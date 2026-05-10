@@ -87,7 +87,7 @@ export const TeamCreateTool: Tool<InputSchema, Output> = buildTool({
   },
 
   isEnabled() {
-    return true
+    return isAgentSwarmsEnabled()
   },
 
   toAutoClassifierInput(input) {
@@ -127,12 +127,6 @@ export const TeamCreateTool: Tool<InputSchema, Output> = buildTool({
   },
 
   async call(input, context) {
-    if (!isAgentSwarmsEnabled()) {
-      throw new Error(
-        'Agent Teams 功能未启用。请确保未设置 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED 环境变量。',
-      )
-    }
-
     const { setAppState, getAppState } = context
     const { team_name, description: _description, agent_type } = input
 

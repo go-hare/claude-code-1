@@ -120,6 +120,30 @@ afterEach(() => {
 })
 
 describe('Agent Teams lifecycle', () => {
+  test('TeamCreate and TeamDelete are hidden when agent swarms are disabled', async () => {
+    const previousDisabled =
+      process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED
+    process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED = '1'
+    try {
+      const { TeamCreateTool } = await import(
+        '@claude-code-best/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
+      )
+      const { TeamDeleteTool } = await import(
+        '@claude-code-best/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
+      )
+
+      expect(TeamCreateTool.isEnabled()).toBe(false)
+      expect(TeamDeleteTool.isEnabled()).toBe(false)
+    } finally {
+      if (previousDisabled === undefined) {
+        delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED
+      } else {
+        process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED =
+          previousDisabled
+      }
+    }
+  })
+
   test('runs TeamCreate -> spawn -> TaskUpdate -> SendMessage -> TeamDelete', async () => {
     const { TeamCreateTool } = await import(
       '@claude-code-best/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
@@ -275,5 +299,77 @@ describe('Agent Teams lifecycle', () => {
     )
 
     expect(result.data.success).toBe(true)
+  })
+
+  test('TeamDelete terminates inactive team-file members that still have running AppState tasks', async () => {
+    const { TeamDeleteTool } = await import(
+      '@claude-code-best/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
+    )
+    const now = Date.now()
+    writeTeamConfig('alpha', {
+      name: 'alpha',
+      createdAt: now,
+      leadAgentId: 'team-lead@alpha',
+      members: [
+        {
+          agentId: 'team-lead@alpha',
+          name: 'team-lead',
+          joinedAt: now,
+          tmuxPaneId: '',
+          cwd: tempHome,
+          subscriptions: [],
+        },
+        {
+          agentId: 'worker@alpha',
+          name: 'worker',
+          joinedAt: now,
+          tmuxPaneId: 'in-process',
+          cwd: tempHome,
+          subscriptions: [],
+          backendType: 'in-process',
+          isActive: false,
+        },
+      ],
+    })
+    state.teamContext = {
+      teamName: 'alpha',
+      teamFilePath: join(tempHome, 'teams', 'alpha', 'config.json'),
+      leadAgentId: 'team-lead@alpha',
+      teammates: {
+        'worker@alpha': {
+          name: 'worker',
+          tmuxSessionName: 'in-process',
+          tmuxPaneId: 'in-process',
+          cwd: tempHome,
+          spawnedAt: now,
+        },
+      },
+    }
+    state.tasks = {
+      teammate_task_worker: {
+        id: 'teammate_task_worker',
+        type: 'in_process_teammate',
+        status: 'running',
+        shutdownRequested: false,
+        identity: {
+          agentId: 'worker@alpha',
+          agentName: 'worker',
+          teamName: 'alpha',
+        },
+      },
+    }
+
+    const result = await TeamDeleteTool.call(
+      {},
+      {
+        getAppState: () => state,
+        setAppState: setState,
+      } as any,
+      undefined as any,
+      undefined as any,
+    )
+
+    expect(result.data.success).toBe(true)
+    expect(terminateCalls).toEqual(['worker@alpha'])
   })
 })
