@@ -20,6 +20,24 @@ describe('AgentCore', () => {
     ])
   })
 
+  test('exposes runtime contract shell for tools and host adapters', () => {
+    const agent = createAgent({ cwd: '/repo' })
+    const contracts = agent.getRuntimeContracts()
+
+    expect(contracts).toMatchObject({
+      toolPolicy: 'runtime/capabilities/tools/ToolPolicy',
+      agentCapabilityPlane: 'runtime/capabilities/agents',
+      coordinatorCapabilityPlane: 'runtime/capabilities/coordinator',
+      hostAdapter: {
+        kind: 'headless',
+        name: 'agent-core',
+      },
+    })
+    expect(
+      (contracts.tools as { list?: () => readonly unknown[] }).list?.(),
+    ).toBeArray()
+  })
+
   test('streams explicit missing-executor terminal event through AgentTurn', async () => {
     const agent = createAgent({ cwd: '/repo' })
     const session = agent.createSession({ id: 'session-1' })

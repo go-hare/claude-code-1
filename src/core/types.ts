@@ -349,3 +349,21 @@ export type AgentCoreOptions = {
   cwd: string
   executor?: AgentTurnExecutor
 }
+
+export type AgentCoreHostKind = 'repl' | 'headless' | 'desktop' | 'test'
+
+export type AgentCoreHostAdapter = {
+  kind: AgentCoreHostKind
+  name?: string
+  capabilities?: readonly string[]
+  metadata?: Record<string, unknown>
+}
+
+export type AgentCoreRuntimeContracts = {
+  tools?: unknown
+  toolPolicy?: unknown
+  agentCapabilityPlane?: unknown
+  coordinatorCapabilityPlane?: unknown
+  hostAdapter?: AgentCoreHostAdapter
+  metadata?: Record<string, unknown>
+}
