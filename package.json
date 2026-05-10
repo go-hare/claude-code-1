@@ -26,10 +26,7 @@
   },
   "bin": {
     "claude": "dist/cli-node.js",
-    "claude-bun": "dist/cli-bun.js",
-    "ccb": "dist/cli-node.js",
-    "ccb-bun": "dist/cli-bun.js",
-    "claude-code-best": "dist/cli-node.js"
+    "claude-bun": "dist/cli-bun.js"
   },
   "exports": {
     "./core": {
