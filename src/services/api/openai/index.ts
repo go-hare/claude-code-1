@@ -39,6 +39,7 @@ import {
   resolveOpenAIMaxTokens,
   buildOpenAIRequestBody,
 } from './requestBody.js'
+import { resolveAppliedEffort } from '../../../utils/effort.js'
 import { recordLLMObservation } from '../../../services/langfuse/tracing.js'
 import {
   convertMessagesToLangfuse,
@@ -377,6 +378,11 @@ export async function* queryModelOpenAI(
               enableThinking,
               maxTokens,
               temperatureOverride: options.temperatureOverride,
+              effortValue: resolveAppliedEffort(
+                openaiModel,
+                options.effortValue,
+              ),
+              outputFormat: options.outputFormat,
             }),
             { signal },
           ),

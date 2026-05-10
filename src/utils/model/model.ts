@@ -35,9 +35,29 @@ import {
   isChatGPTAuthMode,
 } from './chatgptModels.js'
 
+function isAliasOrAliasWithSuffix(value: string): boolean {
+  const base = value.replace(/\[1m\]$/i, '').trim()
+  return isModelAlias(base)
+}
+
 export type ModelShortName = string
 export type ModelName = string
 export type ModelSetting = ModelName | ModelAlias | null
+
+export function getProviderModelEnvSetting(): ModelSetting | undefined {
+  const provider = getAPIProvider()
+
+  switch (provider) {
+    case 'openai':
+      return process.env.OPENAI_MODEL
+    case 'gemini':
+      return process.env.GEMINI_MODEL
+    case 'grok':
+      return process.env.GROK_MODEL
+    default:
+      return process.env.ANTHROPIC_MODEL
+  }
+}
 
 export function getSmallFastModel(): ModelName {
   const provider = getAPIProvider()
@@ -74,7 +94,7 @@ export function isNonCustomOpusModel(model: ModelName): boolean {
  * Priority order within this function:
  * 1. Model override during session (from /model command) - highest priority
  * 2. Model override at startup (from --model flag)
- * 3. ANTHROPIC_MODEL environment variable
+ * 3. Provider-specific model environment variable
  * 4. Settings (from user's saved settings)
  */
 export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
@@ -85,7 +105,7 @@ export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
     specifiedModel = modelOverride
   } else {
     const settings = getSettings_DEPRECATED() || {}
-    specifiedModel = process.env.ANTHROPIC_MODEL || settings.model || undefined
+    specifiedModel = getProviderModelEnvSetting() || settings.model || undefined
   }
 
   // Ignore the user-specified model if it's not in the availableModels allowlist.
@@ -102,7 +122,7 @@ export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
  * Model Selection Priority Order:
  * 1. Model override during session (from /model command) - highest priority
  * 2. Model override at startup (from --model flag)
- * 3. ANTHROPIC_MODEL environment variable
+ * 3. Provider-specific model environment variable
  * 4. Settings (from user's saved settings)
  * 5. Built-in default
  *
@@ -138,6 +158,10 @@ export function getDefaultOpusModel(): ModelName {
   if (process.env.ANTHROPIC_DEFAULT_OPUS_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
   }
+  const userSpecifiedOpus = getUserSpecifiedModelSetting()
+  if (userSpecifiedOpus && !isAliasOrAliasWithSuffix(userSpecifiedOpus)) {
+    return parseUserSpecifiedModel(userSpecifiedOpus)
+  }
   // 3P providers (Bedrock, Vertex, Foundry) all publish Opus 4.7 in sync
   // with firstParty as of 2026-04-17 (AWS Bedrock, Google Vertex AI, and
   // Microsoft Foundry announcements and model catalogs all confirm). The
@@ -166,6 +190,10 @@ export function getDefaultSonnetModel(): ModelName {
   if (process.env.ANTHROPIC_DEFAULT_SONNET_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
   }
+  const userSpecified = getUserSpecifiedModelSetting()
+  if (userSpecified && !isAliasOrAliasWithSuffix(userSpecified)) {
+    return parseUserSpecifiedModel(userSpecified)
+  }
   // Default to Sonnet 4.5 for 3P since they may not have 4.6 yet
   if (provider !== 'firstParty') {
     return getModelStrings().sonnet45
@@ -190,6 +218,10 @@ export function getDefaultHaikuModel(): ModelName {
   // Anthropic-specific override (for first-party and other 3P providers)
   if (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+  }
+  const userSpecifiedHaiku = getUserSpecifiedModelSetting()
+  if (userSpecifiedHaiku && !isAliasOrAliasWithSuffix(userSpecifiedHaiku)) {
+    return parseUserSpecifiedModel(userSpecifiedHaiku)
   }
 
   // Haiku 4.5 is available on all platforms (first-party, Foundry, Bedrock, Vertex)
