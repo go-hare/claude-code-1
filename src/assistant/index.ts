@@ -1,26 +1,38 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { getKairosActive, getSessionId } from '../bootstrap/state.js'
-import type { AppState } from '../state/AppState.js'
-import { formatAgentId } from '../utils/agentId.js'
+import {
+  getKairosActive,
+  getSessionCreatedTeams,
+  getSessionId,
+} from '../bootstrap/state.js'
+import type { AppState } from '../state/AppStateStore.js'
 import { getCwd } from '../utils/cwd.js'
+import { logForDebugging } from '../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
-import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js'
 import {
-  getTeamFilePath,
-  registerTeamForSessionCleanup,
-  sanitizeName,
-  writeTeamFileAsync,
-  type TeamFile,
-} from '../utils/swarm/teamHelpers.js'
-import { assignTeammateColor } from '../utils/swarm/teammateLayoutManager.js'
-import {
+  TEAM_LEAD_NAME,
+  assignTeammateColor,
   ensureTasksDir,
+  formatAgentId,
+  getDefaultMainLoopModel,
+  getInitialSettings,
+  getTeamFilePath,
+  parseUserSpecifiedModel,
   resetTaskList,
+  sanitizeName,
+  setCliTeammateModeOverride,
   setLeaderTeamName,
-} from '../utils/tasks.js'
+  writeTeamFileAsync,
+} from './deps.js'
+import type { TeamFile } from '../utils/swarm/teamHelpers.js'
 
-let _assistantForced = false
+let assistantForced = false
+let assistantTeamContextCache:
+  | {
+      sessionId: string
+      context: NonNullable<AppState['teamContext']>
+    }
+  | undefined
 
 /**
  * Whether the current session is in assistant (KAIROS) daemon mode.
@@ -35,45 +47,80 @@ export function isAssistantMode(): boolean {
  * Skips the GrowthBook gate check — daemon is pre-entitled.
  */
 export function markAssistantForced(): void {
-  _assistantForced = true
+  assistantForced = true
 }
 
 export function isAssistantForced(): boolean {
-  return _assistantForced
+  return assistantForced
+}
+
+function getAssistantNameSetting(): string | undefined {
+  const settings = getInitialSettings() as { assistantName?: unknown }
+  const assistantName =
+    typeof settings.assistantName === 'string'
+      ? settings.assistantName.trim()
+      : undefined
+  return assistantName || undefined
+}
+
+function getAssistantTeamName(sessionId: string): string {
+  return `assistant-${sanitizeName(sessionId)}`
+}
+
+function buildAssistantSystemPromptBase(): string {
+  const assistantName = getAssistantNameSetting()
+  const nameLine = assistantName
+    ? `\nDisplay name for connected clients: ${assistantName}.`
+    : ''
+
+  return `# Assistant Mode
+
+You are running as a persistent assistant session.
+Keep the main loop responsive for new inbound user messages and background events.
+Use SendUserMessage for concise user-visible updates instead of long passive status monologues.
+Prefer background agents or run_in_background for long-running work; do not hold the foreground loop open when work can continue asynchronously.
+Use scheduled tasks/cron for follow-ups, check-ins, and deferred work rather than busy waiting.
+If the user is actively engaging with you, prioritize their latest message over background chores.
+If there is nothing useful to do right now, stay idle instead of narrating inactivity.${nameLine}`
 }
 
 /**
  * Pre-create an in-process team so Agent(name) can spawn teammates
  * without TeamCreate.
- *
- * Creates a session-scoped assistant team file and returns a full team
- * context object matching AppState.teamContext.
  */
-export async function initializeAssistantTeam(): Promise<
-  AppState['teamContext']
-> {
+export async function initializeAssistantTeam(
+  requestedModel?: string,
+): Promise<AppState['teamContext'] | undefined> {
   const sessionId = getSessionId()
-  const teamName = sanitizeName(`assistant-${sessionId.slice(0, 8)}`)
+
+  if (assistantTeamContextCache?.sessionId === sessionId) {
+    setCliTeammateModeOverride('in-process')
+    return assistantTeamContextCache.context
+  }
+
+  const teamName = getAssistantTeamName(sessionId)
   const leadAgentId = formatAgentId(TEAM_LEAD_NAME, teamName)
   const teamFilePath = getTeamFilePath(teamName)
-  const now = Date.now()
   const cwd = getCwd()
-  const color = assignTeammateColor(leadAgentId)
+  const leadColor = assignTeammateColor(leadAgentId)
+  const leadModel = requestedModel
+    ? parseUserSpecifiedModel(requestedModel)
+    : getDefaultMainLoopModel()
 
   const teamFile: TeamFile = {
     name: teamName,
-    description: 'Assistant mode in-process team',
-    createdAt: now,
+    description: 'Assistant mode implicit in-process team',
+    createdAt: Date.now(),
     leadAgentId,
     leadSessionId: sessionId,
     members: [
       {
         agentId: leadAgentId,
         name: TEAM_LEAD_NAME,
-        agentType: 'assistant',
-        color,
-        joinedAt: now,
-        tmuxPaneId: '',
+        agentType: TEAM_LEAD_NAME,
+        model: leadModel,
+        joinedAt: Date.now(),
+        tmuxPaneId: 'leader',
         cwd,
         subscriptions: [],
         backendType: 'in-process',
@@ -82,46 +129,65 @@ export async function initializeAssistantTeam(): Promise<
   }
 
   await writeTeamFileAsync(teamName, teamFile)
-  registerTeamForSessionCleanup(teamName)
-  await resetTaskList(teamName)
-  await ensureTasksDir(teamName)
-  setLeaderTeamName(teamName)
+  getSessionCreatedTeams().add(teamName)
 
-  return {
+  const taskListId = sanitizeName(teamName)
+  await ensureTasksDir(taskListId)
+  await resetTaskList(taskListId)
+  setLeaderTeamName(taskListId)
+  setCliTeammateModeOverride('in-process')
+
+  const context: NonNullable<AppState['teamContext']> = {
     teamName,
     teamFilePath,
     leadAgentId,
     selfAgentId: leadAgentId,
     selfAgentName: TEAM_LEAD_NAME,
     isLeader: true,
-    selfAgentColor: color,
+    selfAgentColor: leadColor,
     teammates: {
       [leadAgentId]: {
         name: TEAM_LEAD_NAME,
-        agentType: 'assistant',
-        color,
+        agentType: TEAM_LEAD_NAME,
+        color: leadColor,
         tmuxSessionName: 'in-process',
         tmuxPaneId: 'leader',
         cwd,
-        spawnedAt: now,
+        spawnedAt: Date.now(),
       },
     },
   }
+
+  assistantTeamContextCache = { sessionId, context }
+  logForDebugging(
+    `[assistant] initialized implicit in-process team ${teamName} for session ${sessionId}`,
+  )
+
+  return context
 }
 
 /**
- * Assistant-specific system prompt addendum loaded from ~/.claude/agents/assistant.md.
- * Returns empty string if the file doesn't exist.
+ * Assistant-specific system prompt addendum.
+ *
+ * Includes a built-in KAIROS baseline plus the optional
+ * `~/.claude/agents/assistant.md` user override/addendum.
  */
 export function getAssistantSystemPromptAddendum(): string {
+  const sections = [buildAssistantSystemPromptBase()]
+
   try {
-    return readFileSync(
+    const customPrompt = readFileSync(
       join(getClaudeConfigHomeDir(), 'agents', 'assistant.md'),
       'utf-8',
     )
+    if (customPrompt.trim()) {
+      sections.push(customPrompt.trim())
+    }
   } catch {
-    return ''
+    // Optional file; built-in prompt is still returned.
   }
+
+  return sections.join('\n\n')
 }
 
 /**
@@ -131,5 +197,5 @@ export function getAssistantSystemPromptAddendum(): string {
  */
 export function getAssistantActivationPath(): string | undefined {
   if (!isAssistantMode()) return undefined
-  return _assistantForced ? 'daemon' : 'gate'
+  return assistantForced ? 'daemon' : 'gate'
 }
