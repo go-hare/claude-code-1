@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle';
 import figures from 'figures';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
@@ -11,6 +10,10 @@ import type { Theme } from '../utils/theme.js';
 import { getCompanion } from './companion.js';
 import { renderFace, renderSprite, spriteFrameCount } from './sprites.js';
 import { RARITY_COLORS } from './types.js';
+import { isBuddyEnabled } from './enabled.js';
+import { installCompanionObserver } from './companionReact.js';
+
+installCompanionObserver();
 
 const TICK_MS = 1000;
 const BUBBLE_SHOW = 10; // ticks → ~10s at 1000ms
@@ -105,7 +108,7 @@ function spriteColWidth(nameWidth: number): number {
 // Narrow terminals: 0 — REPL.tsx stacks the one-liner on its own row
 // (above input in fullscreen, below in scrollback), so no reservation.
 export function companionReservedColumns(terminalColumns: number, speaking: boolean): number {
-  if (!feature('BUDDY')) return 0;
+  if (!isBuddyEnabled()) return 0;
   const companion = getCompanion();
   if (!companion || getGlobalConfig().companionMuted) return 0;
   if (terminalColumns < MIN_COLS_FOR_FULL_SPRITE) return 0;
@@ -152,7 +155,7 @@ export function CompanionSprite(): React.ReactNode {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick intentionally captured at reaction-change, not tracked
   }, [reaction, setAppState]);
 
-  if (!feature('BUDDY')) return null;
+  if (!isBuddyEnabled()) return null;
   const companion = getCompanion();
   if (!companion || getGlobalConfig().companionMuted) return null;
 
@@ -275,7 +278,7 @@ export function CompanionFloatingBubble(): React.ReactNode {
     return () => clearInterval(timer);
   }, [reaction]);
 
-  if (!feature('BUDDY') || !reaction) return null;
+  if (!isBuddyEnabled() || !reaction) return null;
   const companion = getCompanion();
   if (!companion || getGlobalConfig().companionMuted) return null;
 

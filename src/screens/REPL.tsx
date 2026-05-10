@@ -479,6 +479,7 @@ import { TungstenLiveMonitor } from '@claude-code-best/builtin-tools/tools/Tungs
 import { IssueFlagBanner } from '../components/PromptInput/IssueFlagBanner.js';
 import { useIssueFlagBanner } from '../hooks/useIssueFlagBanner.js';
 import { CompanionSprite, CompanionFloatingBubble, MIN_COLS_FOR_FULL_SPRITE } from '../buddy/CompanionSprite.js';
+import { isBuddyEnabled } from '../buddy/enabled.js';
 import { DevBar } from '../components/DevBar.js';
 import { UltraplanChoiceDialog } from '../components/ultraplan/UltraplanChoiceDialog.js';
 import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDialog.js';
@@ -864,6 +865,7 @@ export function REPL({
   const disableVirtualScroll = useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL), []);
   const disableMessageActionsRaw = useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MESSAGE_ACTIONS), []);
   const disableMessageActions = feature('MESSAGE_ACTIONS') ? disableMessageActionsRaw : false;
+  const buddyEnabled = isBuddyEnabled();
 
   // Log REPL mount/unmount lifecycle
   useEffect(() => {
@@ -1573,14 +1575,14 @@ export function REPL({
         // Dismiss the companion bubble on scroll — it's absolute-positioned
         // at bottom-right and covers transcript content. Scrolling = user is
         // trying to read something under it.
-        if (feature('BUDDY')) {
+        if (buddyEnabled) {
           setAppState(prev =>
             prev.companionReaction === undefined ? prev : { ...prev, companionReaction: undefined },
           );
         }
       }
     },
-    [onRepin, onScrollAway, maybeLoadOlder, setAppState],
+    [onRepin, onScrollAway, maybeLoadOlder, buddyEnabled, setAppState],
   );
   // Deferred SessionStart hook messages — REPL renders immediately and
   // hook messages are injected when they resolve. awaitPendingHooks()
@@ -3442,7 +3444,7 @@ export function REPL({
         readFileState.current = engine.getReadFileState();
       }
 
-      if (feature('BUDDY') && typeof (globalThis as Record<string, unknown>).fireCompanionObserver === 'function') {
+      if (buddyEnabled && typeof (globalThis as Record<string, unknown>).fireCompanionObserver === 'function') {
         const _fireCompanionObserver = (globalThis as Record<string, unknown>).fireCompanionObserver as (
           msgs: unknown,
           cb: (r: unknown) => void,
@@ -5778,9 +5780,7 @@ export function REPL({
         <FullscreenLayout
           scrollRef={scrollRef}
           overlay={toolPermissionOverlay}
-          bottomFloat={
-            feature('BUDDY') && companionVisible && !companionNarrow ? <CompanionFloatingBubble /> : undefined
-          }
+          bottomFloat={buddyEnabled && companionVisible && !companionNarrow ? <CompanionFloatingBubble /> : undefined}
           modal={centeredModal}
           modalScrollRef={modalScrollRef}
           dividerYRef={dividerYRef}
@@ -5867,11 +5867,11 @@ export function REPL({
           }
           bottom={
             <Box
-              flexDirection={feature('BUDDY') && companionNarrow ? 'column' : 'row'}
+              flexDirection={buddyEnabled && companionNarrow ? 'column' : 'row'}
               width="100%"
-              alignItems={feature('BUDDY') && companionNarrow ? undefined : 'flex-end'}
+              alignItems={buddyEnabled && companionNarrow ? undefined : 'flex-end'}
             >
-              {feature('BUDDY') && companionNarrow && isFullscreenEnvEnabled() && companionVisible ? (
+              {buddyEnabled && companionNarrow && isFullscreenEnvEnabled() && companionVisible ? (
                 <CompanionSprite />
               ) : null}
               <Box flexDirection="column" flexGrow={1}>
@@ -6555,7 +6555,7 @@ export function REPL({
                 )}
                 {process.env.USER_TYPE === 'ant' && <DevBar />}
               </Box>
-              {feature('BUDDY') && !(companionNarrow && isFullscreenEnvEnabled()) && companionVisible ? (
+              {buddyEnabled && !(companionNarrow && isFullscreenEnvEnabled()) && companionVisible ? (
                 <CompanionSprite />
               ) : null}
             </Box>
