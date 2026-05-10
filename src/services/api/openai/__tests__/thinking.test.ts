@@ -253,4 +253,64 @@ describe('buildOpenAIRequestBody — thinking params', () => {
     expect(body.tools).toBeUndefined()
     expect(body.tool_choice).toBeUndefined()
   })
+
+  test('includes reasoning_effort for supported string effort levels', () => {
+    const body = buildOpenAIRequestBody({
+      ...baseParams,
+      enableThinking: false,
+      effortValue: 'xhigh',
+    })
+
+    expect(body.reasoning_effort).toBe('xhigh')
+  })
+
+  test('excludes reasoning_effort for max and numeric effort values', () => {
+    const maxBody = buildOpenAIRequestBody({
+      ...baseParams,
+      enableThinking: false,
+      effortValue: 'max',
+    })
+    const numericBody = buildOpenAIRequestBody({
+      ...baseParams,
+      enableThinking: false,
+      effortValue: 90,
+    })
+
+    expect(maxBody.reasoning_effort).toBeUndefined()
+    expect(numericBody.reasoning_effort).toBeUndefined()
+  })
+
+  test('converts Anthropic json_schema output format to OpenAI response_format', () => {
+    const body = buildOpenAIRequestBody({
+      ...baseParams,
+      enableThinking: false,
+      outputFormat: {
+        type: 'json_schema',
+        schema: {
+          title: 'Task Result',
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean' },
+          },
+          required: ['ok'],
+        },
+      },
+    })
+
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: {
+        name: 'task_result',
+        schema: {
+          title: 'Task Result',
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean' },
+          },
+          required: ['ok'],
+        },
+        strict: true,
+      },
+    })
+  })
 })

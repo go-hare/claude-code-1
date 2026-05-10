@@ -4,6 +4,8 @@
  * triggering heavy module side-effects (OpenAI client, stream adapter, etc.).
  */
 import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions/completions.mjs'
+import type { BetaJSONOutputFormat } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import type { EffortValue } from '../../../utils/effort.js'
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
 
 /**
@@ -23,7 +25,8 @@ export function isOpenAIThinkingEnabled(model: string): boolean {
   if (isEnvDefinedFalsy(process.env.OPENAI_ENABLE_THINKING)) return false
   // Explicit enable
   if (isEnvTruthy(process.env.OPENAI_ENABLE_THINKING)) return true
-  // Auto-detect from model name (all DeepSeek models support thinking mode)
+  // Auto-detect from model name (DeepSeek-family models support thinking mode
+  // across official and OpenAI-compatible gateways used by this project).
   const modelLower = model.toLowerCase()
   return modelLower.includes('deepseek')
 }
@@ -73,10 +76,21 @@ export function buildOpenAIRequestBody(params: {
   enableThinking: boolean
   maxTokens: number
   temperatureOverride?: number
+  effortValue?: EffortValue
+  outputFormat?: BetaJSONOutputFormat
 }): ChatCompletionCreateParamsStreaming & {
   thinking?: { type: string }
   enable_thinking?: boolean
   chat_template_kwargs?: { thinking: boolean }
+  reasoning_effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  response_format?: {
+    type: 'json_schema'
+    json_schema: {
+      name: string
+      schema: Record<string, unknown>
+      strict: true
+    }
+  }
 } {
   const {
     model,
@@ -86,7 +100,14 @@ export function buildOpenAIRequestBody(params: {
     enableThinking,
     maxTokens,
     temperatureOverride,
+    effortValue,
+    outputFormat,
   } = params
+  const reasoningEffort =
+    typeof effortValue === 'string' && effortValue !== 'max'
+      ? effortValue
+      : undefined
+  const responseFormat = buildOpenAIResponseFormat(outputFormat)
   return {
     model,
     messages,
@@ -97,6 +118,8 @@ export function buildOpenAIRequestBody(params: {
     }),
     stream: true,
     stream_options: { include_usage: true },
+    ...(responseFormat && { response_format: responseFormat }),
+    ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
     // DeepSeek thinking mode: enable chain-of-thought output.
     // When active, temperature/top_p/presence_penalty/frequency_penalty are ignored by DeepSeek.
     ...(enableThinking && {
@@ -112,5 +135,39 @@ export function buildOpenAIRequestBody(params: {
       temperatureOverride !== undefined && {
         temperature: temperatureOverride,
       }),
+  }
+}
+
+function buildOpenAIResponseFormat(outputFormat?: BetaJSONOutputFormat):
+  | {
+      type: 'json_schema'
+      json_schema: {
+        name: string
+        schema: Record<string, unknown>
+        strict: true
+      }
+    }
+  | undefined {
+  if (!outputFormat || outputFormat.type !== 'json_schema') {
+    return undefined
+  }
+
+  const rawTitle =
+    typeof outputFormat.schema?.title === 'string'
+      ? outputFormat.schema.title
+      : 'structured_output'
+  const sanitizedName =
+    rawTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'structured_output'
+
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: sanitizedName,
+      schema: outputFormat.schema,
+      strict: true,
+    },
   }
 }

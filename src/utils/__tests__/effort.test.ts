@@ -6,6 +6,7 @@ mock.module('src/utils/thinking.js', () => ({
 }))
 mock.module('src/utils/settings/settings.js', () => ({
   getInitialSettings: () => ({}),
+  getSettingsForSource: () => ({}),
 }))
 mock.module('src/utils/auth.js', () => ({
   isProSubscriber: () => false,

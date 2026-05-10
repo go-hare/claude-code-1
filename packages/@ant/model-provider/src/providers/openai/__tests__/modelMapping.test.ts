@@ -26,9 +26,15 @@ describe('resolveOpenAIModel', () => {
     Object.assign(process.env, originalEnv)
   })
 
-  test('OPENAI_MODEL env var overrides all', () => {
+  test('OPENAI_MODEL env var maps Claude-family models', () => {
     process.env.OPENAI_MODEL = 'my-custom-model'
     expect(resolveOpenAIModel('claude-sonnet-4-6')).toBe('my-custom-model')
+  })
+
+  test('OPENAI_MODEL does not override direct OpenAI/custom model names', () => {
+    process.env.OPENAI_MODEL = 'my-custom-model'
+    expect(resolveOpenAIModel('gpt-5.5')).toBe('gpt-5.5')
+    expect(resolveOpenAIModel('local/model')).toBe('local/model')
   })
 
   test('ANTHROPIC_DEFAULT_SONNET_MODEL overrides default map', () => {
@@ -56,6 +62,10 @@ describe('resolveOpenAIModel', () => {
 
   test('maps opus model', () => {
     expect(resolveOpenAIModel('claude-opus-4-6')).toBe('o3')
+  })
+
+  test('maps opus 4.7 model', () => {
+    expect(resolveOpenAIModel('claude-opus-4-7')).toBe('o3')
   })
 
   test('passes through unknown model name', () => {

@@ -10,6 +10,7 @@ const DEFAULT_MODEL_MAP: Record<string, string> = {
   'claude-opus-4-1-20250805': 'o3',
   'claude-opus-4-5-20251101': 'o3',
   'claude-opus-4-6': 'o3',
+  'claude-opus-4-7': 'o3',
   'claude-haiku-4-5-20251001': 'gpt-4o-mini',
   'claude-3-5-haiku-20241022': 'gpt-4o-mini',
   'claude-3-7-sonnet-20250219': 'gpt-4o',
@@ -23,22 +24,33 @@ function getModelFamily(model: string): 'haiku' | 'sonnet' | 'opus' | null {
   return null
 }
 
+function isAnthropicModelLike(model: string): boolean {
+  return model.startsWith('claude-') || getModelFamily(model) !== null
+}
+
 /**
  * Resolve the OpenAI model name for a given Anthropic model.
  *
  * Priority:
- * 1. OPENAI_MODEL env var (override all)
- * 2. OPENAI_DEFAULT_{FAMILY}_MODEL env var (e.g. OPENAI_DEFAULT_SONNET_MODEL)
- * 3. ANTHROPIC_DEFAULT_{FAMILY}_MODEL env var (backward compatibility)
- * 4. DEFAULT_MODEL_MAP lookup
- * 5. Pass through original model name
+ * 1. Direct OpenAI/custom model names pass through unchanged
+ * 2. OPENAI_MODEL env var for Claude-family model names
+ * 3. OPENAI_DEFAULT_{FAMILY}_MODEL env var (e.g. OPENAI_DEFAULT_SONNET_MODEL)
+ * 4. ANTHROPIC_DEFAULT_{FAMILY}_MODEL env var (backward compatibility)
+ * 5. DEFAULT_MODEL_MAP lookup
+ * 6. Pass through original model name
  */
 export function resolveOpenAIModel(anthropicModel: string): string {
+  const cleanModel = anthropicModel.replace(/\[1m\]$/, '')
+
+  // If the caller already selected an OpenAI/custom model, don't let the
+  // default OpenAI mapping env var remap it.
+  if (!DEFAULT_MODEL_MAP[cleanModel] && !isAnthropicModelLike(cleanModel)) {
+    return cleanModel
+  }
+
   if (process.env.OPENAI_MODEL) {
     return process.env.OPENAI_MODEL
   }
-
-  const cleanModel = anthropicModel.replace(/\[1m\]$/, '')
 
   const family = getModelFamily(cleanModel)
   if (family) {
