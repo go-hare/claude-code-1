@@ -12,6 +12,7 @@ import type { z } from 'zod/v4'
 import type { Command } from './commands.js'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
 import type { ThinkingConfig } from './utils/thinking.js'
+import type { ActiveTaskExecutionContext } from './utils/tasks.js'
 
 export type ToolInputJSONSchema = {
   [x: string]: unknown
@@ -59,6 +60,7 @@ import type {
 } from './types/tools.js'
 import type { FileStateCache } from './utils/fileStateCache.js'
 import type { DenialTrackingState } from './utils/permissions/denialTracking.js'
+import type { RuntimeCapabilityPlane } from './runtime/contracts/capability.js'
 import type { SystemPrompt } from './utils/systemPromptType.js'
 import type { ContentReplacementState } from './utils/toolResultStorage.js'
 
@@ -193,6 +195,7 @@ export type ToolUseContext = {
     allowBackgroundForkedSlashCommands?: boolean
   }
   abortController: AbortController
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
   readFileState: FileStateCache
   getAppState(): AppState
   setAppState(f: (prev: AppState) => AppState): void
@@ -259,6 +262,7 @@ export type ToolUseContext = {
   setConversationId?: (id: UUID) => void
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
+  capabilityPlane?: RuntimeCapabilityPlane
   /** When true, canUseTool must always be called even when hooks auto-approve.
    *  Used by speculation for overlay file path rewriting. */
   requireCanUseTool?: boolean
@@ -375,9 +379,62 @@ export function toolMatchesName(
 
 /**
  * Finds a tool by name or alias from a list of tools.
+ *
+ * Exact primary-name matches always win over aliases so an older alias cannot
+ * shadow a different tool that is actually named that identifier.
  */
 export function findToolByName(tools: Tools, name: string): Tool | undefined {
-  return tools.find(t => toolMatchesName(t, name))
+  return (
+    tools.find(t => t.name === name) ??
+    tools.find(t => toolMatchesName(t, name))
+  )
+}
+
+function hasSameMcpToolIdentity(a: Tool, b: Tool): boolean {
+  return (
+    a.mcpInfo !== undefined &&
+    b.mcpInfo !== undefined &&
+    a.mcpInfo.serverName === b.mcpInfo.serverName &&
+    a.mcpInfo.toolName === b.mcpInfo.toolName
+  )
+}
+
+function describeToolIdentity(tool: Tool): string {
+  if (tool.mcpInfo) {
+    return `MCP(${tool.mcpInfo.serverName}/${tool.mcpInfo.toolName})`
+  }
+  return `built-in(${tool.name})`
+}
+
+/**
+ * Deduplicates tools by primary name while rejecting conflicting implementations.
+ *
+ * Duplicate entries are only tolerated when they point at the same tool object,
+ * or when they are the same MCP logical tool surfaced through multiple merge
+ * paths (same serverName + toolName).
+ */
+export function dedupeToolsByName(tools: Tools): Tool[] {
+  const deduped: Tool[] = []
+  const seen = new Map<string, Tool>()
+
+  for (const tool of tools) {
+    const existing = seen.get(tool.name)
+    if (!existing) {
+      seen.set(tool.name, tool)
+      deduped.push(tool)
+      continue
+    }
+
+    if (existing === tool || hasSameMcpToolIdentity(existing, tool)) {
+      continue
+    }
+
+    throw new Error(
+      `Conflicting tools share primary name "${tool.name}": ${describeToolIdentity(existing)} vs ${describeToolIdentity(tool)}`,
+    )
+  }
+
+  return deduped
 }
 
 export type Tool<

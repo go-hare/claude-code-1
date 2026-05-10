@@ -1,4 +1,5 @@
 import { dirname, isAbsolute, sep } from 'path'
+import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { diagnosticTracker } from 'src/services/diagnosticTracking.js'
@@ -221,7 +222,10 @@ export const FileEditTool = buildTool({
     if (fileContent === null) {
       // Empty old_string on nonexistent file means new file creation — valid
       if (old_string === '') {
-        return { result: true }
+        return validateCoordinatorWriteAccess({
+          filePath: fullFilePath,
+          sourceTool: 'FileEditTool',
+        })
       }
       // Try to find a similar file with a different extension
       const similarFilename = findSimilarFile(fullFilePath)
@@ -255,9 +259,10 @@ export const FileEditTool = buildTool({
       }
 
       // Empty file with empty old_string is valid - we're replacing empty with content
-      return {
-        result: true,
-      }
+      return validateCoordinatorWriteAccess({
+        filePath: fullFilePath,
+        sourceTool: 'FileEditTool',
+      })
     }
 
     if (fullFilePath.endsWith('.ipynb')) {
@@ -341,6 +346,14 @@ export const FileEditTool = buildTool({
 
     if (settingsValidationResult !== null) {
       return settingsValidationResult
+    }
+
+    const coordinatorWriteValidation = validateCoordinatorWriteAccess({
+      filePath: fullFilePath,
+      sourceTool: 'FileEditTool',
+    })
+    if (!coordinatorWriteValidation.result) {
+      return coordinatorWriteValidation
     }
 
     return { result: true, meta: { actualOldString } }

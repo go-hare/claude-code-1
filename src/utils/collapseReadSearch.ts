@@ -259,6 +259,14 @@ export function getSearchExtraToolsOrReadInfo(
   }
 }
 
+export function getToolSearchOrReadInfo(
+  toolName: string,
+  toolInput: unknown,
+  tools: Tools,
+): SearchOrReadResult {
+  return getSearchExtraToolsOrReadInfo(toolName, toolInput, tools)
+}
+
 /**
  * Check if a tool_use content block is a search/read operation.
  * Returns { isSearch, isRead, isREPL } if it's a collapsible search/read, null otherwise.

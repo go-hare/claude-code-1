@@ -24,6 +24,7 @@ import type { ToolUseContext } from '../Tool.js'
 import type { AgentDefinition } from '@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { AgentId } from '../types/ids.js'
 import type { Message } from '../types/message.js'
+import type { ActiveTaskExecutionContext } from './tasks.js'
 import { createChildAbortController } from './abortController.js'
 import { logForDebugging } from './debug.js'
 import { cloneFileStateCache } from './fileStateCache.js'
@@ -303,6 +304,7 @@ export type SubagentContextOverrides = {
    * state reconstructed from the resumed sidechain so the same results
    * are re-replaced (prompt cache stability). */
   contentReplacementState?: ContentReplacementState
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
 }
 
 /**
@@ -380,6 +382,7 @@ export function createSubagentContext(
     // like auto_mode can attach to the main agent trace instead of the
     // subagent's own trace.
     langfuseRootTrace: parentContext.langfuseTrace,
+    activeTaskExecutionContext: overrides?.activeTaskExecutionContext,
     // Mutable state - cloned by default to maintain isolation
     // Clone overrides.readFileState if provided, otherwise clone from parent
     readFileState: cloneFileStateCache(
