@@ -11,6 +11,7 @@ import {
   cleanupTeamDirectories,
   readTeamFile,
   unregisterTeamForSessionCleanup,
+  type TeamFile,
 } from 'src/utils/swarm/teamHelpers.js'
 import { clearTeammateColors } from 'src/utils/swarm/teammateLayoutManager.js'
 import { clearLeaderTeamName } from 'src/utils/tasks.js'
@@ -40,6 +41,75 @@ const inputSchema = lazySchema(() =>
 )
 type InputSchema = ReturnType<typeof inputSchema>
 
+type TeamMember = TeamFile['members'][number]
+
+function getRunningTeammateTask(
+  agentId: string,
+  context: Parameters<Tool<InputSchema, Output>['call']>[1],
+): { id: string } | undefined {
+  const tasks = context.getAppState().tasks ?? {}
+  for (const task of Object.values(tasks)) {
+    if (
+      task?.type === 'in_process_teammate' &&
+      task.status === 'running' &&
+      task.identity.agentId === agentId
+    ) {
+      return {
+        id: task.id,
+      }
+    }
+  }
+  return undefined
+}
+
+async function terminateTeamMember(
+  member: TeamMember,
+  context: Parameters<Tool<InputSchema, Output>['call']>[1],
+  reason: string,
+): Promise<boolean> {
+  if (member.backendType === 'in-process') {
+    const executor = getInProcessBackend()
+    executor.setContext?.(context)
+    return executor.terminate(member.agentId, reason)
+  }
+
+  if (member.backendType && isPaneBackend(member.backendType)) {
+    await ensureBackendsRegistered()
+    const executor = createPaneBackendExecutor(
+      getBackendByType(member.backendType),
+    )
+    executor.setContext?.(context)
+    return executor.terminate(member.agentId, reason)
+  }
+
+  return false
+}
+
+async function terminateInactiveTeammates(
+  teamName: string,
+  context: Parameters<Tool<InputSchema, Output>['call']>[1],
+): Promise<string[]> {
+  const teamFile = readTeamFile(teamName)
+  if (!teamFile) return []
+
+  const failed: string[] = []
+  for (const member of teamFile.members.filter(
+    m => m.name !== TEAM_LEAD_NAME,
+  )) {
+    if (!getRunningTeammateTask(member.agentId, context)) continue
+
+    const terminated = await terminateTeamMember(
+      member,
+      context,
+      'Team cleanup requested by team lead',
+    )
+    if (!terminated) {
+      failed.push(member.name)
+    }
+  }
+  return failed
+}
+
 export type Output = {
   success: boolean
   message: string
@@ -64,7 +134,7 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
   },
 
   isEnabled() {
-    return true
+    return isAgentSwarmsEnabled()
   },
 
   async description() {
@@ -89,12 +159,6 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
   },
 
   async call(input, context) {
-    if (!isAgentSwarmsEnabled()) {
-      throw new Error(
-        'Agent Teams 功能未启用。请确保未设置 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED 环境变量。',
-      )
-    }
-
     const { setAppState, getAppState } = context
     const appState = getAppState()
     const teamName = appState.teamContext?.teamName
@@ -115,28 +179,11 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
         if (activeMembers.length > 0) {
           const requested: string[] = []
           for (const member of activeMembers) {
-            let sent = false
-            if (member.backendType === 'in-process') {
-              const executor = getInProcessBackend()
-              executor.setContext?.(context)
-              sent = await executor.terminate(
-                member.agentId,
-                'Team cleanup requested by team lead',
-              )
-            } else if (
-              member.backendType &&
-              isPaneBackend(member.backendType)
-            ) {
-              await ensureBackendsRegistered()
-              const executor = createPaneBackendExecutor(
-                getBackendByType(member.backendType),
-              )
-              executor.setContext?.(context)
-              sent = await executor.terminate(
-                member.agentId,
-                'Team cleanup requested by team lead',
-              )
-            }
+            const sent = await terminateTeamMember(
+              member,
+              context,
+              'Team cleanup requested by team lead',
+            )
             if (sent) {
               requested.push(member.name)
             }
@@ -193,6 +240,20 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
               },
             }
           }
+        }
+      }
+
+      const failedInactiveTerminations = await terminateInactiveTeammates(
+        teamName,
+        context,
+      )
+      if (failedInactiveTerminations.length > 0) {
+        return {
+          data: {
+            success: false,
+            message: `Cleanup is still blocked by running teammate(s): ${failedInactiveTerminations.join(', ')}.`,
+            team_name: teamName,
+          },
         }
       }
 

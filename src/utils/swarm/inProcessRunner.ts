@@ -116,6 +116,7 @@ import {
   createPermissionRequest,
   sendPermissionRequestViaMailbox,
 } from './permissionSync.js'
+import { setMemberActive } from './teamHelpers.js'
 import { TEAMMATE_SYSTEM_PROMPT_ADDENDUM } from './teammatePromptAddendum.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
@@ -1036,9 +1037,9 @@ export async function runInProcessTeammate(
 
   // Try to claim an available task immediately so the UI can show activity
   // from the very start. The idle loop handles claiming for subsequent tasks.
-  // Use parentSessionId as the task list ID since the leader creates tasks
-  // under its session ID, not the team name.
-  await tryClaimNextTask(identity.parentSessionId, identity.agentName)
+  // TeamCreate maps Team = TaskList, so teammates claim from the shared
+  // team task list. This matches getTaskListId() inside teammate context.
+  await tryClaimNextTask(identity.teamName, identity.agentName)
 
   try {
     // Add initial prompt to task.messages for display (wrapped with XML)
@@ -1187,6 +1188,7 @@ export async function runInProcessTeammate(
             task => ({ ...task, status: 'running', isIdle: false }),
             setAppState,
           )
+          await setMemberActive(identity.teamName, identity.agentName, true)
 
           // Run the normal agent loop - same runAgent() used by AgentTool/subagents.
           // This calls query() internally, so we share the core API infrastructure.
@@ -1367,6 +1369,7 @@ export async function runInProcessTeammate(
         },
         setAppState,
       )
+      await setMemberActive(identity.teamName, identity.agentName, false)
 
       // Note: We do NOT automatically send the teammate's response to the leader.
       // Teammates should use the Teammate tool to communicate with the leader.
@@ -1400,7 +1403,7 @@ export async function runInProcessTeammate(
         taskId,
         toolUseContext.getAppState,
         setAppState,
-        identity.parentSessionId,
+        identity.teamName,
       )
 
       switch (waitResult.type) {
