@@ -1,20 +1,22 @@
-import { feature } from 'bun:bundle';
 import React, { useEffect } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { Text } from '@anthropic/ink';
 import { getGlobalConfig } from '../utils/config.js';
 import { getRainbowColor } from '../utils/thinking.js';
+import { isBuddyEnabled } from './enabled.js';
 
 // Local date, not UTC — 24h rolling wave across timezones. Sustained Twitter
 // buzz instead of a single UTC-midnight spike, gentler on soul-gen load.
 // Teaser window: April 1-7, 2026 only. Command stays live forever after.
 export function isBuddyTeaserWindow(): boolean {
+  if (!isBuddyEnabled()) return false;
   if (process.env.USER_TYPE === 'ant') return true;
   const d = new Date();
   return d.getFullYear() === 2026 && d.getMonth() === 3 && d.getDate() <= 7;
 }
 
 export function isBuddyLive(): boolean {
+  if (!isBuddyEnabled()) return false;
   if (process.env.USER_TYPE === 'ant') return true;
   const d = new Date();
   return d.getFullYear() > 2026 || (d.getFullYear() === 2026 && d.getMonth() >= 3);
@@ -38,7 +40,7 @@ export function useBuddyNotification(): void {
   const { addNotification, removeNotification } = useNotifications();
 
   useEffect(() => {
-    if (!feature('BUDDY')) return;
+    if (!isBuddyEnabled()) return;
     const config = getGlobalConfig();
     if (config.companion || !isBuddyTeaserWindow()) return;
     addNotification({
@@ -52,7 +54,7 @@ export function useBuddyNotification(): void {
 }
 
 export function findBuddyTriggerPositions(text: string): Array<{ start: number; end: number }> {
-  if (!feature('BUDDY')) return [];
+  if (!isBuddyEnabled()) return [];
   const triggers: Array<{ start: number; end: number }> = [];
   const re = /\/buddy\b/g;
   let m: RegExpExecArray | null;
