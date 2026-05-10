@@ -9,19 +9,49 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 if (process.env.CLAUDE_CODE_SKIP_CHROME_MCP_SETUP === '1') {
   process.exit(0)
 }
 
 const require = createRequire(import.meta.url)
-const cliPath = require.resolve(
-  '@claude-code-best/mcp-chrome-bridge/dist/cli.js',
-)
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+function resolvePackageJsonPath() {
+  try {
+    return require.resolve('@go-hare/mcp-chrome-bridge/package.json')
+  } catch {
+    const workspacePackageJson = join(
+      projectRoot,
+      'packages',
+      'mcp-chrome-bridge',
+      'package.json',
+    )
+    return existsSync(workspacePackageJson) ? workspacePackageJson : null
+  }
+}
+
+const packageJsonPath = resolvePackageJsonPath()
+if (!packageJsonPath) {
+  console.log('[chrome-mcp] mcp-chrome-bridge package not found, skipping setup.')
+  process.exit(0)
+}
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
+const binEntry = packageJson?.bin?.['mcp-chrome-bridge']
+if (!binEntry) {
+  console.log('[chrome-mcp] mcp-chrome-bridge bin not found, skipping setup.')
+  process.exit(0)
+}
+const cliPath = resolve(dirname(packageJsonPath), binEntry)
+if (!existsSync(cliPath)) {
+  console.log('[chrome-mcp] mcp-chrome-bridge cli not found, skipping setup.')
+  process.exit(0)
+}
 
 const userArgs = process.argv.slice(2)
 
