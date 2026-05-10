@@ -88,7 +88,14 @@ import {
 import { parsePluginIdentifier } from 'src/utils/plugins/pluginIdentifier.js'
 import { validateUuid } from 'src/utils/uuid.js'
 import { fromArray } from 'src/utils/generators.js'
-import { ask } from 'src/QueryEngine.js'
+import { QueryEngine } from 'src/QueryEngine.js'
+import { createAgent } from 'src/core/createAgent.js'
+import {
+  agentEventToStdoutMessages,
+  projectSdkMessageToAgentEventPayloads,
+} from 'src/core/adapters/agentEventSdkWire.js'
+import type { AgentTurnExecutor } from 'src/core/types.js'
+import { promptValueToAgentInput } from 'src/hosts/headless/agentEventOutput.js'
 import type { PermissionPromptTool } from 'src/utils/queryHelpers.js'
 import {
   createFileStateCacheWithSizeLimit,
@@ -2203,45 +2210,33 @@ function runHeadlessStreaming(
             await runWithWorkload(
               cmd.workload ?? options.workload,
               async () => {
-                for await (const message of ask({
+                const engine = new QueryEngine({
                   commands: uniqBy(
                     [...currentCommands, ...appState.mcp.commands],
                     'name',
                   ),
-                  prompt: input,
-                  promptUuid: cmd.uuid,
-                  isMeta: cmd.isMeta,
                   cwd: cwd(),
                   tools: allTools,
-                  verbose: options.verbose,
                   mcpClients: allMcpClients,
+                  agents: currentAgents,
+                  canUseTool,
+                  getAppState,
+                  setAppState,
+                  initialMessages: mutableMessages,
+                  readFileCache:
+                    pendingSeeds.size === 0
+                      ? readFileState
+                      : mergeFileStateCaches(readFileState, pendingSeeds),
+                  customSystemPrompt: options.systemPrompt,
+                  appendSystemPrompt: options.appendSystemPrompt,
+                  userSpecifiedModel: activeUserSpecifiedModel,
+                  fallbackModel: options.fallbackModel,
                   thinkingConfig: options.thinkingConfig,
                   maxTurns: options.maxTurns,
                   maxBudgetUsd: options.maxBudgetUsd,
                   taskBudget: options.taskBudget,
-                  canUseTool,
-                  userSpecifiedModel: activeUserSpecifiedModel,
-                  fallbackModel: options.fallbackModel,
                   jsonSchema: getInitJsonSchema() ?? options.jsonSchema,
-                  mutableMessages,
-                  getReadFileCache: () =>
-                    pendingSeeds.size === 0
-                      ? readFileState
-                      : mergeFileStateCaches(readFileState, pendingSeeds),
-                  setReadFileCache: cache => {
-                    readFileState = cache
-                    for (const [path, seed] of pendingSeeds.entries()) {
-                      const existing = readFileState.get(path)
-                      if (!existing || seed.timestamp > existing.timestamp) {
-                        readFileState.set(path, seed)
-                      }
-                    }
-                    pendingSeeds.clear()
-                  },
-                  customSystemPrompt: options.systemPrompt,
-                  appendSystemPrompt: options.appendSystemPrompt,
-                  getAppState,
-                  setAppState,
+                  verbose: options.verbose,
                   abortController,
                   replayUserMessages: options.replayUserMessages,
                   includePartialMessages: options.includePartialMessages,
@@ -2257,8 +2252,6 @@ function runHeadlessStreaming(
                         ? params.elicitationId
                         : undefined,
                     ),
-                  agents: currentAgents,
-                  orphanedPermission: cmd.orphanedPermission,
                   setSDKStatus: status => {
                     output.enqueue({
                       type: 'system',
@@ -2268,43 +2261,82 @@ function runHeadlessStreaming(
                       uuid: randomUUID(),
                     })
                   },
-                })) {
-                  // Forward messages to bridge incrementally (mid-turn) so
-                  // claude.ai sees progress and the connection stays alive
-                  // while blocked on permission requests.
-                  forwardMessagesToBridge()
-
-                  if (message.type === 'result') {
-                    lastResultIsError = !!(message as Record<string, unknown>)
-                      .is_error
-                    // Flush pending SDK events so they appear before result on the stream.
-                    for (const event of drainSdkEvents()) {
-                      output.enqueue(event)
-                    }
-
-                    // Hold-back: don't emit result while background agents are running
-                    const currentState = getAppState()
-                    if (
-                      getRunningTasks(currentState).some(
-                        t =>
-                          (t.type === 'local_agent' ||
-                            t.type === 'local_workflow') &&
-                          isBackgroundTask(t),
-                      )
-                    ) {
-                      heldBackResult = message as StdoutMessage
-                    } else {
-                      heldBackResult = null
-                      output.enqueue(message as StdoutMessage)
-                    }
-                  } else {
-                    // Flush SDK events (task_started, task_progress) so background
-                    // agent progress is streamed in real-time, not batched until result.
-                    for (const event of drainSdkEvents()) {
-                      output.enqueue(event)
-                    }
-                    output.enqueue(message as StdoutMessage)
+                  orphanedPermission: cmd.orphanedPermission,
+                })
+                const executor: AgentTurnExecutor = async function* (
+                  _input,
+                  context,
+                ) {
+                  for await (const sdkMessage of engine.submitMessage(input, {
+                    uuid: cmd.uuid,
+                    isMeta: cmd.isMeta,
+                  })) {
+                    yield* projectSdkMessageToAgentEventPayloads(
+                      sdkMessage,
+                      context,
+                    )
                   }
+                }
+                const agent = createAgent({
+                  cwd: cwd(),
+                  executor,
+                })
+                const session = agent.createSession({ id: getSessionId() })
+                try {
+                  for await (const event of session.stream(
+                    promptValueToAgentInput(input),
+                  )) {
+                    const messages = agentEventToStdoutMessages(event)
+                    for (const message of messages) {
+                      // Forward messages to bridge incrementally (mid-turn) so
+                      // claude.ai sees progress and the connection stays alive
+                      // while blocked on permission requests.
+                      forwardMessagesToBridge()
+
+                      if (message.type === 'result') {
+                        lastResultIsError = !!(
+                          message as Record<string, unknown>
+                        ).is_error
+                        // Flush pending SDK events so they appear before result on the stream.
+                        for (const event of drainSdkEvents()) {
+                          output.enqueue(event)
+                        }
+
+                        // Hold-back: don't emit result while background agents are running
+                        const currentState = getAppState()
+                        if (
+                          getRunningTasks(currentState).some(
+                            t =>
+                              (t.type === 'local_agent' ||
+                                t.type === 'local_workflow') &&
+                              isBackgroundTask(t),
+                          )
+                        ) {
+                          heldBackResult = message as StdoutMessage
+                        } else {
+                          heldBackResult = null
+                          output.enqueue(message as StdoutMessage)
+                        }
+                      } else {
+                        // Flush SDK events (task_started, task_progress) so background
+                        // agent progress is streamed in real-time, not batched until result.
+                        for (const event of drainSdkEvents()) {
+                          output.enqueue(event)
+                        }
+                        output.enqueue(message as StdoutMessage)
+                      }
+                    }
+                  }
+                } finally {
+                  readFileState = engine.getReadFileState()
+                  for (const [path, seed] of pendingSeeds.entries()) {
+                    const existing = readFileState.get(path)
+                    if (!existing || seed.timestamp > existing.timestamp) {
+                      readFileState.set(path, seed)
+                    }
+                  }
+                  pendingSeeds.clear()
+                  agent.dispose()
                 }
               },
             ) // end runWithWorkload

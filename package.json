@@ -29,6 +29,14 @@
     "ccb-bun": "dist/cli-bun.js",
     "claude-code-best": "dist/cli-node.js"
   },
+  "exports": {
+    "./core": {
+      "types": "./src/entrypoints/core.ts",
+      "import": "./dist/core.js",
+      "default": "./dist/core.js"
+    },
+    "./package.json": "./package.json"
+  },
   "workspaces": [
     "packages/*",
     "packages/@ant/*",
@@ -36,6 +44,7 @@
   ],
   "files": [
     "dist",
+    "src",
     "scripts/postinstall.cjs",
     "scripts/run-parallel.mjs",
     "scripts/setup-chrome-mcp.mjs"
