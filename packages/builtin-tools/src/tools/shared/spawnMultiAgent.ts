@@ -11,10 +11,12 @@ import { formatAgentId } from 'src/utils/agentId.js'
 import { getGlobalConfig } from 'src/utils/config.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { errorMessage } from 'src/utils/errors.js'
 import { parseUserSpecifiedModel } from 'src/utils/model/model.js'
 import { getTeammateExecutor } from 'src/utils/swarm/backends/registry.js'
 import type {
   BackendType,
+  TeammateExecutor,
   TeammateSpawnResult,
 } from 'src/utils/swarm/backends/types.js'
 import {
@@ -333,6 +335,97 @@ async function appendTeamMember(
   await writeTeamFileAsync(spawn.teamName, teamFile)
 }
 
+async function rollbackTeamFileMember(spawn: ResolvedSpawn): Promise<void> {
+  try {
+    const teamFile = await readTeamFileAsync(spawn.teamName)
+    if (!teamFile) return
+
+    const members = teamFile.members.filter(
+      member => member.agentId !== spawn.teammateId,
+    )
+    if (members.length === teamFile.members.length) return
+
+    await writeTeamFileAsync(spawn.teamName, {
+      ...teamFile,
+      members,
+    })
+  } catch (error) {
+    logForDebugging(
+      `[spawnTeammate] Failed to roll back team file for ${spawn.teammateId}: ${errorMessage(error)}`,
+    )
+  }
+}
+
+function isSpawnedTeammateTask(task: unknown, agentId: string): boolean {
+  if (!task || typeof task !== 'object') return false
+  const identity = (task as { identity?: { agentId?: unknown } }).identity
+  return identity?.agentId === agentId
+}
+
+function removeSpawnedTeammateFromAppState(
+  context: ToolUseContext,
+  spawn: ResolvedSpawn,
+  result: TeammateSpawnResult,
+): void {
+  context.setAppState(prev => {
+    const tasks = Object.fromEntries(
+      Object.entries(prev.tasks).filter(([taskId, task]) => {
+        if (result.taskId && taskId === result.taskId) return false
+        return !isSpawnedTeammateTask(task, spawn.teammateId)
+      }),
+    ) as typeof prev.tasks
+
+    if (!prev.teamContext?.teammates?.[spawn.teammateId]) {
+      return {
+        ...prev,
+        tasks,
+      }
+    }
+
+    const { [spawn.teammateId]: _removed, ...teammates } =
+      prev.teamContext.teammates
+
+    return {
+      ...prev,
+      tasks,
+      teamContext: {
+        ...prev.teamContext,
+        teammates,
+      },
+    }
+  })
+}
+
+async function cleanupSpawnAfterFailure(
+  context: ToolUseContext,
+  spawn: ResolvedSpawn,
+  executor: TeammateExecutor,
+  result: TeammateSpawnResult,
+): Promise<void> {
+  try {
+    const killed = await executor.kill(spawn.teammateId)
+    if (!killed) {
+      await executor.terminate(
+        spawn.teammateId,
+        'Teammate spawn failed before registration completed',
+      )
+    }
+  } catch (error) {
+    logForDebugging(
+      `[spawnTeammate] Failed to clean up spawned teammate ${spawn.teammateId}: ${errorMessage(error)}`,
+    )
+  }
+
+  await rollbackTeamFileMember(spawn)
+  try {
+    removeSpawnedTeammateFromAppState(context, spawn, result)
+  } catch (error) {
+    logForDebugging(
+      `[spawnTeammate] Failed to roll back AppState for ${spawn.teammateId}: ${errorMessage(error)}`,
+    )
+  }
+}
+
 async function handleSpawn(
   input: SpawnInput,
   context: ToolUseContext,
@@ -377,8 +470,13 @@ async function handleSpawn(
     throw new Error(result.error ?? 'Failed to spawn teammate')
   }
 
-  updateTeamContext(context, spawn, result)
-  await appendTeamMember(input, spawn, result)
+  try {
+    await appendTeamMember(input, spawn, result)
+    updateTeamContext(context, spawn, result)
+  } catch (error) {
+    await cleanupSpawnAfterFailure(context, spawn, executor, result)
+    throw error
+  }
 
   const display = getBackendDisplay(result)
   return {
