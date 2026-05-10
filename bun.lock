@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-code-best",
+      "name": "claude",
       "dependencies": {
         "@agentclientprotocol/sdk": "^0.19.0",
         "@go-hare/mcp-chrome-bridge": "workspace:*",
