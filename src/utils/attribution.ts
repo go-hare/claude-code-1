@@ -8,11 +8,11 @@ import {
 } from '../constants/product.js'
 import { TERMINAL_OUTPUT_TAGS } from '../constants/xml.js'
 import type { AppState } from '../state/AppState.js'
-import { FILE_EDIT_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/FileEditTool/constants.js'
-import { FILE_READ_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/FileReadTool/prompt.js'
-import { FILE_WRITE_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/FileWriteTool/prompt.js'
-import { GLOB_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/GlobTool/prompt.js'
-import { GREP_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/GrepTool/prompt.js'
+import { FILE_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileEditTool/constants.js'
+import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
+import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
+import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
+import { GREP_TOOL_NAME } from '@claude-code/builtin-tools/tools/GrepTool/prompt.js'
 import type { Entry } from '../types/logs.js'
 import {
   type AttributionData,
@@ -64,7 +64,7 @@ export function getAttributionTexts(): AttributionTexts {
 
   const modelName = getRealModelName()
   const email = getAttributionEmail(modelName)
-  const defaultAttribution = `🤖 Generated with [Claude Code Best](${PRODUCT_URL})`
+  const defaultAttribution = `🤖 Generated with [Claude Code](${PRODUCT_URL})`
   const defaultCommit = `Co-Authored-By: ${modelName} <${email}>`
 
   const settings = getInitialSettings()
@@ -356,7 +356,7 @@ export async function getEnhancedPRAttribution(
     memoryAccessCount > 0
       ? `, ${memoryAccessCount} ${memoryAccessCount === 1 ? 'memory' : 'memories'} recalled`
       : ''
-  const summary = `🤖 Generated with [Claude Code Best](${PRODUCT_URL}) (${claudePercent}% ${promptCount}-shotted by ${realModelName}${memSuffix})`
+  const summary = `🤖 Generated with [Claude Code](${PRODUCT_URL}) (${claudePercent}% ${promptCount}-shotted by ${realModelName}${memSuffix})`
 
   // Append trailer lines for squash-merge survival. Only for allowlisted repos
   // (INTERNAL_MODEL_REPOS) and only in builds with COMMIT_ATTRIBUTION enabled —

@@ -16,7 +16,7 @@
 
 ```bash
 bun run dev
-ccb # 或者 ccb 安装版也行
+claude # 或者 claude 安装版也行
 ```
 
 ### 第三步：启用 Chrome MCP
