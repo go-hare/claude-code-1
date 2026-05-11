@@ -80,6 +80,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
 
   private backend: PaneBackend
   private context: ToolUseContext | null = null
+  private registerCleanupFn: typeof registerCleanup
 
   /**
    * Track spawned teammates by agentId -> paneId mapping.
@@ -88,8 +89,12 @@ export class PaneBackendExecutor implements TeammateExecutor {
   private spawnedTeammates: Map<string, { paneId: string; insideTmux: boolean }>
   private cleanupRegistered = false
 
-  constructor(backend: PaneBackend) {
+  constructor(
+    backend: PaneBackend,
+    registerCleanupFn: typeof registerCleanup = registerCleanup,
+  ) {
     this.backend = backend
+    this.registerCleanupFn = registerCleanupFn
     this.type = backend.type
     this.spawnedTeammates = new Map()
   }
@@ -208,7 +213,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
       // Register cleanup to kill all panes on leader exit (e.g., SIGHUP)
       if (!this.cleanupRegistered) {
         this.cleanupRegistered = true
-        registerCleanup(async () => {
+        this.registerCleanupFn(async () => {
           for (const [id, info] of this.spawnedTeammates) {
             logForDebugging(
               `[PaneBackendExecutor] Cleanup: killing pane for ${id}`,
@@ -402,6 +407,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
  */
 export function createPaneBackendExecutor(
   backend: PaneBackend,
+  registerCleanupFn?: typeof registerCleanup,
 ): PaneBackendExecutor {
-  return new PaneBackendExecutor(backend)
+  return new PaneBackendExecutor(backend, registerCleanupFn)
 }
