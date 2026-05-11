@@ -7,7 +7,6 @@ import type {
   TombstoneMessage,
   ToolUseSummaryMessage,
 } from '../../../types/message.js'
-import { getSessionId } from '../../../bootstrap/state.js'
 import {
   createTrace,
   endTrace,
@@ -15,6 +14,7 @@ import {
 } from '../../../services/langfuse/index.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { getAPIProvider } from '../../../utils/model/providers.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../core/state/bootstrapProvider.js'
 
 export type LegacyTurnStreamItem =
   | StreamEvent
@@ -38,6 +38,9 @@ export type TurnEngineOptions = {
  * The underlying loop stays in query.ts; this capability owns the entry seam.
  */
 export class TurnEngine {
+  private readonly sessionIdentityStateProvider =
+    createRuntimeSessionIdentityStateProvider()
+
   constructor(private readonly options: TurnEngineOptions) {}
 
   async *execute(
@@ -56,7 +59,8 @@ export class TurnEngine {
       params.toolUseContext.langfuseTrace ??
       (isLangfuseEnabled()
         ? createTrace({
-            sessionId: getSessionId(),
+            sessionId:
+              this.sessionIdentityStateProvider.getSessionIdentity().sessionId,
             model: params.toolUseContext.options.mainLoopModel,
             provider: getAPIProvider(),
             input: params.messages,

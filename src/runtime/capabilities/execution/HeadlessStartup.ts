@@ -1,7 +1,4 @@
-import {
-  setSdkBetas,
-  setSessionPersistenceDisabled,
-} from '../../../bootstrap/state.js'
+import { createRuntimePromptStateProvider } from '../../core/state/bootstrapProvider.js'
 import { filterAllowedSdkBetas } from '../../../utils/betas.js'
 
 export type PrepareKernelHeadlessStartupOptions = {
@@ -20,11 +17,11 @@ export async function prepareKernelHeadlessStartup(
   options: PrepareKernelHeadlessStartupOptions,
   deps: PrepareKernelHeadlessStartupDeps,
 ): Promise<void> {
-  if (options.sessionPersistenceDisabled) {
-    setSessionPersistenceDisabled(true)
-  }
+  const runtimePromptStateProvider = createRuntimePromptStateProvider()
 
-  setSdkBetas(filterAllowedSdkBetas(options.betas))
+  runtimePromptStateProvider.patchPromptState({
+    sdkBetas: filterAllowedSdkBetas(options.betas),
+  })
 
   if (!options.bareMode) {
     deps.startDeferredPrefetches()
