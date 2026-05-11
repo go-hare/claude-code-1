@@ -5,14 +5,12 @@ import type {
   BetaUsage as Usage,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import {
-  addToTotalDurationState,
-  consumePostCompaction,
-  getIsNonInteractiveSession,
-  getLastApiCompletionTimestamp,
-  getTeleportedSessionInfo,
-  markFirstTeleportMessageLogged,
-  setLastApiCompletionTimestamp,
-} from 'src/bootstrap/state.js'
+  createRuntimeCompactionStateProvider,
+  createRuntimeRequestDebugStateProvider,
+  createRuntimeSessionIdentityStateProvider,
+  createRuntimeTeleportStateProvider,
+  createRuntimeUsageStateProvider,
+} from 'src/runtime/core/state/bootstrapProvider.js'
 import type { QueryChainTracking } from 'src/Tool.js'
 import { isConnectorTextBlock } from 'src/types/connectorText.js'
 import type { AssistantMessage } from 'src/types/message.js'
@@ -42,6 +40,14 @@ import { extractConnectionErrorDetails } from './errorUtils.js'
 
 export type { NonNullableUsage }
 export { EMPTY_USAGE }
+
+const runtimeCompactionStateProvider = createRuntimeCompactionStateProvider()
+const runtimeRequestDebugStateProvider =
+  createRuntimeRequestDebugStateProvider()
+const runtimeSessionIdentityStateProvider =
+  createRuntimeSessionIdentityStateProvider()
+const runtimeTeleportStateProvider = createRuntimeTeleportStateProvider()
+const runtimeUsageStateProvider = createRuntimeUsageStateProvider()
 
 // Strategy used for global prompt caching
 export type GlobalCacheStrategy = 'tool_based' | 'system_prompt' | 'none'
@@ -390,7 +396,7 @@ export function logAPIError({
   })
 
   // Log first error for teleported sessions (reliability tracking)
-  const teleportInfo = getTeleportedSessionInfo()
+  const teleportInfo = runtimeTeleportStateProvider.getTeleportedSessionInfo()
   if (teleportInfo?.isTeleported && !teleportInfo.hasLoggedFirstMessage) {
     logEvent('tengu_teleport_first_message_error', {
       session_id:
@@ -398,7 +404,7 @@ export function logAPIError({
       error_type:
         errorType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
-    markFirstTeleportMessageLogged()
+    runtimeTeleportStateProvider.markFirstTeleportMessageLogged()
   }
 }
 
@@ -455,13 +461,17 @@ function logAPISuccess({
   previousRequestId?: string | null
   betas?: string[]
 }): void {
-  const isNonInteractiveSession = getIsNonInteractiveSession()
-  const isPostCompaction = consumePostCompaction()
+  const isNonInteractiveSession =
+    runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+  const isPostCompaction =
+    runtimeCompactionStateProvider.consumePostCompaction()
   const hasPrintFlag =
     process.argv.includes('-p') || process.argv.includes('--print')
 
   const now = Date.now()
-  const lastCompletion = getLastApiCompletionTimestamp()
+  const lastCompletion =
+    runtimeRequestDebugStateProvider.getRequestDebugState()
+      .lastApiCompletionTimestamp
   const timeSinceLastApiCallMs =
     lastCompletion !== null ? now - lastCompletion : undefined
 
@@ -582,7 +592,9 @@ function logAPISuccess({
     timeSinceLastApiCallMs,
   })
 
-  setLastApiCompletionTimestamp(now)
+  runtimeRequestDebugStateProvider.patchRequestDebugState({
+    lastApiCompletionTimestamp: now,
+  })
 }
 
 export function logAPISuccessAndDuration({
@@ -701,7 +713,10 @@ export function logAPISuccessAndDuration({
 
   const durationMs = Date.now() - start
   const durationMsIncludingRetries = Date.now() - startIncludingRetries
-  addToTotalDurationState(durationMsIncludingRetries, durationMs)
+  runtimeUsageStateProvider.addToTotalDurationState(
+    durationMsIncludingRetries,
+    durationMs,
+  )
 
   logAPISuccess({
     model,
@@ -799,12 +814,12 @@ export function logAPISuccessAndDuration({
   })
 
   // Log first successful message for teleported sessions (reliability tracking)
-  const teleportInfo = getTeleportedSessionInfo()
+  const teleportInfo = runtimeTeleportStateProvider.getTeleportedSessionInfo()
   if (teleportInfo?.isTeleported && !teleportInfo.hasLoggedFirstMessage) {
     logEvent('tengu_teleport_first_message_success', {
       session_id:
         teleportInfo.sessionId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
-    markFirstTeleportMessageLogged()
+    runtimeTeleportStateProvider.markFirstTeleportMessageLogged()
   }
 }
