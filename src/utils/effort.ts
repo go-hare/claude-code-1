@@ -249,6 +249,28 @@ export function getDisplayedEffortLevel(
 }
 
 /**
+ * Whether effort-related UI should be shown for the current model.
+ *
+ * OpenAI-compatible requests can carry explicit `reasoning_effort` even for
+ * custom model strings, so an explicit env or session override must remain
+ * visible in the UI even when the Claude-family heuristic cannot classify the
+ * model as supporting effort.
+ */
+export function shouldShowEffortUI(
+  model: string,
+  appStateEffort: EffortValue | undefined,
+): boolean {
+  if (modelSupportsEffort(model)) {
+    return true
+  }
+  if (getAPIProvider() === 'openai') {
+    const envOverride = getEffortEnvOverride()
+    return envOverride !== undefined || appStateEffort !== undefined
+  }
+  return false
+}
+
+/**
  * Build the ` with {level} effort` suffix shown in Logo/Spinner.
  * Returns empty string if the user hasn't explicitly set an effort value.
  * Delegates to resolveAppliedEffort() so the displayed level matches what
@@ -258,7 +280,9 @@ export function getEffortSuffix(
   model: string,
   effortValue: EffortValue | undefined,
 ): string {
-  if (effortValue === undefined) return ''
+  const envOverride = getEffortEnvOverride()
+  if (effortValue === undefined && envOverride === undefined) return ''
+  if (!shouldShowEffortUI(model, effortValue)) return ''
   const resolved = resolveAppliedEffort(model, effortValue)
   if (resolved === undefined) return ''
   return ` with ${convertEffortValueToLevel(resolved)} effort`

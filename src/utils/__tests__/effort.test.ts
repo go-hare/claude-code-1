@@ -27,6 +27,8 @@ const {
   isValidNumericEffort,
   convertEffortValueToLevel,
   getEffortLevelDescription,
+  getEffortSuffix,
+  shouldShowEffortUI,
   resolvePickerEffortPersistence,
   EFFORT_LEVELS,
 } = await import('src/utils/effort.js')
@@ -224,6 +226,67 @@ describe('getEffortLevelDescription', () => {
   test("returns description for 'max'", () => {
     const desc = getEffortLevelDescription('max')
     expect(desc).toContain('Maximum')
+  })
+})
+
+describe('shouldShowEffortUI', () => {
+  const saved = {
+    CLAUDE_CODE_EFFORT_LEVEL: process.env.CLAUDE_CODE_EFFORT_LEVEL,
+    CLAUDE_CODE_USE_OPENAI: process.env.CLAUDE_CODE_USE_OPENAI,
+  }
+
+  afterEach(() => {
+    if (saved.CLAUDE_CODE_EFFORT_LEVEL === undefined) {
+      delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+    } else {
+      process.env.CLAUDE_CODE_EFFORT_LEVEL = saved.CLAUDE_CODE_EFFORT_LEVEL
+    }
+    if (saved.CLAUDE_CODE_USE_OPENAI === undefined) {
+      delete process.env.CLAUDE_CODE_USE_OPENAI
+    } else {
+      process.env.CLAUDE_CODE_USE_OPENAI = saved.CLAUDE_CODE_USE_OPENAI
+    }
+  })
+
+  test('shows effort UI for explicit OpenAI env override on custom model', () => {
+    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    process.env.CLAUDE_CODE_EFFORT_LEVEL = 'xhigh'
+
+    expect(shouldShowEffortUI('gpt-5.5', undefined)).toBe(true)
+  })
+
+  test('hides effort UI for unsupported 3P custom model without explicit override', () => {
+    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+
+    expect(shouldShowEffortUI('gpt-5.5', undefined)).toBe(false)
+  })
+})
+
+describe('getEffortSuffix', () => {
+  const saved = {
+    CLAUDE_CODE_EFFORT_LEVEL: process.env.CLAUDE_CODE_EFFORT_LEVEL,
+    CLAUDE_CODE_USE_OPENAI: process.env.CLAUDE_CODE_USE_OPENAI,
+  }
+
+  afterEach(() => {
+    if (saved.CLAUDE_CODE_EFFORT_LEVEL === undefined) {
+      delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+    } else {
+      process.env.CLAUDE_CODE_EFFORT_LEVEL = saved.CLAUDE_CODE_EFFORT_LEVEL
+    }
+    if (saved.CLAUDE_CODE_USE_OPENAI === undefined) {
+      delete process.env.CLAUDE_CODE_USE_OPENAI
+    } else {
+      process.env.CLAUDE_CODE_USE_OPENAI = saved.CLAUDE_CODE_USE_OPENAI
+    }
+  })
+
+  test('shows env-driven suffix for OpenAI custom model', () => {
+    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    process.env.CLAUDE_CODE_EFFORT_LEVEL = 'xhigh'
+
+    expect(getEffortSuffix('gpt-5.5', undefined)).toBe(' with high effort')
   })
 })
 
