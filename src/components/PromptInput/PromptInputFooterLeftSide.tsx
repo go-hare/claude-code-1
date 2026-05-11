@@ -36,7 +36,7 @@ import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTasksV2 } from '../../hooks/useTasksV2.js';
-import { formatDuration, formatFileSize } from '../../utils/format.js';
+import { formatDuration } from '../../utils/format.js';
 import { VoiceWarmupHint } from './VoiceIndicator.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import { useVoiceState } from '../../context/voice.js';
@@ -53,26 +53,6 @@ const proactiveModule = feature('PROACTIVE') || feature('KAIROS') ? require('../
 const NO_OP_SUBSCRIBE = (_cb: () => void) => () => {};
 const NULL = () => null;
 const MAX_VOICE_HINT_SHOWS = 3;
-
-const RSS_UPDATE_INTERVAL_MS = 5_000;
-
-type RssState = { text: string; level: 'normal' | 'warning' | 'error' };
-
-function useRssDisplay(): RssState | null {
-  const [state, setState] = useState<RssState | null>(null);
-  useEffect(() => {
-    function update(): void {
-      const mb = process.memoryUsage().rss / (1024 * 1024);
-      const level = mb >= 1024 ? 'error' : mb >= 512 ? 'warning' : 'normal';
-      const text = formatFileSize(mb * 1024 * 1024);
-      setState(prev => (prev?.text === text ? prev : { text, level }));
-    }
-    update();
-    const timer = setInterval(update, RSS_UPDATE_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
-  return state;
-}
 
 type Props = {
   exitMessage: {
@@ -279,8 +259,6 @@ function ModeIndicator({
     }
   }, [voiceEnabled, voiceHintUnderCap]);
   const isKillAgentsConfirmShowing = useAppState(s => s.notifications.current?.key === 'kill-agents-confirm');
-  const rssState = useRssDisplay();
-
   // Derive team info from teamContext (no filesystem I/O needed)
   // Match the same logic as TeamStatus to avoid trailing separator
   // In-process mode uses Shift+Down/Up navigation, not footer teams menu
@@ -363,18 +341,6 @@ function ModeIndicator({
       : []),
     ...(shouldShowPrStatus
       ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />]
-      : []),
-    // RSS memory indicator — always visible
-    ...(rssState
-      ? [
-          <Text
-            key="rss"
-            dimColor={rssState.level === 'normal'}
-            color={rssState.level === 'error' ? 'error' : rssState.level === 'warning' ? 'warning' : undefined}
-          >
-            {rssState.text} · pid:{process.pid}
-          </Text>,
-        ]
       : []),
   ];
 
