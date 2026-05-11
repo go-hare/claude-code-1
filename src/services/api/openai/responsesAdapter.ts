@@ -312,7 +312,10 @@ export async function* adaptResponsesStreamToAnthropic(
       continue
     }
 
-    if (type === 'response.reasoning_text.delta') {
+    if (
+      type === 'response.reasoning_text.delta' ||
+      type === 'response.reasoning_summary_text.delta'
+    ) {
       if (!thinkingBlockOpen) {
         if (textBlockOpen) {
           yield {
