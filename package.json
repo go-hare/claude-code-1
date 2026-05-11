@@ -3,14 +3,14 @@
   "version": "2.3.0",
   "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
   "type": "module",
-  "author": "claude-code-best <claude-code-best@proton.me>",
+  "author": "claude-code <claude-code@proton.me>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/claude-code-best/claude-code.git"
+    "url": "git+https://github.com/claude-code/claude-code.git"
   },
-  "homepage": "https://github.com/claude-code-best/claude-code#readme",
+  "homepage": "https://github.com/claude-code/claude-code#readme",
   "bugs": {
-    "url": "https://github.com/claude-code-best/claude-code/issues"
+    "url": "https://github.com/claude-code/claude-code/issues"
   },
   "keywords": [
     "claude",
@@ -104,10 +104,10 @@
     "@aws-sdk/credential-providers": "^3.1037.0",
     "@azure/identity": "^4.13.1",
     "@biomejs/biome": "^2.4.12",
-    "@claude-code-best/agent-tools": "workspace:*",
-    "@claude-code-best/builtin-tools": "workspace:*",
-    "@claude-code-best/mcp-client": "workspace:*",
-    "@claude-code-best/weixin": "workspace:*",
+    "@claude-code/agent-tools": "workspace:*",
+    "@claude-code/builtin-tools": "workspace:*",
+    "@claude-code/mcp-client": "workspace:*",
+    "@claude-code/weixin": "workspace:*",
     "@commander-js/extra-typings": "^14.0.0",
     "@growthbook/growthbook": "^1.6.5",
     "@langfuse/otel": "^5.1.0",

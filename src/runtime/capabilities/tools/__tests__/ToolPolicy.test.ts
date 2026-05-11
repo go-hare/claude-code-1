@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { buildTool, getEmptyToolPermissionContext } from '../../../../Tool.js'
-import { assembleToolPool, createRuntimeToolCatalog } from '../index.js'
+import {
+  assembleToolPool,
+  createRuntimeToolCatalog,
+  getAllBaseTools as getRuntimeAllBaseTools,
+} from '../index.js'
+import { getAllBaseTools as getLegacyAllBaseTools } from '../../../../tools.js'
 
 function makeTool(name: string, overrides: Record<string, unknown> = {}) {
   return buildTool({
@@ -41,6 +46,13 @@ describe('runtime ToolPolicy', () => {
 })
 
 describe('runtime ToolCatalog', () => {
+  test('keeps runtime base tool names in sync with the legacy registry', () => {
+    const runtimeNames = getRuntimeAllBaseTools().map(tool => tool.name)
+    const legacyNames = getLegacyAllBaseTools().map(tool => tool.name)
+
+    expect(runtimeNames).toEqual(legacyNames)
+  })
+
   test('creates descriptors and alias lookup from tools', () => {
     const tool = makeTool('Read', {
       aliases: ['FileRead'],

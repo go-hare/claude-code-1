@@ -30,7 +30,7 @@ import {
 } from 'src/utils/model/model.js'
 import { getModelStrings } from 'src/utils/model/modelStrings.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
-import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from 'src/runtime/core/state/bootstrapProvider.js'
 import {
   API_PDF_MAX_PAGES,
   PDF_TARGET_RAW_SIZE,
@@ -50,6 +50,9 @@ import {
 } from '../claudeAiLimits.js'
 import { shouldProcessRateLimits } from '../rateLimitMocking.js' // Used for /mock-limits command
 import { extractConnectionErrorDetails, formatAPIError } from './errorUtils.js'
+
+const runtimeSessionIdentityStateProvider =
+  createRuntimeSessionIdentityStateProvider()
 
 export const API_ERROR_MESSAGE_PREFIX = 'API Error'
 
@@ -169,28 +172,28 @@ export const CUSTOM_OFF_SWITCH_MESSAGE =
 export const API_TIMEOUT_ERROR_MESSAGE = 'Request timed out'
 export function getPdfTooLargeErrorMessage(): string {
   const limits = `max ${API_PDF_MAX_PAGES} pages, ${formatFileSize(PDF_TARGET_RAW_SIZE)}`
-  return getIsNonInteractiveSession()
+  return runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
     ? `PDF too large (${limits}). Try reading the file a different way (e.g., extract text with pdftotext).`
     : `PDF too large (${limits}). Double press esc to go back and try again, or use pdftotext to convert to text first.`
 }
 export function getPdfPasswordProtectedErrorMessage(): string {
-  return getIsNonInteractiveSession()
+  return runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
     ? 'PDF is password protected. Try using a CLI tool to extract or convert the PDF.'
     : 'PDF is password protected. Please double press esc to edit your message and try again.'
 }
 export function getPdfInvalidErrorMessage(): string {
-  return getIsNonInteractiveSession()
+  return runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
     ? 'The PDF file was not valid. Try converting it to text first (e.g., pdftotext).'
     : 'The PDF file was not valid. Double press esc to go back and try again with a different file.'
 }
 export function getImageTooLargeErrorMessage(): string {
-  return getIsNonInteractiveSession()
+  return runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
     ? 'Image was too large. Try resizing the image or using a different approach.'
     : 'Image was too large. Double press esc to go back and try again with a smaller image.'
 }
 export function getRequestTooLargeErrorMessage(): string {
   const limits = `max ${formatFileSize(PDF_TARGET_RAW_SIZE)}`
-  return getIsNonInteractiveSession()
+  return runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
     ? `Request too large (${limits}). Try with a smaller file.`
     : `Request too large (${limits}). Double press esc to go back and try with a smaller file.`
 }
@@ -198,13 +201,13 @@ export const OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE =
   'Your account does not have access to Claude Code. Please run /login.'
 
 export function getTokenRevokedErrorMessage(): string {
-  return getIsNonInteractiveSession()
+  return runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
     ? 'Your account does not have access to Claude. Please login again or contact your administrator.'
     : TOKEN_REVOKED_ERROR_MESSAGE
 }
 
 export function getOauthOrgNotAllowedErrorMessage(): string {
-  return getIsNonInteractiveSession()
+  return runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
     ? 'Your organization does not have access to Claude. Please login again or contact your administrator.'
     : OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE
 }
@@ -538,9 +541,10 @@ export function getAssistantMessageFromError(
     // said instead of a generic "Rate limit reached". Entitlement rejections
     // (e.g. 1M context without Extra Usage) and infra capacity 429s land here.
     if (error.message.includes('Extra usage is required for long context')) {
-      const hint = getIsNonInteractiveSession()
-        ? 'enable extra usage at claude.ai/settings/usage, or use --model to switch to standard context'
-        : 'run /extra-usage to enable, or /model to switch to standard context'
+      const hint =
+        runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+          ? 'enable extra usage at claude.ai/settings/usage, or use --model to switch to standard context'
+          : 'run /extra-usage to enable, or /model to switch to standard context'
       return createAssistantAPIErrorMessage({
         content: `${API_ERROR_MESSAGE_PREFIX}: Extra usage is required for 1M context · ${hint}`,
         error: 'rate_limit',
@@ -630,7 +634,7 @@ export function getAssistantMessageFromError(
     error.message.includes('many-image')
   ) {
     return createAssistantAPIErrorMessage({
-      content: getIsNonInteractiveSession()
+      content: runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
         ? 'An image in the conversation exceeds the dimension limit for many-image requests (2000px). Start a new session with fewer images.'
         : 'An image in the conversation exceeds the dimension limit for many-image requests (2000px). Run /compact to remove old images from context, or start a new session.',
       error: 'invalid_request',
@@ -686,18 +690,20 @@ export function getAssistantMessageFromError(
 
     if (process.env.USER_TYPE === 'ant') {
       const baseMessage = `API Error: 400 ${error.message}\n\nRun /share and post the JSON file to ${MACRO.FEEDBACK_CHANNEL}.`
-      const rewindInstruction = getIsNonInteractiveSession()
-        ? ''
-        : ' Then, use /rewind to recover the conversation.'
+      const rewindInstruction =
+        runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+          ? ''
+          : ' Then, use /rewind to recover the conversation.'
       return createAssistantAPIErrorMessage({
         content: baseMessage + rewindInstruction,
         error: 'invalid_request',
       })
     } else {
       const baseMessage = 'API Error: 400 due to tool use concurrency issues.'
-      const rewindInstruction = getIsNonInteractiveSession()
-        ? ''
-        : ' Run /rewind to recover the conversation.'
+      const rewindInstruction =
+        runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+          ? ''
+          : ' Run /rewind to recover the conversation.'
       return createAssistantAPIErrorMessage({
         content: baseMessage + rewindInstruction,
         error: 'invalid_request',
@@ -722,9 +728,10 @@ export function getAssistantMessageFromError(
     error.message.includes('`tool_use` ids must be unique')
   ) {
     logEvent('tengu_duplicate_tool_use_id', {})
-    const rewindInstruction = getIsNonInteractiveSession()
-      ? ''
-      : ' Run /rewind to recover the conversation.'
+    const rewindInstruction =
+      runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+        ? ''
+        : ' Run /rewind to recover the conversation.'
     return createAssistantAPIErrorMessage({
       content: `API Error: 400 duplicate tool_use ID in conversation history.${rewindInstruction}`,
       error: 'invalid_request',
@@ -876,7 +883,7 @@ export function getAssistantMessageFromError(
 
     return createAssistantAPIErrorMessage({
       error: 'authentication_failed',
-      content: getIsNonInteractiveSession()
+      content: runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
         ? `Failed to authenticate. ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`
         : `Please run /login · ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`,
     })
@@ -889,7 +896,10 @@ export function getAssistantMessageFromError(
     error instanceof Error &&
     error.message.toLowerCase().includes('model id')
   ) {
-    const switchCmd = getIsNonInteractiveSession() ? '--model' : '/model'
+    const switchCmd =
+      runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+        ? '--model'
+        : '/model'
     const fallbackSuggestion = get3PModelFallbackSuggestion(model)
     return createAssistantAPIErrorMessage({
       content: fallbackSuggestion
@@ -903,7 +913,10 @@ export function getAssistantMessageFromError(
   // available. Guide the user to /model so they can pick a valid one.
   // For 3P users, suggest a specific fallback model they can try.
   if (error instanceof APIError && error.status === 404) {
-    const switchCmd = getIsNonInteractiveSession() ? '--model' : '/model'
+    const switchCmd =
+      runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+        ? '--model'
+        : '/model'
     const fallbackSuggestion = get3PModelFallbackSuggestion(model)
     return createAssistantAPIErrorMessage({
       content: fallbackSuggestion
@@ -1194,9 +1207,10 @@ export function getErrorMessageIfRefusal(
 
   logEvent('tengu_refusal_api_response', {})
 
-  const baseMessage = getIsNonInteractiveSession()
-    ? `${API_ERROR_MESSAGE_PREFIX}: Claude Code is unable to respond to this request, which appears to violate our Usage Policy (https://www.anthropic.com/legal/aup). Try rephrasing the request or attempting a different approach.`
-    : `${API_ERROR_MESSAGE_PREFIX}: Claude Code is unable to respond to this request, which appears to violate our Usage Policy (https://www.anthropic.com/legal/aup). Please double press esc to edit your last message or start a new session for Claude Code to assist with a different task.`
+  const baseMessage =
+    runtimeSessionIdentityStateProvider.getIsNonInteractiveSession()
+      ? `${API_ERROR_MESSAGE_PREFIX}: Claude Code is unable to respond to this request, which appears to violate our Usage Policy (https://www.anthropic.com/legal/aup). Try rephrasing the request or attempting a different approach.`
+      : `${API_ERROR_MESSAGE_PREFIX}: Claude Code is unable to respond to this request, which appears to violate our Usage Policy (https://www.anthropic.com/legal/aup). Please double press esc to edit your last message or start a new session for Claude Code to assist with a different task.`
 
   const modelSuggestion =
     model !== 'claude-sonnet-4-20250514'

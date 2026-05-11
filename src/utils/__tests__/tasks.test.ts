@@ -19,9 +19,6 @@ mock.module('src/bootstrap/state.ts', () => ({
 mock.module('src/utils/teammate.ts', () => ({
   getTeamName: () => undefined,
 }))
-mock.module('src/utils/teammateContext.ts', () => ({
-  getTeammateContext: () => undefined,
-}))
 mock.module('src/utils/slowOperations.ts', () => ({
   jsonParse: (s: string) => JSON.parse(s),
   jsonStringify: (
@@ -54,6 +51,7 @@ let configDir: string
 const ORIGINAL_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
 
 beforeEach(async () => {
+  clearLeaderTeamName()
   configDir = join(
     tmpdir(),
     `claude-test-tasks-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -65,6 +63,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  clearLeaderTeamName()
   if (ORIGINAL_CONFIG_DIR !== undefined) {
     process.env.CLAUDE_CONFIG_DIR = ORIGINAL_CONFIG_DIR
   } else {

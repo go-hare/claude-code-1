@@ -50,6 +50,9 @@ mock.module('src/utils/swarm/backends/registry.js', () => {
     getCachedDetectionResult: () => null,
     getResolvedTeammateMode: () => 'in-process',
     ensureBackendsRegistered: async () => {},
+    registerTmuxBackend: () => {},
+    registerITermBackend: () => {},
+    registerWindowsTerminalBackend: () => {},
     getBackendByType: () => ({
       type: 'tmux',
       killPane: async () => true,
@@ -126,10 +129,10 @@ describe('Agent Teams lifecycle', () => {
     process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED = '1'
     try {
       const { TeamCreateTool } = await import(
-        '@claude-code-best/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
+        '@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
       )
       const { TeamDeleteTool } = await import(
-        '@claude-code-best/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
+        '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
       )
 
       expect(TeamCreateTool.isEnabled()).toBe(false)
@@ -146,22 +149,22 @@ describe('Agent Teams lifecycle', () => {
 
   test('runs TeamCreate -> spawn -> TaskUpdate -> SendMessage -> TeamDelete', async () => {
     const { TeamCreateTool } = await import(
-      '@claude-code-best/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
+      '@claude-code/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'
     )
     const { spawnTeammate } = await import(
-      '@claude-code-best/builtin-tools/tools/shared/spawnMultiAgent.js'
+      '@claude-code/builtin-tools/tools/shared/spawnMultiAgent.js'
     )
     const { TaskCreateTool } = await import(
-      '@claude-code-best/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
+      '@claude-code/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
     )
     const { TaskUpdateTool } = await import(
-      '@claude-code-best/builtin-tools/tools/TaskUpdateTool/TaskUpdateTool.js'
+      '@claude-code/builtin-tools/tools/TaskUpdateTool/TaskUpdateTool.js'
     )
     const { SendMessageTool } = await import(
-      '@claude-code-best/builtin-tools/tools/SendMessageTool/SendMessageTool.js'
+      '@claude-code/builtin-tools/tools/SendMessageTool/SendMessageTool.js'
     )
     const { TeamDeleteTool } = await import(
-      '@claude-code-best/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
+      '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
     )
 
     const context = {
@@ -238,7 +241,7 @@ describe('Agent Teams lifecycle', () => {
 
   test('TeamDelete waits for active teammates to become inactive before cleanup', async () => {
     const { TeamDeleteTool } = await import(
-      '@claude-code-best/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
+      '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
     )
     const now = Date.now()
     writeTeamConfig('alpha', {
@@ -303,7 +306,7 @@ describe('Agent Teams lifecycle', () => {
 
   test('TeamDelete terminates inactive team-file members that still have running AppState tasks', async () => {
     const { TeamDeleteTool } = await import(
-      '@claude-code-best/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
+      '@claude-code/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js'
     )
     const now = Date.now()
     writeTeamConfig('alpha', {

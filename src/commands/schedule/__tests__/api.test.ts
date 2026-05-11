@@ -51,12 +51,6 @@ mock.module('src/utils/teleport/api.js', () => ({
     apiKey: 'test-workspace-key',
   }),
 }))
-mock.module('src/services/auth/hostGuard.ts', () => ({
-  assertSubscriptionBaseUrl: () => {},
-  assertWorkspaceHost: () => {},
-  assertNoAnthropicEnvForOpenAI: () => {},
-}))
-
 // ── Axios mock ──────────────────────────────────────────────────────────────
 const axiosGetMock = mock(async () => ({}))
 const axiosPostMock = mock(async () => ({}))

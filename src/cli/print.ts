@@ -37,7 +37,7 @@ import {
   type AgentDefinition,
   isBuiltInAgent,
   parseAgentsFromJson,
-} from '@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+} from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { Message, NormalizedUserMessage } from 'src/types/message.js'
 import type { QueuedCommand } from 'src/types/textInputTypes.js'
 import {
@@ -88,7 +88,10 @@ import {
 import { parsePluginIdentifier } from 'src/utils/plugins/pluginIdentifier.js'
 import { validateUuid } from 'src/utils/uuid.js'
 import { fromArray } from 'src/utils/generators.js'
-import { QueryEngine } from 'src/QueryEngine.js'
+import {
+  SessionRuntime,
+  type SessionRuntimeConfig,
+} from 'src/runtime/capabilities/execution/SessionRuntime.js'
 import { createAgent } from 'src/core/createAgent.js'
 import {
   agentEventToStdoutMessages,
@@ -206,7 +209,7 @@ import {
   getInitJsonSchema,
   setSdkAgentProgressSummariesEnabled,
 } from 'src/bootstrap/state.js'
-import { createSyntheticOutputTool } from '@claude-code-best/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
+import { createSyntheticOutputTool } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import { parseSessionIdentifier } from 'src/utils/sessionUrl.js'
 import {
   hydrateRemoteSession,
@@ -383,7 +386,7 @@ const cronSchedulerModule =
 const cronJitterConfigModule =
   require('../utils/cronJitterConfig.js') as typeof import('../utils/cronJitterConfig.js')
 const cronGate =
-  require('@claude-code-best/builtin-tools/tools/ScheduleCronTool/prompt.js') as typeof import('@claude-code-best/builtin-tools/tools/ScheduleCronTool/prompt.js')
+  require('@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js')
 const extractMemoriesModule = feature('EXTRACT_MEMORIES')
   ? (require('../services/extractMemories/extractMemories.js') as typeof import('../services/extractMemories/extractMemories.js'))
   : null
@@ -1183,7 +1186,7 @@ function runHeadlessStreaming(
 
   // Client-supplied readFileState seeds (via seed_read_state control request).
   // The stdin IIFE runs concurrently with ask() — a seed arriving mid-turn
-  // would be lost to ask()'s clone-then-replace (QueryEngine.ts finally block)
+  // would be lost to the runtime's clone-then-replace finally block.
   // if written directly into readFileState. Instead, seeds land here, merge
   // into getReadFileCache's view (readFileState-wins-ties: seeds fill gaps),
   // and are re-applied then CLEARED in setReadFileCache. One-shot: each seed
@@ -2021,7 +2024,7 @@ function runHeadlessStreaming(
           }
           const batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
 
-          // QueryEngine will emit a replay for command.uuid (the last uuid in
+          // SessionRuntime will emit a replay for command.uuid (the last uuid in
           // the batch) via its messagesToAck path. Emit replays here for the
           // rest so consumers that track per-uuid delivery (clank's
           // asyncMessages footer, CCR) see an ack for every message they sent,
@@ -2210,7 +2213,7 @@ function runHeadlessStreaming(
             await runWithWorkload(
               cmd.workload ?? options.workload,
               async () => {
-                const engine = new QueryEngine({
+                const sessionRuntimeConfig: SessionRuntimeConfig = {
                   commands: uniqBy(
                     [...currentCommands, ...appState.mcp.commands],
                     'name',
@@ -2262,15 +2265,19 @@ function runHeadlessStreaming(
                     })
                   },
                   orphanedPermission: cmd.orphanedPermission,
-                })
+                }
+                const sessionRuntime = new SessionRuntime(sessionRuntimeConfig)
                 const executor: AgentTurnExecutor = async function* (
                   _input,
                   context,
                 ) {
-                  for await (const sdkMessage of engine.submitMessage(input, {
-                    uuid: cmd.uuid,
-                    isMeta: cmd.isMeta,
-                  })) {
+                  for await (const sdkMessage of sessionRuntime.submitMessage(
+                    input,
+                    {
+                      uuid: cmd.uuid,
+                      isMeta: cmd.isMeta,
+                    },
+                  )) {
                     yield* projectSdkMessageToAgentEventPayloads(
                       sdkMessage,
                       context,
@@ -2328,7 +2335,7 @@ function runHeadlessStreaming(
                     }
                   }
                 } finally {
-                  readFileState = engine.getReadFileState()
+                  readFileState = sessionRuntime.getReadFileState()
                   for (const [path, seed] of pendingSeeds.entries()) {
                     const existing = readFileState.get(path)
                     if (!existing || seed.timestamp > existing.timestamp) {
@@ -4065,7 +4072,7 @@ function runHeadlessStreaming(
           //
           // Fallback (resume before first turn completes — no snapshot yet):
           // rebuild from scratch. buildSideQuestionFallbackParams mirrors
-          // QueryEngine.ts:ask()'s system prompt assembly (including
+          // SessionRuntime's system prompt assembly (including
           // --system-prompt / --append-system-prompt) so the rebuilt prefix
           // matches in the common case. May still miss the cache for
           // coordinator mode or memory-mechanics extras — acceptable, the
@@ -5191,7 +5198,7 @@ async function loadInitialMessages(
               getActiveAgentsFromList,
             } =
               // eslint-disable-next-line @typescript-eslint/no-require-imports
-              require('@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js')
+              require('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js')
             getAgentDefinitionsWithOverrides.cache.clear?.()
             const freshAgentDefs = await getAgentDefinitionsWithOverrides(
               getCwd(),
@@ -5393,7 +5400,7 @@ async function loadInitialMessages(
           // Refresh agent definitions to reflect the mode switch
           const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js')
+            require('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js')
           getAgentDefinitionsWithOverrides.cache.clear?.()
           const freshAgentDefs = await getAgentDefinitionsWithOverrides(
             getCwd(),
