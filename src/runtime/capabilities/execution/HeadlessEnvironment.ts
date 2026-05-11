@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import type { AgentDefinition } from '@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { Command } from '../../../commands.js'
 import type {
   MCPServerConnection,

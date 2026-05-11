@@ -10,12 +10,9 @@ import {
   spawnInProcessTeammate,
 } from '../spawnInProcess'
 
-mock.module(
-  '@claude-code-best/builtin-tools/tools/AgentTool/runAgent.js',
-  () => ({
-    async *runAgent() {},
-  }),
-)
+mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
+  async *runAgent() {},
+}))
 
 let tempHome: string
 let previousConfigDir: string | undefined

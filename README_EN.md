@@ -1,17 +1,16 @@
-# Claude Code Best V5 (CCB)
+# Claude Code
 
-[![GitHub Stars](https://img.shields.io/github/stars/claude-code-best/claude-code?style=flat-square&logo=github&color=yellow)](https://github.com/claude-code-best/claude-code/stargazers)
-[![GitHub Contributors](https://img.shields.io/github/contributors/claude-code-best/claude-code?style=flat-square&color=green)](https://github.com/claude-code-best/claude-code/graphs/contributors)
-[![GitHub Issues](https://img.shields.io/github/issues/claude-code-best/claude-code?style=flat-square&color=orange)](https://github.com/claude-code-best/claude-code/issues)
-[![GitHub License](https://img.shields.io/github/license/claude-code-best/claude-code?style=flat-square)](https://github.com/claude-code-best/claude-code/blob/main/LICENSE)
-[![Last Commit](https://img.shields.io/github/last-commit/claude-code-best/claude-code?style=flat-square&color=blue)](https://github.com/claude-code-best/claude-code/commits/main)
+[![GitHub Stars](https://img.shields.io/github/stars/claude-code/claude-code?style=flat-square&logo=github&color=yellow)](https://github.com/claude-code/claude-code/stargazers)
+[![GitHub Contributors](https://img.shields.io/github/contributors/claude-code/claude-code?style=flat-square&color=green)](https://github.com/claude-code/claude-code/graphs/contributors)
+[![GitHub Issues](https://img.shields.io/github/issues/claude-code/claude-code?style=flat-square&color=orange)](https://github.com/claude-code/claude-code/issues)
+[![GitHub License](https://img.shields.io/github/license/claude-code/claude-code?style=flat-square)](https://github.com/claude-code/claude-code/blob/main/LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/claude-code/claude-code?style=flat-square&color=blue)](https://github.com/claude-code/claude-code/commits/main)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black?style=flat-square&logo=bun)](https://bun.sh/)
 
 > Which Claude do you like? The open source one is the best.
 
-A reverse-engineered / decompiled source restoration of Anthropic's official [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI tool. The goal is to reproduce most of Claude Code's functionality and engineering capabilities. It's abbreviated as CCB.
+A reverse-engineered / decompiled source restoration of Anthropic's official Claude Code CLI tool. The goal is to reproduce most of Claude Code's functionality and engineering capabilities.
 
-[Documentation (Chinese)](https://ccb.agent-aura.top/) — PR contributions welcome.
 
 Sponsor placeholder.
 
@@ -21,16 +20,16 @@ Sponsor placeholder.
   - [x] Build pipeline complete, output runnable on both Node.js and Bun
 - [x] V3: Extensive documentation and documentation site improvements
 - [x] V4: Large-scale test suite for improved stability
-  - [x] Buddy pet feature restored [Docs](https://ccb.agent-aura.top/docs/features/buddy)
-  - [x] Auto Mode restored [Docs](https://ccb.agent-aura.top/docs/safety/auto-mode)
+  - [x] Buddy pet feature restored
+  - [x] Auto Mode restored
   - [x] All features now configurable via environment variables instead of `bun --feature`
 - [x] V5: Enterprise-grade monitoring/reporting, missing tools补全, restrictions removed
   - [x] Removed anti-distillation code
-  - [x] Web search capability (using Bing) [Docs](https://ccb.agent-aura.top/docs/features/web-browser-tool)
-  - [x] Debug mode support [Docs](https://ccb.agent-aura.top/docs/features/debug-mode)
+  - [x] Web search capability (using Bing)
+  - [x] Debug mode support
   - [x] Disabled auto-updates
-  - [x] Custom Sentry error reporting support [Docs](https://ccb.agent-aura.top/docs/internals/sentry-setup)
-  - [x] Custom GrowthBook support (GB is open source — configure your own feature flag platform) [Docs](https://ccb.agent-aura.top/docs/internals/growthbook-adapter)
+  - [x] Custom Sentry error reporting support
+  - [x] Custom GrowthBook support (GB is open source — configure your own feature flag platform)
   - [x] Custom login mode — configure Claude models your way
 - [ ] V6: Large-scale refactoring, full modular packaging
   - [ ] V6 will be a new branch; main branch will be archived as a historical version
@@ -185,24 +184,19 @@ The TUI (REPL) mode requires a real terminal and cannot be launched directly via
    - Set breakpoints in `src/` files
    - Press F5 → select **"Attach to Bun (TUI debug)"**
 
-## Documentation & Links
-
-- **Online docs (Mintlify)**: [ccb.agent-aura.top](https://ccb.agent-aura.top/) — source in [`docs/`](docs/), PR contributions welcome
-- **DeepWiki**: https://deepwiki.com/claude-code-best/claude-code
-
 ## Contributors
 
-<a href="https://github.com/claude-code-best/claude-code/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=claude-code-best/claude-code" />
+<a href="https://github.com/claude-code/claude-code/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=claude-code/claude-code" />
 </a>
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=claude-code-best%2Fclaude-code&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=claude-code%2Fclaude-code&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=claude-code-best%2Fclaude-code&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=claude-code-best%2Fclaude-code&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=claude-code-best%2Fclaude-code&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=claude-code%2Fclaude-code&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=claude-code%2Fclaude-code&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=claude-code%2Fclaude-code&type=date&legend=top-left" />
  </picture>
 </a>
 

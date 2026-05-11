@@ -459,16 +459,11 @@ export const cliCommandGraph = [
       capability: 'updates',
     },
   ),
-  command(
-    'update',
-    ['update'],
-    'Update claude-code-best (ccb) to the latest version',
-    {
-      ownership: 'product-operation',
-      reuse: 'reuse-as-is',
-      capability: 'updates',
-    },
-  ),
+  command('update', ['update'], 'Update claude-code to the latest version', {
+    ownership: 'product-operation',
+    reuse: 'reuse-as-is',
+    capability: 'updates',
+  }),
   command('log', ['log'], '[ANT-ONLY] Manage conversation logs.', {
     ownership: 'product-operation',
     reuse: 'reuse-as-is',

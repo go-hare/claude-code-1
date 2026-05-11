@@ -6,7 +6,7 @@ import type { AppState } from '../../../state/AppStateStore.js'
 import type { Tools } from '../../../Tool.js'
 import type { ThinkingConfig } from '../../../utils/thinking.js'
 import type { HookResultMessage } from '../../../types/message.js'
-import type { AgentDefinition } from '@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 
 export type HeadlessRuntimeInput = string | AsyncIterable<string>
 
