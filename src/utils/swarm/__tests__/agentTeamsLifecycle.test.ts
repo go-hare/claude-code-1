@@ -50,6 +50,9 @@ mock.module('src/utils/swarm/backends/registry.js', () => {
     getCachedDetectionResult: () => null,
     getResolvedTeammateMode: () => 'in-process',
     ensureBackendsRegistered: async () => {},
+    registerTmuxBackend: () => {},
+    registerITermBackend: () => {},
+    registerWindowsTerminalBackend: () => {},
     getBackendByType: () => ({
       type: 'tmux',
       killPane: async () => true,

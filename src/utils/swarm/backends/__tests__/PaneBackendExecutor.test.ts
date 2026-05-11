@@ -2,14 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runCleanupFunctions } from '../../../cleanupRegistry'
 import { createPaneBackendExecutor } from '../PaneBackendExecutor'
 import type { PaneBackend } from '../types'
 
 let tempHome: string
 let previousConfigDir: string | undefined
+let cleanupFns: Array<() => Promise<void>>
 
 beforeEach(() => {
+  cleanupFns = []
   previousConfigDir = process.env.CLAUDE_CONFIG_DIR
   tempHome = join(
     tmpdir(),
@@ -61,7 +62,12 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend)
+    const executor = createPaneBackendExecutor(backend, cleanupFn => {
+      cleanupFns.push(cleanupFn)
+      return () => {
+        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
+      }
+    })
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {
@@ -128,7 +134,12 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend)
+    const executor = createPaneBackendExecutor(backend, cleanupFn => {
+      cleanupFns.push(cleanupFn)
+      return () => {
+        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
+      }
+    })
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {
@@ -189,7 +200,12 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend)
+    const executor = createPaneBackendExecutor(backend, cleanupFn => {
+      cleanupFns.push(cleanupFn)
+      return () => {
+        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
+      }
+    })
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {
@@ -198,7 +214,7 @@ describe('PaneBackendExecutor', () => {
       }),
     } as any)
 
-    await executor.spawn({
+    const result = await executor.spawn({
       name: 'worker',
       teamName: 'alpha',
       prompt: 'do work',
@@ -206,7 +222,9 @@ describe('PaneBackendExecutor', () => {
       parentSessionId: 'parent-session',
     })
 
-    await runCleanupFunctions()
+    expect(result.success).toBe(true)
+
+    await Promise.all(cleanupFns.map(fn => fn()))
 
     expect(killedPanes).toContainEqual({
       paneId: '%cleanup',
@@ -246,7 +264,12 @@ describe('PaneBackendExecutor', () => {
       },
     }
 
-    const executor = createPaneBackendExecutor(backend)
+    const executor = createPaneBackendExecutor(backend, cleanupFn => {
+      cleanupFns.push(cleanupFn)
+      return () => {
+        cleanupFns = cleanupFns.filter(fn => fn !== cleanupFn)
+      }
+    })
     executor.setContext({
       getAppState: () => ({
         toolPermissionContext: {
@@ -265,7 +288,7 @@ describe('PaneBackendExecutor', () => {
 
     expect(result.success).toBe(true)
     await executor.kill('worker@alpha')
-    await runCleanupFunctions()
+    await Promise.all(cleanupFns.map(fn => fn()))
 
     expect(killedPanes).toEqual(['%abort'])
   })
