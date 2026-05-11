@@ -43,9 +43,11 @@ import {
   runVersionedPluginStartup,
 } from './main/startupAssembly.js';
 import { launchRepl } from './replLauncher.js';
-import { createDefaultKernelHeadlessEnvironment } from './runtime/capabilities/execution/HeadlessEnvironment.js';
-import { connectDefaultKernelHeadlessMcp } from './runtime/capabilities/execution/HeadlessMcp.js';
-import { prepareKernelHeadlessStartup } from './runtime/capabilities/execution/HeadlessStartup.js';
+import {
+  connectDefaultKernelHeadlessMcp,
+  createDefaultKernelHeadlessEnvironment,
+  prepareKernelHeadlessStartup,
+} from './runtime/capabilities/execution/HeadlessHost.js';
 import {
   hasGrowthBookEnvOverride,
   initializeGrowthBook,
