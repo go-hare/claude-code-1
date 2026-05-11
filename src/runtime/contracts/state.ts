@@ -1,8 +1,13 @@
-import type { AppState } from '../../state/AppStateStore.js'
+import type { BetaMessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import type { ModelUsage } from 'src/entrypoints/agentSdkTypes.js'
+import type { AppState } from 'src/state/AppStateStore.js'
+import type { SessionId } from 'src/types/ids.js'
+import type { ModelSetting } from 'src/utils/model/model.js'
+import type { ModelStrings } from 'src/utils/model/modelStrings.js'
 
 export type RuntimeSessionIdentity = {
-  sessionId: string
-  parentSessionId?: string
+  sessionId: SessionId
+  parentSessionId?: SessionId
   sessionProjectDir: string | null
   originalCwd: string
   projectRoot: string
@@ -27,7 +32,7 @@ export type RuntimeUsageSnapshot = {
   totalLinesRemoved: number
   hasUnknownModelCost: boolean
   lastInteractionTime: number
-  modelUsage: Readonly<Record<string, unknown>>
+  modelUsage: Readonly<Record<string, ModelUsage>>
 }
 
 export type RuntimeExecutionBudgetState = {
@@ -38,9 +43,9 @@ export type RuntimeExecutionBudgetState = {
 }
 
 export type RuntimeExecutionPromptState = {
-  mainLoopModelOverride: unknown
-  initialMainLoopModel: unknown
-  modelStrings: unknown
+  mainLoopModelOverride: ModelSetting | undefined
+  initialMainLoopModel: ModelSetting
+  modelStrings: ModelStrings | null
   cachedClaudeMdContent: string | null
   systemPromptSectionCache: ReadonlyMap<string, string | null>
   lastEmittedDate: string | null
@@ -53,23 +58,41 @@ export type RuntimeExecutionPromptState = {
   sdkBetas: string[] | undefined
 }
 
-export type RuntimeExecutionPromptStatePatch =
-  Partial<RuntimeExecutionPromptState> & {
-    systemPromptSection?: { name: string; value: string | null }
-    clearSystemPromptSectionCache?: boolean
-    clearHeaderLatches?: boolean
-  }
+export type RuntimeExecutionPromptStatePatch = {
+  mainLoopModelOverride?: ModelSetting | undefined
+  initialMainLoopModel?: ModelSetting
+  modelStrings?: ModelStrings
+  cachedClaudeMdContent?: string | null
+  systemPromptSection?: { name: string; value: string | null }
+  clearSystemPromptSectionCache?: boolean
+  lastEmittedDate?: string | null
+  promptCache1hAllowlist?: string[] | null
+  promptCache1hEligible?: boolean | null
+  afkModeHeaderLatched?: boolean
+  fastModeHeaderLatched?: boolean
+  cacheEditingHeaderLatched?: boolean
+  thinkingClearLatched?: boolean
+  clearHeaderLatches?: boolean
+  sdkBetas?: string[] | undefined
+}
 
 export type RuntimeRequestDebugState = {
-  lastApiRequest: unknown
-  lastApiRequestMessages: unknown
+  lastApiRequest: Omit<BetaMessageStreamParams, 'messages'> | null
+  lastApiRequestMessages: BetaMessageStreamParams['messages'] | null
   lastClassifierRequests: unknown[] | null
   promptId: string | null
   lastMainRequestId: string | undefined
   lastApiCompletionTimestamp: number | null
 }
 
-export type RuntimeRequestDebugStatePatch = Partial<RuntimeRequestDebugState>
+export type RuntimeRequestDebugStatePatch = {
+  lastApiRequest?: Omit<BetaMessageStreamParams, 'messages'> | null
+  lastApiRequestMessages?: BetaMessageStreamParams['messages'] | null
+  lastClassifierRequests?: unknown[] | null
+  promptId?: string | null
+  lastMainRequestId?: string
+  lastApiCompletionTimestamp?: number
+}
 
 export type RuntimeExecutionAppStateSlice = Pick<
   AppState,
@@ -78,8 +101,8 @@ export type RuntimeExecutionAppStateSlice = Pick<
 
 export interface RuntimeBootstrapStateProvider {
   getSessionIdentity(): RuntimeSessionIdentity
-  regenerateSessionId(options?: { setCurrentAsParent?: boolean }): string
-  switchSession(sessionId: string, projectDir?: string | null): void
+  regenerateSessionId(options?: { setCurrentAsParent?: boolean }): SessionId
+  switchSession(sessionId: SessionId, projectDir?: string | null): void
   setCwd(cwd: string): void
   setProjectRoot(projectRoot: string): void
   getUsageSnapshot(): RuntimeUsageSnapshot

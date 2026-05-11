@@ -157,7 +157,7 @@ export function resolvePermissionMode(
 /**
  * Compute a stable fingerprint of the session-defining params so we can
  * detect when a loadSession/resumeSession call requires tearing down and
- * recreating the underlying QueryEngine.
+ * recreating the underlying SessionRuntime.
  */
 export function computeSessionFingerprint(params: {
   cwd: string

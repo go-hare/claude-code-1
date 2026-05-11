@@ -7,13 +7,6 @@ import type { RuntimeProviderRegistry } from './provider.js'
 import type { RuntimeStateProviders } from './state.js'
 import type { RuntimeToolCatalog, RuntimeToolExecutor } from './tool.js'
 
-export type RuntimeExecutionMode =
-  | 'main'
-  | 'agent'
-  | 'async_agent'
-  | 'teammate'
-  | 'coordinator'
-
 export type RuntimeExecutionStatus =
   | 'idle'
   | 'running'
@@ -21,6 +14,13 @@ export type RuntimeExecutionStatus =
   | 'completed'
   | 'failed'
   | 'cancelled'
+
+export type RuntimeExecutionMode =
+  | 'main'
+  | 'agent'
+  | 'async_agent'
+  | 'teammate'
+  | 'coordinator'
 
 export type RuntimeExecutionEvent =
   | { type: 'status'; status: RuntimeExecutionStatus }
