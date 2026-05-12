@@ -2,6 +2,7 @@ import { z } from 'zod/v4'
 import {
   buildTool,
   findToolByName,
+  type ValidationResult,
   type Tool,
   type ToolDef,
   type ToolUseContext,
@@ -37,6 +38,25 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
 
+function createErrorResult(toolName: string, content: string) {
+  return {
+    data: {
+      result: null,
+      tool_name: toolName,
+    },
+    newMessages: [
+      createUserMessage({
+        content,
+      }),
+    ],
+  }
+}
+
+function formatValidationResultError(result: ValidationResult): string | null {
+  if (result.result) return null
+  return result.message
+}
+
 export const ExecuteTool = buildTool({
   name: EXECUTE_TOOL_NAME,
   searchHint: 'execute run invoke call a deferred tool by name with parameters',
@@ -61,56 +81,57 @@ export const ExecuteTool = buildTool({
 
     const targetTool = findToolByName(tools, input.tool_name)
     if (!targetTool) {
-      return {
-        data: {
-          result: null,
-          tool_name: input.tool_name,
-        },
-        newMessages: [
-          createUserMessage({
-            content: `Tool "${input.tool_name}" not found. Use SearchExtraTools to discover available tools.`,
-          }),
-        ],
-      }
+      return createErrorResult(
+        input.tool_name,
+        `Tool "${input.tool_name}" not found. Use SearchExtraTools to discover available tools.`,
+      )
     }
 
     // Check if the target tool is currently enabled
     if (!targetTool.isEnabled()) {
-      return {
-        data: {
-          result: null,
-          tool_name: input.tool_name,
-        },
-        newMessages: [
-          createUserMessage({
-            content: `工具 "${input.tool_name}" 当前不可用：Remote Control 未连接。`,
-          }),
-        ],
-      }
+      return createErrorResult(
+        input.tool_name,
+        `工具 "${input.tool_name}" 当前不可用：Remote Control 未连接。`,
+      )
+    }
+
+    const parsedInput = targetTool.inputSchema.safeParse(input.params)
+    if (!parsedInput.success) {
+      return createErrorResult(
+        input.tool_name,
+        `Input validation failed for tool "${input.tool_name}": ${parsedInput.error.message}`,
+      )
+    }
+
+    const validationResult = await targetTool.validateInput?.(
+      parsedInput.data,
+      context,
+    )
+    const validationError = validationResult
+      ? formatValidationResultError(validationResult)
+      : null
+    if (validationError) {
+      return createErrorResult(
+        input.tool_name,
+        `Input validation failed for tool "${input.tool_name}": ${validationError}`,
+      )
     }
 
     // Check permissions on the target tool
     const permResult = await targetTool.checkPermissions?.(
-      input.params as Record<string, unknown>,
+      parsedInput.data,
       context,
     )
     if (permResult && permResult.behavior === 'deny') {
-      return {
-        data: {
-          result: null,
-          tool_name: input.tool_name,
-        },
-        newMessages: [
-          createUserMessage({
-            content: `Permission denied for tool "${input.tool_name}": ${permResult.message ?? 'Permission denied'}`,
-          }),
-        ],
-      }
+      return createErrorResult(
+        input.tool_name,
+        `Permission denied for tool "${input.tool_name}": ${permResult.message ?? 'Permission denied'}`,
+      )
     }
 
     // Delegate execution to the target tool
     const targetResult: ToolResult<unknown> = await targetTool.call(
-      input.params as Record<string, unknown>,
+      parsedInput.data,
       context,
       canUseTool,
       parentMessage,

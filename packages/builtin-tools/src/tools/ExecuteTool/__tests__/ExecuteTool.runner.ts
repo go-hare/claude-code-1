@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test'
 import { mock } from 'bun:test'
 import { logMock } from '../../../../../../tests/mocks/log'
 import { debugMock } from '../../../../../../tests/mocks/debug'
+import { z } from 'zod/v4'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -72,9 +73,10 @@ function makeMockTool(name: string, callResult: unknown = 'ok') {
     name,
     call: async () => ({ data: callResult }),
     checkPermissions: async () => ({ behavior: 'allow' as const }),
+    validateInput: undefined,
     prompt: async () => `Description for ${name}`,
     description: async () => `Description for ${name}`,
-    inputSchema: {},
+    inputSchema: z.object({}),
     isEnabled: () => true,
     isConcurrencySafe: () => true,
     isReadOnly: () => false,
@@ -90,6 +92,13 @@ function makeMockTool(name: string, callResult: unknown = 'ok') {
       content,
     }),
   }
+}
+
+function getNewMessageContent(result: { newMessages?: unknown[] }): string {
+  const firstMessage = result.newMessages?.[0] as
+    | { content?: unknown; message?: { content?: unknown } }
+    | undefined
+  return String(firstMessage?.message?.content ?? firstMessage?.content ?? '')
 }
 
 describe('ExecuteTool', () => {
@@ -152,6 +161,75 @@ describe('ExecuteTool', () => {
       tool_name: 'SecretTool',
     })
     expect(result.newMessages).toBeDefined()
+  })
+
+  test('returns schema validation errors from target tool before execution', async () => {
+    let callCount = 0
+    const mockTarget = {
+      ...makeMockTool('TeamCreate', { team_name: 'alpha' }),
+      inputSchema: z.object({
+        team_name: z.string(),
+      }),
+      call: async () => {
+        callCount++
+        return { data: { team_name: 'alpha' } }
+      },
+    }
+    const ctx = makeContext([mockTarget])
+
+    const result = await ExecuteTool.call(
+      { tool_name: 'TeamCreate', params: {} },
+      ctx,
+      async () => ({ behavior: 'allow' }),
+      { type: 'assistant', content: [], uuid: 'msg1' } as never,
+      undefined,
+    )
+
+    expect(result.data).toEqual({
+      result: null,
+      tool_name: 'TeamCreate',
+    })
+    expect(getNewMessageContent(result)).toContain(
+      'Input validation failed for tool "TeamCreate"',
+    )
+    expect(callCount).toBe(0)
+  })
+
+  test('returns target validateInput errors before permission checks', async () => {
+    let permissionChecks = 0
+    const mockTarget = {
+      ...makeMockTool('TeamCreate', { team_name: 'alpha' }),
+      inputSchema: z.object({
+        team_name: z.string(),
+      }),
+      validateInput: async () => ({
+        result: false as const,
+        message: 'team_name is required for TeamCreate',
+        errorCode: 9,
+      }),
+      checkPermissions: async () => {
+        permissionChecks++
+        return { behavior: 'allow' as const }
+      },
+    }
+    const ctx = makeContext([mockTarget])
+
+    const result = await ExecuteTool.call(
+      { tool_name: 'TeamCreate', params: { team_name: '' } },
+      ctx,
+      async () => ({ behavior: 'allow' }),
+      { type: 'assistant', content: [], uuid: 'msg1' } as never,
+      undefined,
+    )
+
+    expect(result.data).toEqual({
+      result: null,
+      tool_name: 'TeamCreate',
+    })
+    expect(getNewMessageContent(result)).toContain(
+      'team_name is required for TeamCreate',
+    )
+    expect(permissionChecks).toBe(0)
   })
 
   test('has correct name', () => {
