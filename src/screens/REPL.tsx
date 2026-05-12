@@ -3429,6 +3429,7 @@ export function REPL({
         userSpecifiedModel: mainLoopModelParam,
         thinkingConfig: toolUseContext.options.thinkingConfig,
         verbose: toolUseContext.options.verbose,
+        includePartialMessages: true,
         handleElicitation: toolUseContext.handleElicitation,
         setSDKStatus: toolUseContext.setSDKStatus,
         abortController,
