@@ -34,10 +34,10 @@ mock.module('src/utils/searchExtraTools.js', () => ({
   isSearchExtraToolsEnabledOptimistic: () => true,
   getAutoSearchExtraToolsCharThreshold: () => 100,
   getSearchExtraToolsMode: () => 'tst' as const,
-  isSearchExtraToolsToolAvailable: async () => true,
+  isSearchExtraToolsToolAvailable: () => true,
   isSearchExtraToolsEnabled: async () => true,
   isToolReferenceBlock: () => false,
-  extractDiscoveredToolNames: () => new Set(),
+  extractDiscoveredToolNames: () => new Set(['TestTool', 'SecretTool']),
   isDeferredToolsDeltaEnabled: () => false,
   getDeferredToolsDelta: () => null,
 }))
@@ -230,6 +230,26 @@ describe('ExecuteTool', () => {
       'team_name is required for TeamCreate',
     )
     expect(permissionChecks).toBe(0)
+  })
+
+  test('returns error when deferred tool has not been discovered via SearchExtraTools', async () => {
+    const mockTarget = makeMockTool('UndiscoveredTool', 'result')
+    const ctx = makeContext([mockTarget])
+
+    const result = await ExecuteTool.call(
+      { tool_name: 'UndiscoveredTool', params: {} },
+      ctx,
+      async () => ({ behavior: 'allow' }),
+      { type: 'assistant', content: [], uuid: 'msg1' } as never,
+      undefined,
+    )
+
+    expect(result.data).toEqual({
+      result: null,
+      tool_name: 'UndiscoveredTool',
+    })
+    expect(result.newMessages).toBeDefined()
+    expect(result.newMessages![0].content).toContain('has not been discovered')
   })
 
   test('has correct name', () => {

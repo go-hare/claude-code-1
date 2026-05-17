@@ -158,10 +158,7 @@ export function modelSupportsStructuredOutputs(model: string): boolean {
 }
 
 export function modelSupportsAutoMode(_model: string): boolean {
-  if (feature('TRANSCRIPT_CLASSIFIER')) {
-    return true
-  }
-  return false
+  return feature('TRANSCRIPT_CLASSIFIER') ? true : false
 }
 
 /**

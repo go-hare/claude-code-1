@@ -995,7 +995,14 @@ export async function runHeadless(
   // the forked agent mid-flight. Gated by isExtractModeActive so the
   // tengu_slate_thimble flag controls non-interactive extraction end-to-end.
   if (feature('EXTRACT_MEMORIES') && isExtractModeActive()) {
-    await extractMemoriesModule!.drainPendingExtraction()
+    try {
+      const { drainPendingExtraction } = await import(
+        '../services/extractMemories/extractMemories.js'
+      )
+      await drainPendingExtraction()
+    } catch {
+      // Module load failure — non-critical at shutdown
+    }
   }
 
   gracefulShutdownSync(

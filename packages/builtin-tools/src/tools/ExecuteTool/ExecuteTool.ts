@@ -11,8 +11,14 @@ import {
 } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { createUserMessage } from 'src/utils/messages.js'
+import {
+  extractDiscoveredToolNames,
+  isSearchExtraToolsEnabledOptimistic,
+  isSearchExtraToolsToolAvailable,
+} from 'src/utils/searchExtraTools.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
 import { EXECUTE_TOOL_NAME } from './constants.js'
+import { isDeferredTool } from '../SearchExtraToolsTool/prompt.js'
 
 export const inputSchema = lazySchema(() =>
   z.object({
@@ -87,6 +93,32 @@ export const ExecuteTool = buildTool({
       )
     }
 
+    // Guard: block execution of undiscovered deferred tools.
+    // When tool search is active, deferred tools must be discovered via
+    // SearchExtraTools first so the model has seen their schemas and knows
+    // the correct parameters.  Executing an undiscovered tool almost always
+    // fails with parameter validation errors.
+    if (
+      isSearchExtraToolsEnabledOptimistic() &&
+      isSearchExtraToolsToolAvailable(tools) &&
+      isDeferredTool(targetTool)
+    ) {
+      const discovered = extractDiscoveredToolNames(context.messages)
+      if (!discovered.has(input.tool_name)) {
+        return {
+          data: {
+            result: null,
+            tool_name: input.tool_name,
+          },
+          newMessages: [
+            createUserMessage({
+              content: `Tool "${input.tool_name}" has not been discovered yet. You must first use SearchExtraTools to discover this tool before executing it.\n\nUsage: SearchExtraTools("select:${input.tool_name}")`,
+            }),
+          ],
+        }
+      }
+    }
+
     // Check if the target tool is currently enabled
     if (!targetTool.isEnabled()) {
       return createErrorResult(
@@ -115,6 +147,29 @@ export const ExecuteTool = buildTool({
         input.tool_name,
         `Input validation failed for tool "${input.tool_name}": ${validationError}`,
       )
+    }
+
+    // Validate input before delegating — prevents crashes when the model
+    // omits required params (e.g. TeamCreate without team_name →
+    // sanitizeName(undefined).replace() TypeError).
+    if (targetTool.validateInput) {
+      const validation = await targetTool.validateInput(
+        input.params as Record<string, unknown>,
+        context,
+      )
+      if (!validation.result) {
+        return {
+          data: {
+            result: null,
+            tool_name: input.tool_name,
+          },
+          newMessages: [
+            createUserMessage({
+              content: `Invalid parameters for tool "${input.tool_name}": ${validation.message}`,
+            }),
+          ],
+        }
+      }
     }
 
     // Check permissions on the target tool
@@ -153,7 +208,7 @@ export const ExecuteTool = buildTool({
     }
   },
   renderToolUseMessage(input) {
-    return `Executing ${input.tool_name}...`
+    return `${input.tool_name}`
   },
   userFacingName() {
     return 'ExecuteExtraTool'
