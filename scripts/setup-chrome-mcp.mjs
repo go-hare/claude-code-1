@@ -38,7 +38,9 @@ function resolvePackageJsonPath() {
 
 const packageJsonPath = resolvePackageJsonPath()
 if (!packageJsonPath) {
-  console.log('[chrome-mcp] mcp-chrome-bridge package not found, skipping setup.')
+  console.log(
+    '[chrome-mcp] mcp-chrome-bridge package not found, skipping setup.',
+  )
   process.exit(0)
 }
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
