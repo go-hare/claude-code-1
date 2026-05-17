@@ -17,7 +17,10 @@ import type {
   BetaUsage,
   BetaMessageParam as MessageParam,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
+import type {
+  ContentBlockParam,
+  TextBlockParam,
+} from '@anthropic-ai/sdk/resources/index.mjs'
 import type { Stream } from '@anthropic-ai/sdk/streaming.mjs'
 import { randomUUID } from 'crypto'
 import { existsSync, unlinkSync } from 'node:fs'
@@ -976,6 +979,50 @@ function isToolResult(
 }
 
 /**
+ * Append a `<system-reminder>` text block to the last user message in the
+ * batch instead of creating a standalone user message.
+ *
+ * Why this exists — bug background:
+ * A standalone SR-only user message at the end of the request triggers a
+ * known bare-ack failure mode: the model emits a single "OK" / "Got it."
+ * because the last user-role turn carries no real user text, just an
+ * instruction-shaped reminder. Wrapping the reminder onto a real user turn
+ * keeps the conversation from ever ending on a "fake" user message.
+ *
+ * Behavior:
+ * - Tail is a user message → append the SR text as a content block.
+ *   - String content: hoist to a 2-block array (original text + SR block).
+ *   - Array content: append the SR block. If the array contains a
+ *     tool_result, smooshSystemReminderSiblings (utils/messages.ts) will
+ *     later fold this SR text into that tool_result. Otherwise it lands
+ *     as a sibling text block on the same user turn. Either way, it is
+ *     not a turn of its own.
+ * - Tail is an assistant message (e.g. mid tool_use) or list is empty →
+ *   skip. The next user turn will re-enter the inject branch and attach
+ *   correctly.
+ */
+export function appendSystemReminderToLastUserMessage(
+  messages: (UserMessage | AssistantMessage)[],
+  srText: string,
+): (UserMessage | AssistantMessage)[] {
+  const lastIdx = messages.length - 1
+  const last = lastIdx >= 0 ? messages[lastIdx] : undefined
+  if (!last || last.message.role !== 'user') return messages
+  const existing = last.message.content
+  const srBlock: TextBlockParam = { type: 'text', text: srText }
+  const newContent: ContentBlockParam[] = Array.isArray(existing)
+    ? [...(existing as ContentBlockParam[]), srBlock]
+    : [{ type: 'text', text: existing ?? '' }, srBlock]
+  return [
+    ...messages.slice(0, lastIdx),
+    {
+      ...last,
+      message: { ...last.message, content: newContent },
+    },
+  ]
+}
+
+/**
  * Ensures messages contain at most `limit` media items (images + documents).
  * Strips oldest media first to preserve the most recent.
  */
@@ -1395,15 +1442,11 @@ async function* queryModel(
       .sort()
       .join('\n')
     if (deferredToolList) {
-      // Append to the end of the messages array (not prepend) so it
-      // never抢占 <project-instructions> (CLAUDE.md) at the front.
-      messagesForAPI = [
-        ...messagesForAPI,
-        createUserMessage({
-          content: `<system-reminder>\n<available-deferred-tools>\n${deferredToolList}\n</available-deferred-tools>\nIMPORTANT: These tools are deferred-loading. You MUST first discover a tool via SearchExtraTools before invoking it with ExecuteExtraTool. Do NOT call ExecuteExtraTool directly — it will fail if the tool has not been discovered.\n\nSteps:\n1. SearchExtraTools("select:<tool_name>") — discover the tool and its schema\n2. ExecuteExtraTool({"tool_name": "<name>", "params": {...}}) — invoke it with correct parameters\n</system-reminder>`,
-          isMeta: true,
-        }),
-      ]
+      const srText = `<system-reminder>\n<available-deferred-tools>\n${deferredToolList}\n</available-deferred-tools>\nIMPORTANT: These tools are deferred-loading. You MUST first discover a tool via SearchExtraTools before invoking it with ExecuteExtraTool. Do NOT call ExecuteExtraTool directly — it will fail if the tool has not been discovered.\n\nSteps:\n1. SearchExtraTools("select:<tool_name>") — discover the tool and its schema\n2. ExecuteExtraTool({"tool_name": "<name>", "params": {...}}) — invoke it with correct parameters\n</system-reminder>`
+      messagesForAPI = appendSystemReminderToLastUserMessage(
+        messagesForAPI,
+        srText,
+      )
     }
   }
 
