@@ -266,7 +266,7 @@ import type {
   HookResultMessage,
   PartialCompactDirection,
 } from '../types/message.js';
-import { QueryEngine } from '../QueryEngine.js';
+import { query } from '../query.js';
 import { mergeClients, useMergedClients } from '../hooks/useMergedClients.js';
 import { getQuerySourceForREPL } from '../utils/promptCategory.js';
 import { useMergedTools } from '../hooks/useMergedTools.js';
@@ -3402,55 +3402,16 @@ export function REPL({
       resetTurnToolDuration();
       resetTurnClassifierDuration();
 
-      const promptMessage = newMessages.find((message): message is UserMessage => message.type === 'user');
-      const promptContent = promptMessage?.message.content ?? '';
-      const prompt = Array.isArray(promptContent)
-        ? promptContent
-        : typeof promptContent === 'string'
-          ? promptContent
-          : '';
-      const previousMessages =
-        newMessages.length > 0
-          ? messagesIncludingNewMessages.slice(0, -newMessages.length)
-          : messagesIncludingNewMessages;
-      const engine = new QueryEngine({
-        cwd: getOriginalCwd(),
-        tools: toolUseContext.options.tools,
-        commands,
-        mcpClients: freshMcpClients,
-        agents: toolUseContext.options.agentDefinitions.activeAgents,
+      for await (const event of query({
+        messages: messagesIncludingNewMessages,
+        systemPrompt,
+        userContext,
+        systemContext,
         canUseTool,
-        getAppState: () => store.getState(),
-        setAppState,
-        initialMessages: previousMessages,
-        readFileCache: readFileState.current,
-        customSystemPrompt,
-        appendSystemPrompt,
-        userSpecifiedModel: mainLoopModelParam,
-        thinkingConfig: toolUseContext.options.thinkingConfig,
-        verbose: toolUseContext.options.verbose,
-        includePartialMessages: true,
-        handleElicitation: toolUseContext.handleElicitation,
-        setToolJSX: toolUseContext.setToolJSX,
-        addNotification: toolUseContext.addNotification,
-        setStreamMode: toolUseContext.setStreamMode,
-        openMessageSelector: toolUseContext.openMessageSelector,
-        sendOSNotification: toolUseContext.sendOSNotification,
-        appendSystemMessage: toolUseContext.appendSystemMessage,
-        onCompactProgress: toolUseContext.onCompactProgress,
-        requestPrompt: toolUseContext.requestPrompt,
-        setSDKStatus: toolUseContext.setSDKStatus,
-        abortController,
-      });
-      try {
-        for await (const sdkMessage of engine.submitMessage(prompt, {
-          uuid: promptMessage?.uuid ?? getSessionId(),
-          isMeta: promptMessage?.isMeta ?? false,
-        })) {
-          onQueryEvent(sdkMessage as Parameters<typeof handleMessageFromStream>[0]);
-        }
-      } finally {
-        readFileState.current = engine.getReadFileState();
+        toolUseContext,
+        querySource: getQuerySourceForREPL(),
+      })) {
+        onQueryEvent(event);
       }
 
       if (buddyEnabled && typeof (globalThis as Record<string, unknown>).fireCompanionObserver === 'function') {

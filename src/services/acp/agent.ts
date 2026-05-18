@@ -1,8 +1,8 @@
 /**
  * ACP Agent implementation — bridges ACP protocol methods to Claude Code's
- * internal SessionRuntime / query() pipeline.
+ * internal QueryEngine / query() pipeline.
  *
- * Architecture: Uses internal SessionRuntime (not @anthropic-ai/claude-agent-sdk)
+ * Architecture: Uses internal QueryEngine (not @anthropic-ai/claude-agent-sdk)
  * to directly run queries, with a bridge layer converting SDKMessage → ACP SessionUpdate.
  */
 import type {
@@ -45,10 +45,7 @@ import {
   getLastSessionLog,
   sessionIdExists,
 } from '../../utils/sessionStorage.js'
-import {
-  SessionRuntime,
-  type SessionRuntimeConfig,
-} from '../../runtime/capabilities/execution/SessionRuntime.js'
+import { QueryEngine, type QueryEngineConfig } from '../../QueryEngine.js'
 import type { Tools } from '../../Tool.js'
 import { getTools } from '../../tools.js'
 import { getEmptyToolPermissionContext } from '../../Tool.js'
@@ -81,7 +78,7 @@ import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 // ── Session state ─────────────────────────────────────────────────
 
 type AcpSession = {
-  runtime: SessionRuntime
+  runtime: QueryEngine
   cancelled: boolean
   cancelGeneration: number
   cwd: string
@@ -406,7 +403,7 @@ export class AcpAgent implements Agent {
     if (!session) {
       throw new Error('Session not found')
     }
-    // Store the raw value — SessionRuntime.submitMessage() calls
+    // Store the raw value — QueryEngine.submitMessage() calls
     // parseUserSpecifiedModel() to resolve aliases (e.g. "sonnet" → "glm-5.1-turbo")
     session.runtime.setModel(params.modelId)
     await this.updateConfigOption(params.sessionId, 'model', params.modelId)
@@ -545,8 +542,8 @@ export class AcpAgent implements Agent {
       // Load commands for slash command and skill support
       const commands = await getCommands(cwd)
 
-      // Build SessionRuntime config
-      const engineConfig: SessionRuntimeConfig = {
+      // Build QueryEngine config
+      const engineConfig: QueryEngineConfig = {
         cwd,
         tools,
         commands,
@@ -564,7 +561,7 @@ export class AcpAgent implements Agent {
         initialMessages: opts.initialMessages,
       }
 
-      const runtime = new SessionRuntime(engineConfig)
+      const runtime = new QueryEngine(engineConfig)
 
       // Build modes — bypassPermissions is opt-in for ACP clients.
       const availableModes = [
