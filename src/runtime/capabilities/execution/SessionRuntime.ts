@@ -38,6 +38,7 @@ import { categorizeRetryableAPIError } from '../../../services/api/errors.js'
 import type { MCPServerConnection } from '../../../services/mcp/types.js'
 import type { AppState } from '../../../state/AppState.js'
 import {
+  type SetToolJSXFn,
   type Tools,
   type ToolUseContext,
   toolMatchesName,
@@ -165,6 +166,26 @@ export type SessionRuntimeConfig = {
   replayUserMessages?: boolean
   /** Handler for URL elicitations triggered by MCP tool -32042 errors. */
   handleElicitation?: ToolUseContext['handleElicitation']
+  /**
+   * Interactive UI hooks threaded through the kernel into
+   * `processUserInputContext`. Most SessionRuntime callers (ACP agent,
+   * CLI print, server backends) are headless → leave unset → defaults to
+   * no-op / undefined. Interactive embedders (e.g. an ACP client driving
+   * computer-use) pass live versions so tool dispatch can drive their UI
+   * mid-call instead of silently failing safe.
+   *
+   * Mirrors QueryEngineConfig — when adding a new interactive callback to
+   * ToolUseContext, list it here AND in QueryEngineConfig, and thread it
+   * into `processUserInputContext` below.
+   */
+  setToolJSX?: SetToolJSXFn
+  addNotification?: ToolUseContext['addNotification']
+  setStreamMode?: ToolUseContext['setStreamMode']
+  openMessageSelector?: ToolUseContext['openMessageSelector']
+  sendOSNotification?: ToolUseContext['sendOSNotification']
+  appendSystemMessage?: ToolUseContext['appendSystemMessage']
+  onCompactProgress?: ToolUseContext['onCompactProgress']
+  requestPrompt?: ToolUseContext['requestPrompt']
   includePartialMessages?: boolean
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
@@ -365,6 +386,14 @@ export class SessionRuntime {
       },
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
+      setToolJSX: this.config.setToolJSX ?? (() => {}),
+      addNotification: this.config.addNotification,
+      setStreamMode: this.config.setStreamMode,
+      openMessageSelector: this.config.openMessageSelector,
+      sendOSNotification: this.config.sendOSNotification,
+      appendSystemMessage: this.config.appendSystemMessage,
+      onCompactProgress: this.config.onCompactProgress,
+      requestPrompt: this.config.requestPrompt,
       options: {
         commands,
         debug: false, // we use stdout, so don't want to clobber it
@@ -502,6 +531,14 @@ export class SessionRuntime {
       setMessages: () => {},
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
+      setToolJSX: this.config.setToolJSX ?? (() => {}),
+      addNotification: this.config.addNotification,
+      setStreamMode: this.config.setStreamMode,
+      openMessageSelector: this.config.openMessageSelector,
+      sendOSNotification: this.config.sendOSNotification,
+      appendSystemMessage: this.config.appendSystemMessage,
+      onCompactProgress: this.config.onCompactProgress,
+      requestPrompt: this.config.requestPrompt,
       options: {
         commands,
         debug: false,

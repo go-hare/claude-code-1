@@ -37,7 +37,12 @@ import { query } from './query.js'
 import { categorizeRetryableAPIError } from './services/api/errors.js'
 import type { MCPServerConnection } from './services/mcp/types.js'
 import type { AppState } from './state/AppState.js'
-import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
+import {
+  type SetToolJSXFn,
+  type Tools,
+  type ToolUseContext,
+  toolMatchesName,
+} from './Tool.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import type { APIError } from '@anthropic-ai/sdk'
@@ -159,6 +164,25 @@ export type QueryEngineConfig = {
   replayUserMessages?: boolean
   /** Handler for URL elicitations triggered by MCP tool -32042 errors. */
   handleElicitation?: ToolUseContext['handleElicitation']
+  /**
+   * Interactive (REPL) UI hooks threaded through the kernel into
+   * `processUserInputContext`. SDK callers leave them unset → defaults to
+   * no-op, preserving headless semantics. REPL passes the live versions so
+   * tool dispatch (computer-use permission dialog, compact spinner state,
+   * permission/exit-plan notifications, OS toasts, /rewind selector, etc.)
+   * can drive the UI mid-call instead of silently failing safe.
+   *
+   * When adding a new interactive callback to ToolUseContext, list it here
+   * and thread it into both processUserInputContext constructions below.
+   */
+  setToolJSX?: SetToolJSXFn
+  addNotification?: ToolUseContext['addNotification']
+  setStreamMode?: ToolUseContext['setStreamMode']
+  openMessageSelector?: ToolUseContext['openMessageSelector']
+  sendOSNotification?: ToolUseContext['sendOSNotification']
+  appendSystemMessage?: ToolUseContext['appendSystemMessage']
+  onCompactProgress?: ToolUseContext['onCompactProgress']
+  requestPrompt?: ToolUseContext['requestPrompt']
   includePartialMessages?: boolean
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
@@ -356,6 +380,14 @@ export class QueryEngine {
       },
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
+      setToolJSX: this.config.setToolJSX ?? (() => {}),
+      addNotification: this.config.addNotification,
+      setStreamMode: this.config.setStreamMode,
+      openMessageSelector: this.config.openMessageSelector,
+      sendOSNotification: this.config.sendOSNotification,
+      appendSystemMessage: this.config.appendSystemMessage,
+      onCompactProgress: this.config.onCompactProgress,
+      requestPrompt: this.config.requestPrompt,
       options: {
         commands,
         debug: false, // we use stdout, so don't want to clobber it
@@ -505,6 +537,14 @@ export class QueryEngine {
       setMessages: () => {},
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
+      setToolJSX: this.config.setToolJSX ?? (() => {}),
+      addNotification: this.config.addNotification,
+      setStreamMode: this.config.setStreamMode,
+      openMessageSelector: this.config.openMessageSelector,
+      sendOSNotification: this.config.sendOSNotification,
+      appendSystemMessage: this.config.appendSystemMessage,
+      onCompactProgress: this.config.onCompactProgress,
+      requestPrompt: this.config.requestPrompt,
       options: {
         commands,
         debug: false,
