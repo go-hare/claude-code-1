@@ -1,8 +1,6 @@
 /* eslint-disable eslint-plugin-n/no-unsupported-features/node-builtins */
 
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
-import type { AgentEventPayload } from '../core/types.js'
-import { projectSdkMessageToAgentEventPayloads } from '../core/adapters/agentEventSdkWire.js'
 import type {
   SDKControlPermissionRequest,
   StdoutMessage,
@@ -22,7 +20,6 @@ export type DirectConnectConfig = {
 
 export type DirectConnectCallbacks = {
   onMessage: (message: SDKMessage) => void
-  onAgentEvent?: (event: AgentEventPayload) => void
   onPermissionRequest: (
     request: SDKControlPermissionRequest,
     requestId: string,
@@ -114,7 +111,6 @@ export class DirectConnectSessionManager {
           !(parsed.type === 'system' && parsed.subtype === 'post_turn_summary')
         ) {
           this.callbacks.onMessage(parsed)
-          this.publishAgentEvents(parsed)
         }
       }
     })
@@ -215,16 +211,5 @@ export class DirectConnectSessionManager {
 
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
-  }
-
-  private publishAgentEvents(message: SDKMessage): void {
-    if (!this.callbacks.onAgentEvent) return
-
-    for (const event of projectSdkMessageToAgentEventPayloads(message, {
-      sessionId: this.config.sessionId,
-      turnId: this.config.sessionId,
-    })) {
-      this.callbacks.onAgentEvent(event)
-    }
   }
 }

@@ -44,10 +44,9 @@ describe('DirectConnectSessionManager', () => {
     MockWebSocket.instance = undefined
   })
 
-  test('keeps SDKMessage callbacks and additionally projects AgentEvents', () => {
+  test('forwards SDKMessage to onMessage callback', () => {
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
     const onMessage = mock(() => {})
-    const onAgentEvent = mock(() => {})
     const manager = new DirectConnectSessionManager(
       {
         serverUrl: 'http://localhost:9000',
@@ -56,7 +55,6 @@ describe('DirectConnectSessionManager', () => {
       },
       {
         onMessage,
-        onAgentEvent,
         onPermissionRequest: mock(() => {}),
       },
     )
@@ -74,16 +72,5 @@ describe('DirectConnectSessionManager', () => {
     })
 
     expect(onMessage).toHaveBeenCalledTimes(1)
-    expect(onAgentEvent).toHaveBeenCalledTimes(1)
-    const agentEventCall = onAgentEvent.mock.calls[0] as unknown[]
-    expect(agentEventCall[0]).toMatchObject({
-      type: 'message.completed',
-      sessionId: 'session-1',
-      turnId: 'session-1',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'hello' }],
-      },
-    })
   })
 })
