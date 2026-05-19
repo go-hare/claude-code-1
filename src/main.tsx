@@ -33,16 +33,16 @@ import { getRemoteSessionUrl } from './constants/product.js';
 import { getSystemContext, getUserContext } from './context.js';
 import { init, initializeTelemetryAfterTrust } from './entrypoints/init.js';
 import { addToHistory } from './history.js';
-import { registerCliHostCommands } from './hosts/cli/index.js';
+import { registerCliHostCommands } from './cli/registerCliHostCommands.js';
 import type { Root } from '@anthropic/ink';
-import { preloadCommandAssembly, primeBundledCommandSources, resolveCommandAssembly } from './main/commandAssembly.js';
-import { determineMainLaunchMode } from './main/modeDispatch.js';
+import { preloadCommandAssembly, primeBundledCommandSources, resolveCommandAssembly } from './cli/commandAssembly.js';
+import { determineMainLaunchMode } from './cli/modeDispatch.js';
 import {
   determineSetupTrigger,
   runSessionStartupSideEffects,
   runStartupPrefetches,
   runVersionedPluginStartup,
-} from './main/startupAssembly.js';
+} from './cli/startupAssembly.js';
 import { launchRepl } from './replLauncher.js';
 import {
   hasGrowthBookEnvOverride,

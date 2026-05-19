@@ -1,1 +1,4 @@
-export { runConnectHeadlessRuntime as runConnectHeadless } from '../runtime/capabilities/server/HostRuntime.js'
+// Auto-generated stub — replace with real implementation
+export {}
+export const runConnectHeadless: (...args: unknown[]) => Promise<void> = () =>
+  Promise.resolve()

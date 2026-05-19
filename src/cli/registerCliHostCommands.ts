@@ -8,26 +8,26 @@ import {
   setCwdState,
   setDirectConnectServerUrl,
   setOriginalCwd,
-} from '../../bootstrap/state.js'
-import { registerMcpAddCommand } from '../../commands/mcp/addCommand.js'
-import { registerMcpXaaIdpCommand } from '../../commands/mcp/xaaIdpCommand.js'
+} from '../bootstrap/state.js'
+import { registerMcpAddCommand } from '../commands/mcp/addCommand.js'
+import { registerMcpXaaIdpCommand } from '../commands/mcp/xaaIdpCommand.js'
 import {
   createDirectConnectSession,
   DirectConnectError,
-} from '../../server/createDirectConnectSession.js'
+} from '../server/createDirectConnectSession.js'
 import {
   VALID_INSTALLABLE_SCOPES,
   VALID_UPDATE_SCOPES,
-} from '../../services/plugins/pluginCliCommands.js'
-import { isXaaEnabled } from '../../services/mcp/xaaIdpLogin.js'
-import { getBaseRenderOptions } from '../../utils/renderOptions.js'
-import { getAutoModeEnabledStateIfCached } from '../../utils/permissions/permissionSetup.js'
-import { TASK_STATUSES } from '../../utils/tasks.js'
-import { validateUuid } from '../../utils/uuid.js'
+} from '../services/plugins/pluginCliCommands.js'
+import { isXaaEnabled } from '../services/mcp/xaaIdpLogin.js'
+import { getBaseRenderOptions } from '../utils/renderOptions.js'
+import { getAutoModeEnabledStateIfCached } from '../utils/permissions/permissionSetup.js'
+import { TASK_STATUSES } from '../utils/tasks.js'
+import { validateUuid } from '../utils/uuid.js'
 import {
   getCliCommandGraphNode,
   type CliCommandPath,
-} from '../../runtime/capabilities/commands/cliCommandGraph.js'
+} from './cliCommandGraph.js'
 
 type SortedHelpConfig = {
   sortSubcommands: true
@@ -82,7 +82,7 @@ export function registerCliHostCommands(
     )
     .action(
       async ({ debug, verbose }: { debug?: boolean; verbose?: boolean }) => {
-        const { mcpServeHandler } = await import('../../cli/handlers/mcp.js')
+        const { mcpServeHandler } = await import('../cli/handlers/mcp.js')
         await mcpServeHandler({ debug, verbose })
       },
     )
@@ -101,7 +101,7 @@ export function registerCliHostCommands(
       'Configuration scope (local, user, or project) - if not specified, removes from whichever scope it exists in',
     )
     .action(async (name: string, commandOptions: { scope?: string }) => {
-      const { mcpRemoveHandler } = await import('../../cli/handlers/mcp.js')
+      const { mcpRemoveHandler } = await import('../cli/handlers/mcp.js')
       await mcpRemoveHandler(name, commandOptions)
     })
 
@@ -109,7 +109,7 @@ export function registerCliHostCommands(
     .command('list')
     .description(describe(['mcp', 'list']))
     .action(async () => {
-      const { mcpListHandler } = await import('../../cli/handlers/mcp.js')
+      const { mcpListHandler } = await import('../cli/handlers/mcp.js')
       await mcpListHandler()
     })
 
@@ -117,7 +117,7 @@ export function registerCliHostCommands(
     .command('get <name>')
     .description(describe(['mcp', 'get']))
     .action(async (name: string) => {
-      const { mcpGetHandler } = await import('../../cli/handlers/mcp.js')
+      const { mcpGetHandler } = await import('../cli/handlers/mcp.js')
       await mcpGetHandler(name)
     })
 
@@ -139,7 +139,7 @@ export function registerCliHostCommands(
         json: string,
         commandOptions: { scope?: string; clientSecret?: true },
       ) => {
-        const { mcpAddJsonHandler } = await import('../../cli/handlers/mcp.js')
+        const { mcpAddJsonHandler } = await import('../cli/handlers/mcp.js')
         await mcpAddJsonHandler(name, json, commandOptions)
       },
     )
@@ -154,7 +154,7 @@ export function registerCliHostCommands(
     )
     .action(async (commandOptions: { scope?: string }) => {
       const { mcpAddFromDesktopHandler } = await import(
-        '../../cli/handlers/mcp.js'
+        '../cli/handlers/mcp.js'
       )
       await mcpAddFromDesktopHandler(commandOptions)
     })
@@ -163,9 +163,7 @@ export function registerCliHostCommands(
     .command('reset-project-choices')
     .description(describe(['mcp', 'reset-project-choices']))
     .action(async () => {
-      const { mcpResetChoicesHandler } = await import(
-        '../../cli/handlers/mcp.js'
-      )
+      const { mcpResetChoicesHandler } = await import('../cli/handlers/mcp.js')
       await mcpResetChoicesHandler()
     })
 
@@ -202,19 +200,15 @@ export function registerCliHostCommands(
           maxSessions: string
         }) => {
           const { randomBytes } = await import('crypto')
-          const { startServer } = await import('../../server/server.js')
-          const { SessionManager } = await import(
-            '../../server/sessionManager.js'
-          )
+          const { startServer } = await import('../server/server.js')
+          const { SessionManager } = await import('../server/sessionManager.js')
           const { DangerousBackend } = await import(
-            '../../server/backends/dangerousBackend.js'
+            '../server/backends/dangerousBackend.js'
           )
-          const { printBanner } = await import('../../server/serverBanner.js')
-          const { createServerLogger } = await import(
-            '../../server/serverLog.js'
-          )
+          const { printBanner } = await import('../server/serverBanner.js')
+          const { createServerLogger } = await import('../server/serverLog.js')
           const { writeServerLock, removeServerLock, probeRunningServer } =
-            await import('../../server/lockfile.js')
+            await import('../server/lockfile.js')
 
           const existing = await probeRunningServer()
           if (existing) {
@@ -324,7 +318,7 @@ export function registerCliHostCommands(
           },
         ) => {
           const { parseConnectUrl } = await import(
-            '../../server/parseConnectUrl.js'
+            '../server/parseConnectUrl.js'
           )
           const { serverUrl, authToken } = parseConnectUrl(ccUrl)
 
@@ -354,7 +348,7 @@ export function registerCliHostCommands(
           }
 
           const { runConnectHeadless } = await import(
-            '../../server/connectHeadless.js'
+            '../server/connectHeadless.js'
           )
 
           const prompt =
@@ -397,7 +391,7 @@ export function registerCliHostCommands(
         console?: boolean
         claudeai?: boolean
       }) => {
-        const { authLogin } = await import('../../cli/handlers/auth.js')
+        const { authLogin } = await import('../cli/handlers/auth.js')
         await authLogin({ email, sso, console: useConsole, claudeai })
       },
     )
@@ -408,7 +402,7 @@ export function registerCliHostCommands(
     .option('--json', 'Output as JSON (default)')
     .option('--text', 'Output as human-readable text')
     .action(async (commandOptions: { json?: boolean; text?: boolean }) => {
-      const { authStatus } = await import('../../cli/handlers/auth.js')
+      const { authStatus } = await import('../cli/handlers/auth.js')
       await authStatus(commandOptions)
     })
 
@@ -416,7 +410,7 @@ export function registerCliHostCommands(
     .command('logout')
     .description(describe(['auth', 'logout']))
     .action(async () => {
-      const { authLogout } = await import('../../cli/handlers/auth.js')
+      const { authLogout } = await import('../cli/handlers/auth.js')
       await authLogout()
     })
 
@@ -439,7 +433,7 @@ export function registerCliHostCommands(
     .action(
       async (manifestPath: string, commandOptions: { cowork?: boolean }) => {
         const { pluginValidateHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await pluginValidateHandler(manifestPath, commandOptions)
       },
@@ -460,9 +454,7 @@ export function registerCliHostCommands(
         available?: boolean
         cowork?: boolean
       }) => {
-        const { pluginListHandler } = await import(
-          '../../cli/handlers/plugins.js'
-        )
+        const { pluginListHandler } = await import('../cli/handlers/plugins.js')
         await pluginListHandler(commandOptions)
       },
     )
@@ -494,7 +486,7 @@ export function registerCliHostCommands(
         },
       ) => {
         const { marketplaceAddHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await marketplaceAddHandler(source, commandOptions)
       },
@@ -507,7 +499,7 @@ export function registerCliHostCommands(
     .addOption(coworkOption())
     .action(async (commandOptions: { json?: boolean; cowork?: boolean }) => {
       const { marketplaceListHandler } = await import(
-        '../../cli/handlers/plugins.js'
+        '../cli/handlers/plugins.js'
       )
       await marketplaceListHandler(commandOptions)
     })
@@ -519,7 +511,7 @@ export function registerCliHostCommands(
     .addOption(coworkOption())
     .action(async (name: string, commandOptions: { cowork?: boolean }) => {
       const { marketplaceRemoveHandler } = await import(
-        '../../cli/handlers/plugins.js'
+        '../cli/handlers/plugins.js'
       )
       await marketplaceRemoveHandler(name, commandOptions)
     })
@@ -534,7 +526,7 @@ export function registerCliHostCommands(
         commandOptions: { cowork?: boolean },
       ) => {
         const { marketplaceUpdateHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await marketplaceUpdateHandler(name, commandOptions)
       },
@@ -556,7 +548,7 @@ export function registerCliHostCommands(
         commandOptions: { scope?: string; cowork?: boolean },
       ) => {
         const { pluginInstallHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await pluginInstallHandler(plugin, commandOptions)
       },
@@ -587,7 +579,7 @@ export function registerCliHostCommands(
         },
       ) => {
         const { pluginUninstallHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await pluginUninstallHandler(plugin, commandOptions)
       },
@@ -607,7 +599,7 @@ export function registerCliHostCommands(
         commandOptions: { scope?: string; cowork?: boolean },
       ) => {
         const { pluginEnableHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await pluginEnableHandler(plugin, commandOptions)
       },
@@ -628,7 +620,7 @@ export function registerCliHostCommands(
         commandOptions: { scope?: string; cowork?: boolean; all?: boolean },
       ) => {
         const { pluginDisableHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await pluginDisableHandler(plugin, commandOptions)
       },
@@ -648,7 +640,7 @@ export function registerCliHostCommands(
         commandOptions: { scope?: string; cowork?: boolean },
       ) => {
         const { pluginUpdateHandler } = await import(
-          '../../cli/handlers/plugins.js'
+          '../cli/handlers/plugins.js'
         )
         await pluginUpdateHandler(plugin, commandOptions)
       },
@@ -659,7 +651,7 @@ export function registerCliHostCommands(
     .description(describe(['setup-token']))
     .action(async () => {
       const [{ setupTokenHandler }, { createRoot }] = await Promise.all([
-        import('../../cli/handlers/util.js'),
+        import('../cli/handlers/util.js'),
         import('@anthropic/ink'),
       ])
       const root = await createRoot(getBaseRenderOptions(false))
@@ -674,7 +666,7 @@ export function registerCliHostCommands(
       'Comma-separated list of setting sources to load (user, project, local).',
     )
     .action(async () => {
-      const { agentsHandler } = await import('../../cli/handlers/agents.js')
+      const { agentsHandler } = await import('../cli/handlers/agents.js')
       await agentsHandler()
       process.exit(0)
     })
@@ -690,7 +682,7 @@ export function registerCliHostCommands(
         .description(describe(['auto-mode', 'defaults']))
         .action(async () => {
           const { autoModeDefaultsHandler } = await import(
-            '../../cli/handlers/autoMode.js'
+            '../cli/handlers/autoMode.js'
           )
           autoModeDefaultsHandler()
           process.exit(0)
@@ -701,7 +693,7 @@ export function registerCliHostCommands(
         .description(describe(['auto-mode', 'config']))
         .action(async () => {
           const { autoModeConfigHandler } = await import(
-            '../../cli/handlers/autoMode.js'
+            '../cli/handlers/autoMode.js'
           )
           autoModeConfigHandler()
           process.exit(0)
@@ -713,7 +705,7 @@ export function registerCliHostCommands(
         .option('--model <model>', 'Override which model is used')
         .action(async (commandOptions: { model?: string }) => {
           const { autoModeCritiqueHandler } = await import(
-            '../../cli/handlers/autoMode.js'
+            '../cli/handlers/autoMode.js'
           )
           await autoModeCritiqueHandler(commandOptions)
           process.exit()
@@ -734,7 +726,7 @@ export function registerCliHostCommands(
     )
     .action(async (commandOptions: { deep?: boolean }) => {
       const { autonomyStatusHandler } = await import(
-        '../../cli/handlers/autonomy.js'
+        '../cli/handlers/autonomy.js'
       )
       await autonomyStatusHandler(commandOptions)
       process.exit(0)
@@ -745,7 +737,7 @@ export function registerCliHostCommands(
     .description(describe(['autonomy', 'runs']))
     .action(async (limit?: string) => {
       const { autonomyRunsHandler } = await import(
-        '../../cli/handlers/autonomy.js'
+        '../cli/handlers/autonomy.js'
       )
       await autonomyRunsHandler(limit)
       process.exit(0)
@@ -756,7 +748,7 @@ export function registerCliHostCommands(
     .description(describe(['autonomy', 'flows']))
     .action(async (limit?: string) => {
       const { autonomyFlowsHandler } = await import(
-        '../../cli/handlers/autonomy.js'
+        '../cli/handlers/autonomy.js'
       )
       await autonomyFlowsHandler(limit)
       process.exit(0)
@@ -767,7 +759,7 @@ export function registerCliHostCommands(
     .description(describe(['autonomy', 'flow']))
     .action(async (flowId: string) => {
       const { autonomyFlowHandler } = await import(
-        '../../cli/handlers/autonomy.js'
+        '../cli/handlers/autonomy.js'
       )
       await autonomyFlowHandler(flowId)
       process.exit(0)
@@ -778,7 +770,7 @@ export function registerCliHostCommands(
     .description(describe(['autonomy', 'flow', 'cancel']))
     .action(async (flowId: string) => {
       const { autonomyFlowCancelHandler } = await import(
-        '../../cli/handlers/autonomy.js'
+        '../cli/handlers/autonomy.js'
       )
       await autonomyFlowCancelHandler(flowId)
       process.exit(0)
@@ -789,7 +781,7 @@ export function registerCliHostCommands(
     .description(describe(['autonomy', 'flow', 'resume']))
     .action(async (flowId: string) => {
       const { autonomyFlowResumeHandler } = await import(
-        '../../cli/handlers/autonomy.js'
+        '../cli/handlers/autonomy.js'
       )
       await autonomyFlowResumeHandler(flowId)
       process.exit(0)
@@ -801,7 +793,7 @@ export function registerCliHostCommands(
         .command('remote-control', { hidden: isHidden(['remote-control']) })
         .description(describe(['remote-control']))
         .action(async () => {
-          const { bridgeMain } = await import('../../bridge/bridgeMain.js')
+          const { bridgeMain } = await import('../bridge/bridgeMain.js')
           await bridgeMain(process.argv.slice(3))
         }),
       ['remote-control'],
@@ -827,7 +819,7 @@ export function registerCliHostCommands(
     .description(describe(['doctor']))
     .action(async () => {
       const [{ doctorHandler }, { createRoot }] = await Promise.all([
-        import('../../cli/handlers/util.js'),
+        import('../cli/handlers/util.js'),
         import('@anthropic/ink'),
       ])
       const root = await createRoot(getBaseRenderOptions(false))
@@ -839,7 +831,7 @@ export function registerCliHostCommands(
       .command('up')
       .description(describe(['up']))
       .action(async () => {
-        const { up } = await import('../../cli/up.js')
+        const { up } = await import('../cli/up.js')
         await up()
       })
   }
@@ -863,7 +855,7 @@ export function registerCliHostCommands(
             safe?: boolean
           },
         ) => {
-          const { rollback } = await import('../../cli/rollback.js')
+          const { rollback } = await import('../cli/rollback.js')
           await rollback(target, commandOptions)
         },
       )
@@ -878,7 +870,7 @@ export function registerCliHostCommands(
         target: string | undefined,
         commandOptions: { force?: boolean },
       ) => {
-        const { installHandler } = await import('../../cli/handlers/util.js')
+        const { installHandler } = await import('../cli/handlers/util.js')
         await installHandler(target, commandOptions)
       },
     )
@@ -887,7 +879,7 @@ export function registerCliHostCommands(
     .command('update')
     .description(describe(['update']))
     .action(async () => {
-      const { updateCCB } = await import('../../cli/updateCCB.js')
+      const { updateCCB } = await import('../cli/updateCCB.js')
       await updateCCB()
     })
 
@@ -907,7 +899,7 @@ export function registerCliHostCommands(
         validateLogId,
       )
       .action(async (logId: string | number | undefined) => {
-        const { logHandler } = await import('../../cli/handlers/ant.js')
+        const { logHandler } = await import('../cli/handlers/ant.js')
         await logHandler(logId)
       })
 
@@ -920,7 +912,7 @@ export function registerCliHostCommands(
         parseInt,
       )
       .action(async (number: number | undefined) => {
-        const { errorHandler } = await import('../../cli/handlers/ant.js')
+        const { errorHandler } = await import('../cli/handlers/ant.js')
         await errorHandler(number)
       })
 
@@ -943,7 +935,7 @@ Examples:
   $ claude export <uuid>.jsonl output.txt           Render JSONL session file to text`,
       )
       .action(async (source: string, outputFile: string) => {
-        const { exportHandler } = await import('../../cli/handlers/ant.js')
+        const { exportHandler } = await import('../cli/handlers/ant.js')
         await exportHandler(source, outputFile)
       })
 
@@ -959,9 +951,7 @@ Examples:
           subject: string,
           commandOptions: { description?: string; list?: string },
         ) => {
-          const { taskCreateHandler } = await import(
-            '../../cli/handlers/ant.js'
-          )
+          const { taskCreateHandler } = await import('../cli/handlers/ant.js')
           await taskCreateHandler(subject, commandOptions)
         },
       )
@@ -978,7 +968,7 @@ Examples:
           pending?: boolean
           json?: boolean
         }) => {
-          const { taskListHandler } = await import('../../cli/handlers/ant.js')
+          const { taskListHandler } = await import('../cli/handlers/ant.js')
           await taskListHandler(commandOptions)
         },
       )
@@ -988,7 +978,7 @@ Examples:
       .description(describe(['task', 'get']))
       .option('-l, --list <id>', 'Task list ID (defaults to "tasklist")')
       .action(async (id: string, commandOptions: { list?: string }) => {
-        const { taskGetHandler } = await import('../../cli/handlers/ant.js')
+        const { taskGetHandler } = await import('../cli/handlers/ant.js')
         await taskGetHandler(id, commandOptions)
       })
 
@@ -1016,9 +1006,7 @@ Examples:
             clearOwner?: boolean
           },
         ) => {
-          const { taskUpdateHandler } = await import(
-            '../../cli/handlers/ant.js'
-          )
+          const { taskUpdateHandler } = await import('../cli/handlers/ant.js')
           await taskUpdateHandler(id, commandOptions)
         },
       )
@@ -1028,7 +1016,7 @@ Examples:
       .description(describe(['task', 'dir']))
       .option('-l, --list <id>', 'Task list ID (defaults to "tasklist")')
       .action(async (commandOptions: { list?: string }) => {
-        const { taskDirHandler } = await import('../../cli/handlers/ant.js')
+        const { taskDirHandler } = await import('../cli/handlers/ant.js')
         await taskDirHandler(commandOptions)
       })
 
@@ -1040,7 +1028,7 @@ Examples:
         'Write completion script directly to a file instead of stdout',
       )
       .action(async (shell: string, commandOptions: { output?: string }) => {
-        const { completionHandler } = await import('../../cli/handlers/ant.js')
+        const { completionHandler } = await import('../cli/handlers/ant.js')
         await completionHandler(shell, commandOptions, program)
       })
   }

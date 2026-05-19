@@ -60,7 +60,6 @@ import type {
 } from './types/tools.js'
 import type { FileStateCache } from './utils/fileStateCache.js'
 import type { DenialTrackingState } from './utils/permissions/denialTracking.js'
-import type { RuntimeCapabilityPlane } from './runtime/contracts/capability.js'
 import type { SystemPrompt } from './utils/systemPromptType.js'
 import type { ContentReplacementState } from './utils/toolResultStorage.js'
 
@@ -262,7 +261,6 @@ export type ToolUseContext = {
   setConversationId?: (id: UUID) => void
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
-  capabilityPlane?: RuntimeCapabilityPlane
   /** When true, canUseTool must always be called even when hooks auto-approve.
    *  Used by speculation for overlay file path rewriting. */
   requireCanUseTool?: boolean

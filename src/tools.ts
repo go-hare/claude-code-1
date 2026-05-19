@@ -1,5 +1,10 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { type Tool, type Tools } from './Tool.js'
+import {
+  dedupeToolsByName,
+  toolMatchesName,
+  type Tool,
+  type Tools,
+} from './Tool.js'
 import { AgentTool } from '@claude-code/builtin-tools/tools/AgentTool/AgentTool.js'
 import { SkillTool } from '@claude-code/builtin-tools/tools/SkillTool/SkillTool.js'
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js'
@@ -160,10 +165,12 @@ import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
 import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js'
 import {
   REPL_ONLY_TOOLS,
+  REPL_TOOL_NAME,
   isReplModeEnabled,
 } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
 import type { ToolPermissionContext } from './Tool.js'
-import * as RuntimeToolPolicy from './runtime/capabilities/tools/ToolPolicy.js'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
+import { getDenyRuleForTool } from './utils/permissions/permissions.js'
 export { REPL_ONLY_TOOLS }
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getPowerShellTool = () => {
@@ -181,7 +188,13 @@ export const TOOL_PRESETS = ['default'] as const
 
 export type ToolPreset = (typeof TOOL_PRESETS)[number]
 
-export const parseToolPreset = RuntimeToolPolicy.parseToolPreset
+export function parseToolPreset(preset: string): ToolPreset | null {
+  const presetString = preset.toLowerCase()
+  if (!TOOL_PRESETS.includes(presetString as ToolPreset)) {
+    return null
+  }
+  return presetString as ToolPreset
+}
 
 /**
  * Get the list of tool names for a given preset
@@ -189,8 +202,11 @@ export const parseToolPreset = RuntimeToolPolicy.parseToolPreset
  * @param preset The preset name
  * @returns Array of tool names
  */
-export const getToolsForDefaultPreset =
-  RuntimeToolPolicy.getToolsForDefaultPreset
+export function getToolsForDefaultPreset(): string[] {
+  const tools = getAllBaseTools()
+  const isEnabled = tools.map(tool => tool.isEnabled())
+  return tools.filter((_, i) => isEnabled[i]).map(tool => tool.name)
+}
 
 /**
  * Get the complete exhaustive list of all tools that could be available
@@ -297,10 +313,42 @@ export function getSimpleModeTools(): Tools {
  * server-prefix rules like `mcp__server` strip all tools from that server
  * before the model sees them — not just at call time.
  */
-export const filterToolsByDenyRules = RuntimeToolPolicy.filterToolsByDenyRules
+export function filterToolsByDenyRules<
+  T extends {
+    name: string
+    mcpInfo?: { serverName: string; toolName: string }
+  },
+>(tools: readonly T[], permissionContext: ToolPermissionContext): T[] {
+  return tools.filter(tool => !getDenyRuleForTool(permissionContext, tool))
+}
 
 export const getTools = (permissionContext: ToolPermissionContext): Tools => {
-  return RuntimeToolPolicy.getTools(permissionContext, getSimpleModeTools())
+  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+    return filterToolsByDenyRules(getSimpleModeTools(), permissionContext)
+  }
+
+  const specialTools = new Set([
+    ListMcpResourcesTool.name,
+    ReadMcpResourceTool.name,
+    SYNTHETIC_OUTPUT_TOOL_NAME,
+  ])
+  const tools = getAllBaseTools().filter(tool => !specialTools.has(tool.name))
+
+  let allowedTools = filterToolsByDenyRules(tools, permissionContext)
+
+  if (isReplModeEnabled()) {
+    const replEnabled = allowedTools.some(tool =>
+      toolMatchesName(tool, REPL_TOOL_NAME),
+    )
+    if (replEnabled) {
+      allowedTools = allowedTools.filter(
+        tool => !REPL_ONLY_TOOLS.has(tool.name),
+      )
+    }
+  }
+
+  const isEnabled = allowedTools.map(tool => tool.isEnabled())
+  return allowedTools.filter((_, i) => isEnabled[i])
 }
 
 /**
@@ -323,10 +371,12 @@ export function assembleToolPool(
   permissionContext: ToolPermissionContext,
   mcpTools: Tools,
 ): Tools {
-  return RuntimeToolPolicy.assembleToolPool(
-    permissionContext,
-    mcpTools,
-    getSimpleModeTools(),
+  const builtInTools = getTools(permissionContext)
+  const allowedMcpTools = filterToolsByDenyRules(mcpTools, permissionContext)
+
+  const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
+  return dedupeToolsByName(
+    [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
   )
 }
 
@@ -348,9 +398,6 @@ export function getMergedTools(
   permissionContext: ToolPermissionContext,
   mcpTools: Tools,
 ): Tools {
-  return RuntimeToolPolicy.getMergedTools(
-    permissionContext,
-    mcpTools,
-    getSimpleModeTools(),
-  )
+  const builtInTools = getTools(permissionContext)
+  return [...builtInTools, ...mcpTools]
 }

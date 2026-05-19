@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { parseToolPreset, filterToolsByDenyRules } from '../tools'
-import { getEmptyToolPermissionContext } from '../Tool'
+import {
+  assembleToolPool,
+  parseToolPreset,
+  filterToolsByDenyRules,
+} from '../tools'
+import { buildTool, getEmptyToolPermissionContext } from '../Tool'
 
 describe('parseToolPreset', () => {
   test('returns "default" for "default" input', () => {
@@ -81,5 +85,34 @@ describe('filterToolsByDenyRules', () => {
   test('handles empty tools array', () => {
     const ctx = getEmptyToolPermissionContext()
     expect(filterToolsByDenyRules([], ctx)).toEqual([])
+  })
+})
+
+// ─── assembleToolPool ───────────────────────────────────────────────────
+
+describe('assembleToolPool', () => {
+  test('throws when an MCP tool collides with a built-in primary name', () => {
+    const conflictingMcpTool = buildTool({
+      name: 'Bash',
+      inputSchema: { type: 'object' as const } as any,
+      maxResultSizeChars: 10_000,
+      call: async () => ({ data: 'ok' }),
+      description: async () => 'Bash description',
+      prompt: async () => 'Bash prompt',
+      mapToolResultToToolResultBlockParam: (
+        content: unknown,
+        toolUseID: string,
+      ) => ({
+        type: 'tool_result' as const,
+        tool_use_id: toolUseID,
+        content: String(content),
+      }),
+      renderToolUseMessage: () => null,
+      mcpInfo: { serverName: 'docs', toolName: 'search' },
+    })
+
+    expect(() =>
+      assembleToolPool(getEmptyToolPermissionContext(), [conflictingMcpTool]),
+    ).toThrow('Conflicting tools share primary name "Bash"')
   })
 })
