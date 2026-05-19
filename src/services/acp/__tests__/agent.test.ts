@@ -44,18 +44,15 @@ afterAll(() => {
 const mockSetModel = mock(() => {})
 const mockSubmitMessage = mock(async function* (_input: string) {})
 
-mockModulePreservingExports(
-  '../../../runtime/capabilities/execution/SessionRuntime.ts',
-  {
-    SessionRuntime: class MockSessionRuntime {
-      submitMessage = mockSubmitMessage
-      interrupt = mock(() => {})
-      resetAbortController = mock(() => {})
-      getAbortSignal = mock(() => new AbortController().signal)
-      setModel = mockSetModel
-    },
+mockModulePreservingExports('../../../QueryEngine.ts', {
+  QueryEngine: class MockQueryEngine {
+    submitMessage = mockSubmitMessage
+    interrupt = mock(() => {})
+    resetAbortController = mock(() => {})
+    getAbortSignal = mock(() => new AbortController().signal)
+    setModel = mockSetModel
   },
-)
+})
 
 mockModulePreservingExports('../../../tools.ts', {
   getTools: mock(() => []),
