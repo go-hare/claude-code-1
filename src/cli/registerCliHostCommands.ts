@@ -338,7 +338,6 @@ export function registerCliHostCommands(
             setDirectConnectServerUrl(serverUrl)
             connectConfig = session.config
           } catch (error) {
-            // biome-ignore lint/suspicious/noConsole: intentional error output
             console.error(
               error instanceof DirectConnectError
                 ? error.message

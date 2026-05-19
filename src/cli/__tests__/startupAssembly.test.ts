@@ -324,10 +324,10 @@ describe('runStartupPrefetches', () => {
     const checkQuotaStatus = mock(async () => {
       calls.push('quota')
     })
-    const fetchBootstrapData = mock(() => {
+    const fetchBootstrapData = mock(async () => {
       calls.push('bootstrap')
     })
-    const prefetchPassesEligibility = mock(() => {
+    const prefetchPassesEligibility = mock(async () => {
       calls.push('passes')
     })
     const prefetchFastModeStatus = mock(async () => {
@@ -339,7 +339,7 @@ describe('runStartupPrefetches', () => {
     const saveStartupPrefetchedAt = mock((timestamp: number) => {
       calls.push(`save:${timestamp}`)
     })
-    const refreshExampleCommands = mock(() => {
+    const refreshExampleCommands = mock(async () => {
       calls.push('examples')
     })
     const logForDebugging = mock((message: string) => {
@@ -389,7 +389,7 @@ describe('runStartupPrefetches', () => {
     const resolveFastModeStatusFromCache = mock(() => {
       calls.push('cache')
     })
-    const refreshExampleCommands = mock(() => {
+    const refreshExampleCommands = mock(async () => {
       calls.push('examples')
     })
 

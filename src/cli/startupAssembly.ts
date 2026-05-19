@@ -70,7 +70,7 @@ export function runSessionStartupSideEffects(options: {
   logManagedSettings: () => void
   sessionNameArg?: string
   registerSession: () => Promise<boolean>
-  updateSessionName: (name: string) => Promise<unknown> | void
+  updateSessionName: (name: string) => Promise<unknown> | undefined
   countConcurrentSessions: () => Promise<number>
   onConcurrentSessions: (count: number) => void
 }): void {
@@ -131,12 +131,12 @@ export function runStartupPrefetches(options: {
   logForDebugging: (message: string) => void
   checkQuotaStatus: () => Promise<unknown>
   onQuotaError: (error: unknown) => void
-  fetchBootstrapData: () => Promise<unknown> | void
-  prefetchPassesEligibility: () => Promise<unknown> | void
-  prefetchFastModeStatus: () => Promise<unknown> | void
+  fetchBootstrapData: () => Promise<unknown> | undefined
+  prefetchPassesEligibility: () => Promise<unknown> | undefined
+  prefetchFastModeStatus: () => Promise<unknown> | undefined
   resolveFastModeStatusFromCache: () => void
   saveStartupPrefetchedAt: (timestamp: number) => void
-  refreshExampleCommands: () => Promise<unknown> | void
+  refreshExampleCommands: () => Promise<unknown> | undefined
   now?: () => number
 }): void {
   const {
