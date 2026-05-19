@@ -83,18 +83,6 @@ console.log(
   `Bundled ${result.outputs.length} files to ${outdir}/ (patched ${patched} for import.meta.require, ${bunPatched} for Bun destructure)`,
 )
 
-const bundledCoreEntry = join(outdir, 'core.js')
-const nestedCoreEntry = join(outdir, 'src', 'entrypoints', 'core.js')
-if (
-  !(await Bun.file(bundledCoreEntry).exists()) &&
-  (await Bun.file(nestedCoreEntry).exists())
-) {
-  await writeFile(
-    bundledCoreEntry,
-    'export * from "./src/entrypoints/core.js"\n',
-  )
-}
-
 // Step 4: Copy native .node addon files (audio-capture) and vendored binaries (ripgrep)
 const audioCaptureDir = join(outdir, 'vendor', 'audio-capture')
 await cp('vendor/audio-capture', audioCaptureDir, { recursive: true })

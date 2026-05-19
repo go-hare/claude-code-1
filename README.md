@@ -68,23 +68,6 @@
 - computer-use / chrome bridge / remote-control 相关能力
 - Langfuse、Sentry、GrowthBook 等可观测性与企业集成能力
 
-## 使用 Agent Core
-
-当前包级 core 入口已经通过 `package.json` 的 `./core` 子路径暴露：
-
-```ts
-import { createAgent } from 'claude/core'
-```
-
-仓库内部的 headless、ACP、direct-connect、server、bridge、daemon 等场景正在向 `src/core`、`src/hosts` 与 `src/runtime` 收口。外部接入不建议直接建立在 `src/screens/REPL.tsx` 上，优先选择下面这些方向：
-
-- headless embedding
-- direct-connect client
-- server host
-- bridge / remote-control host
-- daemon worker
-- ACP / IDE agent host
-
 ## 项目结构
 
 - [`src/entrypoints/cli.tsx`](src/entrypoints/cli.tsx)
