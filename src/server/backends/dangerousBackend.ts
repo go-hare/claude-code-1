@@ -24,7 +24,7 @@ export type DangerousBackendSession = {
 }
 
 export class DangerousBackend {
-  createSessionRuntime(
+  createSession(
     options: DangerousBackendCreateSessionOptions,
   ): DangerousBackendSession {
     const cliArgs = [
