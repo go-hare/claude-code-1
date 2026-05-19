@@ -1,8 +1,5 @@
 import { feature } from 'bun:bundle'
-import {
-  createRuntimeCompactionStateProvider,
-  createRuntimePromptStateProvider,
-} from 'src/runtime/core/state/bootstrapProvider.js'
+import { getSdkBetas, markPostCompaction } from 'src/bootstrap/state.js'
 import type { QuerySource } from '../../constants/querySource.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
@@ -30,8 +27,6 @@ import { trySessionMemoryCompaction } from './sessionMemoryCompact.js'
 // Reserve this many tokens for output during compaction
 // Based on p99.99 of compact summary output being 17,387 tokens.
 const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 20_000
-const promptStateProvider = createRuntimePromptStateProvider()
-const compactionStateProvider = createRuntimeCompactionStateProvider()
 
 // Returns the context window size minus the max output tokens for the model
 export function getEffectiveContextWindowSize(model: string): number {
@@ -39,10 +34,7 @@ export function getEffectiveContextWindowSize(model: string): number {
     getMaxOutputTokensForModel(model),
     MAX_OUTPUT_TOKENS_FOR_SUMMARY,
   )
-  let contextWindow = getContextWindowForModel(
-    model,
-    promptStateProvider.getPromptState().sdkBetas,
-  )
+  let contextWindow = getContextWindowForModel(model, getSdkBetas())
 
   const autoCompactWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
   if (autoCompactWindow) {
@@ -338,7 +330,7 @@ export async function autoCompactIfNeeded(
     if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
       notifyCompaction(querySource ?? 'compact', toolUseContext.agentId)
     }
-    compactionStateProvider.markPostCompaction()
+    markPostCompaction()
     return {
       wasCompacted: true,
       compactionResult: sessionMemoryResult,

@@ -125,10 +125,19 @@ import {
   APIUserAbortError,
 } from '@anthropic-ai/sdk/error'
 import {
-  createRuntimePromptStateProvider,
-  createRuntimeRequestDebugStateProvider,
-  createRuntimeSessionIdentityStateProvider,
-} from 'src/runtime/core/state/bootstrapProvider.js'
+  getAfkModeHeaderLatched,
+  getCacheEditingHeaderLatched,
+  getFastModeHeaderLatched,
+  getPromptCache1hAllowlist,
+  getPromptCache1hEligible,
+  getSessionId,
+  setAfkModeHeaderLatched,
+  setCacheEditingHeaderLatched,
+  setFastModeHeaderLatched,
+  setLastMainRequestId,
+  setPromptCache1hAllowlist,
+  setPromptCache1hEligible,
+} from 'src/bootstrap/state.js'
 import {
   AFK_MODE_BETA_HEADER,
   CONTEXT_1M_BETA_HEADER,
@@ -264,12 +273,6 @@ type JsonValue = string | number | boolean | null | JsonObject | JsonArray
 type JsonObject = { [key: string]: JsonValue }
 type JsonArray = JsonValue[]
 
-const runtimePromptStateProvider = createRuntimePromptStateProvider()
-const runtimeRequestDebugStateProvider =
-  createRuntimeRequestDebugStateProvider()
-const runtimeSessionIdentityStateProvider =
-  createRuntimeSessionIdentityStateProvider()
-
 /**
  * Assemble the extra body parameters for the API request, based on the
  * CLAUDE_CODE_EXTRA_BODY environment variable if present and on any beta
@@ -398,30 +401,24 @@ function should1hCacheTTL(querySource?: QuerySource): boolean {
   // Latch eligibility in bootstrap state for session stability — prevents
   // mid-session overage flips from changing the cache_control TTL, which
   // would bust the server-side prompt cache (~20K tokens per flip).
-  let userEligible =
-    runtimePromptStateProvider.getPromptState().promptCache1hEligible
+  let userEligible = getPromptCache1hEligible()
   if (userEligible === null) {
     userEligible =
       process.env.USER_TYPE === 'ant' ||
       (isClaudeAISubscriber() && !currentLimits.isUsingOverage)
-    runtimePromptStateProvider.patchPromptState({
-      promptCache1hEligible: userEligible,
-    })
+    setPromptCache1hEligible(userEligible)
   }
   if (!userEligible) return false
 
   // Cache allowlist in bootstrap state for session stability — prevents mixed
   // TTLs when GrowthBook's disk cache updates mid-request
-  let allowlist =
-    runtimePromptStateProvider.getPromptState().promptCache1hAllowlist
+  let allowlist = getPromptCache1hAllowlist()
   if (allowlist === null) {
     const config = getFeatureValue_CACHED_MAY_BE_STALE<{
       allowlist?: string[]
     }>('tengu_prompt_cache_1h_config', {})
     allowlist = config.allowlist ?? []
-    runtimePromptStateProvider.patchPromptState({
-      promptCache1hAllowlist: allowlist,
-    })
+    setPromptCache1hAllowlist(allowlist)
   }
 
   return (
@@ -523,8 +520,7 @@ export function getAPIMetadata() {
       device_id: getOrCreateUserID(),
       // Only include OAuth account UUID when actively using OAuth authentication
       account_uuid: getOauthAccountInfo()?.accountUuid ?? '',
-      session_id:
-        runtimeSessionIdentityStateProvider.getSessionIdentity().sessionId,
+      session_id: getSessionId(),
     }),
   }
 }
@@ -1540,8 +1536,7 @@ async function* queryModel(
   // Per-call gates (isAgenticQuery, querySource===repl_main_thread) stay
   // per-call so non-agentic queries keep their own stable header set.
 
-  let afkHeaderLatched =
-    runtimePromptStateProvider.getPromptState().afkModeHeaderLatched === true
+  let afkHeaderLatched = getAfkModeHeaderLatched() === true
   if (feature('TRANSCRIPT_CLASSIFIER')) {
     if (
       !afkHeaderLatched &&
@@ -1550,24 +1545,17 @@ async function* queryModel(
       (autoModeStateModule?.isAutoModeActive() ?? false)
     ) {
       afkHeaderLatched = true
-      runtimePromptStateProvider.patchPromptState({
-        afkModeHeaderLatched: true,
-      })
+      setAfkModeHeaderLatched(true)
     }
   }
 
-  let fastModeHeaderLatched =
-    runtimePromptStateProvider.getPromptState().fastModeHeaderLatched === true
+  let fastModeHeaderLatched = getFastModeHeaderLatched() === true
   if (!fastModeHeaderLatched && isFastMode) {
     fastModeHeaderLatched = true
-    runtimePromptStateProvider.patchPromptState({
-      fastModeHeaderLatched: true,
-    })
+    setFastModeHeaderLatched(true)
   }
 
-  let cacheEditingHeaderLatched =
-    runtimePromptStateProvider.getPromptState().cacheEditingHeaderLatched ===
-    true
+  let cacheEditingHeaderLatched = getCacheEditingHeaderLatched() === true
   if (feature('CACHED_MICROCOMPACT')) {
     if (
       !cacheEditingHeaderLatched &&
@@ -1576,9 +1564,7 @@ async function* queryModel(
       options.querySource === 'repl_main_thread'
     ) {
       cacheEditingHeaderLatched = true
-      runtimePromptStateProvider.patchPromptState({
-        cacheEditingHeaderLatched: true,
-      })
+      setCacheEditingHeaderLatched(true)
     }
   }
 
@@ -3019,9 +3005,7 @@ async function* queryModel(
     (options.querySource.startsWith('repl_main_thread') ||
       options.querySource === 'sdk')
   ) {
-    runtimeRequestDebugStateProvider.patchRequestDebugState({
-      lastMainRequestId: streamRequestId,
-    })
+    setLastMainRequestId(streamRequestId)
   }
 
   // Precompute scalars so the fire-and-forget .then() closure doesn't pin the

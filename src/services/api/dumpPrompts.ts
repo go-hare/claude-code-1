@@ -2,7 +2,7 @@ import type { ClientOptions } from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
 import { promises as fs } from 'fs'
 import { dirname, join } from 'path'
-import { createRuntimeSessionIdentityStateProvider } from 'src/runtime/core/state/bootstrapProvider.js'
+import { getSessionId } from 'src/bootstrap/state.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 
@@ -25,8 +25,6 @@ type DumpState = {
 
 // Track state per session to avoid duplicating data
 const dumpState = new Map<string, DumpState>()
-const runtimeSessionIdentityStateProvider =
-  createRuntimeSessionIdentityStateProvider()
 
 export function getLastApiRequests(): Array<{
   timestamp: string
@@ -62,7 +60,7 @@ export function getDumpPromptsPath(agentIdOrSessionId?: string): string {
   return join(
     getClaudeConfigHomeDir(),
     'dump-prompts',
-    `${agentIdOrSessionId ?? runtimeSessionIdentityStateProvider.getSessionIdentity().sessionId}.jsonl`,
+    `${agentIdOrSessionId ?? getSessionId()}.jsonl`,
   )
 }
 

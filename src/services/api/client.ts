@@ -17,7 +17,10 @@ import {
   isFirstPartyAnthropicBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
-import { createRuntimeSessionIdentityStateProvider } from 'src/runtime/core/state/bootstrapProvider.js'
+import {
+  getIsNonInteractiveSession,
+  getSessionId,
+} from 'src/bootstrap/state.js'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { isDebugToStdErr, logForDebugging } from '../../utils/debug.js'
 import {
@@ -25,9 +28,6 @@ import {
   getVertexRegionForModel,
   isEnvTruthy,
 } from '../../utils/envUtils.js'
-
-const runtimeSessionIdentityStateProvider =
-  createRuntimeSessionIdentityStateProvider()
 
 /**
  * Environment variables for different client types:
@@ -101,8 +101,7 @@ export async function getAnthropicClient({
   const defaultHeaders: { [key: string]: string } = {
     'x-app': 'cli',
     'User-Agent': getUserAgent(),
-    'X-Claude-Code-Session-Id':
-      runtimeSessionIdentityStateProvider.getSessionIdentity().sessionId,
+    'X-Claude-Code-Session-Id': getSessionId(),
     ...customHeaders,
     ...(containerId ? { 'x-claude-remote-container-id': containerId } : {}),
     ...(remoteSessionId
@@ -134,10 +133,7 @@ export async function getAnthropicClient({
   logForDebugging('[API:auth] OAuth token check complete')
 
   if (!isClaudeAISubscriber()) {
-    await configureApiKeyHeaders(
-      defaultHeaders,
-      runtimeSessionIdentityStateProvider.getIsNonInteractiveSession(),
-    )
+    await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
   const resolvedFetch = buildFetch(fetchOverride, source)
