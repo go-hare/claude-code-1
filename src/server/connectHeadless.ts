@@ -1,1 +1,1 @@
-export { runConnectHeadlessHost as runConnectHeadless } from '../hosts/server/index.js'
+export { runConnectHeadlessRuntime as runConnectHeadless } from '../runtime/capabilities/server/HostRuntime.js'

@@ -22,10 +22,6 @@ import { logError } from '../utils/log.js'
 import { sleep } from '../utils/sleep.js'
 import { createAgentWorktree, removeAgentWorktree } from '../utils/worktree.js'
 import {
-  runRemoteControlCliHost,
-  runRemoteControlHeadlessHost,
-} from '../hosts/remote-control/index.js'
-import {
   BridgeFatalError,
   createBridgeApiClient,
   isExpiredErrorType,
@@ -2966,14 +2962,14 @@ async function runBridgeHeadlessImpl(
 }
 
 export async function bridgeMain(args: string[]): Promise<void> {
-  return runRemoteControlCliHost(args, bridgeMainImpl)
+  return bridgeMainImpl(args)
 }
 
 export async function runBridgeHeadless(
   opts: HeadlessBridgeOpts,
   signal: AbortSignal,
 ): Promise<void> {
-  return runRemoteControlHeadlessHost(opts, signal, runBridgeHeadlessImpl)
+  return runBridgeHeadlessImpl(opts, signal)
 }
 
 /** BridgeLogger adapter that routes everything to a single line-log fn. */
