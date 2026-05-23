@@ -161,7 +161,6 @@ export function buildComputerUseTools(
       name: 'request_access',
       description:
         'Request user permission to control a set of applications for this session. Must be called before any other tool in this server. ' +
-        'REQUIRED parameters: `apps` (array of app names like ["Finder", "Safari"]) and `reason` (one-sentence task explanation). Both must be supplied — calling with only `reason` returns a `bad_args` error before any dialog appears. ' +
         'The user sees a single dialog listing all requested apps and either allows the whole set or denies it. ' +
         'Call this again mid-session to add more apps; previously granted apps remain granted. ' +
         'Returns the granted apps, denied apps, and screenshot filtering capability.',

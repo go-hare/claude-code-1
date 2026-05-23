@@ -1,10 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import {
-  dedupeToolsByName,
-  toolMatchesName,
-  type Tool,
-  type Tools,
-} from './Tool.js'
+import { toolMatchesName, type Tool, type Tools } from './Tool.js'
 import { AgentTool } from '@claude-code/builtin-tools/tools/AgentTool/AgentTool.js'
 import { SkillTool } from '@claude-code/builtin-tools/tools/SkillTool/SkillTool.js'
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js'
@@ -97,6 +92,7 @@ import { TaskCreateTool } from '@claude-code/builtin-tools/tools/TaskCreateTool/
 import { TaskGetTool } from '@claude-code/builtin-tools/tools/TaskGetTool/TaskGetTool.js'
 import { TaskUpdateTool } from '@claude-code/builtin-tools/tools/TaskUpdateTool/TaskUpdateTool.js'
 import { TaskListTool } from '@claude-code/builtin-tools/tools/TaskListTool/TaskListTool.js'
+import uniqBy from 'lodash-es/uniqBy.js'
 import { isSearchExtraToolsEnabledOptimistic } from './utils/searchExtraTools.js'
 import { isTodoV2Enabled } from './utils/tasks.js'
 // Dead code elimination: conditional import for CLAUDE_CODE_VERIFY_PLAN
@@ -107,6 +103,7 @@ const VerifyPlanExecutionTool =
         .VerifyPlanExecutionTool
     : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 export {
   ALL_AGENT_DISALLOWED_TOOLS,
   CUSTOM_AGENT_DISALLOWED_TOOLS,
@@ -158,19 +155,18 @@ const WorkflowTool = feature('WORKFLOW_SCRIPTS')
     })()
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
+import type { ToolPermissionContext } from './Tool.js'
+import { getDenyRuleForTool } from './utils/permissions/permissions.js'
 import { hasEmbeddedSearchTools } from './utils/embeddedTools.js'
 import { isEnvTruthy } from './utils/envUtils.js'
 import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
 import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
 import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js'
 import {
-  REPL_ONLY_TOOLS,
   REPL_TOOL_NAME,
+  REPL_ONLY_TOOLS,
   isReplModeEnabled,
 } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
-import type { ToolPermissionContext } from './Tool.js'
-import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
-import { getDenyRuleForTool } from './utils/permissions/permissions.js'
 export { REPL_ONLY_TOOLS }
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getPowerShellTool = () => {
@@ -282,28 +278,6 @@ export function getAllBaseTools(): Tools {
   ]
 }
 
-export function getSimpleModeTools(): Tools {
-  if (isReplModeEnabled() && REPLTool) {
-    const replSimple: Tool[] = [REPLTool]
-    if (
-      feature('COORDINATOR_MODE') &&
-      coordinatorModeModule?.isCoordinatorMode()
-    ) {
-      replSimple.push(TaskStopTool, getSendMessageTool())
-    }
-    return replSimple
-  }
-
-  const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
-  if (
-    feature('COORDINATOR_MODE') &&
-    coordinatorModeModule?.isCoordinatorMode()
-  ) {
-    simpleTools.push(AgentTool, TaskStopTool, getSendMessageTool())
-  }
-  return simpleTools
-}
-
 /**
  * Filters out tools that are blanket-denied by the permission context.
  * A tool is filtered out if there's a deny rule matching its name with no
@@ -323,19 +297,48 @@ export function filterToolsByDenyRules<
 }
 
 export const getTools = (permissionContext: ToolPermissionContext): Tools => {
+  // Simple mode: only Bash, Read, and Edit tools
   if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
-    return filterToolsByDenyRules(getSimpleModeTools(), permissionContext)
+    // --bare + REPL mode: REPL wraps Bash/Read/Edit/etc inside the VM, so
+    // return REPL instead of the raw primitives. Matches the non-bare path
+    // below which also hides REPL_ONLY_TOOLS when REPL is enabled.
+    if (isReplModeEnabled() && REPLTool) {
+      const replSimple: Tool[] = [REPLTool]
+      if (
+        feature('COORDINATOR_MODE') &&
+        coordinatorModeModule?.isCoordinatorMode()
+      ) {
+        replSimple.push(TaskStopTool, getSendMessageTool())
+      }
+      return filterToolsByDenyRules(replSimple, permissionContext)
+    }
+    const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
+    // When coordinator mode is also active, include AgentTool and TaskStopTool
+    // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and
+    // workers get Bash/Read/Edit (via filterToolsForAgent filtering).
+    if (
+      feature('COORDINATOR_MODE') &&
+      coordinatorModeModule?.isCoordinatorMode()
+    ) {
+      simpleTools.push(AgentTool, TaskStopTool, getSendMessageTool())
+    }
+    return filterToolsByDenyRules(simpleTools, permissionContext)
   }
 
+  // Get all base tools and filter out special tools that get added conditionally
   const specialTools = new Set([
     ListMcpResourcesTool.name,
     ReadMcpResourceTool.name,
     SYNTHETIC_OUTPUT_TOOL_NAME,
   ])
+
   const tools = getAllBaseTools().filter(tool => !specialTools.has(tool.name))
 
+  // Filter out tools that are denied by the deny rules
   let allowedTools = filterToolsByDenyRules(tools, permissionContext)
 
+  // When REPL mode is enabled, hide primitive tools from direct use.
+  // They're still accessible inside REPL via the VM context.
   if (isReplModeEnabled()) {
     const replEnabled = allowedTools.some(tool =>
       toolMatchesName(tool, REPL_TOOL_NAME),
@@ -347,7 +350,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     }
   }
 
-  const isEnabled = allowedTools.map(tool => tool.isEnabled())
+  const isEnabled = allowedTools.map(_ => _.isEnabled())
   return allowedTools.filter((_, i) => isEnabled[i])
 }
 
@@ -372,11 +375,22 @@ export function assembleToolPool(
   mcpTools: Tools,
 ): Tools {
   const builtInTools = getTools(permissionContext)
+
+  // Filter out MCP tools that are in the deny list
   const allowedMcpTools = filterToolsByDenyRules(mcpTools, permissionContext)
 
+  // Sort each partition for prompt-cache stability, keeping built-ins as a
+  // contiguous prefix. The server's claude_code_system_cache_policy places a
+  // global cache breakpoint after the last prefix-matched built-in tool; a flat
+  // sort would interleave MCP tools into built-ins and invalidate all downstream
+  // cache keys whenever an MCP tool sorts between existing built-ins. uniqBy
+  // preserves insertion order, so built-ins win on name conflict.
+  // Avoid Array.toSorted (Node 20+) — we support Node 18. builtInTools is
+  // readonly so copy-then-sort; allowedMcpTools is a fresh .filter() result.
   const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
-  return dedupeToolsByName(
+  return uniqBy(
     [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
+    'name',
   )
 }
 
