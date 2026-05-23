@@ -37,7 +37,8 @@ mock.module('src/utils/searchExtraTools.js', () => ({
   isSearchExtraToolsToolAvailable: () => true,
   isSearchExtraToolsEnabled: async () => true,
   isToolReferenceBlock: () => false,
-  extractDiscoveredToolNames: () => new Set(['TestTool', 'SecretTool']),
+  extractDiscoveredToolNames: () =>
+    new Set(['TestTool', 'SecretTool', 'TeamCreate']),
   isDeferredToolsDeltaEnabled: () => false,
   getDeferredToolsDelta: () => null,
 }))
