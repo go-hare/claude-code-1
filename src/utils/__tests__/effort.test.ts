@@ -302,7 +302,7 @@ describe('getEffortSuffix', () => {
     process.env.CLAUDE_CODE_USE_OPENAI = '1'
     process.env.CLAUDE_CODE_EFFORT_LEVEL = 'xhigh'
 
-    expect(getEffortSuffix('gpt-5.5', undefined)).toBe(' with high effort')
+    expect(getEffortSuffix('gpt-5.5', undefined)).toBe(' with xhigh effort')
   })
 })
 
