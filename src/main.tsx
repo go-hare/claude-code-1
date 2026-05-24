@@ -1981,8 +1981,7 @@ async function run(): Promise<CommanderCommand> {
       const chromeOpts = options as { chrome?: boolean };
       // Store the explicit CLI flag so teammates can inherit it
       setChromeFlagOverride(chromeOpts.chrome);
-      const enableClaudeInChrome =
-        shouldEnableClaudeInChrome(chromeOpts.chrome) && (process.env.USER_TYPE === 'ant' || isClaudeAISubscriber());
+      const enableClaudeInChrome = shouldEnableClaudeInChrome(chromeOpts.chrome);
       const autoEnableClaudeInChrome = !enableClaudeInChrome && shouldAutoEnableClaudeInChrome();
 
       if (enableClaudeInChrome) {
@@ -2212,8 +2211,8 @@ async function run(): Promise<CommanderCommand> {
       let toolPermissionContext = initResult.toolPermissionContext;
       const { warnings, dangerousPermissions, overlyBroadBashPermissions } = initResult;
 
-      // Handle overly broad shell allow rules for ant users (Bash(*), PowerShell(*))
-      if (process.env.USER_TYPE === 'ant' && overlyBroadBashPermissions.length > 0) {
+      // Handle overly broad shell allow rules (Bash(*), PowerShell(*))
+      if (overlyBroadBashPermissions.length > 0) {
         for (const permission of overlyBroadBashPermissions) {
           logForDebugging(
             `Ignoring overly broad shell permission ${permission.ruleDisplay} from ${permission.sourceDisplay}`,
@@ -2660,9 +2659,7 @@ async function run(): Promise<CommanderCommand> {
           // Log agent memory loaded event for tmux teammates
           if (customAgent.memory) {
             logEvent('tengu_agent_memory_loaded', {
-              ...(process.env.USER_TYPE === 'ant' && {
-                agent_type: customAgent.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              }),
+              agent_type: customAgent.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               scope: customAgent.memory as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               source: 'teammate' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             });
@@ -5578,18 +5575,16 @@ async function logTenguInit({
       }),
       autoUpdatesChannel: (getInitialSettings().autoUpdatesChannel ??
         'latest') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      ...(process.env.USER_TYPE === 'ant'
-        ? (() => {
-            const cwd = getCwd();
-            const gitRoot = findGitRoot(cwd);
-            const rp = gitRoot ? relative(gitRoot, cwd) || '.' : undefined;
-            return rp
-              ? {
-                  relativeProjectPath: rp as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                }
-              : {};
-          })()
-        : {}),
+      ...(() => {
+        const cwd = getCwd();
+        const gitRoot = findGitRoot(cwd);
+        const rp = gitRoot ? relative(gitRoot, cwd) || '.' : undefined;
+        return rp
+          ? {
+              relativeProjectPath: rp as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }
+          : {};
+      })(),
     });
   } catch (error) {
     logError(error);
