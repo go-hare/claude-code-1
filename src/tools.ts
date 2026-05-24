@@ -11,17 +11,12 @@ import { NotebookEditTool } from '@claude-code/builtin-tools/tools/NotebookEditT
 import { WebFetchTool } from '@claude-code/builtin-tools/tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from '@claude-code/builtin-tools/tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
-// Dead code elimination: conditional import for ant-only tools
+// REPLTool / SuggestBackgroundPRTool: previously ant-only, now generally available.
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const REPLTool =
-  process.env.USER_TYPE === 'ant'
-    ? require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js').REPLTool
-    : null
+  require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js').REPLTool
 const SuggestBackgroundPRTool =
-  process.env.USER_TYPE === 'ant'
-    ? require('@claude-code/builtin-tools/tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js')
-        .SuggestBackgroundPRTool
-    : null
+  require('@claude-code/builtin-tools/tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js').SuggestBackgroundPRTool
 const SleepTool =
   feature('PROACTIVE') || feature('KAIROS')
     ? require('@claude-code/builtin-tools/tools/SleepTool/SleepTool.js')
@@ -235,7 +230,7 @@ export function getAllBaseTools(): Tools {
     EnterPlanModeTool,
     LocalMemoryRecallTool,
     VaultHttpFetchTool,
-    ...(process.env.USER_TYPE === 'ant' ? [ConfigTool] : []),
+    ConfigTool,
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
     ...(SuggestBackgroundPRTool ? [SuggestBackgroundPRTool] : []),
     ...(WebBrowserTool ? [WebBrowserTool] : []),
@@ -252,7 +247,7 @@ export function getAllBaseTools(): Tools {
     getTeamCreateTool(),
     getTeamDeleteTool(),
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
-    ...(process.env.USER_TYPE === 'ant' && REPLTool ? [REPLTool] : []),
+    ...(REPLTool ? [REPLTool] : []),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
     ...cronTools,
