@@ -103,7 +103,7 @@ const VerifyPlanExecutionTool =
         .VerifyPlanExecutionTool
     : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 export {
   ALL_AGENT_DISALLOWED_TOOLS,
   CUSTOM_AGENT_DISALLOWED_TOOLS,
