@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle';
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { copyFile, stat as fsStat, truncate as fsTruncate, link } from 'fs/promises';
 import * as React from 'react';
+import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js';
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
@@ -64,6 +65,7 @@ import {
 import { interpretCommandResult } from './commandSemantics.js';
 import { getDefaultTimeoutMs, getMaxTimeoutMs, getSimplePrompt } from './prompt.js';
 import { checkReadOnlyConstraints } from './readOnlyValidation.js';
+import { validateCoordinatorBashWriteAccess } from './coordinatorWriteValidation.js';
 import { parseSedEditCommand } from './sedEditParser.js';
 import { shouldUseSandbox } from './shouldUseSandbox.js';
 import { BASH_TOOL_NAME } from './toolName.js';
@@ -530,6 +532,20 @@ async function applySedEdit(
     await fileHistoryTrackEdit(toolUseContext.updateFileHistoryState, absoluteFilePath, parentMessage.uuid);
   }
 
+  const coordinatorWriteValidation = validateCoordinatorWriteAccess({
+    filePath: absoluteFilePath,
+    sourceTool: 'BashTool(sed)',
+  });
+  if (!coordinatorWriteValidation.result) {
+    return {
+      data: {
+        stdout: '',
+        stderr: `${coordinatorWriteValidation.message}\nExit code 1`,
+        interrupted: false,
+      },
+    };
+  }
+
   // Detect line endings and write new content
   const endings = detectLineEndings(absoluteFilePath);
   writeTextContent(absoluteFilePath, newContent, encoding, endings);
@@ -777,6 +793,16 @@ export const BashTool = buildTool({
 
     const isMainThread = !toolUseContext.agentId;
     const preventCwdChanges = !isMainThread;
+    const coordinatorWriteValidation = await validateCoordinatorBashWriteAccess(input.command, toolUseContext.agentId);
+    if (!coordinatorWriteValidation.result) {
+      return {
+        data: {
+          stdout: '',
+          stderr: `${coordinatorWriteValidation.message}\nExit code 1`,
+          interrupted: false,
+        },
+      };
+    }
 
     try {
       // Use the new async generator version of runShellCommand

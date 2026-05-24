@@ -6,7 +6,8 @@ import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
 import { clearInvokedSkillsForAgent, getSdkAgentProgressSummariesEnabled } from 'src/bootstrap/state.js';
 import { enhanceSystemPromptWithEnvDetails, getSystemPrompt } from 'src/constants/prompts.js';
-import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js';
+import { getWorkerAntiInjectionAddendum, isCoordinatorMode } from 'src/coordinator/coordinatorMode.js';
+import { releaseAgentLocks, transferAgentLocks } from 'src/coordinator/fileLockManager.js';
 import { startAgentSummarization } from 'src/services/AgentSummary/agentSummary.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import {
@@ -38,7 +39,6 @@ import {
   type BackgroundRemoteSessionPrecondition,
 } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { assembleToolPool } from 'src/tools.js';
-import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js';
 import { asAgentId } from 'src/types/ids.js';
 import { runWithAgentContext, type SubagentContext } from 'src/utils/agentContext.js';
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js';
@@ -47,6 +47,7 @@ import { logForDebugging } from 'src/utils/debug.js';
 import { isEnvTruthy } from 'src/utils/envUtils.js';
 import { AbortError, errorMessage, toError } from 'src/utils/errors.js';
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js';
+import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { createUserMessage, extractTextContent, isSyntheticMessage, normalizeMessages } from 'src/utils/messages.js';
 import { getAgentModel } from 'src/utils/model/agent.js';
@@ -59,6 +60,7 @@ import { sleep } from 'src/utils/sleep.js';
 import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
 import { asSystemPrompt } from 'src/utils/systemPromptType.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
+import { getTask, getTaskListId, getTaskOwnedFiles } from 'src/utils/tasks.js';
 import { getParentSessionId, isTeammate } from 'src/utils/teammate.js';
 import { isInProcessTeammate } from 'src/utils/teammateContext.js';
 import { teleportToRemote } from 'src/utils/teleport.js';
@@ -88,6 +90,7 @@ import {
   isForkSubagentEnabled,
   isInForkChild,
 } from './forkSubagent.js';
+import { normalizeAgentOwnedFiles, resolveAgentTaskExecutionContext, shouldExposeTaskIdInput } from './taskLinking.js';
 import type { AgentDefinition } from './loadAgentsDir.js';
 import { filterAgentsByMcpRequirements, hasRequiredMcpServers, isBuiltInAgent } from './loadAgentsDir.js';
 import { getPrompt } from './prompt.js';
@@ -149,6 +152,18 @@ const baseInputSchema = lazySchema(() =>
       .boolean()
       .optional()
       .describe('Set to true to run this agent in the background. You will be notified when it completes.'),
+    task_id: z
+      .string()
+      .optional()
+      .describe(
+        'Optional task-list task ID this agent is executing. Use this to link a worker run back to a tracked task.',
+      ),
+    owned_files: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Optional file paths this worker exclusively owns for writes. Use for coordinator write tasks to enforce file ownership.',
+      ),
   }),
 );
 
@@ -193,6 +208,7 @@ const fullInputSchema = lazySchema(() => {
 // which always includes all optional fields.
 export const inputSchema = lazySchema(() => {
   const schema = feature('KAIROS') ? fullInputSchema() : fullInputSchema().omit({ cwd: true });
+  const schemaWithTaskFields = shouldExposeTaskIdInput() ? schema : schema.omit({ task_id: true });
 
   // GrowthBook-in-lazySchema is acceptable here (unlike subagent_type, which
   // was removed in 906da6c723): the divergence window is one-session-per-
@@ -201,7 +217,9 @@ export const inputSchema = lazySchema(() => {
   // by forceAsync) or "schema hides a param that would've worked" (gate
   // flips off mid-session: everything still runs async via memoized
   // forceAsync). No Zod rejection, no crash — unlike required→optional.
-  return isBackgroundTasksDisabled || isForkSubagentEnabled() ? schema.omit({ run_in_background: true }) : schema;
+  return isBackgroundTasksDisabled || isForkSubagentEnabled()
+    ? schemaWithTaskFields.omit({ run_in_background: true })
+    : schemaWithTaskFields;
 });
 type InputSchema = ReturnType<typeof inputSchema>;
 
@@ -210,6 +228,8 @@ type InputSchema = ReturnType<typeof inputSchema>;
 // subagent_type is optional; call() defaults it to general-purpose when the
 // fork gate is off, or routes to the fork path when the gate is on.
 type AgentToolInput = z.infer<ReturnType<typeof baseInputSchema>> & {
+  task_id?: string;
+  owned_files?: string[];
   name?: string;
   team_name?: string;
   mode?: z.infer<ReturnType<typeof permissionModeSchema>>;
@@ -234,6 +254,7 @@ export const outputSchema = lazySchema(() => {
       .boolean()
       .optional()
       .describe('Whether the calling agent has Read/Bash tools to check progress'),
+    taskLinkingWarning: z.string().optional(),
   });
 
   return z.union([syncOutputSchema, asyncOutputSchema]);
@@ -272,6 +293,7 @@ export type RemoteLaunchedOutput = {
   description: string;
   prompt: string;
   outputFile: string;
+  taskLinkingWarning?: string;
 };
 
 type InternalOutput = Output | TeammateSpawnedOutput | RemoteLaunchedOutput;
@@ -326,6 +348,8 @@ export const AgentTool = buildTool({
       description,
       model: modelParam,
       run_in_background,
+      task_id,
+      owned_files,
       name,
       team_name,
       mode: spawnMode,
@@ -406,6 +430,21 @@ export const AgentTool = buildTool({
       };
       return { data: spawnResult } as unknown as { data: Output };
     }
+
+    const normalizedOwnedFiles = normalizeAgentOwnedFiles(owned_files);
+    const { taskExecutionContext, taskLinkingWarning } = await resolveAgentTaskExecutionContext({
+      taskId: task_id,
+      explicitOwnedFiles: normalizedOwnedFiles,
+      getTaskListId,
+      getTask,
+      getTaskOwnedFiles,
+      logWarning: logForDebugging,
+    });
+    const workerOwnedFiles = normalizedOwnedFiles ?? taskExecutionContext?.ownedFiles;
+    const activeTaskExecutionContext =
+      taskExecutionContext && workerOwnedFiles
+        ? { ...taskExecutionContext, ownedFiles: workerOwnedFiles }
+        : taskExecutionContext;
 
     // Fork subagent experiment routing:
     // - subagent_type set: use it (explicit wins)
@@ -692,6 +731,9 @@ export const AgentTool = buildTool({
     // Use inline env check instead of coordinatorModule to avoid circular
     // dependency issues during test module loading.
     const isCoordinator = feature('COORDINATOR_MODE') ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE) : false;
+    if (isCoordinator && !isForkPath && enhancedSystemPrompt) {
+      enhancedSystemPrompt = [...enhancedSystemPrompt, getWorkerAntiInjectionAddendum()];
+    }
 
     // Fork subagent experiment: force ALL spawns async for a unified
     // <task-notification> interaction model (not just fork spawns — all of them).
@@ -838,6 +880,7 @@ export const AgentTool = buildTool({
         // survive when the user presses ESC to cancel the main thread.
         // They are killed explicitly via chat:killAgents.
         toolUseId: toolUseContext.toolUseId,
+        activeTaskExecutionContext,
       });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -863,6 +906,7 @@ export const AgentTool = buildTool({
         invokingRequestId: assistantMessage?.requestId as string | undefined,
         invocationKind: 'spawn' as const,
         invocationEmitted: false,
+        ownedFiles: workerOwnedFiles,
       };
 
       // Workload propagation: handlePromptSubmit wraps the entire turn in
@@ -871,29 +915,34 @@ export const AgentTool = buildTool({
       // inside. No capture/restore needed; the detached closure sees the
       // parent turn's workload automatically, isolated from its finally.
       void runWithAgentContext(asyncAgentContext, () =>
-        wrapWithCwd(() =>
-          runAsyncAgentLifecycle({
-            taskId: agentBackgroundTask.agentId,
-            abortController: agentBackgroundTask.abortController!,
-            makeStream: onCacheSafeParams =>
-              runAgent({
-                ...runAgentParams,
-                override: {
-                  ...runAgentParams.override,
-                  agentId: asAgentId(agentBackgroundTask.agentId),
-                  abortController: agentBackgroundTask.abortController!,
-                },
-                onCacheSafeParams,
-              }),
-            metadata,
-            description,
-            toolUseContext,
-            rootSetAppState,
-            agentIdForCleanup: asyncAgentId,
-            enableSummarization: isCoordinator || isForkSubagentEnabled() || getSdkAgentProgressSummariesEnabled(),
-            getWorktreeResult: cleanupWorktreeIfNeeded,
-          }),
-        ),
+        wrapWithCwd(async () => {
+          try {
+            await runAsyncAgentLifecycle({
+              taskId: agentBackgroundTask.agentId,
+              abortController: agentBackgroundTask.abortController!,
+              makeStream: onCacheSafeParams =>
+                runAgent({
+                  ...runAgentParams,
+                  override: {
+                    ...runAgentParams.override,
+                    agentId: asAgentId(agentBackgroundTask.agentId),
+                    abortController: agentBackgroundTask.abortController!,
+                  },
+                  activeTaskExecutionContext,
+                  onCacheSafeParams,
+                }),
+              metadata,
+              description,
+              toolUseContext,
+              rootSetAppState,
+              agentIdForCleanup: asyncAgentId,
+              enableSummarization: isCoordinator || isForkSubagentEnabled() || getSdkAgentProgressSummariesEnabled(),
+              getWorktreeResult: cleanupWorktreeIfNeeded,
+            });
+          } finally {
+            releaseAgentLocks(agentBackgroundTask.agentId);
+          }
+        }),
       );
 
       const canReadOutputFile = toolUseContext.options.tools.some(
@@ -908,6 +957,7 @@ export const AgentTool = buildTool({
           prompt: prompt,
           outputFile: getTaskOutputPath(agentBackgroundTask.agentId),
           canReadOutputFile,
+          taskLinkingWarning,
         },
       };
     } else {
@@ -926,6 +976,7 @@ export const AgentTool = buildTool({
         invokingRequestId: assistantMessage?.requestId as string | undefined,
         invocationKind: 'spawn' as const,
         invocationEmitted: false,
+        ownedFiles: workerOwnedFiles,
       };
 
       // Wrap entire sync agent execution in context for analytics attribution
@@ -998,6 +1049,7 @@ export const AgentTool = buildTool({
               ...runAgentParams.override,
               agentId: syncAgentId,
             },
+            activeTaskExecutionContext,
             onCacheSafeParams:
               summaryTaskId && getSdkAgentProgressSummariesEnabled()
                 ? (params: CacheSafeParams) => {
@@ -1069,6 +1121,7 @@ export const AgentTool = buildTool({
                   // Workload: inherited via ALS at `void` invocation time,
                   // same as the async-from-start path above.
                   // Continue agent in background and return async result
+                  transferAgentLocks(syncAgentId, backgroundedTaskId);
                   void runWithAgentContext(syncAgentContext, async () => {
                     let stopBackgroundedSummarization: (() => void) | undefined;
                     try {
@@ -1091,6 +1144,7 @@ export const AgentTool = buildTool({
                           agentId: asAgentId(backgroundedTaskId),
                           abortController: task.abortController,
                         },
+                        activeTaskExecutionContext,
                         onCacheSafeParams: getSdkAgentProgressSummariesEnabled()
                           ? (params: CacheSafeParams) => {
                               const { stop } = startAgentSummarization(
@@ -1206,6 +1260,7 @@ export const AgentTool = buildTool({
                       });
                     } finally {
                       stopBackgroundedSummarization?.();
+                      releaseAgentLocks(backgroundedTaskId);
                       clearInvokedSkillsForAgent(syncAgentId);
                       clearDumpState(syncAgentId);
                       // Note: worktree cleanup is done before enqueueAgentNotification
@@ -1226,6 +1281,7 @@ export const AgentTool = buildTool({
                       prompt: prompt,
                       outputFile: getTaskOutputPath(backgroundedTaskId),
                       canReadOutputFile,
+                      taskLinkingWarning,
                     },
                   };
                 }
@@ -1377,6 +1433,7 @@ export const AgentTool = buildTool({
 
             // Clean up scoped skills so they don't accumulate in the global map
             clearInvokedSkillsForAgent(syncAgentId);
+            releaseAgentLocks(syncAgentId);
 
             // Clean up dumpState entry for this agent to prevent unbounded growth
             // Skip if backgrounded — the backgrounded agent's finally handles cleanup

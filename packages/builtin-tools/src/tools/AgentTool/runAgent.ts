@@ -1,7 +1,6 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
-import uniqBy from 'lodash-es/uniqBy.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { getProjectRoot, getSessionId } from 'src/bootstrap/state.js'
 import { getCommand, getSkillToolCommands, hasCommand } from 'src/commands.js'
@@ -25,7 +24,12 @@ import type {
   MCPServerConnection,
   ScopedMcpServerConfig,
 } from 'src/services/mcp/types.js'
-import type { Tool, Tools, ToolUseContext } from 'src/Tool.js'
+import {
+  dedupeToolsByName,
+  type Tool,
+  type Tools,
+  type ToolUseContext,
+} from 'src/Tool.js'
 import { killShellTasksForAgent } from 'src/tasks/LocalShellTask/killShellTasks.js'
 import type { Command } from 'src/types/command.js'
 import type { AgentId } from 'src/types/ids.js'
@@ -85,11 +89,9 @@ import {
 } from 'src/utils/telemetry/perfettoTracing.js'
 import type { ContentReplacementState } from 'src/utils/toolResultStorage.js'
 import { createAgentId } from 'src/utils/uuid.js'
+import type { ActiveTaskExecutionContext } from 'src/utils/tasks.js'
 import { resolveAgentTools } from './agentToolUtils.js'
-import { filterIncompleteToolCalls } from './filterIncompleteToolCalls.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
-
-export { filterIncompleteToolCalls } from './filterIncompleteToolCalls.js'
 
 /**
  * Initialize agent-specific MCP servers
@@ -271,6 +273,8 @@ export async function* runAgent({
   allowedTools,
   onCacheSafeParams,
   contentReplacementState,
+  ownedFiles,
+  activeTaskExecutionContext,
   useExactTools,
   worktreePath,
   description,
@@ -315,6 +319,10 @@ export async function* runAgent({
    * the same tool results are re-replaced (prompt cache stability). When
    * omitted, createSubagentContext clones the parent's state. */
   contentReplacementState?: ContentReplacementState
+  /** Coordinator-owned file set for write serialization. */
+  ownedFiles?: string[]
+  /** Optional task context to carry into the spawned agent. */
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
   /** When true, use availableTools directly without filtering through
    * resolveAgentTools(). Also inherits the parent's thinkingConfig and
    * isNonInteractiveSession instead of overriding them. Used by the fork
@@ -666,10 +674,10 @@ export async function* runAgent({
 
   // Merge agent MCP tools with resolved agent tools, deduplicating by name.
   // resolvedTools is already deduplicated (see resolveAgentTools), so skip
-  // the spread + uniqBy overhead when there are no agent-specific MCP tools.
+  // the spread + merge overhead when there are no agent-specific MCP tools.
   const allTools =
     agentMcpTools.length > 0
-      ? uniqBy([...resolvedTools, ...agentMcpTools], 'name')
+      ? dedupeToolsByName([...resolvedTools, ...agentMcpTools])
       : resolvedTools
 
   // Build agent-specific options
@@ -720,6 +728,8 @@ export async function* runAgent({
     criticalSystemReminder_EXPERIMENTAL:
       agentDefinition.criticalSystemReminder_EXPERIMENTAL,
     contentReplacementState,
+    ...(ownedFiles && ownedFiles.length > 0 && { ownedFiles }),
+    activeTaskExecutionContext,
   })
 
   // Preserve tool use results for subagents with viewable transcripts (in-process teammates)
@@ -887,6 +897,50 @@ export async function* runAgent({
     }
     /* eslint-enable @typescript-eslint/no-require-imports */
   }
+}
+
+/**
+ * Filters out assistant messages with incomplete tool calls (tool uses without results).
+ * This prevents API errors when sending messages with orphaned tool calls.
+ */
+export function filterIncompleteToolCalls(messages: Message[]): Message[] {
+  // Build a set of tool use IDs that have results
+  const toolUseIdsWithResults = new Set<string>()
+
+  for (const message of messages) {
+    if (message?.type === 'user') {
+      const userMessage = message as UserMessage
+      const content = userMessage.message.content
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result' && block.tool_use_id) {
+            toolUseIdsWithResults.add(block.tool_use_id)
+          }
+        }
+      }
+    }
+  }
+
+  // Filter out assistant messages that contain tool calls without results
+  return messages.filter(message => {
+    if (message?.type === 'assistant') {
+      const assistantMessage = message as AssistantMessage
+      const content = assistantMessage.message.content
+      if (Array.isArray(content)) {
+        // Check if this assistant message has any tool uses without results
+        const hasIncompleteToolCall = content.some(
+          block =>
+            block.type === 'tool_use' &&
+            block.id &&
+            !toolUseIdsWithResults.has(block.id),
+        )
+        // Exclude messages with incomplete tool calls
+        return !hasIncompleteToolCall
+      }
+    }
+    // Keep all non-assistant messages and assistant messages without tool calls
+    return true
+  })
 }
 
 async function getAgentSystemPrompt(

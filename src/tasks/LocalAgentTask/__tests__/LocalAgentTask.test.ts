@@ -11,6 +11,7 @@ mock.module('src/utils/log.ts', logMock)
 
 mock.module('src/utils/sessionStorage.js', () => ({
   getAgentTranscriptPath: (id: string) => `/tmp/transcripts/${id}.jsonl`,
+  isTranscriptPersistenceDisabled: () => false,
   recordSidechainTranscript: async () => {},
   recordQueueOperation: noop,
   writeAgentMetadata: async () => {},
@@ -19,6 +20,7 @@ mock.module('src/utils/sessionStorage.js', () => ({
 mock.module('src/utils/task/diskOutput.js', () => ({
   evictTaskOutput: noop,
   getTaskOutputPath: (id: string) => `/tmp/output/${id}`,
+  initTaskOutput: async () => {},
   initTaskOutputAsSymlink: async () => {},
   getTaskOutputDelta: async () => null,
 }))
@@ -35,7 +37,14 @@ mock.module('src/bootstrap/state.js', () => ({
   getSdkAgentProgressSummariesEnabled: () => false,
   getSessionId: () => 'test-session-001',
   getProjectRoot: () => '/test/project',
+  getOriginalCwd: () => '/test/project',
+  getCwdState: () => '/test/project',
   getIsNonInteractiveSession: () => false,
+  getAllowedSettingSources: () => ['user', 'project', 'local'],
+  getFlagSettingsPath: () => undefined,
+  getFlagSettingsInline: () => null,
+  setCwdState: noop,
+  waitForScrollIdle: async () => {},
   addSlowOperation: noop,
 }))
 
@@ -89,6 +98,7 @@ mock.module('src/services/analytics/index.js', () => ({
 
 mock.module('src/utils/collapseReadSearch.js', () => ({
   getSearchExtraToolsOrReadInfo: () => undefined,
+  getToolSearchOrReadInfo: () => undefined,
 }))
 
 // ─── Import after mocks ───
@@ -355,12 +365,12 @@ describe('killAsyncAgent', () => {
 })
 
 describe('enqueueAgentNotification', () => {
-  test('enqueues completed notification with correct XML format', () => {
+  test('enqueues completed notification with correct XML format', async () => {
     const { setAppState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
     })
 
-    enqueueAgentNotification({
+    await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'refactor auth',
       status: 'completed',
@@ -384,12 +394,12 @@ describe('enqueueAgentNotification', () => {
     )
   })
 
-  test('enqueues failed notification with error', () => {
+  test('enqueues failed notification with error', async () => {
     const { setAppState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
     })
 
-    enqueueAgentNotification({
+    await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'test',
       status: 'failed',
@@ -404,12 +414,12 @@ describe('enqueueAgentNotification', () => {
     )
   })
 
-  test('enqueues killed notification', () => {
+  test('enqueues killed notification', async () => {
     const { setAppState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
     })
 
-    enqueueAgentNotification({
+    await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'test',
       status: 'killed',
@@ -421,12 +431,12 @@ describe('enqueueAgentNotification', () => {
     expect(enqueuedNotifications[0]).toContain('Agent "test" was stopped')
   })
 
-  test('prevents duplicate notifications', () => {
+  test('prevents duplicate notifications', async () => {
     const { setAppState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
     })
 
-    enqueueAgentNotification({
+    await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'test',
       status: 'completed',
@@ -434,7 +444,7 @@ describe('enqueueAgentNotification', () => {
     })
 
     // Second call — notified flag already set by first call
-    enqueueAgentNotification({
+    await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'test',
       status: 'completed',
@@ -444,12 +454,12 @@ describe('enqueueAgentNotification', () => {
     expect(enqueuedNotifications).toHaveLength(1)
   })
 
-  test('skips if task already notified', () => {
+  test('skips if task already notified', async () => {
     const { setAppState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ notified: true }) },
     })
 
-    enqueueAgentNotification({
+    await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'test',
       status: 'completed',

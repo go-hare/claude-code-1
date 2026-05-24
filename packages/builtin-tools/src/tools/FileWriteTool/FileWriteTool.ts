@@ -1,4 +1,5 @@
 import { dirname, sep } from 'path'
+import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { z } from 'zod/v4'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -187,7 +188,10 @@ export const FileWriteTool = buildTool({
       fileMtimeMs = fileStat.mtimeMs
     } catch (e) {
       if (isENOENT(e)) {
-        return { result: true }
+        return validateCoordinatorWriteAccess({
+          filePath: fullFilePath,
+          sourceTool: 'FileWriteTool',
+        })
       }
       throw e
     }
@@ -208,7 +212,10 @@ export const FileWriteTool = buildTool({
       }
     }
 
-    return { result: true }
+    return validateCoordinatorWriteAccess({
+      filePath: fullFilePath,
+      sourceTool: 'FileWriteTool',
+    })
   },
   async call(
     { file_path, content },

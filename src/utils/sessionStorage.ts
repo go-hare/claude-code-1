@@ -415,6 +415,18 @@ export function getNodeEnv(): string {
   return process.env.NODE_ENV || 'development'
 }
 
+export function isTranscriptPersistenceDisabled(): boolean {
+  const allowTestPersistence = isEnvTruthy(
+    process.env.TEST_ENABLE_SESSION_PERSISTENCE,
+  )
+  return (
+    (getNodeEnv() === 'test' && !allowTestPersistence) ||
+    getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
+    isSessionPersistenceDisabled() ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
+  )
+}
+
 // exported for testing
 export function getUserType(): string {
   return process.env.USER_TYPE || 'external'

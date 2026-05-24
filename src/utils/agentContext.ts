@@ -51,6 +51,8 @@ export type SubagentContext = {
    *  Reset to false on each spawn/resume; flipped true by
    *  consumeInvokingRequestId() on the first terminal API event. */
   invocationEmitted?: boolean
+  /** Optional coordinator-owned file set for write serialization. */
+  ownedFiles?: string[]
 }
 
 /**
@@ -82,6 +84,8 @@ export type TeammateAgentContext = {
   invocationKind?: 'spawn' | 'resume'
   /** Mutable flag: see SubagentContext.invocationEmitted. */
   invocationEmitted?: boolean
+  /** Optional coordinator-owned file set for write serialization. */
+  ownedFiles?: string[]
 }
 
 /**

@@ -18,18 +18,28 @@ import { createTaskStateBase } from '../../Task.js';
 import type { Tools } from '../../Tool.js';
 import { findToolByName } from '../../Tool.js';
 import type { AgentToolResult } from '@claude-code-best/builtin-tools/tools/AgentTool/agentToolUtils.js';
+import { VERIFICATION_AGENT_TYPE } from '@claude-code-best/builtin-tools/tools/AgentTool/constants.js';
 import type { AgentDefinition } from '@claude-code-best/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js';
 import { asAgentId } from '../../types/ids.js';
+import type { AgentId } from '../../types/ids.js';
 import type { Message } from '../../types/message.js';
 import { createAbortController, createChildAbortController } from '../../utils/abortController.js';
+import type { ActiveTaskExecutionContext } from '../../utils/tasks.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
-import { getSearchExtraToolsOrReadInfo } from '../../utils/collapseReadSearch.js';
+import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
-import { getAgentTranscriptPath } from '../../utils/sessionStorage.js';
-import { evictTaskOutput, getTaskOutputPath, initTaskOutputAsSymlink } from '../../utils/task/diskOutput.js';
+import { getAgentTranscriptPath, isTranscriptPersistenceDisabled } from '../../utils/sessionStorage.js';
+import { getTaskExecutionMetadata, getTaskListId, listTasks, markTaskCompletionSuggested } from '../../utils/tasks.js';
+import {
+  evictTaskOutput,
+  getTaskOutputPath,
+  initTaskOutput,
+  initTaskOutputAsSymlink,
+} from '../../utils/task/diskOutput.js';
 import { PANEL_GRACE_MS, registerTask, updateTaskState } from '../../utils/task/framework.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
+import { validateWorkerResult } from '../../coordinator/workerResultValidator.js';
 import type { TaskState } from '../types.js';
 
 export type ToolActivity = {
@@ -106,7 +116,7 @@ export function updateProgressFromMessage(
       // Omit StructuredOutput from preview - it's an internal tool
       if (content.name !== SYNTHETIC_OUTPUT_TOOL_NAME) {
         const input = content.input as Record<string, unknown>;
-        const classification = tools ? getSearchExtraToolsOrReadInfo(content.name!, input, tools) : undefined;
+        const classification = tools ? getToolSearchOrReadInfo(content.name!, input, tools) : undefined;
         tracker.recentActivities.push({
           toolName: content.name!,
           input,
@@ -150,6 +160,9 @@ export type LocalAgentTaskState = TaskStateBase & {
   selectedAgent?: AgentDefinition;
   agentType: string;
   model?: string;
+  activeTaskExecutionContext?: ActiveTaskExecutionContext;
+  ownedFiles?: string[];
+  notificationTargetAgentId?: AgentId;
   abortController?: AbortController;
   unregisterCleanup?: () => void;
   error?: string;
@@ -176,6 +189,20 @@ export type LocalAgentTaskState = TaskStateBase & {
   // and on unselect; cleared on retain.
   evictAfter?: number;
 };
+
+function initAgentTaskOutput(agentId: string): void {
+  if (isTranscriptPersistenceDisabled()) {
+    void initTaskOutput(agentId);
+    return;
+  }
+  void initTaskOutputAsSymlink(agentId, getAgentTranscriptPath(asAgentId(agentId)));
+}
+
+function evictAgentTaskOutputIfPersistent(taskId: string): void {
+  if (!isTranscriptPersistenceDisabled()) {
+    void evictTaskOutput(taskId);
+  }
+}
 
 export function isLocalAgentTask(task: unknown): task is LocalAgentTaskState {
   return typeof task === 'object' && task !== null && 'type' in task && task.type === 'local_agent';
@@ -239,7 +266,44 @@ export function drainPendingMessages(
 /**
  * Enqueue an agent notification to the message queue.
  */
-export function enqueueAgentNotification({
+async function getLinkedTaskCompletionHint(
+  taskId: string,
+  status: 'completed' | 'failed' | 'killed',
+  linkedTaskListId?: string,
+): Promise<string | undefined> {
+  if (status !== 'completed') {
+    return undefined;
+  }
+
+  for (const taskListId of getCompletionHintTaskListIds(linkedTaskListId)) {
+    const taskList = await listTasks(taskListId);
+    const linkedTask = taskList.find(task => {
+      const metadata = getTaskExecutionMetadata(task);
+      return metadata?.linkedBackgroundTaskId === taskId;
+    });
+    if (!linkedTask || linkedTask.status !== 'in_progress') {
+      continue;
+    }
+
+    const shouldSuggest = await markTaskCompletionSuggested(taskListId, linkedTask.id, taskId);
+    if (!shouldSuggest) {
+      return undefined;
+    }
+
+    return `Background task for task #${linkedTask.id} has completed. If the work is done, call TaskUpdate with status: "completed" before proceeding.`;
+  }
+
+  return undefined;
+}
+
+function getCompletionHintTaskListIds(linkedTaskListId: string | undefined): string[] {
+  const currentTaskListId = getTaskListId();
+  return linkedTaskListId && linkedTaskListId !== currentTaskListId
+    ? [linkedTaskListId, currentTaskListId]
+    : [currentTaskListId];
+}
+
+export async function enqueueAgentNotification({
   taskId,
   description,
   status,
@@ -265,16 +329,22 @@ export function enqueueAgentNotification({
   toolUseId?: string;
   worktreePath?: string;
   worktreeBranch?: string;
-}): void {
+}): Promise<void> {
   // Atomically check and set notified flag to prevent duplicate notifications.
   // If the task was already marked as notified (e.g., by TaskStopTool), skip
   // enqueueing to avoid sending redundant messages to the model.
   let shouldEnqueue = false;
+  let shouldCompletePlanVerification = false;
+  let notificationTargetAgentId: AgentId | undefined;
+  let linkedTaskListId: string | undefined;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.notified) {
       return task;
     }
     shouldEnqueue = true;
+    shouldCompletePlanVerification = task.agentType === VERIFICATION_AGENT_TYPE;
+    notificationTargetAgentId = task.notificationTargetAgentId;
+    linkedTaskListId = task.activeTaskExecutionContext?.taskListId;
     return {
       ...task,
       notified: true,
@@ -290,6 +360,23 @@ export function enqueueAgentNotification({
   // preserved; only the pre-computed response is discarded.
   abortSpeculation(setAppState);
 
+  if (shouldCompletePlanVerification) {
+    setAppState(prev => {
+      const pending = prev.pendingPlanVerification;
+      if (!pending || !pending.verificationStarted || pending.verificationCompleted) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        pendingPlanVerification: {
+          ...pending,
+          verificationCompleted: true,
+        },
+      };
+    });
+  }
+
   const summary =
     status === 'completed'
       ? `Agent "${description}" completed`
@@ -299,7 +386,10 @@ export function enqueueAgentNotification({
 
   const outputPath = getTaskOutputPath(taskId);
   const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
-  const resultSection = finalMessage ? `\n<result>${finalMessage}</result>` : '';
+  const completionHint = await getLinkedTaskCompletionHint(taskId, status, linkedTaskListId);
+  const resultWithHint = completionHint ? [finalMessage, completionHint].filter(Boolean).join('\n\n') : finalMessage;
+  const validatedResult = validateWorkerResult(resultWithHint, status, description);
+  const resultSection = `\n<result>${validatedResult.result}</result>`;
   const usageSection = usage
     ? `\n<usage><total_tokens>${usage.totalTokens}</total_tokens><tool_uses>${usage.toolUses}</tool_uses><duration_ms>${usage.durationMs}</duration_ms></usage>`
     : '';
@@ -314,7 +404,12 @@ export function enqueueAgentNotification({
 <${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>${resultSection}${usageSection}${worktreeSection}
 </${TASK_NOTIFICATION_TAG}>`;
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' });
+  enqueuePendingNotification({
+    value: message,
+    mode: 'task-notification',
+    agentId: notificationTargetAgentId,
+    priority: notificationTargetAgentId ? 'next' : 'later',
+  });
 }
 
 /**
@@ -355,7 +450,7 @@ export function killAsyncAgent(taskId: string, setAppState: SetAppState): void {
     };
   });
   if (killed) {
-    void evictTaskOutput(taskId);
+    evictAgentTaskOutputIfPersistent(taskId);
   }
 }
 
@@ -482,7 +577,7 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
       selectedAgent: undefined,
     };
   });
-  void evictTaskOutput(taskId);
+  evictAgentTaskOutputIfPersistent(taskId);
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 
@@ -508,7 +603,7 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
       selectedAgent: undefined,
     };
   });
-  void evictTaskOutput(taskId);
+  evictAgentTaskOutputIfPersistent(taskId);
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 
@@ -528,6 +623,9 @@ export function registerAsyncAgent({
   setAppState,
   parentAbortController,
   toolUseId,
+  activeTaskExecutionContext,
+  notificationTargetAgentId,
+  ownedFiles,
 }: {
   agentId: string;
   description: string;
@@ -536,8 +634,11 @@ export function registerAsyncAgent({
   setAppState: SetAppState;
   parentAbortController?: AbortController;
   toolUseId?: string;
+  activeTaskExecutionContext?: ActiveTaskExecutionContext;
+  notificationTargetAgentId?: AgentId;
+  ownedFiles?: string[];
 }): LocalAgentTaskState {
-  void initTaskOutputAsSymlink(agentId, getAgentTranscriptPath(asAgentId(agentId)));
+  initAgentTaskOutput(agentId);
 
   // Create abort controller - if parent provided, create child that auto-aborts with parent
   const abortController = parentAbortController
@@ -552,6 +653,9 @@ export function registerAsyncAgent({
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
+    activeTaskExecutionContext,
+    ownedFiles,
+    notificationTargetAgentId,
     abortController,
     retrieved: false,
     lastReportedToolCount: 0,
@@ -605,7 +709,7 @@ export function registerAgentForeground({
   backgroundSignal: Promise<void>;
   cancelAutoBackground?: () => void;
 } {
-  void initTaskOutputAsSymlink(agentId, getAgentTranscriptPath(asAgentId(agentId)));
+  initAgentTaskOutput(agentId);
 
   const abortController = createAbortController();
 
