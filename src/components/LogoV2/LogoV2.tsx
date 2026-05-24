@@ -176,12 +176,12 @@ export function LogoV2(): React.ReactNode {
             <Text>{announcement}</Text>
           </Box>
         )}
-        {process.env.USER_TYPE === 'ant' && !process.env.DEMO_VERSION && (
+        {false && !process.env.DEMO_VERSION && (
           <Box paddingLeft={2} flexDirection="column">
             <Text dimColor>Use /issue to report model behavior issues</Text>
           </Box>
         )}
-        {process.env.USER_TYPE === 'ant' && !process.env.DEMO_VERSION && (
+        {false && !process.env.DEMO_VERSION && (
           <Box paddingLeft={2} flexDirection="column">
             <Text color="warning">[ANT-ONLY] Logs:</Text>
             <Text dimColor>API calls: {getDisplayPath(getDumpPromptsPath())}</Text>
@@ -191,8 +191,8 @@ export function LogoV2(): React.ReactNode {
             )}
           </Box>
         )}
-        {process.env.USER_TYPE === 'ant' && <GateOverridesWarning />}
-        {process.env.USER_TYPE === 'ant' && <ExperimentEnrollmentNotice />}
+        {false && <GateOverridesWarning />}
+        {false && <ExperimentEnrollmentNotice />}
       </>
     );
   }
@@ -257,8 +257,8 @@ export function LogoV2(): React.ReactNode {
             <Text color="warning">Your bash commands will be sandboxed. Disable with /sandbox.</Text>
           </Box>
         )}
-        {process.env.USER_TYPE === 'ant' && <GateOverridesWarning />}
-        {process.env.USER_TYPE === 'ant' && <ExperimentEnrollmentNotice />}
+        {false && <GateOverridesWarning />}
+        {false && <ExperimentEnrollmentNotice />}
       </>
     );
   }
@@ -381,12 +381,12 @@ export function LogoV2(): React.ReactNode {
           <Text color="warning">Your bash commands will be sandboxed. Disable with /sandbox.</Text>
         </Box>
       )}
-      {process.env.USER_TYPE === 'ant' && !process.env.DEMO_VERSION && (
+      {false && !process.env.DEMO_VERSION && (
         <Box paddingLeft={2} flexDirection="column">
           <Text dimColor>Use /issue to report model behavior issues</Text>
         </Box>
       )}
-      {process.env.USER_TYPE === 'ant' && !process.env.DEMO_VERSION && (
+      {false && !process.env.DEMO_VERSION && (
         <Box paddingLeft={2} flexDirection="column">
           <Text color="warning">[ANT-ONLY] Logs:</Text>
           <Text dimColor>API calls: {getDisplayPath(getDumpPromptsPath())}</Text>
@@ -396,8 +396,8 @@ export function LogoV2(): React.ReactNode {
           )}
         </Box>
       )}
-      {process.env.USER_TYPE === 'ant' && <GateOverridesWarning />}
-      {process.env.USER_TYPE === 'ant' && <ExperimentEnrollmentNotice />}
+      {false && <GateOverridesWarning />}
+      {false && <ExperimentEnrollmentNotice />}
     </>
   );
 }
