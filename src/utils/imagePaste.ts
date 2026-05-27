@@ -165,7 +165,6 @@ export async function getImageFromClipboard(): Promise<ImageWithDimensions | nul
         return {
           base64: resized.buffer.toString('base64'),
           mediaType: `image/${resized.mediaType}`,
-          // resized.dimensions sees the already-downsampled buffer; native knows the true originals.
           dimensions: {
             originalWidth: native.originalWidth,
             originalHeight: native.originalHeight,

@@ -12,6 +12,24 @@ declare module 'bun:bundle' {
 }
 
 declare module 'bun:ffi' {
+  export const FFIType: {
+    bool: string
+    ptr: string
+    pointer: string
+    cstring: string
+    i8: string
+    i16: string
+    i32: string
+    i64: string
+    u8: string
+    u16: string
+    u32: string
+    u64: string
+    f32: string
+    f64: string
+    void: string
+    buffer: string
+  }
   export function dlopen<
     T extends Record<string, { args: readonly string[]; returns: string }>,
   >(
@@ -20,6 +38,17 @@ declare module 'bun:ffi' {
   ): {
     symbols: { [K in keyof T]: (...args: unknown[]) => unknown }
     close(): void
+  }
+  export function ptr(buffer: Buffer | ArrayBuffer | Uint8Array): number
+  export function toBuffer(ptr: unknown, offset: number, length: number): Buffer
+  export function toArrayBuffer(
+    ptr: unknown,
+    offset: number,
+    length: number,
+  ): ArrayBuffer
+  export class CString {
+    constructor(ptr: number, offset?: number, length?: number)
+    toString(): string
   }
 }
 
