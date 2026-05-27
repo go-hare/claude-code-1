@@ -175,6 +175,15 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Fast-path for `claude agents` — agent view dashboard
+  if (feature('BG_SESSIONS') && args[0] === 'agents') {
+    const { enableConfigs } = await import('../utils/config.js');
+    enableConfigs();
+    const { agentsMain } = await import('../cli/agents.js');
+    await agentsMain(args.slice(1));
+    return;
+  }
+
   // Fast-path for `claude remote-control` (also accepts legacy `claude remote` / `claude sync` / `claude bridge`):
   // serve local machine as bridge environment.
   // feature() must stay inline for build-time dead code elimination;
