@@ -1185,14 +1185,15 @@ export function REPL({
   // Elapsed time is computed by SpinnerWithVerb from these refs on each
   // animation frame, avoiding a useInterval that re-renders the entire REPL.
   const [userInputOnProcessing, setUserInputOnProcessingRaw] = React.useState<string | undefined>(undefined);
-  // messagesRef.current.length at the moment userInputOnProcessing was set.
-  // The placeholder hides once displayedMessages grows past this — i.e. the
-  // real user message has landed in the visible transcript.
-  const userInputBaselineRef = React.useRef(0);
   // True while the submitted prompt is being processed but its user message
-  // hasn't reached setMessages yet. setMessages uses this to keep the
-  // baseline in sync when unrelated async messages (bridge status, hook
-  // results, scheduled tasks) land during that window.
+  // hasn't reached setMessages yet. The render path reads this directly:
+  // when false, the placeholder is hidden regardless of how messages compare.
+  // Length-based gating is unsafe — `cappedMessages` slices to DEFERRED_CAP
+  // (500) and `displayedMessages` falls back to `deferredMessages` while
+  // loading without streaming text, so on long sessions
+  // `displayedMessages.length <= baseline` is permanently true and the
+  // placeholder duplicates the real user message that already rendered.
+  const [userMessagePending, setUserMessagePending] = React.useState(false);
   const userMessagePendingRef = React.useRef(false);
 
   // Wall-clock time tracking refs for accurate elapsed time calculation
@@ -1481,36 +1482,28 @@ export function REPL({
     const prev = messagesRef.current;
     const next = typeof action === 'function' ? action(messagesRef.current) : action;
     messagesRef.current = next;
-    if (next.length < userInputBaselineRef.current) {
-      // Shrank (compact/rewind/clear) — clamp so placeholderText's length
-      // check can't go stale.
-      userInputBaselineRef.current = 0;
-    } else if (next.length > prev.length && userMessagePendingRef.current) {
-      // Grew while the submitted user message hasn't landed yet. If the
-      // added messages don't include it (bridge status, hook results,
-      // scheduled tasks landing async during processUserInputBase), bump
-      // baseline so the placeholder stays visible. Once the user message
-      // lands, stop tracking — later additions (assistant stream) should
-      // not re-show the placeholder.
-      const delta = next.length - prev.length;
-      const added = prev.length === 0 || next[0] === prev[0] ? next.slice(-delta) : next.slice(0, delta);
-      if (added.some(isHumanTurn)) {
-        userMessagePendingRef.current = false;
-      } else {
-        userInputBaselineRef.current = next.length;
+    // Once the user's submitted message lands in the array, the placeholder's
+    // job is done. Diff prev→next by reference identity so we catch it
+    // regardless of where it landed (head replace via compact_boundary, tail
+    // append via onQuery, etc.) — length-based slicing was unreliable.
+    if (userMessagePendingRef.current && next.length > 0) {
+      const prevSet = new Set(prev);
+      for (const m of next) {
+        if (!prevSet.has(m) && isHumanTurn(m)) {
+          userMessagePendingRef.current = false;
+          setUserMessagePending(false);
+          break;
+        }
       }
     }
     rawSetMessages(next);
   }, []);
-  // Capture the baseline message count alongside the placeholder text so
-  // the render can hide it once displayedMessages grows past the baseline.
+  // setUserInputOnProcessing flips the pending flag; the render reads it
+  // directly. No length tracking — see userMessagePending declaration.
   const setUserInputOnProcessing = useCallback((input: string | undefined) => {
-    if (input !== undefined) {
-      userInputBaselineRef.current = messagesRef.current.length;
-      userMessagePendingRef.current = true;
-    } else {
-      userMessagePendingRef.current = false;
-    }
+    const pending = input !== undefined;
+    userMessagePendingRef.current = pending;
+    setUserMessagePending(pending);
     setUserInputOnProcessingRaw(input);
   }, []);
   // Fullscreen: track the unseen-divider position. dividerIndex changes
@@ -5649,18 +5642,14 @@ export function REPL({
     return transcriptReturn;
   }
 
-  // Show the placeholder until the real user message appears in
-  // displayedMessages. userInputOnProcessing stays set for the whole turn
-  // (cleared in resetLoadingState); this length check hides it once
-  // displayedMessages grows past the baseline captured at submit time.
-  // Covers both gaps: before setMessages is called (processUserInput), and
-  // while deferredMessages lags behind messages. Suppressed when viewing an
+  // Show the placeholder until the real user message appears in the
+  // transcript. userInputOnProcessing stays set for the whole turn (cleared
+  // in resetLoadingState); userMessagePending flips false the instant the
+  // submitted message lands in setMessages. Suppressed when viewing an
   // agent — displayedMessages is a different array there, and onAgentSubmit
   // doesn't use the placeholder anyway.
   const placeholderText =
-    userInputOnProcessing && !viewedAgentTask && displayedMessages.length <= userInputBaselineRef.current
-      ? userInputOnProcessing
-      : undefined;
+    userInputOnProcessing && !viewedAgentTask && userMessagePending ? userInputOnProcessing : undefined;
 
   const toolPermissionOverlay =
     focusedInputDialog === 'tool-permission' ? (
