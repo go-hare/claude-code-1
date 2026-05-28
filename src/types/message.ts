@@ -105,5 +105,7 @@ export type CollapsedReadSearchGroup = {
   teamMemorySearchCount?: number
   teamMemoryReadCount?: number
   teamMemoryWriteCount?: number
+  thoughtForMs?: number
+  latestThinkingSummary?: string
   [key: string]: unknown
 }

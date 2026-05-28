@@ -28,6 +28,7 @@ const teamMemCollapsed = feature('TEAMMEM')
 // (bash commands, file reads, search patterns) are actually readable instead
 // of flickering past in a single frame.
 const MIN_HINT_DISPLAY_MS = 700;
+const MIN_THINKING_SUMMARY_DISPLAY_MS = 3000;
 
 type Props = {
   message: CollapsedReadSearchGroup;
@@ -191,6 +192,12 @@ export function CollapsedReadSearchContent({
   }
 
   const displayedHint = useMinDisplayTime(incomingHint, MIN_HINT_DISPLAY_MS);
+
+  // Thinking summary: show the model's thinking summary with a 3-second minimum
+  // display time so it stays readable. Prefer it over the regular hint when active.
+  const thinkingSummaryRaw = isActiveGroup ? (message.latestThinkingSummary as string | undefined) : undefined;
+  const thinkingSummary = useMinDisplayTime(thinkingSummaryRaw, MIN_THINKING_SUMMARY_DISPLAY_MS);
+  const effectiveHint = thinkingSummary ?? displayedHint;
 
   // In verbose mode, render each tool use with its 1-line result summary
   if (verbose) {
@@ -489,21 +496,25 @@ export function CollapsedReadSearchContent({
           {isActiveGroup && <Text key="ellipsis">…</Text>} <CtrlOToExpand />
         </Text>
       </Box>
-      {isActiveGroup && displayedHint !== undefined && (
+      {isActiveGroup && effectiveHint !== undefined && (
         // Row layout: 5-wide gutter for ⎿, then a flex column for the text.
         // Ink's wrap stays inside the right column so continuation lines
         // indent under ⎿. MAX_HINT_CHARS in commandAsHint caps total at ~5 lines.
+        // Thinking summaries cap at 10 lines.
         <Box flexDirection="row">
           <Box width={5} flexShrink={0}>
             <Text dimColor>{'  ⎿  '}</Text>
           </Box>
           <Box flexDirection="column" flexGrow={1}>
-            {displayedHint.split('\n').map((line, i, arr) => (
-              <Text key={`hint-${i}`} dimColor>
-                {line}
-                {i === arr.length - 1 && shellProgressSuffix}
-              </Text>
-            ))}
+            {effectiveHint
+              .split('\n')
+              .slice(0, thinkingSummary ? 10 : undefined)
+              .map((line, i, arr) => (
+                <Text key={`hint-${i}`} dimColor>
+                  {line}
+                  {i === arr.length - 1 && shellProgressSuffix}
+                </Text>
+              ))}
           </Box>
         </Box>
       )}
