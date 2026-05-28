@@ -194,6 +194,7 @@ export async function updateSessionBridgeId(
 export async function updateSessionActivity(patch: {
   status?: SessionStatus
   waitingFor?: string
+  lastMessage?: string
 }): Promise<void> {
   if (!feature('BG_SESSIONS')) return
   await updatePidFile({ ...patch, updatedAt: Date.now() })

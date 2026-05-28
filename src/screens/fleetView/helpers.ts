@@ -234,16 +234,16 @@ export function pickIcon(
   activity: Activity,
   pinned?: boolean,
 ): string {
-  if (pinned === true) return '*'
-  if (band === 'blocked') return '\u25c9'
+  if (pinned === true) return '\u25a0'
+  if (band === 'blocked') return '\u25a1'
   if (band === 'active') {
-    if (activity === 'flowing') return '\u25cf'
-    if (activity === 'slowing') return '\u25d4'
-    return '\u25d4'
+    if (activity === 'flowing') return '\u25a1'
+    if (activity === 'slowing') return '\u25a1'
+    return '\u25a1'
   }
-  if (activity === 'success') return '\u2713'
-  if (activity === 'failure') return '\u2717'
-  return '\u25cb'
+  if (activity === 'success') return '\u25a1'
+  if (activity === 'failure') return '\u25a1'
+  return '\u25a1'
 }
 
 // ---------------------------------------------------------------------------

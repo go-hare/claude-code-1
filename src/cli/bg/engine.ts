@@ -27,6 +27,7 @@ export interface SessionEntry {
   prNumber?: number
   prRepository?: string
   messagingSocketPath?: string
+  lastMessage?: string
 }
 
 export interface BgStartOptions {

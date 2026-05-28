@@ -121,13 +121,11 @@ function SessionRow({
   isSelected,
   isRenaming,
   renameValue,
-  terminalWidth,
 }: {
   session: SessionEntry;
   isSelected: boolean;
   isRenaming: boolean;
   renameValue: string;
-  terminalWidth: number;
 }): React.ReactElement {
   const band = deriveBand(session);
   const activity = deriveActivity(session);
@@ -136,77 +134,25 @@ function SessionRow({
   const name = isRenaming ? renameValue : jobLabel(session);
   const age = formatJobAge(session.startedAt);
 
-  // Build the PR display
-  let prDisplay = '';
-  if (session.prNumber) {
-    prDisplay = session.prRepository ? `${session.prRepository}#${session.prNumber}` : `PR #${session.prNumber}`;
-  }
-
-  // Detail text (what the session is doing / waiting for)
-  let detail = '';
-  if (band === 'blocked' && session.waitingFor) {
-    detail = session.waitingFor;
-  } else if (band === 'active') {
-    if (activity === 'slowing') detail = 'slowing\u2026';
-    else if (activity === 'stuck') detail = 'stuck';
-  } else if (activity === 'failure') {
-    detail = 'failed';
-  }
-
-  // Status indicator color
-  const statusColor =
-    band === 'blocked' ? 'warning' : activity === 'failure' ? 'error' : activity === 'success' ? 'success' : undefined;
-
-  // Status label
-  let statusLabel = '';
-  if (band === 'blocked') statusLabel = 'awaiting input';
-  else if (band === 'active') statusLabel = 'working';
-  else if (activity === 'success') statusLabel = 'completed';
-  else if (activity === 'failure') statusLabel = 'failed';
-  else statusLabel = 'done';
+  // Detail: show waitingFor or last message from the session
+  const detail = session.waitingFor ?? session.lastMessage ?? '';
 
   return (
-    <Box paddingLeft={1} width="100%">
-      {/* Icon */}
-      <Text color={(color ?? statusColor) as never} dimColor={dim}>
+    <Box paddingLeft={1} width="100%" backgroundColor={isSelected ? ('secondaryBg' as never) : undefined}>
+      <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected}>
         {icon}{' '}
       </Text>
-      {/* Name (bold when focused) */}
-      <Text bold={isSelected} inverse={isSelected}>
-        {name}
-      </Text>
-      {/* Status */}
-      <Text dimColor>
-        {' \u00b7 '}
-        {statusLabel}
-      </Text>
-      {/* Detail / waiting reason */}
+      <Text bold={isSelected}>{name}</Text>
       {detail && (
-        <Text dimColor wrap="truncate">
-          {' \u00b7 '}
+        <Text dimColor={!isSelected}>
+          {'  '}
           {detail}
         </Text>
       )}
-      {/* Branch */}
-      {session.gitBranch && (
-        <Text dimColor>
-          {' \u00b7 '}
-          {session.gitBranch}
-        </Text>
-      )}
-      {/* PR */}
-      {prDisplay && (
-        <Text color={statusColor as never}>
-          {' \u00b7 '}
-          {prDisplay}
-        </Text>
-      )}
-      {/* Spacer */}
+      {isSelected && band === 'blocked' && <Text dimColor>{' \u00b7 \u2192'}</Text>}
       <Box flexGrow={1} />
-      {/* Age (right-aligned) */}
-      <Text dimColor>{age}</Text>
-      {/* Rename cursor */}
-      {isRenaming && <Text> \u2588</Text>}
+      <Text dimColor={!isSelected}>{age}</Text>
+      {isRenaming && <Text>{' \u2588'}</Text>}
     </Box>
   );
 }
@@ -228,7 +174,7 @@ function AgentViewApp({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [dispatchInput, setDispatchInput] = useState('');
-  const [focusArea, setFocusArea] = useState<FocusArea>(enteredViaLeftArrow ? 'list' : 'dispatch');
+  const [focusArea, setFocusArea] = useState<FocusArea>('list');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [renameValue, setRenameValue] = useState('');
   const [folded, setFolded] = useState(true);
@@ -579,13 +525,7 @@ function AgentViewApp({
     } else if (key.return && sessions.length > 0) {
       const session = sessions[selectedIndex];
       if (session) {
-        if (deriveBand(session) === 'blocked') {
-          // Enter reply mode for blocked sessions
-          setReplyInput('');
-          setViewMode('reply');
-        } else {
-          void attachHandler(session.name ?? String(session.pid));
-        }
+        void attachHandler(session.name ?? String(session.pid));
       }
     } else if (input === 'x' && key.ctrl && sessions.length > 0) {
       setViewMode('delete-confirm');
@@ -633,17 +573,58 @@ function AgentViewApp({
         </Box>
       )}
 
-      {/* Session list */}
-      {sessions.map((session, index) => (
-        <SessionRow
-          key={session.pid}
-          session={session}
-          isSelected={focusArea === 'list' && index === selectedIndex}
-          isRenaming={viewMode === 'rename' && index === selectedIndex}
-          renameValue={renameValue}
-          terminalWidth={80}
-        />
-      ))}
+      {/* Session list — grouped by status */}
+      {blocked.length > 0 && (
+        <Box flexDirection="column">
+          <Text color={'warning' as never}>Needs input</Text>
+          {blocked.map(session => {
+            const index = sessions.indexOf(session);
+            return (
+              <SessionRow
+                key={session.pid}
+                session={session}
+                isSelected={focusArea === 'list' && index === selectedIndex}
+                isRenaming={viewMode === 'rename' && index === selectedIndex}
+                renameValue={renameValue}
+              />
+            );
+          })}
+        </Box>
+      )}
+      {active.length > 0 && (
+        <Box flexDirection="column" marginTop={blocked.length > 0 ? 1 : 0}>
+          <Text dimColor>Working</Text>
+          {active.map(session => {
+            const index = sessions.indexOf(session);
+            return (
+              <SessionRow
+                key={session.pid}
+                session={session}
+                isSelected={focusArea === 'list' && index === selectedIndex}
+                isRenaming={viewMode === 'rename' && index === selectedIndex}
+                renameValue={renameValue}
+              />
+            );
+          })}
+        </Box>
+      )}
+      {done.length > 0 && (
+        <Box flexDirection="column" marginTop={blocked.length > 0 || active.length > 0 ? 1 : 0}>
+          <Text dimColor>Completed</Text>
+          {visibleDone.map(session => {
+            const index = sessions.indexOf(session);
+            return (
+              <SessionRow
+                key={session.pid}
+                session={session}
+                isSelected={focusArea === 'list' && index === selectedIndex}
+                isRenaming={viewMode === 'rename' && index === selectedIndex}
+                renameValue={renameValue}
+              />
+            );
+          })}
+        </Box>
+      )}
 
       {/* Fold indicator */}
       {hiddenDoneCount > 0 && (
@@ -677,16 +658,16 @@ function AgentViewApp({
         </Box>
       )}
 
-      {/* Dispatch input */}
+      {/* Dispatch input — always at bottom */}
       {viewMode === 'list' && (
         <Box marginTop={1} flexDirection="column">
           <Box>
-            <Text dimColor={focusArea !== 'dispatch'}>{focusArea === 'dispatch' ? '\u276f ' : '  '}</Text>
+            <Text dimColor={focusArea !== 'dispatch'}>{'\u276f '}</Text>
             {dispatchInput ? (
               <Text>{dispatchInput}</Text>
             ) : (
               <Text dimColor>
-                {focusArea === 'dispatch' ? 'start a task in the background' : 'Type a task to dispatch...'}
+                {focusArea === 'dispatch' ? 'start a task in the background' : 'start a task in the background'}
               </Text>
             )}
           </Box>

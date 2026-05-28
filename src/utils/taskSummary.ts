@@ -54,6 +54,7 @@ export function maybeGenerateTaskSummary(
 
     let status: 'busy' | 'idle' = 'busy'
     let waitingFor: string | undefined
+    let lastMessage: string | undefined
 
     if (lastAssistant?.message?.content) {
       const content = lastAssistant.message.content
@@ -66,6 +67,14 @@ export function maybeGenerateTaskSummary(
           status = 'busy'
           waitingFor = `tool: ${lastBlock.name || 'unknown'}`
         }
+        // Extract text from last text block for display in agent view
+        for (let i = content.length - 1; i >= 0; i--) {
+          const block = content[i] as Record<string, unknown> | undefined
+          if (block?.type === 'text' && typeof block.text === 'string') {
+            lastMessage = (block.text as string).slice(0, 200).split('\n')[0]
+            break
+          }
+        }
       }
     }
 
@@ -73,6 +82,7 @@ export function maybeGenerateTaskSummary(
     void updateSessionActivity({
       status,
       waitingFor,
+      lastMessage,
     }).catch(err => {
       logForDebugging(`[taskSummary] updateSessionActivity failed: ${err}`)
     })
