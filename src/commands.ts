@@ -178,6 +178,7 @@ import agents from './commands/agents/index.js'
 import plugin from './commands/plugin/index.js'
 import reloadPlugins from './commands/reload-plugins/index.js'
 import reloadSkills from './commands/reloadSkills.js'
+import { codeReview, simplify } from './commands/codeReview.js'
 import rewind from './commands/rewind/index.js'
 import scrollSpeed from './commands/scrollSpeed.js'
 import heapDump from './commands/heapdump/index.js'
@@ -340,6 +341,8 @@ const COMMANDS = memoize((): Command[] => [
   releaseNotes,
   reloadPlugins,
   reloadSkills,
+  codeReview,
+  simplify,
   scrollSpeed,
   rename,
   resume,

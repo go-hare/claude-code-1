@@ -157,6 +157,14 @@ function SessionRow({
   const statusColor =
     band === 'blocked' ? 'warning' : activity === 'failure' ? 'error' : activity === 'success' ? 'success' : undefined;
 
+  // Status label
+  let statusLabel = '';
+  if (band === 'blocked') statusLabel = 'awaiting input';
+  else if (band === 'active') statusLabel = 'working';
+  else if (activity === 'success') statusLabel = 'completed';
+  else if (activity === 'failure') statusLabel = 'failed';
+  else statusLabel = 'done';
+
   return (
     <Box paddingLeft={1} width="100%">
       {/* Icon */}
@@ -164,20 +172,35 @@ function SessionRow({
         {icon}{' '}
       </Text>
       {/* Name (bold when focused) */}
-      <Text bold={isSelected} dimColor={!isSelected && dim} inverse={isSelected}>
+      <Text bold={isSelected} inverse={isSelected}>
         {name}
+      </Text>
+      {/* Status */}
+      <Text dimColor>
+        {' \u00b7 '}
+        {statusLabel}
       </Text>
       {/* Detail / waiting reason */}
       {detail && (
         <Text dimColor wrap="truncate">
-          {' '}
-          \u00b7 {detail}
+          {' \u00b7 '}
+          {detail}
         </Text>
       )}
       {/* Branch */}
-      {session.gitBranch && <Text dimColor> \u00b7 {session.gitBranch}</Text>}
+      {session.gitBranch && (
+        <Text dimColor>
+          {' \u00b7 '}
+          {session.gitBranch}
+        </Text>
+      )}
       {/* PR */}
-      {prDisplay && <Text color={statusColor as never}> \u00b7 {prDisplay}</Text>}
+      {prDisplay && (
+        <Text color={statusColor as never}>
+          {' \u00b7 '}
+          {prDisplay}
+        </Text>
+      )}
       {/* Spacer */}
       <Box flexGrow={1} />
       {/* Age (right-aligned) */}
@@ -590,7 +613,7 @@ function AgentViewApp({
             <Text bold>Claude Code</Text>
           </Text>
           <Text dimColor>
-            {blocked.length} awaiting input \u00b7 {active.length} working \u00b7 {done.length} completed
+            {blocked.length} awaiting input {'\u00b7'} {active.length} working {'\u00b7'} {done.length} completed
           </Text>
         </Box>
       </Box>
@@ -625,7 +648,9 @@ function AgentViewApp({
       {/* Fold indicator */}
       {hiddenDoneCount > 0 && (
         <Box paddingLeft={2}>
-          <Text dimColor>\u2026 {hiddenDoneCount} more completed (press f to show all)</Text>
+          <Text dimColor>
+            {'\u2026'} {hiddenDoneCount} more completed (press f to show all)
+          </Text>
         </Box>
       )}
 
@@ -633,7 +658,7 @@ function AgentViewApp({
       {viewMode === 'reply' && (
         <Box marginTop={1} paddingLeft={1} flexDirection="column">
           <Box>
-            <Text bold>reply \u276f </Text>
+            <Text bold>{'reply \u276f '}</Text>
             <Text>{replyInput}</Text>
             {!replyInput && voice.state === 'idle' && (
               <Text dimColor> type a response{voiceEnabled ? ' or hold space to speak' : ''}</Text>
@@ -648,7 +673,7 @@ function AgentViewApp({
       {viewMode === 'delete-confirm' && (
         <Box marginTop={1} paddingLeft={1}>
           <Text>Delete session? </Text>
-          <Text dimColor>(y)es \u00b7 delete (a)ll done \u00b7 (n)o</Text>
+          <Text dimColor>{'(y)es \u00b7 delete (a)ll done \u00b7 (n)o'}</Text>
         </Box>
       )}
 
@@ -674,7 +699,7 @@ function AgentViewApp({
                   {item.description && <Text dimColor> {item.description.slice(0, 50)}</Text>}
                 </Box>
               ))}
-              <Text dimColor>tab accept \u00b7 \u2191\u2193 navigate</Text>
+              <Text dimColor>{'tab accept \u00b7 \u2191\u2193 navigate'}</Text>
             </Box>
           )}
         </Box>

@@ -234,7 +234,7 @@ export function pickIcon(
   activity: Activity,
   pinned?: boolean,
 ): string {
-  if (pinned) return '\ud83d\udccc'
+  if (pinned === true) return '*'
   if (band === 'blocked') return '\u25c9'
   if (band === 'active') {
     if (activity === 'flowing') return '\u25cf'
