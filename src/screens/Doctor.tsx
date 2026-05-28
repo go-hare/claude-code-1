@@ -70,6 +70,32 @@ function DistTagsDisplay({ promise }: { promise: Promise<NpmDistTags> }): React.
   );
 }
 
+function LastUpdateDisplay(): React.ReactNode {
+  const [result, setResult] = useState<{
+    success: boolean;
+    timestamp: string;
+    toVersion?: string;
+    error?: string;
+  } | null>(null);
+  useEffect(() => {
+    void import('../utils/updateResult.js').then(({ loadLastUpdateResult }) => loadLastUpdateResult().then(setResult));
+  }, []);
+  if (!result) return null;
+  const time = new Date(result.timestamp).toLocaleString();
+  if (result.success) {
+    return (
+      <Text dimColor>
+        └ Last update: {result.toVersion ?? 'success'} ({time})
+      </Text>
+    );
+  }
+  return (
+    <Text color={'error' as never}>
+      └ Last update failed: {result.error ?? 'unknown'} ({time})
+    </Text>
+  );
+}
+
 export function Doctor({ onDone }: Props): React.ReactNode {
   const agentDefinitions = useAppState(s => s.agentDefinitions);
   const mcpTools = useAppState(s => s.mcp.tools);
@@ -286,6 +312,7 @@ export function Doctor({ onDone }: Props): React.ReactNode {
         <Suspense fallback={null}>
           <DistTagsDisplay promise={distTagsPromise} />
         </Suspense>
+        <LastUpdateDisplay />
       </Box>
 
       <SandboxDoctorSection />
