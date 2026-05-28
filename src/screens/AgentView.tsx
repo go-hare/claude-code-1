@@ -15,7 +15,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { feature } from 'bun:bundle';
-import { wrappedRender as render, Box, Text, useInput } from '@anthropic/ink';
+import { wrappedRender as render, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
 import { listLiveSessions, handleBgStart, attachHandler, killHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
@@ -126,11 +126,15 @@ function SessionRow({
   isSelected,
   isRenaming,
   renameValue,
+  onSelect,
+  onOpen,
 }: {
   session: SessionEntry;
   isSelected: boolean;
   isRenaming: boolean;
   renameValue: string;
+  onSelect?: () => void;
+  onOpen?: () => void;
 }): React.ReactElement {
   const band = deriveBand(session);
   const activity = deriveActivity(session);
@@ -143,7 +147,13 @@ function SessionRow({
   const detail = session.waitingFor ?? session.lastMessage ?? '';
 
   return (
-    <Box paddingLeft={1} width="100%" backgroundColor={isSelected ? ('secondaryBg' as never) : undefined}>
+    <Box
+      paddingLeft={1}
+      width="100%"
+      backgroundColor={isSelected ? ('secondaryBg' as never) : undefined}
+      onMouseEnter={onSelect}
+      onClick={onOpen}
+    >
       <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected}>
         {icon}{' '}
       </Text>
@@ -623,6 +633,11 @@ function AgentViewApp({
                 isSelected={focusArea === 'list' && index === selectedIndex}
                 isRenaming={viewMode === 'rename' && index === selectedIndex}
                 renameValue={renameValue}
+                onSelect={() => {
+                  setFocusArea('list');
+                  setSelectedIndex(index);
+                }}
+                onOpen={() => void attachHandler(session.name ?? String(session.pid))}
               />
             );
           })}
@@ -640,6 +655,11 @@ function AgentViewApp({
                 isSelected={focusArea === 'list' && index === selectedIndex}
                 isRenaming={viewMode === 'rename' && index === selectedIndex}
                 renameValue={renameValue}
+                onSelect={() => {
+                  setFocusArea('list');
+                  setSelectedIndex(index);
+                }}
+                onOpen={() => void attachHandler(session.name ?? String(session.pid))}
               />
             );
           })}
@@ -657,6 +677,11 @@ function AgentViewApp({
                 isSelected={focusArea === 'list' && index === selectedIndex}
                 isRenaming={viewMode === 'rename' && index === selectedIndex}
                 renameValue={renameValue}
+                onSelect={() => {
+                  setFocusArea('list');
+                  setSelectedIndex(index);
+                }}
+                onOpen={() => void attachHandler(session.name ?? String(session.pid))}
               />
             );
           })}
@@ -721,18 +746,34 @@ function AgentViewApp({
               }}
             />
           )}
-          {/* Input line with border */}
-          <Box flexDirection="column" borderStyle="round" borderLeft={false} borderRight={false} borderDimColor>
-            <LineView
-              query={dispatchInput}
-              cursorOffset={cursorOffset}
-              placeholder="start a task in the background"
-              prefix={'\u276f'}
-              prefixDim={focusArea !== 'dispatch'}
-              isFocused={focusArea === 'dispatch'}
-              width="100%"
-            />
-          </Box>
+          {/* Separator + Input line */}
+          <Box
+            borderStyle="round"
+            borderLeft={false}
+            borderRight={false}
+            borderTop={true}
+            borderBottom={false}
+            borderDimColor
+            height={1}
+          />
+          <LineView
+            query={dispatchInput}
+            cursorOffset={cursorOffset}
+            placeholder="start a task in the background"
+            prefix={'\u276f'}
+            prefixDim={focusArea !== 'dispatch'}
+            isFocused={focusArea === 'dispatch'}
+            width="100%"
+          />
+          <Box
+            borderStyle="round"
+            borderLeft={false}
+            borderRight={false}
+            borderTop={true}
+            borderBottom={false}
+            borderDimColor
+            height={1}
+          />
         </Box>
       )}
 
@@ -760,13 +801,15 @@ export async function renderAgentView(options?: {
   cwdFilter?: string;
 }): Promise<void> {
   const instance = await render(
-    <VoiceProvider>
-      <AgentViewApp
-        enteredViaLeftArrow={options?.enteredViaLeftArrow}
-        dispatchExtraArgs={options?.dispatchExtraArgs}
-        cwdFilter={options?.cwdFilter}
-      />
-    </VoiceProvider>,
+    <AlternateScreen mouseTracking={true}>
+      <VoiceProvider>
+        <AgentViewApp
+          enteredViaLeftArrow={options?.enteredViaLeftArrow}
+          dispatchExtraArgs={options?.dispatchExtraArgs}
+          cwdFilter={options?.cwdFilter}
+        />
+      </VoiceProvider>
+    </AlternateScreen>,
   );
   await instance.waitUntilExit();
 }
