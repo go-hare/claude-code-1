@@ -179,6 +179,7 @@ import plugin from './commands/plugin/index.js'
 import reloadPlugins from './commands/reload-plugins/index.js'
 import reloadSkills from './commands/reloadSkills.js'
 import rewind from './commands/rewind/index.js'
+import scrollSpeed from './commands/scrollSpeed.js'
 import heapDump from './commands/heapdump/index.js'
 import mockLimits from './commands/mock-limits/index.js'
 import bridgeKick from './commands/bridge-kick.js'
@@ -339,6 +340,7 @@ const COMMANDS = memoize((): Command[] => [
   releaseNotes,
   reloadPlugins,
   reloadSkills,
+  scrollSpeed,
   rename,
   resume,
   session,

@@ -261,6 +261,11 @@ export const getHookEventMetadata = memoize(
         description:
           'Input to command is JSON with file_path and event (change, add, unlink).\nCLAUDE_ENV_FILE is set — write bash exports there to apply env to subsequent BashTool commands.\nThe matcher field specifies filenames to watch in the current directory (e.g. ".envrc|.env").\nHook output can include hookSpecificOutput.watchPaths (array of absolute paths) to dynamically update the watch list.\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
       },
+      MessageDisplay: {
+        summary: 'When an assistant message is about to be displayed',
+        description:
+          'Input to command is JSON with message_text (the assistant message content).\nHook output can include hookSpecificOutput.transformedText to replace the displayed text, or hookSpecificOutput.hidden=true to hide the message entirely.\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
+      },
     }
   },
   toolNames => toolNames.slice().sort().join(','),
@@ -299,6 +304,7 @@ export function groupHooksByEventAndMatcher(
     InstructionsLoaded: {},
     CwdChanged: {},
     FileChanged: {},
+    MessageDisplay: {},
   }
 
   const metadata = getHookEventMetadata(toolNames)

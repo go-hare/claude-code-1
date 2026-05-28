@@ -28,6 +28,7 @@ import { type UseTextInputProps, useTextInput } from './useTextInput.js'
 type UseVimInputProps = Omit<UseTextInputProps, 'inputFilter'> & {
   onModeChange?: (mode: VimMode) => void
   onUndo?: () => void
+  onHistorySearch?: () => void
   inputFilter?: UseTextInputProps['inputFilter']
 }
 
@@ -291,6 +292,15 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
       state.command.type === 'idle'
     ) {
       props.onChange('?')
+    }
+
+    // Vim NORMAL mode: / opens reverse history search (like Ctrl+R)
+    if (
+      input === '/' &&
+      state.mode === 'NORMAL' &&
+      state.command.type === 'idle'
+    ) {
+      props.onHistorySearch?.()
     }
   }
 

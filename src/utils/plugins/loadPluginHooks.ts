@@ -56,6 +56,7 @@ function convertPluginHooksToMatchers(
     InstructionsLoaded: [],
     CwdChanged: [],
     FileChanged: [],
+    MessageDisplay: [],
   }
 
   if (!plugin.hooksConfig) {
@@ -118,6 +119,7 @@ export const loadPluginHooks = memoize(async (): Promise<void> => {
     InstructionsLoaded: [],
     CwdChanged: [],
     FileChanged: [],
+    MessageDisplay: [],
   }
 
   // Process each enabled plugin

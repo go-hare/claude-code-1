@@ -18,6 +18,7 @@ import {
   isFastModeSupportedByModel,
 } from '../../utils/fastMode.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
+import { updateSettingsForSource } from '../../utils/settings/settings.js';
 import { MODEL_ALIASES } from '../../utils/model/aliases.js';
 import { checkOpus1mAccess, checkSonnet1mAccess } from '../../utils/model/check1mAccess.js';
 import {
@@ -60,6 +61,8 @@ function ModelPickerWrapper({
       mainLoopModelForSession: null,
     }));
     saveSessionModel(model);
+    // Persist as default for new sessions (matching upstream 2.1.153 behavior)
+    updateSettingsForSource('userSettings', { model: model ?? undefined });
 
     let message = `Set model to ${chalk.bold(renderModelLabel(model))}`;
     if (effort !== undefined) {
