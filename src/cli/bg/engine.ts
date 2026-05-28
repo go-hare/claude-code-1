@@ -22,6 +22,11 @@ export interface SessionEntry {
   agent?: string
   tmuxSessionName?: string
   engine?: 'tmux' | 'detached'
+  pinned?: boolean
+  gitBranch?: string
+  prNumber?: number
+  prRepository?: string
+  messagingSocketPath?: string
 }
 
 export interface BgStartOptions {

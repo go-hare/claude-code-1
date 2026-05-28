@@ -401,6 +401,49 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
           </Text>
         </Box>
       );
+    case 'goal_status': {
+      if (attachment.sentinel) return null;
+      const failed = attachment.failed === true;
+      const stats: string[] = [];
+      if (attachment.met || failed) {
+        if (attachment.durationMs !== undefined) {
+          const sec = Math.floor(attachment.durationMs / 1000);
+          stats.push(sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m`);
+        }
+        if (attachment.iterations !== undefined) {
+          stats.push(`${attachment.iterations} ${plural(attachment.iterations, 'turn')}`);
+        }
+      }
+      const suffix = stats.length > 0 ? ` (${stats.join(' \u00b7 ')})` : '';
+      const label = failed
+        ? 'Goal could not be achieved'
+        : attachment.met
+          ? 'Goal achieved'
+          : 'Goal not yet met\u2026 continuing';
+      return (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor={!attachment.met && !failed} color={failed ? 'error' : undefined}>
+            {failed ? '\u2717 ' : attachment.met ? '\u2713 ' : '\u25cb '}
+            {label}
+            {suffix}
+          </Text>
+          {attachment.met && attachment.condition ? (
+            <Box paddingLeft={2}>
+              <Text dimColor wrap="wrap">
+                Goal: {attachment.condition}
+              </Text>
+            </Box>
+          ) : null}
+          {failed && attachment.reason ? (
+            <Box paddingLeft={2}>
+              <Text dimColor wrap="wrap">
+                {attachment.reason}
+              </Text>
+            </Box>
+          ) : null}
+        </Box>
+      );
+    }
     default:
       // Exhaustiveness: every type reaching here must be in NULL_RENDERING_TYPES.
       // If TS errors, a new Attachment type was added without a case above AND

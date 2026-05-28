@@ -1,20 +1,62 @@
 /**
  * `claude agents` — Agent view entry point.
  * Lists all background sessions in a full-screen interactive dashboard.
+ *
+ * Accepts flags that are forwarded to dispatched background sessions:
+ *   --add-dir, --settings, --mcp-config, --plugin-dir
+ *   --permission-mode, --model, --effort
+ *   --dangerously-skip-permissions
+ *   --cwd <path>  (scope session list to a directory)
+ *   --json         (output session list as JSON and exit)
  */
 
-import {
-  listLiveSessions,
-  handleBgStart,
-  attachHandler,
-  killHandler,
-} from './bg.js'
+import { listLiveSessions } from './bg.js'
 import type { SessionEntry } from './bg/engine.js'
 
 export interface AgentViewAction {
   type: 'attach' | 'create' | 'kill' | 'done'
   sessionId?: string
   prompt?: string
+}
+
+// Flags that get forwarded to dispatched sessions
+const PASSTHROUGH_FLAGS = [
+  '--add-dir',
+  '--settings',
+  '--mcp-config',
+  '--plugin-dir',
+  '--permission-mode',
+  '--model',
+  '--effort',
+  '--dangerously-skip-permissions',
+  '--allow-dangerously-skip-permissions',
+  '--fallback-model',
+  '--strict-mcp-config',
+]
+
+function extractPassthroughArgs(args: string[]): string[] {
+  const result: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (
+      arg === '--dangerously-skip-permissions' ||
+      arg === '--allow-dangerously-skip-permissions' ||
+      arg === '--strict-mcp-config'
+    ) {
+      result.push(arg)
+    } else if (PASSTHROUGH_FLAGS.some(f => arg.startsWith(f))) {
+      result.push(arg)
+      // If it's a flag that takes a value and the value is the next arg
+      if (
+        !arg.includes('=') &&
+        i + 1 < args.length &&
+        !args[i + 1]!.startsWith('--')
+      ) {
+        result.push(args[++i]!)
+      }
+    }
+  }
+  return result
 }
 
 export async function agentsMain(args: string[]): Promise<void> {
@@ -25,7 +67,20 @@ export async function agentsMain(args: string[]): Promise<void> {
     return
   }
 
+  // --cwd <path>: scope session list to a directory
+  let cwdFilter: string | undefined
+  const cwdIdx = args.indexOf('--cwd')
+  if (cwdIdx >= 0 && cwdIdx + 1 < args.length) {
+    cwdFilter = args[cwdIdx + 1]
+  }
+
+  // Extract passthrough args for dispatched sessions
+  const dispatchExtraArgs = extractPassthroughArgs(args)
+
   // Interactive dashboard
   const { renderAgentView } = await import('../screens/AgentView.js')
-  await renderAgentView()
+  await renderAgentView({
+    dispatchExtraArgs,
+    cwdFilter,
+  })
 }

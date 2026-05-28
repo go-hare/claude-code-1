@@ -136,6 +136,45 @@ export async function updateSessionName(
 }
 
 /**
+ * Toggle the pinned state for this session's PID file.
+ */
+export async function updateSessionPinned(pinned: boolean): Promise<void> {
+  await updatePidFile({ pinned })
+}
+
+/**
+ * Link a PR to this session's PID file for agent view display.
+ */
+export async function updateSessionPr(
+  prNumber: number | undefined,
+  prRepository: string | undefined,
+): Promise<void> {
+  await updatePidFile({ prNumber, prRepository })
+}
+
+/**
+ * Patch another session's PID file by PID. Used by the agent view to
+ * pin/rename/update sessions that belong to other processes.
+ */
+export async function patchSessionByPid(
+  pid: number,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const pidFile = join(getSessionsDir(), `${pid}.json`)
+  try {
+    const data = jsonParse(await readFile(pidFile, 'utf8')) as Record<
+      string,
+      unknown
+    >
+    await writeFile(pidFile, jsonStringify({ ...data, ...patch }))
+  } catch (e) {
+    logForDebugging(
+      `[concurrentSessions] patchSessionByPid(${pid}) failed: ${errorMessage(e)}`,
+    )
+  }
+}
+
+/**
  * Record this session's Remote Control session ID so peer enumeration can
  * dedup: a session reachable over both UDS and bridge should only appear
  * once (local wins). Cleared on bridge teardown so stale IDs don't

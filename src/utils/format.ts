@@ -209,6 +209,7 @@ export function formatLogMetadata(log: {
   agentSetting?: string
   prNumber?: number
   prRepository?: string
+  sessionKind?: string
 }): string {
   const sizeOrCount =
     log.fileSize !== undefined
@@ -219,6 +220,9 @@ export function formatLogMetadata(log: {
     ...(log.gitBranch ? [log.gitBranch] : []),
     sizeOrCount,
   ]
+  if (log.sessionKind === 'bg') {
+    parts.push('bg')
+  }
   if (log.tag) {
     parts.push(`#${log.tag}`)
   }

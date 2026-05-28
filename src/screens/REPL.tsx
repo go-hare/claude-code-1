@@ -399,7 +399,6 @@ import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
 import { startBackgroundSession } from '../tasks/LocalMainSessionTask.js';
 import { useSessionBackgrounding } from '../hooks/useSessionBackgrounding.js';
-import { useGoalLoop } from '../hooks/useGoalLoop.js';
 import { diagnosticTracker } from '../services/diagnosticTracking.js';
 import { handleSpeculationAccept, type ActiveSpeculationState } from '../services/PromptSuggestion/speculation.js';
 import { IdeOnboardingDialog } from '../components/IdeOnboardingDialog.js';
@@ -2982,7 +2981,9 @@ export function REPL({
 
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
-    // Stop the foreground query so the background one takes over
+    // Stop the foreground query so the background one takes over.
+    // The abort reason 'background' signals that the response should be
+    // continued in the background session rather than discarded.
     abortController?.abort('background');
     // Aborting subagents may produce task-completed notifications.
     // Clear task notifications so the queue processor doesn't immediately
@@ -3038,7 +3039,20 @@ export function REPL({
       );
 
       startBackgroundSession({
-        messages: [...messagesRef.current, ...uniqueNotifications],
+        messages: [
+          ...messagesRef.current,
+          ...uniqueNotifications,
+          // If the model was mid-response when backgrounded, add a continuation
+          // hint so it resumes rather than starting over.
+          ...(abortController?.signal.reason === 'background'
+            ? [
+                createUserMessage({
+                  content: 'Continue where you left off — you were backgrounded mid-response.',
+                  isMeta: true,
+                }),
+              ]
+            : []),
+        ],
         queryParams: {
           systemPrompt,
           userContext,
@@ -3063,8 +3077,6 @@ export function REPL({
     canUseTool,
     setAppState,
   ]);
-
-  const { onGoalTurnComplete } = useGoalLoop();
 
   const { handleBackgroundSession } = useSessionBackgrounding({
     setMessages,
@@ -3484,9 +3496,6 @@ export function REPL({
 
       // Signal that a query turn has completed successfully
       await onTurnComplete?.(messagesRef.current);
-
-      // Goal loop: evaluate condition and auto-continue if not met
-      onGoalTurnComplete(messagesRef.current);
     },
     [
       initialMcpClients,
@@ -3496,7 +3505,6 @@ export function REPL({
       setAppState,
       customSystemPrompt,
       onTurnComplete,
-      onGoalTurnComplete,
       appendSystemPrompt,
       canUseTool,
       mainThreadAgentDefinition,

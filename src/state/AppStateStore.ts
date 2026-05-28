@@ -233,6 +233,12 @@ export type AppState = DeepImmutable<{
   thinkingEnabled: boolean | undefined
   promptSuggestionEnabled: boolean
   sessionHooks: SessionHooksState
+  activeGoal?: {
+    condition: string
+    setAt: number
+    iterations: number
+    tokensAtStart: number
+  }
   tungstenActiveSession?: {
     sessionName: string
     socketName: string

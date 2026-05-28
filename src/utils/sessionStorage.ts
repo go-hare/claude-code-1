@@ -554,6 +554,7 @@ class Project {
   currentSessionLastPrompt: string | undefined
   currentSessionAgentSetting: string | undefined
   currentSessionMode: 'coordinator' | 'normal' | undefined
+  currentSessionModel: string | undefined
   // Tri-state: undefined = never touched (don't write), null = exited worktree,
   // object = currently in worktree. reAppendSessionMetadata writes null so
   // --resume knows the session exited (vs. crashed while inside).
@@ -839,6 +840,13 @@ class Project {
         sessionId,
       })
     }
+    if (this.currentSessionModel) {
+      appendEntryToFile(this.sessionFile, {
+        type: 'session-model',
+        model: this.currentSessionModel,
+        sessionId,
+      })
+    }
     if (this.currentSessionWorktree !== undefined) {
       appendEntryToFile(this.sessionFile, {
         type: 'worktree-state',
@@ -1080,6 +1088,7 @@ class Project {
           // replacement records lost → FROZEN misclassification.
           userType: getUserType(),
           entrypoint: getEntrypoint(),
+          sessionKind: process.env.CLAUDE_CODE_SESSION_KIND || 'interactive',
           cwd: getCwd(),
           sessionId,
           timestamp: new Date().toISOString(),
@@ -2799,6 +2808,7 @@ export function restoreSessionMetadata(meta: {
   agentColor?: string
   agentSetting?: string
   mode?: 'coordinator' | 'normal'
+  sessionModel?: string
   worktreeSession?: PersistedWorktreeSession | null
   prNumber?: number
   prUrl?: string
@@ -2813,6 +2823,7 @@ export function restoreSessionMetadata(meta: {
   if (meta.agentColor) project.currentSessionAgentColor = meta.agentColor
   if (meta.agentSetting) project.currentSessionAgentSetting = meta.agentSetting
   if (meta.mode) project.currentSessionMode = meta.mode
+  if (meta.sessionModel) project.currentSessionModel = meta.sessionModel
   if (meta.worktreeSession !== undefined)
     project.currentSessionWorktree = meta.worktreeSession
   if (meta.prNumber !== undefined)
@@ -2835,6 +2846,7 @@ export function clearSessionMetadata(): void {
   project.currentSessionLastPrompt = undefined
   project.currentSessionAgentSetting = undefined
   project.currentSessionMode = undefined
+  project.currentSessionModel = undefined
   project.currentSessionWorktree = undefined
   project.currentSessionPrNumber = undefined
   project.currentSessionPrUrl = undefined
@@ -2915,6 +2927,13 @@ export function cacheSessionTitle(customTitle: string): void {
  */
 export function saveMode(mode: 'coordinator' | 'normal'): void {
   getProject().currentSessionMode = mode
+}
+
+/**
+ * Record the model the user selected via /model so it survives resume.
+ */
+export function saveSessionModel(model: string | null): void {
+  getProject().currentSessionModel = model ?? undefined
 }
 
 /**
@@ -4633,6 +4652,7 @@ type LiteMetadata = {
   prNumber?: number
   prUrl?: string
   prRepository?: string
+  sessionKind?: string
 }
 
 /**
@@ -4853,6 +4873,7 @@ async function readLiteMetadata(
     prNumber,
     prUrl,
     prRepository,
+    sessionKind: extractJsonStringField(head, 'sessionKind') ?? undefined,
   }
 }
 
@@ -5085,6 +5106,7 @@ async function enrichLog(
     prUrl: meta.prUrl,
     prRepository: meta.prRepository,
     projectPath: meta.projectPath ?? log.projectPath,
+    sessionKind: meta.sessionKind,
   }
 
   // Provide a fallback title for sessions where we couldn't extract the first

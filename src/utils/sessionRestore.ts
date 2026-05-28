@@ -147,6 +147,17 @@ export function restoreSessionStateFromLog(
       }))
     }
   }
+
+  // Restore session model choice (from /model command)
+  const sessionModel = (result as Record<string, unknown>).sessionModel as
+    | string
+    | undefined
+  if (sessionModel) {
+    setAppState(prev => ({
+      ...prev,
+      mainLoopModel: sessionModel,
+    }))
+  }
 }
 
 /**

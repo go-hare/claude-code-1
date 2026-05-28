@@ -5536,6 +5536,15 @@ export async function handleOrphanedPermissionResponse({
       return false
     }
 
+    // Guard: skip if the tool_use belongs to a cancelled subagent (sidechain).
+    // Enqueuing an orphaned permission for a dead agent context would crash.
+    if ((assistantMessage as Record<string, unknown>).isSidechain) {
+      logForDebugging(
+        `handleOrphanedPermissionResponse: skipping orphaned permission for toolUseID=${toolUseID} (belongs to a cancelled subagent)`,
+      )
+      return false
+    }
+
     handledToolUseIds.add(toolUseID)
     logForDebugging(
       `handleOrphanedPermissionResponse: enqueuing orphaned permission for toolUseID=${toolUseID} messageID=${assistantMessage.message.id}`,

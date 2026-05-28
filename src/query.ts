@@ -266,6 +266,7 @@ type State = {
   maxOutputTokensOverride: number | undefined
   pendingToolUseSummary: Promise<ToolUseSummaryMessage | null> | undefined
   stopHookActive: boolean | undefined
+  stopHookBlockCount: number
   turnCount: number
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
@@ -423,6 +424,7 @@ async function* queryLoop(
     maxOutputTokensOverride: params.maxOutputTokensOverride,
     autoCompactTracking: undefined,
     stopHookActive: undefined,
+    stopHookBlockCount: 0,
     maxOutputTokensRecoveryCount: 0,
     hasAttemptedReactiveCompact: false,
     turnCount: 1,
@@ -469,6 +471,7 @@ async function* queryLoop(
       maxOutputTokensOverride,
       pendingToolUseSummary,
       stopHookActive,
+      stopHookBlockCount,
       turnCount,
     } = state
 
@@ -521,7 +524,26 @@ async function* queryLoop(
 
     let messagesForQuery = getMessagesAfterCompactBoundary(messages)
 
-    // Release toolUseResult payloads from previous turns. By this point the
+    // Strip thinking-block signatures proactively when the model has changed.
+    // Signatures are bound to the API key + model — replaying a protected-thinking
+    // block to a different model causes 400 errors. This covers /model switches
+    // mid-session (login switches are handled in login.tsx).
+    if (
+      messagesForQuery.some(m => {
+        if (m.type !== 'assistant') return false
+        const content = m.message?.content
+        if (!Array.isArray(content)) return false
+        return (content as unknown[]).some(
+          b =>
+            typeof b === 'object' &&
+            b !== null &&
+            (b as Record<string, unknown>).type === 'thinking' &&
+            (b as Record<string, unknown>).signature,
+        )
+      })
+    ) {
+      messagesForQuery = stripSignatureBlocks(messagesForQuery)
+    }
     // UI has already rendered those results and the next API call only needs
     // message.message.content (tool_result blocks), not the raw output object.
     // This prevents unbounded memory growth in long sessions before compact
@@ -1377,6 +1399,7 @@ async function* queryLoop(
               maxOutputTokensOverride: undefined,
               pendingToolUseSummary: undefined,
               stopHookActive: undefined,
+              stopHookBlockCount: 0,
               turnCount,
               transition: {
                 reason: 'collapse_drain_retry',
@@ -1430,6 +1453,7 @@ async function* queryLoop(
             maxOutputTokensOverride: undefined,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
+            stopHookBlockCount: 0,
             turnCount,
             transition: { reason: 'reactive_compact_retry' },
           }
@@ -1485,6 +1509,7 @@ async function* queryLoop(
             maxOutputTokensOverride: ESCALATED_MAX_TOKENS,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
+            stopHookBlockCount: 0,
             turnCount,
             transition: { reason: 'max_output_tokens_escalate' },
           }
@@ -1513,6 +1538,7 @@ async function* queryLoop(
             maxOutputTokensOverride: undefined,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
+            stopHookBlockCount: 0,
             turnCount,
             transition: {
               reason: 'max_output_tokens_recovery',
@@ -1555,6 +1581,15 @@ async function* queryLoop(
       }
 
       if (stopHookResult.blockingErrors.length > 0) {
+        const MAX_CONSECUTIVE_STOP_HOOK_BLOCKS =
+          Number(process.env.CLAUDE_CODE_STOP_HOOK_BLOCK_CAP) || 8
+        if (stopHookBlockCount + 1 >= MAX_CONSECUTIVE_STOP_HOOK_BLOCKS) {
+          yield createSystemMessage(
+            `Stop hook blocked ${MAX_CONSECUTIVE_STOP_HOOK_BLOCKS} consecutive times. Ending turn to prevent infinite loop.`,
+            'warning',
+          )
+          return { reason: 'stop_hook_prevented' }
+        }
         const next: State = {
           messages: [
             ...messagesForQuery,
@@ -1573,6 +1608,7 @@ async function* queryLoop(
           maxOutputTokensOverride: undefined,
           pendingToolUseSummary: undefined,
           stopHookActive: true,
+          stopHookBlockCount: stopHookBlockCount + 1,
           turnCount,
           transition: { reason: 'stop_hook_blocking' },
         }
@@ -1609,6 +1645,7 @@ async function* queryLoop(
             maxOutputTokensOverride: undefined,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
+            stopHookBlockCount: 0,
             turnCount,
             transition: { reason: 'token_budget_continuation' },
           }
@@ -2035,6 +2072,7 @@ async function* queryLoop(
       pendingToolUseSummary: nextPendingToolUseSummary,
       maxOutputTokensOverride: undefined,
       stopHookActive,
+      stopHookBlockCount: 0,
       transition: { reason: 'next_turn' },
     }
     state = next

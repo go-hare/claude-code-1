@@ -53,6 +53,38 @@ import {
   createCacheSafeParams,
   saveCacheSafeParams,
 } from '../utils/forkedAgent.js'
+import type { TaskState } from '../tasks/types.js'
+
+const BLOCKING_TASK_TYPES = new Set([
+  'local_agent',
+  'remote_agent',
+  'in_process_teammate',
+  'local_workflow',
+])
+
+function isTerminalStatus(status: string): boolean {
+  return status === 'completed' || status === 'failed' || status === 'killed'
+}
+
+function hasActiveBackgroundWork(tasks: Record<string, TaskState>): boolean {
+  for (const task of Object.values(tasks)) {
+    if (
+      BLOCKING_TASK_TYPES.has(task.type) &&
+      !isTerminalStatus(task.status) &&
+      !(
+        task.type === 'in_process_teammate' &&
+        'isIdle' in task &&
+        (task as Record<string, unknown>).isIdle
+      )
+    ) {
+      return true
+    }
+    if (task.type === 'local_bash' && !isTerminalStatus(task.status)) {
+      return true
+    }
+  }
+  return false
+}
 
 type StopHookResult = {
   blockingErrors: Message[]
@@ -187,6 +219,57 @@ export async function* handleStopHooks(
     const blockingErrors = []
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
+
+    // Defer goal evaluation while background work is still running.
+    // Matches upstream behavior: if an active goal exists but agents/bash tasks
+    // are still in-flight, remove the goal's Stop hook for this turn so it
+    // doesn't fire prematurely. The hook remains registered for the next turn.
+    if (appState.activeGoal) {
+      const tasks = appState.tasks ?? {}
+      if (hasActiveBackgroundWork(tasks)) {
+        logForDebugging(
+          '[goal] evaluation deferred \u2014 background work still running',
+        )
+        // Remove the goal hook temporarily — it will be re-evaluated next turn
+        const { getSessionHooks, removeSessionHook } = await import(
+          '../utils/hooks/sessionHooks.js'
+        )
+        const sessionId =
+          toolUseContext.agentId ??
+          (await import('../bootstrap/state.js')).getSessionId()
+        const hooks = getSessionHooks(appState, sessionId, 'Stop')
+        const stopMatchers = hooks.get('Stop')
+        if (stopMatchers) {
+          for (const matcher of stopMatchers) {
+            for (const hook of matcher.hooks) {
+              if (
+                hook.type === 'prompt' &&
+                hook.prompt === appState.activeGoal.condition
+              ) {
+                removeSessionHook(
+                  toolUseContext.setAppState,
+                  sessionId,
+                  'Stop',
+                  hook,
+                )
+                // Re-register on next turn by incrementing iterations
+                toolUseContext.setAppState(prev => {
+                  if (!prev.activeGoal) return prev
+                  return {
+                    ...prev,
+                    activeGoal: {
+                      ...prev.activeGoal,
+                      iterations: prev.activeGoal.iterations + 1,
+                    },
+                  }
+                })
+                break
+              }
+            }
+          }
+        }
+      }
+    }
 
     const generator = executeStopHooks(
       permissionMode,
