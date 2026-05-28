@@ -48,6 +48,8 @@ const voiceModule: { useVoice: typeof import('../hooks/useVoice.js').useVoice } 
 import { generateCommandSuggestions } from '../utils/suggestions/commandSuggestions.js';
 import type { Command } from '../types/command.js';
 import type { SuggestionItem } from '../components/PromptInput/PromptInputFooterSuggestions.js';
+import { LineView } from '../components/LineView.js';
+import { SuggestionList } from '../components/SuggestionList.js';
 import { Clawd } from '../components/LogoV2/Clawd.js';
 import { getMainLoopModel } from '../utils/model/model.js';
 import { getCwd } from '../utils/cwd.js';
@@ -177,6 +179,7 @@ function AgentViewApp({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [dispatchInput, setDispatchInput] = useState('');
+  const [cursorOffset, setCursorOffset] = useState(0);
   const [focusArea, setFocusArea] = useState<FocusArea>('list');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [renameValue, setRenameValue] = useState('');
@@ -187,6 +190,14 @@ function AgentViewApp({
   const [commands, setCommands] = useState<Command[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+  const [hoveredSuggestion, setHoveredSuggestion] = useState<string | null>(null);
+
+  // Auto-focus dispatch when no sessions
+  useEffect(() => {
+    if (sessions.length === 0 && focusArea === 'list') {
+      setFocusArea('dispatch');
+    }
+  }, [sessions.length, focusArea]);
 
   // Header display values
   const termWidth = process.stdout.columns ?? 80;
@@ -465,55 +476,66 @@ function AgentViewApp({
       return;
     }
 
-    // Dispatch input handling
+    // Dispatch input handling (with cursor support)
     if (focusArea === 'dispatch') {
       if (key.return && dispatchInput.trim()) {
         void handleDispatch();
         return;
       }
-      if (key.escape && !dispatchInput) {
-        process.exit(0);
-        return;
-      }
-      if (key.escape && dispatchInput) {
-        setDispatchInput('');
-        return;
-      }
-      if (key.backspace || key.delete) {
-        setDispatchInput(v => v.slice(0, -1));
-        return;
-      }
-      if (key.tab) {
-        if (suggestions.length > 0) {
-          const selected = suggestions[selectedSuggestion];
-          if (selected) {
-            setDispatchInput(selected.displayText + ' ');
-            setSuggestions([]);
-          }
-          return;
+      if (key.escape) {
+        if (dispatchInput) {
+          setDispatchInput('');
+          setCursorOffset(0);
+        } else if (sessions.length > 0) {
+          setFocusArea('list');
+        } else {
+          process.exit(0);
         }
-        if (sessions.length > 0) setFocusArea('list');
         return;
       }
-      if (key.upArrow && sessions.length > 0) {
+      if (key.backspace && cursorOffset > 0) {
+        setDispatchInput(v => v.slice(0, cursorOffset - 1) + v.slice(cursorOffset));
+        setCursorOffset(o => o - 1);
+        return;
+      }
+      if (key.leftArrow) {
+        setCursorOffset(o => Math.max(0, o - 1));
+        return;
+      }
+      if (key.rightArrow) {
+        setCursorOffset(o => Math.min(dispatchInput.length, o + 1));
+        return;
+      }
+      if (key.upArrow) {
         if (suggestions.length > 0) {
           setSelectedSuggestion(i => Math.max(0, i - 1));
-          return;
+        } else if (sessions.length > 0) {
+          setFocusArea('list');
+          setSelectedIndex(sessions.length - 1);
         }
-        setFocusArea('list');
-        setSelectedIndex(sessions.length - 1);
         return;
       }
       if (key.downArrow && suggestions.length > 0) {
         setSelectedSuggestion(i => Math.min(suggestions.length - 1, i + 1));
         return;
       }
-      if (input && !key.ctrl && !key.meta) {
-        setDispatchInput(v => v + input);
+      if (key.tab) {
+        if (suggestions.length > 0) {
+          const selected = suggestions[selectedSuggestion];
+          if (selected) {
+            const text = selected.displayText + ' ';
+            setDispatchInput(text);
+            setCursorOffset(text.length);
+            setSuggestions([]);
+          }
+        } else if (sessions.length > 0) {
+          setFocusArea('list');
+        }
         return;
       }
-      if (input === 'q' && !dispatchInput) {
-        process.exit(0);
+      if (input && !key.ctrl && !key.meta) {
+        setDispatchInput(v => v.slice(0, cursorOffset) + input + v.slice(cursorOffset));
+        setCursorOffset(o => o + input.length);
         return;
       }
       return;
@@ -545,6 +567,11 @@ function AgentViewApp({
       setFolded(f => !f);
     } else if (input === 'q' || key.escape) {
       process.exit(0);
+    } else if (input && !key.ctrl && !key.meta && input !== 'q' && input !== 'f') {
+      // Auto-switch to dispatch on any printable char
+      setFocusArea('dispatch');
+      setDispatchInput(input);
+      setCursorOffset(input.length);
     }
   });
 
@@ -671,28 +698,41 @@ function AgentViewApp({
       {/* Dispatch input — always at bottom */}
       {viewMode === 'list' && (
         <Box marginTop={1} flexDirection="column">
-          <Box>
-            <Text dimColor={focusArea !== 'dispatch'}>{'\u276f '}</Text>
-            {dispatchInput ? (
-              <Text>{dispatchInput}</Text>
-            ) : (
-              <Text dimColor>
-                {focusArea === 'dispatch' ? 'start a task in the background' : 'start a task in the background'}
-              </Text>
-            )}
-          </Box>
-          {/* Autocomplete suggestions */}
+          {/* Suggestions above input */}
           {suggestions.length > 0 && focusArea === 'dispatch' && (
-            <Box flexDirection="column" paddingLeft={2}>
-              {suggestions.map((item, i) => (
-                <Box key={item.id}>
-                  <Text inverse={i === selectedSuggestion}>{item.displayText}</Text>
-                  {item.description && <Text dimColor> {item.description.slice(0, 50)}</Text>}
-                </Box>
-              ))}
-              <Text dimColor>{'tab accept \u00b7 \u2191\u2193 navigate'}</Text>
-            </Box>
+            <SuggestionList
+              suggestions={suggestions.map(item => ({
+                id: item.id,
+                displayText: item.displayText,
+                description: item.description ?? '',
+              }))}
+              selectedSuggestion={selectedSuggestion}
+              maxColumnWidth={35}
+              hoveredId={hoveredSuggestion}
+              onHoverChange={setHoveredSuggestion}
+              onSelect={index => {
+                const item = suggestions[index];
+                if (item) {
+                  const text = item.displayText + ' ';
+                  setDispatchInput(text);
+                  setCursorOffset(text.length);
+                  setSuggestions([]);
+                }
+              }}
+            />
           )}
+          {/* Input line with border */}
+          <Box flexDirection="column" borderStyle="round" borderLeft={false} borderRight={false} borderDimColor>
+            <LineView
+              query={dispatchInput}
+              cursorOffset={cursorOffset}
+              placeholder="start a task in the background"
+              prefix={'\u276f'}
+              prefixDim={focusArea !== 'dispatch'}
+              isFocused={focusArea === 'dispatch'}
+              width="100%"
+            />
+          </Box>
         </Box>
       )}
 
