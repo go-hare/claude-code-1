@@ -715,7 +715,49 @@ export async function setPluginEnabledOp(
       ...loadedEnabled,
       ...disabled,
     ])
-    if (rdeps.length > 0) reverseDependents = rdeps
+    if (rdeps.length > 0) {
+      reverseDependents = rdeps
+      // Block disable when other enabled plugins depend on this one
+      const enabledRdeps = rdeps.filter(dep =>
+        loadedEnabled.some(p => p.name === dep || p.source === dep),
+      )
+      if (enabledRdeps.length > 0) {
+        const chain = enabledRdeps.join(', ')
+        return {
+          success: false,
+          message: `Cannot disable ${pluginId}: ${chain} depend${enabledRdeps.length === 1 ? 's' : ''} on it. Disable ${chain} first, or run: claude plugin disable ${enabledRdeps.join(' ')} ${pluginId}`,
+        }
+      }
+    }
+  }
+
+  // When enabling, also force-enable transitive dependencies
+  const enabledDeps: string[] = []
+  if (enabled) {
+    const { enabled: loadedEnabled, disabled } = await loadAllPlugins()
+    const targetPlugin = [...loadedEnabled, ...disabled].find(
+      p => p.name === pluginId || p.source === pluginId,
+    )
+    const deps = (targetPlugin?.manifest as Record<string, unknown>)
+      ?.dependencies as Array<string | { name?: string }> | undefined
+    if (deps) {
+      for (const dep of deps) {
+        const depName = typeof dep === 'string' ? dep : (dep?.name ?? '')
+        if (!depName) continue
+        const isDisabled = disabled.some(
+          p => p.name === depName || p.source === depName,
+        )
+        if (isDisabled) {
+          updateSettingsForSource(settingSource, {
+            enabledPlugins: {
+              ...getSettingsForSource(settingSource)?.enabledPlugins,
+              [depName]: true,
+            },
+          })
+          enabledDeps.push(depName)
+        }
+      }
+    }
   }
 
   // ── ACTION: write settings ──
@@ -736,9 +778,13 @@ export async function setPluginEnabledOp(
 
   const { name: pluginName } = parsePluginIdentifier(pluginId)
   const depWarn = formatReverseDependentsSuffix(reverseDependents)
+  const depsNote =
+    enabledDeps.length > 0
+      ? ` (also enabled dependencies: ${enabledDeps.join(', ')})`
+      : ''
   return {
     success: true,
-    message: `Successfully ${operation}d plugin: ${pluginName} (scope: ${resolvedScope})${depWarn}`,
+    message: `Successfully ${operation}d plugin: ${pluginName} (scope: ${resolvedScope})${depWarn}${depsNote}`,
     pluginId,
     pluginName,
     scope: resolvedScope,
