@@ -939,6 +939,13 @@ export const MarketplaceSourceSchema = lazySchema(() =>
             'Example: [".claude-plugin", "plugins"]. ' +
             'If omitted, the full repository is cloned.',
         ),
+      skipLfs: z
+        .boolean()
+        .optional()
+        .describe(
+          'Skip Git LFS downloads during clone and update. ' +
+            'Useful for repos with large binary assets that are not needed for plugins.',
+        ),
     }),
     z.object({
       source: z.literal('git'),
@@ -971,6 +978,10 @@ export const MarketplaceSourceSchema = lazySchema(() =>
             'Example: [".claude-plugin", "plugins"]. ' +
             'If omitted, the full repository is cloned.',
         ),
+      skipLfs: z
+        .boolean()
+        .optional()
+        .describe('Skip Git LFS downloads during clone and update.'),
     }),
     z.object({
       source: z.literal('npm'),
