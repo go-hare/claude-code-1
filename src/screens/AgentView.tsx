@@ -29,7 +29,6 @@ import {
   formatJobAge,
   pickIcon,
   doneCapForRows,
-  repoGroupLabel,
   parseDispatch,
   parsePrRef,
   type StatusBand,
@@ -136,7 +135,6 @@ function SessionRow({
   const icon = pickIcon(band, activity, session.pinned);
   const name = isRenaming ? renameValue : jobLabel(session);
   const age = formatJobAge(session.startedAt);
-  const repo = repoGroupLabel(session);
 
   // Build the PR display
   let prDisplay = '';
@@ -144,33 +142,48 @@ function SessionRow({
     prDisplay = session.prRepository ? `${session.prRepository}#${session.prNumber}` : `PR #${session.prNumber}`;
   }
 
-  // Status text
-  let statusText = '';
-  if (band === 'blocked') statusText = 'awaiting input';
-  else if (band === 'active') {
-    if (activity === 'flowing') statusText = 'working';
-    else if (activity === 'slowing') statusText = 'slowing';
-    else statusText = 'stuck';
-  } else {
-    if (activity === 'success') statusText = 'completed';
-    else if (activity === 'failure') statusText = 'failed';
-    else statusText = 'done';
+  // Detail text (what the session is doing / waiting for)
+  let detail = '';
+  if (band === 'blocked' && session.waitingFor) {
+    detail = session.waitingFor;
+  } else if (band === 'active') {
+    if (activity === 'slowing') detail = 'slowing\u2026';
+    else if (activity === 'stuck') detail = 'stuck';
+  } else if (activity === 'failure') {
+    detail = 'failed';
   }
 
+  // Status indicator color
+  const statusColor =
+    band === 'blocked' ? 'warning' : activity === 'failure' ? 'error' : activity === 'success' ? 'success' : undefined;
+
   return (
-    <Box paddingLeft={1}>
-      <Text inverse={isSelected} color={color as never} dimColor={dim}>
-        {icon} <Text bold={isSelected}>{name}</Text>
-        <Text dimColor>
-          {' '}
-          \u00b7 {statusText} \u00b7 {age}
-        </Text>
-        {session.gitBranch && <Text dimColor> \u00b7 {session.gitBranch}</Text>}
-        {prDisplay && <Text dimColor> \u00b7 {prDisplay}</Text>}
-        {repo && !session.gitBranch && <Text dimColor> \u00b7 {repo}</Text>}
-        {session.waitingFor && <Text dimColor> \u00b7 waiting: {session.waitingFor}</Text>}
-        {isRenaming && <Text> \u2588</Text>}
+    <Box paddingLeft={1} width="100%">
+      {/* Icon */}
+      <Text color={(color ?? statusColor) as never} dimColor={dim}>
+        {icon}{' '}
       </Text>
+      {/* Name (bold when focused) */}
+      <Text bold={isSelected} dimColor={!isSelected && dim} inverse={isSelected}>
+        {name}
+      </Text>
+      {/* Detail / waiting reason */}
+      {detail && (
+        <Text dimColor wrap="truncate">
+          {' '}
+          \u00b7 {detail}
+        </Text>
+      )}
+      {/* Branch */}
+      {session.gitBranch && <Text dimColor> \u00b7 {session.gitBranch}</Text>}
+      {/* PR */}
+      {prDisplay && <Text color={statusColor as never}> \u00b7 {prDisplay}</Text>}
+      {/* Spacer */}
+      <Box flexGrow={1} />
+      {/* Age (right-aligned) */}
+      <Text dimColor>{age}</Text>
+      {/* Rename cursor */}
+      {isRenaming && <Text> \u2588</Text>}
     </Box>
   );
 }
