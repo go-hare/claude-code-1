@@ -48,6 +48,9 @@ const voiceModule: { useVoice: typeof import('../hooks/useVoice.js').useVoice } 
 import { generateCommandSuggestions } from '../utils/suggestions/commandSuggestions.js';
 import type { Command } from '../types/command.js';
 import type { SuggestionItem } from '../components/PromptInput/PromptInputFooterSuggestions.js';
+import { Clawd } from '../components/LogoV2/Clawd.js';
+import { getMainLoopModel } from '../utils/model/model.js';
+import { getCwd } from '../utils/cwd.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -184,6 +187,11 @@ function AgentViewApp({
   const [commands, setCommands] = useState<Command[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+
+  // Header display values
+  const termWidth = process.stdout.columns ?? 80;
+  const modelDisplay = getMainLoopModel();
+  const cwdDisplay = getCwd();
 
   // -------------------------------------------------------------------------
   // Voice integration (push-to-talk in reply mode)
@@ -547,11 +555,13 @@ function AgentViewApp({
   return (
     <Box flexDirection="column" padding={1}>
       {/* Header */}
-      <Box marginBottom={1} gap={1}>
+      <Box marginBottom={1} gap={2}>
+        {termWidth >= 70 && <Clawd />}
         <Box flexDirection="column">
           <Text>
-            <Text bold>Claude Code</Text>
+            <Text bold>Claude Code</Text> <Text dimColor>v{MACRO.VERSION}</Text>
           </Text>
+          <Text dimColor>{[modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}</Text>
           <Text dimColor>
             {blocked.length} awaiting input {'\u00b7'} {active.length} working {'\u00b7'} {done.length} completed
           </Text>
