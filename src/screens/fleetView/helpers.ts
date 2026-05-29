@@ -6,6 +6,7 @@
  */
 
 import type { SessionEntry } from '../../cli/bg/engine.js'
+import figures from 'figures'
 
 // ---------------------------------------------------------------------------
 // Status bands
@@ -141,6 +142,10 @@ export function jobLabel(session: SessionEntry): string {
     // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is intentional
     return session.name.replace(/[\x00-\x1f]/g, '').trim()
   }
+  // Use short session ID (first 8 chars) as fallback, matching official behavior
+  if (session.sessionId) {
+    return session.sessionId.slice(0, 8)
+  }
   return `session-${session.pid}`
 }
 
@@ -227,23 +232,19 @@ export function isSelfDriving(session: SessionEntry): boolean {
 
 /**
  * Pick the status icon for a session row.
- * Upstream: Md_ (pickIcon) + taA/eaA/i$8
+ * Uses figures library to match our normal REPL task icons.
  */
 export function pickIcon(
   band: StatusBand,
   activity: Activity,
   pinned?: boolean,
 ): string {
-  if (pinned === true) return '\u25a0'
-  if (band === 'blocked') return '\u25a1'
-  if (band === 'active') {
-    if (activity === 'flowing') return '\u25a1'
-    if (activity === 'slowing') return '\u25a1'
-    return '\u25a1'
-  }
-  if (activity === 'success') return '\u25a1'
-  if (activity === 'failure') return '\u25a1'
-  return '\u25a1'
+  if (pinned === true) return figures.squareCenter // ■
+  if (band === 'blocked') return figures.bullet // ● (warning colored)
+  if (band === 'active') return figures.play // ▶
+  if (activity === 'success') return figures.bullet // ● (success colored)
+  if (activity === 'failure') return figures.cross // ✘
+  return figures.bullet // ●
 }
 
 // ---------------------------------------------------------------------------

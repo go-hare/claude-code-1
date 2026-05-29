@@ -19,6 +19,8 @@ import { wrappedRender as render, Box, Text, useInput, AlternateScreen } from '@
 import { listLiveSessions, handleBgStart, attachHandler, killHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
+import { submitDispatch } from '../daemon/bgManager.js';
+import { listAllJobs, type BgJobState } from '../daemon/jobState.js';
 import { VoiceProvider } from '../context/voice.js';
 import {
   deriveBand,
@@ -126,6 +128,7 @@ function SessionRow({
   isSelected,
   isRenaming,
   renameValue,
+  labelWidth,
   onSelect,
   onOpen,
 }: {
@@ -133,6 +136,7 @@ function SessionRow({
   isSelected: boolean;
   isRenaming: boolean;
   renameValue: string;
+  labelWidth: number;
   onSelect?: () => void;
   onOpen?: () => void;
 }): React.ReactElement {
@@ -148,25 +152,31 @@ function SessionRow({
 
   return (
     <Box
-      paddingLeft={1}
       width="100%"
       backgroundColor={isSelected ? ('secondaryBg' as never) : undefined}
       onMouseEnter={onSelect}
       onClick={onOpen}
     >
-      <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected}>
-        {icon}{' '}
-      </Text>
-      <Text bold={isSelected}>{name}</Text>
-      {detail && (
-        <Text dimColor={!isSelected}>
-          {'  '}
-          {detail}
+      {/* Icon + Name column (fixed width) */}
+      <Box width={labelWidth + 2} flexShrink={0}>
+        <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected} wrap={'truncate' as never}>
+          {icon}{' '}
+          <Text bold={isSelected} dimColor={!isSelected && dim}>
+            {name}
+          </Text>
         </Text>
-      )}
-      {isSelected && band === 'blocked' && <Text dimColor>{' \u00b7 \u2192'}</Text>}
-      <Box flexGrow={1} />
-      <Text dimColor={!isSelected}>{age}</Text>
+      </Box>
+      {/* Detail column (flex) */}
+      <Box flexGrow={1} width={0} paddingLeft={2}>
+        <Text dimColor wrap={'truncate' as never}>
+          {detail}
+          {isSelected && band === 'blocked' ? ` \u00b7 \u2192` : ''}
+        </Text>
+      </Box>
+      {/* Age column */}
+      <Box flexShrink={0} paddingLeft={2}>
+        <Text dimColor>{age}</Text>
+      </Box>
       {isRenaming && <Text>{' \u2588'}</Text>}
     </Box>
   );
@@ -180,10 +190,12 @@ function AgentViewApp({
   enteredViaLeftArrow,
   dispatchExtraArgs = [],
   cwdFilter,
+  onAction,
 }: {
   enteredViaLeftArrow?: boolean;
   dispatchExtraArgs?: string[];
   cwdFilter?: string;
+  onAction?: (action: { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }) => void;
 }): React.ReactElement {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -262,6 +274,26 @@ function AgentViewApp({
   const refresh = useCallback(async () => {
     try {
       let live = await listLiveSessions();
+
+      // Merge job state entries (sessions managed by bg manager)
+      const jobs = await listAllJobs();
+      for (const { short, state: job } of jobs) {
+        // Skip jobs that already appear in live sessions (by sessionId)
+        if (live.some(s => s.sessionId === job.sessionId)) continue;
+        // Convert job state to SessionEntry for display
+        live.push({
+          pid: 0,
+          sessionId: job.sessionId,
+          cwd: job.cwd,
+          startedAt: Date.parse(job.createdAt),
+          kind: 'bg',
+          name: job.name,
+          status: job.state === 'working' ? 'busy' : job.state === 'blocked' ? 'waiting' : job.state,
+          updatedAt: Date.parse(job.updatedAt),
+          engine: 'detached',
+          lastMessage: job.detail || undefined,
+        });
+      }
 
       // Filter by cwd if specified (--cwd flag)
       if (cwdFilter) {
@@ -352,6 +384,12 @@ function AgentViewApp({
   const visibleDone = folded ? done.slice(0, doneCap) : done;
   const hiddenDoneCount = folded ? Math.max(0, done.length - doneCap) : 0;
 
+  // Compute label column width (max name length across all sessions)
+  const labelWidth = Math.max(
+    ...sessions.map(s => jobLabel(s).length),
+    8, // minimum width
+  );
+
   // -------------------------------------------------------------------------
   // Actions
   // -------------------------------------------------------------------------
@@ -361,8 +399,12 @@ function AgentViewApp({
     if (!prompt || dispatchingRef.current) return;
     dispatchingRef.current = true;
     try {
-      const args = ['-p', prompt, ...dispatchExtraArgs];
-      await handleBgStart(args);
+      await submitDispatch({
+        intent: prompt,
+        cwd: getCwd(),
+        extraArgs: dispatchExtraArgs,
+        source: 'fleet',
+      });
       setDispatchInput('');
       await refresh();
     } finally {
@@ -410,6 +452,51 @@ function AgentViewApp({
     await refresh();
     setViewMode('list');
   }, [done, refresh]);
+
+  // -------------------------------------------------------------------------
+  // Attach pre-check (verify PTY socket before exiting fleet view)
+  // -------------------------------------------------------------------------
+
+  const checkAndAttach = useCallback(
+    async (short: string, session: SessionEntry, onActionCb: typeof onAction, setErr: (msg: string | null) => void) => {
+      const net = require('net') as typeof import('net');
+      let sockPath: string;
+      if (process.platform === 'win32') {
+        const user = process.env.USERNAME || process.env.USER || 'default';
+        sockPath = `//./pipe/cc-pty-${user}-${short}`;
+      } else {
+        const { join } = require('path') as typeof import('path');
+        const { getClaudeConfigHomeDir } = require('../utils/envUtils.js') as typeof import('../utils/envUtils.js');
+        sockPath = join(getClaudeConfigHomeDir(), 'daemon', 'bg', 'pty', `${short}.sock`);
+      }
+
+      // Probe socket with retries (PTY host may be starting)
+      let alive = false;
+      for (let i = 0; i < 6; i++) {
+        alive = await new Promise<boolean>(resolve => {
+          const probe = new net.Socket();
+          probe.on('error', () => resolve(false));
+          probe.on('connect', () => {
+            probe.destroy();
+            resolve(true);
+          });
+          probe.connect(sockPath);
+        });
+        if (alive) break;
+        await new Promise(r => setTimeout(r, [50, 100, 250, 500, 1000, 2000][i]));
+      }
+
+      if (alive) {
+        if (onActionCb) {
+          onActionCb({ type: 'open', sessionId: session.sessionId ?? '', short, logPath: session.logPath });
+        }
+      } else {
+        setErr('Session not reachable \u2014 it may have already exited');
+        setTimeout(() => setErr(null), 3000);
+      }
+    },
+    [],
+  );
 
   // -------------------------------------------------------------------------
   // Input handling
@@ -565,7 +652,23 @@ function AgentViewApp({
     } else if (key.return && sessions.length > 0) {
       const session = sessions[selectedIndex];
       if (session) {
-        void attachHandler(session.name ?? String(session.pid));
+        const short = session.sessionId?.slice(0, 8) ?? '';
+        const band = deriveBand(session);
+        if (band === 'completed') {
+          // Completed sessions can't be attached — show inline error
+          setError('That session ended \u2014 back to the list');
+          setTimeout(() => setError(null), 3000);
+        } else {
+          // Check if PTY socket is reachable before exiting fleet view
+          void checkAndAttach(short, session, onAction, setError);
+        }
+      }
+    } else if (input === ' ' && sessions.length > 0) {
+      // Space to reply (for blocked sessions)
+      const session = sessions[selectedIndex];
+      if (session && deriveBand(session) === 'blocked') {
+        setViewMode('reply');
+        setReplyInput('');
       }
     } else if (input === 'x' && key.ctrl && sessions.length > 0) {
       setViewMode('delete-confirm');
@@ -590,7 +693,7 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   return (
-    <Box flexDirection="column" padding={1}>
+    <Box flexDirection="column" padding={1} height="100%">
       {/* Header */}
       <Box marginBottom={1} gap={2}>
         {termWidth >= 70 && <Clawd />}
@@ -633,6 +736,7 @@ function AgentViewApp({
                 isSelected={focusArea === 'list' && index === selectedIndex}
                 isRenaming={viewMode === 'rename' && index === selectedIndex}
                 renameValue={renameValue}
+                labelWidth={labelWidth}
                 onSelect={() => {
                   setFocusArea('list');
                   setSelectedIndex(index);
@@ -655,6 +759,7 @@ function AgentViewApp({
                 isSelected={focusArea === 'list' && index === selectedIndex}
                 isRenaming={viewMode === 'rename' && index === selectedIndex}
                 renameValue={renameValue}
+                labelWidth={labelWidth}
                 onSelect={() => {
                   setFocusArea('list');
                   setSelectedIndex(index);
@@ -677,6 +782,7 @@ function AgentViewApp({
                 isSelected={focusArea === 'list' && index === selectedIndex}
                 isRenaming={viewMode === 'rename' && index === selectedIndex}
                 renameValue={renameValue}
+                labelWidth={labelWidth}
                 onSelect={() => {
                   setFocusArea('list');
                   setSelectedIndex(index);
@@ -696,6 +802,9 @@ function AgentViewApp({
           </Text>
         </Box>
       )}
+
+      {/* Spacer to push input to bottom */}
+      <Box flexGrow={1} />
 
       {/* Reply mode */}
       {viewMode === 'reply' && (
@@ -720,9 +829,9 @@ function AgentViewApp({
         </Box>
       )}
 
-      {/* Dispatch input — always at bottom */}
+      {/* Dispatch input — pinned to bottom */}
       {viewMode === 'list' && (
-        <Box marginTop={1} flexDirection="column">
+        <Box flexDirection="column">
           {/* Suggestions above input */}
           {suggestions.length > 0 && focusArea === 'dispatch' && (
             <SuggestionList
@@ -746,7 +855,7 @@ function AgentViewApp({
               }}
             />
           )}
-          {/* Separator + Input line */}
+          {/* Separator */}
           <Box
             borderStyle="round"
             borderLeft={false}
@@ -756,6 +865,7 @@ function AgentViewApp({
             borderDimColor
             height={1}
           />
+          {/* Input line */}
           <LineView
             query={dispatchInput}
             cursorOffset={cursorOffset}
@@ -764,7 +874,9 @@ function AgentViewApp({
             prefixDim={focusArea !== 'dispatch'}
             isFocused={focusArea === 'dispatch'}
             width="100%"
+            borderless
           />
+          {/* Bottom separator */}
           <Box
             borderStyle="round"
             borderLeft={false}
@@ -778,17 +890,150 @@ function AgentViewApp({
       )}
 
       {/* Keyboard hints */}
-      <Box marginTop={1}>
+      <Box paddingLeft={1}>
         <Text dimColor>
           {viewMode === 'rename'
             ? 'enter save \u00b7 escape cancel'
             : viewMode === 'reply'
               ? 'enter send \u00b7 escape cancel'
-              : '\u2191\u2193 navigate \u00b7 enter attach/reply \u00b7 ctrl+x delete \u00b7 ctrl+t pin \u00b7 ctrl+r rename \u00b7 f fold \u00b7 tab switch'}
+              : focusArea === 'list'
+                ? 'enter to open \u00b7 space to reply \u00b7 ctrl+x to delete \u00b7 ? for shortcuts'
+                : '\u2191\u2193 navigate \u00b7 enter attach/reply \u00b7 ctrl+x delete \u00b7 ctrl+t pin \u00b7 ctrl+r rename \u00b7 f fold \u00b7 tab switch'}
         </Text>
       </Box>
     </Box>
   );
+}
+
+// ---------------------------------------------------------------------------
+// PTY Attach (connects to PTY host socket, raw terminal I/O)
+// ---------------------------------------------------------------------------
+
+const PTY_DATA_FRAME = 0x01;
+const PTY_CTRL_FRAME = 0x02;
+const PTY_HEADER_SIZE = 5;
+
+function encodePtyDataFrame(data: Buffer): Buffer {
+  const header = Buffer.alloc(PTY_HEADER_SIZE);
+  header[0] = PTY_DATA_FRAME;
+  header.writeUInt32LE(data.length, 1);
+  return Buffer.concat([header, data]);
+}
+
+function encodePtyCtrlFrame(msg: Record<string, unknown>): Buffer {
+  const payload = Buffer.from(JSON.stringify(msg), 'utf-8');
+  const header = Buffer.alloc(PTY_HEADER_SIZE);
+  header[0] = PTY_CTRL_FRAME;
+  header.writeUInt32LE(payload.length, 1);
+  return Buffer.concat([header, payload]);
+}
+
+const RETRY_DELAYS = [50, 100, 250, 500, 1000, 2000];
+const MAX_RETRIES = 30;
+
+async function attachToPtySession(short: string): Promise<void> {
+  const net = require('net') as typeof import('net');
+  const { getClaudeConfigHomeDir } = require('../utils/envUtils.js') as typeof import('../utils/envUtils.js');
+  const { join } = require('path') as typeof import('path');
+
+  let sockPath: string;
+  if (process.platform === 'win32') {
+    const user = process.env.USERNAME || process.env.USER || 'default';
+    sockPath = `//./pipe/cc-pty-${user}-${short}`;
+  } else {
+    sockPath = join(getClaudeConfigHomeDir(), 'daemon', 'bg', 'pty', `${short}.sock`);
+  }
+
+  // Retry connect with backoff (matches official py6 logic)
+  let attempt = 0;
+  const tryConnect = (): Promise<import('net').Socket | null> => {
+    return new Promise(resolve => {
+      const sock = new net.Socket();
+      sock.on('error', () => resolve(null));
+      sock.on('connect', () => resolve(sock));
+      sock.connect(sockPath);
+    });
+  };
+
+  let sock: import('net').Socket | null = null;
+  while (attempt < MAX_RETRIES) {
+    sock = await tryConnect();
+    if (sock) break;
+    const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)]!;
+    await new Promise(r => setTimeout(r, delay));
+    attempt++;
+  }
+
+  if (!sock) return; // Can't connect — silently return to fleet view
+
+  // Connected — enter raw terminal mode
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  process.stdin.resume();
+
+  await new Promise<void>(resolve => {
+    const cleanup = () => {
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      process.stdin.removeAllListeners('data');
+      process.stdout.removeAllListeners('resize');
+      resolve();
+    };
+
+    sock!.on('error', cleanup);
+    sock!.on('close', cleanup);
+
+    // Forward stdin → PTY host
+    process.stdin.on('data', (raw: Buffer | string) => {
+      const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+      if (chunk.length === 1 && chunk[0] === 0x1a) {
+        sock!.destroy();
+        return;
+      }
+      if (!sock!.destroyed) {
+        sock!.write(encodePtyDataFrame(chunk));
+      }
+    });
+
+    // Resize
+    const onResize = () => {
+      if (!sock!.destroyed) {
+        sock!.write(
+          encodePtyCtrlFrame({
+            t: 'resize',
+            cols: process.stdout.columns,
+            rows: process.stdout.rows,
+          }),
+        );
+      }
+    };
+    process.stdout.on('resize', onResize);
+    onResize();
+
+    // Parse incoming frames
+    let buf: Buffer<ArrayBuffer> = Buffer.alloc(0);
+    sock!.on('data', (chunk: Buffer<ArrayBuffer>) => {
+      buf = buf.length ? (Buffer.concat([buf, chunk]) as Buffer<ArrayBuffer>) : chunk;
+      while (buf.length >= PTY_HEADER_SIZE) {
+        const type = buf[0];
+        const len = buf.readUInt32LE(1);
+        if (buf.length < PTY_HEADER_SIZE + len) break;
+        const payload = buf.subarray(PTY_HEADER_SIZE, PTY_HEADER_SIZE + len);
+        buf = buf.subarray(PTY_HEADER_SIZE + len);
+
+        if (type === PTY_DATA_FRAME) {
+          process.stdout.write(payload);
+        } else if (type === PTY_CTRL_FRAME) {
+          try {
+            const msg = JSON.parse(payload.toString()) as Record<string, unknown>;
+            if (msg.t === 'exit') {
+              const code = msg.code as number;
+              const status = code === 0 ? 'done' : `exited (${code})`;
+              process.stdout.write(`\r\n\x1b[2m\u2014 ${status} \xb7 Ctrl+Z to return \u2014\x1b[0m\r\n`);
+            }
+          } catch {}
+        }
+      }
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -800,16 +1045,39 @@ export async function renderAgentView(options?: {
   dispatchExtraArgs?: string[];
   cwdFilter?: string;
 }): Promise<void> {
-  const instance = await render(
-    <AlternateScreen mouseTracking={true}>
-      <VoiceProvider>
-        <AgentViewApp
-          enteredViaLeftArrow={options?.enteredViaLeftArrow}
-          dispatchExtraArgs={options?.dispatchExtraArgs}
-          cwdFilter={options?.cwdFilter}
-        />
-      </VoiceProvider>
-    </AlternateScreen>,
-  );
-  await instance.waitUntilExit();
+  // Loop: render FleetView → handle action → re-render
+  for (;;) {
+    let instance: Awaited<ReturnType<typeof render>> | null = null;
+
+    const action = await new Promise<
+      { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }
+    >(resolve => {
+      void render(
+        <AlternateScreen mouseTracking={true}>
+          <VoiceProvider>
+            <AgentViewApp
+              enteredViaLeftArrow={options?.enteredViaLeftArrow}
+              dispatchExtraArgs={options?.dispatchExtraArgs}
+              cwdFilter={options?.cwdFilter}
+              onAction={resolve}
+            />
+          </VoiceProvider>
+        </AlternateScreen>,
+      ).then(inst => {
+        instance = inst;
+      });
+    });
+
+    // Unmount Ink before doing anything else
+    if (instance) {
+      (instance as { unmount: () => void }).unmount();
+    }
+
+    if (action.type === 'done') break;
+
+    if (action.type === 'open') {
+      // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
+      await attachToPtySession(action.short);
+    }
+  }
 }

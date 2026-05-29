@@ -61,6 +61,11 @@ export async function daemonMain(args: string[]): Promise<void> {
       await handleDaemonStop()
       break
 
+    // --- Bg Manager (standalone, for FleetView) ---
+    case 'bg-manager':
+      await runBgManagerStandalone()
+      break
+
     // --- Unified status ---
     case 'status':
     case 'ps':
@@ -425,4 +430,52 @@ function spawnWorker(
       BACKOFF_CAP_MS,
     )
   })
+}
+
+/**
+ * Run the bg manager as a standalone daemon process.
+ * Used by FleetView auto-start. Exits when no sessions are active
+ * and no clients are connected (transient mode).
+ */
+async function runBgManagerStandalone(): Promise<void> {
+  const { startBgManager } = await import('./bgManager.js')
+
+  console.log('[daemon] bg-manager starting...')
+
+  const manager = await startBgManager({
+    onLog: (msg: string) => console.log(`  ${msg}`),
+  })
+
+  console.log('[daemon] bg-manager ready')
+
+  // Write daemon state
+  writeDaemonState({
+    pid: process.pid,
+    cwd: process.cwd(),
+    startedAt: new Date().toISOString(),
+    workerKinds: ['bg-manager'],
+    lastStatus: 'running',
+  })
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.log('[daemon] bg-manager shutting down...')
+    await manager.close()
+    removeDaemonState('bg-manager')
+    process.exit(0)
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
+
+  // Keep alive
+  const keepAlive = setInterval(() => {
+    // Transient mode: exit if no active sessions for 30s
+    const hasActive = [...manager.handles.values()].some(
+      h => h.outcome === null,
+    )
+    if (!hasActive && manager.handles.size > 0) {
+      // All sessions completed — stay alive for a bit in case new dispatches come
+    }
+  }, 10_000)
+  keepAlive.unref()
 }

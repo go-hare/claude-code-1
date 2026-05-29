@@ -156,6 +156,14 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Fast-path for `--bg-pty-host` (internal — daemon spawns this as PTY host).
+  // Must come before other checks: spawned per-session, perf-sensitive.
+  if (args[0] === '--bg-pty-host') {
+    const { runPtyHost } = await import('../daemon/ptyHost.js');
+    await runPtyHost(args.slice(1));
+    return;
+  }
+
   // Fast-path for `--daemon-worker=<kind>` (internal — supervisor spawns this).
   // Must come before the daemon subcommand check: spawned per-worker, so
   // perf-sensitive. No enableConfigs(), no analytics sinks at this layer —

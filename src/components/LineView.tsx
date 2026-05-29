@@ -12,6 +12,8 @@ type LineViewProps = {
   isTerminalFocused?: boolean;
   width?: string | number;
   borderless?: boolean;
+  borderColor?: string;
+  borderDimColor?: boolean;
 };
 
 export function LineView({
@@ -24,6 +26,8 @@ export function LineView({
   isTerminalFocused: _isTerminalFocused,
   width,
   borderless,
+  borderColor,
+  borderDimColor,
 }: LineViewProps) {
   const renderPrefix = () => {
     if (!prefix) return null;
@@ -63,6 +67,8 @@ export function LineView({
     <Box
       width={width}
       borderStyle={borderless ? undefined : 'round'}
+      borderColor={borderless ? undefined : (borderColor as never)}
+      borderDimColor={borderless ? undefined : borderDimColor}
       paddingLeft={borderless ? 0 : 1}
       paddingRight={borderless ? 0 : 1}
     >

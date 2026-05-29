@@ -77,10 +77,19 @@ export async function agentsMain(args: string[]): Promise<void> {
   // Extract passthrough args for dispatched sessions
   const dispatchExtraArgs = extractPassthroughArgs(args)
 
+  // Start bg manager in-process (like official — no separate daemon needed)
+  const { startBgManager } = await import('../daemon/bgManager.js')
+  const bgManager = await startBgManager({
+    onLog: () => {}, // Suppress logs in UI mode
+  })
+
   // Interactive dashboard
   const { renderAgentView } = await import('../screens/AgentView.js')
   await renderAgentView({
     dispatchExtraArgs,
     cwdFilter,
   })
+
+  // Cleanup bg manager on exit
+  await bgManager.close()
 }
