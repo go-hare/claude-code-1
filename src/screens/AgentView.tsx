@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
-import { wrappedRender as render, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
+import { wrappedRender as render, Box, Text, useInput } from '@anthropic/ink';
 import { listLiveSessions, handleBgStart, attachHandler, killHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
@@ -1102,16 +1102,14 @@ export async function renderAgentView(options?: {
       { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }
     >(resolve => {
       void render(
-        <AlternateScreen mouseTracking={true}>
-          <VoiceProvider>
-            <AgentViewApp
-              enteredViaLeftArrow={options?.enteredViaLeftArrow}
-              dispatchExtraArgs={options?.dispatchExtraArgs}
-              cwdFilter={options?.cwdFilter}
-              onAction={resolve}
-            />
-          </VoiceProvider>
-        </AlternateScreen>,
+        <VoiceProvider>
+          <AgentViewApp
+            enteredViaLeftArrow={options?.enteredViaLeftArrow}
+            dispatchExtraArgs={options?.dispatchExtraArgs}
+            cwdFilter={options?.cwdFilter}
+            onAction={resolve}
+          />
+        </VoiceProvider>,
       ).then(inst => {
         instance = inst;
       });
