@@ -14,6 +14,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
 import { wrappedRender as render, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
 import { listLiveSessions, handleBgStart, attachHandler, killHandler } from '../cli/bg.js';
@@ -460,13 +461,14 @@ function AgentViewApp({
   const checkAndAttach = useCallback(
     async (short: string, session: SessionEntry, onActionCb: typeof onAction, setErr: (msg: string | null) => void) => {
       const net = require('net') as typeof import('net');
+      const { join } = require('path') as typeof import('path');
+      const { getClaudeConfigHomeDir } = require('../utils/envUtils.js') as typeof import('../utils/envUtils.js');
+
       let sockPath: string;
       if (process.platform === 'win32') {
         const user = process.env.USERNAME || process.env.USER || 'default';
         sockPath = `//./pipe/cc-pty-${user}-${short}`;
       } else {
-        const { join } = require('path') as typeof import('path');
-        const { getClaudeConfigHomeDir } = require('../utils/envUtils.js') as typeof import('../utils/envUtils.js');
         sockPath = join(getClaudeConfigHomeDir(), 'daemon', 'bg', 'pty', `${short}.sock`);
       }
 
@@ -490,10 +492,57 @@ function AgentViewApp({
         if (onActionCb) {
           onActionCb({ type: 'open', sessionId: session.sessionId ?? '', short, logPath: session.logPath });
         }
-      } else {
-        setErr('Session not reachable \u2014 it may have already exited');
-        setTimeout(() => setErr(null), 3000);
+        return;
       }
+
+      // Session not reachable — try respawn via daemon
+      try {
+        const { sendControlRequest, isDaemonReachable } =
+          require('../daemon/controlSocket.js') as typeof import('../daemon/controlSocket.js');
+        const daemonUp = await isDaemonReachable();
+        if (daemonUp) {
+          const resp = await sendControlRequest(
+            {
+              op: 'dispatch',
+              short,
+              sessionId: session.sessionId ?? randomUUID(),
+              intent: session.name ?? '',
+              name: session.name ?? short,
+              cwd: session.cwd ?? process.cwd(),
+              respawnFlags: ['--resume', session.sessionId ?? ''],
+              source: 'fleet_respawn',
+              createdAt: Date.now(),
+            },
+            { timeoutMs: 5000 },
+          );
+
+          if (resp.ok) {
+            // Wait for PTY to come up after respawn
+            for (let i = 0; i < 8; i++) {
+              await new Promise(r => setTimeout(r, [100, 200, 500, 500, 1000, 1000, 2000, 2000][i]));
+              alive = await new Promise<boolean>(resolve => {
+                const probe = new net.Socket();
+                probe.on('error', () => resolve(false));
+                probe.on('connect', () => {
+                  probe.destroy();
+                  resolve(true);
+                });
+                probe.connect(sockPath);
+              });
+              if (alive) break;
+            }
+            if (alive && onActionCb) {
+              onActionCb({ type: 'open', sessionId: session.sessionId ?? '', short, logPath: session.logPath });
+              return;
+            }
+          }
+        }
+      } catch {
+        // Daemon not available — fall through to error
+      }
+
+      setErr('Session not reachable \u2014 it may have already exited');
+      setTimeout(() => setErr(null), 3000);
     },
     [],
   );
