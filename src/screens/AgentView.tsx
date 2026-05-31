@@ -17,11 +17,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
 import { wrappedRender as render, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
-import { listLiveSessions, handleBgStart, attachHandler, killHandler } from '../cli/bg.js';
+import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
 import { submitDispatch } from '../daemon/bgManager.js';
-import { listAllJobs, type BgJobState } from '../daemon/jobState.js';
+import { listAllJobs, removeJob, type BgJobState } from '../daemon/jobState.js';
 import { VoiceProvider } from '../context/voice.js';
 import {
   deriveBand,
@@ -134,7 +134,7 @@ async function sendReplyToSession(session: SessionEntry | undefined, text: strin
 // Types
 // ---------------------------------------------------------------------------
 
-type ViewMode = 'list' | 'rename' | 'reply' | 'delete-confirm';
+type ViewMode = 'list' | 'rename' | 'reply';
 type FocusArea = 'list' | 'dispatch';
 
 // ---------------------------------------------------------------------------
@@ -145,6 +145,7 @@ function SessionRow({
   session,
   isSelected,
   isRenaming,
+  isDeletePending,
   renameValue,
   labelWidth,
   onSelect,
@@ -153,6 +154,7 @@ function SessionRow({
   session: SessionEntry;
   isSelected: boolean;
   isRenaming: boolean;
+  isDeletePending: boolean;
   renameValue: string;
   labelWidth: number;
   onSelect?: () => void;
@@ -165,11 +167,13 @@ function SessionRow({
   const name = isRenaming ? renameValue : jobLabel(session);
   const age = formatJobAge(session.startedAt);
 
-  // Official: show detail for completed sessions, not for working (PTY output is garbage)
+  // Official: show detail for all bands (active shows last assistant message too)
   let detail = '';
-  if (band === 'blocked') {
+  if (isDeletePending) {
+    detail = 'ctrl+x again to delete';
+  } else if (band === 'blocked') {
     detail = session.waitingFor ?? session.lastMessage ?? '';
-  } else if (band === 'completed') {
+  } else {
     detail = session.lastMessage ?? '';
   }
   // Strip any ANSI escape sequences from detail
@@ -202,12 +206,7 @@ function SessionRow({
       {/* Detail column (flex) */}
       <Box flexGrow={1} width={0} paddingLeft={2}>
         <Text dimColor wrap={'truncate' as never}>
-          {isSelected && band === 'completed'
-            ? detail
-              ? `${detail} \u00b7 \u2192 to return`
-              : '\u2192 to return'
-            : detail}
-          {isSelected && band === 'blocked' ? ` \u00b7 \u2192` : ''}
+          {isSelected ? (detail ? `${detail} \u00b7 \u2192 to return` : '\u2192 to return') : detail}
         </Text>
       </Box>
       {/* Age column */}
@@ -227,11 +226,15 @@ function AgentViewApp({
   enteredViaLeftArrow,
   dispatchExtraArgs = [],
   cwdFilter,
+  currentSessionId,
+  restoreSessionId,
   onAction,
 }: {
   enteredViaLeftArrow?: boolean;
   dispatchExtraArgs?: string[];
   cwdFilter?: string;
+  currentSessionId?: string;
+  restoreSessionId?: string;
   onAction?: (action: { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }) => void;
 }): React.ReactElement {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -242,9 +245,11 @@ function AgentViewApp({
   const [focusArea, setFocusArea] = useState<FocusArea>('list');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [renameValue, setRenameValue] = useState('');
-  const [folded, setFolded] = useState(true);
+  // Per-group fold state
+  const [foldedGroups, setFoldedGroups] = useState<Set<string>>(() => new Set());
   const [groupMode, setGroupMode] = useState<'state' | 'directory'>('state');
   const [replyInput, setReplyInput] = useState('');
+  const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
   const dispatchingRef = useRef(false);
   const lastRelaunchRef = useRef(0);
   const [commands, setCommands] = useState<Command[]>([]);
@@ -252,17 +257,16 @@ function AgentViewApp({
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [hoveredSuggestion, setHoveredSuggestion] = useState<string | null>(null);
 
-  // Auto-focus dispatch when no sessions
+  // Auto-focus dispatch when no sessions (skip if we're restoring position)
   useEffect(() => {
-    if (sessions.length === 0 && focusArea === 'list') {
+    if (sessions.length === 0 && focusArea === 'list' && !restoreSessionId) {
       setFocusArea('dispatch');
     }
-  }, [sessions.length, focusArea]);
+  }, [sessions.length, focusArea, restoreSessionId]);
 
   // Header display values
   const termWidth = process.stdout.columns ?? 80;
   const modelDisplay = getMainLoopModel();
-  const cwdDisplay = getCwd();
 
   // -------------------------------------------------------------------------
   // Voice integration (push-to-talk in reply mode)
@@ -321,7 +325,14 @@ function AgentViewApp({
         cwd: job.cwd,
         startedAt: Date.parse(job.createdAt),
         kind: 'bg',
-        name: job.name || job.template || 'bg',
+        name:
+          job.name ||
+          job.intent ||
+          (currentSessionId && (job.sessionId === currentSessionId || job.resumeSessionId === currentSessionId)
+            ? 'current session'
+            : job.template === 'bg' && job.state === 'working'
+              ? 'new session'
+              : job.template || 'new session'),
         status:
           job.state === 'working'
             ? job.tempo === 'active'
@@ -464,13 +475,6 @@ function AgentViewApp({
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // Clamp selection
-  useEffect(() => {
-    if (selectedIndex >= sessions.length && sessions.length > 0) {
-      setSelectedIndex(sessions.length - 1);
-    }
-  }, [sessions.length, selectedIndex]);
-
   // Tab title: show awaiting-input count
   useEffect(() => {
     const awaitingCount = sessions.filter(s => deriveBand(s) === 'blocked').length;
@@ -527,14 +531,65 @@ function AgentViewApp({
   const active = unpinned.filter(s => deriveBand(s) === 'active');
   const done = unpinned.filter(s => deriveBand(s) === 'completed');
   const doneCap = doneCapForRows(process.stdout.rows || 54);
-  const visibleDone = folded ? done.slice(0, doneCap) : done;
-  const hiddenDoneCount = folded ? Math.max(0, done.length - doneCap) : 0;
+  const visibleDone = done;
+  const hiddenDoneCount = 0;
+
+  // Flat row list: headers are selectable (official behavior)
+  type RowItem =
+    | { kind: 'header'; group: string }
+    | { kind: 'job'; session: SessionEntry }
+    | { kind: 'fold'; hidden: number };
+  const flatRows: RowItem[] = React.useMemo(() => {
+    const rows: RowItem[] = [];
+    if (active.length > 0) {
+      rows.push({ kind: 'header', group: 'working' });
+      if (!foldedGroups.has('working')) {
+        for (const s of active) rows.push({ kind: 'job', session: s });
+      }
+    }
+    if (blocked.length > 0) {
+      rows.push({ kind: 'header', group: 'blocked' });
+      if (!foldedGroups.has('blocked')) {
+        for (const s of blocked) rows.push({ kind: 'job', session: s });
+      }
+    }
+    if (done.length > 0) {
+      rows.push({ kind: 'header', group: 'done' });
+      if (!foldedGroups.has('done')) {
+        for (const s of done) rows.push({ kind: 'job', session: s });
+      }
+    }
+    return rows;
+  }, [active, blocked, done, foldedGroups]);
+
+  const currentRow = flatRows[selectedIndex] as RowItem | undefined;
+  const selectedSession = currentRow?.kind === 'job' ? currentRow.session : undefined;
+  const cwdDisplay = selectedSession?.cwd || getCwd();
 
   // Compute label column width (max name length across all sessions)
   const labelWidth = Math.max(
     ...sessions.map(s => jobLabel(s).length),
     8, // minimum width
   );
+
+  // Restore selection after returning from an attached session
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !restoreSessionId || flatRows.length === 0) return;
+    const idx = flatRows.findIndex(r => r.kind === 'job' && r.session.sessionId === restoreSessionId);
+    if (idx >= 0) {
+      setSelectedIndex(idx);
+      setFocusArea('list');
+      restoredRef.current = true;
+    }
+  }, [flatRows, restoreSessionId]);
+
+  // Clamp selection
+  useEffect(() => {
+    if (selectedIndex >= flatRows.length && flatRows.length > 0) {
+      setSelectedIndex(flatRows.length - 1);
+    }
+  }, [flatRows.length, selectedIndex]);
 
   // -------------------------------------------------------------------------
   // Actions
@@ -559,7 +614,7 @@ function AgentViewApp({
   }, [dispatchInput, refresh, dispatchExtraArgs]);
 
   const handlePin = useCallback(async () => {
-    const session = sessions[selectedIndex];
+    const session = selectedSession;
     if (!session) return;
     const short = session.sessionId?.slice(0, 8) ?? '';
     if (!short) return;
@@ -591,14 +646,14 @@ function AgentViewApp({
   }, [sessions, selectedIndex, refresh]);
 
   const handleRenameStart = useCallback(() => {
-    const session = sessions[selectedIndex];
+    const session = selectedSession;
     if (!session) return;
     setRenameValue(session.name ?? '');
     setViewMode('rename');
   }, [sessions, selectedIndex]);
 
   const handleRenameConfirm = useCallback(async () => {
-    const session = sessions[selectedIndex];
+    const session = selectedSession;
     if (!session) return;
     const newName = renameValue.trim();
     if (newName) {
@@ -609,19 +664,21 @@ function AgentViewApp({
   }, [sessions, selectedIndex, renameValue, refresh]);
 
   const handleDelete = useCallback(async () => {
-    const session = sessions[selectedIndex];
+    const session = selectedSession;
     if (!session) return;
-    await killHandler(session.name ?? String(session.pid));
+    const short = session.sessionId?.slice(0, 8);
+    if (!short) return;
+    await removeJob(short);
     await refresh();
-    setViewMode('list');
   }, [sessions, selectedIndex, refresh]);
 
   const handleDeleteAll = useCallback(async () => {
     for (const session of done) {
-      await killHandler(session.name ?? String(session.pid));
+      const short = session.sessionId?.slice(0, 8);
+      if (!short) continue;
+      await removeJob(short);
     }
     await refresh();
-    setViewMode('list');
   }, [done, refresh]);
 
   // -------------------------------------------------------------------------
@@ -677,7 +734,7 @@ function AgentViewApp({
         return;
       }
       if (key.return && replyInput.trim()) {
-        void sendReplyToSession(sessions[selectedIndex], replyInput.trim());
+        void sendReplyToSession(selectedSession, replyInput.trim());
         setReplyInput('');
         setViewMode('list');
         return;
@@ -697,23 +754,6 @@ function AgentViewApp({
       }
       if (input && !key.ctrl && !key.meta) {
         setReplyInput(v => v + input);
-        return;
-      }
-      return;
-    }
-
-    // Delete confirmation
-    if (viewMode === 'delete-confirm') {
-      if (key.escape || input === 'n') {
-        setViewMode('list');
-        return;
-      }
-      if (input === 'y') {
-        void handleDelete();
-        return;
-      }
-      if (input === 'a') {
-        void handleDeleteAll();
         return;
       }
       return;
@@ -754,7 +794,7 @@ function AgentViewApp({
           setSelectedSuggestion(i => Math.max(0, i - 1));
         } else if (sessions.length > 0) {
           setFocusArea('list');
-          setSelectedIndex(sessions.length - 1);
+          setSelectedIndex(Math.max(0, flatRows.length - 1));
         }
         return;
       }
@@ -776,6 +816,10 @@ function AgentViewApp({
         }
         return;
       }
+      if (input === 'x' && key.ctrl && done.length > 0) {
+        void handleDeleteAll();
+        return;
+      }
       if (input && !key.ctrl && !key.meta) {
         setDispatchInput(v => v.slice(0, cursorOffset) + input + v.slice(cursorOffset));
         setCursorOffset(o => o + input.length);
@@ -785,38 +829,66 @@ function AgentViewApp({
     }
 
     // List navigation
+    const maxVisibleIndex = flatRows.length - 1;
     if (key.upArrow) {
       setSelectedIndex(i => Math.max(0, i - 1));
+      setDeleteConfirmSessionId(null);
     } else if (key.downArrow) {
-      if (selectedIndex >= sessions.length - 1) {
+      if (selectedIndex >= maxVisibleIndex) {
         setFocusArea('dispatch');
       } else {
-        setSelectedIndex(i => Math.min(sessions.length - 1, i + 1));
+        setSelectedIndex(i => Math.min(maxVisibleIndex, i + 1));
       }
+      setDeleteConfirmSessionId(null);
     } else if (key.tab) {
       setFocusArea('dispatch');
-    } else if (key.return && sessions.length > 0) {
-      // If cursor is on the fold row, expand it
-      const foldIndex = blocked.length + active.length + visibleDone.length;
-      if (hiddenDoneCount > 0 && selectedIndex === foldIndex) {
-        setFolded(false);
-        return;
-      }
-      const session = sessions[selectedIndex];
+    } else if (key.rightArrow && sessions.length > 0) {
+      // Right arrow: attach/resume the selected session
+      const session = selectedSession;
       if (session) {
         const short = session.sessionId?.slice(0, 8) ?? '';
-        // Official: Enter always triggers attach (respawn if needed)
+        void checkAndAttach(short, session, onAction, setError);
+      }
+    } else if (key.return && flatRows.length > 0) {
+      if (currentRow?.kind === 'fold') {
+        setFoldedGroups(s => {
+          const n = new Set(s);
+          n.delete('done');
+          return n;
+        });
+        return;
+      }
+      if (currentRow?.kind === 'header') {
+        setFoldedGroups(s => {
+          const n = new Set(s);
+          if (n.has(currentRow.group)) n.delete(currentRow.group);
+          else n.add(currentRow.group);
+          return n;
+        });
+        return;
+      }
+      const session = selectedSession;
+      if (session) {
+        const short = session.sessionId?.slice(0, 8) ?? '';
         void checkAndAttach(short, session, onAction, setError);
       }
     } else if (input === ' ' && sessions.length > 0) {
       // Space to reply (for blocked sessions)
-      const session = sessions[selectedIndex];
+      const session = selectedSession;
       if (session && deriveBand(session) === 'blocked') {
         setViewMode('reply');
         setReplyInput('');
       }
     } else if (input === 'x' && key.ctrl && sessions.length > 0) {
-      setViewMode('delete-confirm');
+      const session = selectedSession;
+      if (session && deleteConfirmSessionId === session.sessionId) {
+        // Second press — actually delete
+        setDeleteConfirmSessionId(null);
+        void handleDelete();
+      } else if (session) {
+        // First press — mark for confirmation
+        setDeleteConfirmSessionId(session.sessionId);
+      }
     } else if (input === 't' && key.ctrl) {
       void handlePin();
     } else if (input === 'r' && key.ctrl) {
@@ -824,7 +896,12 @@ function AgentViewApp({
     } else if (input === 's' && key.ctrl) {
       setGroupMode(m => (m === 'state' ? 'directory' : 'state'));
     } else if (input === 'f') {
-      setFolded(f => !f);
+      setFoldedGroups(s => {
+        const n = new Set(s);
+        if (n.has('done')) n.delete('done');
+        else n.add('done');
+        return n;
+      });
     } else if (input === 'q' || key.escape) {
       process.exit(0);
     } else if (input && !key.ctrl && !key.meta && input !== 'q' && input !== 'f') {
@@ -862,13 +939,14 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   const renderSessionRow = (session: SessionEntry) => {
-    const index = sessions.indexOf(session);
+    const index = flatRows.findIndex(r => r.kind === 'job' && r.session === session);
     return (
       <SessionRow
         key={`${session.sessionId}-${session.pid}`}
         session={session}
         isSelected={focusArea === 'list' && index === selectedIndex}
         isRenaming={viewMode === 'rename' && index === selectedIndex}
+        isDeletePending={deleteConfirmSessionId === session.sessionId}
         renameValue={renameValue}
         labelWidth={labelWidth}
         onSelect={() => {
@@ -922,72 +1000,82 @@ function AgentViewApp({
           {/* Session list — state grouping mode */}
           {groupMode === 'state' && (
             <Box flexDirection="column" paddingLeft={1}>
-              {pinned.length > 0 && (
-                <Box flexDirection="column">
-                  <Text bold={focusArea === 'list'} dimColor={focusArea !== 'list'}>
-                    Pinned
-                  </Text>
-                  {pinned.map(renderSessionRow)}
-                </Box>
-              )}
-              {blocked.length > 0 && (
-                <Box flexDirection="column" marginTop={pinned.length > 0 ? 1 : 0}>
-                  <Text bold={focusArea === 'list'} color={'warning' as never}>
-                    Needs input <Text dimColor>{blocked.length}</Text>
-                  </Text>
-                  {blocked.map(renderSessionRow)}
-                </Box>
-              )}
-              {review.length > 0 && (
-                <Box flexDirection="column" marginTop={blocked.length > 0 || pinned.length > 0 ? 1 : 0}>
-                  <Text bold={focusArea === 'list'} dimColor={focusArea !== 'list'}>
-                    Ready for review <Text dimColor>{review.length}</Text>
-                  </Text>
-                  {review.map(renderSessionRow)}
-                </Box>
-              )}
-              {active.length > 0 && (
-                <Box
-                  flexDirection="column"
-                  marginTop={blocked.length > 0 || review.length > 0 || pinned.length > 0 ? 1 : 0}
-                >
-                  <Text bold={focusArea === 'list'} dimColor={focusArea !== 'list'}>
-                    Working <Text dimColor>{active.length}</Text>
-                  </Text>
-                  {active.map(renderSessionRow)}
-                </Box>
-              )}
-              {done.length > 0 && (
-                <Box
-                  flexDirection="column"
-                  marginTop={blocked.length > 0 || review.length > 0 || active.length > 0 || pinned.length > 0 ? 1 : 0}
-                >
-                  <Text
-                    dimColor={!done.some(s => deriveActivity(s) === 'failure')}
-                    color={done.some(s => deriveActivity(s) === 'failure') ? ('error' as never) : undefined}
-                  >
-                    Completed <Text dimColor>{done.length}</Text>
-                  </Text>
-                  {visibleDone.map(renderSessionRow)}
-                  {hiddenDoneCount > 0 && (
-                    <Box paddingLeft={2} onClick={() => setFolded(false)}>
+              {flatRows.map((row, idx) => {
+                const isRowSelected = focusArea === 'list' && idx === selectedIndex;
+                if (row.kind === 'header') {
+                  const groupLabels: Record<string, string> = {
+                    working: 'Working',
+                    blocked: 'Needs input',
+                    done: 'Completed',
+                  };
+                  const label = groupLabels[row.group] ?? row.group;
+                  const isFirst = idx === 0;
+                  const isFolded = foldedGroups.has(row.group);
+                  const count =
+                    row.group === 'done' ? done.length : row.group === 'working' ? active.length : blocked.length;
+                  return (
+                    <Box
+                      key={`h:${row.group}`}
+                      marginTop={isFirst ? 0 : 1}
+                      backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
+                      onMouseEnter={() => {
+                        setFocusArea('list');
+                        setSelectedIndex(idx);
+                      }}
+                      onClick={() => {
+                        setSelectedIndex(idx);
+                        setFoldedGroups(s => {
+                          const n = new Set(s);
+                          if (n.has(row.group)) n.delete(row.group);
+                          else n.add(row.group);
+                          return n;
+                        });
+                      }}
+                    >
                       <Text
-                        dimColor={
-                          !(
-                            focusArea === 'list' &&
-                            selectedIndex === blocked.length + active.length + visibleDone.length
-                          )
-                        }
-                        bold={
-                          focusArea === 'list' && selectedIndex === blocked.length + active.length + visibleDone.length
+                        bold={isRowSelected}
+                        dimColor={!isRowSelected}
+                        color={
+                          row.group === 'blocked'
+                            ? ('warning' as never)
+                            : row.group === 'done' && done.some(s => deriveActivity(s) === 'failure')
+                              ? ('error' as never)
+                              : undefined
                         }
                       >
-                        {'\u2026'} {hiddenDoneCount} more
+                        {label}
+                        {isFolded ? ` ${count}` : ''}
                       </Text>
                     </Box>
-                  )}
-                </Box>
-              )}
+                  );
+                }
+                if (row.kind === 'fold') {
+                  return (
+                    <Box
+                      key="fold"
+                      paddingLeft={2}
+                      backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
+                      onMouseEnter={() => {
+                        setFocusArea('list');
+                        setSelectedIndex(idx);
+                      }}
+                      onClick={() => {
+                        setSelectedIndex(idx);
+                        setFoldedGroups(s => {
+                          const n = new Set(s);
+                          n.delete('done');
+                          return n;
+                        });
+                      }}
+                    >
+                      <Text dimColor={!isRowSelected} bold={isRowSelected}>
+                        {'\u2026'} {row.hidden} more
+                      </Text>
+                    </Box>
+                  );
+                }
+                return renderSessionRow(row.session);
+              })}
             </Box>
           )}
 
@@ -1014,14 +1102,6 @@ function AgentViewApp({
                 <Text>{replyInput}</Text>
                 {!replyInput && <Text dimColor> type a response</Text>}
               </Box>
-            </Box>
-          )}
-
-          {/* Delete confirmation */}
-          {viewMode === 'delete-confirm' && (
-            <Box paddingLeft={2}>
-              <Text>Delete session? </Text>
-              <Text dimColor>{'(y)es \u00b7 delete (a)ll done \u00b7 (n)o'}</Text>
             </Box>
           )}
 
@@ -1085,12 +1165,18 @@ function AgentViewApp({
           <Box paddingLeft={2} height={1}>
             <Text dimColor>
               {focusArea === 'dispatch'
-                ? '\u2191\u2193 navigate \u00b7 enter dispatch \u00b7 tab switch'
-                : focusArea === 'list' &&
-                    hiddenDoneCount > 0 &&
-                    selectedIndex === blocked.length + active.length + visibleDone.length
-                  ? 'enter to show all \u00b7 ? for shortcuts'
-                  : 'enter to open \u00b7 space to reply \u00b7 ctrl+x to delete \u00b7 ? for shortcuts'}
+                ? done.length > 0
+                  ? 'ctrl+x to delete all \u00b7 ? for shortcuts'
+                  : '\u2191\u2193 navigate \u00b7 enter dispatch \u00b7 tab switch'
+                : deleteConfirmSessionId
+                  ? 'ctrl+x to confirm'
+                  : currentRow?.kind === 'fold'
+                    ? 'enter to show all \u00b7 ? for shortcuts'
+                    : currentRow?.kind === 'header'
+                      ? `enter to ${currentRow?.kind === 'header' && foldedGroups.has(currentRow.group) ? 'expand' : 'collapse'} \u00b7 ctrl+x to delete all \u00b7 ? for shortcuts`
+                      : selectedSession && deriveBand(selectedSession) === 'completed'
+                        ? 'enter to collapse \u00b7 ctrl+x to delete \u00b7 ? for shortcuts'
+                        : 'enter to resume \u00b7 space to reply \u00b7 ctrl+x to delete \u00b7 ? for shortcuts'}
             </Text>
           </Box>
         </Box>
@@ -1196,9 +1282,13 @@ export async function renderAgentView(options?: {
   enteredViaLeftArrow?: boolean;
   dispatchExtraArgs?: string[];
   cwdFilter?: string;
+  currentSessionId?: string;
 }): Promise<void> {
   // Ensure daemon is running (official: KF / ensureDaemonRunning)
   await ensureDaemonRunning();
+
+  // Track last-selected session so we can restore position after attach
+  let lastSelectedSessionId: string | undefined;
 
   // Loop: render FleetView → handle action → re-render
   for (;;) {
@@ -1213,6 +1303,8 @@ export async function renderAgentView(options?: {
             enteredViaLeftArrow={options?.enteredViaLeftArrow}
             dispatchExtraArgs={options?.dispatchExtraArgs}
             cwdFilter={options?.cwdFilter}
+            currentSessionId={options?.currentSessionId}
+            restoreSessionId={lastSelectedSessionId}
             onAction={resolve}
           />
         </VoiceProvider>,
@@ -1233,6 +1325,7 @@ export async function renderAgentView(options?: {
     if (action.type === 'done') break;
 
     if (action.type === 'open') {
+      lastSelectedSessionId = action.sessionId;
       // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
       await attachToPtySession(action.short);
     }

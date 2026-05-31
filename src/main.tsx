@@ -4481,8 +4481,24 @@ async function run(): Promise<CommanderCommand> {
         );
 
         if (replResult === 'agents' && feature('BG_SESSIONS')) {
+          // Register current session as a daemon job so it shows as "current session"
+          const { getSessionId, getOriginalCwd } = await import('./bootstrap/state.js');
+          const { createInitialJobState, writeBgJobState } = await import('./daemon/jobState.js');
+          const sessionId = getSessionId();
+          const short = sessionId.slice(0, 8);
+          const jobState = createInitialJobState({
+            intent: '',
+            sessionId,
+            cwd: getOriginalCwd(),
+            template: 'bg',
+            short,
+          });
+          jobState.state = 'working';
+          jobState.resumeSessionId = sessionId;
+          writeBgJobState(short, jobState);
+
           const { renderAgentView } = await import('./screens/AgentView.js');
-          await renderAgentView({ enteredViaLeftArrow: true });
+          await renderAgentView({ enteredViaLeftArrow: true, currentSessionId: sessionId });
         }
       }
     })
