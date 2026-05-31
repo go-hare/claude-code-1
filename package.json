@@ -1,16 +1,16 @@
 {
-  "name": "claude-code-best",
+  "name": "claude-code",
   "version": "2.6.6",
   "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
   "type": "module",
-  "author": "claude-code-best <claude-code-best@proton.me>",
+  "author": "DeQiang",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/claude-code-best/claude-code.git"
+    "url": "git+https://github.com/go-hare/claude-code-1.git"
   },
-  "homepage": "https://github.com/claude-code-best/claude-code#readme",
+  "homepage": "https://github.com/go-hare/claude-code-1#readme",
   "bugs": {
-    "url": "https://github.com/claude-code-best/claude-code/issues"
+    "url": "https://github.com/go-hare/claude-code-1/issues"
   },
   "keywords": [
     "claude",
