@@ -807,6 +807,8 @@ export type Props = {
   sshSession?: SSHSession;
   // Thinking configuration to use when thinking is enabled
   thinkingConfig: ThinkingConfig;
+  // Callback to switch to agents/fleet view (left arrow on empty input)
+  onOpenAgents?: () => void;
 };
 
 export type Screen = 'prompt' | 'transcript';
@@ -852,6 +854,7 @@ export function REPL({
   directConnectConfig,
   sshSession,
   thinkingConfig,
+  onOpenAgents,
 }: Props): React.ReactNode {
   const isRemoteSession = !!remoteSessionConfig;
 
@@ -4425,7 +4428,30 @@ export function REPL({
     // active. Without this guard, the worktree branch below short-circuits into
     // ExitFlow (which calls gracefulShutdown) before exit.tsx is ever loaded.
     if (feature('BG_SESSIONS') && isBgSession()) {
-      spawnSync('tmux', ['detach-client'], { stdio: 'ignore' });
+      // Update job state to stopped (official: Ny6)
+      const jobDir = process.env.CLAUDE_JOB_DIR;
+      if (jobDir) {
+        try {
+          const { readBgJobState, writeBgJobState, isTerminalState } = await import('../daemon/jobState.js');
+          const short = jobDir.split('/').pop()!;
+          const state = readBgJobState(short);
+          if (state && !isTerminalState(state)) {
+            const now = new Date().toISOString();
+            writeBgJobState(short, {
+              ...state,
+              state: 'stopped',
+              detail: 'stopped from session',
+              tempo: 'idle',
+              inFlight: undefined,
+              needs: undefined,
+              updatedAt: now,
+              firstTerminalAt: state.firstTerminalAt ?? now,
+            });
+          }
+        } catch {}
+      }
+      // Send detach sequence via stdout — daemon relays to attacher
+      process.stdout.write('\x1B_cc-detach-msg;Session stopped.\x1B\\\x1B_cc-daemon-detach\x1B\\');
       setIsExiting(false);
       return;
     }
@@ -6388,6 +6414,7 @@ export function REPL({
                       setIsSearchingHistory={setIsSearchingHistory}
                       helpOpen={isHelpOpen}
                       setHelpOpen={setIsHelpOpen}
+                      onLeftArrowOnEmpty={onOpenAgents}
                       insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}
                       voiceInterimRange={voice.interimRange}
                     />

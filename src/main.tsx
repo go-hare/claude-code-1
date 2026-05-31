@@ -761,6 +761,11 @@ export async function main() {
     if (process.argv.includes('-p') || process.argv.includes('--print')) {
       return;
     }
+    // In bg sessions, don't exit on SIGINT — let Ink handle Ctrl+C
+    // (shows "Press Ctrl+C again to exit" prompt via onExitMessage)
+    if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') {
+      return;
+    }
     process.exit(0);
   });
   profileCheckpoint('main_warning_handler_initialized');
@@ -1307,6 +1312,12 @@ async function run(): Promise<CommanderCommand> {
         .argParser(String)
         .choices(PERMISSION_MODES),
     )
+    .addOption(
+      new Option(
+        '--exclude-dynamic-system-prompt-sections',
+        'Exclude dynamic system prompt sections (git status, date, etc.) for improved cross-user prompt caching in print mode',
+      ).hideHelp(),
+    )
     .option('-c, --continue', 'Continue the most recent conversation in the current directory', () => true)
     .option(
       '-r, --resume [value]',
@@ -1548,6 +1559,12 @@ async function run(): Promise<CommanderCommand> {
       const init = options.init ?? false;
       const initOnly = options.initOnly ?? false;
       const maintenance = options.maintenance ?? false;
+
+      // --exclude-dynamic-system-prompt-sections: skip git status, date, etc.
+      // for improved cross-user prompt caching in print mode
+      if (options.excludeDynamicSystemPromptSections) {
+        process.env.CLAUDE_CODE_EXCLUDE_DYNAMIC_CONTEXT = '1';
+      }
 
       // Extract disable slash commands flag
       const disableSlashCommands = options.disableSlashCommands || false;
@@ -4477,7 +4494,7 @@ async function run(): Promise<CommanderCommand> {
             ? hookMessages
             : undefined;
 
-        await launchRepl(
+        const replResult = await launchRepl(
           root,
           { getFpsMetrics, stats, initialState },
           {
@@ -4487,6 +4504,11 @@ async function run(): Promise<CommanderCommand> {
           },
           renderAndRun,
         );
+
+        if (replResult === 'agents' && feature('BG_SESSIONS')) {
+          const { renderAgentView } = await import('./screens/AgentView.js');
+          await renderAgentView({ enteredViaLeftArrow: true });
+        }
       }
     })
     .version(`${MACRO.VERSION} (Claude Code)`, '-v, --version', 'Output the version number');

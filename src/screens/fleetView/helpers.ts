@@ -12,24 +12,37 @@ import figures from 'figures'
 // Status bands
 // ---------------------------------------------------------------------------
 
-export type StatusBand = 'blocked' | 'active' | 'completed'
+export type StatusBand = 'blocked' | 'review' | 'active' | 'completed'
 
 /**
  * Derive the high-level status band for a session.
- * Upstream: xhH (deriveBand)
+ * Official: g2H + group assignment
+ * - "busy" status → active (Working)
+ * - Terminal state (completed/failed/killed/idle) → completed
+ * - Has open PR needing review → review (Ready for review)
+ * - "waiting" status OR has waitingFor → blocked (Needs input)
+ * - Otherwise → active (Working)
  */
 export function deriveBand(session: SessionEntry): StatusBand {
-  if (session.waitingFor) return 'blocked'
-  if (session.status === 'running' || session.status === 'busy') {
-    return 'active'
-  }
+  if (session.status === 'busy') return 'active'
   if (
     session.status === 'completed' ||
     session.status === 'failed' ||
     session.status === 'killed' ||
-    session.status === 'idle'
+    session.status === 'idle' ||
+    session.status === 'done' ||
+    session.status === 'stopped'
   ) {
+    // Done sessions with open PR needing review go to "review" band
+    if (session.prReviewState && session.prReviewState !== 'approved') {
+      return 'review'
+    }
     return 'completed'
+  }
+  if (session.status === 'waiting' || session.waitingFor) return 'blocked'
+  // Active sessions with open PR needing review
+  if (session.prReviewState && session.prReviewState !== 'approved') {
+    return 'review'
   }
   return 'active'
 }
@@ -51,10 +64,15 @@ export type Activity =
  * Upstream: jZ6 (deriveActivity)
  */
 export function deriveActivity(session: SessionEntry): Activity {
-  if (session.status === 'completed' || session.status === 'killed') {
+  if (
+    session.status === 'completed' ||
+    session.status === 'done' ||
+    session.status === 'killed'
+  ) {
     return 'success'
   }
-  if (session.status === 'failed') return 'failure'
+  if (session.status === 'failed' || session.status === 'stopped')
+    return 'failure'
 
   const updatedAt = session.updatedAt ?? session.startedAt
   const elapsed = Date.now() - updatedAt
@@ -78,25 +96,21 @@ export type GlyphStyle = {
  * Determine the color for a session's status glyph.
  * Upstream: cnq (glyphColor)
  */
+/**
+ * Determine the color for a session's status glyph.
+ * Official: z1q
+ * - Success (done) → green
+ * - Failed/stopped → error (red) for failed, dim for stopped
+ * - Blocked/waiting → warning (yellow)
+ * - Working → dim (no color)
+ */
 export function glyphColor(
   band: StatusBand,
   activity: Activity,
   session: SessionEntry,
 ): GlyphStyle {
-  if (
-    activity === 'success' ||
-    activity === 'failure' ||
-    activity === 'stopped'
-  ) {
-    const color =
-      activity === 'success'
-        ? 'success'
-        : activity === 'failure'
-          ? 'error'
-          : 'warning'
-    return { color, dim: false }
-  }
-  if (session.status === 'busy') return { color: undefined, dim: false }
+  if (activity === 'success') return { color: 'success', dim: false }
+  if (activity === 'failure') return { color: 'error', dim: false }
   if (band === 'blocked') return { color: 'warning', dim: false }
   return { color: undefined, dim: true }
 }
@@ -107,13 +121,14 @@ export function glyphColor(
 
 const BAND_ORDER: Record<StatusBand, number> = {
   blocked: 0,
-  active: 1,
-  completed: 2,
+  review: 1,
+  active: 2,
+  completed: 3,
 }
 
 /**
- * Sort sessions: pinned first, then by band, then by recency.
- * Upstream: effectiveSortOrder / effectiveStateSortOrder
+ * Sort sessions: pinned first, then by band, then by createdAt (newest first).
+ * Official: XE_ sorts by JC6 (sortOrder ?? createdAt)
  */
 export function sortSessions(sessions: SessionEntry[]): SessionEntry[] {
   return [...sessions].sort((a, b) => {
@@ -124,8 +139,8 @@ export function sortSessions(sessions: SessionEntry[]): SessionEntry[] {
     const bandA = BAND_ORDER[deriveBand(a)]
     const bandB = BAND_ORDER[deriveBand(b)]
     if (bandA !== bandB) return bandA - bandB
-    // Then by most recently updated
-    return (b.updatedAt ?? b.startedAt) - (a.updatedAt ?? a.startedAt)
+    // Then by most recently created (newest first)
+    return b.startedAt - a.startedAt
   })
 }
 
@@ -232,19 +247,21 @@ export function isSelfDriving(session: SessionEntry): boolean {
 
 /**
  * Pick the status icon for a session row.
- * Uses figures library to match our normal REPL task icons.
+ * Official: kj4
+ * - Success (done) → ✻ (asterisk, green)
+ * - Failed/stopped → ∙ (dot, dim)
+ * - Working/blocked → ✻ (asterisk)
  */
 export function pickIcon(
   band: StatusBand,
   activity: Activity,
   pinned?: boolean,
 ): string {
-  if (pinned === true) return figures.squareCenter // ■
-  if (band === 'blocked') return figures.bullet // ● (warning colored)
-  if (band === 'active') return figures.play // ▶
-  if (activity === 'success') return figures.bullet // ● (success colored)
-  if (activity === 'failure') return figures.cross // ✘
-  return figures.bullet // ●
+  if (band === 'completed') {
+    if (activity === 'success') return '\u273B' // ✻ for done (green)
+    return '\u2219' // ∙ for failed/stopped
+  }
+  return '\u273B' // ✻ for working/blocked
 }
 
 // ---------------------------------------------------------------------------

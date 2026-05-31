@@ -19,9 +19,10 @@ const EXIT_CODE_TRANSIENT = 1
  * Daemon worker entry point. Called from `cli.tsx` via:
  *   `claude --daemon-worker=<kind>`
  *
- * The supervisor spawns this as a child process. Each `kind` maps to a
- * different long-running task. Currently only `remoteControl` is implemented
- * — it runs the headless bridge loop that accepts remote sessions.
+ * Official architecture:
+ *   The supervisor spawns `--daemon-worker=remoteControl` which runs
+ *   the bg manager (BG4) + control socket (SG4). This is the process
+ *   that handles all control socket ops (ping/list/dispatch/attach/subscribe).
  */
 export async function runDaemonWorker(kind?: string): Promise<void> {
   if (!kind) {
@@ -41,68 +42,43 @@ export async function runDaemonWorker(kind?: string): Promise<void> {
 }
 
 /**
- * Remote Control worker — runs `runBridgeHeadless()` with config from
- * environment variables set by the daemon supervisor.
- *
- * Environment variables (set by daemonMain):
- *   DAEMON_WORKER_DIR          — working directory
- *   DAEMON_WORKER_NAME         — optional session name
- *   DAEMON_WORKER_SPAWN_MODE   — 'same-dir' | 'worktree'
- *   DAEMON_WORKER_CAPACITY     — max concurrent sessions
- *   DAEMON_WORKER_PERMISSION   — permission mode
- *   DAEMON_WORKER_SANDBOX      — '1' for sandbox mode
- *   DAEMON_WORKER_TIMEOUT_MS   — session timeout in ms
- *   DAEMON_WORKER_CREATE_SESSION — '1' to pre-create session on start
+ * Remote Control worker — official BG4.
+ * Starts the bg manager (control socket + worker management).
+ * This is the core daemon process that FleetView connects to.
  */
 async function runRemoteControlWorker(): Promise<void> {
-  const dir = process.env.DAEMON_WORKER_DIR || resolve('.')
-  const name = process.env.DAEMON_WORKER_NAME || undefined
-  const spawnMode =
-    (process.env.DAEMON_WORKER_SPAWN_MODE as 'same-dir' | 'worktree') ||
-    'same-dir'
-  const capacity = parseInt(process.env.DAEMON_WORKER_CAPACITY || '4', 10)
-  const permissionMode = process.env.DAEMON_WORKER_PERMISSION || undefined
-  const sandbox = process.env.DAEMON_WORKER_SANDBOX === '1'
-  const sessionTimeoutMs = process.env.DAEMON_WORKER_TIMEOUT_MS
-    ? parseInt(process.env.DAEMON_WORKER_TIMEOUT_MS, 10)
-    : undefined
-  const createSessionOnStart = process.env.DAEMON_WORKER_CREATE_SESSION !== '0'
+  const { startBgManager } = await import('./bgManager.js')
 
   const controller = new AbortController()
-
-  // Graceful shutdown on SIGTERM/SIGINT from supervisor
   const onSignal = () => controller.abort()
   process.on('SIGTERM', onSignal)
   process.on('SIGINT', onSignal)
 
-  const opts: HeadlessBridgeOpts = {
-    dir,
-    name,
-    spawnMode,
-    capacity,
-    permissionMode,
-    sandbox,
-    sessionTimeoutMs,
-    createSessionOnStart,
-    getAccessToken: () => getClaudeAIOAuthTokens()?.accessToken,
-    onAuth401: async (_failedToken: string) => {
-      // In daemon context, re-check auth — supervisor may have refreshed token.
-      const tokens = getClaudeAIOAuthTokens()
-      return !!tokens?.accessToken
-    },
-    log: (s: string) => {
-      console.log(`[remoteControl] ${s}`)
-    },
-  }
-
   try {
-    await runBridgeHeadless(opts, controller.signal)
+    const manager = await startBgManager({
+      onLog: (msg: string) => console.log(`[bg] ${msg}`),
+    })
+
+    console.log('[remoteControl] bg manager + control socket ready')
+
+    // Wait for abort signal (supervisor sends SIGTERM on shutdown)
+    await new Promise<void>(resolve => {
+      if (controller.signal.aborted) {
+        resolve()
+        return
+      }
+      controller.signal.addEventListener('abort', () => resolve(), {
+        once: true,
+      })
+    })
+
+    await manager.close()
   } catch (err) {
     if (err instanceof BridgeHeadlessPermanentError) {
       console.error(`[remoteControl] permanent error: ${err.message}`)
       process.exitCode = EXIT_CODE_PERMANENT
     } else {
-      console.error(`[remoteControl] transient error: ${errorMessage(err)}`)
+      console.error(`[remoteControl] error: ${errorMessage(err)}`)
       process.exitCode = EXIT_CODE_TRANSIENT
     }
   } finally {

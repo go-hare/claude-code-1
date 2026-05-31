@@ -30,7 +30,7 @@ function detectFromColorFgBg(): SystemTheme | undefined {
  */
 export function getSystemThemeName(): SystemTheme {
   if (cachedSystemTheme === undefined) {
-    cachedSystemTheme = detectFromColorFgBg() ?? 'dark'
+    cachedSystemTheme = detectFromColorFgBg() ?? 'light'
   }
   return cachedSystemTheme
 }

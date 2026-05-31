@@ -55,15 +55,11 @@ export async function daemonMain(args: string[]): Promise<void> {
   switch (subcommand) {
     // --- Supervisor management ---
     case 'start':
+    case 'run':
       await runSupervisor(args.slice(1))
       break
     case 'stop':
       await handleDaemonStop()
-      break
-
-    // --- Bg Manager (standalone, for FleetView) ---
-    case 'bg-manager':
-      await runBgManagerStandalone()
       break
 
     // --- Unified status ---
@@ -470,9 +466,7 @@ async function runBgManagerStandalone(): Promise<void> {
   // Keep alive
   const keepAlive = setInterval(() => {
     // Transient mode: exit if no active sessions for 30s
-    const hasActive = [...manager.handles.values()].some(
-      h => h.outcome === null,
-    )
+    const hasActive = [...manager.handles.values()].some(h => !h.record.outcome)
     if (!hasActive && manager.handles.size > 0) {
       // All sessions completed — stay alive for a bit in case new dispatches come
     }

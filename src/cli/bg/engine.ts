@@ -26,6 +26,8 @@ export interface SessionEntry {
   gitBranch?: string
   prNumber?: number
   prRepository?: string
+  /** PR review state — set when session has open PR needing review */
+  prReviewState?: 'pending' | 'changes_requested' | 'approved' | 'draft'
   messagingSocketPath?: string
   lastMessage?: string
 }

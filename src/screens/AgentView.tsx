@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
-import { wrappedRender as render, Box, Text, useInput } from '@anthropic/ink';
+import { wrappedRender as render, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
 import { listLiveSessions, handleBgStart, attachHandler, killHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
@@ -77,6 +77,23 @@ const REPL_HINT =
 
 const prCheckCache = new Map<number, number>(); // pid -> last check timestamp
 const PR_CHECK_INTERVAL_MS = 60_000; // Only check once per minute per session
+
+/**
+ * Derive a display name from the intent string (official: DC6).
+ * Takes first 3 words, truncates to 25 chars.
+ */
+function deriveNameFromIntent(intent: string): string {
+  if (!intent) return 'new session';
+  const cleaned = intent
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars
+    .replace(/[\x00-\x1f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const words = cleaned.split(' ').filter(Boolean);
+  if (words.length === 0) return 'new session';
+  const name = words.length > 3 ? `${words.slice(0, 3).join(' ')}\u2026` : words.join(' ');
+  return name.length > 25 ? `${name.slice(0, 24)}\u2026` : name;
+}
 
 async function detectPrForSession(session: SessionEntry): Promise<void> {
   const lastCheck = prCheckCache.get(session.pid) ?? 0;
@@ -148,20 +165,35 @@ function SessionRow({
   const name = isRenaming ? renameValue : jobLabel(session);
   const age = formatJobAge(session.startedAt);
 
-  // Detail: show waitingFor or last message from the session
-  const detail = session.waitingFor ?? session.lastMessage ?? '';
+  // Official: show detail for completed sessions, not for working (PTY output is garbage)
+  let detail = '';
+  if (band === 'blocked') {
+    detail = session.waitingFor ?? session.lastMessage ?? '';
+  } else if (band === 'completed') {
+    detail = session.lastMessage ?? '';
+  }
+  // Strip any ANSI escape sequences from detail
+  detail = detail
+    .replace(
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal escapes
+      /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]|\x1b\[[0-9;]*m|\x1b[>?][0-9]*[a-z]/g,
+      '',
+    )
+    .trim();
 
   return (
     <Box
       width="100%"
-      backgroundColor={isSelected ? ('secondaryBg' as never) : undefined}
+      backgroundColor={isSelected ? ('#e8e8e8' as never) : undefined}
       onMouseEnter={onSelect}
       onClick={onOpen}
     >
       {/* Icon + Name column (fixed width) */}
       <Box width={labelWidth + 2} flexShrink={0}>
-        <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected} wrap={'truncate' as never}>
-          {icon}{' '}
+        <Text wrap={'truncate' as never}>
+          <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected}>
+            {icon}
+          </Text>{' '}
           <Text bold={isSelected} dimColor={!isSelected && dim}>
             {name}
           </Text>
@@ -170,7 +202,11 @@ function SessionRow({
       {/* Detail column (flex) */}
       <Box flexGrow={1} width={0} paddingLeft={2}>
         <Text dimColor wrap={'truncate' as never}>
-          {detail}
+          {isSelected && band === 'completed'
+            ? detail
+              ? `${detail} \u00b7 \u2192 to return`
+              : '\u2192 to return'
+            : detail}
           {isSelected && band === 'blocked' ? ` \u00b7 \u2192` : ''}
         </Text>
       </Box>
@@ -207,6 +243,7 @@ function AgentViewApp({
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [renameValue, setRenameValue] = useState('');
   const [folded, setFolded] = useState(true);
+  const [groupMode, setGroupMode] = useState<'state' | 'directory'>('state');
   const [replyInput, setReplyInput] = useState('');
   const dispatchingRef = useRef(false);
   const lastRelaunchRef = useRef(0);
@@ -274,43 +311,148 @@ function AgentViewApp({
 
   const refresh = useCallback(async () => {
     try {
-      let live = await listLiveSessions();
-
-      // Merge job state entries (sessions managed by bg manager)
+      // Official W1H: read job state files from ~/.claude/jobs/<short>/state.json
       const jobs = await listAllJobs();
-      for (const { short, state: job } of jobs) {
-        // Skip jobs that already appear in live sessions (by sessionId)
-        if (live.some(s => s.sessionId === job.sessionId)) continue;
-        // Convert job state to SessionEntry for display
-        live.push({
-          pid: 0,
-          sessionId: job.sessionId,
-          cwd: job.cwd,
-          startedAt: Date.parse(job.createdAt),
-          kind: 'bg',
-          name: job.name,
-          status: job.state === 'working' ? 'busy' : job.state === 'blocked' ? 'waiting' : job.state,
-          updatedAt: Date.parse(job.updatedAt),
-          engine: 'detached',
-          lastMessage: job.detail || undefined,
-        });
-      }
 
-      // Filter by cwd if specified (--cwd flag)
+      // Convert to SessionEntry (no stale detection on load — matches official)
+      let entries: SessionEntry[] = jobs.map(({ short, state: job }) => ({
+        pid: job.pid ?? 0,
+        sessionId: job.sessionId,
+        cwd: job.cwd,
+        startedAt: Date.parse(job.createdAt),
+        kind: 'bg',
+        name: job.name || job.template || 'bg',
+        status:
+          job.state === 'working'
+            ? job.tempo === 'active'
+              ? 'busy'
+              : job.tempo === 'blocked'
+                ? 'waiting'
+                : 'busy'
+            : job.state === 'blocked'
+              ? 'waiting'
+              : job.state,
+        updatedAt: Date.parse(job.updatedAt),
+        engine: 'detached' as const,
+        lastMessage: job.detail || undefined,
+        waitingFor: job.needs || job.block?.questions?.[0]?.question || undefined,
+        pinned: job.pinned,
+        gitBranch: job.worktreeBranch,
+        prReviewState: undefined, // filled below from children PR status
+      }));
+
+      // Fetch PR review status for sessions with children (PR links)
+      try {
+        const { execFileNoThrow } = await import('../utils/execFileNoThrow.js');
+        for (const entry of entries) {
+          const job = jobs.find(j => j.state.sessionId === entry.sessionId);
+          const children = job?.state.children;
+          if (!children?.length) continue;
+          for (const child of children) {
+            if (!child.href?.includes('/pull/')) continue;
+            // Extract PR number from href
+            const prMatch = /\/pull\/(\d+)/.exec(child.href);
+            if (!prMatch) continue;
+            const prNum = prMatch[1];
+            const repo = child.href.replace(/\/pull\/\d+.*$/, '').replace(/^https?:\/\/github\.com\//, '');
+            try {
+              const { stdout, code } = await execFileNoThrow(
+                'gh',
+                ['pr', 'view', prNum, '--repo', repo, '--json', 'reviewDecision,isDraft,state'],
+                { timeout: 3000, preserveOutputOnError: false },
+              );
+              if (code === 0 && stdout.trim()) {
+                const data = JSON.parse(stdout) as { reviewDecision: string; isDraft: boolean; state: string };
+                if (data.state === 'OPEN') {
+                  entry.prNumber = Number(prNum);
+                  entry.prReviewState = data.isDraft
+                    ? 'draft'
+                    : data.reviewDecision === 'APPROVED'
+                      ? 'approved'
+                      : data.reviewDecision === 'CHANGES_REQUESTED'
+                        ? 'changes_requested'
+                        : 'pending';
+                }
+              }
+            } catch {}
+            break; // Only check first PR child
+          }
+        }
+      } catch {}
+
+      // Official W1H: only uses job state files. No listLiveSessions merge.
+
+      // Get live detail from daemon subscribe (official: streamTail → last line)
+      try {
+        const { getControlSocketPath } = await import('../daemon/controlSocket.js');
+        const { jsonParse } = await import('../utils/slowOperations.js');
+        const net = require('net') as typeof import('net');
+        const socketPath = getControlSocketPath();
+
+        await Promise.all(
+          entries.map(async entry => {
+            if (entry.lastMessage) return; // Already has detail
+            const short = entry.sessionId?.slice(0, 8);
+            if (!short) return;
+            try {
+              const detail = await new Promise<string | undefined>(resolve => {
+                const sock = new net.Socket();
+                const timer = setTimeout(() => {
+                  sock.destroy();
+                  resolve(undefined);
+                }, 500);
+                sock.on('error', () => {
+                  clearTimeout(timer);
+                  resolve(undefined);
+                });
+                sock.on('connect', () => {
+                  sock.write(JSON.stringify({ proto: 1, op: 'subscribe', short, tail: 200 }) + '\n');
+                });
+                let buf = '';
+                sock.on('data', (chunk: Buffer) => {
+                  buf += chunk.toString();
+                  const nl = buf.indexOf('\n');
+                  if (nl < 0) return;
+                  sock.destroy();
+                  clearTimeout(timer);
+                  try {
+                    const msg = jsonParse(buf.slice(0, nl)) as Record<string, unknown>;
+                    if (msg.type === 'snapshot' && Array.isArray(msg.streamTail)) {
+                      const allText = (msg.streamTail as string[]).join('');
+                      // Strip ANSI escapes to get readable text
+                      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal escapes
+                      const stripped = allText.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()].|\r/g, '');
+                      const lines = stripped
+                        .split('\n')
+                        .map(l => l.trim())
+                        .filter(l => l.length > 3);
+                      for (let i = lines.length - 1; i >= 0; i--) {
+                        const l = lines[i]!;
+                        if (!l.startsWith('─') && !l.startsWith('❯') && !l.startsWith('←') && !l.startsWith('↑')) {
+                          resolve(l.slice(0, 120));
+                          return;
+                        }
+                      }
+                    }
+                    resolve(undefined);
+                  } catch {
+                    resolve(undefined);
+                  }
+                });
+                sock.connect(socketPath);
+              });
+              if (detail) entry.lastMessage = detail;
+            } catch {}
+          }),
+        );
+      } catch {}
+
       if (cwdFilter) {
         const normalized = cwdFilter.replace(/\\/g, '/').toLowerCase();
-        live = live.filter(s => s.cwd?.replace(/\\/g, '/').toLowerCase().startsWith(normalized));
+        entries = entries.filter(s => s.cwd?.replace(/\\/g, '/').toLowerCase().startsWith(normalized));
       }
 
-      setSessions(sortSessions(live));
-
-      // PR auto-detection: for sessions with gitBranch but no prNumber,
-      // try to detect PR (rate-limited, fire-and-forget)
-      for (const session of live) {
-        if (session.gitBranch && !session.prNumber && session.status === 'running') {
-          void detectPrForSession(session);
-        }
-      }
+      setSessions(sortSessions(entries));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -378,10 +520,13 @@ function AgentViewApp({
   // Computed values
   // -------------------------------------------------------------------------
 
-  const blocked = sessions.filter(s => deriveBand(s) === 'blocked');
-  const active = sessions.filter(s => deriveBand(s) === 'active');
-  const done = sessions.filter(s => deriveBand(s) === 'completed');
-  const doneCap = doneCapForRows(sessions.length);
+  const pinned = sessions.filter(s => s.pinned);
+  const unpinned = sessions.filter(s => !s.pinned);
+  const blocked = unpinned.filter(s => deriveBand(s) === 'blocked');
+  const review = unpinned.filter(s => deriveBand(s) === 'review');
+  const active = unpinned.filter(s => deriveBand(s) === 'active');
+  const done = unpinned.filter(s => deriveBand(s) === 'completed');
+  const doneCap = doneCapForRows(process.stdout.rows || 54);
   const visibleDone = folded ? done.slice(0, doneCap) : done;
   const hiddenDoneCount = folded ? Math.max(0, done.length - doneCap) : 0;
 
@@ -416,7 +561,32 @@ function AgentViewApp({
   const handlePin = useCallback(async () => {
     const session = sessions[selectedIndex];
     if (!session) return;
-    await patchSessionByPid(session.pid, { pinned: !session.pinned });
+    const short = session.sessionId?.slice(0, 8) ?? '';
+    if (!short) return;
+    // Toggle pin in pins.json (official: LH7 writes array of short IDs)
+    try {
+      const { join } = await import('path');
+      const { readFile, writeFile, mkdir } = await import('fs/promises');
+      const { getClaudeConfigHomeDir } = await import('../utils/envUtils.js');
+      const pinsPath = join(getClaudeConfigHomeDir(), 'pins.json');
+      let pins: string[] = [];
+      try {
+        const raw = await readFile(pinsPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) pins = parsed.filter((s: unknown) => typeof s === 'string');
+      } catch {}
+      if (pins.includes(short)) {
+        pins = pins.filter(s => s !== short);
+      } else {
+        pins.push(short);
+      }
+      await mkdir(join(getClaudeConfigHomeDir()), { recursive: true }).catch(() => {});
+      await writeFile(pinsPath, JSON.stringify(pins, null, 2));
+    } catch {}
+    // Also patch job state for immediate UI update
+    const { patchBgJobState } = await import('../daemon/jobState.js');
+    const jobShort = session.sessionId?.slice(0, 8);
+    if (jobShort) patchBgJobState(jobShort, { pinned: !session.pinned });
     await refresh();
   }, [sessions, selectedIndex, refresh]);
 
@@ -459,90 +629,17 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   const checkAndAttach = useCallback(
-    async (short: string, session: SessionEntry, onActionCb: typeof onAction, setErr: (msg: string | null) => void) => {
-      const net = require('net') as typeof import('net');
-      const { join } = require('path') as typeof import('path');
-      const { getClaudeConfigHomeDir } = require('../utils/envUtils.js') as typeof import('../utils/envUtils.js');
-
-      let sockPath: string;
-      if (process.platform === 'win32') {
-        const user = process.env.USERNAME || process.env.USER || 'default';
-        sockPath = `//./pipe/cc-pty-${user}-${short}`;
-      } else {
-        sockPath = join(getClaudeConfigHomeDir(), 'daemon', 'bg', 'pty', `${short}.sock`);
+    async (
+      short: string,
+      session: SessionEntry,
+      onActionCb: typeof onAction,
+      _setErr: (msg: string | null) => void,
+    ) => {
+      // Official: Enter → respawnJob → onAction({type:'open'})
+      // Attach goes through daemon control socket, no need to probe PTY socket directly
+      if (onActionCb) {
+        onActionCb({ type: 'open', sessionId: session.sessionId ?? '', short, logPath: session.logPath });
       }
-
-      // Probe socket with retries (PTY host may be starting)
-      let alive = false;
-      for (let i = 0; i < 6; i++) {
-        alive = await new Promise<boolean>(resolve => {
-          const probe = new net.Socket();
-          probe.on('error', () => resolve(false));
-          probe.on('connect', () => {
-            probe.destroy();
-            resolve(true);
-          });
-          probe.connect(sockPath);
-        });
-        if (alive) break;
-        await new Promise(r => setTimeout(r, [50, 100, 250, 500, 1000, 2000][i]));
-      }
-
-      if (alive) {
-        if (onActionCb) {
-          onActionCb({ type: 'open', sessionId: session.sessionId ?? '', short, logPath: session.logPath });
-        }
-        return;
-      }
-
-      // Session not reachable — try respawn via daemon
-      try {
-        const { sendControlRequest, isDaemonReachable } =
-          require('../daemon/controlSocket.js') as typeof import('../daemon/controlSocket.js');
-        const daemonUp = await isDaemonReachable();
-        if (daemonUp) {
-          const resp = await sendControlRequest(
-            {
-              op: 'dispatch',
-              short,
-              sessionId: session.sessionId ?? randomUUID(),
-              intent: session.name ?? '',
-              name: session.name ?? short,
-              cwd: session.cwd ?? process.cwd(),
-              respawnFlags: ['--resume', session.sessionId ?? ''],
-              source: 'fleet_respawn',
-              createdAt: Date.now(),
-            },
-            { timeoutMs: 5000 },
-          );
-
-          if (resp.ok) {
-            // Wait for PTY to come up after respawn
-            for (let i = 0; i < 8; i++) {
-              await new Promise(r => setTimeout(r, [100, 200, 500, 500, 1000, 1000, 2000, 2000][i]));
-              alive = await new Promise<boolean>(resolve => {
-                const probe = new net.Socket();
-                probe.on('error', () => resolve(false));
-                probe.on('connect', () => {
-                  probe.destroy();
-                  resolve(true);
-                });
-                probe.connect(sockPath);
-              });
-              if (alive) break;
-            }
-            if (alive && onActionCb) {
-              onActionCb({ type: 'open', sessionId: session.sessionId ?? '', short, logPath: session.logPath });
-              return;
-            }
-          }
-        }
-      } catch {
-        // Daemon not available — fall through to error
-      }
-
-      setErr('Session not reachable \u2014 it may have already exited');
-      setTimeout(() => setErr(null), 3000);
     },
     [],
   );
@@ -699,18 +796,17 @@ function AgentViewApp({
     } else if (key.tab) {
       setFocusArea('dispatch');
     } else if (key.return && sessions.length > 0) {
+      // If cursor is on the fold row, expand it
+      const foldIndex = blocked.length + active.length + visibleDone.length;
+      if (hiddenDoneCount > 0 && selectedIndex === foldIndex) {
+        setFolded(false);
+        return;
+      }
       const session = sessions[selectedIndex];
       if (session) {
         const short = session.sessionId?.slice(0, 8) ?? '';
-        const band = deriveBand(session);
-        if (band === 'completed') {
-          // Completed sessions can't be attached — show inline error
-          setError('That session ended \u2014 back to the list');
-          setTimeout(() => setError(null), 3000);
-        } else {
-          // Check if PTY socket is reachable before exiting fleet view
-          void checkAndAttach(short, session, onAction, setError);
-        }
+        // Official: Enter always triggers attach (respawn if needed)
+        void checkAndAttach(short, session, onAction, setError);
       }
     } else if (input === ' ' && sessions.length > 0) {
       // Space to reply (for blocked sessions)
@@ -725,6 +821,8 @@ function AgentViewApp({
       void handlePin();
     } else if (input === 'r' && key.ctrl) {
       handleRenameStart();
+    } else if (input === 's' && key.ctrl) {
+      setGroupMode(m => (m === 'state' ? 'directory' : 'state'));
     } else if (input === 'f') {
       setFolded(f => !f);
     } else if (input === 'q' || key.escape) {
@@ -738,351 +836,356 @@ function AgentViewApp({
   });
 
   // -------------------------------------------------------------------------
+  // Directory grouping
+  // -------------------------------------------------------------------------
+
+  const cwdGroups = React.useMemo(() => {
+    if (groupMode !== 'directory') return null;
+    const groups = new Map<string, SessionEntry[]>();
+    const currentCwd = getCwd();
+    for (const s of sessions) {
+      const cwd = s.cwd || currentCwd;
+      if (!groups.has(cwd)) groups.set(cwd, []);
+      groups.get(cwd)!.push(s);
+    }
+    // Sort: current CWD first, then alphabetical
+    const sorted = [...groups.entries()].sort(([a], [b]) => {
+      if (a === currentCwd) return -1;
+      if (b === currentCwd) return 1;
+      return a.localeCompare(b);
+    });
+    return sorted;
+  }, [sessions, groupMode]);
+
+  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
+  const renderSessionRow = (session: SessionEntry) => {
+    const index = sessions.indexOf(session);
+    return (
+      <SessionRow
+        key={`${session.sessionId}-${session.pid}`}
+        session={session}
+        isSelected={focusArea === 'list' && index === selectedIndex}
+        isRenaming={viewMode === 'rename' && index === selectedIndex}
+        renameValue={renameValue}
+        labelWidth={labelWidth}
+        onSelect={() => {
+          setFocusArea('list');
+          setSelectedIndex(index);
+        }}
+        onOpen={() => {
+          const short = session.sessionId?.slice(0, 8) ?? '';
+          void checkAndAttach(short, session, onAction, setError);
+        }}
+      />
+    );
+  };
+
   return (
-    <Box flexDirection="column" padding={1} height="100%">
-      {/* Header */}
-      <Box marginBottom={1} gap={2}>
-        {termWidth >= 70 && <Clawd />}
-        <Box flexDirection="column">
-          <Text>
-            <Text bold>Claude Code</Text> <Text dimColor>v{MACRO.VERSION}</Text>
-          </Text>
-          <Text dimColor>{[modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}</Text>
-          <Text dimColor>
-            {blocked.length} awaiting input {'\u00b7'} {active.length} working {'\u00b7'} {done.length} completed
-          </Text>
-        </Box>
-      </Box>
+    <AlternateScreen mouseTracking={!process.env.CLAUDE_CODE_DISABLE_MOUSE}>
+      <Box flexDirection="column" flexGrow={1}>
+        {/* Top: scrollable list area */}
+        <Box flexDirection="column" flexGrow={1} paddingTop={1}>
+          {/* Header */}
+          <Box marginBottom={1} gap={2} paddingLeft={1}>
+            {termWidth >= 70 && <Clawd />}
+            <Box flexDirection="column">
+              <Text>
+                <Text bold>Claude Code</Text> <Text dimColor>v{MACRO.VERSION}</Text>
+              </Text>
+              <Text dimColor>{[modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}</Text>
+              <Text dimColor>
+                {blocked.length} awaiting input {'\u00b7'}{' '}
+                {review.length > 0 ? `${review.length} in review \u00b7 ` : ''}
+                {active.length} working {'\u00b7'} {done.length} completed
+              </Text>
+            </Box>
+          </Box>
 
-      {/* Empty state */}
-      {sessions.length === 0 && !error && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text>{EMPTY_STATE_HINT}</Text>
-          <Text dimColor>{EMPTY_STATE_EXAMPLES}</Text>
-        </Box>
-      )}
+          {/* Empty state */}
+          {sessions.length === 0 && !error && (
+            <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
+              <Text>{EMPTY_STATE_HINT}</Text>
+              <Text dimColor>{EMPTY_STATE_EXAMPLES}</Text>
+            </Box>
+          )}
 
-      {/* Error */}
-      {error && (
-        <Box marginBottom={1}>
-          <Text color={'error' as never}>{error}</Text>
-        </Box>
-      )}
+          {/* Error */}
+          {error && (
+            <Box marginBottom={1} paddingLeft={1}>
+              <Text color={'error' as never}>{error}</Text>
+            </Box>
+          )}
 
-      {/* Session list — grouped by status */}
-      {blocked.length > 0 && (
-        <Box flexDirection="column">
-          <Text color={'warning' as never}>Needs input</Text>
-          {blocked.map(session => {
-            const index = sessions.indexOf(session);
-            return (
-              <SessionRow
-                key={session.pid}
-                session={session}
-                isSelected={focusArea === 'list' && index === selectedIndex}
-                isRenaming={viewMode === 'rename' && index === selectedIndex}
-                renameValue={renameValue}
-                labelWidth={labelWidth}
-                onSelect={() => {
-                  setFocusArea('list');
-                  setSelectedIndex(index);
-                }}
-                onOpen={() => void attachHandler(session.name ?? String(session.pid))}
+          {/* Session list — state grouping mode */}
+          {groupMode === 'state' && (
+            <Box flexDirection="column" paddingLeft={1}>
+              {pinned.length > 0 && (
+                <Box flexDirection="column">
+                  <Text bold={focusArea === 'list'} dimColor={focusArea !== 'list'}>
+                    Pinned
+                  </Text>
+                  {pinned.map(renderSessionRow)}
+                </Box>
+              )}
+              {blocked.length > 0 && (
+                <Box flexDirection="column" marginTop={pinned.length > 0 ? 1 : 0}>
+                  <Text bold={focusArea === 'list'} color={'warning' as never}>
+                    Needs input <Text dimColor>{blocked.length}</Text>
+                  </Text>
+                  {blocked.map(renderSessionRow)}
+                </Box>
+              )}
+              {review.length > 0 && (
+                <Box flexDirection="column" marginTop={blocked.length > 0 || pinned.length > 0 ? 1 : 0}>
+                  <Text bold={focusArea === 'list'} dimColor={focusArea !== 'list'}>
+                    Ready for review <Text dimColor>{review.length}</Text>
+                  </Text>
+                  {review.map(renderSessionRow)}
+                </Box>
+              )}
+              {active.length > 0 && (
+                <Box
+                  flexDirection="column"
+                  marginTop={blocked.length > 0 || review.length > 0 || pinned.length > 0 ? 1 : 0}
+                >
+                  <Text bold={focusArea === 'list'} dimColor={focusArea !== 'list'}>
+                    Working <Text dimColor>{active.length}</Text>
+                  </Text>
+                  {active.map(renderSessionRow)}
+                </Box>
+              )}
+              {done.length > 0 && (
+                <Box
+                  flexDirection="column"
+                  marginTop={blocked.length > 0 || review.length > 0 || active.length > 0 || pinned.length > 0 ? 1 : 0}
+                >
+                  <Text
+                    dimColor={!done.some(s => deriveActivity(s) === 'failure')}
+                    color={done.some(s => deriveActivity(s) === 'failure') ? ('error' as never) : undefined}
+                  >
+                    Completed <Text dimColor>{done.length}</Text>
+                  </Text>
+                  {visibleDone.map(renderSessionRow)}
+                  {hiddenDoneCount > 0 && (
+                    <Box paddingLeft={2} onClick={() => setFolded(false)}>
+                      <Text
+                        dimColor={
+                          !(
+                            focusArea === 'list' &&
+                            selectedIndex === blocked.length + active.length + visibleDone.length
+                          )
+                        }
+                        bold={
+                          focusArea === 'list' && selectedIndex === blocked.length + active.length + visibleDone.length
+                        }
+                      >
+                        {'\u2026'} {hiddenDoneCount} more
+                      </Text>
+                    </Box>
+                  )}
+                </Box>
+              )}
+            </Box>
+          )}
+
+          {/* Session list — directory grouping mode */}
+          {groupMode === 'directory' && cwdGroups && (
+            <Box flexDirection="column" paddingLeft={1}>
+              {cwdGroups.map(([cwd, groupSessions], gi) => (
+                <Box key={cwd} flexDirection="column" marginTop={gi > 0 ? 1 : 0}>
+                  <Text dimColor>{cwd.replace(process.env.HOME ?? '', '~')}</Text>
+                  {groupSessions.map(renderSessionRow)}
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Box>
+
+        {/* Bottom: fixed input area */}
+        <Box flexShrink={0} flexDirection="column">
+          {/* Reply mode */}
+          {viewMode === 'reply' && (
+            <Box paddingLeft={2} flexDirection="column">
+              <Box>
+                <Text bold>{'reply \u276f '}</Text>
+                <Text>{replyInput}</Text>
+                {!replyInput && <Text dimColor> type a response</Text>}
+              </Box>
+            </Box>
+          )}
+
+          {/* Delete confirmation */}
+          {viewMode === 'delete-confirm' && (
+            <Box paddingLeft={2}>
+              <Text>Delete session? </Text>
+              <Text dimColor>{'(y)es \u00b7 delete (a)ll done \u00b7 (n)o'}</Text>
+            </Box>
+          )}
+
+          {/* Dispatch input */}
+          {viewMode === 'list' && (
+            <Box flexDirection="column">
+              {suggestions.length > 0 && focusArea === 'dispatch' && (
+                <SuggestionList
+                  suggestions={suggestions.map(item => ({
+                    id: item.id,
+                    displayText: item.displayText,
+                    description: item.description ?? '',
+                  }))}
+                  selectedSuggestion={selectedSuggestion}
+                  maxColumnWidth={35}
+                  hoveredId={hoveredSuggestion}
+                  onHoverChange={setHoveredSuggestion}
+                  onSelect={index => {
+                    const item = suggestions[index];
+                    if (item) {
+                      const text = item.displayText + ' ';
+                      setDispatchInput(text);
+                      setCursorOffset(text.length);
+                      setSuggestions([]);
+                    }
+                  }}
+                />
+              )}
+              <Box
+                borderStyle="round"
+                borderLeft={false}
+                borderRight={false}
+                borderTop={true}
+                borderBottom={false}
+                borderDimColor
+                height={1}
               />
-            );
-          })}
-        </Box>
-      )}
-      {active.length > 0 && (
-        <Box flexDirection="column" marginTop={blocked.length > 0 ? 1 : 0}>
-          <Text dimColor>Working</Text>
-          {active.map(session => {
-            const index = sessions.indexOf(session);
-            return (
-              <SessionRow
-                key={session.pid}
-                session={session}
-                isSelected={focusArea === 'list' && index === selectedIndex}
-                isRenaming={viewMode === 'rename' && index === selectedIndex}
-                renameValue={renameValue}
-                labelWidth={labelWidth}
-                onSelect={() => {
-                  setFocusArea('list');
-                  setSelectedIndex(index);
-                }}
-                onOpen={() => void attachHandler(session.name ?? String(session.pid))}
+              <LineView
+                query={dispatchInput}
+                cursorOffset={cursorOffset}
+                placeholder="start a task in the background"
+                prefix={'\u276f'}
+                prefixDim={focusArea !== 'dispatch'}
+                isFocused={focusArea === 'dispatch'}
+                width="100%"
+                borderless
               />
-            );
-          })}
-        </Box>
-      )}
-      {done.length > 0 && (
-        <Box flexDirection="column" marginTop={blocked.length > 0 || active.length > 0 ? 1 : 0}>
-          <Text dimColor>Completed</Text>
-          {visibleDone.map(session => {
-            const index = sessions.indexOf(session);
-            return (
-              <SessionRow
-                key={session.pid}
-                session={session}
-                isSelected={focusArea === 'list' && index === selectedIndex}
-                isRenaming={viewMode === 'rename' && index === selectedIndex}
-                renameValue={renameValue}
-                labelWidth={labelWidth}
-                onSelect={() => {
-                  setFocusArea('list');
-                  setSelectedIndex(index);
-                }}
-                onOpen={() => void attachHandler(session.name ?? String(session.pid))}
+              <Box
+                borderStyle="round"
+                borderLeft={false}
+                borderRight={false}
+                borderTop={true}
+                borderBottom={false}
+                borderDimColor
+                height={1}
               />
-            );
-          })}
-        </Box>
-      )}
+            </Box>
+          )}
 
-      {/* Fold indicator */}
-      {hiddenDoneCount > 0 && (
-        <Box paddingLeft={2}>
-          <Text dimColor>
-            {'\u2026'} {hiddenDoneCount} more completed (press f to show all)
-          </Text>
-        </Box>
-      )}
-
-      {/* Spacer to push input to bottom */}
-      <Box flexGrow={1} />
-
-      {/* Reply mode */}
-      {viewMode === 'reply' && (
-        <Box marginTop={1} paddingLeft={1} flexDirection="column">
-          <Box>
-            <Text bold>{'reply \u276f '}</Text>
-            <Text>{replyInput}</Text>
-            {!replyInput && voice.state === 'idle' && (
-              <Text dimColor> type a response{voiceEnabled ? ' or hold space to speak' : ''}</Text>
-            )}
-            {voice.state === 'recording' && <Text color={'warning' as never}> \ud83c\udfa4 recording...</Text>}
-            {voice.state === 'processing' && <Text dimColor> transcribing...</Text>}
+          {/* Keyboard hints */}
+          <Box paddingLeft={2} height={1}>
+            <Text dimColor>
+              {focusArea === 'dispatch'
+                ? '\u2191\u2193 navigate \u00b7 enter dispatch \u00b7 tab switch'
+                : focusArea === 'list' &&
+                    hiddenDoneCount > 0 &&
+                    selectedIndex === blocked.length + active.length + visibleDone.length
+                  ? 'enter to show all \u00b7 ? for shortcuts'
+                  : 'enter to open \u00b7 space to reply \u00b7 ctrl+x to delete \u00b7 ? for shortcuts'}
+            </Text>
           </Box>
         </Box>
-      )}
-
-      {/* Delete confirmation */}
-      {viewMode === 'delete-confirm' && (
-        <Box marginTop={1} paddingLeft={1}>
-          <Text>Delete session? </Text>
-          <Text dimColor>{'(y)es \u00b7 delete (a)ll done \u00b7 (n)o'}</Text>
-        </Box>
-      )}
-
-      {/* Dispatch input — pinned to bottom */}
-      {viewMode === 'list' && (
-        <Box flexDirection="column">
-          {/* Suggestions above input */}
-          {suggestions.length > 0 && focusArea === 'dispatch' && (
-            <SuggestionList
-              suggestions={suggestions.map(item => ({
-                id: item.id,
-                displayText: item.displayText,
-                description: item.description ?? '',
-              }))}
-              selectedSuggestion={selectedSuggestion}
-              maxColumnWidth={35}
-              hoveredId={hoveredSuggestion}
-              onHoverChange={setHoveredSuggestion}
-              onSelect={index => {
-                const item = suggestions[index];
-                if (item) {
-                  const text = item.displayText + ' ';
-                  setDispatchInput(text);
-                  setCursorOffset(text.length);
-                  setSuggestions([]);
-                }
-              }}
-            />
-          )}
-          {/* Separator */}
-          <Box
-            borderStyle="round"
-            borderLeft={false}
-            borderRight={false}
-            borderTop={true}
-            borderBottom={false}
-            borderDimColor
-            height={1}
-          />
-          {/* Input line */}
-          <LineView
-            query={dispatchInput}
-            cursorOffset={cursorOffset}
-            placeholder="start a task in the background"
-            prefix={'\u276f'}
-            prefixDim={focusArea !== 'dispatch'}
-            isFocused={focusArea === 'dispatch'}
-            width="100%"
-            borderless
-          />
-          {/* Bottom separator */}
-          <Box
-            borderStyle="round"
-            borderLeft={false}
-            borderRight={false}
-            borderTop={true}
-            borderBottom={false}
-            borderDimColor
-            height={1}
-          />
-        </Box>
-      )}
-
-      {/* Keyboard hints */}
-      <Box paddingLeft={1}>
-        <Text dimColor>
-          {viewMode === 'rename'
-            ? 'enter save \u00b7 escape cancel'
-            : viewMode === 'reply'
-              ? 'enter send \u00b7 escape cancel'
-              : focusArea === 'list'
-                ? 'enter to open \u00b7 space to reply \u00b7 ctrl+x to delete \u00b7 ? for shortcuts'
-                : '\u2191\u2193 navigate \u00b7 enter attach/reply \u00b7 ctrl+x delete \u00b7 ctrl+t pin \u00b7 ctrl+r rename \u00b7 f fold \u00b7 tab switch'}
-        </Text>
       </Box>
-    </Box>
+    </AlternateScreen>
   );
 }
 
 // ---------------------------------------------------------------------------
-// PTY Attach (connects to PTY host socket, raw terminal I/O)
+// PTY Attach (via daemon control socket — official protocol)
 // ---------------------------------------------------------------------------
 
-const PTY_DATA_FRAME = 0x01;
-const PTY_CTRL_FRAME = 0x02;
-const PTY_HEADER_SIZE = 5;
+/**
+ * Ensure daemon is running (official: KF / ensureDaemonRunning).
+ * Pings control socket; if unreachable, spawns `claude daemon run --origin transient`.
+ */
+async function ensureDaemonRunning(): Promise<void> {
+  const { sendControlRequest } = await import('../daemon/controlSocket.js');
+  const resp = await sendControlRequest({ op: 'ping', proto: 1 }, { timeoutMs: 2000 });
+  if (resp.ok) return; // Daemon already running
 
-function encodePtyDataFrame(data: Buffer): Buffer {
-  const header = Buffer.alloc(PTY_HEADER_SIZE);
-  header[0] = PTY_DATA_FRAME;
-  header.writeUInt32LE(data.length, 1);
-  return Buffer.concat([header, data]);
+  // Spawn transient daemon (official: Ay6(["daemon","run","--origin","transient","--spawned-by",...]))
+  const { buildCliLaunch, spawnCli } = await import('../utils/cliLaunch.js');
+  const { jsonStringify } = await import('../utils/slowOperations.js');
+  const spawnedBy = jsonStringify({ label: 'claude agents', cwd: process.cwd(), pid: process.pid });
+  const launch = buildCliLaunch(['daemon', 'run', '--origin', 'transient', '--spawned-by', spawnedBy]);
+  const child = spawnCli(launch, {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore'],
+    cwd: process.cwd(),
+  });
+  child.unref();
+
+  // Wait for it to become reachable (up to 5s)
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const check = await sendControlRequest({ op: 'ping', proto: 1 }, { timeoutMs: 1000 });
+    if (check.ok) return;
+  }
 }
-
-function encodePtyCtrlFrame(msg: Record<string, unknown>): Buffer {
-  const payload = Buffer.from(JSON.stringify(msg), 'utf-8');
-  const header = Buffer.alloc(PTY_HEADER_SIZE);
-  header[0] = PTY_CTRL_FRAME;
-  header.writeUInt32LE(payload.length, 1);
-  return Buffer.concat([header, payload]);
-}
-
-const RETRY_DELAYS = [50, 100, 250, 500, 1000, 2000];
-const MAX_RETRIES = 30;
 
 async function attachToPtySession(short: string): Promise<void> {
-  const net = require('net') as typeof import('net');
-  const { getClaudeConfigHomeDir } = require('../utils/envUtils.js') as typeof import('../utils/envUtils.js');
-  const { join } = require('path') as typeof import('path');
+  const { attachToSession } = await import('../daemon/clientAttach.js');
+  const { sendControlRequest } = await import('../daemon/controlSocket.js');
+  const { listAllJobs } = await import('../daemon/jobState.js');
 
-  let sockPath: string;
-  if (process.platform === 'win32') {
-    const user = process.env.USERNAME || process.env.USER || 'default';
-    sockPath = `//./pipe/cc-pty-${user}-${short}`;
-  } else {
-    sockPath = join(getClaudeConfigHomeDir(), 'daemon', 'bg', 'pty', `${short}.sock`);
-  }
+  // Official flow: try attach → if ENOJOB → respawn → retry attach
+  let result = await attachToSession(short, { alreadyInAlt: true });
 
-  // Retry connect with backoff (matches official py6 logic)
-  let attempt = 0;
-  const tryConnect = (): Promise<import('net').Socket | null> => {
-    return new Promise(resolve => {
-      const sock = new net.Socket();
-      sock.on('error', () => resolve(null));
-      sock.on('connect', () => resolve(sock));
-      sock.connect(sockPath);
-    });
-  };
+  if (result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
+    // Session not in daemon — respawn it (official: jC6 / respawnJob)
+    // Find the job state to get sessionId for --resume
+    const jobs = await listAllJobs();
+    const job = jobs.find(j => j.short === short);
+    if (job) {
+      // Dispatch to daemon with --resume to respawn the session
+      const resp = await sendControlRequest(
+        {
+          proto: 1,
+          op: 'dispatch',
+          d: {
+            short,
+            sessionId: job.state.sessionId,
+            source: 'respawn',
+            cwd: job.state.cwd,
+            launch: {
+              mode: 'resume',
+              sessionId: job.state.sessionId,
+              fork: false,
+              flagArgs: job.state.respawnFlags ?? [],
+            },
+            env: {},
+            isolation: 'none',
+            respawnFlags: job.state.respawnFlags ?? [],
+            cols: process.stdout.columns || 120,
+            rows: process.stdout.rows || 30,
+          },
+          timeoutMs: 10000,
+        },
+        { timeoutMs: 12000 },
+      );
 
-  let sock: import('net').Socket | null = null;
-  while (attempt < MAX_RETRIES) {
-    sock = await tryConnect();
-    if (sock) break;
-    const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)]!;
-    await new Promise(r => setTimeout(r, delay));
-    attempt++;
-  }
-
-  if (!sock) return; // Can't connect — silently return to fleet view
-
-  // Connected — enter raw terminal mode
-  if (process.stdin.isTTY) process.stdin.setRawMode(true);
-  process.stdin.resume();
-
-  await new Promise<void>(resolve => {
-    const cleanup = () => {
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      process.stdin.removeAllListeners('data');
-      process.stdout.removeAllListeners('resize');
-      resolve();
-    };
-
-    sock!.on('error', cleanup);
-    sock!.on('close', cleanup);
-
-    // Forward stdin → PTY host
-    process.stdin.on('data', (raw: Buffer | string) => {
-      const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
-      if (chunk.length === 1 && chunk[0] === 0x1a) {
-        sock!.destroy();
-        return;
-      }
-      if (!sock!.destroyed) {
-        sock!.write(encodePtyDataFrame(chunk));
-      }
-    });
-
-    // Resize
-    const onResize = () => {
-      if (!sock!.destroyed) {
-        sock!.write(
-          encodePtyCtrlFrame({
-            t: 'resize',
-            cols: process.stdout.columns,
-            rows: process.stdout.rows,
-          }),
-        );
-      }
-    };
-    process.stdout.on('resize', onResize);
-    onResize();
-
-    // Parse incoming frames
-    let buf: Buffer<ArrayBuffer> = Buffer.alloc(0);
-    sock!.on('data', (chunk: Buffer<ArrayBuffer>) => {
-      buf = buf.length ? (Buffer.concat([buf, chunk]) as Buffer<ArrayBuffer>) : chunk;
-      while (buf.length >= PTY_HEADER_SIZE) {
-        const type = buf[0];
-        const len = buf.readUInt32LE(1);
-        if (buf.length < PTY_HEADER_SIZE + len) break;
-        const payload = buf.subarray(PTY_HEADER_SIZE, PTY_HEADER_SIZE + len);
-        buf = buf.subarray(PTY_HEADER_SIZE + len);
-
-        if (type === PTY_DATA_FRAME) {
-          process.stdout.write(payload);
-        } else if (type === PTY_CTRL_FRAME) {
-          try {
-            const msg = JSON.parse(payload.toString()) as Record<string, unknown>;
-            if (msg.t === 'exit') {
-              const code = msg.code as number;
-              const status = code === 0 ? 'done' : `exited (${code})`;
-              process.stdout.write(`\r\n\x1b[2m\u2014 ${status} \xb7 Ctrl+Z to return \u2014\x1b[0m\r\n`);
-            }
-          } catch {}
+      if (resp.ok) {
+        // Wait for worker to become available, then retry attach
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          result = await attachToSession(short, { alreadyInAlt: true });
+          if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) break;
         }
       }
-    });
-  });
+    }
+  }
+
+  // After detach/error: restore alt screen for FleetView re-render
+  process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,6 +1197,9 @@ export async function renderAgentView(options?: {
   dispatchExtraArgs?: string[];
   cwdFilter?: string;
 }): Promise<void> {
+  // Ensure daemon is running (official: KF / ensureDaemonRunning)
+  await ensureDaemonRunning();
+
   // Loop: render FleetView → handle action → re-render
   for (;;) {
     let instance: Awaited<ReturnType<typeof render>> | null = null;
@@ -1116,6 +1222,10 @@ export async function renderAgentView(options?: {
     });
 
     // Unmount Ink before doing anything else
+    // handoffRawMode() prevents Ink from disabling raw mode during unmount (official pattern)
+    if (action.type === 'open' && instance) {
+      (instance as { handoffRawMode?: () => void }).handoffRawMode?.();
+    }
     if (instance) {
       (instance as { unmount: () => void }).unmount();
     }

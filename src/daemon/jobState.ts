@@ -38,40 +38,70 @@ export interface BgJobState {
   detail: string
   tempo: BgSessionTempo
   intent: string
-  name: string
+  name?: string
+  nameSource?: 'user' | 'auto'
+  initialPrompt?: string
   sessionId: string
+  resumeSessionId?: string
+  daemonShort?: string
   cwd: string
   template: string
   routine?: string
+  agent?: string
+  color?: string
   createdAt: string
   updatedAt: string
   firstTerminalAt: string | null
   output: Record<string, string> | null
-  children: Array<{ id: string; href: string; kind: string }> | null
+  children: Array<{ id: string; href: string; kind?: string }> | null
+  linkScanOffset?: number
+  linkScanPath?: string
   /** Flags to pass on respawn */
   respawnFlags: string[]
-  /** Session ID to use when resuming (may differ from sessionId after fork) */
-  resumeSessionId?: string
+  /** Worktree isolation mode */
+  bgIsolation?: 'none' | 'worktree'
   /** Origin CWD (before worktree) */
   originCwd?: string
   /** Worktree path if using worktree isolation */
   worktreePath?: string
-  /** Link scan offset for PR detection */
-  linkScanOffset?: number
+  worktreeBranch?: string
+  worktreeHookBased?: boolean
+  /** Bridge session */
+  bridgeSessionId?: string
+  bridgeOutboundOnly?: boolean
+  bridgeSessionSeq?: number
   /** Backend that manages this job */
-  backend?: 'daemon' | 'detached' | 'tmux'
-  /** Color override */
-  color?: string
+  backend?: 'daemon' | 'peer'
+  /** PTY socket path */
+  sock?: string
+  /** Worker PID */
+  pid?: number
+  /** CLI version that wrote this state */
+  cliVersion?: string
   /** Sort order override */
   sortOrder?: number
-  /** Bridge session sequence */
-  bridgeSessionSeq?: number
-  /** In-flight operation */
-  inFlight?: string
+  stateSortOrder?: number
+  /** Pinned in FleetView */
+  pinned?: boolean
+  /** In-flight operations */
+  inFlight?: { tasks: number; queued: number; kinds: string[] }
   /** What the session needs from the user */
   needs?: string
-  /** Permission block description */
-  block?: string
+  /** Permission/question block */
+  block?: {
+    questions: Array<{
+      question: string
+      options: Array<{ label: string; description: string }>
+    }>
+  }
+  /** Suggested reply for blocked sessions */
+  suggestedReply?: string
+  /** Provider environment overrides */
+  providerEnv?: Record<string, string>
+  /** Session permission rules */
+  sessionPermissionRules?: { allow: string[]; deny: string[] }
+  /** Memory toggled off */
+  memoryToggledOff?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -151,12 +181,81 @@ export async function listAllJobs(): Promise<
     try {
       const raw = await readFile(stateFile, 'utf-8')
       const state = jsonParse(raw) as BgJobState
+      // If detail is empty, try to read last assistant message from transcript
+      if (!state.detail && state.sessionId) {
+        const detail = await readLastAssistantLine(state.sessionId, state.cwd)
+        if (detail) state.detail = detail
+      }
       results.push({ short, state })
     } catch {
       // Corrupt or missing state file — skip
     }
   }
   return results
+}
+
+/**
+ * Read the last assistant text line from a session's transcript file.
+ * Used to populate detail when the classifier hasn't written it yet.
+ */
+async function readLastAssistantLine(
+  sessionId: string,
+  cwd: string,
+): Promise<string | undefined> {
+  try {
+    const { getClaudeConfigHomeDir } = await import('../utils/envUtils.js')
+    const { readdirSync, statSync } = await import('fs')
+    const projectsDir = join(getClaudeConfigHomeDir(), 'projects')
+    // Find the transcript file — it's at ~/.claude/projects/<project-hash>/<sessionId>.jsonl
+    let transcriptPath: string | undefined
+    try {
+      const projectDirs = readdirSync(projectsDir)
+      for (const pd of projectDirs) {
+        const candidate = join(projectsDir, pd, `${sessionId}.jsonl`)
+        try {
+          statSync(candidate)
+          transcriptPath = candidate
+          break
+        } catch {}
+      }
+    } catch {}
+    if (!transcriptPath) return undefined
+
+    // Read last 8KB of the file to find the last assistant message
+    const fs = await import('fs')
+    const fd = fs.openSync(transcriptPath, 'r')
+    const st = fs.fstatSync(fd)
+    const readSize = Math.min(8192, st.size)
+    const buf = Buffer.alloc(readSize)
+    fs.readSync(fd, buf, 0, readSize, Math.max(0, st.size - readSize))
+    fs.closeSync(fd)
+
+    const lines = buf
+      .toString('utf-8')
+      .split('\n')
+      .filter(l => l.trim())
+    // Find last assistant message with text content
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const msg = jsonParse(lines[i]!) as Record<string, unknown>
+        if (msg.type !== 'assistant') continue
+        const content = (msg.message as Record<string, unknown>)?.content
+        if (!Array.isArray(content)) continue
+        for (let j = content.length - 1; j >= 0; j--) {
+          const block = content[j] as Record<string, unknown>
+          if (block.type === 'text' && typeof block.text === 'string') {
+            const textLines = (block.text as string)
+              .split('\n')
+              .filter((l: string) => l.trim())
+            if (textLines.length > 0) {
+              return textLines[textLines.length - 1]!.slice(0, 120)
+            }
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+  return undefined
 }
 
 /**
@@ -173,12 +272,13 @@ export async function removeJob(short: string): Promise<void> {
 
 export function createInitialJobState(opts: {
   intent: string
-  name: string
+  name?: string
   sessionId: string
   cwd: string
   template?: string
   agent?: string
   respawnFlags?: string[]
+  short?: string
 }): BgJobState {
   const now = new Date().toISOString()
   return {
@@ -188,8 +288,10 @@ export function createInitialJobState(opts: {
     intent: opts.intent,
     name: opts.name,
     sessionId: opts.sessionId,
+    daemonShort: opts.short,
     cwd: opts.cwd,
     template: opts.agent ?? opts.template ?? 'bg',
+    agent: opts.agent,
     createdAt: now,
     updatedAt: now,
     firstTerminalAt: null,
@@ -197,5 +299,6 @@ export function createInitialJobState(opts: {
     children: null,
     respawnFlags: opts.respawnFlags ?? [],
     backend: 'daemon',
+    cliVersion: MACRO.VERSION,
   }
 }

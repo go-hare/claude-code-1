@@ -1,37 +1,35 @@
 /**
- * Control Socket — daemon listens for dispatch/status/stop requests.
+ * Control Socket — daemon listens for dispatch/status/stop/attach/subscribe requests.
  *
- * Upstream equivalent: `kG_` (createControlSocket) in the official binary.
+ * Upstream equivalent: `SG4` (startControlSocket) + `JmO` (handleRequest) in the official binary.
  *
  * Protocol: JSON over newline-delimited stream.
  * - Client connects, sends one JSON line
- * - Server responds with one JSON line, then closes
+ * - Server responds with one JSON line, then closes (normal ops)
+ * - For streaming ops (attach/subscribe/lease): server sends ack, then keeps connection open
  *
- * Windows: named pipe \\.\pipe\cc-daemon-bg-<user>
- * Unix: unix domain socket ~/.claude/daemon/bg/control.sock
+ * Path (official Ll):
+ *   Unix: /tmp/cc-daemon-<uid>/<sha256(configDir)[:8]>/control.sock
+ *   Windows: named pipe \\.\pipe\cc-daemon-<pipeKey>-control
  */
 
-import { createServer, connect, type Server, type Socket } from 'net'
+import { createServer, type Server, type Socket } from 'net'
 import { mkdir, unlink } from 'fs/promises'
-import { join, dirname } from 'path'
-import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { dirname } from 'path'
+import {
+  getControlSocketPath,
+  getDaemonInstanceDir,
+  createSignal,
+  type Signal,
+} from './bgWorker.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 
 // ---------------------------------------------------------------------------
-// Paths
+// Constants
 // ---------------------------------------------------------------------------
 
-function getBgDaemonDir(): string {
-  return join(getClaudeConfigHomeDir(), 'daemon', 'bg')
-}
-
-export function getControlSocketPath(): string {
-  if (process.platform === 'win32') {
-    const user = process.env.USERNAME || process.env.USER || 'default'
-    return `//./pipe/cc-daemon-bg-${user}`
-  }
-  return join(getBgDaemonDir(), 'control.sock')
-}
+/** Max request size (1MB) — official $S_ */
+const MAX_REQUEST_SIZE = 1_048_576
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +37,7 @@ export function getControlSocketPath(): string {
 
 export interface ControlRequest {
   op: string
+  proto?: number
   [key: string]: unknown
 }
 
@@ -47,51 +46,104 @@ export interface ControlResponse {
   [key: string]: unknown
 }
 
+export interface LeaseInfo {
+  label?: string
+}
+
+/**
+ * Request handler signature.
+ * Return a ControlResponse to send it and close the socket.
+ * Return null/undefined to indicate the handler has taken ownership of the socket.
+ */
 export type RequestHandler = (
   req: ControlRequest,
   socket: Socket,
-) => Promise<ControlResponse> | ControlResponse
+  remainder: Buffer,
+  addLease: (socket: Socket, info: LeaseInfo | null) => void,
+) =>
+  | Promise<ControlResponse | null | undefined>
+  | ControlResponse
+  | null
+  | undefined
 
 // ---------------------------------------------------------------------------
-// Server
+// Server — official SG4
 // ---------------------------------------------------------------------------
+
+export interface ControlSocketInstance {
+  close: () => Promise<void>
+  leaseCount: () => number
+  onLeaseChange: Signal<[]>
+}
 
 export async function startControlSocket(
   handler: RequestHandler,
-): Promise<{ server: Server; close: () => Promise<void> }> {
+): Promise<ControlSocketInstance> {
   const socketPath = getControlSocketPath()
 
-  // Ensure directory exists (unix only)
+  // Ensure directory exists with correct permissions
   if (process.platform !== 'win32') {
-    await mkdir(dirname(socketPath), { recursive: true })
+    const dir = getDaemonInstanceDir()
+    await mkdir(dir, { recursive: true, mode: 0o700 }).catch(() => {})
     await unlink(socketPath).catch(() => {})
   }
 
-  const server = createServer((socket: Socket) => {
-    socket.setTimeout(30_000, () => socket.destroy())
+  const connections = new Set<Socket>()
+  const leases = new Map<Socket, LeaseInfo | null>()
+  const onLeaseChange = createSignal<[]>()
 
-    let buffer = ''
-    socket.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString()
-      const nl = buffer.indexOf('\n')
+  const addLease = (socket: Socket, info: LeaseInfo | null): void => {
+    if (leases.has(socket)) return
+    leases.set(socket, info)
+    socket.once('close', () => {
+      leases.delete(socket)
+      onLeaseChange.emit()
+    })
+    onLeaseChange.emit()
+  }
+
+  const server: Server = createServer((socket: Socket) => {
+    socket.on('error', () => socket.destroy())
+    socket.setTimeout(30_000, () => socket.destroy())
+    connections.add(socket)
+    socket.once('close', () => connections.delete(socket))
+
+    // Peer UID validation (Unix only)
+    const peerReject = validatePeerUid(socket)
+    if (peerReject) {
+      socket.once('data', () =>
+        respond(socket, { ok: false, code: 'EPEERUID', error: peerReject }),
+      )
+      return
+    }
+
+    let buf = Buffer.alloc(0)
+    const onData = (chunk: Buffer): void => {
+      buf = Buffer.concat([buf, chunk])
+      const nl = buf.indexOf(10) // '\n'
       if (nl < 0) {
-        if (buffer.length > 1_048_576) {
-          respond(socket, { ok: false, error: 'request too large' })
+        if (buf.length > MAX_REQUEST_SIZE) {
+          socket.off('data', onData)
+          respond(socket, {
+            ok: false,
+            code: 'ETOOLARGE',
+            error: `request exceeds ${MAX_REQUEST_SIZE >> 20}MB — shorten the prompt or send in parts`,
+          })
         }
         return
       }
-
-      const line = buffer.slice(0, nl)
-      buffer = buffer.slice(nl + 1)
+      socket.off('data', onData)
       socket.setTimeout(0)
-
-      handleLine(line, socket, handler)
-    })
-
-    socket.on('error', () => {
-      // Client disconnected — ignore
-    })
+      const line = buf.subarray(0, nl).toString('utf8')
+      const remainder = buf.subarray(nl + 1)
+      handleLine(line, socket, remainder, handler, addLease)
+    }
+    socket.on('data', onData)
   })
+
+  server.on('error', err =>
+    console.error('[daemon] control socket error:', err),
+  )
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
@@ -102,117 +154,95 @@ export async function startControlSocket(
   })
 
   return {
-    server,
     async close() {
+      for (const sock of connections) sock.destroy()
       await new Promise<void>(r => server.close(() => r()))
       if (process.platform !== 'win32') {
         await unlink(socketPath).catch(() => {})
       }
     },
+    leaseCount: () => leases.size,
+    onLeaseChange,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Peer UID validation — official VG4
+// ---------------------------------------------------------------------------
+
+function validatePeerUid(socket: Socket): string | null {
+  const myUid = process.getuid?.()
+  if (myUid == null) return null
+
+  // Node.js doesn't expose SO_PEERCRED directly, but on Linux/macOS
+  // the socket object may have a remoteFamily. For Unix domain sockets,
+  // we rely on directory permissions (0o700) for security.
+  // The official code uses a native binding; we skip this check gracefully.
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Request handling
+// ---------------------------------------------------------------------------
 
 async function handleLine(
   line: string,
   socket: Socket,
+  remainder: Buffer,
   handler: RequestHandler,
+  addLease: (socket: Socket, info: LeaseInfo | null) => void,
 ): Promise<void> {
+  let req: ControlRequest
   try {
-    const req = jsonParse(line) as ControlRequest
-    if (!req || typeof req.op !== 'string') {
-      respond(socket, { ok: false, error: 'missing op field' })
+    const parsed = jsonParse(line)
+    if (!parsed || typeof parsed !== 'object') {
+      respond(socket, { ok: false, error: 'bad json', code: 'EUNKNOWN' })
       return
     }
-    const resp = await handler(req, socket)
-    respond(socket, resp)
+    req = parsed as ControlRequest
+  } catch {
+    respond(socket, { ok: false, error: 'bad json', code: 'EUNKNOWN' })
+    return
+  }
+
+  try {
+    const resp = await handler(req, socket, remainder, addLease)
+    if (resp != null) {
+      respond(socket, resp)
+    }
   } catch (e) {
     respond(socket, {
       ok: false,
-      error: e instanceof Error ? e.message : 'parse error',
+      error: e instanceof Error ? e.message : String(e),
+      code: 'EUNKNOWN',
     })
   }
 }
 
-function respond(socket: Socket, resp: ControlResponse): void {
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
+
+/** Send a JSON response and close the socket — official NT */
+export function respond(socket: Socket, resp: ControlResponse): void {
   if (socket.destroyed) return
   socket.end(jsonStringify(resp) + '\n')
 }
 
-// ---------------------------------------------------------------------------
-// Client
-// ---------------------------------------------------------------------------
-
-/**
- * Send a request to the daemon control socket.
- * Returns the response, or { ok: false } if the daemon is unreachable.
- */
-export async function sendControlRequest(
-  req: ControlRequest,
-  opts?: { timeoutMs?: number },
-): Promise<ControlResponse> {
-  const socketPath = getControlSocketPath()
-  const timeout = opts?.timeoutMs ?? 5000
-
-  return new Promise<ControlResponse>(resolve => {
-    const client = connect(socketPath)
-    let responded = false
-
-    const done = (resp: ControlResponse) => {
-      if (responded) return
-      responded = true
-      resolve(resp)
-    }
-
-    client.setTimeout(timeout, () => {
-      client.destroy()
-      done({ ok: false, error: 'timeout' })
-    })
-
-    client.on('error', (err: Error & { code?: string }) => {
-      done({
-        ok: false,
-        error: err.code === 'ENOENT' ? 'daemon not running' : err.message,
-      })
-    })
-
-    client.once('connect', () => {
-      client.write(jsonStringify(req) + '\n')
-    })
-
-    let buffer = ''
-    client.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString()
-      const nl = buffer.indexOf('\n')
-      if (nl < 0) return
-      const line = buffer.slice(0, nl)
-      try {
-        done(jsonParse(line) as ControlResponse)
-      } catch {
-        done({ ok: false, error: 'invalid response' })
-      }
-      client.end()
-    })
-
-    client.on('end', () => {
-      if (!responded) {
-        if (buffer.trim()) {
-          try {
-            done(jsonParse(buffer.trim()) as ControlResponse)
-          } catch {
-            done({ ok: false, error: 'incomplete response' })
-          }
-        } else {
-          done({ ok: false, error: 'connection closed' })
-        }
-      }
-    })
-  })
+/** Write a JSON line WITHOUT closing — official zS_ */
+export function writeJsonLine(
+  socket: Socket,
+  data: Record<string, unknown>,
+): void {
+  if (socket.destroyed) return
+  socket.write(jsonStringify(data) + '\n')
 }
 
-/**
- * Check if the daemon is reachable via control socket.
- */
-export async function isDaemonReachable(): Promise<boolean> {
-  const resp = await sendControlRequest({ op: 'ping' }, { timeoutMs: 2000 })
-  return resp.ok === true
-}
+// ---------------------------------------------------------------------------
+// Client — send requests to the daemon control socket
+// ---------------------------------------------------------------------------
+
+export { sendControlRequest, isDaemonReachable } from './controlSocketClient.js'
+
+// Re-export path helpers for consumers that import from controlSocket
+export { getControlSocketPath } from './bgWorker.js'

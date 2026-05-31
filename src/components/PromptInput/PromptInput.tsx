@@ -211,6 +211,7 @@ type Props = {
   setHelpOpen: React.Dispatch<React.SetStateAction<boolean>>;
   hasSuppressedDialogs?: boolean;
   isLocalJSXCommandActive?: boolean;
+  onLeftArrowOnEmpty?: () => void;
   insertTextRef?: React.MutableRefObject<{
     insert: (text: string) => void;
     setInputWithCursor: (value: string, cursor: number) => void;
@@ -222,6 +223,20 @@ type Props = {
 // Bottom slot has maxHeight="50%"; reserve lines for footer, border, status.
 const PROMPT_FOOTER_LINES = 5;
 const MIN_INPUT_VIEWPORT_LINES = 3;
+
+/** Detach sequence for bg sessions — official dSH + MqH */
+const DETACH_SEQ = '\x1B_cc-daemon-detach\x1B\\';
+const DETACH_MSG_PREFIX = '\x1B_cc-detach-msg;';
+const DETACH_ST = '\x1B\\';
+
+function sendBgDetachRequest(): void {
+  if (process.env.CLAUDE_BG_BACKEND !== 'daemon') return;
+  const msg = 'Detached — use `claude agents` to see background sessions.';
+  process.stdout.write(DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ);
+}
+
+/** Timeout for "← again for agents" double-press (ms) — official zM5 */
+const LEFT_ARROW_AGAIN_TIMEOUT = 800;
 
 function PromptInput({
   debug,
@@ -264,6 +279,7 @@ function PromptInput({
   setHelpOpen,
   hasSuppressedDialogs,
   isLocalJSXCommandActive = false,
+  onLeftArrowOnEmpty: onLeftArrowOnEmptyProp,
   insertTextRef,
   voiceInterimRange,
 }: Props): React.ReactNode {
@@ -280,6 +296,8 @@ function PromptInput({
     key?: string;
   }>({ show: false });
   const [cursorOffset, setCursorOffset] = useState<number>(input.length);
+  const [leftArrowHintShown, setLeftArrowHintShown] = useState(false);
+  const leftArrowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track the last input value set via internal handlers so we can detect
   // external input changes (e.g. speech-to-text injection) and move cursor to end.
   const lastInternalInputRef = React.useRef(input);
@@ -2379,6 +2397,31 @@ function PromptInput({
     onHistoryUp: handleHistoryUp,
     onHistoryDown: handleHistoryDown,
     onHistoryReset: resetHistory,
+    onLeftArrowOnEmpty:
+      onLeftArrowOnEmptyProp ?? (process.env.CLAUDE_BG_BACKEND === 'daemon' ? sendBgDetachRequest : undefined),
+    onLeftArrowOnEmptyMessage: onLeftArrowOnEmptyProp
+      ? (show: boolean) => {
+          if (show) {
+            if (leftArrowHintShown) {
+              // Second press within timeout — trigger the action
+              if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
+              leftArrowTimerRef.current = null;
+              setLeftArrowHintShown(false);
+              onLeftArrowOnEmptyProp();
+            } else {
+              // First press — show hint, start timer
+              setLeftArrowHintShown(true);
+              if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
+              leftArrowTimerRef.current = setTimeout(() => {
+                setLeftArrowHintShown(false);
+                leftArrowTimerRef.current = null;
+              }, LEFT_ARROW_AGAIN_TIMEOUT);
+            }
+          } else {
+            setLeftArrowHintShown(false);
+          }
+        }
+      : undefined,
     placeholder,
     onExit,
     onExitMessage: (show, key) => setExitMessage({ show, key }),
@@ -2554,6 +2597,7 @@ function PromptInput({
         setHistoryQuery={setHistoryQuery}
         historyFailedMatch={historyFailedMatch}
         onOpenTasksDialog={isFullscreenEnvEnabled() ? handleOpenTasksDialog : undefined}
+        leftArrowAgain={leftArrowHintShown}
       />
       {isFullscreenEnvEnabled() ? (
         // position=absolute takes zero layout height so the spinner

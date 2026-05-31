@@ -36,6 +36,18 @@ export type BaseTextInputProps = {
   readonly onHistoryDown?: () => void
 
   /**
+   * Optional callback when left arrow is pressed on empty input (cursor at 0).
+   * Used by bg sessions to detach back to FleetView.
+   */
+  readonly onLeftArrowOnEmpty?: () => void
+
+  /**
+   * Optional callback to show "← again for agents" hint on first press.
+   * When provided, first press shows hint, second press triggers onLeftArrowOnEmpty.
+   */
+  readonly onLeftArrowOnEmptyMessage?: (show: boolean) => void
+
+  /**
    * Text to display when `value` is empty.
    */
   readonly placeholder?: string

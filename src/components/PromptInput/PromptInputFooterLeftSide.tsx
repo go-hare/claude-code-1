@@ -75,6 +75,7 @@ type Props = {
   setHistoryQuery: (query: string) => void;
   historyFailedMatch: boolean;
   onOpenTasksDialog?: (taskId?: string) => void;
+  leftArrowAgain?: boolean;
 };
 
 function ProactiveCountdown(): React.ReactNode {
@@ -124,6 +125,7 @@ export function PromptInputFooterLeftSide({
   setHistoryQuery,
   historyFailedMatch,
   onOpenTasksDialog,
+  leftArrowAgain,
 }: Props): React.ReactNode {
   if (exitMessage.show) {
     return (
@@ -162,6 +164,7 @@ export function PromptInputFooterLeftSide({
         teammateFooterIndex={teammateFooterIndex}
         tmuxSelected={tmuxSelected}
         onOpenTasksDialog={onOpenTasksDialog}
+        leftArrowAgain={leftArrowAgain}
       />
     </Box>
   );
@@ -177,6 +180,7 @@ type ModeIndicatorProps = {
   tmuxSelected: boolean;
   teammateFooterIndex?: number;
   onOpenTasksDialog?: (taskId?: string) => void;
+  leftArrowAgain?: boolean;
 };
 
 function ModeIndicator({
@@ -189,6 +193,7 @@ function ModeIndicator({
   tmuxSelected,
   teammateFooterIndex,
   onOpenTasksDialog,
+  leftArrowAgain,
 }: ModeIndicatorProps): React.ReactNode {
   const { columns } = useTerminalSize();
   const modeCycleShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
@@ -426,6 +431,13 @@ function ModeIndicator({
         ? for shortcuts
       </Text>,
     );
+    if (feature('BG_SESSIONS')) {
+      parts.push(
+        <Text dimColor key="agents-hint">
+          {leftArrowAgain ? ' · ← again for agents' : ' · ← for agents'}
+        </Text>,
+      );
+    }
   }
 
   // Only replace the idle voice hint when there's something to say — otherwise

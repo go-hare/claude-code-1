@@ -110,6 +110,8 @@ export function _resetTmuxControlModeProbeForTesting(): void {
  * opt in).
  */
 export function isFullscreenEnvEnabled(): boolean {
+  // bg sessions always use fullscreen (official: SESSION_KIND==="bg" → true)
+  if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return true
   // Explicit user opt-out always wins.
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)) return false
   // Explicit opt-in overrides auto-detection (escape hatch).

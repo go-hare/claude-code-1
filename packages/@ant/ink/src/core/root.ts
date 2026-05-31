@@ -56,6 +56,10 @@ export type Instance = {
    */
   waitUntilExit: Ink['waitUntilExit']
   cleanup: () => void
+  /**
+   * Prevent unmount from disabling raw mode (caller will take over stdin).
+   */
+  handoffRawMode: Ink['handoffRawMode']
 }
 
 /**
@@ -100,6 +104,7 @@ export const renderSync = (
     },
     waitUntilExit: instance.waitUntilExit,
     cleanup: () => instances.delete(inkOptions.stdout),
+    handoffRawMode: () => instance.handoffRawMode(),
   }
 }
 

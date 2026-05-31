@@ -886,6 +886,17 @@ export default class Ink {
     this.isPaused = true;
   }
 
+  /** Prevent unmount from disabling raw mode (caller will take over stdin). */
+  handoffRawMode(): void {
+    this._handoffRawMode = true;
+  }
+
+  get isHandoffRawMode(): boolean {
+    return this._handoffRawMode;
+  }
+
+  private _handoffRawMode = false;
+
   resume(): void {
     this.isPaused = false;
     this.onRender();
@@ -1049,7 +1060,7 @@ export default class Ink {
       setRawMode?: (m: boolean) => void;
     };
     this.drainStdin();
-    if (stdin.isTTY && stdin.isRaw && stdin.setRawMode) {
+    if (stdin.isTTY && stdin.isRaw && stdin.setRawMode && !this._handoffRawMode) {
       stdin.setRawMode(false);
     }
   }
@@ -1497,7 +1508,7 @@ export default class Ink {
       isRaw?: boolean;
       setRawMode?: (mode: boolean) => void;
     };
-    if (stdinWithRaw.isRaw && stdinWithRaw.setRawMode) {
+    if (stdinWithRaw.isRaw && stdinWithRaw.setRawMode && !this._handoffRawMode) {
       stdinWithRaw.setRawMode(false);
       this.wasRawMode = true;
     }

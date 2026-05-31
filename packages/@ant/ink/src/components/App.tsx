@@ -41,6 +41,7 @@ import {
   parseMultipleKeypresses,
 } from '../core/parse-keypress.js';
 import reconciler from '../core/reconciler.js';
+import instances from '../core/instances.js';
 import { finishSelection, hasSelection, type SelectionState, startSelection } from '../core/selection.js';
 import { isXtermJs, setXtversionName, supportsExtendedKeys } from '../core/terminal.js';
 import { getTerminalFocused, setTerminalFocused } from '../core/terminal-focus-state.js';
@@ -372,7 +373,9 @@ export default class App extends PureComponent<Props, State> {
       this.props.stdout.write(DFE);
       // Disable bracketed paste mode
       this.props.stdout.write(DBP);
-      stdin.setRawMode(false);
+      if (!instances.get(this.props.stdout)?.isHandoffRawMode) {
+        stdin.setRawMode(false);
+      }
       stdin.removeListener('readable', this.handleReadable);
       stdin.unref();
     }

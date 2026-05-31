@@ -3,10 +3,13 @@ import { join } from 'path'
 import type { AssistantMessage } from '../types/message.js'
 
 /**
- * Classify the job status from the turn's assistant messages and update state.json.
+ * Classify the job state from the turn's assistant messages and update state.json.
  *
  * Called by stopHooks.ts after each repl_main_thread turn when CLAUDE_JOB_DIR is set.
  * Only the main thread calls this (not subagents).
+ *
+ * Official equivalent: the transcript classifier that updates state/tempo/detail
+ * in the job's state.json after each turn.
  *
  * @param jobDir - Path to the job directory (from CLAUDE_JOB_DIR env)
  * @param assistantMessages - Assistant messages from this turn
@@ -21,47 +24,96 @@ export async function classifyAndWriteState(
   try {
     state = JSON.parse(readFileSync(stateFile, 'utf-8'))
   } catch {
-    // No state file or corrupt — not a valid job directory
     return
   }
 
-  const newStatus = classifyStatus(assistantMessages)
-  state.status = newStatus
+  const classification = classifyTurn(assistantMessages)
+
+  state.state = classification.state
+  state.tempo = classification.tempo
+  if (classification.detail !== undefined) {
+    state.detail = classification.detail
+  }
   state.updatedAt = new Date().toISOString()
+
+  if (classification.state === 'done' || classification.state === 'failed') {
+    state.firstTerminalAt = state.firstTerminalAt ?? state.updatedAt
+  }
 
   writeFileSync(stateFile, JSON.stringify(state, null, 2), 'utf-8')
 }
 
+interface TurnClassification {
+  state: 'working' | 'blocked' | 'done' | 'failed'
+  tempo: 'active' | 'idle' | 'blocked'
+  detail?: string
+}
+
 /**
- * Determine job status from assistant messages.
+ * Determine job state from assistant messages in this turn.
  *
- * - Has tool_use blocks → still running (tools executing)
- * - stop_reason === 'end_turn' → completed (model finished)
- * - Otherwise → running
+ * Logic (matching official classifier):
+ * - Has tool_use blocks → working/active (tools still executing)
+ * - Has AskUserQuestion tool → blocked (waiting for user input)
+ * - stop_reason === 'end_turn' with no pending tools → done
+ * - Otherwise → working/active
  */
-function classifyStatus(messages: AssistantMessage[]): string {
-  if (messages.length === 0) return 'running'
+function classifyTurn(messages: AssistantMessage[]): TurnClassification {
+  if (messages.length === 0) {
+    return { state: 'working', tempo: 'active' }
+  }
 
   const lastMessage = messages[messages.length - 1]!
   const content = lastMessage.message?.content
 
-  // Check if the last message has tool_use blocks (still executing)
+  // Extract detail from the last text block
+  let detail: string | undefined
   if (Array.isArray(content)) {
-    const hasToolUse = content.some(
-      block =>
-        typeof block === 'object' &&
-        block !== null &&
-        'type' in block &&
-        block.type === 'tool_use',
+    const textBlocks = content.filter(
+      (b): b is { type: 'text'; text: string } =>
+        typeof b === 'object' && b !== null && 'type' in b && b.type === 'text',
     )
-    if (hasToolUse) return 'running'
+    if (textBlocks.length > 0) {
+      const lastText = textBlocks[textBlocks.length - 1]!.text
+      // Take last non-empty line, truncated to 120 chars
+      const lines = lastText.split('\n').filter(l => l.trim())
+      const lastLine = lines[lines.length - 1] ?? ''
+      detail = lastLine.slice(0, 120)
+    }
   }
 
-  // Check stop_reason via index signature
+  // Check for tool_use blocks
+  if (Array.isArray(content)) {
+    const toolUseBlocks = content.filter(
+      b =>
+        typeof b === 'object' &&
+        b !== null &&
+        'type' in b &&
+        (b as unknown as Record<string, unknown>).type === 'tool_use',
+    )
+
+    if (toolUseBlocks.length > 0) {
+      // Check if any tool is AskUserQuestion (= blocked)
+      const isBlocked = toolUseBlocks.some(
+        b =>
+          (b as unknown as Record<string, unknown>).name === 'AskUserQuestion',
+      )
+      if (isBlocked) {
+        return { state: 'blocked', tempo: 'blocked', detail }
+      }
+      return { state: 'working', tempo: 'active', detail }
+    }
+  }
+
+  // No tool_use — check stop_reason
   const stopReason = (lastMessage.message as Record<string, unknown>)
     ?.stop_reason
-  if (stopReason === 'end_turn') return 'completed'
-  if (stopReason === 'max_tokens') return 'running'
+  if (stopReason === 'end_turn') {
+    return { state: 'done', tempo: 'idle', detail }
+  }
+  if (stopReason === 'max_tokens') {
+    return { state: 'working', tempo: 'active', detail }
+  }
 
-  return 'running'
+  return { state: 'working', tempo: 'active', detail }
 }

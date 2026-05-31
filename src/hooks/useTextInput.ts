@@ -42,6 +42,8 @@ export type UseTextInputProps = {
   onSubmit?: (value: string) => void
   onExit?: () => void
   onExitMessage?: (show: boolean, key?: string) => void
+  onLeftArrowOnEmpty?: () => void
+  onLeftArrowOnEmptyMessage?: (show: boolean) => void
   onHistoryUp?: () => void
   onHistoryDown?: () => void
   onHistoryReset?: () => void
@@ -77,6 +79,8 @@ export function useTextInput({
   onSubmit,
   onExit,
   onExitMessage,
+  onLeftArrowOnEmpty,
+  onLeftArrowOnEmptyMessage,
   onHistoryUp,
   onHistoryDown,
   onHistoryReset,
@@ -376,7 +380,21 @@ export function useTextInput({
       case key.downArrow && !key.shift:
         return downOrHistoryDown
       case key.leftArrow:
-        return () => cursor.left()
+        return () => {
+          if (
+            onLeftArrowOnEmpty &&
+            cursor.offset === 0 &&
+            originalValue === ''
+          ) {
+            if (onLeftArrowOnEmptyMessage) {
+              onLeftArrowOnEmptyMessage(true)
+            } else {
+              onLeftArrowOnEmpty()
+            }
+            return cursor
+          }
+          return cursor.left()
+        }
       case key.rightArrow:
         return () => cursor.right()
       default: {
