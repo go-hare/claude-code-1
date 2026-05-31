@@ -457,6 +457,9 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   // ── Ultrareview (cloud code review via CCR) ─────────────────────
   tengu_review_bughunter_config: { enabled: true }, // /ultrareview command visibility
   tengu_ccr_bundle_seed_enabled: true, // Bundle seed: skip GitHub App check for branch mode
+
+  // ── Computer Use (Chicago MCP) ──────────────────────────────────
+  tengu_malort_pedway: { enabled: true }, // Computer Use MCP (Chicago) — fork-enabled; sub-gates fall back to gates.ts DEFAULTS
 }
 
 /**

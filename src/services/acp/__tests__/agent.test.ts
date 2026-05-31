@@ -324,7 +324,7 @@ describe('AcpAgent', () => {
       expect(res.models?.currentModelId).toBe('claude-sonnet-4-6')
     })
 
-    test('calls queryEngine.setModel with resolved model', async () => {
+    test('calls runtime.setModel with resolved model', async () => {
       const agent = new AcpAgent(makeConn())
       await agent.newSession({ cwd: '/tmp' } as any)
       expect(mockSetModel).toHaveBeenCalledWith('claude-sonnet-4-6')
@@ -598,7 +598,7 @@ describe('AcpAgent', () => {
   })
 
   describe('setSessionModel', () => {
-    test('updates model on queryEngine', async () => {
+    test('updates model on runtime', async () => {
       const agent = new AcpAgent(makeConn())
       const { sessionId } = await agent.newSession({ cwd: '/tmp' } as any)
       mockSetModel.mockClear()
@@ -609,7 +609,7 @@ describe('AcpAgent', () => {
       expect(mockSetModel).toHaveBeenCalledWith('glm-5.1')
     })
 
-    test('passes alias modelId to queryEngine as-is for later resolution', async () => {
+    test('passes alias modelId to runtime as-is for later resolution', async () => {
       const agent = new AcpAgent(makeConn())
       const { sessionId } = await agent.newSession({ cwd: '/tmp' } as any)
       mockSetModel.mockClear()

@@ -4040,7 +4040,7 @@ function runHeadlessStreaming(
           //
           // Fallback (resume before first turn completes — no snapshot yet):
           // rebuild from scratch. buildSideQuestionFallbackParams mirrors
-          // QueryEngine.ts:ask()'s system prompt assembly (including
+          // QueryEngine's system prompt assembly (including
           // --system-prompt / --append-system-prompt) so the rebuilt prefix
           // matches in the common case. May still miss the cache for
           // coordinator mode or memory-mechanics extras — acceptable, the

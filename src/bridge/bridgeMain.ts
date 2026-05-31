@@ -1998,7 +1998,7 @@ async function fetchSessionTitle(
   return session?.title || undefined
 }
 
-export async function bridgeMain(args: string[]): Promise<void> {
+async function bridgeMainImpl(args: string[]): Promise<void> {
   const parsed = parseArgs(args)
 
   if (parsed.help) {
@@ -2807,7 +2807,7 @@ export type HeadlessBridgeOpts = {
  *
  * Resolves cleanly when `signal` aborts and the poll loop tears down.
  */
-export async function runBridgeHeadless(
+async function runBridgeHeadlessImpl(
   opts: HeadlessBridgeOpts,
   signal: AbortSignal,
 ): Promise<void> {
@@ -2959,6 +2959,17 @@ export async function runBridgeHeadless(
     initialSessionId,
     async () => opts.getAccessToken(),
   )
+}
+
+export async function bridgeMain(args: string[]): Promise<void> {
+  return bridgeMainImpl(args)
+}
+
+export async function runBridgeHeadless(
+  opts: HeadlessBridgeOpts,
+  signal: AbortSignal,
+): Promise<void> {
+  return runBridgeHeadlessImpl(opts, signal)
 }
 
 /** BridgeLogger adapter that routes everything to a single line-log fn. */

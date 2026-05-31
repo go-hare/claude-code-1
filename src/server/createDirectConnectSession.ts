@@ -5,9 +5,6 @@ import { jsonStringify } from '../utils/slowOperations.js'
 import type { DirectConnectConfig } from './directConnectManager.js'
 import { connectResponseSchema } from './types.js'
 
-/**
- * Errors thrown by createDirectConnectSession when the connection fails.
- */
 export class DirectConnectError extends Error {
   constructor(message: string) {
     super(message)
@@ -15,24 +12,18 @@ export class DirectConnectError extends Error {
   }
 }
 
-/**
- * Create a session on a direct-connect server.
- *
- * Posts to `${serverUrl}/sessions`, validates the response, and returns
- * a DirectConnectConfig ready for use by the REPL or headless runner.
- *
- * Throws DirectConnectError on network, HTTP, or response-parsing failures.
- */
 export async function createDirectConnectSession({
   serverUrl,
   authToken,
   cwd,
   dangerouslySkipPermissions,
+  unixSocket,
 }: {
   serverUrl: string
   authToken?: string
   cwd: string
   dangerouslySkipPermissions?: boolean
+  unixSocket?: string
 }): Promise<{
   config: DirectConnectConfig
   workDir?: string
@@ -41,7 +32,7 @@ export async function createDirectConnectSession({
     'content-type': 'application/json',
   }
   if (authToken) {
-    headers['authorization'] = `Bearer ${authToken}`
+    headers.authorization = `Bearer ${authToken}`
   }
 
   let resp: Response
@@ -49,6 +40,7 @@ export async function createDirectConnectSession({
     resp = await fetch(`${serverUrl}/sessions`, {
       method: 'POST',
       headers,
+      ...(unixSocket && typeof Bun !== 'undefined' ? { unix: unixSocket } : {}),
       body: jsonStringify({
         cwd,
         ...(dangerouslySkipPermissions && {
@@ -82,6 +74,7 @@ export async function createDirectConnectSession({
       sessionId: data.session_id,
       wsUrl: data.ws_url,
       authToken,
+      unixSocket,
     },
     workDir: data.work_dir,
   }

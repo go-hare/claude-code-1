@@ -1508,19 +1508,12 @@ export function areMcpConfigsAllowedWithEnterpriseMcpConfig(
  * Built-in MCP servers that default to disabled. Unlike user-configured servers
  * (opt-out via disabledMcpServers), these require explicit opt-in via
  * enabledMcpServers. They show up in /mcp as disabled until the user enables them.
+ *
+ * 注意：`computer-use` 已不在此列表——fork 默认开启 Chicago MCP，避免每次重启
+ * 都要在 /mcp 里手动 toggle。如需关闭，把 server 名加到项目 config 的
+ * `disabledMcpServers` 即可（走 opt-out 通道）。
  */
-/* eslint-disable @typescript-eslint/no-require-imports */
-const DEFAULT_DISABLED_BUILTINS: Set<string> = new Set([
-  'mcp-chrome',
-  ...(feature('CHICAGO_MCP')
-    ? [
-        (
-          require('../../utils/computerUse/common.js') as typeof import('../../utils/computerUse/common.js')
-        ).COMPUTER_USE_MCP_SERVER_NAME,
-      ]
-    : []),
-])
-/* eslint-enable @typescript-eslint/no-require-imports */
+const DEFAULT_DISABLED_BUILTINS: Set<string> = new Set(['mcp-chrome'])
 
 function isDefaultDisabledBuiltin(name: string): boolean {
   return DEFAULT_DISABLED_BUILTINS.has(name)

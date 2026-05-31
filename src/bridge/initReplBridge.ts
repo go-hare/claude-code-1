@@ -34,7 +34,6 @@ import {
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { logForDebugging } from '../utils/debug.js'
 import { stripDisplayTagsAllowEmpty } from '../utils/displayTags.js'
-import { errorMessage } from '../utils/errors.js'
 import { getBranch, getRemoteUrl } from '../utils/git.js'
 import { toSDKMessages } from '../utils/messages/mappers.js'
 import {
@@ -509,8 +508,8 @@ export async function initReplBridge(
         baseUrl,
         getAccessToken: getBridgeAccessToken,
       }),
-    archiveSession: sessionId =>
-      archiveBridgeSession(sessionId, {
+    archiveSession: async sessionId => {
+      const ok = await archiveBridgeSession(sessionId, {
         baseUrl,
         getAccessToken: getBridgeAccessToken,
         // gracefulShutdown.ts:407 races runCleanupFunctions against 2s.
@@ -518,15 +517,14 @@ export async function initReplBridge(
         // so archive can't have the full budget. 1.5s matches v2's
         // teardown_archive_timeout_ms default.
         timeoutMs: 1500,
-      }).catch((err: unknown) => {
-        // archiveBridgeSession has no try/catch — 5xx/timeout/network throw
-        // straight through. Previously swallowed silently, making archive
-        // failures BQ-invisible and undiagnosable from debug logs.
+      })
+      if (!ok) {
         logForDebugging(
-          `[bridge:repl] archiveBridgeSession threw: ${errorMessage(err)}`,
+          `[bridge:repl] archiveBridgeSession failed for ${sessionId}`,
           { level: 'error' },
         )
-      }),
+      }
+    },
     // getCurrentTitle is read on reconnect-after-env-lost to re-title the new
     // session. /rename writes to session storage; onUserMessage mutates
     // `title` directly — both paths are picked up here.

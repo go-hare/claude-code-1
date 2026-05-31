@@ -33,7 +33,16 @@ import { getRemoteSessionUrl } from './constants/product.js';
 import { getSystemContext, getUserContext } from './context.js';
 import { init, initializeTelemetryAfterTrust } from './entrypoints/init.js';
 import { addToHistory } from './history.js';
+import { registerCliHostCommands } from './cli/registerCliHostCommands.js';
 import type { Root } from '@anthropic/ink';
+import { preloadCommandAssembly, primeBundledCommandSources, resolveCommandAssembly } from './cli/commandAssembly.js';
+import { determineMainLaunchMode } from './cli/modeDispatch.js';
+import {
+  determineSetupTrigger,
+  runSessionStartupSideEffects,
+  runStartupPrefetches,
+  runVersionedPluginStartup,
+} from './cli/startupAssembly.js';
 import { launchRepl } from './replLauncher.js';
 import {
   hasGrowthBookEnvOverride,
@@ -141,6 +150,8 @@ import {
   setIsRemoteMode,
   setMainLoopModelOverride,
   setMainThreadAgentType,
+  setSdkBetas,
+  setSessionPersistenceDisabled,
   setTeleportedSessionInfo,
 } from './bootstrap/state.js';
 import { filterCommandsForRemoteMode, getCommands } from './commands.js';
@@ -162,16 +173,16 @@ import {
   renderAndRun,
   showSetupScreens,
 } from './interactiveHelpers.js';
-import { initBuiltinPlugins } from './plugins/bundled/index.js';
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { checkQuotaStatus } from './services/claudeAiLimits.js';
-import { getMcpToolsCommandsAndResources, prefetchAllMcpResources } from './services/mcp/client.js';
+import { clearServerCache, getMcpToolsCommandsAndResources, prefetchAllMcpResources } from './services/mcp/client.js';
+import { dedupClaudeAiMcpServers, getMcpServerSignature } from './services/mcp/config.js';
+import { excludeCommandsByServer, excludeResourcesByServer } from './services/mcp/utils.js';
 import { VALID_INSTALLABLE_SCOPES, VALID_UPDATE_SCOPES } from './services/plugins/pluginCliCommands.js';
 import { initBundledSkills } from './skills/bundled/index.js';
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js';
 import {
   getActiveAgentsFromList,
-  getAgentDefinitionsWithOverrides,
   isBuiltInAgent,
   isCustomAgent,
   parseAgentsFromJson,
@@ -253,18 +264,14 @@ import { registerMcpAddCommand } from 'src/commands/mcp/addCommand.js';
 import { registerMcpXaaIdpCommand } from 'src/commands/mcp/xaaIdpCommand.js';
 import { logPermissionContextForAnts } from 'src/services/internalLogging.js';
 import { fetchClaudeAIMcpConfigsIfEligible } from 'src/services/mcp/claudeai.js';
-import { clearServerCache } from 'src/services/mcp/client.js';
 import {
   areMcpConfigsAllowedWithEnterpriseMcpConfig,
-  dedupClaudeAiMcpServers,
   doesEnterpriseMcpConfigExist,
   filterMcpServersByPolicy,
   getClaudeCodeMcpConfigs,
-  getMcpServerSignature,
   parseMcpConfig,
   parseMcpConfigFromFilePath,
 } from 'src/services/mcp/config.js';
-import { excludeCommandsByServer, excludeResourcesByServer } from 'src/services/mcp/utils.js';
 import { isXaaEnabled } from 'src/services/mcp/xaaIdpLogin.js';
 import { getRelevantTips } from 'src/services/tips/tipRegistry.js';
 import { logContextMetrics } from 'src/utils/api.js';
@@ -305,9 +312,7 @@ import {
   setKairosActive,
   setOriginalCwd,
   setQuestionPreviewFormat,
-  setSdkBetas,
   setSessionBypassPermissionsMode,
-  setSessionPersistenceDisabled,
   setSessionSource,
   setUserMsgOptIn,
   switchSession,
@@ -339,9 +344,9 @@ import { type AppState, getDefaultAppState, IDLE_SPECULATION_STATE } from './sta
 import { onChangeAppState } from './state/onChangeAppState.js';
 import { createStore } from './state/store.js';
 import { asSessionId } from './types/ids.js';
-import { filterAllowedSdkBetas } from './utils/betas.js';
 import { isInBundledMode, isRunningWithBun } from './utils/bundledMode.js';
 import { logForDiagnosticsNoPII } from './utils/diagLogs.js';
+import { filterAllowedSdkBetas } from './utils/betas.js';
 import { filterExistingPaths, getKnownPathsForRepo } from './utils/githubRepoPathMapping.js';
 import { clearPluginCache, loadAllPluginsCacheOnly } from './utils/plugins/pluginLoader.js';
 import { migrateChangelogFromConfig } from './utils/releaseNotes.js';
@@ -419,7 +424,7 @@ function _isBeingDebugged() {
  * Per-session skill/plugin telemetry. Called from both the interactive path
  * and the headless -p path (before runHeadless) — both go through
  * main.tsx but branch before the interactive startup path, so it needs two
- * call sites here rather than one here + one in QueryEngine.
+ * call sites here rather than one here plus one in the execution runtime.
  */
 function logSessionTelemetry(): void {
   const model = parseUserSpecifiedModel(getInitialMainLoopModel() ?? getDefaultMainLoopModel());
@@ -2395,14 +2400,7 @@ async function run(): Promise<CommanderCommand> {
       // since --worktree makes setup() process.chdir() (setup.ts:203), and
       // commands/agents need the post-chdir cwd.
       const preSetupCwd = getCwd();
-      // Register bundled skills/plugins before kicking getCommands() — they're
-      // pure in-memory array pushes (<1ms, zero I/O) that getBundledSkills()
-      // reads synchronously. Previously ran inside setup() after ~20ms of
-      // await points, so the parallel getCommands() memoized an empty list.
-      if (process.env.CLAUDE_CODE_ENTRYPOINT !== 'local-agent') {
-        initBuiltinPlugins();
-        initBundledSkills();
-      }
+      primeBundledCommandSources(process.env.CLAUDE_CODE_ENTRYPOINT);
       const setupPromise = setup(
         preSetupCwd,
         permissionMode,
@@ -2414,12 +2412,7 @@ async function run(): Promise<CommanderCommand> {
         worktreePRNumber,
         messagingSocketPath,
       );
-      const commandsPromise = worktreeEnabled ? null : getCommands(preSetupCwd);
-      const agentDefsPromise = worktreeEnabled ? null : getAgentDefinitionsWithOverrides(preSetupCwd);
-      // Suppress transient unhandledRejection if these reject during the
-      // ~28ms setupPromise await before Promise.all joins them below.
-      commandsPromise?.catch(() => {});
-      agentDefsPromise?.catch(() => {});
+      const preloadedCommandAssembly = preloadCommandAssembly(preSetupCwd, worktreeEnabled);
       await setupPromise;
       logForDebugging(`[STARTUP] setup() completed in ${Date.now() - setupStart}ms`);
       profileCheckpoint('action_after_setup');
@@ -2520,10 +2513,10 @@ async function run(): Promise<CommanderCommand> {
       const commandsStart = Date.now();
       // Join the promises kicked before setup() (or start fresh if
       // worktreeEnabled gated the early kick). Both memoized by cwd.
-      const [commands, agentDefinitionsResult] = await Promise.all([
-        commandsPromise ?? getCommands(currentCwd),
-        agentDefsPromise ?? getAgentDefinitionsWithOverrides(currentCwd),
-      ]);
+      const { commands, agentDefinitionsResult } = await resolveCommandAssembly({
+        currentCwd,
+        preloaded: preloadedCommandAssembly,
+      });
       logForDebugging(`[STARTUP] Commands and agents loaded in ${Date.now() - commandsStart}ms`);
       profileCheckpoint('action_commands_loaded');
 
@@ -2887,46 +2880,27 @@ async function run(): Promise<CommanderCommand> {
       // mode doesn't apply to the Agent SDK anyway (see getFastModeUnavailableReason).
       const bgRefreshThrottleMs = getFeatureValue_CACHED_MAY_BE_STALE('tengu_cicada_nap_ms', 0);
       const lastPrefetched = getGlobalConfig().startupPrefetchedAt ?? 0;
-      const skipStartupPrefetches =
-        isBareMode() || (bgRefreshThrottleMs > 0 && Date.now() - lastPrefetched < bgRefreshThrottleMs);
-
-      if (!skipStartupPrefetches) {
-        const lastPrefetchedInfo =
-          lastPrefetched > 0 ? ` last ran ${Math.round((Date.now() - lastPrefetched) / 1000)}s ago` : '';
-        logForDebugging(`Starting background startup prefetches${lastPrefetchedInfo}`);
-
-        checkQuotaStatus().catch(error => logError(error));
-
-        // Fetch bootstrap data from the server and update all cache values.
-        void fetchBootstrapData();
-
-        // TODO: Consolidate other prefetches into a single bootstrap request.
-        void prefetchPassesEligibility();
-        if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_miraculo_the_bard', false)) {
-          void prefetchFastModeStatus();
-        } else {
-          // Kill switch skips the network call, not org-policy enforcement.
-          // Resolve from cache so orgStatus doesn't stay 'pending' (which
-          // getFastModeUnavailableReason treats as permissive).
-          resolveFastModeStatusFromCache();
-        }
-        if (bgRefreshThrottleMs > 0) {
+      runStartupPrefetches({
+        bareMode: isBareMode(),
+        isNonInteractiveSession,
+        bgRefreshThrottleMs,
+        lastPrefetched,
+        fastModeKillSwitchEnabled: getFeatureValue_CACHED_MAY_BE_STALE('tengu_miraculo_the_bard', false),
+        logForDebugging,
+        checkQuotaStatus,
+        onQuotaError: logError,
+        fetchBootstrapData,
+        prefetchPassesEligibility,
+        prefetchFastModeStatus,
+        resolveFastModeStatusFromCache,
+        saveStartupPrefetchedAt: timestamp => {
           saveGlobalConfig(current => ({
             ...current,
-            startupPrefetchedAt: Date.now(),
+            startupPrefetchedAt: timestamp,
           }));
-        }
-      } else {
-        logForDebugging(
-          `Skipping startup prefetches, last ran ${Math.round((Date.now() - lastPrefetched) / 1000)}s ago`,
-        );
-        // Resolve fast mode org status from cache (no network)
-        resolveFastModeStatusFromCache();
-      }
-
-      if (!isNonInteractiveSession) {
-        void refreshExampleCommands(); // Pre-fetch example commands (runs git log, no API call)
-      }
+        },
+        refreshExampleCommands,
+      });
 
       // Resolve MCP configs (started early, overlaps with setup/trust dialog work)
       const { servers: existingMcpConfigs } = await mcpConfigPromise;
@@ -3069,29 +3043,23 @@ async function run(): Promise<CommanderCommand> {
           feature('KAIROS') && kairosEnabled ? assistantModule?.getAssistantActivationPath() : undefined,
       });
 
-      // Log context metrics once at initialization
-      void logContextMetrics(regularMcpConfigs, toolPermissionContext);
-
-      void logPermissionContextForAnts(null, 'initialization');
-
-      logManagedSettings();
-
-      // Register PID file for concurrent-session detection (~/.claude/sessions/)
-      // and fire multi-clauding telemetry. Lives here (not init.ts) so only the
-      // REPL path registers — not subcommands like `claude doctor`. Chained:
-      // count must run after register's write completes or it misses our own file.
-      void registerSession().then(registered => {
-        if (!registered) return;
-        if (sessionNameArg) {
-          void updateSessionName(sessionNameArg);
-        }
-        void countConcurrentSessions().then(count => {
-          if (count >= 2) {
-            logEvent('tengu_concurrent_sessions', {
-              num_sessions: count,
-            });
-          }
-        });
+      runSessionStartupSideEffects({
+        logContextMetrics: () => {
+          void logContextMetrics(regularMcpConfigs, toolPermissionContext);
+        },
+        logPermissionContext: () => {
+          void logPermissionContextForAnts(null, 'initialization');
+        },
+        logManagedSettings,
+        sessionNameArg,
+        registerSession,
+        updateSessionName,
+        countConcurrentSessions,
+        onConcurrentSessions: count => {
+          logEvent('tengu_concurrent_sessions', {
+            num_sessions: count,
+          });
+        },
       });
 
       // Initialize versioned plugins system (triggers V1→V2 migration if
@@ -3105,24 +3073,20 @@ async function run(): Promise<CommanderCommand> {
       // are install/upgrade bookkeeping that scripted calls don't need —
       // the next interactive session will reconcile. The await here was
       // blocking -p on a marketplace round-trip.
-      if (isBareMode()) {
-        // skip — no-op
-      } else if (isNonInteractiveSession) {
-        // In headless mode, await to ensure plugin sync completes before CLI exits
-        await initializeVersionedPlugins();
-        profileCheckpoint('action_after_plugins_init');
-        void cleanupOrphanedPluginVersionsInBackground().then(() => getGlobExclusionsForPluginCache());
-      } else {
-        // In interactive mode, fire-and-forget — this is purely bookkeeping
-        // that doesn't affect runtime behavior of the current session
-        void initializeVersionedPlugins().then(async () => {
-          profileCheckpoint('action_after_plugins_init');
-          await cleanupOrphanedPluginVersionsInBackground();
+      await runVersionedPluginStartup({
+        bareMode: isBareMode(),
+        isNonInteractiveSession,
+        initializeVersionedPlugins,
+        cleanupOrphanedPluginVersionsInBackground,
+        warmGlobExclusions: () => {
           void getGlobExclusionsForPluginCache();
-        });
-      }
+        },
+        onPluginsInitComplete: () => {
+          profileCheckpoint('action_after_plugins_init');
+        },
+      });
 
-      const setupTrigger = initOnly || init ? 'init' : maintenance ? 'maintenance' : null;
+      const setupTrigger = determineSetupTrigger({ initOnly, init, maintenance });
       if (initOnly) {
         applyConfigEnvironmentVariables();
         await processSetupHooks('init', { forceSyncExecution: true });
@@ -3670,8 +3634,18 @@ async function run(): Promise<CommanderCommand> {
         cliAgents,
         initialState,
       };
+      const launchMode = determineMainLaunchMode({
+        isNonInteractiveSession,
+        continueRequested: !!options.continue,
+        hasPendingDirectConnect: feature('DIRECT_CONNECT') ? !!_pendingConnect?.url : false,
+        hasPendingSsh: feature('SSH_REMOTE') ? !!_pendingSSH?.host : false,
+        hasPendingAssistantChat: feature('KAIROS')
+          ? !!_pendingAssistantChat && !!(_pendingAssistantChat.sessionId || _pendingAssistantChat.discover)
+          : false,
+        hasResumeLikeRequest: !!(options.resume || options.fromPr || teleport || remote !== null),
+      });
 
-      if (options.continue) {
+      if (launchMode === 'continue') {
         // Continue the most recent conversation directly
         let resumeSucceeded = false;
         try {
@@ -3739,7 +3713,7 @@ async function run(): Promise<CommanderCommand> {
           logError(error);
           process.exit(1);
         }
-      } else if (feature('DIRECT_CONNECT') && _pendingConnect?.url) {
+      } else if (launchMode === 'direct-connect' && feature('DIRECT_CONNECT') && _pendingConnect?.url) {
         // `claude connect <url>` — full interactive TUI connected to a remote server
         let directConnectConfig;
         try {
@@ -3784,7 +3758,7 @@ async function run(): Promise<CommanderCommand> {
           renderAndRun,
         );
         return;
-      } else if (feature('SSH_REMOTE') && _pendingSSH?.host) {
+      } else if (launchMode === 'ssh-remote' && feature('SSH_REMOTE') && _pendingSSH?.host) {
         // `claude ssh <host> [dir]` — probe remote, deploy binary if needed,
         // spawn ssh with unix-socket -R forward to a local auth proxy, hand
         // the REPL an SSHSession. Tools run remotely, UI renders locally.
@@ -3863,6 +3837,7 @@ async function run(): Promise<CommanderCommand> {
         );
         return;
       } else if (
+        launchMode === 'assistant-chat' &&
         feature('KAIROS') &&
         _pendingAssistantChat &&
         (_pendingAssistantChat.sessionId || _pendingAssistantChat.discover)
@@ -3988,7 +3963,7 @@ async function run(): Promise<CommanderCommand> {
           renderAndRun,
         );
         return;
-      } else if (options.resume || options.fromPr || teleport || remote !== null) {
+      } else if (launchMode === 'resume-like') {
         // Handle resume flow - from file (ant-only), session ID, or interactive selector
 
         // Clear stale caches before resuming to ensure fresh file/skill discovery
