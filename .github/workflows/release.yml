@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 2.6.7)"
+        required: true
+      dry-run:
+        description: "Dry run (no actual publish)"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - platform: darwin-arm64
+            os: macos-14
+          - platform: darwin-x64
+            os: macos-13
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+          - platform: linux-x64-musl
+            os: ubuntu-latest
+          - platform: linux-arm64-musl
+            os: ubuntu-24.04-arm
+          - platform: win32-x64
+            os: windows-latest
+          - platform: win32-arm64
+            os: windows-latest
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build binary
+        run: bun ./scripts/publish.ts --build-only --platform ${{ matrix.platform }}
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: packages/@go-hare/claude-code-${{ matrix.platform }}/claude*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      - name: Place binaries in platform packages
+        run: |
+          for dir in artifacts/binary-*; do
+            platform="${dir#artifacts/binary-}"
+            pkg_dir="packages/@go-hare/claude-code-${platform}"
+            cp "$dir"/claude* "$pkg_dir/"
+            chmod +x "$pkg_dir"/claude* 2>/dev/null || true
+            echo "Placed binary for $platform"
+          done
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          DRY_RUN=${{ inputs.dry-run == true && '--dry-run' || '' }}
+          for pkg_dir in packages/@go-hare/claude-code-*/; do
+            echo "Publishing $pkg_dir..."
+            cd "$pkg_dir"
+            npm publish --access public $DRY_RUN
+            cd "$GITHUB_WORKSPACE"
+          done
+      - name: Publish main wrapper package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          DRY_RUN=${{ inputs.dry-run == true && '--dry-run' || '' }}
+          npm publish --access public $DRY_RUN

@@ -19,11 +19,17 @@ export function getMacroDefines(): Record<string, string> {
   return {
     'MACRO.VERSION': JSON.stringify(pkg.version),
     'MACRO.BUILD_TIME': JSON.stringify(new Date().toISOString()),
-    'MACRO.FEEDBACK_CHANNEL': JSON.stringify('https://github.com/go-hare/claude-code-1/issues'),
-    'MACRO.ISSUES_EXPLAINER': JSON.stringify('report the issue at https://github.com/go-hare/claude-code-1/issues'),
+    'MACRO.FEEDBACK_CHANNEL': JSON.stringify(
+      'https://github.com/go-hare/claude-code-1/issues',
+    ),
+    'MACRO.ISSUES_EXPLAINER': JSON.stringify(
+      'report the issue at https://github.com/go-hare/claude-code-1/issues',
+    ),
     'MACRO.NATIVE_PACKAGE_URL': JSON.stringify('@go-hare/claude-code'),
     'MACRO.PACKAGE_URL': JSON.stringify('@go-hare/claude-code'),
-    'MACRO.VERSION_CHANGELOG': JSON.stringify('https://github.com/go-hare/claude-code-1/blob/main/CHANGELOG.md'),
+    'MACRO.VERSION_CHANGELOG': JSON.stringify(
+      'https://github.com/go-hare/claude-code-1/blob/main/CHANGELOG.md',
+    ),
   }
 }
 

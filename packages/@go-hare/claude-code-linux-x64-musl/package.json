@@ -1,0 +1,23 @@
+{
+  "name": "@go-hare/claude-code-linux-x64-musl",
+  "version": "2.6.8",
+  "description": "Platform-specific binary for @go-hare/claude-code (Linux x64 musl)",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "musl"
+  ],
+  "files": [
+    "claude"
+  ],
+  "preferUnplugged": true,
+  "license": "SEE LICENSE IN README.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/go-hare/claude-code-1.git"
+  }
+}
