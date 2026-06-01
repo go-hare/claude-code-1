@@ -3,10 +3,11 @@
  * Publish script — builds and publishes @go-hare/claude-code packages.
  *
  * Usage:
- *   bun run scripts/publish.ts                    # build current platform + publish all
+ *   bun run scripts/publish.ts                    # build current platform + publish platform pkg
  *   bun run scripts/publish.ts --build-only       # build binary only (no publish)
  *   bun run scripts/publish.ts --publish-only     # publish pre-built packages
  *   bun run scripts/publish.ts --platform darwin-arm64  # target specific platform
+ *   bun run scripts/publish.ts --with-main        # also publish the main @go-hare/claude-code pkg
  *   bun run scripts/publish.ts --dry-run          # npm publish --dry-run
  */
 import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
@@ -19,6 +20,7 @@ const args = process.argv.slice(2)
 const buildOnly = args.includes('--build-only')
 const publishOnly = args.includes('--publish-only')
 const dryRun = args.includes('--dry-run')
+const withMain = args.includes('--with-main')
 const platformIdx = args.indexOf('--platform')
 const platformArg =
   platformIdx >= 0 ? args[platformIdx + 1] : process.env.TARGET_PLATFORM
@@ -175,7 +177,7 @@ function main() {
     }
     publishPkg(join(ROOT, info.pkgDir))
 
-    if (!platformArg) {
+    if (withMain) {
       publishPkg(ROOT)
     }
   }
