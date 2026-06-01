@@ -43,10 +43,19 @@ const XTERM_CTRL_B = Buffer.from('\x1B[27;5;98~', 'ascii')
 
 /** Detach sequence to scan for in output */
 const DETACH_SEQ = Buffer.from('\x1B_cc-daemon-detach\x1B\\', 'ascii')
+/** Plain-text detach marker — ConPTY on Windows strips APC wrappers (\x1B_ and \x1B\\) */
+const DETACH_SEQ_PLAIN = Buffer.from('cc-daemon-detach', 'ascii')
 /** Detach message prefix */
 const DETACH_MSG_PREFIX = '\x1B_cc-detach-msg;'
+/** Plain-text detach message prefix (Windows ConPTY strips APC) */
+const DETACH_MSG_PREFIX_PLAIN = 'cc-detach-msg;'
 /** String Terminator */
 const ST = '\x1B\\'
+
+/** Show cursor sequence — filtered on Windows to prevent flicker (official: Wh) */
+const SHOW_CURSOR_SEQ = Buffer.from('\x1B[?25h', 'ascii')
+/** Hide cursor sequence — sent on Windows after ack (official: op) */
+const HIDE_CURSOR = '\x1B[?25l'
 
 /** Ack timeout (10 seconds) */
 const ACK_TIMEOUT_MS = 10_000
@@ -176,6 +185,10 @@ export async function attachToSession(
   let via: string | undefined
   let tempo: string | undefined
 
+  // Windows: filter show-cursor sequences from PTY output to prevent flicker
+  const isWindows = process.platform === 'win32'
+  let cursorFilterPending = Buffer.alloc(0)
+
   // Result promise
   let resolveResult: (result: AttachResult) => void
   const resultPromise = new Promise<AttachResult>(r => {
@@ -188,7 +201,16 @@ export async function attachToSession(
 
     // Restore terminal state
     if (ackReceived) {
-      const restoreModes = decModes.snapshot().map(decReset).reverse().join('')
+      // Reset tracked DEC modes — but skip 1049 (alt screen) when alreadyInAlt,
+      // because the caller owns the alt screen lifecycle
+      let modes = decModes.snapshot()
+      if (
+        opts.alreadyInAlt ||
+        (outcome === 'disconnected' && opts.holdScreenOnDisconnect)
+      ) {
+        modes = modes.filter(m => m !== 1049)
+      }
+      const restoreModes = modes.map(decReset).reverse().join('')
       const restore =
         opts.alreadyInAlt ||
         (outcome === 'disconnected' && opts.holdScreenOnDisconnect)
@@ -271,51 +293,128 @@ export async function attachToSession(
   // --- Output processing ---
   let pendingDetach = Buffer.alloc(0) // Partial detach sequence at end of chunk
 
+  /**
+   * Windows: strip show-cursor (\x1B[?25h) sequences from PTY output.
+   * Official: function s(t) — prevents cursor flicker on Windows Terminal.
+   * Handles partial sequences spanning chunk boundaries.
+   */
+  function stripShowCursor(data: Buffer): Buffer {
+    if (!isWindows) return data
+    const hasPending = cursorFilterPending.length > 0
+    const buf = hasPending ? Buffer.concat([cursorFilterPending, data]) : data
+    if (hasPending) cursorFilterPending = Buffer.alloc(0)
+
+    let idx = buf.indexOf(SHOW_CURSOR_SEQ)
+    if (idx < 0) {
+      // No full match — check for partial match at end
+      const partial = trailingPrefixLength(buf, SHOW_CURSOR_SEQ)
+      if (partial === 0) return buf
+      cursorFilterPending = Buffer.from(buf.subarray(buf.length - partial))
+      return buf.subarray(0, buf.length - partial)
+    }
+
+    // Strip all occurrences
+    const parts: Buffer[] = []
+    let start = 0
+    while (idx >= 0) {
+      if (idx > start) parts.push(buf.subarray(start, idx))
+      start = idx + SHOW_CURSOR_SEQ.length
+      idx = buf.indexOf(SHOW_CURSOR_SEQ, start)
+    }
+    const tail = buf.subarray(start)
+    const partial = trailingPrefixLength(tail, SHOW_CURSOR_SEQ)
+    if (partial > 0) {
+      cursorFilterPending = Buffer.from(tail.subarray(tail.length - partial))
+      if (tail.length > partial)
+        parts.push(tail.subarray(0, tail.length - partial))
+    } else if (tail.length > 0) {
+      parts.push(tail)
+    }
+    if (parts.length === 0) return Buffer.alloc(0)
+    if (parts.length === 1) return parts[0]!
+    return Buffer.concat(parts)
+  }
+
+  function writeToStdout(data: Buffer): void {
+    if (data.length === 0) return
+    const text = data.toString('utf8')
+    stdout.write(text)
+    decModes.feed(text)
+  }
+
   function processOutput(data: Buffer): void {
     // Check for detach sequence in output
     const combined =
       pendingDetach.length > 0 ? Buffer.concat([pendingDetach, data]) : data
-    const detachIdx = combined.indexOf(DETACH_SEQ)
+
+    // Try full ESC-wrapped sequence first, then plain-text fallback (Windows ConPTY strips APC)
+    let detachIdx = combined.indexOf(DETACH_SEQ)
+    let usedPlain = false
+    if (detachIdx < 0 && isWindows) {
+      detachIdx = combined.indexOf(DETACH_SEQ_PLAIN)
+      usedPlain = detachIdx >= 0
+    }
 
     if (detachIdx >= 0) {
-      // Write everything before the detach sequence
-      const before = combined.subarray(0, detachIdx)
-      if (before.length > 0) {
-        const text = before.toString('utf8')
-        stdout.write(text)
-        decModes.feed(text)
-      }
-      // Extract detach message if present
       const msg = extractDetachMsg(combined.subarray(0, detachIdx))
+      // Don't write the detach-msg or detach sequence to terminal
+      const beforeAll = combined.subarray(0, detachIdx)
+      if (beforeAll.length > 0) {
+        const msgPrefix = Buffer.from(
+          usedPlain ? DETACH_MSG_PREFIX_PLAIN : DETACH_MSG_PREFIX,
+          'ascii',
+        )
+        const apcStart = beforeAll.indexOf(msgPrefix)
+        if (apcStart > 0) {
+          writeToStdout(beforeAll.subarray(0, apcStart))
+        } else if (apcStart < 0) {
+          writeToStdout(beforeAll)
+        }
+      }
       pendingDetach = Buffer.alloc(0)
       return finish('detached', msg)
     }
 
     // Check for partial detach sequence at end
-    const trailing = trailingPrefixLength(combined, DETACH_SEQ)
+    const trailing = isWindows
+      ? Math.max(
+          trailingPrefixLength(combined, DETACH_SEQ),
+          trailingPrefixLength(combined, DETACH_SEQ_PLAIN),
+        )
+      : trailingPrefixLength(combined, DETACH_SEQ)
     if (trailing > 0) {
       pendingDetach = Buffer.from(combined.subarray(combined.length - trailing))
       const toWrite = combined.subarray(0, combined.length - trailing)
-      if (toWrite.length > 0) {
-        const text = toWrite.toString('utf8')
-        stdout.write(text)
-        decModes.feed(text)
-      }
+      if (toWrite.length > 0) writeToStdout(toWrite)
     } else {
       pendingDetach = Buffer.alloc(0)
-      const text = combined.toString('utf8')
-      stdout.write(text)
-      decModes.feed(text)
+      writeToStdout(combined)
     }
   }
 
   function extractDetachMsg(data: Buffer): string | undefined {
     const str = data.toString('utf8')
-    const prefixIdx = str.lastIndexOf(DETACH_MSG_PREFIX)
+    // Try ESC-wrapped prefix first, then plain-text (Windows)
+    let prefixIdx = str.lastIndexOf(DETACH_MSG_PREFIX)
+    let prefix = DETACH_MSG_PREFIX
+    if (prefixIdx < 0) {
+      prefixIdx = str.lastIndexOf(DETACH_MSG_PREFIX_PLAIN)
+      prefix = DETACH_MSG_PREFIX_PLAIN
+    }
     if (prefixIdx < 0) return undefined
-    const msgStart = prefixIdx + DETACH_MSG_PREFIX.length
-    const stIdx = str.indexOf(ST, msgStart)
-    if (stIdx < 0) return undefined
+    const msgStart = prefixIdx + prefix.length
+    // Try ST first, then plain-text end markers
+    let stIdx = str.indexOf(ST, msgStart)
+    if (stIdx < 0) {
+      // On Windows, ConPTY strips ST — look for the detach marker as end boundary
+      const plainEnd = str.indexOf('cc-daemon-detach', msgStart)
+      if (plainEnd >= 0) {
+        // Message ends just before the detach marker (minus any separator like '.')
+        const raw = str.slice(msgStart, plainEnd)
+        return raw.replace(/\.?$/, '').trim() || undefined
+      }
+      return str.slice(msgStart).trim() || undefined
+    }
     return str.slice(msgStart, stIdx)
   }
 
@@ -436,8 +535,13 @@ export async function attachToSession(
       // Already in alt screen (FleetView handed off) — set modes + clear for fresh repaint
       stdout.write('\x1B[2J\x1B[H' + modeSeq)
     } else {
+      // On Windows, hide cursor to prevent flicker (official: b ? op : '')
+      const hideCursor = isWindows ? HIDE_CURSOR : ''
       stdout.write(
-        enterAltScreen() + modeSeq + '\n  \x1B[2mAttaching\u2026\x1B[0m\n',
+        enterAltScreen() +
+          modeSeq +
+          hideCursor +
+          '\n  \x1B[2mAttaching\u2026\x1B[0m\n',
       )
     }
 

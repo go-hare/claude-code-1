@@ -43,6 +43,7 @@ const NEWLINE = { type: 'stdout', content: '\n' } as const
 
 export class LogUpdate {
   private state: State
+  private forceReset = false
 
   constructor(private readonly options: Options) {
     this.state = {
@@ -61,6 +62,10 @@ export class LogUpdate {
   // Called when process resumes from suspension (SIGCONT) to prevent clobbering terminal content
   reset(): void {
     this.state.previousOutput = ''
+  }
+
+  forceFullReset(): void {
+    this.forceReset = true
   }
 
   private renderFullFrame(frame: Frame): Diff {
@@ -129,6 +134,15 @@ export class LogUpdate {
   ): Diff {
     if (!this.options.isTTY) {
       return this.renderFullFrame(next)
+    }
+
+    if (this.forceReset) {
+      this.forceReset = false
+      return fullResetSequence_CAUSES_FLICKER(
+        next,
+        'clear',
+        this.options.stylePool,
+      )
     }
 
     const startTime = performance.now()

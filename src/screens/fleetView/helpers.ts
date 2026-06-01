@@ -150,14 +150,20 @@ export function sortSessions(sessions: SessionEntry[]): SessionEntry[] {
 
 /**
  * Generate a display label for a session.
- * Upstream: JZ6 (jobLabel)
+ * Upstream: DC6 (jobLabel)
+ * Note: The heavy lifting (intent truncation) is done in AgentView's
+ * computeJobLabel when building SessionEntry.name.
  */
 export function jobLabel(session: SessionEntry): string {
   if (session.name) {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is intentional
-    return session.name.replace(/[\x00-\x1f]/g, '').trim()
+    return (
+      session.name
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is intentional
+        .replace(/[\x00-\x1f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
   }
-  // Use short session ID (first 8 chars) as fallback, matching official behavior
   if (session.sessionId) {
     return session.sessionId.slice(0, 8)
   }

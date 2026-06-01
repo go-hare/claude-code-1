@@ -49,12 +49,25 @@ export async function launchRepl(
   );
 
   root.render(element);
+
+  // Start rendezvous server for bg sessions (daemon ↔ session communication)
+  if (process.env.CLAUDE_BG_RENDEZVOUS_SOCK) {
+    const { startRendezvousServer } = await import('./daemon/rendezvousServer.js');
+    await startRendezvousServer();
+  }
+
   const { startDeferredPrefetches } = await import('./main.js');
   startDeferredPrefetches();
   await root.waitUntilExit();
 
   if (switchToAgents) {
     return 'agents';
+  }
+
+  // Stop rendezvous server before shutdown
+  if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') {
+    const { stopRendezvousServer } = await import('./daemon/rendezvousServer.js');
+    stopRendezvousServer();
   }
 
   const { gracefulShutdown } = await import('./utils/gracefulShutdown.js');

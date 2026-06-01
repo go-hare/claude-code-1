@@ -897,6 +897,12 @@ export default class Ink {
 
   private _handoffRawMode = false;
 
+  /** Prevent unmount from exiting alt screen (caller will reuse it). */
+  handoffAltScreen(): void {
+    this.isPaused = true;
+    this.altScreenActive = false;
+  }
+
   resume(): void {
     this.isPaused = false;
     this.onRender();
@@ -937,19 +943,29 @@ export default class Ink {
    * was cleared externally (macOS Cmd+K) and Ink's diff engine thinks
    * unchanged cells don't need repainting. Scrollback is preserved.
    */
-  forceRedraw(): void {
-    if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) return;
-    this.options.stdout.write(ERASE_SCREEN + CURSOR_HOME);
+  forceRedraw(): boolean {
+    if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) return false;
+    if (this.hasStaleTerminalSize()) {
+      this.handleResize();
+      return true;
+    }
     if (this.altScreenActive) {
+      this.needsEraseBeforePaint = true;
+      this.displayCursor = null;
       this.resetFramesForAltScreen();
     } else {
-      this.repaint();
-      // repaint() resets frontFrame to 0×0. Without this flag the next
-      // frame's blit optimization copies from that empty screen and the
-      // diff sees no content. onRender resets the flag at frame end.
+      this.log.forceFullReset();
       this.prevFrameContaminated = true;
     }
     this.onRender();
+    return true;
+  }
+
+  private hasStaleTerminalSize(): boolean {
+    return (
+      (this.options.stdout.columns || 80) !== this.terminalColumns ||
+      (this.options.stdout.rows || 24) !== this.terminalRows
+    );
   }
 
   /**

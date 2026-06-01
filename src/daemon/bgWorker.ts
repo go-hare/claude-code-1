@@ -735,10 +735,10 @@ export function getDaemonConfigDir(): string {
   return join(getClaudeConfigHomeDir(), 'daemon')
 }
 
-/** Windows named pipe helper */
+/** Windows named pipe helper — Bun 1.x has a 42-char path limit (Node.js doesn't) */
 function getNamedPipe(name: string): string {
   const pipeKey = getPipeKey()
-  return `\\\\.\\pipe\\cc-daemon-${pipeKey}-${name}`
+  return `\\\\.\\pipe\\ccd-${pipeKey}-${name}`
 }
 
 let _pipeKey: string | undefined
@@ -1546,7 +1546,11 @@ export class BgWorker {
   resize(cols: number, rows: number): void {
     this.ptyCols = cols
     this.ptyRows = rows
-    if (process.platform === 'win32' && !this.workerReady) {
+    if (
+      process.platform === 'win32' &&
+      !this.workerReady &&
+      this.attachers.size === 0
+    ) {
       this.resizeDeferred = true
       return
     }
@@ -2372,6 +2376,8 @@ export class BgWorker {
         if (this.attachers.size > 0) {
           const last = [...this.attachers.values()].at(-1)!
           this.sendAttacherCaps(last.caps ?? null)
+          // RV just connected and attacher is waiting — trigger repaint immediately
+          this.rv?.send({ type: 'repaint' })
         } else {
           this.sendAttacherCaps(null)
         }

@@ -16,13 +16,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
-import { wrappedRender as render, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
+import { createRoot, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
+import type { Root } from '@anthropic/ink';
 import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
 import { submitDispatch } from '../daemon/bgManager.js';
 import { listAllJobs, removeJob, type BgJobState } from '../daemon/jobState.js';
 import { VoiceProvider } from '../context/voice.js';
+import { getPlatform } from '../utils/platform.js';
 import {
   deriveBand,
   deriveActivity,
@@ -70,6 +72,32 @@ const EMPTY_STATE_EXAMPLES =
   'Try: paste a PR or issue URL \u00b7 "investigate why test/auth.test.ts is flaky" \u00b7 "address the review comments on #1234"';
 const REPL_HINT =
   'Press \u2190 to return to your session anytime. Type a task below to dispatch a session alongside it. Sessions keep running even after you close the terminal';
+
+// ---------------------------------------------------------------------------
+// Job label — official DC6 (jobLabel)
+// ---------------------------------------------------------------------------
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars
+const CONTROL_CHAR_RE = /[\x00-\x1f]/g;
+
+function computeJobLabel(job: BgJobState, currentSessionId?: string): string {
+  if (job.name) return job.name.replace(CONTROL_CHAR_RE, '').replace(/\s+/g, ' ').trim();
+
+  const intent = (job.intent || '').replace(CONTROL_CHAR_RE, '').replace(/\s+/g, ' ').trim();
+  const words = intent.split(' ').filter(Boolean);
+  if (words.length === 0) {
+    if (currentSessionId && (job.sessionId === currentSessionId || job.resumeSessionId === currentSessionId)) {
+      return 'current session';
+    }
+    if (job.template === 'bg' && job.state === 'working') return 'new session';
+    return job.template.replace(CONTROL_CHAR_RE, '').replace(/\s+/g, ' ').trim() || 'new session';
+  }
+
+  const maxLen = 25;
+  const short = words.length > 3 ? `${words.slice(0, 3).join(' ')}\u2026` : words.join(' ');
+  if (short.length <= maxLen) return short;
+  return `${short.slice(0, maxLen - 1)}\u2026`;
+}
 
 // ---------------------------------------------------------------------------
 // PR auto-detection (rate-limited)
@@ -325,14 +353,7 @@ function AgentViewApp({
         cwd: job.cwd,
         startedAt: Date.parse(job.createdAt),
         kind: 'bg',
-        name:
-          job.name ||
-          job.intent ||
-          (currentSessionId && (job.sessionId === currentSessionId || job.resumeSessionId === currentSessionId)
-            ? 'current session'
-            : job.template === 'bg' && job.state === 'working'
-              ? 'new session'
-              : job.template || 'new session'),
+        name: computeJobLabel(job, currentSessionId),
         status:
           job.state === 'working'
             ? job.tempo === 'active'
@@ -1227,12 +1248,30 @@ async function attachToPtySession(short: string): Promise<void> {
   let result = await attachToSession(short, { alreadyInAlt: true });
 
   if (result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
-    // Session not in daemon — respawn it (official: jC6 / respawnJob)
-    // Find the job state to get sessionId for --resume
+    // Session not in daemon — respawn it (official: S8_ / respawnJob)
     const jobs = await listAllJobs();
     const job = jobs.find(j => j.short === short);
     if (job) {
-      // Dispatch to daemon with --resume to respawn the session
+      // Official: check if transcript exists before deciding resume vs fresh start
+      const { existsSync } = await import('fs');
+      const { join } = await import('path');
+      const { getProjectDir } = await import('../utils/sessionStorage.js');
+      const transcriptPath = join(getProjectDir(job.state.cwd), `${job.state.sessionId}.jsonl`);
+      const transcriptExists = existsSync(transcriptPath);
+
+      // Build launch config: resume if transcript exists, fresh prompt otherwise
+      const launch = transcriptExists
+        ? {
+            mode: 'resume' as const,
+            sessionId: job.state.sessionId,
+            fork: false,
+            flagArgs: job.state.respawnFlags ?? [],
+          }
+        : {
+            mode: 'prompt' as const,
+            args: job.state.intent ? ['--', job.state.intent] : [],
+          };
+
       const resp = await sendControlRequest(
         {
           proto: 1,
@@ -1240,14 +1279,10 @@ async function attachToPtySession(short: string): Promise<void> {
           d: {
             short,
             sessionId: job.state.sessionId,
+            intent: job.state.intent,
             source: 'respawn',
             cwd: job.state.cwd,
-            launch: {
-              mode: 'resume',
-              sessionId: job.state.sessionId,
-              fork: false,
-              flagArgs: job.state.respawnFlags ?? [],
-            },
+            launch,
             env: {},
             isolation: 'none',
             respawnFlags: job.state.respawnFlags ?? [],
@@ -1284,20 +1319,27 @@ export async function renderAgentView(options?: {
   cwdFilter?: string;
   currentSessionId?: string;
 }): Promise<void> {
+  // Official: applyFleetViewHostWindowsEnv — force full repaint on Windows
+  if (getPlatform() === 'windows') {
+    process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
+  }
+
   // Ensure daemon is running (official: KF / ensureDaemonRunning)
   await ensureDaemonRunning();
 
   // Track last-selected session so we can restore position after attach
   let lastSelectedSessionId: string | undefined;
 
+  // Create a Root instance (sync render, no race condition)
+  // Official uses a persistent Root that survives across attach/detach cycles
+  let root: Root = await createRoot({ exitOnCtrlC: false });
+
   // Loop: render FleetView → handle action → re-render
   for (;;) {
-    let instance: Awaited<ReturnType<typeof render>> | null = null;
-
     const action = await new Promise<
       { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }
     >(resolve => {
-      void render(
+      root.render(
         <VoiceProvider>
           <AgentViewApp
             enteredViaLeftArrow={options?.enteredViaLeftArrow}
@@ -1308,26 +1350,35 @@ export async function renderAgentView(options?: {
             onAction={resolve}
           />
         </VoiceProvider>,
-      ).then(inst => {
-        instance = inst;
-      });
+      );
     });
 
-    // Unmount Ink before doing anything else
-    // handoffRawMode() prevents Ink from disabling raw mode during unmount (official pattern)
-    if (action.type === 'open' && instance) {
-      (instance as { handoffRawMode?: () => void }).handoffRawMode?.();
+    if (action.type === 'open') {
+      // Official: handoffAltScreen prevents unmount from exiting alt screen
+      root.handoffAltScreen();
+      // Official (Windows only): handoffRawMode prevents unmount from disabling raw mode
+      if (getPlatform() === 'windows') {
+        root.handoffRawMode();
+      }
     }
-    if (instance) {
-      (instance as { unmount: () => void }).unmount();
-    }
+
+    root.unmount();
 
     if (action.type === 'done') break;
 
     if (action.type === 'open') {
+      // Official (Windows only): re-enable raw mode + ref stdin after Ink unmount
+      if (getPlatform() === 'windows' && process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+        process.stdin.ref();
+      }
+
       lastSelectedSessionId = action.sessionId;
       // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
       await attachToPtySession(action.short);
     }
+
+    // Re-create root for next iteration (official: cj_ / createRoot after detach)
+    root = await createRoot({ exitOnCtrlC: false });
   }
 }

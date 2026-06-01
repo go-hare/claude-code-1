@@ -58,3 +58,4 @@ credentials.json
 .test-progress.md
 .squash-tmp/
 .git.*-backup
+packages/@go-hare/claude-code-win32-x64/claude.exe

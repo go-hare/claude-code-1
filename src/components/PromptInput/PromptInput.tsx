@@ -2397,31 +2397,33 @@ function PromptInput({
     onHistoryUp: handleHistoryUp,
     onHistoryDown: handleHistoryDown,
     onHistoryReset: resetHistory,
-    onLeftArrowOnEmpty:
-      onLeftArrowOnEmptyProp ?? (process.env.CLAUDE_BG_BACKEND === 'daemon' ? sendBgDetachRequest : undefined),
-    onLeftArrowOnEmptyMessage: onLeftArrowOnEmptyProp
-      ? (show: boolean) => {
-          if (show) {
-            if (leftArrowHintShown) {
-              // Second press within timeout — trigger the action
-              if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
-              leftArrowTimerRef.current = null;
-              setLeftArrowHintShown(false);
-              onLeftArrowOnEmptyProp();
-            } else {
-              // First press — show hint, start timer
-              setLeftArrowHintShown(true);
-              if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
-              leftArrowTimerRef.current = setTimeout(() => {
+    onLeftArrowOnEmpty: process.env.CLAUDE_BG_BACKEND === 'daemon' ? sendBgDetachRequest : onLeftArrowOnEmptyProp,
+    onLeftArrowOnEmptyMessage:
+      process.env.CLAUDE_BG_BACKEND === 'daemon'
+        ? undefined
+        : onLeftArrowOnEmptyProp
+          ? (show: boolean) => {
+              if (show) {
+                if (leftArrowHintShown) {
+                  // Second press within timeout — trigger the action
+                  if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
+                  leftArrowTimerRef.current = null;
+                  setLeftArrowHintShown(false);
+                  onLeftArrowOnEmptyProp();
+                } else {
+                  // First press — show hint, start timer
+                  setLeftArrowHintShown(true);
+                  if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
+                  leftArrowTimerRef.current = setTimeout(() => {
+                    setLeftArrowHintShown(false);
+                    leftArrowTimerRef.current = null;
+                  }, LEFT_ARROW_AGAIN_TIMEOUT);
+                }
+              } else {
                 setLeftArrowHintShown(false);
-                leftArrowTimerRef.current = null;
-              }, LEFT_ARROW_AGAIN_TIMEOUT);
+              }
             }
-          } else {
-            setLeftArrowHintShown(false);
-          }
-        }
-      : undefined,
+          : undefined,
     placeholder,
     onExit,
     onExitMessage: (show, key) => setExitMessage({ show, key }),

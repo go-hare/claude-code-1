@@ -492,6 +492,33 @@ export async function startBgManager(opts?: {
       return
     }
 
+    // Write initial state.json before spawning (official: iO(j, tHH({...})))
+    const jobDir = getJobDirPath(req.short)
+    mkdirSync(jobDir, { recursive: true })
+    const now = new Date().toISOString()
+    writeBgJobState(req.short, {
+      state: 'starting',
+      detail: 'starting\u2026',
+      tempo: 'active',
+      output: null,
+      children: null,
+      linkScanOffset: 0,
+      template: req.agent ?? req.routine ?? 'bg',
+      routine: req.routine,
+      respawnFlags: req.respawnFlags ?? [],
+      intent: req.intent ?? '',
+      name: req.name,
+      sessionId: req.sessionId,
+      resumeSessionId: req.sessionId,
+      daemonShort: req.short,
+      cwd: req.cwd,
+      originCwd: req.cwd,
+      worktreePath: req.worktree?.path,
+      createdAt: now,
+      updatedAt: now,
+      firstTerminalAt: null,
+    })
+
     // Spawn new worker
     const worker = BgWorker.spawn(
       req,
@@ -736,6 +763,8 @@ export async function startBgManager(opts?: {
 
 /** Cursor home + erase display */
 const CLEAR_SCREEN = '\x1B[H\x1B[2J'
+/** Erase display + cursor home (Ink's forceRedraw order) */
+const CLEAR_SCREEN_ALT = '\x1B[2J\x1B[H'
 /** Erase line */
 const ERASE_LINE = '\x1B[2K'
 
@@ -1114,6 +1143,7 @@ function handleAttachOp(
       const combined = lastChunk + data
       if (
         combined.includes(CLEAR_SCREEN) ||
+        combined.includes(CLEAR_SCREEN_ALT) ||
         combined.includes(CLEAR_SCREEN.slice(0, 3) + ERASE_LINE)
       ) {
         clearStall()

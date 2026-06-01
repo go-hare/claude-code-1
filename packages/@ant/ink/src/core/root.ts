@@ -71,6 +71,8 @@ export type Root = {
   render: (node: ReactNode) => void
   unmount: () => void
   waitUntilExit: () => Promise<void>
+  handoffRawMode: () => void
+  handoffAltScreen: () => void
 }
 
 /**
@@ -159,6 +161,8 @@ export async function createRoot({
     render: node => instance.render(node),
     unmount: () => instance.unmount(),
     waitUntilExit: () => instance.waitUntilExit(),
+    handoffRawMode: () => instance.handoffRawMode(),
+    handoffAltScreen: () => instance.handoffAltScreen(),
   }
 }
 
