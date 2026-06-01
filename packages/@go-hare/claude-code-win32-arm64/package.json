@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code-win32-arm64",
-  "version": "2.6.11",
+  "version": "2.6.12",
   "description": "Platform-specific binary for @go-hare/claude-code (Windows ARM64)",
   "os": [
     "win32"
