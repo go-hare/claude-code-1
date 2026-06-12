@@ -34,6 +34,7 @@ import {
 } from 'fs/promises'
 import { randomBytes } from 'crypto'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { isInBundledMode } from '../utils/bundledMode.js'
 import {
   encodeDataFrame,
   encodeCtrlFrame,
@@ -1138,17 +1139,20 @@ export type SpawnPtyFn = (
 /** Default spawnPty using Bun.spawn + PTY host — official nqq */
 export function createDefaultSpawnPty(): SpawnPtyFn {
   return (cmd, args, opts) => {
-    // cmd = process.execPath (bun binary)
+    // cmd = process.execPath (bun binary or compiled exe)
     // args = [scriptPath, ...cliArgs] (e.g. ["cli.tsx", "-p", "hello"])
+    // In bundled mode (compiled .exe), cmd IS the entry — no scriptPath needed.
     // In dev mode, process.execArgv has -d/--feature flags needed by child processes.
     const runtimeFlags = process.execArgv ?? []
-    const scriptPath = args[0]!
-    const cliArgs = args.slice(1)
+    const bundled = isInBundledMode()
+    const scriptPath = bundled ? undefined : args[0]!
+    const cliArgs = bundled ? args.slice(1) : args.slice(1)
 
+    const scriptPrefix = scriptPath ? [scriptPath] : []
     const spawnArgs = [
       cmd,
       ...runtimeFlags,
-      scriptPath,
+      ...scriptPrefix,
       '--bg-pty-host',
       opts.ptySock,
       String(opts.cols),
@@ -1156,7 +1160,7 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
       '--',
       cmd,
       ...runtimeFlags,
-      scriptPath,
+      ...scriptPrefix,
       ...cliArgs,
     ]
 
@@ -1183,6 +1187,9 @@ export function getBinaryPath(opts?: { pinToCurrentBinary?: boolean }): {
   cmd: string
   prefixArgs: string[]
 } {
+  if (isInBundledMode()) {
+    return { cmd: process.execPath, prefixArgs: [] }
+  }
   const argv1 = process.argv[1]
   if (!argv1) return { cmd: process.execPath, prefixArgs: [] }
   return { cmd: process.execPath, prefixArgs: [argv1] }

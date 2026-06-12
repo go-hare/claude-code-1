@@ -77,11 +77,19 @@ export async function agentsMain(args: string[]): Promise<void> {
   // Extract passthrough args for dispatched sessions
   const dispatchExtraArgs = extractPassthroughArgs(args)
 
-  // Start bg manager in-process (like official — no separate daemon needed)
-  const { startBgManager } = await import('../daemon/bgManager.js')
-  const bgManager = await startBgManager({
-    onLog: () => {}, // Suppress logs in UI mode
-  })
+  // Start bg manager in-process only if daemon is not already running.
+  // If a persistent daemon is already serving the control socket, skip
+  // the expensive in-process startup (saves 1-3s).
+  const { isDaemonReachable } = await import('../daemon/controlSocketClient.js')
+  const daemonAlive = await isDaemonReachable()
+
+  let bgManager: { close(): Promise<void> } | null = null
+  if (!daemonAlive) {
+    const { startBgManager } = await import('../daemon/bgManager.js')
+    bgManager = await startBgManager({
+      onLog: () => {},
+    })
+  }
 
   // Interactive dashboard
   const { renderAgentView } = await import('../screens/AgentView.js')
@@ -90,6 +98,8 @@ export async function agentsMain(args: string[]): Promise<void> {
     cwdFilter,
   })
 
-  // Cleanup bg manager on exit
-  await bgManager.close()
+  // Cleanup bg manager on exit (only if we started one)
+  if (bgManager) {
+    await bgManager.close()
+  }
 }

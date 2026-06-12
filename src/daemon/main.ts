@@ -55,9 +55,20 @@ export async function daemonMain(args: string[]): Promise<void> {
   switch (subcommand) {
     // --- Supervisor management ---
     case 'start':
-    case 'run':
       await runSupervisor(args.slice(1))
       break
+    case 'run': {
+      const runArgs = args.slice(1)
+      const hasOriginTransient =
+        runArgs.includes('--origin') &&
+        runArgs[runArgs.indexOf('--origin') + 1] === 'transient'
+      if (hasOriginTransient) {
+        await runBgManagerStandalone()
+      } else {
+        await runSupervisor(runArgs)
+      }
+      break
+    }
     case 'stop':
       await handleDaemonStop()
       break
