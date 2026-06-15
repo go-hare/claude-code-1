@@ -11,12 +11,24 @@ export function isRunningWithBun(): boolean {
 
 /**
  * Detects if running as a Bun-compiled standalone executable.
- * This checks for embedded files which are present in compiled binaries.
+ * Bun reports compiled entrypoints differently across platforms/versions:
+ * macOS/Linux builds may expose embedded files, while Windows builds can expose
+ * a virtual entry path such as B:/~BUN/root/claude.exe with no embedded files.
  */
 export function isInBundledMode(): boolean {
+  if (typeof Bun === 'undefined') return false
   return (
-    typeof Bun !== 'undefined' &&
-    Array.isArray(Bun.embeddedFiles) &&
-    Bun.embeddedFiles.length > 0
+    (Array.isArray(Bun.embeddedFiles) && Bun.embeddedFiles.length > 0) ||
+    isBunCompiledVirtualPath(process.argv[1])
+  )
+}
+
+export function isBunCompiledVirtualPath(value: string | undefined): boolean {
+  if (!value) return false
+  const normalized = value.replace(/\\/g, '/')
+  return (
+    normalized.startsWith('compiled://') ||
+    /^[A-Za-z]:\/~BUN\//.test(normalized) ||
+    normalized.includes('/~BUN/root/')
   )
 }

@@ -68,7 +68,7 @@ const PLATFORMS: Record<string, PlatformInfo> = {
     pkgDir: 'packages/@go-hare/claude-code-win32-x64',
   },
   'win32-arm64': {
-    bunTarget: 'bun-windows-x64',
+    bunTarget: 'bun-windows-arm64',
     binaryName: 'claude.exe',
     pkgDir: 'packages/@go-hare/claude-code-win32-arm64',
   },
@@ -105,6 +105,9 @@ function buildBinary(platformKey: string): string {
   const outFile = join(outdir, info.binaryName)
   const isCurrentPlatform = platformKey === getCurrentPlatform()
   const targetArgs = isCurrentPlatform ? [] : ['--target', info.bunTarget]
+  const executablePathArgs = process.env.BUN_COMPILE_EXECUTABLE_PATH
+    ? ['--compile-executable-path', process.env.BUN_COMPILE_EXECUTABLE_PATH]
+    : []
 
   console.log(`\nBuilding for ${platformKey} (target: ${info.bunTarget})...`)
   const result = Bun.spawnSync(
@@ -116,6 +119,7 @@ function buildBinary(platformKey: string): string {
       '--outfile',
       outFile,
       ...targetArgs,
+      ...executablePathArgs,
       ...defineArgs,
       ...featureArgs,
     ],

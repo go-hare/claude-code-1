@@ -1139,30 +1139,13 @@ export type SpawnPtyFn = (
 /** Default spawnPty using Bun.spawn + PTY host — official nqq */
 export function createDefaultSpawnPty(): SpawnPtyFn {
   return (cmd, args, opts) => {
-    // cmd = process.execPath (bun binary or compiled exe)
-    // args = [scriptPath, ...cliArgs] (e.g. ["cli.tsx", "-p", "hello"])
-    // In bundled mode (compiled .exe), cmd IS the entry — no scriptPath needed.
-    // In dev mode, process.execArgv has -d/--feature flags needed by child processes.
-    const runtimeFlags = process.execArgv ?? []
-    const bundled = isInBundledMode()
-    const scriptPath = bundled ? undefined : args[0]!
-    const cliArgs = bundled ? args.slice(1) : args.slice(1)
-
-    const scriptPrefix = scriptPath ? [scriptPath] : []
-    const spawnArgs = [
-      cmd,
-      ...runtimeFlags,
-      ...scriptPrefix,
-      '--bg-pty-host',
-      opts.ptySock,
-      String(opts.cols),
-      String(opts.rows),
-      '--',
-      cmd,
-      ...runtimeFlags,
-      ...scriptPrefix,
-      ...cliArgs,
-    ]
+    const spawnArgs = buildPtyHostSpawnArgs(cmd, args, {
+      cols: opts.cols,
+      rows: opts.rows,
+      ptySock: opts.ptySock,
+      runtimeFlags: process.execArgv ?? [],
+      bundled: isInBundledMode(),
+    })
 
     const child = Bun.spawn(spawnArgs, {
       cwd: opts.cwd,
@@ -1180,6 +1163,39 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
       child,
     )
   }
+}
+
+export function buildPtyHostSpawnArgs(
+  cmd: string,
+  args: string[],
+  opts: {
+    cols: number
+    rows: number
+    ptySock: string
+    runtimeFlags?: string[]
+    bundled?: boolean
+  },
+): string[] {
+  const runtimeFlags = opts.runtimeFlags ?? []
+  const bundled = opts.bundled ?? isInBundledMode()
+  const scriptPath = bundled ? undefined : args[0]
+  const cliArgs = bundled ? args : args.slice(1)
+  const scriptPrefix = scriptPath ? [scriptPath] : []
+
+  return [
+    cmd,
+    ...runtimeFlags,
+    ...scriptPrefix,
+    '--bg-pty-host',
+    opts.ptySock,
+    String(opts.cols),
+    String(opts.rows),
+    '--',
+    cmd,
+    ...runtimeFlags,
+    ...scriptPrefix,
+    ...cliArgs,
+  ]
 }
 
 /** Get the binary path for spawning — official WE */
