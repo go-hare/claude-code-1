@@ -1,14 +1,16 @@
 import React from 'react'
-import {
-  getCompanion,
-  rollWithSeed,
-  generateSeed,
-} from '../../buddy/companion.js'
+import { getCompanion, generateSeed } from '../../buddy/companion.js'
 import { type StoredCompanion, RARITY_STARS } from '../../buddy/types.js'
-import { renderSprite } from '../../buddy/sprites.js'
 import { CompanionCard } from '../../buddy/CompanionCard.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { triggerCompanionReaction } from '../../buddy/companionReact.js'
+import {
+  dispatchBuddyEvent,
+  hatchBuiltinBuddy,
+  renderBuddyAscii,
+  createBuddyRuntime,
+  builtinBuddyManifest,
+} from '../../buddy/protocol/index.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type {
   LocalJSXCommandContext,
@@ -100,6 +102,9 @@ export async function call(
     // Auto-unmute on pet + trigger heart animation
     saveGlobalConfig(cfg => ({ ...cfg, companionMuted: false }))
     setState?.(prev => ({ ...prev, companionPetAt: Date.now() }))
+    void dispatchBuddyEvent(createBuddyRuntime(builtinBuddyManifest), {
+      type: 'buddy.pet',
+    })
 
     // Trigger a post-pet reaction
     triggerCompanionReaction(context.messages ?? [], reaction =>
@@ -136,7 +141,7 @@ export async function call(
 
   // ── No companion → hatch ──
   const seed = generateSeed()
-  const r = rollWithSeed(seed)
+  const r = hatchBuiltinBuddy(seed)
   const name = SPECIES_NAMES[r.bones.species] ?? 'Buddy'
   const personality =
     SPECIES_PERSONALITY[r.bones.species] ?? 'Mysterious and code-savvy.'
@@ -151,7 +156,7 @@ export async function call(
   saveGlobalConfig(cfg => ({ ...cfg, companion: stored }))
 
   const stars = RARITY_STARS[r.bones.rarity]
-  const sprite = renderSprite(r.bones, 0)
+  const sprite = renderBuddyAscii(r.bones, 0)
   const shiny = r.bones.shiny ? ' \u2728 Shiny!' : ''
 
   const lines = [
