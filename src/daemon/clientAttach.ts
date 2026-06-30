@@ -32,6 +32,11 @@ const CTRL_Z = 0x1a
 /** 'd' — secondary detach after Ctrl+B */
 const CHAR_D = 100
 
+/** Focus In report: CSI I — filter from input (terminal sends on window focus) */
+const FOCUS_IN = Buffer.from('\x1B[I', 'ascii')
+/** Focus Out report: CSI O — filter from input */
+const FOCUS_OUT = Buffer.from('\x1B[O', 'ascii')
+
 /** Kitty protocol Ctrl+Z: CSI 122;5u */
 const KITTY_CTRL_Z = Buffer.from('\x1B[122;5u', 'ascii')
 /** Kitty protocol Ctrl+B: CSI 98;5u */
@@ -265,6 +270,20 @@ export async function attachToSession(
       ) {
         if (i > writeStart) socket.write(data.subarray(writeStart, i))
         return finish('detached')
+      }
+
+      // Filter focus in/out reports (terminal sends these on window focus change)
+      if (bufferMatchesAt(data, i, FOCUS_IN)) {
+        if (i > writeStart) socket.write(data.subarray(writeStart, i))
+        i += FOCUS_IN.length - 1
+        writeStart = i + 1
+        continue
+      }
+      if (bufferMatchesAt(data, i, FOCUS_OUT)) {
+        if (i > writeStart) socket.write(data.subarray(writeStart, i))
+        i += FOCUS_OUT.length - 1
+        writeStart = i + 1
+        continue
       }
 
       // Check for escape prefix

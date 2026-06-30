@@ -1324,8 +1324,15 @@ export async function renderAgentView(options?: {
     process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
   }
 
-  // Ensure daemon is running (official: KF / ensureDaemonRunning)
-  await ensureDaemonRunning();
+  // Ensure daemon is running. Try control socket first; if unreachable,
+  // start bgManager in-process (matches agentsMain path).
+  const { sendControlRequest } = await import('../daemon/controlSocket.js');
+  const pingResp = await sendControlRequest({ op: 'ping', proto: 1 }, { timeoutMs: 2000 });
+  let inProcessManager: { close(): Promise<void> } | null = null;
+  if (!pingResp.ok) {
+    const { startBgManager } = await import('../daemon/bgManager.js');
+    inProcessManager = await startBgManager({ onLog: () => {} });
+  }
 
   // Track last-selected session so we can restore position after attach
   let lastSelectedSessionId: string | undefined;
@@ -1380,5 +1387,10 @@ export async function renderAgentView(options?: {
 
     // Re-create root for next iteration (official: cj_ / createRoot after detach)
     root = await createRoot({ exitOnCtrlC: false });
+  }
+
+  // Cleanup in-process bgManager if we started one
+  if (inProcessManager) {
+    await inProcessManager.close();
   }
 }

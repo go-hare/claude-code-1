@@ -643,23 +643,11 @@ export function connectRendezvous(
 // Path helpers — official Os, u__, Wo8, x__, BU, OCH, Zo8, tV_, bOH
 // ---------------------------------------------------------------------------
 
-/** Daemon instance directory — official Os() = /tmp/cc-daemon-<uid>/<hash>/ */
+/** Daemon instance directory — official: ~/.claude/daemon/bg/ */
 let _instanceDir: string | undefined
 export function getDaemonInstanceDir(): string {
   if (_instanceDir) return _instanceDir
-  const crypto = require('crypto') as typeof import('crypto')
-  const configDir = resolve(getClaudeConfigHomeDir())
-  const hash = crypto
-    .createHash('sha256')
-    .update(configDir)
-    .digest('hex')
-    .slice(0, 8)
-  const uid = process.getuid?.() ?? 0
-  const tmpDir =
-    process.env.TERMUX_VERSION && process.env.PREFIX
-      ? join(process.env.PREFIX, 'tmp')
-      : '/tmp'
-  _instanceDir = join(tmpDir, `cc-daemon-${uid}`, hash)
+  _instanceDir = join(getClaudeConfigHomeDir(), 'daemon', 'bg')
   return _instanceDir
 }
 
