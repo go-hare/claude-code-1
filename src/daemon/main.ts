@@ -2,6 +2,10 @@ import { type ChildProcess } from 'child_process'
 import { resolve } from 'path'
 import { buildCliLaunch, spawnCli } from '../utils/cliLaunch.js'
 import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
+import {
   writeDaemonState,
   removeDaemonState,
   queryDaemonStatus,
@@ -55,17 +59,36 @@ export async function daemonMain(args: string[]): Promise<void> {
   switch (subcommand) {
     // --- Supervisor management ---
     case 'start':
-      await runSupervisor(args.slice(1))
+      try {
+        await runSupervisor(args.slice(1))
+      } catch (err) {
+        // Official: tengu_daemon_startup_crash
+        logEvent('tengu_daemon_startup_crash', {
+          error: String(
+            err,
+          ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        throw err
+      }
       break
     case 'run': {
       const runArgs = args.slice(1)
       const hasOriginTransient =
         runArgs.includes('--origin') &&
         runArgs[runArgs.indexOf('--origin') + 1] === 'transient'
-      if (hasOriginTransient) {
-        await runBgManagerStandalone()
-      } else {
-        await runSupervisor(runArgs)
+      try {
+        if (hasOriginTransient) {
+          await runBgManagerStandalone()
+        } else {
+          await runSupervisor(runArgs)
+        }
+      } catch (err) {
+        logEvent('tengu_daemon_startup_crash', {
+          error: String(
+            err,
+          ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        throw err
       }
       break
     }
@@ -257,6 +280,13 @@ async function runSupervisor(args: string[]): Promise<void> {
     },
   ]
 
+  // Official: tengu_daemon_start
+  logEvent('tengu_daemon_start', {
+    workers: workers
+      .map(w => w.kind)
+      .join(',') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+
   // Write daemon state file so other CLI processes can query/stop us
   writeDaemonState({
     pid: process.pid,
@@ -398,6 +428,10 @@ function spawnWorker(
       console.error(
         `[daemon] worker '${worker.kind}' exited with permanent error — parking`,
       )
+      logEvent('tengu_daemon_worker_permanent_exit', {
+        kind: worker.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        exit_code: code ?? -1,
+      })
       worker.parked = true
       return
     }
@@ -406,6 +440,13 @@ function spawnWorker(
     const runDuration = Date.now() - worker.lastStartTime
     if (runDuration < 10_000) {
       worker.failureCount++
+      logEvent('tengu_daemon_worker_crash', {
+        kind: worker.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        exit_code: code ?? -1,
+        failure_count: worker.failureCount,
+        run_duration_ms: runDuration,
+        rapid: true,
+      })
       if (worker.failureCount >= MAX_RAPID_FAILURES) {
         console.error(
           `[daemon] worker '${worker.kind}' failed ${worker.failureCount} times rapidly — parking`,
@@ -414,6 +455,13 @@ function spawnWorker(
         return
       }
     } else {
+      logEvent('tengu_daemon_worker_crash', {
+        kind: worker.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        exit_code: code ?? -1,
+        failure_count: 0,
+        run_duration_ms: runDuration,
+        rapid: false,
+      })
       // Ran for a reasonable time, reset failure count
       worker.failureCount = 0
       worker.backoffMs = BACKOFF_INITIAL_MS

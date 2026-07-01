@@ -23,6 +23,7 @@ import {
   type Signal,
 } from './bgWorker.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
+import { logEvent } from '../services/analytics/index.js'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -111,6 +112,8 @@ export async function startControlSocket(
     // Peer UID validation (Unix only)
     const peerReject = validatePeerUid(socket)
     if (peerReject) {
+      // Official: tengu_daemon_peer_uid_reject
+      logEvent('tengu_daemon_peer_uid_reject', {})
       socket.once('data', () =>
         respond(socket, { ok: false, code: 'EPEERUID', error: peerReject }),
       )
