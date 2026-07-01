@@ -1,18 +1,11 @@
 import { APIUserAbortError } from '@anthropic-ai/sdk'
-import { getEmptyToolPermissionContext } from '../Tool.js'
-import type { Message } from '../types/message.js'
 import { logForDebugging } from '../utils/debug.js'
-import {
-  createUserMessage,
-  getAssistantMessageText,
-} from '../utils/messages.js'
+import { createUserMessage, extractTextContent } from '../utils/messages.js'
 import { getSmallFastModel } from '../utils/model/model.js'
-import { asSystemPrompt } from '../utils/systemPromptType.js'
 import { getResolvedLanguage } from '../utils/language.js'
-import { queryModelWithoutStreaming } from './api/claude.js'
-import { createTrace, endTrace, isLangfuseEnabled } from './langfuse/index.js'
-import { getSessionId } from '../bootstrap/state.js'
-import { getAPIProvider } from '../utils/model/providers.js'
+import { getLastCacheSafeParams, runForkedAgent } from '../utils/forkedAgent.js'
+import { createAutoMemCanUseTool } from './extractMemories/extractMemories.js'
+import { getAutoMemPath } from '../memdir/paths.js'
 import { getSessionMemoryContent } from './SessionMemory/sessionMemoryUtils.js'
 
 // Recap only needs recent context — truncate to avoid "prompt too long" on
@@ -35,65 +28,81 @@ function buildAwaySummaryPrompt(memory: string | null): string {
 
 /**
  * Generates a short session recap for the "while you were away" card.
- * Returns null on abort, empty transcript, or error.
+ * Uses runForkedAgent with the parent's CacheSafeParams to share prompt cache.
+ * Returns null when no turn has completed yet (no CacheSafeParams saved),
+ * when aborted, or on error.
  */
 export async function generateAwaySummary(
-  messages: readonly Message[],
+  _messages: readonly unknown[],
   signal: AbortSignal,
 ): Promise<string | null> {
-  if (messages.length === 0) {
+  const cacheSafeParams = getLastCacheSafeParams()
+  if (!cacheSafeParams) {
+    logForDebugging('[awaySummary] no CacheSafeParams saved, skipping')
     return null
   }
 
-  const model = getSmallFastModel()
-  const langfuseTrace = isLangfuseEnabled()
-    ? createTrace({
-        sessionId: getSessionId(),
-        model,
-        provider: getAPIProvider(),
-        name: 'away-summary',
-      })
-    : null
+  if (signal.aborted) {
+    return null
+  }
 
   try {
     const memory = await getSessionMemoryContent()
-    const recent = messages.slice(-RECENT_MESSAGE_WINDOW)
-    recent.push(createUserMessage({ content: buildAwaySummaryPrompt(memory) }))
-    const response = await queryModelWithoutStreaming({
-      messages: recent,
-      systemPrompt: asSystemPrompt([]),
-      thinkingConfig: { type: 'disabled' },
-      tools: [],
-      signal,
-      options: {
-        getToolPermissionContext: async () => getEmptyToolPermissionContext(),
-        model,
-        toolChoice: undefined,
-        isNonInteractiveSession: false,
-        hasAppendSystemPrompt: false,
-        agents: [],
-        querySource: 'away_summary',
-        mcpTools: [],
-        skipCacheWrite: true,
-        langfuseTrace,
+    const recentMessages = cacheSafeParams.forkContextMessages.slice(
+      -RECENT_MESSAGE_WINDOW,
+    )
+    const userPrompt = buildAwaySummaryPrompt(memory)
+
+    const model = getSmallFastModel()
+    const overriddenCacheSafeParams = {
+      ...cacheSafeParams,
+      forkContextMessages: recentMessages,
+      toolUseContext: {
+        ...cacheSafeParams.toolUseContext,
+        options: {
+          ...cacheSafeParams.toolUseContext.options,
+          model,
+        },
       },
+    }
+
+    const canUseTool = createAutoMemCanUseTool(getAutoMemPath())
+
+    const result = await runForkedAgent({
+      promptMessages: [createUserMessage({ content: userPrompt })],
+      cacheSafeParams: overriddenCacheSafeParams,
+      canUseTool,
+      querySource: 'away_summary',
+      forkLabel: 'away_summary',
+      skipTranscript: true,
+      skipCacheWrite: true,
+      maxTurns: 1,
     })
 
-    if (response.isApiErrorMessage) {
-      logForDebugging(
-        `[awaySummary] API error: ${getAssistantMessageText(response)}`,
-      )
-      endTrace(langfuseTrace, undefined, 'error')
+    if (signal.aborted) {
       return null
     }
-    endTrace(langfuseTrace)
-    return getAssistantMessageText(response)
+
+    // Extract text from the last assistant message
+    const lastAssistant = result.messages
+      .slice()
+      .reverse()
+      .find(m => m.type === 'assistant')
+    if (!lastAssistant || lastAssistant.type !== 'assistant') {
+      return null
+    }
+    const content = lastAssistant.message?.content
+    const text = Array.isArray(content)
+      ? extractTextContent(content, ' ')
+      : typeof content === 'string'
+        ? content
+        : null
+    return text?.trim() || null
   } catch (err) {
     if (err instanceof APIUserAbortError || signal.aborted) {
       return null
     }
     logForDebugging(`[awaySummary] generation failed: ${err}`)
-    endTrace(langfuseTrace, undefined, 'error')
     return null
   }
 }

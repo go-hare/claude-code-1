@@ -146,6 +146,56 @@ function hasMemoryWritesSince(
   return false
 }
 
+/**
+ * Returns true if there is at least one "prose" user message since sinceUuid.
+ * Prose = non-meta, non-tool-result user messages that contain actual text.
+ * Without user prose there is nothing new worth extracting into memories.
+ */
+function hasUserProseSince(
+  messages: Message[],
+  sinceUuid: string | undefined,
+): boolean {
+  let foundStart = sinceUuid === undefined
+  for (const message of messages) {
+    if (!foundStart) {
+      if (message.uuid === sinceUuid) {
+        foundStart = true
+      }
+      continue
+    }
+    if (message.type !== 'user') {
+      continue
+    }
+    // Skip meta messages (system injections, tool results, etc.)
+    if ((message as { isMeta?: boolean }).isMeta) {
+      continue
+    }
+    if ((message as { toolUseResult?: unknown }).toolUseResult !== undefined) {
+      continue
+    }
+    // Must have at least some text content
+    const content = (message as { message?: { content?: unknown } }).message
+      ?.content
+    if (typeof content === 'string' && content.trim().length > 0) {
+      return true
+    }
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (
+          typeof block === 'object' &&
+          block !== null &&
+          (block as { type?: string }).type === 'text' &&
+          typeof (block as { text?: string }).text === 'string' &&
+          (block as { text: string }).text.trim().length > 0
+        ) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
 // ============================================================================
 // Tool Permissions
 // ============================================================================
@@ -351,6 +401,25 @@ export function initExtractMemories(): void {
         lastMemoryMessageUuid = lastMessage.uuid
       }
       logEvent('tengu_extract_memories_skipped_direct_write', {
+        message_count: newMessageCount,
+      })
+      return
+    }
+
+    // Skip when there is no new user prose since the last extraction. Turns
+    // driven purely by tool results / meta messages carry no durable
+    // preferences or facts worth extracting — running the fork would burn
+    // tokens for nothing. Advance the cursor so the next run only considers
+    // messages after this point.
+    if (!hasUserProseSince(messages, lastMemoryMessageUuid)) {
+      logForDebugging(
+        '[extractMemories] skipping — no user prose since last extraction',
+      )
+      const lastMessage = messages.at(-1)
+      if (lastMessage?.uuid) {
+        lastMemoryMessageUuid = lastMessage.uuid
+      }
+      logEvent('tengu_extract_memories_skipped_no_prose', {
         message_count: newMessageCount,
       })
       return
