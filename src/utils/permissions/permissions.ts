@@ -49,6 +49,7 @@ import {
   permissionRuleValueFromString,
   permissionRuleValueToString,
 } from './permissionRuleParser.js'
+import { isBroadRule, isAutoModeFilteringActive } from './broadRuleFilter.js'
 import {
   deletePermissionRuleFromSettings,
   type PermissionRuleFromEditableSettings,
@@ -122,12 +123,30 @@ export function permissionRuleSourceDisplayString(
 export function getAllowRules(
   context: ToolPermissionContext,
 ): PermissionRule[] {
+  // Auto-mode broad-rule filter (official `PL4` + `ERH`).
+  // When active, broad Bash/PowerShell/Agent allow rules are dropped so the
+  // classifier can evaluate each invocation individually.
+  const filterBroadRules = isAutoModeFilteringActive(
+    context.mode,
+    autoModeStateModule?.isAutoModeActive() ?? false,
+  )
   return PERMISSION_RULE_SOURCES.flatMap(source =>
-    (context.alwaysAllowRules[source] || []).map(ruleString => ({
-      source,
-      ruleBehavior: 'allow',
-      ruleValue: permissionRuleValueFromString(ruleString),
-    })),
+    (context.alwaysAllowRules[source] || []).flatMap(ruleString => {
+      const ruleValue = permissionRuleValueFromString(ruleString)
+      if (
+        filterBroadRules &&
+        isBroadRule(ruleValue.toolName, ruleValue.ruleContent)
+      ) {
+        return []
+      }
+      return [
+        {
+          source,
+          ruleBehavior: 'allow' as const,
+          ruleValue,
+        },
+      ]
+    }),
   )
 }
 

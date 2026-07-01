@@ -1,4 +1,4 @@
-import { isEnvTruthy } from './envUtils.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 
 /**
  * Env vars to strip from subprocess environments when running inside GitHub
@@ -15,6 +15,8 @@ import { isEnvTruthy } from './envUtils.js'
 const GHA_SUBPROCESS_SCRUB = [
   // Anthropic auth — claude re-reads these per-request, subprocesses don't need them
   'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AWS_API_KEY',
+  'ANTHROPIC_BEDROCK_MANTLE_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_FOUNDRY_API_KEY',
@@ -26,6 +28,19 @@ const GHA_SUBPROCESS_SCRUB = [
   'OTEL_EXPORTER_OTLP_LOGS_HEADERS',
   'OTEL_EXPORTER_OTLP_METRICS_HEADERS',
   'OTEL_EXPORTER_OTLP_TRACES_HEADERS',
+
+  // CA certificate bundle overrides — if leaked, an attacker-controlled subprocess
+  // could point these at a malicious CA bundle and MITM tooling (curl, git, pip,
+  // node, cargo, etc.). All CA bundles are read in-process before subprocess spawn.
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'CURL_CA_BUNDLE',
+  'REQUESTS_CA_BUNDLE',
+  'PIP_CERT',
+  'GIT_SSL_CAINFO',
+  'AWS_CA_BUNDLE',
+  'CARGO_HTTP_CAINFO',
+  'DENO_CERT',
 
   // Cloud provider creds — same pattern (lazy SDK reads)
   'AWS_SECRET_ACCESS_KEY',
@@ -76,6 +91,22 @@ export function registerUpstreamProxyEnvFn(
   _getUpstreamProxyEnv = fn
 }
 
+/**
+ * Returns true when the subprocess environment should be scrubbed of sensitive
+ * secrets. Equivalent to official uP1() / isScrubEnabled logic.
+ *
+ * Three paths to scrubbing:
+ * 1. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is truthy → always scrub (GHA mode)
+ * 2. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is explicitly falsy → never scrub
+ * 3. Neither — check CLAUDE_CODE_ENTRYPOINT; local-agent auto-scrubs
+ */
+function shouldScrubSubprocessEnv(): boolean {
+  const envVar = process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+  if (isEnvTruthy(envVar)) return true
+  if (isEnvDefinedFalsy(envVar)) return false
+  return process.env.CLAUDE_CODE_ENTRYPOINT === 'local-agent'
+}
+
 export function subprocessEnv(): NodeJS.ProcessEnv {
   // CCR upstreamproxy: inject HTTPS_PROXY + CA bundle vars so curl/gh/python
   // in agent subprocesses route through the local relay. Returns {} when the
@@ -83,7 +114,7 @@ export function subprocessEnv(): NodeJS.ProcessEnv {
   // CCR containers.
   const proxyEnv = _getUpstreamProxyEnv?.() ?? {}
 
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
+  if (!shouldScrubSubprocessEnv()) {
     return Object.keys(proxyEnv).length > 0
       ? { ...process.env, ...proxyEnv }
       : process.env

@@ -21,7 +21,10 @@ import { safeParseJSON } from '../../utils/json.js'
 import { logError } from '../../utils/log.js'
 import { getPluginMcpServers } from '../../utils/plugins/mcpPluginIntegration.js'
 import { loadAllPluginsCacheOnly } from '../../utils/plugins/pluginLoader.js'
-import { isSettingSourceEnabled } from '../../utils/settings/constants.js'
+import {
+  SETTING_SOURCES,
+  isSettingSourceEnabled,
+} from '../../utils/settings/constants.js'
 import { getManagedFilePath } from '../../utils/settings/managedPath.js'
 import { isRestrictedToPluginOnly } from '../../utils/settings/pluginOnlyPolicy.js'
 import {
@@ -1259,8 +1262,9 @@ export async function getAllMcpConfigs(): Promise<{
   servers: Record<string, ScopedMcpServerConfig>
   errors: PluginError[]
 }> {
-  // In enterprise mode, don't load claude.ai servers (enterprise has exclusive control)
-  if (doesEnterpriseMcpConfigExist()) {
+  // When enterprise lockdown is enabled, suppress claude.ai connectors by default.
+  // Admins can override with allowAllClaudeAiMcps: true in managed settings.
+  if (shouldSuppressClaudeAiMcps()) {
     return getClaudeCodeMcpConfigs()
   }
 
@@ -1487,6 +1491,31 @@ export function shouldAllowManagedMcpServersOnly(): boolean {
   return (
     getSettingsForSource('policySettings')?.allowManagedMcpServersOnly === true
   )
+}
+
+/**
+ * Check whether to suppress claude.ai cloud MCP connectors.
+ *
+ * When enterprise MCP config exists (managed-mcp.json), claude.ai connectors are
+ * suppressed by default so enterprise has exclusive control over MCP servers.
+ * Admins can override this by setting allowAllClaudeAiMcps: true in any policy
+ * source (managed-settings.json).
+ *
+ * Equivalent to official GJ8() / shouldSuppressClaudeAiMcps.
+ */
+export function shouldSuppressClaudeAiMcps(): boolean {
+  if (!doesEnterpriseMcpConfigExist()) {
+    return false
+  }
+  // Check all policy-relevant sources for allowAllClaudeAiMcps override.
+  // When any policy source explicitly allows Claude AI MCPs, don't suppress.
+  for (const source of SETTING_SOURCES) {
+    const settings = getSettingsForSource(source)
+    if (settings?.allowAllClaudeAiMcps === true) {
+      return false
+    }
+  }
+  return true
 }
 
 /**

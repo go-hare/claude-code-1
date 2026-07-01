@@ -23,13 +23,15 @@ import {
 import { rmSync, statSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { memoize } from 'lodash-es'
-import { join, resolve, sep } from 'path'
+import { homedir } from 'os'
+import { dirname, join, posix, resolve, sep } from 'path'
 import {
   getAdditionalDirectoriesForClaudeMd,
   getCwdState,
   getOriginalCwd,
 } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { expandPath } from '../path.js'
 import { getPlatform, type Platform } from '../platform.js'
 import { settingsChangeDetector } from '../settings/changeDetector.js'
@@ -57,6 +59,121 @@ import { errorMessage } from '../errors.js'
 import { getClaudeTempDir } from '../permissions/filesystem.js'
 import type { PermissionRuleValue } from '../permissions/PermissionRule.js'
 import { ripgrepCommand } from '../ripgrep.js'
+
+// ============================================================================
+// Credential Protection Constants (from official sandbox.credentials)
+// ============================================================================
+
+/**
+ * Environment files that should be write-protected in sandbox mode.
+ * Equivalent to official NXq constant.
+ */
+export const ENV_FILES = [
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.development.local',
+  '.env.test',
+  '.env.test.local',
+  '.env.production',
+  '.env.production.local',
+] as const
+
+/**
+ * System directories that are allowed for writes in sandbox mode.
+ * Equivalent to official gH7 constant.
+ */
+export const ALLOW_WRITE_SYSTEM_DIRS = [
+  '/home',
+  '/root',
+  '/tmp',
+  '/var',
+  '/opt',
+  '/run',
+  '/mnt',
+] as const
+
+/**
+ * Socket and runtime paths denied for reads in sandbox mode.
+ * Equivalent to official denyRead list in CXq().
+ */
+export const DENY_READ_SOCKET_PATHS = [
+  '/run/docker.sock',
+  '/run/containerd/containerd.sock',
+  '/run/podman/podman.sock',
+  '/run/buildkit/buildkitd.sock',
+  '/run/dbus',
+  '/run/user',
+] as const
+
+/**
+ * Base credential/config file names to protect.
+ * Equivalent to official vD8 constant.
+ */
+export const SENSITIVE_CREDENTIAL_FILES = [
+  '.gitconfig',
+  '.gitmodules',
+  '.bashrc',
+  '.bash_profile',
+  '.zshrc',
+  '.zprofile',
+  '.profile',
+  '.ripgreprc',
+  '.mcp.json',
+] as const
+
+/**
+ * Extended credential/config file names to protect (includes .claude.json).
+ * Equivalent to official Gwf constant.
+ */
+export const EXTENDED_CREDENTIAL_FILES = [
+  '.gitconfig',
+  '.gitmodules',
+  '.bashrc',
+  '.bash_profile',
+  '.zshrc',
+  '.zprofile',
+  '.profile',
+  '.ripgreprc',
+  '.mcp.json',
+  '.claude.json',
+] as const
+
+/**
+ * Sensitive directory names to protect.
+ * Equivalent to official V01 constant.
+ */
+export const SENSITIVE_DIRECTORIES = ['.git', '.vscode', '.idea'] as const
+
+/**
+ * Extended sensitive directory names to protect (includes .claude, .husky).
+ * Equivalent to official Vwf constant.
+ */
+export const EXTENDED_SENSITIVE_DIRECTORIES = [
+  '.git',
+  '.vscode',
+  '.idea',
+  '.claude',
+  '.husky',
+] as const
+
+/**
+ * CA certificate bundle environment variables that should be scrubbed from
+ * subprocess environments. If leaked, an attacker could point these at a
+ * malicious CA bundle and MITM tooling (curl, git, pip, node, cargo, etc.).
+ * Equivalent to official T01 constant.
+ */
+export const CA_CERT_ENV_VARS = [
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'CURL_CA_BUNDLE',
+  'REQUESTS_CA_BUNDLE',
+  'PIP_CERT',
+  'GIT_SSL_CAINFO',
+  'AWS_CA_BUNDLE',
+  'CARGO_HTTP_CAINFO',
+  'DENO_CERT',
+] as const
 
 // Local copies to avoid circular dependency
 // (permissions.ts imports SandboxManager, bashPermissions.ts imports permissions.ts)
@@ -278,6 +395,157 @@ export function convertToSandboxRuntimeConfig(
       }
     }
   }
+
+  // ==========================================================================
+  // Credential & config file write protection (from official CXq() /
+  // sandbox.credentials). Prevents sandboxed commands from modifying shell
+  // RC files, package manager config, env files, git config, CI/CD runner
+  // paths, and credential directories — all of which are vectors for
+  // sandbox escape or credential exfiltration.
+  // ==========================================================================
+  const home = homedir()
+
+  // Shell RC files — modifying these lets an attacker persist across shell
+  // sessions (e.g. alias sudo=..., PATH injection, PROMPT_COMMAND hook)
+  denyWrite.push(
+    join(home, '.bash_profile'),
+    join(home, '.bashrc'),
+    join(home, '.bash_aliases'),
+    join(home, '.bash_login'),
+    join(home, '.bash_logout'),
+    join(home, '.profile'),
+    join(home, '.zshrc'),
+    join(home, '.zprofile'),
+    join(home, '.zshenv'),
+    join(home, '.zlogin'),
+    join(home, '.zlogout'),
+  )
+
+  // Claude config — modifying these lets an attacker change model, auth,
+  // permission rules, hooks, MCP servers, or sandbox settings
+  denyWrite.push(
+    join(home, '.claude'),
+    join(home, '.claude.json'),
+    getClaudeConfigHomeDir(),
+  )
+
+  // Git config — core.fsmonitor / core.sshCommand escape, credential helper
+  // poisoning, insteadOf URL rewriting
+  denyWrite.push(join(home, '.gitconfig'), join(home, '.config', 'git'))
+
+  // Package manager config files — registry rewriting, script hooks, CA bundle
+  // overrides, install-time code execution
+  denyWrite.push(
+    join(home, '.bunfig.toml'),
+    join(originalCwd, 'bunfig.toml'),
+    join(originalCwd, 'package.json'),
+    ...ENV_FILES.map(f => join(originalCwd, f)),
+    join(home, '.npmrc'),
+    join(originalCwd, '.npmrc'),
+    join(home, '.yarnrc'),
+    join(home, '.yarnrc.yml'),
+    join(originalCwd, '.yarnrc'),
+    join(originalCwd, '.yarnrc.yml'),
+    join(home, '.config', 'pip'),
+    join(home, '.pip'),
+  )
+
+  // Lock files — tampering enables supply-chain attacks by swapping dependency
+  // hashes for malicious packages
+  denyWrite.push(
+    join(originalCwd, 'package-lock.json'),
+    join(originalCwd, 'yarn.lock'),
+    join(originalCwd, 'pnpm-lock.yaml'),
+  )
+
+  // Project-level paths that are gateways for sandbox escape or code execution
+  denyWrite.push(
+    join(originalCwd, 'node_modules', '.bin'),
+    join(originalCwd, '.git', 'modules'),
+    join(originalCwd, 'scripts'),
+    join(originalCwd, '.claude'),
+    join(originalCwd, '.github'),
+  )
+
+  // CI/CD self-hosted runner directories — modifying these enables persistent
+  // code execution on the runner host
+  denyWrite.push(
+    join(home, '.local', 'bin'),
+    join(home, 'runners'),
+    join(home, 'actions-runner'),
+  )
+
+  // Shared temp buffer used by inline-comments — modifying this could inject
+  // content into the conversation context
+  denyWrite.push('/tmp/inline-comments-buffer.jsonl')
+
+  // PATH directories under system paths — binaries in these locations could
+  // shadow or override expected commands.
+  // Equivalent to official fU.pathDirs computation in SXq().
+  const pathDirs = (process.env.PATH ?? '')
+    .split(':')
+    .map(p => (p ? posix.normalize(p).replace(/\/+$/, '') : p))
+    .filter(p => p && ALLOW_WRITE_SYSTEM_DIRS.some(d => p.startsWith(`${d}/`)))
+  denyWrite.push(...pathDirs)
+
+  // GitHub Actions runner file commands directory — set-env / add-path /
+  // set-output commands execute in the runner context, outside the sandbox
+  const githubEnv = process.env.GITHUB_ENV
+  if (githubEnv) {
+    denyWrite.push(dirname(githubEnv))
+  }
+
+  // GitHub Actions action path — modifying action source is remote code
+  // execution on the runner
+  const githubActionPath = process.env.GITHUB_ACTION_PATH
+  if (githubActionPath) {
+    denyWrite.push(githubActionPath)
+    // Also protect the _actions/ prefix directory (the checked-out actions tree)
+    if (githubActionPath.includes('/_actions/')) {
+      denyWrite.push(
+        githubActionPath.slice(0, githubActionPath.indexOf('/_actions/') + 9),
+      )
+    }
+  }
+
+  // GitHub Actions event payload — modifying this can alter workflow behavior
+  const githubEventPath = process.env.GITHUB_EVENT_PATH
+  if (githubEventPath) {
+    denyWrite.push(githubEventPath)
+  }
+
+  // Credential directories — SSH keys, GitHub CLI tokens, netrc passwords
+  denyWrite.push(
+    join(home, '.config', 'gh'),
+    join(home, '.netrc'),
+    join(home, '.ssh'),
+  )
+
+  // Git internals in project directory — hooks, config, modules, exclude
+  denyWrite.push(
+    join(originalCwd, '.git', 'hooks'),
+    join(originalCwd, '.git', 'config'),
+    join(originalCwd, '.gitmodules'),
+    join(originalCwd, '.git', 'info', 'exclude'),
+  )
+
+  // When GITHUB_WORKSPACE differs from cwd (e.g. reusable workflows,
+  // composite actions), also protect the workspace's git metadata
+  const workspace = process.env.GITHUB_WORKSPACE
+  if (workspace && resolve(workspace) !== resolve(originalCwd)) {
+    denyWrite.push(
+      join(workspace, '.git', 'hooks'),
+      join(workspace, '.git', 'config'),
+      join(workspace, '.git', 'modules'),
+      join(workspace, '.git', 'info', 'exclude'),
+      join(workspace, '.gitmodules'),
+      join(workspace, '.github'),
+    )
+  }
+
+  // Deny read access to container runtime sockets — these allow escaping
+  // the sandbox by spawning privileged containers on the host
+  denyRead.push(...DENY_READ_SOCKET_PATHS)
 
   // If we detected a git worktree during initialize(), the main repo path is
   // cached in worktreeMainRepoPath. Git operations in a worktree need write
