@@ -21,7 +21,11 @@
       "@claude-code/agent-tools/*": ["./packages/agent-tools/src/*"],
       "@claude-code/agent-tools": ["./packages/agent-tools/src/index.ts"],
       "@claude-code/weixin/*": ["./packages/weixin/src/*"],
-      "@claude-code/weixin": ["./packages/weixin/src/index.ts"]
+      "@claude-code/weixin": ["./packages/weixin/src/index.ts"],
+      "@claude-code/workflow-engine/*": ["./packages/workflow-engine/src/*"],
+      "@claude-code/workflow-engine": [
+        "./packages/workflow-engine/src/index.ts"
+      ]
     }
   },
   "include": [

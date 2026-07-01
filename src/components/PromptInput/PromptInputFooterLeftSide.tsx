@@ -36,7 +36,7 @@ import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTasksV2 } from '../../hooks/useTasksV2.js';
-import { formatDuration } from '../../utils/format.js';
+import { formatDuration, formatFileSize } from '../../utils/format.js';
 import { VoiceWarmupHint } from './VoiceIndicator.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import { useVoiceState } from '../../context/voice.js';
@@ -53,6 +53,8 @@ const proactiveModule = feature('PROACTIVE') || feature('KAIROS') ? require('../
 const NO_OP_SUBSCRIBE = (_cb: () => void) => () => {};
 const NULL = () => null;
 const MAX_VOICE_HINT_SHOWS = 3;
+
+const GOAL_TICK_INTERVAL_MS = 1_000;
 
 type Props = {
   exitMessage: {
@@ -106,6 +108,55 @@ function ProactiveCountdown(): React.ReactNode {
   if (remainingSeconds === null) return null;
 
   return <Text dimColor>waiting {formatDuration(remainingSeconds * 1000, { mostSignificantOnly: true })}</Text>;
+}
+
+/** Compact "goal (1h22min)" pill for the footer — colored by status. */
+function GoalElapsedIndicator(): React.ReactNode {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), GOAL_TICK_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
+  void tick;
+
+  const goalModule = require('../../services/goal/goalState.js') as typeof import('../../services/goal/goalState');
+  const goal = goalModule.getGoal();
+  if (!goal) return null;
+
+  const elapsedMs = goalModule.getActiveElapsedMs(goal);
+  const totalSeconds = Math.floor(elapsedMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  let timeStr: string;
+  if (hours >= 1) {
+    timeStr = `${hours}h${minutes}min`;
+  } else if (minutes >= 1) {
+    timeStr = `${minutes}min`;
+  } else {
+    timeStr = `${seconds}s`;
+  }
+
+  let color: string | undefined;
+  switch (goal.status) {
+    case 'active':
+      color = 'ansi:green';
+      break;
+    case 'paused':
+    case 'budget_limited':
+    case 'usage_limited':
+      color = 'ansi:yellow';
+      break;
+    case 'blocked':
+      color = 'ansi:red';
+      break;
+    case 'complete':
+      color = 'ansi:cyan';
+      break;
+  }
+
+  return <Text color={color as 'ansi:green'}>goal ({timeStr})</Text>;
 }
 
 export function PromptInputFooterLeftSide({
@@ -264,6 +315,7 @@ function ModeIndicator({
     }
   }, [voiceEnabled, voiceHintUnderCap]);
   const isKillAgentsConfirmShowing = useAppState(s => s.notifications.current?.key === 'kill-agents-confirm');
+
   // Derive team info from teamContext (no filesystem I/O needed)
   // Match the same logic as TeamStatus to avoid trailing separator
   // In-process mode uses Shift+Down/Up navigation, not footer teams menu
@@ -346,6 +398,11 @@ function ModeIndicator({
       : []),
     ...(shouldShowPrStatus
       ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />]
+      : []),
+    // Goal elapsed indicator
+    ...(feature('GOAL') &&
+    (require('../../services/goal/goalState.js') as typeof import('../../services/goal/goalState')).getGoal()
+      ? [<GoalElapsedIndicator key="goal-elapsed" />]
       : []),
   ];
 

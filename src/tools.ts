@@ -11,12 +11,17 @@ import { NotebookEditTool } from '@claude-code/builtin-tools/tools/NotebookEditT
 import { WebFetchTool } from '@claude-code/builtin-tools/tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from '@claude-code/builtin-tools/tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
-// REPLTool / SuggestBackgroundPRTool: previously ant-only, now generally available.
+// Dead code elimination: conditional import for ant-only tools
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const REPLTool =
-  require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js').REPLTool
+  process.env.USER_TYPE === 'ant'
+    ? require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js').REPLTool
+    : null
 const SuggestBackgroundPRTool =
-  require('@claude-code/builtin-tools/tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js').SuggestBackgroundPRTool
+  process.env.USER_TYPE === 'ant'
+    ? require('@claude-code/builtin-tools/tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js')
+        .SuggestBackgroundPRTool
+    : null
 const SleepTool =
   feature('PROACTIVE') || feature('KAIROS')
     ? require('@claude-code/builtin-tools/tools/SleepTool/SleepTool.js')
@@ -56,6 +61,7 @@ import { TaskOutputTool } from '@claude-code/builtin-tools/tools/TaskOutputTool/
 import { WebSearchTool } from '@claude-code/builtin-tools/tools/WebSearchTool/WebSearchTool.js'
 import { TodoWriteTool } from '@claude-code/builtin-tools/tools/TodoWriteTool/TodoWriteTool.js'
 import { ExitPlanModeV2Tool } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
+import { ArtifactTool } from '@claude-code/builtin-tools/tools/ArtifactTool/ArtifactTool.js'
 import { TestingPermissionTool } from '@claude-code/builtin-tools/tools/testing/TestingPermissionTool.js'
 import { GrepTool } from '@claude-code/builtin-tools/tools/GrepTool/GrepTool.js'
 import { TungstenTool } from '@claude-code/builtin-tools/tools/TungstenTool/TungstenTool.js'
@@ -81,6 +87,9 @@ import { EnterPlanModeTool } from '@claude-code/builtin-tools/tools/EnterPlanMod
 import { EnterWorktreeTool } from '@claude-code/builtin-tools/tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/ExitWorktreeTool.js'
 import { ConfigTool } from '@claude-code/builtin-tools/tools/ConfigTool/ConfigTool.js'
+const GoalTool = feature('GOAL')
+  ? require('@claude-code/builtin-tools/tools/GoalTool/GoalTool.js').GoalTool
+  : null
 import { LocalMemoryRecallTool } from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/LocalMemoryRecallTool.js'
 import { VaultHttpFetchTool } from '@claude-code/builtin-tools/tools/VaultHttpFetchTool/VaultHttpFetchTool.js'
 import { TaskCreateTool } from '@claude-code/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
@@ -143,11 +152,7 @@ const ListPeersTool = feature('UDS_INBOX')
       .ListPeersTool
   : null
 const WorkflowTool = feature('WORKFLOW_SCRIPTS')
-  ? (() => {
-      require('@claude-code/builtin-tools/tools/WorkflowTool/bundled/index.js').initBundledWorkflows()
-      return require('@claude-code/builtin-tools/tools/WorkflowTool/WorkflowTool.js')
-        .WorkflowTool
-    })()
+  ? require('./workflow/wiring.js').createWorkflowToolCore()
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import type { ToolPermissionContext } from './Tool.js'
@@ -221,6 +226,7 @@ export function getAllBaseTools(): Tools {
     FileEditTool,
     FileWriteTool,
     NotebookEditTool,
+    ArtifactTool,
     WebFetchTool,
     TodoWriteTool,
     WebSearchTool,
@@ -231,6 +237,7 @@ export function getAllBaseTools(): Tools {
     LocalMemoryRecallTool,
     VaultHttpFetchTool,
     ConfigTool,
+    ...(GoalTool ? [GoalTool] : []),
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
     ...(SuggestBackgroundPRTool ? [SuggestBackgroundPRTool] : []),
     ...(WebBrowserTool ? [WebBrowserTool] : []),
@@ -247,7 +254,7 @@ export function getAllBaseTools(): Tools {
     getTeamCreateTool(),
     getTeamDeleteTool(),
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
-    ...(REPLTool ? [REPLTool] : []),
+    ...(process.env.USER_TYPE === 'ant' && REPLTool ? [REPLTool] : []),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
     ...cronTools,

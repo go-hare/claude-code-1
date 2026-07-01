@@ -323,6 +323,7 @@ type ResumeLoadResult = {
   prNumber?: number
   prUrl?: string
   prRepository?: string
+  goal?: import('../types/logs.js').GoalState
 }
 
 /**
@@ -481,6 +482,18 @@ export async function processResumedConversation(
   restoreSessionMetadata(
     opts.forkSession ? { ...result, worktreeSession: undefined } : result,
   )
+
+  if (feature('GOAL') && result.goal) {
+    const { hydrateGoalFromTranscript } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/goal/goalStorage.js') as typeof import('../services/goal/goalStorage.js')
+    const goalsMap = new Map<UUID, import('../types/logs.js').GoalState>()
+    const sid = (opts.sessionIdOverride ??
+      result.sessionId ??
+      getSessionId()) as UUID
+    goalsMap.set(sid, result.goal)
+    hydrateGoalFromTranscript(goalsMap, sid)
+  }
 
   if (!opts.forkSession) {
     // Cd back into the worktree the session was in when it last exited.
