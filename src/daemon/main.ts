@@ -298,6 +298,9 @@ async function runSupervisor(args: string[]): Promise<void> {
 
   const controller = new AbortController()
 
+  // Record startup version for self-restart detection
+  const startupVersion = process.env.CLAUDE_CODE_VERSION || 'unknown'
+
   // Graceful shutdown
   const shutdown = () => {
     console.log('[daemon] supervisor shutting down...')
@@ -316,6 +319,24 @@ async function runSupervisor(args: string[]): Promise<void> {
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
 
+  // Periodic version check for self-restart on upgrade
+  const versionCheckInterval = setInterval(() => {
+    const currentVersion = process.env.CLAUDE_CODE_VERSION || 'unknown'
+    if (currentVersion !== startupVersion && currentVersion !== 'unknown') {
+      console.log(
+        `[daemon] version changed from ${startupVersion} to ${currentVersion} — restarting`,
+      )
+      logEvent('tengu_daemon_self_restart_on_upgrade', {
+        old_version:
+          startupVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        new_version:
+          currentVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      shutdown()
+    }
+  }, 30_000) // Check every 30s
+  versionCheckInterval.unref?.()
+
   // Spawn and supervise workers
   for (const worker of workers) {
     if (!controller.signal.aborted) {
@@ -331,6 +352,9 @@ async function runSupervisor(args: string[]): Promise<void> {
     }
     controller.signal.addEventListener('abort', () => resolve(), { once: true })
   })
+
+  // Clean up version check interval
+  clearInterval(versionCheckInterval)
 
   // Wait for all workers to exit
   await Promise.all(
