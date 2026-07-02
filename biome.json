@@ -10,7 +10,9 @@
       "**",
       "!!**/dist",
       "!!**/.claude/workflows",
-      "!!**/*.workflow.mjs"
+      "!!**/*.workflow.mjs",
+      "!!docs/reference/**",
+      "!!docs/upstream-extraction/**"
     ]
   },
   "formatter": {
