@@ -10,7 +10,7 @@
  *   bun run scripts/publish.ts --with-main        # also publish the main @go-hare/claude-code pkg
  *   bun run scripts/publish.ts --dry-run          # npm publish --dry-run
  */
-import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 import { DEFAULT_BUILD_FEATURES, getMacroDefines } from './defines.ts'
 
@@ -29,6 +29,7 @@ interface PlatformInfo {
   bunTarget: string
   binaryName: string
   pkgDir: string
+  ripgrepDir?: string
 }
 
 const PLATFORMS: Record<string, PlatformInfo> = {
@@ -36,6 +37,7 @@ const PLATFORMS: Record<string, PlatformInfo> = {
     bunTarget: 'bun-darwin-arm64',
     binaryName: 'claude',
     pkgDir: 'packages/@go-hare/claude-code-darwin-arm64',
+    ripgrepDir: 'arm64-darwin',
   },
   'darwin-x64': {
     bunTarget: 'bun-darwin-x64',
@@ -149,6 +151,38 @@ function copyToPlatformPkg(binaryPath: string, platformKey: string): void {
   console.log(`Copied binary to ${dest}`)
 }
 
+function copyRipgrepToPlatformPkg(platformKey: string): void {
+  const info = PLATFORMS[platformKey]
+  const binaryName = platformKey.startsWith('win32') ? 'rg.exe' : 'rg'
+  const ripgrepDir = info.ripgrepDir
+
+  if (!ripgrepDir) {
+    console.warn(`No vendored ripgrep configured for ${platformKey}, skipping.`)
+    return
+  }
+
+  const src = join(
+    ROOT,
+    'src',
+    'utils',
+    'vendor',
+    'ripgrep',
+    ripgrepDir,
+    binaryName,
+  )
+  if (!existsSync(src)) {
+    console.warn(`Vendored ripgrep not found at ${src}, skipping.`)
+    return
+  }
+
+  const destDir = join(ROOT, info.pkgDir, 'vendor', 'ripgrep', ripgrepDir)
+  const dest = join(destDir, binaryName)
+  mkdirSync(destDir, { recursive: true })
+  copyFileSync(src, dest)
+  if (!platformKey.startsWith('win32')) chmodSync(dest, 0o755)
+  console.log(`Copied ripgrep to ${dest}`)
+}
+
 function publishPkg(pkgDir: string): void {
   const dryRunFlag = dryRun ? ['--dry-run'] : []
   console.log(`\nPublishing ${pkgDir}${dryRun ? ' (dry-run)' : ''}...`)
@@ -170,6 +204,7 @@ function main() {
   if (!publishOnly) {
     const binaryPath = buildBinary(targetPlatform)
     copyToPlatformPkg(binaryPath, targetPlatform)
+    copyRipgrepToPlatformPkg(targetPlatform)
     console.log(`\nBuild complete for ${targetPlatform}.`)
   }
 

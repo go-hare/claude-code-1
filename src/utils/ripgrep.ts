@@ -28,6 +28,81 @@ type RipgrepConfig = {
   note?: string
 }
 
+function getRipgrepPlatformDir(): string {
+  return process.platform === 'win32'
+    ? `${process.arch}-win32`
+    : `${process.arch}-${process.platform}`
+}
+
+function getRipgrepBinaryName(): string {
+  return process.platform === 'win32' ? 'rg.exe' : 'rg'
+}
+
+function getPlatformPackageSuffix(): string | undefined {
+  if (process.platform === 'darwin') return `darwin-${process.arch}`
+  if (process.platform === 'win32') return `win32-${process.arch}`
+  if (process.platform === 'linux') return `linux-${process.arch}`
+  return undefined
+}
+
+function getBuiltinRipgrepCandidates(): string[] {
+  const platformDir = getRipgrepPlatformDir()
+  const binaryName = getRipgrepBinaryName()
+  const execDir = path.dirname(process.execPath)
+  const packageRoot = path.dirname(execDir)
+  const packageParent = path.dirname(packageRoot)
+  const candidates = [
+    path.resolve(
+      distRoot,
+      'src',
+      'utils',
+      'vendor',
+      'ripgrep',
+      platformDir,
+      binaryName,
+    ),
+    path.resolve(__dirname, 'vendor', 'ripgrep', platformDir, binaryName),
+    path.resolve(execDir, 'vendor', 'ripgrep', platformDir, binaryName),
+    path.resolve(packageRoot, 'vendor', 'ripgrep', platformDir, binaryName),
+  ]
+  const suffix = getPlatformPackageSuffix()
+
+  if (suffix) {
+    const platformPkg = `claude-code-${suffix}`
+    candidates.push(
+      path.resolve(
+        packageRoot,
+        'node_modules',
+        '@go-hare',
+        platformPkg,
+        'vendor',
+        'ripgrep',
+        platformDir,
+        binaryName,
+      ),
+      path.resolve(
+        packageParent,
+        platformPkg,
+        'vendor',
+        'ripgrep',
+        platformDir,
+        binaryName,
+      ),
+      path.resolve(
+        packageParent,
+        '@go-hare',
+        platformPkg,
+        'vendor',
+        'ripgrep',
+        platformDir,
+        binaryName,
+      ),
+    )
+  }
+
+  return [...new Set(candidates)]
+}
+
 export const getRipgrepConfig = memoize((): RipgrepConfig => {
   const userWantsSystemRipgrep = isEnvDefinedFalsy(
     process.env.USE_BUILTIN_RIPGREP,
@@ -55,13 +130,7 @@ export const getRipgrepConfig = memoize((): RipgrepConfig => {
     }
   }
 
-  const rgRoot = path.resolve(__dirname, 'vendor', 'ripgrep')
-  const command =
-    process.platform === 'win32'
-      ? path.resolve(rgRoot, `${process.arch}-win32`, 'rg.exe')
-      : path.resolve(rgRoot, `${process.arch}-${process.platform}`, 'rg')
-
-  return resolveBuiltinWithFallback(command)
+  return resolveBuiltinWithFallback(getBuiltinRipgrepCandidates())
 })
 
 /**
@@ -75,7 +144,7 @@ export const getRipgrepConfig = memoize((): RipgrepConfig => {
  * @param platform     Override for `process.platform` (tests only).
  */
 export function resolveBuiltinWithFallback(
-  builtinPath: string,
+  builtinPath: string | string[],
   systemRgPath?: string | null,
   platform?: string,
 ): {
@@ -85,10 +154,12 @@ export function resolveBuiltinWithFallback(
   note?: string
 } {
   const p = platform ?? process.platform
+  const builtinPaths = Array.isArray(builtinPath) ? builtinPath : [builtinPath]
 
   // Builtin exists — use it, no note.
-  if (existsSync(builtinPath)) {
-    return { mode: 'builtin', command: builtinPath, args: [] }
+  const existingBuiltinPath = builtinPaths.find(path => existsSync(path))
+  if (existingBuiltinPath) {
+    return { mode: 'builtin', command: existingBuiltinPath, args: [] }
   }
 
   // Builtin missing — check system rg.
@@ -110,7 +181,7 @@ export function resolveBuiltinWithFallback(
   // Neither available.
   return {
     mode: 'builtin',
-    command: builtinPath,
+    command: builtinPaths[0],
     args: [],
     note: `no ripgrep available on ${p}; install ripgrep via apt/pkg/brew`,
   }

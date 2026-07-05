@@ -37,6 +37,16 @@ describe('resolveBuiltinWithFallback', () => {
     expect(result.note).toBeUndefined()
   })
 
+  test('builtin candidates choose the first existing path', () => {
+    const result = resolveBuiltinWithFallback([
+      join(tmpDir, 'missing-rg'),
+      rgPath,
+    ])
+    expect(result.mode).toBe('builtin')
+    expect(result.command).toBe(rgPath)
+    expect(result.note).toBeUndefined()
+  })
+
   test('builtin missing + system rg available -> mode=system, note set', () => {
     rmSync(rgPath)
     const result = resolveBuiltinWithFallback(
