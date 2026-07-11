@@ -278,6 +278,7 @@
       "version": "1.0.0",
       "dependencies": {
         "@claude-code/agent-tools": "workspace:*",
+        "marked": "^17.0.6",
       },
     },
     "packages/cloud-artifacts": {
