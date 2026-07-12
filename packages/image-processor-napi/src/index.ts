@@ -1,4 +1,6 @@
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname, join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import sharpModule from 'sharp'
 
 export const sharp = sharpModule
@@ -18,33 +20,68 @@ interface NativeModule {
 }
 
 /**
- * Resolve the path to the clipboard-image binary.
- * In dev: vendor/clipboard-image/arm64-darwin
- * In dist: dist/vendor/clipboard-image/arm64-darwin
+ * Candidate paths for the macOS clipboard-image helper.
+ *
+ * Layouts covered:
+ * - bun compile: next to process.execPath / platform optionalDependency
+ * - JS dist: dist/vendor/clipboard-image/arm64-darwin
+ * - monorepo dev: vendor/clipboard-image/arm64-darwin
  */
-function getClipboardBinaryPath(): string {
-  const url = import.meta.url
-  const idx = url.lastIndexOf('dist')
-  if (idx !== -1) {
-    const root = url.slice(0, idx + 4).replace('file://', '')
-    return join(root, 'vendor', 'clipboard-image', 'arm64-darwin')
+function getClipboardBinaryCandidates(): string[] {
+  const binaryName = `${process.arch}-${process.platform}`
+  const rel = ['vendor', 'clipboard-image', binaryName] as const
+  const execDir = dirname(process.execPath)
+  const packageRoot = dirname(execDir)
+  const packageParent = dirname(packageRoot)
+  const platformPkg = `claude-code-${process.platform}-${process.arch}`
+
+  const candidates = [
+    join(execDir, ...rel),
+    join(packageRoot, ...rel),
+    join(packageRoot, 'node_modules', '@go-hare', platformPkg, ...rel),
+    join(packageParent, platformPkg, ...rel),
+    join(packageParent, '@go-hare', platformPkg, ...rel),
+  ]
+
+  try {
+    const filePath = fileURLToPath(import.meta.url)
+    const dir = dirname(filePath)
+    const parts = dir.split(sep)
+    const distIdx = parts.lastIndexOf('dist')
+    if (distIdx !== -1) {
+      candidates.push(join(parts.slice(0, distIdx + 1).join(sep), ...rel))
+    }
+    const packagesIdx = parts.lastIndexOf('packages')
+    if (packagesIdx !== -1) {
+      candidates.push(join(parts.slice(0, packagesIdx).join(sep), ...rel))
+    }
+  } catch {
+    // import.meta.url may be unavailable in some embed layouts
   }
-  const srcIdx = url.lastIndexOf('packages')
-  if (srcIdx !== -1) {
-    const root = url.slice(0, srcIdx).replace('file://', '')
-    return join(root, 'vendor', 'clipboard-image', 'arm64-darwin')
-  }
-  return join(process.cwd(), 'vendor', 'clipboard-image', 'arm64-darwin')
+
+  candidates.push(join(process.cwd(), ...rel))
+  return candidates
 }
 
-let binaryPath: string | null = null
+let resolvedBinaryPath: string | null | undefined
+
+function resolveClipboardBinary(): string | null {
+  if (resolvedBinaryPath !== undefined) return resolvedBinaryPath
+  for (const candidate of getClipboardBinaryCandidates()) {
+    if (existsSync(candidate)) {
+      resolvedBinaryPath = candidate
+      return candidate
+    }
+  }
+  resolvedBinaryPath = null
+  return null
+}
 
 function getClipboardPNG(): Buffer | null {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') return null
+  if (process.platform !== 'darwin') return null
 
-  if (!binaryPath) {
-    binaryPath = getClipboardBinaryPath()
-  }
+  const binaryPath = resolveClipboardBinary()
+  if (!binaryPath) return null
 
   try {
     const result = Bun.spawnSync({
@@ -103,7 +140,9 @@ function createDarwinNativeModule(): NativeModule {
 }
 
 export function getNativeModule(): NativeModule | null {
-  if (process.platform === 'darwin') {
+  // Only expose the native path when the helper binary is actually present.
+  // Otherwise imagePaste falls through to osascript.
+  if (process.platform === 'darwin' && resolveClipboardBinary()) {
     return createDarwinNativeModule()
   }
   return null

@@ -183,6 +183,26 @@ function copyRipgrepToPlatformPkg(platformKey: string): void {
   console.log(`Copied ripgrep to ${dest}`)
 }
 
+function copyClipboardImageToPlatformPkg(platformKey: string): void {
+  // Only arm64 macOS has a vendored NSPasteboard helper today.
+  if (platformKey !== 'darwin-arm64') return
+
+  const info = PLATFORMS[platformKey]
+  const binaryName = 'arm64-darwin'
+  const src = join(ROOT, 'vendor', 'clipboard-image', binaryName)
+  if (!existsSync(src)) {
+    console.warn(`Vendored clipboard-image not found at ${src}, skipping.`)
+    return
+  }
+
+  const destDir = join(ROOT, info.pkgDir, 'vendor', 'clipboard-image')
+  const dest = join(destDir, binaryName)
+  mkdirSync(destDir, { recursive: true })
+  copyFileSync(src, dest)
+  chmodSync(dest, 0o755)
+  console.log(`Copied clipboard-image to ${dest}`)
+}
+
 function publishPkg(pkgDir: string): void {
   const dryRunFlag = dryRun ? ['--dry-run'] : []
   console.log(`\nPublishing ${pkgDir}${dryRun ? ' (dry-run)' : ''}...`)
@@ -205,6 +225,7 @@ function main() {
     const binaryPath = buildBinary(targetPlatform)
     copyToPlatformPkg(binaryPath, targetPlatform)
     copyRipgrepToPlatformPkg(targetPlatform)
+    copyClipboardImageToPlatformPkg(targetPlatform)
     console.log(`\nBuild complete for ${targetPlatform}.`)
   }
 

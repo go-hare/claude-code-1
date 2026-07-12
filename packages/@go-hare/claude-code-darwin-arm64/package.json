@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code-darwin-arm64",
-  "version": "2.6.22",
+  "version": "2.6.24",
   "description": "Platform-specific binary for @go-hare/claude-code (macOS ARM64)",
   "os": [
     "darwin"
@@ -10,7 +10,8 @@
   ],
   "files": [
     "claude",
-    "vendor/ripgrep/arm64-darwin/rg"
+    "vendor/ripgrep/arm64-darwin/rg",
+    "vendor/clipboard-image/arm64-darwin"
   ],
   "preferUnplugged": true,
   "license": "SEE LICENSE IN README.md",
