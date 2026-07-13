@@ -17,6 +17,7 @@ const {
   readFileSync,
   writeFileSync,
   statSync,
+  readdirSync,
 } = require('fs')
 const { arch } = require('os')
 const path = require('path')
@@ -128,6 +129,40 @@ function placeBinary(src, dest) {
   }
   if (process.platform !== 'win32') chmodSync(dest, 0o755)
 }
+
+// npm install may drop the executable bit on vendored helpers (clipboard-image,
+// ripgrep). Only the main binary was chmod'd before — restore +x under vendor/.
+function ensureVendorBinariesExecutable(pkgDir) {
+  if (process.platform === 'win32') return
+
+  const vendorDir = path.join(pkgDir, 'vendor')
+  if (!existsSync(vendorDir)) return
+
+  const stack = [vendorDir]
+  while (stack.length > 0) {
+    const dir = stack.pop()
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        stack.push(full)
+        continue
+      }
+      if (!entry.isFile()) continue
+      try {
+        chmodSync(full, 0o755)
+      } catch {
+        // Best-effort: missing write permission shouldn't fail install.
+      }
+    }
+  }
+}
+
 function main() {
   const platformKey = getPlatformKey()
   const info = PLATFORMS[platformKey]
@@ -153,9 +188,10 @@ function main() {
     return
   }
 
+  let pkgDir
   let src
   try {
-    const pkgDir = path.dirname(require.resolve(info.pkg + '/package.json'))
+    pkgDir = path.dirname(require.resolve(info.pkg + '/package.json'))
     src = path.join(pkgDir, info.bin)
   } catch {
     console.error(
@@ -175,6 +211,7 @@ function main() {
 
   try {
     placeBinary(src, dest)
+    ensureVendorBinariesExecutable(pkgDir)
   } catch (err) {
     console.error(
       `[${WRAPPER_NAME} postinstall] Failed to place binary: ${err.message}`,
