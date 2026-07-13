@@ -68,6 +68,7 @@ const PLATFORMS: Record<string, PlatformInfo> = {
     bunTarget: 'bun-windows-x64',
     binaryName: 'claude.exe',
     pkgDir: 'packages/@go-hare/claude-code-win32-x64',
+    ripgrepDir: 'x64-win32',
   },
   'win32-arm64': {
     bunTarget: 'bun-windows-arm64',
@@ -161,22 +162,26 @@ function copyRipgrepToPlatformPkg(platformKey: string): void {
     return
   }
 
-  const src = join(
-    ROOT,
-    'src',
-    'utils',
-    'vendor',
-    'ripgrep',
-    ripgrepDir,
-    binaryName,
-  )
-  if (!existsSync(src)) {
-    console.warn(`Vendored ripgrep not found at ${src}, skipping.`)
+  const destDir = join(ROOT, info.pkgDir, 'vendor', 'ripgrep', ripgrepDir)
+  const dest = join(destDir, binaryName)
+  const sourceCandidates = [
+    join(ROOT, 'vendor', 'ripgrep', ripgrepDir, binaryName),
+    join(ROOT, 'src', 'utils', 'vendor', 'ripgrep', ripgrepDir, binaryName),
+    dest,
+  ]
+  const src = sourceCandidates.find(candidate => existsSync(candidate))
+  if (!src) {
+    console.warn(
+      `Vendored ripgrep not found for ${platformKey}: ${sourceCandidates.join(', ')}`,
+    )
     return
   }
 
-  const destDir = join(ROOT, info.pkgDir, 'vendor', 'ripgrep', ripgrepDir)
-  const dest = join(destDir, binaryName)
+  if (resolve(src) === resolve(dest)) {
+    console.log(`Vendored ripgrep already present at ${dest}`)
+    return
+  }
+
   mkdirSync(destDir, { recursive: true })
   copyFileSync(src, dest)
   if (!platformKey.startsWith('win32')) chmodSync(dest, 0o755)

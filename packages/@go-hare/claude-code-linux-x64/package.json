@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code-linux-x64",
-  "version": "2.6.24",
+  "version": "2.6.26",
   "description": "Platform-specific binary for @go-hare/claude-code (Linux x64)",
   "os": [
     "linux"

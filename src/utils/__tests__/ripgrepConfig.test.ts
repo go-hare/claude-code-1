@@ -5,7 +5,9 @@ import { join } from 'path'
 // Test the pure fallback function directly — no mock.module needed,
 // so this test cannot pollute other tests in the same Bun process.
 // See CLAUDE.md "Mock 使用规范" for why we avoid business-module mocking.
-const { resolveBuiltinWithFallback } = await import('../ripgrep.js')
+const { resolveBundledRipgrep, resolveBuiltinWithFallback } = await import(
+  '../ripgrep.js'
+)
 
 // Real temp dir with a real (or removed) fake rg binary to control existsSync.
 const tmpDir = join(
@@ -45,6 +47,46 @@ describe('resolveBuiltinWithFallback', () => {
     expect(result.mode).toBe('builtin')
     expect(result.command).toBe(rgPath)
     expect(result.note).toBeUndefined()
+  })
+
+  test('Windows bundled mode prefers a vendored rg binary', () => {
+    const executablePath = join(tmpDir, 'claude.exe')
+    const result = resolveBundledRipgrep(
+      [join(tmpDir, 'missing-rg.exe'), rgPath],
+      'win32',
+      executablePath,
+    )
+
+    expect(result.mode).toBe('builtin')
+    expect(result.command).toBe(rgPath)
+    expect(result.args).toEqual([])
+    expect(result.argv0).toBeUndefined()
+  })
+
+  test('Windows bundled mode never falls back to embedded argv0 dispatch', () => {
+    rmSync(rgPath)
+    const executablePath = join(tmpDir, 'claude.exe')
+    const result = resolveBundledRipgrep(
+      [rgPath],
+      'win32',
+      executablePath,
+      null,
+    )
+
+    expect(result.mode).toBe('builtin')
+    expect(result.command).toBe(rgPath)
+    expect(result.argv0).toBeUndefined()
+    writeFileSync(rgPath, '')
+  })
+
+  test('non-Windows bundled mode keeps embedded argv0 dispatch', () => {
+    const executablePath = join(tmpDir, 'claude')
+    const result = resolveBundledRipgrep([rgPath], 'linux', executablePath)
+
+    expect(result.mode).toBe('embedded')
+    expect(result.command).toBe(executablePath)
+    expect(result.args).toEqual(['--no-config'])
+    expect(result.argv0).toBe('rg')
   })
 
   test('builtin missing + system rg available -> mode=system, note set', () => {

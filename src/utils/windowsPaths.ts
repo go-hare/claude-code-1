@@ -88,6 +88,15 @@ function searchDefaultBashLocations(
   return null
 }
 
+function isWindowsBashLauncher(filePath: string): boolean {
+  const parentDir = pathWin32
+    .basename(pathWin32.dirname(pathWin32.normalize(filePath)))
+    .toLowerCase()
+  return ['system32', 'sysnative', 'syswow64', 'windowsapps'].includes(
+    parentDir,
+  )
+}
+
 /**
  * Look up an executable on Windows. Tries common install locations first
  * (for `git`), then falls back to `where.exe`. Filters out entries in the
@@ -185,12 +194,14 @@ export function findGitBashPathOrNullWithDeps(
     return deps.checkExists(envOverride) ? envOverride : null
   }
 
-  // 2. Look up bash.exe directly via PATH. This is the most reliable
-  //    method for non-default install locations (e.g. D:\software\Git\)
-  //    where bash sits at <root>/usr/bin/bash.exe rather than the
-  //    conventional <root>/bin/bash.exe.
+  // 2. Look up bash.exe directly via PATH. Ignore Windows' WSL launchers;
+  //    they are not Git Bash and can open a console window for every command.
   const fromPath = findExecutableWithDeps('bash', deps)
-  if (fromPath && deps.checkExists(fromPath)) {
+  if (
+    fromPath &&
+    deps.checkExists(fromPath) &&
+    !isWindowsBashLauncher(fromPath)
+  ) {
     return fromPath
   }
 

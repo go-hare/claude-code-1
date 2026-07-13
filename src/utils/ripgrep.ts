@@ -52,6 +52,7 @@ function getBuiltinRipgrepCandidates(): string[] {
   const packageRoot = path.dirname(execDir)
   const packageParent = path.dirname(packageRoot)
   const candidates = [
+    path.resolve(distRoot, 'vendor', 'ripgrep', platformDir, binaryName),
     path.resolve(
       distRoot,
       'src',
@@ -103,6 +104,24 @@ function getBuiltinRipgrepCandidates(): string[] {
   return [...new Set(candidates)]
 }
 
+export function resolveBundledRipgrep(
+  builtinPaths: string[],
+  platform: NodeJS.Platform = process.platform,
+  executablePath: string = process.execPath,
+  systemRgPath?: string | null,
+): RipgrepConfig {
+  if (platform === 'win32') {
+    return resolveBuiltinWithFallback(builtinPaths, systemRgPath, platform)
+  }
+
+  return {
+    mode: 'embedded',
+    command: executablePath,
+    args: ['--no-config'],
+    argv0: 'rg',
+  }
+}
+
 export const getRipgrepConfig = memoize((): RipgrepConfig => {
   const userWantsSystemRipgrep = isEnvDefinedFalsy(
     process.env.USE_BUILTIN_RIPGREP,
@@ -119,15 +138,11 @@ export const getRipgrepConfig = memoize((): RipgrepConfig => {
     }
   }
 
-  // In bundled (native) mode, ripgrep is statically compiled into bun-internal
-  // and dispatches based on argv[0]. We spawn ourselves with argv0='rg'.
+  // Git Bash cannot reliably set argv[0] for a Windows Bun executable. Prefer
+  // the packaged rg.exe there so an `rg` command cannot start a full Claude
+  // process. Other bundled platforms retain Bun's embedded dispatch.
   if (isInBundledMode()) {
-    return {
-      mode: 'embedded',
-      command: process.execPath,
-      args: ['--no-config'],
-      argv0: 'rg',
-    }
+    return resolveBundledRipgrep(getBuiltinRipgrepCandidates())
   }
 
   return resolveBuiltinWithFallback(getBuiltinRipgrepCandidates())

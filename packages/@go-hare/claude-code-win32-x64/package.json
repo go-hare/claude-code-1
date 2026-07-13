@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code-win32-x64",
-  "version": "2.6.24",
+  "version": "2.6.26",
   "description": "Platform-specific binary for @go-hare/claude-code (Windows x64)",
   "os": [
     "win32"
@@ -9,7 +9,8 @@
     "x64"
   ],
   "files": [
-    "claude.exe"
+    "claude.exe",
+    "vendor/ripgrep/x64-win32/rg.exe"
   ],
   "preferUnplugged": true,
   "license": "SEE LICENSE IN README.md",
