@@ -102,24 +102,9 @@ export function updateProgressFromMessage(
   if (message.type !== 'assistant') {
     return;
   }
-  const usage = message.message!.usage as BetaUsage | undefined;
-  if (!usage) {
-    return;
-  }
-  // Keep latest input (it's cumulative in the API), sum outputs.
-  // Intermediate / tool-only assistant turns often report usage all-zeros
-  // (streaming placeholders or providers that omit usage on tool rounds).
-  // Never regress the high-water mark — that made the footer show
-  // "↓ 0 tokens" after real usage had already been counted.
-  const inputTotal =
-    (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
-  if (inputTotal > 0) {
-    tracker.latestInputTokens = inputTotal;
-  }
-  const outputTokens = usage.output_tokens as number;
-  if (typeof outputTokens === 'number' && outputTokens > 0) {
-    tracker.cumulativeOutputTokens += outputTokens;
-  }
+
+  // Tool activity is independent of usage — providers may omit usage on
+  // intermediate assistant turns while still emitting tool_use blocks.
   for (const content of (message.message!.content ?? []) as Array<{ type: string; name?: string; input?: unknown }>) {
     if (content.type === 'tool_use') {
       tracker.toolUseCount++;
@@ -139,6 +124,114 @@ export function updateProgressFromMessage(
   }
   while (tracker.recentActivities.length > MAX_RECENT_ACTIVITIES) {
     tracker.recentActivities.shift();
+  }
+
+  const usage = message.message?.usage as BetaUsage | undefined;
+  if (!usage) {
+    return;
+  }
+  // Keep latest input (it's cumulative in the API), sum outputs.
+  // Intermediate / tool-only assistant turns often report usage all-zeros
+  // (streaming placeholders or providers that omit usage on tool rounds).
+  // Never regress the high-water mark — that made the footer show
+  // "↓ 0 tokens" after real usage had already been counted.
+  //
+  // Also: first-party streaming yields at content_block_stop with message_start
+  // usage (often zeros for output), then mutates message.usage in place when
+  // message_delta arrives. Callers must rebuild from messages after that
+  // mutation (see rebuildProgressFromMessages) to pick up final counts.
+  const inputTotal =
+    (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+  if (inputTotal > 0) {
+    tracker.latestInputTokens = inputTotal;
+  }
+  const outputTokens = usage.output_tokens as number;
+  if (typeof outputTokens === 'number' && outputTokens > 0) {
+    tracker.cumulativeOutputTokens += outputTokens;
+  }
+}
+
+/**
+ * Reset and recompute tracker state from a message list.
+ *
+ * Required because streaming providers often yield AssistantMessage before
+ * final usage is known, then mutate `message.message.usage` in place when
+ * message_delta arrives. Incremental updateProgressFromMessage at yield time
+ * would permanently stick at 0 tokens.
+ *
+ * Usage is counted once per API response id (message.message.id). Parallel
+ * tool-call streaming splits one response into multiple AssistantMessage
+ * records that share the same id and the same final usage object — summing
+ * each would multi-count output_tokens.
+ */
+export function rebuildProgressFromMessages(
+  tracker: ProgressTracker,
+  messages: readonly Message[],
+  resolveActivityDescription?: ActivityDescriptionResolver,
+  tools?: Tools,
+): void {
+  tracker.toolUseCount = 0;
+  tracker.latestInputTokens = 0;
+  tracker.cumulativeOutputTokens = 0;
+  tracker.recentActivities = [];
+
+  const countedResponseIds = new Set<string>();
+  for (const message of messages) {
+    if (message.type !== 'assistant') {
+      continue;
+    }
+
+    // Always collect tool activity from every split record.
+    for (const content of (message.message?.content ?? []) as Array<{
+      type: string;
+      name?: string;
+      input?: unknown;
+    }>) {
+      if (content.type === 'tool_use') {
+        tracker.toolUseCount++;
+        if (content.name !== SYNTHETIC_OUTPUT_TOOL_NAME) {
+          const input = content.input as Record<string, unknown>;
+          const classification = tools ? getToolSearchOrReadInfo(content.name!, input, tools) : undefined;
+          tracker.recentActivities.push({
+            toolName: content.name!,
+            input,
+            activityDescription: resolveActivityDescription?.(content.name!, input),
+            isSearch: classification?.isSearch,
+            isRead: classification?.isRead,
+          });
+        }
+      }
+    }
+    while (tracker.recentActivities.length > MAX_RECENT_ACTIVITIES) {
+      tracker.recentActivities.shift();
+    }
+
+    const usage = message.message?.usage as BetaUsage | undefined;
+    if (!usage) {
+      continue;
+    }
+
+    const responseId =
+      message.message && 'id' in message.message && typeof message.message.id === 'string'
+        ? message.message.id
+        : undefined;
+    if (responseId) {
+      if (countedResponseIds.has(responseId)) {
+        // Sibling split of the same API response — tools already counted above.
+        continue;
+      }
+      countedResponseIds.add(responseId);
+    }
+
+    const inputTotal =
+      (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+    if (inputTotal > 0) {
+      tracker.latestInputTokens = inputTotal;
+    }
+    const outputTokens = usage.output_tokens as number;
+    if (typeof outputTokens === 'number' && outputTokens > 0) {
+      tracker.cumulativeOutputTokens += outputTokens;
+    }
   }
 }
 
@@ -576,10 +669,24 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
 
     task.unregisterCleanup?.();
 
+    // Footer reads progress.tokenCount even after completion. Sync from the
+    // finalized result so a late usage mutation (or rebuild miss) doesn't leave
+    // completed agents stuck at "↓ 0 tokens".
+    const prevProgress = task.progress;
+    const tokenCount = Math.max(result.totalTokens ?? 0, prevProgress?.tokenCount ?? 0);
+    const toolUseCount = Math.max(result.totalToolUseCount ?? 0, prevProgress?.toolUseCount ?? 0);
+
     return {
       ...task,
       status: 'completed',
       result,
+      progress: {
+        toolUseCount,
+        tokenCount,
+        lastActivity: prevProgress?.lastActivity,
+        recentActivities: prevProgress?.recentActivities,
+        summary: prevProgress?.summary,
+      },
       endTime: Date.now(),
       evictAfter: task.retain ? undefined : Date.now() + PANEL_GRACE_MS,
       abortController: undefined,

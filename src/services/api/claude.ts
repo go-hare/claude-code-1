@@ -2441,10 +2441,14 @@ async function* queryModel(
               ;(contentBlock as { text: string }).text = deltas.join('')
               textDeltas.delete(part.index)
             }
+            // Prefer the stream-accumulated `usage` over message_start's partial
+            // usage so background-agent progress tracking sees non-zero
+            // input tokens as soon as they are known. message_delta still
+            // mutates this object in place with final output_tokens later.
             const m: AssistantMessage = {
               message: {
                 ...partialMessage,
-                usage: partialMessage.usage ?? { ...EMPTY_USAGE },
+                usage: { ...usage },
                 content: normalizeContentFromAPI(
                   [contentBlock] as BetaContentBlock[],
                   tools,

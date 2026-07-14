@@ -116,7 +116,7 @@ mock.module('../../../../utils/api.js', () => ({
   toolToAPISchema: async () => ({ name: 'x', input_schema: {} }),
 }))
 
-mock.module('../../../../utils/messages.js', () => ({
+const messagesMock = {
   normalizeMessagesForAPI: (m: any) => m,
   normalizeContentFromAPI: (content: any) => content,
   createAssistantAPIErrorMessage: (opts: any) => ({
@@ -124,7 +124,11 @@ mock.module('../../../../utils/messages.js', () => ({
     isApiErrorMessage: true,
     ...opts,
   }),
-}))
+}
+mock.module('../../../../utils/messages.js', () => messagesMock)
+mock.module('../../../utils/messages.js', () => messagesMock)
+mock.module('src/utils/messages.js', () => messagesMock)
+mock.module('src/utils/messages.ts', () => messagesMock)
 
 describe('queryModelGrok usage attachment', () => {
   beforeEach(() => {

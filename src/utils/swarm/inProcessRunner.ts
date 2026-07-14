@@ -42,7 +42,7 @@ import {
   createActivityDescriptionResolver,
   createProgressTracker,
   getProgressUpdate,
-  updateProgressFromMessage,
+  rebuildProgressFromMessages,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { CustomAgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { runAgent } from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
@@ -1247,9 +1247,10 @@ export async function runInProcessTeammate(
             iterationMessages.push(message)
             allMessages.push(message)
 
-            updateProgressFromMessage(
+            // Rebuild so late message_delta usage mutations stick.
+            rebuildProgressFromMessages(
               tracker,
-              message,
+              iterationMessages,
               resolveActivity,
               toolUseContext.options.tools,
             )

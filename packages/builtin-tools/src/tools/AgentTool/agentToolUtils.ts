@@ -32,8 +32,8 @@ import {
   isLocalAgentTask,
   killAsyncAgent,
   type ProgressTracker,
+  rebuildProgressFromMessages,
   updateAgentProgress as updateAsyncAgentProgress,
-  updateProgressFromMessage,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { asAgentId } from 'src/types/ids.js'
 import type { Message as MessageType, ContentItem } from 'src/types/message.js'
@@ -613,9 +613,12 @@ export async function runAsyncAgentLifecycle({
           },
         }
       })
-      updateProgressFromMessage(
+      // Rebuild from the full message list so in-place usage mutations from
+      // message_delta (after content_block_stop yield) are reflected in the
+      // footer token count. Incremental-only updates permanently stuck at 0.
+      rebuildProgressFromMessages(
         tracker,
-        message,
+        agentMessages,
         resolveActivity,
         toolUseContext.options.tools,
       )
@@ -636,6 +639,20 @@ export async function runAsyncAgentLifecycle({
         )
       }
     }
+
+    // Final rebuild after stream ends — last message_delta may have mutated
+    // usage after the final content_block_stop yield with no further messages.
+    rebuildProgressFromMessages(
+      tracker,
+      agentMessages,
+      resolveActivity,
+      toolUseContext.options.tools,
+    )
+    updateAsyncAgentProgress(
+      taskId,
+      getProgressUpdate(tracker),
+      rootSetAppState,
+    )
 
     stopSummarization?.()
 

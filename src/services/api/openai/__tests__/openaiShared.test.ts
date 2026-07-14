@@ -1,13 +1,18 @@
 import { describe, expect, mock, test } from 'bun:test'
 
-mock.module('../../../../utils/messages.js', () => ({
+// Mock both alias-style and relative-style message modules that shared utils may resolve.
+const messagesMock = {
   normalizeContentFromAPI: (content: any) => content,
   createAssistantAPIErrorMessage: (opts: any) => ({
     type: 'assistant',
     isApiErrorMessage: true,
     ...opts,
   }),
-}))
+}
+mock.module('../../../utils/messages.js', () => messagesMock)
+mock.module('../../../../utils/messages.js', () => messagesMock)
+mock.module('src/utils/messages.js', () => messagesMock)
+mock.module('src/utils/messages.ts', () => messagesMock)
 
 const { assembleFinalAssistantOutputs, EMPTY_OPENAI_USAGE, updateOpenAIUsage } =
   await import('../openaiShared.js')

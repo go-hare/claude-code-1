@@ -106,6 +106,8 @@ mock.module('src/utils/collapseReadSearch.js', () => ({
 const {
   createProgressTracker,
   updateProgressFromMessage,
+  rebuildProgressFromMessages,
+  getTokenCountFromTracker,
   getProgressUpdate,
   completeAgentTask,
   failAgentTask,
@@ -263,6 +265,97 @@ describe('updateProgressFromMessage', () => {
     updateProgressFromMessage(tracker, msg)
     expect(tracker.latestInputTokens).toBe(0)
   })
+
+  test('still counts tool_use when usage is missing', () => {
+    const tracker = createProgressTracker()
+    const msg = makeAssistantMessage(null, [
+      { type: 'tool_use', name: 'Bash', input: { command: 'ls' } },
+    ])
+    updateProgressFromMessage(tracker, msg)
+    expect(tracker.toolUseCount).toBe(1)
+    expect(tracker.latestInputTokens).toBe(0)
+  })
+})
+
+describe('rebuildProgressFromMessages', () => {
+  test('picks up in-place usage mutations after the original yield', () => {
+    const tracker = createProgressTracker()
+    const msg = makeAssistantMessage({
+      input_tokens: 0,
+      output_tokens: 0,
+    })
+
+    // First pass at content_block_stop: zero usage
+    updateProgressFromMessage(tracker, msg)
+    expect(getTokenCountFromTracker(tracker)).toBe(0)
+
+    // message_delta mutates the same object in place (first-party streaming)
+    msg.message.usage = {
+      input_tokens: 1200,
+      output_tokens: 80,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 400,
+    }
+
+    rebuildProgressFromMessages(tracker, [msg])
+    expect(tracker.latestInputTokens).toBe(1600)
+    expect(tracker.cumulativeOutputTokens).toBe(80)
+    expect(getTokenCountFromTracker(tracker)).toBe(1680)
+  })
+
+  test('does not double-count when rebuilt multiple times', () => {
+    const tracker = createProgressTracker()
+    const msg = makeAssistantMessage(
+      {
+        input_tokens: 100,
+        output_tokens: 25,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+      [{ type: 'tool_use', name: 'Read', input: {} }],
+    )
+
+    rebuildProgressFromMessages(tracker, [msg])
+    rebuildProgressFromMessages(tracker, [msg])
+    expect(tracker.toolUseCount).toBe(1)
+    expect(tracker.cumulativeOutputTokens).toBe(25)
+    expect(tracker.latestInputTokens).toBe(100)
+  })
+
+  test('counts shared-usage split assistant records once per response id', () => {
+    const tracker = createProgressTracker()
+    const usage = {
+      input_tokens: 500,
+      output_tokens: 40,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 100,
+    }
+    const textPart = {
+      type: 'assistant',
+      message: {
+        id: 'msg_same',
+        usage,
+        content: [{ type: 'text', text: 'hi' }],
+      },
+    } as any
+    const toolPart = {
+      type: 'assistant',
+      message: {
+        id: 'msg_same',
+        usage,
+        content: [
+          { type: 'tool_use', name: 'Read', input: { file_path: '/x' } },
+        ],
+      },
+    } as any
+
+    rebuildProgressFromMessages(tracker, [textPart, toolPart])
+    expect(tracker.toolUseCount).toBe(1)
+    expect(tracker.latestInputTokens).toBe(600)
+    // output counted once, not 40+40
+    expect(tracker.cumulativeOutputTokens).toBe(40)
+    expect(getTokenCountFromTracker(tracker)).toBe(640)
+  })
 })
 
 describe('getProgressUpdate', () => {
@@ -307,6 +400,32 @@ describe('completeAgentTask', () => {
     expect(task.status).toBe('completed')
     expect(task.endTime).toBeDefined()
     expect(task.evictAfter).toBeDefined()
+  })
+
+  test('syncs progress token count from finalized result', () => {
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          progress: { toolUseCount: 1, tokenCount: 0 },
+        }),
+      },
+    })
+
+    completeAgentTask(
+      {
+        agentId: 'test-agent-001',
+        content: [],
+        totalToolUseCount: 4,
+        totalTokens: 6100,
+        totalDurationMs: 100,
+      } as any,
+      setAppState as any,
+    )
+
+    const task = getState().tasks['test-agent-001']
+    expect(task.status).toBe('completed')
+    expect(task.progress?.tokenCount).toBe(6100)
+    expect(task.progress?.toolUseCount).toBe(4)
   })
 
   test('no-op if task not running', () => {

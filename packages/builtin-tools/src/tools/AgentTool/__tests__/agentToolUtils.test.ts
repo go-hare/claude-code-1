@@ -87,6 +87,7 @@ mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
   getTokenCountFromTracker: () => 0,
   isLocalAgentTask: () => false,
   killAsyncAgent: noop,
+  rebuildProgressFromMessages: noop,
   updateAgentProgress: noop,
   updateProgressFromMessage: noop,
 }))

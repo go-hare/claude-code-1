@@ -25,11 +25,11 @@ import {
   getTokenCountFromTracker,
   isLocalAgentTask,
   killAsyncAgent,
+  rebuildProgressFromMessages,
   registerAgentForeground,
   registerAsyncAgent,
   unregisterAgentForeground,
   updateAgentProgress as updateAsyncAgentProgress,
-  updateProgressFromMessage,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import {
   checkRemoteAgentEligibility,
@@ -1265,12 +1265,16 @@ export const AgentTool = buildTool({
                       // Timeout prevents blocking if MCP server cleanup hangs.
                       // .catch() prevents unhandled rejection if timeout wins the race.
                       await Promise.race([agentIterator.return(undefined).catch(() => {}), sleep(1000)]);
-                      // Initialize progress tracking from existing messages
+                      // Initialize progress tracking from existing messages (rebuild so
+                      // any in-place usage mutations already applied are visible).
                       const tracker = createProgressTracker();
                       const resolveActivity2 = createActivityDescriptionResolver(toolUseContext.options.tools);
-                      for (const existingMsg of agentMessages) {
-                        updateProgressFromMessage(tracker, existingMsg, resolveActivity2, toolUseContext.options.tools);
-                      }
+                      rebuildProgressFromMessages(
+                        tracker,
+                        agentMessages,
+                        resolveActivity2,
+                        toolUseContext.options.tools,
+                      );
                       for await (const msg of runAgent({
                         ...runAgentParams,
                         isAsync: true, // Agent is now running in background
@@ -1294,8 +1298,13 @@ export const AgentTool = buildTool({
                       })) {
                         agentMessages.push(msg);
 
-                        // Track progress for backgrounded agents
-                        updateProgressFromMessage(tracker, msg, resolveActivity2, toolUseContext.options.tools);
+                        // Rebuild so late message_delta usage mutations stick.
+                        rebuildProgressFromMessages(
+                          tracker,
+                          agentMessages,
+                          resolveActivity2,
+                          toolUseContext.options.tools,
+                        );
                         updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
 
                         const lastToolName = getLastToolUseName(msg);
@@ -1310,6 +1319,15 @@ export const AgentTool = buildTool({
                           );
                         }
                       }
+                      // Final rebuild after stream ends so last message_delta
+                      // usage mutations are reflected before completion.
+                      rebuildProgressFromMessages(
+                        tracker,
+                        agentMessages,
+                        resolveActivity2,
+                        toolUseContext.options.tools,
+                      );
+                      updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
                       const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata);
 
                       // Mark task completed FIRST so TaskOutput(block=true)
@@ -1463,8 +1481,13 @@ export const AgentTool = buildTool({
 
               agentMessages.push(message);
 
-              // Emit task_progress for the VS Code subagent panel
-              updateProgressFromMessage(syncTracker, message, syncResolveActivity, toolUseContext.options.tools);
+              // Rebuild so late message_delta usage mutations stick.
+              rebuildProgressFromMessages(
+                syncTracker,
+                agentMessages,
+                syncResolveActivity,
+                toolUseContext.options.tools,
+              );
               if (foregroundTaskId) {
                 const lastToolName = getLastToolUseName(message);
                 if (lastToolName) {

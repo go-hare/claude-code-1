@@ -7,7 +7,9 @@ import { formatTokens } from '../../utils/format.js';
 
 function AgentRow({ task, selected }: { task: LocalAgentTaskState; selected: boolean }) {
   const elapsed = useElapsedTime(task.startTime, task.status === 'running');
-  const tokens = task.progress?.tokenCount ?? 0;
+  // Prefer progress (live), fall back to finalized result so completed agents
+  // don't stay at "↓ 0 tokens" if progress lagged behind late usage writes.
+  const tokens = Math.max(task.progress?.tokenCount ?? 0, task.result?.totalTokens ?? 0);
   const isRunning = task.status === 'running';
   return (
     <Box flexDirection="row" width="100%" justifyContent="space-between">
