@@ -10,10 +10,33 @@ function isExtraUsageAllowed(): boolean {
   return isOverageProvisioningAllowed()
 }
 
+/** Official 2.1.207 primary name (replaces /extra-usage in UX). */
+export const usageCredits = {
+  type: 'local-jsx',
+  name: 'usage-credits',
+  description: 'Configure usage credits to keep working when you hit a limit',
+  isEnabled: () => isExtraUsageAllowed() && !getIsNonInteractiveSession(),
+  load: () => import('./extra-usage.js'),
+} satisfies Command
+
+export const usageCreditsNonInteractive = {
+  type: 'local',
+  name: 'usage-credits',
+  supportsNonInteractive: true,
+  description: 'Configure usage credits to keep working when you hit a limit',
+  isEnabled: () => isExtraUsageAllowed() && getIsNonInteractiveSession(),
+  get isHidden() {
+    return !getIsNonInteractiveSession()
+  },
+  load: () => import('./extra-usage-noninteractive.js'),
+} satisfies Command
+
+/** Hidden alias — official still accepts /extra-usage with rename notice. */
 export const extraUsage = {
   type: 'local-jsx',
   name: 'extra-usage',
-  description: 'Configure extra usage to keep working when limits are hit',
+  description: 'Renamed to /usage-credits',
+  isHidden: true,
   isEnabled: () => isExtraUsageAllowed() && !getIsNonInteractiveSession(),
   load: () => import('./extra-usage.js'),
 } satisfies Command
@@ -22,10 +45,8 @@ export const extraUsageNonInteractive = {
   type: 'local',
   name: 'extra-usage',
   supportsNonInteractive: true,
-  description: 'Configure extra usage to keep working when limits are hit',
+  description: 'Renamed to /usage-credits',
+  isHidden: true,
   isEnabled: () => isExtraUsageAllowed() && getIsNonInteractiveSession(),
-  get isHidden() {
-    return !getIsNonInteractiveSession()
-  },
   load: () => import('./extra-usage-noninteractive.js'),
 } satisfies Command

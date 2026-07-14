@@ -939,6 +939,8 @@ export async function runInProcessTeammate(
     invokingRequestId,
     invocationKind: 'spawn',
     invocationEmitted: false,
+    // Teammates always run off the main loop (official isBackgroundAgent:!0).
+    isBackgroundAgent: true,
   }
 
   // Build system prompt based on systemPromptMode

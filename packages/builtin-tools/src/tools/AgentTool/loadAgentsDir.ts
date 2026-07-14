@@ -19,7 +19,7 @@ import {
   type EffortValue,
   parseEffortValue,
 } from 'src/utils/effort.js'
-import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { isBareMode } from 'src/utils/envUtils.js'
 import { parsePositiveIntFromFrontmatter } from 'src/utils/frontmatterParser.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
@@ -95,6 +95,18 @@ const AgentJsonSchema = lazySchema(() =>
       ? z.enum(['worktree', 'remote'])
       : z.enum(['worktree'])
     ).optional(),
+    // Official observer / observerMessage — experimental observer agents.
+    observer: z
+      .string()
+      .optional()
+      .transform(e => {
+        const t = e?.trim()
+        return t ? t : undefined
+      }),
+    observerMessage: z
+      .string()
+      .optional()
+      .transform(e => (e && e.trim() ? e : undefined)),
   }),
 )
 
@@ -124,6 +136,10 @@ export type BaseAgentDefinition = {
   initialPrompt?: string // Prepended to the first user turn (slash commands work)
   memory?: AgentMemoryScope // Persistent memory scope
   isolation?: 'worktree' | 'remote' // Run in an isolated git worktree, or remotely in CCR (ant-only)
+  /** Official: agent type auto-spawned as background observer when this agent runs. */
+  observer?: string
+  /** Official: supplemental postamble appended to each observer activity digest. */
+  observerMessage?: string
   pendingSnapshotUpdate?: { snapshotTimestamp: string }
   /** Omit CLAUDE.md hierarchy from the agent's userContext. Read-only agents
    * (Explore, Plan) don't need commit/PR/lint guidelines — the main agent has
@@ -296,7 +312,7 @@ async function initializeAgentMemorySnapshots(
 export const getAgentDefinitionsWithOverrides = memoize(
   async (cwd: string): Promise<AgentDefinitionsResult> => {
     // Simple mode: skip custom agents, only return built-ins
-    if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+    if (isBareMode()) {
       const builtInAgents = getBuiltInAgents()
       return {
         activeAgents: builtInAgents,
@@ -505,6 +521,10 @@ export function parseAgentFromJson(
       ...(parsed.background ? { background: parsed.background } : {}),
       ...(parsed.memory ? { memory: parsed.memory } : {}),
       ...(parsed.isolation ? { isolation: parsed.isolation } : {}),
+      ...(parsed.observer ? { observer: parsed.observer } : {}),
+      ...(parsed.observerMessage
+        ? { observerMessage: parsed.observerMessage }
+        : {}),
     }
 
     return agent
@@ -711,6 +731,18 @@ export function parseAgentFromMarkdown(
     // Parse hooks from frontmatter
     const hooks = parseHooksFromFrontmatter(frontmatter, agentType)
 
+    // Official observer / observerMessage (experimental observer agents)
+    const observerRaw = frontmatter['observer']
+    const observer =
+      typeof observerRaw === 'string' && observerRaw.trim()
+        ? observerRaw.trim()
+        : undefined
+    const observerMessageRaw = frontmatter['observerMessage']
+    const observerMessage =
+      typeof observerMessageRaw === 'string' && observerMessageRaw.trim()
+        ? observerMessageRaw
+        : undefined
+
     const systemPrompt = content.trim()
     const agentDef: CustomAgentDefinition = {
       baseDir,
@@ -745,6 +777,8 @@ export function parseAgentFromMarkdown(
       ...(background ? { background } : {}),
       ...(memory ? { memory } : {}),
       ...(isolation ? { isolation } : {}),
+      ...(observer ? { observer } : {}),
+      ...(observerMessage ? { observerMessage } : {}),
     }
     return agentDef
   } catch (error) {

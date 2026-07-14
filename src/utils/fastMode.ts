@@ -29,6 +29,11 @@ import {
 import { getAPIProvider } from './model/providers.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
 import {
+  isOpus47FastModeEnabled,
+  shouldSkipFastModeNetworkErrors,
+  shouldSkipFastModeOrgCheck,
+} from './residualMoreEnvGates.js'
+import {
   getInitialSettings,
   getSettingsForSource,
   updateSettingsForSource,
@@ -36,7 +41,21 @@ import {
 import { createSignal } from './signal.js'
 
 export function isFastModeEnabled(): boolean {
-  return !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FAST_MODE)
+  // Official DISABLE_FAST_MODE densable.
+  try {
+    const { isFastModeDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    if (isFastModeDisabled()) return false
+  } catch {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FAST_MODE)) {
+      return false
+    }
+  }
+  // Official CLAUDE_CODE_ENABLE_OPUS_4_7_FAST_MODE documents force-on;
+  // default is already on when not disabled (env string kept for inventory).
+  void isOpus47FastModeEnabled()
+  return true
 }
 
 export function isFastModeAvailable(): boolean {
@@ -117,6 +136,10 @@ export function getFastModeUnavailableReason(): string | null {
   }
 
   if (orgStatus.status === 'disabled') {
+    // Official CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK — bypass org disable.
+    if (shouldSkipFastModeOrgCheck()) {
+      return null
+    }
     if (
       orgStatus.reason === 'network_error' ||
       orgStatus.reason === 'unknown'
@@ -125,7 +148,7 @@ export function getFastModeUnavailableReason(): string | null {
       // endpoint. We add CLAUDE_CODE_SKIP_FAST_MODE_NETWORK_ERRORS=1 to
       // bypass this check in the CC binary. This is OK since we have
       // another check in the API to error out when disabled by org.
-      if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_FAST_MODE_NETWORK_ERRORS)) {
+      if (shouldSkipFastModeNetworkErrors()) {
         return null
       }
     }

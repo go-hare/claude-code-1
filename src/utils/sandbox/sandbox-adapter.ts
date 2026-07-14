@@ -56,6 +56,7 @@ import { FILE_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileEditTo
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTool/prompt.js'
 import { errorMessage } from '../errors.js'
+import { readHostProxyPorts } from '../hostProxyPorts.js'
 import { getClaudeTempDir } from '../permissions/filesystem.js'
 import type { PermissionRuleValue } from '../permissions/PermissionRule.js'
 import { ripgrepCommand } from '../ripgrep.js'
@@ -624,6 +625,9 @@ export function convertToSandboxRuntimeConfig(
     argv0,
   }
 
+  // Official: host-injected CLAUDE_CODE_HOST_*_PROXY_PORT fill sandbox
+  // network ports when settings omit them (bwrap --setenv path).
+  const hostProxy = readHostProxyPorts()
   return {
     network: {
       allowedDomains,
@@ -631,8 +635,10 @@ export function convertToSandboxRuntimeConfig(
       allowUnixSockets: settings.sandbox?.network?.allowUnixSockets,
       allowAllUnixSockets: settings.sandbox?.network?.allowAllUnixSockets,
       allowLocalBinding: settings.sandbox?.network?.allowLocalBinding,
-      httpProxyPort: settings.sandbox?.network?.httpProxyPort,
-      socksProxyPort: settings.sandbox?.network?.socksProxyPort,
+      httpProxyPort:
+        settings.sandbox?.network?.httpProxyPort ?? hostProxy.httpProxyPort,
+      socksProxyPort:
+        settings.sandbox?.network?.socksProxyPort ?? hostProxy.socksProxyPort,
     },
     filesystem: {
       denyRead,

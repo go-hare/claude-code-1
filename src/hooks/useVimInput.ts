@@ -1,8 +1,12 @@
 import React, { useCallback, useState } from 'react'
 import type { Key } from '@anthropic/ink'
 import type { VimInputState, VimMode } from '../types/textInputTypes.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import { Cursor } from '../utils/Cursor.js'
-import { lastGrapheme } from '../utils/intl.js'
+import { firstGrapheme, lastGrapheme } from '../utils/intl.js'
 import {
   executeIndent,
   executeJoin,
@@ -23,6 +27,12 @@ import {
   type RecordedChange,
   type VimState,
 } from '../vim/types.js'
+import {
+  getVimInsertModeRemaps,
+  isVimInsertRemapPrefix,
+  matchPendingVimInsertRemap,
+  type PendingVimInsertRemap,
+} from '../vim/vimInsertModeRemaps.js'
 import { type UseTextInputProps, useTextInput } from './useTextInput.js'
 
 type UseVimInputProps = Omit<UseTextInputProps, 'inputFilter'> & {
@@ -39,6 +49,8 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
   const persistentRef = React.useRef<PersistentState>(
     createInitialPersistentState(),
   )
+  // Official _.current — first key of a two-key INSERT remap sequence.
+  const pendingRemapRef = React.useRef<PendingVimInsertRemap | null>(null)
 
   // inputFilter is applied once at the top of handleVimInput (not here) so
   // vim-handled paths that return without calling textInput.onInput still
@@ -52,6 +64,7 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
       if (offset !== undefined) {
         textInput.setOffset(offset)
       }
+      pendingRemapRef.current = null
       vimStateRef.current = { mode: 'INSERT', insertedText: '' }
       setMode('INSERT')
       onModeChange?.('INSERT')
@@ -59,26 +72,37 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
     [textInput, onModeChange],
   )
 
-  const switchToNormalMode = useCallback((): void => {
-    const current = vimStateRef.current
-    if (current.mode === 'INSERT' && current.insertedText) {
-      persistentRef.current.lastChange = {
-        type: 'insert',
-        text: current.insertedText,
+  const switchToNormalMode = useCallback(
+    (opts?: { claimEmptyInsert?: boolean }): void => {
+      const current = vimStateRef.current
+      // Official claimEmptyInsert: do not record the insert as lastChange
+      // (used when a remap sequence exits INSERT without a real edit).
+      if (
+        !opts?.claimEmptyInsert &&
+        current.mode === 'INSERT' &&
+        current.insertedText
+      ) {
+        persistentRef.current.lastChange = {
+          type: 'insert',
+          text: current.insertedText,
+        }
       }
-    }
 
-    // Vim behavior: move cursor left by 1 when exiting insert mode
-    // (unless at beginning of line or at offset 0)
-    const offset = textInput.offset
-    if (offset > 0 && props.value[offset - 1] !== '\n') {
-      textInput.setOffset(offset - 1)
-    }
+      pendingRemapRef.current = null
 
-    vimStateRef.current = { mode: 'NORMAL', command: { type: 'idle' } }
-    setMode('NORMAL')
-    onModeChange?.('NORMAL')
-  }, [onModeChange, textInput, props.value])
+      // Vim behavior: move cursor left by 1 when exiting insert mode
+      // (unless at beginning of line or at offset 0)
+      const offset = textInput.offset
+      if (offset > 0 && props.value[offset - 1] !== '\n') {
+        textInput.setOffset(offset - 1)
+      }
+
+      vimStateRef.current = { mode: 'NORMAL', command: { type: 'idle' } }
+      setMode('NORMAL')
+      onModeChange?.('NORMAL')
+    },
+    [onModeChange, textInput, props.value],
+  )
 
   function createOperatorContext(
     cursor: Cursor,
@@ -208,6 +232,73 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
     }
 
     if (state.mode === 'INSERT') {
+      // Official SFs/GGy: two-key INSERT remaps (e.g. jj → Esc).
+      if (!(key.backspace || key.delete || key.return || key.escape)) {
+        const remaps = getVimInsertModeRemaps()
+        if (remaps.size > 0 && input) {
+          const nfcInput = input.normalize('NFC')
+          // Whole input is already a remap key (paste / multi-char burst).
+          if (remaps.has(nfcInput)) {
+            pendingRemapRef.current = null
+            logEvent('vim_insert_remap', {
+              sequence:
+                nfcInput as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            switchToNormalMode({ claimEmptyInsert: true })
+            return
+          }
+          // Complete a pending first-key within timeout at same offset.
+          const pendingMatch = matchPendingVimInsertRemap(
+            remaps,
+            pendingRemapRef.current,
+            nfcInput,
+            textInput.offset,
+            props.value,
+          )
+          if (pendingMatch) {
+            const pending = pendingRemapRef.current!
+            pendingRemapRef.current = null
+            // Undo the first key from buffer if it was recorded into text.
+            if (pending.recorded && state.insertedText.endsWith(pending.char)) {
+              vimStateRef.current = {
+                mode: 'INSERT',
+                insertedText: state.insertedText.slice(0, -pending.char.length),
+              }
+            }
+            const removeStart = textInput.offset - pendingMatch.removeLen
+            if (removeStart >= 0) {
+              const nextText =
+                props.value.slice(0, removeStart) +
+                props.value.slice(textInput.offset)
+              props.onChange(nextText)
+              textInput.setOffset(removeStart)
+            }
+            logEvent('vim_insert_remap', {
+              sequence:
+                pendingMatch.matchedKey as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            switchToNormalMode({ claimEmptyInsert: true })
+            return
+          }
+          // Arm pending if this grapheme is a remap prefix.
+          const first = firstGrapheme(nfcInput)
+          if (first && isVimInsertRemapPrefix(remaps, first)) {
+            pendingRemapRef.current = {
+              char: first,
+              at: Date.now(),
+              offsetAfter: textInput.offset + nfcInput.length,
+              recorded: [...nfcInput].length === 1,
+            }
+          } else {
+            pendingRemapRef.current = null
+          }
+        } else {
+          pendingRemapRef.current = null
+        }
+      } else {
+        pendingRemapRef.current = null
+      }
+
       // Track inserted text for dot-repeat
       if (key.backspace || key.delete) {
         if (state.insertedText.length > 0) {

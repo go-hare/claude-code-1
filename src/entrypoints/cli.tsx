@@ -20,7 +20,17 @@ if (typeof globalThis.MACRO === 'undefined') {
   };
 }
 
-if (isEnvTruthy(process.env.CLAUDE_CODE_FORCE_INTERACTIVE)) {
+// Official FORCE_INTERACTIVE densable.
+let forceInteractiveEarly = isEnvTruthy(process.env.CLAUDE_CODE_FORCE_INTERACTIVE);
+try {
+  const { isForceInteractiveEnabled } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
+  forceInteractiveEarly = isForceInteractiveEnabled();
+} catch {
+  // keep raw env fallback
+}
+if (forceInteractiveEarly) {
   for (const stream of [process.stdin, process.stdout, process.stderr]) {
     if (!stream.isTTY) {
       try {
@@ -185,8 +195,38 @@ async function main(): Promise<void> {
 
   // Fast-path for `claude agents` — agent view dashboard
   if (feature('BG_SESSIONS') && args[0] === 'agents') {
-    const { enableConfigs } = await import('../utils/config.js');
-    enableConfigs();
+    const { getAgentViewDisabledReason } = await import('../utils/residualUiEnvGates.js');
+    let settingsDisableAgentView = false;
+    try {
+      const { enableConfigs } = await import('../utils/config.js');
+      enableConfigs();
+      const { getInitialSettings } = await import('../utils/settings/settings.js');
+      settingsDisableAgentView = getInitialSettings().disableAgentView === true;
+    } catch {
+      // Settings optional before full init.
+    }
+    const agentViewDisabledReason = getAgentViewDisabledReason(process.env, settingsDisableAgentView);
+    if (agentViewDisabledReason) {
+      // Official oUn densable — env or settings.disableAgentView
+      console.error(`Agent view ${agentViewDisabledReason}.`);
+      process.exitCode = 1;
+      return;
+    }
+    // Official GRi — one-shot CLAUDE_CODE_AGENT_VIEW_RELAUNCH flag (consumed).
+    const { consumeAgentViewRelaunch } = await import('../utils/residualFinalEnvGates.js');
+    const agentViewRelaunch = consumeAgentViewRelaunch();
+    if (agentViewRelaunch) {
+      // denser fleetview analytics still blocked; keep debug breadcrumb only
+      const { logForDebugging } = await import('../utils/debug.js');
+      logForDebugging('[agents] relaunch=true via CLAUDE_CODE_AGENT_VIEW_RELAUNCH');
+    }
+    // enableConfigs already attempted above for settings.disableAgentView; ensure configs on.
+    try {
+      const { enableConfigs } = await import('../utils/config.js');
+      enableConfigs();
+    } catch {
+      // already enabled or unavailable
+    }
     const { agentsMain } = await import('../cli/agents.js');
     await agentsMain(args.slice(1));
     return;
@@ -280,6 +320,7 @@ async function main(): Promise<void> {
   }
 
   // Fast-path for `--bg`/`--background` shortcut → daemon bg.
+  // Official Iia: strip only pre-`--` bg flags (stripBgFlags inside handleBgStart).
   if (feature('BG_SESSIONS') && (args.includes('--bg') || args.includes('--background'))) {
     profileCheckpoint('cli_daemon_path');
     const { enableConfigs } = await import('../utils/config.js');
@@ -287,7 +328,7 @@ async function main(): Promise<void> {
     const { setShellIfWindows } = await import('../utils/windowsPaths.js');
     setShellIfWindows();
     const bg = await import('../cli/bg.js');
-    await bg.handleBgStart(args.filter(a => a !== '--bg' && a !== '--background'));
+    await bg.handleBgStart(args);
     return;
   }
 

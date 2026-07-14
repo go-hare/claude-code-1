@@ -44,7 +44,8 @@ import { runWithAgentContext, type SubagentContext } from 'src/utils/agentContex
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js';
 import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
-import { isEnvTruthy } from 'src/utils/envUtils.js';
+import { resolveAgentAutoBackgroundMs } from 'src/utils/autoBackgroundTimeout.js';
+import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
 import { AbortError, errorMessage, toError } from 'src/utils/errors.js';
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js';
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js';
@@ -81,6 +82,7 @@ import {
   getLastToolUseName,
   runAsyncAgentLifecycle,
 } from './agentToolUtils.js';
+import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js';
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js';
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME, ONE_SHOT_BUILTIN_AGENT_TYPES } from './constants.js';
 import {
@@ -118,20 +120,18 @@ const proactiveModule =
 const PROGRESS_THRESHOLD_MS = 2000; // Show background hint after 2 seconds
 
 // Check if background tasks are disabled at module load time
-const isBackgroundTasksDisabled =
-  // eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
-  isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS);
+// Official DISABLE_BACKGROUND_TASKS densable — captured once at module load
+// so the schema omits run_in_background for the whole process.
+// eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
+const isBackgroundTasksDisabled = isBackgroundTasksDisabledEnv();
 
 // Auto-background agent tasks after this many ms (0 = disabled)
 // Enabled by env var OR GrowthBook gate (checked lazily since GB may not be ready at module load)
+// Official: CLAUDE_AUTO_BACKGROUND_TASKS / CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS / tengu_auto_background_agents
 function getAutoBackgroundMs(): number {
-  if (
-    isEnvTruthy(process.env.CLAUDE_AUTO_BACKGROUND_TASKS) ||
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_auto_background_agents', false)
-  ) {
-    return 120_000;
-  }
-  return 0;
+  return resolveAgentAutoBackgroundMs({
+    gbEnabled: getFeatureValue_CACHED_MAY_BE_STALE('tengu_auto_background_agents', false),
+  });
 }
 
 // Multi-agent type constants are defined inline inside gated blocks to enable dead code elimination
@@ -151,7 +151,9 @@ const baseInputSchema = lazySchema(() =>
     run_in_background: z
       .boolean()
       .optional()
-      .describe('Set to true to run this agent in the background. You will be notified when it completes.'),
+      .describe(
+        'Agents run in the background by default; you will be notified when one completes. Set to false to run this agent synchronously when you need its result before continuing.',
+      ),
     task_id: z
       .string()
       .optional()
@@ -323,9 +325,8 @@ export const AgentTool = buildTool({
     const agentsWithMcpRequirementsMet = filterAgentsByMcpRequirements(agents, mcpServersWithTools);
     const filteredAgents = filterDeniedAgents(agentsWithMcpRequirementsMet, toolPermissionContext, AGENT_TOOL_NAME);
 
-    // Use inline env check instead of coordinatorModule to avoid circular
-    // dependency issues during test module loading.
-    const isCoordinator = feature('COORDINATOR_MODE') ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE) : false;
+    // isCoordinatorMode densable (COORDINATOR_MODE feature + env).
+    const isCoordinator = isCoordinatorMode();
     return await getPrompt(filteredAgents, isCoordinator, allowedAgentTypes);
   },
   name: AGENT_TOOL_NAME,
@@ -496,6 +497,39 @@ export const AgentTool = buildTool({
       selectedAgent = found;
     }
 
+    // Official bUr densable: resolve observer declaration (warn on
+    // chaining/missing). Full o5r spawnFirstRun remains denser; pairing is
+    // armed after earlyAgentId so YOu/enqueue can target the observed agent.
+    let resolvedObserver:
+      | {
+          observerDefinition: { agentType: string };
+          observerMessage?: string;
+        }
+      | undefined;
+    if (selectedAgent.observer) {
+      try {
+        const { resolveObserverAgent, formatObserverResolveWarn } = await import('src/utils/observerAgents.js');
+        const observerResult = resolveObserverAgent({
+          observedDefinition: selectedAgent,
+          activeAgents: toolUseContext.options.agentDefinitions.activeAgents,
+          // Nested observer agents should not chain further observers.
+          observedIsObserver: Boolean(toolUseContext.options.querySource?.startsWith('agent:observer:')),
+        });
+        const warn = formatObserverResolveWarn(observerResult);
+        if (warn) {
+          logForDebugging(warn, { level: 'warn' });
+        }
+        if (observerResult.status === 'ok') {
+          resolvedObserver = {
+            observerDefinition: observerResult.observerDefinition,
+            ...(observerResult.observerMessage ? { observerMessage: observerResult.observerMessage } : {}),
+          };
+        }
+      } catch {
+        // Best-effort — observer resolve must not block agent spawn.
+      }
+    }
+
     // Same lifecycle constraint as the run_in_background guard above, but for
     // agent definitions that force background via `background: true`. Checked
     // here because selectedAgent is only now resolved.
@@ -579,9 +613,10 @@ export const AgentTool = buildTool({
       setAgentColor(selectedAgent.agentType, selectedAgent.color);
     }
 
-    // Resolve agent params for logging (these are already resolved in runAgent)
+    // Resolve agent params for logging (these are already resolved in runAgent).
+    // Official $6e: built-in Explore may rewrite model to opus cap before getAgentModel.
     const resolvedAgentModel = getAgentModel(
-      selectedAgent.model,
+      resolveAgentDefinitionModel(selectedAgent, toolUseContext.options.mainLoopModel),
       toolUseContext.options.mainLoopModel,
       isForkPath ? undefined : model,
       permissionMode,
@@ -594,7 +629,11 @@ export const AgentTool = buildTool({
       color: selectedAgent.color as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       is_built_in_agent: isBuiltInAgent(selectedAgent),
       is_resume: false,
-      is_async: (run_in_background === true || selectedAgent.background === true) && !isBackgroundTasksDisabled,
+      is_async:
+        (run_in_background === true ||
+          selectedAgent.background === true ||
+          (!isInProcessTeammate() && run_in_background !== false)) &&
+        !isBackgroundTasksDisabled,
       is_fork: isForkPath,
     });
 
@@ -723,12 +762,17 @@ export const AgentTool = buildTool({
       isBuiltInAgent: isBuiltInAgent(selectedAgent),
       startTime,
       agentType: selectedAgent.agentType,
-      isAsync: (run_in_background === true || selectedAgent.background === true) && !isBackgroundTasksDisabled,
+      // Official 208: default background (run_in_background !== false) unless
+      // in-process teammate; explicit true / agent.background still force async.
+      isAsync:
+        (run_in_background === true ||
+          selectedAgent.background === true ||
+          (!isInProcessTeammate() && run_in_background !== false)) &&
+        !isBackgroundTasksDisabled,
     };
 
-    // Use inline env check instead of coordinatorModule to avoid circular
-    // dependency issues during test module loading.
-    const isCoordinator = feature('COORDINATOR_MODE') ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE) : false;
+    // isCoordinatorMode densable (COORDINATOR_MODE feature + env).
+    const isCoordinator = isCoordinatorMode();
     if (isCoordinator && !isForkPath && enhancedSystemPrompt) {
       enhancedSystemPrompt = [...enhancedSystemPrompt, getWorkerAntiInjectionAddendum()];
     }
@@ -746,13 +790,17 @@ export const AgentTool = buildTool({
     // below (registerAsyncAgentTask + notifyOnCompletion).
     const assistantForceAsync = feature('KAIROS') ? appState.kairosEnabled : false;
 
+    // Official 208: te || (o===true || agent.background || coordinator ||
+    // forceAsync || (!inProcessTeammate && o!==false)) && !disabled
+    // Unset run_in_background → background by default (except in-process teammates).
     const shouldRunAsync =
       (run_in_background === true ||
         selectedAgent.background === true ||
         isCoordinator ||
         forceAsync ||
         assistantForceAsync ||
-        (proactiveModule?.isProactiveActive() ?? false)) &&
+        (proactiveModule?.isProactiveActive() ?? false) ||
+        (!isInProcessTeammate() && run_in_background !== false)) &&
       !isBackgroundTasksDisabled;
     // Assemble the worker's tool pool independently of the parent's.
     // Workers always get their tools from assembleToolPool with their own
@@ -767,6 +815,85 @@ export const AgentTool = buildTool({
 
     // Create a stable agent ID early so it can be used for worktree slug
     const earlyAgentId = createAgentId();
+
+    // Official observer pairing densable (G0t/o5r plan+install): reserve
+    // observer task id keyed by observed earlyAgentId. Host is pairing-scoped
+    // (reads pairing.armingToolUseContext / setAppState) so concurrent agents
+    // share one process host without force:true clobber.
+    if (resolvedObserver) {
+      try {
+        const { installObserverPairing } = await import('src/utils/observerAgents.js');
+        const { installAgentObserverRuntimeHost } = await import('./observerRuntimeHost.js');
+        const rootSetAppStateForObserver = toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState;
+        // Shared real G0t host — also used by query VOu / resumeAgent zOu.
+        await installAgentObserverRuntimeHost({
+          toolUseContext,
+          canUseTool,
+          setAppState: rootSetAppStateForObserver,
+          log: msg => logForDebugging(msg, { level: 'debug' }),
+        });
+        const armingPermissionMode = toolUseContext.getAppState().toolPermissionContext.mode;
+        const installed = await installObserverPairing({
+          observedKey: earlyAgentId,
+          observedTaskId: earlyAgentId,
+          observedName: selectedAgent.agentType,
+          observedAgentType: selectedAgent.agentType,
+          observerDefinition: {
+            agentType: resolvedObserver.observerDefinition.agentType,
+            ...(resolvedObserver.observerMessage ? { observerMessage: resolvedObserver.observerMessage } : {}),
+          },
+          observerTaskId: createAgentId(),
+          generateObserverTaskId: () => createAgentId(),
+          armingPermissionMode,
+          armingToolUseContext: toolUseContext,
+          canUseTool,
+          setAppState: rootSetAppStateForObserver,
+          // Official wZi densable at arm time: Agent tool present +
+          // AgentTool.checkPermissions for observer auto-spawn (ZD densable).
+          tools: toolUseContext.options.tools?.map(t => ({
+            name: t.name,
+            ...(t.aliases ? { aliases: t.aliases } : {}),
+          })),
+          gateCanUseTool: async ({ subagentType, description: gateDesc, prompt: gatePrompt }) => {
+            const agentTool = toolUseContext.options.tools.find(
+              t => toolMatchesName(t, AGENT_TOOL_NAME) || toolMatchesName(t, LEGACY_AGENT_TOOL_NAME),
+            );
+            if (!agentTool) return 'deny';
+            try {
+              const result = await agentTool.checkPermissions(
+                {
+                  description: gateDesc,
+                  prompt: gatePrompt,
+                  subagent_type: subagentType,
+                  run_in_background: true,
+                },
+                toolUseContext,
+              );
+              if (result.behavior === 'allow') return 'allow';
+              if (result.behavior === 'deny') return 'deny';
+              if (result.behavior === 'ask') return 'ask';
+              // passthrough → allow for background auto-spawn densable
+              return 'allow';
+            } catch {
+              return 'error';
+            }
+          },
+          requireHost: true,
+          log: msg => logForDebugging(msg, { level: 'debug' }),
+        });
+        // Official HXt observer pointer write densable for resume re-arm (zOu).
+        if (installed) {
+          void writeAgentMetadata(asAgentId(earlyAgentId), {
+            agentType: selectedAgent.agentType,
+            description,
+            observerTaskId: installed.observerTaskId,
+            ...(installed.armingPermissionMode ? { armingPermissionMode: installed.armingPermissionMode } : {}),
+          }).catch(_err => logForDebugging(`Failed to write observer pointer metadata: ${_err}`));
+        }
+      } catch {
+        // Best-effort — pairing arm must not block agent spawn.
+      }
+    }
 
     // Set up worktree isolation if requested
     let worktreeInfo: {
@@ -905,6 +1032,7 @@ export const AgentTool = buildTool({
         invocationKind: 'spawn' as const,
         invocationEmitted: false,
         ownedFiles: workerOwnedFiles,
+        isBackgroundAgent: true,
       };
 
       // Workload propagation: handlePromptSubmit wraps the entire turn in
@@ -975,6 +1103,8 @@ export const AgentTool = buildTool({
         invocationKind: 'spawn' as const,
         invocationEmitted: false,
         ownedFiles: workerOwnedFiles,
+        // Official He: sync only backgrounds when parent agentContext is background
+        isBackgroundAgent: toolUseContext.isBackgroundAgent ?? false,
       };
 
       // Wrap entire sync agent execution in context for analytics attribution
@@ -1120,7 +1250,14 @@ export const AgentTool = buildTool({
                   // same as the async-from-start path above.
                   // Continue agent in background and return async result
                   transferAgentLocks(syncAgentId, backgroundedTaskId);
-                  void runWithAgentContext(syncAgentContext, async () => {
+                  // Mid-backgrounded: promote to background agent so session
+                  // activity no longer bumps mainLoopRefcount (HOn).
+                  const backgroundedAgentContext: SubagentContext = {
+                    ...syncAgentContext,
+                    agentId: asAgentId(backgroundedTaskId),
+                    isBackgroundAgent: true,
+                  };
+                  void runWithAgentContext(backgroundedAgentContext, async () => {
                     let stopBackgroundedSummarization: (() => void) | undefined;
                     try {
                       // Clean up the foreground iterator so its finally block runs
@@ -1180,6 +1317,16 @@ export const AgentTool = buildTool({
                       // cleanupWorktreeIfNeeded can hang — they must not gate
                       // the status transition (gh-20236).
                       completeAsyncAgent(agentResult, rootSetAppState);
+                      try {
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
+                        const { maybeStopObserverForObservedTerminal } =
+                          require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
+                        maybeStopObserverForObservedTerminal(backgroundedTaskId, msg =>
+                          logForDebugging(msg, { level: 'debug' }),
+                        );
+                      } catch {
+                        // densable optional
+                      }
 
                       // Extract text from agent result content for the notification
                       let finalMessage = extractTextContent(agentResult.content, '\n');
@@ -1221,6 +1368,16 @@ export const AgentTool = buildTool({
                         // Transition status BEFORE worktree cleanup so
                         // TaskOutput unblocks even if git hangs (gh-20236).
                         killAsyncAgent(backgroundedTaskId, rootSetAppState);
+                        try {
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          const { maybeStopObserverForObservedTerminal } =
+                            require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
+                          maybeStopObserverForObservedTerminal(backgroundedTaskId, msg =>
+                            logForDebugging(msg, { level: 'debug' }),
+                          );
+                        } catch {
+                          // densable optional
+                        }
                         logEvent('tengu_agent_tool_terminated', {
                           agent_type: metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                           model:
@@ -1246,6 +1403,16 @@ export const AgentTool = buildTool({
                       }
                       const errMsg = errorMessage(error);
                       failAsyncAgent(backgroundedTaskId, errMsg, rootSetAppState);
+                      try {
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
+                        const { maybeStopObserverForObservedTerminal } =
+                          require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
+                        maybeStopObserverForObservedTerminal(backgroundedTaskId, msg =>
+                          logForDebugging(msg, { level: 'debug' }),
+                        );
+                      } catch {
+                        // densable optional
+                      }
                       const worktreeResult = await cleanupWorktreeIfNeeded();
                       enqueueAgentNotification({
                         taskId: backgroundedTaskId,
@@ -1432,6 +1599,23 @@ export const AgentTool = buildTool({
             // Clean up scoped skills so they don't accumulate in the global map
             clearInvokedSkillsForAgent(syncAgentId);
             releaseAgentLocks(syncAgentId);
+
+            // Official observer densable: stop pairing on pure-sync terminal
+            // (async/backgrounded paths stop via agentToolUtils / bg handlers).
+            if (!wasBackgrounded) {
+              try {
+                const { maybeStopObserverForObservedTerminal } =
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
+                maybeStopObserverForObservedTerminal(earlyAgentId, (msg: string) =>
+                  logForDebugging(msg, {
+                    level: 'debug',
+                  }),
+                );
+              } catch {
+                // densable optional
+              }
+            }
 
             // Clean up dumpState entry for this agent to prevent unbounded growth
             // Skip if backgrounded — the backgrounded agent's finally handles cleanup

@@ -115,7 +115,24 @@ export const NotebookEditTool = buildTool({
   toAutoClassifierInput(input) {
     if (feature('TRANSCRIPT_CLASSIFIER')) {
       const mode = input.edit_mode ?? 'replace'
-      return `${input.notebook_path} ${mode}: ${input.new_source}`
+      // Official xXn: when editRemovalVisibility is on, project structured
+      // notebook edit (mode/cell/adds) instead of only new_source text.
+      const { resolveEditRemovalVisibility } =
+        require('src/utils/permissions/autoModeFlags.js') as typeof import('src/utils/permissions/autoModeFlags.js')
+      if (!resolveEditRemovalVisibility().value) {
+        return `${input.notebook_path} ${mode}: ${input.new_source}`
+      }
+      return {
+        notebook_path: input.notebook_path,
+        mode,
+        ...(input.cell_id !== undefined ? { cell_id: input.cell_id } : {}),
+        ...(mode !== 'delete' && input.cell_type !== undefined
+          ? { cell_type: input.cell_type }
+          : {}),
+        ...(mode === 'delete'
+          ? { ignored_source: input.new_source }
+          : { adds: input.new_source }),
+      }
     }
     return ''
   },

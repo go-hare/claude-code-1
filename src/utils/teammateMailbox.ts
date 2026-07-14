@@ -360,6 +360,42 @@ export async function writeToMailbox(
   message: Omit<TeammateMessage, 'read'>,
   teamName?: string,
 ): Promise<void> {
+  // Official: refuse non-string text / schema-invalid payloads before any I/O.
+  // Prevents crash loops from corrupt concurrent writers or bad callers.
+  if (typeof message.text !== 'string') {
+    const err = new Error(
+      'TeammateMailbox: refused mailbox write with non-string text',
+    )
+    logForDebugging(
+      `[TeammateMailbox] refused mailbox write (${recipientName}): non-string text`,
+    )
+    logError(err)
+    throw err
+  }
+  try {
+    toMailboxMessage({ ...message, read: false })
+  } catch (validationError) {
+    // Preserve size-limit errors (assertMailboxMessageSize); wrap shape errors.
+    if (
+      validationError instanceof Error &&
+      validationError.message.includes('exceeds')
+    ) {
+      logForDebugging(
+        `[TeammateMailbox] writeToMailbox: refusing schema-invalid message for ${recipientName} (${validationError.message})`,
+      )
+      logError(validationError)
+      throw validationError
+    }
+    const err = new Error(
+      'TeammateMailbox: refused mailbox write failing schema validation',
+    )
+    logForDebugging(
+      `[TeammateMailbox] writeToMailbox: refusing schema-invalid message for ${recipientName} (${validationError instanceof Error ? validationError.message : String(validationError)})`,
+    )
+    logError(err)
+    throw err
+  }
+
   await ensureInboxDir(teamName)
 
   const inboxPath = getInboxPath(recipientName, teamName)

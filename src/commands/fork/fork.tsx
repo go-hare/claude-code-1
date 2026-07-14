@@ -10,9 +10,15 @@ export async function call(
   context: LocalJSXCommandContext,
   args: string,
 ): Promise<React.ReactNode> {
-  // Check feature flag
-  if (!feature('FORK_SUBAGENT')) {
-    onDone('Fork subagent feature is not enabled. Set FEATURE_FORK_SUBAGENT=1 to enable.', { display: 'system' });
+  // Feature flag OR official CLAUDE_CODE_FORK_SUBAGENT / GB tengu_fork_subagent.
+  const forkEnvEnabled = (
+    require('../../utils/forkSubagentGate.js') as typeof import('../../utils/forkSubagentGate.js')
+  ).isForkSubagentEnabled();
+  if (!feature('FORK_SUBAGENT') && !forkEnvEnabled) {
+    onDone(
+      'Fork subagent feature is not enabled. Set FEATURE_FORK_SUBAGENT=1 or CLAUDE_CODE_FORK_SUBAGENT=1 to enable.',
+      { display: 'system' },
+    );
     return null;
   }
 

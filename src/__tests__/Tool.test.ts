@@ -170,6 +170,11 @@ describe('getEmptyToolPermissionContext', () => {
     const ctx = getEmptyToolPermissionContext()
     expect(ctx.isBypassPermissionsModeAvailable).toBe(true)
   })
+
+  test('returns empty mcpPermissionModeOverrides', () => {
+    const ctx = getEmptyToolPermissionContext()
+    expect(ctx.mcpPermissionModeOverrides).toEqual({})
+  })
 })
 
 describe('filterToolProgressMessages', () => {

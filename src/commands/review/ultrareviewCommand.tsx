@@ -44,6 +44,11 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
     return null;
   }
 
+  if (gate.kind === 'blocked') {
+    onDone(gate.message, { display: 'system' });
+    return null;
+  }
+
   if (gate.kind === 'low-balance') {
     onDone(
       `Balance too low to launch ultrareview ($${gate.available.toFixed(2)} available, $10 minimum). Top up at https://claude.ai/settings/billing`,
@@ -53,10 +58,12 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   }
 
   if (gate.kind === 'needs-confirm') {
+    const billingNote =
+      gate.billingNote && gate.billingNote.length > 0 ? gate.billingNote : ' This review bills as Extra Usage.';
     return (
       <UltrareviewOverageDialog
         onProceed={async signal => {
-          await launchAndDone(args, context, onDone, ' This review bills as Extra Usage.', signal);
+          await launchAndDone(args, context, onDone, billingNote, signal);
           // Only persist the confirmation flag after a non-aborted launch —
           // otherwise Escape-during-launch would leave the flag set and
           // skip this dialog on the next attempt.

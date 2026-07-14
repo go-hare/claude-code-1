@@ -4,6 +4,7 @@ import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { generateAwaySummary } from '../services/awaySummary.js'
 import type { Message } from '../types/message.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
 import { createAwaySummaryMessage } from '../utils/messages.js'
 
 const BLUR_DELAY_MS = 5 * 60_000
@@ -43,14 +44,23 @@ export function useAwaySummary(
   messagesRef.current = messages
   isLoadingRef.current = isLoading
 
-  // 3P default: false
+  // 3P default: false; CLAUDE_CODE_ENABLE_AWAY_SUMMARY force-on (official densable).
+  let envForce = isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY)
+  try {
+    const { isAwaySummaryEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    envForce = isAwaySummaryEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   const gbEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_sedge_lantern',
     false,
   )
   useEffect(() => {
-    if (!feature('AWAY_SUMMARY')) return
-    if (!gbEnabled) return
+    if (!feature('AWAY_SUMMARY') && !envForce) return
+    if (!gbEnabled && !envForce) return
 
     function clearTimer(): void {
       if (timerRef.current !== null) {

@@ -43,6 +43,7 @@ import {
   executeUserPromptSubmitHooks,
   getUserPromptSubmitHookBlockingMessage,
 } from '../hooks.js'
+import { applyHookSessionTitle } from '../sessionStart.js'
 import {
   createImageMetadataText,
   maybeResizeAndDownsampleImageBlock,
@@ -186,6 +187,7 @@ export async function processUserInput({
   // Execute UserPromptSubmit hooks and handle blocking
   queryCheckpoint('query_hooks_start')
   const inputMessage = getContentText(input) || ''
+  let suppressOriginalPrompt = false
 
   for await (const hookResult of executeUserPromptSubmitHooks(
     inputMessage,
@@ -198,18 +200,26 @@ export async function processUserInput({
       continue
     }
 
+    // Official 2.1.x: UPS can set session title
+    if (hookResult.sessionTitle) {
+      applyHookSessionTitle(hookResult.sessionTitle)
+    }
+    if (hookResult.suppressOriginalPrompt) {
+      suppressOriginalPrompt = true
+    }
+
     // Return only a system-level error message, erasing the original user input
     if (hookResult.blockingError) {
       const blockingMessage = getUserPromptSubmitHookBlockingMessage(
         hookResult.blockingError,
       )
+      const blockText = suppressOriginalPrompt
+        ? blockingMessage
+        : `${blockingMessage}\n\nOriginal prompt: ${input}`
       return {
         messages: [
           // TODO: Make this an attachment message
-          createSystemMessage(
-            `${blockingMessage}\n\nOriginal prompt: ${input}`,
-            'warning',
-          ),
+          createSystemMessage(blockText, 'warning'),
         ],
         shouldQuery: false,
         allowedTools: result.allowedTools,

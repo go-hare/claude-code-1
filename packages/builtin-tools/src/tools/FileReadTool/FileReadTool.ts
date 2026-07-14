@@ -28,7 +28,7 @@ import {
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from 'src/utils/envUtils.js'
+import { getClaudeConfigHomeDir, isBareMode } from 'src/utils/envUtils.js'
 import { getErrnoCode, isENOENT } from 'src/utils/errors.js'
 import {
   addLineNumbers,
@@ -573,7 +573,7 @@ export const FileReadTool = buildTool({
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     // Skip in simple mode - no skills available
     const cwd = getCwd()
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+    if (!isBareMode()) {
       const newSkillDirs = await discoverSkillDirsForPaths([fullFilePath], cwd)
       if (newSkillDirs.length > 0) {
         // Store discovered dirs for attachment display

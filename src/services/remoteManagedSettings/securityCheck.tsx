@@ -13,7 +13,13 @@ import { getBaseRenderOptions } from '../../utils/renderOptions.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 import { logEvent } from '../analytics/index.js';
 
-export type SecurityCheckResult = 'approved' | 'rejected' | 'no_check_needed';
+export type SecurityCheckResult =
+  | 'approved'
+  | 'rejected'
+  | 'no_check_needed'
+  // Official 2.1.207: non-interactive (-p/SDK) runs must not permanently
+  // record consent for dangerous managed settings that never showed a dialog.
+  | 'deferred_non_interactive';
 
 /**
  * Check if new remote managed settings contain dangerous settings that require user approval.
@@ -21,7 +27,9 @@ export type SecurityCheckResult = 'approved' | 'rejected' | 'no_check_needed';
  *
  * @param cachedSettings The current cached settings (may be null for first run)
  * @param newSettings The new settings fetched from the API
- * @returns 'approved' if user accepts, 'rejected' if user declines, 'no_check_needed' if no dangerous changes
+ * @returns 'approved' if user accepts, 'rejected' if user declines,
+ *   'no_check_needed' if no dangerous changes,
+ *   'deferred_non_interactive' if dangerous changes exist but no UI can be shown
  */
 export async function checkManagedSettingsSecurity(
   cachedSettings: SettingsJson | null,
@@ -37,9 +45,11 @@ export async function checkManagedSettingsSecurity(
     return 'no_check_needed';
   }
 
-  // Skip dialog in non-interactive mode (consistent with trust dialog behavior)
+  // Official 2.1.207: do not treat non-interactive as consented.
+  // Apply for this run only; leave the disk cache un-consented so the next
+  // interactive session still shows the security dialog.
   if (!getIsInteractive()) {
-    return 'no_check_needed';
+    return 'deferred_non_interactive';
   }
 
   // Log that dialog is being shown

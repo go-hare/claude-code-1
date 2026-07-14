@@ -5,6 +5,8 @@ import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { shouldSuppressPushForUserPresence } from 'src/utils/residualUiEnvGates.js'
 
 const PUSH_NOTIFICATION_TOOL_NAME = 'PushNotification'
 
@@ -82,6 +84,40 @@ Requires Remote Control to be configured. Respects user notification settings (t
 
   async call(input: PushInput, context) {
     const appState = context.getAppState()
+    // Official REMOTE densable.
+    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    try {
+      const { isRemoteEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+      isRemote = isRemoteEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+
+    // Official densable: skip push when user is present (last interaction < 60s)
+    // unless CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK or remote session.
+    try {
+      const { getLastInteractionTime } = await import('src/bootstrap/state.js')
+      if (
+        shouldSuppressPushForUserPresence({
+          isRemote,
+          lastInteractionAgeMs: Date.now() - getLastInteractionTime(),
+        })
+      ) {
+        logForDebugging(
+          `[PushNotification] suppressed: user_present (${input.title})`,
+        )
+        return {
+          data: {
+            sent: false,
+            error: 'Notification suppressed: user is present.',
+          },
+        }
+      }
+    } catch (e) {
+      logForDebugging(`[PushNotification] presence check failed: ${e}`)
+    }
 
     // Try bridge delivery first (for remote/mobile viewers)
     if (appState.replBridgeEnabled) {

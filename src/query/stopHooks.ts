@@ -167,11 +167,19 @@ export async function* handleStopHooks(
     ? (await import('../commands/poor/poorMode.js')).isPoorModeActive()
     : false
   if (!isBareMode()) {
-    // Inline env check for dead code elimination in external builds
-    if (
-      !isEnvDefinedFalsy(process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION) &&
-      !poorMode
-    ) {
+    // Official ENABLE_PROMPT_SUGGESTION densable pure env half.
+    let promptSuggestionEnvOff = isEnvDefinedFalsy(
+      process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION,
+    )
+    try {
+      const { resolvePromptSuggestionEnvOverride } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+      promptSuggestionEnvOff = resolvePromptSuggestionEnvOverride() === false
+    } catch {
+      // keep raw env fallback
+    }
+    if (!promptSuggestionEnvOff && !poorMode) {
       void executePromptSuggestion(stopHookContext)
     }
     if (
@@ -215,8 +223,71 @@ export async function* handleStopHooks(
     }
   }
 
+  // Official brief-mode stop-hook densable (pre-Stop): when brief is active and
+  // the turn produced no SendUserMessage tool_use, inject one meta enforce
+  // message so the model retries. DISABLE_BRIEF_MODE_STOP_HOOK force-off.
+  const briefEnforceBlocking: Message[] = []
   try {
-    const blockingErrors = []
+    const { isBriefEnabled, resolveBriefEnforceText, BRIEF_ENFORCE_SENTINEL } =
+      await import('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js')
+    const { BRIEF_TOOL_NAME, LEGACY_BRIEF_TOOL_NAME } = await import(
+      '@claude-code/builtin-tools/tools/BriefTool/prompt.js'
+    )
+    const { resolveBriefModeStopHookEnforce } = await import(
+      '../utils/residualFinalEnvGates.js'
+    )
+    const { toolMatchesName } = await import('../Tool.js')
+    // Official cOd densable: slice after last non-meta non-tool_result user msg.
+    let lastUserIdx = -1
+    for (let i = messagesForQuery.length - 1; i >= 0; i--) {
+      const m = messagesForQuery[i]
+      if (!m || m.type !== 'user' || m.isMeta) continue
+      const content = m.message?.content
+      const isToolResult =
+        Array.isArray(content) &&
+        content.some(
+          block =>
+            block &&
+            typeof block === 'object' &&
+            (block as { type?: string }).type === 'tool_result',
+        )
+      if (isToolResult) continue
+      lastUserIdx = i
+      break
+    }
+    const sinceLastUser = messagesForQuery.slice(lastUserIdx + 1)
+    const toolsIncludeBrief = toolUseContext.options.tools.some(
+      t =>
+        toolMatchesName(t, BRIEF_TOOL_NAME) ||
+        toolMatchesName(t, LEGACY_BRIEF_TOOL_NAME),
+    )
+    const enforceContent = resolveBriefModeStopHookEnforce({
+      querySource,
+      isBriefEnabled: isBriefEnabled(),
+      agentId: toolUseContext.agentId,
+      toolsIncludeBrief,
+      messagesSinceLastUser: sinceLastUser,
+      assistantMessages,
+      briefToolNames: [BRIEF_TOOL_NAME, LEGACY_BRIEF_TOOL_NAME],
+      sentinel: BRIEF_ENFORCE_SENTINEL,
+      enforceText: resolveBriefEnforceText(),
+    })
+    if (enforceContent) {
+      const enforceMsg = createUserMessage({
+        content: enforceContent,
+        isMeta: true,
+      })
+      briefEnforceBlocking.push(enforceMsg)
+      yield enforceMsg
+    }
+  } catch (err) {
+    logForDebugging(`Brief mode enforcement failed: ${errorMessage(err)}`, {
+      level: 'error',
+    })
+  }
+
+  try {
+    const blockingErrors: Message[] = [...briefEnforceBlocking]
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
 

@@ -16,7 +16,18 @@ export const SHELL_TOOL_NAMES: string[] = [BASH_TOOL_NAME, POWERSHELL_TOOL_NAME]
  */
 export function isPowerShellToolEnabled(): boolean {
   if (getPlatform() !== 'windows') return false
-  return process.env.USER_TYPE === 'ant'
-    ? !isEnvDefinedFalsy(process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL)
-    : isEnvTruthy(process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL)
+  // Official USE_POWERSHELL_TOOL densable pure env half.
+  try {
+    const { resolvePowerShellToolEnvOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    const envOverride = resolvePowerShellToolEnvOverride()
+    if (envOverride !== null) return envOverride
+    // Unset: ant defaults on, external defaults off.
+    return process.env.USER_TYPE === 'ant'
+  } catch {
+    return process.env.USER_TYPE === 'ant'
+      ? !isEnvDefinedFalsy(process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL)
+      : isEnvTruthy(process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL)
+  }
 }

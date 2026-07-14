@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getProjectRoot } from '../bootstrap/state.js'
 import { logForDebugging } from '../utils/debug.js'
+import { initBundledWorkflows } from './bundled/init.js'
 import { buildHostBundle, makeHostHandle } from './hostHandle.js'
 import { installWorkflowNotifications } from './notifications.js'
 import {
@@ -97,6 +98,8 @@ let cached: WorkflowService | null = null
 /** Process singleton. Tool and panel share the same ports/registry/store. */
 export function getWorkflowService(): WorkflowService {
   if (cached) return cached
+  // Official yOy / initBundledWorkflows — product workflows before first resolve.
+  initBundledWorkflows()
   const bus = createProgressBus()
   const store = createProgressStoreFromBus(bus)
   const ports = createWorkflowPorts({ bus, store })

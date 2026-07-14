@@ -467,7 +467,18 @@ async function fetchAndLoadRemoteManagedSettings(): Promise<SettingsJson | null>
         return cachedSettings
       }
 
+      // Always apply for this process.
       setSessionCache(newSettings)
+
+      // Official 2.1.207: non-interactive runs must not permanently record
+      // consent (disk cache) for dangerous settings that never showed a dialog.
+      if (securityResult === 'deferred_non_interactive') {
+        logForDebugging(
+          'Remote settings: Applied for this non-interactive run; consent deferred — not persisting the disk cache as consented',
+        )
+        return newSettings
+      }
+
       await saveSettings(newSettings)
       logForDebugging('Remote settings: Applied new settings successfully')
       return newSettings
@@ -618,9 +629,21 @@ export function startBackgroundPolling(): void {
     return
   }
 
+  // Official CLAUDE_CODE_REMOTE_SETTINGS_POLL_MS override (else 1h default).
+  const pollOverride = (() => {
+    try {
+      const { resolveRemoteSettingsPollMs } =
+        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+      return resolveRemoteSettingsPollMs()
+    } catch {
+      return undefined
+    }
+  })()
+  const intervalMs = pollOverride ?? POLLING_INTERVAL_MS
+
   pollingIntervalId = setInterval(() => {
     void pollRemoteSettings()
-  }, POLLING_INTERVAL_MS)
+  }, intervalMs)
   pollingIntervalId.unref()
 
   // Register cleanup to stop polling on shutdown

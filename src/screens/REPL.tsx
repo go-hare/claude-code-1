@@ -71,11 +71,17 @@ import {
   getTurnClassifierDurationMs,
   getTurnClassifierCount,
   resetTurnClassifierDuration,
+  setMainLoopBusy,
 } from '../bootstrap/state.js';
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
 import { QueryGuard } from '../utils/QueryGuard.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import {
+  resolveIdleThresholdMinutes,
+  resolveIdleThresholdMs,
+  resolveIdleTokenThreshold,
+} from '../utils/residualMsEnvGates.js';
 import { formatTokens, truncateToWidth } from '../utils/format.js';
 import { consumeEarlyInput } from '../utils/earlyInput.js';
 import {
@@ -310,7 +316,11 @@ import {
   getAgentTranscript,
 } from '../utils/sessionStorage.js';
 import { deserializeMessages } from '../utils/conversationRecovery.js';
-import { extractReadFilesFromMessages, extractBashToolsFromMessages } from '../utils/queryHelpers.js';
+import {
+  extractReadFilesFromMessages,
+  extractBashToolsFromMessages,
+  extractBashHostsFromMessages,
+} from '../utils/queryHelpers.js';
 import { resetMicrocompactState } from '../services/compact/microCompact.js';
 import { runPostCompactCleanup, registerCompactCleanup } from '../services/compact/postCompactCleanup.js';
 import {
@@ -455,6 +465,8 @@ import {
   DesktopUpsellStartup,
   shouldShowDesktopUpsellStartup,
 } from 'src/components/DesktopUpsell/DesktopUpsellStartup.js';
+import { FullscreenUpsellDialog } from '../components/FullscreenUpsellDialog.js';
+import { shouldShowFullscreenUpsell } from '../utils/fullscreenUpsellGate.js';
 import { usePluginInstallationStatus } from 'src/hooks/notifs/usePluginInstallationStatus.js';
 import { usePluginAutoupdateNotification } from 'src/hooks/notifs/usePluginAutoupdateNotification.js';
 import { performStartupChecks } from 'src/utils/plugins/performStartupChecks.js';
@@ -788,6 +800,8 @@ export type Props = {
   strictMcpConfig?: boolean;
   systemPrompt?: string;
   appendSystemPrompt?: string;
+  /** Official --append-subagent-system-prompt for Task-tool subagents. */
+  appendSubagentSystemPrompt?: string;
   // Optional callback invoked before query execution
   // Called after user message is added to conversation but before API call
   // Return false to prevent query execution
@@ -812,6 +826,11 @@ export type Props = {
   thinkingConfig: ThinkingConfig;
   // Callback to switch to agents/fleet view (left arrow on empty input)
   onOpenAgents?: () => void;
+  /**
+   * Official resume-return densable — inject a continue prompt once after
+   * resume (compact/continue choices). Enqueued as priority next, meta.
+   */
+  initialAutoContinuePrompt?: string;
 };
 
 export type Screen = 'prompt' | 'transcript';
@@ -847,6 +866,7 @@ export function REPL({
   strictMcpConfig = false,
   systemPrompt: customSystemPrompt,
   appendSystemPrompt,
+  appendSubagentSystemPrompt,
   onBeforeQuery,
   onTurnComplete,
   disabled = false,
@@ -858,18 +878,46 @@ export function REPL({
   sshSession,
   thinkingConfig,
   onOpenAgents,
+  initialAutoContinuePrompt,
 }: Props): React.ReactNode {
   const isRemoteSession = !!remoteSessionConfig;
 
-  // Env-var gates hoisted to mount-time — isEnvTruthy does toLowerCase+trim+
-  // includes, and these were on the render path (hot during PageUp spam).
-  const titleDisabled = useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE), []);
+  // Env-var gates hoisted to mount-time — densable helpers + isEnvTruthy fall
+  // back; these were on the render path (hot during PageUp spam).
+  const titleDisabled = useMemo(() => {
+    try {
+      const { isTerminalTitleDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
+      return isTerminalTitleDisabled();
+    } catch {
+      return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE);
+    }
+  }, []);
   const moreRightEnabled = useMemo(
     () => process.env.USER_TYPE === 'ant' && isEnvTruthy(process.env.CLAUDE_MORERIGHT),
     [],
   );
-  const disableVirtualScroll = useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL), []);
-  const disableMessageActionsRaw = useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MESSAGE_ACTIONS), []);
+  const disableVirtualScroll = useMemo(() => {
+    try {
+      const { isVirtualScrollDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
+      return isVirtualScrollDisabled();
+    } catch {
+      return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL);
+    }
+  }, []);
+  const disableMessageActionsRaw = useMemo(() => {
+    try {
+      const { isMessageActionsDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
+      return isMessageActionsDisabled();
+    } catch {
+      return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MESSAGE_ACTIONS);
+    }
+  }, []);
   const disableMessageActions = feature('MESSAGE_ACTIONS') ? disableMessageActionsRaw : false;
   const buddyEnabled = isBuddyEnabled();
 
@@ -878,6 +926,17 @@ export function REPL({
     logForDebugging(`[REPL:mount] REPL mounted, disabled=${disabled}`);
     return () => logForDebugging(`[REPL:unmount] REPL unmounting`);
   }, [disabled]);
+
+  // Official resume-return densable — inject continue prompt once after resume.
+  useEffect(() => {
+    if (!initialAutoContinuePrompt) return;
+    enqueue({
+      mode: 'prompt',
+      value: initialAutoContinuePrompt,
+      priority: 'next',
+      isMeta: true,
+    });
+  }, [initialAutoContinuePrompt]);
 
   // Agent definition is state so /resume can update it mid-session
   const [mainThreadAgentDefinition, setMainThreadAgentDefinition] = useState(initialMainThreadAgentDefinition);
@@ -1026,6 +1085,8 @@ export function REPL({
   const [showEffortCallout, setShowEffortCallout] = useState(() => shouldShowEffortCallout(mainLoopModel));
   const showRemoteCallout = useAppState(s => s.showRemoteCallout);
   const [showDesktopUpsellStartup, setShowDesktopUpsellStartup] = useState(() => shouldShowDesktopUpsellStartup());
+  // Official Npf densable — fullscreen TUI upsell (after desktop upsell priority).
+  const [showFullscreenUpsell, setShowFullscreenUpsell] = useState(() => shouldShowFullscreenUpsell());
   // notifications
   useModelMigrationNotifications();
   useCanSwitchToExistingSubscription();
@@ -1871,11 +1932,15 @@ export function REPL({
     for (const tool of extractBashToolsFromMessages(newMessages)) {
       bashTools.current.add(tool);
     }
+    for (const host of extractBashHostsFromMessages(newMessages)) {
+      bashHosts.current.add(host);
+    }
     bashToolsProcessedIdx.current = messagesRef.current.length;
     void getTipToShowOnSpinner({
       theme,
       readFileState: readFileState.current,
       bashTools: bashTools.current,
+      bashHosts: bashHosts.current,
     }).then(async tip => {
       if (tip) {
         const content = await tip.content({ theme });
@@ -2351,6 +2416,7 @@ export function REPL({
   const [initialReadFileState] = useState(() => createFileStateCacheWithSizeLimit(READ_FILE_STATE_CACHE_SIZE));
   const readFileState = useRef(initialReadFileState);
   const bashTools = useRef(new Set<string>());
+  const bashHosts = useRef(new Set<string>());
   const bashToolsProcessedIdx = useRef(0);
   // Session-scoped skill discovery tracking (feeds was_discovered on
   // tengu_skill_tool_invocation). Must persist across getToolUseContext
@@ -2362,6 +2428,8 @@ export function REPL({
   // readFileState is a 100-entry LRU; once it evicts a CLAUDE.md path,
   // the next discovery cycle re-injects it. Cleared in clearConversation.
   const loadedNestedMemoryPathsRef = useRef(new Set<string>());
+  // Coordinator parent queue for subagent-propagated nested memory paths.
+  const pendingNestedMemoryTriggersRef = useRef(new Set<string>());
 
   // Helper to restore read file state from messages (used for resume flows)
   // This allows Claude to edit files that were read in previous sessions
@@ -2370,6 +2438,9 @@ export function REPL({
     readFileState.current = mergeFileStateCaches(readFileState.current, extracted);
     for (const tool of extractBashToolsFromMessages(messages)) {
       bashTools.current.add(tool);
+    }
+    for (const host of extractBashHostsFromMessages(messages)) {
+      bashHosts.current.add(host);
     }
   }, []);
 
@@ -2428,6 +2499,7 @@ export function REPL({
     | 'plugin-hint'
     | 'search-extra-tools-hint'
     | 'desktop-upsell'
+    | 'fullscreen-upsell'
     | 'ultraplan-choice'
     | 'ultraplan-launch'
     | undefined {
@@ -2486,6 +2558,9 @@ export function REPL({
 
     // Desktop app upsell (max 3 launches, lowest priority)
     if (allowDialogsWithAnimation && showDesktopUpsellStartup) return 'desktop-upsell';
+
+    // Official Npf densable — fullscreen TUI upsell (after desktop)
+    if (allowDialogsWithAnimation && showFullscreenUpsell) return 'fullscreen-upsell';
 
     return undefined;
   }
@@ -2592,6 +2667,7 @@ export function REPL({
     setWasAborted(true);
 
     queryGuard.forceEnd();
+    setMainLoopBusy(false);
     skipIdleCheckRef.current = false;
 
     // Preserve partially-streamed text so the user can read what was
@@ -2936,6 +3012,7 @@ export function REPL({
           agentDefinitions: allowedAgentTypes ? { ...s.agentDefinitions, allowedAgentTypes } : s.agentDefinitions,
           customSystemPrompt,
           appendSystemPrompt,
+          appendSubagentSystemPrompt,
           refreshTools: computeTools,
         },
         getAppState: () => store.getState(),
@@ -2976,6 +3053,7 @@ export function REPL({
         onInstallIDEExtension: setIDEToInstallExtension,
         nestedMemoryAttachmentTriggers: new Set<string>(),
         loadedNestedMemoryPaths: loadedNestedMemoryPathsRef.current,
+        pendingNestedMemoryTriggers: pendingNestedMemoryTriggersRef.current,
         dynamicSkillDirTriggers: new Set<string>(),
         discoveredSkillNames: discoveredSkillNamesRef.current,
         setResponseLength,
@@ -3048,6 +3126,7 @@ export function REPL({
       disabled,
       customSystemPrompt,
       appendSystemPrompt,
+      appendSubagentSystemPrompt,
       setConversationId,
     ],
   );
@@ -3668,6 +3747,9 @@ export function REPL({
         return false;
       }
 
+      // Official jGo — block bg shell pressure reap while the main loop is busy.
+      setMainLoopBusy(true);
+
       try {
         pipeReturnHadErrorRef.current = false;
         setWasAborted(false);
@@ -3728,6 +3810,7 @@ export function REPL({
         // running→idle. Returns false if a newer query owns the guard
         // (cancel+resubmit race where the stale finally fires as a microtask).
         if (queryGuard.end(thisGeneration)) {
+          setMainLoopBusy(false);
           setWasAborted(abortController.signal.aborted);
           setLastQueryCompletionTime(Date.now());
           skipIdleCheckRef.current = false;
@@ -3877,6 +3960,7 @@ export function REPL({
           readFileState: readFileState.current,
           discoveredSkillNames: discoveredSkillNamesRef.current,
           loadedNestedMemoryPaths: loadedNestedMemoryPathsRef.current,
+          pendingNestedMemoryTriggers: pendingNestedMemoryTriggersRef.current,
           getAppState: () => store.getState(),
           setAppState,
           setConversationId,
@@ -3884,6 +3968,7 @@ export function REPL({
         haikuTitleAttemptedRef.current = false;
         setHaikuTitle(undefined);
         bashTools.current.clear();
+        bashHosts.current.clear();
         bashToolsProcessedIdx.current = 0;
 
         // Restore the plan slug for the new session so getPlan() finds the file
@@ -3901,8 +3986,8 @@ export function REPL({
               buildPermissionUpdates(initialMsg.mode, initialMsg.allowedPrompts),
             )
           : prev.toolPermissionContext;
-        // For auto, override the mode (buildPermissionUpdates maps
-        // it to 'default' via toExternalPermissionMode) and strip dangerous rules
+        // For auto, strip dangerous rules. Mode is already 'auto' as a first-class
+        // external mode (2.1.207); keep the explicit set for prePlanMode cleanup.
         if (feature('TRANSCRIPT_CLASSIFIER') && initialMsg.mode === 'auto') {
           updatedToolPermissionContext = stripDangerousPermissionsForAutoMode({
             ...updatedToolPermissionContext,
@@ -4171,8 +4256,8 @@ export function REPL({
       // controls treatment: "dialog" (blocking), "hint" (notification), "off".
       {
         const willowMode = getFeatureValue_CACHED_MAY_BE_STALE('tengu_willow_mode', 'off');
-        const idleThresholdMin = Number(process.env.CLAUDE_CODE_IDLE_THRESHOLD_MINUTES ?? 75);
-        const tokenThreshold = Number(process.env.CLAUDE_CODE_IDLE_TOKEN_THRESHOLD ?? 100_000);
+        const idleThresholdMin = resolveIdleThresholdMinutes();
+        const tokenThreshold = resolveIdleTokenThreshold();
         if (
           willowMode !== 'off' &&
           !getGlobalConfig().idleReturnDismissed &&
@@ -4581,7 +4666,10 @@ export function REPL({
       return;
     }
     const exitMod = await exit.load();
-    const exitFlowResult = await exitMod.call(() => {});
+    // Pass conversation messages so BackgroundAndExit (official tsn) can seed.
+    const exitFlowResult = await exitMod.call(() => {}, {
+      messages: messagesRef.current,
+    } as Parameters<typeof exitMod.call>[1]);
     setExitFlow(exitFlowResult);
     // If call() returned without killing the process (bg session detach),
     // clear isExiting so the UI is usable on reattach. No-op on the normal
@@ -4949,10 +5037,10 @@ export function REPL({
     if (willowMode !== 'hint' && willowMode !== 'hint_v2') return;
     if (getGlobalConfig().idleReturnDismissed) return;
 
-    const tokenThreshold = Number(process.env.CLAUDE_CODE_IDLE_TOKEN_THRESHOLD ?? 100_000);
+    const tokenThreshold = resolveIdleTokenThreshold();
     if (getTotalInputTokens() < tokenThreshold) return;
 
-    const idleThresholdMs = Number(process.env.CLAUDE_CODE_IDLE_THRESHOLD_MINUTES ?? 75) * 60_000;
+    const idleThresholdMs = resolveIdleThresholdMs();
     const elapsed = Date.now() - lastQueryCompletionTime;
     const remaining = idleThresholdMs - elapsed;
 
@@ -6263,6 +6351,7 @@ export function REPL({
                           readFileState: readFileState.current,
                           discoveredSkillNames: discoveredSkillNamesRef.current,
                           loadedNestedMemoryPaths: loadedNestedMemoryPathsRef.current,
+                          pendingNestedMemoryTriggers: pendingNestedMemoryTriggersRef.current,
                           getAppState: () => store.getState(),
                           setAppState,
                           setConversationId,
@@ -6270,6 +6359,7 @@ export function REPL({
                         haikuTitleAttemptedRef.current = false;
                         setHaikuTitle(undefined);
                         bashTools.current.clear();
+                        bashHosts.current.clear();
                         bashToolsProcessedIdx.current = 0;
                       }
                       skipIdleCheckRef.current = true;
@@ -6368,6 +6458,10 @@ export function REPL({
 
                 {focusedInputDialog === 'desktop-upsell' && (
                   <DesktopUpsellStartup onDone={() => setShowDesktopUpsellStartup(false)} />
+                )}
+
+                {focusedInputDialog === 'fullscreen-upsell' && (
+                  <FullscreenUpsellDialog onDone={() => setShowFullscreenUpsell(false)} />
                 )}
 
                 {feature('ULTRAPLAN')

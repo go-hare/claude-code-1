@@ -14,6 +14,7 @@ import { logForDebugging } from '../../utils/debug.js'
 import { toError } from '../../utils/errors.js'
 import { getAuthHeaders } from '../../utils/http.js'
 import { logError } from '../../utils/log.js'
+import { resolveGbRefreshIntervalMsOrDefault } from '../../utils/residualFinalEnvGates.js'
 import { createSignal } from '../../utils/signal.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
@@ -467,8 +468,16 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
  * allowing the caller to fall through to the original defaultValue.
  */
 function getLocalGateDefault(feature: string): unknown | undefined {
-  if (process.env.CLAUDE_CODE_DISABLE_LOCAL_GATES) {
-    return undefined
+  // Official DISABLE_LOCAL_GATES densable.
+  try {
+    const { isLocalGatesDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    if (isLocalGatesDisabled()) return undefined
+  } catch {
+    if (process.env.CLAUDE_CODE_DISABLE_LOCAL_GATES) {
+      return undefined
+    }
   }
   return LOCAL_GATE_DEFAULTS[feature]
 }
@@ -1063,10 +1072,11 @@ export function resetGrowthBook(): void {
   envOverridesParsed = false
 }
 
-// Periodic refresh interval (matches Statsig's 6-hour interval)
-const GROWTHBOOK_REFRESH_INTERVAL_MS = true
-  ? 6 * 60 * 60 * 1000 // 6 hours
-  : 20 * 60 * 1000 // 20 min (for ants)
+// Periodic refresh interval — official RSh hardcode 6h (21600000) with
+// densable CLAUDE_CODE_GB_REFRESH_INTERVAL_MS override via OrDefault.
+function getGrowthBookRefreshIntervalMs(): number {
+  return resolveGbRefreshIntervalMsOrDefault()
+}
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 let beforeExitListener: (() => void) | null = null
 
@@ -1140,7 +1150,7 @@ export function setupPeriodicGrowthBookRefresh(): void {
 
   refreshInterval = setInterval(() => {
     void refreshGrowthBookFeatures()
-  }, GROWTHBOOK_REFRESH_INTERVAL_MS)
+  }, getGrowthBookRefreshIntervalMs())
   // Allow process to exit naturally - this timer shouldn't keep the process alive
   refreshInterval.unref?.()
 

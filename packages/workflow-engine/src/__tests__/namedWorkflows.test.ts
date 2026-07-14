@@ -1,11 +1,19 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  clearBundledWorkflows,
+  registerBundledWorkflow,
+} from '../engine/bundledWorkflows.js'
+import {
   listNamedWorkflows,
   resolveNamedWorkflow,
 } from '../engine/namedWorkflows.js'
+
+afterEach(() => {
+  clearBundledWorkflows()
+})
 
 test('resolves named workflow by extension priority', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wf-named-'))
@@ -65,4 +73,41 @@ test('listNamedWorkflows returns sorted names', async () => {
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('bundled registry is used when disk miss; disk shadows bundled', async () => {
+  registerBundledWorkflow(
+    'deep-research',
+    'export const meta = { name: "deep-research", description: "d" }\nreturn 1',
+  )
+  const missingDir = join(tmpdir(), 'wf-nope-' + Date.now())
+  const bundled = await resolveNamedWorkflow(missingDir, 'deep-research')
+  expect(bundled?.path).toBe('<bundled:deep-research>')
+  expect(await listNamedWorkflows(missingDir)).toEqual(['deep-research'])
+
+  const dir = await mkdtemp(join(tmpdir(), 'wf-named-'))
+  try {
+    await writeFile(join(dir, 'deep-research.js'), 'return "disk"')
+    const disk = await resolveNamedWorkflow(dir, 'deep-research')
+    expect(disk?.content).toBe('return "disk"')
+    expect(disk?.path.endsWith('deep-research.js')).toBe(true)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('hidden bundled workflows resolve but are omitted from list', async () => {
+  registerBundledWorkflow(
+    'code-review',
+    'export const meta = { name: "code-review", description: "d" }\nreturn 1',
+    { hidden: true },
+  )
+  registerBundledWorkflow(
+    'deep-research',
+    'export const meta = { name: "deep-research", description: "d" }\nreturn 1',
+  )
+  const missingDir = join(tmpdir(), 'wf-nope-' + Date.now())
+  expect(await listNamedWorkflows(missingDir)).toEqual(['deep-research'])
+  const found = await resolveNamedWorkflow(missingDir, 'code-review')
+  expect(found?.path).toBe('<bundled:code-review>')
 })

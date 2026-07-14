@@ -185,6 +185,62 @@ export function getPluginTrustMessage(): string | undefined {
 }
 
 /**
+ * Official 2.1.x: managed allowlist for contextual plugin install tips.
+ * Empty/undefined → no marketplace-declared tips surface (built-in first-party
+ * tips like frontend-design remain unaffected).
+ * Only honored from policySettings.
+ */
+export function getPluginSuggestionMarketplaces(): string[] {
+  return (
+    getSettingsForSource('policySettings')?.pluginSuggestionMarketplaces ?? []
+  )
+}
+
+/**
+ * Whether a marketplace may contribute contextual plugin suggestion tips.
+ * Built-in first-party tips do not call this (they are always eligible).
+ */
+export function isPluginSuggestionMarketplaceAllowed(
+  marketplaceName: string,
+): boolean {
+  const allowlist = getPluginSuggestionMarketplaces()
+  if (allowlist.length === 0) return false
+  return allowlist.includes(marketplaceName)
+}
+
+/**
+ * Official n3r: a marketplace tip only applies when the marketplace is
+ * registered AND its registered source is declared in managed settings
+ * (extraKnownMarketplaces entry for that name, or strictKnownMarketplaces).
+ * The official marketplace is exempt (checked by caller).
+ */
+export function isMarketplaceSourceDeclaredInManagedSettings(
+  marketplaceName: string,
+  source: MarketplaceSource,
+): boolean {
+  const policy = getSettingsForSource('policySettings')
+  if (!policy) return false
+
+  const extra = policy.extraKnownMarketplaces?.[marketplaceName]?.source
+  if (extra && areSourcesEqual(source, extra as MarketplaceSource)) {
+    return true
+  }
+
+  const strict = policy.strictKnownMarketplaces
+  if (!strict || strict.length === 0) return false
+
+  return strict.some(allowed => {
+    if (allowed.source === 'hostPattern') {
+      return doesSourceMatchHostPattern(source, allowed)
+    }
+    if (allowed.source === 'pathPattern') {
+      return doesSourceMatchPathPattern(source, allowed)
+    }
+    return areSourcesEqual(source, allowed as MarketplaceSource)
+  })
+}
+
+/**
  * Compare two MarketplaceSource objects for equality.
  * Sources are equal if they have the same type and all relevant fields match.
  */

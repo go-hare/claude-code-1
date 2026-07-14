@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
-import { join, parse, resolve } from 'node:path'
+import { parse, resolve } from 'node:path'
 import { WORKFLOW_SCRIPT_EXTENSIONS } from '../constants.js'
+import { getBundledWorkflow, listBundledWorkflows } from './bundledWorkflows.js'
 import { containsPath } from './paths.js'
 
 type Ext = (typeof WORKFLOW_SCRIPT_EXTENSIONS)[number]
@@ -11,7 +12,10 @@ function isScriptExt(ext: string): ext is Ext {
   )
 }
 
-/** Resolve a named workflow file by priority .ts → .js → .mjs. */
+/**
+ * Resolve a named workflow: project `.claude/workflows/` first (disk wins),
+ * then product-bundled registry (official pyo / initBundledWorkflows).
+ */
 export async function resolveNamedWorkflow(
   workflowDir: string,
   name: string,
@@ -26,10 +30,17 @@ export async function resolveNamedWorkflow(
       // try the next extension
     }
   }
+  const bundled = getBundledWorkflow(name)
+  if (bundled !== undefined) {
+    return { path: `<bundled:${name}>`, content: bundled }
+  }
   return null
 }
 
-/** List all named workflows in the directory (excluding non-script files). */
+/**
+ * List named workflows: project dir scripts ∪ bundled registry names.
+ * Project files shadow bundled names of the same stem.
+ */
 export async function listNamedWorkflows(
   workflowDir: string,
 ): Promise<string[]> {
@@ -37,10 +48,10 @@ export async function listNamedWorkflows(
   try {
     files = await readdir(workflowDir)
   } catch {
-    return []
+    files = []
   }
-  return files
+  const disk = files
     .filter(f => isScriptExt(parse(f).ext))
     .map(f => parse(f).name)
-    .sort()
+  return [...new Set([...disk, ...listBundledWorkflows()])].sort()
 }

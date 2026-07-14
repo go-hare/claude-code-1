@@ -22,7 +22,10 @@ import { logError } from 'src/utils/log.js'
 import { getAPIProviderForStatsig } from 'src/utils/model/providers.js'
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
-import { logOTelEvent } from 'src/utils/telemetry/events.js'
+import {
+  formatAssistantResponseForOTel,
+  logOTelEvent,
+} from 'src/utils/telemetry/events.js'
 import type { ThinkingConfig } from 'src/utils/thinking.js'
 import {
   endLLMRequestSpan,
@@ -740,7 +743,32 @@ export function logAPISuccessAndDuration({
     cost_usd: String(costUSD),
     duration_ms: String(durationMs),
     speed: fastMode ? 'fast' : 'normal',
+    ...(requestId ? { request_id: requestId } : {}),
+    ...(querySource ? { query_source: querySource } : {}),
   })
+
+  // Official 208: ou("assistant_response", …) after api_request when text present.
+  // Gate: OTEL_LOG_ASSISTANT_RESPONSES ?? OTEL_LOG_USER_PROMPTS (xkc); body WU-truncated.
+  if (newMessages) {
+    const assistantText = newMessages
+      .flatMap(m => {
+        const content = m.message.content
+        if (!Array.isArray(content)) return []
+        return content
+          .filter(c => typeof c !== 'string' && c.type === 'text')
+          .map(c => (c as { type: 'text'; text: string }).text)
+      })
+      .join('\n')
+    if (assistantText) {
+      void logOTelEvent('assistant_response', {
+        response_length: String(assistantText.length),
+        response: formatAssistantResponseForOTel(assistantText),
+        model,
+        ...(requestId ? { request_id: requestId } : {}),
+        ...(querySource ? { query_source: querySource } : {}),
+      })
+    }
+  }
 
   // Extract model output, thinking output, and tool call flag when beta tracing is enabled
   let modelOutput: string | undefined

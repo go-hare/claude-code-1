@@ -57,6 +57,7 @@ import { emitTaskProgress as emitTaskProgressEvent } from 'src/utils/task/sdkPro
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { getTokenCountFromUsage } from 'src/utils/tokens.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
+import { OBSERVER_REPORT_TOOL_NAME } from '../ObserverReportTool/constants.js'
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 export type ResolvedAgentTools = {
@@ -67,16 +68,37 @@ export type ResolvedAgentTools = {
   allowedAgentTypes?: string[]
 }
 
+/**
+ * Official WId surface densable — ObserverReport only for observer async
+ * agents (`querySource` family `agent:observer:*`). Other agents and main
+ * must not freely resolve it into their tool pool.
+ */
+export function isObserverAgentToolPool(input: {
+  isObserverAgent?: boolean
+  querySource?: string
+}): boolean {
+  if (input.isObserverAgent === true) return true
+  const qs = input.querySource
+  return typeof qs === 'string' && qs.startsWith('agent:observer:')
+}
+
 export function filterToolsForAgent({
   tools,
   isBuiltIn,
   isAsync = false,
   permissionMode,
+  isObserverAgent = false,
 }: {
   tools: Tools
   isBuiltIn: boolean
   isAsync?: boolean
   permissionMode?: PermissionMode
+  /**
+   * Official observer agent tool pool densable. When true, ObserverReport
+   * is retained for async observers; otherwise stripped even if present in
+   * ASYNC_AGENT_ALLOWED_TOOLS.
+   */
+  isObserverAgent?: boolean
 }): Tools {
   return tools.filter(tool => {
     // Allow MCP tools for all agents
@@ -90,6 +112,10 @@ export function filterToolsForAgent({
       permissionMode === 'plan'
     ) {
       return true
+    }
+    // ObserverReport: only observer async agents (WId). Not general agents.
+    if (toolMatchesName(tool, OBSERVER_REPORT_TOOL_NAME)) {
+      return isAsync === true && isObserverAgent === true
     }
     if (ALL_AGENT_DISALLOWED_TOOLS.has(tool.name)) {
       return false
@@ -127,6 +153,11 @@ export function resolveAgentTools(
   availableTools: Tools,
   isAsync = false,
   isMainThread = false,
+  /**
+   * Official observer agent densable — when true (or querySource is
+   * agent:observer:* via isObserverAgentToolPool), ObserverReport stays in pool.
+   */
+  isObserverAgent = false,
 ): ResolvedAgentTools {
   const {
     tools: agentTools,
@@ -136,7 +167,8 @@ export function resolveAgentTools(
   } = agentDefinition
   // When isMainThread is true, skip filterToolsForAgent entirely — the main
   // thread's tool pool is already properly assembled by useMergedTools(), so
-  // the sub-agent disallow lists shouldn't apply.
+  // the sub-agent disallow lists shouldn't apply. Main still does not freely
+  // surface ObserverReport (deferred + checkPermissions gate).
   const filteredAvailableTools = isMainThread
     ? availableTools
     : filterToolsForAgent({
@@ -144,6 +176,7 @@ export function resolveAgentTools(
         isBuiltIn: source === 'built-in',
         isAsync,
         permissionMode,
+        isObserverAgent,
       })
 
   // Create a set of disallowed tool names for quick lookup
@@ -613,6 +646,17 @@ export async function runAsyncAgentLifecycle({
     // (git exec) are notification embellishments that can hang — they must
     // not gate the status transition (gh-20236).
     completeAsyncAgent(agentResult, rootSetAppState)
+    // Official observer densable: stop armed pairing when observed agent ends.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { maybeStopObserverForObservedTerminal } =
+        require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js')
+      maybeStopObserverForObservedTerminal(taskId, msg =>
+        logForDebugging(msg, { level: 'debug' }),
+      )
+    } catch {
+      // densable optional
+    }
 
     let finalMessage = extractTextContent(agentResult.content, '\n')
 
@@ -655,6 +699,16 @@ export async function runAsyncAgentLifecycle({
       // must fire unconditionally. Transition status BEFORE worktree cleanup
       // so TaskOutput unblocks even if git hangs (gh-20236).
       killAsyncAgent(taskId, rootSetAppState)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { maybeStopObserverForObservedTerminal } =
+          require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js')
+        maybeStopObserverForObservedTerminal(taskId, msg =>
+          logForDebugging(msg, { level: 'debug' }),
+        )
+      } catch {
+        // densable optional
+      }
       logEvent('tengu_agent_tool_terminated', {
         agent_type:
           metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -681,6 +735,16 @@ export async function runAsyncAgentLifecycle({
     }
     const msg = errorMessage(error)
     failAsyncAgent(taskId, msg, rootSetAppState)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { maybeStopObserverForObservedTerminal } =
+        require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js')
+      maybeStopObserverForObservedTerminal(taskId, msg =>
+        logForDebugging(msg, { level: 'debug' }),
+      )
+    } catch {
+      // densable optional
+    }
     const worktreeResult = await getWorktreeResult()
     enqueueAgentNotification({
       taskId,

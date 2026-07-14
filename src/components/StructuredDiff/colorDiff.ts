@@ -4,7 +4,7 @@ import {
   getSyntaxTheme as nativeGetSyntaxTheme,
   type SyntaxTheme,
 } from 'color-diff-napi'
-import { isEnvDefinedFalsy } from '../../utils/envUtils.js'
+import { getSyntaxHighlightUnavailableReason } from '../../utils/residualUiEnvGates.js'
 
 export type ColorModuleUnavailableReason = 'env'
 
@@ -14,12 +14,10 @@ export type ColorModuleUnavailableReason = 'env'
  *
  * The TS port of color-diff works in all build modes, so the only way to
  * disable it is via the env var.
+ * Official Nzt densable via getSyntaxHighlightUnavailableReason.
  */
 export function getColorModuleUnavailableReason(): ColorModuleUnavailableReason | null {
-  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_SYNTAX_HIGHLIGHT)) {
-    return 'env'
-  }
-  return null
+  return getSyntaxHighlightUnavailableReason()
 }
 
 export function expectColorDiff(): typeof ColorDiff | null {

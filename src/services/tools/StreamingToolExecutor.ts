@@ -278,6 +278,34 @@ export class StreamingToolExecutor {
     return tool.block.name
   }
 
+  /**
+   * Official buildSameTurnToolUses — prior tool_use blocks from the same
+   * assistant turn that were queued before `tool`. Used by auto-mode sibling
+   * context so the classifier sees concurrent tools in this turn.
+   * Returns synthetic assistant messages with only those tool_use blocks.
+   */
+  private buildSameTurnToolUses(tool: TrackedTool): Message[] | undefined {
+    try {
+      const byAssistant = new Map<AssistantMessage, ToolUseBlock[]>()
+      for (const t of this.tools) {
+        if (t === tool) break
+        const list = byAssistant.get(t.assistantMessage) ?? []
+        list.push(t.block)
+        byAssistant.set(t.assistantMessage, list)
+      }
+      if (byAssistant.size === 0) return undefined
+      return [...byAssistant.entries()].map(([assistant, blocks]) => ({
+        ...assistant,
+        message: {
+          ...assistant.message,
+          content: blocks,
+        },
+      }))
+    } catch {
+      return undefined
+    }
+  }
+
   private updateInterruptibleState(): void {
     const executing = this.tools.filter(t => t.status === 'executing')
     this.toolUseContext.setHasInterruptibleToolInProgress?.(
@@ -348,7 +376,12 @@ export class StreamingToolExecutor {
         tool.block,
         tool.assistantMessage,
         this.canUseTool,
-        { ...this.toolUseContext, abortController: toolAbortController },
+        {
+          ...this.toolUseContext,
+          abortController: toolAbortController,
+          // Official sameTurnToolUses: prior tools in this streaming turn.
+          sameTurnToolUses: this.buildSameTurnToolUses(tool),
+        },
       )
 
       // Track if this specific tool has produced an error result.

@@ -70,6 +70,14 @@ export type DOMElement = {
   scrollClampMin?: number
   scrollClampMax?: number
   scrollHeight?: number
+  /**
+   * Official 2.1.207: high-water mark of content height while the user has
+   * scrolled away from sticky bottom. When content transiently shrinks
+   * (streaming markdown freeze / virtualization remount), clamp against this
+   * so scrollTop does not jump upward above the answer start.
+   * Cleared while sticky (follow-bottom) is active.
+   */
+  scrollHeightHwm?: number
   scrollViewportHeight?: number
   scrollViewportTop?: number
   stickyScroll?: boolean
@@ -79,7 +87,12 @@ export type DOMElement = {
   // imperative scrollTo(N) which bakes in a number that's stale by the
   // time the throttled render fires, the element ref defers the position
   // read to paint time. One-shot.
-  scrollAnchor?: { el: DOMElement; offset: number }
+  // nearest: keep the element in view without jumping if already visible.
+  scrollAnchor?: {
+    el: DOMElement
+    offset: number
+    nearest?: boolean
+  }
   // Only set on ink-root. The document owns focus — any node can
   // reach it by walking parentNode, like browser getRootNode().
   focusManager?: FocusManager

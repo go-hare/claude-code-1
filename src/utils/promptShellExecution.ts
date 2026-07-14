@@ -72,6 +72,35 @@ export async function executeShellCommandsInPrompt(
   slashCommandName: string,
   shell?: FrontmatterShell,
 ): Promise<string> {
+  // Official cYn/uYn densable — cowork / policy / settings disable skill shell.
+  try {
+    const { isSkillShellExecutionDisabled, stripSkillShellCommands } =
+      await import('./residualFinalEnvGates.js')
+    let policyDisable = false
+    let settingsDisable = false
+    try {
+      const { getSettingsForSource, getInitialSettings } = await import(
+        './settings/settings.js'
+      )
+      policyDisable =
+        getSettingsForSource('policySettings')?.disableSkillShellExecution ===
+        true
+      settingsDisable = getInitialSettings().disableSkillShellExecution === true
+    } catch {
+      // Settings optional.
+    }
+    if (
+      isSkillShellExecutionDisabled({
+        policyDisableSkillShellExecution: policyDisable,
+        settingsDisableSkillShellExecution: settingsDisable,
+      })
+    ) {
+      return stripSkillShellCommands(text)
+    }
+  } catch {
+    // Residual helpers optional — fall through to execute.
+  }
+
   let result = text
 
   // Resolve the tool once. `shell === undefined` and `shell === 'bash'` both

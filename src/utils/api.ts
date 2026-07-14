@@ -196,11 +196,23 @@ export async function toolToAPISchema(
     // input_json_delta events, causing multi-minute hangs on large tool inputs.
     // Gated to direct api.anthropic.com: proxies (LiteLLM etc.) and Bedrock/Vertex
     // with Claude 4.5 reject this field with 400. See GH#32742, PR #21729.
+    // Official ENABLE_FINE_GRAINED_TOOL_STREAMING densable.
+    let fineGrainedToolStreaming = isEnvTruthy(
+      process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING,
+    )
+    try {
+      const { isFineGrainedToolStreamingEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      fineGrainedToolStreaming = isFineGrainedToolStreamingEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
     if (
       getAPIProvider() === 'firstParty' &&
       isFirstPartyAnthropicBaseUrl() &&
       (getFeatureValue_CACHED_MAY_BE_STALE('tengu_fgts', false) ||
-        isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING))
+        fineGrainedToolStreaming)
     ) {
       base.eager_input_streaming = true
     }
@@ -236,7 +248,19 @@ export async function toolToAPISchema(
   // (scope, ttl) are already gated upstream by shouldIncludeFirstPartyOnlyBetas
   // which independently respects this kill switch.
   // github.com/anthropics/claude-code/issues/20031
-  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)) {
+  // Official DISABLE_EXPERIMENTAL_BETAS densable.
+  let experimentalBetasDisabled = isEnvTruthy(
+    process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS,
+  )
+  try {
+    const { isExperimentalBetasDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    experimentalBetasDisabled = isExperimentalBetasDisabled()
+  } catch {
+    // residual helpers optional
+  }
+  if (experimentalBetasDisabled) {
     const allowed = new Set([
       'name',
       'description',

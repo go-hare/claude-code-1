@@ -18,7 +18,7 @@ import { logForDebugging } from '../debug.js'
 import { logError } from '../log.js'
 import { getSecureStorage } from '../secureStorage/index.js'
 import {
-  getSettings_DEPRECATED,
+  getSettingsForSource,
   updateSettingsForSource,
 } from '../settings/settings.js'
 import {
@@ -26,10 +26,16 @@ import {
   type UserConfigValues,
   validateUserConfig,
 } from './mcpbHandler.js'
+import { loadPluginConfigFromAllowedSources } from './pluginConfigSources.js'
 import { getPluginDataDir } from './pluginDirectories.js'
 
 export type PluginOptionValues = UserConfigValues
 export type PluginOptionSchema = UserConfigSchema
+
+export {
+  loadPluginConfigFromAllowedSources,
+  PLUGIN_CONFIG_SETTING_SOURCES,
+} from './pluginConfigSources.js'
 
 /**
  * Canonical storage key for a plugin's options in both `settings.pluginConfigs`
@@ -55,9 +61,10 @@ export function getPluginStorageId(plugin: LoadedPlugin): string {
  */
 export const loadPluginOptions = memoize(
   (pluginId: string): PluginOptionValues => {
-    const settings = getSettings_DEPRECATED()
+    // Official 2.1.207: do not read project/local settings for pluginConfigs.
     const nonSensitive =
-      settings.pluginConfigs?.[pluginId]?.options ?? ({} as PluginOptionValues)
+      loadPluginConfigFromAllowedSources(pluginId).options ??
+      ({} as PluginOptionValues)
 
     // NOTE: storage.read() spawns `security find-generic-password` on macOS
     // (~50-100ms, synchronous). Mitigated by the memoize above (per-pluginId,
@@ -153,14 +160,13 @@ export function savePluginOptions(
   // settings.json AFTER secureStorage — scrub sensitive keys via explicit
   // undefined (mergeWith deletion pattern).
   //
-  // TODO: getSettings_DEPRECATED returns MERGED settings across all scopes.
-  // Mutating that and writing to userSettings can leak project-scope
-  // pluginConfigs into ~/.claude/settings.json. Same pattern exists in
-  // saveMcpServerUserConfig. Safe today since pluginConfigs is only ever
-  // written here (user-scope), but will bite if we add project-scoped
-  // plugin options.
-  const settings = getSettings_DEPRECATED()
-  const existingInSettings = settings.pluginConfigs?.[pluginId]?.options ?? {}
+  // Official 2.1.207: only userSettings holds pluginConfigs writes. Read
+  // existing options from userSettings alone (not merged project/local) and
+  // pass a minimal patch so updateSettingsForSource cannot promote other
+  // scopes' pluginConfigs into ~/.claude/settings.json.
+  const userSettings = getSettingsForSource('userSettings') ?? {}
+  const existingInSettings =
+    userSettings.pluginConfigs?.[pluginId]?.options ?? {}
   const keysToScrubFromSettings = Object.keys(existingInSettings).filter(k =>
     sensitiveKeysInThisSave.has(k),
   )
@@ -168,20 +174,19 @@ export function savePluginOptions(
     Object.keys(nonSensitive).length > 0 ||
     keysToScrubFromSettings.length > 0
   ) {
-    if (!settings.pluginConfigs) {
-      settings.pluginConfigs = {}
-    }
-    if (!settings.pluginConfigs[pluginId]) {
-      settings.pluginConfigs[pluginId] = {}
-    }
     const scrubbed = Object.fromEntries(
       keysToScrubFromSettings.map(k => [k, undefined]),
     ) as Record<string, undefined>
-    settings.pluginConfigs[pluginId].options = {
-      ...nonSensitive,
-      ...scrubbed,
-    } as PluginOptionValues
-    const result = updateSettingsForSource('userSettings', settings)
+    const result = updateSettingsForSource('userSettings', {
+      pluginConfigs: {
+        [pluginId]: {
+          options: {
+            ...nonSensitive,
+            ...scrubbed,
+          } as PluginOptionValues,
+        },
+      },
+    })
     if (result.error) {
       logError(result.error)
       throw new Error(
@@ -220,9 +225,12 @@ export function deletePluginOptions(pluginId: string): void {
   // mergeWith-deletion contract is internal plumbing — it shouldn't shape
   // the Zod schema. enabledPlugins gets away with it only because its other
   // arms (string[] | boolean) are non-objects that stay distinct.
-  const settings = getSettings_DEPRECATED()
-  type PluginConfigs = NonNullable<typeof settings.pluginConfigs>
-  if (settings.pluginConfigs?.[pluginId]) {
+  // Only clear userSettings — project/local never own pluginConfigs (2.1.207).
+  const userSettings = getSettingsForSource('userSettings')
+  type PluginConfigs = NonNullable<
+    NonNullable<typeof userSettings>['pluginConfigs']
+  >
+  if (userSettings?.pluginConfigs?.[pluginId]) {
     // Partial<Record<K,V>> = Record<K, V | undefined> — gives us the widening
     // for the undefined value, and Partial-of-X overlaps with X so the cast
     // is a narrowing TS accepts (same approach as marketplaceManager.ts:1795).

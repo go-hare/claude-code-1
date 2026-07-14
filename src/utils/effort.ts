@@ -5,7 +5,7 @@ import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getAPIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
-import { isEnvTruthy } from './envUtils.js'
+import { isAlwaysEnableEffortEnvEnabled } from './residualFinalEnvGates.js'
 import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
 import { resolveAntModel } from './model/antModels.js'
 import { getAntModelOverrideConfig } from './model/antModels.js'
@@ -33,7 +33,7 @@ export type EffortValue = EffortLevel | number
 // @[MODEL LAUNCH]: Add the new model to the allowlist if it supports the effort parameter.
 export function modelSupportsEffort(model: string): boolean {
   const m = model.toLowerCase()
-  if (isEnvTruthy(process.env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT)) {
+  if (isAlwaysEnableEffortEnvEnabled()) {
     return true
   }
   const supported3P = get3PModelCapabilityOverride(model, 'effort')
@@ -47,10 +47,11 @@ export function modelSupportsEffort(model: string): boolean {
   ) {
     return true
   }
-  // Supported by a subset of Claude 4 models
+  // Supported by a subset of Claude 4/5 models
   if (
     m.includes('opus-4-7') ||
     m.includes('opus-4-6') ||
+    m.includes('sonnet-5') ||
     m.includes('sonnet-4-6') ||
     m.includes('deepseek-v4-pro')
   ) {
@@ -164,11 +165,24 @@ export function resolvePickerEffortPersistence(
 }
 
 export function getEffortEnvOverride(): EffortValue | null | undefined {
-  const envOverride = process.env.CLAUDE_CODE_EFFORT_LEVEL
-  return envOverride?.toLowerCase() === 'unset' ||
-    envOverride?.toLowerCase() === 'auto'
-    ? null
-    : parseEffortValue(envOverride)
+  // Official EFFORT_LEVEL densable pure parse (resolveEffortLevelOverride).
+  let envOverride: string | null | undefined
+  try {
+    const { resolveEffortLevelOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    envOverride = resolveEffortLevelOverride()
+  } catch {
+    envOverride = process.env.CLAUDE_CODE_EFFORT_LEVEL?.toLowerCase() ?? null
+  }
+  if (envOverride === null || envOverride === undefined || envOverride === '') {
+    return undefined
+  }
+  // auto/unset mapping densable at call sites — suppress effort param.
+  if (envOverride === 'unset' || envOverride === 'auto') {
+    return null
+  }
+  return parseEffortValue(envOverride)
 }
 
 /**

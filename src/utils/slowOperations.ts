@@ -26,20 +26,28 @@ type WriteFileOptionsWithFlush =
  * - Ants: 300ms (enabled for all internal users)
  */
 const SLOW_OPERATION_THRESHOLD_MS = (() => {
-  const envValue = process.env.CLAUDE_CODE_SLOW_OPERATION_THRESHOLD_MS
-  if (envValue !== undefined) {
-    const parsed = Number(envValue)
-    if (!Number.isNaN(parsed) && parsed >= 0) {
-      return parsed
+  // Official SLOW_OPERATION_THRESHOLD_MS densable.
+  try {
+    const { resolveSlowOperationThresholdMs } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    return resolveSlowOperationThresholdMs()
+  } catch {
+    const envValue = process.env.CLAUDE_CODE_SLOW_OPERATION_THRESHOLD_MS
+    if (envValue !== undefined) {
+      const parsed = Number(envValue)
+      if (!Number.isNaN(parsed) && parsed >= 0) {
+        return parsed
+      }
     }
+    if (process.env.NODE_ENV === 'development') {
+      return 20
+    }
+    if (process.env.USER_TYPE === 'ant') {
+      return 300
+    }
+    return Infinity
   }
-  if (process.env.NODE_ENV === 'development') {
-    return 20
-  }
-  if (process.env.USER_TYPE === 'ant') {
-    return 300
-  }
-  return Infinity
 })()
 
 // Re-export for callers that still need the threshold value directly

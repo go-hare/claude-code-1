@@ -164,11 +164,28 @@ export function logError(error: unknown): void {
   }
   try {
     // Check if error reporting should be disabled
+    // Official USE_* densables — cloud providers always disable features.
+    let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+    let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+    let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    try {
+      const {
+        isUseBedrockEnvEnabled,
+        isUseVertexEnvEnabled,
+        isUseFoundryEnvEnabled,
+      } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      useBedrock = isUseBedrockEnvEnabled()
+      useVertex = isUseVertexEnvEnabled()
+      useFoundry = isUseFoundryEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
     if (
-      // Cloud providers (Bedrock/Vertex/Foundry) always disable features
-      isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-      isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-      isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+      useBedrock ||
+      useVertex ||
+      useFoundry ||
       process.env.DISABLE_ERROR_REPORTING ||
       isEssentialTrafficOnly()
     ) {

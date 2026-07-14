@@ -38,6 +38,7 @@ import {
   parsePrRef,
   type StatusBand,
 } from './fleetView/helpers.js';
+import { isFleetPastSessionsEnabled } from '../utils/permissions/autoModeFlags.js';
 
 // Conditional voice import (dead code eliminated when VOICE_MODE is off)
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -983,7 +984,18 @@ function AgentViewApp({
   };
 
   return (
-    <AlternateScreen mouseTracking={!process.env.CLAUDE_CODE_DISABLE_MOUSE}>
+    <AlternateScreen
+      mouseTracking={(() => {
+        try {
+          const { isMouseTrackingEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/fullscreen.js') as typeof import('../utils/fullscreen.js');
+          return isMouseTrackingEnabled();
+        } catch {
+          return !process.env.CLAUDE_CODE_DISABLE_MOUSE;
+        }
+      })()}
+    >
       <Box flexDirection="column" flexGrow={1}>
         {/* Top: scrollable list area */}
         <Box flexDirection="column" flexGrow={1} paddingTop={1}>
@@ -1066,6 +1078,9 @@ function AgentViewApp({
                       >
                         {label}
                         {isFolded ? ` ${count}` : ''}
+                        {row.group === 'done' && isFleetPastSessionsEnabled() && count === 0
+                          ? ' · looking for past sessions…'
+                          : ''}
                       </Text>
                     </Box>
                   );
@@ -1212,31 +1227,17 @@ function AgentViewApp({
 
 /**
  * Ensure daemon is running (official: KF / ensureDaemonRunning).
- * Pings control socket; if unreachable, spawns `claude daemon run --origin transient`.
+ * Delegates to daemon/installPrompt denser: GPo plan, install Dialog/readline,
+ * or in-process bgManager transient spawn.
  */
-async function ensureDaemonRunning(): Promise<void> {
-  const { sendControlRequest } = await import('../daemon/controlSocket.js');
-  const resp = await sendControlRequest({ op: 'ping', proto: 1 }, { timeoutMs: 2000 });
-  if (resp.ok) return; // Daemon already running
-
-  // Spawn transient daemon (official: Ay6(["daemon","run","--origin","transient","--spawned-by",...]))
-  const { buildCliLaunch, spawnCli } = await import('../utils/cliLaunch.js');
-  const { jsonStringify } = await import('../utils/slowOperations.js');
-  const spawnedBy = jsonStringify({ label: 'claude agents', cwd: process.cwd(), pid: process.pid });
-  const launch = buildCliLaunch(['daemon', 'run', '--origin', 'transient', '--spawned-by', spawnedBy]);
-  const child = spawnCli(launch, {
-    detached: true,
-    stdio: ['ignore', 'ignore', 'ignore'],
-    cwd: process.cwd(),
-  });
-  child.unref();
-
-  // Wait for it to become reachable (up to 5s)
-  for (let i = 0; i < 10; i++) {
-    await new Promise(r => setTimeout(r, 500));
-    const check = await sendControlRequest({ op: 'ping', proto: 1 }, { timeoutMs: 1000 });
-    if (check.ok) return;
-  }
+async function ensureDaemonRunning(opts?: { forceTransient?: boolean }): Promise<{
+  ok: boolean;
+  reason?: string;
+  askInstall?: boolean;
+  manager: { close(): Promise<void> } | null;
+}> {
+  const { ensureDaemonRunning: ensure } = await import('../daemon/installPrompt.js');
+  return ensure(opts);
 }
 
 async function attachToPtySession(short: string): Promise<void> {
@@ -1318,24 +1319,46 @@ export async function renderAgentView(options?: {
   dispatchExtraArgs?: string[];
   cwdFilter?: string;
   currentSessionId?: string;
+  /** Official CLAUDE_AGENTS_SELECT — pre-select this session on first mount. */
+  restoreSessionId?: string;
+  /**
+   * When true, caller already ran ensureDaemonRunning (e.g. agentsMain) and
+   * owns the in-process manager lifecycle. Skip a second ping/cold-start and
+   * do not close any manager on exit.
+   */
+  daemonAlreadyEnsured?: boolean;
 }): Promise<void> {
   // Official: applyFleetViewHostWindowsEnv — force full repaint on Windows
   if (getPlatform() === 'windows') {
     process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
   }
 
-  // Ensure daemon is running. Try control socket first; if unreachable,
-  // start bgManager in-process (matches agentsMain path).
-  const { sendControlRequest } = await import('../daemon/controlSocket.js');
-  const pingResp = await sendControlRequest({ op: 'ping', proto: 1 }, { timeoutMs: 2000 });
-  let inProcessManager: { close(): Promise<void> } | null = null;
-  if (!pingResp.ok) {
-    const { startBgManager } = await import('../daemon/bgManager.js');
-    inProcessManager = await startBgManager({ onLog: () => {} });
+  // Official chO: also accept CLAUDE_AGENTS_SELECT here if not already consumed
+  // by agentsMain (in-process remount / left-arrow path).
+  let envSelect = process.env.CLAUDE_AGENTS_SELECT;
+  if (envSelect) {
+    delete process.env.CLAUDE_AGENTS_SELECT;
   }
 
-  // Track last-selected session so we can restore position after attach
-  let lastSelectedSessionId: string | undefined;
+  // Official KF: ping → GPo cold-start plan → ask_install | in-process transient.
+  // CLI agentsMain already ensures before mount — skip dual ensure there.
+  let inProcessManager: { close(): Promise<void> } | null = null;
+  if (!options?.daemonAlreadyEnsured) {
+    const daemon = await ensureDaemonRunning();
+    if (!daemon.ok) {
+      const msg =
+        daemon.reason ??
+        "No background daemon is running. Run 'claude daemon install' to set it up as a persistent service.";
+      process.stderr.write(`${msg}\n`);
+      return;
+    }
+    inProcessManager = daemon.manager;
+  }
+
+  // Track last-selected session so we can restore position after attach.
+  // Prefer explicit option, then env select (official initialJobId).
+  let lastSelectedSessionId: string | undefined = options?.restoreSessionId ?? envSelect ?? undefined;
+  const enteredViaLeftArrow = options?.enteredViaLeftArrow ?? !!(options?.restoreSessionId ?? envSelect);
 
   // Create a Root instance (sync render, no race condition)
   // Official uses a persistent Root that survives across attach/detach cycles
@@ -1349,7 +1372,7 @@ export async function renderAgentView(options?: {
       root.render(
         <VoiceProvider>
           <AgentViewApp
-            enteredViaLeftArrow={options?.enteredViaLeftArrow}
+            enteredViaLeftArrow={enteredViaLeftArrow}
             dispatchExtraArgs={options?.dispatchExtraArgs}
             cwdFilter={options?.cwdFilter}
             currentSessionId={options?.currentSessionId}

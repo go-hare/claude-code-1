@@ -244,17 +244,45 @@ export async function getWithPermittedRedirects(
   if (depth > MAX_REDIRECTS) {
     throw new Error(`Too many redirects (exceeded ${MAX_REDIRECTS})`)
   }
+  // Official CCR webfetch proxy densable — only on the first hop so redirects
+  // re-enter with the absolute redirect URL (which may re-plan).
+  let fetchUrl = url
+  const headers: Record<string, string> = {
+    Accept: 'text/markdown, text/html, */*',
+    'User-Agent': getWebFetchUserAgent(),
+  }
+  if (depth === 0) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { planWebFetchCcrProxy } =
+        require('src/utils/ccrProxyGates.js') as typeof import('src/utils/ccrProxyGates.js')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getSessionIngressAuthToken } =
+        require('src/utils/sessionIngressAuth.js') as typeof import('src/utils/sessionIngressAuth.js')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getSessionId } =
+        require('src/bootstrap/state.js') as typeof import('src/bootstrap/state.js')
+      const plan = planWebFetchCcrProxy({
+        targetUrl: url,
+        sessionId: getSessionId(),
+        authToken: getSessionIngressAuthToken(),
+      })
+      if (plan.useProxy) {
+        fetchUrl = plan.fetchUrl
+        Object.assign(headers, plan.headers)
+      }
+    } catch {
+      // densable optional
+    }
+  }
   try {
-    return await axios.get(url, {
+    return await axios.get(fetchUrl, {
       signal,
       timeout: getFetchTimeoutMs(),
       maxRedirects: 0,
       responseType: 'arraybuffer',
       maxContentLength: MAX_HTTP_CONTENT_LENGTH,
-      headers: {
-        Accept: 'text/markdown, text/html, */*',
-        'User-Agent': getWebFetchUserAgent(),
-      },
+      headers,
     })
   } catch (error) {
     if (
@@ -344,6 +372,59 @@ export async function getURLMarkdownContent(
       persistedPath: cachedEntry.persistedPath,
       persistedSize: cachedEntry.persistedSize,
     }
+  }
+
+  // Official s_d/a_d (2.1.207): firstParty + WEBFETCH_USE_CCR_PROXY +
+  // CLAUDE_CODE_SESSION_ID → session worker web-fetch (before direct HTTP).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {
+      shouldWebFetchUseCcrSessionWorker,
+      fetchViaCcrSessionWorker,
+      formatCcrProxyToolError,
+    } =
+      require('src/utils/ccrProxyGates.js') as typeof import('src/utils/ccrProxyGates.js')
+    if (shouldWebFetchUseCcrSessionWorker()) {
+      const upgraded = url.replace(/^http:\/\//i, 'https://')
+      const ccr = await fetchViaCcrSessionWorker({
+        url: upgraded,
+        signal: abortController.signal,
+      })
+      if (!ccr.ok) {
+        throw new Error(`${formatCcrProxyToolError(ccr)} [web-fetch-ccr-proxy]`)
+      }
+      if (
+        ccr.destinationUrl &&
+        !isPermittedRedirect(upgraded, ccr.destinationUrl)
+      ) {
+        return {
+          type: 'redirect',
+          originalUrl: upgraded,
+          redirectUrl: ccr.destinationUrl,
+          statusCode: 302,
+        }
+      }
+      const bytes = Buffer.byteLength(ccr.content, 'utf8')
+      const entry: FetchedContent = {
+        content: ccr.content,
+        bytes,
+        code: 200,
+        codeText: 'OK',
+        contentType: ccr.contentType,
+      }
+      URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
+      return entry
+    }
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      (err.message.includes('web-fetch-ccr-proxy') ||
+        err.message.includes('"error_type"') ||
+        err.name === 'AbortError')
+    ) {
+      throw err
+    }
+    // densable optional
   }
 
   let parsedUrl: URL

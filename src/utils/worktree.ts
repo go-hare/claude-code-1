@@ -1,21 +1,25 @@
 import { feature } from 'bun:bundle'
 import chalk from 'chalk'
 import { spawnSync } from 'child_process'
+import { constants as fsConstants } from 'fs'
 import {
+  access,
   copyFile,
   mkdir,
   readdir,
   readFile,
+  realpath,
   stat,
   symlink,
   utimes,
 } from 'fs/promises'
 import ignore from 'ignore'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, join, resolve, sep } from 'path'
 import { saveCurrentProjectConfig } from './config.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode } from './errors.js'
+import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { parseGitConfigValue } from './git/gitConfigParser.js'
 import {
@@ -47,6 +51,86 @@ import { isInITerm2 } from './swarm/backends/detection.js'
 
 const VALID_WORKTREE_SLUG_SEGMENT = /^[a-zA-Z0-9._-]+$/
 const MAX_WORKTREE_SLUG_LENGTH = 64
+
+/**
+ * Official 2.1.207: sparse linked worktrees need extensions.worktreeConfig.
+ * Ensure it is true in the main repo before sparse-checkout set.
+ */
+export async function ensureExtensionsWorktreeConfig(
+  repoRoot: string,
+): Promise<void> {
+  const { stdout, code } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['config', '--local', '--get', 'extensions.worktreeConfig'],
+    { cwd: repoRoot },
+  )
+  if (code === 0 && stdout.trim() === 'true') {
+    return
+  }
+  await execFileNoThrowWithCwd(
+    gitExe(),
+    ['config', '--local', 'extensions.worktreeConfig', 'true'],
+    { cwd: repoRoot },
+  )
+}
+
+/**
+ * Official 2.1.207: after the last sparsePaths worktree is removed, unset
+ * extensions.worktreeConfig so go-git tools (tea, etc.) are not broken.
+ * Only runs when no other worktree under `.claude/worktrees/` remains.
+ */
+/**
+ * Parse `git worktree list --porcelain` and decide whether any Claude linked
+ * worktree remains after `removedWorktreePath` is gone.
+ */
+export function hasRemainingClaudeLinkedWorktrees(
+  porcelainStdout: string,
+  removedWorktreePath: string,
+  claudeWorktreesMarker: string = join('.claude', 'worktrees'),
+): boolean {
+  const remaining = porcelainStdout
+    .split('\n')
+    .filter(line => line.startsWith('worktree '))
+    .map(line => line.slice('worktree '.length).trim())
+    .filter(path => path.length > 0 && path !== removedWorktreePath)
+  return remaining.some(path => path.includes(claudeWorktreesMarker))
+}
+
+export async function maybeRestoreExtensionsWorktreeConfig(
+  repoRoot: string,
+  removedWorktreePath: string,
+): Promise<void> {
+  const { stdout, code } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['worktree', 'list', '--porcelain'],
+    { cwd: repoRoot },
+  )
+  if (code !== 0) {
+    return
+  }
+  if (hasRemainingClaudeLinkedWorktrees(stdout, removedWorktreePath)) {
+    return
+  }
+
+  const { code: unsetCode, stderr: unsetErr } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['config', '--local', '--unset-all', 'extensions.worktreeConfig'],
+    { cwd: repoRoot },
+  )
+  if (unsetCode === 0) {
+    logForDebugging(
+      `Restored extensions.worktreeConfig in ${repoRoot} after removing its last linked worktree`,
+    )
+  } else if (
+    unsetErr &&
+    !/unset|not found|key does not exist/i.test(unsetErr)
+  ) {
+    logForDebugging(
+      `Could not restore extensions.worktreeConfig for ${repoRoot}: ${unsetErr}`,
+      { level: 'warn' },
+    )
+  }
+}
 
 /**
  * Validates a worktree slug to prevent path traversal and directory escape.
@@ -156,6 +240,110 @@ export type WorktreeSession = {
 let currentWorktreeSession: WorktreeSession | null = null
 
 export function getCurrentWorktreeSession(): WorktreeSession | null {
+  return currentWorktreeSession
+}
+
+/**
+ * Official 2.1.207: classify a path as a Claude-managed linked worktree
+ * under `<repo>/.claude/worktrees/…` of the current repository (or a nested
+ * repo on first entry). Managed paths may be entered without an extra
+ * confirmation; other paths require a safetyCheck ask.
+ */
+export async function classifyManagedClaudeWorktree(
+  rawPath: string,
+  cwd: string = getCwd(),
+): Promise<{ managed: true; targetReal: string } | { managed: false }> {
+  const targetAbs = resolve(cwd, rawPath)
+  let targetReal: string
+  try {
+    await access(targetAbs, fsConstants.F_OK)
+    targetReal = await realpath(targetAbs)
+  } catch {
+    return { managed: false }
+  }
+
+  const repoRoot = findCanonicalGitRoot(cwd) ?? findGitRoot(cwd)
+  if (!repoRoot) {
+    return { managed: false }
+  }
+
+  let managedRoot: string
+  try {
+    managedRoot = await realpath(join(repoRoot, '.claude', 'worktrees'))
+  } catch {
+    return { managed: false }
+  }
+
+  const prefix = managedRoot.endsWith(sep) ? managedRoot : managedRoot + sep
+  if (targetReal === managedRoot || !targetReal.startsWith(prefix)) {
+    return { managed: false }
+  }
+
+  // Confirm git sees it as a linked worktree of this repo.
+  const { stdout, code } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['worktree', 'list', '--porcelain'],
+    { cwd: repoRoot },
+  )
+  if (code !== 0) {
+    return { managed: false }
+  }
+  const registered = stdout
+    .split('\n')
+    .filter(line => line.startsWith('worktree '))
+    .map(line => line.slice('worktree '.length).trim())
+  const isRegistered = registered.some(p => {
+    try {
+      // Compare realpaths loosely: list may already be real.
+      return p === targetReal || resolve(p) === targetReal
+    } catch {
+      return p === targetReal
+    }
+  })
+  if (!isRegistered) {
+    return { managed: false }
+  }
+
+  return { managed: true, targetReal }
+}
+
+/**
+ * Enter an existing worktree directory without creating a new one.
+ * Does not run create/sparse setup — only session state + chdir are owned
+ * by the EnterWorktree tool after this returns.
+ */
+export async function enterExistingWorktreeSession(
+  worktreePath: string,
+  sessionId: string,
+): Promise<WorktreeSession> {
+  const originalCwd = getCwd()
+  const { stdout: branchOut } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-parse', '--abbrev-ref', 'HEAD'],
+    { cwd: worktreePath },
+  )
+  const worktreeBranch = branchOut.trim() || undefined
+  const { stdout: headOut } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-parse', 'HEAD'],
+    { cwd: worktreePath },
+  )
+  const worktreeName = basename(worktreePath)
+
+  currentWorktreeSession = {
+    originalCwd,
+    worktreePath,
+    worktreeName,
+    worktreeBranch,
+    originalHeadCommit: headOut.trim() || undefined,
+    sessionId,
+  }
+
+  saveCurrentProjectConfig(current => ({
+    ...current,
+    activeWorktreeSession: currentWorktreeSession ?? undefined,
+  }))
+
   return currentWorktreeSession
 }
 
@@ -334,6 +522,11 @@ async function getOrCreateWorktree(
   }
 
   if (sparsePaths?.length) {
+    // Linked sparse worktrees require extensions.worktreeConfig=true in the
+    // main repo. Official 2.1.207: set it when missing so sparse-checkout
+    // works, and clear it after the last sparse worktree is removed (go-git
+    // tools like tea break if the key is left behind).
+    await ensureExtensionsWorktreeConfig(repoRoot)
     // If sparse-checkout or checkout fail after --no-checkout, the worktree
     // is registered and HEAD is set but the working tree is empty. Next run's
     // fast-resume (rev-parse HEAD) would succeed and present a broken worktree
@@ -399,10 +592,13 @@ export async function copyWorktreeIncludeFiles(
     return []
   }
 
-  const patterns = includeContent
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(line => line.length > 0 && !line.startsWith('#'))
+  const patterns = filterCompilableIgnorePatterns(
+    includeContent
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && !line.startsWith('#')),
+    'worktreeinclude',
+  )
   if (patterns.length === 0) {
     return []
   }
@@ -420,7 +616,9 @@ export async function copyWorktreeIncludeFiles(
   }
 
   const entries = gitignored.stdout.trim().split('\n').filter(Boolean)
-  const matcher = ignore().add(includeContent)
+  // Official 2.1.207: only compilable patterns enter `ignore()` (bad bracket
+  // globs etc. are dropped with a warn rather than throwing).
+  const matcher = ignore().add(patterns)
 
   // --directory emits collapsed dirs with a trailing slash; everything else is
   // an individual file.
@@ -816,8 +1014,13 @@ export async function cleanupWorktree(): Promise<void> {
   }
 
   try {
-    const { worktreePath, originalCwd, worktreeBranch, hookBased } =
-      currentWorktreeSession
+    const {
+      worktreePath,
+      originalCwd,
+      worktreeBranch,
+      hookBased,
+      usedSparsePaths,
+    } = currentWorktreeSession
 
     // Change back to original directory first
     process.chdir(originalCwd)
@@ -851,6 +1054,11 @@ export async function cleanupWorktree(): Promise<void> {
         })
       } else {
         logForDebugging(`Removed linked worktree at: ${worktreePath}`)
+        // Official 2.1.207: after the last sparsePaths worktree is gone,
+        // drop extensions.worktreeConfig so go-git tools (tea, etc.) work.
+        if (usedSparsePaths) {
+          await maybeRestoreExtensionsWorktreeConfig(originalCwd, worktreePath)
+        }
       }
     }
 

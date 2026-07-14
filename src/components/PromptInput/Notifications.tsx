@@ -252,9 +252,19 @@ function NotificationContent({
       {(apiKeyStatus === 'invalid' || apiKeyStatus === 'missing') && (
         <Box>
           <Text color="error" wrap="truncate">
-            {isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
-              ? 'Authentication error · Try again'
-              : 'Not logged in · Run /login'}
+            {(() => {
+              // Official REMOTE densable.
+              let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE);
+              try {
+                const { isRemoteEnvEnabled } =
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js');
+                isRemote = isRemoteEnvEnabled();
+              } catch {
+                // keep raw env fallback
+              }
+              return isRemote ? 'Authentication error · Try again' : 'Not logged in · Run /login';
+            })()}
           </Text>
         </Box>
       )}

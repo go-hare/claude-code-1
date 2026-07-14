@@ -7,22 +7,35 @@ import {
 } from '@anthropic-ai/sdk'
 import type { QuerySource } from 'src/constants/querySource.js'
 import type { SystemAPIErrorMessage } from 'src/types/message.js'
-import { isAwsCredentialsProviderError } from 'src/utils/aws.js'
+import {
+  isAwsAuthMaterialError,
+  isAwsCredentialsProviderError,
+} from 'src/utils/aws.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
 import { createSystemAPIErrorMessage } from 'src/utils/messages.js'
 import { getAPIProviderForStatsig } from 'src/utils/model/providers.js'
 import {
+  isAnthropicAwsProviderEnabled,
+  isMantleProviderEnabled,
+} from 'src/utils/residualFinalEnvGates.js'
+import {
   clearApiKeyHelperCache,
+  clearAwsCredentialExportCache,
   clearAwsCredentialsCache,
   clearGcpCredentialsCache,
   getClaudeAIOAuthTokens,
   handleOAuth401Error,
+  invalidateDefaultAwsProviderChainDebounced,
   isClaudeAISubscriber,
   isEnterpriseSubscriber,
 } from '../../utils/auth.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
+import { getAWSRegion, isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
+import {
+  isHostAuthTokenRefreshAvailable,
+  tryHostAuth401Recovery,
+} from '../../utils/hostCredsFile.js'
 import {
   type CooldownReason,
   handleFastModeOverageRejection,
@@ -98,9 +111,16 @@ const PERSISTENT_RESET_CAP_MS = 6 * 60 * 60 * 1000
 const HEARTBEAT_INTERVAL_MS = 30_000
 
 function isPersistentRetryEnabled(): boolean {
-  return feature('UNATTENDED_RETRY')
-    ? isEnvTruthy(process.env.CLAUDE_CODE_UNATTENDED_RETRY)
-    : false
+  if (!feature('UNATTENDED_RETRY')) return false
+  // Official UNATTENDED_RETRY densable.
+  try {
+    const { isUnattendedRetryEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    return isUnattendedRetryEnvEnabled()
+  } catch {
+    return isEnvTruthy(process.env.CLAUDE_CODE_UNATTENDED_RETRY)
+  }
 }
 
 function isTransientCapacityError(error: unknown): boolean {
@@ -245,6 +265,16 @@ export async function* withRetry<T>(
           const failedAccessToken = getClaudeAIOAuthTokens()?.accessToken
           if (failedAccessToken) {
             await handleOAuth401Error(failedAccessToken)
+          } else if (
+            lastError instanceof APIError &&
+            lastError.status === 401 &&
+            isHostAuthTokenRefreshAvailable()
+          ) {
+            // Official lfa / host_auth_401_recovery — desktop host-creds path.
+            const hostResult = await tryHostAuth401Recovery()
+            if (hostResult === 'failed' || hostResult === 'exhausted') {
+              throw lastError
+            }
           }
         }
         client = await getClient()
@@ -626,7 +656,23 @@ function isOAuthTokenRevokedError(error: unknown): boolean {
 }
 
 function isBedrockAuthError(error: unknown): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
+  // Official wLp: Bedrock (and anthropicAws/mantle when present) treat
+  // CredentialsProviderError + 403 as auth; 401 only for non-Bedrock AWS hosts.
+  // Official USE_BEDROCK densable.
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  try {
+    const { isUseBedrockEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useBedrock = isUseBedrockEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (
+    useBedrock ||
+    isAnthropicAwsProviderEnabled() ||
+    isMantleProviderEnabled()
+  ) {
     // AWS libs reject without an API call if .aws holds a past Expiration value
     // otherwise, API calls that receive expired tokens give generic 403
     // "The security token included in the request is invalid"
@@ -642,14 +688,29 @@ function isBedrockAuthError(error: unknown): boolean {
 
 /**
  * Clear AWS auth caches if appropriate.
+ * Official Pj_ (2.1.207): full wipe on CredentialsProviderError / material
+ * errors; otherwise only drop the export memo + debounced default-chain
+ * invalidate so a generic 403 does not thrash SSO cooldown.
  * @returns true if action was taken.
  */
 function handleAwsCredentialError(error: unknown): boolean {
-  if (isBedrockAuthError(error)) {
-    clearAwsCredentialsCache()
-    return true
+  if (!isBedrockAuthError(error)) {
+    return false
   }
-  return false
+  const materialBad =
+    isAwsCredentialsProviderError(error) ||
+    (error instanceof APIError &&
+      isAwsAuthMaterialError(
+        error.headers?.get('x-amzn-errortype') ?? undefined,
+        error.message,
+      ))
+  if (materialBad) {
+    clearAwsCredentialsCache()
+  } else {
+    clearAwsCredentialExportCache()
+    invalidateDefaultAwsProviderChainDebounced(getAWSRegion())
+  }
+  return true
 }
 
 // google-auth-library throws plain Error (no typed name like AWS's
@@ -665,7 +726,17 @@ function isGoogleAuthLibraryCredentialError(error: unknown): boolean {
 }
 
 function isVertexAuthError(error: unknown): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) {
+  // Official USE_VERTEX densable.
+  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  try {
+    const { isUseVertexEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useVertex = isUseVertexEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (useVertex) {
     // SDK-level: google-auth-library fails in prepareOptions() before the HTTP call
     if (isGoogleAuthLibraryCredentialError(error)) {
       return true
@@ -706,10 +777,17 @@ function shouldRetry(error: APIError): boolean {
   // transient blip (auth service flap, network hiccup) rather than bad
   // credentials. Bypass x-should-retry:false — the server assumes we'd retry
   // the same bad key, but our key is fine.
-  if (
-    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
-    (error.status === 401 || error.status === 403)
-  ) {
+  // Official REMOTE densable.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (isRemote && (error.status === 401 || error.status === 403)) {
     return true
   }
 
@@ -767,6 +845,7 @@ function shouldRetry(error: APIError): boolean {
 
   // Clear API key cache on 401 and allow retry.
   // OAuth token handling is done in the main retry loop via handleOAuth401Error.
+  // Official lfa: host-managed auth token refresh also retries on 401.
   if (error.status === 401) {
     clearApiKeyHelperCache()
     return true
@@ -783,9 +862,71 @@ function shouldRetry(error: APIError): boolean {
   return false
 }
 
+/**
+ * Official pDs / 2.1.199:
+ * - CLAUDE_CODE_MAX_RETRIES wins when set (finite ≥0).
+ * - When MAX_RETRIES > 15 and RETRY_WATCHDOG is not active, clamp to 15 (ufa)
+ *   with a one-shot warn — official clamp-to-ufa densable branch.
+ * - Else RETRY_WATCHDOG raises the default budget (300 when bare-enabled;
+ *   numeric >1 honored as-is).
+ */
+const DEFAULT_RETRY_WATCHDOG_MAX = 300
+/** Official ufa — non-watchdog MAX_RETRIES clamp ceiling. */
+const MAX_RETRIES_CLAMP = 15
+let maxRetriesClampWarned = false
+
+function isRetryWatchdogActive(
+  watchdog: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG,
+): boolean {
+  if (watchdog === undefined || watchdog === '') return false
+  if (watchdog === '0' || watchdog.toLowerCase() === 'false') return false
+  const parsed = parseInt(watchdog, 10)
+  if (!Number.isNaN(parsed) && parsed > 1) return true
+  return isEnvTruthy(watchdog) || Number.isNaN(parsed) || parsed === 1
+}
+
 export function getDefaultMaxRetries(): number {
-  if (process.env.CLAUDE_CODE_MAX_RETRIES) {
-    return parseInt(process.env.CLAUDE_CODE_MAX_RETRIES, 10)
+  const watchdogActive = isRetryWatchdogActive()
+  // Official MAX_RETRIES densable pure parse; clamp remains denser here.
+  let parsed: number | null = null
+  try {
+    const { resolveMaxRetriesOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    parsed = resolveMaxRetriesOverride()
+  } catch {
+    if (process.env.CLAUDE_CODE_MAX_RETRIES) {
+      const n = parseInt(process.env.CLAUDE_CODE_MAX_RETRIES, 10)
+      if (!Number.isNaN(n) && n >= 0) parsed = n
+    }
+  }
+  if (parsed !== null) {
+    // Official: if (t > ufa && !oMe()) clamp to ufa
+    if (parsed > MAX_RETRIES_CLAMP && !watchdogActive) {
+      if (!maxRetriesClampWarned) {
+        maxRetriesClampWarned = true
+        logForDebugging(
+          `CLAUDE_CODE_MAX_RETRIES=${parsed} clamped to ${MAX_RETRIES_CLAMP}`,
+          { level: 'warn' },
+        )
+      }
+      return MAX_RETRIES_CLAMP
+    }
+    return parsed
+  }
+  // Official 2.1.199 stream-retry budget for transient mid-response drops.
+  const watchdog = process.env.CLAUDE_CODE_RETRY_WATCHDOG
+  if (watchdog !== undefined && watchdog !== '') {
+    if (watchdog === '0' || watchdog.toLowerCase() === 'false') {
+      return DEFAULT_MAX_RETRIES
+    }
+    const parsed = parseInt(watchdog, 10)
+    // Explicit high budgets (e.g. 300) are honored as-is; bare enable
+    // flags ("1", "true", "yes") map to the official default of 300.
+    if (!Number.isNaN(parsed) && parsed > 1) return parsed
+    if (isEnvTruthy(watchdog) || Number.isNaN(parsed) || parsed === 1) {
+      return DEFAULT_RETRY_WATCHDOG_MAX
+    }
   }
   return DEFAULT_MAX_RETRIES
 }

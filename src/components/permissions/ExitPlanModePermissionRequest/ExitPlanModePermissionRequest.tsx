@@ -420,7 +420,7 @@ export function ExitPlanModePermissionRequest({
       // Add verification instruction if the feature is enabled
       // Dead code elimination: CLAUDE_CODE_VERIFY_PLAN='false' in external builds, so === 'true' check allows Bun to eliminate the string
       const verificationInstruction =
-        undefined === 'true'
+        process.env.CLAUDE_CODE_VERIFY_PLAN === 'true'
           ? `\n\nIMPORTANT: When you have finished implementing the plan, you MUST call the "VerifyPlanExecution" tool directly (NOT the ${AGENT_TOOL_NAME} tool or an agent) to trigger background verification.`
           : '';
 
@@ -460,7 +460,7 @@ export function ExitPlanModePermissionRequest({
     }
 
     // Handle auto keep-context option — needs special handling because
-    // buildPermissionUpdates maps auto to 'default' via toExternalPermissionMode.
+    // buildPermissionUpdates keeps auto as 'auto' via toExternalPermissionMode (2.1.207).
     // We set the mode directly via setAppState and sync the bootstrap state.
     if (feature('TRANSCRIPT_CLASSIFIER') && value === 'yes-resume-auto-mode' && isAutoModeGateEnabled()) {
       logEvent('tengu_plan_exit', {

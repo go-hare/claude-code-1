@@ -6,6 +6,11 @@ import {
   getCommandName,
 } from '../../commands.js'
 import type { SuggestionItem } from '../../components/PromptInput/PromptInputFooterSuggestions.js'
+import {
+  isMenuKindLanesEnabled,
+  resolveCommandKindLane,
+  resolveCommandSourceTag,
+} from '../residualUiEnvGates.js'
 import { getSkillUsageScore } from './skillUsageTracking.js'
 
 // Treat these characters as word separators for command search
@@ -261,10 +266,13 @@ function findMatchedAlias(
 /**
  * Creates a suggestion item from a command.
  * Only shows the matched alias in parentheses if the user typed an alias.
+ * Official x_a: when menu kind lanes on, attach kind + sourceTag.
  */
 function createCommandSuggestionItem(
   cmd: Command,
   matchedAlias?: string,
+  query?: string,
+  lanesEnabled?: boolean,
 ): SuggestionItem {
   const commandName = getCommandName(cmd)
   // Only show the alias if the user typed it
@@ -280,19 +288,43 @@ function createCommandSuggestionItem(
       ? 'local'
       : undefined
 
+  // Official: when lanes on prefer menuDescription for prompt commands.
+  const descriptionBase =
+    lanesEnabled && cmd.type === 'prompt' && 'menuDescription' in cmd
+      ? ((cmd as { menuDescription?: string }).menuDescription ??
+        (isWorkflow ? cmd.description : formatDescriptionWithSource(cmd)))
+      : isWorkflow
+        ? cmd.description
+        : formatDescriptionWithSource(cmd)
+
   const fullDescription =
-    (isWorkflow ? cmd.description : formatDescriptionWithSource(cmd)) +
+    descriptionBase +
     (cmd.type === 'prompt' && cmd.argNames?.length
       ? ` (arguments: ${cmd.argNames.join(', ')})`
       : '')
 
-  return {
+  const item: SuggestionItem = {
     id: getCommandId(cmd),
     displayText: `/${commandName}${aliasText}`,
-    tag: isWorkflow ? 'workflow' : scopeTag,
+    tag: isWorkflow
+      ? lanesEnabled
+        ? 'dynamic workflow'
+        : 'workflow'
+      : scopeTag,
     description: fullDescription,
     metadata: cmd,
   }
+  if (query !== undefined) {
+    // reserved for future query highlight parity with official x_a
+  }
+  if (lanesEnabled) {
+    item.kind = resolveCommandKindLane(cmd)
+    if (cmd.type === 'prompt') {
+      const sourceTag = resolveCommandSourceTag(cmd.source)
+      if (sourceTag) item.sourceTag = sourceTag
+    }
+  }
+  return item
 }
 
 /**
@@ -313,6 +345,9 @@ export function generateCommandSuggestions(
   }
 
   const query = input.slice(1).toLowerCase().trim()
+  const lanesEnabled = isMenuKindLanesEnabled()
+  const toItem = (cmd: Command, matchedAlias?: string) =>
+    createCommandSuggestionItem(cmd, matchedAlias, query, lanesEnabled)
 
   // When just typing '/' without additional text
   if (query === '') {
@@ -385,7 +420,7 @@ export function generateCommandSuggestions(
       ...projectCommands,
       ...policyCommands,
       ...otherCommands,
-    ].map(cmd => createCommandSuggestionItem(cmd))
+    ].map(cmd => toItem(cmd))
   }
 
   // The Fuse index filters isHidden at build time and is keyed on the
@@ -489,7 +524,7 @@ export function generateCommandSuggestions(
     const cmd = result.r.item.command
     // Only show alias in parentheses if the user typed an alias
     const matchedAlias = findMatchedAlias(query, cmd.aliases)
-    return createCommandSuggestionItem(cmd, matchedAlias)
+    return toItem(cmd, matchedAlias)
   })
   // Skip the prepend if hiddenExact is already in fuseSuggestions — this
   // happens when isHidden flips false→true mid-session (OAuth expiry,
@@ -500,7 +535,7 @@ export function generateCommandSuggestions(
   if (hiddenExact) {
     const hiddenId = getCommandId(hiddenExact)
     if (!fuseSuggestions.some(s => s.id === hiddenId)) {
-      return [createCommandSuggestionItem(hiddenExact), ...fuseSuggestions]
+      return [toItem(hiddenExact), ...fuseSuggestions]
     }
   }
   return fuseSuggestions

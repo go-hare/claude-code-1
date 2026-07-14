@@ -82,7 +82,9 @@ import type {
   PermissionDecisionReason,
   PermissionResult,
 } from '../../utils/permissions/PermissionResult.js'
+import { getAgentContext } from '../../utils/agentContext.js'
 import {
+  resolveSessionActivityAgentId,
   startSessionActivity,
   stopSessionActivity,
 } from '../../utils/sessionActivity.js'
@@ -1219,7 +1221,17 @@ async function checkPermissionsAndCallTool(
 
   const startTime = Date.now()
 
-  startSessionActivity('tool_exec')
+  // Official $Qn("tool_exec", HOn(agentContext) ?? (isBackgroundAgent ? agentId))
+  const sessionActivityAgentId = resolveSessionActivityAgentId({
+    agentContext: getAgentContext(),
+    isBackgroundAgent: toolUseContext.isBackgroundAgent,
+    agentId: toolUseContext.agentId,
+  })
+  startSessionActivity('tool_exec', sessionActivityAgentId)
+
+  // Official activity capture is via query() JOu tap (wOg classifies tool_use
+  // on assistant messages). Do not dual-enqueue tool_call here — that
+  // duplicated digests after the tap landed.
   // If processedInput still points at the backfill clone, no hook/permission
   // replaced it — pass the pre-backfill callInput so call() sees the model's
   // original field values. Otherwise converge on the hook-supplied input.
@@ -1822,7 +1834,7 @@ async function checkPermissionsAndCallTool(
       ...hookMessages,
     ]
   } finally {
-    stopSessionActivity('tool_exec')
+    stopSessionActivity('tool_exec', sessionActivityAgentId)
     // Clean up decision info after logging
     if (decisionInfo) {
       toolUseContext.toolDecisions?.delete(toolUseID)

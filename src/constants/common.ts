@@ -2,9 +2,17 @@ import memoize from 'lodash-es/memoize.js'
 
 // This ensures you get the LOCAL date in ISO format
 export function getLocalISODate(): string {
-  // Check for ant-only date override
-  if (process.env.CLAUDE_CODE_OVERRIDE_DATE) {
-    return process.env.CLAUDE_CODE_OVERRIDE_DATE
+  // Official OVERRIDE_DATE densable (ant-only date override).
+  try {
+    const { resolveOverrideDate } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    const override = resolveOverrideDate()
+    if (override) return override
+  } catch {
+    if (process.env.CLAUDE_CODE_OVERRIDE_DATE) {
+      return process.env.CLAUDE_CODE_OVERRIDE_DATE
+    }
   }
 
   const now = new Date()
@@ -26,8 +34,16 @@ export const getSessionStartDate = memoize(getLocalISODate)
 // Returns "Month YYYY" (e.g. "February 2026") in the user's local timezone.
 // Changes monthly, not daily — used in tool prompts to minimize cache busting.
 export function getLocalMonthYear(): string {
-  const date = process.env.CLAUDE_CODE_OVERRIDE_DATE
-    ? new Date(process.env.CLAUDE_CODE_OVERRIDE_DATE)
-    : new Date()
+  // Official OVERRIDE_DATE densable.
+  let overrideDate: string | null = null
+  try {
+    const { resolveOverrideDate } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    overrideDate = resolveOverrideDate()
+  } catch {
+    overrideDate = process.env.CLAUDE_CODE_OVERRIDE_DATE || null
+  }
+  const date = overrideDate ? new Date(overrideDate) : new Date()
   return date.toLocaleString('en-US', { month: 'long', year: 'numeric' })
 }

@@ -20,6 +20,7 @@ import {
 import { preconnectAnthropicApi } from '../utils/apiPreconnect.js'
 import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.js'
 import { registerCleanup } from '../utils/cleanupRegistry.js'
+import { applyHostCredsFromFileIfManaged } from '../utils/hostCredsFile.js'
 import {
   enableConfigs,
   getGlobalConfig,
@@ -86,6 +87,9 @@ export const init = memoize(async (): Promise<void> => {
     // Full environment variables are applied after trust is established
     const envVarsStart = Date.now()
     applySafeConfigEnvironmentVariables()
+
+    // Official mLp: host-managed desktop creds file → process.env before TLS.
+    await applyHostCredsFromFileIfManaged()
 
     // Apply NODE_EXTRA_CA_CERTS from settings.json to process.env early,
     // before any TLS connections. Bun caches the TLS cert store at boot
@@ -164,6 +168,17 @@ export const init = memoize(async (): Promise<void> => {
     const proxyStart = Date.now()
     logForDebugging('[init] configureGlobalAgents starting')
     configureGlobalAgents()
+    // Official Lci: load proxyAuthHelper from settings + warm cache (fkn).
+    try {
+      const { configureProxyAuthHelperFromSettings, prefetchProxyAuthHelper } =
+        await import('../utils/proxyAuthHelper.js')
+      configureProxyAuthHelperFromSettings()
+      prefetchProxyAuthHelper()
+    } catch (e) {
+      logForDebugging(
+        `[init] proxyAuthHelper setup skipped: ${errorMessage(e)}`,
+      )
+    }
     logForDiagnosticsNoPII('info', 'init_proxy_configured', {
       duration_ms: Date.now() - proxyStart,
     })
@@ -193,7 +208,17 @@ export const init = memoize(async (): Promise<void> => {
     // non-CCR startups don't pay the module load. The getUpstreamProxyEnv
     // function is registered with subprocessEnv.ts so subprocess spawning can
     // inject proxy vars without a static import of the upstreamproxy module.
-    if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    // Official REMOTE densable — CCR upstreamproxy only in remote sessions.
+    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    try {
+      const { isRemoteEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+      isRemote = isRemoteEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+    if (isRemote) {
       try {
         const { initUpstreamProxy, getUpstreamProxyEnv } = await import(
           '../upstreamproxy/upstreamproxy.js'
@@ -335,7 +360,17 @@ async function doInitializeTelemetry(): Promise<void> {
 
   // Skip entire OTel initialization when telemetry is not enabled.
   // Prevents PerformanceMeasure accumulation in long-running sessions.
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY)) {
+  // Official ENABLE_TELEMETRY densable.
+  let telemetryEnabled = isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY)
+  try {
+    const { isTelemetryEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    telemetryEnabled = isTelemetryEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (!telemetryEnabled) {
     telemetryInitialized = true
     logForDebugging(
       '[3P telemetry] Skipped — CLAUDE_CODE_ENABLE_TELEMETRY not set',

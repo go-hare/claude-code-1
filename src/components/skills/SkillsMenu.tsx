@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   type Command,
   type CommandBase,
@@ -7,14 +7,22 @@ import {
   getCommandName,
   type PromptCommand,
 } from '../../commands.js';
-import { Box, FuzzyPicker, Text } from '@anthropic/ink';
+import { Box, Dialog, FuzzyPicker, Text } from '@anthropic/ink';
 import type { Theme } from '@anthropic/ink';
 import { estimateSkillFrontmatterTokens } from '../../skills/loadSkillsDir.js';
 import { formatTokens } from '../../utils/format.js';
 import { getSettingSourceName, type SettingSource } from '../../utils/settings/constants.js';
+import {
+  formatSkillOverrideModeLabel,
+  resolveSkillOverrideMode,
+  resolveSkillOverrideWriteValue,
+  SKILL_OVERRIDE_CYCLE_MODES,
+  type SkillOverrideMode,
+} from '../../utils/residualFinalEnvGates.js';
+import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Dialog } from '@anthropic/ink';
+import { Select } from '../CustomSelect/index.js';
 import { filterSkills } from './filterSkills.js';
 
 // Skills are always PromptCommands with CommandBase properties
@@ -43,8 +51,27 @@ function getSourceLabel(source: SkillSource): string {
   return getSettingSourceName(source);
 }
 
+function readMergedSkillOverrides(): Record<string, SkillOverrideMode> {
+  const local = (getSettingsForSource('localSettings')?.skillOverrides ?? {}) as Record<string, SkillOverrideMode>;
+  const project = (getSettingsForSource('projectSettings')?.skillOverrides ?? {}) as Record<string, SkillOverrideMode>;
+  const user = (getSettingsForSource('userSettings')?.skillOverrides ?? {}) as Record<string, SkillOverrideMode>;
+  return { ...user, ...project, ...local };
+}
+
 export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
   const [searchQuery, setSearchQuery] = useState('');
+  const [overridesEpoch, setOverridesEpoch] = useState(0);
+  const [detailSkill, setDetailSkill] = useState<SkillCommand | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
+
+  const mergedOverrides = useMemo(() => {
+    void overridesEpoch;
+    try {
+      return readMergedSkillOverrides();
+    } catch {
+      return {} as Record<string, SkillOverrideMode>;
+    }
+  }, [overridesEpoch]);
 
   // Filter commands for skills and cast to SkillCommand
   const skills = useMemo(() => {
@@ -54,7 +81,8 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
         (cmd.loadedFrom === 'skills' ||
           cmd.loadedFrom === 'commands_DEPRECATED' ||
           cmd.loadedFrom === 'plugin' ||
-          cmd.loadedFrom === 'mcp'),
+          cmd.loadedFrom === 'mcp' ||
+          cmd.loadedFrom === 'bundled'),
     );
   }, [commands]);
 
@@ -99,6 +127,84 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
     onExit('Skills dialog dismissed', { display: 'system' });
   };
 
+  const applyOverride = useCallback((skill: SkillCommand, desired: SkillOverrideMode) => {
+    const cmdName = getCommandName(skill);
+    const unqualifiedName =
+      'unqualifiedName' in skill && typeof skill.unqualifiedName === 'string' ? skill.unqualifiedName : undefined;
+    let local: Record<string, SkillOverrideMode> = {};
+    let project: Record<string, SkillOverrideMode> = {};
+    let user: Record<string, SkillOverrideMode> = {};
+    try {
+      local = (getSettingsForSource('localSettings')?.skillOverrides ?? {}) as Record<string, SkillOverrideMode>;
+      project = (getSettingsForSource('projectSettings')?.skillOverrides ?? {}) as Record<string, SkillOverrideMode>;
+      user = (getSettingsForSource('userSettings')?.skillOverrides ?? {}) as Record<string, SkillOverrideMode>;
+    } catch {
+      // settings optional
+    }
+    const writeValue = resolveSkillOverrideWriteValue(desired, {
+      cmdName,
+      unqualifiedName,
+      localOverrides: local,
+      projectOverrides: project,
+      userOverrides: user,
+    });
+    const nextLocal: Record<string, SkillOverrideMode | undefined> = {
+      ...local,
+    };
+    if (writeValue === undefined) {
+      nextLocal[cmdName] = undefined;
+    } else {
+      nextLocal[cmdName] = writeValue;
+    }
+    const { error } = updateSettingsForSource('localSettings', {
+      skillOverrides: nextLocal as Record<string, SkillOverrideMode>,
+    });
+    if (error) {
+      setWriteError(error.message);
+      return;
+    }
+    setWriteError(null);
+    setOverridesEpoch(n => n + 1);
+    setDetailSkill(null);
+  }, []);
+
+  if (detailSkill) {
+    const cmdName = getCommandName(detailSkill);
+    const current = resolveSkillOverrideMode(
+      {
+        type: 'prompt',
+        source: detailSkill.source,
+        name: cmdName,
+        unqualifiedName:
+          'unqualifiedName' in detailSkill && typeof detailSkill.unqualifiedName === 'string'
+            ? detailSkill.unqualifiedName
+            : undefined,
+      },
+      { skillOverrides: mergedOverrides },
+    );
+    const options = SKILL_OVERRIDE_CYCLE_MODES.map(mode => ({
+      label: mode === current ? `${formatSkillOverrideModeLabel(mode)} (current)` : formatSkillOverrideModeLabel(mode),
+      value: mode,
+    }));
+    return (
+      <Dialog
+        title={cmdName}
+        onCancel={() => {
+          setDetailSkill(null);
+          setWriteError(null);
+        }}
+      >
+        <Box flexDirection="column">
+          {detailSkill.description ? <Text dimColor>{detailSkill.description}</Text> : null}
+          <Text dimColor>skillOverrides: on / name-only / user-invocable-only / off. Writes to local settings.</Text>
+          {writeError ? <Text color={'error' as keyof Theme}>{writeError}</Text> : null}
+        </Box>
+        <Select options={options} onChange={(value: SkillOverrideMode) => applyOverride(detailSkill, value)} />
+        <Text dimColor>Or press Enter on list items to invoke; Esc returns to the skill list.</Text>
+      </Dialog>
+    );
+  }
+
   if (skills.length === 0) {
     return (
       <Dialog title="Skills" subtitle="No skills found" onCancel={handleCancel} hideInputGuide>
@@ -129,6 +235,16 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
     const tokenDisplay = `~${formatTokens(estimatedTokens)}`;
     const pluginName = skill.source === 'plugin' ? skill.pluginInfo?.pluginManifest.name : undefined;
     const scopeTag = getScopeTag(skill.source);
+    const mode = resolveSkillOverrideMode(
+      {
+        type: 'prompt',
+        source: skill.source,
+        name: getCommandName(skill),
+      },
+      { skillOverrides: mergedOverrides },
+    );
+    const overrideBadge =
+      mode === 'on' || mode === 'model-invocable' ? null : ` · ${formatSkillOverrideModeLabel(mode)}`;
 
     return (
       <Box>
@@ -136,6 +252,7 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
         {scopeTag && <Text color={scopeTag.color as keyof Theme}> [{scopeTag.label}]</Text>}
         <Text dimColor>
           {pluginName ? ` · ${pluginName}` : ''} · {getSourceLabel(skill.source as SkillSource)} · {tokenDisplay} tokens
+          {overrideBadge}
         </Text>
       </Box>
     );
@@ -148,16 +265,13 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
 
   const subtitle =
     searchQuery.trim() === ''
-      ? `${skills.length} ${plural(skills.length, 'skill')}`
+      ? `${skills.length} ${plural(skills.length, 'skill')} · Enter invoke · Tab override`
       : `${filteredSkills.length}/${skills.length} ${plural(skills.length, 'skill')}`;
 
-  // Source group headers — rendered as section labels inside the picker list
-  // via renderItem. We annotate each item with its source to detect group
-  // boundary changes.
   return (
     <FuzzyPicker
       title="Skills"
-      placeholder="Type to filter skills…"
+      placeholder="Type to filter skills… (Tab: set skillOverrides)"
       items={orderedFilteredSkills}
       getKey={s => `${s.name}-${s.source}`}
       visibleCount={12}
@@ -170,6 +284,14 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
       emptyMessage={q => (q.trim() ? `No skills matching "${q.trim()}"` : 'No skills found')}
       matchLabel={subtitle}
       selectAction="invoke skill"
+      // Official denser: skill-detail override path. Tab opens override editor.
+      onTab={{
+        action: 'set skillOverrides',
+        handler: skill => {
+          setDetailSkill(skill);
+          setWriteError(null);
+        },
+      }}
       renderItem={(skill, isFocused) => renderSkillItem(skill, isFocused)}
     />
   );

@@ -64,8 +64,19 @@ export function isProgressReportingAvailable(): boolean {
 /**
  * Checks if the terminal supports DEC mode 2026 (synchronized output).
  * When supported, BSU/ESU sequences prevent visible flicker during redraws.
+ *
+ * Official hq: CLAUDE_CODE_FORCE_SYNC_OUTPUT forces true; known modern
+ * terminals (incl. mintty/rio/Tabby + KONSOLE_VERSION≥211200) enable by default.
+ * Note: tmux still returns false unless FORCE is set (official allows tmux 3.4+
+ * when TERM_PROGRAM=tmux; FORCE is the densable portable override).
  */
 export function isSynchronizedOutputSupported(): boolean {
+  // Official FORCE_SYNC_OUTPUT — enterprise/test override past terminal heuristics.
+  const force = process.env.CLAUDE_CODE_FORCE_SYNC_OUTPUT
+  if (force === '1' || force === 'true' || force === 'yes' || force === 'on') {
+    return true
+  }
+
   // tmux parses and proxies every byte but doesn't implement DEC 2026.
   // BSU/ESU pass through to the outer terminal but tmux has already
   // broken atomicity by chunking. Skip to save 16 bytes/frame + parser work.
@@ -74,7 +85,7 @@ export function isSynchronizedOutputSupported(): boolean {
   const termProgram = process.env.TERM_PROGRAM
   const term = process.env.TERM
 
-  // Modern terminals with known DEC 2026 support
+  // Modern terminals with known DEC 2026 support (official hq list)
   if (
     termProgram === 'iTerm.app' ||
     termProgram === 'WezTerm' ||
@@ -82,7 +93,10 @@ export function isSynchronizedOutputSupported(): boolean {
     termProgram === 'ghostty' ||
     termProgram === 'contour' ||
     termProgram === 'vscode' ||
-    termProgram === 'alacritty'
+    termProgram === 'alacritty' ||
+    termProgram === 'mintty' ||
+    termProgram === 'rio' ||
+    termProgram === 'Tabby'
   ) {
     return true
   }
@@ -104,6 +118,13 @@ export function isSynchronizedOutputSupported(): boolean {
 
   // Windows Terminal
   if (process.env.WT_SESSION) return true
+
+  // Konsole 21.12+ (official KONSOLE_VERSION >= 211200)
+  const konsoleVersion = process.env.KONSOLE_VERSION
+  if (konsoleVersion) {
+    const version = parseInt(konsoleVersion, 10)
+    if (!Number.isNaN(version) && version >= 211200) return true
+  }
 
   // VTE-based terminals (GNOME Terminal, Tilix, etc.) since VTE 0.68
   const vteVersion = process.env.VTE_VERSION

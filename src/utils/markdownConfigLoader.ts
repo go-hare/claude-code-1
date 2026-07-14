@@ -555,7 +555,16 @@ async function loadMarkdownFiles(dir: string): Promise<
   // - Fallback: native Node.js (when CLAUDE_CODE_USE_NATIVE_FILE_SEARCH is set)
   //
   // Why both? Ripgrep has poor startup performance in native builds.
-  const useNative = isEnvTruthy(process.env.CLAUDE_CODE_USE_NATIVE_FILE_SEARCH)
+  // Official USE_NATIVE_FILE_SEARCH densable.
+  let useNative = isEnvTruthy(process.env.CLAUDE_CODE_USE_NATIVE_FILE_SEARCH)
+  try {
+    const { isNativeFileSearchEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    useNative = isNativeFileSearchEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   const signal = AbortSignal.timeout(3000)
   let files: string[]
   try {

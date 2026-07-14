@@ -14,6 +14,7 @@ import {
   createUserMessage,
   prepareUserContent,
 } from '../messages.js';
+import { getInitialSettings } from '../settings/settings.js';
 import { resolveDefaultShell } from '../shell/resolveDefaultShell.js';
 import { isPowerShellToolEnabled } from '../shell/shellToolUtils.js';
 import { processToolResultBlock } from '../toolResultStorage.js';
@@ -36,8 +37,13 @@ export async function processBashCommand(
   // tool-list visibility. Computed up front so telemetry records the
   // actual shell, not the raw setting.
   const usePowerShell = isPowerShellToolEnabled() && resolveDefaultShell() === 'powershell';
+  // Official 2.1.186: `!` output auto-triggers Claude unless opted out.
+  const respondToBashCommands = getInitialSettings().respondToBashCommands ?? true;
 
-  logEvent('tengu_input_bash', { powershell: usePowerShell });
+  logEvent('tengu_input_bash', {
+    powershell: usePowerShell,
+    respond: respondToBashCommands,
+  });
 
   const userMessage = createUserMessage({
     content: prepareUserContent({
@@ -129,16 +135,19 @@ export async function processBashCommand(
     // tags into &lt;persisted-output&gt;, breaking the model's parse and
     // UserBashOutputMessage's extractTag. Escape the raw fallback only.
     const stdout = typeof mapped.content === 'string' ? mapped.content : escapeXml(data.stdout);
+    // Official: skip synthetic caveat + query when auto-responding after `!`.
+    const shouldQuery =
+      respondToBashCommands && !data.interrupted && !data.backgroundTaskId && !context.abortController.signal.aborted;
     return {
       messages: [
-        createSyntheticUserCaveatMessage(),
+        ...(shouldQuery ? [] : [createSyntheticUserCaveatMessage()]),
         userMessage,
         ...attachmentMessages,
         createUserMessage({
           content: `<bash-stdout>${stdout}</bash-stdout><bash-stderr>${escapeXml(stderr)}</bash-stderr>`,
         }),
       ],
-      shouldQuery: false,
+      shouldQuery,
     };
   } catch (e) {
     if (e instanceof ShellError) {
@@ -153,28 +162,30 @@ export async function processBashCommand(
           shouldQuery: false,
         };
       }
+      const shouldQuery = respondToBashCommands && !context.abortController.signal.aborted;
       return {
         messages: [
-          createSyntheticUserCaveatMessage(),
+          ...(shouldQuery ? [] : [createSyntheticUserCaveatMessage()]),
           userMessage,
           ...attachmentMessages,
           createUserMessage({
             content: `<bash-stdout>${escapeXml(e.stdout)}</bash-stdout><bash-stderr>${escapeXml(e.stderr)}</bash-stderr>`,
           }),
         ],
-        shouldQuery: false,
+        shouldQuery,
       };
     }
+    const shouldQuery = respondToBashCommands && !context.abortController.signal.aborted;
     return {
       messages: [
-        createSyntheticUserCaveatMessage(),
+        ...(shouldQuery ? [] : [createSyntheticUserCaveatMessage()]),
         userMessage,
         ...attachmentMessages,
         createUserMessage({
           content: `<bash-stderr>Command failed: ${escapeXml(errorMessage(e))}</bash-stderr>`,
         }),
       ],
-      shouldQuery: false,
+      shouldQuery,
     };
   } finally {
     setToolJSX(null);

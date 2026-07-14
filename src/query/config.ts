@@ -33,14 +33,29 @@ export function buildQueryConfig(): QueryConfig {
       streamingToolExecution: checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
         'tengu_streaming_tool_execution2',
       ),
-      emitToolUseSummaries: isEnvTruthy(
-        process.env.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES,
-      ),
+      emitToolUseSummaries: (() => {
+        try {
+          const { isEmitToolUseSummariesEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+          return isEmitToolUseSummariesEnabled()
+        } catch {
+          return isEnvTruthy(process.env.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES)
+        }
+      })(),
       isAnt: process.env.USER_TYPE === 'ant',
-      // Inlined from fastMode.ts to avoid pulling its heavy module graph
-      // (axios, settings, auth, model, oauth, config) into test shards that
-      // didn't previously load it — changes init order and breaks unrelated tests.
-      fastModeEnabled: !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FAST_MODE),
+      // Official DISABLE_FAST_MODE densable. Lazy require keeps residualFinal
+      // out of the heavy fastMode graph (axios/settings/auth) for test shards.
+      fastModeEnabled: (() => {
+        try {
+          const { isFastModeDisabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+          return !isFastModeDisabled()
+        } catch {
+          return !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FAST_MODE)
+        }
+      })(),
     },
   }
 }

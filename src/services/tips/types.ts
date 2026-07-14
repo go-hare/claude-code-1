@@ -6,6 +6,8 @@ export type TipContext = {
   theme?: ThemeName // 当前终端主题名，用于 `color()` 等着色
   readFileState?: FileStateCache // 近期已读文件 LRU，用于文件类相关性判断
   bashTools?: Set<string> // 本会话出现过的 bash 子命令集合
+  /** Official: bare hostnames from https?:// URLs in bash commands this session. */
+  bashHosts?: Set<string>
 }
 
 /** 内置或用户自定义的 Spinner 提示条目。 */

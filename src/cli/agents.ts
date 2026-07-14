@@ -77,25 +77,35 @@ export async function agentsMain(args: string[]): Promise<void> {
   // Extract passthrough args for dispatched sessions
   const dispatchExtraArgs = extractPassthroughArgs(args)
 
-  // Start bg manager in-process only if daemon is not already running.
-  // If a persistent daemon is already serving the control socket, skip
-  // the expensive in-process startup (saves 1-3s).
-  const { isDaemonReachable } = await import('../daemon/controlSocketClient.js')
-  const daemonAlive = await isDaemonReachable()
-
+  // Official KF / Wy_: ensure daemon with install prompt denser.
   let bgManager: { close(): Promise<void> } | null = null
-  if (!daemonAlive) {
-    const { startBgManager } = await import('../daemon/bgManager.js')
-    bgManager = await startBgManager({
-      onLog: () => {},
-    })
+  {
+    const { ensureDaemonRunning } = await import('../daemon/installPrompt.js')
+    const daemon = await ensureDaemonRunning()
+    if (!daemon.ok) {
+      process.stderr.write(
+        `${daemon.reason ?? "No background daemon is running. Run 'claude daemon install' to set it up as a persistent service."}\n`,
+      )
+      return
+    }
+    bgManager = daemon.manager
   }
+
+  // Official chO / mountFleetView: restore selection from CLAUDE_AGENTS_SELECT
+  // (set by GCp attach detach or left-arrow open). Consume once then delete.
+  const restoreSessionId = process.env.CLAUDE_AGENTS_SELECT
+  const enteredViaLeftArrow = !!restoreSessionId
+  delete process.env.CLAUDE_AGENTS_SELECT
 
   // Interactive dashboard
   const { renderAgentView } = await import('../screens/AgentView.js')
   await renderAgentView({
     dispatchExtraArgs,
     cwdFilter,
+    restoreSessionId: restoreSessionId || undefined,
+    enteredViaLeftArrow,
+    // agentsMain already ensured daemon + owns bgManager.close()
+    daemonAlreadyEnsured: true,
   })
 
   // Cleanup bg manager on exit (only if we started one)

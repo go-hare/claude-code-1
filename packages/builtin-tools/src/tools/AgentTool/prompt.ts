@@ -1,7 +1,10 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getSubscriptionType } from 'src/utils/auth.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
-import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
+import {
+  isBackgroundTasksDisabled,
+  resolveAgentListInMessagesEnvOverride,
+} from 'src/utils/residualFinalEnvGates.js'
 import { isTeammate } from 'src/utils/teammate.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
@@ -56,9 +59,9 @@ export function formatAgentLine(agent: AgentDefinition): string {
  * Override with CLAUDE_CODE_AGENT_LIST_IN_MESSAGES=true/false for testing.
  */
 export function shouldInjectAgentListInMessages(): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_AGENT_LIST_IN_MESSAGES)) return true
-  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_AGENT_LIST_IN_MESSAGES))
-    return false
+  // Official AGENT_LIST_IN_MESSAGES densable env half, then GB.
+  const envOverride = resolveAgentListInMessagesEnvOverride()
+  if (envOverride !== null) return envOverride
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_agent_list_attach', false)
 }
 
@@ -170,11 +173,10 @@ Usage notes:
 - Always include a short description (3-5 words) summarizing what the agent will do${concurrencyNote}
 - When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.${
     // eslint-disable-next-line custom-rules/no-process-env-top-level
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS) &&
-    !isInProcessTeammate()
+    !isBackgroundTasksDisabled() && !isInProcessTeammate()
       ? `
-- You can optionally run agents in the background using the run_in_background parameter. When an agent runs in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.
-- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can proceed — e.g., research agents whose findings inform your next steps. Use background when you have genuinely independent work to do in parallel.`
+- Subagents run in the background by default; you'll be notified when one completes. Pass \`run_in_background: false\` for a synchronous run when you need the result before continuing.
+- **Foreground vs background**: Use background (default) for independent work. Pass \`run_in_background: false\` when you need the agent's results before you can proceed — e.g., research agents whose findings inform your next steps.`
       : ''
   }
 - To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field. The agent resumes with its full context preserved. ${forkEnabled ? 'Each non-fork Agent invocation starts without context — provide a complete task description.' : 'Each Agent invocation starts fresh — provide a complete task description.'}

@@ -373,6 +373,9 @@ export function startBackgroundSession({
     agentType: 'subagent',
     subagentName: 'main-session',
     isBuiltIn: true,
+    // Official isMainSession background path: isBackgroundAgent:!0 so $Qn
+    // does not bump mainLoopRefcount while the session runs in background.
+    isBackgroundAgent: true,
   }
 
   void runWithAgentContext(agentContext, async () => {
@@ -383,9 +386,17 @@ export function startBackgroundSession({
       let tokenCount = 0
       let lastRecordedUuid: UUID | null = messages.at(-1)?.uuid ?? null
 
+      // Mark toolUseContext as background so tool/api activity resolves HOn.
+      const bgToolUseContext = {
+        ...queryParams.toolUseContext,
+        isBackgroundAgent: true as const,
+        agentId: asAgentId(taskId),
+      }
+
       for await (const event of query({
         messages: bgMessages,
         ...queryParams,
+        toolUseContext: bgToolUseContext,
       })) {
         if (abortSignal.aborted) {
           // Aborted mid-stream — completeMainSessionTask won't be reached.

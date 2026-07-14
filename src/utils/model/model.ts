@@ -76,6 +76,7 @@ export function isNonCustomOpusModel(model: ModelName): boolean {
  * 2. Model override at startup (from --model flag)
  * 3. ANTHROPIC_MODEL environment variable
  * 4. Settings (from user's saved settings)
+ * 5. Org default with override_user_selection (official 2.1.196)
  */
 export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
   let specifiedModel: ModelSetting | undefined
@@ -83,9 +84,24 @@ export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
   const modelOverride = getMainLoopModelOverride()
   if (modelOverride !== undefined) {
     specifiedModel = modelOverride
+  } else if (process.env.ANTHROPIC_MODEL) {
+    specifiedModel = process.env.ANTHROPIC_MODEL
   } else {
-    const settings = getSettings_DEPRECATED() || {}
-    specifiedModel = process.env.ANTHROPIC_MODEL || settings.model || undefined
+    // Official: when org default has override_user_selection, ignore user pin.
+    // Lazy require to avoid bootstrap cycles (model ↔ orgDefaultModel ↔ config).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { shouldOrgDefaultOverrideUserSelection, resolveOrgDefaultSetting } =
+      require('./orgDefaultModel.js') as typeof import('./orgDefaultModel.js')
+    if (shouldOrgDefaultOverrideUserSelection()) {
+      const orgDefault = resolveOrgDefaultSetting()
+      if (orgDefault) {
+        specifiedModel = orgDefault
+      }
+    }
+    if (specifiedModel === undefined) {
+      const settings = getSettings_DEPRECATED() || {}
+      specifiedModel = settings.model || undefined
+    }
   }
 
   // Ignore the user-specified model if it's not in the availableModels allowlist.
@@ -189,7 +205,8 @@ export function getDefaultSonnetModel(): ModelName {
   if (provider !== 'firstParty') {
     return getModelStrings().sonnet45
   }
-  return getModelStrings().sonnet46
+  // Official 2.1.197+: Sonnet 5 is the default Sonnet family model.
+  return getModelStrings().sonnet5
 }
 
 // @[MODEL LAUNCH]: Update the default Haiku model (3P providers may lag so keep defaults unchanged).
@@ -258,6 +275,16 @@ export function getRuntimeMainLoopModel(params: {
  * @returns The default model setting to use
  */
 export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
+  // Official org default (G5t attribution "org") takes priority over tier defaults
+  // when the user has not pinned a model. Lazy require avoids cycles.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { resolveOrgDefaultSetting } =
+    require('./orgDefaultModel.js') as typeof import('./orgDefaultModel.js')
+  const orgDefault = resolveOrgDefaultSetting()
+  if (orgDefault) {
+    return orgDefault
+  }
+
   // Ants default to defaultModel from flag config, or Opus 1M if not configured
   if (process.env.USER_TYPE === 'ant') {
     return (
@@ -314,6 +341,9 @@ export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   }
   if (name.includes('claude-opus-4')) {
     return 'claude-opus-4'
+  }
+  if (name.includes('claude-sonnet-5')) {
+    return 'claude-sonnet-5'
   }
   if (name.includes('claude-sonnet-4-6')) {
     return 'claude-sonnet-4-6'
@@ -377,14 +407,14 @@ export function getClaudeAiUserDefaultModelDescription(
     }
     return `Opus 4.7 · Most capable for complex work${fastMode ? getOpusPricingSuffix(true) : ''}`
   }
-  return 'Sonnet 4.6 · Best for everyday tasks'
+  return 'Sonnet 5 · Efficient for routine tasks'
 }
 
 export function renderDefaultModelSetting(
   setting: ModelName | ModelAlias,
 ): string {
   if (setting === 'opusplan') {
-    return 'Opus 4.7 in plan mode, else Sonnet 4.6'
+    return 'Opus 4.7 in plan mode, else Sonnet 5'
   }
   return renderModelName(parseUserSpecifiedModel(setting))
 }
@@ -448,6 +478,10 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
       return 'Opus 4.1'
     case getModelStrings().opus40:
       return 'Opus 4'
+    case getModelStrings().sonnet5 + '[1m]':
+      return 'Sonnet 5 (1M context)'
+    case getModelStrings().sonnet5:
+      return 'Sonnet 5'
     case getModelStrings().sonnet46 + '[1m]':
       return 'Sonnet 4.6 (1M context)'
     case getModelStrings().sonnet46:
@@ -681,6 +715,9 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   }
   if (canonical.includes('claude-opus-4')) {
     return 'Opus 4'
+  }
+  if (canonical.includes('claude-sonnet-5')) {
+    return has1m ? 'Sonnet 5 (with 1M context)' : 'Sonnet 5'
   }
   if (canonical.includes('claude-sonnet-4-6')) {
     return has1m ? 'Sonnet 4.6 (with 1M context)' : 'Sonnet 4.6'

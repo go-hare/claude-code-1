@@ -38,18 +38,19 @@ type PermissionModeConfig = {
   external: ExternalPermissionMode
 }
 
+// Labels aligned with official Claude Code 2.1.207 (Manual / Auto first-class).
 const PERMISSION_MODE_CONFIG: Partial<
   Record<PermissionMode, PermissionModeConfig>
 > = {
   default: {
-    title: 'Default',
-    shortTitle: 'Default',
+    title: 'Manual',
+    shortTitle: 'Manual',
     symbol: '',
     color: 'text',
     external: 'default',
   },
   plan: {
-    title: 'Plan Mode',
+    title: 'Plan',
     shortTitle: 'Plan',
     symbol: PAUSE_ICON,
     color: 'planMode',
@@ -63,7 +64,7 @@ const PERMISSION_MODE_CONFIG: Partial<
     external: 'acceptEdits',
   },
   bypassPermissions: {
-    title: 'Bypass',
+    title: 'Bypass Permissions',
     shortTitle: 'Bypass',
     symbol: '⏵⏵',
     color: 'error',
@@ -81,22 +82,18 @@ const PERMISSION_MODE_CONFIG: Partial<
     shortTitle: 'Auto',
     symbol: '⏵⏵',
     color: 'warning' as ModeColorKey,
-    external: 'default' as ExternalPermissionMode,
+    external: 'auto',
   },
 }
 
 /**
  * Type guard to check if a PermissionMode is an ExternalPermissionMode.
- * auto is ant-only and excluded from external modes.
+ * Official 2.1.207: only `bubble` is internal; `auto` is external.
  */
 export function isExternalPermissionMode(
   mode: PermissionMode,
 ): mode is ExternalPermissionMode {
-  // External users can't have auto, so always true for them
-  if (process.env.USER_TYPE !== 'ant') {
-    return true
-  }
-  return mode !== 'auto' && mode !== 'bubble'
+  return mode !== 'bubble'
 }
 
 function getModeConfig(mode: PermissionMode): PermissionModeConfig {
@@ -110,6 +107,9 @@ export function toExternalPermissionMode(
 }
 
 export function permissionModeFromString(str: string): PermissionMode {
+  // Official 2.1.200: "Manual" is the UI name for default; `manual` is accepted
+  // as an alias in settings / CLI.
+  if (str === 'manual') return 'default'
   return (PERMISSION_MODES as readonly string[]).includes(str)
     ? (str as PermissionMode)
     : 'default'

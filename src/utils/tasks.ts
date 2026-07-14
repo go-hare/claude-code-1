@@ -285,9 +285,16 @@ async function writeHighWaterMark(
 }
 
 export function isTodoV2Enabled(): boolean {
-  // Force-enable tasks in non-interactive mode (e.g. SDK users who want Task tools over TodoWrite)
-  if (isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TASKS)) {
-    return true
+  // Official ENABLE_TASKS densable force-on (e.g. SDK users who want Task tools over TodoWrite).
+  try {
+    const { isTasksEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    if (isTasksEnvEnabled()) return true
+  } catch {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TASKS)) {
+      return true
+    }
   }
   return !getIsNonInteractiveSession()
 }

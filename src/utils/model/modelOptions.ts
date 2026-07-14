@@ -18,6 +18,12 @@ import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.js'
 import { getAPIProvider } from './providers.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import {
+  getGatewayModelsCachePath,
+  parseGatewayModelOptionsFromCache,
+} from '../residualMoreEnvGates.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { readFileSync } from 'node:fs'
+import {
   getCanonicalName,
   getClaudeAiUserDefaultModelDescription,
   getDefaultSonnetModel,
@@ -49,6 +55,13 @@ export type ModelOption = {
 }
 
 export function getDefaultOptionForUser(fastMode = false): ModelOption {
+  // Official org-default badge on the Default row (Elh/Urc).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { resolveOrgDefaultSetting, getDefaultModelAttributionBadge } =
+    require('./orgDefaultModel.js') as typeof import('./orgDefaultModel.js')
+  const orgDefault = resolveOrgDefaultSetting()
+  const orgBadge = orgDefault ? getDefaultModelAttributionBadge('org') : ''
+
   if (process.env.USER_TYPE === 'ant') {
     const currentModel = renderDefaultModelSetting(
       getDefaultMainLoopModelSetting(),
@@ -56,13 +69,22 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
     return {
       value: null,
       label: 'Default (recommended)',
-      description: `Use the default model for Ants (currently ${currentModel})`,
+      description: `Use the default model for Ants (currently ${currentModel})${orgBadge}`,
       descriptionForModel: `Default model (currently ${currentModel})`,
     }
   }
 
   // Subscribers
   if (isClaudeAISubscriber()) {
+    // When org default is set, show the resolved model name + Org default badge
+    // instead of the generic tier marketing string (official N1n org arm).
+    if (orgDefault) {
+      return {
+        value: null,
+        label: 'Default (recommended)',
+        description: `${renderDefaultModelSetting(orgDefault)}${orgBadge}`,
+      }
+    }
     return {
       value: null,
       label: 'Default (recommended)',
@@ -75,7 +97,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   return {
     value: null,
     label: 'Default (recommended)',
-    description: `Use the default model (currently ${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
+    description: `Use the default model (currently ${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}${orgBadge}`,
   }
 }
 
@@ -117,14 +139,31 @@ function getCustomSonnetOption(): ModelOption | undefined {
 
 // @[MODEL LAUNCH]: Update or add model option functions (getSonnetXXOption, getOpusXXOption, etc.)
 // with the new model's label and description. These appear in the /model picker.
+function getSonnet5Option(): ModelOption {
+  const is3P = getAPIProvider() !== 'firstParty'
+  // When the default sonnet alias already resolves to Sonnet 5, use the alias.
+  const defaultIsSonnet5 =
+    !is3P && getCanonicalName(getDefaultSonnetModel()) === 'claude-sonnet-5'
+  return {
+    value: is3P
+      ? getModelStrings().sonnet5
+      : defaultIsSonnet5
+        ? 'sonnet'
+        : getModelStrings().sonnet5,
+    label: 'Sonnet',
+    description: `Sonnet 5 · Efficient for routine tasks${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
+    descriptionForModel:
+      'Sonnet 5 - efficient for routine tasks. Generally recommended for most coding tasks',
+  }
+}
+
 function getSonnet46Option(): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
   return {
-    value: is3P ? getModelStrings().sonnet46 : 'sonnet',
-    label: 'Sonnet',
-    description: `Sonnet 4.6 · Best for everyday tasks${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
-    descriptionForModel:
-      'Sonnet 4.6 - best for everyday tasks. Generally recommended for most coding tasks',
+    value: is3P ? getModelStrings().sonnet46 : getModelStrings().sonnet46,
+    label: 'Sonnet 4.6',
+    description: 'Sonnet 4.6 · Previous Sonnet version',
+    descriptionForModel: 'Sonnet 4.6 - previous Sonnet version',
   }
 }
 
@@ -187,11 +226,24 @@ export function getOpus46Option(fastMode = false): ModelOption {
   }
 }
 
+export function getSonnet5_1MOption(): ModelOption {
+  const is3P = getAPIProvider() !== 'firstParty'
+  return {
+    value: is3P ? getModelStrings().sonnet5 + '[1m]' : 'sonnet[1m]',
+    label: 'Sonnet 5 (1M context)',
+    description: `Sonnet 5 for long sessions${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
+    descriptionForModel:
+      'Sonnet 5 with 1M context window - for long sessions with large codebases',
+  }
+}
+
 export function getSonnet46_1MOption(): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
   return {
-    value: is3P ? getModelStrings().sonnet46 + '[1m]' : 'sonnet[1m]',
-    label: 'Sonnet (1M context)',
+    value: is3P
+      ? getModelStrings().sonnet46 + '[1m]'
+      : getModelStrings().sonnet46 + '[1m]',
+    label: 'Sonnet 4.6 (1M context)',
     description: `Sonnet 4.6 for long sessions${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
     descriptionForModel:
       'Sonnet 4.6 with 1M context window - for long sessions with large codebases',
@@ -260,7 +312,7 @@ function getHaiku45Option(): ModelOption {
     label: 'Haiku',
     description: `Haiku 4.5 · Fastest for quick answers${is3P ? '' : ` · ${formatModelPricing(COST_HAIKU_45)}`}`,
     descriptionForModel:
-      'Haiku 4.5 - fastest for quick answers. Lower cost but less capable than Sonnet 4.6.',
+      'Haiku 4.5 - fastest for quick answers. Lower cost but less capable than Sonnet 5.',
   }
 }
 
@@ -291,14 +343,19 @@ function getMaxOpusOption(fastMode = false): ModelOption {
   }
 }
 
-export function getMaxSonnet46_1MOption(): ModelOption {
+export function getMaxSonnet5_1MOption(): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
   const billingInfo = isClaudeAISubscriber() ? ' · Billed as extra usage' : ''
   return {
     value: 'sonnet[1m]',
-    label: 'Sonnet (1M context)',
-    description: `Sonnet 4.6 with 1M context${billingInfo}${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
+    label: 'Sonnet 5 (1M context)',
+    description: `Sonnet 5 with 1M context${billingInfo}${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
   }
+}
+
+/** @deprecated Use getMaxSonnet5_1MOption — kept as alias for existing callers. */
+export function getMaxSonnet46_1MOption(): ModelOption {
+  return getMaxSonnet5_1MOption()
 }
 
 export function getMaxOpus47_1MOption(fastMode = false): ModelOption {
@@ -321,10 +378,10 @@ function getMergedOpus1MOption(fastMode = false): ModelOption {
   }
 }
 
-const MaxSonnet46Option: ModelOption = {
+const MaxSonnet5Option: ModelOption = {
   value: 'sonnet',
   label: 'Sonnet',
-  description: 'Sonnet 4.6 · Best for everyday tasks',
+  description: 'Sonnet 5 · Efficient for routine tasks',
 }
 
 const MaxHaiku45Option: ModelOption = {
@@ -337,7 +394,7 @@ function getOpusPlanOption(): ModelOption {
   return {
     value: 'opusplan',
     label: 'Opus Plan Mode',
-    description: 'Use Opus 4.7 in plan mode, Sonnet 4.6 otherwise',
+    description: 'Use Opus 4.7 in plan mode, Sonnet 5 otherwise',
   }
 }
 
@@ -373,8 +430,9 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       getDefaultOptionForUser(),
       ...antModelOptions,
       getMergedOpus1MOption(fastMode),
+      getSonnet5Option(),
+      getSonnet5_1MOption(),
       getSonnet46Option(),
-      getSonnet46_1MOption(),
       getHaiku45Option(),
     ]
   }
@@ -389,9 +447,9 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       const premiumOptions = [getDefaultOptionForUser(fastMode)]
       premiumOptions.push(getOpus46_1MOption(fastMode))
 
-      premiumOptions.push(MaxSonnet46Option)
+      premiumOptions.push(MaxSonnet5Option)
       if (checkSonnet1mAccess()) {
-        premiumOptions.push(getMaxSonnet46_1MOption())
+        premiumOptions.push(getMaxSonnet5_1MOption())
       }
 
       premiumOptions.push(MaxHaiku45Option)
@@ -412,14 +470,14 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     standardOptions.push(getOpus46_1MOption(fastMode))
 
     if (checkSonnet1mAccess()) {
-      standardOptions.push(getMaxSonnet46_1MOption())
+      standardOptions.push(getMaxSonnet5_1MOption())
     }
 
     standardOptions.push(MaxHaiku45Option)
     return standardOptions
   }
 
-  // PAYG 1P API: Default (Sonnet) + Opus 4.7 1M + Opus 4.6 1M + Sonnet 1M + Haiku
+  // PAYG 1P API: Default (Sonnet 5) + Opus 4.7 1M + Opus 4.6 1M + Sonnet 5 1M + Haiku
   if (getAPIProvider() === 'firstParty') {
     const payg1POptions = [getDefaultOptionForUser(fastMode)]
     if (isOpus1mMergeEnabled()) {
@@ -432,24 +490,26 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     }
     payg1POptions.push(getOpus46_1MOption(fastMode))
     if (checkSonnet1mAccess()) {
-      payg1POptions.push(getSonnet46_1MOption())
+      payg1POptions.push(getSonnet5_1MOption())
     }
+    // Keep previous Sonnet as a pin-able concrete version.
+    payg1POptions.push(getSonnet46Option())
     payg1POptions.push(getHaiku45Option())
     return payg1POptions
   }
 
-  // PAYG 3P: Default (Sonnet 4.5) + Sonnet (3P custom) or Sonnet 4.6/1M + Opus (3P custom) or Opus 4.7/Opus 4.6 Legacy/Opus 4.7 1M + Haiku
+  // PAYG 3P: Default + Sonnet (3P custom) or Sonnet 5/1M + previous Sonnet 4.6 + Opus + Haiku
   const payg3pOptions = [getDefaultOptionForUser(fastMode)]
 
   const customSonnet = getCustomSonnetOption()
   if (customSonnet !== undefined) {
     payg3pOptions.push(customSonnet)
   } else {
-    // Add Sonnet 4.6 since Sonnet 4.5 is the default
-    payg3pOptions.push(getSonnet46Option())
+    payg3pOptions.push(getSonnet5Option())
     if (checkSonnet1mAccess()) {
-      payg3pOptions.push(getSonnet46_1MOption())
+      payg3pOptions.push(getSonnet5_1MOption())
     }
+    payg3pOptions.push(getSonnet46Option())
   }
 
   const customOpus = getCustomOpusOption()
@@ -483,6 +543,7 @@ function getModelFamilyInfo(
 
   // Sonnet family
   if (
+    canonical.includes('claude-sonnet-5') ||
     canonical.includes('claude-sonnet-4-6') ||
     canonical.includes('claude-sonnet-4-5') ||
     canonical.includes('claude-sonnet-4-') ||
@@ -570,6 +631,14 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     })
   }
 
+  // Official mkr densable — merge cached gateway /v1/models options when $5l.
+  // Full q5l download/write remains denser (bootstrap path).
+  for (const opt of readGatewayModelOptionsFromCache()) {
+    if (!options.some(existing => existing.value === opt.value)) {
+      options.push(opt)
+    }
+  }
+
   // Append additional model options fetched during bootstrap
   for (const opt of getGlobalConfig().additionalModelOptionsCache ?? []) {
     if (!options.some(existing => existing.value === opt.value)) {
@@ -616,6 +685,23 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     }
     return filterModelOptionsByAllowlist(options)
   }
+}
+
+/**
+ * Official mkr consumer — read gateway-models.json cache if present.
+ * Pure parse lives in residualMoreEnvGates; full q5l fetch denser.
+ */
+function readGatewayModelOptionsFromCache(): ModelOption[] {
+  let raw: string | null = null
+  try {
+    raw = readFileSync(
+      getGatewayModelsCachePath(getClaudeConfigHomeDir()),
+      'utf-8',
+    )
+  } catch {
+    raw = null
+  }
+  return parseGatewayModelOptionsFromCache({ raw }) as ModelOption[]
 }
 
 /**

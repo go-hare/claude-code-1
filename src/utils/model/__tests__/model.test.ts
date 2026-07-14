@@ -14,6 +14,13 @@ describe('firstPartyNameToCanonical', () => {
     )
   })
 
+  test('maps sonnet-5 full name', () => {
+    expect(firstPartyNameToCanonical('claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(firstPartyNameToCanonical('us.anthropic.claude-sonnet-5')).toBe(
+      'claude-sonnet-5',
+    )
+  })
+
   test('maps haiku-4-5', () => {
     expect(firstPartyNameToCanonical('claude-haiku-4-5-20251001')).toBe(
       'claude-haiku-4-5',

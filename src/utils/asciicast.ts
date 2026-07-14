@@ -4,7 +4,8 @@ import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
 import { createBufferedWriter } from './bufferedWriter.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import { getClaudeConfigHomeDir } from './envUtils.js'
+import { isTerminalRecordingEnvEnabled } from './residualFinalEnvGates.js'
 import { getFsImplementation } from './fsOperations.js'
 import { sanitizePath } from './path.js'
 import { jsonStringify } from './slowOperations.js'
@@ -28,7 +29,7 @@ export function getRecordFilePath(): string | null {
   if (process.env.USER_TYPE !== 'ant') {
     return null
   }
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_TERMINAL_RECORDING)) {
+  if (!isTerminalRecordingEnvEnabled()) {
     return null
   }
   // Record alongside the transcript.

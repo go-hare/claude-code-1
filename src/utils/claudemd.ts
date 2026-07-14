@@ -29,6 +29,7 @@ import { feature } from 'bun:bundle'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
 import { Lexer } from 'marked'
+import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import {
   basename,
   dirname,
@@ -936,7 +937,18 @@ export const getMemoryFiles = memoize(
     // This is controlled by CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD and defaults to off
     // Note: we don't check isSettingSourceEnabled('projectSettings') here because --add-dir
     // is an explicit user action and the SDK defaults settingSources to [] when not specified
-    if (isEnvTruthy(process.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD)) {
+    let includeAdditionalDirsClaudeMd = isEnvTruthy(
+      process.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD,
+    )
+    try {
+      const { isAdditionalDirectoriesClaudeMdEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      includeAdditionalDirsClaudeMd = isAdditionalDirectoriesClaudeMdEnabled()
+    } catch {
+      // residual helpers optional
+    }
+    if (includeAdditionalDirsClaudeMd) {
       const additionalDirs = getAdditionalDirectoriesForClaudeMd()
       for (const dir of additionalDirs) {
         // Try reading CLAUDE.md from the additional directory
@@ -1154,6 +1166,9 @@ export const getClaudeMds = (
   filter?: (type: MemoryType) => boolean,
 ): string => {
   const memories: string[] = []
+  // Official GB tengu_paper_halyard — skip Project/Local CLAUDE.md.
+  // CLAUDE_CODE_SKIP_PROJECT_BACKFILL is schema-only in 2.1.207 (no product
+  // consumer on this path); do not OR it in here.
   const skipProjectLevel = getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_paper_halyard',
     false,
@@ -1391,7 +1406,13 @@ export async function processConditionedMdRules(
     ) {
       return false
     }
-    return ignore().add(file.globs).ignores(relativePath)
+    // Official 2.1.207: drop uncompilable globs instead of throwing.
+    const globs = filterCompilableIgnorePatterns(
+      file.globs,
+      'claudemd_rule_globs',
+    )
+    if (globs.length === 0) return false
+    return ignore().add(globs).ignores(relativePath)
   })
 }
 

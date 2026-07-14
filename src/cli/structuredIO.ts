@@ -12,7 +12,18 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from 'src/entrypoints/agentSdkTypes.js'
-import { SDKControlElicitationResponseSchema } from 'src/entrypoints/sdk/controlSchemas.js'
+import {
+  SDKControlElicitationResponseSchema,
+  SDKControlHostAuthTokenRefreshResponseSchema,
+  SDKControlOauthTokenRefreshResponseSchema,
+  SDKControlRequestUserDialogResponseSchema,
+} from 'src/entrypoints/sdk/controlSchemas.js'
+import { DEFAULT_SDK_AUTH_REFRESH_CONTROL_TIMEOUT_MS } from 'src/utils/residualFinalEnvGates.js'
+import {
+  buildUserDialogRequiresActionDetails,
+  resolveUserDialogParkTimeoutMs,
+  type UserDialogResponse,
+} from 'src/utils/userDialog.js'
 import type {
   SDKControlRequest,
   SDKControlResponse,
@@ -47,7 +58,11 @@ import {
   persistPermissionUpdates,
 } from '../utils/permissions/PermissionUpdate.js'
 import {
+  notifyNestedPromptBlocking,
+  notifyNestedPromptUnblocking,
   notifySessionStateChanged,
+  republishPendingAction,
+  reteeWaitingOnUser,
   type RequiresActionDetails,
   type SessionExternalMetadata,
 } from '../utils/sessionState.js'
@@ -157,6 +172,30 @@ export class StructuredIO {
   private prependedLines: string[] = []
   private onControlRequestSent?: (request: SDKControlRequest) => void
   private onControlRequestResolved?: (requestId: string) => void
+
+  /**
+   * Official onUserDialogParked — fired when a request_user_dialog parks
+   * requires_action details for host UIs.
+   */
+  onUserDialogParked?: (details: RequiresActionDetails) => void
+
+  /**
+   * Official publishedPendingActionDetails — request_id → details for
+   * concurrent parks; republishSurvivingPendingAction re-emits survivors.
+   */
+  private readonly publishedPendingActionDetails = new Map<
+    string,
+    RequiresActionDetails
+  >()
+
+  /**
+   * Official timedOutUserDialogs — request_ids cancelled by W1n timer so
+   * finally does not reteeWaitingOnUser for the timed-out park.
+   */
+  private readonly timedOutUserDialogs = new Map<
+    string,
+    { dialogKind: string; timedOutAt: number }
+  >()
 
   // sendRequest() and print.ts both enqueue here; the drain loop is the
   // only writer. Prevents control_request from overtaking queued stream_events.
@@ -272,10 +311,90 @@ export class StructuredIO {
       )
   }
 
+  /**
+   * Official getPendingUserDialogRequests — pending request_user_dialog parks.
+   */
+  getPendingUserDialogRequests() {
+    return Array.from(this.pendingRequests.values())
+      .map(entry => entry.request)
+      .filter(
+        pr =>
+          (pr.request as { subtype?: string }).subtype ===
+          'request_user_dialog',
+      )
+  }
+
+  /**
+   * Official republishSurvivingPendingAction — after one park resolves, re-emit
+   * the remaining pending_action so host UIs stay blocked on the survivor.
+   */
+  republishSurvivingPendingAction(): void {
+    let survivor: RequiresActionDetails | undefined
+    for (const [requestId, details] of this.publishedPendingActionDetails) {
+      if (this.pendingRequests.has(requestId)) {
+        survivor = details
+        break
+      }
+    }
+    if (!survivor) return
+    republishPendingAction(survivor)
+  }
+
+  /**
+   * Official cancelPendingUserDialogs — cancel all parks of a given dialog_kind
+   * with reason telemetry (queued_at_park, etc.).
+   */
+  cancelPendingUserDialogs(dialogKind: string, _reason: string): number {
+    let cancelled = 0
+    for (const { request } of Array.from(this.pendingRequests.values())) {
+      const inner = request.request as {
+        subtype?: string
+        dialog_kind?: string
+      }
+      if (
+        inner.subtype !== 'request_user_dialog' ||
+        inner.dialog_kind !== dialogKind
+      ) {
+        continue
+      }
+      this.injectControlResponse({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: request.request_id,
+          response: { behavior: 'cancelled' },
+        },
+      })
+      cancelled += 1
+    }
+    return cancelled
+  }
+
   setUnexpectedResponseCallback(
     callback: (response: SDKControlResponse) => Promise<void>,
   ): void {
     this.unexpectedResponseCallback = callback
+  }
+
+  /**
+   * Official ignoresErrorShapedDialogResponse — error control_response for a
+   * parked request_user_dialog is not a human choice; keep the dialog parked.
+   */
+  ignoresErrorShapedDialogResponse(
+    pending: PendingRequest<unknown>,
+    responseInner: {
+      subtype?: string
+      request_id?: string
+      error?: string
+    },
+  ): boolean {
+    if (responseInner.subtype !== 'error') return false
+    const subtype = (pending.request.request as { subtype?: string }).subtype
+    if (subtype !== 'request_user_dialog') return false
+    logForDebugging(
+      `Ignoring error-shaped control_response for parked request_user_dialog request_id=${responseInner.request_id} — not a human choice; dialog stays parked (error: ${responseInner.error ?? ''})`,
+    )
+    return true
   }
 
   /**
@@ -299,6 +418,9 @@ export class StructuredIO {
     if (!requestId) return
     const request = this.pendingRequests.get(requestId as string)
     if (!request) return
+    if (this.ignoresErrorShapedDialogResponse(request, responseInner)) {
+      return
+    }
     this.trackResolvedToolUseId(request.request)
     this.pendingRequests.delete(requestId as string)
     // Cancel the SDK consumer's canUseTool callback — the bridge won.
@@ -417,6 +539,19 @@ export class StructuredIO {
             )
           }
           return undefined // Ignore responses for requests we don't know about
+        }
+        // Official ignoresErrorShapedDialogResponse — keep request_user_dialog
+        // parked on error-shaped responses (not a human choice). Must run
+        // before delete so the dialog stays in pendingRequests.
+        if (
+          resp.subtype === 'error' &&
+          this.ignoresErrorShapedDialogResponse(request, {
+            subtype: 'error',
+            request_id: resp.request_id,
+            error: resp.error,
+          })
+        ) {
+          return undefined
         }
         this.trackResolvedToolUseId(request.request)
         this.pendingRequests.delete(resp.request_id)
@@ -610,58 +745,77 @@ export class StructuredIO {
 
         // Start the SDK permission prompt immediately (don't wait for hooks)
         const requestId = randomUUID()
-        onPermissionPrompt?.(
-          buildRequiresActionDetails(tool, input, toolUseID, requestId),
-        )
-        const sdkPromise = this.sendRequest<PermissionToolOutput>(
-          {
-            subtype: 'can_use_tool',
-            tool_name: tool.name,
-            input,
-            permission_suggestions: mainPermissionResult.suggestions,
-            blocked_path: mainPermissionResult.blockedPath,
-            decision_reason: serializeDecisionReason(
-              mainPermissionResult.decisionReason,
-            ),
-            tool_use_id: toolUseID,
-            agent_id: toolUseContext.agentId,
-          },
-          permissionToolOutputSchema(),
-          hookAbortController.signal,
+        const details = buildRequiresActionDetails(
+          tool,
+          input,
+          toolUseID,
           requestId,
-        ).then(result => ({ source: 'sdk' as const, result }))
+        )
+        this.publishedPendingActionDetails.set(requestId, details)
+        // Official Imn: nested agent permission parks block waitingOnUser.
+        const nestedAgentId = toolUseContext.agentId
+        let nestedBlocked = false
+        if (nestedAgentId !== undefined) {
+          nestedBlocked = true
+          notifyNestedPromptBlocking(nestedAgentId)
+        }
+        onPermissionPrompt?.(details)
+        try {
+          const sdkPromise = this.sendRequest<PermissionToolOutput>(
+            {
+              subtype: 'can_use_tool',
+              tool_name: tool.name,
+              input,
+              permission_suggestions: mainPermissionResult.suggestions,
+              blocked_path: mainPermissionResult.blockedPath,
+              decision_reason: serializeDecisionReason(
+                mainPermissionResult.decisionReason,
+              ),
+              tool_use_id: toolUseID,
+              agent_id: toolUseContext.agentId,
+            },
+            permissionToolOutputSchema(),
+            hookAbortController.signal,
+            requestId,
+          ).then(result => ({ source: 'sdk' as const, result }))
 
-        // Race: hook completion vs SDK prompt response.
-        // The hook promise always resolves (never rejects), returning
-        // undefined if no hook made a decision.
-        const winner = await Promise.race([hookPromise, sdkPromise])
+          // Race: hook completion vs SDK prompt response.
+          // The hook promise always resolves (never rejects), returning
+          // undefined if no hook made a decision.
+          const winner = await Promise.race([hookPromise, sdkPromise])
 
-        if (winner.source === 'hook') {
-          if (winner.decision) {
-            // Hook decided — abort the pending SDK request.
-            // Suppress the expected AbortError rejection from sdkPromise.
-            sdkPromise.catch(() => {})
-            hookAbortController.abort()
-            return winner.decision
+          if (winner.source === 'hook') {
+            if (winner.decision) {
+              // Hook decided — abort the pending SDK request.
+              // Suppress the expected AbortError rejection from sdkPromise.
+              sdkPromise.catch(() => {})
+              hookAbortController.abort()
+              return winner.decision
+            }
+            // Hook passed through (no decision) — wait for the SDK prompt
+            const sdkResult = await sdkPromise
+            return permissionPromptToolResultToPermissionDecision(
+              sdkResult.result,
+              tool,
+              input,
+              toolUseContext,
+            )
           }
-          // Hook passed through (no decision) — wait for the SDK prompt
-          const sdkResult = await sdkPromise
+
+          // SDK prompt responded first — use its result (hook still running
+          // in background but its result will be ignored)
           return permissionPromptToolResultToPermissionDecision(
-            sdkResult.result,
+            winner.result,
             tool,
             input,
             toolUseContext,
           )
+        } finally {
+          if (nestedBlocked && nestedAgentId !== undefined) {
+            notifyNestedPromptUnblocking(nestedAgentId)
+          }
+          this.publishedPendingActionDetails.delete(requestId)
         }
-
-        // SDK prompt responded first — use its result (hook still running
-        // in background but its result will be ignored)
-        return permissionPromptToolResultToPermissionDecision(
-          winner.result,
-          tool,
-          input,
-          toolUseContext,
-        )
       } catch (error) {
         return permissionPromptToolResultToPermissionDecision(
           {
@@ -676,8 +830,14 @@ export class StructuredIO {
       } finally {
         // Only transition back to 'running' if no other permission prompts
         // are pending (concurrent tool execution can have multiple in-flight).
-        if (this.getPendingPermissionRequests().length === 0) {
+        if (
+          this.getPendingPermissionRequests().length === 0 &&
+          this.getPendingUserDialogRequests().length === 0
+        ) {
           notifySessionStateChanged('running')
+        } else {
+          reteeWaitingOnUser()
+          this.republishSurvivingPendingAction()
         }
         parentSignal.removeEventListener('abort', onParentAbort)
       }
@@ -742,6 +902,113 @@ export class StructuredIO {
       return result
     } catch {
       return { action: 'cancel' as const }
+    }
+  }
+
+  /**
+   * Official requestOAuthTokenRefresh — control_request subtype
+   * oauth_token_refresh; response accessToken (nullable). Timeout 30s (fNb).
+   */
+  async requestOAuthTokenRefresh(): Promise<string | null> {
+    const result = await this.sendRequest<{ accessToken: string | null }>(
+      { subtype: 'oauth_token_refresh' },
+      SDKControlOauthTokenRefreshResponseSchema(),
+      AbortSignal.timeout(DEFAULT_SDK_AUTH_REFRESH_CONTROL_TIMEOUT_MS),
+    )
+    return result.accessToken
+  }
+
+  /**
+   * Official requestHostAuthTokenRefresh — control_request subtype
+   * host_auth_token_refresh; response authToken (nullable). Default 30s (mNb).
+   */
+  async requestHostAuthTokenRefresh(
+    timeoutMs: number = DEFAULT_SDK_AUTH_REFRESH_CONTROL_TIMEOUT_MS,
+  ): Promise<string | null> {
+    const result = await this.sendRequest<{ authToken: string | null }>(
+      { subtype: 'host_auth_token_refresh' },
+      SDKControlHostAuthTokenRefreshResponseSchema(),
+      AbortSignal.timeout(timeoutMs),
+    )
+    return result.authToken
+  }
+
+  /**
+   * Official requestUserDialog densable consumer — park a host-rendered
+   * dialog via control_request subtype request_user_dialog.
+   *
+   * - Publishes requires_action details (dialog:kind)
+   * - Optional W1n timeout injects cancelled
+   * - On settle: clear published details; retee/republish survivors
+   */
+  async requestUserDialog(
+    dialogKind: string,
+    payload: unknown,
+    options?: {
+      signal?: AbortSignal
+      toolUseId?: string
+    },
+  ): Promise<UserDialogResponse> {
+    const requestId = randomUUID()
+    const details = buildUserDialogRequiresActionDetails(
+      dialogKind,
+      payload,
+      requestId,
+      options?.toolUseId,
+    )
+    this.publishedPendingActionDetails.set(requestId, details)
+    notifySessionStateChanged('requires_action', details)
+    this.onUserDialogParked?.(details)
+
+    const timeoutMs = resolveUserDialogParkTimeoutMs()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        if (!this.pendingRequests.has(requestId)) return
+        this.timedOutUserDialogs.set(requestId, {
+          dialogKind,
+          timedOutAt: Date.now(),
+        })
+        this.injectControlResponse({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: requestId,
+            response: { behavior: 'cancelled' },
+          },
+        })
+      }, timeoutMs)
+      timer.unref?.()
+    }
+
+    try {
+      return await this.sendRequest<UserDialogResponse>(
+        {
+          subtype: 'request_user_dialog',
+          dialog_kind: dialogKind,
+          payload,
+          tool_use_id: options?.toolUseId,
+        },
+        SDKControlRequestUserDialogResponseSchema(),
+        options?.signal,
+        requestId,
+      )
+    } catch {
+      return { behavior: 'cancelled' }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      this.publishedPendingActionDetails.delete(requestId)
+      if (
+        this.getPendingUserDialogRequests().length === 0 &&
+        this.getPendingPermissionRequests().length === 0
+      ) {
+        notifySessionStateChanged('running')
+      } else {
+        if (!this.timedOutUserDialogs.has(requestId)) {
+          reteeWaitingOnUser()
+        }
+        this.republishSurvivingPendingAction()
+      }
     }
   }
 

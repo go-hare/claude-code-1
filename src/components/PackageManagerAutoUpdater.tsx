@@ -32,7 +32,15 @@ export function PackageManagerAutoUpdater({ verbose }: Props): React.ReactNode {
       return;
     }
 
-    if (isAutoUpdaterDisabled()) {
+    // Official CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE: '0' force-off.
+    const { resolvePackageManagerAutoUpdateFromEnv } =
+      require('../utils/packageManagerAutoUpdate.js') as typeof import('../utils/packageManagerAutoUpdate.js');
+    const envAuto = resolvePackageManagerAutoUpdateFromEnv();
+    if (envAuto === false) {
+      return;
+    }
+
+    if (isAutoUpdaterDisabled() && envAuto !== true) {
       return;
     }
 

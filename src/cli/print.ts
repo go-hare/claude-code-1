@@ -29,6 +29,38 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import {
+  formatSyncPluginInstallTimeoutLog,
+  isSyncPluginsOrInstallEnabled,
+  raceWithTimeoutMs,
+  resolveSyncPluginsInstallTimeoutMs,
+  shouldRegisterSdkHostAuthRefreshCallback,
+  shouldRegisterSdkOauthRefreshCallback,
+} from 'src/utils/residualFinalEnvGates.js'
+import {
+  getRemoteSystemPromptGbFeatureKey,
+  resolveSystemPromptWithRemoteGb,
+} from 'src/utils/residualMoreEnvGates.js'
+
+/**
+ * Official densable — when CLAUDE_CODE_REMOTE + SYSTEM_PROMPT_GB_FEATURE, prefer
+ * the GrowthBook string override for the print/SDK system prompt.
+ */
+function resolvePrintSystemPrompt(
+  base: string | undefined,
+): string | undefined {
+  const key = getRemoteSystemPromptGbFeatureKey()
+  if (!key) return base
+  const gbValue = getFeatureValue_CACHED_MAY_BE_STALE(key, '')
+  return resolveSystemPromptWithRemoteGb({ base, gbValue })
+}
+
+import { setSdkOauthTokenRefreshCallback } from 'src/utils/sdkOauthTokenRefresh.js'
+import {
+  getHostAuthRefreshTimeoutMs,
+  setHostAuthTokenRefreshCallback,
+} from 'src/utils/hostCredsFile.js'
+import { resolveTeamTeardownParkTimeoutMsOrDefault } from 'src/utils/residualMsEnvGates.js'
+import {
   logForDiagnosticsNoPII,
   withDiagnosticsTiming,
 } from 'src/utils/diagLogs.js'
@@ -52,8 +84,11 @@ import {
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
   getSessionState,
+  notifyNestedPromptBlocking,
+  notifyNestedPromptUnblocking,
   notifySessionStateChanged,
   notifySessionMetadataChanged,
+  reteeWaitingOnUser,
   setPermissionModeChangedListener,
   type RequiresActionDetails,
   type SessionExternalMetadata,
@@ -179,6 +214,7 @@ import {
   isBypassPermissionsModeDisabled,
   transitionPermissionMode,
 } from 'src/utils/permissions/permissionSetup.js'
+import { parseMcpPermissionModeOverride } from 'src/utils/permissions/mcpPermissionMode.js'
 import {
   tryGenerateSuggestion,
   logSuggestionOutcome,
@@ -291,6 +327,7 @@ import {
   getMainThreadAgentType,
   getAllowedChannels,
   setAllowedChannels,
+  setSdkSupportedDialogKinds,
   type ChannelEntry,
 } from 'src/bootstrap/state.js'
 import { runWithWorkload, WORKLOAD_CRON } from 'src/utils/workloadContext.js'
@@ -356,6 +393,14 @@ import { unassignTeammateTasks } from '../utils/tasks.js'
 import { getRunningTasks } from '../utils/task/framework.js'
 import { isBackgroundTask } from '../tasks/types.js'
 import { stopTask } from '../tasks/stopTask.js'
+import {
+  canReportSessionIdleWithBgActivity,
+  formatPrintBgWaitCeilingMessage,
+  formatPrintWindDownMessage,
+  getPrintBgWaitCeilingMs,
+  nextPrintBgWaitGate,
+  PRINT_BG_WAIT_GRACE_MS,
+} from './printBgWait.js'
 import { drainSdkEvents } from '../utils/sdkEventQueue.js'
 import { initializeGrowthBook } from '../services/analytics/growthbook.js'
 import { errorMessage, toError } from '../utils/errors.js'
@@ -481,6 +526,8 @@ export async function runHeadless(
     taskBudget: { total: number } | undefined
     systemPrompt: string | undefined
     appendSystemPrompt: string | undefined
+    /** Official --append-subagent-system-prompt (Task-tool subagents only). */
+    appendSubagentSystemPrompt?: string | undefined
     userSpecifiedModel: string | undefined
     fallbackModel: string | undefined
     teleport: string | true | null | undefined
@@ -488,6 +535,12 @@ export async function runHeadless(
     replayUserMessages: boolean | undefined
     includePartialMessages: boolean | undefined
     forkSession: boolean | undefined
+    /**
+     * Official --reply-on-resume: when resuming a transcript that ends in a
+     * user-role message (bg mid-turn fork), auto-continue the interrupted turn
+     * without requiring CLAUDE_CODE_RESUME_INTERRUPTED_TURN.
+     */
+    replyOnResume: boolean | undefined
     rewindFiles: string | undefined
     enableAuthStatus: boolean | undefined
     agent: string | undefined
@@ -497,15 +550,38 @@ export async function runHeadless(
     setSDKStatus?: (status: SDKStatus) => void
   },
 ): Promise<void> {
-  if (
-    process.env.USER_TYPE === 'ant' &&
-    isEnvTruthy(process.env.CLAUDE_CODE_EXIT_AFTER_FIRST_RENDER)
-  ) {
-    process.stderr.write(
-      `\nStartup time: ${Math.round(process.uptime() * 1000)}ms\n`,
+  // Official EXIT_AFTER_FIRST_RENDER densable — ant-only startup bench exit.
+  try {
+    const { isExitAfterFirstRenderEnabled } = await import(
+      '../utils/residualFinalEnvGates.js'
     )
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(0)
+    if (process.env.USER_TYPE === 'ant' && isExitAfterFirstRenderEnabled()) {
+      process.stderr.write(
+        `\nStartup time: ${Math.round(process.uptime() * 1000)}ms\n`,
+      )
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(0)
+    }
+  } catch {
+    // Official EXIT_AFTER_FIRST_RENDER densable.
+    let exitAfterFirstRender = isEnvTruthy(
+      process.env.CLAUDE_CODE_EXIT_AFTER_FIRST_RENDER,
+    )
+    try {
+      const { isExitAfterFirstRenderEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+      exitAfterFirstRender = isExitAfterFirstRenderEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+    if (process.env.USER_TYPE === 'ant' && exitAfterFirstRender) {
+      process.stderr.write(
+        `\nStartup time: ${Math.round(process.uptime() * 1000)}ms\n`,
+      )
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(0)
+    }
   }
 
   // Fire user settings download now so it overlaps with the MCP/tool setup
@@ -513,9 +589,19 @@ export async function runHeadless(
   // user settings a similar head start. The cached promise is joined in
   // installPluginsAndApplyMcpInBackground before plugin install reads
   // enabledPlugins.
+  // Official REMOTE densable.
+  let isRemoteDownload = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    isRemoteDownload = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   if (
     feature('DOWNLOAD_USER_SETTINGS') &&
-    (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
+    (isRemoteDownload || getIsRemoteMode())
   ) {
     void downloadUserSettings()
   }
@@ -541,11 +627,21 @@ export async function runHeadless(
   // SleepTool passes isEnabled() filtering. This fallback covers the case
   // where CLAUDE_CODE_PROACTIVE is set but main.tsx's check didn't fire
   // (e.g. env was injected by the SDK transport after argv parsing).
+  // Official PROACTIVE densable.
+  let proactiveEnv = isEnvTruthy(process.env.CLAUDE_CODE_PROACTIVE)
+  try {
+    const { isProactiveEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    proactiveEnv = isProactiveEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   if (
     (feature('PROACTIVE') || feature('KAIROS')) &&
     proactiveModule &&
     !proactiveModule.isProactiveActive() &&
-    isEnvTruthy(process.env.CLAUDE_CODE_PROACTIVE)
+    proactiveEnv
   ) {
     proactiveModule.activateProactive('command')
   }
@@ -601,6 +697,114 @@ export async function runHeadless(
   }
 
   const structuredIO = getStructuredIO(inputPrompt, options)
+
+  // Official working-sync densable: sdkUrl + REMOTE_SESSION_ID + !ENVIRONMENT_KIND
+  // + !DISABLE_WORKING_SYNC → fire-and-forget startSyncedFileSyncer.
+  // CCR j6o put host is wired when RemoteIO exposes requestSyncedFile.
+  try {
+    const { maybeStartWorkingSync } = await import(
+      '../utils/workingSyncGate.js'
+    )
+    const remote =
+      structuredIO instanceof RemoteIO ? (structuredIO as RemoteIO) : undefined
+    const ccrHost = remote?.getWorkingFilestoreHost?.()
+    maybeStartWorkingSync({
+      sdkUrl: options.sdkUrl,
+      ...(ccrHost
+        ? {
+            requestSyncedFile: args => ccrHost.requestSyncedFile(args),
+            workerEpoch: ccrHost.workerEpoch,
+          }
+        : {}),
+    })
+  } catch {
+    // densable optional
+  }
+
+  // Official BYi/UYi — wire session activity mainLoopRefcount → Imn + drop chain.
+  try {
+    const {
+      setMainLoopRefcountListener,
+      setDropNestedBlockedChainListener,
+      getMainLoopRefcount,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/sessionActivity.js') as typeof import('../utils/sessionActivity.js')
+    const { setMainLoopRefcount, dropNestedBlockedChain } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/sessionState.js') as typeof import('../utils/sessionState.js')
+    setMainLoopRefcountListener(n => setMainLoopRefcount(n))
+    setMainLoopRefcount(getMainLoopRefcount())
+    setDropNestedBlockedChainListener(agentId =>
+      dropNestedBlockedChain(agentId),
+    )
+  } catch {
+    // densable optional
+  }
+
+  // Official createPrintRequestDialog densable (cvf) — arm requestDialog host
+  // for refusal_fallback / fable_overage / mcp_url_elicitation parks.
+  let printRequestDialog:
+    | ((
+        spec: { kind: string; default: unknown },
+        payload: unknown,
+        options?: { signal?: AbortSignal },
+      ) => Promise<unknown>)
+    | undefined
+  try {
+    const { createPrintRequestDialog } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/printRequestDialog.js') as typeof import('../utils/printRequestDialog.js')
+    const { setSdkDialogHostActive } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    const { peek } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/messageQueueManager.js') as typeof import('../utils/messageQueueManager.js')
+    setSdkDialogHostActive(true)
+    printRequestDialog = createPrintRequestDialog({
+      handleElicitation: (
+        serverName,
+        message,
+        _schema,
+        signal,
+        mode,
+        url,
+        elicitationId,
+      ) =>
+        structuredIO.handleElicitation(
+          serverName,
+          message,
+          undefined,
+          signal,
+          mode,
+          url,
+          elicitationId,
+        ),
+      requestUserDialog: (kind, payload, opts) =>
+        structuredIO.requestUserDialog(kind, payload, opts),
+      peekQueuedCommand: () => peek(),
+      cancelPendingUserDialogs: (kind, reason) =>
+        structuredIO.cancelPendingUserDialogs(kind, reason),
+    })
+  } catch {
+    // densable optional
+  }
+
+  // Official: when SDK host owns OAuth refresh (desktop/local-agent/vscode),
+  // register structuredIO.requestOAuthTokenRefresh as the 401 recovery callback.
+  if (shouldRegisterSdkOauthRefreshCallback()) {
+    setSdkOauthTokenRefreshCallback(() =>
+      structuredIO.requestOAuthTokenRefresh(),
+    )
+  }
+  // Official: HAS_HOST_AUTH_REFRESH + host entrypoint → host auth refresh callback.
+  if (shouldRegisterSdkHostAuthRefreshCallback()) {
+    const timeoutMs = getHostAuthRefreshTimeoutMs()
+    setHostAuthTokenRefreshCallback(() =>
+      structuredIO.requestHostAuthTokenRefresh(timeoutMs),
+    )
+  }
 
   // When emitting NDJSON for SDK clients, any stray write to stdout (debug
   // prints, dependency console.log, library banners) breaks the client's
@@ -706,6 +910,7 @@ export async function runHeadless(
     resumeSessionAt: options.resumeSessionAt,
     forkSession: options.forkSession,
     outputFormat: options.outputFormat,
+    sdkUrl: options.sdkUrl,
     sessionStartHooksPromise: options.sessionStartHooksPromise,
     restoredWorkerState: structuredIO.restoredWorkerState,
   })
@@ -868,10 +1073,22 @@ export async function runHeadless(
   const messages: SDKMessage[] = []
   let lastMessage: SDKMessage | undefined
   // Streamlined mode transforms messages when CLAUDE_CODE_STREAMLINED_OUTPUT=true and using stream-json
-  // Build flag gates this out of external builds; env var is the runtime opt-in for ant builds
+  // Build flag gates this out of external builds; env var is the runtime opt-in for ant builds.
+  // Official STREAMLINED_OUTPUT densable.
+  let streamlinedOutput = isEnvTruthy(
+    process.env.CLAUDE_CODE_STREAMLINED_OUTPUT,
+  )
+  try {
+    const { isStreamlinedOutputEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    streamlinedOutput = isStreamlinedOutputEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   const transformToStreamlined =
     feature('STREAMLINED_OUTPUT') &&
-    isEnvTruthy(process.env.CLAUDE_CODE_STREAMLINED_OUTPUT) &&
+    streamlinedOutput &&
     options.outputFormat === 'stream-json'
       ? createStreamlinedTransformer()
       : null
@@ -890,6 +1107,7 @@ export async function runHeadless(
     agents,
     options,
     turnInterruptionState,
+    printRequestDialog,
   )) {
     if (transformToStreamlined) {
       // Streamlined mode: transform messages and stream immediately
@@ -1022,6 +1240,8 @@ function runHeadlessStreaming(
     taskBudget: { total: number } | undefined
     systemPrompt: string | undefined
     appendSystemPrompt: string | undefined
+    /** Official --append-subagent-system-prompt (Task-tool subagents only). */
+    appendSubagentSystemPrompt?: string | undefined
     userSpecifiedModel: string | undefined
     fallbackModel: string | undefined
     replayUserMessages?: boolean | undefined
@@ -1031,8 +1251,25 @@ function runHeadlessStreaming(
     setSDKStatus?: (status: SDKStatus) => void
     promptSuggestions?: boolean | undefined
     workload?: string | undefined
+    /** Official --reply-on-resume: auto-continue interrupted turn on resume. */
+    replyOnResume?: boolean | undefined
   },
   turnInterruptionState?: TurnInterruptionState,
+  /**
+   * Official requestDialog host (cvf) armed in runHeadless — refusal_fallback /
+   * fable_overage / mcp_url_elicitation parks via ask → ToolUseContext.
+   */
+  printRequestDialog?: (
+    spec: {
+      kind: string
+      default: unknown
+      result?: () => {
+        safeParse: (v: unknown) => { success: boolean; data?: unknown }
+      }
+    },
+    payload: unknown,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown>,
 ): AsyncIterable<StdoutMessage> {
   let running = false
   let runPhase:
@@ -1195,15 +1432,29 @@ function runHeadlessStreaming(
 
   // Auto-resume interrupted turns on restart so CC continues from where it
   // left off without requiring the SDK to re-send the prompt.
-  const resumeInterruptedTurnEnv =
-    process.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN
+  // Official --reply-on-resume (bg mid-turn fork / exit handoff) is the same
+  // path without needing CLAUDE_CODE_RESUME_INTERRUPTED_TURN.
+  // Official RESUME_INTERRUPTED_TURN densable.
+  let resumeInterruptedTurnEnv = Boolean(
+    process.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN,
+  )
+  try {
+    const { isResumeInterruptedTurnEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    resumeInterruptedTurnEnv = isResumeInterruptedTurnEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  const shouldReplyOnResume =
+    resumeInterruptedTurnEnv || Boolean(options.replyOnResume)
   if (
     turnInterruptionState &&
     turnInterruptionState.kind !== 'none' &&
-    resumeInterruptedTurnEnv
+    shouldReplyOnResume
   ) {
     logForDebugging(
-      `[print.ts] Auto-resuming interrupted turn (kind: ${turnInterruptionState.kind})`,
+      `[print.ts] Auto-resuming interrupted turn (kind: ${turnInterruptionState.kind}${options.replyOnResume ? ', reply-on-resume' : ''})`,
     )
 
     // Remove the interrupted message and its sentinel, then re-enqueue so
@@ -1218,6 +1469,43 @@ function runHeadlessStreaming(
         | ContentBlockParam[],
       uuid: randomUUID(),
     })
+  }
+
+  // Official Evf + Svf parked-permission resume densable — when
+  // resume-interrupted is on and external_metadata.pending_action is a
+  // non-dialog permission, plan a short grace wait for a late control_response.
+  // The actual wait runs at message-loop start (async) so unexpected answers
+  // can still land via handleOrphanedPermissionResponse.
+  let parkedPermissionResumePlan:
+    | {
+        wait: true
+        parked: { request_id: string; tool_use_id: string }
+        waitMs: number
+      }
+    | undefined
+  if (shouldReplyOnResume) {
+    try {
+      const { planParkedPermissionResume } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/userDialog.js') as typeof import('../utils/userDialog.js')
+      const { getSessionMetadataSnapshot } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/sessionState.js') as typeof import('../utils/sessionState.js')
+      const meta = getSessionMetadataSnapshot()
+      const plan = planParkedPermissionResume({
+        resumeInterruptedTurn: true,
+        pendingAction: meta.pending_action ?? null,
+        restoreKind: turnInterruptionState?.kind ?? 'worker',
+      })
+      if (plan.wait) {
+        parkedPermissionResumePlan = plan
+        logForDebugging(
+          `[print.ts] Parked permission toolUseID=${plan.parked.tool_use_id} request_id=${plan.parked.request_id} waitMs=${plan.waitMs}`,
+        )
+      }
+    } catch {
+      // densable optional
+    }
   }
 
   const modelOptions = getModelOptions()
@@ -1741,9 +2029,19 @@ function runHeadlessStreaming(
       // Join point for user settings (fired at runHeadless entry) and managed
       // settings (fired in main.tsx preAction). downloadUserSettings() caches
       // its promise so this awaits the same in-flight request.
+      // Official REMOTE densable.
+      let isRemotePlugins = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+      try {
+        const { isRemoteEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+        isRemotePlugins = isRemoteEnvEnabled()
+      } catch {
+        // keep raw env fallback
+      }
       await Promise.all([
         feature('DOWNLOAD_USER_SETTINGS') &&
-        (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
+        (isRemotePlugins || getIsRemoteMode())
           ? withDiagnosticsTiming('headless_user_settings_download', () =>
               downloadUserSettings(),
             )
@@ -1771,7 +2069,9 @@ function runHeadlessStreaming(
   // --bare / SIMPLE: skip plugin install. Scripted calls don't add plugins
   // mid-session; the next interactive run reconciles.
   if (!isBareMode()) {
-    if (isEnvTruthy(process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL)) {
+    // Official: CLAUDE_CODE_SYNC_PLUGIN_INSTALL or CLAUDE_CODE_SYNC_PLUGINS
+    // await install before first ask(); otherwise fire-and-forget background.
+    if (isSyncPluginsOrInstallEnabled()) {
       pluginInstallPromise = installPluginsAndApplyMcpInBackground()
     } else {
       void installPluginsAndApplyMcpInBackground()
@@ -1934,28 +2234,17 @@ function runHeadlessStreaming(
     // Resolve deferred plugin installation (CLAUDE_CODE_SYNC_PLUGIN_INSTALL).
     // The promise was started eagerly so installation overlaps with other init.
     // Awaiting here guarantees plugins are available before the first ask().
-    // If CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS is set, races against that
+    // If CLAUDE_CODE_SYNC_PLUGIN(S)_INSTALL_TIMEOUT_MS is set, races against that
     // deadline and proceeds without plugins on timeout (logging an error).
     if (pluginInstallPromise) {
-      const timeoutMs = parseInt(
-        process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS || '',
-        10,
-      )
-      if (timeoutMs > 0) {
-        const timeout = sleep(timeoutMs).then(() => 'timeout' as const)
-        const result = await Promise.race([pluginInstallPromise, timeout])
-        if (result === 'timeout') {
-          logError(
-            new Error(
-              `CLAUDE_CODE_SYNC_PLUGIN_INSTALL: plugin installation timed out after ${timeoutMs}ms`,
-            ),
-          )
-          logEvent('tengu_sync_plugin_install_timeout', {
-            timeout_ms: timeoutMs,
-          })
-        }
-      } else {
-        await pluginInstallPromise
+      // Official Lmn: default 30s; env SYNC_PLUGIN(S)_INSTALL_TIMEOUT_MS override.
+      const timeoutMs = resolveSyncPluginsInstallTimeoutMs()
+      const raced = await raceWithTimeoutMs(pluginInstallPromise, timeoutMs)
+      if (raced.status === 'timeout') {
+        logError(new Error(formatSyncPluginInstallTimeoutLog(timeoutMs)))
+        logEvent('tengu_sync_plugin_install_timeout', {
+          timeout_ms: timeoutMs,
+        })
       }
       pluginInstallPromise = null
 
@@ -1979,6 +2268,11 @@ function runHeadlessStreaming(
     try {
       let command: QueuedCommand | undefined
       let waitingForAgents = false
+      // Official print bg wait ceiling (dEf/pEf): track elapsed wait + wind-down.
+      let printBgWaitStartedAt: number | null = null
+      let printBgWaitDeadline: number | null = null
+      let printBgWaitSwept = false
+      let printBgWaitCeilingWarned = false
 
       // Extract command processing into a named function for the do-while pattern.
       // Drains the queue, batching consecutive prompt-mode commands into one
@@ -2245,8 +2539,12 @@ function runHeadlessStreaming(
                     }
                     pendingSeeds.clear()
                   },
-                  customSystemPrompt: options.systemPrompt,
+                  customSystemPrompt: resolvePrintSystemPrompt(
+                    options.systemPrompt,
+                  ),
                   appendSystemPrompt: options.appendSystemPrompt,
+                  appendSubagentSystemPrompt:
+                    options.appendSubagentSystemPrompt,
                   getAppState,
                   setAppState,
                   abortController,
@@ -2264,6 +2562,8 @@ function runHeadlessStreaming(
                         ? params.elicitationId
                         : undefined,
                     ),
+                  // Official requestDialog:OSr()?cvf(e) — arm when print host built.
+                  requestDialog: printRequestDialog,
                   agents: currentAgents,
                   orphanedPermission: cmd.orphanedPermission,
                   setSDKStatus: status => {
@@ -2384,11 +2684,21 @@ function runHeadlessStreaming(
             )
           }
 
-          // Generate and emit prompt suggestion for SDK consumers
-          if (
-            options.promptSuggestions &&
-            !isEnvDefinedFalsy(process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)
-          ) {
+          // Generate and emit prompt suggestion for SDK consumers.
+          // Official ENABLE_PROMPT_SUGGESTION densable pure env half.
+          let promptSuggestionEnvOff = isEnvDefinedFalsy(
+            process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION,
+          )
+          try {
+            const { resolvePromptSuggestionEnvOverride } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+            promptSuggestionEnvOff =
+              resolvePromptSuggestionEnvOverride() === false
+          } catch {
+            // keep raw env fallback
+          }
+          if (options.promptSuggestions && !promptSuggestionEnvOff) {
             // TS narrows suggestionState to never in the while loop body;
             // cast via unknown to reset narrowing.
             const state = suggestionState as unknown as typeof suggestionState
@@ -2502,18 +2812,91 @@ function runHeadlessStreaming(
         waitingForAgents = false
         {
           const state = getAppState()
-          const hasRunningBg = getRunningTasks(state).some(
+          const runningBg = getRunningTasks(state).filter(
             t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
           )
+          const hasRunningBg = runningBg.length > 0
           const hasMainThreadQueued = peek(isMainThread) !== undefined
           if (hasRunningBg || hasMainThreadQueued) {
             waitingForAgents = true
             if (!hasMainThreadQueued) {
               runPhase = 'waiting_for_agents'
-              // No commands ready yet, wait for tasks to complete
-              await sleep(100)
+              if (printBgWaitStartedAt === null) {
+                printBgWaitStartedAt = Date.now()
+              }
+              const now = Date.now()
+              const ceiling = getPrintBgWaitCeilingMs()
+              const ceilingExceeded =
+                ceiling !== null && now - printBgWaitStartedAt >= ceiling
+
+              // Official: stderr once when ceiling exceeded.
+              if (
+                ceilingExceeded &&
+                !printBgWaitCeilingWarned &&
+                ceiling !== null
+              ) {
+                printBgWaitCeilingWarned = true
+                process.stderr.write(formatPrintBgWaitCeilingMessage(ceiling))
+              }
+
+              // Official pEf wind-down gate (input closed + grace / ceiling).
+              const gate = nextPrintBgWaitGate({
+                runningBackgroundTasks: runningBg.map(t => ({
+                  id: t.id,
+                  type: t.type,
+                })),
+                inputClosed,
+                hasMainThreadQueued: false,
+                hasActiveTeammates: hasActiveInProcessTeammates(state),
+                hasPendingNotification: false,
+                ceilingExceeded,
+                deadline: printBgWaitDeadline,
+                swept: printBgWaitSwept,
+                now,
+              })
+              printBgWaitDeadline = gate.deadline
+              printBgWaitSwept = gate.swept
+
+              if (gate.shouldSweep || (ceilingExceeded && inputClosed)) {
+                // Official fEf — typed wind-down messages + print_wind_down telemetry
+                for (const t of runningBg) {
+                  try {
+                    logForDebugging(
+                      formatPrintWindDownMessage(
+                        {
+                          id: t.id,
+                          type: t.type,
+                          description: t.description,
+                        },
+                        PRINT_BG_WAIT_GRACE_MS,
+                      ),
+                    )
+                    await stopTask(t.id, { getAppState, setAppState })
+                  } catch {
+                    // best-effort print wind-down
+                  }
+                }
+                if (runningBg.length > 0) {
+                  logEvent('print_wind_down', {})
+                }
+                waitingForAgents = false
+                printBgWaitStartedAt = null
+                printBgWaitDeadline = null
+                printBgWaitSwept = false
+              } else if (ceilingExceeded) {
+                // Ceiling hit while input still open: stop blocking exit.
+                waitingForAgents = false
+                printBgWaitStartedAt = null
+              } else {
+                await sleep(100)
+              }
             }
             // Loop back to drain any newly queued commands
+          } else {
+            printBgWaitStartedAt = null
+            printBgWaitDeadline = null
+            printBgWaitSwept = false
+            printBgWaitCeilingWarned = false
           }
         }
       } while (waitingForAgents)
@@ -2569,7 +2952,22 @@ function runHeadlessStreaming(
       await structuredIO.flushInternalEvents()
       runPhase = 'finally_post_flush'
       if (!isShuttingDown()) {
-        notifySessionStateChanged('idle')
+        // Official cEf / CLAUDE_CODE_BG_TASKS_REPORT_RUNNING: keep session
+        // non-idle while bg tasks or in-process teammates are still active.
+        const finallyState = getAppState()
+        const hasRunningBgTasks = getRunningTasks(finallyState).some(
+          t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
+        )
+        const hasActiveTeammates = hasActiveInProcessTeammates(finallyState)
+        if (
+          canReportSessionIdleWithBgActivity({
+            hasActiveTeammates,
+            hasRunningBgTasks,
+            hasPendingNotification: false,
+          })
+        ) {
+          notifySessionStateChanged('idle')
+        }
         // Drain so the idle session_state_changed SDK event (plus any
         // terminal task_notification bookends emitted during bg-agent
         // teardown) reach the output stream before we block on the next
@@ -2621,6 +3019,9 @@ function runHeadlessStreaming(
         // This is needed because teammates may send messages while we're waiting
         // Keep polling until the team is shut down
         const POLL_INTERVAL_MS = 500
+        // Official ZEf densable — park deadline before forced teardown
+        const parkTimeoutMs = resolveTeamTeardownParkTimeoutMsOrDefault()
+        const parkDeadline = Date.now() + parkTimeoutMs
 
         while (true) {
           // Check if teammates are still active
@@ -2634,6 +3035,23 @@ function runHeadlessStreaming(
             logForDebugging(
               '[print.ts] No more active teammates, stopping poll',
             )
+            break
+          }
+
+          // Official: give up after TEAM_TEARDOWN_PARK_TIMEOUT_MS
+          if (Date.now() >= parkDeadline) {
+            const rosterCount = Object.keys(
+              refreshedState.teamContext?.teammates ?? {},
+            ).length
+            const runningInProcess = Object.values(
+              refreshedState.tasks ?? {},
+            ).filter(
+              t => t.type === 'in_process_teammate' && t.status === 'running',
+            ).length
+            logForDebugging(
+              `[print.ts] Team teardown park gave up after ${parkTimeoutMs}ms (shutdown prompt injected: ${shutdownPromptInjected}) with ${rosterCount} roster teammate(s) and ${runningInProcess} in-process teammate task(s) still active; tearing down anyway`,
+            )
+            logEvent('tengu_headless_team_teardown_park_timeout', {})
             break
           }
 
@@ -3009,6 +3427,24 @@ function runHeadlessStreaming(
   // The process is complete when the input stream completes and
   // the last generation of the queue has complete.
   void (async () => {
+    // Official Svf: brief grace wait for a late parked-permission answer
+    // before the stdin loop starts draining. unexpectedResponseCallback is
+    // already wired, so a matching control_response can enqueue the orphan.
+    if (parkedPermissionResumePlan) {
+      try {
+        const { waitForParkedPermissionAnswer } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/userDialog.js') as typeof import('../utils/userDialog.js')
+        await waitForParkedPermissionAnswer({
+          waitMs: parkedPermissionResumePlan.waitMs,
+          // Never resolves from the answer side here — the wait is purely a
+          // grace window so late control_response can hit the callback above.
+          answer: new Promise<null>(() => {}),
+        })
+      } catch {
+        // densable optional
+      }
+    }
     let initialized = false
     logForDiagnosticsNoPII('info', 'cli_message_loop_started')
     for await (const message of structuredIO.structuredInput) {
@@ -3176,7 +3612,9 @@ function runHeadlessStreaming(
                 mainLoopModel: getMainLoopModel(),
                 tools: buildAllTools(appState),
                 agentDefinitions: appState.agentDefinitions,
-                customSystemPrompt: options.systemPrompt,
+                customSystemPrompt: resolvePrintSystemPrompt(
+                  options.systemPrompt,
+                ),
                 appendSystemPrompt: options.appendSystemPrompt,
               },
             })
@@ -3277,9 +3715,19 @@ function runHeadlessStreaming(
           }
         } else if (msg.request.subtype === 'reload_plugins') {
           try {
+            // Official REMOTE densable.
+            let isRemoteReload = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+            try {
+              const { isRemoteEnvEnabled } =
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+              isRemoteReload = isRemoteEnvEnabled()
+            } catch {
+              // keep raw env fallback
+            }
             if (
               feature('DOWNLOAD_USER_SETTINGS') &&
-              (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
+              (isRemoteReload || getIsRemoteMode())
             ) {
               // Re-pull user settings so enabledPlugins pushed from the
               // user's local CLI take effect before the cache sweep.
@@ -3507,6 +3955,64 @@ function runHeadlessStreaming(
                   : `Server status: ${result.client.type}`
               sendControlResponseError(msg, errorMessage)
             }
+          }
+        } else if (req.subtype === 'set_mcp_permission_mode_override') {
+          // Official 2.1.x: tighten-only per-server mode pin (WDu + snt).
+          const serverName = req.serverName as string
+          const mode = req.mode as string | null
+          const parsed = parseMcpPermissionModeOverride(mode)
+          if (!parsed.ok) {
+            logForDebugging(
+              `set_mcp_permission_mode_override: rejected mode='${parsed.rejected}' for ${serverName} (tighten-only)`,
+              { level: 'warn' },
+            )
+            sendControlResponseError(
+              msg,
+              `Permission mode override over the control channel is tighten-only ('default', 'auto', or null); rejected '${parsed.rejected}'`,
+            )
+          } else if (parsed.override === 'auto' && !isAutoModeGateEnabled()) {
+            const reason = getAutoModeUnavailableReason()
+            sendControlResponseError(
+              msg,
+              reason
+                ? `Cannot pin MCP server '${serverName}' to auto: ${getAutoModeUnavailableNotification(reason)}`
+                : `Cannot pin MCP server '${serverName}' to auto`,
+            )
+          } else {
+            const override = parsed.override
+            setAppState(prev => {
+              const current =
+                prev.toolPermissionContext.mcpPermissionModeOverrides ?? {}
+              const nextOverrides =
+                override === undefined
+                  ? omit(current, serverName)
+                  : { ...current, [serverName]: override }
+              return {
+                ...prev,
+                toolPermissionContext: {
+                  ...prev.toolPermissionContext,
+                  mcpPermissionModeOverrides: nextOverrides,
+                },
+              }
+            })
+            const currentAppState = getAppState()
+            const known =
+              mcpClients.some(c => c.name === serverName) ||
+              sdkClients.some(c => c.name === serverName) ||
+              dynamicMcpState.clients.some(c => c.name === serverName) ||
+              currentAppState.mcp.clients.some(c => c.name === serverName) ||
+              getMcpConfigByName(serverName) !== null
+            sendControlResponseSuccess(
+              msg,
+              known
+                ? undefined
+                : {
+                    warning:
+                      override === undefined
+                        ? `MCP server '${serverName}' is not known; no override was present to clear.`
+                        : `MCP server '${serverName}' is not yet known; override stored but will not apply until a server with that exact name connects.`,
+                  },
+            )
           }
         } else if (req.subtype === 'channel_enable') {
           const currentAppState = getAppState()
@@ -4075,7 +4581,9 @@ function runHeadlessStreaming(
                     readFileState,
                     getAppState,
                     setAppState,
-                    customSystemPrompt: options.systemPrompt,
+                    customSystemPrompt: resolvePrintSystemPrompt(
+                      options.systemPrompt,
+                    ),
                     appendSystemPrompt: options.appendSystemPrompt,
                     thinkingConfig: options.thinkingConfig,
                     agents: currentAgents,
@@ -4427,62 +4935,82 @@ export function createCanUseToolWithPermissionPrompt(
       }
     }
 
-    const abortPromise = new Promise<'aborted'>(resolve => {
-      combinedSignal.addEventListener('abort', () => resolve('aborted'), {
-        once: true,
+    // Official Imn densable: nested agent permission parks block waitingOnUser
+    // (parity with structuredIO.createCanUseTool).
+    const nestedAgentId = toolUseContext.agentId
+    let nestedBlocked = false
+    if (nestedAgentId !== undefined) {
+      nestedBlocked = true
+      notifyNestedPromptBlocking(nestedAgentId)
+    }
+
+    try {
+      const abortPromise = new Promise<'aborted'>(resolve => {
+        combinedSignal.addEventListener('abort', () => resolve('aborted'), {
+          once: true,
+        })
       })
-    })
 
-    const toolCallPromise = permissionPromptTool.call(
-      {
-        tool_name: tool.name,
-        input,
-        tool_use_id: toolUseId,
-      },
-      toolUseContext,
-      canUseTool,
-      assistantMessage,
-    )
-
-    const raceResult = await Promise.race([toolCallPromise, abortPromise])
-    cleanupAbortListener()
-
-    if (raceResult === 'aborted' || combinedSignal.aborted) {
-      return {
-        behavior: 'deny',
-        message: 'Permission prompt was aborted.',
-        decisionReason: {
-          type: 'permissionPromptTool' as const,
-          permissionPromptToolName: tool.name,
-          toolResult: undefined,
+      const toolCallPromise = permissionPromptTool.call(
+        {
+          tool_name: tool.name,
+          input,
+          tool_use_id: toolUseId,
         },
-      }
-    }
-
-    // TypeScript narrowing: after the abort check, raceResult must be ToolResult
-    const result = raceResult as Awaited<typeof toolCallPromise>
-
-    const permissionToolResultBlockParam =
-      permissionPromptTool.mapToolResultToToolResultBlockParam(result.data, '1')
-    if (
-      !permissionToolResultBlockParam.content ||
-      !Array.isArray(permissionToolResultBlockParam.content) ||
-      !permissionToolResultBlockParam.content[0] ||
-      permissionToolResultBlockParam.content[0].type !== 'text' ||
-      typeof permissionToolResultBlockParam.content[0].text !== 'string'
-    ) {
-      throw new Error(
-        'Permission prompt tool returned an invalid result. Expected a single text block param with type="text" and a string text value.',
+        toolUseContext,
+        canUseTool,
+        assistantMessage,
       )
+
+      const raceResult = await Promise.race([toolCallPromise, abortPromise])
+      cleanupAbortListener()
+
+      if (raceResult === 'aborted' || combinedSignal.aborted) {
+        return {
+          behavior: 'deny',
+          message: 'Permission prompt was aborted.',
+          decisionReason: {
+            type: 'permissionPromptTool' as const,
+            permissionPromptToolName: tool.name,
+            toolResult: undefined,
+          },
+        }
+      }
+
+      // TypeScript narrowing: after the abort check, raceResult must be ToolResult
+      const result = raceResult as Awaited<typeof toolCallPromise>
+
+      const permissionToolResultBlockParam =
+        permissionPromptTool.mapToolResultToToolResultBlockParam(
+          result.data,
+          '1',
+        )
+      if (
+        !permissionToolResultBlockParam.content ||
+        !Array.isArray(permissionToolResultBlockParam.content) ||
+        !permissionToolResultBlockParam.content[0] ||
+        permissionToolResultBlockParam.content[0].type !== 'text' ||
+        typeof permissionToolResultBlockParam.content[0].text !== 'string'
+      ) {
+        throw new Error(
+          'Permission prompt tool returned an invalid result. Expected a single text block param with type="text" and a string text value.',
+        )
+      }
+      return permissionPromptToolResultToPermissionDecision(
+        permissionToolOutputSchema().parse(
+          safeParseJSON(permissionToolResultBlockParam.content[0].text),
+        ),
+        permissionPromptTool,
+        input,
+        toolUseContext,
+      )
+    } finally {
+      if (nestedBlocked && nestedAgentId !== undefined) {
+        notifyNestedPromptUnblocking(nestedAgentId)
+      }
+      // Survivors of concurrent parks: re-tee waitingOnUser when still blocked.
+      reteeWaitingOnUser()
     }
-    return permissionPromptToolResultToPermissionDecision(
-      permissionToolOutputSchema().parse(
-        safeParseJSON(permissionToolResultBlockParam.content[0].text),
-      ),
-      permissionPromptTool,
-      input,
-      toolUseContext,
-    )
   }
   return canUseTool
 }
@@ -4586,6 +5114,8 @@ async function handleInitializeRequest(
         request_id: requestId,
         pending_permission_requests:
           structuredIO.getPendingPermissionRequests(),
+        pending_user_dialog_requests:
+          structuredIO.getPendingUserDialogRequests(),
       },
     })
     return
@@ -4677,6 +5207,21 @@ async function handleInitializeRequest(
   }
   if (request.jsonSchema) {
     setInitJsonSchema(request.jsonSchema)
+  }
+  // Official supportedDialogKinds densable (vje + xyn source=initialize).
+  if (request.supportedDialogKinds !== undefined) {
+    try {
+      const { sanitizeDeclaredDialogKinds } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/userDialog.js') as typeof import('../utils/userDialog.js')
+      const kinds = sanitizeDeclaredDialogKinds(request.supportedDialogKinds)
+      setSdkSupportedDialogKinds(
+        kinds.length > 0 ? kinds : undefined,
+        'initialize',
+      )
+    } catch {
+      // densable optional
+    }
   }
   const initResponse: SDKControlInitializeResponse = {
     commands: commands
@@ -5140,6 +5685,8 @@ async function loadInitialMessages(
     resumeSessionAt: string | undefined
     forkSession: boolean | undefined
     outputFormat: string | undefined
+    /** Official sdkUrl densable — enables RESUME_FROM_SESSION hydrate when empty. */
+    sdkUrl?: string | undefined
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
     restoredWorkerState: Promise<SessionExternalMetadata | null>
   },
@@ -5287,7 +5834,17 @@ async function loadInitialMessages(
       }
 
       // Hydrate local transcript from remote before loading
-      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)) {
+      // Official USE_CCR_V2 densable.
+      let useCcrV2 = isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)
+      try {
+        const { isCcrV2EnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+        useCcrV2 = isCcrV2EnvEnabled()
+      } catch {
+        // keep raw env fallback
+      }
+      if (useCcrV2) {
         // Await restore alongside hydration so SSE catchup lands on
         // restored state, not a fresh default.
         const [, metadata] = await Promise.all([
@@ -5298,6 +5855,35 @@ async function loadInitialMessages(
           setAppState(externalMetadataToAppState(metadata))
           if (typeof metadata.model === 'string') {
             setMainLoopModelOverride(metadata.model)
+          }
+          // Official hvf — restore declared_dialog_kinds from prior worker epoch.
+          try {
+            const internal = (
+              metadata as { internal?: { declared_dialog_kinds?: unknown } }
+            ).internal
+            const { getSdkSupportedDialogKinds } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+            if (
+              Array.isArray(internal?.declared_dialog_kinds) &&
+              getSdkSupportedDialogKinds() === undefined
+            ) {
+              const { sanitizeDeclaredDialogKinds } =
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                require('../utils/userDialog.js') as typeof import('../utils/userDialog.js')
+              const kinds = sanitizeDeclaredDialogKinds(
+                internal.declared_dialog_kinds,
+              )
+              setSdkSupportedDialogKinds(
+                kinds.length > 0 ? kinds : undefined,
+                'restored',
+              )
+              logForDebugging(
+                `[print.ts] restored ${kinds.length} declared dialog kind(s) from prior worker epoch`,
+              )
+            }
+          } catch {
+            // densable optional
           }
         }
       } else if (
@@ -5323,11 +5909,49 @@ async function loadInitialMessages(
       // loadConversationForResume returns {messages: []} not null. Treat
       // empty the same as null so SessionStart still fires.
       if (!result || result.messages.length === 0) {
+        // Official RESUME_FROM_SESSION hydrate densable (xit + env + url/sdkUrl).
+        // When source session loads messages, use them instead of empty startup.
+        try {
+          const {
+            shouldAttemptResumeFromSessionHydrate,
+            hydrateMessagesFromResumeSourceSession,
+          } = await import('src/utils/resumeFromSessionHydrate.js')
+          const attempt = shouldAttemptResumeFromSessionHydrate({
+            isUrl: parsedSessionId.isUrl,
+            sdkUrl: options.sdkUrl,
+          })
+          if (attempt.attempt) {
+            const { prepareApiRequest } = await import(
+              'src/utils/teleport/api.js'
+            )
+            const { teleportFromSessionsAPI } = await import(
+              'src/utils/teleport.js'
+            )
+            const { deserializeMessages } = await import(
+              'src/utils/conversationRecovery.js'
+            )
+            const hydrated = await hydrateMessagesFromResumeSourceSession(
+              attempt.sourceSessionId,
+              {
+                prepareApiRequest,
+                teleportFromSessionsAPI: async (sid, org, token) => {
+                  const res = await teleportFromSessionsAPI(sid, org, token)
+                  return { log: res.log as Message[] }
+                },
+                deserializeMessages: msgs =>
+                  deserializeMessages(msgs as Message[]),
+                log: msg => logForDebugging(msg),
+              },
+            )
+            if (hydrated.length > 0) {
+              return { messages: hydrated }
+            }
+          }
+        } catch {
+          // Best-effort densable — fall through to empty/error paths.
+        }
         // For URL-based or CCR v2 resume, start with empty session (it was hydrated but empty)
-        if (
-          parsedSessionId.isUrl ||
-          isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)
-        ) {
+        if (parsedSessionId.isUrl || useCcrV2) {
           // Execute SessionStart hooks for startup since we're starting a new session
           return {
             messages: await (options.sessionStartHooksPromise ??

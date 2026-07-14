@@ -23,7 +23,9 @@ import {
 import type { AgentId } from 'src/types/ids.js';
 import type { AssistantMessage } from 'src/types/message.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
+import { clampTimeoutForAutoBackground } from 'src/utils/autoBackgroundTimeout.js';
 import { isEnvTruthy } from 'src/utils/envUtils.js';
+import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
 import { errorMessage as getErrorMessage, ShellError } from 'src/utils/errors.js';
 import { truncate } from 'src/utils/format.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
@@ -249,9 +251,10 @@ function isWindowsSandboxPolicyViolation(): boolean {
 }
 
 // Check if background tasks are disabled at module load time
-const isBackgroundTasksDisabled =
-  // eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
-  isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS);
+// Official DISABLE_BACKGROUND_TASKS densable — captured once at module load
+// so the schema omits run_in_background for the whole process.
+// eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
+const isBackgroundTasksDisabled = isBackgroundTasksDisabledEnv();
 
 const fullInputSchema = lazySchema(() =>
   z.strictObject({
@@ -547,7 +550,7 @@ export const PowerShellTool = buildTool({
       throw new Error(WINDOWS_SANDBOX_POLICY_REFUSAL);
     }
 
-    const { abortController, setAppState, setToolJSX } = toolUseContext;
+    const { abortController, getAppState, setAppState, setToolJSX } = toolUseContext;
 
     const isMainThread = !toolUseContext.agentId;
 
@@ -560,6 +563,7 @@ export const PowerShellTool = buildTool({
         // Use the always-shared task channel so async agents' background
         // shell tasks are actually registered (and killable on agent exit).
         setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
+        getAppState,
         setToolJSX,
         preventCwdChanges: !isMainThread,
         isMainThread,
@@ -775,6 +779,7 @@ async function* runPowerShellCommand({
   input,
   abortController,
   setAppState,
+  getAppState,
   setToolJSX,
   preventCwdChanges,
   isMainThread,
@@ -784,6 +789,7 @@ async function* runPowerShellCommand({
   input: PowerShellToolInput;
   abortController: AbortController;
   setAppState: (f: (prev: AppState) => AppState) => void;
+  getAppState: () => AppState;
   setToolJSX?: SetToolJSXFn;
   preventCwdChanges?: boolean;
   isMainThread?: boolean;
@@ -804,7 +810,15 @@ async function* runPowerShellCommand({
   void
 > {
   const { command, description, timeout, run_in_background, dangerouslyDisableSandbox } = input;
-  const timeoutMs = Math.min(timeout || getDefaultTimeoutMs(), getMaxTimeoutMs());
+  // Official WYn: when main agent can auto-background, env may clamp timeout.
+  const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
+  const baseTimeoutMs = Math.min(timeout || getDefaultTimeoutMs(), getMaxTimeoutMs());
+  const timeoutMs =
+    clampTimeoutForAutoBackground({
+      requestedTimeoutMs: baseTimeoutMs,
+      isMainAgent: isMainThread === true,
+      canAutoBackground: shouldAutoBackground,
+    }) ?? baseTimeoutMs;
 
   let fullOutput = '';
   let lastProgressOutput = '';
@@ -823,8 +837,6 @@ async function* runPowerShellCommand({
       resolveProgress = () => resolve(null);
     });
   }
-
-  const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
 
   const powershellPath = await getCachedPowerShellPath();
   if (!powershellPath) {
@@ -885,9 +897,7 @@ async function* runPowerShellCommand({
       },
       {
         abortController,
-        getAppState: () => {
-          throw new Error('getAppState not available in runPowerShellCommand context');
-        },
+        getAppState,
         setAppState,
       },
     );
@@ -908,6 +918,7 @@ async function* runPowerShellCommand({
           description || command,
           setAppState,
           toolUseId,
+          getAppState,
         )
       ) {
         return;

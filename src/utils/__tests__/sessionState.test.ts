@@ -148,6 +148,12 @@ describe('sessionState metadata replay', () => {
           request_id: 'req_123',
           input: { path: 'src/utils/sessionState.ts' },
         },
+        // Official GMg blocked classifier summary (heuristic post_turn_summary)
+        post_turn_summary: {
+          status_category: 'blocked',
+          status_detail: 'Waiting on permission: Edit',
+          needs_action: 'Approve or deny Edit',
+        },
       },
     ])
   })
@@ -168,6 +174,13 @@ describe('sessionState metadata replay', () => {
     expect(seen).toEqual([
       {
         task_summary: null,
+        // Official completed-turn heuristic densable on idle — uses prior
+        // task_summary as assistantText context when present.
+        post_turn_summary: {
+          status_category: 'completed',
+          status_detail: 'Running regression suite',
+          needs_action: '',
+        },
       },
     ])
   })

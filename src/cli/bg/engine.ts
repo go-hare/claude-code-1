@@ -47,11 +47,23 @@ export interface BgStartResult {
   engineUsed: 'tmux' | 'detached'
 }
 
+/** Result of engine attach (portable stand-in for official APC attach). */
+export type BgAttachResult = {
+  outcome: 'detached' | 'error'
+  /** True when detach is the GCp-equivalent interactive detach. */
+  viaApc?: boolean
+  msg?: string
+}
+
 export interface BgEngine {
   readonly name: 'tmux' | 'detached'
   /** Whether the engine provides a TTY for interactive REPL input. */
   readonly supportsInteractiveInput: boolean
   available(): Promise<boolean>
   start(opts: BgStartOptions): Promise<BgStartResult>
-  attach(session: SessionEntry): Promise<void>
+  /**
+   * Attach to a live session. DetachedEngine returns a TailAttachResult so
+   * attachHandler can gate AgentsView (official GCp). Tmux may return void.
+   */
+  attach(session: SessionEntry): Promise<BgAttachResult | undefined>
 }

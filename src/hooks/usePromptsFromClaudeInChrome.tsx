@@ -1,5 +1,8 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import { useEffect, useRef } from 'react';
+import { logEvent } from 'src/services/analytics/index.js';
+import { logForDebugging } from 'src/utils/debug.js';
+import { errorMessage } from 'src/utils/errors.js';
 import { logError } from 'src/utils/log.js';
 import { z } from 'zod/v4';
 import { callIdeRpc } from '../services/mcp/client.js';
@@ -88,14 +91,23 @@ export function usePromptsFromClaudeInChrome(
     }
   }, [mcpClients]);
 
-  // Sync permission mode with Chrome extension whenever it changes
+  // Official 2.1.x (IHa): sync permission mode with Chrome extension whenever it
+  // changes. bypassPermissions → skip_all_permission_checks; otherwise ask.
+  // Success/failure are telemetry'd as chrome_permission_sync.
   useEffect(() => {
     const chromeClient = findChromeClient(mcpClients);
     if (!chromeClient) return;
 
     const chromeMode = toolPermissionMode === 'bypassPermissions' ? 'skip_all_permission_checks' : 'ask';
 
-    void callIdeRpc('set_permission_mode', { mode: chromeMode }, chromeClient);
+    void callIdeRpc('set_permission_mode', { mode: chromeMode }, chromeClient)
+      .then(() => {
+        logEvent('chrome_permission_sync', {});
+      })
+      .catch((err: unknown) => {
+        logEvent('chrome_permission_sync', { set_mode_failed: true });
+        logForDebugging(`claude-in-chrome set_permission_mode failed: ${errorMessage(err)}`, { level: 'error' });
+      });
   }, [mcpClients, toolPermissionMode]);
 }
 

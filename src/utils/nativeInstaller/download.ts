@@ -20,6 +20,10 @@ import { getFsImplementation } from '../fsOperations.js'
 import { logError } from '../log.js'
 import { sleep } from '../sleep.js'
 import { jsonStringify, writeFileSync_DEPRECATED } from '../slowOperations.js'
+import {
+  resolveDownloadDeadlineMsForTestingOrDefault,
+  resolveStallTimeoutMsForTestingOrDefault,
+} from '../residualFinalEnvGates.js'
 import { getBinaryName, getPlatform } from './installer.js'
 
 const GCS_BUCKET_URL =
@@ -269,14 +273,20 @@ export async function downloadVersionFromArtifactory(
 }
 
 // Stall timeout: abort if no bytes received for this duration
+// Official YJg / KJg — STALL_TIMEOUT_MS_FOR_TESTING || 60_000
 const DEFAULT_STALL_TIMEOUT_MS = 60000 // 60 seconds
+// Official JJg / fzu default download deadline (5 min) when testing override unset.
+const DEFAULT_DOWNLOAD_DEADLINE_MS = 5 * 60000
 const MAX_DOWNLOAD_RETRIES = 3
 
 function getStallTimeoutMs(): number {
-  return (
-    Number(process.env.CLAUDE_CODE_STALL_TIMEOUT_MS_FOR_TESTING) ||
-    DEFAULT_STALL_TIMEOUT_MS
-  )
+  // Official YJg — STALL_TIMEOUT_MS_FOR_TESTING || 60_000
+  return resolveStallTimeoutMsForTestingOrDefault()
+}
+
+function getDownloadDeadlineMs(): number {
+  // Official JJg — DOWNLOAD_DEADLINE_MS_FOR_TESTING || 5 min
+  return resolveDownloadDeadlineMsForTestingOrDefault()
 }
 
 class StallTimeoutError extends Error {
@@ -319,7 +329,8 @@ async function downloadAndVerifyBinary(
       resetStallTimer()
 
       const response = await axios.get(binaryUrl, {
-        timeout: 5 * 60000, // 5 minute total timeout
+        // Official JJg densable: DOWNLOAD_DEADLINE_MS_FOR_TESTING || 5 min
+        timeout: getDownloadDeadlineMs(),
         responseType: 'arraybuffer',
         signal: controller.signal,
         onDownloadProgress: () => {

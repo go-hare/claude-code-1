@@ -593,7 +593,21 @@ const buildEnvContext = memoize(async (): Promise<EnvContext> => {
     isRunningWithBun: env.isRunningWithBun(),
     isCi: isEnvTruthy(process.env.CI),
     isClaubbit: isEnvTruthy(process.env.CLAUBBIT),
-    isClaudeCodeRemote: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+    // Official REMOTE / ACTION densables for analytics metadata.
+    ...(() => {
+      let isClaudeCodeRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+      let isClaudeCodeAction = isEnvTruthy(process.env.CLAUDE_CODE_ACTION)
+      try {
+        const { isRemoteEnvEnabled, isActionEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+        isClaudeCodeRemote = isRemoteEnvEnabled()
+        isClaudeCodeAction = isActionEnvEnabled()
+      } catch {
+        // keep raw env fallback
+      }
+      return { isClaudeCodeRemote, isClaudeCodeAction }
+    })(),
     isLocalAgentMode: process.env.CLAUDE_CODE_ENTRYPOINT === 'local-agent',
     isConductor: env.isConductor(),
     ...(process.env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE && {
@@ -615,7 +629,6 @@ const buildEnvContext = memoize(async (): Promise<EnvContext> => {
       tags: process.env.CLAUDE_CODE_TAGS,
     }),
     isGithubAction: isEnvTruthy(process.env.GITHUB_ACTIONS),
-    isClaudeCodeAction: isEnvTruthy(process.env.CLAUDE_CODE_ACTION),
     isClaudeAiAuth: isClaudeAISubscriber(),
     version: MACRO.VERSION,
     versionBase: getVersionBase(),

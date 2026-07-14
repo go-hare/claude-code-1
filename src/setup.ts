@@ -32,6 +32,10 @@ import { env } from './utils/env.js'
 import { envDynamic } from './utils/envDynamic.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
 import { errorMessage } from './utils/errors.js'
+import {
+  getTriggerId,
+  isSyncPluginsOrInstallEnabled,
+} from './utils/residualFinalEnvGates.js'
 import { findCanonicalGitRoot, findGitRoot, getIsGit } from './utils/git.js'
 import { initializeFileChangedWatcher } from './utils/hooks/fileChangedWatcher.js'
 import {
@@ -318,8 +322,7 @@ export async function setup(
   // on the same directories), and the hot-reload handler fires clearPluginCache()
   // mid-install when policySettings arrives.
   const skipPluginPrefetch =
-    (getIsNonInteractiveSession() &&
-      isEnvTruthy(process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL)) ||
+    (getIsNonInteractiveSession() && isSyncPluginsOrInstallEnabled()) ||
     // --bare: loadPluginHooks → loadAllPlugins is filesystem work that's
     // wasted when executeHooks early-returns under --bare anyway.
     isBareMode()
@@ -380,7 +383,16 @@ export async function setup(
   // inc-3694 (P0 CHANGELOG crash) threw at checkForReleaseNotes below; every
   // event after this point was dead. This beacon is the earliest reliable
   // "process started" signal for release health monitoring.
-  logEvent('tengu_started', {})
+  // Official: include CLAUDE_CODE_TRIGGER_ID when set (scheduled/remote trigger).
+  const triggerId = getTriggerId()
+  logEvent('tengu_started', {
+    ...(triggerId
+      ? {
+          trigger_id:
+            triggerId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }
+      : {}),
+  })
 
   void prefetchApiKeyFromApiKeyHelperIfSafe(getIsNonInteractiveSession()) // Prefetch safely - only executes if trust already confirmed
   profileCheckpoint('setup_after_prefetch')
@@ -409,7 +421,17 @@ export async function setup(
       typeof process.getuid === 'function' &&
       process.getuid() === 0 &&
       process.env.IS_SANDBOX !== '1' &&
-      !isEnvTruthy(process.env.CLAUDE_CODE_BUBBLEWRAP)
+      !(() => {
+        // Official BUBBLEWRAP densable.
+        try {
+          const { isBubblewrapEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js')
+          return isBubblewrapEnabled()
+        } catch {
+          return isEnvTruthy(process.env.CLAUDE_CODE_BUBBLEWRAP)
+        }
+      })()
     ) {
       // Root + bypass = every tool call executes without review at uid 0.
       // Interactive TTY: warn and require explicit "y" to proceed.

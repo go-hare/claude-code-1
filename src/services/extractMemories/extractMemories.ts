@@ -389,10 +389,27 @@ export function initExtractMemories(): void {
       lastMemoryMessageUuid,
     )
 
+    // Official CLAUDE_CODE_FORCE_EVALUATE_MEMORY densable — bypass skip gates
+    // so extractMemories always runs (test / forced evaluation).
+    let forceEvaluateMemory = false
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isForceEvaluateMemoryEnabled } =
+        require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
+      forceEvaluateMemory = isForceEvaluateMemoryEnabled()
+    } catch {
+      forceEvaluateMemory =
+        process.env.CLAUDE_CODE_FORCE_EVALUATE_MEMORY === '1' ||
+        process.env.CLAUDE_CODE_FORCE_EVALUATE_MEMORY === 'true'
+    }
+
     // Mutual exclusion: when the main agent wrote memories, skip the
     // forked agent and advance the cursor past this range so the next
     // extraction only considers messages after the main agent's write.
-    if (hasMemoryWritesSince(messages, lastMemoryMessageUuid)) {
+    if (
+      !forceEvaluateMemory &&
+      hasMemoryWritesSince(messages, lastMemoryMessageUuid)
+    ) {
       logForDebugging(
         '[extractMemories] skipping — conversation already wrote to memory files',
       )
@@ -411,7 +428,10 @@ export function initExtractMemories(): void {
     // preferences or facts worth extracting — running the fork would burn
     // tokens for nothing. Advance the cursor so the next run only considers
     // messages after this point.
-    if (!hasUserProseSince(messages, lastMemoryMessageUuid)) {
+    if (
+      !forceEvaluateMemory &&
+      !hasUserProseSince(messages, lastMemoryMessageUuid)
+    ) {
       logForDebugging(
         '[extractMemories] skipping — no user prose since last extraction',
       )

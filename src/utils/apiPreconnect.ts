@@ -38,11 +38,25 @@ export function preconnectAnthropicApi(): void {
   if (isEssentialTrafficOnly()) return
 
   // Skip if using a cloud provider — different endpoint + auth
-  if (
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
-  ) {
+  // Official USE_* densables.
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+  try {
+    const {
+      isUseBedrockEnvEnabled,
+      isUseVertexEnvEnabled,
+      isUseFoundryEnvEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    useBedrock = isUseBedrockEnvEnabled()
+    useVertex = isUseVertexEnvEnabled()
+    useFoundry = isUseFoundryEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (useBedrock || useVertex || useFoundry) {
     return
   }
   // Skip if proxy/mTLS/unix — SDK's custom dispatcher won't reuse this pool

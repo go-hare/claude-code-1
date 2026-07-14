@@ -339,8 +339,18 @@ export const FileWriteTool = buildTool({
     }
 
     let gitDiff: ToolUseDiff | undefined
+    // Official REMOTE densable for remote git-diff side channel.
+    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    try {
+      const { isRemoteEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+      isRemote = isRemoteEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
     if (
-      isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+      isRemote &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
     ) {
       const startTime = Date.now()

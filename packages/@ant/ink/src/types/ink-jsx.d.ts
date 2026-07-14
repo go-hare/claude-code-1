@@ -33,6 +33,8 @@ declare module 'react' {
         onKeyDownCapture?: (event: KeyboardEvent) => void
         style?: Styles
         stickyScroll?: boolean
+        /** Official 2.1.207: default true; false disables non-sticky growth follow. */
+        followGrowth?: boolean
         children?: ReactNode
       }
       'ink-text': {

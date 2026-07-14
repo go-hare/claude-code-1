@@ -1,9 +1,54 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   _resetBroadRuleCacheForTesting,
   isAutoModeFilteringActive,
   isBroadRule,
+  isClassifyAllShellEnabled,
 } from '../broadRuleFilter.js'
+
+const getSettingsForSourceMock = mock((_source?: string) => null as unknown)
+mock.module('src/utils/settings/settings.ts', () => ({
+  getSettingsForSource: getSettingsForSourceMock,
+  getSettings_DEPRECATED: () => ({}),
+  getInitialSettings: () => ({}),
+  updateSettingsForSource: () => ({ error: null }),
+  hasAutoModeOptIn: () => true,
+  getAutoModeConfig: () => undefined,
+}))
+
+afterEach(() => {
+  getSettingsForSourceMock.mockReset()
+  getSettingsForSourceMock.mockImplementation((_source?: string) => null)
+  _resetBroadRuleCacheForTesting()
+})
+
+describe('isClassifyAllShellEnabled / classifyAllShell', () => {
+  test('false by default', () => {
+    expect(isClassifyAllShellEnabled()).toBe(false)
+  })
+
+  test('true when userSettings sets autoMode.classifyAllShell', () => {
+    getSettingsForSourceMock.mockImplementation((source?: string) =>
+      source === 'userSettings'
+        ? { autoMode: { classifyAllShell: true } }
+        : null,
+    )
+    expect(isClassifyAllShellEnabled()).toBe(true)
+  })
+
+  test('treats any Bash/PowerShell allow rule as broad when enabled', () => {
+    getSettingsForSourceMock.mockImplementation((source?: string) =>
+      source === 'userSettings'
+        ? { autoMode: { classifyAllShell: true } }
+        : null,
+    )
+    expect(isBroadRule('Bash', 'git status')).toBe(true)
+    expect(isBroadRule('Bash', 'ls -la')).toBe(true)
+    expect(isBroadRule('PowerShell', 'Get-ChildItem')).toBe(true)
+    // classifyAllShell only expands Bash/PowerShell; FileRead is unchanged
+    expect(isBroadRule('FileRead', 'src/main.ts')).toBe(false)
+  })
+})
 
 describe('isAutoModeFilteringActive', () => {
   test('true for mode=auto', () => {

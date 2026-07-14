@@ -459,9 +459,22 @@ export const createAndSaveSnapshot = async (
         ['-c', '-l', snapshotScript],
         {
           env: {
-            ...((process.env.CLAUDE_CODE_DONT_INHERIT_ENV
-              ? {}
-              : subprocessEnv()) as typeof process.env),
+            ...(() => {
+              try {
+                const { isDontInheritEnvEnabled } =
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+                return isDontInheritEnvEnabled()
+                  ? {}
+                  : (subprocessEnv() as typeof process.env)
+              } catch {
+                return (
+                  process.env.CLAUDE_CODE_DONT_INHERIT_ENV
+                    ? {}
+                    : subprocessEnv()
+                ) as typeof process.env
+              }
+            })(),
             SHELL: binShell,
             GIT_EDITOR: 'true',
             CLAUDECODE: '1',

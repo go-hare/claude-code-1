@@ -22,6 +22,14 @@ async function probePath(p: string): Promise<string | null> {
  * Windows/macOS, PATH is sufficient.
  */
 export async function findPowerShell(): Promise<string | null> {
+  // Official CLAUDE_CODE_TEST_NO_PWSH — force "not found" for tests.
+  if (
+    (
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    ).isTestNoPwsh()
+  ) {
+    return null
+  }
   const pwshPath = await which('pwsh')
   if (pwshPath) {
     // Snap launcher hangs in subprocesses. Prefer the direct binary.

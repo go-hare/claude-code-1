@@ -1,6 +1,8 @@
 import chalk from 'chalk';
 import * as React from 'react';
+import { useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
+import { FableConsentDialog } from '../../components/FableConsentDialog.js';
 import { ModelPicker } from '../../components/ModelPicker.js';
 import { COMMON_HELP_ARGS, COMMON_INFO_ARGS } from '../../constants/xml.js';
 import {
@@ -17,6 +19,7 @@ import {
   isFastModeEnabled,
   isFastModeSupportedByModel,
 } from '../../utils/fastMode.js';
+import { shouldShowFableConsentDialog } from '../../utils/fableConsent.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 import { MODEL_ALIASES } from '../../utils/model/aliases.js';
@@ -38,6 +41,11 @@ function ModelPickerWrapper({
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
   const isFastMode = useAppState(s => s.fastMode);
   const setAppState = useSetAppState();
+  const [pendingFable, setPendingFable] = useState<{
+    model: string | null;
+    effort: EffortLevel | undefined;
+  } | null>(null);
+  const [fableSessionFallback, setFableSessionFallback] = useState(false);
 
   function handleCancel(): void {
     logEvent('tengu_model_command_menu', {
@@ -49,7 +57,7 @@ function ModelPickerWrapper({
     });
   }
 
-  function handleSelect(model: string | null, effort: EffortLevel | undefined): void {
+  function commitModel(model: string | null, effort: EffortLevel | undefined): void {
     logEvent('tengu_model_command_menu', {
       action: model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       from_model: mainLoopModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -98,6 +106,37 @@ function ModelPickerWrapper({
     onDone(message);
   }
 
+  function handleSelect(model: string | null, effort: EffortLevel | undefined): void {
+    // Official model_fable_consent densable gate before committing Fable.
+    if (
+      shouldShowFableConsentDialog({
+        model,
+        sessionFallbackConsented: fableSessionFallback,
+      })
+    ) {
+      setPendingFable({ model, effort });
+      return;
+    }
+    commitModel(model, effort);
+  }
+
+  if (pendingFable) {
+    return (
+      <FableConsentDialog
+        onAccept={({ sessionFallback }) => {
+          if (sessionFallback) setFableSessionFallback(true);
+          const { model, effort } = pendingFable;
+          setPendingFable(null);
+          commitModel(model, effort);
+        }}
+        onDecline={() => {
+          setPendingFable(null);
+          handleCancel();
+        }}
+      />
+    );
+  }
+
   return (
     <ModelPicker
       initial={mainLoopModel}
@@ -143,7 +182,7 @@ function SetModelAndClose({
 
       if (model && isSonnet1mUnavailable(model)) {
         onDone(
-          `Sonnet 4.6 with 1M context is not available for your account. Learn more: https://code.claude.com/docs/en/model-config#extended-context-with-1m`,
+          `Sonnet 5 with 1M context is not available for your account. Learn more: https://code.claude.com/docs/en/model-config#extended-context-with-1m`,
           { display: 'system' },
         );
         return;
@@ -234,9 +273,10 @@ function isOpus1mUnavailable(model: string): boolean {
 
 function isSonnet1mUnavailable(model: string): boolean {
   const m = model.toLowerCase();
-  // Warn about Sonnet and Sonnet 4.6, but not Sonnet 4.5 since that had
-  // a different access criteria.
-  return !checkSonnet1mAccess() && (m.includes('sonnet[1m]') || m.includes('sonnet-4-6[1m]'));
+  // Warn about Sonnet / Sonnet 5 / Sonnet 4.6 1M, but not Sonnet 4.5 (different access).
+  return (
+    !checkSonnet1mAccess() && (m.includes('sonnet[1m]') || m.includes('sonnet-5[1m]') || m.includes('sonnet-4-6[1m]'))
+  );
 }
 
 function ShowModelAndClose({ onDone }: { onDone: (result?: string) => void }): React.ReactNode {

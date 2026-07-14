@@ -11,10 +11,10 @@ import { stat } from 'fs/promises'
 import type { ValidationResult } from 'src/Tool.js'
 
 import { getCwd } from 'src/utils/cwd.js'
-import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { getErrnoCode } from 'src/utils/errors.js'
 import { IMAGE_EXTENSION_REGEX } from 'src/utils/imagePaste.js'
 import { expandPath } from 'src/utils/path.js'
+import { shouldUploadBriefAttachments } from 'src/utils/residualFinalEnvGates.js'
 
 export type ResolvedAttachment = {
   path: string
@@ -87,12 +87,11 @@ export async function resolveAttachments(
   // outside remain in the build even if never called".
   if (feature('BRIDGE_MODE')) {
     // Headless/SDK callers never set appState.replBridgeEnabled (only the TTY
-    // REPL does, at main.tsx init). CLAUDE_CODE_BRIEF_UPLOAD lets a host that
-    // runs the CLI as a subprocess opt in — e.g. the cowork desktop bridge,
-    // which already passes CLAUDE_CODE_OAUTH_TOKEN for auth.
-    const shouldUpload =
-      uploadCtx.replBridgeEnabled ||
-      isEnvTruthy(process.env.CLAUDE_CODE_BRIEF_UPLOAD)
+    // REPL does, at main.tsx init). Official: bridge || BRIEF_UPLOAD ||
+    // REMOTE_ENVIRONMENT_TYPE || REMOTE (paths are host-local).
+    const shouldUpload = shouldUploadBriefAttachments({
+      replBridgeEnabled: uploadCtx.replBridgeEnabled,
+    })
     const { uploadBriefAttachment } = await import('./upload.js')
     const uuids = await Promise.all(
       stated.map(a =>

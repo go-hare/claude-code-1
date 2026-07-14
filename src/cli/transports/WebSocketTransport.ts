@@ -776,7 +776,17 @@ export class WebSocketTransport implements Transport {
     this.stopKeepaliveInterval()
 
     // In CCR sessions, session activity heartbeats handle keep-alives
-    if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    // Official REMOTE densable.
+    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    try {
+      const { isRemoteEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+      isRemote = isRemoteEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+    if (isRemote) {
       return
     }
 

@@ -4,8 +4,9 @@ import { getProjectRoot, getSessionId } from './bootstrap/state.js'
 import { registerCleanup } from './utils/cleanupRegistry.js'
 import type { HistoryEntry, PastedContent } from './utils/config.js'
 import { logForDebugging } from './utils/debug.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './utils/envUtils.js'
+import { getClaudeConfigHomeDir } from './utils/envUtils.js'
 import { getErrnoCode } from './utils/errors.js'
+import { shouldSkipPromptHistory } from './utils/residualFinalEnvGates.js'
 import { readLinesReverse } from './utils/fsOperations.js'
 import { lock } from './utils/lockfile.js'
 import {
@@ -411,7 +412,7 @@ async function addToPromptHistory(
 export function addToHistory(command: HistoryEntry | string): void {
   // Skip history when running in a tmux session spawned by Claude Code's Tungsten tool.
   // This prevents verification/test sessions from polluting the user's real command history.
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)) {
+  if (shouldSkipPromptHistory()) {
     return
   }
 

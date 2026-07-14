@@ -11,10 +11,12 @@ import type {
   AssistantMessage,
   UserMessage,
 } from '../../../types/message.js'
-import type { AgentId } from '../../../types/ids.js'
 import type { Tools } from '../../../Tool.js'
 import { getOpenAIClient } from './client.js'
-import { updateOpenAIUsage } from './openaiShared.js'
+import {
+  assembleFinalAssistantOutputs,
+  updateOpenAIUsage,
+} from './openaiShared.js'
 import {
   anthropicMessagesToOpenAI,
   resolveOpenAIModel,
@@ -57,11 +59,9 @@ export {
 }
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import type { Options } from '../claude.js'
-import { randomUUID } from 'crypto'
 import {
   createAssistantAPIErrorMessage,
   createUserMessage,
-  normalizeContentFromAPI,
 } from '../../../utils/messages.js'
 import type { SDKAssistantMessageError } from '../../../entrypoints/agentSdkTypes.js'
 import {
@@ -88,7 +88,16 @@ function convertToResponsesReasoningEffort(
 function getChatGPTResponsesReasoningEffort(
   effortValue: unknown,
 ): ResponsesReasoningEffort | undefined {
-  const envOverride = process.env.CLAUDE_CODE_EFFORT_LEVEL?.toLowerCase()
+  // Official EFFORT_LEVEL densable pure parse.
+  let envOverride: string | undefined
+  try {
+    const { resolveEffortLevelOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../../utils/residualFinalEnvGates.js') as typeof import('../../../utils/residualFinalEnvGates.js')
+    envOverride = resolveEffortLevelOverride() ?? undefined
+  } catch {
+    envOverride = process.env.CLAUDE_CODE_EFFORT_LEVEL?.toLowerCase()
+  }
   if (envOverride === 'auto' || envOverride === 'unset') return undefined
   return (
     convertToResponsesReasoningEffort(envOverride) ??
@@ -134,76 +143,6 @@ function isOpenAIConvertibleMessage(
   msg: Message,
 ): msg is AssistantMessage | UserMessage {
   return msg.type === 'assistant' || msg.type === 'user'
-}
-
-/**
- * Assemble the final AssistantMessage (and optional max_tokens error) from
- * accumulated stream state. Extracted to avoid duplication between the
- * `message_stop` handler and the post-loop safety fallback.
- */
-function assembleFinalAssistantOutputs(params: {
-  partialMessage: BetaMessage | null
-  contentBlocks: Record<number, Record<string, unknown>>
-  tools: Tools
-  agentId: string | undefined
-  usage: {
-    input_tokens: number
-    output_tokens: number
-    cache_creation_input_tokens: number
-    cache_read_input_tokens: number
-  }
-  stopReason: string | null
-  maxTokens: number
-}): (AssistantMessage | SystemAPIErrorMessage)[] {
-  const {
-    partialMessage,
-    contentBlocks,
-    tools,
-    agentId,
-    usage,
-    stopReason,
-    maxTokens,
-  } = params
-  const outputs: (AssistantMessage | SystemAPIErrorMessage)[] = []
-
-  const allBlocks = Object.keys(contentBlocks)
-    .sort((a, b) => Number(a) - Number(b))
-    .map(k => contentBlocks[Number(k)])
-    .filter(Boolean)
-
-  if (allBlocks.length > 0 && partialMessage) {
-    outputs.push({
-      message: {
-        ...partialMessage,
-        content: normalizeContentFromAPI(
-          allBlocks as unknown as BetaMessage['content'],
-          tools,
-          agentId as AgentId | undefined,
-        ),
-        usage,
-        stop_reason: stopReason,
-        stop_sequence: null,
-      } as AssistantMessage['message'],
-      requestId: undefined,
-      type: 'assistant',
-      uuid: randomUUID(),
-      timestamp: new Date().toISOString(),
-    } as AssistantMessage)
-  }
-
-  if (stopReason === 'max_tokens') {
-    outputs.push(
-      createAssistantAPIErrorMessage({
-        content:
-          `Output truncated: response exceeded the ${maxTokens} token limit. ` +
-          `Set OPENAI_MAX_TOKENS or CLAUDE_CODE_MAX_OUTPUT_TOKENS to override.`,
-        apiError: 'max_output_tokens',
-        error: 'max_output_tokens',
-      }),
-    )
-  }
-
-  return outputs
 }
 
 /**

@@ -37,6 +37,7 @@ export type BundleUploadResult =
     }
   | { success: false; error: string; failReason?: BundleFailReason }
 
+// Official 2.1.207 failReason set (no 'skipped' — SKIP_REPO_UPLOAD is schema-only).
 type BundleFailReason = 'git_error' | 'too_large' | 'empty_repo'
 
 type BundleCreateResult =
@@ -153,6 +154,9 @@ export async function createAndUploadGitBundle(
   config: FilesApiConfig,
   opts?: { cwd?: string; signal?: AbortSignal },
 ): Promise<BundleUploadResult> {
+  // CLAUDE_CODE_SKIP_REPO_UPLOAD is densable-only (2.1.207 schema export, no
+  // product consumer). Do not short-circuit upload here.
+
   const workdir = opts?.cwd ?? getCwd()
   const gitRoot = findGitRoot(workdir)
   if (!gitRoot) {

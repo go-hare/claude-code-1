@@ -164,7 +164,11 @@ export interface CoreTool<
   isLsp?: boolean
   readonly shouldDefer?: boolean
   readonly alwaysLoad?: boolean
-  mcpInfo?: { serverName: string; toolName: string }
+  mcpInfo?: {
+    serverName: string
+    toolName: string
+    effectiveMaxPermission?: 'allow' | 'ask' | 'blocked'
+  }
 
   // ── Permissions ──
   validateInput?(

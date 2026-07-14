@@ -1,4 +1,5 @@
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import { getScreenReaderChildEnv } from './screenReaderGate.js'
 
 /**
  * Env vars to strip from subprocess environments when running inside GitHub
@@ -92,6 +93,14 @@ export function registerUpstreamProxyEnvFn(
 }
 
 /**
+ * Official kVt densable accessor — injected upstream-proxy env for subprocesses.
+ * Returns {} when proxy is disabled or not registered (non-CCR).
+ */
+export function getRegisteredUpstreamProxyEnv(): Record<string, string> {
+  return _getUpstreamProxyEnv?.() ?? {}
+}
+
+/**
  * Returns true when the subprocess environment should be scrubbed of sensitive
  * secrets. Equivalent to official uP1() / isScrubEnabled logic.
  *
@@ -113,13 +122,19 @@ export function subprocessEnv(): NodeJS.ProcessEnv {
   // proxy is disabled or not registered (non-CCR), so this is a no-op outside
   // CCR containers.
   const proxyEnv = _getUpstreamProxyEnv?.() ?? {}
+  // Official FXe — propagate CLAUDE_AX_SCREEN_READER=1 when screen-reader mode is on.
+  const screenReaderEnv = getScreenReaderChildEnv()
 
   if (!shouldScrubSubprocessEnv()) {
-    return Object.keys(proxyEnv).length > 0
-      ? { ...process.env, ...proxyEnv }
-      : process.env
+    if (
+      Object.keys(proxyEnv).length === 0 &&
+      Object.keys(screenReaderEnv).length === 0
+    ) {
+      return process.env
+    }
+    return { ...process.env, ...proxyEnv, ...screenReaderEnv }
   }
-  const env = { ...process.env, ...proxyEnv }
+  const env = { ...process.env, ...proxyEnv, ...screenReaderEnv }
   for (const k of GHA_SUBPROCESS_SCRUB) {
     delete env[k]
     // GitHub Actions auto-creates INPUT_<NAME> for `with:` inputs, duplicating

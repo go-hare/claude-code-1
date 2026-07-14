@@ -47,14 +47,24 @@ export function resolveOpenAIMaxTokens(
   upperLimit: number,
   maxOutputTokensOverride?: number,
 ): number {
+  // Official MAX_OUTPUT_TOKENS densable pure parse.
+  let maxOutputTokensEnv: number | undefined
+  try {
+    const { resolveMaxOutputTokensOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../../utils/residualFinalEnvGates.js') as typeof import('../../../utils/residualFinalEnvGates.js')
+    maxOutputTokensEnv = resolveMaxOutputTokensOverride() ?? undefined
+  } catch {
+    maxOutputTokensEnv = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+      ? parseInt(process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, 10) || undefined
+      : undefined
+  }
   return (
     maxOutputTokensOverride ??
     (process.env.OPENAI_MAX_TOKENS
       ? parseInt(process.env.OPENAI_MAX_TOKENS, 10) || undefined
       : undefined) ??
-    (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
-      ? parseInt(process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, 10) || undefined
-      : undefined) ??
+    maxOutputTokensEnv ??
     upperLimit
   )
 }

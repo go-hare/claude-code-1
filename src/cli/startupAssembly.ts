@@ -1,6 +1,7 @@
 import type { Command } from '../commands.js'
 import type { MCPServerConnection } from '../services/mcp/types.js'
 import type { Tool } from '../Tool.js'
+import { dedupeToolsByName } from '../Tool.js'
 import uniqBy from 'lodash-es/uniqBy.js'
 
 export type SetupTrigger = 'init' | 'maintenance' | null
@@ -108,7 +109,9 @@ export function mergeStartupMcpState(
 ): StartupMcpState {
   return {
     clients: [...local.clients, ...claudeai.clients],
-    tools: uniqBy([...local.tools, ...claudeai.tools], 'name'),
+    // Throw on distinct tools with the same primary name (MCP identity
+    // collisions that are the same logical tool still dedupe).
+    tools: dedupeToolsByName([...local.tools, ...claudeai.tools]),
     commands: uniqBy([...local.commands, ...claudeai.commands], 'name'),
   }
 }

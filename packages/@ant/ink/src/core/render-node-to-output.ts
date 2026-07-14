@@ -9,6 +9,13 @@ import type Output from './output.js'
 import renderBorder from './render-border.js'
 import type { Screen } from './screen.js'
 import {
+  clampStoredScrollTop,
+  clampVisualScrollTop,
+  resolveNearestScrollTop,
+  shouldFollowScrollGrowth,
+  updateScrollHeightHwm,
+} from './scrollHeightHwm.js'
+import {
   type StyledSegment,
   squashTextNodesToSegments,
 } from './squash-text-nodes.js'
@@ -734,36 +741,64 @@ function renderNodeToOutput(
         // → firstVisible wrong. Also: SCROLL_MIN_PER_FRAME=4 with snap-at-1
         // ping-ponged forever at delta=2. Smooth needs drain-end notify
         // plumbing; shipping instant first. stickyScroll overrides.
+        // Official 2.1.207: block "nearest" keeps the element in view without
+        // jumping when already fully visible.
         if (node.scrollAnchor) {
-          const anchorTop = node.scrollAnchor.el.yogaNode?.getComputedTop()
-          if (anchorTop != null) {
-            node.scrollTop = anchorTop + node.scrollAnchor.offset
+          const anchorYoga = node.scrollAnchor.el.yogaNode
+          const anchorTop = anchorYoga?.getComputedTop()
+          if (anchorTop != null && anchorYoga) {
+            const offset = node.scrollAnchor.offset
+            if (node.scrollAnchor.nearest) {
+              node.scrollTop = resolveNearestScrollTop({
+                currentScrollTop: node.scrollTop ?? 0,
+                elementTop: anchorTop,
+                elementHeight: anchorYoga.getComputedHeight(),
+                viewportHeight: innerHeight,
+                offset,
+              })
+            } else {
+              node.scrollTop = anchorTop + offset
+            }
             node.pendingScrollDelta = undefined
           }
           node.scrollAnchor = undefined
         }
-        // At-bottom follow. Positional: if scrollTop was at (or past) the
-        // previous max, pin to the new max. Scroll away → stop following;
-        // scroll back (or scrollToBottom/sticky attr) → resume. The sticky
-        // flag is OR'd in for cold start (scrollTop=0 before first layout)
-        // and scrollToBottom-from-far-away (flag set before scrollTop moves)
-        // — the imperative field takes precedence over the attribute so
-        // scrollTo/scrollBy can break stickiness. pendingDelta<0 guard:
-        // don't cancel an in-flight scroll-up when content races in.
+        // At-bottom follow + scrollHeightHwm (official 2.1.207).
+        // While not sticky, track a high-water content height so a transient
+        // shrink (markdown freeze / virtual remount) does not clamp scrollTop
+        // downward and jump the transcript above the answer. Positional
+        // follow uses max(hwm, prev) as the previous max; stored scrollTop
+        // may exceed content maxScroll; paint uses visual clamp only.
         // Capture scrollTop before follow so ink.tsx can translate any
         // active text selection by the same delta (native terminal behavior:
         // view keeps scrolling, highlight walks up with the text).
         const scrollTopBeforeFollow = node.scrollTop ?? 0
-        const sticky =
-          node.stickyScroll ?? Boolean(node.attributes['stickyScroll'])
-        const prevMaxScroll = Math.max(0, prevScrollHeight - prevInnerHeight)
+        const stickyAttr = node.attributes['stickyScroll']
+        const sticky = node.stickyScroll ?? Boolean(stickyAttr)
+        const { referenceHeight, nextHwm } = updateScrollHeightHwm({
+          sticky,
+          prevScrollHeight,
+          scrollHeight,
+          scrollHeightHwm: node.scrollHeightHwm,
+        })
+        node.scrollHeightHwm = nextHwm
+        const prevMaxAgainstHwm = Math.max(0, referenceHeight - prevInnerHeight)
         // Positional check only valid when content grew — virtualization can
         // transiently SHRINK scrollHeight (tail unmount + stale heightCache
-        // spacer) making scrollTop >= prevMaxScroll true by artifact, not
-        // because the user was at bottom.
+        // spacer) making scrollTop >= prevMax true by artifact, not because
+        // the user was at bottom.
         const grew = scrollHeight >= prevScrollHeight
-        const atBottom =
-          sticky || (grew && scrollTopBeforeFollow >= prevMaxScroll)
+        // followGrowth defaults true; stickyScroll={false} attr disables
+        // positional follow (official: stickyAttr !== false && followGrowth).
+        const followGrowth = node.attributes['followGrowth'] !== false
+        const atBottom = shouldFollowScrollGrowth({
+          sticky,
+          stickyAttr,
+          followGrowth,
+          grew,
+          scrollTop: scrollTopBeforeFollow,
+          prevMaxAgainstHwm,
+        })
         if (atBottom && (node.pendingScrollDelta ?? 0) >= 0) {
           node.scrollTop = maxScroll
           node.pendingScrollDelta = undefined
@@ -779,7 +814,7 @@ function renderNodeToOutput(
           // direct scrollTop writes (e.g. the alt-screen-perf test).
           if (
             node.stickyScroll === false &&
-            scrollTopBeforeFollow >= prevMaxScroll
+            scrollTopBeforeFollow >= prevMaxAgainstHwm
           ) {
             node.stickyScroll = true
           }
@@ -830,7 +865,16 @@ function renderNodeToOutput(
           // schedule an infinite loop of no-op drain frames.
           node.pendingScrollDelta = undefined
         }
-        let scrollTop = Math.max(0, Math.min(cur, maxScroll))
+        // Official 2.1.207: stored scrollTop may stay above content maxScroll
+        // when HWM is active (transient shrink). Visual paint always clamps
+        // to real maxScroll so we never paint past content.
+        const storedScrollTop = clampStoredScrollTop(
+          cur,
+          maxScroll,
+          referenceHeight,
+          innerHeight,
+        )
+        let scrollTop = clampVisualScrollTop(storedScrollTop, maxScroll)
         // Virtual-scroll clamp: if scrollTop raced past the currently-mounted
         // range (burst PageUp before React re-renders), render at the EDGE of
         // the mounted children instead of blank spacer. Do NOT write back to
@@ -842,10 +886,10 @@ function renderNodeToOutput(
         const clamped = haveClamp
           ? Math.max(cMin, Math.min(scrollTop, cMax))
           : scrollTop
-        node.scrollTop = scrollTop
+        node.scrollTop = storedScrollTop
         // Clamp hitting top/bottom consumes any remainder. Set drainPending
         // only after clamp so a wasted no-op frame isn't scheduled.
-        if (scrollTop !== cur) node.pendingScrollDelta = undefined
+        if (storedScrollTop !== cur) node.pendingScrollDelta = undefined
         if (node.pendingScrollDelta !== undefined) scrollDrainNode = node
         scrollTop = clamped
 

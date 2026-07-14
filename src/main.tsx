@@ -272,6 +272,7 @@ import {
   parseMcpConfig,
   parseMcpConfigFromFilePath,
 } from 'src/services/mcp/config.js';
+import { filterMcpServersForHermeticMode, formatMcpHermeticDropWarn } from './utils/mcpHermeticFilter.js';
 import { isXaaEnabled } from 'src/services/mcp/xaaIdpLogin.js';
 import { getRelevantTips } from 'src/services/tips/tipRegistry.js';
 import { logContextMetrics } from 'src/utils/api.js';
@@ -317,6 +318,7 @@ import {
   setUserMsgOptIn,
   switchSession,
 } from './bootstrap/state.js';
+import { resolveQuestionPreviewFormat } from './utils/residualUiEnvGates.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -542,8 +544,18 @@ export function startDeferredPrefetches(): void {
   // However, the spawned processes and async work still contend for CPU and event
   // loop time, which skews startup benchmarks (CPU profiles, time-to-first-render
   // measurements). Skip all of it when we're only measuring startup performance.
+  // Official EXIT_AFTER_FIRST_RENDER densable — skip prefetches for startup bench.
+  let exitAfterFirstRender = false;
+  try {
+    const { isExitAfterFirstRenderEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+    exitAfterFirstRender = isExitAfterFirstRenderEnabled();
+  } catch {
+    exitAfterFirstRender = isEnvTruthy(process.env.CLAUDE_CODE_EXIT_AFTER_FIRST_RENDER);
+  }
   if (
-    isEnvTruthy(process.env.CLAUDE_CODE_EXIT_AFTER_FIRST_RENDER) ||
+    exitAfterFirstRender ||
     // --bare: skip ALL prefetches. These are cache-warms for the REPL's
     // first-turn responsiveness (initUser, getUserContext, tips, countFiles,
     // modelCapabilities, change detectors). Scripted -p calls don't have a
@@ -559,10 +571,26 @@ export function startDeferredPrefetches(): void {
   void getUserContext();
   prefetchSystemContextIfSafe();
   void getRelevantTips();
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) && !isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)) {
+  // Official USE_*/SKIP_* densables for cloud-provider credential prefetch.
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK);
+  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX);
+  let skipBedrockAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH);
+  let skipVertexAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH);
+  try {
+    const { isUseBedrockEnvEnabled, isUseVertexEnvEnabled, isSkipBedrockAuthEnvEnabled, isSkipVertexAuthEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+    useBedrock = isUseBedrockEnvEnabled();
+    useVertex = isUseVertexEnvEnabled();
+    skipBedrockAuth = isSkipBedrockAuthEnvEnabled();
+    skipVertexAuth = isSkipVertexAuthEnvEnabled();
+  } catch {
+    // keep raw env fallback
+  }
+  if (useBedrock && !skipBedrockAuth) {
     void prefetchAwsCredentialsAndBedRockInfoIfSafe();
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) && !isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) {
+  if (useVertex && !skipVertexAuth) {
     void prefetchGcpCredentialsIfSafe();
   }
   void countFilesRoundedRg(getCwd(), AbortSignal.timeout(3000), []);
@@ -687,7 +715,17 @@ function initializeEntrypoint(isNonInteractive: boolean): void {
     return;
   }
 
-  if (isEnvTruthy(process.env.CLAUDE_CODE_ACTION)) {
+  // Official CLAUDE_CODE_ACTION densable (GitHub Action entrypoint).
+  let isAction = isEnvTruthy(process.env.CLAUDE_CODE_ACTION);
+  try {
+    const { isActionEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+    isAction = isActionEnvEnabled();
+  } catch {
+    // keep raw env fallback
+  }
+  if (isAction) {
     process.env.CLAUDE_CODE_ENTRYPOINT = 'claude-code-github-action';
     return;
   }
@@ -971,7 +1009,16 @@ export async function main() {
   const hasPrintFlag = cliArgs.includes('-p') || cliArgs.includes('--print');
   const hasInitOnlyFlag = cliArgs.includes('--init-only');
   const hasSdkUrl = cliArgs.some(arg => arg.startsWith('--sdk-url'));
-  const forceInteractive = isEnvTruthy(process.env.CLAUDE_CODE_FORCE_INTERACTIVE);
+  // Official FORCE_INTERACTIVE densable.
+  let forceInteractive = isEnvTruthy(process.env.CLAUDE_CODE_FORCE_INTERACTIVE);
+  try {
+    const { isForceInteractiveEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+    forceInteractive = isForceInteractiveEnabled();
+  } catch {
+    // keep raw env fallback
+  }
   const isNonInteractive = hasPrintFlag || hasInitOnlyFlag || hasSdkUrl || (!forceInteractive && !process.stdout.isTTY);
 
   // Stop capturing early input for non-interactive modes
@@ -1007,8 +1054,8 @@ export async function main() {
   })();
   setClientType(clientType);
 
-  const previewFormat = process.env.CLAUDE_CODE_QUESTION_PREVIEW_FORMAT;
-  if (previewFormat === 'markdown' || previewFormat === 'html') {
+  const previewFormat = resolveQuestionPreviewFormat();
+  if (previewFormat) {
     setQuestionPreviewFormat(previewFormat);
   } else if (
     !clientType.startsWith('sdk-') &&
@@ -1109,7 +1156,17 @@ async function run(): Promise<CommanderCommand> {
     // process.title on Windows sets the console title directly; on POSIX,
     // terminal shell integration may mirror the process name to the tab.
     // After init() so settings.json env can also gate this (gh-4765).
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE)) {
+    // Official DISABLE_TERMINAL_TITLE densable.
+    let terminalTitleDisabled = isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE);
+    try {
+      const { isTerminalTitleDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+      terminalTitleDisabled = isTerminalTitleDisabled();
+    } catch {
+      // residual helpers optional
+    }
+    if (!terminalTitleDisabled) {
       process.title = 'claude';
     }
 
@@ -1322,6 +1379,12 @@ async function run(): Promise<CommanderCommand> {
         .hideHelp(),
     )
     .addOption(
+      new Option(
+        '--append-subagent-system-prompt <prompt>',
+        "Append a system prompt to every Task-tool subagent's system prompt, propagated to nested subagents (only works with --print). Implies CLAUDE_CODE_ENABLE_APPEND_SUBAGENT_PROMPT=1.",
+      ).argParser(String),
+    )
+    .addOption(
       new Option('--permission-mode <mode>', 'Permission mode to use for the session')
         .argParser(String)
         .choices(PERMISSION_MODES),
@@ -1341,6 +1404,11 @@ async function run(): Promise<CommanderCommand> {
     .option(
       '--fork-session',
       'When resuming, create a new session ID instead of reusing the original (use with --resume or --continue)',
+      () => true,
+    )
+    .option(
+      '--reply-on-resume',
+      'When resuming, immediately query if the loaded transcript ends in a user-role message (set by /background mid-turn so the fork continues the in-flight turn)',
       () => true,
     )
     .addOption(new Option('--prefill <text>', 'Pre-fill the prompt input with text without submitting it').hideHelp())
@@ -1574,6 +1642,16 @@ async function run(): Promise<CommanderCommand> {
       const initOnly = options.initOnly ?? false;
       const maintenance = options.maintenance ?? false;
 
+      // Official 208: if (!print && stdout.isTTY && screenReader) console.log(banner)
+      if (!print && process.stdout.isTTY) {
+        const { formatScreenReaderModeBanner } =
+          require('./utils/screenReaderGate.js') as typeof import('./utils/screenReaderGate.js');
+        const banner = formatScreenReaderModeBanner();
+        if (banner !== null) {
+          console.log(banner);
+        }
+      }
+
       // --exclude-dynamic-system-prompt-sections: skip git status, date, etc.
       // for improved cross-user prompt caching in print mode
       if (options.excludeDynamicSystemPromptSections) {
@@ -1673,14 +1751,32 @@ async function run(): Promise<CommanderCommand> {
       // Extract remote sdk options
       const sdkUrl = (options as { sdkUrl?: string }).sdkUrl ?? undefined;
 
-      // Allow env var to enable partial messages (used by sandbox gateway for baku)
-      const effectiveIncludePartialMessages =
-        includePartialMessages || isEnvTruthy(process.env.CLAUDE_CODE_INCLUDE_PARTIAL_MESSAGES);
+      // Official INCLUDE_PARTIAL_MESSAGES densable (used by sandbox gateway for baku).
+      let includePartialMessagesEnv = isEnvTruthy(process.env.CLAUDE_CODE_INCLUDE_PARTIAL_MESSAGES);
+      try {
+        const { isIncludePartialMessagesEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+        includePartialMessagesEnv = isIncludePartialMessagesEnabled();
+      } catch {
+        // keep raw env fallback
+      }
+      const effectiveIncludePartialMessages = includePartialMessages || includePartialMessagesEnv;
 
       // Enable all hook event types when explicitly requested via SDK option
       // or when running in CLAUDE_CODE_REMOTE mode (CCR needs them).
       // Without this, only SessionStart and Setup events are emitted.
-      if (includeHookEvents || isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+      // Official REMOTE densable.
+      let isRemoteHooks = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE);
+      try {
+        const { isRemoteEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+        isRemoteHooks = isRemoteEnvEnabled();
+      } catch {
+        // keep raw env fallback
+      }
+      if (includeHookEvents || isRemoteHooks) {
         setAllHookEventsEnabled(true);
       }
 
@@ -1824,6 +1920,13 @@ async function run(): Promise<CommanderCommand> {
 
       // Handle append system prompt options
       let appendSystemPrompt = options.appendSystemPrompt;
+      // Official --append-subagent-system-prompt: implies ENABLE env when set.
+      let appendSubagentSystemPrompt =
+        typeof options.appendSubagentSystemPrompt === 'string' ? options.appendSubagentSystemPrompt : undefined;
+      if (appendSubagentSystemPrompt) {
+        const { implyAppendSubagentPromptEnv } = await import('src/utils/appendSubagentPrompt.js');
+        implyAppendSubagentPromptEnv(appendSubagentSystemPrompt);
+      }
       if (options.appendSystemPromptFile) {
         if (options.appendSystemPrompt) {
           process.stderr.write(
@@ -1871,14 +1974,14 @@ async function run(): Promise<CommanderCommand> {
       if (feature('TRANSCRIPT_CLASSIFIER')) {
         // autoModeFlagCli is the "did the user intend auto this session" signal.
         // Set when: --enable-auto-mode, --permission-mode auto, resolved mode
-        // is auto, OR settings defaultMode is auto but the gate denied it
-        // (permissionMode resolved to default with no explicit CLI override).
+        // is auto (unless it was a silent fromAutoFallback), OR settings
+        // defaultMode is auto but the gate denied it.
         // Used by verifyAutoModeGateAccess to decide whether to notify on
         // auto-unavailable, and by tengu_auto_mode_config opt-in carousel.
         if (
           (options as { enableAutoMode?: boolean }).enableAutoMode ||
           permissionModeCli === 'auto' ||
-          permissionMode === 'auto' ||
+          (permissionMode === 'auto' && !(autoModeStateModule?.isAutoModeFromFallback() ?? false)) ||
           (!permissionModeCli && isDefaultPermissionModeAuto())
         ) {
           autoModeStateModule?.setAutoModeFlagCli(true);
@@ -2004,7 +2107,15 @@ async function run(): Promise<CommanderCommand> {
               `Warning: MCP ${plural(blocked.length, 'server')} blocked by enterprise policy: ${blocked.join(', ')}\n`,
             );
           }
-          dynamicMcpConfig = { ...dynamicMcpConfig, ...(allowed as Record<string, ScopedMcpServerConfig>) };
+          // Official rhf: safe-mode / remote-hermetic drop non-sdk --mcp-config servers.
+          const hermetic = filterMcpServersForHermeticMode(allowed as Record<string, ScopedMcpServerConfig>);
+          if (hermetic.dropped.length > 0 && hermetic.reason) {
+            process.stderr.write(formatMcpHermeticDropWarn(hermetic.dropped, hermetic.reason) + '\n');
+          }
+          dynamicMcpConfig = {
+            ...dynamicMcpConfig,
+            ...(hermetic.servers as Record<string, ScopedMcpServerConfig>),
+          };
         }
       }
 
@@ -2221,9 +2332,19 @@ async function run(): Promise<CommanderCommand> {
           require('@claude-code/builtin-tools/tools/BriefTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/BriefTool/prompt.js');
         const { isBriefEntitled } =
           require('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js') as typeof import('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js');
+        const { shouldToolsListOptInToBrief, isPewterOwlToolEnabled } =
+          require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
         /* eslint-enable @typescript-eslint/no-require-imports */
+        // Official Xtg: tools list includes brief name && !pewter_owl_tool && entitled.
         const parsed = parseToolListFromCLI(baseTools);
-        if ((parsed.includes(BRIEF_TOOL_NAME) || parsed.includes(LEGACY_BRIEF_TOOL_NAME)) && isBriefEntitled()) {
+        if (
+          shouldToolsListOptInToBrief({
+            toolNames: parsed,
+            briefToolNames: [BRIEF_TOOL_NAME, LEGACY_BRIEF_TOOL_NAME],
+            isPewterOwlTool: isPewterOwlToolEnabled(),
+            isBriefEntitled: isBriefEntitled(),
+          })
+        ) {
           setUserMsgOptIn(true);
         }
       }
@@ -2361,7 +2482,8 @@ async function run(): Promise<CommanderCommand> {
 
       // Apply coordinator mode tool filtering for headless path
       // (mirrors useMergedTools.ts filtering for REPL/interactive path)
-      if (feature('COORDINATOR_MODE') && isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)) {
+      // Official COORDINATOR_MODE densable (isCoordinatorMode reads same densable).
+      if (feature('COORDINATOR_MODE') && coordinatorModeModule?.isCoordinatorMode()) {
         const { applyCoordinatorToolFilter } = await import('./utils/toolPool.js');
         tools = applyCoordinatorToolFilter(tools);
       }
@@ -2722,9 +2844,19 @@ async function run(): Promise<CommanderCommand> {
       // Coordinator mode has its own system prompt and filters out Sleep, so
       // the generic proactive prompt would tell it to call a tool it can't
       // access and conflict with delegation instructions.
+      // Official PROACTIVE densable.
+      let proactiveEnv = isEnvTruthy(process.env.CLAUDE_CODE_PROACTIVE);
+      try {
+        const { isProactiveEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+        proactiveEnv = isProactiveEnvEnabled();
+      } catch {
+        // keep raw env fallback
+      }
       if (
         (feature('PROACTIVE') || feature('KAIROS')) &&
-        ((options as { proactive?: boolean }).proactive || isEnvTruthy(process.env.CLAUDE_CODE_PROACTIVE)) &&
+        ((options as { proactive?: boolean }).proactive || proactiveEnv) &&
         !coordinatorModeModule?.isCoordinatorMode()
       ) {
         /* eslint-disable @typescript-eslint/no-require-imports */
@@ -3365,11 +3497,16 @@ async function run(): Promise<CommanderCommand> {
             permissionPromptToolName: options.permissionPromptTool,
             allowedTools,
             thinkingConfig,
-            maxTurns: options.maxTurns,
+            maxTurns:
+              options.maxTurns ??
+              (
+                require('./utils/maxTurnsEnv.js') as typeof import('./utils/maxTurnsEnv.js')
+              ).tryResolveMaxTurnsFromEnv(),
             maxBudgetUsd: options.maxBudgetUsd,
             taskBudget: options.taskBudget ? { total: options.taskBudget } : undefined,
             systemPrompt,
             appendSystemPrompt,
+            appendSubagentSystemPrompt,
             userSpecifiedModel: effectiveModel,
             fallbackModel: userSpecifiedFallbackModel,
             teleport,
@@ -3377,6 +3514,7 @@ async function run(): Promise<CommanderCommand> {
             replayUserMessages: effectiveReplayUserMessages,
             includePartialMessages: effectiveIncludePartialMessages,
             forkSession: options.forkSession || false,
+            replyOnResume: options.replyOnResume || false,
             resumeSessionAt: options.resumeSessionAt || undefined,
             rewindFiles: options.rewindFiles,
             enableAuthStatus: options.enableAuthStatus,
@@ -3603,7 +3741,15 @@ async function run(): Promise<CommanderCommand> {
       //   - Runtime: uploader checks github.com/anthropics/* remote + gcloud auth.
       //   - Safety: CLAUDE_CODE_DISABLE_SESSION_DATA_UPLOAD=1 bypasses (tests set this).
       // Import is dynamic + async to avoid adding startup latency.
-      const sessionUploaderPromise = process.env.USER_TYPE === 'ant' ? import('./utils/sessionDataUploader.js') : null;
+      let sessionDataUploadDisabled = false;
+      try {
+        const { isSessionDataUploadDisabled } = require('./utils/residualFinalEnvGates.js');
+        sessionDataUploadDisabled = isSessionDataUploadDisabled();
+      } catch {
+        // densable optional
+      }
+      const sessionUploaderPromise =
+        process.env.USER_TYPE === 'ant' && !sessionDataUploadDisabled ? import('./utils/sessionDataUploader.js') : null;
 
       // Defer session uploader resolution to the onTurnComplete callback to avoid
       // adding a new top-level await in main.tsx (performance-critical path).
@@ -3625,6 +3771,7 @@ async function run(): Promise<CommanderCommand> {
         strictMcpConfig,
         systemPrompt,
         appendSystemPrompt,
+        appendSubagentSystemPrompt,
         taskListId,
         thinkingConfig,
         ...(uploaderReady && {
@@ -4539,6 +4686,14 @@ async function run(): Promise<CommanderCommand> {
   if (feature('KAIROS')) {
     program.addOption(new Option('--assistant', 'Force assistant mode (Agent SDK daemon use)').hideHelp());
   }
+  // Official --ax-screen-reader (wbc/zBn). Gate reads process.argv; full Ink
+  // onRenderScreenReader remains denser.
+  program.addOption(
+    new Option(
+      '--ax-screen-reader',
+      'Render screen-reader friendly output (flat text, no decorative borders or animations)',
+    ),
+  );
   program.addOption(
     new Option(
       '--channels <servers...>',
@@ -4674,6 +4829,27 @@ async function run(): Promise<CommanderCommand> {
     .action(async (name: string) => {
       const { mcpGetHandler } = await import('./cli/handlers/mcp.js');
       await mcpGetHandler(name);
+    });
+
+  // Official 2.1.186
+  mcp
+    .command('login <name>')
+    .description('Authenticate with an MCP server (HTTP, SSE, or claude.ai connector)')
+    .option(
+      '--no-browser',
+      'Print the authorization URL instead of opening a browser (for SSH/headless sessions — paste the redirect URL back when prompted)',
+    )
+    .action(async (name: string, options: { browser?: boolean }) => {
+      const { mcpLoginHandler } = await import('./cli/handlers/mcp.js');
+      await mcpLoginHandler(name, options);
+    });
+
+  mcp
+    .command('logout <name>')
+    .description('Clear stored OAuth credentials for an MCP server')
+    .action(async (name: string) => {
+      const { mcpLogoutHandler } = await import('./cli/handlers/mcp.js');
+      await mcpLogoutHandler(name);
     });
 
   mcp
@@ -5571,10 +5747,17 @@ async function logTenguInit({
 }
 
 function maybeActivateProactive(options: unknown): void {
-  if (
-    (feature('PROACTIVE') || feature('KAIROS')) &&
-    ((options as { proactive?: boolean }).proactive || isEnvTruthy(process.env.CLAUDE_CODE_PROACTIVE))
-  ) {
+  // Official PROACTIVE densable.
+  let proactiveEnv = isEnvTruthy(process.env.CLAUDE_CODE_PROACTIVE);
+  try {
+    const { isProactiveEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+    proactiveEnv = isProactiveEnvEnabled();
+  } catch {
+    // keep raw env fallback
+  }
+  if ((feature('PROACTIVE') || feature('KAIROS')) && ((options as { proactive?: boolean }).proactive || proactiveEnv)) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const proactiveModule = require('./proactive/index.js');
     if (!proactiveModule.isProactiveActive()) {
@@ -5586,7 +5769,16 @@ function maybeActivateProactive(options: unknown): void {
 function maybeActivateBrief(options: unknown): void {
   if (!(feature('KAIROS') || feature('KAIROS_BRIEF'))) return;
   const briefFlag = (options as { brief?: boolean }).brief;
-  const briefEnv = isEnvTruthy(process.env.CLAUDE_CODE_BRIEF);
+  // Official CLAUDE_CODE_BRIEF densable.
+  let briefEnv = isEnvTruthy(process.env.CLAUDE_CODE_BRIEF);
+  try {
+    const { isBriefEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js');
+    briefEnv = isBriefEnvEnabled();
+  } catch {
+    // keep raw env fallback
+  }
   if (!briefFlag && !briefEnv) return;
   // --brief / CLAUDE_CODE_BRIEF are explicit opt-ins: check entitlement,
   // then set userMsgOptIn to activate the tool + prompt section. The env

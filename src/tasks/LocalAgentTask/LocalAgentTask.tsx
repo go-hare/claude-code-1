@@ -106,10 +106,20 @@ export function updateProgressFromMessage(
   if (!usage) {
     return;
   }
-  // Keep latest input (it's cumulative in the API), sum outputs
-  tracker.latestInputTokens =
+  // Keep latest input (it's cumulative in the API), sum outputs.
+  // Intermediate / tool-only assistant turns often report usage all-zeros
+  // (streaming placeholders or providers that omit usage on tool rounds).
+  // Never regress the high-water mark — that made the footer show
+  // "↓ 0 tokens" after real usage had already been counted.
+  const inputTotal =
     (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
-  tracker.cumulativeOutputTokens += usage.output_tokens as number;
+  if (inputTotal > 0) {
+    tracker.latestInputTokens = inputTotal;
+  }
+  const outputTokens = usage.output_tokens as number;
+  if (typeof outputTokens === 'number' && outputTokens > 0) {
+    tracker.cumulativeOutputTokens += outputTokens;
+  }
   for (const content of (message.message!.content ?? []) as Array<{ type: string; name?: string; input?: unknown }>) {
     if (content.type === 'tool_use') {
       tracker.toolUseCount++;

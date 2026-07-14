@@ -457,6 +457,9 @@ function buildMcpUserConfig(
   return { ...topLevel, ...channelSpecific }
 }
 
+/** Official 2.1.207: detect ${user_config.KEY} placeholders in shell-bound strings. */
+const USER_CONFIG_REF = /\$\{user_config\.[^}]+\}/
+
 /**
  * Resolve environment variables for plugin MCP servers
  * Handles ${CLAUDE_PLUGIN_ROOT}, ${user_config.X}, and general ${VAR} substitution
@@ -543,6 +546,36 @@ export function resolvePluginMcpEnvironment(
         remoteConfig.headers = resolvedHeaders
       }
 
+      // Official 2.1.207: headersHelper is shell-executed. Never substitute
+      // ${user_config.*} into it (injection). Plugin vars + env expansion only.
+      if (remoteConfig.headersHelper) {
+        if (userConfig && USER_CONFIG_REF.test(remoteConfig.headersHelper)) {
+          const validationError =
+            `headersHelper for MCP server '${serverName ?? '<unnamed>'}' ` +
+            `references \${user_config.*}. The substituted value would be ` +
+            `passed to a shell; read the value inside the helper script ` +
+            `instead (e.g. from an env var set in the server's "env" block).`
+          if (errors && pluginName && serverName) {
+            errors.push({
+              type: 'mcp-config-invalid',
+              source: plugin.source,
+              plugin: pluginName,
+              serverName,
+              validationError,
+            })
+          }
+        } else {
+          const withPluginVars = substitutePluginVariables(
+            remoteConfig.headersHelper,
+            plugin,
+          )
+          const { expanded, missingVars } =
+            expandEnvVarsInString(withPluginVars)
+          allMissingVars.push(...missingVars)
+          remoteConfig.headersHelper = expanded
+        }
+      }
+
       resolved = remoteConfig
       break
     }
@@ -591,6 +624,16 @@ export async function getPluginMcpServers(
   errors: PluginError[] = [],
 ): Promise<Record<string, ScopedMcpServerConfig> | undefined> {
   if (!plugin.enabled) {
+    return undefined
+  }
+
+  // Official CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS (+ EXCEPT allowlist).
+  const { shouldSkipPluginMcpServers } =
+    require('../skipPluginMcpServers.js') as typeof import('../skipPluginMcpServers.js')
+  if (shouldSkipPluginMcpServers(plugin.name)) {
+    logForDebugging(
+      `Skipping plugin MCP servers for ${plugin.name} (CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS)`,
+    )
     return undefined
   }
 

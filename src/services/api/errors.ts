@@ -215,7 +215,15 @@ export function getOauthOrgNotAllowedErrorMessage(): string {
  * not via /login. Transient auth errors should suggest retrying, not logging in.
  */
 function isCCRMode(): boolean {
-  return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  // Official REMOTE densable.
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    return isRemoteEnvEnabled()
+  } catch {
+    return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  }
 }
 
 // Temp helper to log tool_use/tool_result mismatch errors
@@ -884,8 +892,18 @@ export function getAssistantMessageFromError(
 
   // Bedrock errors like "403 You don't have access to the model with the specified model ID."
   // don't contain the actual model ID
+  // Official USE_BEDROCK densable.
+  let useBedrockErr = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  try {
+    const { isUseBedrockEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useBedrockErr = isUseBedrockEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   if (
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) &&
+    useBedrockErr &&
     error instanceof Error &&
     error.message.toLowerCase().includes('model id')
   ) {
@@ -1136,8 +1154,18 @@ export function classifyAPIError(error: unknown): string {
   }
 
   // Bedrock-specific errors
+  // Official USE_BEDROCK densable.
+  let useBedrockClass = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  try {
+    const { isUseBedrockEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useBedrockClass = isUseBedrockEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   if (
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) &&
+    useBedrockClass &&
     error instanceof Error &&
     error.message.toLowerCase().includes('model id')
   ) {

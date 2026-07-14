@@ -53,6 +53,14 @@ export type SubagentContext = {
   invocationEmitted?: boolean
   /** Optional coordinator-owned file set for write serialization. */
   ownedFiles?: string[]
+  /**
+   * Official isBackgroundAgent — when true, session-activity $Qn/$BQn passes
+   * agentId so mainLoopRefcount is not bumped (HOn). Async/background agents
+   * set this true; foreground sync subagents leave it false/undefined.
+   */
+  isBackgroundAgent?: boolean
+  /** Optional depth for nested subagents (official O4). */
+  depth?: number
 }
 
 /**
@@ -86,6 +94,12 @@ export type TeammateAgentContext = {
   invocationEmitted?: boolean
   /** Optional coordinator-owned file set for write serialization. */
   ownedFiles?: string[]
+  /**
+   * Official isBackgroundAgent — teammates run off the main loop and should
+   * not bump mainLoopRefcount via session activity.
+   */
+  isBackgroundAgent?: boolean
+  depth?: number
 }
 
 /**

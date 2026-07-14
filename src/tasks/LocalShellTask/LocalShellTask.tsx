@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle';
 import { stat } from 'fs/promises';
+import { getIsInteractive, getLastInteractionTime, getMainLoopBusy } from '../../bootstrap/state.js';
 import {
   OUTPUT_FILE_TAG,
   STATUS_TAG,
@@ -8,6 +9,7 @@ import {
   TASK_NOTIFICATION_TAG,
   TOOL_USE_ID_TAG,
 } from '../../constants/xml.js';
+import { logEvent } from '../../services/analytics/index.js';
 import { abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
 import type { AppState } from '../../state/AppState.js';
 import type { LocalShellSpawnInput, SetAppState, Task, TaskContext, TaskHandle } from '../../Task.js';
@@ -25,6 +27,11 @@ import { backgroundAgentTask, isLocalAgentTask } from '../LocalAgentTask/LocalAg
 import { isMainSessionTask } from '../LocalMainSessionTask.js';
 import { type BashTaskKind, isLocalShellTask, type LocalShellTaskState } from './guards.js';
 import { killTask } from './killShellTasks.js';
+import {
+  hasActiveAgentishTasks,
+  shouldReapOnMemoryPressure,
+  shouldRegisterShellPressureReap,
+} from './shellPressureReap.js';
 
 /** Prefix that identifies a LocalShellTask summary to the UI collapse transform. */
 export const BACKGROUND_BASH_SUMMARY_PREFIX = 'Background command ';
@@ -125,6 +132,60 @@ The command is likely blocked on an interactive prompt. Kill this task and re-ru
   };
 }
 
+/**
+ * Official $xu — register memoryPressure listener for main-thread bg shells.
+ * Returns dispose (off listener). No-op when gated off.
+ */
+function installShellPressureReap(
+  taskId: string,
+  description: string,
+  getAppState: () => AppState,
+  setAppState: SetAppState,
+  toolUseId?: string,
+  kind?: BashTaskKind,
+  agentId?: AgentId,
+): () => void {
+  if (
+    !shouldRegisterShellPressureReap({
+      agentId,
+      kind,
+      isInteractive: getIsInteractive(),
+    })
+  ) {
+    return () => {};
+  }
+
+  type MemoryPressureProcess = NodeJS.Process & {
+    on(event: 'memoryPressure', listener: () => void): NodeJS.Process;
+    off(event: 'memoryPressure', listener: () => void): NodeJS.Process;
+  };
+  const proc = process as MemoryPressureProcess;
+
+  const onPressure = (): void => {
+    const task = getAppState().tasks[taskId];
+    if (
+      !shouldReapOnMemoryPressure({
+        status: task?.status,
+        notified: task?.notified,
+        lastInteractionTime: getLastInteractionTime(),
+        mainLoopBusy: getMainLoopBusy(),
+        hasActiveAgentTasks: hasActiveAgentishTasks(getAppState().tasks),
+      })
+    ) {
+      return;
+    }
+    logEvent('task_local_shell_pressure_reap', {});
+    // Official F9r then t5e — notify first, then kill.
+    enqueueShellNotification(taskId, description, 'killed', undefined, setAppState, toolUseId, kind ?? 'bash', agentId);
+    killTask(taskId, setAppState);
+  };
+
+  proc.on('memoryPressure', onPressure);
+  return () => {
+    proc.off('memoryPressure', onPressure);
+  };
+}
+
 function enqueueShellNotification(
   taskId: string,
   description: string,
@@ -217,7 +278,7 @@ export async function spawnShellTask(
   context: TaskContext,
 ): Promise<TaskHandle> {
   const { command, description, shellCommand, toolUseId, agentId, kind } = input;
-  const { setAppState } = context;
+  const { setAppState, getAppState } = context;
 
   // TaskOutput owns the data — use its taskId so disk writes are consistent
   const { taskOutput } = shellCommand;
@@ -243,6 +304,17 @@ export async function spawnShellTask(
 
   registerTask(taskState, setAppState);
 
+  // Official $xu — main-thread bg shells only (not monitor / not agent-scoped)
+  const disposePressureReap = installShellPressureReap(
+    taskId,
+    description,
+    getAppState,
+    setAppState,
+    toolUseId,
+    kind,
+    agentId,
+  );
+
   // Data flows through TaskOutput automatically — no stream listeners needed.
   // Just transition to backgrounded state so the process keeps running.
   shellCommand.background(taskId);
@@ -251,6 +323,7 @@ export async function spawnShellTask(
 
   void shellCommand.result.then(async result => {
     cancelStallWatchdog();
+    disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
 
@@ -463,6 +536,7 @@ export function backgroundExistingForegroundTask(
   description: string,
   setAppState: SetAppState,
   toolUseId?: string,
+  getAppState?: () => AppState,
 ): boolean {
   if (!shellCommand.background(taskId)) {
     return false;
@@ -486,9 +560,16 @@ export function backgroundExistingForegroundTask(
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, undefined, toolUseId, agentId);
 
+  // Official YJn → $xu: pressure reap on auto-backgrounded foreground tasks
+  const disposePressureReap =
+    getAppState !== undefined
+      ? installShellPressureReap(taskId, description, getAppState, setAppState, toolUseId, undefined, agentId)
+      : () => {};
+
   // Set up result handler (mirrors backgroundTask's handler)
   void shellCommand.result.then(async result => {
     cancelStallWatchdog();
+    disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
     let cleanupFn: (() => void) | undefined;

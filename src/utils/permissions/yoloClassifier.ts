@@ -44,6 +44,13 @@ import {
   parseClassifierResponse,
 } from './classifierShared.js'
 import { getClaudeTempDir } from './filesystem.js'
+import {
+  mapAutoModeOutcomeCode,
+  resolveOutcomeVisibility,
+  resolvePriorAssistantContext,
+} from './autoModeFlags.js'
+import { fetchAutoModeGitStatus } from './autoModeGitStatus.js'
+import { fetchAutoModeRepoVisibility } from './autoModeRepoVisibility.js'
 
 // Dead code elimination: conditional imports for auto mode classifier prompts.
 // At build time, the bundler inlines .txt files as string literals. At test
@@ -71,6 +78,21 @@ const ANTHROPIC_PERMISSIONS_TEMPLATE: string =
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 
 function isUsingExternalPermissions(): boolean {
+  // Official CLAUDE_CODE_AUTO_MODE_EXTERNAL_PERMISSIONS densable — force external template.
+  let autoModeExternalPermissions = isEnvTruthy(
+    process.env.CLAUDE_CODE_AUTO_MODE_EXTERNAL_PERMISSIONS,
+  )
+  try {
+    const { isAutoModeExternalPermissionsEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    autoModeExternalPermissions = isAutoModeExternalPermissionsEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (autoModeExternalPermissions) {
+    return true
+  }
   if (process.env.USER_TYPE !== 'ant') return true
   const config = getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_auto_mode_config',
@@ -80,13 +102,32 @@ function isUsingExternalPermissions(): boolean {
 }
 
 /**
- * Shape of the settings.autoMode config — the three classifier prompt
- * sections a user can customize. Required-field variant (empty arrays when
- * absent) for JSON output; settings.ts uses the optional-field variant.
+ * Official CLAUDE_CODE_AUTO_MODE_TEMPERATURE — classifier sampling temperature.
+ * Default 0 (deterministic). Invalid / out-of-range values fall back to 0.
+ */
+export function getClassifierTemperature(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.CLAUDE_CODE_AUTO_MODE_TEMPERATURE
+  if (raw === undefined || raw === '') return 0
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0 || n > 2) return 0
+  return n
+}
+
+/**
+ * Shape of the settings.autoMode config — classifier prompt sections a user
+ * can customize. Required-field variant (empty arrays when absent) for JSON
+ * output; settings.ts uses the optional-field variant.
+ *
+ * soft_deny: blocked unless user intent clears them.
+ * hard_deny: security-boundary blocks user intent cannot clear (official
+ * 2.1.205 Session Transcript Tampering lives here).
  */
 export type AutoModeRules = {
   allow: string[]
   soft_deny: string[]
+  hard_deny: string[]
   environment: string[]
 }
 
@@ -98,11 +139,17 @@ export type AutoModeRules = {
  * template; each line starting with `- ` becomes one array entry.
  * Used by `claude auto-mode defaults`. Always returns external defaults,
  * never the Anthropic-internal template.
+ *
+ * Also accepts legacy `user_deny_rules_to_replace` as soft_deny for older
+ * templates / dumps.
  */
 export function getDefaultExternalAutoModeRules(): AutoModeRules {
+  const softFromSoft = extractTaggedBullets('user_soft_deny_rules_to_replace')
+  const softFromLegacy = extractTaggedBullets('user_deny_rules_to_replace')
   return {
     allow: extractTaggedBullets('user_allow_rules_to_replace'),
-    soft_deny: extractTaggedBullets('user_deny_rules_to_replace'),
+    soft_deny: softFromSoft.length > 0 ? softFromSoft : softFromLegacy,
+    hard_deny: extractTaggedBullets('user_hard_deny_rules_to_replace'),
     environment: extractTaggedBullets('user_environment_to_replace'),
   }
 }
@@ -134,7 +181,16 @@ export function buildDefaultExternalSystemPrompt(): string {
       (_m, defaults: string) => defaults,
     )
     .replace(
+      /<user_soft_deny_rules_to_replace>([\s\S]*?)<\/user_soft_deny_rules_to_replace>/,
+      (_m, defaults: string) => defaults,
+    )
+    .replace(
+      // Legacy alias (pre hard/soft split)
       /<user_deny_rules_to_replace>([\s\S]*?)<\/user_deny_rules_to_replace>/,
+      (_m, defaults: string) => defaults,
+    )
+    .replace(
+      /<user_hard_deny_rules_to_replace>([\s\S]*?)<\/user_hard_deny_rules_to_replace>/,
       (_m, defaults: string) => defaults,
     )
     .replace(
@@ -159,7 +215,17 @@ async function maybeDumpAutoMode(
   suffix?: string,
 ): Promise<void> {
   if (process.env.USER_TYPE !== 'ant') return
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_DUMP_AUTO_MODE)) return
+  // Official DUMP_AUTO_MODE densable.
+  let dumpAutoMode = isEnvTruthy(process.env.CLAUDE_CODE_DUMP_AUTO_MODE)
+  try {
+    const { isDumpAutoModeEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    dumpAutoMode = isDumpAutoModeEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (!dumpAutoMode) return
   const base = suffix ? `${timestamp}.${suffix}` : `${timestamp}`
   try {
     await mkdir(getAutoModeDumpDir(), { recursive: true })
@@ -300,6 +366,11 @@ export type TranscriptEntry = {
  * Includes user text messages and assistant tool_use blocks (excluding assistant text).
  * Queued user messages (attachment messages with queued_command type) are extracted
  * and emitted as user turns.
+ *
+ * Official 2.1.207 QPu: skip meta/system conversation updates that are not real
+ * human turns — they otherwise surface as false prompt-injection warnings in the
+ * auto-mode classifier. Match: `if (d.isMeta && !origin) continue` for users, and
+ * `if (!origin && attachment.isMeta) continue` for queued_command.
  */
 export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
   const transcript: TranscriptEntry[] = []
@@ -308,7 +379,24 @@ export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
       msg.type === 'attachment' &&
       msg.attachment!.type === 'queued_command'
     ) {
-      const prompt = msg.attachment!.prompt
+      const attachment = msg.attachment as {
+        type: string
+        prompt?: unknown
+        origin?: unknown
+        isMeta?: boolean
+        commandMode?: string
+      }
+      // Official: origin ?? (commandMode === 'task-notification' ? {kind:...} : void 0)
+      const origin =
+        attachment.origin ??
+        (attachment.commandMode === 'task-notification'
+          ? { kind: 'task-notification' }
+          : undefined)
+      // Meta queued system chatter without origin is not human intent.
+      if (!origin && attachment.isMeta) {
+        continue
+      }
+      const prompt = attachment.prompt
       let text: string | null = null
       if (typeof prompt === 'string') {
         text = prompt
@@ -317,7 +405,9 @@ export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
           prompt
             .filter(
               (block): block is { type: 'text'; text: string } =>
-                block.type === 'text',
+                typeof block === 'object' &&
+                block !== null &&
+                (block as { type?: string }).type === 'text',
             )
             .map(block => block.text)
             .join('\n') || null
@@ -329,6 +419,12 @@ export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
         })
       }
     } else if (msg.type === 'user') {
+      // Official QPu: system conversation updates set isMeta without origin.
+      // Including them trains the classifier to treat harness text as user intent.
+      const origin = (msg as { origin?: unknown }).origin
+      if (msg.isMeta && !origin) {
+        continue
+      }
       const content = msg.message!.content
       const textBlocks: TranscriptBlock[] = []
       if (typeof content === 'string') {
@@ -345,15 +441,33 @@ export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
       }
     } else if (msg.type === 'assistant') {
       const blocks: TranscriptBlock[] = []
+      // Official QPu `t` = priorAssistantContext: when enabled, include
+      // assistant text (excluding API-error / virtual / synthetic model lines)
+      // so the classifier sees the model's stated plan for this turn.
+      const includeAssistantText = resolvePriorAssistantContext().value
+      const textParts: string[] = []
       for (const block of msg.message!.content ?? []) {
-        // Only include tool_use blocks — assistant text is model-authored
-        // and could be crafted to influence the classifier's decision.
-        if (typeof block !== 'string' && block.type === 'tool_use') {
+        if (typeof block === 'string') continue
+        if (block.type === 'tool_use') {
           blocks.push({
             type: 'tool_use',
             name: block.name,
             input: block.input,
           })
+        } else if (includeAssistantText && block.type === 'text') {
+          textParts.push(block.text)
+        }
+      }
+      if (includeAssistantText) {
+        const text = textParts.join('\n')
+        const isSynthetic =
+          Boolean((msg as { isApiErrorMessage?: boolean }).isApiErrorMessage) ||
+          Boolean((msg as { isVirtual?: boolean }).isVirtual)
+        if (text.trim() && !isSynthetic) {
+          // Official buffers assistant text and emits it before the next user
+          // turn; for our compact serializer we attach it on the same assistant
+          // entry so toCompactBlock can emit `Assistant: …` lines.
+          blocks.unshift({ type: 'text', text })
         }
       }
       if (blocks.length > 0) {
@@ -424,6 +538,13 @@ function toCompactBlock(
     return isJsonlTranscriptEnabled()
       ? jsonStringify({ user: block.text }) + '\n'
       : `User: ${block.text}\n`
+  }
+  // Official priorAssistantContext path: assistant prose as `Assistant: …`
+  // (or JSONL `{"assistant":…}`) when the flag is on.
+  if (block.type === 'text' && role === 'assistant') {
+    return isJsonlTranscriptEnabled()
+      ? jsonStringify({ assistant: block.text }) + '\n'
+      : `Assistant: ${block.text}\n`
   }
   return ''
 }
@@ -507,23 +628,24 @@ export async function buildYoloSystemPrompt(
     ...(includeBashPromptRules ? getBashPromptAllowDescriptions(context) : []),
     ...(autoMode?.allow ?? []),
   ]
-  const denyDescriptions = [
+  const softDenyDescriptions = [
     ...(includeBashPromptRules ? getBashPromptDenyDescriptions(context) : []),
     ...(includePowerShellGuidance ? POWERSHELL_DENY_GUIDANCE : []),
     ...(autoMode?.soft_deny ?? []),
   ]
+  const hardDenyDescriptions = [...(autoMode?.hard_deny ?? [])]
 
-  // All three sections use the same <foo_to_replace>...</foo_to_replace>
-  // delimiter pattern. The external template wraps its defaults inside the
-  // tags, so user-provided values REPLACE the defaults entirely. The
-  // anthropic template keeps its defaults outside the tags and uses an empty
-  // tag pair at the end of each section, so user-provided values are
-  // strictly ADDITIVE.
+  // Soft/hard deny + allow/environment use the same <foo_to_replace>…</>
+  // delimiter pattern. External template: user values REPLACE defaults.
+  // Anthropic template: defaults stay outside empty tags → user values ADD.
   const userAllow = allowDescriptions.length
     ? allowDescriptions.map(d => `- ${d}`).join('\n')
     : undefined
-  const userDeny = denyDescriptions.length
-    ? denyDescriptions.map(d => `- ${d}`).join('\n')
+  const userSoftDeny = softDenyDescriptions.length
+    ? softDenyDescriptions.map(d => `- ${d}`).join('\n')
+    : undefined
+  const userHardDeny = hardDenyDescriptions.length
+    ? hardDenyDescriptions.map(d => `- ${d}`).join('\n')
     : undefined
   const userEnvironment = autoMode?.environment?.length
     ? autoMode.environment.map(e => `- ${e}`).join('\n')
@@ -535,8 +657,17 @@ export async function buildYoloSystemPrompt(
       (_m, defaults: string) => userAllow ?? defaults,
     )
     .replace(
+      /<user_soft_deny_rules_to_replace>([\s\S]*?)<\/user_soft_deny_rules_to_replace>/,
+      (_m, defaults: string) => userSoftDeny ?? defaults,
+    )
+    .replace(
+      // Legacy alias for soft_deny (pre hard/soft split)
       /<user_deny_rules_to_replace>([\s\S]*?)<\/user_deny_rules_to_replace>/,
-      (_m, defaults: string) => userDeny ?? defaults,
+      (_m, defaults: string) => userSoftDeny ?? defaults,
+    )
+    .replace(
+      /<user_hard_deny_rules_to_replace>([\s\S]*?)<\/user_hard_deny_rules_to_replace>/,
+      (_m, defaults: string) => userHardDeny ?? defaults,
     )
     .replace(
       /<user_environment_to_replace>([\s\S]*?)<\/user_environment_to_replace>/,
@@ -787,7 +918,7 @@ async function classifyYoloActionXml(
         max_tokens: (mode === 'fast' ? 256 : 64) + thinkingPadding,
         system: systemBlocks,
         skipSystemPromptPrefix: true,
-        temperature: 0,
+        temperature: getClassifierTemperature(),
         thinking: disableThinking,
         messages: [
           ...prefixMessages,
@@ -875,7 +1006,7 @@ async function classifyYoloActionXml(
       max_tokens: 4096 + thinkingPadding,
       system: systemBlocks,
       skipSystemPromptPrefix: true,
-      temperature: 0,
+      temperature: getClassifierTemperature(),
       thinking: disableThinking,
       messages: [
         ...prefixMessages,
@@ -1017,6 +1148,18 @@ async function classifyYoloActionXml(
  * @param context - Tool permission context for extracting Bash(prompt:) rules
  * @param signal - Abort signal
  */
+function withOutcomeCode(result: YoloClassifierResult): YoloClassifierResult {
+  if (!resolveOutcomeVisibility().value) return result
+  return {
+    ...result,
+    outcomeCode: mapAutoModeOutcomeCode({
+      unavailable: result.unavailable,
+      reason: result.reason,
+      shouldBlock: result.shouldBlock,
+    }),
+  }
+}
+
 export async function classifyYoloAction(
   messages: Message[],
   action: TranscriptEntry,
@@ -1030,11 +1173,11 @@ export async function classifyYoloAction(
   // '' = "no security relevance" (Tool.toAutoClassifierInput contract). Without
   // this guard the empty action block + cache_control below hits an API 400.
   if (actionCompact === '') {
-    return {
+    return withOutcomeCode({
       shouldBlock: false,
       reason: 'Tool declares no classifier-relevant input',
       model: getClassifierModel(),
-    }
+    })
   }
 
   const systemPrompt = await buildYoloSystemPrompt(context)
@@ -1103,6 +1246,45 @@ export async function classifyYoloAction(
   // Use getCacheControl for consistency with the main agent loop —
   // respects GrowthBook TTL allowlist and query-source gating.
   const cacheControl = getCacheControl({ querySource: 'auto_mode' })
+  // Official bPu + dPu: attach repoVisibility / gitStatus metadata before the
+  // action when enabled. Budget: system (1) + CLAUDE.md (0–1) + meta (0–1) +
+  // action (1) ≤ 4.
+  const actionToolUse = action.content.find(b => b.type === 'tool_use')
+  if (actionToolUse && actionToolUse.type === 'tool_use') {
+    const metaLines: string[] = []
+    const repoVis = await fetchAutoModeRepoVisibility(
+      actionToolUse.name,
+      actionToolUse.input,
+      signal,
+    )
+    if (repoVis !== null) {
+      for (const entry of repoVis) {
+        metaLines.push(
+          isJsonlTranscriptEnabled()
+            ? jsonStringify({ meta: { repoVisibility: entry } }) + '\n'
+            : `repoVisibility ${jsonStringify(entry)}\n`,
+        )
+      }
+    }
+    const gitStatus = await fetchAutoModeGitStatus(
+      actionToolUse.name,
+      actionToolUse.input,
+      signal,
+    )
+    if (gitStatus !== null) {
+      metaLines.push(
+        isJsonlTranscriptEnabled()
+          ? jsonStringify({ meta: { gitStatus } }) + '\n'
+          : `gitStatus ${jsonStringify(gitStatus)}\n`,
+      )
+    }
+    if (metaLines.length > 0) {
+      userContentBlocks.push({
+        type: 'text' as const,
+        text: metaLines.join(''),
+      })
+    }
+  }
   // Place cache_control on the action block. In the two-stage classifier,
   // stage 2 shares the same transcript+action prefix as stage 1 — the
   // breakpoint here gives stage 2 a guaranteed cache hit on the full prefix.
@@ -1118,24 +1300,26 @@ export async function classifyYoloAction(
 
   // Dispatch to 2-stage XML classifier if enabled via GrowthBook
   if (isTwoStageClassifierEnabled()) {
-    return classifyYoloActionXml(
-      prefixMessages,
-      systemPrompt,
-      userPrompt,
-      userContentBlocks,
-      model,
-      promptLengths,
-      signal,
-      {
-        mainLoopTokens: mainLoopTokens ?? tokenCountWithEstimation(messages),
-        classifierChars,
-        classifierTokensEst,
-        transcriptEntries: transcriptEntries.length,
-        messages: messages.length,
-        action: actionCompact,
-      },
-      getTwoStageMode(),
-      parentSpan,
+    return withOutcomeCode(
+      await classifyYoloActionXml(
+        prefixMessages,
+        systemPrompt,
+        userPrompt,
+        userContentBlocks,
+        model,
+        promptLengths,
+        signal,
+        {
+          mainLoopTokens: mainLoopTokens ?? tokenCountWithEstimation(messages),
+          classifierChars,
+          classifierTokensEst,
+          transcriptEntries: transcriptEntries.length,
+          messages: messages.length,
+          action: actionCompact,
+        },
+        getTwoStageMode(),
+        parentSpan,
+      ),
     )
   }
   const [disableThinking, thinkingPadding] = getClassifierThinkingConfig(model)
@@ -1152,7 +1336,7 @@ export async function classifyYoloAction(
         },
       ],
       skipSystemPromptPrefix: true,
-      temperature: 0,
+      temperature: getClassifierTemperature(),
       thinking: disableThinking,
       messages: [
         ...prefixMessages,
@@ -1211,7 +1395,7 @@ export async function classifyYoloAction(
         level: 'warn',
       })
       logAutoModeOutcome('parse_failure', model, { failureKind: 'no_tool_use' })
-      return {
+      return withOutcomeCode({
         shouldBlock: true,
         reason: 'Classifier returned no tool use block - blocking for safety',
         model,
@@ -1220,7 +1404,7 @@ export async function classifyYoloAction(
         promptLengths,
         stage1RequestId,
         stage1MsgId,
-      }
+      })
     }
 
     // Parse response using shared utility
@@ -1235,7 +1419,7 @@ export async function classifyYoloAction(
       logAutoModeOutcome('parse_failure', model, {
         failureKind: 'invalid_schema',
       })
-      return {
+      return withOutcomeCode({
         shouldBlock: true,
         reason: 'Invalid classifier response - blocking for safety',
         model,
@@ -1244,7 +1428,7 @@ export async function classifyYoloAction(
         promptLengths,
         stage1RequestId,
         stage1MsgId,
-      }
+      })
     }
 
     const classifierResult = {
@@ -1267,17 +1451,17 @@ export async function classifyYoloAction(
       classifierInputTokens,
       classifierTokensEst,
     })
-    return classifierResult
+    return withOutcomeCode(classifierResult)
   } catch (error) {
     if (signal.aborted) {
       logForDebugging('Auto mode classifier: aborted by user')
       logAutoModeOutcome('interrupted', model)
-      return {
+      return withOutcomeCode({
         shouldBlock: true,
         reason: 'Classifier request aborted',
         model,
         unavailable: true,
-      }
+      })
     }
     const tooLong = detectPromptTooLong(error)
     logForDebugging(`Auto mode classifier error: ${errorMessage(error)}`, {
@@ -1303,7 +1487,7 @@ export async function classifyYoloAction(
         transcriptLimitTokens: tooLong.limitTokens,
       }),
     })
-    return {
+    return withOutcomeCode({
       shouldBlock: true,
       reason: tooLong
         ? 'Classifier transcript exceeded context window'
@@ -1312,7 +1496,7 @@ export async function classifyYoloAction(
       unavailable: true,
       transcriptTooLong: Boolean(tooLong),
       errorDumpPath,
-    }
+    })
   }
 }
 
@@ -1320,6 +1504,16 @@ type TwoStageMode = 'both' | 'fast' | 'thinking'
 
 type AutoModeConfig = {
   model?: string
+  /**
+   * Map main-loop model id → classifier model id. Official 2.1.207 reads this
+   * before the flat `model` override (`modelByMainModel` in tengu_auto_mode_config).
+   */
+  modelByMainModel?: Record<string, string>
+  /**
+   * Map primary classifier model → fallback model when the primary is
+   * transiently unavailable. Official 2.1.207: fallbackModelByModel.
+   */
+  fallbackModelByModel?: Record<string, string>
   /**
    * Enable XML classifier. `true` runs both stages; `'fast'` and `'thinking'`
    * run only that stage; `false`/undefined uses the tool_use classifier.
@@ -1335,30 +1529,81 @@ type AutoModeConfig = {
    * Default false (old text-prefix format) for slow rollout / quick rollback.
    */
   jsonlTranscript?: boolean
+  /** Official priorAssistantContext / sameTurnSiblingContext / editRemoval… */
+  priorAssistantContext?: boolean
+  sameTurnSiblingContext?: boolean
+  editRemovalVisibility?: boolean
+  editRemovalCap?: number
+  gitStatusType?: boolean
+  gitStatusUploads?: boolean
+  gitStatusTruncationLimit?: number
+  outcomeVisibility?: boolean
+  classifyEditsModels?: string[]
+  repoVisibility?: boolean
+}
+
+/**
+ * Lookup keys for modelByMainModel, matching official kkr():
+ * if main model is 1M-context, try `base[1m]` then `base`; else just base.
+ */
+function getClassifierModelLookupKeys(mainModel: string): string[] {
+  const has1m = /\[1m\]$/i.test(mainModel)
+  const base = has1m ? mainModel.replace(/\[1m\]$/i, '') : mainModel
+  return has1m ? [`${base}[1m]`, base] : [base]
+}
+
+function resolveModelByMainModel(
+  mapping: Record<string, string> | undefined,
+  mainModel: string,
+): string | undefined {
+  if (mapping == null || typeof mapping !== 'object') return undefined
+  for (const key of getClassifierModelLookupKeys(mainModel)) {
+    const mapped = mapping[key]
+    if (mapped) return mapped
+  }
+  return undefined
 }
 
 /**
  * Get the model for the classifier.
- * Ant-only env var takes precedence, then GrowthBook JSON config override,
- * then the main loop model.
+ *
+ * Aligned with official Claude Code 2.1.207 `oOu()` / `jPu()`:
+ * 1. CLAUDE_CODE_AUTO_MODE_MODEL env (fork: exposed to all users; official
+ *    registers the env name but the 2.1.207 classifier path does not read it)
+ * 2. GrowthBook tengu_auto_mode_config.modelByMainModel[mainModel]
+ * 3. GrowthBook tengu_auto_mode_config.model
+ * 4. Poor mode → default Sonnet (fork-only cost control)
+ * 5. Main loop model
  */
 function getClassifierModel(): string {
-  if (process.env.USER_TYPE === 'ant') {
-    const envModel = process.env.CLAUDE_CODE_AUTO_MODE_MODEL
-    if (envModel) return envModel
-  }
+  // Fork extension: allow external users to pin the classifier model.
+  // Official 2.1.207 ships CLAUDE_CODE_AUTO_MODE_MODEL / BG_CLASSIFIER_MODEL
+  // in its env schema; oOu() does not consume them — only GB + main-model
+  // fallbacks. We honor both envs so hosts/scripts can pin without GB.
+  const envModel =
+    process.env.CLAUDE_CODE_AUTO_MODE_MODEL ||
+    process.env.CLAUDE_CODE_BG_CLASSIFIER_MODEL
+  if (envModel) return envModel
+
+  const mainModel = getMainLoopModel()
   const config = getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_auto_mode_config',
     {} as AutoModeConfig,
   )
+
+  const mapped = resolveModelByMainModel(config?.modelByMainModel, mainModel)
+  if (mapped) return mapped
+
   if (config?.model) {
     return config.model
   }
-  // Poor mode: downgrade classifier to Sonnet to reduce cost
+
+  // Poor mode: downgrade classifier to Sonnet to reduce cost (fork-only).
   if (isPoorModeActive()) {
     return getDefaultSonnetModel()
   }
-  return getMainLoopModel()
+
+  return mainModel
 }
 
 /**

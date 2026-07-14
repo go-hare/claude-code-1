@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import type { Command, LocalCommandResult } from '../../types/command.js'
+import { isTuiJustSwitchedFromFullscreen } from '../../utils/residualFinalEnvGates.js'
 
 /**
  * Path to the TUI-mode marker file.
@@ -54,10 +55,33 @@ const USAGE_TEXT = [
   '  CLAUDE_CODE_NO_FLICKER=0   force off (overrides marker)',
 ].join('\n')
 
+/**
+ * Official env inject for child relaunch after /tui switch.
+ * Full process relaunch (OLt/PNe) is denser; densable path records the target
+ * so bounce detection (`isTuiJustSwitchedFromFullscreen`) can fire on next session.
+ */
+export function buildTuiJustSwitchedEnv(
+  target: 'fullscreen' | 'default',
+): Record<string, string> {
+  return { CLAUDE_CODE_TUI_JUST_SWITCHED: target }
+}
+
+/**
+ * Official bounce: env was fullscreen and user is switching to default.
+ * Used for product-feedback / downsell survey gating on denser paths.
+ */
+export function isTuiBounceToDefault(
+  target: 'fullscreen' | 'default',
+): boolean {
+  return target === 'default' && isTuiJustSwitchedFromFullscreen()
+}
+
 function enableTui(): LocalCommandResult {
   const markerPath = getTuiMarkerPath()
   mkdirSync(getClaudeConfigHomeDir(), { recursive: true })
   writeFileSync(markerPath, new Date().toISOString(), 'utf8')
+  // Densable residual: mark intended renderer for next process (official injects on relaunch).
+  Object.assign(process.env, buildTuiJustSwitchedEnv('fullscreen'))
   return {
     type: 'text',
     value: [
@@ -84,6 +108,9 @@ function disableTui(): LocalCommandResult {
     }
   }
   unlinkSync(markerPath)
+  // Official bounce: env was fullscreen and target is default.
+  const bounce = isTuiBounceToDefault('default')
+  Object.assign(process.env, buildTuiJustSwitchedEnv('default'))
   return {
     type: 'text',
     value: [
@@ -94,8 +121,13 @@ function disableTui(): LocalCommandResult {
       'Standard (non-alternate-screen) rendering will be used on the next',
       'session start.',
       '',
+      bounce
+        ? 'Bounce detected (fullscreen → default). Product feedback may prompt on denser paths.'
+        : '',
       'To re-enable: `/tui on`',
-    ].join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
   }
 }
 

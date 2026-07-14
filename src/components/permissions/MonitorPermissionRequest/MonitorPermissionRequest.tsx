@@ -31,7 +31,9 @@ export function MonitorPermissionRequest({
     description: string;
   };
 
-  const showAlwaysAllowOptions = useMemo(() => shouldShowAlwaysAllowOptions(), []);
+  // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
+  const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
+  const showAlwaysAllowOptions = useMemo(() => shouldShowAlwaysAllowOptions() && !isAskCappedByOrg, [isAskCappedByOrg]);
 
   const options: PermissionPromptOption<OptionValue>[] = useMemo(() => {
     const opts: PermissionPromptOption<OptionValue>[] = [

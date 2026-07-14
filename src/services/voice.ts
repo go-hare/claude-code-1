@@ -258,7 +258,17 @@ export async function requestMicrophonePermission(): Promise<boolean> {
 
 export async function checkRecordingAvailability(): Promise<RecordingAvailability> {
   // Remote environments have no local microphone
-  if (isRunningOnHomespace() || isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+  // Official REMOTE densable.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (isRunningOnHomespace() || isRemote) {
     return {
       available: false,
       reason:

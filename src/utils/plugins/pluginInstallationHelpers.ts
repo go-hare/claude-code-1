@@ -53,6 +53,7 @@ import {
   type PluginScope,
   type PluginSource,
 } from './schemas.js'
+import { maybeProvisionPluginBinaryAssets } from './pluginBinaryAssets.js'
 import {
   convertDirectoryToZipInPlace,
   isPluginZipCacheEnabled,
@@ -200,6 +201,10 @@ export async function cacheAndRegisterPlugin(
     }
     finalPath = versionedPath
   }
+
+  // Official nEo/B$y — provision plugin binary assets into bin/ when gated on.
+  // Full U$y download stream is denser; gate + hook densable here (pre-zip).
+  await maybeProvisionPluginBinaryAssets(finalPath, pluginId)
 
   // Zip cache mode: convert directory to ZIP and remove the directory
   if (isPluginZipCacheEnabled()) {

@@ -791,9 +791,14 @@ export function renderGroupedAgentToolUse(
       taskDescription = undefined;
     }
 
-    // Check if this was launched as a background agent OR backgrounded mid-execution
-    const launchedAsAsync =
-      parsedInput.success && 'run_in_background' in parsedInput.data && parsedInput.data.run_in_background === true;
+    // Check if this was launched as a background agent OR backgrounded mid-execution.
+    // Official 208 default: omit run_in_background → background (unless false).
+    // Match shouldRunAsync: only explicit false is foreground (undefined !== false).
+    // Schema may omit the field when background tasks are disabled — cast for access.
+    const runInBackground = parsedInput.success
+      ? (parsedInput.data as { run_in_background?: boolean }).run_in_background
+      : undefined;
+    const launchedAsAsync = parsedInput.success && runInBackground !== false;
     const outputStatus = (result?.output as { status?: string } | undefined)?.status;
     const backgroundedMidExecution = outputStatus === 'async_launched' || outputStatus === 'remote_launched';
     const isAsync = launchedAsAsync || backgroundedMidExecution || isTeammateSpawn;

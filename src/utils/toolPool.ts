@@ -8,6 +8,7 @@ import {
   type ToolPermissionContext,
   type Tools,
 } from '../Tool.js'
+import { getCoordinatorExtraTools } from './coordinatorEnv.js'
 
 // MCP tool name suffixes for PR activity subscription. These are lightweight
 // orchestration actions the coordinator calls directly rather than delegating
@@ -37,9 +38,11 @@ const coordinatorModeModule = feature('COORDINATOR_MODE')
  * management is orchestration.
  */
 export function applyCoordinatorToolFilter(tools: Tools): Tools {
+  const extra = new Set(getCoordinatorExtraTools())
   return tools.filter(
     t =>
       COORDINATOR_MODE_ALLOWED_TOOLS.has(t.name) ||
+      extra.has(t.name) ||
       isPrActivitySubscriptionTool(t.name),
   )
 }

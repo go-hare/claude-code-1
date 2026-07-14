@@ -160,6 +160,7 @@ import {
   getPlanModeV2ExploreAgentCount,
   isPlanModeInterviewPhaseEnabled,
 } from './planModeV2.js'
+import { shouldShowSettingsHint } from './hideSettingsHint.js'
 import { escapeRegExp } from './stringUtils.js'
 import { isTodoV2Enabled } from './tasks.js'
 
@@ -268,17 +269,22 @@ export function isClassifierDenial(content: string): boolean {
 export function buildYoloRejectionMessage(reason: string): string {
   const prefix = AUTO_MODE_REJECTION_PREFIX
 
-  const ruleHint = feature('BASH_CLASSIFIER')
-    ? `To allow this type of action in the future, the user can add a permission rule like ` +
-      `Bash(prompt: <description of allowed action>) to their settings. ` +
-      `At the end of your session, recommend what permission rules to add so you don't get blocked again.`
-    : `To allow this type of action in the future, the user can add a Bash permission rule to their settings.`
+  // Official CXa — suppress settings/config permission-rule hint for remote
+  // entrypoints or when CLAUDE_CODE_HIDE_SETTINGS_HINT is set.
+  const showSettingsHint = shouldShowSettingsHint()
+  const ruleHint = !showSettingsHint
+    ? ''
+    : feature('BASH_CLASSIFIER')
+      ? `To allow this type of action in the future, the user can add a permission rule like ` +
+        `Bash(prompt: <description of allowed action>) to their settings. ` +
+        `At the end of your session, recommend what permission rules to add so you don't get blocked again.`
+      : `To allow this type of action in the future, the user can add a Bash permission rule to their settings.`
 
   return (
     `${prefix}${reason}. ` +
     `If you have other tasks that don't depend on this action, continue working on those. ` +
-    `${DENIAL_WORKAROUND_GUIDANCE} ` +
-    ruleHint
+    `${DENIAL_WORKAROUND_GUIDANCE}` +
+    (ruleHint ? ` ${ruleHint}` : '')
   )
 }
 
@@ -4498,6 +4504,13 @@ You have exited auto mode. The user may now want to interact more directly. You 
           content: wrapInSystemReminder(
             `Token usage: ${attachment.used}/${attachment.total}; ${attachment.remaining} remaining`,
           ),
+          isMeta: true,
+        }),
+      ]
+    case 'total_tokens_reminder':
+      return [
+        createUserMessage({
+          content: wrapInSystemReminder(attachment.text),
           isMeta: true,
         }),
       ]

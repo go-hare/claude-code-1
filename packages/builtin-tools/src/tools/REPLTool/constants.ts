@@ -21,12 +21,28 @@ export const REPL_TOOL_NAME = 'REPL'
  * of the env the caller passes.
  */
 export function isReplModeEnabled(): boolean {
-  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_REPL)) return false
-  if (isEnvTruthy(process.env.CLAUDE_REPL_MODE)) return true
-  return (
-    process.env.USER_TYPE === 'ant' &&
-    process.env.CLAUDE_CODE_ENTRYPOINT === 'cli'
-  )
+  // Official KO densable: defined-falsy REPL → off; truthy REPL → on; else
+  // legacy CLAUDE_REPL_MODE; else cli|remote + ant/GB.
+  try {
+    const { resolveReplModeEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+    return resolveReplModeEnabled({
+      antDefault:
+        process.env.USER_TYPE === 'ant' &&
+        (process.env.CLAUDE_CODE_ENTRYPOINT === 'cli' ||
+          process.env.CLAUDE_CODE_ENTRYPOINT === 'remote'),
+    })
+  } catch {
+    if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_REPL)) return false
+    if (isEnvTruthy(process.env.CLAUDE_CODE_REPL)) return true
+    if (isEnvTruthy(process.env.CLAUDE_REPL_MODE)) return true
+    return (
+      process.env.USER_TYPE === 'ant' &&
+      (process.env.CLAUDE_CODE_ENTRYPOINT === 'cli' ||
+        process.env.CLAUDE_CODE_ENTRYPOINT === 'remote')
+    )
+  }
 }
 
 /**

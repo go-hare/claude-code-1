@@ -163,6 +163,7 @@ import type { AppState } from '../state/AppState.js'
 import { jsonStringify, jsonParse } from './slowOperations.js'
 import { isEnvTruthy } from './envUtils.js'
 import { errorMessage, getErrnoCode } from './errors.js'
+import { resolveSessionEndHooksTimeoutMs } from './residualMsEnvGates.js'
 
 const TOOL_HOOK_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -172,14 +173,10 @@ const TOOL_HOOK_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000
  * the per-hook default timeout AND the overall AbortSignal cap (hooks run in
  * parallel, so one value suffices). Overridable via env var for users whose
  * teardown scripts need more time.
+ * Official fXr densable via resolveSessionEndHooksTimeoutMs.
  */
-const SESSION_END_HOOK_TIMEOUT_MS_DEFAULT = 1500
 export function getSessionEndHookTimeoutMs(): number {
-  const raw = process.env.CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS
-  const parsed = raw ? parseInt(raw, 10) : NaN
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : SESSION_END_HOOK_TIMEOUT_MS_DEFAULT
+  return resolveSessionEndHooksTimeoutMs()
 }
 
 function executeInBackground({
@@ -347,6 +344,9 @@ export interface HookResult {
   hookPermissionDecisionReason?: string
   additionalContext?: string
   initialUserMessage?: string
+  sessionTitle?: string
+  reloadSkills?: boolean
+  suppressOriginalPrompt?: boolean
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
@@ -367,6 +367,9 @@ export type AggregatedHookResult = {
   permissionBehavior?: PermissionResult['behavior'] // 多钩并行时按 deny > ask > allow 聚合后的权限行为
   additionalContexts?: string[] // 注入模型上下文的补充片段（如 UserPromptSubmit），可与多条钩子结果合并
   initialUserMessage?: string // 会话启动等场景预置的首条用户侧文案，供首轮上下文使用
+  sessionTitle?: string // SessionStart / UserPromptSubmit 设置的会话标题
+  reloadSkills?: boolean // SessionStart 请求重扫 skill/command 目录
+  suppressOriginalPrompt?: boolean // UserPromptSubmit block 时是否省略原始 prompt
   updatedInput?: Record<string, unknown> // 钩子改写后的工具入参；可在 allow/ask 时与权限一起产出，也可单独改参
   updatedMCPToolOutput?: unknown // PostToolUse 钩子对 MCP 工具原始输出的替换内容
   permissionRequestResult?: PermissionRequestResult // PermissionRequest 事件钩子的 allow/deny 及可选改参
@@ -506,12 +509,16 @@ interface TypedSyncHookOutput {
     | {
         hookEventName: 'UserPromptSubmit'
         additionalContext?: string
+        sessionTitle?: string
+        suppressOriginalPrompt?: boolean
       }
     | {
         hookEventName: 'SessionStart'
         additionalContext?: string
         initialUserMessage?: string
+        sessionTitle?: string
         watchPaths?: string[]
+        reloadSkills?: boolean
       }
     | {
         hookEventName: 'Setup'
@@ -706,10 +713,15 @@ function processHookJSONOutput({
         break
       case 'UserPromptSubmit':
         result.additionalContext = json.hookSpecificOutput.additionalContext
+        result.sessionTitle = json.hookSpecificOutput.sessionTitle
+        result.suppressOriginalPrompt =
+          json.hookSpecificOutput.suppressOriginalPrompt
         break
       case 'SessionStart':
         result.additionalContext = json.hookSpecificOutput.additionalContext
         result.initialUserMessage = json.hookSpecificOutput.initialUserMessage
+        result.sessionTitle = json.hookSpecificOutput.sessionTitle
+        result.reloadSkills = json.hookSpecificOutput.reloadSkills
         if (
           'watchPaths' in json.hookSpecificOutput &&
           json.hookSpecificOutput.watchPaths
@@ -902,8 +914,29 @@ async function execCommandHook(
   // Order matches MCP/LSP (plugin vars FIRST, then user config) so a user-
   // entered value containing the literal text ${CLAUDE_PLUGIN_ROOT} is treated
   // as opaque — not re-interpreted as a template.
+  //
+  // Official 2.1.207: shell-form hooks (no `args`) must not embed ${user_config.*}
+  // — the substituted value would be re-parsed by the shell (injection). Use
+  // exec form `{ "command": "<exe>", "args": ["${user_config.KEY}", ...] }` or
+  // read $CLAUDE_PLUGIN_OPTION_<KEY> from the environment instead.
+  const USER_CONFIG_REF = /\$\{user_config\.[^}]+\}/
+  const isExecForm = Array.isArray(hook.args)
   let command = hook.command
+  let execArgs: string[] | undefined = isExecForm
+    ? [...(hook.args as string[])]
+    : undefined
   let pluginOpts: ReturnType<typeof loadPluginOptions> | undefined
+  // Reject before any substitution so shell form never interpolates secrets.
+  if (!isExecForm && USER_CONFIG_REF.test(hook.command)) {
+    const from = pluginId ? `plugin ${pluginId}` : 'plugin'
+    throw new Error(
+      `Hook from ${from} references \${user_config.*} in a shell-form command. ` +
+        `The substituted value would be re-parsed by the shell. Use exec form instead ` +
+        `{"command": "<executable>", "args": ["\${user_config.KEY}", ...]} ` +
+        `or read $CLAUDE_PLUGIN_OPTION_<KEY> from the hook's environment. ` +
+        `Command: ${hook.command}`,
+    )
+  }
   if (pluginRoot) {
     // Plugin directory gone (orphan GC race, concurrent session deleted it):
     // throw so callers yield a non-blocking error. Running would fail — and
@@ -925,17 +958,31 @@ async function execCommandHook(
     // form .replace() so paths containing $ aren't mangled by $-pattern
     // interpretation (rare but possible: \\server\c$\plugin).
     const rootPath = toHookPath(pluginRoot)
-    command = command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, () => rootPath)
-    if (pluginId) {
-      const dataPath = toHookPath(getPluginDataDir(pluginId))
-      command = command.replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, () => dataPath)
+    const subPluginVars = (s: string): string => {
+      let out = s.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, () => rootPath)
+      if (pluginId) {
+        const dataPath = toHookPath(getPluginDataDir(pluginId))
+        out = out.replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, () => dataPath)
+      }
+      return out
+    }
+    command = subPluginVars(command)
+    if (execArgs) {
+      execArgs = execArgs.map(subPluginVars)
     }
     if (pluginId) {
       pluginOpts = loadPluginOptions(pluginId)
       // Throws if a referenced key is missing — that means the hook uses a key
       // that's either not declared in manifest.userConfig or not yet configured.
       // Caught upstream like any other hook exec failure.
-      command = substituteUserConfigVariables(command, pluginOpts)
+      // Exec form only: substitute into command + each arg as plain strings.
+      if (isExecForm) {
+        command = substituteUserConfigVariables(command, pluginOpts)
+        execArgs = (execArgs ?? []).map(a =>
+          substituteUserConfigVariables(a, pluginOpts!),
+        )
+      }
+      // Shell form: user_config already rejected above; still allow env-only access.
     }
   }
 
@@ -948,13 +995,22 @@ async function execCommandHook(
     }
   }
 
-  // CLAUDE_CODE_SHELL_PREFIX wraps the command via POSIX quoting
+  // Official SHELL_PREFIX densable wraps the command via POSIX quoting
   // (formatShellPrefixCommand uses shell-quote). This makes no sense for
   // PowerShell — see design §8.1. For now PS hooks ignore the prefix;
   // a CLAUDE_CODE_PS_SHELL_PREFIX (or shell-aware prefix) is a follow-up.
+  let shellPrefix: string | null = process.env.CLAUDE_CODE_SHELL_PREFIX || null
+  try {
+    const { resolveShellPrefix } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    shellPrefix = resolveShellPrefix()
+  } catch {
+    // keep raw env fallback
+  }
   const finalCommand =
-    !isPowerShell && process.env.CLAUDE_CODE_SHELL_PREFIX
-      ? formatShellPrefixCommand(process.env.CLAUDE_CODE_SHELL_PREFIX, command)
+    !isPowerShell && shellPrefix
+      ? formatShellPrefixCommand(shellPrefix, command)
       : command
 
   const hookTimeoutMs = hook.timeout
@@ -1021,15 +1077,16 @@ async function execCommandHook(
   }
 
   // --
-  // Spawn. Two completely separate paths:
+  // Spawn. Three paths:
   //
-  //   Bash: spawn(cmd, [], { shell: <gitBashPath | true> }) — the shell
-  //   option makes Node pass the whole string to the shell for parsing.
+  //   Exec form (hook.args present): spawn(command, args) — no shell.
+  //   Official 2.1.207; safe for ${user_config.*} substitution.
   //
-  //   PowerShell: spawn(pwshPath, ['-NoProfile', '-NonInteractive',
-  //   '-Command', cmd]) — explicit argv, no shell option. -NoProfile
-  //   skips user profile scripts (faster, deterministic).
-  //   -NonInteractive fails fast instead of prompting.
+  //   Bash shell form: spawn(cmd, [], { shell: <gitBashPath | true> }) —
+  //   the shell option makes Node pass the whole string to the shell.
+  //
+  //   PowerShell shell form: spawn(pwshPath, ['-NoProfile', '-NonInteractive',
+  //   '-Command', cmd]) — explicit argv, no shell option.
   //
   // The Git Bash hard-exit in findGitBashPath() is still in place for
   // bash hooks. PowerShell hooks never call it, so a Windows user with
@@ -1038,7 +1095,9 @@ async function execCommandHook(
   // startup, which will exit first. Relaxing that is phase 1 of the
   // design's implementation order (separate PR).
 
-  // SECURITY: Apply network-only sandbox to hook commands when sandboxing is enabled.
+  // SECURITY: Apply network-only sandbox to shell-form hook commands when
+  // sandboxing is enabled. Exec form skips shell sandbox wrapping (argv is
+  // not re-parsed by a shell).
   // Hooks execute arbitrary shell commands from settings.json without going
   // through the Bash tool's permission prompt. Unlike the full Bash sandbox,
   // hooks only get network restrictions (not filesystem restrictions) because:
@@ -1050,7 +1109,7 @@ async function execCommandHook(
   //   - Hooks that genuinely need network (notifications) should use the
   //     `http` hook type, which is not affected by this sandbox
   let sandboxedCommand = finalCommand
-  if (!isPowerShell && SandboxManager.isSandboxingEnabled()) {
+  if (!isExecForm && !isPowerShell && SandboxManager.isSandboxingEnabled()) {
     try {
       sandboxedCommand = await SandboxManager.wrapWithSandbox(
         finalCommand,
@@ -1088,8 +1147,23 @@ async function execCommandHook(
     }
   }
 
+  if (isExecForm && typeof command === 'string' && /\s/.test(command.trim())) {
+    throw new Error(
+      `Hook command "${hook.command}" has both "args" and whitespace in "command". ` +
+        `Exec form treats "command" as a single executable name; move the rest into "args". ` +
+        `Example: { "command": "node", "args": ["script.js"] }.`,
+    )
+  }
+
   let child: ChildProcessWithoutNullStreams
-  if (shellType === 'powershell') {
+  if (isExecForm) {
+    child = spawn(command, execArgs ?? [], {
+      env: envVars,
+      cwd: safeCwd,
+      // Prevent visible console window on Windows (no-op on other platforms)
+      windowsHide: true,
+    }) as ChildProcessWithoutNullStreams
+  } else if (shellType === 'powershell') {
     const pwshPath = await getCachedPowerShellPath()
     if (!pwshPath) {
       throw new Error(
@@ -1472,11 +1546,21 @@ async function execCommandHook(
 }
 
 /**
+ * Official 2.1.191+/2.1.207 exact-list charset for tool-name hook matchers.
+ * Allows pipe/comma/space lists and hyphens (MCP tool names often contain `-`).
+ * When the matcher only uses this charset it is treated as an exact list, not regex.
+ */
+const HOOK_EXACT_LIST_MATCHER_RE = /^[a-zA-Z0-9_|, -]+$/
+
+/** Official GFy list separators when exact-list mode is active. */
+const HOOK_EXACT_LIST_SPLIT_RE = /[|, ]+/
+
+/**
  * Check if a match query matches a hook matcher pattern
  * @param matchQuery The query to match (e.g., 'Write', 'Edit', 'Bash')
  * @param matcher The matcher pattern - can be:
  *   - Simple string for exact match (e.g., 'Write')
- *   - Pipe-separated list for multiple exact matches (e.g., 'Write|Edit')
+ *   - Pipe/comma/space-separated list (e.g., 'Write|Edit', 'Write, Edit')
  *   - Regex pattern (e.g., '^Write.*', '.*', '^(Write|Edit)$')
  * @returns true if the query matches the pattern
  */
@@ -1484,17 +1568,15 @@ function matchesPattern(matchQuery: string, matcher: string): boolean {
   if (!matcher || matcher === '*') {
     return true
   }
-  // Check if it's a simple string or pipe-separated list (no regex special chars except |)
-  if (/^[a-zA-Z0-9_|]+$/.test(matcher)) {
-    // Handle pipe-separated exact matches
-    if (matcher.includes('|')) {
-      const patterns = matcher
-        .split('|')
-        .map(p => normalizeLegacyToolName(p.trim()))
-      return patterns.includes(matchQuery)
-    }
-    // Simple exact match
-    return matchQuery === normalizeLegacyToolName(matcher)
+  // Official 2.1.207: exact-list mode for tool-name matchers (expanded charset).
+  // Hyphen is included so `mcp__server__tool-name` and `Edit, Write` stay exact.
+  if (HOOK_EXACT_LIST_MATCHER_RE.test(matcher)) {
+    const patterns = matcher
+      .split(HOOK_EXACT_LIST_SPLIT_RE)
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => normalizeLegacyToolName(p))
+    return patterns.includes(matchQuery)
   }
 
   // Otherwise treat as regex
@@ -1515,6 +1597,47 @@ function matchesPattern(matchQuery: string, matcher: string): boolean {
     logForDebugging(`Invalid regex pattern in hook matcher: ${matcher}`)
     return false
   }
+}
+
+/**
+ * Official WFy/t2d (2.1.195): warn once when a tool-event matcher is an exact
+ * server-only `mcp__server` token (no `__tool`). Exact matchers never match
+ * real tools; users need `mcp__server__.*` (regex) for all tools from a server.
+ */
+const TOOL_HOOK_EVENTS_FOR_MCP_MATCHER_WARN = new Set([
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'PermissionRequest',
+  'PermissionDenied',
+])
+
+const warnedMcpServerOnlyMatchers = new Set<string>()
+
+function isMcpServerOnlyExactMatcherToken(token: string): boolean {
+  return token.startsWith('mcp__') && !token.slice(5).includes('__')
+}
+
+function warnIfMcpServerOnlyExactMatcher(
+  hookEvent: string,
+  matcher: string | undefined,
+): void {
+  if (!matcher || !TOOL_HOOK_EVENTS_FOR_MCP_MATCHER_WARN.has(hookEvent)) {
+    return
+  }
+  if (warnedMcpServerOnlyMatchers.has(matcher)) return
+  if (!HOOK_EXACT_LIST_MATCHER_RE.test(matcher)) return
+  const tokens = matcher
+    .split(HOOK_EXACT_LIST_SPLIT_RE)
+    .map(t => t.trim())
+    .filter(Boolean)
+  if (!tokens.some(isMcpServerOnlyExactMatcherToken)) return
+  warnedMcpServerOnlyMatchers.add(matcher)
+  const example = tokens.find(isMcpServerOnlyExactMatcherToken) ?? matcher
+  logForDebugging(
+    `Hook matcher \`${example}\` matches no tool (it is compared as an exact string). To match all tools from this server, use \`${example}__.*\`. See CHANGELOG v2.1.195.`,
+    { level: 'warn' },
+  )
 }
 
 type IfConditionMatcher = (ifCondition: string) => boolean
@@ -1812,6 +1935,11 @@ export async function getMatchingHooks(
     logForDebugging(`Found ${hookMatchers.length} hook matchers in settings`, {
       level: 'verbose',
     })
+
+    // Official 2.1.195: warn once on server-only exact mcp__ matchers for tool events.
+    for (const matcher of hookMatchers) {
+      warnIfMcpServerOnlyExactMatcher(hookEvent, matcher.matcher)
+    }
 
     // Extract hooks with their plugin context (if any)
     const filteredMatchers = matchQuery
@@ -2932,6 +3060,30 @@ async function* executeHooks({
       )
       yield {
         initialUserMessage: result.initialUserMessage,
+      }
+    }
+
+    if (result.sessionTitle) {
+      logForDebugging(
+        `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) provided sessionTitle (${[...result.sessionTitle].length} chars)`,
+      )
+      yield {
+        sessionTitle: result.sessionTitle,
+      }
+    }
+
+    if (result.reloadSkills) {
+      logForDebugging(
+        `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) requested reloadSkills`,
+      )
+      yield {
+        reloadSkills: true,
+      }
+    }
+
+    if (result.suppressOriginalPrompt) {
+      yield {
+        suppressOriginalPrompt: true,
       }
     }
 

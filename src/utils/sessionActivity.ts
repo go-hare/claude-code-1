@@ -13,7 +13,7 @@
 
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
-import { isEnvTruthy } from './envUtils.js'
+import { isRemoteSendKeepalivesEnvEnabled } from './residualFinalEnvGates.js'
 
 const SESSION_ACTIVITY_INTERVAL_MS = 30_000
 
@@ -21,11 +21,21 @@ export type SessionActivityReason = 'api_call' | 'tool_exec'
 
 let activityCallback: (() => void) | null = null
 let refcount = 0
+/**
+ * Official mainLoopRefcount — counts only main-thread activity ($Qn second
+ * arg undefined). Nested agent activity increments refcount but not this.
+ * Wired to Imn.setMainLoopRefcount via onMainLoopRefcountChanged.
+ */
+let mainLoopRefcount = 0
 const activeReasons = new Map<SessionActivityReason, number>()
 let oldestActivityStartedAt: number | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 let cleanupRegistered = false
+/** Official FYi / BYi — mainLoopRefcount change listener. */
+let onMainLoopRefcountChanged: ((n: number) => void) | null = null
+/** Official GRu / UYi — dropNestedBlockedChain listener (agent cancel). */
+let onDropNestedBlockedChain: ((agentId: string) => void) | null = null
 
 function startHeartbeatTimer(): void {
   clearIdleTimer()
@@ -33,7 +43,7 @@ function startHeartbeatTimer(): void {
     logForDiagnosticsNoPII('debug', 'session_keepalive_heartbeat', {
       refcount,
     })
-    if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE_SEND_KEEPALIVES)) {
+    if (isRemoteSendKeepalivesEnvEnabled()) {
       activityCallback?.()
     }
   }, SESSION_ACTIVITY_INTERVAL_MS)
@@ -76,7 +86,7 @@ export function unregisterSessionActivityCallback(): void {
 }
 
 export function sendSessionActivitySignal(): void {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE_SEND_KEEPALIVES)) {
+  if (isRemoteSendKeepalivesEnvEnabled()) {
     activityCallback?.()
   }
 }
@@ -85,12 +95,72 @@ export function isSessionActivityTrackingActive(): boolean {
   return activityCallback !== null
 }
 
+/** Official BYi — register mainLoopRefcount listener (Imn.setMainLoopRefcount). */
+export function setMainLoopRefcountListener(
+  cb: ((n: number) => void) | null,
+): void {
+  onMainLoopRefcountChanged = cb
+}
+
+/** Official UYi — register dropNestedBlockedChain listener. */
+export function setDropNestedBlockedChainListener(
+  cb: ((agentId: string) => void) | null,
+): void {
+  onDropNestedBlockedChain = cb
+}
+
+/** Official QRu — notify dropNestedBlockedChain for cancelled agent. */
+export function notifyDropNestedBlockedChain(agentId: string): void {
+  onDropNestedBlockedChain?.(agentId)
+}
+
+/** Official ZRu — current mainLoopRefcount. */
+export function getMainLoopRefcount(): number {
+  return mainLoopRefcount
+}
+
+/**
+ * Official HOn + call-site fallback for $Qn/$BQn second arg.
+ *
+ * HOn(agentContext): non-main + isBackgroundAgent → agentId; else undefined.
+ * Fallback: toolUseContext/options isBackgroundAgent ? agentId : undefined.
+ * Only background agents suppress mainLoopRefcount bumps.
+ */
+export function resolveSessionActivityAgentId(input: {
+  agentContext?: {
+    agentType?: string
+    agentId?: string
+    isBackgroundAgent?: boolean
+  } | null
+  isBackgroundAgent?: boolean
+  agentId?: string
+}): string | undefined {
+  const ctx = input.agentContext
+  if (ctx && ctx.agentType !== 'main' && ctx.isBackgroundAgent) {
+    return ctx.agentId
+  }
+  if (input.isBackgroundAgent) {
+    return input.agentId
+  }
+  return undefined
+}
+
 /**
  * Increment the activity refcount. When it transitions from 0→1 and a callback
  * is registered, start a periodic heartbeat timer.
+ *
+ * Official $Qn(reason, agentId?) — when agentId is undefined, also bump
+ * mainLoopRefcount and notify FYi.
  */
-export function startSessionActivity(reason: SessionActivityReason): void {
+export function startSessionActivity(
+  reason: SessionActivityReason,
+  agentId?: string,
+): void {
   refcount++
+  if (agentId === undefined) {
+    mainLoopRefcount++
+    onMainLoopRefcountChanged?.(mainLoopRefcount)
+  }
   activeReasons.set(reason, (activeReasons.get(reason) ?? 0) + 1)
   if (refcount === 1) {
     oldestActivityStartedAt = Date.now()
@@ -117,10 +187,26 @@ export function startSessionActivity(reason: SessionActivityReason): void {
 /**
  * Decrement the activity refcount. When it reaches 0, stop the heartbeat timer
  * and start an idle timer that logs after 30s of inactivity.
+ *
+ * Official BQn(reason, agentId?) — when agentId is undefined, also drop
+ * mainLoopRefcount and notify FYi.
  */
-export function stopSessionActivity(reason: SessionActivityReason): void {
+export function stopSessionActivity(
+  reason: SessionActivityReason,
+  agentId?: string,
+): void {
   if (refcount > 0) {
     refcount--
+  }
+  if (agentId === undefined) {
+    if (mainLoopRefcount > 0) {
+      mainLoopRefcount--
+      onMainLoopRefcountChanged?.(mainLoopRefcount)
+    } else {
+      logForDiagnosticsNoPII('warn', 'session_activity_main_loop_underflow', {
+        reason,
+      })
+    }
   }
   const n = (activeReasons.get(reason) ?? 0) - 1
   if (n > 0) activeReasons.set(reason, n)
@@ -130,4 +216,21 @@ export function stopSessionActivity(reason: SessionActivityReason): void {
     heartbeatTimer = null
     startIdleTimer()
   }
+}
+
+/** Test-only reset. */
+export function resetSessionActivityForTests(): void {
+  activityCallback = null
+  refcount = 0
+  mainLoopRefcount = 0
+  activeReasons.clear()
+  oldestActivityStartedAt = null
+  if (heartbeatTimer !== null) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+  clearIdleTimer()
+  cleanupRegistered = false
+  onMainLoopRefcountChanged = null
+  onDropNestedBlockedChain = null
 }

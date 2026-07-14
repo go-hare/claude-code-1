@@ -10,12 +10,62 @@ let eventSequence = 0
 // Track whether we've already warned about a null event logger to avoid spamming
 let hasWarnedNoEventLogger = false
 
-function isUserPromptLoggingEnabled() {
-  return isEnvTruthy(process.env.OTEL_LOG_USER_PROMPTS)
+/** Official bLh — max chars kept when OTEL content logging is enabled. */
+export const OTEL_CONTENT_TRUNCATE_LIMIT = 61440
+
+function isUserPromptLoggingEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.OTEL_LOG_USER_PROMPTS)
 }
 
 export function redactIfDisabled(content: string): string {
   return isUserPromptLoggingEnabled() ? content : '<REDACTED>'
+}
+
+/**
+ * Official xkc densable — log assistant response body when
+ * OTEL_LOG_ASSISTANT_RESPONSES is set, else fall back to OTEL_LOG_USER_PROMPTS.
+ * Uses nullish semantics: an explicit falsy ASSISTANT value does NOT fall through.
+ */
+export function isAssistantResponseLoggingEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.OTEL_LOG_ASSISTANT_RESPONSES !== undefined) {
+    return isEnvTruthy(env.OTEL_LOG_ASSISTANT_RESPONSES)
+  }
+  return isUserPromptLoggingEnabled(env)
+}
+
+/**
+ * Official WU densable — truncate OTEL content past 60KB with a marker.
+ */
+export function truncateOTelContent(
+  content: string,
+  limit: number = OTEL_CONTENT_TRUNCATE_LIMIT,
+): { content: string; truncated: boolean } {
+  if (content.length <= limit) {
+    return { content, truncated: false }
+  }
+  return {
+    content:
+      content.slice(0, limit) + '\n\n[TRUNCATED - Content exceeds 60KB limit]',
+    truncated: true,
+  }
+}
+
+/**
+ * Official assistant_response body field: full (truncated) content when enabled,
+ * else redacted sentinel.
+ */
+export function formatAssistantResponseForOTel(
+  content: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (!isAssistantResponseLoggingEnabled(env)) {
+    return '<REDACTED>'
+  }
+  return truncateOTelContent(content).content
 }
 
 export async function logOTelEvent(

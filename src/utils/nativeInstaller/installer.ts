@@ -29,7 +29,7 @@ import {
   writeFile,
 } from 'fs/promises'
 import { homedir } from 'os'
-import { basename, delimiter, dirname, join, resolve } from 'path'
+import { basename, delimiter, dirname, join, resolve, sep } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -73,10 +73,93 @@ import {
 
 export const VERSION_RETENTION_COUNT = 2
 
+/**
+ * Official 2.1.207: path segment that marks a native-installer-owned version
+ * binary (`…/claude/versions/…`). Used to decide whether `~/.local/bin/claude`
+ * is ours to overwrite/clean up.
+ */
+export const NATIVE_VERSIONS_PATH_MARKER = `${sep}${join('claude', 'versions')}${sep}`
+
 // 7 days in milliseconds - used for mtime-based lock stale timeout.
 // This is long enough to survive laptop sleep durations while still
 // allowing cleanup of abandoned locks from crashed processes within a reasonable time.
 const LOCK_STALE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Pure: does a resolved symlink target point into the native versions dir?
+ * Official `der` target check (non-Windows).
+ */
+export function isNativeInstallerSymlinkTarget(
+  resolvedTarget: string,
+): boolean {
+  return resolvedTarget.includes(NATIVE_VERSIONS_PATH_MARKER)
+}
+
+/**
+ * Pure: is this realpath an npm shim (`.js` entry or under `node_modules`)?
+ * Official `per`.
+ */
+export function isNpmShimResolvedPath(resolvedPath: string): boolean {
+  return resolvedPath.endsWith('.js') || resolvedPath.includes('node_modules')
+}
+
+/**
+ * Official `der`: launcher is owned by the native installer when it is a
+ * symlink into `claude/versions/`. On Windows the "symlink" path is a copied
+ * executable, so ownership is treated as true (copy path has its own guards).
+ */
+export async function isNativeInstallerLauncher(
+  launcherPath: string,
+): Promise<boolean> {
+  if (process.platform === 'win32') {
+    return true
+  }
+  try {
+    const stats = await lstat(launcherPath)
+    if (!stats.isSymbolicLink()) {
+      return false
+    }
+    const target = await readlink(launcherPath)
+    const absoluteTarget = resolve(dirname(launcherPath), target)
+    return isNativeInstallerSymlinkTarget(absoluteTarget)
+  } catch (error) {
+    // Official: ENOENT → falsey path treated as "not native" for the
+    // `!der && !per` refuse check; other errors also fail closed.
+    return isENOENT(error) ? false : false
+  }
+}
+
+/**
+ * Official `per`: npm global shim (JS entry or node_modules path).
+ */
+export async function isNpmShimLauncher(
+  launcherPath: string,
+): Promise<boolean> {
+  try {
+    const resolved = await realpath(launcherPath)
+    return isNpmShimResolvedPath(resolved)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official gate: may the native installer replace / clean based on this
+ * launcher path? Custom scripts/symlinks that are neither native nor npm
+ * must be left alone (2.1.207).
+ */
+export async function isInstallerOwnedLauncher(
+  launcherPath: string,
+): Promise<boolean> {
+  if (await isNativeInstallerLauncher(launcherPath)) {
+    return true
+  }
+  try {
+    return await isNpmShimLauncher(launcherPath)
+  } catch {
+    return false
+  }
+}
 
 export type SetupMessage = {
   message: string
@@ -755,7 +838,19 @@ async function updateSymlink(
           return false
         }
       } catch {
-        // Path exists but is not a symlink - will remove it below
+        // Path exists but is not a symlink - may be a custom launcher
+      }
+
+      // Official 2.1.207: do not overwrite a custom launcher script/symlink
+      // that was not created by the native installer and is not an npm shim.
+      // New versions still install under versions/; user must remove the path
+      // and re-run update to let the installer manage the launcher again.
+      if (!(await isInstallerOwnedLauncher(symlinkPath))) {
+        logForDebugging(
+          `Not replacing ${symlinkPath}: it was not created by the native installer (not a symlink into a claude/versions/ directory) and is not an npm shim, so this update will not overwrite it. New versions still install under the versions/ directory; remove ${symlinkPath} and re-run the update to let the installer manage the launcher again.`,
+          { level: 'warn' },
+        )
+        return false
       }
 
       // Remove existing file/symlink before creating new one
@@ -830,6 +925,20 @@ export async function checkInstall(
   const resolvedLocalBinPath = resolve(localBinDir)
   const platform = getPlatform()
   const isWindows = platform.startsWith('win32')
+
+  // Official 2.1.207: report externally managed launcher in /doctor when the
+  // user is actually on a native install. Custom wrappers are intentional —
+  // auto-update leaves them untouched and version cleanup is disabled.
+  if (
+    installationType === 'native' &&
+    !(await isInstallerOwnedLauncher(dirs.executable))
+  ) {
+    messages.push({
+      message: `${dirs.executable} was not created by the native installer (it is not a symlink into the versions/ directory), so auto-update leaves it untouched. If you put a launcher wrapper there on purpose, this is expected — new versions still install under the versions/ directory, your launcher decides what runs, and automatic version cleanup is disabled on this machine (the installer cannot tell which version your launcher needs, so it keeps them all). To let Claude Code manage the launcher again, remove ${dirs.executable} and run \`claude update\`.`,
+      userActionRequired: true,
+      type: 'info',
+    })
+  }
 
   // Check if bin directory exists
   try {
@@ -1334,6 +1443,25 @@ export async function cleanupOldVersions(): Promise<void> {
   }
 
   if (versionFiles.length === 0) {
+    return
+  }
+
+  // Official 2.1.207: if the launcher is a custom script/symlink (not native
+  // versions/ and not an npm shim), we cannot determine which version(s) it
+  // needs — skip cleanup entirely so we do not delete a still-used binary.
+  if (!(await isInstallerOwnedLauncher(dirs.executable))) {
+    logForDebugging(
+      `Skipping native version cleanup: the launcher at ${dirs.executable} is externally managed, so the version(s) it needs cannot be determined`,
+    )
+    logEvent('tengu_native_version_cleanup', {
+      total_count: versionFiles.length,
+      deleted_count: 0,
+      protected_count: 0,
+      retained_count: VERSION_RETENTION_COUNT,
+      lock_failed_count: 0,
+      error_count: 0,
+      skipped_external_launcher: 1,
+    })
     return
   }
 

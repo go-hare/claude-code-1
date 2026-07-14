@@ -1,6 +1,11 @@
-import { getMainThreadAgentType } from '../bootstrap/state.js'
+import { getSessionId, getMainThreadAgentType } from '../bootstrap/state.js'
+import { clearCommandsCache } from '../commands.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import type { HookResultMessage } from '../types/message.js'
-import { createAttachmentMessage } from './attachments.js'
+import { createAttachmentMessage, resetSentSkillNames } from './attachments.js'
 import { logForDebugging } from './debug.js'
 import { withDiagnosticsTiming } from './diagLogs.js'
 import { isBareMode } from './envUtils.js'
@@ -9,6 +14,7 @@ import { shouldAllowManagedHooksOnly } from './hooks/hooksConfigSnapshot.js'
 import { executeSessionStartHooks, executeSetupHooks } from './hooks.js'
 import { logError } from './log.js'
 import { loadPluginHooks } from './plugins/loadPluginHooks.js'
+import { cacheSessionTitle, getCurrentSessionTitle } from './sessionStorage.js'
 
 type SessionStartHooksOptions = {
   sessionId?: string
@@ -25,10 +31,47 @@ type SessionStartHooksOptions = {
 // handoff would touch five callsites for what is a print-mode-only value).
 let pendingInitialUserMessage: string | undefined
 
+// Official 2.1.x: SessionStart sessionTitle is cached here for startup/resume
+// and applied after the session is ready (takeSessionStartTitle).
+let pendingSessionTitle: string | undefined
+
 export function takeInitialUserMessage(): string | undefined {
   const v = pendingInitialUserMessage
   pendingInitialUserMessage = undefined
   return v
+}
+
+export function takeSessionStartTitle(): string | undefined {
+  const v = pendingSessionTitle
+  pendingSessionTitle = undefined
+  return v
+}
+
+/**
+ * Apply a SessionStart/UserPromptSubmit sessionTitle to the current session.
+ * No-ops when empty, unchanged, or title already matches.
+ */
+export function applyHookSessionTitle(title: string | undefined): void {
+  if (!title) return
+  const trimmed = title.trim()
+  if (!trimmed) return
+  const sessionId = getSessionId()
+  const existing = getCurrentSessionTitle(sessionId)
+  if (existing === trimmed) return
+  logForDebugging(`Hook sessionTitle applied (${[...trimmed].length} chars)`)
+  cacheSessionTitle(trimmed)
+}
+
+function reloadSkillsFromSessionStartHook(): void {
+  // Official: YN() + Zee() + sV.emit() equivalent — clear skill/command caches
+  // so skills installed by SessionStart hooks are visible this session.
+  clearCommandsCache()
+  resetSentSkillNames()
+  logEvent('hook_session_start_reload_skills', {
+    source:
+      'session_start' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+  logForDebugging('SessionStart hook requested reloadSkills — caches cleared')
 }
 
 // Note to CLAUDE: do not add ANY "warmup" logic. It is **CRITICAL** that you do not add extra work on startup.
@@ -50,6 +93,8 @@ export async function processSessionStartHooks(
   const hookMessages: HookResultMessage[] = []
   const additionalContexts: string[] = []
   const allWatchPaths: string[] = []
+  let shouldReloadSkills = false
+  let sessionTitleFromHooks: string | undefined
 
   // Skip loading plugin hooks if restricted to managed hooks only
   // Plugin hooks are untrusted external code that should be blocked by policy
@@ -150,9 +195,29 @@ export async function processSessionStartHooks(
     if (hookResult.initialUserMessage) {
       pendingInitialUserMessage = hookResult.initialUserMessage
     }
+    if (hookResult.sessionTitle) {
+      sessionTitleFromHooks = hookResult.sessionTitle
+    }
+    if (hookResult.reloadSkills) {
+      shouldReloadSkills = true
+    }
     if (hookResult.watchPaths && hookResult.watchPaths.length > 0) {
       allWatchPaths.push(...hookResult.watchPaths)
     }
+  }
+
+  // Official 2.1.x: reload skills before applying title so skills installed
+  // by this SessionStart run are available in the same session.
+  if (shouldReloadSkills) {
+    reloadSkillsFromSessionStartHook()
+  }
+
+  // Official: only cache title for startup/resume (not clear/compact).
+  if ((source === 'startup' || source === 'resume') && sessionTitleFromHooks) {
+    pendingSessionTitle = sessionTitleFromHooks
+    // Also apply immediately so interactive UI can show it without waiting
+    // for takeSessionStartTitle consumers.
+    applyHookSessionTitle(sessionTitleFromHooks)
   }
 
   if (allWatchPaths.length > 0) {

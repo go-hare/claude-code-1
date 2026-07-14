@@ -7,8 +7,51 @@ import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt
 import { GREP_TOOL_NAME } from '@claude-code/builtin-tools/tools/GrepTool/prompt.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/NotebookEditTool/constants.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
+import { getAPIProvider } from 'src/utils/model/providers.js'
 import { AGENT_TOOL_NAME } from '../constants.js'
 import type { BuiltInAgentDefinition } from '../loadAgentsDir.js'
+
+/** Official e_u — Explore parent-model tier list (haiku → sonnet → opus). */
+export const EXPLORE_MODEL_TIERS = ['haiku', 'sonnet', 'opus'] as const
+/** Official r_u — cap Explore to opus when parent is outside the tier list. */
+export const EXPLORE_MODEL_CAP = 'opus' as const
+
+/**
+ * Official $6e / zbg — built-in Explore model resolution.
+ * Always inherit for non-firstParty. On firstParty, if the parent model name
+ * does not include any of haiku/sonnet/opus (up to EXPLORE_MODEL_CAP), force
+ * "opus" instead of inheriting an unbounded parent model.
+ *
+ * `provider` is injectable for tests; production callers omit it.
+ */
+export function resolveBuiltInExploreModel(
+  parentModel: string,
+  provider: string = getAPIProvider(),
+): 'inherit' | typeof EXPLORE_MODEL_CAP {
+  if (provider !== 'firstParty') return 'inherit'
+  const allowed = EXPLORE_MODEL_TIERS.slice(
+    0,
+    EXPLORE_MODEL_TIERS.indexOf(EXPLORE_MODEL_CAP) + 1,
+  )
+  const lower = parentModel.toLowerCase()
+  const inList = allowed.some(t => t.length > 0 && lower.includes(t))
+  return inList ? 'inherit' : EXPLORE_MODEL_CAP
+}
+
+/**
+ * Official $6e(agent, parentModel) — only rewrites built-in Explore; other
+ * agents keep their definition model as-is.
+ */
+export function resolveAgentDefinitionModel(
+  agent: { agentType: string; source: string; model?: string },
+  parentModel: string,
+  provider?: string,
+): string | undefined {
+  if (agent.agentType === 'Explore' && agent.source === 'built-in') {
+    return resolveBuiltInExploreModel(parentModel, provider)
+  }
+  return agent.model
+}
 
 function getExploreSystemPrompt(): string {
   // Ant-native builds alias find/grep to embedded bfs/ugrep and remove the
@@ -73,9 +116,9 @@ export const EXPLORE_AGENT: BuiltInAgentDefinition = {
   ],
   source: 'built-in',
   baseDir: 'built-in',
-  // Ants get inherit to use the main agent's model; external users get haiku for speed
-  // Note: For ants, getAgentModel() checks tengu_explore_agent GrowthBook flag at runtime
-  model: process.env.USER_TYPE === 'ant' ? 'inherit' : 'haiku',
+  // Official 208: always inherit; firstParty cap-to-opus applied at call time
+  // via resolveBuiltInExploreModel / resolveAgentDefinitionModel ($6e/zbg).
+  model: 'inherit',
   // Explore is a fast read-only search agent — it doesn't need commit/PR/lint
   // rules from CLAUDE.md. The main agent has full context and interprets results.
   omitClaudeMd: true,

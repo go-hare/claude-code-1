@@ -694,7 +694,19 @@ export async function detectIDEs(
       if (!lockfileInfo) continue
 
       let isValid = false
-      if (isEnvTruthy(process.env.CLAUDE_CODE_IDE_SKIP_VALID_CHECK)) {
+      // Official IDE_SKIP_VALID_CHECK densable.
+      let skipValidCheck = isEnvTruthy(
+        process.env.CLAUDE_CODE_IDE_SKIP_VALID_CHECK,
+      )
+      try {
+        const { isIdeSkipValidCheckEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+        skipValidCheck = isIdeSkipValidCheckEnvEnabled()
+      } catch {
+        // keep raw env fallback
+      }
+      if (skipValidCheck) {
         isValid = true
       } else if (lockfileInfo.port === envPort) {
         // If the port matches the environment variable, mark as valid regardless of directory
@@ -1297,10 +1309,19 @@ export async function initializeIdeIntegration(
   void findAvailableIDE().then(onIdeDetected)
 
   const shouldAutoInstall = getGlobalConfig().autoInstallIdeExtension ?? true
-  if (
-    !isEnvTruthy(process.env.CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL) &&
-    shouldAutoInstall
-  ) {
+  // Official IDE_SKIP_AUTO_INSTALL densable.
+  let skipAutoInstall = isEnvTruthy(
+    process.env.CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL,
+  )
+  try {
+    const { isIdeSkipAutoInstallEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    skipAutoInstall = isIdeSkipAutoInstallEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (!skipAutoInstall && shouldAutoInstall) {
     const ideType = ideToInstallExtension ?? getTerminalIdeType()
     if (ideType) {
       if (isVSCodeIde(ideType)) {

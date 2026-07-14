@@ -27,7 +27,7 @@ import { parseCommandRaw } from 'src/utils/bash/parser.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
-import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { isCommandInjectionCheckDisabled } from 'src/utils/residualFinalEnvGates.js'
 import { AbortError } from 'src/utils/errors.js'
 import type {
   ClassifierBehavior,
@@ -75,6 +75,7 @@ import {
 } from './bashSecurity.js'
 import { checkPermissionMode } from './modeValidation.js'
 import { checkPathConstraints } from './pathValidation.js'
+import { commandWritesToGitInternalPaths } from './readOnlyValidation.js'
 import { checkSedConstraints } from './sedValidation.js'
 import { shouldUseSandbox } from './shouldUseSandbox.js'
 
@@ -1032,6 +1033,7 @@ export const bashToolCheckExactMatchPermission = (
   const decisionReason = {
     type: 'other' as const,
     reason: 'This command requires approval',
+    bashMissKind: 'no-rule-match',
   }
   return {
     behavior: 'passthrough',
@@ -1162,6 +1164,7 @@ export const bashToolCheckPermission = (
   const decisionReason = {
     type: 'other' as const,
     reason: 'This command requires approval',
+    bashMissKind: 'no-rule-match',
   }
   return {
     behavior: 'passthrough',
@@ -1210,10 +1213,7 @@ export async function checkCommandAndSuggestRules(
   // AST parse already succeeded — tree-sitter has verified there are no
   // hidden substitutions or structural tricks, so the legacy regex-based
   // validators (backslash-escaped operators, etc.) would only add FPs.
-  if (
-    !astParseSucceeded &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_COMMAND_INJECTION_CHECK)
-  ) {
+  if (!astParseSucceeded && !isCommandInjectionCheckDisabled()) {
     const safetyResult = await bashCommandIsSafeAsync(input.command)
 
     if (safetyResult.behavior !== 'passthrough') {
@@ -1671,9 +1671,7 @@ export async function bashToolHasPermission(
   //
   // When tree-sitter WASM is unavailable OR the injection check is disabled
   // via env var, we fall back to the old path (legacy gate at ~1370 runs).
-  const injectionCheckDisabled = isEnvTruthy(
-    process.env.CLAUDE_CODE_DISABLE_COMMAND_INJECTION_CHECK,
-  )
+  const injectionCheckDisabled = isCommandInjectionCheckDisabled()
   // GrowthBook killswitch for shadow mode — when off, skip the native parse
   // entirely. Computed once; feature() must stay inline in the ternary below.
   const shadowEnabled = feature('TREE_SITTER_BASH_SHADOW')
@@ -1744,6 +1742,7 @@ export async function bashToolHasPermission(
     const decisionReason: PermissionDecisionReason = {
       type: 'other' as const,
       reason: astResult.reason,
+      bashMissKind: 'too-complex',
     }
     logEvent('tengu_bash_ast_too_complex', {
       nodeTypeId: nodeTypeId(astResult.nodeType),
@@ -1780,6 +1779,7 @@ export async function bashToolHasPermission(
       const decisionReason: PermissionDecisionReason = {
         type: 'other' as const,
         reason: (sem as { ok: false; reason: string }).reason,
+        bashMissKind: 'semantics',
       }
       return {
         behavior: 'ask',
@@ -1951,6 +1951,7 @@ export async function bashToolHasPermission(
           decisionReason: {
             type: 'other',
             reason: `Required by Bash prompt rule: "${askResult.matchedDescription}"`,
+            bashMissKind: 'prompt-ask-rule',
           },
           suggestions,
           ...(feature('BASH_CLASSIFIER')
@@ -2078,10 +2079,7 @@ export async function bashToolHasPermission(
   // block is skipped entirely. The AST's 'too-complex' result subsumes
   // everything isBashSecurityCheckForMisparsing covered — both answer the
   // same question: "can splitCommand be trusted on this input?"
-  if (
-    astSubcommands === null &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_COMMAND_INJECTION_CHECK)
-  ) {
+  if (astSubcommands === null && !isCommandInjectionCheckDisabled()) {
     const originalCommandSafetyResult = await bashCommandIsSafeAsync(
       input.command,
     )
@@ -2183,6 +2181,7 @@ export async function bashToolHasPermission(
       type: 'other' as const,
       reason:
         'Multiple directory changes in one command require approval for clarity',
+      bashMissKind: 'multi-cd',
     }
     return {
       behavior: 'ask',
@@ -2194,6 +2193,26 @@ export async function bashToolHasPermission(
   // Track if compound command contains cd for security validation
   // This prevents bypassing path checks via: cd .claude/ && mv test.txt settings.json
   const compoundCommandHasCd = cdCommands.length > 0
+  const hasGitCommand = subcommands.some(cmd =>
+    isNormalizedGitCommand(cmd.trim()),
+  )
+
+  // SECURITY: create bare-repo structure (HEAD/objects/refs/hooks) then run git.
+  // Official bashMissKind `cd-git-compound` covers this structure-create surface
+  // even without an explicit `cd` in the compound command.
+  if (hasGitCommand && commandWritesToGitInternalPaths(input.command)) {
+    const decisionReason = {
+      type: 'other' as const,
+      reason:
+        'This command creates git repository structure files (HEAD/objects/refs/hooks) and then runs git, which can execute hooks/fsmonitor from the created files.',
+      bashMissKind: 'cd-git-compound',
+    }
+    return {
+      behavior: 'ask',
+      decisionReason,
+      message: createPermissionRequestMessage(BashTool.name, decisionReason),
+    }
+  }
 
   // SECURITY: Block compound commands that have both cd AND git
   // This prevents sandbox escape via: cd /malicious/dir && git status
@@ -2202,21 +2221,18 @@ export async function bashToolHasPermission(
   // because bashToolCheckPermission checks each subcommand independently via
   // BashTool.isReadOnly(), which would re-derive compoundCommandHasCd=false
   // from just "git status" alone, bypassing the readOnlyValidation.ts check.
-  if (compoundCommandHasCd) {
-    const hasGitCommand = subcommands.some(cmd =>
-      isNormalizedGitCommand(cmd.trim()),
-    )
-    if (hasGitCommand) {
-      const decisionReason = {
-        type: 'other' as const,
-        reason:
-          'Compound commands with cd and git require approval to prevent bare repository attacks',
-      }
-      return {
-        behavior: 'ask',
-        decisionReason,
-        message: createPermissionRequestMessage(BashTool.name, decisionReason),
-      }
+  if (compoundCommandHasCd && hasGitCommand) {
+    const decisionReason = {
+      type: 'other' as const,
+      // Official 2.1.x wording for the cd+git hook/fsmonitor surface.
+      reason:
+        'This command changes directory before running git, which can execute untrusted hooks from the target directory. Approve only if you trust it.',
+      bashMissKind: 'cd-git-compound',
+    }
+    return {
+      behavior: 'ask',
+      decisionReason,
+      message: createPermissionRequestMessage(BashTool.name, decisionReason),
     }
   }
 
@@ -2337,10 +2353,7 @@ export async function bashToolHasPermission(
   // substitutions, no structural tricks); the per-subcommand re-check is
   // redundant. When on the legacy path, re-run bashCommandIsSafeAsync per sub.
   let hasPossibleCommandInjection = false
-  if (
-    astSubcommands === null &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_COMMAND_INJECTION_CHECK)
-  ) {
+  if (astSubcommands === null && !isCommandInjectionCheckDisabled()) {
     // CC-643: Batch divergence telemetry into a single logEvent. The per-sub
     // logEvent was the hot-path syscall driver (each call → /proc/self/stat
     // via process.memoryUsage()). Aggregate count preserves the signal.

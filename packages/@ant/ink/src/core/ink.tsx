@@ -65,6 +65,19 @@ import {
   startSelection,
   updateSelection,
 } from './selection.js';
+import {
+  computeScreenReaderPark,
+  materializeScreenReaderFrameAnsi,
+  materializeScreenReaderLines,
+  planScreenReaderFrameUpdate,
+  type ScreenReaderPark,
+} from './screenReaderPark.js';
+import {
+  extractScreenReaderText,
+  findScreenReaderNodeStartIndex,
+  type ScreenReaderDOMNode,
+} from './screenReaderTree.js';
+import { stringWidth } from './stringWidth.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
 import {
   CURSOR_HOME,
@@ -116,6 +129,75 @@ function makeAltScreenParkPatch(terminalRows: number) {
   });
 }
 
+/** Official LIVE_COUNTS_INTERVAL_MS — throttle expensive DOM/fiber walks. */
+const LIVE_COUNTS_INTERVAL_MS = 100;
+
+/** Reused walk stacks (official jIh/WIh) — avoid alloc on hot sample path. */
+const fiberWalkStack: FiberLike[] = [];
+const domWalkStack: DomLike[] = [];
+
+type FiberLike = {
+  child?: FiberLike | null;
+  sibling?: FiberLike | null;
+  alternate?: FiberLike | null;
+};
+
+type DomLike = {
+  childNodes?: ArrayLike<unknown>;
+};
+
+/**
+ * Official Dxc — count live React fibers under root (incl. alternate trees).
+ */
+function countLiveFibers(root: FiberLike | null | undefined): number {
+  if (!root) return 0;
+  let count = 0;
+  const stack = fiberWalkStack;
+  stack.length = 0;
+  stack.push(root);
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    count++;
+    if (node.alternate) count++;
+    if (node.sibling) stack.push(node.sibling);
+    if (node.child) stack.push(node.child);
+  }
+  stack.length = 0;
+  return count;
+}
+
+/**
+ * Official Pxc — count live Ink DOM nodes under root (childNodes walk).
+ */
+function countLiveDomNodes(root: DomLike | null | undefined): number {
+  if (!root) return 0;
+  let count = 0;
+  const stack = domWalkStack;
+  stack.length = 0;
+  stack.push(root);
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    count++;
+    if (node.childNodes) {
+      const kids = node.childNodes;
+      for (let i = 0; i < kids.length; i++) {
+        stack.push(kids[i] as DomLike);
+      }
+    }
+  }
+  stack.length = 0;
+  return count;
+}
+
+function isBenchLiveCountsEnvEnabled(): boolean {
+  const v = process.env.CLAUDE_CODE_BENCH_LIVE_COUNTS;
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function isEnvTruthyLike(value: string | undefined): boolean {
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
 export type Logger = {
   debug(message: string, options?: { level?: string }): void;
   error(error: Error | unknown): void;
@@ -133,6 +215,12 @@ export type Options = {
   onBeforeRender?: () => void;
   /** Injected logger. Replaces logForDebugging / logError imports. */
   logger?: Logger;
+  /**
+   * Official isScreenReaderEnabled. When unset, falls back to INK_SCREEN_READER
+   * on TTY (official constructor). When true, onRender routes to
+   * onRenderScreenReader (plain-text + park ANSI write path).
+   */
+  isScreenReaderEnabled?: boolean;
 };
 
 /** No-op logger used when no logger is injected. */
@@ -173,6 +261,20 @@ export default class Ink {
     cacheHits: number;
     live: number;
   } = { ms: 0, visited: 0, measured: 0, cacheHits: 0, live: 0 };
+  /** Official liveCountsEnabled from CLAUDE_CODE_BENCH_LIVE_COUNTS. */
+  private readonly liveCountsEnabled: boolean;
+  private lastLiveCountSampleAt = 0;
+  /**
+   * Official accessibilityMode from CLAUDE_CODE_ACCESSIBILITY (magnifier).
+   * Separate from isScreenReaderEnabled (ax screen-reader path).
+   */
+  private readonly accessibilityMode: boolean;
+  /** Official isScreenReaderEnabled — routes onRender → onRenderScreenReader. */
+  private readonly isScreenReaderEnabled: boolean;
+  /** Official prevScreenReaderLines — last written SR frame lines. */
+  private prevScreenReaderLines: string[] = [];
+  /** Official prevScreenReaderPark — last parked SR cursor. */
+  private prevScreenReaderPark: ScreenReaderPark = { row: 0, col: 0 };
   private altScreenParkPatch: Readonly<{ type: 'stdout'; content: string }>;
   // Text selection state (alt-screen only). Owned here so the overlay
   // pass in onRender can read it and App.tsx can update it from mouse
@@ -236,6 +338,13 @@ export default class Ink {
   constructor(private readonly options: Options) {
     autoBind(this);
     this.logger = options.logger ?? noopLogger;
+    // Official: this.liveCountsEnabled=ct(process.env.CLAUDE_CODE_BENCH_LIVE_COUNTS)
+    this.liveCountsEnabled = isBenchLiveCountsEnvEnabled();
+    // Official: this.accessibilityMode=be.CLAUDE_CODE_ACCESSIBILITY
+    this.accessibilityMode = isEnvTruthyLike(process.env.CLAUDE_CODE_ACCESSIBILITY);
+    // Official: e.isScreenReaderEnabled ?? (!!stdout.isTTY && ct(INK_SCREEN_READER))
+    this.isScreenReaderEnabled =
+      options.isScreenReaderEnabled ?? (!!options.stdout.isTTY && isEnvTruthyLike(process.env.INK_SCREEN_READER));
 
     if (this.options.patchConsole) {
       this.restoreConsole = this.patchConsole();
@@ -387,7 +496,15 @@ export default class Ink {
     // suspend. Clear displayCursor so the next frame's cursor preamble
     // doesn't emit a relative move from a stale park position.
     this.displayCursor = null;
+    // Official: this.nativeCursorVisible=this.accessibilityMode; reset SR diff
+    this.resetScreenReaderDiffState();
   };
+
+  /** Official resetScreenReaderDiffState — clear prev SR frame + park. */
+  resetScreenReaderDiffState(): void {
+    this.prevScreenReaderLines = [];
+    this.prevScreenReaderPark = { row: 0, col: 0 };
+  }
 
   // NOT debounced. A debounce opens a window where stdout.columns is NEW
   // but this.terminalColumns/Yoga are OLD — any scheduleRender during that
@@ -405,6 +522,8 @@ export default class Ink {
     this.terminalColumns = cols;
     this.terminalRows = rows;
     this.altScreenParkPatch = makeAltScreenParkPatch(this.terminalRows);
+    // Official syncTerminalSize: resetScreenReaderDiffState on resize
+    this.resetScreenReaderDiffState();
 
     // Alt screen: reset frame buffers so the next render repaints from
     // scratch (prevFrameContaminated → every cell written, wrapped in
@@ -520,6 +639,12 @@ export default class Ink {
     // Done before the render to avoid dirtying state that would trigger
     // an extra React re-render cycle.
     this.options.onBeforeRender?.();
+
+    // Official: if (this.isScreenReaderEnabled) { this.onRenderScreenReader(); return }
+    if (this.isScreenReaderEnabled) {
+      this.onRenderScreenReader();
+      return;
+    }
 
     const renderStart = performance.now();
     const terminalWidth = this.options.stdout.columns || 80;
@@ -877,9 +1002,113 @@ export default class Ink {
         yogaMeasured: yc.measured,
         yogaCacheHits: yc.cacheHits,
         yogaLive: yc.live,
+        // Official: ...liveCountsEnabled && shouldSampleLiveCounts() && {domLive, fiberLive}
+        ...(this.liveCountsEnabled && this.shouldSampleLiveCounts()
+          ? {
+              domLive: countLiveDomNodes(this.rootNode),
+              fiberLive: countLiveFibers((this.container as unknown as { current?: FiberLike | null }).current),
+            }
+          : {}),
       },
       flickers,
     });
+  }
+
+  /**
+   * Official shouldSampleLiveCounts — at most once per LIVE_COUNTS_INTERVAL_MS.
+   */
+  private shouldSampleLiveCounts(): boolean {
+    const now = performance.now();
+    if (now - this.lastLiveCountSampleAt < LIVE_COUNTS_INTERVAL_MS) {
+      return false;
+    }
+    this.lastLiveCountSampleAt = now;
+    return true;
+  }
+
+  /**
+   * Official onRenderScreenReader — plain-text frame write path for
+   * INK_SCREEN_READER / isScreenReaderEnabled.
+   *
+   * Extract DOM text (o1r) → hard-wrap lines → plan diff → s3n/i3n/MHe ANSI
+   * → stdout.write; park cursor at declared caret.
+   */
+  onRenderScreenReader(): void {
+    const fullText = extractScreenReaderText(this.rootNode as ScreenReaderDOMNode);
+    const columns = this.options.stdout.columns || this.terminalColumns || 80;
+    const terminalRows = this.options.stdout.rows || this.terminalRows || 24;
+
+    const decl = this.cursorDeclaration;
+    let cursor: {
+      nodeStartIndex: number;
+      relativeX: number;
+      relativeY: number;
+    } | null = null;
+    if (decl !== null) {
+      const nodeStart = findScreenReaderNodeStartIndex(
+        this.rootNode as ScreenReaderDOMNode,
+        decl.node as ScreenReaderDOMNode,
+      );
+      if (nodeStart !== null) {
+        cursor = {
+          nodeStartIndex: nodeStart,
+          relativeX: decl.relativeX,
+          relativeY: decl.relativeY,
+        };
+      }
+    }
+
+    const plan = planScreenReaderFrameUpdate({
+      fullText,
+      columns,
+      prevLines: this.prevScreenReaderLines,
+      prevPark: this.prevScreenReaderPark,
+      terminalRows,
+      cursor,
+      stringWidth,
+    });
+    if (plan.skip) return;
+
+    const ansi = materializeScreenReaderFrameAnsi(plan);
+    if (ansi.length > 0) {
+      this.options.stdout.write(ansi);
+    }
+
+    // Official: this.prevScreenReaderLines=n; this.prevScreenReaderPark=a
+    const { lines } = materializeScreenReaderLines(fullText, columns);
+    this.prevScreenReaderLines = lines;
+    this.prevScreenReaderPark = plan.park;
+  }
+
+  /**
+   * Official computeScreenReaderPark method form — used by densable path
+   * via planScreenReaderFrameUpdate; kept for parity / tests.
+   */
+  computeScreenReaderPark(
+    fullText: string,
+    lineBaseRows: readonly number[],
+    lines: readonly string[],
+    columns: number,
+  ): ScreenReaderPark | null {
+    const decl = this.cursorDeclaration;
+    if (decl === null) return null;
+    const nodeStart = findScreenReaderNodeStartIndex(
+      this.rootNode as ScreenReaderDOMNode,
+      decl.node as ScreenReaderDOMNode,
+    );
+    if (nodeStart === null) return null;
+    return computeScreenReaderPark(
+      fullText,
+      lineBaseRows,
+      lines.length,
+      columns,
+      {
+        nodeStartIndex: nodeStart,
+        relativeX: decl.relativeX,
+        relativeY: decl.relativeY,
+      },
+      stringWidth,
+    );
   }
 
   pause(): void {
@@ -937,6 +1166,8 @@ export default class Ink {
     // Clear displayCursor so the cursor preamble doesn't emit a stale
     // relative move from where we last parked it.
     this.displayCursor = null;
+    // Official repaint also resets screen-reader diff state
+    this.resetScreenReaderDiffState();
   }
 
   /**
@@ -1604,6 +1835,7 @@ export default class Ink {
         onStdinResume={this.reassertTerminalModes}
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
+        isScreenReaderEnabled={this.isScreenReaderEnabled || this.accessibilityMode}
       >
         <TerminalWriteProvider value={this.writeRaw}>{node}</TerminalWriteProvider>
       </App>

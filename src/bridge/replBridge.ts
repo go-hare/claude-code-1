@@ -207,6 +207,10 @@ export type BridgeCoreParams = {
   onSetPermissionMode?: (
     mode: PermissionMode,
   ) => { ok: true } | { ok: false; error: string }
+  onSetMcpPermissionModeOverride?: (
+    serverName: string,
+    mode: string | null,
+  ) => { ok: true; warning?: string } | { ok: false; error: string }
   onStateChange?: (state: BridgeState, detail?: string) => void
   /**
    * Fires on each real user message to flow through writeMessages() until
@@ -304,6 +308,7 @@ export async function initBridgeCore(
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
+    onSetMcpPermissionModeOverride,
     onStateChange,
     onUserMessage,
     perpetual,
@@ -1233,6 +1238,7 @@ export async function initBridgeCore(
           onSetModel,
           onSetMaxThinkingTokens,
           onSetPermissionMode,
+          onSetMcpPermissionModeOverride,
         })
 
       let initialFlushDone = false

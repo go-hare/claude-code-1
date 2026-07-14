@@ -26,11 +26,13 @@ export type BundledSkillDefinition = {
   hooks?: HooksSettings
   context?: 'inline' | 'fork'
   agent?: string
+  /** Shown while the skill prompt is running (default "running"). */
+  progressMessage?: string
   /**
    * Additional reference files to extract to disk on first invocation.
    * Keys are relative paths (forward slashes, no `..`), values are content.
    * When set, the skill prompt is prefixed with a "Base directory for this
-   * skill: <dir>" line so the model can Read/Grep these files on demand —
+   * skill: <dir>" line so the model can Read/Grep them on demand —
    * same contract as disk-based skills.
    */
   files?: Record<string, string>
@@ -93,7 +95,7 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     agent: definition.agent,
     isEnabled: definition.isEnabled,
     isHidden: !(definition.userInvocable ?? true),
-    progressMessage: 'running',
+    progressMessage: definition.progressMessage ?? 'running',
     getPromptForCommand,
   }
   bundledSkills.push(command)

@@ -50,8 +50,18 @@ export function getCLISyspromptPrefix(options?: {
  * Enabled by default, can be disabled via env var or GrowthBook killswitch.
  */
 function isAttributionHeaderEnabled(): boolean {
-  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ATTRIBUTION_HEADER)) {
-    return false
+  // Official ATTRIBUTION_HEADER densable pure env half.
+  try {
+    const { resolveAttributionHeaderEnvOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    const envOverride = resolveAttributionHeaderEnvOverride()
+    if (envOverride === false) return false
+    if (envOverride === true) return true
+  } catch {
+    if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ATTRIBUTION_HEADER)) {
+      return false
+    }
   }
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_attribution_header', true)
 }

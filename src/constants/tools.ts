@@ -40,6 +40,7 @@ import {
 } from '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js'
 import { LOCAL_MEMORY_RECALL_TOOL_NAME } from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/constants.js'
 import { VAULT_HTTP_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/VaultHttpFetchTool/constants.js'
+import { OBSERVER_REPORT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ObserverReportTool/constants.js'
 
 export const ALL_AGENT_DISALLOWED_TOOLS = new Set([
   TASK_OUTPUT_TOOL_NAME,
@@ -85,6 +86,8 @@ export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
   EXECUTE_TOOL_NAME,
   ENTER_WORKTREE_TOOL_NAME,
   EXIT_WORKTREE_TOOL_NAME,
+  // Official observer async agents deliver via ObserverReport (WId).
+  OBSERVER_REPORT_TOOL_NAME,
 ])
 /**
  * Tools allowed only for in-process teammates (not general async agents).

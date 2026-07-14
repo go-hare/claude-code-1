@@ -45,9 +45,17 @@ export type OfficialMarketplaceSkipReason =
  * Check if official marketplace auto-install is disabled via environment variable.
  */
 export function isOfficialMarketplaceAutoInstallDisabled(): boolean {
-  return isEnvTruthy(
-    process.env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL,
-  )
+  // Official DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL densable.
+  try {
+    const { isOfficialMarketplaceAutoinstallDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    return isOfficialMarketplaceAutoinstallDisabled()
+  } catch {
+    return isEnvTruthy(
+      process.env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL,
+    )
+  }
 }
 
 /**

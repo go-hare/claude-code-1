@@ -36,11 +36,22 @@ export function getEffectiveContextWindowSize(model: string): number {
   )
   let contextWindow = getContextWindowForModel(model, getSdkBetas())
 
-  const autoCompactWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
-  if (autoCompactWindow) {
-    const parsed = parseInt(autoCompactWindow, 10)
-    if (!isNaN(parsed) && parsed > 0) {
+  // Official AUTO_COMPACT_WINDOW densable pure parse.
+  try {
+    const { resolveAutoCompactWindowOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    const parsed = resolveAutoCompactWindowOverride()
+    if (parsed !== null) {
       contextWindow = Math.min(contextWindow, parsed)
+    }
+  } catch {
+    const autoCompactWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
+    if (autoCompactWindow) {
+      const parsed = parseInt(autoCompactWindow, 10)
+      if (!isNaN(parsed) && parsed > 0) {
+        contextWindow = Math.min(contextWindow, parsed)
+      }
     }
   }
 
@@ -100,8 +111,18 @@ const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
 export function getAutoCompactThreshold(model: string): number {
   const effectiveContextWindow = getEffectiveContextWindowSize(model)
 
-  const autocompactThreshold =
-    effectiveContextWindow - getAutocompactBufferTokens(model)
+  // Official zNy cold-compact densable — larger buffer → earlier autocompact.
+  let bufferTokens = getAutocompactBufferTokens(model)
+  try {
+    const { scaleAutocompactBufferForColdCompact } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/coldCompact.js') as typeof import('../../utils/coldCompact.js')
+    bufferTokens = scaleAutocompactBufferForColdCompact(bufferTokens)
+  } catch {
+    // densable optional
+  }
+
+  const autocompactThreshold = effectiveContextWindow - bufferTokens
 
   // Override for easier testing of autocompact
   const envPercent = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
@@ -151,15 +172,24 @@ export function calculateTokenWarningState(
   const defaultBlockingLimit =
     actualContextWindow - MANUAL_COMPACT_BUFFER_TOKENS
 
-  // Allow override for testing
-  const blockingLimitOverride = process.env.CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE
-  const parsedOverride = blockingLimitOverride
-    ? parseInt(blockingLimitOverride, 10)
-    : NaN
-  const blockingLimit =
-    !isNaN(parsedOverride) && parsedOverride > 0
-      ? parsedOverride
-      : defaultBlockingLimit
+  // Official BLOCKING_LIMIT_OVERRIDE densable pure parse.
+  let blockingLimit = defaultBlockingLimit
+  try {
+    const { resolveBlockingLimitOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    const parsedOverride = resolveBlockingLimitOverride()
+    if (parsedOverride !== null) blockingLimit = parsedOverride
+  } catch {
+    const blockingLimitOverride =
+      process.env.CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE
+    const parsedOverride = blockingLimitOverride
+      ? parseInt(blockingLimitOverride, 10)
+      : NaN
+    if (!isNaN(parsedOverride) && parsedOverride > 0) {
+      blockingLimit = parsedOverride
+    }
+  }
 
   const isAtBlockingLimit = tokenUsage >= blockingLimit
 
@@ -184,6 +214,9 @@ export function isAutoCompactEnabled(): boolean {
   const userConfig = getGlobalConfig()
   return userConfig.autoCompactEnabled
 }
+
+// Official zNy — re-export portable cold-compact gate for compact callers.
+export { isColdCompactEnabled } from '../../utils/coldCompact.js'
 
 export async function shouldAutoCompact(
   messages: Message[],

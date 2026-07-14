@@ -82,6 +82,10 @@ export type InitBridgeOptions = {
   onSetPermissionMode?: (
     mode: PermissionMode,
   ) => { ok: true } | { ok: false; error: string }
+  onSetMcpPermissionModeOverride?: (
+    serverName: string,
+    mode: string | null,
+  ) => { ok: true; warning?: string } | { ok: false; error: string }
   onStateChange?: (state: BridgeState, detail?: string) => void
   initialMessages?: Message[]
   // Explicit session name from `/remote-control <name>`. When set, overrides
@@ -118,6 +122,7 @@ export async function initReplBridge(
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
+    onSetMcpPermissionModeOverride,
     onStateChange,
     initialMessages,
     getMessages,
@@ -452,6 +457,7 @@ export async function initReplBridge(
       onSetModel,
       onSetMaxThinkingTokens,
       onSetPermissionMode,
+      onSetMcpPermissionModeOverride,
       onStateChange,
       outboundOnly,
       tags,
@@ -542,6 +548,7 @@ export async function initReplBridge(
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
+    onSetMcpPermissionModeOverride,
     onStateChange,
     perpetual,
   })

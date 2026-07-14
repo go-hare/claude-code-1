@@ -3,13 +3,12 @@ import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import { findToolByName, type ToolUseContext } from '../../Tool.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import { all } from '../../utils/generators.js'
+import { resolveMaxToolUseConcurrency } from '../../utils/residualMsEnvGates.js'
 import { type MessageUpdateLazy, runToolUse } from './toolExecution.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 
 function getMaxToolUseConcurrency(): number {
-  return (
-    parseInt(process.env.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY || '', 10) || 10
-  )
+  return resolveMaxToolUseConcurrency()
 }
 
 export type MessageUpdate = {
@@ -137,22 +136,40 @@ async function* runToolsSerially(
   toolUseContext: ToolUseContext,
 ): AsyncGenerator<MessageUpdate, void> {
   let currentContext = toolUseContext
+  const priorBlocks: ToolUseBlock[] = []
 
   for (const toolUse of toolUseMessages) {
     toolUseContext.setInProgressToolUseIDs(prev =>
       new Set(prev).add(toolUse.id),
     )
+    const assistantMessage = assistantMessages.find(
+      _ =>
+        Array.isArray(_.message.content) &&
+        _.message.content.some(
+          _ => _.type === 'tool_use' && _.id === toolUse.id,
+        ),
+    )!
+    // Official sameTurnToolUses for non-streaming serial path: prior blocks
+    // from this batch (siblings that started before this tool).
+    const sameTurnToolUses =
+      priorBlocks.length > 0
+        ? [
+            {
+              ...assistantMessage,
+              message: {
+                ...assistantMessage.message,
+                content: [...priorBlocks],
+              },
+            },
+          ]
+        : undefined
     for await (const update of runToolUse(
       toolUse,
-      assistantMessages.find(
-        _ =>
-          Array.isArray(_.message.content) &&
-          _.message.content.some(
-            _ => _.type === 'tool_use' && _.id === toolUse.id,
-          ),
-      )!,
+      assistantMessage,
       canUseTool,
-      currentContext,
+      sameTurnToolUses
+        ? { ...currentContext, sameTurnToolUses }
+        : currentContext,
     )) {
       if (update.contextModifier) {
         currentContext = update.contextModifier.modifyContext(currentContext)
@@ -162,6 +179,7 @@ async function* runToolsSerially(
         newContext: currentContext,
       }
     }
+    priorBlocks.push(toolUse)
     markToolUseAsComplete(toolUseContext, toolUse.id)
   }
 }
@@ -173,21 +191,38 @@ async function* runToolsConcurrently(
   toolUseContext: ToolUseContext,
 ): AsyncGenerator<MessageUpdateLazy, void> {
   yield* all(
-    toolUseMessages.map(async function* (toolUse) {
+    toolUseMessages.map(async function* (toolUse, index) {
       toolUseContext.setInProgressToolUseIDs(prev =>
         new Set(prev).add(toolUse.id),
       )
+      const assistantMessage = assistantMessages.find(
+        _ =>
+          Array.isArray(_.message.content) &&
+          _.message.content.some(
+            _ => _.type === 'tool_use' && _.id === toolUse.id,
+          ),
+      )!
+      // Prior tools in this concurrent batch (official buildSameTurnToolUses).
+      const prior = toolUseMessages.slice(0, index)
+      const sameTurnToolUses =
+        prior.length > 0
+          ? [
+              {
+                ...assistantMessage,
+                message: {
+                  ...assistantMessage.message,
+                  content: prior,
+                },
+              },
+            ]
+          : undefined
       yield* runToolUse(
         toolUse,
-        assistantMessages.find(
-          _ =>
-            Array.isArray(_.message.content) &&
-            _.message.content.some(
-              _ => _.type === 'tool_use' && _.id === toolUse.id,
-            ),
-        )!,
+        assistantMessage,
         canUseTool,
-        toolUseContext,
+        sameTurnToolUses
+          ? { ...toolUseContext, sameTurnToolUses }
+          : toolUseContext,
       )
       markToolUseAsComplete(toolUseContext, toolUse.id)
     }),

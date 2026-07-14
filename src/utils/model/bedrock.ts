@@ -1,5 +1,8 @@
 import memoize from 'lodash-es/memoize.js'
-import { refreshAndGetAwsCredentials } from '../auth.js'
+import {
+  getDefaultAwsProviderChain,
+  refreshAndGetAwsCredentials,
+} from '../auth.js'
 import { getAWSRegion, isEnvTruthy } from '../envUtils.js'
 import { logError } from '../log.js'
 import { getAWSClientProxyConfig } from '../proxy.js'
@@ -79,13 +82,23 @@ async function createBedrockClient() {
   }
 
   if (!skipAuth && !process.env.AWS_BEARER_TOKEN_BEDROCK) {
-    // Only refresh credentials if not using API key authentication
+    // Official 2.1.207: prefer export credentials; else stall-guarded default chain
     const cachedCredentials = await refreshAndGetAwsCredentials()
     if (cachedCredentials) {
       clientConfig.credentials = {
         accessKeyId: cachedCredentials.accessKeyId,
         secretAccessKey: cachedCredentials.secretAccessKey,
         sessionToken: cachedCredentials.sessionToken,
+      }
+    } else if (!isEnvTruthy(process.env.CLAUDE_CODE_SKIP_AWS_CRED_CACHE)) {
+      const resolveChain = await getDefaultAwsProviderChain(region)
+      clientConfig.credentials = async () => {
+        const creds = await resolveChain()
+        return {
+          accessKeyId: creds.accessKeyId,
+          secretAccessKey: creds.secretAccessKey,
+          sessionToken: creds.sessionToken || undefined,
+        }
       }
     }
   }
@@ -124,13 +137,22 @@ export async function createBedrockRuntimeClient() {
   }
 
   if (!skipAuth && !process.env.AWS_BEARER_TOKEN_BEDROCK) {
-    // Only refresh credentials if not using API key authentication
     const cachedCredentials = await refreshAndGetAwsCredentials()
     if (cachedCredentials) {
       clientConfig.credentials = {
         accessKeyId: cachedCredentials.accessKeyId,
         secretAccessKey: cachedCredentials.secretAccessKey,
         sessionToken: cachedCredentials.sessionToken,
+      }
+    } else if (!isEnvTruthy(process.env.CLAUDE_CODE_SKIP_AWS_CRED_CACHE)) {
+      const resolveChain = await getDefaultAwsProviderChain(region)
+      clientConfig.credentials = async () => {
+        const creds = await resolveChain()
+        return {
+          accessKeyId: creds.accessKeyId,
+          secretAccessKey: creds.secretAccessKey,
+          sessionToken: creds.sessionToken || undefined,
+        }
       }
     }
   }

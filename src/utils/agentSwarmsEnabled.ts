@@ -1,4 +1,4 @@
-import { isEnvTruthy } from './envUtils.js'
+import { isExperimentalAgentTeamsDisabled } from './residualFinalEnvGates.js'
 
 /**
  * Centralized runtime check for agent teams/teammate features.
@@ -9,7 +9,7 @@ import { isEnvTruthy } from './envUtils.js'
  * CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0 if needed.
  */
 export function isAgentSwarmsEnabled(): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED)) {
+  if (isExperimentalAgentTeamsDisabled()) {
     return false
   }
 

@@ -119,7 +119,18 @@ function cleanupTerminalModes(): void {
     // Clear terminal title so the tab doesn't show stale session info.
     // Respect CLAUDE_CODE_DISABLE_TERMINAL_TITLE — if the user opted out of
     // title changes, don't clear their existing title on exit either.
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE)) {
+    let terminalTitleDisabled = isEnvTruthy(
+      process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE,
+    )
+    try {
+      const { isTerminalTitleDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      terminalTitleDisabled = isTerminalTitleDisabled()
+    } catch {
+      // residual helpers optional
+    }
+    if (!terminalTitleDisabled) {
       if (process.platform === 'win32') {
         process.title = ''
       } else {

@@ -74,6 +74,18 @@ export async function registerSession(): Promise<boolean> {
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await chmod(dir, 0o700)
+    // Official CLAUDE_CODE_BRIDGE_SESSION_ID densable — seed PID file when
+    // child is spawned already attached to a bridge session (peer dedup).
+    let envBridgeSessionId: string | undefined
+    try {
+      const { getBridgeSessionId } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      envBridgeSessionId = getBridgeSessionId()
+    } catch {
+      const raw = process.env.CLAUDE_CODE_BRIDGE_SESSION_ID?.trim()
+      envBridgeSessionId = raw && raw.length > 0 ? raw : undefined
+    }
     await writeFile(
       pidFile,
       jsonStringify({
@@ -83,6 +95,7 @@ export async function registerSession(): Promise<boolean> {
         startedAt: Date.now(),
         kind,
         entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
+        ...(envBridgeSessionId ? { bridgeSessionId: envBridgeSessionId } : {}),
         ...(feature('UDS_INBOX')
           ? { messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET }
           : {}),

@@ -34,6 +34,22 @@ const bootstrapResponseSchema = lazySchema(() =>
           })),
       )
       .nullish(),
+    // Official 2.1.196 org default model (org console).
+    org_model_default: z
+      .object({
+        name: z.string(),
+        updated_at: z.string(),
+        data_source: z.string(),
+        override_user_selection: z.boolean(),
+      })
+      .nullish(),
+    oauth_account: z
+      .object({
+        account_uuid: z.string().nullish(),
+        organization_uuid: z.string().nullish(),
+      })
+      .passthrough()
+      .nullish(),
   }),
 )
 
@@ -118,12 +134,22 @@ export async function fetchBootstrapData(): Promise<void> {
 
     const clientData = response.client_data ?? null
     const additionalModelOptions = response.additional_model_options ?? []
+    const orgUuid =
+      response.oauth_account?.organization_uuid ??
+      getGlobalConfig().oauthAccount?.organizationUuid
+    const orgModelDefault = response.org_model_default
+      ? {
+          ...response.org_model_default,
+          ...(orgUuid ? { orgUuid } : {}),
+        }
+      : null
 
     // Only persist if data actually changed — avoids a config write on every startup.
     const config = getGlobalConfig()
     if (
       isEqual(config.clientDataCache, clientData) &&
-      isEqual(config.additionalModelOptionsCache, additionalModelOptions)
+      isEqual(config.additionalModelOptionsCache, additionalModelOptions) &&
+      isEqual(config.orgModelDefaultCache ?? null, orgModelDefault)
     ) {
       logForDebugging('[Bootstrap] Cache unchanged, skipping write')
       return
@@ -134,8 +160,35 @@ export async function fetchBootstrapData(): Promise<void> {
       ...current,
       clientDataCache: clientData,
       additionalModelOptionsCache: additionalModelOptions,
+      orgModelDefaultCache: orgModelDefault,
     }))
+    // Invalidate session-level org default so the next resolve re-reads cache.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { setResolvedOrgDefault } =
+        require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+      setResolvedOrgDefault(undefined)
+    } catch {
+      // bootstrap isolation — optional
+    }
   } catch (error) {
     logError(error)
+  }
+
+  // Official q5l densable — gateway /v1/models → gateway-models.json when $5l.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { fetchAndCacheGatewayModels } =
+      require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
+    const result = await fetchAndCacheGatewayModels()
+    if (result.ok) {
+      logForDebugging(
+        `[Bootstrap] Gateway models cached (${result.modelCount}) → ${result.path}`,
+      )
+    } else {
+      logForDebugging(`[Bootstrap] Gateway models skip: ${result.reason}`)
+    }
+  } catch {
+    // densable optional
   }
 }

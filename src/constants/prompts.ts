@@ -49,8 +49,21 @@ import { isEnvTruthy } from '../utils/envUtils.js'
 import { isReplModeEnabled } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { getEffectiveContextWindowSize } from '../services/compact/autoCompact.js'
+import { buildTotalTokensSystemPromptSection } from '../utils/totalTokensReminder.js'
 import { shouldUseGlobalCacheScope } from '../utils/betas.js'
 import { isForkSubagentEnabled } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js'
+import {
+  getActDontRederiveSection,
+  getInvestigateFirstSection,
+  getOwnershipFrameSection,
+  isOwnershipFrameEnabled,
+} from '../utils/systemPromptArms.js'
+import {
+  buildLeanSimpleSystemPrompt,
+  getLeanActionCautionSection,
+  shouldUseSimpleSystemPrompt,
+} from '../utils/simpleSystemPrompt.js'
 import {
   systemPromptSection,
   DANGEROUS_uncachedSystemPromptSection,
@@ -413,7 +426,17 @@ export async function getSystemPrompt(
   additionalWorkingDirectories?: string[],
   mcpClients?: MCPServerConnection[],
 ): Promise<string[]> {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+  // Official CLAUDE_CODE_SIMPLE densable.
+  let simpleMode = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
+  try {
+    const { isSimpleModeEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    simpleMode = isSimpleModeEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (simpleMode) {
     return [
       `You are Claude Code, Anthropic's official CLI for Claude.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`,
     ]
@@ -428,6 +451,8 @@ export async function getSystemPrompt(
 
   const settings = getInitialSettings()
   const enabledTools = new Set(tools.map(_ => _.name))
+  // Official Jb(model) — lean simple system prompt path (wrg) when true.
+  const useSimpleSystemPrompt = shouldUseSimpleSystemPrompt({ model })
 
   if (
     (feature('PROACTIVE') || feature('KAIROS')) &&
@@ -503,6 +528,58 @@ ${CYBER_RISK_INSTRUCTION}`,
           ),
         ]
       : []),
+    // Official seu — <total_tokens>N tokens left</total_tokens> system section.
+    // Skipped under CLAUDE_CODE_SIMPLE / DISABLE_ATTACHMENTS (early return above
+    // already covers SIMPLE). Mode off → null. Official also forces off under Jb.
+    systemPromptSection('total_tokens_reminder', () => {
+      let attachmentsDisabled = isEnvTruthy(
+        process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS,
+      )
+      try {
+        const { isAttachmentsDisabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+        attachmentsDisabled = isAttachmentsDisabled()
+      } catch {
+        // keep raw env fallback
+      }
+      // Official CLAUDE_CODE_SIMPLE densable (same path as getSystemPrompt).
+      let simpleModeEnv = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
+      try {
+        const { isSimpleModeEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+        simpleModeEnv = isSimpleModeEnvEnabled()
+      } catch {
+        // keep raw env fallback
+      }
+      return buildTotalTokensSystemPromptSection({
+        contextWindowTokens: getEffectiveContextWindowSize(model),
+        simpleMode:
+          useSimpleSystemPrompt || simpleModeEnv || attachmentsDisabled,
+      })
+    }),
+    // Official act_dont_rederive / ownership_frame / investigate_first arms.
+    systemPromptSection('act_dont_rederive', () => getActDontRederiveSection()),
+    // When lean simple path is active, ownership is folded into wrg intro —
+    // skip the separate arm section to avoid double ownership framing.
+    systemPromptSection('ownership_frame', () =>
+      useSimpleSystemPrompt ? null : getOwnershipFrameSection(),
+    ),
+    // Official arg(e) — action_caution only under Jb lean path.
+    systemPromptSection('action_caution', () =>
+      useSimpleSystemPrompt
+        ? getLeanActionCautionSection({
+            ownershipFrame: isOwnershipFrameEnabled(),
+          })
+        : null,
+    ),
+    systemPromptSection('investigate_first', () =>
+      getInvestigateFirstSection({
+        model,
+        simpleSystemPrompt: useSimpleSystemPrompt,
+      }),
+    ),
     ...(feature('KAIROS') || feature('KAIROS_BRIEF')
       ? [systemPromptSection('brief', () => getBriefSection())]
       : []),
@@ -510,6 +587,22 @@ ${CYBER_RISK_INSTRUCTION}`,
 
   const resolvedDynamicSections =
     await resolveSystemPromptSections(dynamicSections)
+
+  // Official l$ / Jb: lean wrg static body replaces dense intro/system/tasks stack.
+  if (useSimpleSystemPrompt) {
+    logForDebugging(
+      `[SystemPrompt] path=lean-simple-system-prompt model=${model}`,
+    )
+    return [
+      buildLeanSimpleSystemPrompt({
+        outputStyleActive: outputStyleConfig !== null,
+        ownershipFrame: isOwnershipFrameEnabled(),
+        cyberRiskInstruction: CYBER_RISK_INSTRUCTION,
+      }),
+      ...(shouldUseGlobalCacheScope() ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] : []),
+      ...resolvedDynamicSections,
+    ].filter(s => s !== null)
+  }
 
   return [
     // --- Static content (cacheable) ---

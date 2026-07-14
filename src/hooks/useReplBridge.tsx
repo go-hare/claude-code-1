@@ -29,7 +29,10 @@ import { errorMessage } from '../utils/errors.js';
 import { enqueue } from '../utils/messageQueueManager.js';
 import { buildSystemInitMessage } from '../utils/messages/systemInit.js';
 import { createBridgeStatusMessage, createSystemMessage } from '../utils/messages.js';
-import { buildTaskStateMessage, getTaskStateSnapshotKey } from '../utils/taskStateMessage.js';
+import { buildTaskStateMessage, getTaskStateSnapshotKey, shouldPublishTaskState } from '../utils/taskStateMessage.js';
+import omit from 'lodash-es/omit.js';
+import { getMcpConfigByName } from '../services/mcp/config.js';
+import { parseMcpPermissionModeOverride } from '../utils/permissions/mcpPermissionMode.js';
 import {
   getAutoModeUnavailableNotification,
   getAutoModeUnavailableReason,
@@ -90,6 +93,10 @@ export function useReplBridge(
   // only on successful init. Hits MAX_CONSECUTIVE_INIT_FAILURES → fuse blown
   // for the session, regardless of replBridgeEnabled re-toggling.
   const consecutiveFailuresRef = useRef(0);
+  // Official 2.1.207: after reconnect / credential refresh, force one full
+  // task_state publish even when the snapshot key + handle identity match.
+  // Remote clients lose ephemeral task status across the transport rebuild.
+  const forceTaskStatePublishRef = useRef<(() => void) | null>(null);
   const setAppState = useSetAppState();
   const commandsRef = useRef(commands);
   commandsRef.current = commands;
@@ -323,6 +330,13 @@ export function useReplBridge(
                     ),
                   ]);
                 }
+                // Force-republish full task_state after reconnect / credential
+                // refresh. Dedupe by snapshot key + handle would otherwise skip
+                // when tasks are unchanged, leaving remote clients without status
+                // after they lost the prior ephemeral stream. If the session was
+                // inactive (reconnecting path), the task-state effect remounts
+                // and publishes on its own; this covers the still-active path.
+                forceTaskStatePublishRef.current?.();
                 // Send system/init so remote clients (web/iOS/Android) get
                 // session metadata. REPL uses query() directly — never hits
                 // QueryEngine's SDKMessage layer — so this is the only path
@@ -508,6 +522,54 @@ export function useReplBridge(
                 });
               });
               return { ok: true };
+            },
+            onSetMcpPermissionModeOverride(serverName, mode) {
+              // Official 2.1.x: tighten-only per-server pin (print.ts snt/WDu).
+              const parsed = parseMcpPermissionModeOverride(mode);
+              if (!parsed.ok) {
+                logForDebugging(
+                  `set_mcp_permission_mode_override: rejected mode='${parsed.rejected}' for ${serverName} (tighten-only)`,
+                  { level: 'warn' },
+                );
+                return {
+                  ok: false,
+                  error: `Permission mode override over the control channel is tighten-only ('default', 'auto', or null); rejected '${parsed.rejected}'`,
+                };
+              }
+              if (parsed.override === 'auto' && !isAutoModeGateEnabled()) {
+                const reason = getAutoModeUnavailableReason();
+                return {
+                  ok: false,
+                  error: reason
+                    ? `Cannot pin MCP server '${serverName}' to auto: ${getAutoModeUnavailableNotification(reason)}`
+                    : `Cannot pin MCP server '${serverName}' to auto`,
+                };
+              }
+              const override = parsed.override;
+              setAppState(prev => {
+                const current = prev.toolPermissionContext.mcpPermissionModeOverrides ?? {};
+                const nextOverrides =
+                  override === undefined ? omit(current, serverName) : { ...current, [serverName]: override };
+                return {
+                  ...prev,
+                  toolPermissionContext: {
+                    ...prev.toolPermissionContext,
+                    mcpPermissionModeOverrides: nextOverrides,
+                  },
+                };
+              });
+              const known =
+                store.getState().mcp.clients.some(c => c.name === serverName) ||
+                getMcpConfigByName(serverName) !== null;
+              return known
+                ? { ok: true }
+                : {
+                    ok: true,
+                    warning:
+                      override === undefined
+                        ? `MCP server '${serverName}' is not known; no override was present to clear.`
+                        : `MCP server '${serverName}' is not yet known; override stored but will not apply until a server with that exact name connects.`,
+                  };
             },
             onStateChange: handleStateChange,
             initialMessages: messages.length > 0 ? messages : undefined,
@@ -815,6 +877,7 @@ export function useReplBridge(
       let watchedDir: string | null = null;
       let lastPublishedSnapshotKey: string | null = null;
       let lastPublishedHandle: ReplBridgeHandle | null = null;
+      let forceNextPublish = false;
 
       const rewatch = (dir: string): void => {
         if (dir === watchedDir && watcher !== null) return;
@@ -841,7 +904,17 @@ export function useReplBridge(
           const tasks = await listTasks(taskListId);
           if (cancelled || handleRef.current !== handle) return;
           const snapshotKey = getTaskStateSnapshotKey(taskListId, tasks);
-          if (snapshotKey === lastPublishedSnapshotKey && handle === lastPublishedHandle) {
+          const force = forceNextPublish;
+          forceNextPublish = false;
+          if (
+            !shouldPublishTaskState({
+              snapshotKey,
+              handle,
+              lastSnapshotKey: lastPublishedSnapshotKey,
+              lastHandle: lastPublishedHandle,
+              force,
+            })
+          ) {
             return;
           }
           handle.writeSdkMessages([buildTaskStateMessage(taskListId, tasks)]);
@@ -861,6 +934,14 @@ export function useReplBridge(
         debounceTimer.unref?.();
       };
 
+      forceTaskStatePublishRef.current = () => {
+        // Invalidate dedupe so the next publish always goes out, even when
+        // the task list and handle identity are unchanged after reconnect.
+        forceNextPublish = true;
+        lastPublishedSnapshotKey = null;
+        void publishTaskState();
+      };
+
       void publishTaskState();
       const unsubscribe = onTasksUpdated(schedulePublish);
       pollTimer = setInterval(() => {
@@ -870,6 +951,7 @@ export function useReplBridge(
 
       return () => {
         cancelled = true;
+        forceTaskStatePublishRef.current = null;
         unsubscribe();
         if (debounceTimer) clearTimeout(debounceTimer);
         if (pollTimer) clearInterval(pollTimer);

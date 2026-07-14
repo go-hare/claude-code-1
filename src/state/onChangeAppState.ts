@@ -65,11 +65,11 @@ export function onChangeAppState({
   const newMode = newState.toolPermissionContext.mode
   if (prevMode !== newMode) {
     // CCR external_metadata must not receive internal-only mode names
-    // (bubble, ungated auto). Externalize first — and skip
-    // the CCR notify if the EXTERNAL mode didn't change (e.g.,
-    // default→bubble→default is noise from CCR's POV since both
-    // externalize to 'default'). The SDK channel (notifyPermissionModeChanged)
-    // passes raw mode; its listener in print.ts applies its own filter.
+    // (bubble). Externalize first — and skip the CCR notify if the
+    // EXTERNAL mode didn't change (e.g., default→bubble→default is noise
+    // from CCR's POV since both externalize to 'default'). Official 2.1.207:
+    // auto is first-class external and is reported as 'auto'. The SDK channel
+    // (notifyPermissionModeChanged) passes raw mode; print.ts filters itself.
     const prevExternal = toExternalPermissionMode(prevMode)
     const newExternal = toExternalPermissionMode(newMode)
     if (prevExternal !== newExternal) {

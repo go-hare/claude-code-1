@@ -272,16 +272,25 @@ export async function countTokensViaHaikuFallback(
   // Check if messages contain thinking blocks
   const containsThinking = hasThinkingBlocks(messages)
 
+  // Official USE_VERTEX / USE_BEDROCK densables.
+  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  try {
+    const { isUseVertexEnvEnabled, isUseBedrockEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    useVertex = isUseVertexEnvEnabled()
+    useBedrock = isUseBedrockEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   // If we're on Vertex and using global region, always use Sonnet since Haiku is not available there.
   const isVertexGlobalEndpoint =
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) &&
-    getVertexRegionForModel(getSmallFastModel()) === 'global'
+    useVertex && getVertexRegionForModel(getSmallFastModel()) === 'global'
   // If we're on Bedrock with thinking blocks, use Sonnet since Haiku 3.5 doesn't support thinking
-  const isBedrockWithThinking =
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) && containsThinking
+  const isBedrockWithThinking = useBedrock && containsThinking
   // If we're on Vertex with thinking blocks, use Sonnet since Haiku 3.5 doesn't support thinking
-  const isVertexWithThinking =
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) && containsThinking
+  const isVertexWithThinking = useVertex && containsThinking
   // Otherwise always use Haiku - Haiku 4.5 supports thinking blocks.
   // WARNING: if you change this to use a non-Haiku model, this request will fail in 1P unless it uses getCLISyspromptPrefix.
   // Note: We don't need Sonnet for tool_reference blocks because we strip them via

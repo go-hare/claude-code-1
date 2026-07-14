@@ -12,7 +12,7 @@ import type { Tool } from 'src/Tool.js';
 import { backgroundAll } from 'src/tasks/LocalShellTask/LocalShellTask.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import { env } from 'src/utils/env.js';
-import { isEnvTruthy } from 'src/utils/envUtils.js';
+import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { isFullscreenEnvEnabled } from 'src/utils/fullscreen.js';
 import type { ThemeName } from 'src/utils/theme.js';
@@ -49,7 +49,7 @@ export function BackgroundHint({ onBackground }: { onBackground?: () => void } =
   const shortcut = env.terminal === 'tmux' && baseShortcut === 'ctrl+b' ? 'ctrl+b ctrl+b (twice)' : baseShortcut;
 
   // Don't show background hint if background tasks are disabled
-  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)) {
+  if (isBackgroundTasksDisabled()) {
     return null;
   }
 

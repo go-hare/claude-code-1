@@ -16,6 +16,11 @@ import { isProactiveActive } from '../proactive/index.js'
  */
 export type RequiresActionDetails = {
   tool_name: string
+  /**
+   * Official display_tool_name for host UIs (e.g. dialog park uses
+   * "Claude needs your input"). Optional for permission prompts.
+   */
+  display_tool_name?: string
   /** Human-readable summary, e.g. "Editing src/foo.ts", "Running npm test" */
   action_description: string
   tool_use_id: string
@@ -35,6 +40,7 @@ export type AutomationStateMetadata = {
 }
 
 import { isEnvTruthy } from './envUtils.js'
+import { NestedChainIdleTracker } from './nestedChainIdle.js'
 import type { PermissionMode } from './permissions/PermissionMode.js'
 import { enqueueSdkEvent } from './sdkEventQueue.js'
 
@@ -64,6 +70,7 @@ type SessionMetadataChangedListener = (
   metadata: SessionExternalMetadata,
 ) => void
 type PermissionModeChangedListener = (mode: PermissionMode) => void
+type WaitingOnUserChangedListener = (waiting: boolean) => void
 type SessionMetadataListenerOptions = {
   replayCurrent?: boolean
 }
@@ -71,11 +78,71 @@ type SessionMetadataListenerOptions = {
 let stateListener: SessionStateChangedListener | null = null
 let metadataListener: SessionMetadataChangedListener | null = null
 let permissionModeListener: PermissionModeChangedListener | null = null
+let waitingOnUserListener: WaitingOnUserChangedListener | null = null
+
+/**
+ * Official Imn nested-chain idle densable tracker (module singleton).
+ * waitingOnUser = requires_action && mainLoopRefcount - nestedBlocked <= 0.
+ */
+const nestedChainIdleTracker = new NestedChainIdleTracker({
+  onWaitingOnUserChanged: waiting => {
+    waitingOnUserListener?.(waiting)
+  },
+})
 
 export function setSessionStateChangedListener(
   cb: SessionStateChangedListener | null,
 ): void {
   stateListener = cb
+}
+
+/** Official onWaitingOnUserChanged densable consumer registration. */
+export function setWaitingOnUserChangedListener(
+  cb: WaitingOnUserChangedListener | null,
+): void {
+  waitingOnUserListener = cb
+}
+
+/** Official waitingOnUser densable — requires_action with no open main-loop refs beyond nested blocks. */
+export function isWaitingOnUser(): boolean {
+  return nestedChainIdleTracker.waitingOnUser
+}
+
+/** Official setMainLoopRefcount densable. */
+export function setMainLoopRefcount(n: number): void {
+  nestedChainIdleTracker.setMainLoopRefcount(n)
+}
+
+/** Official notifyNestedPromptBlocking densable. */
+export function notifyNestedPromptBlocking(agentId: string): void {
+  nestedChainIdleTracker.notifyNestedPromptBlocking(agentId)
+}
+
+/** Official notifyNestedPromptUnblocking densable. */
+export function notifyNestedPromptUnblocking(agentId: string): void {
+  nestedChainIdleTracker.notifyNestedPromptUnblocking(agentId)
+}
+
+/** Official dropNestedBlockedChain densable. */
+export function dropNestedBlockedChain(agentId: string): void {
+  nestedChainIdleTracker.dropNestedBlockedChain(agentId)
+}
+
+/**
+ * Official Imn.reteeWaitingOnUser — force re-emit current waitingOnUser
+ * (e.g. after one of several concurrent parks resolves).
+ */
+export function reteeWaitingOnUser(): void {
+  nestedChainIdleTracker.reteeWaitingOnUser()
+}
+
+/**
+ * Official Imn.republishPendingAction — re-publish surviving pending_action
+ * metadata without a full state transition (multi-prompt race).
+ */
+export function republishPendingAction(details: RequiresActionDetails): void {
+  hasPendingAction = true
+  notifySessionMetadataChanged({ pending_action: details })
 }
 
 export function setSessionMetadataChangedListener(
@@ -171,6 +238,8 @@ export function notifySessionStateChanged(
   details?: RequiresActionDetails,
 ): void {
   currentState = state
+  // Official Imn.notifyStateChanged — keep nested-chain waitingOnUser in sync.
+  nestedChainIdleTracker.setState(state)
   stateListener?.(state, details)
 
   // Mirror details into external_metadata so GetSession carries the
@@ -178,18 +247,93 @@ export function notifySessionStateChanged(
   // null on the next non-blocked transition.
   if (state === 'requires_action' && details) {
     hasPendingAction = true
+    // Official GMg — blocked post_turn_summary for host UIs (CCR sidebar).
+    // Lazy require avoids bootstrap cycles (classifierSummary → sessionState types).
+    let postTurn: SessionExternalMetadata['post_turn_summary']
+    try {
+      const {
+        shouldEmitBlockedClassifierSummary,
+        buildBlockedPostTurnSummary,
+      } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./permissions/classifierSummary.js') as typeof import('./permissions/classifierSummary.js')
+      if (shouldEmitBlockedClassifierSummary()) {
+        postTurn = buildBlockedPostTurnSummary(details)
+      }
+    } catch {
+      postTurn = undefined
+    }
     notifySessionMetadataChanged({
       pending_action: details,
+      ...(postTurn !== undefined ? { post_turn_summary: postTurn } : {}),
     })
   } else if (hasPendingAction) {
     hasPendingAction = false
-    notifySessionMetadataChanged({ pending_action: null })
+    notifySessionMetadataChanged({
+      pending_action: null,
+      post_turn_summary: null,
+    })
   }
 
   // task_summary is written mid-turn by the forked summarizer; clear it at
   // idle so the next turn doesn't briefly show the previous turn's progress.
+  // Official completed-turn densable: heuristic emit immediately; when mode is
+  // llm and a host is wired, async upgrade post_turn_summary (never blocks idle).
   if (state === 'idle') {
-    notifySessionMetadataChanged({ task_summary: null })
+    let completedSummary: SessionExternalMetadata['post_turn_summary']
+    // Capture mid-turn progress before we clear task_summary for LLM context.
+    const priorTaskSummary =
+      typeof currentMetadata.task_summary === 'string'
+        ? currentMetadata.task_summary
+        : null
+    try {
+      const {
+        shouldEmitCompletedClassifierSummary,
+        buildCompletedPostTurnSummary,
+        buildCompletedPostTurnSummaryWithHost,
+        ensureCompletedClassifierLlmHost,
+        getCompletedClassifierLlmHost,
+      } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./permissions/classifierSummary.js') as typeof import('./permissions/classifierSummary.js')
+      if (shouldEmitCompletedClassifierSummary()) {
+        // Immediate heuristic so hosts see status without waiting on LLM.
+        completedSummary = buildCompletedPostTurnSummary({
+          assistantText: priorTaskSummary,
+        })
+        // Official default Haiku host densable when mode is llm.
+        ensureCompletedClassifierLlmHost()
+        // Optional LLM densable upgrade when host is installed.
+        if (getCompletedClassifierLlmHost()) {
+          void buildCompletedPostTurnSummaryWithHost({
+            assistantText: priorTaskSummary,
+            context: priorTaskSummary,
+          })
+            .then(llmSummary => {
+              if (
+                llmSummary &&
+                typeof llmSummary.status_detail === 'string' &&
+                llmSummary.status_detail.length > 0
+              ) {
+                notifySessionMetadataChanged({
+                  post_turn_summary: llmSummary,
+                })
+              }
+            })
+            .catch(() => {
+              // heuristic already emitted
+            })
+        }
+      }
+    } catch {
+      completedSummary = undefined
+    }
+    notifySessionMetadataChanged({
+      task_summary: null,
+      ...(completedSummary !== undefined
+        ? { post_turn_summary: completedSummary }
+        : {}),
+    })
   }
 
   if (state !== 'idle') {
@@ -214,7 +358,18 @@ export function notifySessionStateChanged(
   // their isWorking() last-message heuristics — the trailing idle event
   // currently pins them at "Running...".
   // https://anthropic.slack.com/archives/C093BJBD1CP/p1774152406752229
-  if (isEnvTruthy(process.env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS)) {
+  let emitSessionState = isEnvTruthy(
+    process.env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS,
+  )
+  try {
+    const { isEmitSessionStateEventsEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    emitSessionState = isEmitSessionStateEventsEnabled()
+  } catch {
+    // residual helpers optional
+  }
+  if (emitSessionState) {
     enqueueSdkEvent({
       type: 'system',
       subtype: 'session_state_changed',
@@ -259,8 +414,10 @@ export function resetSessionStateForTests(): void {
   stateListener = null
   metadataListener = null
   permissionModeListener = null
+  waitingOnUserListener = null
   hasPendingAction = false
   currentState = 'idle'
   currentAutomationState = null
   currentMetadata = {}
+  nestedChainIdleTracker.reset()
 }

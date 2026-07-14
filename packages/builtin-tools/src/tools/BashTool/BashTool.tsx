@@ -28,7 +28,11 @@ import { parseForSecurity } from 'src/utils/bash/ast.js';
 import { splitCommand_DEPRECATED, splitCommandWithOperators } from 'src/utils/bash/commands.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
 import { detectCodeIndexingFromCommand } from 'src/utils/codeIndexing.js';
-import { isEnvTruthy } from 'src/utils/envUtils.js';
+import { clampTimeoutForAutoBackground } from 'src/utils/autoBackgroundTimeout.js';
+import {
+  isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv,
+  isBashSandboxShowIndicatorEnabled,
+} from 'src/utils/residualFinalEnvGates.js';
 import { isENOENT, ShellError } from 'src/utils/errors.js';
 import { detectFileEncoding, detectLineEndings, getFileModificationTime, writeTextContent } from 'src/utils/file.js';
 import { fileHistoryEnabled, fileHistoryTrackEdit } from 'src/utils/fileHistory.js';
@@ -295,9 +299,10 @@ const DISALLOWED_AUTO_BACKGROUND_COMMANDS = [
 ];
 
 // Check if background tasks are disabled at module load time
-const isBackgroundTasksDisabled =
-  // eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
-  isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS);
+// Official DISABLE_BACKGROUND_TASKS densable — captured once at module load
+// so the schema omits run_in_background for the whole process.
+// eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
+const isBackgroundTasksDisabled = isBackgroundTasksDisabledEnv();
 
 const fullInputSchema = lazySchema(() =>
   z.strictObject({
@@ -645,9 +650,7 @@ export const BashTool = buildTool({
     // `new RegExp` per call. userFacingName runs per-render for every bash
     // message in history; with ~50 msgs + one slow-to-tokenize command, this
     // exceeds the shimmer tick → transition abort → infinite retry (#21605).
-    return isEnvTruthy(process.env.CLAUDE_CODE_BASH_SANDBOX_SHOW_INDICATOR) && shouldUseSandbox(input)
-      ? 'SandboxedBash'
-      : 'Bash';
+    return isBashSandboxShowIndicatorEnabled() && shouldUseSandbox(input) ? 'SandboxedBash' : 'Bash';
   },
   getToolUseSummary(input) {
     if (!input?.command) {
@@ -812,6 +815,7 @@ export const BashTool = buildTool({
         // Use the always-shared task channel so async agents' background
         // bash tasks are actually registered (and killable on agent exit).
         setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
+        getAppState,
         setToolJSX,
         preventCwdChanges,
         isMainThread,
@@ -1004,6 +1008,7 @@ async function* runShellCommand({
   input,
   abortController,
   setAppState,
+  getAppState,
   setToolJSX,
   preventCwdChanges,
   isMainThread,
@@ -1013,6 +1018,7 @@ async function* runShellCommand({
   input: BashToolInput;
   abortController: AbortController;
   setAppState: (f: (prev: AppState) => AppState) => void;
+  getAppState: () => AppState;
   setToolJSX?: SetToolJSXFn;
   preventCwdChanges?: boolean;
   isMainThread?: boolean;
@@ -1033,7 +1039,14 @@ async function* runShellCommand({
   void
 > {
   const { command, description, timeout, run_in_background } = input;
-  const timeoutMs = timeout || getDefaultTimeoutMs();
+  // Official WYn: when main agent can auto-background, env may clamp timeout.
+  const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
+  const timeoutMs =
+    clampTimeoutForAutoBackground({
+      requestedTimeoutMs: timeout || getDefaultTimeoutMs(),
+      isMainAgent: isMainThread === true,
+      canAutoBackground: shouldAutoBackground,
+    }) ?? getDefaultTimeoutMs();
 
   let fullOutput = '';
   let lastProgressOutput = '';
@@ -1050,11 +1063,6 @@ async function* runShellCommand({
       resolveProgress = () => resolve(null);
     });
   }
-
-  // Determine if auto-backgrounding should be enabled
-  // Only enable for commands that are allowed to be auto-backgrounded
-  // and when background tasks are not disabled
-  const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
 
   const shellCommand = await exec(command, abortController.signal, 'bash', {
     timeout: timeoutMs,
@@ -1090,11 +1098,7 @@ async function* runShellCommand({
       },
       {
         abortController,
-        getAppState: () => {
-          // We don't have direct access to getAppState here, but spawn doesn't
-          // actually use it during the spawn process
-          throw new Error('getAppState not available in runShellCommand context');
-        },
+        getAppState,
         setAppState,
       },
     );
@@ -1115,6 +1119,7 @@ async function* runShellCommand({
           description || command,
           setAppState,
           toolUseId,
+          getAppState,
         )
       ) {
         return;

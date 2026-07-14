@@ -9,12 +9,15 @@ import { getDoctorDiagnostic } from './doctorDiagnostic.js';
 import { getAWSRegion, getDefaultVertexRegion, isEnvTruthy } from './envUtils.js';
 import { getDisplayPath } from './file.js';
 import { formatNumber } from './format.js';
+import { getGatewayAuth } from './gatewayEnv.js';
 import { getIdeClientName, type IDEExtensionInstallationStatus, isJetBrainsIde, toIDEDisplayName } from './ide.js';
 import { getClaudeAiUserDefaultModelDescription, modelDisplayString } from './model/model.js';
-import { getAPIProvider } from './model/providers.js';
+import { getAPIProvider, getBedrockMantleOverrideProvider } from './model/providers.js';
 import { getMTLSConfig } from './mtls.js';
 import { checkInstall } from './nativeInstaller/index.js';
+import { formatProcessWrapperStatusLines, PROCESS_WRAPPER_ENV_KEY } from './processWrapper.js';
 import { getProxyUrl } from './proxy.js';
+import { shouldSkipAnthropicAwsAuth, shouldSkipMantleAuth } from './residualFinalEnvGates.js';
 import { SandboxManager } from './sandbox/sandbox-adapter.js';
 import { getSettingsWithAllErrors } from './settings/allErrors.js';
 import { getEnabledSettingSources, getSettingSourceDisplayNameCapitalized } from './settings/constants.js';
@@ -39,6 +42,20 @@ export function buildSandboxProperties(): Property[] {
     {
       label: 'Bash Sandbox',
       value: isSandboxed ? 'Enabled' : 'Disabled',
+    },
+  ];
+}
+
+/**
+ * Official PROCESS_WRAPPER densable — Self-exec / refuse lines for /status.
+ */
+export function buildProcessWrapperProperties(): Property[] {
+  const lines = formatProcessWrapperStatusLines();
+  if (lines.length === 0) return [];
+  return [
+    {
+      label: PROCESS_WRAPPER_ENV_KEY,
+      value: lines,
     },
   ];
 }
@@ -298,6 +315,9 @@ export function buildAPIProviderProperties(): Property[] {
       bedrock: 'AWS Bedrock',
       vertex: 'Google Vertex AI',
       foundry: 'Microsoft Foundry',
+      anthropicAws: 'Anthropic on AWS',
+      mantle: 'Amazon Bedrock Mantle',
+      gateway: 'Cloud gateway',
       gemini: 'Gemini API',
       grok: 'Grok API',
       openai: 'OpenAI API',
@@ -330,7 +350,17 @@ export function buildAPIProviderProperties(): Property[] {
       value: getAWSRegion(),
     });
 
-    if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)) {
+    // Official SKIP_BEDROCK_AUTH densable.
+    let skipBedrockAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH);
+    try {
+      const { isSkipBedrockAuthEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js');
+      skipBedrockAuth = isSkipBedrockAuthEnvEnabled();
+    } catch {
+      // keep raw env fallback
+    }
+    if (skipBedrockAuth) {
       properties.push({
         value: 'AWS auth skipped',
       });
@@ -357,7 +387,17 @@ export function buildAPIProviderProperties(): Property[] {
       value: getDefaultVertexRegion(),
     });
 
-    if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) {
+    // Official SKIP_VERTEX_AUTH densable.
+    let skipVertexAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH);
+    try {
+      const { isSkipVertexAuthEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js');
+      skipVertexAuth = isSkipVertexAuthEnvEnabled();
+    } catch {
+      // keep raw env fallback
+    }
+    if (skipVertexAuth) {
       properties.push({
         value: 'GCP auth skipped',
       });
@@ -379,9 +419,45 @@ export function buildAPIProviderProperties(): Property[] {
       });
     }
 
-    if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH)) {
+    // Official SKIP_FOUNDRY_AUTH densable.
+    let skipFoundryAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH);
+    try {
+      const { isSkipFoundryAuthEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js');
+      skipFoundryAuth = isSkipFoundryAuthEnvEnabled();
+    } catch {
+      // keep raw env fallback
+    }
+    if (skipFoundryAuth) {
       properties.push({
         value: 'Microsoft Foundry auth skipped',
+      });
+    }
+  } else if (apiProvider === 'anthropicAws') {
+    // Official status densable for Claude Platform on AWS.
+    const workspaceId = process.env.ANTHROPIC_AWS_WORKSPACE_ID;
+    if (workspaceId) {
+      properties.push({
+        label: 'Workspace ID',
+        value: workspaceId,
+      });
+    }
+    properties.push({
+      label: 'AWS region',
+      value: getAWSRegion(),
+    });
+    if (shouldSkipAnthropicAwsAuth()) {
+      properties.push({
+        value: 'Claude Platform on AWS auth skipped',
+      });
+    }
+  } else if (apiProvider === 'gateway') {
+    const gateway = getGatewayAuth();
+    if (gateway) {
+      properties.push({
+        label: 'Gateway URL',
+        value: gateway.url,
       });
     }
   } else if (apiProvider === 'gemini') {
@@ -402,6 +478,28 @@ export function buildAPIProviderProperties(): Property[] {
       label: 'OpenAI base URL',
       value: openaiBaseUrl,
     });
+  }
+
+  // Official: mantle provider OR bedrock+mantle override shows Mantle details.
+  if (apiProvider === 'mantle' || getBedrockMantleOverrideProvider() === 'mantle') {
+    const mantleBaseUrl = process.env.ANTHROPIC_BEDROCK_MANTLE_BASE_URL;
+    if (mantleBaseUrl) {
+      properties.push({
+        label: 'Amazon Bedrock (Mantle) base URL',
+        value: mantleBaseUrl,
+      });
+    }
+    if (apiProvider === 'mantle') {
+      properties.push({
+        label: 'AWS region',
+        value: getAWSRegion(),
+      });
+    }
+    if (shouldSkipMantleAuth()) {
+      properties.push({
+        value: 'Amazon Bedrock (Mantle) auth skipped',
+      });
+    }
   }
 
   const proxyUrl = getProxyUrl();

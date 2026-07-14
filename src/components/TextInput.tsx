@@ -7,7 +7,7 @@ import { useSettings } from '../hooks/useSettings.js';
 import { useTextInput } from '../hooks/useTextInput.js';
 import { Box, color, useAnimationFrame, useTerminalFocus, useTheme } from '@anthropic/ink';
 import type { BaseTextInputProps } from '../types/textInputTypes.js';
-import { isEnvTruthy } from '../utils/envUtils.js';
+import { isAccessibilityEnvEnabled } from '../utils/residualFinalEnvGates.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
 import { BaseTextInput } from './BaseTextInput.js';
 import { hueToRgb } from './Spinner/utils.js';
@@ -40,7 +40,7 @@ export default function TextInput(props: Props): React.ReactNode {
   const [theme] = useTheme();
   const isTerminalFocused = useTerminalFocus();
   // Hoisted to mount-time — this component re-renders on every keystroke.
-  const accessibilityEnabled = useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_ACCESSIBILITY), []);
+  const accessibilityEnabled = useMemo(() => isAccessibilityEnvEnabled(), []);
   const settings = useSettings();
   const reducedMotion = settings.prefersReducedMotion ?? false;
 

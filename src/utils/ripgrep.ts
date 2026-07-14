@@ -266,9 +266,18 @@ function ripGrepRaw(
   // Allow timeout to be configured via env var (in seconds), otherwise use platform defaults
   // WSL has severe performance penalty for file reads (3-5x slower on WSL2)
   const defaultTimeout = getPlatform() === 'wsl' ? 60_000 : 20_000
-  const parsedSeconds =
-    parseInt(process.env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS || '', 10) || 0
-  const timeout = parsedSeconds > 0 ? parsedSeconds * 1000 : defaultTimeout
+  let timeout = defaultTimeout
+  try {
+    const { resolveGlobTimeoutSeconds } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    const parsedSeconds = resolveGlobTimeoutSeconds()
+    if (parsedSeconds !== null) timeout = parsedSeconds * 1000
+  } catch {
+    const parsedSeconds =
+      parseInt(process.env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS || '', 10) || 0
+    if (parsedSeconds > 0) timeout = parsedSeconds * 1000
+  }
 
   // For embedded ripgrep, use spawn with argv0 (execFile doesn't support argv0 properly)
   if (argv0) {

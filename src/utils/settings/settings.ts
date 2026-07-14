@@ -262,10 +262,17 @@ export function getSettingsRootPathForSource(source: SettingSource): string {
  * 3. Default: 'settings.json'
  */
 function getUserSettingsFilePath(): string {
-  if (
-    getUseCoworkPlugins() ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_COWORK_PLUGINS)
-  ) {
+  // Official USE_COWORK_PLUGINS densable.
+  let coworkPluginsEnv = isEnvTruthy(process.env.CLAUDE_CODE_USE_COWORK_PLUGINS)
+  try {
+    const { isCoworkPluginsEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    coworkPluginsEnv = isCoworkPluginsEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (getUseCoworkPlugins() || coworkPluginsEnv) {
     return 'cowork_settings.json'
   }
   return 'settings.json'
@@ -915,30 +922,86 @@ export function getUseAutoModeDuringPlan(): boolean {
   return true
 }
 
+export type AskUserQuestionTimeout = '60s' | '5m' | '10m' | 'never'
+
+/**
+ * Official 2.1.200: idle timeout for AskUserQuestion auto-continue.
+ * Defaults to `never` (no auto-continue unless explicitly configured).
+ * Override with CLAUDE_AFK_TIMEOUT_MS for absolute ms (testing/managed).
+ */
+export function getAskUserQuestionTimeout(): AskUserQuestionTimeout {
+  const value = getInitialSettings().askUserQuestionTimeout
+  if (
+    value === '60s' ||
+    value === '5m' ||
+    value === '10m' ||
+    value === 'never'
+  ) {
+    return value
+  }
+  return 'never'
+}
+
+/** Convert setting enum to milliseconds, or null when auto-continue is off. */
+export function askUserQuestionTimeoutToMs(
+  value: AskUserQuestionTimeout | undefined = getAskUserQuestionTimeout(),
+): number | null {
+  const envMs = process.env.CLAUDE_AFK_TIMEOUT_MS
+  if (envMs !== undefined && envMs !== '') {
+    const parsed = parseInt(envMs, 10)
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return parsed
+    }
+  }
+  switch (value) {
+    case '60s':
+      return 60_000
+    case '5m':
+      return 300_000
+    case '10m':
+      return 600_000
+    case 'never':
+    case undefined:
+      return null
+  }
+}
+
 /**
  * Returns the merged autoMode config from trusted settings sources.
  * Only available when TRANSCRIPT_CLASSIFIER is active; returns undefined otherwise.
- * projectSettings is intentionally excluded — a malicious project could
- * otherwise inject classifier allow/deny rules (RCE risk).
+ *
+ * Source policy (official Claude Code 2.1.207):
+ * - projectSettings excluded — malicious project could inject classifier rules
+ * - localSettings (`.claude/settings.local.json`) also excluded since 2.1.207 —
+ *   repo-resident autoMode is ignored; use `~/.claude/settings.json` instead
+ * - userSettings / flagSettings / policySettings are honored
  */
 export function getAutoModeConfig():
-  | { allow?: string[]; soft_deny?: string[]; environment?: string[] }
+  | {
+      allow?: string[]
+      soft_deny?: string[]
+      hard_deny?: string[]
+      environment?: string[]
+    }
   | undefined {
   if (feature('TRANSCRIPT_CLASSIFIER')) {
     const schema = z.object({
       allow: z.array(z.string()).optional(),
       soft_deny: z.array(z.string()).optional(),
+      hard_deny: z.array(z.string()).optional(),
       deny: z.array(z.string()).optional(),
       environment: z.array(z.string()).optional(),
     })
 
     const allow: string[] = []
     const soft_deny: string[] = []
+    const hard_deny: string[] = []
     const environment: string[] = []
 
     for (const source of [
       'userSettings',
-      'localSettings',
+      // localSettings intentionally omitted — official 2.1.207 no longer reads
+      // autoMode from `.claude/settings.local.json` (repo-resident).
       'flagSettings',
       'policySettings',
     ] as const) {
@@ -950,6 +1013,7 @@ export function getAutoModeConfig():
       if (result.success) {
         if (result.data.allow) allow.push(...result.data.allow)
         if (result.data.soft_deny) soft_deny.push(...result.data.soft_deny)
+        if (result.data.hard_deny) hard_deny.push(...result.data.hard_deny)
         if (process.env.USER_TYPE === 'ant') {
           if (result.data.deny) soft_deny.push(...result.data.deny)
         }
@@ -958,10 +1022,16 @@ export function getAutoModeConfig():
       }
     }
 
-    if (allow.length > 0 || soft_deny.length > 0 || environment.length > 0) {
+    if (
+      allow.length > 0 ||
+      soft_deny.length > 0 ||
+      hard_deny.length > 0 ||
+      environment.length > 0
+    ) {
       return {
         ...(allow.length > 0 && { allow }),
         ...(soft_deny.length > 0 && { soft_deny }),
+        ...(hard_deny.length > 0 && { hard_deny }),
         ...(environment.length > 0 && { environment }),
       }
     }

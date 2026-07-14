@@ -58,10 +58,17 @@ export function isEnvDefinedFalsy(
  * — notably startKeychainPrefetch() at main.tsx top-level.
  */
 export function isBareMode(): boolean {
-  return (
-    isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE) ||
-    process.argv.includes('--bare')
-  )
+  // Official CLAUDE_CODE_SIMPLE densable (+ --bare argv).
+  let simpleEnv = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
+  try {
+    const { isSimpleModeEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    simpleEnv = isSimpleModeEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  return simpleEnv || process.argv.includes('--bare')
 }
 
 /**

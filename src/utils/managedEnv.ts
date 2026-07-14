@@ -46,7 +46,19 @@ function withoutHostManagedProviderVars(
   env: Record<string, string> | undefined,
 ): Record<string, string> {
   if (!env) return {}
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)) {
+  // Official PROVIDER_MANAGED_BY_HOST densable.
+  let providerManagedByHost = isEnvTruthy(
+    process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
+  )
+  try {
+    const { isProviderManagedByHostEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    providerManagedByHost = isProviderManagedByHostEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (!providerManagedByHost) {
     return env
   }
   const out: Record<string, string> = {}
@@ -196,4 +208,18 @@ export function applyConfigEnvironmentVariables(): void {
 
   // Reconfigure proxy/mTLS agents to pick up any proxy env vars from settings
   configureGlobalAgents()
+
+  // Official b4t densable — async reload client cert/key file contents after
+  // settings env may have changed CLAUDE_CODE_CLIENT_CERT/KEY paths.
+  void import('./mtls.js')
+    .then(m => m.reloadMtlsCertsFromEnvAsync())
+    .then(changed => {
+      if (changed) {
+        clearProxyCache()
+        configureGlobalAgents()
+      }
+    })
+    .catch(() => {
+      // densable optional
+    })
 }

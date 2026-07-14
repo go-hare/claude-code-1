@@ -60,6 +60,8 @@ import type {
 } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { isSyncPluginInstallEnabled } from '../residualFinalEnvGates.js'
+import { githubRepoGitUrl } from '../residualMoreEnvGates.js'
 import {
   errorMessage,
   getErrnoPath,
@@ -671,10 +673,8 @@ async function installFromGitHub(
       `Invalid GitHub repository format: ${repo}. Expected format: owner/repo`,
     )
   }
-  // Use HTTPS for CCR (no SSH keys), SSH for normal CLI
-  const gitUrl = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
-    ? `https://github.com/${repo}.git`
-    : `git@github.com:${repo}.git`
+  // Official OPs/bZe — HTTPS when REMOTE or PLUGIN_PREFER_HTTPS; else SSH.
+  const gitUrl = githubRepoGitUrl(repo)
   return installFromGit(gitUrl, targetPath, ref, sha)
 }
 
@@ -686,9 +686,8 @@ async function installFromGitHub(
  */
 function resolveGitSubdirUrl(url: string): string {
   if (/^[a-zA-Z0-9-_.]+\/[a-zA-Z0-9-_.]+$/.test(url)) {
-    return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
-      ? `https://github.com/${url}.git`
-      : `git@github.com:${url}.git`
+    // Official OPs/bZe densable
+    return githubRepoGitUrl(url)
   }
   return validateGitUrl(url)
 }
@@ -3139,7 +3138,7 @@ export const loadAllPlugins = memoize(async (): Promise<PluginLoadResult> => {
  */
 export const loadAllPluginsCacheOnly = memoize(
   async (): Promise<PluginLoadResult> => {
-    if (isEnvTruthy(process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL)) {
+    if (isSyncPluginInstallEnabled()) {
       return loadAllPlugins()
     }
     return assemblePluginLoadResult(() =>

@@ -363,6 +363,19 @@ export function hasMcpDiscoveryButNoToken(
 }
 
 /**
+ * Official 2.1.206 E0i: true when secure storage still holds a refresh_token
+ * for this server — used to silently reconnect once after a tool-call 401
+ * instead of immediately forcing interactive re-auth.
+ */
+export function serverHasStoredRefreshToken(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+): boolean {
+  const serverKey = getServerKey(serverName, serverConfig)
+  return !!getSecureStorage().read()?.mcpOAuth?.[serverKey]?.refreshToken
+}
+
+/**
  * Revokes a single token on the OAuth server.
  *
  * Per RFC 7009, public clients (like Claude Code) should authenticate by including
@@ -2441,6 +2454,11 @@ export function getMcpClientConfig(
  * Safely extracts scope information from AuthorizationServerMetadata.
  * The metadata can be either OAuthMetadata or OpenIdProviderDiscoveryMetadata,
  * and different providers use different fields for scope information.
+ *
+ * Official 2.1.196: do NOT fall back to `scopes_supported`. That field is the
+ * full catalog of scopes the AS knows about, not the default grant set.
+ * Requesting the entire catalog breaks providers like GitLab self-hosted
+ * (`invalid_scope`). Prefer explicit `scope` / `default_scope` only.
  */
 function getScopeFromMetadata(
   metadata: AuthorizationServerMetadata | undefined,
@@ -2457,9 +2475,6 @@ function getScopeFromMetadata(
   ) {
     return metadata.default_scope
   }
-  // Fall back to scopes_supported (standard OAuth 2.0 field)
-  if (metadata.scopes_supported && Array.isArray(metadata.scopes_supported)) {
-    return metadata.scopes_supported.join(' ')
-  }
+  // Intentionally no scopes_supported fallback (2.1.196).
   return undefined
 }

@@ -44,13 +44,56 @@ export type OverageGate =
   | { kind: 'proceed'; billingNote: string }
   | { kind: 'not-enabled' }
   | { kind: 'low-balance'; available: number }
-  | { kind: 'needs-confirm' }
+  | { kind: 'needs-confirm'; body?: string; billingNote?: string }
+  | {
+      kind: 'blocked'
+      message: string
+      actionUrl?: string | null
+      reason?: string
+    }
 
 /**
  * Determine whether the user can launch an ultrareview and under what
  * billing terms. Fetches quota and utilization in parallel.
  */
 export async function checkOverageGate(): Promise<OverageGate> {
+  // Official zlp densable — CLAUDE_CODE_ULTRAREVIEW_PREFLIGHT_FIXTURE short-circuits
+  // the network preflight (zko).
+  try {
+    const {
+      parseUltrareviewPreflightFixtureTyped,
+      resolveOverageGateFromPreflightFixture,
+    } = await import('../../utils/residualFinalEnvGates.js')
+    const fromFixture = resolveOverageGateFromPreflightFixture({
+      fixture: parseUltrareviewPreflightFixtureTyped(),
+      sessionOverageConfirmed,
+    })
+    if (fromFixture) return fromFixture
+  } catch {
+    // Fixture parse optional — fall through to live preflight / quota path.
+  }
+
+  // Official zko densable — live /v1/ultrareview/preflight when available.
+  // Falls through to quota/utilization when endpoint missing or errors.
+  try {
+    const { fetchUltrareviewPreflight } = await import(
+      '../../services/api/ultrareviewQuota.js'
+    )
+    const { resolveOverageGateFromPreflightFixture } = await import(
+      '../../utils/residualFinalEnvGates.js'
+    )
+    const live = await fetchUltrareviewPreflight()
+    if (live) {
+      const fromLive = resolveOverageGateFromPreflightFixture({
+        fixture: live,
+        sessionOverageConfirmed,
+      })
+      if (fromLive) return fromLive
+    }
+  } catch {
+    // Network preflight optional.
+  }
+
   // Team and Enterprise plans include ultrareview — no free-review quota
   // or Extra Usage dialog. The quota endpoint is scoped to consumer plans
   // (pro/max); hitting it on team/ent would surface a confusing dialog.

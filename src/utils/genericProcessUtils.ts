@@ -28,6 +28,35 @@ export function isProcessRunning(pid: number): boolean {
 }
 
 /**
+ * Official Dmi — process start time as epoch ms via `ps -o lstart=` (UTC).
+ * Returns null on Windows or when ps fails. Used by host-creds procStart drift.
+ */
+export async function getProcessStartTimeMs(
+  pid: number,
+): Promise<number | null> {
+  if (pid <= 1 || process.platform === 'win32') return null
+  try {
+    const result = await execFileNoThrowWithCwd(
+      'ps',
+      ['-o', 'lstart=', '-p', String(pid)],
+      {
+        timeout: 1000,
+        env: {
+          ...process.env,
+          LC_ALL: 'C',
+          TZ: 'UTC',
+        },
+      },
+    )
+    if (result.code !== 0 || !result.stdout?.trim()) return null
+    const ms = Date.parse(`${result.stdout.trim()} UTC`)
+    return Number.isFinite(ms) ? ms : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Gets the ancestor process chain for a given process (up to maxDepth levels)
  * @param pid - The starting process ID
  * @param maxDepth - Maximum number of ancestors to fetch (default: 10)

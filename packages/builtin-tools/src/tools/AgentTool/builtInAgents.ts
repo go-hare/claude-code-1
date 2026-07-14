@@ -11,6 +11,17 @@ import { VERIFICATION_AGENT } from './built-in/verificationAgent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 export function areExplorePlanAgentsEnabled(): boolean {
+  // Official DISABLE_EXPLORE_PLAN_AGENTS densable force-off.
+  try {
+    const { isExplorePlanAgentsDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+    if (isExplorePlanAgentsDisabled()) return false
+  } catch {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS)) {
+      return false
+    }
+  }
   if (feature('BUILTIN_EXPLORE_PLAN_AGENTS')) {
     return true
   }
@@ -31,7 +42,17 @@ export function getBuiltInAgents(): AgentDefinition[] {
   // issues at module init time. The coordinatorMode module depends on tools
   // which depend on AgentTool which imports this file.
   if (feature('COORDINATOR_MODE')) {
-    if (isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)) {
+    // Official COORDINATOR_MODE densable.
+    let coordinatorMode = isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
+    try {
+      const { isCoordinatorModeEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+      coordinatorMode = isCoordinatorModeEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+    if (coordinatorMode) {
       /* eslint-disable @typescript-eslint/no-require-imports */
       const { getCoordinatorAgents } =
         require('src/coordinator/workerAgent.js') as typeof import('src/coordinator/workerAgent.js')
@@ -49,7 +70,9 @@ export function getBuiltInAgents(): AgentDefinition[] {
     agents.push(EXPLORE_AGENT, PLAN_AGENT)
   }
 
-  // Include Code Guide agent for non-SDK entrypoints
+  // Include Code Guide agent for non-SDK entrypoints.
+  // Note (2.1.207): CLAUDE_CODE_DISABLE_CLAUDE_CODE_SKILL gates the
+  // claude-code-docs *skill* (registerClaudeCodeSkill), not this agent.
   const isNonSdkEntrypoint =
     process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-ts' &&
     process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-py' &&

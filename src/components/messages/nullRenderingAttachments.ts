@@ -34,6 +34,7 @@ const NULL_RENDERING_TYPES = [
   'mcp_instructions_delta',
   'companion_intro',
   'token_usage',
+  'total_tokens_reminder',
   'ultrathink_effort',
   'max_turns_reached',
   'task_reminder',

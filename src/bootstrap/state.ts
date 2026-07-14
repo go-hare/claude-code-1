@@ -67,8 +67,37 @@ type State = {
   modelUsage: { [modelName: string]: ModelUsage }
   mainLoopModelOverride: ModelSetting | undefined
   initialMainLoopModel: ModelSetting
+  /**
+   * Official resolvedOrgDefault (KVo/wgt) — session-level cache of the org
+   * console default model. `undefined` = not yet resolved; `null` = no org
+   * default; string = resolved model id/alias.
+   */
+  resolvedOrgDefault: string | null | undefined
+  /**
+   * Official refusalFallbackOccurred (Ryn/F7e/X8o) — true after a refusal
+   * fallback switch in this session. Cleared on session switch / clear.
+   */
+  refusalFallbackOccurred: boolean
+  /**
+   * Official refusalFallbackModelLatch (b$t/Y8o/rke/JUa) — remembers the
+   * previous model override so session switch can restore it.
+   */
+  refusalFallbackModelLatch:
+    | {
+        fallbackModel: string
+        previousOverride: ModelSetting | undefined
+        previousAppStateModel?: ModelSetting | undefined
+        previousModelForSession?: ModelSetting | undefined
+      }
+    | undefined
   modelStrings: ModelStrings | null
   isInteractive: boolean
+  /**
+   * Official mainLoopBusy (qGo/jGo) — true while the REPL query loop is
+   * executing. Blocks bg shell memory-pressure reaping so we don't kill
+   * shells mid-turn.
+   */
+  mainLoopBusy: boolean
   kairosActive: boolean
   // When true, ensureToolResultPairing throws on mismatch instead of
   // repairing with synthetic placeholders. HFI opts in at startup so
@@ -193,6 +222,15 @@ type State = {
   }>
   // SDK-provided betas (e.g., context-1m-2025-08-07)
   sdkBetas: string[] | undefined
+  /**
+   * Official sdkSupportedDialogKinds (Pt) — kinds the SDK host declared it can
+   * render for request_user_dialog. undefined = none declared.
+   */
+  sdkSupportedDialogKinds: string[] | undefined
+  /** Official sdkSupportedDialogKindsSource — 'initialize' | 'restored' | … */
+  sdkSupportedDialogKindsSource: string | undefined
+  /** Official sdkDialogHostActive (Q8o/mht) — print requestDialog host armed. */
+  sdkDialogHostActive: boolean
   // Main thread agent type (from --agent flag or settings)
   mainThreadAgentType: string | undefined
   // Remote mode (--remote flag)
@@ -291,8 +329,12 @@ function getInitialState(): State {
     modelUsage: {},
     mainLoopModelOverride: undefined,
     initialMainLoopModel: null,
+    resolvedOrgDefault: undefined,
+    refusalFallbackOccurred: false,
+    refusalFallbackModelLatch: undefined,
     modelStrings: null,
     isInteractive: false,
+    mainLoopBusy: false,
     kairosActive: false,
     strictToolResultPairing: false,
     sdkAgentProgressSummariesEnabled: false,
@@ -379,6 +421,9 @@ function getInitialState(): State {
     slowOperations: [],
     // SDK-provided betas
     sdkBetas: undefined,
+    sdkSupportedDialogKinds: undefined,
+    sdkSupportedDialogKindsSource: undefined,
+    sdkDialogHostActive: false,
     // Main thread agent type
     mainThreadAgentType: undefined,
     // Remote mode
@@ -436,10 +481,30 @@ export function regenerateSessionId(
   // accumulate stale keys. Callers that need to carry the slug across
   // (REPL.tsx clearContext) read it before calling clearConversation.
   STATE.planSlugCache.delete(STATE.sessionId)
+  // Official X8o + JUa densable on session clear/regenerate.
+  STATE.refusalFallbackOccurred = false
+  const latchReset = consumeRefusalFallbackModelLatch()
   // Regenerated sessions live in the current project: reset projectDir to
   // null so getTranscriptPath() derives from originalCwd.
   STATE.sessionId = randomUUID() as SessionId
   STATE.sessionProjectDir = null
+  // Official BMg densable — pure rebind plan available via latchReset for
+  // callers with setAppState; override already restored by consume above.
+  if (latchReset) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { planRefusalFallbackAppStateRebind } =
+        require('../utils/refusalFallback.js') as typeof import('../utils/refusalFallback.js')
+      // Override already restored; emit plan for optional AppState hosts.
+      void planRefusalFallbackAppStateRebind({
+        appStateModel: latchReset.appStateModel,
+        forSessionValue: latchReset.forSessionValue,
+        overrideValue: latchReset.overrideValue,
+      })
+    } catch {
+      // densable optional
+    }
+  }
   return STATE.sessionId
 }
 
@@ -467,6 +532,13 @@ export function switchSession(
   // across repeated /resume. Only the current session's slug is ever read
   // (plans.ts getPlanSlug defaults to getSessionId()).
   STATE.planSlugCache.delete(STATE.sessionId)
+  // Official: when session id changes, clear refusalFallbackOccurred and
+  // consume latch (JUa restores previous override if still on fallback).
+  if (STATE.sessionId !== sessionId) {
+    STATE.refusalFallbackOccurred = false
+    void consumeRefusalFallbackModelLatch()
+    STATE.parentSessionId = undefined
+  }
   STATE.sessionId = sessionId
   STATE.sessionProjectDir = projectDir
   sessionSwitched.emit(sessionId)
@@ -778,6 +850,17 @@ export function getLastInteractionTime(): number {
   return STATE.lastInteractionTime
 }
 
+/** Official qGo — main query loop is mid-turn. */
+export function getMainLoopBusy(): boolean {
+  return STATE.mainLoopBusy ?? false
+}
+
+/** Official jGo — set while REPL onQuery owns the queryGuard. */
+export function setMainLoopBusy(value: boolean): void {
+  if (STATE.mainLoopBusy === value) return
+  STATE.mainLoopBusy = value
+}
+
 // Scroll drain suspension — background intervals check this before doing work
 // so they don't compete with scroll frames for the event loop. Set by
 // ScrollBox scrollBy/scrollTo, cleared SCROLL_DRAIN_IDLE_MS after the last
@@ -835,12 +918,155 @@ export function setInitialMainLoopModel(model: ModelSetting): void {
   STATE.initialMainLoopModel = model
 }
 
+/** Official KVo — session-resolved org default model. */
+export function getResolvedOrgDefault(): string | null | undefined {
+  return STATE.resolvedOrgDefault
+}
+
+/** Official wgt — set session-resolved org default model. */
+export function setResolvedOrgDefault(model: string | null | undefined): void {
+  STATE.resolvedOrgDefault = model
+}
+
+/** Official Ryn — mark that a refusal fallback switch occurred. */
+export function markRefusalFallbackOccurred(): void {
+  STATE.refusalFallbackOccurred = true
+}
+
+/** Official F7e — whether a refusal fallback switch occurred this session. */
+export function hasRefusalFallbackOccurred(): boolean {
+  return STATE.refusalFallbackOccurred
+}
+
+/** Official X8o — clear refusalFallbackOccurred. */
+export function clearRefusalFallbackOccurred(): void {
+  STATE.refusalFallbackOccurred = false
+}
+
+export type RefusalFallbackModelLatch = {
+  fallbackModel: string
+  previousOverride: ModelSetting | undefined
+  previousAppStateModel?: ModelSetting | undefined
+  previousModelForSession?: ModelSetting | undefined
+}
+
+/**
+ * Official b$t — set/update the refusal fallback model latch.
+ * When already latched to the current override, only update fallbackModel.
+ */
+export function setRefusalFallbackModelLatch(
+  latch: RefusalFallbackModelLatch,
+): void {
+  const cur = STATE.refusalFallbackModelLatch
+  if (cur && STATE.mainLoopModelOverride === cur.fallbackModel) {
+    STATE.refusalFallbackModelLatch = {
+      ...cur,
+      fallbackModel: latch.fallbackModel,
+    }
+    return
+  }
+  STATE.refusalFallbackModelLatch = latch
+}
+
+/** Official rke — clear latch without restoring override. */
+export function clearRefusalFallbackModelLatch(): void {
+  STATE.refusalFallbackModelLatch = undefined
+}
+
+/** Official Y8o — read latch. */
+export function getRefusalFallbackModelLatch():
+  | RefusalFallbackModelLatch
+  | undefined {
+  return STATE.refusalFallbackModelLatch
+}
+
+/**
+ * Official J8o — if latched, update previousOverride (user changed model
+ * while latched).
+ */
+export function updateRefusalFallbackLatchPreviousOverride(
+  previousOverride: ModelSetting | undefined,
+): void {
+  if (!STATE.refusalFallbackModelLatch) return
+  STATE.refusalFallbackModelLatch = {
+    ...STATE.refusalFallbackModelLatch,
+    previousOverride,
+  }
+}
+
+export type RefusalFallbackLatchResetResult = {
+  appStateModel: ModelSetting | undefined
+  forSessionValue: ModelSetting | undefined
+  overrideValue: ModelSetting | undefined
+  restoredToExplicitOverride: boolean
+  fallbackModel: string
+}
+
+/**
+ * Official JUa densable — clear latch and restore mainLoopModelOverride when
+ * it still equals the latched fallback model. Returns restore payload for
+ * AppState rebinding (BMg denser consumer).
+ */
+export function consumeRefusalFallbackModelLatch():
+  | RefusalFallbackLatchResetResult
+  | undefined {
+  const latch = STATE.refusalFallbackModelLatch
+  STATE.refusalFallbackModelLatch = undefined
+  if (!latch || STATE.mainLoopModelOverride !== latch.fallbackModel) {
+    return undefined
+  }
+  STATE.mainLoopModelOverride = latch.previousOverride
+  return {
+    appStateModel: latch.previousAppStateModel,
+    forSessionValue: latch.previousModelForSession,
+    overrideValue: latch.previousOverride,
+    restoredToExplicitOverride: latch.previousOverride !== undefined,
+    fallbackModel: latch.fallbackModel,
+  }
+}
+
 export function getSdkBetas(): string[] | undefined {
   return STATE.sdkBetas
 }
 
 export function setSdkBetas(betas: string[] | undefined): void {
   STATE.sdkBetas = betas
+}
+
+/**
+ * Official hht — declared request_user_dialog kinds the SDK host supports.
+ */
+export function getSdkSupportedDialogKinds(): string[] | undefined {
+  return STATE.sdkSupportedDialogKinds
+}
+
+/**
+ * Official xyn — set declared dialog kinds + source ('initialize' | 'restored').
+ * Pass undefined to clear.
+ */
+export function setSdkSupportedDialogKinds(
+  kinds: string[] | undefined,
+  source?: string,
+): void {
+  STATE.sdkSupportedDialogKinds = kinds
+  STATE.sdkSupportedDialogKindsSource =
+    kinds === undefined ? undefined : (source ?? 'initialize')
+}
+
+/** Official Z8o — source of declared kinds, or 'none' when unset. */
+export function getSdkSupportedDialogKindsSource(): string {
+  if (STATE.sdkSupportedDialogKinds === undefined) return 'none'
+  return STATE.sdkSupportedDialogKindsSource ?? 'none'
+}
+
+/** Official Q8o — mark print requestDialog host active. */
+export function setSdkDialogHostActive(active: boolean): void {
+  STATE.sdkDialogHostActive = active
+}
+
+/** Official mht — whether createPrintRequestDialog host is armed. */
+export function isSdkDialogHostActive(): boolean {
+  return STATE.sdkDialogHostActive
 }
 
 export function resetCostState(): void {
@@ -1305,6 +1531,14 @@ export function setSessionPersistenceDisabled(disabled: boolean): void {
 }
 
 export function isSessionPersistenceDisabled(): boolean {
+  // Official CLAUDE_CODE_FORCE_SESSION_PERSISTENCE — force writes on.
+  if (
+    (
+      require('../utils/forceSessionPersistence.js') as typeof import('../utils/forceSessionPersistence.js')
+    ).isForceSessionPersistenceEnabled()
+  ) {
+    return false
+  }
   return STATE.sessionPersistenceDisabled
 }
 

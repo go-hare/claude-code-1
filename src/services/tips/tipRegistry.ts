@@ -53,6 +53,7 @@ import {
   formatCreditAmount,
   getCachedReferrerReward,
 } from '../api/referral.js'
+import { loadMarketplaceDeclaredPluginTips } from './marketplacePluginTips.js'
 import { getSessionsSinceLastShown } from './tipHistory.js'
 import type { Tip, TipContext } from './types.js'
 
@@ -71,6 +72,8 @@ async function isMarketplacePluginRelevant(
   context: TipContext | undefined,
   signals: { filePath?: RegExp; cli?: string[] },
 ): Promise<boolean> {
+  // Built-in first-party tips (frontend-design, vercel) are always eligible;
+  // official pluginSuggestionMarketplaces only gates marketplace-declared tips.
   if (!(await isOfficialMarketplaceInstalled())) {
     return false
   }
@@ -240,9 +243,18 @@ const externalTips: Tip[] = [
     content: async () =>
       'Set CLAUDE_CODE_USE_POWERSHELL_TOOL=1 to enable the PowerShell tool (preview)',
     cooldownSessions: 10,
-    isRelevant: async () =>
-      getPlatform() === 'windows' &&
-      process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL === undefined,
+    isRelevant: async () => {
+      if (getPlatform() !== 'windows') return false
+      // Official USE_POWERSHELL_TOOL densable pure env half.
+      try {
+        const { resolvePowerShellToolEnvOverride } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+        return resolvePowerShellToolEnvOverride() === null
+      } catch {
+        return process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL === undefined
+      }
+    },
   },
   {
     id: 'status-line',
@@ -672,8 +684,10 @@ export async function getRelevantTips(context?: TipContext): Promise<Tip[]> {
     return customTips
   }
 
-  // Otherwise, filter built-in tips as before and combine with custom
-  const tips = [...externalTips, ...internalOnlyTips]
+  // Official Q4o: built-ins + marketplace-declared (fHa) + custom tips.
+  // Built-in first-party tips are never gated by pluginSuggestionMarketplaces.
+  const marketplaceTips = await loadMarketplaceDeclaredPluginTips()
+  const tips = [...externalTips, ...internalOnlyTips, ...marketplaceTips]
   const isRelevant = await Promise.all(
     tips.map(_ => _.isRelevant?.(context) ?? Promise.resolve(true)),
   )

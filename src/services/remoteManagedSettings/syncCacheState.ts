@@ -28,6 +28,7 @@ import { stripBOM } from '../../utils/jsonRead.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
 import type { SettingsJson } from '../../utils/settings/types.js'
 import { jsonParse } from '../../utils/slowOperations.js'
+import { getRemoteSettingsPath } from '../../utils/residualFinalEnvGates.js'
 
 const SETTINGS_FILENAME = 'remote-settings.json'
 
@@ -49,6 +50,9 @@ export function setEligibility(v: boolean): boolean {
 }
 
 export function getSettingsPath(): string {
+  // Official CLAUDE_CODE_REMOTE_SETTINGS_PATH override for tests / CCR.
+  const override = getRemoteSettingsPath()
+  if (override) return override
   return join(getClaudeConfigHomeDir(), SETTINGS_FILENAME)
 }
 

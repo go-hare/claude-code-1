@@ -20,6 +20,7 @@ import {
   isAnthropicAuthEnabled,
 } from '../utils/auth.js'
 import { logForDebugging } from '../utils/debug.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
 import { getUserAgent } from '../utils/http.js'
 import { logError } from '../utils/log.js'
 import { getWebSocketTLSOptions } from '../utils/mtls.js'
@@ -36,6 +37,9 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from './analytics/growthbook.js'
 const VOICE_STREAM_PATH = '/api/ws/speech_to_text/voice_stream'
 
 const KEEPALIVE_INTERVAL_MS = 8_000
+
+/** Official L3_ — max joined keyterms header length. */
+export const VOICE_KEYTERMS_MAX_CHARS = 1024
 
 // finalize() resolution timers. `noData` fires when no TranscriptText
 // arrives post-CloseStream — the server has nothing; don't wait out the
@@ -106,6 +110,46 @@ export function isVoiceStreamAvailable(): boolean {
   return tokens !== null && tokens.accessToken !== null
 }
 
+/**
+ * Official tHp — forward typed interim transcripts.
+ * CLAUDE_CODE_VOICE_FORWARD_INTERIMS_TYPED truthy → on;
+ * else GrowthBook `tengu_brick_follow` (default false).
+ */
+export function shouldForwardInterimsTyped(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (isEnvTruthy(env.CLAUDE_CODE_VOICE_FORWARD_INTERIMS_TYPED)) return true
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_brick_follow', false)
+}
+
+/**
+ * Official rHp — sanitize + dedupe keyterms for `x-config-keyterms`.
+ * Commas → spaces, strip non-printable ASCII, collapse whitespace, dedupe,
+ * stop when joined length would exceed maxChars (default 1024).
+ */
+export function sanitizeVoiceKeyterms(
+  keyterms: readonly string[],
+  maxChars: number = VOICE_KEYTERMS_MAX_CHARS,
+): string {
+  const seen = new Set<string>()
+  const out: string[] = []
+  let used = 0
+  for (const raw of keyterms) {
+    const cleaned = raw
+      .replace(/,/g, ' ')
+      .replace(/[^\x20-\x7E]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!cleaned || seen.has(cleaned)) continue
+    const add = cleaned.length + (out.length > 0 ? 1 : 0)
+    if (used + add > maxChars) break
+    seen.add(cleaned)
+    out.push(cleaned)
+    used += add
+  }
+  return out.join(',')
+}
+
 // ─── Connection ────────────────────────────────────────────────────────
 
 export async function connectVoiceStream(
@@ -150,10 +194,18 @@ export async function connectVoiceStream(
     language: options?.language ?? 'en',
   })
 
+  // Official tHp — env CLAUDE_CODE_VOICE_FORWARD_INTERIMS_TYPED or
+  // tengu_brick_follow: request typed interim transcripts from the server.
+  if (shouldForwardInterimsTyped()) {
+    params.set('forward_interims', 'typed')
+  }
+
   // Route through conversation-engine with Deepgram Nova 3 (bypassing
   // the server's project_bell_v2_config GrowthBook gate). The server
   // side is anthropics/anthropic#278327 + #281372; this lets us ramp
   // clients independently.
+  // Official always pairs use_conversation_engine + deepgram-nova3 when
+  // connecting (post-2.1.183 voice_stream path). Keep GB gate as soft ramp.
   const isNova3 = getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_cobalt_frost',
     false,
@@ -164,14 +216,6 @@ export async function connectVoiceStream(
     logForDebugging('[voice_stream] Nova 3 gate enabled (tengu_cobalt_frost)')
   }
 
-  // Append keyterms as query params — the voice_stream proxy forwards
-  // these to the STT service which applies appropriate boosting.
-  if (options?.keyterms?.length) {
-    for (const term of options.keyterms) {
-      params.append('keyterms', term)
-    }
-  }
-
   const url = `${wsBaseUrl}${VOICE_STREAM_PATH}?${params.toString()}`
 
   logForDebugging(`[voice_stream] Connecting to ${url}`)
@@ -180,6 +224,14 @@ export async function connectVoiceStream(
     Authorization: `Bearer ${tokens.accessToken}`,
     'User-Agent': getUserAgent(),
     'x-app': 'cli',
+  }
+
+  // Official rHp — keyterms go on x-config-keyterms (not query params).
+  if (options?.keyterms?.length) {
+    const joined = sanitizeVoiceKeyterms(options.keyterms)
+    if (joined) {
+      headers['x-config-keyterms'] = joined
+    }
   }
 
   const tlsOptions = getWebSocketTLSOptions()

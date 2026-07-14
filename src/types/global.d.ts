@@ -85,3 +85,13 @@ declare module '*.css' {
   const content: string
   export default content
 }
+// Nested .txt suffixes used for inlining non-md skill assets as text
+// (e.g. validate_palette.js.txt → extracted as scripts/validate_palette.js).
+declare module '*.js.txt' {
+  const content: string
+  export default content
+}
+declare module '*.py.txt' {
+  const content: string
+  export default content
+}

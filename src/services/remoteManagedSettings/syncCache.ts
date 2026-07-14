@@ -49,6 +49,18 @@ export function resetSyncCache(): void {
 export function isRemoteManagedSettingsEligible(): boolean {
   if (cached !== undefined) return cached
 
+  // Official CLAUDE_CODE_MOCK_REMOTE_SETTINGS densable — force-eligible for tests.
+  try {
+    const { isMockRemoteSettingsEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    if (isMockRemoteSettingsEnabled()) {
+      return (cached = setEligibility(true))
+    }
+  } catch {
+    // densable optional
+  }
+
   // 3p provider users should not hit the settings endpoint
   if (getAPIProvider() !== 'firstParty') {
     return (cached = setEligibility(false))

@@ -106,6 +106,9 @@ export function memoizeWithTTL<Args extends unknown[], Result>(
   return memoized
 }
 
+/** Static ms TTL, or per-value resolver (official AWS credential Expiration TTL). */
+export type AsyncCacheLifetimeMs<Result> = number | ((value: Result) => number)
+
 /**
  * Creates a memoized async function that returns cached values while refreshing in parallel.
  * This implements a write-through cache pattern for async functions:
@@ -114,13 +117,19 @@ export function memoizeWithTTL<Args extends unknown[], Result>(
  * - If no cache exists, block and compute the value
  *
  * @param f The async function to memoize
- * @param cacheLifetimeMs The lifetime of cached values in milliseconds
+ * @param cacheLifetimeMs Lifetime in ms, or a function of the cached value
+ *   (used for AWS credentials with Expiration — official 2.1.207).
  * @returns A memoized version of the async function
  */
 export function memoizeWithTTLAsync<Args extends unknown[], Result>(
   f: (...args: Args) => Promise<Result>,
-  cacheLifetimeMs: number = 5 * 60 * 1000, // Default 5 minutes
-): ((...args: Args) => Promise<Result>) & { cache: { clear: () => void } } {
+  cacheLifetimeMs: AsyncCacheLifetimeMs<Result> = 5 * 60 * 1000, // Default 5 minutes
+): ((...args: Args) => Promise<Result>) & {
+  cache: {
+    clear: () => void
+    delete: (key: string) => boolean
+  }
+} {
   const cache = new Map<string, CacheEntry<Result>>()
   // In-flight cold-miss dedup. The old memoizeWithTTL (sync) accidentally
   // provided this: it stored the Promise synchronously before the first
@@ -130,6 +139,11 @@ export function memoizeWithTTLAsync<Args extends unknown[], Result>(
   // refreshAndGetAwsCredentials that means N concurrent `aws sso login`
   // spawns. Same pattern as pending401Handlers in auth.ts:1171.
   const inFlight = new Map<string, Promise<Result>>()
+
+  const resolveTtl = (value: Result): number =>
+    typeof cacheLifetimeMs === 'function'
+      ? cacheLifetimeMs(value)
+      : cacheLifetimeMs
 
   const memoized = async (...args: Args): Promise<Result> => {
     const key = jsonStringify(args)
@@ -165,7 +179,7 @@ export function memoizeWithTTLAsync<Args extends unknown[], Result>(
     // If we have a stale cache entry and it's not already refreshing
     if (
       cached &&
-      now - cached.timestamp > cacheLifetimeMs &&
+      now - cached.timestamp > resolveTtl(cached.value) &&
       !cached.refreshing
     ) {
       // Mark as refreshing to prevent multiple parallel refreshes
@@ -212,10 +226,11 @@ export function memoizeWithTTLAsync<Args extends unknown[], Result>(
       cache.clear()
       inFlight.clear()
     },
+    delete: (key: string) => cache.delete(key),
   }
 
   return memoized as ((...args: Args) => Promise<Result>) & {
-    cache: { clear: () => void }
+    cache: { clear: () => void; delete: (key: string) => boolean }
   }
 }
 

@@ -8,6 +8,7 @@ import { setCommandLifecycleListener } from '../utils/commandLifecycle.js'
 import { isDebugMode, logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+import { shouldTeeSdkStdout } from '../utils/residualFinalEnvGates.js'
 import { errorMessage } from '../utils/errors.js'
 import { gracefulShutdown } from '../utils/gracefulShutdown.js'
 import { logError } from '../utils/log.js'
@@ -62,8 +63,17 @@ export class RemoteIO extends StructuredIO {
       })
     }
 
-    // Add environment runner version if available (set by Environment Manager)
-    const erVersion = process.env.CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION
+    // Official ENVIRONMENT_RUNNER_VERSION densable (set by Environment Manager).
+    let erVersion: string | null =
+      process.env.CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION || null
+    try {
+      const { resolveEnvironmentRunnerVersion } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+      erVersion = resolveEnvironmentRunnerVersion()
+    } catch {
+      // keep raw env fallback
+    }
     if (erVersion) {
       headers['x-environment-runner-version'] = erVersion
     }
@@ -77,7 +87,16 @@ export class RemoteIO extends StructuredIO {
       if (freshToken) {
         h['Authorization'] = `Bearer ${freshToken}`
       }
-      const freshErVersion = process.env.CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION
+      let freshErVersion: string | null =
+        process.env.CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION || null
+      try {
+        const { resolveEnvironmentRunnerVersion } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+        freshErVersion = resolveEnvironmentRunnerVersion()
+      } catch {
+        // keep raw env fallback
+      }
       if (freshErVersion) {
         h['x-environment-runner-version'] = freshErVersion
       }
@@ -95,9 +114,12 @@ export class RemoteIO extends StructuredIO {
     // Set up data callback
     this.isBridge = process.env.CLAUDE_CODE_ENVIRONMENT_KIND === 'bridge'
     this.isDebug = isDebugMode()
+    // Official: CLAUDE_CODE_TEE_SDK_STDOUT mirrors inbound SDK frames to stdout
+    // (also tees in bridge+debug). Pure gate; denser activity-fd path separate.
+    const teeStdout = shouldTeeSdkStdout()
     this.transport.setOnData((data: string) => {
       this.inputStream.write(data)
-      if (this.isBridge && this.isDebug) {
+      if (teeStdout || (this.isBridge && this.isDebug)) {
         writeToStdout(data.endsWith('\n') ? data : data + '\n')
       }
     })
@@ -113,7 +135,17 @@ export class RemoteIO extends StructuredIO {
     // synchronously, so new CCRClient() MUST run before transport.connect() —
     // otherwise early SSE frames hit an unwired onEventCallback and their
     // 'received' delivery acks are silently dropped.
-    if (isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)) {
+    // Official USE_CCR_V2 densable.
+    let useCcrV2 = isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)
+    try {
+      const { isCcrV2EnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+      useCcrV2 = isCcrV2EnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+    if (useCcrV2) {
       // CCR v2 is SSE+POST by definition. getTransportForUrl returns
       // SSETransport under the same env var, but the two checks live in
       // different files — assert the invariant so a future decoupling
@@ -223,6 +255,34 @@ export class RemoteIO extends StructuredIO {
 
   override get internalEventsPending(): number {
     return this.ccrClient?.internalEventsPending ?? 0
+  }
+
+  /**
+   * Official j6o densable host — expose CCRClient synced-file request when v2
+   * client is initialized so maybeStartWorkingSync can push working files.
+   */
+  getWorkingFilestoreHost(): {
+    requestSyncedFile: (args: {
+      method: 'put' | 'get'
+      path: string
+      body?: unknown
+      timeoutMs?: number
+      maxBodyLength?: number
+      maxContentLength?: number
+    }) => Promise<{
+      ok: boolean
+      reason?: string
+      status?: number
+      data?: { content?: string; content_sha256?: string }
+    }>
+    workerEpoch: number
+  } | null {
+    if (!this.ccrClient) return null
+    const client = this.ccrClient
+    return {
+      requestSyncedFile: args => client.requestSyncedFile(args),
+      workerEpoch: client.getWorkerEpoch(),
+    }
   }
 
   /**

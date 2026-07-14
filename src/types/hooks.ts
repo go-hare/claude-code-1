@@ -79,14 +79,32 @@ export const syncHookResponseSchema = lazySchema(() =>
         z.object({
           hookEventName: z.literal('UserPromptSubmit'),
           additionalContext: z.string().optional(),
+          // Official 2.1.x: hooks can set the session title from UPS
+          sessionTitle: z.string().optional(),
+          // Official: when decision is "block", omit original prompt from the block message
+          suppressOriginalPrompt: z
+            .boolean()
+            .optional()
+            .describe(
+              'When decision is "block", omit the original prompt from the block message',
+            ),
         }),
         z.object({
           hookEventName: z.literal('SessionStart'),
           additionalContext: z.string().optional(),
           initialUserMessage: z.string().optional(),
+          // Official 2.1.x: set session title from SessionStart
+          sessionTitle: z.string().describe('Set the session title').optional(),
           watchPaths: z
             .array(z.string())
             .describe('Absolute paths to watch for FileChanged hooks')
+            .optional(),
+          // Official 2.1.x: re-scan skills after SessionStart so hooks can install skills
+          reloadSkills: z
+            .boolean()
+            .describe(
+              'Re-scan skill and command directories after SessionStart hooks complete, so skills installed by the hook are available in the same session',
+            )
             .optional(),
         }),
         z.object({
@@ -261,6 +279,9 @@ export type HookResult = {
   hookPermissionDecisionReason?: string
   additionalContext?: string
   initialUserMessage?: string
+  sessionTitle?: string
+  reloadSkills?: boolean
+  suppressOriginalPrompt?: boolean
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
@@ -276,6 +297,9 @@ export type AggregatedHookResult = {
   permissionBehavior?: PermissionResult['behavior']
   additionalContexts?: string[]
   initialUserMessage?: string
+  sessionTitle?: string
+  reloadSkills?: boolean
+  suppressOriginalPrompt?: boolean
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult

@@ -202,6 +202,40 @@ describe('teammate mailbox retention', () => {
     tempHome = ''
   })
 
+  test('writeToMailbox refuses non-string text before I/O', async () => {
+    await expect(
+      writeToMailbox(
+        'worker',
+        {
+          from: 'team-lead',
+          // Official crash-loop guard: corrupt callers must not write.
+          text: 123 as unknown as string,
+          timestamp: new Date().toISOString(),
+        },
+        'alpha',
+      ),
+    ).rejects.toThrow('non-string text')
+
+    await expect(readMailbox('worker', 'alpha')).resolves.toEqual([])
+  })
+
+  test('writeToMailbox refuses schema-invalid messages', async () => {
+    await expect(
+      writeToMailbox(
+        'worker',
+        {
+          from: 'team-lead',
+          text: 'ok',
+          // missing timestamp → schema validation failure
+          timestamp: undefined as unknown as string,
+        },
+        'alpha',
+      ),
+    ).rejects.toThrow('schema validation')
+
+    await expect(readMailbox('worker', 'alpha')).resolves.toEqual([])
+  })
+
   test('writeToMailbox compacts oversized unread inbox files', async () => {
     const existing = Array.from(
       { length: MAX_MAILBOX_MESSAGES + 20 },
@@ -320,7 +354,8 @@ describe('teammate mailbox retention', () => {
       ),
     ).rejects.toThrow('Mailbox message text exceeds')
 
-    expect(await readRawMailbox('worker', 'alpha')).toEqual([])
+    // Pre-I/O validation refuses before creating the inbox file.
+    await expect(readMailbox('worker', 'alpha')).resolves.toEqual([])
   })
 
   test('writeToMailbox fails closed when an existing mailbox is corrupt', async () => {

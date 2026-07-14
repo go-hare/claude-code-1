@@ -489,12 +489,22 @@ export async function loadMemoryPrompt(): Promise<string | null> {
     ).join('\n')
   }
 
+  // Official DISABLE_AUTO_MEMORY densable pure env half (telemetry only).
+  let autoMemoryEnvDisabled = isEnvTruthy(
+    process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY,
+  )
+  try {
+    const { resolveAutoMemoryEnvOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    autoMemoryEnvDisabled = resolveAutoMemoryEnvOverride() === false
+  } catch {
+    // keep raw env fallback
+  }
   logEvent('tengu_memdir_disabled', {
-    disabled_by_env_var: isEnvTruthy(
-      process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY,
-    ),
+    disabled_by_env_var: autoMemoryEnvDisabled,
     disabled_by_setting:
-      !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY) &&
+      !autoMemoryEnvDisabled &&
       getInitialSettings().autoMemoryEnabled === false,
   })
   // Gate on the GB flag directly, not isTeamMemoryEnabled() — that function

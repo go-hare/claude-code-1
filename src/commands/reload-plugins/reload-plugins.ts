@@ -21,10 +21,17 @@ export const call: LocalCommandCall = async (_args, context) => {
   //
   // No retries: user-initiated command, one attempt + fail-open. The user
   // can re-run /reload-plugins to retry. Startup path keeps its retries.
-  if (
-    feature('DOWNLOAD_USER_SETTINGS') &&
-    (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
-  ) {
+  // Official REMOTE densable.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (feature('DOWNLOAD_USER_SETTINGS') && (isRemote || getIsRemoteMode())) {
     const applied = await redownloadUserSettings()
     // applyRemoteEntriesToLocal uses markInternalWrite to suppress the
     // file watcher (correct for startup, nothing listening yet); fire

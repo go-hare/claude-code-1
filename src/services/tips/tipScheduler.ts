@@ -1,3 +1,4 @@
+import { getForceTipId } from '../../utils/residualUiEnvGates.js'
 import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -40,6 +41,13 @@ export async function getTipToShowOnSpinner(
   const tips = await getRelevantTips(context)
   if (tips.length === 0) {
     return undefined
+  }
+
+  // Official CLAUDE_CODE_FORCE_TIP_ID — pin a specific tip when present.
+  const forceId = getForceTipId()
+  if (forceId) {
+    const forced = tips.find(t => t.id === forceId)
+    if (forced) return forced
   }
 
   return selectTipWithLongestTimeSinceShown(tips)

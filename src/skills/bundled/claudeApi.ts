@@ -186,6 +186,11 @@ export function registerClaudeApiSkill(): void {
       'DO NOT TRIGGER when: code imports `openai`/other AI SDK, general programming, or ML/data-science tasks.',
     allowedTools: ['Read', 'Grep', 'Glob', 'WebFetch'],
     userInvocable: true,
+    // Official CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL
+    isEnabled: () =>
+      !(
+        require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
+      ).isClaudeApiSkillDisabled(),
     async getPromptForCommand(args) {
       const content = await import('./claudeApiContent.js')
       const lang = await detectLanguage()

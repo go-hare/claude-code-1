@@ -134,6 +134,10 @@ export type EnvLessBridgeParams = {
   onSetPermissionMode?: (
     mode: PermissionMode,
   ) => { ok: true } | { ok: false; error: string }
+  onSetMcpPermissionModeOverride?: (
+    serverName: string,
+    mode: string | null,
+  ) => { ok: true; warning?: string } | { ok: false; error: string }
   onStateChange?: (state: BridgeState, detail?: string) => void
   /**
    * When true, skip opening the SSE read stream — only the CCRClient write
@@ -171,6 +175,7 @@ export async function initEnvLessBridgeCore(
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
+    onSetMcpPermissionModeOverride,
     onStateChange,
     outboundOnly,
     tags,
@@ -469,6 +474,7 @@ export async function initEnvLessBridgeCore(
             onSetModel,
             onSetMaxThinkingTokens,
             onSetPermissionMode,
+            onSetMcpPermissionModeOverride,
             outboundOnly,
           }),
       )

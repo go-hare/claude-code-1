@@ -14,6 +14,7 @@ import type { PermissionUpdate } from 'src/utils/permissions/PermissionUpdateSch
 import { createPermissionRequestMessage } from 'src/utils/permissions/permissions.js'
 import { BashTool } from './BashTool.js'
 import { bashCommandIsSafeAsync_DEPRECATED } from './bashSecurity.js'
+import { commandWritesToGitInternalPaths } from './readOnlyValidation.js'
 
 type CommandIdentityCheckers = {
   isNormalizedCdCommand: (command: string) => boolean
@@ -38,6 +39,7 @@ async function segmentedCommandPermissionResult(
       type: 'other' as const,
       reason:
         'Multiple directory changes in one command require approval for clarity',
+      bashMissKind: 'multi-cd',
     }
     return {
       behavior: 'ask',
@@ -67,11 +69,27 @@ async function segmentedCommandPermissionResult(
         }
       }
     }
-    if (hasCd && hasGit) {
+    // Official: structure-create + git is checked before the plain cd+git path.
+    if (hasGit && commandWritesToGitInternalPaths(input.command)) {
       const decisionReason = {
         type: 'other' as const,
         reason:
-          'Compound commands with cd and git require approval to prevent bare repository attacks',
+          'This command creates git repository structure files (HEAD/objects/refs/hooks) and then runs git, which can execute hooks/fsmonitor from the created files.',
+        bashMissKind: 'cd-git-compound',
+      }
+      return {
+        behavior: 'ask',
+        decisionReason,
+        message: createPermissionRequestMessage(BashTool.name, decisionReason),
+      }
+    }
+    if (hasCd && hasGit) {
+      const decisionReason = {
+        type: 'other' as const,
+        // Official 2.1.x wording for the cd+git hook/fsmonitor surface.
+        reason:
+          'This command changes directory before running git, which can execute untrusted hooks from the target directory. Approve only if you trust it.',
+        bashMissKind: 'cd-git-compound',
       }
       return {
         behavior: 'ask',
@@ -230,6 +248,7 @@ async function bashToolCheckCommandOperatorPermissions(
         safetyResult.behavior === 'ask' && safetyResult.message
           ? safetyResult.message
           : 'This command uses shell operators that require approval for safety',
+      bashMissKind: 'shell-operators',
     }
     return {
       behavior: 'ask',

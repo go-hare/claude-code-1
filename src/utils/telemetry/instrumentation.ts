@@ -323,7 +323,15 @@ async function getOtlpTraceExporters() {
 }
 
 export function isTelemetryEnabled() {
-  return isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY)
+  // Official ENABLE_TELEMETRY densable.
+  try {
+    const { isTelemetryEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    return isTelemetryEnvEnabled()
+  } catch {
+    return isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY)
+  }
 }
 
 function getBigQueryExportingReader() {

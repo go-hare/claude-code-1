@@ -48,7 +48,9 @@ export function SkillPermissionRequest(props: PermissionRequestProps): React.Rea
   usePermissionRequestLogging(toolUseConfirm, unaryEvent);
 
   const originalCwd = getOriginalCwd();
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions();
+  // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
+  const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
+  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg;
   const options = useMemo((): PermissionPromptOption<SkillOptionValue>[] => {
     const baseOptions: PermissionPromptOption<SkillOptionValue>[] = [
       {

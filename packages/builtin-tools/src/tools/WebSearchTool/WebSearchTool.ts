@@ -169,6 +169,74 @@ export const WebSearchTool = buildTool({
     const startTime = performance.now()
     const { query } = input
 
+    // Official X0d/Q0d (2.1.207): firstParty + WEBSEARCH_USE_CCR_PROXY +
+    // CLAUDE_CODE_SESSION_ID (cse_*|session_*) → session worker web-search.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const {
+        shouldWebSearchUseCcrSessionWorker,
+        searchViaCcrSessionWorker,
+        formatCcrProxyToolError,
+      } =
+        require('src/utils/ccrProxyGates.js') as typeof import('src/utils/ccrProxyGates.js')
+      if (shouldWebSearchUseCcrSessionWorker()) {
+        const ccr = await searchViaCcrSessionWorker({
+          query,
+          signal: context.abortController.signal,
+          allowedDomains: input.allowed_domains,
+          blockedDomains: input.blocked_domains,
+        })
+        const durationSeconds = (performance.now() - startTime) / 1000
+        if (!ccr.ok) {
+          // Official Bn(ke(...), "web-search-ccr-proxy") densable.
+          throw new Error(
+            `${formatCcrProxyToolError(ccr)} [web-search-ccr-proxy]`,
+          )
+        }
+        if (onProgress) {
+          onProgress({
+            toolUseID: 'ccr-proxy-search-1',
+            data: {
+              type: 'search_results_received',
+              resultCount: ccr.results.length,
+              query,
+            },
+          })
+        }
+        const results: (SearchResult | string)[] =
+          ccr.results.length > 0
+            ? [
+                {
+                  tool_use_id: 'ccr-proxy-search-1',
+                  content: ccr.results.map(r => ({
+                    title: r.title,
+                    url: r.url,
+                    snippet: r.snippet,
+                  })),
+                },
+              ]
+            : ['No search results found.']
+        return {
+          data: {
+            query,
+            results,
+            durationSeconds,
+          },
+        }
+      }
+    } catch (err) {
+      // Re-throw CCR proxy failures and aborts; only swallow missing densable.
+      if (
+        err instanceof Error &&
+        (err.message.includes('web-search-ccr-proxy') ||
+          err.message.includes('"error_type"') ||
+          err.name === 'AbortError')
+      ) {
+        throw err
+      }
+      // densable optional
+    }
+
     const adapter = createAdapter()
     const adapterResults = await adapter.search(query, {
       allowedDomains: input.allowed_domains,

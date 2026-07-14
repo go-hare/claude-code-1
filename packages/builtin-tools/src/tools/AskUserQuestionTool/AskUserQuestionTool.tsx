@@ -103,6 +103,15 @@ const UNIQUENESS_REFINE = {
 const commonFields = lazySchema(() => ({
   answers: z.record(z.string(), z.string()).optional().describe('User answers collected by the permission component'),
   annotations: annotationsSchema(),
+  // Official 2.1.200: AFK auto-continue stamps timeout on the resolved input
+  afkTimeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      'Set when the dialog auto-resolved after this many milliseconds of idle (user away from keyboard). Absent on every human-resolved path.',
+    ),
   metadata: z
     .object({
       source: z
@@ -137,6 +146,15 @@ const outputSchema = lazySchema(() =>
         'The answers provided by the user (question text -> answer string; multi-select answers are comma-separated)',
       ),
     annotations: annotationsSchema(),
+    // Official 2.1.200: set when dialog auto-resolved after AFK idle timeout
+    afkTimeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        'Set when the dialog auto-resolved after this many milliseconds of idle (user away from keyboard). Absent on every human-resolved path.',
+      ),
   }),
 );
 type OutputSchema = ReturnType<typeof outputSchema>;
@@ -264,12 +282,17 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   renderToolUseErrorMessage() {
     return null;
   },
-  async call({ questions, answers = {}, annotations }, _context) {
+  async call({ questions, answers = {}, annotations, afkTimeoutMs }, _context) {
     return {
-      data: { questions, answers, ...(annotations && { annotations }) },
+      data: {
+        questions,
+        answers,
+        ...(annotations && { annotations }),
+        ...(afkTimeoutMs ? { afkTimeoutMs } : {}),
+      },
     };
   },
-  mapToolResultToToolResultBlockParam({ answers, annotations }, toolUseID) {
+  mapToolResultToToolResultBlockParam({ answers, annotations, afkTimeoutMs }, toolUseID) {
     const answersText = Object.entries(answers)
       .map(([questionText, answer]) => {
         const annotation = annotations?.[questionText];
@@ -284,9 +307,11 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
       })
       .join(', ');
 
+    const afkNote = afkTimeoutMs ? ` (auto-continued after ${Math.round(afkTimeoutMs / 1000)}s idle)` : '';
+
     return {
       type: 'tool_result',
-      content: `User has answered your questions: ${answersText}. You can now continue with the user's answers in mind.`,
+      content: `User has answered your questions: ${answersText}${afkNote}. You can now continue with the user's answers in mind.`,
       tool_use_id: toolUseID,
     };
   },

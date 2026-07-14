@@ -167,10 +167,21 @@ export type SearchExtraToolsMode = 'tst' | 'tst-auto' | 'standard'
  *   (unset)               tst (default: always defer non-core tools)
  */
 export function getSearchExtraToolsMode(): SearchExtraToolsMode {
-  // CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS still acts as a kill switch
+  // Official DISABLE_EXPERIMENTAL_BETAS densable still acts as a kill switch
   // for tool search, even though we no longer send beta headers.
   // Users who set this flag explicitly opt out of tool search.
-  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)) {
+  let experimentalBetasDisabled = isEnvTruthy(
+    process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS,
+  )
+  try {
+    const { isExperimentalBetasDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    experimentalBetasDisabled = isExperimentalBetasDisabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (experimentalBetasDisabled) {
     return 'standard'
   }
 

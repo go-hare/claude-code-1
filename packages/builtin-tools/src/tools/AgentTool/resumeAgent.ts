@@ -22,13 +22,16 @@ import { getQuerySourceForAgent } from 'src/utils/promptCategory.js'
 import {
   getAgentTranscript,
   readAgentMetadata,
+  writeAgentMetadata,
 } from 'src/utils/sessionStorage.js'
+import { createAgentId } from 'src/utils/uuid.js'
 import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js'
 import type { SystemPrompt } from 'src/utils/systemPromptType.js'
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js'
 import { getParentSessionId } from 'src/utils/teammate.js'
 import { reconstructForSubagentResume } from 'src/utils/toolResultStorage.js'
 import { runAsyncAgentLifecycle } from './agentToolUtils.js'
+import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
@@ -148,9 +151,13 @@ export async function resumeAgentBackground({
     }
   }
 
-  // Resolve model for analytics metadata (runAgent resolves its own internally)
+  // Resolve model for analytics metadata (runAgent resolves its own internally).
+  // Official $6e: Explore firstParty cap-to-opus before getAgentModel.
   const resolvedAgentModel = getAgentModel(
-    selectedAgent.model,
+    resolveAgentDefinitionModel(
+      selectedAgent,
+      toolUseContext.options.mainLoopModel,
+    ),
     toolUseContext.options.mainLoopModel,
     undefined,
     permissionMode,
@@ -195,6 +202,164 @@ export async function resumeAgentBackground({
     contentReplacementState: resumedReplacementState,
   }
 
+  // Official zOu densable — resume re-arm observer pairing from agent metadata
+  // pointer (observerTaskId / armingPermissionMode) when observed declares observer.
+  try {
+    const { ensureObservedAgentObserver } = await import(
+      'src/utils/observerAgents.js'
+    )
+    const { installAgentObserverRuntimeHost } = await import(
+      './observerRuntimeHost.js'
+    )
+    const { readAgentMetadata: readObsMeta } = await import(
+      'src/utils/sessionStorage.js'
+    )
+    // Real G0t host before re-arm so first post-resume delivery can fork.
+    await installAgentObserverRuntimeHost({
+      toolUseContext,
+      canUseTool,
+      setAppState: rootSetAppState,
+      log: msg => logForDebugging(msg),
+    })
+    // Prefer meta already loaded above; re-read only if fields missing (older files).
+    const observedMeta = {
+      ...(meta?.observerTaskId ? { observerTaskId: meta.observerTaskId } : {}),
+      ...(meta?.armingPermissionMode
+        ? { armingPermissionMode: meta.armingPermissionMode }
+        : {}),
+    }
+    // If metadata lacked observer fields, try a fresh read (same path).
+    if (!observedMeta.observerTaskId) {
+      const fresh = await readObsMeta(asAgentId(agentId))
+      if (fresh?.observerTaskId) {
+        observedMeta.observerTaskId = fresh.observerTaskId
+      }
+      if (fresh?.armingPermissionMode) {
+        observedMeta.armingPermissionMode = fresh.armingPermissionMode
+      }
+    }
+    const { toolMatchesName } = await import('src/Tool.js')
+    const { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } = await import(
+      './constants.js'
+    )
+    const rearmed = await ensureObservedAgentObserver({
+      observedTaskId: agentId,
+      observedDefinition: {
+        agentType: selectedAgent.agentType,
+        ...('observer' in selectedAgent && selectedAgent.observer
+          ? { observer: selectedAgent.observer as string }
+          : {}),
+        ...('observerMessage' in selectedAgent &&
+        typeof selectedAgent.observerMessage === 'string'
+          ? { observerMessage: selectedAgent.observerMessage }
+          : {}),
+      },
+      observedName: selectedAgent.agentType,
+      observedMeta:
+        observedMeta.observerTaskId || observedMeta.armingPermissionMode
+          ? observedMeta
+          : null,
+      activeAgents: toolUseContext.options.agentDefinitions.activeAgents,
+      armingToolUseContext: toolUseContext,
+      canUseTool,
+      setAppState: rootSetAppState,
+      // Match AgentTool o5r arm gate density (tools + AgentTool.checkPermissions).
+      tools: toolUseContext.options.tools?.map(t => ({
+        name: t.name,
+        ...(t.aliases ? { aliases: t.aliases } : {}),
+      })),
+      gateCanUseTool: async ({
+        subagentType,
+        description: gateDesc,
+        prompt: gatePrompt,
+      }) => {
+        const agentTool = toolUseContext.options.tools.find(
+          t =>
+            toolMatchesName(t, AGENT_TOOL_NAME) ||
+            toolMatchesName(t, LEGACY_AGENT_TOOL_NAME),
+        )
+        if (!agentTool) return 'deny'
+        try {
+          const result = await agentTool.checkPermissions(
+            {
+              description: gateDesc,
+              prompt: gatePrompt,
+              subagent_type: subagentType,
+              run_in_background: true,
+            },
+            toolUseContext,
+          )
+          if (result.behavior === 'allow') return 'allow'
+          if (result.behavior === 'deny') return 'deny'
+          if (result.behavior === 'ask') return 'ask'
+          return 'allow'
+        } catch {
+          return 'error'
+        }
+      },
+      // Cold resume: prior observer process is not live → firstRunDone=false
+      // + fresh observerTaskId (avoids re-register under residual dead id).
+      isObserverProcessRunning: observerTaskId => {
+        try {
+          const tasks = toolUseContext.getAppState().tasks
+          const task = tasks?.[observerTaskId] as
+            | { type?: string; status?: string }
+            | undefined
+          return task?.type === 'local_agent' && task.status === 'running'
+        } catch {
+          return false
+        }
+      },
+      generateObserverTaskId: () => createAgentId(),
+      // Official KOu loadSidecar — feed observerStopped so reattach blocks.
+      reattach: {
+        priorObserverTaskId: observedMeta.observerTaskId,
+        declaredObserverType:
+          'observer' in selectedAgent &&
+          typeof selectedAgent.observer === 'string'
+            ? selectedAgent.observer
+            : selectedAgent.agentType,
+        loadSidecar: async sidecarId => {
+          const side = await readObsMeta(asAgentId(sidecarId))
+          if (!side) return null
+          return {
+            ...(side.observerStopped ? { observerStopped: true } : {}),
+            agentType: side.agentType,
+          }
+        },
+        isSidecarReattachable: async sidecarId => {
+          try {
+            const t = await getAgentTranscript(asAgentId(sidecarId))
+            return Boolean(t)
+          } catch {
+            return false
+          }
+        },
+      },
+      log: msg => logForDebugging(msg),
+    })
+    // HXt: if cold reattach minted a fresh observer id, persist the pointer
+    // so a later resume can reattach/hot-path or re-cold-spawn correctly.
+    if (rearmed && rearmed.observerTaskId !== observedMeta.observerTaskId) {
+      void writeAgentMetadata(asAgentId(agentId), {
+        agentType: selectedAgent.agentType,
+        description: uiDescription,
+        observerTaskId: rearmed.observerTaskId,
+        ...(rearmed.armingPermissionMode
+          ? { armingPermissionMode: rearmed.armingPermissionMode }
+          : {}),
+      }).catch(_err =>
+        logForDebugging(
+          `Failed to write cold-reattach observer pointer metadata: ${_err}`,
+        ),
+      )
+    }
+  } catch (err) {
+    logForDebugging(
+      `[agentObserver] resume re-arm failed for '${selectedAgent.agentType}': ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
   // Skip name-registry write — original entry persists from the initial spawn
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
@@ -223,6 +388,7 @@ export async function resumeAgentBackground({
     invokingRequestId,
     invocationKind: 'resume' as const,
     invocationEmitted: false,
+    isBackgroundAgent: true as const,
   }
 
   const wrapWithCwd = <T>(fn: () => T): T =>

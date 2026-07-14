@@ -3,11 +3,17 @@ import type { Except } from 'type-fest';
 import type { DOMElement } from '../core/dom.js';
 import { markDirty, scheduleRenderFrom } from '../core/dom.js';
 import { markCommitStart } from '../core/reconciler.js';
+import { clampScrollTopToContentMax } from '../core/scrollHeightHwm.js';
 import type { Styles } from '../core/styles.js';
 import Box from './Box.js';
 
 export type ScrollBoxHandle = {
-  scrollTo: (y: number) => void;
+  /**
+   * @param opts.preserveHwm Official 2.1.207: keep scrollHeightHwm across a
+   * programmatic scroll (virtual-list reanchor) so a transient content shrink
+   * does not jump the transcript above the answer.
+   */
+  scrollTo: (y: number, opts?: { preserveHwm?: boolean }) => void;
   scrollBy: (dy: number) => void;
   /**
    * Scroll so `el`'s top is at the viewport top (plus `offset`). Unlike
@@ -15,8 +21,10 @@ export type ScrollBoxHandle = {
    * render fires, this defers the position read to render time —
    * render-node-to-output reads `el.yogaNode.getComputedTop()` in the
    * SAME Yoga pass that computes scrollHeight. Deterministic. One-shot.
+   * @param opts.block "nearest" keeps the element in view without jumping
+   * when it is already fully visible (official 2.1.207).
    */
-  scrollToElement: (el: DOMElement, offset?: number) => void;
+  scrollToElement: (el: DOMElement, offset?: number, opts?: { block?: 'nearest' }) => void;
   scrollToBottom: () => void;
   getScrollTop: () => number;
   getPendingDelta: () => number;
@@ -58,6 +66,8 @@ export type ScrollBoxHandle = {
    * cold start).
    */
   setClampBounds: (min: number | undefined, max: number | undefined) => void;
+  /** Official 2.1.207: expose the DOM node for virtual-scroll HWM reanchor. */
+  getDomElement: () => DOMElement | null;
 };
 
 export type ScrollBoxProps = Except<Styles, 'textWrap' | 'overflow' | 'overflowX' | 'overflowY'> & {
@@ -67,6 +77,12 @@ export type ScrollBoxProps = Except<Styles, 'textWrap' | 'overflow' | 'overflowX
    * grows. Unset manually via scrollTo/scrollBy to break the stickiness.
    */
   stickyScroll?: boolean;
+  /**
+   * Official 2.1.207: when not sticky, still follow content growth if the
+   * viewport was positionally at the previous max. Set false to never auto-
+   * follow growth (only stickyScroll pins). Default true.
+   */
+  followGrowth?: boolean;
 };
 
 /**
@@ -79,7 +95,13 @@ export type ScrollBoxProps = Except<Styles, 'textWrap' | 'overflow' | 'overflowX
  *
  * Works best inside a fullscreen (constrained-height root) Ink tree.
  */
-function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<ScrollBoxProps>): React.ReactNode {
+function ScrollBox({
+  children,
+  ref,
+  stickyScroll,
+  followGrowth,
+  ...style
+}: PropsWithChildren<ScrollBoxProps>): React.ReactNode {
   const domRef = useRef<DOMElement>(null);
   // scrollTo/scrollBy bypass React: they mutate scrollTop on the DOM node,
   // mark it dirty, and call the root's throttled scheduleRender directly.
@@ -116,34 +138,47 @@ function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<
   useImperativeHandle(
     ref,
     (): ScrollBoxHandle => ({
-      scrollTo(y: number) {
+      scrollTo(y: number, opts?: { preserveHwm?: boolean }) {
         const el = domRef.current;
         if (!el) return;
         // Explicit false overrides the DOM attribute so manual scroll
         // breaks stickiness. Render code checks ?? precedence.
         el.stickyScroll = false;
+        // Official 2.1.207: clear HWM unless preserveHwm (virtual reanchor).
+        if (!opts?.preserveHwm) {
+          el.scrollHeightHwm = undefined;
+        }
         el.pendingScrollDelta = undefined;
         el.scrollAnchor = undefined;
         el.scrollTop = Math.max(0, Math.floor(y));
         scrollMutated(el);
       },
-      scrollToElement(el: DOMElement, offset = 0) {
+      scrollToElement(el: DOMElement, offset = 0, opts?: { block?: 'nearest' }) {
         const box = domRef.current;
         if (!box) return;
         box.stickyScroll = false;
+        box.scrollHeightHwm = undefined;
         box.pendingScrollDelta = undefined;
-        box.scrollAnchor = { el, offset };
+        box.scrollAnchor = {
+          el,
+          offset,
+          nearest: opts?.block === 'nearest',
+        };
         scrollMutated(box);
       },
       scrollBy(dy: number) {
         const el = domRef.current;
         if (!el) return;
         el.stickyScroll = false;
+        el.scrollHeightHwm = undefined;
         // Wheel input cancels any in-flight anchor seek — user override.
         el.scrollAnchor = undefined;
         // Accumulate in pendingScrollDelta; renderer drains it at a capped
         // rate so fast flicks show intermediate frames. Pure accumulator:
         // scroll-up followed by scroll-down naturally cancels.
+        // Official 2.1.207: clamp HWM-overscrolled scrollTop to content max
+        // before accumulating pending (pQe).
+        el.scrollTop = clampScrollTopToContentMax(el.scrollTop ?? 0, el.scrollHeight, el.scrollViewportHeight);
         el.pendingScrollDelta = (el.pendingScrollDelta ?? 0) + Math.floor(dy);
         scrollMutated(el);
       },
@@ -151,6 +186,14 @@ function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<
         const el = domRef.current;
         if (!el) return;
         el.pendingScrollDelta = undefined;
+        // stickyScroll=false attribute means never auto-pin; jump to bottom
+        // once without re-enabling sticky (official).
+        if (stickyScroll === false) {
+          el.scrollAnchor = undefined;
+          el.scrollTop = Math.max(0, (el.scrollHeight ?? 0) - (el.scrollViewportHeight ?? 0));
+          scrollMutated(el);
+          return;
+        }
         el.stickyScroll = true;
         markDirty(el);
         notify();
@@ -193,12 +236,13 @@ function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<
         el.scrollClampMin = min;
         el.scrollClampMax = max;
       },
+      getDomElement() {
+        return domRef.current;
+      },
     }),
-    // notify/scrollMutated are inline (no useCallback) but only close over
-    // refs + imports — stable. Empty deps avoids rebuilding the handle on
-    // every render (which re-registers the ref = churn).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    // stickyScroll is closed over by scrollToBottom's one-shot path.
+    // notify/scrollMutated only close over refs + imports — stable.
+    [stickyScroll],
   );
 
   // Structure: outer viewport (overflow:scroll, constrained height) >
@@ -209,9 +253,9 @@ function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<
   // The renderer computes scrollHeight from the content box and culls
   // content's children based on scrollTop.
   //
-  // stickyScroll is passed as a DOM attribute (via ink-box directly) so it's
-  // available on the first render — ref callbacks fire after the initial
-  // commit, which is too late for the first frame.
+  // stickyScroll / followGrowth are passed as DOM attributes (via ink-box
+  // directly) so they're available on the first render — ref callbacks fire
+  // after the initial commit, which is too late for the first frame.
   return (
     <ink-box
       ref={el => {
@@ -228,6 +272,7 @@ function ScrollBox({ children, ref, stickyScroll, ...style }: PropsWithChildren<
         overflowY: 'scroll',
       }}
       {...(stickyScroll ? { stickyScroll: true } : {})}
+      {...(followGrowth === false ? { followGrowth: false } : {})}
     >
       <Box flexDirection="column" flexGrow={1} flexShrink={0} width="100%">
         {children}

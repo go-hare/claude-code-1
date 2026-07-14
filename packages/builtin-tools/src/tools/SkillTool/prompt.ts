@@ -16,6 +16,10 @@ import { logForDebugging } from 'src/utils/debug.js'
 import { toError } from 'src/utils/errors.js'
 import { truncate } from 'src/utils/format.js'
 import { logError } from 'src/utils/log.js'
+import {
+  getSkillDescReframeBody,
+  isSkillDescReframeEnabled,
+} from 'src/utils/systemPromptArms.js'
 
 // Skill listing gets 1% of the context window (in characters)
 export const SKILL_BUDGET_CONTEXT_PERCENT = 0.01
@@ -172,6 +176,11 @@ export function formatCommandsWithinBudget(
 }
 
 export const getPrompt = memoize(async (_cwd: string): Promise<string> => {
+  // Official skill_desc_reframe arm: denser Skill tool description emphasizing
+  // exact names, directory-scoped variants, and no inventing skill names.
+  if (isSkillDescReframeEnabled()) {
+    return getSkillDescReframeBody(COMMAND_NAME_TAG)
+  }
   return `Execute a skill within the main conversation
 
 When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge.

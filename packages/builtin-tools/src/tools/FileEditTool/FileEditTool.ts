@@ -17,7 +17,7 @@ import { buildTool, type ToolDef } from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged } from 'src/utils/diff.js'
-import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { isBareMode, isEnvTruthy } from 'src/utils/envUtils.js'
 import { isENOENT } from 'src/utils/errors.js'
 import {
   FILE_NOT_FOUND_CWD_NOTE,
@@ -104,7 +104,24 @@ export const FileEditTool = buildTool({
     return outputSchema()
   },
   toAutoClassifierInput(input) {
-    return `${input.file_path}: ${input.new_string}`
+    // Official xXn/awu editRemovalVisibility: when on, project adds+removes
+    // (capped by editRemovalCap) so the classifier sees what was deleted.
+    // Lazy require keeps GrowthBook/env resolvers out of the tool's top-level graph.
+    const { resolveEditRemovalVisibility, resolveEditRemovalCap } =
+      require('src/utils/permissions/autoModeFlags.js') as typeof import('src/utils/permissions/autoModeFlags.js')
+    if (!resolveEditRemovalVisibility().value) {
+      return `${input.file_path}: ${input.new_string}`
+    }
+    const cap = resolveEditRemovalCap().value
+    const old = input.old_string
+    const truncated = cap > 0 && typeof old === 'string' && old.length > cap
+    return {
+      file_path: input.file_path,
+      adds: input.new_string,
+      removes: truncated ? old.slice(0, cap) : old,
+      ...(cap > 0 ? { removesTruncated: truncated } : {}),
+      ...(input.replace_all === true ? { replaceAll: true } : {}),
+    }
   },
   getPath(input): string {
     return input.file_path
@@ -401,7 +418,7 @@ export const FileEditTool = buildTool({
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     // Skip in simple mode - no skills available
     const cwd = getCwd()
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+    if (!isBareMode()) {
       const newSkillDirs = await discoverSkillDirsForPaths(
         [absoluteFilePath],
         cwd,
@@ -533,8 +550,18 @@ export const FileEditTool = buildTool({
     })
 
     let gitDiff: ToolUseDiff | undefined
+    // Official REMOTE densable for remote git-diff side channel.
+    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    try {
+      const { isRemoteEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+      isRemote = isRemoteEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
     if (
-      isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+      isRemote &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_quartz_lantern', false)
     ) {
       const startTime = Date.now()

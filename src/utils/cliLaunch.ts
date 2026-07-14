@@ -1,6 +1,11 @@
 import { type ChildProcess, spawn, type SpawnOptions } from 'child_process'
 import { isInBundledMode } from './bundledMode.js'
 import { quote } from './bash/shellQuote.js'
+import {
+  applyProcessWrapperToLaunch,
+  formatProcessWrapperRelaunchRefuseMessage,
+  getProcessWrapperError,
+} from './processWrapper.js'
 
 /**
  * CliLaunchSpec — normalized descriptor for spawning a child CLI process.
@@ -106,10 +111,25 @@ export function buildCliLaunch(
   // In bundled mode the execPath IS the CLI binary — no script path needed.
   // In script mode (dev / npm) we need the script path between runtime flags
   // and CLI args so the runtime knows which file to execute.
-  const args: string[] =
+  const basePrefix =
     isInBundledMode() || !SCRIPT_PATH
-      ? [...BOOTSTRAP_ARGS, ...cliArgs]
-      : [...BOOTSTRAP_ARGS, SCRIPT_PATH, ...cliArgs]
+      ? [...BOOTSTRAP_ARGS]
+      : [...BOOTSTRAP_ARGS, SCRIPT_PATH]
+
+  // Official qCe / _M / bj: prefix self-spawn with CLAUDE_CODE_PROCESS_WRAPPER
+  // when set. When misconfigured or launcher not runnable, refuse rather than
+  // spawn unwrapped (official self-spawn policy / agent_launcher relaunch).
+  const wrapperError =
+    getProcessWrapperError(baseEnv) ??
+    formatProcessWrapperRelaunchRefuseMessage(baseEnv)
+  if (wrapperError) {
+    throw new Error(wrapperError)
+  }
+  const wrapped = applyProcessWrapperToLaunch(
+    { cmd: EXEC_PATH, prefixArgs: basePrefix },
+    baseEnv,
+  )
+  const args: string[] = [...wrapped.prefixArgs, ...cliArgs]
 
   // Ensure Windows children can discover git-bash without shelling out
   const env: NodeJS.ProcessEnv = { ...baseEnv }
@@ -126,7 +146,7 @@ export function buildCliLaunch(
   }
 
   return {
-    execPath: EXEC_PATH,
+    execPath: wrapped.cmd,
     args,
     env,
     windowsHide: IS_WINDOWS,

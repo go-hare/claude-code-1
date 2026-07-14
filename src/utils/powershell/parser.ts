@@ -1,6 +1,7 @@
 import { execa } from 'execa'
 import { logForDebugging } from '../debug.js'
 import { memoizeWithLRU } from '../memoize.js'
+import { resolvePwshParseTimeoutMs } from '../residualMsEnvGates.js'
 import { getCachedPowerShellPath } from '../shell/powershellDetection.js'
 import { jsonParse } from '../slowOperations.js'
 
@@ -204,14 +205,9 @@ export type ParsedPowerShellCommand = {
 // attackVectors F1 hit 2×5s timeout → valid:false → 'ask' instead of 'deny').
 // Override via env for tests. Read inside parsePowerShellCommandImpl, not
 // top-level, per CLAUDE.md (globalSettings.env ordering).
-const DEFAULT_PARSE_TIMEOUT_MS = 5_000
+// Official v_g densable via resolvePwshParseTimeoutMs.
 function getParseTimeoutMs(): number {
-  const env = process.env.CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS
-  if (env) {
-    const parsed = parseInt(env, 10)
-    if (!isNaN(parsed) && parsed > 0) return parsed
-  }
-  return DEFAULT_PARSE_TIMEOUT_MS
+  return resolvePwshParseTimeoutMs()
 }
 // MAX_COMMAND_LENGTH is derived from PARSE_SCRIPT_BODY.length below (after the
 // script body is defined) so it cannot go stale as the script grows.

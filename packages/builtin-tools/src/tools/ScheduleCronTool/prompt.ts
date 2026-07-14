@@ -34,7 +34,28 @@ export const DEFAULT_MAX_AGE_DAYS =
  * `CLAUDE_CODE_DISABLE_CRON` is a local override that wins over GB.
  */
 export function isKairosCronEnabled(): boolean {
-  return !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_CRON)
+  // Official T9 densable: !DISABLE_CRON && tengu_kairos_cron GB (default true kill-switch).
+  try {
+    const { resolveKairosCronEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+    return resolveKairosCronEnabled({
+      gbValue: getFeatureValue_CACHED_WITH_REFRESH(
+        'tengu_kairos_cron',
+        true,
+        KAIROS_CRON_REFRESH_MS,
+      ),
+    })
+  } catch {
+    return (
+      !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_CRON) &&
+      getFeatureValue_CACHED_WITH_REFRESH(
+        'tengu_kairos_cron',
+        true,
+        KAIROS_CRON_REFRESH_MS,
+      )
+    )
+  }
 }
 
 /**

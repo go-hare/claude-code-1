@@ -25,12 +25,44 @@ export const TransportSchema = lazySchema(() =>
 )
 export type Transport = z.infer<ReturnType<typeof TransportSchema>>
 
+/** Official 2.1.206: cap when folding `request_timeout_ms` into `timeout`. */
+const MCP_REQUEST_TIMEOUT_MS_CAP = 300_000
+
+/**
+ * Official 2.1.206 `RAn`: CCR/`request_timeout_ms` wire hint folds into
+ * `timeout` when `timeout` is unset (capped at 5 minutes).
+ */
+function foldRequestTimeoutMs<
+  T extends { timeout?: number; request_timeout_ms?: number },
+>(value: T): Omit<T, 'request_timeout_ms'> & { timeout?: number } {
+  const { request_timeout_ms, ...rest } = value
+  if (rest.timeout === undefined && request_timeout_ms !== undefined) {
+    return {
+      ...rest,
+      timeout: Math.min(request_timeout_ms, MCP_REQUEST_TIMEOUT_MS_CAP),
+    }
+  }
+  return rest
+}
+
+const requestTimeoutMsField = () =>
+  z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .catch(undefined)
+    .describe('@internal CCR backend wire hint; folded into timeout at parse.')
+
 export const McpStdioServerConfigSchema = lazySchema(() =>
   z.object({
     type: z.literal('stdio').optional(), // Optional for backwards compatibility
     command: z.string().min(1, 'Command cannot be empty'),
     args: z.array(z.string()).default([]),
     env: z.record(z.string(), z.string()).optional(),
+    // Official 2.1.187: per-server silent-run idle timeout (ms). Overrides
+    // CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT for this server only.
+    timeout: z.number().int().nonnegative().optional(),
   }),
 )
 
@@ -55,14 +87,37 @@ const McpOAuthConfigSchema = lazySchema(() =>
   }),
 )
 
+/**
+ * Official 2.1.x: org/admin per-tool ceiling for remote MCP tools
+ * (`allow` | `ask` | `blocked`). Drives auto-mode org_ask_ceiling and
+ * strips blocked tools from the model tool list.
+ */
+export const McpToolPermissionSchema = lazySchema(() =>
+  z.enum(['allow', 'ask', 'blocked']),
+)
+export type McpToolPermission = z.infer<
+  ReturnType<typeof McpToolPermissionSchema>
+>
+
 export const McpSSEServerConfigSchema = lazySchema(() =>
-  z.object({
-    type: z.literal('sse'),
-    url: z.string(),
-    headers: z.record(z.string(), z.string()).optional(),
-    headersHelper: z.string().optional(),
-    oauth: McpOAuthConfigSchema().optional(),
-  }),
+  z
+    .object({
+      type: z.literal('sse'),
+      url: z.string(),
+      headers: z.record(z.string(), z.string()).optional(),
+      headersHelper: z.string().optional(),
+      oauth: McpOAuthConfigSchema().optional(),
+      // Official 2.1.187: per-server silent-run idle timeout (ms).
+      timeout: z.number().int().nonnegative().optional(),
+      // Official 2.1.206: CCR wire alias → folded into timeout at parse.
+      request_timeout_ms: requestTimeoutMsField(),
+      alwaysLoad: z.boolean().optional(),
+      // Official: org max permission map keyed by upstream tool name.
+      toolPermissions: z
+        .record(z.string(), McpToolPermissionSchema())
+        .optional(),
+    })
+    .transform(foldRequestTimeoutMs),
 )
 
 // Internal-only server type for IDE extensions
@@ -87,13 +142,24 @@ export const McpWebSocketIDEServerConfigSchema = lazySchema(() =>
 )
 
 export const McpHTTPServerConfigSchema = lazySchema(() =>
-  z.object({
-    type: z.literal('http'),
-    url: z.string(),
-    headers: z.record(z.string(), z.string()).optional(),
-    headersHelper: z.string().optional(),
-    oauth: McpOAuthConfigSchema().optional(),
-  }),
+  z
+    .object({
+      type: z.literal('http'),
+      url: z.string(),
+      headers: z.record(z.string(), z.string()).optional(),
+      headersHelper: z.string().optional(),
+      oauth: McpOAuthConfigSchema().optional(),
+      // Official 2.1.187: per-server silent-run idle timeout (ms).
+      timeout: z.number().int().nonnegative().optional(),
+      // Official 2.1.206: CCR wire alias → folded into timeout at parse.
+      request_timeout_ms: requestTimeoutMsField(),
+      alwaysLoad: z.boolean().optional(),
+      // Official: org max permission map keyed by upstream tool name.
+      toolPermissions: z
+        .record(z.string(), McpToolPermissionSchema())
+        .optional(),
+    })
+    .transform(foldRequestTimeoutMs),
 )
 
 export const McpWebSocketServerConfigSchema = lazySchema(() =>
@@ -102,6 +168,8 @@ export const McpWebSocketServerConfigSchema = lazySchema(() =>
     url: z.string(),
     headers: z.record(z.string(), z.string()).optional(),
     headersHelper: z.string().optional(),
+    // Official 2.1.187: per-server silent-run idle timeout (ms).
+    timeout: z.number().int().nonnegative().optional(),
   }),
 )
 
@@ -118,6 +186,14 @@ export const McpClaudeAIProxyServerConfigSchema = lazySchema(() =>
     type: z.literal('claudeai-proxy'),
     url: z.string(),
     id: z.string(),
+    displayName: z.string().optional(),
+    iconUrl: z.string().optional(),
+    timeout: z.number().int().nonnegative().optional(),
+    alwaysLoad: z.boolean().optional(),
+    // Official: org max permission map keyed by upstream tool name.
+    toolPermissions: z.record(z.string(), McpToolPermissionSchema()).optional(),
+    stateless: z.boolean().optional(),
+    cachedInitResponse: z.record(z.string(), z.unknown()).nullish(),
   }),
 )
 
@@ -177,6 +253,23 @@ export const McpJsonConfigSchema = lazySchema(() =>
 export type McpJsonConfig = z.infer<ReturnType<typeof McpJsonConfigSchema>>
 
 // Server connection types
+/**
+ * Official 2.1.x transportErrorState (O): shared across concurrent callTool
+ * watchdogs on one connection. When onerror fires, all unarmed watchdogs get
+ * armedAt=now; if still armed after 90s without progress/response, the call
+ * aborts as "transport dropped mid-call".
+ */
+export type McpCallWatchdog = {
+  armedAt: number
+}
+
+export type McpTransportErrorState = {
+  consecutiveErrors: number
+  activeCallWatchdogs: Set<McpCallWatchdog>
+  pendingElicitations: number
+  lastElicitationClosedAt: number
+}
+
 export type ConnectedMCPServer = {
   client: Client
   name: string
@@ -189,6 +282,8 @@ export type ConnectedMCPServer = {
   instructions?: string
   config: ScopedMcpServerConfig
   cleanup: () => Promise<void>
+  /** Official transportErrorState — mid-call drop detection. */
+  transportErrorState?: McpTransportErrorState
 }
 
 export type FailedMCPServer = {

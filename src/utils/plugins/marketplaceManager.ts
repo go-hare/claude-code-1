@@ -27,6 +27,11 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/gr
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import {
+  rewritePluginGitUrlPreferHttps,
+  shouldKeepMarketplaceOnFailure,
+  shouldPreferPluginHttpsOrRemote,
+} from '../residualMoreEnvGates.js'
+import {
   ConfigParseError,
   errorMessage,
   getErrnoCode,
@@ -512,17 +517,23 @@ const GIT_NO_PROMPT_ENV = {
   GIT_ASKPASS: '', // Disable askpass GUI programs
 }
 
-const DEFAULT_PLUGIN_GIT_TIMEOUT_MS = 120 * 1000
-
 function getPluginGitTimeoutMs(): number {
-  const envValue = process.env.CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS
-  if (envValue) {
-    const parsed = parseInt(envValue, 10)
-    if (!isNaN(parsed) && parsed > 0) {
-      return parsed
+  // Official PLUGIN_GIT_TIMEOUT_MS densable pure parse.
+  try {
+    const { resolvePluginGitTimeoutMs } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    return resolvePluginGitTimeoutMs()
+  } catch {
+    const envValue = process.env.CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS
+    if (envValue) {
+      const parsed = parseInt(envValue, 10)
+      if (!isNaN(parsed) && parsed > 0) {
+        return parsed
+      }
     }
+    return 120 * 1000
   }
-  return DEFAULT_PLUGIN_GIT_TIMEOUT_MS
 }
 
 export async function gitPull(
@@ -806,6 +817,9 @@ export async function gitClone(
   ref?: string,
   sparsePaths?: string[],
 ): Promise<{ code: number; stderr: string }> {
+  // Official bZe / CLAUDE_CODE_PLUGIN_PREFER_HTTPS (+ REMOTE) — rewrite git@/ssh/http URLs.
+  gitUrl = rewritePluginGitUrlPreferHttps(gitUrl)
+
   const useSparse = sparsePaths && sparsePaths.length > 0
   const args = [
     '-c',
@@ -1118,6 +1132,25 @@ async function cacheMarketplaceFromGit(
       pullResult.code === 0 ? undefined : classifyFetchError(pullResult.stderr),
     )
     if (pullResult.code === 0) return
+    // Official KEEP_MARKETPLACE_ON_FAILURE — keep existing clone when
+    // marketplace.json is still present (skip re-clone wipe).
+    if (shouldKeepMarketplaceOnFailure()) {
+      const marketplaceJsonPath = join(
+        cachePath,
+        '.claude-plugin',
+        'marketplace.json',
+      )
+      try {
+        await fs.stat(marketplaceJsonPath)
+        logForDebugging(
+          `git pull failed, keeping existing clone (CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE): ${pullResult.stderr}`,
+          { level: 'warn' },
+        )
+        return
+      } catch {
+        // marketplace.json missing — fall through to re-clone
+      }
+    }
     logForDebugging(`git pull failed, will re-clone: ${pullResult.stderr}`, {
       level: 'warn',
     })
@@ -1472,6 +1505,28 @@ async function loadAndCacheMarketplace(
         cleanupNeeded = true
 
         let lastError: Error | null = null
+
+        // Official bZe — REMOTE or PLUGIN_PREFER_HTTPS forces HTTPS (no SSH).
+        if (shouldPreferPluginHttpsOrRemote()) {
+          safeCallProgress(onProgress, `Cloning via HTTPS: ${httpsUrl}`)
+          try {
+            await cacheMarketplaceFromGit(
+              httpsUrl,
+              temporaryCachePath,
+              source.ref,
+              source.sparsePaths,
+              onProgress,
+            )
+          } catch (err) {
+            lastError = toError(err)
+            logError(lastError)
+          }
+          if (lastError) {
+            throw lastError
+          }
+          marketplacePath = temporaryCachePath
+          break
+        }
 
         // Quick check if SSH is likely to work
         const sshConfigured = await isGitHubSshLikelyConfigured()
@@ -2473,8 +2528,8 @@ export async function refreshMarketplace(
         const sshUrl = `git@github.com:${source.repo}.git`
         const httpsUrl = `https://github.com/${source.repo}.git`
 
-        if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
-          // CCR: always HTTPS (no SSH keys available)
+        // Official bZe — REMOTE or PLUGIN_PREFER_HTTPS forces HTTPS.
+        if (shouldPreferPluginHttpsOrRemote()) {
           await cacheMarketplaceFromGit(
             httpsUrl,
             installLocation,

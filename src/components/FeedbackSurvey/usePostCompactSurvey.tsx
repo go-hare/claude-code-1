@@ -7,7 +7,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { shouldUseSessionMemoryCompaction } from '../../services/compact/sessionMemoryCompact.js';
 import type { Message } from '../../types/message.js';
-import { isEnvTruthy } from '../../utils/envUtils.js';
+import { isFeedbackSurveyEnvDisabled } from '../../utils/residualFinalEnvGates.js';
 import { isCompactBoundaryMessage } from '../../utils/messages.js';
 import { logOTelEvent } from '../../utils/telemetry/events.js';
 import { useSurveyState } from './useSurveyState.js';
@@ -122,7 +122,7 @@ export function usePostCompactSurvey(
     }
 
     // Check if survey is explicitly disabled
-    if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY)) {
+    if (isFeedbackSurveyEnvDisabled()) {
       return;
     }
 

@@ -27,6 +27,10 @@ import {
 import { logError } from '../utils/log.js'
 import { expandPath } from '../utils/path.js'
 import { ripGrep } from '../utils/ripgrep.js'
+import {
+  filterCompilableIgnorePatterns,
+  splitIgnoreFileLines,
+} from '../utils/ignorePatterns.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import { createSignal } from '../utils/signal.js'
 
@@ -225,7 +229,13 @@ async function loadRipgrepIgnorePatterns(
   )
   for (const [i, content] of contents.entries()) {
     if (content === null) continue
-    ig.add(content)
+    // Official 2.1.207: drop uncompilable lines (bad bracket globs) with warn.
+    const patterns = filterCompilableIgnorePatterns(
+      splitIgnoreFileLines(content),
+      'file_suggestions_ignore',
+    )
+    if (patterns.length === 0) continue
+    ig.add(patterns)
     hasPatterns = true
     logForDebugging(`[FileIndex] loaded ignore patterns from ${paths[i]}`)
   }

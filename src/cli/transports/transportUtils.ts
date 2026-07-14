@@ -19,7 +19,17 @@ export function getTransportForUrl(
   sessionId?: string,
   refreshHeaders?: () => Record<string, string>,
 ): Transport {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)) {
+  // Official USE_CCR_V2 densable.
+  let useCcrV2 = isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)
+  try {
+    const { isCcrV2EnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useCcrV2 = isCcrV2EnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (useCcrV2) {
     // v2: SSE for reads, HTTP POST for writes
     // --sdk-url is the session URL (.../sessions/{id});
     // derive the SSE stream URL by appending /worker/events/stream
@@ -35,7 +45,19 @@ export function getTransportForUrl(
   }
 
   if (url.protocol === 'ws:' || url.protocol === 'wss:') {
-    if (isEnvTruthy(process.env.CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2)) {
+    // Official POST_FOR_SESSION_INGRESS_V2 densable.
+    let postForSessionIngressV2 = isEnvTruthy(
+      process.env.CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2,
+    )
+    try {
+      const { isPostForSessionIngressV2Enabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+      postForSessionIngressV2 = isPostForSessionIngressV2Enabled()
+    } catch {
+      // keep raw env fallback
+    }
+    if (postForSessionIngressV2) {
       return new HybridTransport(url, headers, sessionId, refreshHeaders)
     }
     return new WebSocketTransport(url, headers, sessionId, refreshHeaders)

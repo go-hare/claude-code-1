@@ -149,3 +149,51 @@ describe('getSessionMessages bounded cache (memory leak fix)', () => {
     expect(cache.size).toBe(MAX_CACHED_ENTRIES)
   })
 })
+
+describe('main-session observer HXt pointer densable', () => {
+  test('write/read/patch main session observer pointer', async () => {
+    const {
+      writeMainSessionObserverPointer,
+      readMainSessionObserverPointer,
+      patchMainSessionObserverPointer,
+      getMainSessionObserverPointerPath,
+    } = await import('../sessionStorage.js')
+
+    const sessionId = `sess-obs-${Date.now()}`
+    expect(await readMainSessionObserverPointer(sessionId)).toBeNull()
+
+    await writeMainSessionObserverPointer(
+      {
+        observerTaskId: 'obs-1',
+        armingPermissionMode: 'default',
+        observerAgentType: 'watcher',
+      },
+      sessionId,
+    )
+    const path = getMainSessionObserverPointerPath(sessionId)
+    expect(existsSync(path)).toBe(true)
+    expect(await readMainSessionObserverPointer(sessionId)).toEqual({
+      observerTaskId: 'obs-1',
+      armingPermissionMode: 'default',
+      observerAgentType: 'watcher',
+    })
+
+    const patched = await patchMainSessionObserverPointer(
+      { observerTaskId: 'obs-2' },
+      sessionId,
+    )
+    expect(patched?.observerTaskId).toBe('obs-2')
+    // retained fields from previous
+    expect(patched?.armingPermissionMode).toBe('default')
+    expect(patched?.observerAgentType).toBe('watcher')
+    expect(await readMainSessionObserverPointer(sessionId)).toEqual({
+      observerTaskId: 'obs-2',
+      armingPermissionMode: 'default',
+      observerAgentType: 'watcher',
+    })
+
+    // empty observerTaskId rejected
+    writeFileSync(path, JSON.stringify({ observerTaskId: '' }))
+    expect(await readMainSessionObserverPointer(sessionId)).toBeNull()
+  })
+})

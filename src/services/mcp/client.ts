@@ -36,11 +36,16 @@ import {
   type PromptMessage,
   type ResourceLink,
 } from '@modelcontextprotocol/sdk/types.js'
+import { listAllWithCursorPagination } from './listPagination.js'
 import mapValues from 'lodash-es/mapValues.js'
 import memoize from 'lodash-es/memoize.js'
 import zipObject from 'lodash-es/zipObject.js'
 import pMap from 'p-map'
-import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
+import {
+  getOriginalCwd,
+  getProjectRoot,
+  getSessionId,
+} from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { PRODUCT_URL } from '../../constants/product.js'
@@ -59,6 +64,7 @@ import { createMcpAuthTool } from '@claude-code/builtin-tools/tools/McpAuthTool/
 import { ReadMcpResourceTool } from '@claude-code/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { createAbortController } from '../../utils/abortController.js'
 import { count } from '../../utils/array.js'
+import { resolveMcpToolIdleTimeoutMs } from '../../utils/residualMsEnvGates.js'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
@@ -100,7 +106,10 @@ import {
   getWebSocketProxyUrl,
 } from '../../utils/proxy.js'
 import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js'
-import { subprocessEnv } from '../../utils/subprocessEnv.js'
+import {
+  getRegisteredUpstreamProxyEnv,
+  subprocessEnv,
+} from '../../utils/subprocessEnv.js'
 import {
   isPersistError,
   persistToolResult,
@@ -142,9 +151,22 @@ import { sleep } from '../../utils/sleep.js'
 import {
   ClaudeAuthProvider,
   hasMcpDiscoveryButNoToken,
+  serverHasStoredRefreshToken,
   wrapFetchWithStepUpDetection,
 } from './auth.js'
+import {
+  classifyAuthReconnectKind,
+  hasAuthReconnectInFlight,
+  isConnectionClosedWhileReconnecting,
+  joinOrStartAuthReconnect,
+} from './authReconnect.js'
 import { markClaudeAiMcpConnected } from './claudeai.js'
+import {
+  armAllCallWatchdogs,
+  clearCallWatchdogArm,
+  createMcpTransportErrorState,
+  shouldAbortForTransportDrop,
+} from './transportErrorState.js'
 import { getAllMcpConfigs, isMcpServerDisabled } from './config.js'
 import { getMcpServerHeaders } from './headersHelper.js'
 import { SdkControlClientTransport } from './SdkControlTransport.js'
@@ -208,6 +230,7 @@ export const isMcpSessionExpiredError = isMcpSessionExpiredErrorFromPackage
 
 /**
  * Default timeout for MCP tool calls (effectively infinite - ~27.8 hours).
+ * Hard wall-clock cap for the entire tool call (MCP_TOOL_TIMEOUT).
  */
 const DEFAULT_MCP_TOOL_TIMEOUT_MS = 100_000_000
 
@@ -219,7 +242,7 @@ const DEFAULT_MCP_TOOL_TIMEOUT_MS = 100_000_000
 const MAX_MCP_DESCRIPTION_LENGTH = PKG_MAX_MCP_DESCRIPTION_LENGTH
 
 /**
- * Gets the timeout for MCP tool calls in milliseconds.
+ * Gets the hard wall-clock timeout for MCP tool calls in milliseconds.
  * Uses MCP_TOOL_TIMEOUT environment variable if set, otherwise defaults to ~27.8 hours.
  */
 function getMcpToolTimeoutMs(): number {
@@ -227,6 +250,26 @@ function getMcpToolTimeoutMs(): number {
     parseInt(process.env.MCP_TOOL_TIMEOUT || '', 10) ||
     DEFAULT_MCP_TOOL_TIMEOUT_MS
   )
+}
+
+/**
+ * Official 2.1.187 idle watchdog for remote MCP tools.
+ * Returns null when disabled (0 / unset-after-disable).
+ * Precedence: per-server `timeout` > CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT > 5 min.
+ * Env densable via resolveMcpToolIdleTimeoutMs.
+ */
+function getMcpToolIdleTimeoutMs(
+  serverConfig: { timeout?: number } | undefined,
+): number | null {
+  if (
+    serverConfig &&
+    typeof serverConfig.timeout === 'number' &&
+    Number.isFinite(serverConfig.timeout)
+  ) {
+    if (serverConfig.timeout <= 0) return null
+    return serverConfig.timeout
+  }
+  return resolveMcpToolIdleTimeoutMs()
 }
 
 import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.js'
@@ -951,18 +994,64 @@ export const connectToServer = memoize(
         !(serverRef as ScopedMcpServerConfig).type
       ) {
         const stdioRef = serverRef as McpStdioServerConfig
-        const finalCommand =
-          process.env.CLAUDE_CODE_SHELL_PREFIX || stdioRef.command
-        const finalArgs = process.env.CLAUDE_CODE_SHELL_PREFIX
+        // Official SHELL_PREFIX densable.
+        let shellPrefix: string | null =
+          process.env.CLAUDE_CODE_SHELL_PREFIX || null
+        try {
+          const { resolveShellPrefix } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+          shellPrefix = resolveShellPrefix()
+        } catch {
+          // keep raw env fallback
+        }
+        const finalCommand = shellPrefix || stdioRef.command
+        const finalArgs = shellPrefix
           ? [[stdioRef.command, ...stdioRef.args].join(' ')]
           : stdioRef.args
+        // Official eUi densable consumer: eUi()?{...lqi(),...kVt()}:GO(), then
+        // strip CLAUDE_CODE_CHILD_SESSION and inject PROJECT_DIR/SESSION_ID/CLAUDECODE.
+        let stdioEnv: Record<string, string>
+        try {
+          const {
+            shouldEnforceMcpAllowlistEnv,
+            buildMcpStdioBaseEnv,
+            buildMcpStdioTransportEnv,
+          } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/residualMoreEnvGates.js') as typeof import('../../utils/residualMoreEnvGates.js')
+          const base = buildMcpStdioBaseEnv({
+            enforceAllowlist: shouldEnforceMcpAllowlistEnv(),
+            processEnv: process.env,
+            injectedEnv: getRegisteredUpstreamProxyEnv(),
+            managedEnv: subprocessEnv(),
+          })
+          stdioEnv = buildMcpStdioTransportEnv({
+            baseEnv: base,
+            projectDir: getProjectRoot(),
+            sessionId: getSessionId(),
+            serverEnv: stdioRef.env ?? null,
+          })
+        } catch {
+          // raw-env fallback when densables unavailable
+          const { CLAUDE_CODE_CHILD_SESSION: _child, ...rest } =
+            subprocessEnv() as Record<string, string | undefined>
+          stdioEnv = {
+            ...(Object.fromEntries(
+              Object.entries(rest).filter(
+                (e): e is [string, string] => e[1] !== undefined,
+              ),
+            ) as Record<string, string>),
+            CLAUDE_PROJECT_DIR: getProjectRoot(),
+            CLAUDE_CODE_SESSION_ID: getSessionId(),
+            CLAUDECODE: '1',
+            ...stdioRef.env,
+          }
+        }
         transport = new StdioClientTransport({
           command: finalCommand,
           args: finalArgs,
-          env: {
-            ...subprocessEnv(),
-            ...stdioRef.env,
-          } as Record<string, string>,
+          env: stdioEnv,
           stderr: 'pipe', // prevents error output from the MCP server from printing to the UI
         })
       } else {
@@ -1232,6 +1321,9 @@ export const connectToServer = memoize(
       const originalOnerror = client.onerror
       const originalOnclose = client.onclose
 
+      // Official transportErrorState (O): mid-call drop detection for concurrent tools.
+      const transportErrorState = createMcpTransportErrorState()
+
       // The SDK's transport calls onerror on connection failures but doesn't call onclose,
       // which CC uses to trigger reconnection. We bridge this gap by tracking consecutive
       // terminal errors and manually closing after MAX_ERRORS_BEFORE_RECONNECT failures.
@@ -1360,6 +1452,10 @@ export const connectToServer = memoize(
 
           if (isTerminalConnectionError(error.message)) {
             consecutiveConnectionErrors++
+            transportErrorState.consecutiveErrors = consecutiveConnectionErrors
+            // Official M(): arm in-flight callTool watchdogs so they abort if
+            // no progress arrives within 90s (response presumed lost).
+            armAllCallWatchdogs(transportErrorState)
             logMCPDebug(
               name,
               `Terminal connection error ${consecutiveConnectionErrors}/${MAX_ERRORS_BEFORE_RECONNECT}`,
@@ -1367,11 +1463,13 @@ export const connectToServer = memoize(
 
             if (consecutiveConnectionErrors >= MAX_ERRORS_BEFORE_RECONNECT) {
               consecutiveConnectionErrors = 0
+              transportErrorState.consecutiveErrors = 0
               closeTransportAndRejectPending('max consecutive terminal errors')
             }
           } else {
             // Non-terminal error (e.g., transient issue), reset counter
             consecutiveConnectionErrors = 0
+            transportErrorState.consecutiveErrors = 0
           }
         }
 
@@ -1613,6 +1711,7 @@ export const connectToServer = memoize(
         instructions,
         config: serverRef,
         cleanup: wrappedCleanup,
+        transportErrorState,
       }
     } catch (error) {
       const connectionDurationMs = Date.now() - connectStartTime
@@ -1761,18 +1860,57 @@ export const fetchToolsForClient = memoizeWithLRU(
         return []
       }
 
-      const result = (await client.client.request(
-        { method: 'tools/list' },
-        ListToolsResultSchema,
-      )) as ListToolsResult
+      // Official 2.1.144: paginate tools/list via nextCursor (page-1-only was silent drop).
+      const listedTools = await listAllWithCursorPagination(
+        async cursor => {
+          const result = (await client.client.request(
+            cursor
+              ? { method: 'tools/list', params: { cursor } }
+              : { method: 'tools/list' },
+            ListToolsResultSchema,
+          )) as ListToolsResult
+          return {
+            items: result.tools ?? [],
+            nextCursor: result.nextCursor,
+          }
+        },
+        {
+          onCapped: pages => {
+            logForDebugging(
+              `[MCP] ${client.name}: tools/list still returning nextCursor after ${pages} pages; stopping`,
+              { level: 'warn' },
+            )
+          },
+        },
+      )
 
       // Sanitize tool data from MCP server
-      const toolsToProcess = recursivelySanitizeUnicode(result.tools)
+      const toolsToProcess = recursivelySanitizeUnicode(listedTools)
 
       // Check if we should skip the mcp__ prefix for SDK MCP servers
       const skipPrefix =
         client.config.type === 'sdk' &&
         isEnvTruthy(process.env.CLAUDE_AGENT_SDK_MCP_NO_PREFIX)
+
+      // Official: org ceiling map on remote MCP configs (claudeai-proxy/http/sse).
+      const toolPermissions =
+        client.config.type === 'claudeai-proxy' ||
+        client.config.type === 'http' ||
+        client.config.type === 'sse'
+          ? client.config.toolPermissions
+          : undefined
+      if (toolPermissions) {
+        const entries = Object.keys(toolPermissions).length
+        if (
+          entries > 0 &&
+          !toolsToProcess.some(t => toolPermissions[t.name] !== undefined)
+        ) {
+          logForDebugging(
+            `[claudeai-mcp] ${client.name}: toolPermissions has ${entries} entries but none matched upstream tool names — backend name drift?`,
+            { level: 'warn' },
+          )
+        }
+      }
 
       // Convert MCP tools to our Tool format
       return toolsToProcess
@@ -1783,7 +1921,12 @@ export const fetchToolsForClient = memoizeWithLRU(
             // In skip-prefix mode, use the original name for model invocation so MCP tools
             // can override builtins by name. mcpInfo is used for permission checking.
             name: skipPrefix ? tool.name : fullyQualifiedName,
-            mcpInfo: { serverName: client.name, toolName: tool.name },
+            mcpInfo: {
+              serverName: client.name,
+              toolName: tool.name,
+              // Official org/admin ceiling from server config toolPermissions.
+              effectiveMaxPermission: toolPermissions?.[tool.name],
+            },
             isMcp: true,
             // Collapse whitespace: _meta is open to external MCP servers, and
             // a newline here would inject orphan lines into the deferred-tool
@@ -1869,9 +2012,20 @@ export const fetchToolsForClient = memoizeWithLRU(
 
               const startTime = Date.now()
               const MAX_SESSION_RETRIES = 1
+              // Official 2.1.193/206: headersHelper may mint short-lived auth
+              // headers; OAuth may hold a refresh_token. On 401 re-run the
+              // helper / refresh once, then reconnect (reauth_retry).
+              // Official recursive path retries with the new connected client
+              // object (isAuthRetry); we keep that client for the next loop
+              // iteration instead of only relying on the connection cache.
+              const MAX_AUTH_RECONNECT_RETRIES = 1
+              let authReconnectRetries = 0
+              let preferredClient: ConnectedMCPServer | null = null
               for (let attempt = 0; ; attempt++) {
                 try {
-                  const connectedClient = await ensureConnectedClient(client)
+                  const connectedClient =
+                    preferredClient ?? (await ensureConnectedClient(client))
+                  preferredClient = null
                   const mcpResult = await callMCPToolWithUrlElicitationRetry({
                     client: connectedClient,
                     clientConnection: client,
@@ -1931,6 +2085,101 @@ export const fetchToolsForClient = memoizeWithLRU(
                       `Retrying tool '${tool.name}' after session recovery`,
                     )
                     continue
+                  }
+
+                  // Official 2.1.193/206: 401 auth recovery — headersHelper
+                  // re-mint, or OAuth refresh_token reconnect, once only.
+                  // Concurrent callers rejoin the same in-flight reconnect
+                  // (OHs Map: reauth_retry leader / collateral_rejoin).
+                  if (authReconnectRetries < MAX_AUTH_RECONNECT_RETRIES) {
+                    const serverConfig = client.config as {
+                      headersHelper?: string
+                      type?: string
+                      url?: string
+                      headers?: Record<string, string>
+                      oauth?: unknown
+                    }
+                    const hasRefreshToken =
+                      (serverConfig.type === 'http' ||
+                        serverConfig.type === 'sse') &&
+                      !!serverConfig.url &&
+                      serverHasStoredRefreshToken(
+                        client.name,
+                        serverConfig as {
+                          type: 'http' | 'sse'
+                          url: string
+                          headers?: Record<string, string>
+                        },
+                      )
+                    const kind = classifyAuthReconnectKind({
+                      type: serverConfig.type,
+                      headersHelper: serverConfig.headersHelper,
+                      url: serverConfig.url,
+                      hasRefreshToken,
+                    })
+                    const cacheKey = getServerCacheKey(
+                      client.name,
+                      client.config,
+                    )
+                    // Official W: ConnectionClosed mid-reconnect → rejoin
+                    // even if this call didn't see a 401 classification.
+                    const closedWhileReconnecting =
+                      kind !== null &&
+                      isConnectionClosedWhileReconnecting(
+                        error,
+                        hasAuthReconnectInFlight(cacheKey),
+                      )
+                    const shouldReconnect =
+                      kind !== null &&
+                      (error instanceof McpAuthError || closedWhileReconnecting)
+
+                    if (shouldReconnect && kind !== null) {
+                      authReconnectRetries++
+                      logMCPDebug(
+                        client.name,
+                        kind === 'mcp_headers_helper'
+                          ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
+                          : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
+                      )
+                      const reconnected = await joinOrStartAuthReconnect(
+                        cacheKey,
+                        kind,
+                        async () => {
+                          await clearServerCache(client.name, client.config)
+                          return connectToServer(client.name, client.config)
+                        },
+                        join => {
+                          // Official Ze(kind, role): telemetry distinguishes
+                          // the leader reauth_retry from collateral_rejoin.
+                          if (join.role === 'leader') {
+                            logEvent(
+                              kind === 'mcp_headers_helper'
+                                ? 'tengu_mcp_headers_helper_retry'
+                                : 'tengu_mcp_oauth_refresh_retry',
+                              {},
+                            )
+                          } else {
+                            logEvent(
+                              kind === 'mcp_headers_helper'
+                                ? 'tengu_mcp_headers_helper_collateral_rejoin'
+                                : 'tengu_mcp_oauth_refresh_collateral_rejoin',
+                              {},
+                            )
+                          }
+                        },
+                      )
+                      if (reconnected.type === 'connected') {
+                        // Official: retry the tool with the reconnected client
+                        // (recursive JTo isAuthRetry). Prefer this object so
+                        // we don't race another cache miss after clear+connect.
+                        preferredClient = reconnected
+                        continue
+                      }
+                      logMCPDebug(
+                        client.name,
+                        `Auth reconnect returned '${reconnected.type}'; falling through to needs-auth`,
+                      )
+                    }
                   }
 
                   // Emit progress when tool fails
@@ -2018,15 +2267,34 @@ export const fetchResourcesForClient = memoizeWithLRU(
         return []
       }
 
-      const result = await client.client.request(
-        { method: 'resources/list' },
-        ListResourcesResultSchema,
+      // Official 2.1.144/147: paginate resources/list via nextCursor.
+      const resources = await listAllWithCursorPagination(
+        async cursor => {
+          const result = await client.client.request(
+            cursor
+              ? { method: 'resources/list', params: { cursor } }
+              : { method: 'resources/list' },
+            ListResourcesResultSchema,
+          )
+          return {
+            items: result.resources ?? [],
+            nextCursor: result.nextCursor,
+          }
+        },
+        {
+          onCapped: pages => {
+            logForDebugging(
+              `[MCP] ${client.name}: resources/list still returning nextCursor after ${pages} pages; stopping`,
+              { level: 'warn' },
+            )
+          },
+        },
       )
 
-      if (!result.resources) return []
+      if (resources.length === 0) return []
 
       // Add server name to each resource
-      return result.resources.map(resource => ({
+      return resources.map(resource => ({
         ...resource,
         server: client.name,
       }))
@@ -2051,16 +2319,34 @@ export const fetchCommandsForClient = memoizeWithLRU(
         return []
       }
 
-      // Request prompts list from client
-      const result = (await client.client.request(
-        { method: 'prompts/list' },
-        ListPromptsResultSchema,
-      )) as ListPromptsResult
+      // Official 2.1.144/147: paginate prompts/list via nextCursor.
+      const listedPrompts = await listAllWithCursorPagination(
+        async cursor => {
+          const result = (await client.client.request(
+            cursor
+              ? { method: 'prompts/list', params: { cursor } }
+              : { method: 'prompts/list' },
+            ListPromptsResultSchema,
+          )) as ListPromptsResult
+          return {
+            items: result.prompts ?? [],
+            nextCursor: result.nextCursor,
+          }
+        },
+        {
+          onCapped: pages => {
+            logForDebugging(
+              `[MCP] ${client.name}: prompts/list still returning nextCursor after ${pages} pages; stopping`,
+              { level: 'warn' },
+            )
+          },
+        },
+      )
 
-      if (!result.prompts) return []
+      if (listedPrompts.length === 0) return []
 
       // Sanitize prompt data from MCP server
-      const promptsToProcess = recursivelySanitizeUnicode(result.prompts)
+      const promptsToProcess = recursivelySanitizeUnicode(listedPrompts)
 
       // Convert MCP prompts to our Command format
       return promptsToProcess.map(prompt => {
@@ -3115,7 +3401,7 @@ export async function callMCPToolWithUrlElicitationRetry({
 }
 
 async function callMCPTool({
-  client: { client, name, config },
+  client: { client, name, config, transportErrorState },
   tool,
   args,
   meta,
@@ -3139,17 +3425,43 @@ async function callMCPTool({
 }> {
   const toolStartTime = Date.now()
   let progressInterval: NodeJS.Timeout | undefined
+  let idleTimeoutId: NodeJS.Timeout | undefined
+  let armIdleWatchdog: (() => void) | undefined
+  // Official S={armedAt:0} registered on transportErrorState for mid-call drop.
+  const callWatchdog = { armedAt: 0 }
+  const transportState = transportErrorState
+  transportState?.activeCallWatchdogs.add(callWatchdog)
+  let rejectTransportDrop: ((err: Error) => void) | undefined
+  const transportDropPromise = new Promise<never>((_, reject) => {
+    rejectTransportDrop = reject
+  })
 
   try {
     logMCPDebug(name, `Calling MCP tool: ${tool}`)
 
-    // Set up progress logging for long-running tools (every 30 seconds)
+    // Set up progress logging for long-running tools (every 30 seconds).
+    // Official: also abort if transport error armed this call >90s ago.
     progressInterval = setInterval(
       (startTime, name, tool) => {
         const elapsed = Date.now() - startTime
         const elapsedSeconds = Math.floor(elapsed / 1000)
         const duration = `${elapsedSeconds}s`
         logMCPDebug(name, `Tool '${tool}' still running (${duration} elapsed)`)
+        if (shouldAbortForTransportDrop(callWatchdog)) {
+          const armedSec = Math.floor(
+            (Date.now() - callWatchdog.armedAt) / 1000,
+          )
+          logMCPDebug(
+            name,
+            `Tool '${tool}' aborting: transport error ${armedSec}s ago, response presumed lost`,
+          )
+          rejectTransportDrop?.(
+            new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+              `MCP server "${name}" transport dropped mid-call; response for tool "${tool}" was lost`,
+              'MCP transport lost mid-call',
+            ),
+          )
+        }
       },
       30000, // Log every 30 seconds
       toolStartTime,
@@ -3161,6 +3473,30 @@ async function callMCPTool({
     // internal timeout doesn't work (e.g., SSE stream breaks mid-request)
     const timeoutMs = getMcpToolTimeoutMs()
     let timeoutId: NodeJS.Timeout | undefined
+
+    // Official 2.1.187: abort if neither progress nor final response arrives
+    // within the idle window (default 5 min). Progress resets the idle timer.
+    const idleTimeoutMs = getMcpToolIdleTimeoutMs(
+      config as { timeout?: number } | undefined,
+    )
+    const idlePromise =
+      idleTimeoutMs === null
+        ? null
+        : new Promise<never>((_, reject) => {
+            armIdleWatchdog = () => {
+              if (idleTimeoutId) clearTimeout(idleTimeoutId)
+              idleTimeoutId = setTimeout(() => {
+                const idleSec = Math.floor(idleTimeoutMs / 1000)
+                reject(
+                  new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                    `MCP server "${name}" tool "${tool}" sent no response or progress for ${idleSec}s; aborting. If this server is configured in your MCP settings, set a per-server "timeout" (ms) to allow longer silent runs for just this server; otherwise set CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT (ms) globally (0 disables).`,
+                    'MCP tool idle timeout',
+                  ),
+                )
+              }, idleTimeoutMs)
+            }
+            armIdleWatchdog()
+          })
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(
@@ -3180,7 +3516,7 @@ async function callMCPTool({
       )
     })
 
-    const result = await Promise.race([
+    const races: Promise<unknown>[] = [
       client.callTool(
         {
           name: tool,
@@ -3191,27 +3527,38 @@ async function callMCPTool({
         {
           signal,
           timeout: timeoutMs,
-          onprogress: onProgress
-            ? sdkProgress => {
-                onProgress({
-                  type: 'mcp_progress',
-                  status: 'progress',
-                  serverName: name,
-                  toolName: tool,
-                  progress: sdkProgress.progress,
-                  total: sdkProgress.total,
-                  progressMessage: sdkProgress.message,
-                })
-              }
-            : undefined,
+          onprogress: sdkProgress => {
+            // Any progress notification resets the idle + transport-drop watchdogs.
+            armIdleWatchdog?.()
+            clearCallWatchdogArm(callWatchdog)
+            if (onProgress) {
+              onProgress({
+                type: 'mcp_progress',
+                status: 'progress',
+                serverName: name,
+                toolName: tool,
+                progress: sdkProgress.progress,
+                total: sdkProgress.total,
+                progressMessage: sdkProgress.message,
+              })
+            }
+          },
         },
       ),
       timeoutPromise,
-    ]).finally(() => {
+      transportDropPromise,
+    ]
+    if (idlePromise) races.push(idlePromise)
+
+    const result = (await Promise.race(races).finally(() => {
       if (timeoutId) {
         clearTimeout(timeoutId)
       }
-    })
+      if (idleTimeoutId) {
+        clearTimeout(idleTimeoutId)
+      }
+      armIdleWatchdog = undefined
+    })) as Awaited<ReturnType<typeof client.callTool>>
 
     if ('isError' in result && result.isError) {
       let errorDetails = 'Unknown error'
@@ -3335,10 +3682,11 @@ async function callMCPTool({
     }
     return { content: undefined }
   } finally {
-    // Always clear intervals
+    // Always clear intervals + mid-call drop watchdog registration
     if (progressInterval !== undefined) {
       clearInterval(progressInterval)
     }
+    transportState?.activeCallWatchdogs.delete(callWatchdog)
   }
 }
 

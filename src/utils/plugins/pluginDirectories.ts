@@ -14,7 +14,8 @@ import { readdir, rm, stat } from 'fs/promises'
 import { delimiter, join } from 'path'
 import { getUseCoworkPlugins } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { isCoworkPluginsEnvEnabled } from '../residualFinalEnvGates.js'
 import { errorMessage, isFsInaccessible } from '../errors.js'
 import { formatFileSize } from '../format.js'
 import { expandTilde } from '../permissions/pathValidation.js'
@@ -36,8 +37,8 @@ function getPluginsDirectoryName(): string {
   if (getUseCoworkPlugins()) {
     return COWORK_PLUGINS_DIR
   }
-  // Fall back to env var
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_COWORK_PLUGINS)) {
+  // Fall back to env var (official USE_COWORK_PLUGINS densable)
+  if (isCoworkPluginsEnvEnabled()) {
     return COWORK_PLUGINS_DIR
   }
   return PLUGINS_DIR

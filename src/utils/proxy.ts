@@ -10,7 +10,7 @@ import memoize from 'lodash-es/memoize.js'
 import type * as undici from 'undici'
 import { getCACertificates } from './caCerts.js'
 import { logForDebugging } from './debug.js'
-import { isEnvTruthy } from './envUtils.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import {
   getMTLSAgent,
   getMTLSConfig,
@@ -62,7 +62,15 @@ type EnvLike = Record<string, string | undefined>
  * @param env Environment variables to check (defaults to process.env for production use)
  */
 export function getProxyUrl(env: EnvLike = process.env): string | undefined {
-  return env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY
+  const standard =
+    env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY
+  if (standard) return standard
+  // Official host-injected local HTTP proxy (desktop / sandbox managed).
+  const hostPort = env.CLAUDE_CODE_HOST_HTTP_PROXY_PORT
+  if (hostPort && /^\d+$/.test(hostPort) && Number(hostPort) > 0) {
+    return `http://127.0.0.1:${hostPort}`
+  }
+  return undefined
 }
 
 /**
@@ -139,6 +147,19 @@ function createHttpsProxyAgent(
   const mtlsConfig = getMTLSConfig()
   const caCerts = getCACertificates()
 
+  // Official densable — inject Proxy-Authorization when proxyAuthHelper cached.
+  let authHeaders: Record<string, string> | undefined
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getCachedProxyAuthHelperValue, buildHttpsProxyAgentAuthHeaders } =
+      require('./proxyAuthHelper.js') as typeof import('./proxyAuthHelper.js')
+    authHeaders = buildHttpsProxyAgentAuthHeaders(
+      getCachedProxyAuthHelperValue(),
+    )
+  } catch {
+    // densable optional
+  }
+
   const agentOptions: HttpsProxyAgentOptions<string> = {
     ...(mtlsConfig && {
       cert: mtlsConfig.cert,
@@ -146,6 +167,7 @@ function createHttpsProxyAgent(
       passphrase: mtlsConfig.passphrase,
     }),
     ...(caCerts && { ca: caCerts }),
+    ...(authHeaders ? { headers: authHeaders } : {}),
   }
 
   if (isEnvTruthy(process.env.CLAUDE_CODE_PROXY_RESOLVES_HOSTS)) {
@@ -201,6 +223,37 @@ export const getProxyAgent = memoize((uri: string): undici.Dispatcher => {
   const mtlsConfig = getMTLSConfig()
   const caCerts = getCACertificates()
 
+  const tlsOpts =
+    mtlsConfig || caCerts
+      ? {
+          ...(mtlsConfig && {
+            cert: mtlsConfig.cert,
+            key: mtlsConfig.key,
+            passphrase: mtlsConfig.passphrase,
+          }),
+          ...(caCerts && { ca: caCerts }),
+        }
+      : undefined
+
+  // Official undici densable — when proxyAuthHelper has a cached value, use
+  // ProxyAgent with token (Proxy-Authorization). EnvHttpProxyAgent cannot
+  // inject CONNECT auth headers; ProxyAgent can.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getCachedProxyAuthHelperValue, buildUndiciProxyAgentAuthOptions } =
+      require('./proxyAuthHelper.js') as typeof import('./proxyAuthHelper.js')
+    const authOpts = buildUndiciProxyAgentAuthOptions({
+      proxyUrl: uri,
+      proxyAuthorization: getCachedProxyAuthHelperValue(),
+      ...(tlsOpts ? { requestTls: tlsOpts, connect: tlsOpts } : {}),
+    })
+    if (authOpts && typeof undiciMod.ProxyAgent === 'function') {
+      return new undiciMod.ProxyAgent(authOpts)
+    }
+  } catch {
+    // densable optional — fall through to EnvHttpProxyAgent
+  }
+
   // Use EnvHttpProxyAgent to respect NO_PROXY
   // This agent automatically checks NO_PROXY for each request
   const proxyOptions: undici.EnvHttpProxyAgent.Options & {
@@ -220,15 +273,7 @@ export const getProxyAgent = memoize((uri: string): undici.Dispatcher => {
   // Set both connect and requestTls so TLS options apply to both paths:
   // - requestTls: used by ProxyAgent for the TLS connection through CONNECT tunnels
   // - connect: used by Agent for direct (no-proxy) connections
-  if (mtlsConfig || caCerts) {
-    const tlsOpts = {
-      ...(mtlsConfig && {
-        cert: mtlsConfig.cert,
-        key: mtlsConfig.key,
-        passphrase: mtlsConfig.passphrase,
-      }),
-      ...(caCerts && { ca: caCerts }),
-    }
+  if (tlsOpts) {
     proxyOptions.connect = tlsOpts
     proxyOptions.requestTls = tlsOpts
   }
@@ -275,24 +320,58 @@ export function getWebSocketProxyUrl(url: string): string | undefined {
 }
 
 /**
+ * Official F_ densable — when forAnthropicAPI and body-idle watchdog is
+ * eligible (or API_FORCE_IDLE_TIMEOUT is truthy), disable the undici/Bun
+ * whole-request timeout so the byte-stream idle watchdog owns hang detection.
+ * Explicit falsy API_FORCE_IDLE_TIMEOUT forces the SDK timeout back on.
+ */
+export function shouldDisableFetchTimeoutForBodyIdle(opts?: {
+  forAnthropicAPI?: boolean
+  hasBodyIdleWatchdog?: boolean
+  env?: NodeJS.ProcessEnv
+}): boolean {
+  if (!opts?.forAnthropicAPI) return false
+  const env = opts.env ?? process.env
+  const force = env.API_FORCE_IDLE_TIMEOUT
+  if (isEnvDefinedFalsy(force)) return false
+  return Boolean(opts.hasBodyIdleWatchdog) || isEnvTruthy(force)
+}
+
+/**
  * Get fetch options for the Anthropic SDK with proxy and mTLS configuration
  * Returns fetch options with appropriate dispatcher for proxy and/or mTLS
  *
- * @param opts.forAnthropicAPI - Enables ANTHROPIC_UNIX_SOCKET tunneling. This
- *   env var is set by `claude ssh` on the remote CLI to route API calls through
- *   an ssh -R forwarded unix socket to a local auth proxy. It MUST NOT leak
- *   into non-Anthropic-API fetch paths (MCP HTTP/SSE transports, etc.) or those
+ * Official F_ opts:
+ * - forAnthropicAPI — Enables ANTHROPIC_UNIX_SOCKET tunneling. This env var is
+ *   set by `claude ssh` on the remote CLI to route API calls through an
+ *   ssh -R forwarded unix socket to a local auth proxy. It MUST NOT leak into
+ *   non-Anthropic-API fetch paths (MCP HTTP/SSE transports, etc.) or those
  *   requests get misrouted to api.anthropic.com. Only the Anthropic SDK client
  *   should pass `true` here.
+ * - hasBodyIdleWatchdog — when true (official CAh), disable fetch timeout so
+ *   the byte-body idle watchdog owns hang detection (unless
+ *   API_FORCE_IDLE_TIMEOUT is explicitly falsy).
  */
-export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean }): {
+export function getProxyFetchOptions(opts?: {
+  forAnthropicAPI?: boolean
+  hasBodyIdleWatchdog?: boolean
+}): {
   tls?: TLSConfig
   dispatcher?: undici.Dispatcher
-  proxy?: string
+  proxy?: string | { url: string; headers?: Record<string, string> }
   unix?: string
   keepalive?: false
+  timeout?: false
 } {
-  const base = keepAliveDisabled ? ({ keepalive: false } as const) : {}
+  const base: {
+    keepalive?: false
+    timeout?: false
+  } = {
+    ...(keepAliveDisabled ? ({ keepalive: false } as const) : {}),
+    ...(shouldDisableFetchTimeoutForBodyIdle(opts)
+      ? ({ timeout: false } as const)
+      : {}),
+  }
 
   // ANTHROPIC_UNIX_SOCKET tunnels through the `claude ssh` auth proxy, which
   // hardcodes the upstream to the Anthropic API. Scope to the Anthropic API
@@ -306,11 +385,27 @@ export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean }): {
 
   const proxyUrl = getProxyUrl()
 
-  // If we have a proxy, use the proxy agent (which includes mTLS config)
+  // If we have a proxy, use the proxy agent (which includes mTLS config).
+  // Official k_: when proxyAuthHelper cache has a value, Bun path can pass
+  // Proxy-Authorization via {url, headers}; Node path uses undici ProxyAgent
+  // with token densable (see getProxyAgent).
   if (proxyUrl) {
+    // Lazy require to avoid circular import with proxyAuthHelper → proxy.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getCachedProxyAuthHelperValue, buildProxyOptionWithAuth } =
+      require('./proxyAuthHelper.js') as typeof import('./proxyAuthHelper.js')
+    const proxyAuth = getCachedProxyAuthHelperValue()
     if (typeof Bun !== 'undefined') {
-      return { ...base, proxy: proxyUrl, ...getTLSFetchOptions() }
+      return {
+        ...base,
+        proxy: buildProxyOptionWithAuth({
+          proxyUrl,
+          proxyAuthorization: proxyAuth,
+        }),
+        ...getTLSFetchOptions(),
+      }
     }
+    // Auth-aware dispatcher (ProxyAgent when cache hit, else EnvHttpProxyAgent)
     return { ...base, dispatcher: getProxyAgent(proxyUrl) }
   }
 

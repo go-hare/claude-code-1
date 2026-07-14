@@ -37,6 +37,7 @@ import { OffscreenFreeze } from '../OffscreenFreeze.js';
 import { checkForReleaseNotesSync } from '../../utils/releaseNotes.js';
 import { getDumpPromptsPath } from 'src/services/api/dumpPrompts.js';
 import { isEnvTruthy } from 'src/utils/envUtils.js';
+import { isForceFullLogoEnabled } from 'src/utils/residualUiEnvGates.js';
 import { getStartupPerfLogPath, isDetailedProfilingEnabled } from 'src/utils/startupProfiler.js';
 import { EmergencyTip } from './EmergencyTip.js';
 import { VoiceModeNotice } from './VoiceModeNotice.js';
@@ -120,7 +121,7 @@ export function LogoV2(): React.ReactNode {
   // In condensed mode (early-return below renders <CondensedLogo/>),
   // CondensedLogo's own useEffect handles the impression count. Skipping
   // here avoids double-counting since hooks fire before the early return.
-  const isCondensedMode = !hasReleaseNotes && !showOnboarding && !isEnvTruthy(process.env.CLAUDE_CODE_FORCE_FULL_LOGO);
+  const isCondensedMode = !hasReleaseNotes && !showOnboarding && !isForceFullLogoEnabled();
 
   useEffect(() => {
     if (showGuestPassesUpsell && !showOnboarding && !isCondensedMode) {
@@ -144,7 +145,7 @@ export function LogoV2(): React.ReactNode {
   const modelDisplayName = truncate(fullModelDisplayName + effortSuffix, LEFT_PANEL_MAX_WIDTH - 20);
 
   // Show condensed logo if no new changelog and not showing onboarding and not forcing full logo
-  if (!hasReleaseNotes && !showOnboarding && !isEnvTruthy(process.env.CLAUDE_CODE_FORCE_FULL_LOGO)) {
+  if (!hasReleaseNotes && !showOnboarding && !isForceFullLogoEnabled()) {
     return (
       <>
         <CondensedLogo />

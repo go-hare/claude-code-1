@@ -35,9 +35,19 @@ export function getPromptVariant(): PromptVariant {
 }
 
 export function shouldEnablePromptSuggestion(): boolean {
-  // Env var overrides everything (for testing)
-  const envOverride = process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION
-  if (isEnvDefinedFalsy(envOverride)) {
+  // Official ENABLE_PROMPT_SUGGESTION densable pure env half.
+  let envOverride: boolean | null = null
+  try {
+    const { resolvePromptSuggestionEnvOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    envOverride = resolvePromptSuggestionEnvOverride()
+  } catch {
+    const raw = process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION
+    if (isEnvDefinedFalsy(raw)) envOverride = false
+    else if (isEnvTruthy(raw)) envOverride = true
+  }
+  if (envOverride === false) {
     logEvent('tengu_prompt_suggestion_init', {
       enabled: false,
       source:
@@ -45,7 +55,7 @@ export function shouldEnablePromptSuggestion(): boolean {
     })
     return false
   }
-  if (isEnvTruthy(envOverride)) {
+  if (envOverride === true) {
     logEvent('tengu_prompt_suggestion_init', {
       enabled: true,
       source:

@@ -11,6 +11,9 @@ export type SuggestionItem = {
   description?: string;
   metadata?: unknown;
   color?: keyof Theme;
+  /** Official menu kind lanes (tengu_mint_lanes / ENABLE_MENU_KIND_LANES). */
+  kind?: 'skill' | 'action';
+  sourceTag?: 'project' | 'org';
 };
 
 export type SuggestionType =

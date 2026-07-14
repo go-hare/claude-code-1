@@ -3,6 +3,8 @@ import { ReadStream } from 'tty'
 import type { RenderOptions } from '@anthropic/ink'
 import { isEnvTruthy } from './envUtils.js'
 import { logError } from './log.js'
+import { applyRelaunchTerminalSizeFromEnv } from './residualFinalEnvGates.js'
+import { isScreenReaderModeEnabled } from './screenReaderGate.js'
 
 // Cached stdin override - computed once per process
 let cachedStdinOverride: ReadStream | undefined | null = null
@@ -63,13 +65,22 @@ function getStdinOverride(): ReadStream | undefined {
  * Returns base render options for Ink, including stdin override when needed.
  * Use this for all render() calls to ensure piped input works correctly.
  *
+ * Official WU: apply one-shot CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE first so
+ * Ink inherits restored columns/rows after a terminal relaunch.
+ *
  * @param exitOnCtrlC - Whether to exit on Ctrl+C (usually false for dialogs)
  */
 export function getBaseRenderOptions(
   exitOnCtrlC: boolean = false,
 ): RenderOptions {
+  // Official t2u — restore stdout size from relaunch env before Ink measures.
+  applyRelaunchTerminalSizeFromEnv()
   const stdin = getStdinOverride()
-  const options: RenderOptions = { exitOnCtrlC }
+  // Official zBn / uU → Ink isScreenReaderEnabled (full onRenderScreenReader denser).
+  const options: RenderOptions = {
+    exitOnCtrlC,
+    isScreenReaderEnabled: isScreenReaderModeEnabled(),
+  }
   if (stdin) {
     options.stdin = stdin
   }

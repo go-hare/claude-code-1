@@ -598,6 +598,27 @@ const COMMAND_VALIDATOR: Partial<
 > = {
   mv: (args: string[]) => !args.some(arg => arg?.startsWith('-')),
   cp: (args: string[]) => !args.some(arg => arg?.startsWith('-')),
+  // Official 2.1.x: zsh `cd OLD NEW` rewrites $PWD via substitution; only
+  // multi-positional forms fail static path validation. Flags (-P/-L) are
+  // skipped; bare `-` is a valid previous-directory target.
+  cd: (args: string[]) => {
+    let counting = false
+    let positionalCount = 0
+    for (const arg of args) {
+      if (!counting) {
+        if (arg === '--') {
+          counting = true
+          continue
+        }
+        if (arg.startsWith('-') && arg !== '-') {
+          continue
+        }
+        counting = true
+      }
+      positionalCount++
+    }
+    return positionalCount <= 1
+  },
 }
 
 function validateCommandPaths(
@@ -617,12 +638,26 @@ function validateCommandPaths(
   // so we block ALL flags for these commands to ensure security.
   const validator = COMMAND_VALIDATOR[command]
   if (validator && !validator(args)) {
+    // Official: cd multi-positional is a distinct miss kind from generic flags.
+    if (command === 'cd') {
+      return {
+        behavior: 'ask',
+        message:
+          'cd with two or more directory arguments requires manual approval. zsh\'s "cd OLD NEW" form substitutes OLD→NEW in $PWD, producing a target path that cannot be statically validated.',
+        decisionReason: {
+          type: 'other',
+          reason: 'cd with two or more directory arguments',
+          bashMissKind: 'cd-multi-positional',
+        },
+      }
+    }
     return {
       behavior: 'ask',
       message: `${command} with flags requires manual approval to ensure path safety. For security, Claude Code cannot automatically validate ${command} commands that use flags, as some flags like --target-directory=PATH can bypass path validation.`,
       decisionReason: {
         type: 'other',
         reason: `${command} command with flags requires manual approval`,
+        bashMissKind: 'flag-validation',
       },
     }
   }
@@ -650,6 +685,7 @@ function validateCommandPaths(
         type: 'other',
         reason:
           'Compound command contains cd with write operation - manual approval required to prevent path resolution bypass',
+        bashMissKind: 'cd-compound-write',
       },
     }
   }
@@ -921,7 +957,8 @@ function validateSinglePathCommandArgv(
   return pathChecker(args, cwd, toolPermissionContext, compoundCommandHasCd)
 }
 
-function validateOutputRedirections(
+/** @internal exported for unit tests (cd-compound-redirect /dev/null exception) */
+export function validateOutputRedirections(
   redirections: Array<{ target: string; operator: '>' | '>>' }>,
   cwd: string,
   toolPermissionContext: ToolPermissionContext,
@@ -932,7 +969,12 @@ function validateOutputRedirections(
   // Example attack: cd .claude/ && echo "malicious" > settings.json
   // The redirection target would be validated relative to the original CWD, but the
   // actual write happens in the changed directory after 'cd' executes.
-  if (compoundCommandHasCd && redirections.length > 0) {
+  // Official 2.1.207: /dev/null-only redirects are safe (discard output) and must not
+  // spuriously prompt — only non-/dev/null targets trigger cd-compound-redirect.
+  if (
+    compoundCommandHasCd &&
+    redirections.some(r => r.target !== '/dev/null')
+  ) {
     return {
       behavior: 'ask',
       message: `Commands that change directories and write via output redirection require explicit approval to ensure paths are evaluated correctly. For security, Claude Code cannot automatically determine the final working directory when 'cd' is used in compound commands.`,
@@ -940,6 +982,7 @@ function validateOutputRedirections(
         type: 'other',
         reason:
           'Compound command contains cd with output redirection - manual approval required to prevent path resolution bypass',
+        bashMissKind: 'cd-compound-redirect',
       },
     }
   }
@@ -1033,6 +1076,7 @@ export function checkPathConstraints(
       decisionReason: {
         type: 'other',
         reason: 'Process substitution requires manual approval',
+        bashMissKind: 'process-substitution',
       },
     }
   }
@@ -1049,13 +1093,21 @@ export function checkPathConstraints(
 
   // SECURITY: If we found a redirection operator with a target containing shell expansion
   // syntax ($VAR or %VAR%), require manual approval since the target can't be safely validated.
+  // Official also classifies /dev/tcp|/dev/udp as net-redirect (network_device).
   if (hasDangerousRedirection) {
+    const isNetworkDevice =
+      /\/dev\/(tcp|udp)\//.test(input.command) ||
+      redirections.some(r => /\/dev\/(tcp|udp)\//.test(r.target))
+    const message = isNetworkDevice
+      ? 'Redirect involving /dev/tcp or /dev/udp opens a network connection'
+      : 'Shell expansion syntax in paths requires manual approval'
     return {
       behavior: 'ask',
-      message: 'Shell expansion syntax in paths requires manual approval',
+      message,
       decisionReason: {
         type: 'other',
-        reason: 'Shell expansion syntax in paths requires manual approval',
+        reason: message,
+        bashMissKind: isNetworkDevice ? 'net-redirect' : 'shell-expansion',
       },
     }
   }

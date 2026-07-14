@@ -19,11 +19,22 @@ import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { getFsImplementation } from './fsOperations.js'
 import { formatMs, formatTimelineLine, getPerformance } from './profilerBase.js'
+import {
+  isProfileStartupEnabled,
+  resolveSpawnToFirstCheckpointMs,
+} from './residualFinalEnvGates.js'
 import { writeFileSync_DEPRECATED } from './slowOperations.js'
 
-// Module-level state - decided once at module load
+// Module-level state - decided once at module load.
+// Official PROFILE_STARTUP densable (top-level requires eager eval).
 // eslint-disable-next-line custom-rules/no-process-env-top-level
-const DETAILED_PROFILING = isEnvTruthy(process.env.CLAUDE_CODE_PROFILE_STARTUP)
+const DETAILED_PROFILING = (() => {
+  try {
+    return isProfileStartupEnabled()
+  } catch {
+    return isEnvTruthy(process.env.CLAUDE_CODE_PROFILE_STARTUP)
+  }
+})()
 
 // Sampling for Statsig logging: 100% ant, 0.5% external
 // Decision made once at startup - non-sampled users pay no profiling cost
@@ -193,6 +204,16 @@ function logStartupPerf(): void {
 
   // Add checkpoint count for debugging
   metadata.checkpoint_count = marks.length
+
+  // Official $qa densable: spawn_to_first_checkpoint_ms when CCR/CLAUDE
+  // SPAWN_TIMESTAMP_MS is set (remote runner cold-start latency).
+  const firstMark = marks[0]
+  const spawnToFirst = resolveSpawnToFirstCheckpointMs({
+    firstCheckpointMs: firstMark?.startTime,
+  })
+  if (spawnToFirst !== undefined) {
+    metadata.spawn_to_first_checkpoint_ms = spawnToFirst
+  }
 
   logEvent(
     'tengu_startup_perf',

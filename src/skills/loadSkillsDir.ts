@@ -24,6 +24,7 @@ import {
   substituteArguments,
 } from '../utils/argumentSubstitution.js'
 import { logForDebugging } from '../utils/debug.js'
+import { filterCompilableIgnorePatterns } from '../utils/ignorePatterns.js'
 import {
   EFFORT_LEVELS,
   type EffortValue,
@@ -687,7 +688,16 @@ export const getSkillDirCommands = memoize(
       additionalSkillsNested,
       legacyCommands,
     ] = await Promise.all([
-      isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_POLICY_SKILLS)
+      (() => {
+        try {
+          const { isPolicySkillsDisabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+          return isPolicySkillsDisabled()
+        } catch {
+          return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_POLICY_SKILLS)
+        }
+      })()
         ? Promise.resolve([])
         : loadSkillsFromSkillsDir(managedSkillsDir, 'policySettings'),
       isSettingSourceEnabled('userSettings') && !skillsLocked
@@ -1013,7 +1023,15 @@ export function activateConditionalSkillsForPaths(
       continue
     }
 
-    const skillIgnore = ignore().add(skill.paths)
+    // Official 2.1.207: filter uncompilable paths globs before ignore().add.
+    const skillPaths = filterCompilableIgnorePatterns(
+      skill.paths,
+      'skill_paths',
+    )
+    if (skillPaths.length === 0) {
+      continue
+    }
+    const skillIgnore = ignore().add(skillPaths)
     for (const filePath of filePaths) {
       const relativePath = isAbsolute(filePath)
         ? relative(cwd, filePath)

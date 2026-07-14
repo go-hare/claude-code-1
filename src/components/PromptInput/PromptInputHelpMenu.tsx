@@ -68,9 +68,7 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
           <Text dimColor={dimColor}>double tap esc to clear input</Text>
         </Box>
         <Box>
-          <Text dimColor={dimColor}>
-            {cycleModeShortcut} {process.env.USER_TYPE === 'ant' ? 'to cycle modes' : 'to auto-accept edits'}
-          </Text>
+          <Text dimColor={dimColor}>{cycleModeShortcut} to cycle permission modes</Text>
         </Box>
         <Box>
           <Text dimColor={dimColor}>{transcriptShortcut} for verbose output</Text>

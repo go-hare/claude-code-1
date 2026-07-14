@@ -6,6 +6,12 @@ import { isProcessRunning } from '../utils/genericProcessUtils.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import { selectEngine } from './bg/engines/index.js'
 import type { SessionEntry } from './bg/engine.js'
+import {
+  formatBgHints,
+  shouldOpenAgentsViewOnDetach,
+  stripBgFlags,
+  type DetachAttachResult,
+} from './bg/helpers.js'
 
 export type { SessionEntry } from './bg/engine.js'
 
@@ -196,6 +202,7 @@ export async function attachHandler(target: string | undefined): Promise<void> {
   const engineType = resolveSessionEngine(session)
 
   try {
+    let attachResult: DetachAttachResult | undefined
     if (engineType === 'tmux') {
       const { TmuxEngine } = await import('./bg/engines/tmux.js')
       const tmux = new TmuxEngine()
@@ -206,11 +213,26 @@ export async function attachHandler(target: string | undefined): Promise<void> {
         process.exitCode = 1
         return
       }
-      await tmux.attach(session)
+      attachResult = await tmux.attach(session)
     } else {
       const { DetachedEngine } = await import('./bg/engines/detached.js')
       const detached = new DetachedEngine()
-      await detached.attach(session)
+      attachResult = await detached.attach(session)
+    }
+
+    // Official GCp: after interactive APC/log-tail detach, open AgentsView with
+    // CLAUDE_AGENTS_SELECT so the detached session is pre-selected.
+    if (
+      attachResult &&
+      shouldOpenAgentsViewOnDetach(
+        attachResult,
+        process.stdout.isTTY === true,
+        process.stdin.isTTY === true,
+      )
+    ) {
+      process.env.CLAUDE_AGENTS_SELECT = session.sessionId
+      const { agentsMain } = await import('./agents.js')
+      await agentsMain([])
     }
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e))
@@ -279,8 +301,8 @@ export async function killHandler(target: string | undefined): Promise<void> {
 export async function handleBgStart(args: string[]): Promise<void> {
   const engine = await selectEngine()
 
-  // Strip --bg/--background from args (for backward-compat shortcut)
-  const filteredArgs = args.filter(a => a !== '--bg' && a !== '--background')
+  // Official Iia: strip --bg/--background before `--`, keep rest intact.
+  const filteredArgs = stripBgFlags(args)
 
   // Engines without interactive TTY input (e.g. detached) require -p/--print
   // or piped input. Tmux provides a virtual terminal so it works without -p.
@@ -322,15 +344,10 @@ export async function handleBgStart(args: string[]): Promise<void> {
       cwd: process.cwd(),
     })
 
-    console.log(`Background session started: ${result.sessionName}`)
+    // Official Vdt post-spawn hints.
+    console.log(formatBgHints(result.sessionName))
     console.log(`  Engine: ${result.engineUsed}`)
     console.log(`  Log: ${result.logPath}`)
-    console.log()
-    console.log(
-      `Use \`claude daemon attach ${result.sessionName}\` to reconnect.`,
-    )
-    console.log(`Use \`claude daemon status\` to check status.`)
-    console.log(`Use \`claude daemon kill ${result.sessionName}\` to stop.`)
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e))
     process.exitCode = 1

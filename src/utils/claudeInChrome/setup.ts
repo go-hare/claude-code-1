@@ -50,8 +50,17 @@ export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
     return false
   }
 
-  // Check environment variables
-  if (isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_CFC)) {
+  // Official ENABLE_CFC densable.
+  let cfcEnabled = isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_CFC)
+  try {
+    const { isCfcEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    cfcEnabled = isCfcEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (cfcEnabled) {
     return true
   }
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ENABLE_CFC)) {

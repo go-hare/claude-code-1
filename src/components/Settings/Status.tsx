@@ -16,6 +16,7 @@ import {
   buildInstallationHealthDiagnostics,
   buildMcpProperties,
   buildMemoryDiagnostics,
+  buildProcessWrapperProperties,
   buildSandboxProperties,
   buildSettingSourcesProperties,
   type Diagnostic,
@@ -63,6 +64,7 @@ function buildSecondarySection({
     ...buildIDEProperties(mcp.clients, context.options.ideInstallationStatus, theme),
     ...buildMcpProperties(mcp.clients, theme),
     ...buildSandboxProperties(),
+    ...buildProcessWrapperProperties(),
     ...buildSettingSourcesProperties(),
   ];
 }

@@ -258,6 +258,23 @@ export type ContentReplacementEntry = {
   replacements: ContentReplacementRecord[]
 }
 
+/**
+ * Official xZi / IZi densable (2.1.207) — transcript entry recording the
+ * main-session (or observed-agent) observer pairing pointer so VOu can
+ * reattach across process restarts / resume. Written after successful
+ * observer delivery batches; last matching entry wins on read.
+ */
+export type ObserverRefEntry = {
+  type: 'observer-ref'
+  /** Observed agent id when observing a subagent; omitted for main session. */
+  agentId?: string
+  observerTaskId: string
+  observerAgentType?: string
+  armingPermissionMode?: string
+  timestamp?: string
+  sessionId?: UUID
+}
+
 export type FileHistorySnapshotMessage = {
   type: 'file-history-snapshot'
   messageId: UUID
@@ -390,6 +407,7 @@ export type Entry =
   | ContextCollapseSnapshotEntry
   | GoalMetadataEntry
   | GoalClearedEntry
+  | ObserverRefEntry
 
 export function sortLogs(logs: LogOption[]): LogOption[] {
   return logs.sort((a, b) => {

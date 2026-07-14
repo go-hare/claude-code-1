@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   buildTaskStateMessage,
   getTaskStateSnapshotKey,
+  shouldPublishTaskState,
 } from '../taskStateMessage'
 
 describe('buildTaskStateMessage', () => {
@@ -83,5 +84,54 @@ describe('buildTaskStateMessage', () => {
 
     expect(firstKey).toBe(secondKey)
     expect(message.tasks.map(task => task.id)).toEqual(['1', '2'])
+  })
+})
+
+describe('shouldPublishTaskState', () => {
+  const handle = { id: 'h1' }
+
+  test('skips when snapshot key and handle are unchanged', () => {
+    expect(
+      shouldPublishTaskState({
+        snapshotKey: 'k',
+        handle,
+        lastSnapshotKey: 'k',
+        lastHandle: handle,
+      }),
+    ).toBe(false)
+  })
+
+  test('publishes when snapshot key changes', () => {
+    expect(
+      shouldPublishTaskState({
+        snapshotKey: 'k2',
+        handle,
+        lastSnapshotKey: 'k',
+        lastHandle: handle,
+      }),
+    ).toBe(true)
+  })
+
+  test('publishes when handle identity changes', () => {
+    expect(
+      shouldPublishTaskState({
+        snapshotKey: 'k',
+        handle: { id: 'h2' },
+        lastSnapshotKey: 'k',
+        lastHandle: handle,
+      }),
+    ).toBe(true)
+  })
+
+  test('force republishes after reconnect even when key and handle match', () => {
+    expect(
+      shouldPublishTaskState({
+        snapshotKey: 'k',
+        handle,
+        lastSnapshotKey: 'k',
+        lastHandle: handle,
+        force: true,
+      }),
+    ).toBe(true)
   })
 })

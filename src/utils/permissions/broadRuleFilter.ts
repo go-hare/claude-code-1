@@ -20,6 +20,7 @@
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
+import { getSettingsForSource } from '../settings/settings.js'
 import { normalizeLegacyToolName } from './permissionRuleParser.js'
 
 /**
@@ -185,6 +186,27 @@ export function isAutoModeFilteringActive(
 }
 
 /**
+ * Official 2.1.193 `$oi` / `p6r`: when any trusted settings source sets
+ * `autoMode.classifyAllShell: true`, every Bash/PowerShell allow rule is treated
+ * as broad while auto mode is active (shell always goes through the classifier).
+ * Sources match getAutoModeConfig: user / flag / policy (not project/local).
+ */
+export function isClassifyAllShellEnabled(): boolean {
+  for (const source of [
+    'userSettings',
+    'flagSettings',
+    'policySettings',
+  ] as const) {
+    const settings = getSettingsForSource(source)
+    const autoMode = (
+      settings as { autoMode?: { classifyAllShell?: boolean } } | null
+    )?.autoMode
+    if (autoMode?.classifyAllShell === true) return true
+  }
+  return false
+}
+
+/**
  * Official `rlq` — Bash broad-rule detector.
  *
  * A Bash rule is broad when:
@@ -341,6 +363,16 @@ export function isBroadRule(
   toolName: string,
   ruleContent: string | undefined,
 ): boolean {
+  // Official `v0t`: classifyAllShell makes every Bash/PowerShell allow rule broad.
+  // Not cached with the rule key — setting can change mid-session via file watch.
+  const normalized = normalizeLegacyToolName(toolName)
+  if (
+    (normalized === BASH_TOOL_NAME || normalized === POWERSHELL_TOOL_NAME) &&
+    isClassifyAllShellEnabled()
+  ) {
+    return true
+  }
+
   const key = `${toolName}\x00${ruleContent ?? ''}`
   const cached = broadRuleCache.get(key)
   if (cached !== undefined) return cached

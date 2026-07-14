@@ -179,10 +179,17 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
       ) {
         // Filter bash progress to send only one per minute
         // Only emit for Claude Code Remote for now
-        if (
-          !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
-          !process.env.CLAUDE_CODE_CONTAINER_ID
-        ) {
+        // Official REMOTE densable.
+        let isRemoteProgress = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+        try {
+          const { isRemoteEnvEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+          isRemoteProgress = isRemoteEnvEnabled()
+        } catch {
+          // keep raw env fallback
+        }
+        if (!isRemoteProgress && !process.env.CLAUDE_CODE_CONTAINER_ID) {
           break
         }
 
@@ -556,6 +563,30 @@ export function extractReadFilesFromMessages(
  */
 export function extractBashToolsFromMessages(messages: Message[]): Set<string> {
   const tools = new Set<string>()
+  for (const command of iterBashCommandsFromMessages(messages)) {
+    const cmd = extractCliName(command)
+    if (cmd) tools.add(cmd)
+  }
+  return tools
+}
+
+/**
+ * Official Ng8: extract bare hostnames from https?:// URLs in Bash commands
+ * this session. Case-folded, userinfo/port stripped.
+ */
+export function extractBashHostsFromMessages(messages: Message[]): Set<string> {
+  const hosts = new Set<string>()
+  for (const command of iterBashCommandsFromMessages(messages)) {
+    for (const host of extractHostsFromCommand(command)) {
+      hosts.add(host)
+    }
+  }
+  return hosts
+}
+
+function* iterBashCommandsFromMessages(
+  messages: Message[],
+): Generator<string, void, unknown> {
   for (const message of messages) {
     if (
       message.type === 'assistant' &&
@@ -567,23 +598,42 @@ export function extractBashToolsFromMessages(messages: Message[]): Set<string> {
           if (
             typeof input !== 'object' ||
             input === null ||
-            !('command' in input)
-          )
+            !('command' in input) ||
+            typeof input.command !== 'string'
+          ) {
             continue
-          const cmd = extractCliName(
-            typeof input.command === 'string' ? input.command : undefined,
-          )
-          if (cmd) {
-            tools.add(cmd)
           }
+          yield input.command
         }
       }
     }
   }
-  return tools
 }
 
 const STRIPPED_COMMANDS = new Set(['sudo'])
+
+/** Official MwK host capture from bash command text. */
+const BASH_URL_HOST_RE = /https?:\/\/([^\s/?#'"`<>\\)\];&|(,]+)/gi
+
+/**
+ * Extract bare hostnames from URL-like tokens in a bash command string.
+ * Official Py3: lowercase, strip userinfo (`user@host`), strip port.
+ */
+export function extractHostsFromCommand(command: string | undefined): string[] {
+  if (!command) return []
+  const hosts: string[] = []
+  BASH_URL_HOST_RE.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = BASH_URL_HOST_RE.exec(command)) !== null) {
+    let host = match[1]!.toLowerCase()
+    const at = host.lastIndexOf('@')
+    if (at !== -1) host = host.slice(at + 1)
+    const colon = host.indexOf(':')
+    if (colon !== -1) host = host.slice(0, colon)
+    if (host) hosts.push(host)
+  }
+  return hosts
+}
 
 /**
  * Extract the actual CLI name from a bash command string, skipping

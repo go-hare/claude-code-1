@@ -62,6 +62,7 @@ import { executeSubagentStartHooks } from 'src/utils/hooks.js'
 import { createUserMessage } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
+import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js'
 import {
   createSubagentTrace,
   endTrace,
@@ -78,6 +79,8 @@ import {
   isRestrictedToPluginOnly,
   isSourceAdminTrusted,
 } from 'src/utils/settings/pluginOnlyPolicy.js'
+import { mergeAppendSubagentSystemPrompt } from 'src/utils/appendSubagentPrompt.js'
+import { propagateNestedMemoryFromChild } from 'src/utils/propagateNestedMemory.js'
 import {
   asSystemPrompt,
   type SystemPrompt,
@@ -354,8 +357,12 @@ export async function* runAgent({
   const rootSetAppState =
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
 
+  // Official $6e before getAgentModel — Explore firstParty cap-to-opus.
   const resolvedAgentModel = getAgentModel(
-    agentDefinition.model,
+    resolveAgentDefinitionModel(
+      agentDefinition,
+      toolUseContext.options.mainLoopModel,
+    ),
     toolUseContext.options.mainLoopModel,
     model,
     permissionMode,
@@ -514,24 +521,41 @@ export async function* runAgent({
     }
   }
 
+  // Official observer tool pool densable — ObserverReport only when this
+  // run is an observer agent (querySource agent:observer:*).
+  const isObserverAgent =
+    typeof querySource === 'string' && querySource.startsWith('agent:observer:')
   const resolvedTools = useExactTools
     ? availableTools
-    : resolveAgentTools(agentDefinition, availableTools, isAsync).resolvedTools
+    : resolveAgentTools(
+        agentDefinition,
+        availableTools,
+        isAsync,
+        false,
+        isObserverAgent,
+      ).resolvedTools
 
   const additionalWorkingDirectories = Array.from(
     appState.toolPermissionContext.additionalWorkingDirectories.keys(),
   )
 
+  // Official ENABLE_APPEND_SUBAGENT_PROMPT: append CLI/SDK extra to non-fork
+  // subagents (useExactTools fork children skip to preserve cache prefix).
   const agentSystemPrompt = override?.systemPrompt
     ? override.systemPrompt
     : asSystemPrompt(
-        await getAgentSystemPrompt(
-          agentDefinition,
-          toolUseContext,
-          resolvedAgentModel,
-          additionalWorkingDirectories,
-          resolvedTools,
-        ),
+        mergeAppendSubagentSystemPrompt({
+          basePrompt: await getAgentSystemPrompt(
+            agentDefinition,
+            toolUseContext,
+            resolvedAgentModel,
+            additionalWorkingDirectories,
+            resolvedTools,
+          ),
+          appendSubagentSystemPrompt:
+            toolUseContext.options.appendSubagentSystemPrompt,
+          useExactTools,
+        }),
       )
 
   // Determine abortController:
@@ -688,6 +712,9 @@ export async function* runAgent({
         ? true
         : (toolUseContext.options.isNonInteractiveSession ?? false),
     appendSystemPrompt: toolUseContext.options.appendSystemPrompt,
+    // Propagate so nested Task-tool subagents also receive the append.
+    appendSubagentSystemPrompt:
+      toolUseContext.options.appendSubagentSystemPrompt,
     tools: allTools,
     commands: [],
     debug: toolUseContext.options.debug,
@@ -718,6 +745,8 @@ export async function* runAgent({
     options: agentOptions,
     agentId,
     agentType: agentDefinition.agentType,
+    // Official: async agents are background; sync inherits parent background flag.
+    isBackgroundAgent: isAsync || (toolUseContext.isBackgroundAgent ?? false),
     messages: initialMessages,
     readFileState: agentReadFileState,
     abortController: agentAbortController,
@@ -863,6 +892,18 @@ export async function* runAgent({
     // Clean up prompt cache tracking state for this agent
     if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
       cleanupAgentTracking(agentId)
+    }
+    // Official propagateNestedMemory cleanup: queue child-loaded CLAUDE.md
+    // paths onto the parent for the next root turn (coordinator + env gate).
+    try {
+      propagateNestedMemoryFromChild({
+        parent: toolUseContext,
+        childLoadedNestedMemoryPaths:
+          agentToolUseContext.loadedNestedMemoryPaths,
+        worktreePath,
+      })
+    } catch (err) {
+      logForDebugging(`propagateNestedMemory failed: ${err}`)
     }
     // Release cloned file state cache memory
     agentToolUseContext.readFileState.clear()

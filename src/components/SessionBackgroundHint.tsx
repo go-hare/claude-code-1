@@ -1,3 +1,4 @@
+import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useCallback, useState } from 'react';
 import { useDoublePress } from '../hooks/useDoublePress.js';
@@ -7,8 +8,10 @@ import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { useAppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
 import { backgroundAll, hasForegroundTasks } from '../tasks/LocalShellTask/LocalShellTask.js';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
+import { isBgSession } from '../utils/concurrentSessions.js';
 import { env } from '../utils/env.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import { isBackgroundTasksDisabled } from '../utils/residualFinalEnvGates.js';
 import { KeyboardShortcutHint } from '@anthropic/ink';
 
 type Props = {
@@ -30,6 +33,13 @@ export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props)
 
   const [showSessionHint, setShowSessionHint] = useState(false);
 
+  // Decompile stub was isEnvTruthy('false'); official gate is BG_SESSIONS
+  // + not already backgrounded + adopt not disabled.
+  // feature() must stay in if/ternary condition position (bun:bundle).
+  const sessionBgEnabled = feature('BG_SESSIONS')
+    ? !isBgSession() && !isEnvTruthy(process.env.CLAUDE_DISABLE_ADOPT) && !isBackgroundTasksDisabled()
+    : false;
+
   const handleDoublePress = useDoublePress(
     setShowSessionHint,
     onBackgroundSession,
@@ -39,7 +49,7 @@ export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props)
   // Handler for task:background - prioritizes foreground tasks, falls back to session backgrounding
   // Skip all background functionality if background tasks are disabled
   const handleBackground = useCallback(() => {
-    if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)) {
+    if (isBackgroundTasksDisabled()) {
       return;
     }
     const state = appStateStore.getState();
@@ -49,16 +59,16 @@ export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props)
       if (!getGlobalConfig().hasUsedBackgroundTask) {
         saveGlobalConfig(c => (c.hasUsedBackgroundTask ? c : { ...c, hasUsedBackgroundTask: true }));
       }
-    } else if (isEnvTruthy('false') && isLoading) {
-      // New behavior - double-press to background session (gated)
+    } else if (sessionBgEnabled && isLoading) {
+      // Official session backgrounding: double-press Ctrl+B while a query
+      // is running (gated by BG_SESSIONS + not already a bg session).
       handleDoublePress();
     }
-  }, [setAppState, appStateStore, isLoading, handleDoublePress]);
+  }, [setAppState, appStateStore, isLoading, handleDoublePress, sessionBgEnabled]);
 
   // Only eat ctrl+b when there's something to background. Without this gate
   // the binding double-fires with readline backward-char at an idle prompt.
   const hasForeground = useAppState(hasForegroundTasks);
-  const sessionBgEnabled = isEnvTruthy('false');
   useKeybinding('task:background', handleBackground, {
     context: 'Task',
     isActive: hasForeground || (sessionBgEnabled && isLoading),

@@ -12,6 +12,7 @@ import {
   CONTEXT_1M_BETA_HEADER,
   CONTEXT_MANAGEMENT_BETA_HEADER,
   INTERLEAVED_THINKING_BETA_HEADER,
+  MID_CONVERSATION_SYSTEM_BETA_HEADER,
   PROMPT_CACHING_SCOPE_BETA_HEADER,
   REDACT_THINKING_BETA_HEADER,
   STRUCTURED_OUTPUTS_BETA_HEADER,
@@ -20,6 +21,7 @@ import {
   SEARCH_EXTRA_TOOLS_BETA_HEADER_3P,
   WEB_SEARCH_BETA_HEADER,
 } from '../constants/betas.js'
+import { shouldUseMidConversationSystem } from './midConversationSystem.js'
 import { OAUTH_BETA_HEADER } from '../constants/oauth.js'
 import { isClaudeAISubscriber } from './auth.js'
 import { has1mContext } from './context.js'
@@ -27,6 +29,7 @@ import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import {
+  type APIProvider,
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
 } from './model/providers.js'
@@ -157,8 +160,67 @@ export function modelSupportsStructuredOutputs(model: string): boolean {
   )
 }
 
-export function modelSupportsAutoMode(_model: string): boolean {
-  return feature('TRANSCRIPT_CLASSIFIER') ? true : false
+/**
+ * Official t8t — whether the API provider is eligible for auto mode.
+ * 208 always returns true (3P free of CLAUDE_CODE_ENABLE_AUTO_MODE opt-in).
+ * Kept as a named densable so reason path can still report 'provider' if it
+ * ever flips closed again.
+ */
+export function providerSupportsAutoMode(
+  _provider: APIProvider = getAPIProvider(),
+): boolean {
+  // Official: if (e==="firstParty"||e==="anthropicAws") return true; return true
+  return true
+}
+
+/**
+ * Official u3e densable — pure model denylist (no feature flag).
+ * co() ≈ getCanonicalName(model). Provider gate is separate (t8t).
+ */
+export function planModelSupportsAutoMode(
+  model: string,
+  provider: APIProvider,
+): boolean {
+  const t = getCanonicalName(model)
+  if (
+    t.includes('claude-3-') ||
+    t === 'claude-opus-4-0' ||
+    t === 'claude-opus-4-1' ||
+    t === 'claude-opus-4-5' ||
+    t === 'claude-sonnet-4-0' ||
+    t === 'claude-sonnet-4-5' ||
+    t === 'claude-haiku-4-5' ||
+    // firstPartyNameToCanonical maps bare opus-4 / sonnet-4 (no minor) here
+    t === 'claude-opus-4' ||
+    t === 'claude-sonnet-4'
+  ) {
+    return false
+  }
+  if (
+    provider !== 'firstParty' &&
+    provider !== 'anthropicAws' &&
+    (t === 'claude-opus-4-6' ||
+      t === 'claude-sonnet-4-6' ||
+      t.includes('haiku'))
+  ) {
+    return false
+  }
+  return true
+}
+
+/**
+ * Official u3e + fork TRANSCRIPT_CLASSIFIER gate.
+ * Always false when classifier feature is off (DCE / test builds).
+ */
+export function modelSupportsAutoMode(
+  model: string,
+  provider: APIProvider = getAPIProvider(),
+): boolean {
+  if (feature('TRANSCRIPT_CLASSIFIER')) {
+    if (!providerSupportsAutoMode(provider)) return false
+    return planModelSupportsAutoMode(model, provider)
+  }
+  return false
 }
 
 /**
@@ -298,6 +360,11 @@ export const getAllModelBetas = memoize((model: string): string[] => {
   // Foundry only ships models that already support Web Search
   if (provider === 'foundry') {
     betaHeaders.push(WEB_SEARCH_BETA_HEADER)
+  }
+
+  // Official mid_conversation_system beta (qqt → push Ppe).
+  if (shouldUseMidConversationSystem({ model })) {
+    betaHeaders.push(MID_CONVERSATION_SYSTEM_BETA_HEADER)
   }
 
   // Always send the beta header for 1P. The header is a no-op without a scope field.

@@ -1,4 +1,4 @@
-import { mock, describe, expect, test, beforeEach, afterEach } from 'bun:test'
+import { mock, describe, expect, test } from 'bun:test'
 import { logMock } from '../../../../tests/mocks/log'
 
 mock.module('src/utils/log.ts', logMock)
@@ -52,6 +52,10 @@ describe('permissionModeFromString', () => {
     expect(permissionModeFromString('')).toBe('default')
   })
 
+  test("maps official 2.1.200 alias 'manual' to default", () => {
+    expect(permissionModeFromString('manual')).toBe('default')
+  })
+
   test('is case sensitive — uppercase returns default', () => {
     expect(permissionModeFromString('PLAN')).toBe('default')
     expect(permissionModeFromString('Default')).toBe('default')
@@ -69,15 +73,17 @@ describe('permissionModeFromString', () => {
 
 describe('permissionModeTitle', () => {
   test('returns title for known modes', () => {
-    expect(permissionModeTitle('default')).toBe('Default')
-    expect(permissionModeTitle('plan')).toBe('Plan Mode')
+    // Official 2.1.207 labels: Manual / Plan / Auto / Bypass Permissions
+    expect(permissionModeTitle('default')).toBe('Manual')
+    expect(permissionModeTitle('plan')).toBe('Plan')
     expect(permissionModeTitle('acceptEdits')).toBe('Accept edits')
-    expect(permissionModeTitle('bypassPermissions')).toBe('Bypass')
+    expect(permissionModeTitle('bypassPermissions')).toBe('Bypass Permissions')
     expect(permissionModeTitle('dontAsk')).toBe("Don't Ask")
+    expect(permissionModeTitle('auto')).toBe('Auto')
   })
 
-  test('falls back to Default for unknown mode', () => {
-    expect(permissionModeTitle('nonexistent' as any)).toBe('Default')
+  test('falls back to Manual for unknown mode', () => {
+    expect(permissionModeTitle('nonexistent' as any)).toBe('Manual')
   })
 })
 
@@ -85,11 +91,12 @@ describe('permissionModeTitle', () => {
 
 describe('permissionModeShortTitle', () => {
   test('returns short title for known modes', () => {
-    expect(permissionModeShortTitle('default')).toBe('Default')
+    expect(permissionModeShortTitle('default')).toBe('Manual')
     expect(permissionModeShortTitle('plan')).toBe('Plan')
     expect(permissionModeShortTitle('bypassPermissions')).toBe('Bypass')
     expect(permissionModeShortTitle('dontAsk')).toBe('DontAsk')
     expect(permissionModeShortTitle('acceptEdits')).toBe('Accept')
+    expect(permissionModeShortTitle('auto')).toBe('Auto')
   })
 })
 
@@ -171,49 +178,25 @@ describe('toExternalPermissionMode', () => {
       'bypassPermissions',
     )
   })
+
+  test('maps auto to auto (first-class external mode in 2.1.207)', () => {
+    expect(toExternalPermissionMode('auto')).toBe('auto')
+  })
 })
 
 // ─── isExternalPermissionMode ──────────────────────────────────────────
 
 describe('isExternalPermissionMode', () => {
-  test('returns true for external modes (non-ant)', () => {
-    // USER_TYPE is not 'ant' in tests, so always true
+  test('returns true for all external modes including auto', () => {
     expect(isExternalPermissionMode('default')).toBe(true)
     expect(isExternalPermissionMode('plan')).toBe(true)
+    expect(isExternalPermissionMode('auto')).toBe(true)
+    expect(isExternalPermissionMode('acceptEdits')).toBe(true)
+    expect(isExternalPermissionMode('bypassPermissions')).toBe(true)
+    expect(isExternalPermissionMode('dontAsk')).toBe(true)
   })
 
-  describe("when USER_TYPE is 'ant'", () => {
-    const savedUserType = process.env.USER_TYPE
-
-    beforeEach(() => {
-      process.env.USER_TYPE = 'ant'
-    })
-
-    afterEach(() => {
-      if (savedUserType !== undefined) {
-        process.env.USER_TYPE = savedUserType
-      } else {
-        delete process.env.USER_TYPE
-      }
-    })
-
-    test("returns false for 'auto' (ant-only mode)", () => {
-      expect(isExternalPermissionMode('auto')).toBe(false)
-    })
-
-    test("returns false for 'bubble' (ant-only mode)", () => {
-      expect(isExternalPermissionMode('bubble')).toBe(false)
-    })
-
-    test('returns true for standard external modes', () => {
-      expect(isExternalPermissionMode('default')).toBe(true)
-      expect(isExternalPermissionMode('plan')).toBe(true)
-      expect(isExternalPermissionMode('dontAsk')).toBe(true)
-    })
-
-    test('returns true for acceptEdits and bypassPermissions', () => {
-      expect(isExternalPermissionMode('acceptEdits')).toBe(true)
-      expect(isExternalPermissionMode('bypassPermissions')).toBe(true)
-    })
+  test("returns false for internal-only 'bubble'", () => {
+    expect(isExternalPermissionMode('bubble')).toBe(false)
   })
 })

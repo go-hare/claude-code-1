@@ -80,13 +80,15 @@ describe('buddy protocol', () => {
   })
 
   test('resolves relative assets from pack directory', () => {
+    // Use a platform-absolute pack dir so path.resolve does not join cwd.
+    const packDir = join(tmpdir(), 'spark-pack')
     const asset = resolveBuddyAsset(
       validateBuddyManifest(validManifest),
-      'C:/tmp/spark',
+      packDir,
       'model3d',
     )
     expect(asset?.path.replaceAll('\\', '/')).toBe(
-      'C:/tmp/spark/assets/model.glb',
+      join(packDir, 'assets', 'model.glb').replaceAll('\\', '/'),
     )
   })
 

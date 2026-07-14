@@ -62,21 +62,42 @@ export type DiffStats =
     }
   | undefined
 
+function isFileCheckpointingEnvDisabled(): boolean {
+  // Official DISABLE_FILE_CHECKPOINTING densable.
+  try {
+    const { isFileCheckpointingDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    return isFileCheckpointingDisabled()
+  } catch {
+    return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING)
+  }
+}
+
 export function fileHistoryEnabled(): boolean {
   if (getIsNonInteractiveSession()) {
     return fileHistoryEnabledSdk()
   }
   return (
     getGlobalConfig().fileCheckpointingEnabled !== false &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING)
+    !isFileCheckpointingEnvDisabled()
   )
 }
 
 function fileHistoryEnabledSdk(): boolean {
-  return (
-    isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING) &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING)
+  // Official ENABLE_SDK_FILE_CHECKPOINTING densable.
+  let sdkCheckpointingEnabled = isEnvTruthy(
+    process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING,
   )
+  try {
+    const { isSdkFileCheckpointingEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    sdkCheckpointingEnabled = isSdkFileCheckpointingEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  return sdkCheckpointingEnabled && !isFileCheckpointingEnvDisabled()
 }
 
 /**

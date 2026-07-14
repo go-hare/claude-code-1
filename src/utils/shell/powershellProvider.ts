@@ -1,15 +1,18 @@
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { join as posixJoin } from 'path/posix'
+import { buildPowerShellInvocationFlags } from '../powershellExecutionPolicy.js'
 import { getSessionEnvVars } from '../sessionEnvVars.js'
 import type { ShellProvider } from './shellProvider.js'
 
 /**
  * PowerShell invocation flags + command. Shared by the provider's getSpawnArgs
  * and the hook spawn path in hooks.ts so the flag set stays in one place.
+ * Official: inject -ExecutionPolicy Bypass unless
+ * CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY is set.
  */
 export function buildPowerShellArgs(cmd: string): string[] {
-  return ['-NoProfile', '-NonInteractive', '-Command', cmd]
+  return [...buildPowerShellInvocationFlags(), '-Command', cmd]
 }
 
 /**
@@ -86,8 +89,7 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
       const commandString = opts.useSandbox
         ? [
             `'${shellPath.replace(/'/g, `'\\''`)}'`,
-            '-NoProfile',
-            '-NonInteractive',
+            ...buildPowerShellInvocationFlags(),
             '-EncodedCommand',
             encodePowerShellCommand(psCommand),
           ].join(' ')

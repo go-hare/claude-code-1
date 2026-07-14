@@ -12,10 +12,19 @@ export function createIdleTimeoutManager(isIdle: () => boolean): {
   start: () => void
   stop: () => void
 } {
-  // Parse CLAUDE_CODE_EXIT_AFTER_STOP_DELAY environment variable
-  const exitAfterStopDelay = process.env.CLAUDE_CODE_EXIT_AFTER_STOP_DELAY
-  const delayMs = exitAfterStopDelay ? parseInt(exitAfterStopDelay, 10) : null
-  const isValidDelay = delayMs && !isNaN(delayMs) && delayMs > 0
+  // Official EXIT_AFTER_STOP_DELAY densable pure parse (positive ms).
+  let delayMs: number | null = null
+  try {
+    const { resolveExitAfterStopDelayMs } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    delayMs = resolveExitAfterStopDelayMs()
+  } catch {
+    const exitAfterStopDelay = process.env.CLAUDE_CODE_EXIT_AFTER_STOP_DELAY
+    const parsed = exitAfterStopDelay ? parseInt(exitAfterStopDelay, 10) : null
+    delayMs = parsed && !isNaN(parsed) && parsed > 0 ? parsed : null
+  }
+  const configuredDelayMs = delayMs !== null && delayMs > 0 ? delayMs : null
 
   let timer: NodeJS.Timeout | null = null
   let lastIdleTime = 0
@@ -29,17 +38,18 @@ export function createIdleTimeoutManager(isIdle: () => boolean): {
       }
 
       // Only start timer if delay is configured and valid
-      if (isValidDelay) {
+      if (configuredDelayMs !== null) {
         lastIdleTime = Date.now()
+        const exitAfterMs = configuredDelayMs
 
         timer = setTimeout(() => {
           // Check if we've been continuously idle for the full duration
           const idleDuration = Date.now() - lastIdleTime
-          if (isIdle() && idleDuration >= delayMs) {
-            logForDebugging(`Exiting after ${delayMs}ms of idle time`)
+          if (isIdle() && idleDuration >= exitAfterMs) {
+            logForDebugging(`Exiting after ${exitAfterMs}ms of idle time`)
             gracefulShutdownSync()
           }
-        }, delayMs)
+        }, exitAfterMs)
       }
     },
 

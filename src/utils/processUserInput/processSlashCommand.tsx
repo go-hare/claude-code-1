@@ -702,6 +702,40 @@ async function getMessagesForSlashCommand(
 ): Promise<SlashCommandResult> {
   const command = getCommand(commandName, context.options.commands);
 
+  // Official IJ densable — skillOverrides "off" blocks slash invocation.
+  try {
+    const { getInitialSettings } = await import('../settings/settings.js');
+    const { resolveSkillOverrideMode, isSkillFullyDisabledByOverride } = await import('../residualFinalEnvGates.js');
+    const settings = getInitialSettings();
+    const mode = resolveSkillOverrideMode(command, {
+      skillOverrides: settings.skillOverrides,
+      settingsDisableBundledSkills: settings.disableBundledSkills,
+    });
+    if (isSkillFullyDisabledByOverride(mode)) {
+      logEvent('tengu_input_slash_invalid', {
+        input: 'cmd_skill_override_off' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      const disabledMessage = `Skill "${commandName}" is disabled via skillOverrides. Re-enable it in /skills or remove the override from your settings to run it.`;
+      return {
+        messages: [
+          createSyntheticUserCaveatMessage(),
+          createUserMessage({
+            content: prepareUserContent({
+              inputString: disabledMessage,
+              precedingInputBlocks,
+            }),
+          }),
+          ...(args ? [createSystemMessage(`Args from disabled skill: ${args}`, 'warning')] : []),
+        ],
+        shouldQuery: false,
+        resultText: disabledMessage,
+        command,
+      };
+    }
+  } catch {
+    // Settings / residual helpers optional.
+  }
+
   // Track skill usage for ranking (only for prompt commands that are user-invocable)
   if (command.type === 'prompt' && command.userInvocable !== false) {
     recordSkillUsage(commandName);

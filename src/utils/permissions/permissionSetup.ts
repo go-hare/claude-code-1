@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { relative } from 'path'
 import {
+  getIsNonInteractiveSession,
   getOriginalCwd,
   handleAutoModeTransition,
   handlePlanModeTransition,
@@ -25,6 +26,7 @@ import {
   type PermissionMode,
   permissionModeFromString,
 } from './PermissionMode.js'
+import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
 import { applyPermissionRulesToPermissionContext } from './permissions.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
 
@@ -57,10 +59,11 @@ import {
   getFsImplementation,
   safeResolvePath,
 } from '../../utils/fsOperations.js'
-import { modelSupportsAutoMode } from '../betas.js'
+import { modelSupportsAutoMode, providerSupportsAutoMode } from '../betas.js'
 import { logForDebugging } from '../debug.js'
 import { gracefulShutdown } from '../gracefulShutdown.js'
 import { getMainLoopModel } from '../model/model.js'
+import { getAPIProvider } from '../model/providers.js'
 import {
   CROSS_PLATFORM_CODE_EXEC,
   DANGEROUS_BASH_PATTERNS,
@@ -685,6 +688,9 @@ function isSymlinkTo({
 
 /**
  * Safely convert CLI flags to a PermissionMode
+ *
+ * Official 2.1.196+: may return `fromAutoFallback` when auto was chosen as a
+ * silent fallback (no explicit CLI/settings mode) via tengu_harbor_willow.
  */
 export function initialPermissionModeFromCLI({
   permissionModeCli,
@@ -692,7 +698,11 @@ export function initialPermissionModeFromCLI({
 }: {
   permissionModeCli: string | undefined
   dangerouslySkipPermissions: boolean | undefined
-}): { mode: PermissionMode; notification?: string } {
+}): {
+  mode: PermissionMode
+  notification?: string
+  fromAutoFallback?: boolean
+} {
   const settings = getSettings_DEPRECATED() || {}
 
   // Check GrowthBook gate first - highest precedence
@@ -742,15 +752,23 @@ export function initialPermissionModeFromCLI({
   }
   if (settings.permissions?.defaultMode) {
     const settingsMode = settings.permissions.defaultMode as PermissionMode
-    // CCR only supports acceptEdits and plan — ignore other defaultModes from
-    // settings (e.g. bypassPermissions would otherwise silently grant full
-    // access in a remote environment).
+    // CCR supports acceptEdits, plan, default, and auto (2.1.196+).
+    // Official REMOTE densable.
+    let isRemoteModePerms = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    try {
+      const { isRemoteEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+      isRemoteModePerms = isRemoteEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
     if (
-      isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
-      !['acceptEdits', 'plan', 'default'].includes(settingsMode)
+      isRemoteModePerms &&
+      !['acceptEdits', 'plan', 'default', 'auto'].includes(settingsMode)
     ) {
       logForDebugging(
-        `settings defaultMode "${settingsMode}" is not supported in CLAUDE_CODE_REMOTE — only acceptEdits and plan are allowed`,
+        `settings defaultMode "${settingsMode}" is not supported in CLAUDE_CODE_REMOTE — only acceptEdits, plan, default, and auto are allowed`,
         { level: 'warn' },
       )
       logEvent('tengu_ccr_unsupported_default_mode_ignored', {
@@ -795,19 +813,38 @@ export function initialPermissionModeFromCLI({
     break
   }
 
+  // Official 2.1.207: when no explicit mode resolved, optionally fall back
+  // to auto (tengu_harbor_willow + non-interactive moss_anchor) and mark
+  // fromAutoFallback so resume / flagCli don't treat it as user intent.
+  let fromAutoFallback = false
   if (!result) {
-    result = { mode: 'default', notification }
+    let mode: PermissionMode = 'default'
+    if (feature('TRANSCRIPT_CLASSIFIER')) {
+      const planned = planHarborWillowAutoFallback({
+        hasResolvedMode: false,
+        circuitBroken: autoModeCircuitBrokenSync,
+        disableAutoMode: isAutoModeDisabledBySettings(),
+        harborWillow: checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
+          'tengu_harbor_willow',
+        ),
+        isNonInteractiveSession: getIsNonInteractiveSession(),
+        mossAnchor:
+          checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_moss_anchor'),
+      })
+      mode = planned.mode
+      fromAutoFallback = planned.fromAutoFallback
+    }
+    result = { mode, notification }
   }
 
-  if (!result) {
-    result = { mode: 'default', notification }
+  if (feature('TRANSCRIPT_CLASSIFIER')) {
+    autoModeStateModule?.setAutoModeFromFallback(fromAutoFallback)
+    if (result.mode === 'auto') {
+      autoModeStateModule?.setAutoModeActive(true)
+    }
   }
 
-  if (feature('TRANSCRIPT_CLASSIFIER') && result.mode === 'auto') {
-    autoModeStateModule?.setAutoModeActive(true)
-  }
-
-  return result
+  return { ...result, fromAutoFallback }
 }
 
 export function parseToolListFromCLI(tools: string[]): string[] {
@@ -938,9 +975,19 @@ export async function initializeToolPermissionContext({
   // Skip in CCR/BYOC where --allowed-tools is the intended pre-approval mechanism.
   // Variable name kept for return-field compat; contains both shells.
   let overlyBroadBashPermissions: DangerousPermissionInfo[] = []
+  // Official REMOTE densable.
+  let isRemoteBroad = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    isRemoteBroad = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   if (
     process.env.USER_TYPE === 'ant' &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+    !isRemoteBroad &&
     process.env.CLAUDE_CODE_ENTRYPOINT !== 'local-agent'
   ) {
     overlyBroadBashPermissions = [
@@ -963,6 +1010,21 @@ export async function initializeToolPermissionContext({
     )
   }
 
+  // Official 2.1.x (initializeToolPermissionContext / CZi):
+  // - mcpPermissionModeOverrides starts empty (control channel may pin servers)
+  // - chrome/preview classifier floors demote elevated modes for browser MCP
+  // - canAutoClassifierRun tracks whether auto-mode gate can run the classifier
+  //   (kept in lockstep with isAutoModeAvailable by verifyAutoModeGateAccess)
+  const chromeClassifierFloorEnabled =
+    isEnvTruthy(process.env.CLAUDE_CHROME_CLASSIFIER_FLOOR) ||
+    getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_cowork_chrome_automode_default',
+      false,
+    )
+  const previewClassifierFloorEnabled = isEnvTruthy(
+    process.env.CLAUDE_PREVIEW_CLASSIFIER_FLOOR,
+  )
+
   let toolPermissionContext = applyPermissionRulesToPermissionContext(
     {
       mode: permissionMode,
@@ -971,8 +1033,12 @@ export async function initializeToolPermissionContext({
       alwaysDenyRules: { cliArg: parsedDisallowedToolsCli },
       alwaysAskRules: {},
       isBypassPermissionsModeAvailable,
+      mcpPermissionModeOverrides: {},
+      chromeClassifierFloorEnabled,
+      previewClassifierFloorEnabled,
+      // feature() must stay in ternary condition position (bun:bundle restriction)
       ...(feature('TRANSCRIPT_CLASSIFIER')
-        ? { isAutoModeAvailable: true }
+        ? { isAutoModeAvailable: true, canAutoClassifierRun: true }
         : {}),
     },
     rulesFromDisk,
@@ -1030,7 +1096,12 @@ export type AutoModeGateCheckResult = {
   notification?: string
 }
 
-export type AutoModeUnavailableReason = 'settings' | 'circuit-breaker' | 'model'
+// Official Kne reason set — 'provider' kept for t8t residual (208 always open).
+export type AutoModeUnavailableReason =
+  | 'settings'
+  | 'circuit-breaker'
+  | 'provider'
+  | 'model'
 
 export function getAutoModeUnavailableNotification(
   reason: AutoModeUnavailableReason,
@@ -1042,6 +1113,10 @@ export function getAutoModeUnavailableNotification(
       break
     case 'circuit-breaker':
       base = 'auto mode is unavailable for your plan'
+      break
+    case 'provider':
+      // Official tue case "provider" — residual string when t8t closes.
+      base = 'auto mode requires CLAUDE_CODE_ENABLE_AUTO_MODE=1'
       break
     case 'model':
       base = 'auto mode unavailable for this model'
@@ -1127,6 +1202,10 @@ export async function verifyAutoModeGateAccess(
   // shift-tab gets reverted (or worse, the user stays in auto despite the
   // circuit breaker if they entered auto DURING the await — which is possible
   // because setAutoModeCircuitBroken above runs AFTER the await).
+  // Official: isAutoModeAvailable tracks carousel visibility; canAutoClassifierRun
+  // tracks whether the classifier itself may run (and thus whether chrome floor
+  // demotes to `auto` vs `default`). Both stay in lockstep with canEnterAuto /
+  // carouselAvailable.
   const setAvailable = (
     ctx: ToolPermissionContext,
     available: boolean,
@@ -1136,9 +1215,14 @@ export async function verifyAutoModeGateAccess(
         `[auto-mode] verifyAutoModeGateAccess setAvailable: ${ctx.isAutoModeAvailable} -> ${available}`,
       )
     }
-    return ctx.isAutoModeAvailable === available
+    return ctx.isAutoModeAvailable === available &&
+      ctx.canAutoClassifierRun === canEnterAuto
       ? ctx
-      : { ...ctx, isAutoModeAvailable: available }
+      : {
+          ...ctx,
+          isAutoModeAvailable: available,
+          canAutoClassifierRun: canEnterAuto,
+        }
   }
 
   if (canEnterAuto) {
@@ -1156,6 +1240,13 @@ export async function verifyAutoModeGateAccess(
     reason = 'circuit-breaker'
     logForDebugging(
       'auto mode disabled: tengu_auto_mode_config.enabled === "disabled" (circuit breaker)',
+      { level: 'warn' },
+    )
+  } else if (!providerSupportsAutoMode(getAPIProvider())) {
+    // Official: else if (!t8t(vn())) p = "provider"
+    reason = 'provider'
+    logForDebugging(
+      `auto mode disabled: provider ${getAPIProvider()} requires the CLAUDE_CODE_ENABLE_AUTO_MODE opt-in`,
       { level: 'warn' },
     )
   } else {
@@ -1200,6 +1291,7 @@ export async function verifyAutoModeGateAccess(
           destination: 'session',
         }),
         isAutoModeAvailable: false,
+        canAutoClassifierRun: false,
       }
     }
     // Plan with auto active: deactivate auto, restore permissions, defuse
@@ -1210,6 +1302,7 @@ export async function verifyAutoModeGateAccess(
       ...restoreDangerousPermissions(ctx),
       prePlanMode: ctx.prePlanMode === 'auto' ? 'default' : ctx.prePlanMode,
       isAutoModeAvailable: false,
+      canAutoClassifierRun: false,
     }
   }
 
@@ -1265,24 +1358,38 @@ function isAutoModeDisabledBySettings(): boolean {
 }
 
 /**
- * Checks if auto mode can be entered: circuit breaker is not active and settings
- * have not disabled it. Synchronous.
+ * Official sR — can auto mode be entered right now?
+ * Order: circuit-breaker → settings disable → modelSupportsAutoMode (u3e).
+ * Synchronous. Classifier feature off → closed (fork DCE).
  */
 export function isAutoModeGateEnabled(): boolean {
-  return true
+  if (autoModeStateModule?.isAutoModeCircuitBroken() ?? false) return false
+  if (isAutoModeDisabledBySettings()) return false
+  // Avoid getMainLoopModel when classifier is off (no auth / no model resolve).
+  if (feature('TRANSCRIPT_CLASSIFIER')) {
+    return modelSupportsAutoMode(getMainLoopModel())
+  }
+  return false
 }
 
 /**
- * Returns the reason auto mode is currently unavailable, or null if available.
- * Synchronous — uses state populated by verifyAutoModeGateAccess.
+ * Official Kne — reason auto mode is unavailable, or null if available.
+ * Order differs slightly from sR: settings → circuit-breaker → provider → model.
+ * Synchronous.
  */
 export function getAutoModeUnavailableReason(): AutoModeUnavailableReason | null {
   if (isAutoModeDisabledBySettings()) return 'settings'
   if (autoModeStateModule?.isAutoModeCircuitBroken() ?? false) {
     return 'circuit-breaker'
   }
-  if (!modelSupportsAutoMode(getMainLoopModel())) return 'model'
-  return null
+  // Official t8t(vn()) — currently always true; keeps 'provider' reason live.
+  if (!providerSupportsAutoMode(getAPIProvider())) return 'provider'
+  if (feature('TRANSCRIPT_CLASSIFIER')) {
+    if (!modelSupportsAutoMode(getMainLoopModel())) return 'model'
+    return null
+  }
+  // Classifier feature off — treat as model-unavailable for notification path.
+  return 'model'
 }
 
 /**

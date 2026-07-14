@@ -13,12 +13,46 @@ import { clearMcpAuthCache } from './client.js'
 import { normalizeNameForMCP } from './normalization.js'
 import type { ScopedMcpServerConfig } from './types.js'
 
+type ClaudeAIMcpServerTool = {
+  name: string
+  /** Official org/admin ceiling: allow | ask | blocked */
+  effective_max_permission?: string
+}
+
 type ClaudeAIMcpServer = {
   type: 'mcp_server'
   id: string
   display_name: string
   url: string
   created_at: string
+  icon_url?: string
+  tools?: ClaudeAIMcpServerTool[]
+  stateless?: boolean
+  cached_init_response?: Record<string, unknown> | null
+}
+
+/**
+ * Official Kdg: map claude.ai connector tools → toolPermissions.
+ * Invalid values fall back to "blocked" (fail closed).
+ */
+export function toolPermissionsFromClaudeAiTools(
+  tools: ClaudeAIMcpServerTool[] | undefined,
+): Record<string, 'allow' | 'ask' | 'blocked'> | undefined {
+  if (!tools?.length) return undefined
+  const out: Record<string, 'allow' | 'ask' | 'blocked'> = {}
+  for (const t of tools) {
+    if (t.effective_max_permission === undefined) continue
+    if (
+      t.effective_max_permission === 'allow' ||
+      t.effective_max_permission === 'ask' ||
+      t.effective_max_permission === 'blocked'
+    ) {
+      out[t.name] = t.effective_max_permission
+    } else {
+      out[t.name] = 'blocked'
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 type ClaudeAIMcpServersResponse = {
@@ -46,6 +80,36 @@ export const fetchClaudeAIMcpConfigsIfEligible = memoize(
             'disabled_env_var' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
         return {}
+      }
+
+      // Official Ryt densable — any settings source disableClaudeAiConnectors.
+      try {
+        const { getSettingsForSource } = await import(
+          '../../utils/settings/settings.js'
+        )
+        const { SETTING_SOURCES } = await import(
+          '../../utils/settings/constants.js'
+        )
+        const { isClaudeAiConnectorsDisabledBySources } = await import(
+          '../../utils/residualFinalEnvGates.js'
+        )
+        const disabled = isClaudeAiConnectorsDisabledBySources(
+          SETTING_SOURCES.map(
+            source => getSettingsForSource(source)?.disableClaudeAiConnectors,
+          ),
+        )
+        if (disabled) {
+          logForDebugging(
+            '[claudeai-mcp] Disabled via disableClaudeAiConnectors setting',
+          )
+          logEvent('tengu_claudeai_mcp_eligibility', {
+            state:
+              'disabled_setting' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          return {}
+        }
+      } catch {
+        // Settings optional — fall through to fetch.
       }
 
       const tokens = getClaudeAIOAuthTokens()
@@ -110,11 +174,21 @@ export const fetchClaudeAIMcpConfigsIfEligible = memoize(
         }
         usedNormalizedNames.add(finalNormalized)
 
+        const toolPermissions = toolPermissionsFromClaudeAiTools(server.tools)
         configs[finalName] = {
           type: 'claudeai-proxy',
           url: server.url,
           id: server.id,
+          displayName: server.display_name,
+          iconUrl: server.icon_url,
           scope: 'claudeai',
+          ...(toolPermissions ? { toolPermissions } : {}),
+          ...(server.stateless !== undefined
+            ? { stateless: server.stateless }
+            : {}),
+          ...(server.cached_init_response !== undefined
+            ? { cachedInitResponse: server.cached_init_response }
+            : {}),
         }
       }
 

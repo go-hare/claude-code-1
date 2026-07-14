@@ -8,7 +8,7 @@ import type {
 } from './types.js'
 
 function normalizeResponses(
-  value: BuddyResponse | BuddyResponse[] | void,
+  value: BuddyResponse | BuddyResponse[] | undefined,
 ): BuddyResponse[] {
   if (!value) return []
   return Array.isArray(value) ? value : [value]

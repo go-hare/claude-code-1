@@ -24,11 +24,29 @@ export function MCPToolListView({ server, onSelectTool, onBack }: Props): React.
     return filterToolsByServer(mcpTools, server.name);
   }, [server, mcpTools]);
 
-  const toolOptions = serverTools.map((tool, index) => {
+  // Official: blocked tools sort last and show disabled by org policy.
+  const orderedTools = [...serverTools].sort((a, b) => {
+    const aBlocked = a.mcpInfo?.effectiveMaxPermission === 'blocked' ? 1 : 0;
+    const bBlocked = b.mcpInfo?.effectiveMaxPermission === 'blocked' ? 1 : 0;
+    return aBlocked - bBlocked;
+  });
+
+  const toolOptions = orderedTools.map((tool, index) => {
     const toolName = getMcpDisplayName(tool.name, server.name);
     const fullDisplayName = tool.userFacingName ? tool.userFacingName({}) : toolName;
     // Extract just the tool display name without server prefix
     const displayName = extractMcpToolDisplayName(fullDisplayName);
+
+    const isBlocked = tool.mcpInfo?.effectiveMaxPermission === 'blocked';
+    if (isBlocked) {
+      return {
+        label: displayName,
+        value: index.toString(),
+        disabled: true,
+        description: 'disabled by your organization',
+        descriptionColor: 'error' as const,
+      };
+    }
 
     const isReadOnly = tool.isReadOnly?.({}) ?? false;
     const isDestructive = tool.isDestructive?.({}) ?? false;
@@ -71,8 +89,8 @@ export function MCPToolListView({ server, onSelectTool, onBack }: Props): React.
           options={toolOptions}
           onChange={value => {
             const index = parseInt(value, 10);
-            const tool = serverTools[index];
-            if (tool) {
+            const tool = orderedTools[index];
+            if (tool && tool.mcpInfo?.effectiveMaxPermission !== 'blocked') {
               onSelectTool(tool, index);
             }
           }}

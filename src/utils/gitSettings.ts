@@ -11,8 +11,17 @@ import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { getInitialSettings } from './settings/settings.js'
 
 export function shouldIncludeGitInstructions(): boolean {
-  const envVal = process.env.CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS
-  if (isEnvTruthy(envVal)) return false
-  if (isEnvDefinedFalsy(envVal)) return true
+  // Official DISABLE_GIT_INSTRUCTIONS densable pure env half.
+  try {
+    const { resolveGitInstructionsEnvOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    const envOverride = resolveGitInstructionsEnvOverride()
+    if (envOverride !== null) return envOverride
+  } catch {
+    const envVal = process.env.CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS
+    if (isEnvTruthy(envVal)) return false
+    if (isEnvDefinedFalsy(envVal)) return true
+  }
   return getInitialSettings().includeGitInstructions ?? true
 }

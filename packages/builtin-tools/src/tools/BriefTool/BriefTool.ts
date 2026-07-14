@@ -8,11 +8,17 @@ import { buildTool, type ToolDef } from 'src/Tool.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { plural } from 'src/utils/stringUtils.js'
-import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
+import {
+  getBriefEnforceText,
+  isPewterOwlBriefEnabled,
+  isPewterOwlToolEnabled,
+} from 'src/utils/residualFinalEnvGates.js'
 import { resolveAttachments, validateAttachmentPaths } from './attachments.js'
 import {
+  BRIEF_ENFORCE_SENTINEL,
   BRIEF_TOOL_NAME,
   BRIEF_TOOL_PROMPT,
+  DEFAULT_BRIEF_ENFORCE_TEXT,
   DESCRIPTION,
   LEGACY_BRIEF_TOOL_NAME,
 } from './prompt.js'
@@ -87,11 +93,21 @@ const KAIROS_BRIEF_REFRESH_MS = 5 * 60 * 1000
  * the env var alone also sets userMsgOptIn via maybeActivateBrief().
  */
 export function isBriefEntitled(): boolean {
+  // Official CLAUDE_CODE_BRIEF densable force-grants entitlement for dev/testing.
+  let briefEnv = isEnvTruthy(process.env.CLAUDE_CODE_BRIEF)
+  try {
+    const { isBriefEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+    briefEnv = isBriefEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   // Positive ternary — see docs/feature-gating.md. Negative early-return
   // would not eliminate the GB gate string from external builds.
   return feature('KAIROS') || feature('KAIROS_BRIEF')
     ? getKairosActive() ||
-        isEnvTruthy(process.env.CLAUDE_CODE_BRIEF) ||
+        briefEnv ||
         getFeatureValue_CACHED_WITH_REFRESH(
           'tengu_kairos_brief',
           false,
@@ -129,10 +145,52 @@ export function isBriefEnabled(): boolean {
   // the ternary to `false` in external builds and then dead-code the BriefTool
   // object. Composing isBriefEntitled() alone (which has its own guard) is
   // semantically equivalent but defeats constant-folding across the boundary.
+  // Official WCt: (userMsgOptIn && entitled) || pewter_owl_brief.
   return feature('KAIROS') || feature('KAIROS_BRIEF')
-    ? (getKairosActive() || getUserMsgOptIn()) && isBriefEntitled()
+    ? ((getKairosActive() || getUserMsgOptIn()) && isBriefEntitled()) ||
+        isPewterOwlBriefEnabled()
     : false
 }
+
+/**
+ * Official Ztg densable — GB tengu_kairos_brief_stop_hook_text override or
+ * DEFAULT_BRIEF_ENFORCE_TEXT. stopHooks pre-Stop consumer already wired.
+ */
+export function resolveBriefEnforceText(input?: {
+  gbText?: string | null
+  /**
+   * Injectable GB densable. When omitted, reads
+   * getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_brief_stop_hook_text', '').
+   */
+  getGbText?: () => string | null | undefined
+}): string {
+  let gbText = input?.gbText
+  if (gbText === undefined) {
+    try {
+      if (input?.getGbText) {
+        gbText = input.getGbText()
+      } else {
+        // Lazy require avoids growthbook → tool cycle at module load.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getFeatureValue_CACHED_MAY_BE_STALE } =
+          require('src/services/analytics/growthbook.js') as typeof import('src/services/analytics/growthbook.js')
+        const v = getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_kairos_brief_stop_hook_text',
+          '',
+        )
+        gbText = typeof v === 'string' ? v : ''
+      }
+    } catch {
+      gbText = ''
+    }
+  }
+  return getBriefEnforceText({
+    gbText,
+    defaultText: DEFAULT_BRIEF_ENFORCE_TEXT,
+  })
+}
+
+export { BRIEF_ENFORCE_SENTINEL }
 
 export const BriefTool = buildTool({
   name: BRIEF_TOOL_NAME,
@@ -150,7 +208,9 @@ export const BriefTool = buildTool({
     return outputSchema()
   },
   isEnabled() {
-    return isBridgeEnabled()
+    // Official WCt()||stt() — brief activation or pewter-owl tool force-on.
+    // Do not gate on bridge; bridge only affects attachment upload eligibility.
+    return isBriefEnabled() || isPewterOwlToolEnabled()
   },
   isConcurrencySafe() {
     return true

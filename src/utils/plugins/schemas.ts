@@ -1264,6 +1264,68 @@ export function isLocalMarketplaceSource(
  * plugins from that marketplace would become unavailable. Stripping keeps
  * the blast radius to zero for custom/future fields.
  */
+/**
+ * Official 2.1.x plugin relevance signals — when a marketplace-declared plugin
+ * tip should surface in the spinner ("Working with {topic}?").
+ */
+export const PluginRelevanceSignalsSchema = lazySchema(() =>
+  z.object({
+    cli: z
+      .array(z.string().max(64))
+      .max(10)
+      .optional()
+      .describe(
+        'First command tokens (e.g. ["stripe"]) — exact match against commands run this session.',
+      ),
+    filesRead: z
+      .array(z.string().max(256))
+      .max(10)
+      .optional()
+      .describe(
+        'Glob patterns (e.g. ["**/*.tf"]) matched against files Claude has read this session.',
+      ),
+    hosts: z
+      .array(z.string().max(128))
+      .max(20)
+      .optional()
+      .describe(
+        'Hostnames (e.g. ["api.stripe.com"]) matched case-insensitively against bash URL hosts.',
+      ),
+    cwd: z
+      .array(z.string().max(256))
+      .max(10)
+      .optional()
+      .describe('Cwd path globs for workspace-relative relevance.'),
+    manifestDeps: z
+      .array(
+        z.object({
+          file: z.string().max(256),
+          pattern: z.string().max(256),
+        }),
+      )
+      .max(10)
+      .optional()
+      .describe(
+        'Dependency declared in a package manifest ({file regex, content pattern}).',
+      ),
+  }),
+)
+
+export const PluginRelevanceSchema = lazySchema(() =>
+  z.object({
+    topic: z
+      .string()
+      .max(64)
+      .optional()
+      .describe(
+        'What the user is working with when this plugin is relevant — fills "Working with {topic}?".',
+      ),
+    signals: PluginRelevanceSignalsSchema()
+      .optional()
+      .describe('Matchers that determine when the plugin is relevant.'),
+  }),
+)
+
 export const PluginMarketplaceEntrySchema = lazySchema(() =>
   PluginManifestSchema()
     .partial()
@@ -1293,6 +1355,20 @@ export const PluginMarketplaceEntrySchema = lazySchema(() =>
         .default(true)
         .describe(
           'Require the plugin manifest to be present in the plugin folder. If false, the marketplace entry provides the manifest.',
+        ),
+      // Official: optional relevance block for spinner tip / auto-suggest.
+      // Preprocess non-objects to undefined so bad marketplace data is ignored.
+      relevance: z
+        .preprocess(
+          val =>
+            typeof val === 'object' && val !== null && !Array.isArray(val)
+              ? val
+              : undefined,
+          PluginRelevanceSchema().optional(),
+        )
+        .optional()
+        .describe(
+          'Declares when this plugin is relevant to the user\'s work. Consumed by the spinner tip ("Working with {topic}?"), session-start auto-suggest, and marketplace browse ranking.',
         ),
     }),
 )

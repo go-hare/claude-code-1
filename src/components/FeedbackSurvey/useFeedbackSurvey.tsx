@@ -8,7 +8,7 @@ import {
 import { isPolicyAllowed } from '../../services/policyLimits/index.js';
 import type { Message } from '../../types/message.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
-import { isEnvTruthy } from '../../utils/envUtils.js';
+import { isFeedbackSurveyEnvDisabled } from '../../utils/residualFinalEnvGates.js';
 import { getLastAssistantMessage } from '../../utils/messages.js';
 import { getMainLoopModel } from '../../utils/model/model.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
@@ -280,7 +280,7 @@ export function useFeedbackSurvey(
       return false;
     }
 
-    if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY)) {
+    if (isFeedbackSurveyEnvDisabled()) {
       return false;
     }
 

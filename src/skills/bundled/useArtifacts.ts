@@ -1,4 +1,8 @@
 import { registerBundledSkill } from '../bundledSkills.js'
+import {
+  applyDatavizCallout,
+  DATAVIZ_CALLOUT_PLACEHOLDER,
+} from './datavizCallout.js'
 
 const USE_ARTIFACTS_PROMPT = `# Using Artifacts
 
@@ -106,6 +110,8 @@ The hosting service serves the HTML verbatim (including any \`<script>\` you inc
 - Artifacts expire (default 7 days; pass \`ttl: 30\` for 30-day retention).
 - Anyone with the URL can view the artifact — treat the URL as the secret.
 - The \`/artifacts\` slash command (user-invoked) shows all artifacts uploaded in the current session.
+
+${DATAVIZ_CALLOUT_PLACEHOLDER}
 `
 
 export function registerUseArtifactsSkill(): void {
@@ -118,7 +124,8 @@ export function registerUseArtifactsSkill(): void {
     userInvocable: true,
     argumentHint: '[optional focus note]',
     async getPromptForCommand(args) {
-      let prompt = USE_ARTIFACTS_PROMPT
+      // Official Vif densable: replace <!-- dataviz-callout --> via DAb (GB-gated).
+      let prompt = applyDatavizCallout(USE_ARTIFACTS_PROMPT)
       if (args && args.trim().length > 0) {
         prompt += `\n\n## Additional Focus\n\n${args.trim()}\n`
       }

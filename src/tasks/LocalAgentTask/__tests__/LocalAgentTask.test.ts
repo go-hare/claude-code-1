@@ -206,6 +206,32 @@ describe('updateProgressFromMessage', () => {
     expect(tracker.cumulativeOutputTokens).toBe(50)
   })
 
+  test('zero-usage assistant turns do not wipe prior token counts', () => {
+    const tracker = createProgressTracker()
+    updateProgressFromMessage(
+      tracker,
+      makeAssistantMessage({
+        input_tokens: 1000,
+        output_tokens: 40,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 500,
+      }),
+    )
+    expect(tracker.latestInputTokens).toBe(1500)
+    expect(tracker.cumulativeOutputTokens).toBe(40)
+
+    // Tool-only / streaming placeholder with all-zero usage (common on some providers)
+    updateProgressFromMessage(
+      tracker,
+      makeAssistantMessage({ input_tokens: 0, output_tokens: 0 }, [
+        { type: 'tool_use', name: 'Read', input: { file_path: '/x' } },
+      ]),
+    )
+    expect(tracker.latestInputTokens).toBe(1500)
+    expect(tracker.cumulativeOutputTokens).toBe(40)
+    expect(tracker.toolUseCount).toBe(1)
+  })
+
   test('counts tool_use blocks and tracks recent activities', () => {
     const tracker = createProgressTracker()
     const msg = makeAssistantMessage({ input_tokens: 0, output_tokens: 0 }, [

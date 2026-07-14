@@ -2585,6 +2585,11 @@ export function buildWorkerEnv(
 
   // Exec mode: strip most CLAUDE_ vars
   if (dispatch.launch.mode === 'exec') {
+    // Official 2.1.206: keep EXTRA_BODY (and metadata) for worker API calls —
+    // users set these in the parent shell and expect bg exec workers to honor them.
+    const preservedExtraBody = env.CLAUDE_CODE_EXTRA_BODY
+    const preservedExtraMetadata = env.CLAUDE_CODE_EXTRA_METADATA
+    const preservedPath = env.PATH
     for (const key of Object.keys(env)) {
       if (
         (key.startsWith('CLAUDE_') &&
@@ -2597,6 +2602,16 @@ export function buildWorkerEnv(
     }
     delete env.BROWSER
     env.CLAUDE_PTY_HOST_EXEC = '1'
+    if (preservedExtraBody !== undefined) {
+      env.CLAUDE_CODE_EXTRA_BODY = preservedExtraBody
+    }
+    if (preservedExtraMetadata !== undefined) {
+      env.CLAUDE_CODE_EXTRA_METADATA = preservedExtraMetadata
+    }
+    // PATH can be wiped by a sparse dispatch.env; restore parent PATH.
+    if (!env.PATH && preservedPath) {
+      env.PATH = preservedPath
+    }
   }
 
   return env

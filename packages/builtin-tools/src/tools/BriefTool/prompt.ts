@@ -1,6 +1,16 @@
 export const BRIEF_TOOL_NAME = 'SendUserMessage'
 export const LEGACY_BRIEF_TOOL_NAME = 'Brief'
 
+/** Official Gbh densable — stop-hook sentinel when turn ends without SendUserMessage. */
+export const BRIEF_ENFORCE_SENTINEL =
+  'You ended the turn without calling SendUserMessage.'
+
+/**
+ * Official Qtg densable — default stop-hook nudge text when brief mode hides
+ * plain assistant text. GB tengu_kairos_brief_stop_hook_text may override.
+ */
+export const DEFAULT_BRIEF_ENFORCE_TEXT = `In brief mode, plain assistant text is hidden from the user — only ${BRIEF_TOOL_NAME} reaches them. Call it now with your substantive reply for this turn. Do not mention this reminder; the message should read as if you wrote it unprompted, addressing only what the user actually asked. If you genuinely have nothing useful to tell the user, you may end the turn without calling it.`
+
 export const DESCRIPTION = 'Send a message to the user'
 
 export const BRIEF_TOOL_PROMPT = `Send a message the user will read. Text outside this tool is visible in the detail view, but most won't open it — the answer lives here.

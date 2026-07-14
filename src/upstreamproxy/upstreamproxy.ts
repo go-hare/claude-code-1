@@ -82,7 +82,17 @@ export async function initUpstreamProxy(opts?: {
   caBundlePath?: string
   ccrBaseUrl?: string
 }): Promise<UpstreamProxyState> {
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+  // Official REMOTE densable.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (!isRemote) {
     return state
   }
   // CCR evaluates ccr_upstream_proxy_enabled server-side (where GrowthBook is

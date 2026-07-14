@@ -38,6 +38,7 @@ import {
   normalizeMessages,
 } from './messages.js'
 import { copyPlanForResume } from './plans.js'
+import { getResumePrompt } from './resumeReturn.js'
 import { processSessionStartHooks } from './sessionStart.js'
 import {
   buildConversationChain,
@@ -211,9 +212,10 @@ export function deserializeMessagesWithInterruptDetection(
     // so the consumer only needs to handle interrupted_prompt.
     let turnInterruptionState: TurnInterruptionState
     if (internalState.kind === 'interrupted_turn') {
+      // Official kdo — CLAUDE_CODE_RESUME_PROMPT overrides default.
       const [continuationMessage] = normalizeMessages([
         createUserMessage({
-          content: 'Continue from where you left off.',
+          content: getResumePrompt(),
           isMeta: true,
         }),
       ])

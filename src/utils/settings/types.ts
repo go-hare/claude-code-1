@@ -256,6 +256,12 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Path to a script that outputs authentication values'),
+      proxyAuthHelper: z
+        .string()
+        .optional()
+        .describe(
+          'Shell command that outputs a Proxy-Authorization header value (EAP)',
+        ),
       awsCredentialExport: z
         .string()
         .optional()
@@ -413,6 +419,38 @@ export const SettingsSchema = lazySchema(() =>
         .array(z.string())
         .optional()
         .describe('List of rejected MCP servers from .mcp.json'),
+      // Official residual — disable Claude.ai connectors (any settings source).
+      disableClaudeAiConnectors: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true in any settings source, claude.ai MCP cloud connectors are not auto-fetched.',
+        ),
+      // Official residual — per-skill listing overrides (on / name-only / user-invocable-only / off).
+      skillOverrides: z
+        .record(
+          z.string(),
+          z.enum([
+            'on',
+            'name-only',
+            'user-invocable-only',
+            'off',
+            // Fork-compat alias (treated as "on" for model listing).
+            'model-invocable',
+          ]),
+        )
+        .optional()
+        .describe(
+          'Per-skill listing overrides keyed by skill name. "name-only" lists the skill without its description; ' +
+            '"user-invocable-only" hides it from the model but keeps /name; "off" hides it from both. Absent = on.',
+        ),
+      // Official cae — settings half of DISABLE_BUNDLED_SKILLS.
+      disableBundledSkills: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, skip registration of skills that ship with the CLI (bundled skills).',
+        ),
       // Enterprise allowlist of MCP servers
       allowedMcpServers: z
         .array(AllowedMcpServerEntrySchema())
@@ -475,6 +513,64 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe('Disable all hooks and statusLine execution'),
+      // Official residual — disable `claude agents` agent view.
+      disableAgentView: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, disable the agent view dashboard (`claude agents`). ' +
+            'Also forced off by CLAUDE_CODE_DISABLE_AGENT_VIEW.',
+        ),
+      // Official residual — managed policy can force Remote Control off.
+      disableRemoteControl: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true (typically managed settings), Remote Control / bridge is disabled by organization policy.',
+        ),
+      // Official residual — settings half of DISABLE_WORKFLOWS.
+      disableWorkflows: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, disable dynamic workflows. Also forced off by CLAUDE_CODE_DISABLE_WORKFLOWS.',
+        ),
+      // Official residual — settings half of DISABLE_ARTIFACT.
+      disableArtifact: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, disable the Artifact tool. Also forced off by CLAUDE_CODE_DISABLE_ARTIFACT.',
+        ),
+      // Official residual — user opt-in for Artifact tool when available.
+      enableArtifact: z
+        .boolean()
+        .optional()
+        .describe(
+          'When set, opt into/out of the Artifact tool. Unset uses the product default.',
+        ),
+      // Official residual — user opt-in for dynamic workflows when available.
+      enableWorkflows: z
+        .boolean()
+        .optional()
+        .describe(
+          'When set, opt into/out of dynamic workflows. Unset uses the product default.',
+        ),
+      // Official residual — ultracode/workflow keyword trigger.
+      workflowKeywordTriggerEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Whether the ultracode/workflow keyword trigger is enabled. Default: true.',
+        ),
+      // Official cYn — settings half of skill shell disable.
+      disableSkillShellExecution: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, strip ```! / !` skill shell commands instead of executing them. ' +
+            'Also forced on when CLAUDE_CODE_IS_COWORK is set. Policy settings take precedence.',
+        ),
       // Which shell backs input-box `!` (see docs/design/ps-shell-selection.md §4.2)
       defaultShell: z
         .enum(['bash', 'powershell'])
@@ -482,6 +578,25 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Default shell for input-box ! commands. ' +
             "Defaults to 'bash' on all platforms (no Windows auto-flip).",
+        ),
+      // Official 2.1.186: `!` bash output auto-triggers a Claude response
+      respondToBashCommands: z
+        .boolean()
+        .optional()
+        .describe(
+          'Whether Claude responds after an input-box ! bash command runs. ' +
+            'Set to false to add the command output to context without a response. ' +
+            'Default: true.',
+        ),
+      // Official 2.1.200: AskUserQuestion no longer auto-continues by default.
+      askUserQuestionTimeout: z
+        .enum(['60s', '5m', '10m', 'never'])
+        .optional()
+        .catch(undefined)
+        .describe(
+          "Idle time before Claude's questions auto-continue with any answers " +
+            'selected so far. Defaults to never — auto-continue only runs ' +
+            'when explicitly set to 60s/5m/10m.',
         ),
       // Only run hooks defined in managed settings (managed-settings.json)
       allowManagedHooksOnly: z
@@ -880,7 +995,9 @@ export const SettingsSchema = lazySchema(() =>
         )
         .optional()
         .describe(
-          'Per-plugin configuration including MCP server user configs, keyed by plugin ID (plugin@marketplace format)',
+          'Per-plugin configuration including MCP server user configs, keyed by plugin ID (plugin@marketplace format). ' +
+            'Official 2.1.207: only user, --settings (flag), and managed settings are honored; ' +
+            'project .claude/settings.json and settings.local.json are ignored for this key.',
         ),
       remote: z
         .object({
@@ -1031,6 +1148,50 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Reduce or disable animations for accessibility (spinner shimmer, flash effects, etc.)',
         ),
+      /**
+       * Official axScreenReader — render screen-reader friendly output.
+       * Overridden by CLAUDE_AX_SCREEN_READER env and --ax-screen-reader flag.
+       */
+      axScreenReader: z
+        .boolean()
+        .optional()
+        .describe(
+          'Render screen-reader friendly output (flat text, no decorative borders or animations). Overridden by the CLAUDE_AX_SCREEN_READER env var and the --ax-screen-reader CLI flag.',
+        ),
+      /**
+       * Official vimInsertModeRemaps — INSERT two-key sequences → NORMAL.
+       * e.g. {"jj":"<Esc>"}. Only "<Esc>" targets; keys exactly two printable chars.
+       */
+      vimInsertModeRemaps: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          'Vim INSERT-mode key-sequence remaps, e.g. {"jj": "<Esc>"}. Each key is exactly two printable characters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim".',
+        ),
+      /**
+       * @internal Official totalTokensReminder — emit `<total_tokens>N tokens left</total_tokens>`.
+       * Env CLAUDE_CODE_TOTAL_TOKENS_REMINDER overrides. Defaults to off.
+       */
+      totalTokensReminder: z
+        .enum(['off', 'infinite', 'fixed', 'countdown', 'padded-countdown'])
+        .optional()
+        .describe(
+          "@internal Emit a <total_tokens>N tokens left</total_tokens> block in the system prompt, after each tool result, and (when totalTokensReminderAfterUserTurn is on) after each regular user prompt. 'infinite' uses the literal value Infinite, 'fixed' uses 5000000, 'countdown' uses the live remaining context-window tokens, 'padded-countdown' counts down from totalTokensReminderBudget. Defaults to off. Env var CLAUDE_CODE_TOTAL_TOKENS_REMINDER overrides.",
+        ),
+      totalTokensReminderBudget: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "@internal Starting budget (tokens) for totalTokensReminder 'padded-countdown' mode. Defaults to 15000000. Server-controlled via GrowthBook; env var CLAUDE_CODE_TOTAL_TOKENS_REMINDER_BUDGET overrides.",
+        ),
+      totalTokensReminderAfterUserTurn: z
+        .boolean()
+        .optional()
+        .describe(
+          "@internal When true, emit the totalTokensReminder block after each regular user prompt and (for 'padded-countdown') re-anchor the task budget. Defaults to off. Env var CLAUDE_CODE_TOTAL_TOKENS_REMINDER_AFTER_USER_TURN overrides; server-controlled via GrowthBook tengu_lapis_anchor_user_turn.",
+        ),
       autoMemoryEnabled: z
         .boolean()
         .optional()
@@ -1085,6 +1246,12 @@ export const SettingsSchema = lazySchema(() =>
                   .array(z.string())
                   .optional()
                   .describe('Rules for the auto mode classifier deny section'),
+                hard_deny: z
+                  .array(z.string())
+                  .optional()
+                  .describe(
+                    'Hard deny rules for the auto mode classifier (always block; user intent does not clear)',
+                  ),
                 ...(process.env.USER_TYPE === 'ant'
                   ? {
                       // Back-compat alias for ant users; external users use soft_deny
@@ -1096,6 +1263,13 @@ export const SettingsSchema = lazySchema(() =>
                   .optional()
                   .describe(
                     'Entries for the auto mode classifier environment section',
+                  ),
+                // Official 2.1.193: suspend every Bash/PowerShell allow rule in auto mode
+                classifyAllShell: z
+                  .boolean()
+                  .optional()
+                  .describe(
+                    'When true, every Bash/PowerShell allow rule is suspended while auto mode is active so all shell commands are routed through the classifier (higher safety, more classifier calls). Default: false.',
                   ),
               })
               .optional()
@@ -1178,6 +1352,16 @@ export const SettingsSchema = lazySchema(() =>
             'Only read from policy settings (managed-settings.json / MDM). ' +
             'Useful for enterprise administrators to add organization-specific context ' +
             '(e.g., "All plugins from our internal marketplace are vetted and approved.").',
+        ),
+      // Official 2.1.x: managed allowlist for contextual plugin install tips
+      pluginSuggestionMarketplaces: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Marketplace names whose plugins may surface as contextual install suggestions ' +
+            '(relevance-based tips). No marketplace-declared suggestions surface without this ' +
+            'allowlist; the built-in first-party frontend-design tips are unaffected. ' +
+            'Only honored from managed settings; ignored in user/project/local settings.',
         ),
       /**
        * Workspace API key stored in settings.json for /login UI convenience.

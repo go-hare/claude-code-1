@@ -41,8 +41,10 @@ export function WebFetchPermissionRequest({
 
   usePermissionRequestLogging(toolUseConfirm, unaryEvent);
 
-  // Generate permission options specific to domains
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions();
+  // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow
+  // (WebFetch domain always-allow is gated the same way as MCP tools).
+  const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
+  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg && hostname !== '';
   const options = useMemo((): OptionWithDescription<string>[] => {
     const result: OptionWithDescription<string>[] = [
       {

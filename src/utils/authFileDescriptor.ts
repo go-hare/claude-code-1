@@ -32,7 +32,17 @@ export function maybePersistTokenForSubprocesses(
   token: string,
   tokenName: string,
 ): void {
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+  // Official REMOTE densable — only persist tokens for CCR subprocess access.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (!isRemote) {
     return
   }
   try {

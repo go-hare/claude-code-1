@@ -4,9 +4,11 @@ import * as path from 'path'
 import * as pathWin32 from 'path/win32'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
+import { isEnvTruthy } from './envUtils.js'
 import { execSync_DEPRECATED } from './execSyncWrapper.js'
 import { memoizeWithLRU } from './memoize.js'
 import { getPlatform } from './platform.js'
+import { isTestNoGitBash } from './residualFinalEnvGates.js'
 
 /**
  * If Windows, set the SHELL environment variable to git-bash path.
@@ -187,7 +189,24 @@ function findExecutableWithDeps(
 export function findGitBashPathOrNullWithDeps(
   deps: GitBashDiscoveryDeps = DEFAULT_DEPS,
 ): string | null {
-  const envOverride = deps.envOverride ?? process.env.CLAUDE_CODE_GIT_BASH_PATH
+  // Official CLAUDE_CODE_TEST_NO_GIT_BASH — force "not found" for tests.
+  if (isTestNoGitBash()) {
+    return null
+  }
+
+  // Official GIT_BASH_PATH densable.
+  let gitBashPathEnv: string | null | undefined = deps.envOverride
+  if (gitBashPathEnv === undefined) {
+    try {
+      const { resolveGitBashPath } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      gitBashPathEnv = resolveGitBashPath()
+    } catch {
+      gitBashPathEnv = process.env.CLAUDE_CODE_GIT_BASH_PATH || null
+    }
+  }
+  const envOverride = gitBashPathEnv
 
   // 1. Honor explicit CLAUDE_CODE_GIT_BASH_PATH override
   if (envOverride) {
@@ -263,7 +282,16 @@ export function findGitBashPath(): string {
   if (result !== null) {
     return result
   }
-  const envOverride = process.env.CLAUDE_CODE_GIT_BASH_PATH
+  // Official GIT_BASH_PATH densable (error path).
+  let envOverride: string | null = process.env.CLAUDE_CODE_GIT_BASH_PATH || null
+  try {
+    const { resolveGitBashPath } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    envOverride = resolveGitBashPath()
+  } catch {
+    // keep raw env fallback
+  }
   if (envOverride) {
     console.error(
       `Claude Code was unable to find CLAUDE_CODE_GIT_BASH_PATH path "${envOverride}"`,

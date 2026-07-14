@@ -115,7 +115,9 @@ export function FallbackPermissionRequest({
   }, [toolUseConfirm, onDone, onReject]);
 
   const originalCwd = getOriginalCwd();
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions();
+  // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
+  const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
+  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg;
   const options = useMemo((): PermissionPromptOption<FallbackOptionValue>[] => {
     const result: PermissionPromptOption<FallbackOptionValue>[] = [
       {

@@ -69,6 +69,30 @@ export type {
 } from './keybindings/types.js'
 
 // ============================================================
+// Screen-reader park densable
+// ============================================================
+export {
+  computeScreenReaderPark,
+  countNewlines,
+  eraseScreenReaderLinesUp,
+  hardWrapScreenReaderLine,
+  materializeScreenReaderFrameAnsi,
+  materializeScreenReaderLines,
+  planAndMaterializeScreenReaderFrame,
+  planScreenReaderFrameUpdate,
+  type ScreenReaderPark,
+  type ScreenReaderCursorDeclaration,
+  type ScreenReaderFramePlan,
+} from './core/screenReaderPark.js'
+export {
+  extractScreenReaderText,
+  findScreenReaderNodeStartIndex,
+  sanitizeScreenReaderText,
+  type ScreenReaderAccessibility,
+  type ScreenReaderDOMNode,
+} from './core/screenReaderTree.js'
+
+// ============================================================
 // Core types
 // ============================================================
 export type {

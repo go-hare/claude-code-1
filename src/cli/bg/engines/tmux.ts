@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process'
 import { execFileNoThrow } from '../../../utils/execFileNoThrow.js'
 import { buildCliLaunch, quoteCliLaunch } from '../../../utils/cliLaunch.js'
 import type {
+  BgAttachResult,
   BgEngine,
   BgStartOptions,
   BgStartResult,
@@ -50,7 +51,7 @@ export class TmuxEngine implements BgEngine {
     }
   }
 
-  async attach(session: SessionEntry): Promise<void> {
+  async attach(session: SessionEntry): Promise<BgAttachResult | undefined> {
     if (!session.tmuxSessionName) {
       throw new Error(`Session ${session.sessionId} has no tmux session name.`)
     }
@@ -66,5 +67,6 @@ export class TmuxEngine implements BgEngine {
         `Failed to attach to tmux session '${session.tmuxSessionName}'.`,
       )
     }
+    return undefined
   }
 }

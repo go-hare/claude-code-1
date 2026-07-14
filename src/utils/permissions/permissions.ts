@@ -5,8 +5,12 @@ import {
   getToolNameForPermissionCheck,
   mcpInfoFromString,
 } from '../../services/mcp/mcpStringUtils.js'
+import {
+  isChromeMcpReadOnlyTool,
+  isChromeMcpSafeForAutoMode,
+} from '../claudeInChrome/chromeMcpReadOnly.js'
+import { getEffectivePermissionMode } from './mcpPermissionMode.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
-import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
@@ -100,6 +104,10 @@ import {
   recordSuccess,
   shouldFallbackToPrompting,
 } from './denialTracking.js'
+import {
+  resolveSameTurnSiblingContext,
+  shouldGateEditClassification,
+} from './autoModeFlags.js'
 import {
   classifyYoloAction,
   formatActionForClassifier,
@@ -323,6 +331,9 @@ export function getAskRuleForTool(
 /**
  * Check if a specific agent is denied via Agent(agentType) syntax.
  * For example, Agent(Explore) would deny the Explore agent.
+ *
+ * Official 2.1.207 `_5e` has no CLAUDE_CODE_AGENT_RULE_DISABLED gate —
+ * that env only appears near unrelated Bun schema noise.
  */
 export function getDenyRuleForAgent(
   context: ToolPermissionContext,
@@ -340,6 +351,7 @@ export function getDenyRuleForAgent(
 
 /**
  * Filter agents to exclude those that are denied via Agent(agentType) syntax.
+ * Official 2.1.207 `_nt` — no AGENT_RULE_DISABLED short-circuit.
  */
 export function filterDeniedAgents<T extends { agentType: string }>(
   agents: T[],
@@ -534,10 +546,16 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       }
     }
     // Apply auto mode: use AI classifier instead of prompting user
-    // Check this BEFORE shouldAvoidPermissionPrompts so classifiers work in headless mode
+    // Check this BEFORE shouldAvoidPermissionPrompts so classifiers work in headless mode.
+    // Official snt(): chrome classifier floor can demote bypass → auto for MCP tools.
+    const effectiveModeForAuto = getEffectivePermissionMode(
+      tool,
+      appState.toolPermissionContext,
+    )
     if (
       feature('TRANSCRIPT_CLASSIFIER') &&
-      (appState.toolPermissionContext.mode === 'auto' ||
+      (effectiveModeForAuto === 'auto' ||
+        appState.toolPermissionContext.mode === 'auto' ||
         (appState.toolPermissionContext.mode === 'plan' &&
           (autoModeStateModule?.isAutoModeActive() ?? false)))
     ) {
@@ -562,6 +580,53 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             },
           }
         }
+        return result
+      }
+      // Official 2.1.198/207 plan_mode_floor: plan-mode asks for non-RO Chrome MCP
+      // (and other plan-floor tools) must not be auto-approved by the classifier.
+      // RO chrome tools (heo) are exempt and may continue through auto paths.
+      if (
+        result.decisionReason?.type === 'mode' &&
+        result.decisionReason.mode === 'plan' &&
+        !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), input)
+      ) {
+        if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+          return {
+            behavior: 'deny',
+            message: result.message,
+            decisionReason: {
+              type: 'asyncAgent',
+              reason:
+                'Action requires interactive approval and permission prompts are not available in this context',
+            },
+          }
+        }
+        logEvent('tengu_auto_mode_fallback_to_ask', {
+          reason:
+            'plan_mode_floor' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+        })
+        return result
+      }
+      // Official org_ask_ceiling: MCP tools capped to ask by org policy cannot
+      // be auto-approved by the classifier (mirrors plan_mode_floor handling).
+      if (tool.mcpInfo?.effectiveMaxPermission === 'ask') {
+        if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+          return {
+            behavior: 'deny',
+            message: result.message,
+            decisionReason: {
+              type: 'asyncAgent',
+              reason:
+                'Action requires interactive approval and permission prompts are not available in this context',
+            },
+          }
+        }
+        logEvent('tengu_auto_mode_fallback_to_ask', {
+          reason:
+            'org_ask_ceiling' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+        })
         return result
       }
       if (tool.requiresUserInteraction?.() && result.behavior === 'ask') {
@@ -611,14 +676,21 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       // Before running the auto mode classifier, check if acceptEdits mode would
       // allow this action. This avoids expensive classifier API calls for safe
       // operations like file edits in the working directory.
-      // Skip for Agent and REPL — their checkPermissions returns 'allow' for
-      // acceptEdits mode, which would silently bypass the classifier. REPL
-      // code can contain VM escapes between inner tool calls; the classifier
-      // must see the glue JavaScript, not just the inner tool calls.
+      // Official isAutoModeFastPathExcludedTool + REPL: these must not skip the
+      // classifier via acceptEdits (Agent/cron/remote can spawn work; REPL can
+      // hide VM escapes between inner tool calls).
+      // Official I = KDu(name) && VDu(mainModel): when classify-edits is on for
+      // the main-loop model, Edit/Write/NotebookEdit skip acceptEdits and hit
+      // the classifier (editClassificationGated telemetry flag).
+      const editClassificationGated = shouldGateEditClassification(
+        tool.name,
+        context.options.mainLoopModel,
+      )
       if (
         result.behavior === 'ask' &&
-        tool.name !== AGENT_TOOL_NAME &&
-        tool.name !== REPL_TOOL_NAME
+        tool.name !== REPL_TOOL_NAME &&
+        !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
+        !editClassificationGated
       ) {
         try {
           const parsedInput = tool.inputSchema.parse(input)
@@ -674,8 +746,16 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       }
 
       // Allowlisted tools are safe and don't need YOLO classification.
-      // This uses the safe-tool allowlist to skip unnecessary classifier API calls.
-      if (classifierDecisionModule!.isAutoModeAllowlistedTool(tool.name)) {
+      // Official: static safe builtins OR chrome MCP safe-for-auto (NDu).
+      // Fast-path-excluded tools never auto-allow via this path.
+      if (
+        !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
+        (classifierDecisionModule!.isAutoModeAllowlistedTool(tool.name) ||
+          isChromeMcpSafeForAutoMode(
+            getToolNameForPermissionCheck(tool),
+            input,
+          ))
+      ) {
         const newDenialState = recordSuccess(denialState)
         persistDenialState(context, newDenialState)
         logForDebugging(
@@ -704,6 +784,15 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       }
 
       // Run the auto mode classifier
+      // Official hOg / sameTurnSiblingContext: prepend same-turn prior tool_use
+      // messages so the classifier sees concurrent siblings in this assistant turn.
+      const sameTurnSiblings = resolveSameTurnSiblingContext().value
+        ? (context.sameTurnToolUses ?? [])
+        : []
+      const classifierMessages =
+        sameTurnSiblings.length > 0
+          ? [...context.messages, ...sameTurnSiblings]
+          : context.messages
       const action = formatActionForClassifier(tool.name, input)
       setClassifierChecking(toolUseID)
       let classifierResult
@@ -712,7 +801,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
           `[auto-mode] classifyYoloAction called with langfuseTrace=${context.langfuseTrace ? `id=${(context.langfuseTrace as unknown as Record<string, unknown>).id ?? 'present'}` : 'null/undefined'}`,
         )
         classifierResult = await classifyYoloAction(
-          context.messages,
+          classifierMessages,
           action,
           context.options.tools,
           appState.toolPermissionContext,
@@ -761,6 +850,9 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         // the action at the bottom of the classifier transcript.
         agentMsgId: assistantMessage.message
           .id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        // Official editClassificationGated + sameTurnSiblings telemetry.
+        editClassificationGated,
+        sameTurnSiblings: sameTurnSiblings.length,
         classifierModel:
           classifierResult.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         consecutiveDenials: classifierResult.shouldBlock
@@ -1204,6 +1296,25 @@ async function hasPermissionsToUseToolInner(
     throw new AbortError()
   }
 
+  // Official CLAUDE_CODE_TEST_FORCE_DENY densable — deny every tool (test harness).
+  try {
+    const { isTestForceDenyEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    if (isTestForceDenyEnabled()) {
+      return {
+        behavior: 'deny',
+        decisionReason: {
+          type: 'other',
+          reason: 'CLAUDE_CODE_TEST_FORCE_DENY',
+        },
+        message: `Permission to use ${tool.name} has been denied (TEST_FORCE_DENY).`,
+      }
+    }
+  } catch {
+    // densable optional
+  }
+
   let appState = context.getAppState()
 
   // 1. Check if the tool is denied
@@ -1254,6 +1365,25 @@ async function hasPermissionsToUseToolInner(
   try {
     const parsedInput = tool.inputSchema.parse(input)
     toolPermissionResult = await tool.checkPermissions(parsedInput, context)
+    // Official 2.1.198/199/207: plan mode auto-allows read-only MCP tools;
+    // state-changing MCP (incl. browser) must prompt — except Chrome MCP tools
+    // classified read-only by heo(cie(tool), input) (browser_batch nested RO, etc.).
+    if (
+      tool.mcpInfo &&
+      !tool.isReadOnly(parsedInput) &&
+      toolPermissionResult.behavior === 'passthrough' &&
+      appState.toolPermissionContext.mode === 'plan' &&
+      !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), parsedInput)
+    ) {
+      toolPermissionResult = {
+        behavior: 'ask',
+        message: `Cannot call ${tool.name} while in plan mode.`,
+        decisionReason: {
+          type: 'mode',
+          mode: 'plan',
+        },
+      }
+    }
   } catch (e) {
     // Rethrow abort errors so they propagate properly
     if (e instanceof AbortError || e instanceof APIUserAbortError) {
@@ -1289,6 +1419,20 @@ async function hasPermissionsToUseToolInner(
     return toolPermissionResult
   }
 
+  // 1f2. Official org_ask_ceiling: MCP toolPermissions effectiveMaxPermission
+  // of "ask" forces interactive approval (cannot be auto-approved / bypassed).
+  if (tool.mcpInfo?.effectiveMaxPermission === 'ask') {
+    const decisionReason: PermissionDecisionReason = {
+      type: 'other',
+      reason: 'Your organization requires approval for this tool',
+    }
+    return {
+      behavior: 'ask',
+      message: createPermissionRequestMessage(tool.name, decisionReason),
+      decisionReason,
+    }
+  }
+
   // 1g. Safety checks (e.g. .git/, .claude/, .vscode/, shell configs) are
   // bypass-immune — they must prompt even in bypassPermissions mode.
   // checkPathSafetyForAutoEdit returns {type:'safetyCheck'} for these paths.
@@ -1302,12 +1446,18 @@ async function hasPermissionsToUseToolInner(
   // 2a. Check if mode allows the tool to run
   // IMPORTANT: Call getAppState() to get the latest value
   appState = context.getAppState()
+  // Official snt(): effective mode for this MCP tool may demote bypass/auto
+  // via per-server overrides or chrome classifier floor.
+  const effectiveMode = getEffectivePermissionMode(
+    tool,
+    appState.toolPermissionContext,
+  )
   // Check if permissions should be bypassed:
-  // - Direct bypassPermissions mode
-  // - Plan mode when the user originally started with bypass mode (isBypassPermissionsModeAvailable)
+  // - Direct bypassPermissions mode (after MCP effective-mode resolution)
+  // - Plan mode when the user originally started with bypass mode
   const shouldBypassPermissions =
-    appState.toolPermissionContext.mode === 'bypassPermissions' ||
-    (appState.toolPermissionContext.mode === 'plan' &&
+    effectiveMode === 'bypassPermissions' ||
+    (effectiveMode === 'plan' &&
       appState.toolPermissionContext.isBypassPermissionsModeAvailable)
   if (shouldBypassPermissions) {
     return {
@@ -1315,7 +1465,7 @@ async function hasPermissionsToUseToolInner(
       updatedInput: getUpdatedInputOrFallback(toolPermissionResult, input),
       decisionReason: {
         type: 'mode',
-        mode: appState.toolPermissionContext.mode,
+        mode: effectiveMode,
       },
     }
   }

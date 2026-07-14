@@ -30,7 +30,15 @@ import { jsonParse } from '../../utils/slowOperations.js'
 import { buildRedirectUri, findAvailablePort } from './oauthPort.js'
 
 export function isXaaEnabled(): boolean {
-  return isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_XAA)
+  // Official ENABLE_XAA densable.
+  try {
+    const { isXaaEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    return isXaaEnvEnabled()
+  } catch {
+    return isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_XAA)
+  }
 }
 
 export type XaaIdpSettings = {

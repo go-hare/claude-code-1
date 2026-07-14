@@ -48,6 +48,7 @@ import type { AttributionState } from './utils/commitAttribution.js'
 import { getGlobalConfig } from './utils/config.js'
 import { getCwd } from './utils/cwd.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
+import { isEagerFlushEnabled } from './utils/residualUiEnvGates.js'
 import { getFastModeState } from './utils/fastMode.js'
 import {
   type FileHistoryState,
@@ -148,6 +149,8 @@ export type QueryEngineConfig = {
   readFileCache: FileStateCache
   customSystemPrompt?: string
   appendSystemPrompt?: string
+  /** Official --append-subagent-system-prompt for Task-tool subagents. */
+  appendSubagentSystemPrompt?: string
   userSpecifiedModel?: string
   fallbackModel?: string
   thinkingConfig?: ThinkingConfig
@@ -159,6 +162,11 @@ export type QueryEngineConfig = {
   replayUserMessages?: boolean
   /** Handler for URL elicitations triggered by MCP tool -32042 errors. */
   handleElicitation?: ToolUseContext['handleElicitation']
+  /**
+   * Official requestDialog host (print cvf) for refusal_fallback /
+   * fable_overage / mcp_url_elicitation parks. Plumbed onto ToolUseContext.
+   */
+  requestDialog?: ToolUseContext['requestDialog']
   includePartialMessages?: boolean
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
@@ -204,6 +212,7 @@ export class QueryEngine {
   // many turns in SDK mode.
   private discoveredSkillNames = new Set<string>()
   private loadedNestedMemoryPaths = new Set<string>()
+  private pendingNestedMemoryTriggers = new Set<string>()
 
   constructor(config: QueryEngineConfig) {
     this.config = config
@@ -231,6 +240,7 @@ export class QueryEngine {
       canUseTool,
       customSystemPrompt,
       appendSystemPrompt,
+      appendSubagentSystemPrompt,
       userSpecifiedModel,
       fallbackModel,
       jsonSchema,
@@ -356,6 +366,7 @@ export class QueryEngine {
       },
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
+      requestDialog: this.config.requestDialog,
       options: {
         commands,
         debug: false, // we use stdout, so don't want to clobber it
@@ -369,6 +380,7 @@ export class QueryEngine {
         isNonInteractiveSession: true,
         customSystemPrompt,
         appendSystemPrompt,
+        appendSubagentSystemPrompt,
         agentDefinitions: { activeAgents: agents, allAgents: [] },
         theme: resolveThemeSetting(getGlobalConfig().theme),
         maxBudgetUsd,
@@ -379,6 +391,7 @@ export class QueryEngine {
       readFileState: this.readFileState,
       nestedMemoryAttachmentTriggers: new Set<string>(),
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
+      pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
       dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
       setInProgressToolUseIDs: () => {},
@@ -463,10 +476,7 @@ export class QueryEngine {
         void transcriptPromise
       } else {
         await transcriptPromise
-        if (
-          isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-          isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-        ) {
+        if (isEagerFlushEnabled()) {
           await flushSessionStorage()
         }
       }
@@ -505,6 +515,7 @@ export class QueryEngine {
       setMessages: () => {},
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
+      requestDialog: this.config.requestDialog,
       options: {
         commands,
         debug: false,
@@ -518,6 +529,7 @@ export class QueryEngine {
         isNonInteractiveSession: true,
         customSystemPrompt,
         appendSystemPrompt,
+        appendSubagentSystemPrompt,
         theme: resolveThemeSetting(getGlobalConfig().theme),
         agentDefinitions: { activeAgents: agents, allAgents: [] },
         maxBudgetUsd,
@@ -528,6 +540,7 @@ export class QueryEngine {
       readFileState: this.readFileState,
       nestedMemoryAttachmentTriggers: new Set<string>(),
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
+      pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
       dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
       setInProgressToolUseIDs: () => {},
@@ -619,10 +632,7 @@ export class QueryEngine {
 
       if (persistSession) {
         await recordTranscript(messages)
-        if (
-          isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-          isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-        ) {
+        if (isEagerFlushEnabled()) {
           await flushSessionStorage()
         }
       }
@@ -885,10 +895,7 @@ export class QueryEngine {
           // Handle max turns reached signal from query.ts
           else if (attachment.type === 'max_turns_reached') {
             if (persistSession) {
-              if (
-                isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-                isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-              ) {
+              if (isEagerFlushEnabled()) {
                 await flushSessionStorage()
               }
             }
@@ -1022,10 +1029,7 @@ export class QueryEngine {
       // Check if USD budget has been exceeded
       if (maxBudgetUsd !== undefined && getTotalCost() >= maxBudgetUsd) {
         if (persistSession) {
-          if (
-            isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-            isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-          ) {
+          if (isEagerFlushEnabled()) {
             await flushSessionStorage()
           }
         }
@@ -1067,10 +1071,7 @@ export class QueryEngine {
         )
         if (callsThisQuery >= maxRetries) {
           if (persistSession) {
-            if (
-              isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-              isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-            ) {
+            if (isEagerFlushEnabled()) {
               await flushSessionStorage()
             }
           }
@@ -1127,10 +1128,7 @@ export class QueryEngine {
     // The desktop app kills the CLI process immediately after receiving the
     // result message, so any unflushed writes would be lost.
     if (persistSession) {
-      if (
-        isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
-        isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
-      ) {
+      if (isEagerFlushEnabled()) {
         await flushSessionStorage()
       }
     }
@@ -1272,6 +1270,7 @@ export async function* ask({
   setReadFileCache,
   customSystemPrompt,
   appendSystemPrompt,
+  appendSubagentSystemPrompt,
   userSpecifiedModel,
   fallbackModel,
   jsonSchema,
@@ -1281,6 +1280,7 @@ export async function* ask({
   replayUserMessages = false,
   includePartialMessages = false,
   handleElicitation,
+  requestDialog,
   agents = [],
   setSDKStatus,
   orphanedPermission,
@@ -1301,6 +1301,7 @@ export async function* ask({
   mutableMessages?: Message[]
   customSystemPrompt?: string
   appendSystemPrompt?: string
+  appendSubagentSystemPrompt?: string
   userSpecifiedModel?: string
   fallbackModel?: string
   jsonSchema?: Record<string, unknown>
@@ -1312,6 +1313,7 @@ export async function* ask({
   replayUserMessages?: boolean
   includePartialMessages?: boolean
   handleElicitation?: ToolUseContext['handleElicitation']
+  requestDialog?: ToolUseContext['requestDialog']
   agents?: AgentDefinition[]
   setSDKStatus?: (status: SDKStatus) => void
   orphanedPermission?: OrphanedPermission
@@ -1329,6 +1331,7 @@ export async function* ask({
     readFileCache: cloneFileStateCache(getReadFileCache()),
     customSystemPrompt,
     appendSystemPrompt,
+    appendSubagentSystemPrompt,
     userSpecifiedModel,
     fallbackModel,
     thinkingConfig,
@@ -1338,6 +1341,7 @@ export async function* ask({
     jsonSchema,
     verbose,
     handleElicitation,
+    requestDialog,
     replayUserMessages,
     includePartialMessages,
     setSDKStatus,

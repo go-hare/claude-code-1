@@ -1,3 +1,4 @@
+import { resolve } from 'path'
 import { z } from 'zod/v4'
 import { getSessionId, setOriginalCwd } from 'src/bootstrap/state.js'
 import { clearSystemPromptSections } from 'src/constants/systemPromptSections.js'
@@ -12,7 +13,9 @@ import { getPlanSlug, getPlansDirectory } from 'src/utils/plans.js'
 import { setCwd } from 'src/utils/Shell.js'
 import { saveWorktreeState } from 'src/utils/sessionStorage.js'
 import {
+  classifyManagedClaudeWorktree,
   createWorktreeForSession,
+  enterExistingWorktreeSession,
   getCurrentWorktreeSession,
   validateWorktreeSlug,
 } from 'src/utils/worktree.js'
@@ -21,21 +24,31 @@ import { getEnterWorktreeToolPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>
-  z.strictObject({
-    name: z
-      .string()
-      .superRefine((s, ctx) => {
-        try {
-          validateWorktreeSlug(s)
-        } catch (e) {
-          ctx.addIssue({ code: 'custom', message: (e as Error).message })
-        }
-      })
-      .optional()
-      .describe(
-        'Optional name for the worktree. Each "/"-separated segment may contain only letters, digits, dots, underscores, and dashes; max 64 chars total. A random name is generated if not provided.',
-      ),
-  }),
+  z
+    .strictObject({
+      name: z
+        .string()
+        .superRefine((s, ctx) => {
+          try {
+            validateWorktreeSlug(s)
+          } catch (e) {
+            ctx.addIssue({ code: 'custom', message: (e as Error).message })
+          }
+        })
+        .optional()
+        .describe(
+          'Optional name for a new worktree. Each "/"-separated segment may contain only letters, digits, dots, underscores, and dashes; max 64 chars total. Mutually exclusive with path. A random name is generated if neither name nor path is provided.',
+        ),
+      path: z
+        .string()
+        .optional()
+        .describe(
+          'Path to an existing worktree to enter instead of creating one — of the current repository, or (on first entry from the launch directory) of a repository nested inside it. Mutually exclusive with name.',
+        ),
+    })
+    .refine(v => !(v.name !== undefined && v.path !== undefined), {
+      message: '`name` and `path` are mutually exclusive',
+    }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
 
@@ -65,16 +78,97 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  userFacingName() {
-    return 'Creating worktree'
+  userFacingName(input) {
+    return input?.path ? 'Entering worktree' : 'Creating worktree'
   },
   shouldDefer: true,
   toAutoClassifierInput(input) {
-    return input.name ?? ''
+    return input.path ?? input.name ?? ''
+  },
+  async validateInput(input) {
+    if (getCurrentWorktreeSession() && !input.path) {
+      return {
+        result: false,
+        message:
+          'Already in a worktree session. Pass `path` to switch into another existing worktree, or use ExitWorktree to leave this one before creating a new worktree.',
+        errorCode: 2,
+      }
+    }
+    return { result: true }
+  },
+  /**
+   * Official 2.1.206/207: entering a model-supplied path outside
+   * `.claude/worktrees/` relocates the permission root — force a confirm.
+   * Managed Claude worktrees auto-allow.
+   */
+  async checkPermissions(input) {
+    if (!input.path) {
+      return { behavior: 'allow', updatedInput: input }
+    }
+    const classified = await classifyManagedClaudeWorktree(input.path)
+    if (classified.managed) {
+      return {
+        behavior: 'allow',
+        updatedInput: { ...input, path: classified.targetReal },
+      }
+    }
+    const resolved = resolve(getCwd(), input.path)
+    return {
+      behavior: 'ask',
+      message:
+        `Enter the worktree at "${resolved}"? This moves the session's ` +
+        `working directory and write access there, and loads project ` +
+        `configuration (CLAUDE.md, settings) from that location.`,
+      updatedInput: { ...input, path: resolved },
+      decisionReason: {
+        type: 'safetyCheck',
+        reason: `permission-root relocation to "${resolved}" — a model-supplied worktree outside .claude/worktrees/`,
+        classifierApprovable: false,
+      },
+    }
   },
   renderToolUseMessage,
   renderToolResultMessage,
   async call(input) {
+    if (input.path) {
+      const classified = await classifyManagedClaudeWorktree(input.path)
+      const target = classified.managed
+        ? classified.targetReal
+        : resolve(getCwd(), input.path)
+
+      const worktreeSession = await enterExistingWorktreeSession(
+        target,
+        getSessionId(),
+      )
+
+      process.chdir(worktreeSession.worktreePath)
+      setCwd(worktreeSession.worktreePath)
+      setOriginalCwd(getCwd())
+      saveWorktreeState(worktreeSession)
+      clearSystemPromptSections()
+      clearMemoryFileCaches()
+      getPlansDirectory.cache.clear?.()
+
+      logEvent('tengu_worktree_entered_existing', {
+        mid_session: true,
+      })
+
+      const branchInfo = worktreeSession.worktreeBranch
+        ? ` on branch ${worktreeSession.worktreeBranch}`
+        : ''
+
+      return {
+        data: {
+          worktreePath: worktreeSession.worktreePath,
+          worktreeBranch: worktreeSession.worktreeBranch,
+          message:
+            `Entered worktree at ${worktreeSession.worktreePath}${branchInfo}. ` +
+            `This agent's working directory and write access now point at the worktree; ` +
+            `the previous directory was left untouched.`,
+        },
+      }
+    }
+
     // Validate not already in a worktree created by this session
     if (getCurrentWorktreeSession()) {
       throw new Error('Already in a worktree session')

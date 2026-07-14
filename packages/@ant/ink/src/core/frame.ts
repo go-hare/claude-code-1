@@ -62,6 +62,16 @@ export type FrameEvent = {
     yogaCacheHits: number
     /** total yoga Node instances alive (create - free). Growth = leak. */
     yogaLive: number
+    /**
+     * Official BENCH_LIVE_COUNTS: live Ink DOM node count (root + descendants).
+     * Sampled at most every 100ms when CLAUDE_CODE_BENCH_LIVE_COUNTS is set.
+     */
+    domLive?: number
+    /**
+     * Official BENCH_LIVE_COUNTS: live React fiber count (incl. alternates).
+     * Sampled at most every 100ms when CLAUDE_CODE_BENCH_LIVE_COUNTS is set.
+     */
+    fiberLive?: number
   }
   flickers: Array<{
     desiredHeight: number

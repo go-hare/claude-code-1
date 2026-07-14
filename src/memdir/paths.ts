@@ -8,6 +8,7 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   getClaudeConfigHomeDir,
+  isBareMode,
   isEnvDefinedFalsy,
   isEnvTruthy,
 } from '../utils/envUtils.js'
@@ -28,23 +29,40 @@ import {
  *   5. Default: enabled
  */
 export function isAutoMemoryEnabled(): boolean {
-  const envVal = process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY
-  if (isEnvTruthy(envVal)) {
-    return false
-  }
-  if (isEnvDefinedFalsy(envVal)) {
-    return true
+  // Official DISABLE_AUTO_MEMORY densable pure env half.
+  try {
+    const { resolveAutoMemoryEnvOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    const envOverride = resolveAutoMemoryEnvOverride()
+    if (envOverride !== null) return envOverride
+  } catch {
+    const envVal = process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY
+    if (isEnvTruthy(envVal)) {
+      return false
+    }
+    if (isEnvDefinedFalsy(envVal)) {
+      return true
+    }
   }
   // --bare / SIMPLE: prompts.ts already drops the memory section from the
   // system prompt via its SIMPLE early-return; this gate stops the other half
   // (extractMemories turn-end fork, autoDream, /remember, /dream, team sync).
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+  // Official SIMPLE densable (+ --bare argv).
+  if (isBareMode()) {
     return false
   }
-  if (
-    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
-    !process.env.CLAUDE_CODE_REMOTE_MEMORY_DIR
-  ) {
+  // Official REMOTE densable — remote without memory dir disables auto-memory.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (isRemote && !process.env.CLAUDE_CODE_REMOTE_MEMORY_DIR) {
     return false
   }
   const settings = getInitialSettings()

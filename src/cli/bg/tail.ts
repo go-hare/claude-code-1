@@ -9,6 +9,14 @@ import {
 } from 'fs'
 import { createInterface } from 'readline'
 
+/** Result of a log-tail attach (portable stand-in for APC attach outcomes). */
+export type TailAttachResult = {
+  outcome: 'detached' | 'error'
+  /** True when user Ctrl+C detached while both stdio were TTY (GCp viaApc). */
+  viaApc?: boolean
+  msg?: string
+}
+
 /**
  * Cross-platform real-time log output. Ctrl+C exits tail without killing
  * the background process.
@@ -17,9 +25,9 @@ import { createInterface } from 'readline'
  *  1. Read existing content and output to stdout
  *  2. Use fs.watchFile() (polling-based — works everywhere including Windows)
  *  3. On change, read new bytes from the last known position
- *  4. SIGINT exits cleanly
+ *  4. SIGINT exits cleanly and reports a detach result for AgentsView gate
  */
-export async function tailLog(logPath: string): Promise<void> {
+export async function tailLog(logPath: string): Promise<TailAttachResult> {
   let position = 0
 
   // Output existing content
@@ -39,12 +47,16 @@ export async function tailLog(logPath: string): Promise<void> {
 
   console.log('\n[tail] Watching for new output... (Ctrl+C to detach)\n')
 
-  return new Promise<void>(resolve => {
+  return new Promise<TailAttachResult>(resolve => {
     const onSignal = (): void => {
       unwatchFile(logPath)
       process.removeListener('SIGINT', onSignal)
       console.log('\n[tail] Detached from session.')
-      resolve()
+      // Official GCp treats APC detach as viaApc; log-tail detach is the
+      // portable equivalent when both stdio are TTY interactive.
+      const viaApc =
+        process.stdout.isTTY === true && process.stdin.isTTY === true
+      resolve({ outcome: 'detached', viaApc })
     }
     process.on('SIGINT', onSignal)
 

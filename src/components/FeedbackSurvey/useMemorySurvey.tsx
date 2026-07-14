@@ -10,8 +10,9 @@ import { isPolicyAllowed } from '../../services/policyLimits/index.js';
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js';
 import type { Message } from '../../types/message.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
-import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isAutoManagedMemoryFile } from '../../utils/memoryFileDetection.js';
+import { isForceMemorySurveyEnabled } from '../../utils/residualMoreEnvGates.js';
+import { isFeedbackSurveyEnvDisabled } from '../../utils/residualFinalEnvGates.js';
 import { extractTextContent, getLastAssistantMessage } from '../../utils/messages.js';
 import { logOTelEvent } from '../../utils/telemetry/events.js';
 import { submitTranscriptShare } from './submitTranscriptShare.js';
@@ -182,8 +183,9 @@ export function useMemorySurvey(
       return;
     }
 
+    // Official CLAUDE_CODE_FORCE_MEMORY_SURVEY force-on; else GB gate.
     // 3P default: survey off (no GrowthBook on Bedrock/Vertex/Foundry).
-    if (!getFeatureValue_CACHED_MAY_BE_STALE(MEMORY_SURVEY_GATE, false)) {
+    if (!isForceMemorySurveyEnabled() && !getFeatureValue_CACHED_MAY_BE_STALE(MEMORY_SURVEY_GATE, false)) {
       return;
     }
 
@@ -199,7 +201,7 @@ export function useMemorySurvey(
       return;
     }
 
-    if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY)) {
+    if (isFeedbackSurveyEnvDisabled()) {
       return;
     }
 

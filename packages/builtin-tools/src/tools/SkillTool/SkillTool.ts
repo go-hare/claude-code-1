@@ -26,6 +26,10 @@ import type {
   UserMessage,
 } from 'src/types/message.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import {
+  formatSyncSkillNotMaterializedMessage,
+  waitForSyncSkillMaterialization,
+} from 'src/utils/syncSkillsMaterialization.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { getRuleByContentsForTool } from 'src/utils/permissions/permissions.js'
 import {
@@ -376,6 +380,8 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     // Remote canonical skill handling (ant-only experimental). Intercept
     // `_canonical_<slug>` names before local command lookup since remote
     // skills are not in the local command registry.
+    // Official Dsd producer: when SYNC_SKILLS is on, start materialization
+    // before the wait so concurrent SkillTool waits can race the load.
     if (
       feature('EXPERIMENTAL_SKILL_SEARCH') &&
       process.env.USER_TYPE === 'ant'
@@ -392,16 +398,78 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
             errorCode: 6,
           }
         }
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { isSyncSkillsEnabled } =
+            require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { runSyncSkillMaterialization } =
+            require('src/utils/syncSkillsMaterialization.js') as typeof import('src/utils/syncSkillsMaterialization.js')
+          if (isSyncSkillsEnabled()) {
+            void runSyncSkillMaterialization(
+              normalizedCommandName,
+              async () => {
+                try {
+                  await remoteSkillModules!.loadRemoteSkill(slug, meta.url)
+                  return { ok: true as const }
+                } catch (e) {
+                  return {
+                    ok: false as const,
+                    reason: errorMessage(e),
+                  }
+                }
+              },
+            )
+          }
+        } catch {
+          // densable optional
+        }
+        // Official Nit/gpo: wait for denser/producer materialization of this skill.
+        const materialization = await waitForSyncSkillMaterialization(
+          normalizedCommandName,
+        )
+        if (!materialization.ok) {
+          logEvent('skill_invoke_not_materialized', {})
+          return {
+            result: false,
+            message: formatSyncSkillNotMaterializedMessage(
+              normalizedCommandName,
+              materialization.reason,
+            ),
+            errorCode: 7,
+          }
+        }
         // Discovered remote skill — valid. Loading happens in call().
         return { result: true }
       }
     }
+
+    // Official Nit/gpo: when SYNC_SKILLS is on, wait for denser materialization
+    // of this skill name (if a producer registered a pending promise).
+    const materialization = await waitForSyncSkillMaterialization(
+      normalizedCommandName,
+    )
+    const materializationFailReason = materialization.ok
+      ? undefined
+      : materialization.reason
 
     // Get available commands (including MCP skills)
     const commands = await getAllCommands(context)
 
     // Check if command exists
     const foundCommand = findCommand(normalizedCommandName, commands)
+    // Official: materialization fail + (missing | incomplete) → not_materialized.
+    if (materializationFailReason !== undefined && !foundCommand) {
+      logEvent('skill_invoke_not_materialized', {})
+      return {
+        result: false,
+        message: formatSyncSkillNotMaterializedMessage(
+          normalizedCommandName,
+          materializationFailReason,
+        ),
+        errorCode: 7,
+      }
+    }
     if (!foundCommand) {
       return {
         result: false,
@@ -986,9 +1054,29 @@ async function executeRemoteSkill(
   }
 
   const urlScheme = extractUrlScheme(meta.url)
-  let loadResult
+  let loadResult: Awaited<ReturnType<typeof loadRemoteSkill>> | undefined
   try {
-    loadResult = await loadRemoteSkill(slug, meta.url)
+    // Official Dsd producer shell — register waiter while loading so concurrent
+    // SkillTool validate waits can race this materialization.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { runSyncSkillMaterialization } =
+      require('src/utils/syncSkillsMaterialization.js') as typeof import('src/utils/syncSkillsMaterialization.js')
+    const mat = await runSyncSkillMaterialization(commandName, async () => {
+      try {
+        loadResult = await loadRemoteSkill(slug, meta.url)
+        return { ok: true as const }
+      } catch (e) {
+        return {
+          ok: false as const,
+          reason: errorMessage(e),
+        }
+      }
+    })
+    if (!mat.ok || !loadResult) {
+      throw new Error(
+        mat.ok === false ? mat.reason : `Failed to load remote skill ${slug}`,
+      )
+    }
   } catch (e) {
     const msg = errorMessage(e)
     logRemoteSkillLoaded({

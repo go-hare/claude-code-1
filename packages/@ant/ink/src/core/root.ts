@@ -40,6 +40,13 @@ export type RenderOptions = {
    * Called after each frame render with timing and flicker information.
    */
   onFrame?: (event: FrameEvent) => void
+
+  /**
+   * Official isScreenReaderEnabled — when true, Ink prefers screen-reader
+   * friendly rendering (keep native cursor; full onRenderScreenReader denser).
+   * Set by getBaseRenderOptions from CLAUDE_AX_SCREEN_READER / --ax-screen-reader / settings.
+   */
+  isScreenReaderEnabled?: boolean
 }
 
 export type Instance = {
@@ -141,6 +148,7 @@ export async function createRoot({
   exitOnCtrlC = true,
   patchConsole = true,
   onFrame,
+  isScreenReaderEnabled,
 }: RenderOptions = {}): Promise<Root> {
   // See wrappedRender — preserve microtask boundary from the old WASM await.
   await Promise.resolve()
@@ -151,6 +159,7 @@ export async function createRoot({
     exitOnCtrlC,
     patchConsole,
     onFrame,
+    isScreenReaderEnabled,
   })
 
   // Register in the instances map so that code that looks up the Ink

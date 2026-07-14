@@ -2,6 +2,7 @@ import { closeSync, mkdirSync, openSync } from 'fs'
 import { dirname } from 'path'
 import { buildCliLaunch, spawnCli } from '../../../utils/cliLaunch.js'
 import type {
+  BgAttachResult,
   BgEngine,
   BgStartOptions,
   BgStartResult,
@@ -50,10 +51,11 @@ export class DetachedEngine implements BgEngine {
     }
   }
 
-  async attach(session: SessionEntry): Promise<void> {
+  async attach(session: SessionEntry): Promise<BgAttachResult> {
     if (!session.logPath) {
       throw new Error(`Session ${session.sessionId} has no log path.`)
     }
-    await tailLog(session.logPath)
+    // Official GCp input: log-tail detach reports viaApc when both stdio are TTY.
+    return await tailLog(session.logPath)
   }
 }

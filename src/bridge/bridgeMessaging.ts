@@ -306,7 +306,8 @@ export type ServerControlRequestHandlers = {
   sessionId: string
   /**
    * When true, all mutable requests (interrupt, set_model, set_permission_mode,
-   * set_max_thinking_tokens) reply with an error instead of false-success.
+   * set_max_thinking_tokens, set_mcp_permission_mode_override) reply with an
+   * error instead of false-success.
    * initialize still replies success — the server kills the connection otherwise.
    * Used by the outbound-only bridge mode and the SDK's /bridge subpath so claude.ai sees a
    * proper error instead of "action succeeded but nothing happened locally".
@@ -318,6 +319,16 @@ export type ServerControlRequestHandlers = {
   onSetPermissionMode?: (
     mode: PermissionMode,
   ) => { ok: true } | { ok: false; error: string }
+  /**
+   * Official 2.1.x: per-MCP-server tighten-only mode pin. Callback owns
+   * parse/auto-gate/state (same bootstrap-isolation pattern as
+   * onSetPermissionMode). `mode` is the raw control-channel value
+   * (`'default' | 'auto' | null` or rejected string).
+   */
+  onSetMcpPermissionModeOverride?: (
+    serverName: string,
+    mode: string | null,
+  ) => { ok: true; warning?: string } | { ok: false; error: string }
 }
 
 const OUTBOUND_ONLY_ERROR =
@@ -344,6 +355,7 @@ export function handleServerControlRequest(
     onSetModel,
     onSetMaxThinkingTokens,
     onSetPermissionMode,
+    onSetMcpPermissionModeOverride,
   } = handlers
   if (!transport) {
     logForDebugging(
@@ -468,6 +480,52 @@ export function handleServerControlRequest(
         },
       }
       break
+
+    case 'set_mcp_permission_mode_override': {
+      // Official 2.1.x tighten-only per-server pin (print.ts snt / WDu).
+      const serverName =
+        typeof req.serverName === 'string' ? req.serverName : ''
+      const mode = req.mode === undefined ? null : (req.mode as string | null)
+      if (!serverName) {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error:
+              'set_mcp_permission_mode_override requires a non-empty serverName',
+          },
+        }
+        break
+      }
+      const verdict = onSetMcpPermissionModeOverride?.(serverName, mode) ?? {
+        ok: false,
+        error:
+          'set_mcp_permission_mode_override is not supported in this context (onSetMcpPermissionModeOverride callback not registered)',
+      }
+      if (verdict.ok) {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: request.request_id,
+            ...(verdict.warning
+              ? { response: { warning: verdict.warning } }
+              : {}),
+          },
+        }
+      } else {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error: (verdict as { ok: false; error: string }).error,
+          },
+        }
+      }
+      break
+    }
 
     default:
       // Unknown subtype — respond with error so the server doesn't

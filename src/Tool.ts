@@ -127,6 +127,22 @@ export type ToolPermissionContext = DeepImmutable<{
   awaitAutomatedChecksBeforeDialog?: boolean
   /** Stores the permission mode before model-initiated plan mode entry, so it can be restored on exit */
   prePlanMode?: PermissionMode
+  /**
+   * Official: per MCP serverName → forced mode when session is elevated
+   * (bypass/auto/plan+bypass).
+   */
+  mcpPermissionModeOverrides?: Readonly<
+    Record<string, PermissionMode | undefined>
+  >
+  /** Official: claude-in-chrome tools demote elevated modes via classifier floor. */
+  chromeClassifierFloorEnabled?: boolean
+  /** Official: Claude Preview/Browser tools demote elevated modes via classifier floor. */
+  previewClassifierFloorEnabled?: boolean
+  /**
+   * Official: when classifier floor applies, demote to `auto` if true, else
+   * `default`.
+   */
+  canAutoClassifierRun?: boolean
 }>
 
 export const getEmptyToolPermissionContext: () => ToolPermissionContext =
@@ -137,6 +153,8 @@ export const getEmptyToolPermissionContext: () => ToolPermissionContext =
     alwaysDenyRules: {},
     alwaysAskRules: {},
     isBypassPermissionsModeAvailable: true,
+    // Official 2.1.x: empty map so control-channel overrides can merge cleanly.
+    mcpPermissionModeOverrides: {},
   })
 
 export type CompactProgressEvent =
@@ -164,6 +182,12 @@ export type ToolUseContext = {
     customSystemPrompt?: string
     /** Additional system prompt appended after the main system prompt */
     appendSystemPrompt?: string
+    /**
+     * Official --append-subagent-system-prompt. Appended to Task-tool
+     * subagent system prompts (and nested) when
+     * CLAUDE_CODE_ENABLE_APPEND_SUBAGENT_PROMPT is set.
+     */
+    appendSubagentSystemPrompt?: string
     /** Override querySource for analytics tracking */
     querySource?: QuerySource
     /** Optional callback to get the latest tools (e.g., after MCP servers connect mid-query) */
@@ -206,6 +230,22 @@ export type ToolUseContext = {
     params: ElicitRequestURLParams,
     signal: AbortSignal,
   ) => Promise<ElicitResult>
+  /**
+   * Official requestDialog (cvf host) — print/SDK parks host-rendered dialogs
+   * (refusal_fallback_prompt, fable_overage_consent_prompt, mcp_url_elicitation).
+   * REPL leaves this undefined and uses local Ink dialogs instead.
+   */
+  requestDialog?: (
+    spec: {
+      kind: string
+      default: unknown
+      result?: () => {
+        safeParse: (v: unknown) => { success: boolean; data?: unknown }
+      }
+    },
+    payload: unknown,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown>
   setToolJSX?: SetToolJSXFn
   addNotification?: (notif: Notification) => void
   /** Append a UI-only system message to the REPL message list. Stripped at the
@@ -226,6 +266,12 @@ export type ToolUseContext = {
    * re-inject the same CLAUDE.md dozens of times.
    */
   loadedNestedMemoryPaths?: Set<string>
+  /**
+   * Official pendingNestedMemoryTriggers — coordinator parent queue filled by
+   * subagent cleanup when CLAUDE_CODE_COORDINATOR_PROPAGATE_NESTED_MEMORY is
+   * on. Drained into nestedMemoryAttachmentTriggers on the next root turn.
+   */
+  pendingNestedMemoryTriggers?: Set<string>
   dynamicSkillDirTriggers?: Set<string>
   /** Skill names surfaced via skill_discovery this session. Telemetry only (feeds was_discovered). */
   discoveredSkillNames?: Set<string>
@@ -250,10 +296,23 @@ export type ToolUseContext = {
   setConversationId?: (id: UUID) => void
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
+  /**
+   * Official isBackgroundAgent — when true, session activity passes agentId to
+   * $Qn/$BQn so mainLoopRefcount is not bumped. Async agents and forked side
+   * queries set this; foreground sync subagents leave it false/undefined.
+   */
+  isBackgroundAgent?: boolean
   /** When true, canUseTool must always be called even when hooks auto-approve.
    *  Used by speculation for overlay file path rewriting. */
   requireCanUseTool?: boolean
   messages: Message[]
+  /**
+   * Official sameTurnToolUses — prior tool_use blocks from the same assistant
+   * turn that started before this tool. StreamingToolExecutor populates this
+   * when CLAUDE_CODE_AUTO_MODE_SIBLING_CONTEXT / sameTurnSiblingContext is on
+   * so the auto-mode classifier can see concurrent siblings.
+   */
+  sameTurnToolUses?: Message[]
   fileReadingLimits?: {
     maxTokens?: number
     maxSizeBytes?: number
@@ -516,8 +575,17 @@ export type Tool<
    * For MCP tools: the server and tool names as received from the MCP server (unnormalized).
    * Present on all MCP tools regardless of whether `name` is prefixed (mcp__server__tool)
    * or unprefixed (CLAUDE_AGENT_SDK_MCP_NO_PREFIX mode).
+   *
+   * Official 2.1.x: `effectiveMaxPermission` is the org/admin ceiling from
+   * server config `toolPermissions` (`allow` | `ask` | `blocked`). `ask`
+   * forces interactive approval (org_ask_ceiling); `blocked` tools are
+   * stripped from the model-visible tool list.
    */
-  mcpInfo?: { serverName: string; toolName: string }
+  mcpInfo?: {
+    serverName: string
+    toolName: string
+    effectiveMaxPermission?: 'allow' | 'ask' | 'blocked'
+  }
   readonly name: string
   /**
    * Maximum size in characters for tool result before it gets persisted to disk.

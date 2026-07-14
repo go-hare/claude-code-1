@@ -11,8 +11,9 @@
       "!!**/dist",
       "!!**/.claude/workflows",
       "!!**/*.workflow.mjs",
-      "!!docs/reference/**",
-      "!!docs/upstream-extraction/**"
+      "!!src/workflow/bundled/*.js",
+      "!!docs/reference",
+      "!!docs/upstream-extraction"
     ]
   },
   "formatter": {

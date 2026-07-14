@@ -16,7 +16,12 @@ import type {
   ChatCompletionCreateParamsStreaming,
 } from 'openai/resources/chat/completions/completions.mjs'
 import { getGrokClient } from './client.js'
-import { updateOpenAIUsage } from '../openai/openaiShared.js'
+import {
+  assembleFinalAssistantOutputs,
+  EMPTY_OPENAI_USAGE,
+  type OpenAICompatibleUsage,
+  updateOpenAIUsage,
+} from '../openai/openaiShared.js'
 import {
   anthropicMessagesToOpenAI,
   anthropicToolsToOpenAI,
@@ -37,11 +42,7 @@ import {
   convertToolsToLangfuse,
 } from '../../../services/langfuse/convert.js'
 import type { Options } from '../claude.js'
-import { randomUUID } from 'crypto'
-import {
-  createAssistantAPIErrorMessage,
-  normalizeContentFromAPI,
-} from '../../../utils/messages.js'
+import { createAssistantAPIErrorMessage } from '../../../utils/messages.js'
 
 /**
  * Grok (xAI) query path. Grok uses an OpenAI-compatible API, so we reuse
@@ -126,17 +127,8 @@ export async function* queryModelGrok(
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     const collectedMessages: AssistantMessage[] = []
     let partialMessage: BetaMessage | null = null
-    let usage: {
-      input_tokens: number
-      output_tokens: number
-      cache_creation_input_tokens: number
-      cache_read_input_tokens: number
-    } = {
-      input_tokens: 0,
-      output_tokens: 0,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-    }
+    let usage: OpenAICompatibleUsage = { ...EMPTY_OPENAI_USAGE }
+    let stopReason: string | null = null
     let ttftMs = 0
     const start = Date.now()
 
@@ -188,26 +180,10 @@ export async function* queryModelGrok(
           break
         }
         case 'content_block_stop': {
-          const idx = event.index
-          const block = contentBlocks[idx]
-          if (!block || !partialMessage) break
-
-          const m: AssistantMessage = {
-            message: {
-              ...partialMessage,
-              content: normalizeContentFromAPI(
-                [block] as unknown as BetaMessage['content'],
-                tools,
-                options.agentId,
-              ),
-            } as AssistantMessage['message'],
-            requestId: undefined,
-            type: 'assistant',
-            uuid: randomUUID(),
-            timestamp: new Date().toISOString(),
-          }
-          collectedMessages.push(m)
-          yield m
+          // Block accumulation is complete; assemble at message_stop so the
+          // yielded AssistantMessage carries real usage (needed for agent
+          // footer token counts). Yielding earlier left usage undefined and
+          // permanently stuck background agents at "↓ 0 tokens".
           break
         }
         case 'message_delta': {
@@ -218,25 +194,44 @@ export async function* queryModelGrok(
               deltaUsage as unknown as Parameters<typeof updateOpenAIUsage>[1],
             )
           }
+          if (event.delta.stop_reason != null) {
+            stopReason = event.delta.stop_reason
+          }
           break
         }
-        case 'message_stop':
+        case 'message_stop': {
+          if (partialMessage) {
+            for (const output of assembleFinalAssistantOutputs({
+              partialMessage,
+              contentBlocks,
+              tools,
+              agentId: options.agentId,
+              usage,
+              stopReason,
+              maxTokens: 0,
+              maxTokensErrorPrefix:
+                'GROK_MAX_TOKENS or CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+            })) {
+              if (output.type === 'assistant') {
+                collectedMessages.push(output)
+              }
+              yield output
+            }
+            partialMessage = null
+          }
+          if (usage.input_tokens + usage.output_tokens > 0) {
+            const costUSD = calculateUSDCost(
+              grokModel,
+              usage as unknown as BetaUsage,
+            )
+            addToTotalSessionCost(
+              costUSD,
+              usage as unknown as BetaUsage,
+              options.model,
+            )
+          }
           break
-      }
-
-      if (
-        event.type === 'message_stop' &&
-        usage.input_tokens + usage.output_tokens > 0
-      ) {
-        const costUSD = calculateUSDCost(
-          grokModel,
-          usage as unknown as BetaUsage,
-        )
-        addToTotalSessionCost(
-          costUSD,
-          usage as unknown as BetaUsage,
-          options.model,
-        )
+        }
       }
 
       yield {
@@ -244,6 +239,26 @@ export async function* queryModelGrok(
         event,
         ...(event.type === 'message_start' ? { ttftMs } : undefined),
       } as StreamEvent
+    }
+
+    // Safety: if stream ended without message_stop, assemble whatever we have.
+    if (partialMessage) {
+      for (const output of assembleFinalAssistantOutputs({
+        partialMessage,
+        contentBlocks,
+        tools,
+        agentId: options.agentId,
+        usage,
+        stopReason,
+        maxTokens: 0,
+        maxTokensErrorPrefix:
+          'GROK_MAX_TOKENS or CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+      })) {
+        if (output.type === 'assistant') {
+          collectedMessages.push(output)
+        }
+        yield output
+      }
     }
 
     // Record LLM observation in Langfuse (no-op if not configured)

@@ -1,5 +1,6 @@
 import { isClaudeAISubscriber } from './auth.js'
 import { has1mContext } from './context.js'
+import { isFableModel } from './fableConsent.js'
 
 export function isBilledAsExtraUsage(
   model: string | null,
@@ -7,6 +8,8 @@ export function isBilledAsExtraUsage(
   isOpus1mMerged: boolean,
 ): boolean {
   if (!isClaudeAISubscriber()) return false
+  // Official: Fable 5 is always usage-credits billed for subscribers.
+  if (isFableModel(model)) return true
   if (isFastMode) return true
   if (model === null || !has1mContext(model)) return false
 

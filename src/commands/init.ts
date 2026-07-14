@@ -228,9 +228,10 @@ const command = {
   type: 'prompt',
   name: 'init',
   get description() {
-    return feature('NEW_INIT') &&
-      (process.env.USER_TYPE === 'ant' ||
-        isEnvTruthy(process.env.CLAUDE_CODE_NEW_INIT))
+    // Official cQy: CLAUDE_CODE_NEW_INIT || tengu_slate_harbor_experiment.
+    // feature('NEW_INIT') is local build-time DCE; ant USER_TYPE keeps prior
+    // dogfood default when feature is on.
+    return feature('NEW_INIT') && isNewInitActive()
       ? 'Initialize new CLAUDE.md file(s) and optional skills/hooks with codebase documentation'
       : 'Initialize a new CLAUDE.md file with codebase documentation'
   },
@@ -244,14 +245,43 @@ const command = {
       {
         type: 'text',
         text:
-          feature('NEW_INIT') &&
-          (process.env.USER_TYPE === 'ant' ||
-            isEnvTruthy(process.env.CLAUDE_CODE_NEW_INIT))
+          feature('NEW_INIT') && isNewInitActive()
             ? NEW_INIT_PROMPT
             : OLD_INIT_PROMPT,
       },
     ]
   },
 } satisfies Command
+
+/** Official cQy densable consumer for /init prompt selection. */
+function isNewInitActive(): boolean {
+  if (process.env.USER_TYPE === 'ant') return true
+  // Official NEW_INIT densable env half, then GB.
+  try {
+    const { resolveNewInitEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    return resolveNewInitEnabled({
+      gbValue: getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_slate_harbor_experiment',
+        false,
+      ),
+    })
+  } catch {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_NEW_INIT)) return true
+    try {
+      const { getFeatureValue_CACHED_MAY_BE_STALE } =
+        require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+      return getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_slate_harbor_experiment',
+        false,
+      )
+    } catch {
+      return false
+    }
+  }
+}
 
 export default command

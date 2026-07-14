@@ -2,6 +2,7 @@ import memoize from 'lodash-es/memoize.js'
 import { logForDebugging } from './debug.js'
 import { hasNodeOption } from './envUtils.js'
 import { getFsImplementation } from './fsOperations.js'
+import { parseCertStoreSources } from './residualFinalEnvGates.js'
 
 /**
  * Load CA certificates for TLS connections.
@@ -26,17 +27,30 @@ import { getFsImplementation } from './fsOperations.js'
  * so `proxy.ts`/`mtls.ts` don't transitively pull in the command registry.
  */
 export const getCACertificates = memoize((): string[] | undefined => {
+  // Official JEm densable — CLAUDE_CODE_CERT_STORE=bundled,system (order unique).
+  const certStoreSources = parseCertStoreSources({
+    onUnrecognized: token => {
+      logForDebugging(
+        `CA certs: unrecognized CLAUDE_CODE_CERT_STORE source '${token}', ignoring`,
+        { level: 'warn' },
+      )
+    },
+  })
   const useSystemCA =
-    hasNodeOption('--use-system-ca') || hasNodeOption('--use-openssl-ca')
+    certStoreSources.includes('system') ||
+    hasNodeOption('--use-system-ca') ||
+    hasNodeOption('--use-openssl-ca')
+  // Explicit CERT_STORE=bundled forces bundled base even without extra certs.
+  const forceBundled = certStoreSources.includes('bundled')
 
   const extraCertsPath = process.env.NODE_EXTRA_CA_CERTS
 
   logForDebugging(
-    `CA certs: useSystemCA=${useSystemCA}, extraCertsPath=${extraCertsPath}`,
+    `CA certs: useSystemCA=${useSystemCA}, forceBundled=${forceBundled}, extraCertsPath=${extraCertsPath}, certStore=${certStoreSources.join(',') || '(default)'}`,
   )
 
   // If neither is set, return undefined (use runtime defaults, no override)
-  if (!useSystemCA && !extraCertsPath) {
+  if (!useSystemCA && !extraCertsPath && !forceBundled) {
     return undefined
   }
 

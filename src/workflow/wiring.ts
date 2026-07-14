@@ -5,6 +5,7 @@ import {
   type WorkflowToolDescriptor,
 } from '@claude-code/workflow-engine'
 import { buildTool, type Tool } from '../Tool.js'
+import { isWorkflowsDisabled } from '../utils/workflowDisableGate.js'
 import { getWorkflowService } from './service.js'
 
 /**
@@ -31,7 +32,31 @@ function buildWorkflowTool(): Tool {
     name: WORKFLOW_TOOL_NAME,
     maxResultSizeChars: 50_000,
     inputSchema: workflowInputSchema,
-    isEnabled: () => descriptor().isEnabled(),
+    isEnabled: () => {
+      // Official o5t/peh densable — env/settings disable; enableWorkflows opt-out.
+      try {
+        const { getInitialSettings } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/settings/settings.js') as typeof import('../utils/settings/settings.js')
+        const { resolveEnableWorkflowsSetting } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+        const settings = getInitialSettings()
+        if (
+          isWorkflowsDisabled(process.env, {
+            settingsDisableWorkflows: settings.disableWorkflows,
+          })
+        ) {
+          return false
+        }
+        // peh: explicit enableWorkflows=false forces off when feature available.
+        const enable = resolveEnableWorkflowsSetting(settings.enableWorkflows)
+        if (enable === false) return false
+        return descriptor().isEnabled()
+      } catch {
+        return !isWorkflowsDisabled() && descriptor().isEnabled()
+      }
+    },
     isReadOnly: input => descriptor().isReadOnly(input),
     isConcurrencySafe: () => true,
     async description() {

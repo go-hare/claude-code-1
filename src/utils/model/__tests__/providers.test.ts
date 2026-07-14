@@ -16,31 +16,51 @@ type APIProvider =
   | 'bedrock'
   | 'vertex'
   | 'foundry'
+  | 'anthropicAws'
+  | 'mantle'
+  | 'gateway'
   | 'openai'
   | 'gemini'
   | 'grok'
 
-function getAPIProviderTest(settings: { modelType?: string }): APIProvider {
+function getAPIProviderTest(
+  settings: { modelType?: string },
+  gatewayAuthPresent = false,
+): APIProvider {
   const modelType = settings.modelType
   if (modelType === 'openai') return 'openai'
   if (modelType === 'gemini') return 'gemini'
   if (modelType === 'grok') return 'grok'
 
+  // Official xn(): if (o_()) return "gateway"
+  if (gatewayAuthPresent) return 'gateway'
+
+  // Official xn() order: bedrock → foundry → anthropicAws → mantle → vertex
   if (
     process.env.CLAUDE_CODE_USE_BEDROCK === '1' ||
     process.env.CLAUDE_CODE_USE_BEDROCK === 'true'
   )
     return 'bedrock'
   if (
-    process.env.CLAUDE_CODE_USE_VERTEX === '1' ||
-    process.env.CLAUDE_CODE_USE_VERTEX === 'true'
-  )
-    return 'vertex'
-  if (
     process.env.CLAUDE_CODE_USE_FOUNDRY === '1' ||
     process.env.CLAUDE_CODE_USE_FOUNDRY === 'true'
   )
     return 'foundry'
+  if (
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS === '1' ||
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS === 'true'
+  )
+    return 'anthropicAws'
+  if (
+    process.env.CLAUDE_CODE_USE_MANTLE === '1' ||
+    process.env.CLAUDE_CODE_USE_MANTLE === 'true'
+  )
+    return 'mantle'
+  if (
+    process.env.CLAUDE_CODE_USE_VERTEX === '1' ||
+    process.env.CLAUDE_CODE_USE_VERTEX === 'true'
+  )
+    return 'vertex'
 
   if (
     process.env.CLAUDE_CODE_USE_OPENAI === '1' ||
@@ -61,13 +81,24 @@ function getAPIProviderTest(settings: { modelType?: string }): APIProvider {
   return 'firstParty'
 }
 
-function isFirstPartyAnthropicBaseUrlTest(): boolean {
-  const baseUrl = process.env.ANTHROPIC_BASE_URL
+function isAssumeFirstPartyBaseUrlTest(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
+  return typeof raw === 'string' ? raw.length > 0 : Boolean(raw)
+}
+
+function isFirstPartyAnthropicBaseUrlTest(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  // Official Gd()
+  if (isAssumeFirstPartyBaseUrlTest(env)) return true
+  const baseUrl = env.ANTHROPIC_BASE_URL
   if (!baseUrl) return true
   try {
     const host = new URL(baseUrl).host
     const allowedHosts = ['api.anthropic.com']
-    if (process.env.USER_TYPE === 'ant') {
+    if (env.USER_TYPE === 'ant') {
       allowedHosts.push('api-staging.anthropic.com')
     }
     return allowedHosts.includes(host)
@@ -76,12 +107,21 @@ function isFirstPartyAnthropicBaseUrlTest(): boolean {
   }
 }
 
+function isFirstPartyProviderWithFirstPartyBaseTest(
+  provider: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return provider === 'firstParty' && isFirstPartyAnthropicBaseUrlTest(env)
+}
+
 describe('getAPIProvider', () => {
   const envKeys = [
     'CLAUDE_CODE_USE_GEMINI',
     'CLAUDE_CODE_USE_BEDROCK',
     'CLAUDE_CODE_USE_VERTEX',
     'CLAUDE_CODE_USE_FOUNDRY',
+    'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+    'CLAUDE_CODE_USE_MANTLE',
     'CLAUDE_CODE_USE_OPENAI',
     'CLAUDE_CODE_USE_GROK',
     'OPENAI_BASE_URL',
@@ -108,6 +148,10 @@ describe('getAPIProvider', () => {
 
   test('returns "firstParty" by default', () => {
     expect(getAPIProviderTest({})).toBe('firstParty')
+  })
+
+  test('returns "gateway" when gatewayAuth session present (o_)', () => {
+    expect(getAPIProviderTest({}, true)).toBe('gateway')
   })
 
   test('returns "gemini" when modelType is gemini', () => {
@@ -187,6 +231,7 @@ describe('getAPIProvider', () => {
 describe('isFirstPartyAnthropicBaseUrl', () => {
   const originalBaseUrl = process.env.ANTHROPIC_BASE_URL
   const originalUserType = process.env.USER_TYPE
+  const originalAssume = process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
 
   afterEach(() => {
     if (originalBaseUrl !== undefined) {
@@ -199,46 +244,80 @@ describe('isFirstPartyAnthropicBaseUrl', () => {
     } else {
       delete process.env.USER_TYPE
     }
+    if (originalAssume !== undefined) {
+      process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL = originalAssume
+    } else {
+      delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
+    }
   })
 
   test('returns true when ANTHROPIC_BASE_URL is not set', () => {
     delete process.env.ANTHROPIC_BASE_URL
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(true)
   })
 
   test('returns true for api.anthropic.com', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(true)
   })
 
   test('returns false for custom URL', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://my-proxy.com'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(false)
   })
 
   test('returns false for invalid URL', () => {
     process.env.ANTHROPIC_BASE_URL = 'not-a-url'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(false)
   })
 
   test('returns true for staging URL when USER_TYPE is ant', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://api-staging.anthropic.com'
     process.env.USER_TYPE = 'ant'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(true)
   })
 
   test('returns true for URL with path', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(true)
   })
 
   test('returns true for trailing slash', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com/'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(true)
   })
 
   test('returns false for subdomain attack', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://evil-api.anthropic.com'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
     expect(isFirstPartyAnthropicBaseUrlTest()).toBe(false)
+  })
+
+  test('ASSUME_FIRST_PARTY forces true for custom URL (Gd)', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://my-proxy.com'
+    process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL = '1'
+    expect(isFirstPartyAnthropicBaseUrlTest()).toBe(true)
+  })
+
+  test('ASSUME empty string does not force', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://my-proxy.com'
+    process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL = ''
+    expect(isFirstPartyAnthropicBaseUrlTest()).toBe(false)
+  })
+
+  test('Rpe densable: firstParty + Gd only', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    delete process.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
+    expect(isFirstPartyProviderWithFirstPartyBaseTest('firstParty')).toBe(true)
+    expect(isFirstPartyProviderWithFirstPartyBaseTest('bedrock')).toBe(false)
+    process.env.ANTHROPIC_BASE_URL = 'https://my-proxy.com'
+    expect(isFirstPartyProviderWithFirstPartyBaseTest('firstParty')).toBe(false)
   })
 })

@@ -43,6 +43,11 @@ import { type FpsMetrics, FpsTracker } from './utils/fpsTracker.js';
 import { updateGithubRepoPathMapping } from './utils/githubRepoPathMapping.js';
 import { applyConfigEnvironmentVariables } from './utils/managedEnv.js';
 import type { PermissionMode } from './utils/permissions/PermissionMode.js';
+import {
+  getFrameTimingLogPath,
+  isPowerupOnboardingEnabled,
+  resolveFrameTimingSampleEvery,
+} from './utils/residualFinalEnvGates.js';
 import { getBaseRenderOptions } from './utils/renderOptions.js';
 import { getSettingsWithAllErrors } from './utils/settings/allErrors.js';
 import { hasSkipDangerousModePermissionPrompt } from './utils/settings/settings.js';
@@ -146,9 +151,11 @@ export async function showSetupScreens(
 
   const config = getGlobalConfig();
   let onboardingShown = false;
+  // Official: CLAUDE_CODE_POWERUP_ONBOARDING=banner|step forces onboarding UI.
   if (
     !config.theme ||
-    !config.hasCompletedOnboarding // always show onboarding at least once
+    !config.hasCompletedOnboarding || // always show onboarding at least once
+    isPowerupOnboardingEnabled()
   ) {
     onboardingShown = true;
     const { Onboarding } = await import('./components/Onboarding.js');
@@ -319,7 +326,10 @@ export function getRenderContext(exitOnCtrlC: boolean): {
   // offline analysis by bench/repl-scroll.ts. Captures the full TUI
   // render pipeline (yoga → screen buffer → diff → optimize → stdout)
   // so perf work on any phase can be validated against real user flows.
-  const frameTimingLogPath = process.env.CLAUDE_CODE_FRAME_TIMING_LOG;
+  // Official: FRAME_TIMING_LOG path + FRAME_TIMING_SAMPLE_EVERY stride.
+  const frameTimingLogPath = getFrameTimingLogPath();
+  const frameTimingSampleEvery = resolveFrameTimingSampleEvery();
+  let frameTimingSampleCounter = 0;
   return {
     getFpsMetrics: () => fpsTracker.getMetrics(),
     stats,
@@ -329,19 +339,22 @@ export function getRenderContext(exitOnCtrlC: boolean): {
         fpsTracker.record(event.durationMs);
         stats.observe('frame_duration_ms', event.durationMs);
         if (frameTimingLogPath && event.phases) {
-          // Bench-only env-var-gated path: sync write so no frames dropped
-          // on abrupt exit. ~100 bytes at ≤60fps is negligible. rss/cpu are
-          // single syscalls; cpu is cumulative — bench side computes delta.
-          const line =
-            // eslint-disable-next-line custom-rules/no-direct-json-operations -- tiny object, hot bench path
-            JSON.stringify({
-              total: event.durationMs,
-              ...event.phases,
-              rss: process.memoryUsage.rss(),
-              cpu: process.cpuUsage(),
-            }) + '\n';
-          // eslint-disable-next-line custom-rules/no-sync-fs -- bench-only, sync so no frames dropped on exit
-          appendFileSync(frameTimingLogPath, line);
+          frameTimingSampleCounter += 1;
+          if (frameTimingSampleCounter % frameTimingSampleEvery === 0) {
+            // Bench-only env-var-gated path: sync write so no frames dropped
+            // on abrupt exit. ~100 bytes at ≤60fps is negligible. rss/cpu are
+            // single syscalls; cpu is cumulative — bench side computes delta.
+            const line =
+              // eslint-disable-next-line custom-rules/no-direct-json-operations -- tiny object, hot bench path
+              JSON.stringify({
+                total: event.durationMs,
+                ...event.phases,
+                rss: process.memoryUsage.rss(),
+                cpu: process.cpuUsage(),
+              }) + '\n';
+            // eslint-disable-next-line custom-rules/no-sync-fs -- bench-only, sync so no frames dropped on exit
+            appendFileSync(frameTimingLogPath, line);
+          }
         }
         // Skip flicker reporting for terminals with synchronized output —
         // DEC 2026 buffers between BSU/ESU so clear+redraw is atomic.

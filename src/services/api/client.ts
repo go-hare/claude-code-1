@@ -6,7 +6,10 @@ import {
   getAnthropicApiKey,
   getApiKeyFromApiKeyHelper,
   getClaudeAIOAuthTokens,
+  getDefaultAwsProviderChain,
+  hostManagedAwsSdkCredentials,
   isClaudeAISubscriber,
+  isHostManagedProviderAuth,
   refreshAndGetAwsCredentials,
   refreshGcpCredentialsIfNeeded,
 } from 'src/utils/auth.js'
@@ -16,7 +19,12 @@ import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
 } from 'src/utils/model/providers.js'
+import { wrapFetchWithBodyIdleWatchdog } from 'src/utils/bodyIdleWatchdog.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
+import {
+  resolveByteStreamIdleTimeoutMs,
+  shouldEnableBodyIdleWatchdog,
+} from 'src/utils/streamWatchdogGates.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,
@@ -28,6 +36,16 @@ import {
   getVertexRegionForModel,
   isEnvTruthy,
 } from '../../utils/envUtils.js'
+import { applyGzipRequestBodyInit } from '../../utils/gzipRequestBodies.js'
+import {
+  applyGatewayFromEnvResult,
+  formatGatewaySessionExpiredError,
+  getGatewayAuth,
+  isGatewayAuthExpired,
+  resolveGatewayFromEnv,
+} from '../../utils/gatewayEnv.js'
+import { extractAuthorizationHeader } from '../../utils/residualFinalEnvGates.js'
+import { shouldPropagateTraceparent } from '../../utils/propagateTraceparent.js'
 
 /**
  * Environment variables for different client types:
@@ -120,23 +138,75 @@ export async function getAnthropicClient({
     `[API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: ${!!process.env.ANTHROPIC_CUSTOM_HEADERS}, has Authorization header: ${!!customHeaders['Authorization']}`,
   )
 
-  // Add additional protection header if enabled via env var
-  const additionalProtectionEnabled = isEnvTruthy(
+  // Official ADDITIONAL_PROTECTION densable — x-anthropic-additional-protection.
+  let additionalProtectionEnabled = isEnvTruthy(
     process.env.CLAUDE_CODE_ADDITIONAL_PROTECTION,
   )
+  try {
+    const { isAdditionalProtectionEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    additionalProtectionEnabled = isAdditionalProtectionEnabled()
+  } catch {
+    // residual helpers optional
+  }
   if (additionalProtectionEnabled) {
     defaultHeaders['x-anthropic-additional-protection'] = 'true'
+  }
+
+  // Official CLAUDE_CODE_PROPAGATE_TRACEPARENT — forward W3C trace context.
+  if (shouldPropagateTraceparent() && process.env.TRACEPARENT) {
+    defaultHeaders['traceparent'] = process.env.TRACEPARENT
+  }
+  if (shouldPropagateTraceparent() && process.env.TRACESTATE) {
+    defaultHeaders['tracestate'] = process.env.TRACESTATE
   }
 
   logForDebugging('[API:auth] OAuth token check starting')
   await checkAndRefreshOAuthTokenIfNeeded()
   logForDebugging('[API:auth] OAuth token check complete')
 
-  if (!isClaudeAISubscriber()) {
+  // Official uRi first branch: resolve early so apiKeyHelper headers are not
+  // layered on top of the gateway JWT session.
+  const gatewayFromEnvEarly = resolveGatewayFromEnv()
+  if (gatewayFromEnvEarly.status === 'missing') {
+    logForDebugging(gatewayFromEnvEarly.message)
+  } else if (gatewayFromEnvEarly.status === 'invalid_url') {
+    throw new Error(gatewayFromEnvEarly.message)
+  }
+
+  if (!isClaudeAISubscriber() && gatewayFromEnvEarly.status !== 'ok') {
     await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
-  const resolvedFetch = buildFetch(fetchOverride, source)
+  // Official CAh → F_({ forAnthropicAPI: true, hasBodyIdleWatchdog: CAh(provider) })
+  // Provider for this client request matches current session provider (getAPIProvider).
+  const requestProvider = getAPIProvider()
+  const hasBodyIdleWatchdog = shouldEnableBodyIdleWatchdog({
+    requestProvider,
+    currentProvider: requestProvider,
+  })
+  // Official HAi — only resolve when CAh is on; consumer wraps response body.
+  const bodyIdleTimeoutMs = hasBodyIdleWatchdog
+    ? resolveByteStreamIdleTimeoutMs({ provider: requestProvider })
+    : 0
+
+  // Base fetch (gzip / client-request-id), then byte-body idle watchdog when
+  // CAh is on so F_ timeout:false is not a hang hole.
+  let resolvedFetch = buildFetch(fetchOverride, source)
+  if (hasBodyIdleWatchdog && bodyIdleTimeoutMs > 0) {
+    resolvedFetch = wrapFetchWithBodyIdleWatchdog(
+      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+      (resolvedFetch ?? globalThis.fetch) as (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => Promise<Response>,
+      () => ({
+        enabled: true,
+        idleTimeoutMs: bodyIdleTimeoutMs,
+      }),
+    ) as ClientOptions['fetch']
+  }
 
   const ARGS = {
     defaultHeaders,
@@ -145,12 +215,45 @@ export async function getAnthropicClient({
     dangerouslyAllowBrowser: true,
     fetchOptions: getProxyFetchOptions({
       forAnthropicAPI: true,
+      hasBodyIdleWatchdog,
     }) as ClientOptions['fetchOptions'],
     ...(resolvedFetch && {
       fetch: resolvedFetch,
     }),
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
+  // Official USE_*/SKIP_* densables for cloud provider client selection.
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  let skipBedrockAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)
+  let skipFoundryAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH)
+  let skipVertexAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)
+  let skipAwsCredCache = isEnvTruthy(
+    process.env.CLAUDE_CODE_SKIP_AWS_CRED_CACHE,
+  )
+  try {
+    const {
+      isUseBedrockEnvEnabled,
+      isUseFoundryEnvEnabled,
+      isUseVertexEnvEnabled,
+      isSkipBedrockAuthEnvEnabled,
+      isSkipFoundryAuthEnvEnabled,
+      isSkipVertexAuthEnvEnabled,
+      isSkipAwsCredCacheEnvEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useBedrock = isUseBedrockEnvEnabled()
+    useFoundry = isUseFoundryEnvEnabled()
+    useVertex = isUseVertexEnvEnabled()
+    skipBedrockAuth = isSkipBedrockAuthEnvEnabled()
+    skipFoundryAuth = isSkipFoundryAuthEnvEnabled()
+    skipVertexAuth = isSkipVertexAuthEnvEnabled()
+    skipAwsCredCache = isSkipAwsCredCacheEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (useBedrock) {
     const { BedrockClient } = await import('./bedrockClient.js')
     // Use region override for small fast model if specified
     const awsRegion =
@@ -162,7 +265,7 @@ export async function getAnthropicClient({
     const bedrockArgs: Record<string, unknown> = {
       ...ARGS,
       awsRegion,
-      ...(isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH) && {
+      ...(skipBedrockAuth && {
         skipAuth: true,
       }),
       ...(isDebugToStdErr() && { logger: createStderrLogger() }),
@@ -176,25 +279,46 @@ export async function getAnthropicClient({
         ...(bedrockArgs.defaultHeaders as Record<string, string> | undefined),
         Authorization: `Bearer ${process.env.AWS_BEARER_TOKEN_BEDROCK}`,
       }
-    } else if (!isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)) {
-      // Refresh auth and get credentials with cache clearing
-      const cachedCredentials = await refreshAndGetAwsCredentials()
-      if (cachedCredentials) {
-        bedrockArgs.awsAccessKey = cachedCredentials.accessKeyId
-        bedrockArgs.awsSecretKey = cachedCredentials.secretAccessKey
-        bedrockArgs.awsSessionToken = cachedCredentials.sessionToken
+    } else if (!skipBedrockAuth) {
+      // Official 2.1.207: host-managed desktop credentials (Qv/vpe) skip
+      // settings awsAuthRefresh/export and use env keys or fromIni only.
+      if (isHostManagedProviderAuth()) {
+        bedrockArgs.providerChainResolver =
+          hostManagedAwsSdkCredentials('Bedrock').providerChainResolver
+      } else {
+        // Export path when configured; else stall-guarded default chain via
+        // providerChainResolver (avoids re-resolving SSO / Windows Cred
+        // Manager on every request without a 60s hang).
+        const cachedCredentials = await refreshAndGetAwsCredentials()
+        if (cachedCredentials) {
+          bedrockArgs.awsAccessKey = cachedCredentials.accessKeyId
+          bedrockArgs.awsSecretKey = cachedCredentials.secretAccessKey
+          bedrockArgs.awsSessionToken = cachedCredentials.sessionToken
+        } else if (!skipAwsCredCache) {
+          const resolveChain = await getDefaultAwsProviderChain(awsRegion)
+          bedrockArgs.providerChainResolver = async () => {
+            return async () => {
+              const creds = await resolveChain()
+              return {
+                accessKeyId: creds.accessKeyId,
+                secretAccessKey: creds.secretAccessKey,
+                sessionToken: creds.sessionToken || undefined,
+              }
+            }
+          }
+        }
       }
     }
     // we have always been lying about the return type - this doesn't support batching or models
     return new BedrockClient(bedrockArgs) as unknown as Anthropic
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) {
+  if (useFoundry) {
     const { AnthropicFoundry } = await import('@anthropic-ai/foundry-sdk')
     // Determine Azure AD token provider based on configuration
     // SDK reads ANTHROPIC_FOUNDRY_API_KEY by default
     let azureADTokenProvider: (() => Promise<string>) | undefined
     if (!process.env.ANTHROPIC_FOUNDRY_API_KEY) {
-      if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH)) {
+      if (skipFoundryAuth) {
         // Mock token provider for testing/proxy scenarios (similar to Vertex mock GoogleAuth)
         azureADTokenProvider = () => Promise.resolve('')
       } else {
@@ -218,10 +342,10 @@ export async function getAnthropicClient({
     // we have always been lying about the return type - this doesn't support batching or models
     return new AnthropicFoundry(foundryArgs) as unknown as Anthropic
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) {
+  if (useVertex) {
     // Refresh GCP credentials if gcpAuthRefresh is configured and credentials are expired
     // This is similar to how we handle AWS credential refresh for Bedrock
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) {
+    if (!skipVertexAuth) {
       await refreshGcpCredentialsIfNeeded()
     }
 
@@ -263,7 +387,7 @@ export async function getAnthropicClient({
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] ||
       process.env['google_application_credentials']
 
-    const googleAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)
+    const googleAuth = skipVertexAuth
       ? ({
           // Mock GoogleAuth for testing/proxy scenarios
           getClient: () => ({
@@ -297,18 +421,226 @@ export async function getAnthropicClient({
     return new AnthropicVertex(vertexArgs) as unknown as Anthropic
   }
 
+  // Official anthropicAws / mantle client densables (after bedrock/foundry/vertex).
+  let useAnthropicAws = isEnvTruthy(process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS)
+  let useMantle = isEnvTruthy(process.env.CLAUDE_CODE_USE_MANTLE)
+  let skipAnthropicAwsAuth = isEnvTruthy(
+    process.env.CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH,
+  )
+  let skipMantleAuth = isEnvTruthy(process.env.CLAUDE_CODE_SKIP_MANTLE_AUTH)
+  type PeelAuth = (headers: Record<string, string>) => {
+    value: string | undefined
+    rest: Record<string, string>
+  }
+  let peelAuth: PeelAuth = headers => ({
+    value: headers.Authorization ?? headers.authorization,
+    rest: Object.fromEntries(
+      Object.entries(headers).filter(
+        ([k]) => k.toLowerCase() !== 'authorization',
+      ),
+    ),
+  })
+  let apiKeyFromAuthorizationHeader = (
+    authorization: string | undefined,
+  ): string | undefined => {
+    if (!authorization) return undefined
+    const m = authorization.match(/^Bearer (.+)$/i)
+    return m?.[1] ?? authorization
+  }
+  try {
+    const residual =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useAnthropicAws = residual.isAnthropicAwsProviderEnabled()
+    useMantle = residual.isMantleProviderEnabled()
+    skipAnthropicAwsAuth = residual.shouldSkipAnthropicAwsAuth()
+    skipMantleAuth = residual.shouldSkipMantleAuth()
+    peelAuth = residual.extractAuthorizationHeader
+    apiKeyFromAuthorizationHeader = residual.apiKeyFromAuthorizationHeader
+  } catch {
+    // keep raw env fallbacks + local peel helpers
+  }
+
+  if (useAnthropicAws) {
+    const { AnthropicAwsClient } = await import('./anthropicAwsClient.js')
+    const peeled = peelAuth(
+      (ARGS.defaultHeaders ?? {}) as Record<string, string>,
+    )
+    const skipAuthBearer = skipAnthropicAwsAuth ? peeled.value : undefined
+    const awsArgs: ConstructorParameters<typeof AnthropicAwsClient>[0] = {
+      ...ARGS,
+      defaultHeaders: {
+        ...peeled.rest,
+        Authorization: null as unknown as string,
+      },
+      ...(skipAnthropicAwsAuth &&
+        !skipAuthBearer && {
+          skipAuth: true,
+        }),
+      ...(skipAuthBearer && {
+        apiKey: apiKeyFromAuthorizationHeader(skipAuthBearer) ?? skipAuthBearer,
+        defaultHeaders: {
+          ...peeled.rest,
+          Authorization: skipAuthBearer,
+        },
+      }),
+      ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+    }
+    // Official: when no ANTHROPIC_AWS_API_KEY and not skipAuth, inject AWS creds.
+    if (!process.env.ANTHROPIC_AWS_API_KEY && !skipAnthropicAwsAuth) {
+      if (isHostManagedProviderAuth()) {
+        awsArgs.providerChainResolver =
+          hostManagedAwsSdkCredentials('AnthropicAws').providerChainResolver
+      } else {
+        const cachedCredentials = await refreshAndGetAwsCredentials()
+        if (cachedCredentials) {
+          awsArgs.awsAccessKey = cachedCredentials.accessKeyId
+          awsArgs.awsSecretAccessKey = cachedCredentials.secretAccessKey
+          awsArgs.awsSessionToken = cachedCredentials.sessionToken
+        } else if (!skipAwsCredCache) {
+          const resolveChain = await getDefaultAwsProviderChain(getAWSRegion())
+          awsArgs.providerChainResolver = async () => {
+            return async () => {
+              const creds = await resolveChain()
+              return {
+                accessKeyId: creds.accessKeyId,
+                secretAccessKey: creds.secretAccessKey,
+                sessionToken: creds.sessionToken || undefined,
+              }
+            }
+          }
+        }
+      }
+    }
+    return new AnthropicAwsClient(awsArgs) as unknown as Anthropic
+  }
+
+  if (useMantle) {
+    const { AnthropicBedrockMantle } = await import('@anthropic-ai/bedrock-sdk')
+    const peeled = peelAuth(
+      (ARGS.defaultHeaders ?? {}) as Record<string, string>,
+    )
+    const skipAuthBearer = skipMantleAuth ? peeled.value : undefined
+    const bearerToken = process.env.AWS_BEARER_TOKEN_BEDROCK?.trim()
+    let awsCreds: {
+      accessKeyId: string
+      secretAccessKey: string
+      sessionToken?: string
+    } | null = null
+    if (!bearerToken && !skipMantleAuth) {
+      if (!isHostManagedProviderAuth()) {
+        const cached = await refreshAndGetAwsCredentials()
+        if (cached) {
+          awsCreds = {
+            accessKeyId: cached.accessKeyId,
+            secretAccessKey: cached.secretAccessKey,
+            sessionToken: cached.sessionToken,
+          }
+        }
+      }
+    }
+    const mantleArgs: ConstructorParameters<typeof AnthropicBedrockMantle>[0] =
+      {
+        ...ARGS,
+        awsRegion: getAWSRegion(),
+        defaultHeaders: bearerToken
+          ? {
+              ...peeled.rest,
+              Authorization: `Bearer ${bearerToken}`,
+            }
+          : {
+              ...peeled.rest,
+              Authorization: null as unknown as string,
+            },
+        ...(skipMantleAuth &&
+          !skipAuthBearer && {
+            skipAuth: true,
+          }),
+        ...(skipAuthBearer && {
+          apiKey:
+            apiKeyFromAuthorizationHeader(skipAuthBearer) ?? skipAuthBearer,
+          defaultHeaders: {
+            ...peeled.rest,
+            Authorization: skipAuthBearer,
+          },
+        }),
+        ...(awsCreds && {
+          awsAccessKey: awsCreds.accessKeyId,
+          awsSecretAccessKey: awsCreds.secretAccessKey,
+          awsSessionToken: awsCreds.sessionToken,
+        }),
+        ...(isHostManagedProviderAuth() &&
+          !bearerToken &&
+          !skipMantleAuth &&
+          !awsCreds && {
+            providerChainResolver:
+              hostManagedAwsSdkCredentials('Mantle').providerChainResolver,
+          }),
+        ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+      }
+    return new AnthropicBedrockMantle(mantleArgs) as unknown as Anthropic
+  }
+
+  // Official uRi: CLAUDE_CODE_USE_GATEWAY + BASE_URL + AUTH_TOKEN pins an
+  // unpinned Cloud-gateway session (jwt as authToken, baseURL override).
+  // Else restore enterpriseGateway from secureStorage when gatewayTrust pin
+  // present (sync densable; live TLS probe denser via restoreGatewayAuth).
+  // Official SJe IdP refresh densable when idpRefreshToken nearing expiry.
+  applyGatewayFromEnvResult(gatewayFromEnvEarly)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {
+      getGatewayAuth: getGw,
+      tryRestoreGatewayAuthFromSecureStorage,
+      maybeRefreshGatewayIdp,
+    } = require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
+    if (!getGw()) {
+      tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    }
+    // Fire-and-forget densable when transport absent (skipped/error); real
+    // postToken inject denser at enterprise login sites.
+    void maybeRefreshGatewayIdp()
+  } catch {
+    // densable optional
+  }
+  const gatewaySession = getGatewayAuth()
+  if (getAPIProvider() === 'gateway') {
+    if (!gatewaySession || isGatewayAuthExpired(gatewaySession)) {
+      throw new Error(formatGatewaySessionExpiredError())
+    }
+  }
+
+  // Official gateway client: kTt peel Authorization then set Bearer jwt.
+  const gatewayDefaultHeaders = gatewaySession
+    ? {
+        ...extractAuthorizationHeader(
+          (ARGS.defaultHeaders ?? {}) as Record<string, string>,
+        ).rest,
+        Authorization: `Bearer ${gatewaySession.jwt}`,
+      }
+    : undefined
+
   // Determine authentication method based on available tokens
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
-    apiKey: isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey(),
-    authToken: isClaudeAISubscriber()
-      ? getClaudeAIOAuthTokens()?.accessToken
-      : undefined,
-    // Set baseURL from OAuth config when using staging OAuth
-    ...(process.env.USER_TYPE === 'ant' &&
-    isEnvTruthy(process.env.USE_STAGING_OAUTH)
-      ? { baseURL: getOauthConfig().BASE_API_URL }
-      : {}),
+    apiKey: gatewaySession
+      ? null
+      : isClaudeAISubscriber()
+        ? null
+        : apiKey || getAnthropicApiKey(),
+    authToken: gatewaySession
+      ? gatewaySession.jwt
+      : isClaudeAISubscriber()
+        ? getClaudeAIOAuthTokens()?.accessToken
+        : undefined,
+    // Gateway session wins; else staging OAuth baseURL when ant.
+    ...(gatewaySession
+      ? { baseURL: gatewaySession.url }
+      : process.env.USER_TYPE === 'ant' &&
+          isEnvTruthy(process.env.USE_STAGING_OAUTH)
+        ? { baseURL: getOauthConfig().BASE_API_URL }
+        : {}),
     ...ARGS,
+    ...(gatewayDefaultHeaders ? { defaultHeaders: gatewayDefaultHeaders } : {}),
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }
 
@@ -319,6 +651,19 @@ async function configureApiKeyHeaders(
   headers: Record<string, string>,
   isNonInteractiveSession: boolean,
 ): Promise<void> {
+  // Official HFI densable — trajectory runner injects bearer via env.
+  try {
+    const { getHfiBearerToken } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    const hfi = getHfiBearerToken()
+    if (hfi) {
+      headers['Authorization'] = `Bearer ${hfi}`
+      return
+    }
+  } catch {
+    // residual helpers optional
+  }
   const token =
     process.env.ANTHROPIC_AUTH_TOKEN ||
     (await getApiKeyFromApiKeyHelper(isNonInteractiveSession))
@@ -374,9 +719,11 @@ function buildFetch(
     if (injectClientRequestId && !headers.has(CLIENT_REQUEST_ID_HEADER)) {
       headers.set(CLIENT_REQUEST_ID_HEADER, randomUUID())
     }
+    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+    let url = ''
     try {
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      const url = input instanceof Request ? input.url : String(input)
+      url = input instanceof Request ? input.url : String(input)
       const id = headers.get(CLIENT_REQUEST_ID_HEADER)
       logForDebugging(
         `[API REQUEST] ${new URL(url).pathname}${id ? ` ${CLIENT_REQUEST_ID_HEADER}=${id}` : ''} source=${source ?? 'unknown'}`,
@@ -384,6 +731,12 @@ function buildFetch(
     } catch {
       // never let logging crash the fetch
     }
-    return inner(input, { ...init, headers })
+    // Official x_h: compress eligible first-party request bodies with gzip
+    // and pad JSON body whitespace for length fingerprint resistance.
+    const withGzip = applyGzipRequestBodyInit(url, {
+      ...init,
+      headers,
+    })
+    return inner(input, withGzip ?? { ...init, headers })
   }
 }

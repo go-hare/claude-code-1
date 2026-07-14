@@ -21,7 +21,9 @@ import { loadPluginMcpServers } from '../utils/plugins/mcpPluginIntegration.js'
 import { detectAndUninstallDelistedPlugins } from '../utils/plugins/pluginBlocklist.js'
 import { getFlaggedPlugins } from '../utils/plugins/pluginFlagging.js'
 import { loadAllPlugins } from '../utils/plugins/pluginLoader.js'
+import { refreshActivePlugins } from '../utils/plugins/refresh.js'
 import type { PluginLoadResult } from '../types/plugin.js'
+import { isBackgroundPluginRefreshEnabled } from '../utils/residualMoreEnvGates.js'
 
 /**
  * Hook to manage plugin state and synchronize with AppState.
@@ -295,20 +297,26 @@ export function useManagePlugins({
   }, [initialPluginLoad, enabled])
 
   // Plugin state changed on disk (background reconcile, /plugin menu,
-  // external settings edit). Show a notification; user runs /reload-plugins
-  // to apply. The previous auto-refresh here had a stale-cache bug (only
-  // cleared loadAllPlugins, downstream memoized loaders returned old data)
-  // and was incomplete (no MCP, no agentDefinitions). /reload-plugins
-  // handles all of that correctly via refreshActivePlugins().
+  // external settings edit). Default: notify user to run /reload-plugins.
+  // Official CLAUDE_CODE_ENABLE_BACKGROUND_PLUGIN_REFRESH: auto-call
+  // refreshActivePlugins (same complete Layer-3 path as /reload-plugins).
   useEffect(() => {
     if (!enabled || !needsRefresh) return
+    if (isBackgroundPluginRefreshEnabled()) {
+      void refreshActivePlugins(setAppState).catch(err => {
+        logError(toError(err))
+        logForDebugging(
+          `background plugin refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'error' },
+        )
+      })
+      return
+    }
     addNotification({
       key: 'plugin-reload-pending',
       text: 'Plugins changed. Run /reload-plugins to activate.',
       color: 'suggestion',
       priority: 'low',
     })
-    // Do NOT auto-refresh. Do NOT reset needsRefresh — /reload-plugins
-    // consumes it via refreshActivePlugins().
-  }, [enabled, needsRefresh, addNotification])
+  }, [enabled, needsRefresh, addNotification, setAppState])
 }

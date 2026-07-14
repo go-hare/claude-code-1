@@ -2,7 +2,7 @@ import type { Base64ImageSource, ImageBlockParam } from '@anthropic-ai/sdk/resou
 import React, { Suspense, use, useCallback, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../../../hooks/useSettings.js';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { stringWidth, useTheme } from '@anthropic/ink';
+import { stringWidth, useTheme, useTerminalFocus } from '@anthropic/ink';
 import { useKeybindings } from '../../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -20,7 +20,9 @@ import { logError } from '../../../utils/log.js';
 import { applyMarkdown } from '../../../utils/markdown.js';
 import { isPlanModeInterviewPhaseEnabled } from '../../../utils/planModeV2.js';
 import { getPlanFilePath } from '../../../utils/plans.js';
+import { askUserQuestionTimeoutToMs } from '../../../utils/settings/settings.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
+import { AfkCountdown } from './AfkCountdown.js';
 import { QuestionView } from './QuestionView.js';
 import { SubmitQuestionsView } from './SubmitQuestionsView.js';
 import { useMultipleChoiceState } from './use-multiple-choice-state.js';
@@ -66,6 +68,10 @@ function AskUserQuestionPermissionRequestBody({
   const questions = result.success ? result.data.questions || [] : [];
   const { rows: terminalRows } = useTerminalSize();
   const [theme] = useTheme();
+  // Official 2.1.200: default never; only auto-continue when explicitly configured
+  // (or CLAUDE_AFK_TIMEOUT_MS). Memoize once per dialog open.
+  const afkTimeoutMs = useMemo(() => askUserQuestionTimeoutToMs(), []);
+  const isTerminalFocused = useTerminalFocus();
 
   // Calculate consistent content dimensions across all questions to prevent layout shifts.
   // globalContentHeight represents the total height of the content area below the nav/title,
@@ -280,15 +286,31 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
   }, [questions, answers, onDone, toolUseConfirm, metadataSource, isInPlanMode, allImageAttachments]);
 
   const submitAnswers = useCallback(
-    async (answersToSubmit: Record<string, string>) => {
+    async (answersToSubmit: Record<string, string>, options?: { afkTimeoutMs?: number }) => {
       // Log acceptance with metadata source if present
       if (metadataSource) {
-        logEvent('tengu_ask_user_question_accepted', {
-          source: metadataSource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        logEvent(
+          options?.afkTimeoutMs ? 'tengu_ask_user_question_afk_auto_advance' : 'tengu_ask_user_question_accepted',
+          {
+            source: metadataSource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            questionCount: questions.length,
+            answerCount: Object.keys(answersToSubmit).length,
+            isInPlanMode,
+            interviewPhaseEnabled: isInPlanMode && isPlanModeInterviewPhaseEnabled(),
+            ...(options?.afkTimeoutMs
+              ? {
+                  timeoutMs: options.afkTimeoutMs,
+                  hadPartialAnswers: Object.keys(answersToSubmit).length > 0,
+                }
+              : {}),
+          },
+        );
+      } else if (options?.afkTimeoutMs) {
+        logEvent('tengu_ask_user_question_afk_auto_advance', {
           questionCount: questions.length,
-          answerCount: Object.keys(answersToSubmit).length,
+          timeoutMs: options.afkTimeoutMs,
+          hadPartialAnswers: Object.keys(answersToSubmit).length > 0,
           isInPlanMode,
-          interviewPhaseEnabled: isInPlanMode && isPlanModeInterviewPhaseEnabled(),
         });
       }
       // Build annotations from questionStates (e.g., selected preview, user notes)
@@ -311,6 +333,7 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
         ...toolUseConfirm.input,
         answers: answersToSubmit,
         ...(Object.keys(annotations).length > 0 && { annotations }),
+        ...(options?.afkTimeoutMs ? { afkTimeoutMs: options.afkTimeoutMs } : {}),
       };
 
       const contentBlocks = await convertImagesToBlocks(allImageAttachments);
@@ -324,6 +347,17 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
       );
     },
     [toolUseConfirm, onDone, metadataSource, questions, questionStates, isInPlanMode, allImageAttachments],
+  );
+
+  // Official 2.1.200: auto-continue with answers selected so far after idle.
+  // Disabled while the terminal is unfocused (user may be in another app).
+  // Gate on resolved ms only — invalid CLAUDE_AFK_TIMEOUT_MS must not enable.
+  const afkEnabled = isTerminalFocused && afkTimeoutMs !== null;
+  const handleAfkTimeout = useCallback(
+    (timeoutMs: number) => {
+      void submitAnswers(answers, { afkTimeoutMs: timeoutMs }).catch(logError);
+    },
+    [submitAnswers, answers],
   );
 
   const handleQuestionAnswer = useCallback(
@@ -433,6 +467,7 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
           pastedContents={pastedContentsByQuestion[currentQuestion.question] ?? {}}
           onRemoveImage={id => onRemoveImage(currentQuestion.question, id)}
         />
+        <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
       </>
     );
   }
@@ -449,6 +484,7 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
           minContentHeight={globalContentHeight}
           onFinalResponse={handleFinalResponse}
         />
+        <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
       </>
     );
   }

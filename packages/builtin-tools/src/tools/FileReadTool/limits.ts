@@ -15,21 +15,17 @@
 import memoize from 'lodash-es/memoize.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { MAX_OUTPUT_SIZE } from 'src/utils/file.js'
+import { resolveFileReadMaxOutputTokens } from 'src/utils/residualUiEnvGates.js'
 export const DEFAULT_MAX_OUTPUT_TOKENS = 25000
 
 /**
  * Env var override for max output tokens. Returns undefined when unset/invalid
  * so the caller can fall through to the next precedence tier.
+ * Official qpg densable — mirrors resolveFileReadMaxOutputTokens.
  */
 function getEnvMaxTokens(): number | undefined {
-  const override = process.env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS
-  if (override) {
-    const parsed = parseInt(override, 10)
-    if (!isNaN(parsed) && parsed > 0) {
-      return parsed
-    }
-  }
-  return undefined
+  // Official qpg densable
+  return resolveFileReadMaxOutputTokens()
 }
 
 export type FileReadingLimits = {

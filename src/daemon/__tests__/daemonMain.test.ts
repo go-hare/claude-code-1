@@ -38,6 +38,8 @@ describe('daemonMain subcommand routing', () => {
     expect(output).toContain('SUBCOMMANDS')
     expect(output).toContain('status')
     expect(output).toContain('start')
+    expect(output).toContain('install')
+    expect(output).toContain('uninstall')
     expect(output).toContain('stop')
     expect(output).toContain('bg')
     expect(output).toContain('attach')

@@ -152,7 +152,15 @@ export function isPlanModeRequired(): boolean {
   if (dynamicTeamContext !== null) {
     return dynamicTeamContext.planModeRequired
   }
-  return isEnvTruthy(process.env.CLAUDE_CODE_PLAN_MODE_REQUIRED)
+  // Official Nkr densable — CLAUDE_CODE_PLAN_MODE_REQUIRED env fallback.
+  try {
+    const { isPlanModeRequiredFromEnv } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    return isPlanModeRequiredFromEnv()
+  } catch {
+    return isEnvTruthy(process.env.CLAUDE_CODE_PLAN_MODE_REQUIRED)
+  }
 }
 
 /**

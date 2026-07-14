@@ -1052,7 +1052,9 @@ export function getMcpConfigByName(name: string): ScopedMcpServerConfig | null {
   if (localServers[name]) {
     return localServers[name]
   }
-  if (projectServers[name]) {
+  // Official: only approved project (.mcp.json) servers are reachable by name
+  // for connection paths. Pending/rejected are surfaceable via list/get only.
+  if (projectServers[name] && getProjectMcpServerStatus(name) === 'approved') {
     return projectServers[name]
   }
   if (userServers[name]) {
@@ -1310,17 +1312,52 @@ export function parseMcpConfig(params: {
   const { configObject, expandVars, scope, filePath } = params
   const schemaResult = McpJsonConfigSchema().safeParse(configObject)
   if (!schemaResult.success) {
+    // Official 2.1.202: when a server entry has `url` but no `type`, Zod
+    // rejects the union (stdio expects `command`). Surface a clearer hint.
+    const servers =
+      configObject &&
+      typeof configObject === 'object' &&
+      'mcpServers' in configObject &&
+      (configObject as { mcpServers?: unknown }).mcpServers &&
+      typeof (configObject as { mcpServers: unknown }).mcpServers === 'object'
+        ? ((configObject as { mcpServers: Record<string, unknown> })
+            .mcpServers as Record<string, unknown>)
+        : null
+
     return {
       config: null,
-      errors: schemaResult.error.issues.map(issue => ({
-        ...(filePath && { file: filePath }),
-        path: issue.path.join('.'),
-        message: 'Does not adhere to MCP server configuration schema',
-        mcpErrorMetadata: {
-          scope,
-          severity: 'fatal',
-        },
-      })),
+      errors: schemaResult.error.issues.map(issue => {
+        const path = issue.path.join('.')
+        let message = 'Does not adhere to MCP server configuration schema'
+        let suggestion: string | undefined
+        // path like mcpServers.<name> or mcpServers.<name>.command
+        const nameMatch = path.match(/^mcpServers\.([^.]+)/)
+        if (nameMatch && servers) {
+          const entry = servers[nameMatch[1]!]
+          if (
+            entry &&
+            typeof entry === 'object' &&
+            entry !== null &&
+            'url' in entry &&
+            !('type' in entry)
+          ) {
+            message = `MCP server "${nameMatch[1]}" has "url" but no "type"`
+            suggestion =
+              'Add "type": "http" (or "sse" / "ws") for remote servers. Example: { "type": "http", "url": "..." }'
+          }
+        }
+        return {
+          ...(filePath && { file: filePath }),
+          path,
+          message,
+          ...(suggestion && { suggestion }),
+          mcpErrorMetadata: {
+            scope,
+            severity: 'fatal' as const,
+            ...(nameMatch && { serverName: nameMatch[1]! }),
+          },
+        }
+      }),
     }
   }
 
@@ -1553,13 +1590,23 @@ function isDefaultDisabledBuiltin(name: string): boolean {
  * @param name The name of the server
  * @returns true if the server is disabled
  */
+/**
+ * Official 2.1.200: treat non-array disabled/enabled MCP lists as empty
+ * instead of crashing on `.includes` when project config is corrupted.
+ */
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string')
+    : []
+}
+
 export function isMcpServerDisabled(name: string): boolean {
   const projectConfig = getCurrentProjectConfig()
   if (isDefaultDisabledBuiltin(name)) {
-    const enabledServers = projectConfig.enabledMcpServers || []
+    const enabledServers = asStringArray(projectConfig.enabledMcpServers)
     return !enabledServers.includes(name)
   }
-  const disabledServers = projectConfig.disabledMcpServers || []
+  const disabledServers = asStringArray(projectConfig.disabledMcpServers)
   return disabledServers.includes(name)
 }
 
@@ -1584,15 +1631,27 @@ export function setMcpServerEnabled(name: string, enabled: boolean): void {
 
   saveCurrentProjectConfig(current => {
     if (isDefaultDisabledBuiltin(name)) {
-      const prev = current.enabledMcpServers || []
+      const prev = asStringArray(current.enabledMcpServers)
       const next = toggleMembership(prev, name, enabled)
-      if (next === prev) return current
+      if (
+        next.length === prev.length &&
+        next.every((v, i) => v === prev[i]) &&
+        Array.isArray(current.enabledMcpServers)
+      ) {
+        return current
+      }
       return { ...current, enabledMcpServers: next }
     }
 
-    const prev = current.disabledMcpServers || []
+    const prev = asStringArray(current.disabledMcpServers)
     const next = toggleMembership(prev, name, !enabled)
-    if (next === prev) return current
+    if (
+      next.length === prev.length &&
+      next.every((v, i) => v === prev[i]) &&
+      Array.isArray(current.disabledMcpServers)
+    ) {
+      return current
+    }
     return { ...current, disabledMcpServers: next }
   })
 

@@ -24,6 +24,11 @@ import {
   connectDoubaoStream,
   isDoubaoAvailableSync,
 } from '../services/doubaoSTT.js'
+import {
+  checkVoiceCircuitBreaker,
+  recordVoiceEarlyFailure,
+  resetVoiceCircuitBreaker,
+} from '../services/voiceCircuitBreaker.js'
 import { logForDebugging } from '../utils/debug.js'
 import { toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
@@ -503,6 +508,7 @@ export function useVoice({
           if (!wsConnected) {
             // WS never connected → audio never reached backend. Not a silent
             // drop; a connection failure (slow OAuth refresh, network, etc).
+            recordVoiceEarlyFailure()
             onErrorRef.current?.(
               'Voice connection failed. Check your network and try again.',
             )
@@ -646,6 +652,23 @@ export function useVoice({
       return
     }
 
+    // Official 2.1.202: circuit breaker — suppress new sessions after enough
+    // early failures within a short window until a transcript succeeds.
+    const circuit = checkVoiceCircuitBreaker()
+    if (!circuit.open) {
+      if (circuit.firstTrip) {
+        logForDebugging(
+          `[voice] circuit breaker: ${String(circuit.failureCount)} early failures in ${String(circuit.windowMs)}ms — suppressing new sessions until one succeeds`,
+          { level: 'error' },
+        )
+        logEvent('tengu_voice_circuit_breaker_tripped', {})
+      }
+      onErrorRef.current?.(
+        'Voice input is failing repeatedly and has been paused. Check your microphone and try again in a moment.',
+      )
+      return
+    }
+
     // Transition to 'recording' synchronously, BEFORE any await. Callers
     // read state synchronously right after `void startRecordingSession()`:
     // - useVoiceIntegration.tsx space-hold guard reads voiceState from the
@@ -674,6 +697,7 @@ export function useVoice({
       onErrorRef.current?.(
         availability.reason ?? 'Audio recording is not available.',
       )
+      recordVoiceEarlyFailure()
       cleanup()
       updateState('idle')
       return
@@ -743,6 +767,7 @@ export function useVoice({
       onErrorRef.current?.(
         'Failed to start audio capture. Check that your microphone is accessible.',
       )
+      recordVoiceEarlyFailure()
       cleanup()
       updateState('idle')
       setVoiceState(prev => ({
@@ -801,6 +826,8 @@ export function useVoice({
           onTranscript: (text: string, isFinal: boolean) => {
             if (isStale()) return
             sawTranscript = true
+            // Official rgb: any transcript clears the early-failure breaker.
+            resetVoiceCircuitBreaker()
             logForDebugging(
               `[voice] onTranscript: isFinal=${String(isFinal)} text="${text}"`,
             )
@@ -911,6 +938,10 @@ export function useVoice({
             // Surfacing — bump gen so this conn's trailing close-error
             // (ws fires error then close 1006) is swallowed above.
             attemptGenRef.current++
+            // Official Dpn: only count as early failure when no transcript yet.
+            if (!sawTranscript) {
+              recordVoiceEarlyFailure()
+            }
             logError(new Error(`[voice] voice_stream error: ${error}`))
             onErrorRef.current?.(`Voice stream error: ${error}`)
             // Clear the audio buffer on error to avoid memory leaks

@@ -18,7 +18,8 @@ import config from './commands/config/index.js'
 import { context, contextNonInteractive } from './commands/context/index.js'
 // cost/index.ts re-exports usage — /cost is now an alias of /usage
 import diff from './commands/diff/index.js'
-import doctor from './commands/doctor/index.js'
+// Session /doctor is the official 2.1.208 bundled skill (registerDoctorSkill).
+// Terminal `claude doctor` remains via main.tsx → cli/handlers/util → screens/Doctor.
 import memory from './commands/memory/index.js'
 import mode from './commands/mode/index.js'
 import help from './commands/help/index.js'
@@ -150,11 +151,16 @@ const historyCmd = feature('UDS_INBOX')
 const claimMainCmd = feature('UDS_INBOX')
   ? require('./commands/claim-main/index.js').default
   : null
-const forkCmd = feature('FORK_SUBAGENT')
-  ? (
-      require('./commands/fork/index.js') as typeof import('./commands/fork/index.js')
-    ).default
-  : null
+// feature('FORK_SUBAGENT') OR official CLAUDE_CODE_FORK_SUBAGENT / GB.
+const forkCmd =
+  feature('FORK_SUBAGENT') ||
+  (
+    require('./utils/forkSubagentGate.js') as typeof import('./utils/forkSubagentGate.js')
+  ).isForkSubagentEnabled()
+    ? (
+        require('./commands/fork/index.js') as typeof import('./commands/fork/index.js')
+      ).default
+    : null
 const buddy = isBuddyEnabled()
   ? (
       require('./commands/buddy/index.js') as typeof import('./commands/buddy/index.js')
@@ -240,6 +246,8 @@ import upgrade from './commands/upgrade/index.js'
 import {
   extraUsage,
   extraUsageNonInteractive,
+  usageCredits,
+  usageCreditsNonInteractive,
 } from './commands/extra-usage/index.js'
 import rateLimitOptions from './commands/rate-limit-options/index.js'
 import statusline from './commands/statusline.js'
@@ -325,7 +333,6 @@ const COMMANDS = memoize((): Command[] => [
   context,
   contextNonInteractive,
   diff,
-  doctor,
   effort,
   exit,
   fast,
@@ -370,6 +377,8 @@ const COMMANDS = memoize((): Command[] => [
   securityReview,
   terminalSetup,
   upgrade,
+  usageCredits,
+  usageCreditsNonInteractive,
   extraUsage,
   extraUsageNonInteractive,
   rateLimitOptions,
@@ -657,22 +666,41 @@ export function getMcpSkillCommands(
 
 // SkillTool shows ALL prompt-based commands that the model can invoke
 // This includes both skills (from /skills/) and commands (from /commands/)
+// Official Lqe densable — skillOverrides / disableBundledSkills may hide items.
 export const getSkillToolCommands = memoize(
   async (cwd: string): Promise<Command[]> => {
     const allCommands = await getCommands(cwd)
-    return allCommands.filter(
-      cmd =>
-        cmd.type === 'prompt' &&
-        !cmd.disableModelInvocation &&
-        cmd.source !== 'builtin' &&
-        // Always include skills from /skills/ dirs, bundled skills, and legacy /commands/ entries
-        // (they all get an auto-derived description from the first line if frontmatter is missing).
-        // Plugin/MCP commands still require an explicit description to appear in the listing.
-        (cmd.loadedFrom === 'bundled' ||
-          cmd.loadedFrom === 'skills' ||
-          cmd.loadedFrom === 'commands_DEPRECATED' ||
-          cmd.hasUserSpecifiedDescription ||
-          cmd.whenToUse),
+    let skillOverrides:
+      | Readonly<
+          Record<
+            string,
+            | 'on'
+            | 'name-only'
+            | 'user-invocable-only'
+            | 'off'
+            | 'model-invocable'
+          >
+        >
+      | undefined
+    let settingsDisableBundledSkills: boolean | undefined
+    try {
+      const { getInitialSettings } = await import(
+        './utils/settings/settings.js'
+      )
+      const settings = getInitialSettings()
+      skillOverrides = settings.skillOverrides
+      settingsDisableBundledSkills = settings.disableBundledSkills
+    } catch {
+      // Settings optional.
+    }
+    const { isSkillModelListable } = await import(
+      './utils/residualFinalEnvGates.js'
+    )
+    return allCommands.filter(cmd =>
+      isSkillModelListable(cmd, {
+        skillOverrides,
+        settingsDisableBundledSkills,
+      }),
     )
   },
 )

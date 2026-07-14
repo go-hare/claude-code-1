@@ -16,6 +16,10 @@ import { execFileNoThrow } from './utils/execFileNoThrow.js'
 import { getBranch, getDefaultBranch, getIsGit, gitExe } from './utils/git.js'
 import { shouldIncludeGitInstructions } from './utils/gitSettings.js'
 import { logError } from './utils/log.js'
+import {
+  getPerforceModePromptAddendum,
+  isPerforceModeEnabled,
+} from './utils/perforceMode.js'
 
 const MAX_STATUS_CHARS = 1000
 
@@ -121,11 +125,31 @@ export const getSystemContext = memoize(
     logForDiagnosticsNoPII('info', 'system_context_started')
 
     // Skip git status in CCR (unnecessary overhead on resume), when git instructions
-    // are disabled, or when --exclude-dynamic-system-prompt-sections is set
+    // are disabled, or when --exclude-dynamic-system-prompt-sections is set.
+    // Official EXCLUDE_DYNAMIC_CONTEXT densable.
+    let excludeDynamicContext = isEnvTruthy(
+      process.env.CLAUDE_CODE_EXCLUDE_DYNAMIC_CONTEXT,
+    )
+    try {
+      const { isExcludeDynamicContextEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js')
+      excludeDynamicContext = isExcludeDynamicContextEnabled()
+    } catch {
+      // keep raw env fallback
+    }
+    // Official REMOTE densable — skip git status in CCR.
+    let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+    try {
+      const { isRemoteEnvEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js')
+      isRemote = isRemoteEnvEnabled()
+    } catch {
+      // keep raw env fallback
+    }
     const gitStatus =
-      isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
-      isEnvTruthy(process.env.CLAUDE_CODE_EXCLUDE_DYNAMIC_CONTEXT) ||
-      !shouldIncludeGitInstructions()
+      isRemote || excludeDynamicContext || !shouldIncludeGitInstructions()
         ? null
         : await getGitStatus()
 
@@ -142,6 +166,10 @@ export const getSystemContext = memoize(
 
     return {
       ...(gitStatus && { gitStatus }),
+      // Official CLAUDE_CODE_PERFORCE_MODE — system-context checkout hint.
+      ...(isPerforceModeEnabled()
+        ? { perforceMode: getPerforceModePromptAddendum('Bash') }
+        : {}),
       ...(feature('BREAK_CACHE_COMMAND') && injection
         ? {
             cacheBreaker: `[CACHE_BREAKER: ${injection}]`,
@@ -164,8 +192,19 @@ export const getUserContext = memoize(
     // CLAUDE_CODE_DISABLE_CLAUDE_MDS: hard off, always.
     // --bare: skip auto-discovery (cwd walk), BUT honor explicit --add-dir.
     // --bare means "skip what I didn't ask for", not "ignore what I asked for".
+    let claudeMdsEnvDisabled = isEnvTruthy(
+      process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS,
+    )
+    try {
+      const { isClaudeMdsDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js')
+      claudeMdsEnvDisabled = isClaudeMdsDisabled()
+    } catch {
+      // residual helpers optional
+    }
     const shouldDisableClaudeMd =
-      isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS) ||
+      claudeMdsEnvDisabled ||
       (isBareMode() && getAdditionalDirectoriesForClaudeMd().length === 0)
     // Await the async I/O (readFile/readdir directory walk) so the event
     // loop yields naturally at the first fs.readFile.

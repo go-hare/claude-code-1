@@ -3,6 +3,7 @@ import { getIsInteractive } from '../bootstrap/state.js'
 import { logForDebugging } from './debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
+import { isAlternateScreenDisabled } from './residualUiEnvGates.js'
 
 let loggedTmuxCcDisable = false
 let checkedTmuxMouseHint = false
@@ -110,12 +111,24 @@ export function _resetTmuxControlModeProbeForTesting(): void {
  * opt in).
  */
 export function isFullscreenEnvEnabled(): boolean {
+  // Official CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN force-off.
+  if (isAlternateScreenDisabled()) {
+    return false
+  }
   // bg sessions always use fullscreen (official: SESSION_KIND==="bg" → true)
   if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return true
   // Explicit user opt-out always wins.
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)) return false
   // Explicit opt-in overrides auto-detection (escape hatch).
-  if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
+  // Official isNoFlickerEnabled densable force-on.
+  try {
+    const { isNoFlickerEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    if (isNoFlickerEnabled()) return true
+  } catch {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
+  }
   // Auto-disable under tmux -CC: alt-screen + mouse tracking corrupts
   // terminal state on double-click and mouse wheel is dead.
   if (isTmuxControlMode()) {
@@ -131,6 +144,28 @@ export function isFullscreenEnvEnabled(): boolean {
 }
 
 /**
+ * Official Lfe densable mouse mode:
+ * - DISABLE_MOUSE set → "off" when truthy, else "full"
+ * - else DISABLE_MOUSE_CLICKS set → "scroll" when truthy, else "full"
+ * - else "full"
+ *
+ * "full" = tracking + clicks; "scroll" = tracking, no clicks; "off" = no tracking.
+ */
+export type MouseTrackingMode = 'off' | 'scroll' | 'full'
+
+export function resolveMouseTrackingMode(
+  env: NodeJS.ProcessEnv = process.env,
+): MouseTrackingMode {
+  if (env.CLAUDE_CODE_DISABLE_MOUSE !== undefined) {
+    return isEnvTruthy(env.CLAUDE_CODE_DISABLE_MOUSE) ? 'off' : 'full'
+  }
+  if (env.CLAUDE_CODE_DISABLE_MOUSE_CLICKS !== undefined) {
+    return isEnvTruthy(env.CLAUDE_CODE_DISABLE_MOUSE_CLICKS) ? 'scroll' : 'full'
+  }
+  return 'full'
+}
+
+/**
  * Whether fullscreen mode should enable SGR mouse tracking (DEC 1000/1002/1006).
  * Set CLAUDE_CODE_DISABLE_MOUSE=1 to keep alt-screen + virtualized scroll
  * (keyboard PgUp/PgDn/Ctrl+Home/End still work) but skip mouse capture,
@@ -139,8 +174,10 @@ export function isFullscreenEnvEnabled(): boolean {
  * Compare with CLAUDE_CODE_NO_FLICKER=0 which is all-or-nothing — it also
  * disables alt-screen and virtualized scrollback.
  */
-export function isMouseTrackingEnabled(): boolean {
-  return !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MOUSE)
+export function isMouseTrackingEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return resolveMouseTrackingMode(env) !== 'off'
 }
 
 /**
@@ -149,9 +186,13 @@ export function isMouseTrackingEnabled(): boolean {
  * from triggering cursor positioning, text selection, or message expansion.
  *
  * Fullscreen-specific — only reachable when CLAUDE_CODE_NO_FLICKER is active.
+ * Official Lfe: "scroll" mode disables clicks; "off" also has no clicks.
  */
-export function isMouseClicksDisabled(): boolean {
-  return isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MOUSE_CLICKS)
+export function isMouseClicksDisabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const mode = resolveMouseTrackingMode(env)
+  return mode === 'scroll' || mode === 'off'
 }
 
 /**

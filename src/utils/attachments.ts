@@ -18,6 +18,7 @@ import {
 } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { FileTooLargeError, readFileInRange } from './readFileInRange.js'
 import { expandPath } from './path.js'
+import { mergePendingNestedMemoryTriggers } from './propagateNestedMemory.js'
 import { countCharInString } from './stringUtils.js'
 import { uniq } from './array.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -215,6 +216,11 @@ import {
   tokenCountFromLastAPIResponse,
   tokenCountWithEstimation,
 } from './tokens.js'
+import {
+  buildTotalTokensReminderAttachments,
+  getTotalTokensReminderMode,
+} from './totalTokensReminder.js'
+import { isTodoReminderEnabled } from './todoReminderMode.js'
 import {
   getEffectiveContextWindowSize,
   isAutoCompactEnabled,
@@ -651,6 +657,10 @@ export type Attachment =
       remaining: number
     }
   | {
+      type: 'total_tokens_reminder'
+      text: string
+    }
+  | {
       type: 'budget_usd'
       used: number
       total: number
@@ -787,10 +797,18 @@ export async function getAttachments(
   querySource?: QuerySource,
   options?: { skipSkillDiscovery?: boolean },
 ): Promise<Attachment[]> {
-  if (
-    isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
-  ) {
+  let attachmentsDisabled = isEnvTruthy(
+    process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS,
+  )
+  try {
+    const { isAttachmentsDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    attachmentsDisabled = isAttachmentsDisabled()
+  } catch {
+    // residual helpers optional
+  }
+  if (attachmentsDisabled || isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
     // query.ts:removeFromQueue dequeues these unconditionally after
     // getAttachmentMessages runs — returning [] here silently drops them.
     // Coworker runs with --bare and depends on task-notification for
@@ -1032,6 +1050,15 @@ export async function getAttachments(
             getTokenUsageAttachment(
               messages ?? [],
               toolUseContext.options.mainLoopModel,
+            ),
+          ),
+        ),
+        maybe('total_tokens_reminder', async () =>
+          Promise.resolve(
+            getTotalTokensReminderAttachment(
+              messages ?? [],
+              toolUseContext.options.mainLoopModel,
+              toolUseContext.agentId,
             ),
           ),
         ),
@@ -1883,6 +1910,8 @@ async function getNestedMemoryAttachmentsForFile(
       originalCwd,
     )
 
+    // Official GB tengu_paper_halyard — skip Project/Local CLAUDE.md.
+    // CLAUDE_CODE_SKIP_PROJECT_BACKFILL is schema-only in 2.1.207.
     const skipProjectLevel = getFeatureValue_CACHED_MAY_BE_STALE(
       'tengu_paper_halyard',
       false,
@@ -2230,6 +2259,10 @@ export async function getChangedFiles(
 async function getNestedMemoryAttachments(
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
+  // Official oFy: drain coordinator-propagated pending triggers onto the root
+  // nestedMemoryAttachmentTriggers set before processing (agentId must be unset).
+  mergePendingNestedMemoryTriggers(toolUseContext)
+
   // Check triggers first — getAppState() waits for a React render cycle,
   // and the common case is an empty trigger set.
   if (
@@ -3360,6 +3393,10 @@ async function getTodoReminderAttachments(
   messages: Message[] | undefined,
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
+  // Official YDs — CLAUDE_CODE_TODO_REMINDER_MODE / tengu_soft_slate_nudge.
+  if (!isTodoReminderEnabled()) {
+    return []
+  }
   // Skip if TodoWrite tool is not available
   if (
     !toolUseContext.options.tools.some(t =>
@@ -3901,7 +3938,19 @@ function getTokenUsageAttachment(
   messages: Message[],
   model: string,
 ): Attachment[] {
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TOKEN_USAGE_ATTACHMENT)) {
+  // Official ENABLE_TOKEN_USAGE_ATTACHMENT densable.
+  let tokenUsageAttachmentEnabled = isEnvTruthy(
+    process.env.CLAUDE_CODE_ENABLE_TOKEN_USAGE_ATTACHMENT,
+  )
+  try {
+    const { isTokenUsageAttachmentEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    tokenUsageAttachmentEnabled = isTokenUsageAttachmentEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (!tokenUsageAttachmentEnabled) {
     return []
   }
 
@@ -3916,6 +3965,26 @@ function getTokenUsageAttachment(
       remaining: contextWindow - usedTokens,
     },
   ]
+}
+
+/**
+ * Official EFy — totalTokensReminder attachment after tool-result batches.
+ * After-user-turn re-anchor is available via buildTotalTokensReminderAttachments
+ * when callers pass reanchor=true (REPL user-turn path).
+ */
+function getTotalTokensReminderAttachment(
+  messages: Message[],
+  model: string,
+  agentId?: string,
+): Attachment[] {
+  if (getTotalTokensReminderMode() === 'off') return []
+  const contextWindow = getEffectiveContextWindowSize(model)
+  const usedTokens = tokenCountFromLastAPIResponse(messages)
+  return buildTotalTokensReminderAttachments({
+    sessionUsedTokens: usedTokens,
+    contextWindowTokens: contextWindow,
+    scopeId: agentId ?? 'main',
+  })
 }
 
 function getOutputTokenUsageAttachment(): Attachment[] {
@@ -3988,10 +4057,17 @@ async function getVerifyPlanReminderAttachment(
   messages: Message[] | undefined,
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
-  if (
-    process.env.USER_TYPE !== 'ant' ||
-    !isEnvTruthy(process.env.CLAUDE_CODE_VERIFY_PLAN)
-  ) {
+  // Official VERIFY_PLAN densable.
+  let verifyPlanEnabled = isEnvTruthy(process.env.CLAUDE_CODE_VERIFY_PLAN)
+  try {
+    const { isVerifyPlanEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    verifyPlanEnabled = isVerifyPlanEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (process.env.USER_TYPE !== 'ant' || !verifyPlanEnabled) {
     return []
   }
 

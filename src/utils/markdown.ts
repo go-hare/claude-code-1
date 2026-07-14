@@ -7,6 +7,7 @@ import { stringWidth, supportsHyperlinks } from '@anthropic/ink'
 import { createHyperlink } from '../utils/hyperlink.js'
 import type { CliHighlight } from './cliHighlight.js'
 import { logForDebugging } from './debug.js'
+import { supportsStrikethrough } from './forceStrikethrough.js'
 
 import { stripPromptXMLTags } from './messages.js'
 import type { ThemeName } from './theme.js'
@@ -22,15 +23,19 @@ export function configureMarked(): void {
   if (markedConfigured) return
   markedConfigured = true
 
-  // Disable strikethrough parsing - the model often uses ~ for "approximate"
-  // (e.g., ~100) and rarely intends actual strikethrough formatting
-  marked.use({
-    tokenizer: {
-      del() {
-        return undefined
+  // When the terminal cannot render SGR strikethrough, disable del parsing —
+  // the model often uses ~ for "approximate" (e.g., ~100). When support (or
+  // FORCE_STRIKETHROUGH) is on, keep official del tokenization so ~~text~~
+  // can render via chalk.strikethrough.
+  if (!supportsStrikethrough()) {
+    marked.use({
+      tokenizer: {
+        del() {
+          return undefined
+        },
       },
-    },
-  })
+    })
+  }
 }
 
 export function applyMarkdown(
@@ -270,8 +275,18 @@ export function formatToken(
     case 'escape':
       // Markdown escape: \) → ), \\ → \, etc.
       return token.text
+    case 'del': {
+      // Official wLr: real SGR strikethrough when the terminal supports it,
+      // else keep the ~~…~~ markers visible.
+      const inner = (token.tokens ?? [])
+        .map(_ => formatToken(_, theme, 0, null, null, highlight))
+        .join('')
+      if (supportsStrikethrough() && chalk.level > 0) {
+        return chalk.strikethrough(inner)
+      }
+      return `~~${inner}~~`
+    }
     case 'def':
-    case 'del':
     case 'html':
       // These token types are not rendered
       return ''

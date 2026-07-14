@@ -19,10 +19,15 @@ import {
   setNextTickAt,
   shouldTick,
 } from './index.js'
+import {
+  LOOP_DEFAULT_TICK_INTERVAL_MS,
+  resolveLoopTickIntervalMs,
+} from '../utils/loopKeepalive.js'
 
 /** Default interval between ticks (ms). Prompt cache TTL is ~5 min so we
- *  stay well under that to keep the cache warm. */
-const TICK_INTERVAL_MS = 30_000
+ *  stay well under that to keep the cache warm. LOOP_KEEPALIVE densable
+ *  may stretch this via resolveLoopTickIntervalMs. */
+const TICK_INTERVAL_MS = LOOP_DEFAULT_TICK_INTERVAL_MS
 
 type UseProactiveOpts = {
   isLoading: boolean
@@ -44,7 +49,11 @@ export function useProactive(opts: UseProactiveOpts): void {
     let generating = false
 
     function scheduleTick(): void {
-      const nextTs = Date.now() + TICK_INTERVAL_MS
+      // Official LOOP_KEEPALIVE densable — longer cadence when keepalive on.
+      const intervalMs = resolveLoopTickIntervalMs({
+        defaultMs: TICK_INTERVAL_MS,
+      })
+      const nextTs = Date.now() + intervalMs
       setNextTickAt(nextTs)
 
       timer = setTimeout(() => {
@@ -118,7 +127,7 @@ export function useProactive(opts: UseProactiveOpts): void {
 
         // Schedule next tick
         scheduleTick()
-      }, TICK_INTERVAL_MS)
+      }, intervalMs)
     }
 
     scheduleTick()

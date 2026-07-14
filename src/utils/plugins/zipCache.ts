@@ -44,7 +44,7 @@ import { tmpdir } from 'os'
 import { basename, dirname, join } from 'path'
 import { logForDebugging } from '../debug.js'
 import { parseZipModes, unzipFile } from '../dxt/zip.js'
-import { isEnvTruthy } from '../envUtils.js'
+import { isPluginZipCacheEnvEnabled } from '../residualFinalEnvGates.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { expandTilde } from '../permissions/pathValidation.js'
 import type { MarketplaceSource } from './schemas.js'
@@ -53,7 +53,7 @@ import type { MarketplaceSource } from './schemas.js'
  * Check if the plugin zip cache mode is enabled.
  */
 export function isPluginZipCacheEnabled(): boolean {
-  return isEnvTruthy(process.env.CLAUDE_CODE_PLUGIN_USE_ZIP_CACHE)
+  return isPluginZipCacheEnvEnabled()
 }
 
 /**

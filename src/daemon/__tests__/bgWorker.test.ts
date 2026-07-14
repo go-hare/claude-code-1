@@ -1,5 +1,24 @@
-import { describe, expect, test } from 'bun:test'
-import { buildPtyHostSpawnArgs } from '../bgWorker'
+import { afterEach, describe, expect, test } from 'bun:test'
+import {
+  buildPtyHostSpawnArgs,
+  buildWorkerEnv,
+  type DispatchRequest,
+} from '../bgWorker'
+
+function makeDispatch(
+  mode: DispatchRequest['launch']['mode'],
+): DispatchRequest {
+  return {
+    short: 'abcd',
+    sessionId: 'sess',
+    intent: 'test',
+    cwd: process.cwd(),
+    respawnFlags: [],
+    source: 'test',
+    createdAt: Date.now(),
+    launch: { mode },
+  }
+}
 
 describe('buildPtyHostSpawnArgs', () => {
   test('keeps script path in dev mode', () => {
@@ -61,5 +80,34 @@ describe('buildPtyHostSpawnArgs', () => {
       '--resume',
       'def',
     ])
+  })
+})
+
+describe('buildWorkerEnv exec EXTRA_BODY (2.1.206)', () => {
+  const prevBody = process.env.CLAUDE_CODE_EXTRA_BODY
+  const prevMeta = process.env.CLAUDE_CODE_EXTRA_METADATA
+
+  afterEach(() => {
+    if (prevBody === undefined) delete process.env.CLAUDE_CODE_EXTRA_BODY
+    else process.env.CLAUDE_CODE_EXTRA_BODY = prevBody
+    if (prevMeta === undefined) delete process.env.CLAUDE_CODE_EXTRA_METADATA
+    else process.env.CLAUDE_CODE_EXTRA_METADATA = prevMeta
+  })
+
+  test('preserves CLAUDE_CODE_EXTRA_BODY through exec strip', () => {
+    process.env.CLAUDE_CODE_EXTRA_BODY = '{"region":"us"}'
+    process.env.CLAUDE_CODE_EXTRA_METADATA = '{"team":"x"}'
+    const env = buildWorkerEnv(
+      makeDispatch('exec'),
+      '/tmp/job-dir',
+      undefined,
+      '/tmp/rv.sock',
+    )
+    expect(env.CLAUDE_CODE_EXTRA_BODY).toBe('{"region":"us"}')
+    expect(env.CLAUDE_CODE_EXTRA_METADATA).toBe('{"team":"x"}')
+    expect(env.CLAUDE_PTY_HOST_EXEC).toBe('1')
+    // Other CLAUDE_ session vars are still stripped in exec mode
+    expect(env.CLAUDE_CODE_SESSION_KIND).toBeUndefined()
+    expect(env.CLAUDE_JOB_DIR).toBe('/tmp/job-dir')
   })
 })

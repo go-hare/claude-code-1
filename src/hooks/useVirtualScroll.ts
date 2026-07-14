@@ -129,9 +129,10 @@ export type VirtualScrollResult = {
  * scroll height constant for the rest at O(1) fiber cost each.
  *
  * Height estimation: fixed DEFAULT_ESTIMATE for unmeasured items, replaced
- * by real Yoga heights after first layout. No scroll anchoring — overscan
- * absorbs estimate errors. If drift is noticeable in practice, anchoring
- * (scrollBy(delta) when topSpacer changes) is a straightforward followup.
+ * by real Yoga heights after first layout. Official 2.1.207 scroll anchoring
+ * re-adjusts scrollTop (preserveHwm) when a previously-anchored item's Yoga
+ * top shifts after measurement — keeps the transcript from jumping above
+ * the answer when content above the viewport grows/shrinks.
  *
  * stickyScroll caveat: render-node-to-output.ts:450 sets scrollTop=maxScroll
  * during Ink's render phase, which does NOT fire ScrollBox.subscribe. The
@@ -215,6 +216,13 @@ export function useVirtualScroll(
   // effLo inflated → black screen). One-frame lag like heightCache.
   const listOriginRef = useRef(0)
   const spacerRef = useRef<DOMElement | null>(null)
+  // Official 2.1.207: topmost fully-above-or-at scrollTop item used as scroll
+  // anchor. When its Yoga top shifts after remount/measure, compensate
+  // scrollTop with preserveHwm so HWM still covers the pre-shift position.
+  const scrollAnchorRef = useRef<{ key: string; yogaTop: number } | null>(null)
+  // Positive reanchor delta applied this commit — widen clampMax so the
+  // render-time clamp does not fight the compensatory scrollTo.
+  const reanchorDeltaRef = useRef(0)
 
   // useSyncExternalStore ties re-renders to imperative scroll. Snapshot is
   // scrollTop QUANTIZED to SCROLL_QUANTUM bins — Object.is sees no change
@@ -569,29 +577,82 @@ export function useVirtualScroll(
   // render uses estimate-based offsets, clamp set, sticky-follow moves
   // scrollTop, measurement fires, offsets rebuild with real heights, second
   // render's clamp differs → scrollTop clamp-adjusts → content shifts.
-  const listOrigin = listOriginRef.current
   const effTopSpacer = offsets[effStart]!
-  // At effStart=0 there's no unmounted content above — the clamp must allow
-  // scrolling past listOrigin to see pre-list content (logo, header) that
-  // sits in the ScrollBox but outside VirtualMessageList. Only clamp when
-  // the topSpacer is nonzero (there ARE unmounted items above).
-  const clampMin = effStart === 0 ? 0 : effTopSpacer + listOrigin
-  // At effEnd=n there's no bottomSpacer — nothing to avoid racing past. Using
-  // offsets[n] here would bake in heightCache (one render behind Yoga), and
-  // when the tail item is STREAMING its cached height lags its real height by
-  // however much arrived since last measure. Sticky-break then clamps
-  // scrollTop below the real max, pushing the streaming text off-viewport
-  // (the "scrolled up, response disappeared" bug). Infinity = unbounded:
-  // render-node-to-output's own Math.min(cur, maxScroll) governs instead.
-  const clampMax =
-    effEnd === n
-      ? Infinity
-      : Math.max(effTopSpacer, offsets[effEnd]! - viewportH) + listOrigin
+
+  // Official 2.1.207 scroll anchoring: if the previously-chosen anchor
+  // item's Yoga top moved (content above grew after measure), compensate
+  // scrollTop with preserveHwm so stored HWM still covers the prior
+  // position and the transcript does not jump above the answer.
   useLayoutEffect(() => {
+    reanchorDeltaRef.current = 0
+    if (isSticky || scrollTop < 0 || viewportH === 0) {
+      scrollAnchorRef.current = null
+      return
+    }
+    let nextScrollTop = scrollRef.current?.getScrollTop() ?? scrollTop
+    const pending = scrollRef.current?.getPendingDelta() ?? 0
+    const hasScrollAnchor = Boolean(
+      scrollRef.current?.getDomElement()?.scrollAnchor,
+    )
+    const prevAnchor = scrollAnchorRef.current
+    if (prevAnchor && pending === 0 && !hasScrollAnchor) {
+      const yoga = itemRefs.current.get(prevAnchor.key)?.yogaNode
+      if (yoga && yoga.getComputedWidth() > 0) {
+        const delta = yoga.getComputedTop() - prevAnchor.yogaTop
+        if (delta !== 0) {
+          nextScrollTop = nextScrollTop + delta
+          reanchorDeltaRef.current = delta
+          scrollRef.current?.scrollTo(nextScrollTop, { preserveHwm: true })
+          const dom = scrollRef.current?.getDomElement()
+          if (dom && delta > 0) {
+            const fresh = scrollRef.current?.getFreshScrollHeight() ?? 0
+            dom.scrollHeightHwm = Math.max(dom.scrollHeightHwm ?? 0, fresh)
+            dom.scrollHeight = Math.max(dom.scrollHeight ?? 0, fresh)
+          }
+        }
+      }
+    }
+    // Pick new anchor: topmost mounted item whose top is at/above scrollTop.
+    let bestKey: string | undefined
+    let bestTop = -Infinity
+    for (const [key, el] of itemRefs.current) {
+      const yoga = el.yogaNode
+      if (
+        !yoga ||
+        yoga.getComputedWidth() === 0 ||
+        yoga.getComputedHeight() === 0
+      ) {
+        continue
+      }
+      const top = yoga.getComputedTop()
+      if (top <= nextScrollTop && top > bestTop) {
+        bestTop = top
+        bestKey = key
+      }
+    }
+    scrollAnchorRef.current =
+      bestKey !== undefined ? { key: bestKey, yogaTop: bestTop } : null
+  })
+
+  useLayoutEffect(() => {
+    // Keep listOrigin fresh for clamp math (and range math next commit).
+    const spacerYoga = spacerRef.current?.yogaNode
+    if (spacerYoga && spacerYoga.getComputedWidth() > 0) {
+      listOriginRef.current = spacerYoga.getComputedTop()
+    }
     if (isSticky) {
       scrollRef.current?.setClampBounds(undefined, undefined)
     } else {
-      scrollRef.current?.setClampBounds(clampMin, clampMax)
+      const origin = listOriginRef.current
+      const reanchor = reanchorDeltaRef.current
+      const min = effStart === 0 ? 0 : effTopSpacer + origin
+      const max =
+        effEnd === n
+          ? Infinity
+          : Math.max(effTopSpacer, offsets[effEnd]! - viewportH) +
+            origin +
+            Math.max(0, reanchor)
+      scrollRef.current?.setClampBounds(min, max)
     }
   })
 

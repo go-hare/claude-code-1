@@ -2,6 +2,7 @@ import { stat, readFile } from 'fs/promises'
 import { z } from 'zod/v4'
 import type { ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
+import { isArtifactToolDisabled } from 'src/utils/artifactGates.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
   ARTIFACT_TOOL_NAME,
@@ -70,7 +71,45 @@ export const ArtifactTool = buildTool({
   },
 
   isEnabled() {
-    return true
+    // Official R9i/P7t densable — disableArtifact env/settings wins; else
+    // CLAUDE_CODE_ARTIFACT force-on, then enableArtifact sources, default true.
+    try {
+      const { getInitialSettings, getSettingsForSource } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/settings/settings.js') as typeof import('src/utils/settings/settings.js')
+      const { SETTING_SOURCES } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/settings/constants.js') as typeof import('src/utils/settings/constants.js')
+      const { resolveEnableArtifactFromSources } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+      const { isArtifactEnvForceEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/artifactGates.js') as typeof import('src/utils/artifactGates.js')
+      const settings = getInitialSettings()
+      if (isArtifactToolDisabled(process.env, settings.disableArtifact)) {
+        return false
+      }
+      // Official CLAUDE_CODE_ARTIFACT force-enable densable.
+      if (isArtifactEnvForceEnabled()) {
+        return true
+      }
+      const enable = resolveEnableArtifactFromSources(
+        SETTING_SOURCES.map(s => getSettingsForSource(s)?.enableArtifact),
+      )
+      // Official L7t default true when enableArtifact unset.
+      return enable ?? true
+    } catch {
+      try {
+        const { isArtifactEnvForceEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('src/utils/artifactGates.js') as typeof import('src/utils/artifactGates.js')
+        if (isArtifactEnvForceEnabled()) return true
+      } catch {
+        // densable optional
+      }
+      return !isArtifactToolDisabled()
+    }
   },
   isConcurrencySafe() {
     return false
@@ -188,6 +227,20 @@ export const ArtifactTool = buildTool({
         hash,
         ttl,
       })
+      // Official CLAUDE_CODE_ARTIFACT_AUTO_OPEN densable — open after success.
+      try {
+        const { isArtifactAutoOpenEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('src/utils/artifactGates.js') as typeof import('src/utils/artifactGates.js')
+        if (isArtifactAutoOpenEnabled() && result.url) {
+          const { openBrowser } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('src/utils/browser.js') as typeof import('src/utils/browser.js')
+          void openBrowser(result.url)
+        }
+      } catch {
+        // densable optional
+      }
       return { data: result }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)

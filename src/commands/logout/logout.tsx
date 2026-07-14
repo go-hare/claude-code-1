@@ -44,6 +44,11 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
       }
     }
     updated.oauthAccount = undefined;
+    // Official: clear org-default bootstrap cache on logout.
+    updated.orgModelDefaultCache = undefined;
+    updated.lastSeenOrgDefaultUpdatedAt = undefined;
+    updated.additionalModelOptionsCache = undefined;
+    updated.clientDataCache = undefined;
     return updated;
   });
 }

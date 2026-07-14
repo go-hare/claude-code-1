@@ -133,6 +133,22 @@ describe('memoizeWithTTLAsync', () => {
     const second = await fn()
     expect(second).toBe(1)
   })
+
+  test('supports per-value TTL resolver (AWS Expiration)', async () => {
+    let calls = 0
+    const fn = memoizeWithTTLAsync(
+      async () => {
+        calls++
+        return { n: calls, expiration: Date.now() + 60_000 }
+      },
+      value => (value.expiration > Date.now() + 30_000 ? 60_000 : 1),
+    )
+
+    await fn()
+    expect(calls).toBe(1)
+    await fn()
+    expect(calls).toBe(1)
+  })
 })
 
 // ─── memoizeWithLRU ────────────────────────────────────────────────────

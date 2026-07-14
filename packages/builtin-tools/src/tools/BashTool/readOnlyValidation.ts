@@ -1837,7 +1837,8 @@ function extractWritePathsFromSubcommand(subcommand: string): string[] {
  * @param command The full command string to check
  * @returns true if any subcommand writes to git-internal paths
  */
-function commandWritesToGitInternalPaths(command: string): boolean {
+/** @internal exported for bashPermissions cd-git-compound structure-create path */
+export function commandWritesToGitInternalPaths(command: string): boolean {
   const subcommands = splitCommand_DEPRECATED(command)
 
   for (const subcmd of subcommands) {

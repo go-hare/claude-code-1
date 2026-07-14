@@ -12,8 +12,11 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 // Permission Modes
 // ============================================================================
 
+// Official 2.1.207: `auto` is a first-class external permission mode
+// (settings.json, SDK, --permission-mode). Only `bubble` remains internal.
 export const EXTERNAL_PERMISSION_MODES = [
   'acceptEdits',
+  'auto',
   'bypassPermissions',
   'default',
   'dontAsk',
@@ -24,7 +27,7 @@ export type ExternalPermissionMode = (typeof EXTERNAL_PERMISSION_MODES)[number]
 
 // Exhaustive mode union for typechecking. The user-addressable runtime set
 // is INTERNAL_PERMISSION_MODES below.
-export type InternalPermissionMode = ExternalPermissionMode | 'auto' | 'bubble'
+export type InternalPermissionMode = ExternalPermissionMode | 'bubble'
 export type PermissionMode = InternalPermissionMode
 
 // Runtime validation set: modes that are user-addressable (settings.json
@@ -33,7 +36,6 @@ export type PermissionMode = InternalPermissionMode
 // classifier is unavailable and auto mode falls back to prompting.
 export const INTERNAL_PERMISSION_MODES = [
   ...EXTERNAL_PERMISSION_MODES,
-  'auto' as const,
 ] as const satisfies readonly PermissionMode[]
 
 export const PERMISSION_MODES = INTERNAL_PERMISSION_MODES
@@ -322,6 +324,12 @@ export type PermissionDecisionReason =
   | {
       type: 'other'
       reason: string
+      /**
+       * Official 2.1.x telemetry / analytics code for bash permission misses
+       * (e.g. `cd-compound-write`, `cd-compound-redirect`, `multi-cd`).
+       * Human-readable text stays in `reason`; this is the stable short token.
+       */
+      bashMissKind?: string
     }
 
 // ============================================================================
@@ -349,6 +357,15 @@ export type YoloClassifierResult = {
   shouldBlock: boolean
   reason: string
   unavailable?: boolean
+  /**
+   * Official CLAUDE_CODE_AUTO_MODE_OUTCOME_CODES — machine-readable outcome
+   * when outcomeVisibility is enabled.
+   */
+  outcomeCode?:
+    | 'automode-unavailable'
+    | 'automode-parsing-error'
+    | 'automode-blocked'
+    | 'permission-rule'
   /**
    * API returned "prompt is too long" — the classifier transcript exceeded
    * the context window. Deterministic (same transcript → same error), so
@@ -439,4 +456,20 @@ export type ToolPermissionContext = {
   readonly shouldAvoidPermissionPrompts?: boolean
   readonly awaitAutomatedChecksBeforeDialog?: boolean
   readonly prePlanMode?: PermissionMode
+  /**
+   * Official: per MCP serverName → forced mode when session is elevated
+   * (bypass/auto/plan+bypass).
+   */
+  readonly mcpPermissionModeOverrides?: Readonly<
+    Record<string, PermissionMode | undefined>
+  >
+  /** Official: claude-in-chrome tools demote elevated modes via classifier floor. */
+  readonly chromeClassifierFloorEnabled?: boolean
+  /** Official: Claude Preview/Browser tools demote elevated modes via classifier floor. */
+  readonly previewClassifierFloorEnabled?: boolean
+  /**
+   * Official: when classifier floor applies, demote to `auto` if true, else
+   * `default`.
+   */
+  readonly canAutoClassifierRun?: boolean
 }

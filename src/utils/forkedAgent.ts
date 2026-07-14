@@ -271,6 +271,12 @@ export type SubagentContextOverrides = {
   agentId?: AgentId
   /** Override the agentType (for subagents with a specific type) */
   agentType?: string
+  /**
+   * Official isBackgroundAgent. Defaults to true for isolated subagents
+   * (A$/Who fork default); set false for interactive sync subagents that
+   * should still bump mainLoopRefcount.
+   */
+  isBackgroundAgent?: boolean
   /** Override the messages array */
   messages?: Message[]
   /** Override the readFileState (e.g., fresh cache instead of clone) */
@@ -393,7 +399,10 @@ export function createSubagentContext(
       overrides?.readFileState ?? parentContext.readFileState,
     ),
     nestedMemoryAttachmentTriggers: new Set<string>(),
+    // Fresh loaded set for the child; parent pending is shared so cleanup can
+    // push CLAUDE.md paths discovered by the subagent (official createSubagentContext).
     loadedNestedMemoryPaths: new Set<string>(),
+    pendingNestedMemoryTriggers: parentContext.pendingNestedMemoryTriggers,
     dynamicSkillDirTriggers: new Set<string>(),
     // Per-subagent: tracks skills surfaced by discovery for was_discovered telemetry (SkillTool.ts:116)
     discoveredSkillNames: new Set<string>(),
@@ -460,6 +469,15 @@ export function createSubagentContext(
     // Generate new agentId for subagents (each subagent should have its own ID)
     agentId: overrides?.agentId ?? createAgentId(),
     agentType: overrides?.agentType,
+    // Official Who/A$ — forks default isBackgroundAgent true; interactive
+    // sync agents (shareSetAppState) default false so mainLoopRefcount bumps.
+    isBackgroundAgent:
+      overrides?.isBackgroundAgent ??
+      (overrides?.shareSetAppState ? false : true),
+
+    // Official Who — copy requestDialog so nested FXl/X6e can park on host.
+    requestDialog: parentContext.requestDialog,
+    handleElicitation: parentContext.handleElicitation,
 
     // Create new query tracking chain for subagent with incremented depth
     queryTracking: {

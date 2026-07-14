@@ -1,0 +1,122 @@
+/**
+ * Official 2.1.196 densable: organization default model.
+ *
+ * Bootstrap response may include `org_model_default` (name + timestamps +
+ * override_user_selection). When present and the session is first-party, the
+ * /model Default row shows " · Org default" and that model is used when the
+ * user has not pinned one (or when override_user_selection forces it).
+ */
+
+import {
+  getResolvedOrgDefault,
+  setResolvedOrgDefault,
+} from '../../bootstrap/state.js'
+import { getGlobalConfig } from '../config.js'
+import { getAPIProvider } from './providers.js'
+
+export type OrgModelDefaultCache = {
+  name: string
+  updated_at: string
+  data_source: string
+  override_user_selection: boolean
+  /** Bound at cache-write time so a different org cannot inherit the value. */
+  orgUuid?: string
+}
+
+export type ModelDefaultAttribution =
+  | 'org'
+  | 'enforced'
+  | 'entitlement'
+  | 'tier'
+
+export type ResolvedDefaultModel = {
+  setting: string
+  attribution: ModelDefaultAttribution
+}
+
+/**
+ * Read + validate the disk cache of org_model_default (official t_i).
+ */
+export function getOrgModelDefaultCache(): OrgModelDefaultCache | null {
+  const config = getGlobalConfig()
+  const cached = config.orgModelDefaultCache
+  if (
+    cached == null ||
+    typeof cached !== 'object' ||
+    typeof cached.name !== 'string' ||
+    typeof cached.updated_at !== 'string' ||
+    typeof cached.data_source !== 'string' ||
+    typeof cached.override_user_selection !== 'boolean'
+  ) {
+    return null
+  }
+  const orgUuid = config.oauthAccount?.organizationUuid
+  if (cached.orgUuid != null && orgUuid != null && cached.orgUuid !== orgUuid) {
+    return null
+  }
+  // Strip control characters from the model name (official densable).
+  const cleaned = cached.name.replace(
+    // biome-ignore lint/complexity/useRegexLiterals: control ranges as string avoid noControlCharactersInRegex
+    new RegExp('[\\u0000-\\u001f\\u007f-\\u009f]', 'g'),
+    '',
+  )
+  if (cleaned !== cached.name) {
+    return { ...cached, name: cleaned }
+  }
+  return cached
+}
+
+/**
+ * Resolve the org default model name for first-party sessions (official zUe).
+ * Returns null when unset / non-firstParty / invalid.
+ */
+export function getResolvedOrgDefaultModel(): string | null {
+  if (getAPIProvider() !== 'firstParty') {
+    return null
+  }
+  const cached = getOrgModelDefaultCache()
+  if (!cached) {
+    return null
+  }
+  const name = cached.name.trim()
+  return name.length > 0 ? name : null
+}
+
+/**
+ * Session-level resolved org default with lazy cache (official KVo/wgt/G5t org arm).
+ */
+export function resolveOrgDefaultSetting(): string | null {
+  const existing = getResolvedOrgDefault()
+  if (existing !== undefined) {
+    return existing
+  }
+  const resolved = getResolvedOrgDefaultModel()
+  setResolvedOrgDefault(resolved)
+  return resolved
+}
+
+/**
+ * Attribution badge for the Default row in /model (official Elh/Urc/N1n).
+ * - org → " · Org default"
+ * - enforced/entitlement → " · Set by your organization"
+ * - tier → no badge
+ */
+export function getDefaultModelAttributionBadge(
+  attribution: ModelDefaultAttribution,
+): string {
+  if (attribution === 'org') {
+    return ' · Org default'
+  }
+  if (attribution === 'enforced' || attribution === 'entitlement') {
+    return ' · Set by your organization'
+  }
+  return ''
+}
+
+/**
+ * Whether the org default should override a user-pinned model selection.
+ */
+export function shouldOrgDefaultOverrideUserSelection(): boolean {
+  const cached = getOrgModelDefaultCache()
+  return cached?.override_user_selection === true
+}

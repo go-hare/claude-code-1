@@ -93,6 +93,31 @@ const SAFE_YOLO_ALLOWLISTED_TOOLS = new Set([
   YOLO_CLASSIFIER_TOOL_NAME,
 ])
 
+/**
+ * Official isAutoModeFastPathExcludedTool (cDg): tools that must not use the
+ * acceptEdits / safe-allowlist fast path — they always go through the
+ * classifier (or interactive ask). Agent/cron/remote triggers can spawn work.
+ */
+const AUTO_MODE_FAST_PATH_EXCLUDED = new Set([
+  // Agent tool (hi)
+  'Agent',
+  // CronCreate (y0)
+  'CronCreate',
+  // RemoteTrigger (a5e)
+  'RemoteTrigger',
+  // ScheduleWakeup (Fh) — may be absent in this build
+  'ScheduleWakeup',
+])
+
+export function isAutoModeFastPathExcludedTool(toolName: string): boolean {
+  return AUTO_MODE_FAST_PATH_EXCLUDED.has(toolName)
+}
+
+/**
+ * Official NDu name-only half: static safe builtins.
+ * Chrome MCP safe tools are input-dependent — use
+ * `isChromeMcpSafeForAutoMode` at the call site.
+ */
 export function isAutoModeAllowlistedTool(toolName: string): boolean {
   return SAFE_YOLO_ALLOWLISTED_TOOLS.has(toolName)
 }

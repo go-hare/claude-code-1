@@ -31,13 +31,29 @@ import {
   getOAuthTokenFromFileDescriptor,
 } from './authFileDescriptor.js'
 import {
+  evaluateRemoteAuthFailExit,
+  resolveApiKeyHelperTtlMs,
+  resolveOauth401WaitMsOrDefault,
+  waitForRotatedOauthToken,
+} from './residualMsEnvGates.js'
+import { getSdkOauthTokenRefreshCallback } from './sdkOauthTokenRefresh.js'
+import {
   maybeRemoveApiKeyFromMacOSKeychainThrows,
   normalizeApiKeyForConfig,
 } from './authPortable.js'
 import {
+  type AwsResolvedCredentials,
+  AWS_AUTH_REFRESH_COOLDOWN_MS,
+  AWS_CHAIN_INVALIDATE_DEBOUNCE_MS,
+  awsCredentialCacheTtlMs,
   checkStsCallerIdentity,
   clearAwsIniCache,
-  isValidAwsStsOutput,
+  hostManagedAwsProviderChain,
+  hostManagedAwsSdkCredentials,
+  hostManagedNoCredsError,
+  isHostManagedProviderAuth,
+  parseAwsCredentialExport,
+  resolveWithStallGuard,
 } from './aws.js'
 import { AwsAuthStatusManager } from './awsAuthStatusManager.js'
 import { clearBetasCaches } from './betas.js'
@@ -77,9 +93,6 @@ import { sleep } from './sleep.js'
 import { jsonParse } from './slowOperations.js'
 import { clearToolSchemaCache } from './toolSchemaCache.js'
 
-/** Default TTL for API key helper cache in milliseconds (5 minutes) */
-const DEFAULT_API_KEY_HELPER_TTL = 5 * 60 * 1000
-
 /**
  * CCR and Claude Desktop spawn the CLI with OAuth and should never fall back
  * to the user's ~/.claude/settings.json API-key config (apiKeyHelper,
@@ -89,10 +102,17 @@ const DEFAULT_API_KEY_HELPER_TTL = 5 * 60 * 1000
  * also use that key — and fail if it's stale/wrong-org.
  */
 function isManagedOAuthContext(): boolean {
-  return (
-    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
-    process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'
-  )
+  // Official REMOTE densable.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  return isRemote || process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'
 }
 
 /** Whether we are supporting direct 1P auth. */
@@ -113,19 +133,46 @@ export function isAnthropicAuthEnabled(): boolean {
   }
 
   const settings = getSettings_DEPRECATED() || {}
+  // Official USE_* densables for 3P provider detection.
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+  try {
+    const {
+      isUseBedrockEnvEnabled,
+      isUseVertexEnvEnabled,
+      isUseFoundryEnvEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    useBedrock = isUseBedrockEnvEnabled()
+    useVertex = isUseVertexEnvEnabled()
+    useFoundry = isUseFoundryEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   const is3P =
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+    useBedrock ||
+    useVertex ||
+    useFoundry ||
     settings.modelType === 'openai' ||
     settings.modelType === 'gemini' ||
     !!process.env.OPENAI_BASE_URL ||
     !!process.env.GEMINI_BASE_URL
   const apiKeyHelper = settings.apiKeyHelper
+  // Official API_KEY_FILE_DESCRIPTOR densable.
+  let apiKeyFileDescriptor: string | null =
+    process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR || null
+  try {
+    const { resolveApiKeyFileDescriptor } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    apiKeyFileDescriptor = resolveApiKeyFileDescriptor()
+  } catch {
+    // keep raw env fallback
+  }
   const hasExternalAuthToken =
-    process.env.ANTHROPIC_AUTH_TOKEN ||
-    apiKeyHelper ||
-    process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR
+    process.env.ANTHROPIC_AUTH_TOKEN || apiKeyHelper || apiKeyFileDescriptor
 
   // Check if API key is from an external source (not managed by /login)
   const { source: apiKeySource } = getAnthropicApiKeyWithSource({
@@ -354,6 +401,10 @@ export function getAnthropicApiKeyWithSource(
  * from ~/.claude/settings.json or project settings is ignored.
  */
 export function getConfiguredApiKeyHelper(): string | undefined {
+  // Official RN: host-managed provider auth ignores settings apiKeyHelper.
+  if (isHostManagedProviderAuth()) {
+    return undefined
+  }
   if (isBareMode()) {
     return getSettingsForSource('flagSettings')?.apiKeyHelper
   }
@@ -379,9 +430,13 @@ function isApiKeyHelperFromProjectOrLocalSettings(): boolean {
 }
 
 /**
- * Get the configured awsAuthRefresh from settings
+ * Get the configured awsAuthRefresh from settings.
+ * Official EEe / Qv: host-managed provider skips settings shell refresh.
  */
 function getConfiguredAwsAuthRefresh(): string | undefined {
+  if (isHostManagedProviderAuth()) {
+    return undefined
+  }
   const mergedSettings = getSettings_DEPRECATED() || {}
   return mergedSettings.awsAuthRefresh
 }
@@ -404,9 +459,13 @@ export function isAwsAuthRefreshFromProjectSettings(): boolean {
 }
 
 /**
- * Get the configured awsCredentialExport from settings
+ * Get the configured awsCredentialExport from settings.
+ * Official pRi / Qv: host-managed provider skips settings credential export.
  */
 function getConfiguredAwsCredentialExport(): string | undefined {
+  if (isHostManagedProviderAuth()) {
+    return undefined
+  }
   const mergedSettings = getSettings_DEPRECATED() || {}
   return mergedSettings.awsCredentialExport
 }
@@ -431,23 +490,18 @@ export function isAwsCredentialExportFromProjectSettings(): boolean {
 /**
  * Calculate TTL in milliseconds for the API key helper cache
  * Uses CLAUDE_CODE_API_KEY_HELPER_TTL_MS env var if set and valid,
- * otherwise defaults to 5 minutes
+ * otherwise defaults to 5 minutes.
+ * Official obc densable via resolveApiKeyHelperTtlMs.
  */
 export function calculateApiKeyHelperTTL(): number {
-  const envTtl = process.env.CLAUDE_CODE_API_KEY_HELPER_TTL_MS
-
-  if (envTtl) {
-    const parsed = parseInt(envTtl, 10)
-    if (!Number.isNaN(parsed) && parsed >= 0) {
-      return parsed
-    }
+  const { ttlMs, invalidRaw } = resolveApiKeyHelperTtlMs()
+  if (invalidRaw !== undefined) {
     logForDebugging(
-      `Found CLAUDE_CODE_API_KEY_HELPER_TTL_MS env var, but it was not a valid number. Got ${envTtl}`,
+      `Found CLAUDE_CODE_API_KEY_HELPER_TTL_MS env var, but it was not a valid number. Got ${invalidRaw}`,
       { level: 'error' },
     )
   }
-
-  return DEFAULT_API_KEY_HELPER_TTL
+  return ttlMs
 }
 
 // Async API key helper with sync cache for non-blocking reads.
@@ -602,15 +656,38 @@ export function prefetchApiKeyFromApiKeyHelperIfSafe(
   void getApiKeyFromApiKeyHelper(isNonInteractiveSession)
 }
 
-/** Default STS credentials are one hour. We manually manage invalidation, so not too worried about this being accurate. */
-const DEFAULT_AWS_STS_TTL = 60 * 60 * 1000
+// Timeout for AWS auth refresh command (3 minutes).
+// Long enough for browser-based SSO flows, short enough to prevent indefinite hangs.
+const AWS_AUTH_REFRESH_TIMEOUT_MS = 3 * 60 * 1000
+
+/**
+ * Cooldown after an interactive awsAuthRefresh finishes so every subsequent
+ * API call does not re-spawn `aws sso login` when STS is still failing
+ * (official 2.1.207 BBn/FTh).
+ */
+let awsAuthRefreshLastFinishedAt: number | null = null
+/** Bumped by resetAwsAuthRefreshCooldown so in-flight finally does not stamp cooldown. */
+let awsAuthRefreshCooldownEpoch = 0
+/** In-flight refresh promise — concurrent callers share one SSO spawn. */
+let awsAuthRefreshInflight: Promise<boolean> | null = null
+
+/** Cache key for default provider chain: AWS_PROFILE + region. */
+function defaultAwsProviderChainCacheKey(region: string): string {
+  return `${process.env.AWS_PROFILE ?? ''}\0${region}`
+}
+
+const defaultAwsProviderChainLastInvalidate = new Map<string, number>()
 
 /**
  * Run awsAuthRefresh to perform interactive authentication (e.g., aws sso login)
- * Streams output in real-time for user visibility
+ * Streams output in real-time for user visibility.
+ *
+ * Official 2.1.207: STS success skips refresh; failure is single-flight + 30s
+ * cooldown so Bedrock does not re-request SSO credentials on every API call.
  */
 async function runAwsAuthRefresh(): Promise<boolean> {
   const awsAuthRefresh = getConfiguredAwsAuthRefresh()
+  const cooldownEpoch = awsAuthRefreshCooldownEpoch
 
   if (!awsAuthRefresh) {
     return false // Not configured, treat as success
@@ -630,6 +707,10 @@ async function runAwsAuthRefresh(): Promise<boolean> {
     }
   }
 
+  if (awsAuthRefreshInflight) {
+    return awsAuthRefreshInflight
+  }
+
   try {
     logForDebugging('Fetching AWS caller identity for AWS auth refresh command')
     await checkStsCallerIdentity()
@@ -638,16 +719,33 @@ async function runAwsAuthRefresh(): Promise<boolean> {
     )
     return false
   } catch {
-    // only actually do the refresh if caller-identity calls
-    return refreshAwsAuth(awsAuthRefresh)
+    if (awsAuthRefreshInflight) {
+      return awsAuthRefreshInflight
+    }
+    if (
+      awsAuthRefreshLastFinishedAt !== null &&
+      Date.now() - awsAuthRefreshLastFinishedAt < AWS_AUTH_REFRESH_COOLDOWN_MS
+    ) {
+      return false
+    }
+    awsAuthRefreshInflight = (async () => {
+      try {
+        return await refreshAwsAuth(awsAuthRefresh)
+      } finally {
+        if (cooldownEpoch === awsAuthRefreshCooldownEpoch) {
+          awsAuthRefreshLastFinishedAt = Date.now()
+        }
+        awsAuthRefreshInflight = null
+      }
+    })()
+    return awsAuthRefreshInflight
   }
 }
 
-// Timeout for AWS auth refresh command (3 minutes).
-// Long enough for browser-based SSO flows, short enough to prevent indefinite hangs.
-const AWS_AUTH_REFRESH_TIMEOUT_MS = 3 * 60 * 1000
-
-export function refreshAwsAuth(awsAuthRefresh: string): Promise<boolean> {
+export function refreshAwsAuth(
+  awsAuthRefresh: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
   logForDebugging('Running AWS auth refresh command')
   // Start tracking authentication status
   const authStatusManager = AwsAuthStatusManager.getInstance()
@@ -656,6 +754,9 @@ export function refreshAwsAuth(awsAuthRefresh: string): Promise<boolean> {
   return new Promise(resolve => {
     const refreshProc = exec(awsAuthRefresh, {
       timeout: AWS_AUTH_REFRESH_TIMEOUT_MS,
+      // Hide the console window on Windows so SSO browser spawn is not noisy
+      windowsHide: true,
+      ...(signal ? { signal } : {}),
     })
     refreshProc.stdout!.on('data', data => {
       const output = data.toString().trim()
@@ -675,21 +776,26 @@ export function refreshAwsAuth(awsAuthRefresh: string): Promise<boolean> {
       }
     })
 
-    refreshProc.on('close', (code, signal) => {
+    refreshProc.on('close', (code, signalName) => {
       if (code === 0) {
         logForDebugging('AWS auth refresh completed successfully')
         authStatusManager.endAuthentication(true)
         void resolve(true)
       } else {
-        const timedOut = signal === 'SIGTERM'
-        const message = timedOut
-          ? chalk.red(
-              'AWS auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal.',
-            )
-          : chalk.red(
-              'Error running awsAuthRefresh (in settings or ~/.claude.json):',
-            )
-        console.error(message)
+        const aborted = signal?.aborted === true
+        const timedOut = !aborted && signalName === 'SIGTERM'
+        const message = aborted
+          ? null
+          : timedOut
+            ? chalk.red(
+                'AWS auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal.',
+              )
+            : chalk.red(
+                'Error running awsAuthRefresh (in settings or ~/.claude.json):',
+              )
+        if (message) {
+          console.error(message)
+        }
         authStatusManager.endAuthentication(false)
         void resolve(false)
       }
@@ -698,14 +804,12 @@ export function refreshAwsAuth(awsAuthRefresh: string): Promise<boolean> {
 }
 
 /**
- * Run awsCredentialExport to get credentials and set environment variables
- * Expects JSON output containing AWS credentials
+ * Run awsCredentialExport to get credentials.
+ * Official 2.1.207: always runs when configured (no ambient-STS skip) so
+ * cross-account export is not skipped when ambient creds still resolve.
+ * Accepts flat or nested STS JSON; captures Expiration for cache TTL.
  */
-async function getAwsCredsFromCredentialExport(): Promise<{
-  accessKeyId: string
-  secretAccessKey: string
-  sessionToken: string
-} | null> {
+async function getAwsCredsFromCredentialExport(): Promise<AwsResolvedCredentials | null> {
   const awsCredentialExport = getConfiguredAwsCredentialExport()
 
   if (!awsCredentialExport) {
@@ -727,84 +831,159 @@ async function getAwsCredsFromCredentialExport(): Promise<{
   }
 
   try {
-    logForDebugging(
-      'Fetching AWS caller identity for credential export command',
-    )
-    await checkStsCallerIdentity()
-    logForDebugging(
-      'Fetched AWS caller identity, skipping AWS credential export command',
-    )
-    return null
-  } catch {
-    // only actually do the export if caller-identity calls
-    try {
-      logForDebugging('Running AWS credential export command')
-      const result = await execa(awsCredentialExport, {
-        shell: true,
-        reject: false,
-      })
-      if (result.exitCode !== 0 || !result.stdout) {
-        throw new Error('awsCredentialExport did not return a valid value')
-      }
-
-      // Parse the JSON output from aws sts commands
-      const awsOutput = jsonParse(result.stdout.trim())
-
-      if (!isValidAwsStsOutput(awsOutput)) {
-        throw new Error(
-          'awsCredentialExport did not return valid AWS STS output structure',
-        )
-      }
-
-      logForDebugging('AWS credentials retrieved from awsCredentialExport')
-      return {
-        accessKeyId: awsOutput.Credentials.AccessKeyId,
-        secretAccessKey: awsOutput.Credentials.SecretAccessKey,
-        sessionToken: awsOutput.Credentials.SessionToken,
-      }
-    } catch (e) {
-      const message = chalk.red(
-        'Error getting AWS credentials from awsCredentialExport (in settings or ~/.claude.json):',
-      )
-      if (e instanceof Error) {
-        console.error(message, e.message)
-      } else {
-        console.error(message, e)
-      }
-      return null
+    logForDebugging('Running AWS credential export command')
+    const result = await execa(awsCredentialExport, {
+      shell: true,
+      reject: false,
+    })
+    if (result.exitCode !== 0 || !result.stdout) {
+      throw new Error('awsCredentialExport did not return a valid value')
     }
+
+    const awsOutput = jsonParse(result.stdout.trim())
+    const creds = parseAwsCredentialExport(awsOutput)
+    if (!creds) {
+      throw new Error(
+        'awsCredentialExport did not return valid AWS STS output structure',
+      )
+    }
+
+    logForDebugging('AWS credentials retrieved from awsCredentialExport')
+    const expRaw = creds.Expiration
+    const expiration =
+      typeof expRaw === 'string' ? Date.parse(expRaw) : Number.NaN
+    return {
+      accessKeyId: creds.AccessKeyId,
+      secretAccessKey: creds.SecretAccessKey,
+      sessionToken: creds.SessionToken,
+      expiration: Number.isFinite(expiration) ? expiration : undefined,
+    }
+  } catch (e) {
+    const message = chalk.red(
+      'Error getting AWS credentials from awsCredentialExport (in settings or ~/.claude.json):',
+    )
+    if (e instanceof Error) {
+      console.error(message, e.message)
+    } else {
+      console.error(message, e)
+    }
+    return null
   }
 }
 
 /**
- * Refresh AWS authentication and get credentials with cache clearing
- * This combines runAwsAuthRefresh, getAwsCredsFromCredentialExport, and clearAwsIniCache
- * to ensure fresh credentials are always used
+ * Refresh AWS authentication and get credentials with cache clearing.
+ * Official 2.1.207: TTL follows credential Expiration when present; after a
+ * successful interactive refresh, clears the default-chain cache + INI cache.
  */
 export const refreshAndGetAwsCredentials = memoizeWithTTLAsync(
-  async (): Promise<{
-    accessKeyId: string
-    secretAccessKey: string
-    sessionToken: string
-  } | null> => {
+  async (): Promise<AwsResolvedCredentials | null> => {
+    const started = performance.now()
+    logForDebugging('[API:auth] AWS credential resolve start')
     // First run auth refresh if needed
     const refreshed = await runAwsAuthRefresh()
 
-    // Get credentials from export
+    // Get credentials from export (always when configured)
     const credentials = await getAwsCredsFromCredentialExport()
 
-    // Clear AWS INI cache to ensure fresh credentials are used
-    if (refreshed || credentials) {
+    // Clear AWS INI + default-chain caches so ambient chain sees fresh SSO
+    if (refreshed) {
       await clearAwsIniCache()
+      getDefaultAwsProviderChain.cache.clear?.()
+      defaultAwsProviderChainLastInvalidate.clear()
     }
 
+    logForDebugging(
+      `[API:auth] AWS credential resolve done in ${Math.round(performance.now() - started)}ms`,
+    )
     return credentials
   },
-  DEFAULT_AWS_STS_TTL,
+  value => awsCredentialCacheTtlMs(value?.expiration),
 )
+
+/**
+ * Memoized AWS default provider chain for Bedrock when awsCredentialExport
+ * is not configured. Official 2.1.207 A4 + resolveWithStallGuard: cache
+ * resolved credentials by profile+region and hard-timeout the resolve so
+ * Windows Credential Manager stalls cannot block every API call.
+ */
+export const getDefaultAwsProviderChain = memoize(
+  async (region: string): Promise<() => Promise<AwsResolvedCredentials>> => {
+    const resolveOnce = memoizeWithTTLAsync(
+      async (): Promise<AwsResolvedCredentials> => {
+        logForDebugging(
+          `[API:auth] resolving default AWS provider chain (region: ${region})`,
+        )
+        const { fromNodeProviderChain } = await import(
+          '@aws-sdk/credential-providers'
+        )
+        const provider = fromNodeProviderChain({
+          ignoreCache: true,
+          clientConfig: { region },
+        })
+        const identity = await resolveWithStallGuard(provider())
+        return {
+          accessKeyId: identity.accessKeyId,
+          secretAccessKey: identity.secretAccessKey,
+          sessionToken: identity.sessionToken ?? '',
+          expiration: identity.expiration
+            ? identity.expiration.getTime()
+            : undefined,
+        }
+      },
+      value => awsCredentialCacheTtlMs(value.expiration),
+    )
+    return () => resolveOnce()
+  },
+  defaultAwsProviderChainCacheKey,
+)
+
+/**
+ * Debounced invalidation of the default-chain cache for a region
+ * (official invalidateDefaultAwsProviderChainDebounced / mjt).
+ */
+export function invalidateDefaultAwsProviderChainDebounced(
+  region: string,
+): boolean {
+  const key = defaultAwsProviderChainCacheKey(region)
+  const now = Date.now()
+  if (
+    now - (defaultAwsProviderChainLastInvalidate.get(key) ?? 0) <
+    AWS_CHAIN_INVALIDATE_DEBOUNCE_MS
+  ) {
+    return false
+  }
+  defaultAwsProviderChainLastInvalidate.set(key, now)
+  getDefaultAwsProviderChain.cache.delete(key)
+  return true
+}
 
 export function clearAwsCredentialsCache(): void {
   refreshAndGetAwsCredentials.cache.clear()
+  getDefaultAwsProviderChain.cache.clear?.()
+  defaultAwsProviderChainLastInvalidate.clear()
+}
+
+/** Clear only the export/refresh memo (keep default-chain cache). */
+export function clearAwsCredentialExportCache(): void {
+  refreshAndGetAwsCredentials.cache.clear()
+}
+
+// Official Qv surface — re-export host-managed AWS helpers for client/callers.
+export {
+  hostManagedAwsProviderChain,
+  hostManagedAwsSdkCredentials,
+  hostManagedNoCredsError,
+  isHostManagedProviderAuth,
+}
+
+/**
+ * Reset SSO refresh cooldown so the next failed STS probe may re-run
+ * awsAuthRefresh immediately (official resetAwsAuthRefreshCooldown / WTt).
+ */
+export function resetAwsAuthRefreshCooldown(): void {
+  awsAuthRefreshLastFinishedAt = null
+  awsAuthRefreshCooldownEpoch++
 }
 
 /**
@@ -1338,6 +1517,23 @@ async function invalidateOAuthCacheIfDiskChanged(): Promise<void> {
 // sync spawns stacked to 800ms+ of blocked render frames.
 const pending401Handlers = new Map<string, Promise<boolean>>()
 
+/** Official YPr densable — first unrecovered remote OAuth 401 timestamp. */
+let remoteAuthFailFirstAtMs: number | null = null
+
+function recordRemoteAuthFailExit(recovered: boolean): 'continue' | 'exit' {
+  const result = evaluateRemoteAuthFailExit(
+    { firstFailAtMs: remoteAuthFailFirstAtMs },
+    { recovered },
+  )
+  remoteAuthFailFirstAtMs = result.state.firstFailAtMs
+  return result.decision
+}
+
+/** Test helper — reset official cjt state. */
+export function _resetRemoteAuthFailExitStateForTesting(): void {
+  remoteAuthFailFirstAtMs = null
+}
+
 /**
  * Handle a 401 "OAuth token has expired" error from the API.
  *
@@ -1349,6 +1545,10 @@ const pending401Handlers = new Map<string, Promise<boolean>>()
  * already refreshed (different token in keychain), we use that instead of
  * refreshing again. Concurrent calls with the same failedAccessToken are
  * deduplicated to a single keychain read.
+ *
+ * Official post-183 densable path (XTh/dbc/cjt): when no refresh token is
+ * available but an env/FD OAuth token is pinned (bg worker / remote child),
+ * wait for host rotation then zombie-exit past AUTH_FAIL_EXIT_MS.
  *
  * @param failedAccessToken - The access token that was rejected with 401
  * @returns true if we now have a valid token, false otherwise
@@ -1374,12 +1574,99 @@ async function handleOAuth401ErrorImpl(
   const currentTokens = await getClaudeAIOAuthTokensAsync()
 
   if (!currentTokens?.refreshToken) {
+    // Official QTh: SDK getOAuthToken callback when host owns refresh.
+    const sdkRefresh = getSdkOauthTokenRefreshCallback()
+    if (sdkRefresh) {
+      try {
+        const next = await sdkRefresh()
+        if (next && next !== failedAccessToken) {
+          process.env.CLAUDE_CODE_OAUTH_TOKEN = next
+          clearOAuthTokenCache()
+          logEvent('tengu_oauth_401_sdk_callback_refreshed', {})
+          recordRemoteAuthFailExit(true)
+          return true
+        }
+        if (next === null) {
+          logForDebugging(
+            'SDK getOAuthToken callback returned null (no token available)',
+          )
+        } else {
+          logForDebugging(
+            'SDK getOAuthToken callback returned the same expired token; treating as no refresh',
+            { level: 'error' },
+          )
+        }
+      } catch (e) {
+        logEvent('tengu_oauth_401_sdk_callback_failed', {})
+        logForDebugging(
+          `SDK getOAuthToken callback failed: ${e instanceof Error ? e.message : String(e)}`,
+          { level: 'error' },
+        )
+      }
+    }
+
+    // Official QTh densable: when not host-managed, env/FD-pinned token may
+    // be rotated by the host, or disk keychain may already hold a fresh token.
+    if (
+      !isHostManagedProviderAuth() &&
+      (process.env.CLAUDE_CODE_OAUTH_TOKEN || getOAuthTokenFromFileDescriptor())
+    ) {
+      try {
+        const secureStorage = getSecureStorage()
+        const storageData = await secureStorage.readAsync()
+        const oauthData = storageData?.claudeAiOauth
+        if (
+          oauthData?.accessToken &&
+          oauthData.accessToken !== failedAccessToken
+        ) {
+          if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+            process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthData.accessToken
+          }
+          clearOAuthTokenCache()
+          logEvent('tengu_oauth_401_recovered_from_disk', {})
+          recordRemoteAuthFailExit(true)
+          return true
+        }
+      } catch {
+        // ignore disk recovery errors; fall through to wait/zombie path
+      }
+
+      const waitMs = resolveOauth401WaitMsOrDefault()
+      if (waitMs > 0) {
+        logForDebugging(
+          `OAuth 401 recovery: waiting up to ${waitMs}ms for a rotated env token`,
+        )
+        const rotated = await waitForRotatedOauthToken({
+          failedAccessToken,
+          timeoutMs: waitMs,
+          readToken: () =>
+            process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+            getOAuthTokenFromFileDescriptor() ||
+            undefined,
+        })
+        if (rotated) {
+          clearOAuthTokenCache()
+          logEvent('tengu_oauth_401_recovered_from_rotation', {})
+          recordRemoteAuthFailExit(true)
+          return true
+        }
+      }
+    }
+    if (recordRemoteAuthFailExit(false) === 'exit') {
+      logEvent('tengu_oauth_401_zombie_exit', {})
+      logForDebugging(
+        'OAuth 401 unrecovered past CLAUDE_CODE_AUTH_FAIL_EXIT_MS — exiting so the runner recycles this session with fresh credentials',
+        { level: 'error' },
+      )
+      setTimeout(() => process.exit(1), 2000)
+    }
     return false
   }
 
   // If keychain has a different token, another tab already refreshed - use it
   if (currentTokens.accessToken !== failedAccessToken) {
     logEvent('tengu_oauth_401_recovered_from_keychain', {})
+    recordRemoteAuthFailExit(true)
     return true
   }
 
@@ -1587,11 +1874,25 @@ export function is1PApiCustomer(): boolean {
   // 4. Foundry users
 
   // Exclude Vertex, Bedrock, and Foundry customers
-  if (
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
-  ) {
+  // Official USE_* densables.
+  let useBedrock1P = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  let useVertex1P = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  let useFoundry1P = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+  try {
+    const {
+      isUseBedrockEnvEnabled,
+      isUseVertexEnvEnabled,
+      isUseFoundryEnvEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    useBedrock1P = isUseBedrockEnvEnabled()
+    useVertex1P = isUseVertexEnvEnabled()
+    useFoundry1P = isUseFoundryEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  if (useBedrock1P || useVertex1P || useFoundry1P) {
     return false
   }
 
@@ -1740,13 +2041,40 @@ export function getSubscriptionName(): string {
  * separate handling in the call sites above.
  */
 export function isUsing3PServices(): boolean {
+  // Official USE_* densables — keep in sync with providers.ts getAPIProvider.
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+  let useOpenAI = isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI)
+  let useGemini = isEnvTruthy(process.env.CLAUDE_CODE_USE_GEMINI)
+  let useGrok = isEnvTruthy(process.env.CLAUDE_CODE_USE_GROK)
+  try {
+    const {
+      isUseBedrockEnvEnabled,
+      isUseVertexEnvEnabled,
+      isUseFoundryEnvEnabled,
+      isUseOpenAIEnvEnabled,
+      isUseGeminiEnvEnabled,
+      isUseGrokEnvEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    useBedrock = isUseBedrockEnvEnabled()
+    useVertex = isUseVertexEnvEnabled()
+    useFoundry = isUseFoundryEnvEnabled()
+    useOpenAI = isUseOpenAIEnvEnabled()
+    useGemini = isUseGeminiEnvEnabled()
+    useGrok = isUseGrokEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   return !!(
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_GEMINI) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_GROK)
+    useBedrock ||
+    useVertex ||
+    useFoundry ||
+    useOpenAI ||
+    useGemini ||
+    useGrok
   )
 }
 
@@ -1787,12 +2115,21 @@ export function getOtelHeadersFromHelper(): Record<string, string> {
     return {}
   }
 
-  // Return cached headers if still valid (debounce)
-  const debounceMs = parseInt(
-    process.env.CLAUDE_CODE_OTEL_HEADERS_HELPER_DEBOUNCE_MS ||
-      DEFAULT_OTEL_HEADERS_DEBOUNCE_MS.toString(),
-    10,
-  )
+  // Official OTEL_HEADERS_HELPER_DEBOUNCE_MS densable pure parse.
+  let debounceMs = DEFAULT_OTEL_HEADERS_DEBOUNCE_MS
+  try {
+    const { resolveOtelHeadersHelperDebounceMs } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    debounceMs =
+      resolveOtelHeadersHelperDebounceMs() ?? DEFAULT_OTEL_HEADERS_DEBOUNCE_MS
+  } catch {
+    debounceMs = parseInt(
+      process.env.CLAUDE_CODE_OTEL_HEADERS_HELPER_DEBOUNCE_MS ||
+        DEFAULT_OTEL_HEADERS_DEBOUNCE_MS.toString(),
+      10,
+    )
+  }
   if (
     cachedOtelHeaders &&
     Date.now() - cachedOtelHeadersTimestamp < debounceMs

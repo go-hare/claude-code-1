@@ -228,7 +228,9 @@ export function clearStreamAccumulatorForMessage(
   }
 }
 
-type RequestResult = { ok: true } | { ok: false; retryAfterMs?: number }
+type RequestResult =
+  | { ok: true; status?: number; data?: unknown }
+  | { ok: false; status?: number; data?: unknown; retryAfterMs?: number }
 
 type WorkerEvent = {
   payload: EventPayload
@@ -468,8 +470,16 @@ export class CCRClient {
       throw new CCRInitError('no_auth_headers')
     }
     if (epoch === undefined) {
-      const rawEpoch = process.env.CLAUDE_CODE_WORKER_EPOCH
-      epoch = rawEpoch ? parseInt(rawEpoch, 10) : NaN
+      // Official WORKER_EPOCH densable pure parse.
+      try {
+        const { resolveWorkerEpoch } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+        epoch = resolveWorkerEpoch() ?? NaN
+      } catch {
+        const rawEpoch = process.env.CLAUDE_CODE_WORKER_EPOCH
+        epoch = rawEpoch ? parseInt(rawEpoch, 10) : NaN
+      }
     }
     if (isNaN(epoch)) {
       throw new CCRInitError('missing_epoch')
@@ -559,38 +569,60 @@ export class CCRClient {
    * 409 epoch mismatch, and error logging. Returns { ok: true } on 2xx.
    * On 429, reads Retry-After (integer seconds) so the uploader can honor
    * the server's backoff hint instead of blindly exponentiating.
+   *
+   * Official working-sync filestore densable: when softFailOn409 is set,
+   * 409 is returned instead of process.exit (etag conflict on put).
    */
   private async request(
-    method: 'post' | 'put',
+    method: 'post' | 'put' | 'get',
     path: string,
     body: unknown,
     label: string,
-    { timeout = 10_000 }: { timeout?: number } = {},
+    {
+      timeout = 10_000,
+      softFailOn409 = false,
+      maxBodyLength,
+      maxContentLength,
+    }: {
+      timeout?: number
+      softFailOn409?: boolean
+      maxBodyLength?: number
+      maxContentLength?: number
+    } = {},
   ): Promise<RequestResult> {
     const authHeaders = this.getAuthHeaders()
     if (Object.keys(authHeaders).length === 0) return { ok: false }
 
     try {
-      const response = await this.http[method](
-        `${this.sessionBaseUrl}${path}`,
-        body,
-        {
-          headers: {
-            ...authHeaders,
-            'Content-Type': 'application/json',
-            'anthropic-version': '2023-06-01',
-            'User-Agent': getClaudeCodeUserAgent(),
-          },
-          validateStatus: alwaysValidStatus,
-          timeout,
+      const config = {
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'User-Agent': getClaudeCodeUserAgent(),
         },
-      )
+        validateStatus: alwaysValidStatus,
+        timeout,
+        ...(maxBodyLength !== undefined ? { maxBodyLength } : {}),
+        ...(maxContentLength !== undefined ? { maxContentLength } : {}),
+      }
+      const response =
+        method === 'get'
+          ? await this.http.get(`${this.sessionBaseUrl}${path}`, config)
+          : await this.http[method](
+              `${this.sessionBaseUrl}${path}`,
+              body,
+              config,
+            )
 
       if (response.status >= 200 && response.status < 300) {
         this.consecutiveAuthFailures = 0
-        return { ok: true }
+        return { ok: true, status: response.status, data: response.data }
       }
       if (response.status === 409) {
+        if (softFailOn409) {
+          return { ok: false, status: 409, data: response.data }
+        }
         this.handleEpochMismatch()
       }
       if (response.status === 401 || response.status === 403) {
@@ -631,10 +663,15 @@ export class CCRClient {
         const raw = response.headers?.['retry-after']
         const seconds = typeof raw === 'string' ? parseInt(raw, 10) : NaN
         if (!isNaN(seconds) && seconds >= 0) {
-          return { ok: false, retryAfterMs: seconds * 1000 }
+          return {
+            ok: false,
+            status: response.status,
+            data: response.data,
+            retryAfterMs: seconds * 1000,
+          }
         }
       }
-      return { ok: false }
+      return { ok: false, status: response.status, data: response.data }
     } catch (error) {
       logForDebugging(`CCRClient: ${label} failed: ${errorMessage(error)}`, {
         level: 'warn',
@@ -645,6 +682,54 @@ export class CCRClient {
         error_code: getErrnoCode(error),
       })
       return { ok: false }
+    }
+  }
+
+  /**
+   * Official j6o/J2t densable host — authenticated /worker/synced_file put/get.
+   * Soft-fails on 409 so filestore etag conflicts don't kill the worker epoch.
+   */
+  async requestSyncedFile(args: {
+    method: 'put' | 'get'
+    path: string
+    body?: unknown
+    timeoutMs?: number
+    maxBodyLength?: number
+    maxContentLength?: number
+  }): Promise<{
+    ok: boolean
+    reason?: string
+    status?: number
+    data?: { content?: string; content_sha256?: string }
+  }> {
+    const result = await this.request(
+      args.method,
+      args.path,
+      args.body,
+      `synced_file ${args.method}`,
+      {
+        timeout: args.timeoutMs ?? 30_000,
+        softFailOn409: true,
+        maxBodyLength: args.maxBodyLength,
+        maxContentLength: args.maxContentLength,
+      },
+    )
+    if (result.ok) {
+      return {
+        ok: true,
+        status: result.status,
+        data: result.data as
+          | { content?: string; content_sha256?: string }
+          | undefined,
+      }
+    }
+    return {
+      ok: false,
+      status: result.status,
+      reason: result.status === 409 ? 'conflict' : 'request_failed',
+      data: result.data as
+        | { content?: string; content_sha256?: string }
+        | undefined,
     }
   }
 

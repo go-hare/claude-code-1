@@ -284,6 +284,9 @@ export type GlobalConfig = {
   // Transcript share prompt tracking ("Don't ask again")
   transcriptShareDismissed?: boolean
 
+  // Official: dismiss cold-start 'claude daemon install' prompt forever
+  daemonInstallPromptDismissed?: boolean
+
   // Memory usage tracking
   memoryUsageCount: number // Number of times user has added to memory
 
@@ -430,8 +433,18 @@ export type GlobalConfig = {
   desktopUpsellSeenCount?: number // Total showings (max 3)
   desktopUpsellDismissed?: boolean // "Don't ask again" picked
 
+  // Official fullscreen TUI upsell (Npf / Ufn=3)
+  fullscreenUpsellSeenCount?: number // times the fullscreen renderer upsell was shown
+
   // Idle-return dialog tracking
   idleReturnDismissed?: boolean // "Don't ask again" picked
+
+  // Resume-return dialog tracking (tengu_gleaming_fair / CBp)
+  resumeReturnDismissed?: boolean // "Don't ask me again" picked
+
+  // /config Dynamic workflow size guideline (official workflowSizeGuideline)
+  // 'unrestricted' | 'small' | 'medium' | 'large' | positive agent cap number
+  workflowSizeGuideline?: 'unrestricted' | 'small' | 'medium' | 'large' | number
 
   // Opus 4.5 Pro migration tracking
   opusProMigrationComplete?: boolean
@@ -559,6 +572,10 @@ export type GlobalConfig = {
   // undefined = no cache, null = extra usage enabled, string = disabled reason.
   cachedExtraUsageDisabledReason?: string | null
 
+  // Official Fable 5 overage consent (fableOverageConsentV2) keyed by
+  // organizationUuid or `acct:${accountUuid}`.
+  fableOverageConsentV2?: { [key: string]: boolean }
+
   // Auto permissions notification tracking (ant-only)
   autoPermissionsNotificationCount?: number // Number of times the auto permissions notification has been shown
 
@@ -570,6 +587,21 @@ export type GlobalConfig = {
 
   // Additional model options for the model picker (fetched during bootstrap).
   additionalModelOptionsCache?: ModelOption[]
+
+  /**
+   * Official 2.1.196 org_model_default cache from bootstrap.
+   * When set, /model shows "Org default" and may override user model selection.
+   */
+  orgModelDefaultCache?: {
+    name: string
+    updated_at: string
+    data_source: string
+    override_user_selection: boolean
+    orgUuid?: string
+  } | null
+
+  /** Last-seen org_model_default.updated_at (suppresses repeat clear/notice). */
+  lastSeenOrgDefaultUpdatedAt?: string
 
   // Disk cache for /api/claude_code/organizations/metrics_enabled.
   // Org-level settings change rarely; persisting across processes avoids a

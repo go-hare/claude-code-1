@@ -12,6 +12,7 @@ import { isSelfHostedBridge } from './bridgeConfig.js'
 // namespace after mock.module() (daemon/auth.test.ts), breaking spyOn.
 import * as authModule from '../utils/auth.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+import { isForceBridgeEnabled } from '../utils/residualMoreEnvGates.js'
 import { lt } from '../utils/semver.js'
 
 /**
@@ -26,7 +27,32 @@ import { lt } from '../utils/semver.js'
  * The `feature('BRIDGE_MODE')` guard ensures the GrowthBook string literal
  * is only referenced when bridge mode is enabled at build time.
  */
+function isRemoteControlDisabledByManagedSettings(): boolean {
+  // Official M1t densable — settings.disableRemoteControl managed policy force-off.
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/settings/settings.js') as typeof import('../utils/settings/settings.js')
+    const { isRemoteControlDisabledBySettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    return isRemoteControlDisabledBySettings(
+      getInitialSettings().disableRemoteControl,
+    )
+  } catch {
+    return false
+  }
+}
+
 export function isBridgeEnabled(): boolean {
+  // Official CLAUDE_CODE_FORCE_BRIDGE — force-on when BRIDGE_MODE is compiled in.
+  // Managed disableRemoteControl still wins over force/self-host.
+  if (feature('BRIDGE_MODE') && isRemoteControlDisabledByManagedSettings()) {
+    return false
+  }
+  if (feature('BRIDGE_MODE') && isForceBridgeEnabled()) {
+    return true
+  }
   // Self-hosted bridge: when the user has configured a custom server, bypass
   // GrowthBook gates entirely.
   if (feature('BRIDGE_MODE') && isSelfHostedBridge()) {
@@ -54,6 +80,9 @@ export function isBridgeEnabled(): boolean {
  * `isBridgeEnabled()` instead.
  */
 export async function isBridgeEnabledBlocking(): Promise<boolean> {
+  if (feature('BRIDGE_MODE') && isRemoteControlDisabledByManagedSettings()) {
+    return false
+  }
   if (feature('BRIDGE_MODE') && isSelfHostedBridge()) {
     return true
   }
@@ -78,6 +107,9 @@ export async function isBridgeEnabledBlocking(): Promise<boolean> {
  */
 export async function getBridgeDisabledReason(): Promise<string | null> {
   if (feature('BRIDGE_MODE')) {
+    if (isRemoteControlDisabledByManagedSettings()) {
+      return "Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`)."
+    }
     // Self-hosted bridge: no subscription/scope/gate checks needed.
     if (isSelfHostedBridge()) {
       return null
@@ -208,8 +240,18 @@ export function getCcrAutoConnectDefault(): boolean {
  * local opt-in; GrowthBook controls rollout.
  */
 export function isCcrMirrorEnabled(): boolean {
+  // Official CCR_MIRROR densable env force-on.
+  let ccrMirrorEnv = isEnvTruthy(process.env.CLAUDE_CODE_CCR_MIRROR)
+  try {
+    const { isCcrMirrorEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    ccrMirrorEnv = isCcrMirrorEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
   return feature('CCR_MIRROR')
-    ? isEnvTruthy(process.env.CLAUDE_CODE_CCR_MIRROR) ||
+    ? ccrMirrorEnv ||
         getFeatureValue_CACHED_MAY_BE_STALE('tengu_ccr_mirror', false)
     : false
 }

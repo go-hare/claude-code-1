@@ -33,6 +33,16 @@ export function useIDEIntegration({
 
       // Check if auto-connect is enabled
       const globalConfig = getGlobalConfig();
+      // Official AUTO_CONNECT_IDE densable.
+      let autoConnectIdeEnv = isEnvTruthy(process.env.CLAUDE_CODE_AUTO_CONNECT_IDE);
+      try {
+        const { isAutoConnectIdeEnvEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js');
+        autoConnectIdeEnv = isAutoConnectIdeEnvEnabled();
+      } catch {
+        // keep raw env fallback
+      }
       const autoConnectEnabled =
         (globalConfig.autoConnectIde ||
           autoConnectIdeFlag ||
@@ -41,7 +51,7 @@ export function useIDEIntegration({
           // IDE extension's port env var is inherited. If set, auto-connect anyway.
           process.env.CLAUDE_CODE_SSE_PORT ||
           ideToInstallExtension ||
-          isEnvTruthy(process.env.CLAUDE_CODE_AUTO_CONNECT_IDE)) &&
+          autoConnectIdeEnv) &&
         !isEnvDefinedFalsy(process.env.CLAUDE_CODE_AUTO_CONNECT_IDE);
 
       if (!autoConnectEnabled) {

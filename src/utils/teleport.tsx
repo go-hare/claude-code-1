@@ -936,6 +936,7 @@ export async function teleportToRemote(options: {
         );
         if (!bundle.success) {
           const failBundle = bundle as { success: false; error: string; failReason?: string };
+          // Explicit useBundle path has no GitHub fallthrough by design.
           logError(new Error(`Bundle upload failed: ${failBundle.error}`));
           return null;
         }
@@ -1112,6 +1113,8 @@ export async function teleportToRemote(options: {
       );
       if (!bundle.success) {
         const failBundle = bundle as { success: false; error: string; failReason?: string };
+        // Bundle-only fallback (!gitSource). Official 2.1.207: logError + onBundleFail;
+        // no SKIP_REPO_UPLOAD product consumer / soft-skip branch.
         logError(new Error(`Bundle upload failed: ${failBundle.error}`));
         // Only steer users to GitHub setup when there's a remote to clone from.
         const setup = repoInfo ? '. Please setup GitHub on https://claude.ai/code' : '';

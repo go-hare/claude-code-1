@@ -73,7 +73,7 @@ import {
   getSonnet1mExpTreatmentEnabled,
 } from '../../utils/context.js'
 import { resolveAppliedEffort } from '../../utils/effort.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import { captureAPIRequest, logError } from '../../utils/log.js'
 import {
@@ -172,6 +172,11 @@ import { CHROME_SEARCH_EXTRA_TOOLS_INSTRUCTIONS } from 'src/utils/claudeInChrome
 import { getMaxThinkingTokensForModel } from 'src/utils/context.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logForDiagnosticsNoPII } from 'src/utils/diagLogs.js'
+import {
+  filterBetasForSimulateProxyUsage,
+  shouldSimulateProxyUsage,
+} from 'src/utils/residualFinalEnvGates.js'
+import { OAUTH_BETA_HEADER } from 'src/constants/oauth.js'
 import { type EffortValue, modelSupportsEffort } from 'src/utils/effort.js'
 import {
   isFastModeAvailable,
@@ -210,6 +215,7 @@ import {
   parseUserSpecifiedModel,
 } from '../../utils/model/model.js'
 import {
+  resolveSessionActivityAgentId,
   startSessionActivity,
   stopSessionActivity,
 } from '../../utils/sessionActivity.js'
@@ -718,6 +724,42 @@ export type Options = {
   hasPendingMcpServers?: boolean
   queryTracking?: QueryChainTracking
   agentId?: AgentId // Only set for subagents
+  /**
+   * Official isBackgroundAgent — when true with agentId, session activity
+   * does not bump mainLoopRefcount ($Qn second arg via HOn fallback).
+   */
+  isBackgroundAgent?: boolean
+  /**
+   * Official requestDialog host (print cvf) — FXl refusal_fallback /
+   * X6e fable overage parks. Plumbed from ToolUseContext via query.
+   */
+  requestDialog?: (
+    spec: {
+      kind: string
+      default: unknown
+      result?: () => {
+        safeParse: (v: unknown) => { success: boolean; data?: unknown }
+      }
+    },
+    payload: unknown,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown>
+  /**
+   * Official refusalFallbackModel — armed fallback for refusal path (visible
+   * or silent rearm). When set, takes precedence over generic fallbackModel
+   * for the FXl/stream refusal consumer densable.
+   */
+  refusalFallbackModel?: string
+  /**
+   * Official refusalFallbackModelLane — "visible" | "silent".
+   * Silent lane suppresses the dialog (OXl silent_ab).
+   */
+  refusalFallbackModelLane?: 'visible' | 'silent'
+  /**
+   * Official refusalFallbackSilentArmActive — silent rearm armed without
+   * visible/server lane (pi densable).
+   */
+  refusalFallbackSilentArmActive?: boolean
   outputFormat?: BetaJSONOutputFormat
   fastMode?: boolean
   advisorModel?: string
@@ -832,7 +874,17 @@ function shouldDeferLspTool(tool: Tool): boolean {
 function getNonstreamingFallbackTimeoutMs(): number {
   const override = parseInt(process.env.API_TIMEOUT_MS || '', 10)
   if (override) return override
-  return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ? 120_000 : 300_000
+  // Official REMOTE densable — shorter non-streaming timeout under CCR.
+  let isRemote = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+  try {
+    const { isRemoteEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    isRemote = isRemoteEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  return isRemote ? 120_000 : 300_000
 }
 
 /**
@@ -1723,9 +1775,21 @@ async function* queryModel(
       options.maxOutputTokensOverride ||
       getMaxOutputTokensForModel(options.model)
 
-    const hasThinking =
-      thinkingConfig.type !== 'disabled' &&
-      !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_THINKING)
+    // Official DISABLE_THINKING / DISABLE_ADAPTIVE_THINKING densables.
+    let thinkingDisabled = isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_THINKING)
+    let adaptiveThinkingDisabled = isEnvTruthy(
+      process.env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING,
+    )
+    try {
+      const { isThinkingDisabled, isAdaptiveThinkingDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+      thinkingDisabled = isThinkingDisabled()
+      adaptiveThinkingDisabled = isAdaptiveThinkingDisabled()
+    } catch {
+      // residual helpers optional
+    }
+    const hasThinking = thinkingConfig.type !== 'disabled' && !thinkingDisabled
     let thinking: BetaMessageStreamParams['thinking'] | undefined
 
     // IMPORTANT: Do not change the adaptive-vs-budget thinking selection below
@@ -1733,7 +1797,7 @@ async function* queryModel(
     // setting that can greatly affect model quality and bashing.
     if (hasThinking && modelSupportsThinking(options.model)) {
       if (
-        !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING) &&
+        !adaptiveThinkingDisabled &&
         modelSupportsAdaptiveThinking(options.model)
       ) {
         // For models that support adaptive thinking, always use adaptive
@@ -1829,8 +1893,23 @@ async function* queryModel(
     // Constants like CACHE_EDITING_BETA_HEADER or AFK_MODE_BETA_HEADER
     // can be '' when their feature gate is off; an empty string in the
     // betas array produces an invalid anthropic-beta header (400 error).
-    const filteredBetas = betasParams.filter(Boolean)
+    // Official SIMULATE_PROXY_USAGE: keep only oauth beta (eJe) so requests
+    // look like a corporate proxy that strips non-oauth anthropic-beta values.
+    const simulateProxy = shouldSimulateProxyUsage()
+    let filteredBetas = betasParams.filter(Boolean)
+    if (simulateProxy) {
+      const before = filteredBetas
+      filteredBetas = filterBetasForSimulateProxyUsage(
+        filteredBetas,
+        OAUTH_BETA_HEADER,
+      )
+      logForDebugging(
+        `[API:client] SIMULATE_PROXY_USAGE: stripping ${before.length - filteredBetas.length} beta headers from request (keeping ${filteredBetas.join(', ') || 'none'}): ${before.join(', ')}`,
+      )
+    }
     lastRequestBetas = filteredBetas
+    // Official: send betas when useBetas and (!simulate || remaining > 0)
+    const sendBetas = useBetas && (!simulateProxy || filteredBetas.length > 0)
 
     return {
       model: normalizeModelStringForAPI(options.model),
@@ -1846,17 +1925,18 @@ async function* queryModel(
       system,
       tools: allTools,
       tool_choice: options.toolChoice,
-      ...(useBetas && { betas: filteredBetas }),
+      ...(sendBetas && { betas: filteredBetas }),
       metadata: getAPIMetadata(),
       max_tokens: maxOutputTokens,
       thinking,
       ...(temperature !== undefined && { temperature }),
       ...(contextManagement &&
-        useBetas &&
-        betasParams.includes(CONTEXT_MANAGEMENT_BETA_HEADER) && {
+        sendBetas &&
+        filteredBetas.includes(CONTEXT_MANAGEMENT_BETA_HEADER) && {
           context_management: contextManagement,
         }),
-      ...extraBodyParams,
+      // Official: skip extra body overlays that depend on stripped betas when simulating proxy.
+      ...(!simulateProxy ? extraBodyParams : {}),
       ...(Object.keys(outputConfig).length > 0 && {
         output_config: outputConfig,
       }),
@@ -1915,6 +1995,12 @@ async function* queryModel(
   let research: unknown
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
+  // Official $Qn/$BQn second arg (HOn) — declared outside try so finally can stop.
+  const sessionActivityAgentId = resolveSessionActivityAgentId({
+    agentContext: getAgentContext(),
+    isBackgroundAgent: options.isBackgroundAgent,
+    agentId: options.agentId,
+  })
 
   try {
     queryCheckpoint('query_client_creation_start')
@@ -2014,11 +2100,24 @@ async function* queryModel(
     // kill hung streams. Without this, a silently dropped connection can hang
     // the session indefinitely since the SDK's request timeout only covers the
     // initial fetch(), not the streaming body.
-    const streamWatchdogEnabled = isEnvTruthy(
+    // Official 2.1.207: STREAM_WATCHDOG default ON (va); IAi floor 5 min.
+    // BYTE body idle densable lives in streamWatchdogGates (Zgc/k_h/HAi).
+    let streamWatchdogEnabled = !isEnvDefinedFalsy(
       process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
     )
-    const STREAM_IDLE_TIMEOUT_MS =
-      parseInt(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '', 10) || 90_000
+    let STREAM_IDLE_TIMEOUT_MS = Math.max(
+      parseInt(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '', 10) || 0,
+      300_000,
+    )
+    try {
+      const { isStreamWatchdogEnabled, resolveStreamIdleTimeoutMs } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/streamWatchdogGates.js') as typeof import('../../utils/streamWatchdogGates.js')
+      streamWatchdogEnabled = isStreamWatchdogEnabled()
+      STREAM_IDLE_TIMEOUT_MS = resolveStreamIdleTimeoutMs()
+    } catch {
+      // densable optional — keep inline fallbacks above
+    }
     const STREAM_IDLE_WARNING_MS = STREAM_IDLE_TIMEOUT_MS / 2
     let streamIdleAborted = false
     // performance.now() snapshot when watchdog fires, for measuring abort propagation delay
@@ -2071,7 +2170,8 @@ async function* queryModel(
     }
     resetStreamIdleTimer()
 
-    startSessionActivity('api_call')
+    // Official $Qn("api_call", HOn(agentContext) ?? (isBackgroundAgent ? agentId))
+    startSessionActivity('api_call', sessionActivityAgentId)
     try {
       // stream in and accumulate state
       let isFirstChunk = true
@@ -2415,7 +2515,167 @@ async function* queryModel(
               options.model,
             )
             if (refusalMessage) {
-              yield refusalMessage
+              // Official FXl + silent-arm densable consumer: when refusal
+              // fallback is on and an armed model is available (refusal
+              // lane or generic fallbackModel), park dialog (or silent
+              // auto-switch) and throw FallbackTriggeredError so query.ts
+              // retries on fallback. Full rewind/latch/session supersede
+              // and stream fallback_request yield remain denser.
+              let refusalHandledByFallback = false
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const {
+                  isRefusalFallbackEnabled,
+                  runRefusalFallbackDialogFlow,
+                  getProviderRefusalFallbackGuidanceText,
+                  resolveStreamRefusalFallbackTarget,
+                  resolveRefusalSilentAttempt,
+                  normalizeApiRefusalCategory,
+                } =
+                  require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                const stopDetails = (
+                  part.delta as {
+                    stop_details?: {
+                      category?: string | null
+                      explanation?: string | null
+                    }
+                  }
+                ).stop_details
+                const apiRefusalCategory = stopDetails?.category ?? null
+                const armedFallback =
+                  options.refusalFallbackModel ?? options.fallbackModel
+                if (
+                  isRefusalFallbackEnabled() &&
+                  armedFallback &&
+                  armedFallback !== options.model
+                ) {
+                  const isMainThread = options.agentId === undefined
+                  const silentAttempt = resolveRefusalSilentAttempt({
+                    silentArmActive: options.refusalFallbackSilentArmActive,
+                    modelLane: options.refusalFallbackModelLane,
+                  })
+                  // Official g_i when category present; without category keep
+                  // the armed model (partial densable — full stream path
+                  // always runs g_i and may decline unmapped).
+                  let targetModel: string | undefined = armedFallback
+                  if (apiRefusalCategory != null) {
+                    const routed = resolveStreamRefusalFallbackTarget({
+                      originalModel: options.model,
+                      armedFallbackModel: armedFallback,
+                      apiRefusalCategory,
+                    })
+                    void normalizeApiRefusalCategory(apiRefusalCategory)
+                    if (routed.route?.matched === 'none') {
+                      targetModel = undefined
+                    } else {
+                      targetModel = routed.fallbackModel ?? armedFallback
+                    }
+                  }
+                  if (targetModel !== undefined) {
+                    const flow = await runRefusalFallbackDialogFlow({
+                      decision: {
+                        isMainThread,
+                        requestDialog: options.requestDialog,
+                        silentAttempt,
+                        // Setting not fully plumbed; silentAttempt drives OXl silent_ab.
+                        // No-dialog-host still auto-switches via Gi default.
+                        switchModelsOnFlag: false,
+                      },
+                      requestDialog: options.requestDialog,
+                      signal,
+                      payload: {
+                        originalModel: options.model,
+                        fallbackModel: targetModel,
+                        apiRefusalCategory,
+                        guidanceText: getProviderRefusalFallbackGuidanceText(
+                          getAPIProvider() === 'firstParty',
+                        ),
+                      },
+                    })
+                    if (flow.shouldSwitchToFallback) {
+                      refusalHandledByFallback = true
+                      // Official stream fallback_request yield densable (query
+                      // consumer handles dialog telemetry / salvage denser).
+                      try {
+                        const {
+                          buildFallbackRequestEvent,
+                          matchRefusalFallbackRoute,
+                        } =
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                        let routeMatched:
+                          | 'category'
+                          | 'catch_all'
+                          | 'none'
+                          | null = null
+                        if (apiRefusalCategory != null) {
+                          const route = matchRefusalFallbackRoute({
+                            originalModelCanonical: options.model,
+                            armedFallbackModel: targetModel,
+                            apiRefusalCategory,
+                          })
+                          routeMatched =
+                            route.matched === 'none'
+                              ? 'none'
+                              : route.matched === 'category'
+                                ? 'category'
+                                : route.matched === 'catch_all'
+                                  ? 'catch_all'
+                                  : null
+                        }
+                        yield buildFallbackRequestEvent({
+                          originalModel: options.model,
+                          fallbackModel: targetModel,
+                          requestId: streamRequestId ?? null,
+                          apiRefusalCategory,
+                          apiRefusalExplanation:
+                            stopDetails?.explanation ?? null,
+                          silentArmAtTrigger: silentAttempt,
+                          routeMatched,
+                        }) as unknown as StreamEvent
+                      } catch (e) {
+                        if (e instanceof FallbackTriggeredError) throw e
+                        // densable yield optional
+                      }
+                      // Official Ryn + b$t latch densable (session restore denser)
+                      try {
+                        const {
+                          getMainLoopModelOverride,
+                          markRefusalFallbackOccurred,
+                          setMainLoopModelOverride,
+                          setRefusalFallbackModelLatch,
+                        } =
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+                        const { applyRefusalFallbackLatchArm } =
+                          // already loaded densables above; re-require for latch arm
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                        applyRefusalFallbackLatchArm({
+                          fallbackModel: targetModel,
+                          previousOverride: getMainLoopModelOverride(),
+                          setLatch: setRefusalFallbackModelLatch,
+                          setMainLoopModelOverride,
+                          markOccurred: markRefusalFallbackOccurred,
+                        })
+                      } catch {
+                        // bootstrap latch optional
+                      }
+                      throw new FallbackTriggeredError(
+                        options.model,
+                        targetModel,
+                      )
+                    }
+                    void flow
+                  }
+                }
+              } catch (e) {
+                if (e instanceof FallbackTriggeredError) throw e
+                // densable optional
+              }
+              if (!refusalHandledByFallback) {
+                yield refusalMessage
+              }
             }
 
             if (stopReason === 'max_tokens') {
@@ -2631,8 +2891,20 @@ async function* queryModel(
       // execution when streaming tool execution is active: the partial stream
       // starts a tool, then the non-streaming retry produces the same tool_use
       // and runs it again. See inc-4258.
+      // Official DISABLE_NONSTREAMING_FALLBACK densable.
+      let nonstreamingFallbackDisabled = isEnvTruthy(
+        process.env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK,
+      )
+      try {
+        const { isNonstreamingFallbackDisabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+        nonstreamingFallbackDisabled = isNonstreamingFallbackDisabled()
+      } catch {
+        // residual helpers optional
+      }
       const disableFallback =
-        isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK) ||
+        nonstreamingFallbackDisabled ||
         getFeatureValue_CACHED_MAY_BE_STALE(
           'tengu_disable_streaming_to_non_streaming_fallback',
           false,
@@ -2978,7 +3250,7 @@ async function* queryModel(
       return
     }
   } finally {
-    stopSessionActivity('api_call')
+    stopSessionActivity('api_call', sessionActivityAgentId)
     // Must be in the finally block: if the generator is terminated early
     // via .return() (e.g. consumer breaks out of for-await-of, or query.ts
     // encounters an abort), code after the try/finally never executes.
@@ -3608,11 +3880,28 @@ export function getMaxOutputTokensForModel(model: string): number {
     ? Math.min(maxOutputTokens.default, CAPPED_DEFAULT_MAX_TOKENS)
     : maxOutputTokens.default
 
-  const result = validateBoundedIntEnvVar(
-    'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
-    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
-    defaultTokens,
-    maxOutputTokens.upperLimit,
-  )
-  return result.effective
+  // Official MAX_OUTPUT_TOKENS densable: pure parse + bounded clamp, with
+  // validateBoundedIntEnvVar fallback for logging side effects.
+  try {
+    const { resolveMaxOutputTokensOverride, clampMaxOutputTokensOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    const override = resolveMaxOutputTokensOverride()
+    if (override === null) {
+      return defaultTokens
+    }
+    return clampMaxOutputTokensOverride(
+      override,
+      defaultTokens,
+      maxOutputTokens.upperLimit,
+    ).effective
+  } catch {
+    const result = validateBoundedIntEnvVar(
+      'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+      process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+      defaultTokens,
+      maxOutputTokens.upperLimit,
+    )
+    return result.effective
+  }
 }

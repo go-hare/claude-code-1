@@ -68,6 +68,11 @@ export const SDKControlInitializeRequestSchema = lazySchema(() =>
       agents: z.record(z.string(), AgentDefinitionSchema()).optional(),
       promptSuggestions: z.boolean().optional(),
       agentProgressSummaries: z.boolean().optional(),
+      /**
+       * Official supportedDialogKinds — dialog kinds the SDK host can render
+       * for request_user_dialog. Sanitized/capped server-side (vje/cJr).
+       */
+      supportedDialogKinds: z.array(z.string()).optional(),
     })
     .describe(
       'Initializes the SDK session with hooks, MCP servers, and agent configuration.',
@@ -450,6 +455,26 @@ export const SDKControlMcpToggleRequestSchema = lazySchema(() =>
     .describe('Enables or disables an MCP server.'),
 )
 
+/**
+ * Official 2.1.x control channel: pin an MCP server to a tighten-only mode
+ * (`default` / `auto`) or clear the pin with null. Used by Remote Control /
+ * claude-in-chrome set_permission_mode demotion paths.
+ */
+export const SDKControlSetMcpPermissionModeOverrideRequestSchema = lazySchema(
+  () =>
+    z
+      .object({
+        subtype: z.literal('set_mcp_permission_mode_override'),
+        serverName: z.string(),
+        // null clears the override; string values are validated tighten-only
+        // at the handler (WDu) so unknown modes can return a clear error.
+        mode: z.string().nullable(),
+      })
+      .describe(
+        "Sets a per-MCP-server permission mode override (tighten-only: 'default', 'auto', or null to clear).",
+      ),
+)
+
 export const SDKControlStopTaskRequestSchema = lazySchema(() =>
   z
     .object({
@@ -542,6 +567,96 @@ export const SDKControlElicitationResponseSchema = lazySchema(() =>
     .describe('Response from the SDK consumer for an elicitation request.'),
 )
 
+/**
+ * Official oauth_token_refresh control request — CLI asks SDK host for a
+ * fresh OAuth access token after 401 when the host owns refresh.
+ * @internal
+ */
+export const SDKControlOauthTokenRefreshRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('oauth_token_refresh'),
+    })
+    .describe(
+      '@internal Request from the CLI subprocess to the SDK host for a fresh OAuth access token after a 401 with no local refresh token.',
+    ),
+)
+
+/** Official lSf response: accessToken string | null. */
+export const SDKControlOauthTokenRefreshResponseSchema = lazySchema(() =>
+  z
+    .object({
+      accessToken: z.string().nullable(),
+    })
+    .describe(
+      '@internal Fresh OAuth access token returned by the SDK host getOAuthToken callback, or null when the host has no token available.',
+    ),
+)
+
+/**
+ * Official host_auth_token_refresh control request — CLI asks SDK host for a
+ * fresh provider auth token after 401 (Cowork 3P / host-managed).
+ * @internal
+ */
+export const SDKControlHostAuthTokenRefreshRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('host_auth_token_refresh'),
+    })
+    .describe(
+      '@internal Request from the CLI subprocess to the SDK host for a fresh provider auth token after a 401 when the host owns the credential (Cowork 3P).',
+    ),
+)
+
+/** Official uSf response: authToken string | null. */
+export const SDKControlHostAuthTokenRefreshResponseSchema = lazySchema(() =>
+  z
+    .object({
+      authToken: z.string().nullable(),
+    })
+    .describe(
+      '@internal Fresh provider auth token returned by the SDK host getHostAuthToken callback, or null when the host has no token available.',
+    ),
+)
+
+/**
+ * Official request_user_dialog control request — CLI parks a host-rendered
+ * dialog (refusal_fallback_prompt, etc.) until the SDK consumer answers.
+ * @internal
+ */
+export const SDKControlRequestUserDialogRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('request_user_dialog'),
+      dialog_kind: z.string(),
+      payload: z.unknown().optional(),
+      tool_use_id: z.string().optional(),
+    })
+    .describe(
+      '@internal Request from the CLI to the SDK host to present a user dialog. Host answers with behavior completed|cancelled + optional result.',
+    ),
+)
+
+/**
+ * Official iSf response for request_user_dialog.
+ * behavior completed|cancelled; result is dialog-kind-specific opaque payload.
+ */
+export const SDKControlRequestUserDialogResponseSchema = lazySchema(() =>
+  z
+    .object({
+      behavior: z.enum(['completed', 'cancelled']),
+      result: z
+        .unknown()
+        .optional()
+        .describe(
+          'Dialog-specific result payload. Opaque to the protocol; the caller and dialog renderer agree on the shape per dialog_kind.',
+        ),
+    })
+    .describe(
+      'Response from the SDK consumer for a request_user_dialog request.',
+    ),
+)
+
 // ============================================================================
 // Control Request/Response Wrappers
 // ============================================================================
@@ -565,10 +680,14 @@ export const SDKControlRequestInnerSchema = lazySchema(() =>
     SDKControlReloadPluginsRequestSchema(),
     SDKControlMcpReconnectRequestSchema(),
     SDKControlMcpToggleRequestSchema(),
+    SDKControlSetMcpPermissionModeOverrideRequestSchema(),
     SDKControlStopTaskRequestSchema(),
     SDKControlApplyFlagSettingsRequestSchema(),
     SDKControlGetSettingsRequestSchema(),
     SDKControlElicitationRequestSchema(),
+    SDKControlOauthTokenRefreshRequestSchema(),
+    SDKControlHostAuthTokenRefreshRequestSchema(),
+    SDKControlRequestUserDialogRequestSchema(),
   ]),
 )
 
@@ -594,6 +713,10 @@ export const ControlErrorResponseSchema = lazySchema(() =>
     request_id: z.string(),
     error: z.string(),
     pending_permission_requests: z
+      .array(z.lazy(() => SDKControlRequestSchema()))
+      .optional(),
+    /** Official pending_user_dialog_requests redelivery on initialize error. */
+    pending_user_dialog_requests: z
       .array(z.lazy(() => SDKControlRequestSchema()))
       .optional(),
   }),

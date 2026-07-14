@@ -24,6 +24,7 @@ import { parseJSONL } from './json.js'
 import { logError } from './log.js'
 import { getAttributionEmail } from './attributionEmail.js'
 import { getRealModelName } from './attributionModel.js'
+import { shouldSuppressSessionAttribution } from './residualMoreEnvGates.js'
 import { isMemoryFileAccess } from './sessionFileAccessHooks.js'
 import { getTranscriptPath } from './sessionStorage.js'
 import { readTranscriptForLoad } from './sessionStoragePortable.js'
@@ -49,7 +50,11 @@ export function getAttributionTexts(): AttributionTexts {
     return { commit: '', pr: '' }
   }
 
-  if (getClientType() === 'remote') {
+  // Official uIu densable — CLAUDE_CODE_SUPPRESS_SESSION_ATTRIBUTION skips
+  // remote/bridge session URL attribution.
+  if (shouldSuppressSessionAttribution()) {
+    // Fall through to non-session attribution paths below.
+  } else if (getClientType() === 'remote') {
     const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
     if (remoteSessionId) {
       const ingressUrl = process.env.SESSION_INGRESS_URL

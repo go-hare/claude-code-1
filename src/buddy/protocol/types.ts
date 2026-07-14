@@ -92,8 +92,8 @@ export type BuddyRuntimeHook = (
 ) =>
   | BuddyResponse
   | BuddyResponse[]
-  | void
-  | Promise<BuddyResponse | BuddyResponse[] | void>
+  | undefined
+  | Promise<BuddyResponse | BuddyResponse[] | undefined>
 
 export type BuddyRuntime = {
   manifest: BuddyManifest

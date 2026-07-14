@@ -71,6 +71,10 @@ import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import {
+  isPrecompactSkipDisabled,
+  shouldSkipPromptHistory,
+} from './residualFinalEnvGates.js'
 import { isFsInaccessible } from './errors.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
 import { formatFileSize } from './format.js'
@@ -270,6 +274,18 @@ export type AgentMetadata = {
    * resumed agent's notification can show the original description instead
    * of a placeholder. Optional — older metadata files lack this field. */
   description?: string
+  /**
+   * Official observer pointer densable — observerTaskId armed for this
+   * observed agent (HXt). Used by resume re-arm (zOu/KOu).
+   */
+  observerTaskId?: string
+  /** Official armingPermissionMode snapshot for observer re-arm. */
+  armingPermissionMode?: string
+  /**
+   * Official n5r/HXt observerStopped tombstone densable. Written on the
+   * observer agent sidecar when pairing is stopped so KOu reattach blocks.
+   */
+  observerStopped?: boolean
 }
 
 /**
@@ -301,6 +317,235 @@ export async function readAgentMetadata(
     if (isFsInaccessible(e)) return null
     throw e
   }
+}
+
+/**
+ * Official HXt densable — merge-patch agent sidecar metadata (read-merge-write).
+ * Used by observer tombstone / pointer writes so concurrent fields survive.
+ */
+export async function patchAgentMetadata(
+  agentId: AgentId,
+  patch: Partial<AgentMetadata> & { agentType?: string },
+): Promise<AgentMetadata> {
+  const prev = await readAgentMetadata(agentId)
+  const next: AgentMetadata = {
+    ...(prev ?? {}),
+    ...patch,
+    agentType: patch.agentType ?? prev?.agentType ?? 'unknown',
+  }
+  await writeAgentMetadata(agentId, next)
+  return next
+}
+
+/**
+ * Official main-session observer HXt densable — pointer from the *main*
+ * session to its armed observerTaskId (mirrors observed-agent agent meta).
+ * Lives next to the session transcript so resume/reattach can re-arm VOu
+ * across process restarts without a subagent observed sidecar.
+ */
+export type MainSessionObserverPointer = {
+  observerTaskId: string
+  /** Snapshot of permission mode at arm time (zOu re-arm). */
+  armingPermissionMode?: string
+  /** Observer agent type used when arming (KOu type-match). */
+  observerAgentType?: string
+}
+
+/**
+ * Official xZi densable — append `observer-ref` to the session transcript.
+ * VOu/IZi reads the last matching entry for cross-session reattach.
+ */
+export async function appendObserverRef(input: {
+  observerTaskId: string
+  observerAgentType?: string
+  armingPermissionMode?: string
+  /** Observed agent id; omit for main-session observer. */
+  agentId?: string
+  sessionId?: string
+}): Promise<void> {
+  const entry = {
+    type: 'observer-ref' as const,
+    observerTaskId: input.observerTaskId,
+    ...(input.observerAgentType
+      ? { observerAgentType: input.observerAgentType }
+      : {}),
+    ...(input.armingPermissionMode
+      ? { armingPermissionMode: input.armingPermissionMode }
+      : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+    timestamp: new Date().toISOString(),
+    sessionId: (input.sessionId ?? getSessionId()) as UUID,
+  }
+  await getProject().appendEntry(entry)
+}
+
+/**
+ * Official IZi densable — scan transcript tail-first for last observer-ref.
+ * When agentId is provided, match that observed agent; when omitted, match
+ * main-session refs (no agentId on the entry).
+ *
+ * Also falls back to `${sessionId}.observer.meta.json` when no transcript
+ * entry exists (compat with earlier densable pointer files).
+ */
+export async function readLatestObserverRef(input?: {
+  sessionId?: string
+  agentId?: string
+}): Promise<{
+  observerTaskId: string
+  observerAgentType?: string
+  armingPermissionMode?: string
+  agentId?: string
+  timestamp?: string
+} | null> {
+  const sessionId = input?.sessionId ?? getSessionId()
+  const path = getTranscriptPathForSession(sessionId)
+  try {
+    const st = await stat(path)
+    if (st.size > MAX_TRANSCRIPT_READ_BYTES) {
+      // Fall through to meta pointer for huge transcripts
+    } else {
+      const raw = await readFile(path, 'utf-8')
+      const lines = raw.split('\n')
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]
+        if (!line || !line.includes('"observer-ref"')) continue
+        try {
+          const parsed = JSON.parse(line) as {
+            type?: string
+            observerTaskId?: string
+            observerAgentType?: string
+            armingPermissionMode?: string
+            agentId?: string
+            timestamp?: string
+          }
+          if (parsed?.type !== 'observer-ref') continue
+          if (typeof parsed.observerTaskId !== 'string') continue
+          if (input?.agentId) {
+            if (parsed.agentId !== input.agentId) continue
+          } else if (parsed.agentId) {
+            // main-session read skips agent-scoped refs
+            continue
+          }
+          return {
+            observerTaskId: parsed.observerTaskId,
+            ...(typeof parsed.observerAgentType === 'string'
+              ? { observerAgentType: parsed.observerAgentType }
+              : {}),
+            ...(typeof parsed.armingPermissionMode === 'string'
+              ? { armingPermissionMode: parsed.armingPermissionMode }
+              : {}),
+            ...(typeof parsed.agentId === 'string'
+              ? { agentId: parsed.agentId }
+              : {}),
+            ...(typeof parsed.timestamp === 'string'
+              ? { timestamp: parsed.timestamp }
+              : {}),
+          }
+        } catch {
+          // skip bad lines
+        }
+      }
+    }
+  } catch (e) {
+    if (!isFsInaccessible(e)) throw e
+  }
+  // Compat fallback: side-file pointer (pre-observer-ref densable).
+  if (!input?.agentId) {
+    return readMainSessionObserverPointer(sessionId)
+  }
+  return null
+}
+
+/**
+ * Official kZi densable — whether an observer agent sidecar transcript still
+ * exists on disk (reattachable).
+ */
+export async function isObserverSidecarReattachable(
+  observerTaskId: string,
+): Promise<boolean> {
+  try {
+    const path = getAgentTranscriptPath(asAgentId(observerTaskId))
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function getMainSessionObserverPointerPath(
+  sessionId: string = getSessionId(),
+): string {
+  // Same projectDir resolution as getTranscriptPath / getTranscriptPathForSession.
+  const projectDir =
+    sessionId === getSessionId()
+      ? (getSessionProjectDir() ?? getProjectDir(getOriginalCwd()))
+      : getProjectDir(getOriginalCwd())
+  return join(projectDir, `${sessionId}.observer.meta.json`)
+}
+
+export async function writeMainSessionObserverPointer(
+  pointer: MainSessionObserverPointer,
+  sessionId?: string,
+): Promise<void> {
+  const path = getMainSessionObserverPointerPath(sessionId)
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, JSON.stringify(pointer))
+}
+
+export async function readMainSessionObserverPointer(
+  sessionId?: string,
+): Promise<MainSessionObserverPointer | null> {
+  const path = getMainSessionObserverPointerPath(sessionId)
+  try {
+    const raw = await readFile(path, 'utf-8')
+    const parsed = JSON.parse(raw) as Partial<MainSessionObserverPointer>
+    if (
+      typeof parsed.observerTaskId !== 'string' ||
+      parsed.observerTaskId.length === 0
+    ) {
+      return null
+    }
+    return {
+      observerTaskId: parsed.observerTaskId,
+      ...(typeof parsed.armingPermissionMode === 'string'
+        ? { armingPermissionMode: parsed.armingPermissionMode }
+        : {}),
+      ...(typeof parsed.observerAgentType === 'string'
+        ? { observerAgentType: parsed.observerAgentType }
+        : {}),
+    }
+  } catch (e) {
+    if (isFsInaccessible(e)) return null
+    throw e
+  }
+}
+
+/**
+ * Merge-patch main-session observer pointer (read-merge-write).
+ * Requires observerTaskId either in patch or existing file.
+ */
+export async function patchMainSessionObserverPointer(
+  patch: Partial<MainSessionObserverPointer>,
+  sessionId?: string,
+): Promise<MainSessionObserverPointer | null> {
+  const prev = await readMainSessionObserverPointer(sessionId)
+  const observerTaskId = patch.observerTaskId ?? prev?.observerTaskId
+  if (!observerTaskId) return null
+  const next: MainSessionObserverPointer = {
+    observerTaskId,
+    ...(patch.armingPermissionMode !== undefined
+      ? { armingPermissionMode: patch.armingPermissionMode }
+      : prev?.armingPermissionMode !== undefined
+        ? { armingPermissionMode: prev.armingPermissionMode }
+        : {}),
+    ...(patch.observerAgentType !== undefined
+      ? { observerAgentType: patch.observerAgentType }
+      : prev?.observerAgentType !== undefined
+        ? { observerAgentType: prev.observerAgentType }
+        : {}),
+  }
+  await writeMainSessionObserverPointer(next, sessionId)
+  return next
 }
 
 export type RemoteAgentMetadata = {
@@ -424,7 +669,7 @@ export function isTranscriptPersistenceDisabled(): boolean {
     (getNodeEnv() === 'test' && !allowTestPersistence) ||
     getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
     isSessionPersistenceDisabled() ||
-    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
+    shouldSkipPromptHistory()
   )
 }
 
@@ -1007,7 +1252,7 @@ class Project {
       (getNodeEnv() === 'test' && !allowTestPersistence) ||
       getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
       isSessionPersistenceDisabled() ||
-      isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
+      shouldSkipPromptHistory()
     )
   }
 
@@ -1260,6 +1505,9 @@ class Project {
     } else if (entry.type === 'goal') {
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'goal-cleared') {
+      void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'observer-ref') {
+      // Official xZi — always append (last-wins on IZi scan).
       void this.enqueueWrite(sessionFile, entry)
     } else {
       const messageSet = await getSessionMessages(sessionId)
@@ -3660,7 +3908,9 @@ export async function loadTranscriptFile(
     let buf: Buffer | null = null
     let metadataLines: string[] | null = null
     let hasPreservedSegment = false
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP)) {
+    // Official DISABLE_PRECOMPACT_SKIP densable.
+    const precompactSkipDisabled = isPrecompactSkipDisabled()
+    if (!precompactSkipDisabled) {
       const { size } = await stat(filePath)
       if (size > SKIP_PRECOMPACT_THRESHOLD) {
         const scan = await readTranscriptForLoad(filePath, size)
@@ -3699,7 +3949,7 @@ export async function loadTranscriptFile(
     if (
       !opts?.keepAllLeaves &&
       !hasPreservedSegment &&
-      !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP) &&
+      !precompactSkipDisabled &&
       buf.length > SKIP_PRECOMPACT_THRESHOLD
     ) {
       buf = walkChainBeforeParse(buf)
@@ -4523,9 +4773,21 @@ export function isLoggableMessage(m: Message): boolean {
   // When enabled, we allow hook_additional_context through since it contains
   // user-configured hook output that is useful for session context on resume.
   if (m.type === 'attachment' && getUserType() !== 'ant') {
+    // Official SAVE_HOOK_ADDITIONAL_CONTEXT densable.
+    let saveHookAdditionalContext = isEnvTruthy(
+      process.env.CLAUDE_CODE_SAVE_HOOK_ADDITIONAL_CONTEXT,
+    )
+    try {
+      const { isSaveHookAdditionalContextEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      saveHookAdditionalContext = isSaveHookAdditionalContextEnabled()
+    } catch {
+      // keep raw env fallback
+    }
     if (
       m.attachment!.type === 'hook_additional_context' &&
-      isEnvTruthy(process.env.CLAUDE_CODE_SAVE_HOOK_ADDITIONAL_CONTEXT)
+      saveHookAdditionalContext
     ) {
       return true
     }

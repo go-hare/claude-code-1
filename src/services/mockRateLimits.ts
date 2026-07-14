@@ -823,6 +823,17 @@ export function getMockSubscriptionType(): SubscriptionType | null {
 
 // Export a function that checks if we should use mock subscription
 export function shouldUseMockSubscription(): boolean {
+  // Official CLAUDE_CODE_MOCK_TRIAL densable — force mock subscription path.
+  try {
+    const { isMockTrialEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    if (isMockTrialEnabled() && process.env.USER_TYPE === 'ant') {
+      return true
+    }
+  } catch {
+    // densable optional
+  }
   return (
     mockEnabled &&
     mockSubscriptionType !== null &&

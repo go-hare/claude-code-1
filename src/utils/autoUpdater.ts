@@ -72,6 +72,18 @@ export async function assertMinVersion(): Promise<void> {
     return
   }
 
+  // Official HFI densable — skip min-version kill switch for trajectory runners.
+  try {
+    const { shouldSkipHfiVersionCheck } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    if (shouldSkipHfiVersionCheck()) {
+      return
+    }
+  } catch {
+    // residual helpers optional
+  }
+
   try {
     const versionConfig = await getDynamicConfig_BLOCKS_ON_INIT<{
       minVersion: string

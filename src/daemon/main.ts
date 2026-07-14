@@ -45,6 +45,8 @@ interface WorkerState {
  * Subcommands:
  *   (none)  — unified status (supervisor + sessions)
  *   start   — start the supervisor with default workers
+ *   install — install launchd/systemd user service
+ *   uninstall — remove user service
  *   stop    — send SIGTERM to supervisor
  *   status  — unified status (supervisor + sessions)
  *   ps      — alias for status
@@ -92,6 +94,12 @@ export async function daemonMain(args: string[]): Promise<void> {
       }
       break
     }
+    case 'install':
+      await handleDaemonInstall()
+      break
+    case 'uninstall':
+      await handleDaemonUninstall()
+      break
     case 'stop':
       await handleDaemonStop()
       break
@@ -146,6 +154,8 @@ USAGE
 SUBCOMMANDS
   status      Show daemon and session status (default)
   start       Start the daemon supervisor
+  install     Install as a persistent user service (launchd/systemd)
+  uninstall   Remove the persistent user service
   stop        Stop the daemon
   bg          Start a background session
   attach      Attach to a background session
@@ -196,6 +206,69 @@ async function showUnifiedStatus(): Promise<void> {
   console.log('\n=== Background Sessions ===')
   const bg = await import('../cli/bg.js')
   await bg.psHandler([])
+}
+
+/**
+ * Official denser: `claude daemon install` — launchd/systemd user service.
+ */
+async function handleDaemonInstall(): Promise<void> {
+  const { installDaemonService, isDaemonServiceInstallSupported } =
+    await import('./serviceInstall.js')
+  if (!isDaemonServiceInstallSupported()) {
+    console.error(
+      process.env.CLAUDE_CONFIG_DIR
+        ? 'service install only supports the default config dir — the launchd/systemd unit is a per-user singleton'
+        : `Service install isn't available on this platform — the daemon still runs on demand when a client connects.`,
+    )
+    process.exitCode = 1
+    return
+  }
+  const result = await installDaemonService()
+  if (!result.ok) {
+    console.error(`install failed: ${result.error}`)
+    if (result.servicePath) {
+      console.error(`  (service file was written to ${result.servicePath})`)
+    }
+    process.exitCode = 1
+    return
+  }
+  console.log(`installed: ${result.servicePath}`)
+  // Wait briefly for control socket.
+  const { sendControlRequest } = await import('./controlSocket.js')
+  const deadline = Date.now() + 5000
+  let reachable = false
+  while (Date.now() < deadline) {
+    const resp = await sendControlRequest(
+      { op: 'ping', proto: 1 },
+      { timeoutMs: 1000 },
+    )
+    if (resp.ok) {
+      reachable = true
+      break
+    }
+    await new Promise(r => setTimeout(r, 100))
+  }
+  if (reachable) {
+    console.log('daemon is reachable')
+  } else {
+    console.error(
+      'warning: service installed but daemon not reachable within 5s — check `claude daemon logs`',
+    )
+  }
+}
+
+/**
+ * Official denser: `claude daemon uninstall`.
+ */
+async function handleDaemonUninstall(): Promise<void> {
+  const { uninstallDaemonService } = await import('./serviceInstall.js')
+  const result = await uninstallDaemonService()
+  if (!result.ok) {
+    console.error(`uninstall failed: ${result.error}`)
+    process.exitCode = 1
+    return
+  }
+  console.log('uninstalled')
 }
 
 /**

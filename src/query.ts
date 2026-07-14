@@ -75,6 +75,8 @@ const _jobClassifier = feature('TEMPLATES')
   ? (require('./jobs/classifier.js') as typeof import('./jobs/classifier.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
+import { resolveStopHookBlockCap } from './utils/residualMsEnvGates.js'
+import { messagesEndWithSuccessfulTerminalMcpTool } from './utils/residualUiEnvGates.js'
 import {
   enqueue,
   remove as removeFromQueue,
@@ -314,18 +316,204 @@ export async function* query(
       }
     : params
 
+  // Official queryWithObserverTap densable — capture stream activity for armed
+  // observer pairings (JOu). Lazy require keeps observer optional for cold paths.
+  // Official VOu: on main-family queries, fire-and-forget ensure main-session
+  // observer when mainThreadAgent declares observer: (await only non-interactive).
+  let observerTap: {
+    capture: (value: unknown) => void
+    flushSegment: () => void
+    finish: (reason: string) => void
+  } | null = null
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {
+      createObserverActivityTap,
+      ensureMainSessionObserver,
+      getQuerySourceFamily,
+    } =
+      require('./utils/observerAgents.js') as typeof import('./utils/observerAgents.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getMainThreadAgentType } =
+      require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+    // Install real G0t host (AgentTool spawn/deliver/abort) before VOu arm so
+    // main-session first delivery is a real async fork, not the refuse stub.
+    if (getQuerySourceFamily(paramsWithTrace.querySource) === 'main') {
+      const activeAgents =
+        paramsWithTrace.toolUseContext.options.agentDefinitions?.activeAgents ??
+        []
+      const mainType = getMainThreadAgentType()
+      const mainAgentDefinition = mainType
+        ? activeAgents.find(a => a.agentType === mainType)
+        : undefined
+      // Skip ensure work when main agent has no observer: declaration.
+      if (mainAgentDefinition?.observer) {
+        const ensurePromise = (async () => {
+          try {
+            const { installAgentObserverRuntimeHost } = await import(
+              '@claude-code/builtin-tools/tools/AgentTool/observerRuntimeHost.js'
+            )
+            await installAgentObserverRuntimeHost({
+              toolUseContext: paramsWithTrace.toolUseContext,
+              canUseTool: paramsWithTrace.canUseTool,
+              setAppState:
+                paramsWithTrace.toolUseContext.setAppStateForTasks ??
+                paramsWithTrace.toolUseContext.setAppState,
+              log: msg => logForDebugging(msg),
+            })
+          } catch (err) {
+            logForDebugging(
+              `[agentObserver] real host install failed (arm may refuse first-run): ${err instanceof Error ? err.message : String(err)}`,
+            )
+          }
+          const armCtx = paramsWithTrace.toolUseContext
+          let armingPermissionMode: string | undefined
+          try {
+            armingPermissionMode =
+              armCtx.getAppState().toolPermissionContext.mode
+          } catch {
+            armingPermissionMode = undefined
+          }
+          // createAgentId for real agent ids (observer spawn / resume paths).
+          const { createAgentId } = await import('src/utils/uuid.js')
+          return ensureMainSessionObserver({
+            mainAgentDefinition,
+            activeAgents,
+            armingToolUseContext: armCtx,
+            canUseTool: paramsWithTrace.canUseTool,
+            setAppState: armCtx.setAppStateForTasks ?? armCtx.setAppState,
+            ...(armingPermissionMode !== undefined
+              ? { armingPermissionMode }
+              : {}),
+            generateObserverTaskId: () => createAgentId(),
+            // Match AgentTool o5r arm density (wZi tools + Agent checkPermissions).
+            tools: armCtx.options.tools?.map(t => ({
+              name: t.name,
+              ...(t.aliases ? { aliases: t.aliases } : {}),
+            })),
+            allowedAgentTypes:
+              armCtx.options.agentDefinitions?.allowedAgentTypes,
+            gateCanUseTool: async ({
+              subagentType,
+              description: gateDesc,
+              prompt: gatePrompt,
+            }) => {
+              const agentTool =
+                findToolByName(armCtx.options.tools, 'Agent') ??
+                findToolByName(armCtx.options.tools, 'Task')
+              if (!agentTool) return 'deny'
+              try {
+                const result = await agentTool.checkPermissions(
+                  {
+                    description: gateDesc,
+                    prompt: gatePrompt,
+                    subagent_type: subagentType,
+                    run_in_background: true,
+                  },
+                  armCtx,
+                )
+                if (result.behavior === 'allow') return 'allow'
+                if (result.behavior === 'deny') return 'deny'
+                if (result.behavior === 'ask') return 'ask'
+                return 'allow'
+              } catch {
+                return 'error'
+              }
+            },
+            // Cold resume of main-session observer: no live local_agent task
+            // → firstRunDone stays false and spawnFirstRun restarts lifecycle.
+            // Main HXt pointer load/save is defaulted inside ensureMainSessionObserver.
+            isObserverProcessRunning: observerTaskId => {
+              try {
+                const task = armCtx.getAppState().tasks?.[observerTaskId] as
+                  | { type?: string; status?: string }
+                  | undefined
+                return task?.type === 'local_agent' && task.status === 'running'
+              } catch {
+                return false
+              }
+            },
+            log: msg => logForDebugging(msg),
+          })
+        })()
+        // Official: non-interactive (cn()) awaits ensure so arm completes before
+        // first turn activity; interactive fire-and-forget.
+        const nonInteractive =
+          paramsWithTrace.toolUseContext.options.isNonInteractiveSession ===
+          true
+        if (nonInteractive) {
+          try {
+            await ensurePromise
+          } catch (err) {
+            logForDebugging(
+              `[agentObserver] non-interactive arm failed (degrading to unobserved): ${err instanceof Error ? err.message : String(err)}`,
+            )
+          }
+        } else {
+          void ensurePromise.catch(err => {
+            logForDebugging(
+              `[agentObserver] main-session ensure failed: ${err instanceof Error ? err.message : String(err)}`,
+            )
+          })
+        }
+      }
+    }
+    observerTap = createObserverActivityTap({
+      querySource: paramsWithTrace.querySource,
+      toolUseContext: paramsWithTrace.toolUseContext,
+      messages: paramsWithTrace.messages,
+      turnStartIndex: 0,
+      log: msg => logForDebugging(msg),
+    })
+  } catch {
+    observerTap = null
+  }
+
   let terminal: Terminal | undefined
   let didThrow = false
   let thrownError: unknown
   try {
-    terminal = yield* queryLoop(
+    const loop = queryLoop(
       paramsWithTrace,
       consumedCommandUuids,
       consumedAutonomyCommands,
     )
+    if (observerTap) {
+      while (true) {
+        const next = await loop.next()
+        if (next.done) {
+          terminal = next.value
+          break
+        }
+        const value = next.value
+        if (
+          value &&
+          typeof value === 'object' &&
+          'type' in value &&
+          (value as { type: unknown }).type === 'stream_request_start'
+        ) {
+          observerTap.flushSegment()
+        } else {
+          observerTap.capture(value)
+        }
+        yield value
+      }
+      if (terminal) {
+        observerTap.finish(terminal.reason)
+      }
+    } else {
+      terminal = yield* loop
+    }
   } catch (error) {
     didThrow = true
     thrownError = error
+    if (observerTap) {
+      try {
+        observerTap.finish('error')
+      } catch {
+        // best-effort
+      }
+    }
     throw error
   } finally {
     await finalizeAutonomyCommandsForTurn({
@@ -444,6 +632,11 @@ async function* queryLoop(
   // trigger point. Loop-local (not on State) to avoid touching the 7 continue
   // sites.
   let taskBudgetRemaining: number | undefined
+
+  // Official thinking-only nudge: one retry when end_turn has no visible text
+  // and the turn was not a successful terminal-MCP tool result (C1u).
+  // Loop-local like taskBudgetRemaining so continue sites stay untouched.
+  let thinkingOnlyNudged = false
 
   // Snapshot immutable env/statsig/session state once at entry. See QueryConfig
   // for what's included and why feature() gates are intentionally excluded.
@@ -798,6 +991,83 @@ async function* queryLoop(
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
 
+    // Official model_fable_consent densable at query_setup (X6e + ORu).
+    // Full ExtraUsageDialog 3DS purchase remains denser.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isFableModel, runFableOverageConsentFlow } =
+        require('./utils/fableConsent.js') as typeof import('./utils/fableConsent.js')
+      if (isFableModel(currentModel)) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getOauthAccountInfo } =
+          require('./utils/auth.js') as typeof import('./utils/auth.js')
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getDefaultMainLoopModel } =
+          require('./utils/model/model.js') as typeof import('./utils/model/model.js')
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { resolveFableBridgeDialogTimeoutMsOrDefault } =
+          require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js')
+        const oauth = getOauthAccountInfo()
+        const fallbackModel = getDefaultMainLoopModel()
+        const fallbackAllowed =
+          Boolean(fallbackModel) && !isFableModel(fallbackModel)
+        const flow = await runFableOverageConsentFlow({
+          model: currentModel,
+          requestDialog: toolUseContext.requestDialog ?? null,
+          organizationUuid: oauth?.organizationUuid ?? null,
+          accountUuid: oauth?.accountUuid ?? null,
+          signal: toolUseContext.abortController.signal,
+          parkTimeoutMs: resolveFableBridgeDialogTimeoutMsOrDefault(),
+          fallbackModel: fallbackAllowed ? fallbackModel : null,
+          isFallbackAllowed: fallbackAllowed,
+          overagesEnabled: true,
+        })
+        if (flow.shouldAbort) {
+          yield createAssistantAPIErrorMessage({
+            content:
+              flow.errorMessage ??
+              'Your model policy only allows Fable 5, which requires usage credits — /model to set it up',
+            error: 'billing_error',
+          })
+          return {
+            reason: 'model_error',
+            error: new Error(flow.errorMessage ?? 'model_fable_consent'),
+          }
+        }
+        if (
+          (flow.choice === 'switch_default' ||
+            flow.reason === 'model_consent_fallback' ||
+            flow.reason === 'dialog_declined' ||
+            flow.reason === 'no_dialog_fallback') &&
+          flow.fallbackModel
+        ) {
+          currentModel = flow.fallbackModel
+          toolUseContext = {
+            ...toolUseContext,
+            options: {
+              ...toolUseContext.options,
+              mainLoopModel: flow.fallbackModel,
+            },
+          }
+        }
+        // Official purchase-intent densable after consent — ExtraUsageDialog
+        // 3DS remains denser; open_purchase surfaces /usage-credits hint.
+        if (
+          flow.choice === 'consent' &&
+          flow.purchaseIntent?.next === 'open_purchase'
+        ) {
+          const hint = flow.purchaseIntent.commandHint ?? '/usage-credits'
+          toolUseContext.addNotification?.({
+            key: 'fable-open-purchase',
+            text: `Fable 5 needs usage credits — run ${hint} to buy, or /model to switch`,
+            priority: 'immediate',
+          })
+        }
+      }
+    } catch {
+      // densable optional — never block query on fable consent failures
+    }
+
     queryCheckpoint('query_setup_end')
 
     // Create fetch wrapper once per query session to avoid memory retention.
@@ -938,6 +1208,51 @@ async function* queryLoop(
               isNonInteractiveSession:
                 toolUseContext.options.isNonInteractiveSession,
               fallbackModel,
+              // Official m1u/w_i refusal-arm densable → Options.refusalFallback*
+              ...(() => {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const {
+                    planRefusalFallbackArm,
+                    resolveSilentRearmModel,
+                    resolveRefusalFallbackModelAndLane,
+                    isRefusalFallbackEnabled,
+                  } =
+                    require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                  if (!isRefusalFallbackEnabled()) return {}
+                  const isMainThread = toolUseContext.agentId === undefined
+                  const arm = planRefusalFallbackArm({
+                    currentModel,
+                    alreadyUsed: false,
+                    declined: false,
+                    requestDialog: toolUseContext.requestDialog,
+                    isMainThread,
+                    resolveArmedFallbackModel: () =>
+                      fallbackModel && fallbackModel !== currentModel
+                        ? fallbackModel
+                        : undefined,
+                  })
+                  const silentRearm = resolveSilentRearmModel({
+                    currentModel,
+                    isVisiblyArmable: arm.visibleModel !== undefined,
+                    silentRearmGateEnabled: false,
+                  })
+                  const resolved = resolveRefusalFallbackModelAndLane({
+                    visibleModel: arm.visibleModel,
+                    silentRearmModel: silentRearm,
+                    serverLane: arm.serverLane,
+                  })
+                  if (!resolved.refusalFallbackModel) return {}
+                  return {
+                    refusalFallbackModel: resolved.refusalFallbackModel,
+                    refusalFallbackModelLane: resolved.refusalFallbackModelLane,
+                    refusalFallbackSilentArmActive:
+                      resolved.refusalFallbackSilentArmActive,
+                  }
+                } catch {
+                  return {}
+                }
+              })(),
               onStreamingFallback: () => {
                 streamingFallbackOccured = true
               },
@@ -958,6 +1273,8 @@ async function* queryLoop(
               advisorModel: appState.advisorModel,
               skipCacheWrite,
               agentId: toolUseContext.agentId,
+              isBackgroundAgent: toolUseContext.isBackgroundAgent,
+              requestDialog: toolUseContext.requestDialog,
               addNotification: toolUseContext.addNotification,
               ...(params.taskBudget && {
                 taskBudget: {
@@ -970,6 +1287,88 @@ async function* queryLoop(
               langfuseTrace: toolUseContext.langfuseTrace,
             },
           })) {
+            // Official stream fallback_request densable consumer (query path).
+            // Stream also throws FallbackTriggeredError; this branch yields the
+            // model_refusal_fallback banner / salvage telemetry before retry.
+            if (
+              message &&
+              typeof message === 'object' &&
+              (message as { type?: string }).type === 'fallback_request'
+            ) {
+              const fb = message as {
+                type: 'fallback_request'
+                trigger?: string
+                originalModel: string
+                fallbackModel: string
+                requestId?: string | null
+                apiRefusalCategory?: string | null
+                silentArmAtTrigger?: boolean
+                routeMatched?: 'category' | 'catch_all' | null
+              }
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const {
+                  salvageRefusalPartialText,
+                  planRefusalFallbackPresentation,
+                  buildModelRefusalFallbackSystemMessage,
+                } =
+                  require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                const salvage = salvageRefusalPartialText({
+                  messages: assistantMessages,
+                })
+                const isMainThread = toolUseContext.agentId === undefined
+                const presentation = planRefusalFallbackPresentation({
+                  reason: fb.trigger ?? 'refusal',
+                  midStream: assistantMessages.length > 0,
+                  discardedMessages: assistantMessages as unknown as readonly {
+                    message?: { content?: readonly { type?: string }[] }
+                  }[],
+                  requestId: fb.requestId,
+                  fromModel: fb.originalModel,
+                  apiRefusalCategory: fb.apiRefusalCategory,
+                  isMainThread,
+                  originalModelScope: querySource,
+                })
+                logEvent('tengu_refusal_fallback_request', {
+                  original_model:
+                    fb.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  fallback_model:
+                    fb.fallbackModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  queryChainId: queryChainIdForAnalytics,
+                  queryDepth: queryTracking.depth,
+                  mid_stream: presentation.telemetry.midStream,
+                  had_partial_text: salvage.partialTextChars > 0,
+                  partial_text_chars: salvage.partialTextChars,
+                  salvaged_tool_use_count: salvage.toolUseCount,
+                  silent_arm: fb.silentArmAtTrigger === true,
+                  ...(fb.routeMatched != null
+                    ? {
+                        route_matched:
+                          fb.routeMatched as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      }
+                    : {}),
+                })
+                if (presentation.showBanner) {
+                  const banner = buildModelRefusalFallbackSystemMessage({
+                    content: `Switched to ${renderModelName(fb.fallbackModel)} after a model refusal on ${renderModelName(fb.originalModel)}`,
+                    fromModel: fb.originalModel,
+                    toModel: fb.fallbackModel,
+                    requestId: fb.requestId,
+                    apiRefusalCategory: fb.apiRefusalCategory,
+                    timestamp: new Date().toISOString(),
+                    uuid: crypto.randomUUID(),
+                    reason: 'refusal',
+                  })
+                  yield banner as unknown as Message
+                }
+                void salvage
+              } catch {
+                // densable optional
+              }
+              // Do not push into assistantMessages; stream will throw
+              // FallbackTriggeredError for the actual model switch retry.
+              continue
+            }
             // We won't use the tool_calls from the first attempt
             // We could.. but then we'd have to merge assistant messages
             // with different ids and double up on full the tool_results
@@ -1174,8 +1573,71 @@ async function* queryLoop(
         } catch (innerError) {
           if (innerError instanceof FallbackTriggeredError && fallbackModel) {
             // Fallback was triggered - switch model and retry
-            currentModel = fallbackModel
+            // Prefer the error's fallback model (refusal path may route via g_i).
+            const switchTo =
+              innerError.fallbackModel &&
+              typeof innerError.fallbackModel === 'string'
+                ? innerError.fallbackModel
+                : fallbackModel
+            currentModel = switchTo
             attemptWithFallback = true
+
+            // Official BMg densable — rebind AppState + latch previous models.
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const {
+                planRefusalFallbackAppStateRebind,
+                applyRefusalFallbackAppStateRebind,
+                applyRefusalFallbackLatchArm,
+              } =
+                require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const {
+                getMainLoopModelOverride,
+                setMainLoopModelOverride,
+                setRefusalFallbackModelLatch,
+                markRefusalFallbackOccurred,
+              } =
+                require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+              const appState = toolUseContext.getAppState()
+              applyRefusalFallbackLatchArm({
+                fallbackModel: switchTo,
+                previousOverride: getMainLoopModelOverride(),
+                previousAppStateModel: appState.mainLoopModel,
+                previousModelForSession: appState.mainLoopModelForSession,
+                setLatch: setRefusalFallbackModelLatch,
+                setMainLoopModelOverride,
+                markOccurred: markRefusalFallbackOccurred,
+              })
+              const rebind = planRefusalFallbackAppStateRebind({
+                appStateModel: switchTo,
+                forSessionValue: null,
+                overrideValue: switchTo,
+                currentMainLoopModel: appState.mainLoopModel,
+                currentMainLoopModelForSession:
+                  appState.mainLoopModelForSession,
+                fastMode: appState.fastMode,
+              })
+              applyRefusalFallbackAppStateRebind({
+                plan: rebind,
+                setAppState: toolUseContext.setAppState as unknown as (
+                  f: (prev: {
+                    mainLoopModel?: string | null
+                    mainLoopModelForSession?: string | null
+                    fastMode?: boolean
+                    [k: string]: unknown
+                  }) => {
+                    mainLoopModel?: string | null
+                    mainLoopModelForSession?: string | null
+                    fastMode?: boolean
+                    [k: string]: unknown
+                  },
+                ) => void,
+                setMainLoopModelOverride,
+              })
+            } catch {
+              // BMg densable optional
+            }
 
             // Clear assistant messages since we'll retry the entire request
             yield* yieldMissingToolResultBlocks(
@@ -1200,7 +1662,7 @@ async function* queryLoop(
             }
 
             // Update tool use context with new model
-            toolUseContext.options.mainLoopModel = fallbackModel
+            toolUseContext.options.mainLoopModel = switchTo
 
             // Thinking signatures are model-bound: replaying a protected-thinking
             // block (e.g. capybara) to an unprotected fallback (e.g. opus) 400s.
@@ -1214,7 +1676,7 @@ async function* queryLoop(
               original_model:
                 innerError.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               fallback_model:
-                fallbackModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                switchTo as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               entrypoint:
                 'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               queryChainId: queryChainIdForAnalytics,
@@ -1224,7 +1686,7 @@ async function* queryLoop(
             // Yield system message about fallback — use 'warning' level so
             // users see the notification without needing verbose mode
             yield createSystemMessage(
-              `Switched to ${renderModelName(innerError.fallbackModel)} due to high demand for ${renderModelName(innerError.originalModel)}`,
+              `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
               'warning',
             )
 
@@ -1508,10 +1970,20 @@ async function* queryLoop(
           'tengu_otk_slot_v1',
           false,
         )
+        // Official MAX_OUTPUT_TOKENS densable presence gate.
+        let hasMaxOutputTokensEnv = !!process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+        try {
+          const { resolveMaxOutputTokensOverride } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./utils/residualFinalEnvGates.js') as typeof import('./utils/residualFinalEnvGates.js')
+          hasMaxOutputTokensEnv = resolveMaxOutputTokensOverride() !== null
+        } catch {
+          // keep raw env fallback
+        }
         if (
           capEnabled &&
           maxOutputTokensOverride === undefined &&
-          !process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+          !hasMaxOutputTokensEnv
         ) {
           logEvent('tengu_max_tokens_escalate', {
             escalatedTo: ESCALATED_MAX_TOKENS,
@@ -1581,6 +2053,62 @@ async function* queryLoop(
         }
       }
 
+      // Official thinking-only densable: when the model ends the turn with no
+      // visible text (and not after a successful terminal-MCP tool), nudge once.
+      // Skip for compact / internal query sources that are not user-facing.
+      if (
+        lastMessage?.type === 'assistant' &&
+        !lastMessage.isApiErrorMessage &&
+        querySource !== 'compact' &&
+        querySource !== 'prompt_suggestion' &&
+        querySource !== 'away_summary' &&
+        querySource !== 'agent_summary' &&
+        querySource !== 'memdir_aki_extract' &&
+        !messagesEndWithSuccessfulTerminalMcpTool(messagesForQuery) &&
+        !assistantMessages.some(
+          m =>
+            Array.isArray(m.message?.content) &&
+            m.message.content.some(
+              block =>
+                block.type === 'text' &&
+                typeof block.text === 'string' &&
+                block.text.trim().length > 0,
+            ),
+        )
+      ) {
+        const stopReason = lastMessage.message?.stop_reason
+        // Official: only end_turn | stop_sequence (not tool_use / max_tokens).
+        if (stopReason === 'end_turn' || stopReason === 'stop_sequence') {
+          if (!thinkingOnlyNudged) {
+            thinkingOnlyNudged = true
+            logForDebugging('query_thinking_only_response: nudged')
+            const nudgeMessage = createUserMessage({
+              content:
+                '[Your previous response had no visible output. Please continue and produce a user-visible response.]',
+              isMeta: true,
+            })
+            state = {
+              messages: [...messagesForQuery, nudgeMessage],
+              toolUseContext,
+              autoCompactTracking: tracking,
+              maxOutputTokensRecoveryCount,
+              hasAttemptedReactiveCompact,
+              maxOutputTokensOverride: undefined,
+              pendingToolUseSummary: undefined,
+              stopHookActive: undefined,
+              stopHookBlockCount: 0,
+              turnCount,
+              transition: { reason: 'thinking_only_retry' },
+            }
+            continue
+          }
+          logForDebugging('query_thinking_only_response: nudge_exhausted')
+        }
+      } else if (thinkingOnlyNudged) {
+        // Successful visible turn after a nudge — clear for subsequent turns.
+        thinkingOnlyNudged = false
+      }
+
       const stopHookResult = yield* handleStopHooks(
         messagesForQuery,
         assistantMessages,
@@ -1597,8 +2125,7 @@ async function* queryLoop(
       }
 
       if (stopHookResult.blockingErrors.length > 0) {
-        const MAX_CONSECUTIVE_STOP_HOOK_BLOCKS =
-          Number(process.env.CLAUDE_CODE_STOP_HOOK_BLOCK_CAP) || 8
+        const MAX_CONSECUTIVE_STOP_HOOK_BLOCKS = resolveStopHookBlockCap()
         if (stopHookBlockCount + 1 >= MAX_CONSECUTIVE_STOP_HOOK_BLOCKS) {
           yield createSystemMessage(
             `Stop hook blocked ${MAX_CONSECUTIVE_STOP_HOOK_BLOCKS} consecutive times. Ending turn to prevent infinite loop.`,

@@ -339,14 +339,18 @@ export function parseHeaders(headerArray: string[]): Record<string, string> {
   return headers
 }
 
-export function getProjectMcpServerStatus(
+/**
+ * Strict project MCP approval status from settings only.
+ * Official 2.1.196+: used by `claude mcp list` / `mcp get` so pending
+ * project (.mcp.json) servers are shown without being spawned.
+ * Does NOT auto-approve for bypassPermissions / non-interactive sessions.
+ */
+export function getProjectMcpServerStatusStrict(
   serverName: string,
 ): 'approved' | 'rejected' | 'pending' {
   const settings = getSettings_DEPRECATED()
   const normalizedName = normalizeNameForMCP(serverName)
 
-  // TODO: This fails an e2e test if the ?. is not present. This is likely a bug in the e2e test.
-  // Will fix this in a follow-up PR.
   if (
     settings?.disabledMcpjsonServers?.some(
       name => normalizeNameForMCP(name) === normalizedName,
@@ -362,6 +366,17 @@ export function getProjectMcpServerStatus(
     settings?.enableAllProjectMcpServers
   ) {
     return 'approved'
+  }
+
+  return 'pending'
+}
+
+export function getProjectMcpServerStatus(
+  serverName: string,
+): 'approved' | 'rejected' | 'pending' {
+  const strict = getProjectMcpServerStatusStrict(serverName)
+  if (strict !== 'pending') {
+    return strict
   }
 
   // In bypass permissions mode (--dangerously-skip-permissions), there's no way

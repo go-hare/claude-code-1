@@ -582,15 +582,9 @@ export function Config({
       })(),
       type: 'enum' as const,
       onChange(mode: string) {
+        // Official 2.1.207: auto is a first-class external mode — no special-case mapping.
         const parsedMode = permissionModeFromString(mode);
-        // auto is an internal-only mode — store it directly, don't convert
-        // to its external mapping ('default') which would make it invisible.
-        const validatedMode =
-          parsedMode === 'auto'
-            ? parsedMode
-            : isExternalPermissionMode(parsedMode)
-              ? toExternalPermissionMode(parsedMode)
-              : parsedMode;
+        const validatedMode = isExternalPermissionMode(parsedMode) ? toExternalPermissionMode(parsedMode) : parsedMode;
         const result = updateSettingsForSource('userSettings', {
           permissions: {
             ...settingsData?.permissions,
@@ -861,6 +855,27 @@ export function Config({
         logEvent('tengu_editor_mode_changed', {
           mode: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           source: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+      },
+    },
+    {
+      id: 'askUserQuestionTimeout',
+      label: 'Question auto-continue timeout',
+      // Official 2.1.200: default never (no auto-continue unless configured)
+      value: settingsData?.askUserQuestionTimeout ?? 'never',
+      options: ['60s', '5m', '10m', 'never'],
+      type: 'enum' as const,
+      onChange(value: string) {
+        const next = value === '60s' || value === '5m' || value === '10m' || value === 'never' ? value : 'never';
+        setSettingsData(prev => ({
+          ...prev,
+          askUserQuestionTimeout: next,
+        }));
+        updateSettingsForSource('userSettings', {
+          askUserQuestionTimeout: next,
+        });
+        logEvent('tengu_ask_user_question_timeout_changed', {
+          value: next as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         });
       },
     },

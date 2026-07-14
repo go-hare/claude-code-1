@@ -1,15 +1,18 @@
 /**
  * Tests for src/jobs/classifier.ts
  *
- * Uses real temp directories instead of mocking fs to avoid
+ * Uses real temp dirs instead of mocking fs to avoid
  * cross-test mock pollution in bun test.
  *
  * classifier.ts takes jobDir as a parameter, so no envUtils mock needed.
+ *
+ * Status vocabulary (implementation): working | blocked | done | failed
+ * Field name is `state` (BgJobState), not legacy `status`.
  */
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs'
-import { join } from 'path'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
+import { join } from 'path'
 import type { AssistantMessage } from '../../types/message.js'
 import { classifyAndWriteState } from '../classifier.js'
 
@@ -73,10 +76,10 @@ describe('classifyAndWriteState', () => {
     expect(exists).toBe(false)
   })
 
-  test('sets status to running when last message has tool_use block', async () => {
+  test('sets state to working when last message has tool_use block', async () => {
     writeFileSync(
       stateFile,
-      JSON.stringify({ status: 'created', updatedAt: '2026-01-01' }),
+      JSON.stringify({ state: 'starting', updatedAt: '2026-01-01' }),
       'utf-8',
     )
 
@@ -88,13 +91,14 @@ describe('classifyAndWriteState', () => {
     await classifyAndWriteState(jobDir, [msg])
 
     const state = JSON.parse(readFileSync(stateFile, 'utf-8'))
-    expect(state.status).toBe('running')
+    expect(state.state).toBe('working')
+    expect(state.tempo).toBe('active')
   })
 
-  test('sets status to completed when stop_reason is end_turn', async () => {
+  test('sets state to done when stop_reason is end_turn', async () => {
     writeFileSync(
       stateFile,
-      JSON.stringify({ status: 'running', updatedAt: '2026-01-01' }),
+      JSON.stringify({ state: 'working', updatedAt: '2026-01-01' }),
       'utf-8',
     )
 
@@ -105,26 +109,28 @@ describe('classifyAndWriteState', () => {
     await classifyAndWriteState(jobDir, [msg])
 
     const state = JSON.parse(readFileSync(stateFile, 'utf-8'))
-    expect(state.status).toBe('completed')
+    expect(state.state).toBe('done')
+    expect(state.tempo).toBe('idle')
+    expect(state.firstTerminalAt).toBeDefined()
   })
 
-  test('sets status to running for empty messages (state exists)', async () => {
+  test('sets state to working for empty messages (state exists)', async () => {
     writeFileSync(
       stateFile,
-      JSON.stringify({ status: 'created', updatedAt: '2026-01-01' }),
+      JSON.stringify({ state: 'starting', updatedAt: '2026-01-01' }),
       'utf-8',
     )
 
     await classifyAndWriteState(jobDir, [])
 
     const state = JSON.parse(readFileSync(stateFile, 'utf-8'))
-    expect(state.status).toBe('running')
+    expect(state.state).toBe('working')
   })
 
-  test('sets status to running when stop_reason is max_tokens', async () => {
+  test('sets state to working when stop_reason is max_tokens', async () => {
     writeFileSync(
       stateFile,
-      JSON.stringify({ status: 'running', updatedAt: '2026-01-01' }),
+      JSON.stringify({ state: 'working', updatedAt: '2026-01-01' }),
       'utf-8',
     )
 
@@ -135,6 +141,29 @@ describe('classifyAndWriteState', () => {
     await classifyAndWriteState(jobDir, [msg])
 
     const state = JSON.parse(readFileSync(stateFile, 'utf-8'))
-    expect(state.status).toBe('running')
+    expect(state.state).toBe('working')
+  })
+
+  test('sets state to blocked for AskUserQuestion tool_use', async () => {
+    writeFileSync(
+      stateFile,
+      JSON.stringify({ state: 'working', updatedAt: '2026-01-01' }),
+      'utf-8',
+    )
+
+    const msg = makeAssistantMessage([
+      {
+        type: 'tool_use',
+        id: 'toolu_q',
+        name: 'AskUserQuestion',
+        input: { questions: [] },
+      },
+    ])
+
+    await classifyAndWriteState(jobDir, [msg])
+
+    const state = JSON.parse(readFileSync(stateFile, 'utf-8'))
+    expect(state.state).toBe('blocked')
+    expect(state.tempo).toBe('blocked')
   })
 })
