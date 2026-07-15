@@ -3,6 +3,7 @@ import figures from 'figures';
 import Fuse from 'fuse.js';
 import React from 'react';
 import { getOriginalCwd, getSessionId } from '../bootstrap/state.js';
+import { useIsInsideModal, useModalOrTerminalSize } from '../context/modalContext.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useSearchInput } from '../hooks/useSearchInput.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
@@ -156,7 +157,13 @@ export function LogSelector({
   onAgenticSearch,
 }: LogSelectorProps): React.ReactNode {
   const terminalSize = useTerminalSize();
-  const columns = forceWidth === undefined ? terminalSize.columns : forceWidth;
+  // Prefer modal inner size when hosted in FullscreenLayout's bottom pane so
+  // labels/footers respect the modal's horizontal padding (columns - 4).
+  const modalOrTerm = useModalOrTerminalSize(terminalSize);
+  const columns = forceWidth === undefined ? modalOrTerm.columns : forceWidth;
+  // FullscreenLayout modal already draws ▔ — skip LogSelector's own Divider
+  // (official Pane/Dialog pattern; avoids double blue line + collapsed list).
+  const insideModal = useIsInsideModal();
   const exitState = useExitOnCtrlCDWithKeybindings(onCancel);
   const isTerminalFocused = useTerminalFocus();
   const isResumeWithRenameEnabled = isCustomTitleEnabled();
@@ -852,7 +859,7 @@ export function LogSelector({
     { isActive: true },
   );
 
-  const filterIndicators = [];
+  const filterIndicators: string[] = [];
   if (branchFilterEnabled && currentBranch) {
     filterIndicators.push(currentBranch);
   }
@@ -864,7 +871,10 @@ export function LogSelector({
 
   // Search box takes 3 lines (border top, content, border bottom)
   const searchBoxLines = 3;
-  const headerLines = 5 + searchBoxLines + (showAdditionalFilterLine ? 1 : 0) + tagTabsLines;
+  // Outside modal: divider + spacer = 2 chrome rows. Inside modal: FullscreenLayout
+  // already owns the ▔ divider — don't count them again.
+  const chromeLines = insideModal ? 0 : 2;
+  const headerLines = 3 + chromeLines + searchBoxLines + (showAdditionalFilterLine ? 1 : 0) + tagTabsLines;
   const footerLines = 2;
   const visibleCount = Math.max(1, Math.floor((maxHeight - headerLines - footerLines) / 3));
 
@@ -896,73 +906,106 @@ export function LogSelector({
     );
   }
 
+  // Outside modal: fixed height fills the picker viewport (standalone --resume).
+  // Inside FullscreenLayout modal: content-sized + maxHeight only. The outer
+  // pane is bottom-anchored and grows upward to fit (official 2.1.210). Forcing
+  // height=maxHeight stretches the opaque panel full-screen with empty gap
+  // between list and footer. Do not pass height={undefined} — yoga's
+  // `'height' in style` branch treats that as present.
+  if (insideModal) {
+    // Prefer explicit branch over maxHeight={undefined} (yoga checks `'maxHeight' in style`).
+    if (Number.isFinite(maxHeight)) {
+      return (
+        <Box flexDirection="column" maxHeight={maxHeight}>
+          {renderPickerBody()}
+        </Box>
+      );
+    }
+    return <Box flexDirection="column">{renderPickerBody()}</Box>;
+  }
+
   return (
-    <Box flexDirection="column" height={maxHeight - 1}>
+    <Box flexDirection="column" height={Math.max(1, Number.isFinite(maxHeight) ? maxHeight - 1 : 1)}>
       <Box flexShrink={0}>
         <Divider color="suggestion" />
       </Box>
       <Box flexShrink={0}>
         <Text> </Text>
       </Box>
+      {renderPickerBody()}
+    </Box>
+  );
 
-      {hasTags ? (
-        <TagTabs
-          tabs={tagTabs}
-          selectedIndex={effectiveTagIndex}
-          availableWidth={columns}
-          showAllProjects={showAllProjects}
+  function renderPickerBody(): React.ReactNode {
+    return (
+      <>
+        {hasTags ? (
+          <TagTabs
+            tabs={tagTabs}
+            selectedIndex={effectiveTagIndex}
+            availableWidth={columns}
+            showAllProjects={showAllProjects}
+          />
+        ) : (
+          <Box flexShrink={0}>
+            <Text bold color="suggestion">
+              Resume session
+              {viewMode === 'list' && displayedLogs.length > visibleCount && (
+                <Text dimColor>
+                  {' '}
+                  ({focusedIndex} of {displayedLogs.length})
+                </Text>
+              )}
+            </Text>
+          </Box>
+        )}
+        <SearchBox
+          query={searchQuery}
+          isFocused={viewMode === 'search'}
+          isTerminalFocused={isTerminalFocused}
+          cursorOffset={searchCursorOffset}
         />
-      ) : (
+        {filterIndicators.length > 0 && viewMode !== 'search' && (
+          <Box flexShrink={0} paddingLeft={2}>
+            <Text dimColor>
+              <Byline>{filterIndicators}</Byline>
+            </Text>
+          </Box>
+        )}
         <Box flexShrink={0}>
-          <Text bold color="suggestion">
-            Resume Session
-            {viewMode === 'list' && displayedLogs.length > visibleCount && (
-              <Text dimColor>
-                {' '}
-                ({focusedIndex} of {displayedLogs.length})
+          <Text> </Text>
+        </Box>
+
+        {/* Agentic search loading state */}
+        {agenticSearchState.status === 'searching' && (
+          <Box paddingLeft={1} flexShrink={0}>
+            <Spinner />
+            <Text> Searching…</Text>
+          </Box>
+        )}
+
+        {/* Results header when agentic search completed with results */}
+        {agenticSearchState.status === 'results' && agenticSearchState.results.length > 0 && (
+          <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
+            <Text dimColor italic>
+              Claude found these results:
+            </Text>
+          </Box>
+        )}
+
+        {/* Fallback message when agentic search found no results and deep search also has nothing */}
+        {agenticSearchState.status === 'results' &&
+          agenticSearchState.results.length === 0 &&
+          filteredLogs.length === 0 && (
+            <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
+              <Text dimColor italic>
+                No matching sessions found.
               </Text>
-            )}
-          </Text>
-        </Box>
-      )}
-      <SearchBox
-        query={searchQuery}
-        isFocused={viewMode === 'search'}
-        isTerminalFocused={isTerminalFocused}
-        cursorOffset={searchCursorOffset}
-      />
-      {filterIndicators.length > 0 && viewMode !== 'search' && (
-        <Box flexShrink={0} paddingLeft={2}>
-          <Text dimColor>
-            <Byline>{filterIndicators}</Byline>
-          </Text>
-        </Box>
-      )}
-      <Box flexShrink={0}>
-        <Text> </Text>
-      </Box>
+            </Box>
+          )}
 
-      {/* Agentic search loading state */}
-      {agenticSearchState.status === 'searching' && (
-        <Box paddingLeft={1} flexShrink={0}>
-          <Spinner />
-          <Text> Searching…</Text>
-        </Box>
-      )}
-
-      {/* Results header when agentic search completed with results */}
-      {agenticSearchState.status === 'results' && agenticSearchState.results.length > 0 && (
-        <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
-          <Text dimColor italic>
-            Claude found these results:
-          </Text>
-        </Box>
-      )}
-
-      {/* Fallback message when agentic search found no results and deep search also has nothing */}
-      {agenticSearchState.status === 'results' &&
-        agenticSearchState.results.length === 0 &&
-        filteredLogs.length === 0 && (
+        {/* Error message when agentic search failed and deep search also has nothing */}
+        {agenticSearchState.status === 'error' && filteredLogs.length === 0 && (
           <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
             <Text dimColor italic>
               No matching sessions found.
@@ -970,193 +1013,198 @@ export function LogSelector({
           </Box>
         )}
 
-      {/* Error message when agentic search failed and deep search also has nothing */}
-      {agenticSearchState.status === 'error' && filteredLogs.length === 0 && (
-        <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
-          <Text dimColor italic>
-            No matching sessions found.
-          </Text>
-        </Box>
-      )}
-
-      {/* Agentic search option - first item in list when searching */}
-      {Boolean(searchQuery.trim()) &&
-        onAgenticSearch &&
-        isAgenticSearchEnabled &&
-        agenticSearchState.status !== 'searching' &&
-        agenticSearchState.status !== 'results' &&
-        agenticSearchState.status !== 'error' && (
-          <Box flexShrink={0} flexDirection="column">
-            <Box flexDirection="row" gap={1}>
-              <Text color={isAgenticSearchOptionFocused ? 'suggestion' : undefined}>
-                {isAgenticSearchOptionFocused ? figures.pointer : ' '}
-              </Text>
-              <Text color={isAgenticSearchOptionFocused ? 'suggestion' : undefined} bold={isAgenticSearchOptionFocused}>
-                Search deeply using Claude →
-              </Text>
+        {/* Agentic search option - first item in list when searching */}
+        {Boolean(searchQuery.trim()) &&
+          onAgenticSearch &&
+          isAgenticSearchEnabled &&
+          agenticSearchState.status !== 'searching' &&
+          agenticSearchState.status !== 'results' &&
+          agenticSearchState.status !== 'error' && (
+            <Box flexShrink={0} flexDirection="column">
+              <Box flexDirection="row" gap={1}>
+                <Text color={isAgenticSearchOptionFocused ? 'suggestion' : undefined}>
+                  {isAgenticSearchOptionFocused ? figures.pointer : ' '}
+                </Text>
+                <Text
+                  color={isAgenticSearchOptionFocused ? 'suggestion' : undefined}
+                  bold={isAgenticSearchOptionFocused}
+                >
+                  Search deeply using Claude →
+                </Text>
+              </Box>
+              <Box height={1} />
             </Box>
-            <Box height={1} />
-          </Box>
-        )}
+          )}
 
-      {/* Hide session list when agentic search is in progress */}
-      {agenticSearchState.status === 'searching' ? null : viewMode === 'rename' && focusedLog ? (
-        <Box paddingLeft={2} flexDirection="column">
-          <Text bold>Rename session:</Text>
-          <Box paddingTop={1}>
-            <TextInput
-              value={renameValue}
-              onChange={setRenameValue}
-              onSubmit={handleRenameSubmit}
-              placeholder={getLogDisplayTitle(focusedLog!, 'Enter new session name')}
-              columns={columns}
-              cursorOffset={renameCursorOffset}
-              onChangeCursorOffset={setRenameCursorOffset}
-              showCursor={true}
-            />
+        {/* Hide session list when agentic search is in progress */}
+        {agenticSearchState.status === 'searching' ? null : viewMode === 'rename' && focusedLog ? (
+          <Box paddingLeft={2} flexDirection="column">
+            <Text bold>Rename session:</Text>
+            <Box paddingTop={1}>
+              <TextInput
+                value={renameValue}
+                onChange={setRenameValue}
+                onSubmit={handleRenameSubmit}
+                placeholder={getLogDisplayTitle(focusedLog!, 'Enter new session name')}
+                columns={columns}
+                cursorOffset={renameCursorOffset}
+                onChangeCursorOffset={setRenameCursorOffset}
+                showCursor={true}
+              />
+            </Box>
           </Box>
-        </Box>
-      ) : isResumeWithRenameEnabled ? (
-        <TreeSelect
-          nodes={treeNodes}
-          onSelect={node => {
-            onSelect(node.value.log);
-          }}
-          onFocus={handleTreeSelectFocus}
-          onCancel={onCancel}
-          focusNodeId={focusedNode?.id}
-          visibleOptionCount={visibleCount}
-          layout="expanded"
-          isDisabled={viewMode === 'search' || isAgenticSearchOptionFocused}
-          hideIndexes={false}
-          isNodeExpanded={nodeId => {
-            // Always expand if in search or branch filter mode
-            if (viewMode === 'search' || branchFilterEnabled) {
-              return true;
-            }
-            // Extract sessionId from node ID (format: "group:sessionId")
-            const sessionId = typeof nodeId === 'string' && nodeId.startsWith('group:') ? nodeId.substring(6) : null;
-            return sessionId ? expandedGroupSessionIds.has(sessionId) : false;
-          }}
-          onExpand={nodeId => {
-            const sessionId = typeof nodeId === 'string' && nodeId.startsWith('group:') ? nodeId.substring(6) : null;
-            if (sessionId) {
-              setExpandedGroupSessionIds(prev => new Set(prev).add(sessionId));
-              logEvent('tengu_session_group_expanded', {});
-            }
-          }}
-          onCollapse={nodeId => {
-            const sessionId = typeof nodeId === 'string' && nodeId.startsWith('group:') ? nodeId.substring(6) : null;
-            if (sessionId) {
-              setExpandedGroupSessionIds(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(sessionId);
-                return newSet;
-              });
-            }
-          }}
-          onUpFromFirstItem={enterSearchMode}
-        />
-      ) : (
-        <Select
-          options={flatOptions}
-          onChange={value => {
-            // Old flat list mode - index directly maps to displayedLogs
-            const itemIndex = parseInt(value, 10);
-            const log = displayedLogs[itemIndex];
-            if (log) {
-              onSelect(log);
-            }
-          }}
-          visibleOptionCount={visibleCount}
-          onCancel={onCancel}
-          onFocus={handleFlatOptionsSelectFocus}
-          defaultFocusValue={focusedNode?.id.toString()}
-          layout="expanded"
-          isDisabled={viewMode === 'search' || isAgenticSearchOptionFocused}
-          onUpFromFirstItem={enterSearchMode}
-        />
-      )}
-      <Box paddingLeft={2}>
-        {exitState.pending ? (
-          <Text dimColor>Press {exitState.keyName} again to exit</Text>
-        ) : viewMode === 'rename' ? (
-          <Text dimColor>
-            <Byline>
-              <KeyboardShortcutHint shortcut="Enter" action="save" />
-              <ConfigurableShortcutHint
-                action="confirm:no"
-                context="Confirmation"
-                fallback="Esc"
-                description="cancel"
-              />
-            </Byline>
-          </Text>
-        ) : agenticSearchState.status === 'searching' ? (
-          <Text dimColor>
-            <Byline>
-              <Text>Searching with Claude…</Text>
-              <ConfigurableShortcutHint
-                action="confirm:no"
-                context="Confirmation"
-                fallback="Esc"
-                description="cancel"
-              />
-            </Byline>
-          </Text>
-        ) : isAgenticSearchOptionFocused ? (
-          <Text dimColor>
-            <Byline>
-              <KeyboardShortcutHint shortcut="Enter" action="search" />
-              <KeyboardShortcutHint shortcut="↓" action="skip" />
-              <ConfigurableShortcutHint
-                action="confirm:no"
-                context="Confirmation"
-                fallback="Esc"
-                description="cancel"
-              />
-            </Byline>
-          </Text>
-        ) : viewMode === 'search' ? (
-          <Text dimColor>
-            <Byline>
-              <Text>{isSearching && isDeepSearchEnabled ? 'Searching…' : 'Type to Search'}</Text>
-              <KeyboardShortcutHint shortcut="Enter" action="select" />
-              <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="clear" />
-            </Byline>
-          </Text>
+        ) : isResumeWithRenameEnabled ? (
+          <TreeSelect
+            nodes={treeNodes}
+            onSelect={node => {
+              onSelect(node.value.log);
+            }}
+            onFocus={handleTreeSelectFocus}
+            onCancel={onCancel}
+            focusNodeId={focusedNode?.id}
+            visibleOptionCount={visibleCount}
+            layout="expanded"
+            isDisabled={viewMode === 'search' || isAgenticSearchOptionFocused}
+            hideIndexes={false}
+            isNodeExpanded={nodeId => {
+              // Always expand if in search or branch filter mode
+              if (viewMode === 'search' || branchFilterEnabled) {
+                return true;
+              }
+              // Extract sessionId from node ID (format: "group:sessionId")
+              const sessionId = typeof nodeId === 'string' && nodeId.startsWith('group:') ? nodeId.substring(6) : null;
+              return sessionId ? expandedGroupSessionIds.has(sessionId) : false;
+            }}
+            onExpand={nodeId => {
+              const sessionId = typeof nodeId === 'string' && nodeId.startsWith('group:') ? nodeId.substring(6) : null;
+              if (sessionId) {
+                setExpandedGroupSessionIds(prev => new Set(prev).add(sessionId));
+                logEvent('tengu_session_group_expanded', {});
+              }
+            }}
+            onCollapse={nodeId => {
+              const sessionId = typeof nodeId === 'string' && nodeId.startsWith('group:') ? nodeId.substring(6) : null;
+              if (sessionId) {
+                setExpandedGroupSessionIds(prev => {
+                  const newSet = new Set(prev);
+                  newSet.delete(sessionId);
+                  return newSet;
+                });
+              }
+            }}
+            onUpFromFirstItem={enterSearchMode}
+          />
         ) : (
-          <Text dimColor>
-            <Byline>
-              {onToggleAllProjects && (
-                <KeyboardShortcutHint
-                  shortcut="Ctrl+A"
-                  action={`show ${showAllProjects ? 'current dir' : 'all projects'}`}
-                />
-              )}
-              {currentBranch && <KeyboardShortcutHint shortcut="Ctrl+B" action="toggle branch" />}
-              {hasMultipleWorktrees && (
-                <KeyboardShortcutHint
-                  shortcut="Ctrl+W"
-                  action={`show ${showAllWorktrees ? 'current worktree' : 'all worktrees'}`}
-                />
-              )}
-              <KeyboardShortcutHint shortcut="Ctrl+V" action="preview" />
-              <KeyboardShortcutHint shortcut="Ctrl+R" action="rename" />
-              <Text>Type to search</Text>
-              <ConfigurableShortcutHint
-                action="confirm:no"
-                context="Confirmation"
-                fallback="Esc"
-                description="cancel"
-              />
-              {getExpandCollapseHint() && <Text>{getExpandCollapseHint()}</Text>}
-            </Byline>
-          </Text>
+          <Select
+            options={flatOptions}
+            onChange={value => {
+              // Old flat list mode - index directly maps to displayedLogs
+              const itemIndex = parseInt(value, 10);
+              const log = displayedLogs[itemIndex];
+              if (log) {
+                onSelect(log);
+              }
+            }}
+            visibleOptionCount={visibleCount}
+            onCancel={onCancel}
+            onFocus={handleFlatOptionsSelectFocus}
+            defaultFocusValue={focusedNode?.id.toString()}
+            layout="expanded"
+            isDisabled={viewMode === 'search' || isAgenticSearchOptionFocused}
+            onUpFromFirstItem={enterSearchMode}
+          />
         )}
-      </Box>
-    </Box>
-  );
+        <Box paddingLeft={2} flexShrink={0}>
+          {exitState.pending ? (
+            <Text dimColor>Press {exitState.keyName} again to exit</Text>
+          ) : viewMode === 'rename' ? (
+            <Text dimColor>
+              <Byline>
+                <KeyboardShortcutHint shortcut="Enter" action="save" />
+                <ConfigurableShortcutHint
+                  action="confirm:no"
+                  context="Confirmation"
+                  fallback="Esc"
+                  description="cancel"
+                />
+              </Byline>
+            </Text>
+          ) : agenticSearchState.status === 'searching' ? (
+            <Text dimColor>
+              <Byline>
+                <Text>Searching with Claude…</Text>
+                <ConfigurableShortcutHint
+                  action="confirm:no"
+                  context="Confirmation"
+                  fallback="Esc"
+                  description="cancel"
+                />
+              </Byline>
+            </Text>
+          ) : isAgenticSearchOptionFocused ? (
+            <Text dimColor>
+              <Byline>
+                <KeyboardShortcutHint shortcut="Enter" action="search" />
+                <KeyboardShortcutHint shortcut="↓" action="skip" />
+                <ConfigurableShortcutHint
+                  action="confirm:no"
+                  context="Confirmation"
+                  fallback="Esc"
+                  description="cancel"
+                />
+              </Byline>
+            </Text>
+          ) : viewMode === 'search' ? (
+            <Text dimColor>
+              <Byline>
+                <Text>{isSearching && isDeepSearchEnabled ? 'Searching…' : 'Type to Search'}</Text>
+                <KeyboardShortcutHint shortcut="Enter" action="select" />
+                <ConfigurableShortcutHint
+                  action="confirm:no"
+                  context="Confirmation"
+                  fallback="Esc"
+                  description="clear"
+                />
+              </Byline>
+            </Text>
+          ) : (
+            <Text dimColor>
+              <Byline>
+                {onToggleAllProjects && (
+                  <KeyboardShortcutHint
+                    shortcut="Ctrl+A"
+                    action={`show ${showAllProjects ? 'current dir' : 'all projects'}`}
+                  />
+                )}
+                {currentBranch && (
+                  <KeyboardShortcutHint
+                    shortcut="Ctrl+B"
+                    action={branchFilterEnabled ? 'show all branches' : 'only show current branch'}
+                  />
+                )}
+                {hasMultipleWorktrees && (
+                  <KeyboardShortcutHint
+                    shortcut="Ctrl+W"
+                    action={`show ${showAllWorktrees ? 'current worktree' : 'all worktrees'}`}
+                  />
+                )}
+                <KeyboardShortcutHint shortcut="Space" action="preview" />
+                <KeyboardShortcutHint shortcut="Ctrl+R" action="rename" />
+                <Text>Type to search</Text>
+                <ConfigurableShortcutHint
+                  action="confirm:no"
+                  context="Confirmation"
+                  fallback="Esc"
+                  description="cancel"
+                />
+                {getExpandCollapseHint() && <Text>{getExpandCollapseHint()}</Text>}
+              </Byline>
+            </Text>
+          )}
+        </Box>
+      </>
+    );
+  }
 }
 
 /**

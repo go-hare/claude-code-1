@@ -276,11 +276,10 @@ export function computeUnseenDivider(
  * Outside fullscreen mode, renders content sequentially so the existing
  * main-screen scrollback rendering works unchanged.
  *
- * Fullscreen mode defaults on for ants (CLAUDE_CODE_NO_FLICKER=0 to opt out)
- * and off for external users (CLAUDE_CODE_NO_FLICKER=1 to opt in).
- * The <AlternateScreen> wrapper
- * (alt buffer + mouse tracking + height constraint) lives at REPL's root
- * so nothing can accidentally render outside it.
+ * Fullscreen defaults ON (official 2.1.210 / PR #21439). Opt out with
+ * CLAUDE_CODE_NO_FLICKER=0 or settings.tui="default". The <AlternateScreen>
+ * wrapper (alt buffer + mouse tracking + height constraint) lives at REPL's
+ * root so nothing can accidentally render outside it.
  */
 export function FullscreenLayout({
   scrollable,
@@ -382,7 +381,16 @@ export function FullscreenLayout({
                 {overlay}
               </ScrollBox>
               {!hidePill && pillVisible && overlay == null && (
-                <NewMessagesPill count={newMessageCount} onClick={onPillClick} />
+                <NewMessagesPill
+                  count={newMessageCount}
+                  onClick={() => {
+                    // Collapse sticky chrome before scrollToBottom remounts the
+                    // tail — otherwise the 1-row header + padCollapsed lag one
+                    // frame and the jump paints as empty white under the header.
+                    setStickyPrompt(null);
+                    onPillClick?.();
+                  }}
+                />
               )}
               {bottomFloat != null && (
                 <Box position="absolute" bottom={0} right={0} opaque>
@@ -468,12 +476,17 @@ export function FullscreenLayout({
 // the dead zone where users previously thought chat stalled).
 function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => void }): React.ReactNode {
   const [hover, setHover] = useState(false);
+  // Official densable: "N new message(s) (click) ↓" / "Jump to bottom (click) ↓"
+  const label =
+    count > 0
+      ? `${count} new ${plural(count, 'message')} (click) ${figures.arrowDown}`
+      : `Jump to bottom (click) ${figures.arrowDown}`;
   return (
     <Box position="absolute" bottom={0} left={0} right={0} justifyContent="center">
       <Box onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <Text backgroundColor={hover ? 'userMessageBackgroundHover' : 'userMessageBackground'} dimColor>
           {' '}
-          {count > 0 ? `${count} new ${plural(count, 'message')}` : 'Jump to bottom'} {figures.arrowDown}{' '}
+          {label}{' '}
         </Text>
       </Box>
     </Box>

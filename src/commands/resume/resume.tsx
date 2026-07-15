@@ -7,7 +7,7 @@ import type { CommandResultDisplay, ResumeEntrypoint } from '../../commands.js';
 import { LogSelector } from '../../components/LogSelector.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { Spinner } from '../../components/Spinner.js';
-import { useIsInsideModal } from '../../context/modalContext.js';
+import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { setClipboard } from '@anthropic/ink';
 import { Box, Text } from '@anthropic/ink';
@@ -80,7 +80,10 @@ function ResumeCommand({
   const [loading, setLoading] = React.useState(true);
   const [resuming, setResuming] = React.useState(false);
   const [showAllProjects, setShowAllProjects] = React.useState(false);
-  const { rows } = useTerminalSize();
+  // Inside FullscreenLayout's modal slot, use the modal's inner rows (already
+  // minus transcript peek + divider) — floor(rows/2) collapses the list and
+  // crushes the footer under default-on fullscreen (official 2.1.210 layout).
+  const { rows } = useModalOrTerminalSize(useTerminalSize());
   const insideModal = useIsInsideModal();
 
   const loadLogs = React.useCallback(
@@ -188,7 +191,7 @@ function ResumeCommand({
   return (
     <LogSelector
       logs={logs}
-      maxHeight={insideModal ? Math.floor(rows / 2) : rows - 2}
+      maxHeight={insideModal ? rows : Math.max(1, rows - 2)}
       onCancel={handleCancel}
       onSelect={handleSelect}
       onLogsChanged={() => loadLogs(showAllProjects, worktreePaths)}

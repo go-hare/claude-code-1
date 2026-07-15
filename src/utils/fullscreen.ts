@@ -106,9 +106,19 @@ export function _resetTmuxControlModeProbeForTesting(): void {
 }
 
 /**
- * Runtime env-var check only. Ants default to on (CLAUDE_CODE_NO_FLICKER=0
- * to opt out); external users default to off (CLAUDE_CODE_NO_FLICKER=1 to
- * opt in).
+ * Fullscreen / no-flicker alt-screen gate.
+ *
+ * Official PR #21439 + 2.1.210: default ON for everyone (input pinned to
+ * bottom, virtualized scrollback, "N new message (click) ↓" pill). Opt out
+ * via CLAUDE_CODE_NO_FLICKER=0, settings.tui="default", or
+ * CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN.
+ *
+ * Priority:
+ *   1. DISABLE_ALTERNATE_SCREEN / NO_FLICKER=0 → off
+ *   2. bg session / NO_FLICKER=1 → on
+ *   3. settings.tui "default"|"fullscreen" when set
+ *   4. tmux -CC → off (mouse/alt-screen unrecoverable)
+ *   5. default → on
  */
 export function isFullscreenEnvEnabled(): boolean {
   // Official CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN force-off.
@@ -129,6 +139,19 @@ export function isFullscreenEnvEnabled(): boolean {
   } catch {
     if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
   }
+  // Official settings.tui ("default" | "fullscreen") — explicit renderer choice.
+  try {
+    const { getSettingsForSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const tui = (
+      getSettingsForSource('userSettings') as { tui?: string } | null
+    )?.tui
+    if (tui === 'default') return false
+    if (tui === 'fullscreen') return true
+  } catch {
+    // settings unavailable (early boot / tests) — fall through
+  }
   // Auto-disable under tmux -CC: alt-screen + mouse tracking corrupts
   // terminal state on double-click and mouse wheel is dead.
   if (isTmuxControlMode()) {
@@ -140,7 +163,8 @@ export function isFullscreenEnvEnabled(): boolean {
     }
     return false
   }
-  return process.env.USER_TYPE === 'ant'
+  // Official default-on (PR #21439 / 2.1.210 external ships).
+  return true
 }
 
 /**

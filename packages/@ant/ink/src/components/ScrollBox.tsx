@@ -186,18 +186,39 @@ function ScrollBox({
         const el = domRef.current;
         if (!el) return;
         el.pendingScrollDelta = undefined;
+        el.scrollAnchor = undefined;
+        // Drop virtual-scroll clamp + HWM BEFORE the sticky remount paints.
+        // useVirtualScroll's setClampBounds is useLayoutEffect (after Ink's
+        // resetAfterCommit), so a leftover clamp from the scrolled-up range
+        // would still apply on this paint: visual scrollTop lands in the
+        // freshly-mounted topSpacer → white flash on "Jump to bottom" click.
+        el.scrollClampMin = undefined;
+        el.scrollClampMax = undefined;
+        el.scrollHeightHwm = undefined;
         // stickyScroll=false attribute means never auto-pin; jump to bottom
         // once without re-enabling sticky (official).
         if (stickyScroll === false) {
-          el.scrollAnchor = undefined;
           el.scrollTop = Math.max(0, (el.scrollHeight ?? 0) - (el.scrollViewportHeight ?? 0));
           scrollMutated(el);
           return;
         }
         el.stickyScroll = true;
+        // Eager pin so the first paint after notify (tail remount) is already
+        // at bottom even if React/Ink batching reorders the sticky follow.
+        const vh = el.scrollViewportHeight ?? 0;
+        const sh = el.scrollHeight ?? 0;
+        if (vh > 0 && sh > 0) {
+          el.scrollTop = Math.max(0, sh - vh);
+        }
         markDirty(el);
         notify();
         forceRender(n => n + 1);
+        // Second paint after React mounts the sticky tail range — the first
+        // forceRender may still have stale scrollHeight from the mid-list
+        // mount; Ink's sticky follow then pins to the true maxScroll.
+        queueMicrotask(() => {
+          scheduleRenderFrom(el);
+        });
       },
       getScrollTop() {
         return domRef.current?.scrollTop ?? 0;
