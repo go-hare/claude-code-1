@@ -79,17 +79,20 @@ export type FableConsentGateInput = {
 /**
  * Official densable — should Fable consent dialog block model selection / first use?
  * Requires fable model + credits required + no stored/session consent.
+ *
+ * Session fallback only applies when there is no org/account key. A prior
+ * key-less consent must not skip the dialog for a later org that has no
+ * persisted fableOverageConsentV2 entry.
  */
 export function shouldShowFableConsentDialog(
   input: FableConsentGateInput,
 ): boolean {
   if (!isFableModel(input.model)) return false
   if (input.requiresCredits === false) return false
-  if (input.sessionFallbackConsented) return false
   const key = resolveFableConsentKey(input)
   if (key === null) {
     // Official xJe: no key → session fallback path; dialog still needed once.
-    return true
+    return !input.sessionFallbackConsented
   }
   return !hasFableOverageConsent(key, input.consentMap)
 }

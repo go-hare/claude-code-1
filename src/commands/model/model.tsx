@@ -20,6 +20,7 @@ import {
   isFastModeSupportedByModel,
 } from '../../utils/fastMode.js';
 import { getOauthAccountInfo } from '../../utils/auth.js';
+import { getFableSessionFallbackConsented, setFableSessionFallbackConsented } from '../../bootstrap/state.js';
 import { shouldShowFableConsentDialog } from '../../utils/fableConsent.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
@@ -46,7 +47,6 @@ function ModelPickerWrapper({
     model: string | null;
     effort: EffortLevel | undefined;
   } | null>(null);
-  const [fableSessionFallback, setFableSessionFallback] = useState(false);
 
   function handleCancel(): void {
     logEvent('tengu_model_command_menu', {
@@ -117,7 +117,7 @@ function ModelPickerWrapper({
         model,
         organizationUuid: oauth?.organizationUuid ?? null,
         accountUuid: oauth?.accountUuid ?? null,
-        sessionFallbackConsented: fableSessionFallback,
+        sessionFallbackConsented: getFableSessionFallbackConsented(),
       })
     ) {
       setPendingFable({ model, effort });
@@ -133,7 +133,8 @@ function ModelPickerWrapper({
         organizationUuid={oauth?.organizationUuid ?? null}
         accountUuid={oauth?.accountUuid ?? null}
         onAccept={({ sessionFallback }) => {
-          if (sessionFallback) setFableSessionFallback(true);
+          // Persist key-less latch in bootstrap state so query() honors /model accept.
+          if (sessionFallback) setFableSessionFallbackConsented(true);
           const { model, effort } = pendingFable;
           setPendingFable(null);
           commitModel(model, effort);

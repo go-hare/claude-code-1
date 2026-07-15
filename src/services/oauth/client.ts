@@ -569,12 +569,15 @@ export function storeOAuthAccountInfo({
   })
   // Org-default session memo is keyed only by process state; account/org switch
   // without full logout must re-resolve from disk (orgUuid-bound cache).
+  // Fable key-less latch must also reset so a prior API-key consent cannot
+  // skip the dialog for a new org without persisted consent.
   if (accountChanged) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { setResolvedOrgDefault } =
+      const { setResolvedOrgDefault, setFableSessionFallbackConsented } =
         require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
       setResolvedOrgDefault(undefined)
+      setFableSessionFallbackConsented(false)
     } catch {
       // bootstrap isolation — optional
     }

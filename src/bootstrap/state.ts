@@ -74,6 +74,12 @@ type State = {
    */
   resolvedOrgDefault: string | null | undefined
   /**
+   * Fable overage consent latch for key-less sessions (API-key users).
+   * Shared by query() and /model so a /model accept is honored on first
+   * request. Cleared on logout / account switch.
+   */
+  fableSessionFallbackConsented: boolean
+  /**
    * Official refusalFallbackOccurred (Ryn/F7e/X8o) — true after a refusal
    * fallback switch in this session. Cleared on session switch / clear.
    */
@@ -330,6 +336,7 @@ function getInitialState(): State {
     mainLoopModelOverride: undefined,
     initialMainLoopModel: null,
     resolvedOrgDefault: undefined,
+    fableSessionFallbackConsented: false,
     refusalFallbackOccurred: false,
     refusalFallbackModelLatch: undefined,
     modelStrings: null,
@@ -926,6 +933,15 @@ export function getResolvedOrgDefault(): string | null | undefined {
 /** Official wgt — set session-resolved org default model. */
 export function setResolvedOrgDefault(model: string | null | undefined): void {
   STATE.resolvedOrgDefault = model
+}
+
+/** Session latch for Fable consent when no org/account consent key exists. */
+export function getFableSessionFallbackConsented(): boolean {
+  return STATE.fableSessionFallbackConsented
+}
+
+export function setFableSessionFallbackConsented(value: boolean): void {
+  STATE.fableSessionFallbackConsented = value
 }
 
 /** Official Ryn — mark that a refusal fallback switch occurred. */

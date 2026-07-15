@@ -33,11 +33,13 @@ import {
   resetGatewaySecureStorageRestoreCache_FOR_TESTS,
   restoreGatewayAuth,
   setGatewayAuth,
+  setGatewaySecureStorageNowMs_FOR_TESTS,
   setTestGatewaySecureStorageRead_FOR_TESTS,
   shouldRefreshGatewayIdp,
   toEnterpriseGatewayCredential,
   tryRestoreGatewayAuthFromSecureStorage,
   GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
+  GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS,
   GATEWAY_TLS_PIN_MISMATCH_MESSAGE,
 } from '../gatewayEnv.js'
 
@@ -557,6 +559,57 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       reason: 'already_attempted',
     })
     expect(reads).toBe(4)
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    clearGatewayAuth()
+  })
+
+  test('storage_read_failed uses short backoff instead of permanent cache', () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 1_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
+
+    let reads = 0
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      throw new Error('io fail')
+    })
+
+    const first = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(first).toEqual({
+      status: 'skipped',
+      reason: 'storage_read_failed',
+    })
+    expect(reads).toBe(1)
+
+    // Within backoff: no re-read.
+    now += 100
+    const second = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(second).toEqual({
+      status: 'skipped',
+      reason: 'storage_read_backoff',
+    })
+    expect(reads).toBe(1)
+
+    // After backoff expires, retry read and restore when storage recovers.
+    now += GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return {
+        enterpriseGateway: {
+          url: 'https://gw.example',
+          jwt: 'recovered-jwt',
+          expiresAtMs: Date.now() + 60_000,
+        },
+        gatewayTrust: { 'gw.example': 'pin' },
+      }
+    })
+    const third = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(third.status).toBe('restored')
+    expect(getGatewayAuth()?.jwt).toBe('recovered-jwt')
+    expect(reads).toBe(2)
 
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
     clearGatewayAuth()

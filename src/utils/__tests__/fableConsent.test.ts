@@ -88,6 +88,24 @@ describe('fableConsent densables', () => {
         model: 'fable',
       }),
     ).toBe(true)
+    // Keyed org without consent must still prompt even if key-less session
+    // fallback was previously accepted (cannot bypass new-org consent).
+    expect(
+      shouldShowFableConsentDialog({
+        model: 'claude-fable-5',
+        organizationUuid: 'org-new',
+        sessionFallbackConsented: true,
+        consentMap: {},
+      }),
+    ).toBe(true)
+    // Key-less + session latch still skips.
+    expect(
+      shouldShowFableConsentDialog({
+        model: 'claude-fable-5',
+        sessionFallbackConsented: true,
+        consentMap: {},
+      }),
+    ).toBe(false)
   })
 
   test('getFableConsentCopy variants', () => {

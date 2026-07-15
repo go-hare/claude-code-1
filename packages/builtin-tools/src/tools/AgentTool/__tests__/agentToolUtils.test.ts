@@ -1,16 +1,20 @@
 import { mock, describe, expect, test } from 'bun:test'
+import * as realToolsConstants from 'src/constants/tools.js'
+import * as realErrors from 'src/utils/errors.js'
+import * as realMessages from 'src/utils/messages.js'
 import { debugMock } from '../../../../../../tests/mocks/debug'
 
 // ─── Mocks for agentToolUtils.ts dependencies ───
 // Only mock modules that are truly unavailable or cause side effects.
-// Do NOT mock common/shared modules (zod/v4, bootstrap/state, etc.) to avoid
-// corrupting the module cache for other test files in the same Bun process.
+// Shared modules (tools constants, errors) must spread real exports so sibling
+// suites (spawnInProcess, etc.) still see CORE_TOOLS / getErrnoCode.
 
 const noop = () => {}
 
 mock.module('bun:bundle', () => ({ feature: () => false }))
 
 mock.module('src/constants/tools.js', () => ({
+  ...realToolsConstants,
   ALL_AGENT_DISALLOWED_TOOLS: new Set(),
   ASYNC_AGENT_ALLOWED_TOOLS: new Set(),
   CUSTOM_AGENT_DISALLOWED_TOOLS: new Set(),
@@ -39,42 +43,16 @@ mock.module('src/Tool.js', () => ({
   findToolByName: noop,
 }))
 
-// messages.ts is complex - provide stubs for all named exports
+// Spread real messages so sibling suites keep normalizeMessagesForAPI etc.
 mock.module('src/utils/messages.ts', () => ({
+  ...realMessages,
   extractTextContent: (content: any[]) =>
     content
       ?.filter?.((b: any) => b.type === 'text')
       ?.map?.((b: any) => b.text)
       ?.join('') ?? '',
   getLastAssistantMessage: () => null,
-  SYNTHETIC_MESSAGES: new Set(),
-  INTERRUPT_MESSAGE: '',
-  INTERRUPT_MESSAGE_FOR_TOOL_USE: '',
-  CANCEL_MESSAGE: '',
-  REJECT_MESSAGE: '',
-  REJECT_MESSAGE_WITH_REASON_PREFIX: '',
-  SUBAGENT_REJECT_MESSAGE: '',
-  SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX: '',
-  PLAN_REJECTION_PREFIX: '',
-  DENIAL_WORKAROUND_GUIDANCE: '',
-  NO_RESPONSE_REQUESTED: '',
-  SYNTHETIC_TOOL_RESULT_PLACEHOLDER: '',
-  SYNTHETIC_MODEL: '',
-  AUTO_REJECT_MESSAGE: noop,
-  DONT_ASK_REJECT_MESSAGE: noop,
-  withMemoryCorrectionHint: (s: string) => s,
-  deriveShortMessageId: () => '',
-  isClassifierDenial: () => false,
-  buildYoloRejectionMessage: () => '',
-  buildClassifierUnavailableMessage: () => '',
   isEmptyMessageText: () => true,
-  createAssistantMessage: noop,
-  createAssistantAPIErrorMessage: noop,
-  createUserMessage: noop,
-  prepareUserContent: noop,
-  createUserInterruptionMessage: noop,
-  createSyntheticUserCaveatMessage: noop,
-  formatCommandInputTags: noop,
 }))
 
 mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
@@ -95,22 +73,13 @@ mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
 mock.module('src/utils/debug.ts', debugMock)
 
 mock.module('src/utils/errors.js', () => ({
-  ClaudeError: class extends Error {},
-  MalformedCommandError: class extends Error {},
-  AbortError: class extends Error {},
-  ConfigParseError: class extends Error {},
-  ShellError: class extends Error {},
-  TeleportOperationError: class extends Error {},
-  TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS: class extends Error {},
+  ...realErrors,
+  // Keep real getErrnoCode / isENOENT so EEXIST paths in sibling suites work.
   isAbortError: () => false,
   hasExactErrorMessage: () => false,
   toError: (e: any) => (e instanceof Error ? e : new Error(String(e))),
   errorMessage: (e: any) => String(e),
-  getErrnoCode: () => undefined,
-  isENOENT: () => false,
-  getErrnoPath: () => undefined,
   shortErrorStack: () => '',
-  isFsInaccessible: () => false,
   classifyAxiosError: () => ({ category: 'unknown' }),
 }))
 

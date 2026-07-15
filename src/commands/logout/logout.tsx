@@ -60,11 +60,12 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
     updated.clientDataCache = undefined;
     return updated;
   });
-  // Drop session-level org default so the next resolve re-reads disk (or null).
-  // Disk clear above is not enough — resolveOrgDefaultSetting() memoizes.
+  // Drop session-level org default + Fable key-less consent latch so the next
+  // account cannot inherit prior process-local auth state.
   try {
-    const { setResolvedOrgDefault } = await import('../../bootstrap/state.js');
+    const { setResolvedOrgDefault, setFableSessionFallbackConsented } = await import('../../bootstrap/state.js');
     setResolvedOrgDefault(undefined);
+    setFableSessionFallbackConsented(false);
   } catch {
     // bootstrap isolation — optional
   }
