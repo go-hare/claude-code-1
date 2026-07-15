@@ -232,18 +232,17 @@ export function applyGatewayFromEnvResult(
  * Env is re-checked every call. Default secure-storage restore is process-level
  * negative-cached (see tryRestoreGatewayAuthFromSecureStorage) so repeated
  * getAPIProvider() / getAnthropicClient() cold paths do not re-read disk.
- * Expired in-memory sessions are dropped so a later external login can restore.
+ *
+ * Expired in-memory sessions are kept as gateway identity so provider ranking
+ * does not silently fall through to Bedrock/firstParty. We only replace them
+ * when env or secure-storage yields a fresh valid session; otherwise the
+ * expired session remains for getAnthropicClient's gateway-expired error path.
  */
 export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
   const nowMs = gatewaySecureStorageNowMs()
   const existing = getGatewayAuth()
   if (existing && !isGatewayAuthExpired(existing, nowMs)) {
     return existing
-  }
-  if (existing) {
-    // Drop expired session so provider ranking does not keep a dead gateway JWT
-    // and secure-storage restore can re-read (possibly refreshed by another process).
-    clearGatewayAuth()
   }
   const fromEnv = resolveGatewayFromEnv()
   if (fromEnv.status === 'ok') {
@@ -253,12 +252,12 @@ export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
   if (afterEnv && !isGatewayAuthExpired(afterEnv, nowMs)) {
     return afterEnv
   }
-  if (!getGatewayAuth()) {
-    try {
-      tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
-    } catch {
-      // secure-storage restore optional
-    }
+  // Missing or still-expired: attempt secure-storage refresh without clearing
+  // gateway identity first (clearing would mis-route getAPIProvider).
+  try {
+    tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+  } catch {
+    // secure-storage restore optional
   }
   return getGatewayAuth()
 }
@@ -1105,14 +1104,14 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
     if (secureStorageRestoreSucceeded) {
       const current = getGatewayAuth()
       // Permanent skip only while the restored in-memory session is still valid.
-      // Expired/cleared sessions must re-read so external re-login can refresh JWT.
+      // Expired sessions must re-read so external re-login can refresh JWT —
+      // but do NOT clear the expired session: getAPIProvider ranks any
+      // gatewayAuth above Bedrock/firstParty, and getAnthropicClient needs the
+      // expired identity for its Cloud gateway session expired error path.
       if (current && !isGatewayAuthExpired(current, nowMs)) {
         return { status: 'skipped', reason: 'already_attempted' }
       }
       secureStorageRestoreSucceeded = false
-      if (current && isGatewayAuthExpired(current, nowMs)) {
-        setGatewayAuth(null)
-      }
     }
     if (secureStorageSkipUntilMs > 0 && nowMs < secureStorageSkipUntilMs) {
       return {
@@ -1159,15 +1158,30 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   })
   if (plan.status === 'restore' || plan.status === 'tls_probe_failed') {
     const session = plan.status === 'restore' ? plan.session : plan.session
-    ;(input?.apply ?? setGatewayAuth)(session)
-    // Restored session is in memory; further cold reads are unnecessary until
-    // clear/invalidate.
-    if (useDefaultHost) {
-      secureStorageRestoreSucceeded = true
-      secureStorageSkipUntilMs = 0
-      secureStorageSkipKind = null
+    // Only replace in-memory gateway identity with a still-valid session.
+    // Applying an already-expired disk credential is useless and would still
+    // leave callers needing the expired-gateway error path.
+    if (!isGatewayAuthExpired(session, nowMs)) {
+      ;(input?.apply ?? setGatewayAuth)(session)
+      if (useDefaultHost) {
+        secureStorageRestoreSucceeded = true
+        secureStorageSkipUntilMs = 0
+        secureStorageSkipKind = null
+      }
+      return { status: 'restored', session }
     }
-    return { status: 'restored', session }
+    // Disk session is also expired: keep any existing in-memory gateway
+    // identity and TTL the miss so we can pick up a later re-login.
+    if (useDefaultHost) {
+      secureStorageRestoreSucceeded = false
+      secureStorageSkipUntilMs = nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+      secureStorageSkipKind = 'miss'
+    }
+    return {
+      status: 'blocked',
+      reason: 'expired',
+      message: 'Cloud gateway session expired — run /login to reconnect.',
+    }
   }
   if (plan.status === 'untrusted' || plan.status === 'expired') {
     if (useDefaultHost) {

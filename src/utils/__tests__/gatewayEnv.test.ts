@@ -670,7 +670,7 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       gatewayTrust: { 'gw.example': 'pin' },
     }
 
-    // ensure drops expired session and re-restores from storage.
+    // ensure keeps identity until a fresh valid credential is restored.
     expect(ensureGatewayAuthApplied()?.jwt).toBe('new-jwt')
     expect(reads).toBe(2)
     expect(getGatewayAuth()?.jwt).toBe('new-jwt')
@@ -684,6 +684,53 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
 
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
     clearGatewayAuth()
+  })
+
+  test('expired session + expired disk keeps gateway identity over Bedrock env', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    const savedBedrock = process.env.CLAUDE_CODE_USE_BEDROCK
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    try {
+      setGatewayAuth({
+        url: 'https://gw.example',
+        jwt: 'stale-gateway-jwt',
+        expiresAtMs: Date.now() - 1,
+      })
+      setTestGatewaySecureStorageRead_FOR_TESTS(() => ({
+        enterpriseGateway: {
+          url: 'https://gw.example',
+          jwt: 'also-stale-jwt',
+          expiresAtMs: Date.now() - 1,
+        },
+        gatewayTrust: { 'gw.example': 'pin' },
+      }))
+
+      // Must not clear expired identity when disk cannot supply a fresh session.
+      const applied = ensureGatewayAuthApplied()
+      expect(applied?.jwt).toBe('stale-gateway-jwt')
+      expect(getGatewayAuth()?.jwt).toBe('stale-gateway-jwt')
+      expect(isGatewayAuthExpired(getGatewayAuth())).toBe(true)
+
+      // Disk miss is TTL-blocked expired, not a clear.
+      expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+        status: 'skipped',
+        reason: 'miss_ttl',
+      })
+
+      // Provider ranking: any gatewayAuth (including expired) beats Bedrock.
+      const { getAPIProvider } = await import('../model/providers.js')
+      expect(getAPIProvider({})).toBe('gateway')
+    } finally {
+      if (savedBedrock === undefined) {
+        delete process.env.CLAUDE_CODE_USE_BEDROCK
+      } else {
+        process.env.CLAUDE_CODE_USE_BEDROCK = savedBedrock
+      }
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
   })
 
   test('storage_read_failed uses short backoff instead of permanent cache', () => {
