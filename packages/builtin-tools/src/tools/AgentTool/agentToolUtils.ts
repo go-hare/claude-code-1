@@ -33,6 +33,7 @@ import {
   killAsyncAgent,
   type ProgressTracker,
   rebuildProgressFromMessages,
+  scheduleDeferredAgentProgressRebuild,
   updateAgentProgress as updateAsyncAgentProgress,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { asAgentId } from 'src/types/ids.js'
@@ -636,6 +637,16 @@ export async function runAsyncAgentLifecycle({
         taskId,
         getProgressUpdate(tracker),
         rootSetAppState,
+      )
+      // message_delta often arrives with no further yields until the next tool
+      // result — without a deferred rebuild the footer freezes at first count.
+      scheduleDeferredAgentProgressRebuild(
+        taskId,
+        tracker,
+        agentMessages,
+        rootSetAppState,
+        resolveActivity,
+        toolUseContext.options.tools,
       )
       const lastToolName = getLastToolUseName(message)
       if (lastToolName) {

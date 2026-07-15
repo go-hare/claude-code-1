@@ -131,6 +131,7 @@ const {
   enqueueAgentNotification,
   registerAsyncAgent,
   updateAgentProgress,
+  scheduleDeferredAgentProgressRebuild,
   isLocalAgentTask,
 } = await import('../LocalAgentTask.js')
 
@@ -177,10 +178,15 @@ function makeRunningTask(overrides: Record<string, any> = {}): any {
   }
 }
 
-function makeAssistantMessage(usage: any, content: any[] = []): any {
+function makeAssistantMessage(
+  usage: any,
+  content: any[] = [],
+  id?: string,
+): any {
   return {
     type: 'assistant',
     message: {
+      ...(id !== undefined ? { id } : {}),
       usage,
       content,
     },
@@ -413,6 +419,120 @@ describe('rebuildProgressFromMessages', () => {
     expect(tracker.latestInputTokens).toBe(1600)
     expect(tracker.cumulativeOutputTokens).toBe(80)
     expect(getTokenCountFromTracker(tracker)).toBe(1680)
+  })
+
+  test('max-score keeps earlier sibling when last has zeros', () => {
+    // Some providers leave zeros on the last sibling while an earlier one
+    // already carries real input counts — pure last-wins freezes footer.
+    const tracker = createProgressTracker()
+    const rich = {
+      input_tokens: 7000,
+      output_tokens: 100,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 800,
+    }
+    const zeros = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    }
+    const early = {
+      type: 'assistant',
+      message: {
+        id: 'msg_score',
+        usage: rich,
+        content: [{ type: 'text', text: 'hi' }],
+      },
+    } as any
+    const late = {
+      type: 'assistant',
+      message: {
+        id: 'msg_score',
+        usage: zeros,
+        content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }],
+      },
+    } as any
+
+    rebuildProgressFromMessages(tracker, [early, late])
+    expect(tracker.latestInputTokens).toBe(7800)
+    expect(tracker.cumulativeOutputTokens).toBe(100)
+    expect(getTokenCountFromTracker(tracker)).toBe(7900)
+  })
+
+  test('high-water input across multi-turn responses', () => {
+    const tracker = createProgressTracker()
+    const turn1 = makeAssistantMessage(
+      {
+        input_tokens: 5000,
+        output_tokens: 50,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+      [],
+      'msg_t1',
+    )
+    const turn2 = makeAssistantMessage(
+      {
+        // Shorter second turn (e.g. after compact) must not wipe higher HWM
+        input_tokens: 1200,
+        output_tokens: 30,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+      [],
+      'msg_t2',
+    )
+    rebuildProgressFromMessages(tracker, [turn1, turn2])
+    expect(tracker.latestInputTokens).toBe(5000)
+    expect(tracker.cumulativeOutputTokens).toBe(80)
+  })
+})
+
+describe('scheduleDeferredAgentProgressRebuild', () => {
+  test('picks up in-place message_delta usage after yield', async () => {
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          progress: { toolUseCount: 0, tokenCount: 0 },
+        }),
+      },
+    })
+    const tracker = createProgressTracker()
+    const msg = makeAssistantMessage({
+      input_tokens: 0,
+      output_tokens: 0,
+    })
+
+    // content_block_stop snapshot: zeros
+    rebuildProgressFromMessages(tracker, [msg])
+    updateAgentProgress(
+      'test-agent-001',
+      getProgressUpdate(tracker),
+      setAppState as any,
+    )
+    expect(getState().tasks['test-agent-001'].progress.tokenCount).toBe(0)
+
+    scheduleDeferredAgentProgressRebuild(
+      'test-agent-001',
+      tracker,
+      [msg],
+      setAppState as any,
+    )
+
+    // message_delta mutates after yield, before deferred rebuild runs
+    msg.message.usage = {
+      input_tokens: 7800,
+      output_tokens: 120,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(getState().tasks['test-agent-001'].progress.tokenCount).toBe(7920)
+    expect(tracker.latestInputTokens).toBe(7800)
+    expect(tracker.cumulativeOutputTokens).toBe(120)
   })
 })
 
@@ -732,5 +852,26 @@ describe('updateAgentProgress', () => {
 
     const task = getState().tasks['test-agent-001']
     expect(task.progress.toolUseCount).toBeUndefined()
+  })
+
+  test('never regresses token or tool counts', () => {
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          progress: { toolUseCount: 3, tokenCount: 7800, summary: 'keep me' },
+        }),
+      },
+    })
+
+    updateAgentProgress(
+      'test-agent-001',
+      { toolUseCount: 1, tokenCount: 100 },
+      setAppState as any,
+    )
+
+    const task = getState().tasks['test-agent-001']
+    expect(task.progress.tokenCount).toBe(7800)
+    expect(task.progress.toolUseCount).toBe(3)
+    expect(task.progress.summary).toBe('keep me')
   })
 })

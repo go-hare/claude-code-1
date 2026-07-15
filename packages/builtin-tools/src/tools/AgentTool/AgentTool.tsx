@@ -28,6 +28,7 @@ import {
   rebuildProgressFromMessages,
   registerAgentForeground,
   registerAsyncAgent,
+  scheduleDeferredAgentProgressRebuild,
   unregisterAgentForeground,
   updateAgentProgress as updateAsyncAgentProgress,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
@@ -1306,6 +1307,16 @@ export const AgentTool = buildTool({
                           toolUseContext.options.tools,
                         );
                         updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
+                        // message_delta often lands with no further yields until the
+                        // next tool result — deferred rebuild unfreezes footer tokens.
+                        scheduleDeferredAgentProgressRebuild(
+                          backgroundedTaskId,
+                          tracker,
+                          agentMessages,
+                          rootSetAppState,
+                          resolveActivity2,
+                          toolUseContext.options.tools,
+                        );
 
                         const lastToolName = getLastToolUseName(msg);
                         if (lastToolName) {
@@ -1489,6 +1500,17 @@ export const AgentTool = buildTool({
                 toolUseContext.options.tools,
               );
               if (foregroundTaskId) {
+                // Always push token progress (not only on tool_use messages).
+                // Text-only turns still need footer updates after message_delta.
+                updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
+                scheduleDeferredAgentProgressRebuild(
+                  foregroundTaskId,
+                  syncTracker,
+                  agentMessages,
+                  rootSetAppState,
+                  syncResolveActivity,
+                  toolUseContext.options.tools,
+                );
                 const lastToolName = getLastToolUseName(message);
                 if (lastToolName) {
                   emitTaskProgress(
@@ -1499,12 +1521,6 @@ export const AgentTool = buildTool({
                     agentStartTime,
                     lastToolName,
                   );
-                  // Keep AppState task.progress in sync when SDK summaries are
-                  // enabled, so updateAgentSummary reads correct token/tool counts
-                  // instead of zeros.
-                  if (getSdkAgentProgressSummariesEnabled()) {
-                    updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
-                  }
                 }
               }
 
@@ -1596,7 +1612,8 @@ export const AgentTool = buildTool({
 
             // Final rebuild after stream ends — last message_delta may have mutated
             // usage after the final content_block_stop yield with no further
-            // messages (runAgent filters stream_event).
+            // messages (runAgent filters stream_event). Always push footer
+            // progress (not only when SDK summaries are enabled).
             if (!wasBackgrounded) {
               rebuildProgressFromMessages(
                 syncTracker,
@@ -1604,7 +1621,7 @@ export const AgentTool = buildTool({
                 syncResolveActivity,
                 toolUseContext.options.tools,
               );
-              if (foregroundTaskId && getSdkAgentProgressSummariesEnabled()) {
+              if (foregroundTaskId) {
                 updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
               }
             }

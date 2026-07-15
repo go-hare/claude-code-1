@@ -178,10 +178,19 @@ export function rebuildProgressFromMessages(
   tracker.cumulativeOutputTokens = 0;
   tracker.recentActivities = [];
 
-  // Last usage seen for each response id (message_delta lands on the last
-  // yielded sibling for first-party multi-block streams).
+  // Best usage per response id. Prefer the sibling whose usage scores highest:
+  // message_delta usually lands on the last sibling, but some providers /
+  // partial snapshots leave zeros on the last while an earlier sibling already
+  // has real input counts. Max-score avoids "only first / stuck" footer tokens.
   const usageByResponseId = new Map<string, BetaUsage>();
   const anonymousUsages: BetaUsage[] = [];
+
+  const scoreUsage = (usage: BetaUsage): number => {
+    const inputTotal =
+      (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+    const outputTokens = typeof usage.output_tokens === 'number' ? (usage.output_tokens as number) : 0;
+    return Math.max(0, inputTotal) + Math.max(0, outputTokens);
+  };
 
   for (const message of messages) {
     if (message.type !== 'assistant') {
@@ -223,9 +232,10 @@ export function rebuildProgressFromMessages(
         ? message.message.id
         : undefined;
     if (responseId) {
-      // Last-wins: later siblings (or in-place mutations of the last sibling)
-      // carry message_delta final usage.
-      usageByResponseId.set(responseId, usage);
+      const prev = usageByResponseId.get(responseId);
+      if (!prev || scoreUsage(usage) >= scoreUsage(prev)) {
+        usageByResponseId.set(responseId, usage);
+      }
     } else {
       anonymousUsages.push(usage);
     }
@@ -235,7 +245,8 @@ export function rebuildProgressFromMessages(
     const inputTotal =
       (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
     if (inputTotal > 0) {
-      tracker.latestInputTokens = inputTotal;
+      // Input is cumulative per Claude turn — keep high-water across turns.
+      tracker.latestInputTokens = Math.max(tracker.latestInputTokens, inputTotal);
     }
     const outputTokens = usage.output_tokens as number;
     if (typeof outputTokens === 'number' && outputTokens > 0) {
@@ -252,6 +263,35 @@ export function getProgressUpdate(tracker: ProgressTracker): AgentProgress {
       tracker.recentActivities.length > 0 ? tracker.recentActivities[tracker.recentActivities.length - 1] : undefined,
     recentActivities: [...tracker.recentActivities],
   };
+}
+
+/**
+ * Schedule a progress rebuild after the current stream turn yields.
+ *
+ * First-party streaming yields AssistantMessage at content_block_stop with
+ * partial/zero usage, then mutates `message.message.usage` in place when
+ * message_delta arrives — often with no further yields until the next tool
+ * result / API turn. Without a deferred rebuild, the footer freezes at the
+ * first non-zero (or zero) snapshot for the entire tool-execution gap.
+ */
+export function scheduleDeferredAgentProgressRebuild(
+  taskId: string,
+  tracker: ProgressTracker,
+  messages: readonly Message[],
+  setAppState: SetAppState,
+  resolveActivityDescription?: ActivityDescriptionResolver,
+  tools?: Tools,
+): void {
+  const run = (): void => {
+    rebuildProgressFromMessages(tracker, messages, resolveActivityDescription, tools);
+    updateAgentProgress(taskId, getProgressUpdate(tracker), setAppState);
+  };
+  // Two ticks: message_delta is applied after the yield returns into the
+  // generator; a single queueMicrotask can still race the mutation.
+  queueMicrotask(() => {
+    queueMicrotask(run);
+  });
+  setTimeout(run, 0);
 }
 
 /**
@@ -607,9 +647,27 @@ export function updateAgentProgress(taskId: string, progress: AgentProgress, set
     }
 
     const existingSummary = task.progress?.summary;
+    // Never regress live footer tokens: a rebuild that still sees pre-message_delta
+    // zeros (or a stale sibling snapshot) must not wipe a higher count already shown.
+    const tokenCount = Math.max(progress.tokenCount ?? 0, task.progress?.tokenCount ?? 0);
+    const toolUseCount = Math.max(progress.toolUseCount ?? 0, task.progress?.toolUseCount ?? 0);
+    const next: AgentProgress = {
+      ...progress,
+      tokenCount,
+      toolUseCount,
+      ...(existingSummary !== undefined ? { summary: existingSummary } : {}),
+    };
+    if (
+      task.progress?.tokenCount === next.tokenCount &&
+      task.progress?.toolUseCount === next.toolUseCount &&
+      task.progress?.summary === next.summary &&
+      task.progress?.lastActivity === next.lastActivity
+    ) {
+      return task;
+    }
     return {
       ...task,
-      progress: existingSummary ? { ...progress, summary: existingSummary } : progress,
+      progress: next,
     };
   });
 }

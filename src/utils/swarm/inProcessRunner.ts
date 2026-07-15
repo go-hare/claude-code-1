@@ -43,6 +43,8 @@ import {
   createProgressTracker,
   getProgressUpdate,
   rebuildProgressFromMessages,
+  scheduleDeferredAgentProgressRebuild,
+  updateAgentProgress,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { CustomAgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { runAgent } from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
@@ -1293,14 +1295,40 @@ export async function runInProcessTeammate(
                   }
                 }
 
+                // Never regress live footer tokens (pre-message_delta zeros /
+                // stale sibling snapshots must not wipe a higher count).
+                const tokenCount = Math.max(
+                  progress.tokenCount ?? 0,
+                  task.progress?.tokenCount ?? 0,
+                )
+                const toolUseCount = Math.max(
+                  progress.toolUseCount ?? 0,
+                  task.progress?.toolUseCount ?? 0,
+                )
+
                 return {
                   ...task,
-                  progress,
+                  progress: {
+                    ...progress,
+                    tokenCount,
+                    toolUseCount,
+                  },
                   messages: appendCappedMessage(task.messages, message),
                   inProgressToolUseIDs,
                 }
               },
               setAppState,
+            )
+            // message_delta often lands with no further yields until the next
+            // tool result — deferred rebuild unfreezes footer tokens.
+            // updateAgentProgress works for any running task with progress.
+            scheduleDeferredAgentProgressRebuild(
+              taskId,
+              tracker,
+              iterationMessages,
+              setAppState as Parameters<typeof updateAgentProgress>[2],
+              resolveActivity,
+              toolUseContext.options.tools,
             )
           }
 
@@ -1312,11 +1340,22 @@ export async function runInProcessTeammate(
             resolveActivity,
             toolUseContext.options.tools,
           )
+          const finalProgress = getProgressUpdate(tracker)
           updateTaskState(
             taskId,
             task => ({
               ...task,
-              progress: getProgressUpdate(tracker),
+              progress: {
+                ...finalProgress,
+                tokenCount: Math.max(
+                  finalProgress.tokenCount ?? 0,
+                  task.progress?.tokenCount ?? 0,
+                ),
+                toolUseCount: Math.max(
+                  finalProgress.toolUseCount ?? 0,
+                  task.progress?.toolUseCount ?? 0,
+                ),
+              },
             }),
             setAppState,
           )

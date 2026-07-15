@@ -66,6 +66,7 @@ mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
   isLocalAgentTask: () => false,
   killAsyncAgent: noop,
   rebuildProgressFromMessages: noop,
+  scheduleDeferredAgentProgressRebuild: noop,
   updateAgentProgress: noop,
   updateProgressFromMessage: noop,
 }))
