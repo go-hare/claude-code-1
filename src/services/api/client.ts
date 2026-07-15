@@ -38,7 +38,6 @@ import {
 } from '../../utils/envUtils.js'
 import { applyGzipRequestBodyInit } from '../../utils/gzipRequestBodies.js'
 import {
-  applyGatewayFromEnvResult,
   formatGatewaySessionExpiredError,
   getGatewayAuth,
   isGatewayAuthExpired,
@@ -169,32 +168,32 @@ export async function getAnthropicClient({
   // Official uRi first branch: resolve + apply gateway BEFORE getAPIProvider()
   // and before cloud client branches. Env/secure-storage session must be
   // visible to getAPIProvider() (gateway ranks above BEDROCK/VERTEX/etc.).
+  // Env pin / secure-storage restore must share ensureGatewayAuthApplied
+  // priority: explicit USE_GATEWAY env (even expired JWT) must NEVER be
+  // overwritten by secure-storage — that silently swaps ANTHROPIC_BASE_URL /
+  // ANTHROPIC_AUTH_TOKEN for enterprise credentials.
   const gatewayFromEnvEarly = resolveGatewayFromEnv()
   if (gatewayFromEnvEarly.status === 'missing') {
     logForDebugging(gatewayFromEnvEarly.message)
   } else if (gatewayFromEnvEarly.status === 'invalid_url') {
     throw new Error(gatewayFromEnvEarly.message)
   }
-  applyGatewayFromEnvResult(gatewayFromEnvEarly)
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { tryRestoreGatewayAuthFromSecureStorage, maybeRefreshGatewayIdp } =
+    const { ensureGatewayAuthApplied, maybeRefreshGatewayIdp } =
       require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
-    // Match ensureGatewayAuthApplied: restore when missing or expired.
-    // tryRestore owns permanent-skip for still-usable refreshable sessions and
-    // reopens after IdP-transient schedule so external re-login is visible
-    // before await lXe / Wzo (not only pure-expired without idpRefreshToken).
-    const existingGw = getGatewayAuth()
-    if (!existingGw || isGatewayAuthExpired(existingGw)) {
-      tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
-    }
+    // Pins env when present (including expired unpinned JWT); only falls
+    // through to secure-storage when USE_GATEWAY env session is absent.
+    ensureGatewayAuthApplied()
     // Official lXe: await IdP refresh BEFORE provider/expired checks so a
     // cold-restored expired JWT + idpRefreshToken can renew before Wzo throw.
     // In-flight coalesced inside maybeRefreshGatewayIdp (store path).
+    // Skipped for env-unpinned sessions without idpRefreshToken.
     await maybeRefreshGatewayIdp()
   } catch {
-    // densable optional — transient refresh errors must not block client build;
-    // expired check below still surfaces permanent failure.
+    // densable optional — invalid_url already thrown above the try.
+    // Transient ensure/refresh failures must not block client build;
+    // isGatewayAuthExpired check below still surfaces permanent failure.
   }
 
   // Official CAh → F_({ forAnthropicAPI: true, hasBodyIdleWatchdog: CAh(provider) })
@@ -233,15 +232,28 @@ export async function getAnthropicClient({
     ) as ClientOptions['fetch']
   }
 
-  const ARGS = {
+  // Base proxy/TLS options; gateway TLS pin (B_c) may override dispatcher
+  // so enterprise pin verification is enforced on the live request path.
+  const baseFetchOptions = getProxyFetchOptions({
+    forAnthropicAPI: true,
+    hasBodyIdleWatchdog,
+  }) as ClientOptions['fetchOptions'] & {
+    dispatcher?: unknown
+  }
+
+  const ARGS: {
+    defaultHeaders: typeof defaultHeaders
+    maxRetries: number
+    timeout: number
+    dangerouslyAllowBrowser: boolean
+    fetchOptions: ClientOptions['fetchOptions']
+    fetch?: ClientOptions['fetch']
+  } = {
     defaultHeaders,
     maxRetries,
     timeout: parseInt(process.env.API_TIMEOUT_MS || String(600 * 1000), 10),
     dangerouslyAllowBrowser: true,
-    fetchOptions: getProxyFetchOptions({
-      forAnthropicAPI: true,
-      hasBodyIdleWatchdog,
-    }) as ClientOptions['fetchOptions'],
+    fetchOptions: baseFetchOptions,
     ...(resolvedFetch && {
       fetch: resolvedFetch,
     }),
@@ -630,6 +642,32 @@ export async function getAnthropicClient({
         Authorization: `Bearer ${gatewaySession.jwt}`,
       }
     : undefined
+
+  // Official B_c: when enterprise gateway has a TLS pin, force undici
+  // dispatcher with checkServerIdentity pin on the live request path.
+  // Env-unpinned sessions skip. Bun may ignore undici dispatcher — pin
+  // still enforced on Node and restore/probe densables.
+  if (gatewaySession) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createPinnedGatewayFetchDispatcher } =
+        require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
+      const pinnedDispatcher =
+        createPinnedGatewayFetchDispatcher(gatewaySession)
+      if (pinnedDispatcher) {
+        const fo = (ARGS.fetchOptions ?? {}) as {
+          dispatcher?: unknown
+          [key: string]: unknown
+        }
+        ARGS.fetchOptions = {
+          ...fo,
+          dispatcher: pinnedDispatcher,
+        } as ClientOptions['fetchOptions']
+      }
+    } catch {
+      // optional pin — restore path already verified when possible
+    }
+  }
 
   // Determine authentication method based on available tokens
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {

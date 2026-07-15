@@ -62,6 +62,42 @@ const XTVERSION_RE = /^\x1bP>\|(.*?)(?:\x07|\x1b\\)$/s
 // Button 32=left-drag (0x20 | motion-bit). Plain 0/1/2 = left/mid/right click.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/
+// Orphaned tails after ESC was flushed alone (no leading ESC in the text token).
+// Prefix match so peelOrphanedMouseTails can walk a burst of events.
+const ORPHAN_SGR_MOUSE_TAIL_RE = /^\[<(\d+);(\d+);(\d+)([Mm])/
+// X10 wheel Cb is 0x60-0x7f (button+32 with wheel bit). Use \u escapes so
+// biome does not flag control-character ranges in the source regex literal.
+const ORPHAN_X10_WHEEL_TAIL_RE = /^\[M[\u0060-\u007f][\u0020-\uffff]{2}/
+
+/**
+ * Peel consecutive orphaned SGR/X10 mouse tails from the start of a text
+ * token. Returns full ESC-prefixed sequences for each event and any leftover
+ * text that is not a mouse tail (typed input, partial garbage).
+ */
+function peelOrphanedMouseTails(text: string): {
+  events: string[]
+  rest: string
+} {
+  const events: string[] = []
+  let i = 0
+  while (i < text.length) {
+    const slice = text.slice(i)
+    const sgr = ORPHAN_SGR_MOUSE_TAIL_RE.exec(slice)
+    if (sgr) {
+      events.push('\x1b' + sgr[0])
+      i += sgr[0].length
+      continue
+    }
+    const x10 = ORPHAN_X10_WHEEL_TAIL_RE.exec(slice)
+    if (x10) {
+      events.push('\x1b' + x10[0])
+      i += x10[0].length
+      continue
+    }
+    break
+  }
+  return { events, rest: text.slice(i) }
+}
 
 function createPasteKey(content: string): ParsedKey {
   return {
@@ -258,26 +294,27 @@ export function parseMultipleKeypresses(
     } else if (token.type === 'text') {
       if (inPaste) {
         pasteBuffer += token.value
-      } else if (
-        /^\[<\d+;\d+;\d+[Mm]$/.test(token.value) ||
-        /^\[M[\x60-\x7f][\x20-\uffff]{2}$/.test(token.value)
-      ) {
-        // Orphaned SGR/X10 mouse tail (fullscreen only — mouse tracking is off
-        // otherwise). A heavy render blocked the event loop past App's 50ms
-        // flush timer, so the buffered ESC was flushed as a lone Escape and
-        // the continuation `[<btn;col;rowM` arrived as text. Re-synthesize
-        // with the ESC prefix so the scroll event still fires instead of
-        // leaking into the prompt. The spurious Escape is gone; App.tsx's
-        // readableLength check prevents it. The X10 Cb slot is narrowed to
-        // the wheel range [\x60-\x7f] (0x40|modifiers + 32) — a full [\x20-]
-        // range would match typed input like `[MAX]` batched into one read
-        // and silently drop it as a phantom click. Click/drag orphans leak
-        // as visible garbage instead; deletable garbage beats silent loss.
-        const resynthesized = '\x1b' + token.value
-        const mouse = parseMouseEvent(resynthesized)
-        keys.push(mouse ?? parseKeypress(resynthesized))
       } else {
-        keys.push(parseKeypress(token.value))
+        // Orphaned SGR/X10 mouse tails (fullscreen only — mouse tracking is
+        // off otherwise). A heavy render can block past App's 50ms flush
+        // timer so the buffered ESC is flushed as a lone Escape and the
+        // continuation `[<btn;col;rowM` arrives as text. Fast scroll bursts
+        // concatenate many tails in one read:
+        //   [<65;11;10M[<65;11;10M[<65;11;10M...
+        // A single-event ^...$ match left the whole burst as prompt text.
+        // Peel consecutive tails (prefix, not whole-string only),
+        // re-synthesize each with ESC so wheel/click still route; leftover
+        // non-mouse text still goes to parseKeypress.
+        // X10 Cb is narrowed to wheel range [\x60-\x7f] so typed `[MAX]` is
+        // not swallowed as a phantom click.
+        const { events, rest } = peelOrphanedMouseTails(token.value)
+        for (const seq of events) {
+          const mouse = parseMouseEvent(seq)
+          keys.push(mouse ?? parseKeypress(seq))
+        }
+        if (rest) {
+          keys.push(parseKeypress(rest))
+        }
       }
     }
   }

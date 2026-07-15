@@ -1,45 +1,18 @@
-import { createContext, type RefObject, useContext } from 'react';
-import type { ScrollBoxHandle } from '@anthropic/ink';
-
 /**
- * Set by FullscreenLayout when rendering content in its `modal` slot —
- * the absolute-positioned bottom-anchored pane for slash-command dialogs.
- * Consumers use this to:
+ * App-side re-export of the single ModalContext from @anthropic/ink.
  *
- * - Suppress top-level framing — `Pane` skips its full-terminal-width
- *   `Divider` (FullscreenLayout already draws the ▔ divider).
- * - Size Select pagination to the available rows — the modal's inner
- *   area is smaller than the terminal (rows minus transcript peek minus
- *   divider), so components that cap their visible option count from
- *   `useTerminalSize().rows` would overflow without this context.
- * - Reset scroll on tab switch — Tabs keys its ScrollBox by
- *   `selectedTabIndex`, remounting on tab switch so scrollTop resets to 0
- *   without scrollTo() timing games.
+ * FullscreenLayout provides ModalContext; Pane/Tabs inside ink read the same
+ * createContext instance via their package-local import. Keeping a second
+ * createContext here used to break useIsInsideModal() (always false) so Pane
+ * drew its own Divider on top of FullscreenLayout's ▔ — double top border on
+ * /permissions, /config, etc.
  *
- * null = not inside the modal slot.
+ * Prefer importing from `@anthropic/ink` for new code. This path remains for
+ * existing app imports under `src/context/modalContext.js`.
  */
-type ModalCtx = {
-  rows: number;
-  columns: number;
-  scrollRef: RefObject<ScrollBoxHandle | null> | null;
-};
-export const ModalContext = createContext<ModalCtx | null>(null);
-
-export function useIsInsideModal(): boolean {
-  return useContext(ModalContext) !== null;
-}
-
-/**
- * Available content rows/columns when inside a Modal, else falls back to
- * the provided terminal size. Use instead of `useTerminalSize()` when a
- * component caps its visible content height — the modal's inner area is
- * smaller than the terminal.
- */
-export function useModalOrTerminalSize(fallback: { rows: number; columns: number }): { rows: number; columns: number } {
-  const ctx = useContext(ModalContext);
-  return ctx ? { rows: ctx.rows, columns: ctx.columns } : fallback;
-}
-
-export function useModalScrollRef(): RefObject<ScrollBoxHandle | null> | null {
-  return useContext(ModalContext)?.scrollRef ?? null;
-}
+export {
+  ModalContext,
+  useIsInsideModal,
+  useModalOrTerminalSize,
+  useModalScrollRef,
+} from '@anthropic/ink';

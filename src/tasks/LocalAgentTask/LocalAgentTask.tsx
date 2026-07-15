@@ -72,6 +72,14 @@ export type ProgressTracker = {
   latestInputTokens: number;
   cumulativeOutputTokens: number;
   recentActivities: ToolActivity[];
+  /**
+   * Incremental content-token estimate cache. getProgressUpdate used to re-scan
+   * the entire message list on every progress tick (O(n) per call → O(n²) over
+   * a long agent turn). We cache per-message estimates by identity + content
+   * length so unchanged prefix messages are O(1) and only the growing tail is
+   * re-estimated.
+   */
+  contentEstimateCache?: WeakMap<object, { contentLen: number; tokens: number }>;
 };
 
 export function createProgressTracker(): ProgressTracker {
@@ -256,14 +264,77 @@ export function rebuildProgressFromMessages(
   }
 }
 
+/**
+ * Content-length fingerprint for a message so we can reuse cached estimates
+ * when the object is mutated in place (streaming usage/content updates) or
+ * when the prefix of the array is stable across ticks.
+ */
+function messageContentLen(message: Message): number {
+  try {
+    const content = (message as { message?: { content?: unknown } }).message?.content;
+    if (typeof content === 'string') return content.length;
+    if (Array.isArray(content)) {
+      let n = 0;
+      for (const block of content) {
+        if (typeof block === 'string') n += block.length;
+        else if (block && typeof block === 'object') {
+          const b = block as { text?: string; thinking?: string; input?: unknown };
+          if (typeof b.text === 'string') n += b.text.length;
+          if (typeof b.thinking === 'string') n += b.thinking.length;
+          if (b.input !== undefined) {
+            // Cheap structural size — avoid full JSON stringify of huge inputs.
+            n += typeof b.input === 'string' ? b.input.length : 64;
+          }
+        }
+      }
+      return n;
+    }
+  } catch {
+    // ignore
+  }
+  return 0;
+}
+
+/**
+ * Estimate content tokens with a per-tracker cache so repeated progress ticks
+ * on a long transcript do not re-walk every prior message (O(n²) over a turn).
+ */
+export function estimateContentTokensCached(tracker: ProgressTracker, messages: readonly Message[]): number {
+  if (!tracker.contentEstimateCache) {
+    tracker.contentEstimateCache = new WeakMap();
+  }
+  const cache = tracker.contentEstimateCache;
+  let total = 0;
+  for (const message of messages) {
+    const len = messageContentLen(message);
+    // WeakMap keys must be objects; non-object messages fall through to estimate.
+    // contentLen invalidates when streaming mutates text in place.
+    if (message && typeof message === 'object') {
+      const hit = cache.get(message);
+      if (hit && hit.contentLen === len) {
+        total += hit.tokens;
+        continue;
+      }
+      const tokens = roughTokenCountEstimationForMessages([message]);
+      cache.set(message, { contentLen: len, tokens });
+      total += tokens;
+    } else {
+      total += roughTokenCountEstimationForMessages([message]);
+    }
+  }
+  return total;
+}
+
 export function getProgressUpdate(tracker: ProgressTracker, messages?: readonly Message[]): AgentProgress {
   let tokenCount = getTokenCountFromTracker(tracker);
-  // Gateways / partial streams often leave usage at zeros for long stretches
-  // (or only attach it on a late sibling). Fall back to content length so the
-  // footer does not sit at "↓ 0 tokens" while the agent is clearly working.
-  if (tokenCount <= 0 && messages && messages.length > 0) {
-    const estimated = roughTokenCountEstimationForMessages(messages);
-    if (estimated > 0) {
+  // Gateways / partial streams often leave usage at zeros for long stretches,
+  // or only attach usage on an early sibling while later content has zero
+  // usage. Always take max(usage, contentEstimate) so the footer keeps
+  // growing when the agent is clearly producing tokens after a non-zero
+  // first update (no-regress alone would freeze on the early usage total).
+  if (messages && messages.length > 0) {
+    const estimated = estimateContentTokensCached(tracker, messages);
+    if (estimated > tokenCount) {
       tokenCount = estimated;
     }
   }

@@ -159,8 +159,10 @@ describe('tui on subcommand', () => {
 })
 
 describe('tui off subcommand', () => {
-  test('removes marker file', async () => {
-    const { getTuiMarkerPath } = await import('../index.js')
+  test('removes marker file and persists settings.tui=default', async () => {
+    const { getTuiMarkerPath, readPersistedTuiSetting } = await import(
+      '../index.js'
+    )
     await invokeCmd('on')
     expect(existsSync(getTuiMarkerPath())).toBe(true)
 
@@ -168,33 +170,55 @@ describe('tui off subcommand', () => {
     expect(result.type).toBe('text')
     expect(result.value).toContain('disabled')
     expect(existsSync(getTuiMarkerPath())).toBe(false)
+    // Under default-on fullscreen, marker removal alone is not enough —
+    // settings.tui=default is the durable opt-out isFullscreenEnvEnabled reads.
+    expect(readPersistedTuiSetting()).toBe('default')
+    expect(result.value).toContain('settings.tui')
   })
 
-  test('off when already off returns graceful message', async () => {
+  test('off when already default reports not active', async () => {
+    // First off writes settings.tui=default (even without marker).
+    await invokeCmd('off')
     const result = await invokeCmd('off')
     expect(result.type).toBe('text')
     expect(result.value).toContain('not active')
   })
+
+  test('on persists settings.tui=fullscreen', async () => {
+    const { readPersistedTuiSetting } = await import('../index.js')
+    await invokeCmd('on')
+    expect(readPersistedTuiSetting()).toBe('fullscreen')
+  })
 })
 
 describe('tui toggle subcommand', () => {
-  test('toggle with no marker enables tui', async () => {
-    const { getTuiMarkerPath } = await import('../index.js')
-    const result = await invokeCmd('')
-    expect(result.type).toBe('text')
-    expect(result.value).toContain('enabled')
-    expect(existsSync(getTuiMarkerPath())).toBe(true)
-  })
-
-  test('toggle with marker disables tui', async () => {
-    const { getTuiMarkerPath } = await import('../index.js')
-    await invokeCmd('')
-    expect(existsSync(getTuiMarkerPath())).toBe(true)
-
+  test('toggle under default-on opts out (settings.tui=default)', async () => {
+    // Official 2.1.210 default-on: no marker + no settings.tui still means
+    // fullscreen is effective, so bare /tui toggles OFF (persist default).
+    const { getTuiMarkerPath, readPersistedTuiSetting } = await import(
+      '../index.js'
+    )
     const result = await invokeCmd('')
     expect(result.type).toBe('text')
     expect(result.value).toContain('disabled')
     expect(existsSync(getTuiMarkerPath())).toBe(false)
+    expect(readPersistedTuiSetting()).toBe('default')
+  })
+
+  test('toggle from opted-out re-enables fullscreen', async () => {
+    const { getTuiMarkerPath, readPersistedTuiSetting } = await import(
+      '../index.js'
+    )
+    // Explicit opt-out baseline (idempotent even if prior test left default).
+    await invokeCmd('off')
+    expect(readPersistedTuiSetting()).toBe('default')
+
+    // Toggle from opted-out → fullscreen (opt in)
+    const result = await invokeCmd('')
+    expect(result.type).toBe('text')
+    expect(result.value).toContain('enabled')
+    expect(existsSync(getTuiMarkerPath())).toBe(true)
+    expect(readPersistedTuiSetting()).toBe('fullscreen')
   })
 })
 

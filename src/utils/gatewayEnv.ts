@@ -365,11 +365,14 @@ export function parseGatewayIdpTokenResponse(
 ): GatewayIdpTokenResponse | null {
   if (typeof data !== 'object' || data === null) return null
   const rec = data as Record<string, unknown>
+  // expires_in must be a positive finite number. Zero / negative would yield
+  // expiresAtMs <= now and thrash refresh on every getAnthropicClient call.
   if (
     typeof rec.access_token !== 'string' ||
     rec.access_token.length === 0 ||
     typeof rec.expires_in !== 'number' ||
-    !Number.isFinite(rec.expires_in)
+    !Number.isFinite(rec.expires_in) ||
+    rec.expires_in <= 0
   ) {
     return null
   }
@@ -823,7 +826,13 @@ async function runGatewayIdpRefresh(
           // optional
         }
       }
-      // Pure-expired path can re-read without waiting for transient TTL.
+      // Stop thrashing: dead refresh must not re-load from disk every client
+      // build when persist lags or storage still holds the rejected token.
+      if (opts.usesStoreSession) {
+        secureStorageRestoreSucceeded = false
+        secureStorageSkipUntilMs = nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+        secureStorageSkipKind = 'miss'
+      }
       gatewayIdpTransientRereadAfterMs = 0
       return { status: 'invalid_grant', clearedRefresh: clear }
     }
@@ -1429,9 +1438,16 @@ export type GatewayTlsProbeResult = {
   fingerprint: string
 }
 
+/** True for hostnames that may skip TLS (local http only). */
+export function isGatewayHttpLoopbackHost(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1'
+}
+
 /**
  * Official VPr densable pure plan — non-https URLs short-circuit to
- * http-loopback fingerprint (no live socket).
+ * http-loopback fingerprint only for real loopback hosts (no live socket).
+ * Remote http:// must not inherit the loopback sentinel (would skip pin probe).
  */
 export function planGatewayTlsProbe(
   url: string,
@@ -1443,6 +1459,12 @@ export function planGatewayTlsProbe(
     const parsed = new URL(url)
     const hostname = parsed.hostname.replace(/^\[|\]$/g, '')
     if (parsed.protocol !== 'https:') {
+      if (!isGatewayHttpLoopbackHost(hostname)) {
+        return {
+          status: 'invalid_url',
+          message: `Gateway URL must use https:// (or http:// loopback only); got ${parsed.protocol}//${hostname}`,
+        }
+      }
       return {
         status: 'http_loopback',
         hostname,
@@ -1531,6 +1553,92 @@ export function createPinnedGatewayHttpsAgent(
       pinnedFingerprint,
       baseCheck,
     ),
+  })
+}
+
+/**
+ * Resolve pinned fingerprint for an in-memory gateway session host from
+ * secure-storage (enterprise path). Env-unpinned sessions skip pin.
+ */
+export function resolveGatewayTlsPinForSession(
+  session: GatewayAuthSession | null | undefined,
+  opts?: {
+    readStorage?: () => Record<string, unknown> | null | undefined
+  },
+): string | undefined {
+  if (!session || session.unpinned) return undefined
+  let host: string
+  try {
+    host = resolveGatewayTrustHostKey(session.url)
+  } catch {
+    return undefined
+  }
+  try {
+    const read =
+      opts?.readStorage ??
+      (() => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getSecureStorage } =
+          require('./secureStorage/index.js') as typeof import('./secureStorage/index.js')
+        return getSecureStorage().read() as
+          | Record<string, unknown>
+          | null
+          | undefined
+      })
+    return readGatewayTlsPin({ host, storageData: read() })
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Official B_c consumer densable — undici Agent with TLS pin for gateway
+ * fetchOptions.dispatcher. Returns undefined when no pin / unpinned session.
+ * When present, callers should prefer this dispatcher over a plain proxy agent
+ * so pin verification is not skipped on the live request path.
+ */
+export function createPinnedGatewayFetchDispatcher(
+  session: GatewayAuthSession | null | undefined,
+  opts?: {
+    readStorage?: () => Record<string, unknown> | null | undefined
+    Agent?: new (options?: Record<string, unknown>) => unknown
+    checkServerIdentity?: (
+      hostname: string,
+      cert: { fingerprint256?: string },
+    ) => Error | undefined
+  },
+): unknown | undefined {
+  const pin = resolveGatewayTlsPinForSession(session, {
+    readStorage: opts?.readStorage,
+  })
+  if (!pin) return undefined
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const undiciMod = opts?.Agent
+    ? null
+    : (require('undici') as typeof import('undici'))
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const tlsMod = opts?.checkServerIdentity
+    ? null
+    : (require('tls') as typeof import('tls'))
+  const AgentCtor =
+    opts?.Agent ??
+    (undiciMod!.Agent as unknown as new (
+      options?: Record<string, unknown>,
+    ) => unknown)
+  const baseCheck =
+    opts?.checkServerIdentity ??
+    ((hostname: string, cert: { fingerprint256?: string }) =>
+      tlsMod!.checkServerIdentity(
+        hostname,
+        cert as import('tls').PeerCertificate,
+      ))
+  return new AgentCtor({
+    connect: {
+      checkServerIdentity: createGatewayTlsPinCheckServerIdentity(
+        pin,
+        baseCheck,
+      ),
+    },
   })
 }
 

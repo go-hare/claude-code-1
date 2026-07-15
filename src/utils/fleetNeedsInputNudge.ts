@@ -280,7 +280,10 @@ class FleetNeedsInputNudgeStore {
       this.emit()
     }
 
-    if (next.active > 0 && this.focused) {
+    // Keep sweeping while focused even when active===0. Otherwise the first
+    // empty poll permanently stops discovery of blocked jobs created later
+    // in other terminals (review-band is not counted as active).
+    if (this.focused) {
       this.scheduleSweep()
     }
   }

@@ -7,6 +7,12 @@
  *
  * Stream-loop idle (for-await chunks in claude.ts) remains a separate densable
  * (CLAUDE_ENABLE_STREAM_WATCHDOG / IAi). This is the lower-level body path.
+ *
+ * Backpressure: the previous start()+async-loop form eagerly drained the
+ * upstream reader and enqueued without checking `controller.desiredSize`, so a
+ * slow consumer could balloon memory. The pull-based form only reads from
+ * upstream when the consumer pulls, and re-arms the idle timer on each pull
+ * wait / successful chunk.
  */
 
 import { logForDebugging } from './debug.js'
@@ -26,6 +32,9 @@ export class BodyIdleTimeoutError extends Error {
 /**
  * Wrap a ReadableStream so that silence longer than `idleTimeoutMs` between
  * chunks (or before the first chunk) aborts the stream with BodyIdleTimeoutError.
+ *
+ * Pull-driven so we honor consumer backpressure (desiredSize) instead of
+ * eagerly pumping the upstream reader into an unbounded queue.
  */
 export function wrapReadableStreamWithBodyIdleTimeout(
   source: ReadableStream<Uint8Array>,
@@ -41,6 +50,9 @@ export function wrapReadableStreamWithBodyIdleTimeout(
   let cancelled = false
   let timedOut = false
   let settled = false
+  /** Controller used by the arm timer; set in start(). */
+  let streamController: ReadableStreamDefaultController<Uint8Array> | null =
+    null
 
   const clear = (): void => {
     if (timer !== null) {
@@ -54,56 +66,65 @@ export function wrapReadableStreamWithBodyIdleTimeout(
     clear()
   }
 
-  const arm = (
-    controller: ReadableStreamDefaultController<Uint8Array>,
-  ): void => {
+  const fireTimeout = (): void => {
+    if (settled || cancelled) return
+    timedOut = true
+    settle()
+    const err = new BodyIdleTimeoutError(idleTimeoutMs)
+    onTimeout?.(err)
+    try {
+      streamController?.error(err)
+    } catch {
+      // already closed/errored
+    }
+    void reader.cancel(err).catch(() => {})
+  }
+
+  const arm = (): void => {
     clear()
-    timer = setTimeout(() => {
-      if (settled || cancelled) return
-      timedOut = true
-      settle()
-      const err = new BodyIdleTimeoutError(idleTimeoutMs)
-      onTimeout?.(err)
-      try {
-        controller.error(err)
-      } catch {
-        // already closed/errored
-      }
-      void reader.cancel(err).catch(() => {})
-    }, idleTimeoutMs)
+    timer = setTimeout(fireTimeout, idleTimeoutMs)
   }
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      arm(controller)
-      void (async () => {
-        try {
-          while (!cancelled && !timedOut) {
-            const { done, value } = await reader.read()
-            if (timedOut || cancelled) return
-            if (done) {
-              settle()
-              try {
-                controller.close()
-              } catch {
-                // already closed
-              }
-              return
-            }
-            arm(controller)
-            controller.enqueue(value)
-          }
-        } catch (e) {
+      streamController = controller
+      // Arm immediately so silence before the first pull still times out
+      // (matches prior start-loop behavior for hung responses).
+      arm()
+    },
+    async pull(controller) {
+      if (settled || cancelled || timedOut) return
+      // Re-arm while waiting for the next upstream chunk (idle between pulls).
+      arm()
+      try {
+        const { done, value } = await reader.read()
+        if (timedOut || cancelled) return
+        if (done) {
           settle()
-          if (!timedOut && !cancelled) {
-            try {
-              controller.error(e)
-            } catch {
-              // already closed/errored
-            }
+          try {
+            controller.close()
+          } catch {
+            // already closed
+          }
+          return
+        }
+        // Fresh bytes — reset idle window for the next wait.
+        arm()
+        controller.enqueue(value)
+        // If the consumer is behind (desiredSize <= 0), stop pulling until
+        // they drain; the runtime will call pull() again when ready.
+        // (Default highWaterMark is 1 for byte streams in many runtimes;
+        // returning here is the standard backpressure handshake.)
+      } catch (e) {
+        settle()
+        if (!timedOut && !cancelled) {
+          try {
+            controller.error(e)
+          } catch {
+            // already closed/errored
           }
         }
-      })()
+      }
     },
     cancel(reason) {
       cancelled = true

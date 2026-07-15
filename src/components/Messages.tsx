@@ -711,6 +711,10 @@ const MessagesImpl = ({
   // rows) expand together; falls back to uuid for groups/thinking. Stale keys
   // are harmless — they never match anything in renderableMessages.
   const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(() => new Set());
+  // Bumped on each expand/collapse so VirtualMessageList can invalidate
+  // heightCache + clear scrollHeightHwm (stale expand heights leave blank
+  // spacer after collapse when not sticky).
+  const [layoutEpoch, setLayoutEpoch] = useState(0);
   const onItemClick = useCallback((msg: RenderableMessage) => {
     const k = expandKey(msg);
     setExpandedKeys(prev => {
@@ -719,6 +723,7 @@ const MessagesImpl = ({
       else next.add(k);
       return next;
     });
+    setLayoutEpoch(n => n + 1);
   }, []);
   const isItemExpanded = useCallback(
     (msg: RenderableMessage) => expandedKeys.size > 0 && expandedKeys.has(expandKey(msg)),
@@ -936,6 +941,7 @@ const MessagesImpl = ({
             onItemClick={onItemClick}
             isItemClickable={isItemClickable}
             isItemExpanded={isItemExpanded}
+            layoutEpoch={layoutEpoch}
             trackStickyPrompt={trackStickyPrompt}
             selectedIndex={selectedIdx >= 0 ? selectedIdx : undefined}
             cursorNavRef={cursorNavRef}

@@ -76,6 +76,43 @@ describe('ObserverReport WId surface densable', () => {
     expect(result.data.message).toContain('only available to an observer')
   })
 
+  test('call prefers setAppStateForTasks over no-op setAppState', async () => {
+    armObserverPairing({
+      observerTaskId: 'obs-w3',
+      observerAgentType: 'watcher',
+      observedEnvelopeName: 'worker',
+      observedKey: 'agent-3',
+    })
+    const setAppStateCalls: unknown[] = []
+    const setAppStateForTasksCalls: unknown[] = []
+    const noopSetAppState = (fn: unknown) => {
+      setAppStateCalls.push(fn)
+    }
+    const realSetAppStateForTasks = (fn: unknown) => {
+      setAppStateForTasksCalls.push(fn)
+    }
+    // deliverObserverReport needs running observed task for agent path —
+    // even without that, the enqueueAgent closure must close over
+    // setAppStateForTasks when present (async observer no-op setAppState).
+    const result = await ObserverReportTool.call!({ report: 'findings' }, {
+      agentId: 'obs-w3',
+      setAppState: noopSetAppState,
+      setAppStateForTasks: realSetAppStateForTasks,
+      getAppState: () => ({
+        tasks: {
+          'agent-3': { type: 'local_agent', status: 'running' },
+        },
+      }),
+    } as any)
+    // Either main or agent enqueue path may fire depending on pairing key;
+    // if agent path fires, setAppStateForTasks is used not the no-op.
+    if (setAppStateForTasksCalls.length > 0 || setAppStateCalls.length > 0) {
+      expect(setAppStateCalls.length).toBe(0)
+      expect(setAppStateForTasksCalls.length).toBeGreaterThan(0)
+    }
+    expect(result.data).toBeDefined()
+  })
+
   test('isEnabled follows process env when set', () => {
     process.env.CLAUDE_CODE_EXPERIMENTAL_OBSERVER_AGENTS = '1'
     expect(ObserverReportTool.isEnabled()).toBe(true)

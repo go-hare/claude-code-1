@@ -1188,7 +1188,7 @@ export function LogSelector({
                     action={`show ${showAllWorktrees ? 'current worktree' : 'all worktrees'}`}
                   />
                 )}
-                <KeyboardShortcutHint shortcut="Space" action="preview" />
+                <KeyboardShortcutHint shortcut="Ctrl+V" action="preview" />
                 <KeyboardShortcutHint shortcut="Ctrl+R" action="rename" />
                 <Text>Type to search</Text>
                 <ConfigurableShortcutHint

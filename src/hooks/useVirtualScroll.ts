@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react'
 import type { ScrollBoxHandle, DOMElement } from '@anthropic/ink'
@@ -159,6 +160,14 @@ export function useVirtualScroll(
    * heights DOWN, keeping offsets roughly aligned with post-resize Yoga.
    */
   columns: number,
+  /**
+   * Bumped on intentional per-item content-size changes (click-to-expand /
+   * collapse verbose). Without this, the post-collapse useLayoutEffect still
+   * reads PRE-collapse Yoga into heightCache, bottomSpacer stays inflated,
+   * non-sticky scrollTop/HWM land in empty spacer, and the transcript shows
+   * only the summary line over a large blank ("Jump to bottom" still visible).
+   */
+  layoutEpoch = 0,
 ): VirtualScrollResult {
   const heightCache = useRef(new Map<string, number>())
   // Bump whenever heightCache mutates so offsets rebuild on next read. Ref
@@ -190,17 +199,14 @@ export function useVirtualScroll(
   // into heightCache. Render #3 has accurate heights → normal recompute.
   const prevRangeRef = useRef<readonly [number, number] | null>(null)
   const freezeRendersRef = useRef(0)
-  if (prevColumns.current !== columns) {
-    const ratio = prevColumns.current / columns
-    prevColumns.current = columns
-    for (const [k, h] of heightCache.current) {
-      heightCache.current.set(k, Math.max(1, Math.round(h * ratio)))
-    }
-    offsetVersionRef.current++
-    skipMeasurementRef.current = true
-    freezeRendersRef.current = 2
-  }
-  const frozenRange = freezeRendersRef.current > 0 ? prevRangeRef.current : null
+  // Force commits after expand/collapse so heightCache + offsets catch up.
+  // Measure normally avoids setState (flicker during streaming); intentional
+  // layout changes need the extra frames or blank spacer sticks forever.
+  const [remeasureTick, setRemeasureTick] = useState(0)
+  void remeasureTick
+  const prevLayoutEpoch = useRef(layoutEpoch)
+  const pendingRemeasureRef = useRef(false)
+  const needsOffsetRebuildRef = useRef(false)
   // List origin in content-wrapper coords. scrollTop is content-wrapper-
   // relative, but offsets[] are list-local (0 = first virtualized item).
   // Siblings that render BEFORE this list inside the ScrollBox — Logo,
@@ -219,10 +225,46 @@ export function useVirtualScroll(
   // Official 2.1.207: topmost fully-above-or-at scrollTop item used as scroll
   // anchor. When its Yoga top shifts after remount/measure, compensate
   // scrollTop with preserveHwm so HWM still covers the pre-shift position.
+  // Declared before layoutEpoch handling so expand/collapse can clear it.
   const scrollAnchorRef = useRef<{ key: string; yogaTop: number } | null>(null)
   // Positive reanchor delta applied this commit — widen clampMax so the
   // render-time clamp does not fight the compensatory scrollTo.
   const reanchorDeltaRef = useRef(0)
+  if (prevColumns.current !== columns) {
+    const ratio = prevColumns.current / columns
+    prevColumns.current = columns
+    for (const [k, h] of heightCache.current) {
+      heightCache.current.set(k, Math.max(1, Math.round(h * ratio)))
+    }
+    offsetVersionRef.current++
+    skipMeasurementRef.current = true
+    freezeRendersRef.current = 2
+  }
+  if (prevLayoutEpoch.current !== layoutEpoch) {
+    prevLayoutEpoch.current = layoutEpoch
+    // Drop mounted heights only — those are the rows whose verbose state
+    // just flipped. Prefer DEFAULT_ESTIMATE (low) over a stale expand height
+    // so bottomSpacer/range cannot leave a permanent blank after collapse.
+    for (const k of itemRefs.current.keys()) {
+      heightCache.current.delete(k)
+    }
+    offsetVersionRef.current++
+    // Same Yoga-staleness window as columns: this frame's measure would
+    // re-cache PRE-toggle heights; skip and remeasure after Ink layouts.
+    skipMeasurementRef.current = true
+    pendingRemeasureRef.current = true
+    needsOffsetRebuildRef.current = true
+    // Drop scroll anchor so reanchor preserveHwm cannot re-inflate HWM
+    // after an intentional collapse.
+    scrollAnchorRef.current = null
+    // Intentional shrink/grow is not a transient markdown freeze — clear
+    // HWM so stored scrollTop can fall with real content on the next paint.
+    const el = scrollRef.current?.getDomElement()
+    if (el) {
+      el.scrollHeightHwm = undefined
+    }
+  }
+  const frozenRange = freezeRendersRef.current > 0 ? prevRangeRef.current : null
 
   // useSyncExternalStore ties re-renders to imperative scroll. Snapshot is
   // scrollTop QUANTIZED to SCROLL_QUANTUM bins — Object.is sees no change
@@ -683,6 +725,13 @@ export function useVirtualScroll(
     }
     if (skipMeasurementRef.current) {
       skipMeasurementRef.current = false
+      // Expand/collapse: after this commit Ink lays out post-toggle content.
+      // Schedule a remeasure commit so the next useLayoutEffect sees real
+      // heights (skip above prevented re-caching pre-toggle Yoga).
+      if (pendingRemeasureRef.current) {
+        pendingRemeasureRef.current = false
+        queueMicrotask(() => setRemeasureTick(t => t + 1))
+      }
       return
     }
     let anyChanged = false
@@ -702,6 +751,32 @@ export function useVirtualScroll(
       }
     }
     if (anyChanged) offsetVersionRef.current++
+    // Intentional layoutEpoch path only (not streaming markdown freeze):
+    // force a commit so offsets rebuild from freshly written heights, and
+    // clamp scrollTop to real maxScroll when non-sticky (collapse after
+    // scroll-up). Cache was cleared on epoch so prev heights are undefined —
+    // cannot detect shrink via prev>h; always reclamp after remeasure.
+    // Must NOT run for every measure — that would defeat scrollHeightHwm.
+    if (needsOffsetRebuildRef.current) {
+      needsOffsetRebuildRef.current = false
+      // Always rebuild offsets after epoch remeasure, even if Yoga heights
+      // matched DEFAULT_ESTIMATE (anyChanged false) — spacers still need
+      // the post-toggle commit path for HWM/scroll clamp.
+      queueMicrotask(() => setRemeasureTick(t => t + 1))
+      if (!isSticky) {
+        const s = scrollRef.current
+        const el = s?.getDomElement()
+        if (el) el.scrollHeightHwm = undefined
+        if (s) {
+          const sh = s.getFreshScrollHeight()
+          const vh = s.getViewportHeight()
+          const max = Math.max(0, sh - vh)
+          if (s.getScrollTop() > max) {
+            s.scrollTo(max)
+          }
+        }
+      }
+    }
   })
 
   // Stable per-key callback refs. React's ref-swap dance (old(null) then

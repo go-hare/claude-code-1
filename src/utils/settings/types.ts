@@ -864,6 +864,17 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe('Whether to show tips in the spinner'),
+      // Official settings.tui ("default" | "fullscreen") — explicit TUI renderer.
+      // Consumed by isFullscreenEnvEnabled(); "default" forces classic layout,
+      // "fullscreen" forces alt-screen / no-flicker. Absent → env / auto default.
+      tui: z
+        .enum(['default', 'fullscreen'])
+        .optional()
+        .describe(
+          'Terminal UI renderer. "default" uses the classic scrolling layout; ' +
+            '"fullscreen" pins input to the bottom with virtualized scrollback. ' +
+            'Overrides auto-detection when set; CLAUDE_CODE_NO_FLICKER still wins.',
+        ),
       spinnerVerbs: z
         .object({
           mode: z.enum(['append', 'replace']),

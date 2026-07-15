@@ -35,4 +35,18 @@ describe('createAgentObserverRuntimeHostHandlers', () => {
     // Real host is not the refuse-stub only install — deliver exists.
     expect(typeof host.deliver).toBe('function')
   })
+
+  test('fallback observer agent def is read-only (not tools:* acceptEdits)', () => {
+    // Source-level contract: createAgentObserverRuntimeHostHandlers embeds a
+    // narrow fallback when activeAgents lacks the observer type.
+    const src = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '../observerRuntimeHost.ts'),
+      'utf8',
+    ) as string
+    expect(src).toContain("permissionMode: 'default'")
+    expect(src).toContain('OBSERVER_FALLBACK_TOOLS')
+    expect(src).not.toMatch(
+      /agentType: plan\.observerAgentType[\s\S]{0,400}tools:\s*\['\*'\]/,
+    )
+  })
 })

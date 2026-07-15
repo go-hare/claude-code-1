@@ -130,6 +130,19 @@ const prViewCache = new Map<string, PrViewCacheEntry>();
 const PR_VIEW_INTERVAL_MS = 60_000;
 /** Cap concurrent `gh pr view` spawns per refresh pass. */
 const PR_VIEW_CONCURRENCY = 3;
+/** Bound process-lifetime cache so long-lived fleets do not grow unbounded. */
+const PR_VIEW_CACHE_MAX = 200;
+
+function prViewCacheSet(key: string, entry: PrViewCacheEntry): void {
+  // Refresh insertion order for LRU-ish eviction (Map preserves set order).
+  if (prViewCache.has(key)) prViewCache.delete(key);
+  prViewCache.set(key, entry);
+  while (prViewCache.size > PR_VIEW_CACHE_MAX) {
+    const oldest = prViewCache.keys().next().value;
+    if (oldest === undefined) break;
+    prViewCache.delete(oldest);
+  }
+}
 
 /**
  * Derive a display name from the intent string (official: DC6).
@@ -170,6 +183,42 @@ function prViewCacheKey(repo: string, prNum: string): string {
   return `${repo}#${prNum}`;
 }
 
+/**
+ * Severity for multi-PR review aggregation (higher = worse / more attention).
+ * Used so a fleet row with several PRs surfaces the worst review band, not only
+ * the first child's state.
+ */
+export function prReviewStateSeverity(state: SessionEntry['prReviewState'] | undefined): number {
+  switch (state) {
+    case 'changes_requested':
+      return 4;
+    case 'pending':
+      return 3;
+    case 'draft':
+      return 2;
+    case 'approved':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/** Pick the worst review state among a list (undefined loses to any known). */
+export function worstPrReviewState(
+  states: ReadonlyArray<SessionEntry['prReviewState'] | undefined>,
+): SessionEntry['prReviewState'] | undefined {
+  let best: SessionEntry['prReviewState'] | undefined;
+  let bestScore = 0;
+  for (const s of states) {
+    const score = prReviewStateSeverity(s);
+    if (score > bestScore) {
+      bestScore = score;
+      best = s;
+    }
+  }
+  return best;
+}
+
 async function mapPool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
   if (items.length === 0) return;
   let next = 0;
@@ -187,15 +236,29 @@ async function mapPool<T>(items: T[], concurrency: number, worker: (item: T) => 
  * The target session's onEnqueue callback will fire, enqueuing the reply
  * as a prompt into its message queue.
  */
-async function sendReplyToSession(session: SessionEntry | undefined, text: string): Promise<void> {
-  if (!session?.messagingSocketPath) return;
+async function sendReplyToSession(
+  session: SessionEntry | undefined,
+  text: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!session) {
+    return { ok: false, error: 'No session selected' };
+  }
+  if (!session.messagingSocketPath) {
+    const short = session.short ?? session.sessionId?.slice(0, 8) ?? '?';
+    return {
+      ok: false,
+      error: `Cannot reply to ${short}: no messaging socket (attach with Enter and type there)`,
+    };
+  }
   try {
     const { sendToUdsSocket } = await import('../utils/udsClient.js');
     await sendToUdsSocket(session.messagingSocketPath, text);
+    return { ok: true };
   } catch (e) {
-    // Best-effort — if UDS fails, the user can still attach and type directly
     const { logForDebugging } = await import('../utils/debug.js');
-    logForDebugging(`[agentView] reply failed: ${(e as Error).message}`);
+    const msg = (e as Error).message;
+    logForDebugging(`[agentView] reply failed: ${msg}`);
+    return { ok: false, error: `Reply failed: ${msg}` };
   }
 }
 
@@ -378,6 +441,11 @@ function AgentViewApp({
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
   const dispatchingRef = useRef(false);
   const lastRelaunchRef = useRef(0);
+  /** Monotonic refresh generation — stale async passes must not clobber newer results. */
+  const refreshGenerationRef = useRef(0);
+  /** When a refresh is in flight, a trailing refresh is scheduled after it settles. */
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
   const [commands, setCommands] = useState<Command[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
@@ -440,9 +508,18 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   const refresh = useCallback(async () => {
+    // Coalesce overlapping 3s ticks + manual refreshes: only one pass at a time,
+    // and a single trailing pass if another was requested while in flight.
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
+    const generation = ++refreshGenerationRef.current;
     try {
       // Official W1H: read job state files from ~/.claude/jobs/<short>/state.json
       const jobs = await listAllJobs();
+      if (generation !== refreshGenerationRef.current) return;
 
       // Convert to SessionEntry (no stale detection on load — matches official)
       let entries: SessionEntry[] = jobs.map(({ short, state: job }) => {
@@ -480,9 +557,9 @@ function AgentViewApp({
       });
 
       // Seed PR artifact fields from job children (official zhO / $hO).
-      // Then fetch reviewDecision for the first PR via gh (best-effort),
-      // rate-limited + concurrency-capped so multi-PR fleets don't spawn
-      // unbounded `gh` every 3s refresh.
+      // Probe ALL PR children for reviewDecision via gh (best-effort), then
+      // aggregate worst review state onto the row. Rate-limited + concurrency-
+      // capped so multi-PR fleets don't spawn unbounded `gh` every 3s refresh.
       try {
         const { execFileNoThrow } = await import('../utils/execFileNoThrow.js');
         type PrProbe = {
@@ -492,6 +569,8 @@ function AgentViewApp({
           cacheKey: string;
         };
         const probes: PrProbe[] = [];
+        /** Per-entry collected review states (cached + freshly probed). */
+        const entryReviewStates = new Map<SessionEntry, Array<SessionEntry['prReviewState'] | undefined>>();
         const now = Date.now();
         for (const entry of entries) {
           const job = jobs.find(j => j.state.sessionId === entry.sessionId);
@@ -500,24 +579,31 @@ function AgentViewApp({
           entry.prCount = children.length;
           const first = children[0]!;
           entry.prUrl = first.href;
-          const prMatch = /\/pull\/(\d+)/.exec(first.href);
-          if (prMatch) entry.prNumber = Number(prMatch[1]);
-          // Only probe first PR for review band (matches prior single-PR behavior).
-          if (!prMatch) continue;
-          const prNum = prMatch[1]!;
-          const repo = first.href.replace(/\/pull\/\d+.*$/, '').replace(/^https?:\/\/github\.com\//, '');
-          const cacheKey = prViewCacheKey(repo, prNum);
-          const cached = prViewCache.get(cacheKey);
-          if (cached && now - cached.at < PR_VIEW_INTERVAL_MS) {
-            // Reuse last successful / empty probe within the throttle window.
-            if (cached.prReviewState !== undefined) {
-              entry.prReviewState = cached.prReviewState;
+          const firstMatch = /\/pull\/(\d+)/.exec(first.href);
+          if (firstMatch) entry.prNumber = Number(firstMatch[1]);
+
+          const states: Array<SessionEntry['prReviewState'] | undefined> = [];
+          entryReviewStates.set(entry, states);
+
+          for (const child of children) {
+            const prMatch = /\/pull\/(\d+)/.exec(child.href ?? '');
+            if (!prMatch) continue;
+            const prNum = prMatch[1]!;
+            const repo = (child.href ?? '').replace(/\/pull\/\d+.*$/, '').replace(/^https?:\/\/github\.com\//, '');
+            const cacheKey = prViewCacheKey(repo, prNum);
+            const cached = prViewCache.get(cacheKey);
+            if (cached && now - cached.at < PR_VIEW_INTERVAL_MS) {
+              // Reuse last successful / empty probe within the throttle window.
+              if (cached.prReviewState !== undefined) {
+                states.push(cached.prReviewState);
+              }
+              continue;
             }
-            continue;
+            probes.push({ entry, prNum, repo, cacheKey });
           }
-          probes.push({ entry, prNum, repo, cacheKey });
         }
         await mapPool(probes, PR_VIEW_CONCURRENCY, async ({ entry, prNum, repo, cacheKey }) => {
+          if (generation !== refreshGenerationRef.current) return;
           try {
             const { stdout, code } = await execFileNoThrow(
               'gh',
@@ -539,15 +625,24 @@ function AgentViewApp({
                     : data.reviewDecision === 'CHANGES_REQUESTED'
                       ? 'changes_requested'
                       : 'pending';
-                entry.prReviewState = prReviewState;
               }
             }
-            prViewCache.set(cacheKey, { at: Date.now(), prReviewState });
+            prViewCacheSet(cacheKey, { at: Date.now(), prReviewState });
+            if (prReviewState !== undefined) {
+              const states = entryReviewStates.get(entry);
+              if (states) states.push(prReviewState);
+            }
           } catch {
             // Still stamp the cache so a failing gh does not thrash every 3s.
-            prViewCache.set(cacheKey, { at: Date.now() });
+            prViewCacheSet(cacheKey, { at: Date.now() });
           }
         });
+        if (generation !== refreshGenerationRef.current) return;
+        // Aggregate worst review state across all PRs for the fleet band.
+        for (const [entry, states] of entryReviewStates) {
+          const worst = worstPrReviewState(states);
+          if (worst !== undefined) entry.prReviewState = worst;
+        }
       } catch {
         // best-effort
       }
@@ -625,16 +720,34 @@ function AgentViewApp({
         entries = entries.filter(s => s.cwd?.replace(/\\/g, '/').toLowerCase().startsWith(normalized));
       }
 
+      // Drop stale results if a newer generation was started (or we were
+      // superseded while awaiting listAllJobs / gh probes).
+      if (generation !== refreshGenerationRef.current) return;
       setSessions(sortSessions(entries));
     } catch (e) {
-      setError((e as Error).message);
+      if (generation === refreshGenerationRef.current) {
+        setError((e as Error).message);
+      }
+    } finally {
+      refreshInFlightRef.current = false;
+      if (refreshQueuedRef.current) {
+        refreshQueuedRef.current = false;
+        // Trailing refresh after coalesced requests.
+        void refresh();
+      }
     }
   }, [cwdFilter, currentSessionId]);
 
   useEffect(() => {
     void refresh();
     const interval = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      // Invalidate any in-flight refresh so it cannot setState after unmount /
+      // after deps change that recreated `refresh`.
+      refreshGenerationRef.current += 1;
+      refreshQueuedRef.current = false;
+    };
   }, [refresh]);
 
   // Tab title: show awaiting-input count
@@ -966,9 +1079,18 @@ function AgentViewApp({
         return;
       }
       if (key.return && replyInput.trim()) {
-        void sendReplyToSession(selectedSession, replyInput.trim());
-        setReplyInput('');
-        setViewMode('list');
+        const text = replyInput.trim();
+        void (async () => {
+          const result = await sendReplyToSession(getSelectedSession(), text);
+          if (result.ok) {
+            setReplyInput('');
+            setError(null);
+            setViewMode('list');
+          } else {
+            // Keep reply draft so the user can retry or attach instead.
+            setError(result.error);
+          }
+        })();
         return;
       }
       if (key.backspace || key.delete) {
@@ -1078,7 +1200,7 @@ function AgentViewApp({
       setMouseSelectedIndex(null);
     } else if (key.rightArrow && sessions.length > 0) {
       // Right arrow: attach/resume the selected session
-      const session = selectedSession;
+      const session = getSelectedSession();
       if (session) {
         const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
         void checkAndAttach(short, session, onAction, setError);
@@ -1098,20 +1220,20 @@ function AgentViewApp({
         });
         return;
       }
-      const session = selectedSession;
+      const session = getSelectedSession();
       if (session) {
         const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
         void checkAndAttach(short, session, onAction, setError);
       }
     } else if (input === ' ' && sessions.length > 0) {
       // Space to reply (for blocked sessions)
-      const session = selectedSession;
+      const session = getSelectedSession();
       if (session && deriveBand(session) === 'blocked') {
         setViewMode('reply');
         setReplyInput('');
       }
     } else if (input === 'x' && key.ctrl && sessions.length > 0) {
-      const session = selectedSession;
+      const session = getSelectedSession();
       if (session && deleteConfirmSessionId === session.sessionId) {
         // Second press — actually delete
         setDeleteConfirmSessionId(null);

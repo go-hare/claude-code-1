@@ -85,6 +85,12 @@ type Props = {
   isItemClickable?: (msg: RenderableMessage) => boolean;
   /** Expanded items get a persistent grey bg (not just on hover). */
   isItemExpanded?: (msg: RenderableMessage) => boolean;
+  /**
+   * Bumped when a message's verbose/expand state flips (click-to-expand).
+   * Forces useVirtualScroll to drop stale heights + clear scrollHeightHwm so
+   * collapse does not leave a permanent blank under the summary line.
+   */
+  layoutEpoch?: number;
   /** PRE-LOWERED search text. Messages.tsx caches the lowered result
    *  once at warm time so setSearchQuery's per-keystroke loop does
    *  only indexOf (zero toLowerCase alloc). Falls back to a lowering
@@ -255,6 +261,7 @@ export function VirtualMessageList({
   onItemClick,
   isItemClickable,
   isItemExpanded,
+  layoutEpoch = 0,
   extractSearchText = defaultExtractSearchText,
   trackStickyPrompt,
   selectedIndex,
@@ -297,7 +304,7 @@ export function VirtualMessageList({
     getItemElement,
     getItemHeight,
     scrollToIndex,
-  } = useVirtualScroll(scrollRef, keys, columns);
+  } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch);
   const [start, end] = range;
 
   // Unmeasured (undefined height) falls through — assume visible.

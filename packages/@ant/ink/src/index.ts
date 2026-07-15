@@ -273,5 +273,13 @@ export { ProgressBar } from './theme/ProgressBar.js'
 export { Ratchet } from './theme/Ratchet.js'
 export { StatusIcon } from './theme/StatusIcon.js'
 export { Tabs, Tab, useTabsWidth, useTabHeaderFocus } from './theme/Tabs.js'
+// Single ModalContext instance — FullscreenLayout provides; Pane/Tabs consume.
+// Do not re-create this context in app code (double-divider bug).
+export {
+  ModalContext,
+  useIsInsideModal,
+  useModalOrTerminalSize,
+  useModalScrollRef,
+} from './theme/modalContext.js'
 export { Byline } from './theme/Byline.js'
 export { KeyboardShortcutHint } from './theme/KeyboardShortcutHint.js'

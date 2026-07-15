@@ -547,17 +547,23 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
     }
     // Apply auto mode: use AI classifier instead of prompting user
     // Check this BEFORE shouldAvoidPermissionPrompts so classifiers work in headless mode.
-    // Official snt(): chrome classifier floor can demote bypass → auto for MCP tools.
+    // Official snt(): chrome classifier floor / per-server overrides demote elevated
+    // modes. Only the *effective* mode may enter auto paths — OR-ing the raw
+    // global mode===auto would ignore server override `default` and auto-approve
+    // tools the user explicitly pinned to ask.
     const effectiveModeForAuto = getEffectivePermissionMode(
       tool,
       appState.toolPermissionContext,
     )
+    // Plan mode can act as auto when the auto-mode flag is active, but still
+    // must not override a per-server effective demotion to `default`.
+    const planActingAsAuto =
+      appState.toolPermissionContext.mode === 'plan' &&
+      (autoModeStateModule?.isAutoModeActive() ?? false) &&
+      effectiveModeForAuto !== 'default'
     if (
       feature('TRANSCRIPT_CLASSIFIER') &&
-      (effectiveModeForAuto === 'auto' ||
-        appState.toolPermissionContext.mode === 'auto' ||
-        (appState.toolPermissionContext.mode === 'plan' &&
-          (autoModeStateModule?.isAutoModeActive() ?? false)))
+      (effectiveModeForAuto === 'auto' || planActingAsAuto)
     ) {
       // Non-classifier-approvable safetyCheck decisions stay immune to ALL
       // auto-approve paths: the acceptEdits fast-path, the safe-tool allowlist,

@@ -191,7 +191,11 @@ export const ObserverReportTool = buildTool({
         })
       },
       enqueueAgent: (observedTaskId, value) => {
-        queuePendingMessage(observedTaskId, value, context.setAppState)
+        // Async observers get a no-op setAppState from forkedAgent
+        // (shareSetAppState: !isAsync). Root task queue writes must use
+        // setAppStateForTasks, same as query/autoDream/observer host.
+        const setAppState = context.setAppStateForTasks ?? context.setAppState
+        queuePendingMessage(observedTaskId, value, setAppState)
       },
     })
     return {

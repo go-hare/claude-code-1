@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   _resetTmuxControlModeProbeForTesting,
   isFullscreenEnvEnabled,
@@ -14,6 +14,14 @@ const ORIG = {
   USER_TYPE: process.env.USER_TYPE,
 }
 
+let settingsTui: string | undefined
+
+// Relative specifier matches fullscreen.ts dynamic require('./settings/settings.js').
+mock.module('../settings/settings.js', () => ({
+  getSettingsForSource: () =>
+    settingsTui === undefined ? {} : { tui: settingsTui },
+}))
+
 afterEach(() => {
   const restore = (k: string, v: string | undefined) => {
     if (v === undefined) delete process.env[k]
@@ -26,6 +34,7 @@ afterEach(() => {
   restore('TERM_PROGRAM', ORIG.TERM_PROGRAM)
   restore('TERM', ORIG.TERM)
   restore('USER_TYPE', ORIG.USER_TYPE)
+  settingsTui = undefined
   _resetTmuxControlModeProbeForTesting()
 })
 
@@ -53,5 +62,31 @@ describe('isFullscreenEnvEnabled', () => {
     delete process.env.CLAUDE_CODE_NO_FLICKER
     process.env.CLAUDE_CODE_SESSION_KIND = 'bg'
     expect(isFullscreenEnvEnabled()).toBe(true)
+  })
+
+  test('settings.tui=default forces off (absent env)', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    delete process.env.TMUX
+    settingsTui = 'default'
+    expect(isFullscreenEnvEnabled()).toBe(false)
+  })
+
+  test('settings.tui=fullscreen forces on (absent env)', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    // Force a path that would otherwise disable: tmux -CC.
+    process.env.TMUX = '/tmp/tmux-0/default,123,0'
+    process.env.TERM_PROGRAM = 'tmux'
+    settingsTui = 'fullscreen'
+    expect(isFullscreenEnvEnabled()).toBe(true)
+  })
+
+  test('NO_FLICKER=0 still wins over settings.tui=fullscreen', () => {
+    process.env.CLAUDE_CODE_NO_FLICKER = '0'
+    settingsTui = 'fullscreen'
+    expect(isFullscreenEnvEnabled()).toBe(false)
   })
 })

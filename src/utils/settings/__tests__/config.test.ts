@@ -101,6 +101,12 @@ describe('SettingsSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  test('accepts tui default/fullscreen (official settings.tui)', () => {
+    expect(SettingsSchema().safeParse({ tui: 'default' }).success).toBe(true)
+    expect(SettingsSchema().safeParse({ tui: 'fullscreen' }).success).toBe(true)
+    expect(SettingsSchema().safeParse({ tui: 'other' }).success).toBe(false)
+  })
+
   test('passes through unknown keys (passthrough mode)', () => {
     const result = SettingsSchema().safeParse({ unknownKey: 'value' })
     expect(result.success).toBe(true)

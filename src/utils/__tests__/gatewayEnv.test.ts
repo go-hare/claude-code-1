@@ -24,7 +24,9 @@ import {
   matchesGatewayTlsPin,
   normalizeGatewayTlsFingerprint,
   createGatewayTlsPinCheckServerIdentity,
+  createPinnedGatewayFetchDispatcher,
   createPinnedGatewayHttpsAgent,
+  isGatewayHttpLoopbackHost,
   probeGatewayTlsFingerprint,
   readGatewayTlsPin,
   resolveGatewayFromEnv,
@@ -203,6 +205,25 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       refresh_token: 'r2',
     })
     expect(parseGatewayIdpTokenResponse({ access_token: 'a' })).toBeNull()
+    // Zero / negative expires_in would thrash refresh (expiresAtMs <= now).
+    expect(
+      parseGatewayIdpTokenResponse({
+        access_token: 'a',
+        expires_in: 0,
+      }),
+    ).toBeNull()
+    expect(
+      parseGatewayIdpTokenResponse({
+        access_token: 'a',
+        expires_in: -1,
+      }),
+    ).toBeNull()
+    expect(
+      parseGatewayIdpTokenResponse({
+        access_token: 'a',
+        expires_in: Number.NaN,
+      }),
+    ).toBeNull()
 
     const base = {
       url: 'https://gw.example',
@@ -1003,6 +1024,64 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     }
   })
 
+  test('invalid_grant on store path sets secure-storage miss TTL (no thrash)', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 3_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
+
+    let reads = 0
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return {
+        enterpriseGateway: {
+          url: 'https://gw.example',
+          jwt: 'dead-jwt',
+          expiresAtMs: now - 1,
+          idpRefreshToken: 'rejected-refresh',
+          tokenEndpoint: 'https://idp.example/token',
+        },
+        gatewayTrust: { 'gw.example': 'pin' },
+      }
+    })
+
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true }).status).toBe(
+      'restored',
+    )
+    expect(reads).toBe(1)
+
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      throw {
+        isAxiosError: true,
+        response: { data: { error: 'invalid_grant' } },
+      }
+    })
+    try {
+      const result = await maybeRefreshGatewayIdp({ nowMs: now })
+      expect(result).toEqual({
+        status: 'invalid_grant',
+        clearedRefresh: true,
+      })
+      // Permanent skip cleared + miss TTL — must not re-load rejected token.
+      expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+        status: 'skipped',
+        reason: 'miss_ttl',
+      })
+      expect(reads).toBe(1)
+
+      now += GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+      // After miss TTL, storage may be re-read (external re-login path).
+      const afterTtl = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+      expect(afterTtl.status).toBe('restored')
+      expect(reads).toBe(2)
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
+  })
+
   test('IdP success / invalid_grant clear transient re-read schedule', async () => {
     clearGatewayAuth()
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
@@ -1178,9 +1257,18 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
   })
 
   test('VPr / B_c TLS probe densables', async () => {
-    expect(planGatewayTlsProbe('http://gw.example')).toEqual({
+    expect(isGatewayHttpLoopbackHost('localhost')).toBe(true)
+    expect(isGatewayHttpLoopbackHost('evil.example')).toBe(false)
+    // Remote http:// must not inherit loopback sentinel (would skip pin).
+    expect(planGatewayTlsProbe('http://gw.example').status).toBe('invalid_url')
+    expect(planGatewayTlsProbe('http://127.0.0.1:8080')).toEqual({
       status: 'http_loopback',
-      hostname: 'gw.example',
+      hostname: '127.0.0.1',
+      fingerprint: GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
+    })
+    expect(planGatewayTlsProbe('http://localhost')).toEqual({
+      status: 'http_loopback',
+      hostname: 'localhost',
       fingerprint: GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
     })
     expect(planGatewayTlsProbe('https://gw.example:8443/v1')).toEqual({
@@ -1189,6 +1277,29 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       host: 'gw.example',
       port: 8443,
     })
+    // Env-unpinned session → no live pin dispatcher.
+    expect(
+      createPinnedGatewayFetchDispatcher({
+        url: 'https://gw.example',
+        jwt: 'j',
+        expiresAtMs: Date.now() + 60_000,
+        unpinned: true,
+      }),
+    ).toBeUndefined()
+    // Pinned session with storage pin → undici Agent dispatcher.
+    const pinned = createPinnedGatewayFetchDispatcher(
+      {
+        url: 'https://gw.example',
+        jwt: 'j',
+        expiresAtMs: Date.now() + 60_000,
+      },
+      {
+        readStorage: () => ({
+          gatewayTrust: { 'gw.example': 'aabbcc' },
+        }),
+      },
+    )
+    expect(pinned).toBeDefined()
     expect(
       (await probeGatewayTlsFingerprint('http://localhost')).fingerprint,
     ).toBe(GATEWAY_HTTP_LOOPBACK_FINGERPRINT)

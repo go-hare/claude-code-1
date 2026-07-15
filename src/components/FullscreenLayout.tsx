@@ -384,10 +384,11 @@ export function FullscreenLayout({
                 <NewMessagesPill
                   count={newMessageCount}
                   onClick={() => {
-                    // Collapse sticky chrome before scrollToBottom remounts the
-                    // tail — otherwise the 1-row header + padCollapsed lag one
-                    // frame and the jump paints as empty white under the header.
-                    setStickyPrompt(null);
+                    // 'clicked' (not null): keep padCollapsed so sticky header
+                    // height + top padding drop immediately. null alone would
+                    // briefly restore paddingTop=1 under the header and paint a
+                    // white gap while scrollToBottom remounts the tail.
+                    setStickyPrompt('clicked');
                     onPillClick?.();
                   }}
                 />

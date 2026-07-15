@@ -59,6 +59,45 @@ describe('wrapReadableStreamWithBodyIdleTimeout', () => {
     })
     expect(wrapReadableStreamWithBodyIdleTimeout(source, 0)).toBe(source)
   })
+
+  test('pull-driven: consumer reads advance stream one chunk at a time', async () => {
+    // Backpressure: wrap uses pull() not an eager start()+async drain loop.
+    // Bun may prefill highWaterMark (often 1), so we assert consumer-driven
+    // progress rather than zero upstream activity before the first read.
+    let upstreamEnqueues = 0
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (upstreamEnqueues >= 5) {
+          controller.close()
+          return
+        }
+        upstreamEnqueues++
+        controller.enqueue(new TextEncoder().encode(`c${upstreamEnqueues}`))
+      },
+    })
+    const wrapped = wrapReadableStreamWithBodyIdleTimeout(source, 5_000)
+    const reader = wrapped.getReader()
+
+    const first = await reader.read()
+    expect(first.done).toBe(false)
+    expect(new TextDecoder().decode(first.value)).toMatch(/^c\d+$/)
+    const afterFirst = upstreamEnqueues
+    // Must not have drained the whole source after a single consumer read.
+    expect(afterFirst).toBeLessThan(5)
+
+    const second = await reader.read()
+    expect(second.done).toBe(false)
+    expect(upstreamEnqueues).toBeGreaterThanOrEqual(afterFirst)
+    // Still not fully drained after two reads (source has 5 chunks).
+    expect(upstreamEnqueues).toBeLessThan(5)
+
+    // Drain rest
+    while (true) {
+      const { done } = await reader.read()
+      if (done) break
+    }
+    expect(upstreamEnqueues).toBe(5)
+  })
 })
 
 describe('rewrapResponseWithBody', () => {

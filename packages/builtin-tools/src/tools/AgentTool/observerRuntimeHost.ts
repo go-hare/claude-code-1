@@ -25,10 +25,19 @@ import type {
   ObserverRuntimeHost,
 } from 'src/utils/observerAgents.js'
 import { getParentSessionId } from 'src/utils/teammate.js'
+import { OBSERVER_REPORT_TOOL_NAME } from '../ObserverReportTool/constants.js'
 import { runAsyncAgentLifecycle } from './agentToolUtils.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 import { isBuiltInAgent } from './loadAgentsDir.js'
 import { runAgent } from './runAgent.js'
+
+/** Fallback tool allowlist when no observer agent definition is registered. */
+const OBSERVER_FALLBACK_TOOLS = [
+  'Read',
+  'Grep',
+  'Glob',
+  OBSERVER_REPORT_TOOL_NAME,
+] as const
 
 export type AgentObserverRuntimeHostDeps = {
   /**
@@ -126,13 +135,18 @@ export function createAgentObserverRuntimeHostHandlers(
         ({
           agentType: plan.observerAgentType,
           whenToUse: `Observer for ${pairing.observedEnvelopeName}`,
-          tools: ['*'],
+          // Never fall back to tools:* + acceptEdits — observer reads the
+          // observed transcript and reports via ObserverReport only. Prompt
+          // injection in observed output must not unlock Shell/Edit/MCP.
+          tools: [...OBSERVER_FALLBACK_TOOLS],
           source: 'built-in',
           baseDir: 'built-in',
           model: 'inherit',
-          permissionMode: 'acceptEdits',
+          permissionMode: 'default',
           getSystemPrompt: () =>
-            `You are the ${plan.observerAgentType} observer agent.`,
+            `You are the ${plan.observerAgentType} observer agent. ` +
+            'You may only read context and deliver findings with ObserverReport. ' +
+            'Do not edit files, run shell commands, or call MCP tools.',
         } satisfies AgentDefinition)
 
       const observerAppState = armCtx.getAppState()

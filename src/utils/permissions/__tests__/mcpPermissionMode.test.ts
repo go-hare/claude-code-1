@@ -34,6 +34,18 @@ describe('getEffectivePermissionMode (snt)', () => {
     ).toBe('default')
   })
 
+  test('server override default under global auto is effective default (snt)', () => {
+    // permissions.ts auto-branch must use effectiveMode only — not OR global
+    // mode===auto — so this demotion is not ignored.
+    const tool = { mcpInfo: { serverName: 'acme' } }
+    expect(
+      getEffectivePermissionMode(tool, {
+        mode: 'auto',
+        mcpPermissionModeOverrides: { acme: 'default' },
+      }),
+    ).toBe('default')
+  })
+
   test('chrome classifier floor demotes elevated mode', () => {
     const tool = { mcpInfo: { serverName: 'claude-in-chrome' } }
     expect(

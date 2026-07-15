@@ -44,8 +44,22 @@ function keyFromParsed(parsed: ParsedKey): string {
     if (code >= 0x20 && code !== 0x7f) return seq
   }
 
-  // Special keys (arrows, F-keys, return, tab, escape, etc.): sequence is
-  // either an escape sequence (\x1b[B) or a control byte (\r, \t), so use
-  // the parsed name. Browsers report e.key === 'ArrowDown'.
-  return name || seq
+  // Named special keys (arrows, F-keys, return, tab, escape, wheel*, etc.).
+  // Prefer name over raw sequence — browsers report e.key === 'ArrowDown'.
+  if (name) {
+    if (parsed.shift && name.length === 1 && name >= 'a' && name <= 'z') {
+      return name.toUpperCase()
+    }
+    return name
+  }
+
+  // Official 2.1.153 $z5: swallow ESC-less SGR mouse fragments that escaped
+  // the parser as nameless keys. Single orphan: `[<65;11;10M`. Fast-scroll
+  // burst after a heavy-render ESC flush: `[<65;11;10M[<65;11;10M...`.
+  // Without this, return name||seq would type the garbage into the prompt
+  // via onKeyDown paths that insert e.key when length > 1 was not checked.
+  if (seq.charCodeAt(0) === 0x1b) return ''
+  if (/^(\[<\d[\d;]*[Mm]?)+$/.test(seq)) return ''
+
+  return seq
 }

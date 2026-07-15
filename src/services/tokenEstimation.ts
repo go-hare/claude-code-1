@@ -377,12 +377,19 @@ export async function countTokensViaHaikuFallback(
   return inputTokens + cacheCreationTokens + cacheReadTokens
 }
 
+/**
+ * Structural message shape for rough estimation. Attachment is intentionally
+ * wider than `Attachment` so `Message` / renderable attachment stubs (index
+ * signatures + partial fields) can be passed without double-casts at call sites.
+ */
+type RoughTokenMessage = {
+  type: string
+  message?: { content?: unknown }
+  attachment?: { type: string; [key: string]: unknown }
+}
+
 export function roughTokenCountEstimationForMessages(
-  messages: readonly {
-    type: string
-    message?: { content?: unknown }
-    attachment?: Attachment
-  }[],
+  messages: readonly RoughTokenMessage[],
 ): number {
   let totalTokens = 0
   for (const message of messages) {
@@ -391,11 +398,9 @@ export function roughTokenCountEstimationForMessages(
   return totalTokens
 }
 
-export function roughTokenCountEstimationForMessage(message: {
-  type: string
-  message?: { content?: unknown }
-  attachment?: Attachment
-}): number {
+export function roughTokenCountEstimationForMessage(
+  message: RoughTokenMessage,
+): number {
   if (
     (message.type === 'assistant' || message.type === 'user') &&
     message.message?.content
@@ -410,7 +415,9 @@ export function roughTokenCountEstimationForMessage(message: {
   }
 
   if (message.type === 'attachment' && message.attachment) {
-    const userMessages = normalizeAttachmentForAPI(message.attachment)
+    const userMessages = normalizeAttachmentForAPI(
+      message.attachment as Attachment,
+    )
     let total = 0
     for (const userMsg of userMessages) {
       total += roughTokenCountEstimationForContent(userMsg.message.content)

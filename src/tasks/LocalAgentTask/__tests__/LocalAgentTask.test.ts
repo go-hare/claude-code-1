@@ -125,6 +125,7 @@ const {
   rebuildProgressFromMessages,
   getTokenCountFromTracker,
   getProgressUpdate,
+  estimateContentTokensCached,
   completeAgentTask,
   failAgentTask,
   killAsyncAgent,
@@ -569,6 +570,51 @@ describe('getProgressUpdate', () => {
     expect(getTokenCountFromTracker(tracker)).toBe(0)
     const progress = getProgressUpdate(tracker, [msg])
     expect(progress.tokenCount).toBeGreaterThan(0)
+  })
+
+  test('takes max(usage, contentEstimate) after non-zero usage', () => {
+    // First response has small usage; later content is large with zero usage.
+    // Footer must keep growing (not freeze on the early usage total).
+    const tracker = createProgressTracker()
+    const early = makeAssistantMessage(
+      { input_tokens: 100, output_tokens: 50 },
+      [{ type: 'text', text: 'short' }],
+    )
+    const late = makeAssistantMessage({ input_tokens: 0, output_tokens: 0 }, [
+      {
+        type: 'text',
+        text: 'y'.repeat(8000), // >> 150 tokens at rough estimate
+      },
+    ])
+    rebuildProgressFromMessages(tracker, [early, late])
+    const usageOnly = getTokenCountFromTracker(tracker)
+    expect(usageOnly).toBeGreaterThan(0)
+    const progress = getProgressUpdate(tracker, [early, late])
+    expect(progress.tokenCount).toBeGreaterThan(usageOnly)
+  })
+
+  test('content estimate cache reuses stable prefix across ticks', () => {
+    const tracker = createProgressTracker()
+    const prefix = makeAssistantMessage({ input_tokens: 0, output_tokens: 0 }, [
+      { type: 'text', text: 'a'.repeat(400) },
+    ])
+    const first = estimateContentTokensCached(tracker, [prefix])
+    expect(first).toBeGreaterThan(0)
+    // Same object + same contentLen → cache hit (same total).
+    const second = estimateContentTokensCached(tracker, [prefix])
+    expect(second).toBe(first)
+    // Grow tail with a new message — total must increase; prefix still cached.
+    const tail = makeAssistantMessage({ input_tokens: 0, output_tokens: 0 }, [
+      { type: 'text', text: 'b'.repeat(400) },
+    ])
+    const third = estimateContentTokensCached(tracker, [prefix, tail])
+    expect(third).toBeGreaterThan(first)
+    // Mutate content in place — contentLen changes → re-estimate.
+    ;(
+      prefix.message!.content as Array<{ type: string; text: string }>
+    )[0]!.text = 'c'.repeat(2000)
+    const fourth = estimateContentTokensCached(tracker, [prefix, tail])
+    expect(fourth).toBeGreaterThan(third)
   })
 })
 
