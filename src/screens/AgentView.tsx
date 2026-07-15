@@ -36,6 +36,11 @@ import {
   doneCapForRows,
   parseDispatch,
   parsePrRef,
+  buildStateModeFlatRows,
+  buildDirectoryModeFlatRows,
+  FLEET_STATE_GROUP_LABELS,
+  type FleetFlatRow,
+  type FleetStateGroup,
   type StatusBand,
 } from './fleetView/helpers.js';
 import { isFleetPastSessionsEnabled } from '../utils/permissions/autoModeFlags.js';
@@ -276,6 +281,8 @@ function AgentViewApp({
   const [renameValue, setRenameValue] = useState('');
   // Per-group fold state
   const [foldedGroups, setFoldedGroups] = useState<Set<string>>(() => new Set());
+  /** When true, show all completed rows (past doneCap fold). */
+  const [doneCapExpanded, setDoneCapExpanded] = useState(false);
   const [groupMode, setGroupMode] = useState<'state' | 'directory'>('state');
   const [replyInput, setReplyInput] = useState('');
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
@@ -553,40 +560,68 @@ function AgentViewApp({
   const active = unpinned.filter(s => deriveBand(s) === 'active');
   const done = unpinned.filter(s => deriveBand(s) === 'completed');
   const doneCap = doneCapForRows(process.stdout.rows || 54);
-  const visibleDone = done;
-  const hiddenDoneCount = 0;
 
-  // Flat row list: headers are selectable (official behavior)
-  type RowItem =
-    | { kind: 'header'; group: string }
-    | { kind: 'job'; session: SessionEntry }
-    | { kind: 'fold'; hidden: number };
-  const flatRows: RowItem[] = React.useMemo(() => {
-    const rows: RowItem[] = [];
-    if (active.length > 0) {
-      rows.push({ kind: 'header', group: 'working' });
-      if (!foldedGroups.has('working')) {
-        for (const s of active) rows.push({ kind: 'job', session: s });
-      }
+  // Directory groups (current CWD first) — used for directory-mode flat rows.
+  const cwdGroups = React.useMemo(() => {
+    if (groupMode !== 'directory') return null;
+    const groups = new Map<string, SessionEntry[]>();
+    const currentCwd = getCwd();
+    for (const s of sessions) {
+      const cwd = s.cwd || currentCwd;
+      if (!groups.has(cwd)) groups.set(cwd, []);
+      groups.get(cwd)!.push(s);
     }
-    if (blocked.length > 0) {
-      rows.push({ kind: 'header', group: 'blocked' });
-      if (!foldedGroups.has('blocked')) {
-        for (const s of blocked) rows.push({ kind: 'job', session: s });
-      }
-    }
-    if (done.length > 0) {
-      rows.push({ kind: 'header', group: 'done' });
-      if (!foldedGroups.has('done')) {
-        for (const s of done) rows.push({ kind: 'job', session: s });
-      }
-    }
-    return rows;
-  }, [active, blocked, done, foldedGroups]);
+    return [...groups.entries()].sort(([a], [b]) => {
+      if (a === currentCwd) return -1;
+      if (b === currentCwd) return 1;
+      return a.localeCompare(b);
+    });
+  }, [sessions, groupMode]);
 
-  const currentRow = flatRows[selectedIndex] as RowItem | undefined;
+  // Flat row list: headers selectable; official state order + doneCap fold.
+  const flatRows: FleetFlatRow[] = React.useMemo(() => {
+    if (groupMode === 'directory' && cwdGroups) {
+      return buildDirectoryModeFlatRows({ groups: cwdGroups, foldedGroups });
+    }
+    return buildStateModeFlatRows({
+      pinned,
+      review,
+      blocked,
+      working: active,
+      done,
+      foldedGroups,
+      doneCap,
+      doneCapExpanded,
+    });
+  }, [groupMode, cwdGroups, pinned, review, blocked, active, done, foldedGroups, doneCap, doneCapExpanded]);
+
+  const currentRow = flatRows[selectedIndex] as FleetFlatRow | undefined;
   const selectedSession = currentRow?.kind === 'job' ? currentRow.session : undefined;
   const cwdDisplay = selectedSession?.cwd || getCwd();
+
+  const groupSessionCount = (group: string): number => {
+    if (group === 'pinned') return pinned.length;
+    if (group === 'review') return review.length;
+    if (group === 'blocked') return blocked.length;
+    if (group === 'working') return active.length;
+    if (group === 'done') return done.length;
+    if (group.startsWith('dir:')) {
+      const cwd = group.slice(4);
+      return cwdGroups?.find(([c]) => c === cwd)?.[1].length ?? 0;
+    }
+    return 0;
+  };
+
+  const groupHeaderLabel = (group: string): string => {
+    if (group in FLEET_STATE_GROUP_LABELS) {
+      return FLEET_STATE_GROUP_LABELS[group as FleetStateGroup];
+    }
+    if (group.startsWith('dir:')) {
+      const cwd = group.slice(4);
+      return cwd.replace(process.env.HOME ?? '', '~');
+    }
+    return group;
+  };
 
   // Compute label column width (max name length across all sessions)
   const labelWidth = Math.max(
@@ -873,11 +908,8 @@ function AgentViewApp({
       }
     } else if (key.return && flatRows.length > 0) {
       if (currentRow?.kind === 'fold') {
-        setFoldedGroups(s => {
-          const n = new Set(s);
-          n.delete('done');
-          return n;
-        });
+        // Official fold expand: show all completed rows past doneCap.
+        setDoneCapExpanded(true);
         return;
       }
       if (currentRow?.kind === 'header') {
@@ -917,6 +949,8 @@ function AgentViewApp({
       handleRenameStart();
     } else if (input === 's' && key.ctrl) {
       setGroupMode(m => (m === 'state' ? 'directory' : 'state'));
+      setDoneCapExpanded(false);
+      setSelectedIndex(0);
     } else if (input === 'f') {
       setFoldedGroups(s => {
         const n = new Set(s);
@@ -924,6 +958,8 @@ function AgentViewApp({
         else n.add('done');
         return n;
       });
+      // Collapsing done resets doneCap expand so re-open still folds.
+      setDoneCapExpanded(false);
     } else if (input === 'q' || key.escape) {
       process.exit(0);
     } else if (input && !key.ctrl && !key.meta && input !== 'q' && input !== 'f') {
@@ -935,53 +971,8 @@ function AgentViewApp({
   });
 
   // -------------------------------------------------------------------------
-  // Directory grouping
-  // -------------------------------------------------------------------------
-
-  const cwdGroups = React.useMemo(() => {
-    if (groupMode !== 'directory') return null;
-    const groups = new Map<string, SessionEntry[]>();
-    const currentCwd = getCwd();
-    for (const s of sessions) {
-      const cwd = s.cwd || currentCwd;
-      if (!groups.has(cwd)) groups.set(cwd, []);
-      groups.get(cwd)!.push(s);
-    }
-    // Sort: current CWD first, then alphabetical
-    const sorted = [...groups.entries()].sort(([a], [b]) => {
-      if (a === currentCwd) return -1;
-      if (b === currentCwd) return 1;
-      return a.localeCompare(b);
-    });
-    return sorted;
-  }, [sessions, groupMode]);
-
-  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
-
-  const renderSessionRow = (session: SessionEntry) => {
-    const index = flatRows.findIndex(r => r.kind === 'job' && r.session === session);
-    return (
-      <SessionRow
-        key={`${session.sessionId}-${session.pid}`}
-        session={session}
-        isSelected={focusArea === 'list' && index === selectedIndex}
-        isRenaming={viewMode === 'rename' && index === selectedIndex}
-        isDeletePending={deleteConfirmSessionId === session.sessionId}
-        renameValue={renameValue}
-        labelWidth={labelWidth}
-        onSelect={() => {
-          setFocusArea('list');
-          setSelectedIndex(index);
-        }}
-        onOpen={() => {
-          const short = session.sessionId?.slice(0, 8) ?? '';
-          void checkAndAttach(short, session, onAction, setError);
-        }}
-      />
-    );
-  };
 
   return (
     <AlternateScreen
@@ -1008,9 +999,15 @@ function AgentViewApp({
               </Text>
               <Text dimColor>{[modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}</Text>
               <Text dimColor>
-                {blocked.length} awaiting input {'\u00b7'}{' '}
-                {review.length > 0 ? `${review.length} in review \u00b7 ` : ''}
-                {active.length} working {'\u00b7'} {done.length} completed
+                {[
+                  pinned.length > 0 ? `${pinned.length} pinned` : null,
+                  `${blocked.length} awaiting input`,
+                  review.length > 0 ? `${review.length} ready for review` : null,
+                  `${active.length} working`,
+                  `${done.length} completed`,
+                ]
+                  .filter(Boolean)
+                  .join(' \u00b7 ')}
               </Text>
             </Box>
           </Box>
@@ -1030,102 +1027,100 @@ function AgentViewApp({
             </Box>
           )}
 
-          {/* Session list — state grouping mode */}
-          {groupMode === 'state' && (
-            <Box flexDirection="column" paddingLeft={1}>
-              {flatRows.map((row, idx) => {
-                const isRowSelected = focusArea === 'list' && idx === selectedIndex;
-                if (row.kind === 'header') {
-                  const groupLabels: Record<string, string> = {
-                    working: 'Working',
-                    blocked: 'Needs input',
-                    done: 'Completed',
-                  };
-                  const label = groupLabels[row.group] ?? row.group;
-                  const isFirst = idx === 0;
-                  const isFolded = foldedGroups.has(row.group);
-                  const count =
-                    row.group === 'done' ? done.length : row.group === 'working' ? active.length : blocked.length;
-                  return (
-                    <Box
-                      key={`h:${row.group}`}
-                      marginTop={isFirst ? 0 : 1}
-                      backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
-                      onMouseEnter={() => {
-                        setFocusArea('list');
-                        setSelectedIndex(idx);
-                      }}
-                      onClick={() => {
-                        setSelectedIndex(idx);
-                        setFoldedGroups(s => {
-                          const n = new Set(s);
-                          if (n.has(row.group)) n.delete(row.group);
-                          else n.add(row.group);
-                          return n;
-                        });
-                      }}
-                    >
-                      <Text
-                        bold={isRowSelected}
-                        dimColor={!isRowSelected}
-                        color={
-                          row.group === 'blocked'
-                            ? ('warning' as never)
+          {/* Session list — flat rows (state: pinned/review/blocked/working/done; directory: cwd headers) */}
+          <Box flexDirection="column" paddingLeft={1}>
+            {flatRows.map((row, idx) => {
+              const isRowSelected = focusArea === 'list' && idx === selectedIndex;
+              if (row.kind === 'header') {
+                const label = groupHeaderLabel(row.group);
+                const isFirst = idx === 0;
+                const isFolded = foldedGroups.has(row.group);
+                const count = groupSessionCount(row.group);
+                // marginTop only between groups (skip if previous row was same group's job — headers always start group)
+                return (
+                  <Box
+                    key={`h:${row.group}`}
+                    marginTop={isFirst ? 0 : 1}
+                    backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
+                    onMouseEnter={() => {
+                      setFocusArea('list');
+                      setSelectedIndex(idx);
+                    }}
+                    onClick={() => {
+                      setSelectedIndex(idx);
+                      setFoldedGroups(s => {
+                        const n = new Set(s);
+                        if (n.has(row.group)) n.delete(row.group);
+                        else n.add(row.group);
+                        return n;
+                      });
+                    }}
+                  >
+                    <Text
+                      bold={isRowSelected}
+                      dimColor={!isRowSelected}
+                      color={
+                        row.group === 'blocked'
+                          ? ('warning' as never)
+                          : row.group === 'review'
+                            ? ('success' as never)
                             : row.group === 'done' && done.some(s => deriveActivity(s) === 'failure')
                               ? ('error' as never)
                               : undefined
-                        }
-                      >
-                        {label}
-                        {isFolded ? ` ${count}` : ''}
-                        {row.group === 'done' && isFleetPastSessionsEnabled() && count === 0
-                          ? ' · looking for past sessions…'
-                          : ''}
-                      </Text>
-                    </Box>
-                  );
-                }
-                if (row.kind === 'fold') {
-                  return (
-                    <Box
-                      key="fold"
-                      paddingLeft={2}
-                      backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
-                      onMouseEnter={() => {
-                        setFocusArea('list');
-                        setSelectedIndex(idx);
-                      }}
-                      onClick={() => {
-                        setSelectedIndex(idx);
-                        setFoldedGroups(s => {
-                          const n = new Set(s);
-                          n.delete('done');
-                          return n;
-                        });
-                      }}
+                      }
                     >
-                      <Text dimColor={!isRowSelected} bold={isRowSelected}>
-                        {'\u2026'} {row.hidden} more
-                      </Text>
-                    </Box>
-                  );
-                }
-                return renderSessionRow(row.session);
-              })}
-            </Box>
-          )}
-
-          {/* Session list — directory grouping mode */}
-          {groupMode === 'directory' && cwdGroups && (
-            <Box flexDirection="column" paddingLeft={1}>
-              {cwdGroups.map(([cwd, groupSessions], gi) => (
-                <Box key={cwd} flexDirection="column" marginTop={gi > 0 ? 1 : 0}>
-                  <Text dimColor>{cwd.replace(process.env.HOME ?? '', '~')}</Text>
-                  {groupSessions.map(renderSessionRow)}
-                </Box>
-              ))}
-            </Box>
-          )}
+                      {label}
+                      {isFolded ? ` ${count}` : ''}
+                      {row.group === 'done' && isFleetPastSessionsEnabled() && count === 0
+                        ? ' · looking for past sessions…'
+                        : ''}
+                    </Text>
+                  </Box>
+                );
+              }
+              if (row.kind === 'fold') {
+                return (
+                  <Box
+                    key={`fold:${row.group}`}
+                    paddingLeft={2}
+                    backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
+                    onMouseEnter={() => {
+                      setFocusArea('list');
+                      setSelectedIndex(idx);
+                    }}
+                    onClick={() => {
+                      setSelectedIndex(idx);
+                      setDoneCapExpanded(true);
+                    }}
+                  >
+                    <Text dimColor={!isRowSelected} bold={isRowSelected}>
+                      {'\u2026'} {row.hidden} more
+                    </Text>
+                  </Box>
+                );
+              }
+              const session = row.session;
+              return (
+                <SessionRow
+                  key={`${session.sessionId}-${session.pid}`}
+                  session={session}
+                  isSelected={isRowSelected}
+                  isRenaming={viewMode === 'rename' && isRowSelected}
+                  isDeletePending={deleteConfirmSessionId === session.sessionId}
+                  renameValue={renameValue}
+                  labelWidth={labelWidth}
+                  onSelect={() => {
+                    setFocusArea('list');
+                    setSelectedIndex(idx);
+                  }}
+                  onOpen={() => {
+                    const short = session.sessionId?.slice(0, 8) ?? '';
+                    void checkAndAttach(short, session, onAction, setError);
+                  }}
+                />
+              );
+            })}
+          </Box>
         </Box>
 
         {/* Bottom: fixed input area */}

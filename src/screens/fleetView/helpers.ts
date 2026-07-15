@@ -254,20 +254,18 @@ export function isSelfDriving(session: SessionEntry): boolean {
 /**
  * Pick the status icon for a session row.
  * Official: kj4
- * - Success (done) → ✻ (asterisk, green)
- * - Failed/stopped → ∙ (dot, dim)
- * - Working/blocked → ✻ (asterisk)
+ * - Terminal (completed/failed/stopped) → ∙ (bullet)
+ * - Working / blocked / review → ✻ (asterisk; color via glyphColor)
  */
 export function pickIcon(
   band: StatusBand,
-  activity: Activity,
-  pinned?: boolean,
+  _activity: Activity,
+  _pinned?: boolean,
 ): string {
   if (band === 'completed') {
-    if (activity === 'success') return '\u273B' // ✻ for done (green)
-    return '\u2219' // ∙ for failed/stopped
+    return '\u2219' // ∙ terminal
   }
-  return '\u273B' // ✻ for working/blocked
+  return '\u273B' // ✻ non-terminal
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +278,108 @@ export function pickIcon(
  */
 export function doneCapForRows(totalRows: number): number {
   return Math.max(Math.floor(totalRows / 5), 2)
+}
+
+// ---------------------------------------------------------------------------
+// Flat row list (state grouping — official cw4 order)
+// ---------------------------------------------------------------------------
+
+/** Official group order after pinned: review → blocked → working → done. */
+export const FLEET_STATE_GROUP_ORDER = [
+  'pinned',
+  'review',
+  'blocked',
+  'working',
+  'done',
+] as const
+
+export type FleetStateGroup = (typeof FLEET_STATE_GROUP_ORDER)[number]
+
+/** Official lw4 group labels. */
+export const FLEET_STATE_GROUP_LABELS: Record<FleetStateGroup, string> = {
+  pinned: 'Pinned',
+  review: 'Ready for review',
+  blocked: 'Needs input',
+  working: 'Working',
+  done: 'Completed',
+}
+
+export type FleetFlatRow =
+  | { kind: 'header'; group: string }
+  | { kind: 'job'; session: SessionEntry }
+  | { kind: 'fold'; group: string; hidden: number }
+
+/**
+ * Build selectable flat rows for state-mode FleetView.
+ * - Headers always selectable; Enter toggles fold via foldedGroups.
+ * - Done group applies doneCap unless doneCapExpanded (fold row expands).
+ */
+export function buildStateModeFlatRows(input: {
+  pinned: SessionEntry[]
+  review: SessionEntry[]
+  blocked: SessionEntry[]
+  working: SessionEntry[]
+  done: SessionEntry[]
+  foldedGroups: ReadonlySet<string>
+  doneCap: number
+  doneCapExpanded: boolean
+}): FleetFlatRow[] {
+  const rows: FleetFlatRow[] = []
+  const byGroup: Record<FleetStateGroup, SessionEntry[]> = {
+    pinned: input.pinned,
+    review: input.review,
+    blocked: input.blocked,
+    working: input.working,
+    done: input.done,
+  }
+
+  for (const group of FLEET_STATE_GROUP_ORDER) {
+    const items = byGroup[group]
+    if (items.length === 0) continue
+    rows.push({ kind: 'header', group })
+    if (input.foldedGroups.has(group)) continue
+
+    if (
+      group === 'done' &&
+      !input.doneCapExpanded &&
+      input.doneCap > 0 &&
+      items.length > input.doneCap
+    ) {
+      for (const session of items.slice(0, input.doneCap)) {
+        rows.push({ kind: 'job', session })
+      }
+      rows.push({
+        kind: 'fold',
+        group: 'done',
+        hidden: items.length - input.doneCap,
+      })
+    } else {
+      for (const session of items) {
+        rows.push({ kind: 'job', session })
+      }
+    }
+  }
+  return rows
+}
+
+/**
+ * Directory mode: selectable cwd headers + jobs (current cwd first).
+ */
+export function buildDirectoryModeFlatRows(input: {
+  groups: Array<[string, SessionEntry[]]>
+  foldedGroups: ReadonlySet<string>
+}): FleetFlatRow[] {
+  const rows: FleetFlatRow[] = []
+  for (const [cwd, items] of input.groups) {
+    if (items.length === 0) continue
+    const group = `dir:${cwd}`
+    rows.push({ kind: 'header', group })
+    if (input.foldedGroups.has(group)) continue
+    for (const session of items) {
+      rows.push({ kind: 'job', session })
+    }
+  }
+  return rows
 }
 
 // ---------------------------------------------------------------------------
