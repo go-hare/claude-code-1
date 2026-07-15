@@ -427,6 +427,7 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_chair_sermon: true, // Message smooshing (merge adjacent blocks)
   tengu_lodestone_enabled: true, // Deep link protocol (claude://)
   tengu_auto_background_agents: true, // Auto-background agents after 120s
+  tengu_fleet_needs_input_nudge: true, // Footer "← N agent(s)" when fleet jobs need input
   tengu_fgts: true, // Fine-grained tool state in system prompt
 
   // ── P1: API-dependent features ───────────────────────────────────

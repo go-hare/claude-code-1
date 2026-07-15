@@ -45,6 +45,13 @@ import { isXtermJs, useHasSelection, useSelection } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { getPlatform } from '../../utils/platform.js';
 import { PrBadge } from '../PrBadge.js';
+import {
+  getFleetNudgeExternalStore,
+  isFleetNeedsInputNudgeEnabled,
+  setFleetNeedsInputNudgeFocused,
+} from '../../utils/fleetNeedsInputNudge.js';
+import { plural } from '../../utils/stringUtils.js';
+import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink';
 
 // Dead code elimination: conditional import for proactive mode
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -55,6 +62,92 @@ const NULL = () => null;
 const MAX_VOICE_HINT_SHOWS = 3;
 
 const GOAL_TICK_INTERVAL_MS = 1_000;
+/** Official Hzp — flash duration after needsInput increase / succeeded increase. */
+const FLEET_NUDGE_FLASH_MS = 2_500;
+
+/**
+ * Official FFe — fleet/agents entry hint.
+ * - Default / GB off / zero needs: "← for agents" (or "← again for agents")
+ * - GB on + needsInput > 0: "← N agent(s)" with warning/success flash on change
+ */
+function AgentsFooterHint({ leftArrowAgain }: { leftArrowAgain?: boolean }): React.ReactNode {
+  const nudgeEnabled = isFleetNeedsInputNudgeEnabled();
+  const store = useMemo(() => getFleetNudgeExternalStore(nudgeEnabled), [nudgeEnabled]);
+  const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+
+  // Official eAa(ftt() !== "blurred") — pause sweep when terminal blurred.
+  useEffect(() => {
+    if (!nudgeEnabled) return;
+    const apply = () => {
+      const state = getTerminalFocusState();
+      setFleetNeedsInputNudgeFocused(state !== 'blurred');
+    };
+    apply();
+    return subscribeTerminalFocus(apply);
+  }, [nudgeEnabled]);
+
+  const needsInput = snap?.needsInput;
+  const succeeded = snap?.succeeded;
+  const reducedMotion = useAppState(s => s.settings.prefersReducedMotion) ?? false;
+
+  const [flash, setFlash] = useState<'none' | 'awaiting' | 'done'>('none');
+  const prevNeedsRef = useRef<number | undefined>(undefined);
+  const prevSucceededRef = useRef<number | undefined>(undefined);
+  const flashClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (flashClearRef.current) clearTimeout(flashClearRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const prevNeeds = prevNeedsRef.current;
+    const prevSucceeded = prevSucceededRef.current;
+    prevNeedsRef.current = needsInput;
+    prevSucceededRef.current = succeeded;
+
+    if (needsInput === undefined || needsInput === 0) return;
+    if (reducedMotion) return;
+
+    const needsChanged = prevNeeds !== undefined && needsInput !== prevNeeds;
+    const succeededUp = prevSucceeded !== undefined && succeeded !== undefined && succeeded > prevSucceeded;
+    if (!needsChanged && !succeededUp) return;
+    // Prefer awaiting flash when needs count is moving.
+    if (!needsChanged && flashClearRef.current && flash === 'awaiting') return;
+
+    if (flashClearRef.current) clearTimeout(flashClearRef.current);
+    const kind: 'awaiting' | 'done' = needsChanged ? 'awaiting' : 'done';
+    setFlash(kind);
+    flashClearRef.current = setTimeout(() => {
+      flashClearRef.current = null;
+      setFlash('none');
+    }, FLEET_NUDGE_FLASH_MS);
+  }, [needsInput, succeeded, reducedMotion, flash]);
+
+  // Official: !ppn || needs===0 → plain "← for agents"
+  if (!nudgeEnabled || needsInput === undefined || needsInput === 0) {
+    return (
+      <Text dimColor>
+        {leftArrowAgain ? `${figures.arrowLeft} again for agents` : `${figures.arrowLeft} for agents`}
+      </Text>
+    );
+  }
+
+  const countLabel = needsInput > 99 ? '99+' : String(needsInput);
+  const color = flash === 'awaiting' ? 'warning' : flash === 'done' ? 'success' : undefined;
+  const dimCount = flash === 'none';
+
+  return (
+    <Text>
+      <Text dimColor>{figures.arrowLeft} </Text>
+      <Text color={color as never} dimColor={dimCount}>
+        {countLabel}
+      </Text>
+      <Text dimColor> {plural(needsInput, 'agent')}</Text>
+    </Text>
+  );
+}
 
 type Props = {
   exitMessage: {
@@ -427,6 +520,12 @@ function ModeIndicator({
       )
     : [];
 
+  // Official lfb: BG_SESSIONS fleet entry (not remote, not viewing teammate).
+  // feature() must be a direct if/ternary condition (bun:bundle restriction).
+  const agentsEntryEnabled = feature('BG_SESSIONS')
+    ? !getIsRemoteMode() && !isViewingTeammate && !isViewingCompletedTeammate
+    : false;
+
   if (isViewingCompletedTeammate) {
     parts.push(
       <Text dimColor key="esc-return">
@@ -437,13 +536,25 @@ function ModeIndicator({
     parts.push(<ProactiveCountdown key="proactive" />);
   } else if (!hasTeammatePills && showHint) {
     parts.push(...hintParts);
+    // Official interrupt_agents: loading + fleet → esc · FFe
+    if (isLoading && agentsEntryEnabled) {
+      parts.push(<AgentsFooterHint key="agents-hint" leftArrowAgain={leftArrowAgain} />);
+    }
   }
 
   // When we have teammate pills, always render them on their own line above other parts
   if (hasTeammatePills) {
     // Don't append spinner hints when viewing a completed teammate —
     // the "esc to return to team lead" hint already replaces "esc to interrupt"
-    const otherParts = [...(modePart ? [modePart] : []), ...parts, ...(isViewingCompletedTeammate ? [] : hintParts)];
+    const teammateHintParts = isViewingCompletedTeammate
+      ? []
+      : [
+          ...hintParts,
+          ...(isLoading && agentsEntryEnabled
+            ? [<AgentsFooterHint key="agents-hint-teammate" leftArrowAgain={leftArrowAgain} />]
+            : []),
+        ];
+    const otherParts = [...(modePart ? [modePart] : []), ...parts, ...teammateHintParts];
     return (
       <Box flexDirection="column">
         <Box>
@@ -482,19 +593,20 @@ function ModeIndicator({
       />
     ) : null;
 
-  if (parts.length === 0 && !tasksPart && !modePart && showHint) {
+  // Official Yx priority (after interrupt/manage): agents (FFe) before shortcuts.
+  // Idle + no bg tasks → FFe alone; without BG_SESSIONS → "? for shortcuts".
+  // Loading already appended FFe above with interrupt.
+  // Note: when idle + tasks, manage wins (official) — no FFe on that row.
+  if (!isLoading && showHint && agentsEntryEnabled && !tasksPart && !hasCoordinatorTasks) {
+    if (!parts.some(p => React.isValidElement(p) && p.key === 'agents-hint')) {
+      parts.push(<AgentsFooterHint key="agents-hint" leftArrowAgain={leftArrowAgain} />);
+    }
+  } else if (parts.length === 0 && !tasksPart && !modePart && showHint) {
     parts.push(
       <Text dimColor key="shortcuts-hint">
         ? for shortcuts
       </Text>,
     );
-    if (feature('BG_SESSIONS')) {
-      parts.push(
-        <Text dimColor key="agents-hint">
-          {leftArrowAgain ? ' · ← again for agents' : ' · ← for agents'}
-        </Text>,
-      );
-    }
   }
 
   // Only replace the idle voice hint when there's something to say — otherwise

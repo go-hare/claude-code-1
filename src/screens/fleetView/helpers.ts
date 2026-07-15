@@ -7,6 +7,7 @@
 
 import type { SessionEntry } from '../../cli/bg/engine.js'
 import figures from 'figures'
+import { formatDuration } from '../../utils/format.js'
 
 // ---------------------------------------------------------------------------
 // Status bands
@@ -172,14 +173,15 @@ export function jobLabel(session: SessionEntry): string {
 
 /**
  * Format session age as a human-readable string.
- * Upstream: Fnq (formatJobAge)
+ * Official OhO/q1q: n9(ms, { mostSignificantOnly: true }) → formatDuration.
  */
-export function formatJobAge(startedAt: number): string {
-  const ms = Date.now() - startedAt
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s`
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`
-  return `${Math.floor(ms / 86_400_000)}d`
+export function formatJobAge(
+  startedAt: number,
+  now: number = Date.now(),
+): string {
+  if (!Number.isFinite(startedAt)) return ''
+  const ms = Math.max(0, now - startedAt)
+  return formatDuration(ms, { mostSignificantOnly: true })
 }
 
 // ---------------------------------------------------------------------------
@@ -444,4 +446,43 @@ export function repoGroupLabel(session: SessionEntry): string {
   if (!session.cwd) return ''
   const parts = session.cwd.replace(/\\/g, '/').split('/')
   return parts[parts.length - 1] ?? ''
+}
+
+// ---------------------------------------------------------------------------
+// Attach settle copy (official jC6 / wtK / FV-attach)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map raw attach/respawn errors to FleetView remount strings.
+ * - ENOJOB / still-starting class → "Session is still starting — try again…"
+ * - other failures → "Couldn't attach — …"
+ */
+export function formatAttachError(msg: string | undefined): string {
+  if (!msg) return "Couldn't attach to that session"
+  if (
+    /ENOJOB|not found|restarting|estarting|still starting|socket missing|ENOTCONN|ENOCONN/i.test(
+      msg,
+    )
+  ) {
+    return 'Session is still starting \u2014 try again in a moment'
+  }
+  if (/^Couldn't attach/i.test(msg)) return msg
+  return `Couldn't attach \u2014 ${msg}`
+}
+
+/**
+ * Official isOrigin match: job id / short equals or prefixes restore/current id.
+ */
+export function isOriginSessionId(
+  session: Pick<SessionEntry, 'sessionId' | 'short'>,
+  originSessionId: string | undefined,
+): boolean {
+  if (!originSessionId) return false
+  return (
+    session.sessionId === originSessionId ||
+    session.short === originSessionId ||
+    (!!session.sessionId &&
+      originSessionId.startsWith(session.sessionId.slice(0, 8))) ||
+    (!!session.short && originSessionId.startsWith(session.short))
+  )
 }

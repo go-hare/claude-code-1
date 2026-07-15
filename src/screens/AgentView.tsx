@@ -16,8 +16,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
-import { createRoot, Box, Text, useInput, AlternateScreen } from '@anthropic/ink';
+import { createRoot, Box, Text, useInput, AlternateScreen, ThemeProvider } from '@anthropic/ink';
 import type { Root } from '@anthropic/ink';
+import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
@@ -40,6 +41,8 @@ import {
   buildDirectoryModeFlatRows,
   computeFleetColumnWidths,
   sessionArtifactLabel,
+  formatAttachError,
+  isOriginSessionId,
   FLEET_STATE_GROUP_LABELS,
   type FleetColumnWidths,
   type FleetFlatRow,
@@ -80,8 +83,10 @@ const EMPTY_STATE_HINT =
   'Type a task below to start a background session. It keeps running even after you close this terminal.';
 const EMPTY_STATE_EXAMPLES =
   'Try: paste a PR or issue URL \u00b7 "investigate why test/auth.test.ts is flaky" \u00b7 "address the review comments on #1234"';
+/** Official P9H when origin session is in the list (arrowRight, not left). */
 const REPL_HINT =
-  'Press \u2190 to return to your session anytime. Type a task below to dispatch a session alongside it. Sessions keep running even after you close the terminal';
+  'Press \u2192 to return to your session anytime. Type a task below to dispatch a session alongside it. Sessions keep running even after you close the terminal';
+const REPL_HINT_VIA_LEFT_SUFFIX = ' \u2014 run `claude agents` to manage them';
 
 // ---------------------------------------------------------------------------
 // Job label — official DC6 (jobLabel)
@@ -182,6 +187,8 @@ type FocusArea = 'list' | 'dispatch';
 function SessionRow({
   session,
   isSelected,
+  isOrigin,
+  showSelectionBg,
   isRenaming,
   isDeletePending,
   renameValue,
@@ -191,6 +198,13 @@ function SessionRow({
 }: {
   session: SessionEntry;
   isSelected: boolean;
+  /** Official isOrigin: session is the REPL/left-arrow origin (`initialJobId`). */
+  isOrigin?: boolean;
+  /**
+   * Official pq: keyboard selection paints userMessageBackground; mouse-hover
+   * selection (jH === index) skips the bg so the row is focused without fill.
+   */
+  showSelectionBg?: boolean;
   isRenaming: boolean;
   isDeletePending: boolean;
   renameValue: string;
@@ -206,10 +220,19 @@ function SessionRow({
   const age = formatJobAge(session.startedAt);
   const artifact = sessionArtifactLabel(session);
 
-  // Official: show detail for all bands (active shows last assistant message too)
+  // Official xhO detail: "→ to return" only when origin session is focused.
   let detail = '';
   if (isDeletePending) {
     detail = 'ctrl+x again to delete';
+  } else if (isOrigin && isSelected) {
+    if (band === 'blocked') {
+      const needs = session.waitingFor ?? session.lastMessage ?? '';
+      detail = needs ? `${needs} \u00b7 \u2192` : '\u2192 to return';
+    } else if (band === 'completed' && session.lastMessage) {
+      detail = `${session.lastMessage} \u00b7 \u2192 to return`;
+    } else {
+      detail = '\u2192 to return';
+    }
   } else if (band === 'blocked') {
     detail = session.waitingFor ?? session.lastMessage ?? '';
   } else {
@@ -225,9 +248,11 @@ function SessionRow({
     .trim();
 
   return (
+    // Official xhO root is an un-sized flex row (no width="100%"). A 100% width
+    // inside a padded list parent can overflow the terminal by 1 col and clip
+    // the rightmost age unit ("19s" → "19", "1s" wraps to "s1").
     <Box
-      width="100%"
-      backgroundColor={isSelected ? 'userMessageBackground' : undefined}
+      backgroundColor={isSelected && showSelectionBg ? 'userMessageBackground' : undefined}
       onMouseEnter={onSelect}
       onClick={onOpen}
     >
@@ -249,13 +274,7 @@ function SessionRow({
           color={isDeletePending ? ('error' as never) : undefined}
           wrap={'truncate' as never}
         >
-          {isDeletePending
-            ? detail
-            : isSelected
-              ? detail
-                ? `${detail} \u00b7 \u2192 to return`
-                : '\u2192 to return'
-              : detail}
+          {detail}
         </Text>
       </Box>
       {/* Artifact / PR column (official zhO; hidden when no PRs in list) */}
@@ -279,7 +298,9 @@ function SessionRow({
       )}
       {/* Age column (official $hO.age + 2, right-aligned) */}
       <Box width={cols.age + 2} flexShrink={0} paddingLeft={2} justifyContent="flex-end">
-        <Text dimColor>{age}</Text>
+        <Text dimColor wrap={'truncate' as never}>
+          {age}
+        </Text>
       </Box>
       {isRenaming && <Text>{' \u2588'}</Text>}
     </Box>
@@ -296,6 +317,7 @@ function AgentViewApp({
   cwdFilter,
   currentSessionId,
   restoreSessionId,
+  initialError,
   onAction,
 }: {
   enteredViaLeftArrow?: boolean;
@@ -303,11 +325,19 @@ function AgentViewApp({
   cwdFilter?: string;
   currentSessionId?: string;
   restoreSessionId?: string;
+  /** Official initialError (J) — attach failure shown after remount. */
+  initialError?: string | null;
   onAction?: (action: { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }) => void;
 }): React.ReactElement {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Official jH/KH: index last focused via mouse. When selectedIndex === jH,
+   * selection background is suppressed (hover focus without fill). Keyboard
+   * nav clears jH so bg paints again.
+   */
+  const [mouseSelectedIndex, setMouseSelectedIndex] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const [dispatchInput, setDispatchInput] = useState('');
   const [cursorOffset, setCursorOffset] = useState(0);
   const [focusArea, setFocusArea] = useState<FocusArea>('list');
@@ -389,33 +419,39 @@ function AgentViewApp({
       const jobs = await listAllJobs();
 
       // Convert to SessionEntry (no stale detection on load — matches official)
-      let entries: SessionEntry[] = jobs.map(({ short, state: job }) => ({
-        pid: job.pid ?? 0,
-        sessionId: job.sessionId,
-        cwd: job.cwd,
-        startedAt: Date.parse(job.createdAt),
-        kind: 'bg',
-        name: computeJobLabel(job, currentSessionId),
-        status:
-          job.state === 'working'
-            ? job.tempo === 'active'
-              ? 'busy'
-              : job.tempo === 'blocked'
+      let entries: SessionEntry[] = jobs.map(({ short, state: job }) => {
+        const createdMs = Date.parse(job.createdAt);
+        const updatedMs = Date.parse(job.updatedAt);
+        return {
+          pid: job.pid ?? 0,
+          sessionId: job.sessionId,
+          short,
+          cwd: job.cwd,
+          // Guard NaN — invalid createdAt would render as "NaNd" / overflow age col.
+          startedAt: Number.isFinite(createdMs) ? createdMs : Date.now(),
+          kind: 'bg' as const,
+          name: computeJobLabel(job, currentSessionId),
+          status:
+            job.state === 'working'
+              ? job.tempo === 'active'
+                ? 'busy'
+                : job.tempo === 'blocked'
+                  ? 'waiting'
+                  : 'busy'
+              : job.state === 'blocked'
                 ? 'waiting'
-                : 'busy'
-            : job.state === 'blocked'
-              ? 'waiting'
-              : job.state,
-        updatedAt: Date.parse(job.updatedAt),
-        engine: 'detached' as const,
-        lastMessage: job.detail || undefined,
-        waitingFor: job.needs || job.block?.questions?.[0]?.question || undefined,
-        pinned: job.pinned,
-        gitBranch: job.worktreeBranch,
-        prReviewState: undefined, // filled below from children PR status
-        prUrl: undefined,
-        prCount: undefined,
-      }));
+                : job.state,
+          updatedAt: Number.isFinite(updatedMs) ? updatedMs : Date.now(),
+          engine: 'detached' as const,
+          lastMessage: job.detail || undefined,
+          waitingFor: job.needs || job.block?.questions?.[0]?.question || undefined,
+          pinned: job.pinned,
+          gitBranch: job.worktreeBranch,
+          prReviewState: undefined, // filled below from children PR status
+          prUrl: undefined,
+          prCount: undefined,
+        };
+      });
 
       // Seed PR artifact fields from job children (official zhO / $hO).
       // Then fetch reviewDecision for the first PR via gh (best-effort).
@@ -670,12 +706,33 @@ function AgentViewApp({
   // Official $hO column widths across all sessions (label / age / artifact).
   const cols = React.useMemo(() => computeFleetColumnWidths(sessions, jobLabel), [sessions]);
 
+  // Official isOrigin: job.id === initialJobId (`_`). Prefer currentSessionId
+  // (REPL left-arrow), then restoreSessionId / CLAUDE_AGENTS_SELECT.
+  const originSessionId = currentSessionId ?? restoreSessionId;
+  const isOriginSession = useCallback(
+    (s: SessionEntry): boolean => isOriginSessionId(s, originSessionId),
+    [originSessionId],
+  );
+  // Official VF = Bj.some(Z_ => Z_.id === _)
+  const originSessionPresent = React.useMemo(
+    () => !!originSessionId && sessions.some(isOriginSession),
+    [originSessionId, sessions, isOriginSession],
+  );
+
   // Restore selection after returning from an attached session
   const restoredRef = useRef(false);
   useEffect(() => {
     if (restoredRef.current || !restoreSessionId || flatRows.length === 0) return;
-    const idx = flatRows.findIndex(r => r.kind === 'job' && r.session.sessionId === restoreSessionId);
+    const idx = flatRows.findIndex(
+      r =>
+        r.kind === 'job' &&
+        (r.session.sessionId === restoreSessionId ||
+          r.session.short === restoreSessionId ||
+          r.session.sessionId?.startsWith(restoreSessionId) ||
+          r.session.short?.startsWith(restoreSessionId)),
+    );
     if (idx >= 0) {
+      setMouseSelectedIndex(null);
       setSelectedIndex(idx);
       setFocusArea('list');
       restoredRef.current = true;
@@ -685,6 +742,7 @@ function AgentViewApp({
   // Clamp selection
   useEffect(() => {
     if (selectedIndex >= flatRows.length && flatRows.length > 0) {
+      setMouseSelectedIndex(null);
       setSelectedIndex(flatRows.length - 1);
     }
   }, [flatRows.length, selectedIndex]);
@@ -793,11 +851,28 @@ function AgentViewApp({
       // Official: Enter → respawnJob → onAction({type:'open'})
       // Attach goes through daemon control socket, no need to probe PTY socket directly
       if (onActionCb) {
-        onActionCb({ type: 'open', sessionId: session.sessionId ?? '', short, logPath: session.logPath });
+        onActionCb({
+          type: 'open',
+          sessionId: session.sessionId ?? '',
+          short: session.short ?? short,
+          logPath: session.logPath,
+        });
       }
     },
     [],
   );
+
+  const selectRowByMouse = useCallback((idx: number) => {
+    setFocusArea('list');
+    setMouseSelectedIndex(idx);
+    setSelectedIndex(idx);
+  }, []);
+
+  const selectRowByKeyboard = useCallback((idx: number | ((prev: number) => number)) => {
+    // Official KH(null) on keyboard nav — restore selection bg.
+    setMouseSelectedIndex(null);
+    setSelectedIndex(idx);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Input handling
@@ -892,7 +967,7 @@ function AgentViewApp({
           setSelectedSuggestion(i => Math.max(0, i - 1));
         } else if (sessions.length > 0) {
           setFocusArea('list');
-          setSelectedIndex(Math.max(0, flatRows.length - 1));
+          selectRowByKeyboard(Math.max(0, flatRows.length - 1));
         }
         return;
       }
@@ -929,22 +1004,24 @@ function AgentViewApp({
     // List navigation
     const maxVisibleIndex = flatRows.length - 1;
     if (key.upArrow) {
-      setSelectedIndex(i => Math.max(0, i - 1));
+      selectRowByKeyboard(i => Math.max(0, i - 1));
       setDeleteConfirmSessionId(null);
     } else if (key.downArrow) {
       if (selectedIndex >= maxVisibleIndex) {
         setFocusArea('dispatch');
+        setMouseSelectedIndex(null);
       } else {
-        setSelectedIndex(i => Math.min(maxVisibleIndex, i + 1));
+        selectRowByKeyboard(i => Math.min(maxVisibleIndex, i + 1));
       }
       setDeleteConfirmSessionId(null);
     } else if (key.tab) {
       setFocusArea('dispatch');
+      setMouseSelectedIndex(null);
     } else if (key.rightArrow && sessions.length > 0) {
       // Right arrow: attach/resume the selected session
       const session = selectedSession;
       if (session) {
-        const short = session.sessionId?.slice(0, 8) ?? '';
+        const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
         void checkAndAttach(short, session, onAction, setError);
       }
     } else if (key.return && flatRows.length > 0) {
@@ -964,7 +1041,7 @@ function AgentViewApp({
       }
       const session = selectedSession;
       if (session) {
-        const short = session.sessionId?.slice(0, 8) ?? '';
+        const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
         void checkAndAttach(short, session, onAction, setError);
       }
     } else if (input === ' ' && sessions.length > 0) {
@@ -1053,10 +1130,14 @@ function AgentViewApp({
             </Box>
           </Box>
 
-          {/* Empty state */}
+          {/* Empty state (official P9H when Bj empty / every-origin) */}
           {sessions.length === 0 && !error && (
             <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
-              <Text>{EMPTY_STATE_HINT}</Text>
+              <Text dimColor>
+                {originSessionPresent
+                  ? `${REPL_HINT}${enteredViaLeftArrow ? REPL_HINT_VIA_LEFT_SUFFIX : ''}`
+                  : EMPTY_STATE_HINT}
+              </Text>
               <Text dimColor>{EMPTY_STATE_EXAMPLES}</Text>
             </Box>
           )}
@@ -1072,6 +1153,8 @@ function AgentViewApp({
           <Box flexDirection="column" paddingLeft={1}>
             {flatRows.map((row, idx) => {
               const isRowSelected = focusArea === 'list' && idx === selectedIndex;
+              // Official pq: skip bg when selection came from mouse hover (jH === index).
+              const showSelectionBg = isRowSelected && mouseSelectedIndex !== idx;
               if (row.kind === 'header') {
                 const label = groupHeaderLabel(row.group);
                 const isFirst = idx === 0;
@@ -1082,13 +1165,12 @@ function AgentViewApp({
                   <Box
                     key={`h:${row.group}`}
                     marginTop={isFirst ? 0 : 1}
-                    backgroundColor={isRowSelected ? 'userMessageBackground' : undefined}
+                    backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
                     onMouseEnter={() => {
-                      setFocusArea('list');
-                      setSelectedIndex(idx);
+                      selectRowByMouse(idx);
                     }}
                     onClick={() => {
-                      setSelectedIndex(idx);
+                      selectRowByMouse(idx);
                       setFoldedGroups(s => {
                         const n = new Set(s);
                         if (n.has(row.group)) n.delete(row.group);
@@ -1124,13 +1206,12 @@ function AgentViewApp({
                   <Box
                     key={`fold:${row.group}`}
                     paddingLeft={2}
-                    backgroundColor={isRowSelected ? 'userMessageBackground' : undefined}
+                    backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
                     onMouseEnter={() => {
-                      setFocusArea('list');
-                      setSelectedIndex(idx);
+                      selectRowByMouse(idx);
                     }}
                     onClick={() => {
-                      setSelectedIndex(idx);
+                      selectRowByMouse(idx);
                       setDoneCapExpanded(true);
                     }}
                   >
@@ -1146,21 +1227,29 @@ function AgentViewApp({
                   key={`${session.sessionId}-${session.pid}`}
                   session={session}
                   isSelected={isRowSelected}
+                  isOrigin={isOriginSession(session)}
+                  showSelectionBg={showSelectionBg}
                   isRenaming={viewMode === 'rename' && isRowSelected}
                   isDeletePending={deleteConfirmSessionId === session.sessionId}
                   renameValue={renameValue}
                   cols={cols}
                   onSelect={() => {
-                    setFocusArea('list');
-                    setSelectedIndex(idx);
+                    selectRowByMouse(idx);
                   }}
                   onOpen={() => {
-                    const short = session.sessionId?.slice(0, 8) ?? '';
+                    const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
                     void checkAndAttach(short, session, onAction, setError);
                   }}
                 />
               );
             })}
+            {/* Official P9H under list when every visible job is the origin session */}
+            {originSessionPresent && sessions.length > 0 && sessions.every(s => isOriginSession(s)) && !error && (
+              <Box flexDirection="column" marginTop={1} paddingLeft={1}>
+                <Text dimColor>{`${REPL_HINT}${enteredViaLeftArrow ? REPL_HINT_VIA_LEFT_SUFFIX : ''}`}</Text>
+                <Text dimColor>{EMPTY_STATE_EXAMPLES}</Text>
+              </Box>
+            )}
           </Box>
         </Box>
 
@@ -1276,18 +1365,19 @@ async function ensureDaemonRunning(opts?: { forceTransient?: boolean }): Promise
   return ensure(opts);
 }
 
-async function attachToPtySession(short: string): Promise<void> {
+async function attachToPtySession(short: string): Promise<{ error?: string }> {
   const { attachToSession } = await import('../daemon/clientAttach.js');
   const { sendControlRequest } = await import('../daemon/controlSocket.js');
   const { listAllJobs } = await import('../daemon/jobState.js');
 
   // Official flow: try attach → if ENOJOB → respawn → retry attach
   let result = await attachToSession(short, { alreadyInAlt: true });
+  let respawned = false;
 
   if (result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
     // Session not in daemon — respawn it (official: S8_ / respawnJob)
     const jobs = await listAllJobs();
-    const job = jobs.find(j => j.short === short);
+    const job = jobs.find(j => j.short === short || j.state.sessionId === short || j.state.sessionId.startsWith(short));
     if (job) {
       // Official: check if transcript exists before deciding resume vs fresh start
       const { existsSync } = await import('fs');
@@ -1309,12 +1399,13 @@ async function attachToPtySession(short: string): Promise<void> {
             args: job.state.intent ? ['--', job.state.intent] : [],
           };
 
+      const attachShort = job.short || short;
       const resp = await sendControlRequest(
         {
           proto: 1,
           op: 'dispatch',
           d: {
-            short,
+            short: attachShort,
             sessionId: job.state.sessionId,
             intent: job.state.intent,
             source: 'respawn',
@@ -1332,18 +1423,38 @@ async function attachToPtySession(short: string): Promise<void> {
       );
 
       if (resp.ok) {
+        respawned = true;
         // Wait for worker to become available, then retry attach
         for (let i = 0; i < 20; i++) {
           await new Promise(r => setTimeout(r, 500));
-          result = await attachToSession(short, { alreadyInAlt: true });
+          result = await attachToSession(attachShort, { alreadyInAlt: true });
           if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) break;
         }
+      } else {
+        // After detach/error: restore alt screen for FleetView re-render
+        process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+        return {
+          error: formatAttachError((resp as { error?: string }).error ?? 'respawn failed'),
+        };
       }
     }
   }
 
   // After detach/error: restore alt screen for FleetView re-render
   process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+
+  // Clean detach / disconnect after successful attach — no remount error.
+  if (result.outcome === 'detached' || result.outcome === 'disconnected') {
+    return {};
+  }
+  if (result.outcome === 'error') {
+    // Official: after respawn retries still ENOJOB → still-starting settle copy.
+    if (respawned && result.msg?.includes('ENOJOB')) {
+      return { error: 'Session is still starting \u2014 try again in a moment' };
+    }
+    return { error: formatAttachError(result.msg) };
+  }
+  return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,6 +1506,8 @@ export async function renderAgentView(options?: {
   // Prefer explicit option, then env select (official initialJobId).
   let lastSelectedSessionId: string | undefined = options?.restoreSessionId ?? envSelect ?? undefined;
   const enteredViaLeftArrow = options?.enteredViaLeftArrow ?? !!(options?.restoreSessionId ?? envSelect);
+  // Official J (initialError) — attach failure remounted into FleetView.
+  let remountError: string | undefined;
 
   // Create a Root instance (sync render, no race condition)
   // Official uses a persistent Root that survives across attach/detach cycles
@@ -1405,19 +1518,30 @@ export async function renderAgentView(options?: {
     const action = await new Promise<
       { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }
     >(resolve => {
+      // ThemeProvider required: without it useTheme() defaults to 'dark', so
+      // selection userMessageBackground paints as rgb(55,55,55) on light terminals.
       root.render(
-        <VoiceProvider>
-          <AgentViewApp
-            enteredViaLeftArrow={enteredViaLeftArrow}
-            dispatchExtraArgs={options?.dispatchExtraArgs}
-            cwdFilter={options?.cwdFilter}
-            currentSessionId={options?.currentSessionId}
-            restoreSessionId={lastSelectedSessionId}
-            onAction={resolve}
-          />
-        </VoiceProvider>,
+        <ThemeProvider
+          initialState={getGlobalConfig().theme}
+          onThemeSave={setting => saveGlobalConfig(current => ({ ...current, theme: setting }))}
+        >
+          <VoiceProvider>
+            <AgentViewApp
+              enteredViaLeftArrow={enteredViaLeftArrow}
+              dispatchExtraArgs={options?.dispatchExtraArgs}
+              cwdFilter={options?.cwdFilter}
+              currentSessionId={options?.currentSessionId}
+              restoreSessionId={lastSelectedSessionId}
+              initialError={remountError}
+              onAction={resolve}
+            />
+          </VoiceProvider>
+        </ThemeProvider>,
       );
     });
+
+    // Consume remount error after first paint of this iteration.
+    remountError = undefined;
 
     if (action.type === 'open') {
       // Official: handoffAltScreen prevents unmount from exiting alt screen
@@ -1441,7 +1565,9 @@ export async function renderAgentView(options?: {
 
       lastSelectedSessionId = action.sessionId;
       // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
-      await attachToPtySession(action.short);
+      const attachResult = await attachToPtySession(action.short);
+      // Official: (J = k.msg) on attach_failed / still-starting settle.
+      remountError = attachResult.error;
     }
 
     // Re-create root for next iteration (official: cj_ / createRoot after detach)

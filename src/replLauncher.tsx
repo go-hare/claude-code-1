@@ -35,6 +35,10 @@ export async function launchRepl(
           process.stdout.write(DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ);
         }
       : () => {
+          // Official Szp: attribute left-arrow open to needs-input nudge window.
+          void import('./utils/fleetNeedsInputNudge.js').then(m => {
+            m.recordFleetOpenViaLeft();
+          });
           // In normal mode: unmount REPL and switch to agents view
           switchToAgents = true;
           root.unmount();

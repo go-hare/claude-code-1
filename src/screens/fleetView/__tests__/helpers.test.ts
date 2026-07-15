@@ -7,6 +7,9 @@ import {
   deriveBand,
   doneCapForRows,
   FLEET_STATE_GROUP_LABELS,
+  formatAttachError,
+  formatJobAge,
+  isOriginSessionId,
   pickIcon,
   sessionArtifactLabel,
 } from '../helpers.js'
@@ -260,5 +263,57 @@ describe('sessionArtifactLabel + computeFleetColumnWidths', () => {
     ])
     expect(withPr.label).toBe(40)
     expect(withPr.artifact).toBe('PR #99'.length)
+  })
+})
+
+describe('formatAttachError', () => {
+  test('maps ENOJOB / still-starting class to settle copy', () => {
+    expect(formatAttachError('ENOJOB: job not found')).toBe(
+      'Session is still starting \u2014 try again in a moment',
+    )
+    expect(formatAttachError('socket missing')).toBe(
+      'Session is still starting \u2014 try again in a moment',
+    )
+  })
+
+  test("prefixes other failures with Couldn't attach", () => {
+    expect(formatAttachError('timeout')).toBe("Couldn't attach \u2014 timeout")
+    expect(formatAttachError("Couldn't attach \u2014 boom")).toBe(
+      "Couldn't attach \u2014 boom",
+    )
+    expect(formatAttachError(undefined)).toBe("Couldn't attach to that session")
+  })
+})
+
+describe('formatJobAge', () => {
+  test('official mostSignificantOnly units (s/m/h/d)', () => {
+    const now = 1_000_000_000_000
+    expect(formatJobAge(now - 19_000, now)).toBe('19s')
+    expect(formatJobAge(now - 90_000, now)).toBe('1m')
+    expect(formatJobAge(now - 3_600_000, now)).toBe('1h')
+    expect(formatJobAge(now - 86_400_000, now)).toBe('1d')
+    expect(formatJobAge(now - 30 * 86_400_000, now)).toBe('30d')
+  })
+
+  test('invalid / future timestamps do not explode', () => {
+    const now = 1_000_000_000_000
+    expect(formatJobAge(Number.NaN, now)).toBe('')
+    expect(formatJobAge(now + 5_000, now)).toBe('0s')
+  })
+})
+
+describe('isOriginSessionId', () => {
+  test('matches full sessionId, short, or prefix', () => {
+    const s = session({
+      pid: 1,
+      status: 'busy',
+      sessionId: 'abcdef12-3456-7890',
+      short: 'ab12cd',
+    })
+    expect(isOriginSessionId(s, 'abcdef12-3456-7890')).toBe(true)
+    expect(isOriginSessionId(s, 'ab12cd')).toBe(true)
+    expect(isOriginSessionId(s, 'abcdef12')).toBe(true)
+    expect(isOriginSessionId(s, 'other')).toBe(false)
+    expect(isOriginSessionId(s, undefined)).toBe(false)
   })
 })

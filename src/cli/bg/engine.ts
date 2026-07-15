@@ -32,6 +32,11 @@ export interface SessionEntry {
   prUrl?: string
   /** Non-frame PR children count (official zhO multi-PR label). */
   prCount?: number
+  /**
+   * Daemon job short id (`~/.claude/jobs/<short>/`). Prefer over sessionId
+   * prefix when attaching (official attach short).
+   */
+  short?: string
   messagingSocketPath?: string
   lastMessage?: string
 }
