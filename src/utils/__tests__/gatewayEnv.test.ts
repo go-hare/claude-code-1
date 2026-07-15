@@ -4,9 +4,11 @@ import {
   buildRefreshedGatewayAuthSession,
   clearGatewayAuth,
   decodeJwtExpSeconds,
+  ensureGatewayAuthApplied,
   formatGatewaySessionExpiredError,
   GATEWAY_IDP_REFRESH_SKEW_MS,
   getGatewayAuth,
+  invalidateGatewaySecureStorageRestoreCache,
   isGatewayAuthExpired,
   isGatewayAuthPinned,
   maybeRefreshGatewayIdp,
@@ -28,8 +30,10 @@ import {
   resolveGatewayFromEnv,
   resolveGatewayIdpTokenEndpoint,
   resolveGatewayTrustHostKey,
+  resetGatewaySecureStorageRestoreCache_FOR_TESTS,
   restoreGatewayAuth,
   setGatewayAuth,
+  setTestGatewaySecureStorageRead_FOR_TESTS,
   shouldRefreshGatewayIdp,
   toEnterpriseGatewayCredential,
   tryRestoreGatewayAuthFromSecureStorage,
@@ -484,6 +488,76 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     })
     expect(sync.status).toBe('restored')
     expect(getGatewayAuth()?.jwt).toBe('sync-jwt')
+  })
+
+  test('injectable secure-storage host is not negative-cached', () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let reads = 0
+    const injectable = {
+      read: () => {
+        reads++
+        return null
+      },
+    }
+    const a = tryRestoreGatewayAuthFromSecureStorage({
+      quiet: true,
+      storage: injectable,
+    })
+    const b = tryRestoreGatewayAuthFromSecureStorage({
+      quiet: true,
+      storage: injectable,
+    })
+    expect(a.status).toBe('skipped')
+    expect(b.status).toBe('skipped')
+    expect(reads).toBe(2)
+  })
+
+  test('ensureGatewayAuthApplied only reads secure storage once', () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let reads = 0
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return null
+    })
+
+    ensureGatewayAuthApplied()
+    ensureGatewayAuthApplied()
+    expect(reads).toBe(1)
+
+    // Second default-host tryRestore reports already_attempted without reading.
+    const second = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(second).toEqual({ status: 'skipped', reason: 'already_attempted' })
+    expect(reads).toBe(1)
+
+    // clearGatewayAuth invalidates so a later cold path re-reads.
+    clearGatewayAuth()
+    ensureGatewayAuthApplied()
+    expect(reads).toBe(2)
+
+    // Credential-write invalidation also allows a re-read.
+    invalidateGatewaySecureStorageRestoreCache()
+    ensureGatewayAuthApplied()
+    expect(reads).toBe(3)
+
+    // force: true bypasses cache for this call and still marks attempted.
+    invalidateGatewaySecureStorageRestoreCache()
+    const forced = tryRestoreGatewayAuthFromSecureStorage({
+      quiet: true,
+      force: true,
+    })
+    expect(forced.status).toBe('skipped')
+    expect(reads).toBe(4)
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true }).reason).toBe(
+      'already_attempted',
+    )
+    expect(reads).toBe(4)
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    clearGatewayAuth()
   })
 
   test('VPr / B_c TLS probe densables', async () => {

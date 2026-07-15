@@ -34,6 +34,41 @@ export type ResolveGatewayFromEnvResult =
 // Official Pt.gatewayAuth densable store
 let gatewayAuth: GatewayAuthSession | null = null
 
+/**
+ * Process-level negative cache for default secure-storage restore.
+ * Once tryRestoreGatewayAuthFromSecureStorage has read disk (no injectable
+ * storage host), skip further readFileSync until login/logout/credential write
+ * invalidates. Env bootstrap still runs every ensureGatewayAuthApplied call.
+ */
+let secureStorageRestoreAttempted = false
+
+/**
+ * Test-only override for the default secure-storage read path (avoids
+ * process-global mock.module of secureStorage).
+ */
+let testSecureStorageRead: (() => Record<string, unknown> | null) | null = null
+
+/** Invalidate secure-storage restore negative cache (login / logout / credential write). */
+export function invalidateGatewaySecureStorageRestoreCache(): void {
+  secureStorageRestoreAttempted = false
+}
+
+/** @internal test helper — reset negative cache + clear read override. */
+export function resetGatewaySecureStorageRestoreCache_FOR_TESTS(): void {
+  secureStorageRestoreAttempted = false
+  testSecureStorageRead = null
+}
+
+/**
+ * @internal test helper — inject default-host secure storage read.
+ * Pass null to clear. Does not mark the negative cache.
+ */
+export function setTestGatewaySecureStorageRead_FOR_TESTS(
+  read: (() => Record<string, unknown> | null) | null,
+): void {
+  testSecureStorageRead = read
+}
+
 /** Official o_ — current gateway auth session, if any. */
 export function getGatewayAuth(): GatewayAuthSession | null {
   return gatewayAuth
@@ -46,6 +81,8 @@ export function setGatewayAuth(session: GatewayAuthSession | null): void {
 
 export function clearGatewayAuth(): void {
   gatewayAuth = null
+  // Logout / test reset: allow a later restore after new credentials are written.
+  secureStorageRestoreAttempted = false
 }
 
 /** Official eGo — session present and expired. */
@@ -160,6 +197,10 @@ export function applyGatewayFromEnvResult(
  * Ensure gateway env / secure-storage session is visible to getAPIProvider()
  * and other early callers that do not go through getAnthropicClient().
  * Does not throw on missing/invalid env (client path still validates).
+ *
+ * Env is re-checked every call. Default secure-storage restore is process-level
+ * negative-cached (see tryRestoreGatewayAuthFromSecureStorage) so repeated
+ * getAPIProvider() / getAnthropicClient() cold paths do not re-read disk.
  */
 export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
   if (getGatewayAuth()) {
@@ -388,6 +429,8 @@ export async function persistEnterpriseGatewayCredential(input: {
         '[gateway-refresh] auth changed during persist; discarding outcome',
         'debug',
       )
+      // Storage may have a newer credential; allow a subsequent restore.
+      invalidateGatewaySecureStorageRestoreCache()
       return { success: true, discarded: true }
     }
     const result = storage.update(planned.data)
@@ -405,6 +448,8 @@ export async function persistEnterpriseGatewayCredential(input: {
         ...(result.warning ? { warning: result.warning } : {}),
       }
     }
+    // Credential written: next cold restore after clear must re-read disk.
+    invalidateGatewaySecureStorageRestoreCache()
     return { success: true, discarded: false }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -988,6 +1033,12 @@ export async function restoreGatewayAuth(input?: {
  * Sync restore densable for getAnthropicClient path — secureStorage.read()
  * without live TLS probe (proceed when pin present). Full probe remains denser
  * via restoreGatewayAuth({ probeFingerprint }).
+ *
+ * Default host (no injectable `storage`) is process-level negative-cached:
+ * only the first miss path hits disk; subsequent calls return
+ * `already_attempted` until invalidateGatewaySecureStorageRestoreCache /
+ * clearGatewayAuth / successful persist. Injectable `storage` always reads
+ * (tests / callers that supply their own host).
  */
 export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   storage?: {
@@ -997,18 +1048,40 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   nowMs?: number
   quiet?: boolean
   writeStderr?: (msg: string) => void
+  /**
+   * When true, bypass negative cache for this call (still marks attempted
+   * after a default-host read). Used by tests that need a forced re-read.
+   */
+  force?: boolean
 }): RestoreGatewayAuthResult {
+  const useDefaultHost = !input?.storage
+  if (useDefaultHost && secureStorageRestoreAttempted && !input?.force) {
+    return { status: 'skipped', reason: 'already_attempted' }
+  }
+
   let storageData: Record<string, unknown> | null = null
   try {
     if (input?.storage) {
       storageData = input.storage.read()
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getSecureStorage } =
-        require('./secureStorage/index.js') as typeof import('./secureStorage/index.js')
-      storageData = getSecureStorage().read() as Record<string, unknown> | null
+      // Mark before read so concurrent callers cannot pile onto disk I/O.
+      secureStorageRestoreAttempted = true
+      if (testSecureStorageRead) {
+        storageData = testSecureStorageRead()
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getSecureStorage } =
+          require('./secureStorage/index.js') as typeof import('./secureStorage/index.js')
+        storageData = getSecureStorage().read() as Record<
+          string,
+          unknown
+        > | null
+      }
     }
   } catch {
+    if (useDefaultHost) {
+      secureStorageRestoreAttempted = true
+    }
     return { status: 'skipped', reason: 'storage_read_failed' }
   }
   const plan = planRestoreGatewayAuth({
