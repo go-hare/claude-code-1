@@ -162,4 +162,52 @@ describe('getAnthropicClient gateway priority', () => {
     expect(client).toBeInstanceOf(BedrockClient)
     expect(getAPIProvider()).toBe('bedrock')
   })
+
+  test('expired refreshable session is IdP-refreshed before client build (official lXe)', async () => {
+    const {
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS,
+      setTestGatewayIdpPostToken_FOR_TESTS,
+      setTestGatewaySecureStorageRead_FOR_TESTS,
+    } = await import('../../../utils/gatewayEnv.js')
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => ({
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'expired-jwt',
+        expiresAtMs: Date.now() - 1,
+        idpRefreshToken: 'refresh-token',
+        tokenEndpoint: 'https://idp.example/token',
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }))
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => ({
+      data: {
+        access_token: 'fresh-from-idp',
+        expires_in: 3600,
+        refresh_token: 'refresh-token-2',
+      },
+    }))
+
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH = '1'
+    process.env.AWS_REGION = 'us-east-1'
+
+    try {
+      // No USE_GATEWAY env — cold restore from secure-storage only.
+      expect(getGatewayAuth()).toBeNull()
+      const client = await getAnthropicClient({ maxRetries: 0 })
+      expect(clientKind(client)).toBe('Anthropic')
+      expect(client).toBeInstanceOf(Anthropic)
+      expect(client).not.toBeInstanceOf(BedrockClient)
+      expect(getAPIProvider()).toBe('gateway')
+      expect(getGatewayAuth()?.jwt).toBe('fresh-from-idp')
+      expect(client.authToken).toBe('fresh-from-idp')
+      expect(String(client.baseURL)).toContain('gw.example')
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      setTestGatewaySecureStorageRead_FOR_TESTS(null)
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    }
+  })
 })

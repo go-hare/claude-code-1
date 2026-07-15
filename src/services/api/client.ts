@@ -188,11 +188,13 @@ export async function getAnthropicClient({
       // present (sync densable; live TLS probe denser via restoreGatewayAuth).
       tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
     }
-    // Fire-and-forget densable when transport absent (skipped/error); real
-    // postToken inject denser at enterprise login sites.
-    void maybeRefreshGatewayIdp()
+    // Official lXe: await IdP refresh BEFORE provider/expired checks so a
+    // cold-restored expired JWT + idpRefreshToken can renew before Wzo throw.
+    // In-flight coalesced inside maybeRefreshGatewayIdp (store path).
+    await maybeRefreshGatewayIdp()
   } catch {
-    // densable optional
+    // densable optional — transient refresh errors must not block client build;
+    // expired check below still surfaces permanent failure.
   }
 
   // Official CAh → F_({ forAnthropicAPI: true, hasBodyIdleWatchdog: CAh(provider) })
@@ -610,8 +612,8 @@ export async function getAnthropicClient({
     return new AnthropicBedrockMantle(mantleArgs) as unknown as Anthropic
   }
 
-  // Gateway session was applied before requestProvider resolution (env +
-  // secure-storage). Build the Anthropic client with gateway auth when present.
+  // Gateway session was applied + IdP-refreshed (official lXe) before
+  // requestProvider resolution. Official Wzo: pure expiresAt check after await.
   const gatewaySession = getGatewayAuth()
   if (requestProvider === 'gateway') {
     if (!gatewaySession || isGatewayAuthExpired(gatewaySession)) {

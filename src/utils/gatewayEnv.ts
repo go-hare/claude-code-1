@@ -9,6 +9,7 @@
  * Full enterpriseGateway / TLS trust restore + idp refresh (SJe) denser.
  */
 
+import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 
 export type GatewayAuthSession = {
@@ -65,6 +66,25 @@ let testSecureStorageRead: (() => Record<string, unknown> | null) | null = null
 /** Optional clock for tests (default Date.now). */
 let gatewaySecureStorageNowMs: () => number = () => Date.now()
 
+/**
+ * Official zzo / eTn densable — in-flight IdP refresh promise for store path
+ * (lXe). Concurrent getAnthropicClient / provider calls share one refresh.
+ */
+let gatewayRefreshInFlight: Promise<GatewayIdpRefreshResult> | null = null
+
+/**
+ * Official _E.post densable host for IdP token refresh. Tests inject via
+ * setTestGatewayIdpPostToken_FOR_TESTS so we never need process-global axios
+ * mock.module pollution.
+ */
+let testGatewayIdpPostToken:
+  | ((args: {
+      endpoint: string
+      body: string
+      headers: Record<string, string>
+    }) => Promise<{ data: unknown }>)
+  | null = null
+
 function clearSecureStorageRestoreSkipState(): void {
   secureStorageRestoreSucceeded = false
   secureStorageSkipUntilMs = 0
@@ -76,11 +96,41 @@ export function invalidateGatewaySecureStorageRestoreCache(): void {
   clearSecureStorageRestoreSkipState()
 }
 
+/** Official getGatewayRefreshInFlight densable. */
+export function getGatewayRefreshInFlight(): Promise<GatewayIdpRefreshResult> | null {
+  return gatewayRefreshInFlight
+}
+
+/** Official setGatewayRefreshInFlight densable. */
+export function setGatewayRefreshInFlight(
+  promise: Promise<GatewayIdpRefreshResult> | null,
+): void {
+  gatewayRefreshInFlight = promise
+}
+
 /** @internal test helper — reset negative cache + clear read override. */
 export function resetGatewaySecureStorageRestoreCache_FOR_TESTS(): void {
   clearSecureStorageRestoreSkipState()
   testSecureStorageRead = null
   gatewaySecureStorageNowMs = () => Date.now()
+  gatewayRefreshInFlight = null
+  testGatewayIdpPostToken = null
+}
+
+/**
+ * @internal test helper — inject default IdP postToken transport (store path /
+ * client await lXe). Pass null to clear.
+ */
+export function setTestGatewayIdpPostToken_FOR_TESTS(
+  postToken:
+    | ((args: {
+        endpoint: string
+        body: string
+        headers: Record<string, string>
+      }) => Promise<{ data: unknown }>)
+    | null,
+): void {
+  testGatewayIdpPostToken = postToken
 }
 
 /** @internal test helper — inject clock for backoff tests. */
@@ -112,7 +162,8 @@ export function setGatewayAuth(session: GatewayAuthSession | null): void {
 
 export function clearGatewayAuth(): void {
   gatewayAuth = null
-  // Logout / test reset: allow a later restore after new credentials are written.
+  // Logout / test reset: drop any in-flight IdP refresh and allow restore again.
+  gatewayRefreshInFlight = null
   clearSecureStorageRestoreSkipState()
 }
 
@@ -506,24 +557,60 @@ export async function persistEnterpriseGatewayCredential(input: {
   }
 }
 
+type GatewayIdpPostToken = (args: {
+  endpoint: string
+  body: string
+  headers: Record<string, string>
+}) => Promise<{ data: unknown }>
+
+/**
+ * Official _E.post densable — axios form-urlencoded token refresh (10s timeout).
+ * Test host overrides via setTestGatewayIdpPostToken_FOR_TESTS.
+ */
+async function defaultPostGatewayIdpToken(args: {
+  endpoint: string
+  body: string
+  headers: Record<string, string>
+}): Promise<{ data: unknown }> {
+  if (testGatewayIdpPostToken) {
+    return testGatewayIdpPostToken(args)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const axiosMod = require('axios') as typeof import('axios') & {
+    default?: typeof import('axios')
+  }
+  const axios = axiosMod.default ?? axiosMod
+  const res = await axios.post(args.endpoint, args.body, {
+    headers: args.headers,
+    timeout: 10_000,
+  })
+  return { data: res.data }
+}
+
+function defaultGatewayIdpLog(
+  msg: string,
+  level: 'warn' | 'debug' = 'debug',
+): void {
+  logForDebugging(msg, { level })
+}
+
 /**
  * Official SJe densable — refresh gateway JWT via IdP refresh_token when due.
- * Injectable transport; enterpriseGateway secureStorage persist densable via
- * persistEnterpriseGatewayCredential when persist omitted (pinned only).
+ * Matches official lXe + Wah:
+ * - default transport is axios post (injectable for tests)
+ * - store-path calls coalesce on gatewayRefreshInFlight
+ * - enterpriseGateway secureStorage persist densable via
+ *   persistEnterpriseGatewayCredential when persist omitted (pinned only)
  */
 export async function maybeRefreshGatewayIdp(input?: {
   session?: GatewayAuthSession | null
   nowMs?: number
   skewMs?: number
   /**
-   * Official QS.post(tokenEndpoint, form-urlencoded body).
-   * When omitted and refresh is due → error (no transport).
+   * Official _E.post(tokenEndpoint, form-urlencoded body).
+   * When omitted, uses default axios transport (or test inject).
    */
-  postToken?: (args: {
-    endpoint: string
-    body: string
-    headers: Record<string, string>
-  }) => Promise<{ data: unknown }>
+  postToken?: GatewayIdpPostToken
   /** Optional persist denser after refresh (enterpriseGateway secureStorage). */
   persist?: (session: GatewayAuthSession) => Promise<void> | void
   /**
@@ -541,7 +628,65 @@ export async function maybeRefreshGatewayIdp(input?: {
   isInvalidGrant?: (err: unknown) => boolean
   log?: (msg: string, level?: 'warn' | 'debug') => void
 }): Promise<GatewayIdpRefreshResult> {
-  const session = input?.session === undefined ? gatewayAuth : input.session
+  // Official lXe: store-path only — skip early, then coalesce in-flight.
+  const usesStoreSession = input?.session === undefined
+  if (usesStoreSession) {
+    const current = gatewayAuth
+    if (!current) return { status: 'skipped', reason: 'no_session' }
+    if (!current.idpRefreshToken) {
+      return { status: 'skipped', reason: 'no_refresh_token' }
+    }
+    const nowMs = input?.nowMs ?? Date.now()
+    if (
+      !shouldRefreshGatewayIdp(
+        current,
+        nowMs,
+        input?.skewMs ?? GATEWAY_IDP_REFRESH_SKEW_MS,
+      )
+    ) {
+      return { status: 'skipped', reason: 'not_due' }
+    }
+    if (gatewayRefreshInFlight) {
+      return gatewayRefreshInFlight
+    }
+    const run = runGatewayIdpRefresh(input, {
+      session: current,
+      usesStoreSession: true,
+    }).finally(() => {
+      if (gatewayRefreshInFlight === run) {
+        gatewayRefreshInFlight = null
+      }
+    })
+    gatewayRefreshInFlight = run
+    return run
+  }
+
+  return runGatewayIdpRefresh(input, {
+    session: input.session ?? null,
+    usesStoreSession: false,
+  })
+}
+
+async function runGatewayIdpRefresh(
+  input:
+    | {
+        nowMs?: number
+        skewMs?: number
+        postToken?: GatewayIdpPostToken
+        persist?: (session: GatewayAuthSession) => Promise<void> | void
+        autoPersist?: boolean
+        apply?: (session: GatewayAuthSession) => void
+        clearOnInvalidGrant?: boolean
+        isInvalidGrant?: (err: unknown) => boolean
+        log?: (msg: string, level?: 'warn' | 'debug') => void
+      }
+    | undefined,
+  opts: {
+    session: GatewayAuthSession | null
+    usesStoreSession: boolean
+  },
+): Promise<GatewayIdpRefreshResult> {
+  const session = opts.session
   if (!session) return { status: 'skipped', reason: 'no_session' }
   if (!session.idpRefreshToken) {
     return { status: 'skipped', reason: 'no_refresh_token' }
@@ -556,13 +701,8 @@ export async function maybeRefreshGatewayIdp(input?: {
   ) {
     return { status: 'skipped', reason: 'not_due' }
   }
-  if (!input?.postToken) {
-    return {
-      status: 'error',
-      message: 'gateway idp refresh gated: no transport',
-      retryable: false,
-    }
-  }
+  const log = input?.log ?? defaultGatewayIdpLog
+  const postToken = input?.postToken ?? defaultPostGatewayIdpToken
   const endpoint = resolveGatewayIdpTokenEndpoint(session)
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
@@ -579,25 +719,27 @@ export async function maybeRefreshGatewayIdp(input?: {
     await persistEnterpriseGatewayCredential({
       session: next,
       expectedIdpRefreshToken: expectedRefresh,
-      log: input?.log,
+      log,
     })
   }
   try {
-    const res = await input.postToken({
+    const res = await postToken({
       endpoint,
       body,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
     const token = parseGatewayIdpTokenResponse(res.data)
     if (!token) {
+      log('[gateway-refresh] malformed response; will retry later')
       return {
         status: 'error',
         message: 'malformed idp token response',
         retryable: true,
       }
     }
-    // Official: discard if auth changed mid-refresh
-    if (input?.session === undefined && getGatewayAuth() !== session) {
+    // Official: discard if auth changed mid-refresh (store path only).
+    if (opts.usesStoreSession && getGatewayAuth() !== session) {
+      log('[gateway-refresh] auth changed mid-refresh; discarding')
       return {
         status: 'error',
         message: 'auth changed mid-refresh',
@@ -611,6 +753,7 @@ export async function maybeRefreshGatewayIdp(input?: {
     } catch {
       // secureStorage densable optional — in-memory already applied
     }
+    log('[gateway-refresh] refreshed gateway JWT')
     return { status: 'refreshed', session: next }
   } catch (err) {
     const invalid =
@@ -623,6 +766,13 @@ export async function maybeRefreshGatewayIdp(input?: {
         (err as { response: { data: { error: string } } }).response.data
           .error === 'invalid_grant')
     if (invalid) {
+      if (opts.usesStoreSession && getGatewayAuth() !== session) {
+        log(
+          '[gateway-refresh] auth changed mid-refresh; discarding invalid_grant',
+        )
+        return { status: 'invalid_grant', clearedRefresh: false }
+      }
+      log('[gateway-refresh] IdP rejected refresh token; clearing it', 'warn')
       const clear = input?.clearOnInvalidGrant !== false
       if (clear) {
         const cleared: GatewayAuthSession = {
@@ -638,6 +788,9 @@ export async function maybeRefreshGatewayIdp(input?: {
       }
       return { status: 'invalid_grant', clearedRefresh: clear }
     }
+    log(
+      `[gateway-refresh] transient failure: ${err instanceof Error ? err.message : String(err)}`,
+    )
     return {
       status: 'error',
       message: err instanceof Error ? err.message : String(err),

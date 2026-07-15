@@ -34,8 +34,10 @@ import {
   restoreGatewayAuth,
   setGatewayAuth,
   setGatewaySecureStorageNowMs_FOR_TESTS,
+  setTestGatewayIdpPostToken_FOR_TESTS,
   setTestGatewaySecureStorageRead_FOR_TESTS,
   shouldRefreshGatewayIdp,
+  getGatewayRefreshInFlight,
   toEnterpriseGatewayCredential,
   tryRestoreGatewayAuthFromSecureStorage,
   GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
@@ -244,11 +246,20 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     })
     expect(skipped.status).toBe('skipped')
 
-    const noTransport = await maybeRefreshGatewayIdp({
-      session: base,
-      nowMs: Date.now(),
+    // Default transport is axios (official _E.post); inject failing host so we
+    // never hang on a real network call in unit tests.
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      throw new Error('no transport in test')
     })
-    expect(noTransport.status).toBe('error')
+    try {
+      const noTransport = await maybeRefreshGatewayIdp({
+        session: base,
+        nowMs: Date.now(),
+      })
+      expect(noTransport.status).toBe('error')
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+    }
 
     const refreshed = await maybeRefreshGatewayIdp({
       session: base,
@@ -287,6 +298,53 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       clearedRefresh: true,
     })
     expect(getGatewayAuth()?.idpRefreshToken).toBeUndefined()
+  })
+
+  test('store-path IdP refresh coalesces in-flight (official lXe)', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let posts = 0
+    let release!: (v: { data: unknown }) => void
+    const gate = new Promise<{ data: unknown }>(resolve => {
+      release = resolve
+    })
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      posts++
+      return gate
+    })
+
+    // unpinned so auto-persist does not touch real keychain during unit test.
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'old',
+      expiresAtMs: Date.now() + 60_000,
+      idpRefreshToken: 'r1',
+      unpinned: true,
+    })
+
+    try {
+      const a = maybeRefreshGatewayIdp()
+      const b = maybeRefreshGatewayIdp()
+      expect(getGatewayRefreshInFlight()).toBeTruthy()
+      release({
+        data: {
+          access_token: 'coalesced',
+          expires_in: 300,
+          refresh_token: 'r2',
+        },
+      })
+      const [ra, rb] = await Promise.all([a, b])
+      expect(ra.status).toBe('refreshed')
+      expect(rb.status).toBe('refreshed')
+      expect(posts).toBe(1)
+      expect(getGatewayAuth()?.jwt).toBe('coalesced')
+      expect(getGatewayRefreshInFlight()).toBeNull()
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      clearGatewayAuth()
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    }
   })
 
   test('enterpriseGateway secureStorage persist densable (JYl/XYl)', async () => {
