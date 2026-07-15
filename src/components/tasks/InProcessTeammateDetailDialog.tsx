@@ -63,8 +63,9 @@ export function InProcessTeammateDetailDialog({
 
   const activity = describeTeammateActivity(teammate);
 
-  const tokenCount = teammate.result?.totalTokens ?? teammate.progress?.tokenCount;
-  const toolUseCount = teammate.result?.totalToolUseCount ?? teammate.progress?.toolUseCount;
+  // Prefer the larger of result vs live progress (0 must not hide rebuilt progress).
+  const tokenCount = Math.max(teammate.result?.totalTokens ?? 0, teammate.progress?.tokenCount ?? 0);
+  const toolUseCount = Math.max(teammate.result?.totalToolUseCount ?? 0, teammate.progress?.toolUseCount ?? 0);
 
   const displayPrompt = truncateToWidth(teammate.prompt, 300);
 

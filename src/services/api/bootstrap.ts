@@ -137,19 +137,25 @@ export async function fetchBootstrapData(): Promise<void> {
     const orgUuid =
       response.oauth_account?.organization_uuid ??
       getGlobalConfig().oauthAccount?.organizationUuid
-    const orgModelDefault = response.org_model_default
-      ? {
-          ...response.org_model_default,
-          ...(orgUuid ? { orgUuid } : {}),
-        }
-      : null
+    // Only update org default when the field is present. Omitting it on a
+    // partial bootstrap response must not wipe a previously good disk cache.
+    const orgModelDefaultUpdate =
+      response.org_model_default != null
+        ? {
+            ...response.org_model_default,
+            ...(orgUuid ? { orgUuid } : {}),
+          }
+        : response.org_model_default === null
+          ? null
+          : undefined
 
     // Only persist if data actually changed — avoids a config write on every startup.
     const config = getGlobalConfig()
     if (
       isEqual(config.clientDataCache, clientData) &&
       isEqual(config.additionalModelOptionsCache, additionalModelOptions) &&
-      isEqual(config.orgModelDefaultCache ?? null, orgModelDefault)
+      (orgModelDefaultUpdate === undefined ||
+        isEqual(config.orgModelDefaultCache ?? null, orgModelDefaultUpdate))
     ) {
       logForDebugging('[Bootstrap] Cache unchanged, skipping write')
       return
@@ -160,7 +166,9 @@ export async function fetchBootstrapData(): Promise<void> {
       ...current,
       clientDataCache: clientData,
       additionalModelOptionsCache: additionalModelOptions,
-      orgModelDefaultCache: orgModelDefault,
+      ...(orgModelDefaultUpdate !== undefined
+        ? { orgModelDefaultCache: orgModelDefaultUpdate }
+        : {}),
     }))
     // Invalidate session-level org default so the next resolve re-reads cache.
     try {

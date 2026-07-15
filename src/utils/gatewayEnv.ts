@@ -157,6 +157,29 @@ export function applyGatewayFromEnvResult(
 }
 
 /**
+ * Ensure gateway env / secure-storage session is visible to getAPIProvider()
+ * and other early callers that do not go through getAnthropicClient().
+ * Does not throw on missing/invalid env (client path still validates).
+ */
+export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
+  if (getGatewayAuth()) {
+    return getGatewayAuth()
+  }
+  const fromEnv = resolveGatewayFromEnv()
+  if (fromEnv.status === 'ok') {
+    applyGatewayFromEnvResult(fromEnv)
+  }
+  if (!getGatewayAuth()) {
+    try {
+      tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    } catch {
+      // secure-storage restore optional
+    }
+  }
+  return getGatewayAuth()
+}
+
+/**
  * Official YZm — refresh when idp token expires within 5 minutes.
  */
 export const GATEWAY_IDP_REFRESH_SKEW_MS = 300_000

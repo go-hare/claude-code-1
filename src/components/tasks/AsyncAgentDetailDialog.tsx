@@ -60,9 +60,10 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack }: P
 
   const displayPrompt = agent.prompt.length > 300 ? agent.prompt.substring(0, 297) + '…' : agent.prompt;
 
-  // Get tokens and tool uses (from result if completed, otherwise from progress)
-  const tokenCount = agent.result?.totalTokens ?? agent.progress?.tokenCount;
-  const toolUseCount = agent.result?.totalToolUseCount ?? agent.progress?.toolUseCount;
+  // Prefer the larger of result vs live progress. result.totalTokens can be 0
+  // (last-message finalize) while progress already has the rebuilt multi-turn total.
+  const tokenCount = Math.max(agent.result?.totalTokens ?? 0, agent.progress?.tokenCount ?? 0);
+  const toolUseCount = Math.max(agent.result?.totalToolUseCount ?? 0, agent.progress?.toolUseCount ?? 0);
 
   const title = (
     <Text>

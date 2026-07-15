@@ -166,22 +166,45 @@ export async function getAnthropicClient({
   await checkAndRefreshOAuthTokenIfNeeded()
   logForDebugging('[API:auth] OAuth token check complete')
 
-  // Official uRi first branch: resolve early so apiKeyHelper headers are not
-  // layered on top of the gateway JWT session.
+  // Official uRi first branch: resolve + apply gateway BEFORE getAPIProvider()
+  // and before cloud client branches. Env/secure-storage session must be
+  // visible to getAPIProvider() (gateway ranks above BEDROCK/VERTEX/etc.).
   const gatewayFromEnvEarly = resolveGatewayFromEnv()
   if (gatewayFromEnvEarly.status === 'missing') {
     logForDebugging(gatewayFromEnvEarly.message)
   } else if (gatewayFromEnvEarly.status === 'invalid_url') {
     throw new Error(gatewayFromEnvEarly.message)
   }
-
-  if (!isClaudeAISubscriber() && gatewayFromEnvEarly.status !== 'ok') {
-    await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
+  applyGatewayFromEnvResult(gatewayFromEnvEarly)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {
+      getGatewayAuth: getGw,
+      tryRestoreGatewayAuthFromSecureStorage,
+      maybeRefreshGatewayIdp,
+    } = require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
+    if (!getGw()) {
+      // Else restore enterpriseGateway from secureStorage when gatewayTrust pin
+      // present (sync densable; live TLS probe denser via restoreGatewayAuth).
+      tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    }
+    // Fire-and-forget densable when transport absent (skipped/error); real
+    // postToken inject denser at enterprise login sites.
+    void maybeRefreshGatewayIdp()
+  } catch {
+    // densable optional
   }
 
   // Official CAh → F_({ forAnthropicAPI: true, hasBodyIdleWatchdog: CAh(provider) })
   // Provider for this client request matches current session provider (getAPIProvider).
+  // Must run AFTER env/secure-storage gateway apply so first cold start with
+  // CLAUDE_CODE_USE_GATEWAY does not mis-route to BedrockClient.
   const requestProvider = getAPIProvider()
+
+  // Skip apiKeyHelper headers when a gateway JWT session is active.
+  if (!isClaudeAISubscriber() && requestProvider !== 'gateway') {
+    await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
+  }
   const hasBodyIdleWatchdog = shouldEnableBodyIdleWatchdog({
     requestProvider,
     currentProvider: requestProvider,
@@ -222,6 +245,10 @@ export async function getAnthropicClient({
     }),
   }
   // Official USE_*/SKIP_* densables for cloud provider client selection.
+  // IMPORTANT: Client construction must follow getAPIProvider() (requestProvider),
+  // not raw env alone. Gateway session ranks above BEDROCK/VERTEX/etc. in
+  // getAPIProvider(); building BedrockClient while provider==="gateway" sends
+  // gateway-mapped models to the wrong endpoint with wrong auth.
   let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
   let useFoundry = isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
   let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
@@ -253,7 +280,9 @@ export async function getAnthropicClient({
   } catch {
     // keep raw env fallback
   }
-  if (useBedrock) {
+  // Only construct cloud clients when getAPIProvider selected that provider.
+  // Gateway / firstParty fall through past these branches.
+  if (requestProvider === 'bedrock' && useBedrock) {
     const { BedrockClient } = await import('./bedrockClient.js')
     // Use region override for small fast model if specified
     const awsRegion =
@@ -312,7 +341,7 @@ export async function getAnthropicClient({
     // we have always been lying about the return type - this doesn't support batching or models
     return new BedrockClient(bedrockArgs) as unknown as Anthropic
   }
-  if (useFoundry) {
+  if (requestProvider === 'foundry' && useFoundry) {
     const { AnthropicFoundry } = await import('@anthropic-ai/foundry-sdk')
     // Determine Azure AD token provider based on configuration
     // SDK reads ANTHROPIC_FOUNDRY_API_KEY by default
@@ -342,7 +371,7 @@ export async function getAnthropicClient({
     // we have always been lying about the return type - this doesn't support batching or models
     return new AnthropicFoundry(foundryArgs) as unknown as Anthropic
   }
-  if (useVertex) {
+  if (requestProvider === 'vertex' && useVertex) {
     // Refresh GCP credentials if gcpAuthRefresh is configured and credentials are expired
     // This is similar to how we handle AWS credential refresh for Bedrock
     if (!skipVertexAuth) {
@@ -461,7 +490,7 @@ export async function getAnthropicClient({
     // keep raw env fallbacks + local peel helpers
   }
 
-  if (useAnthropicAws) {
+  if (requestProvider === 'anthropicAws' && useAnthropicAws) {
     const { AnthropicAwsClient } = await import('./anthropicAwsClient.js')
     const peeled = peelAuth(
       (ARGS.defaultHeaders ?? {}) as Record<string, string>,
@@ -515,7 +544,7 @@ export async function getAnthropicClient({
     return new AnthropicAwsClient(awsArgs) as unknown as Anthropic
   }
 
-  if (useMantle) {
+  if (requestProvider === 'mantle' && useMantle) {
     const { AnthropicBedrockMantle } = await import('@anthropic-ai/bedrock-sdk')
     const peeled = peelAuth(
       (ARGS.defaultHeaders ?? {}) as Record<string, string>,
@@ -581,30 +610,10 @@ export async function getAnthropicClient({
     return new AnthropicBedrockMantle(mantleArgs) as unknown as Anthropic
   }
 
-  // Official uRi: CLAUDE_CODE_USE_GATEWAY + BASE_URL + AUTH_TOKEN pins an
-  // unpinned Cloud-gateway session (jwt as authToken, baseURL override).
-  // Else restore enterpriseGateway from secureStorage when gatewayTrust pin
-  // present (sync densable; live TLS probe denser via restoreGatewayAuth).
-  // Official SJe IdP refresh densable when idpRefreshToken nearing expiry.
-  applyGatewayFromEnvResult(gatewayFromEnvEarly)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const {
-      getGatewayAuth: getGw,
-      tryRestoreGatewayAuthFromSecureStorage,
-      maybeRefreshGatewayIdp,
-    } = require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
-    if (!getGw()) {
-      tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
-    }
-    // Fire-and-forget densable when transport absent (skipped/error); real
-    // postToken inject denser at enterprise login sites.
-    void maybeRefreshGatewayIdp()
-  } catch {
-    // densable optional
-  }
+  // Gateway session was applied before requestProvider resolution (env +
+  // secure-storage). Build the Anthropic client with gateway auth when present.
   const gatewaySession = getGatewayAuth()
-  if (getAPIProvider() === 'gateway') {
+  if (requestProvider === 'gateway') {
     if (!gatewaySession || isGatewayAuthExpired(gatewaySession)) {
       throw new Error(formatGatewaySessionExpiredError())
     }

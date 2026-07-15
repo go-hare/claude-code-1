@@ -1304,6 +1304,23 @@ export async function runInProcessTeammate(
             )
           }
 
+          // Final rebuild after stream ends — last message_delta may mutate
+          // usage after the final content_block_stop with no further yields.
+          rebuildProgressFromMessages(
+            tracker,
+            iterationMessages,
+            resolveActivity,
+            toolUseContext.options.tools,
+          )
+          updateTaskState(
+            taskId,
+            task => ({
+              ...task,
+              progress: getProgressUpdate(tracker),
+            }),
+            setAppState,
+          )
+
           return { success: true, messages: iterationMessages }
         })
       })

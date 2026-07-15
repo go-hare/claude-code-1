@@ -545,6 +545,7 @@ export function storeOAuthAccountInfo({
   if (displayName) {
     accountInfo.displayName = displayName
   }
+  let accountChanged = false
   saveGlobalConfig(current => {
     // For oauthAccount we need to compare content since it's an object
     if (
@@ -561,6 +562,21 @@ export function storeOAuthAccountInfo({
     ) {
       return current
     }
+    accountChanged =
+      current.oauthAccount?.accountUuid !== accountInfo.accountUuid ||
+      current.oauthAccount?.organizationUuid !== accountInfo.organizationUuid
     return { ...current, oauthAccount: accountInfo }
   })
+  // Org-default session memo is keyed only by process state; account/org switch
+  // without full logout must re-resolve from disk (orgUuid-bound cache).
+  if (accountChanged) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { setResolvedOrgDefault } =
+        require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+      setResolvedOrgDefault(undefined)
+    } catch {
+      // bootstrap isolation — optional
+    }
+  }
 }

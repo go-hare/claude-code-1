@@ -1,5 +1,5 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
-import { getGatewayAuth } from '../gatewayEnv.js'
+import { ensureGatewayAuthApplied, getGatewayAuth } from '../gatewayEnv.js'
 import {
   isAnthropicAwsProviderEnabled,
   isMantleProviderEnabled,
@@ -32,6 +32,10 @@ export function getAPIProvider(
   if (modelType === 'openai') return 'openai'
   if (modelType === 'gemini') return 'gemini'
   if (modelType === 'grok') return 'grok'
+
+  // Cold start: apply USE_GATEWAY env / secure-storage before ranking so
+  // callers that never hit getAnthropicClient() still see gateway session.
+  ensureGatewayAuthApplied()
 
   // Official xn(): if (o_()) return "gateway" — pinned gatewayAuth session wins.
   if (getGatewayAuth()) return 'gateway'

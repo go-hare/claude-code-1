@@ -51,6 +51,14 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
     updated.clientDataCache = undefined;
     return updated;
   });
+  // Drop session-level org default so the next resolve re-reads disk (or null).
+  // Disk clear above is not enough — resolveOrgDefaultSetting() memoizes.
+  try {
+    const { setResolvedOrgDefault } = await import('../../bootstrap/state.js');
+    setResolvedOrgDefault(undefined);
+  } catch {
+    // bootstrap isolation — optional
+  }
 }
 
 function clearChatGPTSettingsAuthMode(): void {

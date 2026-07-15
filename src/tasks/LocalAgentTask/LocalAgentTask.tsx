@@ -161,8 +161,11 @@ export function updateProgressFromMessage(
  *
  * Usage is counted once per API response id (message.message.id). Parallel
  * tool-call streaming splits one response into multiple AssistantMessage
- * records that share the same id and the same final usage object — summing
- * each would multi-count output_tokens.
+ * records that share the same id. First-party streaming also yields a separate
+ * usage snapshot per content_block_stop and only writes final message_delta
+ * usage onto the last sibling — so for a given id we must take the last usage
+ * (last-wins), not the first. Summing every sibling would multi-count
+ * output_tokens when they share one final usage object.
  */
 export function rebuildProgressFromMessages(
   tracker: ProgressTracker,
@@ -175,7 +178,11 @@ export function rebuildProgressFromMessages(
   tracker.cumulativeOutputTokens = 0;
   tracker.recentActivities = [];
 
-  const countedResponseIds = new Set<string>();
+  // Last usage seen for each response id (message_delta lands on the last
+  // yielded sibling for first-party multi-block streams).
+  const usageByResponseId = new Map<string, BetaUsage>();
+  const anonymousUsages: BetaUsage[] = [];
+
   for (const message of messages) {
     if (message.type !== 'assistant') {
       continue;
@@ -216,13 +223,15 @@ export function rebuildProgressFromMessages(
         ? message.message.id
         : undefined;
     if (responseId) {
-      if (countedResponseIds.has(responseId)) {
-        // Sibling split of the same API response — tools already counted above.
-        continue;
-      }
-      countedResponseIds.add(responseId);
+      // Last-wins: later siblings (or in-place mutations of the last sibling)
+      // carry message_delta final usage.
+      usageByResponseId.set(responseId, usage);
+    } else {
+      anonymousUsages.push(usage);
     }
+  }
 
+  for (const usage of [...usageByResponseId.values(), ...anonymousUsages]) {
     const inputTotal =
       (usage.input_tokens as number) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
     if (inputTotal > 0) {

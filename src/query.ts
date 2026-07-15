@@ -257,6 +257,10 @@ export type QueryParams = {
   deps?: QueryDeps
 }
 
+// Session latch for Fable overage consent when no org/account key is available
+// (API-key users). Survives across query() turns within the same process.
+let fableSessionFallbackConsented = false
+
 // -- query loop state
 
 // Mutable state carried between loop iterations
@@ -1011,11 +1015,17 @@ async function* queryLoop(
         const fallbackModel = getDefaultMainLoopModel()
         const fallbackAllowed =
           Boolean(fallbackModel) && !isFableModel(fallbackModel)
+        // Session latch when no org/account key (API-key users): avoid re-prompt
+        // every turn after consent. Module-level so it survives across query().
         const flow = await runFableOverageConsentFlow({
           model: currentModel,
           requestDialog: toolUseContext.requestDialog ?? null,
           organizationUuid: oauth?.organizationUuid ?? null,
           accountUuid: oauth?.accountUuid ?? null,
+          sessionFallbackConsented: fableSessionFallbackConsented,
+          onSessionConsent: () => {
+            fableSessionFallbackConsented = true
+          },
           signal: toolUseContext.abortController.signal,
           parkTimeoutMs: resolveFableBridgeDialogTimeoutMsOrDefault(),
           fallbackModel: fallbackAllowed ? fallbackModel : null,

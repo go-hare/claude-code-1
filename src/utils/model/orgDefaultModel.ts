@@ -51,8 +51,12 @@ export function getOrgModelDefaultCache(): OrgModelDefaultCache | null {
     return null
   }
   const orgUuid = config.oauthAccount?.organizationUuid
-  if (cached.orgUuid != null && orgUuid != null && cached.orgUuid !== orgUuid) {
-    return null
+  // Bound cache must match current org. Unbound cache (legacy write without
+  // orgUuid) must not be inherited once the user has an organization.
+  if (orgUuid != null) {
+    if (cached.orgUuid == null || cached.orgUuid !== orgUuid) {
+      return null
+    }
   }
   // Strip control characters from the model name (official densable).
   const cleaned = cached.name.replace(

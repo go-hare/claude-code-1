@@ -1594,6 +1594,21 @@ export const AgentTool = buildTool({
             // closure owns a separate stop function (stopBackgroundedSummarization).
             stopForegroundSummarization?.();
 
+            // Final rebuild after stream ends — last message_delta may have mutated
+            // usage after the final content_block_stop yield with no further
+            // messages (runAgent filters stream_event).
+            if (!wasBackgrounded) {
+              rebuildProgressFromMessages(
+                syncTracker,
+                agentMessages,
+                syncResolveActivity,
+                toolUseContext.options.tools,
+              );
+              if (foregroundTaskId && getSdkAgentProgressSummariesEnabled()) {
+                updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
+              }
+            }
+
             // Unregister foreground task if agent completed without being backgrounded
             if (foregroundTaskId) {
               unregisterAgentForeground(foregroundTaskId, rootSetAppState);

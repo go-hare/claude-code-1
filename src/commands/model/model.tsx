@@ -19,6 +19,7 @@ import {
   isFastModeEnabled,
   isFastModeSupportedByModel,
 } from '../../utils/fastMode.js';
+import { getOauthAccountInfo } from '../../utils/auth.js';
 import { shouldShowFableConsentDialog } from '../../utils/fableConsent.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
@@ -108,9 +109,14 @@ function ModelPickerWrapper({
 
   function handleSelect(model: string | null, effort: EffortLevel | undefined): void {
     // Official model_fable_consent densable gate before committing Fable.
+    // Pass org/account identity so persisted fableOverageConsentV2 is honored
+    // (query.ts already does this; the /model picker previously omitted it).
+    const oauth = getOauthAccountInfo();
     if (
       shouldShowFableConsentDialog({
         model,
+        organizationUuid: oauth?.organizationUuid ?? null,
+        accountUuid: oauth?.accountUuid ?? null,
         sessionFallbackConsented: fableSessionFallback,
       })
     ) {
@@ -121,8 +127,11 @@ function ModelPickerWrapper({
   }
 
   if (pendingFable) {
+    const oauth = getOauthAccountInfo();
     return (
       <FableConsentDialog
+        organizationUuid={oauth?.organizationUuid ?? null}
+        accountUuid={oauth?.accountUuid ?? null}
         onAccept={({ sessionFallback }) => {
           if (sessionFallback) setFableSessionFallback(true);
           const { model, effort } = pendingFable;

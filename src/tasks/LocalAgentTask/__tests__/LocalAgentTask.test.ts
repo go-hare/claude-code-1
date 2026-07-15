@@ -356,6 +356,48 @@ describe('rebuildProgressFromMessages', () => {
     expect(tracker.cumulativeOutputTokens).toBe(40)
     expect(getTokenCountFromTracker(tracker)).toBe(640)
   })
+
+  test('last-wins usage when message_delta only updates the last sibling', () => {
+    // Mirrors first-party streaming: each content_block_stop yields a usage
+    // snapshot copy; message_delta assigns final usage only to newMessages.at(-1).
+    const tracker = createProgressTracker()
+    const earlyUsage = {
+      input_tokens: 1200,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 400,
+    }
+    const finalUsage = {
+      input_tokens: 1200,
+      output_tokens: 80,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 400,
+    }
+    const thinkingPart = {
+      type: 'assistant',
+      message: {
+        id: 'msg_agent_1',
+        usage: { ...earlyUsage },
+        content: [{ type: 'thinking', thinking: 'plan' }],
+      },
+    } as any
+    const toolPart = {
+      type: 'assistant',
+      message: {
+        id: 'msg_agent_1',
+        usage: { ...earlyUsage },
+        content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }],
+      },
+    } as any
+    // message_delta only mutates the last yielded sibling
+    toolPart.message.usage = finalUsage
+
+    rebuildProgressFromMessages(tracker, [thinkingPart, toolPart])
+    expect(tracker.toolUseCount).toBe(1)
+    expect(tracker.latestInputTokens).toBe(1600)
+    expect(tracker.cumulativeOutputTokens).toBe(80)
+    expect(getTokenCountFromTracker(tracker)).toBe(1680)
+  })
 })
 
 describe('getProgressUpdate', () => {

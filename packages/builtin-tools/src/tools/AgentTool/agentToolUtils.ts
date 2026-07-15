@@ -352,12 +352,22 @@ export function finalizeAgentTool(
     }
   }
 
-  const totalTokens = getTokenCountFromUsage(
+  // Last-message usage is one API response window, not multi-turn agent spend.
+  // Rebuild last-wins per response id so multi-block / multi-turn totals match
+  // progress UI (and survive content_block_stop zeros until message_delta).
+  const tracker = createProgressTracker()
+  rebuildProgressFromMessages(tracker, agentMessages)
+  const rebuiltTokens = getTokenCountFromTracker(tracker)
+  const lastUsageTokens = getTokenCountFromUsage(
     lastAssistantMessage.message?.usage as Parameters<
       typeof getTokenCountFromUsage
     >[0],
   )
-  const totalToolUseCount = countToolUses(agentMessages)
+  const totalTokens = Math.max(rebuiltTokens, lastUsageTokens)
+  const totalToolUseCount = Math.max(
+    countToolUses(agentMessages),
+    tracker.toolUseCount,
+  )
 
   logEvent('tengu_agent_tool_completed', {
     agent_type:
