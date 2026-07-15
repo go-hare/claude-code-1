@@ -29,6 +29,15 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
   const secureStorage = getSecureStorage();
   secureStorage.delete();
 
+  // Drop in-memory gateway session + secure-storage restore negative cache.
+  // Disk wipe alone is not enough — getAPIProvider() ranks gatewayAuth first.
+  try {
+    const { clearGatewayAuth } = await import('../../utils/gatewayEnv.js');
+    clearGatewayAuth();
+  } catch {
+    // gatewayEnv optional in isolation
+  }
+
   await clearAuthRelatedCaches();
   saveGlobalConfig(current => {
     const updated = { ...current };

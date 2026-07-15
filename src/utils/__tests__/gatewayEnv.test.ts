@@ -551,9 +551,11 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     })
     expect(forced.status).toBe('skipped')
     expect(reads).toBe(4)
-    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true }).reason).toBe(
-      'already_attempted',
-    )
+    const cached = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(cached).toEqual({
+      status: 'skipped',
+      reason: 'already_attempted',
+    })
     expect(reads).toBe(4)
 
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
