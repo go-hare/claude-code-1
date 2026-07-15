@@ -490,6 +490,8 @@ export function regenerateSessionId(
   STATE.planSlugCache.delete(STATE.sessionId)
   // Official X8o + JUa densable on session clear/regenerate.
   STATE.refusalFallbackOccurred = false
+  // Fable key-less consent is conversation-session scoped (/clear starts fresh).
+  STATE.fableSessionFallbackConsented = false
   const latchReset = consumeRefusalFallbackModelLatch()
   // Regenerated sessions live in the current project: reset projectDir to
   // null so getTranscriptPath() derives from originalCwd.
@@ -541,8 +543,10 @@ export function switchSession(
   STATE.planSlugCache.delete(STATE.sessionId)
   // Official: when session id changes, clear refusalFallbackOccurred and
   // consume latch (JUa restores previous override if still on fallback).
+  // Fable key-less consent is also conversation-session scoped (/resume).
   if (STATE.sessionId !== sessionId) {
     STATE.refusalFallbackOccurred = false
+    STATE.fableSessionFallbackConsented = false
     void consumeRefusalFallbackModelLatch()
     STATE.parentSessionId = undefined
   }

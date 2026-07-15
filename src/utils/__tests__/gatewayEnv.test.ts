@@ -39,6 +39,7 @@ import {
   toEnterpriseGatewayCredential,
   tryRestoreGatewayAuthFromSecureStorage,
   GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
+  GATEWAY_SECURE_STORAGE_MISS_TTL_MS,
   GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS,
   GATEWAY_TLS_PIN_MISMATCH_MESSAGE,
 } from '../gatewayEnv.js'
@@ -516,9 +517,12 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     expect(reads).toBe(2)
   })
 
-  test('ensureGatewayAuthApplied only reads secure storage once', () => {
+  test('ensureGatewayAuthApplied TTL-skips empty secure storage reads', () => {
     clearGatewayAuth()
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 2_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
 
     let reads = 0
     setTestGatewaySecureStorageRead_FOR_TESTS(() => {
@@ -530,9 +534,9 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     ensureGatewayAuthApplied()
     expect(reads).toBe(1)
 
-    // Second default-host tryRestore reports already_attempted without reading.
+    // Within miss TTL: no re-read.
     const second = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
-    expect(second).toEqual({ status: 'skipped', reason: 'already_attempted' })
+    expect(second).toEqual({ status: 'skipped', reason: 'miss_ttl' })
     expect(reads).toBe(1)
 
     // clearGatewayAuth invalidates so a later cold path re-reads.
@@ -545,7 +549,7 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     ensureGatewayAuthApplied()
     expect(reads).toBe(3)
 
-    // force: true bypasses cache for this call and still marks attempted.
+    // force: true bypasses TTL for this call and re-applies miss TTL.
     invalidateGatewaySecureStorageRestoreCache()
     const forced = tryRestoreGatewayAuthFromSecureStorage({
       quiet: true,
@@ -556,9 +560,62 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     const cached = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
     expect(cached).toEqual({
       status: 'skipped',
-      reason: 'already_attempted',
+      reason: 'miss_ttl',
     })
     expect(reads).toBe(4)
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    clearGatewayAuth()
+  })
+
+  test('empty miss TTL allows restore after external credential write', () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 3_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
+
+    let reads = 0
+    let storageData: Record<string, unknown> | null = null
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return storageData
+    })
+
+    const empty = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(empty).toEqual({ status: 'skipped', reason: 'no_credential' })
+    expect(getGatewayAuth()).toBeNull()
+    expect(reads).toBe(1)
+
+    // External process writes credentials while we still hold miss TTL.
+    storageData = {
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'external-login-jwt',
+        expiresAtMs: Date.now() + 60_000,
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+      status: 'skipped',
+      reason: 'miss_ttl',
+    })
+    expect(reads).toBe(1)
+    expect(getGatewayAuth()).toBeNull()
+
+    // After TTL, re-read and restore.
+    now += GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+    const restored = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(restored.status).toBe('restored')
+    expect(getGatewayAuth()?.jwt).toBe('external-login-jwt')
+    expect(reads).toBe(2)
+
+    // Successful restore is permanent until clear (no further reads).
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+      status: 'skipped',
+      reason: 'already_attempted',
+    })
+    expect(reads).toBe(2)
 
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
     clearGatewayAuth()
@@ -638,10 +695,10 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     expect(getGatewayAuth()).toBeNull()
     expect(reads).toBe(1)
 
-    // Negative cache would otherwise freeze this miss forever.
+    // Miss TTL would otherwise freeze this miss until expiry.
     expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
       status: 'skipped',
-      reason: 'already_attempted',
+      reason: 'miss_ttl',
     })
     expect(reads).toBe(1)
 

@@ -36,15 +36,22 @@ let gatewayAuth: GatewayAuthSession | null = null
 
 /**
  * Process-level cache for default secure-storage restore.
- * - Successful miss (no usable credential / blocked): permanent until
- *   login/logout/credential write invalidates.
- * - storage_read_failed: short backoff only (external writers / transient IO
- *   must be able to recover in long-lived daemon/bridge processes).
+ * - Successful restore into memory: permanent skip until clear/invalidate
+ *   (session already in gatewayAuth; ensureGatewayAuthApplied short-circuits).
+ * - no_credential / untrusted / expired: TTL miss so long-lived daemon/bridge
+ *   can pick up credentials written by another process after startup.
+ * - storage_read_failed: shorter backoff for transient IO.
  * Env bootstrap still runs every ensureGatewayAuthApplied call.
  */
-let secureStorageRestoreAttempted = false
-/** ms epoch until which failed default-host reads may be retried. */
-let secureStorageReadFailBackoffUntilMs = 0
+/** Permanent only after a successful in-memory restore. */
+let secureStorageRestoreSucceeded = false
+/** ms epoch until which default-host miss/fail skips re-read. */
+let secureStorageSkipUntilMs = 0
+/** Why skipUntil is active — for distinct skip reasons in results. */
+let secureStorageSkipKind: 'miss' | 'read_fail' | null = null
+
+/** TTL after a successful empty/blocked secure-storage read (default host). */
+export const GATEWAY_SECURE_STORAGE_MISS_TTL_MS = 30_000
 
 /** Backoff after a failed secure-storage read (default host). */
 export const GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS = 5_000
@@ -58,16 +65,20 @@ let testSecureStorageRead: (() => Record<string, unknown> | null) | null = null
 /** Optional clock for tests (default Date.now). */
 let gatewaySecureStorageNowMs: () => number = () => Date.now()
 
+function clearSecureStorageRestoreSkipState(): void {
+  secureStorageRestoreSucceeded = false
+  secureStorageSkipUntilMs = 0
+  secureStorageSkipKind = null
+}
+
 /** Invalidate secure-storage restore negative cache (login / logout / credential write). */
 export function invalidateGatewaySecureStorageRestoreCache(): void {
-  secureStorageRestoreAttempted = false
-  secureStorageReadFailBackoffUntilMs = 0
+  clearSecureStorageRestoreSkipState()
 }
 
 /** @internal test helper — reset negative cache + clear read override. */
 export function resetGatewaySecureStorageRestoreCache_FOR_TESTS(): void {
-  secureStorageRestoreAttempted = false
-  secureStorageReadFailBackoffUntilMs = 0
+  clearSecureStorageRestoreSkipState()
   testSecureStorageRead = null
   gatewaySecureStorageNowMs = () => Date.now()
 }
@@ -102,8 +113,7 @@ export function setGatewayAuth(session: GatewayAuthSession | null): void {
 export function clearGatewayAuth(): void {
   gatewayAuth = null
   // Logout / test reset: allow a later restore after new credentials are written.
-  secureStorageRestoreAttempted = false
-  secureStorageReadFailBackoffUntilMs = 0
+  clearSecureStorageRestoreSkipState()
 }
 
 /** Official eGo — session present and expired. */
@@ -1057,11 +1067,11 @@ export async function restoreGatewayAuth(input?: {
  * without live TLS probe (proceed when pin present). Full probe remains denser
  * via restoreGatewayAuth({ probeFingerprint }).
  *
- * Default host (no injectable `storage`) is process-level negative-cached:
- * only the first miss path hits disk; subsequent calls return
- * `already_attempted` until invalidateGatewaySecureStorageRestoreCache /
- * clearGatewayAuth / successful persist. Injectable `storage` always reads
- * (tests / callers that supply their own host).
+ * Default host (no injectable `storage`):
+ * - After successful restore → permanent skip until clear/invalidate
+ * - After miss (no_credential / untrusted / expired) → TTL skip
+ * - After read failure → short backoff
+ * Injectable `storage` always reads (tests / explicit hosts).
  */
 export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   storage?: {
@@ -1080,14 +1090,17 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   const useDefaultHost = !input?.storage
   const nowMs = gatewaySecureStorageNowMs()
   if (useDefaultHost && !input?.force) {
-    if (secureStorageRestoreAttempted) {
+    if (secureStorageRestoreSucceeded) {
       return { status: 'skipped', reason: 'already_attempted' }
     }
-    if (
-      secureStorageReadFailBackoffUntilMs > 0 &&
-      nowMs < secureStorageReadFailBackoffUntilMs
-    ) {
-      return { status: 'skipped', reason: 'storage_read_backoff' }
+    if (secureStorageSkipUntilMs > 0 && nowMs < secureStorageSkipUntilMs) {
+      return {
+        status: 'skipped',
+        reason:
+          secureStorageSkipKind === 'read_fail'
+            ? 'storage_read_backoff'
+            : 'miss_ttl',
+      }
     }
   }
 
@@ -1111,16 +1124,12 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   } catch {
     if (useDefaultHost) {
       // Transient IO failure: short backoff, not permanent negative cache.
-      secureStorageReadFailBackoffUntilMs =
+      secureStorageRestoreSucceeded = false
+      secureStorageSkipUntilMs =
         nowMs + GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS
-      secureStorageRestoreAttempted = false
+      secureStorageSkipKind = 'read_fail'
     }
     return { status: 'skipped', reason: 'storage_read_failed' }
-  }
-
-  // Successful read: clear fail-backoff; mark permanent miss cache after plan.
-  if (useDefaultHost) {
-    secureStorageReadFailBackoffUntilMs = 0
   }
 
   const plan = planRestoreGatewayAuth({
@@ -1131,15 +1140,20 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
     const session = plan.status === 'restore' ? plan.session : plan.session
     ;(input?.apply ?? setGatewayAuth)(session)
     // Restored session is in memory; further cold reads are unnecessary until
-    // clear/invalidate. Mark attempted so ensureGatewayAuthApplied stays cheap.
+    // clear/invalidate.
     if (useDefaultHost) {
-      secureStorageRestoreAttempted = true
+      secureStorageRestoreSucceeded = true
+      secureStorageSkipUntilMs = 0
+      secureStorageSkipKind = null
     }
     return { status: 'restored', session }
   }
   if (plan.status === 'untrusted' || plan.status === 'expired') {
     if (useDefaultHost) {
-      secureStorageRestoreAttempted = true
+      // TTL miss — external login/pin write may unblock later.
+      secureStorageRestoreSucceeded = false
+      secureStorageSkipUntilMs = nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+      secureStorageSkipKind = 'miss'
     }
     if (input?.quiet !== true) {
       ;(input?.writeStderr ?? (m => process.stderr.write(m)))(
@@ -1149,8 +1163,10 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
     return { status: 'blocked', reason: plan.status, message: plan.message }
   }
   if (useDefaultHost) {
-    // no_credential / other permanent misses
-    secureStorageRestoreAttempted = true
+    // no_credential / other misses — TTL so daemon can see external login.
+    secureStorageRestoreSucceeded = false
+    secureStorageSkipUntilMs = nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+    secureStorageSkipKind = 'miss'
   }
   return { status: 'skipped', reason: plan.status }
 }
