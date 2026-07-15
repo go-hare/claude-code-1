@@ -562,6 +562,59 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     clearGatewayAuth()
   })
 
+  test('persistGatewayTlsPin invalidates restore cache so gateway can re-restore', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let reads = 0
+    let storageData: Record<string, unknown> = {
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'post-pin-jwt',
+        expiresAtMs: Date.now() + 60_000,
+      },
+    }
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return storageData
+    })
+
+    // First cold restore: credential present but host not trusted → blocked.
+    const before = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(before.status).toBe('blocked')
+    expect(getGatewayAuth()).toBeNull()
+    expect(reads).toBe(1)
+
+    // Negative cache would otherwise freeze this miss forever.
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+      status: 'skipped',
+      reason: 'already_attempted',
+    })
+    expect(reads).toBe(1)
+
+    const pin = await persistGatewayTlsPin({
+      host: 'gw.example',
+      fingerprint: 'aabbcc',
+      storage: {
+        read: () => storageData,
+        update: data => {
+          storageData = data
+          return { success: true }
+        },
+      },
+    })
+    expect(pin).toEqual({ success: true })
+
+    // After pin write, default-host restore re-reads and applies session.
+    const after = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(after.status).toBe('restored')
+    expect(getGatewayAuth()?.jwt).toBe('post-pin-jwt')
+    expect(reads).toBe(2)
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    clearGatewayAuth()
+  })
+
   test('VPr / B_c TLS probe densables', async () => {
     expect(planGatewayTlsProbe('http://gw.example')).toEqual({
       status: 'http_loopback',

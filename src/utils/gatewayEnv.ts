@@ -723,6 +723,8 @@ export async function persistGatewayTlsPin(input: {
         ...(result.warning ? { warning: result.warning } : {}),
       }
     }
+    // Pin write can unblock a previously skipped restore (untrusted host).
+    invalidateGatewaySecureStorageRestoreCache()
     return { success: true }
   } catch (err) {
     return {
