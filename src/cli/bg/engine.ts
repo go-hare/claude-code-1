@@ -28,6 +28,10 @@ export interface SessionEntry {
   prRepository?: string
   /** PR review state — set when session has open PR needing review */
   prReviewState?: 'pending' | 'changes_requested' | 'approved' | 'draft'
+  /** First PR child href (for artifact column / PrBadge). */
+  prUrl?: string
+  /** Non-frame PR children count (official zhO multi-PR label). */
+  prCount?: number
   messagingSocketPath?: string
   lastMessage?: string
 }

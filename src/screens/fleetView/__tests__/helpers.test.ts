@@ -3,10 +3,12 @@ import type { SessionEntry } from '../../../cli/bg/engine.js'
 import {
   buildDirectoryModeFlatRows,
   buildStateModeFlatRows,
+  computeFleetColumnWidths,
   deriveBand,
   doneCapForRows,
   FLEET_STATE_GROUP_LABELS,
   pickIcon,
+  sessionArtifactLabel,
 } from '../helpers.js'
 
 function session(
@@ -207,5 +209,56 @@ describe('doneCapForRows', () => {
   test('at least 2 and ~1/5 of rows', () => {
     expect(doneCapForRows(10)).toBe(2)
     expect(doneCapForRows(50)).toBe(10)
+  })
+})
+
+describe('sessionArtifactLabel + computeFleetColumnWidths', () => {
+  test('zhO multi / single / bare PR labels', () => {
+    expect(
+      sessionArtifactLabel(
+        session({ pid: 1, status: 'busy', prCount: 3, prNumber: 1 }),
+      ),
+    ).toBe('3 PRs')
+    expect(
+      sessionArtifactLabel(
+        session({
+          pid: 2,
+          status: 'busy',
+          prNumber: 42,
+          prUrl: 'https://github.com/o/r/pull/42',
+        }),
+      ),
+    ).toBe('PR #42')
+    expect(
+      sessionArtifactLabel(
+        session({
+          pid: 3,
+          status: 'busy',
+          prUrl: 'https://github.com/o/r/pull/x',
+        }),
+      ),
+    ).toBe('PR')
+    expect(sessionArtifactLabel(session({ pid: 4, status: 'busy' }))).toBe('')
+  })
+
+  test('$hO clamps label 12–40 and hides artifact when empty', () => {
+    const noPr = computeFleetColumnWidths([
+      session({ pid: 1, status: 'busy', name: 'ab' }),
+    ])
+    expect(noPr.label).toBe(12)
+    expect(noPr.artifact).toBe(0)
+    expect(noPr.age).toBeGreaterThanOrEqual(3)
+
+    const withPr = computeFleetColumnWidths([
+      session({
+        pid: 2,
+        status: 'busy',
+        name: 'x'.repeat(50),
+        prNumber: 99,
+        prUrl: 'https://github.com/o/r/pull/99',
+      }),
+    ])
+    expect(withPr.label).toBe(40)
+    expect(withPr.artifact).toBe('PR #99'.length)
   })
 })

@@ -281,6 +281,56 @@ export function doneCapForRows(totalRows: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Column widths + artifact label (official $hO / zhO)
+// ---------------------------------------------------------------------------
+
+export type FleetColumnWidths = {
+  /** Name column content width (icon rendered separately with +2). */
+  label: number
+  /** Age column content width. */
+  age: number
+  /** PR artifact column content width; 0 hides column. */
+  artifact: number
+}
+
+/**
+ * Official zhO densable — PR artifact text for a session row.
+ * Multi-PR → "N PRs"; single with number → "PR #N"; bare PR → "PR".
+ */
+export function sessionArtifactLabel(session: SessionEntry): string {
+  const count = session.prCount ?? (session.prNumber !== undefined ? 1 : 0)
+  if (count > 1) return `${count} PRs`
+  if (session.prNumber !== undefined) return `PR #${session.prNumber}`
+  if (session.prUrl) return 'PR'
+  return ''
+}
+
+/**
+ * Official $hO densable — fixed column widths across the visible job list.
+ * label: min 12 max 40; age: max of formatted ages (min 3); artifact: max label width.
+ */
+export function computeFleetColumnWidths(
+  sessions: SessionEntry[],
+  labelOf: (s: SessionEntry) => string = jobLabel,
+): FleetColumnWidths {
+  const label = Math.min(
+    40,
+    Math.max(12, ...sessions.map(s => labelOf(s).length), 12),
+  )
+  const age = Math.max(
+    3,
+    ...sessions.map(s => formatJobAge(s.startedAt).length),
+    3,
+  )
+  const artifact = Math.max(
+    0,
+    ...sessions.map(s => sessionArtifactLabel(s).length),
+    0,
+  )
+  return { label, age, artifact }
+}
+
+// ---------------------------------------------------------------------------
 // Flat row list (state grouping — official cw4 order)
 // ---------------------------------------------------------------------------
 

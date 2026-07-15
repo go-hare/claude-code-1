@@ -38,11 +38,15 @@ import {
   parsePrRef,
   buildStateModeFlatRows,
   buildDirectoryModeFlatRows,
+  computeFleetColumnWidths,
+  sessionArtifactLabel,
   FLEET_STATE_GROUP_LABELS,
+  type FleetColumnWidths,
   type FleetFlatRow,
   type FleetStateGroup,
   type StatusBand,
 } from './fleetView/helpers.js';
+import { PrBadge } from '../components/PrBadge.js';
 import { isFleetPastSessionsEnabled } from '../utils/permissions/autoModeFlags.js';
 
 // Conditional voice import (dead code eliminated when VOICE_MODE is off)
@@ -181,7 +185,7 @@ function SessionRow({
   isRenaming,
   isDeletePending,
   renameValue,
-  labelWidth,
+  cols,
   onSelect,
   onOpen,
 }: {
@@ -190,7 +194,7 @@ function SessionRow({
   isRenaming: boolean;
   isDeletePending: boolean;
   renameValue: string;
-  labelWidth: number;
+  cols: FleetColumnWidths;
   onSelect?: () => void;
   onOpen?: () => void;
 }): React.ReactElement {
@@ -200,6 +204,7 @@ function SessionRow({
   const icon = pickIcon(band, activity, session.pinned);
   const name = isRenaming ? renameValue : jobLabel(session);
   const age = formatJobAge(session.startedAt);
+  const artifact = sessionArtifactLabel(session);
 
   // Official: show detail for all bands (active shows last assistant message too)
   let detail = '';
@@ -222,12 +227,12 @@ function SessionRow({
   return (
     <Box
       width="100%"
-      backgroundColor={isSelected ? ('#e8e8e8' as never) : undefined}
+      backgroundColor={isSelected ? 'userMessageBackground' : undefined}
       onMouseEnter={onSelect}
       onClick={onOpen}
     >
-      {/* Icon + Name column (fixed width) */}
-      <Box width={labelWidth + 2} flexShrink={0}>
+      {/* Icon + Name column (fixed width — official $hO.label + 2) */}
+      <Box width={cols.label + 2} flexShrink={0}>
         <Text wrap={'truncate' as never}>
           <Text color={(color ?? undefined) as never} dimColor={dim && !isSelected}>
             {icon}
@@ -239,12 +244,41 @@ function SessionRow({
       </Box>
       {/* Detail column (flex) */}
       <Box flexGrow={1} width={0} paddingLeft={2}>
-        <Text dimColor wrap={'truncate' as never}>
-          {isSelected ? (detail ? `${detail} \u00b7 \u2192 to return` : '\u2192 to return') : detail}
+        <Text
+          dimColor={!isDeletePending}
+          color={isDeletePending ? ('error' as never) : undefined}
+          wrap={'truncate' as never}
+        >
+          {isDeletePending
+            ? detail
+            : isSelected
+              ? detail
+                ? `${detail} \u00b7 \u2192 to return`
+                : '\u2192 to return'
+              : detail}
         </Text>
       </Box>
-      {/* Age column */}
-      <Box flexShrink={0} paddingLeft={2}>
+      {/* Artifact / PR column (official zhO; hidden when no PRs in list) */}
+      {cols.artifact > 0 && (
+        <Box width={cols.artifact + 2} flexShrink={0} paddingLeft={2}>
+          {(session.prCount ?? 0) > 1 ? (
+            <Text>
+              <Text dimColor={!isSelected}>{session.prCount}</Text>
+              <Text dimColor> PRs</Text>
+            </Text>
+          ) : session.prNumber !== undefined && session.prUrl ? (
+            <PrBadge
+              number={session.prNumber}
+              url={session.prUrl}
+              reviewState={session.prReviewState === 'draft' ? undefined : session.prReviewState}
+            />
+          ) : artifact ? (
+            <Text dimColor={!isSelected}>{artifact}</Text>
+          ) : null}
+        </Box>
+      )}
+      {/* Age column (official $hO.age + 2, right-aligned) */}
+      <Box width={cols.age + 2} flexShrink={0} paddingLeft={2} justifyContent="flex-end">
         <Text dimColor>{age}</Text>
       </Box>
       {isRenaming && <Text>{' \u2588'}</Text>}
@@ -379,46 +413,56 @@ function AgentViewApp({
         pinned: job.pinned,
         gitBranch: job.worktreeBranch,
         prReviewState: undefined, // filled below from children PR status
+        prUrl: undefined,
+        prCount: undefined,
       }));
 
-      // Fetch PR review status for sessions with children (PR links)
+      // Seed PR artifact fields from job children (official zhO / $hO).
+      // Then fetch reviewDecision for the first PR via gh (best-effort).
       try {
         const { execFileNoThrow } = await import('../utils/execFileNoThrow.js');
         for (const entry of entries) {
           const job = jobs.find(j => j.state.sessionId === entry.sessionId);
-          const children = job?.state.children;
-          if (!children?.length) continue;
-          for (const child of children) {
-            if (!child.href?.includes('/pull/')) continue;
-            // Extract PR number from href
-            const prMatch = /\/pull\/(\d+)/.exec(child.href);
-            if (!prMatch) continue;
-            const prNum = prMatch[1];
-            const repo = child.href.replace(/\/pull\/\d+.*$/, '').replace(/^https?:\/\/github\.com\//, '');
-            try {
-              const { stdout, code } = await execFileNoThrow(
-                'gh',
-                ['pr', 'view', prNum, '--repo', repo, '--json', 'reviewDecision,isDraft,state'],
-                { timeout: 3000, preserveOutputOnError: false },
-              );
-              if (code === 0 && stdout.trim()) {
-                const data = JSON.parse(stdout) as { reviewDecision: string; isDraft: boolean; state: string };
-                if (data.state === 'OPEN') {
-                  entry.prNumber = Number(prNum);
-                  entry.prReviewState = data.isDraft
-                    ? 'draft'
-                    : data.reviewDecision === 'APPROVED'
-                      ? 'approved'
-                      : data.reviewDecision === 'CHANGES_REQUESTED'
-                        ? 'changes_requested'
-                        : 'pending';
-                }
+          const children = (job?.state.children ?? []).filter(c => c.kind !== 'frame' && c.href?.includes('/pull/'));
+          if (!children.length) continue;
+          entry.prCount = children.length;
+          const first = children[0]!;
+          entry.prUrl = first.href;
+          const prMatch = /\/pull\/(\d+)/.exec(first.href);
+          if (prMatch) entry.prNumber = Number(prMatch[1]);
+          // Only probe first PR for review band (matches prior single-PR behavior).
+          if (!prMatch) continue;
+          const prNum = prMatch[1]!;
+          const repo = first.href.replace(/\/pull\/\d+.*$/, '').replace(/^https?:\/\/github\.com\//, '');
+          try {
+            const { stdout, code } = await execFileNoThrow(
+              'gh',
+              ['pr', 'view', prNum, '--repo', repo, '--json', 'reviewDecision,isDraft,state'],
+              { timeout: 3000, preserveOutputOnError: false },
+            );
+            if (code === 0 && stdout.trim()) {
+              const data = JSON.parse(stdout) as {
+                reviewDecision: string;
+                isDraft: boolean;
+                state: string;
+              };
+              if (data.state === 'OPEN') {
+                entry.prReviewState = data.isDraft
+                  ? 'draft'
+                  : data.reviewDecision === 'APPROVED'
+                    ? 'approved'
+                    : data.reviewDecision === 'CHANGES_REQUESTED'
+                      ? 'changes_requested'
+                      : 'pending';
               }
-            } catch {}
-            break; // Only check first PR child
+            }
+          } catch {
+            // best-effort
           }
         }
-      } catch {}
+      } catch {
+        // best-effort
+      }
 
       // Official W1H: only uses job state files. No listLiveSessions merge.
 
@@ -623,11 +667,8 @@ function AgentViewApp({
     return group;
   };
 
-  // Compute label column width (max name length across all sessions)
-  const labelWidth = Math.max(
-    ...sessions.map(s => jobLabel(s).length),
-    8, // minimum width
-  );
+  // Official $hO column widths across all sessions (label / age / artifact).
+  const cols = React.useMemo(() => computeFleetColumnWidths(sessions, jobLabel), [sessions]);
 
   // Restore selection after returning from an attached session
   const restoredRef = useRef(false);
@@ -1041,7 +1082,7 @@ function AgentViewApp({
                   <Box
                     key={`h:${row.group}`}
                     marginTop={isFirst ? 0 : 1}
-                    backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
+                    backgroundColor={isRowSelected ? 'userMessageBackground' : undefined}
                     onMouseEnter={() => {
                       setFocusArea('list');
                       setSelectedIndex(idx);
@@ -1083,7 +1124,7 @@ function AgentViewApp({
                   <Box
                     key={`fold:${row.group}`}
                     paddingLeft={2}
-                    backgroundColor={isRowSelected ? ('#e8e8e8' as never) : undefined}
+                    backgroundColor={isRowSelected ? 'userMessageBackground' : undefined}
                     onMouseEnter={() => {
                       setFocusArea('list');
                       setSelectedIndex(idx);
@@ -1108,7 +1149,7 @@ function AgentViewApp({
                   isRenaming={viewMode === 'rename' && isRowSelected}
                   isDeletePending={deleteConfirmSessionId === session.sessionId}
                   renameValue={renameValue}
-                  labelWidth={labelWidth}
+                  cols={cols}
                   onSelect={() => {
                     setFocusArea('list');
                     setSelectedIndex(idx);
