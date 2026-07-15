@@ -733,6 +733,122 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     }
   })
 
+  test('expired explicit env session is not overwritten by secure-storage', () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    const saved = {
+      USE_GATEWAY: process.env.CLAUDE_CODE_USE_GATEWAY,
+      BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+    }
+    // JWT already expired — env still explicitly pins this gateway identity.
+    const expiredJwt = makeJwt(Math.floor(Date.now() / 1000) - 60)
+    process.env.CLAUDE_CODE_USE_GATEWAY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'https://env-gw.example'
+    process.env.ANTHROPIC_AUTH_TOKEN = expiredJwt
+
+    let reads = 0
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return {
+        enterpriseGateway: {
+          url: 'https://stored-gw.example',
+          jwt: 'storage-jwt',
+          expiresAtMs: Date.now() + 60_000,
+        },
+        gatewayTrust: { 'stored-gw.example': 'pin' },
+      }
+    })
+
+    try {
+      const applied = ensureGatewayAuthApplied()
+      expect(applied?.url).toBe('https://env-gw.example')
+      expect(applied?.jwt).toBe(expiredJwt)
+      expect(applied?.unpinned).toBe(true)
+      expect(isGatewayAuthExpired(applied)).toBe(true)
+      // Must not fall through to disk and swap identity.
+      expect(reads).toBe(0)
+      expect(getGatewayAuth()?.jwt).toBe(expiredJwt)
+      expect(getGatewayAuth()?.url).toBe('https://env-gw.example')
+    } finally {
+      if (saved.USE_GATEWAY === undefined) {
+        delete process.env.CLAUDE_CODE_USE_GATEWAY
+      } else {
+        process.env.CLAUDE_CODE_USE_GATEWAY = saved.USE_GATEWAY
+      }
+      if (saved.BASE_URL === undefined) {
+        delete process.env.ANTHROPIC_BASE_URL
+      } else {
+        process.env.ANTHROPIC_BASE_URL = saved.BASE_URL
+      }
+      if (saved.AUTH_TOKEN === undefined) {
+        delete process.env.ANTHROPIC_AUTH_TOKEN
+      } else {
+        process.env.ANTHROPIC_AUTH_TOKEN = saved.AUTH_TOKEN
+      }
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
+  })
+
+  test('expired disk session with idpRefreshToken is restored for IdP refresh', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    const savedBedrock = process.env.CLAUDE_CODE_USE_BEDROCK
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    try {
+      setTestGatewaySecureStorageRead_FOR_TESTS(() => ({
+        enterpriseGateway: {
+          url: 'https://gw.example',
+          jwt: 'expired-but-refreshable',
+          expiresAtMs: Date.now() - 1,
+          idpRefreshToken: 'refresh-token',
+          tokenEndpoint: 'https://idp.example/token',
+        },
+        gatewayTrust: { 'gw.example': 'pin' },
+      }))
+
+      // planRestore allows expired+refresh; tryRestore must not re-reject.
+      const restored = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+      expect(restored.status).toBe('restored')
+      if (restored.status === 'restored') {
+        expect(restored.session.jwt).toBe('expired-but-refreshable')
+        expect(restored.session.idpRefreshToken).toBe('refresh-token')
+      }
+      expect(getGatewayAuth()?.idpRefreshToken).toBe('refresh-token')
+      expect(isGatewayAuthExpired(getGatewayAuth())).toBe(true)
+
+      // Cold ensure path also restores refreshable identity (no env).
+      clearGatewayAuth()
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      setTestGatewaySecureStorageRead_FOR_TESTS(() => ({
+        enterpriseGateway: {
+          url: 'https://gw.example',
+          jwt: 'expired-but-refreshable',
+          expiresAtMs: Date.now() - 1,
+          idpRefreshToken: 'refresh-token',
+          tokenEndpoint: 'https://idp.example/token',
+        },
+        gatewayTrust: { 'gw.example': 'pin' },
+      }))
+      expect(ensureGatewayAuthApplied()?.idpRefreshToken).toBe('refresh-token')
+
+      // Provider stays gateway so IdP refresh can run, not silent Bedrock.
+      const { getAPIProvider } = await import('../model/providers.js')
+      expect(getAPIProvider({})).toBe('gateway')
+    } finally {
+      if (savedBedrock === undefined) {
+        delete process.env.CLAUDE_CODE_USE_BEDROCK
+      } else {
+        process.env.CLAUDE_CODE_USE_BEDROCK = savedBedrock
+      }
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
+  })
+
   test('storage_read_failed uses short backoff instead of permanent cache', () => {
     clearGatewayAuth()
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
