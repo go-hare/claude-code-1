@@ -232,14 +232,26 @@ export function applyGatewayFromEnvResult(
  * Env is re-checked every call. Default secure-storage restore is process-level
  * negative-cached (see tryRestoreGatewayAuthFromSecureStorage) so repeated
  * getAPIProvider() / getAnthropicClient() cold paths do not re-read disk.
+ * Expired in-memory sessions are dropped so a later external login can restore.
  */
 export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
-  if (getGatewayAuth()) {
-    return getGatewayAuth()
+  const nowMs = gatewaySecureStorageNowMs()
+  const existing = getGatewayAuth()
+  if (existing && !isGatewayAuthExpired(existing, nowMs)) {
+    return existing
+  }
+  if (existing) {
+    // Drop expired session so provider ranking does not keep a dead gateway JWT
+    // and secure-storage restore can re-read (possibly refreshed by another process).
+    clearGatewayAuth()
   }
   const fromEnv = resolveGatewayFromEnv()
   if (fromEnv.status === 'ok') {
     applyGatewayFromEnvResult(fromEnv)
+  }
+  const afterEnv = getGatewayAuth()
+  if (afterEnv && !isGatewayAuthExpired(afterEnv, nowMs)) {
+    return afterEnv
   }
   if (!getGatewayAuth()) {
     try {
@@ -1091,7 +1103,16 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
   const nowMs = gatewaySecureStorageNowMs()
   if (useDefaultHost && !input?.force) {
     if (secureStorageRestoreSucceeded) {
-      return { status: 'skipped', reason: 'already_attempted' }
+      const current = getGatewayAuth()
+      // Permanent skip only while the restored in-memory session is still valid.
+      // Expired/cleared sessions must re-read so external re-login can refresh JWT.
+      if (current && !isGatewayAuthExpired(current, nowMs)) {
+        return { status: 'skipped', reason: 'already_attempted' }
+      }
+      secureStorageRestoreSucceeded = false
+      if (current && isGatewayAuthExpired(current, nowMs)) {
+        setGatewayAuth(null)
+      }
     }
     if (secureStorageSkipUntilMs > 0 && nowMs < secureStorageSkipUntilMs) {
       return {

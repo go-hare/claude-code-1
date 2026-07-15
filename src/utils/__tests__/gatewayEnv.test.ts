@@ -621,6 +621,71 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     clearGatewayAuth()
   })
 
+  test('expired restored session re-reads and picks up external re-login', () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    // planRestore uses real Date.now for credential expiry; fake clock only for
+    // isGatewayAuthExpired / ensure short-circuit paths when we inject it later.
+    let reads = 0
+    let storageData: Record<string, unknown> = {
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'old-jwt',
+        expiresAtMs: Date.now() + 60_000,
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return storageData
+    })
+
+    const initial = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(initial.status).toBe('restored')
+    expect(getGatewayAuth()?.jwt).toBe('old-jwt')
+    expect(reads).toBe(1)
+
+    // Still valid → permanent skip.
+    expect(ensureGatewayAuthApplied()?.jwt).toBe('old-jwt')
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+      status: 'skipped',
+      reason: 'already_attempted',
+    })
+    expect(reads).toBe(1)
+
+    // Expire in-memory session without clearGatewayAuth (keeps restoreSucceeded
+    // until expiry check clears it). External process writes refreshed JWT.
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'old-jwt',
+      expiresAtMs: Date.now() - 1,
+    })
+    storageData = {
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'new-jwt',
+        expiresAtMs: Date.now() + 60_000,
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }
+
+    // ensure drops expired session and re-restores from storage.
+    expect(ensureGatewayAuthApplied()?.jwt).toBe('new-jwt')
+    expect(reads).toBe(2)
+    expect(getGatewayAuth()?.jwt).toBe('new-jwt')
+
+    // Valid again → permanent skip.
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+      status: 'skipped',
+      reason: 'already_attempted',
+    })
+    expect(reads).toBe(2)
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    clearGatewayAuth()
+  })
+
   test('storage_read_failed uses short backoff instead of permanent cache', () => {
     clearGatewayAuth()
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
