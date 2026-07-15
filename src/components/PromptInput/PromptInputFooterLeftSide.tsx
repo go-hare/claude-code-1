@@ -110,14 +110,15 @@ function AgentsFooterHint({ leftArrowAgain }: { leftArrowAgain?: boolean }): Rea
     if (needsInput === undefined || needsInput === 0) return;
     if (reducedMotion) return;
 
-    const needsChanged = prevNeeds !== undefined && needsInput !== prevNeeds;
+    // Flash only on increase — a drop (3→1) is not a new arrival.
+    const needsUp = prevNeeds !== undefined && needsInput > prevNeeds;
     const succeededUp = prevSucceeded !== undefined && succeeded !== undefined && succeeded > prevSucceeded;
-    if (!needsChanged && !succeededUp) return;
-    // Prefer awaiting flash when needs count is moving.
-    if (!needsChanged && flashClearRef.current && flash === 'awaiting') return;
+    if (!needsUp && !succeededUp) return;
+    // Prefer awaiting flash when needs count is rising.
+    if (!needsUp && flashClearRef.current && flash === 'awaiting') return;
 
     if (flashClearRef.current) clearTimeout(flashClearRef.current);
-    const kind: 'awaiting' | 'done' = needsChanged ? 'awaiting' : 'done';
+    const kind: 'awaiting' | 'done' = needsUp ? 'awaiting' : 'done';
     setFlash(kind);
     flashClearRef.current = setTimeout(() => {
       flashClearRef.current = null;

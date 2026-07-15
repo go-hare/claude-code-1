@@ -112,4 +112,27 @@ describe('classifyFleetJobs', () => {
     expect(snap.succeeded).toBe(1)
     expect(snap.active).toBe(2) // blocked b + active e
   })
+
+  test('review-band jobs do not keep active sweep alive', () => {
+    const jobs = [
+      {
+        short: '1',
+        state: job({
+          sessionId: 'a',
+          state: 'done',
+          tempo: 'idle',
+          children: [{ id: '1', href: 'https://github.com/o/r/pull/1' }],
+        }),
+      },
+      {
+        short: '2',
+        state: job({ sessionId: 'b', state: 'done', tempo: 'idle' }),
+      },
+    ]
+    const snap = classifyFleetJobs(jobs)
+    expect(snap.active).toBe(0)
+    expect(snap.done).toBe(1)
+    expect(snap.succeeded).toBe(1)
+    expect(snap.needsInput).toBe(0)
+  })
 })

@@ -121,6 +121,16 @@ function computeJobLabel(job: BgJobState, currentSessionId?: string): string {
 const prCheckCache = new Map<number, number>(); // pid -> last check timestamp
 const PR_CHECK_INTERVAL_MS = 60_000; // Only check once per minute per session
 
+/** Cached `gh pr view` results keyed by `repo#prNum` — throttle refresh probes. */
+type PrViewCacheEntry = {
+  at: number;
+  prReviewState?: SessionEntry['prReviewState'];
+};
+const prViewCache = new Map<string, PrViewCacheEntry>();
+const PR_VIEW_INTERVAL_MS = 60_000;
+/** Cap concurrent `gh pr view` spawns per refresh pass. */
+const PR_VIEW_CONCURRENCY = 3;
+
 /**
  * Derive a display name from the intent string (official: DC6).
  * Takes first 3 words, truncates to 25 chars.
@@ -154,6 +164,22 @@ async function detectPrForSession(session: SessionEntry): Promise<void> {
   } catch {
     // Silently ignore — PR detection is best-effort
   }
+}
+
+function prViewCacheKey(repo: string, prNum: string): string {
+  return `${repo}#${prNum}`;
+}
+
+async function mapPool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+  if (items.length === 0) return;
+  let next = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      await worker(items[i]!);
+    }
+  });
+  await Promise.all(runners);
 }
 
 /**
@@ -454,9 +480,19 @@ function AgentViewApp({
       });
 
       // Seed PR artifact fields from job children (official zhO / $hO).
-      // Then fetch reviewDecision for the first PR via gh (best-effort).
+      // Then fetch reviewDecision for the first PR via gh (best-effort),
+      // rate-limited + concurrency-capped so multi-PR fleets don't spawn
+      // unbounded `gh` every 3s refresh.
       try {
         const { execFileNoThrow } = await import('../utils/execFileNoThrow.js');
+        type PrProbe = {
+          entry: SessionEntry;
+          prNum: string;
+          repo: string;
+          cacheKey: string;
+        };
+        const probes: PrProbe[] = [];
+        const now = Date.now();
         for (const entry of entries) {
           const job = jobs.find(j => j.state.sessionId === entry.sessionId);
           const children = (job?.state.children ?? []).filter(c => c.kind !== 'frame' && c.href?.includes('/pull/'));
@@ -470,12 +506,25 @@ function AgentViewApp({
           if (!prMatch) continue;
           const prNum = prMatch[1]!;
           const repo = first.href.replace(/\/pull\/\d+.*$/, '').replace(/^https?:\/\/github\.com\//, '');
+          const cacheKey = prViewCacheKey(repo, prNum);
+          const cached = prViewCache.get(cacheKey);
+          if (cached && now - cached.at < PR_VIEW_INTERVAL_MS) {
+            // Reuse last successful / empty probe within the throttle window.
+            if (cached.prReviewState !== undefined) {
+              entry.prReviewState = cached.prReviewState;
+            }
+            continue;
+          }
+          probes.push({ entry, prNum, repo, cacheKey });
+        }
+        await mapPool(probes, PR_VIEW_CONCURRENCY, async ({ entry, prNum, repo, cacheKey }) => {
           try {
             const { stdout, code } = await execFileNoThrow(
               'gh',
               ['pr', 'view', prNum, '--repo', repo, '--json', 'reviewDecision,isDraft,state'],
               { timeout: 3000, preserveOutputOnError: false },
             );
+            let prReviewState: SessionEntry['prReviewState'] | undefined;
             if (code === 0 && stdout.trim()) {
               const data = JSON.parse(stdout) as {
                 reviewDecision: string;
@@ -483,19 +532,22 @@ function AgentViewApp({
                 state: string;
               };
               if (data.state === 'OPEN') {
-                entry.prReviewState = data.isDraft
+                prReviewState = data.isDraft
                   ? 'draft'
                   : data.reviewDecision === 'APPROVED'
                     ? 'approved'
                     : data.reviewDecision === 'CHANGES_REQUESTED'
                       ? 'changes_requested'
                       : 'pending';
+                entry.prReviewState = prReviewState;
               }
             }
+            prViewCache.set(cacheKey, { at: Date.now(), prReviewState });
           } catch {
-            // best-effort
+            // Still stamp the cache so a failing gh does not thrash every 3s.
+            prViewCache.set(cacheKey, { at: Date.now() });
           }
-        }
+        });
       } catch {
         // best-effort
       }
@@ -512,7 +564,8 @@ function AgentViewApp({
         await Promise.all(
           entries.map(async entry => {
             if (entry.lastMessage) return; // Already has detail
-            const short = entry.sessionId?.slice(0, 8);
+            // Prefer daemon short (attach correctness) over sessionId slice.
+            const short = entry.short ?? entry.sessionId?.slice(0, 8);
             if (!short) return;
             try {
               const detail = await new Promise<string | undefined>(resolve => {
@@ -576,7 +629,7 @@ function AgentViewApp({
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [cwdFilter]);
+  }, [cwdFilter, currentSessionId]);
 
   useEffect(() => {
     void refresh();
@@ -769,10 +822,16 @@ function AgentViewApp({
     }
   }, [dispatchInput, refresh, dispatchExtraArgs]);
 
+  /** Resolve the currently selected job from flatRows at call time (not a stale closure). */
+  const getSelectedSession = useCallback((): SessionEntry | undefined => {
+    const row = flatRows[selectedIndex];
+    return row?.kind === 'job' ? row.session : undefined;
+  }, [flatRows, selectedIndex]);
+
   const handlePin = useCallback(async () => {
-    const session = selectedSession;
+    const session = getSelectedSession();
     if (!session) return;
-    const short = session.sessionId?.slice(0, 8) ?? '';
+    const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
     if (!short) return;
     // Toggle pin in pins.json (official: LH7 writes array of short IDs)
     try {
@@ -796,20 +855,19 @@ function AgentViewApp({
     } catch {}
     // Also patch job state for immediate UI update
     const { patchBgJobState } = await import('../daemon/jobState.js');
-    const jobShort = session.sessionId?.slice(0, 8);
-    if (jobShort) patchBgJobState(jobShort, { pinned: !session.pinned });
+    patchBgJobState(short, { pinned: !session.pinned });
     await refresh();
-  }, [sessions, selectedIndex, refresh]);
+  }, [getSelectedSession, refresh]);
 
   const handleRenameStart = useCallback(() => {
-    const session = selectedSession;
+    const session = getSelectedSession();
     if (!session) return;
     setRenameValue(session.name ?? '');
     setViewMode('rename');
-  }, [sessions, selectedIndex]);
+  }, [getSelectedSession]);
 
   const handleRenameConfirm = useCallback(async () => {
-    const session = selectedSession;
+    const session = getSelectedSession();
     if (!session) return;
     const newName = renameValue.trim();
     if (newName) {
@@ -817,16 +875,16 @@ function AgentViewApp({
     }
     setViewMode('list');
     await refresh();
-  }, [sessions, selectedIndex, renameValue, refresh]);
+  }, [getSelectedSession, renameValue, refresh]);
 
   const handleDelete = useCallback(async () => {
-    const session = selectedSession;
+    const session = getSelectedSession();
     if (!session) return;
-    const short = session.sessionId?.slice(0, 8);
+    const short = session.short ?? session.sessionId?.slice(0, 8);
     if (!short) return;
     await removeJob(short);
     await refresh();
-  }, [sessions, selectedIndex, refresh]);
+  }, [getSelectedSession, refresh]);
 
   const handleDeleteAll = useCallback(async () => {
     for (const session of done) {
@@ -1068,7 +1126,8 @@ function AgentViewApp({
     } else if (input === 's' && key.ctrl) {
       setGroupMode(m => (m === 'state' ? 'directory' : 'state'));
       setDoneCapExpanded(false);
-      setSelectedIndex(0);
+      // Clear mouse-hover selection so keyboard bg paints after mode switch.
+      selectRowByKeyboard(0);
     } else if (input === 'f') {
       setFoldedGroups(s => {
         const n = new Set(s);

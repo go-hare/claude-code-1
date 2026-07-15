@@ -32,12 +32,15 @@ const OPEN_VIA_LEFT_WINDOW_MS = 120_000
 const IGNORED_AFTER_MS = 1_800_000
 
 export function isFleetNeedsInputNudgeEnabled(): boolean {
-  if (!feature('BG_SESSIONS')) return false
-  if (getIsRemoteMode()) return false
-  return getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_fleet_needs_input_nudge',
-    false,
-  )
+  // Ternary form so DCE can drop the GrowthBook key when BG_SESSIONS is off.
+  // Negative `if (!feature(...))` does not eliminate the true-branch literals.
+  return feature('BG_SESSIONS')
+    ? !getIsRemoteMode() &&
+        getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_fleet_needs_input_nudge',
+          false,
+        )
+    : false
 }
 
 /**
@@ -83,6 +86,15 @@ export function jobSucceeded(job: BgJobState): boolean {
   return job.state === 'done' && !hasOpenPrChild(job)
 }
 
+/**
+ * Review-band job: terminal success that still has an open PR child.
+ * Counts as neither done (for the nudge done/succeeded UI) nor active work
+ * that needs continuous disk polling — state is static until the user acts.
+ */
+export function isReviewBandFleetJob(job: BgJobState): boolean {
+  return job.state === 'done' && hasOpenPrChild(job)
+}
+
 export function classifyFleetJobs(
   jobs: Array<{ short: string; state: BgJobState }>,
   currentSessionId?: string | null,
@@ -102,6 +114,11 @@ export function classifyFleetJobs(
     if (isTerminalFleetJob(job)) {
       done++
       if (jobSucceeded(job)) succeeded++
+      continue
+    }
+    // Review band (done + open PR): not terminal for done-count, but not live
+    // work either — do not keep the 10s sweep alive forever for these.
+    if (isReviewBandFleetJob(job)) {
       continue
     }
     active++
@@ -305,8 +322,20 @@ class FleetNeedsInputNudgeStore {
 
   private stop(): void {
     this.clearSweep()
+    // Drop the 30m ignored timer so unmount cannot fire analytics later.
+    this.clearIgnore()
+    this.increasedAt = 0
     this.rerun = false
     this.started = false
+    this.inFlight = null
+  }
+
+  /** Test helper — full teardown of timers/state. */
+  _disposeForTests(): void {
+    this.stop()
+    this.snapshot = undefined
+    this.listeners.clear()
+    this.subCount = 0
   }
 }
 
@@ -316,8 +345,9 @@ export function getFleetNeedsInputNudgeStore(): FleetNeedsInputNudgeStore {
   return (singleton ??= new FleetNeedsInputNudgeStore())
 }
 
-/** Test helper — reset singleton. */
+/** Test helper — stop timers then drop singleton. */
 export function _resetFleetNeedsInputNudgeStoreForTests(): void {
+  singleton?._disposeForTests()
   singleton = null
 }
 
