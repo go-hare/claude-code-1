@@ -1306,7 +1306,11 @@ export const AgentTool = buildTool({
                           resolveActivity2,
                           toolUseContext.options.tools,
                         );
-                        updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
+                        updateAsyncAgentProgress(
+                          backgroundedTaskId,
+                          getProgressUpdate(tracker, agentMessages),
+                          rootSetAppState,
+                        );
                         // message_delta often lands with no further yields until the
                         // next tool result — deferred rebuild unfreezes footer tokens.
                         scheduleDeferredAgentProgressRebuild(
@@ -1338,7 +1342,11 @@ export const AgentTool = buildTool({
                         resolveActivity2,
                         toolUseContext.options.tools,
                       );
-                      updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
+                      updateAsyncAgentProgress(
+                        backgroundedTaskId,
+                        getProgressUpdate(tracker, agentMessages),
+                        rootSetAppState,
+                      );
                       const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata);
 
                       // Mark task completed FIRST so TaskOutput(block=true)
@@ -1502,7 +1510,11 @@ export const AgentTool = buildTool({
               if (foregroundTaskId) {
                 // Always push token progress (not only on tool_use messages).
                 // Text-only turns still need footer updates after message_delta.
-                updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
+                updateAsyncAgentProgress(
+                  foregroundTaskId,
+                  getProgressUpdate(syncTracker, agentMessages),
+                  rootSetAppState,
+                );
                 scheduleDeferredAgentProgressRebuild(
                   foregroundTaskId,
                   syncTracker,
@@ -1622,7 +1634,11 @@ export const AgentTool = buildTool({
                 toolUseContext.options.tools,
               );
               if (foregroundTaskId) {
-                updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
+                updateAsyncAgentProgress(
+                  foregroundTaskId,
+                  getProgressUpdate(syncTracker, agentMessages),
+                  rootSetAppState,
+                );
               }
             }
 
@@ -1633,7 +1649,7 @@ export const AgentTool = buildTool({
               // foreground agent is done. Goes through drainSdkEvents() — does
               // NOT trigger the print.ts XML task_notification parser or the LLM loop.
               if (!wasBackgrounded) {
-                const progress = getProgressUpdate(syncTracker);
+                const progress = getProgressUpdate(syncTracker, agentMessages);
                 enqueueSdkEvent({
                   type: 'system',
                   subtype: 'task_notification',

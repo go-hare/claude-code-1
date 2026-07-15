@@ -635,7 +635,7 @@ export async function runAsyncAgentLifecycle({
       )
       updateAsyncAgentProgress(
         taskId,
-        getProgressUpdate(tracker),
+        getProgressUpdate(tracker, agentMessages),
         rootSetAppState,
       )
       // message_delta often arrives with no further yields until the next tool
@@ -671,7 +671,7 @@ export async function runAsyncAgentLifecycle({
     )
     updateAsyncAgentProgress(
       taskId,
-      getProgressUpdate(tracker),
+      getProgressUpdate(tracker, agentMessages),
       rootSetAppState,
     )
 

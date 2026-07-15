@@ -39,6 +39,7 @@ import {
 } from '../../utils/task/diskOutput.js';
 import { PANEL_GRACE_MS, registerTask, updateTaskState } from '../../utils/task/framework.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
+import { roughTokenCountEstimationForMessages } from '../../services/tokenEstimation.js';
 import { validateWorkerResult } from '../../coordinator/workerResultValidator.js';
 import type { TaskState } from '../types.js';
 
@@ -255,10 +256,20 @@ export function rebuildProgressFromMessages(
   }
 }
 
-export function getProgressUpdate(tracker: ProgressTracker): AgentProgress {
+export function getProgressUpdate(tracker: ProgressTracker, messages?: readonly Message[]): AgentProgress {
+  let tokenCount = getTokenCountFromTracker(tracker);
+  // Gateways / partial streams often leave usage at zeros for long stretches
+  // (or only attach it on a late sibling). Fall back to content length so the
+  // footer does not sit at "↓ 0 tokens" while the agent is clearly working.
+  if (tokenCount <= 0 && messages && messages.length > 0) {
+    const estimated = roughTokenCountEstimationForMessages(messages);
+    if (estimated > 0) {
+      tokenCount = estimated;
+    }
+  }
   return {
     toolUseCount: tracker.toolUseCount,
-    tokenCount: getTokenCountFromTracker(tracker),
+    tokenCount,
     lastActivity:
       tracker.recentActivities.length > 0 ? tracker.recentActivities[tracker.recentActivities.length - 1] : undefined,
     recentActivities: [...tracker.recentActivities],
@@ -273,6 +284,9 @@ export function getProgressUpdate(tracker: ProgressTracker): AgentProgress {
  * message_delta arrives — often with no further yields until the next tool
  * result / API turn. Without a deferred rebuild, the footer freezes at the
  * first non-zero (or zero) snapshot for the entire tool-execution gap.
+ *
+ * Multiple delays: some proxies attach usage slightly after the local event
+ * loop drains microtasks; re-probe at 0/50/250ms while still on the same turn.
  */
 export function scheduleDeferredAgentProgressRebuild(
   taskId: string,
@@ -284,7 +298,7 @@ export function scheduleDeferredAgentProgressRebuild(
 ): void {
   const run = (): void => {
     rebuildProgressFromMessages(tracker, messages, resolveActivityDescription, tools);
-    updateAgentProgress(taskId, getProgressUpdate(tracker), setAppState);
+    updateAgentProgress(taskId, getProgressUpdate(tracker, messages), setAppState);
   };
   // Two ticks: message_delta is applied after the yield returns into the
   // generator; a single queueMicrotask can still race the mutation.
@@ -292,6 +306,8 @@ export function scheduleDeferredAgentProgressRebuild(
     queueMicrotask(run);
   });
   setTimeout(run, 0);
+  setTimeout(run, 50);
+  setTimeout(run, 250);
 }
 
 /**

@@ -888,7 +888,8 @@ function AgentViewApp({
 
   const handleDeleteAll = useCallback(async () => {
     for (const session of done) {
-      const short = session.sessionId?.slice(0, 8);
+      // Prefer daemon short (attach correctness) over sessionId slice.
+      const short = session.short ?? session.sessionId?.slice(0, 8);
       if (!short) continue;
       await removeJob(short);
     }

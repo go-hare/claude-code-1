@@ -1256,7 +1256,7 @@ export async function runInProcessTeammate(
               resolveActivity,
               toolUseContext.options.tools,
             )
-            const progress = getProgressUpdate(tracker)
+            const progress = getProgressUpdate(tracker, iterationMessages)
 
             updateTaskState(
               taskId,
@@ -1340,7 +1340,7 @@ export async function runInProcessTeammate(
             resolveActivity,
             toolUseContext.options.tools,
           )
-          const finalProgress = getProgressUpdate(tracker)
+          const finalProgress = getProgressUpdate(tracker, iterationMessages)
           updateTaskState(
             taskId,
             task => ({

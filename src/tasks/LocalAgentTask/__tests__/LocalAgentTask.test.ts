@@ -556,6 +556,20 @@ describe('getProgressUpdate', () => {
     const progress = getProgressUpdate(tracker)
     expect(progress.lastActivity).toBeUndefined()
   })
+
+  test('falls back to content estimate when usage is all zeros', () => {
+    const tracker = createProgressTracker()
+    const msg = makeAssistantMessage({ input_tokens: 0, output_tokens: 0 }, [
+      {
+        type: 'text',
+        text: 'x'.repeat(400), // ~100 tokens at 4 bytes/token
+      },
+    ])
+    rebuildProgressFromMessages(tracker, [msg])
+    expect(getTokenCountFromTracker(tracker)).toBe(0)
+    const progress = getProgressUpdate(tracker, [msg])
+    expect(progress.tokenCount).toBeGreaterThan(0)
+  })
 })
 
 describe('completeAgentTask', () => {
