@@ -249,4 +249,88 @@ describe('getAnthropicClient gateway priority', () => {
       resetGatewaySecureStorageRestoreCache_FOR_TESTS()
     }
   })
+
+  test('expired+idp after IdP transient TTL re-reads storage on client path', async () => {
+    const {
+      GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS,
+      maybeRefreshGatewayIdp,
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS,
+      setGatewayAuth,
+      setTestGatewayIdpPostToken_FOR_TESTS,
+      setTestGatewaySecureStorageRead_FOR_TESTS,
+      tryRestoreGatewayAuthFromSecureStorage,
+    } = await import('../../../utils/gatewayEnv.js')
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    // Wall-clock-expired + idp so client isGatewayAuthExpired(Date.now) is true.
+    // Keep real Date.now for tryRestore schedule (no fake clock) so client +
+    // restore clocks agree.
+    const deadSession = {
+      url: 'https://gw.example',
+      jwt: 'dead-refreshable-jwt',
+      expiresAtMs: Date.now() - 1,
+      idpRefreshToken: 'dead-refresh',
+      tokenEndpoint: 'https://idp.example/token',
+      unpinned: true as const,
+    }
+
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => ({
+      enterpriseGateway: {
+        url: deadSession.url,
+        jwt: deadSession.jwt,
+        expiresAtMs: deadSession.expiresAtMs,
+        idpRefreshToken: deadSession.idpRefreshToken,
+        tokenEndpoint: deadSession.tokenEndpoint,
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }))
+    // Warm permanent skip (secureStorageRestoreSucceeded).
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true }).status).toBe(
+      'restored',
+    )
+
+    setGatewayAuth(deadSession)
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      throw new Error('idp temporarily unavailable')
+    })
+    // Schedule reopen in the future (now + TTL).
+    await maybeRefreshGatewayIdp()
+
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => ({
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'external-relogin-after-transient',
+        expiresAtMs: Date.now() + 60_000,
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }))
+
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH = '1'
+    process.env.AWS_REGION = 'us-east-1'
+
+    try {
+      // Before TTL: tryRestore permanent-skips; IdP still fails; identity held.
+      await expect(getAnthropicClient({ maxRetries: 0 })).rejects.toThrow(
+        /gateway/i,
+      )
+      expect(getGatewayAuth()?.jwt).toBe('dead-refreshable-jwt')
+
+      // Elapse schedule without waiting: note(now - TTL) → after = now.
+      setGatewayAuth(deadSession)
+      await maybeRefreshGatewayIdp({
+        nowMs: Date.now() - GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS,
+      })
+      const after = await getAnthropicClient({ maxRetries: 0 })
+      expect(clientKind(after)).toBe('Anthropic')
+      expect(after).toBeInstanceOf(Anthropic)
+      expect(getGatewayAuth()?.jwt).toBe('external-relogin-after-transient')
+      expect(after.authToken).toBe('external-relogin-after-transient')
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      setTestGatewaySecureStorageRead_FOR_TESTS(null)
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    }
+  })
 })
