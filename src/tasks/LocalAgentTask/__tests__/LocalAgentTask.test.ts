@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import * as realBootstrapState from '../../../bootstrap/state.js'
+import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 
@@ -17,13 +19,20 @@ mock.module('src/utils/sessionStorage.js', () => ({
   writeAgentMetadata: async () => {},
 }))
 
-mock.module('src/utils/task/diskOutput.js', () => ({
-  evictTaskOutput: noop,
-  getTaskOutputPath: (id: string) => `/tmp/output/${id}`,
-  initTaskOutput: async () => {},
-  initTaskOutputAsSymlink: async () => {},
-  getTaskOutputDelta: async () => null,
-}))
+// Spread real diskOutput so DiskTaskOutput and other named exports stay intact
+// for sibling suites (process-global mock.module pollution).
+function diskOutputMock() {
+  return {
+    ...realDiskOutput,
+    evictTaskOutput: noop,
+    getTaskOutputPath: (id: string) => `/tmp/output/${id}`,
+    initTaskOutput: async () => {},
+    initTaskOutputAsSymlink: async () => {},
+    getTaskOutputDelta: async () => null,
+  }
+}
+mock.module('src/utils/task/diskOutput.js', diskOutputMock)
+mock.module('../../utils/task/diskOutput.js', diskOutputMock)
 
 // Capture enqueuePendingNotification calls for verification
 const enqueuedNotifications: string[] = []
@@ -33,20 +42,27 @@ mock.module('src/utils/messageQueueManager.js', () => ({
   },
 }))
 
-mock.module('src/bootstrap/state.js', () => ({
-  getSdkAgentProgressSummariesEnabled: () => false,
-  getSessionId: () => 'test-session-001',
-  getProjectRoot: () => '/test/project',
-  getOriginalCwd: () => '/test/project',
-  getCwdState: () => '/test/project',
-  getIsNonInteractiveSession: () => false,
-  getAllowedSettingSources: () => ['user', 'project', 'local'],
-  getFlagSettingsPath: () => undefined,
-  getFlagSettingsInline: () => null,
-  setCwdState: noop,
-  waitForScrollIdle: async () => {},
-  addSlowOperation: noop,
-}))
+// Spread real bootstrap/state so getUseCoworkPlugins and the rest of the
+// surface remain available to settings/plugin suites in the same process.
+function bootstrapStateMock() {
+  return {
+    ...realBootstrapState,
+    getSdkAgentProgressSummariesEnabled: () => false,
+    getSessionId: () => 'test-session-001',
+    getProjectRoot: () => '/test/project',
+    getOriginalCwd: () => '/test/project',
+    getCwdState: () => '/test/project',
+    getIsNonInteractiveSession: () => false,
+    getAllowedSettingSources: () => ['user', 'project', 'local'],
+    getFlagSettingsPath: () => undefined,
+    getFlagSettingsInline: () => null,
+    setCwdState: noop,
+    waitForScrollIdle: async () => {},
+    addSlowOperation: noop,
+  }
+}
+mock.module('src/bootstrap/state.js', bootstrapStateMock)
+mock.module('../../bootstrap/state.js', bootstrapStateMock)
 
 mock.module('src/services/PromptSuggestion/speculation.js', () => ({
   abortSpeculation: noop,

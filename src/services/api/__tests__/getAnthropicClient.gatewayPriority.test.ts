@@ -9,34 +9,19 @@
  *   CLAUDE_CODE_USE_BEDROCK=1
  * must build Anthropic (gateway) client, not BedrockClient.
  *
- * Do NOT mock @anthropic-ai/sdk (process-global; incomplete mocks break other
- * files that import AnthropicError etc.). Real SDK Client construction does
- * not hit the network. Mock only BedrockClient so the bedrock branch is
- * identifiable without AWS wiring.
+ * Do NOT mock @anthropic-ai/sdk or BedrockClient (process-global mock.module
+ * breaks bedrockClient.test.ts and other SDK importers). Real BedrockClient
+ * construction is safe with CLAUDE_CODE_SKIP_BEDROCK_AUTH=1.
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import Anthropic from '@anthropic-ai/sdk'
 import * as realSettings from '../../../utils/settings/settings.js'
+import { BedrockClient } from '../bedrockClient.js'
 
 // MACRO.VERSION is only injected in dev/build.
 ;(globalThis as unknown as { MACRO?: { VERSION: string } }).MACRO = {
   VERSION: '0.0.0-test',
 }
-
-class FakeBedrockClient {
-  constructor(_opts: unknown) {}
-}
-
-// client.ts does dynamic import('./bedrockClient.js') — cover relative + alias.
-mock.module('../bedrockClient.js', () => ({
-  BedrockClient: FakeBedrockClient,
-}))
-mock.module('./bedrockClient.js', () => ({
-  BedrockClient: FakeBedrockClient,
-}))
-mock.module('src/services/api/bedrockClient.js', () => ({
-  BedrockClient: FakeBedrockClient,
-}))
 
 // getAPIProvider reads settings.modelType first. Force empty settings while
 // re-exporting the real module so other named exports stay intact (no pollution
@@ -140,8 +125,9 @@ describe('getAnthropicClient gateway priority', () => {
     const client = await getAnthropicClient({ maxRetries: 0 })
 
     expect(clientKind(client)).toBe('Anthropic')
-    expect(clientKind(client)).not.toBe('FakeBedrockClient')
+    expect(clientKind(client)).not.toBe('BedrockClient')
     expect(client).toBeInstanceOf(Anthropic)
+    expect(client).not.toBeInstanceOf(BedrockClient)
     expect(getAPIProvider()).toBe('gateway')
     expect(getGatewayAuth()?.url).toContain('gw.example')
     expect(client.authToken).toBe(jwt)
@@ -163,6 +149,7 @@ describe('getAnthropicClient gateway priority', () => {
     const client = await getAnthropicClient({ maxRetries: 0 })
     expect(clientKind(client)).toBe('Anthropic')
     expect(client).toBeInstanceOf(Anthropic)
+    expect(client).not.toBeInstanceOf(BedrockClient)
   })
 
   test('bedrock-only still builds BedrockClient when gateway is off', async () => {
@@ -171,7 +158,8 @@ describe('getAnthropicClient gateway priority', () => {
     process.env.AWS_REGION = 'us-east-1'
 
     const client = await getAnthropicClient({ maxRetries: 0 })
-    expect(clientKind(client)).toBe('FakeBedrockClient')
+    expect(clientKind(client)).toBe('BedrockClient')
+    expect(client).toBeInstanceOf(BedrockClient)
     expect(getAPIProvider()).toBe('bedrock')
   })
 })
