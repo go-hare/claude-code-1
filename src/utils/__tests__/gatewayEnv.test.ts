@@ -41,6 +41,7 @@ import {
   toEnterpriseGatewayCredential,
   tryRestoreGatewayAuthFromSecureStorage,
   GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
+  GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS,
   GATEWAY_SECURE_STORAGE_MISS_TTL_MS,
   GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS,
   GATEWAY_TLS_PIN_MISMATCH_MESSAGE,
@@ -902,6 +903,171 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       } else {
         process.env.CLAUDE_CODE_USE_BEDROCK = savedBedrock
       }
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
+  })
+
+  test('IdP transient failure schedules secure-storage re-read for external re-login', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 1_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
+
+    let reads = 0
+    let storageData: Record<string, unknown> = {
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'dead-refreshable-jwt',
+        // planRestore uses real Date.now for expiry; keep disk credential
+        // expired relative to wall clock so pure-expired rules still apply.
+        expiresAtMs: Date.now() - 1,
+        idpRefreshToken: 'dead-refresh',
+        tokenEndpoint: 'https://idp.example/token',
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return storageData
+    })
+
+    // Cold restore of expired+idp → permanent skip while refreshable.
+    const initial = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    expect(initial.status).toBe('restored')
+    expect(getGatewayAuth()?.jwt).toBe('dead-refreshable-jwt')
+    expect(reads).toBe(1)
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+      status: 'skipped',
+      reason: 'already_attempted',
+    })
+    expect(reads).toBe(1)
+
+    // Store-path IdP refresh transient failure schedules reopen after TTL.
+    // unpinned so auto-persist does not touch real keychain.
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'dead-refreshable-jwt',
+      expiresAtMs: now - 1,
+      idpRefreshToken: 'dead-refresh',
+      tokenEndpoint: 'https://idp.example/token',
+      unpinned: true,
+    })
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      throw new Error('idp temporarily unavailable')
+    })
+    try {
+      const failed = await maybeRefreshGatewayIdp({ nowMs: now })
+      expect(failed.status).toBe('error')
+      if (failed.status === 'error') {
+        expect(failed.retryable).toBe(true)
+      }
+
+      // Before TTL: still permanent-skip refreshable identity (no disk thrash).
+      expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+        status: 'skipped',
+        reason: 'already_attempted',
+      })
+      expect(reads).toBe(1)
+      expect(getGatewayAuth()?.jwt).toBe('dead-refreshable-jwt')
+
+      // External /login writes a fresh JWT while IdP is still dead.
+      storageData = {
+        enterpriseGateway: {
+          url: 'https://gw.example',
+          jwt: 'external-relogin-jwt',
+          expiresAtMs: Date.now() + 60_000,
+        },
+        gatewayTrust: { 'gw.example': 'pin' },
+      }
+
+      // After TTL: re-open permanent skip and pick up external re-login.
+      now += GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS
+      const reopened = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+      expect(reopened.status).toBe('restored')
+      expect(getGatewayAuth()?.jwt).toBe('external-relogin-jwt')
+      expect(getGatewayAuth()?.idpRefreshToken).toBeUndefined()
+      expect(reads).toBe(2)
+
+      // Fresh restore re-arms permanent skip (no further reads).
+      expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+        status: 'skipped',
+        reason: 'already_attempted',
+      })
+      expect(reads).toBe(2)
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
+  })
+
+  test('IdP success / invalid_grant clear transient re-read schedule', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 2_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
+
+    let reads = 0
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => {
+      reads++
+      return {
+        enterpriseGateway: {
+          url: 'https://gw.example',
+          jwt: 'still-dead',
+          expiresAtMs: Date.now() - 1,
+          idpRefreshToken: 'r',
+          tokenEndpoint: 'https://idp.example/token',
+        },
+        gatewayTrust: { 'gw.example': 'pin' },
+      }
+    })
+
+    // Seed permanent-skip refreshable session via restore.
+    expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true }).status).toBe(
+      'restored',
+    )
+    expect(reads).toBe(1)
+
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'dead',
+      expiresAtMs: now - 1,
+      idpRefreshToken: 'r',
+      tokenEndpoint: 'https://idp.example/token',
+      unpinned: true,
+    })
+
+    // Schedule reopen via transient failure.
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      throw new Error('transient')
+    })
+    try {
+      await maybeRefreshGatewayIdp({ nowMs: now })
+      // Successful refresh clears schedule — permanent skip remains even past TTL.
+      setTestGatewayIdpPostToken_FOR_TESTS(async () => ({
+        data: {
+          access_token: 'fresh-after-transient',
+          expires_in: 3600,
+          refresh_token: 'r2',
+        },
+      }))
+      // still expired so shouldRefresh is true
+      const ok = await maybeRefreshGatewayIdp({ nowMs: now })
+      expect(ok.status).toBe('refreshed')
+      expect(getGatewayAuth()?.jwt).toBe('fresh-after-transient')
+
+      now += GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS
+      // Valid session → already_attempted; schedule must not force disk re-read.
+      expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+        status: 'skipped',
+        reason: 'already_attempted',
+      })
+      expect(reads).toBe(1)
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
       resetGatewaySecureStorageRestoreCache_FOR_TESTS()
       clearGatewayAuth()
     }

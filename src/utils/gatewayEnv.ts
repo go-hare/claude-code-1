@@ -50,12 +50,26 @@ let secureStorageRestoreSucceeded = false
 let secureStorageSkipUntilMs = 0
 /** Why skipUntil is active — for distinct skip reasons in results. */
 let secureStorageSkipKind: 'miss' | 'read_fail' | null = null
+/**
+ * After store-path IdP refresh transient failure: ms epoch at which
+ * expired+idpRefreshToken permanent skip reopens so external re-login can
+ * replace a dead refreshable session. 0 = no reopen scheduled.
+ */
+let gatewayIdpTransientRereadAfterMs = 0
 
 /** TTL after a successful empty/blocked secure-storage read (default host). */
 export const GATEWAY_SECURE_STORAGE_MISS_TTL_MS = 30_000
 
 /** Backoff after a failed secure-storage read (default host). */
 export const GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS = 5_000
+
+/**
+ * After IdP refresh transient (retryable) failure, wait this long before
+ * re-reading secure-storage for expired+idpRefreshToken sessions.
+ * Matches miss TTL so daemon external re-login is not starved forever.
+ */
+export const GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS =
+  GATEWAY_SECURE_STORAGE_MISS_TTL_MS
 
 /**
  * Test-only override for the default secure-storage read path (avoids
@@ -89,6 +103,24 @@ function clearSecureStorageRestoreSkipState(): void {
   secureStorageRestoreSucceeded = false
   secureStorageSkipUntilMs = 0
   secureStorageSkipKind = null
+  gatewayIdpTransientRereadAfterMs = 0
+}
+
+/**
+ * Store-path IdP refresh hit a retryable error. Keep the expired+refresh
+ * identity for provider ranking, but schedule a secure-storage re-read so
+ * an external /login can replace dead credentials after the TTL.
+ */
+function noteGatewayIdpRefreshTransientFailure(
+  nowMs: number = gatewaySecureStorageNowMs(),
+): void {
+  const after = nowMs + GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS
+  if (
+    gatewayIdpTransientRereadAfterMs === 0 ||
+    after < gatewayIdpTransientRereadAfterMs
+  ) {
+    gatewayIdpTransientRereadAfterMs = after
+  }
 }
 
 /** Invalidate secure-storage restore negative cache (login / logout / credential write). */
@@ -731,6 +763,9 @@ async function runGatewayIdpRefresh(
     const token = parseGatewayIdpTokenResponse(res.data)
     if (!token) {
       log('[gateway-refresh] malformed response; will retry later')
+      if (opts.usesStoreSession) {
+        noteGatewayIdpRefreshTransientFailure(nowMs)
+      }
       return {
         status: 'error',
         message: 'malformed idp token response',
@@ -753,6 +788,8 @@ async function runGatewayIdpRefresh(
     } catch {
       // secureStorage densable optional — in-memory already applied
     }
+    // Successful refresh: no need to reopen secure-storage for external login.
+    gatewayIdpTransientRereadAfterMs = 0
     log('[gateway-refresh] refreshed gateway JWT')
     return { status: 'refreshed', session: next }
   } catch (err) {
@@ -786,11 +823,16 @@ async function runGatewayIdpRefresh(
           // optional
         }
       }
+      // Pure-expired path can re-read without waiting for transient TTL.
+      gatewayIdpTransientRereadAfterMs = 0
       return { status: 'invalid_grant', clearedRefresh: clear }
     }
     log(
       `[gateway-refresh] transient failure: ${err instanceof Error ? err.message : String(err)}`,
     )
+    if (opts.usesStoreSession) {
+      noteGatewayIdpRefreshTransientFailure(nowMs)
+    }
     return {
       status: 'error',
       message: err instanceof Error ? err.message : String(err),
@@ -1261,17 +1303,35 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
       const current = getGatewayAuth()
       // Permanent skip while restored identity is still usable:
       // - JWT not expired, or
-      // - JWT expired but idpRefreshToken present (IdP refresh will renew).
+      // - JWT expired but idpRefreshToken present (IdP refresh will renew),
+      //   unless a prior IdP transient failure scheduled a re-read (external
+      //   re-login can replace a dead refreshable session).
       // Pure-expired sessions without refresh must re-read so external re-login
       // can supply a new JWT. Do NOT clear gatewayAuth here: provider ranking
       // needs the identity, and getAnthropicClient needs the expired error path.
-      if (
-        current &&
-        (!isGatewayAuthExpired(current, nowMs) || current.idpRefreshToken)
-      ) {
+      if (current && !isGatewayAuthExpired(current, nowMs)) {
         return { status: 'skipped', reason: 'already_attempted' }
       }
-      secureStorageRestoreSucceeded = false
+      if (
+        current &&
+        isGatewayAuthExpired(current, nowMs) &&
+        current.idpRefreshToken
+      ) {
+        if (
+          gatewayIdpTransientRereadAfterMs > 0 &&
+          nowMs >= gatewayIdpTransientRereadAfterMs
+        ) {
+          // Reopen: consume schedule and fall through to disk read.
+          secureStorageRestoreSucceeded = false
+          gatewayIdpTransientRereadAfterMs = 0
+          secureStorageSkipUntilMs = 0
+          secureStorageSkipKind = null
+        } else {
+          return { status: 'skipped', reason: 'already_attempted' }
+        }
+      } else {
+        secureStorageRestoreSucceeded = false
+      }
     }
     if (secureStorageSkipUntilMs > 0 && nowMs < secureStorageSkipUntilMs) {
       return {
@@ -1326,6 +1386,8 @@ export function tryRestoreGatewayAuthFromSecureStorage(input?: {
       secureStorageRestoreSucceeded = true
       secureStorageSkipUntilMs = 0
       secureStorageSkipKind = null
+      // Fresh restore supersedes any prior IdP-transient reopen schedule.
+      gatewayIdpTransientRereadAfterMs = 0
     }
     return { status: 'restored', session }
   }
