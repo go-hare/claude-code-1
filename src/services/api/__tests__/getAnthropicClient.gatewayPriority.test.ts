@@ -210,4 +210,43 @@ describe('getAnthropicClient gateway priority', () => {
       resetGatewaySecureStorageRestoreCache_FOR_TESTS()
     }
   })
+
+  test('pure-expired in-memory session re-reads storage before Wzo (external re-login)', async () => {
+    const {
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS,
+      setGatewayAuth,
+      setTestGatewaySecureStorageRead_FOR_TESTS,
+    } = await import('../../../utils/gatewayEnv.js')
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    // Stale pure-expired identity already in memory (no idpRefreshToken).
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'stale-expired-jwt',
+      expiresAtMs: Date.now() - 1,
+    })
+    setTestGatewaySecureStorageRead_FOR_TESTS(() => ({
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: 'external-relogin-jwt',
+        expiresAtMs: Date.now() + 60_000,
+      },
+      gatewayTrust: { 'gw.example': 'pin' },
+    }))
+
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH = '1'
+    process.env.AWS_REGION = 'us-east-1'
+
+    try {
+      const client = await getAnthropicClient({ maxRetries: 0 })
+      expect(clientKind(client)).toBe('Anthropic')
+      expect(client).toBeInstanceOf(Anthropic)
+      expect(getGatewayAuth()?.jwt).toBe('external-relogin-jwt')
+      expect(client.authToken).toBe('external-relogin-jwt')
+    } finally {
+      setTestGatewaySecureStorageRead_FOR_TESTS(null)
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    }
+  })
 })

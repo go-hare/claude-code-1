@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import {
   BodyIdleTimeoutError,
   type BodyIdleFetch,
+  rewrapResponseWithBody,
   wrapFetchWithBodyIdleWatchdog,
   wrapReadableStreamWithBodyIdleTimeout,
 } from '../bodyIdleWatchdog.js'
@@ -60,6 +61,50 @@ describe('wrapReadableStreamWithBodyIdleTimeout', () => {
   })
 })
 
+describe('rewrapResponseWithBody', () => {
+  test('preserves url redirected type for SDK logging', () => {
+    const sourceBody = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.close()
+      },
+    })
+    const source = new Response(sourceBody, {
+      status: 201,
+      statusText: 'Created',
+      headers: { 'x-test': '1' },
+    })
+    // Platform-constructed Response has empty url; mimic a real fetch Response.
+    Object.defineProperty(source, 'url', {
+      value: 'https://api.example/v1/messages',
+      configurable: true,
+    })
+    Object.defineProperty(source, 'redirected', {
+      value: true,
+      configurable: true,
+    })
+    Object.defineProperty(source, 'type', {
+      value: 'basic',
+      configurable: true,
+    })
+
+    const nextBody = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('ok'))
+        c.close()
+      },
+    })
+    const rewrapped = rewrapResponseWithBody(source, nextBody)
+    expect(rewrapped.status).toBe(201)
+    expect(rewrapped.statusText).toBe('Created')
+    expect(rewrapped.headers.get('x-test')).toBe('1')
+    expect(rewrapped.url).toBe('https://api.example/v1/messages')
+    expect(rewrapped.redirected).toBe(true)
+    expect(rewrapped.type).toBe('basic')
+    // Bare new Response would leave url empty — guard the regression.
+    expect(new Response(nextBody).url).toBe('')
+  })
+})
+
 describe('wrapFetchWithBodyIdleWatchdog', () => {
   test('wraps body when enabled', async () => {
     const base = (async () =>
@@ -72,6 +117,33 @@ describe('wrapFetchWithBodyIdleWatchdog', () => {
     expect(res.body).toBeTruthy()
     const reader = res.body!.getReader()
     await expect(reader.read()).rejects.toBeInstanceOf(BodyIdleTimeoutError)
+  })
+
+  test('preserves upstream response.url after wrap', async () => {
+    const base = (async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode('chunk'))
+          c.close()
+        },
+      })
+      const response = new Response(body, { status: 200 })
+      Object.defineProperty(response, 'url', {
+        value: 'https://api.example/v1/messages',
+        configurable: true,
+      })
+      return response
+    }) as BodyIdleFetch
+    const wrapped = wrapFetchWithBodyIdleWatchdog(base, () => ({
+      enabled: true,
+      idleTimeoutMs: 5_000,
+    }))
+    const res = await wrapped('https://api.example/v1/messages')
+    expect(res.url).toBe('https://api.example/v1/messages')
+    const reader = res.body!.getReader()
+    const { value, done } = await reader.read()
+    expect(done).toBe(false)
+    expect(new TextDecoder().decode(value)).toBe('chunk')
   })
 
   test('passes through when disabled', async () => {

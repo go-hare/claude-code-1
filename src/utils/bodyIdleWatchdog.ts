@@ -125,6 +125,40 @@ export type BodyIdleFetch = (
 ) => Promise<Response>
 
 /**
+ * Re-wrap a fetch Response with a different body while preserving fields the
+ * Anthropic SDK reads for logging/debug (`url`, `redirected`, `type`).
+ *
+ * `new Response(body, init)` always yields `url === ""` — without rebinding,
+ * SDK paths that log `response.url` lose the real request URL.
+ */
+export function rewrapResponseWithBody(
+  response: Response,
+  body: ReadableStream<Uint8Array>,
+): Response {
+  // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+  const next = new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  })
+  // url / redirected / type are read-only on platform Responses; defineProperty
+  // restores the upstream values on the constructed instance.
+  for (const key of ['url', 'redirected', 'type'] as const) {
+    try {
+      Object.defineProperty(next, key, {
+        value: response[key],
+        writable: false,
+        enumerable: true,
+        configurable: true,
+      })
+    } catch {
+      // Runtime may freeze the property — body idle still functions.
+    }
+  }
+  return next
+}
+
+/**
  * Wrap fetch so successful responses with a body are guarded by the byte-idle
  * watchdog. Headers / non-body responses pass through unchanged.
  */
@@ -148,11 +182,6 @@ export function wrapFetchWithBodyIdleWatchdog(
       },
     )
 
-    // Preserve status / headers; body is the idle-guarded stream.
-    return new Response(wrappedBody, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    })
+    return rewrapResponseWithBody(response, wrappedBody)
   }
 }

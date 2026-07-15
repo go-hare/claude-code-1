@@ -178,14 +178,17 @@ export async function getAnthropicClient({
   applyGatewayFromEnvResult(gatewayFromEnvEarly)
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const {
-      getGatewayAuth: getGw,
-      tryRestoreGatewayAuthFromSecureStorage,
-      maybeRefreshGatewayIdp,
-    } = require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
-    if (!getGw()) {
-      // Else restore enterpriseGateway from secureStorage when gatewayTrust pin
-      // present (sync densable; live TLS probe denser via restoreGatewayAuth).
+    const { tryRestoreGatewayAuthFromSecureStorage, maybeRefreshGatewayIdp } =
+      require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
+    // Same gate as ensureGatewayAuthApplied: restore when missing, or when the
+    // in-memory session is pure-expired (no idpRefreshToken) so external
+    // re-login is visible before await lXe / Wzo. Refreshable expired sessions
+    // keep identity for IdP refresh and are not overwritten here.
+    const existingGw = getGatewayAuth()
+    if (
+      !existingGw ||
+      (isGatewayAuthExpired(existingGw) && !existingGw.idpRefreshToken)
+    ) {
       tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
     }
     // Official lXe: await IdP refresh BEFORE provider/expired checks so a
