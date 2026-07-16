@@ -1,6 +1,9 @@
 /**
- * Agents subcommand handler — prints the list of configured agents.
- * Dynamically imported only when `claude agents` runs.
+ * Prints the list of configured AgentTool definitions (Project/Built-in/etc.).
+ *
+ * Official `claude agents` CLI opens FleetView via agentsMain (src/cli/agents.ts).
+ * This handler is the definition inventory (same data as `/agents` menu source);
+ * keep for programmatic / diagnostic use — not the CLI `agents` command entry.
  */
 
 import {

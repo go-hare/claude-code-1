@@ -1419,6 +1419,9 @@ export async function submitDispatch(opts: {
   extraArgs?: string[]
   source?: string
   sessionId?: string
+  /** Resume an existing transcript in a newly forked background session. */
+  resumeSessionId?: string
+  forkSession?: boolean
 }): Promise<{ short: string; sessionId: string }> {
   const { randomUUID } = await import('crypto')
   const sessionId = opts.sessionId ?? randomUUID()
@@ -1435,17 +1438,28 @@ export async function submitDispatch(opts: {
     source: opts.source || 'fleet',
     createdAt: Date.now(),
     seed: { intent: opts.intent, name: opts.name },
-    launch: {
-      mode: 'prompt',
-      sessionId,
-      args: [
-        '--session-id',
-        sessionId,
-        ...(opts.name ? ['-n', opts.name] : []),
-        ...(opts.agent ? ['--agent', opts.agent] : []),
-        ...(opts.extraArgs || []),
-      ],
-    },
+    launch: opts.resumeSessionId
+      ? {
+          mode: 'resume',
+          sessionId: opts.resumeSessionId,
+          fork: opts.forkSession !== false,
+          flagArgs: [
+            ...(opts.name ? ['-n', opts.name] : []),
+            ...(opts.agent ? ['--agent', opts.agent] : []),
+            ...(opts.extraArgs || []),
+          ],
+        }
+      : {
+          mode: 'prompt',
+          sessionId,
+          args: [
+            '--session-id',
+            sessionId,
+            ...(opts.name ? ['-n', opts.name] : []),
+            ...(opts.agent ? ['--agent', opts.agent] : []),
+            ...(opts.extraArgs || []),
+          ],
+        },
   }
 
   // Try control socket

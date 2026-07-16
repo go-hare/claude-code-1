@@ -44,6 +44,21 @@ export const SHOW_CURSOR = decset(DEC.CURSOR_VISIBLE)
 export const HIDE_CURSOR = decreset(DEC.CURSOR_VISIBLE)
 export const ENTER_ALT_SCREEN = decset(DEC.ALT_SCREEN_CLEAR)
 export const EXIT_ALT_SCREEN = decreset(DEC.ALT_SCREEN_CLEAR)
+
+/** Official alt-screen entry wrapper: enter, clear, home, then restore extended keys. */
+export function enterAltScreenSequence(extendedKeys = false): string {
+  return (
+    ENTER_ALT_SCREEN +
+    csi('2J') +
+    csi('H') +
+    (extendedKeys ? csi('<u') + csi('>1u') + csi('>4;2m') : '')
+  )
+}
+
+/** Official alt-screen exit wrapper: pop Kitty, restore main screen, reset modifyOtherKeys. */
+export function exitAltScreenSequence(): string {
+  return csi('<u') + EXIT_ALT_SCREEN + csi('>4m')
+}
 // Mouse tracking: 1000 reports button press/release/wheel, 1002 adds drag
 // events (button-motion), 1003 adds all-motion (no button held — for
 // hover), 1006 uses SGR format (CSI < btn;col;row M/m) instead of legacy

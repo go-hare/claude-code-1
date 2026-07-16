@@ -95,7 +95,7 @@ import {
   DISABLE_MOUSE_TRACKING,
   ENABLE_MOUSE_TRACKING,
   ENTER_ALT_SCREEN,
-  EXIT_ALT_SCREEN,
+  exitAltScreenSequence,
   SHOW_CURSOR,
 } from './termio/dec.js';
 import {
@@ -1239,6 +1239,10 @@ export default class Ink {
     return this.altScreenActive;
   }
 
+  get hasUnmounted(): boolean {
+    return this.isUnmounted;
+  }
+
   /**
    * Re-assert terminal modes after a gap (>5s stdin silence or event-loop
    * stall). Catches tmux detach→attach, ssh reconnect, and laptop
@@ -1619,10 +1623,7 @@ export default class Ink {
   }
 
   private notifySelectionChange(): void {
-    // Skip during/after unmount: AlternateScreen cleanup may clear selection
-    // after EXIT_ALT_SCREEN, and a late onRender would target the main buffer.
-    if (this.isUnmounted) return;
-    this.onRender();
+    this.scheduleRender();
     for (const cb of this.selectionListeners) cb();
   }
 
@@ -1884,18 +1885,14 @@ export default class Ink {
     /* eslint-disable custom-rules/no-sync-fs -- process exiting; async writes would be dropped */
     if (this.options.stdout.isTTY) {
       if (this.altScreenActive) {
-        // Exit alt screen FIRST so other cleanup sequences go to the main screen.
-        // Clear the flag BEFORE writing 1049l and BEFORE React tree teardown:
-        // updateContainerSync(null) below still runs AlternateScreen's insertion
-        // cleanup, which would otherwise (1) call setAltScreenActive(false) →
-        // repaint() onto the main buffer and (2) write a second EXIT_ALT_SCREEN.
-        // On Windows Terminal that double DECRC flash looks like stacked windows.
-        // Do NOT call setAltScreenActive(false) here — its inactive branch repaints.
+        // Official 2.1.210 order: emit the sole wrapped 1049l first, then clear
+        // the flag. Do NOT call setAltScreenActive(false) — its inactive branch
+        // repaints. React teardown still runs AlternateScreen cleanup, which
+        // sees alreadyInactive and skips a second 1049l (Windows Terminal DECRC
+        // flash / stacked-frame look).
+        writeSync(1, exitAltScreenSequence());
         this.altScreenActive = false;
         this.altScreenMouseTracking = false;
-        // Gate late onRender/selection listeners before any main-buffer write.
-        this.isUnmounted = true;
-        writeSync(1, EXIT_ALT_SCREEN);
       }
       // Disable mouse tracking — unconditional because altScreenActive can be
       // stale if AlternateScreen's unmount (which flips the flag) raced a

@@ -3,9 +3,11 @@ import instances from '../core/instances.js';
 import {
   DISABLE_MOUSE_TRACKING,
   ENABLE_MOUSE_TRACKING,
-  ENTER_ALT_SCREEN,
-  EXIT_ALT_SCREEN,
+  enterAltScreenSequence,
+  exitAltScreenSequence,
 } from '../core/termio/dec.js';
+import { DISABLE_KITTY_KEYBOARD, ENABLE_KITTY_KEYBOARD, ENABLE_MODIFY_OTHER_KEYS } from '../core/termio/csi.js';
+import { supportsExtendedKeys } from '../core/terminal.js';
 import { TerminalWriteContext } from '../hooks/useTerminalNotification.js';
 import Box from './Box.js';
 import { TerminalSizeContext } from './TerminalSizeContext.js';
@@ -53,22 +55,27 @@ export function AlternateScreen({ children, mouseTracking = true }: Props): Reac
     const ink = instances.get(process.stdout);
     if (!writeRaw) return;
 
-    writeRaw(ENTER_ALT_SCREEN + '\x1b[2J\x1b[H' + (mouseTracking ? ENABLE_MOUSE_TRACKING : ''));
+    writeRaw(enterAltScreenSequence(supportsExtendedKeys()) + (mouseTracking ? ENABLE_MOUSE_TRACKING : ''));
     ink?.setAltScreenActive(true, mouseTracking);
 
     return () => {
-      // ink.unmount() may already have exited alt-screen and cleared the flag
-      // (gracefulShutdown / Ctrl+C path). Skip redundant EXIT_ALT_SCREEN —
-      // a second 1049l triggers another DECRC on Windows Terminal and flashes
-      // multi-frame main-buffer content (looks like stacked windows).
-      const stillActive = ink?.isAltScreenActive ?? true;
-      if (!stillActive) {
-        ink?.clearTextSelection();
-        return;
-      }
+      // Snapshot before clearing: Ink.unmount() exits alt-screen itself, then
+      // React teardown reaches this cleanup. Match official 2.1.210 by still
+      // disabling mouse tracking while suppressing the second 1049l.
+      const alreadyInactive = ink ? !ink.isAltScreenActive : false;
       ink?.setAltScreenActive(false);
       ink?.clearTextSelection();
-      writeRaw((mouseTracking ? DISABLE_MOUSE_TRACKING : '') + EXIT_ALT_SCREEN);
+      if (alreadyInactive) {
+        writeRaw(mouseTracking ? DISABLE_MOUSE_TRACKING : '');
+        return;
+      }
+      writeRaw(
+        (mouseTracking ? DISABLE_MOUSE_TRACKING : '') +
+          exitAltScreenSequence() +
+          (ink?.hasUnmounted || !supportsExtendedKeys()
+            ? ''
+            : DISABLE_KITTY_KEYBOARD + ENABLE_KITTY_KEYBOARD + ENABLE_MODIFY_OTHER_KEYS),
+      );
     };
   }, [writeRaw, mouseTracking]);
 

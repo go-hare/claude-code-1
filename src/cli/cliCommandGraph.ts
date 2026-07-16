@@ -287,7 +287,7 @@ export const cliCommandGraph = [
       capability: 'auth',
     },
   ),
-  command('agents', ['agents'], 'List configured agents', {
+  command('agents', ['agents'], 'Manage background agents', {
     ownership: 'runtime-capability',
     reuse: 'reuse-with-isolation',
     capability: 'agents',

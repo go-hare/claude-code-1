@@ -75,14 +75,26 @@ export async function daemonMain(args: string[]): Promise<void> {
       break
     case 'run': {
       const runArgs = args.slice(1)
-      const hasOriginTransient =
-        runArgs.includes('--origin') &&
-        runArgs[runArgs.indexOf('--origin') + 1] === 'transient'
+      const originIdx = runArgs.indexOf('--origin')
+      const origin =
+        originIdx >= 0 && runArgs[originIdx + 1]
+          ? runArgs[originIdx + 1]
+          : undefined
+      const spawnedByIdx = runArgs.indexOf('--spawned-by')
+      const spawnedBy =
+        spawnedByIdx >= 0 && runArgs[spawnedByIdx + 1]
+          ? runArgs[spawnedByIdx + 1]
+          : undefined
+      // Official: --origin transient → bg supervisor; service/other → full supervisor.
+      // Both write daemon.lock so KF asK can detect zombies.
       try {
-        if (hasOriginTransient) {
-          await runBgManagerStandalone()
+        if (origin === 'transient') {
+          await runBgManagerStandalone({ origin: 'transient', spawnedBy })
         } else {
-          await runSupervisor(runArgs)
+          await runSupervisor(runArgs, {
+            origin: origin === 'service' ? 'service' : origin,
+            spawnedBy,
+          })
         }
       } catch (err) {
         logEvent('tengu_daemon_startup_crash', {
@@ -335,7 +347,10 @@ function parseSupervisorArgs(args: string[]): Record<string, string> {
  * Run the daemon supervisor loop. Spawns workers and restarts them
  * on crash with exponential backoff.
  */
-async function runSupervisor(args: string[]): Promise<void> {
+async function runSupervisor(
+  args: string[],
+  lockOpts?: { origin?: string; spawnedBy?: string },
+): Promise<void> {
   const config = parseSupervisorArgs(args)
   const dir = config.dir || resolve('.')
 
@@ -360,11 +375,22 @@ async function runSupervisor(args: string[]): Promise<void> {
       .join(',') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 
+  const startedAtMs = Date.now()
+  // Official daemon.lock (EvK) — KF asK / oAO ENOCONN probe.
+  const { writeDaemonLock, clearDaemonLock } = await import('./daemonLock.js')
+  await writeDaemonLock({
+    pid: process.pid,
+    version: MACRO.VERSION,
+    startedAt: startedAtMs,
+    origin: lockOpts?.origin ?? 'service',
+    ...(lockOpts?.spawnedBy ? { spawnedBy: lockOpts.spawnedBy } : {}),
+  })
+
   // Write daemon state file so other CLI processes can query/stop us
   writeDaemonState({
     pid: process.pid,
     cwd: dir,
-    startedAt: new Date().toISOString(),
+    startedAt: new Date(startedAtMs).toISOString(),
     workerKinds: workers.map(w => w.kind),
     lastStatus: 'running',
   })
@@ -379,6 +405,7 @@ async function runSupervisor(args: string[]): Promise<void> {
     console.log('[daemon] supervisor shutting down...')
     controller.abort()
     removeDaemonState()
+    void clearDaemonLock()
     for (const w of workers) {
       if (w.restartTimer) {
         clearTimeout(w.restartTimer)
@@ -586,13 +613,26 @@ function spawnWorker(
 
 /**
  * Run the bg manager as a standalone daemon process.
- * Used by FleetView auto-start. Exits when no sessions are active
- * and no clients are connected (transient mode).
+ * Used by FleetView auto-start / official Ay6 transient spawn.
+ * Writes official daemon.lock so KF asK can signal zombies.
  */
-async function runBgManagerStandalone(): Promise<void> {
+async function runBgManagerStandalone(opts?: {
+  origin?: string
+  spawnedBy?: string
+}): Promise<void> {
   const { startBgManager } = await import('./bgManager.js')
+  const { writeDaemonLock, clearDaemonLock } = await import('./daemonLock.js')
 
   console.log('[daemon] bg-manager starting...')
+
+  const startedAt = Date.now()
+  await writeDaemonLock({
+    pid: process.pid,
+    version: MACRO.VERSION,
+    startedAt,
+    origin: opts?.origin ?? 'transient',
+    ...(opts?.spawnedBy ? { spawnedBy: opts.spawnedBy } : {}),
+  })
 
   const manager = await startBgManager({
     onLog: (msg: string) => console.log(`  ${msg}`),
@@ -600,20 +640,20 @@ async function runBgManagerStandalone(): Promise<void> {
 
   console.log('[daemon] bg-manager ready')
 
-  // Write daemon state
+  // Legacy state file (status / stop helpers)
   writeDaemonState({
     pid: process.pid,
     cwd: process.cwd(),
-    startedAt: new Date().toISOString(),
+    startedAt: new Date(startedAt).toISOString(),
     workerKinds: ['bg-manager'],
     lastStatus: 'running',
   })
 
-  // Graceful shutdown
   const shutdown = async () => {
     console.log('[daemon] bg-manager shutting down...')
     await manager.close()
     removeDaemonState('bg-manager')
+    await clearDaemonLock()
     process.exit(0)
   }
   process.on('SIGTERM', shutdown)

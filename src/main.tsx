@@ -5272,14 +5272,34 @@ async function run(): Promise<CommanderCommand> {
       await setupTokenHandler(root);
     });
 
-  // Agents command - list configured agents
+  // Official: `claude agents` = Manage background agents (FleetView), not AgentTool defs.
+  // AgentTool definition list remains available via the `/agents` slash command.
+  // Fast-path in cli.tsx handles this when feature('BG_SESSIONS'); this is the
+  // Commander fallback (full main load) so routing stays correct without the flag.
   program
     .command('agents')
-    .description('List configured agents')
-    .option('--setting-sources <sources>', 'Comma-separated list of setting sources to load (user, project, local).')
+    .description('Manage background agents')
+    .option('--cwd <path>', 'Scope session list to a directory')
+    .option('--json', 'Output session list as JSON and exit')
+    .option('--add-dir <path>', 'Additional directories to allow tool access for (repeatable)')
+    .option('--settings <file>', 'Path to a settings JSON file')
+    .option('--mcp-config <path>', 'MCP config to forward to dispatched sessions')
+    .option('--plugin-dir <path>', 'Plugin directory to forward to dispatched sessions')
+    .option('--permission-mode <mode>', 'Permission mode for dispatched sessions')
+    .option('--model <model>', 'Model for dispatched sessions')
+    .option('--effort <level>', 'Effort level for dispatched sessions')
+    .option('--dangerously-skip-permissions', 'Skip permissions for dispatched sessions')
+    .option('--allow-dangerously-skip-permissions', 'Allow dangerously-skip-permissions for dispatched sessions')
+    .option('--fallback-model <model>', 'Fallback model for dispatched sessions')
+    .option('--strict-mcp-config', 'Strict MCP config for dispatched sessions')
+    .allowUnknownOption(true)
     .action(async () => {
-      const { agentsHandler } = await import('./cli/handlers/agents.js');
-      await agentsHandler();
+      const agentsIdx = process.argv.findIndex(a => a === 'agents');
+      const rawArgs = agentsIdx >= 0 ? process.argv.slice(agentsIdx + 1) : [];
+      const { agentsMain } = await import('./cli/agents.js');
+      await agentsMain(rawArgs);
+      // process.exit — mountFleetView's Ink TUI can leave event-loop handles
+      // eslint-disable-next-line custom-rules/no-process-exit
       process.exit(0);
     });
 

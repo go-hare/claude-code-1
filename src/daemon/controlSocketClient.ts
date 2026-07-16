@@ -1,20 +1,28 @@
 /**
  * Control Socket Client — sends requests to the daemon control socket.
  * Split from controlSocket.ts to avoid circular imports.
+ *
+ * Official densable: IA (client-attach) — error codes:
+ *   ETIMEOUT — socket idle timeout
+ *   ENOCONN  — connect/error/parse/drop
  */
 
 import { connect } from 'net'
 import { getControlSocketPath } from './bgWorker.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 
+export type ControlErrorCode = 'ETIMEOUT' | 'ENOCONN'
+
 export interface ControlResponse {
   ok: boolean
+  /** Official IA failure code when ok === false. */
+  code?: ControlErrorCode | string
   [key: string]: unknown
 }
 
 /**
  * Send a request to the daemon control socket.
- * Returns the response, or { ok: false } if the daemon is unreachable.
+ * Official IA: default timeout 5000ms; codes ETIMEOUT / ENOCONN.
  */
 export async function sendControlRequest(
   req: Record<string, unknown>,
@@ -24,24 +32,43 @@ export async function sendControlRequest(
   const timeout = opts?.timeoutMs ?? 5000
 
   return new Promise<ControlResponse>(resolve => {
-    const client = connect(socketPath)
+    let client: ReturnType<typeof connect>
+    try {
+      client = connect(socketPath)
+    } catch (err) {
+      resolve({
+        ok: false,
+        code: 'ENOCONN',
+        error: err instanceof Error ? err.message : String(err),
+      })
+      return
+    }
+
     let responded = false
 
     const done = (resp: ControlResponse) => {
       if (responded) return
       responded = true
+      try {
+        client.destroy()
+      } catch {
+        // ignore
+      }
       resolve(resp)
     }
 
     client.setTimeout(timeout, () => {
-      client.destroy()
-      done({ ok: false, error: 'timeout' })
+      done({ ok: false, code: 'ETIMEOUT', error: 'control socket timeout' })
     })
 
     client.on('error', (err: Error & { code?: string }) => {
       done({
         ok: false,
-        error: err.code === 'ENOENT' ? 'daemon not running' : err.message,
+        code: 'ENOCONN',
+        error:
+          err.code === 'ENOENT'
+            ? 'daemon not running'
+            : err.message || String(err),
       })
     })
 
@@ -57,22 +84,34 @@ export async function sendControlRequest(
       const line = buffer.slice(0, nl)
       try {
         done(jsonParse(line) as ControlResponse)
-      } catch {
-        done({ ok: false, error: 'invalid response' })
+      } catch (err) {
+        done({
+          ok: false,
+          code: 'ENOCONN',
+          error: err instanceof Error ? err.message : 'invalid response',
+        })
       }
-      client.end()
     })
 
-    client.on('end', () => {
+    client.once('close', () => {
       if (!responded) {
         if (buffer.trim()) {
           try {
             done(jsonParse(buffer.trim()) as ControlResponse)
           } catch {
-            done({ ok: false, error: 'incomplete response' })
+            done({
+              ok: false,
+              code: 'ENOCONN',
+              error: 'incomplete response',
+            })
           }
         } else {
-          done({ ok: false, error: 'connection closed' })
+          done({
+            ok: false,
+            code: 'ENOCONN',
+            error:
+              'connection dropped mid-request — it may have restarted; retry',
+          })
         }
       }
     })

@@ -184,12 +184,16 @@ const EXTENDED_KEYS_TERMINALS = [
   'ghostty',
   'tmux',
   'windows-terminal',
+  'WarpTerminal',
 ]
 
 /** True if this terminal correctly handles extended key reporting
  *  (Kitty keyboard protocol + xterm modifyOtherKeys). */
 export function supportsExtendedKeys(): boolean {
-  return EXTENDED_KEYS_TERMINALS.includes(process.env.TERM_PROGRAM ?? '')
+  const terminal =
+    process.env.TERM_PROGRAM ||
+    (process.env.WT_SESSION ? 'windows-terminal' : '')
+  return EXTENDED_KEYS_TERMINALS.includes(terminal)
 }
 
 /** True if the terminal scrolls the viewport when it receives cursor-up
