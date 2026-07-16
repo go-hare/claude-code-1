@@ -875,6 +875,15 @@ export const SettingsSchema = lazySchema(() =>
             '"fullscreen" pins input to the bottom with virtualized scrollback. ' +
             'Overrides auto-detection when set; CLAUDE_CODE_NO_FLICKER still wins.',
         ),
+      // Official 2.1.210 settings densable — wheel accel on/off (default true).
+      // Consumed by ScrollKeybindingHandler initAndLogWheelAccel / FSp.
+      wheelScrollAccelerationEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Whether mouse-wheel scroll acceleration is enabled in fullscreen. ' +
+            'When false, each wheel event scrolls a fixed base number of rows.',
+        ),
       spinnerVerbs: z
         .object({
           mode: z.enum(['append', 'replace']),

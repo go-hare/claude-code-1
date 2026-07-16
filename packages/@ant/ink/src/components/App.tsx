@@ -34,6 +34,12 @@ import { EventEmitter } from '../core/events/emitter.js';
 import { InputEvent } from '../core/events/input-event.js';
 import { TerminalFocusEvent } from '../core/events/terminal-focus-event.js';
 import {
+  createArrowBurstWindow,
+  createJediTermInputState,
+  rewriteJediTermInput,
+  trackArrowBurst,
+} from '../core/jediTermInput.js';
+import {
   INITIAL_STATE,
   type ParsedInput,
   type ParsedKey,
@@ -166,6 +172,9 @@ export default class App extends PureComponent<Props, State> {
 
   internal_eventEmitter = new EventEmitter();
   keyParseState = INITIAL_STATE;
+  // Official JediTerm input rewrite state (RJc / eag densables).
+  jediTermInput = createJediTermInputState();
+  arrowBurstWindow = createArrowBurstWindow();
   // Timer for flushing incomplete escape sequences
   incompleteEscapeTimer: NodeJS.Timeout | null = null;
   // Timeout durations for incomplete sequences (ms)
@@ -562,6 +571,18 @@ export default class App extends PureComponent<Props, State> {
 // Helper to process all keys within a single discrete update context.
 // discreteUpdates expects (fn, a, b, c, d) -> fn(a, b, c, d)
 function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined, _unused2: undefined): void {
+  // Official Xsg densable order: RJc (JediTerm rewrite) then eag (arrow-burst).
+  const now = performance.now();
+  const rewritten = rewriteJediTermInput(app.jediTermInput, items, now, () => {
+    app.internal_eventEmitter.emit('jediterm-scroll-bug');
+  });
+  const burst = trackArrowBurst(app.arrowBurstWindow, rewritten, now);
+  if (burst) {
+    app.internal_eventEmitter.emit('arrow-burst', burst);
+    app.props.onStdinResume?.();
+  }
+  items = rewritten;
+
   // Update interaction time for notification timeout tracking.
   // This is called from the central input handler to avoid having multiple
   // stdin listeners that can cause race conditions and dropped input.

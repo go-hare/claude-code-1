@@ -692,6 +692,27 @@ export function Config({
               });
             },
           },
+          // Official wheelScrollAccelerationEnabled (2.1.210 settings densable).
+          // Only meaningful in fullscreen where app-side wheel accel runs.
+          {
+            id: 'wheelScrollAccelerationEnabled',
+            label: 'Wheel scroll acceleration',
+            value: settingsData?.wheelScrollAccelerationEnabled ?? true,
+            type: 'boolean' as const,
+            onChange(wheelScrollAccelerationEnabled: boolean) {
+              const result = updateSettingsForSource('userSettings', {
+                wheelScrollAccelerationEnabled,
+              });
+              if (result.error) return;
+              setSettingsData(getInitialSettings());
+              logEvent('tengu_config_changed', {
+                setting: 'wheelScrollAccelerationEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                value: String(
+                  wheelScrollAccelerationEnabled,
+                ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              });
+            },
+          },
         ]
       : []),
     // autoUpdates setting is hidden - use DISABLE_AUTOUPDATER env var to control
@@ -1297,6 +1318,14 @@ export function Config({
     }
     if (globalConfig.copyOnSelect !== initialConfig.current.copyOnSelect) {
       formattedChanges.push(`${globalConfig.copyOnSelect ? 'Enabled' : 'Disabled'} copy on select`);
+    }
+    if (
+      (settingsData?.wheelScrollAccelerationEnabled ?? true) !==
+      (initialSettingsData.current?.wheelScrollAccelerationEnabled ?? true)
+    ) {
+      formattedChanges.push(
+        `${(settingsData?.wheelScrollAccelerationEnabled ?? true) ? 'Enabled' : 'Disabled'} wheel scroll acceleration`,
+      );
     }
     if (globalConfig.terminalProgressBarEnabled !== initialConfig.current.terminalProgressBarEnabled) {
       formattedChanges.push(

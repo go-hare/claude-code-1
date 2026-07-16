@@ -165,9 +165,25 @@ export {
 export {
   isSynchronizedOutputSupported,
   isXtermJs,
+  getXtversionName,
   hasCursorUpViewportYankBug,
   writeDiffToTerminal,
 } from './core/terminal.js'
+export {
+  isJediTermEnv,
+  isJediTermArrowFloodActive,
+  isJediTermBugConfirmed,
+  noteJediTermArrowFlood,
+  clearJediTermArrowFlood,
+  consumeJediTermArrowBurstCount,
+  rewriteJediTermInput,
+  trackArrowBurst,
+  createJediTermInputState,
+  createArrowBurstWindow,
+  _resetJediTermInputForTesting,
+  type JediTermInputState,
+  type ArrowBurstWindow,
+} from './core/jediTermInput.js'
 export {
   colorize,
   applyColor,

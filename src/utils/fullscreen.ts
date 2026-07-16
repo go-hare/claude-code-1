@@ -6,7 +6,10 @@ import { execFileNoThrow } from './execFileNoThrow.js'
 import { isAlternateScreenDisabled } from './residualUiEnvGates.js'
 
 let loggedTmuxCcDisable = false
+let loggedWinSshDisable = false
 let checkedTmuxMouseHint = false
+/** Test-only override for official yMi windows check (process.platform). */
+let windowsPlatformOverride: boolean | undefined
 
 /**
  * Cached result from `tmux display-message -p '#{client_control_mode}'`.
@@ -103,29 +106,47 @@ export function isTmuxControlMode(): boolean {
 export function _resetTmuxControlModeProbeForTesting(): void {
   tmuxControlModeProbed = undefined
   loggedTmuxCcDisable = false
+  loggedWinSshDisable = false
+  windowsPlatformOverride = undefined
+}
+
+/**
+ * Official yMi densable — Windows over SSH (ConPTY re-rendering is broken
+ * under alt-screen). Matches Ot()==="windows" (process.platform==="win32")
+ * + SSH_* env triple.
+ */
+export function isWindowsOverSSH(): boolean {
+  const isWindows = windowsPlatformOverride ?? process.platform === 'win32'
+  if (!isWindows) return false
+  return Boolean(
+    process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY,
+  )
+}
+
+/** Test-only: force/clear the windows branch of isWindowsOverSSH. */
+export function _setWindowsPlatformForTesting(
+  isWindows: boolean | undefined,
+): void {
+  windowsPlatformOverride = isWindows
 }
 
 /**
  * Fullscreen / no-flicker alt-screen gate.
  *
- * Official PR #21439 + 2.1.210: default ON for everyone (input pinned to
- * bottom, virtualized scrollback, "N new message (click) ↓" pill). Opt out
- * via CLAUDE_CODE_NO_FLICKER=0, settings.tui="default", or
- * CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN.
- *
- * Priority:
+ * Official P8t densable (2.1.210) + local bg-session force-on:
  *   1. DISABLE_ALTERNATE_SCREEN / NO_FLICKER=0 → off
  *   2. bg session / NO_FLICKER=1 → on
- *   3. settings.tui "default"|"fullscreen" when set
+ *   3. Windows over SSH (yMi) → off
  *   4. tmux -CC → off (mouse/alt-screen unrecoverable)
- *   5. default → on
+ *   5. settings.tui "default"|"fullscreen" when set
+ *   6. default → on
  */
 export function isFullscreenEnvEnabled(): boolean {
-  // Official CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN force-off.
+  // Official CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN force-off (_Mi).
   if (isAlternateScreenDisabled()) {
     return false
   }
-  // bg sessions always use fullscreen (official: SESSION_KIND==="bg" → true)
+  // bg sessions always use fullscreen (official Qi: SESSION_KIND==="bg" → true)
   if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return true
   // Explicit user opt-out always wins.
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)) return false
@@ -139,21 +160,19 @@ export function isFullscreenEnvEnabled(): boolean {
   } catch {
     if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
   }
-  // Official settings.tui ("default" | "fullscreen") — explicit renderer choice.
-  try {
-    const { getSettingsForSource } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./settings/settings.js') as typeof import('./settings/settings.js')
-    const tui = (
-      getSettingsForSource('userSettings') as { tui?: string } | null
-    )?.tui
-    if (tui === 'default') return false
-    if (tui === 'fullscreen') return true
-  } catch {
-    // settings unavailable (early boot / tests) — fall through
+  // Official yMi: Windows over SSH auto-off (before settings.tui / after force-on).
+  if (isWindowsOverSSH()) {
+    if (!loggedWinSshDisable) {
+      loggedWinSshDisable = true
+      logForDebugging(
+        'fullscreen disabled: Windows over SSH (ConPTY re-rendering) detected · set CLAUDE_CODE_NO_FLICKER=1 to override',
+      )
+    }
+    return false
   }
   // Auto-disable under tmux -CC: alt-screen + mouse tracking corrupts
-  // terminal state on double-click and mouse wheel is dead.
+  // terminal state on double-click and mouse wheel is dead. Official P8t:
+  // before settings.tui so settings cannot re-enable a broken host.
   if (isTmuxControlMode()) {
     if (!loggedTmuxCcDisable) {
       loggedTmuxCcDisable = true
@@ -163,8 +182,128 @@ export function isFullscreenEnvEnabled(): boolean {
     }
     return false
   }
-  // Official default-on (PR #21439 / 2.1.210 external ships).
+  // Official settings.tui via merged settings (zn().tui densable).
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const tui = getInitialSettings()?.tui
+    if (tui === 'default') return false
+    if (tui === 'fullscreen') return true
+  } catch {
+    // settings unavailable (early boot / tests) — fall through
+  }
+  // Official default-on (PR #21439 / 2.1.210 external ships / P8t).
   return true
+}
+
+/**
+ * Official Qi densable — gate for non-renderer fullscreen *features*
+ * (focus view, etc.). Distinct from P8t / isFullscreenEnvEnabled which wraps
+ * AlternateScreen and defaults ON.
+ *
+ * After env/tmux/win-ssh/settings, falls through to:
+ *   tengu_amber_creek downsell → true
+ *   tengu_pewter_brook GB (default false) → true/false
+ */
+export function isFullscreenFeatureGateEnabled(): boolean {
+  // local-agent sessions never get feature gate (official JF()==="local-agent")
+  if (process.env.CLAUDE_CODE_ENTRYPOINT === 'local-agent') return false
+  if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return true
+  if (isAlternateScreenDisabled()) return false
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)) return false
+  try {
+    const { isNoFlickerEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    if (isNoFlickerEnabled()) return true
+  } catch {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
+  }
+  if (isTmuxControlMode()) return false
+  if (isWindowsOverSSH()) return false
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const tui = getInitialSettings()?.tui
+    if (tui === 'fullscreen') return true
+    if (tui === 'default') return false
+  } catch {
+    // fall through
+  }
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    // Official k2h / tengu_amber_creek downsell force-on
+    if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_creek', false)) {
+      return true
+    }
+    // Official tengu_pewter_brook default false
+    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_pewter_brook', false)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official t3e densable — diagnostic reason string for the fullscreen gate.
+ * Matches official labels for analytics/debug; not used for control flow.
+ */
+export type FullscreenGateReason =
+  | 'bg_forced_on'
+  | 'sr_auto_off'
+  | 'env_off'
+  | 'env_on'
+  | 'tmux_cc_auto_off'
+  | 'win_ssh_auto_off'
+  | 'settings_on'
+  | 'settings_off'
+  | 'downsell_on'
+  | 'gb_on'
+  | 'gb_off'
+  | 'default_on'
+
+export function getFullscreenGateReason(): FullscreenGateReason {
+  if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return 'bg_forced_on'
+  if (isAlternateScreenDisabled()) return 'env_off'
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)) return 'env_off'
+  try {
+    const { isNoFlickerEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    if (isNoFlickerEnabled()) return 'env_on'
+  } catch {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return 'env_on'
+  }
+  if (isTmuxControlMode()) return 'tmux_cc_auto_off'
+  if (isWindowsOverSSH()) return 'win_ssh_auto_off'
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const tui = getInitialSettings()?.tui
+    if (tui === 'fullscreen') return 'settings_on'
+    if (tui === 'default') return 'settings_off'
+  } catch {
+    // fall through
+  }
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_creek', false)) {
+      return 'downsell_on'
+    }
+    if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_pewter_brook', false)) {
+      return 'gb_on'
+    }
+    return 'gb_off'
+  } catch {
+    // P8t path has no GB fallthrough — default on
+    return 'default_on'
+  }
 }
 
 /**
@@ -265,5 +404,7 @@ export async function maybeGetTmuxMouseHint(): Promise<string | null> {
 /** Test-only: reset module-level once-per-session flags. */
 export function _resetForTesting(): void {
   loggedTmuxCcDisable = false
+  loggedWinSshDisable = false
   checkedTmuxMouseHint = false
+  windowsPlatformOverride = undefined
 }

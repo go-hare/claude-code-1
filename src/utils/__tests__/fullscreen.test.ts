@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   _resetTmuxControlModeProbeForTesting,
+  _setWindowsPlatformForTesting,
+  getFullscreenGateReason,
   isFullscreenEnvEnabled,
+  isFullscreenFeatureGateEnabled,
+  isWindowsOverSSH,
 } from '../fullscreen.js'
 
 const ORIG = {
@@ -12,6 +16,9 @@ const ORIG = {
   TERM_PROGRAM: process.env.TERM_PROGRAM,
   TERM: process.env.TERM,
   USER_TYPE: process.env.USER_TYPE,
+  SSH_CONNECTION: process.env.SSH_CONNECTION,
+  SSH_CLIENT: process.env.SSH_CLIENT,
+  SSH_TTY: process.env.SSH_TTY,
 }
 
 let settingsTui: string | undefined
@@ -19,6 +26,8 @@ let settingsTui: string | undefined
 // Relative specifier matches fullscreen.ts dynamic require('./settings/settings.js').
 mock.module('../settings/settings.js', () => ({
   getSettingsForSource: () =>
+    settingsTui === undefined ? {} : { tui: settingsTui },
+  getInitialSettings: () =>
     settingsTui === undefined ? {} : { tui: settingsTui },
 }))
 
@@ -34,7 +43,13 @@ afterEach(() => {
   restore('TERM_PROGRAM', ORIG.TERM_PROGRAM)
   restore('TERM', ORIG.TERM)
   restore('USER_TYPE', ORIG.USER_TYPE)
+  // Always clear SSH envs so host win32 + residual SSH_* cannot trip yMi
+  // in unrelated cases. Tests that need SSH set it explicitly.
+  delete process.env.SSH_CONNECTION
+  delete process.env.SSH_CLIENT
+  delete process.env.SSH_TTY
   settingsTui = undefined
+  _setWindowsPlatformForTesting(undefined)
   _resetTmuxControlModeProbeForTesting()
 })
 
@@ -45,6 +60,9 @@ describe('isFullscreenEnvEnabled', () => {
     delete process.env.CLAUDE_CODE_SESSION_KIND
     delete process.env.TMUX
     delete process.env.USER_TYPE
+    delete process.env.SSH_CONNECTION
+    delete process.env.SSH_CLIENT
+    delete process.env.SSH_TTY
     expect(isFullscreenEnvEnabled()).toBe(true)
   })
 
@@ -77,9 +95,8 @@ describe('isFullscreenEnvEnabled', () => {
     delete process.env.CLAUDE_CODE_NO_FLICKER
     delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
     delete process.env.CLAUDE_CODE_SESSION_KIND
-    // Force a path that would otherwise disable: tmux -CC.
-    process.env.TMUX = '/tmp/tmux-0/default,123,0'
-    process.env.TERM_PROGRAM = 'tmux'
+    delete process.env.TMUX
+    delete process.env.SSH_CONNECTION
     settingsTui = 'fullscreen'
     expect(isFullscreenEnvEnabled()).toBe(true)
   })
@@ -88,5 +105,87 @@ describe('isFullscreenEnvEnabled', () => {
     process.env.CLAUDE_CODE_NO_FLICKER = '0'
     settingsTui = 'fullscreen'
     expect(isFullscreenEnvEnabled()).toBe(false)
+  })
+
+  test('official yMi: Windows over SSH auto-off', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    delete process.env.TMUX
+    _setWindowsPlatformForTesting(true)
+    process.env.SSH_CONNECTION = '1.2.3.4 1234 5.6.7.8 22'
+    expect(isWindowsOverSSH()).toBe(true)
+    expect(isFullscreenEnvEnabled()).toBe(false)
+  })
+
+  test('official yMi: NO_FLICKER=1 wins over Windows SSH auto-off', () => {
+    _setWindowsPlatformForTesting(true)
+    process.env.SSH_CONNECTION = '1.2.3.4 1234 5.6.7.8 22'
+    process.env.CLAUDE_CODE_NO_FLICKER = '1'
+    expect(isFullscreenEnvEnabled()).toBe(true)
+  })
+
+  test('official yMi: settings.tui=fullscreen cannot re-enable Win SSH', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    _setWindowsPlatformForTesting(true)
+    process.env.SSH_CONNECTION = '1.2.3.4 1234 5.6.7.8 22'
+    settingsTui = 'fullscreen'
+    expect(isFullscreenEnvEnabled()).toBe(false)
+  })
+
+  test('official yMi: non-windows SSH stays on', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    _setWindowsPlatformForTesting(false)
+    process.env.SSH_CONNECTION = '1.2.3.4 1234 5.6.7.8 22'
+    expect(isWindowsOverSSH()).toBe(false)
+    expect(isFullscreenEnvEnabled()).toBe(true)
+  })
+
+  test('t3e reason: default_on when no env/settings/GB', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    delete process.env.TMUX
+    settingsTui = undefined
+    // P8t path (renderer) defaults on; t3e falls through GB catch → default_on
+    expect(getFullscreenGateReason()).toMatch(/default_on|gb_off/)
+  })
+
+  test('t3e reason: env_off when NO_FLICKER=0', () => {
+    process.env.CLAUDE_CODE_NO_FLICKER = '0'
+    expect(getFullscreenGateReason()).toBe('env_off')
+  })
+
+  test('t3e reason: win_ssh_auto_off', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    delete process.env.TMUX
+    _setWindowsPlatformForTesting(true)
+    process.env.SSH_CONNECTION = '1.2.3.4 1234 5.6.7.8 22'
+    expect(getFullscreenGateReason()).toBe('win_ssh_auto_off')
+  })
+
+  test('Qi feature gate: GB default false without force-on', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    delete process.env.CLAUDE_CODE_ENTRYPOINT
+    delete process.env.TMUX
+    settingsTui = undefined
+    // Without GB amber_creek / pewter_brook, feature gate is off
+    expect(isFullscreenFeatureGateEnabled()).toBe(false)
+  })
+
+  test('Qi feature gate: bg session force-on', () => {
+    process.env.CLAUDE_CODE_SESSION_KIND = 'bg'
+    expect(isFullscreenFeatureGateEnabled()).toBe(true)
+  })
+
+  test('Qi feature gate: settings.tui=fullscreen force-on', () => {
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+    settingsTui = 'fullscreen'
+    expect(isFullscreenFeatureGateEnabled()).toBe(true)
   })
 })

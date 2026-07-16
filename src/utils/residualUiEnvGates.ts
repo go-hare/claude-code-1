@@ -336,8 +336,13 @@ export function getSyntaxHighlightUnavailableReason(
 }
 
 /**
- * Official bxh densable core — CLAUDE_CODE_SCROLL_SPEED parse, default 1,
- * clamp (0, 20]. Invalid/≤0 → default.
+ * Official wog densable core — CLAUDE_CODE_SCROLL_SPEED parse, clamp (0, 20].
+ * Invalid/≤0/absent → defaultBase.
+ *
+ * Official F3i auto defaultBase is 3 when not wheelFlood (else 1); jediTerm
+ * uses 2. Callers that want the official auto base pass it in (see
+ * resolveWheelProfile / readScrollSpeedBase). Bare default stays 1 for
+ * backward-compatible call sites.
  */
 export function resolveScrollSpeedBase(
   env: NodeJS.ProcessEnv = process.env,

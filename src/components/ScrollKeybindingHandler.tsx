@@ -2,7 +2,18 @@ import React, { type RefObject, useEffect, useRef } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
 import type { ScrollBoxHandle, FocusMove, SelectionState } from '@anthropic/ink';
-import { useSelection, type Key, useInput, isXtermJs, getClipboardPath } from '@anthropic/ink';
+import {
+  useSelection,
+  type Key,
+  useInput,
+  isXtermJs,
+  getXtversionName,
+  getClipboardPath,
+  isJediTermArrowFloodActive,
+  isJediTermBugConfirmed,
+  consumeJediTermArrowBurstCount,
+  useStdin,
+} from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logForDebugging } from '../utils/debug.js';
 import { resolveScrollSpeedBase } from '../utils/residualUiEnvGates.js';
@@ -22,83 +33,40 @@ type Props = {
   isModal?: boolean;
 };
 
-// Terminals send one SGR wheel event per intended row (verified in Ghostty
-// src/Surface.zig: `for (0..@abs(y.delta)) |_| { mouseReport(.four, ...) }`).
-// Ghostty already 3×'s discrete wheel ticks before that loop; trackpad
-// precision scroll is pixels/cell_size. 1 event = 1 row intended — use it
-// as the base, and ramp a multiplier when events arrive rapidly. The
-// pendingScrollDelta accumulator + proportional drain in
-// render-node-to-output handles smooth catch-up on big bursts.
+// Official 2.1.210 FSp densable constants (OSp/hP_/gP_/yP_/_P_/bP_/SP_/EP_/
+// vP_/NSp/AP_/$Sp/wP_/TP_/HP_/CP_ + jb path kP_/IP_/RP_/DP_/j3i). Keep names
+// aligned with local docs but values must match the official binary — do not invent.
 //
-// xterm.js (VS Code/Cursor/Windsurf integrated terminals) sends exactly 1
-// event per wheel notch — no pre-amplification. A separate exponential
-// decay curve (below) compensates for the lower event rate, with burst
-// detection and gap-dependent caps tuned to VS Code's event patterns.
+// Native terminals: hard-window linear ramp (OSp/hP_/gP_). Events closer than
+// the window ramp the multiplier; idle gaps reset to `base`. Official F3i
+// auto-base is 3 when not wheelFlood (win32/WT/xterm.js decay path).
+const WHEEL_ACCEL_WINDOW_MS = 40; // OSp
+const WHEEL_ACCEL_STEP = 0.3; // hP_
+const WHEEL_ACCEL_MAX = 6; // gP_
+const WHEEL_FLOOD_IDLE_MULT = 3; // yP_ — mult = base*yP_ when gap > OSp under wheelFlood
 
-// Native terminals: hard-window linear ramp. Events closer than the window
-// ramp the multiplier; idle gaps reset to `base` (default 1). Some emulators
-// pre-multiply at their layer (ghostty discrete=3 sends 3 SGR events/notch;
-// iTerm2 "faster scroll" similar) — base=1 is correct there. Others send 1
-// event/notch — users on those can set CLAUDE_CODE_SCROLL_SPEED=3 to match
-// vim/nvim/opencode app-side defaults. We can't detect which, so knob it.
-const WHEEL_ACCEL_WINDOW_MS = 40;
-const WHEEL_ACCEL_STEP = 0.3;
-const WHEEL_ACCEL_MAX = 6;
+// Encoder bounce debounce + wheel-mode decay curve (_P_/bP_/SP_/EP_/vP_).
+const WHEEL_BOUNCE_GAP_MAX_MS = 200; // _P_
+const WHEEL_MODE_STEP = 15; // bP_
+const WHEEL_MODE_CAP = 15; // SP_
+const WHEEL_MODE_RAMP = 3; // EP_
+const WHEEL_MODE_IDLE_DISENGAGE_MS = 1500; // vP_
 
-// Encoder bounce debounce + wheel-mode decay curve. Worn/cheap optical
-// encoders emit spurious reverse-direction ticks during fast spins — measured
-// 28% of events on Boris's mouse (2026-03-17, iTerm2). Pattern is always
-// flip-then-flip-back; trackpads produce ZERO flips (0/458 in same recording).
-// A confirmed bounce proves a physical wheel is attached — engage the same
-// exponential-decay curve the xterm.js path uses (it's already tuned), with
-// a higher cap to compensate for the lower event rate (~9/sec vs VS Code's
-// ~30/sec). Trackpad can't reach this path.
-//
-// The decay curve gives: 1st click after idle = 1 row (precision), 2nd = 10,
-// 3rd = cap. Slowing down decays smoothly toward 1 — no separate idle
-// threshold needed, large gaps just have m≈0 → mult→1. Wheel mode is STICKY:
-// once a bounce confirms it's a mouse, the decay curve applies until an idle
-// gap or trackpad-flick-burst signals a possible device switch.
-const WHEEL_BOUNCE_GAP_MAX_MS = 200; // flip-back must arrive within this
-// Mouse is ~9 events/sec vs VS Code's ~30 — STEP is 3× xterm.js's 5 to
-// compensate. At gap=100ms (m≈0.63): one click gives 1+15*0.63≈10.5.
-const WHEEL_MODE_STEP = 15;
-const WHEEL_MODE_CAP = 15;
-// Max mult growth per event. Without this, the +STEP*m term jumps mult
-// from 1→10 in one event when wheelMode engages mid-scroll (bounce
-// detected after N events in trackpad mode at mult=1). User sees scroll
-// suddenly go 10× faster. Cap=3 gives 1→4→7→10→13→15 over ~0.5s at
-// 9 events/sec — smooth ramp instead of a jump. Decay is unaffected
-// (target<mult wins the min).
-const WHEEL_MODE_RAMP = 3;
-// Device-switch disengage: mouse finger-repositions max at ~830ms (measured);
-// trackpad between-gesture pauses are 2000ms+. An idle gap above this means
-// the user stopped — might have switched devices. Disengage; the next mouse
-// bounce re-engages. Trackpad slow swipe (no <5ms bursts, so the burst-count
-// guard doesn't catch it) is what this protects against.
-const WHEEL_MODE_IDLE_DISENGAGE_MS = 1500;
-
-// xterm.js: exponential decay. momentum=0.5^(gap/hl) — slow click → m≈0
-// → mult→1 (precision); fast → m≈1 → carries momentum. Steady-state
-// = 1 + step×m/(1-m), capped. Measured event rates in VS Code (wheel.log):
-// sustained scroll sends events at 20-50ms gaps (20-40 Hz), plus 0-2ms
-// same-batch bursts on flicks. Cap is low (3–6, gap-dependent) because event
-// frequency is high — at 40 Hz × 6 = 240 rows/sec max demand, which the
-// adaptive drain at ~200fps (measured) handles. Higher cap → pending explosion.
-// Tuned empirically (boris 2026-03). See docs/research/terminal-scroll-*.
-const WHEEL_DECAY_HALFLIFE_MS = 150;
-const WHEEL_DECAY_STEP = 5;
-// Same-batch events (<BURST_MS) arrive in one stdin batch — the terminal
-// is doing proportional reporting. Treat as 1 row/event like native.
-const WHEEL_BURST_MS = 5;
-// Cap boundary: slow events (≥GAP_MS) cap low for short smooth drains;
-// fast events cap higher for throughput (adaptive drain handles backlog).
-const WHEEL_DECAY_GAP_MS = 80;
-const WHEEL_DECAY_CAP_SLOW = 3; // gap ≥ GAP_MS: precision
-const WHEEL_DECAY_CAP_FAST = 6; // gap < GAP_MS: throughput
-// Idle threshold: gaps beyond this reset to the kick value (2) so the
-// first click after a pause feels responsive regardless of direction.
-const WHEEL_DECAY_IDLE_MS = 500;
+// Decay curve (NSp/AP_/$Sp/wP_/TP_/HP_/CP_) — used when useDecayCurve
+// (official: !wheelFlood && (xtermJs || win32 || WT_SESSION)).
+const WHEEL_DECAY_HALFLIFE_MS = 150; // NSp
+const WHEEL_DECAY_STEP = 7; // AP_ (official 2.1.210; was 5 pre-port)
+const WHEEL_BURST_MS = 5; // $Sp
+const WHEEL_DECAY_GAP_MS = 80; // wP_
+const WHEEL_DECAY_CAP_SLOW = 3; // TP_
+const WHEEL_DECAY_CAP_FAST = 36; // HP_ (official 2.1.210; was 6 pre-port)
+const WHEEL_DECAY_IDLE_MS = 500; // CP_
+// Official jbBypass / kJc path (JediTerm arrow-flood as wheel).
+const WHEEL_JB_IDLE_MS = 200; // j3i — reset jbBypass after idle
+const WHEEL_JB_FRAC_STEP = 0.35; // kP_
+const WHEEL_JB_MULT_STEP = 0.008; // IP_
+const WHEEL_JB_BURST_WEIGHT = 0.4; // RP_
+const WHEEL_JB_MULT_CAP = 4; // DP_
 
 /**
  * Whether a keypress should clear the virtual text selection. Mimics
@@ -149,75 +117,173 @@ export type WheelAccelState = {
   time: number;
   mult: number;
   dir: 0 | 1 | -1;
+  /**
+   * Official useDecayCurve (J3): !wheelFlood && (xtermJs || win32 || WT).
+   * Selects the exponential decay path in computeWheelStep/FSp.
+   * Kept as `xtermJs` for historical call sites; equals useDecayCurve.
+   */
   xtermJs: boolean;
-  /** Carried fractional scroll (xterm.js only). scrollBy floors, so without
-   *  this a mult of 1.5 gives 1 row every time. Carrying the remainder gives
-   *  1,2,1,2 on average for mult=1.5 — correct throughput over time. */
+  /** Official useDecayCurve field (same as xtermJs flag above). */
+  useDecayCurve: boolean;
+  /** Carried fractional scroll (decay path). scrollBy floors, so without
+   *  this a mult of 1.5 gives 1 row every time. */
   frac: number;
-  /** Native-path baseline rows/event. Reset value on idle/reversal; ramp
-   *  builds on top. xterm.js path ignores this (own kick=2 tuning). */
+  /** Baseline rows/event (official F3i/wog/jediTerm). */
   base: number;
-  /** Deferred direction flip (native only). Might be encoder bounce or a
-   *  real reversal — resolved by the NEXT event. Real reversal loses 1 row
-   *  of latency; bounce is swallowed and triggers wheel mode. The flip's
-   *  direction and timestamp are derivable (it's always -state.dir at
-   *  state.time) so this is just a marker. */
   pendingFlip: boolean;
-  /** Set true once a bounce is confirmed (flip-then-flip-back within
-   *  BOUNCE_GAP_MAX). Sticky — but disengaged on idle gap >1500ms OR a
-   *  trackpad-signature burst (see burstCount). State lives in a useRef so
-   *  it persists across device switches; the disengages handle mouse→trackpad. */
   wheelMode: boolean;
-  /** Consecutive <5ms events. Trackpad flick produces 100+ at <5ms; mouse
-   *  produces ≤3 (verified in /tmp/wheel-tune.txt). 5+ in a row → trackpad
-   *  signature → disengage wheel mode so device-switch doesn't leak mouse
-   *  accel to trackpad. */
   burstCount: number;
+  /** Official wheelFlood ($3i) — Cursor/VSCode flood path under !useDecayCurve. */
+  wheelFlood: boolean;
+  /** Official accelEnabled (settings.wheelScrollAccelerationEnabled, default true). */
+  accelEnabled: boolean;
+  /** Official jbBypass — sticky while kJc() arrow-flood is active. */
+  jbBypass: boolean;
 };
 
-/** Compute rows for one wheel event, mutating accel state. Returns 0 when
- *  a direction flip is deferred for bounce detection — call sites no-op on
- *  step=0 (scrollBy(0) is a no-op, onScroll(false) is idempotent). Exported
- *  for tests. */
+/** Official $3i densable — wheel flood hosts (Cursor / certain VS Code /
+ *  xterm.js via XTVERSION). Flood path uses window mult, not decay. */
+export function isWheelFloodHost(
+  env: NodeJS.ProcessEnv = process.env,
+  xtversion: string | undefined = getXtversionName(),
+): boolean {
+  if (env.CURSOR_TRACE_ID !== undefined) return true;
+  if (env.VSCODE_GIT_ASKPASS_MAIN?.includes('cursor')) return true;
+  if (env.TERM_PROGRAM === 'vscode') {
+    const v = parseVscodeVersionTriple(env.TERM_PROGRAM_VERSION);
+    if (v !== null) return v >= 1_092_000 && v < 1_105_000;
+  }
+  return xtversion?.startsWith('xterm.js') ?? false;
+}
+
+/** Official Aog densable — pack semver major.minor.patch into integer. */
+function parseVscodeVersionTriple(version: string | undefined): number | null {
+  if (!version) return null;
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!m) return null;
+  return +m[1]! * 1e6 + +m[2]! * 1000 + +m[3]!;
+}
+
+/** Official JediTerm detection (TERMINAL_EMULATOR). */
+export function isJediTerm(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.TERMINAL_EMULATOR === 'JetBrains-JediTerm';
+}
+
+/**
+ * Official F3i densable: !wheelFlood → 3, else 1.
+ * (xtermJs/wtSession args are present in the binary but `(e||!0)` is always
+ * true, so the effective rule is flood-gated only.)
+ */
+export function resolveOfficialAutoScrollBase(wheelFlood: boolean): number {
+  return !wheelFlood ? 3 : 1;
+}
+
+/**
+ * Official J3 densable profile (portable: process.platform, not hardcoded
+ * win32 from the Windows native binary).
+ */
+export type WheelProfile = {
+  useDecayCurve: boolean;
+  base: number;
+  xtermJs: boolean;
+  wheelFlood: boolean;
+  jediTerm: boolean;
+  wtSession: boolean;
+  platform: string;
+  termProgram: string;
+};
+
+export function resolveWheelProfile(env: NodeJS.ProcessEnv = process.env): WheelProfile {
+  const xtversion = getXtversionName();
+  const wheelFlood = isWheelFloodHost(env, xtversion);
+  const jediTerm = isJediTerm(env);
+  const wtSession = !!env.WT_SESSION;
+  const xtermJs = isXtermJs();
+  const platform = process.platform;
+  // Official: useDecayCurve:!r&&(i||s==="win32"||o)
+  const useDecayCurve = !wheelFlood && (xtermJs || platform === 'win32' || wtSession);
+  // Official: base:n?2:wog(i,r,o) where wog = SCROLL_SPEED override on F3i
+  const autoBase = jediTerm ? 2 : resolveOfficialAutoScrollBase(wheelFlood);
+  const base = resolveScrollSpeedBase(env, autoBase);
+  return {
+    useDecayCurve,
+    base,
+    xtermJs,
+    wheelFlood,
+    jediTerm,
+    wtSession,
+    platform,
+    termProgram: env.TERM_PROGRAM ?? 'unset',
+  };
+}
+
+/**
+ * Official FSp densable — compute rows for one wheel event.
+ * Returns 0 when a direction flip is deferred for bounce detection.
+ * Exported for tests.
+ */
 export function computeWheelStep(state: WheelAccelState, dir: 1 | -1, now: number): number {
-  if (!state.xtermJs) {
-    // Device-switch guard ①: idle disengage. Runs BEFORE pendingFlip resolve
-    // so a pending bounce (28% of last-mouse-events) doesn't bypass it via
-    // the real-reversal early return. state.time is either the last committed
-    // event OR the deferred flip — both count as "last activity".
+  // Official FSp head: if (kJc()) { jbBypass path ... }
+  if (isJediTermArrowFloodActive()) {
+    const gap = now - state.time;
+    if (!state.jbBypass || gap > WHEEL_JB_IDLE_MS) {
+      state.jbBypass = true;
+      state.frac = 0;
+      state.mult = 1;
+    } else if (dir !== state.dir) {
+      state.frac = 0;
+    }
+    state.dir = dir;
+    state.time = now;
+    const burst = consumeJediTermArrowBurstCount();
+    if (state.accelEnabled) {
+      state.mult = Math.min(WHEEL_JB_MULT_CAP, state.mult + WHEEL_JB_MULT_STEP + burst * WHEEL_JB_BURST_WEIGHT);
+    }
+    state.frac += WHEEL_JB_FRAC_STEP * state.mult;
+    const rows = Math.floor(state.frac);
+    state.frac -= rows;
+    return rows;
+  }
+  if (state.jbBypass) {
+    state.jbBypass = false;
+    state.pendingFlip = false;
+    state.wheelMode = false;
+    state.burstCount = 0;
+    state.frac = 0;
+    state.dir = 0;
+  }
+
+  // Official: if (!e.useDecayCurve) { ... native / flood ... } else { decay }
+  if (!state.useDecayCurve) {
+    // Official wheelFlood path under window mode.
+    if (state.wheelFlood) {
+      const gap = now - state.time;
+      state.time = now;
+      state.dir = dir;
+      state.mult = gap > WHEEL_ACCEL_WINDOW_MS ? state.base * WHEEL_FLOOD_IDLE_MULT : state.base;
+      return Math.max(1, Math.floor(state.mult));
+    }
+
+    // Device-switch guard ①: idle disengage.
     if (state.wheelMode && now - state.time > WHEEL_MODE_IDLE_DISENGAGE_MS) {
       state.wheelMode = false;
       state.burstCount = 0;
       state.mult = state.base;
     }
 
-    // Resolve any deferred flip BEFORE touching state.time/dir — we need the
-    // pre-flip state.dir to distinguish bounce (flip-back) from real reversal
-    // (flip persisted), and state.time (= bounce timestamp) for the gap check.
     if (state.pendingFlip) {
       state.pendingFlip = false;
       if (dir !== state.dir || now - state.time > WHEEL_BOUNCE_GAP_MAX_MS) {
-        // Real reversal: new dir persisted, OR flip-back arrived too late.
-        // Commit. The deferred event's 1 row is lost (acceptable latency).
         state.dir = dir;
         state.time = now;
         state.mult = state.base;
-        return Math.floor(state.mult);
+        return Math.max(1, Math.floor(state.mult));
       }
-      // Bounce confirmed: flipped back to original dir within the window.
-      // state.dir/mult unchanged from pre-bounce. state.time was advanced to
-      // the bounce below, so gap here = flip-back interval — reflects the
-      // user's actual click cadence (bounce IS a physical click, just noisy).
       state.wheelMode = true;
     }
 
     const gap = now - state.time;
     if (dir !== state.dir && state.dir !== 0) {
-      // Flip. Defer — next event decides bounce vs. real reversal. Advance
-      // time (but NOT dir/mult): if this turns out to be a bounce, the
-      // confirm event's gap will be the flip-back interval, which reflects
-      // the user's actual click rate. The bounce IS a physical wheel click,
-      // just misread by the encoder — it should count toward cadence.
       state.pendingFlip = true;
       state.time = now;
       return 0;
@@ -225,16 +291,8 @@ export function computeWheelStep(state: WheelAccelState, dir: 1 | -1, now: numbe
     state.dir = dir;
     state.time = now;
 
-    // ─── MOUSE (wheel mode, sticky until device-switch signal) ───
     if (state.wheelMode) {
       if (gap < WHEEL_BURST_MS) {
-        // Same-batch burst check (ported from xterm.js): iTerm2 proportional
-        // reporting sends 2+ SGR events for one detent when macOS gives
-        // delta>1. Without this, the 2nd event at gap<1ms has m≈1 → STEP*m=15
-        // → one gentle click gives 1+15=16 rows.
-        //
-        // Device-switch guard ②: trackpad flick produces 100+ events at <5ms
-        // (measured); mouse produces ≤3. 5+ consecutive → trackpad flick.
         if (++state.burstCount >= 5) {
           state.wheelMode = false;
           state.burstCount = 0;
@@ -246,51 +304,39 @@ export function computeWheelStep(state: WheelAccelState, dir: 1 | -1, now: numbe
         state.burstCount = 0;
       }
     }
-    // Re-check: may have disengaged above.
-    if (state.wheelMode) {
-      // xterm.js decay curve with STEP×3, higher cap. No idle threshold —
-      // the curve handles it (gap=1000ms → m≈0.01 → mult≈1). No frac —
-      // rounding loss is minor at high mult, and frac persisting across idle
-      // was causing off-by-one on the first click back.
+
+    // Official: wheelMode && accelEnabled → decay-style wheel mode.
+    if (state.wheelMode && state.accelEnabled) {
       const m = 0.5 ** (gap / WHEEL_DECAY_HALFLIFE_MS);
-      const cap = Math.max(WHEEL_MODE_CAP, state.base * 2);
+      // Official: Math.max(SP_*Math.min(base,1), base*2)
+      const cap = Math.max(WHEEL_MODE_CAP * Math.min(state.base, 1), state.base * 2);
       const next = 1 + (state.mult - 1) * m + WHEEL_MODE_STEP * m;
       state.mult = Math.min(cap, next, state.mult + WHEEL_MODE_RAMP);
-      return Math.floor(state.mult);
+      return Math.max(1, Math.floor(state.mult));
     }
 
-    // ─── TRACKPAD / HI-RES (native, non-wheel-mode) ───
-    // Tight 40ms burst window: sub-40ms events ramp, anything slower resets.
-    // Trackpad flick delivers 200+ events at <20ms gaps → rails to cap 6.
-    // Trackpad slow swipe at 40-400ms gaps → resets every event → 1 row each.
-    if (gap > WHEEL_ACCEL_WINDOW_MS) {
+    // Trackpad / hi-res native window ramp (or accel disabled → base).
+    if (gap > WHEEL_ACCEL_WINDOW_MS || !state.accelEnabled) {
       state.mult = state.base;
     } else {
-      const cap = Math.max(WHEEL_ACCEL_MAX, state.base * 2);
+      // Official: Math.max(gP_*Math.min(base,1), base*2)
+      const cap = Math.max(WHEEL_ACCEL_MAX * Math.min(state.base, 1), state.base * 2);
       state.mult = Math.min(cap, state.mult + WHEEL_ACCEL_STEP);
     }
-    return Math.floor(state.mult);
+    return Math.max(1, Math.floor(state.mult));
   }
 
-  // ─── VSCODE (xterm.js, browser wheel events) ───
-  // Browser wheel events — no encoder bounce, no SGR bursts. Decay curve
-  // unchanged from the original tuning. Same formula shape as wheel mode
-  // above (keep in sync) but STEP=5 not 15 — higher event rate here.
+  // ─── Decay curve (useDecayCurve: xterm.js / win32 / WT_SESSION) ───
   const gap = now - state.time;
   const sameDir = dir === state.dir;
   state.time = now;
   state.dir = dir;
-  // xterm.js path. Debug log shows two patterns: (a) 20-50ms gaps during
-  // sustained scroll (~30 Hz), (b) <5ms same-batch bursts on flicks. For
-  // (b) give 1 row/event — the burst count IS the acceleration, same as
-  // native. For (a) the decay curve gives 3-5 rows. For sparse events
-  // (100ms+, slow deliberate scroll) the curve gives 1-3.
   if (sameDir && gap < WHEEL_BURST_MS) return 1;
+  // Official: !accelEnabled → fixed base rows.
+  if (!state.accelEnabled) return Math.max(1, Math.floor(state.base));
   if (!sameDir || gap > WHEEL_DECAY_IDLE_MS) {
-    // Direction reversal or long idle: start at 2 (not 1) so the first
-    // click after a pause moves a visible amount. Without this, idle-
-    // then-resume in the same direction decays to mult≈1 (1 row).
-    state.mult = 2;
+    // Official: mult = Math.max(2, base) (base is often 3 on win32).
+    state.mult = Math.max(2, state.base);
     state.frac = 0;
   } else {
     const m = 0.5 ** (gap / WHEEL_DECAY_HALFLIFE_MS);
@@ -303,46 +349,70 @@ export function computeWheelStep(state: WheelAccelState, dir: 1 | -1, now: numbe
   return rows;
 }
 
-/** Read CLAUDE_CODE_SCROLL_SPEED, default 1, clamp (0, 20].
- *  Some terminals pre-multiply wheel events (ghostty discrete=3, iTerm2
- *  "faster scroll") — base=1 is correct there. Others send 1 event/notch —
- *  set CLAUDE_CODE_SCROLL_SPEED=3 to match vim/nvim/opencode. We can't
- *  detect which kind of terminal we're in, hence the knob. Called lazily
- *  from initAndLogWheelAccel so globalSettings.env has loaded.
- *  Official bxh densable core via resolveScrollSpeedBase. */
-export function readScrollSpeedBase(): number {
-  return resolveScrollSpeedBase();
+/**
+ * Official wog densable via resolveScrollSpeedBase — default is official
+ * auto base (F3i=3 when not flood), not 1.
+ */
+export function readScrollSpeedBase(defaultBase = 3): number {
+  return resolveScrollSpeedBase(process.env, defaultBase);
 }
 
-/** Initial wheel accel state. xtermJs=true selects the decay curve.
- *  base is the native-path baseline rows/event (default 1). */
-export function initWheelAccel(xtermJs = false, base = 1): WheelAccelState {
+/** Official PP_ densable — initial wheel accel state. */
+export function initWheelAccel(
+  useDecayCurve = false,
+  base = 1,
+  wheelFlood = false,
+  accelEnabled = true,
+): WheelAccelState {
   return {
     time: 0,
     mult: base,
     dir: 0,
-    xtermJs,
+    xtermJs: useDecayCurve,
+    useDecayCurve,
     frac: 0,
     base,
     pendingFlip: false,
     wheelMode: false,
     burstCount: 0,
+    wheelFlood,
+    accelEnabled,
+    jbBypass: false,
   };
 }
 
-// Lazy-init helper. isXtermJs() combines the TERM_PROGRAM env check + async
-// XTVERSION probe — the probe may not have resolved at render time, so this
-// is called on the first wheel event (>>50ms after startup) when it's settled.
-// Logs detected mode once so --debug users can verify SSH detection worked.
-// The renderer also calls isXtermJsHost() (in render-node-to-output) to
-// select the drain algorithm — no state to pass through.
+/**
+ * Official vc("wheelScrollAccelerationEnabled", true) densable — merged
+ * settings (getInitialSettings), default true.
+ */
+export function isWheelScrollAccelerationEnabled(): boolean {
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/settings/settings.js') as typeof import('../utils/settings/settings.js');
+    const v = getInitialSettings().wheelScrollAccelerationEnabled;
+    if (v === false) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Official USp densable — lazy profile + log on first wheel event.
+ * Re-reads J3-equivalent profile so XTVERSION / settings have settled.
+ */
 function initAndLogWheelAccel(): WheelAccelState {
-  const xtermJs = isXtermJs();
-  const base = readScrollSpeedBase();
+  const profile = resolveWheelProfile();
+  const accelEnabled = isWheelScrollAccelerationEnabled();
   logForDebugging(
-    `wheel accel: ${xtermJs ? 'decay (xterm.js)' : 'window (native)'} · base=${base} · TERM_PROGRAM=${process.env.TERM_PROGRAM ?? 'unset'}`,
+    `wheel accel: ${profile.useDecayCurve ? 'decay' : 'window (native)'} · base=${profile.base} · platform=${profile.platform} · TERM_PROGRAM=${profile.termProgram}` +
+      `${profile.wheelFlood ? ' · wheelFlood' : ''}` +
+      `${profile.jediTerm ? ' · jediTerm' : ''}` +
+      `${isJediTermBugConfirmed() ? ' · jbBugConfirmed' : ''}` +
+      `${accelEnabled ? '' : ' · accelDisabled'}`,
   );
-  return initWheelAccel(xtermJs, base);
+  return initWheelAccel(profile.useDecayCurve, profile.base, profile.wheelFlood, accelEnabled);
 }
 
 // Drag-to-scroll: when dragging past the viewport edge, scroll by this many
@@ -366,10 +436,77 @@ const AUTOSCROLL_MAX_TICKS = 200; // 10s @ 50ms
 export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal = false }: Props): React.ReactNode {
   const selection = useSelection();
   const { addNotification } = useNotifications();
+  const { internal_eventEmitter } = useStdin();
   // Lazy-inited on first wheel event so the XTVERSION probe (fired at
   // raw-mode-enable time) has resolved by then — initializing in useRef()
   // would read getWheelBase() before the probe reply arrives over SSH.
+  // Official fXs: also cache last J3 profile so XTVERSION/flood changes
+  // re-init accel state; always refresh base from live profile.
   const wheelAccel = useRef<WheelAccelState | null>(null);
+  const wheelProfileRef = useRef<WheelProfile | null>(null);
+
+  // Official VSp densable — arrow-burst / jediterm-scroll-bug toasts.
+  useEffect(() => {
+    if (!internal_eventEmitter) return;
+    let arrowNotified = false;
+    let pendingToast: ReturnType<typeof setTimeout> | undefined;
+    const onArrowBurst = (payload: { direction?: string; count?: number }) => {
+      if (!arrowNotified) {
+        arrowNotified = true;
+        logForDebugging(`tengu_scroll_arrows_detected count=${payload?.count ?? 0} up=${payload?.direction === 'up'}`);
+      }
+      // Defer like official setTimeout(..., 200)
+      if (pendingToast !== undefined) clearTimeout(pendingToast);
+      pendingToast = setTimeout(() => {
+        pendingToast = undefined;
+        addNotification({
+          key: 'scroll-as-arrows',
+          text: 'Scroll wheel is sending arrow keys · use PgUp/PgDn to scroll',
+          color: 'warning',
+          priority: 'immediate',
+          timeoutMs: 12000,
+        });
+      }, 200);
+    };
+    const onJediBug = () => {
+      logForDebugging('tengu_jediterm_scroll_bug_detected');
+      addNotification({
+        key: 'jediterm-scroll-bug',
+        text: 'Scroll support in JetBrains IDE 2025.2 terminals is experimental · upgrade to 2025.3+ for the best experience',
+        color: 'suggestion',
+        priority: 'immediate',
+        timeoutMs: 15000,
+      });
+    };
+    internal_eventEmitter.on('arrow-burst', onArrowBurst);
+    internal_eventEmitter.on('jediterm-scroll-bug', onJediBug);
+    return () => {
+      if (pendingToast !== undefined) clearTimeout(pendingToast);
+      internal_eventEmitter.off('arrow-burst', onArrowBurst);
+      internal_eventEmitter.off('jediterm-scroll-bug', onJediBug);
+    };
+  }, [internal_eventEmitter, addNotification]);
+
+  function ensureWheelAccel(): WheelAccelState {
+    const profile = resolveWheelProfile();
+    if (wheelProfileRef.current !== null) {
+      const prev = wheelProfileRef.current;
+      if (
+        prev.useDecayCurve !== profile.useDecayCurve ||
+        prev.wheelFlood !== profile.wheelFlood ||
+        prev.jediTerm !== profile.jediTerm ||
+        prev.wtSession !== profile.wtSession ||
+        prev.xtermJs !== profile.xtermJs
+      ) {
+        wheelAccel.current = null;
+      }
+    }
+    wheelProfileRef.current = profile;
+    wheelAccel.current ??= initAndLogWheelAccel();
+    // Official: c.current.base = J3().base every event (SCROLL_SPEED may change).
+    wheelAccel.current.base = profile.base;
+    return wheelAccel.current;
+  }
 
   function showCopiedToast(text: string): void {
     // getClipboardPath reads env synchronously — predicts what setClipboard
@@ -476,16 +613,16 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
         // the wheel event instead (e.g. Settings Config's list navigation
         // inside the centered Modal, where the paginated slice always fits).
         if (!s || s.getScrollHeight() <= s.getViewportHeight()) return false;
-        wheelAccel.current ??= initAndLogWheelAccel();
-        scrollUp(s, computeWheelStep(wheelAccel.current, -1, performance.now()));
+        const accel = ensureWheelAccel();
+        scrollUp(s, computeWheelStep(accel, -1, performance.now()));
         onScroll?.(false, s);
       },
       'scroll:lineDown': () => {
         selection.clearSelection();
         const s = scrollRef.current;
         if (!s || s.getScrollHeight() <= s.getViewportHeight()) return false;
-        wheelAccel.current ??= initAndLogWheelAccel();
-        const step = computeWheelStep(wheelAccel.current, 1, performance.now());
+        const accel = ensureWheelAccel();
+        const step = computeWheelStep(accel, 1, performance.now());
         const reachedBottom = scrollDown(s, step);
         onScroll?.(reachedBottom, s);
       },
