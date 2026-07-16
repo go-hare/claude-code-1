@@ -9,180 +9,118 @@
 
 > Which Claude do you like? The open source one is the best.
 
-A reverse-engineered / decompiled source restoration of Anthropic's official Claude Code CLI tool. The goal is to reproduce most of Claude Code's functionality and engineering capabilities.
+A reverse-engineered / decompiled source restoration of Anthropic's official Claude Code CLI tool. The goal is to keep the Claude Code interaction model while restoring multi-model providers, remote control, ACP, swarm/pipes, MCP, plugins, KAIROS, Buddy, observability, and local automation.
 
+The published npm package is **`@go-hare/claude-code`** (current line: **2.6.33**). Platform binaries ship as optionalDependencies: `@go-hare/claude-code-<os>-<arch>`.
 
-Sponsor placeholder.
+| Feature | Notes |
+| ------- | ----- |
+| **Pipes / multi-instance** | Same-host main/sub orchestration + LAN discovery; `/pipes` panel + `Shift+↓` routing |
+| **ACP** | First-class agent protocol for IDEs (Zed/Cursor), session resume, skills, permission bridge |
+| **Remote Control** | Self-hosted Docker remote UI — use Claude Code from a phone/browser |
+| **Agents / background sessions** | `claude agents` fullscreen dashboard, daemon job dispatch, `/exit` handoff (resume/fork), Windows WMI self-spawn |
+| **Fullscreen densable** | Official 2.1.210 alignment: fullscreen on by default, wheel / Jump-to-bottom, spinner visibility resume, alt-screen exit anti-flash |
+| **Langfuse** | Agent-loop observability and dataset export |
+| **Web Search** | Built-in search (Bing / Brave) |
+| **Poor Mode** | `/poor` — drop memory extract + prompt suggestions to cut concurrent spend |
+| **KAIROS** | Persistent assistant mode (brief, wait, channels, daily memory, PR push) |
+| **Buddy** | Terminal companion pet (`/buddy`) |
+| **Channels** | External push into the session (Feishu/Slack/Discord/WeChat plugins) |
+| **Custom providers** | OpenAI / Anthropic / Gemini / Grok via `/login` (incl. Sonnet 5 / Org default) |
+| **Gateway / IdP sessions** | Expired session tryRestore, secure-storage negative cache, refreshable restore without silent Bedrock fallback |
+| Voice / Computer Use / Chrome Use | Doubao ASR, screenshot+input, browser automation |
+| Artifacts | HTML/Markdown hosting with highlight + mermaid |
+| Sentry / GrowthBook | Enterprise error tracking and feature flags |
+| `/dream` | Memory file consolidation |
 
-- [x] v1: Basic runability and type checking pass
-- [x] V2: Complete engineering infrastructure
-  - [ ] Biome formatting may not be implemented first to avoid code conflicts
-  - [x] Build pipeline complete, output runnable on both Node.js and Bun
-- [x] V3: Extensive documentation and documentation site improvements
-- [x] V4: Large-scale test suite for improved stability
-  - [x] Buddy pet feature restored
-  - [x] Auto Mode restored
-  - [x] All features now configurable via environment variables instead of `bun --feature`
-- [x] V5: Enterprise-grade monitoring/reporting, missing tools补全, restrictions removed
-  - [x] Removed anti-distillation code
-  - [x] Web search capability (using Bing)
-  - [x] Debug mode support
-  - [x] Disabled auto-updates
-  - [x] Custom Sentry error reporting support
-  - [x] Custom GrowthBook support (GB is open source — configure your own feature flag platform)
-  - [x] Custom login mode — configure Claude models your way
-- [ ] V6: Large-scale refactoring, full modular packaging
-  - [ ] V6 will be a new branch; main branch will be archived as a historical version
+## Recent updates (2.6.x)
 
-> I don't know how long this project will survive. Star + Fork + git clone + .zip is the safest bet.
->
-> This project updates rapidly — Opus continuously optimizes in the background, with new changes almost every few hours.
->
-> Claude has burned over $1000, out of budget, switching to GLM to continue; @zai-org GLM 5.1 is quite capable.
+| Range | Highlights |
+| ----- | ---------- |
+| **2.6.33** | Resume spinner animation immediately after Jump-to-bottom (viewport visibility notify) |
+| **2.6.32–2.6.30** | Alt-screen double-EXIT flash fix on Windows Terminal; fullscreen/wheel densable vs official 2.1.210 |
+| **2.6.29** | Modal double-border, wheel residue, collapse blank fixes |
+| **Agents view** | Group order / review list / done fold / PR column / theme tokens / needs-input nudge / token footer |
+| **Gateway** | tryRestore, IdP transient re-read, secure-storage negative cache, explicit Gateway env |
+| **Daemon / exit** | `/exit` → daemon `submitDispatch(resume/fork)`; stable user-bin launch; Windows WMI densable |
+| **≤2.6.27** | vendor +x postinstall, Windows Bash/ripgrep, swarm banner width, macOS image paste |
 
-## Quick Start
+## Quick start (install from npm)
+
+```sh
+npm i -g @go-hare/claude-code
+
+# Windows: if install hits EBUSY, kill the locked binary first
+# taskkill /F /IM claude.exe
+
+claude
+claude --version
+claude agents
+claude update
+```
+
+If install/update fails: `npm rm -g @go-hare/claude-code` then `npm i -g @go-hare/claude-code@latest` (or pin e.g. `@2.6.33`).
+
+> Older docs that say `npm i -g claude-code` do **not** match this fork’s publish stream — use `@go-hare/claude-code`.
+
+## Quick start (from source)
 
 ### Prerequisites
 
-Make sure you're on the latest version of Bun, otherwise you'll run into all sorts of weird bugs. Run `bun upgrade`!
-
-- [Bun](https://bun.sh/) >= 1.3.11
-
-**Install Bun:**
+Use a recent Bun (`bun upgrade`). Target: [Bun](https://bun.sh/) >= 1.3.11.
 
 ```bash
-# Linux and macOS
+# Linux / macOS
 curl -fsSL https://bun.sh/install | bash
 
 # Windows (PowerShell)
 powershell -c "irm bun.sh/install.ps1 | iex"
 ```
 
-**Post-installation steps:**
-
-1. **Make `bun` available in the current terminal**
-
-   The installer adds `~/.bun/bin` to the matching shell configuration file. On macOS with the default zsh shell, you may see:
-
-   ```text
-   Added "~/.bun/bin" to $PATH in "~/.zshrc"
-   ```
-
-   Restart the current shell as the installer suggests:
-
-   ```bash
-   exec /bin/zsh
-   ```
-
-   If you use bash, reload the bash configuration:
-
-   ```bash
-   source ~/.bashrc
-   ```
-
-   Windows PowerShell users can close and reopen PowerShell.
-
-2. **Verify that Bun is available:**
-   ```bash
-   bun --help
-   bun --version
-   ```
-
-3. **Update to latest version (if already installed):**
-   ```bash
-   bun upgrade
-   ```
-
-- Standard Claude Code configuration — each provider has its own setup method
-
-### Command Execution Location
-
-- Bun installation and checking commands can be run from any directory:
-  `curl -fsSL https://bun.sh/install | bash`, `bun --help`, `bun --version`, `bun upgrade`
-- Project dependency installation, development mode, and builds must be run from this repository root, the directory containing `package.json`.
-
-### Install
+Reload the shell so `bun` is on `PATH`, then:
 
 ```bash
 cd /path/to/claude-code
 bun install
+bun run dev      # dev REPL (version 888 = defines injected)
+bun run build    # code-split dist/cli.js + chunks
+bun run precheck # typecheck + biome fix + test
 ```
 
-### Run
+Cross-platform native publish:
 
 ```bash
-# Dev mode — if you see version 888, it's working
-bun run dev
-
-# Build
-bun run build
+bun run build:compile
+bun run scripts/publish.ts
+bun run scripts/publish.ts --with-main
 ```
 
-The build uses code splitting (`build.ts`), outputting to `dist/` (entry `dist/cli.js` + ~450 chunk files).
+### First-time `/login`
 
-The build output runs on both Bun and Node.js — you can publish to a private registry and run directly.
+In the REPL, run `/login` and pick **Anthropic Compatible** (or OpenAI / Gemini). Settings land under `~/.claude/settings.json` → `env`.
 
-If you encounter a bug, please open an issue — we'll prioritize it.
+| Field | Example |
+|-------|---------|
+| Base URL | `https://api.example.com/v1` |
+| API Key | `sk-xxx` |
+| Haiku / Sonnet / Opus model IDs | provider-specific model names |
 
-### First-time Setup /login
+## Feature flags
 
-After the first run, enter `/login` in the REPL to access the login configuration screen. Select **Anthropic Compatible** to connect to third-party API-compatible services (no Anthropic account required).
-
-Fields to fill in:
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| Base URL | API service URL | `https://api.example.com/v1` |
-| API Key | Authentication key | `sk-xxx` |
-| Haiku Model | Fast model ID | `claude-haiku-4-5-20251001` |
-| Sonnet Model | Balanced model ID | `claude-sonnet-4-6` |
-| Opus Model | High-performance model ID | `claude-opus-4-6` |
-
-- **Tab / Shift+Tab** to switch fields, **Enter** to confirm and move to the next, press Enter on the last field to save
-- Model fields auto-fill from current environment variables
-- Configuration saves to `~/.claude/settings.json` under the `env` key, effective immediately
-
-You can also edit `~/.claude/settings.json` directly:
-
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://api.example.com/v1",
-    "ANTHROPIC_AUTH_TOKEN": "sk-xxx",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-6"
-  }
-}
-```
-
-> Supports all Anthropic API-compatible services (e.g., OpenRouter, AWS Bedrock proxies, etc.) as long as the interface is compatible with the Messages API.
-
-## Feature Flags
-
-All feature toggles are enabled via `FEATURE_<FLAG_NAME>=1` environment variables, for example:
+Enable with `FEATURE_<FLAG_NAME>=1`, e.g.:
 
 ```bash
-FEATURE_BUDDY=1 FEATURE_FORK_SUBAGENT=1 bun run dev
+FEATURE_BUDDY=1 FEATURE_BG_SESSIONS=1 bun run dev
 ```
 
-See [`docs/features/`](docs/features/) for detailed descriptions of each feature. Contributions welcome.
+See [`docs/features/`](docs/features/) for per-feature notes.
 
-## VS Code Debugging
+## VS Code debugging
 
-The TUI (REPL) mode requires a real terminal and cannot be launched directly via VS Code's launch config. Use **attach mode**:
+TUI needs a real terminal — use attach mode:
 
-### Steps
-
-1. **Start inspect server in terminal**:
-   ```bash
-   bun run dev:inspect
-   ```
-   This outputs an address like `ws://localhost:8888/xxxxxxxx`.
-
-2. **Attach debugger from VS Code**:
-   - Set breakpoints in `src/` files
-   - Press F5 → select **"Attach to Bun (TUI debug)"**
+1. `bun run dev:inspect` → note `ws://localhost:8888/...`
+2. F5 → **Attach to Bun (TUI debug)**
 
 ## Contributors
 

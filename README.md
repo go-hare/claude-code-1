@@ -16,16 +16,20 @@
 | **Claude 群控技术**         | Pipe IPC 多实例协作：同机 main/sub 自动编排 + LAN 跨机器零配置发现与通讯，`/pipes` 选择面板 + `Shift+↓` 交互 + 消息广播路由 |
 | **ACP 协议一等一支持**      | 支持接入 Zed、Cursor 等 IDE，支持会话恢复、Skills、权限桥接                                                                  |
 | **Remote Control 私有部署** | Docker 自托管远程界面, 可以手机上看 CC                                                                                       |
+| **Agents / BG 后台会话**    | `claude agents` 全屏 dashboard、daemon job dispatch、`/exit` 后台移交（resume/fork）、WMI 自启与 Windows 终端稳固            |
+| **Fullscreen densable**     | 对齐官方 2.1.210：fullscreen 默认开、滚轮/Jump-to-bottom、spinner 可见性恢复、alt-screen 退出序列防闪窗                      |
 | **Langfuse 监控**           | 企业级 Agent 监控, 可以清晰看到每次 agent loop 细节, 可以一键转化为数据集                                                    |
 | **Web Search**              | 内置网页搜索工具, 支持 bing 和 brave 搜索                                                                                    |
 | **Poor Mode**               | 穷鬼模式，关闭记忆提取和键入建议,大幅度减少并发请求，`/poor` 可以开关                                                       |
 | **KAIROS 常驻助手**         | 持久化 AI 助手模式，支持 brief 输出、后台等待、频道消息、每日记忆日志、PR 订阅与推送通知等主动 Agent 能力                    |
 | **Buddy Agent 宠物**        | 终端里的 AI 伙伴/宠物系统，支持 `/buddy` 唤出、陪伴展示、互动摸摸、上下文反应与提示输入联动                                  |
 | **Channels 频道通知**       | MCP 服务器推送外部消息到会话（飞书/Slack/Discord/微信等），`--channels plugin:name@marketplace` 启用                         |
-| **自定义模型供应商**        | OpenAI/Anthropic/Gemini/Grok 兼容（`/login`）                                                                                 |
+| **自定义模型供应商**        | OpenAI/Anthropic/Gemini/Grok 兼容（`/login`）；含 Sonnet 5 / Org default 映射                                                 |
+| **Gateway / IdP 会话**      | 过期 session 优先 tryRestore、secure-storage 负缓存、refreshable 会话恢复，避免静默回落 Bedrock                              |
 | Voice Mode                  | 语音输入，支持豆包语言输入（`/voice doubao`）                                                                                |
 | Computer Use                | 屏幕截图、键鼠控制                                                                                                           |
 | Chrome Use                  | 浏览器自动化、表单填写、数据抓取                                                                                             |
+| Artifacts                   | HTML/Markdown 上传托管、代码高亮与 mermaid                                                                                   |
 | Sentry                      | 企业级错误追踪                                                                                                               |
 | GrowthBook                  | 企业级特性开关                                                                                                               |
 | /dream 记忆整理             | 自动整理和优化记忆文件                                                                                                       |
@@ -57,16 +61,33 @@
 
 ## 当前能力
 
-- 交互式 CLI / REPL
+- 交互式 CLI / REPL（fullscreen 默认开，对齐官方 2.1.210 滚轮 / sticky / Jump-to-bottom）
 - headless runtime session
 - direct-connect / server
 - ACP agent 模式
-- bridge / remote-control / daemon host
+- bridge / remote-control / daemon host（含 Windows WMI 自启与 exit 后台移交）
+- `claude agents` 后台会话 dashboard（分组 / PR 列 / needs-input nudge / token footer）
 - MCP、channels、plugins
-- OpenAI / Anthropic / Gemini / Grok 兼容模型接入
+- OpenAI / Anthropic / Gemini / Grok 兼容模型接入（含 Sonnet 5 / Org default）
 - Buddy agent 宠物、KAIROS 常驻助手、Coordinator、task、subagent、team 主链
-- computer-use / chrome bridge / remote-control 相关能力
+- computer-use / chrome bridge / remote-control / artifacts 相关能力
 - Langfuse、Sentry、GrowthBook 等可观测性与企业集成能力
+
+## 近期更新（2.6.x）
+
+对照近期 git 主线，已合入并发布到 npm 的方向包括：
+
+| 版本区间 | 要点 |
+| -------- | ---- |
+| **2.6.33** | Jump-to-bottom 后立即恢复 spinner 动画（viewport 可见性 notify） |
+| **2.6.32–2.6.30** | alt-screen 双次 EXIT 防 Windows Terminal 多层闪窗；fullscreen / 滚轮 densable 对齐官方 2.1.210 |
+| **2.6.29** | modal 双线、滚轮残片与折叠空白修复；残差端口对齐 |
+| **2.6.x agents** | agents view 分组顺序 / review 列表 / done fold / PR 列 / fleet token / fleet needs-input / token footer |
+| **Gateway** | 过期 session tryRestore、IdP transient 重读、secure-storage 负缓存、显式 Gateway env 与 refreshable 恢复 |
+| **Daemon / exit** | `/exit` 走 daemon `submitDispatch(resume/fork)`；`cliLaunch` 优先稳定 user-bin；Windows WMI `Win32_Process.Create` densable |
+| **2.6.27 及前** | vendor 可执行权限 postinstall、Windows Bash/ripgrep、swarm banner 宽度、macOS 粘贴图片等 |
+
+当前发布包版本见 `package.json`（`@go-hare/claude-code`）。
 
 ## 使用 Agent Core
 
@@ -120,22 +141,28 @@ import { createAgent } from 'claude/core'
 
 ## ⚡ 快速开始(安装版)
 
-不用克隆仓库, 从 NPM 下载后, 直接使用
+不用克隆仓库, 从 NPM 下载后, 直接使用。本仓库发布的 scoped 包名为 **`@go-hare/claude-code`**（平台二进制在 `@go-hare/claude-code-<os>-<arch>` optionalDependencies）。
 
 ```sh
-npm i -g claude-code
+npm i -g @go-hare/claude-code
 
-# bun 安装比较多问题, 推荐 npm 装
-# bun  i -g claude-code
-# bun pm -g trust claude-code @claude-code/mcp-chrome-bridge
+# Windows 若 claude.exe 被占用导致 EBUSY，先结束占用进程再装
+# taskkill /F /IM claude.exe
 
-claude # 以 nodejs 打开 claude code
-claude-bun # 以 bun 形态打开
-claude update # 更新到最新版本
-CLAUDE_BRIDGE_BASE_URL=https://remote-control.claude-code.win/ CLAUDE_BRIDGE_OAUTH_TOKEN=test-my-key claude --remote-control # 我们有自部署的远程控制
+claude                 # 启动（postinstall 会把对应平台 native 二进制落到 bin/）
+claude --version
+claude agents          # 后台会话 dashboard（需 daemon）
+claude update          # 更新到最新版本
+
+# 自托管 Remote Control 示例
+CLAUDE_BRIDGE_BASE_URL=https://remote-control.claude-code.win/ \
+CLAUDE_BRIDGE_OAUTH_TOKEN=test-my-key \
+claude --remote-control
 ```
 
-> **安装/更新失败？** 先 `npm rm -g claude-code` 清理旧版本，再 `npm i -g claude-code@latest`。仍失败则指定版本号：`npm i -g claude-code@<版本号>`
+> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.33`。
+>
+> 旧文档里的全局包名 `claude-code` 已不再对应本仓库发布流；请使用 `@go-hare/claude-code`。
 
 ## ⚡ 快速开始(源码版)
 
@@ -217,11 +244,23 @@ bun run dev
 bun run build
 ```
 
-构建采用 code splitting 多文件打包（`build.ts`），产物输出到 `dist/` 目录（入口 `dist/cli.js` + 约 450 个 chunk 文件）。
+构建采用 code splitting 多文件打包（`build.ts`），产物输出到 `dist/` 目录（入口 `dist/cli.js` + 多 chunk）。
 
-构建出的版本 bun 和 node 都可以启动, 你 publish 到私有源可以直接启动
+跨平台原生包与主包发布：
 
-如果遇到 bug 请直接提一个 issues, 我们优先解决
+```bash
+bun run build:compile          # 仅编译各平台二进制到 packages/@go-hare/*
+bun run scripts/publish.ts     # 构建并 publish 平台包
+bun run scripts/publish.ts --with-main   # 同时 publish 主包 @go-hare/claude-code
+```
+
+构建出的版本 bun 和 node 都可以启动；若你 fork 后 publish 到私有源，可直接按上面的全局安装方式使用。
+
+如果遇到 bug 请直接提 issues, 我们优先解决。提交前建议：
+
+```bash
+bun run precheck   # typecheck + biome fix + test
+```
 
 ### 👤 新人配置 /login
 
