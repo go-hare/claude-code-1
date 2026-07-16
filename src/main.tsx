@@ -4593,25 +4593,24 @@ async function run(): Promise<CommanderCommand> {
           renderAndRun,
         );
 
-        if (replResult === 'agents' && feature('BG_SESSIONS')) {
-          // Register current session as a daemon job so it shows as "current session"
-          const { getSessionId, getOriginalCwd } = await import('./bootstrap/state.js');
-          const { createInitialJobState, writeBgJobState } = await import('./daemon/jobState.js');
-          const sessionId = getSessionId();
-          const short = sessionId.slice(0, 8);
-          const jobState = createInitialJobState({
-            intent: '',
-            sessionId,
-            cwd: getOriginalCwd(),
-            template: 'bg',
-            short,
-          });
-          jobState.state = 'working';
-          jobState.resumeSessionId = sessionId;
-          writeBgJobState(short, jobState);
-
+        // Official Sj4: left-arrow → seed (Vy6) + A8q job dir + ky6 spawn → FleetView.
+        if (replResult.type === 'agents' && feature('BG_SESSIONS')) {
+          const { openAgentsViaLeftArrow } = await import('./cli/bg/leftArrowAgents.js');
+          const handoff = await openAgentsViaLeftArrow(replResult.messages);
           const { renderAgentView } = await import('./screens/AgentView.js');
-          await renderAgentView({ enteredViaLeftArrow: true, currentSessionId: sessionId });
+          if (!handoff.ok) {
+            process.stderr.write(`${handoff.error}\n`);
+            // Still open fleet view without origin (matches empty-open fallback).
+            await renderAgentView({ enteredViaLeftArrow: true });
+          } else {
+            // Official CLAUDE_AGENTS_SELECT / initialJobId = short; isOrigin uses it.
+            process.env.CLAUDE_AGENTS_SELECT = handoff.short;
+            await renderAgentView({
+              enteredViaLeftArrow: true,
+              currentSessionId: handoff.sessionId,
+              restoreSessionId: handoff.short,
+            });
+          }
         }
       }
     })

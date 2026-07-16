@@ -148,12 +148,37 @@ export async function writeDaemonLock(
   }
 }
 
+/**
+ * Unconditional unlink of daemon.lock (missing is fine).
+ * Prefer {@link clearDaemonLockIfOwned} on graceful exit so a newer
+ * supervisor's lock is never wiped by a dying predecessor.
+ */
 export async function clearDaemonLock(configDir?: string): Promise<void> {
   try {
     await unlink(getDaemonLockPath(configDir))
   } catch {
     // missing is fine
   }
+}
+
+/**
+ * Official CvK via Q — only unlink when lock still belongs to this process:
+ *   let l = await iV_(); if (l && l.pid === X.pid && l.startedAt === X.startedAt) await CvK()
+ *
+ * Prevents a retiring/stale supervisor from deleting a lock rewritten by a
+ * newer binary takeover or a second start.
+ */
+export async function clearDaemonLockIfOwned(
+  owner: { pid: number; startedAt: number },
+  configDir?: string,
+): Promise<boolean> {
+  const lock = await readDaemonLock(configDir)
+  if (!lock) return false
+  if (lock.pid !== owner.pid || lock.startedAt !== owner.startedAt) {
+    return false
+  }
+  await clearDaemonLock(configDir)
+  return true
 }
 
 /**

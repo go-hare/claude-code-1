@@ -825,8 +825,15 @@ export type Props = {
   sshSession?: SSHSession;
   // Thinking configuration to use when thinking is enabled
   thinkingConfig: ThinkingConfig;
-  // Callback to switch to agents/fleet view (left arrow on empty input)
-  onOpenAgents?: () => void;
+  // Callback to switch to agents/fleet view (left arrow on empty input).
+  // Official Sj4: pass transcript snapshot so main can Vy6-seed the job.
+  onOpenAgents?: (payload?: {
+    messages?: Array<{
+      type: string;
+      isMeta?: boolean;
+      message?: { content?: unknown };
+    }>;
+  }) => void;
   /**
    * Official resume-return densable — inject a continue prompt once after
    * resume (compact/continue choices). Enqueued as priority next, meta.
@@ -6653,7 +6660,19 @@ export function REPL({
                       setIsSearchingHistory={setIsSearchingHistory}
                       helpOpen={isHelpOpen}
                       setHelpOpen={setIsHelpOpen}
-                      onLeftArrowOnEmpty={onOpenAgents}
+                      onLeftArrowOnEmpty={
+                        onOpenAgents
+                          ? () =>
+                              onOpenAgents({
+                                // Snapshot for official Sj4 / Vy6 seed (main → A8q).
+                                messages: messagesRef.current as Array<{
+                                  type: string;
+                                  isMeta?: boolean;
+                                  message?: { content?: unknown };
+                                }>,
+                              })
+                          : undefined
+                      }
                       insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}
                       voiceInterimRange={voice.interimRange}
                     />

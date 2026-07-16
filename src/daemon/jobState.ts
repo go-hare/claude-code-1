@@ -273,32 +273,74 @@ export async function removeJob(short: string): Promise<void> {
 export function createInitialJobState(opts: {
   intent: string
   name?: string
+  nameSource?: 'user' | 'auto'
   sessionId: string
   cwd: string
   template?: string
   agent?: string
   respawnFlags?: string[]
   short?: string
+  detail?: string
+  color?: string
+  /** Resume/fork source transcript (left-arrow / exit handoff). */
+  resumeSessionId?: string
 }): BgJobState {
   const now = new Date().toISOString()
+  // Official A8q/tHH: empty intent+detail → idle blocked needs prompt.
+  const empty = opts.intent === '' && !opts.detail
   return {
-    state: 'starting',
-    detail: '',
-    tempo: 'active',
+    state: empty ? 'working' : 'starting',
+    detail:
+      opts.detail ?? (empty ? '(idle \u2014 send a prompt to start)' : ''),
+    tempo: empty ? 'blocked' : 'active',
     intent: opts.intent,
     name: opts.name,
+    nameSource: opts.nameSource,
     sessionId: opts.sessionId,
+    resumeSessionId: opts.resumeSessionId,
     daemonShort: opts.short,
     cwd: opts.cwd,
     template: opts.agent ?? opts.template ?? 'bg',
     agent: opts.agent,
+    color: opts.color,
     createdAt: now,
     updatedAt: now,
     firstTerminalAt: null,
     output: null,
     children: null,
     respawnFlags: opts.respawnFlags ?? [],
+    needs: empty ? 'send a prompt to start' : undefined,
     backend: 'daemon',
     cliVersion: MACRO.VERSION,
   }
+}
+
+/**
+ * Official A8q — write job dir + state.json for left-arrow open before spawn.
+ * Returns short + jobDir for CLAUDE_AGENTS_SELECT / FleetView origin.
+ */
+export function writeA8qJobState(opts: {
+  sessionId: string
+  cwd: string
+  intent: string
+  name?: string
+  nameSource?: 'user' | 'auto'
+  detail?: string
+  color?: string
+}): { short: string; jobDir: string } {
+  const short = opts.sessionId.slice(0, 8)
+  const jobDir = getJobDirPath(short)
+  const state = createInitialJobState({
+    intent: opts.intent,
+    name: opts.name,
+    nameSource: opts.nameSource,
+    sessionId: opts.sessionId,
+    cwd: opts.cwd,
+    detail: opts.detail,
+    color: opts.color,
+    short,
+    template: 'bg',
+  })
+  writeBgJobState(short, state)
+  return { short, jobDir }
 }

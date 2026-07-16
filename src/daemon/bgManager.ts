@@ -468,22 +468,27 @@ export async function startBgManager(opts?: {
     if (closed) return
     hasDispatched = true
 
-    const existing = handles.get(req.short)
-    if (existing) {
+    const existingHandle = handles.get(req.short)
+    if (existingHandle) {
       if (
-        (existing.isKilling ||
-          existing.isRetiring ||
-          existing.record.outcome) &&
+        (existingHandle.isKilling ||
+          existingHandle.isRetiring ||
+          existingHandle.record.outcome) &&
         retryCount < 30
       ) {
-        if (retryCount === 15 && (existing.isKilling || existing.isRetiring)) {
-          existing.kill('SIGKILL')
+        if (
+          retryCount === 15 &&
+          (existingHandle.isKilling || existingHandle.isRetiring)
+        ) {
+          existingHandle.kill('SIGKILL')
         }
         setTimeout(handleDispatch, 100, req, retryCount + 1, afterUpgrade)
         return
       }
       const isDying =
-        existing.isKilling || existing.isRetiring || existing.record.outcome
+        existingHandle.isKilling ||
+        existingHandle.isRetiring ||
+        existingHandle.record.outcome
       log(
         isDying
           ? `bg: dispatch ${req.short} dropped — retry budget exhausted (handle still settling)`
@@ -492,32 +497,63 @@ export async function startBgManager(opts?: {
       return
     }
 
-    // Write initial state.json before spawning (official: iO(j, tHH({...})))
+    // Write initial state.json before spawning (official: iO(j, tHH({...}))).
+    // Official fwO: if A8q already seeded state.json, only patch respawnFlags —
+    // do not clobber name/intent/detail/needs with a blank "starting…" shell.
     const jobDir = getJobDirPath(req.short)
     mkdirSync(jobDir, { recursive: true })
     const now = new Date().toISOString()
-    writeBgJobState(req.short, {
-      state: 'starting',
-      detail: 'starting\u2026',
-      tempo: 'active',
-      output: null,
-      children: null,
-      linkScanOffset: 0,
-      template: req.agent ?? req.routine ?? 'bg',
-      routine: req.routine,
-      respawnFlags: req.respawnFlags ?? [],
-      intent: req.intent ?? '',
-      name: req.name,
-      sessionId: req.sessionId,
-      resumeSessionId: req.sessionId,
-      daemonShort: req.short,
-      cwd: req.cwd,
-      originCwd: req.cwd,
-      worktreePath: req.worktree?.path,
-      createdAt: now,
-      updatedAt: now,
-      firstTerminalAt: null,
-    })
+    const existingState = readBgJobState(req.short)
+    if (existingState) {
+      const flags = req.respawnFlags ?? []
+      if (flags.length > 0 && existingState.respawnFlags.length === 0) {
+        writeBgJobState(req.short, {
+          ...existingState,
+          respawnFlags: flags,
+          sessionId: req.sessionId,
+          resumeSessionId:
+            req.launch.mode === 'resume'
+              ? req.sessionId
+              : (existingState.resumeSessionId ?? req.sessionId),
+          daemonShort: req.short,
+          updatedAt: now,
+        })
+      } else if (existingState.sessionId !== req.sessionId) {
+        writeBgJobState(req.short, {
+          ...existingState,
+          sessionId: req.sessionId,
+          resumeSessionId:
+            req.launch.mode === 'resume'
+              ? req.sessionId
+              : (existingState.resumeSessionId ?? req.sessionId),
+          daemonShort: req.short,
+          updatedAt: now,
+        })
+      }
+    } else {
+      writeBgJobState(req.short, {
+        state: 'starting',
+        detail: 'starting\u2026',
+        tempo: 'active',
+        output: null,
+        children: null,
+        linkScanOffset: 0,
+        template: req.agent ?? req.routine ?? 'bg',
+        routine: req.routine,
+        respawnFlags: req.respawnFlags ?? [],
+        intent: req.intent ?? '',
+        name: req.name,
+        sessionId: req.sessionId,
+        resumeSessionId: req.sessionId,
+        daemonShort: req.short,
+        cwd: req.cwd,
+        originCwd: req.cwd,
+        worktreePath: req.worktree?.path,
+        createdAt: now,
+        updatedAt: now,
+        firstTerminalAt: null,
+      })
+    }
 
     // Spawn new worker
     const worker = BgWorker.spawn(
@@ -1422,16 +1458,27 @@ export async function submitDispatch(opts: {
   /** Resume an existing transcript in a newly forked background session. */
   resumeSessionId?: string
   forkSession?: boolean
+  /**
+   * Official Sj4 providedSessionId — use this as the new forked job id so
+   * A8q-written state (short = id.slice(0,8)) matches the spawn.
+   */
+  providedSessionId?: string
 }): Promise<{ short: string; sessionId: string }> {
   const { randomUUID } = await import('crypto')
-  const sessionId = opts.sessionId ?? randomUUID()
+  // New job session id (fork target). Resume source is resumeSessionId.
+  const sessionId = opts.providedSessionId ?? opts.sessionId ?? randomUUID()
   const short = sessionId.slice(0, 8)
+  // Prefer explicit name; empty intent should not become "new session" when
+  // A8q already seeded (left-arrow empty). deriveSessionName('') → "new session".
+  const derivedName =
+    opts.name ??
+    (opts.intent.trim() ? deriveSessionName(opts.intent) : undefined)
 
   const dispatch: DispatchRequest = {
     short,
     sessionId,
     intent: opts.intent,
-    name: opts.name || deriveSessionName(opts.intent),
+    name: derivedName,
     agent: opts.agent,
     cwd: opts.cwd || process.cwd(),
     respawnFlags: opts.extraArgs || [],
@@ -1444,7 +1491,7 @@ export async function submitDispatch(opts: {
           sessionId: opts.resumeSessionId,
           fork: opts.forkSession !== false,
           flagArgs: [
-            ...(opts.name ? ['-n', opts.name] : []),
+            ...(derivedName ? ['-n', derivedName] : []),
             ...(opts.agent ? ['--agent', opts.agent] : []),
             ...(opts.extraArgs || []),
           ],
@@ -1455,7 +1502,7 @@ export async function submitDispatch(opts: {
           args: [
             '--session-id',
             sessionId,
-            ...(opts.name ? ['-n', opts.name] : []),
+            ...(derivedName ? ['-n', derivedName] : []),
             ...(opts.agent ? ['--agent', opts.agent] : []),
             ...(opts.extraArgs || []),
           ],

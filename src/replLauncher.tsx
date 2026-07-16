@@ -11,7 +11,15 @@ type AppWrapperProps = {
   initialState: AppState;
 };
 
-export type LaunchReplResult = 'exit' | 'agents';
+import type { BackgroundSeedMessage } from './cli/bg/helpers.js';
+
+export type LaunchReplResult =
+  | { type: 'exit' }
+  | {
+      type: 'agents';
+      /** Transcript snapshot for official Sj4 / Vy6 seed. */
+      messages: BackgroundSeedMessage[];
+    };
 
 export async function launchRepl(
   root: Root,
@@ -24,6 +32,7 @@ export async function launchRepl(
   const { REPL } = await import('./screens/REPL.js');
 
   let switchToAgents = false;
+  let agentsMessages: BackgroundSeedMessage[] = [];
   const onOpenAgents =
     process.env.CLAUDE_BG_BACKEND === 'daemon'
       ? () => {
@@ -34,11 +43,12 @@ export async function launchRepl(
           const msg = 'Detached — use `claude agents` to see background sessions.';
           process.stdout.write(DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ);
         }
-      : () => {
+      : (payload?: { messages?: BackgroundSeedMessage[] }) => {
           // Official Szp: attribute left-arrow open to needs-input nudge window.
           void import('./utils/fleetNeedsInputNudge.js').then(m => {
             m.recordFleetOpenViaLeft();
           });
+          agentsMessages = payload?.messages ?? [];
           // In normal mode: unmount REPL and switch to agents view
           switchToAgents = true;
           root.unmount();
@@ -65,7 +75,7 @@ export async function launchRepl(
   await root.waitUntilExit();
 
   if (switchToAgents) {
-    return 'agents';
+    return { type: 'agents', messages: agentsMessages };
   }
 
   // Stop rendezvous server before shutdown
@@ -76,5 +86,5 @@ export async function launchRepl(
 
   const { gracefulShutdown } = await import('./utils/gracefulShutdown.js');
   await gracefulShutdown(0);
-  return 'exit';
+  return { type: 'exit' };
 }

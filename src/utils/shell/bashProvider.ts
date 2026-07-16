@@ -81,7 +81,13 @@ export async function createBashShellProvider(
   return {
     type: 'bash',
     shellPath,
-    detached: true,
+    // Official densable: detached:true (process-group isolation on Unix).
+    // On Windows, detached:true opens a new console even with windowsHide
+    // when the runtime is Bun (CREATE_NO_WINDOW not fully honoured) — that
+    // is the "shell popup appears then vanishes" flash. BashTool children
+    // do not need to outlive the parent (tree-kill / taskkill /T); keep
+    // detached only where POSIX process groups matter.
+    detached: getPlatform() !== 'windows',
 
     async buildExecCommand(
       command: string,

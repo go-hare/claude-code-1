@@ -84,6 +84,44 @@ export type BackgroundSeed = {
   detail?: string
 }
 
+/** Official $8q — empty left-arrow job needs copy. */
+export const EMPTY_BG_PROMPT_NEEDS = 'send a prompt to start'
+
+/** Official Y8q — empty left-arrow job detail. */
+export const EMPTY_BG_IDLE_DETAIL = `(idle \u2014 ${EMPTY_BG_PROMPT_NEEDS})`
+
+/**
+ * Official Sj4 seed step: Vy6(messages) + optional haiku title fill.
+ * Empty conversation → `{ intent: '' }` (still opens agents).
+ */
+export function seedForLeftArrow(
+  messages: readonly BackgroundSeedMessage[],
+  options?: {
+    sessionTitle?: string | null
+    sessionAiTitle?: string | null
+    agentColor?: string
+    /** Official Sj4 `z` — fill name when seed has none. */
+    haikuTitle?: string | null
+  },
+): BackgroundSeed {
+  const seed = deriveBackgroundSeed(messages, '', {
+    sessionTitle: options?.sessionTitle,
+    sessionAiTitle: options?.sessionAiTitle,
+    agentColor: options?.agentColor,
+  })
+  if (seed === null) {
+    return { intent: '' }
+  }
+  if (!seed.name && options?.haikuTitle) {
+    return {
+      ...seed,
+      name: options.haikuTitle,
+      nameSource: seed.nameSource ?? 'auto',
+    }
+  }
+  return seed
+}
+
 function textFromContent(content: unknown): string | null {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return null

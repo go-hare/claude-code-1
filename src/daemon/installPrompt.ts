@@ -12,13 +12,23 @@
  */
 
 import { createInterface } from 'readline'
+import { realpath, lstat } from 'fs/promises'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { isInBundledMode } from '../utils/bundledMode.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
+import { logForDebugging } from '../utils/debug.js'
 import { getPlatform } from '../utils/platform.js'
-import { planDaemonColdStart } from '../utils/residualFinalEnvGates.js'
+import {
+  planDaemonColdStart,
+  resolveDaemonColdStartModeFull,
+} from '../utils/residualFinalEnvGates.js'
+import { gt } from '../utils/semver.js'
+import { getUserBinDir } from '../utils/xdg.js'
+import { isVersionedNativeBinary } from '../utils/cliLaunch.js'
 import { sendControlRequest } from './controlSocketClient.js'
 import {
   buildSpawnedByPayload,
@@ -33,7 +43,7 @@ import {
   startDaemonService,
 } from './serviceInstall.js'
 import { getControlSocketPath } from './bgWorker.js'
-import { lstat } from 'fs/promises'
+import { join } from 'path'
 
 export type DaemonInstallAnswer = 'yes' | 'once' | 'never' | 'no'
 
@@ -104,12 +114,183 @@ export async function waitForDaemonReachable(
 }
 
 /**
+ * Official osK — realpath + mtimeMs, or null when unreadable.
+ */
+async function binaryMtimeMs(path: string): Promise<number | null> {
+  try {
+    return (await lstat(await realpath(path))).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Official aAO — client binary path from WE densable.
+ *   versioned native → ~/.local/bin/claude
+ *   bundled         → process.execPath
+ *   unbundled/script → process.argv[1] (entry script)
+ */
+export function clientBinaryPath(): string {
+  if (isVersionedNativeBinary(process.execPath)) {
+    return join(getUserBinDir(), 'claude')
+  }
+  if (isInBundledMode() || !process.argv[1]) {
+    return process.execPath
+  }
+  return process.argv[1]
+}
+
+export type DaemonBinaryTakeoverInput = {
+  daemonVersion: string
+  daemonOrigin: string | undefined
+  daemonTarget: string | undefined
+  clientVersion: string
+  clientTarget: string
+  daemonMtimeMs: number | null
+  clientMtimeMs: number | null
+}
+
+/**
+ * Official sAO — should this client retire a live transient daemon?
+ *
+ * Only transient daemons. Same version → keep (short-circuit before mtime).
+ * Same launchTarget → keep. When daemon has no launchTarget, fall back to
+ * semver gt(client, daemon). When versions differ and both have targets,
+ * newer client mtime wins.
+ */
+export function shouldRetireStaleDaemonBinary(
+  input: DaemonBinaryTakeoverInput,
+): boolean {
+  if (input.daemonOrigin !== 'transient') return false
+  if (input.daemonVersion === input.clientVersion) return false
+  if (
+    input.daemonTarget !== undefined &&
+    input.daemonTarget === input.clientTarget
+  ) {
+    return false
+  }
+  if (!input.daemonTarget) {
+    try {
+      return gt(input.clientVersion, input.daemonVersion)
+    } catch {
+      return false
+    }
+  }
+  if (input.clientMtimeMs === null || input.daemonMtimeMs === null) {
+    return false
+  }
+  return input.clientMtimeMs > input.daemonMtimeMs
+}
+
+/**
+ * Official tAO — retire a live transient daemon when this client is a newer
+ * binary so subsequent bg sessions run the current build.
+ *
+ * Gates (official):
+ *   1. nudge version already === client version → no-op
+ *   2. tengu_bg_binary_takeover feature (default true)
+ *   3. service-installed → leave service alone
+ *   4. ask-mode cold start + interactive + not dismissed + !forceTransient
+ *      → defer (install prompt path owns the decision)
+ *   5. sAO comparison on lock vs client binary
+ *   6. SIGTERM (then SIGKILL) supervisor until exited
+ */
+export async function tryBinaryTakeover(
+  nudgeVersion: unknown,
+  forceTransient: boolean,
+): Promise<boolean> {
+  const clientVersion = MACRO.VERSION
+  if (typeof nudgeVersion === 'string' && nudgeVersion === clientVersion) {
+    return false
+  }
+  if (
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_bg_binary_takeover', true) !==
+    true
+  ) {
+    return false
+  }
+  if (await isDaemonServiceInstalled().catch(() => false)) {
+    return false
+  }
+  if (
+    !forceTransient &&
+    resolveDaemonColdStartModeFull() === 'ask' &&
+    process.stdout.isTTY === true &&
+    process.stdin.isTTY === true &&
+    !isDaemonInstallPromptDismissed()
+  ) {
+    return false
+  }
+
+  let clientTarget: string
+  try {
+    clientTarget = await realpath(clientBinaryPath())
+  } catch {
+    return false
+  }
+
+  const lock = await readAliveDaemonLock().catch(() => null)
+  if (!lock) return false
+
+  const [clientMtimeMs, daemonMtimeMs] = await Promise.all([
+    binaryMtimeMs(clientTarget),
+    lock.launchTarget
+      ? binaryMtimeMs(lock.launchTarget)
+      : Promise.resolve(null),
+  ])
+
+  if (
+    !shouldRetireStaleDaemonBinary({
+      daemonVersion: lock.version,
+      daemonOrigin: lock.origin,
+      daemonTarget: lock.launchTarget,
+      clientVersion,
+      clientTarget,
+      daemonMtimeMs,
+      clientMtimeMs,
+    })
+  ) {
+    return false
+  }
+
+  let signalled = await signalSupervisorRestart(lock.pid)
+  if (signalled === 'timed-out') {
+    try {
+      process.kill(lock.pid, 'SIGKILL')
+    } catch {
+      // already gone
+    }
+    signalled = await signalSupervisorRestart(lock.pid, { gracefulMs: 500 })
+    // After SIGKILL, C__ may still report exited via kill(0) failure path.
+    // signalSupervisorRestart on dead pid returns 'exited'.
+  }
+  if (signalled !== 'exited') {
+    return false
+  }
+
+  // Official N(..., { level: 'warn' }) — surface on stderr so the user sees
+  // why their agents session just restarted the supervisor.
+  process.stderr.write(
+    `bg: daemon pid ${lock.pid} runs ${lock.version}; this binary (${clientVersion}) is a newer build — retired the stale daemon so new sessions use the current binary\n`,
+  )
+  logForDebugging(
+    `bg: binary takeover retired pid ${lock.pid} (${lock.version} → ${clientVersion})`,
+    { level: 'warn' },
+  )
+  logEvent('tengu_bg_daemon_binary_takeover', {
+    daemon_age_ms: Date.now() - lock.startedAt,
+  })
+  return true
+}
+
+/**
  * Official oAO — nudge skew / restart probe (max 10s).
  * Returns "up" when daemon is healthy enough to skip spawn.
- * Binary-takeover (tAO) is not ported here; always treat non-restarting nudge as up.
+ * On healthy non-restarting nudge, runs tAO binary-takeover; if takeover
+ * retires the stale transient supervisor, returns "down" so KF respawns.
  */
 export async function probeDaemonSkew(
-  _forceTransient: boolean,
+  forceTransient: boolean,
 ): Promise<'up' | 'down'> {
   const started = Date.now()
   let sawLive = false
@@ -126,7 +307,9 @@ export async function probeDaemonSkew(
       sawLive = true
       if (!resp.restarting) {
         // Official: if tAO(version, forceTransient) → 'down' to respawn.
-        // Local: no binary-takeover denser yet → treat as up.
+        if (await tryBinaryTakeover(resp.version, forceTransient)) {
+          return 'down'
+        }
         if (Date.now() - started > 200) {
           logEvent('tengu_bg_skew_nudge', {
             converged: true,

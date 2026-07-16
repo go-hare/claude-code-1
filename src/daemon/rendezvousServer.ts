@@ -19,6 +19,7 @@ import { createServer, type Server, type Socket } from 'net'
 import { unlink } from 'fs/promises'
 import { StringDecoder } from 'string_decoder'
 import { instances } from '@anthropic/ink'
+import { enqueue } from '../utils/messageQueueManager.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 
 // ---------------------------------------------------------------------------
@@ -157,12 +158,73 @@ function handleMessage(line: string): void {
 
     case 'reply':
       if (typeof msg.text === 'string') {
-        // Enqueue the reply as stdin input
-        // The REPL's prompt input will pick it up
-        if (process.stdin.readable) {
-          process.stdin.push(Buffer.from(msg.text + '\n'))
+        // Official bg-rv densable:
+        //   if (nZK(text)) return  // peer answered an in-session question
+        //   mw({ mode: pR(text), value: Vh(text), priority: 'next' })
+        // Do NOT push text+'\n' into stdin — that leaves the cursor on a new
+        // line under the injected prompt when the user later attaches.
+        if (tryAnswerPeerQuestion(msg.text)) {
+          break
         }
+        enqueueReplyAsQueuedCommand(msg.text)
       }
       break
   }
+}
+
+/**
+ * Official pR — bash mode when seed starts with '!', else prompt.
+ */
+export function replyMode(text: string): 'bash' | 'prompt' {
+  return text.startsWith('!') ? 'bash' : 'prompt'
+}
+
+/**
+ * Official Vh — strip leading '!' for bash mode values.
+ */
+export function replyValue(text: string): string {
+  return replyMode(text) === 'prompt' ? text : text.slice(1)
+}
+
+/**
+ * Official mw payload for a bg-rv `reply` text (without peer-question gate).
+ */
+export function replyToQueuedCommand(text: string): {
+  mode: 'bash' | 'prompt'
+  value: string
+  priority: 'next'
+} {
+  return {
+    mode: replyMode(text),
+    value: replyValue(text),
+    priority: 'next',
+  }
+}
+
+/**
+ * Official nZK — optional peer-question interceptor (registered by REPL).
+ * When a question UI is open, the reply answers it instead of enqueueing.
+ */
+type PeerQuestionHandler = (text: string) => boolean
+let peerQuestionHandler: PeerQuestionHandler | null = null
+
+export function setPeerQuestionHandler(
+  handler: PeerQuestionHandler | null,
+): void {
+  peerQuestionHandler = handler
+}
+
+function tryAnswerPeerQuestion(text: string): boolean {
+  try {
+    return peerQuestionHandler?.(text) ?? false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official mw({mode,value,priority:'next'}) — structured queue inject.
+ */
+function enqueueReplyAsQueuedCommand(text: string): void {
+  enqueue(replyToQueuedCommand(text))
 }

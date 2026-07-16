@@ -377,11 +377,14 @@ async function runSupervisor(
 
   const startedAtMs = Date.now()
   // Official daemon.lock (EvK) — KF asK / oAO ENOCONN probe.
-  const { writeDaemonLock, clearDaemonLock } = await import('./daemonLock.js')
+  const { writeDaemonLock, clearDaemonLockIfOwned } = await import(
+    './daemonLock.js'
+  )
+  const lockOwner = { pid: process.pid, startedAt: startedAtMs }
   await writeDaemonLock({
-    pid: process.pid,
+    pid: lockOwner.pid,
     version: MACRO.VERSION,
-    startedAt: startedAtMs,
+    startedAt: lockOwner.startedAt,
     origin: lockOpts?.origin ?? 'service',
     ...(lockOpts?.spawnedBy ? { spawnedBy: lockOpts.spawnedBy } : {}),
   })
@@ -400,12 +403,20 @@ async function runSupervisor(
   // Record startup version for self-restart detection
   const startupVersion = process.env.CLAUDE_CODE_VERSION || 'unknown'
 
-  // Graceful shutdown
+  // Official Q: once, ownership-gated CvK. Awaited at end of run path so
+  // unlink finishes before process exit (void fire-and-forget left zombies).
+  let lockCleared = false
+  const clearOwnedLock = async (): Promise<void> => {
+    if (lockCleared) return
+    lockCleared = true
+    await clearDaemonLockIfOwned(lockOwner)
+  }
+
+  // Graceful shutdown — signal workers; lock cleared after they drain below.
   const shutdown = () => {
     console.log('[daemon] supervisor shutting down...')
     controller.abort()
     removeDaemonState()
-    void clearDaemonLock()
     for (const w of workers) {
       if (w.restartTimer) {
         clearTimeout(w.restartTimer)
@@ -487,6 +498,8 @@ async function runSupervisor(
       ),
   )
 
+  // Official CvK — only if lock still ours (pid+startedAt).
+  await clearOwnedLock()
   console.log('[daemon] supervisor stopped')
 }
 
@@ -621,15 +634,18 @@ async function runBgManagerStandalone(opts?: {
   spawnedBy?: string
 }): Promise<void> {
   const { startBgManager } = await import('./bgManager.js')
-  const { writeDaemonLock, clearDaemonLock } = await import('./daemonLock.js')
+  const { writeDaemonLock, clearDaemonLockIfOwned } = await import(
+    './daemonLock.js'
+  )
 
   console.log('[daemon] bg-manager starting...')
 
   const startedAt = Date.now()
+  const lockOwner = { pid: process.pid, startedAt }
   await writeDaemonLock({
-    pid: process.pid,
+    pid: lockOwner.pid,
     version: MACRO.VERSION,
-    startedAt,
+    startedAt: lockOwner.startedAt,
     origin: opts?.origin ?? 'transient',
     ...(opts?.spawnedBy ? { spawnedBy: opts.spawnedBy } : {}),
   })
@@ -649,15 +665,27 @@ async function runBgManagerStandalone(opts?: {
     lastStatus: 'running',
   })
 
+  // Official Q — ownership-gated CvK; once only.
+  let lockCleared = false
+  const clearOwnedLock = async (): Promise<void> => {
+    if (lockCleared) return
+    lockCleared = true
+    await clearDaemonLockIfOwned(lockOwner)
+  }
+
   const shutdown = async () => {
     console.log('[daemon] bg-manager shutting down...')
     await manager.close()
     removeDaemonState('bg-manager')
-    await clearDaemonLock()
+    await clearOwnedLock()
     process.exit(0)
   }
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', () => {
+    void shutdown()
+  })
+  process.on('SIGINT', () => {
+    void shutdown()
+  })
 
   // Keep alive
   const keepAlive = setInterval(() => {
