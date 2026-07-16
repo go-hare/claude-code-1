@@ -29,9 +29,20 @@ export class KeyboardEvent extends TerminalEvent {
   }
 }
 
+/**
+ * Convert a ParsedKey into the browser-like `KeyboardEvent.key` string.
+ * Aligned with official 2.1.210 densable `fag()`:
+ *   space name → ' '; ctrl → letter name; single printable seq → that char;
+ *   named key (with shift uppercasing) → name; ESC-prefixed / orphan SGR
+ *   nameless sequences → '' (do not leak into text insert).
+ */
 function keyFromParsed(parsed: ParsedKey): string {
   const seq = parsed.sequence ?? ''
   const name = parsed.name ?? ''
+
+  // CSI u / modifyOtherKeys report space as name "space" with a multi-char
+  // sequence. Official returns the literal space character first.
+  if (name === 'space') return ' '
 
   // Ctrl combos: sequence is a control byte (\x03 for ctrl+c), name is the
   // letter. Browsers report e.key === 'c' with e.ctrlKey === true.
@@ -39,26 +50,34 @@ function keyFromParsed(parsed: ParsedKey): string {
 
   // Single printable char (space through ~, plus anything above ASCII):
   // use the literal char. Browsers report e.key === '3', not 'Digit3'.
+  // This is also the path for raw UTF-8 / high-byte-reassembled CJK (name
+  // is often empty; sequence is the character itself).
   if (seq.length === 1) {
     const code = seq.charCodeAt(0)
     if (code >= 0x20 && code !== 0x7f) return seq
   }
 
-  // Named special keys (arrows, F-keys, return, tab, escape, wheel*, etc.).
+  // Named special keys (arrows, F-keys, return, tab, escape, wheel*, etc.)
+  // and printable Unicode names recovered from CSI u (e.g. fullwidth `：`).
   // Prefer name over raw sequence — browsers report e.key === 'ArrowDown'.
+  // Official uses toUpperCase() for any single-char name under shift, not
+  // only a–z (covers non-Latin when terminals report shift).
   if (name) {
-    if (parsed.shift && name.length === 1 && name >= 'a' && name <= 'z') {
-      return name.toUpperCase()
+    if (parsed.shift && name.length === 1) {
+      const upper = name.toUpperCase()
+      if (upper !== name && upper.length === 1) return upper
     }
     return name
   }
 
-  // Official 2.1.153 $z5: swallow ESC-less SGR mouse fragments that escaped
-  // the parser as nameless keys. Single orphan: `[<65;11;10M`. Fast-scroll
-  // burst after a heavy-render ESC flush: `[<65;11;10M[<65;11;10M...`.
-  // Without this, return name||seq would type the garbage into the prompt
-  // via onKeyDown paths that insert e.key when length > 1 was not checked.
+  // Official fag: nameless ESC-prefixed sequences produce no key text
+  // (unmapped functional CSI u, incomplete recovery, etc.).
   if (seq.charCodeAt(0) === 0x1b) return ''
+  // Official 2.1.153 $z5 / 2.1.210 fag: swallow ESC-less SGR mouse fragments
+  // that escaped the parser as nameless keys. Single orphan: `[<65;11;10M`.
+  // Fast-scroll burst after a heavy-render ESC flush:
+  // `[<65;11;10M[<65;11;10M...`. Without this, return name||seq would type
+  // the garbage into the prompt via onKeyDown paths that insert e.key.
   if (/^(\[<\d[\d;]*[Mm]?)+$/.test(seq)) return ''
 
   return seq

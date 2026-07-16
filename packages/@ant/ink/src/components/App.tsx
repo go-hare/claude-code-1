@@ -175,11 +175,21 @@ export default class App extends PureComponent<Props, State> {
   // Official JediTerm input rewrite state (RJc / eag densables).
   jediTermInput = createJediTermInputState();
   arrowBurstWindow = createArrowBurstWindow();
-  // Timer for flushing incomplete escape sequences
+  // Timer for flushing incomplete escape sequences / pending high-byte
+  // CSI u UTF-8 reassembly (official 2.1.210 App densable).
   incompleteEscapeTimer: NodeJS.Timeout | null = null;
+  /**
+   * Deadline (performance.now()) for flushing a pending multi-byte UTF-8
+   * reassembly run assembled from high-byte CSI u events. Official
+   * `byteRunDeadlineAt` — without this, ESC[239u ESC[188u ESC[154u] split
+   * across stdin chunks never completes if no further keys arrive, and a
+   * later unrelated key flushes Latin-1 garbage instead of `：`.
+   */
+  byteRunDeadlineAt: number | null = null;
   // Timeout durations for incomplete sequences (ms)
   readonly NORMAL_TIMEOUT = 50; // Short timeout for regular esc sequences
-  readonly PASTE_TIMEOUT = 500; // Longer timeout for paste operations
+  // Official 2.1.210 uses 2000ms for open paste brackets.
+  readonly PASTE_TIMEOUT = 2000;
 
   // Terminal query/response dispatch. Responses arrive on stdin (parsed
   // out by parse-keypress) and are routed to pending promise resolvers.
@@ -203,10 +213,12 @@ export default class App extends PureComponent<Props, State> {
   lastHoverCol = -1;
   lastHoverRow = -1;
 
-  // Timestamp of last stdin chunk. Used to detect long gaps (tmux attach,
-  // ssh reconnect, laptop wake) and trigger terminal mode re-assert.
-  // Initialized to now so startup doesn't false-trigger.
-  lastStdinTime = Date.now();
+  // Timestamp of last stdin chunk (performance.now(), same clock as
+  // incompleteEscapeTimer / byteRunDeadlineAt — official 2.1.210 App).
+  // Used to detect long gaps (tmux attach, ssh reconnect, laptop wake)
+  // and trigger terminal mode re-assert. Initialized to now so startup
+  // doesn't false-trigger.
+  lastStdinTime = performance.now();
 
   // Determines if TTY is supported on the provided stdin
   isRawModeSupported(): boolean {
@@ -399,13 +411,19 @@ export default class App extends PureComponent<Props, State> {
     }
   };
 
-  // Helper to flush incomplete escape sequences
+  // Helper to flush incomplete escape sequences and pending high-byte CSI u
+  // UTF-8 reassembly. Aligned with official 2.1.210 App densable.
   flushIncomplete = (): void => {
     // Clear the timer reference
     this.incompleteEscapeTimer = null;
 
-    // Only proceed if we have incomplete sequences
-    if (!this.keyParseState.incomplete) return;
+    const hasIncomplete = Boolean(this.keyParseState.incomplete);
+    const hasPendingBytes = (this.keyParseState.pendingByteEvents?.length ?? 0) > 0;
+    const inPaste = this.keyParseState.mode === 'IN_PASTE';
+
+    // Only proceed if we have incomplete sequences, open paste, or a
+    // half-assembled multi-byte UTF-8 run from high-byte CSI u events.
+    if (!hasIncomplete && !inPaste && !hasPendingBytes) return;
 
     // Fullscreen: if stdin has data waiting, it's almost certainly the
     // continuation of the buffered sequence (e.g. `[<64;74;16M` after a
@@ -420,14 +438,27 @@ export default class App extends PureComponent<Props, State> {
       return;
     }
 
-    // Process incomplete as a flush operation (input=null)
-    // This reuses all existing parsing logic
+    // Official: if only an incomplete ESC sequence remains, recompute the
+    // remaining timeout from lastStdinTime so a blocked event loop doesn't
+    // flush early relative to the intended NORMAL/PASTE window.
+    if (hasIncomplete) {
+      const budget = this.keyParseState.mode === 'IN_PASTE' ? this.PASTE_TIMEOUT : this.NORMAL_TIMEOUT;
+      const remaining = budget - (performance.now() - this.lastStdinTime);
+      if (remaining > 0) {
+        this.incompleteEscapeTimer = setTimeout(this.flushIncomplete, remaining);
+        return;
+      }
+    }
+
+    // Process incomplete / pending bytes as a flush operation (input=null).
+    // This reuses all existing parsing logic (including pendingByteEvents).
     this.processInput(null);
   };
 
   // Process input through the parser and handle the results
   processInput = (input: string | Buffer | null): void => {
     // Parse input using our state machine
+    const prevState = this.keyParseState;
     const [keys, newState] = parseMultipleKeypresses(this.keyParseState, input);
     this.keyParseState = newState;
 
@@ -440,25 +471,61 @@ export default class App extends PureComponent<Props, State> {
       reconciler.discreteUpdates(processKeysInBatch, this, keys, undefined, undefined);
     }
 
-    // If we have incomplete escape sequences, set a timer to flush them
-    if (this.keyParseState.incomplete) {
-      // Cancel any existing timer first
-      if (this.incompleteEscapeTimer) {
-        clearTimeout(this.incompleteEscapeTimer);
-      }
-      this.incompleteEscapeTimer = setTimeout(
-        this.flushIncomplete,
-        this.keyParseState.mode === 'IN_PASTE' ? this.PASTE_TIMEOUT : this.NORMAL_TIMEOUT,
-      );
+    // Official 2.1.210: arm / clear the high-byte UTF-8 reassembly deadline
+    // and a single timer covering incomplete ESC, open paste, or pending
+    // multi-byte CSI u fragments.
+    // Note: parseMultipleKeypresses always returns a new pendingByteEvents
+    // array (spread copy), so we cannot use reference inequality like
+    // official densable (`t.pendingByteEvents !== i`). Extend the deadline
+    // only when the reassembly run grows or is newly started.
+    const now = performance.now();
+    const pending = this.keyParseState.pendingByteEvents ?? [];
+    const prevPendingLen = prevState.pendingByteEvents?.length ?? 0;
+    if (pending.length === 0) {
+      this.byteRunDeadlineAt = null;
+    } else if (pending.length > prevPendingLen || this.byteRunDeadlineAt === null) {
+      // New or extended reassembly run — give it NORMAL_TIMEOUT to complete.
+      this.byteRunDeadlineAt = now + this.NORMAL_TIMEOUT;
+    }
+
+    if (this.incompleteEscapeTimer) {
+      clearTimeout(this.incompleteEscapeTimer);
+      this.incompleteEscapeTimer = null;
+    }
+
+    const incompleteOrPasteMs =
+      this.keyParseState.incomplete || this.keyParseState.mode === 'IN_PASTE'
+        ? this.keyParseState.mode === 'IN_PASTE'
+          ? this.PASTE_TIMEOUT
+          : this.NORMAL_TIMEOUT
+        : null;
+    // Don't race paste with a byte-run deadline (paste may legitimately
+    // pause longer than NORMAL_TIMEOUT between high-byte fragments).
+    const byteRunMs =
+      this.byteRunDeadlineAt === null || this.keyParseState.mode === 'IN_PASTE'
+        ? null
+        : Math.max(0, this.byteRunDeadlineAt - now);
+
+    let waitMs: number | null;
+    if (incompleteOrPasteMs === null) {
+      waitMs = byteRunMs;
+    } else if (byteRunMs === null) {
+      waitMs = incompleteOrPasteMs;
+    } else {
+      waitMs = Math.min(incompleteOrPasteMs, byteRunMs);
+    }
+
+    if (waitMs !== null) {
+      this.incompleteEscapeTimer = setTimeout(this.flushIncomplete, waitMs);
     }
   };
 
   handleReadable = (): void => {
     // Detect long stdin gaps (tmux attach, ssh reconnect, laptop wake).
     // The terminal may have reset DEC private modes; re-assert mouse
-    // tracking. Checked before the read loop so one Date.now() covers
-    // all chunks in this readable event.
-    const now = Date.now();
+    // tracking. Checked before the read loop so one performance.now()
+    // covers all chunks in this readable event (official 2.1.210).
+    const now = performance.now();
     if (now - this.lastStdinTime > STDIN_RESUME_GAP_MS) {
       this.props.onStdinResume?.();
     }

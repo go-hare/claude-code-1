@@ -5,7 +5,7 @@
  * then interprets sequences as keypresses.
  */
 import { Buffer } from 'buffer'
-import { PASTE_END, PASTE_START } from './termio/csi.js'
+import { FOCUS_IN, FOCUS_OUT, PASTE_END, PASTE_START } from './termio/csi.js'
 import { createTokenizer, type Tokenizer } from './termio/tokenize.js'
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
@@ -15,11 +15,18 @@ const FN_KEY_RE =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
   /^(?:\x1b+)(O|N|\[|\[\[)(?:(\d+)(?:;(\d+))?([~^$])|(?:1;)?(\d+)?([a-zA-Z]))/
 
-// CSI u (kitty keyboard protocol): ESC [ codepoint [; modifier] u
-// Example: ESC[13;2u = Shift+Enter, ESC[27u = Escape (no modifiers)
-// Modifier is optional - when absent, defaults to 1 (no modifiers)
+// CSI u (kitty keyboard protocol), including progressive-enhancement
+// subparameters (colon-separated) from the full form:
+//   CSI unicode-key-code[:shifted[:base]] ; mods[:event-type] ; text-as-codepoints u
+// Examples:
+//   ESC[13;2u              Shift+Enter (basic)
+//   ESC[27u                Escape, no modifiers
+//   ESC[58:65306;2u        key ":" with shifted key U+FF1A (fullwidth colon)
+//   ESC[58:65306;2:1;65306u  same + event-type press + associated text U+FF1A
+// Each field accepts digits and ":" so subparams don't fail the match and get
+// swallowed as unmapped functional keys (the CJK fullwidth-colon bug).
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
-const CSI_U_RE = /^\x1b\[(\d+)(?:;(\d+))?u/
+const CSI_U_RE = /^\x1b\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
 
 // xterm modifyOtherKeys: ESC [ 27 ; modifier ; keycode ~
 // Example: ESC[27;2;13~ = Shift+Enter. Emitted by Ghostty/tmux/xterm when
@@ -214,10 +221,25 @@ function splitNumericParams(params: string): number[] {
   return params.split(';').map(p => parseInt(p, 10))
 }
 
+/** One high-byte CSI u / modifyOtherKeys event awaiting UTF-8 reassembly. */
+type PendingByteEvent = {
+  seq: string
+  byte: number
+}
+
 export type KeyParseState = {
   mode: 'NORMAL' | 'IN_PASTE'
   incomplete: string
   pasteBuffer: string
+  /**
+   * High-byte CSI u events (code 128–255, no real modifiers) that some
+   * terminals emit under the Kitty keyboard protocol — one event per UTF-8
+   * byte of a multi-byte character. Official 2.1.210 reassembles these into
+   * a single Unicode character before parseKeypress so CJK / fullwidth
+   * punctuation (e.g. `：` = EF BC 9A) is not inserted as Latin-1 garbage
+   * or swallowed. See highByteFromExtendedKeySequence + reassemble below.
+   */
+  pendingByteEvents: PendingByteEvent[]
   // Internal tokenizer instance
   _tokenizer?: Tokenizer
 }
@@ -226,6 +248,7 @@ export const INITIAL_STATE: KeyParseState = {
   mode: 'NORMAL',
   incomplete: '',
   pasteBuffer: '',
+  pendingByteEvents: [],
 }
 
 function inputToString(input: Buffer | string): string {
@@ -245,6 +268,40 @@ function inputToString(input: Buffer | string): string {
   }
 }
 
+/**
+ * Extract a high UTF-8 byte (128–255) from a simple CSI u / modifyOtherKeys
+ * event with no modifiers. Official densable zXc — terminals under Kitty
+ * keyboard mode sometimes report multi-byte characters as one event per
+ * UTF-8 byte (e.g. fullwidth `：` → ESC[239u ESC[188u ESC[154u). Those must
+ * be reassembled, not treated as Latin-1 / C1 codepoints.
+ */
+function highByteFromExtendedKeySequence(sequence: string): number | undefined {
+  const csi = CSI_U_RE.exec(sequence)
+  let code: number | undefined
+  let mods: number | undefined
+  if (csi) {
+    code = firstSubparam(csi[1])
+    mods = firstSubparam(csi[2])
+  } else {
+    const mok = MODIFY_OTHER_KEYS_RE.exec(sequence)
+    if (mok) {
+      mods = parseInt(mok[1]!, 10)
+      code = parseInt(mok[2]!, 10)
+    }
+  }
+  if (code === undefined || code < 128 || code > 255) return undefined
+  // Only unmodified (or omitted mods, treated as 1). Real Shift/Alt/Ctrl
+  // high-byte events are not UTF-8 fragments.
+  if (mods !== undefined && mods !== 1) return undefined
+  // Progressive-enhancement event-type subparam: only press (or default)
+  // participates in reassembly. Release/repeat would corrupt the buffer.
+  if (csi?.[2]?.includes(':')) {
+    const eventType = parseInt(csi[2].split(':')[1] ?? '1', 10)
+    if (Number.isFinite(eventType) && eventType !== 1) return undefined
+  }
+  return code
+}
+
 export function parseMultipleKeypresses(
   prevState: KeyParseState,
   input: Buffer | string | null = '',
@@ -262,13 +319,83 @@ export function parseMultipleKeypresses(
   const keys: ParsedInput[] = []
   let inPaste = prevState.mode === 'IN_PASTE'
   let pasteBuffer = prevState.pasteBuffer
+  // Copy so we never mutate prevState.pendingByteEvents in place.
+  let pendingByteEvents: PendingByteEvent[] = [
+    ...(prevState.pendingByteEvents ?? []),
+  ]
+
+  /** Emit a single pending high-byte event as a normal key/paste char. */
+  const emitPendingByte = (ev: PendingByteEvent): void => {
+    if (inPaste) {
+      pasteBuffer += String.fromCharCode(ev.byte)
+    } else {
+      keys.push(parseKeypress(ev.seq))
+    }
+  }
+
+  /** Flush any incomplete multi-byte assembly (official d()). */
+  const flushPendingBytes = (): void => {
+    for (const ev of pendingByteEvents) {
+      emitPendingByte(ev)
+    }
+    pendingByteEvents = []
+  }
+
+  /**
+   * Official p() — accumulate high-byte CSI u events into one UTF-8 char.
+   * Lead bytes 0xC2–0xF4 start a multi-byte sequence; continuation 0x80–0xBF
+   * extend it; anything else flushes and retries.
+   */
+  const reassembleHighByte = (seq: string, byte: number): void => {
+    if (pendingByteEvents.length === 0) {
+      // UTF-8 lead for 2/3/4-byte sequences (C2–F4). C0/C1 leads are
+      // invalid/overlong and are emitted as lone high-byte keys.
+      if (byte >= 0xc2 && byte <= 0xf4) {
+        pendingByteEvents = [{ seq, byte }]
+        return
+      }
+      emitPendingByte({ seq, byte })
+      return
+    }
+    if (byte >= 0x80 && byte <= 0xbf) {
+      pendingByteEvents = [...pendingByteEvents, { seq, byte }]
+      const lead = pendingByteEvents[0]!.byte
+      const expected = lead <= 0xdf ? 2 : lead <= 0xef ? 3 : 4
+      if (pendingByteEvents.length < expected) return
+      const assembled = pendingByteEvents
+      pendingByteEvents = []
+      const buf = Buffer.from(assembled.map(e => e.byte))
+      const text = buf.toString('utf8')
+      // Must decode to exactly one Unicode scalar matching the byte length.
+      if (
+        [...text].length !== 1 ||
+        Buffer.byteLength(text, 'utf8') !== assembled.length
+      ) {
+        for (const ev of assembled) {
+          emitPendingByte(ev)
+        }
+        return
+      }
+      if (inPaste) {
+        pasteBuffer += text
+      } else {
+        keys.push(parseKeypress(text))
+      }
+      return
+    }
+    // Not a continuation — flush prior fragment and reprocess this byte.
+    flushPendingBytes()
+    reassembleHighByte(seq, byte)
+  }
 
   for (const token of tokens) {
     if (token.type === 'sequence') {
       if (token.value === PASTE_START) {
+        flushPendingBytes()
         inPaste = true
         pasteBuffer = ''
       } else if (token.value === PASTE_END) {
+        flushPendingBytes()
         // Always emit a paste key, even for empty pastes. This allows
         // downstream handlers to detect empty pastes (e.g., for clipboard
         // image handling on macOS). The paste content may be empty string.
@@ -276,9 +403,44 @@ export function parseMultipleKeypresses(
         inPaste = false
         pasteBuffer = ''
       } else if (inPaste) {
-        // Sequences inside paste are treated as literal text
-        pasteBuffer += token.value
+        // High-byte CSI u fragments under Kitty → reassemble to real UTF-8
+        // (official zXc + p). Full Unicode CSI u still converts via MO5.
+        const highByte = highByteFromExtendedKeySequence(token.value)
+        if (highByte !== undefined) {
+          reassembleHighByte(token.value, highByte)
+          continue
+        }
+        // Sequences inside paste are usually literal, but Kitty CSI u /
+        // modifyOtherKeys can encode a single Unicode codepoint (official
+        // densable MO5 / sig). Convert those to the real character so CJK
+        // paste does not land raw "\x1b[65306u" in the buffer. Mouse /
+        // focus sequences are skipped (official YXc).
+        if (
+          token.value === FOCUS_IN ||
+          token.value === FOCUS_OUT ||
+          SGR_MOUSE_RE.test(token.value) ||
+          (token.value.length === 6 && token.value.startsWith('\x1b[M'))
+        ) {
+          continue
+        }
+        // Non-fragment sequence: drop any half-assembled UTF-8 first.
+        if (
+          !parseTerminalResponse(token.value) &&
+          !SGR_MOUSE_RE.test(token.value)
+        ) {
+          // Keep pending only if this were a fragment (handled above).
+        }
+        flushPendingBytes()
+        pasteBuffer +=
+          unicodeFromExtendedKeySequence(token.value) ?? token.value
       } else {
+        // High-byte UTF-8 fragments (official zXc) — reassemble before any
+        // key/response/mouse routing so ESC[239u ESC[188u ESC[154u → `：`.
+        const highByte = highByteFromExtendedKeySequence(token.value)
+        if (highByte !== undefined) {
+          reassembleHighByte(token.value, highByte)
+          continue
+        }
         const response = parseTerminalResponse(token.value)
         if (response) {
           keys.push({ kind: 'response', sequence: token.value, response })
@@ -287,11 +449,22 @@ export function parseMultipleKeypresses(
           if (mouse) {
             keys.push(mouse)
           } else {
+            // Flush incomplete UTF-8 assembly before unrelated keys
+            // (official: d() before ZUr for non-mouse sequences).
+            if (
+              token.value === FOCUS_OUT ||
+              (!SGR_MOUSE_RE.test(token.value) &&
+                !(token.value.length === 6 && token.value.startsWith('\x1b[M')))
+            ) {
+              flushPendingBytes()
+            }
             keys.push(parseKeypress(token.value))
           }
         }
       }
     } else if (token.type === 'text') {
+      // Text breaks multi-byte assembly (official d() before text).
+      flushPendingBytes()
       if (inPaste) {
         pasteBuffer += token.value
       } else {
@@ -319,11 +492,14 @@ export function parseMultipleKeypresses(
     }
   }
 
-  // If flushing and still in paste mode, emit what we have
-  if (isFlush && inPaste && pasteBuffer) {
-    keys.push(createPasteKey(pasteBuffer))
-    inPaste = false
-    pasteBuffer = ''
+  // Flush incomplete assembly and open paste on stream end (input=null).
+  if (isFlush) {
+    flushPendingBytes()
+    if (inPaste && pasteBuffer) {
+      keys.push(createPasteKey(pasteBuffer))
+      inPaste = false
+      pasteBuffer = ''
+    }
   }
 
   // Build new state
@@ -331,6 +507,7 @@ export function parseMultipleKeypresses(
     mode: inPaste ? 'IN_PASTE' : 'NORMAL',
     incomplete: tokenizer.buffer(),
     pasteBuffer,
+    pendingByteEvents,
     _tokenizer: tokenizer,
   }
 
@@ -514,11 +691,135 @@ function decodeModifier(modifier: number): {
 }
 
 /**
+ * True for printable Unicode codepoints that should become text input when
+ * reported via Kitty CSI u / modifyOtherKeys (MO5-style recovery / name).
+ *
+ * Official 2.1.210 splits this:
+ *   - VXc keycodeToName: only `e >= 160 && e < 55296` (stops before surrogates)
+ *   - sig / MO5 recovery: any `e <= 0x10FFFF` via fromCodePoint
+ *
+ * Fullwidth forms (U+FF00–U+FFEF, e.g. `：` U+FF1A = 65306) sit AFTER the
+ * surrogate block, so official VXc does NOT name them — recovery is via MO5
+ * on empty name. We intentionally include them here so both name mapping and
+ * characterFromCsiUMatch accept IME fullwidth punctuation without relying
+ * solely on the empty-name path.
+ *
+ * Excludes:
+ * - ASCII (handled separately with toLowerCase for key names)
+ * - Surrogate halves (invalid scalar values)
+ * - BMP Private Use Area U+E000–U+F8FF — Kitty functional keys live here
+ *   (Caps Lock 57358, KP_0 57399, …)
+ * - Supplementary Private Use Areas
+ */
+function isPrintableUnicodeCodepoint(codepoint: number): boolean {
+  if (codepoint <= 126 || codepoint > 0x10ffff) return false
+  // Surrogates
+  if (codepoint >= 0xd800 && codepoint <= 0xdfff) return false
+  // BMP Private Use Area (Kitty functional-key codepoints)
+  if (codepoint >= 0xe000 && codepoint <= 0xf8ff) return false
+  // Supplementary Private Use Area-A / Area-B
+  if (codepoint >= 0xf0000 && codepoint <= 0xffffd) return false
+  if (codepoint >= 0x100000 && codepoint <= 0x10fffd) return false
+  return true
+}
+
+/** First numeric subparameter of a CSI u field (`"58:65306"` → 58). */
+function firstSubparam(field: string | undefined): number | undefined {
+  if (!field) return undefined
+  const n = parseInt(field.split(':')[0]!, 10)
+  return Number.isFinite(n) ? n : undefined
+}
+
+/**
+ * Best character to insert for a Kitty CSI u sequence under progressive
+ * enhancement. Preference order mirrors the protocol's text field intent:
+ *   1. associated text codepoints (3rd CSI field) — what IME/terminals
+ *      report as the produced text (e.g. fullwidth `：`)
+ *   2. shifted-key codepoint (2nd subparam of 1st field) when present
+ *   3. primary unicode-key-code
+ * Only returns printable codepoints (ASCII or non-PUA Unicode).
+ */
+function characterFromCsiUMatch(match: RegExpExecArray): string | undefined {
+  const candidates: number[] = []
+  // 3rd field: text-as-codepoints, may be colon-separated multiples
+  if (match[3]) {
+    for (const part of match[3].split(':')) {
+      const n = parseInt(part, 10)
+      if (Number.isFinite(n)) candidates.push(n)
+    }
+  }
+  // 1st field: unicode-key-code[:shifted-key[:base-layout-key]]
+  if (match[1]) {
+    const parts = match[1].split(':')
+    // shifted key (index 1) preferred over primary for text insertion when
+    // the primary is a bare ASCII key and IME produced a fullwidth form.
+    if (parts[1]) {
+      const shifted = parseInt(parts[1], 10)
+      if (Number.isFinite(shifted)) candidates.push(shifted)
+    }
+    const primary = parseInt(parts[0]!, 10)
+    if (Number.isFinite(primary)) candidates.push(primary)
+  }
+  for (const codepoint of candidates) {
+    if (
+      (isPrintableUnicodeCodepoint(codepoint) ||
+        (codepoint >= 32 && codepoint <= 126)) &&
+      codepoint <= 0x10ffff &&
+      !(codepoint >= 0xd800 && codepoint <= 0xdfff)
+    ) {
+      return String.fromCodePoint(codepoint)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Recover a Unicode character from a CSI u / modifyOtherKeys sequence.
+ * Mirrors official densable MO5, extended for Kitty progressive enhancement
+ * (`code:shifted;mods:event;text u`) so IME fullwidth punctuation is not
+ * swallowed when the sequence is more than simple `ESC[N;Mu`.
+ */
+export function unicodeFromExtendedKeySequence(
+  sequence: string | undefined,
+): string | undefined {
+  if (!sequence) return undefined
+  const csi = CSI_U_RE.exec(sequence)
+  if (csi) {
+    // Release events (mods:3) must not insert — InputEvent recovers via this
+    // helper when name is empty, so skip here too.
+    if (csi[2]?.includes(':')) {
+      const eventType = parseInt(csi[2].split(':')[1] ?? '1', 10)
+      if (Number.isFinite(eventType) && eventType === 3) return undefined
+    }
+    return characterFromCsiUMatch(csi)
+  }
+  const mok = MODIFY_OTHER_KEYS_RE.exec(sequence)
+  if (mok) {
+    const codepoint = parseInt(mok[2]!, 10)
+    if (
+      Number.isFinite(codepoint) &&
+      codepoint <= 0x10ffff &&
+      !(codepoint >= 0xd800 && codepoint <= 0xdfff) &&
+      (isPrintableUnicodeCodepoint(codepoint) ||
+        (codepoint >= 32 && codepoint <= 126))
+    ) {
+      return String.fromCodePoint(codepoint)
+    }
+  }
+  return undefined
+}
+
+/**
  * Map keycode to key name for modifyOtherKeys/CSI u sequences.
  * Handles both ASCII keycodes and Kitty keyboard protocol functional keys.
  *
  * Numpad codepoints are from Unicode Private Use Area, defined at:
  * https://sw.kovidgoyal.net/kitty/keyboard-protocol/#functional-key-definitions
+ *
+ * Non-ASCII printable Unicode (CJK, fullwidth punctuation, etc.) is returned
+ * as the actual character so InputEvent can insert it. Without this, IME
+ * commits of e.g. fullwidth colon (`：`, U+FF1A) arrive as ESC[65306u and
+ * are swallowed as "unmapped Kitty functional keys".
  */
 function keycodeToName(keycode: number): string | undefined {
   switch (keycode) {
@@ -571,6 +872,10 @@ function keycodeToName(keycode: number): string | undefined {
       // Printable ASCII characters
       if (keycode >= 32 && keycode <= 126) {
         return String.fromCharCode(keycode).toLowerCase()
+      }
+      // Printable non-ASCII Unicode (CJK, fullwidth punct, emoji base, …)
+      if (isPrintableUnicodeCodepoint(keycode)) {
+        return String.fromCodePoint(keycode)
       }
       return undefined
   }
@@ -663,18 +968,39 @@ function parseKeypress(s: string = ''): ParsedKey {
 
   key.sequence = key.sequence || s || key.name
 
-  // Handle CSI u (kitty keyboard protocol): ESC [ codepoint [; modifier] u
-  // Example: ESC[13;2u = Shift+Enter, ESC[27u = Escape (no modifiers)
+  // Handle CSI u (kitty keyboard protocol), including progressive enhancement:
+  // ESC [ code[:shifted[:base]] ; mods[:event] ; text-codepoints u
+  // Prefer associated text / shifted codepoint for the inserted character so
+  // IME fullwidth punctuation (e.g. `：` U+FF1A) is not dropped.
+  //
+  // Event-type subparam (official progressive enhancement):
+  //   mods:event  →  "1:1" press, "1:2" repeat, "1:3" release
+  // Only press (1, default) and repeat (2) produce input. Release must not
+  // insert, or press+release would double fullwidth characters.
   let match: RegExpExecArray | null
   if ((match = CSI_U_RE.exec(s))) {
-    const codepoint = parseInt(match[1]!, 10)
-    // Modifier defaults to 1 (no modifiers) when not present
-    const modifier = match[2] ? parseInt(match[2], 10) : 1
+    const primary = firstSubparam(match[1]) ?? 0
+    // Modifier field may be "2" or "2:1" (mods:event-type); first subparam wins.
+    const modifier = firstSubparam(match[2]) ?? 1
     const mods = decodeModifier(modifier)
-    const name = keycodeToName(codepoint)
+    const eventTypeField = match[2]?.includes(':')
+      ? parseInt(match[2]!.split(':')[1] ?? '1', 10)
+      : 1
+    const isRelease = Number.isFinite(eventTypeField) && eventTypeField === 3
+    // Name for keybindings uses primary codepoint (physical key). The text to
+    // insert is recovered later in InputEvent via unicodeFromExtendedKeySequence
+    // / key name when printable non-ASCII.
+    const mapped = keycodeToName(primary)
+    const textChar = isRelease ? undefined : characterFromCsiUMatch(match)
+    // Functional names (return/escape/tab/space/backspace/numpad labels) are
+    // multi-char and must win for keybindings. Otherwise prefer the recovered
+    // text character so ESC[58:65306;2u] inserts `：` rather than `:`.
+    // On release, keep the functional/primary name for bindings but InputEvent
+    // will clear printable insert (empty textChar + nonAlphanumeric / name).
+    const name = mapped && mapped.length > 1 ? mapped : (textChar ?? mapped)
     return {
       kind: 'key',
-      name,
+      name: isRelease && !(mapped && mapped.length > 1) ? '' : name,
       fn: false,
       ctrl: mods.ctrl,
       meta: mods.meta,
