@@ -5,6 +5,7 @@ import { markDirty, scheduleRenderFrom } from '../core/dom.js';
 import { markCommitStart } from '../core/reconciler.js';
 import { clampScrollTopToContentMax } from '../core/scrollHeightHwm.js';
 import type { Styles } from '../core/styles.js';
+import { notifyScrollVisibilityWatchers } from '../hooks/use-terminal-viewport.js';
 import Box from './Box.js';
 
 export type ScrollBoxHandle = {
@@ -127,6 +128,10 @@ function ScrollBox({
     markDirty(el);
     markCommitStart();
     notify();
+    // Wake useAnimationFrame consumers (spinner) that paused while offscreen.
+    // Scroll mutates scrollTop without re-rendering those leaves — without
+    // this, isVisible stays false until the next token/state push.
+    notifyScrollVisibilityWatchers();
     if (renderQueuedRef.current) return;
     renderQueuedRef.current = true;
     queueMicrotask(() => {
@@ -212,12 +217,18 @@ function ScrollBox({
         }
         markDirty(el);
         notify();
+        // Same as scrollMutated: resume offscreen-paused animations (spinner
+        // "Germinating…" frozen after Jump-to-bottom was the repro).
+        notifyScrollVisibilityWatchers();
         forceRender(n => n + 1);
         // Second paint after React mounts the sticky tail range — the first
         // forceRender may still have stale scrollHeight from the mid-list
         // mount; Ink's sticky follow then pins to the true maxScroll.
+        // Re-notify after the remount so yoga tops for the spinner reflect
+        // the sticky pin before visibility is recomputed.
         queueMicrotask(() => {
           scheduleRenderFrom(el);
+          notifyScrollVisibilityWatchers();
         });
       },
       getScrollTop() {
