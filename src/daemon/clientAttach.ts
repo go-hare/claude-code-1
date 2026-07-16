@@ -356,7 +356,11 @@ export async function attachToSession(
 
   function writeToStdout(data: Buffer): void {
     if (data.length === 0) return
-    const text = data.toString('utf8')
+    // Windows: strip show-cursor so WT/ConPTY don't re-expose the block
+    // cursor mid-frame (official Wh filter on attach stream).
+    const filtered = stripShowCursor(data)
+    if (filtered.length === 0) return
+    const text = filtered.toString('utf8')
     stdout.write(text)
     decModes.feed(text)
   }
@@ -550,12 +554,14 @@ export async function attachToSession(
     decModes.feed(modeSeq)
 
     // Write initial screen setup
+    // On Windows, hide cursor to prevent the visible block/bar cursor that
+    // survives FleetView handoff + clear (official: b ? op : ''). Must apply
+    // on both paths — agents view always attaches with alreadyInAlt:true.
+    const hideCursor = isWindows ? HIDE_CURSOR : ''
     if (opts.alreadyInAlt) {
       // Already in alt screen (FleetView handed off) — set modes + clear for fresh repaint
-      stdout.write('\x1B[2J\x1B[H' + modeSeq)
+      stdout.write('\x1B[2J\x1B[H' + modeSeq + hideCursor)
     } else {
-      // On Windows, hide cursor to prevent flicker (official: b ? op : '')
-      const hideCursor = isWindows ? HIDE_CURSOR : ''
       stdout.write(
         enterAltScreen() +
           modeSeq +
