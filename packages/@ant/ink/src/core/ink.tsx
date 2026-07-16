@@ -1298,6 +1298,12 @@ export default class Ink {
    */
   detachForShutdown(): void {
     this.isUnmounted = true;
+    // unmount() already cleared these before EXIT_ALT_SCREEN; also clear here
+    // for the catch-path fallback that only writeSync's 1049l without going
+    // through unmount's flag bookkeeping. Prevents any late isAltScreenActive
+    // reader from thinking we're still fullscreen after process.exit cleanup.
+    this.altScreenActive = false;
+    this.altScreenMouseTracking = false;
     // Cancel any pending throttled render so it doesn't fire between
     // cleanupTerminalModes() and process.exit() and write to main screen.
     this.scheduleRender.cancel?.();
@@ -1613,6 +1619,9 @@ export default class Ink {
   }
 
   private notifySelectionChange(): void {
+    // Skip during/after unmount: AlternateScreen cleanup may clear selection
+    // after EXIT_ALT_SCREEN, and a late onRender would target the main buffer.
+    if (this.isUnmounted) return;
     this.onRender();
     for (const cb of this.selectionListeners) cb();
   }
@@ -1875,8 +1884,17 @@ export default class Ink {
     /* eslint-disable custom-rules/no-sync-fs -- process exiting; async writes would be dropped */
     if (this.options.stdout.isTTY) {
       if (this.altScreenActive) {
-        // <AlternateScreen>'s unmount effect won't run during signal-exit.
         // Exit alt screen FIRST so other cleanup sequences go to the main screen.
+        // Clear the flag BEFORE writing 1049l and BEFORE React tree teardown:
+        // updateContainerSync(null) below still runs AlternateScreen's insertion
+        // cleanup, which would otherwise (1) call setAltScreenActive(false) →
+        // repaint() onto the main buffer and (2) write a second EXIT_ALT_SCREEN.
+        // On Windows Terminal that double DECRC flash looks like stacked windows.
+        // Do NOT call setAltScreenActive(false) here — its inactive branch repaints.
+        this.altScreenActive = false;
+        this.altScreenMouseTracking = false;
+        // Gate late onRender/selection listeners before any main-buffer write.
+        this.isUnmounted = true;
         writeSync(1, EXIT_ALT_SCREEN);
       }
       // Disable mouse tracking — unconditional because altScreenActive can be
@@ -1901,6 +1919,8 @@ export default class Ink {
     }
     /* eslint-enable custom-rules/no-sync-fs */
 
+    // Mark unmounted BEFORE React tree teardown so AlternateScreen cleanup /
+    // selection clear cannot schedule a main-buffer onRender after 1049l.
     this.isUnmounted = true;
 
     // Cancel any pending throttled renders to prevent accessing freed Yoga nodes

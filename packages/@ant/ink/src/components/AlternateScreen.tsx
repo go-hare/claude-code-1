@@ -57,6 +57,15 @@ export function AlternateScreen({ children, mouseTracking = true }: Props): Reac
     ink?.setAltScreenActive(true, mouseTracking);
 
     return () => {
+      // ink.unmount() may already have exited alt-screen and cleared the flag
+      // (gracefulShutdown / Ctrl+C path). Skip redundant EXIT_ALT_SCREEN —
+      // a second 1049l triggers another DECRC on Windows Terminal and flashes
+      // multi-frame main-buffer content (looks like stacked windows).
+      const stillActive = ink?.isAltScreenActive ?? true;
+      if (!stillActive) {
+        ink?.clearTextSelection();
+        return;
+      }
       ink?.setAltScreenActive(false);
       ink?.clearTextSelection();
       writeRaw((mouseTracking ? DISABLE_MOUSE_TRACKING : '') + EXIT_ALT_SCREEN);
