@@ -10,6 +10,7 @@ import {
 } from '../bootstrap/state.js';
 import { parseTokenBudget } from '../utils/tokenBudget.js';
 import { count } from '../utils/array.js';
+import { countUserPromptsInMessages } from '../utils/attribution.js';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import figures from 'figures';
@@ -1805,7 +1806,9 @@ export function REPL({
   const activeRemote = sshRemote.isRemoteMode ? sshRemote : directConnect.isRemoteMode ? directConnect : remoteSession;
 
   const [pastedContents, setPastedContents] = useState<Record<number, PastedContent>>({});
-  const [submitCount, setSubmitCount] = useState(0);
+  // Seed from transcript so resume/attach/bg sessions don't re-show the
+  // onboarding "Try …" placeholder (official: example only when no prior user turns).
+  const [submitCount, setSubmitCount] = useState(() => countUserPromptsInMessages(initialMessages ?? []));
   // Ref instead of state to avoid triggering React re-renders on every
   // streaming text_delta. The spinner reads this via its animation timer.
   const responseLengthRef = useRef(0);
@@ -2386,6 +2389,9 @@ export function REPL({
         // Reset messages to the provided initial messages
         // Use a callback to ensure we're not dependent on stale state
         setMessages(() => messages);
+        // Keep submitCount in sync so onboarding Try-placeholder stays off
+        // after in-session /resume or attach handoff with history.
+        setSubmitCount(countUserPromptsInMessages(messages));
 
         // Clear any active tool JSX
         setToolJSX(null);

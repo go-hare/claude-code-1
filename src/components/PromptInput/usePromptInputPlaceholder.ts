@@ -54,7 +54,9 @@ export function usePromptInputPlaceholder({
       return 'Press up to edit queued messages'
     }
 
-    // Show example command if user has not submitted yet and suggestions are enabled.
+    // Show example command only on a truly fresh session (no prior user turns).
+    // submitCount is seeded from transcript on resume/attach/bg (see REPL), so
+    // re-opening a session does not re-show "Try …" onboarding copy.
     // Skip in proactive mode — the model drives the conversation so onboarding
     // examples are irrelevant and block prompt suggestions from showing.
     if (
