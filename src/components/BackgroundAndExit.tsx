@@ -1,12 +1,13 @@
 /**
- * Official tsn / BackgroundAndExit — on /exit when a session can be
- * backgrounded, spawn a bg session from the seed and exit with Vdt hints.
+ * Official Gan / BackgroundAndExit — on /exit when a session can be
+ * backgrounded, hand the transcript to the daemon job dispatcher and exit.
  *
- * Denser path (official dOo/fOo portable subset): prefer
- * `handleBgStart(['-p', '', '--resume', sessionId, '--fork-session', ...])`
- * so the bg child continues the same transcript rather than starting a fresh
- * print-only intent job. Mid-turn exit adds `--reply-on-resume` (official
- * `replyOnResume: isMidTurn`). Falls back to `-p intent` without session id.
+ * Official path: eOo → rOo → Hbe/OJs (daemon job dispatch with resume/fork).
+ * Local equivalent: ensureDaemonRunning → submitDispatch({ resumeSessionId }).
+ * Mid-turn exit adds `--reply-on-resume` via dispatch flagArgs.
+ *
+ * Do NOT use DetachedEngine / `claude -p "" --resume ... --fork-session` here —
+ * that leaves orphan print-mode children on Windows.
  */
 import React, { useEffect, useRef } from 'react';
 import { Box, Text } from '@anthropic/ink';
@@ -16,8 +17,7 @@ import {
   formatBgHints,
   type BackgroundSeedMessage,
 } from '../cli/bg/helpers.js';
-import { handleBgStart } from '../cli/bg.js';
-import { getSessionId } from '../bootstrap/state.js';
+import { getOriginalCwd, getSessionId, isSessionPersistenceDisabled } from '../bootstrap/state.js';
 import { isBgSession } from '../utils/concurrentSessions.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
@@ -84,26 +84,40 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone }: Props
         } catch {
           sessionId = undefined;
         }
-        const shortId = sessionId ? sessionId.slice(0, 8) : 'session';
-        const prevExit = process.exitCode;
-        await handleBgStart(
-          buildBackgroundExitArgs(seed, sessionId, {
-            replyOnResume: isMidTurn,
-          }),
-        );
-        if (process.exitCode && process.exitCode !== 0) {
-          const err = `Failed to background session (exit ${process.exitCode})`;
-          process.exitCode = prevExit;
+        const { ensureDaemonRunning } = await import('../daemon/installPrompt.js');
+        const daemon = await ensureDaemonRunning({
+          forceTransient: true,
+          mayPromptInstall: false,
+        });
+        if (!daemon.ok) {
+          const err = `Failed to background session: ${daemon.reason ?? 'daemon unavailable'}`;
           onDone(err);
-          await gracefulShutdown(0, 'prompt_input_exit');
+          await gracefulShutdown(0, 'prompt_input_exit', { finalMessage: err });
           return;
         }
-        process.exitCode = prevExit;
-        onDone(formatBgHints(shortId, undefined, seed.name ?? seed.intent));
-        await gracefulShutdown(0, 'prompt_input_exit');
+        const { submitDispatch } = await import('../daemon/bgManager.js');
+        const dispatch = await submitDispatch({
+          intent: seed.intent,
+          name: seed.name,
+          cwd: getOriginalCwd(),
+          source: 'exit',
+          // Resume/fork the existing transcript in a daemon-managed session.
+          // When sessionId is missing, fall back to a fresh prompt job.
+          resumeSessionId: sessionId,
+          forkSession: true,
+          extraArgs: isMidTurn ? ['--reply-on-resume'] : [],
+        });
+        const hint = formatBgHints(dispatch.short, undefined, seed.name ?? seed.intent);
+        onDone(hint);
+        // Official Cs(..., {suppressResumeHint:true, finalMessage})
+        await gracefulShutdown(0, 'prompt_input_exit', {
+          suppressResumeHint: true,
+          finalMessage: hint,
+        });
       } catch (e) {
-        onDone(e instanceof Error ? e.message : String(e));
-        await gracefulShutdown(0, 'prompt_input_exit');
+        const err = e instanceof Error ? e.message : String(e);
+        onDone(err);
+        await gracefulShutdown(0, 'prompt_input_exit', { finalMessage: err });
       }
     })();
   }, [messages, isMidTurn, onDone]);
@@ -115,7 +129,15 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone }: Props
   );
 }
 
-/** Official mOo gate for exit / session-background UI. */
+/**
+ * Official nOo gate for exit / session-background UI.
+ * Mapping (2.1.210):
+ *   kk()  → BG_SESSIONS feature already gated by caller + residual handoff env
+ *   Xi()  → isBgSession()
+ *   A$()  → isSessionPersistenceDisabled() / shouldSkipPromptHistory()
+ *   Kfo() → !CLAUDE_DISABLE_ADOPT
+ *   s1t() → deriveBackgroundSeed(...)
+ */
 export function canOfferBackgroundAndExit(messages: readonly BackgroundSeedMessage[]): boolean {
   try {
     const { isBgExitHandoffDisabled } =
@@ -127,10 +149,11 @@ export function canOfferBackgroundAndExit(messages: readonly BackgroundSeedMessa
       return false;
     }
   }
+  // featureEnabled is true here because callers already guard with feature('BG_SESSIONS').
   return canBackgroundSession(messages, {
     featureEnabled: true,
     isBgSession: isBgSession(),
-    skipHistory: shouldSkipPromptHistory(),
+    skipHistory: shouldSkipPromptHistory() || isSessionPersistenceDisabled(),
     adoptDisabled: isEnvTruthy(process.env.CLAUDE_DISABLE_ADOPT),
   });
 }

@@ -16,7 +16,7 @@ import {
   DBP,
   DFE,
   DISABLE_MOUSE_TRACKING,
-  EXIT_ALT_SCREEN,
+  exitAltScreenSequence,
   SHOW_CURSOR,
   CLEAR_ITERM2_PROGRESS,
   CLEAR_TAB_STATUS,
@@ -87,7 +87,7 @@ function cleanupTerminalModes(): void {
       } catch {
         // Reconciler/render threw — fall back to manual alt-screen exit
         // so printResumeHint still hits the main buffer.
-        writeSync(1, EXIT_ALT_SCREEN)
+        writeSync(1, exitAltScreenSequence())
       }
     }
     // Catches events that arrived during the unmount tree-walk.
@@ -277,12 +277,16 @@ export const setupGracefulShutdown = memoize(() => {
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGTERM' })
     void gracefulShutdown(143) // Exit code 143 (128 + 15) for SIGTERM
   })
-  if (process.platform !== 'win32') {
-    process.on('SIGHUP', () => {
-      logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGHUP' })
-      void gracefulShutdown(129) // Exit code 129 (128 + 1) for SIGHUP
+  process.on('SIGHUP', () => {
+    logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGHUP' })
+    void gracefulShutdown(129) // Exit code 129 (128 + 1) for SIGHUP
+  })
+  if (process.platform === 'win32') {
+    process.on('SIGBREAK', () => {
+      logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGBREAK' })
+      void gracefulShutdown(0)
     })
-
+  } else {
     // Detect orphaned process when terminal closes without delivering SIGHUP.
     // macOS revokes TTY file descriptors instead of signaling, leaving the
     // process alive but unable to read/write. Periodically check stdin validity.
@@ -404,6 +408,11 @@ export async function gracefulShutdown(
     setAppState?: (f: (prev: AppState) => AppState) => void
     /** Printed to stderr after alt-screen exit, before forceExit. */
     finalMessage?: string
+    /**
+     * Official background-exit path suppresses the normal "claude --resume"
+     * hint because the session was handed off to a background job.
+     */
+    suppressResumeHint?: boolean
   },
 ): Promise<void> {
   if (shutdownInProgress) {
@@ -435,6 +444,11 @@ export async function gracefulShutdown(
 
   // Set the exit code that will be used when process naturally exits
   process.exitCode = exitCode
+
+  // Official background handoff suppresses the resume hint (session continues).
+  if (options?.suppressResumeHint) {
+    resumeHintPrinted = true
+  }
 
   // Exit alt screen and print resume hint FIRST, before any async operations.
   // This ensures the hint is visible even if the process is killed during

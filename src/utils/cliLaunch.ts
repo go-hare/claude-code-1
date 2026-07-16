@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn, type SpawnOptions } from 'child_process'
+import { join, sep } from 'path'
 import { isInBundledMode } from './bundledMode.js'
 import { quote } from './bash/shellQuote.js'
 import {
@@ -6,6 +7,7 @@ import {
   formatProcessWrapperRelaunchRefuseMessage,
   getProcessWrapperError,
 } from './processWrapper.js'
+import { getUserBinDir, getXDGDataHome } from './xdg.js'
 
 /**
  * CliLaunchSpec — normalized descriptor for spawning a child CLI process.
@@ -97,16 +99,71 @@ const IS_WINDOWS = process.platform === 'win32'
 // ---------------------------------------------------------------------------
 
 /**
- * Build a normalized launch spec for spawning a child CLI process.
+ * Official y26 densable — running a versioned native binary under
+ * `$XDG_DATA_HOME/claude/versions/` (default `~/.local/share/claude/versions/`).
+ * When true and not pinToCurrentBinary, self-spawn prefers the stable
+ * `~/.local/bin/claude` symlink (official WE).
+ */
+export function isVersionedNativeBinary(
+  execPath: string = process.execPath,
+): boolean {
+  if (!isInBundledMode()) return false
+  const versionsRoot = join(getXDGDataHome(), 'claude', 'versions') + sep
+  // Official uses startsWith(versionsDir + sep). Normalize separators on win32.
+  const normalizedExec = execPath.replace(/\\/g, '/')
+  const normalizedRoot = versionsRoot.replace(/\\/g, '/')
+  return normalizedExec.startsWith(normalizedRoot)
+}
+
+export type BuildCliLaunchOptions = {
+  env?: NodeJS.ProcessEnv
+  /**
+   * Official WE pinToCurrentBinary — force process.execPath (+ script when
+   * unbundled) instead of the stable ~/.local/bin/claude launcher. Used after
+   * ENOENT/EACCES when the stable path is missing or unreadable.
+   */
+  pinToCurrentBinary?: boolean
+}
+
+/**
+ * Official WE densable + local bootstrap/wrapper:
  *
- * @param cliArgs  Arguments to pass to the CLI entrypoint (e.g. ['daemon', 'start'])
- * @param opts.env Override environment (defaults to process.env)
+ *   if !pin && versioned native → {cmd: ~/.local/bin/claude, prefix: []}
+ *   else if bundled             → {cmd: process.execPath, prefix: bootstrap}
+ *   else                        → {cmd: process.execPath, prefix: bootstrap + script}
+ *
+ * Bootstrap/feature -d flags are kept for unbundled/dev so children inherit the
+ * same MACRO/FEATURE surface; official WE only has [script] for that case.
  */
 export function buildCliLaunch(
   cliArgs: string[],
-  opts?: { env?: NodeJS.ProcessEnv },
+  opts?: BuildCliLaunchOptions,
 ): CliLaunchSpec {
   const baseEnv = opts?.env ?? process.env
+  const pinToCurrentBinary = opts?.pinToCurrentBinary === true
+
+  // Official WE: prefer stable user-bin launcher when running a versioned
+  // native install (unless pinToCurrentBinary forces the live execPath).
+  if (!pinToCurrentBinary && isVersionedNativeBinary(EXEC_PATH)) {
+    const stable = join(getUserBinDir(), 'claude')
+    const wrapperError =
+      getProcessWrapperError(baseEnv) ??
+      formatProcessWrapperRelaunchRefuseMessage(baseEnv)
+    if (wrapperError) {
+      throw new Error(wrapperError)
+    }
+    const wrapped = applyProcessWrapperToLaunch(
+      { cmd: stable, prefixArgs: [] },
+      baseEnv,
+    )
+    return {
+      execPath: wrapped.cmd,
+      args: [...wrapped.prefixArgs, ...cliArgs],
+      env: withWindowsGitBashEnv(baseEnv),
+      // Official rsK always sets windowsHide:true; harmless no-op on Unix.
+      windowsHide: true,
+    }
+  }
 
   // In bundled mode the execPath IS the CLI binary — no script path needed.
   // In script mode (dev / npm) we need the script path between runtime flags
@@ -131,7 +188,15 @@ export function buildCliLaunch(
   )
   const args: string[] = [...wrapped.prefixArgs, ...cliArgs]
 
-  // Ensure Windows children can discover git-bash without shelling out
+  return {
+    execPath: wrapped.cmd,
+    args,
+    env: withWindowsGitBashEnv(baseEnv),
+    windowsHide: true,
+  }
+}
+
+function withWindowsGitBashEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...baseEnv }
   if (IS_WINDOWS) {
     if (
@@ -144,13 +209,7 @@ export function buildCliLaunch(
       env.SHELL = process.env.SHELL
     }
   }
-
-  return {
-    execPath: wrapped.cmd,
-    args,
-    env,
-    windowsHide: IS_WINDOWS,
-  }
+  return env
 }
 
 /**
@@ -172,7 +231,9 @@ export function spawnCli(
   return spawn(spec.execPath, spec.args, {
     ...spawnOpts,
     env: { ...spec.env, ...(spawnOpts.env as NodeJS.ProcessEnv) },
-    windowsHide: spec.windowsHide,
+    // Official rsK always passes windowsHide:true; keep true even on Unix
+    // (no-op) so daemon/self-spawn sites never open a console on Windows.
+    windowsHide: true,
   })
 }
 
