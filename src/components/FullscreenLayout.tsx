@@ -15,10 +15,12 @@ import { fileURLToPath } from 'url';
 import { ModalContext } from '../context/modalContext.js';
 import { PromptOverlayProvider, usePromptOverlay, usePromptOverlayDialog } from '../context/promptOverlayContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, ScrollBox, type ScrollBoxHandle, Text, instances } from '@anthropic/ink';
+import { Box, ScrollBox, type ScrollBoxHandle, Text, instances, stringWidth, useTerminalFocus } from '@anthropic/ink';
 import type { Message } from '../types/message.js';
+import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { openBrowser, openPath } from '../utils/browser.js';
-import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
+import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fullscreen.js';
+import { getPlatform } from '../utils/platform.js';
 import { plural } from '../utils/stringUtils.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
 import PromptInputFooterSuggestions from './PromptInput/PromptInputFooterSuggestions.js';
@@ -475,19 +477,53 @@ export function FullscreenLayout({
 // (absoluteRectsPrev third-pass in render-node-to-output.ts, #23939). Shows
 // "Jump to bottom" when count is 0 (scrolled away but no new messages yet —
 // the dead zone where users previously thought chat stalled).
+//
+// Official 2.1.210 densable Bta: adaptive label (click / shortcut / pageDown
+// / bare ↓), Badge (Ey) with textColor+padded+truncate-end, noSelect on the
+// hit box. Official still uses left/right=0 full-width absolute — we keep
+// content-width + computed left: dirty absolute nodes clear their full cached
+// rect before re-paint (output.clear fromAbsolute), so a full-width wrapper
+// would wipe the entire last transcript row on hover (backgroundColor flip),
+// blanking text under the transparent gaps (e.g. "价值" under "意图").
 function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => void }): React.ReactNode {
   const [hover, setHover] = useState(false);
-  // Official densable: "N new message(s) (click) ↓" / "Jump to bottom (click) ↓"
-  const label =
-    count > 0
-      ? `${count} new ${plural(count, 'message')} (click) ${figures.arrowDown}`
-      : `Jump to bottom (click) ${figures.arrowDown}`;
+  const { columns } = useTerminalSize();
+  const terminalFocused = useTerminalFocus();
+  // Official defaults (vRp/CRp densables via platform table).
+  const bottomDefault = 'ctrl+end';
+  const pageDownDefault = 'pagedown';
+  const bottomShortcut = getShortcutDisplay('scroll:bottom', 'Scroll', bottomDefault);
+  const pageDownShortcut = getShortcutDisplay('scroll:pageDown', 'Scroll', pageDownDefault);
+  const base = count > 0 ? `${count} new ${plural(count, 'message')}` : 'Jump to bottom';
+  // Official: macOS + bottom binding is empty/default → prefer click or fn+↓
+  // wording; otherwise show the resolved scroll:bottom chord.
+  const isMacDefaultBottom = getPlatform() === 'macos' && (bottomShortcut === '' || bottomShortcut === bottomDefault);
+  const mouseClickable = resolveMouseTrackingMode() === 'full' && terminalFocused;
+  const pageDownHint = pageDownShortcut === pageDownDefault ? `fn+${figures.arrowDown}` : pageDownShortcut;
+  let preferred: string;
+  if (isMacDefaultBottom && mouseClickable) {
+    preferred = `${base} (click) ${figures.arrowDown}`;
+  } else if (isMacDefaultBottom && pageDownHint) {
+    preferred = `${base}: ${pageDownHint} to scroll`;
+  } else if (bottomShortcut) {
+    preferred = `${base} (${bottomShortcut}) ${figures.arrowDown}`;
+  } else {
+    preferred = `${base} ${figures.arrowDown}`;
+  }
+  // Official width fallthrough: full → base+↓ → base (columns-2 budget).
+  const maxWidth = Math.max(0, columns - 2);
+  const bare = `${base} ${figures.arrowDown}`;
+  const label = [preferred, bare, base].find(s => stringWidth(s) <= maxWidth) ?? base;
+  // Badge (Ey densable): padded spaces + text color + truncate-end.
+  const text = ` ${label} `;
+  const width = stringWidth(text);
+  const left = Math.max(0, Math.floor((columns - width) / 2));
+  const bg = hover ? 'userMessageBackgroundHover' : 'userMessageBackground';
   return (
-    <Box position="absolute" bottom={0} left={0} right={0} justifyContent="center">
-      <Box onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-        <Text backgroundColor={hover ? 'userMessageBackgroundHover' : 'userMessageBackground'} dimColor>
-          {' '}
-          {label}{' '}
+    <Box position="absolute" bottom={0} left={left}>
+      <Box noSelect onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+        <Text backgroundColor={bg} color="text" wrap="truncate-end">
+          {text}
         </Text>
       </Box>
     </Box>
