@@ -20,6 +20,7 @@ import { getCwd } from 'src/utils/cwd.js';
 import { getPatchForDisplay } from 'src/utils/diff.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { logError } from 'src/utils/log.js';
+import { isScratchpadFile } from 'src/utils/permissions/filesystem.js';
 import { getPlansDirectory } from 'src/utils/plans.js';
 import { openForScan, readCapped } from 'src/utils/readEditContext.js';
 import type { Output } from './FileWriteTool.js';
@@ -279,6 +280,16 @@ export function renderToolResultMessage(
             Wrote <Text bold>{numLines}</Text> lines to <Text bold>{relative(getCwd(), filePath)}</Text>
           </Text>
         );
+      } else if (!verbose && isScratchpadFile(filePath)) {
+        // Official densable: scratchpad creates keep line count + expand hint.
+        const numLines = countLines(content);
+        return (
+          <MessageResponse>
+            <Text>
+              Wrote <Text bold>{numLines}</Text> {numLines === 1 ? 'line' : 'lines'} <CtrlOToExpand />
+            </Text>
+          </MessageResponse>
+        );
       }
 
       return <FileWriteToolCreatedMessage filePath={filePath} content={content} verbose={verbose} />;
@@ -294,6 +305,8 @@ export function renderToolResultMessage(
           style={style}
           verbose={verbose}
           previewHint={isPlanFile ? '/plan to preview' : undefined}
+          // Official densable: collapse full diff only for scratchpad files.
+          collapsed={!isPlanFile && isScratchpadFile(filePath)}
         />
       );
     }

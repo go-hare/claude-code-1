@@ -2,7 +2,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import type { UUID } from 'crypto'
 import type React from 'react'
 import type { PermissionResult } from '../entrypoints/agentSdkTypes.js'
-import type { Key } from '@anthropic/ink'
+import type { InputEvent, Key } from '@anthropic/ink'
 import type { PastedContent } from '../utils/config.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
 import type { TextHighlight } from '../utils/textHighlighting.js'
@@ -232,7 +232,7 @@ export type VimMode = 'INSERT' | 'NORMAL'
  * Common properties for input hook results
  */
 export type BaseInputState = {
-  onInput: (input: string, key: Key) => void
+  onInput: (input: string, key: Key, event?: InputEvent) => void
   renderedValue: string
   offset: number
   setOffset: (offset: number) => void

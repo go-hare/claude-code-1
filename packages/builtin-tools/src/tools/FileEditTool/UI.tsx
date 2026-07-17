@@ -15,6 +15,7 @@ import type { Message, ProgressMessage } from 'src/types/message.js';
 import { adjustHunkLineNumbers, CONTEXT_LINES } from 'src/utils/diff.js';
 import { FILE_NOT_FOUND_CWD_NOTE, getDisplayPath } from 'src/utils/file.js';
 import { logError } from 'src/utils/log.js';
+import { isScratchpadFile } from 'src/utils/permissions/filesystem.js';
 import { getPlansDirectory } from 'src/utils/plans.js';
 import { readEditContext } from 'src/utils/readEditContext.js';
 import { firstLineOf } from 'src/utils/stringUtils.js';
@@ -96,6 +97,8 @@ export function renderToolResultMessage(
       style={style}
       verbose={verbose}
       previewHint={isPlanFile ? '/plan to preview' : undefined}
+      // Official densable: collapse full diff only for scratchpad files.
+      collapsed={!isPlanFile && isScratchpadFile(filePath)}
     />
   );
 }

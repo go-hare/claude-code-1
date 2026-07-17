@@ -41,7 +41,21 @@ type TokenizerOptions = {
    * output streams, and enabling this there swallows display text. Default false.
    */
   x10Mouse?: boolean
+  /**
+   * Output-stream mode (official densable `$Xc` `forOutput` flag). When true,
+   * ground-state C0 controls are not peeled into separate text tokens — they
+   * stay in the display stream. Stdin (default false) peels short-buffer C0
+   * so CR/LF become independent keys (densable 2.1.210 enter path).
+   */
+  forOutput?: boolean
 }
+
+/**
+ * Incomplete legacy X10 mouse fragment sitting in ground text just before DEL
+ * (official densable `Bog`). Skip the DEL so the mouse payload is not broken
+ * by a spurious `\x7f` text token.
+ */
+const INCOMPLETE_X10_BEFORE_DEL_RE = /^\[M[\x60-\x7f][\x20-\uffff]?$/
 
 /**
  * Create a streaming tokenizer for terminal input.
@@ -58,6 +72,7 @@ export function createTokenizer(options?: TokenizerOptions): Tokenizer {
   let currentState: State = 'ground'
   let currentBuffer = ''
   const x10Mouse = options?.x10Mouse ?? false
+  const forOutput = options?.forOutput ?? false
 
   return {
     feed(input: string): Token[] {
@@ -67,6 +82,7 @@ export function createTokenizer(options?: TokenizerOptions): Tokenizer {
         currentBuffer,
         false,
         x10Mouse,
+        forOutput,
       )
       currentState = result.state.state
       currentBuffer = result.state.buffer
@@ -74,7 +90,14 @@ export function createTokenizer(options?: TokenizerOptions): Tokenizer {
     },
 
     flush(): Token[] {
-      const result = tokenize('', currentState, currentBuffer, true, x10Mouse)
+      const result = tokenize(
+        '',
+        currentState,
+        currentBuffer,
+        true,
+        x10Mouse,
+        forOutput,
+      )
       currentState = result.state.state
       currentBuffer = result.state.buffer
       return result.tokens
@@ -102,6 +125,7 @@ function tokenize(
   initialBuffer: string,
   flush: boolean,
   x10Mouse: boolean,
+  forOutput: boolean,
 ): { tokens: Token[]; state: InternalState } {
   const tokens: Token[] = []
   const result: InternalState = {
@@ -137,11 +161,38 @@ function tokenize(
 
     switch (result.state) {
       case 'ground':
+        // Official densable 2.1.210 $Xc ground:
+        //   ESC → escape state
+        //   DEL → skip if incomplete X10 text prefix, else emit "\x7f" text
+        //   C0 (m<32) when !forOutput && buffer.length<64 → peel as its own
+        //     text token; CRLF (13 then 10) collapses to a single CR token
+        //   else advance (printable / large-buffer C0 stays in the text run)
         if (code === C0.ESC) {
           flushText()
           seqStart = i
           result.state = 'escape'
           i++
+        } else if (code === C0.DEL) {
+          if (INCOMPLETE_X10_BEFORE_DEL_RE.test(data.slice(textStart, i))) {
+            i++
+          } else {
+            flushText()
+            i++
+            tokens.push({ type: 'text', value: '\x7f' })
+            textStart = i
+          }
+        } else if (!forOutput && code < 0x20 && data.length < 64) {
+          flushText()
+          i++
+          // CRLF → keep only CR (official: m===13 && next===10 → skip LF)
+          if (code === C0.CR && data.charCodeAt(i) === C0.LF) {
+            i++
+          }
+          tokens.push({
+            type: 'text',
+            value: String.fromCharCode(code),
+          })
+          textStart = i
         } else {
           i++
         }

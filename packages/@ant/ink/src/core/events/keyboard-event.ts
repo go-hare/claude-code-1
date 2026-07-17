@@ -4,13 +4,18 @@ import { TerminalEvent } from './terminal-event.js'
 /**
  * Keyboard event dispatched through the DOM tree via capture/bubble.
  *
- * Follows browser KeyboardEvent semantics: `key` is the literal character
- * for printable keys ('a', '3', ' ', '/') and a multi-char name for
- * special keys ('down', 'return', 'escape', 'f1'). The idiomatic
- * printable-char check is `e.key.length === 1`.
+ * Official densable 2.1.210 KeyboardEvent shape:
+ * - `key` — fag(parsed): literal char / named multi-char / "" for ESC residue
+ * - `name` — raw ParsedKey.name ("" when nameless); used by tS_ blacklist
+ * - `sequence` — raw ParsedKey.sequence
+ *
+ * Main prompt inserts with: `if (q.key.length >= 1 && !tS_.has(q.name)) insert(q.key)`
+ * where tS_ = pageup/pagedown/insert/wheelup/wheeldown/mouse/clear/enter/f1…f12.
  */
 export class KeyboardEvent extends TerminalEvent {
   readonly key: string
+  readonly name: string
+  readonly sequence: string
   readonly ctrl: boolean
   readonly shift: boolean
   readonly meta: boolean
@@ -21,6 +26,8 @@ export class KeyboardEvent extends TerminalEvent {
     super('keydown', { bubbles: true, cancelable: true })
 
     this.key = keyFromParsed(parsedKey)
+    this.name = parsedKey.name ?? ''
+    this.sequence = parsedKey.sequence ?? ''
     this.ctrl = parsedKey.ctrl
     this.shift = parsedKey.shift
     this.meta = parsedKey.meta || parsedKey.option
@@ -31,10 +38,9 @@ export class KeyboardEvent extends TerminalEvent {
 
 /**
  * Convert a ParsedKey into the browser-like `KeyboardEvent.key` string.
- * Aligned with official 2.1.210 densable `fag()`:
- *   space name → ' '; ctrl → letter name; single printable seq → that char;
- *   named key (with shift uppercasing) → name; ESC-prefixed / orphan SGR
- *   nameless sequences → '' (do not leak into text insert).
+ * Official 2.1.210 densable `fag()` — do not invent extra residue sinks here.
+ * Multi-codepoint garbage that escapes fag is blocked at InputEvent via `sji`
+ * (`[...key].length === 1` only).
  */
 function keyFromParsed(parsed: ParsedKey): string {
   const seq = parsed.sequence ?? ''
@@ -70,14 +76,10 @@ function keyFromParsed(parsed: ParsedKey): string {
     return name
   }
 
-  // Official fag: nameless ESC-prefixed sequences produce no key text
-  // (unmapped functional CSI u, incomplete recovery, etc.).
+  // Official fag: nameless ESC-prefixed sequences produce no key text.
   if (seq.charCodeAt(0) === 0x1b) return ''
-  // Official 2.1.153 $z5 / 2.1.210 fag: swallow ESC-less SGR mouse fragments
-  // that escaped the parser as nameless keys. Single orphan: `[<65;11;10M`.
-  // Fast-scroll burst after a heavy-render ESC flush:
-  // `[<65;11;10M[<65;11;10M...`. Without this, return name||seq would type
-  // the garbage into the prompt via onKeyDown paths that insert e.key.
+  // Official fag: pure orphan SGR burst (complete and/or incomplete tails).
+  //   /^(\[<\d[\d;]*[Mm]?)+$/
   if (/^(\[<\d[\d;]*[Mm]?)+$/.test(seq)) return ''
 
   return seq

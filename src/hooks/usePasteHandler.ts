@@ -17,7 +17,7 @@ const PASTE_COMPLETION_TIMEOUT_MS = 100
 
 type PasteHandlerProps = {
   onPaste?: (text: string) => void
-  onInput: (input: string, key: Key) => void
+  onInput: (input: string, key: Key, event?: InputEvent) => void
   onImagePaste?: (
     base64Image: string,
     mediaType?: string,
@@ -216,6 +216,14 @@ export function usePasteHandler({
     // The keypress parser sets isPasted=true for content within bracketed paste.
     const isFromPaste = event.keypress.isPasted
 
+    // Official densable sji (2.1.210): InputEvent.input is only a single
+    // codepoint for non-paste keys. Multi-codepoint non-paste payloads
+    // (orphan mouse residue "17;19M", accidental multi-char batches) arrive
+    // as input="". Bracketed paste still keeps the full string on input.
+    // Do NOT re-inflate from keypress.sequence for non-paste — that would
+    // reintroduce the mouse-residue leak official avoids via sji.
+    const text = input
+
     // If this is pasted content, set isPasting state for UI feedback
     if (isFromPaste) {
       setIsPasting(true)
@@ -233,7 +241,7 @@ export function usePasteHandler({
     // When dragging multiple images, they may come as newline-separated or
     // space-separated paths. Split on spaces preceding absolute paths:
     // - Unix: ` /` - Windows: ` C:\` etc.
-    const hasImageFilePath = input
+    const hasImageFilePath = text
       .split(/ (?=\/|[A-Za-z]:\\)/)
       .flatMap(part => part.split('\n'))
       .some(line => isImageFilePath(line.trim()))
@@ -242,7 +250,7 @@ export function usePasteHandler({
     // When the user pastes an image with Cmd+V, the terminal sends an empty
     // bracketed paste sequence. The keypress parser emits this as isPasted=true
     // with empty input.
-    if (isFromPaste && input.length === 0 && isMacOS && onImagePaste) {
+    if (isFromPaste && text.length === 0 && isMacOS && onImagePaste) {
       checkClipboardForImage()
       // Reset isPasting since there's no text content to process
       setIsPasting(false)
@@ -252,11 +260,11 @@ export function usePasteHandler({
     // Check if we should handle as paste (from bracketed paste, large input, or continuation)
     const shouldHandleAsPaste =
       onPaste &&
-      (input.length > PASTE_THRESHOLD ||
+      (text.length > PASTE_THRESHOLD ||
         pastePendingRef.current ||
         hasImageFilePath ||
         isFromPaste ||
-        (input.length >= 3 &&
+        (text.length >= 3 &&
           !key.return &&
           !key.tab &&
           !key.escape &&
@@ -269,14 +277,17 @@ export function usePasteHandler({
       pastePendingRef.current = true
       setPasteState(({ chunks, timeoutId }) => {
         return {
-          chunks: [...chunks, input],
+          chunks: [...chunks, text],
           timeoutId: resetPasteTimeout(timeoutId),
         }
       })
       return
     }
-    onInput(input, key)
-    if (input.length > 10) {
+    // Paste-only path: BaseTextInput routes typed keys via KeyboardEvent
+    // onKeyDown (official densable). useInput only delivers bracketed paste
+    // here so we keep isPasted chunking without double-inserting keystrokes.
+    onInput(text, key, event)
+    if (text.length > 10) {
       // Ensure that setIsPasting is turned off on any other multicharacter
       // input, because the stdin buffer may chunk at arbitrary points and split
       // the closing escape sequence if the input length is too long for the

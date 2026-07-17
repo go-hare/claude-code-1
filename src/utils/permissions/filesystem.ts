@@ -424,6 +424,20 @@ function isScratchpadPath(absolutePath: string): boolean {
 }
 
 /**
+ * Official densable: collapse FileEdit/FileWrite result UI for files under the
+ * session scratchpad (not the directory itself). When disabled / path outside
+ * scratchpad → false. Used as `collapsed` on FileEditToolUpdatedMessage.
+ */
+export function isScratchpadFile(absolutePath: string): boolean {
+  if (!isScratchpadEnabled()) {
+    return false
+  }
+  const scratchpadDir = getScratchpadDir()
+  const normalizedPath = normalize(absolutePath)
+  return normalizedPath.startsWith(scratchpadDir + sep)
+}
+
+/**
  * Check if a file path is dangerous to auto-edit without explicit permission.
  * This includes:
  * - Files in .git directories or .gitconfig files (to prevent git-based data exfiltration and code execution)

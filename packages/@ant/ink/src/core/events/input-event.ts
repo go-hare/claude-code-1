@@ -40,6 +40,8 @@ function parseKey(keypress: ParsedKey): [Key, string] {
     wheelDown: keypress.name === 'wheeldown',
     home: keypress.name === 'home',
     end: keypress.name === 'end',
+    // Official densable sji (2.1.210): only name "return" sets key.return.
+    // Bare \n is named "enter" and yields input "\n" (multiline insert), not submit.
     return: keypress.name === 'return',
     escape: keypress.name === 'escape',
     fn: keypress.fn,
@@ -57,6 +59,21 @@ function parseKey(keypress: ParsedKey): [Key, string] {
     // protocol CSI u sequences. Distinct from meta (Alt/Option) so
     // bindings like cmd+c can be expressed separately from opt+c.
     super: keypress.super,
+  }
+
+  // Official lag: wheel/mouse never become text insert. Keybindings still
+  // see key.wheelUp/wheelDown; only the character payload is suppressed.
+  if (
+    keypress.name === 'wheelup' ||
+    keypress.name === 'wheeldown' ||
+    keypress.name === 'mouse'
+  ) {
+    return [key, '']
+  }
+
+  // Official densable sji: name==="enter" → input "\n" (not submit).
+  if (keypress.name === 'enter') {
+    return [key, '\n']
   }
 
   let input = keypress.ctrl ? keypress.name : keypress.sequence
@@ -83,22 +100,19 @@ function parseKey(keypress: ParsedKey): [Key, string] {
     input = ''
   }
 
-  // Suppress ESC-less SGR mouse fragments. When a heavy React commit blocks
-  // the event loop past App's 50ms NORMAL_TIMEOUT flush, a CSI split across
-  // stdin chunks gets its buffered ESC flushed as a lone Escape key, and the
-  // continuation arrives as a text token with name='' — which falls through
-  // all of parseKeypress's ESC-anchored regexes and the nonAlphanumericKeys
-  // clear below (name is falsy). The fragment then leaks into the prompt as
-  // literal `[<64;74;16M`. This is the same defensive sink as the F13 guard
-  // above; the underlying tokenizer-flush race is upstream of this layer.
-  if (!keypress.name && /^\[<\d+;\d+;\d+[Mm]/.test(input)) {
-    input = ''
+  // Strip ESC prefix(es). Official fag sees post-tokenizer sequences;
+  // ESC-prefixed nameless CSI is swallowed via charCodeAt(0)===27.
+  // TODO(vadimdemedes): remove ESC strip in the next major version.
+  while (input.startsWith('\u001B')) {
+    input = input.slice(1)
   }
 
-  // Strip meta if it's still remaining after `parseKeypress`
-  // TODO(vadimdemedes): remove this in the next major version.
-  if (input.startsWith('\u001B')) {
-    input = input.slice(1)
+  // Official fag: pure orphan SGR burst → "".
+  //   /^(\[<\d[\d;]*[Mm]?)+$/
+  // No invented 2-param / 3-param / M{2,} residual sinks here — those are
+  // covered by official sji below ([...input].length === 1 only).
+  if (!keypress.name && /^(\[<\d[\d;]*[Mm]?)+$/.test(input)) {
+    input = ''
   }
 
   // Track whether we've already processed this as a special sequence
@@ -204,6 +218,39 @@ function parseKey(keypress: ParsedKey): [Key, string] {
     keypress.name &&
     nonAlphanumericKeys.includes(keypress.name)
   ) {
+    input = ''
+  }
+
+  // Official densable fag (2.1.210): nameless ESC-prefixed sequences produce
+  // no key text (`seq.charCodeAt(0)===0x1b → ""`). KeyboardEvent already does
+  // this, but InputEvent historically strips ESC and keeps the residue — so a
+  // 50ms incomplete-CSI flush of "\x1b[" becomes a single typed "[" (live
+  // "[[[[[[[[[[" during collapse-scroll). After CSI u / modifyOtherKeys /
+  // keypad recovery above, any remaining nameless ESC-origin residue must be
+  // emptied. Preserve ink's ESC+alnum meta path only (Alt+letter → "a").
+  if (!processedAsSpecialSequence && !keypress.name && input !== '') {
+    const orig = keypress.sequence ?? keypress.raw ?? ''
+    if (orig.charCodeAt(0) === 0x1b) {
+      const isMetaAlnum =
+        orig.length === 2 &&
+        input.length === 1 &&
+        ((input >= 'a' && input <= 'z') ||
+          (input >= 'A' && input <= 'Z') ||
+          (input >= '0' && input <= '9'))
+      if (!isMetaAlnum) {
+        input = ''
+      }
+    }
+  }
+
+  // Official densable sji (2.1.210) — the real reason official never types
+  // "17;19M" / "MMMM" / orphan bursts into the prompt even when those strings
+  // reach the keyboard path:
+  //   input = name==="enter" ? "\n" : [...e.key].length===1 ? e.key : ""
+  // Multi-codepoint sequences are NOT typed. Single codepoints (ASCII, CJK,
+  // fullwidth punct) still insert. Bracketed paste sets isPasted and keeps
+  // the full payload for the paste handler (official uses dispatchPasteEvent).
+  if (!keypress.isPasted && input !== '' && [...input].length !== 1) {
     input = ''
   }
 

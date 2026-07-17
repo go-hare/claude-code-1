@@ -423,6 +423,7 @@ export default class App extends PureComponent<Props, State> {
 
     // Only proceed if we have incomplete sequences, open paste, or a
     // half-assembled multi-byte UTF-8 run from high-byte CSI u events.
+    // Official densable App: no ESC-less orphan-SGR hold.
     if (!hasIncomplete && !inPaste && !hasPendingBytes) return;
 
     // Fullscreen: if stdin has data waiting, it's almost certainly the
@@ -493,6 +494,8 @@ export default class App extends PureComponent<Props, State> {
       this.incompleteEscapeTimer = null;
     }
 
+    // Official densable App: arm NORMAL_TIMEOUT for incomplete ESC in the
+    // tokenizer buffer, PASTE_TIMEOUT for open bracketed paste.
     const incompleteOrPasteMs =
       this.keyParseState.incomplete || this.keyParseState.mode === 'IN_PASTE'
         ? this.keyParseState.mode === 'IN_PASTE'

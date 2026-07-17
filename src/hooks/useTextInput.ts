@@ -1,9 +1,10 @@
 import { isInputModeCharacter } from 'src/components/PromptInput/inputModes.js'
 import { useNotifications } from 'src/context/notifications.js'
+import { useRef } from 'react'
 import stripAnsi from 'strip-ansi'
 import { markBackslashReturnUsed } from '../commands/terminalSetup/terminalSetup.js'
 import { addToHistory } from '../history.js'
-import type { Key } from '@anthropic/ink'
+import type { InputEvent, Key } from '@anthropic/ink'
 import type {
   InlineGhostText,
   TextInputState,
@@ -107,7 +108,26 @@ export function useTextInput({
 
   const offset = externalOffset
   const setOffset = onOffsetChange
-  const cursor = Cursor.fromText(originalValue, columns, offset)
+  // App processKeysInBatch can emit several InputEvents in one discreteUpdates
+  // pass before React re-renders. Props (value/offset) stay frozen across that
+  // batch, so Enter after typed chars would call onSubmit(stale empty/old
+  // value) and appear as "swallowed". Track the live text/offset synchronously
+  // as we apply each key in the batch.
+  const liveValueRef = useRef(originalValue)
+  const liveOffsetRef = useRef(offset)
+  if (liveValueRef.current !== originalValue) {
+    liveValueRef.current = originalValue
+  }
+  if (liveOffsetRef.current !== offset) {
+    liveOffsetRef.current = offset
+  }
+  // `let` so onInput can rebuild from live refs mid-batch; mapKey handlers
+  // read this binding at call time (not capture a frozen Cursor snapshot).
+  let cursor = Cursor.fromText(
+    liveValueRef.current,
+    columns,
+    liveOffsetRef.current,
+  )
   const { addNotification, removeNotification } = useNotifications()
 
   const handleCtrlC = useDoublePress(
@@ -268,7 +288,8 @@ export function useTextInput({
     if (env.terminal === 'Apple_Terminal' && isModifierPressed('shift')) {
       return cursor.insert('\n')
     }
-    onSubmit?.(originalValue)
+    // Prefer liveValueRef: same-batch typed chars may not have re-rendered yet.
+    onSubmit?.(liveValueRef.current)
   }
 
   function upOrHistoryUp() {
@@ -406,6 +427,10 @@ export function useTextInput({
             // End key
             case input === '\x1b[F' || input === '\x1b[4~':
               return cursor.endOfLine()
+            // Official densable: bare \n is name "enter". Multiline inserts
+            // newline; single-line does not submit (only name "return" does).
+            case input === '\n':
+              return multiline ? cursor.insert('\n') : cursor
             default: {
               // Trailing \r after text is SSH-coalesced Enter ("o\r") —
               // strip it so the Enter isn't inserted as content. Lone \r
@@ -447,14 +472,34 @@ export function useTextInput({
     return (key.ctrl || key.meta) && input === 'y'
   }
 
-  function onInput(input: string, key: Key): void {
+  function onInput(input: string, key: Key, _event?: InputEvent): void {
     // Note: Image paste shortcut (chat:imagePaste) is handled via useKeybindings in PromptInput
 
+    // Official densable 2.1.210 main prompt: insert comes from KeyboardEvent
+    // `q.key` + tS_ blacklist (BaseTextInput onKeyDown), not InputEvent sji +
+    // sequence recovery. Wheel/mouse names never insert text.
+    if (key.wheelUp || key.wheelDown) {
+      return
+    }
+
+    // Rebuild from live refs so a multi-key stdin batch (typed chars + Enter)
+    // does not keep inserting into the props snapshot from this render.
+    cursor = Cursor.fromText(
+      liveValueRef.current,
+      columns,
+      liveOffsetRef.current,
+    )
+
+    // Payload is already official KeyboardEvent insert text (or paste
+    // InputEvent.input). No sequence-recovery bridge — that re-typed
+    // multi-char SGR residue (MMM8MMMM) after sji emptied it.
+    const recovered = input
+
     // Apply filter if provided
-    const filteredInput = inputFilter ? inputFilter(input, key) : input
+    const filteredInput = inputFilter ? inputFilter(recovered, key) : recovered
 
     // If the input was filtered out, do nothing
-    if (filteredInput === '' && input !== '') {
+    if (filteredInput === '' && recovered !== '') {
       return
     }
 
@@ -477,6 +522,8 @@ export function useTextInput({
           onChange(currentCursor.text)
         }
         setOffset(currentCursor.offset)
+        liveValueRef.current = currentCursor.text
+        liveOffsetRef.current = currentCursor.offset
       }
       resetKillAccumulation()
       resetYankState()
@@ -500,12 +547,17 @@ export function useTextInput({
           onChange(nextCursor.text)
         }
         setOffset(nextCursor.offset)
+        // Keep the next key in this stdin batch on the updated buffer.
+        liveValueRef.current = nextCursor.text
+        liveOffsetRef.current = nextCursor.offset
       }
       // SSH-coalesced Enter: on slow links, "o" + Enter can arrive as one
       // chunk "o\r". parseKeypress only matches s === '\r', so it hit the
       // default handler above (which stripped the trailing \r). Text with
       // exactly one trailing \r is coalesced Enter; lone \r is Alt+Enter
       // (newline); embedded \r is multi-line paste.
+      // Prefer path: parse-keypress now splits "o\r" into separate keys so
+      // handleEnter runs on \r with liveValueRef already updated.
       if (
         filteredInput.length > 1 &&
         filteredInput.endsWith('\r') &&

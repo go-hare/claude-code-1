@@ -3,6 +3,7 @@ import * as React from 'react';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Box, Text } from '@anthropic/ink';
 import { count } from '../utils/array.js';
+import { CtrlOToExpand } from './CtrlOToExpand.js';
 import { MessageResponse } from './MessageResponse.js';
 import { StructuredDiffList } from './StructuredDiffList.js';
 
@@ -14,6 +15,8 @@ type Props = {
   style?: 'condensed';
   verbose: boolean;
   previewHint?: string;
+  /** Official: collapse full diff for scratchpad files (stats + ctrl+o). */
+  collapsed?: boolean;
 };
 
 export function FileEditToolUpdatedMessage({
@@ -24,11 +27,13 @@ export function FileEditToolUpdatedMessage({
   style,
   verbose,
   previewHint,
+  collapsed,
 }: Props): React.ReactNode {
   const { columns } = useTerminalSize();
   const numAdditions = structuredPatch.reduce((acc, hunk) => acc + count(hunk.lines, _ => _.startsWith('+')), 0);
   const numRemovals = structuredPatch.reduce((acc, hunk) => acc + count(hunk.lines, _ => _.startsWith('-')), 0);
 
+  // Official densable: stats-only line — no path in condensed/collapsed summary.
   const text = (
     <Text>
       {numAdditions > 0 ? (
@@ -57,7 +62,17 @@ export function FileEditToolUpdatedMessage({
       );
     }
   } else if (style === 'condensed' && !verbose) {
+    // Official: subagent / condensed style returns stats only.
     return text;
+  } else if (collapsed && !verbose && numAdditions + numRemovals > 0) {
+    // Official: scratchpad edits keep stats + expand hint, hide full diff.
+    return (
+      <MessageResponse>
+        <Text>
+          {text} <CtrlOToExpand />
+        </Text>
+      </MessageResponse>
+    );
   }
 
   return (
