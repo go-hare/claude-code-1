@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -5,6 +6,31 @@ import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const pkgPath = resolve(__dirname, '..', 'package.json')
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+
+/**
+ * Official densable embeds MACRO.GIT_SHA at build time (emO --version --verbose
+ * prints `Commit: <sha>`). Prefer env (CI) then `git rev-parse HEAD`.
+ */
+function resolveGitSha(): string {
+  const fromEnv =
+    process.env.GIT_SHA ||
+    process.env.SOURCE_COMMIT ||
+    process.env.GITHUB_SHA ||
+    process.env.COMMIT_SHA
+  if (fromEnv && /^[0-9a-f]{7,40}$/i.test(fromEnv.trim())) {
+    return fromEnv.trim().toLowerCase()
+  }
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      cwd: resolve(__dirname, '..'),
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    }).trim()
+  } catch {
+    return ''
+  }
+}
 
 /**
  * Shared MACRO define map used by both dev.ts (runtime -d flags)
@@ -19,6 +45,8 @@ export function getMacroDefines(): Record<string, string> {
   return {
     'MACRO.VERSION': JSON.stringify(pkg.version),
     'MACRO.BUILD_TIME': JSON.stringify(new Date().toISOString()),
+    // Official densable: GIT_SHA used by `claude --version --verbose`.
+    'MACRO.GIT_SHA': JSON.stringify(resolveGitSha()),
     'MACRO.FEEDBACK_CHANNEL': JSON.stringify(
       'https://github.com/go-hare/claude-code-1/issues',
     ),

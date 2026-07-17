@@ -12,6 +12,8 @@ if (typeof globalThis.MACRO === 'undefined') {
   (globalThis as any).MACRO = {
     VERSION: process.env.CLAUDE_CODE_VERSION || '2.1.888',
     BUILD_TIME: new Date().toISOString(),
+    // Official densable embeds GIT_SHA; empty when not built via defines.
+    GIT_SHA: process.env.GIT_SHA || process.env.SOURCE_COMMIT || '',
     FEEDBACK_CHANNEL: '',
     ISSUES_EXPLAINER: '',
     NATIVE_PACKAGE_URL: '',
@@ -86,10 +88,20 @@ if (feature('ABLATION_BASELINE') && process.env.CLAUDE_CODE_ABLATION_BASELINE) {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  // Fast-path for --version/-v: zero module loading needed
-  if (args.length === 1 && (args[0] === '--version' || args[0] === '-v' || args[0] === '-V')) {
-    // MACRO.VERSION is inlined at build time
+  // Official emO version path: --version/-v/-V, optional trailing --verbose → Commit SHA.
+  // MACRO.VERSION / MACRO.GIT_SHA inlined at build time; zero module loading.
+  if (
+    (args.length === 1 || (args.length === 2 && args[1] === '--verbose')) &&
+    (args[0] === '--version' || args[0] === '-v' || args[0] === '-V')
+  ) {
+    // Official zS(BUILD_REF_NAME) is empty in open densable; keep suffix empty.
     console.log(`${MACRO.VERSION} (Claude Code)`);
+    if (args.length === 2) {
+      const sha = typeof MACRO.GIT_SHA === 'string' && MACRO.GIT_SHA.length > 0 ? MACRO.GIT_SHA : '';
+      if (sha) {
+        console.log(`Commit: ${sha}`);
+      }
+    }
     return;
   }
 
@@ -166,19 +178,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Fast-path for `--bg-pty-host` (internal — daemon spawns this as PTY host).
-  // Must come before other checks: spawned per-session, perf-sensitive.
-  if (args[0] === '--bg-pty-host') {
-    const { runPtyHost } = await import('../daemon/ptyHost.js');
-    await runPtyHost(args.slice(1));
-    return;
-  }
-
+  // Official emO order: --daemon-worker → --bg-pty-host → --bg-spare.
   // Fast-path for `--daemon-worker=<kind>` (internal — supervisor spawns this).
-  // Must come before the daemon subcommand check: spawned per-worker, so
-  // perf-sensitive. No enableConfigs(), no analytics sinks at this layer —
-  // workers are lean. If a worker kind needs configs/auth (assistant will),
-  // it calls them inside its run() fn.
+  // Official: loadFastPathPolicy then runDaemonWorker.
   if (args[0] === '--daemon-worker' || args[0]?.startsWith('--daemon-worker=')) {
     if (!feature('DAEMON')) {
       console.error(
@@ -187,9 +189,28 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
+    const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
+    const policyErr = await loadFastPathPolicy();
+    if (policyErr) {
+      process.stderr.write(`${policyErr}\n`);
+    }
     const kind = args[0] === '--daemon-worker' ? args[1] : args[0].split('=')[1];
     const { runDaemonWorker } = await import('../daemon/workerRegistry.js');
     await runDaemonWorker(kind);
+    return;
+  }
+
+  // Fast-path for `--bg-pty-host` (internal — daemon spawns this as PTY host).
+  if (args[0] === '--bg-pty-host') {
+    const { runPtyHost } = await import('../daemon/ptyHost.js');
+    await runPtyHost(args.slice(1));
+    return;
+  }
+
+  // Official HmO: `--bg-spare <claimSock>` — pre-warmed claim host.
+  if (args[0] === '--bg-spare') {
+    const { runBgSpare } = await import('../daemon/bgSpare.js');
+    await runBgSpare(args.slice(1));
     return;
   }
 
@@ -245,8 +266,15 @@ async function main(): Promise<void> {
       args[0] === 'bridge')
   ) {
     profileCheckpoint('cli_bridge_path');
-    const { enableConfigs } = await import('../utils/config.js');
-    enableConfigs();
+    // Official emO: loadFastPathPolicy before bridge gates (fatal on error).
+    const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
+    {
+      const policyErr = await loadFastPathPolicy();
+      if (policyErr) {
+        const { exitWithError } = await import('../utils/process.js');
+        exitWithError(policyErr);
+      }
+    }
 
     const { getBridgeDisabledReason, checkBridgeMinVersion } = await import('../bridge/bridgeEnabled.js');
     const { BRIDGE_LOGIN_ERROR } = await import('../bridge/types.js');
@@ -287,8 +315,9 @@ async function main(): Promise<void> {
   // subcommands under one namespace.
   if ((feature('DAEMON') || feature('BG_SESSIONS')) && args[0] === 'daemon') {
     profileCheckpoint('cli_daemon_path');
-    const { enableConfigs } = await import('../utils/config.js');
-    enableConfigs();
+    // Official emO: ensureFastPathSettingsLoaded (not full policy fatal) then sinks.
+    const { ensureFastPathSettingsLoaded } = await import('../utils/fastPathPolicy.js');
+    await ensureFastPathSettingsLoaded();
     const { setShellIfWindows } = await import('../utils/windowsPaths.js');
     setShellIfWindows();
     const { initSinks } = await import('../utils/sinks.js');
@@ -320,11 +349,17 @@ async function main(): Promise<void> {
   }
 
   // Fast-path for `--bg`/`--background` shortcut → daemon bg.
-  // Official Iia: strip only pre-`--` bg flags (stripBgFlags inside handleBgStart).
+  // Official Iia/emO: loadFastPathPolicy before handleBgStart.
   if (feature('BG_SESSIONS') && (args.includes('--bg') || args.includes('--background'))) {
     profileCheckpoint('cli_daemon_path');
-    const { enableConfigs } = await import('../utils/config.js');
-    enableConfigs();
+    const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
+    {
+      const policyErr = await loadFastPathPolicy();
+      if (policyErr) {
+        const { exitWithError } = await import('../utils/process.js');
+        exitWithError(policyErr);
+      }
+    }
     const { setShellIfWindows } = await import('../utils/windowsPaths.js');
     setShellIfWindows();
     const bg = await import('../cli/bg.js');
@@ -340,8 +375,20 @@ async function main(): Promise<void> {
     const mapped = args[0] === 'ps' ? 'status' : args[0];
     console.error(`[deprecated] Use: claude daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
     profileCheckpoint('cli_daemon_path');
-    const { enableConfigs } = await import('../utils/config.js');
-    enableConfigs();
+    // Official emO bg path: loadFastPathPolicy (warn-only for logs/kill style).
+    const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
+    {
+      const policyErr = await loadFastPathPolicy();
+      const warnOnly = args[0] === 'logs' || args[0] === 'kill' || args[0] === 'ps';
+      if (policyErr) {
+        if (warnOnly) {
+          process.stderr.write(`${policyErr}\n`);
+        } else {
+          const { exitWithError } = await import('../utils/process.js');
+          exitWithError(policyErr);
+        }
+      }
+    }
     const { setShellIfWindows } = await import('../utils/windowsPaths.js');
     setShellIfWindows();
     const { initSinks } = await import('../utils/sinks.js');
@@ -407,9 +454,17 @@ async function main(): Promise<void> {
     process.env.CLAUDE_CODE_SIMPLE = '1';
   }
 
-  // No special flags detected, load and run the full CLI
+  // Official emO full path: earlyInput first, then fire MDM + keychain
+  // prefetch *before* main import so subprocesses overlap module eval.
+  // main.tsx still starts them at top-level (idempotent no-ops if already fired).
   const { startCapturingEarlyInput } = await import('../utils/earlyInput.js');
   startCapturingEarlyInput();
+  const [{ startMdmRawRead }, { startKeychainPrefetch }] = await Promise.all([
+    import('../utils/settings/mdm/rawRead.js'),
+    import('../utils/secureStorage/keychainPrefetch.js'),
+  ]);
+  startMdmRawRead();
+  startKeychainPrefetch();
   profileCheckpoint('cli_before_main_import');
   const { main: cliMain } = await import('../main.jsx');
   profileCheckpoint('cli_after_main_import');

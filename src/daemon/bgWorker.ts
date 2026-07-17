@@ -33,6 +33,7 @@ import {
   access,
 } from 'fs/promises'
 import { randomBytes } from 'crypto'
+import { spawn as nodeSpawn } from 'child_process'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { isInBundledMode } from '../utils/bundledMode.js'
 import {
@@ -1124,7 +1125,15 @@ export type SpawnPtyFn = (
   },
 ) => PtyConnection
 
-/** Default spawnPty using Bun.spawn + PTY host — official nqq */
+/**
+ * Default spawnPty using Bun.spawn + PTY host — official nqq.
+ *
+ * LOCAL: on Windows we use node:child_process.spawn instead of Bun.spawn
+ * because Bun's CREATE_NO_WINDOW/windowsHide is not honoured when
+ * `detached: true` is also set, causing a console flash on every worker
+ * spawn. Node's implementation correctly hides the window for detached
+ * children. Non-Windows keeps Bun.spawn.
+ */
 export function createDefaultSpawnPty(): SpawnPtyFn {
   return (cmd, args, opts) => {
     const spawnArgs = buildPtyHostSpawnArgs(cmd, args, {
@@ -1134,6 +1143,46 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
       runtimeFlags: process.execArgv ?? [],
       bundled: isInBundledMode(),
     })
+
+    if (process.platform === 'win32') {
+      // LOCAL: Bun.spawn + detached ignores windowsHide → conhost flash.
+      // node:child_process.spawn correctly applies CREATE_NO_WINDOW.
+      const child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
+        cwd: opts.cwd,
+        env: opts.env as NodeJS.ProcessEnv,
+        stdio: 'ignore',
+        detached: true,
+        windowsHide: true,
+      })
+      child.unref()
+
+      if (child.pid == null) {
+        throw new Error('spawned bg pty host has no pid on Windows')
+      }
+
+      // Adapter for connectToPtyHost's Bun-ish { exited, signalCode }.
+      // Must be a live bag: plain `{ signalCode }` would freeze the initial null.
+      const handle = {
+        exited: Promise.resolve(-1) as Promise<number>,
+        signalCode: null as string | null,
+      }
+      handle.exited = new Promise<number>((resolve, reject) => {
+        child.once('error', reject)
+        child.once('exit', (code, signal) => {
+          child.removeListener('error', reject)
+          handle.signalCode = signal ?? null
+          resolve(code ?? 0)
+        })
+      }).catch(() => -1)
+
+      return connectToPtyHost(
+        opts.ptySock,
+        child.pid,
+        undefined,
+        opts.short,
+        handle,
+      )
+    }
 
     const child = Bun.spawn(spawnArgs, {
       cwd: opts.cwd,
@@ -1394,6 +1443,33 @@ export class BgWorker {
       w.patch({ pid: spare.pid })
     })
     return w
+  }
+
+  /**
+   * Official zF.buildClaimFrame — attempt=1, no transcript resume.
+   */
+  static buildClaimFrame(
+    dispatch: DispatchRequest,
+    authPath?: string,
+  ): { env: Record<string, string | undefined>; argv: string[] } {
+    const jobDir = getJobDirPath(dispatch.short)
+    const env = buildWorkerEnv(
+      dispatch,
+      jobDir,
+      authPath,
+      getRendezvousSockPath(dispatch.short),
+    )
+    if (dispatch.reattachEnv) {
+      Object.assign(env, dispatch.reattachEnv)
+    }
+    const argv = buildWorkerArgs(
+      dispatch,
+      1,
+      false,
+      dispatch.sessionId,
+      dispatch.respawnFlags,
+    )
+    return { env, argv }
   }
 
   static async adopt(

@@ -18,6 +18,7 @@ import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { StringDecoder } from 'string_decoder'
 import type { Socket } from 'net'
+import { freemem } from 'os'
 import {
   BgWorker,
   type DispatchRequest,
@@ -63,6 +64,16 @@ import {
   type ControlSocketInstance,
   type LeaseInfo,
 } from './controlSocket.js'
+import {
+  type HeldSpare,
+  spawnSpare,
+  claimSpare,
+  reapOrphanSpares,
+  getBgLowMemThresholdBytes,
+} from './bgSpare.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { logEvent } from '../services/analytics/index.js'
+import { errorMessage } from '../utils/errors.js'
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -453,53 +464,92 @@ export async function startBgManager(opts?: {
   const log = opts?.onLog ?? (() => {})
   const handles = new Map<string, BgWorker>()
   const pendingSettleWrites = new Set<Promise<unknown>>()
+  // Official: O = _.spawnPty ?? nqq(); j = _.spawnPty === void 0
+  // Spare only uses the default Bun.spawn path when caller did not inject spawnPty.
+  const usingDefaultSpawnPty = opts?.spawnPty === undefined
   const spawnPty = opts?.spawnPty ?? createDefaultSpawnPty()
   const onKeepAliveChange = opts?.onKeepAliveChange ?? (() => {})
   let closed = false
   let adoptionComplete = false
   let hasDispatched = false
+  // Official Y / A — held spare + in-flight refill
+  let heldSpare: HeldSpare | null = null
+  let spareRefilling = false
 
-  // --- Dispatch handler ---
-  const handleDispatch = (
-    req: DispatchRequest,
-    retryCount = 0,
-    afterUpgrade?: boolean,
-  ): void => {
-    if (closed) return
-    hasDispatched = true
-
-    const existingHandle = handles.get(req.short)
-    if (existingHandle) {
-      if (
-        (existingHandle.isKilling ||
-          existingHandle.isRetiring ||
-          existingHandle.record.outcome) &&
-        retryCount < 30
-      ) {
-        if (
-          retryCount === 15 &&
-          (existingHandle.isKilling || existingHandle.isRetiring)
-        ) {
-          existingHandle.kill('SIGKILL')
-        }
-        setTimeout(handleDispatch, 100, req, retryCount + 1, afterUpgrade)
-        return
+  /**
+   * Official J() — refill single held spare when eligible.
+   * Gates: tengu_bg_spare_enable, low-mem, hasDispatched, adoptionComplete ($),
+   * no held/refilling, not closed, default spawnPty, not Windows.
+   */
+  const refillSpare = (): void => {
+    if (
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_bg_spare_enable', true) !==
+      true
+    ) {
+      if (heldSpare) {
+        heldSpare.dispose()
+        heldSpare = null
       }
-      const isDying =
-        existingHandle.isKilling ||
-        existingHandle.isRetiring ||
-        existingHandle.record.outcome
-      log(
-        isDying
-          ? `bg: dispatch ${req.short} dropped — retry budget exhausted (handle still settling)`
-          : `bg: dup dispatch ${req.short} dropped (existing handle still live)`,
-      )
       return
     }
+    const lowMemThreshold = getBgLowMemThresholdBytes()
+    if (lowMemThreshold > 0 && freemem() < lowMemThreshold) {
+      if (heldSpare) {
+        heldSpare.dispose()
+        heldSpare = null
+      }
+      return
+    }
+    // Official: !w || Y || A || z || !$ || !O || !j || windows
+    if (
+      !hasDispatched ||
+      heldSpare ||
+      spareRefilling ||
+      closed ||
+      !adoptionComplete ||
+      !spawnPty ||
+      !usingDefaultSpawnPty ||
+      process.platform === 'win32'
+    ) {
+      return
+    }
+    spareRefilling = true
+    let spawned: HeldSpare | null = null
+    let exitedBeforeAssign = false
+    void spawnSpare({
+      log,
+      onExit: () => {
+        if (spawned === null) {
+          exitedBeforeAssign = true
+          return
+        }
+        if (heldSpare === spawned) {
+          heldSpare = null
+          // Official: only refill if spare lived ≥2s (avoid crash loops)
+          if (Date.now() - spawned.startedAt >= 2000) refillSpare()
+        }
+      },
+    })
+      .then(spare => {
+        spawned = spare
+        if (!spare || closed || exitedBeforeAssign) {
+          spare?.dispose()
+          return
+        }
+        heldSpare = spare
+        logEvent('tengu_bg_spare_spawn', {})
+      })
+      .catch((err: unknown) => {
+        // Official Pw(C) soft-fail for spawn errno; otherwise rethrow path → log
+        log(`bg-spare spawn failed: ${errorMessage(err)}`)
+      })
+      .finally(() => {
+        spareRefilling = false
+      })
+  }
 
-    // Write initial state.json before spawning (official: iO(j, tHH({...}))).
-    // Official fwO: if A8q already seeded state.json, only patch respawnFlags —
-    // do not clobber name/intent/detail/needs with a blank "starting…" shell.
+  // Seed state.json for a dispatch (shared by claim + cold spawn paths).
+  const seedJobState = (req: DispatchRequest): void => {
     const jobDir = getJobDirPath(req.short)
     mkdirSync(jobDir, { recursive: true })
     const now = new Date().toISOString()
@@ -554,8 +604,129 @@ export async function startBgManager(opts?: {
         firstTerminalAt: null,
       })
     }
+  }
 
-    // Spawn new worker
+  // --- Dispatch handler (official M) ---
+  const handleDispatch = (
+    req: DispatchRequest,
+    retryCount = 0,
+    afterUpgrade?: boolean,
+  ): void => {
+    if (closed) return
+    hasDispatched = true
+
+    const existingHandle = handles.get(req.short)
+    if (existingHandle) {
+      if (
+        (existingHandle.isKilling ||
+          existingHandle.isRetiring ||
+          existingHandle.record.outcome) &&
+        retryCount < 30
+      ) {
+        if (
+          retryCount === 15 &&
+          (existingHandle.isKilling || existingHandle.isRetiring)
+        ) {
+          existingHandle.kill('SIGKILL')
+        }
+        setTimeout(handleDispatch, 100, req, retryCount + 1, afterUpgrade)
+        return
+      }
+      const isDying =
+        existingHandle.isKilling ||
+        existingHandle.isRetiring ||
+        existingHandle.record.outcome
+      log(
+        isDying
+          ? `bg: dispatch ${req.short} dropped — retry budget exhausted (handle still settling)`
+          : `bg: dup dispatch ${req.short} dropped (existing handle still live)`,
+      )
+      return
+    }
+
+    // Official: low-mem with live handles → retire settled before spawn
+    const free = freemem()
+    const lowMemThreshold = getBgLowMemThresholdBytes()
+    if (lowMemThreshold > 0 && free < lowMemThreshold && handles.size > 0) {
+      const freeMb = Math.round(free / 1024 / 1024)
+      log(
+        `bg: low memory (${freeMb}MB free) — retiring settled workers before spawning ${req.short}`,
+      )
+      logEvent('tengu_bg_dispatch_low_mem', {
+        free_mb: freeMb,
+        handles: handles.size,
+      })
+      void readPinnedSessions()
+        .catch(() => new Set<string>())
+        .then(pinned => {
+          for (const w of handles.values()) {
+            void w.retireIfSettled(RETIRE_GRACE_MS, pinned).catch(() => {})
+          }
+        })
+    }
+    // Official: spare-source dispatch under low-mem is skipped entirely
+    if (
+      req.source === 'spare' &&
+      lowMemThreshold > 0 &&
+      free < lowMemThreshold
+    ) {
+      log(`bg: low memory — skipping spare dispatch ${req.short}`)
+      return
+    }
+
+    seedJobState(req)
+
+    // Official claim path: held spare + not afterUpgrade + non-exec + version match + feature on
+    if (
+      heldSpare &&
+      !afterUpgrade &&
+      req.launch.mode !== 'exec' &&
+      heldSpare.cliVersion === MACRO.VERSION &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_bg_spare_enable', true) ===
+        true
+    ) {
+      const spare = heldSpare
+      heldSpare = null
+      try {
+        const worker = claimSpare(req, spare, spawnPty, opts?.getAuthSnapshot)
+        handles.set(req.short, worker)
+        wireWorkerLifecycle(
+          handles,
+          worker,
+          onKeepAliveChange,
+          pendingSettleWrites,
+          log,
+        )
+        onKeepAliveChange()
+        logEvent('tengu_bg_spare_claim', {
+          age_ms: Date.now() - spare.startedAt,
+        })
+        log(`bg claimed-spare ${req.short} (${req.source})`)
+        refillSpare()
+        return
+      } catch (err) {
+        // Official: tengu_bg_spare_claim_fail + dispose spare, fall through to cold
+        const code =
+          err && typeof err === 'object' && 'code' in err
+            ? String((err as { code?: unknown }).code)
+            : undefined
+        // Official reason: enoent|econnrefused|error|unknown (string metadata
+        // not accepted by local logEvent — keep reason in log line)
+        const reason =
+          code === 'ENOENT'
+            ? 'enoent'
+            : code === 'ECONNREFUSED'
+              ? 'econnrefused'
+              : err instanceof Error
+                ? 'error'
+                : 'unknown'
+        logEvent('tengu_bg_spare_claim_fail', {})
+        log(`bg-spare claim failed (${reason}): ${errorMessage(err)}`)
+        spare.dispose()
+      }
+    }
+
+    // Cold spawn (official zF.spawn)
     const worker = BgWorker.spawn(
       req,
       spawnPty,
@@ -571,6 +742,7 @@ export async function startBgManager(opts?: {
       log,
     )
     onKeepAliveChange()
+    refillSpare()
     log(`bg spawned ${req.short} (${req.source})`)
   }
 
@@ -589,10 +761,11 @@ export async function startBgManager(opts?: {
   // --- Ensure directories ---
   await ensureDaemonDirs()
 
-  // Create pty/ and rv/ directories
+  // Create pty/ rv/ spare/ directories (official non-windows)
   if (process.platform !== 'win32') {
     await mkdir(getRvDir(), { recursive: true, mode: 0o700 }).catch(() => {})
     await mkdir(getPtyDir(), { recursive: true, mode: 0o700 }).catch(() => {})
+    await mkdir(getSpareDir(), { recursive: true, mode: 0o700 }).catch(() => {})
   }
 
   // --- Clean stale dirs ---
@@ -618,9 +791,11 @@ export async function startBgManager(opts?: {
   )
 
   controlSocket.onLeaseChange.subscribe(onKeepAliveChange)
+  // Official: first lease arms hasDispatched then J() refill
   controlSocket.onLeaseChange.subscribe(() => {
     if (controlSocket.leaseCount() > 0 && !hasDispatched) {
       hasDispatched = true
+      refillSpare()
     }
   })
 
@@ -700,9 +875,13 @@ export async function startBgManager(opts?: {
     log(`bg adopt: adopted=${adopted} respawned=${respawned} dead=${dead}`)
   }
 
-  // Reap orphan PTY hosts not in roster
+  // Reap orphan PTY hosts not in roster (official GmO)
   if (!roster.parseFailed) {
     await reapOrphanPtyHosts(handles, log)
+  }
+  // Reap orphan spare socks (official f3q) — only when roster parse ok
+  if (!roster.parseFailed) {
+    await reapOrphanSpares(handles, log)
   }
 
   // Write initial roster
@@ -718,9 +897,11 @@ export async function startBgManager(opts?: {
 
   adoptionComplete = true
   onKeepAliveChange()
+  // Official: if (q.size > 0) w = !0; J()
   if (handles.size > 0) hasDispatched = true
+  refillSpare()
 
-  // --- Periodic tick: retire idle workers ---
+  // --- Periodic tick: retire idle workers; pass refillSpare like official J ---
   let lastTickAt = Date.now()
   const tickTimer = setInterval(async () => {
     const now = Date.now()
@@ -733,6 +914,8 @@ export async function startBgManager(opts?: {
         w.shiftGraceClocksForward(drift)
       }
       onKeepAliveChange()
+      // Official still calls E() (J/refill) after clock shift
+      refillSpare()
       return
     }
 
@@ -754,6 +937,8 @@ export async function startBgManager(opts?: {
     )
 
     onKeepAliveChange()
+    // Official: E() = J at end of tick
+    refillSpare()
   }, TICK_INTERVAL_MS)
   tickTimer.unref()
 
@@ -775,6 +960,11 @@ export async function startBgManager(opts?: {
       closed = true
       clearInterval(tickTimer)
       watcher.close()
+      // Official: dispose held spare on close
+      if (heldSpare) {
+        heldSpare.dispose()
+        heldSpare = null
+      }
       await controlSocket.close()
       for (const w of handles.values()) w.stop()
       await Promise.allSettled([...pendingSettleWrites])

@@ -377,17 +377,61 @@ async function runSupervisor(
 
   const startedAtMs = Date.now()
   // Official daemon.lock (EvK) — KF asK / oAO ENOCONN probe.
-  const { writeDaemonLock, clearDaemonLockIfOwned } = await import(
-    './daemonLock.js'
-  )
+  // Official tG4: claim slot (bW + optional yield) BEFORE write.
+  const {
+    writeDaemonLock,
+    clearDaemonLockIfOwned,
+    claimDaemonSupervisorSlot,
+    detectDaemonLockRace,
+  } = await import('./daemonLock.js')
+  const origin = lockOpts?.origin ?? 'service'
   const lockOwner = { pid: process.pid, startedAt: startedAtMs }
-  await writeDaemonLock({
+
+  const slot = await claimDaemonSupervisorSlot({
+    origin,
+    log: msg => console.log(`[daemon] ${msg}`),
+  })
+  if (!slot.ok) {
+    // Official: yield failure → e_('daemon_start','daemon_start_yield_failed');
+    // otherwise SH('daemon_start') and exit 1.
+    if (slot.askedYield) {
+      logEvent('tengu_daemon_start_yield_failed', {})
+    }
+    process.exitCode = 1
+    return
+  }
+
+  const lockWritten = await writeDaemonLock({
     pid: lockOwner.pid,
     version: MACRO.VERSION,
     startedAt: lockOwner.startedAt,
-    origin: lockOpts?.origin ?? 'service',
+    origin,
     ...(lockOpts?.spawnedBy ? { spawnedBy: lockOpts.spawnedBy } : {}),
   })
+  if (!lockWritten) {
+    const raced = await detectDaemonLockRace(lockOwner)
+    if (raced) {
+      console.log(
+        `[daemon] another daemon won the lock race (pid=${raced.pid}) — exiting`,
+      )
+      process.exitCode = 1
+      return
+    }
+    console.error('[daemon] failed to write daemon.lock — exiting')
+    process.exitCode = 1
+    return
+  }
+  // Official: re-read after write; if another live pid owns it, exit.
+  {
+    const raced = await detectDaemonLockRace(lockOwner)
+    if (raced) {
+      console.log(
+        `[daemon] another daemon won the lock race (pid=${raced.pid}) — exiting`,
+      )
+      process.exitCode = 1
+      return
+    }
+  }
 
   // Write daemon state file so other CLI processes can query/stop us
   writeDaemonState({
@@ -634,24 +678,107 @@ async function runBgManagerStandalone(opts?: {
   spawnedBy?: string
 }): Promise<void> {
   const { startBgManager } = await import('./bgManager.js')
-  const { writeDaemonLock, clearDaemonLockIfOwned } = await import(
-    './daemonLock.js'
-  )
+  const {
+    writeDaemonLock,
+    clearDaemonLockIfOwned,
+    claimDaemonSupervisorSlot,
+    detectDaemonLockRace,
+  } = await import('./daemonLock.js')
 
   console.log('[daemon] bg-manager starting...')
 
   const startedAt = Date.now()
   const lockOwner = { pid: process.pid, startedAt }
-  await writeDaemonLock({
+  const origin = opts?.origin ?? 'transient'
+
+  // Official tG4: claim slot before write (transient never displaces a live lock).
+  const slot = await claimDaemonSupervisorSlot({
+    origin,
+    log: msg => console.log(`[daemon] ${msg}`),
+  })
+  if (!slot.ok) {
+    if (slot.askedYield) {
+      logEvent('tengu_daemon_start_yield_failed', {})
+    }
+    process.exitCode = 1
+    return
+  }
+
+  const lockWritten = await writeDaemonLock({
     pid: lockOwner.pid,
     version: MACRO.VERSION,
     startedAt: lockOwner.startedAt,
-    origin: opts?.origin ?? 'transient',
+    origin,
     ...(opts?.spawnedBy ? { spawnedBy: opts.spawnedBy } : {}),
   })
+  if (!lockWritten) {
+    const raced = await detectDaemonLockRace(lockOwner)
+    if (raced) {
+      console.log(
+        `[daemon] another daemon won the lock race (pid=${raced.pid}) — exiting`,
+      )
+      process.exitCode = 1
+      return
+    }
+    console.error('[daemon] failed to write daemon.lock — exiting')
+    process.exitCode = 1
+    return
+  }
+  {
+    const raced = await detectDaemonLockRace(lockOwner)
+    if (raced) {
+      console.log(
+        `[daemon] another daemon won the lock race (pid=${raced.pid}) — exiting`,
+      )
+      process.exitCode = 1
+      return
+    }
+  }
 
-  const manager = await startBgManager({
+  // Official Q — ownership-gated CvK; once only.
+  let lockCleared = false
+  const clearOwnedLock = async (): Promise<void> => {
+    if (lockCleared) return
+    lockCleared = true
+    await clearDaemonLockIfOwned(lockOwner)
+  }
+
+  // manager assigned after startBgManager; shutdown/onYield close over the let.
+  let manager: Awaited<ReturnType<typeof startBgManager>> | null = null
+  let shuttingDown = false
+  const shutdown = async (reason?: string): Promise<void> => {
+    if (shuttingDown) return
+    shuttingDown = true
+    console.log(
+      `[daemon] bg-manager shutting down${reason ? ` (${reason})` : ''}...`,
+    )
+    try {
+      await manager?.close()
+    } catch {
+      // best-effort
+    }
+    removeDaemonState('bg-manager')
+    await clearOwnedLock()
+    process.exit(0)
+  }
+
+  // Official tG4 h(): only transient yields; service/foreground refuse.
+  // Workers stay on disk for re-adoption by the successor supervisor.
+  const onYield = (): boolean => {
+    if (origin !== 'transient') return false
+    if (!shuttingDown) {
+      console.log(
+        '[daemon] yielding to a foreground/service daemon — bg workers will be re-adopted',
+      )
+      logEvent('tengu_daemon_yield', {})
+      void shutdown('yield')
+    }
+    return true
+  }
+
+  manager = await startBgManager({
     onLog: (msg: string) => console.log(`  ${msg}`),
+    onYield,
   })
 
   console.log('[daemon] bg-manager ready')
@@ -665,31 +792,17 @@ async function runBgManagerStandalone(opts?: {
     lastStatus: 'running',
   })
 
-  // Official Q — ownership-gated CvK; once only.
-  let lockCleared = false
-  const clearOwnedLock = async (): Promise<void> => {
-    if (lockCleared) return
-    lockCleared = true
-    await clearDaemonLockIfOwned(lockOwner)
-  }
-
-  const shutdown = async () => {
-    console.log('[daemon] bg-manager shutting down...')
-    await manager.close()
-    removeDaemonState('bg-manager')
-    await clearOwnedLock()
-    process.exit(0)
-  }
   process.on('SIGTERM', () => {
-    void shutdown()
+    void shutdown('SIGTERM')
   })
   process.on('SIGINT', () => {
-    void shutdown()
+    void shutdown('SIGINT')
   })
 
   // Keep alive
   const keepAlive = setInterval(() => {
     // Transient mode: exit if no active sessions for 30s
+    if (!manager) return
     const hasActive = [...manager.handles.values()].some(h => !h.record.outcome)
     if (!hasActive && manager.handles.size > 0) {
       // All sessions completed — stay alive for a bit in case new dispatches come

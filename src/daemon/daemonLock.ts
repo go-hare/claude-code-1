@@ -206,3 +206,155 @@ export function buildSpawnedByPayload(input?: {
     pid: input?.pid ?? process.pid,
   })
 }
+
+/**
+ * Official tG4 pre-write gate: only a non-transient starter may ask a
+ * live transient daemon to yield.
+ */
+export function shouldRequestDaemonYield(
+  existingOrigin: string | undefined,
+  newOrigin: string,
+): boolean {
+  return existingOrigin === 'transient' && newOrigin !== 'transient'
+}
+
+/**
+ * Official "another daemon is already running …" stderr/log line (tG4).
+ */
+export function buildAnotherDaemonRunningMessage(input: {
+  pid: number
+  version: string
+  existingOrigin?: string
+  newOrigin: string
+  askedYield: boolean
+  platform?: NodeJS.Platform
+}): string {
+  const originLabel = input.existingOrigin ?? 'unknown'
+  let why: string
+  if (input.askedYield) {
+    why = `origin=${originLabel}; asked it to yield but the handover failed (see above)`
+  } else if (input.newOrigin === 'transient') {
+    why = `origin=${originLabel}; an on-demand daemon never displaces a running one`
+  } else {
+    why = `origin=${originLabel}; only a transient daemon can be displaced`
+  }
+  const stopHint =
+    (input.platform ?? process.platform) === 'win32'
+      ? `Stop it with \`taskkill /PID ${input.pid}\`, then retry.`
+      : 'Run `claude daemon stop` to stop it, then retry.'
+  return `another daemon is already running (pid=${input.pid}, version=${input.version}, ${why}). ${stopHint}`
+}
+
+export type ClaimDaemonSupervisorSlotResult =
+  | { ok: true }
+  | { ok: false; reason: string; askedYield: boolean }
+
+/**
+ * Official tG4 pre-SvK arbitration:
+ *   1. bW() alive lock
+ *   2. if lock is transient and we are not → control op=yield, wait ≤5s
+ *   3. if lock still held → refuse (never double-write over a live daemon)
+ *
+ * Does not write the lock — caller writes after ok.
+ */
+export async function claimDaemonSupervisorSlot(opts: {
+  origin: string
+  configDir?: string
+  yieldTimeoutMs?: number
+  log?: (msg: string) => void
+  /** Injected for tests; default sends control `yield`. */
+  requestYield?: () => Promise<{
+    ok: boolean
+    yielding?: boolean
+    error?: string
+  }>
+}): Promise<ClaimDaemonSupervisorSlotResult> {
+  const log = opts.log ?? (() => {})
+  const yieldTimeoutMs = opts.yieldTimeoutMs ?? 5000
+  let lock = await readAliveDaemonLock(opts.configDir)
+  let askedYield = false
+
+  if (lock && shouldRequestDaemonYield(lock.origin, opts.origin)) {
+    askedYield = true
+    log(
+      `transient daemon running (pid=${lock.pid}, origin=transient) — asking it to yield to origin=${opts.origin}`,
+    )
+
+    const requestYield =
+      opts.requestYield ??
+      (async () => {
+        const { sendControlRequest } = await import('./controlSocketClient.js')
+        const { PROTO_VERSION } = await import('./bgWorker.js')
+        const resp = await sendControlRequest(
+          { proto: PROTO_VERSION, op: 'yield' },
+          { timeoutMs: 2000 },
+        )
+        if (resp.ok && resp.op === 'yield') {
+          return { ok: true, yielding: resp.yielding === true }
+        }
+        return {
+          ok: false,
+          error:
+            typeof resp.error === 'string'
+              ? resp.error
+              : resp.code
+                ? String(resp.code)
+                : 'yield failed',
+        }
+      })
+
+    const yieldResp = await requestYield()
+    if (yieldResp.ok && yieldResp.yielding) {
+      const deadline = Date.now() + yieldTimeoutMs
+      while (lock && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 100))
+        lock = await readAliveDaemonLock(opts.configDir)
+      }
+      if (lock) {
+        log('yield acked but lock still held after 5s — refusing to start')
+      }
+    } else if (yieldResp.ok) {
+      log('existing daemon refused to yield (it reports origin!=transient)')
+    } else {
+      log(
+        `existing daemon unreachable on control socket (${yieldResp.error ?? 'unknown'}); not taking over`,
+      )
+    }
+  }
+
+  lock = await readAliveDaemonLock(opts.configDir)
+  if (lock) {
+    const reason = buildAnotherDaemonRunningMessage({
+      pid: lock.pid,
+      version: lock.version,
+      existingOrigin: lock.origin,
+      newOrigin: opts.origin,
+      askedYield,
+    })
+    log(reason)
+    return { ok: false, reason, askedYield }
+  }
+
+  return { ok: true }
+}
+
+/**
+ * Official post-SvK race check: if another live pid owns the lock after
+ * our write attempt, exit rather than run a second supervisor.
+ */
+export async function detectDaemonLockRace(
+  owner: { pid: number; startedAt: number },
+  configDir?: string,
+): Promise<DaemonLockData | null> {
+  const lock = await readDaemonLock(configDir)
+  if (!lock) return null
+  if (lock.pid === owner.pid && lock.startedAt === owner.startedAt) {
+    return null
+  }
+  try {
+    process.kill(lock.pid, 0)
+  } catch {
+    return null
+  }
+  return lock
+}
