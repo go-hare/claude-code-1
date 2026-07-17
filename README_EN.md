@@ -37,6 +37,7 @@ The published npm package is **`@go-hare/claude-code`** (current line: **2.6.35*
 
 | Range | Highlights |
 | ----- | ---------- |
+| **2.6.36** | Windows taskkill/shell probes use windowsHide (no flash on Bash abort/exit; LOCAL) |
 | **2.6.35** | Windows packaged rg.exe main path uses spawn+windowsHide (no conhost flash on Grep/Glob) |
 | **2.6.34** | Jump-to-bottom spinner resume; agents left-arrow / daemon skew; CSI u fullwidth colon |
 | **2.6.32–2.6.30** | Alt-screen double-EXIT flash fix on Windows Terminal; fullscreen/wheel densable vs official 2.1.210 |
@@ -60,7 +61,7 @@ claude agents
 claude update
 ```
 
-If install/update fails: `npm rm -g @go-hare/claude-code` then `npm i -g @go-hare/claude-code@latest` (or pin e.g. `@2.6.35`).
+If install/update fails: `npm rm -g @go-hare/claude-code` then `npm i -g @go-hare/claude-code@latest` (or pin e.g. `@2.6.36`).
 
 > Older docs that say `npm i -g claude-code` do **not** match this fork’s publish stream — use `@go-hare/claude-code`.
 

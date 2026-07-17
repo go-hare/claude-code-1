@@ -79,6 +79,7 @@
 
 | 版本区间 | 要点 |
 | -------- | ---- |
+| **2.6.36** | Windows taskkill/shell 探测 windowsHide，避免 Bash 中断与 /exit 闪窗（LOCAL） |
 | **2.6.35** | Windows 打包 rg.exe 主路径 spawn+windowsHide，避免 Grep/Glob 闪 conhost |
 | **2.6.34** | Jump-to-bottom 后立即恢复 spinner；agents 左箭头/daemon skew；CSI u 全角冒号等 |
 | **2.6.32–2.6.30** | alt-screen 双次 EXIT 防 Windows Terminal 多层闪窗；fullscreen / 滚轮 densable 对齐官方 2.1.210 |
@@ -161,7 +162,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=test-my-key \
 claude --remote-control
 ```
 
-> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.35`。
+> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.36`。
 >
 > 旧文档里的全局包名 `claude-code` 已不再对应本仓库发布流；请使用 `@go-hare/claude-code`。
 
