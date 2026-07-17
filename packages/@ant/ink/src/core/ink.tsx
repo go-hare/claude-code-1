@@ -14,6 +14,7 @@ import type { CursorDeclaration, CursorDeclarationSetter } from '../components/C
 import { FRAME_INTERVAL_MS } from './constants.js';
 import * as dom from './dom.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
+import { PasteEvent } from './events/paste-event.js';
 import { FocusManager } from './focus.js';
 import { emptyFrame, type Frame, type FrameEvent } from './frame.js';
 import { dispatchClick, dispatchHover } from './hit-test.js';
@@ -1665,6 +1666,17 @@ export default class Ink {
       }
     }
   }
+
+  /**
+   * Official densable 2.1.210 dispatchPasteEvent:
+   *   focusManager.activeElement ?? root → new PasteEvent(text) → dispatchDiscrete
+   * Bracketed paste is a separate event from keydown (lag: isPasted branch).
+   */
+  dispatchPasteEvent(text: string): void {
+    const target = this.focusManager.activeElement ?? this.rootNode;
+    const event = new PasteEvent(text);
+    dispatcher.dispatchDiscrete(target, event);
+  }
   /**
    * Look up the URL at (col, row) in the current front frame. Checks for
    * an OSC 8 hyperlink first, then falls back to scanning the row for a
@@ -1850,6 +1862,7 @@ export default class Ink {
         onStdinResume={this.reassertTerminalModes}
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
+        dispatchPasteEvent={this.dispatchPasteEvent}
         isScreenReaderEnabled={this.isScreenReaderEnabled || this.accessibilityMode}
       >
         <TerminalWriteProvider value={this.writeRaw}>{node}</TerminalWriteProvider>

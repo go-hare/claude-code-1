@@ -6,6 +6,7 @@ import type {
   ClickEvent,
   FocusEvent,
   KeyboardEvent,
+  PasteEvent,
   Styles,
   TextStyles,
   DOMElement,
@@ -27,8 +28,12 @@ declare global {
         onMouseLeave?: () => void
         onKeyDown?: (event: KeyboardEvent) => void
         onKeyDownCapture?: (event: KeyboardEvent) => void
+        onPaste?: (event: PasteEvent) => void
+        onPasteCapture?: (event: PasteEvent) => void
         style?: Styles
         stickyScroll?: boolean
+        /** Official 2.1.207: default true; false disables non-sticky growth follow. */
+        followGrowth?: boolean
         children?: ReactNode
       }
       'ink-text': {

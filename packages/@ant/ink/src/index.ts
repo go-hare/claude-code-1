@@ -128,8 +128,14 @@ export {
   type TerminalFocusEventType,
 } from './core/events/terminal-focus-event.js'
 export { KeyboardEvent } from './core/events/keyboard-event.js'
+export { PasteEvent } from './core/events/paste-event.js'
 export { FocusEvent } from './core/events/focus-event.js'
-export { FocusManager } from './core/focus.js'
+export { FocusManager, getFocusManager } from './core/focus.js'
+export type {
+  ParsedKey,
+  ParsedInput,
+  ParsedMouse,
+} from './core/parse-keypress.js'
 export { Ansi } from './core/Ansi.js'
 export { stringWidth } from './core/stringWidth.js'
 export { default as wrapText } from './core/wrap-text.js'
@@ -239,6 +245,7 @@ export {
 // ============================================================
 export { default as useApp } from './hooks/use-app.js'
 export { default as useInput } from './hooks/use-input.js'
+export { useFocusReclaim } from './hooks/use-focus-reclaim.js'
 export { useAnimationFrame } from './hooks/use-animation-frame.js'
 export { useAnimationTimer, useInterval } from './hooks/use-interval.js'
 export { useSelection, useHasSelection } from './hooks/use-selection.js'

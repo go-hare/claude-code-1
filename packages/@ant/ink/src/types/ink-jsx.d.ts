@@ -12,6 +12,7 @@ import type { ReactNode, Ref } from 'react'
 import type { ClickEvent } from '../core/events/click-event.js'
 import type { FocusEvent } from '../core/events/focus-event.js'
 import type { KeyboardEvent } from '../core/events/keyboard-event.js'
+import type { PasteEvent } from '../core/events/paste-event.js'
 import type { Styles, TextStyles } from '../core/styles.js'
 import type { DOMElement } from '../core/dom.js'
 
@@ -31,6 +32,8 @@ declare module 'react' {
         onMouseLeave?: () => void
         onKeyDown?: (event: KeyboardEvent) => void
         onKeyDownCapture?: (event: KeyboardEvent) => void
+        onPaste?: (event: PasteEvent) => void
+        onPasteCapture?: (event: PasteEvent) => void
         style?: Styles
         stickyScroll?: boolean
         /** Official 2.1.207: default true; false disables non-sticky growth follow. */

@@ -245,12 +245,8 @@ export type BaseInputState = {
   /** Character offset in the full text where the viewport ends (text.length when no windowing). */
   viewportCharEnd: number
 
-  // For paste handling
+  // For paste handling (UI feedback while image clipboard / path paste runs)
   isPasting?: boolean
-  pasteState?: {
-    chunks: string[]
-    timeoutId: ReturnType<typeof setTimeout> | null
-  }
 }
 
 /**

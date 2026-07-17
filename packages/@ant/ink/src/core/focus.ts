@@ -6,22 +6,37 @@ const MAX_FOCUS_STACK = 32
 /**
  * DOM-like focus manager for the Ink terminal UI.
  *
- * Pure state — tracks activeElement and a focus stack. Has no reference
- * to the tree; callers pass the root when tree walks are needed.
- *
- * Stored on the root DOMElement so any node can reach it by walking
- * parentNode (like browser's `node.ownerDocument`).
+ * Official densable 2.1.210 FocusManager:
+ * - activeElement + focusStack + autoFocusStack
+ * - subscribe/notify so inputs can reclaim focus (nR)
+ * - Stored on the root DOMElement (like browser ownerDocument)
  */
 export class FocusManager {
   activeElement: DOMElement | null = null
   private dispatchFocusEvent: (target: DOMElement, event: FocusEvent) => boolean
   private enabled = true
   private focusStack: DOMElement[] = []
+  private autoFocusStack: DOMElement[] = []
+  private listeners = new Set<() => void>()
 
   constructor(
     dispatchFocusEvent: (target: DOMElement, event: FocusEvent) => boolean,
   ) {
     this.dispatchFocusEvent = dispatchFocusEvent
+  }
+
+  /** Official: subscribe to focus changes (used by nR reclaim hook). */
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      listener()
+    }
   }
 
   focus(node: DOMElement): void {
@@ -39,6 +54,7 @@ export class FocusManager {
     }
     this.activeElement = node
     this.dispatchFocusEvent(node, new FocusEvent('focus', previous))
+    this.notify()
   }
 
   blur(): void {
@@ -47,6 +63,7 @@ export class FocusManager {
     const previous = this.activeElement
     this.activeElement = null
     this.dispatchFocusEvent(previous, new FocusEvent('blur', null))
+    this.notify()
   }
 
   /**
@@ -57,6 +74,9 @@ export class FocusManager {
   handleNodeRemoved(node: DOMElement, root: DOMElement): void {
     // Remove the node and any descendants from the stack
     this.focusStack = this.focusStack.filter(
+      n => n !== node && isInTree(n, root),
+    )
+    this.autoFocusStack = this.autoFocusStack.filter(
       n => n !== node && isInTree(n, root),
     )
 
@@ -76,12 +96,32 @@ export class FocusManager {
       if (isInTree(candidate, root)) {
         this.activeElement = candidate
         this.dispatchFocusEvent(candidate, new FocusEvent('focus', removed))
+        this.notify()
         return
       }
     }
+
+    // Official densable: fall back to last autoFocus node
+    const auto = this.autoFocusStack.at(-1)
+    if (auto && isInTree(auto, root)) {
+      this.activeElement = auto
+      this.dispatchFocusEvent(auto, new FocusEvent('focus', removed))
+    }
+    this.notify()
+  }
+
+  /** Official pushAutoFocusFallback — track autoFocus nodes for restore. */
+  pushAutoFocusFallback(node: DOMElement): void {
+    if (this.autoFocusStack.at(-1) === node) return
+    const idx = this.autoFocusStack.indexOf(node)
+    if (idx !== -1) this.autoFocusStack.splice(idx, 1)
+    this.autoFocusStack.push(node)
+    if (this.autoFocusStack.length > MAX_FOCUS_STACK)
+      this.autoFocusStack.shift()
   }
 
   handleAutoFocus(node: DOMElement): void {
+    this.pushAutoFocusFallback(node)
     this.focus(node)
   }
 
@@ -175,6 +215,7 @@ export function getRootNode(node: DOMElement): DOMElement {
 /**
  * Walk up to root and return its FocusManager.
  * Like browser's `node.ownerDocument` — focus belongs to the root.
+ * Official densable: `Bhe(node)`.
  */
 export function getFocusManager(node: DOMElement): FocusManager {
   return getRootNode(node).focusManager!

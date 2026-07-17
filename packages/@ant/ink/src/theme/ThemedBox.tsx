@@ -4,6 +4,7 @@ import type { DOMElement } from '../core/dom.js';
 import type { ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
+import type { PasteEvent } from '../core/events/paste-event.js';
 import type { Color, Styles } from '../core/styles.js';
 import { getTheme, type Theme } from './theme-types.js';
 import { useTheme } from './ThemeProvider.js';
@@ -42,6 +43,9 @@ export type Props = BaseStylesWithoutColors &
     onBlurCapture?: (event: FocusEvent) => void;
     onKeyDown?: (event: KeyboardEvent) => void;
     onKeyDownCapture?: (event: KeyboardEvent) => void;
+    /** Official densable: bracketed paste → PasteEvent on focused node. */
+    onPaste?: (event: PasteEvent) => void;
+    onPasteCapture?: (event: PasteEvent) => void;
     onMouseEnter?: () => void;
     onMouseLeave?: () => void;
   };

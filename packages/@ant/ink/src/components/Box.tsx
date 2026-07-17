@@ -4,6 +4,7 @@ import type { DOMElement } from '../core/dom.js';
 import type { ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
+import type { PasteEvent } from '../core/events/paste-event.js';
 import type { Styles } from '../core/styles.js';
 import * as warn from '../core/warn.js';
 
@@ -33,6 +34,12 @@ export type Props = Except<Styles, 'textWrap'> & {
   onBlurCapture?: (event: FocusEvent) => void;
   onKeyDown?: (event: KeyboardEvent) => void;
   onKeyDownCapture?: (event: KeyboardEvent) => void;
+  /**
+   * Official densable: bracketed paste arrives as PasteEvent (not keydown).
+   * Ink.dispatchPasteEvent targets the focused node.
+   */
+  onPaste?: (event: PasteEvent) => void;
+  onPasteCapture?: (event: PasteEvent) => void;
   /**
    * Fired when the mouse moves into this Box's rendered rect. Like DOM
    * `mouseenter`, does NOT bubble — moving between children does not
@@ -65,6 +72,8 @@ function Box({
   onMouseLeave,
   onKeyDown,
   onKeyDownCapture,
+  onPaste,
+  onPasteCapture,
   ...style
 }: PropsWithChildren<Props>): React.ReactNode {
   // Warn if spacing values are not integers to prevent fractional layout dimensions
@@ -100,6 +109,8 @@ function Box({
       onMouseLeave={onMouseLeave}
       onKeyDown={onKeyDown as unknown as (event: React.KeyboardEvent<Element>) => void}
       onKeyDownCapture={onKeyDownCapture as unknown as (event: React.KeyboardEvent<Element>) => void}
+      onPaste={onPaste}
+      onPasteCapture={onPasteCapture}
       style={{
         flexWrap,
         flexDirection,

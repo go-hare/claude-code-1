@@ -136,6 +136,8 @@ type Props = {
   // Dispatch a keyboard event through the DOM tree. Called for each
   // parsed key alongside the legacy EventEmitter path.
   readonly dispatchKeyboardEvent: (parsedKey: ParsedKey) => void;
+  // Official densable lag: bracketed paste → PasteEvent on focused node.
+  readonly dispatchPasteEvent: (text: string) => void;
 };
 
 // Multi-click detection thresholds. 500ms is the macOS default; a small
@@ -718,12 +720,26 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
       continue;
     }
 
-    app.handleInput(sequence);
+    // Official densable lag (2.1.210):
+    //   if (!isPasted) handleInput(seq)          // only exitOnCtrlC side-effect
+    //   if (isPasted) dispatchPasteEvent(seq)
+    //   else if (wheel/mouse) dispatchWheelEvent
+    //   else dispatchKeyboardEvent
+    // Bracketed paste is a separate PasteEvent — never keydown insert.
+    // Fork keeps InputEvent emit after keyboard for useKeybindings/chords
+    // (official has no peer emitter on this path).
+    if (!item.isPasted) {
+      app.handleInput(sequence);
+    }
+    if (item.isPasted) {
+      app.props.dispatchPasteEvent(item.sequence ?? '');
+      continue;
+    }
+    // Official: keyboard DOM path first (onKeyDown / focus tree).
+    app.props.dispatchKeyboardEvent(item);
+    // Fork-only: legacy InputEvent for useInput / useKeybindings.
     const event = new InputEvent(item);
     app.internal_eventEmitter.emit('input', event);
-
-    // Also dispatch through the DOM tree so onKeyDown handlers fire.
-    app.props.dispatchKeyboardEvent(item);
   }
 }
 

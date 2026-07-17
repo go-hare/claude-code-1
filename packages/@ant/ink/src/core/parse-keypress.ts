@@ -83,9 +83,7 @@ const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/
 //   /^\[M[\x60-\x7f][\x20-\uffff]{2}$/  X10 wheel payload
 // Anything else (bursts, incomplete, param residue) stays as text; InputEvent
 // sji (`[...input].length === 1`) and fag pure-burst empty multi-char inserts.
-// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const ORPHAN_SGR_WHOLE_TOKEN_RE = /^\[<\d+;\d+;\d+[Mm]$/
-// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE = /^\[M[\u0060-\u007f][\u0020-\uffff]{2}$/
 
 /**
@@ -688,9 +686,7 @@ export function parseMultipleKeypresses(
         // ESC stays in the tokenizer buffer until NORMAL_TIMEOUT flush —
         // then we hold the SGR body in pendingSgrPrefix (extra vs densable).
         {
-          // biome-ignore lint/suspicious/noControlCharactersInRegex: orphan mouse peel
           const ORPHAN_SGR_PREFIX_RE = /^\[<\d+;\d+;\d+[Mm]/
-          // biome-ignore lint/suspicious/noControlCharactersInRegex: orphan mouse peel
           const ORPHAN_X10_WHEEL_PREFIX_RE =
             /^\[M[\u0060-\u007f][\u0020-\uffff]{2}/
           // Complete held incomplete SGR with a leading M/m, or absorb pure

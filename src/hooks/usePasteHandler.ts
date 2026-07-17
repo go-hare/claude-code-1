@@ -2,7 +2,8 @@ import { basename } from 'path'
 import React from 'react'
 import { logError } from 'src/utils/log.js'
 import { useDebounceCallback } from 'usehooks-ts'
-import type { InputEvent, Key } from '@anthropic/ink'
+import { KeyboardEvent } from '@anthropic/ink'
+import type { ParsedKey } from '@anthropic/ink'
 import {
   getImageFromClipboard,
   isImageFilePath,
@@ -13,11 +14,11 @@ import type { ImageDimensions } from '../utils/imageResizer.js'
 import { getPlatform } from '../utils/platform.js'
 
 const CLIPBOARD_CHECK_DEBOUNCE_MS = 50
-const PASTE_COMPLETION_TIMEOUT_MS = 100
 
 type PasteHandlerProps = {
   onPaste?: (text: string) => void
-  onInput: (input: string, key: Key, event?: InputEvent) => void
+  /** Official densable d7r: underlying KeyboardEvent handler after paste guards. */
+  handleKeyDown: (event: KeyboardEvent) => void
   onImagePaste?: (
     base64Image: string,
     mediaType?: string,
@@ -27,37 +28,49 @@ type PasteHandlerProps = {
   ) => void
 }
 
+/**
+ * Official densable 2.1.210 `d7r`:
+ *   { handleKeyDown, handlePaste, isPasting } = d7r({ onPaste, handleKeyDown, onImagePaste })
+ *
+ * - handlePaste(PasteEvent): bracketed paste → image paths / clipboard / onPaste
+ * - handleKeyDown wraps typed keys: swallow return while pasting; large
+ *   non-bracketed key payloads (>pkt=800) route as paste
+ * - empty paste → macOS/WSL clipboard image
+ * - mid-paste Enter deferred then replayed via `_()` after text paste
+ */
 export function usePasteHandler({
   onPaste,
-  onInput,
+  handleKeyDown: innerHandleKeyDown,
   onImagePaste,
 }: PasteHandlerProps): {
-  wrappedOnInput: (input: string, key: Key, event: InputEvent) => void
-  pasteState: {
-    chunks: string[]
-    timeoutId: ReturnType<typeof setTimeout> | null
-  }
+  handleKeyDown: (event: KeyboardEvent) => void
+  handlePaste: (event: { text: string; preventDefault: () => void }) => void
   isPasting: boolean
 } {
-  const [pasteState, setPasteState] = React.useState<{
-    chunks: string[]
-    timeoutId: ReturnType<typeof setTimeout> | null
-  }>({ chunks: [], timeoutId: null })
   const [isPasting, setIsPasting] = React.useState(false)
   const isMountedRef = React.useRef(true)
-  // Mirrors pasteState.timeoutId but updated synchronously. When paste + a
-  // keystroke arrive in the same stdin chunk, both wrappedOnInput calls run
-  // in the same discreteUpdates batch before React commits — the second call
-  // reads stale pasteState.timeoutId (null) and takes the onInput path. If
-  // that key is Enter, it submits the old input and the paste is lost.
+  // Official d7r: l.current = paste pending; c.current = deferred return
   const pastePendingRef = React.useRef(false)
+  const deferredReturnRef = React.useRef(false)
+  const innerKeyDownRef = React.useRef(innerHandleKeyDown)
+  innerKeyDownRef.current = innerHandleKeyDown
 
+  // Official: Mt()==="macos" / Mt()==="wsl"
   const isMacOS = React.useMemo(() => getPlatform() === 'macos', [])
+  const isWsl = React.useMemo(() => getPlatform() === 'wsl', [])
+  const canClipboardImage = isMacOS || isWsl
 
   React.useEffect(() => {
     return () => {
       isMountedRef.current = false
     }
+  }, [])
+
+  const finishPaste = React.useCallback(() => {
+    if (!isMountedRef.current) return
+    pastePendingRef.current = false
+    deferredReturnRef.current = false
+    setIsPasting(false)
   }, [])
 
   const checkClipboardForImageImpl = React.useCallback(() => {
@@ -69,7 +82,7 @@ export function usePasteHandler({
           onImagePaste(
             imageData.base64,
             imageData.mediaType,
-            undefined, // no filename for clipboard images
+            undefined,
             imageData.dimensions,
           )
         }
@@ -80,225 +93,191 @@ export function usePasteHandler({
         }
       })
       .finally(() => {
-        if (isMountedRef.current) {
-          setIsPasting(false)
-        }
+        finishPaste()
       })
-  }, [onImagePaste])
+  }, [onImagePaste, finishPaste])
 
   const checkClipboardForImage = useDebounceCallback(
     checkClipboardForImageImpl,
     CLIPBOARD_CHECK_DEBOUNCE_MS,
   )
 
-  const resetPasteTimeout = React.useCallback(
-    (currentTimeoutId: ReturnType<typeof setTimeout> | null) => {
-      if (currentTimeoutId) {
-        clearTimeout(currentTimeoutId)
+  /**
+   * Official d7r `g(w)`:
+   *   if (onPaste) onPaste(w)
+   *   else innerHandleKeyDown(new KeyboardEvent({ sequence:w, isPasted:true, name:undefined }))
+   */
+  const deliverText = React.useCallback(
+    (text: string) => {
+      if (onPaste) {
+        onPaste(text)
+        return
       }
-      return setTimeout(
-        (
-          setPasteState,
-          onImagePaste,
-          onPaste,
-          setIsPasting,
-          checkClipboardForImage,
-          isMacOS,
-          pastePendingRef,
-        ) => {
-          pastePendingRef.current = false
-          setPasteState(({ chunks }) => {
-            // Join chunks and filter out orphaned focus sequences
-            // These can appear when focus events split during paste
-            const pastedText = chunks
-              .join('')
-              .replace(/\[I$/, '')
-              .replace(/\[O$/, '')
-
-            // Check if the pasted text contains image file paths
-            // When dragging multiple images, they may come as:
-            // 1. Newline-separated paths (common in some terminals)
-            // 2. Space-separated paths (common when dragging from Finder)
-            // For space-separated paths, we split on spaces that precede absolute paths:
-            // - Unix: space followed by `/` (e.g., `/Users/...`)
-            // - Windows: space followed by drive letter and `:\` (e.g., `C:\Users\...`)
-            // This works because spaces within paths are escaped (e.g., `file\ name.png`)
-            const lines = pastedText
-              .split(/ (?=\/|[A-Za-z]:\\)/)
-              .flatMap(part => part.split('\n'))
-              .filter(line => line.trim())
-            const imagePaths = lines.filter(line => isImageFilePath(line))
-
-            if (onImagePaste && imagePaths.length > 0) {
-              const isTempScreenshot =
-                /\/TemporaryItems\/.*screencaptureui.*\/Screenshot/i.test(
-                  pastedText,
-                )
-
-              // Process all image paths
-              void Promise.all(
-                imagePaths.map(imagePath => tryReadImageFromPath(imagePath)),
-              ).then(results => {
-                const validImages = results.filter(
-                  (r): r is NonNullable<typeof r> => r !== null,
-                )
-
-                if (validImages.length > 0) {
-                  // Successfully read at least one image
-                  for (const imageData of validImages) {
-                    const filename = basename(imageData.path)
-                    onImagePaste(
-                      imageData.base64,
-                      imageData.mediaType,
-                      filename,
-                      imageData.dimensions,
-                      imageData.path,
-                    )
-                  }
-                  // If some paths weren't images, paste them as text
-                  const nonImageLines = lines.filter(
-                    line => !isImageFilePath(line),
-                  )
-                  if (nonImageLines.length > 0 && onPaste) {
-                    onPaste(nonImageLines.join('\n'))
-                  }
-                  setIsPasting(false)
-                } else if (isTempScreenshot && isMacOS) {
-                  // For temporary screenshot files that no longer exist, try clipboard
-                  checkClipboardForImage()
-                } else {
-                  if (onPaste) {
-                    onPaste(pastedText)
-                  }
-                  setIsPasting(false)
-                }
-              })
-              return { chunks: [], timeoutId: null }
-            }
-
-            // If paste is empty (common when trying to paste images with Cmd+V),
-            // check if clipboard has an image (macOS only)
-            if (isMacOS && onImagePaste && pastedText.length === 0) {
-              checkClipboardForImage()
-              return { chunks: [], timeoutId: null }
-            }
-
-            // Handle regular paste
-            if (onPaste) {
-              onPaste(pastedText)
-            }
-            // Reset isPasting state after paste is complete
-            setIsPasting(false)
-            return { chunks: [], timeoutId: null }
-          })
-        },
-        PASTE_COMPLETION_TIMEOUT_MS,
-        setPasteState,
-        onImagePaste,
-        onPaste,
-        setIsPasting,
-        checkClipboardForImage,
-        isMacOS,
-        pastePendingRef,
-      )
+      // No onPaste → synthesize paste-as-key for inner handleKeyDown (insert path).
+      const pasteKey: ParsedKey = {
+        kind: 'key',
+        name: undefined,
+        sequence: text,
+        raw: text,
+        ctrl: false,
+        meta: false,
+        shift: false,
+        option: false,
+        super: false,
+        fn: false,
+        isPasted: true,
+      }
+      innerKeyDownRef.current(new KeyboardEvent(pasteKey))
     },
-    [checkClipboardForImage, isMacOS, onImagePaste, onPaste],
+    [onPaste],
   )
 
-  // Paste detection is now done via the InputEvent's keypress.isPasted flag,
-  // which is set by the keypress parser when it detects bracketed paste mode.
-  // This avoids the race condition caused by having multiple listeners on stdin.
-  // Previously, we had a stdin.on('data') listener here which competed with
-  // the 'readable' listener in App.tsx, causing dropped characters.
+  /**
+   * Official d7r `_()`: after text paste, re-fire return if Enter arrived mid-paste.
+   * Clears pastePending inside the timeout (same tick semantics as densable).
+   */
+  const maybeReplayReturn = React.useCallback(() => {
+    setIsPasting(false)
+    // Defer so React state for the pasted text commits first.
+    setTimeout(() => {
+      if (!isMountedRef.current) return
+      // Official: l.current = !1 always; then if c.current → replay return
+      pastePendingRef.current = false
+      if (!deferredReturnRef.current) return
+      deferredReturnRef.current = false
+      const returnKey: ParsedKey = {
+        kind: 'key',
+        name: 'return',
+        sequence: '\r',
+        raw: '\r',
+        ctrl: false,
+        meta: false,
+        shift: false,
+        option: false,
+        super: false,
+        fn: false,
+        isPasted: false,
+      }
+      innerKeyDownRef.current(new KeyboardEvent(returnKey))
+    }, 0)
+  }, [])
 
-  const wrappedOnInput = (input: string, key: Key, event: InputEvent): void => {
-    // Detect paste from the parsed keypress event.
-    // The keypress parser sets isPasted=true for content within bracketed paste.
-    const isFromPaste = event.keypress.isPasted
-
-    // Official densable sji (2.1.210): InputEvent.input is only a single
-    // codepoint for non-paste keys. Multi-codepoint non-paste payloads
-    // (orphan mouse residue "17;19M", accidental multi-char batches) arrive
-    // as input="". Bracketed paste still keeps the full string on input.
-    // Do NOT re-inflate from keypress.sequence for non-paste — that would
-    // reintroduce the mouse-residue leak official avoids via sji.
-    const text = input
-
-    // If this is pasted content, set isPasting state for UI feedback
-    if (isFromPaste) {
-      setIsPasting(true)
-    }
-
-    // Handle large pastes (>PASTE_THRESHOLD chars)
-    // Usually we get one or two input characters at a time. If we
-    // get more than the threshold, the user has probably pasted.
-    // Unfortunately node batches long pastes, so it's possible
-    // that we would see e.g. 1024 characters and then just a few
-    // more in the next frame that belong with the original paste.
-    // This batching number is not consistent.
-
-    // Handle potential image filenames (even if they're shorter than paste threshold)
-    // When dragging multiple images, they may come as newline-separated or
-    // space-separated paths. Split on spaces preceding absolute paths:
-    // - Unix: ` /` - Windows: ` C:\` etc.
-    const hasImageFilePath = text
-      .split(/ (?=\/|[A-Za-z]:\\)/)
-      .flatMap(part => part.split('\n'))
-      .some(line => isImageFilePath(line.trim()))
-
-    // Handle empty paste (clipboard image on macOS)
-    // When the user pastes an image with Cmd+V, the terminal sends an empty
-    // bracketed paste sequence. The keypress parser emits this as isPasted=true
-    // with empty input.
-    if (isFromPaste && text.length === 0 && isMacOS && onImagePaste) {
-      checkClipboardForImage()
-      // Reset isPasting since there's no text content to process
-      setIsPasting(false)
-      return
-    }
-
-    // Check if we should handle as paste (from bracketed paste, large input, or continuation)
-    const shouldHandleAsPaste =
-      onPaste &&
-      (text.length > PASTE_THRESHOLD ||
-        pastePendingRef.current ||
-        hasImageFilePath ||
-        isFromPaste ||
-        (text.length >= 3 &&
-          !key.return &&
-          !key.tab &&
-          !key.escape &&
-          !key.upArrow &&
-          !key.downArrow &&
-          !key.leftArrow &&
-          !key.rightArrow))
-
-    if (shouldHandleAsPaste) {
+  const processPastedText = React.useCallback(
+    (rawText: string) => {
       pastePendingRef.current = true
-      setPasteState(({ chunks, timeoutId }) => {
-        return {
-          chunks: [...chunks, text],
-          timeoutId: resetPasteTimeout(timeoutId),
-        }
-      })
-      return
-    }
-    // Paste-only path: BaseTextInput routes typed keys via KeyboardEvent
-    // onKeyDown (official densable). useInput only delivers bracketed paste
-    // here so we keep isPasted chunking without double-inserting keystrokes.
-    onInput(text, key, event)
-    if (text.length > 10) {
-      // Ensure that setIsPasting is turned off on any other multicharacter
-      // input, because the stdin buffer may chunk at arbitrary points and split
-      // the closing escape sequence if the input length is too long for the
-      // stdin buffer.
-      setIsPasting(false)
-    }
-  }
+      const pastedText = rawText.replace(/\[I$/, '').replace(/\[O$/, '')
+
+      // Empty bracketed paste → clipboard image (macOS / WSL official).
+      if (pastedText.length === 0 && canClipboardImage && onImagePaste) {
+        checkClipboardForImage()
+        return
+      }
+
+      const lines = pastedText
+        .split(/ (?=\/|[A-Za-z]:\\)/)
+        .flatMap(part => part.split('\n'))
+        .filter(line => line.trim())
+      const imagePaths = lines.filter(line => isImageFilePath(line))
+
+      if (onImagePaste && imagePaths.length > 0) {
+        const isTempScreenshot =
+          /\/TemporaryItems\/.*screencaptureui.*\/Screenshot/i.test(pastedText)
+
+        void Promise.all(
+          imagePaths.map(imagePath => tryReadImageFromPath(imagePath)),
+        ).then(results => {
+          if (!isMountedRef.current) return
+
+          const validImages = results.filter(
+            (r): r is NonNullable<typeof r> => r !== null,
+          )
+
+          if (validImages.length > 0) {
+            for (const imageData of validImages) {
+              const filename = basename(imageData.path)
+              onImagePaste(
+                imageData.base64,
+                imageData.mediaType,
+                filename,
+                imageData.dimensions,
+                imageData.path,
+              )
+            }
+            const nonImageLines = lines.filter(line => !isImageFilePath(line))
+            if (nonImageLines.length > 0) {
+              deliverText(nonImageLines.join('\n'))
+            }
+            finishPaste()
+          } else if (isTempScreenshot && isMacOS) {
+            checkClipboardForImage()
+          } else {
+            deliverText(pastedText)
+            finishPaste()
+          }
+        })
+        return
+      }
+
+      // Official: g(x), _() — text paste may re-fire return that arrived mid-paste.
+      // pastePending is cleared inside maybeReplayReturn's timeout (not here).
+      deliverText(pastedText)
+      maybeReplayReturn()
+    },
+    [
+      canClipboardImage,
+      checkClipboardForImage,
+      deliverText,
+      finishPaste,
+      isMacOS,
+      maybeReplayReturn,
+      onImagePaste,
+    ],
+  )
+
+  // Official d7r handlePaste S(w)
+  const handlePaste = React.useCallback(
+    (event: { text: string; preventDefault: () => void }) => {
+      event.preventDefault()
+      setIsPasting(true)
+      processPastedText(event.text)
+    },
+    [processPastedText],
+  )
+
+  // Official d7r handleKeyDown b(w):
+  //   if (l.current && w.key === "return") { prevent; c.current = true; return }
+  //   if ((onPaste||onImagePaste) && !ctrl && !meta && w.key.length > pkt && !defaultPrevented)
+  //     → treat as paste
+  //   else inner(w)
+  const handleKeyDown = React.useCallback(
+    (event: KeyboardEvent) => {
+      // Official densable uses event.key === "return" (KeyboardEvent.key from fag).
+      if (pastePendingRef.current && event.key === 'return') {
+        event.preventDefault()
+        deferredReturnRef.current = true
+        return
+      }
+      // Non-bracketed large payload → treat as paste (official pkt=800).
+      if (
+        (onPaste || onImagePaste) &&
+        !event.ctrl &&
+        !event.meta &&
+        event.key.length > PASTE_THRESHOLD &&
+        !event.defaultPrevented
+      ) {
+        event.preventDefault()
+        setIsPasting(true)
+        processPastedText(event.key)
+        return
+      }
+      innerHandleKeyDown(event)
+    },
+    [innerHandleKeyDown, onImagePaste, onPaste, processPastedText],
+  )
 
   return {
-    wrappedOnInput,
-    pasteState,
+    handleKeyDown,
+    handlePaste,
     isPasting,
   }
 }
