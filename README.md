@@ -79,7 +79,8 @@
 
 | 版本区间 | 要点 |
 | -------- | ---- |
-| **2.6.34** | Jump-to-bottom 后立即恢复 spinner 动画（viewport 可见性 notify） |
+| **2.6.35** | Windows 打包 rg.exe 主路径 spawn+windowsHide，避免 Grep/Glob 闪 conhost |
+| **2.6.34** | Jump-to-bottom 后立即恢复 spinner；agents 左箭头/daemon skew；CSI u 全角冒号等 |
 | **2.6.32–2.6.30** | alt-screen 双次 EXIT 防 Windows Terminal 多层闪窗；fullscreen / 滚轮 densable 对齐官方 2.1.210 |
 | **2.6.29** | modal 双线、滚轮残片与折叠空白修复；残差端口对齐 |
 | **2.6.x agents** | agents view 分组顺序 / review 列表 / done fold / PR 列 / fleet token / fleet needs-input / token footer |
@@ -160,7 +161,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=test-my-key \
 claude --remote-control
 ```
 
-> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.34`。
+> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.35`。
 >
 > 旧文档里的全局包名 `claude-code` 已不再对应本仓库发布流；请使用 `@go-hare/claude-code`。
 
