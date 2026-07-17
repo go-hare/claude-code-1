@@ -697,7 +697,7 @@ export function registerCliHostCommands(
     .option('--strict-mcp-config', 'Strict MCP config for dispatched sessions')
     .allowUnknownOption(true)
     .action(async () => {
-      const agentsIdx = process.argv.findIndex(a => a === 'agents')
+      const agentsIdx = process.argv.indexOf('agents')
       const rawArgs = agentsIdx >= 0 ? process.argv.slice(agentsIdx + 1) : []
       const { agentsMain } = await import('../cli/agents.js')
       await agentsMain(rawArgs)

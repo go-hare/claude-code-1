@@ -1623,6 +1623,11 @@ export default class Ink {
   }
 
   private notifySelectionChange(): void {
+    // Skip during/after unmount: AlternateScreen cleanup may clearTextSelection
+    // after 1049l. scheduleRender.cancel() already ran, but notifySelectionChange
+    // would re-arm the throttle and a late onRender can flash main-buffer frames
+    // on Windows Terminal (stacked-window look). Restored from 92e1ffdd.
+    if (this.isUnmounted) return;
     this.scheduleRender();
     for (const cb of this.selectionListeners) cb();
   }
@@ -1885,11 +1890,15 @@ export default class Ink {
     /* eslint-disable custom-rules/no-sync-fs -- process exiting; async writes would be dropped */
     if (this.options.stdout.isTTY) {
       if (this.altScreenActive) {
-        // Official 2.1.210 order: emit the sole wrapped 1049l first, then clear
-        // the flag. Do NOT call setAltScreenActive(false) — its inactive branch
-        // repaints. React teardown still runs AlternateScreen cleanup, which
-        // sees alreadyInactive and skips a second 1049l (Windows Terminal DECRC
-        // flash / stacked-frame look).
+        // Gate renders BEFORE leaving the alt buffer. Official clears the flag
+        // right after the sole wrapped 1049l; we also set isUnmounted first so
+        // nothing between writeSync and React teardown can scheduleRender onto
+        // the newly-visible main buffer (Windows Terminal multi-frame flash).
+        // Do NOT call setAltScreenActive(false) — its inactive branch repaints.
+        // AlternateScreen cleanup still runs, sees alreadyInactive, skips a
+        // second 1049l (92e1ffdd / DECRC stacked-window).
+        this.isUnmounted = true;
+        this.scheduleRender.cancel?.();
         writeSync(1, exitAltScreenSequence());
         this.altScreenActive = false;
         this.altScreenMouseTracking = false;
@@ -1918,6 +1927,7 @@ export default class Ink {
 
     // Mark unmounted BEFORE React tree teardown so AlternateScreen cleanup /
     // selection clear cannot schedule a main-buffer onRender after 1049l.
+    // (May already be true from the alt-screen exit path above.)
     this.isUnmounted = true;
 
     // Cancel any pending throttled renders to prevent accessing freed Yoga nodes

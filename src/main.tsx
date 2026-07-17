@@ -4595,6 +4595,15 @@ async function run(): Promise<CommanderCommand> {
 
         // Official Sj4: left-arrow → seed (Vy6) + A8q job dir + ky6 spawn → FleetView.
         if (replResult.type === 'agents' && feature('BG_SESSIONS')) {
+          // Official Lj_: unmount REPL ink → setImmediate → createRoot/mountFleetView.
+          // Yield so AlternateScreen cleanup / instance map settle before next root.
+          await new Promise<void>(resolve => setImmediate(resolve));
+          // Official AgentView open→attach: after handoff unmount, Windows re-asserts
+          // raw mode + stdin.ref (App teardown still unrefs even with handoffRawMode).
+          if (process.platform === 'win32' && process.stdin.isTTY) {
+            process.stdin.setRawMode(true);
+            process.stdin.ref();
+          }
           const { openAgentsViaLeftArrow } = await import('./cli/bg/leftArrowAgents.js');
           const handoff = await openAgentsViaLeftArrow(replResult.messages);
           const { renderAgentView } = await import('./screens/AgentView.js');
@@ -5293,7 +5302,7 @@ async function run(): Promise<CommanderCommand> {
     .option('--strict-mcp-config', 'Strict MCP config for dispatched sessions')
     .allowUnknownOption(true)
     .action(async () => {
-      const agentsIdx = process.argv.findIndex(a => a === 'agents');
+      const agentsIdx = process.argv.indexOf('agents');
       const rawArgs = agentsIdx >= 0 ? process.argv.slice(agentsIdx + 1) : [];
       const { agentsMain } = await import('./cli/agents.js');
       await agentsMain(rawArgs);

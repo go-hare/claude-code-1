@@ -49,8 +49,16 @@ export async function launchRepl(
             m.recordFleetOpenViaLeft();
           });
           agentsMessages = payload?.messages ?? [];
-          // In normal mode: unmount REPL and switch to agents view
+          // In normal mode: hand off alt screen / raw mode so unmount does NOT
+          // write EXIT_ALT_SCREEN (or drop raw on Windows). Without this, ←
+          // opens AgentsView via main-buffer flash then re-enter alt — broken paint.
+          // Mirrors AgentView open→attach path and official in-process left-arrow
+          // remount (Lj_ unmount → setImmediate → createRoot / mountFleetView).
           switchToAgents = true;
+          root.handoffAltScreen();
+          if (process.platform === 'win32') {
+            root.handoffRawMode();
+          }
           root.unmount();
         };
 
