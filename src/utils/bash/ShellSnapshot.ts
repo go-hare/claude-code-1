@@ -482,6 +482,9 @@ export const createAndSaveSnapshot = async (
           timeout: SNAPSHOT_CREATION_TIMEOUT,
           maxBuffer: 1024 * 1024, // 1MB buffer
           encoding: 'utf8',
+          // LOCAL: login-shell snapshot is a CUI bash; hide the console on
+          // Windows (official densable execFile here has no windowsHide).
+          windowsHide: true,
         },
         async (error, stdout, stderr) => {
           if (error) {

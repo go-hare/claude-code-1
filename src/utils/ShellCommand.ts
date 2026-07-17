@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'child_process'
+import { type ChildProcess, spawn } from 'child_process'
 import { stat } from 'fs/promises'
 import type { Readable } from 'stream'
 import treeKill from 'tree-kill'
@@ -9,6 +9,53 @@ import {
   MAX_TASK_OUTPUT_BYTES_DISPLAY,
 } from './task/diskOutput.js'
 import { TaskOutput } from './task/TaskOutput.js'
+
+/**
+ * Kill a process tree.
+ *
+ * Official densable (2.1.88 tree-kill): on win32 runs
+ * `exec('taskkill /pid … /T /F')` — `child_process.exec` shells through
+ * cmd.exe with no `windowsHide`, so each Bash abort/timeout/exit flashes
+ * a console window.
+ *
+ * LOCAL (not official densable): use `spawn('taskkill', …, { windowsHide:true })`
+ * on win32. Unix path keeps the stock tree-kill implementation.
+ */
+function treeKillNoFlash(
+  pid: number,
+  signal: NodeJS.Signals | number = 'SIGKILL',
+  callback?: (error?: Error) => void,
+): void {
+  if (process.platform === 'win32') {
+    const child = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    })
+    child.once('error', err => {
+      callback?.(err)
+    })
+    child.once('exit', (code, sig) => {
+      // taskkill: 0 = killed; 128 / non-zero often means already gone.
+      // Match tree-kill's fire-and-forget spirit — only surface spawn errors.
+      if (code === 0 || code === null) {
+        callback?.()
+        return
+      }
+      // Process not found / access denied: treat as success for abort paths.
+      if (code === 128 || code === 1) {
+        callback?.()
+        return
+      }
+      callback?.(
+        new Error(
+          `taskkill exited with code ${code}${sig ? ` signal ${sig}` : ''}`,
+        ),
+      )
+    })
+    return
+  }
+  treeKill(pid, signal, callback)
+}
 
 export type ExecResult = {
   stdout: string
@@ -337,7 +384,7 @@ class ShellCommandImpl implements ShellCommand {
   #doKill(code?: number): void {
     this.#status = 'killed'
     if (this.#childProcess.pid) {
-      treeKill(this.#childProcess.pid, 'SIGKILL')
+      treeKillNoFlash(this.#childProcess.pid, 'SIGKILL')
     }
     this.#resolveExitCode(code ?? SIGKILL)
   }

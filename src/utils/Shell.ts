@@ -60,6 +60,10 @@ function isExecutable(shellPath: string): boolean {
       execFileSync(shellPath, ['--version'], {
         timeout: 1000,
         stdio: 'ignore',
+        // LOCAL: bash --version is a CUI child; without windowsHide each
+        // isExecutable probe can flash a console on Windows (official
+        // densable also omits this flag here).
+        windowsHide: true,
       })
       return true
     } catch {
