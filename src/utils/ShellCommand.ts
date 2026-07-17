@@ -13,13 +13,10 @@ import { TaskOutput } from './task/TaskOutput.js'
 /**
  * Kill a process tree.
  *
- * Official densable (2.1.88 tree-kill): on win32 runs
- * `exec('taskkill /pid … /T /F')` — `child_process.exec` shells through
- * cmd.exe with no `windowsHide`, so each Bash abort/timeout/exit flashes
- * a console window.
- *
- * LOCAL (not official densable): use `spawn('taskkill', …, { windowsHide:true })`
- * on win32. Unix path keeps the stock tree-kill implementation.
+ * Official 2.1.210 densable (killProcessTree): on win32
+ * `spawn(System32/taskkill.exe, ["/PID",…,"/T","/F"], {stdio:"ignore", windowsHide:!0})`.
+ * Older tree-kill used `exec('taskkill …')` (cmd.exe flash); 210 fixed hide.
+ * Unix path keeps stock tree-kill.
  */
 function treeKillNoFlash(
   pid: number,

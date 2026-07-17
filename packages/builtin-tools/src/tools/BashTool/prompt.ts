@@ -79,25 +79,44 @@ Use the gh command via the Bash tool for other GitHub-related tasks including wo
   // For external users, include full inline instructions
   const { commit: commitAttribution, pr: prAttribution } = getAttributionTexts()
 
+  // LOCAL (not official densable): Windows multi-git parallel Bash amplifies
+  // Git-for-Windows conhost flash — combine read-only git analysis into one shell.
+  const winGitCombine = process.platform === 'win32'
+  const commitStep1 = winGitCombine
+    ? `1. In a single ${BASH_TOOL_NAME} call, run read-only git analysis combined (do not split into parallel Bash tool calls on Windows — each spawn can flash a console):
+  \`git status --short\` (never -uall on large repos), \`git diff\` (staged + unstaged), and \`git log --oneline -n 5\` chained with \`&&\` or \`;\` as appropriate.`
+    : `1. Run the following bash commands in parallel, each using the ${BASH_TOOL_NAME} tool:
+  - Run a git status command to see all untracked files. IMPORTANT: Never use the -uall flag as it can cause memory issues on large repos.
+  - Run a git diff command to see both staged and unstaged changes that will be committed.
+  - Run a git log command to see recent commit messages, so that you can follow this repository's commit message style.`
+  const prStep1 = winGitCombine
+    ? `1. In one or two ${BASH_TOOL_NAME} calls (prefer combining read-only git), understand the branch since it diverged from main — avoid many parallel git Bash spawns on Windows:
+   - \`git status --short\` (never -uall), \`git diff\`, tracking/upstream check, \`git log\` and \`git diff [base-branch]...HEAD\` — chain related git queries in one shell where practical.`
+    : `1. Run the following bash commands in parallel using the ${BASH_TOOL_NAME} tool, in order to understand the current state of the branch since it diverged from the main branch:
+   - Run a git status command to see all untracked files (never use -uall flag)
+   - Run a git diff command to see both staged and unstaged changes that will be committed
+   - Check if the current branch tracks a remote branch and is up to date with the remote, so you know if you need to push to the remote
+   - Run a git log command and \`git diff [base-branch]...HEAD\` to understand the full commit history for the current branch (from the time it diverged from the base branch)`
+  const parallelIntro = winGitCombine
+    ? `You can call multiple tools in a single response when independent. On Windows, prefer combining read-only git queries into one ${BASH_TOOL_NAME} call rather than many parallel git Bash tool calls.`
+    : `You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. The numbered steps below indicate which commands should be batched in parallel.`
+
   return `# Committing changes with git
 
 Only create commits when requested by the user. If unclear, ask first. When the user asks you to create a new git commit, follow these steps carefully:
 
-You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. The numbered steps below indicate which commands should be batched in parallel.
+${parallelIntro}
 
 Git Safety Protocol:
 - NEVER update the git config
-- NEVER run destructive git commands (push --force, reset --hard, checkout ., restore ., clean -f, branch -D) unless the user explicitly requests these actions. Taking unauthorized destructive actions is unhelpful and can result in lost work, so it's best to ONLY run these commands when given direct instructions 
+- NEVER run destructive git commands (push --force, reset --hard, checkout ., restore ., clean -f, branch -D) unless the user explicitly requests these actions. Taking unauthorized destructive actions is unhelpful and can result in lost work, so it's best to ONLY run these commands when given direct instructions
 - NEVER skip hooks (--no-verify, --no-gpg-sign, etc) unless the user explicitly requests it
 - NEVER run force push to main/master, warn the user if they request it
 - CRITICAL: Always create NEW commits rather than amending, unless the user explicitly requests a git amend. When a pre-commit hook fails, the commit did NOT happen — so --amend would modify the PREVIOUS commit, which may result in destroying work or losing previous changes. Instead, after hook failure, fix the issue, re-stage, and create a NEW commit
 - When staging files, prefer adding specific files by name rather than using "git add -A" or "git add .", which can accidentally include sensitive files (.env, credentials) or large binaries
 - NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive
 
-1. Run the following bash commands in parallel, each using the ${BASH_TOOL_NAME} tool:
-  - Run a git status command to see all untracked files. IMPORTANT: Never use the -uall flag as it can cause memory issues on large repos.
-  - Run a git diff command to see both staged and unstaged changes that will be committed.
-  - Run a git log command to see recent commit messages, so that you can follow this repository's commit message style.
+${commitStep1}
 2. Analyze all staged changes (both previously staged and newly added) and draft a commit message:
   - Summarize the nature of the changes (eg. new feature, enhancement to an existing feature, bug fix, refactoring, test, docs, etc.). Ensure the message accurately reflects the changes and their purpose (i.e. "add" means a wholly new feature, "update" means an enhancement to an existing feature, "fix" means a bug fix, etc.).
   - Do not commit files that likely contain secrets (.env, credentials.json, etc). Warn the user if they specifically request to commit those files
@@ -130,11 +149,7 @@ Use the gh command via the Bash tool for ALL GitHub-related tasks including work
 
 IMPORTANT: When the user asks you to create a pull request, follow these steps carefully:
 
-1. Run the following bash commands in parallel using the ${BASH_TOOL_NAME} tool, in order to understand the current state of the branch since it diverged from the main branch:
-   - Run a git status command to see all untracked files (never use -uall flag)
-   - Run a git diff command to see both staged and unstaged changes that will be committed
-   - Check if the current branch tracks a remote branch and is up to date with the remote, so you know if you need to push to the remote
-   - Run a git log command and \`git diff [base-branch]...HEAD\` to understand the full commit history for the current branch (from the time it diverged from the base branch)
+${prStep1}
 2. Analyze all changes that will be included in the pull request, making sure to look at all relevant commits (NOT just the latest commit, but ALL commits that will be included in the pull request!!!), and draft a pull request title and summary:
    - Keep the PR title short (under 70 characters)
    - Use the description/body for details, not the title
@@ -295,14 +310,31 @@ export function getSimplePrompt(): string {
     ? '`cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
     : '`find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
 
-  const multipleCommandsSubitems = [
-    `If the commands are independent and can run in parallel, make multiple ${BASH_TOOL_NAME} tool calls in a single message. Example: if you need to run "git status" and "git diff", send a single message with two ${BASH_TOOL_NAME} tool calls in parallel.`,
-    `If the commands depend on each other and must run sequentially, use a single ${BASH_TOOL_NAME} call with '&&' to chain them together.`,
-    "Use ';' only when you need to run commands sequentially but don't care if earlier commands fail.",
-    'DO NOT use newlines to separate commands (newlines are ok in quoted strings).',
-  ]
+  // LOCAL (not official densable): on Windows, parallel git Bash trees multiply
+  // Git-for-Windows nested conhost flashes. Prefer one combined shell for
+  // read-only git analysis; keep true parallel for unrelated independent work.
+  const preferCombinedGitOnWindows = process.platform === 'win32'
+
+  const multipleCommandsSubitems = preferCombinedGitOnWindows
+    ? [
+        `If the commands are independent and can run in parallel, make multiple ${BASH_TOOL_NAME} tool calls in a single message — except for read-only git analysis (status/diff/log/show): combine those into one ${BASH_TOOL_NAME} call (e.g. \`git status --short && git diff && git log --oneline -n 5\`) to avoid multiple console flashes on Windows.`,
+        `If the commands depend on each other and must run sequentially, use a single ${BASH_TOOL_NAME} call with '&&' to chain them together.`,
+        "Use ';' only when you need to run commands sequentially but don't care if earlier commands fail.",
+        'DO NOT use newlines to separate commands (newlines are ok in quoted strings).',
+      ]
+    : [
+        `If the commands are independent and can run in parallel, make multiple ${BASH_TOOL_NAME} tool calls in a single message. Example: if you need to run "git status" and "git diff", send a single message with two ${BASH_TOOL_NAME} tool calls in parallel.`,
+        `If the commands depend on each other and must run sequentially, use a single ${BASH_TOOL_NAME} call with '&&' to chain them together.`,
+        "Use ';' only when you need to run commands sequentially but don't care if earlier commands fail.",
+        'DO NOT use newlines to separate commands (newlines are ok in quoted strings).',
+      ]
 
   const gitSubitems = [
+    ...(preferCombinedGitOnWindows
+      ? [
+          'LOCAL (Windows): Prefer a single Bash command that chains read-only git queries (status, diff, log, show) rather than multiple parallel Bash tool calls. Parallel multi-git spawns amplify console window flashes under Git for Windows.',
+        ]
+      : []),
     'Prefer to create a new commit rather than amending an existing commit.',
     'Before running destructive operations (e.g., git reset --hard, git push --force, git checkout --), consider whether there is a safer alternative that achieves the same goal. Only use destructive operations when they are truly the best approach.',
     'Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly asked for it. If a hook fails, investigate and fix the underlying issue.',

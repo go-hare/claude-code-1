@@ -477,13 +477,14 @@ export const createAndSaveSnapshot = async (
             })(),
             SHELL: binShell,
             GIT_EDITOR: 'true',
+            // LOCAL (not official densable): same as Shell.ts spawn env.
+            GIT_PAGER: 'cat',
             CLAUDECODE: '1',
           },
           timeout: SNAPSHOT_CREATION_TIMEOUT,
           maxBuffer: 1024 * 1024, // 1MB buffer
           encoding: 'utf8',
-          // LOCAL: login-shell snapshot is a CUI bash; hide the console on
-          // Windows (official densable execFile here has no windowsHide).
+          // Official 2.1.210 densable: execFile(..., {..., windowsHide:!0})
           windowsHide: true,
         },
         async (error, stdout, stderr) => {

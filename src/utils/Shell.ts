@@ -324,6 +324,10 @@ export async function exec(
         ...subprocessEnv(),
         SHELL: shellType === 'bash' ? binShell : undefined,
         GIT_EDITOR: 'true',
+        // LOCAL (not official densable): skip interactive pager (less) so short
+        // git log/diff/show don't open a pager process. Does not hide nested
+        // Git-for-Windows conhost; prefer serial/combined git on Windows too.
+        GIT_PAGER: 'cat',
         CLAUDECODE: '1',
         ...envOverrides,
         ...(process.env.USER_TYPE === 'ant'
