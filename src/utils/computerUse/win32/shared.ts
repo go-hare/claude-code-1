@@ -17,6 +17,8 @@ export function ps(script: string): string {
     cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
     stdout: 'pipe',
     stderr: 'pipe',
+    // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
+    windowsHide: true,
   })
   return new TextDecoder().decode(result.stdout).trim()
 }
@@ -28,6 +30,8 @@ export function runPs(script: string): string | null {
       cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
       stdout: 'pipe',
       stderr: 'pipe',
+      // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
+      windowsHide: true,
     })
     if (result.exitCode !== 0) return null
     return new TextDecoder().decode(result.stdout).trim()
@@ -40,7 +44,12 @@ export function runPs(script: string): string | null {
 export async function psAsync(script: string): Promise<string> {
   const proc = Bun.spawn(
     ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-    { stdout: 'pipe', stderr: 'pipe' },
+    {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      // LOCAL: suppress the conhost flash on Windows for headless PowerShell calls.
+      windowsHide: true,
+    },
   )
   const out = await new Response(proc.stdout).text()
   await proc.exited

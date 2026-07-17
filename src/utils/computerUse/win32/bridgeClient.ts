@@ -46,6 +46,8 @@ export function ensureBridge(): boolean {
       stdout: 'pipe',
       stderr: 'ignore',
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+      // LOCAL: keep the Python bridge from flashing a console window on Windows.
+      windowsHide: true,
     })
 
     // Read stdout lines asynchronously
