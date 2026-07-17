@@ -28,6 +28,11 @@ const FN_KEY_RE =
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const CSI_U_RE = /^\x1b\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
 
+// Orphan CSI u / progressive tail after a lone ESC was flushed (App 50ms
+// NORMAL_TIMEOUT). Same shape as CSI_U_RE without the leading ESC so the text
+// token `[65306u` / `[58:65306;2u` can be re-prefixed and parsed.
+const ORPHAN_CSI_U_RE = /^\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
+
 // xterm modifyOtherKeys: ESC [ 27 ; modifier ; keycode ~
 // Example: ESC[27;2;13~ = Shift+Enter. Emitted by Ghostty/tmux/xterm when
 // modifyOtherKeys=2 is active or via user keybinds, typically over SSH where
@@ -35,6 +40,9 @@ const CSI_U_RE = /^\x1b\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
 // Note param order is reversed vs CSI u (modifier first, keycode second).
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const MODIFY_OTHER_KEYS_RE = /^\x1b\[27;(\d+);(\d+)~/
+
+// Orphan modifyOtherKeys tail (ESC flushed alone): `[27;1;65306~`
+const ORPHAN_MODIFY_OTHER_KEYS_RE = /^\[27;(\d+);(\d+)~/
 
 // -- Terminal response patterns (inbound sequences from the terminal itself) --
 // DECRPM: CSI ? Ps ; Pm $ y  — response to DECRQM (request mode)
@@ -104,6 +112,103 @@ function peelOrphanedMouseTails(text: string): {
     break
   }
   return { events, rest: text.slice(i) }
+}
+
+/**
+ * Peel orphaned CSI u / modifyOtherKeys tails (ESC was flushed alone as Escape).
+ * Re-prefixes ESC so parseKeypress / AltGr / fullwidth recovery run normally.
+ * Only peels at the start of the remaining text (one event per peel call site
+ * is enough — callers loop or re-invoke via rest handling).
+ */
+function peelOrphanedExtendedKeyTail(text: string): {
+  event: string | null
+  rest: string
+} {
+  const csi = ORPHAN_CSI_U_RE.exec(text)
+  if (csi) {
+    return { event: '\x1b' + csi[0], rest: text.slice(csi[0].length) }
+  }
+  const mok = ORPHAN_MODIFY_OTHER_KEYS_RE.exec(text)
+  if (mok) {
+    return { event: '\x1b' + mok[0], rest: text.slice(mok[0].length) }
+  }
+  return { event: null, rest: text }
+}
+
+/**
+ * Official Uog/Bog densable: CLAUDE_CODE_ALTGR_AS_TEXT / WT_SESSION.
+ * force | off | auto (Windows Terminal default).
+ */
+function resolveAltGrAsTextMode(): 'force' | 'off' | 'auto' {
+  const raw = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+  if (raw) {
+    const normalized = raw.toLowerCase().trim()
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return 'force'
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return 'off'
+  }
+  return process.env.WT_SESSION ? 'auto' : 'off'
+}
+
+/**
+ * Official jog / qgg — codepoints that may be AltGr text.
+ * Extended past official `e>=160&&e<55296` so fullwidth forms (U+FF1A etc.)
+ * and CJK after the surrogate block also rewrite ctrl+meta → plain text.
+ * Without this, ESC[65306;7u (AltGr/IME) keeps ctrl+meta and useTextInput
+ * mapKey swallows the character via handleCtrl/handleMeta.
+ */
+function isAltGrPrintableCodepoint(codepoint: number): boolean {
+  if (codepoint > 32 && codepoint < 127) return true
+  if (codepoint >= 160 && codepoint < 0xd800) return true
+  // Fullwidth / CJK beyond surrogates (official FJc stops at 55296; we need
+  // these for IME punctuation under AltGr-reported mods).
+  return isPrintableUnicodeCodepoint(codepoint)
+}
+
+/** Official Wog/zgg — ASCII alnum; auto mode leaves these as real ctrl+meta. */
+function isAsciiAlphanumericCodepoint(codepoint: number): boolean {
+  return (
+    (codepoint >= 48 && codepoint <= 57) ||
+    (codepoint >= 65 && codepoint <= 90) ||
+    (codepoint >= 97 && codepoint <= 122)
+  )
+}
+
+/**
+ * Official NJc/rau densable — treat ctrl+meta (without super) printable as
+ * AltGr text when CLAUDE_CODE_ALTGR_AS_TEXT allows it.
+ */
+function shouldRewriteAltGrAsText(
+  mods: { ctrl: boolean; meta: boolean; super: boolean },
+  codepoint: number,
+): boolean {
+  if (!(mods.ctrl && mods.meta) || mods.super) return false
+  if (!isAltGrPrintableCodepoint(codepoint)) return false
+  const mode = resolveAltGrAsTextMode()
+  if (mode === 'off') return false
+  if (mode === 'force') return true
+  // auto: non-alnum only (punctuation / fullwidth / CJK)
+  return !isAsciiAlphanumericCodepoint(codepoint)
+}
+
+/** Official OJc/tau — plain text key with modifiers cleared. */
+function altGrTextKey(
+  sequence: string,
+  codepoint: number,
+  shift: boolean,
+): ParsedKey {
+  return {
+    kind: 'key',
+    name: String.fromCodePoint(codepoint),
+    fn: false,
+    ctrl: false,
+    meta: false,
+    shift,
+    option: false,
+    super: false,
+    sequence,
+    raw: sequence,
+    isPasted: false,
+  }
 }
 
 function createPasteKey(content: string): ParsedKey {
@@ -480,13 +585,26 @@ export function parseMultipleKeypresses(
         // non-mouse text still goes to parseKeypress.
         // X10 Cb is narrowed to wheel range [\x60-\x7f] so typed `[MAX]` is
         // not swallowed as a phantom click.
-        const { events, rest } = peelOrphanedMouseTails(token.value)
+        const { events, rest: afterMouse } = peelOrphanedMouseTails(token.value)
         for (const seq of events) {
           const mouse = parseMouseEvent(seq)
           keys.push(mouse ?? parseKeypress(seq))
         }
-        if (rest) {
+        // Same ESC-flush race for CSI u / modifyOtherKeys (fullwidth `：` →
+        // `[65306u` or progressive `[58:65306;2u`). Without re-prefixing ESC,
+        // InputEvent never recovers the character and KeyboardEvent leaks the
+        // literal tail. Official swallows nameless ESC-less SGR; we recover
+        // extended-key tails the same way mouse tails are recovered.
+        let rest = afterMouse
+        while (rest) {
+          const peeled = peelOrphanedExtendedKeyTail(rest)
+          if (peeled.event) {
+            keys.push(parseKeypress(peeled.event))
+            rest = peeled.rest
+            continue
+          }
           keys.push(parseKeypress(rest))
+          break
         }
       }
     }
@@ -987,6 +1105,21 @@ function parseKeypress(s: string = ''): ParsedKey {
       ? parseInt(match[2]!.split(':')[1] ?? '1', 10)
       : 1
     const isRelease = Number.isFinite(eventTypeField) && eventTypeField === 3
+    // Official NJc/OJc: AltGr (ctrl+meta) printable → plain text key before
+    // functional naming so useTextInput does not route through handleCtrl/Meta.
+    // Prefer recovered text codepoint (IME fullwidth) over primary physical key.
+    if (!isRelease) {
+      const textChar = characterFromCsiUMatch(match)
+      const altGrCp =
+        textChar !== undefined
+          ? textChar.codePointAt(0)!
+          : isAltGrPrintableCodepoint(primary)
+            ? primary
+            : undefined
+      if (altGrCp !== undefined && shouldRewriteAltGrAsText(mods, altGrCp)) {
+        return altGrTextKey(s, altGrCp, mods.shift)
+      }
+    }
     // Name for keybindings uses primary codepoint (physical key). The text to
     // insert is recovered later in InputEvent via unicodeFromExtendedKeySequence
     // / key name when printable non-ASCII.
@@ -1018,7 +1151,12 @@ function parseKeypress(s: string = ''): ParsedKey {
   // would leave the tail as garbage if it partially matched.
   if ((match = MODIFY_OTHER_KEYS_RE.exec(s))) {
     const mods = decodeModifier(parseInt(match[1]!, 10))
-    const name = keycodeToName(parseInt(match[2]!, 10))
+    const codepoint = parseInt(match[2]!, 10)
+    // Official NJc on modifyOtherKeys: same AltGr rewrite as CSI u.
+    if (shouldRewriteAltGrAsText(mods, codepoint)) {
+      return altGrTextKey(s, codepoint, mods.shift)
+    }
+    const name = keycodeToName(codepoint)
     return {
       kind: 'key',
       name,

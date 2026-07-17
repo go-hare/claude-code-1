@@ -183,4 +183,118 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     expect(key.isPasted).toBe(true)
     expect(key.sequence).toBe(`${FULLWIDTH_COLON}hello`)
   })
+
+  test('orphan CSI u tail after ESC flush inserts fullwidth colon', () => {
+    // App 50ms timer flushes incomplete ESC as Escape; continuation arrives
+    // as text token `[65306u` without leading ESC.
+    const [items] = parseMultipleKeypresses(INITIAL_STATE, '[65306u')
+    expect(items).toHaveLength(1)
+    const key = asKey(items[0])
+    const event = new InputEvent(key)
+    expect(event.input).toBe(FULLWIDTH_COLON)
+    expect(event.key.ctrl).toBe(false)
+    expect(event.key.meta).toBe(false)
+  })
+
+  test('orphan progressive CSI u tail inserts fullwidth colon', () => {
+    const [items] = parseMultipleKeypresses(INITIAL_STATE, '[58:65306;2u')
+    const event = new InputEvent(asKey(items[0]))
+    expect(event.input).toBe(FULLWIDTH_COLON)
+  })
+
+  test('AltGr CSI u (ctrl+meta) fullwidth colon clears modifiers for insert', () => {
+    // Official NJc/OJc densable. force so WT_SESSION is not required in CI.
+    const prev = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+    process.env.CLAUDE_CODE_ALTGR_AS_TEXT = '1'
+    try {
+      const [items] = parseMultipleKeypresses(
+        INITIAL_STATE,
+        `\x1b[${FULLWIDTH_COLON_CP};7u`,
+      )
+      const key = asKey(items[0])
+      expect(key.ctrl).toBe(false)
+      expect(key.meta).toBe(false)
+      expect(key.name).toBe(FULLWIDTH_COLON)
+      const event = new InputEvent(key)
+      expect(event.input).toBe(FULLWIDTH_COLON)
+      // mapKey routes key.ctrl / key.meta to handleCtrl/Meta — must stay clear
+      expect(event.key.ctrl).toBe(false)
+      expect(event.key.meta).toBe(false)
+    } finally {
+      if (prev === undefined) {
+        delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+      } else {
+        process.env.CLAUDE_CODE_ALTGR_AS_TEXT = prev
+      }
+    }
+  })
+
+  test('AltGr modifyOtherKeys fullwidth colon clears modifiers', () => {
+    const prev = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+    process.env.CLAUDE_CODE_ALTGR_AS_TEXT = '1'
+    try {
+      const [items] = parseMultipleKeypresses(
+        INITIAL_STATE,
+        `\x1b[27;7;${FULLWIDTH_COLON_CP}~`,
+      )
+      const key = asKey(items[0])
+      expect(key.ctrl).toBe(false)
+      expect(key.meta).toBe(false)
+      expect(new InputEvent(key).input).toBe(FULLWIDTH_COLON)
+    } finally {
+      if (prev === undefined) {
+        delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+      } else {
+        process.env.CLAUDE_CODE_ALTGR_AS_TEXT = prev
+      }
+    }
+  })
+
+  test('AltGr auto mode rewrites non-alnum under WT_SESSION', () => {
+    const prevAlt = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+    const prevWt = process.env.WT_SESSION
+    delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+    process.env.WT_SESSION = 'test-session'
+    try {
+      const [items] = parseMultipleKeypresses(
+        INITIAL_STATE,
+        `\x1b[${FULLWIDTH_COLON_CP};7u`,
+      )
+      const key = asKey(items[0])
+      expect(key.ctrl).toBe(false)
+      expect(key.meta).toBe(false)
+      expect(new InputEvent(key).input).toBe(FULLWIDTH_COLON)
+    } finally {
+      if (prevAlt === undefined) {
+        delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+      } else {
+        process.env.CLAUDE_CODE_ALTGR_AS_TEXT = prevAlt
+      }
+      if (prevWt === undefined) {
+        delete process.env.WT_SESSION
+      } else {
+        process.env.WT_SESSION = prevWt
+      }
+    }
+  })
+
+  test('AltGr off keeps ctrl+meta on fullwidth colon', () => {
+    const prev = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+    process.env.CLAUDE_CODE_ALTGR_AS_TEXT = '0'
+    try {
+      const [items] = parseMultipleKeypresses(
+        INITIAL_STATE,
+        `\x1b[${FULLWIDTH_COLON_CP};7u`,
+      )
+      const key = asKey(items[0])
+      expect(key.ctrl).toBe(true)
+      expect(key.meta).toBe(true)
+    } finally {
+      if (prev === undefined) {
+        delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
+      } else {
+        process.env.CLAUDE_CODE_ALTGR_AS_TEXT = prev
+      }
+    }
+  })
 })
