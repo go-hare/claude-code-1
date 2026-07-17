@@ -279,10 +279,25 @@ function ripGrepRaw(
     if (parsedSeconds > 0) timeout = parsedSeconds * 1000
   }
 
-  // For embedded ripgrep, use spawn with argv0 (execFile doesn't support argv0 properly)
-  if (argv0) {
+  // Prefer spawn when we need argv0 (embedded rg) or windowsHide.
+  //
+  // Official densable (2.1.88 e44 / 2.1.153 WM_): native is always
+  // embedded+argv0 → spawn(..., { argv0, windowsHide:true }); only the
+  // non-argv0 branch uses execFile (no windowsHide). Official never
+  // special-cases win32 to a separate rg.exe.
+  //
+  // LOCAL (not official densable): 69de73ae forces Windows bundled mode
+  // onto packaged rg.exe so Git Bash cannot spawn full claude.exe via
+  // argv0. That path has no argv0, so without this win32 spawn gate
+  // execFile flashes a conhost per Grep/Glob. windowsHide intent matches
+  // official; the platform branch is local.
+  //
+  // Timeout: SIGTERM alone may not kill ripgrep if it's blocked in
+  // uninterruptible I/O. Escalate to SIGKILL after 5s. On Windows,
+  // child.kill('SIGTERM') / SIGKILL throw — use default signal.
+  if (argv0 || process.platform === 'win32') {
     const child = spawn(rgPath, fullArgs, {
-      argv0,
+      ...(argv0 ? { argv0 } : {}),
       signal: abortSignal,
       // Prevent visible console window on Windows (no-op on other platforms)
       windowsHide: true,
@@ -313,11 +328,6 @@ function ripGrepRaw(
       }
     })
 
-    // Set up timeout with SIGKILL escalation.
-    // SIGTERM alone may not kill ripgrep if it's blocked in uninterruptible I/O
-    // (e.g., deep filesystem traversal). If SIGTERM doesn't work within 5 seconds,
-    // escalate to SIGKILL which cannot be caught or ignored.
-    // On Windows, child.kill('SIGTERM') throws; use default signal.
     let killTimeoutId: ReturnType<typeof setTimeout> | undefined
     const timeoutId = setTimeout(() => {
       if (process.platform === 'win32') {
@@ -361,10 +371,7 @@ function ripGrepRaw(
     return child
   }
 
-  // For non-embedded ripgrep, use execFile
-  // Use SIGKILL as killSignal because SIGTERM may not terminate ripgrep
-  // when it's blocked in uninterruptible filesystem I/O.
-  // On Windows, SIGKILL throws; use default (undefined) which sends SIGTERM.
+  // Non-Windows, non-embedded: execFile is fine (no conhost flash).
   return execFile(
     rgPath,
     fullArgs,
@@ -372,7 +379,7 @@ function ripGrepRaw(
       maxBuffer: MAX_BUFFER_SIZE,
       signal: abortSignal,
       timeout,
-      killSignal: process.platform === 'win32' ? undefined : 'SIGKILL',
+      killSignal: 'SIGKILL',
     },
     callback,
   )
