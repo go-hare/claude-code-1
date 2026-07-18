@@ -1819,6 +1819,7 @@ export function REPL({
   // Ref instead of state to avoid triggering React re-renders on every
   // streaming text_delta. The spinner reads this via its animation timer.
   const responseLengthRef = useRef(0);
+  const compactProgressActiveRef = useRef(false);
   // API performance metrics ref for ant-only spinner display (TTFT/OTPS).
   // Accumulates metrics from all API requests in a turn for P50 aggregation.
   const apiMetricsRef = useRef<
@@ -3100,11 +3101,13 @@ export function REPL({
               break;
             case 'compact_start':
               setSpinnerMessage('Compacting conversation');
+              compactProgressActiveRef.current = true;
               break;
             case 'compact_end':
               setSpinnerMessage(null);
               setSpinnerColor(null);
               setSpinnerShimmerColor(null);
+              compactProgressActiveRef.current = false;
               break;
           }
         },
@@ -6084,6 +6087,7 @@ export function REPL({
                   spinnerTip={spinnerTip}
                   responseLengthRef={responseLengthRef}
                   apiMetricsRef={apiMetricsRef}
+                  compactProgressActiveRef={compactProgressActiveRef}
                   overrideMessage={spinnerMessage}
                   spinnerSuffix={stopHookSpinnerSuffix}
                   verbose={verbose}

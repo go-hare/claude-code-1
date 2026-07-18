@@ -571,13 +571,13 @@ export const SettingsSchema = lazySchema(() =>
           'When true, strip ```! / !` skill shell commands instead of executing them. ' +
             'Also forced on when CLAUDE_CODE_IS_COWORK is set. Policy settings take precedence.',
         ),
-      // Which shell backs input-box `!` (see docs/design/ps-shell-selection.md §4.2)
+      // Which shell backs input-box `!` (see resolveDefaultShell)
       defaultShell: z
         .enum(['bash', 'powershell'])
         .optional()
         .describe(
           'Default shell for input-box ! commands. ' +
-            "Defaults to 'bash' on all platforms (no Windows auto-flip).",
+            "Defaults to 'powershell' on Windows when the PowerShell tool is enabled, otherwise 'bash'. Set explicitly to override.",
         ),
       // Official 2.1.186: `!` bash output auto-triggers a Claude response
       respondToBashCommands: z
@@ -1356,7 +1356,7 @@ export const SettingsSchema = lazySchema(() =>
         .max(100)
         .optional()
         .describe(
-          'Prompt cache hit rate threshold (0-100). Warnings shown when cache hit rate falls below this percentage. Default: 80.',
+          'Prompt cache hit rate threshold (0-100). Warnings shown when cache hit rate falls below this percentage. Default: 70.',
         ),
       cacheWarningEnabled: z
         .boolean()

@@ -241,20 +241,12 @@ const externalTips: Tip[] = [
   {
     id: 'powershell-tool-env',
     content: async () =>
-      'Set CLAUDE_CODE_USE_POWERSHELL_TOOL=1 to enable the PowerShell tool (preview)',
-    cooldownSessions: 10,
-    isRelevant: async () => {
-      if (getPlatform() !== 'windows') return false
-      // Official USE_POWERSHELL_TOOL densable pure env half.
-      try {
-        const { resolvePowerShellToolEnvOverride } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-        return resolvePowerShellToolEnvOverride() === null
-      } catch {
-        return process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL === undefined
-      }
-    },
+      'PowerShell is the default shell on Windows. Set CLAUDE_CODE_USE_POWERSHELL_TOOL=0 or defaultShell=bash to prefer Bash/Git Bash instead.',
+    cooldownSessions: 20,
+    isRelevant: async () =>
+      getPlatform() === 'windows' &&
+      process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL === undefined &&
+      getSettings_DEPRECATED().defaultShell === undefined,
   },
   {
     id: 'status-line',
@@ -387,7 +379,7 @@ const externalTips: Tip[] = [
   {
     id: 'continue',
     content: async () =>
-      'Run claude --continue or claude --resume to resume a conversation',
+      'Run ccb --continue or ccb --resume to resume a conversation',
     cooldownSessions: 10,
     isRelevant: async () => true,
   },

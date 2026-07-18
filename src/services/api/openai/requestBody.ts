@@ -7,6 +7,7 @@ import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/
 import type { BetaJSONOutputFormat } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { EffortValue } from '../../../utils/effort.js'
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
+import { getOpenAIPromptCacheKey } from './openaiShared.js'
 
 /**
  * Detect whether thinking mode should be enabled for this model.
@@ -90,6 +91,8 @@ export function buildOpenAIRequestBody(params: {
   temperatureOverride?: number
   effortValue?: EffortValue
   outputFormat?: BetaJSONOutputFormat
+  /** Override for tests; production uses the current CCB session id. */
+  promptCacheKey?: string
 }): ChatCompletionCreateParamsStreaming & {
   thinking?: { type: string }
   enable_thinking?: boolean
@@ -103,6 +106,8 @@ export function buildOpenAIRequestBody(params: {
       strict: true
     }
   }
+  /** OpenAI prompt-cache routing key (not always in SDK types yet). */
+  prompt_cache_key?: string
 } {
   const {
     model,
@@ -114,6 +119,7 @@ export function buildOpenAIRequestBody(params: {
     temperatureOverride,
     effortValue,
     outputFormat,
+    promptCacheKey,
   } = params
   const reasoningEffort =
     typeof effortValue === 'string' && effortValue !== 'max'
@@ -132,6 +138,9 @@ export function buildOpenAIRequestBody(params: {
     stream_options: { include_usage: true },
     ...(responseFormat && { response_format: responseFormat }),
     ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
+    // Sticky cache routing for multi-turn OpenAI/compatible endpoints that
+    // honor prompt_cache_key. Process-stable by default (not message-derived).
+    prompt_cache_key: promptCacheKey ?? getOpenAIPromptCacheKey(),
     // Enable chain-of-thought output for DeepSeek and MiMo models.
     // When active, temperature/top_p/presence_penalty/frequency_penalty are ignored.
     ...(enableThinking && {
