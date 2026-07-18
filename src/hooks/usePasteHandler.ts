@@ -14,6 +14,8 @@ import type { ImageDimensions } from '../utils/imageResizer.js'
 import { getPlatform } from '../utils/platform.js'
 
 const CLIPBOARD_CHECK_DEBOUNCE_MS = 50
+/** If pastePending sticks (async image hang / cancelled debounce), free Enter. */
+const PASTE_PENDING_SAFETY_MS = 2000
 
 type PasteHandlerProps = {
   onPaste?: (text: string) => void
@@ -37,6 +39,9 @@ type PasteHandlerProps = {
  *   non-bracketed key payloads (>pkt=800) route as paste
  * - empty paste → macOS/WSL clipboard image
  * - mid-paste Enter deferred then replayed via `_()` after text paste
+ *
+ * Fork hardening: pastePending must never stick forever — that silently
+ * swallows every subsequent Enter (onSubmit never runs).
  */
 export function usePasteHandler({
   onPaste,
@@ -52,6 +57,10 @@ export function usePasteHandler({
   // Official d7r: l.current = paste pending; c.current = deferred return
   const pastePendingRef = React.useRef(false)
   const deferredReturnRef = React.useRef(false)
+  const pastePendingSinceRef = React.useRef(0)
+  const safetyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
   const innerKeyDownRef = React.useRef(innerHandleKeyDown)
   innerKeyDownRef.current = innerHandleKeyDown
 
@@ -63,18 +72,57 @@ export function usePasteHandler({
   React.useEffect(() => {
     return () => {
       isMountedRef.current = false
+      if (safetyTimerRef.current) {
+        clearTimeout(safetyTimerRef.current)
+        safetyTimerRef.current = null
+      }
     }
   }, [])
 
-  const finishPaste = React.useCallback(() => {
-    if (!isMountedRef.current) return
-    pastePendingRef.current = false
-    deferredReturnRef.current = false
-    setIsPasting(false)
+  const clearSafetyTimer = React.useCallback(() => {
+    if (safetyTimerRef.current) {
+      clearTimeout(safetyTimerRef.current)
+      safetyTimerRef.current = null
+    }
   }, [])
 
+  /** Always clear pending refs (even if unmounted); setState only when mounted. */
+  const finishPaste = React.useCallback(() => {
+    pastePendingRef.current = false
+    deferredReturnRef.current = false
+    pastePendingSinceRef.current = 0
+    clearSafetyTimer()
+    if (isMountedRef.current) {
+      setIsPasting(false)
+    }
+  }, [clearSafetyTimer])
+
+  const markPastePending = React.useCallback(() => {
+    pastePendingRef.current = true
+    pastePendingSinceRef.current = Date.now()
+    clearSafetyTimer()
+    // Hard upper bound so a hung clipboard/image path cannot swallow Enter forever.
+    safetyTimerRef.current = setTimeout(() => {
+      if (pastePendingRef.current) {
+        pastePendingRef.current = false
+        deferredReturnRef.current = false
+        pastePendingSinceRef.current = 0
+        if (isMountedRef.current) {
+          setIsPasting(false)
+        }
+      }
+    }, PASTE_PENDING_SAFETY_MS)
+  }, [clearSafetyTimer])
+
   const checkClipboardForImageImpl = React.useCallback(() => {
-    if (!onImagePaste || !isMountedRef.current) return
+    if (!onImagePaste) {
+      finishPaste()
+      return
+    }
+    if (!isMountedRef.current) {
+      finishPaste()
+      return
+    }
 
     void getImageFromClipboard()
       .then(imageData => {
@@ -137,12 +185,19 @@ export function usePasteHandler({
    * Clears pastePending inside the timeout (same tick semantics as densable).
    */
   const maybeReplayReturn = React.useCallback(() => {
-    setIsPasting(false)
+    clearSafetyTimer()
+    if (isMountedRef.current) {
+      setIsPasting(false)
+    }
     // Defer so React state for the pasted text commits first.
     setTimeout(() => {
-      if (!isMountedRef.current) return
       // Official: l.current = !1 always; then if c.current → replay return
       pastePendingRef.current = false
+      pastePendingSinceRef.current = 0
+      if (!isMountedRef.current) {
+        deferredReturnRef.current = false
+        return
+      }
       if (!deferredReturnRef.current) return
       deferredReturnRef.current = false
       const returnKey: ParsedKey = {
@@ -160,68 +215,102 @@ export function usePasteHandler({
       }
       innerKeyDownRef.current(new KeyboardEvent(returnKey))
     }, 0)
-  }, [])
+  }, [clearSafetyTimer])
 
   const processPastedText = React.useCallback(
     (rawText: string) => {
-      pastePendingRef.current = true
-      const pastedText = rawText.replace(/\[I$/, '').replace(/\[O$/, '')
+      markPastePending()
+      try {
+        const pastedText = rawText.replace(/\[I$/, '').replace(/\[O$/, '')
 
-      // Empty bracketed paste → clipboard image (macOS / WSL official).
-      if (pastedText.length === 0 && canClipboardImage && onImagePaste) {
-        checkClipboardForImage()
-        return
-      }
+        // Empty bracketed paste → clipboard image (macOS / WSL official).
+        if (pastedText.length === 0 && canClipboardImage && onImagePaste) {
+          checkClipboardForImage()
+          return
+        }
 
-      const lines = pastedText
-        .split(/ (?=\/|[A-Za-z]:\\)/)
-        .flatMap(part => part.split('\n'))
-        .filter(line => line.trim())
-      const imagePaths = lines.filter(line => isImageFilePath(line))
+        const lines = pastedText
+          .split(/ (?=\/|[A-Za-z]:\\)/)
+          .flatMap(part => part.split('\n'))
+          .filter(line => line.trim())
+        const imagePaths = lines.filter(line => isImageFilePath(line))
 
-      if (onImagePaste && imagePaths.length > 0) {
-        const isTempScreenshot =
-          /\/TemporaryItems\/.*screencaptureui.*\/Screenshot/i.test(pastedText)
+        if (onImagePaste && imagePaths.length > 0) {
+          const isTempScreenshot =
+            /\/TemporaryItems\/.*screencaptureui.*\/Screenshot/i.test(
+              pastedText,
+            )
 
-        void Promise.all(
-          imagePaths.map(imagePath => tryReadImageFromPath(imagePath)),
-        ).then(results => {
-          if (!isMountedRef.current) return
-
-          const validImages = results.filter(
-            (r): r is NonNullable<typeof r> => r !== null,
+          void Promise.all(
+            imagePaths.map(imagePath => tryReadImageFromPath(imagePath)),
           )
+            .then(results => {
+              if (!isMountedRef.current) {
+                finishPaste()
+                return
+              }
 
-          if (validImages.length > 0) {
-            for (const imageData of validImages) {
-              const filename = basename(imageData.path)
-              onImagePaste(
-                imageData.base64,
-                imageData.mediaType,
-                filename,
-                imageData.dimensions,
-                imageData.path,
+              const validImages = results.filter(
+                (r): r is NonNullable<typeof r> => r !== null,
               )
-            }
-            const nonImageLines = lines.filter(line => !isImageFilePath(line))
-            if (nonImageLines.length > 0) {
-              deliverText(nonImageLines.join('\n'))
-            }
-            finishPaste()
-          } else if (isTempScreenshot && isMacOS) {
-            checkClipboardForImage()
-          } else {
-            deliverText(pastedText)
-            finishPaste()
-          }
-        })
-        return
-      }
 
-      // Official: g(x), _() — text paste may re-fire return that arrived mid-paste.
-      // pastePending is cleared inside maybeReplayReturn's timeout (not here).
-      deliverText(pastedText)
-      maybeReplayReturn()
+              if (validImages.length > 0) {
+                for (const imageData of validImages) {
+                  const filename = basename(imageData.path)
+                  onImagePaste(
+                    imageData.base64,
+                    imageData.mediaType,
+                    filename,
+                    imageData.dimensions,
+                    imageData.path,
+                  )
+                }
+                const nonImageLines = lines.filter(
+                  line => !isImageFilePath(line),
+                )
+                if (nonImageLines.length > 0) {
+                  deliverText(nonImageLines.join('\n'))
+                }
+                finishPaste()
+              } else if (isTempScreenshot && isMacOS) {
+                checkClipboardForImage()
+              } else {
+                try {
+                  deliverText(pastedText)
+                } finally {
+                  finishPaste()
+                }
+              }
+            })
+            .catch(error => {
+              if (isMountedRef.current) {
+                logError(error as Error)
+                try {
+                  deliverText(pastedText)
+                } finally {
+                  finishPaste()
+                }
+              } else {
+                finishPaste()
+              }
+            })
+          return
+        }
+
+        // Official: g(x), _() — text paste may re-fire return that arrived mid-paste.
+        // pastePending is cleared inside maybeReplayReturn's timeout (not here).
+        try {
+          deliverText(pastedText)
+        } catch (error) {
+          logError(error as Error)
+          finishPaste()
+          return
+        }
+        maybeReplayReturn()
+      } catch (error) {
+        logError(error as Error)
+        finishPaste()
+      }
     },
     [
       canClipboardImage,
@@ -229,6 +318,7 @@ export function usePasteHandler({
       deliverText,
       finishPaste,
       isMacOS,
+      markPastePending,
       maybeReplayReturn,
       onImagePaste,
     ],
@@ -238,7 +328,9 @@ export function usePasteHandler({
   const handlePaste = React.useCallback(
     (event: { text: string; preventDefault: () => void }) => {
       event.preventDefault()
-      setIsPasting(true)
+      if (isMountedRef.current) {
+        setIsPasting(true)
+      }
       processPastedText(event.text)
     },
     [processPastedText],
@@ -251,6 +343,15 @@ export function usePasteHandler({
   //   else inner(w)
   const handleKeyDown = React.useCallback(
     (event: KeyboardEvent) => {
+      // Stuck-pending safety: if async paste never finished, release Enter.
+      if (
+        pastePendingRef.current &&
+        pastePendingSinceRef.current > 0 &&
+        Date.now() - pastePendingSinceRef.current > PASTE_PENDING_SAFETY_MS
+      ) {
+        finishPaste()
+      }
+
       // Official densable uses event.key === "return" (KeyboardEvent.key from fag).
       if (pastePendingRef.current && event.key === 'return') {
         event.preventDefault()
@@ -266,13 +367,15 @@ export function usePasteHandler({
         !event.defaultPrevented
       ) {
         event.preventDefault()
-        setIsPasting(true)
+        if (isMountedRef.current) {
+          setIsPasting(true)
+        }
         processPastedText(event.key)
         return
       }
       innerHandleKeyDown(event)
     },
-    [innerHandleKeyDown, onImagePaste, onPaste, processPastedText],
+    [finishPaste, innerHandleKeyDown, onImagePaste, onPaste, processPastedText],
   )
 
   return {

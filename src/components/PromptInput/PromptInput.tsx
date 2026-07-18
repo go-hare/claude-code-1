@@ -306,10 +306,18 @@ function PromptInput({
     setCursorOffset(input.length);
     lastInternalInputRef.current = input;
   }
+  // Synchronous ref for keybinding handlers (chat:submit) that fire within the
+  // same stdin batch as TextInput's onChange. React state lags one tick, so
+  // reading `input` in the handler closure would submit the stale value.
+  const liveInputRef = React.useRef(input);
+  if (input !== liveInputRef.current) {
+    liveInputRef.current = input;
+  }
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
     (value: string) => {
       lastInternalInputRef.current = value;
+      liveInputRef.current = value;
       onInputChange(value);
     },
     [onInputChange],
@@ -324,11 +332,13 @@ function PromptInput({
         const insertText = needsSpace ? ' ' + text : text;
         const newValue = input.slice(0, cursorOffset) + insertText + input.slice(cursorOffset);
         lastInternalInputRef.current = newValue;
+        liveInputRef.current = newValue;
         onInputChange(newValue);
         setCursorOffset(cursorOffset + insertText.length);
       },
       setInputWithCursor: (value: string, cursor: number) => {
         lastInternalInputRef.current = value;
+        liveInputRef.current = value;
         onInputChange(value);
         setCursorOffset(cursor);
       },
@@ -1720,6 +1730,10 @@ function PromptInput({
   // handled by TextInput directly (via onSubmit prop) and useTypeahead (for
   // autocomplete acceptance). Using useKeybindings would cause
   // stopImmediatePropagation on Enter, blocking autocomplete from seeing the key.
+  //
+  // Read liveInputRef.current rather than the frozen `input` prop so a chord
+  // completion in the same stdin batch as typed characters submits the current
+  // value, not the stale prop snapshot.
   const keybindingContext = useOptionalKeybindingContext();
   useEffect(() => {
     if (!keybindingContext || isModalOverlayActive) return;
@@ -1727,10 +1741,10 @@ function PromptInput({
       action: 'chat:submit',
       context: 'Chat',
       handler: () => {
-        void onSubmit(input);
+        void onSubmit(liveInputRef.current);
       },
     });
-  }, [keybindingContext, isModalOverlayActive, onSubmit, input]);
+  }, [keybindingContext, isModalOverlayActive, onSubmit]);
 
   // Chat context keybindings for editing shortcuts
   // Note: history:previous/history:next are NOT handled here. They are passed as

@@ -143,3 +143,16 @@ describe('d7r deliverText fallback (no onPaste)', () => {
     expect(synthetic.name).toBe('')
   })
 })
+
+describe('pastePending stuck-Enter contract', () => {
+  test('return defer only while pastePending is true', () => {
+    const ret = new KeyboardEvent(parsed({ sequence: '\r', name: 'return' }))
+    expect(d7rKeyGate(ret, { pastePending: true, hasPasteHandler: true })).toBe(
+      'defer-return',
+    )
+    // After finishPaste / safety clear, Enter must forward (onSubmit path)
+    expect(
+      d7rKeyGate(ret, { pastePending: false, hasPasteHandler: true }),
+    ).toBe('forward')
+  })
+})

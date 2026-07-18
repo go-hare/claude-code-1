@@ -108,17 +108,27 @@ export function useTextInput({
 
   const offset = externalOffset
   const setOffset = onOffsetChange
-  // App processKeysInBatch can emit several InputEvents in one discreteUpdates
-  // pass before React re-renders. Props (value/offset) stay frozen across that
+  // App processKeysInBatch can emit several keys in one discreteUpdates pass
+  // before React re-renders. Props (value/offset) stay frozen across that
   // batch, so Enter after typed chars would call onSubmit(stale empty/old
   // value) and appear as "swallowed". Track the live text/offset synchronously
   // as we apply each key in the batch.
+  //
+  // Only sync live refs when *props* change — never overwrite a mid-batch live
+  // value with a still-stale prop. Comparing liveValueRef to originalValue is
+  // wrong: after onChange('hello') live is ahead of props until the next
+  // parent render; a sibling re-render with old originalValue would wipe it
+  // and Enter would submit '' (message swallowed).
   const liveValueRef = useRef(originalValue)
   const liveOffsetRef = useRef(offset)
-  if (liveValueRef.current !== originalValue) {
+  const prevPropValueRef = useRef(originalValue)
+  const prevPropOffsetRef = useRef(offset)
+  if (prevPropValueRef.current !== originalValue) {
+    prevPropValueRef.current = originalValue
     liveValueRef.current = originalValue
   }
-  if (liveOffsetRef.current !== offset) {
+  if (prevPropOffsetRef.current !== offset) {
+    prevPropOffsetRef.current = offset
     liveOffsetRef.current = offset
   }
   // `let` so onInput can rebuild from live refs mid-batch; mapKey handlers
