@@ -6,7 +6,7 @@ import { TaskOutput } from '../task/TaskOutput.js'
 /**
  * Windows: #doKill must not shell out via child_process.exec('taskkill …')
  * (tree-kill stock path) — that flashes a console on every Bash abort/timeout.
- * wrapSpawn().kill() exercises the LOCAL windowsHide taskkill path.
+ * wrapSpawn().kill() exercises System32\taskkill.exe + windowsHide + shell:false.
  */
 describe('ShellCommand tree kill (Windows flash)', () => {
   test('kill completes without throwing when child is alive', async () => {

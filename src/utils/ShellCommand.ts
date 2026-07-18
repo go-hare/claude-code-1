@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'child_process'
+import { join } from 'path'
 import { stat } from 'fs/promises'
 import type { Readable } from 'stream'
 import treeKill from 'tree-kill'
@@ -9,6 +10,15 @@ import {
   MAX_TASK_OUTPUT_BYTES_DISPLAY,
 } from './task/diskOutput.js'
 import { TaskOutput } from './task/TaskOutput.js'
+
+/**
+ * Absolute System32\taskkill.exe — densable-style, avoids PATH lookup and any
+ * shell fallback that can flash a console on abort/timeout/Ctrl+C cleanup.
+ */
+function win32TaskkillPath(): string {
+  const root = process.env.SystemRoot || process.env.windir || 'C:\\Windows'
+  return join(root, 'System32', 'taskkill.exe')
+}
 
 /**
  * Kill a process tree.
@@ -24,12 +34,31 @@ function treeKillNoFlash(
   callback?: (error?: Error) => void,
 ): void {
   if (process.platform === 'win32') {
-    const child = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-      windowsHide: true,
-      stdio: 'ignore',
-    })
+    // Prefer absolute taskkill.exe + windowsHide. Bare "taskkill" can resolve via
+    // PATHEXT/cmd on some shells and flash on every Bash abort / SessionEnd kill.
+    const child = spawn(
+      win32TaskkillPath(),
+      ['/PID', String(pid), '/T', '/F'],
+      {
+        windowsHide: true,
+        stdio: 'ignore',
+        shell: false,
+      },
+    )
     child.once('error', err => {
-      callback?.(err)
+      // Fallback: bare name if System32 path missing (unusual).
+      const fallback = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+        shell: false,
+      })
+      fallback.once('error', fallbackErr => {
+        callback?.(fallbackErr)
+      })
+      fallback.once('exit', () => {
+        callback?.()
+      })
+      void err
     })
     child.once('exit', (code, sig) => {
       // taskkill: 0 = killed; 128 / non-zero often means already gone.
