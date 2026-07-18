@@ -240,6 +240,29 @@ function forceExit(exitCode: number): never {
 }
 
 /**
+ * Sync pre-shutdown: disable mouse tracking + drain stdin immediately on
+ * SIGINT/SIGTERM/etc, before gracefulShutdown's first `await import`.
+ *
+ * Without this, mouse SGR bytes still arrive while hooks load and echo as
+ * garbage like `move…` on the main buffer after alt-screen exit (common on
+ * Windows Terminal with bun run dev + Ctrl+C).
+ *
+ * Full alt-screen unmount still happens in cleanupTerminalModes(); this is
+ * the latency-sensitive half only.
+ */
+function preemptTerminalForShutdown(): void {
+  if (!process.stdout.isTTY) {
+    return
+  }
+  try {
+    writeSync(1, DISABLE_MOUSE_TRACKING)
+    instances.get(process.stdout)?.drainStdin()
+  } catch {
+    // Terminal may already be gone.
+  }
+}
+
+/**
  * Set up global signal handlers for graceful shutdown
  */
 export const setupGracefulShutdown = memoize(() => {
@@ -270,19 +293,26 @@ export const setupGracefulShutdown = memoize(() => {
     if (process.argv.includes('-p') || process.argv.includes('--print')) {
       return
     }
+    // Windows: stop mouse tracking + drain stdin BEFORE any async import in
+    // gracefulShutdown. Otherwise leftover SGR mouse bytes print as garbage
+    // ("move…") on the main buffer while hooks.js loads, and look like multi-window noise.
+    preemptTerminalForShutdown()
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGINT' })
     void gracefulShutdown(0)
   })
   process.on('SIGTERM', () => {
+    preemptTerminalForShutdown()
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGTERM' })
     void gracefulShutdown(143) // Exit code 143 (128 + 15) for SIGTERM
   })
   process.on('SIGHUP', () => {
+    preemptTerminalForShutdown()
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGHUP' })
     void gracefulShutdown(129) // Exit code 129 (128 + 1) for SIGHUP
   })
   if (process.platform === 'win32') {
     process.on('SIGBREAK', () => {
+      preemptTerminalForShutdown()
       logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGBREAK' })
       void gracefulShutdown(0)
     })
@@ -420,9 +450,27 @@ export async function gracefulShutdown(
   }
   shutdownInProgress = true
 
+  // Set the exit code that will be used when process naturally exits
+  process.exitCode = exitCode
+
+  // Official background handoff suppresses the resume hint (session continues).
+  if (options?.suppressResumeHint) {
+    resumeHintPrinted = true
+  }
+
+  // Exit alt screen and print resume hint FIRST, before any async operations
+  // (including dynamic import of hooks). Previously we awaited import('./hooks.js')
+  // before cleanupTerminalModes — on Ctrl+C that left mouse tracking on long
+  // enough for SGR "move…" garbage + stacked main-buffer frames (Windows).
+  // signal handlers also call preemptTerminalForShutdown() for the earliest
+  // mouse-off; this is the full unmount/reset path.
+  cleanupTerminalModes()
+  printResumeHint()
+
   // Resolve the SessionEnd hook budget before arming the failsafe so the
   // failsafe can scale with it. Without this, a user-configured 10s hook
   // budget is silently truncated by the 5s failsafe (gh-32712 follow-up).
+  // Import AFTER terminal cleanup so module load latency cannot leak mouse bytes.
   const { executeSessionEndHooks, getSessionEndHookTimeoutMs } = await import(
     './hooks.js'
   )
@@ -441,22 +489,6 @@ export async function gracefulShutdown(
     exitCode,
   )
   failsafeTimer.unref()
-
-  // Set the exit code that will be used when process naturally exits
-  process.exitCode = exitCode
-
-  // Official background handoff suppresses the resume hint (session continues).
-  if (options?.suppressResumeHint) {
-    resumeHintPrinted = true
-  }
-
-  // Exit alt screen and print resume hint FIRST, before any async operations.
-  // This ensures the hint is visible even if the process is killed during
-  // cleanup (e.g., SIGKILL during macOS reboot). Without this, the resume
-  // hint would only appear after cleanup functions, hooks, and analytics
-  // flush — which can take several seconds.
-  cleanupTerminalModes()
-  printResumeHint()
 
   // Flush session data first — this is the most critical cleanup. If the
   // terminal is dead (SIGHUP, SSH disconnect), hooks and analytics may hang
