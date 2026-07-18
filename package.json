@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code",
-  "version": "2.6.36",
+  "version": "2.6.37",
   "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
   "type": "module",
   "author": "DeQiang",
@@ -39,14 +39,14 @@
     "cli-wrapper.cjs"
   ],
   "optionalDependencies": {
-    "@go-hare/claude-code-darwin-arm64": ">=2.6.36",
-    "@go-hare/claude-code-darwin-x64": ">=2.6.36",
-    "@go-hare/claude-code-linux-x64": ">=2.6.36",
-    "@go-hare/claude-code-linux-arm64": ">=2.6.36",
-    "@go-hare/claude-code-linux-x64-musl": ">=2.6.36",
-    "@go-hare/claude-code-linux-arm64-musl": ">=2.6.36",
-    "@go-hare/claude-code-win32-x64": ">=2.6.36",
-    "@go-hare/claude-code-win32-arm64": ">=2.6.36",
+    "@go-hare/claude-code-darwin-arm64": ">=2.6.37",
+    "@go-hare/claude-code-darwin-x64": ">=2.6.37",
+    "@go-hare/claude-code-linux-x64": ">=2.6.37",
+    "@go-hare/claude-code-linux-arm64": ">=2.6.37",
+    "@go-hare/claude-code-linux-x64-musl": ">=2.6.37",
+    "@go-hare/claude-code-linux-arm64-musl": ">=2.6.37",
+    "@go-hare/claude-code-win32-x64": ">=2.6.37",
+    "@go-hare/claude-code-win32-arm64": ">=2.6.37",
     "doubaoime-asr": "^0.1.0"
   },
   "scripts": {

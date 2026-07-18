@@ -79,6 +79,7 @@
 
 | 版本区间 | 要点 |
 | -------- | ---- |
+| **2.6.37** | Windows taskkill 用 System32 绝对路径对齐 densable；Ctrl+C 退出前抢先关鼠标与 cleanup 避 move 残字（LOCAL） |
 | **2.6.36** | Windows taskkill/shell 探测 windowsHide，避免 Bash 中断与 /exit 闪窗（LOCAL） |
 | **2.6.35** | Windows 打包 rg.exe 主路径 spawn+windowsHide，避免 Grep/Glob 闪 conhost |
 | **2.6.34** | Jump-to-bottom 后立即恢复 spinner；agents 左箭头/daemon skew；CSI u 全角冒号等 |
@@ -162,7 +163,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=test-my-key \
 claude --remote-control
 ```
 
-> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.36`。
+> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.37`。
 >
 > 旧文档里的全局包名 `claude-code` 已不再对应本仓库发布流；请使用 `@go-hare/claude-code`。
 

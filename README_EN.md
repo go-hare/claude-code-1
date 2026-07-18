@@ -11,7 +11,7 @@
 
 A reverse-engineered / decompiled source restoration of Anthropic's official Claude Code CLI tool. The goal is to keep the Claude Code interaction model while restoring multi-model providers, remote control, ACP, swarm/pipes, MCP, plugins, KAIROS, Buddy, observability, and local automation.
 
-The published npm package is **`@go-hare/claude-code`** (current line: **2.6.35**). Platform binaries ship as optionalDependencies: `@go-hare/claude-code-<os>-<arch>`.
+The published npm package is **`@go-hare/claude-code`** (current line: **2.6.37**). Platform binaries ship as optionalDependencies: `@go-hare/claude-code-<os>-<arch>`.
 
 | Feature | Notes |
 | ------- | ----- |
@@ -37,6 +37,7 @@ The published npm package is **`@go-hare/claude-code`** (current line: **2.6.35*
 
 | Range | Highlights |
 | ----- | ---------- |
+| **2.6.37** | Windows taskkill via System32 absolute path (densable); Ctrl+C preempt mouse-off + cleanup before hooks (LOCAL, avoids move residue / flash) |
 | **2.6.36** | Windows taskkill/shell probes use windowsHide (no flash on Bash abort/exit; LOCAL) |
 | **2.6.35** | Windows packaged rg.exe main path uses spawn+windowsHide (no conhost flash on Grep/Glob) |
 | **2.6.34** | Jump-to-bottom spinner resume; agents left-arrow / daemon skew; CSI u fullwidth colon |
@@ -61,7 +62,7 @@ claude agents
 claude update
 ```
 
-If install/update fails: `npm rm -g @go-hare/claude-code` then `npm i -g @go-hare/claude-code@latest` (or pin e.g. `@2.6.36`).
+If install/update fails: `npm rm -g @go-hare/claude-code` then `npm i -g @go-hare/claude-code@latest` (or pin e.g. `@2.6.37`).
 
 > Older docs that say `npm i -g claude-code` do **not** match this fork’s publish stream — use `@go-hare/claude-code`.
 
