@@ -1499,6 +1499,12 @@ export const SDKSystemMessageSchema = lazySchema(() =>
       }),
     ),
     fast_mode_state: FastModeStateSchema().optional(),
+    capabilities: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Protocol capabilities this CLI supports, so SDK consumers can feature-detect instead of version-sniffing. Open set — ignore unknown values; check each capability for exactly the behavior you use. 'interrupt_receipt_v1' = the interrupt control_response success payload carries still_queued (uuids of async user messages that survive the interrupt). Absent on older CLIs.",
+      ),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
   }),

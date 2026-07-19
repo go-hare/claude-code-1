@@ -47,6 +47,7 @@ import type {
   PermissionDecisionReason,
 } from 'src/utils/permissions/PermissionResult.js'
 import { hasPermissionsToUseTool } from 'src/utils/permissions/permissions.js'
+import { clearOAuthTokenCache } from 'src/utils/auth.js'
 import { writeToStdout } from 'src/utils/process.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { z } from 'zod/v4'
@@ -57,6 +58,7 @@ import {
   applyPermissionUpdates,
   persistPermissionUpdates,
 } from '../utils/permissions/PermissionUpdate.js'
+import { maybeStripAlwaysAllowPermissionsFromContext } from '../utils/permissions/suppressAlwaysAllow.js'
 import {
   notifyNestedPromptBlocking,
   notifyNestedPromptUnblocking,
@@ -138,6 +140,16 @@ type PendingRequest<T> = {
   schema?: z.Schema
   request: SDKControlRequest
 }
+
+/**
+ * densable dtT — allowlist for stdin `update_environment_variables`.
+ * Bridge session runner may refresh session/OAuth tokens only; arbitrary
+ * process.env writes are refused.
+ */
+export const UPDATE_ENVIRONMENT_VARIABLE_ALLOWLIST = new Set([
+  'CLAUDE_CODE_SESSION_ACCESS_TOKEN',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+])
 
 /**
  * Provides a structured way to read and write SDK messages from stdio,
@@ -482,18 +494,76 @@ export class StructuredIO {
         return undefined
       }
       if (message.type === 'update_environment_variables') {
-        // Apply environment variable updates directly to process.env.
-        // Used by bridge session runner for auth token refresh
-        // (CLAUDE_CODE_SESSION_ACCESS_TOKEN) which must be readable
-        // by the REPL process itself, not just child Bash commands.
-        const variables = message.variables ?? {}
-        const keys = Object.keys(variables)
+        // densable dtT allowlist residual:
+        //   only CLAUDE_CODE_SESSION_ACCESS_TOKEN + CLAUDE_CODE_OAUTH_TOKEN;
+        //   validate object-of-strings; refuse non-allowlisted keys;
+        //   on OAUTH_TOKEN apply clear OAuth token caches (U9).
+        // Used by bridge session runner for auth token refresh which must be
+        // readable by the REPL process itself, not just child Bash commands.
+        const msgRec = message as unknown as Record<string, unknown>
+        const raw = msgRec.variables
+        const requestId =
+          typeof msgRec.request_id === 'string' ? msgRec.request_id : undefined
+        if (
+          typeof raw !== 'object' ||
+          raw === null ||
+          Array.isArray(raw) ||
+          Object.values(raw as Record<string, unknown>).some(
+            v => typeof v !== 'string',
+          )
+        ) {
+          logForDebugging(
+            '[structuredIO] dropped update_environment_variables: variables must be an object of string values',
+          )
+          if (requestId) {
+            writeToStdout(
+              ndjsonSafeStringify({
+                type: 'control_response',
+                response: {
+                  subtype: 'error',
+                  request_id: requestId,
+                  error:
+                    'update_environment_variables: variables must be an object of string values',
+                },
+              }) + '\n',
+            )
+          }
+          return undefined
+        }
+        const variables = raw as Record<string, string>
+        const applied: string[] = []
+        const refused: string[] = []
         for (const [key, value] of Object.entries(variables)) {
+          if (!UPDATE_ENVIRONMENT_VARIABLE_ALLOWLIST.has(key)) {
+            refused.push(key)
+            continue
+          }
           process.env[key] = value
+          applied.push(key)
+        }
+        if (refused.length > 0) {
+          logForDebugging(
+            `[structuredIO] refused update_environment_variables for non-allowlisted keys: ${refused.join(', ')}`,
+          )
+        }
+        // densable U9 — OAuth token cache bust when env OAuth token changes.
+        if (applied.includes('CLAUDE_CODE_OAUTH_TOKEN')) {
+          clearOAuthTokenCache()
         }
         logForDebugging(
-          `[structuredIO] applied update_environment_variables: ${keys.join(', ')}`,
+          `[structuredIO] applied update_environment_variables: ${applied.join(', ')}`,
         )
+        if (requestId) {
+          writeToStdout(
+            ndjsonSafeStringify({
+              type: 'control_response',
+              response: {
+                subtype: 'success',
+                request_id: requestId,
+              },
+            }) + '\n',
+          )
+        }
         return undefined
       }
       if (message.type === 'control_response') {
@@ -736,7 +806,7 @@ export class StructuredIO {
       try {
         // Start the hook evaluation (runs in background)
         const hookPromise = executePermissionRequestHooksForSDK(
-          tool.name,
+          tool,
           toolUseID,
           input,
           toolUseContext,
@@ -1076,7 +1146,7 @@ function exitWithMessage(message: string): never {
  * Returns undefined if no hook made a decision.
  */
 async function executePermissionRequestHooksForSDK(
-  toolName: string,
+  tool: Tool,
   toolUseID: string,
   input: Record<string, unknown>,
   toolUseContext: ToolUseContext,
@@ -1087,7 +1157,7 @@ async function executePermissionRequestHooksForSDK(
 
   // Iterate directly over the generator instead of using `all`
   const hookGenerator = executePermissionRequestHooks(
-    toolName,
+    tool.name,
     toolUseID,
     input,
     toolUseContext,
@@ -1106,9 +1176,15 @@ async function executePermissionRequestHooksForSDK(
       if (decision.behavior === 'allow') {
         const finalInput = decision.updatedInput || input
 
-        // Apply permission updates if provided by hook ("always allow")
-        const permissionUpdates = (decision.updatedPermissions ??
-          []) as unknown as InternalPermissionUpdate[]
+        // Apply permission updates if provided by hook ("always allow").
+        // densable nLe/rLe — strip bare always-allow when tool suppresses it.
+        const permissionUpdates = maybeStripAlwaysAllowPermissionsFromContext(
+          (decision.updatedPermissions ??
+            []) as unknown as InternalPermissionUpdate[],
+          tool,
+          finalInput,
+          toolUseContext,
+        )
         if (permissionUpdates.length > 0) {
           persistPermissionUpdates(permissionUpdates)
           const currentAppState = toolUseContext.getAppState()

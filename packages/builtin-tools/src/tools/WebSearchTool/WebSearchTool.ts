@@ -238,6 +238,7 @@ export const WebSearchTool = buildTool({
     }
 
     const adapter = createAdapter()
+    // densable WebSearch call(e,t): pass ToolUseContext for P_/Tn in API adapter
     const adapterResults = await adapter.search(query, {
       allowedDomains: input.allowed_domains,
       blockedDomains: input.blocked_domains,
@@ -246,6 +247,7 @@ export const WebSearchTool = buildTool({
       searchType: input.search_type,
       contextMaxCharacters: input.context_max_characters,
       signal: context.abortController.signal,
+      toolUseContext: context,
       onProgress(progress) {
         if (onProgress) {
           const progressCounter = Date.now()

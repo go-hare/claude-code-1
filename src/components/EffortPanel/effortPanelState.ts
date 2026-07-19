@@ -1,8 +1,9 @@
 import type { EffortValue } from '../../utils/effort.js'
 
 /**
- * 光标在面板上的位置。仅面板内部使用，不进入 AppState / settings / API。
- * 'ultracode' 不是 EffortLevel；它在本面板里仅作视觉占位与文案引导。
+ * 光标在面板上的位置。仅面板内部使用，不进入 settings / API。
+ * densable: 'ultracode' 确认后走 /effort ultracode（session flag + xhigh），
+ * 不是独立 EffortLevel，但会写入 AppState.ultracode。
  */
 export type PanelPosition =
   | 'low'
@@ -92,21 +93,29 @@ export function getInitialCursor(args: {
 
 // ---- 确认/取消决策（注入 ApplyFn 避免循环依赖 + 便于测试）----
 
-export type ConfirmOutcome =
-  | {
-      kind: 'apply'
-      message: string
-      effortUpdate?: { value: EffortValue | undefined }
-    }
-  | { kind: 'ultracode-hint'; message: string }
-
-export type ApplyFn = (cursor: PanelPosition) => {
-  message: string
-  effortUpdate?: { value: EffortValue | undefined }
+export type EffortUpdatePayload = {
+  value: EffortValue | undefined
+  ultracode?: boolean
 }
 
+export type ConfirmOutcome = {
+  kind: 'apply'
+  message: string
+  effortUpdate?: EffortUpdatePayload
+}
+
+/**
+ * densable applyFn — 接收面板档位（含 ultracode alias），返回 message + effortUpdate。
+ * 生产路径注入 executeEffort(cursor, { model })。
+ */
+export type ApplyFn = (cursor: PanelPosition) => {
+  message: string
+  effortUpdate?: EffortUpdatePayload
+}
+
+/** @deprecated densable sLy: panel ultracode applies session flag; keep for tests/docs. */
 export const ULTRACODE_HINT =
-  'ultracode is not an effort level. Use /ultracode <context> to start a multi-agent workflow.'
+  'Set effort level to ultracode (this session only): xhigh + dynamic workflow orchestration'
 
 export const CANCEL_MESSAGE = 'Effort unchanged.'
 
@@ -114,9 +123,8 @@ export function computeConfirmOutcome(
   cursor: PanelPosition,
   applyFn: ApplyFn,
 ): ConfirmOutcome {
-  if (isUltracode(cursor)) {
-    return { kind: 'ultracode-hint', message: ULTRACODE_HINT }
-  }
+  // densable sLy: ultracode is a real session mode (xhigh + AppState.ultracode),
+  // not a separate hint-only branch.
   const result = applyFn(cursor)
   return {
     kind: 'apply',

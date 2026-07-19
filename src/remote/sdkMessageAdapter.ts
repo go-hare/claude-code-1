@@ -15,9 +15,22 @@ import type {
   StreamEvent,
   SystemMessage,
 } from '../types/message.js'
+import stripAnsi from 'strip-ansi'
 import { logForDebugging } from '../utils/debug.js'
+import { isSystemVisibleOrigin } from '../utils/messagePredicates.js'
 import { fromSDKCompactMetadata } from '../utils/messages/mappers.js'
-import { createUserMessage } from '../utils/messages.js'
+import {
+  createAssistantMessage,
+  createUserMessage,
+  INTERRUPT_MESSAGE,
+  INTERRUPT_MESSAGE_FOR_TOOL_USE,
+} from '../utils/messages.js'
+
+/** densable zi — strip ANSI from remote/SDK display strings. */
+function densableZi(value: unknown): string {
+  if (typeof value !== 'string') return value == null ? '' : String(value)
+  return stripAnsi(value)
+}
 
 /**
  * Converts SDKMessage from CCR to REPL Message types.
@@ -27,43 +40,67 @@ import { createUserMessage } from '../utils/messages.js'
  */
 
 /**
- * Convert an SDKAssistantMessage to an AssistantMessage
+ * Convert an SDKAssistantMessage to an AssistantMessage.
+ * densable pIb: timestamp from SDK when present; stamp isApiErrorMessage from
+ * is_api_error_message (behavior only — no analytics).
  */
 function convertAssistantMessage(msg: SDKAssistantMessage): AssistantMessage {
+  const sdk = msg as SDKAssistantMessage & {
+    timestamp?: string
+    is_api_error_message?: boolean
+  }
   return {
     type: 'assistant',
     message: msg.message!,
     uuid: msg.uuid!,
     requestId: undefined,
-    timestamp: new Date().toISOString(),
+    timestamp: sdk.timestamp ?? new Date().toISOString(),
     error: msg.error,
+    ...(sdk.is_api_error_message ? { isApiErrorMessage: true as const } : {}),
   }
 }
 
 /**
- * Convert an SDKPartialAssistantMessage (streaming) to a StreamEvent
+ * Convert an SDKPartialAssistantMessage (streaming) to a StreamEvent.
+ * densable fIb: pass through event + optional ttftMs from ttft_ms.
  */
 function convertStreamEvent(msg: SDKPartialAssistantMessage): StreamEvent {
+  const sdk = msg as SDKPartialAssistantMessage & { ttft_ms?: number }
   return {
     type: 'stream_event',
     event: msg.event,
+    ...(sdk.ttft_ms !== undefined ? { ttftMs: sdk.ttft_ms } : {}),
   }
 }
 
 /**
- * Convert an SDKResultMessage to a SystemMessage
+ * Convert an SDKResultMessage to a SystemMessage.
+ * densable mIb: strip `[ede_diagnostic]` error lines; if none remain after filter
+ * return null (caller ignores). Success content is unused by convertSDKMessage
+ * (success subtype short-circuits to ignored) but kept for parity with mIb.
  */
-function convertResultMessage(msg: SDKResultMessage): SystemMessage {
-  const isError = msg.subtype !== 'success'
-  const content = isError
-    ? msg.errors?.join(', ') || 'Unknown error'
-    : 'Session completed successfully'
-
+function convertResultMessage(msg: SDKResultMessage): SystemMessage | null {
+  if (msg.subtype === 'success') {
+    return {
+      type: 'system',
+      subtype: 'informational',
+      content: 'Session completed successfully',
+      level: 'info',
+      uuid: msg.uuid!,
+      timestamp: new Date().toISOString(),
+    }
+  }
+  const errors = (msg.errors ?? []).filter(
+    e => !e.startsWith('[ede_diagnostic]'),
+  )
+  if (errors.length === 0) {
+    return null
+  }
   return {
     type: 'system',
     subtype: 'informational',
-    content,
-    level: isError ? 'warning' : 'info',
+    content: densableZi(errors.join(', ')),
+    level: 'warning',
     uuid: msg.uuid!,
     timestamp: new Date().toISOString(),
   }
@@ -97,7 +134,7 @@ function convertStatusMessage(msg: SDKStatusMessage): SystemMessage | null {
     content:
       msg.status === 'compacting'
         ? 'Compacting conversation…'
-        : `Status: ${msg.status}`,
+        : `Status: ${densableZi(msg.status)}`,
     level: 'info',
     uuid: msg.uuid!,
     timestamp: new Date().toISOString(),
@@ -115,7 +152,7 @@ function convertToolProgressMessage(
   return {
     type: 'system',
     subtype: 'informational',
-    content: `Tool ${msg.tool_name} running for ${msg.elapsed_time_seconds}s…`,
+    content: `Tool ${densableZi(msg.tool_name)} running for ${msg.elapsed_time_seconds}s…`,
     level: 'info',
     uuid: msg.uuid!,
     timestamp: new Date().toISOString(),
@@ -198,10 +235,40 @@ export function convertSDKMessage(
           }),
         }
       }
+      // densable Nke order after tool_result convert:
+      // parent_tool_use_id → ignored; isSynthetic && !Ace(origin) → ignored;
+      // convertUserTextMessages OR interrupt text (DV/kH) → convert.
+      if (userMsg.parent_tool_use_id) {
+        return { type: 'ignored' }
+      }
+      const origin = (
+        userMsg as {
+          origin?: { kind?: string; senderTaskId?: string } | null
+        }
+      ).origin
+      if (
+        (userMsg as { isSynthetic?: boolean }).isSynthetic === true &&
+        !isSystemVisibleOrigin(origin)
+      ) {
+        return { type: 'ignored' }
+      }
+      const isInterruptText =
+        content === INTERRUPT_MESSAGE ||
+        (Array.isArray(content) &&
+          content.some(
+            b =>
+              b.type === 'text' &&
+              (b.text === INTERRUPT_MESSAGE ||
+                b.text === INTERRUPT_MESSAGE_FOR_TOOL_USE),
+          ))
       // When converting historical events, user-typed messages need to be
       // rendered (they weren't added locally by the REPL). Skip tool_results
-      // here — already handled above.
-      if (opts?.convertUserTextMessages && !isToolResult) {
+      // here — already handled above. densable also always converts interrupt
+      // placeholders even without convertUserTextMessages.
+      if (
+        (opts?.convertUserTextMessages || isInterruptText) &&
+        !isToolResult
+      ) {
         if (typeof content === 'string' || Array.isArray(content)) {
           return {
             type: 'message',
@@ -225,16 +292,17 @@ export function convertSDKMessage(
         event: convertStreamEvent(msg as SDKPartialAssistantMessage),
       }
 
-    case 'result':
-      // Only show result messages for errors. Success results are noise
-      // in multi-turn sessions (isLoading=false is sufficient signal).
-      if ((msg as SDKResultMessage).subtype !== 'success') {
-        return {
-          type: 'message',
-          message: convertResultMessage(msg as SDKResultMessage),
-        }
+    case 'result': {
+      // densable Nke: success → ignored; error mIb may return null when only
+      // [ede_diagnostic] lines remain after filter.
+      if ((msg as SDKResultMessage).subtype === 'success') {
+        return { type: 'ignored' }
       }
-      return { type: 'ignored' }
+      const resultMsg = convertResultMessage(msg as SDKResultMessage)
+      return resultMsg
+        ? { type: 'message', message: resultMsg }
+        : { type: 'ignored' }
+    }
 
     case 'system': {
       const sysMsg = msg as SDKSystemMessage
@@ -242,6 +310,14 @@ export function convertSDKMessage(
         return { type: 'message', message: convertInitMessage(sysMsg) }
       }
       if (sysMsg.subtype === 'status') {
+        // densable Nke: status=requesting → stream_request_start (spinner mode).
+        const status = (msg as SDKStatusMessage).status
+        if (status === 'requesting') {
+          return {
+            type: 'stream_event',
+            event: { type: 'stream_request_start' },
+          }
+        }
         const statusMsg = convertStatusMessage(msg as SDKStatusMessage)
         return statusMsg
           ? { type: 'message', message: statusMsg }
@@ -254,6 +330,131 @@ export function convertSDKMessage(
             msg as SDKCompactBoundaryMessage,
           ),
         }
+      }
+      // densable Nke system extras (behavior only):
+      // informational / permission_denied / local_command_output /
+      // model_refusal_fallback / model_refusal_no_fallback (gty refused uuid).
+      if (sysMsg.subtype === 'informational') {
+        const info = sysMsg as SDKSystemMessage & {
+          content?: string
+          level?: string
+          tool_use_id?: string
+          prevent_continuation?: boolean
+        }
+        return {
+          type: 'message',
+          message: {
+            type: 'system',
+            subtype: 'informational',
+            content: densableZi(info.content),
+            level: (info.level as SystemMessage['level']) ?? 'info',
+            isMeta: false,
+            uuid: info.uuid!,
+            timestamp: new Date().toISOString(),
+            ...(info.tool_use_id ? { toolUseID: info.tool_use_id } : {}),
+            ...(info.prevent_continuation
+              ? { preventContinuation: info.prevent_continuation }
+              : {}),
+          } as SystemMessage,
+        }
+      }
+      if (sysMsg.subtype === 'permission_denied') {
+        // densable: under convertToolResults, permission_denied is ignored
+        // (direct-connect tool path renders denials elsewhere).
+        if (opts?.convertToolResults) {
+          return { type: 'ignored' }
+        }
+        const denied = sysMsg as SDKSystemMessage & {
+          tool_name?: string
+          decision_reason?: string
+          decision_reason_type?: string
+          tool_use_id?: string
+        }
+        const reason = denied.decision_reason
+          ? ` — ${densableZi(denied.decision_reason)}`
+          : denied.decision_reason_type
+            ? ` (${densableZi(denied.decision_reason_type)})`
+            : ''
+        return {
+          type: 'message',
+          message: {
+            type: 'system',
+            subtype: 'informational',
+            content: densableZi(
+              `Permission denied: ${denied.tool_name ?? ''}${reason}`,
+            ),
+            level: 'warning',
+            uuid: denied.uuid!,
+            timestamp: new Date().toISOString(),
+            toolUseID: denied.tool_use_id,
+          } as SystemMessage,
+        }
+      }
+      if (
+        sysMsg.subtype === 'model_refusal_fallback' ||
+        sysMsg.subtype === 'model_refusal_no_fallback'
+      ) {
+        // densable gty #172 — preserve refused_user_message_uuid / retracted ids
+        // for rewind/edit-and-retry consumers.
+        const ref = sysMsg as SDKSystemMessage & {
+          content?: string
+          trigger?: string
+          direction?: string
+          original_model?: string
+          fallback_model?: string
+          request_id?: string | null
+          api_refusal_category?: string | null
+          api_refusal_explanation?: string | null
+          refused_user_message_uuid?: string | null
+          retracted_message_uuids?: string[]
+        }
+        return {
+          type: 'message',
+          message: {
+            type: 'system',
+            subtype: sysMsg.subtype,
+            content: densableZi(ref.content) ?? '',
+            level: 'warning',
+            isMeta: false,
+            uuid: ref.uuid!,
+            timestamp: new Date().toISOString(),
+            ...(ref.trigger !== undefined ? { trigger: ref.trigger } : {}),
+            ...(ref.direction !== undefined
+              ? { direction: ref.direction }
+              : {}),
+            ...(ref.original_model !== undefined
+              ? { originalModel: ref.original_model }
+              : {}),
+            ...(ref.fallback_model !== undefined
+              ? { fallbackModel: ref.fallback_model }
+              : {}),
+            ...(ref.request_id !== undefined
+              ? { requestId: ref.request_id }
+              : {}),
+            ...(ref.api_refusal_category !== undefined
+              ? { apiRefusalCategory: ref.api_refusal_category }
+              : {}),
+            ...(ref.api_refusal_explanation !== undefined
+              ? { apiRefusalExplanation: ref.api_refusal_explanation }
+              : {}),
+            refusedUserMessageUuid: ref.refused_user_message_uuid ?? null,
+            ...(ref.retracted_message_uuids !== undefined
+              ? { retractedMessageUuids: ref.retracted_message_uuids }
+              : {}),
+          } as SystemMessage,
+        }
+      }
+      if (sysMsg.subtype === 'local_command_output') {
+        // densable XC: XC({content:zi(e.content), uuid:()=>e.uuid})
+        // pDd uses the same uuid factory for outer uuid + message.id.
+        const loc = sysMsg as SDKSystemMessage & { content?: string }
+        const synthetic = createAssistantMessage({
+          content: densableZi(loc.content),
+          ...(loc.uuid
+            ? { uuid: () => loc.uuid as string }
+            : {}),
+        })
+        return { type: 'message', message: synthetic }
       }
       // hook_response and other subtypes
       logForDebugging(

@@ -36,8 +36,17 @@ const NULL_RENDERING_TYPES = [
   'token_usage',
   'total_tokens_reminder',
   'ultrathink_effort',
+  // densable workflow_keyword_request — meta reminder only, no UI
+  'workflow_keyword_request',
+  // densable workflow_size_guideline_change — meta reminder only
+  'workflow_size_guideline_change',
+  // densable ultra_effort_enter/exit — meta reminder only
+  'ultra_effort_enter',
+  'ultra_effort_exit',
   'max_turns_reached',
   'task_reminder',
+  // densable tool_search_usage_reminder — meta juniper reminder only
+  'tool_search_usage_reminder',
   'auto_mode',
   'auto_mode_exit',
   'output_token_usage',

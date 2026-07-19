@@ -27,6 +27,7 @@ export { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResour
 export { LocalMemoryRecallTool } from './tools/LocalMemoryRecallTool/LocalMemoryRecallTool.js'
 export { VaultHttpFetchTool } from './tools/VaultHttpFetchTool/VaultHttpFetchTool.js'
 export { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
+export { RefreshMcpToolsTool } from './tools/RefreshMcpToolsTool/RefreshMcpToolsTool.js'
 export { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
 export { SkillTool } from './tools/SkillTool/SkillTool.js'
 export { TaskOutputTool } from './tools/TaskOutputTool/TaskOutputTool.js'

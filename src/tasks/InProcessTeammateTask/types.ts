@@ -72,6 +72,11 @@ export type InProcessTeammateTaskState = TaskStateBase & {
   // Lifecycle
   isIdle: boolean
   shutdownRequested: boolean
+  /**
+   * densable Aba/gze panel deadline for idle teammates.
+   * undefined = no deadline; timestamp = hide after this time when idle-released.
+   */
+  evictAfter?: number
 
   // Callbacks to notify when teammate becomes idle (runtime only)
   // Used by leader to efficiently wait without polling

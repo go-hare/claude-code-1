@@ -80,6 +80,8 @@ import {
 } from './screenReaderTree.js';
 import { stringWidth } from './stringWidth.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
+import type { TerminalResponse } from './parse-keypress.js';
+import { cursorPosition as cursorPositionQuery, type TerminalQuery } from './terminal-querier.js';
 import {
   CURSOR_HOME,
   cursorMove,
@@ -94,9 +96,10 @@ import {
   DBP,
   DFE,
   DISABLE_MOUSE_TRACKING,
-  ENABLE_MOUSE_TRACKING,
+  enableMouseTracking,
   ENTER_ALT_SCREEN,
   exitAltScreenSequence,
+  type MouseTrackingMode,
   SHOW_CURSOR,
 } from './termio/dec.js';
 import {
@@ -308,9 +311,10 @@ export default class Ink {
   // LF-induced scroll when screen.height === terminalRows) and gates
   // alt-screen-aware SIGCONT/resize/unmount handling.
   private altScreenActive = false;
-  // Set alongside altScreenActive so SIGCONT resume knows whether to
-  // re-enable mouse tracking (not all <AlternateScreen> uses want it).
-  private altScreenMouseTracking = false;
+  // Official densable altScreenMouseTracking: "off" | "scroll" | "full".
+  // Set by <AlternateScreen> so SIGCONT / resize / reassert re-enable the
+  // same DEC mode set (not all AlternateScreen uses want tracking).
+  private altScreenMouseTracking: MouseTrackingMode = 'off';
   // True when the previous frame's screen buffer cannot be trusted for
   // blit — selection overlay mutated it, resetFramesForAltScreen()
   // replaced it with blanks, or forceRedraw() reset it to 0×0. Forces
@@ -361,6 +365,16 @@ export default class Ink {
     this.terminalRows = options.stdout.rows || 24;
     this.altScreenParkPatch = makeAltScreenParkPatch(this.terminalRows);
     this.stylePool = new StylePool();
+    // densable Bsu(this.stylePool) — register for basalt_meadow glyph telemetry.
+    // Soft global hook avoids @ant/ink → src hard dependency.
+    try {
+      const g = globalThis as typeof globalThis & {
+        __claude_code_register_stylepool?: (pool: { size: number; overflowed: boolean }) => void;
+      };
+      g.__claude_code_register_stylepool?.(this.stylePool);
+    } catch {
+      // ignore
+    }
     this.charPool = new CharPool();
     this.hyperlinkPool = new HyperlinkPool();
     this.frontFrame = emptyFrame(
@@ -537,8 +551,8 @@ export default class Ink {
     // doesn't exit alt-screen. Do NOT write ERASE_SCREEN: render() below
     // can take ~80ms; erasing first leaves the screen blank that whole time.
     if (this.altScreenActive && !this.isPaused && this.options.stdout.isTTY) {
-      if (this.altScreenMouseTracking) {
-        this.options.stdout.write(ENABLE_MOUSE_TRACKING);
+      if (this.altScreenMouseTracking !== 'off') {
+        this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
       }
       this.resetFramesForAltScreen();
       this.needsEraseBeforePaint = true;
@@ -573,7 +587,7 @@ export default class Ink {
       // kitty/modifyOtherKeys stays active. exitAlternateScreen re-enables.
       DISABLE_KITTY_KEYBOARD +
         DISABLE_MODIFY_OTHER_KEYS +
-        (this.altScreenMouseTracking ? DISABLE_MOUSE_TRACKING : '') + // disable mouse (no-op if off)
+        (this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') + // disable mouse (no-op if off)
         (this.altScreenActive ? '' : '\x1b[?1049h') + // enter alt (already in alt if fullscreen)
         '\x1b[?1004l' + // disable focus reporting
         '\x1b[0m' + // reset attributes
@@ -600,7 +614,7 @@ export default class Ink {
       (this.altScreenActive ? ENTER_ALT_SCREEN : '') + // re-enter alt — vim's rmcup dropped us to main
         '\x1b[2J' + // clear screen (now alt if fullscreen)
         '\x1b[H' + // cursor home
-        (this.altScreenMouseTracking ? ENABLE_MOUSE_TRACKING : '') + // re-enable mouse (skip if CLAUDE_CODE_DISABLE_MOUSE)
+        enableMouseTracking(this.altScreenMouseTracking) + // re-enable mouse (skip if off)
         (this.altScreenActive ? '' : '\x1b[?1049l') + // exit alt (non-fullscreen only)
         '\x1b[?25l', // hide cursor (Ink manages)
     );
@@ -1197,6 +1211,31 @@ export default class Ink {
     return true;
   }
 
+  /**
+   * densable probeExternalClear — detect external alt-screen wipe (cmd+k /
+   * terminal clear) while our cursor is parked below row 1.
+   *
+   * Gate: alt-screen active, not paused/unmounted, displayCursor.y >= 1.
+   * Query DECXCPR via querier; if terminal reports row===1 the external
+   * clear reset the cursor home while we still think it's parked mid-
+   * screen → forceRedraw and return true.
+   */
+  async probeExternalClear(querier: {
+    send: (
+      query: TerminalQuery<Extract<TerminalResponse, { type: 'cursorPosition' }>>,
+    ) => Promise<Extract<TerminalResponse, { type: 'cursorPosition' }> | undefined>;
+  }): Promise<boolean> {
+    if (this.altScreenActive === false || this.isPaused || this.isUnmounted) {
+      return false;
+    }
+    const parked = this.displayCursor;
+    if (!parked || parked.y < 1) return false;
+    const reported = await querier.send(cursorPositionQuery());
+    if (reported?.row !== 1) return false;
+    this.forceRedraw();
+    return true;
+  }
+
   private hasStaleTerminalSize(): boolean {
     return (
       (this.options.stdout.columns || 80) !== this.terminalColumns ||
@@ -1225,16 +1264,30 @@ export default class Ink {
    * the first alt-screen frame (and first main-screen frame on exit) is
    * a full redraw with no stale diff state.
    */
-  setAltScreenActive(active: boolean, mouseTracking = false): void {
+  /**
+   * Official densable setAltScreenActive(active, mode="off").
+   * `mouseTracking` accepts boolean (legacy) or densable mode string.
+   */
+  setAltScreenActive(active: boolean, mouseTracking: boolean | MouseTrackingMode = 'off'): void {
     if (this.altScreenActive === active) return;
     this.altScreenActive = active;
-    this.altScreenMouseTracking = active && mouseTracking;
+    const mode: MouseTrackingMode = !active
+      ? 'off'
+      : mouseTracking === true
+        ? 'full'
+        : mouseTracking === false
+          ? 'off'
+          : mouseTracking;
+    this.altScreenMouseTracking = mode;
     if (active) {
       this.resetFramesForAltScreen();
     } else {
       this.repaint();
     }
   }
+
+  /** Official densable getMouseMode — current alt-screen tracking mode. */
+  getMouseMode = (): MouseTrackingMode => this.altScreenMouseTracking;
 
   get isAltScreenActive(): boolean {
     return this.altScreenActive;
@@ -1280,8 +1333,8 @@ export default class Ink {
     }
     if (!this.altScreenActive) return;
     // Mouse tracking — idempotent, safe to re-assert on every stdin gap.
-    if (this.altScreenMouseTracking) {
-      this.options.stdout.write(ENABLE_MOUSE_TRACKING);
+    if (this.altScreenMouseTracking !== 'off') {
+      this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking));
     }
     // Alt-screen re-entry — destructive (ERASE_SCREEN). Only for callers that
     // have a strong signal the terminal actually dropped mode 1049.
@@ -1308,7 +1361,7 @@ export default class Ink {
     // through unmount's flag bookkeeping. Prevents any late isAltScreenActive
     // reader from thinking we're still fullscreen after process.exit cleanup.
     this.altScreenActive = false;
-    this.altScreenMouseTracking = false;
+    this.altScreenMouseTracking = 'off';
     // Cancel any pending throttled render so it doesn't fire between
     // cleanupTerminalModes() and process.exit() and write to main screen.
     this.scheduleRender.cancel?.();
@@ -1341,7 +1394,7 @@ export default class Ink {
    */
   private reenterAltScreen(): void {
     this.options.stdout.write(
-      ENTER_ALT_SCREEN + ERASE_SCREEN + CURSOR_HOME + (this.altScreenMouseTracking ? ENABLE_MOUSE_TRACKING : ''),
+      ENTER_ALT_SCREEN + ERASE_SCREEN + CURSOR_HOME + enableMouseTracking(this.altScreenMouseTracking),
     );
     this.resetFramesForAltScreen();
   }
@@ -1863,6 +1916,7 @@ export default class Ink {
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
         dispatchPasteEvent={this.dispatchPasteEvent}
+        getMouseMode={this.getMouseMode}
         isScreenReaderEnabled={this.isScreenReaderEnabled || this.accessibilityMode}
       >
         <TerminalWriteProvider value={this.writeRaw}>{node}</TerminalWriteProvider>
@@ -1914,7 +1968,7 @@ export default class Ink {
         this.scheduleRender.cancel?.();
         writeSync(1, exitAltScreenSequence());
         this.altScreenActive = false;
-        this.altScreenMouseTracking = false;
+        this.altScreenMouseTracking = 'off';
       }
       // Disable mouse tracking — unconditional because altScreenActive can be
       // stale if AlternateScreen's unmount (which flips the flag) raced a

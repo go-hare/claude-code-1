@@ -104,12 +104,25 @@ export function findUltrareviewTriggerPositions(
   return findKeywordTriggerPositions(text, 'ultrareview')
 }
 
+/**
+ * densable fSs — "ultracode" keyword opts the turn into Workflow orchestration.
+ * Same quote/path exclusions as ultraplan (pSs).
+ */
+export function findUltracodeTriggerPositions(text: string): TriggerPosition[] {
+  return findKeywordTriggerPositions(text, 'ultracode')
+}
+
 export function hasUltraplanKeyword(text: string): boolean {
   return findUltraplanTriggerPositions(text).length > 0
 }
 
 export function hasUltrareviewKeyword(text: string): boolean {
   return findUltrareviewTriggerPositions(text).length > 0
+}
+
+/** densable vCd */
+export function hasUltracodeKeyword(text: string): boolean {
+  return findUltracodeTriggerPositions(text).length > 0
 }
 
 /**

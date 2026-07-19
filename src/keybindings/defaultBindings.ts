@@ -39,7 +39,8 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // will show an error if users try to override these keys.
       'ctrl+c': 'app:interrupt',
       'ctrl+d': 'app:exit',
-      'ctrl+l': 'app:redraw',
+      // densable: ctrl+l is Chat chat:clearInput (double-press /clear), not
+      // Global app:redraw. app:redraw stays registered without a default key.
       'ctrl+t': 'app:toggleTodos',
       'ctrl+o': 'app:toggleTranscript',
       ...(feature('KAIROS') || feature('KAIROS_BRIEF')
@@ -47,6 +48,14 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
         : {}),
       'ctrl+shift+o': 'app:toggleTeammatePreview',
       'ctrl+r': 'history:search',
+      // densable: Global ctrl/meta+up/down scroll the diff file list when a
+      // DiffDialog/DiffPanel is mounted (no-op handlers otherwise).
+      'ctrl+up': 'app:diffFileListUp',
+      'ctrl+down': 'app:diffFileListDown',
+      'meta+up': 'app:diffFileListUp',
+      'meta+down': 'app:diffFileListDown',
+      // densable: open latest session artifact URL in the browser
+      'ctrl+]': 'app:openArtifact',
       // File navigation. cmd+ bindings only fire on kitty-protocol terminals;
       // ctrl+shift is the portable fallback.
       ...(feature('QUICK_SEARCH')
@@ -64,21 +73,31 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
     context: 'Chat',
     bindings: {
       escape: 'chat:cancel',
+      // densable: ctrl+l clears input (1st) / double-press submits /clear (2nd)
+      'ctrl+l': 'chat:clearInput',
+      // densable: cmd+k clearScreen (kitty protocol) — same double-press /clear
+      'cmd+k': 'chat:clearScreen',
       // ctrl+x chord prefix avoids shadowing readline editing keys (ctrl+a/b/e/f/...).
       'ctrl+x ctrl+k': 'chat:killAgents',
       [MODE_CYCLE_KEY]: 'chat:cycleMode',
       'meta+p': 'chat:modelPicker',
       'meta+o': 'chat:fastMode',
       'meta+t': 'chat:thinkingToggle',
+      // densable: toggle suppress ultracode keyword for one prompt
+      'meta+w': 'chat:workflowKeywordToggle',
       enter: 'chat:submit',
+      // densable newline (also used when enter is rebound away from submit)
+      'ctrl+j': 'chat:newline',
       up: 'history:previous',
       down: 'history:next',
       // Editing shortcuts (defined here, migration in progress)
-      // Undo has two bindings to support different terminal behaviors:
+      // Undo bindings mirror densable terminal variants:
       // - ctrl+_ for legacy terminals (send \x1f control char)
-      // - ctrl+shift+- for Kitty protocol (sends physical key with modifiers)
+      // - ctrl+- / ctrl+shift+- / ctrl+shift+_ for Kitty / alternate encodings
       'ctrl+_': 'chat:undo',
+      'ctrl+-': 'chat:undo',
       'ctrl+shift+-': 'chat:undo',
+      'ctrl+shift+_': 'chat:undo',
       // ctrl+x ctrl+e is the readline-native edit-and-execute-command binding.
       'ctrl+x ctrl+e': 'chat:externalEditor',
       'ctrl+g': 'chat:externalEditor',
@@ -122,17 +141,28 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       right: 'select:nextValue',
       // Toggle/activate the selected setting (space only — enter saves & closes)
       space: 'select:accept',
-      // Save and close the config panel
+      // Save and close the config panel (fork: densable uses enter→select:accept;
+      // local Config binds settings:close so Enter saves+exits).
       enter: 'settings:close',
       // Enter search mode
       '/': 'settings:search',
       // Retry loading usage data (only active on error)
       r: 'settings:retry',
+      // densable d/w/t → periodDay/periodWeek (Usage breakdown) / sortByTokens (Skills)
+      d: 'settings:periodDay',
+      w: 'settings:periodWeek',
+      t: 'settings:sortByTokens',
+      // densable Config/list half-page (Settings context last-wins over Global)
+      'ctrl+u': 'scroll:halfPageUp',
+      'ctrl+d': 'scroll:halfPageDown',
     },
   },
   {
     context: 'Confirmation',
     bindings: {
+      // densable binds y/n → confirm:yes/no; this fork intentionally omits
+      // them (see confirmation-keybindings.test.ts — letters steal typeable
+      // inputs / accidental dismiss). enter/escape remain yes/no.
       enter: 'confirm:yes',
       escape: 'confirm:no',
       // Navigation for dialogs with lists
@@ -177,6 +207,25 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // q — pager convention (less, tmux copy-mode). Transcript is a modal
       // reading view with no prompt, so q-as-literal-char has no owner.
       q: 'transcript:exit',
+      // densable pager (less/tmux copy-mode). Handlers live on
+      // ScrollKeybindingHandler with context Transcript when isModal.
+      // Not bound on Scroll: ctrl+u/d/b/f/j/k/g own real keys in Chat.
+      'ctrl+u': 'scroll:halfPageUp',
+      'ctrl+d': 'scroll:halfPageDown',
+      'ctrl+b': 'scroll:fullPageUp',
+      'ctrl+f': 'scroll:fullPageDown',
+      'ctrl+n': 'scroll:lineDown',
+      'ctrl+p': 'scroll:lineUp',
+      g: 'scroll:top',
+      'shift+g': 'scroll:bottom',
+      j: 'scroll:lineDown',
+      k: 'scroll:lineUp',
+      space: 'scroll:fullPageDown',
+      b: 'scroll:fullPageUp',
+      up: 'scroll:lineUp',
+      down: 'scroll:lineDown',
+      home: 'scroll:top',
+      end: 'scroll:bottom',
     },
   },
   {
@@ -187,13 +236,17 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       tab: 'historySearch:accept',
       'ctrl+c': 'historySearch:cancel',
       enter: 'historySearch:execute',
+      // densable: HistorySearchDialog scope cycle (session → project → everywhere)
+      'ctrl+s': 'historySearch:cycleScope',
     },
   },
   {
     context: 'Task',
     bindings: {
-      // Background running foreground tasks (bash commands, agents)
-      // In tmux, users must press ctrl+b twice (tmux prefix escape)
+      // densable: dual bind — cohesion path prefers ctrl+x ctrl+b so bare
+      // ctrl+b does not steal readline backward-char when KB cohesion is on.
+      // In tmux, bare ctrl+b still needs the prefix double-press escape.
+      'ctrl+x ctrl+b': 'task:background',
       'ctrl+b': 'task:background',
     },
   },
@@ -201,6 +254,8 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
     context: 'ThemePicker',
     bindings: {
       'ctrl+t': 'theme:toggleSyntaxHighlighting',
+      // densable: edit focused custom theme
+      'ctrl+e': 'theme:editCustom',
     },
   },
   {
@@ -220,6 +275,14 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // useInput so they can conditionally propagate.
       'ctrl+shift+c': 'selection:copy',
       'cmd+c': 'selection:copy',
+      // densable keyboard selection extend (also handled via preDispatch when
+      // a selection already exists; bindings enable rebind + first-extend path)
+      'shift+left': 'selection:extendLeft',
+      'shift+right': 'selection:extendRight',
+      'shift+up': 'selection:extendUp',
+      'shift+down': 'selection:extendDown',
+      'shift+home': 'selection:extendLineStart',
+      'shift+end': 'selection:extendLineEnd',
     },
   },
   {
@@ -241,6 +304,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
     },
   },
   // Footer indicator navigation (tasks, teams, diff, loop)
+  // densable: x → footer:close (dismiss agent / type-to-exit when not handled)
   {
     context: 'Footer',
     bindings: {
@@ -252,6 +316,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       left: 'footer:previous',
       enter: 'footer:openSelected',
       escape: 'footer:clearSelection',
+      x: 'footer:close',
     },
   },
   // Message selector (rewind dialog) navigation
@@ -304,7 +369,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
         },
       ]
     : []),
-  // Diff dialog navigation
+  // Diff dialog navigation (+ densable detail-mode pager when viewing a file)
   {
     context: 'DiffDialog',
     bindings: {
@@ -314,16 +379,30 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       up: 'diff:previousFile',
       down: 'diff:nextFile',
       enter: 'diff:viewDetails',
+      // densable: j/k mirror up/down (list = file, detail = scroll line)
+      j: 'diff:nextFile',
+      k: 'diff:previousFile',
+      // densable detail pager (handlers no-op outside detail + modal scrollRef)
+      pageup: 'scroll:pageUp',
+      pagedown: 'scroll:pageDown',
+      space: 'scroll:fullPageDown',
+      'shift+space': 'scroll:fullPageUp',
+      b: 'scroll:fullPageUp',
+      g: 'scroll:top',
+      'shift+g': 'scroll:bottom',
+      home: 'scroll:top',
+      end: 'scroll:bottom',
       // Note: diff:back is handled by left arrow in detail mode
     },
   },
-  // Model picker effort cycling (ant-only)
+  // Model picker effort cycling + densable s:thisSessionOnly
   {
     context: 'ModelPicker',
     bindings: {
       left: 'modelPicker:decreaseEffort',
       right: 'modelPicker:increaseEffort',
       space: 'modelPicker:toggle1M',
+      s: 'modelPicker:thisSessionOnly',
     },
   },
   // Effort panel (slash /effort without args)
@@ -343,6 +422,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
     },
   },
   // Select component navigation (used by /model, /resume, permission prompts, etc.)
+  // densable: pageup/pagedown/home/end → select:page*/first/last
   {
     context: 'Select',
     bindings: {
@@ -352,6 +432,10 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       k: 'select:previous',
       'ctrl+n': 'select:next',
       'ctrl+p': 'select:previous',
+      pageup: 'select:pageUp',
+      pagedown: 'select:pageDown',
+      home: 'select:first',
+      end: 'select:last',
       enter: 'select:accept',
       escape: 'select:cancel',
     },
@@ -363,6 +447,8 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
     bindings: {
       space: 'plugin:toggle',
       i: 'plugin:install',
+      // densable f → plugin:favorite (GlobalConfig.favoritePlugins)
+      f: 'plugin:favorite',
     },
   },
 ]

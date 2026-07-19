@@ -11,6 +11,8 @@ export type LspServerConfig = z.infer<ReturnType<typeof LspServerConfigSchema>>
 export type ScopedLspServerConfig = LspServerConfig & {
   scope: 'dynamic' // 运行时由插件挂载的作用域标记
   source: string // 来源插件名（用于 `plugin:name:server` 前缀等）
+  /** densable pluginSource: LoadedPlugin.source / repository for pluginUsage F$ */
+  pluginSource?: string
 }
 
 /** LSP 子进程生命周期状态（由 `LSPServerInstance` 维护）。 */

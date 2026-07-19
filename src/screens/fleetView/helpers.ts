@@ -48,6 +48,33 @@ export function deriveBand(session: SessionEntry): StatusBand {
   return 'active'
 }
 
+/**
+ * densable O7e — header stats buckets (blocked / active / completed).
+ * Unlike deriveBand, PR-review jobs still count as completed here; pinned
+ * busy jobs count as active. Matches RU.blocked/active/completed.
+ */
+export type StatsBand = 'blocked' | 'active' | 'completed'
+
+export function deriveStatsBand(session: SessionEntry): StatsBand {
+  if (session.status === 'busy' || session.status === 'running') {
+    return 'active'
+  }
+  if (
+    session.status === 'completed' ||
+    session.status === 'failed' ||
+    session.status === 'killed' ||
+    session.status === 'idle' ||
+    session.status === 'done' ||
+    session.status === 'stopped'
+  ) {
+    return 'completed'
+  }
+  if (session.status === 'waiting' || session.waitingFor) {
+    return 'blocked'
+  }
+  return 'active'
+}
+
 // ---------------------------------------------------------------------------
 // Activity derivation
 // ---------------------------------------------------------------------------
@@ -128,7 +155,7 @@ const BAND_ORDER: Record<StatusBand, number> = {
 }
 
 /**
- * Sort sessions: pinned first, then by band, then by createdAt (newest first).
+ * Sort sessions: pinned first, then by band, then sortOrder/createdAt.
  * Official: XE_ sorts by JC6 (sortOrder ?? createdAt)
  */
 export function sortSessions(sessions: SessionEntry[]): SessionEntry[] {
@@ -140,9 +167,62 @@ export function sortSessions(sessions: SessionEntry[]): SessionEntry[] {
     const bandA = BAND_ORDER[deriveBand(a)]
     const bandB = BAND_ORDER[deriveBand(b)]
     if (bandA !== bandB) return bandA - bandB
+    // Manual reorder (lower sortOrder first) when both set
+    const soA = a.sortOrder
+    const soB = b.sortOrder
+    if (soA !== undefined && soB !== undefined && soA !== soB) {
+      return soA - soB
+    }
+    if (soA !== undefined && soB === undefined) return -1
+    if (soA === undefined && soB !== undefined) return 1
     // Then by most recently created (newest first)
     return b.startedAt - a.startedAt
   })
+}
+
+/** Soft-archive filter for main list (official archive hides without delete). */
+export function partitionArchivedSessions(sessions: SessionEntry[]): {
+  active: SessionEntry[]
+  earlier: SessionEntry[]
+} {
+  const active: SessionEntry[] = []
+  const earlier: SessionEntry[] = []
+  for (const s of sessions) {
+    if (s.archived) earlier.push(s)
+    else active.push(s)
+  }
+  return { active, earlier }
+}
+
+/** Official reserved group names that cannot be assigned (cNg / soo). */
+const RESERVED_FLEET_GROUP_NAMES = new Set([
+  'pinned',
+  'ungrouped',
+  '(ungrouped)',
+  'past',
+  '(earlier)',
+  'earlier',
+  'review',
+  'blocked',
+  'working',
+  'done',
+])
+
+/**
+ * Normalize custom group name (official group assign / Ges).
+ * Empty / whitespace / reserved → ungrouped (undefined).
+ * Max 64 chars (official lNg).
+ */
+export function normalizeFleetGroupName(raw: string): string | undefined {
+  const cleaned = raw
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strip control
+    .replace(/[\x00-\x1f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 64)
+  if (!cleaned) return undefined
+  if (RESERVED_FLEET_GROUP_NAMES.has(cleaned.toLowerCase())) return undefined
+  return cleaned
 }
 
 // ---------------------------------------------------------------------------
@@ -200,23 +280,50 @@ export function parsePrRef(text: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch parsing
+// Dispatch parsing (official e$a)
 // ---------------------------------------------------------------------------
 
+/** Official H5b — minimum free-form intent length (not bash/template match). */
+export const FLEET_MIN_INTENT_LEN = 4
+
+/** Official Vkt — paste above this char count becomes a placeholder. */
+export const FLEET_PASTE_CHAR_THRESHOLD = 800
+
+/**
+ * Parse dispatch input text into a structured command.
+ * Upstream: e$a (parseDispatch)
+ *
+ * - `!cmd` → bash exec
+ * - `@name` → template / routine / cwd basename mention (stripped from intent)
+ * - leading template name token → matched template
+ */
 export type ParsedDispatch = {
   intent: string
   matched: boolean
   cwd?: string
+  /** Bash mode / `!` prefix — command to exec (not an agent prompt). */
+  exec?: string
+  routine?: string
+  templateName?: string
 }
 
-/**
- * Parse dispatch input text into a structured command.
- * Upstream: xnq (parseDispatch)
- */
-export function parseDispatch(input: string): ParsedDispatch {
-  const trimmed = input.trim()
-  const lower = trimmed.toLowerCase()
+export type DispatchMentionTarget = {
+  name: string
+}
 
+export function parseDispatch(
+  input: string,
+  templates: readonly DispatchMentionTarget[] = [],
+  cwdByBasename: Readonly<Record<string, string>> = {},
+  routines: readonly DispatchMentionTarget[] = [],
+): ParsedDispatch {
+  const trimmed = input.trim()
+  if (trimmed.startsWith('!')) {
+    const exec = trimmed.slice(1).trim()
+    return { intent: '', matched: !!exec, exec }
+  }
+
+  const lower = trimmed.toLowerCase()
   // Skip special prefixes (a: = attach, s: = search, o: = open)
   if (
     lower.startsWith('a:') ||
@@ -226,7 +333,121 @@ export function parseDispatch(input: string): ParsedDispatch {
     return { intent: '', matched: false }
   }
 
-  return { intent: trimmed, matched: trimmed.length > 0 }
+  let matchedTemplate: DispatchMentionTarget | undefined
+  let cwd: string | undefined
+  let routine: string | undefined
+
+  const stripped = trimmed
+    .replace(/(?:^|\s)@(\S+)/g, (full, name: string) => {
+      const y = name.toLowerCase()
+      const t = templates.find(b => b.name.toLowerCase() === y)
+      if (t) {
+        matchedTemplate ??= t
+        return ''
+      }
+      const r = routines.find(b => b.name.toLowerCase() === y)
+      if (r) {
+        routine ??= r.name
+        return ''
+      }
+      const key = Object.keys(cwdByBasename).find(b => b.toLowerCase() === y)
+      if (key) {
+        cwd ??= cwdByBasename[key]
+        return ''
+      }
+      return full
+    })
+    .trim()
+
+  const d = stripped.search(/\s/)
+  const first = (d < 0 ? stripped : stripped.slice(0, d)).toLowerCase()
+  const firstTemplate = matchedTemplate
+    ? undefined
+    : templates.find(m => m.name.toLowerCase() === first)
+  if (firstTemplate) {
+    return {
+      intent: d < 0 ? '' : stripped.slice(d + 1).trim(),
+      matched: true,
+      cwd,
+      routine,
+      templateName: firstTemplate.name,
+    }
+  }
+  if (matchedTemplate) {
+    return {
+      intent: stripped,
+      matched: true,
+      cwd,
+      routine,
+      templateName: matchedTemplate.name,
+    }
+  }
+  return {
+    intent: stripped,
+    matched: false,
+    cwd,
+    routine,
+  }
+}
+
+/** Official hat — newline count for paste placeholder. */
+export function countNewlines(text: string): number {
+  return (text.match(/\r\n|\r|\n/g) || []).length
+}
+
+/** Official uor — `[Pasted text #N]` / `+M lines`. */
+export function formatPastedTextPlaceholder(
+  id: number,
+  newlineCount: number,
+): string {
+  if (newlineCount === 0) return `[Pasted text #${id}]`
+  return `[Pasted text #${id} +${newlineCount} lines]`
+}
+
+/**
+ * Official jye — expand `[Pasted text #N …]` refs using stored paste map.
+ */
+export function expandPastedTextRefs(
+  text: string,
+  pastes: Readonly<Record<number, string>>,
+): string {
+  if (!text) return text
+  const re =
+    /\[(Pasted text|Image|Audio|\.\.\.Truncated text) #(\d+)(?: \+\d+ lines)?(\.)*\]/g
+  const matches = [...text.matchAll(re)].filter(m => {
+    const id = parseInt(m[2] || '0', 10)
+    return id > 0 && pastes[id] !== undefined
+  })
+  if (matches.length === 0) return text
+  let out = text
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const m = matches[i]!
+    const id = parseInt(m[2]!, 10)
+    const content = pastes[id]
+    if (content === undefined) continue
+    const index = m.index ?? 0
+    out = out.slice(0, index) + content + out.slice(index + m[0].length)
+  }
+  return out
+}
+
+/**
+ * Build cwd basename → absolute path map from sessions (for @mention).
+ * Later sessions win on basename collision (official map overwrite).
+ */
+export function buildCwdBasenameMap(
+  sessions: readonly SessionEntry[],
+): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const s of sessions) {
+    if (!s.cwd) continue
+    const base = s.cwd
+      .replace(/[/\\]+$/, '')
+      .split(/[/\\]/)
+      .pop()
+    if (base) map[base] = s.cwd
+  }
+  return map
 }
 
 // ---------------------------------------------------------------------------
@@ -276,10 +497,91 @@ export function pickIcon(
 
 /**
  * Calculate how many "done" sessions to show before folding.
- * Upstream: oQ_ (doneCapForRows)
+ * Upstream: oQ_ (doneCapForRows) — legacy; FleetView prefers XFa doneCap.
  */
 export function doneCapForRows(totalRows: number): number {
   return Math.max(Math.floor(totalRows / 5), 2)
+}
+
+/** densable JFa — only fold done when (done+earlier) >= doneCap + JFa. */
+export const FLEET_DONE_FOLD_MIN_HIDDEN = 3
+
+/**
+ * densable zwf gate (simplified without earlier interleave / sticky id):
+ * if totalDone < doneCap + JFa → Infinity (no fold); else doneCap.
+ * doneCap=0 is valid (compact short terminal may yield 0).
+ */
+export function fleetDoneFoldAt(
+  doneCount: number,
+  earlierCount: number,
+  doneCap: number,
+): number {
+  const total = doneCount + earlierCount
+  if (total < doneCap + FLEET_DONE_FOLD_MIN_HIDDEN) {
+    return Number.POSITIVE_INFINITY
+  }
+  return Math.max(0, doneCap)
+}
+
+/**
+ * densable XFa(e=rows, t=listEst):
+ *   remaining(header) = rows - N5b(8) - header - t
+ *   if remaining(F5b=4) >= Fwf(3) → full header + that doneCap
+ *   else → compactHeader ($5b=2) + remaining(2) doneCap
+ */
+export type FleetHeaderBudget = {
+  doneCap: number
+  compactHeader: boolean
+}
+
+/** densable N5b / F5b / $5b / Fwf */
+const FLEET_CHROME_ROWS = 8
+const FLEET_FULL_HEADER_ROWS = 4
+const FLEET_COMPACT_HEADER_ROWS = 2
+const FLEET_MIN_DONE_ROWS = 3
+
+export function fleetHeaderBudget(
+  termRows: number,
+  listRowEstimate: number,
+): FleetHeaderBudget {
+  const remaining = (headerRows: number) =>
+    termRows - FLEET_CHROME_ROWS - headerRows - listRowEstimate
+  const withFull = remaining(FLEET_FULL_HEADER_ROWS)
+  if (withFull >= FLEET_MIN_DONE_ROWS) {
+    return { doneCap: withFull, compactHeader: false }
+  }
+  return {
+    doneCap: Math.max(0, remaining(FLEET_COMPACT_HEADER_ROWS)),
+    compactHeader: true,
+  }
+}
+
+/**
+ * densable XFa `t` argument.
+ * State mode: non-done jobs outside folded groups + max(0, distinctGroups*2-1)
+ * Other modes: allJobs + max(0, distinctGroups*2-1)
+ */
+export function fleetXfaListEstimate(opts: {
+  mode: 'state' | 'other'
+  distinctGroupCount: number
+  /** state: count of non-done jobs whose group is not folded */
+  visibleNonDoneJobs?: number
+  /** other modes: all main jobs */
+  allJobs?: number
+}): number {
+  const groupPad = Math.max(0, opts.distinctGroupCount * 2 - 1)
+  if (opts.mode === 'state') {
+    return (opts.visibleNonDoneJobs ?? 0) + groupPad
+  }
+  return (opts.allJobs ?? 0) + groupPad
+}
+
+/** densable wpe flag only. */
+export function shouldCompactFleetHeader(
+  termRows: number,
+  listRowEstimate: number,
+): boolean {
+  return fleetHeaderBudget(termRows, listRowEstimate).compactHeader
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +658,20 @@ export const FLEET_STATE_GROUP_LABELS: Record<FleetStateGroup, string> = {
   done: 'Completed',
 }
 
+/**
+ * Official L5b — helper copy under state headers / empty groups.
+ */
+export const FLEET_STATE_GROUP_DESCRIPTIONS: Record<
+  Exclude<FleetStateGroup, 'pinned'>,
+  string
+> = {
+  review: '',
+  blocked: 'Sessions that have a question or need your decision land here',
+  working:
+    'Sessions Claude is actively working on — they keep running even if you close the terminal',
+  done: 'Finished sessions wait here for you to review',
+}
+
 export type FleetFlatRow =
   | { kind: 'header'; group: string }
   | { kind: 'job'; session: SessionEntry }
@@ -391,19 +707,21 @@ export function buildStateModeFlatRows(input: {
     rows.push({ kind: 'header', group })
     if (input.foldedGroups.has(group)) continue
 
+    // densable: fold when finite doneCap and items exceed it (0 is valid).
     if (
       group === 'done' &&
       !input.doneCapExpanded &&
-      input.doneCap > 0 &&
+      Number.isFinite(input.doneCap) &&
       items.length > input.doneCap
     ) {
-      for (const session of items.slice(0, input.doneCap)) {
+      const cap = Math.max(0, input.doneCap)
+      for (const session of items.slice(0, cap)) {
         rows.push({ kind: 'job', session })
       }
       rows.push({
         kind: 'fold',
         group: 'done',
-        hidden: items.length - input.doneCap,
+        hidden: items.length - cap,
       })
     } else {
       for (const session of items) {
@@ -432,6 +750,143 @@ export function buildDirectoryModeFlatRows(input: {
     }
   }
   return rows
+}
+
+/**
+ * Custom group mode (official fleetViewGroupMode === 'group').
+ * Headers are group:name (or group:ungrouped). Optional earlier fold.
+ */
+export function buildCustomGroupModeFlatRows(input: {
+  groups: Array<[string, SessionEntry[]]>
+  foldedGroups: ReadonlySet<string>
+  earlier?: SessionEntry[]
+  earlierExpanded?: boolean
+}): FleetFlatRow[] {
+  const rows: FleetFlatRow[] = []
+  for (const [name, items] of input.groups) {
+    if (items.length === 0) continue
+    const group = `group:${name}`
+    rows.push({ kind: 'header', group })
+    if (input.foldedGroups.has(group)) continue
+    for (const session of items) {
+      rows.push({ kind: 'job', session })
+    }
+  }
+  const earlier = input.earlier ?? []
+  if (earlier.length > 0) {
+    rows.push({ kind: 'header', group: 'earlier' })
+    if (!input.foldedGroups.has('earlier') && input.earlierExpanded) {
+      for (const session of earlier) {
+        rows.push({ kind: 'job', session })
+      }
+    } else if (!input.foldedGroups.has('earlier') && !input.earlierExpanded) {
+      rows.push({ kind: 'fold', group: 'earlier', hidden: earlier.length })
+    }
+  }
+  return rows
+}
+
+/**
+ * Build footer chord hints aligned with official FleetView footer.
+ * Help mode mirrors official n_k/Swf: include "@ to mention" when canMention.
+ */
+export function buildFleetFooterHints(input: {
+  focusArea: 'list' | 'dispatch'
+  viewMode: 'list' | 'rename' | 'reply' | 'group'
+  deletePending: boolean
+  ungroupPending: boolean
+  rowKind?: 'header' | 'job' | 'fold'
+  band?: StatusBand
+  canPin: boolean
+  canGroup: boolean
+  canRename: boolean
+  /** Official Swf — show "@ to mention" when sessions exist. */
+  canMention?: boolean
+  /** Dispatch composer is in bash (`!`) mode. */
+  bashMode?: boolean
+  pinned?: boolean
+  openSlots: number
+  exitArmed: boolean
+  runningCount: number
+  helpOpen: boolean
+}): string {
+  if (input.helpOpen) {
+    const parts: string[] = []
+    parts.push('shift+\u2191\u2193 to reorder')
+    if (input.canRename) parts.push('ctrl+r to rename')
+    if (input.canGroup) parts.push('ctrl+e to set group')
+    parts.push('ctrl+s to switch views')
+    if (input.canMention) parts.push('@ to mention')
+    if (input.canPin) {
+      parts.push(input.pinned ? 'ctrl+t to unpin' : 'ctrl+t to pin to top')
+    }
+    if (input.openSlots > 0) {
+      parts.push(
+        input.openSlots === 1
+          ? 'alt+1 to open'
+          : `alt+1-${Math.min(input.openSlots, 9)} to open`,
+      )
+    }
+    parts.push('esc to quit')
+    parts.push('? to close')
+    return parts.join(' \u00b7 ')
+  }
+  if (input.exitArmed) {
+    const keep =
+      input.runningCount > 0
+        ? ` \u00b7 ${input.runningCount} agent${input.runningCount === 1 ? '' : 's'} will keep running`
+        : ''
+    // Esc / q / Ctrl+C all share requestExit double-arm (densable fC).
+    return `Press Esc/Ctrl-C again to exit${keep}`
+  }
+  if (input.viewMode === 'rename') {
+    return 'enter to save \u00b7 esc to cancel'
+  }
+  if (input.viewMode === 'group') {
+    return 'enter to set group \u00b7 empty = ungroup \u00b7 esc to cancel'
+  }
+  if (input.viewMode === 'reply') {
+    return 'enter to send \u00b7 esc to cancel'
+  }
+  if (input.deletePending) {
+    return input.ungroupPending
+      ? 'ctrl+x again to ungroup'
+      : 'ctrl+x again to delete'
+  }
+  if (input.focusArea === 'dispatch') {
+    if (input.bashMode) {
+      return 'enter run bash \u00b7 backspace exit ! \u00b7 esc clear \u00b7 ? shortcuts'
+    }
+    return 'enter dispatch \u00b7 ! bash \u00b7 @ mention \u00b7 shift+enter newline \u00b7 \u2191 list \u00b7 esc clear'
+  }
+
+  const parts: string[] = []
+  if (input.rowKind === 'fold') {
+    parts.push('enter to show')
+  } else if (input.rowKind === 'header') {
+    parts.push('enter to fold')
+  } else {
+    parts.push('enter to open')
+    if (input.band === 'blocked') parts.push('space to reply')
+  }
+  if (input.canRename) parts.push('ctrl+r to rename')
+  if (input.canGroup) parts.push('ctrl+e to set group')
+  parts.push('ctrl+s to switch views')
+  if (input.canMention) parts.push('@ to mention')
+  if (input.canPin) {
+    parts.push(input.pinned ? 'ctrl+t to unpin' : 'ctrl+t to pin to top')
+  }
+  if (input.openSlots > 0) {
+    parts.push(
+      input.openSlots === 1
+        ? 'alt+1 to open'
+        : `alt+1-${Math.min(input.openSlots, 9)} to open`,
+    )
+  }
+  parts.push('shift+\u2191\u2193 reorder')
+  parts.push('esc/ctrl+c to exit')
+  parts.push('? for shortcuts')
+  return parts.join(' \u00b7 ')
 }
 
 // ---------------------------------------------------------------------------

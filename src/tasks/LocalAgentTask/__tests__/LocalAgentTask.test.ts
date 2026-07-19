@@ -36,9 +36,11 @@ mock.module('../../utils/task/diskOutput.js', diskOutputMock)
 
 // Capture enqueuePendingNotification calls for verification
 const enqueuedNotifications: string[] = []
+const enqueuedNotificationCmds: Array<Record<string, unknown>> = []
 mock.module('src/utils/messageQueueManager.js', () => ({
   enqueuePendingNotification: (cmd: any) => {
     enqueuedNotifications.push(cmd.value)
+    enqueuedNotificationCmds.push({ ...cmd })
   },
 }))
 
@@ -196,6 +198,7 @@ function makeAssistantMessage(
 
 afterEach(() => {
   enqueuedNotifications.length = 0
+  enqueuedNotificationCmds.length = 0
 })
 
 // ─── Tests ───
@@ -767,14 +770,135 @@ describe('enqueueAgentNotification', () => {
     expect(enqueuedNotifications[0]).toContain(
       '<task_id>test-agent-001</task_id>',
     )
+    // densable BRt: status XML stays "completed"; summary uses "finished"
     expect(enqueuedNotifications[0]).toContain('<status>completed</status>')
     expect(enqueuedNotifications[0]).toContain(
-      'Agent "refactor auth" completed',
+      'Agent "refactor auth" finished',
     )
     expect(enqueuedNotifications[0]).toContain('<result>Done!</result>')
+    // densable BRt usage tag is subagent_tokens (value = totalTokens)
     expect(enqueuedNotifications[0]).toContain(
-      '<total_tokens>5000</total_tokens>',
+      '<subagent_tokens>5000</subagent_tokens>',
     )
+    // densable BRt fixed <note> after summary
+    expect(enqueuedNotifications[0]).toContain(
+      'A task-notification fires each time this agent stops with no live background children of its own',
+    )
+    expect(enqueuedNotifications[0]).toContain(
+      'same task-id may notify more than once',
+    )
+    // note precedes result (densable order: summary → note → result → usage)
+    const noteIdx = enqueuedNotifications[0]!.indexOf('<note>')
+    const resultIdx = enqueuedNotifications[0]!.indexOf('<result>')
+    expect(noteIdx).toBeGreaterThan(-1)
+    expect(resultIdx).toBeGreaterThan(noteIdx)
+  })
+
+  test('BRt Ul-escapes summary and result XML text', async () => {
+    const { setAppState } = createSetAppState({
+      tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
+    })
+
+    await enqueueAgentNotification({
+      taskId: 'test-agent-001',
+      description: 'fix a < b & c > d',
+      status: 'completed',
+      setAppState: setAppState as any,
+      finalMessage: 'use <tag> & "quotes"',
+    })
+
+    expect(enqueuedNotifications).toHaveLength(1)
+    const msg = enqueuedNotifications[0]!
+    // densable Ul(E)/Ul(s): & < > escaped inside summary/result
+    expect(msg).toContain('Agent "fix a &lt; b &amp; c &gt; d" finished')
+    expect(msg).toContain('<result>use &lt;tag&gt; &amp; "quotes"</result>')
+    expect(msg).not.toContain('<result>use <tag>')
+  })
+
+  test('BRt omits empty result tag (densable x=s?result:"")', async () => {
+    // densable BRt: x=s?`\n<result>${Ul(s)}</result>`:""
+    const { setAppState } = createSetAppState({
+      tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
+    })
+
+    await enqueueAgentNotification({
+      taskId: 'test-agent-001',
+      description: 'silent kill',
+      status: 'killed',
+      setAppState: setAppState as any,
+      // no finalMessage → no result section
+    })
+
+    expect(enqueuedNotifications).toHaveLength(1)
+    const msg = enqueuedNotifications[0]!
+    expect(msg).toContain('<status>killed</status>')
+    expect(msg).toContain('Agent "silent kill" was stopped')
+    expect(msg).not.toContain('<result>')
+    // note still present after summary
+    expect(msg).toContain('<note>A task-notification fires each time')
+  })
+
+  test('BRt routes to owner when ownerBusy (densable _&&m?Qc(m):mi())', async () => {
+    // densable: agentId = ownerBusy && owner ? owner : undefined(mi)
+    // priority always "next"; taskId stamped for Jeo
+    const { setAppState } = createSetAppState({
+      tasks: {
+        owner: makeRunningTask({
+          id: 'owner',
+          agentId: 'owner',
+          status: 'running',
+          notified: true,
+          keepaliveReasons: new Set(['agent:child']),
+        }),
+        child: makeRunningTask({
+          id: 'child',
+          agentId: 'child',
+          ownerAgentId: 'owner',
+          notificationTargetAgentId: 'owner' as any,
+          notified: false,
+        }),
+      },
+    })
+
+    await enqueueAgentNotification({
+      taskId: 'child',
+      description: 'nested',
+      status: 'completed',
+      setAppState: setAppState as any,
+      finalMessage: 'ok',
+    })
+
+    expect(enqueuedNotificationCmds).toHaveLength(1)
+    expect(enqueuedNotificationCmds[0]!.agentId).toBe('owner')
+    expect(enqueuedNotificationCmds[0]!.priority).toBe('next')
+    expect(enqueuedNotificationCmds[0]!.taskId).toBe('child')
+    expect(enqueuedNotificationCmds[0]!.mode).toBe('task-notification')
+  })
+
+  test('BRt main session leaves agentId undefined; priority next (densable)', async () => {
+    // No owner / not busy → mi() mapped to undefined; densable priority always next
+    const { setAppState } = createSetAppState({
+      tasks: {
+        child: makeRunningTask({
+          id: 'child',
+          agentId: 'child',
+          notified: false,
+        }),
+      },
+    })
+
+    await enqueueAgentNotification({
+      taskId: 'child',
+      description: 'nested',
+      status: 'completed',
+      setAppState: setAppState as any,
+      finalMessage: 'ok',
+    })
+
+    expect(enqueuedNotificationCmds).toHaveLength(1)
+    expect(enqueuedNotificationCmds[0]!.agentId).toBeUndefined()
+    expect(enqueuedNotificationCmds[0]!.priority).toBe('next')
+    expect(enqueuedNotificationCmds[0]!.taskId).toBe('child')
   })
 
   test('enqueues failed notification with error', async () => {
@@ -812,6 +936,46 @@ describe('enqueueAgentNotification', () => {
     expect(enqueuedNotifications).toHaveLength(1)
     expect(enqueuedNotifications[0]).toContain('<status>killed</status>')
     expect(enqueuedNotifications[0]).toContain('Agent "test" was stopped')
+  })
+
+  test('BRt killedBy parent/user wording', async () => {
+    const { setAppState } = createSetAppState({
+      tasks: { a: makeRunningTask({ id: 'a', notified: false }) },
+    })
+    await enqueueAgentNotification({
+      taskId: 'a',
+      description: 'worker',
+      status: 'killed',
+      killedBy: 'parent',
+      setAppState: setAppState as any,
+    })
+    expect(enqueuedNotifications[0]).toContain(
+      'Agent "worker" was stopped by Claude',
+    )
+
+    const { setAppState: set2 } = createSetAppState({
+      tasks: { b: makeRunningTask({ id: 'b', notified: false }) },
+    })
+    enqueuedNotifications.length = 0
+    await enqueueAgentNotification({
+      taskId: 'b',
+      description: 'worker',
+      status: 'killed',
+      killedBy: 'user',
+      setAppState: set2 as any,
+    })
+    expect(enqueuedNotifications[0]).toContain(
+      'Agent "worker" was stopped by user',
+    )
+  })
+
+  test('killAsyncAgent stamps killedBy on task state', () => {
+    const { setAppState, getState } = createSetAppState({
+      tasks: { 'test-agent-001': makeRunningTask() },
+    })
+    killAsyncAgent('test-agent-001', setAppState as any, 'parent')
+    expect(getState().tasks['test-agent-001'].status).toBe('killed')
+    expect(getState().tasks['test-agent-001'].killedBy).toBe('parent')
   })
 
   test('prevents duplicate notifications', async () => {

@@ -55,7 +55,21 @@ const questionSchema = lazySchema(() =>
       .min(2)
       .max(4)
       .describe(
-        `The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). There should be no 'Other' option, that will be provided automatically.`,
+        // densable m1i / thistle_skein — clarify multiSelect still capped at 2-4.
+        (() => {
+          let schemaDescFixes = false;
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { isJuniperSchemaDescFixesEnabled } =
+              require('src/utils/systemPromptArms.js') as typeof import('src/utils/systemPromptArms.js');
+            schemaDescFixes = isJuniperSchemaDescFixesEnabled();
+          } catch {
+            schemaDescFixes = false;
+          }
+          return schemaDescFixes
+            ? "The available choices for this question. Must have 2-4 options (this cap applies to multiSelect too — group or split if you have more). Each option should be a distinct choice; mutually exclusive unless multiSelect is enabled. There should be no 'Other' option, that will be provided automatically."
+            : "The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). There should be no 'Other' option, that will be provided automatically.";
+        })(),
       ),
     multiSelect: z
       .boolean()

@@ -25,6 +25,12 @@ export type PromptOverlayData = {
   suggestions: SuggestionItem[];
   selectedSuggestion: number;
   maxColumnWidth?: number;
+  /** densable yGe emptyMessage — "No commands match …". */
+  emptyMessage?: string;
+  /** densable yGe hover/click — optional for fullscreen portal. */
+  hoveredId?: string | null;
+  onSelect?: (index: number) => void;
+  onHoverChange?: (id: string | null) => void;
 };
 
 type Setter<T> = (d: T | null) => void;

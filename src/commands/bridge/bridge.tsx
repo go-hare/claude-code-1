@@ -23,6 +23,11 @@ import { logForDebugging } from '../../utils/debug.js';
 type Props = {
   onDone: LocalJSXCommandOnDone;
   name?: string;
+  /**
+   * Official P2t — project/session grouping id for Remote Control sessions.
+   * Stored on AppState as replBridgeSessionGroupingId and passed to initReplBridge.
+   */
+  sessionGroupingId?: string;
 };
 
 /**
@@ -37,7 +42,7 @@ type Props = {
  * Running /remote-control when already connected shows a dialog with the session
  * URL and options to disconnect or continue.
  */
-function BridgeToggle({ onDone, name }: Props): React.ReactNode {
+function BridgeToggle({ onDone, name, sessionGroupingId }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const replBridgeConnected = useAppState(s => s.replBridgeConnected);
   const replBridgeEnabled = useAppState(s => s.replBridgeEnabled);
@@ -77,6 +82,8 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
             ...prev,
             showRemoteCallout: true,
             replBridgeInitialName: name,
+            // Official P2t: seed grouping before callout enables bridge.
+            replBridgeSessionGroupingId: sessionGroupingId,
           };
         });
         onDone('', { display: 'system' });
@@ -89,13 +96,25 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
         action: 'connect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       });
       setAppState(prev => {
-        if (prev.replBridgeEnabled && !prev.replBridgeOutboundOnly) return prev;
+        // Official: if already full bidirectional, keep state but allow
+        // sessionGroupingId update when provided (P2t usb path simplified).
+        if (prev.replBridgeEnabled && !prev.replBridgeOutboundOnly) {
+          if (
+            sessionGroupingId !== undefined &&
+            prev.replBridgeSessionGroupingId !== sessionGroupingId
+          ) {
+            return { ...prev, replBridgeSessionGroupingId: sessionGroupingId };
+          }
+          return prev;
+        }
         return {
           ...prev,
           replBridgeEnabled: true,
           replBridgeExplicit: true,
           replBridgeOutboundOnly: false,
           replBridgeInitialName: name,
+          // Official P2t → replBridgeSessionGroupingId
+          replBridgeSessionGroupingId: sessionGroupingId,
         };
       });
       onDone('Remote Control connecting\u2026', {
@@ -147,13 +166,22 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
   }, [showQR, displayUrl]);
 
   function handleDisconnect(): void {
+    // Official Fsb/ohs: disable bridge + clear session grouping.
     setAppState(prev => {
-      if (!prev.replBridgeEnabled) return prev;
+      if (
+        !prev.replBridgeEnabled &&
+        !prev.replBridgeExplicit &&
+        !prev.replBridgeOutboundOnly &&
+        prev.replBridgeSessionGroupingId === undefined
+      ) {
+        return prev;
+      }
       return {
         ...prev,
         replBridgeEnabled: false,
         replBridgeExplicit: false,
         replBridgeOutboundOnly: false,
+        replBridgeSessionGroupingId: undefined,
       };
     });
     logEvent('tengu_bridge_command', {
@@ -265,11 +293,44 @@ async function checkBridgePrerequisites(): Promise<string | null> {
   return null;
 }
 
+/**
+ * Parse `/remote-control [name] [--project <id>]` style args.
+ * Official passes sessionGroupingId (P2t) separately into BridgeToggle.
+ */
+function parseRemoteControlArgs(args: string): {
+  name?: string;
+  sessionGroupingId?: string;
+} {
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  let sessionGroupingId: string | undefined;
+  const nameParts: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (t === '--project' || t === '--session-grouping') {
+      const next = tokens[i + 1];
+      if (next && !next.startsWith('-')) {
+        sessionGroupingId = next;
+        i++;
+        continue;
+      }
+    }
+    if (t.startsWith('--project=') || t.startsWith('--session-grouping=')) {
+      sessionGroupingId = t.slice(t.indexOf('=') + 1) || undefined;
+      continue;
+    }
+    nameParts.push(t);
+  }
+  const name = nameParts.join(' ').trim() || undefined;
+  return { name, sessionGroupingId };
+}
+
 export async function call(
   onDone: LocalJSXCommandOnDone,
   _context: ToolUseContext & LocalJSXCommandContext,
   args: string,
 ): Promise<React.ReactNode> {
-  const name = args.trim() || undefined;
-  return <BridgeToggle onDone={onDone} name={name} />;
+  const { name, sessionGroupingId } = parseRemoteControlArgs(args);
+  return (
+    <BridgeToggle onDone={onDone} name={name} sessionGroupingId={sessionGroupingId} />
+  );
 }

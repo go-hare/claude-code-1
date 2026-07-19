@@ -1,6 +1,13 @@
 import { LRUCache } from 'lru-cache'
 import { normalize } from 'path'
 
+/**
+ * densable ACg — keep body content for entries ≤ this many UTF-8 bytes, or
+ * when keepContent is set (CLAUDE.md seeds). Larger non-kept entries store
+ * content:"" + contentHash so ALe equality still works without RAM bloat.
+ */
+export const FILE_STATE_KEEP_CONTENT_MAX_BYTES = 4096
+
 export type FileState = {
   content: string
   timestamp: number
@@ -12,6 +19,41 @@ export type FileState = {
   // Edit/Write must require an explicit Read first. `content` here holds the
   // RAW disk bytes (for getChangedFiles diffing), not what the model saw.
   isPartialView?: boolean
+  /**
+   * densable seededFromContext — entry was auto-seeded into the parent context
+   * (CLAUDE.md / nested memory), not an explicit model Read. createSubagentContext
+   * clones strip this flag (qwe stripSeededFromContext) so subagent Edit/Write
+   * does not inherit "already read" from parent seed alone.
+   */
+  seededFromContext?: boolean
+  /**
+   * densable keepContent — never strip body for large files (seeded CLAUDE.md).
+   * Sticky across set() when not re-specified (t.keepContent ?? prior).
+   */
+  keepContent?: boolean
+  /** densable contentHash — Bun.hash(content).toString(36) for ALe equality. */
+  contentHash?: string
+  /** densable contentLength — original content.length before optional strip. */
+  contentLength?: number
+}
+
+/** densable nyu — stable content fingerprint for FileState equality. */
+export function hashFileStateContent(content: string): string {
+  return Bun.hash(content).toString(36)
+}
+
+/**
+ * densable ALe — content equality using contentHash when present, else raw
+ * string compare. Used by Edit/Write stale-mtime fallback + getChangedFiles.
+ */
+export function fileStateContentMatches(
+  state: Pick<FileState, 'content' | 'contentHash'>,
+  content: string,
+): boolean {
+  if (state.contentHash !== undefined) {
+    return state.contentHash === hashFileStateContent(content)
+  }
+  return state.content === content
 }
 
 // Default max entries for read file state caches
@@ -53,8 +95,47 @@ export class FileStateCache {
     return this.cache.get(normalize(key))
   }
 
+  /**
+   * densable oyu.set — normalize path; sticky keepContent; auto contentHash /
+   * contentLength; optionally strip large non-kept bodies to "" (hash remains).
+   * Re-set with empty content + same hash + keepContent restores prior body.
+   */
   set(key: string, value: FileState): this {
-    this.cache.set(normalize(key), value)
+    const normalized = normalize(key)
+    const prior = this.cache.get(normalized)
+    const keepContent = value.keepContent ?? prior?.keepContent
+    // Defensive: some tests/callers may pass non-string content; coerce for hash.
+    const rawContent =
+      typeof value.content === 'string'
+        ? value.content
+        : value.content == null
+          ? ''
+          : String(value.content)
+    const contentHash =
+      value.contentHash ?? hashFileStateContent(rawContent)
+    const contentLength = value.contentLength ?? rawContent.length
+    let body =
+      keepContent &&
+      rawContent === '' &&
+      contentHash === prior?.contentHash &&
+      prior.content
+        ? prior.content
+        : rawContent
+    if (
+      !(
+        keepContent ||
+        Buffer.byteLength(body, 'utf8') <= FILE_STATE_KEEP_CONTENT_MAX_BYTES
+      )
+    ) {
+      body = ''
+    }
+    this.cache.set(normalized, {
+      ...value,
+      keepContent,
+      contentHash,
+      contentLength,
+      content: body,
+    })
     return this
   }
 
@@ -128,11 +209,25 @@ export function cacheKeys(cache: FileStateCache): string[] {
   return Array.from(cache.keys())
 }
 
-// Helper function to clone a FileStateCache
-// Preserves size limit configuration from the source cache
-export function cloneFileStateCache(cache: FileStateCache): FileStateCache {
+/**
+ * densable qwe — clone FileStateCache, optionally clearing seededFromContext
+ * on every entry (createSubagentContext always uses stripSeededFromContext:!0).
+ */
+export function cloneFileStateCache(
+  cache: FileStateCache,
+  options?: { stripSeededFromContext?: boolean },
+): FileStateCache {
   const cloned = createFileStateCacheWithSizeLimit(cache.max, cache.maxSize)
-  cloned.load(cache.dump())
+  const entries = cache.dump()
+  if (options?.stripSeededFromContext) {
+    for (const entry of entries) {
+      const value = entry[1].value
+      if (value?.seededFromContext) {
+        entry[1].value = { ...value, seededFromContext: false }
+      }
+    }
+  }
+  cloned.load(entries)
   return cloned
 }
 

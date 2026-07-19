@@ -7,9 +7,13 @@ import type { UnifiedInstalledItem } from './unifiedTypes.js';
 type Props = {
   item: UnifiedInstalledItem;
   isSelected: boolean;
+  /** densable favoritePlugins pin — show star next to name */
+  isFavorite?: boolean;
+  /** densable disused section — days since last use */
+  unusedDays?: number;
 };
 
-export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNode {
+export function UnifiedInstalledCell({ item, isSelected, isFavorite = false, unusedDays }: Props): React.ReactNode {
   const [theme] = useTheme();
 
   if (item.type === 'plugin') {
@@ -36,6 +40,12 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
       <Box>
         <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
         <Text color={isSelected ? 'suggestion' : undefined}>{item.name}</Text>
+        {isFavorite && (
+          <Text color={isSelected ? 'suggestion' : 'warning'} dimColor={!isSelected}>
+            {' '}
+            {figures.star}
+          </Text>
+        )}
         <Text dimColor={!isSelected}>
           {' '}
           <Text backgroundColor="userMessageBackground">Plugin</Text>
@@ -43,6 +53,7 @@ export function UnifiedInstalledCell({ item, isSelected }: Props): React.ReactNo
         <Text dimColor> · {item.marketplace}</Text>
         <Text dimColor={!isSelected}> · {statusIcon} </Text>
         <Text dimColor={!isSelected}>{statusText}</Text>
+        {unusedDays !== undefined && <Text dimColor={!isSelected}> · unused {unusedDays}d</Text>}
       </Box>
     );
   }

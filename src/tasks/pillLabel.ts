@@ -1,18 +1,28 @@
 import { DIAMOND_FILLED, DIAMOND_OPEN } from '../constants/figures.js'
 import { count } from '../utils/array.js'
+import { formatMcpBackgroundTaskLabel } from '../utils/densableNamingGates.js'
 import type { BackgroundTaskState } from './types.js'
 
 /**
  * Produces the compact footer-pill label for a set of background tasks.
  * Used by both the footer pill and the turn-duration transcript line so the
  * two surfaces agree on terminology.
+ *
+ * densable alt() polarity: local_workflow uses "background dynamic workflow",
+ * remote-workflow sessions get a dedicated label, monitor_mcp|monitor_ws share
+ * monitors, mcp_task noun is copper_thistle-gated job|task.
  */
 export function getPillLabel(tasks: BackgroundTaskState[]): string {
   const n = tasks.length
-  const allSameType = tasks.every(t => t.type === tasks[0]!.type)
+  if (n === 0) return '0 background tasks'
+  const first = tasks[0]!
+  const allSameType = tasks.every(t => t.type === first.type)
 
   if (allSameType) {
-    switch (tasks[0]!.type) {
+    // densable residual types (mcp_task / monitor_ws) may not be in the local
+    // TaskState union yet — compare as string for label parity.
+    const type = first.type as string
+    switch (type) {
       case 'local_bash': {
         const monitors = count(
           tasks,
@@ -37,7 +47,6 @@ export function getPillLabel(tasks: BackgroundTaskState[]): string {
       case 'local_agent':
         return n === 1 ? '1 local agent' : `${n} local agents`
       case 'remote_agent': {
-        const first = tasks[0]!
         // Per design mockup: ◇ open diamond while running/needs-input,
         // ◆ filled once ExitPlanMode is awaiting approval.
         if (n === 1 && first.type === 'remote_agent' && first.isUltraplan) {
@@ -50,14 +59,33 @@ export function getPillLabel(tasks: BackgroundTaskState[]): string {
               return `${DIAMOND_OPEN} ultraplan`
           }
         }
+        // densable: all remote-workflow → "remote dynamic workflow(s)".
+        // remoteTaskType 'remote-workflow' exists in densable alt(); local
+        // RemoteTaskType union may lag — compare as string for label parity.
+        if (
+          tasks.every(t => {
+            if (t.type !== 'remote_agent') return false
+            return (t.remoteTaskType as string) === 'remote-workflow'
+          })
+        ) {
+          return n === 1
+            ? `${DIAMOND_OPEN} 1 remote dynamic workflow`
+            : `${DIAMOND_OPEN} ${n} remote dynamic workflows`
+        }
         return n === 1
           ? `${DIAMOND_OPEN} 1 cloud session`
           : `${DIAMOND_OPEN} ${n} cloud sessions`
       }
       case 'local_workflow':
-        return n === 1 ? '1 background workflow' : `${n} background workflows`
+        // densable: "background dynamic workflow(s)"
+        return n === 1
+          ? '1 background dynamic workflow'
+          : `${n} background dynamic workflows`
       case 'monitor_mcp':
+      case 'monitor_ws':
         return n === 1 ? '1 monitor' : `${n} monitors`
+      case 'mcp_task':
+        return formatMcpBackgroundTaskLabel(n)
       case 'dream':
         return 'dreaming'
     }

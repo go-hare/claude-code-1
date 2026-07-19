@@ -121,7 +121,9 @@ export const DANGEROUS_SHELL_SETTINGS = [
   'awsCredentialExport',
   'gcpAuthRefresh',
   'otelHeadersHelper',
+  'processWrapper',
   'statusLine',
+  'subagentStatusLine',
 ] as const
 
 /**

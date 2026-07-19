@@ -6,6 +6,7 @@ import {
   getMcpDisplayName,
   getToolNameForPermissionCheck,
   extractMcpToolDisplayName,
+  toolBelongsToServer,
 } from '../mcpStringUtils'
 
 // ─── mcpInfoFromString ─────────────────────────────────────────────────
@@ -110,6 +111,36 @@ describe('getToolNameForPermissionCheck', () => {
   test('returns tool name when mcpInfo is undefined', () => {
     const tool = { name: 'Write', mcpInfo: undefined }
     expect(getToolNameForPermissionCheck(tool)).toBe('Write')
+  })
+})
+
+// ─── toolBelongsToServer ───────────────────────────────────────────────
+
+describe('toolBelongsToServer', () => {
+  test('matches via mcpInfo.serverName when present', () => {
+    const tool = {
+      name: 'list_issues',
+      mcpInfo: { serverName: 'github', toolName: 'list_issues' },
+    }
+    expect(toolBelongsToServer(tool, 'github')).toBe(true)
+    expect(toolBelongsToServer(tool, 'other')).toBe(false)
+  })
+
+  test('falls back to fully-qualified mcp__ prefix when no mcpInfo', () => {
+    const tool = { name: 'mcp__github__list_issues' }
+    expect(toolBelongsToServer(tool, 'github')).toBe(true)
+    expect(toolBelongsToServer(tool, 'other')).toBe(false)
+  })
+
+  test('accepts an explicit prefix argument', () => {
+    const tool = { name: 'mcp__my_server__tool' }
+    expect(toolBelongsToServer(tool, 'my.server', 'mcp__my_server__')).toBe(
+      true,
+    )
+  })
+
+  test('returns false when name is missing and no mcpInfo', () => {
+    expect(toolBelongsToServer({}, 'github')).toBe(false)
   })
 })
 

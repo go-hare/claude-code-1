@@ -36,10 +36,25 @@ import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { usePromptSuggestion } from '../../hooks/usePromptSuggestion.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTypeahead } from '../../hooks/useTypeahead.js';
-import { Box, type BorderTextOptions, type ClickEvent, type Key, stringWidth, Text, useInput } from '@anthropic/ink';
-import { useOptionalKeybindingContext } from '../../keybindings/KeybindingContext.js';
+import {
+  Box,
+  type BorderTextOptions,
+  type ClickEvent,
+  instances,
+  type Key,
+  type KeyboardEvent,
+  stringWidth,
+  Text,
+  useInput,
+  useProbeExternalClear,
+} from '@anthropic/ink';
+import { getIsInteractive } from '../../bootstrap/state.js';
+import { useOptionalKeybindingContext, useRegisterKeybindingContext } from '../../keybindings/KeybindingContext.js';
+import { parseKeystroke } from '../../keybindings/parser.js';
+import { resolveActionForKeystroke } from '../../keybindings/resolver.js';
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
+import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { abortPromptSuggestion, logSuggestionSuppressed } from '../../services/PromptSuggestion/promptSuggestion.js';
 import { type ActiveSpeculationState, abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
@@ -63,6 +78,12 @@ import { count } from '../../utils/array.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { Cursor } from '../../utils/Cursor.js';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
+import {
+  getLaunchWarning,
+  maybeClearLaunchWarningOnInputChange,
+  setLaunchWarning,
+  type LaunchWarning,
+} from '../../utils/launchWarning.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
 import type { EffortLevel } from '../../utils/effort.js';
@@ -76,7 +97,7 @@ import {
   isFastModeEnabled,
   isFastModeSupportedByModel,
 } from '../../utils/fastMode.js';
-import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
+import { isFullscreenActive, isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import type { PromptInputHelpers } from '../../utils/handlePromptSubmit.js';
 import { getImageFromClipboard, PASTE_THRESHOLD } from '../../utils/imagePaste.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
@@ -107,11 +128,27 @@ import type { TextHighlight } from '../../utils/textHighlighting.js';
 import type { Theme } from '../../utils/theme.js';
 import { findThinkingTriggerPositions, getRainbowColor, isUltrathinkEnabled } from '../../utils/thinking.js';
 import { findTokenBudgetPositions } from '../../utils/tokenBudget.js';
-import { findUltraplanTriggerPositions, findUltrareviewTriggerPositions } from '../../utils/ultraplan/keyword.js';
+import {
+  findUltracodeTriggerPositions,
+  findUltraplanTriggerPositions,
+  findUltrareviewTriggerPositions,
+} from '../../utils/ultraplan/keyword.js';
+import {
+  isWorkflowKeywordTriggerEnabledFromSettings,
+  isWorkflowsFeatureEnabled,
+} from '../../utils/workflowDisableGate.js';
 // AutoModeOptInDialog removed — auto mode is available to all users
 import { BridgeDialog } from '../BridgeDialog.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { getVisibleAgentTasks, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
+import { getPanelListItems, getPanelVisibleAgentTasks, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
+import {
+  isIdleSummaryRow,
+  remapPanelSelectionIndex,
+  wouldCollapseIdlePanelRows,
+} from '../../utils/panelIdleSummary.js';
+import { cycleFrameNavPath, latestFrameUrl } from '../../utils/frameUrls.js';
+import { withBannerOpenParam } from '../../utils/openArtifactShortcut.js';
+import { openBrowser } from '../../utils/browser.js';
 import { getEffortNotificationText } from '../EffortIndicator.js';
 import { getFastIconString } from '../FastIcon.js';
 import { GlobalSearchDialog } from '../GlobalSearchDialog.js';
@@ -159,6 +196,8 @@ type Props = {
         text: string;
         cursorOffset: number;
         pastedContents: Record<number, PastedContent>;
+        /** densable stash carries launchWarning across stash/restore. */
+        launchWarning?: LaunchWarning;
       }
     | undefined;
   setStashedPrompt: (
@@ -167,6 +206,7 @@ type Props = {
           text: string;
           cursorOffset: number;
           pastedContents: Record<number, PastedContent>;
+          launchWarning?: LaunchWarning;
         }
       | undefined,
   ) => void;
@@ -196,7 +236,7 @@ type Props = {
       speculationSessionTimeSavedMs: number;
       setAppState: (f: (prev: AppState) => AppState) => void;
     },
-    options?: { fromKeybinding?: boolean },
+    options?: { fromKeybinding?: boolean; suppressWorkflowKeyword?: boolean },
   ) => Promise<void>;
   onAgentSubmit?: (
     input: string,
@@ -294,6 +334,8 @@ function PromptInput({
   const [exitMessage, setExitMessage] = useState<{
     show: boolean;
     key?: string;
+    /** densable clear double-press: action "clear" → "Press {key} again to /clear" */
+    action?: string;
   }>({ show: false });
   const [cursorOffset, setCursorOffset] = useState<number>(input.length);
   const [leftArrowHintShown, setLeftArrowHintShown] = useState(false);
@@ -301,21 +343,32 @@ function PromptInput({
   // Track the last input value set via internal handlers so we can detect
   // external input changes (e.g. speech-to-text injection) and move cursor to end.
   const lastInternalInputRef = React.useRef(input);
-  if (input !== lastInternalInputRef.current) {
-    // Input changed externally (not through any internal handler) — move cursor to end
-    setCursorOffset(input.length);
-    lastInternalInputRef.current = input;
-  }
   // Synchronous ref for keybinding handlers (chat:submit) that fire within the
   // same stdin batch as TextInput's onChange. React state lags one tick, so
   // reading `input` in the handler closure would submit the stale value.
+  //
+  // Only sync live/external when *props* change — never overwrite a mid-batch
+  // live value with a still-stale prop. Comparing liveInputRef to `input` is
+  // wrong: after trackAndSetInput('hello') live is ahead of props until the
+  // next parent render; a sibling re-render with old empty input would wipe
+  // live and chat:submit/Enter would submit '' (message swallowed). Mirrors
+  // useTextInput prevPropValueRef / liveValueRef.
   const liveInputRef = React.useRef(input);
-  if (input !== liveInputRef.current) {
+  const prevPropInputRef = React.useRef(input);
+  if (prevPropInputRef.current !== input) {
+    prevPropInputRef.current = input;
     liveInputRef.current = input;
+    if (input !== lastInternalInputRef.current) {
+      // Input changed externally (not through any internal handler) — move cursor to end
+      setCursorOffset(input.length);
+      lastInternalInputRef.current = input;
+    }
   }
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
     (value: string) => {
+      // densable Prr: clearing non-empty input drops launchWarning.
+      maybeClearLaunchWarningOnInputChange(liveInputRef.current, value);
       lastInternalInputRef.current = value;
       liveInputRef.current = value;
       onInputChange(value);
@@ -347,6 +400,11 @@ function PromptInput({
   const store = useAppStateStore();
   const setAppState = useSetAppState();
   const tasks = useAppState(s => s.tasks);
+  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
+  const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
+  const frameUrls = useAppState(s => s.frameUrls ?? {});
+  const frameNavPath = useAppState(s => s.frameNavPath ?? null);
+  const frameExpanded = useAppState(s => s.frameExpanded ?? false);
   const replBridgeConnected = useAppState(s => s.replBridgeConnected);
   const replBridgeExplicit = useAppState(s => s.replBridgeExplicit);
   const replBridgeReconnecting = useAppState(s => s.replBridgeReconnecting);
@@ -409,7 +467,13 @@ function PromptInput({
     }
     return toolPermissionContext;
   }, [viewedTeammate, toolPermissionContext]);
-  const { historyQuery, setHistoryQuery, historyMatch, historyFailedMatch } = useHistorySearch(
+  const {
+    historyQuery,
+    setHistoryQuery,
+    historyMatch,
+    historyFailedMatch,
+    handleKeyDown: historySearchHandleKeyDown,
+  } = useHistorySearch(
     entry => {
       setPastedContents(entry.pastedContents);
       void onSubmit(entry.display);
@@ -466,6 +530,16 @@ function PromptInput({
     [setAppState],
   );
   const coordinatorTaskCount = useCoordinatorTaskCount();
+  // densable G7 panel rows (decoration filter + optional idle_summary collapse).
+  // Shared by Enter/x handlers so selection indices cannot drift from the panel.
+  const panelListItems = useMemo(
+    () =>
+      getPanelListItems(tasks, taskDecorations, {
+        idleTeammatesExpanded,
+        viewingAgentTaskId,
+      }),
+    [tasks, taskDecorations, idleTeammatesExpanded, viewingAgentTaskId],
+  );
   // The pill (BackgroundTaskStatus) only renders when non-local_agent bg tasks
   // exist. When only local_agent tasks are running (coordinator/fork mode), the
   // pill is absent, so the -1 sentinel would leave nothing visually selected.
@@ -476,14 +550,24 @@ function PromptInput({
     [tasks],
   );
   const minCoordinatorIndex = hasBgTaskPill ? -1 : 0;
-  // Clamp index when tasks complete and the list shrinks beneath the cursor
+  // densable qo/hrf: when panel row ids change (collapse/expand/evict), remap
+  // the selection onto a still-present predecessor rather than only clamping.
+  const panelListIds = useMemo(() => panelListItems.map(r => r.id), [panelListItems]);
+  const panelListIdsRef = useRef(panelListIds);
   useEffect(() => {
+    const prevIds = panelListIdsRef.current;
+    panelListIdsRef.current = panelListIds;
+    const remapped = remapPanelSelectionIndex(coordinatorTaskIndex, prevIds, panelListIds);
+    if (remapped !== coordinatorTaskIndex) {
+      setCoordinatorTaskIndex(remapped);
+      return;
+    }
     if (coordinatorTaskIndex >= coordinatorTaskCount) {
       setCoordinatorTaskIndex(Math.max(minCoordinatorIndex, coordinatorTaskCount - 1));
     } else if (coordinatorTaskIndex < minCoordinatorIndex) {
       setCoordinatorTaskIndex(minCoordinatorIndex);
     }
-  }, [coordinatorTaskCount, coordinatorTaskIndex, minCoordinatorIndex]);
+  }, [panelListIds, coordinatorTaskCount, coordinatorTaskIndex, minCoordinatorIndex, setCoordinatorTaskIndex]);
   const [isPasting, setIsPasting] = useState(false);
   const [isExternalEditorActive, setIsExternalEditorActive] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -544,6 +628,8 @@ function PromptInput({
   const teamsFooterVisible = cachedTeams.length > 0;
   const bgAgentList = useBackgroundAgentTasks();
   const bgAgentFooterVisible = bgAgentList.length > 0;
+  // densable Ke = Object.keys(frameUrls).length>0 && Y7t gate; local residual always on when map non-empty.
+  const frameFooterVisible = Object.keys(frameUrls).length > 0;
 
   const footerItems = useMemo(
     () =>
@@ -554,6 +640,7 @@ function PromptInput({
         bagelFooterVisible && 'bagel',
         teamsFooterVisible && 'teams',
         bridgeFooterVisible && 'bridge',
+        frameFooterVisible && 'frame',
         companionFooterVisible && 'companion',
       ].filter(Boolean) as FooterItem[],
     [
@@ -563,6 +650,7 @@ function PromptInput({
       bagelFooterVisible,
       teamsFooterVisible,
       bridgeFooterVisible,
+      frameFooterVisible,
       companionFooterVisible,
     ],
   );
@@ -576,7 +664,17 @@ function PromptInput({
 
   useEffect(() => {
     if (rawFooterSelection && !footerItemSelected) {
-      setAppState(prev => (prev.footerSelection === null ? prev : { ...prev, footerSelection: null }));
+      // densable XDa — collapse idle_summary / frameExpanded when selection is invalidated
+      setAppState(prev =>
+        prev.footerSelection === null
+          ? prev
+          : {
+              ...prev,
+              footerSelection: null,
+              idleTeammatesExpanded: false,
+              frameExpanded: false,
+            },
+      );
     }
   }, [rawFooterSelection, footerItemSelected, setAppState]);
 
@@ -585,10 +683,26 @@ function PromptInput({
   const _bagelSelected = footerItemSelected === 'bagel';
   const teamsSelected = footerItemSelected === 'teams';
   const bridgeSelected = footerItemSelected === 'bridge';
+  const frameSelected = footerItemSelected === 'frame';
   const bgAgentSelected = footerItemSelected === 'bg_agent';
 
   function selectFooterItem(item: FooterItem | null): void {
-    setAppState(prev => (prev.footerSelection === item ? prev : { ...prev, footerSelection: item }));
+    // densable ul: leaving tasks collapses idle_summary; entering/leaving frame
+    // resets frameNavPath / frameExpanded like densable.
+    setAppState(prev => {
+      if (prev.footerSelection === item) return prev;
+      const next = { ...prev, footerSelection: item };
+      if (item === 'frame') {
+        next.frameNavPath = Object.keys(prev.frameUrls ?? {}).at(-1) ?? null;
+        next.frameExpanded = false;
+      } else if (prev.footerSelection === 'frame') {
+        next.frameExpanded = false;
+      }
+      if (prev.footerSelection === 'tasks') {
+        next.idleTeammatesExpanded = false;
+      }
+      return next;
+    });
     if (item === 'tasks') {
       setTeammateFooterIndex(0);
       setCoordinatorTaskIndex(minCoordinatorIndex);
@@ -596,6 +710,17 @@ function PromptInput({
     if (item === 'bg_agent') {
       setSelectedBgAgentIndex(-1);
     }
+  }
+
+  function cycleFrameFooter(delta: 1 | -1): boolean {
+    const cycled = cycleFrameNavPath(frameUrls, frameNavPath, frameExpanded, delta);
+    if (!cycled) return false;
+    setAppState(prev => ({
+      ...prev,
+      frameNavPath: cycled.frameNavPath,
+      frameExpanded: cycled.frameExpanded,
+    }));
+    return true;
   }
 
   // delta: +1 = down/right, -1 = up/left. Returns true if nav happened
@@ -649,6 +774,18 @@ function PromptInput({
     () => (isUltrareviewEnabled() ? findUltrareviewTriggerPositions(displayedValue) : []),
     [displayedValue],
   );
+
+  // densable FE() && VBn() ? fSs(input) : [] — ultracode workflow keyword
+  const ultracodeTriggers = useMemo(
+    () =>
+      isWorkflowsFeatureEnabled() && isWorkflowKeywordTriggerEnabledFromSettings()
+        ? findUltracodeTriggerPositions(displayedValue)
+        : [],
+    [displayedValue],
+  );
+  // densable Gi/gi — suppressWorkflowKeyword for this prompt (meta+w)
+  const [workflowKeywordSuppressed, setWorkflowKeywordSuppressed] = useState(false);
+  const suppressWorkflowKeywordRef = useRef(false);
 
   const btwTriggers = useMemo(() => findBtwTriggerPositions(displayedValue), [displayedValue]);
 
@@ -871,6 +1008,21 @@ function PromptInput({
       }
     }
 
+    // densable ultracode keyword rainbow (only when not suppressed for this prompt)
+    if (!workflowKeywordSuppressed) {
+      for (const trigger of ultracodeTriggers) {
+        for (let i = trigger.start; i < trigger.end; i++) {
+          highlights.push({
+            start: i,
+            end: i + 1,
+            color: getRainbowColor(i - trigger.start),
+            shimmerColor: getRainbowColor(i - trigger.start, true),
+            priority: 10,
+          });
+        }
+      }
+    }
+
     // Rainbow for /buddy
     for (const trigger of buddyTriggers) {
       for (let i = trigger.start; i < trigger.end; i++) {
@@ -902,6 +1054,8 @@ function PromptInput({
     thinkTriggers,
     ultraplanTriggers,
     ultrareviewTriggers,
+    ultracodeTriggers,
+    workflowKeywordSuppressed,
     buddyTriggers,
   ]);
 
@@ -933,6 +1087,59 @@ function PromptInput({
       removeNotification('ultraplan-active');
     }
   }, [addNotification, removeNotification, ultraplanTriggers.length]);
+
+  // densable workflow-keyword-active notification + toggle shortcut display
+  const workflowToggleShortcut = useShortcutDisplay('chat:workflowKeywordToggle', 'Chat', 'alt+w');
+  useEffect(() => {
+    if (isWorkflowsFeatureEnabled() && ultracodeTriggers.length && !workflowKeywordSuppressed) {
+      addNotification({
+        key: 'workflow-keyword-active',
+        text: `Dynamic workflow requested for this turn${
+          workflowToggleShortcut ? ` · ${workflowToggleShortcut} to ignore` : ''
+        }`,
+        priority: 'immediate',
+        timeoutMs: 30000,
+      });
+    } else {
+      removeNotification('workflow-keyword-active');
+    }
+  }, [
+    addNotification,
+    removeNotification,
+    ultracodeTriggers.length,
+    workflowKeywordSuppressed,
+    workflowToggleShortcut,
+  ]);
+
+  // densable: clear suppress when ultracode keyword leaves the input
+  useEffect(() => {
+    if (ultracodeTriggers.length === 0 && workflowKeywordSuppressed) {
+      setWorkflowKeywordSuppressed(false);
+      suppressWorkflowKeywordRef.current = false;
+      removeNotification('workflow-keyword-ignored');
+    }
+  }, [ultracodeTriggers.length, workflowKeywordSuppressed, removeNotification]);
+
+  const handleWorkflowKeywordToggle = useCallback(() => {
+    if (ultracodeTriggers.length === 0) return;
+    const next = !suppressWorkflowKeywordRef.current;
+    setWorkflowKeywordSuppressed(next);
+    suppressWorkflowKeywordRef.current = next;
+    if (next) {
+      logEvent('tengu_workflow_keyword_dismissed', {});
+      addNotification({
+        key: 'workflow-keyword-ignored',
+        text: `Ultracode keyword ignored for this prompt${
+          workflowToggleShortcut ? ` · ${workflowToggleShortcut} to undo` : ''
+        }`,
+        priority: 'immediate',
+        timeoutMs: 5000,
+      });
+    } else {
+      logEvent('tengu_workflow_keyword_restored', {});
+      removeNotification('workflow-keyword-ignored');
+    }
+  }, [ultracodeTriggers.length, addNotification, removeNotification, workflowToggleShortcut]);
 
   useEffect(() => {
     if (isUltrareviewEnabled() && ultrareviewTriggers.length) {
@@ -1060,8 +1267,17 @@ function PromptInput({
         pushToBuffer(input, cursorOffset, pastedContents);
       }
 
-      // Deselect footer items when user types
-      setAppState(prev => (prev.footerSelection === null ? prev : { ...prev, footerSelection: null }));
+      // densable XDa: deselect footer + collapse idle_summary / frameExpanded when user types
+      setAppState(prev =>
+        prev.footerSelection === null
+          ? prev
+          : {
+              ...prev,
+              footerSelection: null,
+              idleTeammatesExpanded: false,
+              frameExpanded: false,
+            },
+      );
 
       trackAndSetInput(processedValue);
     },
@@ -1135,14 +1351,19 @@ function PromptInput({
   }
 
   // Create a suggestions state directly - we'll sync it with useTypeahead later
+  // densable Md: hoveredSuggestionId + suggestionsEmptyMessage for Me / empty-match UI
   const [suggestionsState, setSuggestionsStateRaw] = useState<{
     suggestions: SuggestionItem[];
     selectedSuggestion: number;
+    hoveredSuggestionId?: string | null;
     commandArgumentHint?: string;
+    suggestionsEmptyMessage?: string;
   }>({
     suggestions: [],
     selectedSuggestion: -1,
+    hoveredSuggestionId: null,
     commandArgumentHint: undefined,
+    suggestionsEmptyMessage: undefined,
   });
 
   // Setter for suggestions state
@@ -1250,13 +1471,25 @@ function PromptInput({
         return;
       }
 
-      // PromptInput UX: Check if suggestions dropdown is showing
-      // For directory suggestions, allow submission (Tab is used for completion)
-      const hasDirectorySuggestions =
+      // PromptInput UX: Check if suggestions dropdown is showing.
+      // densable: allow submit when every item is description==="directory"
+      // (Tab completes, Enter submits the line). densable g8s path lists
+      // (bash-path) omit description, so Me pe()+r(o,!1) would hit this
+      // early-return and swallow — treat path metadata the same as dirs.
+      const hasPathOnlySuggestions =
         suggestionsState.suggestions.length > 0 &&
-        suggestionsState.suggestions.every(s => s.description === 'directory');
+        suggestionsState.suggestions.every(s => {
+          if (s.description === 'directory') return true;
+          const meta = s.metadata;
+          return (
+            typeof meta === 'object' &&
+            meta !== null &&
+            'type' in meta &&
+            (meta.type === 'directory' || meta.type === 'file')
+          );
+        });
 
-      if (suggestionsState.suggestions.length > 0 && !isSubmittingSlashCommand && !hasDirectorySuggestions) {
+      if (suggestionsState.suggestions.length > 0 && !isSubmittingSlashCommand && !hasPathOnlySuggestions) {
         logForDebugging(`[onSubmit] early return: suggestions showing (count=${suggestionsState.suggestions.length})`);
         return; // Don't submit, user needs to clear suggestions first
       }
@@ -1281,12 +1514,22 @@ function PromptInput({
         return;
       }
 
-      // Normal leader submission
-      await onSubmitProp(inputParam, {
-        setCursorOffset,
-        clearBuffer,
-        resetHistory,
-      });
+      // Normal leader submission — densable suppressWorkflowKeyword rides options
+      await onSubmitProp(
+        inputParam,
+        {
+          setCursorOffset,
+          clearBuffer,
+          resetHistory,
+        },
+        undefined,
+        suppressWorkflowKeywordRef.current ? { suppressWorkflowKeyword: true } : undefined,
+      );
+      // densable: one-shot suppress — clear after submit
+      if (suppressWorkflowKeywordRef.current) {
+        suppressWorkflowKeywordRef.current = false;
+        setWorkflowKeywordSuppressed(false);
+      }
     },
     [
       promptSuggestionState,
@@ -1308,7 +1551,18 @@ function PromptInput({
     ],
   );
 
-  const { suggestions, selectedSuggestion, commandArgumentHint, inlineGhostText, maxColumnWidth } = useTypeahead({
+  const {
+    suggestions,
+    selectedSuggestion,
+    commandArgumentHint,
+    suggestionsEmptyMessage,
+    inlineGhostText,
+    maxColumnWidth,
+    handleKeyDown: typeaheadHandleKeyDown,
+    selectSuggestion,
+    setHoveredSuggestion,
+    hoveredSuggestionId,
+  } = useTypeahead({
     commands,
     onInputChange: trackAndSetInput,
     onSubmit,
@@ -1323,6 +1577,21 @@ function PromptInput({
     markAccepted,
     onModeChange,
   });
+
+  // Official densable PromptInput UI(Bt) → onKeyDownBefore:
+  //   vo(historySearch) then $F(typeahead); short-circuit on preventDefault /
+  //   stopImmediate so BaseTextInput never submits/inserts that key.
+  // (Full densable UI also does pill-backspace / option-meta / escape — those
+  // remain on the fork useInput path below; composition order for Enter is
+  // what fixes suggestion accept vs onSubmit early-return race.)
+  const onKeyDownBefore = React.useCallback(
+    (event: KeyboardEvent) => {
+      historySearchHandleKeyDown(event);
+      if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
+      typeaheadHandleKeyDown(event);
+    },
+    [historySearchHandleKeyDown, typeaheadHandleKeyDown],
+  );
 
   // Track if prompt suggestion should be shown (computed later with terminal width).
   // Hidden in teammate view — suggestion is leader-context only.
@@ -1531,6 +1800,80 @@ function PromptInput({
     setCursorOffset(cursorOffset + 1);
   }, [input, cursorOffset, trackAndSetInput, setCursorOffset, pushToBuffer, pastedContents]);
 
+  // densable chat:clearScreen (cmd+k) / chat:clearInput (ctrl+l):
+  // first press shows "Press {key} again to /clear"; second press within
+  // densable CJ timeout (2000ms) submits /clear. clearInput also bumps a
+  // redraw counter (OBe) so Ink force-repaints after external clear residue.
+  // densable timeout for this path is 2000ms (not the default 800ms exit path).
+  const CLEAR_DOUBLE_PRESS_MS = 2000;
+  const clearScreenShortcut = useShortcutDisplay('chat:clearScreen', 'Chat', 'cmd+k');
+  const clearInputShortcut = useShortcutDisplay('chat:clearInput', 'Chat', 'ctrl+l');
+  const clearHintKeyRef = useRef(clearScreenShortcut);
+  const [clearRedrawTick, setClearRedrawTick] = useState(0);
+  useEffect(() => {
+    if (clearRedrawTick === 0) return;
+    instances.get(process.stdout)?.forceRedraw();
+  }, [clearRedrawTick]);
+
+  const clearDoublePressLastRef = useRef(0);
+  const clearDoublePressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fireClearDoublePress = useCallback(() => {
+    if (!getIsInteractive()) return;
+    const now = Date.now();
+    const pending = clearDoublePressTimeoutRef.current !== null;
+    const isDouble = pending && now - clearDoublePressLastRef.current <= CLEAR_DOUBLE_PRESS_MS;
+    if (isDouble) {
+      if (clearDoublePressTimeoutRef.current) {
+        clearTimeout(clearDoublePressTimeoutRef.current);
+        clearDoublePressTimeoutRef.current = null;
+      }
+      setExitMessage(prev => (prev.action === 'clear' ? { show: false } : prev));
+      // densable kt.current?.("/clear", !0) — skip suggestion early-return gate
+      void onSubmit('/clear', true);
+    } else {
+      setExitMessage({
+        show: true,
+        key: clearHintKeyRef.current,
+        action: 'clear',
+      });
+      if (clearDoublePressTimeoutRef.current) {
+        clearTimeout(clearDoublePressTimeoutRef.current);
+      }
+      clearDoublePressTimeoutRef.current = setTimeout(() => {
+        setExitMessage(prev => (prev.action === 'clear' ? { show: false } : prev));
+        clearDoublePressTimeoutRef.current = null;
+      }, CLEAR_DOUBLE_PRESS_MS);
+    }
+    clearDoublePressLastRef.current = now;
+  }, [onSubmit]);
+
+  useEffect(() => {
+    return () => {
+      if (clearDoublePressTimeoutRef.current) {
+        clearTimeout(clearDoublePressTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // densable jie: chat:clearScreen — set hint key then double-press /clear
+  const handleClearScreen = useCallback(() => {
+    clearHintKeyRef.current = clearScreenShortcut;
+    fireClearDoublePress();
+  }, [clearScreenShortcut, fireClearDoublePress]);
+
+  // densable ksf: external alt-screen wipe (cmd+k / terminal clear) on
+  // iTerm/Terminal → probeExternalClear → forceRedraw + clearScreen hint path
+  useProbeExternalClear(handleClearScreen, {
+    isFullscreenActive: isFullscreenActive(),
+  });
+
+  // densable KR: chat:clearInput — forceRedraw tick + clearInput shortcut + double-press
+  const handleClearInput = useCallback(() => {
+    setClearRedrawTick(t => t + 1);
+    clearHintKeyRef.current = clearInputShortcut;
+    fireClearDoublePress();
+  }, [clearInputShortcut, fireClearDoublePress]);
+
   // Handler for chat:externalEditor - edit in $EDITOR
   const handleExternalEditor = useCallback(async () => {
     logEvent('tengu_external_editor_used', {});
@@ -1578,10 +1921,19 @@ function PromptInput({
       trackAndSetInput(stashedPrompt.text);
       setCursorOffset(stashedPrompt.cursorOffset);
       setPastedContents(stashedPrompt.pastedContents);
+      // densable: restore launchWarning with stash
+      if (stashedPrompt.launchWarning) {
+        setLaunchWarning(stashedPrompt.launchWarning);
+      }
       setStashedPrompt(undefined);
     } else if (input.trim() !== '') {
-      // Push to stash (save text, cursor position, and pasted contents)
-      setStashedPrompt({ text: input, cursorOffset, pastedContents });
+      // Push to stash (save text, cursor, pastes, launchWarning)
+      setStashedPrompt({
+        text: input,
+        cursorOffset,
+        pastedContents,
+        launchWarning: getLaunchWarning() ?? undefined,
+      });
       trackAndSetInput('');
       setCursorOffset(0);
       setPastedContents({});
@@ -1725,26 +2077,37 @@ function PromptInput({
   }, [addNotification, onImagePaste]);
 
   // Register chat:submit handler directly in the handler registry (not via
-  // useKeybindings) so that only the ChordInterceptor can invoke it for chord
-  // completions (e.g., "ctrl+e s"). The default Enter binding for submit is
-  // handled by TextInput directly (via onSubmit prop) and useTypeahead (for
-  // autocomplete acceptance). Using useKeybindings would cause
-  // stopImmediatePropagation on Enter, blocking autocomplete from seeing the key.
+  // useKeybindings) so that ChordInterceptor can invoke it for chord
+  // completions (e.g., "ctrl+e s") and for singleKey rebinds.
+  //
+  // densable: singleKey:!Bt where Bt = enter→chat:submit in Chat bindings.
+  // Default enter:chat:submit keeps singleKey:false so TextInput/typeahead
+  // own bare Enter (useKeybindings would stopImmediatePropagation and block
+  // autocomplete). When enter is rebound away from chat:submit, singleKey
+  // is true so the interceptor fires the rebound single key for submit.
   //
   // Read liveInputRef.current rather than the frozen `input` prop so a chord
   // completion in the same stdin batch as typed characters submits the current
-  // value, not the stale prop snapshot.
+  // value, not the stale prop snapshot (densable kt.current?.(Ct.current)).
   const keybindingContext = useOptionalKeybindingContext();
+  // densable kt.current?.(Ct.current) — stable handler via refs
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
   useEffect(() => {
-    if (!keybindingContext || isModalOverlayActive) return;
+    // densable: chat:submit inactive while history search (He) or modal overlay
+    if (!keybindingContext || isModalOverlayActive || isSearchingHistory) return;
+    // densable fQc(RAt("enter"), "Chat", bindings) === "chat:submit"
+    const enterIsSubmit =
+      resolveActionForKeystroke(parseKeystroke('enter'), 'Chat', keybindingContext.bindings) === 'chat:submit';
     return keybindingContext.registerHandler({
       action: 'chat:submit',
       context: 'Chat',
       handler: () => {
-        void onSubmit(liveInputRef.current);
+        void onSubmitRef.current(liveInputRef.current);
       },
+      singleKey: !enterIsSubmit,
     });
-  }, [keybindingContext, isModalOverlayActive, onSubmit]);
+  }, [keybindingContext, isModalOverlayActive, isSearchingHistory]);
 
   // Chat context keybindings for editing shortcuts
   // Note: history:previous/history:next are NOT handled here. They are passed as
@@ -1755,6 +2118,8 @@ function PromptInput({
     () => ({
       'chat:undo': handleUndo,
       'chat:newline': handleNewline,
+      'chat:clearScreen': handleClearScreen,
+      'chat:clearInput': handleClearInput,
       'chat:externalEditor': handleExternalEditor,
       'chat:stash': handleStash,
       'chat:modelPicker': handleModelPicker,
@@ -1765,6 +2130,8 @@ function PromptInput({
     [
       handleUndo,
       handleNewline,
+      handleClearScreen,
+      handleClearInput,
       handleExternalEditor,
       handleStash,
       handleModelPicker,
@@ -1774,9 +2141,16 @@ function PromptInput({
     ],
   );
 
+  // densable Chat isActive:!re&&!He — gate while ctrl+r history search owns input.
   useKeybindings(chatHandlers, {
     context: 'Chat',
-    isActive: !isModalOverlayActive,
+    isActive: !isModalOverlayActive && !isSearchingHistory,
+  });
+
+  // densable En("chat:workflowKeywordToggle", _C, { isActive: !re && va.length>0 })
+  useKeybinding('chat:workflowKeywordToggle', handleWorkflowKeywordToggle, {
+    context: 'Chat',
+    isActive: !isModalOverlayActive && !isSearchingHistory && ultracodeTriggers.length > 0,
   });
 
   // Shift+↑ enters message-actions cursor. Separate isActive so ctrl+r search
@@ -1789,7 +2163,7 @@ function PromptInput({
   // Fast mode keybinding is only active when fast mode is enabled and available
   useKeybinding('chat:fastMode', handleFastModePicker, {
     context: 'Chat',
-    isActive: !isModalOverlayActive && isFastModeEnabled() && isFastModeAvailable(),
+    isActive: !isModalOverlayActive && !isSearchingHistory && isFastModeEnabled() && isFastModeAvailable(),
   });
 
   // Handle help:dismiss keybinding (ESC closes help menu)
@@ -1905,6 +2279,8 @@ function PromptInput({
         navigateFooter(1);
       },
       'footer:next': () => {
+        // densable YR: when frame pill selected, cycle frames before footer nav
+        if (frameSelected && cycleFrameFooter(1)) return;
         // Teammate mode: ←/→ cycles within the team member list
         if (tasksSelected && isTeammateMode) {
           const totalAgents = 1 + inProcessTeammates.length;
@@ -1914,6 +2290,7 @@ function PromptInput({
         navigateFooter(1);
       },
       'footer:previous': () => {
+        if (frameSelected && cycleFrameFooter(-1)) return;
         if (tasksSelected && isTeammateMode) {
           const totalAgents = 1 + inProcessTeammates.length;
           setTeammateFooterIndex(prev => (prev - 1 + totalAgents) % totalAgents);
@@ -1941,12 +2318,27 @@ function PromptInput({
                 const teammate = inProcessTeammates[teammateFooterIndex - 1];
                 if (teammate) enterTeammateView(teammate.id, setAppState);
               }
-            } else if (coordinatorTaskIndex === 0 && coordinatorTaskCount > 0) {
-              exitTeammateView(setAppState);
             } else {
-              const selectedTaskId = getVisibleAgentTasks(tasks)[coordinatorTaskIndex - 1]?.id;
-              if (selectedTaskId) {
-                enterTeammateView(selectedTaskId, setAppState);
+              // densable footer:openSelected tasks branch — G7 list + idle_summary.
+              const selectedRow = coordinatorTaskIndex >= 1 ? panelListItems[coordinatorTaskIndex - 1] : undefined;
+              if (selectedRow && isIdleSummaryRow(selectedRow)) {
+                // Expand collapse and land selection on first collapsed idle id.
+                const expandedRows = getPanelListItems(tasks, taskDecorations, {
+                  idleTeammatesExpanded: true,
+                  viewingAgentTaskId,
+                });
+                const firstCollapsed = selectedRow.taskIds[0];
+                const landAt = firstCollapsed ? expandedRows.findIndex(r => r.id === firstCollapsed) : -1;
+                panelListIdsRef.current = expandedRows.map(r => r.id);
+                setAppState(prev => ({
+                  ...prev,
+                  idleTeammatesExpanded: true,
+                  coordinatorTaskIndex: landAt >= 0 ? landAt + 1 : prev.coordinatorTaskIndex,
+                }));
+              } else if (selectedRow) {
+                enterTeammateView(selectedRow.id, setAppState);
+              } else if (coordinatorTaskIndex === 0 && coordinatorTaskCount > 0) {
+                exitTeammateView(setAppState);
               } else {
                 setShowBashesDialog(true);
                 selectFooterItem(null);
@@ -1975,6 +2367,25 @@ function PromptInput({
             setShowBridgeDialog(true);
             selectFooterItem(null);
             break;
+          case 'frame': {
+            // densable frame openSelected: open current nav url + expand pill
+            const entries = Object.entries(frameUrls);
+            if (entries.length === 0) break;
+            const navIdx = frameNavPath
+              ? Math.max(
+                  0,
+                  entries.findIndex(([p]) => p === frameNavPath),
+                )
+              : entries.length - 1;
+            const entry = entries[navIdx === -1 ? entries.length - 1 : navIdx]?.[1];
+            const url = entry?.url ?? latestFrameUrl(frameUrls);
+            if (url) {
+              void openBrowser(withBannerOpenParam(url));
+              logEvent('frame_link_open', {});
+            }
+            setAppState(prev => (prev.frameExpanded ? prev : { ...prev, frameExpanded: true }));
+            break;
+          }
           case 'bg_agent':
             if (selectedBgAgentIndex === -1) {
               exitTeammateView(setAppState);
@@ -1987,21 +2398,37 @@ function PromptInput({
         }
       },
       'footer:clearSelection': () => {
+        // densable: collapse frameExpanded first when frame pill focused
+        if (frameSelected && frameExpanded) {
+          setAppState(prev => (!prev.frameExpanded ? prev : { ...prev, frameExpanded: false }));
+          return;
+        }
+        // densable: if tasks selected and idle expanded, collapse first (keep
+        // selection when mqo says collapse would still apply).
+        if (tasksSelected && idleTeammatesExpanded) {
+          const expandedRows = getPanelVisibleAgentTasks(tasks, taskDecorations);
+          setAppState(prev => (!prev.idleTeammatesExpanded ? prev : { ...prev, idleTeammatesExpanded: false }));
+          if (wouldCollapseIdlePanelRows(expandedRows, viewingAgentTaskId)) {
+            return;
+          }
+        }
         selectFooterItem(null);
       },
       'footer:close': () => {
         if (tasksSelected && coordinatorTaskIndex >= 1) {
-          const task = getVisibleAgentTasks(tasks)[coordinatorTaskIndex - 1];
-          if (!task) return false;
+          const row = panelListItems[coordinatorTaskIndex - 1];
+          if (!row) return false;
+          // densable: idle_summary is not dismissable via x
+          if (isIdleSummaryRow(row)) return;
           // When the selected row IS the viewed agent, 'x' types into the
           // steering input. Any other row — dismiss it.
-          if (viewSelectionMode === 'viewing-agent' && task.id === viewingAgentTaskId) {
+          if (viewSelectionMode === 'viewing-agent' && row.id === viewingAgentTaskId) {
             onChange(input.slice(0, cursorOffset) + 'x' + input.slice(cursorOffset));
             setCursorOffset(cursorOffset + 1);
             return;
           }
-          stopOrDismissAgent(task.id, setAppState);
-          if (task.status !== 'running') {
+          stopOrDismissAgent(row.id, setAppState);
+          if (row.status !== 'running') {
             setCoordinatorTaskIndex(i => Math.max(minCoordinatorIndex, i - 1));
           }
           return;
@@ -2015,6 +2442,10 @@ function PromptInput({
       isActive: !!footerItemSelected && !isModalOverlayActive,
     },
   );
+
+  // Elevate Footer while a pill is selected so ChordInterceptor singleKey
+  // last-wins over Chat (escape/enter/arrows) for footer:* actions.
+  useRegisterKeybindingContext('Footer', !!footerItemSelected && !isModalOverlayActive);
 
   useInput((char, key) => {
     // Skip all input handling when a full-screen dialog is open. These dialogs
@@ -2400,6 +2831,7 @@ function PromptInput({
 
   const baseProps: BaseTextInputProps = {
     multiline: true,
+    onKeyDownBefore,
     onSubmit,
     onChange,
     value: historyMatch
@@ -2441,7 +2873,9 @@ function PromptInput({
           : undefined,
     placeholder,
     onExit,
-    onExitMessage: (show, key) => setExitMessage({ show, key }),
+    // densable: preserve clear double-press hint when exit message is dismissed
+    onExitMessage: (show, key) =>
+      setExitMessage(prev => (show ? { show, key } : prev.action === 'clear' ? prev : { show: false })),
     onImagePaste,
     columns: textInputColumns,
     maxVisibleLines,
@@ -2595,6 +3029,10 @@ function PromptInput({
         suggestions={suggestions}
         selectedSuggestion={selectedSuggestion}
         maxColumnWidth={maxColumnWidth}
+        suggestionsEmptyMessage={suggestionsEmptyMessage}
+        hoveredSuggestionId={hoveredSuggestionId}
+        onSelectSuggestion={selectSuggestion}
+        onHoverSuggestion={setHoveredSuggestion}
         toolPermissionContext={effectiveToolPermissionContext}
         helpOpen={helpOpen}
         suppressHint={input.length > 0}
@@ -2602,6 +3040,7 @@ function PromptInput({
         tasksSelected={tasksSelected}
         teamsSelected={teamsSelected}
         bridgeSelected={bridgeSelected}
+        frameSelected={frameSelected}
         tmuxSelected={tmuxSelected}
         teammateFooterIndex={teammateFooterIndex}
         ideSelection={ideSelection}

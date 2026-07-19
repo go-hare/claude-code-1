@@ -25,6 +25,7 @@ export type LocalShellTaskState = TaskStateBase & {
   isBackgrounded: boolean
   // Agent that spawned this task. Used to kill orphaned bash tasks when the
   // agent exits (see killShellTasksForAgent). Undefined = main thread.
+  // Also official Gge owner for `bash:${id}` / `monitor:${id}` keepalive.
   agentId?: AgentId
   // UI display variant. 'monitor' → shows description instead of command,
   // 'Monitor details' dialog title, distinct status bar pill.

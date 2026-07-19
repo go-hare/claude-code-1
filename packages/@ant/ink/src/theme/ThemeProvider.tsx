@@ -1,8 +1,15 @@
 import { feature } from 'bun:bundle';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import useStdin from '../hooks/use-stdin.js';
+import {
+  applyThemeOverrides,
+  getCachedCustomThemes,
+  loadCustomThemes,
+  parseCustomThemeRef,
+  type CustomTheme,
+} from './customThemes.js';
 import { getSystemThemeName, type SystemTheme } from './systemTheme.js';
-import type { ThemeName, ThemeSetting } from './theme-types.js';
+import { getTheme, isThemeName, type Theme, type ThemeName, type ThemeSetting } from './theme-types.js';
 
 // -- Config persistence injection --
 // Business layer provides these via setThemeConfigCallbacks().
@@ -21,14 +28,26 @@ export function setThemeConfigCallbacks(opts: {
 }
 
 type ThemeContextValue = {
-  /** The saved user preference. May be 'auto'. */
+  /** The saved user preference. May be 'auto' or custom:<slug>. */
   themeSetting: ThemeSetting;
   setThemeSetting: (setting: ThemeSetting) => void;
   setPreviewTheme: (setting: ThemeSetting) => void;
   savePreview: () => void;
   cancelPreview: () => void;
-  /** The resolved theme to render with. Never 'auto'. */
+  /**
+   * densable currentTheme / u9r — base ThemeName used for non-override paths.
+   * For custom themes this is the theme's `base` preset, never `custom:…`.
+   */
   currentTheme: ThemeName;
+  /** densable resolvedTheme / Aiu — palette with custom overrides applied. */
+  resolvedTheme: Theme;
+  /** densable customThemes — user (+ plugin) loaded themes. */
+  customThemes: CustomTheme[];
+  /** densable activeCustomTheme when setting is custom:<slug>. */
+  activeCustomTheme: CustomTheme | undefined;
+  reloadCustomThemes: () => Promise<void>;
+  /** densable setPreviewOverrides — live color edits in the custom theme editor. */
+  setPreviewOverrides: (overrides: Partial<Record<keyof Theme, string>> | null) => void;
 };
 
 // Non-'auto' default so useTheme() works without a provider (tests, tooling).
@@ -41,6 +60,11 @@ const ThemeContext = createContext<ThemeContextValue>({
   savePreview: () => {},
   cancelPreview: () => {},
   currentTheme: DEFAULT_THEME,
+  resolvedTheme: getTheme(DEFAULT_THEME),
+  customThemes: [],
+  activeCustomTheme: undefined,
+  reloadCustomThemes: () => Promise.resolve(),
+  setPreviewOverrides: () => {},
 });
 
 type Props = {
@@ -58,8 +82,10 @@ function defaultSaveTheme(setting: ThemeSetting): void {
 }
 
 export function ThemeProvider({ children, initialState, onThemeSave = defaultSaveTheme }: Props) {
-  const [themeSetting, setThemeSetting] = useState(initialState ?? defaultInitialTheme);
-  const [previewTheme, setPreviewTheme] = useState<ThemeSetting | null>(null);
+  const [themeSetting, setThemeSettingState] = useState(initialState ?? defaultInitialTheme);
+  const [previewTheme, setPreviewThemeState] = useState<ThemeSetting | null>(null);
+  const [previewOverrides, setPreviewOverridesState] = useState<Partial<Record<keyof Theme, string>> | null>(null);
+  const [customThemes, setCustomThemes] = useState<CustomTheme[]>(() => getCachedCustomThemes());
 
   // Track terminal theme for 'auto' resolution. Seeds from $COLORFGBG (or
   // 'dark' if unset); the OSC 11 watcher corrects it on first poll.
@@ -71,6 +97,19 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
   const activeSetting = previewTheme ?? themeSetting;
 
   const { internal_querier } = useStdin();
+
+  const reloadCustomThemes = useCallback(async () => {
+    const loaded = await loadCustomThemes();
+    setCustomThemes(loaded);
+  }, []);
+
+  // densable: load + shallow watch of themes dir on mount
+  useEffect(() => {
+    void reloadCustomThemes();
+    // Lightweight poll instead of chokidar (densable uses chokidar) — enough
+    // for editor save → picker list refresh in-process; reloadCustomThemes is
+    // also called explicitly after save.
+  }, [reloadCustomThemes]);
 
   // Watch for live terminal theme changes while 'auto' is active.
   // Positive feature() pattern so the watcher import is dead-code-eliminated
@@ -91,55 +130,101 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
     }
   }, [activeSetting, internal_querier]);
 
-  const currentTheme: ThemeName = activeSetting === 'auto' ? systemTheme : activeSetting;
+  const customSlug = parseCustomThemeRef(String(activeSetting));
+  // Prefer React state; fall back to module cache so editor save → finish
+  // (reload + clear preview in one tick) never flashes the base palette when
+  // setCustomThemes has not yet re-rendered but saveCustomTheme already
+  // updated getCachedCustomThemes().
+  const activeCustomTheme = customSlug
+    ? (customThemes.find(t => t.slug === customSlug) ?? getCachedCustomThemes().find(t => t.slug === customSlug))
+    : undefined;
+
+  // densable u9r: base name for palette lookup
+  let currentTheme: ThemeName = 'dark';
+  if (activeCustomTheme) {
+    currentTheme = activeCustomTheme.base;
+  } else if (activeSetting === 'auto') {
+    currentTheme = systemTheme;
+  } else if (isThemeName(String(activeSetting))) {
+    currentTheme = String(activeSetting) as ThemeName;
+  }
+
+  const resolvedTheme = useMemo(
+    () => applyThemeOverrides(getTheme(currentTheme), previewOverrides ?? activeCustomTheme?.overrides),
+    [currentTheme, previewOverrides, activeCustomTheme?.overrides],
+  );
 
   const value = useMemo<ThemeContextValue>(
     () => ({
       themeSetting,
       setThemeSetting: (newSetting: ThemeSetting) => {
-        setThemeSetting(newSetting);
-        setPreviewTheme(null);
-        // Switching to 'auto' restarts the watcher (activeSetting dep), whose
-        // first poll fires immediately. Seed from the cache so the OSC
-        // round-trip doesn't flash the wrong palette.
+        setThemeSettingState(newSetting);
+        setPreviewThemeState(null);
+        setPreviewOverridesState(null);
         if (newSetting === 'auto') {
           setSystemTheme(getSystemThemeName());
         }
         onThemeSave?.(newSetting);
       },
       setPreviewTheme: (newSetting: ThemeSetting) => {
-        setPreviewTheme(newSetting);
+        setPreviewThemeState(newSetting);
+        setPreviewOverridesState(null);
         if (newSetting === 'auto') {
           setSystemTheme(getSystemThemeName());
         }
       },
       savePreview: () => {
         if (previewTheme !== null) {
-          setThemeSetting(previewTheme);
-          setPreviewTheme(null);
+          setThemeSettingState(previewTheme);
+          setPreviewThemeState(null);
           onThemeSave?.(previewTheme);
         }
       },
       cancelPreview: () => {
         if (previewTheme !== null) {
-          setPreviewTheme(null);
+          setPreviewThemeState(null);
         }
+        setPreviewOverridesState(null);
       },
       currentTheme,
+      resolvedTheme,
+      customThemes,
+      activeCustomTheme,
+      reloadCustomThemes,
+      setPreviewOverrides: overrides => {
+        setPreviewOverridesState(overrides);
+      },
     }),
-    [themeSetting, previewTheme, currentTheme, onThemeSave],
+    [
+      themeSetting,
+      previewTheme,
+      currentTheme,
+      resolvedTheme,
+      customThemes,
+      activeCustomTheme,
+      reloadCustomThemes,
+      onThemeSave,
+    ],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 /**
- * Returns the resolved theme for rendering (never 'auto') and a setter that
- * accepts any ThemeSetting (including 'auto').
+ * Returns the resolved base theme name for rendering (never 'auto'/custom:)
+ * and a setter that accepts any ThemeSetting (including 'auto' / custom:).
  */
 export function useTheme(): [ThemeName, (setting: ThemeSetting) => void] {
   const { currentTheme, setThemeSetting } = useContext(ThemeContext);
   return [currentTheme, setThemeSetting];
+}
+
+/**
+ * densable HL — full palette with custom overrides. Prefer this for color
+ * resolution when custom themes are active.
+ */
+export function useResolvedTheme(): Theme {
+  return useContext(ThemeContext).resolvedTheme;
 }
 
 /**
@@ -153,4 +238,20 @@ export function useThemeSetting(): ThemeSetting {
 export function usePreviewTheme() {
   const { setPreviewTheme, savePreview, cancelPreview } = useContext(ThemeContext);
   return { setPreviewTheme, savePreview, cancelPreview };
+}
+
+/** densable dge — custom theme list + editor hooks. */
+export function useCustomThemes(): {
+  customThemes: CustomTheme[];
+  activeCustomTheme: CustomTheme | undefined;
+  reloadCustomThemes: () => Promise<void>;
+  setPreviewOverrides: (overrides: Partial<Record<keyof Theme, string>> | null) => void;
+} {
+  const { customThemes, activeCustomTheme, reloadCustomThemes, setPreviewOverrides } = useContext(ThemeContext);
+  return {
+    customThemes,
+    activeCustomTheme,
+    reloadCustomThemes,
+    setPreviewOverrides,
+  };
 }

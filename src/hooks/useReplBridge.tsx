@@ -116,6 +116,11 @@ export function useReplBridge(
   const replBridgeOutboundOnly = feature('BRIDGE_MODE') ? replBridgeOutboundOnlyRaw : false;
   const replBridgeInitialNameRaw = useAppState(s => s.replBridgeInitialName);
   const replBridgeInitialName = feature('BRIDGE_MODE') ? replBridgeInitialNameRaw : undefined;
+  // Official te=Ve((ce)=>ce.replBridgeSessionGroupingId) → sessionGroupingId:te
+  const replBridgeSessionGroupingIdRaw = useAppState(s => s.replBridgeSessionGroupingId);
+  const replBridgeSessionGroupingId = feature('BRIDGE_MODE')
+    ? replBridgeSessionGroupingIdRaw
+    : undefined;
 
   // Initialize/teardown bridge when enabled state changes.
   // Passes current messages as initialMessages so the remote session
@@ -156,6 +161,8 @@ export function useReplBridge(
             ...prev,
             replBridgeError: fuseHint,
             replBridgeEnabled: false,
+            // Official ohs/Fsb: clear grouping when bridge disables.
+            replBridgeSessionGroupingId: undefined,
           };
         });
         return;
@@ -413,6 +420,7 @@ export function useReplBridge(
                       ...prev,
                       replBridgeEnabled: false,
                       replBridgeError: undefined,
+                      replBridgeSessionGroupingId: undefined,
                     };
                   });
                 }, BRIDGE_FAILURE_DISMISS_MS);
@@ -445,6 +453,9 @@ export function useReplBridge(
           const rawHandle = await initReplBridge({
             outboundOnly,
             tags: outboundOnly ? ['ccr-mirror'] : undefined,
+            // Official: sessionGroupingId from AppState for project-grouped RC sessions
+            // and left-arrow rit CLAUDE_BRIDGE_REATTACH_GROUPING.
+            sessionGroupingId: replBridgeSessionGroupingId,
             onInboundMessage: handleInboundMessage,
             onPermissionResponse: handlePermissionResponse,
             onInterrupt() {
@@ -623,6 +634,7 @@ export function useReplBridge(
                   ...prev,
                   replBridgeEnabled: false,
                   replBridgeError: undefined,
+                  replBridgeSessionGroupingId: undefined,
                 };
               });
             }, BRIDGE_FAILURE_DISMISS_MS);
@@ -760,6 +772,7 @@ export function useReplBridge(
                 ...prev,
                 replBridgeEnabled: false,
                 replBridgeError: undefined,
+                replBridgeSessionGroupingId: undefined,
               };
             });
           }, BRIDGE_FAILURE_DISMISS_MS);

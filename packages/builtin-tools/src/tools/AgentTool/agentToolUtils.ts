@@ -45,9 +45,14 @@ import { AbortError, errorMessage } from 'src/utils/errors.js'
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
+  createTurnDurationMessage,
   extractTextContent,
   getLastAssistantMessage,
 } from 'src/utils/messages.js'
+import {
+  preferLongerAgentMessages,
+  throwIfLastAssistantIsApiError,
+} from './syncAgentErrorRecover.js'
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js'
 import { permissionRuleValueFromString } from 'src/utils/permissions/permissionRuleParser.js'
 import {
@@ -319,6 +324,13 @@ export function finalizeAgentTool(
     agentType: string
     isAsync: boolean
   },
+  /**
+   * Official Cns(..., {suppressTelemetry:Z}) where Z = JXt after Jeo.
+   * When the finishing agent still holds any `agent:` keepalive children,
+   * skip tengu_agent_tool_completed / cache_eviction_hint (parent is parked
+   * for live children — completion telemetry would double-count).
+   */
+  opts?: { suppressTelemetry?: boolean },
 ): AgentToolResult {
   const {
     prompt,
@@ -328,6 +340,7 @@ export function finalizeAgentTool(
     agentType,
     isAsync,
   } = metadata
+  const suppressTelemetry = opts?.suppressTelemetry === true
 
   const lastAssistantMessage = getLastAssistantMessage(agentMessages)
   if (lastAssistantMessage === undefined) {
@@ -370,30 +383,34 @@ export function finalizeAgentTool(
     tracker.toolUseCount,
   )
 
-  logEvent('tengu_agent_tool_completed', {
-    agent_type:
-      agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    model:
-      resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    prompt_char_count: prompt.length,
-    response_char_count: content.length,
-    assistant_message_count: agentMessages.length,
-    total_tool_uses: totalToolUseCount,
-    duration_ms: Date.now() - startTime,
-    total_tokens: totalTokens,
-    is_built_in_agent: isBuiltInAgent,
-    is_async: isAsync,
-  })
-
-  // Signal to inference that this subagent's cache chain can be evicted.
-  const lastRequestId = lastAssistantMessage.requestId
-  if (lastRequestId) {
-    logEvent('tengu_cache_eviction_hint', {
-      scope:
-        'subagent_end' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      last_request_id:
-        lastRequestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  // Official: if(!Z) j("completed"); Cns(..., {suppressTelemetry:Z})
+  // Z = JXt after Jeo — suppress when any agent: child KA remains.
+  if (!suppressTelemetry) {
+    logEvent('tengu_agent_tool_completed', {
+      agent_type:
+        agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      model:
+        resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      prompt_char_count: prompt.length,
+      response_char_count: content.length,
+      assistant_message_count: agentMessages.length,
+      total_tool_uses: totalToolUseCount,
+      duration_ms: Date.now() - startTime,
+      total_tokens: totalTokens,
+      is_built_in_agent: isBuiltInAgent,
+      is_async: isAsync,
     })
+
+    // Signal to inference that this subagent's cache chain can be evicted.
+    const lastRequestId = lastAssistantMessage.requestId
+    if (lastRequestId) {
+      logEvent('tengu_cache_eviction_hint', {
+        scope:
+          'subagent_end' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        last_request_id:
+          lastRequestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
   }
 
   return {
@@ -555,7 +572,36 @@ export function extractPartialResult(
   return undefined
 }
 
+// densable J$u/k6g/$er/Vio — re-export pure module (avoid circular AgentTool load)
+export {
+  AgentApiErrorTerminationError,
+  RECOVERABLE_AGENT_API_ERROR_KINDS,
+  hasRecoverableAssistantText,
+  tryRecoverApiErrorPartial,
+  recoverSyncAgentErrorHistory,
+  type SyncAgentErrorRecovery,
+} from './syncAgentErrorRecover.js'
+
 type SetAppState = (f: (prev: AppState) => AppState) => void
+
+/**
+ * Snapshot AppState via the root setAppState path (setAppStateForTasks).
+ * Async/subagent getAppState() can miss root task registry writes (KA holds
+ * live on root via rootSetAppState); Jeo mutates through set, so JXt must
+ * read the same store.
+ */
+function readAppStateViaSet(setAppState: SetAppState): AppState {
+  let snap: AppState | undefined
+  setAppState(prev => {
+    snap = prev
+    return prev
+  })
+  // Fallback should never trip when setAppState is the real root updater.
+  return snap as AppState
+}
+
+// densable H6g pure helper lives in syncAgentErrorRecover (preferLongerAgentMessages)
+// to avoid agentToolUtils ↔ AgentTool circular load in pure tests.
 
 /**
  * Drives a background agent from spawn to terminal notification.
@@ -572,6 +618,7 @@ export async function runAsyncAgentLifecycle({
   agentIdForCleanup,
   enableSummarization,
   getWorktreeResult,
+  shouldNotifyOwner,
 }: {
   taskId: string
   abortController: AbortController
@@ -588,7 +635,14 @@ export async function runAsyncAgentLifecycle({
     worktreePath?: string
     worktreeBranch?: string
   }>
+  /**
+   * Official densable Yqe `shouldNotifyOwner` (d ?? ()=>!0).
+   * Aye awaitCompletion passes `() => false` so observer-activity join
+   * does not BRt the owner after the awaited turn completes.
+   */
+  shouldNotifyOwner?: () => boolean
 }): Promise<void> {
+  const notifyOwner = shouldNotifyOwner ?? (() => true)
   let stopSummarization: (() => void) | undefined
   const agentMessages: MessageType[] = []
   try {
@@ -675,15 +729,87 @@ export async function runAsyncAgentLifecycle({
       rootSetAppState,
     )
 
+    // densable Yqe: ie=FH(g); if(ie?.isApiErrorMessage&&!_ce(ie)) throw new Vio(...)
+    // Must run after stream ends, before stopSummarization/Jeo/finalize so catch
+    // path failAsyncAgent sees Vio + partial agentMessages (k6g recoverable kinds).
+    throwIfLastAssistantIsApiError(agentMessages)
+
     stopSummarization?.()
 
-    const agentResult = finalizeAgentTool(agentMessages, taskId, metadata)
-
+    // Official: Jeo(e,s); let Z=JXt(e,s); if(!Z) j("completed");
+    // Cns(..., {suppressTelemetry:Z}); DSu(re,s,...)
+    // Sweep stale KA first, then suppress finalize telemetry when this agent
+    // still holds any agent: child (parked parent finishing with live kids).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {
+      sweepStaleKeepaliveReasons,
+      hasLiveAgentKeepaliveChildren,
+      countAgentKeepaliveChildren,
+    } = require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
+    sweepStaleKeepaliveReasons(taskId, rootSetAppState)
+    // JXt must read the same root registry Jeo just mutated (not forked getAppState).
+    const stillHasAgentChildren = hasLiveAgentKeepaliveChildren(
+      taskId,
+      () => readAppStateViaSet(rootSetAppState),
+    )
+    // densable H6g(s,e,g) before Cns — prefer longer retain transcript over stream.
+    const taskSnap = readAppStateViaSet(rootSetAppState).tasks?.[taskId]
+    const retainedMessages = isLocalAgentTask(taskSnap)
+      ? taskSnap.messages
+      : undefined
+    const historyForFinalize = preferLongerAgentMessages(
+      agentMessages,
+      retainedMessages,
+    )
+    const agentResult = finalizeAgentTool(historyForFinalize, taskId, metadata, {
+      suppressTelemetry: stillHasAgentChildren,
+    })
     // Mark task completed FIRST so TaskOutput(block=true) unblocks
     // immediately. classifyHandoffIfNeeded (API call) and getWorktreeResult
     // (git exec) are notification embellishments that can hang — they must
     // not gate the status transition (gh-20236).
     completeAsyncAgent(agentResult, rootSetAppState)
+
+    // densable Yqe park-on-keepalive: if Z=JXt after DSu, strip old turn_duration,
+    // append CWr(duration, void0, void0, pe||void0), defer owner BRt (return).
+    if (stillHasAgentChildren) {
+      const pe = countAgentKeepaliveChildren(
+        taskId,
+        () => readAppStateViaSet(rootSetAppState),
+      )
+      const durationMs = agentResult.totalDurationMs
+      const turnDuration = createTurnDurationMessage(
+        durationMs,
+        undefined,
+        undefined,
+        pe || undefined,
+      )
+      rootSetAppState(prev => {
+        const t = prev.tasks[taskId]
+        if (!isLocalAgentTask(t)) return prev
+        const base = t.messages ?? []
+        const filtered = base.filter(
+          m =>
+            !(
+              m.type === 'system' &&
+              (m as { subtype?: string }).subtype === 'turn_duration'
+            ),
+        )
+        return {
+          ...prev,
+          tasks: {
+            ...prev.tasks,
+            [taskId]: { ...t, messages: [...filtered, turnDuration] },
+          },
+        }
+      })
+      logForDebugging(
+        `[AsyncAgent ${taskId}] parked on keepalive — deferring owner notification until resume`,
+        { level: 'info' },
+      )
+      return
+    }
+
     // Official observer densable: stop armed pairing when observed agent ends.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -715,28 +841,37 @@ export async function runAsyncAgentLifecycle({
 
     const worktreeResult = await getWorktreeResult()
 
-    enqueueAgentNotification({
-      taskId,
-      description,
-      status: 'completed',
-      setAppState: rootSetAppState,
-      finalMessage,
-      usage: {
-        totalTokens: getTokenCountFromTracker(tracker),
-        toolUses: agentResult.totalToolUseCount,
-        durationMs: agentResult.totalDurationMs,
-      },
-      toolUseId: toolUseContext.toolUseId,
-      ...worktreeResult,
-    })
+    // densable Yqe: if (p()) BRt(...) — awaitCompletion passes ()=>!1
+    if (notifyOwner()) {
+      enqueueAgentNotification({
+        taskId,
+        description,
+        status: 'completed',
+        setAppState: rootSetAppState,
+        finalMessage,
+        usage: {
+          totalTokens: getTokenCountFromTracker(tracker),
+          toolUses: agentResult.totalToolUseCount,
+          durationMs: agentResult.totalDurationMs,
+        },
+        toolUseId: toolUseContext.toolUseId,
+        ...worktreeResult,
+      })
+    }
   } catch (error) {
     stopSummarization?.()
     if (error instanceof AbortError) {
-      // killAsyncAgent is a no-op if TaskStop already set status='killed' —
-      // but only this catch handler has agentMessages, so the notification
-      // must fire unconditionally. Transition status BEFORE worktree cleanup
-      // so TaskOutput unblocks even if git hangs (gh-20236).
+      // densable Yqe AbortError: XV(e,s) then read ie.killedBy for analytics
+      // + BRt. killAsyncAgent is a no-op if TaskStop already set status=killed
+      // (and stamped killedBy:parent); only this catch has agentMessages so
+      // the notification still fires. Transition status BEFORE worktree
+      // cleanup so TaskOutput unblocks even if git hangs (gh-20236).
       killAsyncAgent(taskId, rootSetAppState)
+      const killedTask = readAppStateViaSet(rootSetAppState).tasks?.[taskId]
+      const killedBy =
+        isLocalAgentTask(killedTask) && killedTask.killedBy
+          ? killedTask.killedBy
+          : undefined
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { maybeStopObserverForObservedTerminal } =
@@ -747,6 +882,13 @@ export async function runAsyncAgentLifecycle({
       } catch {
         // densable optional
       }
+      // densable: Z==="parent"?parent_kill_async:Z==="system"?system_kill_async:user_kill_async
+      const killReason =
+        killedBy === 'parent'
+          ? 'parent_kill_async'
+          : killedBy === 'system'
+            ? 'system_kill_async'
+            : 'user_kill_async'
       logEvent('tengu_agent_tool_terminated', {
         agent_type:
           metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -756,19 +898,22 @@ export async function runAsyncAgentLifecycle({
         is_async: true,
         is_built_in_agent: metadata.isBuiltInAgent,
         reason:
-          'user_kill_async' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          killReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
       const worktreeResult = await getWorktreeResult()
       const partialResult = extractPartialResult(agentMessages)
-      enqueueAgentNotification({
-        taskId,
-        description,
-        status: 'killed',
-        setAppState: rootSetAppState,
-        toolUseId: toolUseContext.toolUseId,
-        finalMessage: partialResult,
-        ...worktreeResult,
-      })
+      if (notifyOwner()) {
+        enqueueAgentNotification({
+          taskId,
+          description,
+          status: 'killed',
+          killedBy,
+          setAppState: rootSetAppState,
+          toolUseId: toolUseContext.toolUseId,
+          finalMessage: partialResult,
+          ...worktreeResult,
+        })
+      }
       return
     }
     const msg = errorMessage(error)
@@ -784,15 +929,17 @@ export async function runAsyncAgentLifecycle({
       // densable optional
     }
     const worktreeResult = await getWorktreeResult()
-    enqueueAgentNotification({
-      taskId,
-      description,
-      status: 'failed',
-      error: msg,
-      setAppState: rootSetAppState,
-      toolUseId: toolUseContext.toolUseId,
-      ...worktreeResult,
-    })
+    if (notifyOwner()) {
+      enqueueAgentNotification({
+        taskId,
+        description,
+        status: 'failed',
+        error: msg,
+        setAppState: rootSetAppState,
+        toolUseId: toolUseContext.toolUseId,
+        ...worktreeResult,
+      })
+    }
   } finally {
     clearInvokedSkillsForAgent(agentIdForCleanup)
     clearDumpState(agentIdForCleanup)

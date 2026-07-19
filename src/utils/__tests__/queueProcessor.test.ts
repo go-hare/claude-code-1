@@ -115,6 +115,45 @@ describe('processQueueIfReady', () => {
     expect(result.processed).toBe(false)
   })
 
+  test('processes main-session task-notification with agentId undefined', () => {
+    // Official BRt: main-session leaves agentId unset (AL).
+    const executed: string[][] = []
+    enqueuePendingNotification({
+      value: '<task-notification>main done</task-notification>',
+      mode: 'task-notification',
+    } as any)
+
+    const result = processQueueIfReady({
+      executeInput: async cmds => {
+        executed.push(cmds.map(c => c.value as string))
+      },
+    })
+
+    expect(result.processed).toBe(true)
+    expect(executed).toEqual([['<task-notification>main done</task-notification>']])
+    expect(hasQueuedCommands()).toBe(false)
+  })
+
+  test('does not process mi()-stamped agentId (not main AL)', () => {
+    // Local bug path: stamping getSessionId() made drain skip forever.
+    const { getSessionId } =
+      require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+    const result = processQueueIfReady({
+      executeInput: async () => {},
+    })
+    enqueuePendingNotification({
+      value: '<task-notification>bogus mi</task-notification>',
+      mode: 'task-notification',
+      agentId: getSessionId() as any,
+    } as any)
+    const result2 = processQueueIfReady({
+      executeInput: async () => {},
+    })
+    expect(result.processed).toBe(false)
+    expect(result2.processed).toBe(false)
+    expect(hasQueuedCommands()).toBe(true)
+  })
+
   test('returns processed:false when only subagent commands in queue', () => {
     enqueuePendingNotification({
       value: '<task-notification/>',

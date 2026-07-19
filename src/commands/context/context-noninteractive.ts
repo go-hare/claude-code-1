@@ -28,6 +28,8 @@ type CollectContextDataInput = {
     agentDefinitions: AgentDefinitionsResult
     customSystemPrompt?: string
     appendSystemPrompt?: string
+    /** densable lor/dmo excludeDynamicSections */
+    excludeDynamicSections?: boolean
   }
 }
 
@@ -43,6 +45,7 @@ export async function collectContextData(
       agentDefinitions,
       customSystemPrompt,
       appendSystemPrompt,
+      excludeDynamicSections,
     },
   } = context
 
@@ -73,6 +76,7 @@ export async function collectContextData(
     >,
     undefined, // mainThreadAgentDefinition
     apiView, // original messages for API usage extraction
+    excludeDynamicSections,
   )
 }
 

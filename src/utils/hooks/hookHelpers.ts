@@ -20,6 +20,16 @@ export const hookResponseSchema = lazySchema(() =>
       .string()
       .describe('Reason, if the condition was not met')
       .optional(),
+    /**
+     * densable cXr.impossible — only meaningful when ok is false; Stop/SubagentStop
+     * evaluators may mark the condition permanently unachievable.
+     */
+    impossible: z
+      .boolean()
+      .describe(
+        'Whether the condition can never be satisfied (only meaningful when ok is false)',
+      )
+      .optional(),
   }),
 )
 

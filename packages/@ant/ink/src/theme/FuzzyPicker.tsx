@@ -18,7 +18,8 @@ type PickerAction<T> = {
 };
 
 type Props<T> = {
-  title: string;
+  /** densable: string or ReactNode (HistorySearch shows · scope suffix). */
+  title: React.ReactNode;
   placeholder?: string;
   initialQuery?: string;
   items: readonly T[];

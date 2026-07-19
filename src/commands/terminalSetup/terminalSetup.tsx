@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { randomBytes } from 'crypto';
 import { copyFile, mkdir, readFile, writeFile } from 'fs/promises';
-import { homedir, platform } from 'os';
+import { homedir, platform, release as osRelease } from 'os';
 import { dirname, join } from 'path';
 import type { ThemeName } from 'src/utils/theme.js';
 import { pathToFileURL } from 'url';
@@ -24,6 +24,7 @@ import { execFileNoThrow } from '../../utils/execFileNoThrow.js';
 import { addItemToJSONCArray, safeParseJSONC } from '../../utils/json.js';
 import { logError } from '../../utils/log.js';
 import { getPlatform } from '../../utils/platform.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js';
 
 const EOL = '\n';
@@ -380,8 +381,34 @@ async function disableAudioBellForProfile(profileName: string): Promise<boolean>
   return true;
 }
 
-// Enable Option as Meta key for Terminal.app
+/**
+ * Official densable 2.1.211 `Mol`:
+ *   os.release() major − 9 ≈ macOS marketing major (Darwin 24 → macOS 15).
+ * macOS ≥ 27 ships native Shift+Return newline in Terminal.app, so Option-as-Meta
+ * setup is skipped (bell may still be muted unless screen-reader mode).
+ */
+function getMacOSMajorVersion(): number | undefined {
+  if (platform() !== 'darwin') return undefined;
+  // Official densable Mol: os.release() major − 9.
+  const m = osRelease().match(/^(\d+)\./);
+  if (!m?.[1]) return undefined;
+  return parseInt(m[1], 10) - 9;
+}
+
+// Enable Option as Meta key for Terminal.app (and mute audible bell unless
+// screen-reader mode needs the system bell). Aligns with official 2.1.211 VWy.
 async function enableOptionAsMetaForTerminal(theme: ThemeName): Promise<string> {
+  // Official: t=(Mol()??0)>=27 — skip Option-as-Meta when Shift+Return is native.
+  const skipOptionAsMeta = (getMacOSMajorVersion() ?? 0) >= 27;
+  // Official: r=TL() — screen-reader mode leaves the audible bell alone.
+  const leaveBellUnchanged = isScreenReaderModeEnabled();
+
+  if (skipOptionAsMeta && leaveBellUnchanged) {
+    return `${color('success', theme)('No Terminal.app changes needed.')}${EOL}${chalk.dim(
+      'Shift+Return already enters a newline on this macOS version, and screen-reader mode leaves the audible bell setting unchanged.',
+    )}${EOL}`;
+  }
+
   try {
     // Create a backup of the current plist file
     const backupPath = await backupTerminalPreferences();
@@ -410,10 +437,19 @@ async function enableOptionAsMetaForTerminal(theme: ThemeName): Promise<string> 
     }
 
     let wasAnyProfileUpdated = false;
+    let anyOptionAsMeta = false;
+    let anyBellDisabled = false;
 
     const defaultProfileName = defaultProfile.trim();
-    const optionAsMetaEnabled = await enableOptionAsMetaForProfile(defaultProfileName);
-    const audioBellDisabled = await disableAudioBellForProfile(defaultProfileName);
+    // Official: u=t?!1:await P$d(c) — skip Option-as-Meta when macOS ≥ 27.
+    const optionAsMetaEnabled = skipOptionAsMeta ? false : await enableOptionAsMetaForProfile(defaultProfileName);
+    anyOptionAsMeta = anyOptionAsMeta || optionAsMetaEnabled;
+    let audioBellDisabled = false;
+    // Official: d=r?!1:await O$d(c)
+    if (!leaveBellUnchanged) {
+      audioBellDisabled = await disableAudioBellForProfile(defaultProfileName);
+      anyBellDisabled = anyBellDisabled || audioBellDisabled;
+    }
 
     if (optionAsMetaEnabled || audioBellDisabled) {
       wasAnyProfileUpdated = true;
@@ -423,8 +459,15 @@ async function enableOptionAsMetaForTerminal(theme: ThemeName): Promise<string> 
 
     // Only proceed if the startup profile is different from the default profile
     if (startupProfileName !== defaultProfileName) {
-      const startupOptionAsMetaEnabled = await enableOptionAsMetaForProfile(startupProfileName);
-      const startupAudioBellDisabled = await disableAudioBellForProfile(startupProfileName);
+      const startupOptionAsMetaEnabled = skipOptionAsMeta
+        ? false
+        : await enableOptionAsMetaForProfile(startupProfileName);
+      anyOptionAsMeta = anyOptionAsMeta || startupOptionAsMetaEnabled;
+      let startupAudioBellDisabled = false;
+      if (!leaveBellUnchanged) {
+        startupAudioBellDisabled = await disableAudioBellForProfile(startupProfileName);
+        anyBellDisabled = anyBellDisabled || startupAudioBellDisabled;
+      }
 
       if (startupOptionAsMetaEnabled || startupAudioBellDisabled) {
         wasAnyProfileUpdated = true;
@@ -432,6 +475,13 @@ async function enableOptionAsMetaForTerminal(theme: ThemeName): Promise<string> 
     }
 
     if (!wasAnyProfileUpdated) {
+      // Official failure branches when neither profile accepted the change.
+      if (skipOptionAsMeta) {
+        throw new Error('Failed to disable audio bell for any Terminal.app profile');
+      }
+      if (leaveBellUnchanged) {
+        throw new Error('Failed to enable Option as Meta key for any Terminal.app profile');
+      }
       throw new Error('Failed to enable Option as Meta key or disable audio bell for any Terminal.app profile');
     }
 
@@ -440,19 +490,34 @@ async function enableOptionAsMetaForTerminal(theme: ThemeName): Promise<string> 
 
     markTerminalSetupComplete();
 
-    return `${color(
-      'success',
-      theme,
-    )(
-      `Configured Terminal.app settings:`,
-    )}${EOL}${color('success', theme)('- Enabled "Use Option as Meta key"')}${EOL}${color('success', theme)('- Switched to visual bell')}${EOL}${chalk.dim('Option+Enter will now enter a newline.')}${EOL}${chalk.dim('You must restart Terminal.app for changes to take effect.', theme)}${EOL}`;
+    // Official success copy (VWy).
+    const lines = [color('success', theme)('Configured Terminal.app settings:')];
+    if (!skipOptionAsMeta) {
+      lines.push(color('success', theme)('- Enabled "Use Option as Meta key"'));
+    }
+    if (!leaveBellUnchanged) {
+      if (anyBellDisabled) {
+        lines.push(color('success', theme)('- Disabled the audible bell'));
+      }
+    } else {
+      lines.push(chalk.dim('- Left the audible bell setting unchanged (screen-reader mode uses it)'));
+    }
+    const newlineHint = skipOptionAsMeta
+      ? chalk.dim('Shift+Return will now enter a newline.')
+      : chalk.dim('Option+Enter will now enter a newline.');
+    return `${lines.join(EOL)}${EOL}${newlineHint}${EOL}${chalk.dim('You must restart Terminal.app for changes to take effect.')}${EOL}`;
   } catch (error) {
     logError(error);
 
     // Attempt to restore from backup
     const restoreResult = await checkAndRestoreTerminalBackup();
 
-    const errorMessage = 'Failed to enable Option as Meta key for Terminal.app.';
+    // Official: when Option-as-Meta was skipped (macOS ≥ 27), error is bell-only.
+    const errorMessage = skipOptionAsMeta
+      ? 'Failed to disable the audio bell for Terminal.app.'
+      : leaveBellUnchanged
+        ? 'Failed to enable Option as Meta key for Terminal.app.'
+        : 'Failed to enable Option as Meta key or disable the audio bell for Terminal.app.';
     if (restoreResult.status === 'restored') {
       throw new Error(`${errorMessage} Your settings have been restored from backup.`);
     } else if (restoreResult.status === 'failed') {

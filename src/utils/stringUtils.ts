@@ -76,6 +76,34 @@ export function normalizeFullWidthDigits(input: string): string {
 }
 
 /**
+ * densable Q0f: AZERTY / shifted number-row glyphs → digit (layout residual).
+ * Used by Z0f when NFKC alone is not enough for survey digit input.
+ */
+const SURVEY_DIGIT_LAYOUT_MAP: ReadonlyMap<string, string> = new Map([
+  ['&', '1'],
+  ['\u00e9', '2'], // é
+  ['"', '3'],
+  ["'", '4'],
+  ['(', '5'],
+  ['-', '6'],
+  ['\u00a7', '6'], // §
+  ['\u00e8', '7'], // è
+  ['_', '8'],
+  ['\u00e7', '9'], // ç
+  ['\u00e0', '0'], // à
+])
+
+/**
+ * densable Z0f: map single-char survey input to a digit via layout map or NFKC.
+ * Full-width digits are covered by NFKC; AZERTY shifted keys use the map.
+ */
+export function normalizeSurveyDigitInput(input: string): string {
+  const fromMap = SURVEY_DIGIT_LAYOUT_MAP.get(input)
+  if (fromMap !== undefined) return fromMap
+  return input.normalize('NFKC')
+}
+
+/**
  * Normalize full-width (zenkaku) space to half-width space.
  * Useful for accepting input from Japanese/CJK IMEs (U+3000 → U+0020).
  */

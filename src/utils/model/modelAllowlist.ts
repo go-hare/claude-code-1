@@ -168,3 +168,37 @@ export function isModelAllowed(model: string): boolean {
 
   return false
 }
+
+/**
+ * densable Fqe — scrub model names for control-response error text so
+ * control/invisible characters cannot leak into host-facing payloads.
+ * Empty scrub → "(unrecognized model name)"; over 128 chars → truncated + …
+ */
+export function sanitizeModelNameForControlError(model: string): string {
+  const cleaned = model.replace(/[^A-Za-z0-9._:/@[\]-]/g, '')
+  if (cleaned.length === 0) {
+    return '(unrecognized model name)'
+  }
+  if (cleaned.length > 128) {
+    return `${cleaned.slice(0, 128)}…`
+  }
+  return cleaned
+}
+
+/**
+ * densable $3 — org allowlist rejection message used by set_model when
+ * the requested model is blocked and no family step-down (Jq) is available.
+ * When a fallback is known, densable appends "Using <fallback> instead.";
+ * the thin print residual currently errors without applying a fallback, so
+ * `fallback` is optional and omitted in that path.
+ */
+export function formatRestrictedModelError(
+  requested: string,
+  fallback?: string | null,
+): string {
+  const req = sanitizeModelNameForControlError(requested)
+  if (fallback != null && fallback !== '') {
+    return `Model "${req}" is restricted by your organization's settings. Using ${sanitizeModelNameForControlError(fallback)} instead.`
+  }
+  return `Model "${req}" is restricted by your organization's settings.`
+}

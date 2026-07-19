@@ -93,6 +93,7 @@ const mockGetDefaultAppState = mock(() => ({
   settings: {},
   tasks: {},
   verbose: false,
+  showMessageTimestamps: false,
   mainLoopModel: null,
   mainLoopModelForSession: null,
 }))

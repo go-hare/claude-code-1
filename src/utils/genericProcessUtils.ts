@@ -28,13 +28,13 @@ export function isProcessRunning(pid: number): boolean {
 }
 
 /**
- * Official Dmi — process start time as epoch ms via `ps -o lstart=` (UTC).
- * Returns null on Windows or when ps fails. Used by host-creds procStart drift.
+ * Official Ex/phh — raw `ps -o lstart=` string (LC_ALL=C TZ=UTC).
+ * Used as adopt.json `procStart` identity token. Undefined on Windows / fail.
  */
-export async function getProcessStartTimeMs(
+export async function getProcessLstartString(
   pid: number,
-): Promise<number | null> {
-  if (pid <= 1 || process.platform === 'win32') return null
+): Promise<string | undefined> {
+  if (pid <= 1 || process.platform === 'win32') return undefined
   try {
     const result = await execFileNoThrowWithCwd(
       'ps',
@@ -48,11 +48,76 @@ export async function getProcessStartTimeMs(
         },
       },
     )
-    if (result.code !== 0 || !result.stdout?.trim()) return null
-    const ms = Date.parse(`${result.stdout.trim()} UTC`)
-    return Number.isFinite(ms) ? ms : null
+    if (result.code !== 0 || !result.stdout?.trim()) return undefined
+    return result.stdout.trim()
   } catch {
-    return null
+    return undefined
+  }
+}
+
+/**
+ * Official Dmi / WEi — process start time as epoch ms via `ps -o lstart=` (UTC).
+ * Returns null on Windows or when ps fails. Used by host-creds procStart drift.
+ */
+export async function getProcessStartTimeMs(
+  pid: number,
+): Promise<number | null> {
+  const lstart = await getProcessLstartString(pid)
+  if (lstart === undefined) return null
+  const ms = Date.parse(`${lstart} UTC`)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/**
+ * Official zU — identity still matches when expectedLstart is undefined, or
+ * when current lstart is undefined (ps race), or when equal.
+ */
+export async function processLstartMatches(
+  pid: number,
+  expectedLstart: string | undefined,
+): Promise<boolean> {
+  if (expectedLstart === undefined) return true
+  const current = await getProcessLstartString(pid)
+  return current === undefined || current === expectedLstart
+}
+
+/**
+ * Official Klr portable — SIGTERM only when identity still matches.
+ * - If procStart set: require current lstart === procStart (skip when recycled).
+ * - Else if startTimeTicks set: official xen is a null stub; `null !== ticks`
+ *   is always true → official returns without kill for ticks-only. Portable:
+ *   same (no kill on ticks-only until xen is real).
+ * - Else (no identity): official returns without kill (`else return`).
+ * Returns true if SIGTERM was attempted.
+ */
+export async function killPidIfIdentityMatches(
+  pid: number,
+  opts?: {
+    procStart?: string
+    startTimeTicks?: number
+    signal?: NodeJS.Signals | number
+  },
+): Promise<boolean> {
+  if (pid <= 1) return false
+  const procStart = opts?.procStart
+  const startTimeTicks = opts?.startTimeTicks
+  if (procStart !== undefined) {
+    const current = await getProcessLstartString(pid)
+    // Official: if await Ex(e,{skipCache:!0}) !== r return
+    // If current is undefined (ps fail), Ex returns undefined ≠ procStart → no kill.
+    if (current !== procStart) return false
+  } else if (startTimeTicks !== undefined) {
+    // Official xen returns null; null !== ticks → no kill.
+    return false
+  } else {
+    // Official: else return (no identity → no SIGTERM).
+    return false
+  }
+  try {
+    process.kill(pid, opts?.signal ?? 'SIGTERM')
+    return true
+  } catch {
+    return false
   }
 }
 

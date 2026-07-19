@@ -87,6 +87,7 @@ import { AskUserQuestionTool } from '@claude-code/builtin-tools/tools/AskUserQue
 import { LSPTool } from '@claude-code/builtin-tools/tools/LSPTool/LSPTool.js'
 import { ListMcpResourcesTool } from '@claude-code/builtin-tools/tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { ReadMcpResourceTool } from '@claude-code/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
+import { RefreshMcpToolsTool } from '@claude-code/builtin-tools/tools/RefreshMcpToolsTool/RefreshMcpToolsTool.js'
 import { SearchExtraToolsTool } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/SearchExtraToolsTool.js'
 import { ExecuteTool } from '@claude-code/builtin-tools/tools/ExecuteTool/ExecuteTool.js'
 import { EnterPlanModeTool } from '@claude-code/builtin-tools/tools/EnterPlanModeTool/EnterPlanModeTool.js'
@@ -279,6 +280,7 @@ export function getAllBaseTools(): Tools {
     ...(process.env.NODE_ENV === 'test' ? [TestingPermissionTool] : []),
     ListMcpResourcesTool,
     ReadMcpResourceTool,
+    RefreshMcpToolsTool,
     // Include SearchExtraToolsTool when tool search might be enabled (optimistic check)
     // The actual decision to defer tools happens at request time in claude.ts
     ...(isSearchExtraToolsEnabledOptimistic() ? [SearchExtraToolsTool] : []),
@@ -345,9 +347,14 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   }
 
   // Get all base tools and filter out special tools that get added conditionally
+  // Official: List/Read MCP resources are re-injected when a server advertises
+  // resources; RefreshMcpTools is only useful when MCP clients exist and is
+  // re-injected via getMcpToolsCommandsAndResources (below is the base-tool
+  // exclusion so getTools() does not always surface them without MCP).
   const specialTools = new Set([
     ListMcpResourcesTool.name,
     ReadMcpResourceTool.name,
+    RefreshMcpToolsTool.name,
     SYNTHETIC_OUTPUT_TOOL_NAME,
   ])
 

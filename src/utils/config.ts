@@ -238,7 +238,17 @@ export type GlobalConfig = {
   bypassPermissionsModeAccepted?: boolean
   hasUsedBackslashReturn?: boolean
   autoCompactEnabled: boolean // Controls whether auto-compact is enabled
+  /**
+   * densable precomputeCompactionEnabled — background-precompute compaction summary.
+   * Config UI gated by GrowthBook tengu_sepia_moth; default true when unset.
+   */
+  precomputeCompactionEnabled?: boolean
   showTurnDuration: boolean // Controls whether to show turn duration message (e.g., "Cooked for 1m 6s")
+  /**
+   * densable showMessageTimestamps — stamp each assistant message with arrival time.
+   * Config UI gated by GrowthBook tengu_silk_hinge.
+   */
+  showMessageTimestamps: boolean
   /**
    * @deprecated Use settings.env instead.
    */
@@ -281,11 +291,26 @@ export type GlobalConfig = {
     lastShownTime?: number
   }
 
+  /**
+   * densable pluginSurveyState — plugin feedback survey pacing.
+   * lastShownTime: global cooldown; perPlugin: keyed by Jae(name, marketplace) hash.
+   */
+  pluginSurveyState?: {
+    lastShownTime?: number
+    perPlugin?: { [pluginKeyHash: string]: number }
+  }
+
   // Transcript share prompt tracking ("Don't ask again")
   transcriptShareDismissed?: boolean
 
   // Official: dismiss cold-start 'claude daemon install' prompt forever
   daemonInstallPromptDismissed?: boolean
+
+  /**
+   * Official fleetViewGroupMode — Agents View grouping: state | directory | group.
+   * Persisted across `claude agents` opens (Ctrl+S cycles).
+   */
+  fleetViewGroupMode?: 'state' | 'directory' | 'group'
 
   // Memory usage tracking
   memoryUsageCount: number // Number of times user has added to memory
@@ -615,6 +640,25 @@ export type GlobalConfig = {
   // CURRENT_MIGRATION_VERSION, runMigrations() skips all sync migrations
   // (avoiding 11× saveGlobalConfig lock+re-read on every startup).
   migrationVersion?: number
+
+  /**
+   * densable favoritePlugins — plugin ids (`name@marketplace`) starred via
+   * ManagePlugins `f` / plugin:favorite. Pinned above the rest of the list.
+   */
+  favoritePlugins?: string[]
+
+  /**
+   * densable pluginUsage — per-plugin usage for “Not used recently” section.
+   * Keyed by plugin id (`name@marketplace`). Seeded on install/list; touched
+   * when the plugin contributes work. Disuse threshold: ≥14 days AND ≥10
+   * startups since last use (densable s1y/a1y).
+   */
+  pluginUsage?: Record<
+    string,
+    { usageCount: number; lastUsedAt: number; lastUsedNumStartups: number }
+  >
+  /** densable pluginUsageLspGraceAppliedIds — one-time LSP grace touch ids */
+  pluginUsageLspGraceAppliedIds?: string[]
 }
 
 /**
@@ -632,7 +676,9 @@ function createDefaultGlobalConfig(): GlobalConfig {
     verbose: false,
     editorMode: 'normal',
     autoCompactEnabled: true,
+    precomputeCompactionEnabled: true,
     showTurnDuration: true,
+    showMessageTimestamps: false,
     hasSeenTasksHint: false,
     hasUsedStash: false,
     hasUsedBackgroundTask: false,
@@ -677,6 +723,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'hasUsedBackslashReturn',
   'autoCompactEnabled',
   'showTurnDuration',
+  'showMessageTimestamps',
   'diffTool',
   'env',
   'tipsHistory',

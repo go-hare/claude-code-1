@@ -244,6 +244,44 @@ ${modelUsageDisplay}`,
   )
 }
 
+/**
+ * densable xJr session slice — structured /usage control response body.
+ * Local residual: no claude.ai rate-limit fetch (RJr) or transcript behaviors (AJr);
+ * rate_limits/behaviors stay null. rate_limits_available mirrors densable t&&aH.
+ */
+export function buildGetUsageControlResponse(opts: {
+  subscriptionType: string | null
+  rateLimitsAvailable: boolean
+}): {
+  session: {
+    total_cost_usd: number
+    total_api_duration_ms: number
+    total_duration_ms: number
+    total_lines_added: number
+    total_lines_removed: number
+    model_usage: { [modelName: string]: ModelUsage }
+  }
+  subscription_type: string | null
+  rate_limits_available: boolean
+  rate_limits: null
+  behaviors: null
+} {
+  return {
+    session: {
+      total_cost_usd: getTotalCostUSD(),
+      total_api_duration_ms: getTotalAPIDuration(),
+      total_duration_ms: getTotalDuration(),
+      total_lines_added: getTotalLinesAdded(),
+      total_lines_removed: getTotalLinesRemoved(),
+      model_usage: getModelUsage(),
+    },
+    subscription_type: opts.subscriptionType,
+    rate_limits_available: opts.rateLimitsAvailable,
+    rate_limits: null,
+    behaviors: null,
+  }
+}
+
 function round(number: number, precision: number): number {
   return Math.round(number * precision) / precision
 }

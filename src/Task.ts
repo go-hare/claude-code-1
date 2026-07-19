@@ -18,11 +18,14 @@ export type TaskStatus =
   | 'completed'
   | 'failed'
   | 'killed'
+  // Official workflow pause (zit/xao/ess). Not terminal (UE excludes paused).
+  | 'paused'
 
 /**
  * True when a task is in a terminal state and will not transition further.
  * Used to guard against injecting messages into dead teammates, evicting
  * finished tasks from AppState, and orphan-cleanup paths.
+ * Official UE: completed | failed | killed — paused is intentionally excluded.
  */
 export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'killed'
@@ -67,12 +70,19 @@ export type LocalShellSpawnInput = {
 }
 
 // What getTaskByType dispatches for: kill. spawn/render were never
-// called polymorphically (removed in #22546). All six kill implementations
-// use only setAppState — getAppState/abortController were dead weight.
+// called polymorphically (removed in #22546).
+// densable LocalAgentTask.kill(e,t,r,n) → XV(e,t,n) with killedBy as 4th arg;
+// local omits the registry param and passes killedBy as optional 3rd.
+export type TaskKilledBy = 'user' | 'parent' | 'system'
+
 export type Task = {
   name: string
   type: TaskType
-  kill(taskId: string, setAppState: SetAppState): Promise<void>
+  kill(
+    taskId: string,
+    setAppState: SetAppState,
+    killedBy?: TaskKilledBy,
+  ): Promise<void>
 }
 
 // Task ID prefixes

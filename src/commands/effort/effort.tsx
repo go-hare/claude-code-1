@@ -13,19 +13,31 @@ import {
   getEffortEnvOverride,
   getEffortValueDescription,
   isEffortLevel,
+  isUltraEffortSessionActive,
+  modelSupportsXhighEffort,
   toPersistableEffort,
 } from '../../utils/effort.js';
+import { isWorkflowsFeatureEnabled } from '../../utils/workflowDisableGate.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 
 const COMMON_HELP_ARGS = ['help', '-h', '--help'];
 
-type EffortCommandResult = {
+const EFFORT_USAGE_LEVELS = 'low, medium, high, xhigh, max, auto, ultracode';
+
+export type EffortCommandResult = {
   message: string;
-  effortUpdate?: { value: EffortValue | undefined };
+  /**
+   * densable effortUpdate — value is effortValue; ultracode is the session
+   * standing-orchestration flag (true only for /effort ultracode).
+   */
+  effortUpdate?: { value: EffortValue | undefined; ultracode?: boolean };
 };
 
-function setEffortValue(effortValue: EffortValue): EffortCommandResult {
-  const persistable = toPersistableEffort(effortValue);
+function setEffortValue(effortValue: EffortValue, opts?: { ultracode?: boolean }): EffortCommandResult {
+  const ultracode = opts?.ultracode === true;
+  // densable: ultracode is session-only (xhigh + flag); do not persist
+  // effortLevel for the ultracode alias path.
+  const persistable = ultracode ? undefined : toPersistableEffort(effortValue);
   if (persistable !== undefined) {
     const result = updateSettingsForSource('userSettings', {
       effortLevel: persistable,
@@ -37,7 +49,7 @@ function setEffortValue(effortValue: EffortValue): EffortCommandResult {
     }
   }
   logEvent('tengu_effort_command', {
-    effort: effortValue as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    effort: (ultracode ? 'ultracode' : effortValue) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   });
 
   // Env var wins at resolveAppliedEffort time. Only flag it when it actually
@@ -46,15 +58,29 @@ function setEffortValue(effortValue: EffortValue): EffortCommandResult {
   const envOverride = getEffortEnvOverride();
   if (envOverride !== undefined && envOverride !== effortValue) {
     const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
-    if (persistable === undefined) {
+    if (persistable === undefined || ultracode) {
+      if (ultracode) {
+        // densable still applies session update under env conflict for ultracode
+        return {
+          message: `CLAUDE_CODE_EFFORT_LEVEL=${envRaw} overrides effort this session — clear it and ultracode takes over`,
+          effortUpdate: { value: effortValue, ultracode: true },
+        };
+      }
       return {
         message: `Not applied: CLAUDE_CODE_EFFORT_LEVEL=${envRaw} overrides effort this session, and ${effortValue} is session-only (nothing saved)`,
-        effortUpdate: { value: effortValue },
+        effortUpdate: { value: effortValue, ultracode: false },
       };
     }
     return {
       message: `CLAUDE_CODE_EFFORT_LEVEL=${envRaw} overrides this session — clear it and ${effortValue} takes over`,
-      effortUpdate: { value: effortValue },
+      effortUpdate: { value: effortValue, ultracode: false },
+    };
+  }
+
+  if (ultracode) {
+    return {
+      message: 'Set effort level to ultracode (this session only): xhigh + dynamic workflow orchestration',
+      effortUpdate: { value: 'xhigh', ultracode: true },
     };
   }
 
@@ -62,11 +88,23 @@ function setEffortValue(effortValue: EffortValue): EffortCommandResult {
   const suffix = persistable !== undefined ? '' : ' (this session only)';
   return {
     message: `Set effort level to ${effortValue}${suffix}: ${description}`,
-    effortUpdate: { value: effortValue },
+    effortUpdate: { value: effortValue, ultracode: false },
   };
 }
 
-export function showCurrentEffort(appStateEffort: EffortValue | undefined, model: string): EffortCommandResult {
+/**
+ * densable LJr — when ultracode session active, report ultracode status.
+ */
+export function showCurrentEffort(
+  appStateEffort: EffortValue | undefined,
+  model: string,
+  ultracode?: boolean,
+): EffortCommandResult {
+  if (isUltraEffortSessionActive(model, appStateEffort, ultracode)) {
+    return {
+      message: 'Current effort level: ultracode (xhigh + dynamic workflow orchestration; this session only)',
+    };
+  }
   const envOverride = getEffortEnvOverride();
   const effectiveValue = envOverride === null ? undefined : (envOverride ?? appStateEffort);
   if (effectiveValue === undefined) {
@@ -98,56 +136,77 @@ function unsetEffortLevel(): EffortCommandResult {
     const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
     return {
       message: `Cleared effort from settings, but CLAUDE_CODE_EFFORT_LEVEL=${envRaw} still controls this session`,
-      effortUpdate: { value: undefined },
+      effortUpdate: { value: undefined, ultracode: false },
     };
   }
   return {
     message: 'Effort level set to auto',
-    effortUpdate: { value: undefined },
+    effortUpdate: { value: undefined, ultracode: false },
   };
 }
 
-export function executeEffort(args: string): EffortCommandResult {
+/**
+ * densable sLy — /effort ultracode: xhigh + AppState.ultracode session flag.
+ * Requires workflows feature + xhigh-capable model.
+ */
+function setUltracodeEffort(model: string): EffortCommandResult {
+  if (!isWorkflowsFeatureEnabled()) {
+    return {
+      message: `Ultracode needs dynamic workflows enabled (see /config). Valid options are: ${EFFORT_USAGE_LEVELS}`,
+    };
+  }
+  if (!modelSupportsXhighEffort(model)) {
+    return {
+      message: `Ultracode runs at xhigh effort, which ${model} doesn't support — switch to an xhigh-capable model. Valid options are: ${EFFORT_USAGE_LEVELS}`,
+    };
+  }
+  return setEffortValue('xhigh', { ultracode: true });
+}
+
+export function executeEffort(args: string, opts?: { model?: string }): EffortCommandResult {
   const normalized = args.toLowerCase();
   if (normalized === 'auto' || normalized === 'unset') {
     return unsetEffortLevel();
   }
+  if (normalized === 'ultracode') {
+    return setUltracodeEffort(opts?.model ?? 'unknown');
+  }
 
   if (!isEffortLevel(normalized)) {
     return {
-      message: `Invalid argument: ${args}. Valid options are: low, medium, high, max, auto`,
+      message: `Invalid argument: ${args}. Valid options are: ${EFFORT_USAGE_LEVELS}`,
     };
   }
 
-  return setEffortValue(normalized);
+  return setEffortValue(normalized, { ultracode: false });
 }
 
 function ShowCurrentEffort({ onDone }: { onDone: (result: string) => void }): React.ReactNode {
   const effortValue = useAppState(s => s.effortValue);
+  const ultracode = useAppState(s => s.ultracode);
   const model = useMainLoopModel();
-  const { message } = showCurrentEffort(effortValue, model);
+  const { message } = showCurrentEffort(effortValue, model, ultracode);
   onDone(message);
   return null;
 }
 
-function ApplyEffortAndClose({
-  result,
-  onDone,
-}: {
-  result: EffortCommandResult;
-  onDone: (result: string) => void;
-}): React.ReactNode {
+/**
+ * densable uSo apply path — set effortValue + ultracode session flag together.
+ */
+function ExecuteEffortAndClose({ args, onDone }: { args: string; onDone: (result: string) => void }): React.ReactNode {
+  const model = useMainLoopModel();
   const setAppState = useSetAppState();
-  const { effortUpdate, message } = result;
   React.useEffect(() => {
-    if (effortUpdate) {
+    const result = executeEffort(args, { model });
+    if (result.effortUpdate) {
       setAppState(prev => ({
         ...prev,
-        effortValue: effortUpdate.value,
+        effortValue: result.effortUpdate!.value,
+        ultracode: result.effortUpdate!.ultracode === true,
       }));
     }
-    onDone(message);
-  }, [setAppState, effortUpdate, message, onDone]);
+    onDone(result.message);
+  }, [args, model, setAppState, onDone]);
   return null;
 }
 
@@ -156,7 +215,7 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
 
   if (COMMON_HELP_ARGS.includes(args)) {
     onDone(
-      'Usage: /effort [low|medium|high|xhigh|max|auto]\n\nEffort levels:\n- low: Quick, straightforward implementation\n- medium: Balanced approach with standard testing\n- high: Comprehensive implementation with extensive testing\n- xhigh: Extended reasoning beyond high, short of max; including ChatGPT Codex models\n- max: Maximum capability with deepest reasoning\n- auto: Use the default effort level for your model',
+      'Usage: /effort [low|medium|high|xhigh|max|auto|ultracode]\n\nEffort levels:\n- low: Quick, straightforward implementation\n- medium: Balanced approach with standard testing\n- high: Comprehensive implementation with extensive testing\n- xhigh: Extended reasoning beyond high, short of max; including ChatGPT Codex models\n- max: Maximum capability with deepest reasoning\n- auto: Use the default effort level for your model\n- ultracode: Session-only xhigh + dynamic workflow orchestration',
     );
     return;
   }
@@ -169,8 +228,7 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
     return <EffortPanelWrapper onDone={onDone} />;
   }
 
-  const result = executeEffort(args);
-  return <ApplyEffortAndClose result={result} onDone={onDone} />;
+  return <ExecuteEffortAndClose args={args} onDone={onDone} />;
 }
 
 function EffortPanelWrapper({ onDone }: { onDone: (result: string) => void }): React.ReactNode {

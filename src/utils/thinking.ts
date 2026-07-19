@@ -8,10 +8,54 @@ import { getAPIProvider } from './model/providers.js'
 import { getSettingsWithErrors } from './settings/settings.js'
 import { resolveAntModel } from './model/antModels.js'
 
+/** densable thinking_display modes for stream / transcript rendering. */
+export type ThinkingDisplayMode = 'summarized' | 'omitted'
+
 export type ThinkingConfig =
-  | { type: 'adaptive' }
-  | { type: 'enabled'; budgetTokens: number }
+  | { type: 'adaptive'; display?: ThinkingDisplayMode }
+  | { type: 'enabled'; budgetTokens: number; display?: ThinkingDisplayMode }
   | { type: 'disabled' }
+
+/**
+ * densable OFf — resolve set_max_thinking_tokens control request into
+ * ThinkingConfig.
+ *
+ * - maxThinkingTokens null/undefined: clear mid-session budget override back
+ *   toward spawn/session default `previous`, optionally patching `display`.
+ * - 0: disable thinking.
+ * - positive integer: fixed budget (enabled).
+ * - `adaptiveCapable` mirrors densable dme() when no previous config exists
+ *   and only a display mode is being set.
+ */
+export function resolveControlThinkingConfig(
+  maxThinkingTokens: number | null | undefined,
+  display: ThinkingDisplayMode | undefined,
+  previous: ThinkingConfig | undefined,
+  adaptiveCapable = false,
+): ThinkingConfig | undefined {
+  if (maxThinkingTokens == null) {
+    if (previous) {
+      // densable: r.type!=="disabled" ? {...r,display:t} : r
+      if (previous.type === 'disabled') {
+        return previous
+      }
+      return { ...previous, display }
+    }
+    // densable: t!==void 0 && dme() ? {type:"adaptive",display:t} : void 0
+    if (display !== undefined && adaptiveCapable) {
+      return { type: 'adaptive', display }
+    }
+    return undefined
+  }
+  if (maxThinkingTokens === 0) {
+    return { type: 'disabled' }
+  }
+  return {
+    type: 'enabled',
+    budgetTokens: maxThinkingTokens,
+    display,
+  }
+}
 
 /**
  * Build-time gate (feature) + runtime gate (GrowthBook). The build flag

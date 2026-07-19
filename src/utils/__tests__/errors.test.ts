@@ -247,6 +247,18 @@ describe('isFsInaccessible', () => {
     ).toBe(true)
   })
 
+  test('returns true for densable mrm ENAMETOOLONG', () => {
+    expect(
+      isFsInaccessible(Object.assign(new Error(), { code: 'ENAMETOOLONG' })),
+    ).toBe(true)
+  })
+
+  test('returns true for densable mrm EROFS', () => {
+    expect(
+      isFsInaccessible(Object.assign(new Error(), { code: 'EROFS' })),
+    ).toBe(true)
+  })
+
   test('returns false for other codes', () => {
     expect(
       isFsInaccessible(Object.assign(new Error(), { code: 'EEXIST' })),

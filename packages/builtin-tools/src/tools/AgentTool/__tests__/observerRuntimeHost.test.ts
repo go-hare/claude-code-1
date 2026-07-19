@@ -49,4 +49,19 @@ describe('createAgentObserverRuntimeHostHandlers', () => {
       /agentType: plan\.observerAgentType[\s\S]{0,400}tools:\s*\['\*'\]/,
     )
   })
+
+  test('source-scan: densable deliver uses Aye observer-activity + isObserver stamp', () => {
+    const src = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '../observerRuntimeHost.ts'),
+      'utf8',
+    ) as string
+    // densable Cxt.deliver → Aye promptOrigin observer-activity
+    expect(src).toContain("promptOriginKind: 'observer-activity'")
+    expect(src).toContain('suppressOwnerNotification: true')
+    expect(src).toContain('awaitCompletion: true')
+    expect(src).toContain('resumeAgentBackground')
+    // spawnFirstRun stamps Sot isObserver + sidecar meta
+    expect(src).toContain('isObserver: true')
+    expect(src).toContain('writeAgentMetadata')
+  })
 })

@@ -156,17 +156,50 @@ export type TimestampedHistoryEntry = {
 }
 
 /**
- * Current-project history for the ctrl+r picker: deduped by display text,
- * newest first, with timestamps. Paste contents are resolved lazily via
- * `resolve()` — the picker only reads display+timestamp for the list.
+ * densable vmo — HistorySearch picker scope order for ctrl+s cycleScope.
+ * - session: current sessionId only
+ * - project: current project root only
+ * - everywhere: all projects
  */
-export async function* getTimestampedHistory(): AsyncGenerator<TimestampedHistoryEntry> {
+export const HISTORY_SEARCH_SCOPES = [
+  'session',
+  'project',
+  'everywhere',
+] as const
+
+export type HistorySearchScope = (typeof HISTORY_SEARCH_SCOPES)[number]
+
+export function isHistorySearchScope(
+  value: string,
+): value is HistorySearchScope {
+  return (HISTORY_SEARCH_SCOPES as readonly string[]).includes(value)
+}
+
+export function nextHistorySearchScope(
+  current: HistorySearchScope,
+): HistorySearchScope {
+  const idx = HISTORY_SEARCH_SCOPES.indexOf(current)
+  const next = HISTORY_SEARCH_SCOPES[(idx + 1) % HISTORY_SEARCH_SCOPES.length]
+  return next ?? 'everywhere'
+}
+
+/**
+ * densable Esd — scoped history for the HISTORY_PICKER dialog: deduped by
+ * display text, newest first, with timestamps. Paste contents resolve lazily.
+ * Default scope is `project` (densable function default); the picker itself
+ * starts on `everywhere`.
+ */
+export async function* getTimestampedHistory(
+  scope: HistorySearchScope = 'project',
+): AsyncGenerator<TimestampedHistoryEntry> {
   const currentProject = getProjectRoot()
+  const currentSession = getSessionId()
   const seen = new Set<string>()
 
   for await (const entry of makeLogEntryReader()) {
     if (!entry || typeof entry.project !== 'string') continue
-    if (entry.project !== currentProject) continue
+    if (scope === 'project' && entry.project !== currentProject) continue
+    if (scope === 'session' && entry.sessionId !== currentSession) continue
     if (seen.has(entry.display)) continue
     seen.add(entry.display)
 

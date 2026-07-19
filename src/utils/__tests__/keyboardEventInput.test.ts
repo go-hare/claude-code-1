@@ -125,4 +125,35 @@ describe('insertInputFromKeyboardEvent (official tS_ + insert(q.key))', () => {
     expect(e.key).toBe('')
     expect(insertInputFromKeyboardEvent(e)).toBe('')
   })
+
+  test('live leading-< progressive mouse desync never inserts', () => {
+    const live = '<64;32;19M4;32;19M32;19M;19M<65;32;19M'
+    const e = new KeyboardEvent(key({ sequence: live }))
+    expect(e.key).toBe('')
+    expect(insertInputFromKeyboardEvent(e)).toBe('')
+  })
+
+  test('param residue and MMMM never insert', () => {
+    expect(
+      insertInputFromKeyboardEvent(
+        new KeyboardEvent(key({ sequence: '17;19M' })),
+      ),
+    ).toBe('')
+    expect(
+      insertInputFromKeyboardEvent(
+        new KeyboardEvent(key({ sequence: 'MMMM' })),
+      ),
+    ).toBe('')
+  })
+
+  test('live Image chip wall + SGR residue inserts chips only', () => {
+    // Screenshot: chips glued to M-param residue + orphan SGR after scroll.
+    const live =
+      '[Image #1][Image #2][Image #3][Image #4]M5;12;11M[<65;12;11M'
+    const e = new KeyboardEvent(key({ sequence: live }))
+    expect(e.key).toBe('[Image #1][Image #2][Image #3][Image #4]')
+    expect(insertInputFromKeyboardEvent(e)).toBe(
+      '[Image #1][Image #2][Image #3][Image #4]',
+    )
+  })
 })

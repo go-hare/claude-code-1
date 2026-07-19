@@ -110,6 +110,12 @@ export type InitBridgeOptions = {
    */
   outboundOnly?: boolean
   tags?: string[]
+  /**
+   * Official sessionGroupingId for project-grouped remote sessions.
+   * Threaded to the bridge handle for left-arrow rit GROUPING env.
+   */
+  sessionGroupingId?: string
+  requestedSessionGroupingId?: string
 }
 
 export async function initReplBridge(
@@ -131,6 +137,8 @@ export async function initReplBridge(
     perpetual,
     outboundOnly,
     tags,
+    sessionGroupingId,
+    requestedSessionGroupingId,
   } = options ?? {}
 
   // Wire the cse_ shim kill switch so toCompatSessionId respects the
@@ -461,6 +469,8 @@ export async function initReplBridge(
       onStateChange,
       outboundOnly,
       tags,
+      sessionGroupingId,
+      requestedSessionGroupingId,
     })
   }
 
@@ -551,6 +561,8 @@ export async function initReplBridge(
     onSetMcpPermissionModeOverride,
     onStateChange,
     perpetual,
+    outboundOnly,
+    sessionGroupingId,
   })
 }
 

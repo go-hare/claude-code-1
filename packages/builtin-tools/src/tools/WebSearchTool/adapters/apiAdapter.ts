@@ -16,6 +16,11 @@ import {
 } from 'src/services/langfuse/index.js'
 import { getSessionId } from 'src/bootstrap/state.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
+import type { ToolPermissionContext } from 'src/Tool.js'
+import {
+  resolveEffortValue,
+  resolveToolPermissionContext,
+} from 'src/utils/contextLayers.js'
 import { createUserMessage } from 'src/utils/messages.js'
 import { getMainLoopModel, getSmallFastModel } from 'src/utils/model/model.js'
 import { jsonParse } from 'src/utils/slowOperations.js'
@@ -37,7 +42,13 @@ function makeToolSchema(input: {
 
 export class ApiSearchAdapter implements WebSearchAdapter {
   async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
-    const { signal, onProgress, allowedDomains, blockedDomains } = options
+    const {
+      signal,
+      onProgress,
+      allowedDomains,
+      blockedDomains,
+      toolUseContext,
+    } = options
 
     const userMessage = createUserMessage({
       content: 'Perform a web search for the query: ' + query,
@@ -48,7 +59,10 @@ export class ApiSearchAdapter implements WebSearchAdapter {
       'tengu_plum_vx3',
       false,
     )
-    const model = useHaiku ? getSmallFastModel() : getMainLoopModel()
+    // densable: et("tengu_plum_vx3")?rP():t.options.mainLoopModel (bare, not X$)
+    const model = useHaiku
+      ? getSmallFastModel()
+      : (toolUseContext?.options.mainLoopModel ?? getMainLoopModel())
     const langfuseTrace = isLangfuseEnabled()
       ? createTrace({
           sessionId: getSessionId(),
@@ -58,37 +72,51 @@ export class ApiSearchAdapter implements WebSearchAdapter {
         })
       : null
 
+    // densable: effortValue:P_(t), getToolPermissionContext:async()=>Tn(t)
+    const effortValue = toolUseContext
+      ? resolveEffortValue(toolUseContext)
+      : undefined
+
     const queryStream = queryModelWithStreaming({
       messages: [userMessage],
       systemPrompt: asSystemPrompt([
         'You are an assistant for performing a web search tool use',
       ]),
-      thinkingConfig: useHaiku
-        ? { type: 'disabled' as const }
-        : { type: 'enabled' as const, budgetTokens: 10000 },
+      // densable: thinkingConfig:{type:"disabled"} always (not haiku-gated)
+      thinkingConfig: { type: 'disabled' as const },
       tools: [],
-      signal: signal ?? new AbortController().signal,
+      signal: signal ?? toolUseContext?.abortController.signal ?? new AbortController().signal,
       options: {
-        getToolPermissionContext: async () => ({
-          mode: 'default' as const,
-          additionalWorkingDirectories: new Map(),
-          alwaysAllowRules: {},
-          alwaysDenyRules: {},
-          alwaysAskRules: {},
-          isBypassPermissionsModeAvailable: false,
-        }),
+        getToolPermissionContext: async (): Promise<ToolPermissionContext> => {
+          if (toolUseContext) {
+            // densable Tn(t) — types/permissions ReadonlyMap vs Tool.ts Map cast
+            return resolveToolPermissionContext(
+              toolUseContext,
+            ) as ToolPermissionContext
+          }
+          return {
+            mode: 'default' as const,
+            additionalWorkingDirectories: new Map(),
+            alwaysAllowRules: {},
+            alwaysDenyRules: {},
+            alwaysAskRules: {},
+            isBypassPermissionsModeAvailable: false,
+          }
+        },
         model,
-        toolChoice: useHaiku
-          ? { type: 'tool' as const, name: 'web_search' }
-          : undefined,
-        isNonInteractiveSession: false,
-        hasAppendSystemPrompt: false,
+        // densable: toolChoice:{type:"tool",name:"web_search"} always
+        toolChoice: { type: 'tool' as const, name: 'web_search' },
+        isNonInteractiveSession:
+          toolUseContext?.options.isNonInteractiveSession ?? false,
+        hasAppendSystemPrompt: !!toolUseContext?.options.appendSystemPrompt,
         extraToolSchemas: [toolSchema],
         querySource: 'web_search_tool' as const,
-        agents: [],
+        // densable enablePromptCaching:!1
+        enablePromptCaching: false,
+        agents: toolUseContext?.options.agentDefinitions.activeAgents ?? [],
         mcpTools: [],
-        agentId: undefined,
-        effortValue: undefined,
+        agentId: toolUseContext?.agentId,
+        effortValue,
         langfuseTrace,
       },
     })

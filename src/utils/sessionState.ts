@@ -50,6 +50,8 @@ export type SessionExternalMetadata = {
   permission_mode?: string | null
   is_ultraplan_mode?: boolean | null
   model?: string | null
+  /** densable effort_level from apply_flag_settings — null clears. */
+  effort_level?: string | null
   pending_action?: RequiresActionDetails | null
   automation_state?: AutomationStateMetadata | null
   // Opaque — typed at the emit site. Importing PostTurnSummaryOutput here

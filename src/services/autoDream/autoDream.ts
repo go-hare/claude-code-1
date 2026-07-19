@@ -14,6 +14,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { REPLHookContext } from '../../utils/hooks/postSamplingHooks.js'
 import {
   createCacheSafeParams,
+  forkPointUuidOf,
   runForkedAgent,
 } from '../../utils/forkedAgent.js'
 import {
@@ -21,6 +22,7 @@ import {
   createMemorySavedMessage,
 } from '../../utils/messages.js'
 import type { Message } from '../../types/message.js'
+import { shouldSkipMemoryForkCacheWrite } from '../../utils/basaltMemoryGates.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { logEvent } from '../analytics/index.js'
@@ -222,14 +224,19 @@ Sessions since last consolidation (${sessionIds.length}):
 ${sessionIds.map(id => `- ${id}`).join('\n')}`
       const prompt = buildConsolidationPrompt(memoryRoot, transcriptDir, extra)
 
+      const cacheSafeParams = createCacheSafeParams(context)
       const result = await runForkedAgent({
         promptMessages: [createUserMessage({ content: prompt })],
-        cacheSafeParams: createCacheSafeParams(context),
+        cacheSafeParams,
         canUseTool: createAutoMemCanUseTool(memoryRoot),
         querySource: 'auto_dream',
         forkLabel: 'auto_dream',
         maxTurns: 20,
         skipTranscript: true,
+        // densable krr / tengu_basalt_spur — ant-only skip cache write on fork.
+        skipCacheWrite: shouldSkipMemoryForkCacheWrite(),
+        // densable iay fork pin when spur is on (Bio of shared context).
+        forkPointUuid: forkPointUuidOf(cacheSafeParams.forkContextMessages),
         overrides: { abortController },
         onMessage: makeDreamProgressWatcher(taskId, setAppState),
       })

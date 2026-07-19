@@ -80,6 +80,7 @@ import {
 } from './pluginDirectories.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import { deletePluginOptions } from './pluginOptionsStorage.js'
+import { clearPluginUsage } from './pluginUsage.js'
 import {
   isLocalMarketplaceSource,
   type KnownMarketplace,
@@ -2098,6 +2099,10 @@ export async function removeMarketplaceSource(name: string): Promise<void> {
   for (const pluginId of removedPluginIds) {
     deletePluginOptions(pluginId)
     await deletePluginDataDir(pluginId)
+  }
+  // densable E7t(c): drop pluginUsage + pending F$ for marketplace-removed plugins
+  if (removedPluginIds.length > 0) {
+    clearPluginUsage(removedPluginIds)
   }
 
   logForDebugging(`Removed marketplace source: ${name}`)

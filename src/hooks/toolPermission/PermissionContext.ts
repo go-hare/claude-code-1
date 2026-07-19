@@ -37,6 +37,7 @@ import {
   supportsPersistence,
 } from '../../utils/permissions/PermissionUpdate.js'
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js'
+import { maybeStripAlwaysAllowPermissionsFromContext } from '../../utils/permissions/suppressAlwaysAllow.js'
 import {
   logPermissionDecision,
   type PermissionDecisionArgs,
@@ -297,8 +298,14 @@ function createPermissionContext(
       contentBlocks?: ContentBlockParam[],
       decisionReason?: PermissionDecisionReason,
     ): Promise<PermissionAllowDecision> {
-      const acceptedPermanentUpdates =
-        await this.persistPermissions(permissionUpdates)
+      // densable nLe/rLe — strip bare always-allow when tool suppresses it.
+      const stripped = maybeStripAlwaysAllowPermissionsFromContext(
+        permissionUpdates,
+        tool,
+        updatedInput,
+        toolUseContext,
+      )
+      const acceptedPermanentUpdates = await this.persistPermissions(stripped)
       this.logDecision(
         {
           decision: 'accept',
@@ -322,8 +329,14 @@ function createPermissionContext(
       permissionUpdates: PermissionUpdate[],
       permissionPromptStartTimeMs?: number,
     ): Promise<PermissionAllowDecision> {
-      const acceptedPermanentUpdates =
-        await this.persistPermissions(permissionUpdates)
+      // densable nLe/rLe — strip bare always-allow when tool suppresses it.
+      const stripped = maybeStripAlwaysAllowPermissionsFromContext(
+        permissionUpdates,
+        tool,
+        finalInput,
+        toolUseContext,
+      )
+      const acceptedPermanentUpdates = await this.persistPermissions(stripped)
       this.logDecision(
         {
           decision: 'accept',

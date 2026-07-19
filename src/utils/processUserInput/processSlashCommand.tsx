@@ -31,6 +31,9 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
   logEvent,
 } from '../../services/analytics/index.js';
+import { cmdFeatureNameForAnalytics } from '../../services/analytics/metadata.js';
+import { recordPluginActivity } from '../plugins/pluginActivity.js';
+import { recordPluginUse } from '../plugins/pluginUsage.js';
 import { getDumpPromptsPath } from '../../services/api/dumpPrompts.js';
 import { buildPostCompactMessages } from '../../services/compact/compact.js';
 import { resetMicrocompactState } from '../../services/compact/microCompact.js';
@@ -72,6 +75,7 @@ import { isRestrictedToPluginOnly, isSourceAdminTrusted } from '../settings/plug
 import { parseSlashCommand } from '../slashCommandParsing.js';
 import { sleep } from '../sleep.js';
 import { recordSkillUsage } from '../suggestions/skillUsageTracking.js';
+import { bareSkillName, maybeNoteScopedSkillVariants } from '../../skills/scopeSkillCommand.js';
 import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js';
 import { buildPluginCommandTelemetryFields } from '../telemetry/pluginTelemetry.js';
 import { getAssistantMessageContentLength } from '../tokens.js';
@@ -119,6 +123,9 @@ async function executeForkedSlashCommand(
   const pluginMarketplace = command.pluginInfo
     ? parsePluginIdentifier(command.pluginInfo.repository).marketplace
     : undefined;
+  // densable F$ is recorded once by the outer processSlashCommand paths
+  // (empty-message / query) via returnedCommand.pluginInfo — do not record
+  // here or forked invokes double-count usageCount.
   logEvent('tengu_slash_command_forked', {
     command_name: command.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     invocation_trigger: 'user-slash' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -131,14 +138,35 @@ async function executeForkedSlashCommand(
     }),
   });
 
-  const { skillContent, modifiedGetAppState, baseAgent, promptMessages } = await prepareForkedCommandContext(
-    command,
-    args,
-    context,
-  );
+  const {
+    skillContent,
+    modifiedGetAppState,
+    contextLayers: forkContextLayers,
+    baseAgent,
+    promptMessages,
+  } = await prepareForkedCommandContext(command, args, context);
+
+  // densable aWr: multiproject scoped-variant meta note for forked slash skills
+  const scopedVariantNote = maybeNoteScopedSkillVariants(command, {
+    tools: context.options.tools,
+    commands: context.options.commands,
+    spawnedBySkill: bareSkillName(command),
+  });
+  if (scopedVariantNote) {
+    promptMessages.push(scopedVariantNote);
+  }
 
   // Merge skill's effort into the agent definition so runAgent applies it
-  const agentDefinition = command.effort !== undefined ? { ...baseAgent, effort: command.effort } : baseAgent;
+  // densable L6g: e.getEffort?.(r||"",n)??e.effort
+  const skillEffort = command.getEffort?.(args, context) ?? command.effort;
+  const agentDefinition =
+    skillEffort !== undefined ? { ...baseAgent, effort: skillEffort } : baseAgent;
+
+  // densable L6g: permissionLayers = parent stack + gWr contextLayers
+  const forkPermissionLayers =
+    forkContextLayers.length > 0
+      ? [...(context.permissionLayers ?? []), ...forkContextLayers]
+      : context.permissionLayers;
 
   logForDebugging(`Executing forked slash command /${command.name} with agent ${agentDefinition.agentType}`);
 
@@ -247,11 +275,14 @@ async function executeForkedSlashCommand(
         toolUseContext: {
           ...context,
           getAppState: modifiedGetAppState,
+          permissionLayers: forkPermissionLayers,
           abortController: bgAbortController,
         },
         canUseTool,
         isAsync: true,
         querySource: 'agent:custom',
+        // densable: block skill_invoke_fork_recursion in forked subagent
+        spawnedBySkill: bareSkillName(command),
         model: command.model as ModelAlias | undefined,
         availableTools: freshTools,
         override: { agentId },
@@ -342,10 +373,13 @@ async function executeForkedSlashCommand(
       toolUseContext: {
         ...context,
         getAppState: modifiedGetAppState,
+        permissionLayers: forkPermissionLayers,
       },
       canUseTool,
       isAsync: false,
       querySource: 'agent:custom',
+      // densable: block skill_invoke_fork_recursion in forked subagent
+      spawnedBySkill: bareSkillName(command),
       model: command.model as ModelAlias | undefined,
       availableTools: context.options.tools,
     })) {
@@ -552,6 +586,9 @@ export async function processSlashCommand(
     // Add plugin metadata if this is a plugin command
     if (returnedCommand.type === 'prompt' && returnedCommand.pluginInfo) {
       const { pluginManifest, repository } = returnedCommand.pluginInfo;
+      // densable F$ + sJ: local-slash plugin command (empty-message path)
+      recordPluginUse(repository);
+      recordPluginActivity(repository, 'command');
       const { marketplace } = parsePluginIdentifier(repository);
       const isOfficial = isOfficialMarketplaceName(marketplace);
       // _PROTO_* routes to PII-tagged plugin_name/marketplace_name BQ columns
@@ -634,6 +671,9 @@ export async function processSlashCommand(
   // Add plugin metadata if this is a plugin command
   if (returnedCommand.type === 'prompt' && returnedCommand.pluginInfo) {
     const { pluginManifest, repository } = returnedCommand.pluginInfo;
+    // densable F$ + sJ: local-slash plugin command (query path)
+    recordPluginUse(repository);
+    recordPluginActivity(repository, 'command');
     const { marketplace } = parsePluginIdentifier(repository);
     const isOfficial = isOfficialMarketplaceName(marketplace);
     eventData._PROTO_plugin_name = pluginManifest.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED;
@@ -843,8 +883,40 @@ async function getMessagesForSlashCommand(
             });
           };
 
-          void command
-            .load()
+          // densable: load ?? resolveCommandDialog; missing both → feature_bad
+          type LocalJsxModule = Awaited<ReturnType<typeof command.load>>;
+          type LoadMod = () => Promise<LocalJsxModule>;
+          const optionsBag = context.options as {
+            resolveCommandDialog?: (cmd: typeof command) => LoadMod | undefined;
+          };
+          const loadMod: LoadMod | undefined =
+            typeof command.load === 'function' ? () => command.load() : optionsBag.resolveCommandDialog?.(command);
+
+          if (!loadMod) {
+            logEvent('tengu_feature_bad', {
+              feature_name: cmdFeatureNameForAnalytics(command.name),
+              error_code:
+                'cmd_local_jsx_no_dialog_resolution' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+            void resolve({
+              messages: [
+                createUserMessage({
+                  content: prepareUserContent({
+                    inputString: formatCommandInput(command, args),
+                    precedingInputBlocks,
+                  }),
+                }),
+                createUserMessage({
+                  content: `Command /${command.name} has no dialog resolution path.`,
+                }),
+              ],
+              shouldQuery: false,
+              command,
+            });
+            return;
+          }
+
+          void loadMod()
             .then(mod => mod.call(onDone, { ...context, canUseTool }, args))
             .then(jsx => {
               if (jsx == null) return;
@@ -877,6 +949,11 @@ async function getMessagesForSlashCommand(
               // Promise hangs forever, leaving queryGuard stuck in
               // 'dispatching' and deadlocking the queue processor.
               logError(e);
+              // densable me(Vbt(name), "cmd_local_jsx_threw")
+              logEvent('tengu_feature_bad', {
+                feature_name: cmdFeatureNameForAnalytics(command.name),
+                error_code: 'cmd_local_jsx_threw' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              });
               if (doneWasCalled) return;
               doneWasCalled = true;
               setToolJSX({
@@ -1218,6 +1295,12 @@ async function getMessagesForPromptSlashCommand(
     ),
   );
 
+  // densable aWr: multiproject scoped-variant note after skill body meta message
+  const scopedVariantNote = maybeNoteScopedSkillVariants(command, {
+    tools: context.options.tools,
+    commands: context.options.commands,
+  });
+
   const messages = [
     createUserMessage({
       content: metadata,
@@ -1227,6 +1310,7 @@ async function getMessagesForPromptSlashCommand(
       content: mainMessageContent,
       isMeta: true,
     }),
+    ...(scopedVariantNote ? [scopedVariantNote] : []),
     ...attachmentMessages,
     createAttachmentMessage({
       type: 'command_permissions',

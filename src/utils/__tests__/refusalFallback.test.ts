@@ -22,6 +22,7 @@ import {
   planRefusalFallbackAppStateRebind,
   planRefusalFallbackArm,
   planRefusalFallbackPresentation,
+  isRefusalEditPromptChoice,
   resolveInitialRefusalFallbackChoice,
   resolveRefusalDialogSuppressReason,
   resolveRefusalFallbackLatchRestore,
@@ -156,6 +157,14 @@ describe('refusal dialog decision densables', () => {
     expect(resolveInitialRefusalFallbackChoice(undefined)).toBe(
       'retry_fallback',
     )
+  })
+
+  test('isRefusalEditPromptChoice densable edit_prompt branch', () => {
+    expect(isRefusalEditPromptChoice('edit_prompt')).toBe(true)
+    expect(isRefusalEditPromptChoice('retry_fallback')).toBe(false)
+    expect(isRefusalEditPromptChoice('cancelled')).toBe(false)
+    expect(isRefusalEditPromptChoice(undefined)).toBe(false)
+    expect(isRefusalEditPromptChoice(null)).toBe(false)
   })
 
   test('shouldInvokeRefusalFallbackDialog', () => {
@@ -695,5 +704,7 @@ describe('silent-arm densables (m1u / w_i / g_i)', () => {
     expect(banner.subtype).toBe('model_refusal_fallback')
     expect(banner.level).toBe('warning')
     expect(banner.fallbackModel).toBe('b')
+    // densable gty #172 — default refusedUserMessageUuid null when unset
+    expect(banner.refusedUserMessageUuid).toBeNull()
   })
 })

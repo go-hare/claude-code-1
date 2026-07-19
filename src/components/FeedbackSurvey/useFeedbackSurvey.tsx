@@ -55,9 +55,10 @@ export function useFeedbackSurvey(
   surveyType: FeedbackSurveyType = 'session',
   hasActivePrompt: boolean = false,
 ): {
-  state: 'closed' | 'open' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
+  state: 'closed' | 'open' | 'pending' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
   lastResponse: FeedbackSurveyResponse | null;
   handleSelect: (selected: FeedbackSurveyResponse) => boolean;
+  handleUndo: () => void;
   handleTranscriptSelect: (selected: TranscriptShareResponse) => void;
 } {
   const lastAssistantMessageIdRef = useRef('unknown');
@@ -237,7 +238,7 @@ export function useFeedbackSurvey(
     [surveyType],
   );
 
-  const { state, lastResponse, open, handleSelect, handleTranscriptSelect } = useSurveyState({
+  const { state, lastResponse, open, handleSelect, handleUndo, handleTranscriptSelect } = useSurveyState({
     hideThanksAfterMs: config.hideThanksAfterMs,
     onOpen,
     onSelect,
@@ -362,5 +363,5 @@ export function useFeedbackSurvey(
     }
   }, [shouldOpen, open]);
 
-  return { state, lastResponse, handleSelect, handleTranscriptSelect };
+  return { state, lastResponse, handleSelect, handleUndo, handleTranscriptSelect };
 }

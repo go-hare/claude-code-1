@@ -132,6 +132,21 @@ export const useSelectInput = <T>({
         }
         state.focusPreviousOption()
       }
+      // densable select:pageUp/pageDown/first/last (pageup/pagedown/home/end)
+      handlers['select:pageDown'] = () => {
+        state.focusNextPage()
+      }
+      handlers['select:pageUp'] = () => {
+        state.focusPreviousPage()
+      }
+      handlers['select:first'] = () => {
+        const firstOption = options[0]
+        if (firstOption) state.focusOption(firstOption.value)
+      }
+      handlers['select:last'] = () => {
+        const lastOption = options[options.length - 1]
+        if (lastOption) state.focusOption(lastOption.value)
+      }
       handlers['select:accept'] = () => {
         if (disableSelection === true) return
         if (state.focusedValue === undefined) return
@@ -167,8 +182,9 @@ export const useSelectInput = <T>({
     isActive: !isDisabled,
   })
 
-  // Remaining keys that stay as useInput: number keys, pageUp/pageDown, tab, space,
-  // and arrow key navigation when in input mode
+  // Remaining keys that stay as useInput: number keys, tab, space, and arrow
+  // key navigation when in input mode. Page/home/end go through Select
+  // keybindings (select:page*/first/last) — densable 2.1.211 parity.
   useInput(
     (input, key, event: InputEvent) => {
       const normalizedInput = normalizeFullWidthDigits(input)
@@ -227,14 +243,6 @@ export const useSelectInput = <T>({
         // options — the user has focused a text field and expects typing
         // to insert characters, not jump to a different option.
         return
-      }
-
-      if (key.pageDown) {
-        state.focusNextPage()
-      }
-
-      if (key.pageUp) {
-        state.focusPreviousPage()
       }
 
       if (disableSelection !== true) {

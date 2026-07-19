@@ -6,6 +6,8 @@ import { z } from 'zod/v4'
 import { ensureConnectedClient } from 'src/services/mcp/client.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { recordPluginActivity } from 'src/utils/plugins/pluginActivity.js'
+import { recordPluginUse } from 'src/utils/plugins/pluginUsage.js'
 import {
   getBinaryBlobSavedMessage,
   persistBinaryContent,
@@ -89,6 +91,13 @@ export const ReadMcpResourceTool = buildTool({
 
     if (!client.capabilities?.resources) {
       throw new Error(`Server "${serverName}" does not support resources`)
+    }
+
+    // densable F$: reading a plugin MCP resource counts as plugin use
+    const pluginSource = client.config.pluginSource
+    if (pluginSource) {
+      recordPluginUse(pluginSource)
+      recordPluginActivity(pluginSource, 'mcp')
     }
 
     const connectedClient = await ensureConnectedClient(client)

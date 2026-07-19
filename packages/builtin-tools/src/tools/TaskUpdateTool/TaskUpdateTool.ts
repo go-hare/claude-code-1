@@ -27,6 +27,7 @@ import {
   getTeamName,
 } from 'src/utils/teammate.js'
 import { writeToMailbox } from 'src/utils/teammateMailbox.js'
+import { coerceTaskIdAliasInput } from 'src/utils/toolInputCoerce.js'
 import { VERIFICATION_AGENT_TYPE } from '../AgentTool/constants.js'
 import { TASK_UPDATE_TOOL_NAME } from './constants.js'
 import { DESCRIPTION, PROMPT } from './prompt.js'
@@ -105,6 +106,8 @@ export const TaskUpdateTool = buildTool({
   userFacingName() {
     return 'TaskUpdate'
   },
+  // densable S8r — id|task_id→taskId, active_form→activeForm before Zod.
+  coerceInput: coerceTaskIdAliasInput,
   shouldDefer: true,
   isEnabled() {
     return isTodoV2Enabled()
@@ -113,9 +116,16 @@ export const TaskUpdateTool = buildTool({
     return true
   },
   toAutoClassifierInput(input) {
-    const parts = [input.taskId]
-    if (input.status) parts.push(input.status)
-    if (input.subject) parts.push(input.subject)
+    // densable: coerce aliases so classifier sees canonical field names.
+    const coerced = coerceTaskIdAliasInput(input)
+    const t = (coerced?.input ?? input) as {
+      taskId?: string
+      status?: string
+      subject?: string
+    }
+    const parts = [t.taskId]
+    if (t.status) parts.push(t.status)
+    if (t.subject) parts.push(t.subject)
     return parts.join(' ')
   },
   renderToolUseMessage() {

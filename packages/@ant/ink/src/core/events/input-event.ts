@@ -4,6 +4,7 @@ import {
   unicodeFromExtendedKeySequence,
 } from '../parse-keypress.js'
 import { Event } from './event.js'
+import { isSgrMouseResidue } from './keyboard-event.js'
 
 export type Key = {
   upArrow: boolean
@@ -108,10 +109,10 @@ function parseKey(keypress: ParsedKey): [Key, string] {
   }
 
   // Official fag: pure orphan SGR burst → "".
-  //   /^(\[<\d[\d;]*[Mm]?)+$/
-  // No invented 2-param / 3-param / M{2,} residual sinks here — those are
-  // covered by official sji below ([...input].length === 1 only).
-  if (!keypress.name && /^(\[<\d[\d;]*[Mm]?)+$/.test(input)) {
+  // Fork also empties ESC/`[`-lost progressive residue (same as KeyboardEvent)
+  // so useInput/keybinding path never types mouse desync into the prompt.
+  // Multi-codepoint non-paste is still emptied by official sji below.
+  if (!keypress.name && isSgrMouseResidue(input)) {
     input = ''
   }
 

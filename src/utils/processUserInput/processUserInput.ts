@@ -60,6 +60,11 @@ import {
   hasUltraplanKeyword,
   replaceUltraplanKeyword,
 } from '../ultraplan/keyword.js'
+import {
+  resolvePromptSource,
+  resolveWakeupSource,
+} from '../promptSource.js'
+import type { MessageOrigin } from '../../types/message.js'
 import { processTextPrompt } from './processTextPrompt.js'
 export type ProcessUserInputContext = ToolUseContext & LocalJSXCommandContext
 
@@ -106,6 +111,17 @@ export async function processUserInput({
   isMeta,
   skipAttachments,
   autonomy,
+  suppressWorkflowKeyword,
+  /**
+   * densable callerSource for OXd — from queue inputSource / submit path.
+   * Resolved with isNonInteractive + isMeta via resolvePromptSource.
+   */
+  promptSource: callerSource,
+  /**
+   * densable wakeupSource — explicit override for PXd (schedule/loop wakeup).
+   */
+  wakeupSource,
+  origin,
 }: {
   input: string | Array<ContentBlockParam>
   /**
@@ -144,6 +160,23 @@ export async function processUserInput({
   isMeta?: boolean
   skipAttachments?: boolean
   autonomy?: QueuedCommand['autonomy']
+  /**
+   * densable suppressWorkflowKeyword — skip ultracode → Workflow attachment.
+   */
+  suppressWorkflowKeyword?: boolean
+  /**
+   * densable OXd callerSource — queue/submit path source before OXd resolve.
+   */
+  promptSource?: string
+  /**
+   * densable PXd explicit wakeupSource override.
+   */
+  wakeupSource?: string
+  /**
+   * densable origin — threaded into processTextPrompt for Nr + Fws wrap.
+   * Missing-origin stamp for other messages is rvo (handlePromptSubmit).
+   */
+  origin?: MessageOrigin | { kind?: string; from?: string }
 }): Promise<ProcessUserInputBaseResult> {
   const inputString = typeof input === 'string' ? input : null
   // Immediately show the user input prompt while we are still processing the input.
@@ -157,6 +190,19 @@ export async function processUserInput({
   queryCheckpoint('query_process_user_input_base_start')
 
   const appState = context.getAppState()
+
+  // densable OXd — resolve promptSource before processUserInputBase (SE_).
+  const resolvedPromptSource = resolvePromptSource({
+    isNonInteractive: context.options.isNonInteractiveSession,
+    isMeta,
+    callerSource,
+  })
+  // densable PXd — attachment/UPS wakeup source (hooks currently ignore the
+  // value; keep the resolve for parity and future consumers).
+  void resolveWakeupSource({
+    promptSource: resolvedPromptSource,
+    wakeupSource,
+  })
 
   const result = await processUserInputBase(
     input,
@@ -177,6 +223,9 @@ export async function processUserInput({
     skipAttachments,
     preExpansionInput,
     autonomy,
+    suppressWorkflowKeyword,
+    resolvedPromptSource,
+    origin,
   )
   queryCheckpoint('query_process_user_input_base_end')
 
@@ -317,6 +366,11 @@ async function processUserInputBase(
   skipAttachments?: boolean,
   preExpansionInput?: string,
   autonomy?: QueuedCommand['autonomy'],
+  suppressWorkflowKeyword?: boolean,
+  /** densable OXd-resolved promptSource stamped onto createUserMessage. */
+  promptSource?: string,
+  /** densable origin for Nr + Fws wrap in processTextPrompt. */
+  origin?: MessageOrigin | { kind?: string; from?: string },
 ): Promise<ProcessUserInputBaseResult> {
   let inputString: string | null = null
   let precedingInputBlocks: ContentBlockParam[] = []
@@ -524,6 +578,10 @@ async function processUserInputBase(
     (mode !== 'prompt' || effectiveSkipSlash || !inputString.startsWith('/'))
 
   queryCheckpoint('query_attachment_loading_start')
+  // densable isHumanTypedPrompt: interactive prompt mode, not meta/system
+  const isHumanTypedPrompt =
+    mode === 'prompt' && !isMeta && !bridgeOrigin && !effectiveSkipSlash
+
   const attachmentMessages = shouldExtractAttachments
     ? await toArray(
         getAttachmentMessages(
@@ -533,6 +591,11 @@ async function processUserInputBase(
           [], // queuedCommands - handled by query.ts for mid-turn attachments
           messages,
           querySource,
+          {
+            isHumanTypedPrompt,
+            suppressWorkflowKeyword,
+            preExpansionInput: preExpansionInput ?? inputString,
+          },
         ),
       )
     : []
@@ -609,6 +672,8 @@ async function processUserInputBase(
       uuid,
       permissionMode,
       isMeta,
+      promptSource,
+      origin,
     ),
     imageMetadataTexts,
   )

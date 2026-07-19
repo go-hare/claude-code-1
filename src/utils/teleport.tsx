@@ -39,6 +39,7 @@ import { getMainLoopModel } from './model/model.js';
 import { isTranscriptMessage } from './sessionStorage.js';
 import { getSettings_DEPRECATED } from './settings/settings.js';
 import { jsonStringify } from './slowOperations.js';
+import { stripOuterMarkdownFences } from './stripFencedCode.js';
 import { asSystemPrompt } from './systemPromptType.js';
 import {
   fetchSession,
@@ -154,7 +155,8 @@ async function generateTitleAndBranch(description: string, signal: AbortSignal):
       return { title: fallbackTitle, branchName: fallbackBranch };
     }
 
-    const parsed = safeParseJSON(firstBlock.text!.trim());
+    // densable eee — strip outer markdown fences before JSON parse
+    const parsed = safeParseJSON(stripOuterMarkdownFences(firstBlock.text!));
     const parseResult = z.object({ title: z.string(), branch: z.string() }).safeParse(parsed);
     if (parseResult.success) {
       return {
@@ -958,9 +960,23 @@ export async function teleportToRemote(options: {
         }
       }
 
+      // densable Lre explicit-env path also runs j2u (mode/focus/advisor/user).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { buildTeleportInitialEvents } =
+        require('./teleportInitialEvents.js') as typeof import('./teleportInitialEvents.js');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getInitialAdvisorSetting } =
+        require('./advisor.js') as typeof import('./advisor.js');
+      const events = buildTeleportInitialEvents({
+        initialMessage,
+        permissionMode: options.permissionMode,
+        ultraplan: options.ultraplan,
+        advisorModel: getInitialAdvisorSetting(),
+      });
+
       const requestBody = {
         title: options.title || options.description || 'Remote task',
-        events: [],
+        events,
         session_context: {
           sources: gitSource ? [gitSource] : [],
           ...(seedBundleFileId && { seed_bundle_file_id: seedBundleFileId }),
@@ -1241,41 +1257,22 @@ export async function teleportToRemote(options: {
       ...(options.source && { source: options.source }),
     };
 
-    // CreateCCRSessionPayload has no permission_mode field — a top-level
-    // body entry is silently dropped by the proto parser server-side.
-    // Instead prepend a set_permission_mode control_request event. Initial
-    // events are written to threadstore before the container connects, so
-    // the CLI applies the mode before the first user turn — no readiness race.
-    const events: Array<{ type: 'event'; data: Record<string, unknown> }> = [];
-    if (options.permissionMode) {
-      events.push({
-        type: 'event',
-        data: {
-          type: 'control_request',
-          request_id: `set-mode-${randomUUID()}`,
-          request: {
-            subtype: 'set_permission_mode',
-            mode: options.permissionMode,
-            ultraplan: options.ultraplan,
-          },
-        },
-      });
-    }
-    if (initialMessage) {
-      events.push({
-        type: 'event',
-        data: {
-          uuid: randomUUID(),
-          session_id: '',
-          type: 'user',
-          parent_tool_use_id: null,
-          message: {
-            role: 'user',
-            content: initialMessage,
-          },
-        },
-      });
-    }
+    // densable j2u residual — set_permission_mode, J7t focus pin, advisorModel,
+    // then optional initial user message. CreateCCRSessionPayload has no
+    // permission_mode field — control_request events are written to
+    // threadstore before the container connects (no readiness race).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { buildTeleportInitialEvents } =
+      require('./teleportInitialEvents.js') as typeof import('./teleportInitialEvents.js');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getInitialAdvisorSetting } =
+      require('./advisor.js') as typeof import('./advisor.js');
+    const events = buildTeleportInitialEvents({
+      initialMessage,
+      permissionMode: options.permissionMode,
+      ultraplan: options.ultraplan,
+      advisorModel: getInitialAdvisorSetting(),
+    });
 
     const requestBody = {
       title: options.ultraplan ? `ultraplan: ${sessionTitle}` : sessionTitle,

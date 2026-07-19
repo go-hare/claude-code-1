@@ -27,7 +27,11 @@ import {
 } from 'src/services/analytics/index.js'
 import { ImageSizeError } from './utils/imageValidation.js'
 import { ImageResizeError } from './utils/imageResizer.js'
-import { findToolByName, type ToolUseContext } from './Tool.js'
+import {
+  findToolByName,
+  type ToolPermissionContext,
+  type ToolUseContext,
+} from './Tool.js'
 import { asSystemPrompt, type SystemPrompt } from './utils/systemPromptType.js'
 import type {
   AssistantMessage,
@@ -40,6 +44,7 @@ import type {
   TombstoneMessage,
 } from './types/message.js'
 import { logError } from './utils/log.js'
+import { errorMessage } from './utils/errors.js'
 import {
   PROMPT_TOO_LONG_ERROR_MESSAGE,
   isPromptTooLongMessage,
@@ -55,9 +60,14 @@ import {
   createToolUseSummaryMessage,
   createMicrocompactBoundaryMessage,
   stripSignatureBlocks,
+  hasSuccessfulToolCall,
+  findLastRealUserMessageIndex,
+  STRUCTURED_OUTPUT_ENFORCE_SENTINEL,
 } from './utils/messages.js'
 import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import { prependUserContext, appendSystemContext } from './utils/api.js'
+import { classifyQuerySource } from './utils/promptCategory.js'
 import {
   createAttachmentMessage,
   filterDuplicateMemoryAttachments,
@@ -75,13 +85,23 @@ const _jobClassifier = feature('TEMPLATES')
   ? (require('./jobs/classifier.js') as typeof import('./jobs/classifier.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
+import {
+  resolveEffortValue,
+  resolveMainLoopModel,
+  resolveThinkingConfig,
+  resolveToolPermissionContext,
+} from './utils/contextLayers.js'
 import { resolveStopHookBlockCap } from './utils/residualMsEnvGates.js'
-import { messagesEndWithSuccessfulTerminalMcpTool } from './utils/residualUiEnvGates.js'
+import {
+  endTurnSourceFromMessages,
+  endTurnSourceFromUserMessage,
+  messagesEndWithSuccessfulTerminalMcpTool,
+} from './utils/residualUiEnvGates.js'
 import {
   enqueue,
   remove as removeFromQueue,
   getCommandsByMaxPriority,
-  isSlashCommand,
+  filterMidTurnQueuedCommands,
 } from './utils/messageQueueManager.js'
 import {
   type AutonomyTurnOutcome,
@@ -249,6 +269,8 @@ export type QueryParams = {
   maxOutputTokensOverride?: number
   maxTurns?: number
   skipCacheWrite?: boolean
+  /** densable forkPointUuid — pin cache breakpoint at shared fork prefix. */
+  forkPointUuid?: string
   // API task_budget (output_config.task_budget, beta task-budgets-2026-03-13).
   // Distinct from the tokenBudget +500k auto-continue feature. `total` is the
   // budget for the whole agentic turn; `remaining` is computed per iteration
@@ -399,8 +421,16 @@ export async function* query(
               prompt: gatePrompt,
             }) => {
               const agentTool =
-                findToolByName(armCtx.options.tools, 'Agent') ??
-                findToolByName(armCtx.options.tools, 'Task')
+                findToolByName(
+                  armCtx.options.tools,
+                  'Agent',
+                  armCtx.options.toolAliases,
+                ) ??
+                findToolByName(
+                  armCtx.options.tools,
+                  'Task',
+                  armCtx.options.toolAliases,
+                )
               if (!agentTool) return 'deny'
               try {
                 const result = await agentTool.checkPermissions(
@@ -601,8 +631,24 @@ async function* queryLoop(
     querySource,
     maxTurns,
     skipCacheWrite,
+    forkPointUuid,
   } = params
   const deps = params.deps ?? productionDeps()
+
+  // densable gty(Zb(messages)) — last RAe-selectable user uuid after last
+  // assistant; stamped on model_refusal_* system banners as refusedUserMessageUuid.
+  // Computed once at query entry (gold m=gty(...)); not re-scanned mid-turn.
+  let refusedUserMessageUuid: string | null = null
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { lastSelectableUserMessageUuidAfterAssistant } =
+      require('./components/MessageSelector.js') as typeof import('./components/MessageSelector.js')
+    refusedUserMessageUuid = lastSelectableUserMessageUuidAfterAssistant(
+      getMessagesAfterCompactBoundary(params.messages),
+    )
+  } catch {
+    refusedUserMessageUuid = null
+  }
 
   // Mutable cross-iteration state. The loop body destructures this at the top
   // of each iteration so reads stay bare-name (`messages`, `toolUseContext`).
@@ -865,7 +911,12 @@ async function* queryLoop(
     )
 
     queryCheckpoint('query_autocompact_start')
-    const { compactionResult, consecutiveFailures } = await deps.autocompact(
+    const {
+      compactionResult,
+      consecutiveFailures,
+      thrashingTripped,
+      consecutiveRapidRefills,
+    } = await deps.autocompact(
       messagesForQuery,
       toolUseContext,
       {
@@ -880,6 +931,25 @@ async function* queryLoop(
       snipTokensFreed,
     )
     queryCheckpoint('query_autocompact_end')
+
+    // densable fto rapid_refill_breaker — surface bJi and stop this turn.
+    if (thrashingTripped) {
+      try {
+        const { AUTO_COMPACT_THRASHING_MESSAGE } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/autoCompactThrashingBreaker.js') as typeof import('./utils/autoCompactThrashingBreaker.js')
+        const { createAssistantAPIErrorMessage } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/messages.js') as typeof import('./utils/messages.js')
+        yield createAssistantAPIErrorMessage({
+          content: AUTO_COMPACT_THRASHING_MESSAGE,
+          error: 'invalid_request',
+        })
+      } catch {
+        // densable optional surface
+      }
+      return { reason: 'rapid_refill_breaker' }
+    }
 
     if (compactionResult) {
       const {
@@ -928,15 +998,14 @@ async function* queryLoop(
         )
       }
 
-      // Reset on every compact so turnCounter/turnId reflect the MOST RECENT
-      // compact. recompactionInfo (autoCompact.ts:190) already captured the
-      // old values for turnsSincePreviousCompact/previousCompactTurnId before
-      // the call, so this reset doesn't lose those.
+      // densable _Ji — reset on every compact so turnCounter/turnId reflect the
+      // MOST RECENT compact; carry consecutiveRapidRefills thrash counter.
       tracking = {
         compacted: true,
         turnId: deps.uuid(),
         turnCounter: 0,
         consecutiveFailures: 0,
+        consecutiveRapidRefills: consecutiveRapidRefills ?? 0,
       }
 
       const postCompactMessages = buildPostCompactMessages(compactionResult)
@@ -985,7 +1054,8 @@ async function* queryLoop(
     const permissionMode = appState.toolPermissionContext.mode
     let currentModel = getRuntimeMainLoopModel({
       permissionMode,
-      mainLoopModel: toolUseContext.options.mainLoopModel,
+      // densable X$ — last model layer wins for this query turn
+      mainLoopModel: resolveMainLoopModel(toolUseContext),
       exceeds200kTokens:
         permissionMode === 'plan' &&
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
@@ -1141,6 +1211,7 @@ async function* queryLoop(
       const { isAtBlockingLimit } = calculateTokenWarningState(
         tokenCountWithEstimation(messagesForQuery) - snipTokensFreed,
         toolUseContext.options.mainLoopModel,
+        toolUseContext.options.autoCompactWindow,
       )
       if (isAtBlockingLimit) {
         yield createAssistantAPIErrorMessage({
@@ -1157,11 +1228,13 @@ async function* queryLoop(
     // getAutoCompactThreshold which already subtracts buffer.
     if (!compactionResult && isAutoCompactEnabled()) {
       const model = toolUseContext.options.mainLoopModel
+      const autoCompactWindow = toolUseContext.options.autoCompactWindow
       const currentTokens =
         tokenCountWithEstimation(messagesForQuery) - snipTokensFreed
       const estimatedGrowth = estimateMaxTurnGrowth(model)
       const predictiveThreshold =
-        getEffectiveContextWindowSize(model) - estimatedGrowth
+        getEffectiveContextWindowSize(model, autoCompactWindow) -
+        estimatedGrowth
       if (currentTokens > predictiveThreshold) {
         const predictiveResult = await deps.autocompact(
           messagesForQuery,
@@ -1205,14 +1278,21 @@ async function* queryLoop(
           for await (const message of deps.callModel({
             messages: prependUserContext(messagesForQuery, userContext),
             systemPrompt: fullSystemPrompt,
-            thinkingConfig: toolUseContext.options.thinkingConfig,
+            // densable fqr — last max_thinking_tokens layer wins
+            thinkingConfig: resolveThinkingConfig(toolUseContext),
             tools: toolUseContext.options.tools,
             signal: toolUseContext.abortController.signal,
             options: {
-              async getToolPermissionContext() {
-                const appState = toolUseContext.getAppState()
-                return appState.toolPermissionContext
+              async getToolPermissionContext(): Promise<ToolPermissionContext> {
+                // densable Tn — fold permissionLayers for API permission surface.
+                // Cast: applyPermissionLayers uses types/permissions ReadonlyMap shape;
+                // Options expects Tool.js DeepImmutable Map context (structurally same).
+                return resolveToolPermissionContext(
+                  toolUseContext,
+                ) as ToolPermissionContext
               },
+              // densable X$ folded into getRuntimeMainLoopModel via resolveMainLoopModel
+              // when currentModel is computed; still pass runtime currentModel here.
               model: currentModel,
               ...(config.gates.fastModeEnabled && {
                 fastMode: appState.fastMode,
@@ -1282,9 +1362,11 @@ async function* queryLoop(
                 c => c.type === 'pending',
               ),
               queryTracking,
-              effortValue: appState.effortValue,
+              // densable P_ — last effort layer wins over appState.effortValue
+              effortValue: resolveEffortValue(toolUseContext),
               advisorModel: appState.advisorModel,
               skipCacheWrite,
+              forkPointUuid,
               agentId: toolUseContext.agentId,
               isBackgroundAgent: toolUseContext.isBackgroundAgent,
               requestDialog: toolUseContext.requestDialog,
@@ -1300,6 +1382,38 @@ async function* queryLoop(
               langfuseTrace: toolUseContext.langfuseTrace,
             },
           })) {
+            // densable Te==="edit_prompt" consumer: stream yields refusal_edit_prompt;
+            // abort main toolUseContext controller with J0("refusal-fallback-edit")
+            // so REPL finally-block auto-restore rewinds the last human turn.
+            if (
+              message &&
+              typeof message === 'object' &&
+              (message as { type?: string }).type === 'refusal_edit_prompt'
+            ) {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const {
+                  abortReasonAsDOMException,
+                  REFUSAL_FALLBACK_EDIT_REASON,
+                } =
+                  require('./utils/abortController.js') as typeof import('./utils/abortController.js')
+                // Tombstone partial assistant stream so UI/transcript drop invalid
+                // mid-refusal blocks (gold Me/ot tombstone before edit abort).
+                for (const msg of assistantMessages) {
+                  yield { type: 'tombstone' as const, message: msg }
+                }
+                assistantMessages.length = 0
+                toolResults.length = 0
+                if (!toolUseContext.abortController.signal.aborted) {
+                  toolUseContext.abortController.abort(
+                    abortReasonAsDOMException(REFUSAL_FALLBACK_EDIT_REASON),
+                  )
+                }
+              } catch {
+                // densable optional
+              }
+              continue
+            }
             // Official stream fallback_request densable consumer (query path).
             // Stream also throws FallbackTriggeredError; this branch yields the
             // model_refusal_fallback banner / salvage telemetry before retry.
@@ -1368,6 +1482,8 @@ async function* queryLoop(
                     toModel: fb.fallbackModel,
                     requestId: fb.requestId,
                     apiRefusalCategory: fb.apiRefusalCategory,
+                    // densable gty → refusedUserMessageUuid on model_refusal_fallback
+                    refusedUserMessageUuid,
                     timestamp: new Date().toISOString(),
                     uuid: crypto.randomUUID(),
                     reason: 'refusal',
@@ -1442,6 +1558,7 @@ async function* queryLoop(
                   const tool = findToolByName(
                     toolUseContext.options.tools,
                     block.name as string,
+                    toolUseContext.options.toolAliases,
                   )
                   if (tool?.backfillObservableInput) {
                     const originalInput = block.input as Record<string, unknown>
@@ -1812,6 +1929,17 @@ async function* queryLoop(
           'Interrupted by user',
         )
       }
+      // densable jGr: on abort residual, bulk system-kill bg agents / OH / workflows
+      try {
+        const { bulkSystemKillTasks } = await import('./tasks/stopTask.js')
+        const tasks = toolUseContext.getAppState().tasks ?? {}
+        bulkSystemKillTasks(
+          tasks,
+          toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState,
+        )
+      } catch {
+        /* optional */
+      }
       // chicago MCP: auto-unhide + lock release on interrupt. Same cleanup
       // as the natural turn-end path in stopHooks.ts. Main thread only —
       // see stopHooks.ts for the subagent-releasing-main's-lock rationale.
@@ -1826,12 +1954,27 @@ async function* queryLoop(
         }
       }
 
-      // Skip the interruption message for submit-interrupts — the queued
-      // user message that follows provides sufficient context.
-      if (toolUseContext.abortController.signal.reason !== 'interrupt') {
-        yield createUserInterruptionMessage({
-          toolUse: false,
-        })
+      // densable Hus: skip interruption yield for interrupt + refusal-fallback-edit
+      // (RT-normalized). Submit-interrupt: queued user message follows; edit_prompt
+      // restore rewinds the turn so the banner would be noise.
+      {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const {
+          shouldSkipInterruptionMessage,
+          resolveInterruptedMessageId,
+        } =
+          require('./utils/abortController.js') as typeof import('./utils/abortController.js')
+        if (
+          !shouldSkipInterruptionMessage(
+            toolUseContext.abortController.signal.reason,
+          )
+        ) {
+          // densable dye: pass gzr interruptedMessageId (user/remote cancel only)
+          yield createUserInterruptionMessage({
+            toolUse: false,
+            interruptedMessageId: resolveInterruptedMessageId(toolUseContext),
+          })
+        }
       }
       return { reason: 'aborted_streaming' }
     }
@@ -1903,19 +2046,63 @@ async function* queryLoop(
         }
       }
       if ((isWithheld413 || isWithheldMedia) && reactiveCompact) {
+        // densable QMi: recovery AbortController child of main with FLc-
+        // filtered parent propagation (Y9h: user-cancel|remote-cancel|
+        // interrupt) + recovery-timeout (jjn 10m). Gold: Rn=QMi(U) when
+        // PTL (ZOe) or media (Vto) withheld.
+        let recoveryToolUseContext = toolUseContext
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { createRecoveryAbortController } =
+            require('./utils/abortController.js') as typeof import('./utils/abortController.js')
+          recoveryToolUseContext = {
+            ...toolUseContext,
+            abortController: createRecoveryAbortController(
+              toolUseContext.abortController,
+            ),
+          }
+        } catch {
+          // densable optional
+        }
         const compacted = await reactiveCompact.tryReactiveCompact({
           hasAttempted: hasAttemptedReactiveCompact,
           querySource,
-          aborted: toolUseContext.abortController.signal.aborted,
+          aborted: recoveryToolUseContext.abortController.signal.aborted,
           messages: messagesForQuery,
           cacheSafeParams: {
             systemPrompt,
             userContext,
             systemContext,
-            toolUseContext,
+            toolUseContext: recoveryToolUseContext,
             forkContextMessages: messagesForQuery,
           },
+          // densable Evu reactive path — thread prior consecutiveFailures.
+          tracking,
         })
+
+        // densable Evu(o, true, f) — failed reactive compact returns failure
+        // shape (not CompactionResult). Thread consecutiveFailures, surface.
+        if (
+          compacted &&
+          typeof compacted === 'object' &&
+          'kind' in compacted &&
+          (compacted as { kind?: string }).kind === 'failed'
+        ) {
+          const fail = compacted as {
+            kind: 'failed'
+            consecutiveFailures: number
+          }
+          tracking = {
+            compacted: tracking?.compacted ?? false,
+            turnId: tracking?.turnId ?? deps.uuid(),
+            turnCounter: tracking?.turnCounter ?? 0,
+            consecutiveFailures: fail.consecutiveFailures,
+            consecutiveRapidRefills: tracking?.consecutiveRapidRefills,
+          }
+          yield lastMessage!
+          void executeStopFailureHooks(lastMessage!, recoveryToolUseContext)
+          return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
+        }
 
         if (compacted) {
           // task_budget: same carryover as the proactive path above.
@@ -1931,13 +2118,16 @@ async function* queryLoop(
             )
           }
 
-          const postCompactMessages = buildPostCompactMessages(compacted)
+          const postCompactMessages = buildPostCompactMessages(
+            compacted as import('./services/compact/compact.js').CompactionResult,
+          )
           for (const msg of postCompactMessages) {
             yield msg
           }
           const next: State = {
             messages: postCompactMessages,
-            toolUseContext,
+            // densable Rn: keep recovery abort controller for post-compact retry
+            toolUseContext: recoveryToolUseContext,
             autoCompactTracking: undefined,
             maxOutputTokensRecoveryCount,
             hasAttemptedReactiveCompact: true,
@@ -1958,7 +2148,7 @@ async function* queryLoop(
         // on prompt-too-long creates a death spiral: error → hook blocking
         // → retry → error → … (the hook injects more tokens each cycle).
         yield lastMessage!
-        void executeStopFailureHooks(lastMessage!, toolUseContext)
+        void executeStopFailureHooks(lastMessage!, recoveryToolUseContext)
         return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
       } else if (feature('CONTEXT_COLLAPSE') && isWithheld413) {
         // reactiveCompact compiled out but contextCollapse withheld and
@@ -2122,6 +2312,43 @@ async function* queryLoop(
         thinkingOnlyNudged = false
       }
 
+      // densable JYu / zYu: requiresStructuredOutput inject before stop hooks.
+      // Skip auxiliary querySources (f2). One nudge per post-user segment.
+      let structuredOutputEnforce: UserMessage | null = null
+      if (
+        toolUseContext.options.requiresStructuredOutput &&
+        classifyQuerySource(querySource) !== 'auxiliary'
+      ) {
+        try {
+          const lastRealUser = findLastRealUserMessageIndex(messagesForQuery)
+          const sinceUser = messagesForQuery.slice(lastRealUser + 1)
+          const checkMsgs = [...sinceUser, ...assistantMessages]
+          const soOk = hasSuccessfulToolCall(
+            checkMsgs,
+            SYNTHETIC_OUTPUT_TOOL_NAME,
+          )
+          const alreadyNudged = sinceUser.some(
+            m =>
+              m.type === 'user' &&
+              m.isMeta &&
+              typeof m.message?.content === 'string' &&
+              m.message.content.includes(STRUCTURED_OUTPUT_ENFORCE_SENTINEL),
+          )
+          if (!soOk && !alreadyNudged) {
+            structuredOutputEnforce = createUserMessage({
+              content: `${STRUCTURED_OUTPUT_ENFORCE_SENTINEL} You MUST call the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool to complete this request. Call this tool now.`,
+              isMeta: true,
+            })
+            yield structuredOutputEnforce
+          }
+        } catch (err) {
+          logForDebugging(
+            `StructuredOutput enforcement failed: ${errorMessage(err)}`,
+            { level: 'error' },
+          )
+        }
+      }
+
       const stopHookResult = yield* handleStopHooks(
         messagesForQuery,
         assistantMessages,
@@ -2137,7 +2364,10 @@ async function* queryLoop(
         return { reason: 'stop_hook_prevented' }
       }
 
-      if (stopHookResult.blockingErrors.length > 0) {
+      if (
+        structuredOutputEnforce ||
+        stopHookResult.blockingErrors.length > 0
+      ) {
         const MAX_CONSECUTIVE_STOP_HOOK_BLOCKS = resolveStopHookBlockCap()
         if (stopHookBlockCount + 1 >= MAX_CONSECUTIVE_STOP_HOOK_BLOCKS) {
           yield createSystemMessage(
@@ -2150,6 +2380,7 @@ async function* queryLoop(
           messages: [
             ...messagesForQuery,
             ...assistantMessages,
+            ...(structuredOutputEnforce ? [structuredOutputEnforce] : []),
             ...stopHookResult.blockingErrors,
           ],
           toolUseContext,
@@ -2227,6 +2458,10 @@ async function* queryLoop(
 
     let shouldPreventContinuation = false
     let updatedToolUseContext = toolUseContext
+    // densable ze — fts accumulation (toolEndsTurn / mcp claude/endTurn)
+    let toolResultEndTurnSource: ReturnType<
+      typeof endTurnSourceFromUserMessage
+    > = false
 
     queryCheckpoint('query_tool_execution_start')
 
@@ -2259,6 +2494,10 @@ async function* queryLoop(
           shouldPreventContinuation = true
         }
 
+        // densable fts(Pt.message) — end turn from tool result or MCP meta
+        const endSrc = endTurnSourceFromUserMessage(update.message)
+        if (endSrc) toolResultEndTurnSource = endSrc
+
         toolResults.push(
           ...normalizeMessagesForAPI(
             [update.message],
@@ -2272,6 +2511,10 @@ async function* queryLoop(
           queryTracking,
         }
       }
+    }
+    // Also scan early-completed streaming results already in toolResults
+    if (!toolResultEndTurnSource) {
+      toolResultEndTurnSource = endTurnSourceFromMessages(toolResults)
     }
     queryCheckpoint('query_tool_execution_end')
 
@@ -2355,6 +2598,17 @@ async function* queryLoop(
 
     // We were aborted during tool calls
     if (toolUseContext.abortController.signal.aborted) {
+      // densable jGr: bulk system-kill bg agents/workflows/OH on tool-call abort
+      try {
+        const { bulkSystemKillTasks } = await import('./tasks/stopTask.js')
+        const tasks = toolUseContext.getAppState().tasks ?? {}
+        bulkSystemKillTasks(
+          tasks,
+          toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState,
+        )
+      } catch {
+        /* optional */
+      }
       // chicago MCP: auto-unhide + lock release when aborted mid-tool-call.
       // This is the most likely Ctrl+C path for CU (e.g. slow screenshot).
       // Main thread only — see stopHooks.ts for the subagent rationale.
@@ -2368,12 +2622,26 @@ async function* queryLoop(
           // Failures are silent — this is dogfooding cleanup, not critical path
         }
       }
-      // Skip the interruption message for submit-interrupts — the queued
-      // user message that follows provides sufficient context.
-      if (toolUseContext.abortController.signal.reason !== 'interrupt') {
-        yield createUserInterruptionMessage({
-          toolUse: true,
-        })
+      // densable Hus: skip interruption yield for interrupt + refusal-fallback-edit
+      // (RT-normalized). Submit-interrupt / edit_prompt restore paths.
+      {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const {
+          shouldSkipInterruptionMessage,
+          resolveInterruptedMessageId,
+        } =
+          require('./utils/abortController.js') as typeof import('./utils/abortController.js')
+        if (
+          !shouldSkipInterruptionMessage(
+            toolUseContext.abortController.signal.reason,
+          )
+        ) {
+          // densable dye: pass gzr interruptedMessageId (user/remote cancel only)
+          yield createUserInterruptionMessage({
+            toolUse: true,
+            interruptedMessageId: resolveInterruptedMessageId(toolUseContext),
+          })
+        }
       }
       // Check maxTurns before returning when aborted
       const nextTurnCountOnAbort = turnCount + 1
@@ -2390,6 +2658,34 @@ async function* queryLoop(
     // If a hook indicated to prevent continuation, stop here
     if (shouldPreventContinuation) {
       return { reason: 'hook_stopped' }
+    }
+
+    // densable yty: toolEndsTurn / mcp_meta claude/endTurn → complete without
+    // model re-invoke. Log tengu_mcp_tool_result_ended_turn; still run stop hooks.
+    if (toolResultEndTurnSource) {
+      logEvent('tengu_mcp_tool_result_ended_turn', {
+        queryChainId: queryChainIdForAnalytics,
+        queryDepth: queryTracking.depth,
+        source:
+          toolResultEndTurnSource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      const endTurnStopHooks = yield* handleStopHooks(
+        messagesForQuery,
+        assistantMessages,
+        systemPrompt,
+        userContext,
+        systemContext,
+        updatedToolUseContext,
+        querySource,
+        stopHookActive,
+      )
+      if (endTurnStopHooks.blockingErrors.length > 0) {
+        // Surface blocking stop-hook feedback then still end (no model re-invoke).
+        for (const err of endTurnStopHooks.blockingErrors) {
+          yield err
+        }
+      }
+      return { reason: 'completed' }
     }
 
     if (tracking?.compacted) {
@@ -2439,15 +2735,11 @@ async function* queryLoop(
     const isMainThread =
       querySource.startsWith('repl_main_thread') || querySource === 'sdk'
     const currentAgentId = toolUseContext.agentId
-    const queuedCommandsSnapshot = getCommandsByMaxPriority(
-      sleepRan ? 'later' : 'next',
-    ).filter(cmd => {
-      if (isSlashCommand(cmd)) return false
-      if (isMainThread) return cmd.agentId === undefined
-      // Subagents only drain task-notifications addressed to them — never
-      // user prompts, even if someone stamps an agentId on one.
-      return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId
-    })
+    // densable k7c — mid-turn fold filter (Erg drop + AL main / task-notification sub)
+    const queuedCommandsSnapshot = filterMidTurnQueuedCommands(
+      getCommandsByMaxPriority(sleepRan ? 'later' : 'next'),
+      { isMainThread, currentAgentId },
+    )
     const queuedAutonomyClaim = await claimConsumableQueuedAutonomyCommands(
       queuedCommandsSnapshot,
     )

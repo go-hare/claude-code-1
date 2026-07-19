@@ -1,14 +1,28 @@
-import React, { createContext, type RefObject, useContext, useLayoutEffect, useMemo } from 'react';
-import type { Key } from '../core/events/input-event.js';
+import React, { createContext, type RefObject, useContext, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import type { InputEvent, Key } from '../core/events/input-event.js';
 import { type ChordResolveResult, getBindingDisplayText, resolveKeyWithChordState } from './resolver.js';
 import type { KeybindingContextName, ParsedBinding, ParsedKeystroke } from './types.js';
 
-/** Handler registration for action callbacks */
-type HandlerRegistration = {
+/**
+ * Handler registration for action callbacks.
+ * densable: singleKey marks handlers that ChordInterceptor may invoke for
+ * non-chord single keystrokes (after the chord match path). Default enter →
+ * chat:submit registers with singleKey:false so TextInput/typeahead own Enter.
+ */
+export type HandlerRegistration = {
   action: string;
   context: KeybindingContextName;
-  handler: () => void;
+  handler: () => void | false | Promise<void>;
+  /** densable singleKey — when true, interceptor may fire outside chord completion */
+  singleKey?: boolean;
 };
+
+/**
+ * densable preDispatch (Q0t/Wlr) handler. Runs after the chord path and
+ * before the singleKey scan. Return `true` to consume the keystroke
+ * (stopImmediatePropagation + skip singleKey).
+ */
+export type PreDispatchHandler = (input: string, key: Key, event: InputEvent) => boolean | undefined;
 
 type KeybindingContextValue = {
   /** Resolve a key input to an action name (with chord support) */
@@ -38,6 +52,12 @@ type KeybindingContextValue = {
   /** Register a handler for an action (used by useKeybinding) */
   registerHandler: (registration: HandlerRegistration) => () => void;
 
+  /**
+   * densable registerPreDispatch — ChordInterceptor pre-hook before singleKey.
+   * Returns unregister.
+   */
+  registerPreDispatch: (handler: PreDispatchHandler) => () => void;
+
   /** Invoke all handlers for an action (used by ChordInterceptor) */
   invokeAction: (action: string) => boolean;
 };
@@ -56,6 +76,11 @@ type ProviderProps = {
   unregisterActiveContext: (context: KeybindingContextName) => void;
   /** Ref to handler registry (used by ChordInterceptor) */
   handlerRegistryRef: RefObject<Map<string, Set<HandlerRegistration>>>;
+  /**
+   * densable preDispatchRef — Set of pre-dispatch handlers run after the
+   * chord path and before singleKey (selection esc/ctrl+c, digit-submit, …).
+   */
+  preDispatchRef: RefObject<Set<PreDispatchHandler>>;
   children: React.ReactNode;
 };
 
@@ -68,6 +93,7 @@ export function KeybindingProvider({
   registerActiveContext,
   unregisterActiveContext,
   handlerRegistryRef,
+  preDispatchRef,
   children,
 }: ProviderProps): React.ReactNode {
   const value = useMemo<KeybindingContextValue>(() => {
@@ -93,6 +119,16 @@ export function KeybindingProvider({
             registry.delete(registration.action);
           }
         }
+      };
+    };
+
+    // densable pzi: (cb) => (preDispatchRef.add(cb), () => delete)
+    const registerPreDispatch = (handler: PreDispatchHandler) => {
+      const set = preDispatchRef.current;
+      if (!set) return () => {};
+      set.add(handler);
+      return () => {
+        set.delete(handler);
       };
     };
 
@@ -128,6 +164,7 @@ export function KeybindingProvider({
       registerActiveContext,
       unregisterActiveContext,
       registerHandler,
+      registerPreDispatch,
       invokeAction,
     };
   }, [
@@ -139,6 +176,7 @@ export function KeybindingProvider({
     registerActiveContext,
     unregisterActiveContext,
     handlerRegistryRef,
+    preDispatchRef,
   ]);
 
   return <KeybindingContext.Provider value={value}>{children}</KeybindingContext.Provider>;
@@ -186,4 +224,25 @@ export function useRegisterKeybindingContext(context: KeybindingContextName, isA
       keybindingContext.unregisterActiveContext(context);
     };
   }, [context, keybindingContext, isActive]);
+}
+
+/**
+ * densable Q0t — register a ChordInterceptor pre-dispatch handler.
+ *
+ * Runs after the chord match path and before the singleKey scan. Return
+ * `true` from the handler to consume the keystroke (stopImmediatePropagation
+ * + skip singleKey). Used by selection esc/ctrl+c, digit-submit guards, etc.
+ *
+ * Handler is kept in a ref so identity changes don't thrash registration.
+ */
+export function usePreDispatch(handler: PreDispatchHandler, options: { isActive?: boolean } = {}): void {
+  const { isActive = true } = options;
+  const keybindingContext = useOptionalKeybindingContext();
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
+  useEffect(() => {
+    if (!keybindingContext || !isActive) return;
+    return keybindingContext.registerPreDispatch((input, key, event) => handlerRef.current(input, key, event));
+  }, [isActive, keybindingContext]);
 }

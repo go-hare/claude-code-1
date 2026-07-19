@@ -85,12 +85,18 @@ export type FooterItem =
   | 'bagel'
   | 'teams'
   | 'bridge'
+  | 'frame'
   | 'companion'
   | 'bg_agent'
 
 export type AppState = DeepImmutable<{
   settings: SettingsJson
   verbose: boolean
+  /**
+   * densable showMessageTimestamps — session mirror of global config flag.
+   * UI option gated by tengu_silk_hinge; Messages reads this for stamps.
+   */
+  showMessageTimestamps: boolean
   mainLoopModel: ModelSetting
   mainLoopModelForSession: ModelSetting
   statusLineText: string | undefined
@@ -111,6 +117,57 @@ export type AppState = DeepImmutable<{
   // Lives in AppState so pill components rendered outside PromptInput
   // (CompanionSprite in REPL.tsx) can read their own focused state.
   footerSelection: FooterItem | null
+  /** densable footerLinks — settings regex badges + keyed PR pills. */
+  footerLinks: import('../utils/footerLinks.js').FooterLink[]
+  /**
+   * densable prStatus — open PR for current branch (footer / copper_thistle).
+   * Written by PromptInputFooterLeftSide from usePrStatus poll.
+   */
+  prStatus: import('../utils/prStatusFooter.js').AppPrStatus | null
+  /**
+   * densable prNeedsAuth — false or densable DXt reason when PR badge cannot load
+   * (`needs-auth` / `gh-missing`). Truthy only when no prStatus.
+   */
+  prNeedsAuth: import('../utils/prStatusFooter.js').PrNeedsAuth
+  /**
+   * densable idleTeammatesExpanded — when false, G7 collapses idle rows past
+   * cIa=3 into a single idle_summary panel row.
+   */
+  idleTeammatesExpanded: boolean
+  /**
+   * densable frameUrls — path-keyed live HTML artifact/frame URLs for footer
+   * nav + ctrl+] open (fuo/a7u).
+   */
+  frameUrls: import('../utils/frameUrls.js').FrameUrlsMap
+  /** densable frameNavPath — selected path key within frameUrls, or null. */
+  frameNavPath: string | null
+  /** densable frameExpanded — footer frame pill expanded for multi-frame nav. */
+  frameExpanded: boolean
+  /** densable artifactReadVersions — slug→version last observed. */
+  artifactReadVersions: import('../utils/frameUrls.js').ArtifactReadVersions
+  /** densable artifactRefs — ordered slug refs (pin optional). */
+  artifactRefs: import('../utils/frameUrls.js').ArtifactRef[]
+  /**
+   * densable panelFileView — file panel overlay state (sparse writers).
+   * null = closed. Cleared by clearPanelFileView (_Lk residual).
+   */
+  panelFileView: import('../utils/panelFileView.js').PanelFileView
+  /**
+   * densable cacheBreakerPhrase — session flag that busts getSystemContext
+   * memoization (rR residual). Cleared on /clear; applied via applyFlagSettings.
+   */
+  cacheBreakerPhrase: string | undefined
+  /**
+   * densable autoCompactWindow — session/settings window size (tokens).
+   * Applied via apply_flag_settings (Xat). Env CLAUDE_CODE_AUTO_COMPACT_WINDOW
+   * still wins inside getEffectiveContextWindowSize.
+   */
+  autoCompactWindow: number | undefined
+  /**
+   * densable briefTranscript — focus-view style brief transcript (Xat + /focus).
+   * Session-scoped AppState mirror of settings.briefTranscript when toggled.
+   */
+  briefTranscript: boolean
   toolPermissionContext: ToolPermissionContext
   spinnerTip?: string
   // Agent name from --agent CLI flag or settings (for logo display)
@@ -158,6 +215,11 @@ export type AppState = DeepImmutable<{
   replBridgeError: string | undefined
   // Always-on bridge: session name set via `/remote-control <name>` (used as session title)
   replBridgeInitialName: string | undefined
+  /**
+   * Always-on bridge: official sessionGroupingId (project group).
+   * Threaded into initReplBridge → handle → left-arrow rit GROUPING env.
+   */
+  replBridgeSessionGroupingId: string | undefined
   // Always-on bridge: first-time remote dialog pending (set by /remote-control command)
   showRemoteCallout: boolean
   // Pipe IPC state — added at runtime when feature('PIPE_IPC') is enabled.
@@ -165,6 +227,20 @@ export type AppState = DeepImmutable<{
 }> & {
   // Unified task state - excluded from DeepImmutable because TaskState contains function types
   tasks: { [taskId: string]: TaskState }
+  /**
+   * densable taskDecorations — per-task custom status content from
+   * settings.subagentStatusLine command (agent panel row override).
+   * Excluded from DeepImmutable (plain mutable map).
+   */
+  taskDecorations: { [taskId: string]: { content: string } }
+  /**
+   * densable sendMessagePins — name-keyed last-known SendMessage targets
+   * `{id,name,ref}` for ambiguous-name disambiguation / rebound guards.
+   * Session-scoped; cleared on /clear; rehydrated from toolUseResult.pin.
+   */
+  sendMessagePins: {
+    [normalizedName: string]: { id: string; name: string; ref: string }
+  }
   // Name → AgentId registry populated by Agent tool when `name` is provided.
   // Latest-wins on collision. Used by SendMessage to route by name.
   agentNameRegistry: Map<string, AgentId>
@@ -229,7 +305,14 @@ export type AppState = DeepImmutable<{
   notifications: {
     current: Notification | null
     queue: Notification[]
+    /** densable sticky notices (launch-prompt-warning, etc.). */
+    pinned: Notification[]
   }
+  /**
+   * densable diffPanelVisible — DiffDialog / DiffPanel open. Notifications
+   * without exemptFromDiffPanelHold are held until the panel closes.
+   */
+  diffPanelVisible: boolean
   elicitation: {
     queue: ElicitationRequestEvent[]
   }
@@ -438,6 +521,13 @@ export type AppState = DeepImmutable<{
   advisorModel?: string
   // Effort value
   effortValue?: EffortValue
+  /**
+   * densable ultracode session flag — /effort ultracode sets this with
+   * effortValue xhigh. Standing Workflow orchestration (ultra_effort_*
+   * attachments) while true + workflows available + resolved effort xhigh.
+   * Session-scoped; cleared when effort changes away from ultracode.
+   */
+  ultracode?: boolean
   // Set synchronously in launchUltraplan before the detached flow starts.
   // Prevents duplicate launches during the ~5s window before
   // ultraplanSessionUrl is set by teleportToRemote. Cleared by launchDetached
@@ -481,8 +571,11 @@ export function getDefaultAppState(): AppState {
   return {
     settings: getInitialSettings(),
     tasks: {},
+    taskDecorations: {},
+    sendMessagePins: {},
     agentNameRegistry: new Map(),
     verbose: false,
+    showMessageTimestamps: false,
     mainLoopModel: null, // alias, full name (as with --model or env var), or null (default)
     mainLoopModelForSession: null,
     statusLineText: undefined,
@@ -494,6 +587,27 @@ export function getDefaultAppState(): AppState {
     coordinatorTaskIndex: -1,
     viewSelectionMode: 'none',
     footerSelection: null,
+    footerLinks: [],
+    prStatus: null,
+    prNeedsAuth: false,
+    idleTeammatesExpanded: false,
+    frameUrls: {},
+    frameNavPath: null,
+    frameExpanded: false,
+    artifactReadVersions: {},
+    artifactRefs: [],
+    panelFileView: null,
+    cacheBreakerPhrase: undefined,
+    autoCompactWindow: getInitialSettings().autoCompactWindow,
+    // densable J7t seed via isFocusViewActive.
+    briefTranscript: (() => {
+      const s = getInitialSettings()
+      // Lazy require avoids circular import at module init (settings ↔ AppState).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isFocusViewActive } =
+        require('../utils/focusView.js') as typeof import('../utils/focusView.js')
+      return isFocusViewActive(s.viewMode, s.briefTranscript)
+    })(),
     kairosEnabled: false,
     remoteSessionUrl: undefined,
     remoteConnectionStatus: 'connecting',
@@ -510,6 +624,7 @@ export function getDefaultAppState(): AppState {
     replBridgeSessionId: undefined,
     replBridgeError: undefined,
     replBridgeInitialName: undefined,
+    replBridgeSessionGroupingId: undefined,
     showRemoteCallout: false,
     toolPermissionContext: {
       ...getEmptyToolPermissionContext(),
@@ -546,7 +661,9 @@ export function getDefaultAppState(): AppState {
     notifications: {
       current: null,
       queue: [],
+      pinned: [],
     },
+    diffPanelVisible: false,
     elicitation: {
       queue: [],
     },
@@ -577,6 +694,7 @@ export function getDefaultAppState(): AppState {
     authVersion: 0,
     initialMessage: null,
     effortValue: undefined,
+    ultracode: false,
     activeOverlays: new Set<string>(),
     fastMode: false,
   }

@@ -17,6 +17,7 @@ import {
 import { logError } from 'src/utils/log.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { Box, Text, Divider } from '@anthropic/ink';
+import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding, useKeybindings } from '../keybindings/useKeybinding.js';
 import type { Message, PartialCompactDirection, UserMessage } from '../types/message.js';
 import { stripDisplayTags } from '../utils/displayTags.js';
@@ -322,6 +323,11 @@ export function MessageSelector({
     isActive: !messageToRestore,
   });
 
+  // densable Dnt("MessageSelector", pe) — elevate so last-wins over Global/Chat
+  // for j/k/enter while the pick list is active (not restore confirm / error).
+  const messageSelectorActive = !isRestoring && !error && !messageToRestore && hasMessagesToSelect;
+  useRegisterKeybindingContext('MessageSelector', messageSelectorActive);
+
   // Message selector navigation keybindings
   useKeybindings(
     {
@@ -333,7 +339,7 @@ export function MessageSelector({
     },
     {
       context: 'MessageSelector',
-      isActive: !isRestoring && !error && !messageToRestore && hasMessagesToSelect,
+      isActive: messageSelectorActive,
     },
   );
 
@@ -784,6 +790,35 @@ function computeDiffStatsBetweenMessages(
   };
 }
 
+/**
+ * densable gty — UUID of the last RAe-selectable user message after the last
+ * assistant message (or from start when no assistant). Used as
+ * refusedUserMessageUuid on model_refusal_* system banners (rewind/edit target).
+ * Gold: `e.slice(t+1).findLast(RAe)?.uuid??null` with t = last assistant index.
+ */
+export function lastSelectableUserMessageUuidAfterAssistant(
+  messages: readonly Message[],
+): string | null {
+  let lastAssistant = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.type === 'assistant') {
+      lastAssistant = i;
+      break;
+    }
+  }
+  for (let i = messages.length - 1; i > lastAssistant; i--) {
+    const m = messages[i];
+    if (m && selectableUserMessagesFilter(m)) {
+      return m.uuid ?? null;
+    }
+  }
+  return null;
+}
+
+/**
+ * densable jDt base + RAe — selectable human user messages for restore/selector.
+ * RAe = jDt(e) && !(origin set && origin.kind !== "human") && !stackedExpansion.
+ */
 export function selectableUserMessagesFilter(message: Message): message is UserMessage {
   if (message.type !== 'user') {
     return false;
@@ -818,6 +853,16 @@ export function selectableUserMessagesFilter(message: Message): message is UserM
   ) {
     return false;
   }
+
+  // densable RAe: origin set and not human → not selectable (agent/channel/etc.)
+  const origin = (message as { origin?: { kind?: string } | null }).origin;
+  if (origin && origin.kind !== 'human') {
+    return false;
+  }
+  // densable RAe: stacked expansion rows are not independently selectable
+  if ((message as { stackedExpansion?: boolean }).stackedExpansion) {
+    return false;
+  }
   return true;
 }
 
@@ -838,6 +883,10 @@ export function messagesAfterAreOnlySynthetic(messages: Message[], fromIndex: nu
     if (msg.type === 'system') continue;
     if (msg.type === 'attachment') continue;
     if (msg.type === 'user' && msg.isMeta) continue;
+    // densable IRa: stackedExpansion user rows are non-meaningful for restore
+    if (msg.type === 'user' && (msg as { stackedExpansion?: boolean }).stackedExpansion) {
+      continue;
+    }
 
     // Assistant with actual content = meaningful
     if (msg.type === 'assistant') {

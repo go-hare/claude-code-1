@@ -39,6 +39,27 @@ export async function listBridgePeers(): Promise<BridgePeerSession[]> {
 }
 
 /**
+ * densable residual — true when a bridge post failure looks like a dead /
+ * archived cloud session (not a transient network blip). Used by SendMessage
+ * cloud-session error suffix.
+ */
+export function isLikelyStaleBridgeError(error: string | undefined): boolean {
+  if (!error) return false
+  const e = error.toLowerCase()
+  return (
+    e.includes('not found') ||
+    e.includes('404') ||
+    e.includes('410') ||
+    e.includes('gone') ||
+    e.includes('archived') ||
+    e.includes('ended') ||
+    e.includes('expired') ||
+    e.includes('session does not exist') ||
+    e.includes('unknown session')
+  )
+}
+
+/**
  * Send a plain-text message to another Claude session via the bridge API.
  *
  * Called by SendMessageTool when the target address scheme is "bridge:".

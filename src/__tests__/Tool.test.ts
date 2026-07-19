@@ -3,6 +3,9 @@ import {
   buildTool,
   toolMatchesName,
   findToolByName,
+  buildToolNameLookupMap,
+  forwardToolAliasPair,
+  reverseToolAliases,
   getEmptyToolPermissionContext,
   filterToolProgressMessages,
 } from '../Tool'
@@ -149,6 +152,140 @@ describe('findToolByName', () => {
     ]
     const tool = findToolByName(dupeTools, 'Bash')
     expect(tool!.maxResultSizeChars).toBe(100)
+  })
+
+  // densable Tc — session toolAliases single-hop remap
+  test('resolves densable session toolAliases map (single hop)', () => {
+    const tool = findToolByName(mockTools, 'shell', { shell: 'Bash' })
+    expect(tool?.name).toBe('Bash')
+  })
+
+  test('session toolAliases does not chain (single hop only)', () => {
+    // shell → sh → Bash would require multi-hop; densable Tc drops map on recurse
+    expect(
+      findToolByName(mockTools, 'shell', { shell: 'sh', sh: 'Bash' }),
+    ).toBeUndefined()
+    // direct hop still works
+    expect(findToolByName(mockTools, 'sh', { shell: 'sh', sh: 'Bash' })?.name).toBe(
+      'Bash',
+    )
+  })
+
+  test('session toolAliases identity mapping is ignored', () => {
+    expect(findToolByName(mockTools, 'Bash', { Bash: 'Bash' })?.name).toBe(
+      'Bash',
+    )
+  })
+
+  test('session toolAliases can remap onto a builtin tool alias target', () => {
+    // map → primary name after hop
+    expect(findToolByName(mockTools, 'rf', { rf: 'Read' })?.name).toBe('Read')
+  })
+})
+
+describe('forwardToolAliasPair / reverseToolAliases densable sDn/b5t', () => {
+  test('sDn returns [name, mapped] for non-identity map', () => {
+    expect(forwardToolAliasPair('shell', { shell: 'Bash' })).toEqual([
+      'shell',
+      'Bash',
+    ])
+  })
+
+  test('sDn returns [name] when unmapped or identity', () => {
+    expect(forwardToolAliasPair('Bash', { shell: 'Bash' })).toEqual(['Bash'])
+    expect(forwardToolAliasPair('Bash', { Bash: 'Bash' })).toEqual(['Bash'])
+    expect(forwardToolAliasPair('Bash', null)).toEqual(['Bash'])
+  })
+
+  test('b5t lists reverse aliases', () => {
+    expect(
+      reverseToolAliases('Bash', {
+        shell: 'Bash',
+        sh: 'Bash',
+        r: 'Read',
+      }).sort(),
+    ).toEqual(['sh', 'shell'])
+    expect(reverseToolAliases('Bash', null)).toEqual([])
+  })
+})
+
+describe('toolNamesForAlwaysAllowSuppress densable nLe', () => {
+  test('nLe is primary + reverse aliases', async () => {
+    const { toolNamesForAlwaysAllowSuppress } = await import('../Tool.js')
+    expect(
+      [...toolNamesForAlwaysAllowSuppress({ name: 'Bash' }, { shell: 'Bash' })].sort(),
+    ).toEqual(['Bash', 'shell'])
+  })
+})
+
+describe('buildToolNameLookupMap / findToolByName densable B7c/U7c/Rrg', () => {
+  test('Rrg primary name wins over later alias of same string', () => {
+    const tools = [
+      buildTool(makeMinimalToolDef({ name: 'Read' })),
+      buildTool(makeMinimalToolDef({ name: 'Other', aliases: ['Read'] })),
+    ]
+    const map = buildToolNameLookupMap(tools)
+    expect(map.get('Read')?.name).toBe('Read')
+  })
+
+  test('Rrg first alias registration wins', () => {
+    const tools = [
+      buildTool(makeMinimalToolDef({ name: 'A', aliases: ['x'] })),
+      buildTool(makeMinimalToolDef({ name: 'B', aliases: ['x'] })),
+    ]
+    expect(buildToolNameLookupMap(tools).get('x')?.name).toBe('A')
+  })
+
+  test('findToolByName cache path still resolves name and alias', () => {
+    const tools = [
+      buildTool(makeMinimalToolDef({ name: 'Bash' })),
+      buildTool(makeMinimalToolDef({ name: 'Read', aliases: ['FileRead'] })),
+    ]
+    // First lookup primes U7c; second builds B7c map.
+    expect(findToolByName(tools, 'Bash')?.name).toBe('Bash')
+    expect(findToolByName(tools, 'FileRead')?.name).toBe('Read')
+    expect(findToolByName(tools, 'Bash')?.name).toBe('Bash')
+    expect(findToolByName(tools, 'missing')).toBeUndefined()
+  })
+
+  test('earlier alias vs later primary: linear and cache agree (densable first-wins)', () => {
+    // densable ll is single find(name|alias) in registration order; Rrg is single-pass
+    // first-wins — so earlier alias shadows later primary, and both paths agree.
+    const tools = [
+      buildTool(makeMinimalToolDef({ name: 'Early', aliases: ['Conflict'] })),
+      buildTool(makeMinimalToolDef({ name: 'Conflict' })),
+    ]
+    const linear = findToolByName(tools, 'Conflict')?.name
+    const cached = findToolByName(tools, 'Conflict')?.name
+    const rrg = buildToolNameLookupMap(tools).get('Conflict')?.name
+    expect(linear).toBe('Early')
+    expect(cached).toBe('Early')
+    expect(rrg).toBe('Early')
+    expect(cached).toBe(linear)
+  })
+
+  test('session toolAliases single-hop still works with cache', () => {
+    const tools = [buildTool(makeMinimalToolDef({ name: 'Bash' }))]
+    expect(findToolByName(tools, 'shell', { shell: 'Bash' })?.name).toBe('Bash')
+    // second lookup hits cache after U7c seen
+    expect(findToolByName(tools, 'Bash')?.name).toBe('Bash')
+    expect(findToolByName(tools, 'shell', { shell: 'Bash' })?.name).toBe('Bash')
+  })
+
+  test('source anchors densable B7c/U7c/Rrg', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const src = readFileSync(join(import.meta.dir, '../Tool.ts'), 'utf8')
+    expect(src).toContain('findToolByNameCache')
+    expect(src).toContain('findToolByNameSeen')
+    expect(src).toContain('buildToolNameLookupMap')
+    expect(src).toContain('densable B7c')
+    expect(src).toContain('densable U7c')
+    expect(src).toContain('densable Rrg')
+    // densable first path is single find(ll), not primary-then-alias two-pass
+    expect(src).toMatch(
+      /return tools\.find\(\s*t\s*=>\s*toolMatchesName\(\s*t\s*,\s*name\s*\)\s*\)/,
+    )
   })
 })
 

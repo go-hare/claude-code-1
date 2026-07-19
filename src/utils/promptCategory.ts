@@ -6,6 +6,23 @@ import {
 import { getSettings_DEPRECATED } from './settings/settings.js'
 
 /**
+ * densable f2 — classify querySource into main / subagent / auxiliary.
+ * Structured-output enforcement skips auxiliary (prompt_suggestion, side queries).
+ */
+export function classifyQuerySource(
+  querySource: QuerySource | string | undefined,
+): 'main' | 'subagent' | 'auxiliary' | undefined {
+  if (querySource === undefined) return undefined
+  if (querySource.startsWith('repl_main_thread') || querySource === 'sdk') {
+    return 'main'
+  }
+  if (querySource.startsWith('agent:') || querySource === 'hook_agent') {
+    return 'subagent'
+  }
+  return 'auxiliary'
+}
+
+/**
  * Determines the prompt category for agent usage.
  * Used for analytics to track different agent patterns.
  *

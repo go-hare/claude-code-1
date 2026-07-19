@@ -288,7 +288,120 @@ function getSimpleSandboxSection(): string {
   ].join('\n')
 }
 
-export function getSimplePrompt(): string {
+function isCobaltThistleOn(): boolean {
+  // densable Slc / tengu_cobalt_thistle — lean bash path only.
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/services/analytics/growthbook.js') as typeof import('src/services/analytics/growthbook.js')
+    const { isCobaltThistleEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/systemPromptArms.js') as typeof import('src/utils/systemPromptArms.js')
+    return isCobaltThistleEnabled({
+      gbValue: getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_cobalt_thistle',
+        false,
+      ),
+    })
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable Pte for Bash prompt/sleep guidance.
+ * Prefer amber_sentinel GB; fall back to MONITOR_TOOL feature for builds
+ * that only wire the compile-time flag.
+ */
+function isAmberSentinelOn(): boolean {
+  try {
+    const { isAmberSentinelEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/amberSentinelGate.js') as typeof import('src/utils/amberSentinelGate.js')
+    if (isAmberSentinelEnabled()) return true
+  } catch {
+    // densable optional
+  }
+  // Compile-time feature keeps Monitor copy in builds that still use
+  // MONITOR_TOOL as the ship gate before GB is flipped.
+  if (feature('MONITOR_TOOL')) return true
+  return false
+}
+
+function getWindowsGitBashNote(): string | null {
+  // densable $wu — Git Bash (POSIX) note on Windows only.
+  if (process.platform !== 'win32') return null
+  return 'This tool runs Git Bash (POSIX sh), not cmd.exe or PowerShell. Use Unix shell syntax: `/dev/null` not `NUL`, forward slashes, `$VAR` not `%VAR%` or `$env:VAR`.'
+}
+
+function getAvoidCommandsList(): string {
+  const embedded = hasEmbeddedSearchTools()
+  return embedded
+    ? '`cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
+    : '`find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
+}
+
+/**
+ * densable sPg — lean Bash tool prompt when simple system prompt (vT/Jb) is on.
+ * cobalt_thistle (Slc) skips the avoid-find/grep line and uses a shorter cwd line.
+ */
+export function getLeanBashPrompt(): string {
+  const cobaltThistle = isCobaltThistleOn()
+  const avoidCommands = getAvoidCommandsList()
+  const windowsNote = getWindowsGitBashNote()
+  const backgroundNote = getBackgroundUsageNote()
+
+  // densable sPg working-dir + shell-state line (bullet-prefixed).
+  const workingDirLine = cobaltThistle
+    ? "- Working directory persists between calls. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile."
+    : "- Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile."
+
+  const lines: string[] = [
+    'Executes a bash command and returns its output.',
+    ...(windowsNote ? ['', windowsNote] : []),
+    '',
+    workingDirLine,
+  ]
+
+  // densable: avoid-block only when !cobalt_thistle; single IMPORTANT line (no tool list).
+  if (!cobaltThistle) {
+    lines.push(
+      `- IMPORTANT: Avoid using this tool to run ${avoidCommands} commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.`,
+    )
+  }
+
+  lines.push(
+    `- \`timeout\` is in milliseconds: default ${getDefaultTimeoutMs()}, max ${getMaxTimeoutMs()}.`,
+  )
+
+  if (backgroundNote !== null) {
+    // densable sPg: bg note + Pte() sleep/Monitor line.
+    let bg =
+      '- `run_in_background` runs the command detached: it keeps running across turns and re-invokes you when it exits. No `&` needed.'
+    if (isAmberSentinelOn()) {
+      bg +=
+        ' Foreground `sleep` is blocked; use Monitor with an until-loop to wait on a condition.'
+    }
+    lines.push(bg)
+  }
+
+  const sandbox = getSimpleSandboxSection()
+  if (sandbox) lines.push(sandbox)
+
+  // densable iPg lean git is much shorter; reuse reduced commit/PR section when enabled.
+  const git = getCommitAndPRInstructions()
+  if (git) {
+    lines.push('', git)
+  }
+
+  return lines.join('\n')
+}
+
+/**
+ * densable jwu — full Bash tool prompt (dense system prompt path).
+ * cobalt_thistle does NOT apply here (always include avoid + tool preference list).
+ */
+export function getFullBashPrompt(): string {
   // Ant-native builds alias find/grep to embedded bfs/ugrep in Claude's shell,
   // so we don't steer away from them (and Glob/Grep tools are removed).
   const embedded = hasEmbeddedSearchTools()
@@ -306,9 +419,7 @@ export function getSimplePrompt(): string {
     'Communication: Output text directly (NOT echo/printf)',
   ]
 
-  const avoidCommands = embedded
-    ? '`cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
-    : '`find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
+  const avoidCommands = getAvoidCommandsList()
 
   // LOCAL (not official densable): on Windows, parallel git Bash trees multiply
   // Git-for-Windows nested conhost flashes. Prefer one combined shell for
@@ -340,29 +451,48 @@ export function getSimplePrompt(): string {
     'Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly asked for it. If a hook fails, investigate and fix the underlying issue.',
   ]
 
+  // densable jwu: s=!Ov() (background tasks available); Pte for Monitor sleep lines.
+  const bgTasksAvailable = !isBackgroundTasksDisabled()
+  const amberSentinel = isAmberSentinelOn()
   const sleepSubitems = [
     'Do not sleep between commands that can run immediately — just run them.',
-    ...(feature('MONITOR_TOOL')
+    ...(amberSentinel
       ? [
-          'Use the Monitor tool to stream events from a background process (each stdout line is a notification). For one-shot "wait until done," use Bash with run_in_background instead.',
+          bgTasksAvailable
+            ? 'Use the Monitor tool to stream events from a background process (each stdout line is a notification). For one-shot "wait until done," use Bash with run_in_background instead.'
+            : 'Use the Monitor tool to stream events from a background process (each stdout line is a notification).',
         ]
       : []),
-    'For long-running commands, use `run_in_background` — you will be notified when it completes. Do not poll.',
-    'Do not retry failing commands in a sleep loop — diagnose the root cause.',
-    ...(feature('MONITOR_TOOL')
+    ...(bgTasksAvailable
       ? [
-          '`sleep N` as the first command with N ≥ 2 is blocked. If you need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.',
+          'If your command is long running and you would like to be notified when it finishes — use `run_in_background`. No sleep needed.',
+        ]
+      : []),
+    'Do not retry failing commands in a sleep loop — diagnose the root cause.',
+    ...(bgTasksAvailable
+      ? [
+          'If waiting for a background task you started with `run_in_background`, you will be notified when it completes — do not poll.',
+        ]
+      : []),
+    // densable: Pte()&&s → long leading sleep blocked + until-loop Monitor;
+    // else poll/check + short sleep.
+    ...(amberSentinel && bgTasksAvailable
+      ? [
+          'Long leading `sleep` commands are blocked. To poll until a condition is met, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`) — you get a notification when the loop exits. Do not chain shorter sleeps to work around the block.',
         ]
       : [
-          'If you must sleep, keep the duration short (1-5 seconds) to avoid blocking the user.',
+          'If you must poll an external process, use a check command (e.g. `gh run view`) rather than sleeping first.',
+          'If you must sleep, keep the duration short to avoid blocking the user.',
         ]),
   ]
   const backgroundNote = getBackgroundUsageNote()
+  const windowsNote = getWindowsGitBashNote()
 
   const instructionItems: Array<string | string[]> = [
     'If your command will create new directories or files, first use this tool to run `ls` to verify the parent directory exists and is the correct location.',
     'Always quote file paths that contain spaces with double quotes in your command (e.g., cd "path with spaces/file.txt")',
-    'Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.',
+    // densable jwu: absolute paths + never prepend `cd <cwd>` to git (permission prompt).
+    'Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it. In particular, never prepend `cd <current-directory>` to a `git` command — `git` already operates on the current working tree, and the compound triggers a permission prompt.',
     `You may specify an optional timeout in milliseconds (up to ${getMaxTimeoutMs()}ms / ${getMaxTimeoutMs() / 60000} minutes). By default, your command will timeout after ${getDefaultTimeoutMs()}ms (${getDefaultTimeoutMs() / 60000} minutes).`,
     ...(backgroundNote !== null ? [backgroundNote] : []),
     'When issuing multiple commands:',
@@ -378,23 +508,52 @@ export function getSimplePrompt(): string {
           // POSIX leftmost-longest. This silently drops matches when a shorter
           // alternative is a prefix of a longer one.
           "When using `find -regex` with alternation, put the longest alternative first. Example: use `'.*\\.\\(tsx\\|ts\\)'` not `'.*\\.\\(ts\\|tsx\\)'` — the second form silently skips `.tsx` files.",
+          'When running `find`, search from `.` (or a specific path), not `/` — scanning the full filesystem can exhaust system resources on large trees.',
         ]
       : []),
   ]
 
-  return [
-    'Executes a given bash command and returns its output.',
-    '',
-    "The working directory persists between commands, but shell state does not. The shell environment is initialized from the user's profile (bash or zsh).",
-    '',
+  // densable jwu always includes the avoid + dedicated-tool preference block.
+  const avoidDedicatedToolsBlock = [
     `IMPORTANT: Avoid using this tool to run ${avoidCommands} commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user:`,
     '',
     ...prependBullets(toolPreferenceItems),
     `While the ${BASH_TOOL_NAME} tool can do similar things, it’s better to use the built-in tools as they provide a better user experience and make it easier to review tool calls and give permission.`,
     '',
+  ]
+
+  // densable jwu working-dir line (not thistle-branched).
+  const workingDirLine =
+    "The working directory persists between commands, but shell state does not. The shell environment is initialized from the user's profile (bash or zsh)."
+
+  return [
+    'Executes a given bash command and returns its output.',
+    ...(windowsNote ? ['', windowsNote] : []),
+    '',
+    workingDirLine,
+    '',
+    ...avoidDedicatedToolsBlock,
     '# Instructions',
     ...prependBullets(instructionItems),
     getSimpleSandboxSection(),
     ...(getCommitAndPRInstructions() ? ['', getCommitAndPRInstructions()] : []),
   ].join('\n')
+}
+
+/**
+ * densable jwu(e,t) entry — routes lean sPg vs full jwu via simple system prompt (vT).
+ */
+export function getSimplePrompt(options?: { model?: string }): string {
+  let useLean = false
+  if (options?.model) {
+    try {
+      const { shouldUseSimpleSystemPrompt } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/simpleSystemPrompt.js') as typeof import('src/utils/simpleSystemPrompt.js')
+      useLean = shouldUseSimpleSystemPrompt({ model: options.model })
+    } catch {
+      useLean = false
+    }
+  }
+  return useLean ? getLeanBashPrompt() : getFullBashPrompt()
 }

@@ -6,12 +6,19 @@ import {
   getCommandName,
 } from '../../commands.js'
 import type { SuggestionItem } from '../../components/PromptInput/PromptInputFooterSuggestions.js'
+import type {
+  ArgumentCompletion,
+  GetArgumentCompletions,
+} from '../../types/command.js'
 import {
   isMenuKindLanesEnabled,
   resolveCommandKindLane,
   resolveCommandSourceTag,
 } from '../residualUiEnvGates.js'
 import { getSkillUsageScore } from './skillUsageTracking.js'
+
+/** densable Uef — command-arg suggestion id prefix. */
+export const COMMAND_ARG_ID_PREFIX = 'command-arg-'
 
 // Treat these characters as word separators for command search
 const SEPARATORS = /[:_-]/g
@@ -204,6 +211,14 @@ export function getBestCommandMatch(
  */
 export function isCommandInput(input: string): boolean {
   return input.startsWith('/')
+}
+
+/**
+ * densable zxa: command token (after `/`, before first space) is safe for
+ * empty-match messaging — no spaces/specials that would mean non-command input.
+ */
+export function isSafeCommandQueryToken(token: string): boolean {
+  return token.length > 0 && !/[^a-zA-Z0-9.:\-_]/.test(token)
 }
 
 /**
@@ -542,7 +557,75 @@ export function generateCommandSuggestions(
 }
 
 /**
- * Apply selected command to input
+ * densable qef — map Command.getArgumentCompletions into command-arg-* SuggestionItems
+ * with replacement/partial metadata for Yxa/Rer apply + reSuggest.
+ */
+export async function generateCommandArgumentSuggestions(
+  input: string,
+  getCompletions: GetArgumentCompletions,
+): Promise<SuggestionItem[]> {
+  const spaceIndex = input.indexOf(' ')
+  if (!input.startsWith('/') || spaceIndex === -1) {
+    return []
+  }
+  const commandName = input.slice(1, spaceIndex)
+  const argsText = input.slice(spaceIndex + 1)
+  const tokens = argsText.split(/\s+/).filter(Boolean)
+  const endsWithSpace = argsText === '' || /\s$/.test(argsText)
+  const partial = endsWithSpace ? '' : (tokens.at(-1) ?? '')
+  const argsSoFar = endsWithSpace ? tokens : tokens.slice(0, -1)
+  const completions = await getCompletions(argsSoFar, partial)
+  const prefix = [`/${commandName}`, ...argsSoFar].join(' ')
+  return completions.slice(0, 12).map((c: ArgumentCompletion) => {
+    const isFinal =
+      c.isFinal === true || c.value.toLowerCase() === partial.toLowerCase()
+    const appendSpace = !isFinal && (c.appendSpace ?? true)
+    return {
+      id: `${COMMAND_ARG_ID_PREFIX}${c.value}`,
+      displayText: c.value,
+      description: c.description,
+      metadata: {
+        replacement: `${prefix} ${c.value}${appendSpace ? ' ' : ''}`,
+        partial: !isFinal,
+      },
+    }
+  })
+}
+
+/** densable Rer — command-arg / template suggestion metadata. */
+export type ReplacementMetadata = {
+  replacement: string
+  partial: boolean
+}
+
+export function asReplacementMetadata(
+  metadata: unknown,
+): ReplacementMetadata | null {
+  if (
+    typeof metadata === 'object' &&
+    metadata !== null &&
+    'replacement' in metadata &&
+    typeof (metadata as { replacement: unknown }).replacement === 'string' &&
+    'partial' in metadata &&
+    typeof (metadata as { partial: unknown }).partial === 'boolean'
+  ) {
+    return {
+      replacement: (metadata as { replacement: string }).replacement,
+      partial: (metadata as { partial: boolean }).partial,
+    }
+  }
+  return null
+}
+
+export type ApplyCommandSuggestionResult = {
+  newInput: string
+  /** densable Yxa reSuggest — keep typeahead open and refresh for partial args. */
+  reSuggest: boolean
+} | null
+
+/**
+ * Apply selected command to input.
+ * densable Yxa: replacement/partial metadata first; else formatCommand + optional submit.
  */
 export function applyCommandSuggestion(
   suggestion: string | SuggestionItem,
@@ -551,7 +634,20 @@ export function applyCommandSuggestion(
   onInputChange: (value: string) => void,
   setCursorOffset: (offset: number) => void,
   onSubmit: (value: string, isSubmittingSlashCommand?: boolean) => void,
-): void {
+): ApplyCommandSuggestionResult {
+  // densable Yxa Rer path: command-arg-* items carry replacement + partial
+  if (typeof suggestion !== 'string') {
+    const rep = asReplacementMetadata(suggestion.metadata)
+    if (rep) {
+      onInputChange(rep.replacement)
+      setCursorOffset(rep.replacement.length)
+      if (shouldExecute && !rep.partial) {
+        onSubmit(rep.replacement.trim(), /* isSubmittingSlashCommand */ true)
+      }
+      return { newInput: rep.replacement, reSuggest: rep.partial }
+    }
+  }
+
   // Extract command name and object from string or SuggestionItem metadata
   let commandName: string
   let commandObj: Command | undefined
@@ -560,7 +656,7 @@ export function applyCommandSuggestion(
     commandObj = shouldExecute ? getCommand(commandName, commands) : undefined
   } else {
     if (!isCommandMetadata(suggestion.metadata)) {
-      return // Invalid suggestion, nothing to apply
+      return null // Invalid suggestion, nothing to apply
     }
     commandName = getCommandName(suggestion.metadata)
     commandObj = suggestion.metadata
@@ -580,6 +676,7 @@ export function applyCommandSuggestion(
       onSubmit(newInput, /* isSubmittingSlashCommand */ true)
     }
   }
+  return { newInput, reSuggest: false }
 }
 
 // Helper function at bottom of file per CLAUDE.md

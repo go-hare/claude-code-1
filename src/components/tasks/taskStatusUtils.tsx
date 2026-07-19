@@ -39,6 +39,7 @@ export function getTaskStatusIcon(
     if (isIdle) return figures.ellipsis;
     return figures.play;
   }
+  if (status === 'paused') return figures.ellipsis;
   if (status === 'completed') return figures.tick;
   if (status === 'failed' || status === 'killed') return figures.cross;
   return figures.bullet;
@@ -65,7 +66,7 @@ export function getTaskStatusColor(
 
   if (status === 'completed') return 'success';
   if (status === 'failed') return 'error';
-  if (status === 'killed') return 'warning';
+  if (status === 'killed' || status === 'paused') return 'warning';
   return 'background';
 }
 

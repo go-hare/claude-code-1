@@ -31,6 +31,11 @@ export type PromptCommand = {
   disallowedTools?: string[]
   model?: string
   source: SettingSource | 'builtin' | 'mcp' | 'plugin' | 'bundled'
+  /**
+   * densable: bare skill name before multiproject/path qualification rewrites
+   * `name`. Used by skill-doctor / skillOverrides lookups (BFu alternate key).
+   */
+  unqualifiedName?: string
   pluginInfo?: {
     pluginManifest: PluginManifest
     repository: string
@@ -48,6 +53,22 @@ export type PromptCommand = {
   // Only applicable when context is 'fork'
   agent?: string
   effort?: EffortValue
+  /**
+   * densable getEffort?.(args, ctx) — dynamic effort for forked skills.
+   * densable L6g: `e.getEffort?.(r||"",n)??e.effort` (nullish fallback).
+   */
+  getEffort?: (
+    args: string,
+    context: ToolUseContext,
+  ) => EffortValue | undefined
+  /**
+   * densable getAllowedTools?.(args, ctx) — dynamic allowed tool list for gWr.
+   * When present, preferred over static `allowedTools`.
+   */
+  getAllowedTools?: (
+    args: string,
+    context: ToolUseContext,
+  ) => Promise<string[]> | string[]
   // Glob patterns for file paths this skill applies to
   // When set, the skill is only visible after the model touches matching files
   paths?: string[]
@@ -175,6 +196,25 @@ export type CommandAvailability =
   // Console API key user (direct api.anthropic.com, not via claude.ai OAuth)
   | 'console'
 
+/**
+ * densable ArgumentCompletion — values from Command.getArgumentCompletions.
+ * isFinal: accepting should not re-open typeahead; appendSpace defaults true when partial.
+ */
+export type ArgumentCompletion = {
+  value: string
+  description?: string
+  isFinal?: boolean
+  /** When partial, whether to append a trailing space (default true). densable config uses false for key=. */
+  appendSpace?: boolean
+}
+
+export type GetArgumentCompletions = (
+  /** Completed argument tokens before the current partial token. */
+  argsSoFar: string[],
+  /** Current partial token (empty when input ends with whitespace). */
+  partial: string,
+) => ArgumentCompletion[] | Promise<ArgumentCompletion[]>
+
 export type CommandBase = {
   availability?: CommandAvailability[]
   /**
@@ -183,6 +223,16 @@ export type CommandBase = {
    * interactive Ink UI and can safely complete headlessly.
    */
   bridgeSafe?: boolean
+  /**
+   * densable thinClientDispatch — how slash commands behave in remote/CCR
+   * sessions (see resolveRemoteSlashDispatch). When unset:
+   * local-jsx → local, else → post-text.
+   */
+  thinClientDispatch?:
+    | 'post-text'
+    | 'control-request'
+    | 'local-then-rpc'
+    | 'twin'
   /**
    * Optional per-invocation validation for bridge-delivered slash commands.
    * Return a user-facing rejection reason when specific arguments are unsafe
@@ -199,6 +249,11 @@ export type CommandBase = {
   aliases?: string[]
   isMcp?: boolean
   argumentHint?: string // Hint text for command arguments (displayed in gray after command)
+  /**
+   * densable getArgumentCompletions — dynamic slash-command argument typeahead
+   * (e.g. /plugin list|enable…, /config key=). Wired via qef → command-arg-* items.
+   */
+  getArgumentCompletions?: GetArgumentCompletions
   whenToUse?: string // From the "Skill" spec. Detailed usage scenarios for when to use this command
   version?: string // Version of the command/skill
   disableModelInvocation?: boolean // Whether to disable this command from being invoked by models
@@ -224,6 +279,34 @@ export type Command = CommandBase &
 export function getCommandName(cmd: CommandBase): string {
   const name = cmd.userFacingName?.() ?? cmd.name
   return name || ''
+}
+
+/**
+ * densable Z$u — skill/command name match for allowlist entries:
+ * exact `name`, user-facing name, or alias.
+ */
+export function commandMatchesName(cmd: CommandBase, entry: string): boolean {
+  return (
+    cmd.name === entry ||
+    getCommandName(cmd) === entry ||
+    (cmd.aliases?.includes(entry) ?? false)
+  )
+}
+
+/**
+ * densable Jte — filter commands by session skill allowlist.
+ * undefined allowlist → all commands. Match rules: Z$u or name ends with `:${entry}`.
+ */
+export function filterCommandsBySkillAllowlist<T extends CommandBase>(
+  commands: T[],
+  allowlist: string[] | undefined,
+): T[] {
+  if (allowlist === undefined) return commands
+  return commands.filter(cmd =>
+    allowlist.some(
+      entry => commandMatchesName(cmd, entry) || cmd.name.endsWith(`:${entry}`),
+    ),
+  )
 }
 
 /** Resolves whether the command is enabled, defaulting to true. */

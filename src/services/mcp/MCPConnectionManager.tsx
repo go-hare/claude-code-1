@@ -1,4 +1,5 @@
-import React, { createContext, type ReactNode, useContext, useMemo } from 'react';
+import React, { createContext, type ReactNode, useContext, useEffect, useMemo } from 'react';
+import { clearMcpControls, setMcpControls } from '../../commands/mcp/mcpControls.js';
 import type { Command } from '../../commands.js';
 import type { Tool } from '../../Tool.js';
 import type { MCPServerConnection, ScopedMcpServerConfig, ServerResource } from './types.js';
@@ -46,6 +47,14 @@ export function MCPConnectionManager({
 }: MCPConnectionManagerProps): React.ReactNode {
   const { reconnectMcpServer, toggleMcpServer } = useManageMCPConnections(dynamicMcpConfig, isStrictMcpConfig);
   const value = useMemo(() => ({ reconnectMcpServer, toggleMcpServer }), [reconnectMcpServer, toggleMcpServer]);
+
+  // densable XTs: publish reconnect/toggle for non-interactive /mcp (yDy)
+  useEffect(() => {
+    setMcpControls(reconnectMcpServer, toggleMcpServer);
+    return () => {
+      clearMcpControls();
+    };
+  }, [reconnectMcpServer, toggleMcpServer]);
 
   return <MCPConnectionContext.Provider value={value}>{children}</MCPConnectionContext.Provider>;
 }

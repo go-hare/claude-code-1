@@ -57,10 +57,11 @@ export const SyntheticOutputTool = buildTool({
     return outputSchema()
   },
   async call(input) {
-    // The tool just validates and returns the input as the structured output
+    // densable endsTurn:!0 — StructuredOutput ends the agentic turn.
     return {
       data: 'Structured output provided successfully',
       structured_output: input,
+      endsTurn: true,
     }
   },
   async checkPermissions(input): Promise<PermissionResult> {
@@ -153,6 +154,8 @@ function buildSyntheticOutputTool(
           return {
             data: 'Structured output provided successfully',
             structured_output: input,
+            // densable endsTurn:!0 on schema-validated StructuredOutput
+            endsTurn: true,
           }
         },
       },

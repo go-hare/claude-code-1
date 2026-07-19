@@ -39,6 +39,7 @@ import { getPlatform } from '../../utils/platform.js'
 import { isPluginInstalled } from '../../utils/plugins/installedPluginsManager.js'
 import { loadKnownMarketplacesConfigSafe } from '../../utils/plugins/marketplaceManager.js'
 import { OFFICIAL_MARKETPLACE_NAME } from '../../utils/plugins/officialMarketplace.js'
+import { listDisusedPluginsWDt } from '../../utils/plugins/pluginUsage.js'
 import {
   getCurrentSessionAgentColor,
   isCustomTitleEnabled,
@@ -499,6 +500,22 @@ const externalTips: Tip[] = [
       isMarketplacePluginRelevant('frontend-design', context, {
         filePath: /\.(html|css|htm)$/i,
       }),
+  },
+  // densable plugin-disuse-review (WDt)
+  {
+    id: 'plugin-disuse-review',
+    content: async (ctx?) => {
+      const blue = color('suggestion', ctx?.theme ?? 'dark')
+      const disused = await listDisusedPluginsWDt()
+      const first = disused[0]
+      if (!first) return ''
+      if (disused.length === 1) {
+        return `You haven't used the ${chalk.bold(first.name)} plugin in a while. It still adds startup and context cost — review it with ${blue('/plugin')}`
+      }
+      return `You have ${disused.length} plugins you haven't used in a while. They still add startup and context cost — review them with ${blue('/plugin')}`
+    },
+    cooldownSessions: 30,
+    isRelevant: async () => (await listDisusedPluginsWDt()).length > 0,
   },
   {
     id: 'vercel-plugin',

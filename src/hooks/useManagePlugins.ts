@@ -21,6 +21,10 @@ import { loadPluginMcpServers } from '../utils/plugins/mcpPluginIntegration.js'
 import { detectAndUninstallDelistedPlugins } from '../utils/plugins/pluginBlocklist.js'
 import { getFlaggedPlugins } from '../utils/plugins/pluginFlagging.js'
 import { loadAllPlugins } from '../utils/plugins/pluginLoader.js'
+import {
+  applyPluginUsageLspGrace,
+  seedPluginUsage,
+} from '../utils/plugins/pluginUsage.js'
 import { refreshActivePlugins } from '../utils/plugins/refresh.js'
 import type { PluginLoadResult } from '../types/plugin.js'
 import { isBackgroundPluginRefreshEnabled } from '../utils/residualMoreEnvGates.js'
@@ -147,6 +151,15 @@ export function useManagePlugins({
       )
       const lsp_count = lspServerCounts.reduce((sum, n) => sum + n, 0)
       reinitializeLspServerManager()
+
+      // densable vzn + Czc on initial Layer-3 plugin load
+      const enabledIds = enabled.map(p => p.repository)
+      seedPluginUsage(enabledIds)
+      applyPluginUsageLspGrace(
+        enabled
+          .filter(p => p.lspServers && Object.keys(p.lspServers).length > 0)
+          .map(p => p.repository),
+      )
 
       // Update AppState - merge errors to preserve LSP errors
       setAppState(prevState => {

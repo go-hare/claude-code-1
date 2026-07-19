@@ -10,7 +10,10 @@
  */
 
 import type { Command } from '../commands.js'
-import { getSystemPrompt } from '../constants/prompts.js'
+import {
+  getExcludedDynamicSectionsContent,
+  getSystemPrompt,
+} from '../constants/prompts.js'
 import { getSystemContext, getUserContext } from '../context.js'
 import type { MCPServerConnection } from '../services/mcp/types.js'
 import type { AppState } from '../state/AppStateStore.js'
@@ -47,30 +50,65 @@ export async function fetchSystemPromptParts({
   additionalWorkingDirectories,
   mcpClients,
   customSystemPrompt,
+  cacheBreakerPhrase,
+  excludeDynamicSections,
 }: {
   tools: Tools
   mainLoopModel: string
   additionalWorkingDirectories: string[]
   mcpClients: MCPServerConnection[]
   customSystemPrompt: string | undefined
+  /** densable rR — AppState/options cacheBreakerPhrase memo key. */
+  cacheBreakerPhrase?: string
+  /** densable TSo/mB excludeDynamicSections flag. */
+  excludeDynamicSections?: boolean
 }): Promise<{
   defaultSystemPrompt: string[]
   userContext: { [k: string]: string }
   systemContext: { [k: string]: string }
 }> {
-  const [defaultSystemPrompt, userContext, systemContext] = await Promise.all([
-    customSystemPrompt !== undefined
-      ? Promise.resolve([])
-      : getSystemPrompt(
-          tools,
-          mainLoopModel,
-          additionalWorkingDirectories,
-          mcpClients,
-        ),
-    getUserContext(),
-    customSystemPrompt !== undefined ? Promise.resolve({}) : getSystemContext(),
-  ])
-  return { defaultSystemPrompt, userContext, systemContext }
+  // densable TSo:
+  //   defaultSystemPrompt = mB(..., {excludeDynamicSections})
+  //   when exclude: userContext={...rR, ...VA(), ...ESo}, systemContext={}
+  //   else: userContext=VA(), systemContext=rR
+  const exclude = excludeDynamicSections === true
+  const [defaultSystemPrompt, baseUserContext, systemContext, excluded] =
+    await Promise.all([
+      customSystemPrompt !== undefined
+        ? Promise.resolve([])
+        : getSystemPrompt(
+            tools,
+            mainLoopModel,
+            additionalWorkingDirectories,
+            mcpClients,
+            { excludeDynamicSections: exclude },
+          ),
+      getUserContext(),
+      customSystemPrompt !== undefined
+        ? Promise.resolve({})
+        : getSystemContext(cacheBreakerPhrase),
+      exclude && customSystemPrompt === undefined
+        ? getExcludedDynamicSectionsContent(
+            mainLoopModel,
+            additionalWorkingDirectories,
+          )
+        : Promise.resolve({} as { [k: string]: string }),
+    ])
+
+  if (exclude) {
+    // densable: userContext={...l,...a,...c}; systemContext={}
+    return {
+      defaultSystemPrompt,
+      userContext: { ...systemContext, ...baseUserContext, ...excluded },
+      systemContext: {},
+    }
+  }
+
+  return {
+    defaultSystemPrompt,
+    userContext: baseUserContext,
+    systemContext,
+  }
 }
 
 /**
@@ -97,6 +135,7 @@ export async function buildSideQuestionFallbackParams({
   appendSystemPrompt,
   thinkingConfig,
   agents,
+  excludeDynamicSections,
 }: {
   tools: Tools
   commands: Command[]
@@ -109,6 +148,8 @@ export async function buildSideQuestionFallbackParams({
   appendSystemPrompt: string | undefined
   thinkingConfig: ThinkingConfig | undefined
   agents: AgentDefinition[]
+  /** densable xEs → TSo excludeDynamicSections */
+  excludeDynamicSections?: boolean
 }): Promise<CacheSafeParams> {
   const mainLoopModel = getMainLoopModel()
   const appState = getAppState()
@@ -122,6 +163,8 @@ export async function buildSideQuestionFallbackParams({
       ),
       mcpClients,
       customSystemPrompt,
+      cacheBreakerPhrase: appState.cacheBreakerPhrase,
+      excludeDynamicSections,
     })
 
   const systemPrompt = asSystemPrompt([
@@ -157,6 +200,10 @@ export async function buildSideQuestionFallbackParams({
       agentDefinitions: { activeAgents: agents, allAgents: [] },
       customSystemPrompt,
       appendSystemPrompt,
+      cacheBreakerPhrase: appState.cacheBreakerPhrase,
+      autoCompactWindow: appState.autoCompactWindow,
+      // densable Tc: mirror AppState toolAliases for side_question fallback
+      toolAliases: appState.toolPermissionContext.toolAliases,
     },
     abortController: createAbortController(),
     readFileState,

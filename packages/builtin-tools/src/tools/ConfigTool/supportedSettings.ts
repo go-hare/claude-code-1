@@ -10,7 +10,11 @@ import { validateModel } from 'src/utils/model/validateModel.js'
 import { THEME_NAMES, THEME_SETTINGS } from 'src/utils/theme.js'
 
 /** AppState keys that can be synced for immediate UI effect */
-type SyncableAppStateKey = 'verbose' | 'mainLoopModel' | 'thinkingEnabled'
+type SyncableAppStateKey =
+  | 'verbose'
+  | 'mainLoopModel'
+  | 'thinkingEnabled'
+  | 'showMessageTimestamps'
 
 type SettingConfig = {
   source: 'global' | 'settings'
@@ -56,6 +60,13 @@ export const SUPPORTED_SETTINGS: Record<string, SettingConfig> = {
     type: 'boolean',
     description: 'Auto-compact when context is full',
   },
+  // densable tengu_sepia_moth — precompute compaction (Config UI also GB-gated).
+  precomputeCompactionEnabled: {
+    source: 'global',
+    type: 'boolean',
+    description:
+      'Precompute the compaction summary in the background before it is needed',
+  },
   autoMemoryEnabled: {
     source: 'settings',
     type: 'boolean',
@@ -76,6 +87,13 @@ export const SUPPORTED_SETTINGS: Record<string, SettingConfig> = {
     type: 'boolean',
     description:
       'Show turn duration message after responses (e.g., "Cooked for 1m 6s")',
+  },
+  // densable showMessageTimestamps — silk_hinge-gated stamps; Config UI also gated.
+  showMessageTimestamps: {
+    source: 'global',
+    type: 'boolean',
+    description: 'Stamp each assistant message with its arrival time',
+    appStateKey: 'showMessageTimestamps',
   },
   terminalProgressBarEnabled: {
     source: 'global',

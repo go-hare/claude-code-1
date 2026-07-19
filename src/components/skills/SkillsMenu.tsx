@@ -9,6 +9,7 @@ import {
 } from '../../commands.js';
 import { Box, Dialog, FuzzyPicker, Text } from '@anthropic/ink';
 import type { Theme } from '@anthropic/ink';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { estimateSkillFrontmatterTokens } from '../../skills/loadSkillsDir.js';
 import { formatTokens } from '../../utils/format.js';
 import { getSettingSourceName, type SettingSource } from '../../utils/settings/constants.js';
@@ -63,6 +64,8 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
   const [overridesEpoch, setOverridesEpoch] = useState(0);
   const [detailSkill, setDetailSkill] = useState<SkillCommand | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
+  // densable hbr/tZR: `t` toggles token-desc sort (settings:sortByTokens)
+  const [sortByTokens, setSortByTokens] = useState(false);
 
   const mergedOverrides = useMemo(() => {
     void overridesEpoch;
@@ -122,6 +125,32 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
 
     return groups;
   }, [filteredSkills]);
+
+  // Flat ordered list: densable source groups by default; token-desc when sortByTokens.
+  const orderedFilteredSkills = useMemo(() => {
+    if (sortByTokens) {
+      // densable: Map tokens once, sort desc then name asc
+      const list = [...filteredSkills];
+      const tokens = new Map(list.map(s => [s, estimateSkillFrontmatterTokens(s)] as const));
+      return list.sort(
+        (a, b) => (tokens.get(b) ?? 0) - (tokens.get(a) ?? 0) || getCommandName(a).localeCompare(getCommandName(b)),
+      );
+    }
+    return ORDERED_SOURCES.flatMap(source => skillsBySource[source]);
+  }, [skillsBySource, filteredSkills, sortByTokens]);
+
+  // densable: t only when list mode (not search-focused). Local FuzzyPicker is
+  // always type-to-filter — gate on empty query so typing `t` in a filter works.
+  useKeybinding(
+    'settings:sortByTokens',
+    () => {
+      setSortByTokens(v => !v);
+    },
+    {
+      context: 'Settings',
+      isActive: !detailSkill && orderedFilteredSkills.length > 0 && searchQuery === '',
+    },
+  );
 
   const handleCancel = (): void => {
     onExit('Skills dialog dismissed', { display: 'system' });
@@ -258,15 +287,10 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
     );
   };
 
-  // Flat ordered list of filtered skills preserving source grouping order
-  const orderedFilteredSkills = useMemo(() => {
-    return ORDERED_SOURCES.flatMap(source => skillsBySource[source]);
-  }, [skillsBySource]);
-
   const subtitle =
     searchQuery.trim() === ''
-      ? `${skills.length} ${plural(skills.length, 'skill')} · Enter invoke · Tab override`
-      : `${filteredSkills.length}/${skills.length} ${plural(skills.length, 'skill')}`;
+      ? `${skills.length} ${plural(skills.length, 'skill')}${sortByTokens ? ' · sorted by tokens' : ''} · Enter invoke · Tab override · t tokens`
+      : `${filteredSkills.length}/${skills.length} ${plural(skills.length, 'skill')}${sortByTokens ? ' · sorted by tokens' : ''}`;
 
   return (
     <FuzzyPicker
@@ -292,6 +316,16 @@ export function SkillsMenu({ onExit, commands }: Props): React.ReactNode {
           setWriteError(null);
         },
       }}
+      extraHints={
+        searchQuery === '' ? (
+          <ConfigurableShortcutHint
+            action="settings:sortByTokens"
+            context="Settings"
+            fallback="t"
+            description="sort by tokens"
+          />
+        ) : undefined
+      }
       renderItem={(skill, isFocused) => renderSkillItem(skill, isFocused)}
     />
   );

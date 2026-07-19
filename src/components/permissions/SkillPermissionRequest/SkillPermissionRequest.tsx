@@ -6,7 +6,7 @@ import { sanitizeToolNameForAnalytics } from '../../../services/analytics/metada
 import { SKILL_TOOL_NAME } from '@claude-code/builtin-tools/tools/SkillTool/constants.js';
 import { SkillTool } from '@claude-code/builtin-tools/tools/SkillTool/SkillTool.js';
 import { env } from '../../../utils/env.js';
-import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import { computeShowAlwaysAllowOptions } from '../../../utils/permissions/suppressAlwaysAllow.js';
 import { logUnaryEvent } from '../../../utils/unaryLogging.js';
 import { type UnaryEvent, usePermissionRequestLogging } from '../hooks.js';
 import { PermissionDialog } from '../PermissionDialog.js';
@@ -48,9 +48,12 @@ export function SkillPermissionRequest(props: PermissionRequestProps): React.Rea
   usePermissionRequestLogging(toolUseConfirm, unaryEvent);
 
   const originalCwd = getOriginalCwd();
-  // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
-  const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg;
+  // densable showAlwaysAllow: EYt + org ask ceiling + suppressAlwaysAllowRule + tool.suppressesAlwaysAllowRule
+  const showAlwaysAllowOptions = computeShowAlwaysAllowOptions({
+    tool: toolUseConfirm.tool,
+    input: toolUseConfirm.input as { [key: string]: unknown },
+    permissionResult: toolUseConfirm.permissionResult,
+  });
   const options = useMemo((): PermissionPromptOption<SkillOptionValue>[] => {
     const baseOptions: PermissionPromptOption<SkillOptionValue>[] = [
       {

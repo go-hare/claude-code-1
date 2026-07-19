@@ -25,8 +25,12 @@ mock.module('src/services/AgentSummary/agentSummary.js', () => ({
   startAgentSummarization: noop,
 }))
 
+// Mutable capture for official Cns suppressTelemetry (JXt-after-Jeo).
+const analyticsEvents: Array<{ name: string; data?: unknown }> = []
 mock.module('src/services/analytics/index.js', () => ({
-  logEvent: noop,
+  logEvent: (name: string, data?: unknown) => {
+    analyticsEvents.push({ name, data })
+  },
   logEventAsync: async () => {},
   stripProtoFields: (v: any) => v,
   attachAnalyticsSink: noop,
@@ -44,6 +48,8 @@ mock.module('src/Tool.js', () => ({
 }))
 
 // Spread real messages so sibling suites keep normalizeMessagesForAPI etc.
+// getLastAssistantMessage is overridable for finalizeAgentTool (JXt) tests.
+let lastAssistantOverride: any = null
 mock.module('src/utils/messages.ts', () => ({
   ...realMessages,
   extractTextContent: (content: any[]) =>
@@ -51,7 +57,14 @@ mock.module('src/utils/messages.ts', () => ({
       ?.filter?.((b: any) => b.type === 'text')
       ?.map?.((b: any) => b.text)
       ?.join('') ?? '',
-  getLastAssistantMessage: () => null,
+  getLastAssistantMessage: (msgs?: any[]) => {
+    if (lastAssistantOverride !== null) return lastAssistantOverride
+    // Prefer real implementation when available for other callers.
+    if (typeof realMessages.getLastAssistantMessage === 'function' && msgs) {
+      return realMessages.getLastAssistantMessage(msgs)
+    }
+    return null
+  },
   isEmptyMessageText: () => true,
 }))
 
@@ -124,7 +137,9 @@ mock.module('src/tools/AgentTool/AgentTool.tsx', () => ({
   default: {},
 }))
 
-const { countToolUses, getLastToolUseName } = await import('../agentToolUtils')
+const { countToolUses, getLastToolUseName, finalizeAgentTool } = await import(
+  '../agentToolUtils'
+)
 
 function makeAssistantMessage(content: any[]): any {
   return { type: 'assistant', message: { content } }
@@ -206,5 +221,96 @@ describe('getLastToolUseName', () => {
   test('handles message with null content', () => {
     const msg = { type: 'assistant', message: { content: null } } as any
     expect(getLastToolUseName(msg)).toBeUndefined()
+  })
+})
+
+describe('finalizeAgentTool suppressTelemetry (official JXt after Jeo)', () => {
+  const meta = {
+    prompt: 'p',
+    resolvedAgentModel: 'm',
+    isBuiltInAgent: true,
+    startTime: Date.now() - 10,
+    agentType: 'general-purpose',
+    isAsync: true,
+  }
+
+  test('emits tengu_agent_tool_completed when not suppressed', () => {
+    analyticsEvents.length = 0
+    lastAssistantOverride = {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'done' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      requestId: 'req-1',
+    }
+    const result = finalizeAgentTool(
+      [lastAssistantOverride],
+      'agent-1',
+      meta,
+    )
+    expect(result.agentId).toBe('agent-1')
+    expect(
+      analyticsEvents.some(e => e.name === 'tengu_agent_tool_completed'),
+    ).toBe(true)
+    expect(
+      analyticsEvents.some(e => e.name === 'tengu_cache_eviction_hint'),
+    ).toBe(true)
+    lastAssistantOverride = null
+  })
+
+  test('skips telemetry when suppressTelemetry (JXt true)', () => {
+    analyticsEvents.length = 0
+    lastAssistantOverride = {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'parked parent' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      requestId: 'req-2',
+    }
+    finalizeAgentTool([lastAssistantOverride], 'agent-2', meta, {
+      suppressTelemetry: true,
+    })
+    expect(
+      analyticsEvents.some(e => e.name === 'tengu_agent_tool_completed'),
+    ).toBe(false)
+    expect(
+      analyticsEvents.some(e => e.name === 'tengu_cache_eviction_hint'),
+    ).toBe(false)
+    lastAssistantOverride = null
+  })
+
+  test('source-scan: Jeo then JXt then finalize with suppressTelemetry', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs') as typeof import('fs')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('path') as typeof import('path')
+    const utils = fs.readFileSync(
+      path.join(import.meta.dir, '../agentToolUtils.ts'),
+      'utf8',
+    )
+    const tool = fs.readFileSync(
+      path.join(import.meta.dir, '../AgentTool.tsx'),
+      'utf8',
+    )
+    for (const [label, src] of [
+      ['agentToolUtils', utils],
+      ['AgentTool', tool],
+    ] as const) {
+      // Call-site marker (not JSDoc {suppressTelemetry:Z} comments).
+      const suppressIdx = src.indexOf('suppressTelemetry: stillHasAgentChildren')
+      expect(suppressIdx).toBeGreaterThanOrEqual(0)
+      const before = src.slice(0, suppressIdx)
+      const sweepIdx = before.lastIndexOf('sweepStaleKeepaliveReasons(')
+      const jxtIdx = before.lastIndexOf('hasLiveAgentKeepaliveChildren(')
+      const finalizeIdx = before.lastIndexOf('finalizeAgentTool(')
+      expect(sweepIdx).toBeGreaterThanOrEqual(0)
+      expect(jxtIdx).toBeGreaterThan(sweepIdx)
+      expect(finalizeIdx).toBeGreaterThan(jxtIdx)
+    }
+    // JXt must read root registry (set-snapshot), not forked getAppState alone.
+    expect(utils).toContain('readAppStateViaSet')
+    expect(tool).toMatch(/rootSetAppState\(prev\s*=>/)
   })
 })

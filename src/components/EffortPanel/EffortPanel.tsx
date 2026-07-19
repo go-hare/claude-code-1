@@ -132,15 +132,17 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
   const handleConfirm = React.useCallback(() => {
     if (done) return;
     setDone(true);
-    const outcome = computeConfirmOutcome(cursor, executeEffort);
+    // densable sLy: ultracode → xhigh + AppState.ultracode session flag
+    const outcome = computeConfirmOutcome(cursor, c => executeEffort(c, { model }));
     if (outcome.kind === 'apply' && outcome.effortUpdate) {
       setAppState(prev => ({
         ...prev,
         effortValue: outcome.effortUpdate!.value,
+        ultracode: outcome.effortUpdate!.ultracode === true,
       }));
     }
     onDone(outcome.message);
-  }, [cursor, done, onDone, setAppState]);
+  }, [cursor, done, model, onDone, setAppState]);
 
   const handleCancel = React.useCallback(() => {
     if (done) return;

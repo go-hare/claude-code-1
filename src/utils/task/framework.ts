@@ -14,6 +14,7 @@ import {
   type TaskType,
 } from '../../Task.js'
 import type { TaskState } from '../../tasks/types.js'
+import { getCommandQueue } from '../messageQueueManager.js'
 import { enqueuePendingNotification } from '../messageQueueManager.js'
 import { enqueueSdkEvent } from '../sdkEventQueue.js'
 import { getTaskOutputDelta, getTaskOutputPath } from './diskOutput.js'
@@ -84,16 +85,51 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
     // the panel sort stable; messages + diskLoaded preserve the viewed
     // transcript across the replace (the user's just-appended prompt lives
     // in messages and isn't on disk yet).
-    const merged =
-      existing && 'retain' in existing
-        ? {
+    // Official ekg merge: retain/startTime/diskLoaded/pendingMessages +
+    // keepaliveReasons/ownerAgentId/parentAgentId/spawnDepth so resume
+    // replace does not drop live Gge holds or adopt owner tree.
+    // Local also preserves messages (viewed transcript not yet on disk).
+    type EkgCarry = {
+      retain: boolean
+      startTime: number
+      diskLoaded?: boolean
+      pendingMessages?: unknown
+      messages?: unknown
+      keepaliveReasons?: Set<string>
+      ownerAgentId?: string
+      parentAgentId?: string
+      spawnDepth?: number
+      isObserver?: boolean
+    }
+    const prevTask = existing as EkgCarry | undefined
+    const merged: TaskState =
+      prevTask && 'retain' in existing
+        ? ({
             ...task,
-            retain: existing.retain,
-            startTime: existing.startTime,
-            messages: existing.messages,
-            diskLoaded: existing.diskLoaded,
-            pendingMessages: existing.pendingMessages,
-          }
+            retain: prevTask.retain,
+            startTime: prevTask.startTime,
+            ...(prevTask.messages !== undefined
+              ? { messages: prevTask.messages }
+              : {}),
+            diskLoaded: prevTask.diskLoaded,
+            pendingMessages: prevTask.pendingMessages as string[] | undefined,
+            ...(prevTask.keepaliveReasons !== undefined
+              ? { keepaliveReasons: prevTask.keepaliveReasons }
+              : {}),
+            ...(prevTask.ownerAgentId !== undefined
+              ? { ownerAgentId: prevTask.ownerAgentId }
+              : {}),
+            ...(prevTask.parentAgentId !== undefined
+              ? { parentAgentId: prevTask.parentAgentId }
+              : {}),
+            ...(prevTask.spawnDepth !== undefined
+              ? { spawnDepth: prevTask.spawnDepth }
+              : {}),
+            // Official ekg: ...s.isObserver!==void 0&&{isObserver:s.isObserver}
+            ...(prevTask.isObserver !== undefined
+              ? { isObserver: prevTask.isObserver }
+              : {}),
+          } as TaskState)
         : task
     return { ...prev, tasks: { ...prev.tasks, [task.id]: merged } }
   })
@@ -131,6 +167,16 @@ export function evictTerminalTask(
     if (!task) return prev
     if (!isTerminalTaskStatus(task.status)) return prev
     if (!task.notified) return prev
+    // Official zle/tB: non-empty keepaliveReasons block GC until detach.
+    if (
+      'keepaliveReasons' in task &&
+      (task as { keepaliveReasons?: Set<string> }).keepaliveReasons instanceof
+        Set &&
+      ((task as { keepaliveReasons?: Set<string> }).keepaliveReasons?.size ??
+        0) > 0
+    ) {
+      return prev
+    }
     // Panel grace period — blocks eviction until deadline passes.
     // 'retain' in task narrows to LocalAgentTaskState (the only type with
     // that field); evictAfter is optional so 'evictAfter' in task would
@@ -141,6 +187,246 @@ export function evictTerminalTask(
     const { [taskId]: _, ...remainingTasks } = prev.tasks
     return { ...prev, tasks: remainingTasks }
   })
+}
+
+/**
+ * Official Wge — read keepalive reason set (empty default).
+ * Only local_agent tasks carry keepaliveReasons (Wl guard on Gge/tB).
+ */
+export function getKeepaliveReasons(task: {
+  keepaliveReasons?: Set<string>
+}): Set<string> {
+  return task.keepaliveReasons ?? new Set()
+}
+
+/**
+ * Official Gge(owner, reason, registry) portable.
+ * Adds a keepalive reason on a local_agent owner so panel GC waits until
+ * the child (workflow/bash/monitor/agent) detaches via removeKeepaliveReason.
+ * No-op when owner missing or not a local_agent task.
+ */
+export function addKeepaliveReason(
+  ownerAgentId: string | undefined | null,
+  reason: string,
+  setAppState: SetAppState,
+): void {
+  if (!ownerAgentId || !reason) return
+  updateTaskState(ownerAgentId, setAppState, task => {
+    if (task.type !== 'local_agent') return task
+    const current = getKeepaliveReasons(
+      task as { keepaliveReasons?: Set<string> },
+    )
+    if (current.has(reason)) return task
+    return {
+      ...task,
+      keepaliveReasons: new Set(current).add(reason),
+    }
+  })
+}
+
+/**
+ * Official tB(owner, reason, registry) portable.
+ * Removes a keepalive reason. When the set becomes empty and the owner is
+ * terminal + not retained + no evictAfter yet, sets PANEL_GRACE_MS deadline
+ * (official Date.now()+_re with _re=30000).
+ */
+export function removeKeepaliveReason(
+  ownerAgentId: string | undefined | null,
+  reason: string,
+  setAppState: SetAppState,
+): void {
+  if (!ownerAgentId || !reason) return
+  updateTaskState(ownerAgentId, setAppState, task => {
+    if (task.type !== 'local_agent') return task
+    const agent = task as {
+      type: 'local_agent'
+      status: TaskStatus
+      retain?: boolean
+      evictAfter?: number
+      keepaliveReasons?: Set<string>
+    }
+    const current = getKeepaliveReasons(agent)
+    if (!current.has(reason)) return task
+    const next = new Set(current)
+    next.delete(reason)
+    const shouldScheduleEvict =
+      next.size === 0 &&
+      isTerminalTaskStatus(agent.status) &&
+      !agent.retain &&
+      agent.evictAfter === undefined
+    return {
+      ...task,
+      keepaliveReasons: next,
+      ...(shouldScheduleEvict
+        ? { evictAfter: Date.now() + PANEL_GRACE_MS }
+        : {}),
+    }
+  })
+}
+
+/** Official Gge/tB reason prefixes for child task types. */
+export function agentKeepaliveReason(taskId: string): string {
+  return `agent:${taskId}`
+}
+export function bashKeepaliveReason(taskId: string): string {
+  return `bash:${taskId}`
+}
+export function monitorKeepaliveReason(taskId: string): string {
+  return `monitor:${taskId}`
+}
+export function workflowKeepaliveReason(taskId: string): string {
+  return `workflow:${taskId}`
+}
+
+/**
+ * Official QYi(task, {park}) — panel eviction deadline.
+ * - retain → undefined (never auto-evict)
+ * - park && keepaliveReasons non-empty → undefined (held open by children)
+ * - else → Date.now() + PANEL_GRACE_MS (_re=30000)
+ */
+export function computePanelEvictAfter(
+  task: {
+    retain?: boolean
+    keepaliveReasons?: Set<string>
+  },
+  opts: { park: boolean },
+): number | undefined {
+  if (task.retain) return undefined
+  if (opts.park && (task.keepaliveReasons?.size ?? 0) > 0) return undefined
+  return Date.now() + PANEL_GRACE_MS
+}
+
+/**
+ * densable YC(task): completed + keepaliveReasons non-empty.
+ * Local also requires type===local_agent. BRt ownerBusy uses YC(owner)&&!pn().
+ */
+export function isParkedKeepaliveAgent(task: {
+  type?: string
+  status?: TaskStatus
+  keepaliveReasons?: Set<string>
+}): boolean {
+  return (
+    task.type === 'local_agent' &&
+    task.status === 'completed' &&
+    (task.keepaliveReasons?.size ?? 0) > 0
+  )
+}
+
+/**
+ * densable Yqe park pe — count `agent:` keepalive reasons on owner task.
+ * Gold: for (let He of Ce.keepaliveReasons) if(He.startsWith("agent:")) pe++
+ */
+export function countAgentKeepaliveChildren(
+  ownerAgentId: string | undefined | null,
+  getAppState: () => AppState,
+): number {
+  if (!ownerAgentId) return 0
+  const task = getAppState().tasks?.[ownerAgentId]
+  if (!task || task.type !== 'local_agent') return 0
+  const reasons = getKeepaliveReasons(
+    task as { keepaliveReasons?: Set<string> },
+  )
+  let pe = 0
+  for (const r of reasons) {
+    if (r.startsWith('agent:')) pe++
+  }
+  return pe
+}
+
+/**
+ * Official JXt(ownerId, registry): owner still holds any `agent:` keepalive.
+ * Used after Jeo to decide whether the finishing agent has live children.
+ */
+export function hasLiveAgentKeepaliveChildren(
+  ownerAgentId: string | undefined | null,
+  getAppState: () => AppState,
+): boolean {
+  return countAgentKeepaliveChildren(ownerAgentId, getAppState) > 0
+}
+
+/**
+ * densable Jr (pure status/JXt half): skip async_launched promote when the
+ * agent is already non-running and has no live agent: children.
+ * Gold full: Jr = Nt==="backgrounded" && !Zt && Vt!==void0 && Vt!=="running" && !JXt
+ * Caller supplies backgrounded && !Zt (or mid-bg isBackgrounded).
+ */
+export function isJrDeadBackgroundPromote(
+  status: TaskStatus | string | undefined,
+  hasLiveAgentChildren: boolean,
+): boolean {
+  return (
+    status !== undefined && status !== 'running' && !hasLiveAgentChildren
+  )
+}
+
+/**
+ * Official Jeo(ownerId, registry) — sweep stale keepalive holds on a local_agent.
+ *
+ * For each `agent:` / `workflow:` reason on the owner:
+ * - if a task-notification is still queued for that child+owner → keep
+ * - else if child missing OR child is local_agent/local_workflow and notified
+ *   → tB detach
+ *
+ * Called before DSu complete so a finishing parent drops children that already
+ * notified (or vanished) and no longer need panel parking.
+ */
+export function sweepStaleKeepaliveReasons(
+  ownerAgentId: string | undefined | null,
+  setAppState: SetAppState,
+): void {
+  if (!ownerAgentId) return
+
+  // Snapshot owner + queue outside update so we can call removeKeepaliveReason
+  // (which itself updates) without nested setAppState races.
+  let reasons: string[] = []
+  let ownerExists = false
+  setAppState(prev => {
+    const owner = prev.tasks?.[ownerAgentId]
+    if (owner && owner.type === 'local_agent') {
+      ownerExists = true
+      reasons = [...getKeepaliveReasons(owner as { keepaliveReasons?: Set<string> })]
+    }
+    return prev
+  })
+  if (!ownerExists || reasons.length === 0) return
+
+  const pendingChildIds = new Set<string>()
+  for (const cmd of getCommandQueue()) {
+    if (
+      cmd.mode === 'task-notification' &&
+      cmd.agentId === ownerAgentId &&
+      typeof cmd.taskId === 'string' &&
+      cmd.taskId.length > 0
+    ) {
+      pendingChildIds.add(cmd.taskId)
+    }
+  }
+
+  // Need a fresh tasks snapshot for child notified/missing checks.
+  let tasks: Record<string, TaskState> = {}
+  setAppState(prev => {
+    tasks = prev.tasks ?? {}
+    return prev
+  })
+
+  for (const reason of reasons) {
+    let childId: string | undefined
+    if (reason.startsWith('agent:')) childId = reason.slice('agent:'.length)
+    else if (reason.startsWith('workflow:'))
+      childId = reason.slice('workflow:'.length)
+    else continue
+
+    if (pendingChildIds.has(childId)) continue
+
+    const child = tasks[childId]
+    const shouldDetach =
+      !child ||
+      (child.type === 'local_agent' && child.notified) ||
+      (child.type === 'local_workflow' && child.notified)
+    if (shouldDetach) {
+      removeKeepaliveReason(ownerAgentId, reason, setAppState)
+    }
+  }
 }
 
 /**
@@ -238,6 +524,15 @@ export function applyTaskOffsetsAndEvictions(
       if (!fresh || !isTerminalTaskStatus(fresh.status) || !fresh.notified) {
         continue
       }
+      if (
+        'keepaliveReasons' in fresh &&
+        (fresh as { keepaliveReasons?: Set<string> }).keepaliveReasons
+          instanceof Set &&
+        ((fresh as { keepaliveReasons?: Set<string> }).keepaliveReasons
+          ?.size ?? 0) > 0
+      ) {
+        continue
+      }
       if ('retain' in fresh && (fresh.evictAfter ?? Infinity) > Date.now()) {
         continue
       }
@@ -300,6 +595,8 @@ function getStatusText(status: TaskStatus): string {
       return 'failed'
     case 'killed':
       return 'was stopped'
+    case 'paused':
+      return 'was paused'
     case 'running':
       return 'is running'
     case 'pending':

@@ -105,6 +105,9 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
   const options = useMemo(
     () =>
       powershellToolUseOptions({
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input as { [key: string]: unknown },
+        permissionResult: toolUseConfirm.permissionResult,
         suggestions:
           toolUseConfirm.permissionResult.behavior === 'ask' ? toolUseConfirm.permissionResult.suggestions : undefined,
         onRejectFeedbackChange: setRejectFeedback,

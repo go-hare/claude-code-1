@@ -16,10 +16,11 @@ import {
 
 export type { EffortLevel }
 
-// NOTE: 'ultracode' is NOT an effort level. It is a session-scoped multi-agent
-// orchestration opt-in injected by the harness (claude.ai/client) as a
-// system-reminder, orthogonal to the effort parameter. EffortLevel / EffortValue
-// must never include 'ultracode'; /effort only accepts the levels below.
+// NOTE: 'ultracode' is NOT an EffortLevel / EffortValue. densable session
+// flag AppState.ultracode + effortValue xhigh enables standing Workflow
+// orchestration (ultra_effort_* attachments). /effort ultracode is a command
+// alias that sets that pair — the effort parameter sent to the API is still
+// 'xhigh'.
 export const EFFORT_LEVELS = [
   'low',
   'medium',
@@ -101,15 +102,35 @@ export function parseEffortValue(value: unknown): EffortValue | undefined {
   if (typeof value === 'number' && isValidNumericEffort(value)) {
     return value
   }
+  // densable qlc — med → medium; jlc ultracode alias handled by callers via
+  // parseEffortUltracodeAlias (UBn) so API effort stays xhigh not 'ultracode'.
   const str = String(value).toLowerCase()
-  if (isEffortLevel(str)) {
-    return str
+  const aliased = str === 'med' ? 'medium' : str
+  if (isEffortLevel(aliased)) {
+    return aliased
   }
-  const numericValue = parseInt(str, 10)
+  const numericValue = parseInt(aliased, 10)
   if (!isNaN(numericValue) && isValidNumericEffort(numericValue)) {
     return numericValue
   }
   return undefined
+}
+
+/**
+ * densable XLr — true when the raw effortLevel string is the ultracode alias.
+ */
+export function isEffortUltracodeAlias(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'ultracode'
+}
+
+/**
+ * densable UBn — map ultracode effort alias → xhigh API level.
+ * Returns undefined for non-alias inputs (callers use parseEffortValue first).
+ */
+export function parseEffortUltracodeAlias(
+  value: unknown,
+): EffortValue | undefined {
+  return isEffortUltracodeAlias(value) ? 'xhigh' : undefined
 }
 
 /**
@@ -218,6 +239,137 @@ export function getDisplayedEffortLevel(
 }
 
 /**
+ * densable Dee — ultracode session active for ultra_effort attachments:
+ * AppState.ultracode && workflows feature on && resolved effort === xhigh.
+ */
+export function isUltraEffortSessionActive(
+  model: string,
+  appStateEffort: EffortValue | undefined,
+  ultracode: boolean | undefined,
+): boolean {
+  if (ultracode !== true) return false
+  try {
+    const { isWorkflowsFeatureEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./workflowDisableGate.js') as typeof import('./workflowDisableGate.js')
+    if (!isWorkflowsFeatureEnabled()) return false
+  } catch {
+    return false
+  }
+  return resolveAppliedEffort(model, appStateEffort) === 'xhigh'
+}
+
+/** densable Lxd */
+export const ULTRA_EFFORT_CONFIG = {
+  TURNS_BETWEEN_MAINTENANCE: 10,
+} as const
+
+export type UltraEffortEnterAttachment = {
+  type: 'ultra_effort_enter'
+  reminderType: 'full' | 'sparse'
+}
+
+export type UltraEffortExitAttachment = {
+  type: 'ultra_effort_exit'
+}
+
+export type UltraEffortAttachment =
+  | UltraEffortEnterAttachment
+  | UltraEffortExitAttachment
+
+/**
+ * densable zxd / A2y — user content that carries a tool_result block is a
+ * tool-result turn, not a human turn for maintenance counting.
+ */
+function contentHasToolResult(content: unknown): boolean {
+  return (
+    Array.isArray(content) &&
+    content.some(
+      block =>
+        typeof block === 'object' &&
+        block !== null &&
+        (block as { type?: unknown }).type === 'tool_result' &&
+        typeof (block as { tool_use_id?: unknown }).tool_use_id === 'string',
+    )
+  )
+}
+
+type UltraEffortScanMessage = {
+  type?: string
+  isMeta?: boolean
+  message?: { content?: unknown }
+  attachment?: { type?: string; reminderType?: string }
+}
+
+/**
+ * densable f2y — emit ultra_effort_enter (full / sparse) or ultra_effort_exit
+ * based on session ultracode active state and recent message history.
+ *
+ * - active && never entered → full enter
+ * - active && last was enter && ≥10 human turns since → sparse enter
+ * - !active && last was enter → exit
+ * - else → []
+ */
+export function getUltraEffortAttachments(
+  messages: UltraEffortScanMessage[] | undefined,
+  active: boolean,
+): UltraEffortAttachment[] {
+  let last: 'none' | 'enter' | 'exit' = 'none'
+  let humanTurns = 0
+  if (messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m === undefined) continue
+      if (m.type === 'attachment') {
+        const t = m.attachment?.type
+        if (t === 'ultra_effort_enter') {
+          last = 'enter'
+          break
+        }
+        if (t === 'ultra_effort_exit') {
+          last = 'exit'
+          break
+        }
+      } else if (
+        m.type === 'user' &&
+        !m.isMeta &&
+        !contentHasToolResult(m.message?.content)
+      ) {
+        humanTurns++
+      }
+    }
+  }
+
+  if (active) {
+    if (last !== 'enter') {
+      return [{ type: 'ultra_effort_enter', reminderType: 'full' }]
+    }
+    if (humanTurns >= ULTRA_EFFORT_CONFIG.TURNS_BETWEEN_MAINTENANCE) {
+      return [{ type: 'ultra_effort_enter', reminderType: 'sparse' }]
+    }
+    return []
+  }
+  if (last === 'enter') {
+    return [{ type: 'ultra_effort_exit' }]
+  }
+  return []
+}
+
+/** densable ultra_effort_enter / exit meta copy (messages.ts). */
+export function buildUltraEffortEnterMessage(
+  reminderType: 'full' | 'sparse',
+): string {
+  if (reminderType === 'full') {
+    return "Ultracode is on: optimize for the most exhaustive, correct answer — not the fastest or cheapest. Use the Workflow tool on every substantive task; token cost is not a constraint. See the Workflow tool's **Ultracode** section and quality patterns. Solo only on conversational/trivial turns."
+  }
+  return 'Ultracode is still on — use the Workflow tool; see its Ultracode section.'
+}
+
+export function buildUltraEffortExitMessage(): string {
+  return "Ultracode is off — the Workflow tool's standard opt-in rule applies again."
+}
+
+/**
  * Whether effort-related UI should be shown for the current model.
  *
  * OpenAI-compatible requests can carry explicit `reasoning_effort` even for
@@ -275,6 +427,29 @@ export function convertEffortValueToLevel(value: EffortValue): EffortLevel {
     return 'max'
   }
   return 'high'
+}
+
+/**
+ * densable t3 — resolveAppliedEffort (cme) then level string (NDe), default high.
+ */
+export function resolveEffortLevelForModel(
+  model: string,
+  appStateEffort: EffortValue | undefined,
+): EffortLevel {
+  const resolved = resolveAppliedEffort(model, appStateEffort) ?? 'high'
+  return convertEffortValueToLevel(resolved)
+}
+
+/**
+ * densable y$ — analytics `effort_level` when modelSupportsEffort (kk); else
+ * undefined (omit from event). Callers pass densable P_ effort when available.
+ */
+export function effortLevelForAnalytics(
+  model: string,
+  appStateEffort: EffortValue | undefined,
+): EffortLevel | undefined {
+  if (!modelSupportsEffort(model)) return undefined
+  return resolveEffortLevelForModel(model, appStateEffort)
 }
 
 /**

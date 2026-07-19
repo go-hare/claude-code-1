@@ -1,12 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
 import { getLastInteractionTime } from '../bootstrap/state.js'
 import { fetchPrStatus, type PrReviewState } from '../utils/ghPrStatus.js'
+import type { PrNeedsAuth } from '../utils/prStatusFooter.js'
 
 const POLL_INTERVAL_MS = 60_000
 const SLOW_GH_THRESHOLD_MS = 4_000
 const IDLE_STOP_MS = 60 * 60_000 // stop polling after 60 min idle
 
+/**
+ * densable PHa / SRb — local PR poll snapshot.
+ * `pr` is the open PR for this branch (null when none/unavailable).
+ * `needsAuth` is only set by harbor-style direct REST paths (tengu_harbor_prism);
+ * the legacy `gh pr view` path leaves it false (densable QAg).
+ */
 export type PrStatusState = {
+  pr: {
+    number: number
+    url: string
+    reviewState: PrReviewState
+    kind?: string
+  } | null
+  needsAuth: PrNeedsAuth
+  lastUpdated: number
+}
+
+/** @deprecated Prefer `.pr` — kept for callers that still read flat fields. */
+export type PrStatusFlat = {
   number: number | null
   url: string | null
   reviewState: PrReviewState | null
@@ -14,9 +33,8 @@ export type PrStatusState = {
 }
 
 const INITIAL_STATE: PrStatusState = {
-  number: null,
-  url: null,
-  reviewState: null,
+  pr: null,
+  needsAuth: false,
   lastUpdated: 0,
 }
 
@@ -63,15 +81,28 @@ export function usePrStatus(isLoading: boolean, enabled = true): PrStatusState {
       lastFetchRef.current = start
 
       setPrStatus(prev => {
-        const newNumber = result?.number ?? null
-        const newReviewState = result?.reviewState ?? null
-        if (prev.number === newNumber && prev.reviewState === newReviewState) {
+        const nextPr: PrStatusState['pr'] = result
+          ? {
+              number: result.number,
+              url: result.url,
+              reviewState: result.reviewState,
+            }
+          : null
+        // densable QAg path: failures are null, not needs-auth (harbor only).
+        const needsAuth: PrNeedsAuth = false
+        if (
+          prev.lastUpdated > 0 &&
+          prev.pr?.number === nextPr?.number &&
+          prev.pr?.url === nextPr?.url &&
+          prev.pr?.reviewState === nextPr?.reviewState &&
+          prev.pr?.kind === nextPr?.kind &&
+          prev.needsAuth === needsAuth
+        ) {
           return prev
         }
         return {
-          number: newNumber,
-          url: result?.url ?? null,
-          reviewState: newReviewState,
+          pr: nextPr,
+          needsAuth,
           lastUpdated: Date.now(),
         }
       })

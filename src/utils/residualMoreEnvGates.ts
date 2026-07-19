@@ -16,11 +16,7 @@ export function isClaudeApiSkillDisabled(
   return isEnvTruthy(env.CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL)
 }
 
-/**
- * Official CLAUDE_CODE_DISABLE_CLAUDE_CODE_SKILL — skip registerClaudeCodeSkill
- * (skill name: claude-code-docs). Does NOT gate the claude-code-guide agent.
- * GB tengu_birch_kettle further gates isEnabled on the skill.
- */
+/** Official CLAUDE_CODE_DISABLE_CLAUDE_CODE_SKILL — force-off claude-code-guide agent. */
 export function isClaudeCodeSkillDisabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -161,7 +157,9 @@ export function planGatewayModelsCacheWrite(input: {
           : typeof r.name === 'string'
             ? r.name
             : undefined
-      return display ? { id: r.id, display_name: display } : { id: r.id }
+      return display
+        ? { id: r.id, display_name: display }
+        : { id: r.id }
     })
     .filter((m): m is { id: string; display_name?: string } => m !== null)
   if (models.length === 0) return undefined
@@ -181,7 +179,8 @@ export async function fetchAndCacheGatewayModels(input?: {
   resolveAuthHeaders?: () => Record<string, string> | null | undefined
   mkdirp?: (dir: string) => void | Promise<void>
 }): Promise<
-  { ok: true; path: string; modelCount: number } | { ok: false; reason: string }
+  | { ok: true; path: string; modelCount: number }
+  | { ok: false; reason: string }
 > {
   const env = input?.env ?? process.env
   if (!shouldEnableGatewayModelDiscovery({ env, provider: input?.provider })) {
@@ -344,22 +343,14 @@ export function githubRepoGitUrl(
     : `git@github.com:${repo}.git`
 }
 
-/**
- * Official CLAUDE_CODE_SKIP_PROJECT_BACKFILL densable (env schema qnm).
- * Product Project/Local CLAUDE.md skip uses GB tengu_paper_halyard only —
- * no confirmed 2.1.207 consumer wiring this env into getClaudeMds/attachments.
- */
+/** Official SKIP_PROJECT_BACKFILL — skip Project/Local CLAUDE.md in getClaudeMds/attachments. */
 export function shouldSkipProjectBackfill(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return isEnvTruthy(env.CLAUDE_CODE_SKIP_PROJECT_BACKFILL)
 }
 
-/**
- * CLAUDE_CODE_SKIP_REPO_UPLOAD densable-only (2.1.207 env schema/export Wnm).
- * Official binary has no product consumer on createAndUploadGitBundle /
- * teleport — do not wire this into upload paths. Helper + unit tests only.
- */
+/** Official SKIP_REPO_UPLOAD — skip CCR git-bundle seed upload. */
 export function shouldSkipRepoUpload(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -522,8 +513,10 @@ export function buildMcpStdioTransportEnv(input: {
   sessionId: string
   serverEnv?: Readonly<Record<string, string>> | null
 }): Record<string, string> {
-  const { CLAUDE_CODE_CHILD_SESSION: _childSession, ...rest } =
-    input.baseEnv as Record<string, string | undefined>
+  const {
+    CLAUDE_CODE_CHILD_SESSION: _childSession,
+    ...rest
+  } = input.baseEnv as Record<string, string | undefined>
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(rest)) {
     if (v !== undefined) out[k] = v

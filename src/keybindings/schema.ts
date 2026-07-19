@@ -24,11 +24,18 @@ export const KEYBINDING_CONTEXTS = [
   // New contexts for keybindings migration
   'Attachments',
   'Footer',
+  'FormField',
+  'MessageActions',
   'MessageSelector',
   'DiffDialog',
+  // densable DiffPanel (file list in fullscreen diff)
+  'DiffPanel',
   'ModelPicker',
+  'EffortPanel',
   'Select',
   'Plugin',
+  // densable Scroll (scroll + selection:extend*/copy)
+  'Scroll',
 ] as const
 
 /**
@@ -51,11 +58,16 @@ export const KEYBINDING_CONTEXT_DESCRIPTIONS: Record<
   Tabs: 'When tab navigation is active',
   Attachments: 'When navigating image attachments in a select dialog',
   Footer: 'When footer indicators are focused',
+  FormField: 'When a form field (login/setup) is focused',
+  MessageActions: 'When message actions (cursor on a message) are active',
   MessageSelector: 'When the message selector (rewind) is open',
   DiffDialog: 'When the diff dialog is open',
+  DiffPanel: 'When the fullscreen diff file list is focused',
   ModelPicker: 'When the model picker is open',
+  EffortPanel: 'When the /effort panel is open',
   Select: 'When a select/list component is focused',
   Plugin: 'When the plugin dialog is open',
+  Scroll: 'When scroll/selection keybindings are active',
 }
 
 /**
@@ -73,6 +85,14 @@ export const KEYBINDING_ACTIONS = [
   'app:redraw',
   'app:globalSearch',
   'app:quickOpen',
+  // densable Global: open latest artifact / scroll diff file list
+  'app:openArtifact',
+  'app:diffFileListUp',
+  'app:diffFileListDown',
+  'app:toggleDiffNoiseFilter',
+  'app:toggleDiffPreSession',
+  'app:cycleDiffBase',
+  'app:toggleReplTab',
   // History navigation
   'history:search',
   'history:previous',
@@ -91,6 +111,11 @@ export const KEYBINDING_ACTIONS = [
   'chat:stash',
   'chat:imagePaste',
   'chat:messageActions',
+  // densable clear path: ctrl+l / cmd+k double-press → /clear
+  'chat:clearInput',
+  'chat:clearScreen',
+  // densable: meta+w toggles suppressWorkflowKeyword for ultracode trigger
+  'chat:workflowKeywordToggle',
   // Autocomplete menu actions
   'autocomplete:accept',
   'autocomplete:dismiss',
@@ -117,10 +142,34 @@ export const KEYBINDING_ACTIONS = [
   'historySearch:accept',
   'historySearch:cancel',
   'historySearch:execute',
+  // densable HistorySearch picker — ctrl+s cycles session/project/everywhere
+  'historySearch:cycleScope',
   // Task/agent actions
   'task:background',
   // Theme picker actions
   'theme:toggleSyntaxHighlighting',
+  // densable ThemePicker — ctrl+e edits focused custom theme
+  'theme:editCustom',
+  // Scroll context (ScrollKeybindingHandler)
+  'scroll:pageUp',
+  'scroll:pageDown',
+  'scroll:lineUp',
+  'scroll:lineDown',
+  'scroll:top',
+  'scroll:bottom',
+  'scroll:halfPageUp',
+  'scroll:halfPageDown',
+  'scroll:fullPageUp',
+  'scroll:fullPageDown',
+  // densable selection (Scroll context) — copy + keyboard extend
+  'selection:copy',
+  'selection:clear',
+  'selection:extendLeft',
+  'selection:extendRight',
+  'selection:extendUp',
+  'selection:extendDown',
+  'selection:extendLineStart',
+  'selection:extendLineEnd',
   // Help menu actions
   'help:dismiss',
   // Attachment navigation (select dialog image attachments)
@@ -154,6 +203,9 @@ export const KEYBINDING_ACTIONS = [
   'modelPicker:decreaseEffort',
   'modelPicker:increaseEffort',
   'modelPicker:toggle1M',
+  // densable ModelPicker — s applies focused model for this session only
+  // (Enter also persists as default when onSetDefault is provided)
+  'modelPicker:thisSessionOnly',
   // Effort panel actions (slash /effort without args)
   'effortPanel:decrease',
   'effortPanel:increase',
@@ -164,17 +216,29 @@ export const KEYBINDING_ACTIONS = [
   // Select component actions (distinct from confirm: to avoid collisions)
   'select:next',
   'select:previous',
+  // densable Select — page/home/end navigation
+  'select:pageUp',
+  'select:pageDown',
+  'select:first',
+  'select:last',
   'select:accept',
   'select:cancel',
   // Plugin dialog actions
   'plugin:toggle',
   'plugin:install',
+  // densable Plugin — favorite toggle (schema for user remaps; handler when UI supports)
+  'plugin:favorite',
   // Permission dialog actions
   'permission:toggleDebug',
   // Settings config panel actions
   'settings:search',
   'settings:retry',
   'settings:close',
+  // densable Settings — usage breakdown day/week + skills sort (schema for
+  // remaps; handlers when UsageBreakdown / densable skills settings ship)
+  'settings:periodDay',
+  'settings:periodWeek',
+  'settings:sortByTokens',
   'select:previousValue',
   'select:nextValue',
   // Voice actions

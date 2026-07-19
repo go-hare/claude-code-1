@@ -21,9 +21,10 @@ import {
   isSkillDescReframeEnabled,
 } from 'src/utils/systemPromptArms.js'
 
-// Skill listing gets 1% of the context window (in characters)
+// densable kpg / Bru / Ipg / Hpg / jqi defaults
 export const SKILL_BUDGET_CONTEXT_PERCENT = 0.01
 export const CHARS_PER_TOKEN = 4
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000
 export const DEFAULT_CHAR_BUDGET = 8_000 // Fallback: 1% of 200k × 4
 
 // Per-entry hard cap. The listing is for discovery only — the Skill tool loads
@@ -33,25 +34,59 @@ export const DEFAULT_CHAR_BUDGET = 8_000 // Fallback: 1% of 200k × 4
 // v2.1.117: raised from 250 → 1536 to allow richer skill descriptions.
 export const MAX_LISTING_DESC_CHARS = 1536
 
+/**
+ * densable KAt — per-entry description cap from settings.skillListingMaxDescChars.
+ */
+export function getMaxListingDescChars(): number {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getInitialSettings } =
+      require('src/utils/settings/settings.js') as typeof import('src/utils/settings/settings.js')
+    const n = getInitialSettings().skillListingMaxDescChars
+    if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
+      return Math.floor(n)
+    }
+  } catch {
+    // settings optional
+  }
+  return MAX_LISTING_DESC_CHARS
+}
+
+/**
+ * densable Dpg — listing budget fraction from settings.skillListingBudgetFraction.
+ */
+export function getSkillListingBudgetFraction(): number {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getInitialSettings } =
+      require('src/utils/settings/settings.js') as typeof import('src/utils/settings/settings.js')
+    const n = getInitialSettings().skillListingBudgetFraction
+    if (typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 1) {
+      return n
+    }
+  } catch {
+    // settings optional
+  }
+  return SKILL_BUDGET_CONTEXT_PERCENT
+}
+
+/** densable YAt — char budget for skill listing. */
 export function getCharBudget(contextWindowTokens?: number): number {
-  if (Number(process.env.SLASH_COMMAND_TOOL_CHAR_BUDGET)) {
-    return Number(process.env.SLASH_COMMAND_TOOL_CHAR_BUDGET)
+  const envBudget = Number(process.env.SLASH_COMMAND_TOOL_CHAR_BUDGET)
+  if (envBudget) {
+    return envBudget
   }
-  if (contextWindowTokens) {
-    return Math.floor(
-      contextWindowTokens * CHARS_PER_TOKEN * SKILL_BUDGET_CONTEXT_PERCENT,
-    )
-  }
-  return DEFAULT_CHAR_BUDGET
+  const fraction = getSkillListingBudgetFraction()
+  const tokens = contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS
+  return Math.max(1, Math.floor(tokens * CHARS_PER_TOKEN * fraction))
 }
 
 function getCommandDescription(cmd: Command): string {
   const desc = cmd.whenToUse
     ? `${cmd.description} - ${cmd.whenToUse}`
     : cmd.description
-  return desc.length > MAX_LISTING_DESC_CHARS
-    ? desc.slice(0, MAX_LISTING_DESC_CHARS - 1) + '\u2026'
-    : desc
+  const cap = getMaxListingDescChars()
+  return desc.length > cap ? desc.slice(0, cap - 1) + '\u2026' : desc
 }
 
 function formatCommandDescription(cmd: Command): string {
@@ -72,6 +107,48 @@ function formatCommandDescription(cmd: Command): string {
 
 const MIN_DESC_LENGTH = 20
 
+/**
+ * densable KOe name-only set for listing (Vqi). Best-effort — if settings
+ * unavailable, treat as empty (all full descriptions).
+ */
+function getNameOnlySkillNames(commands: Command[]): Set<string> {
+  const names = new Set<string>()
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { resolveSkillOverrideMode } =
+      require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getInitialSettings } =
+      require('src/utils/settings/settings.js') as typeof import('src/utils/settings/settings.js')
+    let skillOverrides:
+      | Readonly<
+          Record<
+            string,
+            import('src/utils/residualFinalEnvGates.js').SkillOverrideMode
+          >
+        >
+      | undefined
+    let settingsDisableBundledSkills: boolean | undefined
+    try {
+      const settings = getInitialSettings()
+      skillOverrides = settings.skillOverrides
+      settingsDisableBundledSkills = settings.disableBundledSkills
+    } catch {
+      // settings optional
+    }
+    for (const cmd of commands) {
+      const mode = resolveSkillOverrideMode(cmd, {
+        skillOverrides,
+        settingsDisableBundledSkills,
+      })
+      if (mode === 'name-only') names.add(cmd.name)
+    }
+  } catch {
+    // residual optional
+  }
+  return names
+}
+
 export function formatCommandsWithinBudget(
   commands: Command[],
   contextWindowTokens?: number,
@@ -79,11 +156,15 @@ export function formatCommandsWithinBudget(
   if (commands.length === 0) return ''
 
   const budget = getCharBudget(contextWindowTokens)
+  // densable Vqi: name-only skills always list as `- name` (no description).
+  const nameOnly = getNameOnlySkillNames(commands)
 
-  // Try full descriptions first
+  // Try full descriptions first (name-only forced to names-only entry)
   const fullEntries = commands.map(cmd => ({
     cmd,
-    full: formatCommandDescription(cmd),
+    full: nameOnly.has(cmd.name)
+      ? `- ${cmd.name}`
+      : formatCommandDescription(cmd),
   }))
   // join('\n') produces N-1 newlines for N entries
   const fullTotal =
@@ -94,19 +175,26 @@ export function formatCommandsWithinBudget(
     return fullEntries.map(e => e.full).join('\n')
   }
 
-  // Partition into bundled (never truncated) and rest
+  // densable Vqi over-budget warn (when not env-forced budget)
+  logForDebugging(
+    `Skill listing over budget: ${commands.length} skills, ${fullTotal} chars > ${budget} budget — descriptions will be truncated. Run /skills to disable some, or raise skillListingBudgetFraction in settings.`,
+  )
+
+  // Partition into bundled/name-only (never truncated) and rest
   const bundledIndices = new Set<number>()
   const restCommands: Command[] = []
   for (let i = 0; i < commands.length; i++) {
     const cmd = commands[i]!
-    if (cmd.type === 'prompt' && cmd.source === 'bundled') {
+    if (nameOnly.has(cmd.name)) {
+      bundledIndices.add(i) // treat as preserved (already name-only)
+    } else if (cmd.type === 'prompt' && cmd.source === 'bundled') {
       bundledIndices.add(i)
     } else {
       restCommands.push(cmd)
     }
   }
 
-  // Compute space used by bundled skills (full descriptions, always preserved)
+  // Compute space used by bundled/name-only skills (always preserved)
   const bundledChars = fullEntries.reduce(
     (sum, e, i) =>
       bundledIndices.has(i) ? sum + stringWidth(e.full) + 1 : sum,
@@ -126,7 +214,7 @@ export function formatCommandsWithinBudget(
   const maxDescLen = Math.floor(availableForDescs / restCommands.length)
 
   if (maxDescLen < MIN_DESC_LENGTH) {
-    // Extreme case: non-bundled go names-only, bundled keep descriptions
+    // Extreme case: non-bundled go names-only, bundled/name-only keep their form
     if (process.env.USER_TYPE === 'ant') {
       logEvent('tengu_skill_descriptions_truncated', {
         skill_count: commands.length,
@@ -167,7 +255,7 @@ export function formatCommandsWithinBudget(
   }
   return commands
     .map((cmd, i) => {
-      // Bundled skills always get full descriptions
+      // Bundled / name-only skills keep their precomputed entry
       if (bundledIndices.has(i)) return fullEntries[i]!.full
       const description = getCommandDescription(cmd)
       return `- ${cmd.name}: ${truncate(description, maxDescLen)}`

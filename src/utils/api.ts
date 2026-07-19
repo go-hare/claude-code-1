@@ -173,6 +173,8 @@ export async function toolToAPISchema(
         tools: options.tools,
         agents: options.agents,
         allowedAgentTypes: options.allowedAgentTypes,
+        // densable prompt({model}) for Edit lean/dense description.
+        model: options.model,
       }),
       input_schema,
     }

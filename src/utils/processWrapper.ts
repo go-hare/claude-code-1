@@ -12,6 +12,7 @@ import { accessSync, constants as fsConstants, statSync } from 'fs'
 import { isAbsolute, join } from 'path'
 import { isInBundledMode } from './bundledMode.js'
 import { logForDebugging } from './debug.js'
+import { backgroundServiceLabel } from './densableNamingGates.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 
 export const PROCESS_WRAPPER_ENV_KEY = 'CLAUDE_CODE_PROCESS_WRAPPER'
@@ -204,6 +205,13 @@ let cachedRaw: string | undefined
 let cachedResult: ProcessWrapperParseResult = EMPTY_RESULT
 
 /**
+ * densable Dhs — last CLAUDE_CODE_PROCESS_WRAPPER value seeded from settings.
+ * When env is empty or still equal to this, re-apply settings.policy/flag/user.
+ * A user/host-set env that differs is never overwritten.
+ */
+let lastSettingsSeededProcessWrapper: string | undefined
+
+/**
  * Official sUr — resolve PROCESS_WRAPPER from env with cache + log on new error.
  */
 export function resolveProcessWrapper(
@@ -262,6 +270,76 @@ export function getProcessWrapperRecord(
 export function resetProcessWrapperCache(): void {
   cachedRaw = undefined
   cachedResult = EMPTY_RESULT
+  lastSettingsSeededProcessWrapper = undefined
+}
+
+/**
+ * densable processWrapper source precedence: policy > flag > user (if enabled).
+ * Project/local ignored.
+ */
+export function pickProcessWrapperFromSources(
+  policy: string | undefined,
+  flag: string | undefined,
+  user: string | undefined,
+): string | undefined {
+  return [policy, flag, user].find(
+    (v): v is string => typeof v === 'string' && v !== '',
+  )
+}
+
+/**
+ * densable settings→env seed for processWrapper (policy > flag > user).
+ * Env takes precedence when set to a value not previously seeded by us.
+ * Call from managedEnv applySafe/applyConfig paths.
+ */
+export function seedProcessWrapperFromSettings(
+  env: NodeJS.ProcessEnv = process.env,
+  /**
+   * Inject sources for tests; production resolves policy/flag/user settings.
+   */
+  sources?: {
+    policy?: string
+    flag?: string
+    user?: string
+  },
+): void {
+  const current = env[PROCESS_WRAPPER_ENV_KEY]
+  if (current && current !== lastSettingsSeededProcessWrapper) {
+    // Host / user env wins — do not clobber.
+    return
+  }
+
+  let next: string | undefined
+  if (sources) {
+    next = pickProcessWrapperFromSources(
+      sources.policy,
+      sources.flag,
+      sources.user,
+    )
+  } else {
+    // Lazy require to avoid settings↔processWrapper import cycles in tests.
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { getSettingsForSource } =
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const { isSettingSourceEnabled } =
+      require('./settings/constants.js') as typeof import('./settings/constants.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    next = pickProcessWrapperFromSources(
+      getSettingsForSource('policySettings')?.processWrapper,
+      getSettingsForSource('flagSettings')?.processWrapper,
+      isSettingSourceEnabled('userSettings')
+        ? getSettingsForSource('userSettings')?.processWrapper
+        : undefined,
+    )
+  }
+  if (next !== undefined) {
+    env[PROCESS_WRAPPER_ENV_KEY] = next
+    lastSettingsSeededProcessWrapper = next
+    // Invalidate parse cache so next resolve sees the new raw value.
+    if (env === process.env) {
+      cachedRaw = undefined
+    }
+  }
 }
 
 /**
@@ -388,9 +466,12 @@ export function formatProcessWrapperStatusLines(
   const error = getProcessWrapperError(env)
   if (!record && !error) return []
 
+  // densable rb / tengu_amber_anchor — "daemon" vs "background service" noun.
+  const bgNoun = backgroundServiceLabel()
+
   if (error) {
     return [
-      `${error} — nothing will run unwrapped: new background sessions are refused unless a background service that validated an earlier value is still serving them (\`claude daemon status\` shows it)`,
+      `${error} — nothing will run unwrapped: new background sessions are refused unless a ${bgNoun} that validated an earlier value is still serving them (\`claude daemon status\` shows it)`,
     ]
   }
 
@@ -400,7 +481,7 @@ export function formatProcessWrapperStatusLines(
   ]
   if (!isProcessWrapperRunnable(env)) {
     lines.push(
-      `The launcher \`${launch.cmd}\` cannot run right now (deleted or not executable) — new background sessions are refused until it is restored; a background service that validated it earlier keeps serving its existing sessions (\`claude daemon status\`)`,
+      `The launcher \`${launch.cmd}\` cannot run right now (deleted or not executable) — new background sessions are refused until it is restored; a ${bgNoun} that validated it earlier keeps serving its existing sessions (\`claude daemon status\`)`,
     )
   }
   return lines

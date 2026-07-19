@@ -84,6 +84,13 @@ export function buildSystemInitMessage(inputs: SystemInitInputs): SDKMessage {
     })),
     uuid: randomUUID(),
   }
+  // densable kXd — protocol capabilities for SDK feature-detect (not version-sniff).
+  // interrupt_receipt_v1: interrupt control_response carries still_queued uuids.
+  // msg_lifecycle_v1: command lifecycle started/completed events.
+  ;(initMessage as Record<string, unknown>).capabilities = [
+    'interrupt_receipt_v1',
+    'msg_lifecycle_v1',
+  ]
   // Hidden from public SDK types — ant-only UDS messaging socket path
   if (feature('UDS_INBOX')) {
     /* eslint-disable @typescript-eslint/no-require-imports */

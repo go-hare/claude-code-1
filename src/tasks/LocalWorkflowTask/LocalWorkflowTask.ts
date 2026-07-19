@@ -3,12 +3,20 @@
 // dialog. Follows the DreamTask pattern: lifecycle + UI surfacing via
 // the existing task registry.
 
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import type { AppState } from '../../state/AppState.js'
 import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type { AgentId } from '../../types/ids.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { registerTask, updateTaskState } from '../../utils/task/framework.js'
+import {
+  addKeepaliveReason,
+  isParkedKeepaliveAgent,
+  registerTask,
+  removeKeepaliveReason,
+  updateTaskState,
+  workflowKeepaliveReason,
+} from '../../utils/task/framework.js'
 
 export type LocalWorkflowTaskState = TaskStateBase & {
   type: 'local_workflow'
@@ -26,17 +34,39 @@ export type LocalWorkflowTaskState = TaskStateBase & {
   error?: string
   /** Agent that spawned this task. Used for orphan cleanup. */
   agentId?: AgentId
+  /**
+   * Official ownerAgentId — parent local_agent for Gge/tB keepalive
+   * (`workflow:${taskId}`). Prefer this over agentId for detach.
+   */
+  ownerAgentId?: string
+  /** Official workflowRunId (ess / hDs adopt + resumeFromRunId). */
+  workflowRunId?: string
+  /** Official scriptPath (may equal workflowFile). */
+  scriptPath?: string
+  /** Official empty script body on ess stub. */
+  script?: string
+  /** Official empty prompt on ess stub. */
+  prompt?: string
   /** Abort controller for cancellation. */
   abortController?: AbortController
   /**
    * Pending action for a sub-agent within this workflow.
    * The workflow execution loop polls this field and acts on it.
+   * Official j6u aborts agentControllers Map; portable polls this field.
    */
   pendingAgentAction?: {
     kind: 'skip' | 'retry'
     agentId: AgentId
     requestedAt: number
   }
+}
+
+export { workflowKeepaliveReason }
+
+function resolveWorkflowOwner(
+  task: LocalWorkflowTaskState,
+): string | undefined {
+  return task.ownerAgentId ?? task.agentId
 }
 
 export function isLocalWorkflowTask(
@@ -59,10 +89,15 @@ export function registerLocalWorkflowTask(
     summary?: string
     toolUseId?: string
     agentId?: AgentId
+    /** Official ownerAgentId for Gge keepalive (defaults to agentId). */
+    ownerAgentId?: string
+    workflowRunId?: string
+    scriptPath?: string
     abortController?: AbortController
   },
 ): string {
   const id = generateTaskId('local_workflow')
+  const ownerAgentId = opts.ownerAgentId ?? opts.agentId
   const task: LocalWorkflowTaskState = {
     ...createTaskStateBase(
       id,
@@ -76,23 +111,81 @@ export function registerLocalWorkflowTask(
     workflowFile: opts.workflowFile,
     summary: opts.summary,
     agentId: opts.agentId,
+    ownerAgentId,
+    workflowRunId: opts.workflowRunId,
+    scriptPath: opts.scriptPath ?? opts.workflowFile,
     abortController: opts.abortController,
   }
   registerTask(task, setAppState)
+  // Official: if (y && !pn()) Gge(y, `workflow:${t}`, registry)
+  // pn() = !isInteractive → skip Gge in non-interactive/headless sessions.
+  if (ownerAgentId && !getIsNonInteractiveSession()) {
+    addKeepaliveReason(ownerAgentId, workflowKeepaliveReason(id), setAppState)
+  }
   return id
+}
+
+/**
+ * Official Hao owner-busy guard (mirrors BRt):
+ *   w = Wl(owner) && ((YC(owner) && !pn()) || owner.status === 'running')
+ *   if (!(firstNotify && w)) tB(owner, `workflow:${id}`)
+ * First-notify + busy owner keeps the KA hold so Jeo can later drop it
+ * only when the task-notification is drained / child is notified without queue.
+ */
+function maybeDetachWorkflowKeepalive(
+  owner: string | undefined,
+  taskId: string,
+  firstNotify: boolean,
+  setAppState: SetAppState,
+): void {
+  let ownerBusy = false
+  setAppState(prev => {
+    const o = owner ? prev.tasks?.[owner] : undefined
+    if (o && o.type === 'local_agent') {
+      const parked =
+        isParkedKeepaliveAgent(o) && !getIsNonInteractiveSession()
+      const running = o.status === 'running'
+      ownerBusy = parked || running
+    }
+    return prev
+  })
+  if (!(firstNotify && ownerBusy)) {
+    removeKeepaliveReason(owner, workflowKeepaliveReason(taskId), setAppState)
+  }
 }
 
 export function completeWorkflowTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
-  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => ({
-    ...task,
-    status: 'completed',
-    endTime: Date.now(),
-    notified: true,
-    abortController: undefined,
-  }))
+  let owner: string | undefined
+  // Official Hao `_` = first transition to notified (shouldEnqueue).
+  let firstNotify = false
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    owner = resolveWorkflowOwner(task)
+    if (task.notified) {
+      // Already notified (e.g. suppress / double complete) — still update
+      // terminal fields but firstNotify stays false → always tB below.
+      return {
+        ...task,
+        status: 'completed',
+        endTime: task.endTime ?? Date.now(),
+        abortController: undefined,
+        pendingAgentAction: undefined,
+      }
+    }
+    firstNotify = true
+    return {
+      ...task,
+      status: 'completed',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+      pendingAgentAction: undefined,
+    }
+  })
+  // Official Hao: if (!(p && _)) tB(owner, workflow:id) — not always-detach.
+  maybeDetachWorkflowKeepalive(owner, taskId, firstNotify, setAppState)
 }
 
 export function failWorkflowTask(
@@ -100,35 +193,108 @@ export function failWorkflowTask(
   setAppState: SetAppState,
   error?: string,
 ): void {
-  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => ({
-    ...task,
-    status: 'failed',
-    endTime: Date.now(),
-    notified: true,
-    abortController: undefined,
-    ...(error !== undefined ? { error } : {}),
-  }))
+  let owner: string | undefined
+  let firstNotify = false
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    owner = resolveWorkflowOwner(task)
+    if (task.notified) {
+      return {
+        ...task,
+        status: 'failed',
+        endTime: task.endTime ?? Date.now(),
+        abortController: undefined,
+        pendingAgentAction: undefined,
+        ...(error !== undefined ? { error } : {}),
+      }
+    }
+    firstNotify = true
+    return {
+      ...task,
+      status: 'failed',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+      pendingAgentAction: undefined,
+      ...(error !== undefined ? { error } : {}),
+    }
+  })
+  maybeDetachWorkflowKeepalive(owner, taskId, firstNotify, setAppState)
 }
 
 /**
- * Kill a running workflow task. Called from BackgroundTasksDialog
+ * Official zit / xao(..., "paused", {notified:!0}) portable.
+ *
+ * Only transitions from `running`. Aborts the controller, sets status
+ * `paused` + `notified: true` + `endTime`, clears abortController.
+ * Does NOT set evictAfter (official UE excludes paused from terminal eviction).
+ * On success, official tB(ownerAgentId, `workflow:${id}`) detaches keepalive.
+ *
+ * Called from CAo.checkpointAgents after abort(J0("background")), and from
+ * Workflow UI onPause. Returns true when the task was running and updated.
+ */
+export function pauseWorkflowTask(
+  taskId: string,
+  setAppState: SetAppState,
+): boolean {
+  let paused = false
+  let owner: string | undefined
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    if (task.status !== 'running') return task
+    paused = true
+    owner = resolveWorkflowOwner(task)
+    try {
+      task.abortController?.abort()
+    } catch {
+      /* ignore */
+    }
+    return {
+      ...task,
+      status: 'paused',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+      pendingAgentAction: undefined,
+    }
+  })
+  // Official zit: if (r) tB(r.ownerAgentId, `workflow:${e}`, t)
+  if (paused) {
+    removeKeepaliveReason(owner, workflowKeepaliveReason(taskId), setAppState)
+  }
+  return paused
+}
+
+/**
+ * Kill a running or paused workflow task. Called from BackgroundTasksDialog
  * via the feature-gated `killWorkflowTask` binding.
+ * Official bye: xao killed + tB(owner, workflow:id) + zS + lf stopped.
  */
 export function killWorkflowTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
+  let killed = false
+  let owner: string | undefined
   updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
-    if (task.status !== 'running') return task
-    task.abortController?.abort()
+    if (task.status !== 'running' && task.status !== 'paused') return task
+    killed = true
+    owner = resolveWorkflowOwner(task)
+    try {
+      task.abortController?.abort()
+    } catch {
+      /* ignore */
+    }
     return {
       ...task,
       status: 'killed',
       endTime: Date.now(),
       notified: true,
       abortController: undefined,
+      pendingAgentAction: undefined,
     }
   })
+  if (killed) {
+    removeKeepaliveReason(owner, workflowKeepaliveReason(taskId), setAppState)
+  }
 }
 
 /**

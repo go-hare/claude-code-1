@@ -1,7 +1,9 @@
 import { dirname, isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { modelSlugForGrowthbookKey } from 'src/utils/modelScopedGrowthbookKey.js'
 import { diagnosticTracker } from 'src/services/diagnosticTracking.js'
 import { clearDeliveredDiagnosticsForFile } from 'src/services/lsp/LSPDiagnosticRegistry.js'
 import { getLspServerManager } from 'src/services/lsp/manager.js'
@@ -26,6 +28,7 @@ import {
   suggestPathUnderCwd,
   writeTextContent,
 } from 'src/utils/file.js'
+import { fileStateContentMatches } from 'src/utils/fileStateCache.js'
 import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
@@ -40,6 +43,8 @@ import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
 import { logError } from 'src/utils/log.js'
 import { expandPath } from 'src/utils/path.js'
+import { coerceFileEditInput } from 'src/utils/toolInputCoerce.js'
+import { stripFileEditResultForStorage } from 'src/utils/toolResultStrip.js'
 import {
   checkWritePermissionForTool,
   matchingRuleForInput,
@@ -50,8 +55,10 @@ import { validateInputForSettingsFileEdit } from 'src/utils/settings/validateEdi
 import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.js'
 import {
   FILE_EDIT_TOOL_NAME,
+  FILE_NOT_READ_YET_ERROR,
   FILE_UNEXPECTEDLY_MODIFIED_ERROR,
 } from './constants.js'
+import { FileStateError } from 'src/utils/errors.js'
 import { getEditToolDescription } from './prompt.js'
 import {
   type FileEditInput,
@@ -68,7 +75,13 @@ import {
   userFacingName,
 } from './UI.js'
 import {
+  shouldRecoverStaleEditRead,
+  shouldSkipEditNotReadGuard,
+} from 'src/utils/editReadGuardSkip.js'
+import {
   areFileEditsInputsEquivalent,
+  classifyEditApplyOutcome,
+  editWouldHaveResultForAnalytics,
   findActualString,
   getPatchForEdit,
 } from './utils.js'
@@ -88,8 +101,9 @@ export const FileEditTool = buildTool({
   async description() {
     return 'A tool for editing files'
   },
-  async prompt() {
-    return getEditToolDescription()
+  async prompt({ model }) {
+    // densable jCg(model) — lean vs dense Edit description via simple-prompt gate.
+    return getEditToolDescription(model)
   },
   userFacingName,
   getToolUseSummary,
@@ -103,6 +117,10 @@ export const FileEditTool = buildTool({
   get outputSchema() {
     return outputSchema()
   },
+  // densable _yu — path/old_str/new_str/replace_name aliases before Zod.
+  coerceInput: coerceFileEditInput,
+  // densable stripForStorage — drop originalFile from older toolUseResult payloads.
+  stripForStorage: stripFileEditResultForStorage,
   toAutoClassifierInput(input) {
     // Official xXn/awu editRemovalVisibility: when on, project adds+removes
     // (capped by editRemovalCap) so the classifier sees what was deleted.
@@ -304,6 +322,45 @@ export const FileEditTool = buildTool({
 
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
 
+    // densable: missing/partial Read → tengu_edit_tool_not_read_hypothetical
+    // + errorCode 6 unless densable guardSkipped = !Ywi(model) && SKi(path,ctx).
+    if (!readTimestamp || readTimestamp.isPartialView) {
+      const model = toolUseContext.options.mainLoopModel
+      const modelBucket = modelSlugForGrowthbookKey(model)
+      const applyOutcome = classifyEditApplyOutcome(
+        fileContent,
+        old_string,
+        replace_all,
+      )
+      const wouldHaveResult = editWouldHaveResultForAnalytics(applyOutcome)
+      const guardSkipped = shouldSkipEditNotReadGuard({
+        absolutePath: fullFilePath,
+        model,
+        context: toolUseContext,
+      })
+      logEvent('tengu_edit_tool_not_read_hypothetical', {
+        wouldHaveResult:
+          wouldHaveResult as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        isPartialView: readTimestamp?.isPartialView === true,
+        isFilePathAbsolute: isAbsolute(file_path),
+        guardSkipped,
+        modelBucket:
+          modelBucket as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      if (!guardSkipped) {
+        return {
+          result: false,
+          behavior: 'ask',
+          message:
+            'File has not been read yet. Read it first before writing to it.',
+          meta: {
+            isFilePathAbsolute: String(isAbsolute(file_path)),
+          },
+          errorCode: 6,
+        }
+      }
+    }
+
     // Check if file exists and get its last modified time
     if (readTimestamp) {
       const lastWriteTime = getFileModificationTime(fullFilePath)
@@ -311,18 +368,39 @@ export const FileEditTool = buildTool({
         // Timestamp indicates modification, but on Windows timestamps can change
         // without content changes (cloud sync, antivirus, etc.). For full reads,
         // compare content as a fallback to avoid false positives.
+        // densable: offset default 1 — treat missing offset as full-from-start.
         const isFullRead =
-          readTimestamp.offset === undefined &&
+          (readTimestamp.offset === undefined || readTimestamp.offset <= 1) &&
           readTimestamp.limit === undefined
-        if (isFullRead && fileContent === readTimestamp.content) {
+        // densable ALe(r,t) — contentHash-aware equality (stripped large bodies)
+        if (isFullRead && fileStateContentMatches(readTimestamp, fileContent)) {
           // Content unchanged, safe to proceed
         } else {
-          return {
-            result: false,
-            behavior: 'ask',
-            message:
-              'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-            errorCode: 7,
+          // densable tengu_edit_tool_stale_read + recovered = applies && SKi
+          const applyOutcome = classifyEditApplyOutcome(
+            fileContent,
+            old_string,
+            replace_all,
+          )
+          const wouldHaveResult = editWouldHaveResultForAnalytics(applyOutcome)
+          const recovered = shouldRecoverStaleEditRead({
+            absolutePath: fullFilePath,
+            applyOutcome,
+            context: toolUseContext,
+          })
+          logEvent('tengu_edit_tool_stale_read', {
+            wouldHaveResult:
+              wouldHaveResult as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            recovered,
+          })
+          if (!recovered) {
+            return {
+              result: false,
+              behavior: 'ask',
+              message:
+                'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+              errorCode: 7,
+            }
           }
         }
       }
@@ -475,20 +553,26 @@ export const FileEditTool = buildTool({
     } = readFileForEdit(absoluteFilePath)
 
     if (fileExists) {
-      const lastWriteTime = getFileModificationTime(absoluteFilePath)
+      // densable nwg: distinct U5n (never read) vs q5n (stale) errors.
       const lastRead = readFileState.get(absoluteFilePath)
-      if (!lastRead || lastWriteTime > lastRead.timestamp) {
+      if (!lastRead) {
+        // densable gPe(U5n)
+        throw new FileStateError(FILE_NOT_READ_YET_ERROR)
+      }
+      const lastWriteTime = getFileModificationTime(absoluteFilePath)
+      if (lastWriteTime > lastRead.timestamp) {
         // Timestamp indicates modification, but on Windows timestamps can change
         // without content changes (cloud sync, antivirus, etc.). For full reads,
         // compare content as a fallback to avoid false positives.
         const isFullRead =
-          lastRead &&
-          lastRead.offset === undefined &&
-          lastRead.limit === undefined
+          (lastRead.offset ?? 1) <= 1 && lastRead.limit === undefined
+        // densable ALe — hash-aware so stripped FileState bodies still match
         const contentUnchanged =
-          isFullRead && originalFileContents === lastRead.content
+          isFullRead &&
+          fileStateContentMatches(lastRead, originalFileContents)
         if (!contentUnchanged) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          // densable gPe(q5n)
+          throw new FileStateError(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
         }
       }
     }

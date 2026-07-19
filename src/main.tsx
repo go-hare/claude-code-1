@@ -96,6 +96,7 @@ import {
   saveGlobalConfig,
 } from './utils/config.js';
 import { seedEarlyInput, stopCapturingEarlyInput } from './utils/earlyInput.js';
+import { setLaunchWarning } from './utils/launchWarning.js';
 import { getInitialEffortSetting, parseEffortValue } from './utils/effort.js';
 import {
   getInitialFastModeSetting,
@@ -114,6 +115,7 @@ import { jsonParse, writeFileSync_DEPRECATED } from './utils/slowOperations.js';
 import { computeInitialTeamContext } from './utils/swarm/reconnection.js';
 import { initializeWarningHandler } from './utils/warningHandler.js';
 import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js';
+import { isFocusViewActive, resolveVerboseFromViewMode, setSessionBriefTranscript } from './utils/focusView.js';
 
 // Lazy require to avoid circular dependency: teammate.ts -> AppState.tsx -> ... -> main.tsx
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -1274,6 +1276,11 @@ async function run(): Promise<CommanderCommand> {
       'Include partial message chunks as they arrive (only works with --print and --output-format=stream-json)',
       () => true,
     )
+    .option(
+      '--forward-subagent-text',
+      'Forward subagent text and thinking blocks as assistant/user messages with parent_tool_use_id set (only works with --print and --output-format=stream-json)',
+      () => true,
+    )
     .addOption(
       new Option(
         '--input-format <format>',
@@ -1614,6 +1621,7 @@ async function run(): Promise<CommanderCommand> {
         sessionId,
         includeHookEvents,
         includePartialMessages,
+        forwardSubagentText,
       } = options;
 
       if (options.prefill) {
@@ -1636,7 +1644,15 @@ async function run(): Promise<CommanderCommand> {
       // Extract these separately so they can be modified if needed
       let outputFormat = options.outputFormat;
       let inputFormat = options.inputFormat;
-      let verbose = options.verbose ?? getGlobalConfig().verbose;
+      // densable main residual:
+      //   q=zn().viewMode, j=J7t(), B=a.verbose??(q?q==="verbose":j?!1:config.verbose)
+      const viewSettings = getInitialSettings();
+      let verbose = resolveVerboseFromViewMode({
+        cliVerbose: options.verbose,
+        viewMode: viewSettings.viewMode,
+        briefTranscript: viewSettings.briefTranscript,
+        configVerbose: getGlobalConfig().verbose,
+      });
       let print = options.print;
       const init = options.init ?? false;
       const initOnly = options.initOnly ?? false;
@@ -2352,6 +2368,16 @@ async function run(): Promise<CommanderCommand> {
       // This await replaces blocking existsSync/statSync calls that were already in
       // the startup path. Wall-clock time is unchanged; we just yield to the event
       // loop during the fs I/O instead of blocking it. See #19661.
+      // Official MDf: apply CLAUDE_BG_MEMORY_TOGGLED_OFF before permission setup
+      // so isAutoMemoryEnabled() sees the session flag for this bg fork.
+      if (process.env.CLAUDE_BG_MEMORY_TOGGLED_OFF === '1' && process.env.CLAUDE_CODE_SESSION_KIND === 'bg') {
+        try {
+          const { setMemoryToggledOff } = await import('./bootstrap/state.js');
+          setMemoryToggledOff(true);
+        } catch {
+          // ignore
+        }
+      }
       const initResult = await initializeToolPermissionContext({
         allowedToolsCli: allowedTools,
         disallowedToolsCli: disallowedTools,
@@ -2359,6 +2385,8 @@ async function run(): Promise<CommanderCommand> {
         permissionMode,
         allowDangerouslySkipPermissions,
         addDirs: addDir,
+        // Official ZKb: CLAUDE_BG_SESSION_PERMISSION_RULES applied inside init.
+        bgSessionPermissionRules: undefined,
       });
       let toolPermissionContext = initResult.toolPermissionContext;
       const { warnings, dangerousPermissions, overlyBroadBashPermissions } = initResult;
@@ -2459,6 +2487,14 @@ async function run(): Promise<CommanderCommand> {
       if (effectiveIncludePartialMessages) {
         if (!isNonInteractiveSession || outputFormat !== 'stream-json') {
           writeToStderr(`Error: --include-partial-messages requires --print and --output-format=stream-json.`);
+          process.exit(1);
+        }
+      }
+
+      // Official 2.1.211: --forward-subagent-text requires print + stream-json
+      if (forwardSubagentText) {
+        if (!isNonInteractiveSession || outputFormat !== 'stream-json') {
+          writeToStderr(`Error: --forward-subagent-text requires --print and --output-format=stream-json.`);
           process.exit(1);
         }
       }
@@ -3513,6 +3549,7 @@ async function run(): Promise<CommanderCommand> {
             sdkUrl,
             replayUserMessages: effectiveReplayUserMessages,
             includePartialMessages: effectiveIncludePartialMessages,
+            forwardSubagentText: Boolean(forwardSubagentText),
             forkSession: options.forkSession || false,
             replyOnResume: options.replyOnResume || false,
             resumeSessionAt: options.resumeSessionAt || undefined,
@@ -3598,8 +3635,14 @@ async function run(): Promise<CommanderCommand> {
       const initialState: AppState = {
         settings: getInitialSettings(),
         tasks: {},
+        // densable taskDecorations — filled by useSubagentStatusLine.
+        taskDecorations: {},
+        // densable sendMessagePins — name-keyed SendMessage pin disambiguation.
+        sendMessagePins: {},
         agentNameRegistry: new Map(),
         verbose: verbose ?? getGlobalConfig().verbose ?? false,
+        // densable showMessageTimestamps — silk_hinge-gated UI stamps.
+        showMessageTimestamps: getGlobalConfig().showMessageTimestamps ?? false,
         mainLoopModel: initialMainLoopModel,
         mainLoopModelForSession: null,
         isBriefOnly: initialIsBriefOnly,
@@ -3652,11 +3695,45 @@ async function run(): Promise<CommanderCommand> {
         replBridgeSessionId: undefined,
         replBridgeError: undefined,
         replBridgeInitialName: remoteControlName,
+        // Official P2t field — project/session grouping for RC + left-arrow rit.
+        replBridgeSessionGroupingId: undefined,
         showRemoteCallout: false,
         notifications: {
           current: null,
           queue: initialNotifications,
+          pinned: [],
         },
+        // densable footerLinks — regex badges + keyed pills (empty until scan/PR).
+        footerLinks: [],
+        // densable prStatus / prNeedsAuth — synced from usePrStatus in footer.
+        prStatus: null,
+        prNeedsAuth: false,
+        // densable idleTeammatesExpanded — G7 idle_summary collapse (cIa=3).
+        idleTeammatesExpanded: false,
+        // densable frameUrls residual (fuo/a7u) — empty until artifact tool results.
+        frameUrls: {},
+        frameNavPath: null,
+        frameExpanded: false,
+        artifactReadVersions: {},
+        artifactRefs: [],
+        // densable panelFileView / cacheBreakerPhrase residual.
+        panelFileView: null,
+        cacheBreakerPhrase: undefined,
+        // densable Xat residual — seed autoCompactWindow / briefTranscript from settings.
+        // densable: briefTranscript: B ? false : j  (verbose wins over J7t focus seed)
+        autoCompactWindow: getInitialSettings().autoCompactWindow,
+        briefTranscript: (() => {
+          if (verbose) {
+            setSessionBriefTranscript(false);
+            return false;
+          }
+          const s = getInitialSettings();
+          const j = isFocusViewActive(s.viewMode, s.briefTranscript);
+          setSessionBriefTranscript(j);
+          return j;
+        })(),
+        // densable DiffPanel hold — false until DiffDialog mounts.
+        diffPanelVisible: false,
         elicitation: {
           queue: [],
         },
@@ -4576,6 +4653,18 @@ async function run(): Promise<CommanderCommand> {
             );
           }
         }
+        // densable Tje — sticky launch-prompt-warning (pinned footer), independent of LODESTONE banner
+        if (options.deepLinkOrigin && options.prefill) {
+          setLaunchWarning({
+            type: 'deep-link',
+            prefillLength: options.prefill.length,
+          });
+        } else if (options.prefill) {
+          setLaunchWarning({
+            type: 'prefill',
+            prefillLength: options.prefill.length,
+          });
+        }
         const initialMessages = deepLinkBanner
           ? [deepLinkBanner, ...hookMessages]
           : hookMessages.length > 0
@@ -4605,7 +4694,15 @@ async function run(): Promise<CommanderCommand> {
             process.stdin.ref();
           }
           const { openAgentsViaLeftArrow } = await import('./cli/bg/leftArrowAgents.js');
-          const handoff = await openAgentsViaLeftArrow(replResult.messages);
+          const handoff = await openAgentsViaLeftArrow(replResult.messages, {
+            via: replResult.via,
+            partialText: replResult.partialText,
+            boundaryUuid: replResult.boundaryUuid,
+            agentsCount: replResult.agentsCount,
+            checkpoint: replResult.checkpoint,
+            sessionPermissionRules: replResult.sessionPermissionRules,
+            memoryToggledOff: replResult.memoryToggledOff,
+          });
           const { renderAgentView } = await import('./screens/AgentView.js');
           if (!handoff.ok) {
             process.stderr.write(`${handoff.error}\n`);
@@ -4620,6 +4717,12 @@ async function run(): Promise<CommanderCommand> {
               restoreSessionId: handoff.short,
             });
           }
+          // Official Sj4/bg-leftarrow-mounted: after FleetView returns (Esc/q/Ctrl+C×2),
+          // gracefulShutdown + process.exit — do NOT fall through with a bare event
+          // loop (blank terminal + hanging cursor after alt-screen unmount).
+          await gracefulShutdown(0);
+          // eslint-disable-next-line custom-rules/no-process-exit
+          process.exit(0);
         }
       }
     })

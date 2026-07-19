@@ -3,12 +3,14 @@ import { randomUUID } from 'crypto'
 import { setPromptId } from 'src/bootstrap/state.js'
 import type {
   AttachmentMessage,
+  MessageOrigin,
   SystemMessage,
   UserMessage,
 } from 'src/types/message.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { PermissionMode } from '../../types/permissions.js'
 import { createUserMessage } from '../messages.js'
+import { applyOriginContentWrap } from '../originContentWrap.js'
 import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js'
 import { startInteractionSpan } from '../telemetry/sessionTracing.js'
 import {
@@ -24,6 +26,15 @@ export function processTextPrompt(
   uuid?: string,
   permissionMode?: PermissionMode,
   isMeta?: boolean,
+  /**
+   * densable promptSource (OXd) — stamped onto the UserMessage via Nr.
+   * Never sent to the model; behavior for wakeup/attachment consumers.
+   */
+  promptSource?: string,
+  /**
+   * densable origin — stamped via Nr then Fws content wrap for peer/observer.
+   */
+  origin?: MessageOrigin | { kind?: string; from?: string },
 ): {
   messages: (UserMessage | AttachmentMessage | SystemMessage)[]
   shouldQuery: boolean
@@ -78,7 +89,14 @@ export function processTextPrompt(
       imagePasteIds: imagePasteIds.length > 0 ? imagePasteIds : undefined,
       permissionMode,
       isMeta: isMeta || undefined,
+      promptSource,
+      origin: origin as MessageOrigin | undefined,
     })
+    // densable Fws after Nr when origin present (object form only;
+    // MessageOrigin is loosely string in model-provider).
+    if (origin && typeof origin === 'object') {
+      applyOriginContentWrap(userMessage, origin)
+    }
 
     return {
       messages: [userMessage, ...attachmentMessages],
@@ -91,7 +109,12 @@ export function processTextPrompt(
     uuid,
     permissionMode,
     isMeta: isMeta || undefined,
+    promptSource,
+    origin: origin as MessageOrigin | undefined,
   })
+  if (origin && typeof origin === 'object') {
+    applyOriginContentWrap(userMessage, origin)
+  }
 
   return {
     messages: [userMessage, ...attachmentMessages],

@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { Task, TaskType } from './Task.js'
 import { DreamTask } from './tasks/DreamTask/DreamTask.js'
+import { InProcessTeammateTask } from './tasks/InProcessTeammateTask/InProcessTeammateTask.js'
 import { LocalAgentTask } from './tasks/LocalAgentTask/LocalAgentTask.js'
 import { LocalShellTask } from './tasks/LocalShellTask/LocalShellTask.js'
 import { RemoteAgentTask } from './tasks/RemoteAgentTask/RemoteAgentTask.js'
@@ -16,7 +17,7 @@ const MonitorMcpTask: Task | null = feature('MONITOR_TOOL')
 
 /**
  * Get all tasks.
- * Mirrors the pattern from tools.ts
+ * Mirrors the pattern from tools.ts / densable Mzg (includes InProcessTeammateTask).
  * Note: Returns array inline to avoid circular dependency issues with top-level const
  */
 export function getAllTasks(): Task[] {
@@ -25,6 +26,8 @@ export function getAllTasks(): Task[] {
     LocalAgentTask,
     RemoteAgentTask,
     DreamTask,
+    // densable DGr / Mzg — required so Elo-resolved teammate stops can kill()
+    InProcessTeammateTask,
   ]
   if (LocalWorkflowTask) tasks.push(LocalWorkflowTask)
   if (MonitorMcpTask) tasks.push(MonitorMcpTask)

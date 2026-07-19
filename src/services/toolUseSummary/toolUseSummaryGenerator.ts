@@ -72,7 +72,8 @@ export async function generateToolUseSummary({
       signal,
       options: {
         querySource: 'tool_use_summary_generation',
-        enablePromptCaching: true,
+        // densable lxu/g6: enablePromptCaching:!1 (label gen must not pin cache)
+        enablePromptCaching: false,
         agents: [],
         isNonInteractiveSession,
         hasAppendSystemPrompt: false,

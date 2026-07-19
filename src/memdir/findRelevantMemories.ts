@@ -5,6 +5,7 @@ import { getDefaultSonnetModel } from '../utils/model/model.js'
 import { sideQuery } from '../utils/sideQuery.js'
 import type { LangfuseSpan } from '../services/langfuse/index.js'
 import { jsonParse } from '../utils/slowOperations.js'
+import { stripOuterMarkdownFences } from '../utils/stripFencedCode.js'
 import {
   formatMemoryManifest,
   type MemoryHeader,
@@ -132,7 +133,10 @@ async function selectRelevantMemories(
       return []
     }
 
-    const parsed: { selected_memories: string[] } = jsonParse(textBlock.text)
+    // densable r2y: Ut(eee(u.text)) before selected_memories filter
+    const parsed: { selected_memories: string[] } = jsonParse(
+      stripOuterMarkdownFences(textBlock.text),
+    )
     return parsed.selected_memories.filter(f => validFilenames.has(f))
   } catch (e) {
     if (signal.aborted) {

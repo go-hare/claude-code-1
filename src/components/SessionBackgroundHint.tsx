@@ -3,13 +3,11 @@ import * as React from 'react';
 import { useCallback, useState } from 'react';
 import { useDoublePress } from '../hooks/useDoublePress.js';
 import { Box, Text } from '@anthropic/ink';
-import { useKeybinding } from '../keybindings/useKeybinding.js';
-import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
+import { useTaskBackgroundKeybinding } from '../keybindings/useTaskBackgroundKeybinding.js';
 import { useAppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
 import { backgroundAll, hasForegroundTasks } from '../tasks/LocalShellTask/LocalShellTask.js';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { isBgSession } from '../utils/concurrentSessions.js';
-import { env } from '../utils/env.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { isBackgroundTasksDisabled } from '../utils/residualFinalEnvGates.js';
 import { KeyboardShortcutHint } from '@anthropic/ink';
@@ -26,6 +24,9 @@ type Props = {
  * Only activates when:
  * 1. isLoading is true (a query is in progress)
  * 2. No foreground tasks (bash/agent) are running (those take priority for Ctrl+B)
+ *
+ * densable tpr: cohesion gate may hide the hint when the shortcut is unbound,
+ * and prefers ctrl+x ctrl+b display when defaults are intact.
  */
 export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props): React.ReactElement | null {
   const setAppState = useSetAppState();
@@ -69,24 +70,20 @@ export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props)
   // Only eat ctrl+b when there's something to background. Without this gate
   // the binding double-fires with readline backward-char at an idle prompt.
   const hasForeground = useAppState(hasForegroundTasks);
-  useKeybinding('task:background', handleBackground, {
-    context: 'Task',
+  const { cohesionFixes, displayShortcut } = useTaskBackgroundKeybinding({
+    handler: handleBackground,
     isActive: hasForeground || (sessionBgEnabled && isLoading),
   });
 
-  // Get the configured shortcut for task:background
-  const baseShortcut = useShortcutDisplay('task:background', 'Task', 'ctrl+b');
-  // In tmux, ctrl+b is the prefix key, so users need to press it twice to send ctrl+b
-  const shortcut = env.terminal === 'tmux' && baseShortcut === 'ctrl+b' ? 'ctrl+b ctrl+b' : baseShortcut;
-
-  if (!isLoading || !showSessionHint) {
+  // densable: hide when cohesion on and shortcut unbound (empty display)
+  if (!isLoading || !showSessionHint || (cohesionFixes && displayShortcut === '')) {
     return null;
   }
 
   return (
     <Box paddingLeft={2}>
       <Text dimColor>
-        <KeyboardShortcutHint shortcut={shortcut} action="background" />
+        <KeyboardShortcutHint shortcut={displayShortcut} action="background" />
       </Text>
     </Box>
   );

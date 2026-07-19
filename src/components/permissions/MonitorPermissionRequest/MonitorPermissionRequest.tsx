@@ -2,7 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import { Box, Text, useTheme } from '@anthropic/ink';
 import { getTheme } from '../../../utils/theme.js';
 import { env } from '../../../utils/env.js';
-import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import { computeShowAlwaysAllowOptions } from '../../../utils/permissions/suppressAlwaysAllow.js';
 import { truncateToLines } from '../../../utils/stringUtils.js';
 import { logUnaryEvent } from '../../../utils/unaryLogging.js';
 import { PermissionDialog } from '../PermissionDialog.js';
@@ -31,9 +31,16 @@ export function MonitorPermissionRequest({
     description: string;
   };
 
-  // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
-  const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
-  const showAlwaysAllowOptions = useMemo(() => shouldShowAlwaysAllowOptions() && !isAskCappedByOrg, [isAskCappedByOrg]);
+  // densable showAlwaysAllow: EYt + org ask ceiling + suppressAlwaysAllowRule + tool.suppressesAlwaysAllowRule
+  const showAlwaysAllowOptions = useMemo(
+    () =>
+      computeShowAlwaysAllowOptions({
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input as { [key: string]: unknown },
+        permissionResult: toolUseConfirm.permissionResult,
+      }),
+    [toolUseConfirm.tool, toolUseConfirm.input, toolUseConfirm.permissionResult],
+  );
 
   const options: PermissionPromptOption<OptionValue>[] = useMemo(() => {
     const opts: PermissionPromptOption<OptionValue>[] = [

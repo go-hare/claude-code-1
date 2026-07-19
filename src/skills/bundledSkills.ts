@@ -18,6 +18,8 @@ export type BundledSkillDefinition = {
   aliases?: string[]
   whenToUse?: string
   argumentHint?: string
+  /** densable getArgumentCompletions — optional command-arg typeahead for skill args. */
+  getArgumentCompletions?: Command['getArgumentCompletions']
   allowedTools?: string[]
   model?: string
   disableModelInvocation?: boolean
@@ -82,6 +84,7 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     hasUserSpecifiedDescription: true,
     allowedTools: definition.allowedTools ?? [],
     argumentHint: definition.argumentHint,
+    getArgumentCompletions: definition.getArgumentCompletions,
     whenToUse: definition.whenToUse,
     model: definition.model,
     disableModelInvocation: definition.disableModelInvocation ?? false,

@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import stripAnsi from 'strip-ansi';
 import { Messages } from '../components/Messages.js';
-import { KeybindingProvider } from '../keybindings/KeybindingContext.js';
+import { KeybindingProvider, type PreDispatchHandler } from '../keybindings/KeybindingContext.js';
 import { loadKeybindingsSyncWithWarnings } from '../keybindings/loadUserBindings.js';
 import type { KeybindingContextName } from '../keybindings/types.js';
 import { AppStateProvider } from '../state/AppState.js';
@@ -18,6 +18,7 @@ function StaticKeybindingProvider({ children }: { children: React.ReactNode }): 
   const { bindings } = loadKeybindingsSyncWithWarnings();
   const pendingChordRef = useRef(null);
   const handlerRegistryRef = useRef(new Map());
+  const preDispatchRef = useRef(new Set<PreDispatchHandler>());
   const activeContexts = useRef(new Set<KeybindingContextName>()).current;
 
   return (
@@ -30,6 +31,7 @@ function StaticKeybindingProvider({ children }: { children: React.ReactNode }): 
       registerActiveContext={() => {}}
       unregisterActiveContext={() => {}}
       handlerRegistryRef={handlerRegistryRef}
+      preDispatchRef={preDispatchRef}
     >
       {children}
     </KeybindingProvider>

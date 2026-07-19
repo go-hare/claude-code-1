@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { Permutations } from 'src/types/utils.js'
 import { getSessionId } from '../bootstrap/state.js'
@@ -55,9 +54,68 @@ const commandQueue: QueuedCommand[] = []
 let snapshot: readonly QueuedCommand[] = Object.freeze([])
 const queueChanged = createSignal()
 
+/**
+ * densable cancel-pending set (vrg `n`, cap 256 / FIFO drop).
+ * markCancelPending when cancel_async_message misses the queue; drain
+ * consumeCancelPending drops those uuids before notify started.
+ */
+const cancelPending = new Set<string>()
+const CANCEL_PENDING_CAP = 256
+
+/**
+ * densable fold-in-flight uuid set (vrg `l` via register/unregisterFoldInFlight).
+ * cancel_async_message: if isFoldInFlight(uuid), skip queue remove (cancelled:false)
+ * and do not mark pending — fold path owns cancellation granularity.
+ */
+const foldInFlight = new Set<string>()
+
 function notifySubscribers(): void {
   snapshot = Object.freeze([...commandQueue])
   queueChanged.emit()
+}
+
+/** densable I7c / markCancelPending — stamp cancel race for not-yet-dequeued. */
+export function markCancelPending(uuid: string): void {
+  if (cancelPending.delete(uuid)) {
+    cancelPending.add(uuid)
+    return
+  }
+  if (cancelPending.size >= CANCEL_PENDING_CAP) {
+    const oldest = cancelPending.values().next().value
+    if (oldest !== undefined) cancelPending.delete(oldest)
+  }
+  cancelPending.add(uuid)
+}
+
+/**
+ * densable zzn / consumeCancelPending — true once if pending cancel was set.
+ * Clears the stamp (also used at end-of-turn to drop leftover pending).
+ */
+export function consumeCancelPending(uuid: string): boolean {
+  return cancelPending.delete(uuid)
+}
+
+/** densable q4i / isFoldInFlight */
+export function isFoldInFlight(uuid: string): boolean {
+  return foldInFlight.has(uuid)
+}
+
+/** densable registerFoldInFlight — uuids of commands in a REPL fold batch. */
+export function registerFoldInFlight(
+  commands: ReadonlyArray<{ uuid?: string }>,
+): void {
+  for (const cmd of commands) {
+    if (cmd.uuid !== undefined) foldInFlight.add(cmd.uuid)
+  }
+}
+
+/** densable unregisterFoldInFlight */
+export function unregisterFoldInFlight(
+  commands: ReadonlyArray<{ uuid?: string }>,
+): void {
+  for (const cmd of commands) {
+    if (cmd.uuid !== undefined) foldInFlight.delete(cmd.uuid)
+  }
 }
 
 // ============================================================================
@@ -79,6 +137,78 @@ export function getCommandQueueSnapshot(): readonly QueuedCommand[] {
   return snapshot
 }
 
+/**
+ * densable interrupt still_queued list:
+ * `[...j, ...Xtt().filter(AL).map(uuid).filter(defined)]`
+ *
+ * - `inFlightBatchUuids` = densable `j` — batch already dequeued for the
+ *   imminent turn but not yet abort-reachable (set while drain runs).
+ * - Queue half uses `getCommandQueueSnapshot` (Xtt) filtered to main-thread
+ *   (official AL: `agentId === undefined`).
+ */
+export function buildInterruptStillQueued(
+  inFlightBatchUuids: readonly string[],
+  isMainThread: (cmd: QueuedCommand) => boolean = isMainThreadQueuedCommand,
+): string[] {
+  return [
+    ...inFlightBatchUuids,
+    ...getCommandQueueSnapshot()
+      .filter(isMainThread)
+      .map(cmd => cmd.uuid)
+      .filter((uuid): uuid is NonNullable<typeof uuid> => uuid !== undefined),
+  ]
+}
+
+/**
+ * densable AL — main-thread queue entry.
+ * Official: `cmd.agentId === undefined` only.
+ * Main-session notifications leave agentId unset (notificationTargetAgentId
+ * undefined); nested targets stamp owner via notificationTargetAgentId at
+ * register time. Never stamp getSessionId()/mi() as main.
+ */
+export function isMainThreadQueuedCommand(cmd: QueuedCommand): boolean {
+  return cmd.agentId === undefined
+}
+
+/**
+ * densable D7c — true if any main-thread editable (aJ) command is queued.
+ * Used by REPL auto-restore cancel: skip restore when user already queued
+ * a follow-up they can pull into the input.
+ */
+export function hasMainThreadEditableQueuedCommand(): boolean {
+  return getCommandQueue().some(
+    cmd => isMainThreadQueuedCommand(cmd) && isQueuedCommandEditable(cmd),
+  )
+}
+
+/**
+ * densable Vzn — main-thread prompt-mode queue entry (AL && mode==="prompt").
+ * Narrower than D7c (editable any mode); used for prompt-only mid-turn drains.
+ */
+export function isMainThreadPromptQueuedCommand(cmd: QueuedCommand): boolean {
+  return isMainThreadQueuedCommand(cmd) && cmd.mode === 'prompt'
+}
+
+/**
+ * densable k7c — mid-turn fold drain filter over a priority snapshot.
+ * Drop slash commands (Erg/isSlashCommand). Main thread keeps AL entries;
+ * subagents keep only task-notification addressed to currentAgentId.
+ */
+export function filterMidTurnQueuedCommands(
+  commands: readonly QueuedCommand[],
+  options: {
+    isMainThread: boolean
+    currentAgentId?: QueuedCommand['agentId']
+  },
+): QueuedCommand[] {
+  const { isMainThread, currentAgentId } = options
+  return commands.filter(cmd => {
+    if (isSlashCommand(cmd)) return false
+    if (isMainThread) return isMainThreadQueuedCommand(cmd)
+    return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId
+  })
+}
+
 // ============================================================================
 // Read operations (for non-React code)
 // ============================================================================
@@ -93,6 +223,7 @@ export function getCommandQueue(): QueuedCommand[] {
 
 /**
  * Get the current queue length without copying.
+ * Official densable j4i — full queue (spinner uses this).
  */
 export function getCommandQueueLength(): number {
   return commandQueue.length
@@ -161,7 +292,7 @@ const PRIORITY_ORDER: Record<QueuePriority, number> = {
  * An optional `filter` narrows the candidates: only commands for which the
  * predicate returns `true` are considered. Non-matching commands stay in the
  * queue untouched. This lets between-turn drains (SDK, REPL) restrict to
- * main-thread commands (`cmd.agentId === undefined`) without restructuring
+ * main-thread commands (isMainThreadQueuedCommand) without restructuring
  * the existing while-loop patterns.
  */
 export function dequeue(
@@ -334,6 +465,8 @@ export function clearCommandQueue(): void {
 export function resetCommandQueue(): void {
   commandQueue.length = 0
   snapshot = Object.freeze([])
+  cancelPending.clear()
+  foldInFlight.clear()
 }
 
 // ============================================================================
@@ -351,28 +484,64 @@ export function isPromptInputModeEditable(
 }
 
 /**
- * Whether this queued command can be pulled into the input buffer via UP/ESC.
- * System-generated commands (proactive ticks, scheduled tasks, plan
- * verification, channel messages) contain raw XML and must not leak into
- * the user's input.
+ * densable Mj — origin allowed for queue pull-into-input (aJ).
+ * undefined (keyboard human), human, or auto-continuation.
+ * Distinct from densable Ite (wTo title path): Ite is void0|null|human only.
  */
-export function isQueuedCommandEditable(cmd: QueuedCommand): boolean {
-  return isPromptInputModeEditable(cmd.mode) && !cmd.isMeta
+export function isEditableQueuedOrigin(
+  origin: { kind?: string } | undefined | null,
+): boolean {
+  return (
+    origin === undefined ||
+    origin === null ||
+    origin.kind === 'human' ||
+    origin.kind === 'auto-continuation'
+  )
 }
 
 /**
- * Whether this queued command should render in the queue preview under the
- * prompt. Superset of editable — channel messages show (so the keyboard user
- * sees what arrived) but stay non-editable (raw XML).
+ * densable aJ — whether this queued command can be pulled into the input
+ * buffer via UP/ESC: Srg(mode) && !isMeta && Mj(origin).
+ * System-generated commands (proactive ticks, scheduled tasks, plan
+ * verification, channel/peer/agent origins) contain raw XML and must not
+ * leak into the user's input.
  */
-export function isQueuedCommandVisible(cmd: QueuedCommand): boolean {
-  if (
-    (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
-    (cmd as Record<string, unknown>).origin !== undefined &&
-    ((cmd as Record<string, unknown>).origin as Record<string, unknown>)
-      ?.kind === 'channel'
+export function isQueuedCommandEditable(cmd: QueuedCommand): boolean {
+  const origin = (cmd as { origin?: { kind?: string } | null }).origin
+  return (
+    isPromptInputModeEditable(cmd.mode) &&
+    !cmd.isMeta &&
+    isEditableQueuedOrigin(origin)
   )
-    return true
+}
+
+/**
+ * densable U4i / Rkb — whether this queued command should render in the queue
+ * preview under the prompt. Superset of aJ (editable): system origins that
+ * must stay non-editable still surface so the keyboard user sees what arrived.
+ *
+ * Gold: channel | task-notification | auto-continuation | observer → true;
+ * peer → true if senderTaskId set, or includePeersWithoutSender;
+ * else aJ(e). densable Rkb calls U4i(bLx) with default false peer flag.
+ */
+export function isQueuedCommandVisible(
+  cmd: QueuedCommand,
+  includePeersWithoutSender = false,
+): boolean {
+  const origin = (
+    cmd as {
+      origin?: { kind?: string; senderTaskId?: string } | null
+    }
+  ).origin
+  const kind = origin?.kind
+  if (kind === 'channel') return true
+  if (kind === 'task-notification') return true
+  if (kind === 'auto-continuation') return true
+  if (kind === 'observer') return true
+  if (kind === 'peer') {
+    if (origin?.senderTaskId !== undefined) return true
+    if (includePeersWithoutSender) return true
+  }
   return isQueuedCommandEditable(cmd)
 }
 

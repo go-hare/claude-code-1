@@ -60,7 +60,12 @@ export function UltraplanLaunchDialog({ onChoice }: UltraplanLaunchDialogProps):
 
       if (disconnectedBridge) {
         setAppState(prev => {
-          if (!prev.replBridgeEnabled) {
+          if (
+            !prev.replBridgeEnabled &&
+            !prev.replBridgeExplicit &&
+            !prev.replBridgeOutboundOnly &&
+            prev.replBridgeSessionGroupingId === undefined
+          ) {
             return prev;
           }
           return {
@@ -68,6 +73,8 @@ export function UltraplanLaunchDialog({ onChoice }: UltraplanLaunchDialogProps):
             replBridgeEnabled: false,
             replBridgeExplicit: false,
             replBridgeOutboundOnly: false,
+            // Official Fsb/ohs: clear grouping with disable.
+            replBridgeSessionGroupingId: undefined,
           };
         });
       }

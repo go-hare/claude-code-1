@@ -1,4 +1,5 @@
-type CommandLifecycleState = 'started' | 'completed'
+/** densable: started | completed | cancelled (cancel_async / interrupt / abort). */
+type CommandLifecycleState = 'started' | 'completed' | 'cancelled'
 
 type CommandLifecycleListener = (
   uuid: string,

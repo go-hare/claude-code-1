@@ -83,6 +83,16 @@ export interface BgJobState {
   stateSortOrder?: number
   /** Pinned in FleetView */
   pinned?: boolean
+  /**
+   * Custom FleetView group label (official job.state.group).
+   * Used by group mode / Ctrl+E assign — local daemon jobs only.
+   */
+  group?: string
+  /**
+   * Soft-removed from main FleetView list (official archive).
+   * Archived jobs can reappear under "Earlier" without hard delete.
+   */
+  archived?: boolean
   /** In-flight operations */
   inFlight?: { tasks: number; queued: number; kinds: string[] }
   /** What the session needs from the user */
@@ -142,7 +152,17 @@ export function patchBgJobState(
 ): BgJobState | null {
   const current = readBgJobState(short)
   if (!current) return null
-  const updated = { ...current, ...patch, updatedAt: new Date().toISOString() }
+  // Explicit undefined clears optional fields (JSON.stringify drops them on write).
+  const updated: BgJobState = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  }
+  for (const key of Object.keys(patch) as Array<keyof BgJobState>) {
+    if (patch[key] === undefined) {
+      delete updated[key]
+    }
+  }
   writeBgJobState(short, updated)
   return updated
 }
@@ -284,6 +304,19 @@ export function createInitialJobState(opts: {
   color?: string
   /** Resume/fork source transcript (left-arrow / exit handoff). */
   resumeSessionId?: string
+  /** Worktree isolation (official hcn/A8q). */
+  bgIsolation?: 'none' | 'worktree'
+  originCwd?: string
+  worktreePath?: string
+  worktreeBranch?: string
+  worktreeHookBased?: boolean
+  bridgeSessionId?: string
+  bridgeOutboundOnly?: boolean
+  bridgeSessionSeq?: number
+  /** Official hcn/aAf session permission allow/deny rules. */
+  sessionPermissionRules?: { allow: string[]; deny: string[] }
+  /** Official hcn memoryToggledOff when auto-memory is off. */
+  memoryToggledOff?: boolean
 }): BgJobState {
   const now = new Date().toISOString()
   // Official A8q/tHH: empty intent+detail → idle blocked needs prompt.
@@ -312,11 +345,21 @@ export function createInitialJobState(opts: {
     needs: empty ? 'send a prompt to start' : undefined,
     backend: 'daemon',
     cliVersion: MACRO.VERSION,
+    bgIsolation: opts.bgIsolation,
+    originCwd: opts.originCwd,
+    worktreePath: opts.worktreePath,
+    worktreeBranch: opts.worktreeBranch,
+    worktreeHookBased: opts.worktreeHookBased,
+    bridgeSessionId: opts.bridgeSessionId,
+    bridgeOutboundOnly: opts.bridgeOutboundOnly,
+    bridgeSessionSeq: opts.bridgeSessionSeq,
+    sessionPermissionRules: opts.sessionPermissionRules,
+    memoryToggledOff: opts.memoryToggledOff,
   }
 }
 
 /**
- * Official A8q — write job dir + state.json for left-arrow open before spawn.
+ * Official A8q / hcn — write job dir + state.json for left-arrow open before spawn.
  * Returns short + jobDir for CLAUDE_AGENTS_SELECT / FleetView origin.
  */
 export function writeA8qJobState(opts: {
@@ -327,6 +370,20 @@ export function writeA8qJobState(opts: {
   nameSource?: 'user' | 'auto'
   detail?: string
   color?: string
+  resumeSessionId?: string
+  worktree?: {
+    path: string
+    branch?: string
+    hookBased?: boolean
+    originCwd?: string
+  }
+  bridgeSessionId?: string
+  bridgeOutboundOnly?: boolean
+  bridgeSessionSeq?: number
+  /** Official aAf → hcn sessionPermissionRules. */
+  sessionPermissionRules?: { allow: string[]; deny: string[] }
+  /** Official aAf → hcn memoryToggledOff. */
+  memoryToggledOff?: boolean
 }): { short: string; jobDir: string } {
   const short = opts.sessionId.slice(0, 8)
   const jobDir = getJobDirPath(short)
@@ -340,6 +397,17 @@ export function writeA8qJobState(opts: {
     color: opts.color,
     short,
     template: 'bg',
+    resumeSessionId: opts.resumeSessionId,
+    bgIsolation: opts.worktree ? 'worktree' : 'none',
+    originCwd: opts.worktree?.originCwd,
+    worktreePath: opts.worktree?.path,
+    worktreeBranch: opts.worktree?.branch,
+    worktreeHookBased: opts.worktree?.hookBased,
+    bridgeSessionId: opts.bridgeSessionId,
+    bridgeOutboundOnly: opts.bridgeOutboundOnly,
+    bridgeSessionSeq: opts.bridgeSessionSeq,
+    sessionPermissionRules: opts.sessionPermissionRules,
+    memoryToggledOff: opts.memoryToggledOff,
   })
   writeBgJobState(short, state)
   return { short, jobDir }

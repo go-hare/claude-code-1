@@ -81,6 +81,14 @@ import {
   injectBridgeFault,
 } from './bridgeDebug.js'
 
+export type ReplBridgeTeardownOpts = {
+  /**
+   * Official aAf left-arrow: teardown({skipArchive:true}) so the session can
+   * reattach via CLAUDE_BRIDGE_REATTACH_* instead of being archived.
+   */
+  skipArchive?: boolean
+}
+
 export type ReplBridgeHandle = {
   bridgeSessionId: string
   environmentId: string
@@ -92,7 +100,24 @@ export type ReplBridgeHandle = {
   sendControlResponse(response: SDKControlResponse): void
   sendControlCancelRequest(requestId: string): void
   sendResult(): void
-  teardown(): Promise<void>
+  /**
+   * Official getLastSequenceNum / getSSESequenceNum — high-water for
+   * CLAUDE_BRIDGE_REATTACH_SEQ on left-arrow adopt (rit).
+   */
+  getLastSequenceNum?(): number
+  getSSESequenceNum?(): number
+  /**
+   * Official bridge flush before left-arrow teardown — drain in-flight writes.
+   */
+  flush?(): Promise<void>
+  /**
+   * When false, rit() omits CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY.
+   * Defaults true for left-arrow reattach.
+   */
+  outboundOnly?: boolean
+  /** Official sessionGroupingId → CLAUDE_BRIDGE_REATTACH_GROUPING */
+  sessionGroupingId?: string
+  teardown(opts?: ReplBridgeTeardownOpts): Promise<void>
 }
 
 export type BridgeState = 'ready' | 'connected' | 'reconnecting' | 'failed'
@@ -237,6 +262,16 @@ export type BridgeCoreParams = {
    * history. REPL callers omit (fresh session each run → 0 is correct).
    */
   initialSSESequenceNum?: number
+  /**
+   * Official sessionGroupingId (project / session group). Threaded to the
+   * returned handle so left-arrow rit() can set CLAUDE_BRIDGE_REATTACH_GROUPING.
+   */
+  sessionGroupingId?: string
+  /**
+   * When true, bridge only forwards outbound (no SSE). Surfaced on the handle
+   * for rit() OUTBOUND_ONLY — defaults true when omitted for left-arrow.
+   */
+  outboundOnly?: boolean
 }
 
 /**
@@ -313,6 +348,8 @@ export async function initBridgeCore(
     onUserMessage,
     perpetual,
     initialSSESequenceNum = 0,
+    sessionGroupingId: requestedSessionGroupingId,
+    outboundOnly: requestedOutboundOnly,
   } = params
 
   const seq = ++initSequence
@@ -905,7 +942,9 @@ export async function initBridgeCore(
 
   // Teardown reference — set after definition below. All callers are async
   // callbacks that run after assignment, so the reference is always valid.
-  let doTeardownImpl: (() => Promise<void>) | null = null
+  let doTeardownImpl:
+    | ((opts?: ReplBridgeTeardownOpts) => Promise<void>)
+    | null = null
   function triggerTeardown(): void {
     void doTeardownImpl?.()
   }
@@ -1608,8 +1647,9 @@ export async function initBridgeCore(
 
   // Shared teardown sequence used by both cleanup registration and
   // the explicit teardown() method on the returned handle.
+  // skipArchive: official aAf left-arrow — reattach instead of archive.
   let teardownStarted = false
-  doTeardownImpl = async (): Promise<void> => {
+  doTeardownImpl = async (opts?: ReplBridgeTeardownOpts): Promise<void> => {
     if (teardownStarted) {
       logForDebugging(
         `[bridge:repl] Teardown already in progress, skipping duplicate call env=${environmentId} session=${currentSessionId}`,
@@ -1618,8 +1658,9 @@ export async function initBridgeCore(
     }
     teardownStarted = true
     const teardownStart = Date.now()
+    const skipArchive = opts?.skipArchive === true
     logForDebugging(
-      `[bridge:repl] Teardown starting: env=${environmentId} session=${currentSessionId} workId=${currentWorkId ?? 'none'} transportState=${transport?.getStateLabel() ?? 'null'}`,
+      `[bridge:repl] Teardown starting: env=${environmentId} session=${currentSessionId} workId=${currentWorkId ?? 'none'} transportState=${transport?.getStateLabel() ?? 'null'} skipArchive=${skipArchive}`,
     )
 
     if (pointerRefreshTimer !== null) {
@@ -1709,21 +1750,32 @@ export async function initBridgeCore(
     // so archive is capped at 1.5s at the injection site to stay under budget.
     // archiveSession is contractually no-throw; the injected implementations
     // log their own success/failure internally.
-    await Promise.all([stopWorkP, archiveSession(currentSessionId)])
+    // Official aAf: skipArchive so left-arrow reattach can claim the session.
+    const archiveP = skipArchive
+      ? Promise.resolve().then(() => {
+          logForDebugging(
+            '[bridge:repl] Teardown: skipArchive — not archiving session',
+          )
+        })
+      : archiveSession(currentSessionId)
+    await Promise.all([stopWorkP, archiveP])
 
     teardownTransport?.close()
     logForDebugging('[bridge:repl] Teardown: transport closed')
 
-    await api.deregisterEnvironment(environmentId).catch((err: unknown) => {
-      logForDebugging(
-        `[bridge:repl] Teardown deregister failed: ${errorMessage(err)}`,
-      )
-    })
+    // skipArchive leaves the environment registered for reattach (rit).
+    if (!skipArchive) {
+      await api.deregisterEnvironment(environmentId).catch((err: unknown) => {
+        logForDebugging(
+          `[bridge:repl] Teardown deregister failed: ${errorMessage(err)}`,
+        )
+      })
 
-    // Clear the crash-recovery pointer — explicit disconnect or clean REPL
-    // exit means the user is done with this session. Crash/kill-9 never
-    // reaches this line, leaving the pointer for next-launch recovery.
-    await clearBridgePointer(dir)
+      // Clear the crash-recovery pointer — explicit disconnect or clean REPL
+      // exit means the user is done with this session. Crash/kill-9 never
+      // reaches this line, leaving the pointer for next-launch recovery.
+      await clearBridgePointer(dir)
+    }
 
     logForDebugging(
       `[bridge:repl] Teardown complete: env=${environmentId} duration=${Date.now() - teardownStart}ms`,
@@ -1752,6 +1804,25 @@ export async function initBridgeCore(
       // (e.g. daemon persistState()) get the actual high-water mark.
       const live = transport?.getLastSequenceNum() ?? 0
       return Math.max(lastTransportSequenceNum, live)
+    },
+    getLastSequenceNum() {
+      const live = transport?.getLastSequenceNum() ?? 0
+      return Math.max(lastTransportSequenceNum, live)
+    },
+    // Official handle fields for rit(session, seq, outboundOnly, grouping).
+    // outboundOnly: true when unset (left-arrow reattach default r !== false).
+    outboundOnly: (requestedOutboundOnly ?? true) as boolean | undefined,
+    sessionGroupingId: requestedSessionGroupingId,
+    async flush() {
+      // Drain in-flight transport writes before left-arrow teardown.
+      if (!transport) return
+      try {
+        await transport.flush()
+      } catch (err: unknown) {
+        logForDebugging(`[bridge:repl] flush failed: ${errorMessage(err)}`, {
+          level: 'warn',
+        })
+      }
     },
     sessionIngressUrl,
     writeMessages(messages) {
@@ -1906,10 +1977,12 @@ export async function initBridgeCore(
         `[bridge:repl] Sent result for session=${currentSessionId}`,
       )
     },
-    async teardown() {
+    async teardown(opts?: ReplBridgeTeardownOpts) {
       unregister()
-      await doTeardownImpl?.()
-      logForDebugging('[bridge:repl] Torn down')
+      await doTeardownImpl?.(opts)
+      logForDebugging(
+        `[bridge:repl] Torn down${opts?.skipArchive ? ' (skipArchive)' : ''}`,
+      )
       logEvent('tengu_bridge_repl_teardown', {})
     },
   }

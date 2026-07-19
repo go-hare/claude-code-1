@@ -4,6 +4,7 @@ import {
   styledCharsFromTokens,
   tokenize,
 } from '@alcalzone/ansi-tokenize'
+import chalk from 'chalk'
 import { getGraphemeSegmenter } from './utils/grapheme.js'
 import sliceAnsi from './utils/sliceAnsi.js'
 
@@ -25,6 +26,7 @@ import {
   shiftRows,
 } from './screen.js'
 import { stringWidth } from './stringWidth.js'
+import { reduceTruecolorAnsiCodes } from './truecolorReduce.js'
 import { widestLine } from './widest-line.js'
 
 /**
@@ -609,7 +611,9 @@ function flushBuffer(
   const filteredStyles = hasOsc8Styles
     ? filterOutHyperlinkStyles(styles)
     : styles
-  const styleId = stylePool.intern(filteredStyles)
+  // densable Gsu — rewrite truecolor SGR → ansi256 before intern when level < 3
+  const internStyles = reduceTruecolorAnsiCodes(filteredStyles, chalk.level)
+  const styleId = stylePool.intern(internStyles)
 
   for (const { segment: grapheme } of getGraphemeSegmenter().segment(buffer)) {
     out.push({

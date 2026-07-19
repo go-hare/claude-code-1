@@ -53,6 +53,15 @@ export function getPlanSlug(sessionId?: SessionId): string {
 }
 
 /**
+ * densable dPt / peekPlanSlug — cache lookup only; never creates a slug or file.
+ * Used by get_plan control: never creates a plan slug or file.
+ */
+export function peekPlanSlug(sessionId?: SessionId): string | undefined {
+  const id = sessionId ?? getSessionId()
+  return getPlanSlugCache().get(id)
+}
+
+/**
  * Set a specific plan slug for a session (used when resuming a session)
  */
 export function setPlanSlug(sessionId: SessionId, slug: string): void {

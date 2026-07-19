@@ -57,7 +57,11 @@ import { setShellIfWindows } from '../utils/windowsPaths.js'
 import { initSentry } from '../utils/sentry.js'
 import { initUser } from '../utils/user.js'
 import { initLangfuse, shutdownLangfuse } from '../services/langfuse/index.js'
-import { setThemeConfigCallbacks } from '@anthropic/ink'
+import {
+  setCustomThemesConfigDir,
+  setThemeConfigCallbacks,
+} from '@anthropic/ink'
+import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 
 // initialize1PEventLogging is dynamically imported to defer OpenTelemetry sdk-logs/resources
 
@@ -78,6 +82,8 @@ export const init = memoize(async (): Promise<void> => {
       saveTheme: setting =>
         saveGlobalConfig(current => ({ ...current, theme: setting })),
     })
+    // densable custom themes live under ~/.claude/themes
+    setCustomThemesConfigDir(getClaudeConfigHomeDir)
     logForDiagnosticsNoPII('info', 'init_configs_enabled', {
       duration_ms: Date.now() - configsStart,
     })

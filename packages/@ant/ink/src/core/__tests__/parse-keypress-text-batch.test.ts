@@ -53,10 +53,15 @@ describe('text token batch (official densable tokenizer + ZXc + sji/fag)', () =>
     expect(new KeyboardEvent(keys[0]!).key).toBe('你好')
   })
 
-  test('SGR param residue stays one key and sji empties', () => {
+  test('SGR param residue stays text; sji + residue sink empty insert', () => {
+    // Official densable ZXc has no residual sink — token stays one nameless key.
+    // InputEvent sji empties multi-codepoint; fork KeyboardEvent residue sink
+    // also empties (main prompt inserts e.key with no sji).
     const [items] = parseMultipleKeypresses(INITIAL_STATE, '17;19M')
     expect(items).toHaveLength(1)
-    expect(new InputEvent(keyItems(items)[0]!).input).toBe('')
+    const k = keyItems(items)[0]!
+    expect(new InputEvent(k).input).toBe('')
+    expect(new KeyboardEvent(k).key).toBe('')
   })
 
   test('[MAX] stays one key and sji empties', () => {
@@ -108,15 +113,23 @@ describe('text token batch (official densable tokenizer + ZXc + sji/fag)', () =>
     expect(new InputEvent(keys[keys.length - 1]!).key.return).toBe(true)
   })
 
-  test('pure MMMM residue stays one key (sji empty, not typed)', () => {
+  test('pure MMMM residue stays text; sji + residue sink empty insert', () => {
+    // Official ZXc has no absorb window — multi-char is one key; sji empties.
+    // Fork KE isSgrMouseResidue empties pure finalizer runs ≥2 (main insert path).
     const [items] = parseMultipleKeypresses(INITIAL_STATE, 'MMMM')
     expect(items).toHaveLength(1)
-    expect(new InputEvent(keyItems(items)[0]!).input).toBe('')
+    const k = keyItems(items)[0]!
+    expect(new InputEvent(k).input).toBe('')
+    expect(new KeyboardEvent(k).key).toBe('')
   })
 
-  test('live residue MMM8MMMM stays one key and sji empties', () => {
+  test('live residue MMM8MMMM stays text; sji + residue sink empty insert', () => {
+    // Official densable leaves mixed finalizer+digit noise as text (sji empties).
+    // Fork KE residue sink empties MMM8MMMM so main prompt never types it.
     const [items] = parseMultipleKeypresses(INITIAL_STATE, 'MMM8MMMM')
     expect(items).toHaveLength(1)
-    expect(new InputEvent(keyItems(items)[0]!).input).toBe('')
+    const k = keyItems(items)[0]!
+    expect(new InputEvent(k).input).toBe('')
+    expect(new KeyboardEvent(k).key).toBe('')
   })
 })

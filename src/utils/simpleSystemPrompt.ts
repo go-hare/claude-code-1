@@ -12,11 +12,33 @@
  * reh is the velvet_cascade / simple_system_prompt model list (injected).
  */
 
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
-import {
-  isBasaltCoveEnabled,
-  isOwnershipFrameEnabled,
-} from './systemPromptArms.js'
+import { isOwnershipFrameEnabled } from './systemPromptArms.js'
+
+/**
+ * densable et("tengu_velvet_cascade") — models list that forces simple prompt (reh).
+ * Returns null when flag is unset/malformed so callers can distinguish "no list".
+ */
+export function getVelvetCascadeModels(): readonly string[] | null {
+  const raw = getFeatureValue_CACHED_MAY_BE_STALE<{
+    models?: unknown
+  } | null>('tengu_velvet_cascade', null)
+  if (typeof raw !== 'object' || raw === null || !('models' in raw)) {
+    return null
+  }
+  if (!Array.isArray(raw.models)) return null
+  return raw.models.filter((m): m is string => typeof m === 'string')
+}
+
+/**
+ * densable et("tengu_velvet_tide", false) — global simple-prompt force-on when
+ * dense-default models would otherwise stay off. Sits after !pTh (dense) and
+ * before reh cascade list in densable vT.
+ */
+export function isVelvetTideSimplePromptEnabled(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvet_tide', false)
+}
 
 const KNOWN_NEH_EXACT = new Set([
   'claude-opus-4-0',
@@ -84,39 +106,65 @@ export function shouldUseSimpleSystemPrompt(input: {
   leanPromptCapability?: boolean
   /** Optional GB tengu_velvet_cascade.models list (official reh). */
   velvetCascadeModels?: readonly string[] | null
+  /**
+   * densable tengu_velvet_tide. When undefined, reads GrowthBook (default false).
+   * Tests inject boolean to avoid GB.
+   */
+  velvetTide?: boolean
 }): boolean {
   const env = input.env ?? process.env
+  // densable vT order: env force → !dense → velvet_tide → reh cascade.
   if (isEnvTruthy(env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT)) return true
   if (isEnvDefinedFalsy(env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT)) return false
 
-  // Official reh short-circuit
+  // Explicit reh short-circuit (tests / callers).
   if (input.modelEligible === true) return true
-  if (isVelvetCascadeModelEligible(input.model, input.velvetCascadeModels)) {
-    return true
-  }
 
   const model = input.model
   if (!model) return false
 
-  // Official lean_prompt / mythos → neh false → !neh true → simple ON
+  // Official lean_prompt / mythos / EAP → not dense-default → simple ON
   if (input.leanPromptCapability === true || model === 'claude-mythos-5') {
     return true
   }
-  // EAP
   if (/-eap($|\[)/i.test(model)) return true
 
-  // BASALT_COVE is a related arm latch; when on, prefer simple for densable path
-  // when model is not in the denser-default set.
-  if (isBasaltCoveEnabled(env) && !isDenseDefaultSystemPromptModel(model)) {
+  // densable !pTh(e) — non-dense-default models use simple prompt.
+  if (!isDenseDefaultSystemPromptModel(model)) {
     return true
   }
 
-  // Official: !neh(model) || reh(model). reh already handled above.
-  if (input.modelEligible === false) {
-    // reh explicitly false — only !neh can enable
-    return !isDenseDefaultSystemPromptModel(model)
+  // densable velvet_tide force-on for dense-default models.
+  const velvetTide =
+    input.velvetTide !== undefined
+      ? input.velvetTide
+      : isVelvetTideSimplePromptEnabled()
+  if (velvetTide) return true
+
+  // densable dTh / reh — velvet_cascade.models list.
+  if (input.modelEligible === false) return false
+  const cascadeModels =
+    input.velvetCascadeModels !== undefined
+      ? input.velvetCascadeModels
+      : getVelvetCascadeModels()
+  if (isVelvetCascadeModelEligible(model, cascadeModels)) {
+    return true
   }
-  return !isDenseDefaultSystemPromptModel(model)
+
+  // densable dTh blc("simple_system_prompt", model) — clientDataCache map.
+  try {
+    const { isModelOnClientDataMap } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./clientDataModelMap.js') as typeof import('./clientDataModelMap.js')
+    if (isModelOnClientDataMap('simple_system_prompt', model)) {
+      return true
+    }
+  } catch {
+    // config unavailable in some test graphs
+  }
+
+  // Dense default and no tide/cascade → simple OFF.
+  return false
 }
 
 /**

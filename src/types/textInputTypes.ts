@@ -2,7 +2,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import type { UUID } from 'crypto'
 import type React from 'react'
 import type { PermissionResult } from '../entrypoints/agentSdkTypes.js'
-import type { InputEvent, Key } from '@anthropic/ink'
+import type { InputEvent, Key, KeyboardEvent } from '@anthropic/ink'
 import type { PastedContent } from '../utils/config.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
 import type { TextHighlight } from '../utils/textHighlighting.js'
@@ -206,6 +206,14 @@ export type BaseTextInputProps = {
    * input drops the event.
    */
   readonly inputFilter?: (input: string, key: Key) => string
+
+  /**
+   * Official densable `onKeyDownBefore` (PromptInput `UI`): runs on the focused
+   * input's KeyboardEvent path *before* paste-handler / text insert / submit.
+   * History search + typeahead call preventDefault / stopImmediatePropagation
+   * here so Enter accepts a suggestion instead of racing a dual useInput path.
+   */
+  readonly onKeyDownBefore?: (event: KeyboardEvent) => void
 }
 
 /**
@@ -316,6 +324,11 @@ export type QueuedCommand = {
    */
   preExpansionValue?: string
   /**
+   * densable suppressWorkflowKeyword — when true, skip ultracode → Workflow
+   * attachment for this human-typed prompt (meta+w toggle in PromptInput).
+   */
+  suppressWorkflowKeyword?: boolean
+  /**
    * When true, the input is treated as plain text even if it starts with `/`.
    * Used for remotely-received messages (e.g. bridge/CCR) that should not
    * trigger local slash commands or skills.
@@ -336,6 +349,11 @@ export type QueuedCommand = {
    * the queue instead of calling `onQuery` directly.
    */
   isMeta?: boolean
+  /**
+   * densable inputSource / promptSource caller hint for OXd (typed / queued /
+   * suggestion_accepted). Resolved with isMeta + Ite(origin) in executeUserInput.
+   */
+  inputSource?: string
   /**
    * Provenance of this command. Stamped onto the resulting UserMessage so the
    * transcript records origin structurally (not just via XML tags in content).
@@ -358,6 +376,11 @@ export type QueuedCommand = {
    * unified the queue but lost the isolation the dual-queue accidentally had).
    */
   agentId?: AgentId
+  /**
+   * Official BRt/Hao/Jeo task id stamped on task-notification queue entries.
+   * Jeo skips tB for keepalive children still waiting in the queue.
+   */
+  taskId?: string
   /**
    * Autonomy-run provenance for system-generated automatic turns.
    * Used by the autonomy ledger to track queue → execution lifecycle.

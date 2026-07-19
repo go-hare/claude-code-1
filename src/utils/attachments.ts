@@ -114,13 +114,18 @@ import {
   FILE_READ_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { getDefaultFileReadingLimits } from '@claude-code/builtin-tools/tools/FileReadTool/limits.js'
-import { cacheKeys, type FileStateCache } from './fileStateCache.js'
+import {
+  cacheKeys,
+  fileStateContentMatches,
+  type FileStateCache,
+} from './fileStateCache.js'
 import {
   createAbortController,
   createChildAbortController,
 } from './abortController.js'
 import { isAbortError } from './errors.js'
 import {
+  getFileModificationTime,
   getFileModificationTimeAsync,
   isFileWithinReadSizeLimit,
 } from './file.js'
@@ -165,12 +170,22 @@ import {
 } from '../bootstrap/state.js'
 import type { QuerySource } from '../constants/querySource.js'
 import {
+  extractDiscoveredToolNames,
   getDeferredToolsDelta,
+  getSearchExtraToolsMode,
   isDeferredToolsDeltaEnabled,
   isSearchExtraToolsEnabledOptimistic,
   isSearchExtraToolsToolAvailable,
   type DeferredToolsDeltaScanContext,
 } from './searchExtraTools.js'
+import {
+  isDeferredTool,
+  SEARCH_EXTRA_TOOLS_TOOL_NAME,
+} from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
+import {
+  getJuniperShoalFlagsFromClientData,
+  type JuniperToolSearchReminder,
+} from './systemPromptArms.js'
 import {
   getMcpInstructionsDelta,
   isMcpInstructionsDeltaEnabled,
@@ -498,6 +513,15 @@ export type Attachment =
       content: Task[]
       itemCount: number
     }
+  /**
+   * densable Zxd/O2y — juniper_shoal marsh_lantern periodic reminder to use
+   * SearchExtraTools (official ToolSearch) for undiscovered deferred tools.
+   */
+  | {
+      type: 'tool_search_usage_reminder'
+      undiscoveredToolNames: string[]
+      undiscoveredCount: number
+    }
   | {
       type: 'nested_memory'
       path: string
@@ -763,6 +787,36 @@ export type Attachment =
       durationMs?: number
       tokens?: number
     }
+  /**
+   * densable workflow_keyword_request — human typed "ultracode" this turn.
+   * Injects a meta reminder to use the Workflow tool.
+   */
+  | {
+      type: 'workflow_keyword_request'
+    }
+  /**
+   * densable workflow_size_guideline_change — /config Dynamic workflow size
+   * changed mid-session (D5u). size is densable Qit-normalized named value.
+   */
+  | {
+      type: 'workflow_size_guideline_change'
+      size: 'unrestricted' | 'small' | 'medium' | 'large'
+    }
+  /**
+   * densable ultra_effort_enter (f2y) — standing ultracode session reminder.
+   * full on first enter; sparse every TURNS_BETWEEN_MAINTENANCE human turns.
+   */
+  | {
+      type: 'ultra_effort_enter'
+      reminderType: 'full' | 'sparse'
+    }
+  /**
+   * densable ultra_effort_exit (f2y) — ultracode session ended; restore
+   * Workflow tool standard opt-in rule.
+   */
+  | {
+      type: 'ultra_effort_exit'
+    }
 
 export type TeammateMailboxAttachment = {
   type: 'teammate_mailbox'
@@ -795,7 +849,15 @@ export async function getAttachments(
   queuedCommands: QueuedCommand[],
   messages?: Message[],
   querySource?: QuerySource,
-  options?: { skipSkillDiscovery?: boolean },
+  options?: {
+    skipSkillDiscovery?: boolean
+    /** densable: human-typed prompt (not meta/system) */
+    isHumanTypedPrompt?: boolean
+    /** densable suppressWorkflowKeyword from PromptInput meta+w */
+    suppressWorkflowKeyword?: boolean
+    /** pre-expansion input for ultracode detection (paste-safe) */
+    preExpansionInput?: string | null
+  },
 ): Promise<Attachment[]> {
   let attachmentsDisabled = isEnvTruthy(
     process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS,
@@ -899,6 +961,16 @@ export async function getAttachments(
   // This ensures files are added to nestedMemoryAttachmentTriggers before nested_memory processes them
   const userAttachmentResults = await Promise.all(userInputAttachments)
 
+  // densable Nxd: memoize todo_reminders so tool_search_usage_reminder can
+  // await the same promise for the "task_reminder_same_turn" gate (Zxd).
+  let todoRemindersShared: Promise<Attachment[]> | undefined
+  const getTodoRemindersShared = (): Promise<Attachment[]> => {
+    todoRemindersShared ??= isTodoV2Enabled()
+      ? getTaskReminderAttachments(messages, toolUseContext)
+      : getTodoReminderAttachments(messages, toolUseContext)
+    return todoRemindersShared
+  }
+
   // Thread-safe attachments available in sub-agents
   // NOTE: These must be created AFTER userInputAttachments completes to ensure
   // nestedMemoryAttachmentTriggers is populated before getNestedMemoryAttachments runs
@@ -971,11 +1043,21 @@ export async function getAttachments(
           ),
         ]
       : []),
-    maybe('todo_reminders', () =>
-      isTodoV2Enabled()
-        ? getTaskReminderAttachments(messages, toolUseContext)
-        : getTodoReminderAttachments(messages, toolUseContext),
-    ),
+    // densable Nxd: todo_reminders is memoized so tool_search_usage_reminder
+    // (Zxd) can share the same promise for the same-turn task_reminder gate.
+    maybe('todo_reminders', getTodoRemindersShared),
+    // densable f1i()!=null → gb("tool_search_usage_reminder", Zxd)
+    ...(getJuniperShoalFlagsFromClientData().toolSearchReminder !== null
+      ? [
+          maybe('tool_search_usage_reminder', () =>
+            getToolSearchUsageReminderAttachments(
+              messages,
+              toolUseContext,
+              async () => (await getTodoRemindersShared()).length > 0,
+            ),
+          ),
+        ]
+      : []),
     ...(isAgentSwarmsEnabled()
       ? [
           // Skip teammate mailbox for the session_memory forked agent.
@@ -1032,6 +1114,36 @@ export async function getAttachments(
         ),
         maybe('output_style', async () =>
           Promise.resolve(getOutputStyleAttachment()),
+        ),
+        // densable FE()+workflow_keyword_request (p2y) — ultracode keyword
+        maybe('workflow_keyword_request', () =>
+          Promise.resolve(
+            getWorkflowKeywordAttachment(input, {
+              isHumanTypedPrompt: options?.isHumanTypedPrompt,
+              suppressWorkflowKeyword: options?.suppressWorkflowKeyword,
+              preExpansionInput: options?.preExpansionInput,
+            }),
+          ),
+        ),
+        // densable D5u — workflow_size_guideline_change on regular user prompts
+        maybe('workflow_size_guideline_change', () =>
+          Promise.resolve(
+            getWorkflowSizeGuidelineChangeAttachment(
+              messages ?? [],
+              options?.isHumanTypedPrompt,
+            ),
+          ),
+        ),
+        // densable f2y — ultra_effort_enter/exit on regular user prompts
+        maybe('ultra_effort_enter', () =>
+          Promise.resolve(
+            options?.isHumanTypedPrompt
+              ? getUltraEffortEnterOrExitAttachments(
+                  messages ?? [],
+                  toolUseContext,
+                )
+              : [],
+          ),
         ),
         maybe('diagnostics', async () =>
           getDiagnosticAttachments(toolUseContext),
@@ -1543,6 +1655,161 @@ function getUltrathinkEffortAttachment(input: string | null): Attachment[] {
   return [{ type: 'ultrathink_effort', level: 'high' }]
 }
 
+/**
+ * densable p2y — emit workflow_keyword_request when human typed "ultracode",
+ * workflows are on (FE), keyword trigger enabled (VBn), and not suppressed.
+ */
+function getWorkflowKeywordAttachment(
+  input: string | null,
+  opts?: {
+    isHumanTypedPrompt?: boolean
+    suppressWorkflowKeyword?: boolean
+    preExpansionInput?: string | null
+  },
+): Attachment[] {
+  // Local require keeps residual/settings out of the hot attachment graph
+  // when workflows are off; mirrors densable FE()/VBn()/p2y.
+  try {
+    const {
+      isWorkflowsFeatureEnabled,
+      isWorkflowKeywordTriggerEnabledFromSettings,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./workflowDisableGate.js') as typeof import('./workflowDisableGate.js')
+    const { hasUltracodeKeyword } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./ultraplan/keyword.js') as typeof import('./ultraplan/keyword.js')
+
+    if (!isWorkflowsFeatureEnabled()) return []
+    if (!opts?.isHumanTypedPrompt) return []
+    if (opts.suppressWorkflowKeyword) return []
+    if (!isWorkflowKeywordTriggerEnabledFromSettings()) return []
+
+    const text = opts.preExpansionInput ?? input
+    if (!text || !hasUltracodeKeyword(text)) return []
+
+    logEvent('tengu_workflow_keyword', {})
+    return [{ type: 'workflow_keyword_request' }]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * densable D5u — emit workflow_size_guideline_change when /config guideline
+ * diverges from last attachment size (or session baseline). Only on regular
+ * human prompts (isRegularUserPrompt).
+ */
+function getWorkflowSizeGuidelineChangeAttachment(
+  messages: Message[],
+  isHumanTypedPrompt?: boolean,
+): Attachment[] {
+  if (!isHumanTypedPrompt) return []
+  try {
+    const { getGlobalConfig } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./config.js') as typeof import('./config.js')
+    const {
+      getWorkflowSizeGuidelineChangeAttachments,
+      parseWorkflowSizeGuideline,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./workflowSizeGuideline.js') as typeof import('./workflowSizeGuideline.js')
+
+    const raw = getGlobalConfig().workflowSizeGuideline
+    const guideline = parseWorkflowSizeGuideline(raw) ?? 'unrestricted'
+    // Scan message stream: AttachmentMessages carry .attachment; also accept
+    // already-normalized attachment-shaped entries if present.
+    const scan = messages.map(m => {
+      if (m.type === 'attachment') {
+        return {
+          type: 'attachment' as const,
+          attachment: (m as { attachment?: { type?: string; size?: string } })
+            .attachment,
+        }
+      }
+      return m as {
+        type?: string
+        attachment?: { type?: string; size?: string }
+      }
+    })
+    return getWorkflowSizeGuidelineChangeAttachments(scan, guideline)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * densable f2y — ultra_effort_enter (full/sparse) / ultra_effort_exit.
+ * Gated by isRegularUserPrompt at the maybe() call site.
+ * densable: Dee(t.options.mainLoopModel, P_(t), Ojr(t)) — layered effort
+ * via P_, ultracode via Ojr, bare options.mainLoopModel (not X$).
+ */
+function getUltraEffortEnterOrExitAttachments(
+  messages: Message[],
+  toolUseContext: ToolUseContext,
+): Attachment[] {
+  try {
+    const { getUltraEffortAttachments, isUltraEffortSessionActive } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./effort.js') as typeof import('./effort.js')
+    const { resolveEffortValue } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./contextLayers.js') as typeof import('./contextLayers.js')
+
+    // densable Dee(t.options.mainLoopModel, P_(t), Ojr(t))
+    const active = isUltraEffortSessionActive(
+      toolUseContext.options.mainLoopModel,
+      resolveEffortValue(toolUseContext),
+      toolUseContext.getAppState().ultracode,
+    )
+    const scan = messages.map(m => {
+      if (m.type === 'attachment') {
+        return {
+          type: 'attachment' as const,
+          attachment: (
+            m as {
+              attachment?: { type?: string; reminderType?: string }
+            }
+          ).attachment,
+        }
+      }
+      if (m.type === 'user') {
+        return {
+          type: 'user' as const,
+          isMeta: (m as { isMeta?: boolean }).isMeta,
+          message: (m as { message?: { content?: unknown } }).message,
+        }
+      }
+      return m as UltraEffortScanShim
+    })
+    const out = getUltraEffortAttachments(scan, active)
+    if (out.length === 0) return []
+    const first = out[0]
+    if (first === undefined) return []
+    if (first.type === 'ultra_effort_enter') {
+      logEvent('tengu_ultra_effort', {
+        is_enter: true,
+        is_full: first.reminderType === 'full',
+      })
+    } else {
+      logEvent('tengu_ultra_effort', {
+        is_enter: false,
+      })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+type UltraEffortScanShim = {
+  type?: string
+  isMeta?: boolean
+  message?: { content?: unknown }
+  attachment?: { type?: string; reminderType?: string }
+}
+
 // Exported for compact.ts — the gate must be identical at both call sites.
 export function getDeferredToolsDeltaAttachment(
   tools: Tools,
@@ -1830,14 +2097,23 @@ export function memoryFilesToAttachments(
       // with `isPartialView: true`. Edit/Write see the flag and require a real
       // Read first; getChangedFiles sees real content + undefined offset/limit
       // so mid-session change detection still works.
+      // densable YSo: seededFromContext:!0 + timestamp via KK(mtime).
+      let seedTimestamp: number
+      try {
+        seedTimestamp = getFileModificationTime(memoryFile.path)
+      } catch {
+        seedTimestamp = Date.now()
+      }
       toolUseContext.readFileState.set(memoryFile.path, {
         content: memoryFile.contentDiffersFromDisk
           ? (memoryFile.rawContent ?? memoryFile.content)
           : memoryFile.content,
-        timestamp: Date.now(),
+        timestamp: seedTimestamp,
         offset: undefined,
         limit: undefined,
         isPartialView: memoryFile.contentDiffersFromDisk,
+        seededFromContext: true,
+        keepContent: true,
       })
 
       // Fire InstructionsLoaded hook for audit/observability (fire-and-forget)
@@ -2196,6 +2472,10 @@ export async function getChangedFiles(
         const result = await FileReadTool.call(fileInput, toolUseContext)
         // Extract only the changed section
         if (result.data.type === 'text') {
+          // densable ALe(a, newContent) — hash-aware equality; then Pyu snippet
+          if (fileStateContentMatches(fileState, result.data.file.content)) {
+            return null
+          }
           const snippet = getSnippetForTwoFileDiff(
             fileState.content,
             result.data.file.content,
@@ -3067,7 +3347,12 @@ export async function* getAttachmentMessages(
   queuedCommands: QueuedCommand[],
   messages?: Message[],
   querySource?: QuerySource,
-  options?: { skipSkillDiscovery?: boolean },
+  options?: {
+    skipSkillDiscovery?: boolean
+    isHumanTypedPrompt?: boolean
+    suppressWorkflowKeyword?: boolean
+    preExpansionInput?: string | null
+  },
 ): AsyncGenerator<AttachmentMessage, void> {
   // TODO: Compute this upstream
   const attachments = await getAttachments(
@@ -3500,6 +3785,147 @@ function getTaskReminderTurnCounts(messages: Message[]): {
     turnsSinceLastTaskManagement: assistantTurnsSinceTaskManagement,
     turnsSinceLastReminder: assistantTurnsSinceReminder,
   }
+}
+
+/**
+ * densable O2y — count assistant turns since last ToolSearch/SearchExtraTools
+ * tool_use and since last tool_search_usage_reminder attachment.
+ * Thinking-only assistants (ZSo/isThinkingMessage) are skipped.
+ */
+export function getToolSearchUsageReminderTurnCounts(
+  messages: Message[],
+  toolSearchName: string = SEARCH_EXTRA_TOOLS_TOOL_NAME,
+): {
+  turnsSinceLastToolSearch: number
+  turnsSinceLastReminder: number
+} {
+  let lastToolSearchIndex = -1
+  let lastReminderIndex = -1
+  let turnsSinceLastToolSearch = 0
+  let turnsSinceLastReminder = 0
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message?.type === 'assistant') {
+      if (isThinkingMessage(message)) {
+        continue
+      }
+      if (
+        lastToolSearchIndex === -1 &&
+        'message' in message &&
+        Array.isArray(message.message?.content) &&
+        message.message.content.some(
+          block =>
+            block.type === 'tool_use' && block.name === toolSearchName,
+        )
+      ) {
+        lastToolSearchIndex = i
+      }
+      if (lastToolSearchIndex === -1) turnsSinceLastToolSearch++
+      if (lastReminderIndex === -1) turnsSinceLastReminder++
+    } else if (
+      lastReminderIndex === -1 &&
+      message?.type === 'attachment' &&
+      message.attachment!.type === 'tool_search_usage_reminder'
+    ) {
+      lastReminderIndex = i
+    }
+    if (lastToolSearchIndex !== -1 && lastReminderIndex !== -1) {
+      break
+    }
+  }
+
+  return { turnsSinceLastToolSearch, turnsSinceLastReminder }
+}
+
+/**
+ * densable Zxd / getToolSearchUsageReminderAttachments — juniper marsh_lantern
+ * periodic reminder when deferred tools remain undiscovered and SearchExtraTools
+ * has not been used recently.
+ *
+ * `hasTaskReminderThisTurn` mirrors densable's shared todo_reminders promise gate
+ * (skip when todo/task reminder fires same turn).
+ */
+export async function getToolSearchUsageReminderAttachments(
+  messages: Message[] | undefined,
+  toolUseContext: ToolUseContext,
+  hasTaskReminderThisTurn: () => Promise<boolean>,
+  reminderConfig?: JuniperToolSearchReminder | null,
+): Promise<Attachment[]> {
+  const config =
+    reminderConfig === undefined
+      ? getJuniperShoalFlagsFromClientData().toolSearchReminder
+      : reminderConfig
+  if (config === null) return []
+  if (!messages || messages.length === 0) return []
+
+  const { turnsSinceLastToolSearch, turnsSinceLastReminder } =
+    getToolSearchUsageReminderTurnCounts(messages)
+  if (
+    turnsSinceLastToolSearch < config.everyNTurns ||
+    turnsSinceLastReminder < config.everyNTurns
+  ) {
+    return []
+  }
+
+  const skip = (reason: string): Attachment[] => {
+    // densable only emits skip telemetry on everyNTurns cadence of the reminder
+    // turn counter (i % everyNTurns === 0).
+    if (turnsSinceLastReminder % config.everyNTurns === 0) {
+      logEvent('tengu_juniper_shoal_shown', {
+        delivered: false,
+        skipReason:
+          reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        everyNTurns: config.everyNTurns,
+        turnsSinceLastReminder,
+      })
+    }
+    return []
+  }
+
+  // densable s3r() !== "tst"
+  if (getSearchExtraToolsMode() !== 'tst') {
+    return skip('mode_not_tst')
+  }
+  // densable Ast — SearchExtraTools/ToolSearch available in toolkit
+  if (!isSearchExtraToolsToolAvailable(toolUseContext.options.tools)) {
+    return skip('toolsearch_unavailable')
+  }
+
+  const discovered = extractDiscoveredToolNames(messages)
+  const undiscovered = toolUseContext.options.tools
+    .filter(t => isDeferredTool(t) && !discovered.has(t.name))
+    .map(t => t.name)
+    .sort()
+  if (undiscovered.length === 0) {
+    return skip('no_undiscovered_tools')
+  }
+
+  let taskReminderSameTurn = false
+  try {
+    taskReminderSameTurn = await hasTaskReminderThisTurn()
+  } catch {
+    taskReminderSameTurn = false
+  }
+  if (taskReminderSameTurn) {
+    return skip('task_reminder_same_turn')
+  }
+
+  const listed = undiscovered.slice(0, config.maxNames)
+  logEvent('tengu_juniper_shoal_shown', {
+    delivered: true,
+    undiscoveredCount: undiscovered.length,
+    listedCount: listed.length,
+    everyNTurns: config.everyNTurns,
+    maxNames: config.maxNames,
+  })
+  return [
+    {
+      type: 'tool_search_usage_reminder',
+      undiscoveredToolNames: listed,
+      undiscoveredCount: undiscovered.length,
+    },
+  ]
 }
 
 async function getTaskReminderAttachments(

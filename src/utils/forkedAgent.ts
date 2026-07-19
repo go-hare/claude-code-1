@@ -39,6 +39,11 @@ import {
   getLastAssistantMessage,
 } from './messages.js'
 import { createDenialTrackingState } from './permissions/denialTracking.js'
+import {
+  type ContextLayer,
+  withAllowedToolRules,
+  withDeniedToolRules,
+} from './contextLayers.js'
 import { parseToolListFromCLI } from './permissions/permissionSetup.js'
 import { recordSidechainTranscript } from './sessionStorage.js'
 import type { SystemPrompt } from './systemPromptType.js'
@@ -47,6 +52,8 @@ import {
   cloneContentReplacementState,
 } from './toolResultStorage.js'
 import { createAgentId } from './uuid.js'
+// densable Bio — re-export for fork callers that pin basalt_spur cache markers
+export { forkPointUuidOf } from './cacheBreakpointMarkers.js'
 
 /**
  * Parameters that must be identical between the fork and parent API requests
@@ -115,6 +122,12 @@ export type ForkedAgentParams = {
   /** Skip writing new prompt cache entries on the last message. For
    *  fire-and-forget forks where no future request will read from this prefix. */
   skipCacheWrite?: boolean
+  /**
+   * densable forkPointUuid — when basalt_spur is on, pin an extra cache
+   * breakpoint so the fork shares the main-thread prefix. Callers typically
+   * pass `forkPointUuidOf(forkContextMessages)`.
+   */
+  forkPointUuid?: string
 }
 
 export type ForkedAgentResult = {
@@ -146,43 +159,58 @@ export function createCacheSafeParams(
 }
 
 /**
- * Creates a modified getAppState that adds allowed tools to the permission context.
- * This is used by forked skill/command execution to grant tool permissions.
+ * densable jJu — modified getAppState folding allowed + disallowed tool rules
+ * via udo/ddo (withAllowedToolRules / withDeniedToolRules).
+ * Used by forked skill/command execution (gWr) to grant/deny tool permissions.
  */
 export function createGetAppStateWithAllowedTools(
   baseGetAppState: ToolUseContext['getAppState'],
   allowedTools: string[],
+  disallowedTools: string[] = [],
 ): ToolUseContext['getAppState'] {
-  if (allowedTools.length === 0) return baseGetAppState
+  if (allowedTools.length === 0 && disallowedTools.length === 0) {
+    return baseGetAppState
+  }
   return () => {
     const appState = baseGetAppState()
+    // densable jJu → udo then ddo. Cast preserves AppState's concrete
+    // toolPermissionContext (InternalPermissionMode) through the shared
+    // ToolPermissionContext helpers.
+    let toolPermissionContext = appState.toolPermissionContext
+    if (allowedTools.length > 0) {
+      toolPermissionContext = withAllowedToolRules(
+        toolPermissionContext,
+        allowedTools,
+      ) as typeof toolPermissionContext
+    }
+    if (disallowedTools.length > 0) {
+      toolPermissionContext = withDeniedToolRules(
+        toolPermissionContext,
+        disallowedTools,
+      ) as typeof toolPermissionContext
+    }
     return {
       ...appState,
-      toolPermissionContext: {
-        ...appState.toolPermissionContext,
-        alwaysAllowRules: {
-          ...appState.toolPermissionContext.alwaysAllowRules,
-          command: [
-            ...new Set([
-              ...(appState.toolPermissionContext.alwaysAllowRules.command ||
-                []),
-              ...allowedTools,
-            ]),
-          ],
-        },
-      },
+      toolPermissionContext,
     }
   }
 }
 
 /**
  * Result from preparing a forked command context.
+ * densable gWr returns skillContent / modifiedGetAppState / contextLayers /
+ * baseAgent / promptMessages.
  */
 export type PreparedForkedContext = {
   /** Skill content with args replaced */
   skillContent: string
-  /** Modified getAppState with allowed tools */
+  /** Modified getAppState with allowed/disallowed tools */
   modifiedGetAppState: ToolUseContext['getAppState']
+  /**
+   * densable gWr contextLayers — allowed_tools / disallowed_tools for
+   * permissionLayers stack on forked subagent toolUseContext.
+   */
+  contextLayers: ContextLayer[]
   /** The general-purpose agent to use */
   baseAgent: AgentDefinition
   /** Initial prompt messages */
@@ -190,8 +218,8 @@ export type PreparedForkedContext = {
 }
 
 /**
- * Prepares the context for executing a forked command/skill.
- * This handles the common setup that both SkillTool and slash commands need.
+ * densable gWr — prepares the context for executing a forked command/skill.
+ * Shared by SkillTool and slash-command fork paths.
  */
 export async function prepareForkedCommandContext(
   command: PromptCommand,
@@ -204,14 +232,30 @@ export async function prepareForkedCommandContext(
     .map(block => (block.type === 'text' ? block.text : ''))
     .join('\n')
 
-  // Parse and prepare allowed tools
-  const allowedTools = parseToolListFromCLI(command.allowedTools ?? [])
+  // densable L6(await e.getAllowedTools?.() ?? e.allowedTools ?? []) / disallowedTools
+  const rawAllowed =
+    (await command.getAllowedTools?.(args, context)) ??
+    command.allowedTools ??
+    []
+  const allowedTools = parseToolListFromCLI(rawAllowed)
+  const disallowedTools = parseToolListFromCLI(command.disallowedTools ?? [])
 
-  // Create modified context with allowed tools
+  // densable jJu(getAppState, allowed, disallowed)
   const modifiedGetAppState = createGetAppStateWithAllowedTools(
     context.getAppState,
     allowedTools,
+    disallowedTools,
   )
+
+  // densable gWr contextLayers for Tn / permissionLayers stack
+  const contextLayers: ContextLayer[] = [
+    ...(allowedTools.length === 0
+      ? []
+      : ([{ kind: 'allowed_tools', allowedTools }] as const)),
+    ...(disallowedTools.length === 0
+      ? []
+      : ([{ kind: 'disallowed_tools', disallowedTools }] as const)),
+  ]
 
   // Use command.agent if specified, otherwise 'general-purpose'
   const agentTypeName = command.agent ?? 'general-purpose'
@@ -225,12 +269,15 @@ export async function prepareForkedCommandContext(
     throw new Error('No agent available for forked execution')
   }
 
-  // Prepare prompt messages
-  const promptMessages = [createUserMessage({ content: skillContent })]
+  // densable Nr({content, isMeta:!0}) — skill body is meta prompt content
+  const promptMessages = [
+    createUserMessage({ content: skillContent, isMeta: true }),
+  ]
 
   return {
     skillContent,
     modifiedGetAppState,
+    contextLayers,
     baseAgent,
     promptMessages,
   }
@@ -285,6 +332,12 @@ export type SubagentContextOverrides = {
   abortController?: AbortController
   /** Override the getAppState function */
   getAppState?: ToolUseContext['getAppState']
+  /**
+   * densable $io `t?.permissionLayers` — extra layers appended after parent
+   * stack (+ optional avoid_prompts). SkillTool L6g pre-stacks on parent
+   * toolUseContext; this override is for callers that pass layers here.
+   */
+  permissionLayers?: ContextLayer[]
 
   /**
    * Explicit opt-in to share parent's setAppState callback.
@@ -387,6 +440,46 @@ export function createSubagentContext(
           }
         }
 
+  // densable $io permissionLayers:
+  //   o = avoid_prompts when NOT shareAbortController AND NOT custom getAppState
+  //   i = [...parent.permissionLayers??[], ...o, ...overrides.permissionLayers??[]]
+  // Custom getAppState (SkillTool modifiedGetAppState) means the caller already
+  // folded allow/deny into AppState and may have pre-stacked layers on parent.
+  const avoidPromptLayers: ContextLayer[] =
+    overrides?.shareAbortController || overrides?.getAppState
+      ? []
+      : [{ kind: 'avoid_prompts' }]
+  const permissionLayers: ContextLayer[] = [
+    ...(parentContext.permissionLayers ?? []),
+    ...avoidPromptLayers,
+    ...(overrides?.permissionLayers ?? []),
+  ]
+
+  // densable $io options:s — when override tools differ from parent, strip
+  // shared refreshTools identity so the child does not refresh the parent
+  // tool list mid-run.
+  let options: ToolUseContext['options'] =
+    overrides?.options ?? parentContext.options
+  if (
+    overrides?.options &&
+    overrides.options.tools !== parentContext.options.tools
+  ) {
+    const sharesRefreshTools =
+      overrides.options.refreshTools !== undefined &&
+      overrides.options.refreshTools === parentContext.options.refreshTools
+    if (sharesRefreshTools) {
+      options = { ...overrides.options, refreshTools: undefined }
+    }
+  }
+
+  // densable $io rootToolSurface:e.rootToolSurface — pass-through; seed from
+  // parent options when root never stamped a surface (local REPL path).
+  const rootToolSurface: ToolUseContext['rootToolSurface'] =
+    parentContext.rootToolSurface ?? {
+      tools: parentContext.options.tools,
+      mainLoopModel: parentContext.options.mainLoopModel,
+    }
+
   return {
     // Preserve the parent Langfuse trace separately so nested side queries
     // like auto_mode can attach to the main agent trace instead of the
@@ -394,9 +487,10 @@ export function createSubagentContext(
     langfuseRootTrace: parentContext.langfuseTrace,
     activeTaskExecutionContext: overrides?.activeTaskExecutionContext,
     // Mutable state - cloned by default to maintain isolation
-    // Clone overrides.readFileState if provided, otherwise clone from parent
+    // densable $io qwe(..., {stripSeededFromContext:!0}) — strip parent seed flags
     readFileState: cloneFileStateCache(
       overrides?.readFileState ?? parentContext.readFileState,
+      { stripSeededFromContext: true },
     ),
     nestedMemoryAttachmentTriggers: new Set<string>(),
     // Fresh loaded set for the child; parent pending is shared so cleanup can
@@ -429,6 +523,8 @@ export function createSubagentContext(
 
     // AppState access
     getAppState,
+    // densable $io permissionLayers:i — preserve parent + avoid_prompts + override
+    permissionLayers,
     setAppState: overrides?.shareSetAppState
       ? parentContext.setAppState
       : () => {},
@@ -464,7 +560,10 @@ export function createSubagentContext(
     openMessageSelector: undefined,
 
     // Fields that can be overridden or copied from parent
-    options: overrides?.options ?? parentContext.options,
+    // densable $io options:s (may strip shared refreshTools)
+    options,
+    // densable $io rootToolSurface:e.rootToolSurface
+    rootToolSurface,
     messages: overrides?.messages ?? parentContext.messages,
     // Generate new agentId for subagents (each subagent should have its own ID)
     agentId: overrides?.agentId ?? createAgentId(),
@@ -547,6 +646,7 @@ export async function runForkedAgent({
   onMessage,
   skipTranscript,
   skipCacheWrite,
+  forkPointUuid,
 }: ForkedAgentParams): Promise<ForkedAgentResult> {
   const startTime = Date.now()
   const outputMessages: Message[] = []
@@ -602,6 +702,7 @@ export async function runForkedAgent({
       maxOutputTokensOverride: maxOutputTokens,
       maxTurns,
       skipCacheWrite,
+      forkPointUuid,
     })) {
       // Extract real usage from message_delta stream events (final usage per API call)
       if (message.type === 'stream_event') {

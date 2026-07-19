@@ -115,10 +115,16 @@ export const getGitStatus = memoize(async (): Promise<string | null> => {
 })
 
 /**
- * This context is prepended to each conversation, and cached for the duration of the conversation.
+ * densable rR residual — system context memoized by cacheBreakerPhrase.
+ * Phrase is a memo key only (does not appear in the returned object body in
+ * densable; local also keeps BREAK_CACHE_COMMAND injection for ant debugging).
+ * Callers pass AppState.cacheBreakerPhrase / options.cacheBreakerPhrase when
+ * available so session flag changes bust the cache.
  */
 export const getSystemContext = memoize(
-  async (): Promise<{
+  async (
+    cacheBreakerPhrase?: string,
+  ): Promise<{
     [k: string]: string
   }> => {
     const startTime = Date.now()
@@ -161,9 +167,12 @@ export const getSystemContext = memoize(
     logForDiagnosticsNoPII('info', 'system_context_completed', {
       duration_ms: Date.now() - startTime,
       has_git_status: gitStatus !== null,
-      has_injection: injection !== null,
+      has_injection: injection !== null || cacheBreakerPhrase !== undefined,
     })
 
+    // densable rR: phrase is memo-key only (`...{}`); body is git/perforce.
+    // Keep BREAK_CACHE_COMMAND injection for local ant debugging.
+    void cacheBreakerPhrase
     return {
       ...(gitStatus && { gitStatus }),
       // Official CLAUDE_CODE_PERFORCE_MODE — system-context checkout hint.
@@ -177,6 +186,9 @@ export const getSystemContext = memoize(
         : {}),
     }
   },
+  // densable resolver: `${U6i()}\0${e??""}` — phrase alone is enough locally
+  // (git status is already memoized separately on getGitStatus).
+  (cacheBreakerPhrase?: string) => cacheBreakerPhrase ?? '',
 )
 
 /**

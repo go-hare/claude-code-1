@@ -29,6 +29,7 @@ import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
 import { expandPath } from 'src/utils/path.js'
+import { recordPluginUse } from 'src/utils/plugins/pluginUsage.js'
 import { checkReadPermissionForTool } from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import {
@@ -294,6 +295,13 @@ export const LSPTool = buildTool({
         return {
           data: output,
         }
+      }
+
+      // densable F$: navigation/diagnostics from a plugin LSP server count as use
+      const pluginSource =
+        manager.getServerForFile(absolutePath)?.config?.pluginSource
+      if (pluginSource) {
+        recordPluginUse(pluginSource)
       }
 
       // For incomingCalls and outgoingCalls, we need a two-step process:

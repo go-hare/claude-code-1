@@ -283,7 +283,12 @@ export async function* handleOrphanedPermission(
   const toolName = toolUseBlock.name
   const toolInput = toolUseBlock.input
 
-  const toolDefinition = findToolByName(tools, toolName)
+  // densable Tc: orphaned permission path also consults session toolAliases
+  const toolDefinition = findToolByName(
+    tools,
+    toolName,
+    processUserInputContext.options.toolAliases,
+  )
   if (!toolDefinition) {
     return
   }

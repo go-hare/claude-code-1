@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { spawnSync } from 'child_process'
 import { findGitRoot } from '../utils/git.js'
+import { stripOuterMarkdownFences } from '../utils/stripFencedCode.js'
 
 /**
  * `claude up` — run the "# claude up" section from the nearest CLAUDE.md.
@@ -87,9 +88,7 @@ function extractUpSection(markdown: string): string | null {
 
   if (sectionLines.length === 0) return null
 
-  // Strip fenced code block markers
-  let text = sectionLines.join('\n').trim()
-  text = text.replace(/^```\w*\n?/, '').replace(/\n?```\s*$/, '')
-
-  return text.trim() || null
+  // densable eee — strip outer markdown fences from "# claude up" body
+  const text = stripOuterMarkdownFences(sectionLines.join('\n'))
+  return text || null
 }

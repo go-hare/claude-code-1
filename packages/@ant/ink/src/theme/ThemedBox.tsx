@@ -6,8 +6,8 @@ import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
 import type { PasteEvent } from '../core/events/paste-event.js';
 import type { Color, Styles } from '../core/styles.js';
-import { getTheme, type Theme } from './theme-types.js';
-import { useTheme } from './ThemeProvider.js';
+import type { Theme } from './theme-types.js';
+import { useResolvedTheme } from './ThemeProvider.js';
 
 // Color props that accept theme keys
 type ThemedColorProps = {
@@ -78,8 +78,8 @@ function ThemedBox({
   ref,
   ...rest
 }: PropsWithChildren<Props>): React.ReactNode {
-  const [themeName] = useTheme();
-  const theme = getTheme(themeName);
+  // densable HL — resolved palette includes custom theme overrides
+  const theme = useResolvedTheme();
 
   // Resolve theme keys to raw colors
   const resolvedBorderColor = resolveColor(borderColor, theme);

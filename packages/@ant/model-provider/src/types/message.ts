@@ -75,6 +75,46 @@ export type UserMessage = Message & {
   type: 'user'
   message: NonNullable<Message['message']>
   imagePasteIds?: number[]
+  /**
+   * densable toolEndsTurn — tool result requests end-of-turn (no model re-invoke).
+   * Never sent to the model; query loop only.
+   */
+  toolEndsTurn?: boolean
+  /**
+   * densable mcpMeta — MCP protocol metadata (incl. claude/endTurn) for SDK /
+   * end-turn detection. Never sent to the model.
+   */
+  mcpMeta?: {
+    _meta?: Record<string, unknown>
+    structuredContent?: Record<string, unknown>
+  }
+  /**
+   * densable toolDenialKind — why a tool_result was denied (user-rejected,
+   * permission-rule, automode-*). Never sent to the model.
+   */
+  toolDenialKind?:
+    | 'user-rejected'
+    | 'permission-rule'
+    | 'automode-blocked'
+    | 'automode-unavailable'
+    | 'automode-parsing-error'
+  /**
+   * densable classifierMetaLines — auto-mode classifier meta (repoVisibility /
+   * gitStatus) associated with a single tool_result. Never sent to the model;
+   * re-injected into later classifier transcripts before the matching tool_use.
+   */
+  classifierMetaLines?: string
+  /**
+   * densable interruptedMessageId — API assistant message id that was in-flight
+   * when the user cancelled (user-cancel / remote-cancel). Stamped by dye/Nr
+   * via gzr(b_t). Never sent to the model.
+   */
+  interruptedMessageId?: string
+  /**
+   * densable promptSource (Nr) — how this user turn was produced
+   * (sdk / system / typed / queued / suggestion_accepted). Never sent to the model.
+   */
+  promptSource?: string
 }
 export type NormalizedUserMessage = UserMessage
 export type RequestStartEvent = { type: string; [key: string]: unknown }

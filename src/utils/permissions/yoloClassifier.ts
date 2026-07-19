@@ -22,6 +22,10 @@ import type {
   ClassifierUsage,
   YoloClassifierResult,
 } from '../../types/permissions.js'
+import {
+  getClassifierMetaLines,
+  setClassifierMetaLines,
+} from '../classifierMetaLines.js'
 import { isDebugMode, logForDebugging } from '../debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
 import { errorMessage } from '../errors.js'
@@ -354,7 +358,14 @@ const YOLO_CLASSIFIER_TOOL_SCHEMA: BetaToolUnion = {
 
 type TranscriptBlock =
   | { type: 'text'; text: string }
-  | { type: 'tool_use'; name: string; input: unknown }
+  | { type: 'tool_use'; name: string; input: unknown; id?: string }
+  // densable and(): classifier meta lines before matching tool_use
+  | {
+      type: 'meta'
+      name: string
+      input: unknown
+      serialized: string
+    }
 
 export type TranscriptEntry = {
   role: 'user' | 'assistant'
@@ -374,6 +385,30 @@ export type TranscriptEntry = {
  */
 export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
   const transcript: TranscriptEntry[] = []
+  // densable and() first-pass: tool_use_id → classifierMetaLines from single
+  // tool_result user messages (stamped via Nr/mfo).
+  const metaByToolUseId = new Map<string, string>()
+  for (const msg of messages) {
+    if (msg.type !== 'user') continue
+    const lines = (msg as { classifierMetaLines?: unknown }).classifierMetaLines
+    if (typeof lines !== 'string') continue
+    const content = msg.message?.content
+    if (!Array.isArray(content)) continue
+    const toolResults = content.filter(
+      b =>
+        typeof b === 'object' &&
+        b !== null &&
+        (b as { type?: string }).type === 'tool_result',
+    )
+    if (toolResults.length === 1) {
+      const id = (toolResults[0] as { tool_use_id?: unknown } | undefined)
+        ?.tool_use_id
+      if (typeof id === 'string' && id.length > 0) {
+        metaByToolUseId.set(id, lines)
+      }
+    }
+  }
+
   for (const msg of messages) {
     if (
       msg.type === 'attachment' &&
@@ -449,6 +484,22 @@ export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
       for (const block of msg.message!.content ?? []) {
         if (typeof block === 'string') continue
         if (block.type === 'tool_use') {
+          // densable and(): inject meta before tool_use (msg map, else live Crd)
+          const id =
+            typeof (block as { id?: unknown }).id === 'string'
+              ? (block as { id: string }).id
+              : undefined
+          const serialized =
+            (id ? metaByToolUseId.get(id) : undefined) ??
+            (id ? getClassifierMetaLines(id) : undefined)
+          if (serialized !== undefined) {
+            blocks.push({
+              type: 'meta',
+              name: block.name,
+              input: block.input,
+              serialized,
+            })
+          }
           blocks.push({
             type: 'tool_use',
             name: block.name,
@@ -505,6 +556,20 @@ function toCompactBlock(
   role: TranscriptEntry['role'],
   lookup: ToolLookup,
 ): string {
+  // densable: meta lines only emit when tool still projects non-empty input
+  if (block.type === 'meta') {
+    const tool = lookup.get(block.name)
+    if (!tool) return ''
+    const input = (block.input ?? {}) as Record<string, unknown>
+    let encoded: unknown
+    try {
+      encoded = tool.toAutoClassifierInput(input) ?? input
+    } catch {
+      encoded = input
+    }
+    if (encoded === '') return ''
+    return block.serialized
+  }
   if (block.type === 'tool_use') {
     const tool = lookup.get(block.name)
     if (!tool) return ''
@@ -1279,10 +1344,16 @@ export async function classifyYoloAction(
       )
     }
     if (metaLines.length > 0) {
+      const joined = metaLines.join('')
       userContentBlocks.push({
         type: 'text' as const,
-        text: metaLines.join(''),
+        text: joined,
       })
+      // densable wrd — remember meta for this tool_use so tool_result UserMessage
+      // (Nr/mfo) and later classifier transcripts can re-inject it.
+      if (typeof actionToolUse.id === 'string' && actionToolUse.id.length > 0) {
+        setClassifierMetaLines(actionToolUse.id, joined)
+      }
     }
   }
   // Place cache_control on the action block. In the two-stage classifier,
@@ -1743,13 +1814,24 @@ function getTwoStageMode(): TwoStageMode {
  * Format an action for the classifier from tool name and input.
  * Returns a TranscriptEntry with the tool_use block. Each tool controls which
  * fields get exposed via its `toAutoClassifierInput` implementation.
+ *
+ * densable: optional toolUseId is attached so wrd can store classifierMetaLines
+ * keyed by the live tool_use id for later mfo/transcript inject.
  */
 export function formatActionForClassifier(
   toolName: string,
   toolInput: unknown,
+  toolUseId?: string,
 ): TranscriptEntry {
   return {
     role: 'assistant',
-    content: [{ type: 'tool_use', name: toolName, input: toolInput }],
+    content: [
+      {
+        type: 'tool_use',
+        name: toolName,
+        input: toolInput,
+        ...(toolUseId !== undefined ? { id: toolUseId } : {}),
+      } as TranscriptBlock,
+    ],
   }
 }

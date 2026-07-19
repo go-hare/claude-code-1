@@ -46,6 +46,8 @@ import {
   getProjectRoot,
   getSessionId,
 } from '../../bootstrap/state.js'
+import { recordPluginActivity } from '../../utils/plugins/pluginActivity.js'
+import { recordPluginUse } from '../../utils/plugins/pluginUsage.js'
 import type { Command } from '../../commands.js'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { PRODUCT_URL } from '../../constants/product.js'
@@ -56,6 +58,7 @@ import {
   toolMatchesName,
 } from '../../Tool.js'
 import { ListMcpResourcesTool } from '@claude-code/builtin-tools/tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
+import { RefreshMcpToolsTool } from '@claude-code/builtin-tools/tools/RefreshMcpToolsTool/RefreshMcpToolsTool.js'
 import {
   type MCPProgress,
   MCPTool,
@@ -1851,404 +1854,440 @@ export function mcpToolInputToAutoClassifierInput(
     : toolName
 }
 
-export const fetchToolsForClient = memoizeWithLRU(
-  async (client: MCPServerConnection): Promise<Tool[]> => {
-    if (client.type !== 'connected') return []
+/**
+ * Uncached tools/list for a live connection. Throws on RPC/list failures so
+ * RefreshMcpTools can keep the previous tool set (status: error). Returns []
+ * when the server has no tools capability or legitimately lists zero tools.
+ * Never dials or reconnects.
+ */
+export async function fetchToolsForClientUncached(
+  client: MCPServerConnection,
+): Promise<Tool[]> {
+  if (client.type !== 'connected') return []
+  if (!client.capabilities?.tools) {
+    return []
+  }
 
-    try {
-      if (!client.capabilities?.tools) {
-        return []
-      }
-
-      // Official 2.1.144: paginate tools/list via nextCursor (page-1-only was silent drop).
-      const listedTools = await listAllWithCursorPagination(
-        async cursor => {
-          const result = (await client.client.request(
-            cursor
-              ? { method: 'tools/list', params: { cursor } }
-              : { method: 'tools/list' },
-            ListToolsResultSchema,
-          )) as ListToolsResult
-          return {
-            items: result.tools ?? [],
-            nextCursor: result.nextCursor,
-          }
-        },
-        {
-          onCapped: pages => {
-            logForDebugging(
-              `[MCP] ${client.name}: tools/list still returning nextCursor after ${pages} pages; stopping`,
-              { level: 'warn' },
-            )
-          },
-        },
-      )
-
-      // Sanitize tool data from MCP server
-      const toolsToProcess = recursivelySanitizeUnicode(listedTools)
-
-      // Check if we should skip the mcp__ prefix for SDK MCP servers
-      const skipPrefix =
-        client.config.type === 'sdk' &&
-        isEnvTruthy(process.env.CLAUDE_AGENT_SDK_MCP_NO_PREFIX)
-
-      // Official: org ceiling map on remote MCP configs (claudeai-proxy/http/sse).
-      const toolPermissions =
-        client.config.type === 'claudeai-proxy' ||
-        client.config.type === 'http' ||
-        client.config.type === 'sse'
-          ? client.config.toolPermissions
-          : undefined
-      if (toolPermissions) {
-        const entries = Object.keys(toolPermissions).length
-        if (
-          entries > 0 &&
-          !toolsToProcess.some(t => toolPermissions[t.name] !== undefined)
-        ) {
+  // Official 2.1.144: paginate tools/list via nextCursor (page-1-only was silent drop).
+  // Explicit ListToolsResult['tools'] — bare ReturnType of the generic
+  // listAllWithCursorPagination collapses to unknown[] under Awaited<>.
+  let listedTools: ListToolsResult['tools']
+  try {
+    listedTools = await listAllWithCursorPagination(
+      async cursor => {
+        const result = (await client.client.request(
+          cursor
+            ? { method: 'tools/list', params: { cursor } }
+            : { method: 'tools/list' },
+          ListToolsResultSchema,
+        )) as ListToolsResult
+        return {
+          items: result.tools ?? [],
+          nextCursor: result.nextCursor,
+        }
+      },
+      {
+        onCapped: pages => {
           logForDebugging(
-            `[claudeai-mcp] ${client.name}: toolPermissions has ${entries} entries but none matched upstream tool names — backend name drift?`,
+            `[MCP] ${client.name}: tools/list still returning nextCursor after ${pages} pages; stopping`,
             { level: 'warn' },
           )
-        }
-      }
+        },
+      },
+    )
+    // Successful list clears prior discovery/auth failure state (official
+    // densable WM: e.toolsListError=void 0).
+    client.toolsListError = undefined
+    client.discoveryAuthFailure = false
+  } catch (error) {
+    const msg = errorMessage(error)
+    client.toolsListError = msg
+    // Official densable: 401/403 on claude.ai proxy → discoveryAuthFailure + [].
+    // Refresh then reports kept-previous with an authorize-via-/mcp message.
+    const isAuth =
+      /\b401\b|\b403\b|Unauthorized|unauthorized|Forbidden|forbidden|needs.?auth/i.test(
+        msg,
+      ) ||
+      (error instanceof Error &&
+        /401|403|Unauthorized|Forbidden/i.test(error.message))
+    if (isAuth) {
+      client.discoveryAuthFailure = true
+    }
+    throw error
+  }
 
-      // Convert MCP tools to our Tool format
-      return toolsToProcess
-        .map((tool): Tool => {
-          const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+  // Sanitize tool data from MCP server
+  const toolsToProcess = recursivelySanitizeUnicode(listedTools)
+
+  // Check if we should skip the mcp__ prefix for SDK MCP servers
+  const skipPrefix =
+    client.config.type === 'sdk' &&
+    isEnvTruthy(process.env.CLAUDE_AGENT_SDK_MCP_NO_PREFIX)
+
+  // Official: org ceiling map on remote MCP configs (claudeai-proxy/http/sse).
+  const toolPermissions =
+    client.config.type === 'claudeai-proxy' ||
+    client.config.type === 'http' ||
+    client.config.type === 'sse'
+      ? client.config.toolPermissions
+      : undefined
+  if (toolPermissions) {
+    const entries = Object.keys(toolPermissions).length
+    if (
+      entries > 0 &&
+      !toolsToProcess.some(t => toolPermissions[t.name] !== undefined)
+    ) {
+      logForDebugging(
+        `[claudeai-mcp] ${client.name}: toolPermissions has ${entries} entries but none matched upstream tool names — backend name drift?`,
+        { level: 'warn' },
+      )
+    }
+  }
+
+  // Convert MCP tools to our Tool format
+  return toolsToProcess
+    .map((tool): Tool => {
+      const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+      return {
+        ...MCPTool,
+        // In skip-prefix mode, use the original name for model invocation so MCP tools
+        // can override builtins by name. mcpInfo is used for permission checking.
+        name: skipPrefix ? tool.name : fullyQualifiedName,
+        mcpInfo: {
+          serverName: client.name,
+          toolName: tool.name,
+          // Official org/admin ceiling from server config toolPermissions.
+          effectiveMaxPermission: toolPermissions?.[tool.name],
+        },
+        isMcp: true,
+        // Collapse whitespace: _meta is open to external MCP servers, and
+        // a newline here would inject orphan lines into the deferred-tool
+        // list (formatDeferredToolLine joins on '\n').
+        searchHint:
+          typeof tool._meta?.['anthropic/searchHint'] === 'string'
+            ? tool._meta['anthropic/searchHint'].replace(/\s+/g, ' ').trim() ||
+              undefined
+            : undefined,
+        alwaysLoad: tool._meta?.['anthropic/alwaysLoad'] === true,
+        async description() {
+          return tool.description ?? ''
+        },
+        async prompt() {
+          const desc = tool.description ?? ''
+          return desc.length > MAX_MCP_DESCRIPTION_LENGTH
+            ? desc.slice(0, MAX_MCP_DESCRIPTION_LENGTH) + '… [truncated]'
+            : desc
+        },
+        isConcurrencySafe() {
+          return tool.annotations?.readOnlyHint ?? false
+        },
+        isReadOnly() {
+          return tool.annotations?.readOnlyHint ?? false
+        },
+        toAutoClassifierInput(input) {
+          return mcpToolInputToAutoClassifierInput(input, tool.name)
+        },
+        isDestructive() {
+          return tool.annotations?.destructiveHint ?? false
+        },
+        isOpenWorld() {
+          return tool.annotations?.openWorldHint ?? false
+        },
+        isSearchOrReadCommand() {
+          return classifyMcpToolForCollapse(client.name, tool.name)
+        },
+        inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
+        async checkPermissions() {
           return {
-            ...MCPTool,
-            // In skip-prefix mode, use the original name for model invocation so MCP tools
-            // can override builtins by name. mcpInfo is used for permission checking.
-            name: skipPrefix ? tool.name : fullyQualifiedName,
-            mcpInfo: {
-              serverName: client.name,
-              toolName: tool.name,
-              // Official org/admin ceiling from server config toolPermissions.
-              effectiveMaxPermission: toolPermissions?.[tool.name],
-            },
-            isMcp: true,
-            // Collapse whitespace: _meta is open to external MCP servers, and
-            // a newline here would inject orphan lines into the deferred-tool
-            // list (formatDeferredToolLine joins on '\n').
-            searchHint:
-              typeof tool._meta?.['anthropic/searchHint'] === 'string'
-                ? tool._meta['anthropic/searchHint']
-                    .replace(/\s+/g, ' ')
-                    .trim() || undefined
-                : undefined,
-            alwaysLoad: tool._meta?.['anthropic/alwaysLoad'] === true,
-            async description() {
-              return tool.description ?? ''
-            },
-            async prompt() {
-              const desc = tool.description ?? ''
-              return desc.length > MAX_MCP_DESCRIPTION_LENGTH
-                ? desc.slice(0, MAX_MCP_DESCRIPTION_LENGTH) + '… [truncated]'
-                : desc
-            },
-            isConcurrencySafe() {
-              return tool.annotations?.readOnlyHint ?? false
-            },
-            isReadOnly() {
-              return tool.annotations?.readOnlyHint ?? false
-            },
-            toAutoClassifierInput(input) {
-              return mcpToolInputToAutoClassifierInput(input, tool.name)
-            },
-            isDestructive() {
-              return tool.annotations?.destructiveHint ?? false
-            },
-            isOpenWorld() {
-              return tool.annotations?.openWorldHint ?? false
-            },
-            isSearchOrReadCommand() {
-              return classifyMcpToolForCollapse(client.name, tool.name)
-            },
-            inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
-            async checkPermissions() {
-              return {
-                behavior: 'passthrough' as const,
-                message: 'MCPTool requires permission.',
-                suggestions: [
+            behavior: 'passthrough' as const,
+            message: 'MCPTool requires permission.',
+            suggestions: [
+              {
+                type: 'addRules' as const,
+                rules: [
                   {
-                    type: 'addRules' as const,
-                    rules: [
-                      {
-                        toolName: fullyQualifiedName,
-                        ruleContent: undefined,
-                      },
-                    ],
-                    behavior: 'allow' as const,
-                    destination: 'localSettings' as const,
+                    toolName: fullyQualifiedName,
+                    ruleContent: undefined,
                   },
                 ],
-              }
-            },
-            async call(
-              args: Record<string, unknown>,
-              context,
-              _canUseTool,
-              parentMessage,
-              onProgress?: ToolCallProgress<MCPProgress>,
-            ) {
-              const toolUseId = extractToolUseId(parentMessage)
-              const meta = toolUseId
-                ? { 'claudecode/toolUseId': toolUseId }
-                : {}
+                behavior: 'allow' as const,
+                destination: 'localSettings' as const,
+              },
+            ],
+          }
+        },
+        async call(
+          args: Record<string, unknown>,
+          context,
+          _canUseTool,
+          parentMessage,
+          onProgress?: ToolCallProgress<MCPProgress>,
+        ) {
+          const toolUseId = extractToolUseId(parentMessage)
+          const meta = toolUseId ? { 'claudecode/toolUseId': toolUseId } : {}
 
-              // Emit progress when tool starts
+          // densable F$ + sJ: MCP tool call from a plugin-owned server counts as use
+          const pluginSource = client.config.pluginSource
+          if (pluginSource) {
+            recordPluginUse(pluginSource)
+            recordPluginActivity(pluginSource, 'mcp')
+          }
+
+          // Emit progress when tool starts
+          if (onProgress && toolUseId) {
+            onProgress({
+              toolUseID: toolUseId,
+              data: {
+                type: 'mcp_progress',
+                status: 'started',
+                serverName: client.name,
+                toolName: tool.name,
+              },
+            })
+          }
+
+          const startTime = Date.now()
+          const MAX_SESSION_RETRIES = 1
+          // Official 2.1.193/206: headersHelper may mint short-lived auth
+          // headers; OAuth may hold a refresh_token. On 401 re-run the
+          // helper / refresh once, then reconnect (reauth_retry).
+          // Official recursive path retries with the new connected client
+          // object (isAuthRetry); we keep that client for the next loop
+          // iteration instead of only relying on the connection cache.
+          const MAX_AUTH_RECONNECT_RETRIES = 1
+          let authReconnectRetries = 0
+          let preferredClient: ConnectedMCPServer | null = null
+          for (let attempt = 0; ; attempt++) {
+            try {
+              const connectedClient =
+                preferredClient ?? (await ensureConnectedClient(client))
+              preferredClient = null
+              const mcpResult = await callMCPToolWithUrlElicitationRetry({
+                client: connectedClient,
+                clientConnection: client,
+                tool: tool.name,
+                args,
+                meta,
+                signal: context.abortController.signal,
+                setAppState: context.setAppState,
+                onProgress:
+                  onProgress && toolUseId
+                    ? progressData => {
+                        onProgress({
+                          toolUseID: toolUseId,
+                          data: progressData,
+                        })
+                      }
+                    : undefined,
+                handleElicitation: context.handleElicitation,
+              })
+
+              // Emit progress when tool completes successfully
               if (onProgress && toolUseId) {
                 onProgress({
                   toolUseID: toolUseId,
                   data: {
                     type: 'mcp_progress',
-                    status: 'started',
+                    status: 'completed',
                     serverName: client.name,
                     toolName: tool.name,
+                    elapsedTimeMs: Date.now() - startTime,
                   },
                 })
               }
 
-              const startTime = Date.now()
-              const MAX_SESSION_RETRIES = 1
-              // Official 2.1.193/206: headersHelper may mint short-lived auth
-              // headers; OAuth may hold a refresh_token. On 401 re-run the
-              // helper / refresh once, then reconnect (reauth_retry).
-              // Official recursive path retries with the new connected client
-              // object (isAuthRetry); we keep that client for the next loop
-              // iteration instead of only relying on the connection cache.
-              const MAX_AUTH_RECONNECT_RETRIES = 1
-              let authReconnectRetries = 0
-              let preferredClient: ConnectedMCPServer | null = null
-              for (let attempt = 0; ; attempt++) {
-                try {
-                  const connectedClient =
-                    preferredClient ?? (await ensureConnectedClient(client))
-                  preferredClient = null
-                  const mcpResult = await callMCPToolWithUrlElicitationRetry({
-                    client: connectedClient,
-                    clientConnection: client,
-                    tool: tool.name,
-                    args,
-                    meta,
-                    signal: context.abortController.signal,
-                    setAppState: context.setAppState,
-                    onProgress:
-                      onProgress && toolUseId
-                        ? progressData => {
-                            onProgress({
-                              toolUseID: toolUseId,
-                              data: progressData,
-                            })
-                          }
-                        : undefined,
-                    handleElicitation: context.handleElicitation,
-                  })
-
-                  // Emit progress when tool completes successfully
-                  if (onProgress && toolUseId) {
-                    onProgress({
-                      toolUseID: toolUseId,
-                      data: {
-                        type: 'mcp_progress',
-                        status: 'completed',
-                        serverName: client.name,
-                        toolName: tool.name,
-                        elapsedTimeMs: Date.now() - startTime,
-                      },
-                    })
-                  }
-
-                  return {
-                    data: mcpResult.content,
-                    ...((mcpResult._meta || mcpResult.structuredContent) && {
-                      mcpMeta: {
-                        ...(mcpResult._meta && {
-                          _meta: mcpResult._meta,
-                        }),
-                        ...(mcpResult.structuredContent && {
-                          structuredContent: mcpResult.structuredContent,
-                        }),
-                      },
+              return {
+                data: mcpResult.content,
+                ...((mcpResult._meta || mcpResult.structuredContent) && {
+                  mcpMeta: {
+                    ...(mcpResult._meta && {
+                      _meta: mcpResult._meta,
                     }),
-                  }
-                } catch (error) {
-                  // Session expired — the connection cache has been
-                  // cleared, so retry with a fresh client.
-                  if (
-                    error instanceof McpSessionExpiredError &&
-                    attempt < MAX_SESSION_RETRIES
-                  ) {
-                    logMCPDebug(
-                      client.name,
-                      `Retrying tool '${tool.name}' after session recovery`,
-                    )
+                    ...(mcpResult.structuredContent && {
+                      structuredContent: mcpResult.structuredContent,
+                    }),
+                  },
+                }),
+              }
+            } catch (error) {
+              // Session expired — the connection cache has been
+              // cleared, so retry with a fresh client.
+              if (
+                error instanceof McpSessionExpiredError &&
+                attempt < MAX_SESSION_RETRIES
+              ) {
+                logMCPDebug(
+                  client.name,
+                  `Retrying tool '${tool.name}' after session recovery`,
+                )
+                continue
+              }
+
+              // Official 2.1.193/206: 401 auth recovery — headersHelper
+              // re-mint, or OAuth refresh_token reconnect, once only.
+              // Concurrent callers rejoin the same in-flight reconnect
+              // (OHs Map: reauth_retry leader / collateral_rejoin).
+              if (authReconnectRetries < MAX_AUTH_RECONNECT_RETRIES) {
+                const serverConfig = client.config as {
+                  headersHelper?: string
+                  type?: string
+                  url?: string
+                  headers?: Record<string, string>
+                  oauth?: unknown
+                }
+                const hasRefreshToken =
+                  (serverConfig.type === 'http' ||
+                    serverConfig.type === 'sse') &&
+                  !!serverConfig.url &&
+                  serverHasStoredRefreshToken(
+                    client.name,
+                    serverConfig as {
+                      type: 'http' | 'sse'
+                      url: string
+                      headers?: Record<string, string>
+                    },
+                  )
+                const kind = classifyAuthReconnectKind({
+                  type: serverConfig.type,
+                  headersHelper: serverConfig.headersHelper,
+                  url: serverConfig.url,
+                  hasRefreshToken,
+                })
+                const cacheKey = getServerCacheKey(client.name, client.config)
+                // Official W: ConnectionClosed mid-reconnect → rejoin
+                // even if this call didn't see a 401 classification.
+                const closedWhileReconnecting =
+                  kind !== null &&
+                  isConnectionClosedWhileReconnecting(
+                    error,
+                    hasAuthReconnectInFlight(cacheKey),
+                  )
+                const shouldReconnect =
+                  kind !== null &&
+                  (error instanceof McpAuthError || closedWhileReconnecting)
+
+                if (shouldReconnect && kind !== null) {
+                  authReconnectRetries++
+                  logMCPDebug(
+                    client.name,
+                    kind === 'mcp_headers_helper'
+                      ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
+                      : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
+                  )
+                  const reconnected = await joinOrStartAuthReconnect(
+                    cacheKey,
+                    kind,
+                    async () => {
+                      await clearServerCache(client.name, client.config)
+                      return connectToServer(client.name, client.config)
+                    },
+                    join => {
+                      // Official Ze(kind, role): telemetry distinguishes
+                      // the leader reauth_retry from collateral_rejoin.
+                      if (join.role === 'leader') {
+                        logEvent(
+                          kind === 'mcp_headers_helper'
+                            ? 'tengu_mcp_headers_helper_retry'
+                            : 'tengu_mcp_oauth_refresh_retry',
+                          {},
+                        )
+                      } else {
+                        logEvent(
+                          kind === 'mcp_headers_helper'
+                            ? 'tengu_mcp_headers_helper_collateral_rejoin'
+                            : 'tengu_mcp_oauth_refresh_collateral_rejoin',
+                          {},
+                        )
+                      }
+                    },
+                  )
+                  if (reconnected.type === 'connected') {
+                    // Official: retry the tool with the reconnected client
+                    // (recursive JTo isAuthRetry). Prefer this object so
+                    // we don't race another cache miss after clear+connect.
+                    preferredClient = reconnected
                     continue
                   }
-
-                  // Official 2.1.193/206: 401 auth recovery — headersHelper
-                  // re-mint, or OAuth refresh_token reconnect, once only.
-                  // Concurrent callers rejoin the same in-flight reconnect
-                  // (OHs Map: reauth_retry leader / collateral_rejoin).
-                  if (authReconnectRetries < MAX_AUTH_RECONNECT_RETRIES) {
-                    const serverConfig = client.config as {
-                      headersHelper?: string
-                      type?: string
-                      url?: string
-                      headers?: Record<string, string>
-                      oauth?: unknown
-                    }
-                    const hasRefreshToken =
-                      (serverConfig.type === 'http' ||
-                        serverConfig.type === 'sse') &&
-                      !!serverConfig.url &&
-                      serverHasStoredRefreshToken(
-                        client.name,
-                        serverConfig as {
-                          type: 'http' | 'sse'
-                          url: string
-                          headers?: Record<string, string>
-                        },
-                      )
-                    const kind = classifyAuthReconnectKind({
-                      type: serverConfig.type,
-                      headersHelper: serverConfig.headersHelper,
-                      url: serverConfig.url,
-                      hasRefreshToken,
-                    })
-                    const cacheKey = getServerCacheKey(
-                      client.name,
-                      client.config,
-                    )
-                    // Official W: ConnectionClosed mid-reconnect → rejoin
-                    // even if this call didn't see a 401 classification.
-                    const closedWhileReconnecting =
-                      kind !== null &&
-                      isConnectionClosedWhileReconnecting(
-                        error,
-                        hasAuthReconnectInFlight(cacheKey),
-                      )
-                    const shouldReconnect =
-                      kind !== null &&
-                      (error instanceof McpAuthError || closedWhileReconnecting)
-
-                    if (shouldReconnect && kind !== null) {
-                      authReconnectRetries++
-                      logMCPDebug(
-                        client.name,
-                        kind === 'mcp_headers_helper'
-                          ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
-                          : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
-                      )
-                      const reconnected = await joinOrStartAuthReconnect(
-                        cacheKey,
-                        kind,
-                        async () => {
-                          await clearServerCache(client.name, client.config)
-                          return connectToServer(client.name, client.config)
-                        },
-                        join => {
-                          // Official Ze(kind, role): telemetry distinguishes
-                          // the leader reauth_retry from collateral_rejoin.
-                          if (join.role === 'leader') {
-                            logEvent(
-                              kind === 'mcp_headers_helper'
-                                ? 'tengu_mcp_headers_helper_retry'
-                                : 'tengu_mcp_oauth_refresh_retry',
-                              {},
-                            )
-                          } else {
-                            logEvent(
-                              kind === 'mcp_headers_helper'
-                                ? 'tengu_mcp_headers_helper_collateral_rejoin'
-                                : 'tengu_mcp_oauth_refresh_collateral_rejoin',
-                              {},
-                            )
-                          }
-                        },
-                      )
-                      if (reconnected.type === 'connected') {
-                        // Official: retry the tool with the reconnected client
-                        // (recursive JTo isAuthRetry). Prefer this object so
-                        // we don't race another cache miss after clear+connect.
-                        preferredClient = reconnected
-                        continue
-                      }
-                      logMCPDebug(
-                        client.name,
-                        `Auth reconnect returned '${reconnected.type}'; falling through to needs-auth`,
-                      )
-                    }
-                  }
-
-                  // Emit progress when tool fails
-                  if (onProgress && toolUseId) {
-                    onProgress({
-                      toolUseID: toolUseId,
-                      data: {
-                        type: 'mcp_progress',
-                        status: 'failed',
-                        serverName: client.name,
-                        toolName: tool.name,
-                        elapsedTimeMs: Date.now() - startTime,
-                      },
-                    })
-                  }
-                  // Wrap MCP SDK errors so telemetry gets useful context
-                  // instead of just "Error" or "McpError" (the constructor
-                  // name). MCP SDK errors are protocol-level messages and
-                  // don't contain user file paths or code.
-                  if (
-                    error instanceof Error &&
-                    !(
-                      error instanceof
-                      TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-                    )
-                  ) {
-                    const name = error.constructor.name
-                    if (name === 'Error') {
-                      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                        error.message,
-                        error.message.slice(0, 200),
-                      )
-                    }
-                    // McpError has a numeric `code` with the JSON-RPC error
-                    // code (e.g. -32000 ConnectionClosed, -32001 RequestTimeout)
-                    if (
-                      name === 'McpError' &&
-                      'code' in error &&
-                      typeof error.code === 'number'
-                    ) {
-                      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                        error.message,
-                        `McpError ${error.code}`,
-                      )
-                    }
-                  }
-                  throw error
+                  logMCPDebug(
+                    client.name,
+                    `Auth reconnect returned '${reconnected.type}'; falling through to needs-auth`,
+                  )
                 }
               }
-            },
-            userFacingName() {
-              // Prefer title annotation if available, otherwise use tool name
-              const displayName = tool.annotations?.title || tool.name
-              return `${client.name} - ${displayName} (MCP)`
-            },
-            ...(isClaudeInChromeMCPServer(client.name) &&
-            (client.config.type === 'stdio' || !client.config.type)
-              ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
-                  tool.name,
+
+              // Emit progress when tool fails
+              if (onProgress && toolUseId) {
+                onProgress({
+                  toolUseID: toolUseId,
+                  data: {
+                    type: 'mcp_progress',
+                    status: 'failed',
+                    serverName: client.name,
+                    toolName: tool.name,
+                    elapsedTimeMs: Date.now() - startTime,
+                  },
+                })
+              }
+              // Wrap MCP SDK errors so telemetry gets useful context
+              // instead of just "Error" or "McpError" (the constructor
+              // name). MCP SDK errors are protocol-level messages and
+              // don't contain user file paths or code.
+              if (
+                error instanceof Error &&
+                !(
+                  error instanceof
+                  TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
                 )
-              : {}),
-            ...(feature('CHICAGO_MCP') &&
-            (client.config.type === 'stdio' || !client.config.type) &&
-            isComputerUseMCPServer!(client.name)
-              ? computerUseWrapper!().getComputerUseMCPToolOverrides(tool.name)
-              : {}),
+              ) {
+                const name = error.constructor.name
+                if (name === 'Error') {
+                  throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                    error.message,
+                    error.message.slice(0, 200),
+                  )
+                }
+                // McpError has a numeric `code` with the JSON-RPC error
+                // code (e.g. -32000 ConnectionClosed, -32001 RequestTimeout)
+                if (
+                  name === 'McpError' &&
+                  'code' in error &&
+                  typeof error.code === 'number'
+                ) {
+                  throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                    error.message,
+                    `McpError ${error.code}`,
+                  )
+                }
+              }
+              throw error
+            }
           }
-        })
-        .filter(isIncludedMcpTool)
+        },
+        userFacingName() {
+          // Prefer title annotation if available, otherwise use tool name
+          const displayName = tool.annotations?.title || tool.name
+          return `${client.name} - ${displayName} (MCP)`
+        },
+        ...(isClaudeInChromeMCPServer(client.name) &&
+        (client.config.type === 'stdio' || !client.config.type)
+          ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
+              tool.name,
+            )
+          : {}),
+        ...(feature('CHICAGO_MCP') &&
+        (client.config.type === 'stdio' || !client.config.type) &&
+        isComputerUseMCPServer!(client.name)
+          ? computerUseWrapper!().getComputerUseMCPToolOverrides(tool.name)
+          : {}),
+      }
+    })
+    .filter(isIncludedMcpTool)
+}
+
+export const fetchToolsForClient = memoizeWithLRU(
+  async (client: MCPServerConnection): Promise<Tool[]> => {
+    try {
+      return await fetchToolsForClientUncached(client)
     } catch (error) {
       logMCPError(client.name, `Failed to fetch tools: ${errorMessage(error)}`)
       return []
@@ -2487,10 +2526,18 @@ export async function reconnectMcpServerImpl(
         resourceTools.push(ListMcpResourcesTool, ReadMcpResourceTool)
       }
     }
+    // Official 2.1.211: RefreshMcpTools is available whenever any MCP client
+    // is live — re-inject (deduped by assembleToolPool) so getTools() special
+    // exclusion still surfaces it with connected servers.
+    const helperTools: Tool[] = tools.some(t =>
+      toolMatchesName(t, RefreshMcpToolsTool.name),
+    )
+      ? resourceTools
+      : [...resourceTools, RefreshMcpToolsTool]
 
     return {
       client,
-      tools: [...tools, ...resourceTools],
+      tools: [...tools, ...helperTools],
       commands,
       resources: resources.length > 0 ? resources : undefined,
     }
@@ -2660,10 +2707,13 @@ export async function getMcpToolsCommandsAndResources(
         resourceToolsAdded = true
         resourceTools.push(ListMcpResourcesTool, ReadMcpResourceTool)
       }
+      // Official 2.1.211: RefreshMcpTools — inject on every connected server
+      // batch; assembleToolPool/uniqBy dedupe by name.
+      const helperTools: Tool[] = [...resourceTools, RefreshMcpToolsTool]
 
       onConnectionAttempt({
         client,
-        tools: [...tools, ...resourceTools],
+        tools: [...tools, ...helperTools],
         commands,
         resources: resources.length > 0 ? resources : undefined,
       })

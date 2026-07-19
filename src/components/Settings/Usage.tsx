@@ -1,15 +1,24 @@
 import * as React from 'react';
-import { useEffect, useState } from 'react';
+import { Suspense, use, useEffect, useState } from 'react';
 import { extraUsage as extraUsageCommand } from 'src/commands/extra-usage/index.js';
 import { formatCost } from 'src/cost-tracker.js';
 import { getSubscriptionType } from 'src/utils/auth.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text } from '@anthropic/ink';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import { type ExtraUsage, fetchUtilization, type RateLimit, type Utilization } from '../../services/api/usage.js';
 import { formatResetText } from '../../utils/format.js';
 import { logError } from '../../utils/log.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
+import {
+  hasNamedTips,
+  periodHasSignal,
+  scanLocalUsageSafe,
+  significantBehaviors,
+  USAGE_BEHAVIOR_COPY,
+  type UsageNamedPct,
+  type UsageScanResult,
+} from '../../utils/usageSessionScan.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Byline, ProgressBar } from '@anthropic/ink';
 import { isEligibleForOverageCreditGrant, OverageCreditUpsell } from '../LogoV2/OverageCreditUpsell.js';
@@ -186,9 +195,171 @@ export function Usage(): React.ReactNode {
 
       {isEligibleForOverageCreditGrant() && <OverageCreditUpsell maxWidth={maxWidth} />}
 
+      {/* densable y1o/mYs/hYs: local session usage breakdown with d/w period keys */}
+      <UsageBreakdown maxWidth={maxWidth} />
+
       <Text dimColor>
         <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
       </Text>
+    </Box>
+  );
+}
+
+function UsageBreakdownHeader(): React.ReactNode {
+  return (
+    <Box flexDirection="column">
+      <Text bold wrap="wrap">
+        What&apos;s contributing to your limits usage?
+      </Text>
+    </Box>
+  );
+}
+
+function UsageBreakdown({ maxWidth }: { maxWidth: number }): React.ReactNode {
+  // densable mYs: start scan once; Suspense shows "Scanning local sessions…"
+  const [scanPromise] = useState(() => scanLocalUsageSafe());
+  return (
+    <Suspense
+      fallback={
+        <Box flexDirection="column">
+          <UsageBreakdownHeader />
+          <Box marginTop={1}>
+            <Text dimColor>Scanning local sessions…</Text>
+          </Box>
+        </Box>
+      }
+    >
+      <UsageBreakdownInner maxWidth={maxWidth} scanPromise={scanPromise} />
+    </Suspense>
+  );
+}
+
+function UsageBreakdownInner({
+  maxWidth,
+  scanPromise,
+}: {
+  maxWidth: number;
+  scanPromise: Promise<UsageScanResult>;
+}): React.ReactNode {
+  const scan = use(scanPromise);
+  const [period, setPeriod] = useState<'day' | 'week'>('day');
+  const dayHas = periodHasSignal(scan.day);
+  const weekHas = periodHasSignal(scan.week);
+  const anyHas = dayHas || weekHas;
+
+  useKeybindings(
+    {
+      'settings:periodDay': () => setPeriod('day'),
+      'settings:periodWeek': () => setPeriod('week'),
+    },
+    { context: 'Settings', isActive: anyHas },
+  );
+
+  if (!anyHas) return null;
+
+  const snap = period === 'day' ? scan.day : scan.week;
+  const behaviors = significantBehaviors(snap);
+  const windowLabel = period === 'day' ? '24h' : '7d';
+  const emptyPeriod = behaviors.length === 0 && !hasNamedTips(snap);
+
+  return (
+    <Box flexDirection="column" width={maxWidth}>
+      <UsageBreakdownHeader />
+      <Box marginTop={1}>
+        <Text dimColor wrap="wrap">
+          Last {windowLabel} · these are independent characteristics of your usage, not a breakdown
+        </Text>
+      </Box>
+      <Box flexDirection="column" marginTop={1} gap={1}>
+        {emptyPeriod ? (
+          <Text dimColor>Nothing over 10% in this period — try the other window.</Text>
+        ) : (
+          <>
+            {behaviors.map(stat => (
+              <BehaviorRow key={stat.key} stat={stat} totalCost={snap.totalCost} maxWidth={maxWidth} />
+            ))}
+            <NamedTip
+              top={snap.agents[0]}
+              maxWidth={maxWidth}
+              headline={(pct, name) => `${pct}% of your usage came from subagents under "${name}"`}
+              body="If this runs frequently, consider configuring its subagents with a cheaper model or tightening their prompts."
+            />
+            <NamedTip
+              top={snap.skills[0]}
+              maxWidth={maxWidth}
+              headline={(pct, name) => `${pct}% of your usage came from /${name}`}
+              body="Heavy skills can be scoped down or run with a cheaper model via skill frontmatter."
+            />
+            <NamedTip
+              top={snap.plugins[0]}
+              maxWidth={maxWidth}
+              headline={(pct, name) => `${pct}% of your usage came from plugin "${name}"`}
+              body="Review what this plugin contributes — its agents, skills, and MCP tools all count toward your limit."
+            />
+            <NamedTip
+              top={snap.mcpServers[0]}
+              maxWidth={maxWidth}
+              headline={(pct, name) => `${pct}% of your usage came from MCP server "${name}"`}
+              body="MCP tools can add tokens via large results. Prefer scoped tools and shorter responses."
+            />
+          </>
+        )}
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>
+          <Byline>
+            <ConfigurableShortcutHint action="settings:periodDay" context="Settings" fallback="d" description="day" />
+            <ConfigurableShortcutHint action="settings:periodWeek" context="Settings" fallback="w" description="week" />
+          </Byline>
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function BehaviorRow({
+  stat,
+  totalCost,
+  maxWidth,
+}: {
+  stat: { key: keyof typeof USAGE_BEHAVIOR_COPY; cost: number; count: number };
+  totalCost: number;
+  maxWidth: number;
+}): React.ReactNode {
+  const copy = USAGE_BEHAVIOR_COPY[stat.key];
+  const pct = totalCost > 0 ? Math.round((stat.cost / totalCost) * 100) : 0;
+  return (
+    <Box flexDirection="column" width={maxWidth}>
+      <Text wrap="wrap">{copy.headline(pct)}</Text>
+      <Box paddingLeft={1}>
+        <Text dimColor wrap="wrap">
+          {copy.body}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function NamedTip({
+  top,
+  maxWidth,
+  headline,
+  body,
+}: {
+  top: UsageNamedPct | undefined;
+  maxWidth: number;
+  headline: (pct: number, name: string) => string;
+  body: string;
+}): React.ReactNode {
+  if (!top || top.pct < 10) return null;
+  return (
+    <Box flexDirection="column" width={maxWidth}>
+      <Text wrap="wrap">{headline(top.pct, top.name)}</Text>
+      <Box paddingLeft={1}>
+        <Text dimColor wrap="wrap">
+          {body}
+        </Text>
+      </Box>
     </Box>
   );
 }

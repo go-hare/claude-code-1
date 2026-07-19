@@ -75,6 +75,14 @@ import {
 import { resolveAppliedEffort } from '../../utils/effort.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
+import {
+  computeCacheBreakpointMarkers,
+  type CacheBreakpointSourceMessage,
+} from '../../utils/cacheBreakpointMarkers.js'
+import {
+  isBasaltScarpPreserveWindowEnabled,
+  shouldSkipMemoryForkCacheWrite,
+} from '../../utils/basaltMemoryGates.js'
 import { captureAPIRequest, logError } from '../../utils/log.js'
 import {
   createAssistantAPIErrorMessage,
@@ -718,6 +726,12 @@ export type Options = {
   fetchOverride?: ClientOptions['fetch']
   enablePromptCaching?: boolean
   skipCacheWrite?: boolean
+  /**
+   * densable forkPointUuid — when basalt_spur is on, pin an extra cache
+   * breakpoint at (or before) this message uuid so forked agents share the
+   * main-thread prefix without rewriting the fork's own tail.
+   */
+  forkPointUuid?: string
   temperatureOverride?: number
   effortValue?: EffortValue
   mcpTools: Tools
@@ -1921,6 +1935,7 @@ async function* queryModel(
         consumedCacheEdits as any,
         consumedPinnedEdits as any,
         options.skipCacheWrite,
+        options.forkPointUuid,
       ),
       system,
       tools: allTools,
@@ -2453,6 +2468,10 @@ async function* queryModel(
                   [contentBlock] as BetaContentBlock[],
                   tools,
                   options.agentId,
+                  {
+                    requestId: streamRequestId ?? undefined,
+                    messageId: partialMessage.id,
+                  },
                 ) as MessageContent,
               },
               requestId: streamRequestId ?? undefined,
@@ -2669,6 +2688,20 @@ async function* queryModel(
                         options.model,
                         targetModel,
                       )
+                    }
+                    // densable Te==="edit_prompt": abort(J0("refusal-fallback-edit"))
+                    // so REPL auto-restore rewinds the last human turn. query.ts
+                    // consumes this event and aborts toolUseContext.abortController
+                    // (stream path only has signal, not the controller).
+                    if (flow.choice === 'edit_prompt') {
+                      refusalHandledByFallback = true
+                      yield {
+                        type: 'refusal_edit_prompt',
+                        originalModel: options.model,
+                        fallbackModel: targetModel,
+                        requestId: streamRequestId ?? null,
+                        apiRefusalCategory,
+                      } as unknown as StreamEvent
                     }
                     void flow
                   }
@@ -3022,6 +3055,10 @@ async function* queryModel(
             result.content,
             tools,
             options.agentId,
+            {
+              requestId: streamRequestId ?? undefined,
+              messageId: result.id,
+            },
           ) as MessageContent,
         },
         requestId: streamRequestId ?? undefined,
@@ -3121,6 +3158,10 @@ async function* queryModel(
               result.content,
               tools,
               options.agentId,
+              {
+                requestId: streamRequestId ?? undefined,
+                messageId: result.id,
+              },
             ) as MessageContent,
           },
           requestId: streamRequestId ?? undefined,
@@ -3533,6 +3574,24 @@ type CachedMCPinnedEdits = {
   block: CachedMCEditsBlock
 }
 
+/** densable i() — assistant is cacheable when last content block is not thinking. */
+function isMessageCacheBreakpointEligible(
+  message: UserMessage | AssistantMessage,
+): boolean {
+  if (message.type !== 'assistant') return true
+  const content = message.message?.content
+  if (typeof content === 'string') return true
+  if (!Array.isArray(content) || content.length === 0) return true
+  const last = content.at(-1)
+  if (last === undefined) return true
+  if (last.type === 'thinking' || last.type === 'redacted_thinking')
+    return false
+  if (feature('CONNECTOR_TEXT')) {
+    if (isConnectorTextBlock(last)) return false
+  }
+  return true
+}
+
 // Exported for testing cache_reference placement constraints
 export function addCacheBreakpoints(
   messages: (UserMessage | AssistantMessage)[],
@@ -3542,27 +3601,40 @@ export function addCacheBreakpoints(
   newCacheEdits?: CachedMCEditsBlock | null,
   pinnedEdits?: CachedMCPinnedEdits[],
   skipCacheWrite = false,
+  forkPointUuid?: string,
 ): MessageParam[] {
+  // densable iay: marker set with optional basalt_spur fork-point pin.
+  // Default (spur off): exactly one message-level cache_control marker —
+  // last cacheable message, or second-to-last cacheable when skipCacheWrite
+  // (fire-and-forget forks share the prefix without writing their own tail).
+  // With basalt_spur (ant+GB): pin an extra marker at forkPointUuid (or the
+  // previous cacheable when no uuid and not skipCacheWrite). basalt_scarp
+  // steps the fork pin one cacheable earlier when forkIdx === primary under
+  // skipCacheWrite.
+  const source: CacheBreakpointSourceMessage[] = messages.map(m => ({
+    type: m.type,
+    uuid: m.uuid,
+  }))
+  const basaltSpur = shouldSkipMemoryForkCacheWrite()
+  const basaltScarp = isBasaltScarpPreserveWindowEnabled()
+  const { markers, forkPointPinned } = computeCacheBreakpointMarkers({
+    messages: source,
+    skipCacheWrite,
+    basaltSpur,
+    basaltScarp,
+    forkPointUuid,
+    isCacheable: (_m, index) =>
+      isMessageCacheBreakpointEligible(messages[index]!),
+  })
   logEvent('tengu_api_cache_breakpoints', {
     totalMessageCount: messages.length,
     cachingEnabled: enablePromptCaching,
     skipCacheWrite,
+    forkPointPinned,
+    markerCount: markers.size,
   })
-
-  // Exactly one message-level cache_control marker per request. Mycro's
-  // turn-to-turn eviction (page_manager/index.rs: Index::insert) frees
-  // local-attention KV pages at any cached prefix position NOT in
-  // cache_store_int_token_boundaries. With two markers the second-to-last
-  // position is protected and its locals survive an extra turn even though
-  // nothing will ever resume from there — with one marker they're freed
-  // immediately. For fire-and-forget forks (skipCacheWrite) we shift the
-  // marker to the second-to-last message: that's the last shared-prefix
-  // point, so the write is a no-op merge on mycro (entry already exists)
-  // and the fork doesn't leave its own tail in the KVCC. Dense pages are
-  // refcounted and survive via the new hash either way.
-  const markerIndex = skipCacheWrite ? messages.length - 2 : messages.length - 1
   const result = messages.map((msg, index) => {
-    const addCache = index === markerIndex
+    const addCache = markers.has(index)
     if (msg.type === 'user') {
       return userMessageToMessageParam(
         msg,

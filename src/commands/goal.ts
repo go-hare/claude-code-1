@@ -6,6 +6,7 @@
  * the hook blocks and the query loop continues automatically.
  */
 
+import { feature } from 'bun:bundle'
 import type {
   Command,
   LocalCommandResult,
@@ -110,6 +111,14 @@ const goal = {
   argumentHint: '[<condition> | clear]',
   immediate: true,
   supportsNonInteractive: true,
+  // densable dual for GOAL feature lives in commands/goal/; hide this legacy
+  // local command when GOAL is on so findCommand is unambiguous.
+  isEnabled() {
+    if (feature('GOAL')) {
+      return false
+    }
+    return true
+  },
   load: () =>
     Promise.resolve({
       async call(

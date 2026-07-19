@@ -109,10 +109,19 @@ const YELLOW_FG_CODE: AnsiCode = {
   endCode: '\x1b[39m',
 }
 
+/**
+ * densable BWi — max unique styles before overflow.
+ * Packed style id uses 15 data bits (x0t=17 style shift) →
+ * Yyg=(1<<(32-17))-1 = 32767, BWi = Yyg>>>1 = 16383.
+ */
+export const STYLE_POOL_MAX_UNIQUE = 16383
+
 export class StylePool {
   private ids = new Map<string, number>()
   private styles: AnsiCode[][] = []
   private transitionCache = new Map<number, string>()
+  /** densable overflowWarned — Usu().overflowed */
+  private overflowWarned = false
   readonly none: number
 
   constructor() {
@@ -120,6 +129,16 @@ export class StylePool {
   }
 
   private static readonly CACHE_MAX = 1000
+
+  /** densable QJn.get size() — unique style count for basalt_meadow telemetry. */
+  get size(): number {
+    return this.styles.length
+  }
+
+  /** densable QJn.get overflowed() — true after STYLE_POOL_MAX_UNIQUE hit. */
+  get overflowed(): boolean {
+    return this.overflowWarned
+  }
 
   /**
    * Evict oldest entries from derivative caches when they exceed the limit.
@@ -163,12 +182,22 @@ export class StylePool {
    * underline, etc.). Foreground-only styles get even IDs; styles visible
    * on spaces get odd IDs. This lets the renderer skip invisible spaces
    * with a single bitmask check on the packed word.
+   *
+   * densable: when styles.length > BWi, further combinations render unstyled
+   * (return none) to avoid packed-cell aliasing; sets overflowWarned once.
    */
   intern(styles: AnsiCode[]): number {
     const key = styles.length === 0 ? '' : styles.map(s => s.code).join('\0')
     let id = this.ids.get(key)
     if (id === undefined) {
       const rawId = this.styles.length
+      // densable: n>BWi → warn once + return none (do not allocate).
+      if (rawId > STYLE_POOL_MAX_UNIQUE) {
+        if (!this.overflowWarned) {
+          this.overflowWarned = true
+        }
+        return this.none
+      }
       this.styles.push(styles.length === 0 ? [] : styles)
       id =
         (rawId << 1) |

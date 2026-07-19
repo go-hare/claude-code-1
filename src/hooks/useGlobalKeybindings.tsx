@@ -5,8 +5,9 @@
  * This component renders nothing - it just registers the keybinding handlers.
  */
 import { feature } from 'bun:bundle';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { instances } from '@anthropic/ink';
+import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import type { Screen } from '../screens/REPL.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
@@ -15,7 +16,10 @@ import {
   logEvent,
 } from '../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
+import type { Message } from '../types/message.js';
 import { count } from '../utils/array.js';
+import { diffFileListDown, diffFileListUp } from '../utils/diffFileListNav.js';
+import { openLatestArtifact } from '../utils/openArtifactShortcut.js';
 import { getTerminalPanel } from '../utils/terminalPanel.js';
 
 type Props = {
@@ -28,6 +32,8 @@ type Props = {
   onExitTranscript?: () => void;
   virtualScrollActive?: boolean;
   searchBarOpen?: boolean;
+  /** densable app:openArtifact — open latest session artifact from transcript. */
+  messages?: Message[];
 };
 
 /**
@@ -47,9 +53,20 @@ export function GlobalKeybindingHandlers({
   onExitTranscript,
   virtualScrollActive,
   searchBarOpen = false,
+  messages = [],
 }: Props): null {
   const expandedView = useAppState(s => s.expandedView);
+  const frameUrls = useAppState(s => s.frameUrls ?? {});
   const setAppState = useSetAppState();
+  // Keep latest messages without re-registering app:openArtifact each turn.
+  const messagesRef = useRef<Message[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  const frameUrlsRef = useRef(frameUrls);
+  useEffect(() => {
+    frameUrlsRef.current = frameUrls;
+  }, [frameUrls]);
 
   // Toggle todo list (ctrl+t) - cycles through views
   const handleToggleTodos = useCallback(() => {
@@ -224,8 +241,47 @@ export function GlobalKeybindingHandlers({
   }, []);
   useKeybinding('app:redraw', handleRedraw, { context: 'Global' });
 
+  // densable app:openArtifact (ctrl+]) — prefer frameUrls map (UIa), else transcript.
+  const handleOpenArtifact = useCallback(() => {
+    const map = frameUrlsRef.current;
+    void openLatestArtifact(messagesRef.current, map).then(opened => {
+      if (!opened || Object.keys(map).length === 0) return;
+      // densable: expand footer frame nav to latest path key
+      const lastKey = Object.keys(map).at(-1) ?? null;
+      setAppState(prev =>
+        prev.frameExpanded && prev.frameNavPath === lastKey
+          ? prev
+          : { ...prev, frameExpanded: true, frameNavPath: lastKey },
+      );
+    });
+  }, [setAppState]);
+  useKeybinding('app:openArtifact', handleOpenArtifact, { context: 'Global' });
+
+  // densable app:diffFileListUp/Down — Global ctrl/meta+up/down; no-op unless
+  // DiffDialog (or future DiffPanel) has registered via registerDiffFileListNav.
+  useKeybinding(
+    'app:diffFileListUp',
+    () => {
+      diffFileListUp();
+    },
+    { context: 'Global' },
+  );
+  useKeybinding(
+    'app:diffFileListDown',
+    () => {
+      diffFileListDown();
+    },
+    { context: 'Global' },
+  );
+
   // Transcript-specific bindings (only active when in transcript mode)
   const isInTranscript = screen === 'transcript';
+  // densable: elevate Transcript over Global so ctrl+c → transcript:exit
+  // and ctrl+d → pager when modal handlers are active. Do NOT elevate while
+  // searchBarOpen — isModal is false then, but Scroll half/full handlers stay
+  // registered; elevating would last-win halfPage onto those Scroll handlers
+  // and steal ctrl+u/d from the search bar.
+  useRegisterKeybindingContext('Transcript', isInTranscript && !searchBarOpen);
   useKeybinding('transcript:toggleShowAll', handleToggleShowAll, {
     context: 'Transcript',
     isActive: isInTranscript && !virtualScrollActive,

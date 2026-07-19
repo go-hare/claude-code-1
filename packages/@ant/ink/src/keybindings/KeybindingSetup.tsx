@@ -12,7 +12,7 @@ import type { InputEvent } from '../core/events/input-event.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings
 import useInput from '../hooks/use-input.js';
 import type { Key } from '../core/events/input-event.js';
-import { KeybindingProvider } from './KeybindingContext.js';
+import { type HandlerRegistration, KeybindingProvider, type PreDispatchHandler } from './KeybindingContext.js';
 import { resolveKeyWithChordState } from './resolver.js';
 import type {
   KeybindingContextName,
@@ -80,16 +80,10 @@ export function KeybindingSetup({
   const chordTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Handler registry for action callbacks (used by ChordInterceptor to invoke handlers)
-  const handlerRegistryRef = useRef(
-    new Map<
-      string,
-      Set<{
-        action: string;
-        context: KeybindingContextName;
-        handler: () => void;
-      }>
-    >(),
-  );
+  const handlerRegistryRef = useRef(new Map<string, Set<HandlerRegistration>>());
+
+  // densable preDispatchRef — handlers run after chord path, before singleKey
+  const preDispatchRef = useRef(new Set<PreDispatchHandler>());
 
   // Active context tracking for keybinding priority resolution
   const activeContextsRef = useRef<Set<KeybindingContextName>>(new Set());
@@ -167,6 +161,7 @@ export function KeybindingSetup({
       registerActiveContext={registerActiveContext}
       unregisterActiveContext={unregisterActiveContext}
       handlerRegistryRef={handlerRegistryRef}
+      preDispatchRef={preDispatchRef}
     >
       <ChordInterceptor
         bindings={bindings}
@@ -174,6 +169,7 @@ export function KeybindingSetup({
         setPendingChord={setPendingChord}
         activeContexts={activeContextsRef.current}
         handlerRegistryRef={handlerRegistryRef}
+        preDispatchRef={preDispatchRef}
       />
       {children}
     </KeybindingProvider>
@@ -189,26 +185,51 @@ export function KeybindingSetup({
  * Without this, the second key of a chord (e.g., 'r' in "ctrl+c r") would be
  * captured by PromptInput and added to the input field before the keybinding
  * system could recognize it as completing a chord.
+ *
+ * densable also runs preDispatch (Q0t/Wlr) after the chord path and before
+ * singleKey — selection esc/ctrl+c, digit-submit guards, etc. Then scans
+ * singleKey handlers for non-chord keystrokes (e.g. enter rebound away from
+ * chat:submit, or chat:submit rebound to a non-enter key). Handlers opt in
+ * via singleKey:true.
  */
-type HandlerRegistration = {
-  action: string;
-  context: KeybindingContextName;
-  handler: () => void;
-};
-
 function ChordInterceptor({
   bindings,
   pendingChordRef,
   setPendingChord,
   activeContexts,
   handlerRegistryRef,
+  preDispatchRef,
 }: {
   bindings: ParsedBinding[];
   pendingChordRef: React.RefObject<ParsedKeystroke[] | null>;
   setPendingChord: (pending: ParsedKeystroke[] | null) => void;
   activeContexts: Set<KeybindingContextName>;
   handlerRegistryRef: React.RefObject<Map<string, Set<HandlerRegistration>>>;
+  preDispatchRef: React.RefObject<Set<PreDispatchHandler>>;
 }): null {
+  /**
+   * densable Wlr — invoke preDispatch handlers; first truthy return consumes
+   * the event via stopImmediatePropagation.
+   */
+  const runPreDispatch = useCallback(
+    (input: string, key: Key, event: InputEvent): boolean => {
+      const handlers = preDispatchRef.current;
+      if (!handlers || handlers.size === 0) return false;
+      for (const handler of handlers) {
+        try {
+          if (handler(input, key, event) === true) {
+            event.stopImmediatePropagation();
+            return true;
+          }
+        } catch {
+          // densable swallows handler errors via xe(_PA) — keep interceptor alive
+        }
+      }
+      return false;
+    },
+    [preDispatchRef],
+  );
+
   const handleInput = useCallback(
     (input: string, key: Key, event: InputEvent) => {
       // Wheel events can never start chord sequences — scroll:lineUp/Down are
@@ -242,49 +263,93 @@ function ChordInterceptor({
           // This key starts a chord - store pending state and stop propagation
           setPendingChord(result.pending);
           event.stopImmediatePropagation();
+          return;
+
+        case 'chord_cancelled':
+          setPendingChord(null);
+          event.stopImmediatePropagation();
+          return;
+
+        case 'unbound':
+          // densable: mid-chord unbound cancels + stops; otherwise fall through
+          // so singleKey handlers can still fire for non-chord unbound keys.
+          setPendingChord(null);
+          if (wasInChord) {
+            event.stopImmediatePropagation();
+            return;
+          }
           break;
 
         case 'match': {
           // Clear pending state
           setPendingChord(null);
 
-          // Only invoke handlers and stop propagation for chord completions
-          // (multi-keystroke sequences). Single-keystroke matches should propagate
-          // to per-hook handlers to avoid interfering with other input handling.
+          // Chord completions (multi-keystroke) invoke handlers here and stop.
+          // Single-keystroke matches fall through to the singleKey scan so
+          // opt-in handlers (singleKey:true) can fire without double-handling
+          // default enter:chat:submit (which registers singleKey:false).
           if (wasInChord) {
-            const contextsSet = new Set(contexts);
             if (registry) {
               const handlers = registry.get(result.action);
               if (handlers && handlers.size > 0) {
                 for (const registration of handlers) {
-                  if (contextsSet.has(registration.context)) {
+                  if (contexts.includes(registration.context) || activeContexts.has(registration.context)) {
                     registration.handler();
                     event.stopImmediatePropagation();
-                    break;
+                    return;
                   }
                 }
               }
             }
+            return;
           }
           break;
         }
 
-        case 'chord_cancelled':
-          setPendingChord(null);
-          event.stopImmediatePropagation();
-          break;
-
-        case 'unbound':
-          setPendingChord(null);
-          event.stopImmediatePropagation();
-          break;
-
         case 'none':
-          // No chord involvement - let other handlers process
+          // No chord involvement — fall through to preDispatch + singleKey
           break;
       }
+
+      // densable: if(!lAo) return — no registry, nothing to dispatch
+      if (!registry) return;
+
+      // densable Wlr: preDispatch after chord path, before singleKey
+      // (EPA skip is densable keyboard-event reentry; fork useInput path has no EPA)
+      if (runPreDispatch(input, key, event)) {
+        return;
+      }
+
+      // densable singleKey path: after chord match/none/unbound (non-chord),
+      // scan handlers that opted into single-key interceptor dispatch.
+      const resolvedByContext = new Map<KeybindingContextName, string | null>();
+      for (const handlers of registry.values()) {
+        for (const registration of handlers) {
+          if (!registration.singleKey) continue;
+
+          let resolved = resolvedByContext.get(registration.context);
+          if (resolved === undefined) {
+            const singleResult = resolveKeyWithChordState(
+              input,
+              key,
+              [...activeContexts, registration.context, 'Global'],
+              bindings,
+              null,
+            );
+            resolved = singleResult.type === 'match' ? singleResult.action : null;
+            resolvedByContext.set(registration.context, resolved);
+          }
+
+          if (resolved === registration.action) {
+            if (registration.handler() !== false) {
+              event.stopImmediatePropagation();
+              return;
+            }
+          }
+        }
+      }
     },
-    [bindings, pendingChordRef, setPendingChord, activeContexts, handlerRegistryRef],
+    [bindings, pendingChordRef, setPendingChord, activeContexts, handlerRegistryRef, runPreDispatch],
   );
 
   useInput(handleInput);

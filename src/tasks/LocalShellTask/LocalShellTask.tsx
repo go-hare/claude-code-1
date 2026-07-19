@@ -20,8 +20,16 @@ import { tailFile } from '../../utils/fsOperations.js';
 import { logError } from '../../utils/log.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import type { ShellCommand } from '../../utils/ShellCommand.js';
+import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js';
 import { evictTaskOutput, getTaskOutputPath } from '../../utils/task/diskOutput.js';
-import { registerTask, updateTaskState } from '../../utils/task/framework.js';
+import {
+  addKeepaliveReason,
+  bashKeepaliveReason,
+  monitorKeepaliveReason,
+  registerTask,
+  removeKeepaliveReason,
+  updateTaskState,
+} from '../../utils/task/framework.js';
 import { escapeXml } from '../../utils/xml.js';
 import { backgroundAgentTask, isLocalAgentTask } from '../LocalAgentTask/LocalAgentTask.js';
 import { isMainSessionTask } from '../LocalMainSessionTask.js';
@@ -102,6 +110,7 @@ function startStallWatchdog(
             // signal and an unknown value falls through to 'completed',
             // falsely closing the task for SDK consumers. Statusless
             // notifications are skipped by the SDK emitter (progress ping).
+            // densable stall body uses "Stop this task" (not Kill).
             const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
 <${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
@@ -110,13 +119,15 @@ function startStallWatchdog(
 Last output:
 ${content.trimEnd()}
 
-The command is likely blocked on an interactive prompt. Kill this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`;
+The command is likely blocked on an interactive prompt. Stop this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`;
+            // Official stall: cf({..., priority:"next", agentId}) — leave undefined for main
             enqueuePendingNotification({
               value: message,
               mode: 'task-notification',
               priority: 'next',
               agentId,
             });
+            logEvent('task_local_shell_stall_detected', {});
           },
           () => {},
         );
@@ -212,6 +223,14 @@ function enqueueShellNotification(
     return;
   }
 
+  // densable _Xi: completed → Ee("task_local_shell"); failed → me("task_local_shell","task_local_shell_failed")
+  // Local uses direct event names (same style as task_local_shell_pressure_reap).
+  if (status === 'completed') {
+    logEvent('task_local_shell', {});
+  } else if (status === 'failed') {
+    logEvent('task_local_shell_failed', {});
+  }
+
   // Abort any active speculation — background task state changed, so speculated
   // results may reference stale task output. The prompt suggestion text is
   // preserved; only the pre-computed response is discarded.
@@ -257,12 +276,23 @@ function enqueueShellNotification(
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`;
 
+  // Official _Xi: priority always "next", agentId as-is (undefined = main AL)
   enqueuePendingNotification({
     value: message,
     mode: 'task-notification',
-    priority: feature('MONITOR_TOOL') ? 'next' : 'later',
+    priority: 'next',
     agentId,
   });
+
+  // densable _Xi: if(a!==void 0) lf(e, killed?"stopped":r, {toolUseId, summary, outputFile})
+  // Only when caller passed an agentId (nested shell) — main-session path omits lf here.
+  if (agentId !== undefined) {
+    emitTaskTerminatedSdk(taskId, status === 'killed' ? 'stopped' : status, {
+      toolUseId,
+      summary,
+      outputFile: outputPath,
+    });
+  }
 }
 
 export const LocalShellTask: Task = {
@@ -304,6 +334,13 @@ export async function spawnShellTask(
 
   registerTask(taskState, setAppState);
 
+  // Official Gge(i, `bash:${e}` / `monitor:${e}`) — attach when agent-scoped.
+  // Official bash/monitor Gge has no pn() guard (unlike agent/workflow).
+  if (agentId) {
+    const reason = kind === 'monitor' ? monitorKeepaliveReason(taskId) : bashKeepaliveReason(taskId);
+    addKeepaliveReason(agentId, reason, setAppState);
+  }
+
   // Official $xu — main-thread bg shells only (not monitor / not agent-scoped)
   const disposePressureReap = installShellPressureReap(
     taskId,
@@ -326,8 +363,12 @@ export async function spawnShellTask(
     disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
+    let owner: string | undefined;
+    let shellKind: BashTaskKind | undefined;
 
     updateTaskState<LocalShellTaskState>(taskId, setAppState, task => {
+      owner = task.agentId;
+      shellKind = task.kind;
       if (task.status === 'killed') {
         wasKilled = true;
         return task;
@@ -342,6 +383,12 @@ export async function spawnShellTask(
         endTime: Date.now(),
       };
     });
+
+    // Official tB(owner, bash:/monitor:id) on terminal (also kill path).
+    if (owner) {
+      const reason = shellKind === 'monitor' ? monitorKeepaliveReason(taskId) : bashKeepaliveReason(taskId);
+      removeKeepaliveReason(owner, reason, setAppState);
+    }
 
     enqueueShellNotification(
       taskId,
@@ -513,6 +560,7 @@ export function backgroundAll(getAppState: () => AppState, setAppState: SetAppSt
   }
 
   // Background all foreground agent tasks
+  // densable WLe: all local_agent with !isBackgrounded (includes main-session).
   const foregroundAgentTaskIds = Object.keys(state.tasks).filter(id => {
     const task = state.tasks[id];
     return isLocalAgentTask(task) && !task.isBackgrounded;
@@ -520,6 +568,35 @@ export function backgroundAll(getAppState: () => AppState, setAppState: SetAppSt
   for (const taskId of foregroundAgentTaskIds) {
     backgroundAgentTask(taskId, getAppState, setAppState);
   }
+
+  // densable WLe → Ee("task_local_shell_background_all")
+  logEvent('task_local_shell_background_all', {});
+}
+
+/**
+ * densable Yto — background the single task whose toolUseId matches.
+ * Shell: return backgroundTask result. Agent (non main-session): call
+ * backgroundAgentTask and return true (densable `return J5r(...),!0`).
+ * Matching task of other types / already-backgrounded / main-session → false.
+ */
+export function backgroundByToolUseId(
+  toolUseId: string,
+  getAppState: () => AppState,
+  setAppState: SetAppState,
+): boolean {
+  const state = getAppState();
+  for (const [taskId, task] of Object.entries(state.tasks)) {
+    if (task.toolUseId !== toolUseId) continue;
+    if (isLocalShellTask(task) && !task.isBackgrounded && task.shellCommand) {
+      return backgroundTask(taskId, getAppState, setAppState);
+    }
+    if (isLocalAgentTask(task) && !task.isBackgrounded && !isMainSessionTask(task)) {
+      backgroundAgentTask(taskId, getAppState, setAppState);
+      return true;
+    }
+    return false;
+  }
+  return false;
 }
 
 /**

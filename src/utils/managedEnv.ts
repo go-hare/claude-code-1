@@ -187,6 +187,9 @@ export function applySafeConfigEnvironmentVariables(): void {
       process.env[key] = value
     }
   }
+
+  // densable processWrapper settings → CLAUDE_CODE_PROCESS_WRAPPER env seed.
+  seedProcessWrapperFromSettingsSafe()
 }
 
 /**
@@ -209,6 +212,9 @@ export function applyConfigEnvironmentVariables(): void {
   // Reconfigure proxy/mTLS agents to pick up any proxy env vars from settings
   configureGlobalAgents()
 
+  // densable processWrapper settings → env (also after full trusted apply).
+  seedProcessWrapperFromSettingsSafe()
+
   // Official b4t densable — async reload client cert/key file contents after
   // settings env may have changed CLAUDE_CODE_CLIENT_CERT/KEY paths.
   void import('./mtls.js')
@@ -222,4 +228,16 @@ export function applyConfigEnvironmentVariables(): void {
     .catch(() => {
       // densable optional
     })
+}
+
+/** Lazy seed to keep managedEnv free of hard processWrapper cycles. */
+function seedProcessWrapperFromSettingsSafe(): void {
+  try {
+    const { seedProcessWrapperFromSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./processWrapper.js') as typeof import('./processWrapper.js')
+    seedProcessWrapperFromSettings()
+  } catch {
+    // optional during early bootstrap
+  }
 }

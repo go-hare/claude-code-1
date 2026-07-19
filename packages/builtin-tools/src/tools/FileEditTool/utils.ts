@@ -60,6 +60,49 @@ export function findActualString(
 }
 
 /**
+ * densable EKi — classify whether old_string would apply to file contents.
+ * Used for tengu_edit_tool_*_hypothetical wouldHaveResult analytics.
+ */
+export type EditApplyOutcome = 'no_match' | 'ambiguous' | 'applies'
+
+export function classifyEditApplyOutcome(
+  fileContent: string,
+  oldString: string,
+  replaceAll: boolean,
+): EditApplyOutcome {
+  if (oldString === '') {
+    return 'no_match'
+  }
+  const actual = findActualString(fileContent, oldString)
+  if (!actual) {
+    return 'no_match'
+  }
+  if (!replaceAll) {
+    const first = fileContent.indexOf(actual)
+    if (fileContent.indexOf(actual, first + actual.length) !== -1) {
+      return 'ambiguous'
+    }
+  }
+  return 'applies'
+}
+
+/**
+ * densable Fyu — map EKi outcome → analytics wouldHaveResult token.
+ */
+export function editWouldHaveResultForAnalytics(
+  outcome: EditApplyOutcome,
+): 'errorCode8' | 'errorCode9' | 'success' {
+  switch (outcome) {
+    case 'no_match':
+      return 'errorCode8'
+    case 'ambiguous':
+      return 'errorCode9'
+    case 'applies':
+      return 'success'
+  }
+}
+
+/**
  * Transform edits to ensure replace_all always has a boolean value
  * @param edits Array of edits with optional replace_all
  * @returns Array of edits with replace_all guaranteed to be boolean

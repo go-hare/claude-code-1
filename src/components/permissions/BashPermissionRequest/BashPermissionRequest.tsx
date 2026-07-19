@@ -272,6 +272,9 @@ function BashPermissionRequestInner({
   const options = useMemo(
     () =>
       bashToolUseOptions({
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input as { [key: string]: unknown },
+        permissionResult: toolUseConfirm.permissionResult,
         suggestions:
           toolUseConfirm.permissionResult.behavior === 'ask' ? toolUseConfirm.permissionResult.suggestions : undefined,
         decisionReason: toolUseConfirm.permissionResult.decisionReason,

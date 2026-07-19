@@ -24,6 +24,7 @@ import type { Screen } from '../screens/REPL.js'
 import { exitTeammateView } from '../state/teammateViewHelpers.js'
 import {
   killAllRunningAgentTasks,
+  markAgentStoppedByUser,
   markAgentsNotified,
 } from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { PromptInputMode, VimMode } from '../types/textInputTypes.js'
@@ -33,6 +34,8 @@ import {
   hasCommandsInQueue,
 } from '../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
+import { killInProcessTeammate } from '../utils/swarm/spawnInProcess.js'
+import { isParkedKeepaliveAgent } from '../utils/task/framework.js'
 
 /** Time window in ms during which a second press kills all background agents. */
 const KILL_AGENTS_CONFIRM_WINDOW_MS = 3000
@@ -166,24 +169,57 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     isActive: isEscapeActive,
   })
 
-  // Shared kill path: stop all agents, suppress per-agent notifications,
-  // emit SDK events, enqueue a single aggregate model-facing notification.
+  // Shared kill path — densable chat:killAgents / UPa+kSu+PGr:
+  // densable UPa: (Wl && (running||YC)) || (in_process_teammate && running)
+  // 1. Kle each killable; hAe for non-OH local_agent
+  // 2. kSu(tasks, set, "user"): YC parked first, then running local_agent
+  // 3. PGr each in_process_teammate
+  // 4. lf/SDK stopped for non-OH non-teammate; aggregate notif (OH skipped)
   // Returns true if anything was killed.
   const killAllAgentsAndNotify = useCallback((): boolean => {
     const tasks = store.getState().tasks
-    const running = Object.entries(tasks).filter(
-      ([, t]) => t.type === 'local_agent' && t.status === 'running',
-    )
-    if (running.length === 0) return false
-    killAllRunningAgentTasks(tasks, setAppState)
-    const descriptions: string[] = []
-    for (const [taskId, task] of running) {
+    // Official densable UPa
+    const killable = Object.entries(tasks).filter(([, t]) => {
+      if (t.type === 'local_agent') {
+        if (t.status === 'running') return true
+        return isParkedKeepaliveAgent(t as never)
+      }
+      return t.type === 'in_process_teammate' && t.status === 'running'
+    })
+    if (killable.length === 0) return false
+    // densable: for each UPa → Kle; Wl && !OH → hAe
+    for (const [taskId, task] of killable) {
       markAgentsNotified(taskId, setAppState)
+      if (
+        task.type === 'local_agent' &&
+        (task as { isObserver?: boolean }).isObserver !== true
+      ) {
+        markAgentStoppedByUser(taskId, setAppState)
+      }
+    }
+    // densable kSu(X,y,"user")
+    killAllRunningAgentTasks(tasks, setAppState, 'user')
+    // densable: for teammates → PGr (killInProcessTeammate)
+    for (const [taskId, task] of killable) {
+      if (task.type === 'in_process_teammate') {
+        killInProcessTeammate(taskId, setAppState)
+      }
+    }
+    const descriptions: string[] = []
+    for (const [taskId, task] of killable) {
+      // Official: skip observers from aggregate description / SDK surface
+      if ((task as { isObserver?: boolean }).isObserver === true) continue
       descriptions.push(task.description)
+      // densable: teammate in te but skip lf (PGr already notified:true)
+      if (task.type === 'in_process_teammate') continue
       emitTaskTerminatedSdk(taskId, 'stopped', {
         toolUseId: task.toolUseId,
         summary: task.description,
       })
+    }
+    if (descriptions.length === 0) {
+      onAgentsKilled()
+      return true
     }
     const summary =
       descriptions.length === 1
@@ -224,10 +260,17 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // agents. Reads tasks from the store directly to avoid stale closures.
   const handleKillAgents = useCallback(() => {
     const tasks = store.getState().tasks
-    const hasRunningAgents = Object.values(tasks).some(
-      t => t.type === 'local_agent' && t.status === 'running',
-    )
-    if (!hasRunningAgents) {
+    // Official UPa: killable if running OR YC parked (completed+KA)
+    const hasKillableAgents = Object.values(tasks).some(t => {
+      if (t.type !== 'local_agent') return false
+      if (t.status === 'running') return true
+      return (
+        t.status === 'completed' &&
+        ((t as { keepaliveReasons?: Set<string> }).keepaliveReasons?.size ??
+          0) > 0
+      )
+    })
+    if (!hasKillableAgents) {
       addNotification({
         key: 'kill-agents-none',
         text: 'No background agents running',

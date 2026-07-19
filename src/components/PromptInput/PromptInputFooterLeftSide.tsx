@@ -23,13 +23,13 @@ import {
 import { BackgroundTaskStatus } from '../tasks/BackgroundTaskStatus.js';
 import { isBackgroundTask } from '../../tasks/types.js';
 import { isPanelAgentTask } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
-import { getVisibleAgentTasks } from '../CoordinatorAgentStatus.js';
+import { getPanelListItems } from '../CoordinatorAgentStatus.js';
 import { count } from '../../utils/array.js';
 import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { TeamStatus } from '../teams/TeamStatus.js';
 import { isInProcessEnabled } from '../../utils/swarm/backends/registry.js';
-import { useAppState, useAppStateStore } from 'src/state/AppState.js';
+import { useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
@@ -45,6 +45,19 @@ import { isXtermJs, useHasSelection, useSelection } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { getPlatform } from '../../utils/platform.js';
 import { PrBadge } from '../PrBadge.js';
+import {
+  FooterLinkBadges,
+  useHasVisibleFooterLinks,
+} from './FooterLinkBadges.js';
+import { setKeyedFooterLink } from '../../utils/footerLinks.js';
+import { applyPrUrlTemplate } from '../../utils/prUrlTemplate.js';
+import {
+  buildPrFooterLink,
+  computeAppPrNeedsAuth,
+  CURRENT_PR_FOOTER_KEY,
+  prNeedsAuthHint,
+} from '../../utils/prStatusFooter.js';
+import { useSettings } from '../../hooks/useSettings.js';
 import {
   getFleetNudgeExternalStore,
   isFleetNeedsInputNudgeEnabled,
@@ -154,6 +167,8 @@ type Props = {
   exitMessage: {
     show: boolean;
     key?: string;
+    /** densable: "clear" shows "Press {key} again to /clear" */
+    action?: string;
   };
   vimMode: VimMode | undefined;
   mode: PromptInputMode;
@@ -273,9 +288,11 @@ export function PromptInputFooterLeftSide({
   leftArrowAgain,
 }: Props): React.ReactNode {
   if (exitMessage.show) {
+    // densable footer: action==="clear" → "/clear", else exit/detach
+    const againTarget = exitMessage.action === 'clear' ? '/clear' : 'exit';
     return (
       <Text dimColor key="exit-message">
-        Press {exitMessage.key} again to exit
+        Press {exitMessage.key} again to {againTarget}
       </Text>
     );
   }
@@ -343,6 +360,7 @@ function ModeIndicator({
   const { columns } = useTerminalSize();
   const modeCycleShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
   const tasks = useAppState(s => s.tasks);
+  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
   const teamContext = useAppState(s => s.teamContext);
   // Set once in initialState (main.tsx --remote mode) and never mutated — lazy
   // init captures the immutable value without a subscription.
@@ -352,7 +370,56 @@ function ModeIndicator({
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const expandedView = useAppState(s => s.expandedView);
   const showSpinnerTree = expandedView === 'teammates';
-  const prStatus = usePrStatus(isLoading, isPrStatusEnabled());
+  const prStatusEnabled = isPrStatusEnabled();
+  const prPoll = usePrStatus(isLoading, prStatusEnabled);
+  const prStatus = prPoll.pr;
+  const setAppState = useSetAppState();
+  const settings = useSettings();
+  const prUrlTemplate = settings.prUrlTemplate;
+  // Only include FooterLinkBadges in Byline parts when there is something to
+  // show — empty element still counts as a child and inserts a stray " · ".
+  const hasVisibleFooterLinks = useHasVisibleFooterLinks(true);
+  // densable: sync prStatus + keyed current-pr footerLink + prNeedsAuth → AppState
+  useEffect(() => {
+    const displayUrl = prStatus ? applyPrUrlTemplate(prStatus.url, prUrlTemplate) : undefined;
+    const nextNeedsAuth = computeAppPrNeedsAuth({
+      pr: prStatus,
+      prStatusEnabled,
+      needsAuth: prPoll.needsAuth,
+    });
+    setAppState(prev => {
+      const samePr =
+        prev.prStatus?.number === prStatus?.number &&
+        prev.prStatus?.url === prStatus?.url &&
+        prev.prStatus?.reviewState === prStatus?.reviewState &&
+        prev.prStatus?.kind === prStatus?.kind &&
+        (prev.prStatus === null) === (prStatus === null);
+      const nextLinks = setKeyedFooterLink(
+        prev.footerLinks ?? [],
+        CURRENT_PR_FOOTER_KEY,
+        buildPrFooterLink(prStatus, displayUrl),
+      );
+      const sameLinks = nextLinks === prev.footerLinks;
+      const sameAuth = prev.prNeedsAuth === nextNeedsAuth;
+      if (samePr && sameLinks && sameAuth) return prev;
+      return {
+        ...prev,
+        prStatus: prStatus ?? null,
+        prNeedsAuth: nextNeedsAuth,
+        footerLinks: nextLinks,
+      };
+    });
+  }, [
+    prStatus?.number,
+    prStatus?.url,
+    prStatus?.reviewState,
+    prStatus?.kind,
+    prPoll.needsAuth,
+    prPoll.lastUpdated,
+    prStatusEnabled,
+    prUrlTemplate,
+    setAppState,
+  ]);
   const hasTmuxSession = useAppState(s => process.env.USER_TYPE === 'ant' && s.tungstenActiveSession !== undefined);
 
   const nextTickAt = useSyncExternalStore(
@@ -438,12 +505,15 @@ function ModeIndicator({
   // baseline, primaryItemCount is ≥1 for most sessions; keep the threshold
   // low enough to show PR status on standard 80-col terminals.
   const shouldShowPrStatus =
-    isPrStatusEnabled() &&
-    prStatus.number !== null &&
+    prStatusEnabled &&
+    prStatus !== null &&
     prStatus.reviewState !== null &&
     prStatus.url !== null &&
     primaryItemCount < 2 &&
     (primaryItemCount === 0 || columns >= 80);
+  // densable DXt — when copper_thistle-style gate would show auth hint (no PR
+  // badge). Local path rarely sets needsAuth (gh QAg); still wire for AppState.
+  const prAuthHint = !shouldShowPrStatus && prStatusEnabled ? prNeedsAuthHint(prPoll.needsAuth) : null;
 
   // Hide the shift+tab hint when there are 2 primary items
   const shouldShowModeHint = primaryItemCount < 2;
@@ -491,7 +561,18 @@ function ModeIndicator({
       ? [<TeamStatus key="teams" teamsSelected={teamsSelected} showHint={showHint && !hasBackgroundTasks} />]
       : []),
     ...(shouldShowPrStatus
-      ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />]
+      ? [<PrBadge key="pr-status" number={prStatus!.number} url={prStatus!.url} reviewState={prStatus!.reviewState} />]
+      : prAuthHint
+        ? [
+            <Text dimColor key="pr-status">
+              {prAuthHint}
+            </Text>,
+          ]
+        : []),
+    // densable DHa/$gn — settings regex footer badges (exclude keyed PR).
+    // Conditionally push so Byline does not paint an empty middot separator.
+    ...(hasVisibleFooterLinks
+      ? [<FooterLinkBadges key="footer-links" excludeKeyed />]
       : []),
     // Goal elapsed indicator
     ...(feature('GOAL') &&
@@ -576,8 +657,8 @@ function ModeIndicator({
     );
   }
 
-  // Add "↓ to manage tasks" hint when panel has visible rows
-  const hasCoordinatorTasks = process.env.USER_TYPE === 'ant' && getVisibleAgentTasks(tasks).length > 0;
+  // Add "↓ to manage tasks" hint when panel has visible rows (G7 list)
+  const hasCoordinatorTasks = process.env.USER_TYPE === 'ant' && getPanelListItems(tasks, taskDecorations).length > 0;
 
   // Tasks pill renders as a Box sibling (not a parts entry) so its
   // click-target Box isn't nested inside <Text wrap="truncate"> — the

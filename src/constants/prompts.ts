@@ -56,9 +56,19 @@ import { shouldUseGlobalCacheScope } from '../utils/betas.js'
 import { isForkSubagentEnabled } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js'
 import {
   getActDontRederiveSection,
+  getAntiVerbositySection,
+  getAutonomyAppendSection,
+  getFableIdentitySection,
+  getHeronBrookSection,
   getInvestigateFirstSection,
   getOwnershipFrameSection,
+  getPronounsSection,
+  getToolParamJsonSection,
+  getWorktreeEnvNotes,
+  isBasaltCoveEnabled,
+  isFableMitigationsOrMythosModel,
   isOwnershipFrameEnabled,
+  isPewterOwlEnabled,
 } from '../utils/systemPromptArms.js'
 import {
   buildLeanSimpleSystemPrompt,
@@ -398,33 +408,53 @@ function getSessionSpecificGuidanceSection(
   return ['# Session-specific guidance', ...prependBullets(items)].join('\n')
 }
 
-// Un-gated: all users get the detailed "Communicating with the user" guidance
-// (upstream ant-only version). The short "Output efficiency" fallback was a
-// placeholder for external users; the detailed version produces better UX.
-function getOutputEfficiencySection(): string {
-  return `# Communication style
-Write for a person, not a console. Assume users can't see most tool calls or thinking — only your text output. Before your first tool call, briefly state what you're about to do. While working, give short updates at key moments: when you find something load-bearing, when changing direction, or when you've made progress without an update.
-
-Don't narrate internal machinery. Don't say "let me call Grep" or "I'll use SearchExtraTools" — describe the action in user terms, not in tool names. Don't justify why you're searching — just search.
-
-When making updates, assume the person has stepped away and lost the thread. Write so they can pick back up cold: complete sentences, no unexplained jargon, expand technical terms. Err on the side of more explanation; attend to the user's expertise level.
-
-Write in flowing prose. Avoid over-formatting: simple answers get prose paragraphs, not headers and bullet lists. Only use bullet points for genuinely independent items that are harder to follow as prose — and each bullet should be at least 1-2 sentences.
-
-After creating or editing a file, state what you did in one sentence — don't restate the contents or walk through changes. After running a command, report the outcome — don't re-explain what it does. Don't offer unchosen approaches unless asked.
-
-When the task is done, report the result. Do not append "Is there anything else?" or "Let me know if you need anything else."
-
-If you need to ask the user a question, limit to one question per response. Address the request first, then ask.
-
-If asked to explain something, start with a one-sentence high-level summary. If the user wants more depth, they'll ask.
-
-Only use emojis if the user explicitly requests it.
-Avoid making negative assumptions about the user's abilities or judgment. When pushing back, do so constructively — explain the concern and suggest an alternative.
-When referencing code, include file_path:line_number. For GitHub issues/PRs, use owner/repo#123 format.
-Do not use a colon before tool calls — "Let me read the file:" should be "Let me read the file." with a period.
-
-These instructions do not apply to code or tool calls.`
+/**
+ * densable VMy residual — anti_verbosity / communicating-with-user.
+ * Replaces the local Communication-style placeholder with densable branches:
+ *   communicating family (basalt_cove / fable mitigations) → long body
+ *   simple system prompt → short code-comment line
+ *   else → densable "# Text output" default
+ *
+ * finalMessageOnly (GMy): fable mitigations/mythos AND not brief/pewter.
+ */
+function getOutputEfficiencySection(input?: {
+  model?: string
+  simpleSystemPrompt?: boolean
+}): string {
+  let briefEnabled = false
+  try {
+    // Lazy to keep Brief feature flags out of the prompts module graph.
+    const brief =
+      require('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js') as {
+        isBriefEnabled?: () => boolean
+      }
+    briefEnabled = Boolean(brief.isBriefEnabled?.())
+  } catch {
+    briefEnabled = false
+  }
+  const pewter = isPewterOwlEnabled()
+  // densable VMy / Tlc: basalt_cove = env OR clientDataMap blc("basalt_cove", model)
+  let basaltCoveModels: Record<string, boolean> | null = null
+  try {
+    const { getClientDataModelMap } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/clientDataModelMap.js') as typeof import('../utils/clientDataModelMap.js')
+    basaltCoveModels = getClientDataModelMap('basalt_cove')
+  } catch {
+    basaltCoveModels = null
+  }
+  const communicatingFamily =
+    isBasaltCoveEnabled({
+      model: input?.model,
+      basaltCoveModels,
+    }) || isFableMitigationsOrMythosModel(input?.model)
+  const finalMessageOnly =
+    isFableMitigationsOrMythosModel(input?.model) && !(briefEnabled || pewter)
+  return getAntiVerbositySection({
+    communicatingFamily,
+    simpleSystemPrompt: Boolean(input?.simpleSystemPrompt),
+    finalMessageOnly,
+  })
 }
 
 function getModePersonaSection(): string | null {
@@ -438,7 +468,15 @@ export async function getSystemPrompt(
   model: string,
   additionalWorkingDirectories?: string[],
   mcpClients?: MCPServerConnection[],
+  /**
+   * densable mB `excludeDynamicSections` — when true, drop per-user dynamic
+   * system-prompt sections (cwd/git env, auto-memory, scratchpad) so the
+   * cached prefix is session-stable. Dynamic pieces re-enter via
+   * getExcludedDynamicSectionsContent → userContext (see queryContext TSo).
+   */
+  options?: { excludeDynamicSections?: boolean },
 ): Promise<string[]> {
+  const excludeDynamicSections = options?.excludeDynamicSections === true
   // Official CLAUDE_CODE_SIMPLE densable.
   let simpleMode = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
   try {
@@ -450,6 +488,10 @@ export async function getSystemPrompt(
     // keep raw env fallback
   }
   if (simpleMode) {
+    // densable afs(): excludeDynamicSections → [] (no CWD/Date in cached prefix)
+    if (excludeDynamicSections) {
+      return []
+    }
     return [
       `You are Claude Code, Anthropic's official CLI for Claude.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`,
     ]
@@ -459,7 +501,10 @@ export async function getSystemPrompt(
   const [skillToolCommands, outputStyleConfig, envInfo] = await Promise.all([
     getSkillToolCommands(cwd),
     getOutputStyleConfig(),
-    computeSimpleEnvInfo(model, additionalWorkingDirectories),
+    // densable yNy (static) vs gNy (simple) based on excludeDynamicSections
+    excludeDynamicSections
+      ? Promise.resolve(computeStaticEnvInfo(model))
+      : computeSimpleEnvInfo(model, additionalWorkingDirectories),
   ])
 
   const settings = getInitialSettings()
@@ -477,7 +522,8 @@ export async function getSystemPrompt(
 
 ${CYBER_RISK_INSTRUCTION}`,
       getSystemRemindersSection(),
-      await loadMemoryPrompt(),
+      // densable: memory/scratchpad re-enter via ESo userContext when excluded
+      excludeDynamicSections ? null : await loadMemoryPrompt(),
       envInfo,
       getLanguageSection(settings.language),
       // When delta enabled, instructions are announced via persisted
@@ -485,7 +531,7 @@ ${CYBER_RISK_INSTRUCTION}`,
       isMcpInstructionsDeltaEnabled()
         ? null
         : getMcpInstructionsSection(mcpClients),
-      getScratchpadInstructions(),
+      excludeDynamicSections ? null : getScratchpadInstructions(),
       SUMMARIZE_TOOL_RESULTS_SECTION,
       getProactiveSection(),
     ].filter(s => s !== null)
@@ -496,12 +542,21 @@ ${CYBER_RISK_INSTRUCTION}`,
     systemPromptSection('session_guidance', () =>
       getSessionSpecificGuidanceSection(enabledTools, skillToolCommands),
     ),
-    systemPromptSection('memory', () => loadMemoryPrompt()),
+    // densable: omit memory from cached system prompt when excludeDynamicSections
+    // (moved into userContext via getExcludedDynamicSectionsContent / ESo)
+    ...(excludeDynamicSections
+      ? []
+      : [systemPromptSection('memory', () => loadMemoryPrompt())]),
     systemPromptSection('ant_model_override', () =>
       getAntModelOverrideSection(),
     ),
-    systemPromptSection('env_info_simple', () =>
-      computeSimpleEnvInfo(model, additionalWorkingDirectories),
+    // densable env_info_static (yNy) vs env_info_simple (gNy)
+    systemPromptSection(
+      excludeDynamicSections ? 'env_info_static' : 'env_info_simple',
+      () =>
+        excludeDynamicSections
+          ? computeStaticEnvInfo(model)
+          : computeSimpleEnvInfo(model, additionalWorkingDirectories),
     ),
     systemPromptSection('language', () =>
       getLanguageSection(settings.language),
@@ -522,7 +577,10 @@ ${CYBER_RISK_INSTRUCTION}`,
           : getMcpInstructionsSection(mcpClients),
       'MCP servers connect/disconnect between turns',
     ),
-    systemPromptSection('scratchpad', () => getScratchpadInstructions()),
+    // densable: scratchpad moves to userContext (ESo) when excludeDynamicSections
+    ...(excludeDynamicSections
+      ? []
+      : [systemPromptSection('scratchpad', () => getScratchpadInstructions())]),
     systemPromptSection(
       'summarize_tool_results',
       () => SUMMARIZE_TOOL_RESULTS_SECTION,
@@ -596,6 +654,82 @@ ${CYBER_RISK_INSTRUCTION}`,
     ...(feature('KAIROS') || feature('KAIROS_BRIEF')
       ? [systemPromptSection('brief', () => getBriefSection())]
       : []),
+    // densable CNy / focus_mode system section (J7t-gated).
+    // Use uncached so /focus mid-session updates model-facing guidance.
+    DANGEROUS_uncachedSystemPromptSection(
+      'focus_mode',
+      () => getFocusModeSection({ model }),
+      'focus view toggled mid-session via /focus or apply_flag_settings',
+    ),
+    // densable XMy pronouns — always-on.
+    systemPromptSection('pronouns', () => getPronounsSection()),
+    // densable fable_identity (BLr / Cee).
+    systemPromptSection('fable_identity', () => {
+      let isDefaultFableAlias = false
+      try {
+        const def = process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
+        if (def && model) {
+          isDefaultFableAlias =
+            model === def ||
+            model.replace(/\[.*$/, '') === def.replace(/\[.*$/, '')
+        }
+      } catch {
+        isDefaultFableAlias = false
+      }
+      return getFableIdentitySection({ model, isDefaultFableAlias })
+    }),
+    // densable JMy tool_param_json — RHc (juniper bracken_spool) / silent_harbor.
+    systemPromptSection('tool_param_json', () => {
+      let toolParamStrictness = false
+      let silentHarbor = false
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getJuniperShoalFlagsFromClientData } =
+          require('../utils/systemPromptArms.js') as typeof import('../utils/systemPromptArms.js')
+        toolParamStrictness =
+          getJuniperShoalFlagsFromClientData().toolParamStrictness
+      } catch {
+        toolParamStrictness = false
+      }
+      if (!toolParamStrictness) {
+        try {
+          toolParamStrictness = getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_bracken_spool',
+            false,
+          )
+        } catch {
+          toolParamStrictness = false
+        }
+      }
+      try {
+        silentHarbor = getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_silent_harbor',
+          false,
+        )
+      } catch {
+        silentHarbor = false
+      }
+      return getToolParamJsonSection({
+        toolParamStrictness,
+        fableOrMythos: isFableMitigationsOrMythosModel(model),
+        silentHarbor,
+      })
+    }),
+    // densable ZMy heron_brook — freeform clientData / GB system append.
+    systemPromptSection('heron_brook', () => getHeronBrookSection()),
+    // densable eNy autonomy_append — fable mitigations / mythos-5 + amber_sextant.
+    systemPromptSection('autonomy_append', () => {
+      let amberSextant = true
+      try {
+        amberSextant = getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_amber_sextant',
+          true,
+        )
+      } catch {
+        amberSextant = true
+      }
+      return getAutonomyAppendSection({ model, amberSextant })
+    }),
   ]
 
   const resolvedDynamicSections =
@@ -627,7 +761,11 @@ ${CYBER_RISK_INSTRUCTION}`,
       : null,
     getActionsSection(),
     getUsingYourToolsSection(enabledTools),
-    getOutputEfficiencySection(),
+    // densable anti_verbosity (VMy) — model/gates resolved above.
+    getOutputEfficiencySection({
+      model,
+      simpleSystemPrompt: useSimpleSystemPrompt,
+    }),
     // === BOUNDARY MARKER - DO NOT MOVE OR REMOVE ===
     ...(shouldUseGlobalCacheScope() ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] : []),
     // --- Dynamic content (registry-managed) ---
@@ -728,11 +866,12 @@ export async function computeSimpleEnvInfo(
   const cwd = getCwd()
   const isWorktree = getCurrentWorktreeSession() !== null
 
+  // densable gNy residual: worktree isolation + lxd stash note when in worktree.
+  const worktreeNotes = getWorktreeEnvNotes(isWorktree)
+
   const envItems = [
     `Primary working directory: ${cwd}`,
-    isWorktree
-      ? `This is a git worktree — an isolated copy of the repository. Run all commands from this directory. Do NOT \`cd\` to the original repository root.`
-      : null,
+    ...worktreeNotes,
     [`Is a git repository: ${isGit}`],
     additionalWorkingDirectories && additionalWorkingDirectories.length > 0
       ? `Additional working directories:`
@@ -755,6 +894,132 @@ export async function computeSimpleEnvInfo(
     `You have been invoked in the following environment: `,
     ...prependBullets(envItems),
   ].join(`\n`)
+}
+
+/**
+ * densable yNy residual — static env section when excludeDynamicSections is
+ * true. Omits cwd/git/platform/OS (re-injected via userContext ESo/_Ny) so the
+ * system-prompt cache key stays stable across directory moves.
+ */
+export function computeStaticEnvInfo(modelId: string): string {
+  const marketingName = getMarketingNameForModel(modelId)
+  const modelDescription = marketingName
+    ? `You are powered by the model named ${marketingName}. The exact model ID is ${modelId}.`
+    : `You are powered by the model ${modelId}.`
+  const cutoff = getKnowledgeCutoff(modelId)
+  const knowledgeCutoffMessage = cutoff
+    ? `Assistant knowledge cutoff is ${cutoff}.`
+    : null
+  const envItems = [
+    modelDescription,
+    knowledgeCutoffMessage,
+    `The most recent Claude model family is Claude 4.5/4.6/4.7. Model IDs — Opus 4.7: '${CLAUDE_LATEST_MODEL_IDS.opus}', Sonnet 4.6: '${CLAUDE_LATEST_MODEL_IDS.sonnet}', Haiku 4.5: '${CLAUDE_LATEST_MODEL_IDS.haiku}'. When building AI applications, default to the latest and most capable Claude models.`,
+    `Claude Code is available as a CLI in the terminal, desktop app (Mac/Windows), web app (claude.ai/code), and IDE extensions (VS Code, JetBrains). Claude is also accessible via Claude in Chrome (a browsing agent), Claude in Excel (a spreadsheet agent), and Cowork (desktop automation for non-developers).`,
+    `Fast mode for Claude Code uses the same ${FRONTIER_MODEL_NAME} model with faster output. It does NOT switch to a different model. It can be toggled with /fast.`,
+  ].filter((item): item is string => item !== null)
+
+  return [`# Environment`, ...prependBullets(envItems)].join(`\n`)
+}
+
+/**
+ * densable _Ny residual — full cwd/git/platform env for userContext when
+ * excludeDynamicSections moves it out of the cached system prompt.
+ */
+export async function computeExcludedDynamicEnvSection(
+  additionalWorkingDirectories?: string[],
+): Promise<string> {
+  const [isGit, unameSR] = await Promise.all([getIsGit(), getUnameSR()])
+  const cwd = getCwd()
+  const isWorktree = getCurrentWorktreeSession() !== null
+  const worktreeNotes = getWorktreeEnvNotes(isWorktree)
+  const envItems = [
+    `Primary working directory: ${cwd}`,
+    ...worktreeNotes,
+    `Is a git repository: ${isGit}`,
+    additionalWorkingDirectories && additionalWorkingDirectories.length > 0
+      ? `Additional working directories:`
+      : null,
+    additionalWorkingDirectories && additionalWorkingDirectories.length > 0
+      ? additionalWorkingDirectories
+      : null,
+    `Platform: ${env.platform}`,
+    getShellInfoLine(),
+    `OS Version: ${unameSR}`,
+  ].filter(item => item !== null)
+
+  return [
+    `# Environment`,
+    `You have been invoked in the following environment: `,
+    ...prependBullets(envItems),
+  ].join(`\n`)
+}
+
+/**
+ * densable ODc residual — slim auto-memory directory pointer for userContext
+ * when excludeDynamicSections is on (full memory prompt stays out of cache).
+ */
+export async function computeExcludedDynamicMemorySection(): Promise<
+  string | null
+> {
+  const { isAutoMemoryEnabled, getAutoMemPath } = await import(
+    '../memdir/paths.js'
+  )
+  if (!isAutoMemoryEnabled()) {
+    // densable DDc false → fall back to full loadMemoryPrompt path
+    return loadMemoryPrompt()
+  }
+  const autoDir = getAutoMemPath()
+  const coworkExtra = process.env.CLAUDE_COWORK_MEMORY_EXTRA_GUIDELINES
+  const lines = [`# auto memory`, `Memory directory: \`${autoDir}\``]
+  if (coworkExtra && coworkExtra.trim().length > 0) {
+    lines.push('', coworkExtra)
+  }
+  return lines.join('\n')
+}
+
+/**
+ * densable ESo / nvs residual — parse "# Heading\\nbody" sections into
+ * userContext entries for re-injection outside the cached system prompt.
+ */
+export function parseExcludedDynamicSection(body: string): [string, string] {
+  const nl = body.indexOf('\n')
+  const headingLine = nl === -1 ? body : body.slice(0, nl)
+  if (!headingLine.startsWith('# ')) {
+    throw new Error(
+      `getExcludedDynamicSectionsContent: expected section body to start with a "# <heading>" line, got "${headingLine}"`,
+    )
+  }
+  return [headingLine.slice(2), nl === -1 ? '' : body.slice(nl + 1)]
+}
+
+/**
+ * densable ESo — build userContext entries for env + memory + scratchpad when
+ * excludeDynamicSections is active.
+ */
+export async function getExcludedDynamicSectionsContent(
+  model: string,
+  additionalWorkingDirectories?: string[],
+): Promise<{ [k: string]: string }> {
+  void model // densable ODc(e) model-gated; local ODc uses auto-mem path only
+  const [envBody, memoryBody] = await Promise.all([
+    computeExcludedDynamicEnvSection(additionalWorkingDirectories),
+    computeExcludedDynamicMemorySection(),
+  ])
+  const out: { [k: string]: string } = {}
+  {
+    const [k, v] = parseExcludedDynamicSection(envBody)
+    out[k] = v
+  }
+  if (memoryBody) {
+    const [k, v] = parseExcludedDynamicSection(memoryBody)
+    out[k] = v
+  }
+  const scratch = getScratchpadInstructions()
+  if (scratch) {
+    const [k, v] = parseExcludedDynamicSection(scratch)
+    out[k] = v
+  }
+  return out
 }
 
 // @[MODEL LAUNCH]: Add a knowledge cutoff date for the new model.
@@ -885,6 +1150,36 @@ function getBriefSection(): string | null {
   )
     return null
   return BRIEF_PROACTIVE_SECTION
+}
+
+/**
+ * densable CNy residual — focus_mode system prompt section when J7t is active.
+ * Lean simple path (vT / shouldUseSimpleSystemPrompt) uses the shorter vNy text;
+ * default path uses ENy.
+ *
+ * Non-interactive densable: only when flagSettings.viewMode==="focus".
+ * Interactive: settings.viewMode or session briefTranscript (J7t).
+ */
+const FOCUS_MODE_SECTION_LEAN = `# Focus mode
+The user has focus mode enabled. They only see your final text message in each response — not tool calls, tool results, or any text you write between tool calls. Anything you say mid-turn is not seen, so don't narrate progress between tool calls. Put everything the user needs into your final message: what you investigated, what you found, what you changed, decisions you made, and what's next. Do not assume they saw earlier output.`
+
+const FOCUS_MODE_SECTION_DEFAULT = `# Focus mode
+The user has focus mode enabled. In focus mode, the user only sees your final text message in each response. They do not see tool calls, tool results, or any text you emit between tool calls. This overrides earlier guidance about giving short updates between tool calls — skip those updates and put everything the user needs to know in your final message. Do not assume they saw earlier progress updates.`
+
+function getFocusModeSection(args: { model: string }): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { resolveFocusViewActiveFromSession } =
+    require('../utils/focusView.js') as typeof import('../utils/focusView.js')
+  const nonInteractive = getIsNonInteractiveSession()
+  if (
+    !resolveFocusViewActiveFromSession({
+      nonInteractive,
+    })
+  ) {
+    return null
+  }
+  const lean = shouldUseSimpleSystemPrompt({ model: args.model })
+  return lean ? FOCUS_MODE_SECTION_LEAN : FOCUS_MODE_SECTION_DEFAULT
 }
 
 function getProactiveSection(): string | null {

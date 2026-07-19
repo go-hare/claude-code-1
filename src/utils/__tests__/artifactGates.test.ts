@@ -4,6 +4,13 @@ import {
   isArtifactDirectUploadEnabled,
   isArtifactEnvForceEnabled,
   isArtifactToolDisabled,
+  isCobaltPlinthAdminSurfaceEnabled,
+  isCobaltPlinthEnabled,
+  isCobaltPlinthFernEnabled,
+  isCobaltPlinthPutguardEnabled,
+  isFramePublishContextEnabled,
+  isSaffronAnchorEnabled,
+  isSlateLanternEnabled,
   planArtifactAutoOpenSkip,
 } from '../artifactGates.js'
 
@@ -104,6 +111,36 @@ describe('artifactGates', () => {
       isArtifactDirectUploadEnabled({
         env: { CLAUDE_CODE_DISABLE_ARTIFACT: '1' },
         gbValue: true,
+      }),
+    ).toBe(false)
+  })
+
+  test('cobalt_plinth* pure gates densable Jso/c7n/L9u', () => {
+    expect(isCobaltPlinthEnabled({ gbValue: true })).toBe(true)
+    expect(isCobaltPlinthEnabled({ gbValue: false })).toBe(false)
+    expect(isCobaltPlinthFernEnabled({ gbValue: true })).toBe(true)
+    expect(isSaffronAnchorEnabled({ gbValue: true })).toBe(true)
+    expect(isSlateLanternEnabled({ gbValue: false })).toBe(false)
+    expect(isFramePublishContextEnabled({ gbValue: true })).toBe(true)
+    // putguard default true when unset
+    expect(isCobaltPlinthPutguardEnabled({})).toBe(true)
+    expect(isCobaltPlinthPutguardEnabled({ gbValue: false })).toBe(false)
+    expect(
+      isCobaltPlinthAdminSurfaceEnabled({
+        plinthGb: true,
+        adminAllowed: true,
+      }),
+    ).toBe(true)
+    expect(
+      isCobaltPlinthAdminSurfaceEnabled({
+        plinthGb: true,
+        adminAllowed: false,
+      }),
+    ).toBe(false)
+    expect(
+      isCobaltPlinthAdminSurfaceEnabled({
+        plinthGb: false,
+        adminAllowed: true,
       }),
     ).toBe(false)
   })

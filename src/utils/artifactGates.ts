@@ -145,3 +145,87 @@ export function isArtifactDirectUploadEnabled(
   if (isEnvTruthy(env.CLAUDE_CODE_ARTIFACT_DIRECT_UPLOAD)) return true
   return gbValue ?? false
 }
+
+/**
+ * densable cobalt_plinth* / saffron / slate frame gates (Jso/oGr/O9u/uWg/iGr/L9u/Iis).
+ * Full frame publish path denser; pure GB polarity helpers for residual dig.
+ */
+export type CobaltPlinthGateName =
+  | 'tengu_cobalt_plinth'
+  | 'tengu_cobalt_plinth_fern'
+  | 'tengu_cobalt_plinth_osier'
+  | 'tengu_cobalt_plinth_reader_persist'
+  | 'tengu_cobalt_plinth_putguard'
+  | 'tengu_cobalt_plinth_direct'
+  | 'tengu_saffron_anchor'
+  | 'tengu_slate_lantern'
+  | 'tengu_frame_publish_context'
+
+/** densable c7n half — master plinth flag (admin eligibility layered by caller). */
+export function isCobaltPlinthEnabled(input: { gbValue?: boolean } = {}): boolean {
+  return input.gbValue === true
+}
+
+/** densable Jso — fern (artifact template skills surface). */
+export function isCobaltPlinthFernEnabled(
+  input: { gbValue?: boolean } = {},
+): boolean {
+  return input.gbValue === true
+}
+
+/** densable O9u — osier. */
+export function isCobaltPlinthOsierEnabled(
+  input: { gbValue?: boolean } = {},
+): boolean {
+  return input.gbValue === true
+}
+
+/** densable uWg — reader_persist. */
+export function isCobaltPlinthReaderPersistEnabled(
+  input: { gbValue?: boolean } = {},
+): boolean {
+  return input.gbValue === true
+}
+
+/**
+ * densable L9u — putguard (default TRUE in densable when GB unset).
+ * Callers should pass getFeatureValue(..., true) result.
+ */
+export function isCobaltPlinthPutguardEnabled(
+  input: { gbValue?: boolean } = {},
+): boolean {
+  return input.gbValue !== false
+}
+
+/** densable oGr — saffron_anchor. */
+export function isSaffronAnchorEnabled(
+  input: { gbValue?: boolean } = {},
+): boolean {
+  return input.gbValue === true
+}
+
+/** densable iGr — slate_lantern. */
+export function isSlateLanternEnabled(
+  input: { gbValue?: boolean } = {},
+): boolean {
+  return input.gbValue === true
+}
+
+/** densable Iis — frame_publish_context. */
+export function isFramePublishContextEnabled(
+  input: { gbValue?: boolean } = {},
+): boolean {
+  return input.gbValue === true
+}
+
+/**
+ * densable c7n composition: plinth master AND admin-allowed.
+ * densable: if (!et("tengu_cobalt_plinth", false)) return false; return rYc();
+ */
+export function isCobaltPlinthAdminSurfaceEnabled(input: {
+  plinthGb?: boolean
+  adminAllowed: boolean
+}): boolean {
+  if (input.plinthGb !== true) return false
+  return input.adminAllowed === true
+}

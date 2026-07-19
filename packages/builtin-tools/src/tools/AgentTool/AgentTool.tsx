@@ -4,7 +4,11 @@ import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
 import type { AssistantMessage, Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
-import { clearInvokedSkillsForAgent, getSdkAgentProgressSummariesEnabled } from 'src/bootstrap/state.js';
+import {
+  clearInvokedSkillsForAgent,
+  getIsNonInteractiveSession,
+  getSdkAgentProgressSummariesEnabled,
+} from 'src/bootstrap/state.js';
 import { enhanceSystemPromptWithEnvDetails, getSystemPrompt } from 'src/constants/prompts.js';
 import { getWorkerAntiInjectionAddendum, isCoordinatorMode } from 'src/coordinator/coordinatorMode.js';
 import { releaseAgentLocks, transferAgentLocks } from 'src/coordinator/fileLockManager.js';
@@ -15,7 +19,9 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js';
 import { clearDumpState } from 'src/services/api/dumpPrompts.js';
+import type { AppState } from 'src/state/AppState.js';
 import {
+  backgroundAgentTask,
   completeAgentTask as completeAsyncAgent,
   createActivityDescriptionResolver,
   createProgressTracker,
@@ -28,6 +34,7 @@ import {
   rebuildProgressFromMessages,
   registerAgentForeground,
   registerAsyncAgent,
+  resolvePanelOwnerAgentId,
   scheduleDeferredAgentProgressRebuild,
   unregisterAgentForeground,
   updateAgentProgress as updateAsyncAgentProgress,
@@ -47,11 +54,14 @@ import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { resolveAgentAutoBackgroundMs } from 'src/utils/autoBackgroundTimeout.js';
 import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
+import { attachDetachableAbortRelay } from 'src/utils/abortController.js';
 import { AbortError, errorMessage, toError } from 'src/utils/errors.js';
+import { notifyDropNestedBlockedChain } from 'src/utils/sessionActivity.js';
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js';
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { createUserMessage, extractTextContent, isSyntheticMessage, normalizeMessages } from 'src/utils/messages.js';
+import { resolveMainLoopModel } from 'src/utils/contextLayers.js';
 import { getAgentModel } from 'src/utils/model/agent.js';
 import { permissionModeSchema } from 'src/utils/permissions/PermissionMode.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
@@ -62,6 +72,10 @@ import { sleep } from 'src/utils/sleep.js';
 import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
 import { asSystemPrompt } from 'src/utils/systemPromptType.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
+import {
+  addKeepaliveReason,
+  agentKeepaliveReason,
+} from 'src/utils/task/framework.js';
 import { getTask, getTaskListId, getTaskOwnedFiles } from 'src/utils/tasks.js';
 import { getParentSessionId, isTeammate } from 'src/utils/teammate.js';
 import { isInProcessTeammate } from 'src/utils/teammateContext.js';
@@ -95,7 +109,14 @@ import {
 } from './forkSubagent.js';
 import { normalizeAgentOwnedFiles, resolveAgentTaskExecutionContext, shouldExposeTaskIdInput } from './taskLinking.js';
 import type { AgentDefinition } from './loadAgentsDir.js';
-import { filterAgentsByMcpRequirements, hasRequiredMcpServers, isBuiltInAgent } from './loadAgentsDir.js';
+import {
+  filterAgentsByMcpRequirements,
+  hasRequiredMcpServers,
+  isBuiltInAgent,
+  isPluginAgent,
+} from './loadAgentsDir.js';
+import { recordPluginActivity } from 'src/utils/plugins/pluginActivity.js';
+import { recordPluginUse } from 'src/utils/plugins/pluginUsage.js';
 import { getPrompt } from './prompt.js';
 import { runAgent } from './runAgent.js';
 import {
@@ -616,9 +637,11 @@ export const AgentTool = buildTool({
 
     // Resolve agent params for logging (these are already resolved in runAgent).
     // Official $6e: built-in Explore may rewrite model to opus cap before getAgentModel.
+    // densable X$ — last model permissionLayer wins over options.mainLoopModel.
+    const parentMainLoopModel = resolveMainLoopModel(toolUseContext);
     const resolvedAgentModel = getAgentModel(
-      resolveAgentDefinitionModel(selectedAgent, toolUseContext.options.mainLoopModel),
-      toolUseContext.options.mainLoopModel,
+      resolveAgentDefinitionModel(selectedAgent, parentMainLoopModel),
+      parentMainLoopModel,
       isForkPath ? undefined : model,
       permissionMode,
     );
@@ -637,6 +660,12 @@ export const AgentTool = buildTool({
         !isBackgroundTasksDisabled,
       is_fork: isForkPath,
     });
+
+    // densable F$ + sJ: spawning a plugin agent counts as plugin use
+    if (isPluginAgent(selectedAgent)) {
+      recordPluginUse(selectedAgent.plugin);
+      recordPluginActivity(selectedAgent.plugin, 'subagent');
+    }
 
     // Resolve effective isolation mode (explicit param overrides agent def)
     const effectiveIsolation = isolation ?? selectedAgent.isolation;
@@ -714,7 +743,7 @@ export const AgentTool = buildTool({
         );
         const defaultSystemPrompt = await getSystemPrompt(
           toolUseContext.options.tools,
-          toolUseContext.options.mainLoopModel,
+          parentMainLoopModel,
           additionalWorkingDirectories,
           toolUseContext.options.mcpClients,
         );
@@ -996,6 +1025,12 @@ export const AgentTool = buildTool({
 
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId;
+      // densable Sot: ownerAgentId: Yeo(parent)??mi()
+      // Local: only stamp nested panel parents (never sessionId/main-session).
+      const nestedOwnerId = resolvePanelOwnerAgentId(
+        toolUseContext.agentId,
+        toolUseContext.getAppState,
+      );
       const agentBackgroundTask = registerAsyncAgent({
         agentId: asyncAgentId,
         description,
@@ -1007,6 +1042,13 @@ export const AgentTool = buildTool({
         // They are killed explicitly via chat:killAgents.
         toolUseId: toolUseContext.toolUseId,
         activeTaskExecutionContext,
+        ...(nestedOwnerId
+          ? {
+              ownerAgentId: nestedOwnerId,
+              notificationTargetAgentId: asAgentId(nestedOwnerId),
+              parentAgentId: nestedOwnerId,
+            }
+          : {}),
       });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -1144,6 +1186,11 @@ export const AgentTool = buildTool({
           // promise, accumulating callbacks for the lifetime of the agent.
           let backgroundPromise: Promise<{ type: 'background' }> | undefined;
           let cancelAutoBackground: (() => void) | undefined;
+          // densable OSu abortController + YMi detachable parent→task relay.
+          // Gold: vt=Je.abortController, Ct=YMi(c.abortController,vt); Ct() on
+          // background return and finally so parent Esc no longer kills bg agent.
+          let foregroundTaskAbortController: AbortController | undefined;
+          let detachParentAbortRelay: (() => void) | undefined;
           if (!isBackgroundTasksDisabled) {
             const registration = registerAgentForeground({
               agentId: syncAgentId,
@@ -1159,6 +1206,11 @@ export const AgentTool = buildTool({
               type: 'background' as const,
             }));
             cancelAutoBackground = registration.cancelAutoBackground;
+            foregroundTaskAbortController = registration.abortController;
+            detachParentAbortRelay = attachDetachableAbortRelay(
+              toolUseContext.abortController,
+              registration.abortController,
+            );
           }
 
           // Track if we've shown the background hint UI
@@ -1172,11 +1224,16 @@ export const AgentTool = buildTool({
           const summaryTaskId = foregroundTaskId;
 
           // Get async iterator for the agent
+          // densable: foreground runAgent uses task abort (vt), not parent
+          // directly — parent cancel reaches task via YMi while linked.
           const agentIterator = runAgent({
             ...runAgentParams,
             override: {
               ...runAgentParams.override,
               agentId: syncAgentId,
+              ...(foregroundTaskAbortController
+                ? { abortController: foregroundTaskAbortController }
+                : {}),
             },
             activeTaskExecutionContext,
             onCacheSafeParams:
@@ -1240,9 +1297,49 @@ export const AgentTool = buildTool({
                 const appState = toolUseContext.getAppState();
                 const task = appState.tasks[foregroundTaskId];
                 if (isLocalAgentTask(task) && task.isBackgrounded) {
+                  // densable Jr: backgrounded && !Zt && status defined &&
+                  // !==running && !JXt → skip async_launched; fall through as sync.
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const {
+                    hasLiveAgentKeepaliveChildren,
+                    isJrDeadBackgroundPromote,
+                  } =
+                    require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js');
+                  const midJxt = hasLiveAgentKeepaliveChildren(
+                    foregroundTaskId,
+                    toolUseContext.getAppState,
+                  );
+                  if (isJrDeadBackgroundPromote(task.status, midJxt)) {
+                    // Dead race: do not promote / do not restart runAgent in bg.
+                    break;
+                  }
                   // Capture the taskId for use in the async callback
                   const backgroundedTaskId = foregroundTaskId;
                   wasBackgrounded = true;
+                  // densable Ct() — detach YMi before bg so parent Esc no longer
+                  // aborts the independent background agent.
+                  detachParentAbortRelay?.();
+                  detachParentAbortRelay = undefined;
+                  // densable GEu(st) — drop nested blocked-chain for this agent
+                  // on async promote (mid-bg). Gold: Ct(); GEu(st); if(!pn()) Gge(...)
+                  notifyDropNestedBlockedChain(backgroundedTaskId);
+                  // densable Gge(Re, `agent:${ze}`) on mid-bg async_launched —
+                  // !pn() interactive only; Re = Yeo(parent)??mi().
+                  // Local only attaches when parent is a nested panel agent —
+                  // never stamp sessionId as owner (main AL is undefined).
+                  if (!getIsNonInteractiveSession()) {
+                    const ownerId = resolvePanelOwnerAgentId(
+                      toolUseContext.agentId,
+                      toolUseContext.getAppState,
+                    );
+                    if (ownerId) {
+                      addKeepaliveReason(
+                        ownerId,
+                        agentKeepaliveReason(backgroundedTaskId),
+                        rootSetAppState,
+                      );
+                    }
+                  }
                   // Stop foreground summarization; the backgrounded closure
                   // below owns its own independent stop function.
                   stopForegroundSummarization?.();
@@ -1347,8 +1444,25 @@ export const AgentTool = buildTool({
                         getProgressUpdate(tracker, agentMessages),
                         rootSetAppState,
                       );
-                      const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata);
-
+                      // Official: Jeo → JXt → Cns(suppressTelemetry:JXt) → DSu
+                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                      const { sweepStaleKeepaliveReasons, hasLiveAgentKeepaliveChildren } =
+                        require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js');
+                      sweepStaleKeepaliveReasons(backgroundedTaskId, rootSetAppState);
+                      // JXt reads root registry via set-snapshot (same store as Jeo).
+                      // Async getAppState can miss setAppStateForTasks KA writes.
+                      let rootSnap: AppState | undefined;
+                      rootSetAppState(prev => {
+                        rootSnap = prev;
+                        return prev;
+                      });
+                      const stillHasAgentChildren = hasLiveAgentKeepaliveChildren(
+                        backgroundedTaskId,
+                        () => rootSnap ?? toolUseContext.getAppState(),
+                      );
+                      const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata, {
+                        suppressTelemetry: stillHasAgentChildren,
+                      });
                       // Mark task completed FIRST so TaskOutput(block=true)
                       // unblocks immediately. classifyHandoffIfNeeded and
                       // cleanupWorktreeIfNeeded can hang — they must not gate
@@ -1564,33 +1678,36 @@ export const AgentTool = buildTool({
                 }
               }
 
+              // Official densable 2.1.211: only the first content block is checked.
+              // Default: tool_use / tool_result only. With --forward-subagent-text,
+              // text/thinking also forward as agent_progress (parent_tool_use_id).
+              const forwardSubagentText = toolUseContext.options.forwardSubagentText === true;
               const normalizedNew = normalizeMessages([message]);
               for (const m of normalizedNew) {
-                for (const content of (m.message?.content ?? []) as readonly { readonly type: string }[]) {
-                  if (content.type !== 'tool_use' && content.type !== 'tool_result') {
-                    continue;
-                  }
+                const first = (m.message?.content as readonly { readonly type: string }[] | undefined)?.[0];
+                if (!first) continue;
+                if (!forwardSubagentText && first.type !== 'tool_use' && first.type !== 'tool_result') {
+                  continue;
+                }
 
-                  // Forward progress updates
-                  if (onProgress) {
-                    onProgress({
-                      toolUseID: `agent_${assistantMessage.message.id}`,
-                      data: {
-                        message: m,
-                        type: 'agent_progress',
-                        // prompt only needed on first progress message (UI.tsx:624
-                        // reads progressMessages[0]). Omit here to avoid duplication.
-                        prompt: '',
-                        agentId: syncAgentId,
-                      },
-                    });
-                  }
+                // Forward progress updates
+                if (onProgress) {
+                  onProgress({
+                    toolUseID: `agent_${assistantMessage.message.id}`,
+                    data: {
+                      message: m,
+                      type: 'agent_progress',
+                      // prompt only needed on first progress message (UI.tsx:624
+                      // reads progressMessages[0]). Omit here to avoid duplication.
+                      prompt: '',
+                      agentId: syncAgentId,
+                    },
+                  });
                 }
               }
             }
           } catch (error) {
             // Handle errors from the sync agent loop
-            // AbortError should be re-thrown for proper interruption handling
             if (error instanceof AbortError) {
               wasAborted = true;
               logEvent('tengu_agent_tool_terminated', {
@@ -1601,16 +1718,24 @@ export const AgentTool = buildTool({
                 is_built_in_agent: metadata.isBuiltInAgent,
                 reason: 'user_cancel_sync' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               });
-              throw error;
+              // densable: recover partial when task aborted but parent still live
+              // (vt.aborted && !c.aborted). Parent Esc (YMi) aborts both → rethrow.
+              const taskAborted =
+                foregroundTaskAbortController?.signal.aborted === true;
+              const parentLive = !toolUseContext.abortController.signal.aborted;
+              if (!(taskAborted && parentLive)) {
+                throw error;
+              }
+              syncAgentError = toError(error);
+            } else {
+              // Log the error for debugging
+              logForDebugging(`Sync agent error: ${errorMessage(error)}`, {
+                level: 'error',
+              });
+
+              // Store the error to handle after cleanup
+              syncAgentError = toError(error);
             }
-
-            // Log the error for debugging
-            logForDebugging(`Sync agent error: ${errorMessage(error)}`, {
-              level: 'error',
-            });
-
-            // Store the error to handle after cleanup
-            syncAgentError = toError(error);
           } finally {
             // Clear the background hint UI
             if (toolUseContext.setToolJSX) {
@@ -1642,7 +1767,55 @@ export const AgentTool = buildTool({
               }
             }
 
+            // densable Zt = done && !Ft && JXt — promote to background before
+            // unregister/worktree so parent with live agent: children parks.
+            if (
+              !wasBackgrounded &&
+              foregroundTaskId &&
+              !syncAgentError &&
+              !wasAborted
+            ) {
+              let rootSnap: AppState | undefined;
+              rootSetAppState(prev => {
+                rootSnap = prev;
+                return prev;
+              });
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { hasLiveAgentKeepaliveChildren } =
+                require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js');
+              if (
+                hasLiveAgentKeepaliveChildren(
+                  foregroundTaskId,
+                  () => rootSnap ?? toolUseContext.getAppState(),
+                )
+              ) {
+                // densable J5r + Gge on Zt park (done && JXt)
+                backgroundAgentTask(
+                  foregroundTaskId,
+                  () => rootSnap ?? toolUseContext.getAppState(),
+                  rootSetAppState,
+                );
+                // densable GEu(st) on Zt park async promote (same as mid-bg).
+                notifyDropNestedBlockedChain(foregroundTaskId);
+                if (!getIsNonInteractiveSession()) {
+                  const ownerId = resolvePanelOwnerAgentId(
+                    toolUseContext.agentId,
+                    () => rootSnap ?? toolUseContext.getAppState(),
+                  );
+                  if (ownerId) {
+                    addKeepaliveReason(
+                      ownerId,
+                      agentKeepaliveReason(foregroundTaskId),
+                      rootSetAppState,
+                    );
+                  }
+                }
+                wasBackgrounded = true;
+              }
+            }
+
             // Unregister foreground task if agent completed without being backgrounded
+            // densable LSu also skips remove when JXt (hasLiveAgentKeepaliveChildren).
             if (foregroundTaskId) {
               unregisterAgentForeground(foregroundTaskId, rootSetAppState);
               // Notify SDK consumers (e.g. VS Code subagent panel) that this
@@ -1697,10 +1870,62 @@ export const AgentTool = buildTool({
             // Cancel auto-background timer if agent completed before it fired
             cancelAutoBackground?.();
 
+            // densable Ct() — always detach YMi in finally (noop if already
+            // detached on background path).
+            detachParentAbortRelay?.();
+            detachParentAbortRelay = undefined;
+
             // Clean up worktree if applicable (in finally to handle abort/error paths)
             // Skip if backgrounded — the background continuation is still running in it
             if (!wasBackgrounded) {
               worktreeResult = await cleanupWorktreeIfNeeded();
+            }
+          }
+
+          // densable Zt park path: after finally, wasBackgrounded from JXt
+          // promote (mid-loop bg already returned from try). Return async_launched.
+          // densable Jr: if already non-running && !JXt, skip async_launched
+          // (gold: only promote when (backgrounded && !Jr) || Zt).
+          if (wasBackgrounded && foregroundTaskId && !syncAgentError) {
+            let rootSnapJr: AppState | undefined;
+            rootSetAppState(prev => {
+              rootSnapJr = prev;
+              return prev;
+            });
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const {
+              hasLiveAgentKeepaliveChildren,
+              isJrDeadBackgroundPromote,
+            } =
+              require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js');
+            const snap = rootSnapJr ?? toolUseContext.getAppState();
+            const t = snap.tasks?.[foregroundTaskId];
+            const status =
+              t && typeof t === 'object' && 'status' in t
+                ? (t as { status?: string }).status
+                : undefined;
+            const jxt = hasLiveAgentKeepaliveChildren(
+              foregroundTaskId,
+              () => rootSnapJr ?? toolUseContext.getAppState(),
+            );
+            if (!isJrDeadBackgroundPromote(status, jxt)) {
+              const canReadOutputFile = toolUseContext.options.tools.some(
+                t =>
+                  toolMatchesName(t, FILE_READ_TOOL_NAME) ||
+                  toolMatchesName(t, BASH_TOOL_NAME),
+              );
+              return {
+                data: {
+                  isAsync: true as const,
+                  status: 'async_launched' as const,
+                  agentId: foregroundTaskId,
+                  description,
+                  prompt,
+                  outputFile: getTaskOutputPath(foregroundTaskId),
+                  canReadOutputFile,
+                  taskLinkingWarning,
+                },
+              };
             }
           }
 
@@ -1719,29 +1944,37 @@ export const AgentTool = buildTool({
             throw new AbortError();
           }
 
-          // If an error occurred during iteration, try to return a result with
-          // whatever messages we have. If we have no assistant messages,
-          // re-throw the error so it's properly handled by the tool framework.
+          // densable J$u: on sync error, recover partial history (+ k6g cutoffNote)
+          // or rethrow when no recoverable assistant text / non-partial Vio.
+          let finalizeMessages = agentMessages;
+          let cutoffNote: string | undefined;
           if (syncAgentError) {
-            // Check if we have any assistant messages to return
-            const hasAssistantMessages = agentMessages.some(msg => msg.type === 'assistant');
-
-            if (!hasAssistantMessages) {
-              // No messages collected, re-throw the error
-              throw syncAgentError;
-            }
-
-            // We have some messages, try to finalize and return them
-            // This allows the parent agent to see partial progress even after an error
-            logForDebugging(`Sync agent recovering from error with ${agentMessages.length} messages`);
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { recoverSyncAgentErrorHistory } =
+              require('./syncAgentErrorRecover.js') as typeof import('./syncAgentErrorRecover.js');
+            const recovered = recoverSyncAgentErrorHistory(
+              syncAgentError,
+              agentMessages,
+            );
+            finalizeMessages = recovered.history;
+            cutoffNote = recovered.cutoffNote;
+            logForDebugging(
+              `Sync agent recovering from error with ${finalizeMessages.length} messages`,
+            );
           }
 
-          const agentResult = finalizeAgentTool(agentMessages, syncAgentId, metadata);
+          // densable Cns(Pn,...,{suppressTelemetry:!Ft}) — when Ft set (error),
+          // !Ft is false so telemetry still fires; keep default emit.
+          const agentResult = finalizeAgentTool(
+            finalizeMessages,
+            syncAgentId,
+            metadata,
+          );
 
           if (feature('TRANSCRIPT_CLASSIFIER')) {
             const currentAppState = toolUseContext.getAppState();
             const handoffWarning = await classifyHandoffIfNeeded({
-              agentMessages,
+              agentMessages: finalizeMessages,
               tools: toolUseContext.options.tools,
               toolPermissionContext: currentAppState.toolPermissionContext,
               abortSignal: toolUseContext.abortController.signal,
@@ -1751,6 +1984,14 @@ export const AgentTool = buildTool({
             if (handoffWarning) {
               agentResult.content = [{ type: 'text' as const, text: handoffWarning }, ...agentResult.content];
             }
+          }
+
+          // densable: if(Wr)_n.content=[{type:"text",text:Wr},..._n.content]
+          if (cutoffNote) {
+            agentResult.content = [
+              { type: 'text' as const, text: cutoffNote },
+              ...agentResult.content,
+            ];
           }
 
           return {

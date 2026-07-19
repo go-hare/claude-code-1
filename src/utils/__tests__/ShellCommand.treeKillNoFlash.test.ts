@@ -28,3 +28,29 @@ describe('ShellCommand tree kill (Windows flash)', () => {
     shell.cleanup()
   })
 })
+
+describe('ShellCommand.detach (official fDs)', () => {
+  test('detach returns pid and unrefs child without killing', async () => {
+    const child =
+      process.platform === 'win32'
+        ? spawn('cmd.exe', ['/c', 'ping -n 30 127.0.0.1 >nul'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          })
+        : spawn('sleep', ['30'], { stdio: 'ignore' })
+
+    const expectedPid = child.pid
+    expect(expectedPid).toBeDefined()
+    const ac = new AbortController()
+    const taskOutput = new TaskOutput('test-detach', null, false)
+    const shell = wrapSpawn(child, ac.signal, 60_000, taskOutput)
+    const pid = shell.detach?.()
+    expect(pid).toBe(expectedPid)
+    expect(shell.getPid?.()).toBe(expectedPid)
+    // Process still alive after detach (unref only).
+    expect(() => process.kill(expectedPid!, 0)).not.toThrow()
+    shell.kill()
+    await shell.result
+    shell.cleanup()
+  })
+})

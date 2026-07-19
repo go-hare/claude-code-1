@@ -11,6 +11,7 @@ import {
   persistPermissionUpdates,
 } from './PermissionUpdate.js'
 import { permissionUpdateSchema } from './PermissionUpdateSchema.js'
+import { maybeStripAlwaysAllowPermissionsFromContext } from './suppressAlwaysAllow.js'
 
 export const inputSchema = lazySchema(() =>
   z.object({
@@ -93,8 +94,14 @@ export function permissionPromptToolResultToPermissionDecision(
     toolResult: result,
   }
   if (result.behavior === 'allow') {
-    const updatedPermissions = result.updatedPermissions
-    if (updatedPermissions) {
+    // densable nLe/rLe — strip bare always-allow when tool suppresses it.
+    const updatedPermissions = maybeStripAlwaysAllowPermissionsFromContext(
+      result.updatedPermissions,
+      tool,
+      input,
+      toolUseContext,
+    )
+    if (updatedPermissions.length > 0) {
       toolUseContext.setAppState(prev => ({
         ...prev,
         toolPermissionContext: applyPermissionUpdates(

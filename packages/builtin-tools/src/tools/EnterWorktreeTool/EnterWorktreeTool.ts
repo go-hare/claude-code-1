@@ -166,6 +166,13 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
             `This agent's working directory and write access now point at the worktree; ` +
             `the previous directory was left untouched.`,
         },
+        // densable contextLayers working_directory (behavior; no extra 埋点)
+        contextLayers: [
+          {
+            kind: 'working_directory',
+            directory: worktreeSession.worktreePath,
+          },
+        ],
       }
     }
 
@@ -209,6 +216,13 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
         worktreeBranch: worktreeSession.worktreeBranch,
         message: `Created worktree at ${worktreeSession.worktreePath}${branchInfo}. The session is now working in the worktree. Use ExitWorktree to leave mid-session, or exit the session to be prompted.`,
       },
+      // densable contextLayers working_directory (behavior; no extra 埋点)
+      contextLayers: [
+        {
+          kind: 'working_directory',
+          directory: worktreeSession.worktreePath,
+        },
+      ],
     }
   },
   mapToolResultToToolResultBlockParam({ message }, toolUseID) {

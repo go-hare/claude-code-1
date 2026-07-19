@@ -1,9 +1,11 @@
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js';
+import type { Tool } from '../../../Tool.js';
 import { extractOutputRedirections } from '../../../utils/bash/commands.js';
 import { isClassifierPermissionsEnabled } from '../../../utils/permissions/bashClassifier.js';
+import type { PermissionDecision } from '../../../types/permissions.js';
 import type { PermissionDecisionReason } from '../../../utils/permissions/PermissionResult.js';
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js';
-import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import { computeShowAlwaysAllowOptions } from '../../../utils/permissions/suppressAlwaysAllow.js';
 import type { OptionWithDescription } from '../../CustomSelect/select.js';
 import { generateShellSuggestionsLabel } from '../shellPermissionHelpers.js';
 
@@ -33,6 +35,9 @@ function stripBashRedirections(command: string): string {
 }
 
 export function bashToolUseOptions({
+  tool,
+  input = {},
+  permissionResult,
   suggestions = [],
   decisionReason,
   onRejectFeedbackChange,
@@ -46,6 +51,10 @@ export function bashToolUseOptions({
   editablePrefix,
   onEditablePrefixChange,
 }: {
+  /** densable showAlwaysAllow — tool + input + permissionResult for suppress gates */
+  tool: Tool;
+  input?: { [key: string]: unknown };
+  permissionResult?: PermissionDecision | null;
   suggestions?: PermissionUpdate[];
   decisionReason?: PermissionDecisionReason;
   onRejectFeedbackChange: (value: string) => void;
@@ -80,8 +89,14 @@ export function bashToolUseOptions({
     });
   }
 
-  // Only show "always allow" options when not restricted by allowManagedPermissionRulesOnly
-  if (shouldShowAlwaysAllowOptions()) {
+  // densable showAlwaysAllow: EYt + org ask ceiling + suppressAlwaysAllowRule + tool.suppressesAlwaysAllowRule
+  if (
+    computeShowAlwaysAllowOptions({
+      tool,
+      input,
+      permissionResult,
+    })
+  ) {
     // Show an editable input for the prefix rule instead of the
     // Haiku-generated suggestion label — but only when the suggestions
     // don't contain non-Bash items (addDirectories, Read rules) that

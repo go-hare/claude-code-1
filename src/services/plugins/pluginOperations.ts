@@ -42,6 +42,7 @@ import {
   parsePluginIdentifier,
   scopeToSettingSource,
 } from '../../utils/plugins/pluginIdentifier.js'
+import { clearPluginUsage } from '../../utils/plugins/pluginUsage.js'
 import {
   formatResolutionError,
   installResolvedPlugin,
@@ -538,6 +539,8 @@ export async function uninstallPluginOp(
     if (deleteDataDir) {
       await deletePluginDataDir(pluginId)
     }
+    // densable E7t([u]): wipe pluginUsage + pending F$ only when last scope gone
+    clearPluginUsage([pluginId])
   }
 
   // Warn (don't block) if other enabled plugins depend on this one.

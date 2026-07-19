@@ -3,6 +3,7 @@ import { feature } from 'bun:bundle';
 import { type KeyboardEvent, Box, Text, useTheme, useThemeSetting, useTerminalFocus } from '@anthropic/ink';
 import * as React from 'react';
 import { useState, useCallback } from 'react';
+import { useRegisterKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import figures from 'figures';
 import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type OutputStyle } from '../../utils/config.js';
@@ -62,6 +63,11 @@ import { isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
+import {
+  isMapleSundialEnabled,
+  mapleSundialNotifChannelLabel,
+  mapleSundialPick,
+} from '../../utils/densableNamingGates.js';
 import {
   getCliTeammateModeOverride,
   clearCliTeammateModeOverride,
@@ -312,6 +318,30 @@ export function Config({
         });
       },
     },
+    // densable tengu_sepia_moth — Precompute compaction option (only when GB on).
+    ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_sepia_moth', false)
+      ? [
+          {
+            id: 'precomputeCompactionEnabled',
+            label: 'Precompute compaction',
+            value: globalConfig.precomputeCompactionEnabled ?? true,
+            type: 'boolean' as const,
+            onChange(precomputeCompactionEnabled: boolean) {
+              saveGlobalConfig(current => ({
+                ...current,
+                precomputeCompactionEnabled,
+              }));
+              setGlobalConfig({
+                ...getGlobalConfig(),
+                precomputeCompactionEnabled,
+              });
+              logEvent('tengu_precompute_compaction_setting_changed', {
+                enabled: precomputeCompactionEnabled,
+              });
+            },
+          },
+        ]
+      : []),
     {
       id: 'spinnerTipsEnabled',
       label: 'Show tips',
@@ -515,7 +545,8 @@ export function Config({
       : []),
     {
       id: 'verbose',
-      label: 'Verbose output',
+      // densable ior / tengu_maple_sundial — shorter labels when on.
+      label: mapleSundialPick('Verbose output', 'Verbose'),
       value: verbose,
       type: 'boolean',
       onChange: onChangeVerbose,
@@ -572,6 +603,31 @@ export function Config({
         });
       },
     },
+    // densable tengu_silk_hinge — Show message timestamps option.
+    ...(getFeatureValue_CACHED_MAY_BE_STALE('tengu_silk_hinge', false)
+      ? [
+          {
+            id: 'timestamps',
+            label: 'Show message timestamps',
+            value: globalConfig.showMessageTimestamps,
+            type: 'boolean' as const,
+            onChange(showMessageTimestamps: boolean) {
+              saveGlobalConfig(current => ({
+                ...current,
+                showMessageTimestamps,
+              }));
+              setGlobalConfig({
+                ...getGlobalConfig(),
+                showMessageTimestamps,
+              });
+              setAppState(prev => ({ ...prev, showMessageTimestamps }));
+              logEvent('tengu_show_message_timestamps_setting_changed', {
+                enabled: showMessageTimestamps,
+              });
+            },
+          },
+        ]
+      : []),
     {
       id: 'defaultPermissionMode',
       label: 'Default permission mode',
@@ -742,7 +798,14 @@ export function Config({
     },
     {
       id: 'notifChannel',
-      label: feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION') ? 'Local notifications' : 'Notifications',
+      // densable Fje: maple_sundial → "Notifications"; else KAIROS local label path.
+      label: isMapleSundialEnabled()
+        ? 'Notifications'
+        : feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
+          ? 'Local notifications'
+          : 'Notifications',
+      // Keep canonical enum as value (options match). densable lmo short form is
+      // display-only via NotifChannelLabel / change summary when maple_sundial on.
       value: globalConfig.preferredNotifChannel,
       options: ['auto', 'iterm2', 'terminal_bell', 'iterm2_with_bell', 'kitty', 'ghostty', 'notifications_disabled'],
       type: 'enum',
@@ -902,7 +965,8 @@ export function Config({
     },
     {
       id: 'prStatusFooterEnabled',
-      label: 'Show PR status footer',
+      // densable ior / maple_sundial
+      label: mapleSundialPick('Show PR status footer', 'Show PR status'),
       value: globalConfig.prStatusFooterEnabled ?? true,
       type: 'boolean' as const,
       onChange(enabled: boolean) {
@@ -998,7 +1062,11 @@ export function Config({
       : []),
     {
       id: 'claudeInChromeDefaultEnabled',
-      label: 'Claude in Chrome enabled by default',
+      // densable ior / maple_sundial
+      label: mapleSundialPick(
+        'Claude in Chrome enabled by default',
+        'Claude in Chrome',
+      ),
       value: globalConfig.claudeInChromeDefaultEnabled ?? true,
       type: 'boolean' as const,
       onChange(enabled: boolean) {
@@ -1099,14 +1167,22 @@ export function Config({
                   remoteControlAtStartup: enabled,
                 });
               }
-              // Sync to AppState so useReplBridge reacts immediately
+              // Sync to AppState so useReplBridge reacts immediately.
+              // Official ohs/YUy: clear replBridgeSessionGroupingId when disabling.
               const resolved = getRemoteControlAtStartup();
               setAppState(prev => {
-                if (prev.replBridgeEnabled === resolved && !prev.replBridgeOutboundOnly) return prev;
+                if (
+                  prev.replBridgeEnabled === resolved &&
+                  !prev.replBridgeOutboundOnly &&
+                  (resolved || prev.replBridgeSessionGroupingId === undefined)
+                ) {
+                  return prev;
+                }
                 return {
                   ...prev,
                   replBridgeEnabled: resolved,
                   replBridgeOutboundOnly: false,
+                  ...(!resolved ? { replBridgeSessionGroupingId: undefined } : {}),
                 };
               });
             },
@@ -1117,7 +1193,11 @@ export function Config({
       ? [
           {
             id: 'showExternalIncludesDialog',
-            label: 'External CLAUDE.md includes',
+            // densable ior / maple_sundial
+            label: mapleSundialPick(
+              'External CLAUDE.md includes',
+              'External CLAUDE.md files',
+            ),
             value: (() => {
               const projectConfig = getCurrentProjectConfig();
               if (projectConfig.hasClaudeMdExternalIncludesApproved) {
@@ -1283,7 +1363,11 @@ export function Config({
       formattedChanges.push(`Set theme to ${chalk.bold(globalConfig.theme)}`);
     }
     if (globalConfig.preferredNotifChannel !== initialConfig.current.preferredNotifChannel) {
-      formattedChanges.push(`Set notifications to ${chalk.bold(globalConfig.preferredNotifChannel)}`);
+      // densable lmo — short label in change summary when maple_sundial on.
+      const notifLabel = isMapleSundialEnabled()
+        ? mapleSundialNotifChannelLabel(globalConfig.preferredNotifChannel)
+        : globalConfig.preferredNotifChannel;
+      formattedChanges.push(`Set notifications to ${chalk.bold(notifLabel)}`);
     }
     if (currentOutputStyle !== initialOutputStyle.current) {
       formattedChanges.push(`Set output style to ${chalk.bold(currentOutputStyle)}`);
@@ -1307,6 +1391,13 @@ export function Config({
     }
     if (globalConfig.autoCompactEnabled !== initialConfig.current.autoCompactEnabled) {
       formattedChanges.push(`${globalConfig.autoCompactEnabled ? 'Enabled' : 'Disabled'} auto-compact`);
+    }
+    if (
+      (globalConfig.precomputeCompactionEnabled ?? true) !== (initialConfig.current.precomputeCompactionEnabled ?? true)
+    ) {
+      formattedChanges.push(
+        `${(globalConfig.precomputeCompactionEnabled ?? true) ? 'Enabled' : 'Disabled'} precompute compaction`,
+      );
     }
     if (globalConfig.respectGitignore !== initialConfig.current.respectGitignore) {
       formattedChanges.push(
@@ -1337,6 +1428,9 @@ export function Config({
     }
     if (globalConfig.showTurnDuration !== initialConfig.current.showTurnDuration) {
       formattedChanges.push(`${globalConfig.showTurnDuration ? 'Enabled' : 'Disabled'} turn duration`);
+    }
+    if (globalConfig.showMessageTimestamps !== initialConfig.current.showMessageTimestamps) {
+      formattedChanges.push(`${globalConfig.showMessageTimestamps ? 'Enabled' : 'Disabled'} message timestamps`);
     }
     if (globalConfig.remoteControlAtStartup !== initialConfig.current.remoteControlAtStartup) {
       const remoteLabel =
@@ -1586,6 +1680,11 @@ export function Config({
     adjustScrollOffset(newIndex);
   };
 
+  // Elevate Settings into activeContexts so ChordInterceptor last-wins over
+  // Global for ctrl+d/u (halfPage vs app:exit) while the list is focused.
+  const settingsListActive = showSubmenu === null && !isSearchMode && !headerFocused;
+  useRegisterKeybindingContext('Settings', settingsListActive);
+
   useKeybindings(
     {
       'select:previous': () => {
@@ -1607,6 +1706,24 @@ export function Config({
       // to this handler which navigates the list, clamping at boundaries.
       'scroll:lineUp': () => moveSelection(-1),
       'scroll:lineDown': () => moveSelection(1),
+      // densable Settings ctrl+u/d half-page list jump (page size ≈ maxVisible/2)
+      'scroll:halfPageUp': () => {
+        if (filteredSettingsItems.length === 0) return;
+        const step = Math.max(1, Math.floor(maxVisible / 2));
+        setShowThinkingWarning(false);
+        const newIndex = Math.max(0, selectedIndex - step);
+        setSelectedIndex(newIndex);
+        adjustScrollOffset(newIndex);
+      },
+      'scroll:halfPageDown': () => {
+        if (filteredSettingsItems.length === 0) return;
+        const step = Math.max(1, Math.floor(maxVisible / 2));
+        setShowThinkingWarning(false);
+        // clamp both sides so empty/underflow never yields selectedIndex -1
+        const newIndex = Math.max(0, Math.min(filteredSettingsItems.length - 1, selectedIndex + step));
+        setSelectedIndex(newIndex);
+        adjustScrollOffset(newIndex);
+      },
       'select:accept': toggleSetting,
       'select:previousValue': () => toggleSetting(),
       'select:nextValue': () => toggleSetting(),
@@ -1617,7 +1734,7 @@ export function Config({
     },
     {
       context: 'Settings',
-      isActive: showSubmenu === null && !isSearchMode && !headerFocused,
+      isActive: settingsListActive,
     },
   );
 
@@ -2115,6 +2232,10 @@ const THEME_LABELS: Record<string, string> = {
 };
 
 function NotifChannelLabel({ value }: { value: string }): React.ReactNode {
+  // densable lmo / maple_sundial — short labels when gate on.
+  if (isMapleSundialEnabled()) {
+    return mapleSundialNotifChannelLabel(value);
+  }
   switch (value) {
     case 'auto':
       return 'Auto';

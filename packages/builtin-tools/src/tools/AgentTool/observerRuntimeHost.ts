@@ -159,6 +159,8 @@ export function createAgentObserverRuntimeHostHandlers(
         observerAppState.mcp.tools,
       )
 
+      // Official densable Sot spawnFirstRun: isObserver:!0 + lYy meta stamp
+      // (T1e agentType+isObserver with read-back).
       const observerTask = registerAsyncAgent({
         agentId: plan.observerTaskId,
         description: plan.description,
@@ -168,7 +170,24 @@ export function createAgentObserverRuntimeHostHandlers(
           typeof registerAsyncAgent
         >[0]['setAppState'],
         toolUseId: armCtx.toolUseId,
+        isObserver: true,
       })
+
+      try {
+        const { writeAgentMetadata } = await import(
+          'src/utils/sessionStorage.js'
+        )
+        await writeAgentMetadata(asAgentId(plan.observerTaskId), {
+          agentType: plan.observerAgentType,
+          isObserver: true,
+          description: plan.description,
+        })
+      } catch (err) {
+        log(
+          `[agentObserver] failed to stamp isObserver meta for ${plan.observerTaskId}: ${errorMessage(err)}`,
+        )
+        throw err
+      }
 
       const observerPromptMessages = [
         createUserMessage({ content: plan.prompt }),
@@ -239,20 +258,68 @@ export function createAgentObserverRuntimeHostHandlers(
       )
     },
 
-    deliver: async ({ pairing, digest }) => {
+    // Official densable Cxt.deliver:
+      //   await Aye({agentId, prompt:digest, promptOrigin:{kind:"observer-activity"},
+      //     toolUseContext, canUseTool, awaitCompletion:!0,
+      //     suppressOwnerNotification:!0, workerPermissionMode:armingPermissionMode})
+      // Prefer Aye when the observer task is not live-running so stoppedByUser
+      // refuse (AgentStoppedByUserError) terminals the pairing. When still
+      // running, fall back to queuePendingMessage (mid-turn delivery).
+      deliver: async ({ pairing, digest }) => {
       const armCtx =
         (pairing.armingToolUseContext as ToolUseContext | undefined) ??
         deps.toolUseContext
+      const armCanUseTool =
+        (pairing.canUseTool as CanUseToolFn | undefined) ?? deps.canUseTool
       const armSetAppState = resolveSetAppState(
         pairing.setAppState,
         deps.setAppState as SetAppState | undefined,
         armCtx,
       )
-      queuePendingMessage(
-        pairing.observerTaskId,
-        digest,
-        armSetAppState as Parameters<typeof queuePendingMessage>[2],
-      )
+
+      let status: string | undefined
+      try {
+        const st = armCtx?.getAppState?.()
+        const t = st?.tasks?.[pairing.observerTaskId] as
+          | { status?: string }
+          | undefined
+        status = t?.status
+      } catch {
+        /* best-effort */
+      }
+
+      if (status === 'running' || !armCtx || !armCanUseTool) {
+        queuePendingMessage(
+          pairing.observerTaskId,
+          digest,
+          armSetAppState as Parameters<typeof queuePendingMessage>[2],
+        )
+        return
+      }
+
+      try {
+        const { resumeAgentBackground } = await import('./resumeAgent.js')
+        await resumeAgentBackground({
+          agentId: pairing.observerTaskId,
+          prompt: digest,
+          toolUseContext: armCtx,
+          canUseTool: armCanUseTool,
+          promptOriginKind: 'observer-activity',
+          suppressOwnerNotification: true,
+          awaitCompletion: true,
+          workerPermissionMode:
+            typeof pairing.armingPermissionMode === 'string'
+              ? pairing.armingPermissionMode
+              : undefined,
+        })
+      } catch (err) {
+        // Densable: AgentStoppedByUserError → pairing terminal (host/classify).
+        // Other errors bubble so drain can classify ResumeAgentStateError restart.
+        log(
+          `[agentObserver] deliver Aye failed for ${pairing.observerTaskId}: ${errorMessage(err)}`,
+        )
+        throw err
+      }
     },
 
     writeTombstone: async ({ observerTaskId, observerAgentType }) => {

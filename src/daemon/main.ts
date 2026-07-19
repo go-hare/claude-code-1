@@ -474,8 +474,39 @@ async function runSupervisor(
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
 
-  // Periodic version check for self-restart on upgrade
+  // Periodic version check for self-restart on upgrade + densable y1i
+  // copper_lantern service recall (origin=service only). densable k one-shot.
+  let serviceRecallTriggered = false
   const versionCheckInterval = setInterval(() => {
+    if (serviceRecallTriggered) return
+    // densable: n==="service" && y1i() → drain workers and uninstall service.
+    if (origin === 'service') {
+      try {
+        const { isCopperLanternEnabled } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/densableNamingGates.js') as typeof import('../utils/densableNamingGates.js')
+        if (isCopperLanternEnabled()) {
+          serviceRecallTriggered = true
+          console.log(
+            '[daemon] service recall flag set — draining workers and uninstalling service',
+          )
+          logEvent('tengu_daemon_service_recall', {
+            origin:
+              'service' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          void import('./serviceInstall.js')
+            .then(({ uninstallDaemonService }) => uninstallDaemonService())
+            .catch(() => {})
+            .finally(() => {
+              shutdown()
+            })
+          return
+        }
+      } catch {
+        // densable optional
+      }
+    }
+
     const currentVersion = process.env.CLAUDE_CODE_VERSION || 'unknown'
     if (currentVersion !== startupVersion && currentVersion !== 'unknown') {
       console.log(

@@ -71,6 +71,46 @@ export async function setup(
 ): Promise<void> {
   logForDiagnosticsNoPII('info', 'setup_started')
 
+  // densable uul / tengu_cobalt_thicket + Lcf basalt_meadow / xterm_atlas_reset.
+  // densable: if (tE() && et('tengu_cobalt_thicket', true)) uul(true)
+  // densable Lcf: Msu(atlas_reset); if (reset || meadow) E0t(true)
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./services/analytics/growthbook.js') as typeof import('./services/analytics/growthbook.js')
+    const {
+      clampChalkLevelForCobaltThicket,
+      isXtermJsTerminal,
+      applyBasaltMeadowStartupGates,
+      isXtermAtlasResetEnabled,
+      isBasaltMeadowGlyphTelemetryEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/renderGlyphTelemetry.js') as typeof import('./utils/renderGlyphTelemetry.js')
+    // densable Lcf() — enable glyph cardinality when either gate is on.
+    applyBasaltMeadowStartupGates({
+      xtermAtlasReset: isXtermAtlasResetEnabled(),
+      basaltMeadow: isBasaltMeadowGlyphTelemetryEnabled(),
+    })
+    // densable uul — only clamp truecolor on xterm.js hosts (tE).
+    if (isXtermJsTerminal()) {
+      const thicketOn = getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_cobalt_thicket',
+        true,
+      )
+      const clamped = clampChalkLevelForCobaltThicket({
+        enabled: thicketOn,
+        chalkLevel: chalk.level,
+      })
+      if (clamped !== null) {
+        // chalk.level is ColorSupportLevel (0|1|2|3); clamp returns 2
+        chalk.level = clamped as 0 | 1 | 2 | 3
+      }
+    }
+  } catch {
+    // densable optional
+  }
+
   // Check for Node.js version < 18
   const nodeVersion = process.version.match(/^v(\d+)\./)?.[1]
   if (!nodeVersion || parseInt(nodeVersion, 10) < 18) {

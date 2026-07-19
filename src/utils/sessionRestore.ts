@@ -158,6 +158,30 @@ export function restoreSessionStateFromLog(
       mainLoopModel: sessionModel,
     }))
   }
+
+  // densable kls/zVu — rehydrate sendMessagePins from successful SendMessage results
+  if (result.messages && result.messages.length > 0) {
+    const { extractSendMessagePinsFromMessages } =
+      require('./sendMessagePins.js') as typeof import('./sendMessagePins.js')
+    const pins = extractSendMessagePinsFromMessages(result.messages)
+    if (Object.keys(pins).length > 0) {
+      setAppState(prev => {
+        // Prefer densable equality: skip if already same keys
+        if (
+          Object.keys(prev.sendMessagePins ?? {}).length ===
+            Object.keys(pins).length &&
+          Object.entries(pins).every(
+            ([k, v]) =>
+              prev.sendMessagePins?.[k]?.id === v.id &&
+              prev.sendMessagePins?.[k]?.ref === v.ref,
+          )
+        ) {
+          return prev
+        }
+        return { ...prev, sendMessagePins: pins }
+      })
+    }
+  }
 }
 
 /**

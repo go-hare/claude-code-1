@@ -9,7 +9,6 @@
 
 import chalk from 'chalk'
 import type { QuerySource } from '../../constants/querySource.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -211,27 +210,16 @@ async function getCommandPrefixImpl(
       isNonInteractiveSession,
     )
 
-    const useSystemPromptPolicySpec = getFeatureValue_CACHED_MAY_BE_STALE(
-      'tengu_cork_m4q',
-      false,
-    )
-
+    // densable Lfg: policy always in systemPrompt; userPrompt is bare Command;
+    // enablePromptCaching:!0 (GB cork gate removed in 2.1.211).
     const response = await queryHaiku({
-      systemPrompt: asSystemPrompt(
-        useSystemPromptPolicySpec
-          ? [
-              `Your task is to process ${toolName} commands that an AI coding agent wants to run.\n\n${policySpec}`,
-            ]
-          : [
-              `Your task is to process ${toolName} commands that an AI coding agent wants to run.\n\nThis policy spec defines how to determine the prefix of a ${toolName} command:`,
-            ],
-      ),
-      userPrompt: useSystemPromptPolicySpec
-        ? `Command: ${command}`
-        : `${policySpec}\n\nCommand: ${command}`,
+      systemPrompt: asSystemPrompt([
+        `Your task is to process ${toolName} commands that an AI coding agent wants to run.\n\n${policySpec}`,
+      ]),
+      userPrompt: `Command: ${command}`,
       signal: abortSignal,
       options: {
-        enablePromptCaching: useSystemPromptPolicySpec,
+        enablePromptCaching: true,
         querySource,
         agents: [],
         isNonInteractiveSession,

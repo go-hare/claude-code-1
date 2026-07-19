@@ -46,6 +46,12 @@ import {
 import { getMemoryPath } from '../../utils/config.js'
 import { COMPACT_MAX_OUTPUT_TOKENS } from '../../utils/context.js'
 import {
+  resolveEffortValue,
+  resolveMainLoopModel,
+  resolveThinkingConfig,
+} from '../../utils/contextLayers.js'
+import { effortLevelForAnalytics } from '../../utils/effort.js'
+import {
   analyzeContext,
   tokenStatsToStatsigMetrics,
 } from '../../utils/contextAnalysis.js'
@@ -678,6 +684,12 @@ export async function compactConversation(
     const querySourceForEvent =
       recompactionInfo?.querySource ?? context.options.querySource ?? 'unknown'
 
+    // densable y$(t.options.mainLoopModel, P_(t)) → effort_level on tengu_compact
+    const compactEffortLevel = effortLevelForAnalytics(
+      context.options.mainLoopModel,
+      resolveEffortValue(context),
+    )
+
     logEvent('tengu_compact', {
       preCompactTokenCount,
       // Kept for continuity — semantically the compact API call's total usage
@@ -688,6 +700,10 @@ export async function compactConversation(
         recompactionInfo !== undefined &&
         truePostCompactTokenCount >= recompactionInfo.autoCompactThreshold,
       isAutoCompact,
+      ...(compactEffortLevel !== undefined && {
+        effort_level:
+          compactEffortLevel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
       querySource:
         querySourceForEvent as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       queryChainId: (context.queryTracking?.chainId ??
@@ -1023,11 +1039,21 @@ export async function partialCompactConversation(
     // Release the full API response — it holds content blocks + usage metadata
     summaryResponse = undefined as unknown as typeof summaryResponse
 
+    // densable y$(r.options.mainLoopModel, P_(r)) → effort_level
+    const partialEffortLevel = effortLevelForAnalytics(
+      context.options.mainLoopModel,
+      resolveEffortValue(context),
+    )
+
     logEvent('tengu_partial_compact', {
       preCompactTokenCount,
       postCompactTokenCount,
       messagesKept: messagesToKeep.length,
       messagesSummarized: messagesToSummarize.length,
+      ...(partialEffortLevel !== undefined && {
+        effort_level:
+          partialEffortLevel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
       direction:
         direction as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       hasUserFeedback: !!userFeedback,
@@ -1331,6 +1357,8 @@ async function streamCompactSummary({
           )
         : [FileReadTool]
 
+      // densable X$ / fqr / P_ — layer-aware model/thinking/effort for compact call
+      const compactModel = resolveMainLoopModel(context)
       const streamingGen = queryModelWithStreaming({
         messages: normalizeMessagesForAPI(
           stripImagesFromMessages(
@@ -1344,7 +1372,7 @@ async function streamCompactSummary({
         systemPrompt: asSystemPrompt([
           'You are a helpful AI assistant tasked with summarizing conversations.',
         ]),
-        thinkingConfig: { type: 'disabled' as const },
+        thinkingConfig: resolveThinkingConfig(context),
         tools,
         signal: context.abortController.signal,
         options: {
@@ -1352,18 +1380,21 @@ async function streamCompactSummary({
             const appState = context.getAppState()
             return appState.toolPermissionContext
           },
-          model: context.options.mainLoopModel,
+          model: compactModel,
           toolChoice: undefined,
           isNonInteractiveSession: context.options.isNonInteractiveSession,
           hasAppendSystemPrompt: !!context.options.appendSystemPrompt,
           maxOutputTokensOverride: Math.min(
             COMPACT_MAX_OUTPUT_TOKENS,
-            getMaxOutputTokensForModel(context.options.mainLoopModel),
+            getMaxOutputTokensForModel(compactModel),
           ),
           querySource: 'compact',
           agents: context.options.agentDefinitions.activeAgents,
           mcpTools: [],
-          effortValue: appState.effortValue,
+          effortValue: resolveEffortValue(context),
+          // densable compact streaming fallback: enablePromptCaching:!1
+          // (must not pin cache on the non-fork summary path)
+          enablePromptCaching: false,
           langfuseTrace: context.langfuseTrace,
         },
       })

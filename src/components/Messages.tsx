@@ -30,8 +30,11 @@ import { collapseBackgroundBashNotifications } from '../utils/collapseBackground
 import { collapseHookSummaries } from '../utils/collapseHookSummaries.js';
 import { collapseReadSearchGroups } from '../utils/collapseReadSearch.js';
 import { collapseTeammateShutdowns } from '../utils/collapseTeammateShutdowns.js';
+import { useAppState } from '../state/AppState.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import { getGlobalConfig } from '../utils/config.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import { isFullscreenFeatureGateEnabled } from '../utils/fullscreen.js';
 import { applyGrouping } from '../utils/groupToolUses.js';
 import {
   buildMessageLookups,
@@ -45,6 +48,7 @@ import {
   hasUnresolvedHooksFromLookup,
   isNotEmptyMessage,
   normalizeMessages,
+  type NormalizeMessagesCacheEntry,
   reorderMessagesInUI,
   type StreamingThinking,
   type StreamingToolUse,
@@ -234,6 +238,83 @@ export function dropTextInBriefTurns<
   });
 }
 
+/**
+ * densable focus transcript residual (ySu subset).
+ *
+ * When briefTranscript is on: keep prompt, collapsed tool summaries, assistant
+ * text/thinking, system (non api_metrics), and brief-tool results. Drop raw
+ * intermediate tool_use / tool_result chrome so the UI is
+ * "prompt + summary + response". Full ySu re-collapses every tool into
+ * collapsed_read_search; local already runs collapseReadSearchGroups — this
+ * filter drops what remains as verbose tool chrome.
+ */
+export function filterForFocusTranscript<
+  T extends {
+    type: string;
+    subtype?: string;
+    isMeta?: boolean;
+    isApiErrorMessage?: boolean;
+    message?: {
+      content: Array<{
+        type: string;
+        name?: string;
+        id?: string;
+        tool_use_id?: string;
+      }>;
+    };
+    attachment?: {
+      type: string;
+      isMeta?: boolean;
+      origin?: unknown;
+      commandMode?: string;
+    };
+  },
+>(messages: T[]): T[] {
+  // densable local subset: drop raw tool chrome. keepToolUseIDs is only
+  // populated when we retain standalone brief tool_use (briefStandalone);
+  // without that flag, tool_result always drops — intentional.
+  const keepToolUseIDs = new Set<string>();
+  return messages.filter(msg => {
+    if (msg.type === 'system') {
+      // densable drops most system noise; keep non-metrics system (compact,
+      // attach, errors). api_metrics is per-turn debug.
+      return msg.subtype !== 'api_metrics';
+    }
+    // Collapsed groups are the "summary" line.
+    if (msg.type === 'collapsed_read_search' || msg.type === 'grouped_tool_use') {
+      return true;
+    }
+    if (msg.type === 'assistant') {
+      if (msg.isApiErrorMessage) return true;
+      const block = msg.message?.content[0];
+      if (!block) return false;
+      if (block.type === 'text' || block.type === 'thinking' || block.type === 'redacted_thinking') {
+        return true;
+      }
+      // Keep only when already collapsed away — raw tool_use is chrome.
+      if (block.type === 'tool_use') {
+        // densable briefStandalone would keepToolUseIDs.add(block.id) here.
+        // Without that tool flag locally, drop raw tool chrome.
+        return false;
+      }
+      return false;
+    }
+    if (msg.type === 'user') {
+      const block = msg.message?.content[0];
+      if (block?.type === 'tool_result') {
+        return block.tool_use_id !== undefined && keepToolUseIDs.has(block.tool_use_id);
+      }
+      return !msg.isMeta;
+    }
+    if (msg.type === 'attachment') {
+      const att = msg.attachment;
+      return att?.type === 'queued_command' && att.commandMode === 'prompt' && !att.isMeta && att.origin === undefined;
+    }
+    // Progress / other types already filtered earlier; keep unknowns conservative.
+    return false;
+  });
+}
+
 type Props = {
   messages: MessageType[];
   tools: Tools;
@@ -404,8 +485,33 @@ const MessagesImpl = ({
 }: Props): React.ReactNode => {
   const { columns } = useTerminalSize();
   const toggleShowAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'Ctrl+E');
+  // densable Messages residual: j = briefTranscript; ySu when Ki() && j && !transcript
+  const briefTranscript = useAppState(s => s.briefTranscript);
+  // densable Messages residual: U = showMessageTimestamps && tengu_silk_hinge
+  const showMessageTimestampsSetting = useAppState(s => s.showMessageTimestamps);
+  const showMessageTimestamps =
+    showMessageTimestampsSetting && getFeatureValue_CACHED_MAY_BE_STALE('tengu_silk_hinge', false);
+  const focusTranscriptActive = briefTranscript && isFullscreenFeatureGateEnabled() && !isBriefOnly;
 
-  const normalizedMessages = useMemo(() => normalizeMessages(messages).filter(isNotEmptyMessage), [messages]);
+  // densable QC: WeakMap cache across re-renders; mDd lets evo-stripped msgs hit cache.
+  // densable clears cache on conversationId / verbose flips (chain identity).
+  const normalizeCacheRef = useRef<WeakMap<object, NormalizeMessagesCacheEntry>>(new WeakMap());
+  const conversationIdRef = useRef(conversationId);
+  const verboseRef = useRef(verbose);
+  if (conversationIdRef.current !== conversationId) {
+    conversationIdRef.current = conversationId;
+    normalizeCacheRef.current = new WeakMap();
+  }
+  if (verboseRef.current !== verbose) {
+    verboseRef.current = verbose;
+    normalizeCacheRef.current = new WeakMap();
+  }
+  const activeNormalizeCache = normalizeCacheRef.current;
+
+  const normalizedMessages = useMemo(
+    () => normalizeMessages(messages, false, activeNormalizeCache).filter(isNotEmptyMessage),
+    [messages, activeNormalizeCache],
+  );
 
   // Check if streaming thinking should be visible (streaming or within 30s timeout)
   const isStreamingThinkingVisible = useMemo(() => {
@@ -589,10 +695,18 @@ const MessagesImpl = ({
 
     const { messages: groupedMessages } = applyGrouping(messagesToShow as MessageType[], tools, verbose);
 
-    const collapsed = collapseBackgroundBashNotifications(
+    const collapsedBase = collapseBackgroundBashNotifications(
       collapseHookSummaries(collapseTeammateShutdowns(collapseReadSearchGroups(groupedMessages, tools))),
       verbose,
     );
+    // densable: if (Ki() && (j || remoteKeepAllText) && !transcript) ySu(Le,...)
+    // Local subset: filter residual tool chrome after collapse when focus on.
+    const collapsed =
+      focusTranscriptActive && !isTranscriptMode
+        ? (filterForFocusTranscript(
+            collapsedBase as Parameters<typeof filterForFocusTranscript>[0],
+          ) as typeof collapsedBase)
+        : collapsedBase;
 
     const lookupsKey = computeMessageStructureKey(normalizedMessages, messagesToShow as MessageType[]);
     const currentLastAssistantMsgId = (() => {
@@ -664,6 +778,7 @@ const MessagesImpl = ({
     shouldTruncate,
     tools,
     isBriefOnly,
+    focusTranscriptActive,
   ]);
 
   // Cheap slice — only runs when scroll range or slice config changes.
@@ -800,12 +915,10 @@ const MessagesImpl = ({
       msg.type === 'collapsed_read_search' &&
       (!!streamingText || hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs));
 
-    // Official densable 2.1.210 does NOT collapse diffs by message distance.
-    // Condensed style is only for subagent/grouped tool views; scratchpad
-    // files use FileEditToolUpdatedMessage.collapsed instead. Fork PR #376
-    // distance collapse turned long scrolls into bare "Added N lines" walls.
-    const shouldCollapseDiffs = false;
-
+    // Official densable 2.1.210: no message-distance diff collapse. Condensed
+    // style is only for subagent/grouped tool views; scratchpad files use
+    // FileEditToolUpdatedMessage.collapsed. Fork PR #376 distance collapse
+    // was removed (it produced bare "Added N lines" walls on scroll-up).
     const k = messageKey(msg);
     const row = (
       <MessageRow
@@ -816,6 +929,7 @@ const MessagesImpl = ({
         tools={tools}
         commands={commands}
         verbose={verbose || isItemExpanded(msg) || (cursor?.expanded === true && index === selectedIdx)}
+        showMessageTimestamps={showMessageTimestamps}
         inProgressToolUseIDs={inProgressToolUseIDs}
         streamingToolUseIDs={streamingToolUseIDs}
         screen={screen}
@@ -826,7 +940,6 @@ const MessagesImpl = ({
         columns={columns}
         isLoading={isLoading}
         lookups={lookups}
-        shouldCollapseDiffs={shouldCollapseDiffs}
       />
     );
 

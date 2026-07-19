@@ -950,9 +950,14 @@ export async function runInProcessTeammate(
   if (systemPromptMode === 'replace' && systemPrompt) {
     teammateSystemPrompt = systemPrompt
   } else {
+    // densable teammate: {tools:I,mainLoopModel:H}=a.rootToolSurface
+    const rootSurface = toolUseContext.rootToolSurface ?? {
+      tools: toolUseContext.options.tools,
+      mainLoopModel: toolUseContext.options.mainLoopModel,
+    }
     const fullSystemPromptParts = await getSystemPrompt(
-      toolUseContext.options.tools,
-      toolUseContext.options.mainLoopModel,
+      rootSurface.tools,
+      rootSurface.mainLoopModel,
       undefined,
       toolUseContext.options.mcpClients,
     )
@@ -1108,9 +1113,12 @@ export async function runInProcessTeammate(
         // Create an isolated copy of toolUseContext so that compaction
         // does not clear the main session's readFileState cache or
         // trigger the main session's UI callbacks.
+        // densable: qwe(a.readFileState,{stripSeededFromContext:!0})
         const isolatedContext: ToolUseContext = {
           ...toolUseContext,
-          readFileState: cloneFileStateCache(toolUseContext.readFileState),
+          readFileState: cloneFileStateCache(toolUseContext.readFileState, {
+            stripSeededFromContext: true,
+          }),
           onCompactProgress: undefined,
           setStreamMode: undefined,
         }
@@ -1225,9 +1233,14 @@ export async function runInProcessTeammate(
             override: { abortController: currentWorkAbortController },
             model: model as ModelAlias | undefined,
             preserveToolUseResults: true,
-            availableTools: toolUseContext.options.tools,
+            // densable teammate availableTools from rootToolSurface.tools
+            availableTools:
+              toolUseContext.rootToolSurface?.tools ??
+              toolUseContext.options.tools,
             allowedTools,
             contentReplacementState: teammateReplacementState,
+            // densable isTeammate:W → rootToolSurface.mainLoopModel for getAgentModel
+            useRootToolSurface: true,
           })) {
             // Check lifecycle abort first (kills whole teammate)
             if (abortController.signal.aborted) {

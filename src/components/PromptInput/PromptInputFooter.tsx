@@ -22,7 +22,9 @@ import { isUndercover } from '../../utils/undercover.js';
 import { CoordinatorTaskPanel, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
 import { getLastAssistantMessageId, StatusLine, statusLineShouldDisplay } from '../StatusLine.js';
 import { Notifications } from './Notifications.js';
+import { PinnedNotifications } from './PinnedNotifications.js';
 import { PromptInputFooterLeftSide } from './PromptInputFooterLeftSide.js';
+import { FrameFooterStatus } from './FrameFooterStatus.js';
 
 // Inline pipe status is shown only after /pipes sets pipeIpc.statusVisible.
 import { PromptInputFooterSuggestions, type SuggestionItem } from './PromptInputFooterSuggestions.js';
@@ -34,6 +36,7 @@ type Props = {
   exitMessage: {
     show: boolean;
     key?: string;
+    action?: string;
   };
   vimMode: VimMode | undefined;
   mode: PromptInputMode;
@@ -45,6 +48,12 @@ type Props = {
   suggestions: SuggestionItem[];
   selectedSuggestion: number;
   maxColumnWidth?: number;
+  /** densable gu — "No commands match …" empty list message. */
+  suggestionsEmptyMessage?: string;
+  /** densable Z5 / Spe / aG — mouse hover + click accept on suggestion rows. */
+  hoveredSuggestionId?: string | null;
+  onSelectSuggestion?: (index: number) => void;
+  onHoverSuggestion?: (id: string | null) => void;
   toolPermissionContext: ToolPermissionContext;
   helpOpen: boolean;
   suppressHint: boolean;
@@ -52,6 +61,7 @@ type Props = {
   tasksSelected: boolean;
   teamsSelected: boolean;
   bridgeSelected: boolean;
+  frameSelected?: boolean;
   tmuxSelected: boolean;
   teammateFooterIndex?: number;
   ideSelection: IDESelection | undefined;
@@ -81,6 +91,10 @@ function PromptInputFooter({
   suggestions,
   selectedSuggestion,
   maxColumnWidth,
+  suggestionsEmptyMessage,
+  hoveredSuggestionId,
+  onSelectSuggestion,
+  onHoverSuggestion,
   toolPermissionContext,
   helpOpen,
   suppressHint: suppressHintFromProps,
@@ -88,6 +102,7 @@ function PromptInputFooter({
   tasksSelected,
   teamsSelected,
   bridgeSelected,
+  frameSelected = false,
   tmuxSelected,
   teammateFooterIndex,
   ideSelection,
@@ -127,18 +142,42 @@ function PromptInputFooter({
   const suppressHint = suppressHintFromProps || statusLineShouldDisplay(settings) || isSearching;
   // Fullscreen: portal data to FullscreenLayout — see promptOverlayContext.tsx
   const overlayData = useMemo(
-    () => (isFullscreen && suggestions.length ? { suggestions, selectedSuggestion, maxColumnWidth } : null),
-    [isFullscreen, suggestions, selectedSuggestion, maxColumnWidth],
+    () =>
+      isFullscreen && (suggestions.length || suggestionsEmptyMessage)
+        ? {
+            suggestions,
+            selectedSuggestion,
+            maxColumnWidth,
+            emptyMessage: suggestionsEmptyMessage,
+            hoveredId: hoveredSuggestionId,
+            onSelect: onSelectSuggestion,
+            onHoverChange: onHoverSuggestion,
+          }
+        : null,
+    [
+      isFullscreen,
+      suggestions,
+      selectedSuggestion,
+      maxColumnWidth,
+      suggestionsEmptyMessage,
+      hoveredSuggestionId,
+      onSelectSuggestion,
+      onHoverSuggestion,
+    ],
   );
   useSetPromptOverlay(overlayData);
 
-  if (suggestions.length && !isFullscreen) {
+  if ((suggestions.length || suggestionsEmptyMessage) && !isFullscreen) {
     return (
       <Box paddingX={2} paddingY={0}>
         <PromptInputFooterSuggestions
           suggestions={suggestions}
           selectedSuggestion={selectedSuggestion}
           maxColumnWidth={maxColumnWidth}
+          emptyMessage={suggestionsEmptyMessage}
+          hoveredId={hoveredSuggestionId}
+          onSelect={onSelectSuggestion}
+          onHoverChange={onHoverSuggestion}
         />
       </Box>
     );
@@ -181,7 +220,9 @@ function PromptInputFooter({
             leftArrowAgain={leftArrowAgain}
           />
         </Box>
-        <Box flexShrink={1} gap={1}>
+        <Box flexShrink={1} gap={1} flexDirection="column" alignItems="flex-end">
+          {/* densable sHa: sticky pinned notices above transient Notifications */}
+          {isFullscreen ? null : <PinnedNotifications />}
           {isFullscreen ? null : (
             <Notifications
               apiKeyStatus={apiKeyStatus}
@@ -200,6 +241,7 @@ function PromptInputFooter({
           )}
           {process.env.USER_TYPE === 'ant' && isUndercover() && <Text dimColor>undercover</Text>}
           <BridgeStatusIndicator bridgeSelected={bridgeSelected} />
+          <FrameFooterStatus isSelected={frameSelected} />
         </Box>
       </Box>
       {process.env.USER_TYPE === 'ant' && <CoordinatorTaskPanel />}

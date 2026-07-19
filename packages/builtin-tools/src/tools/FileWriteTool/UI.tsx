@@ -243,7 +243,16 @@ export function renderToolUseErrorMessage(
   result: ToolResultBlockParam['content'],
   { verbose }: { verbose: boolean },
 ): React.ReactNode {
+  // densable Hh_-aligned short-circuits for Write (same U5n / fallback).
   if (!verbose && typeof result === 'string' && extractTag(result, 'tool_use_error')) {
+    const errorMessage = extractTag(result, 'tool_use_error');
+    if (errorMessage?.includes('File has not been read yet')) {
+      return (
+        <MessageResponse>
+          <Text dimColor>File must be read first</Text>
+        </MessageResponse>
+      );
+    }
     return (
       <MessageResponse>
         <Text color="error">Error writing file</Text>

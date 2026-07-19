@@ -10,7 +10,12 @@ import {
   isChromeMcpSafeForAutoMode,
 } from '../claudeInChrome/chromeMcpReadOnly.js'
 import { getEffectivePermissionMode } from './mcpPermissionMode.js'
-import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
+import {
+  forwardToolAliasPair,
+  type Tool,
+  type ToolPermissionContext,
+  type ToolUseContext,
+} from '../../Tool.js'
 import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
@@ -45,6 +50,7 @@ import {
   applyPermissionUpdates,
   persistPermissionUpdates,
 } from './PermissionUpdate.js'
+import { maybeStripAlwaysAllowPermissionsFromContext } from './suppressAlwaysAllow.js'
 import type {
   PermissionUpdate,
   PermissionUpdateDestination,
@@ -59,6 +65,7 @@ import {
   type PermissionRuleFromEditableSettings,
   shouldAllowManagedPermissionRulesOnly,
 } from './permissionsLoader.js'
+import { withPermissionLayersApplied } from '../contextLayers.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const classifierDecisionModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -261,10 +268,14 @@ export function getAskRules(context: ToolPermissionContext): PermissionRule[] {
  * Check if the entire tool matches a rule
  * For example, this matches "Bash" but not "Bash(prefix:*)" for BashTool
  * This also matches MCP tools with a server name, e.g. the rule "mcp__server1"
+ *
+ * densable URu proxyExpansion: when context.toolAliases is set, a rule named for
+ * an alias that maps to this tool also matches (sDn forward pair).
  */
 function toolMatchesRule(
   tool: Pick<Tool, 'name' | 'mcpInfo'>,
   rule: PermissionRule,
+  toolAliases?: Readonly<Record<string, string>> | null,
 ): boolean {
   // Rule must not have content to match the entire tool
   if (rule.ruleValue.ruleContent !== undefined) {
@@ -280,6 +291,15 @@ function toolMatchesRule(
   // Direct tool name match
   if (rule.ruleValue.toolName === nameForRuleMatch) {
     return true
+  }
+
+  // densable sDn proxyExpansion: rule toolName aliases that map to this tool.
+  // Single-hop: if rule names an alias whose canonical is this tool, match.
+  if (toolAliases) {
+    const pair = forwardToolAliasPair(rule.ruleValue.toolName, toolAliases)
+    if (pair.length === 2 && pair[1] === nameForRuleMatch) {
+      return true
+    }
   }
 
   // MCP server-level permission: rule "mcp__server1" matches tool "mcp__server1__tool1"
@@ -304,7 +324,9 @@ export function toolAlwaysAllowedRule(
   tool: Pick<Tool, 'name' | 'mcpInfo'>,
 ): PermissionRule | null {
   return (
-    getAllowRules(context).find(rule => toolMatchesRule(tool, rule)) || null
+    getAllowRules(context).find(rule =>
+      toolMatchesRule(tool, rule, context.toolAliases),
+    ) || null
   )
 }
 
@@ -315,7 +337,11 @@ export function getDenyRuleForTool(
   context: ToolPermissionContext,
   tool: Pick<Tool, 'name' | 'mcpInfo'>,
 ): PermissionRule | null {
-  return getDenyRules(context).find(rule => toolMatchesRule(tool, rule)) || null
+  return (
+    getDenyRules(context).find(rule =>
+      toolMatchesRule(tool, rule, context.toolAliases),
+    ) || null
+  )
 }
 
 /**
@@ -325,7 +351,11 @@ export function getAskRuleForTool(
   context: ToolPermissionContext,
   tool: Pick<Tool, 'name' | 'mcpInfo'>,
 ): PermissionRule | null {
-  return getAskRules(context).find(rule => toolMatchesRule(tool, rule)) || null
+  return (
+    getAskRules(context).find(rule =>
+      toolMatchesRule(tool, rule, context.toolAliases),
+    ) || null
+  )
 }
 
 /**
@@ -452,16 +482,24 @@ async function runPermissionRequestHooksForHeadlessAgent(
       const decision = hookResult.permissionRequestResult
       if (decision.behavior === 'allow') {
         const finalInput = decision.updatedInput ?? input
-        // Persist permission updates if provided
+        // Persist permission updates if provided (densable nLe/rLe strip)
         if (decision.updatedPermissions?.length) {
-          persistPermissionUpdates(decision.updatedPermissions as any)
-          context.setAppState(prev => ({
-            ...prev,
-            toolPermissionContext: applyPermissionUpdates(
-              prev.toolPermissionContext,
-              decision.updatedPermissions as any,
-            ),
-          }))
+          const stripped = maybeStripAlwaysAllowPermissionsFromContext(
+            decision.updatedPermissions as any,
+            tool,
+            finalInput,
+            context,
+          )
+          if (stripped.length > 0) {
+            persistPermissionUpdates(stripped)
+            context.setAppState(prev => ({
+              ...prev,
+              toolPermissionContext: applyPermissionUpdates(
+                prev.toolPermissionContext,
+                stripped,
+              ),
+            }))
+          }
         }
         return {
           behavior: 'allow',
@@ -508,6 +546,9 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
   assistantMessage,
   toolUseID,
 ): Promise<PermissionDecision> => {
+  // densable Tn — fold permissionLayers into toolPermissionContext for this check
+  // (inner + outer ask/auto/dontAsk paths all read context.getAppState())
+  context = withPermissionLayersApplied(context)
   const result = await hasPermissionsToUseToolInner(tool, input, context)
 
   // Reset consecutive denials on any allowed tool use in auto mode.
@@ -799,7 +840,8 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         sameTurnSiblings.length > 0
           ? [...context.messages, ...sameTurnSiblings]
           : context.messages
-      const action = formatActionForClassifier(tool.name, input)
+      // densable: pass toolUseID so wrd stores classifierMetaLines under live id
+      const action = formatActionForClassifier(tool.name, input, toolUseID)
       setClassifierChecking(toolUseID)
       let classifierResult
       try {
@@ -1211,6 +1253,8 @@ export async function checkRuleBasedPermissions(
   input: { [key: string]: unknown },
   context: ToolUseContext,
 ): Promise<PermissionAskDecision | PermissionDenyDecision | null> {
+  // densable Tn — same layered context as hasPermissionsToUseTool
+  context = withPermissionLayersApplied(context)
   const appState = context.getAppState()
 
   // 1a. Entire tool is denied by rule

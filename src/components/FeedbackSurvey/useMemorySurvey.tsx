@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isFeedbackSurveyDisabled } from 'src/services/analytics/config.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import {
@@ -9,10 +9,12 @@ import { isAutoMemoryEnabled } from '../../memdir/paths.js';
 import { isPolicyAllowed } from '../../services/policyLimits/index.js';
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js';
 import type { Message } from '../../types/message.js';
-import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
+import { saveGlobalConfig } from '../../utils/config.js';
 import { isAutoManagedMemoryFile } from '../../utils/memoryFileDetection.js';
 import { isForceMemorySurveyEnabled } from '../../utils/residualMoreEnvGates.js';
 import { isFeedbackSurveyEnvDisabled } from '../../utils/residualFinalEnvGates.js';
+import { extractMemoryCitationFromAssistantContent } from '../../utils/memoryCitation.js';
+import { MEMORY_SURVEY_RESPONSE_SCORE, writeMemorySurveyRatings } from '../../utils/memorySurveyRating.js';
 import { extractTextContent, getLastAssistantMessage } from '../../utils/messages.js';
 import { logOTelEvent } from '../../utils/telemetry/events.js';
 import { submitTranscriptShare } from './submitTranscriptShare.js';
@@ -20,11 +22,22 @@ import type { TranscriptShareResponse } from './TranscriptSharePrompt.js';
 import { useSurveyState } from './useSurveyState.js';
 import type { FeedbackSurveyResponse } from './utils.js';
 
-const HIDE_THANKS_AFTER_MS = 3000;
+/** densable Sjb */
+const HIDE_THANKS_AFTER_MS = 5000;
+/** densable Ejb: auto-close open memory survey after 60s → event_type timeout */
+const AUTO_DISMISS_AFTER_MS = 60_000;
 const MEMORY_SURVEY_GATE = 'tengu_dunwich_bell';
 const MEMORY_SURVEY_EVENT = 'tengu_memory_survey_event';
-const SURVEY_PROBABILITY = 0.2;
+/** densable Cjb / Ajb — default 0.2 when GB unset or non-numeric. */
+const MEMORY_SURVEY_PROBABILITY_FLAG = 'tengu_velvet_moth';
+const DEFAULT_SURVEY_PROBABILITY = 0.2;
 const TRANSCRIPT_SHARE_TRIGGER = 'memory_survey';
+
+/** densable Ajb — sampling probability for memory survey appear. */
+function getMemorySurveyProbability(): number {
+  const raw = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(MEMORY_SURVEY_PROBABILITY_FLAG, DEFAULT_SURVEY_PROBABILITY);
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : DEFAULT_SURVEY_PROBABILITY;
+}
 
 const MEMORY_WORD_RE = /\bmemor(?:y|ies)\b/i;
 
@@ -54,19 +67,32 @@ export function useMemorySurvey(
   messages: Message[],
   isLoading: boolean,
   hasActivePrompt = false,
-  { enabled = true }: { enabled?: boolean } = {},
+  { enabled = true, otherSurveyActive = false }: { enabled?: boolean; otherSurveyActive?: boolean } = {},
 ): {
-  state: 'closed' | 'open' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
+  state: 'closed' | 'open' | 'pending' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
   lastResponse: FeedbackSurveyResponse | null;
+  /** densable citation from last opened memory survey (cc-memory span). */
+  citation: { sentence: string; filenames: string[] } | null;
   handleSelect: (selected: FeedbackSurveyResponse) => void;
+  handleUndo: () => void;
+  abandon: () => void;
   handleTranscriptSelect: (selected: TranscriptShareResponse) => void;
 } {
   // Track assistant message UUIDs that were already evaluated so we don't
   // re-roll probability on re-renders or re-scan messages for the same turn.
   const seenAssistantUuids = useRef<Set<string>>(new Set());
-  // Once a memory file read is observed it stays true for the session —
-  // skip the O(n) scan on subsequent turns.
-  const memoryReadSeen = useRef(false);
+  // densable u: last opened citation (filenames used for surveyRating write-back)
+  const openCitationRef = useRef<{
+    sentence: string;
+    filenames: string[];
+  } | null>(null);
+  // densable s: first message uuid — detect /clear resets
+  const firstMessageUuidRef = useRef<string | null>(null);
+  // densable l/c: last opened citation for residual UI consumers
+  const [citation, setCitation] = useState<{
+    sentence: string;
+    filenames: string[];
+  } | null>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
@@ -82,6 +108,7 @@ export function useMemorySurvey(
     });
   }, []);
 
+  // densable g: responded + optional surveyRating write-back for cited files
   const onSelect = useCallback((appearanceId: string, selected: FeedbackSurveyResponse) => {
     logEvent(MEMORY_SURVEY_EVENT, {
       event_type: 'responded' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -94,22 +121,42 @@ export function useMemorySurvey(
       response: selected,
       survey_type: 'memory',
     });
+    const score = MEMORY_SURVEY_RESPONSE_SCORE[selected];
+    const cited = openCitationRef.current;
+    if (score !== undefined && cited && cited.filenames.length > 0) {
+      void writeMemorySurveyRatings(cited.filenames, score);
+    }
   }, []);
 
-  const shouldShowTranscriptPrompt = useCallback((selected: FeedbackSurveyResponse) => {
-    if (process.env.USER_TYPE !== 'ant') {
-      return false;
-    }
-    if (selected !== 'bad' && selected !== 'good') {
-      return false;
-    }
-    if (getGlobalConfig().transcriptShareDismissed) {
-      return false;
-    }
-    if (!isPolicyAllowed('allow_product_feedback')) {
-      return false;
-    }
-    return true;
+  // densable f: autoDismiss → event_type "timeout"
+  const onAutoDismiss = useCallback((appearanceId: string) => {
+    logEvent(MEMORY_SURVEY_EVENT, {
+      event_type: 'timeout' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      appearance_id: appearanceId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    void logOTelEvent('feedback_survey', {
+      event_type: 'timeout',
+      appearance_id: appearanceId,
+      survey_type: 'memory',
+    });
+  }, []);
+
+  // densable m: abandon → event_type "abandoned"
+  const onAbandon = useCallback((appearanceId: string) => {
+    logEvent(MEMORY_SURVEY_EVENT, {
+      event_type: 'abandoned' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      appearance_id: appearanceId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    void logOTelEvent('feedback_survey', {
+      event_type: 'abandoned',
+      appearance_id: appearanceId,
+      survey_type: 'memory',
+    });
+  }, []);
+
+  // densable y: always false (memory survey does not open transcript share)
+  const shouldShowTranscriptPrompt = useCallback((_selected: FeedbackSurveyResponse) => {
+    return false;
   }, []);
 
   const onTranscriptPromptShown = useCallback((appearanceId: string) => {
@@ -157,10 +204,14 @@ export function useMemorySurvey(
     [],
   );
 
-  const { state, lastResponse, open, handleSelect, handleTranscriptSelect } = useSurveyState({
+  const { state, lastResponse, open, abandon, handleSelect, handleUndo, handleTranscriptSelect } = useSurveyState({
     hideThanksAfterMs: HIDE_THANKS_AFTER_MS,
+    otherSurveyActive,
+    autoDismissAfterMs: AUTO_DISMISS_AFTER_MS,
     onOpen,
     onSelect,
+    onAutoDismiss,
+    onAbandon,
     shouldShowTranscriptPrompt,
     onTranscriptPromptShown,
     onTranscriptSelect,
@@ -171,15 +222,33 @@ export function useMemorySurvey(
   useEffect(() => {
     if (!enabled) return;
 
-    // /clear resets messages but REPL stays mounted — reset refs so a memory
-    // read from the previous conversation doesn't leak into the new one.
+    // densable: empty transcript resets citation + seen set
     if (messages.length === 0) {
-      memoryReadSeen.current = false;
       seenAssistantUuids.current.clear();
+      firstMessageUuidRef.current = null;
+      openCitationRef.current = null;
+      setCitation(null);
+      return;
+    }
+
+    // densable s: first-message uuid change (e.g. /clear) → reseed seen set
+    const firstUuid = messages[0]?.uuid ?? null;
+    if (firstMessageUuidRef.current !== firstUuid) {
+      firstMessageUuidRef.current = firstUuid;
+      seenAssistantUuids.current.clear();
+      for (const msg of messages) {
+        if (msg.type === 'assistant') {
+          seenAssistantUuids.current.add(msg.uuid);
+        }
+      }
       return;
     }
 
     if (state !== 'closed' || isLoading || hasActivePrompt) {
+      return;
+    }
+
+    if (otherSurveyActive) {
       return;
     }
 
@@ -209,30 +278,43 @@ export function useMemorySurvey(
       return;
     }
 
-    const text = extractTextContent(
-      Array.isArray(lastAssistant.message.content) ? lastAssistant.message.content : [],
-      ' ',
-    );
-    if (!MEMORY_WORD_RE.test(text)) {
-      return;
-    }
-
-    // Mark as evaluated before the memory-read scan so a turn that mentions
-    // "memory" but has no memory read doesn't trigger repeated O(n) scans
-    // on subsequent renders with the same last assistant message.
+    // densable kjb: require <cc-memory> citation spans (not bare "memory" word).
+    // Residual keeps MEMORY_WORD_RE as a cheap prefilter only when no citation
+    // tags are present at all — still refuse open without a real citation.
+    const citationHit = extractMemoryCitationFromAssistantContent(lastAssistant.message.content);
     seenAssistantUuids.current.add(lastAssistant.uuid);
-
-    if (!memoryReadSeen.current) {
-      memoryReadSeen.current = hasMemoryFileRead(messages);
+    if (citationHit === null) {
+      // Legacy residual: memory-file-read + word "memory" still allowed when
+      // force gate is on (no model citation tags in older transcripts).
+      if (!isForceMemorySurveyEnabled()) {
+        return;
+      }
+      const text = extractTextContent(
+        Array.isArray(lastAssistant.message.content) ? lastAssistant.message.content : [],
+        ' ',
+      );
+      if (!MEMORY_WORD_RE.test(text) || !hasMemoryFileRead(messages)) {
+        return;
+      }
     }
-    if (!memoryReadSeen.current) {
+
+    // densable: !Rjb() && Math.random() >= Ajb() → skip (Rjb always false).
+    if (Math.random() >= getMemorySurveyProbability() && !isForceMemorySurveyEnabled()) {
       return;
     }
 
-    if (Math.random() < SURVEY_PROBABILITY) {
-      open();
-    }
-  }, [enabled, state, isLoading, hasActivePrompt, lastAssistant, messages, open]);
+    openCitationRef.current = citationHit;
+    setCitation(citationHit);
+    open();
+  }, [enabled, otherSurveyActive, state, isLoading, hasActivePrompt, lastAssistant, messages, open]);
 
-  return { state, lastResponse, handleSelect, handleTranscriptSelect };
+  return {
+    state,
+    lastResponse,
+    citation,
+    handleSelect,
+    handleUndo,
+    abandon,
+    handleTranscriptSelect,
+  };
 }

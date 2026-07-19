@@ -184,11 +184,15 @@ export class RemoteIO extends StructuredIO {
         () => this.ccrClient!.readSubagentInternalEvents(),
       )
 
+      // densable: started→processing; completed|cancelled→processed
+      // (cancelled is reported as processed — no separate delivery status).
       const LIFECYCLE_TO_DELIVERY = {
         started: 'processing',
         completed: 'processed',
+        cancelled: 'processed',
       } as const
       setCommandLifecycleListener((uuid, state) => {
+        if (!Object.hasOwn(LIFECYCLE_TO_DELIVERY, state)) return
         this.ccrClient?.reportDelivery(uuid, LIFECYCLE_TO_DELIVERY[state])
       })
       setSessionStateChangedListener((state, details) => {

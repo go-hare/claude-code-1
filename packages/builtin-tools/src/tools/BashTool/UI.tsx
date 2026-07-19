@@ -5,13 +5,14 @@ import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseError
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { ShellProgressMessage } from 'src/components/shell/ShellProgressMessage.js';
 import { Box, Text } from '@anthropic/ink';
-import { useKeybinding } from 'src/keybindings/useKeybinding.js';
-import { useShortcutDisplay } from 'src/keybindings/useShortcutDisplay.js';
+import {
+  TASK_BACKGROUND_DEFAULT_KEY,
+  useTaskBackgroundKeybinding,
+} from 'src/keybindings/useTaskBackgroundKeybinding.js';
 import { useAppStateStore, useSetAppState } from 'src/state/AppState.js';
 import type { Tool } from 'src/Tool.js';
 import { backgroundAll } from 'src/tasks/LocalShellTask/LocalShellTask.js';
 import type { ProgressMessage } from 'src/types/message.js';
-import { env } from 'src/utils/env.js';
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { isFullscreenEnvEnabled } from 'src/utils/fullscreen.js';
@@ -25,8 +26,8 @@ import { parseSedEditCommand } from './sedEditParser.js';
 const MAX_COMMAND_DISPLAY_LINES = 2;
 const MAX_COMMAND_DISPLAY_CHARS = 160;
 
-// Simple component to show background hint and handle ctrl+b
-// When ctrl+b is pressed, backgrounds ALL running foreground commands
+// densable BackgroundHint + tpr: cohesion prefers ctrl+x ctrl+b; bare ctrl+b
+// is singleKey:false under default bindings so readline backward-char survives.
 export function BackgroundHint({ onBackground }: { onBackground?: () => void } = {}): React.ReactElement | null {
   const store = useAppStateStore();
   const setAppState = useSetAppState();
@@ -39,19 +40,28 @@ export function BackgroundHint({ onBackground }: { onBackground?: () => void } =
     onBackground?.();
   }, [store, setAppState, onBackground]);
 
-  useKeybinding('task:background', handleBackground, {
-    context: 'Task',
+  const { cohesionFixes, displayShortcut, resolvedShortcut } = useTaskBackgroundKeybinding({
+    handler: handleBackground,
+    isActive: true,
   });
-
-  // Get the configured shortcut for task:background
-  const baseShortcut = useShortcutDisplay('task:background', 'Task', 'ctrl+b');
-  // In tmux, ctrl+b is the prefix key, so users need to press it twice to send ctrl+b
-  const shortcut = env.terminal === 'tmux' && baseShortcut === 'ctrl+b' ? 'ctrl+b ctrl+b (twice)' : baseShortcut;
 
   // Don't show background hint if background tasks are disabled
   if (isBackgroundTasksDisabled()) {
     return null;
   }
+
+  // densable: hide when cohesion on and shortcut unbound
+  if (cohesionFixes && displayShortcut === '') {
+    return null;
+  }
+
+  // Legacy tmux bare-ctrl+b path kept the "(twice)" suffix for Bash only.
+  const shortcut =
+    !cohesionFixes &&
+    displayShortcut === `${TASK_BACKGROUND_DEFAULT_KEY} ${TASK_BACKGROUND_DEFAULT_KEY}` &&
+    resolvedShortcut === TASK_BACKGROUND_DEFAULT_KEY
+      ? `${displayShortcut} (twice)`
+      : displayShortcut;
 
   return (
     <Box paddingLeft={5}>

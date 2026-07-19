@@ -284,6 +284,18 @@ export type ConnectedMCPServer = {
   cleanup: () => Promise<void>
   /** Official transportErrorState — mid-call drop detection. */
   transportErrorState?: McpTransportErrorState
+  /**
+   * Official densable 2.1.211: tools/list failed with 401/403 on a claude.ai
+   * proxy (or equivalent). RefreshMcpTools treats empty list + this flag as
+   * kept-previous / error (user must re-auth via /mcp) rather than "refreshed
+   * to zero tools".
+   */
+  discoveryAuthFailure?: boolean
+  /**
+   * Official densable: last tools/list error message (when list failed but
+   * connection remains "connected"). Cleared on successful list.
+   */
+  toolsListError?: string
 }
 
 export type FailedMCPServer = {

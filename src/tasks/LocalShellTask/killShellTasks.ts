@@ -7,17 +7,41 @@ import type { AgentId } from '../../types/ids.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logError } from '../../utils/log.js'
 import { dequeueAllMatching } from '../../utils/messageQueueManager.js'
+import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
 import { evictTaskOutput } from '../../utils/task/diskOutput.js'
-import { updateTaskState } from '../../utils/task/framework.js'
+import {
+  bashKeepaliveReason,
+  monitorKeepaliveReason,
+  removeKeepaliveReason,
+  updateTaskState,
+} from '../../utils/task/framework.js'
 import { isLocalShellTask } from './guards.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
 
+/**
+ * densable jLe portable — kill running local shell, stamp notified, drop
+ * shellCommand, and when the task was not yet notified emit lf("stopped").
+ * c7c once-gate in emitTaskTerminatedSdk de-dupes with stopTask / _Xi lf.
+ */
 export function killTask(taskId: string, setAppState: SetAppStateFn): void {
+  let owner: string | undefined
+  let kind: 'bash' | 'monitor' | undefined
+  let killed = false
+  let wasNotified = false
+  let toolUseId: string | undefined
+  let description: string | undefined
   updateTaskState(taskId, setAppState, task => {
     if ((task as any).status !== 'running' || !isLocalShellTask(task)) {
       return task
     }
+
+    killed = true
+    wasNotified = task.notified === true
+    owner = task.agentId
+    kind = task.kind
+    toolUseId = task.toolUseId
+    description = task.description
 
     try {
       logForDebugging(`LocalShellTask ${taskId} kill requested`)
@@ -42,6 +66,21 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
       endTime: Date.now(),
     }
   })
+  // densable jLe: if(r&&!n) lf(e,"stopped",{toolUseId,summary:description})
+  if (killed && !wasNotified) {
+    emitTaskTerminatedSdk(taskId, 'stopped', {
+      toolUseId,
+      summary: description,
+    })
+  }
+  // Official tB(i, `bash:${e}` / `monitor:${e}`) on kill cleanup.
+  if (killed && owner) {
+    const reason =
+      kind === 'monitor'
+        ? monitorKeepaliveReason(taskId)
+        : bashKeepaliveReason(taskId)
+    removeKeepaliveReason(owner, reason, setAppState)
+  }
   void evictTaskOutput(taskId)
 }
 

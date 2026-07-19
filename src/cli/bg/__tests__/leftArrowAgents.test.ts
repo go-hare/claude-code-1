@@ -138,4 +138,317 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     expect(payload.name).toBe('from left')
     expect(payload.intent).toBe('from left arrow')
   })
+
+  test('writeA8qJobState persists worktree + bridge + resumeSessionId', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'a8q-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+    const { writeA8qJobState, readBgJobState } = await import(
+      '../../../daemon/jobState.js'
+    )
+    const sessionId = 'deadbeef-1111-2222-3333-444444444444'
+    writeA8qJobState({
+      sessionId,
+      cwd: '/tmp/wt-path',
+      intent: 'continue in worktree',
+      resumeSessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      worktree: {
+        path: '/tmp/wt-path',
+        branch: 'feat/x',
+        hookBased: false,
+        originCwd: '/tmp/origin',
+      },
+      bridgeSessionId: 'bridge-sess-1',
+      bridgeOutboundOnly: true,
+    })
+    const state = readBgJobState('deadbeef')!
+    expect(state.cwd).toBe('/tmp/wt-path')
+    expect(state.resumeSessionId).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+    expect(state.bgIsolation).toBe('worktree')
+    expect(state.worktreePath).toBe('/tmp/wt-path')
+    expect(state.worktreeBranch).toBe('feat/x')
+    expect(state.originCwd).toBe('/tmp/origin')
+    expect(state.bridgeSessionId).toBe('bridge-sess-1')
+    expect(state.bridgeOutboundOnly).toBe(true)
+  })
+
+  test('buildBridgeReattachEnv mirrors official rit()', async () => {
+    const { buildBridgeReattachEnv } = await import('../leftArrowAgents.js')
+    expect(buildBridgeReattachEnv(undefined)).toBeUndefined()
+    expect(buildBridgeReattachEnv('sid')).toEqual({
+      CLAUDE_BRIDGE_REATTACH_SESSION: 'sid',
+      CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY: '1',
+    })
+    expect(
+      buildBridgeReattachEnv('sid', {
+        seq: 7,
+        outboundOnly: false,
+        grouping: 'g1',
+      }),
+    ).toEqual({
+      CLAUDE_BRIDGE_REATTACH_SESSION: 'sid',
+      CLAUDE_BRIDGE_REATTACH_SEQ: '7',
+      CLAUDE_BRIDGE_REATTACH_GROUPING: 'g1',
+    })
+  })
+
+  test('openAgentsViaLeftArrow writes adopt.json prefill on abort-then-fork', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'a8q-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+
+    mock.module('../../../bootstrap/state.js', () => ({
+      getOriginalCwd: () => '/tmp/proj',
+      getSessionId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      isSessionPersistenceDisabled: () => false,
+    }))
+    mock.module('../../../utils/sessionStorage.js', () => ({
+      getCurrentSessionTitle: () => undefined,
+    }))
+    mock.module('../../../types/ids.js', () => ({
+      asSessionId: (s: string) => s,
+    }))
+    mock.module('../../../utils/worktree.js', () => ({
+      getCurrentWorktreeSession: () => null,
+    }))
+    mock.module('../../../bridge/replBridgeHandle.js', () => ({
+      getReplBridgeHandle: () => null,
+    }))
+    mock.module('../../../daemon/installPrompt.js', () => ({
+      ensureDaemonRunning: async () => ({ ok: false }),
+    }))
+
+    const { openAgentsViaLeftArrow } = await import('../leftArrowAgents.js')
+    const result = await openAgentsViaLeftArrow(
+      [{ type: 'user', message: { content: 'mid turn work' } }],
+      {
+        via: 'abort-then-fork',
+        partialText: 'partial assistant text that was streaming',
+        boundaryUuid: 'bound-1',
+      },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const adoptPath = join(dir, 'jobs', result.short, 'adopt.json')
+    const adopt = JSON.parse(readFileSync(adoptPath, 'utf8')) as {
+      prefill?: { text: string; boundaryUuid?: string }
+      shells: unknown[]
+      cron: unknown[]
+    }
+    expect(adopt.prefill?.text).toContain('partial assistant')
+    expect(adopt.prefill?.boundaryUuid).toBe('bound-1')
+    expect(Array.isArray(adopt.shells)).toBe(true)
+  })
+
+  test('openAgentsViaLeftArrow writes checkpoint shells/cron from options', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'a8q-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+
+    mock.module('../../../bootstrap/state.js', () => ({
+      getOriginalCwd: () => '/tmp/proj',
+      getSessionId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      isSessionPersistenceDisabled: () => false,
+    }))
+    mock.module('../../../utils/sessionStorage.js', () => ({
+      getCurrentSessionTitle: () => undefined,
+    }))
+    mock.module('../../../types/ids.js', () => ({
+      asSessionId: (s: string) => s,
+    }))
+    mock.module('../../../utils/worktree.js', () => ({
+      getCurrentWorktreeSession: () => null,
+    }))
+    mock.module('../../../bridge/replBridgeHandle.js', () => ({
+      getReplBridgeHandle: () => null,
+    }))
+    mock.module('../../../daemon/installPrompt.js', () => ({
+      ensureDaemonRunning: async () => ({ ok: false }),
+    }))
+
+    const { openAgentsViaLeftArrow } = await import('../leftArrowAgents.js')
+    const result = await openAgentsViaLeftArrow(
+      [{ type: 'user', message: { content: 'carry tasks' } }],
+      {
+        via: 'idle-fork',
+        checkpoint: {
+          shells: [{ taskId: 'b1', pid: 9, command: 'sleep 9' }],
+          cron: [{ id: 'c1', cron: '0 * * * *', prompt: 'hourly' }],
+        },
+      },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const adoptPath = join(dir, 'jobs', result.short, 'adopt.json')
+    const adopt = JSON.parse(readFileSync(adoptPath, 'utf8')) as {
+      prefill?: unknown
+      shells: Array<{ taskId?: string; pid?: number }>
+      cron: Array<{ id: string }>
+    }
+    expect(adopt.prefill).toBeUndefined()
+    expect(adopt.shells[0]?.pid).toBe(9)
+    expect(adopt.cron[0]?.id).toBe('c1')
+  })
+
+  test('buildBridgeReattachEnv with seq + grouping', async () => {
+    const { buildBridgeReattachEnv } = await import('../leftArrowAgents.js')
+    expect(
+      buildBridgeReattachEnv('sid', {
+        seq: 42,
+        grouping: 'g',
+        outboundOnly: true,
+      }),
+    ).toEqual({
+      CLAUDE_BRIDGE_REATTACH_SESSION: 'sid',
+      CLAUDE_BRIDGE_REATTACH_SEQ: '42',
+      CLAUDE_BRIDGE_REATTACH_GROUPING: 'g',
+      CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY: '1',
+    })
+  })
+
+  test('submitDispatch carries worktree isolation + reattachEnv', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'a8q-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+
+    mock.module('../../../daemon/controlSocketClient.js', () => ({
+      sendControlRequest: async () => ({ ok: false, error: 'offline' }),
+      isDaemonReachable: async () => false,
+    }))
+
+    const provided = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff'
+    const { writeA8qJobState } = await import('../../../daemon/jobState.js')
+    writeA8qJobState({
+      sessionId: provided,
+      cwd: '/tmp/wt',
+      intent: 'wt',
+      worktree: { path: '/tmp/wt', originCwd: '/tmp/o' },
+    })
+
+    const { submitDispatch } = await import('../../../daemon/bgManager.js')
+    await submitDispatch({
+      intent: 'wt',
+      cwd: '/tmp/wt',
+      source: 'left_arrow',
+      resumeSessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      forkSession: true,
+      providedSessionId: provided,
+      isolation: 'worktree',
+      worktree: { path: '/tmp/wt' },
+      reattachEnv: {
+        CLAUDE_BRIDGE_REATTACH_SESSION: 'br1',
+        CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY: '1',
+      },
+    })
+
+    const { getDispatchDir } = await import('../../../daemon/bgWorker.js')
+    const dispatchDir = getDispatchDir()
+    const files = readdirSync(dispatchDir).filter(f => f.endsWith('.json'))
+    const payload = JSON.parse(
+      readFileSync(join(dispatchDir, files[files.length - 1]!), 'utf8'),
+    ) as {
+      isolation?: string
+      worktree?: { path: string }
+      reattachEnv?: Record<string, string>
+      env?: Record<string, string>
+    }
+    expect(payload.isolation).toBe('worktree')
+    expect(payload.worktree?.path).toBe('/tmp/wt')
+    expect(payload.reattachEnv?.CLAUDE_BRIDGE_REATTACH_SESSION).toBe('br1')
+  })
+
+  test('writeA8qJobState persists sessionPermissionRules + memoryToggledOff', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'a8q-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+    const { writeA8qJobState, readBgJobState } = await import(
+      '../../../daemon/jobState.js'
+    )
+    const sessionId = 'permrule-1111-2222-3333-444444444444'
+    writeA8qJobState({
+      sessionId,
+      cwd: '/tmp/proj',
+      intent: 'with rules',
+      sessionPermissionRules: {
+        allow: ['Bash(git *)'],
+        deny: ['Bash(rm *)'],
+      },
+      memoryToggledOff: true,
+    })
+    const state = readBgJobState(sessionId.slice(0, 8))!
+    expect(state.sessionPermissionRules?.allow).toEqual(['Bash(git *)'])
+    expect(state.sessionPermissionRules?.deny).toEqual(['Bash(rm *)'])
+    expect(state.memoryToggledOff).toBe(true)
+  })
+
+  test('submitDispatch sets CLAUDE_BG_SESSION_PERMISSION_RULES + MEMORY env', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'a8q-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+
+    mock.module('../../../daemon/controlSocketClient.js', () => ({
+      sendControlRequest: async () => ({ ok: false, error: 'offline' }),
+      isDaemonReachable: async () => false,
+    }))
+
+    const provided = 'rulesenv-cccc-dddd-eeee-ffffffffffff'
+    const { writeA8qJobState } = await import('../../../daemon/jobState.js')
+    writeA8qJobState({
+      sessionId: provided,
+      cwd: '/tmp',
+      intent: 'rules',
+    })
+    const { submitDispatch } = await import('../../../daemon/bgManager.js')
+    await submitDispatch({
+      intent: 'rules',
+      source: 'left_arrow',
+      resumeSessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      forkSession: true,
+      providedSessionId: provided,
+      sessionPermissionRules: { allow: ['Read'], deny: [] },
+      memoryToggledOff: true,
+    })
+    const { getDispatchDir } = await import('../../../daemon/bgWorker.js')
+    const dispatchDir = getDispatchDir()
+    const files = readdirSync(dispatchDir).filter(f => f.endsWith('.json'))
+    const payload = JSON.parse(
+      readFileSync(join(dispatchDir, files[files.length - 1]!), 'utf8'),
+    ) as { env?: Record<string, string> }
+    expect(payload.env?.CLAUDE_BG_MEMORY_TOGGLED_OFF).toBe('1')
+    expect(
+      JSON.parse(payload.env?.CLAUDE_BG_SESSION_PERMISSION_RULES ?? '{}'),
+    ).toEqual({ allow: ['Read'], deny: [] })
+  })
+
+  test('carryTaskListToFork copies task files (official pqb)', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'pqb-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+    delete process.env.CLAUDE_CODE_TASK_LIST_ID
+
+    const { mkdirSync, writeFileSync, existsSync } = await import('fs')
+    const fromId = 'from-session-aaaa-bbbb-cccc-dddddddddddd'
+    const toId = 'to-session-eeee-ffff-0000-111111111111'
+    const fromDir = join(dir, 'tasks', fromId)
+    mkdirSync(fromDir, { recursive: true })
+    writeFileSync(join(fromDir, '1.json'), '{"id":"1","subject":"x"}')
+    writeFileSync(join(fromDir, '.lock'), 'ignore-me')
+
+    const { carryTaskListToFork } = await import('../leftArrowAgents.js')
+    await carryTaskListToFork(toId, fromId)
+    expect(existsSync(join(dir, 'tasks', toId, '1.json'))).toBe(true)
+    expect(existsSync(join(dir, 'tasks', toId, '.lock'))).toBe(false)
+  })
+
+  test('carryTaskListToFork skips when CLAUDE_CODE_TASK_LIST_ID set', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'pqb-skip-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+    process.env.CLAUDE_CODE_TASK_LIST_ID = 'shared'
+    try {
+      const { mkdirSync, writeFileSync, existsSync } = await import('fs')
+      const fromId = 'from2-session-aaaa-bbbb-cccc-dddddddddddd'
+      const toId = 'to2-session-eeee-ffff-0000-111111111111'
+      const fromDir = join(dir, 'tasks', fromId)
+      mkdirSync(fromDir, { recursive: true })
+      writeFileSync(join(fromDir, '1.json'), '{}')
+      const { carryTaskListToFork } = await import('../leftArrowAgents.js')
+      await carryTaskListToFork(toId, fromId)
+      expect(existsSync(join(dir, 'tasks', toId, '1.json'))).toBe(false)
+    } finally {
+      delete process.env.CLAUDE_CODE_TASK_LIST_ID
+    }
+  })
 })

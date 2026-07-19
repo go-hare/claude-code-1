@@ -1689,6 +1689,39 @@ export function getObserverPairingByObserverTaskId(
 }
 
 /**
+ * Official Fjr densable — sync in-place stop of an observer pairing by
+ * observerTaskId, zero the buffer, fire-and-forget observerStopped tombstone.
+ * Does **not** clear the Map entry (stopped orphan remains findable) and does
+ * **not** abort the agent process (XV/ySr handle process kill separately).
+ * Returns true when a pairing existed and was not already stopped (analytics
+ * `agent_observer_stop` densable path).
+ */
+export function stopObserverPairingInPlace(
+  observerTaskId: string,
+  opts?: {
+    agentType?: string
+    log?: (msg: string) => void
+  },
+): boolean {
+  const pairing = observerPairings.get(observerTaskId)
+  const wasLive = pairing !== undefined && pairing.state !== 'stopped'
+  if (pairing) {
+    pairing.state = 'stopped'
+    if (pairing.buffer) pairing.buffer.length = 0
+    pairing.drainDirty = false
+  }
+  const agentType = pairing?.observerAgentType ?? opts?.agentType
+  void writeObserverStoppedTombstone({
+    observerTaskId,
+    ...(agentType !== undefined ? { observerAgentType: agentType } : {}),
+    log: opts?.log,
+  }).catch(() => {
+    /* densable Bno swallow */
+  })
+  return wasLive
+}
+
+/**
  * Official HXt/n5r observerStopped tombstone densable — patch observer
  * sidecar meta so KOu reattach returns blocked.
  */

@@ -35,6 +35,7 @@ import {
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js'
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
 import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.js'
+import { maybeStripAlwaysAllowPermissionsFromContext } from '../../../utils/permissions/suppressAlwaysAllow.js'
 import type { PermissionContext } from '../PermissionContext.js'
 import { createResolveOnce } from '../PermissionContext.js'
 
@@ -344,15 +345,22 @@ function handleInteractivePermission(
 
       if (response.behavior === 'allow') {
         void (async () => {
-          if (response.permissionUpdates?.length) {
-            void ctx.persistPermissions(response.permissionUpdates)
+          // densable nLe/rLe — strip bare always-allow when tool suppresses it.
+          const stripped = maybeStripAlwaysAllowPermissionsFromContext(
+            response.permissionUpdates,
+            ctx.tool,
+            response.updatedInput ?? displayInput,
+            ctx.toolUseContext,
+          )
+          if (stripped.length > 0) {
+            void ctx.persistPermissions(stripped)
           }
           ctx.logDecision(
             {
               decision: 'accept',
               source: {
                 type: 'user',
-                permanent: !!response.permissionUpdates?.length,
+                permanent: stripped.length > 0,
               },
             },
             { permissionPromptStartTimeMs },
@@ -422,15 +430,22 @@ function handleInteractivePermission(
         channelUnsubscribe?.()
 
         if (response.behavior === 'allow') {
-          if (response.updatedPermissions?.length) {
-            void ctx.persistPermissions(response.updatedPermissions)
+          // densable nLe/rLe — strip bare always-allow when tool suppresses it.
+          const stripped = maybeStripAlwaysAllowPermissionsFromContext(
+            response.updatedPermissions,
+            ctx.tool,
+            response.updatedInput ?? displayInput,
+            ctx.toolUseContext,
+          )
+          if (stripped.length > 0) {
+            void ctx.persistPermissions(stripped)
           }
           ctx.logDecision(
             {
               decision: 'accept',
               source: {
                 type: 'user',
-                permanent: !!response.updatedPermissions?.length,
+                permanent: stripped.length > 0,
               },
             },
             { permissionPromptStartTimeMs },

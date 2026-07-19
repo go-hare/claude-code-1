@@ -161,6 +161,12 @@ type Props = {
    * renderer doesn't push fewer items down into the prompt area.
    */
   overlay?: boolean;
+  /** densable yGe emptyMessage — shown when list empty (e.g. No commands match). */
+  emptyMessage?: string;
+  /** densable yGe: mouse hover id preferred for highlight over selected. */
+  hoveredId?: string | null;
+  onSelect?: (index: number) => void;
+  onHoverChange?: (id: string | null) => void;
 };
 
 export function PromptInputFooterSuggestions({
@@ -168,6 +174,10 @@ export function PromptInputFooterSuggestions({
   selectedSuggestion,
   maxColumnWidth: maxColumnWidthProp,
   overlay,
+  emptyMessage,
+  hoveredId,
+  onSelect,
+  onHoverChange,
 }: Props): ReactNode {
   const { rows } = useTerminalSize();
   // Maximum number of suggestions to show at once (leaving space for prompt).
@@ -175,9 +185,18 @@ export function PromptInputFooterSuggestions({
   // the ScrollBox, so terminal height isn't the constraint.
   const maxVisibleItems = overlay ? OVERLAY_MAX_ITEMS : Math.min(6, Math.max(1, rows - 3));
 
-  // No suggestions to display
+  // densable yGe: empty list with emptyMessage still renders the message row
   if (suggestions.length === 0) {
-    return null;
+    if (!emptyMessage) return null;
+    const pad = overlay ? 0 : Math.max(0, maxVisibleItems - 1);
+    return (
+      <Box flexDirection="column" justifyContent={overlay ? undefined : 'flex-end'}>
+        <Text dimColor>{emptyMessage}</Text>
+        {Array.from({ length: pad }, (_, i) => (
+          <Text key={`pad-${i}`}> </Text>
+        ))}
+      </Box>
+    );
   }
 
   // Use prop if provided (stable width from all commands), otherwise calculate from visible
@@ -191,6 +210,12 @@ export function PromptInputFooterSuggestions({
   const endIndex = Math.min(startIndex + maxVisibleItems, suggestions.length);
   const visibleItems = suggestions.slice(startIndex, endIndex);
 
+  // densable yGe: I=e[t]?.id; H=a!=null&&e.some(id===a)?a:void 0; selected = H??I
+  const selectedId = suggestions[selectedSuggestion]?.id;
+  const activeHoverId =
+    hoveredId != null && suggestions.some(s => s.id === hoveredId) ? hoveredId : undefined;
+  const highlightId = activeHoverId ?? selectedId;
+
   // In non-overlay (inline) mode, justifyContent keeps suggestions
   // anchored to the bottom (near the prompt). In overlay mode we omit
   // both minHeight and flex-end: the parent is position=absolute with
@@ -199,15 +224,33 @@ export function PromptInputFooterSuggestions({
   // padding rows that shift the visible items down into the prompt area
   // when the list has fewer items than maxVisibleItems.
   return (
-    <Box flexDirection="column" justifyContent={overlay ? undefined : 'flex-end'}>
-      {visibleItems.map(item => (
-        <SuggestionItemRow
-          key={item.id}
-          item={item}
-          maxColumnWidth={maxColumnWidth}
-          isSelected={item.id === suggestions[selectedSuggestion]?.id}
-        />
-      ))}
+    <Box
+      flexDirection="column"
+      justifyContent={overlay ? undefined : 'flex-end'}
+      onMouseLeave={onSelect ? () => onHoverChange?.(null) : undefined}
+    >
+      {visibleItems.map((item, visibleIdx) => {
+        const absoluteIndex = startIndex + visibleIdx;
+        const row = (
+          <SuggestionItemRow
+            item={item}
+            maxColumnWidth={maxColumnWidth}
+            isSelected={item.id === highlightId}
+          />
+        );
+        if (!onSelect) {
+          return <Box key={item.id}>{row}</Box>;
+        }
+        return (
+          <Box
+            key={item.id}
+            onMouseEnter={() => onHoverChange?.(item.id)}
+            onClick={() => onSelect(absoluteIndex)}
+          >
+            {row}
+          </Box>
+        );
+      })}
     </Box>
   );
 }

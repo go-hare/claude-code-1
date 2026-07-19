@@ -11,7 +11,14 @@
  * updated by the watcher once the OSC 11 response arrives.
  */
 
-import type { ThemeName, ThemeSetting } from './theme.js'
+import {
+  isThemeName,
+  parseCustomThemeRef,
+  type ThemeName,
+  type ThemeSetting,
+} from './theme.js'
+// densable: custom theme base lives in ink package (shared with ThemeProvider)
+import { getCustomThemeBase } from '@anthropic/ink'
 
 export type SystemTheme = 'dark' | 'light'
 
@@ -37,13 +44,21 @@ export function setCachedSystemTheme(theme: SystemTheme): void {
 }
 
 /**
- * Resolve a ThemeSetting (which may be 'auto') to a concrete ThemeName.
+ * Resolve a ThemeSetting (which may be 'auto' or custom:<slug>) to a concrete
+ * ThemeName base palette. densable Jj — custom themes resolve to their base.
  */
 export function resolveThemeSetting(setting: ThemeSetting): ThemeName {
   if (setting === 'auto') {
     return getSystemThemeName()
   }
-  return setting
+  if (isThemeName(setting)) {
+    return setting
+  }
+  const slug = parseCustomThemeRef(setting)
+  if (slug) {
+    return getCustomThemeBase(slug) ?? 'dark'
+  }
+  return 'dark'
 }
 
 /**

@@ -22,6 +22,7 @@ import type {
 } from 'src/types/message.js'
 import type { DeepImmutable } from 'src/types/utils.js'
 import stripAnsi from 'strip-ansi'
+import { isSystemVisibleOrigin } from '../messagePredicates.js'
 import { createAssistantMessage } from '../messages.js'
 import { getPlan } from '../plans.js'
 
@@ -41,7 +42,28 @@ export function toInternalMessages(
             timestamp: new Date().toISOString(),
           } as Message,
         ]
-      case 'user':
+      case 'user': {
+        // densable Nke: parent_tool_use_id → ignored (child tool results only
+        // when convertToolResults is set — not on this pure mapper).
+        const parentToolUseId = (
+          message as { parent_tool_use_id?: string | null }
+        ).parent_tool_use_id
+        if (parentToolUseId) return []
+
+        // densable Nke: isSynthetic && !Ace(origin) → ignored.
+        // Channel/observer/peer synthetic rows still convert.
+        const origin = (
+          message as {
+            origin?: { kind?: string; senderTaskId?: string } | null
+          }
+        ).origin
+        if (
+          (message as { isSynthetic?: boolean }).isSynthetic === true &&
+          !isSystemVisibleOrigin(origin)
+        ) {
+          return []
+        }
+
         return [
           {
             type: 'user',
@@ -49,11 +71,14 @@ export function toInternalMessages(
             uuid: message.uuid ?? randomUUID(),
             timestamp: message.timestamp ?? new Date().toISOString(),
             isMeta: message.isSynthetic,
+            ...(origin !== undefined ? { origin } : {}),
           } as unknown as Message,
         ]
+      }
+      case 'system':
         // Handle compact boundary messages
-        if (message.subtype === 'compact_boundary') {
-          const compactMsg = message
+        if ((message as { subtype?: string }).subtype === 'compact_boundary') {
+          const compactMsg = message as SDKCompactBoundaryMessage
           return [
             {
               type: 'system',

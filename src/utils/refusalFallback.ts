@@ -174,6 +174,16 @@ export function resolveInitialRefusalFallbackChoice(
 }
 
 /**
+ * densable edit_prompt branch — true when dialog choice should abort the
+ * turn with refusal-fallback-edit (REPL auto-restore) instead of model switch.
+ */
+export function isRefusalEditPromptChoice(
+  choice: RefusalFallbackResult | string | undefined | null,
+): boolean {
+  return choice === 'edit_prompt'
+}
+
+/**
  * Whether FXl should be invoked: suppress undefined AND requestDialog present.
  */
 export function shouldInvokeRefusalFallbackDialog(
@@ -1189,6 +1199,10 @@ export function buildModelRefusalFallbackSystemMessage(input: {
   toModel: string
   requestId?: string | null
   apiRefusalCategory?: string | null
+  /** densable gty — last selectable user uuid after last assistant (rewind target). */
+  refusedUserMessageUuid?: string | null
+  /** densable gold also stamps retractedMessageUuids when salvaging partial stream. */
+  retractedMessageUuids?: string[]
   timestamp: string
   uuid: string
   reason?: 'refusal' | 'sticky' | string
@@ -1204,6 +1218,8 @@ export function buildModelRefusalFallbackSystemMessage(input: {
   requestId: string | null | undefined
   apiRefusalCategory: string | null | undefined
   apiRefusalExplanation: null
+  refusedUserMessageUuid: string | null | undefined
+  retractedMessageUuids?: string[]
   isMeta: false
   timestamp: string
   uuid: string
@@ -1220,6 +1236,53 @@ export function buildModelRefusalFallbackSystemMessage(input: {
     requestId: input.requestId,
     apiRefusalCategory: input.apiRefusalCategory,
     apiRefusalExplanation: null,
+    refusedUserMessageUuid: input.refusedUserMessageUuid ?? null,
+    ...(input.retractedMessageUuids !== undefined
+      ? { retractedMessageUuids: input.retractedMessageUuids }
+      : {}),
+    isMeta: false,
+    timestamp: input.timestamp,
+    uuid: input.uuid,
+  }
+}
+
+/**
+ * densable model_refusal_no_fallback system banner (chain exhausted / no route).
+ * Stamps refusedUserMessageUuid from gty like the fallback banner.
+ */
+export function buildModelRefusalNoFallbackSystemMessage(input: {
+  originalModel: string
+  requestId?: string | null
+  apiRefusalCategory?: string | null
+  apiRefusalExplanation?: string | null
+  refusedUserMessageUuid?: string | null
+  timestamp: string
+  uuid: string
+  content?: string
+}): {
+  type: 'system'
+  subtype: 'model_refusal_no_fallback'
+  content: string
+  level: 'warning'
+  originalModel: string
+  requestId: string | null | undefined
+  apiRefusalCategory: string | null | undefined
+  apiRefusalExplanation: string | null | undefined
+  refusedUserMessageUuid: string | null | undefined
+  isMeta: false
+  timestamp: string
+  uuid: string
+} {
+  return {
+    type: 'system',
+    subtype: 'model_refusal_no_fallback',
+    content: input.content ?? '',
+    level: 'warning',
+    originalModel: input.originalModel,
+    requestId: input.requestId,
+    apiRefusalCategory: input.apiRefusalCategory,
+    apiRefusalExplanation: input.apiRefusalExplanation ?? null,
+    refusedUserMessageUuid: input.refusedUserMessageUuid ?? null,
     isMeta: false,
     timestamp: input.timestamp,
     uuid: input.uuid,

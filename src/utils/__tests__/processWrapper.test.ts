@@ -7,8 +7,10 @@ import {
   formatProcessWrapperRelaunchRefuseMessage,
   formatProcessWrapperStatusLines,
   parseProcessWrapperValue,
+  pickProcessWrapperFromSources,
   PROCESS_WRAPPER_ENV_KEY,
   resetProcessWrapperCache,
+  seedProcessWrapperFromSettings,
   validateProcessWrapperArgv,
 } from '../processWrapper.js'
 
@@ -126,6 +128,47 @@ describe('applyProcessWrapperToLaunch (official qCe)', () => {
     expect(out.cmd).toBe(bin)
     expect(out.prefixArgs).toEqual(['--keep', '/bin/claude', 'script.js'])
     expect(out.target).toBe('script.js')
+  })
+})
+
+describe('seedProcessWrapperFromSettings densable residual', () => {
+  test('pickProcessWrapperFromSources prefers policy > flag > user', () => {
+    expect(pickProcessWrapperFromSources('/policy', '/flag', '/user')).toBe(
+      '/policy',
+    )
+    expect(pickProcessWrapperFromSources(undefined, '/flag', '/user')).toBe(
+      '/flag',
+    )
+    expect(pickProcessWrapperFromSources(undefined, undefined, '/user')).toBe(
+      '/user',
+    )
+    expect(
+      pickProcessWrapperFromSources(undefined, undefined, undefined),
+    ).toBeUndefined()
+    expect(pickProcessWrapperFromSources('', '/flag', '/user')).toBe('/flag')
+  })
+
+  test('seeds env when unset; does not clobber host env', () => {
+    const env: NodeJS.ProcessEnv = {}
+    seedProcessWrapperFromSettings(env, {
+      policy: '/opt/corp-wrap',
+      flag: '/flag',
+    })
+    expect(env[PROCESS_WRAPPER_ENV_KEY]).toBe('/opt/corp-wrap')
+
+    const host: NodeJS.ProcessEnv = {
+      [PROCESS_WRAPPER_ENV_KEY]: '/host/wrap',
+    }
+    seedProcessWrapperFromSettings(host, { policy: '/policy' })
+    expect(host[PROCESS_WRAPPER_ENV_KEY]).toBe('/host/wrap')
+  })
+
+  test('re-seeds when env still equals previous settings seed', () => {
+    const env: NodeJS.ProcessEnv = {}
+    seedProcessWrapperFromSettings(env, { user: '/old' })
+    expect(env[PROCESS_WRAPPER_ENV_KEY]).toBe('/old')
+    seedProcessWrapperFromSettings(env, { policy: '/new-policy' })
+    expect(env[PROCESS_WRAPPER_ENV_KEY]).toBe('/new-policy')
   })
 })
 

@@ -102,11 +102,38 @@ export type ThemeName = (typeof THEME_NAMES)[number]
 
 export const THEME_SETTINGS = ['auto', ...THEME_NAMES] as const
 
+/** densable `custom:` prefix for user/plugin theme refs stored in config. */
+export const CUSTOM_THEME_PREFIX = 'custom:' as const
+
 /**
  * A theme preference as stored in user config. `'auto'` follows the system
- * dark/light mode and is resolved to a ThemeName at runtime.
+ * dark/light mode; `custom:<slug>` selects a user/plugin theme JSON.
  */
-export type ThemeSetting = (typeof THEME_SETTINGS)[number]
+export type ThemeSetting =
+  | (typeof THEME_SETTINGS)[number]
+  | `${typeof CUSTOM_THEME_PREFIX}${string}`
+
+export function isThemeName(value: string): value is ThemeName {
+  return (THEME_NAMES as readonly string[]).includes(value)
+}
+
+export function isBuiltinThemeSetting(
+  value: string,
+): value is (typeof THEME_SETTINGS)[number] {
+  return (THEME_SETTINGS as readonly string[]).includes(value)
+}
+
+/** densable oge — encode slug as config theme setting. */
+export function customThemeRef(slug: string): ThemeSetting {
+  return `${CUSTOM_THEME_PREFIX}${slug}`
+}
+
+/** densable P2 — parse custom theme slug from a setting, or null. */
+export function parseCustomThemeRef(setting: string): string | null {
+  return setting.startsWith(CUSTOM_THEME_PREFIX)
+    ? setting.slice(CUSTOM_THEME_PREFIX.length)
+    : null
+}
 
 /**
  * Light theme using explicit RGB values to avoid inconsistencies

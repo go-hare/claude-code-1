@@ -60,6 +60,7 @@ import { registerFrontmatterHooks } from 'src/utils/hooks/registerFrontmatterHoo
 import { clearSessionHooks } from 'src/utils/hooks/sessionHooks.js'
 import { executeSubagentStartHooks } from 'src/utils/hooks.js'
 import { createUserMessage } from 'src/utils/messages.js'
+import { resolveMainLoopModel } from 'src/utils/contextLayers.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js'
@@ -268,6 +269,7 @@ export async function* runAgent({
   canShowPermissionPrompts,
   forkContextMessages,
   querySource,
+  spawnedBySkill,
   override,
   model,
   maxTurns,
@@ -283,6 +285,7 @@ export async function* runAgent({
   description,
   transcriptSubdir,
   onQueryProgress,
+  useRootToolSurface,
 }: {
   agentDefinition: AgentDefinition
   promptMessages: Message[]
@@ -294,6 +297,17 @@ export async function* runAgent({
   canShowPermissionPrompts?: boolean
   forkContextMessages?: Message[]
   querySource: QuerySource
+  /**
+   * densable isTeammate:W — when true, parent model is rootToolSurface.mainLoopModel
+   * (not X$/resolveMainLoopModel). Set by inProcessRunner teammate loop only.
+   */
+  useRootToolSurface?: boolean
+  /**
+   * densable spawnedBySkill: bare name of the skill that launched this
+   * forked agent. Placed on child ToolUseContext.options so nested Skill
+   * tool calls can block skill_invoke_fork_recursion.
+   */
+  spawnedBySkill?: string
   override?: {
     userContext?: { [k: string]: string }
     systemContext?: { [k: string]: string }
@@ -358,12 +372,14 @@ export async function* runAgent({
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
 
   // Official $6e before getAgentModel — Explore firstParty cap-to-opus.
+  // densable: isTeammate ? rootToolSurface.mainLoopModel : X$(ctx)
+  const parentMainLoopModel =
+    useRootToolSurface && toolUseContext.rootToolSurface?.mainLoopModel
+      ? toolUseContext.rootToolSurface.mainLoopModel
+      : resolveMainLoopModel(toolUseContext)
   const resolvedAgentModel = getAgentModel(
-    resolveAgentDefinitionModel(
-      agentDefinition,
-      toolUseContext.options.mainLoopModel,
-    ),
-    toolUseContext.options.mainLoopModel,
+    resolveAgentDefinitionModel(agentDefinition, parentMainLoopModel),
+    parentMainLoopModel,
     model,
     permissionMode,
   )
@@ -396,14 +412,18 @@ export async function* runAgent({
     : []
   const initialMessages: Message[] = [...contextMessages, ...promptMessages]
 
+  // densable: Z=s!==void 0?qwe(r.readFileState,{stripSeededFromContext:!0}):zV(kJ)
   const agentReadFileState =
     forkContextMessages !== undefined
-      ? cloneFileStateCache(toolUseContext.readFileState)
+      ? cloneFileStateCache(toolUseContext.readFileState, {
+          stripSeededFromContext: true,
+        })
       : createFileStateCacheWithSizeLimit(READ_FILE_STATE_CACHE_SIZE)
 
   const [baseUserContext, baseSystemContext] = await Promise.all([
     override?.userContext ?? getUserContext(),
-    override?.systemContext ?? getSystemContext(),
+    override?.systemContext ??
+      getSystemContext(toolUseContext.options.cacheBreakerPhrase),
   ])
 
   // Read-only agents (Explore, Plan) don't act on commit/PR/lint rules from
@@ -704,6 +724,11 @@ export async function* runAgent({
       ? dedupeToolsByName([...resolvedTools, ...agentMcpTools])
       : resolvedTools
 
+  // densable: prefer explicit runAgent(spawnedBySkill) from Skill/slash fork
+  // launchers; otherwise inherit parent options (nested Task agents).
+  const resolvedSpawnedBySkill =
+    spawnedBySkill ?? toolUseContext.options.spawnedBySkill
+
   // Build agent-specific options
   const agentOptions: ToolUseContext['options'] = {
     isNonInteractiveSession: useExactTools
@@ -715,6 +740,9 @@ export async function* runAgent({
     // Propagate so nested Task-tool subagents also receive the append.
     appendSubagentSystemPrompt:
       toolUseContext.options.appendSubagentSystemPrompt,
+    // Official 2.1.211 --forward-subagent-text: nested agents inherit the
+    // headless SDK stream forwarding flag from the parent ToolUseContext.
+    forwardSubagentText: toolUseContext.options.forwardSubagentText,
     tools: allTools,
     commands: [],
     debug: toolUseContext.options.debug,
@@ -729,6 +757,14 @@ export async function* runAgent({
     mcpClients: mergedMcpClients,
     mcpResources: toolUseContext.options.mcpResources,
     agentDefinitions: toolUseContext.options.agentDefinitions,
+    // densable spawnedBySkill on child options for SkillTool fork recursion
+    ...(resolvedSpawnedBySkill !== undefined && {
+      spawnedBySkill: resolvedSpawnedBySkill,
+    }),
+    // densable cacheBreakerPhrase — rR systemContext memo key
+    cacheBreakerPhrase: toolUseContext.options.cacheBreakerPhrase,
+    // densable autoCompactWindow — QV session window via options
+    autoCompactWindow: toolUseContext.options.autoCompactWindow,
     // Fork children (useExactTools path) need querySource on context.options
     // for the recursive-fork guard at AgentTool.tsx call() — it checks
     // options.querySource === 'agent:builtin:fork'. This survives autocompact

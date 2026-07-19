@@ -1,6 +1,8 @@
 import React from 'react';
 import { Link, Text } from '@anthropic/ink';
+import { useSettings } from '../hooks/useSettings.js';
 import type { PrReviewState } from '../utils/ghPrStatus.js';
+import { applyPrUrlTemplate } from '../utils/prUrlTemplate.js';
 
 type Props = {
   number: number;
@@ -10,6 +12,9 @@ type Props = {
 };
 
 export function PrBadge({ number, url, reviewState, bold }: Props): React.ReactNode {
+  // densable P2e/uot — rewrite PR link via settings.prUrlTemplate when set.
+  const settings = useSettings();
+  const href = applyPrUrlTemplate(url, settings.prUrlTemplate);
   const statusColor = getPrStatusColor(reviewState);
   const label = (
     <Text color={statusColor} dimColor={!statusColor && !bold} bold={bold}>
@@ -19,7 +24,7 @@ export function PrBadge({ number, url, reviewState, bold }: Props): React.ReactN
   return (
     <Text>
       <Text dimColor={!bold}>PR</Text>{' '}
-      <Link url={url} fallback={label}>
+      <Link url={href} fallback={label}>
         <Text color={statusColor} dimColor={!statusColor && !bold} underline bold={bold}>
           #{number}
         </Text>

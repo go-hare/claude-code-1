@@ -1,22 +1,42 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
+import { useMemo, useState } from 'react';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, usePreviewTheme, useTheme, useThemeSetting } from '@anthropic/ink';
+import {
+  Box,
+  Byline,
+  KeyboardShortcutHint,
+  Text,
+  customThemeRef,
+  parseCustomThemeRef,
+  useCustomThemes,
+  usePreviewTheme,
+  useTheme,
+  useThemeSetting,
+  type CustomTheme,
+  type ThemeSetting,
+} from '@anthropic/ink';
 import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
-import type { ThemeSetting } from '../utils/theme.js';
 import { Select } from './CustomSelect/index.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { getColorModuleUnavailableReason, getSyntaxTheme } from './StructuredDiff/colorDiff.js';
 import { StructuredDiff } from './StructuredDiff.js';
 
+/** densable Mmr — synthetic option value for "New custom theme…" */
+const NEW_CUSTOM_THEME = '__new_custom_theme__';
+
 export type ThemePickerProps = {
   onThemeSelect: (setting: ThemeSetting) => void;
+  /**
+   * densable onCustomTheme — open editor. `undefined` initial = create new;
+   * CustomTheme = edit/fork. Omit to hide custom theme UI (e.g. safe mode).
+   */
+  onCustomTheme?: (initial?: CustomTheme) => void;
   showIntroText?: boolean;
   helpText?: string;
   showHelpTextBelow?: boolean;
@@ -29,6 +49,7 @@ export type ThemePickerProps = {
 
 export function ThemePicker({
   onThemeSelect,
+  onCustomTheme,
   showIntroText = false,
   helpText = '',
   showHelpTextBelow = false,
@@ -42,13 +63,18 @@ export function ThemePicker({
   const colorModuleUnavailableReason = getColorModuleUnavailableReason();
   const syntaxTheme = colorModuleUnavailableReason === null ? getSyntaxTheme(theme) : null;
   const { setPreviewTheme, savePreview, cancelPreview } = usePreviewTheme();
+  const { customThemes } = useCustomThemes();
   const syntaxHighlightingDisabled = useAppState(s => s.settings.syntaxHighlightingDisabled) ?? false;
   const setAppState = useSetAppState();
+
+  // densable: local focus setting so custom-theme focus can drive edit shortcut
+  const [focusedSetting, setFocusedSetting] = useState<string>(themeSetting);
 
   // Register ThemePicker context so its keybindings take precedence over Global
   useRegisterKeybindingContext('ThemePicker');
 
   const syntaxToggleShortcut = useShortcutDisplay('theme:toggleSyntaxHighlighting', 'ThemePicker', 'ctrl+t');
+  const editCustomShortcut = useShortcutDisplay('theme:editCustom', 'ThemePicker', 'ctrl+e');
 
   useKeybinding(
     'theme:toggleSyntaxHighlighting',
@@ -66,30 +92,54 @@ export function ThemePicker({
     },
     { context: 'ThemePicker' },
   );
+
+  const focusedSlug = parseCustomThemeRef(focusedSetting);
+  const focusedCustom = focusedSlug ? customThemes.find(t => t.slug === focusedSlug) : undefined;
+
+  // densable theme:editCustom — only when focused item is a custom theme + editor available
+  useKeybinding(
+    'theme:editCustom',
+    () => {
+      if (focusedCustom && onCustomTheme) {
+        cancelPreview();
+        onCustomTheme(focusedCustom);
+      }
+    },
+    { context: 'ThemePicker' },
+  );
+
   // Always call the hook to follow React rules, but conditionally assign the exit handler
   const exitState = useExitOnCtrlCDWithKeybindings(skipExitHandling ? () => {} : undefined);
 
-  const themeOptions: { label: string; value: ThemeSetting }[] = [
-    ...(feature('AUTO_THEME') ? [{ label: 'Auto (match terminal)', value: 'auto' as const }] : []),
-    { label: 'Dark mode', value: 'dark' },
-    { label: 'Light mode', value: 'light' },
-    {
-      label: 'Dark mode (colorblind-friendly)',
-      value: 'dark-daltonized',
-    },
-    {
-      label: 'Light mode (colorblind-friendly)',
-      value: 'light-daltonized',
-    },
-    {
-      label: 'Dark mode (ANSI colors only)',
-      value: 'dark-ansi',
-    },
-    {
-      label: 'Light mode (ANSI colors only)',
-      value: 'light-ansi',
-    },
-  ];
+  const themeOptions = useMemo(() => {
+    const builtins: { label: string; value: string }[] = [
+      ...(feature('AUTO_THEME') ? [{ label: 'Auto (match terminal)', value: 'auto' as const }] : []),
+      { label: 'Dark mode', value: 'dark' },
+      { label: 'Light mode', value: 'light' },
+      {
+        label: 'Dark mode (colorblind-friendly)',
+        value: 'dark-daltonized',
+      },
+      {
+        label: 'Light mode (colorblind-friendly)',
+        value: 'light-daltonized',
+      },
+      {
+        label: 'Dark mode (ANSI colors only)',
+        value: 'dark-ansi',
+      },
+      {
+        label: 'Light mode (ANSI colors only)',
+        value: 'light-ansi',
+      },
+    ];
+    const customs = customThemes.map(t => ({
+      label: t.source === 'user' ? `${t.name} (custom)` : `${t.name} (from ${t.source.plugin})`,
+      value: customThemeRef(t.slug),
+    }));
+    const create = onCustomTheme ? [{ label: 'New custom theme…', value: NEW_CUSTOM_THEME }] : [];
+    return [...builtins, ...customs, ...create];
+  }, [customThemes, onCustomTheme]);
 
   const content = (
     <Box flexDirection="column" gap={1}>
@@ -108,9 +158,19 @@ export function ThemePicker({
         <Select
           options={themeOptions}
           onFocus={setting => {
-            setPreviewTheme(setting as ThemeSetting);
+            setFocusedSetting(setting);
+            if (setting === NEW_CUSTOM_THEME) {
+              cancelPreview();
+            } else {
+              setPreviewTheme(setting as ThemeSetting);
+            }
           }}
           onChange={(setting: string) => {
+            if (setting === NEW_CUSTOM_THEME) {
+              cancelPreview();
+              onCustomTheme?.(undefined);
+              return;
+            }
             savePreview();
             onThemeSelect(setting as ThemeSetting);
           }}
@@ -125,7 +185,7 @@ export function ThemePicker({
                   await gracefulShutdown(0);
                 }
           }
-          visibleOptionCount={themeOptions.length}
+          visibleOptionCount={Math.min(themeOptions.length, 12)}
           defaultValue={themeSetting}
           defaultFocusValue={themeSetting}
         />
@@ -192,6 +252,9 @@ export function ThemePicker({
                 ) : (
                   <Byline>
                     <KeyboardShortcutHint shortcut="Enter" action="select" />
+                    {focusedCustom && onCustomTheme && (
+                      <KeyboardShortcutHint shortcut={editCustomShortcut} action="edit" />
+                    )}
                     <KeyboardShortcutHint shortcut="Esc" action="cancel" />
                   </Byline>
                 )}

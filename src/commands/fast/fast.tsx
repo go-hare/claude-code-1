@@ -12,38 +12,15 @@ import {
 import { type AppState, useAppState, useSetAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import {
-  clearFastModeCooldown,
   FAST_MODE_MODEL_DISPLAY,
-  getFastModeModel,
   getFastModeRuntimeState,
   getFastModeUnavailableReason,
   isFastModeEnabled,
-  isFastModeSupportedByModel,
   prefetchFastModeStatus,
 } from '../../utils/fastMode.js';
 import { formatDuration } from '../../utils/format.js';
 import { formatModelPricing, getOpus46CostTier } from '../../utils/modelCost.js';
-import { updateSettingsForSource } from '../../utils/settings/settings.js';
-
-function applyFastMode(enable: boolean, setAppState: (f: (prev: AppState) => AppState) => void): void {
-  clearFastModeCooldown();
-  updateSettingsForSource('userSettings', {
-    fastMode: enable ? true : undefined,
-  });
-  if (enable) {
-    setAppState(prev => {
-      // Only switch model if current model doesn't support fast mode
-      const needsModelSwitch = !isFastModeSupportedByModel(prev.mainLoopModel);
-      return {
-        ...prev,
-        ...(needsModelSwitch ? { mainLoopModel: getFastModeModel(), mainLoopModelForSession: null } : {}),
-        fastMode: true,
-      };
-    });
-  } else {
-    setAppState(prev => ({ ...prev, fastMode: false }));
-  }
-}
+import { applyFastModeToggle } from './applyFast.js';
 
 export function FastModePicker({
   onDone,
@@ -63,26 +40,26 @@ export function FastModePicker({
 
   function handleConfirm(): void {
     if (isUnavailable) return;
-    applyFastMode(enableFastMode, setAppState);
-    logEvent('tengu_fast_mode_toggled', {
-      enabled: enableFastMode,
-      source: 'picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    });
-    if (enableFastMode) {
-      const fastIcon = getFastIconString(enableFastMode);
-      const modelUpdated = !isFastModeSupportedByModel(model) ? ` · model set to ${FAST_MODE_MODEL_DISPLAY}` : '';
-      onDone(`${fastIcon} Fast mode ON${modelUpdated} · ${pricing}`);
-    } else {
-      setAppState(prev => ({ ...prev, fastMode: false }));
-      onDone(`Fast mode OFF`);
-    }
+    const message = applyFastModeToggle(
+      enableFastMode,
+      () => ({ mainLoopModel: model, fastMode: initialFastMode }),
+      setAppState,
+      {
+        persistDefault: true,
+        source: 'picker',
+      },
+    );
+    onDone(message);
   }
 
   function handleCancel(): void {
     if (isUnavailable) {
       // Ensure fast mode is off if the org has disabled it
       if (initialFastMode) {
-        applyFastMode(false, setAppState);
+        applyFastModeToggle(false, () => ({ mainLoopModel: model, fastMode: initialFastMode }), setAppState, {
+          persistDefault: true,
+          source: 'picker',
+        });
       }
       onDone('Fast mode OFF', { display: 'system' });
       return;
@@ -174,26 +151,11 @@ async function handleFastModeShortcut(
   getAppState: () => AppState,
   setAppState: (f: (prev: AppState) => AppState) => void,
 ): Promise<string> {
-  const unavailableReason = getFastModeUnavailableReason();
-  if (unavailableReason) {
-    return `Fast mode unavailable: ${unavailableReason}`;
-  }
-
-  const { mainLoopModel } = getAppState();
-  applyFastMode(enable, setAppState);
-  logEvent('tengu_fast_mode_toggled', {
-    enabled: enable,
-    source: 'shortcut' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  // densable jTo with persist for interactive shortcut
+  return applyFastModeToggle(enable, getAppState, setAppState, {
+    persistDefault: true,
+    source: 'shortcut',
   });
-
-  if (enable) {
-    const fastIcon = getFastIconString(true);
-    const modelUpdated = !isFastModeSupportedByModel(mainLoopModel) ? ` · model set to ${FAST_MODE_MODEL_DISPLAY}` : '';
-    const pricing = formatModelPricing(getOpus46CostTier(true));
-    return `${fastIcon} Fast mode ON${modelUpdated} · ${pricing}`;
-  } else {
-    return `Fast mode OFF`;
-  }
 }
 
 export async function call(

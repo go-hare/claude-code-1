@@ -18,6 +18,16 @@ import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text, useInput, useTerminalFocus } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import { getBuiltinPluginDefinition } from '../../plugins/builtinPlugins.js';
+import {
+  getPluginDaysSinceLastUse,
+  hasNonUsageOnlySurfaces,
+  isEphemeralMarketplace,
+  listDisusedFromUsage,
+  seedPluginUsage,
+  touchPluginUsage,
+} from '../../utils/plugins/pluginUsage.js';
+import { getStrictKnownMarketplaces } from '../../utils/plugins/marketplaceHelpers.js';
+import { isNeedsAttentionItem, orderUnifiedInstalledItems } from './managePluginsSections.js';
 import { useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
 import type {
   MCPServerConnection,
@@ -42,6 +52,7 @@ import type { Tool } from '../../Tool.js';
 import type { LoadedPlugin, PluginError } from '../../types/plugin.js';
 import { count } from '../../utils/array.js';
 import { openBrowser } from '../../utils/browser.js';
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { errorMessage, toError } from '../../utils/errors.js';
 import { logError } from '../../utils/log.js';
@@ -864,16 +875,72 @@ export function ManagePlugins({
     }
   }, [flaggedIds]);
 
+  // densable favoritePlugins — pin starred ids above the rest when not searching.
+  // Seed from GlobalConfig; toggle via plugin:favorite / details menu.
+  const [favoriteIds, setFavoriteIds] = useState(
+    () => new Set((getGlobalConfig().favoritePlugins ?? []).map(id => id)),
+  );
+
+  const toggleFavorite = useCallback((pluginId: string) => {
+    setFavoriteIds(prev => {
+      const next = new Set(prev);
+      if (next.has(pluginId)) next.delete(pluginId);
+      else next.add(pluginId);
+      saveGlobalConfig(cfg => ({
+        ...cfg,
+        favoritePlugins: [...next],
+      }));
+      return next;
+    });
+  }, []);
+
+  // densable vzn/WDt: seed pluginUsage + compute disused map (days since last use)
+  const [disusedDays, setDisusedDays] = useState(() => new Map<string, number>());
+  React.useEffect(() => {
+    const plugins = unifiedItems.filter((i): i is Extract<typeof i, { type: 'plugin' }> => i.type === 'plugin');
+    const pluginIds = plugins.map(i => i.id);
+    if (pluginIds.length === 0) return;
+    seedPluginUsage(pluginIds);
+    // densable WDt: skip when org strictKnownMarketplaces is set; only tip
+    // user-install marketplace plugins (not inline/skills-dir, not theme-only).
+    if (getStrictKnownMarketplaces() !== null) {
+      setDisusedDays(new Map());
+      return;
+    }
+    const byId = new Map(plugins.map(p => [p.id, p]));
+    const disused = listDisusedFromUsage(pluginIds, {
+      include: id => {
+        const item = byId.get(id);
+        if (!item) return false;
+        if (isEphemeralMarketplace(item.marketplace)) return false;
+        // densable p4i user-install only — skip builtin / managed org policy rows
+        if (item.scope === 'builtin' || item.scope === 'managed') return false;
+        if (item.plugin.isBuiltin) return false;
+        if (hasNonUsageOnlySurfaces(item.plugin)) return false;
+        return true;
+      },
+    });
+    setDisusedDays(new Map(disused.map(d => [d.pluginId, d.daysSinceLastUse])));
+  }, [unifiedItems]);
+
   // Filter items based on search query (matches name or description)
   const filteredItems = useMemo(() => {
-    if (!searchQuery) return unifiedItems;
-    const lowerQuery = searchQuery.toLowerCase();
-    return unifiedItems.filter(
-      item =>
-        item.name.toLowerCase().includes(lowerQuery) ||
-        ('description' in item && item.description?.toLowerCase().includes(lowerQuery)),
-    );
-  }, [unifiedItems, searchQuery]);
+    let items = unifiedItems;
+    if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
+      items = unifiedItems.filter(
+        item =>
+          item.name.toLowerCase().includes(lowerQuery) ||
+          ('description' in item && item.description?.toLowerCase().includes(lowerQuery)),
+      );
+    }
+    // densable MBp: attention → favorites → disused → rest (no search)
+    return orderUnifiedInstalledItems(items, {
+      searchQuery,
+      favoriteIds,
+      disusedDays,
+    });
+  }, [unifiedItems, searchQuery, favoriteIds, disusedDays]);
 
   // Selection state
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -1116,6 +1183,8 @@ export function ManagePlugins({
           if (!enableResult.success) {
             throw new Error(enableResult.message);
           }
+          // densable vzc: refresh last-used so re-enabled plugins leave disused
+          touchPluginUsage([pluginId]);
           break;
         }
         case 'disable': {
@@ -1264,6 +1333,8 @@ export function ManagePlugins({
             try {
               if (currentPending === 'will-disable') {
                 await enablePluginOp(pluginId);
+                // densable vzc: undo pending-disable → enable refreshes usage
+                touchPluginUsage([pluginId]);
               } else {
                 await disablePluginOp(pluginId);
               }
@@ -1280,6 +1351,8 @@ export function ManagePlugins({
                 await disablePluginOp(pluginId);
               } else {
                 await enablePluginOp(pluginId);
+                // densable vzc on enable
+                touchPluginUsage([pluginId]);
               }
               clearAllCaches();
             } catch (err) {
@@ -1369,6 +1442,21 @@ export function ManagePlugins({
     },
   );
 
+  // densable plugin:favorite (f) — toggle GlobalConfig.favoritePlugins for focused plugin
+  const handleFavorite = React.useCallback((): false | undefined => {
+    const item = filteredItems[selectedIndex];
+    if (!item || item.type !== 'plugin') return false;
+    toggleFavorite(item.id);
+  }, [filteredItems, selectedIndex, toggleFavorite]);
+
+  useKeybindings(
+    { 'plugin:favorite': handleFavorite },
+    {
+      context: 'Plugin',
+      isActive: viewState === 'plugin-list' && !isSearchMode,
+    },
+  );
+
   // Handle dismiss action in flagged-detail view
   const handleFlaggedDismiss = React.useCallback(() => {
     if (typeof viewState !== 'object' || viewState.type !== 'flagged-detail') return;
@@ -1398,6 +1486,12 @@ export function ManagePlugins({
     menuItems.push({
       label: isEnabled ? 'Disable plugin' : 'Enable plugin',
       action: () => void handleSingleOperation(isEnabled ? 'disable' : 'enable'),
+    });
+
+    // densable details menu: Add/Remove from favorites
+    menuItems.push({
+      label: favoriteIds.has(pluginId) ? 'Remove from favorites' : 'Add to favorites',
+      action: () => toggleFavorite(pluginId),
     });
 
     // Update/Uninstall options — not available for built-in plugins
@@ -1536,7 +1630,7 @@ export function ManagePlugins({
     });
 
     return menuItems;
-  }, [viewState, selectedPlugin, selectedPluginHasMcpb, pluginStates]);
+  }, [viewState, selectedPlugin, selectedPluginHasMcpb, pluginStates, favoriteIds, toggleFavorite]);
 
   // Plugin-details navigation
   useKeybindings(
@@ -2065,11 +2159,18 @@ export function ManagePlugins({
           </Box>
         )}
 
-        {/* Current status */}
+        {/* Current status — densable nRd Last used */}
         <Box marginBottom={1}>
           <Text dimColor>Status: </Text>
           <Text color={isEnabled ? 'success' : 'warning'}>{isEnabled ? 'Enabled' : 'Disabled'}</Text>
           {selectedPlugin.pendingUpdate && <Text color="suggestion"> · Marked for update</Text>}
+          {(() => {
+            const days = getPluginDaysSinceLastUse(pluginId, {
+              skipUnderStrictMarketplaces: getStrictKnownMarketplaces() !== null,
+            });
+            if (days === null) return null;
+            return <Text dimColor> · Last used: {days === 0 ? 'today' : `${days} ${plural(days, 'day')} ago`}</Text>;
+          })()}
         </Box>
 
         {/* Installed components */}
@@ -2425,10 +2526,38 @@ export function ManagePlugins({
       {visibleItems.map((item, visibleIndex) => {
         const actualIndex = pagination.toActualIndex(visibleIndex);
         const isSelected = actualIndex === selectedIndex && !isSearchMode;
+        // densable NQ_ / MBp section membership (no search)
+        const isAttention = !searchQuery && isNeedsAttentionItem(item);
+        const isFav = !searchQuery && !isAttention && favoriteIds.has(item.id);
+        const isDisused =
+          !searchQuery &&
+          !isAttention &&
+          !isFav &&
+          item.type === 'plugin' &&
+          item.isEnabled &&
+          disusedDays.has(item.id);
+        const unusedDays = isDisused ? disusedDays.get(item.id) : undefined;
 
-        // Check if we need to show a scope header
+        // densable MBp sections: Needs attention → Favorites → Not used recently → scope headers
         const prevItem = visibleIndex > 0 ? visibleItems[visibleIndex - 1] : null;
-        const showScopeHeader = !prevItem || prevItem.scope !== item.scope;
+        const prevIsAttention = !!prevItem && !searchQuery && isNeedsAttentionItem(prevItem);
+        const prevIsFav = !!prevItem && !searchQuery && !prevIsAttention && favoriteIds.has(prevItem.id);
+        const prevIsDisused =
+          !!prevItem &&
+          !searchQuery &&
+          !prevIsAttention &&
+          !prevIsFav &&
+          prevItem.type === 'plugin' &&
+          prevItem.isEnabled &&
+          disusedDays.has(prevItem.id);
+        const showAttentionHeader = isAttention && !prevIsAttention;
+        const showFavoritesHeader = isFav && !prevIsFav;
+        const showDisusedHeader = isDisused && !prevIsDisused;
+        const showScopeHeader =
+          !isAttention &&
+          !isFav &&
+          !isDisused &&
+          (!prevItem || prevIsAttention || prevIsFav || prevIsDisused || prevItem.scope !== item.scope);
 
         // Get scope label
         const getScopeLabel = (scope: string): string => {
@@ -2456,8 +2585,28 @@ export function ManagePlugins({
 
         return (
           <React.Fragment key={item.id}>
-            {showScopeHeader && (
+            {showAttentionHeader && (
               <Box marginTop={visibleIndex > 0 ? 1 : 0} paddingLeft={2}>
+                <Text color="warning" bold>
+                  Needs attention
+                </Text>
+              </Box>
+            )}
+            {showFavoritesHeader && (
+              <Box marginTop={visibleIndex > 0 || showAttentionHeader ? 1 : 0} paddingLeft={2}>
+                <Text dimColor>Favorites</Text>
+              </Box>
+            )}
+            {showDisusedHeader && (
+              <Box marginTop={visibleIndex > 0 || showAttentionHeader || showFavoritesHeader ? 1 : 0} paddingLeft={2}>
+                <Text dimColor>Not used recently</Text>
+              </Box>
+            )}
+            {showScopeHeader && (
+              <Box
+                marginTop={visibleIndex > 0 || showAttentionHeader || showFavoritesHeader || showDisusedHeader ? 1 : 0}
+                paddingLeft={2}
+              >
                 <Text
                   dimColor={item.scope !== 'flagged'}
                   color={item.scope === 'flagged' ? 'warning' : undefined}
@@ -2467,7 +2616,7 @@ export function ManagePlugins({
                 </Text>
               </Box>
             )}
-            <UnifiedInstalledCell item={item} isSelected={isSelected} />
+            <UnifiedInstalledCell item={item} isSelected={isSelected} isFavorite={isFav} unusedDays={unusedDays} />
           </React.Fragment>
         );
       })}
@@ -2485,6 +2634,7 @@ export function ManagePlugins({
           <Byline>
             <Text>type to search</Text>
             <ConfigurableShortcutHint action="plugin:toggle" context="Plugin" fallback="Space" description="toggle" />
+            <ConfigurableShortcutHint action="plugin:favorite" context="Plugin" fallback="f" description="favorite" />
             <ConfigurableShortcutHint action="select:accept" context="Select" fallback="Enter" description="details" />
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="back" />
           </Byline>

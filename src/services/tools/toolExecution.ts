@@ -4,11 +4,14 @@ import type {
   ToolResultBlockParam,
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/index.mjs'
+import { ZodError } from 'zod/v4'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
 import {
+  bashCommandFileExtensionsForAnalytics,
+  emitFileActivityForToolSuccess,
   extractMcpToolDetails,
   extractSkillName,
   extractToolInputForTelemetry,
@@ -17,6 +20,8 @@ import {
   isToolDetailsLoggingEnabled,
   mcpToolDetailsForAnalytics,
   sanitizeToolNameForAnalytics,
+  toolFeatureNameForAnalytics,
+  toolResultAttachmentBytesFromMessages,
 } from 'src/services/analytics/metadata.js'
 import {
   addToToolDuration,
@@ -31,6 +36,7 @@ import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
   findToolByName,
   type Tool,
+  type Tools,
   type ToolProgress,
   type ToolProgressData,
   type ToolUseContext,
@@ -48,7 +54,13 @@ import {
   isDeferredTool,
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
+import {
+  formatEmptyInputRepairMessage,
+  isEmptyPlainObject,
+  isJuniperEmptyInputRepairEnabled,
+} from '../../utils/systemPromptArms.js'
 import { getAllBaseTools } from '../../tools.js'
+import { formatToolNotFoundHint } from './toolNotFoundHint.js'
 import type { HookProgress } from '../../types/hooks.js'
 import { recordToolObservation } from '../langfuse/index.js'
 import type {
@@ -60,11 +72,29 @@ import type {
 } from '../../types/message.js'
 import { count } from '../../utils/array.js'
 import { createAttachmentMessage } from '../../utils/attachments.js'
+import {
+  classifyAbortKindForAnalytics,
+  isServerFallbackTombstoneAbort,
+} from '../../utils/abortController.js'
 import { logForDebugging } from '../../utils/debug.js'
+import {
+  errorAnalyticsFromThrown,
+  hashErrorMessageForAnalytics,
+  sampleToolMemoryUsage,
+  shortSha256Hex12,
+  toolMemoryDeltasForAnalytics,
+  uniqueJoin,
+} from '../../utils/hash.js'
+import {
+  formatUnparsedToolInputError,
+  isUnparsedToolInput,
+  UNPARSED_TOOL_INPUT_KEY,
+} from '../../utils/unparsedToolInput.js'
 import {
   AbortError,
   errorMessage,
   getErrnoCode,
+  isAbortError,
   ShellError,
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../../utils/errors.js'
@@ -78,11 +108,16 @@ import {
   createUserMessage,
   withMemoryCorrectionHint,
 } from '../../utils/messages.js'
+import { mcpMetaForToolResultMessage } from '../../utils/residualUiEnvGates.js'
+import { toolDenialKindFromPermissionDecision } from '../../utils/toolDenialKind.js'
 import type {
   PermissionDecisionReason,
   PermissionResult,
 } from '../../utils/permissions/PermissionResult.js'
-import { getAgentContext } from '../../utils/agentContext.js'
+import {
+  agentContextForToolAnalytics,
+  getAgentContext,
+} from '../../utils/agentContext.js'
 import {
   resolveSessionActivityAgentId,
   startSessionActivity,
@@ -132,6 +167,7 @@ import {
   runPostToolUseHooks,
   runPreToolUseHooks,
 } from './toolHooks.js'
+import { resyncReadFileStateAfterPostToolUse } from './postToolUseFileResync.js'
 import { isSkillLearningEnabled } from '../skillLearning/featureCheck.js'
 
 // Cached import promise for the skill-learning wrapper — paid once, not per call.
@@ -298,6 +334,14 @@ export type MessageUpdateLazy<M extends Message = Message> = {
     toolUseID: string
     modifyContext: (context: ToolUseContext) => ToolUseContext
   }
+  /**
+   * densable contextLayers on tool-result update — { toolUseID, layers }
+   * for concurrent aggregation / exclusive Ter merge.
+   */
+  contextLayers?: {
+    toolUseID: string
+    layers: import('../../utils/contextLayers.js').ContextLayer[]
+  }
 }
 
 export type McpServerType =
@@ -365,6 +409,59 @@ function getMcpServerBaseUrlFromToolName(
   return getLoggingSafeMcpBaseUrl(serverConnection.config)
 }
 
+/**
+ * densable vKu — once-per-process flag for tengu_dead_probe_tool_alias_exec.
+ * Set when a tool_use name resolves via a builtin tool alias (name !== primary
+ * && aliases.includes(name)). Telemetry-only residual.
+ */
+let loggedDeadProbeToolAliasExec = false
+
+/** Test-only: reset densable vKu once-flag between unit cases. */
+export function resetDeadProbeToolAliasExecForTests(): void {
+  loggedDeadProbeToolAliasExec = false
+}
+
+/**
+ * densable cWr tool resolve:
+ * 1. Tc(options.tools, name, toolAliases) — session single-hop + B7c/U7c
+ * 2. if miss: Tc(I8(), name) without toolAliases; accept only if aliases.includes
+ * 3. once: if resolved via builtin alias, log tengu_dead_probe_tool_alias_exec
+ */
+export function resolveToolForExecution(
+  tools: Tools,
+  toolName: string,
+  toolAliases?: Readonly<Record<string, string>> | null,
+  baseTools: Tools = getAllBaseTools(),
+): Tool | undefined {
+  let tool = findToolByName(tools, toolName, toolAliases)
+  // densable: fallback is Tc(I8(), name) with NO session toolAliases map.
+  // Only accept when the call name is a builtin alias of the base tool.
+  if (!tool) {
+    const fallbackTool = findToolByName(baseTools, toolName)
+    if (fallbackTool?.aliases?.includes(toolName)) {
+      tool = fallbackTool
+    }
+  }
+  // densable vKu + M("tengu_dead_probe_tool_alias_exec", {alias:Vs(i), tool:Vs(s.name)})
+  if (
+    !loggedDeadProbeToolAliasExec &&
+    tool &&
+    tool.name !== toolName &&
+    tool.aliases?.includes(toolName)
+  ) {
+    loggedDeadProbeToolAliasExec = true
+    logEvent('tengu_dead_probe_tool_alias_exec', {
+      alias: sanitizeToolNameForAnalytics(
+        toolName,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      tool: sanitizeToolNameForAnalytics(
+        tool.name,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
+  return tool
+}
+
 export async function* runToolUse(
   toolUse: ToolUseBlock,
   assistantMessage: AssistantMessage,
@@ -372,19 +469,12 @@ export async function* runToolUse(
   toolUseContext: ToolUseContext,
 ): AsyncGenerator<MessageUpdateLazy, void> {
   const toolName = toolUse.name
-  // First try to find in the available tools (what the model sees)
-  let tool = findToolByName(toolUseContext.options.tools, toolName)
-
-  // If not found, check if it's a deprecated tool being called by alias
-  // (e.g., old transcripts calling "KillShell" which is now an alias for "TaskStop")
-  // Only fall back for tools where the name matches an alias, not the primary name
-  if (!tool) {
-    const fallbackTool = findToolByName(getAllBaseTools(), toolName)
-    // Only use fallback if the tool was found via alias (deprecated name)
-    if (fallbackTool && fallbackTool.aliases?.includes(toolName)) {
-      tool = fallbackTool
-    }
-  }
+  // densable Tc + I8 alias fallback + dead_probe (see resolveToolForExecution)
+  const tool = resolveToolForExecution(
+    toolUseContext.options.tools,
+    toolName,
+    toolUseContext.options.toolAliases,
+  )
   const messageId = assistantMessage.message.id as string
   const requestId = assistantMessage.requestId as string | undefined
   const mcpServerType = getMcpServerType(
@@ -399,14 +489,34 @@ export async function* runToolUse(
   // Check if the tool exists
   if (!tool) {
     const sanitizedToolName = sanitizeToolNameForAnalytics(toolName)
+    // densable qcs — contextual suffix for unknown-tool errors
+    const notFoundHint = formatToolNotFoundHint({
+      toolName,
+      availableTools: toolUseContext.options.tools,
+      agentId: toolUseContext.agentId,
+      mcpClients: toolUseContext.options.mcpClients as
+        | ReadonlyArray<{ name: string; type?: string }>
+        | undefined,
+    })
     logForDebugging(`Unknown tool ${toolName}: ${toolUse.id}`)
+    // densable me(SIt(i),"tool_not_found") → tengu_feature_bad
+    logEvent('tengu_feature_bad', {
+      feature_name: toolFeatureNameForAnalytics(toolName),
+      error_code:
+        'tool_not_found' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    // densable errorCode:Ie("NO_SUCH_TOOL") on tengu_tool_use_error
     logEvent('tengu_tool_use_error', {
       error:
         `No such tool available: ${sanitizedToolName}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errorCode:
+        'NO_SUCH_TOOL' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       toolName: sanitizedToolName,
       toolUseID:
         toolUse.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       isMcp: toolName.startsWith('mcp__'),
+      // densable ...FSt(n.agentContext)
+      ...agentContextForToolAnalytics(),
       queryChainId: toolUseContext.queryTracking
         ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       queryDepth: toolUseContext.queryTracking?.depth,
@@ -424,17 +534,18 @@ export async function* runToolUse(
       }),
       ...mcpToolDetailsForAnalytics(toolName, mcpServerType, mcpServerBaseUrl),
     })
+    const notFoundMessage = `Error: No such tool available: ${toolName}${notFoundHint}`
     yield {
       message: createUserMessage({
         content: [
           {
             type: 'tool_result',
-            content: `<tool_use_error>Error: No such tool available: ${toolName}</tool_use_error>`,
+            content: `<tool_use_error>${notFoundMessage}</tool_use_error>`,
             is_error: true,
             tool_use_id: toolUse.id,
           },
         ],
-        toolUseResult: `Error: No such tool available: ${toolName}`,
+        toolUseResult: notFoundMessage,
         sourceToolAssistantUUID: assistantMessage.uuid,
       }),
     }
@@ -444,42 +555,17 @@ export async function* runToolUse(
   const toolInput = toolUse.input as { [key: string]: string }
   try {
     if (toolUseContext.abortController.signal.aborted) {
-      logEvent('tengu_tool_use_cancelled', {
-        toolName: sanitizeToolNameForAnalytics(tool.name),
-        toolUseID:
-          toolUse.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        isMcp: tool.isMcp ?? false,
-
-        queryChainId: toolUseContext.queryTracking
-          ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        queryDepth: toolUseContext.queryTracking?.depth,
-        ...(mcpServerType && {
-          mcpServerType:
-            mcpServerType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        }),
-        ...(mcpServerBaseUrl && {
-          mcpServerBaseUrl:
-            mcpServerBaseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        }),
-        ...(requestId && {
-          requestId:
-            requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        }),
-        ...mcpToolDetailsForAnalytics(
-          tool.name,
-          mcpServerType,
-          mcpServerBaseUrl,
-        ),
+      // densable Auo entry: phase:Ie("entry"), abortKind:ve(TVt(reason))
+      yield buildToolUseCancelledUpdate({
+        tool,
+        toolUseID: toolUse.id,
+        toolUseContext,
+        assistantMessage,
+        phase: 'entry',
+        requestId,
+        mcpServerType,
+        mcpServerBaseUrl,
       })
-      const content = createToolResultStopMessage(toolUse.id)
-      content.content = withMemoryCorrectionHint(CANCEL_MESSAGE)
-      yield {
-        message: createUserMessage({
-          content: [content],
-          toolUseResult: CANCEL_MESSAGE,
-          sourceToolAssistantUUID: assistantMessage.uuid,
-        }),
-      }
       return
     }
 
@@ -498,7 +584,15 @@ export async function* runToolUse(
       yield update
     }
   } catch (error) {
-    logError(error)
+    // densable: if (!wst(E)) { ... me(_,"tool_unexpected_error") } — skip abort-shaped
+    if (!isAbortError(error)) {
+      logError(error)
+      logEvent('tengu_feature_bad', {
+        feature_name: toolFeatureNameForAnalytics(tool.name),
+        error_code:
+          'tool_unexpected_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
     const errorMessage = error instanceof Error ? error.message : String(error)
     const toolInfo = tool ? ` (${tool.name})` : ''
     const detailedError = `Error calling tool${toolInfo}: ${errorMessage}`
@@ -601,6 +695,79 @@ function streamedCheckPermissionsAndCallTool(
 }
 
 /**
+ * densable Auo multiphase cancel phases (entry is handled in runToolUse).
+ * Only H9e (server-fallback-tombstone) trips mid-pipeline checkpoints.
+ */
+export type ToolCancelPhase =
+  | 'entry'
+  | 'validate_input'
+  | 'permission'
+  | 'pre_call'
+  | 'call'
+
+/**
+ * densable Auo — emit tengu_tool_use_cancelled with phase+abortKind and a
+ * cancelled tool_result. Shared by entry (runToolUse) and multiphase H9e
+ * checkpoints inside checkPermissionsAndCallTool.
+ */
+function buildToolUseCancelledUpdate(params: {
+  tool: Tool
+  toolUseID: string
+  toolUseContext: ToolUseContext
+  assistantMessage: AssistantMessage
+  phase: ToolCancelPhase
+  requestId: string | undefined
+  mcpServerType: McpServerType
+  mcpServerBaseUrl: ReturnType<typeof getLoggingSafeMcpBaseUrl>
+}): MessageUpdateLazy {
+  const {
+    tool,
+    toolUseID,
+    toolUseContext,
+    assistantMessage,
+    phase,
+    requestId,
+    mcpServerType,
+    mcpServerBaseUrl,
+  } = params
+  logEvent('tengu_tool_use_cancelled', {
+    toolName: sanitizeToolNameForAnalytics(tool.name),
+    toolUseID:
+      toolUseID as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    isMcp: tool.isMcp ?? false,
+    phase: phase as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    abortKind: classifyAbortKindForAnalytics(
+      toolUseContext.abortController.signal.reason,
+    ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    queryChainId: toolUseContext.queryTracking
+      ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    queryDepth: toolUseContext.queryTracking?.depth,
+    ...(mcpServerType && {
+      mcpServerType:
+        mcpServerType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }),
+    ...(mcpServerBaseUrl && {
+      mcpServerBaseUrl:
+        mcpServerBaseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }),
+    ...(requestId && {
+      requestId:
+        requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }),
+    ...mcpToolDetailsForAnalytics(tool.name, mcpServerType, mcpServerBaseUrl),
+  })
+  const content = createToolResultStopMessage(toolUseID)
+  content.content = withMemoryCorrectionHint(CANCEL_MESSAGE)
+  return {
+    message: createUserMessage({
+      content: [content],
+      toolUseResult: CANCEL_MESSAGE,
+      sourceToolAssistantUUID: assistantMessage.uuid,
+    }),
+  }
+}
+
+/**
  * Appended to Zod errors when a deferred tool wasn't in the discovered-tool
  * set — re-runs the claude.ts schema-filter scan dispatch-time to detect the
  * mismatch. The raw Zod error ("expected array, got string") doesn't tell the
@@ -655,10 +822,118 @@ async function checkPermissionsAndCallTool(
     progress: ToolProgress<ToolProgressData> | ProgressMessage<HookProgress>,
   ) => void,
 ): Promise<MessageUpdateLazy[]> {
+  // densable SIt(e.name) early — feature name for sad/ok/bad
+  const featureName = toolFeatureNameForAnalytics(tool.name)
+  // densable `m = De(r).length` — raw input size for analytics.
+  // For unparsed marker, densable uses payload.len instead of JSON size.
+  const toolInputSizeBytes = jsonStringify(input).length
+
+  // densable uTt(r) early path — streamed JSON never parsed (JSON_PARSE)
+  if (isUnparsedToolInput(input)) {
+    const { len } = input[UNPARSED_TOOL_INPUT_KEY]
+    const errorContent = formatUnparsedToolInputError(tool.name, input)
+    logEvent('tengu_feature_sad', {
+      feature_name: featureName,
+      error_code:
+        'tool_input_validation_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    logEvent('tengu_tool_use_error', {
+      error:
+        'InputValidationError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errorCode:
+        'JSON_PARSE' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errorDetailsHash: shortSha256Hex12(
+        `${tool.name}: unparsed tool input`,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      messageID:
+        messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      toolName: sanitizeToolNameForAnalytics(tool.name),
+      isMcp: tool.isMcp ?? false,
+      // densable ...FSt(n.agentContext)
+      ...agentContextForToolAnalytics(),
+      toolInputSizeBytes: len,
+      queryChainId: toolUseContext.queryTracking
+        ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      queryDepth: toolUseContext.queryTracking?.depth,
+      ...(mcpServerType && {
+        mcpServerType:
+          mcpServerType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...(mcpServerBaseUrl && {
+        mcpServerBaseUrl:
+          mcpServerBaseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...(requestId && {
+        requestId:
+          requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...mcpToolDetailsForAnalytics(tool.name, mcpServerType, mcpServerBaseUrl),
+    })
+    return [
+      {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>InputValidationError: ${errorContent}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUseID,
+            },
+          ],
+          toolUseResult: `InputValidationError: JSON parse failed (${len} bytes)`,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      },
+    ]
+  }
+
+  // densable coerceInput before Zod — remap common model shape mistakes.
+  let coercedForParse: {
+    input: { [key: string]: unknown }
+    shapeClass: string
+  } | null = null
+  let parseTarget: { [key: string]: unknown } = input
+  if (tool.coerceInput) {
+    coercedForParse = tool.coerceInput(input)
+    if (coercedForParse !== null) {
+      parseTarget = coercedForParse.input
+    }
+  }
+
   // Validate input types with zod (surprisingly, the model is not great at generating valid input)
-  const parsedInput = tool.inputSchema.safeParse(input)
+  const parsedInput = tool.inputSchema.safeParse(parseTarget)
+  if (coercedForParse !== null) {
+    logEvent('tengu_tool_input_coerced', {
+      toolName: sanitizeToolNameForAnalytics(tool.name),
+      shapeClass:
+        coercedForParse.shapeClass as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome: (parsedInput.success
+        ? 'coerced_valid'
+        : 'coerced_still_invalid') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      toolInputSizeBytes,
+    })
+  }
   if (!parsedInput.success) {
     let errorContent = formatZodValidationError(tool.name, parsedInput.error)
+    // densable xHc+h1i+IHc — teasel_cove empty-input repair steers model
+    // when the call was literally `{}` against a required ZodObject schema.
+    let emptyInputRepaired = false
+    if (isJuniperEmptyInputRepairEnabled() && isEmptyPlainObject(input)) {
+      const repaired = formatEmptyInputRepairMessage(
+        tool.name,
+        tool.inputSchema,
+        jsonStringify,
+      )
+      if (repaired !== null) {
+        errorContent = repaired
+        emptyInputRepaired = true
+      }
+    }
+    // densable validationErrorSteer — append tool-specific recovery text.
+    const steer = tool.validationErrorSteer?.(input)
+    if (steer) {
+      errorContent += `\n\n${steer}`
+    }
 
     const schemaHint = buildSchemaNotSentHint(
       tool,
@@ -676,9 +951,26 @@ async function checkPermissionsAndCallTool(
     logForDebugging(
       `${tool.name} tool input error: ${errorContent.slice(0, 200)}`,
     )
+    // densable We(f,"tool_input_validation_failed") → tengu_feature_sad
+    logEvent('tengu_feature_sad', {
+      feature_name: featureName,
+      error_code:
+        'tool_input_validation_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    // densable errorCode:Ie("ZOD_VALIDATION") + zodIssueCodes:Ho + errorDetailsHash:bu
+    const zodIssueCodes = uniqueJoin(
+      parsedInput.error.issues.map(issue => String(issue.code)),
+    )
     logEvent('tengu_tool_use_error', {
       error:
         'InputValidationError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errorCode:
+        'ZOD_VALIDATION' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      zodIssueCodes:
+        zodIssueCodes as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errorDetailsHash: shortSha256Hex12(
+        errorContent,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       errorDetails: errorContent.slice(
         0,
         2000,
@@ -687,6 +979,10 @@ async function checkPermissionsAndCallTool(
         messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       toolName: sanitizeToolNameForAnalytics(tool.name),
       isMcp: tool.isMcp ?? false,
+      // densable ...FSt(n.agentContext)
+      ...agentContextForToolAnalytics(),
+      toolInputSizeBytes,
+      ...(emptyInputRepaired ? { emptyInputRepaired: true } : {}),
 
       queryChainId: toolUseContext.queryTracking
         ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -728,18 +1024,45 @@ async function checkPermissionsAndCallTool(
     parsedInput.data,
     toolUseContext,
   )
+  // densable Auo phase:"validate_input" — H9e server-fallback-tombstone only
+  if (isServerFallbackTombstoneAbort(toolUseContext.abortController.signal)) {
+    return [
+      buildToolUseCancelledUpdate({
+        tool,
+        toolUseID,
+        toolUseContext,
+        assistantMessage,
+        phase: 'validate_input',
+        requestId,
+        mcpServerType,
+        mcpServerBaseUrl,
+      }),
+    ]
+  }
   if (isValidCall?.result === false) {
     logForDebugging(
       `${tool.name} tool validation error: ${isValidCall.message?.slice(0, 200)}`,
     )
+    // densable We(f,"tool_validate_input_rejected") → tengu_feature_sad
+    logEvent('tengu_feature_sad', {
+      feature_name: featureName,
+      error_code:
+        'tool_validate_input_rejected' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    // densable error:Ie("ValidateInputError"), ...PC(S.message)
     logEvent('tengu_tool_use_error', {
       messageID:
         messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       toolName: sanitizeToolNameForAnalytics(tool.name),
       error:
-        isValidCall.message as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        'ValidateInputError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_message_hash: hashErrorMessageForAnalytics(
+        isValidCall.message,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       errorCode: isValidCall.errorCode,
       isMcp: tool.isMcp ?? false,
+      // densable ...FSt(n.agentContext)
+      ...agentContextForToolAnalytics(),
 
       queryChainId: toolUseContext.queryTracking
         ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1037,6 +1360,29 @@ async function checkPermissionsAndCallTool(
   }
 
   if (permissionDecision.behavior !== 'allow') {
+    // densable: non-allow + H9e → Auo phase:"permission" (server-fallback
+    // tombstone during permission wait). JFr("cancelled","server_fallback_tombstone")
+    if (isServerFallbackTombstoneAbort(toolUseContext.abortController.signal)) {
+      const decisionInfo = toolUseContext.toolDecisions?.get(toolUseID)
+      endToolBlockedOnUserSpan(
+        'cancelled',
+        decisionInfo?.source || 'server_fallback_tombstone',
+      )
+      endToolSpan()
+      resultingMessages.push(
+        buildToolUseCancelledUpdate({
+          tool,
+          toolUseID,
+          toolUseContext,
+          assistantMessage,
+          phase: 'permission',
+          requestId,
+          mcpServerType,
+          mcpServerBaseUrl,
+        }),
+      )
+      return resultingMessages
+    }
     logForDebugging(`${tool.name} tool permission denied`)
     const decisionInfo = toolUseContext.toolDecisions?.get(toolUseID)
     endToolBlockedOnUserSpan('reject', decisionInfo?.source || 'unknown')
@@ -1110,6 +1456,9 @@ async function checkPermissionsAndCallTool(
         content: messageContent,
         imagePasteIds: rejectImageIds,
         toolUseResult: `Error: ${errorMessage}`,
+        // densable TKu(B) → toolDenialKind on denied tool_result
+        toolDenialKind:
+          toolDenialKindFromPermissionDecision(permissionDecision),
         sourceToolAssistantUUID: assistantMessage.uuid,
       }),
     })
@@ -1171,8 +1520,122 @@ async function checkPermissionsAndCallTool(
 
   // Use the updated input from permissions if provided
   // (Don't overwrite if undefined - processedInput may have been modified by passthrough hooks)
-  if (permissionDecision.updatedInput !== undefined) {
+  // densable: if updatedInput is non-empty {}, re-validate with CKu (safeParse
+  // ignoring unrecognized_keys). On real issues → PERMISSION_UPDATED_INPUT.
+  // densable: only apply non-empty updatedInput (!h1i). Empty {} is a
+  // no-op sentinel — applying it would wipe valid model input.
+  if (
+    permissionDecision.updatedInput !== undefined &&
+    !isEmptyPlainObject(permissionDecision.updatedInput)
+  ) {
+    const updatedParse = tool.inputSchema.safeParse(
+      permissionDecision.updatedInput,
+    )
+    if (!updatedParse.success) {
+      // densable CKu: ignore unrecognized_keys-only failures
+      const materialIssues = updatedParse.error.issues.filter(
+        issue => issue.code !== 'unrecognized_keys',
+      )
+      if (materialIssues.length > 0) {
+        const filteredError = new ZodError(materialIssues)
+        const schemaMsg = formatZodValidationError(tool.name, filteredError)
+        const errorContent =
+          `The permission handler returned updatedInput for ${tool.name} that failed schema validation: ${schemaMsg}\n` +
+          `This is a configuration issue in your canUseTool callback, PermissionRequest hook, or permission-prompt tool — updatedInput must satisfy the tool's input schema. The tool input from the model was valid.`
+        const zodIssueCodes = uniqueJoin(
+          materialIssues.map(issue => String(issue.code)),
+        )
+        logForDebugging(
+          `Permission handler updatedInput for ${tool.name} failed schema validation (${zodIssueCodes})`,
+          { level: 'warn' },
+        )
+        // densable We(f,"tool_permission_updated_input_invalid")
+        logEvent('tengu_feature_sad', {
+          feature_name: featureName,
+          error_code:
+            'tool_permission_updated_input_invalid' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        // densable errorCode:Ie("PERMISSION_UPDATED_INPUT")
+        logEvent('tengu_tool_use_error', {
+          error:
+            'InputValidationError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          errorCode:
+            'PERMISSION_UPDATED_INPUT' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          zodIssueCodes:
+            zodIssueCodes as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          errorDetailsHash: shortSha256Hex12(
+            errorContent,
+          ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          messageID:
+            messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+          isMcp: tool.isMcp ?? false,
+          // densable ...FSt(n.agentContext)
+          ...agentContextForToolAnalytics(),
+          toolInputSizeBytes,
+          queryChainId: toolUseContext.queryTracking
+            ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          queryDepth: toolUseContext.queryTracking?.depth,
+          ...(mcpServerType && {
+            mcpServerType:
+              mcpServerType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }),
+          ...(mcpServerBaseUrl && {
+            mcpServerBaseUrl:
+              mcpServerBaseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }),
+          ...(requestId && {
+            requestId:
+              requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          }),
+          ...mcpToolDetailsForAnalytics(
+            tool.name,
+            mcpServerType,
+            mcpServerBaseUrl,
+          ),
+        })
+        // densable JFr("reject","permission_updated_input_invalid") + kVt(D)
+        const decisionInfo = toolUseContext.toolDecisions?.get(toolUseID)
+        endToolBlockedOnUserSpan(
+          'reject',
+          decisionInfo?.source || 'permission_updated_input_invalid',
+        )
+        endToolSpan()
+        resultingMessages.push({
+          message: createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: `<tool_use_error>${errorContent}</tool_use_error>`,
+                is_error: true,
+                tool_use_id: toolUseID,
+              },
+            ],
+            toolUseResult: `InputValidationError: permission handler updatedInput failed schema for ${tool.name}`,
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          }),
+        })
+        return resultingMessages
+      }
+    }
     processedInput = permissionDecision.updatedInput
+  }
+
+  // densable Auo phase:"pre_call" — H9e after permission, before tool.call
+  if (isServerFallbackTombstoneAbort(toolUseContext.abortController.signal)) {
+    resultingMessages.push(
+      buildToolUseCancelledUpdate({
+        tool,
+        toolUseID,
+        toolUseContext,
+        assistantMessage,
+        phase: 'pre_call',
+        requestId,
+        mcpServerType,
+        mcpServerBaseUrl,
+      }),
+    )
+    return resultingMessages
   }
 
   // Prepare tool parameters for logging in tool_result event.
@@ -1220,6 +1683,8 @@ async function checkPermissionsAndCallTool(
   startToolExecutionSpan()
 
   const startTime = Date.now()
+  // densable G=process.memoryUsage() before tool.call — success/error deltas
+  const memBefore = sampleToolMemoryUsage()
 
   // Official $Qn("tool_exec", HOn(agentContext) ?? (isBackgroundAgent ? agentId))
   const sessionActivityAgentId = resolveSessionActivityAgentId({
@@ -1387,8 +1852,15 @@ async function checkPermissionsAndCallTool(
         ? mappedContent.length
         : jsonStringify(mappedContent).length
 
-    // Extract file extension for file-related tools
+    // densable pe/He/Ce/_e + readHasLimit/Offset for success analytics
     let fileExtension: ReturnType<typeof getFileExtensionForAnalytics>
+    let filePathLen: number | undefined
+    let bashCommandFileExtensions:
+      | AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+      | undefined
+    let bashCommandLen: number | undefined
+    let readHasLimit: boolean | undefined
+    let readHasOffset: boolean | undefined
     if (processedInput && typeof processedInput === 'object') {
       if (
         (tool.name === FILE_READ_TOOL_NAME ||
@@ -1399,31 +1871,102 @@ async function checkPermissionsAndCallTool(
         fileExtension = getFileExtensionForAnalytics(
           String(processedInput.file_path),
         )
+        // densable He from original callInput path (w), not expanded/backfilled
+        const originalPath =
+          callInput &&
+          typeof callInput === 'object' &&
+          'file_path' in (callInput as Record<string, unknown>)
+            ? String((callInput as Record<string, unknown>).file_path)
+            : String(processedInput.file_path)
+        filePathLen = originalPath.length
+        if (tool.name === FILE_READ_TOOL_NAME) {
+          // densable readHasLimit/readHasOffset on Read success
+          readHasLimit =
+            'limit' in processedInput && processedInput.limit !== undefined
+          readHasOffset =
+            'offset' in processedInput && processedInput.offset !== undefined
+        }
       } else if (
         tool.name === NOTEBOOK_EDIT_TOOL_NAME &&
         'notebook_path' in processedInput
       ) {
-        fileExtension = getFileExtensionForAnalytics(
-          String(processedInput.notebook_path),
-        )
+        const notebookPath = String(processedInput.notebook_path)
+        fileExtension = getFileExtensionForAnalytics(notebookPath)
+        filePathLen = notebookPath.length
       } else if (tool.name === BASH_TOOL_NAME && 'command' in processedInput) {
         const bashInput = processedInput as BashToolInput
         fileExtension = getFileExtensionsFromBashCommand(
           bashInput.command,
           bashInput._simulatedSedEdit?.filePath,
         )
+        // densable z5n → bashCommandFileExtensions
+        bashCommandFileExtensions = bashCommandFileExtensionsForAnalytics(
+          bashInput.command,
+        )
+        bashCommandLen = bashInput.command.length
+      } else if (
+        tool.name === POWERSHELL_TOOL_NAME &&
+        'command' in processedInput &&
+        typeof (processedInput as { command?: unknown }).command === 'string'
+      ) {
+        // densable z5n on PS/shell command tools without qkc fileExtension
+        bashCommandFileExtensions = bashCommandFileExtensionsForAnalytics(
+          String((processedInput as { command: string }).command),
+        )
       }
     }
 
+    // densable Ae=Wkc(newMessages) — document/image attachment payload size
+    const toolResultAttachmentBytes = toolResultAttachmentBytesFromMessages(
+      result.newMessages as
+        | ReadonlyArray<{ type?: string; message?: { content?: unknown } }>
+        | undefined,
+    )
+
+    // densable jkc(e.name,b,s) → tengu_file_activity before Ee(f)/success
+    // local-only: Edit/Write/NotebookEdit/Bash|PowerShell; skip G5n deliver channels
+    emitFileActivityForToolSuccess(
+      logEvent,
+      tool.name,
+      processedInput,
+      messageId,
+      {
+        edit: FILE_EDIT_TOOL_NAME,
+        write: FILE_WRITE_TOOL_NAME,
+        notebookEdit: NOTEBOOK_EDIT_TOOL_NAME,
+        bash: BASH_TOOL_NAME,
+        powerShell: POWERSHELL_TOOL_NAME,
+      },
+    )
+
+    // densable Ee(f) → tengu_feature_ok before tengu_tool_use_success
+    logEvent('tengu_feature_ok', {
+      feature_name: featureName,
+    })
+    // densable Z=process.memoryUsage(); rss/heap/external deltas on success
+    const successMem = toolMemoryDeltasForAnalytics(memBefore)
     logEvent('tengu_tool_use_success', {
       messageID:
         messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       toolName: sanitizeToolNameForAnalytics(tool.name),
       isMcp: tool.isMcp ?? false,
       durationMs,
+      rssDeltaBytes: successMem.rssDeltaBytes,
+      heapUsedDeltaBytes: successMem.heapUsedDeltaBytes,
+      externalDeltaBytes: successMem.externalDeltaBytes,
       preToolHookDurationMs,
+      permissionDurationMs,
       toolResultSizeBytes,
+      ...(toolResultAttachmentBytes > 0 && { toolResultAttachmentBytes }),
+      toolInputSizeBytes,
       ...(fileExtension !== undefined && { fileExtension }),
+      ...(bashCommandFileExtensions !== undefined && {
+        bashCommandFileExtensions,
+      }),
+      ...(filePathLen !== undefined && { filePathLen }),
+      ...(bashCommandLen !== undefined && { bashCommandLen }),
+      ...(readHasLimit !== undefined && { readHasLimit }),
+      ...(readHasOffset !== undefined && { readHasOffset }),
 
       queryChainId: toolUseContext.queryTracking
         ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1486,6 +2029,13 @@ async function checkPermissionsAndCallTool(
     const hookResults = []
     const toolContextModifier = result.contextModifier
     const mcpMeta = result.mcpMeta
+    // densable st=se.endsTurn → UserMessage.toolEndsTurn
+    const toolEndsTurn = result.endsTurn === true ? true : undefined
+    // densable Be=se.contextLayers → update.contextLayers for Ter merge
+    const resultContextLayers =
+      result.contextLayers && result.contextLayers.length > 0
+        ? result.contextLayers
+        : undefined
 
     async function addToolResult(
       toolUseResult: unknown,
@@ -1548,7 +2098,9 @@ async function checkPermissionsAndCallTool(
             toolUseContext.agentId && !toolUseContext.preserveToolUseResults
               ? undefined
               : toolUseResult,
-          mcpMeta: toolUseContext.agentId ? undefined : mcpMeta,
+          // densable mts(n.agentId, Me) — subagent only keeps end-turn mcpMeta
+          mcpMeta: mcpMetaForToolResultMessage(toolUseContext.agentId, mcpMeta),
+          toolEndsTurn,
           sourceToolAssistantUUID: assistantMessage.uuid,
         }),
         contextModifier: toolContextModifier
@@ -1557,6 +2109,15 @@ async function checkPermissionsAndCallTool(
               modifyContext: toolContextModifier,
             }
           : undefined,
+        // densable contextLayers:Be&&Be.length>0?{toolUseID:t,layers:Be}:void 0
+        ...(resultContextLayers
+          ? {
+              contextLayers: {
+                toolUseID: toolUseID,
+                layers: resultContextLayers,
+              },
+            }
+          : {}),
       })
     }
 
@@ -1567,6 +2128,8 @@ async function checkPermissionsAndCallTool(
 
     const postToolHookInfos: StopHookInfo[] = []
     const postToolHookStart = Date.now()
+    // densable ze — true if any PostToolUse hook yielded (gates Llo resync)
+    let postToolHooksYielded = false
     for await (const hookResult of runPostToolUseHooks(
       toolUseContext,
       tool,
@@ -1578,6 +2141,7 @@ async function checkPermissionsAndCallTool(
       mcpServerType,
       mcpServerBaseUrl,
     )) {
+      postToolHooksYielded = true
       if ('updatedMCPToolOutput' in hookResult) {
         if (isMcpTool(tool)) {
           toolOutput = hookResult.updatedMCPToolOutput
@@ -1622,6 +2186,22 @@ async function checkPermissionsAndCallTool(
         `Slow PostToolUse hooks: ${postToolHookDurationMs}ms for ${tool.name} (${postToolHookInfos.length} hooks)`,
         { level: 'info' },
       )
+    }
+
+    // densable Llo — only when PostToolUse hooks ran (ze); re-sync readFileState
+    // if formatter rewrote disk after Edit/Write (full prior read only).
+    if (postToolHooksYielded) {
+      const fileResync = resyncReadFileStateAfterPostToolUse(
+        tool.name,
+        toolUseID,
+        processedInput,
+        toolUseContext.readFileState,
+      )
+      if (fileResync) {
+        resultingMessages.push({
+          message: createAttachmentMessage(fileResync),
+        })
+      }
     }
 
     if (isMcpTool(tool)) {
@@ -1683,6 +2263,27 @@ async function checkPermissionsAndCallTool(
     })
     endToolSpan()
 
+    // densable: let ce=H9e(...); if (ce) return Auo({phase:"call",...})
+    // Tombstone abort during/after tool.call → clean cancel, not tool_use_error.
+    const tombstoneDuringCall = isServerFallbackTombstoneAbort(
+      toolUseContext.abortController.signal,
+    )
+    if (tombstoneDuringCall) {
+      resultingMessages.push(
+        buildToolUseCancelledUpdate({
+          tool,
+          toolUseID,
+          toolUseContext,
+          assistantMessage,
+          phase: 'call',
+          requestId,
+          mcpServerType,
+          mcpServerBaseUrl,
+        }),
+      )
+      return resultingMessages
+    }
+
     // Record error observation in Langfuse (no-op if not configured)
     recordToolObservation(toolUseContext.langfuseTrace ?? null, {
       toolName: tool?.name ?? 'unknown',
@@ -1734,14 +2335,54 @@ async function checkPermissionsAndCallTool(
       if (!(error instanceof ShellError)) {
         logError(error)
       }
+      // densable ...PC(se) + errorCode:re + mem deltas Z-G
+      const classified = classifyToolError(error)
+      const catchMem = toolMemoryDeltasForAnalytics(memBefore)
+      const pcFields = errorAnalyticsFromThrown(error)
       logEvent('tengu_tool_use_error', {
         messageID:
           messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         toolName: sanitizeToolNameForAnalytics(tool.name),
-        error: classifyToolError(
-          error,
-        ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error:
+          classified as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        ...(pcFields.error_message_hash
+          ? {
+              error_message_hash:
+                pcFields.error_message_hash as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }
+          : {}),
+        ...(pcFields.error_code
+          ? {
+              error_code:
+                pcFields.error_code as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }
+          : {}),
+        ...(pcFields.error_constructor
+          ? {
+              error_constructor:
+                pcFields.error_constructor as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }
+          : {}),
+        ...(pcFields.error_stack_hash
+          ? {
+              error_stack_hash:
+                pcFields.error_stack_hash as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }
+          : {}),
+        ...(pcFields.error_top_frame
+          ? {
+              error_top_frame:
+                pcFields.error_top_frame as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            }
+          : {}),
+        errorCode:
+          classified as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         isMcp: tool.isMcp ?? false,
+        // densable ...FSt(n.agentContext)
+        ...agentContextForToolAnalytics(),
+        rssDeltaBytes: catchMem.rssDeltaBytes,
+        heapUsedDeltaBytes: catchMem.heapUsedDeltaBytes,
+        externalDeltaBytes: catchMem.externalDeltaBytes,
 
         queryChainId: toolUseContext.queryTracking
           ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

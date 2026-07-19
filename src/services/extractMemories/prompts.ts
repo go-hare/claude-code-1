@@ -12,6 +12,7 @@
 import { feature } from 'bun:bundle'
 import {
   MEMORY_FRONTMATTER_EXAMPLE,
+  selectTypesOfMemorySection,
   TYPES_SECTION_COMBINED,
   TYPES_SECTION_INDIVIDUAL,
   WHAT_NOT_TO_SAVE_SECTION,
@@ -86,7 +87,8 @@ export function buildExtractAutoOnlyPrompt(
     '',
     'If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, find and remove the relevant entry.',
     '',
-    ...TYPES_SECTION_INDIVIDUAL,
+    // densable nFr / tengu_ochre_finch — compact types section when on.
+    ...selectTypesOfMemorySection(TYPES_SECTION_INDIVIDUAL),
     ...WHAT_NOT_TO_SAVE_SECTION,
     '',
     ...howToSave,
@@ -145,7 +147,8 @@ export function buildExtractCombinedPrompt(
     '',
     'If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, find and remove the relevant entry.',
     '',
-    ...TYPES_SECTION_COMBINED,
+    // densable nFr / tengu_ochre_finch — compact types section when on.
+    ...selectTypesOfMemorySection(TYPES_SECTION_COMBINED),
     ...WHAT_NOT_TO_SAVE_SECTION,
     '- You MUST avoid saving sensitive data within shared team memories. For example, never save API keys or user credentials.',
     '',

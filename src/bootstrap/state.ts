@@ -110,6 +110,12 @@ type State = {
   // trajectories fail fast rather than conditioning the model on fake
   // tool_results.
   strictToolResultPairing: boolean
+  /**
+   * Official Ot.memoryToggledOff (YF/g_t) — session-level auto-memory off.
+   * Set from CLAUDE_BG_MEMORY_TOGGLED_OFF=1 when spawning a bg fork that
+   * inherited a paused memory session (left-arrow / exit handoff).
+   */
+  memoryToggledOff: boolean
   sdkAgentProgressSummariesEnabled: boolean
   userMsgOptIn: boolean
   clientType: string
@@ -151,6 +157,17 @@ type State = {
   // Captures the exact post-compaction, CLAUDE.md-injected message set sent
   // to the API so /share's serialized_conversation.json reflects reality.
   lastAPIRequestMessages: BetaMessageStreamParams['messages'] | null
+  /**
+   * densable lastCancelledAPIMessageId (b_t/sCn) — API assistant message id
+   * captured on Esc cancel for dye interruptedMessageId stamping.
+   */
+  lastCancelledAPIMessageId: string | null
+  /**
+   * densable NO.current equivalent — latest in-flight stream assistant
+   * message id (from message_start). Copied into lastCancelledAPIMessageId
+   * on user-cancel when reason was not already user/remote-cancel.
+   */
+  lastStreamAPIMessageId: string | null
   // Last auto-mode classifier request(s) for /share transcript
   lastClassifierRequests: unknown[] | null
   // CLAUDE.md content cached by context.ts for the auto-mode classifier.
@@ -239,6 +256,12 @@ type State = {
   sdkDialogHostActive: boolean
   // Main thread agent type (from --agent flag or settings)
   mainThreadAgentType: string | undefined
+  /**
+   * densable sessionSkillAllowlist (kQo/wK) — when set by initialize.skills,
+   * only matching skills are exposed to the main-session skill tool list.
+   * undefined = no filter (all discovered skills).
+   */
+  sessionSkillAllowlist: string[] | undefined
   // Remote mode (--remote flag)
   isRemoteMode: boolean
   // Direct connect server URL (for display in header)
@@ -344,6 +367,7 @@ function getInitialState(): State {
     mainLoopBusy: false,
     kairosActive: false,
     strictToolResultPairing: false,
+    memoryToggledOff: false,
     sdkAgentProgressSummariesEnabled: false,
     userMsgOptIn: false,
     clientType: 'cli',
@@ -386,6 +410,8 @@ function getInitialState(): State {
     // Last API request for bug reports
     lastAPIRequest: null,
     lastAPIRequestMessages: null,
+    lastCancelledAPIMessageId: null,
+    lastStreamAPIMessageId: null,
     // Last auto-mode classifier request(s) for /share transcript
     lastClassifierRequests: null,
     cachedClaudeMdContent: null,
@@ -433,6 +459,7 @@ function getInitialState(): State {
     sdkDialogHostActive: false,
     // Main thread agent type
     mainThreadAgentType: undefined,
+    sessionSkillAllowlist: undefined,
     // Remote mode
     isRemoteMode: false,
     ...(process.env.USER_TYPE === 'ant'
@@ -490,6 +517,9 @@ export function regenerateSessionId(
   STATE.planSlugCache.delete(STATE.sessionId)
   // Official X8o + JUa densable on session clear/regenerate.
   STATE.refusalFallbackOccurred = false
+  // densable: clear lastCancelledAPIMessageId on session regenerate.
+  STATE.lastCancelledAPIMessageId = null
+  STATE.lastStreamAPIMessageId = null
   // Fable key-less consent is conversation-session scoped (/clear starts fresh).
   STATE.fableSessionFallbackConsented = false
   const latchReset = consumeRefusalFallbackModelLatch()
@@ -547,6 +577,9 @@ export function switchSession(
   if (STATE.sessionId !== sessionId) {
     STATE.refusalFallbackOccurred = false
     STATE.fableSessionFallbackConsented = false
+    // densable: clear lastCancelledAPIMessageId on session switch.
+    STATE.lastCancelledAPIMessageId = null
+    STATE.lastStreamAPIMessageId = null
     void consumeRefusalFallbackModelLatch()
     STATE.parentSessionId = undefined
   }
@@ -1326,6 +1359,16 @@ export function setStrictToolResultPairing(value: boolean): void {
   STATE.strictToolResultPairing = value
 }
 
+/** Official YF — session auto-memory toggled off. */
+export function getMemoryToggledOff(): boolean {
+  return STATE.memoryToggledOff
+}
+
+/** Official g_t — set session auto-memory toggled off (bg fork inherit). */
+export function setMemoryToggledOff(value: boolean): void {
+  STATE.memoryToggledOff = value
+}
+
 // Field name 'userMsgOptIn' avoids excluded-string substrings ('BriefTool',
 // 'SendUserMessage' — case-insensitive). All callers are inside feature()
 // guards so these accessors don't need their own (matches getKairosActive).
@@ -1418,6 +1461,31 @@ export function getLastAPIRequestMessages():
   | BetaMessageStreamParams['messages']
   | null {
   return STATE.lastAPIRequestMessages
+}
+
+/**
+ * densable sCn — stamp lastCancelledAPIMessageId (from stream message id
+ * on Esc cancel, or null on successful turn end).
+ */
+export function setLastCancelledAPIMessageId(id: string | null): void {
+  STATE.lastCancelledAPIMessageId = id
+}
+
+/** densable b_t — read lastCancelledAPIMessageId for dye gzr. */
+export function getLastCancelledAPIMessageId(): string | null {
+  return STATE.lastCancelledAPIMessageId
+}
+
+/**
+ * densable NO.current — track in-flight stream assistant message id
+ * (message_start). Used by cancel path to seed lastCancelledAPIMessageId.
+ */
+export function setLastStreamAPIMessageId(id: string | null): void {
+  STATE.lastStreamAPIMessageId = id
+}
+
+export function getLastStreamAPIMessageId(): string | null {
+  return STATE.lastStreamAPIMessageId
 }
 
 export function setLastClassifierRequests(requests: unknown[] | null): void {
@@ -1860,6 +1928,18 @@ export function getMainThreadAgentType(): string | undefined {
 
 export function setMainThreadAgentType(agentType: string | undefined): void {
   STATE.mainThreadAgentType = agentType
+}
+
+/** densable wK — session skill allowlist from initialize.skills. */
+export function getSessionSkillAllowlist(): string[] | undefined {
+  return STATE.sessionSkillAllowlist
+}
+
+/** densable kQo — set by initialize when skills is provided. */
+export function setSessionSkillAllowlist(
+  allowlist: string[] | undefined,
+): void {
+  STATE.sessionSkillAllowlist = allowlist
 }
 
 export function getIsRemoteMode(): boolean {

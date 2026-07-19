@@ -29,10 +29,14 @@ export {
   useKeybindingContext,
   useOptionalKeybindingContext,
   useRegisterKeybindingContext,
+  usePreDispatch,
+  type HandlerRegistration,
+  type PreDispatchHandler,
 } from './keybindings/KeybindingContext.js'
 export {
   resolveKey,
   resolveKeyWithChordState,
+  resolveActionForKeystroke,
   getBindingDisplayText,
   keystrokesEqual,
   type ResolveResult,
@@ -163,6 +167,9 @@ export {
   HIDE_CURSOR,
   ENTER_ALT_SCREEN,
   ENABLE_MOUSE_TRACKING,
+  ENABLE_MOUSE_TRACKING_SCROLL,
+  enableMouseTracking,
+  type MouseTrackingMode,
 } from './core/termio/dec.js'
 export { default as instances } from './core/instances.js'
 export {
@@ -250,6 +257,7 @@ export { useAnimationFrame } from './hooks/use-animation-frame.js'
 export { useAnimationTimer, useInterval } from './hooks/use-interval.js'
 export { useSelection, useHasSelection } from './hooks/use-selection.js'
 export { default as useStdin } from './hooks/use-stdin.js'
+export { useProbeExternalClear } from './hooks/use-probe-external-clear.js'
 export { useTerminalSize } from './hooks/useTerminalSize.js'
 export { useTimeout } from './hooks/useTimeout.js'
 export { useMinDisplayTime } from './hooks/useMinDisplayTime.js'
@@ -275,10 +283,27 @@ export {
 export {
   ThemeProvider,
   setThemeConfigCallbacks,
+  useCustomThemes,
   usePreviewTheme,
+  useResolvedTheme,
   useTheme,
   useThemeSetting,
 } from './theme/ThemeProvider.js'
+export {
+  applyThemeOverrides,
+  customThemeRef,
+  getCustomThemeBase,
+  getThemesDir,
+  isValidThemeColor,
+  loadCustomThemes,
+  parseCustomThemeRef,
+  saveCustomTheme,
+  setCustomThemesConfigDir,
+  slugifyThemeName,
+  uniqueThemeSlug,
+  type CustomTheme,
+  type CustomThemeSource,
+} from './theme/customThemes.js'
 export { default as Box } from './theme/ThemedBox.js'
 export type { Props as BoxProps } from './theme/ThemedBox.js'
 export { default as Text, TextHoverColorContext } from './theme/ThemedText.js'

@@ -1,12 +1,17 @@
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js';
+import type { Tool } from '../../../Tool.js';
+import type { PermissionDecision } from '../../../types/permissions.js';
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js';
-import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
+import { computeShowAlwaysAllowOptions } from '../../../utils/permissions/suppressAlwaysAllow.js';
 import type { OptionWithDescription } from '../../CustomSelect/select.js';
 import { generateShellSuggestionsLabel } from '../shellPermissionHelpers.js';
 
 export type PowerShellToolUseOption = 'yes' | 'yes-apply-suggestions' | 'yes-prefix-edited' | 'no';
 
 export function powershellToolUseOptions({
+  tool,
+  input = {},
+  permissionResult,
   suggestions = [],
   onRejectFeedbackChange,
   onAcceptFeedbackChange,
@@ -15,6 +20,10 @@ export function powershellToolUseOptions({
   editablePrefix,
   onEditablePrefixChange,
 }: {
+  /** densable showAlwaysAllow — tool + input + permissionResult for suppress gates */
+  tool: Tool;
+  input?: { [key: string]: unknown };
+  permissionResult?: PermissionDecision | null;
   suggestions?: PermissionUpdate[];
   onRejectFeedbackChange: (value: string) => void;
   onAcceptFeedbackChange: (value: string) => void;
@@ -44,12 +53,19 @@ export function powershellToolUseOptions({
   // Note: No sandbox toggle for PowerShell - sandbox is not supported on Windows
   // Note: No classifier-reviewed option for PowerShell (ANT-ONLY feature for Bash)
 
-  // Only show "always allow" options when not restricted by allowManagedPermissionRulesOnly.
+  // densable showAlwaysAllow: EYt + org ask ceiling + suppressAlwaysAllowRule + tool.suppressesAlwaysAllowRule
   // Prefer the editable prefix input (static extractor + user edits) over the
   // non-editable suggestions label. The editable input can't represent
   // directory permissions or Read-tool rules, so fall back to the label when
   // those are present.
-  if (shouldShowAlwaysAllowOptions() && suggestions.length > 0) {
+  if (
+    computeShowAlwaysAllowOptions({
+      tool,
+      input,
+      permissionResult,
+    }) &&
+    suggestions.length > 0
+  ) {
     const hasNonPowerShellSuggestions = suggestions.some(
       s =>
         s.type === 'addDirectories' ||

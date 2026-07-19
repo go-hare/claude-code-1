@@ -105,44 +105,52 @@ describe('effortPanelState', () => {
   })
 })
 
-describe('computeConfirmOutcome', () => {
-  const mockApply: ApplyFn = cursor => ({
-    message: `applied:${cursor}`,
-    // 测试里 cursor 是 PanelPosition（含 ultracode），但 ApplyFn 的契约要求 EffortValue。
-    // 实际运行时 mockApply 只会被 computeConfirmOutcome 在非 ultracode 档位调用，
-    // 因此 cast 是安全的。生产代码用真 executeEffort 不会出现 ultracode。
-    effortUpdate: { value: cursor as unknown as EffortValue },
-  })
-
-  test('ultracode → kind=ultracode-hint，含 /ultracode 引导', () => {
-    const out = computeConfirmOutcome('ultracode', mockApply)
-    expect(out.kind).toBe('ultracode-hint')
-    if (out.kind === 'ultracode-hint') {
-      expect(out.message).toBe(ULTRACODE_HINT)
-      expect(out.message).toContain('/ultracode')
+describe('computeConfirmOutcome (densable sLy panel apply)', () => {
+  const mockApply: ApplyFn = cursor => {
+    if (cursor === 'ultracode') {
+      return {
+        message: ULTRACODE_HINT,
+        effortUpdate: { value: 'xhigh' as EffortValue, ultracode: true },
+      }
     }
+    return {
+      message: `applied:${cursor}`,
+      effortUpdate: {
+        value: cursor as unknown as EffortValue,
+        ultracode: false,
+      },
+    }
+  }
+
+  test('ultracode → kind=apply with xhigh + ultracode flag', () => {
+    const out = computeConfirmOutcome('ultracode', mockApply)
+    expect(out.kind).toBe('apply')
+    expect(out.message).toBe(ULTRACODE_HINT)
+    expect(out.effortUpdate).toEqual({ value: 'xhigh', ultracode: true })
   })
 
-  test('ultracode 不调 applyFn（不会被副作用触发）', () => {
-    let called = false
+  test('ultracode 调 applyFn（session flag path）', () => {
+    let calledWith: string | undefined
     const spy: ApplyFn = c => {
-      called = true
-      return { message: `applied:${c}` }
+      calledWith = c
+      return {
+        message: 'ok',
+        effortUpdate: { value: 'xhigh', ultracode: true },
+      }
     }
     computeConfirmOutcome('ultracode', spy)
-    expect(called).toBe(false)
+    expect(calledWith).toBe('ultracode')
   })
 
   test('low → kind=apply，message 来自 applyFn，effortUpdate 透传', () => {
     const out = computeConfirmOutcome('low', mockApply)
     expect(out.kind).toBe('apply')
-    if (out.kind === 'apply') {
-      expect(out.message).toBe('applied:low')
-      expect(out.effortUpdate?.value).toBe('low')
-    }
+    expect(out.message).toBe('applied:low')
+    expect(out.effortUpdate?.value).toBe('low')
+    expect(out.effortUpdate?.ultracode).toBe(false)
   })
 
-  test('high → apply 路径不调 ultracode 分支', () => {
+  test('high → apply 路径', () => {
     const out = computeConfirmOutcome('high', mockApply)
     expect(out.kind).toBe('apply')
   })
@@ -151,13 +159,11 @@ describe('computeConfirmOutcome', () => {
     const noUpdate: ApplyFn = c => ({ message: `applied:${c}` })
     const out = computeConfirmOutcome('medium', noUpdate)
     expect(out.kind).toBe('apply')
-    if (out.kind === 'apply') {
-      expect(out.effortUpdate).toBeUndefined()
-    }
+    expect(out.effortUpdate).toBeUndefined()
   })
 })
 
 test('常量字符串', () => {
   expect(CANCEL_MESSAGE).toBe('Effort unchanged.')
-  expect(ULTRACODE_HINT).toContain('/ultracode <context>')
+  expect(ULTRACODE_HINT).toContain('ultracode')
 })

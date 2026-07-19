@@ -58,6 +58,8 @@ import {
 } from 'src/utils/notebook.js'
 import { expandPath } from 'src/utils/path.js'
 import { extractPDFPages, getPDFPageCount, readPDF } from 'src/utils/pdf.js'
+import { coerceFileReadInput } from 'src/utils/toolInputCoerce.js'
+import { stripFileReadResultForStorage } from 'src/utils/toolResultStrip.js'
 import {
   isPDFExtension,
   isPDFSupported,
@@ -70,6 +72,7 @@ import {
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
 import { readFileInRange } from 'src/utils/readFileInRange.js'
+import { isSensitiveReadPath } from 'src/utils/sensitiveReadPath.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
@@ -92,39 +95,8 @@ import {
   userFacingName,
 } from './UI.js'
 
-// Device files that would hang the process: infinite output or blocking input.
-// Checked by path only (no I/O). Safe devices like /dev/null are intentionally omitted.
-const BLOCKED_DEVICE_PATHS = new Set([
-  // Infinite output — never reach EOF
-  '/dev/zero',
-  '/dev/random',
-  '/dev/urandom',
-  '/dev/full',
-  // Blocks waiting for input
-  '/dev/stdin',
-  '/dev/tty',
-  '/dev/console',
-  // Nonsensical to read
-  '/dev/stdout',
-  '/dev/stderr',
-  // fd aliases for stdin/stdout/stderr
-  '/dev/fd/0',
-  '/dev/fd/1',
-  '/dev/fd/2',
-])
-
-function isBlockedDevicePath(filePath: string): boolean {
-  if (BLOCKED_DEVICE_PATHS.has(filePath)) return true
-  // /proc/self/fd/0-2 and /proc/<pid>/fd/0-2 are Linux aliases for stdio
-  if (
-    filePath.startsWith('/proc/') &&
-    (filePath.endsWith('/fd/0') ||
-      filePath.endsWith('/fd/1') ||
-      filePath.endsWith('/fd/2'))
-  )
-    return true
-  return false
-}
+// densable YNy/KNy: device + sensitive /proc paths that hang or leak.
+// Safe devices like /dev/null are intentionally omitted (isSensitiveReadPath).
 
 // Narrow no-break space (U+202F) used by some macOS versions in screenshot filenames
 const THIN_SPACE = String.fromCharCode(8239)
@@ -326,6 +298,8 @@ const outputSchema = lazySchema(() => {
       file: z.object({
         filePath: z.string().describe('The path to the file'),
       }),
+      // densable seeded-read dedup marks source:"seeded" for model/telemetry.
+      source: z.literal('seeded').optional(),
     }),
   ])
 })
@@ -364,6 +338,10 @@ export const FileReadTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
+  // densable gxd — unwrap singleton offset/limit arrays, length→limit, drop bad ranges.
+  coerceInput: coerceFileReadInput,
+  // densable stripForStorage — clear content/base64/cells from older reads.
+  stripForStorage: stripFileReadResultForStorage,
   userFacingName,
   getToolUseSummary,
   getActivityDescription(input) {
@@ -496,9 +474,8 @@ export const FileReadTool = buildTool({
       }
     }
 
-    // Block specific device files that would hang (infinite output or blocking input).
-    // This is a path-based check with no I/O — safe special files like /dev/null are allowed.
-    if (isBlockedDevicePath(fullFilePath)) {
+    // densable YNy — path-based check only; /dev/null etc. allowed.
+    if (isSensitiveReadPath(fullFilePath)) {
       return {
         result: false,
         message: `Cannot read '${file_path}': this device file would block or produce infinite output.`,
@@ -555,6 +532,37 @@ export const FileReadTool = buildTool({
     const existingState = dedupKillswitch
       ? undefined
       : readFileState.get(fullFilePath)
+    // densable: full-file re-Read of a context-seeded CLAUDE.md (seededFromContext,
+    // not partial, default offset=1 / limit undefined) short-circuits to
+    // file_unchanged when mtime matches — avoids re-sending auto-injected content.
+    if (
+      existingState &&
+      existingState.seededFromContext &&
+      !existingState.isPartialView &&
+      offset === 1 &&
+      limit === undefined
+    ) {
+      try {
+        const mtimeMs = await getFileModificationTimeAsync(fullFilePath)
+        if (mtimeMs === existingState.timestamp) {
+          const analyticsExt = getFileExtensionForAnalytics(fullFilePath)
+          logEvent('tengu_file_read_dedup', {
+            source:
+              'seeded' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...(analyticsExt !== undefined && { ext: analyticsExt }),
+          })
+          return {
+            data: {
+              type: 'file_unchanged' as const,
+              file: { filePath: fullFilePath },
+              source: 'seeded' as const,
+            },
+          }
+        }
+      } catch {
+        // stat failed — fall through to full read
+      }
+    }
     // Only dedup entries that came from a prior Read (offset is always set
     // by Read). Edit/Write store offset=undefined — their readFileState
     // entry reflects post-edit mtime, so deduping against it would wrongly

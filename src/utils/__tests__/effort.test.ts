@@ -24,12 +24,16 @@ mock.module('src/utils/model/modelSupportOverrides.js', () => ({
 const {
   isEffortLevel,
   parseEffortValue,
+  parseEffortUltracodeAlias,
+  isEffortUltracodeAlias,
   isValidNumericEffort,
   convertEffortValueToLevel,
   getEffortLevelDescription,
   getEffortSuffix,
   shouldShowEffortUI,
   resolvePickerEffortPersistence,
+  effortLevelForAnalytics,
+  resolveEffortLevelForModel,
   EFFORT_LEVELS,
 } = await import('src/utils/effort.js')
 
@@ -111,6 +115,19 @@ describe('parseEffortValue', () => {
   test('handles case-insensitive effort level strings', () => {
     expect(parseEffortValue('LOW')).toBe('low')
     expect(parseEffortValue('HIGH')).toBe('high')
+  })
+
+  test('densable qlc med → medium', () => {
+    expect(parseEffortValue('med')).toBe('medium')
+    expect(parseEffortValue('MED')).toBe('medium')
+  })
+
+  test('ultracode alias not an EffortLevel — use UBn helper', () => {
+    expect(parseEffortValue('ultracode')).toBeUndefined()
+    expect(isEffortUltracodeAlias('ultracode')).toBe(true)
+    expect(parseEffortUltracodeAlias('ultracode')).toBe('xhigh')
+    expect(parseEffortUltracodeAlias('ULTRACODE')).toBe('xhigh')
+    expect(parseEffortUltracodeAlias('high')).toBeUndefined()
   })
 })
 
@@ -410,5 +427,53 @@ describe('modelSupportsXhighEffort', () => {
   test('returns true for unknown models', async () => {
     const { modelSupportsXhighEffort } = await import('src/utils/effort.js')
     expect(modelSupportsXhighEffort('some-random-model')).toBe(true)
+  })
+})
+
+// ─── densable y$ / t3 analytics helpers ──────────────────────────────────
+
+describe('effortLevelForAnalytics densable y$', () => {
+  const savedProvider = {
+    CLAUDE_CODE_USE_OPENAI: process.env.CLAUDE_CODE_USE_OPENAI,
+    CLAUDE_CODE_USE_BEDROCK: process.env.CLAUDE_CODE_USE_BEDROCK,
+    CLAUDE_CODE_USE_VERTEX: process.env.CLAUDE_CODE_USE_VERTEX,
+    CLAUDE_CODE_EFFORT_LEVEL: process.env.CLAUDE_CODE_EFFORT_LEVEL,
+  }
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedProvider)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+  })
+
+  test('t3: resolveEffortLevelForModel defaults high when no effort', () => {
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+    expect(resolveEffortLevelForModel('claude-opus-4-7', undefined)).toBe(
+      'high',
+    )
+  })
+
+  test('t3: passes through known effort levels', () => {
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+    expect(resolveEffortLevelForModel('claude-opus-4-7', 'xhigh')).toBe(
+      'xhigh',
+    )
+    expect(resolveEffortLevelForModel('claude-opus-4-7', 'low')).toBe('low')
+  })
+
+  test('y$: effort-capable model returns level string', () => {
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+    expect(effortLevelForAnalytics('claude-opus-4-7', 'xhigh')).toBe('xhigh')
+    expect(effortLevelForAnalytics('claude-sonnet-4-6', undefined)).toBe(
+      'high',
+    )
+  })
+
+  test('y$: haiku (no effort support on 1P legacy) → undefined', () => {
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+    delete process.env.CLAUDE_CODE_USE_OPENAI
+    // haiku models: modelSupportsEffort returns false
+    expect(effortLevelForAnalytics('claude-haiku-4-5', 'xhigh')).toBeUndefined()
   })
 })

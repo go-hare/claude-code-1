@@ -1,4 +1,5 @@
 import { getForceTipId } from '../../utils/residualUiEnvGates.js'
+import { isAmberQuillContextTipsEnabled } from '../../utils/amberQuillGate.js'
 import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -35,6 +36,13 @@ export async function getTipToShowOnSpinner(
 ): Promise<Tip | undefined> {
   // Check if tips are disabled (default to true if not set)
   if (getSettings_DEPRECATED().spinnerTipsEnabled === false) {
+    return undefined
+  }
+
+  // densable Mtn/amber_quill: when GB+policy allow classifier context tips,
+  // suppress the static tip registry on the spinner (contextTipsActive path).
+  // Full iWd classifier residual still pending; gate polarity matches densable.
+  if (isAmberQuillContextTipsEnabled()) {
     return undefined
   }
 

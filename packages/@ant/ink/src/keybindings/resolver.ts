@@ -77,6 +77,27 @@ export function getBindingDisplayText(
 }
 
 /**
+ * densable fQc — resolve which action a single keystroke maps to in a context.
+ * Last matching single-keystroke binding wins (user overrides). Returns null
+ * when unbound or no match. Used by PromptInput to decide chat:submit singleKey.
+ */
+export function resolveActionForKeystroke(
+  keystroke: ParsedKeystroke,
+  context: KeybindingContextName,
+  bindings: ParsedBinding[],
+): string | null {
+  let action: string | null = null
+  for (const binding of bindings) {
+    if (binding.context !== context || binding.chord.length !== 1) continue
+    const first = binding.chord[0]
+    if (first && keystrokesEqual(first, keystroke)) {
+      action = binding.action
+    }
+  }
+  return action
+}
+
+/**
  * Build a ParsedKeystroke from Ink's input/key.
  */
 function buildKeystroke(input: string, key: Key): ParsedKeystroke | null {

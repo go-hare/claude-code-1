@@ -6,7 +6,6 @@ import {
 } from '../components/PromptInput/inputModes.js'
 import { makeHistoryReader } from '../history.js'
 import { KeyboardEvent, useInput } from '@anthropic/ink'
-// backward-compat bridge until consumers wire handleKeyDown to <Box onKeyDown>
 import { useKeybinding, useKeybindings } from '../keybindings/useKeybinding.js'
 import type { PromptInputMode } from '../types/textInputTypes.js'
 import type { HistoryEntry } from '../utils/config.js'
@@ -257,7 +256,10 @@ export function useHistorySearch(
 
   // Handle backspace when query is empty (cancels search)
   // This is a conditional behavior that doesn't fit the keybinding model
-  // well (backspace only cancels when query is empty)
+  // well (backspace only cancels when query is empty).
+  // Also exposed for PromptInput onKeyDownBefore (densable vo) when the input
+  // still has focus; while isSearching, TextInput focus=false so the useInput
+  // bridge below is the active path (same as densable dual coverage).
   const handleKeyDown = (e: KeyboardEvent): void => {
     if (!isSearching) return
     if (e.key === 'backspace' && historyQuery === '') {
@@ -266,10 +268,9 @@ export function useHistorySearch(
     }
   }
 
-  // Backward-compat bridge: PromptInput doesn't yet wire handleKeyDown to
-  // <Box onKeyDown>. Subscribe via useInput and adapt InputEvent →
-  // KeyboardEvent until the consumer is migrated (separate PR).
-  // TODO(onKeyDown-migration): remove once PromptInput passes handleKeyDown.
+  // History search unfocuses BaseTextInput (focus:!isSearching...), so
+  // onKeyDownBefore is not on the focused node. Keep InputEvent bridge while
+  // searching only — typeahead uses onKeyDownBefore instead.
   useInput(
     (_input, _key, event) => {
       handleKeyDown(new KeyboardEvent(event.keypress))

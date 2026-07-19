@@ -117,6 +117,18 @@ export type ShellCommand = {
   ) => void
   /** The TaskOutput instance that owns all stdout/stderr data and progress. */
   taskOutput: TaskOutput
+  /**
+   * Official fDs portable: child pid for adopt.json shell snapshot.
+   * Undefined when the process has already exited or was never spawned.
+   */
+  getPid?: () => number | undefined
+  /**
+   * Official ShellCommand.detach():
+   * `let e=this.#o?.pid; if(e!==void 0) this.#o.unref(); return e`
+   * Unrefs the child so the parent can exit without waiting; returns pid for
+   * adopt.json / abandon kill-by-pid. No-op when process already gone.
+   */
+  detach?: () => number | undefined
 }
 
 const SIGKILL = 137
@@ -254,6 +266,30 @@ class ShellCommandImpl implements ShellCommand {
 
   get status(): 'running' | 'backgrounded' | 'completed' | 'killed' {
     return this.#status
+  }
+
+  getPid(): number | undefined {
+    const pid = this.#childProcess?.pid
+    return typeof pid === 'number' && pid > 0 ? pid : undefined
+  }
+
+  /**
+   * Official densable detach — unref child so REPL can hand off without
+   * waiting on background shells; return pid for adopt checkpoint.
+   */
+  detach(): number | undefined {
+    const child = this.#childProcess
+    if (!child) return undefined
+    const pid = child.pid
+    if (typeof pid === 'number' && pid > 0) {
+      try {
+        child.unref()
+      } catch {
+        // already detached / closed
+      }
+      return pid
+    }
+    return undefined
   }
 
   #abortHandler(): void {
@@ -504,6 +540,10 @@ class AbortedShellCommand implements ShellCommand {
 
   kill(): void {}
 
+  detach(): number | undefined {
+    return undefined
+  }
+
   cleanup(): void {}
 }
 
@@ -533,6 +573,164 @@ export function createFailedCommand(preSpawnError: string): ShellCommand {
       return false
     },
     kill(): void {},
+    detach(): number | undefined {
+      return undefined
+    },
     cleanup(): void {},
   }
+}
+
+/**
+ * Official k$a portable — adopt a detached background shell by pid (+ optional
+ * procStart / startTimeTicks identity). Polls liveness; on death resolves with
+ * exit code -1 and appends a note. kill() identity-gates SIGTERM (official Klr).
+ */
+const ADOPTED_POLL_MS = 1000
+
+export type AdoptedShellOptions = {
+  taskId: string
+  pid: number
+  /** Optional identity tokens (official procStart / startTimeTicks). */
+  procStart?: string
+  startTimeTicks?: number
+  /** Poll interval ms (default 1000, official fqb). */
+  pollMs?: number
+}
+
+class AdoptedShellCommand implements ShellCommand {
+  #pid: number
+  #procStart: string | undefined
+  #startTimeTicks: number | undefined
+  #status: 'running' | 'backgrounded' | 'completed' | 'killed' = 'backgrounded'
+  #poll: ReturnType<typeof setInterval> | null = null
+  #resolve!: (r: ExecResult) => void
+  readonly result: Promise<ExecResult>
+  readonly taskOutput: TaskOutput
+
+  constructor(opts: AdoptedShellOptions) {
+    this.#pid = opts.pid
+    this.#procStart = opts.procStart
+    this.#startTimeTicks = opts.startTimeTicks
+    this.taskOutput = new TaskOutput(opts.taskId, null, true)
+    this.result = new Promise(resolve => {
+      this.#resolve = resolve
+    })
+    const pollMs = opts.pollMs ?? ADOPTED_POLL_MS
+    this.#poll = setInterval(() => {
+      void this.#tick()
+    }, pollMs)
+    this.#poll.unref?.()
+  }
+
+  async #tick(): Promise<void> {
+    if (this.#status !== 'backgrounded') return
+    let alive = true
+    try {
+      process.kill(this.#pid, 0)
+      // Official k$a: if identity present, mismatch → treat as dead (recycled pid).
+      if (this.#procStart !== undefined) {
+        const { processLstartMatches } = await import(
+          './genericProcessUtils.js'
+        )
+        if (!(await processLstartMatches(this.#pid, this.#procStart))) {
+          alive = false
+        }
+      } else if (this.#startTimeTicks !== undefined) {
+        // Official xen is currently a null stub — ticks gate is residual-thin.
+        void this.#startTimeTicks
+      }
+    } catch {
+      alive = false
+    }
+    if (!alive) await this.#finish(false)
+  }
+
+  async #finish(killed: boolean): Promise<void> {
+    if (this.#status !== 'backgrounded') return
+    if (this.#poll) {
+      clearInterval(this.#poll)
+      this.#poll = null
+    }
+    this.#status = killed ? 'killed' : 'completed'
+    const hasIdentity =
+      this.#procStart !== undefined || this.#startTimeTicks !== undefined
+    // Official note strings (k$a.#s).
+    const note = killed
+      ? hasIdentity
+        ? '[SIGTERM requested for detached process tree (sent if identity still matched) — adopted handle released]'
+        : '[detached process still running — adopted handle released]'
+      : '[process exited while detached; exit code unknown]'
+    try {
+      const { appendFile } = await import('fs/promises')
+      await appendFile(this.taskOutput.path, `\n${note}\n`).catch(() => {})
+    } catch {
+      // ignore
+    }
+    let stdout = ''
+    try {
+      stdout = await this.taskOutput.getStdout()
+    } catch {
+      stdout = ''
+    }
+    this.#resolve({
+      code: -1,
+      stdout,
+      stderr: '',
+      interrupted: killed,
+      backgroundTaskId: this.taskOutput.taskId,
+    })
+  }
+
+  get status(): 'running' | 'backgrounded' | 'completed' | 'killed' {
+    return this.#status
+  }
+
+  background(): boolean {
+    return true
+  }
+
+  getPid(): number | undefined {
+    return this.#pid > 0 ? this.#pid : undefined
+  }
+
+  detach(): number | undefined {
+    return this.#pid > 0 ? this.#pid : undefined
+  }
+
+  kill(): void {
+    if (this.#status !== 'backgrounded') return
+    // Official async kill → Klr(this.#e, this.#r, this.#t) then #s(true).
+    // ShellCommand.kill is sync void — fire-and-forget. Official Klr never
+    // falls back to unconditional SIGTERM (no identity → no kill; mismatch →
+    // no kill; only matching procStart → SIGTERM).
+    void (async () => {
+      try {
+        const { killPidIfIdentityMatches } = await import(
+          './genericProcessUtils.js'
+        )
+        await killPidIfIdentityMatches(this.#pid, {
+          procStart: this.#procStart,
+          startTimeTicks: this.#startTimeTicks,
+        })
+      } catch {
+        // Import/ps failure: do not SIGTERM ungated (recycled-pid risk).
+      }
+      await this.#finish(true)
+    })()
+  }
+
+  cleanup(): void {
+    if (this.#poll) {
+      clearInterval(this.#poll)
+      this.#poll = null
+    }
+    this.taskOutput.clear()
+  }
+}
+
+/** Official k$a factory — adopted detached shell for claim rehydrate. */
+export function createAdoptedShellCommand(
+  opts: AdoptedShellOptions,
+): ShellCommand {
+  return new AdoptedShellCommand(opts)
 }

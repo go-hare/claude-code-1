@@ -55,6 +55,7 @@ import {
   mergeFileStateCaches,
   READ_FILE_STATE_CACHE_SIZE,
 } from '../utils/fileStateCache.js';
+import { getFileModificationTime } from '../utils/file.js';
 import {
   updateLastInteractionTime,
   getLastInteractionTime,
@@ -85,6 +86,7 @@ import {
 } from '../utils/residualMsEnvGates.js';
 import { formatTokens, truncateToWidth } from '../utils/format.js';
 import { consumeEarlyInput } from '../utils/earlyInput.js';
+import { maybeClearLaunchWarningOnInputChange, setLaunchWarning, type LaunchWarning } from '../utils/launchWarning.js';
 import {
   claimConsumableQueuedAutonomyCommands,
   finalizeAutonomyCommandsForTurn,
@@ -164,6 +166,7 @@ import { prependModeCharacterToInput } from '../components/PromptInput/inputMode
 import { prependToShellHistoryCache } from '../utils/suggestions/shellHistoryCompletion.js';
 import { useApiKeyVerification } from '../hooks/useApiKeyVerification.js';
 import { GlobalKeybindingHandlers } from '../hooks/useGlobalKeybindings.js';
+import { applyFrameUrlsSnapshot, extractFrameUrlsSnapshot } from '../utils/frameUrls.js';
 import { CommandKeybindingHandlers } from '../hooks/useCommandKeybindings.js';
 import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
@@ -173,7 +176,10 @@ import { useBackgroundTaskNavigation } from '../hooks/useBackgroundTaskNavigatio
 import { useSwarmInitialization } from '../hooks/useSwarmInitialization.js';
 import { useTeammateViewAutoExit } from '../hooks/useTeammateViewAutoExit.js';
 import { errorMessage, toError } from '../utils/errors.js';
-import { isHumanTurn } from '../utils/messagePredicates.js';
+import {
+  isHumanTurn,
+  isSystemVisibleOrigin,
+} from '../utils/messagePredicates.js';
 import { logError } from '../utils/log.js';
 import { getCwd } from '../utils/cwd.js';
 // Dead code elimination: conditional imports
@@ -232,7 +238,9 @@ import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from 'src/services/analytics/index.js';
+import { cmdFeatureNameForAnalytics } from 'src/services/analytics/metadata.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
+import { remoteUnavailableNotificationText, resolveRemoteSlashDispatch } from '../utils/remoteSlashDispatch.js';
 import {
   textForResubmit,
   handleMessageFromStream,
@@ -272,6 +280,7 @@ import type {
   ProgressMessage,
   HookResultMessage,
   PartialCompactDirection,
+  MessageOrigin,
 } from '../types/message.js';
 import { query } from '../query.js';
 import { mergeClients, useMergedClients } from '../hooks/useMergedClients.js';
@@ -407,6 +416,7 @@ import {
   type SetAppState,
   getCommandQueue,
   getCommandQueueLength,
+  hasMainThreadEditableQueuedCommand,
   removeByFilter,
 } from '../utils/messageQueueManager.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
@@ -430,10 +440,23 @@ const UndercoverAutoCallout =
   process.env.USER_TYPE === 'ant' ? require('../components/UndercoverAutoCallout.js').UndercoverAutoCallout : null;
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { activityManager } from '../utils/activityManager.js';
-import { createAbortController } from '../utils/abortController.js';
+import {
+  abortReasonAsDOMException,
+  createAbortController,
+  isAutoRestoreAbortReason,
+  normalizeAbortReason,
+  resolveAutoRestoreSource,
+  type AutoRestoreSource,
+} from '../utils/abortController.js';
+import {
+  getLastStreamAPIMessageId,
+  setLastCancelledAPIMessageId,
+  setLastStreamAPIMessageId,
+} from '../bootstrap/state.js';
 import { MCPConnectionManager } from 'src/services/mcp/MCPConnectionManager.js';
 import { useFeedbackSurvey } from 'src/components/FeedbackSurvey/useFeedbackSurvey.js';
 import { useMemorySurvey } from 'src/components/FeedbackSurvey/useMemorySurvey.js';
+import { usePluginSurvey } from 'src/components/FeedbackSurvey/usePluginSurvey.js';
 import { usePostCompactSurvey } from 'src/components/FeedbackSurvey/usePostCompactSurvey.js';
 import { FeedbackSurvey } from 'src/components/FeedbackSurvey/FeedbackSurvey.js';
 import { useInstallMessages } from 'src/hooks/notifs/useInstallMessages.js';
@@ -505,7 +528,7 @@ import type { RemoteSessionConfig } from '../remote/RemoteSessionManager.js';
 import { REMOTE_SAFE_COMMANDS } from '../commands.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
-import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, isMouseTrackingEnabled } from '../utils/fullscreen.js';
+import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, mouseTrackingProp } from '../utils/fullscreen.js';
 import { AlternateScreen } from '@anthropic/ink';
 import { ScrollKeybindingHandler } from '../components/ScrollKeybindingHandler.js';
 import {
@@ -830,9 +853,33 @@ export type Props = {
   onOpenAgents?: (payload?: {
     messages?: Array<{
       type: string;
+      uuid?: string;
       isMeta?: boolean;
-      message?: { content?: unknown };
+      message?: { content?: unknown; stop_reason?: string | null };
     }>;
+    /** Official aAf via — idle-fork | abort-then-fork for adopt prefill. */
+    via?: string;
+    partialText?: string | null;
+    boundaryUuid?: string;
+    agentsCount?: number;
+    checkpoint?: {
+      shells?: unknown[];
+      cron?: Array<{
+        id: string;
+        cron: string;
+        prompt: string;
+        createdAt?: number;
+        recurring?: boolean;
+        agentId?: string;
+        kind?: string;
+      }>;
+      agents?: unknown[];
+      workflows?: unknown[];
+    };
+    /** Official aAf → hcn sessionPermissionRules. */
+    sessionPermissionRules?: { allow: string[]; deny: string[] };
+    /** Official aAf → hcn memoryToggledOff. */
+    memoryToggledOff?: boolean;
   }) => void;
   /**
    * Official resume-return densable — inject a continue prompt once after
@@ -972,6 +1019,280 @@ export function REPL({
   const ultraplanLaunchPending = useAppState(s => s.ultraplanLaunchPending);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const setAppState = useSetAppState();
+  // Needed by claim-loop deferred resume (t4d/wAo/BSe MCP-settle wait).
+  const store = useAppStateStore();
+  // Refs filled after getToolUseContext/canUseTool exist — claim BSe schedule
+  // closes over these for official Aye agent resume.
+  type DeferredAdoptResumeRefs = {
+    getToolUseContext?: (messages: unknown[], newMessages: unknown[], abort: AbortController, model: string) => unknown;
+    canUseTool?: (...args: unknown[]) => Promise<unknown> | unknown;
+    mainLoopModel?: string;
+    resumeAgentBackground?: (opts: {
+      agentId: string;
+      prompt: string;
+      toolUseContext: unknown;
+      canUseTool: unknown;
+      /** Official Aye continueInterruptedTurn — orphan auto-resume EAf gate. */
+      continueInterruptedTurn?: boolean;
+    }) => Promise<
+      | {
+          agentId?: string;
+          description?: string;
+          outputFile?: string;
+          alreadyCompleted?: boolean;
+        }
+      | unknown
+    >;
+  };
+  const deferredResumeRefs = useRef<DeferredAdoptResumeRefs>({});
+
+  // Official e4d on bg mount — claim adopt.json once, rehydrate agents (r4d/PSu)
+  // then shells (k$a/Lvu) + cron (s4d) + workflows (i4d/o4d/ess) + t4d/BSe + prefill.
+  useEffect(() => {
+    if (feature('BG_SESSIONS')) {
+      if (!isBgSession()) return;
+      const jobDir = process.env.CLAUDE_JOB_DIR;
+      if (!jobDir) return;
+      let cancelled = false;
+      void (async () => {
+        try {
+          const {
+            claimAdoptJson,
+            ADOPT_CLAIM_WAIT_MS,
+            rehydrateAdoptedShells,
+            rehydrateAdoptedAgents,
+            rehydrateAdoptedWorkflows,
+            stashDeferredAdoptResume,
+          } = await import('../utils/bgCheckpoint.js');
+          // Official: waitMs when expectHandoff — use non-zero wait for bg spawn.
+          const expectHandoff =
+            process.env.CLAUDE_BG_SOURCE === 'left_arrow' || process.env.CLAUDE_BG_SOURCE === 'exit';
+          const claimed = await claimAdoptJson(jobDir, {
+            waitMs: expectHandoff ? ADOPT_CLAIM_WAIT_MS : 0,
+          });
+          if (cancelled || !claimed.ok) return;
+          const payload = claimed.payload;
+
+          // Official claim order (CAo): agents (r4d+PSu) → shells (k$a/Lvu) →
+          // cron (s4d) → workflows (i4d+o4d+ess). Agents first so shell/cron
+          // owner filters can use adoptedAgentIds.
+          let adoptedAgentIds = new Set<string>();
+          let adoptedAgentEntries: import('../utils/bgCheckpoint.js').AdoptedAgentEntry[] = [];
+          if (payload.agents?.length && !cancelled) {
+            try {
+              const agentResult = await rehydrateAdoptedAgents(
+                payload.agents,
+                setAppState as unknown as (
+                  u: (p: { tasks: Record<string, unknown> }) => {
+                    tasks: Record<string, unknown>;
+                  },
+                ) => void,
+              );
+              adoptedAgentIds = agentResult.adoptedAgentIds;
+              adoptedAgentEntries = agentResult.adoptedEntries;
+            } catch {
+              // best-effort
+            }
+          }
+
+          // Official Lvu + k$a — rehydrate detached shells into AppState.tasks.
+          // Agent-owned shells require owner in adoptedAgentIds; orphans get n4d.
+          if (payload.shells?.length && !cancelled) {
+            try {
+              await rehydrateAdoptedShells(
+                payload.shells,
+                setAppState as unknown as (
+                  u: (p: { tasks: Record<string, unknown> }) => {
+                    tasks: Record<string, unknown>;
+                  },
+                ) => void,
+                {
+                  adoptedAgentIds,
+                  skipOrphanAgentShells: true,
+                },
+              );
+            } catch {
+              // best-effort
+            }
+          }
+
+          // Official s4d — rehydrate cron before workflows (claim-loop order).
+          if (payload.cron?.length) {
+            const { addSessionCronTask } = await import('../bootstrap/state.js');
+            for (const c of payload.cron) {
+              if (!c?.id || !c.cron || !c.prompt) continue;
+              // Official: skip cron whose agentId is set but owner not adopted.
+              if (c.agentId !== undefined && !adoptedAgentIds.has(c.agentId)) continue;
+              try {
+                addSessionCronTask({
+                  id: c.id,
+                  cron: c.cron,
+                  prompt: c.prompt,
+                  createdAt: c.createdAt ?? Date.now(),
+                  recurring: c.recurring,
+                  agentId: c.agentId,
+                });
+              } catch {
+                // skip individual
+              }
+            }
+          }
+
+          // Official i4d + o4d + ess — validate scriptPath, link transcript, register.
+          let adoptedWorkflowEntries: import('../utils/bgCheckpoint.js').AdoptedWorkflowEntry[] = [];
+          if (payload.workflows?.length && !cancelled) {
+            try {
+              const wfResult = await rehydrateAdoptedWorkflows(
+                payload.workflows,
+                setAppState as unknown as (
+                  u: (p: { tasks: Record<string, unknown> }) => {
+                    tasks: Record<string, unknown>;
+                  },
+                ) => void,
+              );
+              adoptedWorkflowEntries = wfResult.adoptedEntries;
+            } catch {
+              // best-effort
+            }
+          }
+
+          // Official t4d + BSe — stash then deferred MCP-settle resume (w5u + Aye).
+          // resumeAgent closes over claim-time refs for tool context (defined later).
+          if (!cancelled && (adoptedAgentEntries.length > 0 || adoptedWorkflowEntries.length > 0)) {
+            stashDeferredAdoptResume(jobDir, adoptedAgentEntries, adoptedWorkflowEntries);
+            const { scheduleDeferredAdoptResume } = await import('../utils/bgCheckpoint.js');
+            void scheduleDeferredAdoptResume({
+              jobDir,
+              getState: () => store.getState(),
+              subscribe: listener => store.subscribe(listener),
+              isJobDirCurrent: dir => process.env.CLAUDE_JOB_DIR === dir,
+              // Official w5u: drop adopted taskId when same workflowRunId already running.
+              removeTask: taskId => {
+                try {
+                  setAppState(prev => {
+                    if (!prev.tasks || !(taskId in prev.tasks)) return prev;
+                    const { [taskId]: _removed, ...rest } = prev.tasks;
+                    return { ...prev, tasks: rest };
+                  });
+                } catch {
+                  /* best-effort */
+                }
+              },
+              resumeAgent: async entry => {
+                const resume = deferredResumeRefs.current.resumeAgentBackground;
+                const ctx = deferredResumeRefs.current.getToolUseContext;
+                const can = deferredResumeRefs.current.canUseTool;
+                const model = deferredResumeRefs.current.mainLoopModel;
+                if (!resume || !ctx || !can || !model) {
+                  throw new Error('resume agent context not ready');
+                }
+                // Official BSe Aye: continueInterruptedTurn:!0 (claim path
+                // fire-and-forget; orphan ese separately maps alreadyCompleted→EAf).
+                await resume({
+                  agentId: entry.agentId,
+                  prompt: entry.description ?? '(resumed agent)',
+                  toolUseContext: ctx(messagesRef.current, [], new AbortController(), model) as never,
+                  canUseTool: can,
+                  continueInterruptedTurn: true,
+                });
+              },
+            }).catch(() => {
+              // best-effort
+            });
+          }
+
+          // Mid-turn prefill → meta continue prompt (official mZ prefill path).
+          if (payload.prefill?.text) {
+            const { buildInterruptedOutputHintContent, checkInterruptedOutputBoundary } = await import(
+              '../utils/replyOnResume.js'
+            );
+            const check = checkInterruptedOutputBoundary(payload.prefill, payload.prefill.boundaryUuid);
+            if (check.accept) {
+              const hint = buildInterruptedOutputHintContent(payload.prefill.text);
+              enqueue({
+                mode: 'prompt',
+                value: hint,
+                priority: 'next',
+                isMeta: true,
+              });
+            }
+          }
+
+          // Official wvr/kqb/Hqb/Dqb/ese finally — orphaned agents/shells/workflows
+          // from prior process exit (scan → classify → deferred auto-resume).
+          if (!cancelled) {
+            try {
+              const { runOrphanAgentResumePass } = await import('../utils/orphanAgentResume.js');
+              const liveIds = new Set<string>();
+              const liveTaskIds = new Set<string>();
+              try {
+                const tasksSnap = store.getState().tasks ?? {};
+                for (const t of Object.values(tasksSnap) as Array<{
+                  type?: string;
+                  agentId?: string;
+                  id?: string;
+                }>) {
+                  if (typeof t?.id === 'string') liveTaskIds.add(t.id);
+                  if (t?.type === 'local_agent') {
+                    if (typeof t.agentId === 'string') liveIds.add(t.agentId);
+                    if (typeof t.id === 'string') liveIds.add(t.id);
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+              void runOrphanAgentResumePass({
+                messages: messagesRef.current as never,
+                liveAgentIds: liveIds,
+                liveTaskIds,
+                getState: () => store.getState(),
+                subscribe: listener => store.subscribe(listener),
+                isCurrent: () => !cancelled,
+                resumeAgent: async entry => {
+                  const resume = deferredResumeRefs.current.resumeAgentBackground;
+                  const ctx = deferredResumeRefs.current.getToolUseContext;
+                  const can = deferredResumeRefs.current.canUseTool;
+                  const model = deferredResumeRefs.current.mainLoopModel;
+                  if (!resume || !ctx || !can || !model) {
+                    throw new Error('resume agent context not ready');
+                  }
+                  const r = await resume({
+                    agentId: entry.agentId,
+                    prompt: entry.description ?? '(resumed agent)',
+                    toolUseContext: ctx(messagesRef.current, [], new AbortController(), model) as never,
+                    canUseTool: can,
+                    // Official Aye continueInterruptedTurn:!0 on orphan ese path
+                    continueInterruptedTurn: true,
+                  });
+                  const rec =
+                    r && typeof r === 'object'
+                      ? (r as {
+                          alreadyCompleted?: boolean;
+                          outputFile?: string;
+                        })
+                      : undefined;
+                  return {
+                    alreadyCompleted: rec?.alreadyCompleted === true,
+                    outputFile:
+                      typeof rec?.outputFile === 'string' && rec.outputFile ? rec.outputFile : entry.outputFile,
+                  };
+                },
+              }).catch(() => {
+                /* best-effort */
+              });
+            } catch {
+              /* best-effort */
+            }
+          }
+        } catch {
+          // best-effort
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [setAppState, store]);
 
   // Bootstrap: retained local_agent that hasn't loaded disk yet → read
   // sidechain JSONL and UUID-merge with whatever stream has appended so far.
@@ -1004,7 +1325,7 @@ export function REPL({
     });
   }, [viewingAgentTaskId, needsBootstrap, setAppState]);
 
-  const store = useAppStateStore();
+  // store already bound above for claim-loop deferred resume.
   const terminal = useTerminalNotification();
   const mainLoopModel = useMainLoopModel();
 
@@ -1234,7 +1555,11 @@ export function REPL({
 
   // Ref for the synchronous restore callback — set after restoreMessageSync is
   // defined, read in the onQuery finally block for auto-restore on interrupt.
-  const restoreMessageSyncRef = useRef<(m: UserMessage) => void>(() => {});
+  // densable Ld: second arg is restore source (auto_restore_cancel |
+  // refusal_fallback_edit) for rewind telemetry / latch unwind denser.
+  const restoreMessageSyncRef = useRef<
+    (m: UserMessage, source?: AutoRestoreSource) => void
+  >(() => {});
 
   // Ref to the fullscreen layout's scroll box for keyboard scrolling.
   // Null when fullscreen mode is disabled (ref never attached).
@@ -1594,6 +1919,11 @@ export function REPL({
     }
     rawSetMessages(next);
   }, []);
+  // densable a7u/fuo — keep AppState.frameUrls in sync with transcript artifacts.
+  useEffect(() => {
+    const snap = extractFrameUrlsSnapshot(messages);
+    setAppState(prev => applyFrameUrlsSnapshot(prev, snap));
+  }, [messages, setAppState]);
   // setUserInputOnProcessing flips the pending flag; the render reads it
   // directly. No length tracking — see userMessagePending declaration.
   const setUserInputOnProcessing = useCallback((input: string | undefined) => {
@@ -1720,6 +2050,8 @@ export function REPL({
   const setInputValue = useCallback(
     (value: string) => {
       if (trySuggestBgPRIntercept(inputValueRef.current, value)) return;
+      // densable Prr: emptying input clears launchWarning.
+      maybeClearLaunchWarningOnInputChange(inputValueRef.current, value);
       // In fullscreen mode, typing into an empty prompt re-pins scroll to
       // bottom. Only fires on empty→non-empty so scrolling up to reference
       // something while composing a message doesn't yank the view back on
@@ -1759,6 +2091,7 @@ export function REPL({
         text: string;
         cursorOffset: number;
         pastedContents: Record<number, PastedContent>;
+        launchWarning?: LaunchWarning;
       }
     | undefined
   >();
@@ -2111,7 +2444,8 @@ export function REPL({
     toolUseConfirmQueue.length === 0 &&
     promptQueue.length === 0 &&
     // Show spinner during input processing, API call, while teammates are running,
-    // or while pending task notifications are queued (prevents spinner bounce between consecutive notifications)
+    // or while pending task notifications are queued (official densable:
+    // getCommandQueueLength() > 0).
     (isLoading ||
       userInputOnProcessing ||
       hasRunningTeammates ||
@@ -2142,31 +2476,40 @@ export function REPL({
 
   const showIssueFlagBanner = useIssueFlagBanner(messages, submitCount);
 
-  // Wrap feedback survey handler to trigger auto-run /issue
-  const feedbackSurvey = useMemo(
-    () => ({
-      ...feedbackSurveyOriginal,
-      handleSelect: (selected: 'dismissed' | 'bad' | 'fine' | 'good') => {
-        // Reset the ref when a new survey response comes in
-        didAutoRunIssueRef.current = false;
-        const showedTranscriptPrompt = feedbackSurveyOriginal.handleSelect(selected);
-        // Auto-run /issue for "bad" if transcript prompt wasn't shown
-        if (selected === 'bad' && !showedTranscriptPrompt && shouldAutoRunIssue('feedback_survey_bad')) {
-          setAutoRunIssueReason('feedback_survey_bad');
-          didAutoRunIssueRef.current = true;
-        }
-      },
-    }),
-    [feedbackSurveyOriginal],
-  );
+  // densable cpe pending: digit select no longer commits immediately — auto-run
+  // /issue for "bad" must wait until commit lands on thanks (not pending/transcript).
+  const feedbackSurvey = feedbackSurveyOriginal;
+  useEffect(() => {
+    if (feedbackSurvey.state === 'open') {
+      didAutoRunIssueRef.current = false;
+    }
+  }, [feedbackSurvey.state]);
+  useEffect(() => {
+    if (feedbackSurvey.state !== 'thanks' || feedbackSurvey.lastResponse !== 'bad') {
+      return;
+    }
+    if (didAutoRunIssueRef.current) return;
+    if (!shouldAutoRunIssue('feedback_survey_bad')) return;
+    setAutoRunIssueReason('feedback_survey_bad');
+    didAutoRunIssueRef.current = true;
+  }, [feedbackSurvey.state, feedbackSurvey.lastResponse]);
 
   // Post-compact survey: shown after compaction if feature gate is enabled
   const postCompactSurvey = usePostCompactSurvey(messages, isLoading, hasActivePrompt, { enabled: !isRemoteSession });
 
+  // densable DBa: plugin feedback survey after turn ends if sJ activity ring has hits
+  const pluginSurvey = usePluginSurvey(isLoading, hasActivePrompt, {
+    enabled: !isRemoteSession,
+    otherSurveyActive: postCompactSurvey.state !== 'closed',
+  });
+
   // Memory survey: shown when the assistant mentions memory and a memory file
   // was read this conversation
+  // densable: memory yields when post-compact / plugin survey is active
+  // (enabled gate + otherSurveyActive force-close without abandon)
   const memorySurvey = useMemorySurvey(messages, isLoading, hasActivePrompt, {
-    enabled: !isRemoteSession,
+    enabled: !isRemoteSession && postCompactSurvey.state === 'closed' && pluginSurvey.state === 'closed',
+    otherSurveyActive: postCompactSurvey.state !== 'closed' || pluginSurvey.state !== 'closed',
   });
 
   // Frustration detection: show transcript sharing prompt after detecting frustrated messages
@@ -2174,7 +2517,10 @@ export function REPL({
     messages,
     isLoading,
     hasActivePrompt,
-    feedbackSurvey.state !== 'closed' || postCompactSurvey.state !== 'closed' || memorySurvey.state !== 'closed',
+    feedbackSurvey.state !== 'closed' ||
+      postCompactSurvey.state !== 'closed' ||
+      pluginSurvey.state !== 'closed' ||
+      memorySurvey.state !== 'closed',
   );
 
   // Initialize IDE integration
@@ -2407,6 +2753,70 @@ export function REPL({
         // Clear input to ensure no residual state
         setInputValue('');
 
+        // Official wvr(messages, Je) on in-session /resume — orphan scan after
+        // messages restored (skip fork: new session id, no prior orphans).
+        if (entrypoint !== 'fork') {
+          try {
+            const { runOrphanAgentResumePass } = await import('../utils/orphanAgentResume.js');
+            const liveIds = new Set<string>();
+            const liveTaskIds = new Set<string>();
+            try {
+              const tasksSnap = store.getState().tasks ?? {};
+              for (const t of Object.values(tasksSnap) as Array<{
+                type?: string;
+                agentId?: string;
+                id?: string;
+              }>) {
+                if (typeof t?.id === 'string') liveTaskIds.add(t.id);
+                if (t?.type === 'local_agent') {
+                  if (typeof t.agentId === 'string') liveIds.add(t.agentId);
+                  if (typeof t.id === 'string') liveIds.add(t.id);
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+            void runOrphanAgentResumePass({
+              messages: messages as never,
+              liveAgentIds: liveIds,
+              liveTaskIds,
+              getState: () => store.getState(),
+              subscribe: listener => store.subscribe(listener),
+              resumeAgent: async entry => {
+                const resumeFn = deferredResumeRefs.current.resumeAgentBackground;
+                const ctx = deferredResumeRefs.current.getToolUseContext;
+                const can = deferredResumeRefs.current.canUseTool;
+                const model = deferredResumeRefs.current.mainLoopModel;
+                if (!resumeFn || !ctx || !can || !model) {
+                  throw new Error('resume agent context not ready');
+                }
+                const r = await resumeFn({
+                  agentId: entry.agentId,
+                  prompt: entry.description ?? '(resumed agent)',
+                  toolUseContext: ctx(messages, [], new AbortController(), model) as never,
+                  canUseTool: can,
+                  continueInterruptedTurn: true,
+                });
+                const rec =
+                  r && typeof r === 'object'
+                    ? (r as {
+                        alreadyCompleted?: boolean;
+                        outputFile?: string;
+                      })
+                    : undefined;
+                return {
+                  alreadyCompleted: rec?.alreadyCompleted === true,
+                  outputFile: typeof rec?.outputFile === 'string' && rec.outputFile ? rec.outputFile : entry.outputFile,
+                };
+              },
+            }).catch(() => {
+              /* best-effort */
+            });
+          } catch {
+            /* best-effort */
+          }
+        }
+
         logEvent('tengu_session_resumed', {
           entrypoint: entrypoint as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           success: true,
@@ -2469,6 +2879,78 @@ export function REPL({
         getAppState: () => store.getState(),
         setAppState,
       });
+      // Official wvr on cold --resume mount (messages via props, not resume()).
+      void (async () => {
+        try {
+          const { runOrphanAgentResumePass } = await import('../utils/orphanAgentResume.js');
+          const liveIds = new Set<string>();
+          const liveTaskIds = new Set<string>();
+          try {
+            const tasksSnap = store.getState().tasks ?? {};
+            for (const t of Object.values(tasksSnap) as Array<{
+              type?: string;
+              agentId?: string;
+              id?: string;
+            }>) {
+              if (typeof t?.id === 'string') liveTaskIds.add(t.id);
+              if (t?.type === 'local_agent') {
+                if (typeof t.agentId === 'string') liveIds.add(t.agentId);
+                if (typeof t.id === 'string') liveIds.add(t.id);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+          await runOrphanAgentResumePass({
+            messages: initialMessages as never,
+            liveAgentIds: liveIds,
+            liveTaskIds,
+            getState: () => store.getState(),
+            subscribe: listener => store.subscribe(listener),
+            resumeAgent: async entry => {
+              // deferredResumeRefs may not be ready on first paint — wait briefly.
+              for (let i = 0; i < 40; i++) {
+                if (
+                  deferredResumeRefs.current.resumeAgentBackground &&
+                  deferredResumeRefs.current.getToolUseContext &&
+                  deferredResumeRefs.current.canUseTool &&
+                  deferredResumeRefs.current.mainLoopModel
+                ) {
+                  break;
+                }
+                await new Promise<void>(r => setTimeout(r, 50));
+              }
+              const resumeFn = deferredResumeRefs.current.resumeAgentBackground;
+              const ctx = deferredResumeRefs.current.getToolUseContext;
+              const can = deferredResumeRefs.current.canUseTool;
+              const model = deferredResumeRefs.current.mainLoopModel;
+              if (!resumeFn || !ctx || !can || !model) {
+                throw new Error('resume agent context not ready');
+              }
+              const r = await resumeFn({
+                agentId: entry.agentId,
+                prompt: entry.description ?? '(resumed agent)',
+                toolUseContext: ctx(initialMessages, [], new AbortController(), model) as never,
+                canUseTool: can,
+                continueInterruptedTurn: true,
+              });
+              const rec =
+                r && typeof r === 'object'
+                  ? (r as {
+                      alreadyCompleted?: boolean;
+                      outputFile?: string;
+                    })
+                  : undefined;
+              return {
+                alreadyCompleted: rec?.alreadyCompleted === true,
+                outputFile: typeof rec?.outputFile === 'string' && rec.outputFile ? rec.outputFile : entry.outputFile,
+              };
+            },
+          });
+        } catch {
+          /* best-effort */
+        }
+      })();
     }
     // Only run on mount - initialMessages shouldn't change during component lifetime
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2700,6 +3182,23 @@ export function REPL({
       snapshotOutputTokensForTurn(null);
     }
 
+    // densable sCn/NO.current: stamp lastCancelledAPIMessageId from the
+    // in-flight stream message id before aborting with user/remote-cancel,
+    // unless the controller was already aborted with those reasons.
+    {
+      const prior = abortController?.signal.aborted
+        ? normalizeAbortReason(abortController.signal.reason)
+        : undefined;
+      if (prior !== 'user-cancel' && prior !== 'remote-cancel') {
+        setLastCancelledAPIMessageId(getLastStreamAPIMessageId());
+      }
+    }
+
+// densable FBe/J0: local cancel aborts with AbortError DOMException so
+    // RT(reason) recovers the string from .message (same as refusal path).
+    // Gold: remote mode only cancelRequest(); non-remote El?.abort(J0(Ji)).
+    const cancelAbort = abortReasonAsDOMException('user-cancel');
+
     if (focusedInputDialog === 'tool-permission') {
       // Tool use confirm handles the abort signal itself
       toolUseConfirmQueue[0]?.onAbort();
@@ -2710,12 +3209,12 @@ export function REPL({
         item.reject(new Error('Prompt cancelled by user'));
       }
       setPromptQueue([]);
-      abortController?.abort('user-cancel');
+      abortController?.abort(cancelAbort);
     } else if (activeRemote.isRemoteMode) {
-      // Remote mode: send interrupt signal to CCR
+      // Remote mode: send interrupt signal to CCR (no local abort — densable)
       activeRemote.cancelRequest();
     } else {
-      abortController?.abort('user-cancel');
+      abortController?.abort(cancelAbort);
     }
 
     // Clear the controller so subsequent Escape presses don't see a stale
@@ -3006,11 +3505,15 @@ export function REPL({
         return resolveAgentTools(mainThreadAgentDefinition, merged, false, true).resolvedTools;
       };
 
+      // densable rootToolSurface freeze at context construction (tools + model)
+      const surfaceTools = computeTools();
       return {
         abortController,
+        // densable rootToolSurface:{tools, mainLoopModel} — teammate spawn freezes root
+        rootToolSurface: { tools: surfaceTools, mainLoopModel },
         options: {
           commands,
-          tools: computeTools(),
+          tools: surfaceTools,
           debug,
           verbose: s.verbose,
           mainLoopModel,
@@ -3027,10 +3530,21 @@ export function REPL({
           customSystemPrompt,
           appendSystemPrompt,
           appendSubagentSystemPrompt,
+          // densable cacheBreakerPhrase — rR systemContext memo key
+          cacheBreakerPhrase: s.cacheBreakerPhrase,
+          // densable autoCompactWindow — QV session window via options
+          autoCompactWindow: s.autoCompactWindow,
           refreshTools: computeTools,
         },
         getAppState: () => store.getState(),
         setAppState,
+        // densable Oit/Lit/Mit artifact pin writers on ToolUseContext
+        ...(() => {
+          const { bindArtifactContractHandlers } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/frameUrls.js') as typeof import('../utils/frameUrls.js');
+          return bindArtifactContractHandlers(() => store.getState(), setAppState);
+        })(),
         messages,
         setMessages,
         updateFileHistoryState(updater: (prev: FileHistoryState) => FileHistoryState) {
@@ -3147,6 +3661,17 @@ export function REPL({
     ],
   );
 
+  // Keep deferred adopt resume refs current for claim-path BSe schedule (Aye).
+  useEffect(() => {
+    deferredResumeRefs.current.getToolUseContext = getToolUseContext as DeferredAdoptResumeRefs['getToolUseContext'];
+    deferredResumeRefs.current.canUseTool = canUseTool as DeferredAdoptResumeRefs['canUseTool'];
+    deferredResumeRefs.current.mainLoopModel = mainLoopModel;
+    void import('@claude-code/builtin-tools/tools/AgentTool/resumeAgent.js').then(m => {
+      deferredResumeRefs.current.resumeAgentBackground =
+        m.resumeAgentBackground as DeferredAdoptResumeRefs['resumeAgentBackground'];
+    });
+  }, [getToolUseContext, canUseTool, mainLoopModel]);
+
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
     // Stop the foreground query so the background one takes over.
@@ -3169,7 +3694,7 @@ export function REPL({
           toolUseContext.options.mcpClients,
         ),
         getUserContext(),
-        getSystemContext(),
+        getSystemContext(toolUseContext.options.cacheBreakerPhrase),
       ]);
 
       const systemPrompt = buildEffectiveSystemPrompt({
@@ -3586,7 +4111,7 @@ export function REPL({
           freshMcpClients,
         ),
         getUserContext(),
-        getSystemContext(),
+        getSystemContext(toolUseContext.options.cacheBreakerPhrase ?? store.getState().cacheBreakerPhrase),
       ]);
       const userContext = {
         ...baseUserContext,
@@ -3747,19 +4272,38 @@ export function REPL({
       if (thisGeneration === null) {
         logEvent('tengu_concurrent_onquery_detected', {});
 
-        // Extract and enqueue user message text, skipping meta messages
-        // (e.g. expanded skill content, tick prompts) that should not be
-        // replayed as user-visible text.
-        newMessages
-          .filter((m): m is UserMessage => m.type === 'user' && !m.isMeta)
-          .map(_ => getContentText(_.message.content as string | ContentBlockParam[]))
-          .filter(_ => _ !== null)
-          .forEach((msg, i) => {
-            enqueue({ value: msg, mode: 'prompt' });
-            if (i === 0) {
-              logEvent('tengu_concurrent_onquery_enqueued', {});
+        // densable concurrent-onquery: skip isMeta unless Ace(origin)
+        // (channel/observer/observer-activity/peer-with-senderTaskId still
+        // re-enqueue). Stamp origin + skipSlashCommands:Ace(origin).
+        // stackedExpansion not on local UserMessage — skip densable wDd path.
+        let enqueuedAny = false;
+        for (const m of newMessages) {
+          if (m.type !== 'user') continue;
+          const origin = (
+            m as {
+              origin?: { kind?: string; senderTaskId?: string } | null;
             }
+          ).origin;
+          if (m.isMeta && !isSystemVisibleOrigin(origin)) continue;
+          const content = m.message?.content;
+          if (content === undefined) continue;
+          const text = getContentText(
+            content as string | ContentBlockParam[],
+          );
+          if (text === null) continue;
+          enqueue({
+            value: text,
+            mode: 'prompt',
+            uuid: m.uuid,
+            origin: origin as MessageOrigin | undefined,
+            isMeta: m.isMeta,
+            skipSlashCommands: isSystemVisibleOrigin(origin),
           });
+          if (!enqueuedAny) {
+            enqueuedAny = true;
+            logEvent('tengu_concurrent_onquery_enqueued', {});
+          }
+        }
         return false;
       }
 
@@ -3830,10 +4374,43 @@ export function REPL({
           setWasAborted(abortController.signal.aborted);
           setLastQueryCompletionTime(Date.now());
           skipIdleCheckRef.current = false;
+          // densable: sCn(null) on successful (non-aborted) turn end so the
+          // next dye does not inherit a stale cancelled message id. Stream
+          // tracking id always clears at turn boundary.
+          if (!abortController.signal.aborted) {
+            setLastCancelledAPIMessageId(null);
+          }
+          setLastStreamAPIMessageId(null);
           // Always reset loading state in finally - this ensures cleanup even
           // if onQueryImpl throws. onTurnComplete is called separately in
           // onQueryImpl only on successful completion.
           resetLoadingState();
+
+          // densable B4d — scan turn output into footerLinks regex badges
+          try {
+            const { scanAndMergeFooterLinks } =
+              require('../utils/footerLinks.js') as typeof import('../utils/footerLinks.js');
+            setAppState(prev => {
+              const next = scanAndMergeFooterLinks(messagesRef.current, prev.footerLinks ?? []);
+              return next === prev.footerLinks ? prev : { ...prev, footerLinks: next };
+            });
+          } catch {
+            // ignore scan failures
+          }
+
+          // densable evo — strip old toolUseResult payloads after each turn
+          // (keep last 200 messages full). Pure memory win; transcripts already
+          // wrote full results earlier in the turn.
+          try {
+            const { stripOldToolUseResultsForStorage } =
+              require('../utils/toolResultStrip.js') as typeof import('../utils/toolResultStrip.js');
+            setMessages(prev => {
+              const next = stripOldToolUseResultsForStorage(prev, tools);
+              return next === prev ? prev : next;
+            });
+          } catch {
+            // ignore strip failures
+          }
 
           await mrOnTurnComplete(messagesRef.current, abortController.signal.aborted);
 
@@ -3919,20 +4496,22 @@ export function REPL({
         // opening the message selector and picking the last message.
         // This runs OUTSIDE the queryGuard.end() check because onCancel calls
         // forceEnd(), which bumps the generation so end() returns false above.
-        // Guards: reason === 'user-cancel' (onCancel/Esc; programmatic aborts
-        // use 'background'/'interrupt' and must not rewind — note abort() with
-        // no args sets reason to a DOMException, not undefined), !isActive (no
-        // newer query started — cancel+resubmit race), empty input (don't
-        // clobber text typed during loading), no queued commands (user queued
-        // B while A was loading → they've moved on, don't restore A; also
-        // avoids removeLastFromHistory removing B's entry instead of A's),
-        // not viewing a teammate (messagesRef is the main conversation — the
-        // old Up-arrow quick-restore had this guard, preserve it).
+        // densable: RT(reason) is user-cancel OR refusal-fallback-edit (edit_prompt
+        // on refusal dialog aborts via J0("refusal-fallback-edit")). Programmatic
+        // aborts use 'background'/'interrupt' and must not rewind — note bare
+        // abort() sets reason to a DOMException, not undefined.
+        // Other guards: !isActive (no newer query — cancel+resubmit race), empty
+        // input (don't clobber text typed during loading), densable D7c: no
+        // main-thread editable queued command, not viewing a teammate.
+        const restoreSource = resolveAutoRestoreSource(
+          abortController.signal.reason,
+        );
         if (
-          abortController.signal.reason === 'user-cancel' &&
+          restoreSource !== undefined &&
+          isAutoRestoreAbortReason(abortController.signal.reason) &&
           !queryGuard.isActive &&
           inputValueRef.current === '' &&
-          getCommandQueueLength() === 0 &&
+          !hasMainThreadEditableQueuedCommand() &&
           !store.getState().viewingAgentTaskId
         ) {
           const msgs = messagesRef.current;
@@ -3943,14 +4522,14 @@ export function REPL({
               // The submit is being undone — undo its history entry too,
               // otherwise Up-arrow shows the restored text twice.
               removeLastFromHistory();
-              restoreMessageSyncRef.current(lastUserMsg);
+              restoreMessageSyncRef.current(lastUserMsg, restoreSource);
             }
           }
         }
       }
       return true;
     },
-    [onQueryImpl, setAppState, resetLoadingState, queryGuard, mrOnBeforeQuery, mrOnTurnComplete],
+    [onQueryImpl, setAppState, setMessages, resetLoadingState, queryGuard, mrOnBeforeQuery, mrOnTurnComplete, tools],
   );
 
   // Handle initial message (from CLI args or plan mode exit with context clear)
@@ -4087,7 +4666,7 @@ export function REPL({
         speculationSessionTimeSavedMs: number;
         setAppState: SetAppState;
       },
-      options?: { fromKeybinding?: boolean },
+      options?: { fromKeybinding?: boolean; suppressWorkflowKeyword?: boolean },
     ) => {
       // Re-pin scroll to bottom on submit so the user always sees the new
       // exchange (matches OpenCode's auto-scroll behavior).
@@ -4232,6 +4811,9 @@ export function REPL({
                 setInputValue(stashedPrompt.text);
                 helpers.setCursorOffset(stashedPrompt.cursorOffset);
                 setPastedContents(stashedPrompt.pastedContents);
+                if (stashedPrompt.launchWarning) {
+                  setLaunchWarning(stashedPrompt.launchWarning);
+                }
                 setStashedPrompt(undefined);
               }
             };
@@ -4331,6 +4913,9 @@ export function REPL({
         setInputValue(stashedPrompt.text);
         helpers.setCursorOffset(stashedPrompt.cursorOffset);
         setPastedContents(stashedPrompt.pastedContents);
+        if (stashedPrompt.launchWarning) {
+          setLaunchWarning(stashedPrompt.launchWarning);
+        }
         setStashedPrompt(undefined);
       } else if (submitsNow) {
         if (!options?.fromKeybinding) {
@@ -4400,20 +4985,43 @@ export function REPL({
       // Permission requests from the remote are bridged into toolUseConfirmQueue
       // and rendered using the standard PermissionRequest component.
       //
-      // local-jsx slash commands (e.g. /agents, /config) render UI in THIS
-      // process — they have no remote equivalent. Let those fall through to
-      // handlePromptSubmit so they execute locally. Prompt commands and
-      // plain text go to the remote.
-      if (
-        activeRemote.isRemoteMode &&
-        !(
-          isSlashCommand &&
-          commands.find(c => {
-            const name = input.trim().slice(1).split(/\s/)[0];
-            return isCommandEnabled(c) && (c.name === name || c.aliases?.includes(name!) || getCommandName(c) === name);
-          })?.type === 'local-jsx'
-        )
-      ) {
+      // densable evs / thinClientDispatch:
+      //   local → fall through to local handlePromptSubmit (e.g. local-jsx UI)
+      //   unavailable → feature_bad remote_unavailable + notification
+      //   post-text → forward to remote
+      let remoteSlashKind: 'local' | 'post-text' | 'unavailable' | null = null;
+      if (activeRemote.isRemoteMode && isSlashCommand) {
+        const remoteSlashName = input.trim().slice(1).split(/\s/)[0];
+        const remoteSlashCmd = commands.find(
+          c =>
+            isCommandEnabled(c) &&
+            (c.name === remoteSlashName ||
+              c.aliases?.includes(remoteSlashName!) ||
+              getCommandName(c) === remoteSlashName),
+        );
+        if (remoteSlashCmd) {
+          remoteSlashKind = resolveRemoteSlashDispatch({
+            type: remoteSlashCmd.type,
+            thinClientDispatch: remoteSlashCmd.thinClientDispatch,
+            // densable Lb() — local RPC/control path readiness; default true for
+            // interactive REPL so local-then-rpc stays available.
+            rpcOk: true,
+          });
+          if (remoteSlashKind === 'unavailable') {
+            logEvent('tengu_feature_bad', {
+              feature_name: cmdFeatureNameForAnalytics(remoteSlashCmd.name),
+              error_code: 'remote_unavailable' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+            addNotification({
+              key: `remote-slash-command-unavailable-${remoteSlashCmd.name}`,
+              text: remoteUnavailableNotificationText(remoteSlashCmd.name, Boolean(remoteSessionConfig?.viewerOnly)),
+              priority: 'medium',
+            });
+            return;
+          }
+        }
+      }
+      if (activeRemote.isRemoteMode && remoteSlashKind !== 'local') {
         // Build content blocks when there are pasted attachments (images)
         const pastedValues = Object.values(pastedContents);
         const imageContents = pastedValues.filter(c => c.type === 'image');
@@ -4501,6 +5109,8 @@ export function REPL({
         // handlePromptSubmit only uses it for debug log + telemetry event.
         streamMode: streamModeRef.current,
         hasInterruptibleToolInProgress: hasInterruptibleToolInProgressRef.current,
+        // densable suppressWorkflowKeyword from PromptInput meta+w toggle
+        suppressWorkflowKeyword: options?.suppressWorkflowKeyword,
       });
 
       // Restore stash that was deferred above. Two cases:
@@ -4513,6 +5123,9 @@ export function REPL({
         setInputValue(stashedPrompt.text);
         helpers.setCursorOffset(stashedPrompt.cursorOffset);
         setPastedContents(stashedPrompt.pastedContents);
+        if (stashedPrompt.launchWarning) {
+          setLaunchWarning(stashedPrompt.launchWarning);
+        }
         setStashedPrompt(undefined);
       }
     },
@@ -4566,11 +5179,14 @@ export function REPL({
         if (task.status === 'running') {
           queuePendingMessage(task.id, input, setAppState);
         } else {
+          // Official Aye userInitiated: user is typing into the agent view —
+          // clear stoppedByUser and allow resume after TaskStop.
           void resumeAgentBackground({
             agentId: task.id,
             prompt: input,
             toolUseContext: getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel),
             canUseTool,
+            userInitiated: true,
           }).catch(err => {
             logForDebugging(`resumeAgentBackground failed: ${errorMessage(err)}`);
             addNotification({
@@ -4764,8 +5380,10 @@ export function REPL({
   // Synchronous rewind + input population. Used directly by auto-restore on
   // interrupt (so React batches with the abort's setMessages → single render,
   // no flicker). MessageSelector wraps this in setImmediate via handleRestoreMessage.
+  // densable jF(message, source): source is auto_restore_cancel |
+  // refusal_fallback_edit (latch/file-history denser still in rewindConversationTo).
   const restoreMessageSync = useCallback(
-    (message: UserMessage) => {
+    (message: UserMessage, _source?: AutoRestoreSource) => {
       rewindConversationTo(message);
 
       const r = textForResubmit(message);
@@ -4874,12 +5492,21 @@ export function REPL({
       // stripped frontmatter, MEMORY.md truncation), cache the RAW disk bytes
       // with isPartialView so Edit/Write require a real Read first while
       // getChangedFiles + nested_memory dedup still work.
+      // densable Fyt/YN.current.set: seededFromContext + KK(mtime) timestamp.
+      let seedTimestamp: number;
+      try {
+        seedTimestamp = getFileModificationTime(file.path);
+      } catch {
+        seedTimestamp = Date.now();
+      }
       readFileState.current.set(file.path, {
         content: file.contentDiffersFromDisk ? (file.rawContent ?? file.content) : file.content,
-        timestamp: Date.now(),
+        timestamp: seedTimestamp,
         offset: undefined,
         limit: undefined,
         isPartialView: file.contentDiffersFromDisk,
+        seededFromContext: true,
+        keepContent: true,
       });
     }
 
@@ -5638,6 +6265,8 @@ export function REPL({
     // would fire on the same Esc that cancels the bar (child registers
     // first, fires first, bubbles).
     searchBarOpen: searchOpen,
+    // densable app:openArtifact (ctrl+]) — latest artifact from transcript
+    messages,
   };
 
   // Use frozen lengths to slice arrays, avoiding memory overhead of cloning
@@ -5921,7 +6550,7 @@ export function REPL({
     // stays entered across toggle. The 30-cap dump branch stays
     // unwrapped — it wants native terminal scrollback.
     if (transcriptScrollRef) {
-      return <AlternateScreen mouseTracking={isMouseTrackingEnabled()}>{transcriptReturn}</AlternateScreen>;
+      return <AlternateScreen mouseTracking={mouseTrackingProp()}>{transcriptReturn}</AlternateScreen>;
     }
     return transcriptReturn;
   }
@@ -6570,26 +7199,46 @@ export function REPL({
                         state={postCompactSurvey.state}
                         lastResponse={postCompactSurvey.lastResponse}
                         handleSelect={postCompactSurvey.handleSelect}
+                        handleUndo={postCompactSurvey.handleUndo}
                         inputValue={inputValue}
                         setInputValue={setInputValue}
                         onRequestFeedback={handleSurveyRequestFeedback}
+                        onAbandon={postCompactSurvey.abandon}
+                      />
+                    ) : pluginSurvey.state !== 'closed' ? (
+                      <FeedbackSurvey
+                        state={pluginSurvey.state}
+                        lastResponse={pluginSurvey.lastResponse}
+                        handleSelect={pluginSurvey.handleSelect}
+                        handleUndo={pluginSurvey.handleUndo}
+                        inputValue={inputValue}
+                        setInputValue={setInputValue}
+                        onRequestFeedback={handleSurveyRequestFeedback}
+                        message={pluginSurvey.message}
+                        onAbandon={pluginSurvey.abandon}
+                        showNotSure
                       />
                     ) : memorySurvey.state !== 'closed' ? (
                       <FeedbackSurvey
                         state={memorySurvey.state}
                         lastResponse={memorySurvey.lastResponse}
                         handleSelect={memorySurvey.handleSelect}
+                        handleUndo={memorySurvey.handleUndo}
                         handleTranscriptSelect={memorySurvey.handleTranscriptSelect}
                         inputValue={inputValue}
                         setInputValue={setInputValue}
                         onRequestFeedback={handleSurveyRequestFeedback}
+                        onAbandon={memorySurvey.abandon}
                         message="How well did Claude use its memory? (optional)"
+                        memoryCitation={memorySurvey.citation}
+                        showNotSure
                       />
                     ) : (
                       <FeedbackSurvey
                         state={feedbackSurvey.state}
                         lastResponse={feedbackSurvey.lastResponse}
                         handleSelect={feedbackSurvey.handleSelect}
+                        handleUndo={feedbackSurvey.handleUndo}
                         handleTranscriptSelect={feedbackSurvey.handleTranscriptSelect}
                         inputValue={inputValue}
                         setInputValue={setInputValue}
@@ -6666,15 +7315,90 @@ export function REPL({
                       setHelpOpen={setIsHelpOpen}
                       onLeftArrowOnEmpty={
                         onOpenAgents
-                          ? () =>
+                          ? () => {
+                              // Official Fco/MVr/CAo portable: mid-turn partial from
+                              // transcript + live stream, boundary uuid, task checkpoint.
+                              const snap = messagesRef.current as Array<{
+                                type: string;
+                                uuid?: string;
+                                isMeta?: boolean;
+                                message?: {
+                                  content?: unknown;
+                                  stop_reason?: string | null;
+                                };
+                              }>;
+                              // Lazy import to keep REPL cold path light.
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              const { buildInFlightPartialText, findForkBoundaryUuid, collectPortableCheckpoint } =
+                                require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              const { getSessionCronTasks, removeSessionCronTasks } =
+                                require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
+                              const partialFromMsgs = buildInFlightPartialText(snap, isLoading ? streamingText : null);
+                              const boundaryUuid = findForkBoundaryUuid(snap);
+                              // Official CAo/fDs: detach shells + snapshot; disown after handoff.
+                              const collected = collectPortableCheckpoint({
+                                tasks: tasks as unknown as Record<
+                                  string,
+                                  import('../utils/bgCheckpoint.js').PortableTaskLike
+                                >,
+                                cron: getSessionCronTasks(),
+                              });
+                              const checkpoint = collected?.payload;
+                              // Official aAf: session allow/deny + memoryToggledOff into hcn.
+                              const allow = toolPermissionContext?.alwaysAllowRules?.session ?? [];
+                              const deny = toolPermissionContext?.alwaysDenyRules?.session ?? [];
+                              const sessionPermissionRules =
+                                allow.length > 0 || deny.length > 0
+                                  ? {
+                                      allow: [...allow],
+                                      deny: [...deny],
+                                    }
+                                  : undefined;
+                              let memoryToggledOff: boolean | undefined;
+                              try {
+                                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                const { isAutoMemoryEnabled } =
+                                  require('../memdir/paths.js') as typeof import('../memdir/paths.js');
+                                memoryToggledOff = !isAutoMemoryEnabled() ? true : undefined;
+                              } catch {
+                                memoryToggledOff = undefined;
+                              }
+                              // Official aAf: CAo stays live across Jlr write, then
+                              // checkpointAgents + disown. Local unmounts REPL first —
+                              // stash live handle for openAgentsViaLeftArrow post-write.
+                              if (collected) {
+                                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                const { stashLeftArrowCheckpointLive } =
+                                  require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
+                                stashLeftArrowCheckpointLive(collected);
+                              }
+                              // Drop session cron from this process now (module-global).
+                              // Official disown after Jlr also removes cron; task registry
+                              // remove is no-op after unmount — abort runs post-write.
+                              if (collected?.cronIds?.length) {
+                                removeSessionCronTasks(collected.cronIds);
+                              }
                               onOpenAgents({
                                 // Snapshot for official Sj4 / Vy6 seed (main → A8q).
-                                messages: messagesRef.current as Array<{
-                                  type: string;
-                                  isMeta?: boolean;
-                                  message?: { content?: unknown };
-                                }>,
-                              })
+                                messages: snap,
+                                // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
+                                via: isLoading ? 'abort-then-fork' : 'idle-fork',
+                                partialText: isLoading ? partialFromMsgs || streamingText : null,
+                                boundaryUuid,
+                                agentsCount: checkpoint?.agents?.length ?? 0,
+                                checkpoint: checkpoint
+                                  ? {
+                                      shells: checkpoint.shells,
+                                      cron: checkpoint.cron,
+                                      agents: checkpoint.agents,
+                                      workflows: checkpoint.workflows,
+                                    }
+                                  : undefined,
+                                sessionPermissionRules,
+                                memoryToggledOff,
+                              });
+                            }
                           : undefined
                       }
                       insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}
@@ -6743,7 +7467,10 @@ export function REPL({
                         defaultSystemPrompt: defaultSysPrompt,
                         appendSystemPrompt: context.options.appendSystemPrompt,
                       });
-                      const [userContext, systemContext] = await Promise.all([getUserContext(), getSystemContext()]);
+                      const [userContext, systemContext] = await Promise.all([
+                        getUserContext(),
+                        getSystemContext(context.options.cacheBreakerPhrase ?? appState.cacheBreakerPhrase),
+                      ]);
 
                       const result = await partialCompactConversation(
                         compactMessages,
@@ -6828,7 +7555,7 @@ export function REPL({
     </KeybindingSetup>
   );
   if (isFullscreenEnvEnabled()) {
-    return <AlternateScreen mouseTracking={isMouseTrackingEnabled()}>{mainReturn}</AlternateScreen>;
+    return <AlternateScreen mouseTracking={mouseTrackingProp()}>{mainReturn}</AlternateScreen>;
   }
   return mainReturn;
 }

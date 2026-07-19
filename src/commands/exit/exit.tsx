@@ -42,11 +42,20 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
     }
     if (!bgExitHandoffDisabled && canOfferBackgroundAndExit(context.messages ?? [])) {
       // Official fOo replyOnResume: isMidTurn — query loop busy (mainLoopBusy).
+      // Pass tasks for official u4d origin:"exit" adopt handoff.
+      const getTasks = () => {
+        try {
+          return context.getAppState?.()?.tasks ?? null;
+        } catch {
+          return null;
+        }
+      };
       return (
         <BackgroundAndExit
           messages={context.messages ?? []}
           isMidTurn={getMainLoopBusy()}
           onDone={msg => onDone(msg)}
+          getTasks={getTasks}
         />
       );
     }

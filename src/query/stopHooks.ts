@@ -453,8 +453,13 @@ export async function* handleStopHooks(
 
           queryDepth: toolUseContext.queryTracking?.depth,
         })
+        // densable dye: pass gzr interruptedMessageId when applicable
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { resolveInterruptedMessageId } =
+          require('../utils/abortController.js') as typeof import('../utils/abortController.js')
         yield createUserInterruptionMessage({
           toolUse: false,
+          interruptedMessageId: resolveInterruptedMessageId(toolUseContext),
         })
         return { blockingErrors: [], preventContinuation: true }
       }

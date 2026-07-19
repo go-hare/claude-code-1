@@ -75,6 +75,34 @@ export function applySettingsChange(
     const newEffort = newSettings.effortLevel
     const effortChanged = prevEffort !== newEffort
 
+    // densable Xat residual: mirror settings autoCompactWindow / briefTranscript /
+    // viewMode (J7t) into session AppState when those keys change.
+    const windowChanged =
+      prev.settings.autoCompactWindow !== newSettings.autoCompactWindow
+    const briefChanged =
+      prev.settings.briefTranscript !== newSettings.briefTranscript
+    const viewModeChanged = prev.settings.viewMode !== newSettings.viewMode
+    // densable J7t: viewMode wins when set; else brief setting or prev session.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isFocusViewActive } =
+      require('../focusView.js') as typeof import('../focusView.js')
+    const nextBriefTranscript = isFocusViewActive(
+      newSettings.viewMode,
+      briefChanged
+        ? Boolean(newSettings.briefTranscript)
+        : prev.briefTranscript,
+    )
+    if (briefChanged || viewModeChanged) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { setSessionBriefTranscript } =
+          require('../focusView.js') as typeof import('../focusView.js')
+        setSessionBriefTranscript(nextBriefTranscript)
+      } catch {
+        // ignore
+      }
+    }
+
     return {
       ...prev,
       settings: newSettings,
@@ -86,6 +114,12 @@ export function applySettingsChange(
       // be true and we'd wipe a session-scoped value held in effortValue.
       ...(effortChanged && newEffort !== undefined
         ? { effortValue: newEffort }
+        : {}),
+      ...(windowChanged
+        ? { autoCompactWindow: newSettings.autoCompactWindow }
+        : {}),
+      ...(briefChanged || viewModeChanged
+        ? { briefTranscript: nextBriefTranscript }
         : {}),
     }
   })

@@ -4,10 +4,13 @@ import type { CommandResultDisplay } from '../../commands.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { type DiffData, useDiffData } from '../../hooks/useDiffData.js';
 import { type TurnDiff, useTurnDiffs } from '../../hooks/useTurnDiffs.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useModalScrollRef } from '@anthropic/ink';
+import { useRegisterKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
+import { useSetAppState } from '../../state/AppState.js';
 import type { Message } from '../../types/message.js';
+import { registerDiffFileListNav } from '../../utils/diffFileListNav.js';
 import { plural } from '../../utils/stringUtils.js';
 import { Byline, Dialog } from '@anthropic/ink';
 import { DiffDetailView } from './DiffDetailView.js';
@@ -55,10 +58,19 @@ function turnDiffToDiffData(turn: TurnDiff): DiffData {
 export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
   const gitDiffData = useDiffData();
   const turnDiffs = useTurnDiffs(messages);
+  const setAppState = useSetAppState();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [sourceIndex, setSourceIndex] = useState<number>(0);
+
+  // densable diffPanelVisible — hold non-exempt footer notifications while open.
+  useEffect(() => {
+    setAppState(prev => (prev.diffPanelVisible ? prev : { ...prev, diffPanelVisible: true }));
+    return () => {
+      setAppState(prev => (prev.diffPanelVisible ? { ...prev, diffPanelVisible: false } : prev));
+    };
+  }, [setAppState]);
 
   const sources: DiffSource[] = useMemo(
     () => [{ type: 'current' }, ...turnDiffs.map((turn): DiffSource => ({ type: 'turn', turn }))],
@@ -97,6 +109,62 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
   // are disabled while DiffDialog is showing
   useRegisterOverlay('diff-dialog');
 
+  // densable Global app:diffFileListUp/Down (ctrl/meta+up/down) — same as
+  // diff:previousFile/nextFile while the list view is active.
+  useEffect(() => {
+    if (viewMode !== 'list') return;
+    return registerDiffFileListNav({
+      up: () => setSelectedIndex(prev => Math.max(0, prev - 1)),
+      down: () => setSelectedIndex(prev => Math.min(Math.max(0, diffData.files.length - 1), prev + 1)),
+    });
+  }, [viewMode, diffData.files.length]);
+
+  // densable: elevate DiffDialog over Global/Scroll for pager + j/k file nav.
+  useRegisterKeybindingContext('DiffDialog');
+
+  // densable _Le: modal ScrollBox for detail-mode pager (page/full/top/bottom +
+  // up/down via previousFile/nextFile when viewing a file).
+  const modalScrollRef = useModalScrollRef();
+
+  /**
+   * densable cQ — detail-only scroll. Returns false when not in detail or no
+   * scroll handle so callers can fall through (e.g. list file nav).
+   */
+  function scrollDetail(
+    action: 'up' | 'down' | 'pageUp' | 'pageDown' | 'fullPageUp' | 'fullPageDown' | 'top' | 'bottom',
+  ): false | undefined {
+    const box = modalScrollRef?.current;
+    if (viewMode !== 'detail' || !box) return false;
+    const half = Math.max(1, Math.floor(box.getViewportHeight() / 2));
+    const full = Math.max(1, box.getViewportHeight());
+    switch (action) {
+      case 'up':
+        box.scrollBy(-1);
+        break;
+      case 'down':
+        box.scrollBy(1);
+        break;
+      case 'pageUp':
+        box.scrollBy(-half);
+        break;
+      case 'pageDown':
+        box.scrollBy(half);
+        break;
+      case 'fullPageUp':
+        box.scrollBy(-full);
+        break;
+      case 'fullPageDown':
+        box.scrollBy(full);
+        break;
+      case 'top':
+        box.scrollTo(0);
+        break;
+      case 'bottom':
+        box.scrollToBottom();
+        break;
+    }
+  }
+
   // Diff dialog navigation keybindings
   // View-mode dependent: left/right arrows have different behavior based on mode
   // (source tab switching vs back navigation), and up/down/enter are
@@ -132,16 +200,25 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
           setViewMode('detail');
         }
       },
+      // densable: list = file nav; detail = line scroll (return false falls through)
       'diff:previousFile': () => {
-        if (viewMode === 'list') {
-          setSelectedIndex(prev => Math.max(0, prev - 1));
+        if (viewMode === 'detail') {
+          return scrollDetail('up');
         }
+        setSelectedIndex(prev => Math.max(0, prev - 1));
       },
       'diff:nextFile': () => {
-        if (viewMode === 'list') {
-          setSelectedIndex(prev => Math.min(diffData.files.length - 1, prev + 1));
+        if (viewMode === 'detail') {
+          return scrollDetail('down');
         }
+        setSelectedIndex(prev => Math.min(diffData.files.length - 1, prev + 1));
       },
+      'scroll:pageUp': () => scrollDetail('pageUp'),
+      'scroll:pageDown': () => scrollDetail('pageDown'),
+      'scroll:fullPageUp': () => scrollDetail('fullPageUp'),
+      'scroll:fullPageDown': () => scrollDetail('fullPageDown'),
+      'scroll:top': () => scrollDetail('top'),
+      'scroll:bottom': () => scrollDetail('bottom'),
     },
     { context: 'DiffDialog' },
   );

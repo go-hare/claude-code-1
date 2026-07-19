@@ -8,6 +8,7 @@
 
 import { extname } from 'path'
 import memoize from 'lodash-es/memoize.js'
+import snakeCase from 'lodash-es/snakeCase.js'
 import { env, getHostPlatformForAnalytics } from '../../utils/env.js'
 import { envDynamic } from '../../utils/envDynamic.js'
 import { getModelBetas } from '../../utils/betas.js'
@@ -74,6 +75,31 @@ export function sanitizeToolNameForAnalytics(
     return 'mcp_tool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
   }
   return toolName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+}
+
+/**
+ * densable SIt/Yul — feature_name for tengu_feature_{ok,bad,sad} tool events.
+ * `tool_${snakeCase(Vs(name))}` e.g. Read → tool_read, mcp__x__y → tool_mcp_tool.
+ */
+export function toolFeatureNameForAnalytics(
+  toolName: string,
+): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  const sanitized = String(sanitizeToolNameForAnalytics(toolName))
+  return `tool_${snakeCase(sanitized)}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+}
+
+/** densable Vbt — `cmd_${snakeCase(name)}` for slash-command feature events. */
+export function cmdFeatureNameForAnalytics(
+  commandName: string,
+): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  return `cmd_${snakeCase(commandName)}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+}
+
+/** densable sJe — `hook_${snakeCase(name)}` for hook feature events. */
+export function hookFeatureNameForAnalytics(
+  hookName: string,
+): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  return `hook_${snakeCase(hookName)}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
 }
 
 /**
@@ -409,6 +435,235 @@ export function getFileExtensionsFromBashCommand(
 
   if (!result) return undefined
   return result as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+}
+
+/**
+ * densable g2h — document-ish extensions harvested from free-form shell text.
+ */
+const BASH_COMMAND_DOC_EXT_RE =
+  /\.(csv|docx?|html|json|md|od[pst]|pdf|pptx?|rtf|txt|xlsx?)\b/g
+
+/**
+ * densable z5n — sorted unique document extensions mentioned in a shell command
+ * string (broader than getFileExtensionsFromBashCommand / qkc FILE_COMMANDS).
+ * Used as bashCommandFileExtensions on tool success analytics.
+ */
+export function bashCommandFileExtensionsForAnalytics(
+  command: string,
+): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS | undefined {
+  if (!command.includes('.')) {
+    return undefined
+  }
+  const found = new Set<string>()
+  for (const m of command.toLowerCase().matchAll(BASH_COMMAND_DOC_EXT_RE)) {
+    if (m[1]) {
+      found.add(m[1])
+    }
+  }
+  if (found.size === 0) {
+    return undefined
+  }
+  return [...found]
+    .sort()
+    .join(',') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+}
+
+/**
+ * densable Wkc — total serialized size of document/image blocks on
+ * tool-emitted newMessages (user/assistant content arrays).
+ */
+export function toolResultAttachmentBytesFromMessages(
+  messages:
+    | ReadonlyArray<{
+        type?: string
+        message?: { content?: unknown }
+      }>
+    | null
+    | undefined,
+): number {
+  if (!messages) {
+    return 0
+  }
+  let total = 0
+  for (const msg of messages) {
+    if (msg.type !== 'user' && msg.type !== 'assistant') {
+      continue
+    }
+    const content = msg.message?.content
+    if (!Array.isArray(content)) {
+      continue
+    }
+    for (const block of content) {
+      if (
+        block &&
+        typeof block === 'object' &&
+        'type' in block &&
+        ((block as { type: string }).type === 'document' ||
+          (block as { type: string }).type === 'image')
+      ) {
+        total += jsonStringify(block).length
+      }
+    }
+  }
+  return total
+}
+
+/**
+ * densable f2r activity labels for tengu_file_activity (local tools only).
+ * deliverChannel reserved for densable G5n deliver paths (artifact/cowork/brief)
+ * which are intentionally skipped in the local residual.
+ */
+export type FileActivityKind =
+  | 'edit'
+  | 'write'
+  | 'notebook_edit'
+  | 'bash_mention'
+
+export type FileActivityEvent = {
+  messageID: string
+  activity: FileActivityKind
+  fileExtension:
+    | AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+    | undefined
+  toolName: string
+  isNewFile: boolean | undefined
+  deliverChannel?: string | undefined
+}
+
+/**
+ * densable f2r — payload builder for tengu_file_activity.
+ * Caller supplies logEvent to avoid analytics import cycles in unit tests.
+ */
+export function fileActivityPayloadForAnalytics(event: FileActivityEvent): {
+  messageID: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  activity: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  fileExtension?: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  toolName: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  isNewFile: boolean | undefined
+  deliverChannel?: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+} {
+  return {
+    messageID:
+      event.messageID as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    activity:
+      event.activity as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    ...(event.fileExtension !== undefined && {
+      fileExtension: event.fileExtension,
+    }),
+    toolName: sanitizeToolNameForAnalytics(event.toolName),
+    isNewFile: event.isNewFile,
+    ...(event.deliverChannel != null && {
+      deliverChannel:
+        event.deliverChannel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }),
+  }
+}
+
+/**
+ * densable jkc — emit tengu_file_activity on successful tool use for local
+ * Edit/Write/NotebookEdit/Bash|PowerShell doc-ext mentions.
+ * Skips densable Artifact/cowork/brief deliver channels (G5n).
+ *
+ * @returns number of tengu_file_activity events emitted (for tests).
+ */
+export function emitFileActivityForToolSuccess(
+  log: (
+    eventName: string,
+    metadata: {
+      [key: string]:
+        | boolean
+        | number
+        | undefined
+        | AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+    },
+  ) => void,
+  toolName: string,
+  processedInput: unknown,
+  messageID: string | undefined,
+  toolNames: {
+    edit: string
+    write: string
+    notebookEdit: string
+    bash: string
+    powerShell: string
+  },
+): number {
+  if (!processedInput || typeof processedInput !== 'object') {
+    return 0
+  }
+  const input = processedInput as Record<string, unknown>
+  const mid = messageID ?? ''
+  let emitted = 0
+  const emit = (event: FileActivityEvent): void => {
+    log('tengu_file_activity', fileActivityPayloadForAnalytics(event))
+    emitted += 1
+  }
+
+  if (toolName === toolNames.edit && typeof input.file_path === 'string') {
+    emit({
+      messageID: mid,
+      activity: 'edit',
+      fileExtension: getFileExtensionForAnalytics(input.file_path),
+      toolName,
+      // densable isNewFile: n.old_string===""
+      isNewFile: input.old_string === '',
+      deliverChannel: undefined,
+    })
+    return emitted
+  }
+
+  if (toolName === toolNames.write && typeof input.file_path === 'string') {
+    emit({
+      messageID: mid,
+      activity: 'write',
+      fileExtension: getFileExtensionForAnalytics(input.file_path),
+      toolName,
+      isNewFile: undefined,
+      deliverChannel: undefined,
+    })
+    return emitted
+  }
+
+  if (
+    toolName === toolNames.notebookEdit &&
+    typeof input.notebook_path === 'string'
+  ) {
+    emit({
+      messageID: mid,
+      activity: 'notebook_edit',
+      fileExtension: getFileExtensionForAnalytics(input.notebook_path),
+      toolName,
+      isNewFile: false,
+      deliverChannel: undefined,
+    })
+    return emitted
+  }
+
+  if (
+    (toolName === toolNames.bash || toolName === toolNames.powerShell) &&
+    typeof input.command === 'string'
+  ) {
+    // densable z5n → bash_mention per extension
+    const joined = bashCommandFileExtensionsForAnalytics(input.command)
+    if (!joined) {
+      return 0
+    }
+    for (const ext of String(joined).split(',')) {
+      if (!ext) continue
+      emit({
+        messageID: mid,
+        activity: 'bash_mention',
+        fileExtension:
+          ext as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        toolName,
+        isNewFile: undefined,
+        deliverChannel: undefined,
+      })
+    }
+    return emitted
+  }
+
+  return 0
 }
 
 /**

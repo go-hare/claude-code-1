@@ -3,12 +3,15 @@ import { type Command, getCommandName } from '../../../commands.js'
 import type { SuggestionItem } from '../../../components/PromptInput/PromptInputFooterSuggestions.js'
 import {
   applyCommandSuggestion,
+  COMMAND_ARG_ID_PREFIX,
   findMidInputSlashCommand,
   formatCommand,
+  generateCommandArgumentSuggestions,
   generateCommandSuggestions,
   getBestCommandMatch,
   hasCommandArgs,
   isCommandInput,
+  isSafeCommandQueryToken,
 } from '../commandSuggestions.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -47,6 +50,23 @@ describe('isCommandInput', () => {
 
   test('returns true for just a slash', () => {
     expect(isCommandInput('/')).toBe(true)
+  })
+})
+
+// densable zxa — empty-match message only for safe command query tokens
+describe('isSafeCommandQueryToken', () => {
+  test('allows alphanumerics and command-safe punctuation', () => {
+    expect(isSafeCommandQueryToken('commit')).toBe(true)
+    expect(isSafeCommandQueryToken('plugin:foo')).toBe(true)
+    expect(isSafeCommandQueryToken('foo-bar_baz')).toBe(true)
+    expect(isSafeCommandQueryToken('a.b')).toBe(true)
+  })
+
+  test('rejects empty and tokens with spaces/specials', () => {
+    expect(isSafeCommandQueryToken('')).toBe(false)
+    expect(isSafeCommandQueryToken('foo bar')).toBe(false)
+    expect(isSafeCommandQueryToken('foo/bar')).toBe(false)
+    expect(isSafeCommandQueryToken('foo@bar')).toBe(false)
   })
 })
 
@@ -245,6 +265,123 @@ describe('applyCommandSuggestion', () => {
     )
 
     expect(submitted).toBe('/commit ')
+  })
+
+  test('densable Rer: replacement metadata applies and reSuggest when partial', () => {
+    let newInput = ''
+    let submitted = ''
+    const suggestion: SuggestionItem = {
+      id: 'command-arg-foo',
+      displayText: 'foo',
+      description: 'arg',
+      metadata: { replacement: '/plugin foo ', partial: true },
+    }
+
+    const result = applyCommandSuggestion(
+      suggestion,
+      true,
+      commands,
+      v => {
+        newInput = v
+      },
+      () => {},
+      v => {
+        submitted = v
+      },
+    )
+
+    expect(newInput).toBe('/plugin foo ')
+    expect(submitted).toBe('') // partial → no submit
+    expect(result).toEqual({ newInput: '/plugin foo ', reSuggest: true })
+  })
+
+  test('densable Rer: final replacement submits when shouldExecute', () => {
+    let submitted = ''
+    const suggestion: SuggestionItem = {
+      id: 'command-arg-bar',
+      displayText: 'bar',
+      metadata: { replacement: '/plugin bar', partial: false },
+    }
+
+    const result = applyCommandSuggestion(
+      suggestion,
+      true,
+      commands,
+      () => {},
+      () => {},
+      v => {
+        submitted = v
+      },
+    )
+
+    expect(submitted).toBe('/plugin bar')
+    expect(result?.reSuggest).toBe(false)
+  })
+})
+
+// ─── generateCommandArgumentSuggestions (densable qef) ────────────────
+
+describe('generateCommandArgumentSuggestions', () => {
+  test('maps completions to command-arg ids with partial replacement', async () => {
+    const items = await generateCommandArgumentSuggestions(
+      '/plugin ',
+      async () => [
+        { value: 'list', description: 'List installed plugins', isFinal: true },
+        { value: 'enable', description: 'Enable an installed plugin' },
+      ],
+    )
+
+    expect(items).toHaveLength(2)
+    expect(items[0]!.id).toBe(`${COMMAND_ARG_ID_PREFIX}list`)
+    expect(items[0]!.displayText).toBe('list')
+    expect(items[0]!.metadata).toEqual({
+      replacement: '/plugin list',
+      partial: false,
+    })
+    expect(items[1]!.metadata).toEqual({
+      replacement: '/plugin enable ',
+      partial: true,
+    })
+  })
+
+  test('uses completed args as prefix and respects appendSpace:false', async () => {
+    const items = await generateCommandArgumentSuggestions(
+      '/config th',
+      async (_soFar, partial) => {
+        expect(partial).toBe('th')
+        return [
+          {
+            value: 'theme=',
+            description: 'dark | light',
+            isFinal: false,
+            appendSpace: false,
+          },
+        ]
+      },
+    )
+    expect(items[0]!.metadata).toEqual({
+      replacement: '/config theme=',
+      partial: true,
+    })
+  })
+
+  test('returns empty when input has no space after command', async () => {
+    const items = await generateCommandArgumentSuggestions(
+      '/plugin',
+      async () => [{ value: 'list', isFinal: true }],
+    )
+    expect(items).toHaveLength(0)
+  })
+
+  test('treats exact partial match as final', async () => {
+    const items = await generateCommandArgumentSuggestions(
+      '/plugin list',
+      async () => [{ value: 'list', description: 'List' }],
+    )
+    expect(items[0]!.metadata).toEqual({
+      replacement: '/plugin list',
+      partial: false,
+    })
   })
 })
 

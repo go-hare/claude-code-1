@@ -52,6 +52,26 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
 }
 
 /**
+ * Whether a tool belongs to the given MCP server.
+ * Prefer mcpInfo.serverName when present (skip-prefix / SDK mode); otherwise
+ * fall back to the fully-qualified mcp__server__ prefix.
+ */
+export function toolBelongsToServer(
+  tool: {
+    name?: string
+    mcpInfo?: { serverName: string; toolName: string }
+  },
+  serverName: string,
+  prefix?: string,
+): boolean {
+  if (tool.mcpInfo?.serverName !== undefined) {
+    return tool.mcpInfo.serverName === serverName
+  }
+  const p = prefix ?? getMcpPrefix(serverName)
+  return typeof tool.name === 'string' && tool.name.startsWith(p)
+}
+
+/**
  * Returns the name to use for permission rule matching.
  * For MCP tools, uses the fully qualified mcp__server__tool name so that
  * deny rules targeting builtins (e.g., "Write") don't match unprefixed MCP

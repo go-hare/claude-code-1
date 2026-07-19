@@ -61,8 +61,8 @@ export function BaseTextInput({
   useFocusReclaim(nodeRef, isActive);
 
   // Official densable rfo wrap before d7r:
-  //   if (onKeyDownBefore?.(B), B.defaultPrevented || B.didStopImmediatePropagation()) return
-  //   inputState.handleKeyDown(B)
+  //   handleKeyDown:(W)=>{if(s.onKeyDownBefore?.(W),W.defaultPrevented||
+  //     W.didStopImmediatePropagation())return;a(W)}
   // Fork maps KeyboardEvent → onInput(input, Key) (legacy mapKey) instead of
   // native inputState.handleKeyDown — functional parity for insert/nav/ctrl.
   const baseHandleKeyDown = React.useCallback(
@@ -95,10 +95,22 @@ export function BaseTextInput({
     [onInput],
   );
 
-  // Official densable d7r
+  // Official: onKeyDownBefore → short-circuit → inner handleKeyDown (a), then
+  // that whole function is wrapped by d7r/UZr paste handler as onKeyDown.
+  const { onKeyDownBefore } = props;
+  const handleKeyDownWithBefore = React.useCallback(
+    (event: KeyboardEvent) => {
+      onKeyDownBefore?.(event);
+      if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
+      baseHandleKeyDown(event);
+    },
+    [onKeyDownBefore, baseHandleKeyDown],
+  );
+
+  // Official densable d7r / UZr
   const { handleKeyDown, handlePaste, isPasting } = usePasteHandler({
     onPaste: props.onPaste,
-    handleKeyDown: baseHandleKeyDown,
+    handleKeyDown: handleKeyDownWithBefore,
     onImagePaste: props.onImagePaste,
   });
 

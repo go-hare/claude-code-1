@@ -6,7 +6,7 @@ import type { Command } from '../../commands.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { Box, Text, stringWidth, useTheme } from '@anthropic/ink';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
-import { findToolByName, type Tool, type ToolProgressData, type Tools } from '../../Tool.js';
+import { findToolByName, safeParseToolInput, type Tool, type ToolProgressData, type Tools } from '../../Tool.js';
 import type { ProgressMessage } from '../../types/message.js';
 import { useIsClassifierChecking } from '../../utils/classifierApprovalsHook.js';
 import { logError } from '../../utils/log.js';
@@ -73,7 +73,9 @@ export function AssistantToolUseMessage({
     if (!tools) return null;
     const tool = findToolByName(tools, param.name);
     if (!tool) return null;
-    const input = tool.inputSchema.safeParse(param.input);
+    // densable Qae — coerce aliases before Zod so userFacingName/render see
+    // canonical shapes (timeout_ms→timeout, path→file_path, etc.).
+    const input = safeParseToolInput(tool, param.input);
     const data = input.success ? input.data : undefined;
     return {
       tool,
@@ -207,7 +209,8 @@ function renderToolUseMessage(
   { theme, verbose, commands }: { theme: ThemeName; verbose: boolean; commands: Command[] },
 ): React.ReactNode {
   try {
-    const parsed = tool.inputSchema.safeParse(input);
+    // densable Qae
+    const parsed = safeParseToolInput(tool, input);
     if (!parsed.success) {
       return '';
     }

@@ -1,5 +1,5 @@
 import type * as React from 'react';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useAppStateStore, useSetAppState } from '../state/AppState.js';
 import type { Theme } from '../utils/theme.js';
 
@@ -22,6 +22,72 @@ type BaseNotification = {
    * Returns the merged notification (should carry fold forward for future merges).
    */
   fold?: (accumulator: Notification, incoming: Notification) => Notification;
+  /**
+   * densable ylr / token-warning: still render while DiffPanel is open.
+   */
+  exemptFromDiffPanelHold?: boolean;
+  /**
+   * densable heldDuringDiffPanel: immediate was deferred because DiffPanel was
+   * open; when promoted after hold, the flag is cleared.
+   */
+  heldDuringDiffPanel?: boolean;
+  /**
+   * densable mks/requeueOnPreempt: allow an immediate notification to be
+   * re-queued when preempted by another immediate (or held immediate).
+   */
+  requeueOnPreempt?: boolean;
+  /**
+   * densable pinned: sticky notice outside the transient queue (e.g.
+   * launch-prompt-warning). Not subject to DiffPanel hold or timeouts.
+   */
+  pinned?: boolean;
+  /**
+   * densable kind: metadata for producers (warning/hint/event/feedback).
+   * Not used by queue/filter logic; optional for densable parity.
+   */
+  kind?: 'warning' | 'hint' | 'event' | 'feedback';
+};
+
+/** densable notifications state shape (current + queue + pinned). */
+export type NotificationsState = {
+  current: Notification | null;
+  queue: Notification[];
+  pinned: Notification[];
+};
+
+/**
+ * densable glr: remove a key from current / queue / pinned.
+ * Returns the same object when nothing matched.
+ */
+export function removeNotificationFromState(
+  state: NotificationsState,
+  key: string,
+): NotificationsState {
+  const isCurrent = state.current?.key === key;
+  const inQueue = state.queue.some(n => n.key === key);
+  const inPinned = state.pinned.some(n => n.key === key);
+  if (!isCurrent && !inQueue && !inPinned) return state;
+  return {
+    current: isCurrent ? null : state.current,
+    queue: state.queue.filter(n => n.key !== key),
+    pinned: inPinned ? state.pinned.filter(n => n.key !== key) : state.pinned,
+  };
+}
+
+/** densable D0b: higher priority first for pinned list sort. */
+export function compareNotificationPriority(
+  a: Notification,
+  b: Notification,
+): number {
+  return PRIORITIES[a.priority] - PRIORITIES[b.priority];
+}
+
+// PRIORITIES forward-declared via const below — hoist rank table for helpers.
+const PRIORITIES: Record<Priority, number> = {
+  immediate: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
 };
 
 type TextNotification = BaseNotification & {
@@ -35,6 +101,7 @@ type JSXNotification = BaseNotification & {
 
 type AddNotificationFn = (content: Notification) => void;
 type RemoveNotificationFn = (key: string) => void;
+type ProcessQueueFn = () => void;
 
 export type Notification = TextNotification | JSXNotification;
 
@@ -43,50 +110,129 @@ const DEFAULT_TIMEOUT_MS = 8000;
 // Track current timeout to clear it when immediate notifications arrive
 let currentTimeoutId: NodeJS.Timeout | null = null;
 
+/**
+ * densable ylr: whether a current notification should paint while DiffPanel
+ * may be holding the footer.
+ */
+export function isNotificationVisibleDuringDiffPanel(current: Notification | null, diffPanelVisible: boolean): boolean {
+  return current !== null && (!diffPanelVisible || current.exemptFromDiffPanelHold === true);
+}
+
+/**
+ * densable mks: keep existing entry when preempted (unless invalidated).
+ * Immediate entries requeue only with requeueOnPreempt or heldDuringDiffPanel.
+ */
+export function shouldRequeueOnPreempt(existing: Notification, incoming: Notification): boolean {
+  return (
+    (existing.priority !== 'immediate' ||
+      existing.requeueOnPreempt === true ||
+      existing.heldDuringDiffPanel === true) &&
+    !incoming.invalidates?.includes(existing.key)
+  );
+}
+
+/** densable processQueue candidate set when DiffPanel is open. */
+export function queueForDiffPanel(queue: Notification[], diffPanelVisible: boolean): Notification[] {
+  if (!diffPanelVisible) return queue;
+  return queue.filter(n => n.exemptFromDiffPanelHold === true);
+}
+
+function scheduleClearCurrent(
+  setAppState: ReturnType<typeof useSetAppState>,
+  key: string,
+  processQueue: ProcessQueueFn,
+  timeoutMs: number | undefined,
+  /** densable immediate-path timeout also drops invalidated queue keys. */
+  invalidates?: string[],
+): void {
+  currentTimeoutId = setTimeout(
+    (setAppStateArg, nextKey, processQueueArg, invalidateKeys: string[] | undefined) => {
+      currentTimeoutId = null;
+      setAppStateArg(prev => {
+        if (prev.notifications.current?.key !== nextKey) {
+          return prev;
+        }
+        const nextQueue =
+          invalidateKeys && invalidateKeys.length > 0
+            ? prev.notifications.queue.filter(n => !invalidateKeys.includes(n.key))
+            : prev.notifications.queue;
+        return {
+          ...prev,
+          notifications: {
+            ...prev.notifications,
+            queue: nextQueue,
+            current: null,
+          },
+        };
+      });
+      processQueueArg();
+    },
+    timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    setAppState,
+    key,
+    processQueue,
+    invalidates,
+  );
+}
+
 export function useNotifications(): {
   addNotification: AddNotificationFn;
   removeNotification: RemoveNotificationFn;
+  processQueue: ProcessQueueFn;
 } {
   const store = useAppStateStore();
   const setAppState = useSetAppState();
+  const prevDiffPanelVisible = useRef(store.getState().diffPanelVisible);
 
   // Process queue when current notification finishes or queue changes
   const processQueue = useCallback(() => {
     setAppState(prev => {
-      const next = getNext(prev.notifications.queue);
-      if (prev.notifications.current !== null || !next) {
+      const candidates = queueForDiffPanel(prev.notifications.queue, prev.diffPanelVisible);
+      const next = getNext(candidates);
+      if (!next) {
         return prev;
       }
 
-      currentTimeoutId = setTimeout(
-        (setAppState, nextKey, processQueue) => {
-          currentTimeoutId = null;
-          setAppState(prev => {
-            // Compare by key instead of reference to handle re-created notifications
-            if (prev.notifications.current?.key !== nextKey) {
-              return prev;
-            }
-            return {
-              ...prev,
-              notifications: {
-                queue: prev.notifications.queue,
-                current: null,
-              },
-            };
-          });
-          processQueue();
-        },
-        next.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      // densable: only preempt a non-immediate current with a held immediate
+      const requeuedCurrent =
+        prev.notifications.current !== null &&
+        next.priority === 'immediate' &&
+        next.heldDuringDiffPanel === true &&
+        prev.notifications.current.priority !== 'immediate'
+          ? prev.notifications.current
+          : null;
+      if (prev.notifications.current !== null && requeuedCurrent === null) {
+        return prev;
+      }
+
+      if (currentTimeoutId) {
+        clearTimeout(currentTimeoutId);
+        currentTimeoutId = null;
+      }
+
+      const nextKey = next.key;
+      scheduleClearCurrent(
         setAppState,
-        next.key,
+        nextKey,
         processQueue,
+        next.timeoutMs,
+        next.invalidates,
       );
+
+      const restQueue = prev.notifications.queue.filter(_ => _ !== next);
+      const withRequeued =
+        requeuedCurrent !== null && shouldRequeueOnPreempt(requeuedCurrent, next)
+          ? [requeuedCurrent, ...restQueue]
+          : restQueue;
+
+      const current: Notification = next.heldDuringDiffPanel ? { ...next, heldDuringDiffPanel: undefined } : next;
 
       return {
         ...prev,
         notifications: {
-          queue: prev.notifications.queue.filter(_ => _ !== next),
-          current: next,
+          ...prev.notifications,
+          queue: withRequeued,
+          current,
         },
       };
     });
@@ -94,107 +240,106 @@ export function useNotifications(): {
 
   const addNotification = useCallback<AddNotificationFn>(
     (notif: Notification) => {
-      // Handle immediate priority notifications
-      if (notif.priority === 'immediate') {
-        // Clear any existing timeout since we're showing a new immediate notification
+      // densable: pinned notices go to sticky list (no timeout / DiffPanel hold).
+      // Same-key re-add replaces content so producers (Pqo) can refresh jsx
+      // when launchWarning length/type changes without clearing first.
+      if (notif.pinned) {
+        setAppState(prev => {
+          const pinned = prev.notifications.pinned ?? [];
+          const idx = pinned.findIndex(n => n.key === notif.key);
+          if (idx !== -1) {
+            if (pinned[idx] === notif) return prev;
+            const nextPinned = [...pinned];
+            nextPinned[idx] = notif;
+            return {
+              ...prev,
+              notifications: {
+                ...prev.notifications,
+                pinned: nextPinned,
+              },
+            };
+          }
+          return {
+            ...prev,
+            notifications: {
+              ...prev.notifications,
+              pinned: [...pinned, notif],
+            },
+          };
+        });
+        return;
+      }
+
+      const diffPanelVisible = store.getState().diffPanelVisible;
+
+      // densable: immediate only paints immediately when DiffPanel is closed.
+      // While open, mark heldDuringDiffPanel and fall through to queue path.
+      if (notif.priority === 'immediate' && !diffPanelVisible) {
         if (currentTimeoutId) {
           clearTimeout(currentTimeoutId);
           currentTimeoutId = null;
         }
 
-        // Set up timeout for the immediate notification
-        currentTimeoutId = setTimeout(
-          (setAppState, notif, processQueue) => {
-            currentTimeoutId = null;
-            setAppState(prev => {
-              // Compare by key instead of reference to handle re-created notifications
-              if (prev.notifications.current?.key !== notif.key) {
-                return prev;
-              }
-              return {
-                ...prev,
-                notifications: {
-                  queue: prev.notifications.queue.filter(_ => !notif.invalidates?.includes(_.key)),
-                  current: null,
-                },
-              };
-            });
-            processQueue();
-          },
-          notif.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        // densable: immediate timeout filters invalidates from queue on clear
+        scheduleClearCurrent(
           setAppState,
-          notif,
+          notif.key,
           processQueue,
+          notif.timeoutMs,
+          notif.invalidates,
         );
 
-        // Show the immediate notification right away
         setAppState(prev => ({
           ...prev,
           notifications: {
+            ...prev.notifications,
             current: notif,
-            queue:
-              // Only re-queue the current notification if it's not immediate
-              [...(prev.notifications.current ? [prev.notifications.current] : []), ...prev.notifications.queue].filter(
-                _ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key),
-              ),
+            queue: [
+              ...(prev.notifications.current ? [prev.notifications.current] : []),
+              ...prev.notifications.queue,
+            ].filter(_ => shouldRequeueOnPreempt(_, notif)),
           },
         }));
-        return; // IMPORTANT: Exit addNotification for immediate notifications
+        return;
       }
 
-      // Handle non-immediate notifications
+      const enqueued: Notification = notif.priority === 'immediate' ? { ...notif, heldDuringDiffPanel: true } : notif;
+
       setAppState(prev => {
-        // Check if we can fold into an existing notification with the same key
-        if (notif.fold) {
-          // Fold into current notification if keys match
-          if (prev.notifications.current?.key === notif.key) {
-            const folded = notif.fold(prev.notifications.current, notif);
-            // Reset timeout for the folded notification
+        if (enqueued.fold) {
+          if (prev.notifications.current?.key === enqueued.key) {
+            const folded = enqueued.fold(prev.notifications.current, enqueued);
             if (currentTimeoutId) {
               clearTimeout(currentTimeoutId);
               currentTimeoutId = null;
             }
-            currentTimeoutId = setTimeout(
-              (setAppState, foldedKey, processQueue) => {
-                currentTimeoutId = null;
-                setAppState(p => {
-                  if (p.notifications.current?.key !== foldedKey) {
-                    return p;
-                  }
-                  return {
-                    ...p,
-                    notifications: {
-                      queue: p.notifications.queue,
-                      current: null,
-                    },
-                  };
-                });
-                processQueue();
-              },
-              folded.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            scheduleClearCurrent(
               setAppState,
               folded.key,
               processQueue,
+              folded.timeoutMs,
+              folded.invalidates,
             );
 
             return {
               ...prev,
               notifications: {
+                ...prev.notifications,
                 current: folded,
                 queue: prev.notifications.queue,
               },
             };
           }
 
-          // Fold into queued notification if keys match
-          const queueIdx = prev.notifications.queue.findIndex(_ => _.key === notif.key);
+          const queueIdx = prev.notifications.queue.findIndex(_ => _.key === enqueued.key);
           if (queueIdx !== -1) {
-            const folded = notif.fold(prev.notifications.queue[queueIdx]!, notif);
+            const folded = enqueued.fold(prev.notifications.queue[queueIdx]!, enqueued);
             const newQueue = [...prev.notifications.queue];
             newQueue[queueIdx] = folded;
             return {
               ...prev,
               notifications: {
+                ...prev.notifications,
                 current: prev.notifications.current,
                 queue: newQueue,
               },
@@ -202,14 +347,13 @@ export function useNotifications(): {
           }
         }
 
-        // Only add to queue if not already present (prevent duplicates)
         const queuedKeys = new Set(prev.notifications.queue.map(_ => _.key));
-        const shouldAdd = !queuedKeys.has(notif.key) && prev.notifications.current?.key !== notif.key;
+        const shouldAdd = !queuedKeys.has(enqueued.key) && prev.notifications.current?.key !== enqueued.key;
 
         if (!shouldAdd) return prev;
 
         const invalidatesCurrent =
-          prev.notifications.current !== null && notif.invalidates?.includes(prev.notifications.current.key);
+          prev.notifications.current !== null && enqueued.invalidates?.includes(prev.notifications.current.key);
 
         if (invalidatesCurrent && currentTimeoutId) {
           clearTimeout(currentTimeoutId);
@@ -219,44 +363,45 @@ export function useNotifications(): {
         return {
           ...prev,
           notifications: {
+            ...prev.notifications,
             current: invalidatesCurrent ? null : prev.notifications.current,
-            queue: [
-              ...prev.notifications.queue.filter(
-                _ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key),
-              ),
-              notif,
-            ],
+            queue: [...prev.notifications.queue.filter(_ => shouldRequeueOnPreempt(_, enqueued)), enqueued],
           },
         };
       });
 
-      // Process queue after adding the notification
       processQueue();
     },
-    [setAppState, processQueue],
+    [setAppState, processQueue, store],
   );
 
   const removeNotification = useCallback<RemoveNotificationFn>(
     (key: string) => {
       setAppState(prev => {
-        const isCurrent = prev.notifications.current?.key === key;
-        const inQueue = prev.notifications.queue.some(n => n.key === key);
-
-        if (!isCurrent && !inQueue) {
+        const next = removeNotificationFromState(
+          {
+            current: prev.notifications.current,
+            queue: prev.notifications.queue,
+            pinned: prev.notifications.pinned ?? [],
+          },
+          key,
+        );
+        if (
+          next.current === prev.notifications.current &&
+          next.queue === prev.notifications.queue &&
+          next.pinned === (prev.notifications.pinned ?? [])
+        ) {
           return prev;
         }
 
-        if (isCurrent && currentTimeoutId) {
+        if (prev.notifications.current?.key === key && currentTimeoutId) {
           clearTimeout(currentTimeoutId);
           currentTimeoutId = null;
         }
 
         return {
           ...prev,
-          notifications: {
-            current: isCurrent ? null : prev.notifications.current,
-            queue: prev.notifications.queue.filter(n => n.key !== key),
-          },
+          notifications: next,
         };
       });
 
@@ -275,15 +420,22 @@ export function useNotifications(): {
     }
   }, []);
 
-  return { addNotification, removeNotification };
+  // densable: when DiffPanel closes, drain held non-exempt notifications.
+  useEffect(() => {
+    prevDiffPanelVisible.current = store.getState().diffPanelVisible;
+    return store.subscribe(() => {
+      const visible = store.getState().diffPanelVisible;
+      const wasVisible = prevDiffPanelVisible.current;
+      prevDiffPanelVisible.current = visible;
+      if (wasVisible && !visible) {
+        processQueue();
+      }
+    });
+  }, [store, processQueue]);
+
+  return { addNotification, removeNotification, processQueue };
 }
 
-const PRIORITIES: Record<Priority, number> = {
-  immediate: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-};
 export function getNext(queue: Notification[]): Notification | undefined {
   if (queue.length === 0) return undefined;
   return queue.reduce((min, n) => (PRIORITIES[n.priority] < PRIORITIES[min.priority] ? n : min));

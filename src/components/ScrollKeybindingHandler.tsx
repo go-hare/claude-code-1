@@ -1,11 +1,11 @@
-import React, { type RefObject, useEffect, useRef } from 'react';
+import React, { type RefObject, useCallback, useEffect, useRef } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
 import type { ScrollBoxHandle, FocusMove, SelectionState } from '@anthropic/ink';
 import {
   useSelection,
   type Key,
-  useInput,
+  usePreDispatch,
   isXtermJs,
   getXtversionName,
   getClipboardPath,
@@ -14,9 +14,16 @@ import {
   consumeJediTermArrowBurstCount,
   useStdin,
 } from '@anthropic/ink';
+import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logForDebugging } from '../utils/debug.js';
 import { resolveScrollSpeedBase } from '../utils/residualUiEnvGates.js';
+import {
+  recordPageJump,
+  recordReachedScrollbackCap,
+  recordScroll,
+  recordStickyState,
+} from '../utils/scrollTelemetry.js';
 
 type Props = {
   scrollRef: RefObject<ScrollBoxHandle | null>;
@@ -24,12 +31,10 @@ type Props = {
   /** Called after every scroll action with the resulting sticky state and
    *  the handle (for reading scrollTop/scrollHeight post-scroll). */
   onScroll?: (sticky: boolean, handle: ScrollBoxHandle) => void;
-  /** Enables modal pager keys (g/G, ctrl+u/d/b/f). Only safe when there
-   *  is no text input competing for those characters — i.e. transcript
-   *  mode. Defaults to false. When true, G works regardless of editorMode
-   *  and sticky state; ctrl+u/d/b/f don't conflict with kill-line/exit/
-   *  task:background/kill-agents (none are mounted, or they mount after
-   *  this component so stopImmediatePropagation wins). */
+  /** densable: when true, register Transcript-context pager handlers
+   *  (ctrl+u/d/b/f, g/G, j/k, space/b, arrows, home/end). Only safe when
+   *  there is no text input competing — i.e. virtual-scroll transcript
+   *  with search closed. Defaults to false. */
   isModal?: boolean;
 };
 
@@ -111,6 +116,20 @@ export function selectionFocusMoveForKey(key: Key): FocusMove | null {
   if (key.home) return 'lineStart';
   if (key.end) return 'lineEnd';
   return null;
+}
+
+/**
+ * densable bnt — both anchor and focus have virtual rows overshooting the same
+ * viewport edge (e.g. after a large jump). Extending further is a no-op.
+ */
+export function isBothEndsVirtualOvershoot(state: SelectionState): boolean {
+  if (!state.anchor || !state.focus || state.virtualAnchorRow === undefined || state.virtualFocusRow === undefined) {
+    return false;
+  }
+  return (
+    (state.virtualAnchorRow < state.anchor.row && state.virtualFocusRow < state.focus.row) ||
+    (state.virtualAnchorRow > state.anchor.row && state.virtualFocusRow > state.focus.row)
+  );
 }
 
 export type WheelAccelState = {
@@ -445,6 +464,29 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
   const wheelAccel = useRef<WheelAccelState | null>(null);
   const wheelProfileRef = useRef<WheelProfile | null>(null);
 
+  // Official g gate: only count when an onScroll listener is mounted
+  // (fullscreen / transcript chrome path). Headless / non-scroll hosts skip.
+  const trackTelemetry = onScroll != null;
+  // Stable wrapper so we can both record sticky dwell time (ALi densable)
+  // and forward to the caller's onScroll without identity thrash.
+  const onScrollRef = useRef(onScroll);
+  onScrollRef.current = onScroll;
+  const notifyScroll = useCallback(
+    (sticky: boolean, handle: ScrollBoxHandle) => {
+      if (trackTelemetry) recordStickyState(sticky);
+      onScrollRef.current?.(sticky, handle);
+    },
+    [trackTelemetry],
+  );
+
+  // When the handler unmounts, stop the unpinned clock (official cleanup ALi(true)).
+  useEffect(() => {
+    if (!trackTelemetry) return;
+    return () => {
+      recordStickyState(true);
+    };
+  }, [trackTelemetry]);
+
   // Official VSp densable — arrow-burst / jediterm-scroll-bug toasts.
   useEffect(() => {
     if (!internal_eventEmitter) return;
@@ -589,18 +631,20 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
       'scroll:pageUp': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
       'scroll:pageDown': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
       'scroll:lineUp': () => {
         // Wheel: scrollBy accumulates into pendingScrollDelta, drained async
@@ -613,25 +657,29 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
         // the wheel event instead (e.g. Settings Config's list navigation
         // inside the centered Modal, where the paginated slice always fits).
         if (!s || s.getScrollHeight() <= s.getViewportHeight()) return false;
+        if (trackTelemetry) recordScroll();
         const accel = ensureWheelAccel();
-        scrollUp(s, computeWheelStep(accel, -1, performance.now()));
-        onScroll?.(false, s);
+        scrollUp(s, computeWheelStep(accel, -1, performance.now()), trackTelemetry);
+        notifyScroll(false, s);
       },
       'scroll:lineDown': () => {
         selection.clearSelection();
         const s = scrollRef.current;
         if (!s || s.getScrollHeight() <= s.getViewportHeight()) return false;
+        if (trackTelemetry) recordScroll();
         const accel = ensureWheelAccel();
         const step = computeWheelStep(accel, 1, performance.now());
         const reachedBottom = scrollDown(s, step);
-        onScroll?.(reachedBottom, s);
+        notifyScroll(reachedBottom, s);
       },
       'scroll:top': () => {
         const s = scrollRef.current;
         if (!s) return;
+        // Official p2r densable: top jump marks scrollback cap reached.
+        if (trackTelemetry) recordReachedScrollbackCap();
         translateSelectionForJump(s, -(s.getScrollTop() + s.getPendingDelta()));
         s.scrollTo(0);
-        onScroll?.(false, s);
+        notifyScroll(false, s);
       },
       'scroll:bottom': () => {
         const s = scrollRef.current;
@@ -645,121 +693,154 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
         // above, 2× offset. scrollToBottom() then re-enables sticky.
         s.scrollTo(max);
         s.scrollToBottom();
-        onScroll?.(true, s);
+        notifyScroll(true, s);
       },
       'selection:copy': copyAndToast,
+      'selection:clear': () => {
+        selection.clearSelection();
+      },
+      // densable selection:extend* — rebindable keyboard extension. When a
+      // selection exists, also covered by usePreDispatch (shift+nav). Edge
+      // scroll on up/down at viewport boundary matches densable `_` helper.
+      'selection:extendLeft': () => extendSelectionFocus('left'),
+      'selection:extendRight': () => extendSelectionFocus('right'),
+      'selection:extendUp': () => extendSelectionFocus('up'),
+      'selection:extendDown': () => extendSelectionFocus('down'),
+      'selection:extendLineStart': () => extendSelectionFocus('lineStart'),
+      'selection:extendLineEnd': () => extendSelectionFocus('lineEnd'),
     },
     { context: 'Scroll', isActive },
   );
 
-  // scroll:halfPage*/fullPage* have no default key bindings — ctrl+u/d/b/f
-  // all have real owners in normal mode (kill-line/exit/task:background/
-  // kill-agents). Transcript mode gets them via the isModal raw useInput
-  // below. These handlers stay for custom rebinds only.
+  /**
+   * densable `_` — move selection focus; on up/down at viewport edge with
+   * room to scroll, scroll one row and keep focus pinned to the edge.
+   * Returns false when there is no selection so the binding does not swallow
+   * the keystroke for unrelated handlers.
+   */
+  /**
+   * densable `_` — move selection focus; on up/down at viewport edge with
+   * room to scroll, scroll one row and keep focus pinned to the edge.
+   * Returns false when there is no selection so the binding does not swallow
+   * the keystroke for unrelated handlers.
+   *
+   * densable also gates edge-scroll with PQs(state, scrollBox) via selection
+   * scope + virtualFocusCol; those fields are not on SelectionState yet —
+   * edge-scroll runs for any active selection on this ScrollBox (PQs true
+   * when scope unset).
+   */
+  function extendSelectionFocus(move: FocusMove): false | undefined {
+    if (!selection.hasSelection()) return false;
+    const state = selection.getState();
+    // densable bnt: both ends overshooting the same edge — no-op extend
+    if (state && isBothEndsVirtualOvershoot(state)) return;
+    if (move === 'up' || move === 'down') {
+      const box = scrollRef.current;
+      if (box && state?.anchor && state.focus) {
+        const top = box.getViewportTop();
+        const bottom = top + box.getViewportHeight() - 1;
+        const anchorInView = state.anchor.row >= top && state.anchor.row <= bottom;
+        const atTopEdge = anchorInView && move === 'up' && state.focus.row <= top;
+        const atBottomEdge = anchorInView && move === 'down' && state.focus.row >= bottom;
+        if (atTopEdge || atBottomEdge) {
+          const max = Math.max(0, box.getScrollHeight() - box.getViewportHeight());
+          const canScroll = atTopEdge ? box.getScrollTop() > 0 : box.getScrollTop() < max;
+          if (box.getPendingDelta() === 0 && canScroll) {
+            // densable: pin focus to edge, set virtual focus one row outside, scroll
+            state.focus = {
+              col: state.focus.col,
+              row: atTopEdge ? top : bottom,
+            };
+            state.virtualFocusRow = atTopEdge ? top - 1 : bottom + 1;
+            box.scrollBy(atTopEdge ? -1 : 1);
+            notifyScroll(false, box);
+            return;
+          }
+        }
+      }
+    }
+    selection.moveFocus(move);
+  }
+
+  // densable FQs: half/full page stay registered on Scroll for user rebinds
+  // (no default Scroll keys — ctrl+u/d/b/f own Chat/Task owners). Transcript
+  // context binds the less/tmux pager map (ctrl+u/d/b/f, g/G, j/k, space/b,
+  // arrows, home/end) and isActive only when isModal (virtual-scroll
+  // transcript / search-closed). Shared y() path mirrors densable FM_.
+  //
+  // Activate Transcript in activeContexts so ChordInterceptor singleKey
+  // resolve([...active, ctx, Global]) last-wins Transcript over Global
+  // app:exit on ctrl+d (and app:interrupt on ctrl+c for transcript:exit).
+  useRegisterKeybindingContext('Transcript', isActive && isModal);
+
+  function runModalPager(act: ModalPagerAction): void {
+    const s = scrollRef.current;
+    if (!s) return;
+    if (trackTelemetry) {
+      if (act === 'lineUp' || act === 'lineDown') recordScroll();
+      else if (act === 'top') recordReachedScrollbackCap();
+      else if (act !== 'bottom') recordPageJump();
+    }
+    const sticky = applyModalPagerAction(s, act, d => translateSelectionForJump(s, d), trackTelemetry);
+    if (sticky === null) return;
+    notifyScroll(sticky, s);
+  }
+
   useKeybindings(
     {
-      'scroll:halfPageUp': () => {
-        const s = scrollRef.current;
-        if (!s) return;
-        const d = -Math.max(1, Math.floor(s.getViewportHeight() / 2));
-        translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
-      },
-      'scroll:halfPageDown': () => {
-        const s = scrollRef.current;
-        if (!s) return;
-        const d = Math.max(1, Math.floor(s.getViewportHeight() / 2));
-        translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
-      },
-      'scroll:fullPageUp': () => {
-        const s = scrollRef.current;
-        if (!s) return;
-        const d = -Math.max(1, s.getViewportHeight());
-        translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
-      },
-      'scroll:fullPageDown': () => {
-        const s = scrollRef.current;
-        if (!s) return;
-        const d = Math.max(1, s.getViewportHeight());
-        translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
-      },
+      'scroll:halfPageUp': () => runModalPager('halfPageUp'),
+      'scroll:halfPageDown': () => runModalPager('halfPageDown'),
+      'scroll:fullPageUp': () => runModalPager('fullPageUp'),
+      'scroll:fullPageDown': () => runModalPager('fullPageDown'),
     },
     { context: 'Scroll', isActive },
   );
 
-  // Modal pager keys — transcript mode only. less/tmux copy-mode lineage:
-  // ctrl+u/d (half-page), ctrl+b/f (full-page), g/G (top/bottom). Tom's
-  // resolution (2026-03-15): "In ctrl-o mode, ctrl-u, ctrl-d, etc. should
-  // roughly just work!" — transcript is the copy-mode container.
-  //
-  // Safe because the conflicting handlers aren't reachable here:
-  //   ctrl+u → kill-line, ctrl+d → exit: PromptInput not mounted
-  //   ctrl+b → task:background: SessionBackgroundHint not mounted
-  //   ctrl+f → chat:killAgents moved to ctrl+x ctrl+k; no conflict
-  //   g/G → printable chars: no prompt to eat them, no vim/sticky gate needed
-  //
-  // TODO(search): `/`, n/N — build on Richard Kim's d94b07add4 (branch
-  // claude/jump-recent-message-CEPcq). getItemY Yoga-walk + computeOrigin +
-  // anchorY already solve scroll-to-index. jumpToPrevTurn is the n/N
-  // template. Single-shot via OVERSCAN_ROWS=80; two-phase was tried and
-  // abandoned (❯ oscillation). See team memory scroll-copy-mode-design.md.
-  useInput(
-    (input, key, event) => {
-      const s = scrollRef.current;
-      if (!s) return;
-      const sticky = applyModalPagerAction(s, modalPagerAction(input, key), d => translateSelectionForJump(s, d));
-      if (sticky === null) return;
-      onScroll?.(sticky, s);
-      event.stopImmediatePropagation();
+  // densable: same actions on Transcript so defaultBindings map
+  // (ctrl+u → halfPageUp, j/k, g/G, space/b, …) resolves while modal.
+  useKeybindings(
+    {
+      'scroll:lineUp': () => runModalPager('lineUp'),
+      'scroll:lineDown': () => runModalPager('lineDown'),
+      'scroll:halfPageUp': () => runModalPager('halfPageUp'),
+      'scroll:halfPageDown': () => runModalPager('halfPageDown'),
+      'scroll:fullPageUp': () => runModalPager('fullPageUp'),
+      'scroll:fullPageDown': () => runModalPager('fullPageDown'),
+      'scroll:top': () => runModalPager('top'),
+      'scroll:bottom': () => runModalPager('bottom'),
     },
-    { isActive: isActive && isModal },
+    { context: 'Transcript', isActive: isActive && isModal },
   );
 
-  // Esc clears selection; any other keystroke also clears it (matches
-  // native terminal behavior where selection disappears on input).
-  // Ctrl+C copies when a selection exists — needed on legacy terminals
-  // where ctrl+shift+c sends the same byte (\x03, shift is lost) and
-  // cmd+c never reaches the pty (terminal intercepts it for Edit > Copy).
-  // Handled via raw useInput so we can conditionally consume: Esc/Ctrl+C
-  // only stop propagation when a selection exists, letting them still work
-  // for cancel-request / interrupt otherwise. Other keys never stop
-  // propagation — they're observed to clear selection as a side-effect.
-  // The selection:copy keybinding (ctrl+shift+c / cmd+c) registers above
-  // via useKeybindings and consumes its event before reaching here.
-  useInput(
-    (input, key, event) => {
+  // densable Q0t selection path: Esc clears, Ctrl+C copies when a selection
+  // exists — runs as ChordInterceptor preDispatch (after chord, before
+  // singleKey) so bare ctrl+c doesn't race chat:cancel / interrupt when a
+  // selection is active. Conditionally consume: Esc/Ctrl+C only stop when
+  // selection exists. densable does NOT extend via preDispatch — shift+nav
+  // goes through Scroll selection:extend* bindings (`_` / extendSelectionFocus)
+  // so edge-scroll + bnt apply. Other keys never stop — clear as a side-effect.
+  // selection:copy (ctrl+shift+c / cmd+c) still registers via useKeybindings.
+  usePreDispatch(
+    (input, key) => {
       if (!selection.hasSelection()) return;
       if (key.escape) {
         selection.clearSelection();
-        event.stopImmediatePropagation();
-        return;
+        return true;
       }
       if (key.ctrl && !key.shift && !key.meta && input === 'c') {
         copyAndToast();
-        event.stopImmediatePropagation();
-        return;
+        return true;
       }
-      const move = selectionFocusMoveForKey(key);
-      if (move) {
-        selection.moveFocus(move);
-        event.stopImmediatePropagation();
-        return;
-      }
+      // densable: shift/meta/super nav is not cleared (sCp); extend bindings own it.
       if (shouldClearSelectionOnKey(key)) {
         selection.clearSelection();
       }
+      return;
     },
     { isActive },
   );
 
-  useDragToScroll(scrollRef, selection, isActive, onScroll);
+  useDragToScroll(scrollRef, selection, isActive, notifyScroll);
   useCopyOnSelect(selection, isActive, showCopiedToast);
   useSelectionBgColor(selection);
 
@@ -990,7 +1071,10 @@ export function dragScrollDirection(
 // wheel smoothness, wrong for PgUp/ctrl+u where the user expects a snap.
 // Target is relative to scrollTop+pendingDelta so a jump mid-wheel-burst
 // lands where the wheel was heading.
-export function jumpBy(s: ScrollBoxHandle, delta: number): boolean {
+//
+// trackTelemetry (official poe r flag): when a jump lands at scrollTop 0,
+// mark reachedScrollbackCap (p2r densable).
+export function jumpBy(s: ScrollBoxHandle, delta: number, trackTelemetry = false): boolean {
   const max = Math.max(0, s.getScrollHeight() - s.getViewportHeight());
   const target = s.getScrollTop() + s.getPendingDelta() + delta;
   if (target >= max) {
@@ -1000,6 +1084,9 @@ export function jumpBy(s: ScrollBoxHandle, delta: number): boolean {
     s.scrollTo(max);
     s.scrollToBottom();
     return true;
+  }
+  if (target <= 0 && trackTelemetry) {
+    recordReachedScrollbackCap();
   }
   s.scrollTo(Math.max(0, target));
   return false;
@@ -1029,11 +1116,13 @@ function scrollDown(s: ScrollBoxHandle, amount: number): boolean {
 // useVirtualScroll's [effLo, effHi] span grows past what MAX_MOUNTED_ITEMS
 // can cover and intermediate drain frames render at scrollTops with no
 // mounted children — blank viewport.
-export function scrollUp(s: ScrollBoxHandle, amount: number): void {
+export function scrollUp(s: ScrollBoxHandle, amount: number, trackTelemetry = false): void {
   // Include pendingDelta: scrollBy accumulates without updating scrollTop,
   // so getScrollTop() alone is stale within a batch of wheel events.
   const effectiveTop = s.getScrollTop() + s.getPendingDelta();
   if (effectiveTop - amount <= 0) {
+    // Official UP_ densable: wheel-up past top marks scrollback cap.
+    if (trackTelemetry) recordReachedScrollbackCap();
     s.scrollTo(0);
     return;
   }
@@ -1092,8 +1181,8 @@ export function modalPagerAction(
       case 'f':
         return 'fullPageDown';
       // emacs-style line scroll (less accepts both ctrl+n/p and ctrl+e/y).
-      // Works during search nav — fine-adjust after a jump without
-      // leaving modal. No !searchOpen gate on this useInput's isActive.
+      // Transcript defaultBindings map ctrl+n/p → scroll:line*; kept for
+      // modalPagerAction helpers/tests.
       case 'n':
         return 'lineDown';
       case 'p':
@@ -1141,6 +1230,7 @@ export function applyModalPagerAction(
   s: ScrollBoxHandle,
   act: ModalPagerAction | null,
   onBeforeJump: (delta: number) => void,
+  trackTelemetry = false,
 ): boolean | null {
   switch (act) {
     case null:
@@ -1149,21 +1239,21 @@ export function applyModalPagerAction(
     case 'lineDown': {
       const d = act === 'lineDown' ? 1 : -1;
       onBeforeJump(d);
-      return jumpBy(s, d);
+      return jumpBy(s, d, trackTelemetry);
     }
     case 'halfPageUp':
     case 'halfPageDown': {
       const half = Math.max(1, Math.floor(s.getViewportHeight() / 2));
       const d = act === 'halfPageDown' ? half : -half;
       onBeforeJump(d);
-      return jumpBy(s, d);
+      return jumpBy(s, d, trackTelemetry);
     }
     case 'fullPageUp':
     case 'fullPageDown': {
       const page = Math.max(1, s.getViewportHeight());
       const d = act === 'fullPageDown' ? page : -page;
       onBeforeJump(d);
-      return jumpBy(s, d);
+      return jumpBy(s, d, trackTelemetry);
     }
     case 'top':
       onBeforeJump(-(s.getScrollTop() + s.getPendingDelta()));

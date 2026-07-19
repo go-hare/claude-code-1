@@ -26,10 +26,20 @@ describe('shouldUseSimpleSystemPrompt', () => {
   })
   test('official neh: opus 4.x denser default → simple off', () => {
     expect(
-      shouldUseSimpleSystemPrompt({ env: {}, model: 'claude-opus-4-7' }),
+      shouldUseSimpleSystemPrompt({
+        env: {},
+        model: 'claude-opus-4-7',
+        velvetCascadeModels: null,
+        velvetTide: false,
+      }),
     ).toBe(false)
     expect(
-      shouldUseSimpleSystemPrompt({ env: {}, model: 'claude-sonnet-4-6' }),
+      shouldUseSimpleSystemPrompt({
+        env: {},
+        model: 'claude-sonnet-4-6',
+        velvetCascadeModels: null,
+        velvetTide: false,
+      }),
     ).toBe(false)
   })
   test('mythos / lean capability → simple on', () => {
@@ -59,10 +69,29 @@ describe('shouldUseSimpleSystemPrompt', () => {
         env: {},
         model: 'claude-opus-4-7',
         velvetCascadeModels: ['opus-4-7'],
+        velvetTide: false,
       }),
     ).toBe(true)
     expect(
       isVelvetCascadeModelEligible('claude-sonnet-4-6', ['opus-4-7']),
+    ).toBe(false)
+  })
+  test('densable velvet_tide forces simple on dense-default models', () => {
+    expect(
+      shouldUseSimpleSystemPrompt({
+        env: {},
+        model: 'claude-opus-4-7',
+        velvetCascadeModels: null,
+        velvetTide: true,
+      }),
+    ).toBe(true)
+    expect(
+      shouldUseSimpleSystemPrompt({
+        env: {},
+        model: 'claude-opus-4-7',
+        velvetCascadeModels: null,
+        velvetTide: false,
+      }),
     ).toBe(false)
   })
 })

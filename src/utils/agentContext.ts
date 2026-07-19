@@ -156,16 +156,53 @@ export function isTeammateAgentContext(
  * Safe for analytics metadata: built-in agent names are code constants,
  * and custom agents are always mapped to the literal "user-defined".
  */
-export function getSubagentLogName():
-  | AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-  | undefined {
-  const context = getAgentContext()
+/**
+ * densable kvi — subagent analytics type name for a given context.
+ * Built-in → subagentName; custom → "user-defined"; else undefined.
+ */
+export function subagentTypeForAnalytics(
+  context: AgentContext | undefined = getAgentContext(),
+): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS | undefined {
   if (!isSubagentContext(context) || !context.subagentName) {
     return undefined
   }
   return (
     context.isBuiltIn ? context.subagentName : 'user-defined'
   ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+}
+
+export function getSubagentLogName():
+  | AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  | undefined {
+  return subagentTypeForAnalytics(getAgentContext())
+}
+
+/**
+ * densable FSt — agentContext fields for tool-execution analytics.
+ * Subagent only: `{ subagent_type, is_built_in_agent }`. Empty object
+ * for main/teammate/missing name/errors. Spread onto tengu_tool_use_error.
+ */
+export function agentContextForToolAnalytics(
+  context: AgentContext | undefined = getAgentContext(),
+): {
+  subagent_type?: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  is_built_in_agent?: boolean
+} {
+  try {
+    if (!isSubagentContext(context)) {
+      return {}
+    }
+    const subagentType = subagentTypeForAnalytics(context)
+    if (subagentType === undefined) {
+      return {}
+    }
+    return {
+      subagent_type: subagentType,
+      is_built_in_agent: context.isBuiltIn ?? false,
+    }
+  } catch {
+    return {}
+  }
 }
 
 /**

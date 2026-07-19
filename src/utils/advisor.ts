@@ -2,6 +2,10 @@ import type { BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messag
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { shouldIncludeFirstPartyOnlyBetas } from './betas.js'
 import {
+  normalizeModelStringForAPI,
+  parseUserSpecifiedModel,
+} from './model/model.js'
+import {
   isAdvisorToolDisabled,
   isExperimentalAdvisorToolEnabled,
 } from './residualMoreEnvGates.js'
@@ -119,6 +123,34 @@ export function getInitialAdvisorSetting(): string | undefined {
     return undefined
   }
   return getInitialSettings().advisorModel
+}
+
+/**
+ * densable nZn — advisor model that will be attached to API requests for the
+ * current base model, after enablement / allowlist / pairing checks.
+ * Returns undefined when none will be attached (get_settings maps to null).
+ */
+export function resolveAppliedAdvisorModel(
+  advisorOption: string | undefined,
+  baseModel: string,
+): string | undefined {
+  if (!isAdvisorEnabled() || !advisorOption) {
+    return undefined
+  }
+  let option = advisorOption
+  const advisorExperiment = getExperimentAdvisorModels()
+  if (
+    advisorExperiment !== undefined &&
+    normalizeModelStringForAPI(
+      parseUserSpecifiedModel(advisorExperiment.baseModel),
+    ) === normalizeModelStringForAPI(parseUserSpecifiedModel(baseModel))
+  ) {
+    option = advisorExperiment.advisorModel
+  }
+  const normalized = normalizeModelStringForAPI(parseUserSpecifiedModel(option))
+  if (!modelSupportsAdvisor(baseModel)) return undefined
+  if (!isValidAdvisorModel(normalized)) return undefined
+  return normalized
 }
 
 export function getAdvisorUsage(

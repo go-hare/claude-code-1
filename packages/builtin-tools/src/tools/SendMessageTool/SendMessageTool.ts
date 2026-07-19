@@ -10,7 +10,8 @@ import {
   queuePendingMessage,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { isMainSessionTask } from 'src/tasks/LocalMainSessionTask.js'
-import { toAgentId } from 'src/types/ids.js'
+import { asAgentId, toAgentId } from 'src/types/ids.js'
+import { readAgentMetadata } from 'src/utils/sessionStorage.js'
 import { generateRequestId } from 'src/utils/agentId.js'
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -39,6 +40,17 @@ import {
   writeToMailbox,
 } from 'src/utils/teammateMailbox.js'
 import { resumeAgentBackground } from '../AgentTool/resumeAgent.js'
+import { isObserverTaskId } from 'src/utils/observerAgents.js'
+import {
+  applySendMessagePin,
+  createSendMessagePin,
+  evaluateSubagentPinGuard,
+  formatCloudSessionSendSuccessMessage,
+  formatLocalSessionSendSuccessMessage,
+  formatPinReboundMessage,
+  parseNamedRef,
+  type SendMessagePin,
+} from 'src/utils/sendMessagePins.js'
 import { SEND_MESSAGE_TOOL_NAME } from './constants.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
@@ -102,6 +114,8 @@ export type MessageOutput = {
   success: boolean
   message: string
   routing?: MessageRouting
+  /** densable pin — recorded on successful subagent delivery for rehydrate. */
+  pin?: SendMessagePin
 }
 
 export type BroadcastOutput = {
@@ -799,6 +813,19 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
     },
 
     async call(input, context, canUseTool, assistantMessage) {
+      // Official densable ues: observers report via ObserverReport, not SendMessage.
+      // `context.agentId` is the caller; pairing map membership = ues/isObserverTaskId.
+      const callerAgentId = context.agentId
+      if (callerAgentId !== undefined && isObserverTaskId(callerAgentId)) {
+        return {
+          data: {
+            success: false,
+            message:
+              'Observers report via ObserverReport, not SendMessage. SendMessage is not available from an observer.',
+          },
+        }
+      }
+
       if (typeof input.message === 'string') {
         const addr = parseAddress(input.to)
         if (addr.scheme === 'uds' && hasInlineUdsToken(input.to)) {
@@ -819,7 +846,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           // minutes). validateInput's check is stale if the bridge dropped
           // during the prompt wait; without this, from="unknown" ships.
           // Also re-check isReplBridgeActive for outbound-only mode.
-          if (!getReplBridgeHandle() || !isReplBridgeActive()) {
+          // densable cloud-session path still posts when RC is one-way, but
+          // success text marks one-way so the model knows replies won't route.
+          const bridgeHandle = getReplBridgeHandle()
+          const replBridgeActive = isReplBridgeActive()
+          if (!bridgeHandle) {
             return {
               data: {
                 success: false,
@@ -828,20 +859,54 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
           }
           /* eslint-disable @typescript-eslint/no-require-imports */
-          const { postInterClaudeMessage } =
+          const peerSessions =
             require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
-          const result = (await postInterClaudeMessage(
+          const result = (await peerSessions.postInterClaudeMessage(
             addr.target,
             input.message,
-          )) as { ok: boolean; error?: string }
+          )) as { ok: boolean; error?: string; msgId?: string }
           const preview = input.summary || truncate(input.message, 50)
+          const displayName = recipientForDisplay(input.to)
+          if (!result.ok) {
+            const stale =
+              typeof peerSessions.isLikelyStaleBridgeError === 'function' &&
+              peerSessions.isLikelyStaleBridgeError(result.error)
+                ? ' — that cloud session may have ended or been archived.'
+                : ''
+            return {
+              data: {
+                success: false,
+                message: `Failed to send to ${displayName}: ${result.error ?? 'unknown'}${stale}`,
+              },
+            }
+          }
+          // densable Ozu — pin cloud-session under display name for jVu.
+          const cloudPin = createSendMessagePin(
+            displayName,
+            addr.target,
+            'cloud-session',
+          )
+          context.setAppState(prev => {
+            const nextPins = applySendMessagePin(
+              prev.sendMessagePins,
+              cloudPin,
+            )
+            if (nextPins === prev.sendMessagePins) return prev
+            return { ...prev, sendMessagePins: nextPins }
+          })
+          // densable: one-way when bridge handle missing outbound or RC inactive
+          const oneWay = !replBridgeActive
           return {
             data: {
-              success: result.ok,
-              message: result.ok
-                ? `”${preview}” → ${input.to}`
-                : `Failed to send to ${input.to}: ${result.error ?? 'unknown'}`,
+              success: true,
+              message: formatCloudSessionSendSuccessMessage(
+                preview,
+                displayName,
+                undefined,
+                { oneWay },
+              ),
+              ...(result.msgId ? { msg_id: result.msgId } : {}),
             },
           }
         }
@@ -853,11 +918,31 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           /* eslint-enable @typescript-eslint/no-require-imports */
           try {
             await sendToUdsSocket(addr.target, input.message)
+            // densable Ozu residual — pin session sock under display name for jVu.
+            // Live-only (kls/tXg still requires agent-id for transcript rehydrate).
+            const sessionPin = createSendMessagePin(
+              recipient,
+              addr.target,
+              'session',
+            )
+            context.setAppState(prev => {
+              const nextPins = applySendMessagePin(
+                prev.sendMessagePins,
+                sessionPin,
+              )
+              if (nextPins === prev.sendMessagePins) return prev
+              return { ...prev, sendMessagePins: nextPins }
+            })
             const preview = input.summary || truncate(input.message, 50)
+            // densable local-session success: note another Claude session + sameNamedSiblings.
+            // Direct uds: targets have no sibling count (name-index residual); pass undefined.
             return {
               data: {
                 success: true,
-                message: `”${preview}” → ${recipient}`,
+                message: formatLocalSessionSendSuccessMessage(
+                  preview,
+                  recipient,
+                ),
               },
             }
           } catch (e) {
@@ -910,25 +995,96 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       // through to ambient-team resolution. Stopped agents are auto-resumed.
       if (typeof input.message === 'string' && input.to !== '*') {
         const appState = context.getAppState()
-        const registered = appState.agentNameRegistry.get(input.to)
+        // densable Mtr: allow addressing as `Name [ref]` for pin override.
+        const namedRef = parseNamedRef(input.to)
+        const lookupName = namedRef?.name ?? input.to
+        const registered =
+          appState.agentNameRegistry.get(lookupName) ??
+          appState.agentNameRegistry.get(input.to)
         const agentId = registered ?? toAgentId(input.to)
         if (agentId) {
+          // Resolve display name for pin key (registry inverse, else lookup).
+          let agentName = lookupName
+          for (const [n, id] of appState.agentNameRegistry) {
+            if (id === agentId) {
+              agentName = n
+              break
+            }
+          }
+
+          // densable VVu pin guard — rebound if name now maps to a new agent id.
+          const pinGuard = evaluateSubagentPinGuard({
+            to: input.to,
+            message: input.message,
+            pins: appState.sendMessagePins,
+            resolved: { kind: 'subagent', id: agentId, name: agentName },
+          })
+          if (pinGuard.kind === 'rebound') {
+            return {
+              data: {
+                success: false,
+                message: formatPinReboundMessage(pinGuard),
+              },
+            }
+          }
+          const pin = pinGuard.pin
+          const pinField = pin ? { pin } : {}
+          const recordPin = (): void => {
+            if (!pin) return
+            const setState = context.setAppStateForTasks ?? context.setAppState
+            setState(prev => {
+              const nextPins = applySendMessagePin(prev.sendMessagePins, pin)
+              if (nextPins === prev.sendMessagePins) return prev
+              return { ...prev, sendMessagePins: nextPins }
+            })
+          }
+
+          // Official densable ncs: background observers cannot receive
+          // SendMessage (live/stopped/evicted). ues(agentId) pairing map,
+          // live isObserver tasks, or sidecar meta.isObserver → refuse.
+          const observerCannotReceive = {
+            data: {
+              success: false as const,
+              message:
+                'That agent cannot receive messages (it is a background observer, or its status could not be verified).',
+            },
+          }
+          // densable: if(ues(c.agentId)) return ncs — before live task branch
+          if (isObserverTaskId(agentId)) {
+            return observerCannotReceive
+          }
           const task = appState.tasks[agentId]
           if (isLocalAgentTask(task) && !isMainSessionTask(task)) {
+            if ((task as { isObserver?: boolean }).isObserver === true) {
+              return observerCannotReceive
+            }
             if (task.status === 'running') {
               queuePendingMessage(
                 agentId,
                 input.message,
                 context.setAppStateForTasks ?? context.setAppState,
               )
+              recordPin()
               return {
                 data: {
                   success: true,
                   message: `Message queued for delivery to ${input.to} at its next tool round.`,
+                  ...pinField,
                 },
               }
             }
-            // task exists but stopped — auto-resume
+            // Official densable agent-stopped-by-user: refuse auto-resume.
+            // TaskStop/ySr stamps stoppedByUser; silent SendMessage must not
+            // clear it (Aye userInitiated only for explicit user re-launch).
+            if ((task as { stoppedByUser?: boolean }).stoppedByUser === true) {
+              return {
+                data: {
+                  success: false,
+                  message: `Agent "${input.to}" was stopped by the user and was not resumed. Treat its work as cancelled; only start a new agent for it if the user explicitly asks.`,
+                },
+              }
+            }
+            // task exists but stopped — auto-resume (agent-stopped, not by user)
             try {
               const result = await resumeAgentBackground({
                 agentId,
@@ -939,10 +1095,12 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                   | string
                   | undefined,
               })
+              recordPin()
               return {
                 data: {
                   success: true,
                   message: `Agent "${input.to}" was stopped (${task.status}); resumed it in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
+                  ...pinField,
                 },
               }
             } catch (e) {
@@ -958,6 +1116,17 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             // agentId is either a registered name or a format-matching raw ID
             // (toAgentId validates the createAgentId format, so teammate names
             // never reach this block).
+            // Official densable: if meta.isObserver return ncs (cannot receive).
+            // meta.stoppedByUser refuse is handled inside Aye; silent SendMessage
+            // does not pass userInitiated.
+            try {
+              const meta = await readAgentMetadata(asAgentId(agentId))
+              if (meta?.isObserver === true) {
+                return observerCannotReceive
+              }
+            } catch {
+              return observerCannotReceive
+            }
             try {
               const result = await resumeAgentBackground({
                 agentId,
@@ -968,10 +1137,12 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                   | string
                   | undefined,
               })
+              recordPin()
               return {
                 data: {
                   success: true,
                   message: `Agent "${input.to}" had no active task; resumed from transcript in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
+                  ...pinField,
                 },
               }
             } catch (e) {

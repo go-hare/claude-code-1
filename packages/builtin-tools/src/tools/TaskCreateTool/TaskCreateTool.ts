@@ -12,6 +12,10 @@ import {
   isTodoV2Enabled,
 } from 'src/utils/tasks.js'
 import { getAgentName, getTeamName } from 'src/utils/teammate.js'
+import {
+  coerceTaskCreateInput,
+  steerTaskCreateValidationError,
+} from 'src/utils/toolInputCoerce.js'
 import { TASK_CREATE_TOOL_NAME } from './constants.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
 
@@ -65,6 +69,9 @@ export const TaskCreateTool = buildTool({
     return 'TaskCreate'
   },
   shouldDefer: true,
+  // densable uWu / dWu — remap aliases/wrappers before Zod; steer multi-task mistakes.
+  coerceInput: coerceTaskCreateInput,
+  validationErrorSteer: steerTaskCreateValidationError,
   isEnabled() {
     return isTodoV2Enabled()
   },

@@ -171,6 +171,112 @@ export const TRUSTING_RECALL_SECTION: readonly string[] = [
 ]
 
 /**
+ * densable yBh / X1i — Project skill upkeep (tengu_gorse_fathom).
+ * Fold feedback memories that correct repeatable workflow steps into the
+ * nearest project skill file.
+ */
+export const PROJECT_SKILL_UPKEEP_BODY =
+  'When you save a `feedback` memory because the user corrected how you ran a repeatable step — how you verified, committed, opened a PR, or used a project skill — fold the same correction into the project skill that drives that step (`.claude/skills/<name>/SKILL.md`): a terse, general edit, so the next session gets it right unprompted. Edit existing skill files only; never create one — a new project skill silently shadows a same-named built-in skill. The single exception is verify, because how a project verifies changes is project-specific: put a verify correction in the `.claude/skills/verify/SKILL.md` closest to the code it covers — the repo root for repo-wide corrections, a subproject directory (e.g. `ios/.claude/skills/verify/SKILL.md`) for corrections that only apply to that subtree — and if that file does not exist, create it. Each correction lives in exactly one skill file: the closest-scoped one, never duplicated at broader scopes.'
+
+export const PROJECT_SKILL_UPKEEP_SECTION: readonly string[] = [
+  '## Project skill upkeep',
+  '',
+  PROJECT_SKILL_UPKEEP_BODY,
+  '',
+]
+
+/**
+ * densable sFr / aFr — tengu_gorse_fathom gate (default false).
+ * When on, inject PROJECT_SKILL_UPKEEP_SECTION into the memory prompt.
+ */
+export function isGorseFathomSkillUpkeepEnabled(gbValue?: boolean): boolean {
+  if (gbValue !== undefined) return gbValue
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_gorse_fathom', false)
+  } catch {
+    return false
+  }
+}
+
+/** densable aFr — section lines or empty. */
+export function getProjectSkillUpkeepSection(
+  gbValue?: boolean,
+): readonly string[] {
+  return isGorseFathomSkillUpkeepEnabled(gbValue)
+    ? PROJECT_SKILL_UPKEEP_SECTION
+    : []
+}
+
+/**
+ * densable hBh — short type blurbs for ochre_finch compact types section.
+ * Wording matches densable 2.1.211 (shorter than TYPES_SECTION_*).
+ */
+export const OCHRE_FINCH_TYPE_BLURBS: Record<MemoryType, string> = {
+  user: "the user's role, expertise, or working preferences",
+  feedback:
+    "a correction or confirmation of how you should approach work. Confirmations ('yes, good call') are quieter than corrections — watch for them",
+  project:
+    'ongoing work, deadlines, or decisions not derivable from code or git history',
+  reference:
+    'where to find information in an external system (issue tracker, dashboard, channel)',
+}
+
+/** densable Y1i — skill name referenced by short types section. */
+export const MEMORY_TYPES_SKILL_NAME = 'memory-types'
+
+/**
+ * densable J1i / tengu_ochre_finch — compact types section gate (default false).
+ */
+export function isOchreFinchTypesEnabled(gbValue?: boolean): boolean {
+  if (gbValue !== undefined) return gbValue
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_ochre_finch', false)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable gBh — compact bullet types section (when ochre_finch on).
+ */
+export function buildOchreFinchTypesSection(
+  types: readonly MemoryType[] = MEMORY_TYPES,
+): string[] {
+  return [
+    '## Types of memory',
+    '',
+    'Save a memory when you learn one of the following — pick the matching `type:`:',
+    '',
+    ...types.map(t => `- **${t}** — ${OCHRE_FINCH_TYPE_BLURBS[t]}`),
+    '',
+    `Invoke the \`${MEMORY_TYPES_SKILL_NAME}\` skill for scope, body structure and examples once you've decided to save.`,
+    '',
+  ]
+}
+
+/**
+ * densable nFr(e,t=K1i) — when ochre_finch on, replace long types section with
+ * compact gBh(types); otherwise keep `fallback`.
+ */
+export function selectTypesOfMemorySection(
+  fallback: readonly string[],
+  input: { ochreFinch?: boolean; types?: readonly MemoryType[] } = {},
+): readonly string[] {
+  const on =
+    input.ochreFinch !== undefined
+      ? input.ochreFinch
+      : isOchreFinchTypesEnabled()
+  if (!on) return fallback
+  return buildOchreFinchTypesSection(input.types ?? MEMORY_TYPES)
+}
+
+/**
  * Frontmatter format example with the `type` field.
  */
 export const MEMORY_FRONTMATTER_EXAMPLE: readonly string[] = [

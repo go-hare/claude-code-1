@@ -143,6 +143,12 @@ export type ToolPermissionContext = DeepImmutable<{
    * `default`.
    */
   canAutoClassifierRun?: boolean
+  /**
+   * densable toolAliases (ErT → toolPermissionContext.toolAliases).
+   * Map of tool-name aliases applied before name resolution / rule matching.
+   * Single-hop (no chains). Mirrored onto ToolUseContext.options.toolAliases.
+   */
+  toolAliases?: Readonly<Record<string, string>>
 }>
 
 export const getEmptyToolPermissionContext: () => ToolPermissionContext =
@@ -183,13 +189,36 @@ export type ToolUseContext = {
     /** Additional system prompt appended after the main system prompt */
     appendSystemPrompt?: string
     /**
+     * densable cacheBreakerPhrase — session flag forwarded into getSystemContext
+     * memo key (rR residual). Optional; undefined = default cache entry.
+     */
+    cacheBreakerPhrase?: string
+    /**
+     * densable autoCompactWindow — session window size (tokens) for autocompact
+     * effective context (options.autoCompactWindow residual). Env override still
+     * wins inside getEffectiveContextWindowSize.
+     */
+    autoCompactWindow?: number
+    /**
      * Official --append-subagent-system-prompt. Appended to Task-tool
      * subagent system prompts (and nested) when
      * CLAUDE_CODE_ENABLE_APPEND_SUBAGENT_PROMPT is set.
      */
     appendSubagentSystemPrompt?: string
+    /**
+     * Official 2.1.211 --forward-subagent-text. When true (print + stream-json),
+     * AgentTool forwards subagent text/thinking blocks as progress messages so
+     * the SDK stream includes them with parent_tool_use_id set.
+     */
+    forwardSubagentText?: boolean
     /** Override querySource for analytics tracking */
     querySource?: QuerySource
+    /**
+     * densable requiresStructuredOutput — when true, query turn-end injects a
+     * meta user nudge requiring SyntheticOutputTool unless already satisfied
+     * (akd agent-hook residual; also SDK --json-schema paths).
+     */
+    requiresStructuredOutput?: boolean
     /** Optional callback to get the latest tools (e.g., after MCP servers connect mid-query) */
     refreshTools?: () => Tools
     /**
@@ -205,6 +234,33 @@ export type ToolUseContext = {
      * outside `NODE_ENV=test`.
      */
     allowBackgroundForkedSlashCommands?: boolean
+    /**
+     * densable spawnedBySkill (lye of the skill that launched this forked
+     * subagent). Used by SkillTool validateInput to block
+     * skill_invoke_fork_recursion (errorCode 9) when the forked agent
+     * re-invokes the same skill family via the Skill tool.
+     */
+    spawnedBySkill?: string
+    /**
+     * densable options.toolAliases — session map of alias → canonical tool
+     * name. Consumed by findToolByName (Tc) on the tool execution path.
+     * Single-hop (no chains). Also mirrored on AppState.toolPermissionContext.
+     */
+    toolAliases?: Readonly<Record<string, string>>
+  }
+  /**
+   * densable permissionLayers stack — accumulated ContextLayer entries from
+   * tool results (allowed/disallowed tools, model, thinking, cwd).
+   */
+  permissionLayers?: import('./utils/contextLayers.js').ContextLayer[]
+  /**
+   * densable rootToolSurface — frozen root tools + mainLoopModel for teammate
+   * spawn and nested agent tool lists (`{tools, mainLoopModel}=a.rootToolSurface`).
+   * createSubagentContext ($io) pass-through; seed from options when absent.
+   */
+  rootToolSurface?: {
+    tools: Tools
+    mainLoopModel: string
   }
   abortController: AbortController
   activeTaskExecutionContext?: ActiveTaskExecutionContext
@@ -220,6 +276,22 @@ export type ToolUseContext = {
    * fall back to setAppState.
    */
   setAppStateForTasks?: (f: (prev: AppState) => AppState) => void
+  /**
+   * densable Oit — set/clear one slug in AppState.artifactReadVersions.
+   * Optional until artifact frame tools call it; pure helpers remain usable.
+   */
+  setArtifactReadVersion?: (slug: string, version: string | undefined) => void
+  /**
+   * densable Lit — promote slug to front of AppState.artifactRefs (optional pin).
+   */
+  setArtifactContractTarget?: (slug: string, pinArg?: unknown) => void
+  /**
+   * densable Mit — { targetSlug, pins } snapshot of AppState.artifactRefs.
+   */
+  getArtifactContractTarget?: () => {
+    targetSlug: string | undefined
+    pins: Record<string, string>
+  }
   /**
    * Optional handler for URL elicitations triggered by tool call errors (-32042).
    * In print/SDK mode, this delegates to structuredIO.handleElicitation.
@@ -404,6 +476,16 @@ export type ToolResult<T> = {
     _meta?: Record<string, unknown>
     structuredContent?: Record<string, unknown>
   }
+  /**
+   * densable se.endsTurn — when true, toolExecution stamps UserMessage.toolEndsTurn
+   * and the query loop ends the turn without re-invoking the model (fts/yty).
+   */
+  endsTurn?: boolean
+  /**
+   * densable se.contextLayers — permission / model / cwd layers merged into
+   * ToolUseContext after the tool batch (Ter). Behavior only; no analytics.
+   */
+  contextLayers?: import('./utils/contextLayers.js').ContextLayer[]
 }
 
 export type ToolCallProgress<P extends ToolProgressData = ToolProgressData> = (
@@ -424,16 +506,141 @@ export function toolMatchesName(
 }
 
 /**
+ * densable sDn — forward alias pair for a tool name.
+ * Returns [name, mapped] when toolAliases has a non-identity mapping for name,
+ * otherwise [name].
+ */
+export function forwardToolAliasPair(
+  name: string,
+  toolAliases?: Readonly<Record<string, string>> | null,
+): [string] | [string, string] {
+  const mapped =
+    toolAliases && Object.hasOwn(toolAliases, name)
+      ? toolAliases[name]
+      : undefined
+  return mapped !== undefined && mapped !== name ? [name, mapped] : [name]
+}
+
+/**
+ * densable b5t — reverse aliases: all keys in toolAliases that map to `name`.
+ */
+export function reverseToolAliases(
+  name: string,
+  toolAliases?: Readonly<Record<string, string>> | null,
+): string[] {
+  if (!toolAliases) return []
+  const out: string[] = []
+  for (const [alias, canonical] of Object.entries(toolAliases)) {
+    if (canonical === name) out.push(alias)
+  }
+  return out
+}
+
+/**
+ * densable iee — tool identity used in permission rule matching.
+ * Local MCP tools already use the fully-qualified name; prefer `name`.
+ */
+export function toolPermissionIdentityName(tool: {
+  name: string
+  mcpInfo?: { serverName: string; toolName: string }
+}): string {
+  return tool.name
+}
+
+/**
+ * densable nLe — set of tool names whose bare always-allow rules should be
+ * stripped when suppressesAlwaysAllowRule fires: primary identity + reverse
+ * aliases (b5t) from session toolAliases.
+ */
+export function toolNamesForAlwaysAllowSuppress(
+  tool: { name: string; mcpInfo?: { serverName: string; toolName: string } },
+  toolAliases?: Readonly<Record<string, string>> | null,
+): Set<string> {
+  const id = toolPermissionIdentityName(tool)
+  return new Set([id, ...reverseToolAliases(id, toolAliases)])
+}
+
+/**
+ * densable B7c — WeakMap cache of tools array → name/alias → Tool map.
+ * densable U7c — WeakSet of tools arrays already scanned once without cache hit
+ * (first lookup is linear; second builds Rrg map and stores in B7c).
+ */
+const findToolByNameCache = new WeakMap<Tools, Map<string, Tool>>()
+const findToolByNameSeen = new WeakSet<Tools>()
+
+/**
+ * densable Rrg — build primary-name + alias Map for a tools list.
+ * Single pass over tools (primary then that tool's aliases); first
+ * registration wins (does not overwrite). Matches densable Rrg exactly.
+ */
+export function buildToolNameLookupMap(tools: Tools): Map<string, Tool> {
+  const map = new Map<string, Tool>()
+  for (const tool of tools) {
+    if (!map.has(tool.name)) map.set(tool.name, tool)
+    if (tool.aliases) {
+      for (const alias of tool.aliases) {
+        if (!map.has(alias)) map.set(alias, tool)
+      }
+    }
+  }
+  return map
+}
+
+/**
  * Finds a tool by name or alias from a list of tools.
  *
- * Exact primary-name matches always win over aliases so an older alias cannot
- * shadow a different tool that is actually named that identifier.
+ * densable Tc:
+ * - optional `toolAliases` (session map alias → canonical) is a **single hop**
+ *   before name/builtin-alias lookup; chains are not followed (recurse drops map).
+ * - B7c/U7c: first lookup is linear `find(ll)` (name|alias, registration order);
+ *   second builds Rrg into B7c; subsequent hits use the cached map.
+ *
+ * Note: densable first path is a single `tools.find(ll)`, not a primary-then-alias
+ * two-pass. That keeps linear and cached paths consistent when an earlier tool's
+ * alias collides with a later tool's primary name (first registration wins).
  */
-export function findToolByName(tools: Tools, name: string): Tool | undefined {
-  return (
-    tools.find(t => t.name === name) ??
-    tools.find(t => toolMatchesName(t, name))
+export function findToolByName(
+  tools: Tools,
+  name: string,
+  toolAliases?: Readonly<Record<string, string>> | null,
+): Tool | undefined {
+  // densable Tc: remap via toolAliases once, then look up without the map.
+  if (toolAliases && Object.hasOwn(toolAliases, name)) {
+    const mapped = toolAliases[name]
+    if (mapped !== undefined && mapped !== name) {
+      return findToolByName(tools, mapped)
+    }
+  }
+  // densable B7c: cached name map for this tools array identity.
+  const cached = findToolByNameCache.get(tools)
+  if (cached) return cached.get(name)
+  // densable U7c: second+ lookup builds and stores Rrg map.
+  if (findToolByNameSeen.has(tools)) {
+    const map = buildToolNameLookupMap(tools)
+    findToolByNameCache.set(tools, map)
+    return map.get(name)
+  }
+  findToolByNameSeen.add(tools)
+  // densable first scan: e.find((i) => ll(i, t)) — name OR alias, first wins.
+  return tools.find(t => toolMatchesName(t, name))
+}
+
+/**
+ * densable Qae — parse tool input after optional coerceInput remapping.
+ * Used by UI paths (userFacingName / renderToolUseMessage) so aliased model
+ * shapes still display correctly before/without a successful Zod parse of the
+ * raw object. toolExecution applies the same coerce before execution.
+ */
+export function safeParseToolInput(
+  tool: Pick<Tool, 'coerceInput' | 'inputSchema'>,
+  input: unknown,
+): ReturnType<Tool['inputSchema']['safeParse']> {
+  const coerced = tool.coerceInput?.(
+    input as { [key: string]: boolean | string | number | unknown },
   )
+  const target =
+    coerced === null || coerced === undefined ? input : coerced.input
+  return tool.inputSchema.safeParse(target)
 }
 
 function hasSameMcpToolIdentity(a: Tool, b: Tool): boolean {
@@ -529,6 +736,13 @@ export type Tool<
   /** Defaults to false. Only set when the tool performs irreversible operations (delete, overwrite, send). */
   isDestructive?(input: z.infer<Input>): boolean
   /**
+   * densable suppressesAlwaysAllowRule — when true for this input, bare
+   * always-allow permission rules for this tool (and its reverse toolAliases)
+   * are stripped from updatedPermissions before apply/persist (nLe/rLe).
+   * Content-scoped rules (ruleContent set) are preserved.
+   */
+  suppressesAlwaysAllowRule?(input: z.infer<Input>): boolean
+  /**
    * What should happen when the user submits a new message while this tool
    * is running.
    *
@@ -614,6 +828,30 @@ export type Tool<
   backfillObservableInput?(input: Record<string, unknown>): void
 
   /**
+   * densable residual — remap common model shape mistakes before Zod safeParse
+   * (snake_case aliases, wrapper objects, array-wrapped scalars). Return null
+   * when no remapping applies. shapeClass is logged on tengu_tool_input_coerced.
+   */
+  coerceInput?(input: {
+    [key: string]: boolean | string | number | unknown
+  }): { input: { [key: string]: unknown }; shapeClass: string } | null
+
+  /**
+   * densable residual — extra steer text appended to InputValidationError when
+   * Zod fails (e.g. TaskCreate multi-task / Agent-shaped calls).
+   */
+  validationErrorSteer?(input: {
+    [key: string]: boolean | string | number | unknown
+  }): string | null
+
+  /**
+   * densable residual — rewrite toolUseResult for older in-memory messages
+   * (strip large fields like file contents / stdout) while keeping structure.
+   * compactMode is true for full post-compact strip (Bash empties stdout/stderr).
+   */
+  stripForStorage?(result: unknown, compactMode?: boolean): unknown
+
+  /**
    * Determines if this tool is allowed to run with this input in the current context.
    * It informs the model of why the tool use failed, and does not directly display any UI.
    * @param input
@@ -653,6 +891,8 @@ export type Tool<
     tools: Tools
     agents: AgentDefinition[]
     allowedAgentTypes?: string[]
+    /** densable Edit/Write prompt residual — model-aware descriptions (jCg/Eyu). */
+    model?: string
   }): Promise<string>
   userFacingName(input: Partial<z.infer<Input>> | undefined): string
   userFacingNameBackgroundColor?(

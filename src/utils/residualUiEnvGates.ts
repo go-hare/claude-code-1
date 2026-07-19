@@ -354,3 +354,104 @@ export function resolveScrollSpeedBase(
   if (Number.isNaN(n) || n <= 0) return defaultBase
   return Math.min(n, 20)
 }
+
+/**
+ * densable tIu — MCP _meta requests end-of-turn via claude/endTurn.
+ */
+export function mcpMetaHasEndTurn(
+  mcpMeta:
+    | {
+        _meta?: Record<string, unknown>
+      }
+    | null
+    | undefined,
+): boolean {
+  return mcpMeta?._meta?.['claude/endTurn'] === true
+}
+
+/** densable HNg — frozen MCP meta tombstone for end-turn in subagent path. */
+export const MCP_END_TURN_META = Object.freeze({
+  _meta: Object.freeze({ ['claude/endTurn']: true as const }),
+})
+
+/**
+ * densable mts — when agentId is set, only pass through end-turn mcpMeta
+ * (as frozen HNg); otherwise pass full meta. Main-thread keeps full mcpMeta.
+ */
+export function mcpMetaForToolResultMessage(
+  agentId: string | undefined,
+  mcpMeta:
+    | {
+        _meta?: Record<string, unknown>
+        structuredContent?: Record<string, unknown>
+      }
+    | undefined,
+):
+  | {
+      _meta?: Record<string, unknown>
+      structuredContent?: Record<string, unknown>
+    }
+  | undefined {
+  if (!agentId) return mcpMeta
+  return mcpMetaHasEndTurn(mcpMeta) ? MCP_END_TURN_META : undefined
+}
+
+export type ToolEndTurnSource = 'tool' | 'mcp_meta'
+
+/**
+ * densable fts — if a user tool_result message requests end-of-turn and has
+ * no is_error tool_result block, return source (`tool` via toolEndsTurn, or
+ * `mcp_meta` via claude/endTurn); else false.
+ */
+export function endTurnSourceFromUserMessage(message: {
+  type?: string
+  toolEndsTurn?: boolean
+  mcpMeta?: {
+    _meta?: Record<string, unknown>
+  }
+  message?: {
+    content?: unknown
+  }
+}): ToolEndTurnSource | false {
+  if (message.type !== 'user') return false
+  const source: ToolEndTurnSource | false = message.toolEndsTurn
+    ? 'tool'
+    : mcpMetaHasEndTurn(message.mcpMeta)
+      ? 'mcp_meta'
+      : false
+  if (!source) return false
+  const content = message.message?.content
+  if (
+    Array.isArray(content) &&
+    content.some(
+      block =>
+        !!block &&
+        typeof block === 'object' &&
+        (block as { type?: string; is_error?: boolean }).type ===
+          'tool_result' &&
+        (block as { is_error?: boolean }).is_error === true,
+    )
+  ) {
+    return false
+  }
+  return source
+}
+
+/**
+ * First end-turn source among messages (densable ze accumulation).
+ */
+export function endTurnSourceFromMessages(
+  messages: readonly {
+    type?: string
+    toolEndsTurn?: boolean
+    mcpMeta?: { _meta?: Record<string, unknown> }
+    message?: { content?: unknown }
+  }[],
+): ToolEndTurnSource | false {
+  let found: ToolEndTurnSource | false = false
+  for (const m of messages) {
+    const s = endTurnSourceFromUserMessage(m)
+    if (s) found = s
+  }
+  return found
+}

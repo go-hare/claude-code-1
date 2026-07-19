@@ -48,6 +48,8 @@ import type { AttributionState } from './utils/commitAttribution.js'
 import { getGlobalConfig } from './utils/config.js'
 import { getCwd } from './utils/cwd.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
+import { logError } from './utils/log.js'
+import { stripOldToolUseResultsForStorage } from './utils/toolResultStrip.js'
 import { isEagerFlushEnabled } from './utils/residualUiEnvGates.js'
 import { getFastModeState } from './utils/fastMode.js'
 import {
@@ -168,6 +170,21 @@ export type QueryEngineConfig = {
    */
   requestDialog?: ToolUseContext['requestDialog']
   includePartialMessages?: boolean
+  /**
+   * Official 2.1.211 --forward-subagent-text. When true, AgentTool forwards
+   * subagent text/thinking as progress messages for the SDK stream.
+   */
+  forwardSubagentText?: boolean
+  /**
+   * densable TSo/mB excludeDynamicSections — omit per-user dynamic system
+   * prompt sections and re-inject via userContext for cache stability.
+   */
+  excludeDynamicSections?: boolean
+  /**
+   * densable options.toolAliases — session map alias → canonical tool name
+   * for findToolByName (Tc) on the tool execution path.
+   */
+  toolAliases?: Readonly<Record<string, string>>
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
   orphanedPermission?: OrphanedPermission
@@ -248,6 +265,9 @@ export class QueryEngine {
       setAppState,
       replayUserMessages = false,
       includePartialMessages = false,
+      forwardSubagentText = false,
+      excludeDynamicSections = false,
+      toolAliases,
       agents = [],
       setSDKStatus,
       orphanedPermission,
@@ -317,6 +337,8 @@ export class QueryEngine {
       ),
       mcpClients,
       customSystemPrompt: customPrompt,
+      // densable TSo: excludeDynamicSections:b / d.excludeDynamicSections
+      excludeDynamicSections,
     })
     headlessProfilerCheckpoint('after_getSystemPrompt')
     const userContext = {
@@ -367,6 +389,11 @@ export class QueryEngine {
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
       requestDialog: this.config.requestDialog,
+      // densable rootToolSurface freeze at context construction
+      rootToolSurface: {
+        tools,
+        mainLoopModel: initialMainLoopModel,
+      },
       options: {
         commands,
         debug: false, // we use stdout, so don't want to clobber it
@@ -381,12 +408,27 @@ export class QueryEngine {
         customSystemPrompt,
         appendSystemPrompt,
         appendSubagentSystemPrompt,
+        forwardSubagentText,
+        // densable Tc: options.toolAliases (session map) for findToolByName
+        toolAliases:
+          toolAliases ?? getAppState().toolPermissionContext.toolAliases,
         agentDefinitions: { activeAgents: agents, allAgents: [] },
         theme: resolveThemeSetting(getGlobalConfig().theme),
         maxBudgetUsd,
+        // densable cacheBreakerPhrase — rR systemContext memo key
+        cacheBreakerPhrase: getAppState().cacheBreakerPhrase,
+        // densable autoCompactWindow — QV session window via options
+        autoCompactWindow: getAppState().autoCompactWindow,
       },
       getAppState,
       setAppState,
+      // densable Oit/Lit/Mit artifact pin writers
+      ...(() => {
+        const { bindArtifactContractHandlers } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/frameUrls.js') as typeof import('./utils/frameUrls.js')
+        return bindArtifactContractHandlers(getAppState, setAppState)
+      })(),
       abortController: this.abortController,
       readFileState: this.readFileState,
       nestedMemoryAttachmentTriggers: new Set<string>(),
@@ -530,12 +572,27 @@ export class QueryEngine {
         customSystemPrompt,
         appendSystemPrompt,
         appendSubagentSystemPrompt,
+        forwardSubagentText,
+        // densable Tc: re-read toolAliases each turn (initialize may have updated)
+        toolAliases:
+          toolAliases ?? getAppState().toolPermissionContext.toolAliases,
         theme: resolveThemeSetting(getGlobalConfig().theme),
         agentDefinitions: { activeAgents: agents, allAgents: [] },
         maxBudgetUsd,
+        // densable cacheBreakerPhrase — re-read each turn (Xat may have updated)
+        cacheBreakerPhrase: getAppState().cacheBreakerPhrase,
+        // densable autoCompactWindow — re-read each turn (Xat may have updated)
+        autoCompactWindow: getAppState().autoCompactWindow,
       },
       getAppState,
       setAppState,
+      // densable Oit/Lit/Mit artifact pin writers
+      ...(() => {
+        const { bindArtifactContractHandlers } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/frameUrls.js') as typeof import('./utils/frameUrls.js')
+        return bindArtifactContractHandlers(getAppState, setAppState)
+      })(),
       abortController: this.abortController,
       readFileState: this.readFileState,
       nestedMemoryAttachmentTriggers: new Set<string>(),
@@ -1102,6 +1159,26 @@ export class QueryEngine {
       }
     }
 
+    // densable evo post-turn (keepRecent=0, compactMode=true) — drop large
+    // toolUseResult payloads from in-memory history after headless query ends.
+    // Full transcripts already flushed above for UI/resume paths that need them.
+    try {
+      const stripped = stripOldToolUseResultsForStorage(
+        this.mutableMessages,
+        tools,
+        0,
+        true,
+      )
+      if (stripped !== this.mutableMessages) {
+        for (let i = 0; i < stripped.length; i++) {
+          this.mutableMessages[i] = stripped[i]!
+        }
+        this.mutableMessages.length = stripped.length
+      }
+    } catch (err) {
+      logError(err)
+    }
+
     // Stop hooks yield progress/attachment messages AFTER the assistant
     // response (via yield* handleStopHooks in query.ts). Since #23537 pushes
     // those to `messages` inline, last(messages) can be a progress/attachment
@@ -1279,6 +1356,9 @@ export async function* ask({
   abortController,
   replayUserMessages = false,
   includePartialMessages = false,
+  forwardSubagentText = false,
+  excludeDynamicSections = false,
+  toolAliases,
   handleElicitation,
   requestDialog,
   agents = [],
@@ -1312,6 +1392,12 @@ export async function* ask({
   abortController?: AbortController
   replayUserMessages?: boolean
   includePartialMessages?: boolean
+  /** Official 2.1.211 --forward-subagent-text */
+  forwardSubagentText?: boolean
+  /** densable TSo excludeDynamicSections */
+  excludeDynamicSections?: boolean
+  /** densable options.toolAliases for Tc findToolByName */
+  toolAliases?: Readonly<Record<string, string>>
   handleElicitation?: ToolUseContext['handleElicitation']
   requestDialog?: ToolUseContext['requestDialog']
   agents?: AgentDefinition[]
@@ -1344,6 +1430,9 @@ export async function* ask({
     requestDialog,
     replayUserMessages,
     includePartialMessages,
+    forwardSubagentText,
+    excludeDynamicSections,
+    toolAliases,
     setSDKStatus,
     abortController,
     orphanedPermission,

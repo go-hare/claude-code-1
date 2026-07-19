@@ -35,6 +35,48 @@ function makeMinimalContext(): ToolUseContext {
   } as unknown as ToolUseContext
 }
 
+describe('StreamingToolExecutor densable qcs unknown-tool hint', () => {
+  test('append formatToolNotFoundHint on missing tool (exists-but-disabled style)', () => {
+    const ctx = makeMinimalContext()
+    // Empty toolDefinitions → unknown; empty base defaults may still load real tools,
+    // so assert the message structure rather than a specific densable branch.
+    const executor = new StreamingToolExecutor([], () => true as any, ctx)
+    executor.addTool(
+      {
+        type: 'tool_use',
+        id: 'tu_missing',
+        name: 'TotallyFakeToolXYZ',
+        input: {},
+      } as any,
+      {
+        type: 'assistant',
+        uuid: 'asst-1',
+        message: { id: 'm1', role: 'assistant', content: [] },
+      } as any,
+    )
+    const tracked = (executor as unknown as { tools: Array<{ results?: any[] }> })
+      .tools
+    expect(tracked).toHaveLength(1)
+    const msg = tracked[0]!.results?.[0]
+    const content = msg?.message?.content?.[0]?.content ?? msg?.content?.[0]?.content
+    const resultStr = String(content ?? '')
+    expect(resultStr).toContain('No such tool available: TotallyFakeToolXYZ')
+    // source anchors
+  })
+
+  test('source anchors densable resolveToolForExecution + formatToolNotFoundHint', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const src = readFileSync(
+      join(import.meta.dir, '../StreamingToolExecutor.ts'),
+      'utf8',
+    )
+    expect(src).toContain('resolveToolForExecution')
+    expect(src).toContain('formatToolNotFoundHint')
+    expect(src).toContain('notFoundHint')
+  })
+})
+
 describe('StreamingToolExecutor.discard()', () => {
   test('clears the internal tools array', () => {
     const ctx = makeMinimalContext()

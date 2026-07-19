@@ -249,6 +249,10 @@ export async function getPathCompletions(
     return {
       id: fullPath,
       displayText: entry.type === 'directory' ? fullPath + '/' : fullPath,
+      // densable Fsn sets description:"directory" for dir-only lists so
+      // onSubmit's xU allow-path. Path lists (g8s) omit it and densable
+      // Me bash-path Enter can early-return; mark dirs for the same gate.
+      description: entry.type === 'directory' ? 'directory' : undefined,
       metadata: { type: entry.type },
     }
   })

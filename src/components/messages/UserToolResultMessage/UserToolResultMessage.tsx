@@ -24,7 +24,6 @@ type Props = {
   verbose: boolean;
   width: number | string;
   isTranscriptMode?: boolean;
-  shouldCollapseDiffs?: boolean;
 };
 
 export function UserToolResultMessage({
@@ -37,7 +36,6 @@ export function UserToolResultMessage({
   verbose,
   width,
   isTranscriptMode,
-  shouldCollapseDiffs,
 }: Props): React.ReactNode {
   const toolUse = useGetToolFromMessages(param.tool_use_id, tools, lookups);
   if (!toolUse) {
@@ -91,7 +89,6 @@ export function UserToolResultMessage({
       verbose={verbose}
       width={width}
       isTranscriptMode={isTranscriptMode}
-      shouldCollapseDiffs={shouldCollapseDiffs}
     />
   );
 }

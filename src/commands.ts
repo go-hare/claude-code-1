@@ -8,13 +8,13 @@ import goodClaude from './commands/good-claude/index.js'
 import issue from './commands/issue/index.js'
 import feedback from './commands/feedback/index.js'
 import clear from './commands/clear/index.js'
-import color from './commands/color/index.js'
+import { color, colorNonInteractive } from './commands/color/index.js'
 import commit from './commands/commit.js'
 import copy from './commands/copy/index.js'
 import desktop from './commands/desktop/index.js'
 import commitPushPr from './commands/commit-push-pr.js'
 import compact from './commands/compact/index.js'
-import config from './commands/config/index.js'
+import { config, configNonInteractive } from './commands/config/index.js'
 import { context, contextNonInteractive } from './commands/context/index.js'
 // cost/index.ts re-exports usage — /cost is now an alias of /usage
 import diff from './commands/diff/index.js'
@@ -35,17 +35,18 @@ import installSlackApp from './commands/install-slack-app/index.js'
 import breakCache, {
   breakCacheNonInteractive,
 } from './commands/break-cache/index.js'
-import mcp from './commands/mcp/index.js'
+import { mcp, mcpNonInteractive } from './commands/mcp/index.js'
 import mobile from './commands/mobile/index.js'
 import onboarding from './commands/onboarding/index.js'
 import pr_comments from './commands/pr_comments/index.js'
 import releaseNotes from './commands/release-notes/index.js'
-import rename from './commands/rename/index.js'
+import { rename, renameNonInteractive } from './commands/rename/index.js'
 import resume from './commands/resume/index.js'
 import review, { ultrareview } from './commands/review.js'
 import session from './commands/session/index.js'
 import share from './commands/share/index.js'
 import skills from './commands/skills/index.js'
+import skillDoctor from './commands/skill-doctor/index.js'
 import status from './commands/status/index.js'
 import tasks from './commands/tasks/index.js'
 import teleport from './commands/teleport/index.js'
@@ -59,7 +60,7 @@ import localMemoryCommand from './commands/local-memory/index.js'
 import securityReview from './commands/security-review.js'
 import bughunter from './commands/bughunter/index.js'
 import terminalSetup from './commands/terminalSetup/index.js'
-import usage from './commands/usage/index.js'
+import { usage, usageNonInteractive } from './commands/usage/index.js'
 import theme from './commands/theme/index.js'
 import vim from './commands/vim/index.js'
 import webTools from './commands/web-tools/index.js'
@@ -75,6 +76,8 @@ const briefCommand =
   feature('KAIROS') || feature('KAIROS_BRIEF')
     ? require('./commands/brief.js').default
     : null
+// densable /focus residual (v0d) — always registered; runtime-gated by fullscreen feature gate.
+const focusCommand = require('./commands/focus.js').default
 const assistantCommand = feature('KAIROS')
   ? require('./commands/assistant/index.js').default
   : null
@@ -174,14 +177,19 @@ const poor = feature('POOR')
 const goalCmd = feature('GOAL')
   ? (
       require('./commands/goal/index.js') as typeof import('./commands/goal/index.js')
-    ).default
+    ).goal
+  : null
+const goalNonInteractiveCmd = feature('GOAL')
+  ? (
+      require('./commands/goal/index.js') as typeof import('./commands/goal/index.js')
+    ).goalNonInteractive
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import thinkback from './commands/thinkback/index.js'
 import thinkbackPlay from './commands/thinkback-play/index.js'
 import permissions from './commands/permissions/index.js'
 import plan from './commands/plan/index.js'
-import fast from './commands/fast/index.js'
+import { fast, fastNonInteractive } from './commands/fast/index.js'
 import passes from './commands/passes/index.js'
 import privacySettings from './commands/privacy-settings/index.js'
 import hooks from './commands/hooks/index.js'
@@ -213,6 +221,7 @@ import sandboxToggle from './commands/sandbox-toggle/index.js'
 import tui, { tuiNonInteractive } from './commands/tui/index.js'
 import chrome from './commands/chrome/index.js'
 import stickers from './commands/stickers/index.js'
+import radio from './commands/radio/index.js'
 import advisor from './commands/advisor.js'
 import autonomy from './commands/autonomy.js'
 import provider from './commands/provider.js'
@@ -224,6 +233,7 @@ import {
   clearSkillCaches,
   getDynamicSkills,
 } from './skills/loadSkillsDir.js'
+import { mergeDynamicSkillsDensable } from './skills/scopeSkillCommand.js'
 import { getBundledSkills } from './skills/bundledSkills.js'
 import { getBuiltinPluginSkillCommands } from './plugins/builtinPlugins.js'
 import {
@@ -238,7 +248,7 @@ import { isFirstPartyAnthropicBaseUrl } from './utils/model/providers.js'
 import env from './commands/env/index.js'
 import exit from './commands/exit/index.js'
 import exportCommand from './commands/export/index.js'
-import model from './commands/model/index.js'
+import { model, modelNonInteractive } from './commands/model/index.js'
 import tag from './commands/tag/index.js'
 import outputStyle from './commands/output-style/index.js'
 import remoteEnv from './commands/remote-env/index.js'
@@ -251,7 +261,7 @@ import {
 } from './commands/extra-usage/index.js'
 import rateLimitOptions from './commands/rate-limit-options/index.js'
 import statusline from './commands/statusline.js'
-import effort from './commands/effort/index.js'
+import { effort, effortNonInteractive } from './commands/effort/index.js'
 // stats/index.ts re-exports usage — /stats is now an alias of /usage
 // insights.ts is 113KB (3200 lines, includes diffLines/html rendering). Lazy
 // shim defers the heavy module until /insights is actually invoked.
@@ -326,16 +336,20 @@ const COMMANDS = memoize((): Command[] => [
   chrome,
   clear,
   color,
+  colorNonInteractive,
   compact,
   config,
+  configNonInteractive,
   copy,
   desktop,
   context,
   contextNonInteractive,
   diff,
   effort,
+  effortNonInteractive,
   exit,
   fast,
+  fastNonInteractive,
   files,
   goal,
   heapDump,
@@ -347,10 +361,12 @@ const COMMANDS = memoize((): Command[] => [
   installGitHubApp,
   installSlackApp,
   mcp,
+  mcpNonInteractive,
   memory,
   mobile,
   mode,
   model,
+  modelNonInteractive,
   outputStyle,
   remoteEnv,
   plugin,
@@ -362,12 +378,15 @@ const COMMANDS = memoize((): Command[] => [
   simplify,
   scrollSpeed,
   rename,
+  renameNonInteractive,
   resume,
   session,
   skills,
+  skillDoctor,
   status,
   statusline,
   stickers,
+  radio,
   tag,
   theme,
   feedback,
@@ -383,6 +402,7 @@ const COMMANDS = memoize((): Command[] => [
   extraUsageNonInteractive,
   rateLimitOptions,
   usage,
+  usageNonInteractive,
   usageReport,
   vim,
   webTools,
@@ -391,10 +411,12 @@ const COMMANDS = memoize((): Command[] => [
   ...(buddy ? [buddy] : []),
   ...(poor ? [poor] : []),
   ...(goalCmd ? [goalCmd] : []),
+  ...(goalNonInteractiveCmd ? [goalNonInteractiveCmd] : []),
   ...(proactive ? [proactive] : []),
   ...(monitorCmd ? [monitorCmd] : []),
   ...(coordinatorCmd ? [coordinatorCmd] : []),
   ...(briefCommand ? [briefCommand] : []),
+  focusCommand,
   ...(assistantCommand ? [assistantCommand] : []),
   ...(bridge ? [bridge] : []),
   ...(remoteControlServerCommand ? [remoteControlServerCommand] : []),
@@ -594,30 +616,31 @@ export async function getCommands(cwd: string): Promise<Command[]> {
     return baseCommands
   }
 
-  // Dedupe dynamic skills - only add if not already present
-  const baseCommandNames = new Set(baseCommands.map(c => c.name))
-  const uniqueDynamicSkills = dynamicSkills.filter(
-    s =>
-      !baseCommandNames.has(s.name) &&
-      meetsAvailabilityRequirement(s) &&
-      isCommandEnabled(s),
+  // Available dynamic skills only (enabled + availability)
+  const availableDynamics = dynamicSkills.filter(
+    s => meetsAvailabilityRequirement(s) && isCommandEnabled(s),
   )
 
-  if (uniqueDynamicSkills.length === 0) {
+  // densable Xw/FMy: multiproject qualify collisions → unqualifiedName
+  const withDynamics = mergeDynamicSkillsDensable(
+    baseCommands,
+    availableDynamics,
+    cwd,
+  )
+  // mergeDynamicSkillsDensable appends dynamics; re-insert before built-ins
+  // when densable places them after plugin skills but before COMMANDS().
+  if (withDynamics.length === baseCommands.length) {
     return baseCommands
   }
-
-  // Insert dynamic skills after plugin skills but before built-in commands
+  const added = withDynamics.slice(baseCommands.length)
   const builtInNames = new Set(COMMANDS().map(c => c.name))
   const insertIndex = baseCommands.findIndex(c => builtInNames.has(c.name))
-
   if (insertIndex === -1) {
-    return [...baseCommands, ...uniqueDynamicSkills]
+    return withDynamics
   }
-
   return [
     ...baseCommands.slice(0, insertIndex),
-    ...uniqueDynamicSkills,
+    ...added,
     ...baseCommands.slice(insertIndex),
   ]
 }
@@ -696,12 +719,25 @@ export const getSkillToolCommands = memoize(
     const { isSkillModelListable } = await import(
       './utils/residualFinalEnvGates.js'
     )
-    return allCommands.filter(cmd =>
+    const listable = allCommands.filter(cmd =>
       isSkillModelListable(cmd, {
         skillOverrides,
         settingsDisableBundledSkills,
       }),
     )
+    // densable x4r/Jte(wK()) — session skill allowlist from initialize.skills
+    try {
+      const { getSessionSkillAllowlist } = await import('./bootstrap/state.js')
+      const { filterCommandsBySkillAllowlist } = await import(
+        './types/command.js'
+      )
+      return filterCommandsBySkillAllowlist(
+        listable,
+        getSessionSkillAllowlist(),
+      )
+    } catch {
+      return listable
+    }
   },
 )
 
@@ -712,16 +748,53 @@ export const getSlashCommandToolSkills = memoize(
   async (cwd: string): Promise<Command[]> => {
     try {
       const allCommands = await getCommands(cwd)
-      return allCommands.filter(
-        cmd =>
-          cmd.type === 'prompt' &&
-          cmd.source !== 'builtin' &&
-          (cmd.hasUserSpecifiedDescription || cmd.whenToUse) &&
-          (cmd.loadedFrom === 'skills' ||
+      // densable YOe: exclude S8 (skillOverrides off) in addition to source filters.
+      let skillOverrides:
+        | Readonly<
+            Record<
+              string,
+              | 'on'
+              | 'name-only'
+              | 'user-invocable-only'
+              | 'off'
+              | 'model-invocable'
+            >
+          >
+        | undefined
+      let settingsDisableBundledSkills: boolean | undefined
+      try {
+        const { getInitialSettings } = await import(
+          './utils/settings/settings.js'
+        )
+        const settings = getInitialSettings()
+        skillOverrides = settings.skillOverrides
+        settingsDisableBundledSkills = settings.disableBundledSkills
+      } catch {
+        // Settings optional.
+      }
+      const { resolveSkillOverrideMode, isSkillFullyDisabledByOverride } =
+        await import('./utils/residualFinalEnvGates.js')
+      return allCommands.filter(cmd => {
+        if (cmd.type !== 'prompt') return false
+        if (cmd.source === 'builtin') return false
+        if (!(cmd.hasUserSpecifiedDescription || cmd.whenToUse)) return false
+        if (
+          !(
+            cmd.loadedFrom === 'skills' ||
             cmd.loadedFrom === 'plugin' ||
             cmd.loadedFrom === 'bundled' ||
-            cmd.disableModelInvocation),
-      )
+            cmd.disableModelInvocation
+          )
+        ) {
+          return false
+        }
+        // densable S8: fully off skills excluded from slash skill menus
+        const mode = resolveSkillOverrideMode(cmd, {
+          skillOverrides,
+          settingsDisableBundledSkills,
+        })
+        return !isSkillFullyDisabledByOverride(mode)
+      })
     } catch (error) {
       logError(toError(error))
       // Return empty array rather than throwing - skills are non-critical
@@ -758,6 +831,7 @@ export const REMOTE_SAFE_COMMANDS: Set<Command> = new Set([
   keybindings, // Keybinding management
   statusline, // Status line toggle
   stickers, // Stickers
+  radio, // densable velvet_static Claude FM
   mobile, // Mobile QR code
 ])
 

@@ -9,6 +9,8 @@ export type Terminal =
   | { reason: 'stop_hook_prevented' }
   | { reason: 'hook_stopped' }
   | { reason: 'max_turns'; turnCount: number }
+  /** densable fto rapid-refill thrashing breaker. */
+  | { reason: 'rapid_refill_breaker' }
 
 export type Continue =
   | { reason: 'collapse_drain_retry'; committed: number }

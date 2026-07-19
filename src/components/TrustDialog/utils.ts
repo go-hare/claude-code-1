@@ -15,6 +15,10 @@ function hasHooks(settings: SettingsJson | null): boolean {
   if (settings.fileSuggestion) {
     return true
   }
+  // densable: project/local subagentStatusLine also requires trust.
+  if (settings.subagentStatusLine) {
+    return true
+  }
   if (!settings.hooks) {
     return false
   }

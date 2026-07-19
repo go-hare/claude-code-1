@@ -906,6 +906,29 @@ export function parseToolListFromCLI(tools: string[]): string[] {
   return result
 }
 
+/**
+ * Official ZKb — parse CLAUDE_BG_SESSION_PERMISSION_RULES when SESSION_KIND=bg.
+ * Returns {allow,deny} session rule lists or undefined.
+ */
+export function readBgSessionPermissionRulesFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): { allow: string[]; deny: string[] } | undefined {
+  const raw = env.CLAUDE_BG_SESSION_PERMISSION_RULES
+  if (!raw || env.CLAUDE_CODE_SESSION_KIND !== 'bg') return undefined
+  try {
+    const parsed = JSON.parse(raw) as { allow?: unknown; deny?: unknown }
+    if (Array.isArray(parsed.allow) && Array.isArray(parsed.deny)) {
+      return {
+        allow: parsed.allow.filter((x): x is string => typeof x === 'string'),
+        deny: parsed.deny.filter((x): x is string => typeof x === 'string'),
+      }
+    }
+  } catch {
+    // ignore corrupt env
+  }
+  return undefined
+}
+
 export async function initializeToolPermissionContext({
   allowedToolsCli,
   disallowedToolsCli,
@@ -913,6 +936,7 @@ export async function initializeToolPermissionContext({
   permissionMode,
   allowDangerouslySkipPermissions: _allowDangerouslySkipPermissions,
   addDirs,
+  bgSessionPermissionRules,
 }: {
   allowedToolsCli: string[]
   disallowedToolsCli: string[]
@@ -920,6 +944,8 @@ export async function initializeToolPermissionContext({
   permissionMode: PermissionMode
   allowDangerouslySkipPermissions: boolean
   addDirs: string[]
+  /** Official ZKb / MDf — session allow/deny carried into bg fork. */
+  bgSessionPermissionRules?: { allow: string[]; deny: string[] }
 }): Promise<{
   toolPermissionContext: ToolPermissionContext
   warnings: string[]
@@ -1025,12 +1051,23 @@ export async function initializeToolPermissionContext({
     process.env.CLAUDE_PREVIEW_CLASSIFIER_FLOOR,
   )
 
+  // Official MDf: merge bgSessionPermissionRules (or CLAUDE_BG_SESSION_PERMISSION_RULES)
+  // into session alwaysAllow/Deny so left-arrow fork keeps parent session rules.
+  const bgRules =
+    bgSessionPermissionRules ?? readBgSessionPermissionRulesFromEnv()
+
   let toolPermissionContext = applyPermissionRulesToPermissionContext(
     {
       mode: permissionMode,
       additionalWorkingDirectories,
-      alwaysAllowRules: { cliArg: parsedAllowedToolsCli },
-      alwaysDenyRules: { cliArg: parsedDisallowedToolsCli },
+      alwaysAllowRules: {
+        cliArg: parsedAllowedToolsCli,
+        ...(bgRules?.allow?.length ? { session: bgRules.allow } : {}),
+      },
+      alwaysDenyRules: {
+        cliArg: parsedDisallowedToolsCli,
+        ...(bgRules?.deny?.length ? { session: bgRules.deny } : {}),
+      },
       alwaysAskRules: {},
       isBypassPermissionsModeAvailable,
       mcpPermissionModeOverrides: {},

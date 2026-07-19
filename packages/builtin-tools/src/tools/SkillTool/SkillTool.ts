@@ -36,6 +36,14 @@ import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
 } from 'src/utils/plugins/pluginIdentifier.js'
+import { recordPluginActivity } from 'src/utils/plugins/pluginActivity.js'
+import { recordPluginUse } from 'src/utils/plugins/pluginUsage.js'
+import {
+  bareSkillName,
+  formatUnknownSkillMessage,
+  isSkillForkRecursion,
+  maybeNoteScopedSkillVariants,
+} from 'src/skills/scopeSkillCommand.js'
 import { buildPluginCommandTelemetryFields } from 'src/utils/telemetry/pluginTelemetry.js'
 import { z } from 'zod/v4'
 import {
@@ -151,6 +159,11 @@ async function executeForkedSkill(
   const pluginMarketplace = command.pluginInfo
     ? parsePluginIdentifier(command.pluginInfo.repository).marketplace
     : undefined
+  // densable F$ + sJ: Skill tool fork-path plugin skill use
+  if (command.pluginInfo) {
+    recordPluginUse(command.pluginInfo.repository)
+    recordPluginActivity(command.pluginInfo.repository, 'skill')
+  }
   const queryDepth = context.queryTracking?.depth ?? 0
   const parentAgentId = getAgentContext()?.agentId
   logEvent('tengu_skill_tool_invocation', {
@@ -204,13 +217,31 @@ async function executeForkedSkill(
     }),
   })
 
-  const { modifiedGetAppState, baseAgent, promptMessages, skillContent } =
-    await prepareForkedCommandContext(command, args || '', context)
+  const {
+    modifiedGetAppState,
+    contextLayers: forkContextLayers,
+    baseAgent,
+    promptMessages,
+    skillContent,
+  } = await prepareForkedCommandContext(command, args || '', context)
+
+  // densable aWr: multiproject scoped-variant meta note for forked Skill tool
+  const scopedVariantNote = maybeNoteScopedSkillVariants(command, {
+    tools: context.options.tools,
+    commands: await getAllCommands(context),
+    spawnedBySkill: bareSkillName(command),
+  })
+  if (scopedVariantNote) {
+    promptMessages.push(scopedVariantNote)
+  }
 
   // Merge skill's effort into the agent definition so runAgent applies it
+  // densable L6g: e.getEffort?.(r||"",n)??e.effort
+  const skillEffort =
+    command.getEffort?.(args || '', context) ?? command.effort
   const agentDefinition =
-    command.effort !== undefined
-      ? { ...baseAgent, effort: command.effort }
+    skillEffort !== undefined
+      ? { ...baseAgent, effort: skillEffort }
       : baseAgent
 
   // Collect messages from the forked agent
@@ -222,16 +253,25 @@ async function executeForkedSkill(
 
   try {
     // Run the sub-agent
+    // densable: pass spawnedBySkill so nested Skill tool calls can block
+    // skill_invoke_fork_recursion (errorCode 9).
+    // densable L6g: permissionLayers = parent stack + gWr contextLayers
+    const permissionLayers =
+      forkContextLayers.length > 0
+        ? [...(context.permissionLayers ?? []), ...forkContextLayers]
+        : context.permissionLayers
     for await (const message of runAgent({
       agentDefinition,
       promptMessages,
       toolUseContext: {
         ...context,
         getAppState: modifiedGetAppState,
+        permissionLayers,
       },
       canUseTool,
       isAsync: false,
       querySource: 'agent:custom',
+      spawnedBySkill: bareSkillName(command),
       model: command.model as ModelAlias | undefined,
       availableTools: context.options.tools,
       override: { agentId },
@@ -471,20 +511,128 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       }
     }
     if (!foundCommand) {
+      // densable skill_invoke_not_found: zrs scoped variants, else _it did-you-mean
+      logEvent('skill_invoke_not_found', {})
       return {
         result: false,
-        message: `Unknown skill: ${normalizedCommandName}`,
+        message: formatUnknownSkillMessage(
+          normalizedCommandName,
+          commands,
+          context.options.spawnedBySkill,
+        ),
         errorCode: 2,
       }
     }
 
-    // Check if command has model invocation disabled
-    if (foundCommand.disableModelInvocation) {
+    // densable skill_invoke_fork_recursion (errorCode 9): forked skill subagent
+    // re-invoking the same skill family via Skill tool.
+    if (isSkillForkRecursion(foundCommand, context.options.spawnedBySkill)) {
+      logEvent('skill_invoke_fork_recursion', {})
+      logEvent('tengu_skill_tool_fork_recursion_blocked', {})
+      return {
+        result: false,
+        message: `Skill ${normalizedCommandName} is already executing in this forked context — you are the subagent running it. Execute the instructions in the skill body directly instead of re-invoking the ${SKILL_TOOL_NAME} tool.`,
+        errorCode: 9,
+      }
+    }
+
+    // densable O6g: user typed `/skill` this turn (main session only).
+    // RWr allows disableModelInvocation / user-invocable-only when true.
+    let userTypedThisTurn = false
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const residualGates =
+        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+      userTypedThisTurn = residualGates.userTypedSkillThisTurn(
+        normalizedCommandName,
+        {
+          agentId: context.agentId,
+          messages: context.messages ?? [],
+        },
+      )
+    } catch {
+      // residual optional
+    }
+
+    // Check if command has model invocation disabled (densable: unless userTyped)
+    if (foundCommand.disableModelInvocation && !userTypedThisTurn) {
       return {
         result: false,
         message: `Skill ${normalizedCommandName} cannot be used with ${SKILL_TOOL_NAME} tool due to disable-model-invocation`,
         errorCode: 4,
       }
+    }
+
+    // densable RWr/KOe (errorCode 7): off always blocks; user-invocable-only
+    // blocks unless userTypedThisTurn. name-only ok. Slash uses processSlashCommand.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const residualGates =
+        require('src/utils/residualFinalEnvGates.js') as typeof import('src/utils/residualFinalEnvGates.js')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getInitialSettings } =
+        require('src/utils/settings/settings.js') as typeof import('src/utils/settings/settings.js')
+      let skillOverrides:
+        | Readonly<
+            Record<
+              string,
+              | 'on'
+              | 'name-only'
+              | 'user-invocable-only'
+              | 'off'
+              | 'model-invocable'
+            >
+          >
+        | undefined
+      let settingsDisableBundledSkills: boolean | undefined
+      try {
+        const settings = getInitialSettings()
+        skillOverrides = settings.skillOverrides
+        settingsDisableBundledSkills = settings.disableBundledSkills
+      } catch {
+        // settings optional
+      }
+      const mode = residualGates.resolveSkillOverrideMode(foundCommand, {
+        skillOverrides,
+        settingsDisableBundledSkills,
+      })
+      if (
+        residualGates.isSkillToolInvocationBlockedByOverride(
+          mode,
+          userTypedThisTurn,
+        )
+      ) {
+        const killSwitch =
+          residualGates.isBuiltinPromptSkillDisabledByBundledSetting(
+            foundCommand,
+            { settingsDisableBundledSkills },
+          )
+        const overrideKeys = [foundCommand.name]
+        if (
+          foundCommand.type === 'prompt' &&
+          foundCommand.unqualifiedName != null
+        ) {
+          overrideKeys.push(foundCommand.unqualifiedName)
+        }
+        const explicit = overrideKeys.some(k => {
+          const v = skillOverrides?.[k]
+          return v === 'user-invocable-only' || v === 'off'
+        })
+        const by =
+          killSwitch && explicit
+            ? 'by the disableBundledSkills setting or CLAUDE_CODE_DISABLE_BUNDLED_SKILLS env var, and by an explicit skillOverrides entry'
+            : killSwitch
+              ? 'by the disableBundledSkills setting or CLAUDE_CODE_DISABLE_BUNDLED_SKILLS env var'
+              : 'in skillOverrides settings'
+        logEvent('skill_invoke_override_disabled', {})
+        return {
+          result: false,
+          message: `Skill ${normalizedCommandName} is disabled for model invocation ${by}`,
+          errorCode: 7,
+        }
+      }
+    } catch {
+      // residual optional
     }
 
     // Check if command is a prompt-based command
@@ -740,6 +888,11 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       command?.type === 'prompt' && command.pluginInfo
         ? parsePluginIdentifier(command.pluginInfo.repository).marketplace
         : undefined
+    // densable F$ + sJ: Skill tool inline-path plugin skill use
+    if (command?.type === 'prompt' && command.pluginInfo) {
+      recordPluginUse(command.pluginInfo.repository)
+      recordPluginActivity(command.pluginInfo.repository, 'skill')
+    }
     const queryDepth = context.queryTracking?.depth ?? 0
     const parentAgentId = getAgentContext()?.agentId
     logEvent('tengu_skill_tool_invocation', {
@@ -831,6 +984,31 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     // calling them again here would double-register hooks and rebuild
     // skillContent redundantly.
 
+    // densable SkillTool: emit contextLayers (allowed_tools / model / effort)
+    // for Ter + Tn, while keeping contextModifier for in-process getAppState
+    // mutation (effortValue) and backward-compatible allow/model apply.
+    // Use densable ContextLayer kinds (allowed_tools / model / effort)
+    const contextLayers: import('src/utils/contextLayers.js').ContextLayer[] =
+      []
+    if (allowedTools.length > 0) {
+      contextLayers.push({
+        kind: 'allowed_tools',
+        allowedTools: [...allowedTools],
+      })
+    }
+    if (model) {
+      contextLayers.push({
+        kind: 'model',
+        mainLoopModel: resolveSkillModelOverride(
+          model,
+          context.options.mainLoopModel,
+        ),
+      })
+    }
+    if (effort !== undefined) {
+      contextLayers.push({ kind: 'effort', effort })
+    }
+
     // Return success with newMessages and contextModifier
     return {
       data: {
@@ -840,6 +1018,7 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
         model,
       },
       newMessages,
+      ...(contextLayers.length > 0 ? { contextLayers } : {}),
       contextModifier(ctx) {
         let modifiedContext = ctx
 
@@ -956,6 +1135,8 @@ const SAFE_SKILL_PROPERTIES = new Set([
   'agent',
   'getPromptForCommand',
   'frontmatterKeys',
+  // densable FMy: multiproject bare name after name qualification
+  'unqualifiedName',
   // CommandBase properties
   'name',
   'description',

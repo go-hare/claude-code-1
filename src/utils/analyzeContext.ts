@@ -948,6 +948,8 @@ export async function analyzeContextUsage(
   mainThreadAgentDefinition?: AgentDefinition,
   /** Original messages before microcompact, used to extract API usage */
   originalMessages?: Message[],
+  /** densable dmo/mB excludeDynamicSections for system-prompt assembly */
+  excludeDynamicSections?: boolean,
 ): Promise<ContextData> {
   const runtimeModel = getRuntimeMainLoopModel({
     permissionMode: (await getToolPermissionContext()).mode,
@@ -957,7 +959,13 @@ export async function analyzeContextUsage(
   const contextWindow = getContextWindowForModel(runtimeModel, getSdkBetas())
 
   // Build the effective system prompt using the shared utility
-  const defaultSystemPrompt = await getSystemPrompt(tools, runtimeModel)
+  const defaultSystemPrompt = await getSystemPrompt(
+    tools,
+    runtimeModel,
+    undefined,
+    undefined,
+    { excludeDynamicSections },
+  )
   const effectiveSystemPrompt = buildEffectiveSystemPrompt({
     mainThreadAgentDefinition,
     toolUseContext: toolUseContext ?? {

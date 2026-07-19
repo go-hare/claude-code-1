@@ -1,3 +1,5 @@
+import type { ToolUseContext } from 'src/Tool.js'
+
 export interface SearchResult {
   title: string
   url: string
@@ -17,6 +19,11 @@ export interface SearchOptions {
   searchType?: 'auto' | 'fast' | 'deep'
   /** Maximum characters for context string (default: 10000) */
   contextMaxCharacters?: number
+  /**
+   * densable WebSearchTool.call(e,t,...) ToolUseContext — used by API adapter
+   * for P_ effortValue + Tn getToolPermissionContext (bare mainLoopModel, not X$).
+   */
+  toolUseContext?: ToolUseContext
 }
 
 export interface SearchProgress {

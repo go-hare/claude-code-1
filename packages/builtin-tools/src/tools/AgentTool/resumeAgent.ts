@@ -17,11 +17,13 @@ import {
   filterUnresolvedToolUses,
   filterWhitespaceOnlyAssistantMessages,
 } from 'src/utils/messages.js'
+import { resolveMainLoopModel } from 'src/utils/contextLayers.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js'
 import {
   getAgentTranscript,
   readAgentMetadata,
+  recordSidechainTranscript,
   writeAgentMetadata,
 } from 'src/utils/sessionStorage.js'
 import { createAgentId } from 'src/utils/uuid.js'
@@ -42,20 +44,104 @@ export type ResumeAgentResult = {
   agentId: string
   description: string
   outputFile: string
+  /**
+   * Official Aye alreadyCompleted — when continueInterruptedTurn and the
+   * sidechain already ends on an assistant turn ($co false), skip re-run
+   * and only report completion (orphan EAf path).
+   */
+  alreadyCompleted?: boolean
+  /**
+   * Official Aye awaitCompletion path — final text from the completed turn
+   * after joining the lifecycle promise (`Tu(pe.result?.content??[], "\n")`).
+   */
+  finalText?: string
 }
+
+/**
+ * Official densable B6 — ResumeAgentStateError base for Aye resume failures
+ * that are not a hard user-stop. Observer host restarts on this name.
+ */
+export class ResumeAgentStateError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ResumeAgentStateError'
+  }
+}
+
+/**
+ * Official densable orr extends B6 — AgentStoppedByUserError. Thrown by Aye
+ * when stoppedByUser refuses silent resume. Observer delivery classifies this
+ * name as pairing-terminal (no restart).
+ */
+export class AgentStoppedByUserError extends ResumeAgentStateError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentStoppedByUserError'
+  }
+}
+
 export async function resumeAgentBackground({
   agentId,
   prompt,
   toolUseContext,
   canUseTool,
   invokingRequestId,
+  continueInterruptedTurn,
+  userInitiated,
+  promptOriginKind,
+  suppressOwnerNotification,
+  awaitCompletion,
+  workerPermissionMode: _workerPermissionMode,
+  promptIsMeta,
 }: {
   agentId: string
   prompt: string
   toolUseContext: ToolUseContext
   canUseTool: CanUseToolFn
   invokingRequestId?: string
+  /**
+   * Official Aye `continueInterruptedTurn` (orphan auto-resume / send-message
+   * resume). When true and the filtered transcript is already complete
+   * (ends on assistant), return alreadyCompleted without spawning.
+   * Also densable: if(continueInterruptedTurn) skip Xeo append and skip
+   * re-appending the resume prompt to promptMessages.
+   */
+  continueInterruptedTurn?: boolean
+  /**
+   * Official Aye `userInitiated` — when true, clears stoppedByUser marker and
+   * allows resume after an explicit user re-launch. Silent/auto resumes refuse
+   * when metadata.stoppedByUser is set.
+   */
+  userInitiated?: boolean
+  /**
+   * Official promptOrigin.kind — `observer-activity` bypasses the stoppedByUser
+   * refuse (observer re-arm must resume observed agents the user stopped).
+   */
+  promptOriginKind?: string
+  /**
+   * Official Aye `suppressOwnerNotification` — densable Cxt.deliver passes
+   * `!0` so observer mid-task resume does not surface owner BRt noise. Local:
+   * Kle after Sot + shouldNotifyOwner:!1 when also awaiting.
+   */
+  suppressOwnerNotification?: boolean
+  /**
+   * Official Aye `awaitCompletion` — densable observer deliver uses `!0`.
+   * When true: parentAbortController linked, join lifecycle, return finalText,
+   * finally notify+evictAfter grace (Yqe join path).
+   */
+  awaitCompletion?: boolean
+  /**
+   * Official Aye `workerPermissionMode` — densable observer deliver passes
+   * arming permission mode. Accepted for call-site parity (runAgent residual).
+   */
+  workerPermissionMode?: string
+  /**
+   * Official Aye `promptIsMeta` (n) — when true, densable skips Xeo
+   * (`if(!n&&!o)Xeo`) because the prompt is already on the sidechain.
+   */
+  promptIsMeta?: boolean
 }): Promise<ResumeAgentResult> {
+  void _workerPermissionMode
   const startTime = Date.now()
   const appState = toolUseContext.getAppState()
   // In-process teammates get a no-op setAppState; setAppStateForTasks
@@ -71,11 +157,103 @@ export async function resumeAgentBackground({
   if (!transcript) {
     throw new Error(`No transcript found for agent ID: ${agentId}`)
   }
+
+  // Official Aye: if (b?.stoppedByUser && r?.kind !== "observer-activity") {
+  //   if (!c) throw orr(...); else clear marker via T1e
+  // }
+  // Second gate BEFORE Sot: if (!c && Wl(ne) && ne.stoppedByUser) throw orr
+  const refuseStoppedMsg = `Agent ${agentId} was stopped by the user and won't be resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`
+  if (
+    meta?.stoppedByUser === true &&
+    promptOriginKind !== 'observer-activity'
+  ) {
+    if (!userInitiated) {
+      throw new AgentStoppedByUserError(refuseStoppedMsg)
+    }
+    // Explicit user re-launch: clear stop marker on sidecar so subsequent
+    // silent resumes are not blocked after this intentional restart.
+    try {
+      const { stoppedByUser: _cleared, ...rest } = meta
+      await writeAgentMetadata(asAgentId(agentId), {
+        ...rest,
+        agentType: rest.agentType ?? 'general-purpose',
+      })
+    } catch (err) {
+      logForDebugging(
+        `failed to clear stop marker for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
+  // Official Aye densable: if (r?.kind==="observer-activity" && b?.isObserver!==!0)
+  // throw B6(`Observer sidecar for ${e} missing or did not confirm isObserver...`)
+  if (promptOriginKind === 'observer-activity' && meta?.isObserver !== true) {
+    throw new ResumeAgentStateError(
+      `Observer sidecar for ${agentId} missing or did not confirm isObserver; refusing delivery`,
+    )
+  }
+
+  // Live registry second gate (densable ne.stoppedByUser BEFORE Sot/register)
+  // checked just above registerAsyncAgent when userInitiated is false.
+  // Official Aye: P = continueInterruptedTurn ? LVr(messages) : messages
+  // then O = filters(P); if (continueInterruptedTurn && O.length>0 && !$co(O)) alreadyCompleted.
+  let rawForResume = transcript.messages as Array<{
+    type?: string
+    message?: { content?: unknown; stop_reason?: string | null }
+    [key: string]: unknown
+  }>
+  if (continueInterruptedTurn) {
+    const { stripInterruptedTrailingTurns } = await import(
+      'src/utils/orphanAgentResume.js'
+    )
+    rawForResume = stripInterruptedTrailingTurns(rawForResume)
+  }
   const resumedMessages = filterWhitespaceOnlyAssistantMessages(
     filterOrphanedThinkingOnlyMessages(
-      filterUnresolvedToolUses(transcript.messages),
+      filterUnresolvedToolUses(rawForResume as never),
     ),
   )
+  if (continueInterruptedTurn && resumedMessages.length > 0) {
+    const { isAgentTranscriptIncomplete } = await import(
+      'src/utils/orphanAgentResume.js'
+    )
+    if (!isAgentTranscriptIncomplete(resumedMessages as never)) {
+      // Official Aye alreadyCompleted: g.update(e, {resuming:!1, notified:!0,
+      // evictAfter: Date.now()+_re}) then return without re-running.
+      try {
+        const { PANEL_GRACE_MS } = await import('src/utils/task/framework.js')
+        rootSetAppState(prev => {
+          const tasks = prev.tasks
+          const task = tasks?.[agentId]
+          if (!task || !tasks) return prev
+          const retain =
+            'retain' in task ? Boolean((task as { retain?: boolean }).retain) : false
+          const nextTask = {
+            ...task,
+            resuming: false,
+            notified: true as const,
+            evictAfter: retain
+              ? (task as { evictAfter?: number }).evictAfter
+              : Date.now() + PANEL_GRACE_MS,
+          }
+          return {
+            ...prev,
+            tasks: {
+              ...tasks,
+              [agentId]: nextTask as typeof task,
+            },
+          }
+        })
+      } catch {
+        /* best-effort — task may not be registered on orphan cold resume */
+      }
+      return {
+        agentId,
+        description: meta?.description ?? '(resumed)',
+        outputFile: getTaskOutputPath(agentId),
+        alreadyCompleted: true,
+      }
+    }
+  }
   const resumedReplacementState = reconstructForSubagentResume(
     toolUseContext.contentReplacementState,
     resumedMessages,
@@ -117,6 +295,9 @@ export async function resumeAgentBackground({
 
   const uiDescription = meta?.description ?? '(resumed)'
 
+  // densable X$ — last model permissionLayer wins over options.mainLoopModel.
+  const parentMainLoopModel = resolveMainLoopModel(toolUseContext)
+
   let forkParentSystemPrompt: SystemPrompt | undefined
   if (isResumedFork) {
     if (toolUseContext.renderedSystemPrompt) {
@@ -132,7 +313,7 @@ export async function resumeAgentBackground({
       )
       const defaultSystemPrompt = await getSystemPrompt(
         toolUseContext.options.tools,
-        toolUseContext.options.mainLoopModel,
+        parentMainLoopModel,
         additionalWorkingDirectories,
         toolUseContext.options.mcpClients,
       )
@@ -154,11 +335,8 @@ export async function resumeAgentBackground({
   // Resolve model for analytics metadata (runAgent resolves its own internally).
   // Official $6e: Explore firstParty cap-to-opus before getAgentModel.
   const resolvedAgentModel = getAgentModel(
-    resolveAgentDefinitionModel(
-      selectedAgent,
-      toolUseContext.options.mainLoopModel,
-    ),
-    toolUseContext.options.mainLoopModel,
+    resolveAgentDefinitionModel(selectedAgent, parentMainLoopModel),
+    parentMainLoopModel,
     undefined,
     permissionMode,
   )
@@ -171,12 +349,26 @@ export async function resumeAgentBackground({
     ? filterParentToolsForFork(toolUseContext.options.tools)
     : assembleToolPool(workerPermissionContext, appState.mcp.tools)
 
+  // Official densable:
+  //   ie = r ? Nr({content:cIt(t,r),origin:r,isMeta:!0})
+  //        : Nr({content:t,...n&&{isMeta:!0}})
+  //   promptMessages: o ? O : [...O, ie]
+  // Local: observer-activity leaves body as-is (cIt case); stamps origin+isMeta.
+  const resumeUserMessage = promptOriginKind
+    ? createUserMessage({
+        content: prompt,
+        origin: promptOriginKind as never,
+        isMeta: true,
+      })
+    : createUserMessage({
+        content: prompt,
+        ...(promptIsMeta ? { isMeta: true as const } : {}),
+      })
   const runAgentParams: Parameters<typeof runAgent>[0] = {
     agentDefinition: selectedAgent,
-    promptMessages: [
-      ...resumedMessages,
-      createUserMessage({ content: prompt }),
-    ],
+    promptMessages: continueInterruptedTurn
+      ? [...resumedMessages]
+      : [...resumedMessages, resumeUserMessage],
     toolUseContext,
     canUseTool,
     isAsync: true,
@@ -360,7 +552,85 @@ export async function resumeAgentBackground({
     )
   }
 
+  // Official Aye second stoppedByUser gate BEFORE Sot(register):
+  //   ne = g.get(e); if (!c && Wl(ne) && ne.stoppedByUser) throw orr(...)
+  // Must run pre-register: densable ekg does not carry stoppedByUser across
+  // replace, so a post-Sot read would always miss hAe's live stamp. Meta was
+  // cleared above when userInitiated; live flag still blocks silent resume
+  // if only the in-memory task was stamped (sidecar missing).
+  if (!userInitiated) {
+    let liveStopped = false
+    rootSetAppState(prev => {
+      const t = prev.tasks?.[agentId] as
+        | { type?: string; stoppedByUser?: boolean }
+        | undefined
+      if (t?.type === 'local_agent' && t.stoppedByUser === true) {
+        liveStopped = true
+      }
+      return prev
+    })
+    if (liveStopped) {
+      throw new AgentStoppedByUserError(refuseStoppedMsg)
+    }
+  }
+
   // Skip name-registry write — original entry persists from the initial spawn
+  // Official densable: if(!n&&!o)Xeo(e, Ace(r)?ie:Nr(...), g)
+  // Append resume prompt to in-memory task transcript + sidechain before Sot
+  // so retain/panel and disk share the new user turn. Skip when promptIsMeta
+  // (n) or continueInterruptedTurn (o) — densable already has that message.
+  if (!promptIsMeta && !continueInterruptedTurn) {
+    try {
+      rootSetAppState(prev => {
+        const t = prev.tasks?.[agentId]
+        if (!t || t.type !== 'local_agent') return prev
+        const base =
+          'messages' in t && Array.isArray((t as { messages?: unknown[] }).messages)
+            ? ((t as { messages?: unknown[] }).messages as unknown[])
+            : []
+        return {
+          ...prev,
+          tasks: {
+            ...prev.tasks,
+            [agentId]: {
+              ...t,
+              messages: [...base, resumeUserMessage] as never,
+            },
+          },
+        }
+      })
+      void recordSidechainTranscript(
+        [resumeUserMessage as never],
+        agentId,
+      ).catch(err =>
+        logForDebugging(
+          `Xeo sidechain append failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      )
+    } catch {
+      /* best-effort — registry may lack the task on cold resume */
+    }
+  }
+
+  // Official Sot: ...r?.kind==="observer-activity"&&{isObserver:!0}
+  // Also re-stamp when sidecar already marks isObserver (observer cold resume).
+  // densable: parentAbortController:i?s.abortController:void 0
+  const stampIsObserver =
+    promptOriginKind === 'observer-activity' || meta?.isObserver === true
+  // densable Sot: ownerAgentId: mi() on cold resume (main-owned). Local only
+  // stamps nested panel parents so BRt/Gge do not attach to session id.
+  let nestedOwnerId: string | undefined
+  try {
+    const { resolvePanelOwnerAgentId } = await import(
+      'src/tasks/LocalAgentTask/LocalAgentTask.js'
+    )
+    nestedOwnerId = resolvePanelOwnerAgentId(
+      toolUseContext.agentId,
+      toolUseContext.getAppState,
+    )
+  } catch {
+    nestedOwnerId = undefined
+  }
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
     description: uiDescription,
@@ -368,7 +638,45 @@ export async function resumeAgentBackground({
     selectedAgent,
     setAppState: rootSetAppState,
     toolUseId: toolUseContext.toolUseId,
+    ...(awaitCompletion
+      ? { parentAbortController: toolUseContext.abortController }
+      : {}),
+    ...(stampIsObserver ? { isObserver: true } : {}),
+    ...(nestedOwnerId
+      ? {
+          ownerAgentId: nestedOwnerId,
+          notificationTargetAgentId: asAgentId(nestedOwnerId),
+          parentAgentId: nestedOwnerId,
+        }
+      : {}),
   })
+
+  // Official Aye: if(u) Kle(re.agentId, g) — suppressOwnerNotification parks
+  // the resumed agent as quietly notified so complete/BRt does not re-notify
+  // the owner for observer-activity digests.
+  if (suppressOwnerNotification) {
+    try {
+      const { markAgentsNotified } = await import(
+        'src/tasks/LocalAgentTask/LocalAgentTask.js'
+      )
+      markAgentsNotified(agentId, rootSetAppState)
+    } catch {
+      /* optional in pure unit contexts */
+    }
+  }
+
+  // Official Aye densable: after Sot(register) + await exu(re-arm) → Jeo(e, g).
+  // Local re-arm runs just above; Jeo sweeps stale agent:/workflow: KA on the
+  // resumed agent so orphan holds from a prior terminal child do not pin the
+  // panel after resume re-attaches live observer/workflow children.
+  try {
+    const { sweepStaleKeepaliveReasons } = await import(
+      'src/utils/task/framework.js'
+    )
+    sweepStaleKeepaliveReasons(agentId, rootSetAppState)
+  } catch {
+    /* best-effort — registry may be empty in pure unit contexts */
+  }
 
   const metadata = {
     prompt,
@@ -394,7 +702,8 @@ export async function resumeAgentBackground({
   const wrapWithCwd = <T>(fn: () => T): T =>
     resumedWorktreePath ? runWithCwdOverride(resumedWorktreePath, fn) : fn()
 
-  void runWithAgentContext(asyncAgentContext, () =>
+  // densable: shouldNotifyOwner:i?()=>!1:void 0
+  const lifecyclePromise = runWithAgentContext(asyncAgentContext, () =>
     wrapWithCwd(() =>
       runAsyncAgentLifecycle({
         taskId: agentBackgroundTask.agentId,
@@ -420,9 +729,62 @@ export async function resumeAgentBackground({
           getSdkAgentProgressSummariesEnabled(),
         getWorktreeResult: async () =>
           resumedWorktreePath ? { worktreePath: resumedWorktreePath } : {},
+        ...(awaitCompletion ? { shouldNotifyOwner: () => false } : {}),
       }),
     ),
   )
+
+  if (awaitCompletion) {
+    // Official: if(i) try{await Ae; finalText=Tu(...)} finally{notified+evictAfter}
+    try {
+      await lifecyclePromise
+      let finalText = ''
+      rootSetAppState(prev => {
+        const t = prev.tasks?.[agentId] as
+          | {
+              type?: string
+              result?: { content?: Array<{ type?: string; text?: string }> }
+            }
+          | undefined
+        if (t?.type === 'local_agent' && t.result?.content) {
+          finalText = t.result.content
+            .map(c => (c && typeof c.text === 'string' ? c.text : ''))
+            .filter(Boolean)
+            .join('\n')
+        }
+        return prev
+      })
+      return {
+        agentId,
+        description: uiDescription,
+        outputFile: getTaskOutputPath(agentId),
+        finalText,
+      }
+    } finally {
+      try {
+        const { PANEL_GRACE_MS } = await import('src/utils/task/framework.js')
+        rootSetAppState(prev => {
+          const t = prev.tasks?.[agentId]
+          if (!t) return prev
+          return {
+            ...prev,
+            tasks: {
+              ...prev.tasks,
+              [agentId]: {
+                ...t,
+                notified: true,
+                evictAfter: Date.now() + PANEL_GRACE_MS,
+              } as typeof t,
+            },
+          }
+        })
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
+  void lifecyclePromise
 
   return {
     agentId,

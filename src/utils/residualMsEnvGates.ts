@@ -1,7 +1,22 @@
 /**
  * Official residual positive-integer ms env gates (portable parsers).
- * Invalid/missing → undefined (caller keeps default).
+ * Invalid/missing → undefined or documented defaults (caller-dependent).
  */
+
+export const DEFAULT_AUTH_FAIL_EXIT_MS = 300_000
+export const DEFAULT_USER_DIALOG_TIMEOUT_MS = 300_000
+export const DEFAULT_PARKED_PERMISSION_WAIT_MS = 2_000
+export const DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS = 30_000
+export const DEFAULT_OAUTH_401_WAIT_REMOTE_MS = 30_000
+export const DEFAULT_IDLE_THRESHOLD_MINUTES = 60
+export const DEFAULT_IDLE_TOKEN_THRESHOLD = 100_000
+export const DEFAULT_SESSIONEND_HOOKS_TIMEOUT_MS = 1_500
+export const DEFAULT_PWSH_PARSE_TIMEOUT_MS = 5_000
+export const DEFAULT_API_KEY_HELPER_TTL_MS = 5 * 60 * 1000
+export const DEFAULT_AWS_CHAIN_RESOLVE_TIMEOUT_MS = 60_000
+export const DEFAULT_MCP_TOOL_IDLE_TIMEOUT_MS = 5 * 60 * 1000
+export const DEFAULT_MAX_TOOL_USE_CONCURRENCY = 10
+export const DEFAULT_STOP_HOOK_BLOCK_CAP = 50
 
 function parsePositiveMs(raw: string | undefined): number | undefined {
   if (!raw) return undefined
@@ -10,16 +25,13 @@ function parsePositiveMs(raw: string | undefined): number | undefined {
   return Math.floor(n)
 }
 
-/** Official cjt default: 10 minutes. */
-export const DEFAULT_AUTH_FAIL_EXIT_MS = 600_000
-/** Official W1n / Jeh default. */
-export const DEFAULT_USER_DIALOG_TIMEOUT_MS = 300_000
-/** Official Svf / PARKED_PERMISSION_ANSWER_WAIT_MS default. */
-export const DEFAULT_PARKED_PERMISSION_WAIT_MS = 2_000
-/** Official ZEf default. */
-export const DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS = 10_000
-/** Official XTh remote-session default when env unset. */
-export const DEFAULT_OAUTH_401_WAIT_REMOTE_MS = 60_000
+/** Non-negative integer ms (0 allowed). Invalid/missing → undefined. */
+function parseNonNegativeMs(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === '') return undefined
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return undefined
+  return Math.floor(n)
+}
 
 export function resolveAuthFailExitMs(
   env: NodeJS.ProcessEnv = process.env,
@@ -28,16 +40,16 @@ export function resolveAuthFailExitMs(
 }
 
 /**
- * Official cjt threshold: env CLAUDE_CODE_AUTH_FAIL_EXIT_MS or 600_000.
- * Raw 0 disables the zombie-exit kill switch.
+ * OrDefault densable — explicit 0 allowed; invalid/missing → DEFAULT.
+ * Uses non-negative parse so CLAUDE_CODE_AUTH_FAIL_EXIT_MS=0 disables exit.
  */
 export function resolveAuthFailExitMsOrDefault(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = env.CLAUDE_CODE_AUTH_FAIL_EXIT_MS
-  if (raw === undefined || raw === '') return DEFAULT_AUTH_FAIL_EXIT_MS
-  const n = Number(raw)
-  return Number.isFinite(n) ? Math.floor(n) : DEFAULT_AUTH_FAIL_EXIT_MS
+  return (
+    parseNonNegativeMs(env.CLAUDE_CODE_AUTH_FAIL_EXIT_MS) ??
+    DEFAULT_AUTH_FAIL_EXIT_MS
+  )
 }
 
 export function resolveUserDialogTimeoutMs(
@@ -46,14 +58,10 @@ export function resolveUserDialogTimeoutMs(
   return parsePositiveMs(env.CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS)
 }
 
-/** Official W1n — USER_DIALOG_TIMEOUT_MS ?? 300_000. */
 export function resolveUserDialogTimeoutMsOrDefault(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = env.CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS
-  if (raw === undefined || raw === '') return DEFAULT_USER_DIALOG_TIMEOUT_MS
-  const n = Number(raw)
-  return Number.isFinite(n) ? Math.floor(n) : DEFAULT_USER_DIALOG_TIMEOUT_MS
+  return resolveUserDialogTimeoutMs(env) ?? DEFAULT_USER_DIALOG_TIMEOUT_MS
 }
 
 export function resolveParkedPermissionWaitMs(
@@ -62,14 +70,12 @@ export function resolveParkedPermissionWaitMs(
   return parsePositiveMs(env.CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS)
 }
 
-/** Official Svf — PARKED_PERMISSION_WAIT_MS ?? 2000. */
 export function resolveParkedPermissionWaitMsOrDefault(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = env.CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS
-  if (raw === undefined || raw === '') return DEFAULT_PARKED_PERMISSION_WAIT_MS
-  const n = Number(raw)
-  return Number.isFinite(n) ? Math.floor(n) : DEFAULT_PARKED_PERMISSION_WAIT_MS
+  return (
+    resolveParkedPermissionWaitMs(env) ?? DEFAULT_PARKED_PERMISSION_WAIT_MS
+  )
 }
 
 export function resolveOauth401WaitMs(
@@ -79,20 +85,20 @@ export function resolveOauth401WaitMs(
 }
 
 /**
- * Official XTh — CLAUDE_CODE_OAUTH_401_WAIT_MS if set (incl. 0);
- * else remote session → 60_000, else 0.
+ * Official XTh densable — OAuth 401 wait with remote default.
+ * - Explicit CLAUDE_CODE_OAUTH_401_WAIT_MS (incl. 0) wins.
+ * - Remote session → DEFAULT_OAUTH_401_WAIT_REMOTE_MS (30_000).
+ * - Non-remote → 0 (no wait).
  */
 export function resolveOauth401WaitMsOrDefault(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = env.CLAUDE_CODE_OAUTH_401_WAIT_MS
-  if (raw !== undefined) {
-    const n = Number(raw)
-    return Number.isFinite(n) ? n : 0
-  }
-  return env.CLAUDE_CODE_REMOTE_SESSION_ID
-    ? DEFAULT_OAUTH_401_WAIT_REMOTE_MS
-    : 0
+  const explicit = parseNonNegativeMs(env.CLAUDE_CODE_OAUTH_401_WAIT_MS)
+  if (explicit !== undefined) return explicit
+  const isRemote = Boolean(
+    env.CLAUDE_CODE_REMOTE_SESSION_ID || env.CLAUDE_CODE_REMOTE,
+  )
+  return isRemote ? DEFAULT_OAUTH_401_WAIT_REMOTE_MS : 0
 }
 
 export function resolveTeamTeardownParkTimeoutMs(
@@ -101,148 +107,40 @@ export function resolveTeamTeardownParkTimeoutMs(
   return parsePositiveMs(env.CLAUDE_CODE_TEAM_TEARDOWN_PARK_TIMEOUT_MS)
 }
 
-/** Official ZEf — TEAM_TEARDOWN_PARK_TIMEOUT_MS ?? 10_000. */
 export function resolveTeamTeardownParkTimeoutMsOrDefault(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = env.CLAUDE_CODE_TEAM_TEARDOWN_PARK_TIMEOUT_MS
-  if (raw === undefined || raw === '') {
-    return DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS
-  }
-  const n = Number(raw)
-  return Number.isFinite(n)
-    ? Math.floor(n)
-    : DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS
+  return (
+    resolveTeamTeardownParkTimeoutMs(env) ??
+    DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS
+  )
 }
 
-export type AuthFailExitDecision = 'continue' | 'exit'
-
-export type AuthFailExitState = {
-  firstFailAtMs: number | null
-}
-
-/**
- * Official cjt densable — remote-child unrecovered OAuth 401 zombie-exit gate.
- * recovered → clear + continue; non-remote → continue; threshold≤0 → continue;
- * first fail records timestamp; subsequent past threshold → exit.
- */
-export function evaluateRemoteAuthFailExit(
-  state: AuthFailExitState,
-  input: {
-    recovered?: boolean
-    nowMs?: number
-    isRemoteChild?: boolean
-    thresholdMs?: number
-    env?: NodeJS.ProcessEnv
-  } = {},
-): { decision: AuthFailExitDecision; state: AuthFailExitState } {
-  const env = input.env ?? process.env
-  if (input.recovered) {
-    return { decision: 'continue', state: { firstFailAtMs: null } }
-  }
-  const isRemote =
-    input.isRemoteChild ?? Boolean(env.CLAUDE_CODE_REMOTE_SESSION_ID)
-  if (!isRemote) {
-    return { decision: 'continue', state }
-  }
-  const threshold = input.thresholdMs ?? resolveAuthFailExitMsOrDefault(env)
-  if (threshold <= 0) {
-    return { decision: 'continue', state }
-  }
-  const now = input.nowMs ?? Date.now()
-  if (state.firstFailAtMs === null) {
-    return { decision: 'continue', state: { firstFailAtMs: now } }
-  }
-  if (now - state.firstFailAtMs >= threshold) {
-    return { decision: 'exit', state }
-  }
-  return { decision: 'continue', state }
-}
-
-/**
- * Official dbc densable — poll until env/FD OAuth token rotates away from
- * the failed access token, or timeout elapses.
- */
-export async function waitForRotatedOauthToken(input: {
-  failedAccessToken: string
-  timeoutMs: number
-  readToken?: () => string | undefined
-  sleeper?: (ms: number) => Promise<void>
-  pollMs?: number
-  nowMs?: () => number
-}): Promise<boolean> {
-  const pollMs = input.pollMs ?? 2_000
-  const readToken =
-    input.readToken ?? (() => process.env.CLAUDE_CODE_OAUTH_TOKEN || undefined)
-  const sleeper =
-    input.sleeper ??
-    ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
-  const now = input.nowMs ?? Date.now
-  const deadline = now() + input.timeoutMs
-  while (now() < deadline) {
-    const token = readToken()
-    if (token && token !== input.failedAccessToken) return true
-    await sleeper(Math.min(pollMs, Math.max(1, deadline - now())))
-  }
-  const finalToken = readToken()
-  return Boolean(finalToken && finalToken !== input.failedAccessToken)
-}
-
-/** Official Vuy default tool concurrency. */
-export const DEFAULT_MAX_TOOL_USE_CONCURRENCY = 10
-
-/**
- * Official Vuy densable — CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY, positive int
- * or default 10.
- */
+/** Official densable — CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY (default 10). */
 export function resolveMaxToolUseConcurrency(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const n = parseInt(env.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY || '', 10)
-  return n > 0 ? n : DEFAULT_MAX_TOOL_USE_CONCURRENCY
+  const raw = env.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY
+  if (raw !== undefined && raw !== '') {
+    const n = Number(raw)
+    if (Number.isFinite(n) && n > 0) return Math.floor(n)
+  }
+  return DEFAULT_MAX_TOOL_USE_CONCURRENCY
 }
 
-/** Official stop-hook consecutive block cap default. */
-export const DEFAULT_STOP_HOOK_BLOCK_CAP = 8
-
-/**
- * Official densable — CLAUDE_CODE_STOP_HOOK_BLOCK_CAP, NaN → 8.
- * Cap of 0 disables the consecutive-block kill switch (official eo>0 check).
- */
+/** Official densable — CLAUDE_CODE_STOP_HOOK_BLOCK_CAP (default 50). */
 export function resolveStopHookBlockCap(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const n = parseInt(env.CLAUDE_CODE_STOP_HOOK_BLOCK_CAP ?? '', 10)
-  return Number.isNaN(n) ? DEFAULT_STOP_HOOK_BLOCK_CAP : n
+  const raw = env.CLAUDE_CODE_STOP_HOOK_BLOCK_CAP
+  if (raw !== undefined && raw !== '') {
+    const n = Number(raw)
+    if (Number.isFinite(n) && n > 0) return Math.floor(n)
+  }
+  return DEFAULT_STOP_HOOK_BLOCK_CAP
 }
 
-/** Official idle-return default: 75 minutes. */
-export const DEFAULT_IDLE_THRESHOLD_MINUTES = 75
-/** Official idle-return default: 100_000 tokens. */
-export const DEFAULT_IDLE_TOKEN_THRESHOLD = 100_000
-
-/**
- * Official densable — CLAUDE_CODE_IDLE_THRESHOLD_MINUTES (default 75).
- * Used by willow idle-return dialog / hint timers.
- */
-export function resolveIdleThresholdMinutes(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  const n = Number(
-    env.CLAUDE_CODE_IDLE_THRESHOLD_MINUTES ?? DEFAULT_IDLE_THRESHOLD_MINUTES,
-  )
-  return Number.isFinite(n) ? n : DEFAULT_IDLE_THRESHOLD_MINUTES
-}
-
-export function resolveIdleThresholdMs(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  return resolveIdleThresholdMinutes(env) * 60_000
-}
-
-/**
- * Official densable — CLAUDE_CODE_IDLE_TOKEN_THRESHOLD (default 100_000).
- */
+/** Official densable — CLAUDE_CODE_IDLE_TOKEN_THRESHOLD (default 100_000). */
 export function resolveIdleTokenThreshold(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
@@ -252,20 +150,24 @@ export function resolveIdleTokenThreshold(
   return Number.isFinite(n) ? n : DEFAULT_IDLE_TOKEN_THRESHOLD
 }
 
-/** Official SessionEnd hooks default timeout. */
-export const DEFAULT_SESSIONEND_HOOKS_TIMEOUT_MS = 1_500
-/** Official PowerShell parse default timeout. */
-export const DEFAULT_PWSH_PARSE_TIMEOUT_MS = 5_000
-/** Official API key helper TTL default. */
-export const DEFAULT_API_KEY_HELPER_TTL_MS = 5 * 60 * 1000
-/** Official AWS default-chain resolve stall guard. */
-export const DEFAULT_AWS_CHAIN_RESOLVE_TIMEOUT_MS = 60_000
-/** Official MCP tool idle watchdog default. */
-export const DEFAULT_MCP_TOOL_IDLE_TIMEOUT_MS = 5 * 60 * 1000
+/** Official densable — CLAUDE_CODE_IDLE_THRESHOLD_MINUTES (default 60). */
+export function resolveIdleThresholdMinutes(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const n = Number(
+    env.CLAUDE_CODE_IDLE_THRESHOLD_MINUTES ?? DEFAULT_IDLE_THRESHOLD_MINUTES,
+  )
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_IDLE_THRESHOLD_MINUTES
+}
 
-/**
- * Official fXr densable — SESSIONEND_HOOKS_TIMEOUT_MS positive or 1500.
- */
+/** Official densable — idle threshold in ms (minutes × 60_000). */
+export function resolveIdleThresholdMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return resolveIdleThresholdMinutes(env) * 60_000
+}
+
+/** Official fXr densable — SESSIONEND_HOOKS_TIMEOUT_MS positive or 1500. */
 export function resolveSessionEndHooksTimeoutMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
@@ -276,9 +178,7 @@ export function resolveSessionEndHooksTimeoutMs(
     : DEFAULT_SESSIONEND_HOOKS_TIMEOUT_MS
 }
 
-/**
- * Official v_g densable — PWSH_PARSE_TIMEOUT_MS positive or 5000.
- */
+/** Official v_g densable — PWSH_PARSE_TIMEOUT_MS positive or 5000. */
 export function resolvePwshParseTimeoutMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
@@ -292,7 +192,7 @@ export function resolvePwshParseTimeoutMs(
 
 /**
  * Official obc densable — API_KEY_HELPER_TTL_MS ≥0 or 300_000.
- * Invalid logs via caller; returns default.
+ * Invalid raw is returned for caller logging; ttl falls back to default.
  */
 export function resolveApiKeyHelperTtlMs(
   env: NodeJS.ProcessEnv = process.env,
@@ -308,16 +208,14 @@ export function resolveApiKeyHelperTtlMs(
   return { ttlMs: DEFAULT_API_KEY_HELPER_TTL_MS }
 }
 
-/**
- * Official sbc densable — AWS_CHAIN_RESOLVE_TIMEOUT_MS positive or 60_000.
- */
+/** Official sbc densable — AWS_CHAIN_RESOLVE_TIMEOUT_MS positive or 60_000. */
 export function resolveAwsChainResolveTimeoutMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
   const raw = env.CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS
   if (raw) {
     const n = Number(raw)
-    if (Number.isFinite(n) && n > 0) return n
+    if (Number.isFinite(n) && n > 0) return Math.floor(n)
   }
   return DEFAULT_AWS_CHAIN_RESOLVE_TIMEOUT_MS
 }
@@ -338,4 +236,92 @@ export function resolveMcpToolIdleTimeoutMs(
     }
   }
   return DEFAULT_MCP_TOOL_IDLE_TIMEOUT_MS
+}
+
+export type RemoteAuthFailExitState = {
+  firstFailAtMs: number | null
+}
+
+export type RemoteAuthFailExitResult = {
+  decision: 'continue' | 'exit'
+  state: RemoteAuthFailExitState
+}
+
+/**
+ * Official cjt densable — remote-session auth-fail exit after threshold.
+ * Non-remote → continue. recovered clears firstFailAtMs. threshold 0 disables.
+ */
+export function evaluateRemoteAuthFailExit(
+  state: RemoteAuthFailExitState,
+  input: {
+    env?: NodeJS.ProcessEnv
+    nowMs?: number
+    thresholdMs?: number
+    recovered?: boolean
+  } = {},
+): RemoteAuthFailExitResult {
+  if (input.recovered) {
+    return { decision: 'continue', state: { firstFailAtMs: null } }
+  }
+  const env = input.env ?? process.env
+  const isRemote = Boolean(
+    env.CLAUDE_CODE_REMOTE_SESSION_ID || env.CLAUDE_CODE_REMOTE,
+  )
+  if (!isRemote) {
+    return { decision: 'continue', state }
+  }
+  // Must use OrDefault (non-negative): explicit 0 disables zombie exit.
+  // resolveAuthFailExitMs rejects 0 via parsePositiveMs and would fall back
+  // to DEFAULT, incorrectly re-enabling exit when env says 0.
+  const threshold =
+    input.thresholdMs ?? resolveAuthFailExitMsOrDefault(env)
+  if (threshold <= 0) {
+    return { decision: 'continue', state }
+  }
+  const now = input.nowMs ?? Date.now()
+  if (state.firstFailAtMs === null) {
+    return {
+      decision: 'continue',
+      state: { firstFailAtMs: now },
+    }
+  }
+  if (now - state.firstFailAtMs >= threshold) {
+    return { decision: 'exit', state }
+  }
+  return { decision: 'continue', state }
+}
+
+/**
+ * Official dbc densable — poll until oauth access token rotates away from
+ * the failed token (or timeout).
+ *
+ * Accepts `sleeper`/`nowMs` (call sites + tests) with `sleep`/`now` aliases.
+ */
+export async function waitForRotatedOauthToken(input: {
+  failedAccessToken: string
+  timeoutMs: number
+  pollMs?: number
+  readToken?: () => string | undefined
+  sleeper?: (ms: number) => Promise<void>
+  sleep?: (ms: number) => Promise<void>
+  nowMs?: () => number
+  now?: () => number
+}): Promise<boolean> {
+  const sleep =
+    input.sleeper ??
+    input.sleep ??
+    ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+  const now = input.nowMs ?? input.now ?? (() => Date.now())
+  const readToken =
+    input.readToken ??
+    (() => process.env.CLAUDE_CODE_OAUTH_TOKEN || undefined)
+  const pollMs = input.pollMs ?? 2_000
+  const deadline = now() + input.timeoutMs
+  while (now() < deadline) {
+    const token = readToken()
+    if (token && token !== input.failedAccessToken) return true
+    await sleep(Math.min(pollMs, Math.max(1, deadline - now())))
+  }
+  const finalToken = readToken()
+  return Boolean(finalToken && finalToken !== input.failedAccessToken)
 }

@@ -7,6 +7,8 @@ import { buildTool, type ToolDef } from 'src/Tool.js'
 import { errorMessage } from 'src/utils/errors.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logMCPError } from 'src/utils/log.js'
+import { recordPluginActivity } from 'src/utils/plugins/pluginActivity.js'
+import { recordPluginUse } from 'src/utils/plugins/pluginUsage.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { isOutputLineTruncated } from 'src/utils/terminal.js'
 import { DESCRIPTION, LIST_MCP_RESOURCES_TOOL_NAME, PROMPT } from './prompt.js'
@@ -85,6 +87,12 @@ export const ListMcpResourcesTool = buildTool({
       clientsToProcess.map(async client => {
         if (client.type !== 'connected') return []
         try {
+          // densable F$: listing resources on a plugin MCP server counts as use
+          const pluginSource = client.config.pluginSource
+          if (pluginSource) {
+            recordPluginUse(pluginSource)
+            recordPluginActivity(pluginSource, 'mcp')
+          }
           const fresh = await ensureConnectedClient(client)
           return await fetchResourcesForClient(fresh)
         } catch (error) {

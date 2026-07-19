@@ -1089,6 +1089,14 @@ export function clearDynamicSkills(): void {
   activatedConditionalSkillNames.clear()
 }
 
+/** Test helper: seed densable _io() dynamic skill map for aWr/Xw unit tests. */
+export function setDynamicSkillsForTests(skills: readonly Command[]): void {
+  dynamicSkills.clear()
+  for (const skill of skills) {
+    dynamicSkills.set(skill.name, skill)
+  }
+}
+
 // Expose createSkillCommand + parseSkillFrontmatterFields to MCP skill
 // discovery via a leaf registry module. See mcpSkillBuilders.ts for why this
 // indirection exists (a literal dynamic import from mcpSkills.ts fans a single

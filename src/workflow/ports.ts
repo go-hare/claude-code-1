@@ -16,6 +16,7 @@ import {
   killWorkflowTask,
   registerLocalWorkflowTask,
 } from '../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
+import { registerWorkflowNotifyMeta } from './notifications.js'
 import {
   buildHostBundle,
   makeHostHandle,
@@ -95,12 +96,20 @@ export function createWorkflowPorts(opts: {
         bundle.toolUseContext.setAppStateForTasks ??
         bundle.toolUseContext.setAppState
       const abortController = new AbortController()
+      // Official ownerAgentId from spawning agent (toolUseContext.agentId).
+      // Gge attaches `workflow:${taskId}` keepalive when owner is a local_agent.
+      const ownerAgentId = bundle.toolUseContext.agentId
       const taskId = registerLocalWorkflowTask(setAppState, {
         description: regOpts.summary ?? regOpts.workflowName,
         workflowName: regOpts.workflowName,
         workflowFile: regOpts.workflowFile ?? '',
         summary: regOpts.summary,
         ...(regOpts.toolUseId ? { toolUseId: regOpts.toolUseId } : {}),
+        ...(ownerAgentId ? { agentId: ownerAgentId, ownerAgentId } : {}),
+        ...(regOpts.runId ? { workflowRunId: regOpts.runId } : {}),
+        ...(regOpts.workflowFile
+          ? { scriptPath: regOpts.workflowFile }
+          : {}),
         abortController,
       })
       const runId = regOpts.runId ?? taskId
@@ -111,6 +120,12 @@ export function createWorkflowPorts(opts: {
         abortController,
         workflowName: regOpts.workflowName,
         agentAbortControllers: new Map(),
+      })
+      // Official Hao/Jeo: queue keep needs panel taskId + owner agentId
+      // (runId may differ from taskId on resumeFromRunId).
+      registerWorkflowNotifyMeta(runId, {
+        taskId,
+        ...(ownerAgentId ? { agentId: ownerAgentId } : {}),
       })
       logForDebugging(
         `workflow task registered: ${runId} (${regOpts.workflowName})`,

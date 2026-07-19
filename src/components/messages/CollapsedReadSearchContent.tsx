@@ -3,7 +3,7 @@ import { basename } from 'path';
 import React, { useRef } from 'react';
 import { useMinDisplayTime } from '../../hooks/useMinDisplayTime.js';
 import { Ansi, Box, Text, useTheme } from '@anthropic/ink';
-import { findToolByName, type Tools } from '../../Tool.js';
+import { findToolByName, safeParseToolInput, type Tools } from '../../Tool.js';
 import { getReplPrimitiveTools } from '@claude-code/builtin-tools/tools/REPLTool/primitiveTools.js';
 import type { CollapsedReadSearchGroup, NormalizedAssistantMessage } from '../../types/message.js';
 import { uniq } from '../../utils/array.js';
@@ -73,7 +73,8 @@ function VerboseToolUse({
   const parsedOutput = tool.outputSchema?.safeParse(rawToolResult);
   const toolResult = parsedOutput?.success ? parsedOutput.data : undefined;
 
-  const parsedInput = tool.inputSchema.safeParse(content.input);
+  // densable Qae — coerce before display parse.
+  const parsedInput = safeParseToolInput(tool, content.input);
   const input = parsedInput.success ? parsedInput.data : undefined;
   const userFacingName = tool.userFacingName(input);
   const toolUseMessage = input ? tool.renderToolUseMessage(input, { theme, verbose: true }) : null;

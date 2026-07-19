@@ -111,3 +111,49 @@ export function isWorkflowsAvailable(
 ): boolean {
   return !isWorkflowsDisabled(env, input)
 }
+
+/**
+ * densable FE — workflows feature on for tool + ultracode keyword path.
+ * Mirrors wiring.ts Workflow tool isEnabled (o5t/peh + enableWorkflows).
+ */
+export function isWorkflowsFeatureEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const { resolveEnableWorkflowsSetting } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    const settings = getInitialSettings()
+    if (
+      isWorkflowsDisabled(env, {
+        settingsDisableWorkflows: settings.disableWorkflows,
+      })
+    ) {
+      return false
+    }
+    const enable = resolveEnableWorkflowsSetting(settings.enableWorkflows)
+    if (enable === false) return false
+    return true
+  } catch {
+    return !isWorkflowsDisabled(env)
+  }
+}
+
+/**
+ * densable VBn — settings.workflowKeywordTriggerEnabled (default true).
+ */
+export function isWorkflowKeywordTriggerEnabledFromSettings(): boolean {
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    return isWorkflowKeywordTriggerEnabled(
+      getInitialSettings().workflowKeywordTriggerEnabled,
+    )
+  } catch {
+    return isWorkflowKeywordTriggerEnabled()
+  }
+}

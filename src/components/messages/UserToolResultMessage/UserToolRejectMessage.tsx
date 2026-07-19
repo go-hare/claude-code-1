@@ -1,7 +1,12 @@
 import * as React from 'react';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
 import { useTheme } from '@anthropic/ink';
-import { filterToolProgressMessages, type Tool, type Tools } from '../../../Tool.js';
+import {
+  filterToolProgressMessages,
+  safeParseToolInput,
+  type Tool,
+  type Tools,
+} from '../../../Tool.js';
 import type { ProgressMessage } from '../../../types/message.js';
 import type { buildMessageLookups } from '../../../utils/messages.js';
 import { FallbackToolUseRejectedMessage } from '../../FallbackToolUseRejectedMessage.js';
@@ -33,7 +38,8 @@ export function UserToolRejectMessage({
     return <FallbackToolUseRejectedMessage />;
   }
 
-  const parsedInput = tool.inputSchema.safeParse(input);
+  // densable Qae — coerce aliases before rejected-message render parse.
+  const parsedInput = safeParseToolInput(tool, input);
   if (!parsedInput.success) {
     return <FallbackToolUseRejectedMessage />;
   }

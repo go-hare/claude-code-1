@@ -34,6 +34,7 @@ import { loadPluginLspServers } from './lspPluginIntegration.js'
 import { loadPluginMcpServers } from './mcpPluginIntegration.js'
 import { clearPluginCacheExclusions } from './orphanedPluginFilter.js'
 import { loadAllPlugins } from './pluginLoader.js'
+import { applyPluginUsageLspGrace, seedPluginUsage } from './pluginUsage.js'
 
 type SetAppState = (updater: (prev: AppState) => AppState) => void
 
@@ -119,6 +120,15 @@ export async function refreshActivePlugins(
   ])
   const mcp_count = mcpCounts.reduce((sum, n) => sum + n, 0)
   const lsp_count = lspCounts.reduce((sum, n) => sum + n, 0)
+
+  // densable vzn + Czc: seed usage rows; LSP-only plugins get one-shot grace
+  // so they are not immediately treated as disused before any skill/MCP use.
+  const enabledIds = enabled.map(p => p.repository)
+  seedPluginUsage(enabledIds)
+  const lspPluginIds = enabled
+    .filter(p => p.lspServers && Object.keys(p.lspServers).length > 0)
+    .map(p => p.repository)
+  applyPluginUsageLspGrace(lspPluginIds)
 
   setAppState(prev => ({
     ...prev,

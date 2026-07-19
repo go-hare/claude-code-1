@@ -51,6 +51,8 @@ import { EndTruncatingAccumulator } from 'src/utils/stringUtils.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
 import { TaskOutput } from 'src/utils/task/TaskOutput.js';
 import { isOutputLineTruncated } from 'src/utils/terminal.js';
+import { coerceBashTimeoutInput } from 'src/utils/toolInputCoerce.js';
+import { stripBashResultForStorage } from 'src/utils/toolResultStrip.js';
 import {
   buildLargeToolResultMessage,
   ensureToolResultsDir,
@@ -461,24 +463,27 @@ function isAutobackgroundingAllowed(command: string): boolean {
 }
 
 /**
- * Detect standalone or leading `sleep N` patterns that should use Monitor
- * instead. Catches `sleep 5`, `sleep 5 && check`, `sleep 5; check` — but
- * not sleep inside pipelines, subshells, or scripts (those are fine).
+ * densable NZn — min sleep seconds blocked when amber_sentinel is on.
+ * densable mOg returns null when duration < NZn (25).
+ */
+export const BLOCKED_LEADING_SLEEP_MIN_SECONDS = 25;
+
+/**
+ * densable mOg — detect standalone or leading `sleep N` patterns that should
+ * use Monitor instead. Catches `sleep 30`, `sleep 30 && check` — but not
+ * sleep inside pipelines/subshells, and not short sleeps (< NZn).
  */
 export function detectBlockedSleepPattern(command: string): string | null {
   const parts = splitCommand_DEPRECATED(command);
   if (parts.length === 0) return null;
 
   const first = parts[0]?.trim() ?? '';
-  // Bare `sleep N` or `sleep N.N` as the first subcommand.
-  // Float durations (sleep 0.5) are allowed — those are legit pacing, not polls.
-  const m = /^sleep\s+(\d+)\s*$/.exec(first);
+  // densable mOg: bare `sleep N` or `sleep N.N` as the first subcommand.
+  const m = /^sleep\s+(\d+(?:\.\d*)?)\s*$/.exec(first);
   if (!m) return null;
-  const secs = parseInt(m[1]!, 10);
-  if (secs < 2) return null; // sub-2s sleeps are fine (rate limiting, pacing)
+  const secs = parseFloat(m[1]!);
+  if (secs < BLOCKED_LEADING_SLEEP_MIN_SECONDS) return null;
 
-  // `sleep N` alone → "what are you waiting for?"
-  // `sleep N && check` → "use Monitor { command: check }"
   const rest = parts.slice(1).join(' ').trim();
   return rest ? `sleep ${secs} followed by: ${rest}` : `standalone sleep ${secs}`;
 }
@@ -585,8 +590,9 @@ export const BashTool = buildTool({
   async description({ description }) {
     return description || 'Run shell command';
   },
-  async prompt() {
-    return getSimplePrompt();
+  async prompt({ model }) {
+    // densable jwu(model, …) — lean sPg when simple system prompt is on.
+    return getSimplePrompt({ model });
   },
   isConcurrencySafe(input) {
     return this.isReadOnly?.(input) ?? false;
@@ -629,6 +635,10 @@ export const BashTool = buildTool({
   get inputSchema(): InputSchema {
     return inputSchema();
   },
+  // densable Kvu — timeout_ms → timeout before Zod.
+  coerceInput: coerceBashTimeoutInput,
+  // densable stripForStorage — empty stdout/stderr under compactMode only.
+  stripForStorage: stripBashResultForStorage,
   get outputSchema(): OutputSchema {
     return outputSchema();
   },
@@ -670,12 +680,25 @@ export const BashTool = buildTool({
     return `Running ${desc}`;
   },
   async validateInput(input: BashToolInput): Promise<ValidationResult> {
-    if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
+    // densable: Pte() && !Ov() && !run_in_background → mOg sleep block.
+    // Prefer amber_sentinel GB; also honor MONITOR_TOOL compile feature so
+    // residual builds with only the feature flag still enforce.
+    let amberOn = false;
+    if (feature('MONITOR_TOOL')) amberOn = true;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isAmberSentinelEnabled } =
+        require('src/utils/amberSentinelGate.js') as typeof import('src/utils/amberSentinelGate.js');
+      if (isAmberSentinelEnabled()) amberOn = true;
+    } catch {
+      // densable optional
+    }
+    if (amberOn && !isBackgroundTasksDisabled && !input.run_in_background) {
       const sleepPattern = detectBlockedSleepPattern(input.command);
       if (sleepPattern !== null) {
         return {
           result: false,
-          message: `Blocked: ${sleepPattern}. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. For streaming events (watching logs, polling APIs), use the Monitor tool. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.`,
+          message: `Blocked: ${sleepPattern}. To wait for a condition, use Monitor with an until-loop (e.g. \`until <check>; do sleep 2; done\`). To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block.`,
           errorCode: 10,
         };
       }

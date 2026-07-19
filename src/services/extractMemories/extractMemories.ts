@@ -42,9 +42,11 @@ import type {
 } from '../../types/message.js'
 import { createAbortController } from '../../utils/abortController.js'
 import { count, uniq } from '../../utils/array.js'
+import { shouldSkipMemoryForkCacheWrite } from '../../utils/basaltMemoryGates.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
   createCacheSafeParams,
+  forkPointUuidOf,
   runForkedAgent,
 } from '../../utils/forkedAgent.js'
 import type { REPLHookContext } from '../../utils/hooks/postSamplingHooks.js'
@@ -510,6 +512,10 @@ export function initExtractMemories(): void {
         // Well-behaved extractions complete in 2-4 turns (read → write).
         // A hard cap prevents verification rabbit-holes from burning turns.
         maxTurns: 5,
+        // densable krr / tengu_basalt_spur — ant-only skip cache write on fork.
+        skipCacheWrite: shouldSkipMemoryForkCacheWrite(),
+        // densable iay fork pin when spur is on (Bio of shared context).
+        forkPointUuid: forkPointUuidOf(cacheSafeParams.forkContextMessages),
       })
 
       // Advance the cursor only after a successful run. If the agent errors

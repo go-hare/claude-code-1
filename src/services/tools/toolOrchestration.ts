@@ -2,6 +2,10 @@ import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import { findToolByName, type ToolUseContext } from '../../Tool.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
+import {
+  applyContextLayers,
+  type ContextLayer,
+} from '../../utils/contextLayers.js'
 import { all } from '../../utils/generators.js'
 import { resolveMaxToolUseConcurrency } from '../../utils/residualMsEnvGates.js'
 import { type MessageUpdateLazy, runToolUse } from './toolExecution.js'
@@ -14,6 +18,10 @@ function getMaxToolUseConcurrency(): number {
 export type MessageUpdate = {
   message?: Message
   newContext: ToolUseContext
+  contextLayers?: {
+    toolUseID: string
+    layers: ContextLayer[]
+  }
 }
 
 export async function* runTools(
@@ -44,6 +52,8 @@ export async function* runTools(
         string,
         ((context: ToolUseContext) => ToolUseContext)[]
       > = {}
+      // densable concurrent contextLayers aggregation keyed by toolUseID
+      const queuedContextLayers: Record<string, ContextLayer[]> = {}
       // Run read-only batch concurrently
       for await (const update of runToolsConcurrently(
         blocks,
@@ -58,6 +68,13 @@ export async function* runTools(
           }
           queuedContextModifiers[toolUseID].push(modifyContext)
         }
+        if (update.contextLayers) {
+          const { toolUseID, layers } = update.contextLayers
+          if (!queuedContextLayers[toolUseID]) {
+            queuedContextLayers[toolUseID] = []
+          }
+          queuedContextLayers[toolUseID].push(...layers)
+        }
         yield {
           message: update.message,
           newContext: currentContext,
@@ -65,11 +82,15 @@ export async function* runTools(
       }
       for (const block of blocks) {
         const modifiers = queuedContextModifiers[block.id]
-        if (!modifiers) {
-          continue
+        if (modifiers) {
+          for (const modifier of modifiers) {
+            currentContext = modifier(currentContext)
+          }
         }
-        for (const modifier of modifiers) {
-          currentContext = modifier(currentContext)
+        // densable Ter after concurrent batch, in tool-use order
+        const layers = queuedContextLayers[block.id]
+        if (layers && layers.length > 0) {
+          currentContext = applyContextLayers(currentContext, layers)
         }
       }
       yield { newContext: currentContext }
@@ -83,6 +104,13 @@ export async function* runTools(
       )) {
         if (update.newContext) {
           currentContext = update.newContext
+        }
+        // densable serial: Ter layers on each update before yield
+        if (update.contextLayers?.layers?.length) {
+          currentContext = applyContextLayers(
+            currentContext,
+            update.contextLayers.layers,
+          )
         }
         yield {
           message: update.message,
@@ -107,7 +135,12 @@ function partitionToolCalls(
   toolUseContext: ToolUseContext,
 ): Batch[] {
   return toolUseMessages.reduce((acc: Batch[], toolUse) => {
-    const tool = findToolByName(toolUseContext.options.tools, toolUse.name)
+    // densable Tc: pass options.toolAliases for session alias remap
+    const tool = findToolByName(
+      toolUseContext.options.tools,
+      toolUse.name,
+      toolUseContext.options.toolAliases,
+    )
     const parsedInput = tool?.inputSchema.safeParse(toolUse.input)
     const isConcurrencySafe = parsedInput?.success
       ? (() => {
@@ -177,6 +210,7 @@ async function* runToolsSerially(
       yield {
         message: update.message,
         newContext: currentContext,
+        contextLayers: update.contextLayers,
       }
     }
     priorBlocks.push(toolUse)

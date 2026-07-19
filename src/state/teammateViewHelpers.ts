@@ -1,6 +1,7 @@
 import { logEvent } from '../services/analytics/index.js'
 import { isTerminalTaskStatus } from '../Task.js'
 import type { LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js'
+import type { InProcessTeammateTaskState } from '../tasks/InProcessTeammateTask/types.js'
 
 // Inlined from framework.ts — importing creates a cycle through
 // BackgroundTasksDialog. Keep in sync with PANEL_GRACE_MS there.
@@ -8,9 +9,9 @@ const PANEL_GRACE_MS = 30_000
 
 import type { AppState } from './AppState.js'
 
-// Inline type check instead of importing isLocalAgentTask — breaks the
-// teammateViewHelpers → LocalAgentTask runtime edge that creates a cycle
-// through BackgroundTasksDialog.
+// Inline type checks instead of importing isLocalAgentTask / isInProcessTeammate
+// — breaks the teammateViewHelpers → task module runtime edge that creates a
+// cycle through BackgroundTasksDialog.
 function isLocalAgent(task: unknown): task is LocalAgentTaskState {
   return (
     typeof task === 'object' &&
@@ -20,12 +21,39 @@ function isLocalAgent(task: unknown): task is LocalAgentTaskState {
   )
 }
 
+function isInProcessTeammate(
+  task: unknown,
+): task is InProcessTeammateTaskState {
+  return (
+    typeof task === 'object' &&
+    task !== null &&
+    'type' in task &&
+    task.type === 'in_process_teammate'
+  )
+}
+
+/** densable wba — viewable agent: local_agent | in_process_teammate */
+function isViewableAgent(
+  task: unknown,
+): task is LocalAgentTaskState | InProcessTeammateTaskState {
+  return isLocalAgent(task) || isInProcessTeammate(task)
+}
+
 /**
- * Return the task released back to stub form: retain dropped, messages
- * cleared, evictAfter set if terminal. Shared by exitTeammateView and
- * the switch-away path in enterTeammateView.
+ * densable Aba portable — release a viewable agent when leaving its transcript.
+ * - local_agent: retain:false, diskLoaded:false, messages cleared, evictAfter if terminal
+ * - in_process_teammate: only set evictAfter when isIdle (no retain/diskLoaded)
  */
-function release(task: LocalAgentTaskState): LocalAgentTaskState {
+function releaseViewable<
+  T extends LocalAgentTaskState | InProcessTeammateTaskState,
+>(task: T): T {
+  if (isInProcessTeammate(task)) {
+    return {
+      ...task,
+      evictAfter: task.isIdle ? Date.now() + PANEL_GRACE_MS : undefined,
+    }
+  }
+  // local_agent densable Aba (+ clear messages for stub form)
   return {
     ...task,
     retain: false,
@@ -39,9 +67,10 @@ function release(task: LocalAgentTaskState): LocalAgentTaskState {
 
 /**
  * Transitions the UI to view a teammate's transcript.
- * Sets viewingAgentTaskId and, for local_agent, retain: true (blocks eviction,
- * enables stream-append, triggers disk bootstrap) and clears evictAfter.
- * If switching from another agent, releases the previous one back to stub.
+ * densable gze:
+ *   s = switching from another wba view
+ *   a = wba(n) && (Cba(n)&&!retain || evictAfter!==void 0)
+ *   retain only on Cba (local_agent); teammate only clears evictAfter
  */
 export function enterTeammateView(
   taskId: string,
@@ -52,13 +81,14 @@ export function enterTeammateView(
     const task = prev.tasks[taskId]
     const prevId = prev.viewingAgentTaskId
     const prevTask = prevId !== undefined ? prev.tasks[prevId] : undefined
+    // densable s: o!==void 0&&o!==e&&wba(i) — no retain gate on prev
     const switching =
-      prevId !== undefined &&
-      prevId !== taskId &&
-      isLocalAgent(prevTask) &&
-      prevTask.retain
+      prevId !== undefined && prevId !== taskId && isViewableAgent(prevTask)
+    // densable a: wba(n)&&(Cba(n)&&!n.retain||n.evictAfter!==void 0)
     const needsRetain =
-      isLocalAgent(task) && (!task.retain || task.evictAfter !== undefined)
+      isViewableAgent(task) &&
+      ((isLocalAgent(task) && !task.retain) ||
+        (task as { evictAfter?: number }).evictAfter !== undefined)
     const needsView =
       prev.viewingAgentTaskId !== taskId ||
       prev.viewSelectionMode !== 'viewing-agent'
@@ -66,9 +96,16 @@ export function enterTeammateView(
     let tasks = prev.tasks
     if (switching || needsRetain) {
       tasks = { ...prev.tasks }
-      if (switching) tasks[prevId] = release(prevTask)
-      if (needsRetain) {
-        tasks[taskId] = { ...task, retain: true, evictAfter: undefined }
+      if (switching && prevId !== undefined && isViewableAgent(prevTask)) {
+        tasks[prevId] = releaseViewable(prevTask)
+      }
+      if (needsRetain && isViewableAgent(task)) {
+        // densable: Cba(n)?{...n,retain:!0,evictAfter:void 0}:{...n,evictAfter:void 0}
+        if (isLocalAgent(task)) {
+          tasks[taskId] = { ...task, retain: true, evictAfter: undefined }
+        } else if (isInProcessTeammate(task)) {
+          tasks[taskId] = { ...task, evictAfter: undefined }
+        }
       }
     }
     return {
@@ -82,8 +119,7 @@ export function enterTeammateView(
 
 /**
  * Exit teammate transcript view and return to leader's view.
- * Drops retain and clears messages back to stub form; if terminal,
- * schedules eviction via evictAfter so the row lingers briefly.
+ * densable nie: if !wba return cleared view; else Aba(viewed).
  */
 export function exitTeammateView(
   setAppState: (updater: (prev: AppState) => AppState) => void,
@@ -100,17 +136,17 @@ export function exitTeammateView(
       return prev.viewSelectionMode === 'none' ? prev : cleared
     }
     const task = prev.tasks[id]
-    if (!isLocalAgent(task) || !task.retain) return cleared
+    if (!isViewableAgent(task)) return cleared
     return {
       ...cleared,
-      tasks: { ...prev.tasks, [id]: release(task) },
+      tasks: { ...prev.tasks, [id]: releaseViewable(task) },
     }
   })
 }
 
 /**
  * Context-sensitive x: running → abort, terminal → dismiss.
- * Dismiss sets evictAfter=0 so the filter hides immediately.
+ * densable Rba is Cba-only (local_agent) — force-dismiss panel with evictAfter=0.
  * If viewing the dismissed agent, also exits to leader.
  */
 export function stopOrDismissAgent(
@@ -130,11 +166,11 @@ export function stopOrDismissAgent(
       ...prev,
       tasks: {
         ...prev.tasks,
-        [taskId]: { ...release(task), evictAfter: 0 },
+        [taskId]: { ...releaseViewable(task), evictAfter: 0 },
       },
       ...(viewingThis && {
         viewingAgentTaskId: undefined,
-        viewSelectionMode: 'none',
+        viewSelectionMode: 'none' as const,
       }),
     }
   })

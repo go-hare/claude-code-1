@@ -60,6 +60,17 @@ export class ShellError extends Error {
   }
 }
 
+/**
+ * densable gPe / FileStateError — Edit/Write staleness and "not read yet" throws.
+ * Named for telemetry/error classification (densable error-name allowlist).
+ */
+export class FileStateError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'FileStateError'
+  }
+}
+
 export class TeleportOperationError extends Error {
   constructor(
     message: string,
@@ -175,13 +186,15 @@ export function shortErrorStack(e: unknown, maxFrames = 5): string {
  * structurally unreachable — use in catch blocks after fs operations to
  * distinguish expected "nothing there / no access" from unexpected errors.
  *
- * Covers:
- *  ENOENT    — path does not exist
- *  EACCES    — permission denied
- *  EPERM     — operation not permitted
- *  ENOTDIR   — a path component is not a directory (e.g. a file named
- *              `.claude` exists where a directory is expected)
- *  ELOOP     — too many symlink levels (circular symlinks)
+ * Covers densable Xo/mrm:
+ *  ENOENT        — path does not exist
+ *  EACCES        — permission denied
+ *  EPERM         — operation not permitted
+ *  ENOTDIR       — a path component is not a directory (e.g. a file named
+ *                  `.claude` exists where a directory is expected)
+ *  ELOOP         — too many symlink levels (circular symlinks)
+ *  ENAMETOOLONG  — path too long
+ *  EROFS         — read-only filesystem
  */
 export function isFsInaccessible(e: unknown): e is NodeJS.ErrnoException {
   const code = getErrnoCode(e)
@@ -190,7 +203,9 @@ export function isFsInaccessible(e: unknown): e is NodeJS.ErrnoException {
     code === 'EACCES' ||
     code === 'EPERM' ||
     code === 'ENOTDIR' ||
-    code === 'ELOOP'
+    code === 'ELOOP' ||
+    code === 'ENAMETOOLONG' ||
+    code === 'EROFS'
   )
 }
 

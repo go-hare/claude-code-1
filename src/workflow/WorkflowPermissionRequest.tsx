@@ -2,7 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import { Box, Text, useTheme } from '@anthropic/ink';
 import { getTheme, type Theme } from 'src/utils/theme.js';
 import { env } from 'src/utils/env.js';
-import { shouldShowAlwaysAllowOptions } from 'src/utils/permissions/permissionsLoader.js';
+import { computeShowAlwaysAllowOptions } from 'src/utils/permissions/suppressAlwaysAllow.js';
 import { logUnaryEvent } from 'src/utils/unaryLogging.js';
 import { PermissionDialog } from 'src/components/permissions/PermissionDialog.js';
 import { PermissionPrompt, type PermissionPromptOption } from 'src/components/permissions/PermissionPrompt.js';
@@ -30,7 +30,16 @@ export function WorkflowPermissionRequest({
     args?: string;
   };
 
-  const showAlwaysAllowOptions = useMemo(() => shouldShowAlwaysAllowOptions(), []);
+  // densable showAlwaysAllow: EYt + org ask ceiling + suppressAlwaysAllowRule + tool.suppressesAlwaysAllowRule
+  const showAlwaysAllowOptions = useMemo(
+    () =>
+      computeShowAlwaysAllowOptions({
+        tool: toolUseConfirm.tool,
+        input: toolUseConfirm.input as { [key: string]: unknown },
+        permissionResult: toolUseConfirm.permissionResult,
+      }),
+    [toolUseConfirm.tool, toolUseConfirm.input, toolUseConfirm.permissionResult],
+  );
 
   const options: PermissionPromptOption<OptionValue>[] = useMemo(() => {
     const opts: PermissionPromptOption<OptionValue>[] = [

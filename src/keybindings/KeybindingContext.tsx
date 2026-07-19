@@ -4,4 +4,7 @@ export {
   useKeybindingContext,
   useOptionalKeybindingContext,
   useRegisterKeybindingContext,
+  usePreDispatch,
+  type HandlerRegistration,
+  type PreDispatchHandler,
 } from '@anthropic/ink';

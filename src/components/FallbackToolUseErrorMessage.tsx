@@ -17,6 +17,20 @@ type Props = {
 
 export function FallbackToolUseErrorMessage({ result, verbose }: Props): React.ReactNode {
   const transcriptShortcut = useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
+
+  // densable: non-verbose "not read yet" collapses to a one-line dim hint
+  // (Edit UI has densable Hh_; this covers generic Fallback paths).
+  if (!verbose && typeof result === 'string') {
+    const tagBody = extractTag(result, 'tool_use_error');
+    if (tagBody?.includes('File has not been read yet')) {
+      return (
+        <MessageResponse>
+          <Text dimColor>File must be read first</Text>
+        </MessageResponse>
+      );
+    }
+  }
+
   let error: string;
 
   if (typeof result !== 'string') {

@@ -1,6 +1,10 @@
 import { z } from 'zod/v4'
 import type { TaskStateBase } from 'src/Task.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  formatTaskNotFoundMessage,
+  resolveTaskQuery,
+} from 'src/tasks/resolveTaskQuery.js'
 import { stopTask } from 'src/tasks/stopTask.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
@@ -57,7 +61,7 @@ export const TaskStopTool = buildTool({
   toAutoClassifierInput(input) {
     return input.task_id ?? input.shell_id ?? ''
   },
-  async validateInput({ task_id, shell_id }, { getAppState }) {
+  async validateInput({ task_id, shell_id }, { getAppState, agentId }) {
     // Support both task_id and shell_id (deprecated KillShell compat)
     const id = task_id ?? shell_id
     if (!id) {
@@ -69,14 +73,66 @@ export const TaskStopTool = buildTool({
     }
 
     const appState = getAppState()
-    const task = appState.tasks?.[id] as TaskStateBase | undefined
+    // densable TaskStop validateInput: Elo when registry miss
+    let task = appState.tasks?.[id] as TaskStateBase | undefined
+    let suggestion: string | undefined
+    if (!task) {
+      const resolved = resolveTaskQuery(id, appState.tasks ?? {}, getAppState)
+      if (resolved.status === 'ambiguous') {
+        return {
+          result: false,
+          message: resolved.message,
+          errorCode: 1,
+        }
+      }
+      if (resolved.status === 'found') {
+        task = resolved.task
+      } else {
+        suggestion = resolved.suggestion
+      }
+    }
 
     if (!task) {
       return {
         result: false,
-        message: `No task found with ID: ${id}`,
+        message: formatTaskNotFoundMessage(
+          id,
+          appState.tasks ?? {},
+          getAppState,
+          suggestion,
+          agentId,
+        ),
         errorCode: 1,
       }
+    }
+
+    // Official H1e/ySr for local_agent:
+    // - isObserver (OH): any status — terminal OH still Fjr+Rba/XV via ySr
+    // - else: running OR YC parked (completed + keepaliveReasons)
+    // Other task types still require running.
+    // densable validate: status!==running && !zle && !OH → error 3
+    if (task.type === 'local_agent') {
+      if (
+        'isObserver' in task &&
+        (task as { isObserver?: boolean }).isObserver === true
+      ) {
+        return { result: true }
+      }
+      const ka =
+        'keepaliveReasons' in task &&
+        (task as { keepaliveReasons?: Set<string> }).keepaliveReasons
+      const parked =
+        task.status === 'completed' &&
+        ka instanceof Set &&
+        ka.size > 0
+      if (task.status !== 'running' && !parked) {
+        return {
+          result: false,
+          message: `Task ${id} is not running or parked (status: ${task.status})`,
+          errorCode: 3,
+        }
+      }
+      return { result: true }
     }
 
     if (task.status !== 'running') {
@@ -106,7 +162,7 @@ export const TaskStopTool = buildTool({
   renderToolResultMessage,
   async call(
     { task_id, shell_id },
-    { getAppState, setAppState, abortController },
+    { getAppState, setAppState, abortController, agentId },
   ) {
     // Support both task_id and shell_id (deprecated KillShell compat)
     const id = task_id ?? shell_id
@@ -114,9 +170,14 @@ export const TaskStopTool = buildTool({
       throw new Error('Missing required parameter: task_id')
     }
 
+    // densable H1e: callerAgentId:Vqe(r), killedBy:"parent"
+    // (ySr source remains "user" for hAe/Fjr; XV stamps parent for BRt wording)
     const result = await stopTask(id, {
       getAppState,
       setAppState,
+      callerAgentId: agentId,
+      killedBy: 'parent',
+      source: 'user',
     })
 
     return {

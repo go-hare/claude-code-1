@@ -2627,12 +2627,41 @@ export function buildWorkerEnv(
   authPath: string | undefined,
   rvSockPath: string,
 ): Record<string, string | undefined> {
+  // Official BF_ inherit: if dispatch.env lacks permission/memory, fill from
+  // A8q state.json so respawn / file-dispatch still carries session rules.
+  let statePermissionEnv: Record<string, string> = {}
+  try {
+    // Lazy import avoids cycle with jobState consumers.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readBgJobState } =
+      require('./jobState.js') as typeof import('./jobState.js')
+    const short = dispatch.short
+    const state = readBgJobState(short)
+    if (
+      state?.sessionPermissionRules &&
+      !dispatch.env?.CLAUDE_BG_SESSION_PERMISSION_RULES
+    ) {
+      statePermissionEnv.CLAUDE_BG_SESSION_PERMISSION_RULES = JSON.stringify(
+        state.sessionPermissionRules,
+      )
+    }
+    if (
+      state?.memoryToggledOff &&
+      !dispatch.env?.CLAUDE_BG_MEMORY_TOGGLED_OFF
+    ) {
+      statePermissionEnv.CLAUDE_BG_MEMORY_TOGGLED_OFF = '1'
+    }
+  } catch {
+    // ignore
+  }
+
   const env: Record<string, string | undefined> = {
     ...process.env,
     ...(authPath && { CLAUDE_BG_AUTH_SNAPSHOT_PATH: authPath }),
     ...(process.platform === 'win32' && {
       CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT: '1',
     }),
+    ...statePermissionEnv,
     ...dispatch.env,
     CLAUDE_CODE_SESSION_KIND: 'bg',
     CLAUDE_BG_BACKEND: 'daemon',

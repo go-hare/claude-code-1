@@ -1,7 +1,11 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { type Notification, useNotifications } from 'src/context/notifications.js';
+import {
+  type Notification,
+  isNotificationVisibleDuringDiffPanel,
+  useNotifications,
+} from 'src/context/notifications.js';
 import { logEvent } from 'src/services/analytics/index.js';
 import { useAppState } from 'src/state/AppState.js';
 import { useVoiceState } from '../../context/voice.js';
@@ -13,6 +17,7 @@ import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import { Box, Text } from '@anthropic/ink';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
 import { calculateTokenWarningState } from '../../services/compact/autoCompact.js';
+import { useCompactWarningSuppression } from '../../services/compact/compactWarningHook.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { Message } from '../../types/message.js';
 import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper, getSubscriptionType } from '../../utils/auth.js';
@@ -30,6 +35,14 @@ import { MemoryUsageIndicator } from '../MemoryUsageIndicator.js';
 import { SentryErrorBoundary } from '../SentryErrorBoundary.js';
 import { TokenWarning } from '../TokenWarning.js';
 import { SandboxPromptFooterHint } from './SandboxPromptFooterHint.js';
+
+/** densable hCb — token-warning fold always prefers the incoming entry. */
+function foldTokenWarning(_acc: Notification, incoming: Notification): Notification {
+  return incoming;
+}
+
+/** densable token-warning long dwell (5h). */
+const TOKEN_WARNING_TIMEOUT_MS = 18_000_000;
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const VoiceIndicator: typeof import('./VoiceIndicator.js').VoiceIndicator = feature('VOICE_MODE')
@@ -77,9 +90,17 @@ export function Notifications({
   // re-reads settings.json on every call, so another session's /model write
   // would leak into this session's display (anthropics/claude-code#37596).
   const mainLoopModel = useMainLoopModel();
-  const isShowingCompactMessage = calculateTokenWarningState(tokenUsage, mainLoopModel).isAboveWarningThreshold;
+  const isShowingCompactMessage = calculateTokenWarningState(
+    tokenUsage,
+    mainLoopModel,
+  ).isAboveWarningThreshold;
+  const suppressTokenWarning = useCompactWarningSuppression();
+  const isBriefOnlyState = useAppState(s => s.isBriefOnly);
+  const isBriefOnly =
+    feature('KAIROS') || feature('KAIROS_BRIEF') ? isBriefOnlyState : false;
   const { status: ideStatus } = useIdeConnectionStatus(mcpClients);
   const notifications = useAppState(s => s.notifications);
+  const diffPanelVisible = useAppState(s => s.diffPanelVisible);
   const { addNotification, removeNotification } = useNotifications();
   const claudeAiLimits = useClaudeAiLimits();
 
@@ -139,6 +160,31 @@ export function Notifications({
     }
   }, [shouldShowExternalEditorHint, editor, addNotification, removeNotification]);
 
+  // densable token-warning via notification queue (medium, fold, DiffPanel-exempt)
+  // instead of always painting TokenWarning outside the queue.
+  useEffect(() => {
+    if (isShowingCompactMessage && !suppressTokenWarning && !isBriefOnly) {
+      addNotification({
+        key: 'token-warning',
+        jsx: <TokenWarning tokenUsage={tokenUsage} model={mainLoopModel} />,
+        priority: 'medium',
+        timeoutMs: TOKEN_WARNING_TIMEOUT_MS,
+        fold: foldTokenWarning,
+        exemptFromDiffPanelHold: true,
+      });
+    } else {
+      removeNotification('token-warning');
+    }
+  }, [
+    isShowingCompactMessage,
+    suppressTokenWarning,
+    isBriefOnly,
+    tokenUsage,
+    mainLoopModel,
+    addNotification,
+    removeNotification,
+  ]);
+
   return (
     <SentryErrorBoundary>
       <Box flexDirection="column" alignItems={isNarrow ? 'flex-start' : 'flex-end'} flexShrink={0} overflowX="hidden">
@@ -146,13 +192,13 @@ export function Notifications({
           ideSelection={ideSelection}
           mcpClients={mcpClients}
           notifications={notifications}
+          diffPanelVisible={diffPanelVisible}
           isInOverageMode={isInOverageMode ?? false}
           isTeamOrEnterprise={isTeamOrEnterprise}
           apiKeyStatus={apiKeyStatus}
           debug={debug}
           verbose={verbose}
           tokenUsage={tokenUsage}
-          mainLoopModel={mainLoopModel}
         />
       </Box>
     </SentryErrorBoundary>
@@ -163,13 +209,13 @@ function NotificationContent({
   ideSelection,
   mcpClients,
   notifications,
+  diffPanelVisible,
   isInOverageMode,
   isTeamOrEnterprise,
   apiKeyStatus,
   debug,
   verbose,
   tokenUsage,
-  mainLoopModel,
 }: {
   ideSelection: IDESelection | undefined;
   mcpClients?: MCPServerConnection[];
@@ -177,14 +223,18 @@ function NotificationContent({
     current: Notification | null;
     queue: Notification[];
   };
+  diffPanelVisible: boolean;
   isInOverageMode: boolean;
   isTeamOrEnterprise: boolean;
   apiKeyStatus: VerificationStatus;
   debug: boolean;
   verbose: boolean;
   tokenUsage: number;
-  mainLoopModel: string;
 }): ReactNode {
+  // densable ylr/nSr: hide non-exempt current while DiffPanel is open.
+  const visibleCurrent = isNotificationVisibleDuringDiffPanel(notifications.current, diffPanelVisible)
+    ? notifications.current
+    : null;
   // Poll apiKeyHelper inflight state to show slow-helper notice.
   // Gated on configuration — most users never set apiKeyHelper, so the
   // effect is a no-op for them (no interval allocated).
@@ -210,8 +260,6 @@ function NotificationContent({
   const voiceEnabled = feature('VOICE_MODE') ? voiceEnabledRaw : false;
   const voiceErrorRaw = useVoiceState(s => s.voiceError);
   const voiceError = feature('VOICE_MODE') ? voiceErrorRaw : null;
-  const isBriefOnlyState = useAppState(s => s.isBriefOnly);
-  const isBriefOnly = feature('KAIROS') || feature('KAIROS_BRIEF') ? isBriefOnlyState : false;
 
   // When voice is actively recording or processing, replace all
   // notifications with just the voice indicator.
@@ -222,14 +270,14 @@ function NotificationContent({
   return (
     <>
       <IdeStatusIndicator ideSelection={ideSelection} mcpClients={mcpClients} />
-      {notifications.current &&
-        ('jsx' in notifications.current ? (
-          <Text wrap="truncate" key={notifications.current.key}>
-            {notifications.current.jsx}
+      {visibleCurrent &&
+        ('jsx' in visibleCurrent ? (
+          <Text wrap="truncate" key={visibleCurrent.key}>
+            {visibleCurrent.jsx}
           </Text>
         ) : (
-          <Text color={notifications.current.color} dimColor={!notifications.current.color} wrap="truncate">
-            {notifications.current.text}
+          <Text color={visibleCurrent.color} dimColor={!visibleCurrent.color} wrap="truncate">
+            {visibleCurrent.text}
           </Text>
         ))}
       {isInOverageMode && !isTeamOrEnterprise && (
@@ -282,7 +330,6 @@ function NotificationContent({
           </Text>
         </Box>
       )}
-      {!isBriefOnly && <TokenWarning tokenUsage={tokenUsage} model={mainLoopModel} />}
       {feature('VOICE_MODE')
         ? voiceEnabled &&
           voiceError && (

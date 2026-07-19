@@ -170,8 +170,18 @@ export function renderToolUseErrorMessage(
   },
 ): React.ReactElement {
   const { verbose } = options;
+  // densable Hh_: non-verbose tool_use_error short-circuits.
   if (!verbose && typeof result === 'string' && extractTag(result, 'tool_use_error')) {
     const errorMessage = extractTag(result, 'tool_use_error');
+    // densable U5n → "File must be read first"
+    if (errorMessage?.includes('File has not been read yet')) {
+      return (
+        <MessageResponse>
+          <Text dimColor>File must be read first</Text>
+        </MessageResponse>
+      );
+    }
+    // densable XZ cwd note → "File not found"
     if (errorMessage?.includes(FILE_NOT_FOUND_CWD_NOTE)) {
       return (
         <MessageResponse>

@@ -96,6 +96,17 @@ function buildHookSchemas() {
       .describe(
         'Model to use for this prompt hook (e.g., "claude-sonnet-4-6"). If not specified, uses the default small fast model.',
       ),
+    /**
+     * densable continueOnBlock — when true, a blocking (ok:false) result does not
+     * set preventContinuation (session may continue). Stop/SubagentStop already
+     * skip preventContinuation regardless of this flag.
+     */
+    continueOnBlock: z
+      .boolean()
+      .optional()
+      .describe(
+        'If true, a blocking ok:false result does not prevent continuation',
+      ),
     statusMessage: z
       .string()
       .optional()

@@ -39,9 +39,11 @@ export function usePostCompactSurvey(
   hasActivePrompt = false,
   { enabled = true }: { enabled?: boolean } = {},
 ): {
-  state: 'closed' | 'open' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
+  state: 'closed' | 'open' | 'pending' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
   lastResponse: FeedbackSurveyResponse | null;
   handleSelect: (selected: FeedbackSurveyResponse) => void;
+  handleUndo: () => void;
+  abandon: () => void;
 } {
   const [gateEnabled, setGateEnabled] = useState<boolean | null>(null);
   const seenCompactBoundaries = useRef<Set<string>>(new Set());
@@ -80,10 +82,24 @@ export function usePostCompactSurvey(
     });
   }, []);
 
-  const { state, lastResponse, open, handleSelect } = useSurveyState({
+  // densable Yjb / kvk onAbandon
+  const onAbandon = useCallback((appearanceId: string) => {
+    logEvent('tengu_post_compact_survey_event', {
+      event_type: 'abandoned' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      appearance_id: appearanceId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    void logOTelEvent('feedback_survey', {
+      event_type: 'abandoned',
+      appearance_id: appearanceId,
+      survey_type: 'post_compact',
+    });
+  }, []);
+
+  const { state, lastResponse, open, abandon, handleSelect, handleUndo } = useSurveyState({
     hideThanksAfterMs: HIDE_THANKS_AFTER_MS,
     onOpen,
     onSelect,
+    onAbandon,
   });
 
   // Check the feature gate on mount
@@ -153,5 +169,5 @@ export function usePostCompactSurvey(
     }
   }, [enabled, currentCompactBoundaries, state, isLoading, hasActivePrompt, gateEnabled, messages, open]);
 
-  return { state, lastResponse, handleSelect };
+  return { state, lastResponse, handleSelect, handleUndo, abandon };
 }

@@ -19,6 +19,7 @@ import { createAttachmentMessage } from '../attachments.js'
 import { createCombinedAbortSignal } from '../combinedAbortSignal.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
+import { cloneFileStateCache } from '../fileStateCache.js'
 import type { HookResult } from '../hooks.js'
 import { createUserMessage, handleMessageFromStream } from '../messages.js'
 import { getSmallFastModel } from '../model/model.js'
@@ -127,8 +128,14 @@ export async function execAgentHook(
         structuredOutputTool,
       ]
 
+      // densable akd: Stop/SubagentStop vs generic hook-event system prompt
+      const roleLead =
+        hookEvent === 'Stop' || hookEvent === 'SubagentStop'
+          ? 'You are verifying a stop condition in Claude Code. Your task is to verify that the agent completed the given plan.'
+          : `You are evaluating a ${hookEvent} hook in Claude Code. Your task is to evaluate the condition described in the user message.`
       const systemPrompt = asSystemPrompt([
-        `You are verifying a stop condition in Claude Code. Your task is to verify that the agent completed the given plan. The conversation transcript is available at: ${transcriptPath}\nYou can read this file to analyze the conversation history if needed.
+        `${roleLead} The conversation transcript is available at: ${transcriptPath}
+You can read this file to analyze the conversation history if needed.
 
 Use the available tools to inspect the codebase and verify the condition.
 Use as few steps as possible - be efficient and direct.
@@ -144,17 +151,28 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
       // Create unique agentId for this hook agent
       const hookAgentId = asAgentId(`hook-agent-${randomUUID()}`)
 
+      // densable akd: strip seededFromContext so parent CLAUDE.md seeds do not
+      // count as "already read" for Edit/Write inside the hook agent.
+      const agentReadFileState = cloneFileStateCache(toolUseContext.readFileState, {
+        stripSeededFromContext: true,
+      })
+
       // Create a modified toolUseContext for the agent
+      // densable akd options: requiresStructuredOutput:!0, thinking disabled,
+      // refreshTools stripped (parent mid-query tool refresh must not leak).
       const agentToolUseContext: ToolUseContext = {
         ...toolUseContext,
         agentId: hookAgentId,
         abortController: hookAbortController,
+        readFileState: agentReadFileState,
         options: {
           ...toolUseContext.options,
           tools,
           mainLoopModel: model,
           isNonInteractiveSession: true,
+          requiresStructuredOutput: true,
           thinkingConfig: { type: 'disabled' as const },
+          refreshTools: undefined,
         },
         setInProgressToolUseIDs: () => {},
         getAppState() {

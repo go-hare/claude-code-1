@@ -9,7 +9,12 @@ import { findToolByName, type Tools, type ToolUseContext } from '../../Tool.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import { createChildAbortController } from '../../utils/abortController.js'
-import { runToolUse } from './toolExecution.js'
+import {
+  applyContextLayers,
+  type ContextLayer,
+} from '../../utils/contextLayers.js'
+import { resolveToolForExecution, runToolUse } from './toolExecution.js'
+import { formatToolNotFoundHint } from './toolNotFoundHint.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 import type { LangfuseSpan } from '../langfuse/index.js'
 
@@ -31,6 +36,8 @@ type TrackedTool = {
   // Progress messages are stored separately and yielded immediately
   pendingProgress: Message[]
   contextModifiers?: Array<(context: ToolUseContext) => ToolUseContext>
+  /** densable e.contextLayers layers collected from tool updates */
+  contextLayers?: ContextLayer[]
 }
 
 /**
@@ -101,8 +108,23 @@ export class StreamingToolExecutor {
         }
       }
     }
-    const toolDefinition = findToolByName(this.toolDefinitions, block.name)
+    // densable Tc + I8 alias fallback (same resolve path as runToolUse/cWr)
+    const toolDefinition = resolveToolForExecution(
+      this.toolDefinitions,
+      block.name,
+      this.toolUseContext.options.toolAliases,
+    )
     if (!toolDefinition) {
+      // densable qcs — contextual unknown-tool suffix
+      const notFoundHint = formatToolNotFoundHint({
+        toolName: block.name,
+        availableTools: this.toolDefinitions,
+        agentId: this.toolUseContext.agentId,
+        mcpClients: this.toolUseContext.options.mcpClients as
+          | ReadonlyArray<{ name: string; type?: string }>
+          | undefined,
+      })
+      const notFoundMessage = `Error: No such tool available: ${block.name}${notFoundHint}`
       this.tools.push({
         id: block.id,
         block,
@@ -115,12 +137,12 @@ export class StreamingToolExecutor {
             content: [
               {
                 type: 'tool_result',
-                content: `<tool_use_error>Error: No such tool available: ${block.name}</tool_use_error>`,
+                content: `<tool_use_error>${notFoundMessage}</tool_use_error>`,
                 is_error: true,
                 tool_use_id: block.id,
               },
             ],
-            toolUseResult: `Error: No such tool available: ${block.name}`,
+            toolUseResult: notFoundMessage,
             sourceToolAssistantUUID: assistantMessage.uuid,
           }),
         ],
@@ -195,6 +217,8 @@ export class StreamingToolExecutor {
           },
         ],
         toolUseResult: 'User rejected tool use',
+        // densable toolDenialKind:"user-rejected" on interrupt reject
+        toolDenialKind: 'user-rejected',
         sourceToolAssistantUUID: assistantMessage.uuid,
       })
     }
@@ -258,7 +282,12 @@ export class StreamingToolExecutor {
   }
 
   private getToolInterruptBehavior(tool: TrackedTool): 'cancel' | 'block' {
-    const definition = findToolByName(this.toolDefinitions, tool.block.name)
+    // densable Tc: session toolAliases for interrupt behavior lookup
+    const definition = findToolByName(
+      this.toolDefinitions,
+      tool.block.name,
+      this.toolUseContext.options.toolAliases,
+    )
     if (!definition?.interruptBehavior) return 'block'
     try {
       return definition.interruptBehavior()
@@ -327,6 +356,7 @@ export class StreamingToolExecutor {
     const messages: Message[] = []
     const contextModifiers: Array<(context: ToolUseContext) => ToolUseContext> =
       []
+    const layers: ContextLayer[] = []
 
     const collectResults = async () => {
       // If already aborted (by error or user), generate synthetic error block instead of running the tool
@@ -341,6 +371,7 @@ export class StreamingToolExecutor {
         )
         tool.results = messages
         tool.contextModifiers = contextModifiers
+        tool.contextLayers = layers
         tool.status = 'completed'
         this.updateInterruptibleState()
         return
@@ -439,9 +470,14 @@ export class StreamingToolExecutor {
         if (update.contextModifier) {
           contextModifiers.push(update.contextModifier.modifyContext)
         }
+        // densable: collect contextLayers.layers from tool updates
+        if (update.contextLayers?.layers?.length) {
+          layers.push(...update.contextLayers.layers)
+        }
       }
       tool.results = messages
       tool.contextModifiers = contextModifiers
+      tool.contextLayers = layers
       tool.status = 'completed'
       this.updateInterruptibleState()
 
@@ -452,6 +488,10 @@ export class StreamingToolExecutor {
         for (const modifier of contextModifiers) {
           this.toolUseContext = modifier(this.toolUseContext)
         }
+      }
+      // densable Ter on exclusive tools when layers present
+      if (!tool.isConcurrencySafe && layers.length > 0) {
+        this.toolUseContext = applyContextLayers(this.toolUseContext, layers)
       }
     }
 

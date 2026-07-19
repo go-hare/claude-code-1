@@ -18,14 +18,52 @@ import {
   TASK_NOTIFICATION_TAG,
   TASK_TYPE_TAG,
 } from '../constants/xml.js'
+import type { AgentId } from '../types/ids.js'
+import { asAgentId } from '../types/ids.js'
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import type { RunProgress } from './progress/store.js'
 import type { WorkflowService } from './service.js'
 
 const WORKFLOW_TASK_TYPE = 'local_workflow'
 
+/**
+ * Official Hao/Jeo queue meta for a workflow run.
+ * - taskId: LocalWorkflowTask panel id (reason is `workflow:${taskId}`)
+ * - agentId: owner local_agent id (Jeo matches cmd.agentId === owner)
+ * runId may differ from taskId on resumeFromRunId — always stamp panel taskId.
+ */
+export type WorkflowNotifyMeta = {
+  taskId: string
+  agentId?: string
+}
+
+/** runId → panel taskId + owner for Jeo undrained-notification keep. */
+const workflowNotifyMetaByRunId = new Map<string, WorkflowNotifyMeta>()
+
+/** Register at taskRegistrar.register; cleared after terminal enqueue. */
+export function registerWorkflowNotifyMeta(
+  runId: string,
+  meta: WorkflowNotifyMeta,
+): void {
+  workflowNotifyMetaByRunId.set(runId, meta)
+}
+
+export function clearWorkflowNotifyMeta(runId: string): void {
+  workflowNotifyMetaByRunId.delete(runId)
+}
+
+export function getWorkflowNotifyMeta(
+  runId: string,
+): WorkflowNotifyMeta | undefined {
+  return workflowNotifyMetaByRunId.get(runId)
+}
+
 /** Notifier abstraction (lets tests inject a spy). */
-export type WorkflowNotifier = (message: string) => void
+export type WorkflowNotifier = (
+  message: string,
+  runId?: string,
+  meta?: WorkflowNotifyMeta,
+) => void
 
 const TERMINAL_STATUSES: ReadonlySet<RunProgress['status']> = new Set([
   'completed',
@@ -34,8 +72,19 @@ const TERMINAL_STATUSES: ReadonlySet<RunProgress['status']> = new Set([
 ])
 
 /** Default notifier: uses the host message queue's task-notification mode. */
-const defaultNotifier: WorkflowNotifier = message => {
-  enqueuePendingNotification({ value: message, mode: 'task-notification' })
+const defaultNotifier: WorkflowNotifier = (message, runId, meta) => {
+  const resolved = meta ?? (runId ? workflowNotifyMetaByRunId.get(runId) : undefined)
+  const taskId = resolved?.taskId ?? runId
+  const owner = resolved?.agentId
+  const agentId: AgentId | undefined = owner ? asAgentId(owner) : undefined
+  enqueuePendingNotification({
+    value: message,
+    mode: 'task-notification',
+    // Official Jeo: taskId = child panel id, agentId = owner (Hao/BRt stamp).
+    ...(taskId ? { taskId } : {}),
+    ...(agentId ? { agentId } : {}),
+  })
+  if (runId) clearWorkflowNotifyMeta(runId)
 }
 
 export function installWorkflowNotifications(
@@ -56,7 +105,12 @@ export function installWorkflowNotifications(
       }
       // Status changed + entered terminal state → emit notification
       if (prev !== run.status && TERMINAL_STATUSES.has(run.status)) {
-        notify(buildMessage(run))
+        const meta = workflowNotifyMetaByRunId.get(run.runId)
+        notify(
+          buildMessage(run, meta?.taskId),
+          run.runId,
+          meta,
+        )
       }
       prevStatus.set(run.runId, run.status)
     }
@@ -68,7 +122,11 @@ export function installWorkflowNotifications(
   }
 }
 
-function buildMessage(run: RunProgress): string {
+/**
+ * Build host notification XML. Prefer panel LocalWorkflowTask id when known
+ * (resume runId may differ); fall back to runId for historical / unbound runs.
+ */
+function buildMessage(run: RunProgress, panelTaskId?: string): string {
   const statusText =
     run.status === 'completed'
       ? 'completed successfully'
@@ -78,9 +136,10 @@ function buildMessage(run: RunProgress): string {
   const errorSuffix =
     run.status === 'failed' && run.error ? `: ${run.error}` : ''
   const summary = `Workflow "${run.workflowName}" ${statusText}${errorSuffix}`
+  const taskIdForXml = panelTaskId ?? run.runId
 
   return `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${run.runId}</${TASK_ID_TAG}>
+<${TASK_ID_TAG}>${taskIdForXml}</${TASK_ID_TAG}>
 <${TASK_TYPE_TAG}>${WORKFLOW_TASK_TYPE}</${TASK_TYPE_TAG}>
 <${STATUS_TAG}>${run.status}</${STATUS_TAG}>
 <${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>

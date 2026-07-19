@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test'
+import { InputEvent } from '../events/input-event.js'
+import { KeyboardEvent } from '../events/keyboard-event.js'
 import {
   INITIAL_STATE,
   parseMultipleKeypresses,
   type ParsedInput,
 } from '../parse-keypress.js'
-import { InputEvent } from '../events/input-event.js'
 
 function names(items: ParsedInput[]): string[] {
   return items.map(i => {
@@ -19,34 +20,32 @@ function sequences(items: ParsedInput[]): string[] {
 }
 
 /**
- * Orphan SGR/X10 recovery:
- * - Official densable ZXc whole-token re-ESC:
- *     /^\[<\d+;\d+;\d+[Mm]$/
- *     /^\[M[\x60-\x7f][\x20-\uffff]{2}$/
- * - Fork also peels successive COMPLETE orphan mouse events from the front
- *   of a text token so ESC-lost wheel bursts still scroll (live: without
- *   peel, residues like "MMM8MMMM" steal the input path and scroll sticks).
- * Incomplete / param residue stays text; InputEvent sji empties multi-char.
+ * Official densable ZXc (2.1.210) text-branch orphan recovery is whole-token
+ * only:
+ *   /^\[<\d+;\d+;\d+[Mm]$/
+ *   /^\[M[\x60-\x7f][\x20-\uffff]{2}$/
+ * Bursts / incomplete / embedded / param residue are NOT peeled or held —
+ * they stay as text tokens. InputEvent sji empties multi-codepoint non-paste;
+ * KeyboardEvent fag empties ESC-prefixed / pure orphan bursts.
+ * No pendingSgrPrefix / absorb window (those were fork-only extras).
  */
-describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () => {
+describe('orphan SGR/X10 mouse tails (official ZXc whole-token)', () => {
   test('single orphaned wheel-down tail becomes wheeldown', () => {
     const [items] = parseMultipleKeypresses(INITIAL_STATE, '[<65;11;10M')
     expect(names(items)).toEqual(['wheeldown'])
   })
 
-  test('burst of orphaned wheel tails peels into wheeldown keys', () => {
+  test('burst of orphaned wheel tails stays text (sji/fag empty insert)', () => {
     const burst = '[<65;11;10M[<65;11;10M[<65;11;10M[<65;11;10M[<65;11;10M'
     const [items] = parseMultipleKeypresses(INITIAL_STATE, burst)
-    expect(names(items)).toEqual([
-      'wheeldown',
-      'wheeldown',
-      'wheeldown',
-      'wheeldown',
-      'wheeldown',
-    ])
+    expect(names(items).every(n => n !== 'wheeldown' && n !== 'wheelup')).toBe(
+      true,
+    )
     for (const item of items) {
       if (item.kind === 'key') {
         expect(new InputEvent(item).input).toBe('')
+        // pure orphan burst matches fag
+        expect(new KeyboardEvent(item).key).toBe('')
       }
     }
   })
@@ -68,17 +67,13 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     }
   })
 
-  test('typed text after complete orphan peels mouse then keeps text', () => {
-    // Prefix peel takes the complete mouse; leftover "hello" is text (sji empty).
+  test('typed text after complete orphan is not whole-token — stays text', () => {
     const [items] = parseMultipleKeypresses(INITIAL_STATE, '[<65;1;1Mhello')
-    expect(names(items)[0]).toBe('wheeldown')
-    const textKeys = items.filter(
-      (i): i is Extract<ParsedInput, { kind: 'key' }> =>
-        i.kind === 'key' && i.name !== 'wheeldown',
-    )
-    expect(textKeys.length).toBeGreaterThanOrEqual(1)
-    for (const item of textKeys) {
-      expect(new InputEvent(item).input).toBe('')
+    expect(names(items).every(n => n !== 'wheeldown')).toBe(true)
+    for (const item of items) {
+      if (item.kind === 'key') {
+        expect(new InputEvent(item).input).toBe('')
+      }
     }
   })
 
@@ -98,53 +93,11 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     expect(names(items)).toEqual(['wheeldown', 'wheelup'])
   })
 
-  test('incomplete orphan SGR prefix is held for late finalizer (not typed)', () => {
-    // 3-param incomplete body + late M → wheel. Official densable flushes
-    // and loses the body; fork keeps pendingSgrPrefix so "M" is not typed.
+  test('incomplete orphan SGR prefix is text (no hold across chunks)', () => {
     const [items, state] = parseMultipleKeypresses(INITIAL_STATE, '[<64;19;15')
     expect(state.incomplete).toBe('')
-    expect(items).toHaveLength(0)
-    expect(state.pendingSgrPrefix).toBe('[<64;19;15')
-    const [items2] = parseMultipleKeypresses(state, 'M')
-    expect(names(items2)).toEqual(['wheelup'])
-    for (const item of items2) {
-      if (item.kind === 'key') {
-        expect(new InputEvent(item).input).toBe('')
-      }
-    }
-  })
-
-  test('late pure M run after held incomplete is absorbed not typed', () => {
-    let [items, state] = parseMultipleKeypresses(
-      INITIAL_STATE,
-      '\x1b[<65;11;10',
-    )
-    // Still incomplete in tokenizer until flush
-    ;[items, state] = parseMultipleKeypresses(state, null)
-    // Held or emptied — must not type the body
-    for (const item of items) {
-      if (item.kind === 'key') {
-        expect(new InputEvent(item).input).toBe('')
-      }
-    }
-    ;[items, state] = parseMultipleKeypresses(state, 'M')
-    // Completes wheeldown if held
-    expect(
-      names(items).filter(n => n === 'wheeldown').length,
-    ).toBeGreaterThanOrEqual(0)
-    for (const item of items) {
-      if (item.kind === 'key') {
-        expect(new InputEvent(item).input).toBe('')
-      }
-    }
-    ;[items, state] = parseMultipleKeypresses(state, 'MMMMMMMM')
-    // Pure finalizer run absorbed — never typed
-    expect(items).toHaveLength(0)
-  })
-
-  test('incomplete orphan SGR with junk after body stays sji-empty', () => {
-    const [items, state] = parseMultipleKeypresses(INITIAL_STATE, '[<64;19;x')
-    expect(state.incomplete).toBe('')
+    expect(state).not.toHaveProperty('pendingSgrPrefix')
+    expect(items.length).toBeGreaterThanOrEqual(1)
     for (const item of items) {
       if (item.kind === 'key') {
         expect(new InputEvent(item).input).toBe('')
@@ -152,35 +105,22 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     }
   })
 
-  test('later complete tail after incomplete prefix peels complete wheel', () => {
-    // Prefix peel takes complete `[<65;11;10M`; incomplete head held/dropped.
-    const [items] = parseMultipleKeypresses(
-      INITIAL_STATE,
-      '[<64;19;[<65;11;10M',
-    )
-    // May peel the complete wheel; either way sji must not type residue.
-    for (const item of items) {
-      if (item.kind === 'key') {
-        expect(new InputEvent(item).input).toBe('')
-      }
-    }
-  })
-
-  test('multi-chunk incomplete 3-param body + M completes as wheel', () => {
-    // Fork holds incomplete SGR so late finalizer scrolls instead of typing M.
+  test('multi-chunk incomplete body + M does NOT complete as wheel', () => {
+    // Official densable: no pendingSgrPrefix. Each chunk is independent text.
     let state = INITIAL_STATE
     let items: ParsedInput[]
     ;[items, state] = parseMultipleKeypresses(state, '[<65;23;12')
-    expect(items).toHaveLength(0)
-    expect(state.pendingSgrPrefix).toBe('[<65;23;12')
+    expect(names(items).every(n => n !== 'wheeldown')).toBe(true)
     ;[items, state] = parseMultipleKeypresses(state, 'M')
-    expect(names(items)).toEqual(['wheeldown'])
-    ;[items, state] = parseMultipleKeypresses(state, 'MMMM')
-    // Absorb trailing finalizers after complete wheel
-    expect(items).toHaveLength(0)
+    // Single "M" types (official can type late finalizer after desync)
+    expect(items).toHaveLength(1)
+    if (items[0]!.kind === 'key') {
+      expect(items[0].sequence).toBe('M')
+      expect(new InputEvent(items[0]).input).toBe('M')
+    }
   })
 
-  test('typed M alone still inserts (not swallowed as SGR residue)', () => {
+  test('typed M alone still inserts', () => {
     const [items] = parseMultipleKeypresses(INITIAL_STATE, 'M')
     expect(items).toHaveLength(1)
     expect(items[0]!.kind).toBe('key')
@@ -191,16 +131,17 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     }
   })
 
-  test('typed M after a complete wheel is absorbed (desync window)', () => {
-    // Live walls of M come from finalizers arriving after a complete SGR.
-    // After any complete wheel we open an absorb window for pure M/m runs.
-    // Idle single M without a recent mouse event still inserts (test above).
+  test('typed M after a complete wheel still inserts (no absorb window)', () => {
     let state = INITIAL_STATE
     let items: ParsedInput[]
     ;[items, state] = parseMultipleKeypresses(state, '\x1b[<65;23;12M')
     expect(names(items)).toEqual(['wheeldown'])
     ;[items, state] = parseMultipleKeypresses(state, 'M')
-    expect(items).toHaveLength(0)
+    expect(items).toHaveLength(1)
+    if (items[0]!.kind === 'key') {
+      expect(items[0].sequence).toBe('M')
+      expect(new InputEvent(items[0]).input).toBe('M')
+    }
   })
 
   test('2-param residue col;rowM is not recovered as mouse (live 17;19M)', () => {
@@ -216,7 +157,6 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
   })
 
   test('SGR embedded after image placeholder is not peeled (official)', () => {
-    // Official whole-token only — mixed image+SGR stays text; sji empties.
     const [items] = parseMultipleKeypresses(
       INITIAL_STATE,
       '[Image #2][<64;19;15M[<65;19;15M[Image #3]',
@@ -231,9 +171,10 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     }
   })
 
-  test('typed char then orphan SGR is not peeled as wheel (official)', () => {
-    const [items] = parseMultipleKeypresses(INITIAL_STATE, 'x[<64;19;15M')
-    expect(names(items).every(n => n !== 'wheelup')).toBe(true)
+  test('leading-< complete wheel is not recovered (official whole-token needs [)', () => {
+    // Official only re-ESC's `\[<…M` whole token, not leading-`<` alone.
+    const [items] = parseMultipleKeypresses(INITIAL_STATE, '<65;11;10M')
+    expect(names(items).every(n => n !== 'wheeldown')).toBe(true)
     for (const item of items) {
       if (item.kind === 'key') {
         expect(new InputEvent(item).input).toBe('')
@@ -241,30 +182,50 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     }
   })
 
-  test('lone param residue is not treated as mouse', () => {
-    const [items] = parseMultipleKeypresses(INITIAL_STATE, '5;23;12M')
-    expect(names(items).every(n => n !== 'wheeldown' && n !== 'wheelup')).toBe(
-      true,
-    )
-    for (const item of items) {
-      if (item.kind === 'key') {
-        expect(new InputEvent(item).input).toBe('')
-      }
-    }
-  })
-
-  test('flush of incomplete ESC+[ is swallowed (mouse-start, not typed)', () => {
-    // Tokenizer holds "\x1b["; flush would emit sequence. We treat bare CSI
-    // mouse start as non-text and open the M/m absorb window instead.
+  test('flush of incomplete ESC+[ yields nameless sequence emptied by fag/sji', () => {
     let state = INITIAL_STATE
     let items: ParsedInput[]
     ;[items, state] = parseMultipleKeypresses(state, '\x1b[')
     expect(items).toHaveLength(0)
     expect(state.incomplete).toBe('\x1b[')
     ;[items, state] = parseMultipleKeypresses(state, null)
-    expect(items).toHaveLength(0)
-    // Subsequent pure M run absorbed
-    ;[items, state] = parseMultipleKeypresses(state, 'MMMM')
-    expect(items).toHaveLength(0)
+    expect(items.length).toBeGreaterThanOrEqual(1)
+    for (const item of items) {
+      if (item.kind === 'key') {
+        expect(new InputEvent(item).input).toBe('')
+        expect(new KeyboardEvent(item).key).toBe('')
+      }
+    }
+  })
+
+  test('pure MMMM multi-char is emptied by sji and fork residue sink', () => {
+    const [items] = parseMultipleKeypresses(INITIAL_STATE, 'MMMM')
+    expect(items).toHaveLength(1)
+    if (items[0]!.kind === 'key') {
+      // InputEvent sji: multi-codepoint non-paste → ""
+      expect(new InputEvent(items[0]).input).toBe('')
+      // KeyboardEvent: fork isSgrMouseResidue (main prompt inserts e.key, no sji)
+      expect(new KeyboardEvent(items[0]).key).toBe('')
+    }
+  })
+
+  test('live progressive desync and glued residue empty at KE insert path', () => {
+    const cases = [
+      '<64;32;19M4;32;19M32;19M;19M<65;32;19M',
+      '[<65;23;12M5;23;12M',
+      '5;23;12M',
+      'MMM8MMMM',
+      '64;32;19',
+    ]
+    for (const seq of cases) {
+      const [items] = parseMultipleKeypresses(INITIAL_STATE, seq)
+      expect(items.length).toBeGreaterThanOrEqual(1)
+      for (const item of items) {
+        if (item.kind === 'key') {
+          expect(new InputEvent(item).input).toBe('')
+          expect(new KeyboardEvent(item).key).toBe('')
+        }
+      }
+    }
   })
 })

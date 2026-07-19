@@ -92,8 +92,15 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
         });
       }
       setAppState(prev => {
-        if (!prev.replBridgeEnabled) return prev;
-        return { ...prev, replBridgeEnabled: false };
+        if (!prev.replBridgeEnabled && prev.replBridgeSessionGroupingId === undefined) {
+          return prev;
+        }
+        // Official Fsb: clear grouping with disable.
+        return {
+          ...prev,
+          replBridgeEnabled: false,
+          replBridgeSessionGroupingId: undefined,
+        };
       });
       onDone();
     }

@@ -292,7 +292,9 @@ async function getCacheSharingParams(
   })
   const [userContext, systemContext] = await Promise.all([
     getUserContext(),
-    getSystemContext(),
+    getSystemContext(
+      context.options.cacheBreakerPhrase ?? appState.cacheBreakerPhrase,
+    ),
   ])
   return {
     systemPrompt,

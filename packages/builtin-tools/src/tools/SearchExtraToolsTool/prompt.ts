@@ -23,6 +23,26 @@ function getToolLocationHint(): string {
     : 'Deferred tools appear by name in <available-deferred-tools> messages.'
 }
 
+/**
+ * densable kHc / p7n residual — when juniper gorse_hollow (toolSearchFetchRule)
+ * is on, strengthen the "must fetch schema before call" rule. Keep require
+ * lazy to avoid circular import with systemPromptArms → config.
+ */
+function getDeferredFetchRuleSentence(): string {
+  let fetchRule = false
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isJuniperToolSearchFetchRuleEnabled } =
+      require('src/utils/systemPromptArms.js') as typeof import('src/utils/systemPromptArms.js')
+    fetchRule = isJuniperToolSearchFetchRuleEnabled()
+  } catch {
+    fetchRule = false
+  }
+  return fetchRule
+    ? ' Until fetched, only the name is known — there is no parameter schema, so calling the tool fails with InputValidationError. When any instruction, system reminder, or other tool\'s description names a deferred tool, fetch it with query "select:<name>" before calling it.'
+    : ' Until fetched, only the name is known — there is no parameter schema, so the tool cannot be invoked.'
+}
+
 const PROMPT_TAIL = ` Returns matching tool names.
 
 ## Two-step workflow (MUST follow exactly)
@@ -87,5 +107,11 @@ export function formatDeferredToolLine(tool: Tool): string {
 }
 
 export function getPrompt(): string {
-  return PROMPT_HEAD + getToolLocationHint() + PROMPT_TAIL
+  // densable p7n: HEAD + location + fetch-rule sentence + TAIL
+  return (
+    PROMPT_HEAD +
+    getToolLocationHint() +
+    getDeferredFetchRuleSentence() +
+    PROMPT_TAIL
+  )
 }

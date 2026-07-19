@@ -5,16 +5,24 @@ import type { NormalizedMessage } from '../types/message.js';
 type Props = {
   message: NormalizedMessage;
   isTranscriptMode: boolean;
+  /**
+   * densable showMessageTimestamps (silk_hinge) — when true, stamp assistant
+   * messages outside transcript mode as well. Transcript mode always stamps
+   * assistant text messages when a timestamp is present.
+   */
+  showMessageTimestamps?: boolean;
 };
 
-export function MessageTimestamp({ message, isTranscriptMode }: Props): React.ReactNode {
+export function MessageTimestamp({ message, isTranscriptMode, showMessageTimestamps = false }: Props): React.ReactNode {
+  // densable l2o: timestamp && assistant && (showMessageTimestamps || transcript+text)
+  const hasTimestamp = Boolean(message.timestamp);
+  const isAssistant = message.type === 'assistant';
+  const hasTextBlock =
+    Array.isArray(message.message?.content) &&
+    (message.message!.content as { type: string }[]).some(c => c.type === 'text');
+
   const shouldShowTimestamp =
-    isTranscriptMode &&
-    message.timestamp &&
-    message.type === 'assistant' &&
-    (Array.isArray(message.message!.content)
-      ? (message.message!.content as { type: string }[]).some(c => c.type === 'text')
-      : false);
+    hasTimestamp && isAssistant && (showMessageTimestamps || (isTranscriptMode && hasTextBlock));
 
   if (!shouldShowTimestamp) {
     return null;

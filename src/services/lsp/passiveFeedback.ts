@@ -3,6 +3,7 @@ import type { PublishDiagnosticsParams } from 'vscode-languageserver-protocol'
 import { logForDebugging } from '../../utils/debug.js'
 import { toError } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
+import { recordPluginUse } from '../../utils/plugins/pluginUsage.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import type { DiagnosticFile } from '../diagnosticTracking.js'
 import { registerPendingLSPDiagnostic } from './LSPDiagnosticRegistry.js'
@@ -218,6 +219,12 @@ export function registerLSPNotificationHandlers(
 
               // Success - reset failure counter for this server
               diagnosticFailures.delete(serverName)
+
+              // densable F$: plugin LSP diagnostics count as real plugin use
+              const pluginSource = serverInstance.config?.pluginSource
+              if (pluginSource) {
+                recordPluginUse(pluginSource)
+              }
             } catch (error) {
               const err = toError(error)
               logError(err)

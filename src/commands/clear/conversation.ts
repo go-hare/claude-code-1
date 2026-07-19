@@ -30,6 +30,8 @@ import { isLocalShellTask } from '../../tasks/LocalShellTask/guards.js'
 import { asAgentId } from '../../types/ids.js'
 import type { Message } from '../../types/message.js'
 import { createEmptyAttributionState } from '../../utils/commitAttribution.js'
+import { footerLinksAfterClear } from '../../utils/footerLinks.js'
+import { setSessionBriefTranscript } from '../../utils/focusView.js'
 import type { FileStateCache } from '../../utils/fileStateCache.js'
 import {
   executeSessionEndHooks,
@@ -210,6 +212,24 @@ export async function clearConversation({
           trackedFiles: new Set(),
           snapshotSequence: 0,
         },
+        // densable $4d: drop regex footer badges; keep keyed (e.g. PR)
+        footerLinks: footerLinksAfterClear(prev.footerLinks ?? []),
+        // densable clear: drop sendMessagePins (name→agent pins are session-scoped)
+        sendMessagePins: {},
+        // densable clear: collapse idle summary again
+        idleTeammatesExpanded: false,
+        // densable clear: drop session frameUrls / nav
+        frameUrls: {},
+        frameNavPath: null,
+        frameExpanded: false,
+        artifactReadVersions: {},
+        artifactRefs: [],
+        // densable clear: panelFileView null + cacheBreakerPhrase void
+        panelFileView: null,
+        cacheBreakerPhrase: undefined,
+        // densable Xat session flags — drop autoCompactWindow / briefTranscript
+        autoCompactWindow: undefined,
+        briefTranscript: false,
         // Reset MCP state to default to trigger re-initialization.
         // Preserve pluginReconnectKey so /clear doesn't cause a no-op
         // (it's only bumped by /reload-plugins).
@@ -222,6 +242,7 @@ export async function clearConversation({
         },
       }
     })
+    setSessionBriefTranscript(false)
   }
 
   // Clear plan slug cache so a new plan file is used after /clear

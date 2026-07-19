@@ -176,6 +176,9 @@ export async function* queryModelGemini(
                 [block] as unknown as BetaMessage['content'],
                 tools,
                 options.agentId,
+                {
+                  messageId: partialMessage.id,
+                },
               ),
             } as AssistantMessage['message'],
             requestId: undefined,

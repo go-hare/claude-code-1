@@ -419,7 +419,7 @@ export async function manuallyExtractSessionMemory(
     const [rawSystemPrompt, userContext, systemContext] = await Promise.all([
       getSystemPrompt(tools, mainLoopModel),
       getUserContext(),
-      getSystemContext(),
+      getSystemContext(toolUseContext.options.cacheBreakerPhrase),
     ])
     const systemPrompt = asSystemPrompt(rawSystemPrompt)
 

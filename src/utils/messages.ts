@@ -314,6 +314,39 @@ export const SYNTHETIC_MESSAGES = new Set([
   NO_RESPONSE_REQUESTED,
 ])
 
+/** densable compact-summary flag on user messages (footerLinks / title filters). */
+export function isCompactSummary(message: Message): boolean {
+  return (message as { isCompactSummary?: boolean }).isCompactSummary === true
+}
+
+/** densable — user message carrying tool_result content blocks. */
+export function isToolResultUserMessage(message: Message): boolean {
+  if (message.type !== 'user') return false
+  const content = message.message?.content
+  if (typeof content === 'string' || !Array.isArray(content)) return false
+  return content.some(
+    (block: { type?: string }) => block?.type === 'tool_result',
+  )
+}
+
+/**
+ * densable — index of last non-meta, non-tool_result user message.
+ * Structured-output enforcement looks only after this index.
+ */
+export function findLastRealUserMessageIndex(messages: Message[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (!m || m.type !== 'user') continue
+    if (m.isMeta) continue
+    if (isToolResultUserMessage(m)) continue
+    return i
+  }
+  return -1
+}
+
+/** densable zYu — sentinel prefix on SO-enforcement meta nudges. */
+export const STRUCTURED_OUTPUT_ENFORCE_SENTINEL = '[structured-output-enforce]'
+
 export function isSyntheticMessage(message: Message): boolean {
   return (
     message.type !== 'progress' &&
@@ -481,6 +514,11 @@ export function createUserMessage({
   sourceToolAssistantUUID,
   permissionMode,
   origin,
+  promptSource,
+  toolDenialKind,
+  toolEndsTurn,
+  classifierMetaLines,
+  interruptedMessageId,
 }: {
   content: string | ContentBlockParam[]
   isMeta?: true
@@ -507,6 +545,16 @@ export function createUserMessage({
   }
   // Provenance of this message. undefined = human (keyboard).
   origin?: MessageOrigin
+  /** densable promptSource (Nr) — sdk/system/typed/queued/suggestion_accepted. */
+  promptSource?: string
+  /** densable toolDenialKind on denied tool_result. Never sent to model. */
+  toolDenialKind?: UserMessage['toolDenialKind']
+  /** densable toolEndsTurn — tool result requests end-of-turn. Never sent to model. */
+  toolEndsTurn?: boolean
+  /** densable classifierMetaLines for auto-mode. Never sent to model. */
+  classifierMetaLines?: string
+  /** densable interruptedMessageId for cancel path. Never sent to model. */
+  interruptedMessageId?: string
 }): UserMessage {
   const m: UserMessage = {
     type: 'user',
@@ -527,6 +575,11 @@ export function createUserMessage({
     sourceToolAssistantUUID,
     permissionMode,
     origin,
+    promptSource,
+    toolDenialKind,
+    toolEndsTurn,
+    classifierMetaLines,
+    interruptedMessageId,
   }
   return m
 }
@@ -553,8 +606,11 @@ export function prepareUserContent({
 
 export function createUserInterruptionMessage({
   toolUse = false,
+  interruptedMessageId,
 }: {
   toolUse?: boolean
+  /** densable — API assistant message id cancelled mid-flight. */
+  interruptedMessageId?: string
 }): UserMessage {
   const content = toolUse ? INTERRUPT_MESSAGE_FOR_TOOL_USE : INTERRUPT_MESSAGE
 
@@ -565,6 +621,7 @@ export function createUserInterruptionMessage({
         text: content,
       },
     ],
+    interruptedMessageId,
   })
 }
 

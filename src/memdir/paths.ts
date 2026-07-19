@@ -29,6 +29,15 @@ import {
  *   5. Default: enabled
  */
 export function isAutoMemoryEnabled(): boolean {
+  // Official YF — session-level memoryToggledOff (bg fork inherit) wins first.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getMemoryToggledOff } =
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    if (getMemoryToggledOff()) return false
+  } catch {
+    // bootstrap not loaded yet
+  }
   // Official DISABLE_AUTO_MEMORY densable pure env half.
   try {
     const { resolveAutoMemoryEnvOverride } =

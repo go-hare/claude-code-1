@@ -7,6 +7,7 @@ import {
   countCharInString,
   normalizeFullWidthDigits,
   normalizeFullWidthSpace,
+  normalizeSurveyDigitInput,
   safeJoinLines,
   EndTruncatingAccumulator,
   truncateToLines,
@@ -112,6 +113,25 @@ describe('normalizeFullWidthDigits', () => {
 
   test('handles mixed content', () => {
     expect(normalizeFullWidthDigits('test１２３')).toBe('test123')
+  })
+})
+
+describe('normalizeSurveyDigitInput densable Z0f', () => {
+  test('NFKC full-width digit', () => {
+    expect(normalizeSurveyDigitInput('１')).toBe('1')
+    expect(normalizeSurveyDigitInput('４')).toBe('4')
+  })
+
+  test('AZERTY layout map', () => {
+    expect(normalizeSurveyDigitInput('&')).toBe('1')
+    expect(normalizeSurveyDigitInput('\u00e9')).toBe('2')
+    expect(normalizeSurveyDigitInput('"')).toBe('3')
+    expect(normalizeSurveyDigitInput("'")).toBe('4')
+    expect(normalizeSurveyDigitInput('\u00e0')).toBe('0')
+  })
+
+  test('passthrough half-width digit', () => {
+    expect(normalizeSurveyDigitInput('3')).toBe('3')
   })
 })
 

@@ -5,8 +5,10 @@ import {
   MAX_ENTRYPOINT_LINES,
 } from './memdir.js'
 import {
+  getProjectSkillUpkeepSection,
   MEMORY_DRIFT_CAVEAT,
   MEMORY_FRONTMATTER_EXAMPLE,
+  selectTypesOfMemorySection,
   TRUSTING_RECALL_SECTION,
   TYPES_SECTION_COMBINED,
   WHAT_NOT_TO_SAVE_SECTION,
@@ -73,10 +75,13 @@ export function buildCombinedMemoryPrompt(
     `- private: memories that are private between you and the current user. They persist across conversations with only this specific user and are stored at the root \`${autoDir}\`.`,
     `- team: memories that are shared with and contributed by all of the users who work within this project directory. Team memories are synced at the beginning of every session and they are stored at \`${teamDir}\`.`,
     '',
-    ...TYPES_SECTION_COMBINED,
+    // densable nFr / tengu_ochre_finch — compact types section when on.
+    ...selectTypesOfMemorySection(TYPES_SECTION_COMBINED),
     ...WHAT_NOT_TO_SAVE_SECTION,
     '- You MUST avoid saving sensitive data within shared team memories. For example, never save API keys or user credentials.',
     '',
+    // densable aFr / tengu_gorse_fathom — project skill upkeep (default off).
+    ...getProjectSkillUpkeepSection(),
     ...howToSave,
     '',
     '## When to access memories',

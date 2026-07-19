@@ -1,8 +1,13 @@
-import { dirname, sep } from 'path'
+import { dirname, isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/index.js'
 import { z } from 'zod/v4'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import {
+  modelScopedGrowthbookKey,
+  modelSlugForGrowthbookKey,
+} from 'src/utils/modelScopedGrowthbookKey.js'
 import { diagnosticTracker } from 'src/services/diagnosticTracking.js'
 import { clearDeliveredDiagnosticsForFile } from 'src/services/lsp/LSPDiagnosticRegistry.js'
 import { getLspServerManager } from 'src/services/lsp/manager.js'
@@ -15,12 +20,14 @@ import {
 } from 'src/skills/loadSkillsDir.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
+import { stripFileWriteResultForStorage } from 'src/utils/toolResultStrip.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { getFileModificationTime, writeTextContent } from 'src/utils/file.js'
+import { fileStateContentMatches } from 'src/utils/fileStateCache.js'
 import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
@@ -38,7 +45,11 @@ import {
 } from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
-import { FILE_UNEXPECTEDLY_MODIFIED_ERROR } from '../FileEditTool/constants.js'
+import {
+  FILE_NOT_READ_YET_ERROR,
+  FILE_UNEXPECTEDLY_MODIFIED_ERROR,
+} from '../FileEditTool/constants.js'
+import { FileStateError } from 'src/utils/errors.js'
 import { gitDiffSchema, hunkSchema } from '../FileEditTool/types.js'
 import { FILE_WRITE_TOOL_NAME, getWriteToolDescription } from './prompt.js'
 import {
@@ -50,6 +61,17 @@ import {
   renderToolUseRejectedMessage,
   userFacingName,
 } from './UI.js'
+
+/**
+ * densable nwg / Jwi("tengu_velvet_mallet", model) — model-scoped GB flag that
+ * skips the "must Read before Write" guard for experimental EAP models.
+ * densable always keys as `tengu_velvet_mallet_${g8t(model)}` — nonconforming
+ * models use `tengu_velvet_mallet_nonconforming` (never the bare flag).
+ */
+function isVelvetMalletBypassEnabled(model: string): boolean {
+  const key = modelScopedGrowthbookKey('tengu_velvet_mallet', model)
+  return getFeatureValue_CACHED_MAY_BE_STALE(key, false)
+}
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -108,6 +130,8 @@ export const FileWriteTool = buildTool({
   },
   renderToolUseMessage,
   isResultTruncated,
+  // densable stripForStorage — drop content+originalFile on older update results.
+  stripForStorage: stripFileWriteResultForStorage,
   get inputSchema(): InputSchema {
     return inputSchema()
   },
@@ -209,11 +233,60 @@ export const FileWriteTool = buildTool({
 
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
 
+    // densable validateInput residual: when missing/partial Read state, log
+    // tengu_write_tool_not_read_hypothetical and optionally skip via velvet_mallet.
+    if (!readTimestamp || readTimestamp.isPartialView) {
+      const model = toolUseContext.options.mainLoopModel
+      const modelBucket = modelSlugForGrowthbookKey(model)
+      const guardSkipped = !readTimestamp && isVelvetMalletBypassEnabled(model)
+      const wouldHaveResult =
+        readTimestamp && Math.floor(fileMtimeMs) > readTimestamp.timestamp
+          ? 'errorCode3'
+          : 'success'
+      logEvent('tengu_write_tool_not_read_hypothetical', {
+        wouldHaveResult:
+          wouldHaveResult as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        isPartialView: readTimestamp?.isPartialView === true,
+        isFilePathAbsolute: isAbsolute(file_path),
+        guardSkipped,
+        modelBucket:
+          modelBucket as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      if (!guardSkipped) {
+        return {
+          result: false,
+          message:
+            'File has not been read yet. Read it first before writing to it.',
+          errorCode: 2,
+        }
+      }
+      // velvet_mallet: allow through without prior full Read
+      return validateCoordinatorWriteAccess({
+        filePath: fullFilePath,
+        sourceTool: 'FileWriteTool',
+      })
+    }
+
     // Reuse mtime from the stat above — avoids a redundant statSync via
-    // getFileModificationTime.
-    if (readTimestamp) {
-      const lastWriteTime = Math.floor(fileMtimeMs)
-      if (lastWriteTime > readTimestamp.timestamp) {
+    // getFileModificationTime. densable: full-read + ALe content match skips
+    // stale-mtime failure (cloud-sync / antivirus false positives).
+    const lastWriteTime = Math.floor(fileMtimeMs)
+    if (lastWriteTime > readTimestamp.timestamp) {
+      const isFullRead =
+        (readTimestamp.offset ?? 1) <= 1 && readTimestamp.limit === undefined
+      let contentMatches = false
+      if (isFullRead) {
+        try {
+          const meta = readFileSyncWithMetadata(fullFilePath)
+          contentMatches = fileStateContentMatches(
+            readTimestamp,
+            meta.content,
+          )
+        } catch {
+          contentMatches = false
+        }
+      }
+      if (!contentMatches) {
         return {
           result: false,
           message:
@@ -230,7 +303,7 @@ export const FileWriteTool = buildTool({
   },
   async call(
     { file_path, content },
-    { readFileState, updateFileHistoryState, dynamicSkillDirTriggers },
+    { readFileState, updateFileHistoryState, dynamicSkillDirTriggers, options },
     _,
     parentMessage,
   ) {
@@ -285,19 +358,30 @@ export const FileWriteTool = buildTool({
     }
 
     if (meta !== null) {
-      const lastWriteTime = getFileModificationTime(fullFilePath)
+      // densable nwg: require prior Read unless model-scoped tengu_velvet_mallet.
       const lastRead = readFileState.get(fullFilePath)
-      if (!lastRead || lastWriteTime > lastRead.timestamp) {
-        // Timestamp indicates modification, but on Windows timestamps can change
-        // without content changes (cloud sync, antivirus, etc.). For full reads,
-        // compare content as a fallback to avoid false positives.
-        const isFullRead =
-          lastRead &&
-          lastRead.offset === undefined &&
-          lastRead.limit === undefined
-        // meta.content is CRLF-normalized — matches readFileState's normalized form.
-        if (!isFullRead || meta.content !== lastRead.content) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+      if (!lastRead) {
+        const model = options.mainLoopModel
+        if (!isVelvetMalletBypassEnabled(model)) {
+          // densable nwg → gPe(U5n)
+          throw new FileStateError(FILE_NOT_READ_YET_ERROR)
+        }
+      } else {
+        const lastWriteTime = getFileModificationTime(fullFilePath)
+        if (lastWriteTime > lastRead.timestamp) {
+          // Timestamp indicates modification, but on Windows timestamps can change
+          // without content changes (cloud sync, antivirus, etc.). For full reads,
+          // compare content as a fallback to avoid false positives.
+          const isFullRead =
+            (lastRead.offset ?? 1) <= 1 && lastRead.limit === undefined
+          // densable ALe — hash-aware equality (stripped large bodies)
+          if (
+            !isFullRead ||
+            !fileStateContentMatches(lastRead, meta.content)
+          ) {
+            // densable nwg → gPe(q5n)
+            throw new FileStateError(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          }
         }
       }
     }

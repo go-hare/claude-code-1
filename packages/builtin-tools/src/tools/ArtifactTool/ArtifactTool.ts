@@ -13,6 +13,7 @@ import { getArtifactsToken, getUploadUrl } from './config.js'
 import { uploadArtifact } from './client.js'
 import { markdownToHtml } from './markdown.js'
 import { renderToolResultMessage } from './UI.js'
+import { sanitizeArtifactHtmlForPublishAsync } from 'src/utils/chartRuntimeSanitize.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -117,6 +118,26 @@ export const ArtifactTool = buildTool({
   isReadOnly() {
     return false
   },
+  // densable residual — steer common model mistakes (inline content / long label).
+  validationErrorSteer(input) {
+    if (typeof input !== 'object' || input === null) return null
+    const raw = input as Record<string, unknown>
+    if ('content' in raw) {
+      return (
+        'The Artifact tool reads from a file on disk — it does not take inline `content`. ' +
+        'Write the page to an .html or .md file first (Write/Edit), then call Artifact with ' +
+        '`file_path` pointing at it (a `title` parameter is used only when the file lacks its own <title> tag).'
+      )
+    }
+    if (
+      'label' in raw &&
+      typeof raw.label === 'string' &&
+      raw.label.length > 60
+    ) {
+      return '`label` is a short version name (max 60 chars). Move longer text into the page content.'
+    }
+    return null
+  },
   requiresUserInteraction() {
     return true
   },
@@ -217,6 +238,21 @@ export const ArtifactTool = buildTool({
           error: `Unsupported file extension. Accepted: .html, .htm, .md, .markdown — got: ${file_path}`,
         },
       }
+    }
+
+    // densable F9u: strip prior chart-runtime regions; try inject trusted
+    // Chart.umd + v8g boot when data-chart-runtime present and pewter allows.
+    // Bundle is optional (bunfs / vendor path); missing bundle still publishes
+    // stripped HTML (densable We chart_bundle_unreadable residual soft).
+    try {
+      const { readFile: rf } = await import('fs/promises')
+      const sanitized = await sanitizeArtifactHtmlForPublishAsync(html, {
+        readFile: (p, enc) => rf(p, enc),
+        cwd: process.cwd(),
+      })
+      html = sanitized.body
+    } catch {
+      // fall through with original html if sanitize import/IO path fails
     }
 
     try {

@@ -35,6 +35,8 @@ import {
 } from './autonomyQueueLifecycle.js'
 import type { ProcessUserInputContext } from './processUserInput/processUserInput.js'
 import { processUserInput } from './processUserInput/processUserInput.js'
+import { stampMissingOriginOnUserMessages } from './originContentWrap.js'
+import { resolveCallerSourceFromQueuedCommand } from './promptSource.js'
 import type { QueryGuard } from './QueryGuard.js'
 import { queryCheckpoint, startQueryProfile } from './queryProfiler.js'
 import { runWithWorkload } from './workloadContext.js'
@@ -58,6 +60,11 @@ type BaseExecutionParams = {
    * (executeQueuedInput) — dequeued items were already queued past this check.
    */
   isExternalLoading?: boolean
+  /**
+   * densable Jcf inputSource — default callerSource for OXd when a queued
+   * command has no inputSource (e.g. keyboard submit → "typed").
+   */
+  inputSource?: string
   setToolJSX: SetToolJSXFn
   getToolUseContext: (
     messages: Message[],
@@ -124,6 +131,10 @@ export type HandlePromptSubmitParams = BaseExecutionParams & {
   skipSlashCommands?: boolean
   /** Preserves that the input originated from Remote Control when queued. */
   bridgeOrigin?: boolean
+  /**
+   * densable suppressWorkflowKeyword — skip ultracode Workflow attachment.
+   */
+  suppressWorkflowKeyword?: boolean
 }
 
 export async function handlePromptSubmit(
@@ -167,6 +178,8 @@ export async function handlePromptSubmit(
       querySource: params.querySource,
       commands,
       queryGuard,
+      // densable Jcf: default inputSource from caller (typed if omitted).
+      inputSource: params.inputSource ?? 'typed',
       setToolJSX,
       getToolUseContext,
       setUserInputOnProcessing,
@@ -197,6 +210,19 @@ export async function handlePromptSubmit(
   const hasImages = Object.values(pastedContents).some(isValidImagePaste)
   if (input.trim() === '') {
     return
+  }
+
+  // densable Ocf() — basalt_meadow glyph cardinality log on non-empty submit
+  // (after empty/exit short-circuits in densable; we skip exit path below).
+  if (!['exit', 'quit', ':q', ':q!', ':wq', ':wq!'].includes(input.trim())) {
+    try {
+      const { maybeLogRenderGlyphCardinality } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./renderGlyphTelemetry.js') as typeof import('./renderGlyphTelemetry.js')
+      maybeLogRenderGlyphCardinality()
+    } catch {
+      // telemetry optional
+    }
   }
 
   // Handle exit commands by triggering the exit command instead of direct process.exit
@@ -351,6 +377,7 @@ export async function handlePromptSubmit(
       skipSlashCommands,
       bridgeOrigin,
       uuid,
+      suppressWorkflowKeyword: params.suppressWorkflowKeyword,
     })
 
     onInputChange('')
@@ -375,6 +402,7 @@ export async function handlePromptSubmit(
     skipSlashCommands,
     bridgeOrigin,
     uuid,
+    suppressWorkflowKeyword: params.suppressWorkflowKeyword,
   }
 
   await executeUserInput({
@@ -385,6 +413,8 @@ export async function handlePromptSubmit(
     querySource: params.querySource,
     commands,
     queryGuard,
+    // densable Jcf: keyboard / direct submit defaults to "typed".
+    inputSource: params.inputSource ?? 'typed',
     setToolJSX,
     getToolUseContext,
     setUserInputOnProcessing,
@@ -422,6 +452,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     resetHistory,
     canUseTool,
     queuedCommands,
+    inputSource: defaultInputSource,
   } = params
 
   // Note: paste references are already processed before calling this function
@@ -500,6 +531,25 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           const cmd = commands[i]!
           const isFirst = i === 0
           const runId = cmd.autonomy?.runId
+          // densable Jcf: origin + callerSource (OXd) before processUserInput.
+          // origin for task-notification mirrors messages.ts queued_command.
+          // MessageOrigin is loosely typed as string in model-provider; object
+          // forms carry {kind}. Normalize for Ite / OXd.
+          const origin =
+            cmd.origin ??
+            (cmd.mode === 'task-notification'
+              ? ({ kind: 'task-notification' } as const)
+              : undefined)
+          const originForCaller: { kind?: string } | null | undefined =
+            typeof origin === 'string'
+              ? { kind: origin }
+              : (origin as { kind?: string } | undefined)
+          const callerSource = resolveCallerSourceFromQueuedCommand({
+            isMeta: cmd.isMeta,
+            origin: originForCaller,
+            inputSource: cmd.inputSource,
+            defaultSource: defaultInputSource ?? 'typed',
+          })
           const result = await processUserInput({
             input: cmd.value,
             preExpansionInput: cmd.preExpansionValue,
@@ -521,25 +571,24 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             isMeta: cmd.isMeta,
             skipAttachments: !isFirst,
             autonomy: cmd.autonomy,
+            suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
+            promptSource: callerSource,
+            // densable: pass origin so processTextPrompt can Nr+Fws wrap
+            origin: origin as
+              | { kind?: string; from?: string }
+              | undefined,
           })
           if (runId && result.deferAutonomyCompletion) {
             deferredAutonomyRunIds.add(runId)
           }
-          // Stamp origin here rather than threading another arg through
-          // processUserInput → processUserInputBase → processTextPrompt → createUserMessage.
-          // Derive origin from mode for task-notifications — mirrors the origin
-          // derivation at messages.ts (case 'queued_command'); intentionally
-          // does NOT mirror its isMeta:true so idle-dequeued notifications stay
-          // visible in the transcript via UserAgentNotificationMessage.
-          const origin =
-            cmd.origin ??
-            (cmd.mode === 'task-notification'
-              ? ({ kind: 'task-notification' } as const)
-              : undefined)
+          // densable rvo — stamp origin only on user messages that still lack
+          // one (Fws path already set origin via Nr). Skip when Mj(origin)
+          // (human / auto-continuation / undefined).
           if (origin) {
-            for (const m of result.messages) {
-              if (m.type === 'user') m.origin = origin
-            }
+            stampMissingOriginOnUserMessages(
+              result.messages,
+              origin as { kind?: string },
+            )
           }
           newMessages.push(...result.messages)
           if (isFirst) {

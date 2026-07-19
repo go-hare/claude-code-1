@@ -147,6 +147,16 @@ export type EnvLessBridgeParams = {
   outboundOnly?: boolean
   /** Free-form tags for session categorization (e.g. ['ccr-mirror']). */
   tags?: string[]
+  /**
+   * Official sessionGroupingId — returned on the handle for left-arrow
+   * CLAUDE_BRIDGE_REATTACH_GROUPING (rit grouping arg).
+   */
+  sessionGroupingId?: string
+  /**
+   * Requested project/group when creating a session; falls back to
+   * sessionGroupingId when the create path succeeds with grouping.
+   */
+  requestedSessionGroupingId?: string
 }
 
 /**
@@ -179,7 +189,13 @@ export async function initEnvLessBridgeCore(
     onStateChange,
     outboundOnly,
     tags,
+    sessionGroupingId: paramSessionGroupingId,
+    requestedSessionGroupingId,
   } = params
+
+  // Official He: requested group wins at create when available; else U.
+  let resolvedSessionGroupingId =
+    requestedSessionGroupingId ?? paramSessionGroupingId
 
   const cfg = await getEnvLessBridgeConfig()
 
@@ -694,12 +710,13 @@ export async function initEnvLessBridgeCore(
   //   - archive: teardown_archive_timeout_ms (default 1500, cap 2000)
   //   - result write: fire-and-forget, archive latency covers the drain
   //   - 401 retry: only if first archive 401s, shares the same budget
-  async function teardown(): Promise<void> {
+  async function teardown(opts?: { skipArchive?: boolean }): Promise<void> {
     if (tornDown) return
     tornDown = true
     refresh.cancelAll()
     clearTimeout(connectDeadline)
     flushGate.drop()
+    const skipArchive = opts?.skipArchive === true
 
     // Fire the result message before archive — transport.write() only awaits
     // enqueue (SerialBatchEventUploader resolves once buffered, drain is
@@ -713,6 +730,11 @@ export async function initEnvLessBridgeCore(
       session_id: sessionId,
     } as unknown as TransportMessage
     void transport.write(resultMsg as StdoutMessage)
+    if (skipArchive) {
+      // Left-arrow reattach: close transport without archiving.
+      transport.close()
+      return
+    }
     let token = getAccessToken()
     let status = await archiveSession(
       sessionId,
@@ -932,9 +954,25 @@ export async function initEnvLessBridgeCore(
       void transport.write(resultMsg as StdoutMessage)
       logForDebugging(`[remote-bridge] Sent result`)
     },
-    async teardown() {
+    getLastSequenceNum() {
+      return transport.getLastSequenceNum()
+    },
+    getSSESequenceNum() {
+      return transport.getLastSequenceNum()
+    },
+    async flush() {
+      try {
+        await transport.flush()
+      } catch {
+        // best-effort
+      }
+    },
+    // Official Qt: outboundOnly:B??!1, sessionGroupingId:He
+    outboundOnly: (outboundOnly ?? true) as boolean | undefined,
+    sessionGroupingId: resolvedSessionGroupingId,
+    async teardown(opts?: { skipArchive?: boolean }) {
       unregister()
-      await teardown()
+      await teardown(opts)
     },
   }
 }

@@ -53,3 +53,19 @@ export function getSkillUsageScore(skillName: string): number {
   // Minimum recency factor of 0.1 to avoid completely dropping old but heavily used skills
   return usage.usageCount * Math.max(recencyFactor, 0.1)
 }
+
+/** densable BFu: usageCount + daysSinceUse for skill-doctor / UI. */
+export function getSkillUsageSnapshot(
+  skillName: string,
+  alternateName?: string,
+): { usageCount: number; daysSinceUse: number } | null {
+  const usageMap = getGlobalConfig().skillUsage
+  const usage =
+    usageMap?.[skillName] ??
+    (alternateName ? usageMap?.[alternateName] : undefined)
+  if (!usage) return null
+  return {
+    usageCount: usage.usageCount,
+    daysSinceUse: Math.floor((Date.now() - usage.lastUsedAt) / 86_400_000),
+  }
+}

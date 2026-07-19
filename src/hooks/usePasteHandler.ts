@@ -359,6 +359,8 @@ export function usePasteHandler({
         return
       }
       // Non-bracketed large payload → treat as paste (official pkt=800).
+      // Empty key (SGR residue emptied by fag) never enters pastePending —
+      // that path would swallow subsequent Enter until safety timeout.
       if (
         (onPaste || onImagePaste) &&
         !event.ctrl &&

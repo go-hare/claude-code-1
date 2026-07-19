@@ -24,7 +24,9 @@ import { formatFileSize } from '../utils/format.js'
 import { getProjectDir } from '../utils/sessionStorage.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import {
+  getProjectSkillUpkeepSection,
   MEMORY_FRONTMATTER_EXAMPLE,
+  selectTypesOfMemorySection,
   TRUSTING_RECALL_SECTION,
   TYPES_SECTION_INDIVIDUAL,
   WHAT_NOT_TO_SAVE_SECTION,
@@ -242,9 +244,12 @@ export function buildMemoryLines(
     '',
     'If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, find and remove the relevant entry.',
     '',
-    ...TYPES_SECTION_INDIVIDUAL,
+    // densable nFr / tengu_ochre_finch — compact types section when on.
+    ...selectTypesOfMemorySection(TYPES_SECTION_INDIVIDUAL),
     ...WHAT_NOT_TO_SAVE_SECTION,
     '',
+    // densable aFr / tengu_gorse_fathom — project skill upkeep (default off).
+    ...getProjectSkillUpkeepSection(),
     ...howToSave,
     '',
     ...WHEN_TO_ACCESS_SECTION,

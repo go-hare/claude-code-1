@@ -499,6 +499,31 @@ describe('normalizeMessages', () => {
     const normalized = normalizeMessages([msg])
     expect(normalized.length).toBe(1)
   })
+
+  test('densable QC WeakMap cache reuses normalized splits on same message identity', () => {
+    const cache = new WeakMap<
+      object,
+      import('../messages.js').NormalizeMessagesCacheEntry
+    >()
+    const msg = makeAssistantMsg([
+      { type: 'text', text: 'a' },
+      { type: 'text', text: 'b' },
+    ])
+    const first = normalizeMessages([msg], false, cache)
+    const second = normalizeMessages([msg], false, cache)
+    // Outer array is rebuilt each call; entry content is identity-equal.
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toBe(first[1])
+  })
+
+  test('densable QC startIsNewChain derives UUIDs for single-block messages', () => {
+    const msg = makeAssistantMsg([{ type: 'text', text: 'hello' }])
+    const plain = normalizeMessages([msg], false)
+    const chained = normalizeMessages([msg], true)
+    expect(plain[0]!.uuid).toBe(msg.uuid)
+    expect(chained[0]!.uuid).not.toBe(msg.uuid)
+    expect(chained[0]!.uuid).toBe(deriveUUID(msg.uuid, 0))
+  })
 })
 
 describe('normalizeMessagesForAPI', () => {

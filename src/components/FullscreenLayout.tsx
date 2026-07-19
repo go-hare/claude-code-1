@@ -21,6 +21,7 @@ import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { openBrowser, openPath } from '../utils/browser.js';
 import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fullscreen.js';
 import { getPlatform } from '../utils/platform.js';
+import { recordJumpToBottomClick } from '../utils/scrollTelemetry.js';
 import { plural } from '../utils/stringUtils.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
 import PromptInputFooterSuggestions from './PromptInput/PromptInputFooterSuggestions.js';
@@ -519,9 +520,19 @@ function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => vo
   const width = stringWidth(text);
   const left = Math.max(0, Math.floor((columns - width) / 2));
   const bg = hover ? 'userMessageBackgroundHover' : 'userMessageBackground';
+  // Official Bta densable: wLi() then onClick — pill clicks only, not
+  // scroll:bottom keybindings.
+  const handleClick = onClick
+    ? () => {
+        recordJumpToBottomClick();
+        onClick();
+      }
+    : () => {
+        recordJumpToBottomClick();
+      };
   return (
     <Box position="absolute" bottom={0} left={left}>
-      <Box noSelect onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <Box noSelect onClick={handleClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <Text backgroundColor={bg} color="text" wrap="truncate-end">
           {text}
         </Text>
@@ -572,13 +583,17 @@ function StickyPromptHeader({ text, onClick }: { text: string; onClick: () => vo
 // items down into the prompt area when the list has fewer items than max.
 function SuggestionsOverlay(): React.ReactNode {
   const data = usePromptOverlay();
-  if (!data || data.suggestions.length === 0) return null;
+  if (!data || (data.suggestions.length === 0 && !data.emptyMessage)) return null;
   return (
     <Box position="absolute" bottom="100%" left={0} right={0} paddingX={2} paddingTop={1} flexDirection="column" opaque>
       <PromptInputFooterSuggestions
         suggestions={data.suggestions}
         selectedSuggestion={data.selectedSuggestion}
         maxColumnWidth={data.maxColumnWidth}
+        emptyMessage={data.emptyMessage}
+        hoveredId={data.hoveredId}
+        onSelect={data.onSelect}
+        onHoverChange={data.onHoverChange}
         overlay
       />
     </Box>

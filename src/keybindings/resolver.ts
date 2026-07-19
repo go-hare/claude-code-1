@@ -2,6 +2,7 @@
 export {
   resolveKey,
   resolveKeyWithChordState,
+  resolveActionForKeystroke,
   getBindingDisplayText,
   keystrokesEqual,
   type ResolveResult,

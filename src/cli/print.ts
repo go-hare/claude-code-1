@@ -30,6 +30,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/grow
 import { logForDebugging } from 'src/utils/debug.js'
 import {
   formatSyncPluginInstallTimeoutLog,
+  isStaleArchivedEndSession,
   isSyncPluginsOrInstallEnabled,
   raceWithTimeoutMs,
   resolveSyncPluginsInstallTimeoutMs,
@@ -77,9 +78,14 @@ import {
   dequeueAllMatching,
   enqueue,
   hasCommandsInQueue,
+  isMainThreadQueuedCommand,
   peek,
   subscribeToCommandQueue,
   getCommandsByMaxPriority,
+  buildInterruptStillQueued,
+  consumeCancelPending,
+  isFoldInFlight,
+  markCancelPending,
 } from 'src/utils/messageQueueManager.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
@@ -161,6 +167,7 @@ import type {
   SDKControlMcpSetServersResponse,
   SDKControlReloadPluginsResponse,
 } from 'src/entrypoints/sdk/controlTypes.js'
+import { SDKControlMessageRatedRequestSchema } from 'src/entrypoints/sdk/controlSchemas.js'
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import type { PermissionMode as InternalPermissionMode } from 'src/types/permissions.js'
 import { cwd } from 'process'
@@ -182,7 +189,12 @@ import {
 } from 'src/utils/permissions/PermissionPromptToolResultSchema.js'
 import { createAbortController } from 'src/utils/abortController.js'
 import { createCombinedAbortSignal } from 'src/utils/combinedAbortSignal.js'
-import { generateSessionTitle } from 'src/utils/sessionTitle.js'
+import {
+  extractTitleSourceText,
+  generateSessionTitle,
+  isAutoTitleExcludedPrompt,
+  shouldSkipAutoSessionTitle,
+} from 'src/utils/sessionTitle.js'
 import { buildSideQuestionFallbackParams } from 'src/utils/queryContext.js'
 import { runSideQuestion } from 'src/utils/sideQuestion.js'
 import {
@@ -222,7 +234,17 @@ import {
   type PromptVariant,
 } from 'src/services/PromptSuggestion/promptSuggestion.js'
 import { getLastCacheSafeParams } from 'src/utils/forkedAgent.js'
-import { getAccountInformation } from 'src/utils/auth.js'
+import {
+  getAccountInformation,
+  getSubscriptionType,
+  hasProfileScope,
+  isClaudeAISubscriber,
+} from 'src/utils/auth.js'
+import {
+  buildGetUsageControlResponse,
+  formatTotalCost,
+} from 'src/cost-tracker.js'
+import stripAnsi from 'strip-ansi'
 import { OAuthService } from 'src/services/oauth/index.js'
 import { installOAuthTokens } from 'src/cli/handlers/auth.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
@@ -247,6 +269,10 @@ import {
   saveAgentSetting,
   saveMode,
   saveAiGeneratedTitle,
+  saveCustomTitle,
+  cacheSessionTitle,
+  getActiveSessionFilePath,
+  getCurrentSessionTitle,
   restoreSessionMetadata,
 } from 'src/utils/sessionStorage.js'
 import { incrementPromptCount } from 'src/utils/commitAttribution.js'
@@ -305,20 +331,32 @@ import {
   modelDisplayString,
   parseUserSpecifiedModel,
 } from 'src/utils/model/model.js'
+import {
+  formatRestrictedModelError,
+  isModelAllowed,
+} from 'src/utils/model/modelAllowlist.js'
 import { getModelOptions } from 'src/utils/model/modelOptions.js'
 import {
+  isUltraEffortSessionActive,
   modelSupportsEffort,
   modelSupportsMaxEffort,
   EFFORT_LEVELS,
   resolveAppliedEffort,
 } from 'src/utils/effort.js'
-import { modelSupportsAdaptiveThinking } from 'src/utils/thinking.js'
+import { resolveAppliedAdvisorModel } from 'src/utils/advisor.js'
+import { getSettingsWithAllErrors } from 'src/utils/settings/allErrors.js'
+import {
+  modelSupportsAdaptiveThinking,
+  resolveControlThinkingConfig,
+  type ThinkingDisplayMode,
+} from 'src/utils/thinking.js'
 import { modelSupportsAutoMode } from 'src/utils/betas.js'
 import { ensureModelStringsInitialized } from 'src/utils/model/modelStrings.js'
 import {
   getSessionId,
   setMainLoopModelOverride,
   setMainThreadAgentType,
+  setSessionSkillAllowlist,
   switchSession,
   isSessionPersistenceDisabled,
   getIsRemoteMode,
@@ -368,7 +406,11 @@ import {
 } from 'src/utils/autonomyQueueLifecycle.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { skillChangeDetector } from '../utils/skills/skillChangeDetector.js'
-import { getCommands, clearCommandsCache } from '../commands.js'
+import {
+  getCommands,
+  clearCommandsCache,
+  getSkillToolCommands,
+} from '../commands.js'
 import {
   isBareMode,
   isEnvTruthy,
@@ -392,7 +434,11 @@ import { removeTeammateFromTeamFile } from '../utils/swarm/teamHelpers.js'
 import { unassignTeammateTasks } from '../utils/tasks.js'
 import { getRunningTasks } from '../utils/task/framework.js'
 import { isBackgroundTask } from '../tasks/types.js'
-import { stopTask } from '../tasks/stopTask.js'
+import { stopTask, StopTaskError } from '../tasks/stopTask.js'
+import {
+  backgroundAll,
+  backgroundByToolUseId,
+} from '../tasks/LocalShellTask/LocalShellTask.js'
 import {
   canReportSessionIdleWithBgActivity,
   formatPrintBgWaitCeilingMessage,
@@ -403,7 +449,7 @@ import {
 } from './printBgWait.js'
 import { drainSdkEvents } from '../utils/sdkEventQueue.js'
 import { initializeGrowthBook } from '../services/analytics/growthbook.js'
-import { errorMessage, toError } from '../utils/errors.js'
+import { errorMessage, isFsInaccessible, toError } from '../utils/errors.js'
 import { sleep } from '../utils/sleep.js'
 import { isExtractModeActive } from '../memdir/paths.js'
 
@@ -534,6 +580,8 @@ export async function runHeadless(
     sdkUrl: string | undefined
     replayUserMessages: boolean | undefined
     includePartialMessages: boolean | undefined
+    /** Official 2.1.211 --forward-subagent-text */
+    forwardSubagentText: boolean | undefined
     forkSession: boolean | undefined
     /**
      * Official --reply-on-resume: when resuming a transcript that ends in a
@@ -1246,6 +1294,8 @@ function runHeadlessStreaming(
     fallbackModel: string | undefined
     replayUserMessages?: boolean | undefined
     includePartialMessages?: boolean | undefined
+    /** Official 2.1.211 --forward-subagent-text */
+    forwardSubagentText?: boolean | undefined
     enableAuthStatus?: boolean | undefined
     agent?: string | undefined
     setSDKStatus?: (status: SDKStatus) => void
@@ -1282,6 +1332,13 @@ function runHeadlessStreaming(
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
   let abortController: AbortController | undefined
+  // Only main-thread commands — subagent notifications are drained by the
+  // subagent's mid-turn gate in query.ts. Shared by run() drain and interrupt
+  // still_queued snapshot (official AL: agentId === undefined).
+  const isMainThread = isMainThreadQueuedCommand
+  // densable `j` — uuids of the batch already dequeued for the imminent turn.
+  // Interrupt still_queued includes these (not yet abort-reachable).
+  let inFlightDrainBatchUuids: string[] = []
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
 
@@ -1429,6 +1486,24 @@ function runHeadlessStreaming(
   const pendingSeeds = createFileStateCacheWithSizeLimit(
     READ_FILE_STATE_CACHE_SIZE,
   )
+
+  // densable `dt` — skip auto session-title generation when:
+  // - initial transcript already has non-system messages (resume / prefilled), or
+  // - nonessential traffic / terminal-title disabled (Hvd), or
+  // - initialize title / generate_session_title(persist) / rename_session set it.
+  // Auto-title failure clears the flag so a later human prompt may retry.
+  let skipAutoSessionTitle =
+    initialMessages.some(m => m.type !== 'system') ||
+    shouldSkipAutoSessionTitle()
+
+  // densable `st` — session thinking_display mode (set_max_thinking_tokens).
+  // Survives across control requests; null clears, omitted keeps.
+  let sessionThinkingDisplay: ThinkingDisplayMode | undefined =
+    options.thinkingConfig &&
+    options.thinkingConfig.type !== 'disabled' &&
+    'display' in options.thinkingConfig
+      ? options.thinkingConfig.display
+      : undefined
 
   // Auto-resume interrupted turns on restart so CC continues from where it
   // left off without requiring the SDK to re-send the prompt.
@@ -2259,12 +2334,6 @@ function runHeadlessStreaming(
       setupPluginHookHotReload()
     }
 
-    // Only main-thread commands (agentId===undefined) — subagent
-    // notifications are drained by the subagent's mid-turn gate in query.ts.
-    // Defined outside the try block so it's accessible in the post-finally
-    // queue re-checks at the bottom of run().
-    const isMainThread = (cmd: QueuedCommand) => cmd.agentId === undefined
-
     try {
       let command: QueuedCommand | undefined
       let waitingForAgents = false
@@ -2299,12 +2368,32 @@ function runHeadlessStreaming(
               batch.push(dequeue(isMainThread)!)
             }
           }
+          // densable first zzn filter: drop cancel_async-stamped uuids before
+          // coalesce/ask (race: cancel arrived after dequeue, before started).
+          {
+            const cancelled = batch.filter(
+              c => c.uuid !== undefined && consumeCancelPending(c.uuid),
+            )
+            if (cancelled.length > 0) {
+              for (const c of cancelled) {
+                if (c.uuid !== undefined) {
+                  notifyCommandLifecycle(c.uuid, 'cancelled')
+                }
+              }
+              batch = batch.filter(c => !cancelled.includes(c))
+              if (batch.length === 0) {
+                continue
+              }
+            }
+          }
+
           const queuedAutonomyClaim =
             await claimConsumableQueuedAutonomyCommands(batch)
           batch = queuedAutonomyClaim.attachmentCommands
           if (batch.length === 0) {
             continue
           }
+
           command = batch[0]!
           if (command.mode === 'prompt' && batch.length > 1) {
             command = {
@@ -2313,7 +2402,11 @@ function runHeadlessStreaming(
               uuid: batch.findLast(c => c.uuid)?.uuid ?? command.uuid,
             }
           }
-          const batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
+          let batchUuids = batch
+            .map(c => c.uuid)
+            .filter((u): u is NonNullable<typeof u> => u !== undefined)
+          // densable j=Il — stamp before ask() so interrupt can receipt them
+          inFlightDrainBatchUuids = batchUuids
 
           // QueryEngine will emit a replay for command.uuid (the last uuid in
           // the batch) via its messagesToAck path. Emit replays here for the
@@ -2358,95 +2451,50 @@ function runHeadlessStreaming(
 
           const allTools = buildAllTools(appState)
 
+          // densable second zzn filter (after mcp prewait): cancel may race
+          // during client registration / tool assembly before started.
+          {
+            const cancelled = batch.filter(
+              c => c.uuid !== undefined && consumeCancelPending(c.uuid),
+            )
+            if (cancelled.length > 0) {
+              for (const c of cancelled) {
+                if (c.uuid !== undefined) {
+                  notifyCommandLifecycle(c.uuid, 'cancelled')
+                }
+              }
+              batch = batch.filter(c => !cancelled.includes(c))
+              if (batch.length === 0) {
+                inFlightDrainBatchUuids = []
+                continue
+              }
+              command = batch[0]!
+              if (command.mode === 'prompt' && batch.length > 1) {
+                command = {
+                  ...command,
+                  value: joinPromptValues(batch.map(c => c.value)),
+                  uuid: batch.findLast(c => c.uuid)?.uuid ?? command.uuid,
+                }
+              }
+              batchUuids = batch
+                .map(c => c.uuid)
+                .filter((u): u is NonNullable<typeof u> => u !== undefined)
+              inFlightDrainBatchUuids = batchUuids
+            }
+          }
+
           for (const uuid of batchUuids) {
             notifyCommandLifecycle(uuid, 'started')
           }
 
-          // Task notifications arrive when background agents complete.
-          // Emit an SDK system event for SDK consumers, then fall through
-          // to ask() so the model sees the agent result and can act on it.
-          // This matches TUI behavior where useQueueProcessor always feeds
-          // notifications to the model regardless of coordinator mode.
-          if (command.mode === 'task-notification') {
-            const notificationText =
-              typeof command.value === 'string' ? command.value : ''
-            // Parse the XML-formatted notification
-            const taskIdMatch = notificationText.match(
-              /<task-id>([^<]+)<\/task-id>/,
-            )
-            const toolUseIdMatch = notificationText.match(
-              /<tool-use-id>([^<]+)<\/tool-use-id>/,
-            )
-            const outputFileMatch = notificationText.match(
-              /<output-file>([^<]+)<\/output-file>/,
-            )
-            const statusMatch = notificationText.match(
-              /<status>([^<]+)<\/status>/,
-            )
-            const summaryMatch = notificationText.match(
-              /<summary>([^<]+)<\/summary>/,
-            )
-
-            const isValidStatus = (
-              s: string | undefined,
-            ): s is 'completed' | 'failed' | 'stopped' | 'killed' =>
-              s === 'completed' ||
-              s === 'failed' ||
-              s === 'stopped' ||
-              s === 'killed'
-            const rawStatus = statusMatch?.[1]
-            const status = isValidStatus(rawStatus)
-              ? rawStatus === 'killed'
-                ? 'stopped'
-                : rawStatus
-              : 'completed'
-
-            const usageMatch = notificationText.match(
-              /<usage>([\s\S]*?)<\/usage>/,
-            )
-            const usageContent = usageMatch?.[1] ?? ''
-            const totalTokensMatch = usageContent.match(
-              /<total_tokens>(\d+)<\/total_tokens>/,
-            )
-            const toolUsesMatch = usageContent.match(
-              /<tool_uses>(\d+)<\/tool_uses>/,
-            )
-            const durationMsMatch = usageContent.match(
-              /<duration_ms>(\d+)<\/duration_ms>/,
-            )
-
-            // Only emit a task_notification SDK event when a <status> tag is
-            // present — that means this is a terminal notification (completed/
-            // failed/stopped). Stream events from enqueueStreamEvent carry no
-            // <status> (they're progress pings); emitting them here would
-            // default to 'completed' and falsely close the task for SDK
-            // consumers. Terminal bookends are now emitted directly via
-            // emitTaskTerminatedSdk, so skipping statusless events is safe.
-            if (statusMatch) {
-              output.enqueue({
-                type: 'system',
-                subtype: 'task_notification',
-                task_id: taskIdMatch?.[1] ?? '',
-                tool_use_id: toolUseIdMatch?.[1],
-                status,
-                output_file: outputFileMatch?.[1] ?? '',
-                summary: summaryMatch?.[1] ?? '',
-                usage:
-                  totalTokensMatch && toolUsesMatch
-                    ? {
-                        total_tokens: parseInt(totalTokensMatch[1]!, 10),
-                        tool_uses: parseInt(toolUsesMatch[1]!, 10),
-                        duration_ms: durationMsMatch
-                          ? parseInt(durationMsMatch[1]!, 10)
-                          : 0,
-                      }
-                    : undefined,
-                session_id: getSessionId(),
-                uuid: randomUUID(),
-              })
-            }
-            // No continue -- fall through to ask() so the model processes the result
-          }
+          // Task notifications (command.mode === 'task-notification') fall through to
+          // ask() so the model sees the agent result — matches TUI
+          // useQueueProcessor. Do NOT re-parse XML into an SDK task_notification
+          // here: official headless emits the terminal bookend only via lf
+          // (emitTaskTerminatedSdk / c7c once-gate), drained by drainSdkEvents().
+          // Re-emitting from XML double-bookends the same task_id for SDK
+          // consumers. Paths that only enqueue XML without lf must call
+          // emitTaskTerminatedSdk themselves (notifyTaskNotification default).
 
           const input = command.value
           const claimedAutonomyCommands = queuedAutonomyClaim.claimedCommands
@@ -2550,6 +2598,17 @@ function runHeadlessStreaming(
                   abortController,
                   replayUserMessages: options.replayUserMessages,
                   includePartialMessages: options.includePartialMessages,
+                  forwardSubagentText: options.forwardSubagentText,
+                  // densable TSo: excludeDynamicSections:d.excludeDynamicSections
+                  excludeDynamicSections: (
+                    options as { excludeDynamicSections?: boolean }
+                  ).excludeDynamicSections,
+                  // densable Tc: toolAliases from initialize → options → ask()
+                  toolAliases: (
+                    options as {
+                      toolAliases?: Readonly<Record<string, string>>
+                    }
+                  ).toolAliases,
                   handleElicitation: (serverName, params, elicitSignal) =>
                     structuredIO.handleElicitation(
                       serverName,
@@ -2652,8 +2711,15 @@ function runHeadlessStreaming(
             throw error
           }
 
+          // densable end-of-turn: zzn(uuid) clear leftover pending + lifecycle
+          // cancelled if abort/signal, else completed.
+          const turnAborted = abortController?.signal.aborted === true
           for (const uuid of batchUuids) {
-            notifyCommandLifecycle(uuid, 'completed')
+            consumeCancelPending(uuid)
+            notifyCommandLifecycle(
+              uuid,
+              turnAborted ? 'cancelled' : 'completed',
+            )
           }
 
           // Forward messages to bridge after each turn
@@ -2799,7 +2865,12 @@ function runHeadlessStreaming(
         }
 
         runPhase = 'draining_commands'
-        await drainCommandQueue()
+        try {
+          await drainCommandQueue()
+        } finally {
+          // densable finally{j=[]} after drain completes
+          inFlightDrainBatchUuids = []
+        }
 
         // Check for running background tasks before exiting.
         // Exclude in_process_teammate — teammates are long-lived by design
@@ -3483,6 +3554,15 @@ function runHeadlessStreaming(
               },
             }))
           }
+          // densable jGr on interrupt: bulk system-kill bg agents/workflows/OH
+          try {
+            const { bulkSystemKillTasks } = await import(
+              'src/tasks/stopTask.js'
+            )
+            bulkSystemKillTasks(getAppState().tasks ?? {}, setAppState)
+          } catch {
+            /* optional — stopTask may be unavailable in lean stubs */
+          }
           if (abortController) {
             abortController.abort()
           }
@@ -3490,10 +3570,32 @@ function runHeadlessStreaming(
           suggestionState.abortController = null
           suggestionState.lastEmitted = null
           suggestionState.pendingSuggestion = null
-          sendControlResponseSuccess(msg)
+          // densable: fn(je,{still_queued:[...j,...Xtt().filter(AL).map(uuid)]})
+          // Snapshot synchronously with abort — drain may start next turn ASAP.
+          // inFlightDrainBatchUuids is only populated while run()'s drain is mid
+          // ask(); when idle it's [] and queue-only residual still applies.
+          const still_queued = buildInterruptStillQueued(
+            inFlightDrainBatchUuids,
+            isMainThread,
+          )
+          sendControlResponseSuccess(msg, { still_queued })
         } else if (req.subtype === 'end_session') {
+          // densable UFf: stale reason=archived on WORKER_EPOCH>1 is prior
+          // lifecycle residue — soft-succeed and continue without abort.
+          // end_session is outside the typed union; cast reason carefully.
+          const endReason =
+            typeof (req as { reason?: unknown }).reason === 'string'
+              ? (req as { reason: string }).reason
+              : undefined
+          if (isStaleArchivedEndSession(endReason)) {
+            logForDebugging(
+              "[print.ts] stale 'archived' end_session ignored on epoch>1 — from prior lifecycle",
+            )
+            sendControlResponseSuccess(msg)
+            continue
+          }
           logForDebugging(
-            `[print.ts] end_session received, reason=${req.reason ?? 'unspecified'}`,
+            `[print.ts] end_session received, reason=${endReason ?? 'unspecified'}`,
           )
           if (abortController) {
             abortController.abort()
@@ -3505,6 +3607,99 @@ function runHeadlessStreaming(
           sendControlResponseSuccess(msg)
           break // exits for-await → falls through to inputClosed=true drain below
         } else if (msg.request.subtype === 'initialize') {
+          // densable runtime type gates (schema is best-effort; control stream
+          // may bypass zod). Exact error strings match densable gold.
+          const initSdkMcp = (msg.request as { sdkMcpServers?: unknown })
+            .sdkMcpServers
+          const initWebSearchExempt = (
+            msg.request as {
+              webSearchIsolationExemptMcpServers?: unknown
+            }
+          ).webSearchIsolationExemptMcpServers
+          if (
+            (initSdkMcp != null &&
+              (!Array.isArray(initSdkMcp) ||
+                initSdkMcp.some(name => typeof name !== 'string'))) ||
+            (initWebSearchExempt != null &&
+              (!Array.isArray(initWebSearchExempt) ||
+                initWebSearchExempt.some(name => typeof name !== 'string')))
+          ) {
+            sendControlResponseError(
+              msg,
+              'initialize: sdkMcpServers and webSearchIsolationExemptMcpServers must be arrays of strings',
+            )
+            continue
+          }
+          const initHooks = msg.request.hooks as unknown
+          if (
+            initHooks != null &&
+            (typeof initHooks !== 'object' ||
+              Array.isArray(initHooks) ||
+              Object.values(initHooks as Record<string, unknown>).some(
+                matchers =>
+                  !Array.isArray(matchers) ||
+                  matchers.some(
+                    matcher =>
+                      matcher === null ||
+                      typeof matcher !== 'object' ||
+                      !('hookCallbackIds' in matcher) ||
+                      !Array.isArray(
+                        (matcher as { hookCallbackIds?: unknown })
+                          .hookCallbackIds,
+                      ) ||
+                      (
+                        matcher as { hookCallbackIds: unknown[] }
+                      ).hookCallbackIds.some(id => typeof id !== 'string') ||
+                      ('matcher' in matcher &&
+                        (matcher as { matcher?: unknown }).matcher != null &&
+                        typeof (matcher as { matcher?: unknown }).matcher !==
+                          'string'),
+                  ),
+              ))
+          ) {
+            sendControlResponseError(
+              msg,
+              'initialize: hooks must map hook events to arrays of matchers carrying hookCallbackIds arrays and string matchers',
+            )
+            continue
+          }
+          const initSkills = (msg.request as { skills?: unknown }).skills
+          if (
+            initSkills !== undefined &&
+            (!Array.isArray(initSkills) ||
+              initSkills.some(name => typeof name !== 'string'))
+          ) {
+            sendControlResponseError(
+              msg,
+              'initialize: skills must be an array of strings',
+            )
+            continue
+          }
+
+          // densable: title.trim() → cPt(cacheSessionTitle); also sets auto-title
+          // skip flag (dt) so first-prompt Haiku title gen is suppressed.
+          const initTitleRaw =
+            typeof msg.request.title === 'string'
+              ? msg.request.title
+              : undefined
+          const initTitle = initTitleRaw?.trim()
+          if (initTitle) {
+            skipAutoSessionTitle = true
+            cacheSessionTitle(initTitle)
+          }
+
+          // densable excludeDynamicSections — stash on options; consumed by
+          // getSystemPrompt / get_context_usage / side_question / QueryEngine (mB/ESo
+          // is a heavier residual; flag is accepted + stored here).
+          const excludeDynamicSections = (
+            msg.request as { excludeDynamicSections?: boolean }
+          ).excludeDynamicSections
+          if (typeof excludeDynamicSections === 'boolean') {
+            ;(
+              options as { excludeDynamicSections?: boolean }
+            ).excludeDynamicSections = excludeDynamicSections
+          }
+
           // SDK MCP server names from the initialize message
           // Populated by both browser and ProcessTransport sessions
           if (
@@ -3520,6 +3715,8 @@ function runHeadlessStreaming(
               }
             }
           }
+          // densable xju(webSearchIsolationExemptMcpServers) — LOCAL SKIP
+          // (isolation latch not wired in this tree).
 
           await handleInitializeRequest(
             msg.request,
@@ -3533,6 +3730,7 @@ function runHeadlessStreaming(
             options,
             agents,
             getAppState,
+            setAppState,
           )
 
           // Enable prompt suggestions in AppState when SDK consumer opts in.
@@ -3575,28 +3773,71 @@ function runHeadlessStreaming(
           // notifySessionMetadataChanged that used to follow here is
           // now fired by onChangeAppState (with externalized mode name).
         } else if (msg.request.subtype === 'set_model') {
-          const requestedModel = msg.request.model ?? 'default'
-          const model =
-            requestedModel === 'default'
-              ? getDefaultMainLoopModel()
-              : requestedModel
+          // densable: model must be string|nullish; default via trim/lower;
+          // allowlist gate; AppState mainLoopModelForSession; metadata +
+          // breadcrumbs only when resolved model changes.
+          const rawModel = msg.request.model
+          if (rawModel != null && typeof rawModel !== 'string') {
+            sendControlResponseError(msg, 'set_model: model must be a string')
+            continue
+          }
+          const requestedModel = rawModel ?? 'default'
+          const isDefault = requestedModel.trim().toLowerCase() === 'default'
+          const model = isDefault ? getDefaultMainLoopModel() : requestedModel
+          if (!isDefault && !isModelAllowed(model)) {
+            // densable $3 portable — org allowlist rejection (no Jq step-down).
+            sendControlResponseError(
+              msg,
+              formatRestrictedModelError(requestedModel),
+            )
+            continue
+          }
+          const prevModel = getMainLoopModel()
           activeUserSpecifiedModel = model
           setMainLoopModelOverride(model)
+          setAppState(prev =>
+            prev.mainLoopModelForSession === model
+              ? prev
+              : { ...prev, mainLoopModelForSession: model },
+          )
           notifySessionMetadataChanged({ model })
-          injectModelSwitchBreadcrumbs(requestedModel, model)
-
+          if (getMainLoopModel() !== prevModel) {
+            injectModelSwitchBreadcrumbs(requestedModel, model)
+          }
           sendControlResponseSuccess(msg)
         } else if (msg.request.subtype === 'set_max_thinking_tokens') {
-          if (msg.request.max_thinking_tokens === null) {
-            options.thinkingConfig = undefined
-          } else if (msg.request.max_thinking_tokens === 0) {
-            options.thinkingConfig = { type: 'disabled' }
-          } else {
-            options.thinkingConfig = {
-              type: 'enabled',
-              budgetTokens: msg.request.max_thinking_tokens,
+          // densable: validate integer-or-null max_thinking_tokens +
+          // thinking_display ∈ {summarized,omitted,null,omitted-field};
+          // patch session display (st); resolve via OFf portable helper.
+          const rawMax = msg.request.max_thinking_tokens
+          const rawDisplay = (
+            msg.request as {
+              thinking_display?: 'summarized' | 'omitted' | null
             }
+          ).thinking_display
+          if (
+            (rawMax != null &&
+              (typeof rawMax !== 'number' || !Number.isInteger(rawMax))) ||
+            (rawDisplay != null &&
+              rawDisplay !== 'summarized' &&
+              rawDisplay !== 'omitted')
+          ) {
+            sendControlResponseError(
+              msg,
+              'set_max_thinking_tokens: max_thinking_tokens must be an integer or null and thinking_display must be "summarized", "omitted", or null',
+            )
+            continue
           }
+          if (rawDisplay !== undefined) {
+            // densable: st = thinking_display ?? void 0; N3t(display !== null)
+            sessionThinkingDisplay = rawDisplay ?? undefined
+          }
+          options.thinkingConfig = resolveControlThinkingConfig(
+            rawMax,
+            sessionThinkingDisplay,
+            options.thinkingConfig,
+            modelSupportsAdaptiveThinking(getMainLoopModel()),
+          )
           sendControlResponseSuccess(msg)
         } else if (msg.request.subtype === 'mcp_status') {
           sendControlResponseSuccess(msg, {
@@ -3616,9 +3857,79 @@ function runHeadlessStreaming(
                   options.systemPrompt,
                 ),
                 appendSystemPrompt: options.appendSystemPrompt,
+                // densable lor: excludeDynamicSections:d.excludeDynamicSections
+                excludeDynamicSections: (
+                  options as { excludeDynamicSections?: boolean }
+                ).excludeDynamicSections,
               },
             })
             sendControlResponseSuccess(msg, { ...data })
+          } catch (error) {
+            sendControlResponseError(msg, errorMessage(error))
+          }
+        } else if (msg.request.subtype === 'get_binary_version') {
+          // densable: version=`${MACRO.VERSION}${SZ()}` (SZ always ""), buildTime=MACRO.BUILD_TIME
+          sendControlResponseSuccess(msg, {
+            version: MACRO.VERSION,
+            buildTime: MACRO.BUILD_TIME,
+          })
+        } else if (msg.request.subtype === 'list_models') {
+          // densable: fn(je,{models:_4e(UQe())}) — same ModelInfo shape as initialize
+          try {
+            sendControlResponseSuccess(msg, { models: modelInfos })
+          } catch (error) {
+            sendControlResponseError(msg, errorMessage(error))
+          }
+        } else if (msg.request.subtype === 'get_session_cost') {
+          // densable: fn(je,{text:zi(V5e())}) — stripANSI(formatTotalCost())
+          sendControlResponseSuccess(msg, {
+            text: stripAnsi(formatTotalCost()),
+          })
+        } else if (msg.request.subtype === 'get_usage') {
+          // densable xJr: session totals + subscription; rate limits/behaviors
+          // null locally (no claude.ai usage endpoint / transcript scan).
+          try {
+            const payload = buildGetUsageControlResponse({
+              subscriptionType: getSubscriptionType(),
+              rateLimitsAvailable: isClaudeAISubscriber() && hasProfileScope(),
+            })
+            sendControlResponseSuccess(msg, { ...payload })
+          } catch (error) {
+            sendControlResponseError(msg, errorMessage(error))
+          }
+        } else if (msg.request.subtype === 'get_plan') {
+          // densable: peekPlanSlug()!==undefined ? getPlan() : null
+          // Never creates a plan slug or file.
+          try {
+            const { peekPlanSlug, getPlan, getPlanFilePath } = await import(
+              'src/utils/plans.js'
+            )
+            const content = peekPlanSlug() !== undefined ? getPlan() : null
+            if (content !== null) {
+              sendControlResponseSuccess(msg, {
+                exists: true,
+                content,
+                path: getPlanFilePath(),
+              })
+            } else {
+              sendControlResponseSuccess(msg, { exists: false })
+            }
+          } catch (error) {
+            sendControlResponseError(msg, errorMessage(error))
+          }
+        } else if (msg.request.subtype === 'file_suggestions') {
+          // densable: generateFileSuggestions(cache, query, true) →
+          // {suggestions: map displayText → path}. Local cache is module singleton.
+          try {
+            const query =
+              typeof req.query === 'string' ? (req.query as string) : ''
+            const { generateFileSuggestions } = await import(
+              'src/hooks/fileSuggestions.js'
+            )
+            const items = await generateFileSuggestions(query, true)
+            sendControlResponseSuccess(msg, {
+              suggestions: items.map(item => ({ path: item.displayText })),
+            })
           } catch (error) {
             sendControlResponseError(msg, errorMessage(error))
           }
@@ -3657,8 +3968,23 @@ function runHeadlessStreaming(
             )
           }
         } else if (msg.request.subtype === 'cancel_async_message') {
+          // densable: if isFoldInFlight(uuid) → no queue remove (cancelled:false);
+          // else dequeueAllMatching; if none removed and not fold → markCancelPending
+          // so drain's zzn filters drop before started; lifecycle cancelled for removed.
           const targetUuid = msg.request.message_uuid
-          const removed = dequeueAllMatching(cmd => cmd.uuid === targetUuid)
+          const fold =
+            typeof targetUuid === 'string' && isFoldInFlight(targetUuid)
+          const removed = fold
+            ? []
+            : dequeueAllMatching(cmd => cmd.uuid === targetUuid)
+          if (removed.length === 0 && !fold && typeof targetUuid === 'string') {
+            markCancelPending(targetUuid)
+          }
+          for (const cmd of removed) {
+            if (cmd.uuid !== undefined) {
+              notifyCommandLifecycle(cmd.uuid, 'cancelled')
+            }
+          }
           sendControlResponseSuccess(msg, {
             cancelled: removed.length > 0,
           })
@@ -3701,17 +4027,49 @@ function runHeadlessStreaming(
           }
           sendControlResponseSuccess(msg)
         } else if (msg.request.subtype === 'mcp_set_servers') {
+          // densable: servers must be a plain object of config objects.
+          const servers = msg.request.servers as unknown
+          if (
+            typeof servers !== 'object' ||
+            servers === null ||
+            Array.isArray(servers) ||
+            Object.values(servers as Record<string, unknown>).some(
+              cfg =>
+                cfg === null || typeof cfg !== 'object' || Array.isArray(cfg),
+            )
+          ) {
+            sendControlResponseError(
+              msg,
+              'mcp_set_servers: servers must be an object of config objects',
+            )
+            continue
+          }
           const { response, sdkServersChanged } = await applyMcpServerChanges(
-            msg.request.servers as Record<
-              string,
-              McpServerConfigForProcessTransport
-            >,
+            servers as Record<string, McpServerConfigForProcessTransport>,
           )
           sendControlResponseSuccess(msg, response)
 
           // Connect SDK servers AFTER response to avoid deadlock
           if (sdkServersChanged) {
             void updateSdkMcp()
+          }
+        } else if (req.subtype === 'reload_skills') {
+          // densable: optional SYNC_SKILLS race (skipped local-only cloud install),
+          // F2/bre cache clear → clearCommandsCache; RH(cwd) skill list map
+          // {name,description,argumentHint,aliases?}; also refresh currentCommands.
+          try {
+            clearCommandsCache()
+            currentCommands = await getCommands(cwd())
+            const skillCmds = await getSkillToolCommands(cwd())
+            const skills = skillCmds.map(cmd => ({
+              name: getCommandName(cmd),
+              description: formatDescriptionWithSource(cmd),
+              argumentHint: cmd.argumentHint || '',
+              ...(cmd.aliases?.length ? { aliases: cmd.aliases } : {}),
+            }))
+            sendControlResponseSuccess(msg, { skills })
+          } catch (error) {
+            sendControlResponseError(msg, errorMessage(error))
           }
         } else if (msg.request.subtype === 'reload_plugins') {
           try {
@@ -4474,8 +4832,85 @@ function runHeadlessStreaming(
             injectModelSwitchBreadcrumbs(modelArg, newModel)
           }
 
+          // densable Xat residual — session AppState flags (cacheBreakerPhrase etc.)
+          // + densable effortLevel/ultracode AppState updates.
+          {
+            const { applyFlagSettings } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../utils/applyFlagSettings.js') as typeof import('../utils/applyFlagSettings.js')
+            const { parseEffortValue, parseEffortUltracodeAlias } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../utils/effort.js') as typeof import('../utils/effort.js')
+            const patch: {
+              cacheBreakerPhrase?: string | null
+              autoCompactWindow?: number | null
+              briefTranscript?: boolean
+              isBriefOnly?: boolean
+              fastMode?: boolean
+              model?: string | null
+              effortLevel?: unknown
+              ultracode?: boolean
+            } = {}
+            if ('cacheBreakerPhrase' in incoming) {
+              const v = (incoming as { cacheBreakerPhrase?: unknown })
+                .cacheBreakerPhrase
+              patch.cacheBreakerPhrase = v == null ? null : String(v)
+            }
+            if ('autoCompactWindow' in incoming) {
+              const v = (incoming as { autoCompactWindow?: unknown })
+                .autoCompactWindow
+              patch.autoCompactWindow = v == null ? null : Number(v)
+            }
+            if ('briefTranscript' in incoming) {
+              patch.briefTranscript = Boolean(
+                (incoming as { briefTranscript?: unknown }).briefTranscript,
+              )
+            }
+            if ('isBriefOnly' in incoming) {
+              patch.isBriefOnly = Boolean(
+                (incoming as { isBriefOnly?: unknown }).isBriefOnly,
+              )
+            }
+            if ('fastMode' in incoming) {
+              patch.fastMode = Boolean(
+                (incoming as { fastMode?: unknown }).fastMode,
+              )
+            }
+            if ('model' in incoming) {
+              const v = (incoming as { model?: unknown }).model
+              patch.model = v == null ? null : String(v)
+            }
+            if ('effortLevel' in incoming) {
+              patch.effortLevel = (
+                incoming as { effortLevel?: unknown }
+              ).effortLevel
+            }
+            if ('ultracode' in incoming) {
+              patch.ultracode =
+                (incoming as { ultracode?: unknown }).ultracode === true
+            }
+            if (Object.keys(patch).length > 0) {
+              applyFlagSettings(patch, setAppState)
+            }
+            // densable notifyMetadataChanged({effort_level: ...})
+            if ('effortLevel' in incoming) {
+              const raw = (incoming as { effortLevel?: unknown }).effortLevel
+              if (raw == null) {
+                notifySessionMetadataChanged({ effort_level: null })
+              } else {
+                const gi =
+                  parseEffortValue(raw) ?? parseEffortUltracodeAlias(raw)
+                notifySessionMetadataChanged({
+                  effort_level: String(gi ?? raw),
+                })
+              }
+            }
+          }
+
           sendControlResponseSuccess(msg)
         } else if (msg.request.subtype === 'get_settings') {
+          // densable: jpi sources + applied {model,effort,advisor,ultracode}
+          // + non-warning settings errors (aee filter).
           const currentAppState = getAppState()
           const model = getMainLoopModel()
           // modelSupportsEffort gate matches claude.ts — applied.effort must
@@ -4483,24 +4918,73 @@ function runHeadlessStreaming(
           const effort = modelSupportsEffort(model)
             ? resolveAppliedEffort(model, currentAppState.effortValue)
             : undefined
+          const advisor =
+            resolveAppliedAdvisorModel(currentAppState.advisorModel, model) ??
+            null
+          const ultracode = isUltraEffortSessionActive(
+            model,
+            currentAppState.effortValue,
+            currentAppState.ultracode,
+          )
+          const settingsErrors = getSettingsWithAllErrors()
+            .errors.filter(e => e.mcpErrorMetadata?.severity !== 'warning')
+            .map(e => ({
+              file: e.file,
+              path: e.path,
+              message: e.message,
+            }))
           sendControlResponseSuccess(msg, {
             ...getSettingsWithSources(),
             applied: {
               model,
               // Numeric effort (ant-only) → null; SDK schema is string-level only.
               effort: typeof effort === 'string' ? effort : null,
+              advisor,
+              ultracode,
             },
+            ...(settingsErrors.length > 0 ? { errors: settingsErrors } : {}),
           })
         } else if (msg.request.subtype === 'stop_task') {
           const { task_id: taskId } = msg.request
           try {
+            // densable H1e(source:"user") — main-session SDK, no callerAgentId
             await stopTask(taskId, {
               getAppState,
               setAppState,
+              source: 'user',
             })
             sendControlResponseSuccess(msg, {})
           } catch (error) {
-            sendControlResponseError(msg, errorMessage(error))
+            // densable: not_found|not_running → soft success; else error
+            // (not_owner surfaces as error so agent callers see refusal)
+            if (
+              error instanceof StopTaskError &&
+              (error.code === 'not_found' || error.code === 'not_running')
+            ) {
+              sendControlResponseSuccess(msg, {})
+            } else {
+              sendControlResponseError(msg, errorMessage(error))
+            }
+          }
+        } else if (req.subtype === 'background_tasks') {
+          // densable: eB task registry → Yto(tool_use_id) or WLe all.
+          // Local: backgroundByToolUseId / backgroundAll over AppState.tasks.
+          try {
+            const toolUseId =
+              typeof req.tool_use_id === 'string' ? req.tool_use_id : undefined
+            if (toolUseId) {
+              const backgrounded = backgroundByToolUseId(
+                toolUseId,
+                getAppState,
+                setAppState,
+              )
+              sendControlResponseSuccess(msg, { backgrounded })
+            } else {
+              backgroundAll(getAppState, setAppState)
+              sendControlResponseSuccess(msg, {})
+            }
+          } catch (e) {
+            sendControlResponseError(msg, errorMessage(e))
           }
         } else if (req.subtype === 'generate_session_title') {
           // Fire-and-forget so the Haiku call does not block the stdin loop
@@ -4508,6 +4992,11 @@ function runHeadlessStreaming(
           // interrupts for the duration of the API roundtrip).
           const description = req.description as string
           const persist = req.persist as boolean
+          // densable: persist=true marks auto-title skipped (dt=!0) so a concurrent
+          // first-prompt auto-title does not race a host-requested title.
+          if (persist) {
+            skipAutoSessionTitle = true
+          }
           // Reuse the live controller only if it has not already been aborted
           // (e.g. by interrupt()); an aborted signal would cause queryHaiku to
           // immediately throw APIUserAbortError → {title: null}.
@@ -4523,8 +5012,14 @@ function runHeadlessStreaming(
                 try {
                   saveAiGeneratedTitle(getSessionId() as UUID, title)
                 } catch (e) {
-                  logError(e)
+                  // densable Xo: soft-log expected FS errors; hard-log others.
+                  if (isFsInaccessible(e)) {
+                    logForDebugging(`saveAiGeneratedTitle failed: ${e}`)
+                  } else {
+                    logError(e)
+                  }
                 }
+                // densable sSs remote title sync skipped (local-only; no fleet).
               }
               sendControlResponseSuccess(msg, { title })
             } catch (e) {
@@ -4535,6 +5030,62 @@ function runHeadlessStreaming(
               sendControlResponseError(msg, errorMessage(e))
             }
           })()
+        } else if (req.subtype === 'rename_session') {
+          // densable: title.trim(); empty → error; if qL() sessionFile → zre
+          // saveCustomTitle(..., "remote"); else cPt cacheSessionTitle;
+          // dt=!0 suppress auto-title; success.
+          try {
+            const raw =
+              typeof req.title === 'string' ? (req.title as string) : ''
+            const title = raw.trim()
+            if (!title) {
+              sendControlResponseError(msg, 'title must be non-empty')
+            } else {
+              const sessionId = getSessionId() as UUID
+              if (getActiveSessionFilePath()) {
+                await saveCustomTitle(sessionId, title, undefined, 'remote')
+              } else {
+                cacheSessionTitle(title)
+              }
+              skipAutoSessionTitle = true
+              sendControlResponseSuccess(msg)
+            }
+          } catch (e) {
+            sendControlResponseError(msg, errorMessage(e))
+          }
+        } else if (req.subtype === 'message_rated') {
+          // densable Fzo.safeParse → Wi(allow_product_feedback) → tengu_message_rated
+          // → always success {}. Local-only analytics; no cloud fleet.
+          const parsed = SDKControlMessageRatedRequestSchema().safeParse(req)
+          if (!parsed.success) {
+            sendControlResponseError(
+              msg,
+              'message_rated: messageUuid must be a string, sentiment "positive" or "negative", surface "tool_use" or "assistant_text", and cleared a boolean',
+            )
+          } else {
+            if (isPolicyAllowed('allow_product_feedback')) {
+              const {
+                messageUuid,
+                sentiment,
+                surface = 'tool_use',
+                cleared = false,
+              } = parsed.data
+              // densable nn: A-Za-z0-9_- {1,128} else "nonconforming"
+              const safeUuid = /^[A-Za-z0-9_-]{1,128}$/.test(messageUuid)
+                ? messageUuid
+                : 'nonconforming'
+              logEvent('tengu_message_rated', {
+                message_uuid:
+                  safeUuid as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                sentiment:
+                  sentiment as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                surface:
+                  surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                cleared,
+              })
+            }
+            sendControlResponseSuccess(msg, {})
+          }
         } else if (req.subtype === 'side_question') {
           // Same fire-and-forget pattern as generate_session_title above —
           // the forked agent's API roundtrip must not block the stdin loop.
@@ -4587,6 +5138,10 @@ function runHeadlessStreaming(
                     appendSystemPrompt: options.appendSystemPrompt,
                     thinkingConfig: options.thinkingConfig,
                     agents: currentAgents,
+                    // densable xEs: excludeDynamicSections:d.excludeDynamicSections
+                    excludeDynamicSections: (
+                      options as { excludeDynamicSections?: boolean }
+                    ).excludeDynamicSections,
                   })
               const result = await runSideQuestion({
                 question,
@@ -4826,6 +5381,73 @@ function runHeadlessStreaming(
 
         // Track this UUID to prevent runtime duplicates
         trackReceivedMessageUuid(userMsg.uuid as UUID)
+      }
+
+      // densable first-prompt auto-title (dt / l8e / kye). Fires before enqueue
+      // so Haiku runs in parallel with the main turn. Skip when host already
+      // set a title, env disables nonessential traffic / terminal title, or
+      // content is slash/bash/task envelope. Remote sSs sync is local-skipped.
+      {
+        const origin =
+          (userMsg as { origin?: { kind?: string } }).origin ??
+          (
+            userMsg.message as {
+              origin?: { kind?: string }
+            }
+          )?.origin
+        const isMeta =
+          (userMsg as { isMeta?: boolean }).isMeta === true ||
+          (userMsg.message as { isMeta?: boolean } | undefined)?.isMeta === true
+        const shouldQuery = (userMsg as { shouldQuery?: boolean }).shouldQuery
+        const isSynthetic =
+          (userMsg as { isSynthetic?: boolean }).isSynthetic === true
+        if (
+          !skipAutoSessionTitle &&
+          shouldQuery !== false &&
+          !isMeta &&
+          !isSynthetic &&
+          (origin === undefined || origin.kind === 'human')
+        ) {
+          const titleSource = extractTitleSourceText(
+            (userMsg.message as { content?: unknown }).content,
+          )
+          if (titleSource && !isAutoTitleExcludedPrompt(titleSource)) {
+            skipAutoSessionTitle = true
+            const sessionId = asSessionId(getSessionId())
+            // densable iE: skip if custom title already cached.
+            if (!getCurrentSessionTitle(sessionId)) {
+              const titleSignal = (
+                abortController && !abortController.signal.aborted
+                  ? abortController
+                  : createAbortController()
+              ).signal
+              void generateSessionTitle(titleSource, titleSignal)
+                .then(title => {
+                  if (!title) {
+                    skipAutoSessionTitle = false
+                    return
+                  }
+                  // densable iE re-check: custom title may have landed mid-flight.
+                  if (getCurrentSessionTitle(sessionId)) {
+                    return
+                  }
+                  try {
+                    saveAiGeneratedTitle(sessionId as UUID, title)
+                  } catch (e) {
+                    if (isFsInaccessible(e)) {
+                      logForDebugging(`saveAiGeneratedTitle failed: ${e}`)
+                    } else {
+                      logError(e)
+                    }
+                  }
+                })
+                .catch(e => {
+                  skipAutoSessionTitle = false
+                  logError(e)
+                })
+            }
+          }
+        }
       }
 
       enqueue({
@@ -5104,6 +5726,8 @@ async function handleInitializeRequest(
   },
   agents: AgentDefinition[],
   getAppState: () => AppState,
+  // densable ErT toolAliases → AppState.toolPermissionContext.toolAliases
+  setAppState: (f: (prev: AppState) => AppState) => void,
 ): Promise<void> {
   if (initialized) {
     output.enqueue({
@@ -5121,7 +5745,7 @@ async function handleInitializeRequest(
     return
   }
 
-  // Apply systemPrompt/appendSystemPrompt from stdin to avoid ARG_MAX limits
+  // densable ErT field apply — stdin/control overrides for session options.
   if (request.systemPrompt !== undefined) {
     options.systemPrompt = request.systemPrompt
   }
@@ -5130,6 +5754,42 @@ async function handleInitializeRequest(
   }
   if (request.promptSuggestions !== undefined) {
     options.promptSuggestions = request.promptSuggestions
+  }
+  // densable ErT: planModeInstructions / appendSubagentSystemPrompt /
+  // forwardSubagentText / excludeDynamicSections / toolAliases → options.
+  // densable toolAliases also mirrors onto AppState.toolPermissionContext
+  // (Tc/sDn/b5t consumers via options.toolAliases + permission proxyExpansion).
+  if (request.planModeInstructions !== undefined) {
+    options.planModeInstructions = request.planModeInstructions
+  }
+  if (request.appendSubagentSystemPrompt !== undefined) {
+    options.appendSubagentSystemPrompt = request.appendSubagentSystemPrompt
+  }
+  if (request.toolAliases !== undefined) {
+    options.toolAliases = request.toolAliases
+    setAppState(prev => ({
+      ...prev,
+      toolPermissionContext: {
+        ...prev.toolPermissionContext,
+        toolAliases: request.toolAliases,
+      },
+    }))
+  }
+  if (request.excludeDynamicSections !== undefined) {
+    options.excludeDynamicSections = request.excludeDynamicSections
+  }
+  if (request.forwardSubagentText !== undefined) {
+    options.forwardSubagentText = request.forwardSubagentText
+  }
+  // densable kQo — session skill allowlist for main-session skill tool list.
+  if (request.skills !== undefined) {
+    setSessionSkillAllowlist(request.skills)
+    // Bust memoized skill lists so the allowlist applies immediately.
+    try {
+      getSkillToolCommands.cache?.clear?.()
+    } catch {
+      /* memoize cache optional */
+    }
   }
 
   // Merge agents from stdin to avoid ARG_MAX limits

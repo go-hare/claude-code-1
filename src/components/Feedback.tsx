@@ -20,6 +20,10 @@ import { checkAndRefreshOAuthTokenIfNeeded } from '../utils/auth.js';
 import { openBrowser } from '../utils/browser.js';
 import { logForDebugging } from '../utils/debug.js';
 import { env } from '../utils/env.js';
+import {
+  createFeedbackFallbackTitle,
+  isFeedbackTitleRefusalLike,
+} from '../utils/feedbackTitle.js';
 import { type GitRepoState, getGitState, getIsGit } from '../utils/git.js';
 import { getAuthHeaders, getUserAgent } from '../utils/http.js';
 import { getInMemoryErrors, logError } from '../utils/log.js';
@@ -537,44 +541,21 @@ async function generateTitle(description: string, abortSignal: AbortSignal): Pro
     const _firstBlock = response?.message?.content?.[0] as unknown as Record<string, unknown> | undefined;
     const title = _firstBlock?.type === 'text' ? (_firstBlock.text as string) : 'Bug Report';
 
-    // Check if the title contains an API error message
+    // densable h6: API / AWS error-shaped title → fallback
     if (startsWithApiErrorPrefix(title)) {
-      return createFallbackTitle(description);
+      return createFeedbackFallbackTitle(description);
+    }
+    // densable c8_: empty or refusal-like Haiku title → fallback
+    if (isFeedbackTitleRefusalLike(title)) {
+      return createFeedbackFallbackTitle(description);
     }
 
     return title;
   } catch (error) {
     // If there's any error in title generation, use a fallback title
     logError(error);
-    return createFallbackTitle(description);
+    return createFeedbackFallbackTitle(description);
   }
-}
-
-function createFallbackTitle(description: string): string {
-  // Create a safe fallback title based on the bug description
-
-  // Try to extract a meaningful title from the first line
-  const firstLine = description.split('\n')[0] || '';
-
-  // If the first line is very short, use it directly
-  if (firstLine.length <= 60 && firstLine.length > 5) {
-    return firstLine;
-  }
-
-  // For longer descriptions, create a truncated version
-  // Truncate at word boundaries when possible
-  let truncated = firstLine.slice(0, 60);
-  if (firstLine.length > 60) {
-    // Find the last space before the 60 char limit
-    const lastSpace = truncated.lastIndexOf(' ');
-    if (lastSpace > 30) {
-      // Only trim at word if we're not cutting too much
-      truncated = truncated.slice(0, lastSpace);
-    }
-    truncated += '...';
-  }
-
-  return truncated.length < 10 ? 'Bug Report' : truncated;
 }
 
 // Helper function to sanitize and log errors without exposing API keys

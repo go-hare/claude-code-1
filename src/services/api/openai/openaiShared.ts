@@ -9,6 +9,17 @@
  * tests and isolated mocks do not need a full session runtime.
  */
 import { randomUUID } from 'crypto'
+import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import type { Tools } from '../../../Tool.js'
+import type { AgentId } from '../../../types/ids.js'
+import type {
+  AssistantMessage,
+  SystemAPIErrorMessage,
+} from '../../../types/message.js'
+import {
+  createAssistantAPIErrorMessage,
+  normalizeContentFromAPI,
+} from '../../../utils/messages.js'
 
 /**
  * Build a stable OpenAI `prompt_cache_key` for a session.
@@ -45,19 +56,6 @@ export function getOpenAIPromptCacheKey(sessionIdOverride?: string): string {
   }
   return processPromptCacheKey
 }
-
-import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import { randomUUID } from 'crypto'
-import type { Tools } from '../../../Tool.js'
-import type { AgentId } from '../../../types/ids.js'
-import type {
-  AssistantMessage,
-  SystemAPIErrorMessage,
-} from '../../../types/message.js'
-import {
-  createAssistantAPIErrorMessage,
-  normalizeContentFromAPI,
-} from '../../../utils/messages.js'
 
 export type OpenAICompatibleUsage = {
   input_tokens: number
@@ -148,6 +146,9 @@ export function assembleFinalAssistantOutputs(params: {
           allBlocks as unknown as BetaMessage['content'],
           tools,
           agentId as AgentId | undefined,
+          {
+            messageId: partialMessage.id,
+          },
         ),
         usage,
         stop_reason: stopReason,

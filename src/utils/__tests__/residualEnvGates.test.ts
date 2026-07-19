@@ -275,6 +275,7 @@ import {
   resolveOtelHeadersHelperDebounceMs,
   resolveApiKeyFileDescriptor,
   resolveWorkerEpoch,
+  isStaleArchivedEndSession,
   resolveEnvironmentRunnerVersion,
   isSimpleModeEnvEnabled,
   isCoordinatorModeEnvEnabled,
@@ -323,6 +324,9 @@ import {
   formatSkillOverrideModeLabel,
   SKILL_OVERRIDE_CYCLE_MODES,
   isSkillModelInvocationBlockedByOverride,
+  isSkillToolInvocationBlockedByOverride,
+  findTurnStartIndex,
+  userTypedSkillThisTurn,
   isSkillFullyDisabledByOverride,
   isSkillModelListable,
   clampMaxOutputTokensOverride,
@@ -2603,8 +2607,64 @@ describe('DISABLE_CRON + BRIEF_UPLOAD densables', () => {
     expect(isSkillModelInvocationBlockedByOverride('user-invocable-only')).toBe(
       true,
     )
-    expect(isSkillModelInvocationBlockedByOverride('name-only')).toBe(true)
+    // densable Ber: name-only remains model-listable (description stripped elsewhere)
+    expect(isSkillModelInvocationBlockedByOverride('name-only')).toBe(false)
     expect(isSkillFullyDisabledByOverride('off')).toBe(true)
+    // densable RWr invoke gate: off always; user-invocable-only unless O6g
+    expect(isSkillToolInvocationBlockedByOverride('off', false)).toBe(true)
+    expect(isSkillToolInvocationBlockedByOverride('off', true)).toBe(true)
+    expect(
+      isSkillToolInvocationBlockedByOverride('user-invocable-only', false),
+    ).toBe(true)
+    expect(
+      isSkillToolInvocationBlockedByOverride('user-invocable-only', true),
+    ).toBe(false)
+    expect(isSkillToolInvocationBlockedByOverride('name-only', false)).toBe(
+      false,
+    )
+    expect(isSkillToolInvocationBlockedByOverride('on', false)).toBe(false)
+    // densable AJu
+    expect(
+      findTurnStartIndex([
+        { type: 'assistant' },
+        { type: 'user', isMeta: true },
+        { type: 'user' },
+        { type: 'assistant' },
+      ]),
+    ).toBe(2)
+    expect(findTurnStartIndex([{ type: 'assistant' }])).toBe(0)
+    // densable O6g
+    expect(
+      userTypedSkillThisTurn('commit', {
+        messages: [{ type: 'user', message: { content: '/commit -m x' } }],
+      }),
+    ).toBe(true)
+    expect(
+      userTypedSkillThisTurn('commit', {
+        agentId: 'sub',
+        messages: [{ type: 'user', message: { content: '/commit' } }],
+      }),
+    ).toBe(false)
+    expect(
+      userTypedSkillThisTurn('commit', {
+        messages: [
+          {
+            type: 'user',
+            message: { content: '<command-message>/commit</command-message>' },
+          },
+        ],
+      }),
+    ).toBe(false)
+    expect(
+      userTypedSkillThisTurn('commit', {
+        messages: [{ type: 'user', message: { content: 'please /commit now' } }],
+      }),
+    ).toBe(true)
+    expect(
+      userTypedSkillThisTurn('commit', {
+        messages: [{ type: 'user', message: { content: 'x/commit' } }],
+      }),
+    ).toBe(false)
     // Official RQd / OQd densables
     expect(SKILL_OVERRIDE_CYCLE_MODES).toEqual([
       'on',
@@ -2985,6 +3045,21 @@ describe('DISABLE_CRON + BRIEF_UPLOAD densables', () => {
       }),
     ).toBe('3')
     expect(resolveWorkerEpoch({ CLAUDE_CODE_WORKER_EPOCH: '7' })).toBe(7)
+    // densable UFf — stale archived end_session only when epoch>1
+    expect(
+      isStaleArchivedEndSession('archived', {
+        CLAUDE_CODE_WORKER_EPOCH: '2',
+      }),
+    ).toBe(true)
+    expect(
+      isStaleArchivedEndSession('archived', {
+        CLAUDE_CODE_WORKER_EPOCH: '1',
+      }),
+    ).toBe(false)
+    expect(
+      isStaleArchivedEndSession('user', { CLAUDE_CODE_WORKER_EPOCH: '9' }),
+    ).toBe(false)
+    expect(isStaleArchivedEndSession('archived', {})).toBe(false)
     expect(
       resolveEnvironmentRunnerVersion({
         CLAUDE_CODE_ENVIRONMENT_RUNNER_VERSION: '1.2.3',

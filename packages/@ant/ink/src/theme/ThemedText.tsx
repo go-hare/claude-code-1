@@ -2,8 +2,8 @@ import type { ReactNode } from 'react';
 import React, { useContext } from 'react';
 import Text from '../components/Text.js';
 import type { Color, Styles } from '../core/styles.js';
-import { getTheme, type Theme } from './theme-types.js';
-import { useTheme } from './ThemeProvider.js';
+import type { Theme } from './theme-types.js';
+import { useResolvedTheme } from './ThemeProvider.js';
 
 /** Colors uncolored ThemedText in the subtree. Precedence: explicit `color` >
  *  this > dimColor. Crosses Box boundaries (Ink's style cascade doesn't). */
@@ -90,8 +90,8 @@ export default function ThemedText({
   wrap = 'wrap',
   children,
 }: Props): React.ReactNode {
-  const [themeName] = useTheme();
-  const theme = getTheme(themeName);
+  // densable HL — use resolved palette so custom theme overrides apply
+  const theme = useResolvedTheme();
   const hoverColor = useContext(TextHoverColorContext);
 
   // Resolve theme keys to raw colors

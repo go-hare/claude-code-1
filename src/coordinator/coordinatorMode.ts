@@ -193,9 +193,10 @@ Format:
 <task-id>{agentId}</task-id>
 <status>completed|failed|killed</status>
 <summary>{human-readable status summary}</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
 <result>{agent's final text response}</result>
 <usage>
-  <total_tokens>N</total_tokens>
+  <subagent_tokens>N</subagent_tokens>
   <tool_uses>N</tool_uses>
   <duration_ms>N</duration_ms>
 </usage>
@@ -203,7 +204,8 @@ Format:
 \`\`\`
 
 - \`<result>\` and \`<usage>\` are optional sections
-- The \`<summary>\` describes the outcome: "completed", "failed: {error}", or "was stopped"
+- The \`<note>\` is always present — agents may resume and re-notify under the same task-id
+- The \`<summary>\` describes the outcome: "finished", "failed: {error}", "was stopped by Claude/user", or "was stopped"
 - The \`<task-id>\` value is the agent ID — use SendMessage with that ID as \`to\` to continue that worker
 
 ### Example
@@ -222,7 +224,7 @@ User:
   <task-notification>
   <task-id>agent-a1b</task-id>
   <status>completed</status>
-  <summary>Agent "Investigate auth bug" completed</summary>
+  <summary>Agent "Investigate auth bug" finished</summary>
   <result>Found null pointer in src/auth/validate.ts:42...</result>
   </task-notification>
 
@@ -393,7 +395,7 @@ User:
   <task-notification>
   <task-id>agent-a1b</task-id>
   <status>completed</status>
-  <summary>Agent "Investigate auth bug" completed</summary>
+  <summary>Agent "Investigate auth bug" finished</summary>
   <result>Found null pointer in src/auth/validate.ts:42. The user field on Session is undefined when the session expires but ...</result>
   </task-notification>
 

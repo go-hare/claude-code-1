@@ -97,6 +97,7 @@ import {
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
+import { stripOversizedOriginalFileForPersistence } from './toolResultStrip.js'
 import { validateUuid } from './uuid.js'
 
 // Cache MACRO.VERSION at module level to work around bun --define bug in async contexts
@@ -286,6 +287,18 @@ export type AgentMetadata = {
    * observer agent sidecar when pairing is stopped so KOu reattach blocks.
    */
   observerStopped?: boolean
+  /**
+   * Official hAe/Gzg stoppedByUser densable. Written when the user stops an
+   * agent (TaskStop / ySr / gtf cascade). Aye resume refuses silent re-run
+   * when set (unless userInitiated).
+   */
+  stoppedByUser?: boolean
+  /**
+   * Official densable isObserver sidecar marker (lYy/T1e). Written when an
+   * observer agent is spawned (spawnFirstRun). Aye observer-activity deliver
+   * refuses if missing (`observer_resume_sidecar_unconfirmed`).
+   */
+  isObserver?: boolean
 }
 
 /**
@@ -795,6 +808,8 @@ class Project {
   // Minimal cache for current session only (not all sessions)
   currentSessionTag: string | undefined
   currentSessionTitle: string | undefined
+  /** densable Hd().currentSessionAiTitle — AI-generated title cache. */
+  currentSessionAiTitle: string | undefined
   currentSessionAgentName: string | undefined
   currentSessionAgentColor: string | undefined
   currentSessionLastPrompt: string | undefined
@@ -1350,6 +1365,17 @@ class Project {
           version: VERSION,
           gitBranch,
           slug,
+        }
+        // densable nHd — drop oversized originalFile before JSONL append so
+        // transcript rows stay small (in-memory message keeps full payload).
+        if (
+          transcriptMessage.type === 'user' &&
+          transcriptMessage.toolUseResult != null
+        ) {
+          transcriptMessage.toolUseResult =
+            stripOversizedOriginalFileForPersistence(
+              transcriptMessage.toolUseResult,
+            )
         }
         await this.appendEntry(transcriptMessage)
         if (isChainParticipant(message)) {
@@ -2926,7 +2952,8 @@ export async function saveCustomTitle(
   sessionId: UUID,
   customTitle: string,
   fullPath?: string,
-  source: 'user' | 'auto' = 'user',
+  // densable zre n="user" — rename_session control path uses "remote"
+  source: 'user' | 'auto' | 'remote' = 'user',
 ) {
   // Fall back to computed path if fullPath is not provided
   const resolvedPath = fullPath ?? getTranscriptPathForSession(sessionId)
@@ -2973,11 +3000,18 @@ export async function saveCustomTitle(
  * where the AI title lands after a mid-flight user rename.
  */
 export function saveAiGeneratedTitle(sessionId: UUID, aiTitle: string): void {
+  // densable kye: append ai-title entry; if current session, cache
+  // currentSessionAiTitle so U1e / auto-title skip can read it without a
+  // transcript scan. Transcript append failures are handled by the write
+  // queue (logged); cache still updates so in-process title state is coherent.
   appendEntryToFile(getTranscriptPathForSession(sessionId), {
     type: 'ai-title',
     aiTitle,
     sessionId,
   })
+  if (sessionId === getSessionId()) {
+    getProject().currentSessionAiTitle = aiTitle
+  }
 }
 
 /**
@@ -3096,6 +3130,19 @@ export function getCurrentSessionTitle(
   return undefined
 }
 
+/**
+ * densable yNe — AI-generated title cache for the current session.
+ * Distinct from customTitle (currentSessionTitle / --name / rename_session).
+ */
+export function getCurrentSessionAiTitle(
+  sessionId: SessionId,
+): string | undefined {
+  if (sessionId === getSessionId()) {
+    return getProject().currentSessionAiTitle
+  }
+  return undefined
+}
+
 export function getCurrentSessionAgentColor(): string | undefined {
   return getProject().currentSessionAgentColor
 }
@@ -3146,6 +3193,7 @@ export function restoreSessionMetadata(meta: {
 export function clearSessionMetadata(): void {
   const project = getProject()
   project.currentSessionTitle = undefined
+  project.currentSessionAiTitle = undefined
   project.currentSessionTag = undefined
   project.currentSessionAgentName = undefined
   project.currentSessionAgentColor = undefined
@@ -3225,6 +3273,15 @@ export function saveAgentSetting(agentSetting: string): void {
  */
 export function cacheSessionTitle(customTitle: string): void {
   getProject().currentSessionTitle = customTitle
+}
+
+/**
+ * densable qL — Project.sessionFile for the current session, or null before
+ * materializeSessionFile. Used by rename_session: persist custom-title when
+ * set, else cacheSessionTitle only.
+ */
+export function getActiveSessionFilePath(): string | null {
+  return getProject().sessionFile
 }
 
 /**

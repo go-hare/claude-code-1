@@ -210,6 +210,12 @@ export type PermissionAskDecision<
   blockedPath?: string
   metadata?: PermissionMetadata
   /**
+   * densable suppressAlwaysAllowRule — when true on an ask decision, hide
+   * permanent always-allow UI options for this prompt (showAlwaysAllow gate).
+   * Combined with tool.suppressesAlwaysAllowRule?.(input) and org ask ceiling.
+   */
+  suppressAlwaysAllowRule?: boolean
+  /**
    * If true, this ask decision was triggered by a bashCommandIsSafe_DEPRECATED security check
    * for patterns that splitCommand_DEPRECATED could misparse (e.g. line continuations, shell-quote
    * transformations). Used by bashToolHasPermission to block early before splitCommand_DEPRECATED
@@ -472,4 +478,10 @@ export type ToolPermissionContext = {
    * `default`.
    */
   readonly canAutoClassifierRun?: boolean
+  /**
+   * densable toolAliases — session map of alias → canonical tool name.
+   * Single-hop. Used for permission rule proxy expansion (sDn) and mirrored
+   * from initialize onto AppState.toolPermissionContext.
+   */
+  readonly toolAliases?: Readonly<Record<string, string>>
 }

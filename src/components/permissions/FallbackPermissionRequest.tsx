@@ -3,7 +3,7 @@ import { getOriginalCwd } from '../../bootstrap/state.js';
 import { Box, Text, useTheme } from '@anthropic/ink';
 import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js';
 import { env } from '../../utils/env.js';
-import { shouldShowAlwaysAllowOptions } from '../../utils/permissions/permissionsLoader.js';
+import { computeShowAlwaysAllowOptions } from '../../utils/permissions/suppressAlwaysAllow.js';
 import { truncateToLines } from '../../utils/stringUtils.js';
 import { logUnaryEvent } from '../../utils/unaryLogging.js';
 import { type UnaryEvent, usePermissionRequestLogging } from './hooks.js';
@@ -115,9 +115,12 @@ export function FallbackPermissionRequest({
   }, [toolUseConfirm, onDone, onReject]);
 
   const originalCwd = getOriginalCwd();
-  // Official isAskCappedByOrg: org ceiling "ask" must not offer permanent allow.
-  const isAskCappedByOrg = toolUseConfirm.tool.mcpInfo?.effectiveMaxPermission === 'ask';
-  const showAlwaysAllowOptions = shouldShowAlwaysAllowOptions() && !isAskCappedByOrg;
+  // densable showAlwaysAllow: EYt + org ask ceiling + suppressAlwaysAllowRule + tool.suppressesAlwaysAllowRule
+  const showAlwaysAllowOptions = computeShowAlwaysAllowOptions({
+    tool: toolUseConfirm.tool,
+    input: toolUseConfirm.input as { [key: string]: unknown },
+    permissionResult: toolUseConfirm.permissionResult,
+  });
   const options = useMemo((): PermissionPromptOption<FallbackOptionValue>[] => {
     const result: PermissionPromptOption<FallbackOptionValue>[] = [
       {

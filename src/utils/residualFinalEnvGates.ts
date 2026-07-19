@@ -1681,13 +1681,30 @@ export function resolveSkillOverrideMode(
   return n
 }
 
-/** Official k1o densable — model invocation blocked by override mode. */
+/**
+ * Official k1o densable — model invocation blocked by override mode.
+ * densable: user-invocable-only | off only; name-only stays model-listable
+ * (description stripped elsewhere / Ber).
+ */
 export function isSkillModelInvocationBlockedByOverride(
   mode: SkillOverrideMode,
 ): boolean {
-  return (
-    mode === 'user-invocable-only' || mode === 'off' || mode === 'name-only'
-  )
+  return mode === 'user-invocable-only' || mode === 'off'
+}
+
+/**
+ * densable RWr override gate for SkillTool validateInput:
+ * `s==="off" || (s==="user-invocable-only" && !userTypedThisTurn)`.
+ * Listing still uses Ber; invoke allows user-invocable-only when the user
+ * typed `/skill` this turn (O6g).
+ */
+export function isSkillToolInvocationBlockedByOverride(
+  mode: SkillOverrideMode,
+  userTypedThisTurn: boolean,
+): boolean {
+  if (mode === 'off') return true
+  if (mode === 'user-invocable-only' && !userTypedThisTurn) return true
+  return false
 }
 
 /** Official IJ densable — skill fully off (slash + model). */
@@ -2337,6 +2354,116 @@ export function resolveWorkerEpoch(
   const n = parseInt(raw, 10)
   if (Number.isNaN(n)) return null
   return n
+}
+
+/**
+ * densable UFf — stale archived end_session only when worker epoch > 1.
+ * Epoch defaults to 1 when unset (not stale for first worker).
+ */
+export function isStaleArchivedEndSession(
+  reason: string | undefined | null,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const epoch = parseInt(env.CLAUDE_CODE_WORKER_EPOCH ?? '1', 10)
+  return epoch > 1 && reason === 'archived'
+}
+
+/**
+ * densable AJu — index of the last real user message starting this turn
+ * (not meta / toolUseResult / compact summary). Falls back to 0.
+ */
+export function findTurnStartIndex(
+  messages: ReadonlyArray<{
+    type?: string
+    isMeta?: boolean
+    toolUseResult?: unknown
+    isCompactSummary?: boolean
+  }>,
+): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (
+      m?.type === 'user' &&
+      !m.isMeta &&
+      !m.toolUseResult &&
+      !m.isCompactSummary
+    ) {
+      return i
+    }
+  }
+  return 0
+}
+
+/**
+ * densable O6g — true when the main-session user typed `/skillName` this turn.
+ * Subagents always false. Skips meta / command-message wrappers / tool_result
+ * user rows; matches bare `/name` not glued to a preceding non-space char.
+ */
+export function userTypedSkillThisTurn(
+  skillName: string,
+  ctx: {
+    agentId?: string
+    messages: ReadonlyArray<{
+      type?: string
+      isMeta?: boolean
+      message?: { content?: unknown }
+    }>
+    /** densable turnStartIndex; computed via AJu when omitted. */
+    turnStartIndex?: number
+    /** densable NP text extractor override (tests). */
+    getUserText?: (msg: {
+      type?: string
+      message?: { content?: unknown }
+    }) => string | null
+  },
+): boolean {
+  if (ctx.agentId !== undefined) return false
+  const start =
+    ctx.turnStartIndex ?? findTurnStartIndex(ctx.messages as never)
+  const escaped = skillName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`(?:^|\\s)/${escaped}(?=$|\\s)`)
+  for (let i = ctx.messages.length - 1; i >= start; i--) {
+    const m = ctx.messages[i]
+    if (!m || m.type !== 'user' || m.isMeta) continue
+    const content = m.message?.content
+    if (typeof content === 'string') {
+      if (content.includes('<command-message>')) continue
+    } else if (Array.isArray(content)) {
+      if (
+        content.some(
+          (b): b is { type: string } =>
+            typeof b === 'object' &&
+            b !== null &&
+            (b as { type?: string }).type === 'tool_result',
+        )
+      ) {
+        continue
+      }
+    }
+    let text: string | null
+    if (ctx.getUserText) {
+      text = ctx.getUserText(m)
+    } else if (typeof content === 'string') {
+      text = content
+    } else if (Array.isArray(content)) {
+      text =
+        content
+          .filter(
+            (b): b is { type: 'text'; text: string } =>
+              typeof b === 'object' &&
+              b !== null &&
+              (b as { type?: string }).type === 'text' &&
+              typeof (b as { text?: unknown }).text === 'string',
+          )
+          .map(b => b.text)
+          .join('\n')
+          .trim() || null
+    } else {
+      text = null
+    }
+    if (text && re.test(text)) return true
+  }
+  return false
 }
 
 /** Official ENVIRONMENT_RUNNER_VERSION densable — raw string when set. */

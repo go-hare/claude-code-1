@@ -17,6 +17,7 @@ import { parseCellId } from 'src/utils/notebook.js'
 import { checkWritePermissionForTool } from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { jsonParse, jsonStringify } from 'src/utils/slowOperations.js'
+import { stripNotebookEditResultForStorage } from 'src/utils/toolResultStrip.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from './constants.js'
 import { DESCRIPTION, PROMPT } from './prompt.js'
 import {
@@ -92,6 +93,8 @@ export const NotebookEditTool = buildTool({
   searchHint: 'edit Jupyter notebook cells (.ipynb)',
   maxResultSizeChars: 100_000,
   shouldDefer: true,
+  // densable stripForStorage — drop large notebook file payloads from memory.
+  stripForStorage: stripNotebookEditResultForStorage,
   async description() {
     return DESCRIPTION
   },

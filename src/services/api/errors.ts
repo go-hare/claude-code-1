@@ -52,11 +52,21 @@ import { shouldProcessRateLimits } from '../rateLimitMocking.js' // Used for /mo
 import { extractConnectionErrorDetails, formatAPIError } from './errorUtils.js'
 
 export const API_ERROR_MESSAGE_PREFIX = 'API Error'
+/** densable wnu / Anu — AWS auth error prefixes used by h6. */
+export const AWS_CREDENTIALS_EXPIRED_PREFIX =
+  'AWS credentials expired or invalid'
+export const AWS_AUTHENTICATION_FAILED_PREFIX = 'AWS authentication failed'
 
+/**
+ * densable h6 — true when Haiku (or API) returned an error-shaped title
+ * that should not be used as a public GitHub issue title.
+ */
 export function startsWithApiErrorPrefix(text: string): boolean {
   return (
     text.startsWith(API_ERROR_MESSAGE_PREFIX) ||
-    text.startsWith(`Please run /login · ${API_ERROR_MESSAGE_PREFIX}`)
+    text.startsWith(`Please run /login · ${API_ERROR_MESSAGE_PREFIX}`) ||
+    text.startsWith(AWS_CREDENTIALS_EXPIRED_PREFIX) ||
+    text.startsWith(AWS_AUTHENTICATION_FAILED_PREFIX)
   )
 }
 export const PROMPT_TOO_LONG_ERROR_MESSAGE = 'Prompt is too long'

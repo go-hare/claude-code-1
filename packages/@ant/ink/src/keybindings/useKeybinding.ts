@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { InputEvent } from '../core/events/input-event.js'
 import { type Key } from '../core/events/input-event.js'
 import useInput from '../hooks/use-input.js'
@@ -24,6 +24,10 @@ type Options = {
  * Uses stopImmediatePropagation() to prevent other handlers from firing
  * once this binding is handled.
  *
+ * densable En: registry registration uses handler ref + singleKey:true so
+ * ChordInterceptor can invoke without re-register thrash on every render.
+ * Fork still keeps useInput for non-interceptor dispatch (TextInput paths).
+ *
  * @example
  * ```tsx
  * useKeybinding('app:toggleTodos', () => {
@@ -39,11 +43,19 @@ export function useKeybinding(
   const { context = 'Global', isActive = true } = options
   const keybindingContext = useOptionalKeybindingContext()
 
-  // Register handler with the context for ChordInterceptor to invoke
+  // densable En: stable handler ref — register effect deps omit handler
+  const handlerRef = useRef(handler)
+  handlerRef.current = handler
+
   useEffect(() => {
     if (!keybindingContext || !isActive) return
-    return keybindingContext.registerHandler({ action, context, handler })
-  }, [action, context, handler, keybindingContext, isActive])
+    return keybindingContext.registerHandler({
+      action,
+      context,
+      handler: () => handlerRef.current(),
+      singleKey: true,
+    })
+  }, [action, context, keybindingContext, isActive])
 
   const handleInput = useCallback(
     (input: string, key: Key, event: InputEvent) => {
@@ -67,7 +79,7 @@ export function useKeybinding(
           // Chord completed (if any) - clear pending state
           keybindingContext.setPendingChord(null)
           if (result.action === action) {
-            if (handler() !== false) {
+            if (handlerRef.current() !== false) {
               event.stopImmediatePropagation()
             }
           }
@@ -91,7 +103,7 @@ export function useKeybinding(
           break
       }
     },
-    [action, context, handler, keybindingContext],
+    [action, context, keybindingContext],
   )
 
   useInput(handleInput, { isActive })
@@ -102,6 +114,9 @@ export function useKeybinding(
  *
  * Supports chord sequences. When a chord is started, the hook will
  * manage the pending state automatically.
+ *
+ * densable no: re-register only when action key set changes (sorted join),
+ * handlers via ref; singleKey:true for interceptor dispatch.
  *
  * @example
  * ```tsx
@@ -125,14 +140,23 @@ export function useKeybindings(
   const { context = 'Global', isActive = true } = options
   const keybindingContext = useOptionalKeybindingContext()
 
-  // Register all handlers with the context for ChordInterceptor to invoke
+  // densable no: handlers ref + action-key fingerprint
+  const handlersRef = useRef(handlers)
+  handlersRef.current = handlers
+  const actionKeys = Object.keys(handlers).sort().join('|')
+
   useEffect(() => {
     if (!keybindingContext || !isActive) return
 
     const unregisterFns: Array<() => void> = []
-    for (const [action, handler] of Object.entries(handlers)) {
+    for (const action of Object.keys(handlersRef.current)) {
       unregisterFns.push(
-        keybindingContext.registerHandler({ action, context, handler }),
+        keybindingContext.registerHandler({
+          action,
+          context,
+          handler: () => handlersRef.current[action]?.(),
+          singleKey: true,
+        }),
       )
     }
 
@@ -141,7 +165,7 @@ export function useKeybindings(
         unregister()
       }
     }
-  }, [context, handlers, keybindingContext, isActive])
+  }, [context, actionKeys, keybindingContext, isActive])
 
   const handleInput = useCallback(
     (input: string, key: Key, event: InputEvent) => {
@@ -164,8 +188,8 @@ export function useKeybindings(
         case 'match':
           // Chord completed (if any) - clear pending state
           keybindingContext.setPendingChord(null)
-          if (result.action in handlers) {
-            const handler = handlers[result.action]
+          if (result.action in handlersRef.current) {
+            const handler = handlersRef.current[result.action]
             if (handler && handler() !== false) {
               event.stopImmediatePropagation()
             }
@@ -190,7 +214,7 @@ export function useKeybindings(
           break
       }
     },
-    [context, handlers, keybindingContext],
+    [context, keybindingContext],
   )
 
   useInput(handleInput, { isActive })

@@ -33,11 +33,11 @@ type TaskProgressEvent = {
   workflow_progress?: SdkWorkflowProgress[]
 }
 
-// Emitted when a foreground agent completes without being backgrounded.
+// Emitted when a task reaches a terminal state (official lf bookend).
 // Drained by drainSdkEvents() directly into the output stream — does NOT
-// go through the print.ts XML task_notification parser and does NOT trigger
-// the LLM loop. Consumers (e.g. VS Code session.ts) use this to remove the
-// task from the subagent panel.
+// trigger the LLM loop. Official print/headless path is lf-only (no XML→SDK
+// parse). Consumers (e.g. VS Code session.ts) use this to remove the task
+// from the subagent panel.
 type TaskNotificationSdkEvent = {
   type: 'system'
   subtype: 'task_notification'
@@ -74,6 +74,12 @@ export type SdkEvent =
 const MAX_QUEUE_SIZE = 1000
 const queue: SdkEvent[] = []
 
+/**
+ * Official c7c / x4i — once-gate so lf (emitTaskTerminatedSdk) does not
+ * double-bookend the same task_id in one process.
+ */
+const taskTerminatedOnce = new Set<string>()
+
 export function enqueueSdkEvent(event: SdkEvent): void {
   // SDK events are only consumed (drained) in headless/streaming mode.
   // In TUI mode they would accumulate up to the cap and never be read.
@@ -100,16 +106,24 @@ export function drainSdkEvents(): Array<
   }))
 }
 
+/** Official k4i — release once-gate (tests / rare re-open). */
+export function clearTaskTerminatedSdkOnce(taskId?: string): void {
+  if (taskId === undefined) taskTerminatedOnce.clear()
+  else taskTerminatedOnce.delete(taskId)
+}
+
 /**
  * Emit a task_notification SDK event for a task reaching a terminal state.
  *
- * registerTask() always emits task_started; this is the closing bookend.
- * Call this from any exit path that sets a task terminal WITHOUT going
- * through enqueuePendingNotification-with-<task-id> (print.ts parses that
- * XML into the same SDK event, so paths that do both would double-emit).
- * Paths that suppress the XML notification (notified:true pre-set, kill
- * paths, abort branches) must call this directly so SDK consumers
- * (Scuttle's bg-task dot, VS Code subagent panel) see the task close.
+ * Official lf portable — once-gated (c7c). registerTask() always emits
+ * task_started; this is the closing bookend for SDK consumers.
+ * Call from exit paths that set a task terminal (kill, abort, orphan
+ * Hqb/Dqb/kqb multi F$a, adopt fail notify). XML task_notification still
+ * feeds the LLM loop via ask(); it no longer double-constructs SDK events
+ * in print.ts (official lf-only headless bookend).
+ *
+ * @returns true when the once-gate accepted the emit (queued if non-interactive).
+ * Official lf returns void after c7c skip; boolean is portable for tests/callers.
  */
 export function emitTaskTerminatedSdk(
   taskId: string,
@@ -119,8 +133,17 @@ export function emitTaskTerminatedSdk(
     summary?: string
     outputFile?: string
     usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+    /**
+     * When true, skip official c7c once-gate (rare). Default gated.
+     */
+    force?: boolean
   },
-): void {
+): boolean {
+  // Official lf: if (!c7c(e)) return
+  if (!opts?.force) {
+    if (taskTerminatedOnce.has(taskId)) return false
+    taskTerminatedOnce.add(taskId)
+  }
   enqueueSdkEvent({
     type: 'system',
     subtype: 'task_notification',
@@ -131,4 +154,5 @@ export function emitTaskTerminatedSdk(
     summary: opts?.summary ?? '',
     usage: opts?.usage,
   })
+  return true
 }

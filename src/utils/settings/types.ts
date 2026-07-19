@@ -276,6 +276,13 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Command to refresh GCP authentication (e.g., gcloud auth application-default login)',
         ),
+      // densable processWrapper — corporate launcher argv prefix (settings → env).
+      processWrapper: z
+        .string()
+        .optional()
+        .describe(
+          'Corporate launcher argv prefix for the background-agent supervisor, the sessions and workers it hosts, and the other covered background processes listed in the Claude Code corporate-launcher documentation. Equivalent to the CLAUDE_CODE_PROCESS_WRAPPER environment variable, which takes precedence when set. Honored from managed settings, a --settings/SDK-supplied settings file, and user settings, in that precedence order; project and local settings are ignored.',
+        ),
       // Gated so the SDK generator (which runs without CLAUDE_CODE_ENABLE_XAA)
       // doesn't surface this in GlobalClaudeSettings. Read via getXaaIdpSettings().
       // .passthrough() on the outer object keeps an existing settings.json key
@@ -328,6 +335,68 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Number of days to retain chat transcripts (default: 30). Setting to 0 disables session persistence entirely: no transcripts are written and existing transcripts are deleted at startup.',
+        ),
+      // densable skillListingMaxDescChars (Hpg default 1536)
+      skillListingMaxDescChars: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Per-skill description character cap in the skill listing sent to Claude (default: 1536). Descriptions longer than this are truncated. Raise to opt in to higher per-turn context cost.',
+        ),
+      // densable footerLinksRegexes (user/flag/policy only)
+      footerLinksRegexes: z
+        .array(
+          z.union([
+            z
+              .object({
+                type: z
+                  .literal('regex')
+                  .describe(
+                    'Config variant. This client understands "regex": matches turn output and builds a URL from named capture groups. Entries with other variants are preserved but skipped at runtime.',
+                  ),
+                pattern: z
+                  .string()
+                  .describe(
+                    'Regex matched against turn output (tool results and assistant text)',
+                  ),
+                url: z
+                  .string()
+                  .describe(
+                    'Link target. {name} placeholders are filled from named regex capture groups, e.g. (?<id>...) -> {id}. Values are URL-encoded; the origin must be literal in the template. The scheme must be https, http, or a recognized editor or workspace deep-link scheme: vscode, vscode-insiders, cursor, windsurf, zed, jetbrains, idea, slack, linear, notion, figma.',
+                  ),
+                label: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Badge text. {name} placeholders filled from named capture groups; defaults to the full match.',
+                  ),
+              })
+              .passthrough(),
+            z
+              .object({
+                type: z
+                  .string()
+                  .describe(
+                    'Config variant discriminator for entries this client does not understand; the entry is preserved as-is and skipped at runtime.',
+                  ),
+              })
+              .passthrough(),
+          ]),
+        )
+        .optional()
+        .describe(
+          'Extra clickable footer badges that appear when a regex matches turn output (tool results and assistant responses). Read from user, flag, and managed settings only; ignored in project .claude/settings.json and local .claude/settings.local.json. At most 5 badges render; the oldest is displaced by newer matches and /clear removes them. Use to surface IDs printed by project CLIs as session links.',
+        ),
+      // densable skillListingBudgetFraction (kpg default 0.01)
+      skillListingBudgetFraction: z
+        .number()
+        .gt(0)
+        .lte(1)
+        .optional()
+        .describe(
+          'Fraction of the context window (in characters) reserved for the skill listing sent to Claude (default: 0.01 = 1%). When the listing exceeds this, descriptions are shortened to fit. Raise to opt in to higher per-turn context cost.',
         ),
       env: EnvironmentVariablesSchema()
         .optional()
@@ -688,6 +757,13 @@ export const SettingsSchema = lazySchema(() =>
             'Composes with strictKnownMarketplaces for end-to-end admin control — plugins gated by ' +
             'marketplace allowlist, everything else blocked here.',
         ),
+      // densable prUrlTemplate — rewrite PR badge / footer-link URLs.
+      prUrlTemplate: z
+        .string()
+        .optional()
+        .describe(
+          'URL template for PR links in the footer link badges and inline messages. The detected git PR is rendered as the first footer-link badge. Placeholders: {host} {owner} {repo} {number} {url}. Example: "https://reviews.example.com/{owner}/{repo}/pull/{number}"',
+        ),
       // Status line for custom status line display
       statusLine: z
         .object({
@@ -705,6 +781,17 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Whether to render the fork built-in status line (model + ctx + 5h/7d limits + cost + cache pill). Toggled with /statusline.',
+        ),
+      // densable subagentStatusLine — per-subagent status line for agent panel rows.
+      // Receives row context as JSON on stdin; emits NDJSON {id, content} lines.
+      subagentStatusLine: z
+        .object({
+          type: z.literal('command'),
+          command: z.string(),
+        })
+        .optional()
+        .describe(
+          'Custom per-subagent status line shown in the agent panel; receives row context as JSON on stdin',
         ),
       // Enabled plugins using marketplace-first format
       enabledPlugins: z
@@ -791,6 +878,15 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Controls the output style for assistant responses'),
+      /**
+       * densable viewMode — default transcript view on startup.
+       * `focus` mirrors AppState.briefTranscript via J7t residual.
+       */
+      viewMode: z
+        .enum(['default', 'verbose', 'focus'])
+        .optional()
+        .catch(undefined)
+        .describe('Default transcript view mode on startup'),
       language: z
         .string()
         .optional()
@@ -928,6 +1024,42 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .catch(undefined)
         .describe('Persisted effort level for supported models.'),
+      /**
+       * densable ultracode — session-scoped in practice (apply_flag_settings /
+       * --settings). Standing xhigh + dynamic-workflow orchestration.
+       * Interactive toggles never persist it (densable schema note).
+       */
+      ultracode: z
+        .boolean()
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Enable ultracode for the session: xhigh effort plus standing ' +
+            'dynamic-workflow orchestration. Session-scoped — typically via ' +
+            '--settings or apply_flag_settings; interactive toggles never persist it.',
+        ),
+      /**
+       * densable autoCompactWindow — token window for auto-compact (1e5–1e6).
+       * Session may also set via apply_flag_settings into AppState.
+       */
+      autoCompactWindow: z
+        .number()
+        .int()
+        .min(100_000)
+        .max(1_000_000)
+        .optional()
+        .catch(undefined)
+        .describe('Auto-compact window size'),
+      /**
+       * densable briefTranscript — focus-view transcript preference (settings).
+       * AppState.briefTranscript mirrors session toggles via Xat.
+       */
+      briefTranscript: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, focus-style brief transcript view is preferred.',
+        ),
       advisorModel: z
         .string()
         .optional()

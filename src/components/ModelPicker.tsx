@@ -42,7 +42,19 @@ import { effortLevelToSymbol } from './EffortIndicator.js';
 export type Props = {
   initial: string | null;
   sessionModel?: ModelSetting;
-  onSelect: (model: string | null, effort: EffortLevel | undefined) => void;
+  /**
+   * densable onSelect / fk_ — apply model for the current session.
+   * `asDefault` is true when Enter should also persist as default;
+   * false for `s` thisSessionOnly or when enableThisSessionOnly is off.
+   * Parent owns settings writes so Fable consent can gate both paths.
+   */
+  onSelect: (model: string | null, effort: EffortLevel | undefined, asDefault?: boolean) => void;
+  /**
+   * densable dual-mode picker (apt present): Enter → asDefault=true,
+   * `s` → thisSessionOnly (asDefault=false). When false/omitted, Enter is
+   * session-only and `s` is a no-op (PromptInput hotkey / skipSettingsWrite).
+   */
+  enableThisSessionOnly?: boolean;
   onCancel?: () => void;
   isStandaloneCommand?: boolean;
   showFastModeNotice?: boolean;
@@ -53,6 +65,7 @@ export type Props = {
    * Used by the assistant installer wizard where the model choice is
    * project-scoped (written to the assistant's .claude/settings.json via
    * install.ts) and should not leak to the user's global ~/.claude/settings.
+   * densable $mr — also disables modelPicker:thisSessionOnly.
    */
   skipSettingsWrite?: boolean;
 };
@@ -63,6 +76,7 @@ export function ModelPicker({
   initial,
   sessionModel,
   onSelect,
+  enableThisSessionOnly = false,
   onCancel,
   isStandaloneCommand,
   showFastModeNotice,
@@ -72,6 +86,8 @@ export function ModelPicker({
   const setAppState = useSetAppState();
   const exitState = useExitOnCtrlCDWithKeybindings();
   const maxVisible = 10;
+  // densable: thisSessionOnly (`s`) only when dual-mode and not skipSettingsWrite ($mr).
+  const canThisSessionOnly = enableThisSessionOnly && !skipSettingsWrite;
 
   const initialValue = initial === null ? NO_PREFERENCE : initial;
   const [focusedValue, setFocusedValue] = useState<string | undefined>(initialValue);
@@ -183,53 +199,79 @@ export function ModelPicker({
     [focusedSupportsEffort, focusedSupportsXhigh, focusedSupportsMax, focusedDefaultEffort],
   );
 
+  /**
+   * densable Dan — resolve effort + [1m], then onSelect(asDefault).
+   * Parent owns model default persistence (after Fable consent if needed).
+   */
+  const applyFocusedModel = useCallback(
+    (value: string, asDefault: boolean): void => {
+      logEvent('tengu_model_command_menu_effort', {
+        effort: effort as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      if (!skipSettingsWrite) {
+        // Prior comes from userSettings on disk — NOT merged settings (which
+        // includes project/policy layers that must not leak into the user's
+        // global ~/.claude/settings.json), and NOT AppState.effortValue (which
+        // includes session-ephemeral sources like --effort CLI flag).
+        // See resolvePickerEffortPersistence JSDoc.
+        const effortLevel = resolvePickerEffortPersistence(
+          effort,
+          getDefaultEffortLevelForOption(value),
+          getSettingsForSource('userSettings')?.effortLevel,
+          hasToggledEffort,
+        );
+        const persistable = toPersistableEffort(effortLevel);
+        if (persistable !== undefined) {
+          updateSettingsForSource('userSettings', { effortLevel: persistable });
+        }
+        setAppState(prev => ({ ...prev, effortValue: effortLevel }));
+      }
+
+      const selectedModel = resolveOptionModel(value);
+      const selectedEffort =
+        hasToggledEffort && selectedModel && modelSupportsEffort(selectedModel) ? effort : undefined;
+      let finalModel: string | null;
+      if (value === NO_PREFERENCE) {
+        finalModel = null;
+      } else {
+        // Apply or strip [1m] suffix based on user toggle. marked1MValues is keyed
+        // on the base value (see initializer + handleToggle1M), so look up with the
+        // base form — not `value`, which may carry a `[1m]` suffix from predefined
+        // 1M options and would never match.
+        const baseValue = value.replace(/\[1m\]/i, '');
+        const wants1M = marked1MValues.has(baseValue);
+        finalModel = wants1M ? `${baseValue}[1m]` : baseValue;
+      }
+
+      onSelect(finalModel, selectedEffort, asDefault);
+    },
+    [effort, hasToggledEffort, marked1MValues, onSelect, setAppState, skipSettingsWrite],
+  );
+
+  const handleSelect = useCallback(
+    (value: string): void => {
+      // Select onChange (Enter) — densable apt path when dual-mode
+      applyFocusedModel(value, canThisSessionOnly);
+    },
+    [applyFocusedModel, canThisSessionOnly],
+  );
+
+  const handleThisSessionOnly = useCallback(() => {
+    // densable: if(!apt||Ebe===void 0) return; if($mr) return; Dan(Ebe)
+    if (!canThisSessionOnly) return;
+    if (focusedValue === undefined) return;
+    applyFocusedModel(focusedValue, false);
+  }, [applyFocusedModel, canThisSessionOnly, focusedValue]);
+
   useKeybindings(
     {
       'modelPicker:decreaseEffort': () => handleCycleEffort('left'),
       'modelPicker:increaseEffort': () => handleCycleEffort('right'),
       'modelPicker:toggle1M': () => handleToggle1M(),
+      'modelPicker:thisSessionOnly': handleThisSessionOnly,
     },
     { context: 'ModelPicker' },
   );
-
-  function handleSelect(value: string): void {
-    logEvent('tengu_model_command_menu_effort', {
-      effort: effort as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    });
-    if (!skipSettingsWrite) {
-      // Prior comes from userSettings on disk — NOT merged settings (which
-      // includes project/policy layers that must not leak into the user's
-      // global ~/.claude/settings.json), and NOT AppState.effortValue (which
-      // includes session-ephemeral sources like --effort CLI flag).
-      // See resolvePickerEffortPersistence JSDoc.
-      const effortLevel = resolvePickerEffortPersistence(
-        effort,
-        getDefaultEffortLevelForOption(value),
-        getSettingsForSource('userSettings')?.effortLevel,
-        hasToggledEffort,
-      );
-      const persistable = toPersistableEffort(effortLevel);
-      if (persistable !== undefined) {
-        updateSettingsForSource('userSettings', { effortLevel: persistable });
-      }
-      setAppState(prev => ({ ...prev, effortValue: effortLevel }));
-    }
-
-    const selectedModel = resolveOptionModel(value);
-    const selectedEffort = hasToggledEffort && selectedModel && modelSupportsEffort(selectedModel) ? effort : undefined;
-    if (value === NO_PREFERENCE) {
-      onSelect(null, selectedEffort);
-      return;
-    }
-    // Apply or strip [1m] suffix based on user toggle. marked1MValues is keyed
-    // on the base value (see initializer + handleToggle1M), so look up with the
-    // base form — not `value`, which may carry a `[1m]` suffix from predefined
-    // 1M options and would never match.
-    const baseValue = value.replace(/\[1m\]/i, '');
-    const wants1M = marked1MValues.has(baseValue);
-    const finalValue = wants1M ? `${baseValue}[1m]` : baseValue;
-    onSelect(finalValue, selectedEffort);
-  }
 
   const content = (
     <Box flexDirection="column">
@@ -240,7 +282,9 @@ export function ModelPicker({
           </Text>
           <Text dimColor>
             {headerText ??
-              'Choose a model for this and future sessions. Use ← → to adjust effort, Space to toggle 1M context.'}
+              (canThisSessionOnly
+                ? 'Switch between Claude models. Your pick becomes the default for new sessions. Press s for this session only.'
+                : 'Choose a model for this and future sessions. Use ← → to adjust effort, Space to toggle 1M context.')}
           </Text>
           {sessionModel && (
             <Text dimColor>
@@ -319,7 +363,15 @@ export function ModelPicker({
             <>Press {exitState.keyName} again to exit</>
           ) : (
             <Byline>
-              <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+              <KeyboardShortcutHint shortcut="Enter" action={canThisSessionOnly ? 'set as default' : 'confirm'} />
+              {canThisSessionOnly && (
+                <ConfigurableShortcutHint
+                  action="modelPicker:thisSessionOnly"
+                  context="ModelPicker"
+                  fallback="s"
+                  description="this session only"
+                />
+              )}
               <ConfigurableShortcutHint action="select:cancel" context="Select" fallback="Esc" description="exit" />
             </Byline>
           )}
