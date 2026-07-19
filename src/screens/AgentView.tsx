@@ -1278,10 +1278,10 @@ function AgentViewApp({
     <AlternateScreen
       mouseTracking={(() => {
         try {
-          const { isMouseTrackingEnabled } =
+          const { mouseTrackingProp } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             require('../utils/fullscreen.js') as typeof import('../utils/fullscreen.js');
-          return isMouseTrackingEnabled();
+          return mouseTrackingProp();
         } catch {
           return !process.env.CLAUDE_CODE_DISABLE_MOUSE;
         }

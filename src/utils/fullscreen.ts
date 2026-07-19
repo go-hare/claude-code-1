@@ -329,7 +329,7 @@ export function resolveMouseTrackingMode(
 }
 
 /**
- * Whether fullscreen mode should enable SGR mouse tracking (DEC 1000/1002/1006).
+ * Whether fullscreen mode should enable any SGR mouse tracking.
  * Set CLAUDE_CODE_DISABLE_MOUSE=1 to keep alt-screen + virtualized scroll
  * (keyboard PgUp/PgDn/Ctrl+Home/End still work) but skip mouse capture,
  * so tmux/kitty/terminal-native copy-on-select keeps working.
@@ -341,6 +341,17 @@ export function isMouseTrackingEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return resolveMouseTrackingMode(env) !== 'off'
+}
+
+/**
+ * densable mode string for `<AlternateScreen mouseTracking={...}>`.
+ * Prefer this over `isMouseTrackingEnabled()` so "scroll" can enable
+ * 1000+1006 only (no 1002/1003 any-motion flood on Apple Terminal).
+ */
+export function mouseTrackingProp(
+  env: NodeJS.ProcessEnv = process.env,
+): MouseTrackingMode {
+  return resolveMouseTrackingMode(env)
 }
 
 /**

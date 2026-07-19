@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   isMouseClicksDisabled,
   isMouseTrackingEnabled,
+  mouseTrackingProp,
   resolveMouseTrackingMode,
 } from '../fullscreen.js'
 
@@ -10,6 +11,7 @@ describe('resolveMouseTrackingMode Lfe densable', () => {
     expect(resolveMouseTrackingMode({})).toBe('full')
     expect(isMouseTrackingEnabled({})).toBe(true)
     expect(isMouseClicksDisabled({})).toBe(false)
+    expect(mouseTrackingProp({})).toBe('full')
   })
 
   test('DISABLE_MOUSE truthy → off', () => {
@@ -20,6 +22,7 @@ describe('resolveMouseTrackingMode Lfe densable', () => {
       false,
     )
     expect(isMouseClicksDisabled({ CLAUDE_CODE_DISABLE_MOUSE: '1' })).toBe(true)
+    expect(mouseTrackingProp({ CLAUDE_CODE_DISABLE_MOUSE: '1' })).toBe('off')
   })
 
   test('DISABLE_MOUSE falsy → full', () => {
@@ -38,6 +41,10 @@ describe('resolveMouseTrackingMode Lfe densable', () => {
     expect(
       isMouseClicksDisabled({ CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }),
     ).toBe(true)
+    // scroll mode must reach AlternateScreen so only 1000+1006 are enabled
+    expect(mouseTrackingProp({ CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' })).toBe(
+      'scroll',
+    )
   })
 
   test('DISABLE_MOUSE wins over CLICKS', () => {

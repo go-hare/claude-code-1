@@ -67,11 +67,18 @@ export function keyFromKeyboardEvent(e: KeyboardEvent): Key {
 }
 
 /**
- * Official insert payload for main prompt:
- *   if (q.key.length >= 1 && !tS_.has(q.name)) insert(q.key)
+ * Official densable 2.1.211 main-prompt insert (handleKeyDown `$`):
+ *   if (B.key.length >= 1 && !OC_.has(B.name)) insert(B.key)
+ * where OC_ = pageup/pagedown/insert/wheelup/wheeldown/mouse/clear/enter/f1…f12.
  *
- * Plus name==="enter" → "\n" so multiline path matches densable sji/handleKeyDown.
- * Named functional keys (return/tab/arrows/…) yield "" — mapKey handles them.
+ * Official does NOT apply `[...key].length===1` on this path (that gate is only
+ * in the legacy InputEvent/`sji` adapter). Multi-char batches (IME / paste-as-
+ * key under PASTE_THRESHOLD) insert whole `e.key`. Mouse residue is emptied
+ * earlier by KeyboardEvent fag (pure orphan SGR) + parse-keypress peel /
+ * incomplete buffer — official densable has no residual-regex sinks beyond fag.
+ *
+ * Plus name==="enter" → "\n" for multiline (official handleKeyDown enter branch).
+ * Named edit/nav keys yield "" — mapKey handles them.
  */
 export function insertInputFromKeyboardEvent(e: KeyboardEvent): string {
   if (e.name === 'enter') return '\n'
@@ -92,7 +99,18 @@ export function insertInputFromKeyboardEvent(e: KeyboardEvent): string {
   ) {
     return ''
   }
+  // Official: B.key.length>=1 && !OC_.has(B.name)
   if (e.key.length >= 1 && !FUNCTIONAL_KEY_NAMES.has(e.name)) {
+    // Env-gated residual diagnostics: which tokens still reach insert().
+    // Set CLAUDE_CODE_DEBUG_MOUSE_RESIDUE=1 while reproducing scroll-over-input.
+    if (
+      process.env.CLAUDE_CODE_DEBUG_MOUSE_RESIDUE === '1' ||
+      process.env.CLAUDE_CODE_DEBUG_MOUSE_RESIDUE === 'true'
+    ) {
+      process.stderr.write(
+        `[mouse-residue] insert key=${JSON.stringify(e.key)} name=${JSON.stringify(e.name)} seq=${JSON.stringify(e.sequence)}\n`,
+      )
+    }
     return e.key
   }
   return ''

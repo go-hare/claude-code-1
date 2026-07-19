@@ -163,6 +163,9 @@ export {
   HIDE_CURSOR,
   ENTER_ALT_SCREEN,
   ENABLE_MOUSE_TRACKING,
+  ENABLE_MOUSE_TRACKING_SCROLL,
+  enableMouseTracking,
+  type MouseTrackingMode,
 } from './core/termio/dec.js'
 export { default as instances } from './core/instances.js'
 export {
