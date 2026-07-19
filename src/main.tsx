@@ -3598,6 +3598,8 @@ async function run(): Promise<CommanderCommand> {
       const initialState: AppState = {
         settings: getInitialSettings(),
         tasks: {},
+        // densable taskDecorations — filled by useSubagentStatusLine.
+        taskDecorations: {},
         agentNameRegistry: new Map(),
         verbose: verbose ?? getGlobalConfig().verbose ?? false,
         mainLoopModel: initialMainLoopModel,
@@ -3612,6 +3614,25 @@ async function run(): Promise<CommanderCommand> {
         selectedIPAgentIndex: -1,
         selectedBgAgentIndex: -1,
         coordinatorTaskIndex: -1,
+        // densable idleTeammatesExpanded — G7 idle_summary collapse (cIa=3).
+        idleTeammatesExpanded: false,
+        // densable Xat residual — seed briefTranscript from viewMode/settings.
+        // densable: briefTranscript: B ? false : j  (verbose wins over J7t focus seed)
+        // Also mirrors into setSessionBriefTranscript (EYc) for prompts/settings.
+        briefTranscript: (() => {
+          const s = getInitialSettings();
+          // Lazy require avoids circular import at module init.
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { isFocusViewActive, setSessionBriefTranscript } =
+            require('./utils/focusView.js') as typeof import('./utils/focusView.js');
+          if (verbose === true) {
+            setSessionBriefTranscript(false);
+            return false;
+          }
+          const j = isFocusViewActive(s.viewMode, s.briefTranscript);
+          setSessionBriefTranscript(j);
+          return j;
+        })(),
         viewSelectionMode: 'none',
         footerSelection: null,
         toolPermissionContext: effectiveToolPermissionContext,
@@ -4605,7 +4626,16 @@ async function run(): Promise<CommanderCommand> {
             process.stdin.ref();
           }
           const { openAgentsViaLeftArrow } = await import('./cli/bg/leftArrowAgents.js');
-          const handoff = await openAgentsViaLeftArrow(replResult.messages);
+          // Official aAf: forward full left-arrow payload (via/partial/boundary/checkpoint).
+          const handoff = await openAgentsViaLeftArrow(replResult.messages, {
+            via: replResult.via,
+            partialText: replResult.partialText,
+            boundaryUuid: replResult.boundaryUuid,
+            agentsCount: replResult.agentsCount,
+            checkpoint: replResult.checkpoint,
+            sessionPermissionRules: replResult.sessionPermissionRules,
+            memoryToggledOff: replResult.memoryToggledOff,
+          });
           const { renderAgentView } = await import('./screens/AgentView.js');
           if (!handoff.ok) {
             process.stderr.write(`${handoff.error}\n`);

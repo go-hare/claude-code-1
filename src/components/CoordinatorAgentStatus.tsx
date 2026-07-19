@@ -9,40 +9,97 @@
 import figures from 'figures';
 import * as React from 'react';
 import { BLACK_CIRCLE, PAUSE_ICON, PLAY_ICON } from '../constants/figures.js';
+import { useSubagentStatusLine } from '../hooks/useSubagentStatusLine.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, stringWidth, wrapText } from '@anthropic/ink';
+import { Ansi, Box, Text, stringWidth, wrapText } from '@anthropic/ink';
 import { type AppState, useAppState, useSetAppState } from '../state/AppState.js';
 import { enterTeammateView, exitTeammateView } from '../state/teammateViewHelpers.js';
-import { isPanelAgentTask, type LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js';
+import { type LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js';
+import { isInProcessTeammateTask } from '../tasks/InProcessTeammateTask/types.js';
 import { formatDuration, formatNumber } from '../utils/format.js';
+import {
+  collapseIdlePanelRows,
+  idleSummaryLabel,
+  isIdleSummaryRow,
+  isPanelListTask,
+  type PanelAgentTask,
+  type PanelListItem,
+} from '../utils/panelIdleSummary.js';
 import { evictTerminalTask } from '../utils/task/framework.js';
 import { isTerminalStatus } from './tasks/taskStatusUtils.js';
 
 /**
- * Which panel-managed tasks currently have a visible row.
+ * densable UQ + cAb residual — panel-managed tasks currently visible.
  * Presence in AppState.tasks IS visibility — the 1s tick in
  * CoordinatorTaskPanel evicts tasks past their evictAfter deadline. The
  * evictAfter !== 0 check handles immediate dismiss (x key) without making
  * the filter time-dependent. Shared by panel render, useCoordinatorTaskCount,
  * and index resolvers so the math can't drift.
+ *
+ * densable UQ = local_agent (non-main) OR in_process_teammate.
  */
-export function getVisibleAgentTasks(tasks: AppState['tasks']): LocalAgentTaskState[] {
+export function getVisibleAgentTasks(tasks: AppState['tasks']): PanelAgentTask[] {
   return Object.values(tasks)
-    .filter((t): t is LocalAgentTaskState => isPanelAgentTask(t) && t.evictAfter !== 0)
+    .filter((t): t is PanelAgentTask => isPanelListTask(t))
     .sort((a, b) => a.startTime - b.startTime);
+}
+
+/**
+ * densable G7 empty-decoration filter: when a task has decoration.content === "",
+ * hide the panel row (status-line command explicitly blanked the agent).
+ * Missing decoration (undefined) keeps the row visible with default body.
+ */
+export function filterTasksByDecorationContent(
+  tasks: PanelAgentTask[],
+  decorations: AppState['taskDecorations'] | undefined,
+): PanelAgentTask[] {
+  if (!decorations) return tasks;
+  return tasks.filter(t => decorations[t.id]?.content !== '');
+}
+
+/** densable G7 base: visible panel tasks with empty decoration content removed. */
+export function getPanelVisibleAgentTasks(
+  tasks: AppState['tasks'],
+  decorations?: AppState['taskDecorations'],
+): PanelAgentTask[] {
+  return filterTasksByDecorationContent(getVisibleAgentTasks(tasks), decorations);
+}
+
+/**
+ * densable G7 full panel list: decoration filter + optional idle_summary collapse
+ * when idleTeammatesExpanded is false (cIa=3).
+ */
+export function getPanelListItems(
+  tasks: AppState['tasks'],
+  decorations?: AppState['taskDecorations'],
+  opts?: {
+    idleTeammatesExpanded?: boolean;
+    viewingAgentTaskId?: string;
+  },
+): PanelListItem[] {
+  const base = getPanelVisibleAgentTasks(tasks, decorations);
+  return collapseIdlePanelRows(base, opts?.idleTeammatesExpanded ?? false, opts?.viewingAgentTaskId);
 }
 
 export function CoordinatorTaskPanel(): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const agentNameRegistry = useAppState(s => s.agentNameRegistry);
+  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
   const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
   const tasksSelected = useAppState(s => s.footerSelection === 'tasks');
   const selectedIndex = tasksSelected ? coordinatorTaskIndex : undefined;
   const setAppState = useSetAppState();
 
-  const visibleTasks = getVisibleAgentTasks(tasks);
-  const hasTasks = Object.values(tasks).some(isPanelAgentTask);
+  // densable wHa — poll subagentStatusLine → taskDecorations.
+  useSubagentStatusLine();
+
+  const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
+  const visibleTasks = getPanelListItems(tasks, taskDecorations, {
+    idleTeammatesExpanded,
+    viewingAgentTaskId,
+  });
+  const hasTasks = Object.values(tasks).some(isPanelListTask);
 
   // 1s tick: re-render for elapsed time + evict tasks past their deadline.
   // The eviction deletes from prev.tasks, which makes useCoordinatorTaskCount
@@ -56,7 +113,7 @@ export function CoordinatorTaskPanel(): React.ReactNode {
       (tasksRef, setAppState, setTick) => {
         const now = Date.now();
         for (const t of Object.values(tasksRef.current)) {
-          if (isPanelAgentTask(t) && (t.evictAfter ?? Infinity) <= now) {
+          if (isPanelListTask(t) && (t.evictAfter ?? Infinity) <= now) {
             evictTerminalTask(t.id, setAppState);
           }
         }
@@ -86,16 +143,28 @@ export function CoordinatorTaskPanel(): React.ReactNode {
         isViewed={viewingAgentTaskId === undefined}
         onClick={() => exitTeammateView(setAppState)}
       />
-      {visibleTasks.map((task, i) => (
-        <AgentLine
-          key={task.id}
-          task={task}
-          name={nameByAgentId.get(task.id)}
-          isSelected={selectedIndex === i + 1}
-          isViewed={viewingAgentTaskId === task.id}
-          onClick={() => enterTeammateView(task.id, setAppState)}
-        />
-      ))}
+      {visibleTasks.map((row, i) =>
+        isIdleSummaryRow(row) ? (
+          <IdleSummaryLine
+            key={row.id}
+            count={row.taskIds.length}
+            isSelected={selectedIndex === i + 1}
+            onClick={() =>
+              setAppState(prev => (prev.idleTeammatesExpanded ? prev : { ...prev, idleTeammatesExpanded: true }))
+            }
+          />
+        ) : (
+          <AgentLine
+            key={row.id}
+            task={row}
+            name={isInProcessTeammateTask(row) ? row.identity.agentName : nameByAgentId.get(row.id)}
+            decoration={taskDecorations[row.id]}
+            isSelected={selectedIndex === i + 1}
+            isViewed={viewingAgentTaskId === row.id}
+            onClick={() => enterTeammateView(row.id, setAppState)}
+          />
+        ),
+      )}
     </Box>
   );
 }
@@ -107,11 +176,41 @@ export function CoordinatorTaskPanel(): React.ReactNode {
  */
 export function useCoordinatorTaskCount(): number {
   const tasks = useAppState(s => s.tasks);
+  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
+  const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
+  const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   return React.useMemo(() => {
     if ((process.env.USER_TYPE as string) !== 'ant') return 0;
-    const count = getVisibleAgentTasks(tasks).length;
+    const count = getPanelListItems(tasks, taskDecorations, {
+      idleTeammatesExpanded,
+      viewingAgentTaskId,
+    }).length;
     return count > 0 ? count + 1 : 0;
-  }, [tasks]);
+  }, [tasks, taskDecorations, idleTeammatesExpanded, viewingAgentTaskId]);
+}
+
+/** densable _rf — collapsed idle agents summary row. */
+function IdleSummaryLine({
+  count,
+  isSelected,
+  onClick,
+}: {
+  count: number;
+  isSelected?: boolean;
+  onClick: () => void;
+}): React.ReactNode {
+  const [hover, setHover] = React.useState(false);
+  const highlighted = isSelected || hover;
+  const prefix = highlighted ? figures.pointer + ' ' : '  ';
+  const dim = !highlighted;
+  return (
+    <Box onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <Text dimColor={dim}>
+        {prefix}
+        {figures.circle} {idleSummaryLabel(count)}
+      </Text>
+    </Box>
+  );
 }
 
 function MainLine({
@@ -137,33 +236,47 @@ function MainLine({
 }
 
 type AgentLineProps = {
-  task: LocalAgentTaskState;
+  task: PanelAgentTask;
   name?: string;
+  /** densable taskDecorations[id] — custom status content replaces default row body. */
+  decoration?: { content: string };
   isSelected?: boolean;
   isViewed?: boolean;
   onClick?: () => void;
 };
 
-function AgentLine({ task, name, isSelected, isViewed, onClick }: AgentLineProps): React.ReactNode {
+function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: AgentLineProps): React.ReactNode {
   const { columns } = useTerminalSize();
   const [hover, setHover] = React.useState(false);
-  const isRunning = !isTerminalStatus(task.status);
-  const pausedMs = task.totalPausedMs ?? 0;
+  const isTeammate = isInProcessTeammateTask(task);
+  const isIdleTeammate = isTeammate && task.isIdle;
+  const isRunning = !isTerminalStatus(task.status) && !isIdleTeammate;
+  const pausedMs = (task as LocalAgentTaskState).totalPausedMs ?? 0;
   const elapsedMs = Math.max(
     0,
     isRunning ? Date.now() - task.startTime - pausedMs : (task.endTime ?? task.startTime) - task.startTime - pausedMs,
   );
 
-  const elapsed = formatDuration(elapsedMs);
+  // densable pAb: idle teammate shows "idle" instead of duration.
+  const elapsed = isIdleTeammate
+    ? 'idle'
+    : isTeammate && task.awaitingPlanApproval && task.status === 'running'
+      ? 'awaiting approval'
+      : formatDuration(elapsedMs);
   const tokenCount = task.progress?.tokenCount;
 
   // Derive direction arrow from activity state, same logic as Spinner
   const lastActivity = task.progress?.lastActivity;
   const arrow = lastActivity ? figures.arrowDown : figures.arrowUp;
 
-  const tokenText = tokenCount !== undefined && tokenCount > 0 ? ` · ${arrow} ${formatNumber(tokenCount)} tokens` : '';
+  const tokenText =
+    !isIdleTeammate && tokenCount !== undefined && tokenCount > 0
+      ? ` · ${arrow} ${formatNumber(tokenCount)} tokens`
+      : '';
 
-  const queuedCount = task.pendingMessages.length;
+  const queuedCount = isTeammate
+    ? task.pendingUserMessages.length
+    : (task as LocalAgentTaskState).pendingMessages.length;
   const queuedText = queuedCount > 0 ? ` · ${queuedCount} queued` : '';
 
   // Precedence: AI summary > static description (no tool-call activity noise)
@@ -184,6 +297,35 @@ function AgentLine({ task, name, isSelected, isViewed, onClick }: AgentLineProps
   const availableForDesc =
     columns - stringWidth(prefix) - stringWidth(`${bullet} `) - stringWidth(namePart) - stringWidth(suffixPart);
   const truncated = wrapText(displayDescription, Math.max(0, availableForDesc), 'truncate-end');
+
+  // densable yrf: when decoration.content is set, replace name+desc+status with Ansi content.
+  if (decoration?.content !== undefined) {
+    const gutter = (
+      <Text dimColor={dim} bold={isViewed}>
+        {prefix}
+        {bullet}{' '}
+      </Text>
+    );
+    const body = (
+      <Box flexGrow={1} width={0}>
+        <Text dimColor={dim} bold={isViewed} wrap="truncate">
+          <Ansi>{decoration.content}</Ansi>
+        </Text>
+      </Box>
+    );
+    const row = (
+      <Box>
+        <Box flexShrink={0}>{gutter}</Box>
+        {body}
+      </Box>
+    );
+    if (!onClick) return row;
+    return (
+      <Box onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+        {row}
+      </Box>
+    );
+  }
 
   const line = (
     <Text dimColor={dim} bold={isViewed}>

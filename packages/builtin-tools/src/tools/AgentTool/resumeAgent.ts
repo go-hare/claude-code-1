@@ -42,6 +42,12 @@ export type ResumeAgentResult = {
   agentId: string
   description: string
   outputFile: string
+  /**
+   * Official Aye alreadyCompleted — when continueInterruptedTurn and the
+   * sidechain already ends on an assistant turn ($co false), skip re-run
+   * and only report completion (orphan EAf path).
+   */
+  alreadyCompleted?: boolean
 }
 export async function resumeAgentBackground({
   agentId,
@@ -49,13 +55,28 @@ export async function resumeAgentBackground({
   toolUseContext,
   canUseTool,
   invokingRequestId,
+  continueInterruptedTurn,
+  promptIsMeta,
 }: {
   agentId: string
   prompt: string
   toolUseContext: ToolUseContext
   canUseTool: CanUseToolFn
   invokingRequestId?: string
+  /**
+   * Official Aye `continueInterruptedTurn` (orphan auto-resume / send-message
+   * resume). When true and the filtered transcript is already complete
+   * (ends on assistant), return alreadyCompleted without spawning.
+   * Also densable: skip re-appending the resume prompt to promptMessages.
+   */
+  continueInterruptedTurn?: boolean
+  /**
+   * Official Aye `promptIsMeta` (n) — reserved for call-site parity when the
+   * resume prompt is already on the sidechain.
+   */
+  promptIsMeta?: boolean
 }): Promise<ResumeAgentResult> {
+  void promptIsMeta
   const startTime = Date.now()
   const appState = toolUseContext.getAppState()
   // In-process teammates get a no-op setAppState; setAppStateForTasks
@@ -71,11 +92,68 @@ export async function resumeAgentBackground({
   if (!transcript) {
     throw new Error(`No transcript found for agent ID: ${agentId}`)
   }
+
+  // Official Aye: P = continueInterruptedTurn ? LVr(messages) : messages
+  // then O = filters(P); if (continueInterruptedTurn && O.length>0 && !$co(O)) alreadyCompleted.
+  let rawForResume = transcript.messages as Array<{
+    type?: string
+    message?: { content?: unknown; stop_reason?: string | null }
+    [key: string]: unknown
+  }>
+  if (continueInterruptedTurn) {
+    const { stripInterruptedTrailingTurns } = await import(
+      'src/utils/orphanAgentResume.js'
+    )
+    rawForResume = stripInterruptedTrailingTurns(rawForResume)
+  }
   const resumedMessages = filterWhitespaceOnlyAssistantMessages(
     filterOrphanedThinkingOnlyMessages(
-      filterUnresolvedToolUses(transcript.messages),
+      filterUnresolvedToolUses(rawForResume as never),
     ),
   )
+  if (continueInterruptedTurn && resumedMessages.length > 0) {
+    const { isAgentTranscriptIncomplete } = await import(
+      'src/utils/orphanAgentResume.js'
+    )
+    if (!isAgentTranscriptIncomplete(resumedMessages as never)) {
+      // Official Aye alreadyCompleted: mark notified + grace, return without re-run.
+      try {
+        const { PANEL_GRACE_MS } = await import('src/utils/task/framework.js')
+        rootSetAppState(prev => {
+          const tasks = prev.tasks
+          const task = tasks?.[agentId]
+          if (!task || !tasks) return prev
+          const retain =
+            'retain' in task
+              ? Boolean((task as { retain?: boolean }).retain)
+              : false
+          const nextTask = {
+            ...task,
+            resuming: false,
+            notified: true as const,
+            evictAfter: retain
+              ? (task as { evictAfter?: number }).evictAfter
+              : Date.now() + PANEL_GRACE_MS,
+          }
+          return {
+            ...prev,
+            tasks: {
+              ...tasks,
+              [agentId]: nextTask as typeof task,
+            },
+          }
+        })
+      } catch {
+        /* best-effort — task may not be registered on orphan cold resume */
+      }
+      return {
+        agentId,
+        description: meta?.description ?? '(resumed)',
+        outputFile: getTaskOutputPath(agentId),
+        alreadyCompleted: true,
+      }
+    }
+  }
   const resumedReplacementState = reconstructForSubagentResume(
     toolUseContext.contentReplacementState,
     resumedMessages,
@@ -171,12 +249,13 @@ export async function resumeAgentBackground({
     ? filterParentToolsForFork(toolUseContext.options.tools)
     : assembleToolPool(workerPermissionContext, appState.mcp.tools)
 
+  // Official densable: promptMessages: o ? O : [...O, ie]
+  // continueInterruptedTurn skips re-appending the resume prompt (already mid-turn).
   const runAgentParams: Parameters<typeof runAgent>[0] = {
     agentDefinition: selectedAgent,
-    promptMessages: [
-      ...resumedMessages,
-      createUserMessage({ content: prompt }),
-    ],
+    promptMessages: continueInterruptedTurn
+      ? [...resumedMessages]
+      : [...resumedMessages, createUserMessage({ content: prompt })],
     toolUseContext,
     canUseTool,
     isAsync: true,

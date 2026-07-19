@@ -106,6 +106,16 @@ export type AppState = DeepImmutable<{
   // AppState (not local) so the panel can read it directly without prop-drilling
   // through PromptInput → PromptInputFooter.
   coordinatorTaskIndex: number
+  /**
+   * densable idleTeammatesExpanded — when false, G7 collapses idle rows past
+   * cIa=3 into a single idle_summary panel row.
+   */
+  idleTeammatesExpanded: boolean
+  /**
+   * densable briefTranscript — focus-view style brief transcript (Xat + /focus).
+   * Session-scoped AppState mirror of settings.briefTranscript when toggled.
+   */
+  briefTranscript: boolean
   viewSelectionMode: 'none' | 'selecting-agent' | 'viewing-agent'
   // Which footer pill is focused (arrow-key navigation below the prompt).
   // Lives in AppState so pill components rendered outside PromptInput
@@ -165,6 +175,12 @@ export type AppState = DeepImmutable<{
 }> & {
   // Unified task state - excluded from DeepImmutable because TaskState contains function types
   tasks: { [taskId: string]: TaskState }
+  /**
+   * densable taskDecorations — per-task custom status content from
+   * settings.subagentStatusLine command (agent panel row override).
+   * Excluded from DeepImmutable (plain mutable map).
+   */
+  taskDecorations: { [taskId: string]: { content: string } }
   // Name → AgentId registry populated by Agent tool when `name` is provided.
   // Latest-wins on collision. Used by SendMessage to route by name.
   agentNameRegistry: Map<string, AgentId>
@@ -481,6 +497,7 @@ export function getDefaultAppState(): AppState {
   return {
     settings: getInitialSettings(),
     tasks: {},
+    taskDecorations: {},
     agentNameRegistry: new Map(),
     verbose: false,
     mainLoopModel: null, // alias, full name (as with --model or env var), or null (default)
@@ -492,6 +509,16 @@ export function getDefaultAppState(): AppState {
     selectedIPAgentIndex: -1,
     selectedBgAgentIndex: -1,
     coordinatorTaskIndex: -1,
+    idleTeammatesExpanded: false,
+    // densable J7t seed via isFocusViewActive.
+    briefTranscript: (() => {
+      const s = getInitialSettings()
+      // Lazy require avoids circular import at module init (settings ↔ AppState).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isFocusViewActive } =
+        require('../utils/focusView.js') as typeof import('../utils/focusView.js')
+      return isFocusViewActive(s.viewMode, s.briefTranscript)
+    })(),
     viewSelectionMode: 'none',
     footerSelection: null,
     kairosEnabled: false,

@@ -826,13 +826,37 @@ export type Props = {
   // Thinking configuration to use when thinking is enabled
   thinkingConfig: ThinkingConfig;
   // Callback to switch to agents/fleet view (left arrow on empty input).
-  // Official Sj4: pass transcript snapshot so main can Vy6-seed the job.
+  // Official Sj4/aAf: transcript + mid-turn partial + portable checkpoint.
   onOpenAgents?: (payload?: {
     messages?: Array<{
       type: string;
+      uuid?: string;
       isMeta?: boolean;
-      message?: { content?: unknown };
+      message?: {
+        content?: unknown;
+        stop_reason?: string | null;
+      };
     }>;
+    via?: string;
+    partialText?: string | null;
+    boundaryUuid?: string;
+    agentsCount?: number;
+    checkpoint?: {
+      shells?: unknown[];
+      cron?: Array<{
+        id: string;
+        cron: string;
+        prompt: string;
+        createdAt?: number;
+        recurring?: boolean;
+        agentId?: string;
+        kind?: string;
+      }>;
+      agents?: unknown[];
+      workflows?: unknown[];
+    };
+    sessionPermissionRules?: { allow: string[]; deny: string[] };
+    memoryToggledOff?: boolean;
   }) => void;
   /**
    * Official resume-return densable — inject a continue prompt once after
@@ -1005,6 +1029,31 @@ export function REPL({
   }, [viewingAgentTaskId, needsBootstrap, setAppState]);
 
   const store = useAppStateStore();
+  // Needed by claim-loop deferred resume (t4d/wAo/BSe MCP-settle wait).
+  // Refs filled after getToolUseContext/canUseTool exist — claim BSe schedule
+  // closes over these for official Aye agent resume.
+  type DeferredAdoptResumeRefs = {
+    getToolUseContext?: (messages: unknown[], newMessages: unknown[], abort: AbortController, model: string) => unknown;
+    canUseTool?: (...args: unknown[]) => Promise<unknown> | unknown;
+    mainLoopModel?: string;
+    resumeAgentBackground?: (opts: {
+      agentId: string;
+      prompt: string;
+      toolUseContext: unknown;
+      canUseTool: unknown;
+      /** Official Aye continueInterruptedTurn — orphan auto-resume EAf gate. */
+      continueInterruptedTurn?: boolean;
+    }) => Promise<
+      | {
+          agentId?: string;
+          description?: string;
+          outputFile?: string;
+          alreadyCompleted?: boolean;
+        }
+      | unknown
+    >;
+  };
+  const deferredResumeRefs = useRef<DeferredAdoptResumeRefs>({});
   const terminal = useTerminalNotification();
   const mainLoopModel = useMainLoopModel();
 
@@ -1594,6 +1643,256 @@ export function REPL({
     }
     rawSetMessages(next);
   }, []);
+
+  // Official e4d on bg mount — claim adopt.json once, rehydrate agents (r4d/PSu)
+  // then shells (k$a/Lvu) + cron (s4d) + workflows (i4d/o4d/ess) + t4d/BSe + prefill.
+  // Orphan auto-resume (ese) after claim prefill — scan → classify → deferred Aye.
+  useEffect(() => {
+    if (feature('BG_SESSIONS')) {
+      if (!isBgSession()) return;
+      const jobDir = process.env.CLAUDE_JOB_DIR;
+      if (!jobDir) return;
+      let cancelled = false;
+      void (async () => {
+        try {
+          const {
+            claimAdoptJson,
+            ADOPT_CLAIM_WAIT_MS,
+            rehydrateAdoptedShells,
+            rehydrateAdoptedAgents,
+            rehydrateAdoptedWorkflows,
+            stashDeferredAdoptResume,
+          } = await import('../utils/bgCheckpoint.js');
+          // Official: waitMs when expectHandoff — use non-zero wait for bg spawn.
+          const expectHandoff =
+            process.env.CLAUDE_BG_SOURCE === 'left_arrow' || process.env.CLAUDE_BG_SOURCE === 'exit';
+          const claimed = await claimAdoptJson(jobDir, {
+            waitMs: expectHandoff ? ADOPT_CLAIM_WAIT_MS : 0,
+          });
+          if (cancelled || !claimed.ok) return;
+          const payload = claimed.payload;
+
+          // Official claim order (CAo): agents (r4d+PSu) → shells (k$a/Lvu) →
+          // cron (s4d) → workflows (i4d+o4d+ess). Agents first so shell/cron
+          // owner filters can use adoptedAgentIds.
+          let adoptedAgentIds = new Set<string>();
+          let adoptedAgentEntries: import('../utils/bgCheckpoint.js').AdoptedAgentEntry[] = [];
+          if (payload.agents?.length && !cancelled) {
+            try {
+              const agentResult = await rehydrateAdoptedAgents(
+                payload.agents,
+                setAppState as unknown as (
+                  u: (p: { tasks: Record<string, unknown> }) => {
+                    tasks: Record<string, unknown>;
+                  },
+                ) => void,
+              );
+              adoptedAgentIds = agentResult.adoptedAgentIds;
+              adoptedAgentEntries = agentResult.adoptedEntries;
+            } catch {
+              // best-effort
+            }
+          }
+
+          // Official Lvu + k$a — rehydrate detached shells into AppState.tasks.
+          // Agent-owned shells require owner in adoptedAgentIds; orphans get n4d.
+          if (payload.shells?.length && !cancelled) {
+            try {
+              await rehydrateAdoptedShells(
+                payload.shells,
+                setAppState as unknown as (
+                  u: (p: { tasks: Record<string, unknown> }) => {
+                    tasks: Record<string, unknown>;
+                  },
+                ) => void,
+                {
+                  adoptedAgentIds,
+                  skipOrphanAgentShells: true,
+                },
+              );
+            } catch {
+              // best-effort
+            }
+          }
+
+          // Official s4d — rehydrate cron before workflows (claim-loop order).
+          if (payload.cron?.length) {
+            const { addSessionCronTask } = await import('../bootstrap/state.js');
+            for (const c of payload.cron) {
+              if (!c?.id || !c.cron || !c.prompt) continue;
+              // Official: skip cron whose agentId is set but owner not adopted.
+              if (c.agentId !== undefined && !adoptedAgentIds.has(c.agentId)) continue;
+              try {
+                addSessionCronTask({
+                  id: c.id,
+                  cron: c.cron,
+                  prompt: c.prompt,
+                  createdAt: c.createdAt ?? Date.now(),
+                  recurring: c.recurring,
+                  agentId: c.agentId,
+                });
+              } catch {
+                // skip individual
+              }
+            }
+          }
+
+          // Official i4d + o4d + ess — validate scriptPath, link transcript, register.
+          let adoptedWorkflowEntries: import('../utils/bgCheckpoint.js').AdoptedWorkflowEntry[] = [];
+          if (payload.workflows?.length && !cancelled) {
+            try {
+              const wfResult = await rehydrateAdoptedWorkflows(
+                payload.workflows,
+                setAppState as unknown as (
+                  u: (p: { tasks: Record<string, unknown> }) => {
+                    tasks: Record<string, unknown>;
+                  },
+                ) => void,
+              );
+              adoptedWorkflowEntries = wfResult.adoptedEntries;
+            } catch {
+              // best-effort
+            }
+          }
+
+          // Official t4d + BSe — stash then deferred MCP-settle resume (w5u + Aye).
+          // resumeAgent closes over claim-time refs for tool context (defined later).
+          if (!cancelled && (adoptedAgentEntries.length > 0 || adoptedWorkflowEntries.length > 0)) {
+            stashDeferredAdoptResume(jobDir, adoptedAgentEntries, adoptedWorkflowEntries);
+            const { scheduleDeferredAdoptResume } = await import('../utils/bgCheckpoint.js');
+            void scheduleDeferredAdoptResume({
+              jobDir,
+              getState: () => store.getState(),
+              subscribe: listener => store.subscribe(listener),
+              isJobDirCurrent: dir => process.env.CLAUDE_JOB_DIR === dir,
+              // Official w5u: drop adopted taskId when same workflowRunId already running.
+              removeTask: taskId => {
+                try {
+                  setAppState(prev => {
+                    if (!prev.tasks || !(taskId in prev.tasks)) return prev;
+                    const { [taskId]: _removed, ...rest } = prev.tasks;
+                    return { ...prev, tasks: rest };
+                  });
+                } catch {
+                  /* best-effort */
+                }
+              },
+              resumeAgent: async entry => {
+                const resume = deferredResumeRefs.current.resumeAgentBackground;
+                const ctx = deferredResumeRefs.current.getToolUseContext;
+                const can = deferredResumeRefs.current.canUseTool;
+                const model = deferredResumeRefs.current.mainLoopModel;
+                if (!resume || !ctx || !can || !model) {
+                  throw new Error('resume agent context not ready');
+                }
+                // Official BSe Aye: continueInterruptedTurn:!0 (claim path
+                // fire-and-forget; orphan ese separately maps alreadyCompleted→EAf).
+                await resume({
+                  agentId: entry.agentId,
+                  prompt: entry.description ?? '(resumed agent)',
+                  toolUseContext: ctx(messagesRef.current, [], new AbortController(), model) as never,
+                  canUseTool: can,
+                  continueInterruptedTurn: true,
+                });
+              },
+            }).catch(() => {
+              // best-effort
+            });
+          }
+
+          // Mid-turn prefill → meta continue prompt (official mZ prefill path).
+          if (payload.prefill?.text) {
+            const { buildInterruptedOutputHintContent, checkInterruptedOutputBoundary } = await import(
+              '../utils/replyOnResume.js'
+            );
+            const check = checkInterruptedOutputBoundary(payload.prefill, payload.prefill.boundaryUuid);
+            if (check.accept) {
+              const hint = buildInterruptedOutputHintContent(payload.prefill.text);
+              enqueue({
+                mode: 'prompt',
+                value: hint,
+                priority: 'next',
+                isMeta: true,
+              });
+            }
+          }
+
+          // Official wvr/kqb/Hqb/Dqb/ese finally — orphaned agents/shells/workflows
+          // from prior process exit (scan → classify → deferred auto-resume).
+          if (!cancelled) {
+            try {
+              const { runOrphanAgentResumePass } = await import('../utils/orphanAgentResume.js');
+              const liveIds = new Set<string>();
+              const liveTaskIds = new Set<string>();
+              try {
+                const tasksSnap = store.getState().tasks ?? {};
+                for (const t of Object.values(tasksSnap) as Array<{
+                  type?: string;
+                  agentId?: string;
+                  id?: string;
+                }>) {
+                  if (typeof t?.id === 'string') liveTaskIds.add(t.id);
+                  if (t?.type === 'local_agent') {
+                    if (typeof t.agentId === 'string') liveIds.add(t.agentId);
+                    if (typeof t.id === 'string') liveIds.add(t.id);
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+              void runOrphanAgentResumePass({
+                messages: messagesRef.current as never,
+                liveAgentIds: liveIds,
+                liveTaskIds,
+                getState: () => store.getState(),
+                subscribe: listener => store.subscribe(listener),
+                isCurrent: () => !cancelled,
+                resumeAgent: async entry => {
+                  const resume = deferredResumeRefs.current.resumeAgentBackground;
+                  const ctx = deferredResumeRefs.current.getToolUseContext;
+                  const can = deferredResumeRefs.current.canUseTool;
+                  const model = deferredResumeRefs.current.mainLoopModel;
+                  if (!resume || !ctx || !can || !model) {
+                    throw new Error('resume agent context not ready');
+                  }
+                  const r = await resume({
+                    agentId: entry.agentId,
+                    prompt: entry.description ?? '(resumed agent)',
+                    toolUseContext: ctx(messagesRef.current, [], new AbortController(), model) as never,
+                    canUseTool: can,
+                    // Official Aye continueInterruptedTurn:!0 on orphan ese path
+                    continueInterruptedTurn: true,
+                  });
+                  const rec =
+                    r && typeof r === 'object'
+                      ? (r as {
+                          alreadyCompleted?: boolean;
+                          outputFile?: string;
+                        })
+                      : undefined;
+                  return {
+                    alreadyCompleted: rec?.alreadyCompleted === true,
+                    outputFile:
+                      typeof rec?.outputFile === 'string' && rec.outputFile ? rec.outputFile : entry.outputFile,
+                  };
+                },
+              }).catch(() => {
+                /* best-effort */
+              });
+            } catch {
+              /* best-effort */
+            }
+          }
+        } catch {
+          // best-effort claim
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [setAppState, store]);
+
   // setUserInputOnProcessing flips the pending flag; the render reads it
   // directly. No length tracking — see userMessagePending declaration.
   const setUserInputOnProcessing = useCallback((input: string | undefined) => {
@@ -2407,6 +2706,70 @@ export function REPL({
         // Clear input to ensure no residual state
         setInputValue('');
 
+        // Official wvr(messages, Je) on in-session /resume — orphan scan after
+        // messages restored (skip fork: new session id, no prior orphans).
+        if (entrypoint !== 'fork') {
+          try {
+            const { runOrphanAgentResumePass } = await import('../utils/orphanAgentResume.js');
+            const liveIds = new Set<string>();
+            const liveTaskIds = new Set<string>();
+            try {
+              const tasksSnap = store.getState().tasks ?? {};
+              for (const t of Object.values(tasksSnap) as Array<{
+                type?: string;
+                agentId?: string;
+                id?: string;
+              }>) {
+                if (typeof t?.id === 'string') liveTaskIds.add(t.id);
+                if (t?.type === 'local_agent') {
+                  if (typeof t.agentId === 'string') liveIds.add(t.agentId);
+                  if (typeof t.id === 'string') liveIds.add(t.id);
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+            void runOrphanAgentResumePass({
+              messages: messages as never,
+              liveAgentIds: liveIds,
+              liveTaskIds,
+              getState: () => store.getState(),
+              subscribe: listener => store.subscribe(listener),
+              resumeAgent: async entry => {
+                const resumeFn = deferredResumeRefs.current.resumeAgentBackground;
+                const ctx = deferredResumeRefs.current.getToolUseContext;
+                const can = deferredResumeRefs.current.canUseTool;
+                const model = deferredResumeRefs.current.mainLoopModel;
+                if (!resumeFn || !ctx || !can || !model) {
+                  throw new Error('resume agent context not ready');
+                }
+                const r = await resumeFn({
+                  agentId: entry.agentId,
+                  prompt: entry.description ?? '(resumed agent)',
+                  toolUseContext: ctx(messages, [], new AbortController(), model) as never,
+                  canUseTool: can,
+                  continueInterruptedTurn: true,
+                });
+                const rec =
+                  r && typeof r === 'object'
+                    ? (r as {
+                        alreadyCompleted?: boolean;
+                        outputFile?: string;
+                      })
+                    : undefined;
+                return {
+                  alreadyCompleted: rec?.alreadyCompleted === true,
+                  outputFile: typeof rec?.outputFile === 'string' && rec.outputFile ? rec.outputFile : entry.outputFile,
+                };
+              },
+            }).catch(() => {
+              /* best-effort */
+            });
+          } catch {
+            /* best-effort */
+          }
+        }
+
         logEvent('tengu_session_resumed', {
           entrypoint: entrypoint as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           success: true,
@@ -2469,6 +2832,78 @@ export function REPL({
         getAppState: () => store.getState(),
         setAppState,
       });
+      // Official wvr on cold --resume mount (messages via props, not resume()).
+      void (async () => {
+        try {
+          const { runOrphanAgentResumePass } = await import('../utils/orphanAgentResume.js');
+          const liveIds = new Set<string>();
+          const liveTaskIds = new Set<string>();
+          try {
+            const tasksSnap = store.getState().tasks ?? {};
+            for (const t of Object.values(tasksSnap) as Array<{
+              type?: string;
+              agentId?: string;
+              id?: string;
+            }>) {
+              if (typeof t?.id === 'string') liveTaskIds.add(t.id);
+              if (t?.type === 'local_agent') {
+                if (typeof t.agentId === 'string') liveIds.add(t.agentId);
+                if (typeof t.id === 'string') liveIds.add(t.id);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+          await runOrphanAgentResumePass({
+            messages: initialMessages as never,
+            liveAgentIds: liveIds,
+            liveTaskIds,
+            getState: () => store.getState(),
+            subscribe: listener => store.subscribe(listener),
+            resumeAgent: async entry => {
+              // deferredResumeRefs may not be ready on first paint — wait briefly.
+              for (let i = 0; i < 40; i++) {
+                if (
+                  deferredResumeRefs.current.resumeAgentBackground &&
+                  deferredResumeRefs.current.getToolUseContext &&
+                  deferredResumeRefs.current.canUseTool &&
+                  deferredResumeRefs.current.mainLoopModel
+                ) {
+                  break;
+                }
+                await new Promise<void>(r => setTimeout(r, 50));
+              }
+              const resumeFn = deferredResumeRefs.current.resumeAgentBackground;
+              const ctx = deferredResumeRefs.current.getToolUseContext;
+              const can = deferredResumeRefs.current.canUseTool;
+              const model = deferredResumeRefs.current.mainLoopModel;
+              if (!resumeFn || !ctx || !can || !model) {
+                throw new Error('resume agent context not ready');
+              }
+              const r = await resumeFn({
+                agentId: entry.agentId,
+                prompt: entry.description ?? '(resumed agent)',
+                toolUseContext: ctx(initialMessages, [], new AbortController(), model) as never,
+                canUseTool: can,
+                continueInterruptedTurn: true,
+              });
+              const rec =
+                r && typeof r === 'object'
+                  ? (r as {
+                      alreadyCompleted?: boolean;
+                      outputFile?: string;
+                    })
+                  : undefined;
+              return {
+                alreadyCompleted: rec?.alreadyCompleted === true,
+                outputFile: typeof rec?.outputFile === 'string' && rec.outputFile ? rec.outputFile : entry.outputFile,
+              };
+            },
+          });
+        } catch {
+          /* best-effort */
+        }
+      })();
     }
     // Only run on mount - initialMessages shouldn't change during component lifetime
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4590,6 +5025,13 @@ export function REPL({
     [setAppState, setInputValue, getToolUseContext, canUseTool, mainLoopModel, addNotification],
   );
 
+  // Claim-path deferred resume adapters — keep refs current for BSe after MCP settle.
+  deferredResumeRefs.current.getToolUseContext = getToolUseContext as DeferredAdoptResumeRefs['getToolUseContext'];
+  deferredResumeRefs.current.canUseTool = canUseTool as DeferredAdoptResumeRefs['canUseTool'];
+  deferredResumeRefs.current.mainLoopModel = mainLoopModel;
+  deferredResumeRefs.current.resumeAgentBackground =
+    resumeAgentBackground as DeferredAdoptResumeRefs['resumeAgentBackground'];
+
   // Handlers for auto-run /issue or /good-claude (defined after onSubmit)
   const handleAutoRunIssue = useCallback(() => {
     const command = autoRunIssueReason ? getAutoRunCommand(autoRunIssueReason) : '/issue';
@@ -6666,15 +7108,90 @@ export function REPL({
                       setHelpOpen={setIsHelpOpen}
                       onLeftArrowOnEmpty={
                         onOpenAgents
-                          ? () =>
+                          ? () => {
+                              // Official Fco/MVr/CAo portable: mid-turn partial from
+                              // transcript + live stream, boundary uuid, task checkpoint.
+                              const snap = messagesRef.current as Array<{
+                                type: string;
+                                uuid?: string;
+                                isMeta?: boolean;
+                                message?: {
+                                  content?: unknown;
+                                  stop_reason?: string | null;
+                                };
+                              }>;
+                              // Lazy import to keep REPL cold path light.
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              const { buildInFlightPartialText, findForkBoundaryUuid, collectPortableCheckpoint } =
+                                require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              const { getSessionCronTasks, removeSessionCronTasks } =
+                                require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
+                              const partialFromMsgs = buildInFlightPartialText(snap, isLoading ? streamingText : null);
+                              const boundaryUuid = findForkBoundaryUuid(snap);
+                              // Official CAo/fDs: detach shells + snapshot; disown after handoff.
+                              const collected = collectPortableCheckpoint({
+                                tasks: tasks as unknown as Record<
+                                  string,
+                                  import('../utils/bgCheckpoint.js').PortableTaskLike
+                                >,
+                                cron: getSessionCronTasks(),
+                              });
+                              const checkpoint = collected?.payload;
+                              // Official aAf: session allow/deny + memoryToggledOff into hcn.
+                              const allow = toolPermissionContext?.alwaysAllowRules?.session ?? [];
+                              const deny = toolPermissionContext?.alwaysDenyRules?.session ?? [];
+                              const sessionPermissionRules =
+                                allow.length > 0 || deny.length > 0
+                                  ? {
+                                      allow: [...allow],
+                                      deny: [...deny],
+                                    }
+                                  : undefined;
+                              let memoryToggledOff: boolean | undefined;
+                              try {
+                                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                const { isAutoMemoryEnabled } =
+                                  require('../memdir/paths.js') as typeof import('../memdir/paths.js');
+                                memoryToggledOff = !isAutoMemoryEnabled() ? true : undefined;
+                              } catch {
+                                memoryToggledOff = undefined;
+                              }
+                              // Official aAf: CAo stays live across Jlr write, then
+                              // checkpointAgents + disown. Local unmounts REPL first —
+                              // stash live handle for openAgentsViaLeftArrow post-write.
+                              if (collected) {
+                                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                const { stashLeftArrowCheckpointLive } =
+                                  require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
+                                stashLeftArrowCheckpointLive(collected);
+                              }
+                              // Drop session cron from this process now (module-global).
+                              // Official disown after Jlr also removes cron; task registry
+                              // remove is no-op after unmount — abort runs post-write.
+                              if (collected?.cronIds?.length) {
+                                removeSessionCronTasks(collected.cronIds);
+                              }
                               onOpenAgents({
                                 // Snapshot for official Sj4 / Vy6 seed (main → A8q).
-                                messages: messagesRef.current as Array<{
-                                  type: string;
-                                  isMeta?: boolean;
-                                  message?: { content?: unknown };
-                                }>,
-                              })
+                                messages: snap,
+                                // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
+                                via: isLoading ? 'abort-then-fork' : 'idle-fork',
+                                partialText: isLoading ? partialFromMsgs || streamingText : null,
+                                boundaryUuid,
+                                agentsCount: checkpoint?.agents?.length ?? 0,
+                                checkpoint: checkpoint
+                                  ? {
+                                      shells: checkpoint.shells,
+                                      cron: checkpoint.cron,
+                                      agents: checkpoint.agents,
+                                      workflows: checkpoint.workflows,
+                                    }
+                                  : undefined,
+                                sessionPermissionRules,
+                                memoryToggledOff,
+                              });
+                            }
                           : undefined
                       }
                       insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}

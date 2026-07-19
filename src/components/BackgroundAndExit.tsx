@@ -27,6 +27,11 @@ type Props = {
   messages: readonly BackgroundSeedMessage[];
   isMidTurn?: boolean;
   onDone: (message?: string) => void;
+  /**
+   * Optional AppState.tasks snapshot (or getter) for official u4d exit handoff
+   * adopt.json write (origin:"exit"). When omitted, only submitDispatch runs.
+   */
+  getTasks?: () => Record<string, unknown> | null | undefined;
 };
 
 export type BackgroundExitArgOptions = {
@@ -62,7 +67,7 @@ export function buildBackgroundExitArgs(
   return args;
 }
 
-export function BackgroundAndExit({ messages, isMidTurn = false, onDone }: Props): React.ReactNode {
+export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTasks }: Props): React.ReactNode {
   const started = useRef(false);
 
   useEffect(() => {
@@ -107,6 +112,64 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone }: Props
           forkSession: true,
           extraArgs: isMidTurn ? ['--reply-on-resume'] : [],
         });
+
+        // Official u4d — write adopt.json with origin:"exit" into the forked
+        // job dir so the next wake can claim shells/agents/workflows (k$a/Lvu).
+        // Prefer existing CLAUDE_JOB_DIR when already in a bg session; else new short.
+        try {
+          const { getJobDirPath } = await import('../daemon/jobState.js');
+          const { writeExitHandoffAdopt, collectPortableCheckpoint } = await import('../utils/bgCheckpoint.js');
+          const existingJobDir = process.env.CLAUDE_JOB_DIR;
+          const jobDir = existingJobDir || getJobDirPath(dispatch.short);
+          const tasks = getTasks?.() ?? null;
+          if (tasks && Object.keys(tasks).length > 0) {
+            const typedTasks = tasks as Parameters<typeof collectPortableCheckpoint>[0]['tasks'];
+            const cp = collectPortableCheckpoint({
+              tasks: typedTasks,
+              cron: [],
+              detachShells: true,
+            });
+            if (cp) {
+              // Pass tasks so u4d can abort live agent/workflow controllers.
+              await writeExitHandoffAdopt(jobDir, {
+                checkpoint: cp,
+                tasks: typedTasks,
+              });
+              // Official disown: remove checkpointed tasks from this process before exit.
+              cp.disown({
+                removeTaskIds: ids => {
+                  /* parent is exiting — AppState cleanup is best-effort no-op */
+                  void ids;
+                },
+              });
+              // Official Hen residual: reap running tasks not in the handoff set
+              // (agent-owned shells, non-background agents, monitors with status
+              // running, etc.). Parent is exiting — remove is best-effort.
+              try {
+                const { reapNonHandoffTasks } = await import('../utils/bgCheckpoint.js');
+                reapNonHandoffTasks({
+                  tasks: typedTasks,
+                  handoffTaskIds: cp.handoffTaskIds,
+                });
+              } catch {
+                /* best-effort */
+              }
+            } else {
+              // No portable handoff payload — still reap all running residual
+              // work so the process doesn't leave orphans (official Hen when
+              // c4d handoff set empty still iterates non-handoff).
+              try {
+                const { reapNonHandoffTasks } = await import('../utils/bgCheckpoint.js');
+                reapNonHandoffTasks({ tasks: typedTasks, handoffTaskIds: [] });
+              } catch {
+                /* best-effort */
+              }
+            }
+          }
+        } catch {
+          // best-effort — don't block exit on adopt write failure
+        }
+
         const hint = formatBgHints(dispatch.short, undefined, seed.name ?? seed.intent);
         onDone(hint);
         // Official Cs(..., {suppressResumeHint:true, finalMessage})
@@ -120,7 +183,7 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone }: Props
         await gracefulShutdown(0, 'prompt_input_exit', { finalMessage: err });
       }
     })();
-  }, [messages, isMidTurn, onDone]);
+  }, [messages, isMidTurn, onDone, getTasks]);
 
   return (
     <Box>

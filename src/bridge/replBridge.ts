@@ -81,6 +81,14 @@ import {
   injectBridgeFault,
 } from './bridgeDebug.js'
 
+export type ReplBridgeTeardownOpts = {
+  /**
+   * Official aAf left-arrow: teardown({skipArchive:true}) so the session can
+   * be reattached by the forked bg worker (rit). Best-effort when unsupported.
+   */
+  skipArchive?: boolean
+}
+
 export type ReplBridgeHandle = {
   bridgeSessionId: string
   environmentId: string
@@ -92,7 +100,25 @@ export type ReplBridgeHandle = {
   sendControlResponse(response: SDKControlResponse): void
   sendControlCancelRequest(requestId: string): void
   sendResult(): void
-  teardown(): Promise<void>
+  /**
+   * Official getLastSequenceNum / getSSESequenceNum — high-water for
+   * CLAUDE_BRIDGE_REATTACH_SEQ on left-arrow adopt (rit). Optional until
+   * full bridge reattach path is wired.
+   */
+  getLastSequenceNum?(): number
+  getSSESequenceNum?(): number
+  /**
+   * Official bridge flush before left-arrow teardown — drain in-flight writes.
+   */
+  flush?(): Promise<void>
+  /**
+   * When false, rit() omits CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY.
+   * Defaults true for left-arrow reattach.
+   */
+  outboundOnly?: boolean
+  /** Official sessionGroupingId → CLAUDE_BRIDGE_REATTACH_GROUPING */
+  sessionGroupingId?: string
+  teardown(opts?: ReplBridgeTeardownOpts): Promise<void>
 }
 
 export type BridgeState = 'ready' | 'connected' | 'reconnecting' | 'failed'
@@ -1906,10 +1932,15 @@ export async function initBridgeCore(
         `[bridge:repl] Sent result for session=${currentSessionId}`,
       )
     },
-    async teardown() {
+    async teardown(opts?: ReplBridgeTeardownOpts) {
+      // opts.skipArchive is accepted for left-arrow reattach callers; full
+      // skip-archive archive/env behavior lands with bridge reattach wiring.
+      void opts
       unregister()
       await doTeardownImpl?.()
-      logForDebugging('[bridge:repl] Torn down')
+      logForDebugging(
+        `[bridge:repl] Torn down${opts?.skipArchive ? ' (skipArchive)' : ''}`,
+      )
       logEvent('tengu_bridge_repl_teardown', {})
     },
   }

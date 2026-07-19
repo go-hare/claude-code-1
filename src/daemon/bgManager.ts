@@ -1653,6 +1653,18 @@ export async function submitDispatch(opts: {
    * A8q-written state (short = id.slice(0,8)) matches the spawn.
    */
   providedSessionId?: string
+  /** Official isolation / worktree handoff for left-arrow adopt. */
+  isolation?: 'worktree' | 'none'
+  worktree?: { path: string }
+  /** Bridge reattach env (CLAUDE_BRIDGE_REATTACH_*) — official rit(). */
+  env?: Record<string, string>
+  reattachEnv?: Record<string, string>
+  /**
+   * Official aAf → BF_ env: CLAUDE_BG_SESSION_PERMISSION_RULES JSON +
+   * CLAUDE_BG_MEMORY_TOGGLED_OFF=1 for bg worker inherit.
+   */
+  sessionPermissionRules?: { allow: string[]; deny: string[] }
+  memoryToggledOff?: boolean
 }): Promise<{ short: string; sessionId: string }> {
   const { randomUUID } = await import('crypto')
   // New job session id (fork target). Resume source is resumeSessionId.
@@ -1663,6 +1675,23 @@ export async function submitDispatch(opts: {
   const derivedName =
     opts.name ??
     (opts.intent.trim() ? deriveSessionName(opts.intent) : undefined)
+
+  // Official BF_: merge permission/memory into worker env.
+  const inheritEnv: Record<string, string> = {}
+  if (opts.sessionPermissionRules) {
+    inheritEnv.CLAUDE_BG_SESSION_PERMISSION_RULES = JSON.stringify(
+      opts.sessionPermissionRules,
+    )
+  }
+  if (opts.memoryToggledOff) {
+    inheritEnv.CLAUDE_BG_MEMORY_TOGGLED_OFF = '1'
+  }
+
+  const env = {
+    ...inheritEnv,
+    ...(opts.env ?? {}),
+    ...(opts.reattachEnv ?? {}),
+  }
 
   const dispatch: DispatchRequest = {
     short,
@@ -1675,6 +1704,13 @@ export async function submitDispatch(opts: {
     source: opts.source || 'fleet',
     createdAt: Date.now(),
     seed: { intent: opts.intent, name: opts.name },
+    isolation: opts.isolation,
+    worktree: opts.worktree,
+    env: Object.keys(env).length > 0 ? env : undefined,
+    reattachEnv:
+      Object.keys(opts.reattachEnv ?? {}).length > 0
+        ? opts.reattachEnv
+        : undefined,
     launch: opts.resumeSessionId
       ? {
           mode: 'resume',

@@ -596,6 +596,13 @@ ${CYBER_RISK_INSTRUCTION}`,
     ...(feature('KAIROS') || feature('KAIROS_BRIEF')
       ? [systemPromptSection('brief', () => getBriefSection())]
       : []),
+    // densable CNy / focus_mode system section (J7t-gated).
+    // Use uncached so /focus mid-session updates model-facing guidance.
+    DANGEROUS_uncachedSystemPromptSection(
+      'focus_mode',
+      () => getFocusModeSection({ model }),
+      'focus view toggled mid-session via /focus or apply_flag_settings',
+    ),
   ]
 
   const resolvedDynamicSections =
@@ -885,6 +892,36 @@ function getBriefSection(): string | null {
   )
     return null
   return BRIEF_PROACTIVE_SECTION
+}
+
+/**
+ * densable CNy residual — focus_mode system prompt section when J7t is active.
+ * Lean simple path (vT / shouldUseSimpleSystemPrompt) uses the shorter vNy text;
+ * default path uses ENy.
+ *
+ * Non-interactive densable: only when flagSettings.viewMode==="focus".
+ * Interactive: settings.viewMode or session briefTranscript (J7t).
+ */
+const FOCUS_MODE_SECTION_LEAN = `# Focus mode
+The user has focus mode enabled. They only see your final text message in each response — not tool calls, tool results, or any text you write between tool calls. Anything you say mid-turn is not seen, so don't narrate progress between tool calls. Put everything the user needs into your final message: what you investigated, what you found, what you changed, decisions you made, and what's next. Do not assume they saw earlier output.`
+
+const FOCUS_MODE_SECTION_DEFAULT = `# Focus mode
+The user has focus mode enabled. In focus mode, the user only sees your final text message in each response. They do not see tool calls, tool results, or any text you emit between tool calls. This overrides earlier guidance about giving short updates between tool calls — skip those updates and put everything the user needs to know in your final message. Do not assume they saw earlier progress updates.`
+
+function getFocusModeSection(args: { model: string }): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { resolveFocusViewActiveFromSession } =
+    require('../utils/focusView.js') as typeof import('../utils/focusView.js')
+  const nonInteractive = getIsNonInteractiveSession()
+  if (
+    !resolveFocusViewActiveFromSession({
+      nonInteractive,
+    })
+  ) {
+    return null
+  }
+  const lean = shouldUseSimpleSystemPrompt({ model: args.model })
+  return lean ? FOCUS_MODE_SECTION_LEAN : FOCUS_MODE_SECTION_DEFAULT
 }
 
 function getProactiveSection(): string | null {

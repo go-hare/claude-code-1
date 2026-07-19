@@ -75,6 +75,8 @@ const briefCommand =
   feature('KAIROS') || feature('KAIROS_BRIEF')
     ? require('./commands/brief.js').default
     : null
+// densable /focus residual (v0d) — always registered; runtime-gated by fullscreen feature gate.
+const focusCommand = require('./commands/focus.js').default
 const assistantCommand = feature('KAIROS')
   ? require('./commands/assistant/index.js').default
   : null
@@ -395,6 +397,7 @@ const COMMANDS = memoize((): Command[] => [
   ...(monitorCmd ? [monitorCmd] : []),
   ...(coordinatorCmd ? [coordinatorCmd] : []),
   ...(briefCommand ? [briefCommand] : []),
+  focusCommand,
   ...(assistantCommand ? [assistantCommand] : []),
   ...(bridge ? [bridge] : []),
   ...(remoteControlServerCommand ? [remoteControlServerCommand] : []),

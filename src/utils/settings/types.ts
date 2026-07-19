@@ -706,6 +706,17 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Whether to render the fork built-in status line (model + ctx + 5h/7d limits + cost + cache pill). Toggled with /statusline.',
         ),
+      // densable subagentStatusLine — per-subagent status line for agent panel rows.
+      // Receives row context as JSON on stdin; emits NDJSON {id, content} lines.
+      subagentStatusLine: z
+        .object({
+          type: z.literal('command'),
+          command: z.string(),
+        })
+        .optional()
+        .describe(
+          'Custom per-subagent status line shown in the agent panel; receives row context as JSON on stdin',
+        ),
       // Enabled plugins using marketplace-first format
       enabledPlugins: z
         .record(
@@ -791,6 +802,23 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Controls the output style for assistant responses'),
+      /**
+       * densable viewMode — default transcript view on startup.
+       * `focus` mirrors AppState.briefTranscript via J7t residual.
+       */
+      viewMode: z
+        .enum(['default', 'verbose', 'focus'])
+        .optional()
+        .catch(undefined)
+        .describe('Default transcript view mode on startup'),
+      /**
+       * densable briefTranscript — focus-view transcript preference (settings).
+       * AppState.briefTranscript mirrors session toggles via Xat.
+       */
+      briefTranscript: z
+        .boolean()
+        .optional()
+        .describe('When true, focus-style brief transcript view is preferred.'),
       language: z
         .string()
         .optional()

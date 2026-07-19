@@ -39,6 +39,12 @@ export interface SessionEntry {
   short?: string
   messagingSocketPath?: string
   lastMessage?: string
+  /** Custom FleetView group label (job.state.group) */
+  group?: string
+  /** Soft-archived — hidden from main list unless Earlier expanded */
+  archived?: boolean
+  /** Manual sort order override (lower = higher) */
+  sortOrder?: number
 }
 
 export interface BgStartOptions {

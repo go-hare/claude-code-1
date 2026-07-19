@@ -111,7 +111,42 @@ export function failWorkflowTask(
 }
 
 /**
- * Kill a running workflow task. Called from BackgroundTasksDialog
+ * Official zit / xao(..., "paused", {notified:!0}) portable subset.
+ *
+ * Only transitions from `running`. Aborts the controller, sets status
+ * `paused` + `notified: true` + `endTime`, clears abortController.
+ * Does NOT set evictAfter (official UE excludes paused from terminal eviction).
+ *
+ * Called from bgCheckpoint.checkpointAgents after abort-for-background.
+ * Returns true when the task was running and updated.
+ */
+export function pauseWorkflowTask(
+  taskId: string,
+  setAppState: SetAppState,
+): boolean {
+  let paused = false
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    if (task.status !== 'running') return task
+    paused = true
+    try {
+      task.abortController?.abort()
+    } catch {
+      /* ignore */
+    }
+    return {
+      ...task,
+      status: 'paused',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+      pendingAgentAction: undefined,
+    }
+  })
+  return paused
+}
+
+/**
+ * Kill a running or paused workflow task. Called from BackgroundTasksDialog
  * via the feature-gated `killWorkflowTask` binding.
  */
 export function killWorkflowTask(
@@ -119,7 +154,7 @@ export function killWorkflowTask(
   setAppState: SetAppState,
 ): void {
   updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
-    if (task.status !== 'running') return task
+    if (task.status !== 'running' && task.status !== 'paused') return task
     task.abortController?.abort()
     return {
       ...task,

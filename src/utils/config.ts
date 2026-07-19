@@ -287,6 +287,12 @@ export type GlobalConfig = {
   // Official: dismiss cold-start 'claude daemon install' prompt forever
   daemonInstallPromptDismissed?: boolean
 
+  /**
+   * Official fleetViewGroupMode — Agents View grouping: state | directory | group.
+   * Persisted across `claude agents` opens (Ctrl+S cycles).
+   */
+  fleetViewGroupMode?: 'state' | 'directory' | 'group'
+
   // Memory usage tracking
   memoryUsageCount: number // Number of times user has added to memory
 

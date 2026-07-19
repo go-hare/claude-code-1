@@ -12,14 +12,20 @@ type AppWrapperProps = {
 };
 
 import type { BackgroundSeedMessage } from './cli/bg/helpers.js';
+import type { LeftArrowOpenOptions } from './cli/bg/leftArrowAgents.js';
+
+/** Left-arrow payload from REPL → main → openAgentsViaLeftArrow (Sj4/aAf). */
+export type LeftArrowAgentsHandoff = {
+  /** Transcript snapshot for official Sj4 / Vy6 seed. */
+  messages?: BackgroundSeedMessage[];
+} & Pick<
+  LeftArrowOpenOptions,
+  'via' | 'partialText' | 'boundaryUuid' | 'agentsCount' | 'checkpoint' | 'sessionPermissionRules' | 'memoryToggledOff'
+>;
 
 export type LaunchReplResult =
   | { type: 'exit' }
-  | {
-      type: 'agents';
-      /** Transcript snapshot for official Sj4 / Vy6 seed. */
-      messages: BackgroundSeedMessage[];
-    };
+  | ({ type: 'agents'; messages: BackgroundSeedMessage[] } & LeftArrowAgentsHandoff);
 
 export async function launchRepl(
   root: Root,
@@ -32,7 +38,7 @@ export async function launchRepl(
   const { REPL } = await import('./screens/REPL.js');
 
   let switchToAgents = false;
-  let agentsMessages: BackgroundSeedMessage[] = [];
+  let agentsHandoff: LeftArrowAgentsHandoff = { messages: [] };
   const onOpenAgents =
     process.env.CLAUDE_BG_BACKEND === 'daemon'
       ? () => {
@@ -43,12 +49,21 @@ export async function launchRepl(
           const msg = 'Detached — use `claude agents` to see background sessions.';
           process.stdout.write(DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ);
         }
-      : (payload?: { messages?: BackgroundSeedMessage[] }) => {
+      : (payload?: LeftArrowAgentsHandoff) => {
           // Official Szp: attribute left-arrow open to needs-input nudge window.
           void import('./utils/fleetNeedsInputNudge.js').then(m => {
             m.recordFleetOpenViaLeft();
           });
-          agentsMessages = payload?.messages ?? [];
+          agentsHandoff = {
+            messages: payload?.messages ?? [],
+            via: payload?.via,
+            partialText: payload?.partialText,
+            boundaryUuid: payload?.boundaryUuid,
+            agentsCount: payload?.agentsCount,
+            checkpoint: payload?.checkpoint,
+            sessionPermissionRules: payload?.sessionPermissionRules,
+            memoryToggledOff: payload?.memoryToggledOff,
+          };
           // In normal mode: hand off alt screen / raw mode so unmount does NOT
           // write EXIT_ALT_SCREEN (or drop raw on Windows). Without this, ←
           // opens AgentsView via main-buffer flash then re-enter alt — broken paint.
@@ -83,7 +98,11 @@ export async function launchRepl(
   await root.waitUntilExit();
 
   if (switchToAgents) {
-    return { type: 'agents', messages: agentsMessages };
+    return {
+      type: 'agents',
+      ...agentsHandoff,
+      messages: agentsHandoff.messages ?? [],
+    };
   }
 
   // Stop rendezvous server before shutdown

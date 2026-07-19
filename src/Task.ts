@@ -18,11 +18,14 @@ export type TaskStatus =
   | 'completed'
   | 'failed'
   | 'killed'
+  // Official workflow pause (zit/xao/ess). Not terminal (UE excludes paused).
+  | 'paused'
 
 /**
  * True when a task is in a terminal state and will not transition further.
  * Used to guard against injecting messages into dead teammates, evicting
  * finished tasks from AppState, and orphan-cleanup paths.
+ * Official UE: completed | failed | killed — paused is intentionally excluded.
  */
 export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'killed'

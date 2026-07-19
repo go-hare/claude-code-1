@@ -10,7 +10,6 @@
  *   --json         (output session list as JSON and exit)
  */
 
-import { listLiveSessions } from './bg.js'
 import type { SessionEntry } from './bg/engine.js'
 
 export interface AgentViewAction {
@@ -60,9 +59,42 @@ function extractPassthroughArgs(args: string[]): string[] {
 }
 
 export async function agentsMain(args: string[]): Promise<void> {
-  // --json flag: output session list as JSON and exit
+  // --json flag: output job list as JSON (same source as FleetView dashboard)
   if (args.includes('--json')) {
-    const sessions = await listLiveSessions()
+    const { listAllJobs } = await import('../daemon/jobState.js')
+    const jobs = await listAllJobs()
+    const sessions: SessionEntry[] = jobs.map(({ short, state: job }) => {
+      const createdMs = Date.parse(job.createdAt)
+      const updatedMs = Date.parse(job.updatedAt)
+      return {
+        pid: job.pid ?? 0,
+        sessionId: job.sessionId,
+        short,
+        cwd: job.cwd,
+        startedAt: Number.isFinite(createdMs) ? createdMs : Date.now(),
+        kind: 'bg',
+        name: job.name,
+        status:
+          job.state === 'working'
+            ? job.tempo === 'blocked'
+              ? 'waiting'
+              : 'busy'
+            : job.state === 'blocked'
+              ? 'waiting'
+              : job.state,
+        updatedAt: Number.isFinite(updatedMs) ? updatedMs : Date.now(),
+        engine: 'detached',
+        lastMessage: job.detail || undefined,
+        waitingFor:
+          job.needs || job.block?.questions?.[0]?.question || undefined,
+        pinned: job.pinned,
+        gitBranch: job.worktreeBranch,
+        group: job.group,
+        archived: job.archived,
+        sortOrder: job.sortOrder,
+        agent: job.agent,
+      }
+    })
     process.stdout.write(JSON.stringify(sessions, null, 2) + '\n')
     return
   }

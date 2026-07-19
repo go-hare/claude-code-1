@@ -32,7 +32,9 @@ import { collapseReadSearchGroups } from '../utils/collapseReadSearch.js';
 import { collapseTeammateShutdowns } from '../utils/collapseTeammateShutdowns.js';
 import { getGlobalConfig } from '../utils/config.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import { isFullscreenFeatureGateEnabled } from '../utils/fullscreen.js';
 import { applyGrouping } from '../utils/groupToolUses.js';
+import { useAppState } from '../state/AppState.js';
 import {
   buildMessageLookups,
   computeMessageStructureKey,
@@ -185,6 +187,82 @@ export function filterForBriefTool<
       const att = msg.attachment;
       return att?.type === 'queued_command' && att.commandMode === 'prompt' && !att.isMeta && att.origin === undefined;
     }
+    return false;
+  });
+}
+
+/**
+ * densable focus transcript residual (ySu subset).
+ * When briefTranscript is on: keep prompt, collapsed tool summaries, assistant
+ * text/thinking, system (non api_metrics), and brief-tool results. Drop raw
+ * intermediate tool_use / tool_result chrome so the UI is
+ * "prompt + summary + response". Full ySu re-collapses every tool into
+ * collapsed_read_search; local already runs collapseReadSearchGroups — this
+ * filter drops what remains as verbose tool chrome.
+ */
+export function filterForFocusTranscript<
+  T extends {
+    type: string;
+    subtype?: string;
+    isMeta?: boolean;
+    isApiErrorMessage?: boolean;
+    message?: {
+      content: Array<{
+        type: string;
+        name?: string;
+        id?: string;
+        tool_use_id?: string;
+      }>;
+    };
+    attachment?: {
+      type: string;
+      isMeta?: boolean;
+      origin?: unknown;
+      commandMode?: string;
+    };
+  },
+>(messages: T[]): T[] {
+  // densable local subset: drop raw tool chrome. keepToolUseIDs is only
+  // populated when we retain standalone brief tool_use (briefStandalone);
+  // without that flag, tool_result always drops — intentional.
+  const keepToolUseIDs = new Set<string>();
+  return messages.filter(msg => {
+    if (msg.type === 'system') {
+      // densable drops most system noise; keep non-metrics system (compact,
+      // attach, errors). api_metrics is per-turn debug.
+      return msg.subtype !== 'api_metrics';
+    }
+    // Collapsed groups are the "summary" line.
+    if (msg.type === 'collapsed_read_search' || msg.type === 'grouped_tool_use') {
+      return true;
+    }
+    if (msg.type === 'assistant') {
+      if (msg.isApiErrorMessage) return true;
+      const block = msg.message?.content[0];
+      if (!block) return false;
+      if (block.type === 'text' || block.type === 'thinking' || block.type === 'redacted_thinking') {
+        return true;
+      }
+      // Keep only when already collapsed away — raw tool_use is chrome.
+      if (block.type === 'tool_use') {
+        // densable briefStandalone would keepToolUseIDs.add(block.id) here.
+        // Without that tool flag locally, drop raw tool chrome.
+        return false;
+      }
+      return false;
+    }
+    if (msg.type === 'user') {
+      const block = msg.message?.content[0];
+      if (block?.type === 'tool_result') {
+        return block.tool_use_id !== undefined && keepToolUseIDs.has(block.tool_use_id);
+      }
+      return !msg.isMeta;
+    }
+    if (msg.type === 'attachment') {
+      const att = msg.attachment;
+      return att?.type === 'queued_command' && att.commandMode === 'prompt' && !att.isMeta && att.origin === undefined;
+    }
+    // Progress / other types already filtered earlier; keep unknowns conservative.
     return false;
   });
 }
@@ -404,6 +482,10 @@ const MessagesImpl = ({
 }: Props): React.ReactNode => {
   const { columns } = useTerminalSize();
   const toggleShowAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'Ctrl+E');
+  // densable Messages residual: j = briefTranscript; ySu when Ki() && j && !transcript
+  const briefTranscript = useAppState(s => s.briefTranscript);
+  // focus vs /brief: isBriefOnly wins when both on (stricter SendUserMessage-only path).
+  const focusTranscriptActive = Boolean(briefTranscript) && isFullscreenFeatureGateEnabled() && !isBriefOnly;
 
   const normalizedMessages = useMemo(() => normalizeMessages(messages).filter(isNotEmptyMessage), [messages]);
 
@@ -589,10 +671,18 @@ const MessagesImpl = ({
 
     const { messages: groupedMessages } = applyGrouping(messagesToShow as MessageType[], tools, verbose);
 
-    const collapsed = collapseBackgroundBashNotifications(
+    const collapsedBase = collapseBackgroundBashNotifications(
       collapseHookSummaries(collapseTeammateShutdowns(collapseReadSearchGroups(groupedMessages, tools))),
       verbose,
     );
+    // densable: if (Ki() && (j || remoteKeepAllText) && !transcript) ySu(Le,...)
+    // Local subset: filter residual tool chrome after collapse when focus on.
+    const collapsed =
+      focusTranscriptActive && !isTranscriptMode
+        ? (filterForFocusTranscript(
+            collapsedBase as Parameters<typeof filterForFocusTranscript>[0],
+          ) as typeof collapsedBase)
+        : collapsedBase;
 
     const lookupsKey = computeMessageStructureKey(normalizedMessages, messagesToShow as MessageType[]);
     const currentLastAssistantMsgId = (() => {
@@ -664,6 +754,7 @@ const MessagesImpl = ({
     shouldTruncate,
     tools,
     isBriefOnly,
+    focusTranscriptActive,
   ]);
 
   // Cheap slice — only runs when scroll range or slice config changes.

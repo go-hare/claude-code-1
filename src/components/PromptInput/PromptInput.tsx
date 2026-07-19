@@ -111,7 +111,12 @@ import { findUltraplanTriggerPositions, findUltrareviewTriggerPositions } from '
 // AutoModeOptInDialog removed — auto mode is available to all users
 import { BridgeDialog } from '../BridgeDialog.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { getVisibleAgentTasks, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
+import { getPanelListItems, getPanelVisibleAgentTasks, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
+import {
+  isIdleSummaryRow,
+  remapPanelSelectionIndex,
+  wouldCollapseIdlePanelRows,
+} from '../../utils/panelIdleSummary.js';
 import { getEffortNotificationText } from '../EffortIndicator.js';
 import { getFastIconString } from '../FastIcon.js';
 import { GlobalSearchDialog } from '../GlobalSearchDialog.js';
@@ -446,6 +451,8 @@ function PromptInput({
   // First ↓ selects the pill, second ↓ moves to row 0. Prevents double-select
   // of pill + row when both bg tasks (pill) and forked agents (rows) are visible.
   const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
+  const taskDecorations = useAppState(s => s.taskDecorations ?? {});
+  const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
   const selectedBgAgentIndex = useAppState(s => s.selectedBgAgentIndex);
   const setSelectedBgAgentIndex = useCallback(
     (v: number | ((prev: number) => number)) =>
@@ -466,6 +473,16 @@ function PromptInput({
     [setAppState],
   );
   const coordinatorTaskCount = useCoordinatorTaskCount();
+  // densable G7 panel rows (decoration filter + optional idle_summary collapse).
+  // Shared by Enter/x handlers so selection indices cannot drift from the panel.
+  const panelListItems = useMemo(
+    () =>
+      getPanelListItems(tasks, taskDecorations, {
+        idleTeammatesExpanded,
+        viewingAgentTaskId,
+      }),
+    [tasks, taskDecorations, idleTeammatesExpanded, viewingAgentTaskId],
+  );
   // The pill (BackgroundTaskStatus) only renders when non-local_agent bg tasks
   // exist. When only local_agent tasks are running (coordinator/fork mode), the
   // pill is absent, so the -1 sentinel would leave nothing visually selected.
@@ -476,14 +493,29 @@ function PromptInput({
     [tasks],
   );
   const minCoordinatorIndex = hasBgTaskPill ? -1 : 0;
-  // Clamp index when tasks complete and the list shrinks beneath the cursor
+  // densable qo/hrf: when panel row ids change (collapse/expand/evict), remap
+  // the selection onto a still-present predecessor rather than only clamping.
+  const panelListIds = useMemo(() => panelListItems.map(r => r.id), [panelListItems]);
+  const panelListIdsRef = useRef(panelListIds);
   useEffect(() => {
+    const prevIds = panelListIdsRef.current;
+    panelListIdsRef.current = panelListIds;
+    if (prevIds === panelListIds) return;
+    if (coordinatorTaskIndex < 1) {
+      if (coordinatorTaskIndex < minCoordinatorIndex) {
+        setCoordinatorTaskIndex(minCoordinatorIndex);
+      }
+      return;
+    }
+    const remapped = remapPanelSelectionIndex(coordinatorTaskIndex, prevIds, panelListIds);
+    if (remapped !== coordinatorTaskIndex) {
+      setCoordinatorTaskIndex(Math.max(minCoordinatorIndex, remapped));
+      return;
+    }
     if (coordinatorTaskIndex >= coordinatorTaskCount) {
       setCoordinatorTaskIndex(Math.max(minCoordinatorIndex, coordinatorTaskCount - 1));
-    } else if (coordinatorTaskIndex < minCoordinatorIndex) {
-      setCoordinatorTaskIndex(minCoordinatorIndex);
     }
-  }, [coordinatorTaskCount, coordinatorTaskIndex, minCoordinatorIndex]);
+  }, [panelListIds, coordinatorTaskCount, coordinatorTaskIndex, minCoordinatorIndex, setCoordinatorTaskIndex]);
   const [isPasting, setIsPasting] = useState(false);
   const [isExternalEditorActive, setIsExternalEditorActive] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -576,7 +608,16 @@ function PromptInput({
 
   useEffect(() => {
     if (rawFooterSelection && !footerItemSelected) {
-      setAppState(prev => (prev.footerSelection === null ? prev : { ...prev, footerSelection: null }));
+      // densable XDa — collapse idle_summary when selection is invalidated
+      setAppState(prev =>
+        prev.footerSelection === null
+          ? prev
+          : {
+              ...prev,
+              footerSelection: null,
+              idleTeammatesExpanded: false,
+            },
+      );
     }
   }, [rawFooterSelection, footerItemSelected, setAppState]);
 
@@ -588,7 +629,15 @@ function PromptInput({
   const bgAgentSelected = footerItemSelected === 'bg_agent';
 
   function selectFooterItem(item: FooterItem | null): void {
-    setAppState(prev => (prev.footerSelection === item ? prev : { ...prev, footerSelection: item }));
+    // densable: leaving tasks collapses idle_summary.
+    setAppState(prev => {
+      if (prev.footerSelection === item) return prev;
+      const next = { ...prev, footerSelection: item };
+      if (prev.footerSelection === 'tasks') {
+        next.idleTeammatesExpanded = false;
+      }
+      return next;
+    });
     if (item === 'tasks') {
       setTeammateFooterIndex(0);
       setCoordinatorTaskIndex(minCoordinatorIndex);
@@ -1941,12 +1990,27 @@ function PromptInput({
                 const teammate = inProcessTeammates[teammateFooterIndex - 1];
                 if (teammate) enterTeammateView(teammate.id, setAppState);
               }
-            } else if (coordinatorTaskIndex === 0 && coordinatorTaskCount > 0) {
-              exitTeammateView(setAppState);
             } else {
-              const selectedTaskId = getVisibleAgentTasks(tasks)[coordinatorTaskIndex - 1]?.id;
-              if (selectedTaskId) {
-                enterTeammateView(selectedTaskId, setAppState);
+              // densable footer:openSelected tasks branch — G7 list + idle_summary.
+              const selectedRow = coordinatorTaskIndex >= 1 ? panelListItems[coordinatorTaskIndex - 1] : undefined;
+              if (selectedRow && isIdleSummaryRow(selectedRow)) {
+                // Expand collapse and land selection on first collapsed idle id.
+                const expandedRows = getPanelListItems(tasks, taskDecorations, {
+                  idleTeammatesExpanded: true,
+                  viewingAgentTaskId,
+                });
+                const firstCollapsed = selectedRow.taskIds[0];
+                const landAt = firstCollapsed ? expandedRows.findIndex(r => r.id === firstCollapsed) : -1;
+                panelListIdsRef.current = expandedRows.map(r => r.id);
+                setAppState(prev => ({
+                  ...prev,
+                  idleTeammatesExpanded: true,
+                  coordinatorTaskIndex: landAt >= 0 ? landAt + 1 : prev.coordinatorTaskIndex,
+                }));
+              } else if (selectedRow) {
+                enterTeammateView(selectedRow.id, setAppState);
+              } else if (coordinatorTaskIndex === 0 && coordinatorTaskCount > 0) {
+                exitTeammateView(setAppState);
               } else {
                 setShowBashesDialog(true);
                 selectFooterItem(null);
@@ -1987,21 +2051,32 @@ function PromptInput({
         }
       },
       'footer:clearSelection': () => {
+        // densable: if tasks selected and idle expanded, collapse first (keep
+        // selection when mqo says collapse would still apply).
+        if (tasksSelected && idleTeammatesExpanded) {
+          const expandedRows = getPanelVisibleAgentTasks(tasks, taskDecorations);
+          setAppState(prev => (!prev.idleTeammatesExpanded ? prev : { ...prev, idleTeammatesExpanded: false }));
+          if (wouldCollapseIdlePanelRows(expandedRows, viewingAgentTaskId)) {
+            return;
+          }
+        }
         selectFooterItem(null);
       },
       'footer:close': () => {
         if (tasksSelected && coordinatorTaskIndex >= 1) {
-          const task = getVisibleAgentTasks(tasks)[coordinatorTaskIndex - 1];
-          if (!task) return false;
+          const row = panelListItems[coordinatorTaskIndex - 1];
+          if (!row) return false;
+          // densable: idle_summary is not dismissable via x
+          if (isIdleSummaryRow(row)) return;
           // When the selected row IS the viewed agent, 'x' types into the
           // steering input. Any other row — dismiss it.
-          if (viewSelectionMode === 'viewing-agent' && task.id === viewingAgentTaskId) {
+          if (viewSelectionMode === 'viewing-agent' && row.id === viewingAgentTaskId) {
             onChange(input.slice(0, cursorOffset) + 'x' + input.slice(cursorOffset));
             setCursorOffset(cursorOffset + 1);
             return;
           }
-          stopOrDismissAgent(task.id, setAppState);
-          if (task.status !== 'running') {
+          stopOrDismissAgent(row.id, setAppState);
+          if (row.status !== 'running') {
             setCoordinatorTaskIndex(i => Math.max(minCoordinatorIndex, i - 1));
           }
           return;
