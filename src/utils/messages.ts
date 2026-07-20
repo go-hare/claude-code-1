@@ -4875,10 +4875,16 @@ export function createStopHookSummaryMessage(
   }
 }
 
+/**
+ * densable CWr(durationMs, budget?, messageCount?, pe?).
+ * pe = pendingBackgroundAgentCount — live `agent:` keepalive children when
+ * the agent parks on JXt (Yqe) instead of BRt-notifying the owner.
+ */
 export function createTurnDurationMessage(
   durationMs: number,
   budget?: { tokens: number; limit: number; nudges: number },
   messageCount?: number,
+  pendingBackgroundAgentCount?: number,
 ): SystemTurnDurationMessage {
   return {
     type: 'system',
@@ -4888,10 +4894,13 @@ export function createTurnDurationMessage(
     budgetLimit: budget?.limit,
     budgetNudges: budget?.nudges,
     messageCount,
+    ...(pendingBackgroundAgentCount !== undefined
+      ? { pendingBackgroundAgentCount }
+      : {}),
     timestamp: new Date().toISOString(),
     uuid: randomUUID(),
     isMeta: false,
-  }
+  } as SystemTurnDurationMessage
 }
 
 export function createAwaySummaryMessage(

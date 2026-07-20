@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
 import type { AssistantMessage, Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
+import type { AppState } from 'src/state/AppState.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
 import {
@@ -87,7 +88,9 @@ import {
   extractPartialResult,
   finalizeAgentTool,
   getLastToolUseName,
+  parkAgentOnKeepaliveDeferNotify,
   runAsyncAgentLifecycle,
+  sweepAndDetectLiveAgentChildren,
 } from './agentToolUtils.js';
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js';
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js';
@@ -1404,13 +1407,44 @@ export const AgentTool = buildTool({
                         getProgressUpdate(tracker, agentMessages),
                         rootSetAppState,
                       );
-                      const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata);
+                      // densable: Jeo → JXt (root registry) → Cns(suppressTelemetry:Z) → DSu
+                      // JXt must read root via set-snapshot (same store as Jeo).
+                      const preCompleteJxt = sweepAndDetectLiveAgentChildren(backgroundedTaskId, rootSetAppState);
+                      const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata, {
+                        suppressTelemetry: preCompleteJxt,
+                      });
 
                       // Mark task completed FIRST so TaskOutput(block=true)
                       // unblocks immediately. classifyHandoffIfNeeded and
                       // cleanupWorktreeIfNeeded can hang — they must not gate
                       // the status transition (gh-20236).
+                      // Re-check JXt AFTER complete (complete's Jeo may drop
+                      // already-notified kids — pre Z alone would false-defer).
                       completeAsyncAgent(agentResult, rootSetAppState);
+
+                      // densable Yqe: if JXt after DSu, CWr + defer owner BRt
+                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                      const { hasLiveAgentKeepaliveChildren } =
+                        require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js');
+                      let rootSnapAfter: AppState | undefined;
+                      rootSetAppState(prev => {
+                        rootSnapAfter = prev;
+                        return prev;
+                      });
+                      if (
+                        hasLiveAgentKeepaliveChildren(
+                          backgroundedTaskId,
+                          () => rootSnapAfter ?? toolUseContext.getAppState(),
+                        )
+                      ) {
+                        parkAgentOnKeepaliveDeferNotify(
+                          backgroundedTaskId,
+                          agentResult.totalDurationMs,
+                          rootSetAppState,
+                        );
+                        return;
+                      }
+
                       try {
                         // eslint-disable-next-line @typescript-eslint/no-require-imports
                         const { maybeStopObserverForObservedTerminal } =

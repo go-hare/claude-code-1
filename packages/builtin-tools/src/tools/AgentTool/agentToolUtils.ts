@@ -45,6 +45,7 @@ import { AbortError, errorMessage } from 'src/utils/errors.js'
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
+  createTurnDurationMessage,
   extractTextContent,
   getLastAssistantMessage,
 } from 'src/utils/messages.js'
@@ -319,6 +320,13 @@ export function finalizeAgentTool(
     agentType: string
     isAsync: boolean
   },
+  /**
+   * densable Cns(..., {suppressTelemetry:Z}) where Z = JXt after Jeo.
+   * When the finishing agent still holds any `agent:` keepalive children,
+   * skip tengu_agent_tool_completed / cache_eviction_hint (parent is parked
+   * for live children — completion telemetry would double-count).
+   */
+  opts?: { suppressTelemetry?: boolean },
 ): AgentToolResult {
   const {
     prompt,
@@ -328,6 +336,7 @@ export function finalizeAgentTool(
     agentType,
     isAsync,
   } = metadata
+  const suppressTelemetry = opts?.suppressTelemetry === true
 
   const lastAssistantMessage = getLastAssistantMessage(agentMessages)
   if (lastAssistantMessage === undefined) {
@@ -370,30 +379,34 @@ export function finalizeAgentTool(
     tracker.toolUseCount,
   )
 
-  logEvent('tengu_agent_tool_completed', {
-    agent_type:
-      agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    model:
-      resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    prompt_char_count: prompt.length,
-    response_char_count: content.length,
-    assistant_message_count: agentMessages.length,
-    total_tool_uses: totalToolUseCount,
-    duration_ms: Date.now() - startTime,
-    total_tokens: totalTokens,
-    is_built_in_agent: isBuiltInAgent,
-    is_async: isAsync,
-  })
-
-  // Signal to inference that this subagent's cache chain can be evicted.
-  const lastRequestId = lastAssistantMessage.requestId
-  if (lastRequestId) {
-    logEvent('tengu_cache_eviction_hint', {
-      scope:
-        'subagent_end' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      last_request_id:
-        lastRequestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  // densable: if(!Z) j("completed"); Cns(..., {suppressTelemetry:Z})
+  // Z = JXt after Jeo — suppress when any agent: child KA remains.
+  if (!suppressTelemetry) {
+    logEvent('tengu_agent_tool_completed', {
+      agent_type:
+        agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      model:
+        resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      prompt_char_count: prompt.length,
+      response_char_count: content.length,
+      assistant_message_count: agentMessages.length,
+      total_tool_uses: totalToolUseCount,
+      duration_ms: Date.now() - startTime,
+      total_tokens: totalTokens,
+      is_built_in_agent: isBuiltInAgent,
+      is_async: isAsync,
     })
+
+    // Signal to inference that this subagent's cache chain can be evicted.
+    const lastRequestId = lastAssistantMessage.requestId
+    if (lastRequestId) {
+      logEvent('tengu_cache_eviction_hint', {
+        scope:
+          'subagent_end' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        last_request_id:
+          lastRequestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
   }
 
   return {
@@ -558,6 +571,86 @@ export function extractPartialResult(
 type SetAppState = (f: (prev: AppState) => AppState) => void
 
 /**
+ * Snapshot AppState via the root setAppState path (setAppStateForTasks).
+ * Async/subagent getAppState() can miss root task registry writes (KA holds
+ * live on root via rootSetAppState); Jeo mutates through set, so JXt must
+ * read the same store.
+ */
+function readAppStateViaSet(setAppState: SetAppState): AppState {
+  let snap: AppState | undefined
+  setAppState(prev => {
+    snap = prev
+    return prev
+  })
+  // Fallback should never trip when setAppState is the real root updater.
+  return snap as AppState
+}
+
+/**
+ * densable Yqe park-on-keepalive after DSu when JXt:
+ * strip old turn_duration, append CWr(duration, pe), defer owner BRt.
+ * Shared by runAsyncAgentLifecycle + AgentTool mid-bg complete path.
+ */
+export function parkAgentOnKeepaliveDeferNotify(
+  taskId: string,
+  durationMs: number,
+  setAppState: SetAppState,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { countAgentKeepaliveChildren } =
+    require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
+  const pe = countAgentKeepaliveChildren(taskId, () =>
+    readAppStateViaSet(setAppState),
+  )
+  const turnDuration = createTurnDurationMessage(
+    durationMs,
+    undefined,
+    undefined,
+    pe || undefined,
+  )
+  setAppState(prev => {
+    const t = prev.tasks[taskId]
+    if (!isLocalAgentTask(t)) return prev
+    const base = t.messages ?? []
+    const filtered = base.filter(
+      m =>
+        !(
+          m.type === 'system' &&
+          (m as { subtype?: string }).subtype === 'turn_duration'
+        ),
+    )
+    return {
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [taskId]: { ...t, messages: [...filtered, turnDuration] },
+      },
+    }
+  })
+  logForDebugging(
+    `[AsyncAgent ${taskId}] parked on keepalive — deferring owner notification until resume`,
+    { level: 'info' },
+  )
+}
+
+/**
+ * densable Jeo → JXt (root registry) after stream ends, before finalize.
+ * Returns whether the agent still holds live `agent:` children (Z).
+ */
+export function sweepAndDetectLiveAgentChildren(
+  taskId: string,
+  setAppState: SetAppState,
+): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { sweepStaleKeepaliveReasons, hasLiveAgentKeepaliveChildren } =
+    require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
+  sweepStaleKeepaliveReasons(taskId, setAppState)
+  return hasLiveAgentKeepaliveChildren(taskId, () =>
+    readAppStateViaSet(setAppState),
+  )
+}
+
+/**
  * Drives a background agent from spawn to terminal notification.
  * Shared between AgentTool's async-from-start path and resumeAgentBackground.
  */
@@ -677,13 +770,47 @@ export async function runAsyncAgentLifecycle({
 
     stopSummarization?.()
 
-    const agentResult = finalizeAgentTool(agentMessages, taskId, metadata)
+    // densable: Jeo(e,s); let Z=JXt(e,s); if(!Z) j("completed");
+    // Cns(..., {suppressTelemetry:Z}); DSu(re,s,...)
+    // Sweep stale KA first, then suppress finalize telemetry when this agent
+    // still holds any agent: child (parked parent finishing with live kids).
+    // JXt must read the same root registry Jeo just mutated (not forked getAppState).
+    const preCompleteJxt = sweepAndDetectLiveAgentChildren(
+      taskId,
+      rootSetAppState,
+    )
+    const agentResult = finalizeAgentTool(agentMessages, taskId, metadata, {
+      suppressTelemetry: preCompleteJxt,
+    })
 
     // Mark task completed FIRST so TaskOutput(block=true) unblocks
     // immediately. classifyHandoffIfNeeded (API call) and getWorktreeResult
     // (git exec) are notification embellishments that can hang — they must
     // not gate the status transition (gh-20236).
+    // completeAgentTask also runs Jeo + may stamp bot idle-window.
+    // Re-check JXt AFTER complete: second Jeo may drop already-notified kids,
+    // so pre-complete Z alone would falsely defer BRt forever.
     completeAsyncAgent(agentResult, rootSetAppState)
+
+    // densable Yqe park-on-keepalive: if JXt after DSu, strip old turn_duration,
+    // append CWr(duration, void0, void0, pe||void0), defer owner BRt (return).
+    // Bot idle-window alone is NOT JXt (only agent: reasons count).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { hasLiveAgentKeepaliveChildren } =
+      require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
+    if (
+      hasLiveAgentKeepaliveChildren(taskId, () =>
+        readAppStateViaSet(rootSetAppState),
+      )
+    ) {
+      parkAgentOnKeepaliveDeferNotify(
+        taskId,
+        agentResult.totalDurationMs,
+        rootSetAppState,
+      )
+      return
+    }
+
     // Official observer densable: stop armed pairing when observed agent ends.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
