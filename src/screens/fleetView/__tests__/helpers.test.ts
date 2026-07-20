@@ -532,7 +532,7 @@ describe('buildFleetFooterHints', () => {
         runningCount: 2,
         helpOpen: false,
       }),
-    ).toContain('Press Esc/Ctrl-C again to exit')
+    ).toContain('Press Ctrl-C again to exit')
 
     expect(
       buildFleetFooterHints({

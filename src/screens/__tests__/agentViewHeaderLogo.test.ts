@@ -1,19 +1,25 @@
 /**
  * Regression: AgentView header Clawd aligned to densable Od_/WB / XFa / LUt.
- * densable: !wpe && Ys>=70 && KB; gap2 marginBottom1; path Ys-11-(model+3);
- * stats always awaiting/working/completed; no header flexShrink; no minWidth.
+ * densable 2.1.211: !wpe && Ys>=70 && <KB/>; gap2 marginBottom1; path Ys-11-(model+3);
+ * no host width wrapper; text col plain column; Esc=Tt one-shot; Ctrl+C=CJ.
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const clawdSrc = readFileSync(
-  join(import.meta.dir, '../../components/LogoV2/Clawd.tsx'),
-  'utf8',
+/** Strip block/line comments so source-string asserts only see real code. */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+}
+
+const clawdSrc = stripComments(
+  readFileSync(
+    join(import.meta.dir, '../../components/LogoV2/Clawd.tsx'),
+    'utf8',
+  ),
 )
-const agentViewSrc = readFileSync(
-  join(import.meta.dir, '../AgentView.tsx'),
-  'utf8',
+const agentViewSrc = stripComments(
+  readFileSync(join(import.meta.dir, '../AgentView.tsx'), 'utf8'),
 )
 
 describe('AgentView header logo / path layout', () => {
@@ -24,12 +30,20 @@ describe('AgentView header logo / path layout', () => {
     expect(clawdSrc).not.toMatch(
       /flexDirection="column"\s+flexShrink=\{0\}\s+width=\{CLAWD_WIDTH\}/,
     )
+    // densable uses ThemedText theme keys, not BaseText raw colors
+    expect(clawdSrc).toContain('color="clawd_body"')
+    expect(clawdSrc).toContain('backgroundColor="clawd_background"')
+    expect(clawdSrc).not.toContain('BaseText')
   })
 
-  test('Apple Terminal path: center only, no fixed width (densable _ta)', () => {
-    expect(clawdSrc).toMatch(/flexDirection="column"\s+alignItems="center"\s*>/)
-    expect(clawdSrc).not.toMatch(
+  test('Apple Terminal path: center + flexShrink 0, no fixed width', () => {
+    // densable _ta omits flexShrink, but Box default flexShrink:1 crushes the
+    // Apple column in Fleet header into solid orange bars — keep flexShrink:0.
+    expect(clawdSrc).toMatch(
       /flexDirection="column"\s+alignItems="center"\s+flexShrink=\{0\}/,
+    )
+    expect(clawdSrc).not.toMatch(
+      /flexDirection="column"\s+alignItems="center"\s+flexShrink=\{0\}\s+width=/,
     )
     expect(clawdSrc).toContain("' '.repeat(7)")
     expect(clawdSrc).toMatch(/default:\s*' ▗ {3}▖ '/)
@@ -41,31 +55,32 @@ describe('AgentView header logo / path layout', () => {
   })
 
   test('default/look poses keep densable 8-col row1 (no r1R pad)', () => {
-    // densable r1R is bare ▌ — trailing space pad was a local wrong fix
     expect(clawdSrc).toMatch(/default:\s*\{[^}]*r1R:\s*'▌'/)
     expect(clawdSrc).toMatch(/'look-left':\s*\{[^}]*r1R:\s*'▌'/)
     expect(clawdSrc).toMatch(/'look-right':\s*\{[^}]*r1R:\s*'▌'/)
     expect(clawdSrc).not.toMatch(/r1R:\s*'▌ '/)
   })
 
-  test('AgentView header matches densable Od_/WB / XFa / LUt', () => {
+  test('AgentView header matches densable Od_/WB / XFa / LUt exactly', () => {
     expect(agentViewSrc).toContain('renderModelName')
     expect(agentViewSrc).toContain('truncatePathMiddle')
     expect(agentViewSrc).toContain('pathBudget')
-    // densable LUt: Ys-11-(model+3), not CondensedLogo 15
     expect(agentViewSrc).toContain('termWidth - 11')
     expect(agentViewSrc).not.toContain('termWidth - 15')
-    // densable: no flexShrink on header row; no minWidth on text col
-    expect(agentViewSrc).toMatch(/marginBottom=\{1\} gap=\{2\}>/)
-    expect(agentViewSrc).not.toMatch(
-      /marginBottom=\{1\} gap=\{2\} flexShrink=\{0\}/,
+    // Header row MUST flexShrink={0}: parent flexGrow column would otherwise
+    // crush 3-row Clawd + title when the session list is long (solid bars).
+    // densable avoids this via ScrollBox; we pin natural header height.
+    expect(agentViewSrc).toMatch(
+      /marginBottom=\{1\} gap=\{2\} flexShrink=\{0\}>/,
     )
+    expect(agentViewSrc).not.toMatch(/width=\{CLAWD_WIDTH\}/)
     expect(agentViewSrc).toContain('fleetHeaderBudget')
     expect(agentViewSrc).toContain('fleetXfaListEstimate')
+    // densable hosts KB directly — no width={CLAWD_WIDTH} wrapper
     expect(agentViewSrc).toContain(
       '!compactHeader && termWidth >= 70 && <Clawd',
     )
-    // densable stats: RU via deriveStatsBand (O7e) — awaiting/working/completed
+    expect(agentViewSrc).not.toMatch(/width=\{CLAWD_WIDTH\}/)
     expect(agentViewSrc).toContain('deriveStatsBand')
     expect(agentViewSrc).toContain('statsBlocked')
     expect(agentViewSrc).toContain('statsActive')
@@ -74,7 +89,10 @@ describe('AgentView header logo / path layout', () => {
     expect(agentViewSrc).toContain('fleetDoneFoldAt')
     expect(agentViewSrc).not.toMatch(/\$\{pinned\.length\} pinned/)
     expect(agentViewSrc).not.toMatch(/ready for review/)
-    // densable title: bold without forced theme color
     expect(agentViewSrc).toMatch(/<Text bold>Claude Code<\/Text>/)
+    // densable: Esc cascade ends forceExit/Tt; Ctrl+C uses handleCtrlCDoublePress
+    expect(agentViewSrc).toContain('handleCtrlCDoublePress')
+    expect(agentViewSrc).toMatch(/key\.escape[\s\S]{0,400}forceExit\(\)/)
+    expect(agentViewSrc).not.toContain('requestExit')
   })
 })

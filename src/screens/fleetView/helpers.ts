@@ -832,12 +832,12 @@ export function buildFleetFooterHints(input: {
     return parts.join(' \u00b7 ')
   }
   if (input.exitArmed) {
+    // densable Mt: only Ctrl+C double-press arms exit (CJ); Esc is cascade + Tt.
     const keep =
       input.runningCount > 0
         ? ` \u00b7 ${input.runningCount} agent${input.runningCount === 1 ? '' : 's'} will keep running`
         : ''
-    // Esc / q / Ctrl+C all share requestExit double-arm (densable fC).
-    return `Press Esc/Ctrl-C again to exit${keep}`
+    return `Press Ctrl-C again to exit${keep}`
   }
   if (input.viewMode === 'rename') {
     return 'enter to save \u00b7 esc to cancel'
@@ -884,7 +884,7 @@ export function buildFleetFooterHints(input: {
     )
   }
   parts.push('shift+\u2191\u2193 reorder')
-  parts.push('esc/ctrl+c to exit')
+  parts.push('esc to quit')
   parts.push('? for shortcuts')
   return parts.join(' \u00b7 ')
 }

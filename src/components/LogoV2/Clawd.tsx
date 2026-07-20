@@ -37,11 +37,16 @@ type Segments = {
 /**
  * densable clawd column footprint. Exported for CondensedLogo / AgentView
  * pathBudget math (Clawd ~9 + gap 2 + pad ≈ 15).
+ *
+ * densable Fleet header hosts KB with NO fixed width wrapper:
+ *   gap:2 marginBottom:1; !wpe && Ys>=70 && <KB/>; text col is plain column.
+ * Do not invent width={CLAWD_WIDTH} on Clawd or its host — that clips glyph
+ * rows into a solid orange slab (observed in Agents header).
  */
 export const CLAWD_WIDTH = 9;
 
 // densable tRp — do NOT pad r1R; densable r1 is 8 cols, r2/r3 are 9.
-// flexShrink:0 (not fixed width) is what densable uses to stop layout squash.
+// densable KB root: flexDirection column + flexShrink:0 only (no width).
 const POSES: Record<ClawdPose, Segments> = {
   default: { r1L: ' ▐', r1E: '▛███▜', r1R: '▌', r2L: '▝▜', r2R: '▛▘' },
   'look-left': { r1L: ' ▐', r1E: '▟███▟', r1R: '▌', r2L: '▝▜', r2R: '▛▘' },
@@ -58,13 +63,19 @@ const APPLE_EYES: Record<ClawdPose, string> = {
   'arms-up': ' ▗   ▖ ',
 };
 
+/**
+ * densable KB / _ta — layout from 2.1.211 main_bundle.
+ * Standard KB: column + flexShrink:0; theme keys clawd_body / clawd_background.
+ * Apple _ta: densable writes column + alignItems center only. In Fleet header
+ * (row + long model·path) Box default flexShrink:1 crushes the Apple column
+ * into solid orange slabs — keep flexShrink:0 (same intent as KB). Never set
+ * width={CLAWD_WIDTH}: fixed width clips half-block rows into a solid bar.
+ */
 export function Clawd({ pose = 'default' }: Props = {}): React.ReactNode {
   if (env.terminal === 'Apple_Terminal') {
     return <AppleTerminalClawd pose={pose} />;
   }
   const p = POSES[pose];
-  // densable KB: flexShrink:0 only — no fixed width (width was clipping the
-  // Apple/standard glyph rows into a solid orange blob on fleet header).
   return (
     <Box flexDirection="column" flexShrink={0}>
       <Text>
@@ -92,17 +103,18 @@ function AppleTerminalClawd({ pose }: { pose: ClawdPose }): React.ReactNode {
   // Apple's Terminal renders vertical space between chars by default.
   // It does NOT render vertical space between background colors
   // so we use background color to draw the main shape.
-  // densable _ta: column + alignItems center only (no fixed width / flexShrink).
+  //
+  // densable _ta omits flexShrink; Box defaults flexShrink:1. Under Agents
+  // header row pressure that shrinks the column and paints solid orange
+  // bars (live screenshot 2026-07-20). flexShrink:0 keeps intrinsic ~9 cols.
   //
   // Eye FG: densable uses clawd_background (truecolor black). On Apple
   // Terminal with COLORTERM=truecolor, pure rgb(0,0,0) on orange bg often
   // paints as "no ink" → solid orange bar with no pupils. Use basic
   // ansi:black (SGR 30) so pupils stay visible while body keeps true
-  // Claude orange rgb(215,119,87) — do NOT clamp global chalk to level 2
-  // (that cubes orange → washed salmon 174). densable Ypg level-2 Chalk is
-  // chart-only; Clawd keeps the global truecolor path for body color.
+  // Claude orange rgb(215,119,87). densable Ypg level-2 chalk is chart-only.
   return (
-    <Box flexDirection="column" alignItems="center">
+    <Box flexDirection="column" alignItems="center" flexShrink={0}>
       <Text>
         <Text color="clawd_body">▗</Text>
         <Text color="ansi:black" backgroundColor="clawd_body">

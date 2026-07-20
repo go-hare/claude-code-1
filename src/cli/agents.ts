@@ -131,17 +131,23 @@ export async function agentsMain(args: string[]): Promise<void> {
 
   // Interactive dashboard
   const { renderAgentView } = await import('../screens/AgentView.js')
-  await renderAgentView({
-    dispatchExtraArgs,
-    cwdFilter,
-    restoreSessionId: restoreSessionId || undefined,
-    enteredViaLeftArrow,
-    // agentsMain already ensured daemon + owns bgManager.close()
-    daemonAlreadyEnsured: true,
-  })
-
-  // Cleanup bg manager on exit (only if we started one)
-  if (bgManager) {
-    await bgManager.close()
+  try {
+    await renderAgentView({
+      dispatchExtraArgs,
+      cwdFilter,
+      restoreSessionId: restoreSessionId || undefined,
+      enteredViaLeftArrow,
+      // agentsMain already ensured daemon + owns bgManager.close()
+      daemonAlreadyEnsured: true,
+    })
+  } finally {
+    // Cleanup bg manager on exit (only if we started one)
+    if (bgManager) {
+      try {
+        await bgManager.close()
+      } catch {
+        // ignore close errors on exit path
+      }
+    }
   }
 }

@@ -47,7 +47,6 @@ export function getOpenAIPromptCacheKey(sessionIdOverride?: string): string {
 }
 
 import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import { randomUUID } from 'crypto'
 import type { Tools } from '../../../Tool.js'
 import type { AgentId } from '../../../types/ids.js'
 import type {

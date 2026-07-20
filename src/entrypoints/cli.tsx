@@ -250,7 +250,10 @@ async function main(): Promise<void> {
     }
     const { agentsMain } = await import('../cli/agents.js');
     await agentsMain(args.slice(1));
-    return;
+    // process.exit (not return) — FleetView/Ink can leave event-loop handles
+    // that prevent natural exit (blank TTY hang after Esc).
+    // eslint-disable-next-line custom-rules/no-process-exit
+    process.exit(0);
   }
 
   // Fast-path for `claude remote-control` (also accepts legacy `claude remote` / `claude sync` / `claude bridge`):

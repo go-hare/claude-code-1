@@ -4650,6 +4650,10 @@ async function run(): Promise<CommanderCommand> {
               restoreSessionId: handoff.short,
             });
           }
+          // Left-arrow REPL → Agents is a one-way handoff (REPL already unmounted).
+          // Force exit so Ink refresh intervals / raw-mode handles cannot hang the TTY.
+          // eslint-disable-next-line custom-rules/no-process-exit
+          process.exit(0);
         }
       }
     })

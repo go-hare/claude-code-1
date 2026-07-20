@@ -8,7 +8,7 @@
  * - Dispatch input to start new background sessions
  * - Pin (Ctrl+T), Rename (Ctrl+R), Kill (Ctrl+X), Attach (Enter)
  * - Custom group (Ctrl+E), group modes state|directory|group (Ctrl+S)
- * - Soft-archive / Earlier, Shift+↑↓ reorder, Alt+1-9 open, double Ctrl+C exit
+ * - Soft-archive / Earlier, Shift+↑↓ reorder, Alt+1-9 open, Esc quit / double Ctrl+C exit
  * - Fold completed sessions beyond a cap
  * - Sorted: pinned first, then blocked > active > done
  * - Auto-relaunch detection
@@ -110,6 +110,9 @@ const REPL_HINT_VIA_LEFT_SUFFIX = ' \u2014 run `claude agents` to manage them';
 const DISPATCH_PLACEHOLDER = 'describe a task for a new session';
 /** Official Hre — custom-group bucket for jobs with no group. */
 const UNGROUPED_LABEL = '(ungrouped)';
+
+/** densable eSo — prompt-composer quit tokens (not bash). */
+const FLEET_QUIT_TOKENS = new Set(['exit', 'quit', ':q', ':q!', ':wq', ':wq!']);
 
 // ---------------------------------------------------------------------------
 // Job label — official DC6 (jobLabel)
@@ -484,9 +487,45 @@ function AgentViewApp({
    * - `group:<name>` → ungroup entire custom group header (official Lyt)
    */
   const [ungroupConfirmSessionId, setUngroupConfirmSessionId] = useState<string | null>(null);
+  // densable Mt — only Ctrl+C double-press (CJ) arms exit; Esc is one-shot Tt.
   const [exitArmed, setExitArmed] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const exitArmedRef = useRef(false);
   const exitArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // densable Tt — leave FleetView immediately (defined early: handleDispatch + useInput).
+  const forceExit = useCallback(() => {
+    if (exitArmTimerRef.current) {
+      clearTimeout(exitArmTimerRef.current);
+      exitArmTimerRef.current = null;
+    }
+    exitArmedRef.current = false;
+    setExitArmed(false);
+    if (onAction) onAction({ type: 'done' });
+    else process.exit(0);
+  }, [onAction]);
+
+  /**
+   * densable ur = CJ(Et, Tt): Ctrl+C only double-press exit.
+   * Esc is cascade then one-shot Tt() — never arms Mt (see densable 2.1.211:
+   * ctrl+c → ur(); escape → … else Tt()).
+   * Refs so re-renders cannot reset the arm window.
+   * Window 2000ms — densable CJ default is 800ms; slightly longer is easier.
+   */
+  const handleCtrlCDoublePress = useCallback(() => {
+    if (exitArmedRef.current) {
+      forceExit();
+      return;
+    }
+    exitArmedRef.current = true;
+    setExitArmed(true);
+    if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
+    exitArmTimerRef.current = setTimeout(() => {
+      exitArmedRef.current = false;
+      setExitArmed(false);
+      exitArmTimerRef.current = null;
+    }, 2000);
+  }, [forceExit]);
 
   useEffect(
     () => () => {
@@ -494,6 +533,7 @@ function AgentViewApp({
     },
     [],
   );
+
   const dispatchingRef = useRef(false);
   const lastRelaunchRef = useRef(0);
   /** Monotonic refresh generation — stale async passes must not clobber newer results. */
@@ -1221,6 +1261,18 @@ function AgentViewApp({
     const rawForParse = dispatchMode === 'bash' ? `!${dispatchInput}` : dispatchInput;
     if (!rawForParse.trim()) return;
 
+    // densable eSo: exit/quit/:q… from prompt composer exits FleetView (not bash).
+    if (dispatchMode !== 'bash') {
+      const quitToken = dispatchInput.trim().toLowerCase();
+      if (FLEET_QUIT_TOKENS.has(quitToken)) {
+        setDispatchInput('');
+        setCursorOffset(0);
+        setDispatchMode('prompt');
+        forceExit();
+        return;
+      }
+    }
+
     const cwdMap = buildCwdBasenameMap(sessions);
     const templateTargets = fleetTemplates.map(t => ({ name: t.name }));
     const routineTargets = fleetRoutines.map(r => ({ name: r.name }));
@@ -1271,7 +1323,7 @@ function AgentViewApp({
     } finally {
       dispatchingRef.current = false;
     }
-  }, [dispatchInput, dispatchMode, refresh, dispatchExtraArgs, sessions, fleetTemplates, fleetRoutines]);
+  }, [dispatchInput, dispatchMode, refresh, dispatchExtraArgs, sessions, fleetTemplates, fleetRoutines, forceExit]);
 
   /** Resolve the currently selected job from flatRows at call time (not a stale closure). */
   const getSelectedSession = useCallback((): SessionEntry | undefined => {
@@ -1346,25 +1398,6 @@ function AgentViewApp({
     }
     await refresh();
   }, [done, refresh]);
-
-  const armExit = useCallback(() => {
-    if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
-    setExitArmed(true);
-    exitArmTimerRef.current = setTimeout(() => {
-      setExitArmed(false);
-      exitArmTimerRef.current = null;
-    }, 2000);
-  }, []);
-
-  const requestExit = useCallback(() => {
-    if (exitArmed) {
-      if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
-      if (onAction) onAction({ type: 'done' });
-      else process.exit(0);
-      return;
-    }
-    armExit();
-  }, [exitArmed, armExit, onAction]);
 
   const handleGroupStart = useCallback(() => {
     const session = getSelectedSession();
@@ -1556,14 +1589,12 @@ function AgentViewApp({
     const clearPending = () => {
       setDeleteConfirmSessionId(null);
       setUngroupConfirmSessionId(null);
-      if (exitArmed) {
-        if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
-        setExitArmed(false);
-      }
     };
 
-    // Official double Ctrl+C exit (works in all modes when exitOnCtrlC is false).
-    if (input === 'c' && key.ctrl) {
+    // densable: Ctrl+C cancels transient modes / clears dispatch, else ur() double-exit.
+    // Esc never arms — only Ctrl+C uses double-press (Mt footer: Press Ctrl-C again).
+    // Match both parsed form (input='c'+ctrl) and raw ETX (\x03) for robustness.
+    if ((input === 'c' && key.ctrl) || input === '\x03') {
       if (viewMode === 'rename' || viewMode === 'group') {
         setViewMode('list');
         setGroupValue('');
@@ -1578,11 +1609,19 @@ function AgentViewApp({
         setHelpOpen(false);
         return;
       }
+      if (deleteConfirmSessionId || ungroupConfirmSessionId) {
+        clearPending();
+        return;
+      }
+      // densable: clear composer then still ur() — first Ctrl+C arms, second exits.
       if (dispatchInput) {
         setDispatchInput('');
         setCursorOffset(0);
       }
-      requestExit();
+      if (dispatchMode === 'bash') {
+        setDispatchMode('prompt');
+      }
+      handleCtrlCDoublePress();
       return;
     }
 
@@ -1750,15 +1789,18 @@ function AgentViewApp({
         }
         return;
       }
+      // densable escape cascade: clear dispatch/bash → pending delete → Tt().
+      // Empty list does NOT fall back to list focus — exit immediately (not CJ arm).
       if (key.escape) {
         if (dispatchInput || dispatchMode === 'bash') {
           setDispatchInput('');
           setCursorOffset(0);
           setDispatchMode('prompt');
-        } else if (sessions.length > 0) {
-          setFocusArea('list');
+        } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
+          // densable MD.current → NO(null): cancel delete/ungroup arm first.
+          clearPending();
         } else {
-          requestExit();
+          forceExit();
         }
         return;
       }
@@ -1986,8 +2028,18 @@ function AgentViewApp({
       });
       // Collapsing done resets doneCap expand so re-open still folds.
       setDoneCapExpanded(false);
-    } else if (input === 'q' || key.escape) {
-      requestExit();
+    } else if (key.escape) {
+      // densable list-focus Esc cascade: draft/bash → pending delete → Tt().
+      // Draft can remain after ↑ from dispatch without clearing.
+      if (dispatchInput || dispatchMode === 'bash') {
+        setDispatchInput('');
+        setCursorOffset(0);
+        setDispatchMode('prompt');
+      } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
+        clearPending();
+      } else {
+        forceExit();
+      }
     } else if (input === '!' && !key.ctrl && !key.meta) {
       // Official: "!" from list enters bash dispatch mode
       clearPending();
@@ -1995,8 +2047,8 @@ function AgentViewApp({
       setDispatchMode('bash');
       setDispatchInput('');
       setCursorOffset(0);
-    } else if (input && !key.ctrl && !key.meta && input !== 'q' && input !== 'f' && input !== '?' && input !== 'a') {
-      // Auto-switch to dispatch on any printable char
+    } else if (input && !key.ctrl && !key.meta && input !== 'f' && input !== '?' && input !== 'a') {
+      // Auto-switch to dispatch on any printable char (incl. q — densable types into composer)
       clearPending();
       setFocusArea('dispatch');
       setDispatchMode('prompt');
@@ -2025,21 +2077,29 @@ function AgentViewApp({
       <Box flexDirection="column" flexGrow={1}>
         {/* Top: scrollable list area */}
         <Box flexDirection="column" flexGrow={1} paddingTop={1}>
-          {/* Header — densable Od_/WB:
-              gap:2 marginBottom:1; !wpe && Ys>=70 && <KB/>; text col no minWidth;
-              !wpe → title + model·path; always stats awaiting/working/completed. */}
-          <Box marginBottom={1} gap={2}>
+          {/* Header — densable Od_/WB exact (2.1.211):
+              gap:2 marginBottom:1; !wpe && Ys>=70 && <KB/>;
+              text col = flexDirection column only.
+              Host KB directly — never fixed host width (clips half-blocks).
+              CRITICAL: flexShrink={0} on this row. Parent is a flexGrow column
+              packing header + full session list into the viewport; Box default
+              flexShrink:1 crushes the 3-row Clawd into solid orange bars and
+              clips the "Claude Code" title (live 2026-07-20). densable hosts
+              the header inside ScrollBox (WB) so natural height is preserved. */}
+          <Box marginBottom={1} gap={2} flexShrink={0}>
             {!compactHeader && termWidth >= 70 && <Clawd />}
-            <Box flexDirection="column">
+            <Box flexDirection="column" flexShrink={1} minWidth={0}>
               {!compactHeader && (
                 <>
                   <Text>
                     <Text bold>Claude Code</Text> <Text dimColor>v{MACRO.VERSION}</Text>
                   </Text>
-                  <Text dimColor>{[modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}</Text>
+                  <Text dimColor wrap="truncate">
+                    {[modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}
+                  </Text>
                 </>
               )}
-              <Text dimColor>
+              <Text dimColor wrap="truncate">
                 {[`${statsBlocked} awaiting input`, `${statsActive} working`, `${statsCompleted} completed`].join(
                   ' \u00b7 ',
                 )}
@@ -2215,7 +2275,7 @@ function AgentViewApp({
               <Text dimColor>enter open · space reply · ctrl+e group · ctrl+s views</Text>
               <Text dimColor>ctrl+t pin · ctrl+r rename · ctrl+x delete/ungroup · a archive</Text>
               <Text dimColor>! bash · @ mention · shift+enter newline · shift+↑↓ reorder · alt+1-9 open</Text>
-              <Text dimColor>ctrl+c exit · ? close</Text>
+              <Text dimColor>esc to quit · ctrl+c exit · ? close</Text>
             </Box>
           )}
 
@@ -2305,9 +2365,9 @@ function AgentViewApp({
             </Box>
           )}
 
-          {/* Keyboard hints — official FleetView footer chords */}
-          <Box paddingLeft={2} height={1}>
-            <Text dimColor wrap={'truncate' as never}>
+          {/* Keyboard hints — FleetView footer. Arm message stays prominent. */}
+          <Box paddingLeft={2} height={1} flexShrink={0}>
+            <Text dimColor={!exitArmed} color={exitArmed ? 'warning' : undefined} wrap={'truncate' as never}>
               {footerHints}
             </Text>
           </Box>
@@ -2563,9 +2623,17 @@ export async function renderAgentView(options?: {
       // ignore
     }
     try {
+      process.stdin.ref?.();
       process.stdin.unref?.();
     } catch {
       // ignore
     }
+  }
+
+  // Leave alt screen / restore cursor in case unmount raced with handoff.
+  try {
+    process.stdout.write('\x1b[?25h\x1b[0m');
+  } catch {
+    // ignore
   }
 }
