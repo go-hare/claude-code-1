@@ -78,6 +78,14 @@ describe('panelIdleSummary densable G7', () => {
     expect(wouldCollapseIdlePanelRows(rows)).toBe(true)
   })
 
+  test('local_agent isIdle does not collapse (densable mrf teammate-only)', () => {
+    const rows = Array.from({ length: IDLE_COLLAPSE_THRESHOLD + 2 }, (_, i) =>
+      local(String(i), true),
+    )
+    expect(collapseIdlePanelRows(rows, false)).toEqual(rows)
+    expect(wouldCollapseIdlePanelRows(rows)).toBe(false)
+  })
+
   test('expanded skips collapse', () => {
     const rows = Array.from({ length: 5 }, (_, i) => teammate(String(i), true))
     expect(collapseIdlePanelRows(rows, true)).toEqual(rows)

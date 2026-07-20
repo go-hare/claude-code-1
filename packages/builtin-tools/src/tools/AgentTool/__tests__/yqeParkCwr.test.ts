@@ -77,6 +77,18 @@ describe('densable Yqe park CWr + pe (JXt count)', () => {
     expect(utils).toContain('sweepAndDetectLiveAgentChildren')
     expect(utils).toContain('parkAgentOnKeepaliveDeferNotify')
     expect(utils).toContain('suppressTelemetry')
+    // densable Yqe D isIdle tracking (shared tracker)
+    expect(utils).toContain('createLocalAgentIsIdleTracker')
+    expect(utils).toContain('computeLocalAgentIsIdle')
+    expect(utils).toContain('updateLocalAgentIsIdle')
+    // mid-bg path in AgentTool must seed + track (verifier residual)
+    const agentTool = readFileSync(
+      join(import.meta.dir, '../AgentTool.tsx'),
+      'utf8',
+    )
+    expect(agentTool).toContain('createLocalAgentIsIdleTracker')
+    expect(agentTool).toContain('seedFromMessages')
+    expect(agentTool).toContain('isIdleTracker.track')
     // order: completeAsyncAgent → post-complete JXt park return → enqueue
     const completeIdx = utils.indexOf('completeAsyncAgent(agentResult')
     const parkIdx = utils.indexOf(

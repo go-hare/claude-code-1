@@ -140,6 +140,7 @@ export function registerMainSessionTask(
     lastReportedTokenCount: 0,
     isBackgrounded: true, // Already backgrounded
     pendingMessages: [],
+    isIdle: false, // densable local_agent isIdle:!1 at register
     retain: false,
     diskLoaded: false,
   }

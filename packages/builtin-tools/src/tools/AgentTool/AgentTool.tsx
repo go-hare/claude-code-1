@@ -84,6 +84,7 @@ import { setAgentColor } from './agentColorManager.js';
 import {
   agentToolResultSchema,
   classifyHandoffIfNeeded,
+  createLocalAgentIsIdleTracker,
   emitTaskProgress,
   extractPartialResult,
   finalizeAgentTool,
@@ -1330,6 +1331,9 @@ export const AgentTool = buildTool({
                       // any in-place usage mutations already applied are visible).
                       const tracker = createProgressTracker();
                       const resolveActivity2 = createActivityDescriptionResolver(toolUseContext.options.tools);
+                      // densable Yqe D: seed isIdle from pre-bg messages, then track mid-bg stream.
+                      const isIdleTracker = createLocalAgentIsIdleTracker(backgroundedTaskId, rootSetAppState);
+                      isIdleTracker.seedFromMessages(agentMessages);
                       rebuildProgressFromMessages(
                         tracker,
                         agentMessages,
@@ -1358,6 +1362,7 @@ export const AgentTool = buildTool({
                           : undefined,
                       })) {
                         agentMessages.push(msg);
+                        isIdleTracker.track(msg);
 
                         // Rebuild so late message_delta usage mutations stick.
                         rebuildProgressFromMessages(
@@ -1371,6 +1376,7 @@ export const AgentTool = buildTool({
                           getProgressUpdate(tracker, agentMessages),
                           rootSetAppState,
                         );
+                        isIdleTracker.sync();
                         // message_delta often lands with no further yields until the
                         // next tool result — deferred rebuild unfreezes footer tokens.
                         scheduleDeferredAgentProgressRebuild(

@@ -14,7 +14,7 @@ import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Ansi, Box, Text, stringWidth, wrapText } from '@anthropic/ink';
 import { type AppState, useAppState, useSetAppState } from '../state/AppState.js';
 import { enterTeammateView, exitTeammateView } from '../state/teammateViewHelpers.js';
-import { type LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js';
+import { isLocalAgentTask, type LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js';
 import { isInProcessTeammateTask } from '../tasks/InProcessTeammateTask/types.js';
 import { formatDuration, formatNumber } from '../utils/format.js';
 import {
@@ -250,19 +250,24 @@ function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: Ag
   const [hover, setHover] = React.useState(false);
   const isTeammate = isInProcessTeammateTask(task);
   const isIdleTeammate = isTeammate && task.isIdle;
-  const isRunning = !isTerminalStatus(task.status) && !isIdleTeammate;
+  // densable pAb: non-terminal local_agent isIdle → "waiting" (not "idle")
+  const isIdleLocalAgent = !isTeammate && isLocalAgentTask(task) && Boolean((task as LocalAgentTaskState).isIdle);
+  const isIdleRow = isIdleTeammate || isIdleLocalAgent;
+  const isRunning = !isTerminalStatus(task.status) && !isIdleRow;
   const pausedMs = (task as LocalAgentTaskState).totalPausedMs ?? 0;
   const elapsedMs = Math.max(
     0,
     isRunning ? Date.now() - task.startTime - pausedMs : (task.endTime ?? task.startTime) - task.startTime - pausedMs,
   );
 
-  // densable pAb: idle teammate shows "idle" instead of duration.
+  // densable pAb: teammate isIdle → "idle"; local_agent isIdle → "waiting".
   const elapsed = isIdleTeammate
     ? 'idle'
-    : isTeammate && task.awaitingPlanApproval && task.status === 'running'
-      ? 'awaiting approval'
-      : formatDuration(elapsedMs);
+    : isIdleLocalAgent
+      ? 'waiting'
+      : isTeammate && task.awaitingPlanApproval && task.status === 'running'
+        ? 'awaiting approval'
+        : formatDuration(elapsedMs);
   const tokenCount = task.progress?.tokenCount;
 
   // Derive direction arrow from activity state, same logic as Spinner
@@ -270,9 +275,7 @@ function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: Ag
   const arrow = lastActivity ? figures.arrowDown : figures.arrowUp;
 
   const tokenText =
-    !isIdleTeammate && tokenCount !== undefined && tokenCount > 0
-      ? ` · ${arrow} ${formatNumber(tokenCount)} tokens`
-      : '';
+    !isIdleRow && tokenCount !== undefined && tokenCount > 0 ? ` · ${arrow} ${formatNumber(tokenCount)} tokens` : '';
 
   const queuedCount = isTeammate
     ? task.pendingUserMessages.length

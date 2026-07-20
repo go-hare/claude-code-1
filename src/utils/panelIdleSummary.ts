@@ -6,8 +6,8 @@
  * synthetic idle_summary row ("N idle agents").
  *
  * densable UQ = non-main local_agent (R6) OR in_process_teammate (Nv).
- * densable mrf only collapses in_process_teammate when idle; local residual also
- * duck-types optional isIdle on local_agent for tests / future parity.
+ * densable mrf only collapses in_process_teammate when idle — local_agent isIdle
+ * means "waiting on nested Agent" (Yqe D), not panel idle collapse.
  */
 import { isTerminalStatus } from '../components/tasks/taskStatusUtils.js'
 import type { LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js'
@@ -69,22 +69,19 @@ export function isTeammateBusyForIdleCollapse(
 
 /**
  * densable mrf — collapsible idle agent for panel list.
- * Primary: in_process_teammate isIdle && !terminal && !viewed && !$eo.
- * Secondary: local_agent duck-type optional isIdle (tests / future).
+ * Only in_process_teammate isIdle && !terminal && !viewed && !$eo.
+ * local_agent isIdle is "waiting" (nested Agent tools), not mrf-collapsible.
  */
 export function isCollapsibleIdlePanelTask(
-  task: PanelAgentTask | (LocalAgentTaskState & { isIdle?: boolean }),
+  task: PanelAgentTask | LocalAgentTaskState,
   viewingAgentTaskId: string | undefined,
 ): boolean {
   if (task.id === viewingAgentTaskId) return false
   if (isTerminalStatus(task.status)) return false
-  if (task.type === 'in_process_teammate') {
-    const tm = task as InProcessTeammateTaskState
-    if (isTeammateBusyForIdleCollapse(tm)) return false
-    return Boolean(tm.isIdle)
-  }
-  // Duck-type local_agent if isIdle is ever set on the task state.
-  return Boolean((task as { isIdle?: boolean }).isIdle)
+  if (task.type !== 'in_process_teammate') return false
+  const tm = task as InProcessTeammateTaskState
+  if (isTeammateBusyForIdleCollapse(tm)) return false
+  return Boolean(tm.isIdle)
 }
 
 /**

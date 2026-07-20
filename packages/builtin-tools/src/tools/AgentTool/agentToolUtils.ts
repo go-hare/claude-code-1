@@ -23,6 +23,7 @@ import type {
 import { toolMatchesName } from 'src/Tool.js'
 import {
   completeAgentTask as completeAsyncAgent,
+  computeLocalAgentIsIdle,
   createActivityDescriptionResolver,
   createProgressTracker,
   enqueueAgentNotification,
@@ -35,6 +36,7 @@ import {
   rebuildProgressFromMessages,
   scheduleDeferredAgentProgressRebuild,
   updateAgentProgress as updateAsyncAgentProgress,
+  updateLocalAgentIsIdle,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { asAgentId } from 'src/types/ids.js'
 import type { Message as MessageType, ContentItem } from 'src/types/message.js'
@@ -591,6 +593,66 @@ function readAppStateViaSet(setAppState: SetAppState): AppState {
  * strip old turn_duration, append CWr(duration, pe), defer owner BRt.
  * Shared by runAsyncAgentLifecycle + AgentTool mid-bg complete path.
  */
+/**
+ * densable Yqe isIdle tracker: N = in-flight tool_use ids, $ = nested Agent/Task.
+ * Shared by runAsyncAgentLifecycle and AgentTool mid-bg continuation.
+ */
+export function createLocalAgentIsIdleTracker(
+  taskId: string,
+  setAppState: SetAppState,
+): {
+  track: (message: MessageType) => void
+  sync: () => void
+  seedFromMessages: (messages: readonly MessageType[]) => void
+} {
+  const inFlightToolUseIds = new Set<string>()
+  const nestedAgentToolUseIds = new Set<string>()
+  const track = (message: MessageType): void => {
+    if (message.type === 'assistant') {
+      const content = (message.message?.content as ContentItem[]) ?? []
+      for (const block of content) {
+        if (block.type !== 'tool_use' || typeof block.id !== 'string') continue
+        inFlightToolUseIds.add(block.id)
+        if (
+          block.name === AGENT_TOOL_NAME ||
+          block.name === LEGACY_AGENT_TOOL_NAME
+        ) {
+          nestedAgentToolUseIds.add(block.id)
+        }
+      }
+      return
+    }
+    if (message.type !== 'user') return
+    const content = message.message?.content
+    if (!Array.isArray(content)) return
+    for (const block of content) {
+      if (
+        typeof block === 'object' &&
+        block !== null &&
+        (block as { type?: string }).type === 'tool_result'
+      ) {
+        const id = (block as { tool_use_id?: string }).tool_use_id
+        if (typeof id === 'string') {
+          inFlightToolUseIds.delete(id)
+          nestedAgentToolUseIds.delete(id)
+        }
+      }
+    }
+  }
+  const sync = (): void => {
+    updateLocalAgentIsIdle(
+      taskId,
+      computeLocalAgentIsIdle(inFlightToolUseIds, nestedAgentToolUseIds),
+      setAppState,
+    )
+  }
+  const seedFromMessages = (messages: readonly MessageType[]): void => {
+    for (const m of messages) track(m)
+    sync()
+  }
+  return { track, sync, seedFromMessages }
+}
+
 export function parkAgentOnKeepaliveDeferNotify(
   taskId: string,
   durationMs: number,
@@ -684,6 +746,8 @@ export async function runAsyncAgentLifecycle({
 }): Promise<void> {
   let stopSummarization: (() => void) | undefined
   const agentMessages: MessageType[] = []
+  // densable Yqe D — shared tracker (also used by mid-bg path in AgentTool)
+  const isIdleTracker = createLocalAgentIsIdleTracker(taskId, rootSetAppState)
   try {
     const tracker = createProgressTracker()
     const resolveActivity = createActivityDescriptionResolver(
@@ -702,6 +766,7 @@ export async function runAsyncAgentLifecycle({
       : undefined
     for await (const message of makeStream(onCacheSafeParams)) {
       agentMessages.push(message)
+      isIdleTracker.track(message)
       // Append immediately when UI holds the task (retain). Bootstrap reads
       // disk in parallel and UUID-merges the prefix — disk-write-before-yield
       // means live is always a suffix of disk, so merge is order-correct.
@@ -731,6 +796,8 @@ export async function runAsyncAgentLifecycle({
         getProgressUpdate(tracker, agentMessages),
         rootSetAppState,
       )
+      // densable Yqe D after each stream message (tool_use / tool_result)
+      isIdleTracker.sync()
       // message_delta often arrives with no further yields until the next tool
       // result — without a deferred rebuild the footer freezes at first count.
       scheduleDeferredAgentProgressRebuild(

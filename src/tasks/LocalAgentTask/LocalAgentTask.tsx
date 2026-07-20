@@ -444,6 +444,12 @@ export type LocalAgentTaskState = TaskStateBase & {
   isBackgrounded: boolean;
   // Messages queued mid-turn via SendMessage, drained at tool-round boundaries
   pendingMessages: string[];
+  /**
+   * densable local_agent isIdle (Yqe D): true only when every in-flight tool is a
+   * nested Agent/Task spawn — panel shows "waiting". Not teammate park/idle.
+   * false when no tools in flight or any non-Agent tool is running.
+   */
+  isIdle: boolean;
   // UI is holding this task: blocks eviction, enables stream-append, triggers
   // disk bootstrap. Set by enterTeammateView. Separate from viewingAgentTaskId
   // (which is "what am I LOOKING at") — retain is "what am I HOLDING."
@@ -503,6 +509,26 @@ function evictAgentTaskOutputIfPersistent(taskId: string): void {
   if (!isTranscriptPersistenceDisabled()) {
     void evictTaskOutput(taskId);
   }
+}
+
+/**
+ * densable Yqe D: `te = $.size>0 && $.size===N.size`
+ * N = all in-flight tool_use ids; $ = subset whose name is Agent (or legacy Task).
+ * isIdle only when parent is blocked solely on nested agent tool results.
+ */
+export function computeLocalAgentIsIdle(
+  inFlightToolUseIds: ReadonlySet<string>,
+  nestedAgentToolUseIds: ReadonlySet<string>,
+): boolean {
+  return nestedAgentToolUseIds.size > 0 && nestedAgentToolUseIds.size === inFlightToolUseIds.size;
+}
+
+/** densable Sot/OSu/Yqe — stamp isIdle without churning AppState when unchanged. */
+export function updateLocalAgentIsIdle(taskId: string, isIdle: boolean, setAppState: SetAppState): void {
+  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
+    if (task.isIdle === isIdle) return task;
+    return { ...task, isIdle };
+  });
 }
 
 export function isLocalAgentTask(task: unknown): task is LocalAgentTaskState {
@@ -1523,6 +1549,7 @@ export function registerAsyncAgent({
     lastReportedTokenCount: 0,
     isBackgrounded: true, // registerAsyncAgent immediately backgrounds
     pendingMessages: [],
+    isIdle: false, // densable Sot isIdle:!1
     retain: false,
     diskLoaded: false,
     ...(isObserver === true ? { isObserver: true } : {}),
@@ -1620,6 +1647,7 @@ export function registerAgentForeground({
     lastReportedTokenCount: 0,
     isBackgrounded: false, // Not yet backgrounded - running in foreground
     pendingMessages: [],
+    isIdle: false, // densable OSu isIdle:!1
     retain: false,
     diskLoaded: false,
   };
