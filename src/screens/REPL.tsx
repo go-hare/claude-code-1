@@ -298,6 +298,7 @@ import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool
 import { resolveAgentTools } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js';
 import { resumeAgentBackground } from '@claude-code/builtin-tools/tools/AgentTool/resumeAgent.js';
 import { useMainLoopModel } from '../hooks/useMainLoopModel.js';
+import { useStrandedAgentResume } from '../hooks/useStrandedAgentResume.js';
 import { useAppState, useSetAppState, useAppStateStore } from '../state/AppState.js';
 import type { ContentBlockParam, ContentBlock, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import type { ProcessUserInputContext } from '../utils/processUserInput/processUserInput.js';
@@ -3582,6 +3583,21 @@ export function REPL({
     ],
   );
 
+  // densable luf/Weo: stranded pendingMessages → drain + Aye resume
+  useStrandedAgentResume({
+    getAppState: () => store.getState(),
+    setAppState,
+    getToolUseContext: () =>
+      getToolUseContext(
+        messagesRef.current,
+        [],
+        new AbortController(),
+        mainLoopModel,
+      ) as unknown as import('../Tool.js').ToolUseContext,
+    canUseTool,
+    addNotification,
+  });
+
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
     // Stop the foreground query so the background one takes over.
@@ -5006,6 +5022,8 @@ export function REPL({
             prompt: input,
             toolUseContext: getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel),
             canUseTool,
+            // densable Aye userInitiated — panel user resume clears stoppedByUser
+            userInitiated: true,
           }).catch(err => {
             logForDebugging(`resumeAgentBackground failed: ${errorMessage(err)}`);
             addNotification({
