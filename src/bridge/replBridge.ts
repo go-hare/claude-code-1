@@ -1764,6 +1764,7 @@ export async function initBridgeCore(
   )
   onStateChange?.('ready')
 
+  // densable Qt: sessionGroupingId + outboundOnly:B??!1 on handle for left-arrow rit
   return {
     get bridgeSessionId() {
       return currentSessionId
@@ -1779,6 +1780,9 @@ export async function initBridgeCore(
       const live = transport?.getLastSequenceNum() ?? 0
       return Math.max(lastTransportSequenceNum, live)
     },
+    // densable B??!1 — boolean so left-arrow does not treat unset as true
+    outboundOnly: false,
+    sessionGroupingId: undefined,
     sessionIngressUrl,
     writeMessages(messages) {
       // Filter to user/assistant messages that haven't already been sent.

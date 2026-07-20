@@ -796,10 +796,17 @@ export async function initEnvLessBridgeCore(
   }
 
   // ── 10. Handle ──────────────────────────────────────────────────────────
+  // densable Qt: sessionGroupingId:He, outboundOnly:B??!1
+  // outboundOnly must be a boolean on the handle so left-arrow rit() sees
+  // false (omit env) when unset — not undefined (local rit treated as true).
   return {
     bridgeSessionId: sessionId,
     environmentId: '',
     sessionIngressUrl: credentials.api_base_url,
+    outboundOnly: outboundOnly ?? false,
+    // Grouping id is densable He (reattach B / wXr grouping / new k). Local
+    // has no bootstrap currentSessionBridgeGroupingId yet — leave undefined.
+    sessionGroupingId: undefined,
     writeMessages(messages) {
       const filtered = messages.filter(
         m =>
