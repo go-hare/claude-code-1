@@ -17,6 +17,11 @@ mock.module('src/utils/sessionStorage.js', () => ({
   recordSidechainTranscript: async () => {},
   recordQueueOperation: noop,
   writeAgentMetadata: async () => {},
+  readAgentMetadata: async () => null,
+  patchAgentMetadata: async (_id: string, patch: Record<string, unknown>) => ({
+    agentType: 'unknown',
+    ...patch,
+  }),
 }))
 
 // Spread real diskOutput so DiskTaskOutput and other named exports stay intact
@@ -36,10 +41,18 @@ mock.module('../../utils/task/diskOutput.js', diskOutputMock)
 
 // Capture enqueuePendingNotification calls for verification
 const enqueuedNotifications: string[] = []
+// densable okg / Jeo / Zeo read getCommandQueue — keep empty stub so complete
+// with bot idle-window does not throw under process-global mock.
 mock.module('src/utils/messageQueueManager.js', () => ({
   enqueuePendingNotification: (cmd: any) => {
     enqueuedNotifications.push(cmd.value)
   },
+  getCommandQueue: () => [],
+  getCommandQueueSnapshot: () => [],
+  getCommandQueueLength: () => 0,
+  dequeueAllMatching: () => [],
+  enqueue: () => {},
+  dequeue: () => undefined,
 }))
 
 // Spread real bootstrap/state so getUseCoworkPlugins and the rest of the
@@ -134,7 +147,11 @@ const {
   updateAgentProgress,
   scheduleDeferredAgentProgressRebuild,
   isLocalAgentTask,
+  clearAllIdleWindowTimersForTests,
 } = await import('../LocalAgentTask.js')
+const { IDLE_WINDOW_KEEPALIVE_REASON } = await import(
+  '../../../utils/task/framework.js'
+)
 
 // ─── Helpers ───
 
@@ -619,6 +636,10 @@ describe('getProgressUpdate', () => {
 })
 
 describe('completeAgentTask', () => {
+  afterEach(() => {
+    clearAllIdleWindowTimersForTests()
+  })
+
   test('transitions running task to completed', () => {
     const { setAppState, getState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask() },
@@ -637,7 +658,9 @@ describe('completeAgentTask', () => {
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('completed')
     expect(task.endTime).toBeDefined()
-    expect(task.evictAfter).toBeDefined()
+    // densable DSu a=true: stamps flag:idle-window → YC park, no grace yet
+    expect(task.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON)).toBe(true)
+    expect(task.evictAfter).toBeUndefined()
   })
 
   test('syncs progress token count from finalized result', () => {

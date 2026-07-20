@@ -6,6 +6,7 @@
  * not the default log-only refuse stub.
  */
 
+import { getMainThreadAgentId } from 'src/bootstrap/state.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { assembleToolPool } from 'src/tools.js'
@@ -159,6 +160,9 @@ export function createAgentObserverRuntimeHostHandlers(
         observerAppState.mcp.tools,
       )
 
+      // densable observer Sot: ownerAgentId:mi(), isObserver:!0, no Gge
+      // (Kle quietly parks notify; attachOwnerKeepalive:false).
+      const mainOwnerId = getMainThreadAgentId()
       const observerTask = registerAsyncAgent({
         agentId: plan.observerTaskId,
         description: plan.description,
@@ -168,6 +172,10 @@ export function createAgentObserverRuntimeHostHandlers(
           typeof registerAsyncAgent
         >[0]['setAppState'],
         toolUseId: armCtx.toolUseId,
+        ownerAgentId: mainOwnerId,
+        notificationTargetAgentId: asAgentId(mainOwnerId),
+        isObserver: true,
+        attachOwnerKeepalive: false,
       })
 
       const observerPromptMessages = [

@@ -9,7 +9,13 @@ import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type { AgentId } from '../../types/ids.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { registerTask, updateTaskState } from '../../utils/task/framework.js'
+import {
+  addKeepaliveReason,
+  monitorKeepaliveReason,
+  registerTask,
+  removeKeepaliveReason,
+  updateTaskState,
+} from '../../utils/task/framework.js'
 
 export type MonitorMcpTaskState = TaskStateBase & {
   type: 'monitor_mcp'
@@ -58,38 +64,66 @@ export function registerMonitorMcpTask(
     abortController: opts.abortController,
   }
   registerTask(task, setAppState)
+  // densable: Gge(c, `monitor:${u}`, registry) after register
+  if (opts.agentId) {
+    addKeepaliveReason(opts.agentId, monitorKeepaliveReason(id), setAppState)
+  }
   return id
+}
+
+function detachMonitorKeepalive(
+  taskId: string,
+  agentId: AgentId | undefined,
+  setAppState: SetAppState,
+): void {
+  if (!agentId) return
+  removeKeepaliveReason(agentId, monitorKeepaliveReason(taskId), setAppState)
 }
 
 export function completeMonitorMcpTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
-  updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => ({
-    ...task,
-    status: 'completed',
-    endTime: Date.now(),
-    notified: true,
-    abortController: undefined,
-  }))
+  let agentId: AgentId | undefined
+  updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
+    agentId = task.agentId
+    return {
+      ...task,
+      status: 'completed',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+    }
+  })
+  // densable: tB(c, `monitor:${taskId}`) on finish
+  detachMonitorKeepalive(taskId, agentId, setAppState)
 }
 
 export function failMonitorMcpTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
-  updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => ({
-    ...task,
-    status: 'failed',
-    endTime: Date.now(),
-    notified: true,
-    abortController: undefined,
-  }))
+  let agentId: AgentId | undefined
+  updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
+    agentId = task.agentId
+    return {
+      ...task,
+      status: 'failed',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+    }
+  })
+  detachMonitorKeepalive(taskId, agentId, setAppState)
 }
 
 export function killMonitorMcp(taskId: string, setAppState: SetAppState): void {
+  let agentId: AgentId | undefined
+  let killed = false
   updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') return task
+    agentId = task.agentId
+    killed = true
     task.abortController?.abort()
     return {
       ...task,
@@ -99,6 +133,9 @@ export function killMonitorMcp(taskId: string, setAppState: SetAppState): void {
       abortController: undefined,
     }
   })
+  if (killed) {
+    detachMonitorKeepalive(taskId, agentId, setAppState)
+  }
 }
 
 /**

@@ -28,11 +28,17 @@ mock.module('src/utils/task/diskOutput.js', diskOutputMock)
 mock.module('../diskOutput.js', diskOutputMock)
 
 // Mutable queue for Jeo pending-notification probes (official Hte()).
+// Keep full export surface so co-running suites that import real
+// messageQueueManager helpers still resolve under process-global mock.
 let mockCommandQueue: any[] = []
 mock.module('src/utils/messageQueueManager.js', () => ({
   enqueuePendingNotification: noop,
   dequeueAllMatching: () => [],
   getCommandQueue: () => mockCommandQueue,
+  getCommandQueueSnapshot: () => mockCommandQueue,
+  getCommandQueueLength: () => mockCommandQueue.length,
+  enqueue: noop,
+  dequeue: () => undefined,
 }))
 
 // ─── Import after mocks ───
@@ -48,6 +54,10 @@ const {
   isParkedKeepaliveAgent,
   sweepStaleKeepaliveReasons,
   hasLiveAgentKeepaliveChildren,
+  hasNonIdleWindowKeepalive,
+  idleWindowKeepaliveReason,
+  IDLE_WINDOW_KEEPALIVE_REASON,
+  IDLE_WINDOW_MS,
   POLL_INTERVAL_MS,
   PANEL_GRACE_MS,
 } = await import('../framework.js')
@@ -250,6 +260,40 @@ describe('QYi computePanelEvictAfter / YC isParkedKeepaliveAgent', () => {
         keepaliveReasons: new Set(),
       }),
     ).toBe(false)
+    // densable bot alone still YC-parks
+    expect(
+      isParkedKeepaliveAgent({
+        type: 'local_agent',
+        status: 'completed',
+        keepaliveReasons: new Set([IDLE_WINDOW_KEEPALIVE_REASON]),
+      }),
+    ).toBe(true)
+  })
+
+  test('densable bot idle-window helpers', () => {
+    expect(IDLE_WINDOW_KEEPALIVE_REASON).toBe('flag:idle-window')
+    expect(idleWindowKeepaliveReason()).toBe(IDLE_WINDOW_KEEPALIVE_REASON)
+    expect(IDLE_WINDOW_MS).toBe(PANEL_GRACE_MS)
+    expect(hasNonIdleWindowKeepalive(undefined)).toBe(false)
+    expect(hasNonIdleWindowKeepalive(new Set())).toBe(false)
+    expect(
+      hasNonIdleWindowKeepalive(new Set([IDLE_WINDOW_KEEPALIVE_REASON])),
+    ).toBe(false)
+    expect(
+      hasNonIdleWindowKeepalive(
+        new Set([IDLE_WINDOW_KEEPALIVE_REASON, 'agent:x']),
+      ),
+    ).toBe(true)
+    // park with only bot → no grace (held open)
+    expect(
+      computePanelEvictAfter(
+        {
+          retain: false,
+          keepaliveReasons: new Set([IDLE_WINDOW_KEEPALIVE_REASON]),
+        },
+        { park: true },
+      ),
+    ).toBeUndefined()
   })
 })
 

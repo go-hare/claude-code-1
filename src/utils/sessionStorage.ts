@@ -286,6 +286,11 @@ export type AgentMetadata = {
    * observer agent sidecar when pairing is stopped so KOu reattach blocks.
    */
   observerStopped?: boolean
+  /**
+   * densable Gzg/hAe — user-initiated stop marker on agent sidecar.
+   * Aye resume blocks auto-resume unless userInitiated clears it.
+   */
+  stoppedByUser?: boolean
 }
 
 /**

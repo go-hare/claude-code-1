@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
 import * as realBootstrapState from '../../../bootstrap/state.js'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
@@ -13,6 +13,11 @@ mock.module('src/utils/sessionStorage.js', () => ({
   recordSidechainTranscript: async () => {},
   recordQueueOperation: noop,
   writeAgentMetadata: async () => {},
+  readAgentMetadata: async () => null,
+  patchAgentMetadata: async (_id: string, patch: Record<string, unknown>) => ({
+    agentType: 'unknown',
+    ...patch,
+  }),
 }))
 function diskOutputMock() {
   return {
@@ -82,6 +87,10 @@ mock.module('../../bootstrap/state.js', bootstrapStateMock)
 mock.module('src/services/PromptSuggestion/speculation.js', () => ({
   abortSpeculation: noop,
 }))
+mock.module('src/services/analytics/index.js', () => ({
+  logEvent: noop,
+  stripProtoFields: (x: unknown) => x,
+}))
 mock.module('src/utils/cleanupRegistry.js', () => ({
   registerCleanup: () => noop,
 }))
@@ -124,7 +133,17 @@ const {
   rewireOrphanedOwnerNotifications,
   resolvePanelOwnerAgentId,
   isPanelAgentTask,
+  armIdleWindowTimer,
+  clearIdleWindowTimer,
+  clearAllIdleWindowTimersForTests,
+  expireIdleWindowKeepalive,
 } = await import('../LocalAgentTask.js')
+const {
+  IDLE_WINDOW_KEEPALIVE_REASON,
+  IDLE_WINDOW_MS,
+  hasNonIdleWindowKeepalive,
+  idleWindowKeepaliveReason,
+} = await import('../../../utils/task/framework.js')
 
 function store() {
   let state: { tasks: Record<string, any> } = { tasks: {} }
@@ -180,6 +199,11 @@ function spawnChild(s: ReturnType<typeof store>, id = 'child1') {
 }
 
 describe('agent keepalive Gge/tB', () => {
+  afterEach(() => {
+    clearAllIdleWindowTimersForTests()
+    zeoQueue.length = 0
+  })
+
   test('resolvePanelOwnerAgentId mirrors densable Yeo (panel only)', () => {
     const s = store()
     seedOwner(s, { agentType: 'general-purpose' })
@@ -246,8 +270,12 @@ describe('agent keepalive Gge/tB', () => {
     // Official DSu: no owner tB on complete — BRt decides.
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
     expect(s.get().tasks.child1.status).toBe('completed')
-    // park:true + no self KA → still schedules grace when empty
-    expect(typeof s.get().tasks.child1.evictAfter).toBe('number')
+    // densable DSu a=true: stamps bot idle-window → YC park, no grace yet
+    expect(
+      s.get().tasks.child1.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
+    ).toBe(true)
+    expect(s.get().tasks.child1.evictAfter).toBeUndefined()
+    clearAllIdleWindowTimersForTests()
   })
 
   test('completeAgentTask Jeo sweeps already-notified child KA before park', () => {
@@ -275,7 +303,7 @@ describe('agent keepalive Gge/tB', () => {
     }))
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
 
-    // Parent completes: Jeo detaches agent:child; parent not parked
+    // Parent completes: Jeo detaches agent:child; DSu stamps bot → YC park
     completeAgentTask(
       {
         agentId: 'owner',
@@ -289,8 +317,12 @@ describe('agent keepalive Gge/tB', () => {
       false,
     )
     expect(s.get().tasks.owner.status).toBe('completed')
-    // empty KA + park:true → still schedules grace (not YC)
-    expect(typeof s.get().tasks.owner.evictAfter).toBe('number')
+    // densable DSu a=true: bot idle-window only → YC, no grace until okg
+    expect(
+      s.get().tasks.owner.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
+    ).toBe(true)
+    expect(s.get().tasks.owner.evictAfter).toBeUndefined()
+    clearAllIdleWindowTimersForTests()
   })
 
   test('enqueueAgentNotification skips tB when owner running (first notify)', async () => {
@@ -414,6 +446,171 @@ describe('agent keepalive Gge/tB', () => {
     expect(
       s.get().tasks['parent-agent'].keepaliveReasons.has('agent:nested'),
     ).toBe(true)
+    expect(
+      s
+        .get()
+        .tasks['parent-agent'].keepaliveReasons.has(
+          IDLE_WINDOW_KEEPALIVE_REASON,
+        ),
+    ).toBe(true)
+    clearAllIdleWindowTimersForTests()
+  })
+
+  test('densable bot idle-window: complete stamps flag + arms okg', () => {
+    expect(idleWindowKeepaliveReason()).toBe('flag:idle-window')
+    expect(IDLE_WINDOW_MS).toBe(30_000)
+    expect(hasNonIdleWindowKeepalive(new Set(['flag:idle-window']))).toBe(false)
+    expect(
+      hasNonIdleWindowKeepalive(new Set(['flag:idle-window', 'agent:x'])),
+    ).toBe(true)
+
+    const s = store()
+    seedOwner(s)
+    spawnChild(s, 'idle-child')
+    completeAgentTask(
+      {
+        agentId: 'idle-child',
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        content: [],
+      } as any,
+      s.set as any,
+    )
+    const child = s.get().tasks['idle-child']
+    expect(child.status).toBe('completed')
+    expect(child.keepaliveReasons.has(IDLE_WINDOW_KEEPALIVE_REASON)).toBe(true)
+    // YC park: no evictAfter until bot expires and set is empty
+    expect(child.evictAfter).toBeUndefined()
+    clearAllIdleWindowTimersForTests()
+  })
+
+  test('densable okg: expireIdleWindowKeepalive removes bot and may tB owner', () => {
+    const s = store()
+    seedOwner(s, {
+      status: 'completed',
+      keepaliveReasons: new Set(['agent:idle-kid']),
+      notified: true,
+    })
+    // Seed completed child already notified, holding only bot
+    s.set((p: any) => ({
+      tasks: {
+        ...p.tasks,
+        'idle-kid': {
+          id: 'idle-kid',
+          type: 'local_agent',
+          status: 'completed',
+          description: 'c',
+          startTime: 1,
+          endTime: 2,
+          outputFile: '/t',
+          outputOffset: 0,
+          notified: true,
+          agentId: 'idle-kid',
+          prompt: '',
+          agentType: 'g',
+          retrieved: false,
+          lastReportedToolCount: 0,
+          lastReportedTokenCount: 0,
+          isBackgrounded: true,
+          pendingMessages: [],
+          retain: false,
+          diskLoaded: false,
+          ownerAgentId: 'owner',
+          keepaliveReasons: new Set([IDLE_WINDOW_KEEPALIVE_REASON]),
+        },
+      },
+    }))
+    expireIdleWindowKeepalive('idle-kid', s.set as any)
+    // bot removed
+    expect(
+      s
+        .get()
+        .tasks['idle-kid'].keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
+    ).toBe(false)
+    // empty KA after bot removal + notified + no pending → tB owner agent:id
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:idle-kid')).toBe(
+      false,
+    )
+    // tB empty schedule may set owner.evictAfter if owner terminal+empty
+    clearAllIdleWindowTimersForTests()
+  })
+
+  test('densable okg: skips owner tB when pending task-notification for child', () => {
+    const s = store()
+    seedOwner(s, {
+      status: 'completed',
+      keepaliveReasons: new Set(['agent:pend-kid']),
+      notified: true,
+    })
+    s.set((p: any) => ({
+      tasks: {
+        ...p.tasks,
+        'pend-kid': {
+          id: 'pend-kid',
+          type: 'local_agent',
+          status: 'completed',
+          description: 'c',
+          startTime: 1,
+          endTime: 2,
+          outputFile: '/t',
+          outputOffset: 0,
+          notified: true,
+          agentId: 'pend-kid',
+          prompt: '',
+          agentType: 'g',
+          retrieved: false,
+          lastReportedToolCount: 0,
+          lastReportedTokenCount: 0,
+          isBackgrounded: true,
+          pendingMessages: [],
+          retain: false,
+          diskLoaded: false,
+          ownerAgentId: 'owner',
+          keepaliveReasons: new Set([IDLE_WINDOW_KEEPALIVE_REASON]),
+        },
+      },
+    }))
+    zeoQueue.push({
+      mode: 'task-notification',
+      agentId: 'owner',
+      taskId: 'pend-kid',
+      value: 'x',
+    })
+    expireIdleWindowKeepalive('pend-kid', s.set as any)
+    // owner still holds agent: (pending notif blocks tB)
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:pend-kid')).toBe(
+      true,
+    )
+    zeoQueue.length = 0
+    clearAllIdleWindowTimersForTests()
+  })
+
+  test('killAsyncAgent clears idle-window timer', () => {
+    const s = store()
+    seedOwner(s)
+    spawnChild(s, 'timer-kid')
+    completeAgentTask(
+      {
+        agentId: 'timer-kid',
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        content: [],
+      } as any,
+      s.set as any,
+    )
+    // still armed
+    expect(
+      s
+        .get()
+        .tasks['timer-kid'].keepaliveReasons.has(IDLE_WINDOW_KEEPALIVE_REASON),
+    ).toBe(true)
+    killAsyncAgent('timer-kid', s.set as any)
+    expect(s.get().tasks['timer-kid'].status).toBe('killed')
+    expect(s.get().tasks['timer-kid'].keepaliveReasons?.size ?? 0).toBe(0)
+    // re-arm then clearIdleWindowTimer unit
+    armIdleWindowTimer('timer-kid', s.set as any)
+    clearIdleWindowTimer('timer-kid')
+    clearAllIdleWindowTimersForTests()
   })
 
   test('killAsyncAgent detaches keepalive', () => {
@@ -635,7 +832,7 @@ describe('agent keepalive Gge/tB', () => {
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child3')).toBe(true)
   })
 
-  test('Zeo: complete without park rewires undrained child task-notifications to main', () => {
+  test('Zeo: complete defers rewire until okg clears bot idle-window', () => {
     zeoQueue.length = 0
     const s = store()
     seedOwner(s)
@@ -674,7 +871,7 @@ describe('agent keepalive Gge/tB', () => {
       taskId: 'kid',
       value: 'x',
     })
-    // Complete owner with no self KA → not YC → Zeo runs
+    // densable DSu a=true: stamps bot → YC park interactive → Zeo skipped
     completeAgentTask(
       {
         agentId: 'owner',
@@ -685,10 +882,18 @@ describe('agent keepalive Gge/tB', () => {
       s.set as any,
     )
     expect(s.get().tasks.owner.status).toBe('completed')
-    // densable Zeo: re-cf with agentId:mi() (main AL)
+    expect(
+      s.get().tasks.owner.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
+    ).toBe(true)
+    // still parked → queue not rewired yet
+    expect(zeoQueue[0]!.agentId).toBe('owner')
+
+    // densable okg: drop bot → empty KA → Zeo re-cf agentId:mi()
+    expireIdleWindowKeepalive('owner', s.set as any)
     expect(zeoQueue.length).toBe(1)
     expect(zeoQueue[0]!.agentId).toBe('s')
     expect(zeoQueue[0]!.taskId).toBe('kid')
+    clearAllIdleWindowTimersForTests()
   })
 
   test('Zeo: complete YC parked interactive skips rewire', () => {

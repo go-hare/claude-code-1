@@ -2,6 +2,7 @@ import { z } from 'zod/v4'
 import type { TaskStateBase } from 'src/Task.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { stopTask } from 'src/tasks/stopTask.js'
+import { isParkedKeepaliveAgent } from 'src/utils/task/framework.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { DESCRIPTION, TASK_STOP_TOOL_NAME } from './prompt.js'
@@ -69,20 +70,41 @@ export const TaskStopTool = buildTool({
     }
 
     const appState = getAppState()
-    const task = appState.tasks?.[id] as TaskStateBase | undefined
+    let task = appState.tasks?.[id] as TaskStateBase | undefined
+    let resolvedId = id
 
+    // densable Elo: allow name/registry resolve in validate
     if (!task) {
-      return {
-        result: false,
-        message: `No task found with ID: ${id}`,
-        errorCode: 1,
+      const { resolveTaskForStop, formatTaskNotFoundMessage } = await import(
+        'src/tasks/resolveTaskForStop.js'
+      )
+      const resolved = resolveTaskForStop(id, getAppState)
+      if (resolved.status === 'ambiguous') {
+        return { result: false, message: resolved.message, errorCode: 1 }
+      }
+      if (resolved.status === 'found') {
+        task = resolved.task
+        resolvedId = resolved.taskId
+      } else {
+        return {
+          result: false,
+          message: formatTaskNotFoundMessage(
+            id,
+            getAppState,
+            resolved.suggestion,
+            undefined,
+          ),
+          errorCode: 1,
+        }
       }
     }
 
-    if (task.status !== 'running') {
+    // densable H1e: running OR zle(YC park: completed + keepalive)
+    const parked = isParkedKeepaliveAgent(task)
+    if (task.status !== 'running' && !parked) {
       return {
         result: false,
-        message: `Task ${id} is not running (status: ${task.status})`,
+        message: `Task ${resolvedId} is not running (status: ${task.status})`,
         errorCode: 3,
       }
     }
@@ -106,7 +128,7 @@ export const TaskStopTool = buildTool({
   renderToolResultMessage,
   async call(
     { task_id, shell_id },
-    { getAppState, setAppState, abortController },
+    { getAppState, setAppState, abortController, agentId },
   ) {
     // Support both task_id and shell_id (deprecated KillShell compat)
     const id = task_id ?? shell_id
@@ -114,9 +136,13 @@ export const TaskStopTool = buildTool({
       throw new Error('Missing required parameter: task_id')
     }
 
+    // densable H1e: callerAgentId from toolUseContext.agentId (undefined = main)
     const result = await stopTask(id, {
       getAppState,
       setAppState,
+      callerAgentId: agentId,
+      source: 'user',
+      killedBy: 'user',
     })
 
     return {

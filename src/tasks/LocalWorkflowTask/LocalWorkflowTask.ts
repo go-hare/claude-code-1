@@ -3,12 +3,19 @@
 // dialog. Follows the DreamTask pattern: lifecycle + UI surfacing via
 // the existing task registry.
 
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import type { AppState } from '../../state/AppState.js'
 import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type { AgentId } from '../../types/ids.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { registerTask, updateTaskState } from '../../utils/task/framework.js'
+import {
+  addKeepaliveReason,
+  registerTask,
+  removeKeepaliveReason,
+  updateTaskState,
+  workflowKeepaliveReason,
+} from '../../utils/task/framework.js'
 
 export type LocalWorkflowTaskState = TaskStateBase & {
   type: 'local_workflow'
@@ -79,20 +86,41 @@ export function registerLocalWorkflowTask(
     abortController: opts.abortController,
   }
   registerTask(task, setAppState)
+  // densable: if (y && !pn()) Gge(y, `workflow:${t}`, registry)
+  // y = Yeo(parent) owner; local uses agentId field as the panel owner stamp.
+  if (opts.agentId && !getIsNonInteractiveSession()) {
+    addKeepaliveReason(opts.agentId, workflowKeepaliveReason(id), setAppState)
+  }
   return id
+}
+
+function detachWorkflowKeepalive(
+  taskId: string,
+  agentId: AgentId | undefined,
+  setAppState: SetAppState,
+): void {
+  if (!agentId) return
+  removeKeepaliveReason(agentId, workflowKeepaliveReason(taskId), setAppState)
 }
 
 export function completeWorkflowTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
-  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => ({
-    ...task,
-    status: 'completed',
-    endTime: Date.now(),
-    notified: true,
-    abortController: undefined,
-  }))
+  let agentId: AgentId | undefined
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    agentId = task.agentId
+    return {
+      ...task,
+      status: 'completed',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+    }
+  })
+  // densable complete path: tB(owner, workflow:id) when owner not still live/parked
+  // Local always detaches — Jeo covers agent:/workflow: on parent complete.
+  detachWorkflowKeepalive(taskId, agentId, setAppState)
 }
 
 export function failWorkflowTask(
@@ -100,14 +128,19 @@ export function failWorkflowTask(
   setAppState: SetAppState,
   error?: string,
 ): void {
-  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => ({
-    ...task,
-    status: 'failed',
-    endTime: Date.now(),
-    notified: true,
-    abortController: undefined,
-    ...(error !== undefined ? { error } : {}),
-  }))
+  let agentId: AgentId | undefined
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    agentId = task.agentId
+    return {
+      ...task,
+      status: 'failed',
+      endTime: Date.now(),
+      notified: true,
+      abortController: undefined,
+      ...(error !== undefined ? { error } : {}),
+    }
+  })
+  detachWorkflowKeepalive(taskId, agentId, setAppState)
 }
 
 /**
@@ -125,9 +158,11 @@ export function pauseWorkflowTask(
   setAppState: SetAppState,
 ): boolean {
   let paused = false
+  let agentId: AgentId | undefined
   updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') return task
     paused = true
+    agentId = task.agentId
     try {
       task.abortController?.abort()
     } catch {
@@ -142,19 +177,28 @@ export function pauseWorkflowTask(
       pendingAgentAction: undefined,
     }
   })
+  // densable zit: if (r) tB(r.ownerAgentId, `workflow:${e}`)
+  if (paused) {
+    detachWorkflowKeepalive(taskId, agentId, setAppState)
+  }
   return paused
 }
 
 /**
  * Kill a running or paused workflow task. Called from BackgroundTasksDialog
  * via the feature-gated `killWorkflowTask` binding.
+ * densable bye: tB(owner, workflow:id) after terminal.
  */
 export function killWorkflowTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
+  let agentId: AgentId | undefined
+  let detached = false
   updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running' && task.status !== 'paused') return task
+    agentId = task.agentId
+    detached = true
     task.abortController?.abort()
     return {
       ...task,
@@ -164,6 +208,9 @@ export function killWorkflowTask(
       abortController: undefined,
     }
   })
+  if (detached) {
+    detachWorkflowKeepalive(taskId, agentId, setAppState)
+  }
 }
 
 /**

@@ -10,7 +10,11 @@ import { DreamTask, type DreamTaskState } from 'src/tasks/DreamTask/DreamTask.js
 import { InProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/InProcessTeammateTask.js';
 import type { InProcessTeammateTaskState } from 'src/tasks/InProcessTeammateTask/types.js';
 import type { LocalAgentTaskState } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
-import { LocalAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
+import {
+  killDescendantAgents,
+  LocalAgentTask,
+  markAgentStoppedByUser,
+} from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import type { LocalShellTaskState } from 'src/tasks/LocalShellTask/guards.js';
 import { LocalShellTask } from 'src/tasks/LocalShellTask/LocalShellTask.js';
 // Type import is erased at build time — safe even though module is ant-gated.
@@ -316,7 +320,35 @@ export function BackgroundTasksDialog({ onDone, toolUseContext, initialDetailTas
   }
 
   async function killAgentTask(taskId: string): Promise<void> {
+    // densable ySr: if isObserver → H1e (Fjr+kill); else hAe + XV + gtf
+    const snapshot = toolUseContext.getAppState().tasks?.[taskId] as LocalAgentTaskState | undefined;
+    if (snapshot?.type === 'local_agent' && snapshot.isObserver) {
+      // densable ySr OH: H1e with source=user (Fjr + kill)
+      try {
+        const { stopTask } = await import('src/tasks/stopTask.js');
+        await stopTask(taskId, {
+          getAppState: toolUseContext.getAppState,
+          setAppState,
+          source: 'user',
+          killedBy: 'user',
+        });
+      } catch {
+        /* best-effort panel kill */
+      }
+      return;
+    }
+    if (snapshot?.type === 'local_agent') {
+      markAgentStoppedByUser(taskId, setAppState);
+    }
     await LocalAgentTask.kill(taskId, setAppState);
+    if (snapshot?.type === 'local_agent') {
+      killDescendantAgents(
+        { id: taskId, agentId: snapshot.agentId ?? taskId },
+        toolUseContext.getAppState,
+        setAppState,
+        { source: 'user', killedBy: 'user' },
+      );
+    }
   }
 
   async function killTeammateTask(taskId: string): Promise<void> {

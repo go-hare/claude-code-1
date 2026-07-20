@@ -28,7 +28,18 @@ export const POLL_INTERVAL_MS = 1000
 export const STOPPED_DISPLAY_MS = 3_000
 
 // Grace period for terminal local_agent tasks in the coordinator panel
+// densable _re=30000 (tB empty-KA schedule + QYi non-park path)
 export const PANEL_GRACE_MS = 30_000
+
+/**
+ * densable bot="flag:idle-window" — temporary self-KA reason stamped on DSu
+ * complete so the agent stays YC-parked for CSu ms even with no live children.
+ * okg timer tB's this reason after IDLE_WINDOW_MS.
+ */
+export const IDLE_WINDOW_KEEPALIVE_REASON = 'flag:idle-window'
+
+/** densable CSu=30000 — idle-window timer delay (same as panel grace). */
+export const IDLE_WINDOW_MS = PANEL_GRACE_MS
 
 // Attachment type for task status updates
 export type TaskAttachment = {
@@ -278,6 +289,25 @@ export function monitorKeepaliveReason(taskId: string): string {
 }
 export function workflowKeepaliveReason(taskId: string): string {
   return `workflow:${taskId}`
+}
+
+/** densable bot self-KA reason (not a child prefix). */
+export function idleWindowKeepaliveReason(): string {
+  return IDLE_WINDOW_KEEPALIVE_REASON
+}
+
+/**
+ * True when the set has any keepalive reason other than flag:idle-window.
+ * densable DSu `l` flag: for (p of Wge) if p!==bot { l=true }.
+ */
+export function hasNonIdleWindowKeepalive(
+  reasons: Iterable<string> | undefined | null,
+): boolean {
+  if (!reasons) return false
+  for (const r of reasons) {
+    if (r !== IDLE_WINDOW_KEEPALIVE_REASON) return true
+  }
+  return false
 }
 
 /**

@@ -8,12 +8,22 @@ import { logForDebugging } from '../../utils/debug.js'
 import { logError } from '../../utils/log.js'
 import { dequeueAllMatching } from '../../utils/messageQueueManager.js'
 import { evictTaskOutput } from '../../utils/task/diskOutput.js'
-import { updateTaskState } from '../../utils/task/framework.js'
+import {
+  bashKeepaliveReason,
+  monitorKeepaliveReason,
+  removeKeepaliveReason,
+  updateTaskState,
+} from '../../utils/task/framework.js'
 import { isLocalShellTask } from './guards.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
 
 export function killTask(taskId: string, setAppState: SetAppStateFn): void {
+  // densable jLe does not tB itself — bXi releaseBgCap does on result.settle.
+  // Local still detaches here so owner KA is not stuck if result never fires
+  // (process already dead / kill races). removeKeepalive is idempotent.
+  let ownerAgentId: string | undefined
+  let kind: 'bash' | 'monitor' | undefined
   updateTaskState(taskId, setAppState, task => {
     if ((task as any).status !== 'running' || !isLocalShellTask(task)) {
       return task
@@ -32,6 +42,9 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
       clearTimeout(task.cleanupTimeoutId)
     }
 
+    ownerAgentId = task.agentId
+    kind = task.kind
+
     return {
       ...task,
       status: 'killed',
@@ -42,6 +55,13 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
       endTime: Date.now(),
     }
   })
+  if (ownerAgentId) {
+    const reason =
+      kind === 'monitor'
+        ? monitorKeepaliveReason(taskId)
+        : bashKeepaliveReason(taskId)
+    removeKeepaliveReason(ownerAgentId, reason, setAppState)
+  }
   void evictTaskOutput(taskId)
 }
 

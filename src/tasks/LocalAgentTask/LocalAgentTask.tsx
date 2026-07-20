@@ -28,8 +28,15 @@ import { createAbortController, createChildAbortController } from '../../utils/a
 import type { ActiveTaskExecutionContext } from '../../utils/tasks.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js';
-import { dequeueAllMatching, enqueuePendingNotification } from '../../utils/messageQueueManager.js';
-import { getAgentTranscriptPath, isTranscriptPersistenceDisabled } from '../../utils/sessionStorage.js';
+import { dequeueAllMatching, enqueuePendingNotification, getCommandQueue } from '../../utils/messageQueueManager.js';
+import { logForDebugging } from '../../utils/debug.js';
+import {
+  getAgentTranscriptPath,
+  isTranscriptPersistenceDisabled,
+  readAgentMetadata,
+  writeAgentMetadata,
+} from '../../utils/sessionStorage.js';
+import { stopObserverPairing } from '../../utils/observerAgents.js';
 import { getTaskExecutionMetadata, getTaskListId, listTasks, markTaskCompletionSuggested } from '../../utils/tasks.js';
 import {
   evictTaskOutput,
@@ -42,6 +49,9 @@ import {
   agentKeepaliveReason,
   computePanelEvictAfter,
   hasLiveAgentKeepaliveChildren,
+  idleWindowKeepaliveReason,
+  IDLE_WINDOW_KEEPALIVE_REASON,
+  IDLE_WINDOW_MS,
   isParkedKeepaliveAgent,
   registerTask,
   removeKeepaliveReason,
@@ -49,10 +59,17 @@ import {
   updateTaskState,
 } from '../../utils/task/framework.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
+import { createSignal } from '../../utils/signal.js';
 import { roughTokenCountEstimationForMessages } from '../../services/tokenEstimation.js';
 import { validateWorkerResult } from '../../coordinator/workerResultValidator.js';
 import { escapeXml } from '../../utils/xml.js';
 import type { TaskState } from '../types.js';
+
+/**
+ * densable Weo (`vs()` signal): fire agentId when DSu completes with
+ * non-empty pendingMessages so REPL luf-hook can Qeo→Aye resume.
+ */
+export const strandedAgentResume = createSignal<[agentId: string]>();
 
 export type ToolActivity = {
   toolName: string;
@@ -503,6 +520,127 @@ export function isPanelAgentTask(t: unknown): t is LocalAgentTaskState {
 }
 
 /**
+ * densable OH(task): local_agent && isObserver===true
+ */
+export function isObserverAgentTask(t: unknown): t is LocalAgentTaskState {
+  return isLocalAgentTask(t) && t.isObserver === true;
+}
+
+/**
+ * densable Beo(child, ancestorId, tasks): walk child.parentAgentId chain for ancestor.
+ * Used by H1e parked cascade and ySr/gtf panel descendant kill.
+ */
+export function isDescendantAgentOf(
+  child: { parentAgentId?: string },
+  ancestorId: string | undefined | null,
+  tasks: Record<string, TaskState | undefined>,
+): boolean {
+  if (!ancestorId) return false;
+  const seen = new Set<string>();
+  let cursor: string | undefined = typeof child.parentAgentId === 'string' ? child.parentAgentId : undefined;
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === ancestorId) return true;
+    seen.add(cursor);
+    const node = tasks[cursor];
+    cursor =
+      node !== undefined &&
+      node.type === 'local_agent' &&
+      typeof (node as LocalAgentTaskState).parentAgentId === 'string'
+        ? (node as LocalAgentTaskState).parentAgentId
+        : undefined;
+  }
+  return false;
+}
+
+/**
+ * densable Gzg(e, agentType): persist stoppedByUser on agent sidecar meta.
+ * Fire-and-forget; inaccessible FS is logged and swallowed.
+ */
+export async function persistAgentStoppedByUser(taskId: string, agentType: string): Promise<void> {
+  try {
+    const id = asAgentId(taskId);
+    const prev = await readAgentMetadata(id);
+    if (prev?.stoppedByUser) return;
+    await writeAgentMetadata(id, {
+      ...(prev ?? { agentType }),
+      agentType: prev?.agentType ?? agentType,
+      stoppedByUser: true,
+    });
+  } catch (e) {
+    logForDebugging(`failed to persist stop marker for ${taskId}: ${String(e)}`);
+  }
+}
+
+/**
+ * densable hAe(id, registry): stamp stoppedByUser in-memory + Gzg disk sidecar.
+ */
+export function markAgentStoppedByUser(taskId: string, setAppState: SetAppState): void {
+  let agentType: string | undefined;
+  let shouldPersist = false;
+  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
+    if (task.stoppedByUser) return task;
+    shouldPersist = true;
+    agentType = typeof task.agentType === 'string' && task.agentType.length > 0 ? task.agentType : 'general-purpose';
+    return { ...task, stoppedByUser: true };
+  });
+  if (shouldPersist && agentType) {
+    void persistAgentStoppedByUser(taskId, agentType);
+  }
+}
+
+/**
+ * densable Aye clear of disk stoppedByUser when userInitiated resume proceeds.
+ */
+export async function clearAgentStoppedByUser(taskId: string): Promise<void> {
+  try {
+    const id = asAgentId(taskId);
+    const prev = await readAgentMetadata(id);
+    if (!prev?.stoppedByUser) return;
+    const { stoppedByUser: _cleared, ...rest } = prev;
+    await writeAgentMetadata(id, rest);
+  } catch (e) {
+    logForDebugging(`failed to clear stop marker for ${taskId}: ${String(e)}`);
+  }
+}
+
+/**
+ * densable gtf(parentTask, registry, {source}): kill running/YC descendants
+ * whose parentAgentId chain reaches parent.agentId.
+ * Panel kill (ySr) always cascades; H1e only when target was zle/YC.
+ * densable: source=user && OH → Fjr observer tombstone before kill.
+ */
+export function killDescendantAgents(
+  parent: { id: string; agentId?: string },
+  getAppState: () => Pick<AppState, 'tasks'> | AppState,
+  setAppState: SetAppState,
+  opts?: { source?: 'user' | 'system'; killedBy?: 'user' | 'parent' | 'system' },
+): void {
+  const ancestorId = parent.agentId ?? parent.id;
+  const tasks = getAppState().tasks ?? {};
+  const source = opts?.source ?? 'user';
+  const killedBy = opts?.killedBy ?? 'user';
+  for (const child of Object.values(tasks)) {
+    if (!isLocalAgentTask(child) || child.id === parent.id) continue;
+    const live = child.status === 'running' || isParkedKeepaliveAgent(child);
+    if (!live) continue;
+    if (!isDescendantAgentOf(child, ancestorId, tasks)) continue;
+    // densable gtf: if source===user && OH → Fjr
+    if (source === 'user' && isObserverAgentTask(child)) {
+      void stopObserverPairing(child.id, {
+        agentType: typeof child.agentType === 'string' ? child.agentType : undefined,
+      }).catch(() => {});
+    }
+    // densable: hAe when source===user || !OH — for OH, only user stamps
+    if (source === 'user' || !isObserverAgentTask(child)) {
+      markAgentStoppedByUser(child.id, setAppState);
+    }
+    // densable gtf: Kle then XV — mark notified to suppress noise on cascade
+    markAgentsNotified(child.id, setAppState);
+    killAsyncAgent(child.id, setAppState, killedBy);
+  }
+}
+
+/**
  * densable Yeo(parentId, registry):
  *   if parent is local_agent && agentType !== "main-session" → parentId else void 0
  *
@@ -799,6 +937,9 @@ export function killAsyncAgent(
   setAppState: SetAppState,
   killedBy: 'user' | 'parent' | 'system' = 'user',
 ): void {
+  // densable: kill drops idle-window timer so okg cannot fire after XV clear KA
+  clearIdleWindowTimer(taskId);
+
   // Official XV step 1: YC + quietlyParked → un-notify so kill can re-surface.
   setAppState(prev => {
     const t = prev.tasks?.[taskId];
@@ -1089,10 +1230,105 @@ export function rewireOrphanedOwnerNotifications(ownerTaskId: string, setAppStat
 }
 
 /**
+ * densable XYi — per-agent idle-window timer map (okg after CSu).
+ * Module-level so complete/kill/fail/tests share one timer table.
+ */
+const idleWindowTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Test/cleanup: clear all idle-window timers (densable XYi). */
+export function clearAllIdleWindowTimersForTests(): void {
+  for (const timer of idleWindowTimers.values()) {
+    clearTimeout(timer);
+  }
+  idleWindowTimers.clear();
+}
+
+/** densable: clear XYi entry for one agent (kill/fail/re-arm). */
+export function clearIdleWindowTimer(taskId: string): void {
+  const existing = idleWindowTimers.get(taskId);
+  if (existing !== undefined) {
+    clearTimeout(existing);
+    idleWindowTimers.delete(taskId);
+  }
+}
+
+/**
+ * densable okg(taskId, registry):
+ * 1. XYi.delete + tB(self, bot)
+ * 2. if completed && KA empty: zS + Zeo; if notified && no pending owner notif for
+ *    this taskId → tB(owner, agent:id)
+ *
+ * Gold densable DSu arms a=true always in our port (bundle has dead `a=!1` —
+ * known densable wip bug; without arming, bot/okg is unreachable dead code).
+ */
+export function expireIdleWindowKeepalive(taskId: string, setAppState: SetAppState): void {
+  idleWindowTimers.delete(taskId);
+  const bot = idleWindowKeepaliveReason();
+  removeKeepaliveReason(taskId, bot, setAppState);
+
+  let status: string | undefined;
+  let notified = false;
+  let ownerId: string | undefined;
+  let remainingSize = 0;
+  setAppState(prev => {
+    const t = prev.tasks?.[taskId];
+    if (t && t.type === 'local_agent') {
+      const agent = t as LocalAgentTaskState;
+      status = agent.status;
+      notified = agent.notified === true;
+      ownerId = agent.ownerAgentId ?? agent.notificationTargetAgentId;
+      remainingSize = agent.keepaliveReasons?.size ?? 0;
+    }
+    return prev;
+  });
+
+  // densable: if (Wl(r)&&r.status==="completed"&&Wge(r).size===0)
+  if (status !== 'completed' || remainingSize !== 0) {
+    return;
+  }
+
+  // densable okg: zS(e), Zeo(e,t)
+  rewireOrphanedOwnerNotifications(taskId, setAppState);
+
+  if (!notified) {
+    return;
+  }
+
+  // if notified: only tB owner when no pending task-notification for this
+  // taskId still targeting the owner (densable Hte scan).
+  let hasPendingOwnerNotif = false;
+  if (ownerId) {
+    for (const cmd of getCommandQueue()) {
+      if (cmd.mode === 'task-notification' && cmd.agentId === ownerId && cmd.taskId === taskId) {
+        hasPendingOwnerNotif = true;
+        break;
+      }
+    }
+  }
+  if (!hasPendingOwnerNotif) {
+    removeKeepaliveReason(ownerId, agentKeepaliveReason(taskId), setAppState);
+  }
+}
+
+/**
+ * densable DSu arm: if (o&&a) clearTimeout + setTimeout(okg, CSu).
+ * Always armed on successful complete in this port (see expireIdleWindowKeepalive).
+ */
+export function armIdleWindowTimer(taskId: string, setAppState: SetAppState): void {
+  clearIdleWindowTimer(taskId);
+  const timer = setTimeout(() => {
+    expireIdleWindowKeepalive(taskId, setAppState);
+  }, IDLE_WINDOW_MS);
+  // densable: u.unref?.()
+  timer.unref?.();
+  idleWindowTimers.set(taskId, timer);
+}
+
+/**
  * Complete an agent task with result.
  * densable: Jeo(taskId) before DSu so already-notified children drop their
- * agent: holds; then DSu QYi(park:true); no owner tB (BRt does conditional tB);
- * Zeo when not YC-parked interactive.
+ * agent: holds; then DSu stamps bot idle-window KA + QYi(park:true) + arms okg;
+ * no owner tB (BRt does conditional tB); Zeo when not YC-parked interactive.
  */
 export function completeAgentTask(result: AgentToolResult, setAppState: SetAppState): void {
   const taskId = result.agentId;
@@ -1104,6 +1340,9 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
 
   let completed = false;
   let parkedInteractive = false;
+  let armedIdleWindow = false;
+  // densable DSu: s = (d.pendingMessages?.length ?? 0) > 0 → Weo.emit after update
+  let hasPendingMessages = false;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') {
       return task;
@@ -1111,6 +1350,7 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
 
     task.unregisterCleanup?.();
     completed = true;
+    hasPendingMessages = (task.pendingMessages?.length ?? 0) > 0;
 
     // Footer reads progress.tokenCount even after completion. Sync from the
     // finalized result so a late usage mutation (or rebuild miss) doesn't leave
@@ -1119,9 +1359,16 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
     const tokenCount = Math.max(result.totalTokens ?? 0, prevProgress?.tokenCount ?? 0);
     const toolUseCount = Math.max(result.totalToolUseCount ?? 0, prevProgress?.toolUseCount ?? 0);
 
-    // densable DSu: QYi({retain, keepaliveReasons}, {park:true}) — no owner tB
-    // here; BRt does conditional tB on first notify.
-    const nextKeepalive = task.keepaliveReasons;
+    // densable DSu (fixed a=true — gold bundle leaves a=!1 dead):
+    // u = a ? Wge.add(bot) : keepaliveReasons
+    // Always stamp flag:idle-window so okg can expire after CSu.
+    // densable l=hasNonIdleWindowKeepalive(prev) only gates telemetry
+    // `else if (o&&a&&!l) Ee` — no local telemetry sink, so l is unused.
+    const bot = IDLE_WINDOW_KEEPALIVE_REASON;
+    const prevReasons = task.keepaliveReasons ?? new Set<string>();
+    const nextKeepalive = new Set(prevReasons).add(bot);
+    armedIdleWindow = true;
+
     const next = {
       ...task,
       status: 'completed' as const,
@@ -1135,6 +1382,7 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
       },
       endTime: Date.now(),
       keepaliveReasons: nextKeepalive,
+      // park:true + non-empty (bot at least) → evictAfter undefined (YC hold)
       evictAfter: computePanelEvictAfter({ retain: task.retain, keepaliveReasons: nextKeepalive }, { park: true }),
       abortController: undefined,
       unregisterCleanup: undefined,
@@ -1150,6 +1398,14 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
     if (!parkedInteractive) {
       rewireOrphanedOwnerNotifications(taskId, setAppState);
     }
+    // densable: if (o&&a) arm okg timer
+    if (armedIdleWindow) {
+      armIdleWindowTimer(taskId, setAppState);
+    }
+    // densable: if (o&&s) Weo.emit(n) — stranded pending drain/resume (luf→Aye)
+    if (hasPendingMessages) {
+      strandedAgentResume.emit(taskId);
+    }
   }
   // Notification + densable BRt owner tB: AgentTool via enqueueAgentNotification
 }
@@ -1159,6 +1415,8 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
  * densable eto: QYi(park:false); always Zeo; owner tB deferred to BRt.
  */
 export function failAgentTask(taskId: string, error: string, setAppState: SetAppState): void {
+  // densable eto: no idle-window arm; clear any prior timer defensively
+  clearIdleWindowTimer(taskId);
   let failed = false;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') {
@@ -1173,6 +1431,7 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
       status: 'failed',
       error,
       endTime: Date.now(),
+      // densable eto: leave keepaliveReasons as-is (no bot arm on fail path)
       evictAfter: computePanelEvictAfter(task, { park: false }),
       abortController: undefined,
       unregisterCleanup: undefined,
@@ -1210,6 +1469,7 @@ export function registerAsyncAgent({
   spawnDepth,
   ownedFiles,
   isObserver,
+  attachOwnerKeepalive = true,
 }: {
   agentId: string;
   description: string;
@@ -1227,6 +1487,12 @@ export function registerAsyncAgent({
   ownedFiles?: string[];
   /** Official Sot isObserver — observer-activity spawns. */
   isObserver?: boolean;
+  /**
+   * densable: Gge is call-site only (nested spawn `if(!pn())Gge`), not inside Sot.
+   * Resume Aye / observer Sot stamp ownerAgentId:mi() without Gge.
+   * Default true for AgentTool nested async; resume/observer pass false.
+   */
+  attachOwnerKeepalive?: boolean;
 }): LocalAgentTaskState {
   initAgentTaskOutput(agentId);
 
@@ -1272,8 +1538,9 @@ export function registerAsyncAgent({
   // Register task in AppState
   registerTask(taskState, setAppState);
 
-  // Official: if (!pn()) Gge(Re, `agent:${st}`, registry)
-  if (resolvedOwner && !getIsNonInteractiveSession()) {
+  // densable nested spawn: if (!pn()) Gge(Re, `agent:${st}`, registry)
+  // Resume/observer stamp owner without Gge (attachOwnerKeepalive:false).
+  if (attachOwnerKeepalive && resolvedOwner && !getIsNonInteractiveSession()) {
     addKeepaliveReason(resolvedOwner, agentKeepaliveReason(agentId), setAppState);
   }
 

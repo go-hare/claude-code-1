@@ -1,9 +1,12 @@
 import { describe, expect, mock, test } from 'bun:test'
+import * as realDiskOutput from '../../../utils/task/diskOutput.js'
+import * as realMessageQueue from 'src/utils/messageQueueManager.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 
 // ─── Mocks（仅 mock 有副作用的依赖链）───
 
+const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 
@@ -20,20 +23,33 @@ mock.module('src/constants/xml.js', () => ({
   TASK_TYPE_TAG: 'task_type',
 }))
 
-mock.module('src/utils/messageQueueManager.js', () => ({
-  enqueuePendingNotification: () => {},
-}))
+// Spread reals so process-global mock.module does not strip exports
+// (getCommandQueue / DiskTaskOutput) for co-running suites.
+function messageQueueMock() {
+  return {
+    ...realMessageQueue,
+    enqueuePendingNotification: noop,
+    dequeueAllMatching: () => [],
+    getCommandQueue: () => [],
+  }
+}
+mock.module('src/utils/messageQueueManager.js', messageQueueMock)
 
 mock.module('src/utils/sdkEventQueue.js', () => ({
-  enqueueSdkEvent: () => {},
+  enqueueSdkEvent: noop,
 }))
 
-mock.module('src/utils/task/diskOutput.js', () => ({
-  getTaskOutputDelta: async () => null,
-  getTaskOutputPath: (id: string) => `/tmp/${id}`,
-  evictTaskOutput: () => {},
-  initTaskOutputAsSymlink: async () => {},
-}))
+function diskOutputMock() {
+  return {
+    ...realDiskOutput,
+    getTaskOutputDelta: async () => null,
+    getTaskOutputPath: (id: string) => `/tmp/${id}`,
+    evictTaskOutput: noop,
+    initTaskOutputAsSymlink: async () => {},
+    initTaskOutput: async () => {},
+  }
+}
+mock.module('src/utils/task/diskOutput.js', diskOutputMock)
 
 // ─── Import after mocks ───
 

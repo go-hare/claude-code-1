@@ -1,5 +1,8 @@
 import { promises as fsp } from 'fs'
-import { getSdkAgentProgressSummariesEnabled } from 'src/bootstrap/state.js'
+import {
+  getMainThreadAgentId,
+  getSdkAgentProgressSummariesEnabled,
+} from 'src/bootstrap/state.js'
 import { getSystemPrompt } from 'src/constants/prompts.js'
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
@@ -49,6 +52,13 @@ export type ResumeAgentResult = {
    */
   alreadyCompleted?: boolean
 }
+export class AgentStoppedByUserError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentStoppedByUserError'
+  }
+}
+
 export async function resumeAgentBackground({
   agentId,
   prompt,
@@ -57,6 +67,8 @@ export async function resumeAgentBackground({
   invokingRequestId,
   continueInterruptedTurn,
   promptIsMeta,
+  userInitiated,
+  promptOriginKind,
 }: {
   agentId: string
   prompt: string
@@ -75,6 +87,17 @@ export async function resumeAgentBackground({
    * resume prompt is already on the sidechain.
    */
   promptIsMeta?: boolean
+  /**
+   * densable Aye `userInitiated` (c) — when true, allow resume even if
+   * sidecar has stoppedByUser and clear the disk marker. Auto-resume paths
+   * omit this and throw AgentStoppedByUserError.
+   */
+  userInitiated?: boolean
+  /**
+   * densable Aye promptOrigin.kind — observer-activity resumes skip the
+   * stoppedByUser gate (observer may re-deliver after user stop of observed).
+   */
+  promptOriginKind?: string
 }): Promise<ResumeAgentResult> {
   void promptIsMeta
   const startTime = Date.now()
@@ -91,6 +114,26 @@ export async function resumeAgentBackground({
   ])
   if (!transcript) {
     throw new Error(`No transcript found for agent ID: ${agentId}`)
+  }
+
+  // densable Aye: b?.stoppedByUser && r?.kind !== "observer-activity"
+  // if (!c) throw orr; else clear disk marker and proceed.
+  if (meta?.stoppedByUser && promptOriginKind !== 'observer-activity') {
+    if (!userInitiated) {
+      throw new AgentStoppedByUserError(
+        `Agent ${agentId} was stopped by the user and won't be resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`,
+      )
+    }
+    try {
+      const { clearAgentStoppedByUser } = await import(
+        'src/tasks/LocalAgentTask/LocalAgentTask.js'
+      )
+      await clearAgentStoppedByUser(agentId)
+    } catch (err) {
+      logForDebugging(
+        `failed to clear stop marker for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
   }
 
   // Official Aye: P = continueInterruptedTurn ? LVr(messages) : messages
@@ -439,6 +482,22 @@ export async function resumeAgentBackground({
     )
   }
 
+  // densable Aye Sot:
+  //   ownerAgentId: mi()
+  //   parentAgentId: b?.parentAgentId  (from prior metadata / ekg task)
+  //   no Gge (resume re-stamps only; attachOwnerKeepalive:false)
+  const mainOwnerId = getMainThreadAgentId()
+  let parentFromTask: string | undefined
+  try {
+    const live = toolUseContext.getAppState().tasks?.[agentId] as
+      | { parentAgentId?: string }
+      | undefined
+    parentFromTask =
+      typeof live?.parentAgentId === 'string' ? live.parentAgentId : undefined
+  } catch {
+    parentFromTask = undefined
+  }
+
   // Skip name-registry write — original entry persists from the initial spawn
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
@@ -447,6 +506,10 @@ export async function resumeAgentBackground({
     selectedAgent,
     setAppState: rootSetAppState,
     toolUseId: toolUseContext.toolUseId,
+    ownerAgentId: mainOwnerId,
+    notificationTargetAgentId: asAgentId(mainOwnerId),
+    ...(parentFromTask ? { parentAgentId: parentFromTask } : {}),
+    attachOwnerKeepalive: false,
   })
 
   const metadata = {

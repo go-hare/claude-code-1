@@ -119,5 +119,41 @@ describe('densable JXt / YC / UE pure', () => {
     expect(local.includes('// densable OSu: ownerAgentId:t at register')).toBe(
       true,
     )
+    // densable Beo/gtf/hAe stop cascade helpers
+    expect(local.includes('isDescendantAgentOf')).toBe(true)
+    expect(local.includes('killDescendantAgents')).toBe(true)
+    expect(local.includes('markAgentStoppedByUser')).toBe(true)
+    // densable Sot Gge is call-site only (resume/observer attachOwnerKeepalive:false)
+    expect(local.includes('attachOwnerKeepalive')).toBe(true)
+    // densable bot idle-window / full Zt park package (DSu a=true + okg)
+    expect(
+      local.includes('flag:idle-window') ||
+        local.includes('IDLE_WINDOW_KEEPALIVE_REASON'),
+    ).toBe(true)
+    expect(local.includes('expireIdleWindowKeepalive')).toBe(true)
+    expect(local.includes('armIdleWindowTimer')).toBe(true)
+    expect(local.includes('clearIdleWindowTimer')).toBe(true)
+
+    const fw = readFileSync(
+      join(import.meta.dir, '../../../utils/task/framework.ts'),
+      'utf8',
+    )
+    expect(
+      fw.includes("IDLE_WINDOW_KEEPALIVE_REASON = 'flag:idle-window'"),
+    ).toBe(true)
+    expect(fw.includes('hasNonIdleWindowKeepalive')).toBe(true)
+    expect(fw.includes('computePanelEvictAfter')).toBe(true)
+
+    // densable Yqe JXt defer BRt (AgentTool complete path)
+    const utils = readFileSync(
+      join(
+        import.meta.dir,
+        '../../../../packages/builtin-tools/src/tools/AgentTool/agentToolUtils.ts',
+      ),
+      'utf8',
+    )
+    expect(utils.includes('parkAgentOnKeepaliveDeferNotify')).toBe(true)
+    expect(utils.includes('parked on keepalive')).toBe(true)
+    expect(utils.includes('sweepAndDetectLiveAgentChildren')).toBe(true)
   })
 })

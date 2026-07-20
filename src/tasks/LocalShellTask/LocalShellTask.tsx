@@ -21,7 +21,14 @@ import { logError } from '../../utils/log.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import type { ShellCommand } from '../../utils/ShellCommand.js';
 import { evictTaskOutput, getTaskOutputPath } from '../../utils/task/diskOutput.js';
-import { registerTask, updateTaskState } from '../../utils/task/framework.js';
+import {
+  addKeepaliveReason,
+  bashKeepaliveReason,
+  monitorKeepaliveReason,
+  registerTask,
+  removeKeepaliveReason,
+  updateTaskState,
+} from '../../utils/task/framework.js';
 import { escapeXml } from '../../utils/xml.js';
 import { backgroundAgentTask, isLocalAgentTask } from '../LocalAgentTask/LocalAgentTask.js';
 import { isMainSessionTask } from '../LocalMainSessionTask.js';
@@ -129,6 +136,28 @@ The command is likely blocked on an interactive prompt. Kill this task and re-ru
   return () => {
     cancelled = true;
     clearInterval(timer);
+  };
+}
+
+/**
+ * densable Ovu / monitor Gge portable: Gge(agentId, bash|monitor:id).
+ * Returns dispose that tB's the same reason (bXi releaseBgCap / result.settle).
+ * densable Ovu always calls Gge (no-op when agentId undefined); !pn is only for
+ * agent/workflow child holds. Main-thread shells omit agentId → no panel owner.
+ */
+function attachShellKeepalive(
+  taskId: string,
+  agentId: AgentId | undefined,
+  kind: BashTaskKind | undefined,
+  setAppState: SetAppState,
+): () => void {
+  if (!agentId) {
+    return () => {};
+  }
+  const reason = kind === 'monitor' ? monitorKeepaliveReason(taskId) : bashKeepaliveReason(taskId);
+  addKeepaliveReason(agentId, reason, setAppState);
+  return () => {
+    removeKeepaliveReason(agentId, reason, setAppState);
   };
 }
 
@@ -304,6 +333,9 @@ export async function spawnShellTask(
 
   registerTask(taskState, setAppState);
 
+  // densable Ovu: Gge(agentId, bash|monitor:id) after register; dispose = tB
+  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, setAppState);
+
   // Official $xu — main-thread bg shells only (not monitor / not agent-scoped)
   const disposePressureReap = installShellPressureReap(
     taskId,
@@ -353,6 +385,9 @@ export async function spawnShellTask(
       kind,
       agentId,
     );
+
+    // densable bXi: l?.() releaseBgCap after notify (tB bash|monitor:id)
+    releaseShellKeepalive();
 
     void evictTaskOutput(taskId);
   });
@@ -437,6 +472,9 @@ function backgroundTask(taskId: string, getAppState: () => AppState, setAppState
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
 
+  // densable Ovu on mid-bg: Gge only once the shell is backgrounded
+  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, setAppState);
+
   // Set up result handler
   void shellCommand.result.then(async result => {
     cancelStallWatchdog();
@@ -473,6 +511,7 @@ function backgroundTask(taskId: string, getAppState: () => AppState, setAppState
       enqueueShellNotification(taskId, description, finalStatus, result.code, setAppState, toolUseId, kind, agentId);
     }
 
+    releaseShellKeepalive();
     void evictTaskOutput(taskId);
   });
 
@@ -566,6 +605,9 @@ export function backgroundExistingForegroundTask(
       ? installShellPressureReap(taskId, description, getAppState, setAppState, toolUseId, undefined, agentId)
       : () => {};
 
+  // densable Ovu on auto-bg: Gge(agentId, bash:id) once backgrounded
+  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, undefined, setAppState);
+
   // Set up result handler (mirrors backgroundTask's handler)
   void shellCommand.result.then(async result => {
     cancelStallWatchdog();
@@ -595,6 +637,7 @@ export function backgroundExistingForegroundTask(
     const finalStatus = wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed';
     enqueueShellNotification(taskId, description, finalStatus, result.code, setAppState, toolUseId, undefined, agentId);
 
+    releaseShellKeepalive();
     void evictTaskOutput(taskId);
   });
 
