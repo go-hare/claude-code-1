@@ -2429,21 +2429,22 @@ async function* queryLoop(
     // sent to the model as text. Bash-mode commands are already excluded by
     // INLINE_NOTIFICATION_MODES in getQueuedCommandAttachments.
     //
-    // Agent scoping: the queue is a process-global singleton shared by the
-    // coordinator and all in-process subagents. Each loop drains only what's
-    // addressed to it — main thread drains agentId===undefined, subagents
-    // drain their own agentId. User prompts (mode:'prompt') still go to main
-    // only; subagents never see the prompt stream.
+    // Agent scoping: densable k7c — main thread drains AL(cmd)=agentId===mi(),
+    // subagents drain task-notifications with agentId===currentAgentId.
+    // User prompts still go to main only; subagents never see the prompt stream.
     // eslint-disable-next-line custom-rules/require-tool-match-name -- ToolUseBlock.name has no aliases
     const sleepRan = toolUseBlocks.some(b => b.name === SLEEP_TOOL_NAME)
     const isMainThread =
       querySource.startsWith('repl_main_thread') || querySource === 'sdk'
     const currentAgentId = toolUseContext.agentId
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isMainThreadQueuedCommand } =
+      require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
     const queuedCommandsSnapshot = getCommandsByMaxPriority(
       sleepRan ? 'later' : 'next',
     ).filter(cmd => {
       if (isSlashCommand(cmd)) return false
-      if (isMainThread) return cmd.agentId === undefined
+      if (isMainThread) return isMainThreadQueuedCommand(cmd)
       // Subagents only drain task-notifications addressed to them — never
       // user prompts, even if someone stamps an agentId on one.
       return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId

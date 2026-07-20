@@ -58,13 +58,15 @@ function isSlashCommand(cmd: QueuedCommand): boolean {
 export function processQueueIfReady({
   executeInput,
 }: ProcessQueueParams): ProcessQueueResult {
-  // This processor runs on the REPL main thread between turns. Skip anything
-  // addressed to a subagent — an unfiltered peek() returning a subagent
-  // notification would set targetMode, dequeueAllMatching would find nothing
-  // matching that mode with agentId===undefined, and we'd return processed:
-  // false with the queue unchanged → the React effect never re-fires and any
-  // queued user prompt stalls permanently.
-  const isMainThread = (cmd: QueuedCommand) => cmd.agentId === undefined
+  // densable AL(cmd): main thread is agentId===mi(). Skip subagent-addressed
+  // commands — an unfiltered peek returning a subagent notification would
+  // set targetMode, dequeueAllMatching would find nothing matching that mode
+  // on the main AL, and we'd return processed:false with the queue unchanged
+  // → React effect never re-fires and any queued user prompt stalls.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isMainThreadQueuedCommand } =
+    require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+  const isMainThread = (cmd: QueuedCommand) => isMainThreadQueuedCommand(cmd)
 
   const next = peek(isMainThread)
   if (!next) {

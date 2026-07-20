@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { Permutations } from 'src/types/utils.js'
-import { getSessionId } from '../bootstrap/state.js'
+import { getMainThreadAgentId, getSessionId } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
 import type {
   QueueOperation,
@@ -121,16 +121,28 @@ export function recheckCommandQueue(): void {
 // ============================================================================
 
 /**
+ * densable: callers that omit agentId mean main thread. Stamp mi() so AL
+ * (`agentId===mi()`) drains them. Explicit agentId (nested owner / subagent)
+ * is preserved. Not dual-OR drain — single official address.
+ */
+function withMainThreadAgentId(command: QueuedCommand): QueuedCommand {
+  if (command.agentId !== undefined) return command
+  return { ...command, agentId: getMainThreadAgentId() }
+}
+
+/**
  * Add a command to the queue.
  * Used for user-initiated commands (prompt, bash, orphaned-permission).
  * Defaults priority to 'next' (processed before task notifications).
+ * densable IT: omit agentId → stamp mi() (main).
  */
 export function enqueue(command: QueuedCommand): void {
-  commandQueue.push({ ...command, priority: command.priority ?? 'next' })
+  const stamped = withMainThreadAgentId(command)
+  commandQueue.push({ ...stamped, priority: stamped.priority ?? 'next' })
   notifySubscribers()
   logOperation(
     'enqueue',
-    typeof command.value === 'string' ? command.value : undefined,
+    typeof stamped.value === 'string' ? stamped.value : undefined,
   )
 }
 
@@ -138,13 +150,15 @@ export function enqueue(command: QueuedCommand): void {
  * Add a task notification to the queue.
  * Convenience wrapper that defaults priority to 'later' so user input
  * is never starved by system messages.
+ * densable cf: omit agentId → stamp mi() (main). Explicit agentId kept.
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
-  commandQueue.push({ ...command, priority: command.priority ?? 'later' })
+  const stamped = withMainThreadAgentId(command)
+  commandQueue.push({ ...stamped, priority: stamped.priority ?? 'later' })
   notifySubscribers()
   logOperation(
     'enqueue',
-    typeof command.value === 'string' ? command.value : undefined,
+    typeof stamped.value === 'string' ? stamped.value : undefined,
   )
 }
 
@@ -161,8 +175,8 @@ const PRIORITY_ORDER: Record<QueuePriority, number> = {
  * An optional `filter` narrows the candidates: only commands for which the
  * predicate returns `true` are considered. Non-matching commands stay in the
  * queue untouched. This lets between-turn drains (SDK, REPL) restrict to
- * main-thread commands (`cmd.agentId === undefined`) without restructuring
- * the existing while-loop patterns.
+ * main-thread commands (densable AL: `cmd.agentId === mi()`) without
+ * restructuring the existing while-loop patterns.
  */
 export function dequeue(
   filter?: (cmd: QueuedCommand) => boolean,

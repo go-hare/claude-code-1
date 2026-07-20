@@ -2259,11 +2259,12 @@ function runHeadlessStreaming(
       setupPluginHookHotReload()
     }
 
-    // Only main-thread commands (agentId===undefined) — subagent
+    // densable AL: main-thread commands (agentId===mi()) — subagent
     // notifications are drained by the subagent's mid-turn gate in query.ts.
     // Defined outside the try block so it's accessible in the post-finally
     // queue re-checks at the bottom of run().
-    const isMainThread = (cmd: QueuedCommand) => cmd.agentId === undefined
+    const { isMainThreadQueuedCommand } = await import('../bootstrap/state.js')
+    const isMainThread = (cmd: QueuedCommand) => isMainThreadQueuedCommand(cmd)
 
     try {
       let command: QueuedCommand | undefined

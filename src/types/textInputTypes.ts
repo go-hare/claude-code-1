@@ -351,13 +351,18 @@ export type QueuedCommand = {
    */
   workload?: string
   /**
-   * Agent that should receive this notification. Undefined = main thread.
-   * Subagents run in-process and share the module-level command queue; the
-   * drain gate in query.ts filters by this field so a subagent's background
-   * task notifications don't leak into the coordinator's context (PR #18453
-   * unified the queue but lost the isolation the dual-queue accidentally had).
+   * Agent that should receive this notification.
+   * densable: main thread = mi() (session main AgentId); nested = Qc(owner).
+   * Omit at call site → enqueue stamps mi() (official IT/cf). Not dual-OR.
+   * Subagents share the process queue; drain gates filter by this field.
    */
   agentId?: AgentId
+  /**
+   * Official BRt/Hao/Jeo task id stamped on task-notification queue entries.
+   * Jeo skips tB for keepalive children still waiting in the queue.
+   * Main-thread AL is agentId===mi() (densable AL).
+   */
+  taskId?: string
   /**
    * Autonomy-run provenance for system-generated automatic turns.
    * Used by the autonomy ledger to track queue → execution lifecycle.

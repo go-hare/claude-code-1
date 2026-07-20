@@ -768,12 +768,13 @@ describe('enqueueAgentNotification', () => {
       '<task_id>test-agent-001</task_id>',
     )
     expect(enqueuedNotifications[0]).toContain('<status>completed</status>')
-    expect(enqueuedNotifications[0]).toContain(
-      'Agent "refactor auth" completed',
-    )
+    expect(enqueuedNotifications[0]).toContain('Agent "refactor auth" finished')
     expect(enqueuedNotifications[0]).toContain('<result>Done!</result>')
     expect(enqueuedNotifications[0]).toContain(
-      '<total_tokens>5000</total_tokens>',
+      '<subagent_tokens>5000</subagent_tokens>',
+    )
+    expect(enqueuedNotifications[0]).toContain(
+      'A task-notification fires each time this agent stops',
     )
   })
 

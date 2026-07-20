@@ -69,13 +69,21 @@ export type LocalShellSpawnInput = {
   kind?: 'bash' | 'monitor'
 }
 
+// densable LocalAgentTask.kill(e,t,r,n) → XV(e,t,n) with killedBy as 4th arg;
+// local omits the registry param and passes killedBy as optional 3rd.
+export type TaskKilledBy = 'user' | 'parent' | 'system'
+
 // What getTaskByType dispatches for: kill. spawn/render were never
 // called polymorphically (removed in #22546). All six kill implementations
 // use only setAppState — getAppState/abortController were dead weight.
 export type Task = {
   name: string
   type: TaskType
-  kill(taskId: string, setAppState: SetAppState): Promise<void>
+  kill(
+    taskId: string,
+    setAppState: SetAppState,
+    killedBy?: TaskKilledBy,
+  ): Promise<void>
 }
 
 // Task ID prefixes
