@@ -3911,6 +3911,10 @@ export function normalizeAttachmentForAPI(
         createUserMessage({
           content: getTeammateMailbox().formatTeammateMessages(
             attachment.messages,
+            {
+              // densable jot: lead gets peer midTurn:false framing
+              recipientIsLead: attachment.recipientIsLead ?? false,
+            },
           ),
           isMeta: true,
         }),

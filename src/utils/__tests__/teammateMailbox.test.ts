@@ -7,6 +7,7 @@ import type { Message } from 'src/types/message.js'
 import { getErrnoCode } from 'src/utils/errors.js'
 import {
   compactMailboxMessages,
+  formatTeammateMessages,
   getLastPeerDmSummary,
   getInboxPath,
   markMessageAsReadByIndex,
@@ -22,6 +23,7 @@ import {
   type TeammateMessage,
   writeToMailbox,
 } from 'src/utils/teammateMailbox.js'
+import { TEAMMATE_MESSAGE_TAG } from 'src/constants/xml.js'
 
 let tempHome = ''
 let previousConfigDir: string | undefined
@@ -541,5 +543,36 @@ describe('getLastPeerDmSummary', () => {
     ] as unknown as Message[]
 
     expect(getLastPeerDmSummary(messages)).toBeUndefined()
+  })
+})
+
+describe('formatTeammateMessages densable jot', () => {
+  const sample = [
+    {
+      from: 'worker',
+      text: 'scan done',
+      timestamp: new Date(0).toISOString(),
+      color: 'blue',
+    },
+  ]
+
+  test('non-lead returns raw XML envelope without peer framing', () => {
+    const out = formatTeammateMessages(sample)
+    expect(out).toContain(`<${TEAMMATE_MESSAGE_TAG} teammate_id="worker"`)
+    expect(out).toContain('scan done')
+    expect(out).not.toContain('Another Claude session sent a message')
+  })
+
+  test('recipientIsLead wraps with peer midTurn:false framing', () => {
+    const out = formatTeammateMessages(sample, { recipientIsLead: true })
+    expect(out).toContain('Another Claude session sent a message:')
+    expect(out).not.toContain('while you were working')
+    expect(out).toContain('permission laundering')
+    expect(out).toContain(`<${TEAMMATE_MESSAGE_TAG} teammate_id="worker"`)
+    expect(out).toContain('scan done')
+  })
+
+  test('empty messages stay empty even for lead', () => {
+    expect(formatTeammateMessages([], { recipientIsLead: true })).toBe('')
   })
 })

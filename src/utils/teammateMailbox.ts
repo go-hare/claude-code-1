@@ -669,7 +669,9 @@ export async function clearMailbox(
 }
 
 /**
- * Format teammate messages as XML for attachment display
+ * densable cZt + jot — format teammate messages as XML; when recipient is the
+ * team lead (recipientIsLead), wrap with peer midTurn:false laundering note
+ * (fjr) so the model does not treat mailbox content as user input.
  */
 export function formatTeammateMessages(
   messages: Array<{
@@ -679,14 +681,23 @@ export function formatTeammateMessages(
     color?: string
     summary?: string
   }>,
+  opts?: { recipientIsLead?: boolean },
 ): string {
-  return messages
+  const body = messages
     .map(m => {
       const colorAttr = m.color ? ` color="${m.color}"` : ''
       const summaryAttr = m.summary ? ` summary="${m.summary}"` : ''
       return `<${TEAMMATE_MESSAGE_TAG} teammate_id="${m.from}"${colorAttr}${summaryAttr}>\n${m.text}\n</${TEAMMATE_MESSAGE_TAG}>`
     })
     .join('\n\n')
+  if (!opts?.recipientIsLead || !body) {
+    return body
+  }
+  // Lazy require avoids cycle with messages.ts → getTeammateMailbox().
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { wrapPeerOriginText } =
+    require('./messages.js') as typeof import('./messages.js')
+  return wrapPeerOriginText(body, { midTurn: false })
 }
 
 /**

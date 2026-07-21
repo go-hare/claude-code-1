@@ -773,6 +773,8 @@ export type TeammateMailboxAttachment = {
     color?: string
     summary?: string
   }>
+  /** densable: when true, formatTeammateMessages applies peer framing (jot). */
+  recipientIsLead?: boolean
 }
 
 export type TeamContextAttachment = {
@@ -3805,10 +3807,12 @@ async function getTeammateMailboxAttachments(
 
   // Build the attachment BEFORE marking messages as processed
   // This prevents message loss if any operation below fails
+  // densable: recipientIsLead drives jot peer midTurn:false framing
   const attachment: Attachment[] = [
     {
       type: 'teammate_mailbox',
       messages: allMessages,
+      recipientIsLead: teamLeadStatus,
     },
   ]
 
