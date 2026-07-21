@@ -1,23 +1,32 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import { isReplBridgeActive } from 'src/bootstrap/state.js'
+import {
+  getMainThreadAgentId,
+  isReplBridgeActive,
+} from 'src/bootstrap/state.js'
 import { getReplBridgeHandle } from 'src/bridge/replBridgeHandle.js'
 import type { Tool, ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { findTeammateTaskByAgentId } from 'src/tasks/InProcessTeammateTask/InProcessTeammateTask.js'
 import {
   isLocalAgentTask,
+  isObserverAgentTask,
   queuePendingMessage,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import { isInProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/types.js'
 import { isMainSessionTask } from 'src/tasks/LocalMainSessionTask.js'
-import { toAgentId } from 'src/types/ids.js'
+import { asAgentId, toAgentId } from 'src/types/ids.js'
+import { getAgentContext } from 'src/utils/agentContext.js'
 import { generateRequestId } from 'src/utils/agentId.js'
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
+import { isObserverTaskId } from 'src/utils/observerAgents.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { readAgentMetadata } from 'src/utils/sessionStorage.js'
 import { errorMessage } from 'src/utils/errors.js'
 import { truncate } from 'src/utils/format.js'
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { enqueuePendingNotification } from 'src/utils/messageQueueManager.js'
 import { parseAddress } from 'src/utils/peerAddress.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
@@ -42,6 +51,9 @@ import { resumeAgentBackground } from '../AgentTool/resumeAgent.js'
 import { SEND_MESSAGE_TOOL_NAME } from './constants.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
+
+/** densable D6 — reserved recipient routed to the main conversation queue. */
+export const MAIN_RECIPIENT = 'main'
 
 const StructuredMessage = lazySchema(() =>
   z.discriminatedUnion('type', [
@@ -142,6 +154,154 @@ function hasInlineUdsToken(to: string): boolean {
   // Empty-token markers are still inline-token attempts. Observable input
   // redaction preserves "#token=" so cloned inputs remain rejected.
   return addr.scheme === 'uds' && addr.target.includes(UDS_INLINE_TOKEN_MARKER)
+}
+
+/** Peer body envelope tag. */
+const AGENT_MESSAGE_TAG = 'agent-message'
+
+/**
+ * Refuse delivery when recipient is a background observer (or its observer
+ * status cannot be verified from sidecar).
+ */
+const OBSERVER_RECIPIENT_REFUSE = {
+  data: {
+    success: false as const,
+    message:
+      'That agent cannot receive messages (it is a background observer, or its status could not be verified).',
+  },
+}
+
+/**
+ * agent-live|stopped|evicted gate: refuse observer recipients (task id,
+ * live task, or sidecar metadata). Unreadable metadata also refuses.
+ */
+async function refuseIfObserverRecipient(
+  agentId: string,
+  task: unknown,
+): Promise<typeof OBSERVER_RECIPIENT_REFUSE | null> {
+  if (isObserverTaskId(agentId) || isObserverAgentTask(task)) {
+    return OBSERVER_RECIPIENT_REFUSE
+  }
+  try {
+    const meta = await readAgentMetadata(asAgentId(agentId))
+    if (meta?.isObserver === true) {
+      return OBSERVER_RECIPIENT_REFUSE
+    }
+  } catch {
+    // meta unreadable → refuse (cannot verify non-observer)
+    return OBSERVER_RECIPIENT_REFUSE
+  }
+  return null
+}
+
+/**
+ * Escape raw `<agent-message` openers inside body so nested envelopes
+ * cannot break the outer tag.
+ */
+function escapeAgentMessageBody(text: string): string {
+  return text.replace(
+    new RegExp(`<(?=/?${AGENT_MESSAGE_TAG}(?:[>\\s/]|$))`, 'gi'),
+    '<\\',
+  )
+}
+
+/**
+ * Sanitize display name for origin.name (max 64 graphemes).
+ */
+function sanitizePeerOriginName(name: string): string {
+  const cleaned = name.replace(/[\p{Cf}\p{Cc}\p{Cs}\p{Zl}\p{Zp}]/gu, '').trim()
+  const chars = [...cleaned]
+  return chars.length > 64 ? `${chars.slice(0, 64).join('')}…` : cleaned
+}
+
+/**
+ * Resolve human-readable sender label for peer origin.
+ *
+ * Order:
+ *   1. ALS agentContext teammate + agentName (teammates under runWithAgentContext)
+ *   2. agentNameRegistry reverse lookup
+ *   3. local_agent task.agentType
+ *   4. in-process teammate task.identity.agentName
+ *   5. raw agent id
+ *
+ * Exported for unit tests.
+ */
+export function resolveSenderDisplayName(
+  context: ToolUseContext,
+  senderAgentId: string,
+): string {
+  // Prefer ALS when the running agent is a teammate (SendMessage from
+  // in-process/tmux teammate loop). Live identity even when registry/task lag.
+  const agentCtx = getAgentContext()
+  if (
+    agentCtx?.agentType === 'teammate' &&
+    typeof agentCtx.agentName === 'string' &&
+    agentCtx.agentName.length > 0
+  ) {
+    return agentCtx.agentName
+  }
+
+  const appState = context.getAppState()
+  for (const [name, id] of appState.agentNameRegistry) {
+    if (id === senderAgentId) return name
+  }
+  const task = appState.tasks[senderAgentId]
+  if (isLocalAgentTask(task) && typeof task.agentType === 'string') {
+    return task.agentType
+  }
+  if (
+    isInProcessTeammateTask(task) &&
+    typeof task.identity?.agentName === 'string'
+  ) {
+    return task.identity.agentName
+  }
+  return senderAgentId
+}
+
+/**
+ * Wrap plain text in <agent-message from="…"> when peer-sent.
+ */
+function wrapAgentMessageEnvelope(from: string, message: string): string {
+  const safeFrom = from.replace(/"/g, '')
+  return `<${AGENT_MESSAGE_TAG} from="${safeFrom}">\n${escapeAgentMessageBody(message)}\n</${AGENT_MESSAGE_TAG}>`
+}
+
+/**
+ * Peer when context.agentId (sender task) is set; else coordinator.
+ * Main-thread SendMessage has no agentId → coordinator.
+ */
+function resolveSendMessageOriginAndBody(
+  context: ToolUseContext,
+  message: string,
+): {
+  origin:
+    | { kind: 'coordinator' }
+    | {
+        kind: 'peer'
+        from: string
+        senderTaskId: string
+        name?: string
+        body: string
+      }
+  body: string
+} {
+  const senderTaskId = context.agentId
+  if (!senderTaskId) {
+    return { origin: { kind: 'coordinator' }, body: message }
+  }
+  const from = resolveSenderDisplayName(context, senderTaskId)
+  const name = sanitizePeerOriginName(from)
+  const bodyEscaped = escapeAgentMessageBody(message)
+  return {
+    origin: {
+      kind: 'peer',
+      from,
+      senderTaskId,
+      ...(name ? { name } : {}),
+      body: bodyEscaped,
+    },
+    body: wrapAgentMessageEnvelope(from, message),
+  }
 }
 
 function recipientForDisplay(to: string): string {
@@ -799,6 +959,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
     },
 
     async call(input, context, canUseTool, assistantMessage) {
+      // Call entry: refuse when sender is an observer task.
+      // Covers all routes (UDS/bridge/TCP/mailbox/broadcast/local_agent).
+      if (context.agentId && isObserverTaskId(context.agentId)) {
+        return {
+          data: {
+            success: false,
+            message:
+              'Observers report via ObserverReport, not SendMessage. SendMessage is not available from an observer.',
+          },
+        }
+      }
+
       if (typeof input.message === 'string') {
         const addr = parseAddress(input.to)
         if (addr.scheme === 'uds' && hasInlineUdsToken(input.to)) {
@@ -906,8 +1078,41 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         }
       }
 
+      // densable Hco: e===D6 → kind:"main" before agentNameRegistry / mailbox.
+      // Subagent → main: IT({mode:"prompt", agentId:mi(), origin:peer, …}).
+      // Main → main: refuse (you already are the main conversation).
+      if (typeof input.message === 'string' && input.to === MAIN_RECIPIENT) {
+        if (!context.agentId) {
+          return {
+            data: {
+              success: false,
+              message: `You are the main conversation — "${MAIN_RECIPIENT}" addresses you. Send to a named agent instead.`,
+            },
+          }
+        }
+        const { origin: sendOrigin, body: sendBody } =
+          resolveSendMessageOriginAndBody(context, input.message)
+        enqueuePendingNotification({
+          mode: 'prompt',
+          value: sendBody,
+          priority: 'next',
+          isMeta: true,
+          skipSlashCommands: true,
+          origin: sendOrigin as never,
+          agentId: getMainThreadAgentId(),
+        })
+        return {
+          data: {
+            success: true,
+            message: "Message queued for the main conversation's next turn.",
+          },
+        }
+      }
+
       // Route to in-process subagent by name or raw agentId before falling
       // through to ambient-team resolution. Stopped agents are auto-resumed.
+      // promptOrigin: peer when subagent-sent, else coordinator (from main).
+      // (Observer sender gate is at call() entry — covers UDS/mailbox/etc.)
       if (typeof input.message === 'string' && input.to !== '*') {
         const appState = context.getAppState()
         const registered = appState.agentNameRegistry.get(input.to)
@@ -915,11 +1120,31 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         if (agentId) {
           const task = appState.tasks[agentId]
           if (isLocalAgentTask(task) && !isMainSessionTask(task)) {
+            // refuse observer recipients (live or stopped)
+            const observerRefuse = await refuseIfObserverRecipient(
+              agentId,
+              task,
+            )
+            if (observerRefuse) return observerRefuse
+            // user-stopped → refuse (no auto-resume)
+            if (task.stoppedByUser) {
+              return {
+                data: {
+                  success: false,
+                  message: `Agent "${input.to}" was stopped by the user and was not resumed. Treat its work as cancelled; only start a new agent for it if the user explicitly asks.`,
+                },
+              }
+            }
+            // peer when context.agentId set, else coordinator
+            const { origin: sendOrigin, body: sendBody } =
+              resolveSendMessageOriginAndBody(context, input.message)
             if (task.status === 'running') {
+              // queue with origin + isMeta for live SendMessage
               queuePendingMessage(
                 agentId,
-                input.message,
+                sendBody,
                 context.setAppStateForTasks ?? context.setAppState,
+                { isMeta: true, origin: sendOrigin },
               )
               return {
                 data: {
@@ -928,16 +1153,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 },
               }
             }
-            // task exists but stopped — auto-resume
+            // agent stopped — auto-resume with promptOrigin
             try {
               const result = await resumeAgentBackground({
                 agentId,
-                prompt: input.message,
+                prompt: sendBody,
                 toolUseContext: context,
                 canUseTool,
                 invokingRequestId: assistantMessage?.requestId as
                   | string
                   | undefined,
+                promptOrigin: sendOrigin,
+                promptIsMeta: true,
               })
               return {
                 data: {
@@ -953,20 +1180,29 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 },
               }
             }
-          } else {
-            // task evicted from state — try resume from disk transcript.
+          } else if (!task || !isLocalAgentTask(task)) {
+            // agent-evicted — same observer refuse before resume from disk.
             // agentId is either a registered name or a format-matching raw ID
             // (toAgentId validates the createAgentId format, so teammate names
             // never reach this block).
+            const observerRefuse = await refuseIfObserverRecipient(
+              agentId,
+              task,
+            )
+            if (observerRefuse) return observerRefuse
+            const { origin: sendOrigin, body: sendBody } =
+              resolveSendMessageOriginAndBody(context, input.message)
             try {
               const result = await resumeAgentBackground({
                 agentId,
-                prompt: input.message,
+                prompt: sendBody,
                 toolUseContext: context,
                 canUseTool,
                 invokingRequestId: assistantMessage?.requestId as
                   | string
                   | undefined,
+                promptOrigin: sendOrigin,
+                promptIsMeta: true,
               })
               return {
                 data: {
