@@ -182,20 +182,28 @@ export const ObserverReportTool = buildTool({
           return false
         }
       },
-      enqueueMain: value => {
+      enqueueMain: (value, origin) => {
+        // densable IT({mode:"prompt",...,origin:l,skipSlashCommands:!0,isMeta:!0})
+        // origin kind is "observer" (not observer-activity) so Fws can frame.
         enqueuePendingNotification({
           mode: 'prompt',
           value,
           priority: 'next',
           isMeta: true,
+          skipSlashCommands: true,
+          origin: origin as never,
         })
       },
-      enqueueAgent: (observedTaskId, value) => {
+      enqueueAgent: (observedTaskId, value, origin) => {
         // Async observers get a no-op setAppState from forkedAgent
         // (shareSetAppState: !isAsync). Root task queue writes must use
         // setAppStateForTasks, same as query/autoDream/observer host.
+        // densable sqe(…,{origin:l, isMeta:!0}) with kind:"observer".
         const setAppState = context.setAppStateForTasks ?? context.setAppState
-        queuePendingMessage(observedTaskId, value, setAppState)
+        queuePendingMessage(observedTaskId, value, setAppState, {
+          isMeta: true,
+          origin: origin as never,
+        })
       },
     })
     return {

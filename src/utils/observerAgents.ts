@@ -810,13 +810,35 @@ export async function drainObserverActivityBuffer(input: {
 }
 
 /**
- * Official Fdo densable — wrap an observer report for the observed agent.
+ * densable Noo envelope for ObserverReport delivery — same agent-message tag
+ * as peer SendMessage (not a bespoke observer-report tag).
+ *
+ * densable: Noo(e,t) = `<agent-message from="${Ll(e)}">\n${I6e("agent-message",t)}\n</agent-message>`
+ * Ll keeps `:` in `observer:type` (only HTML-escapes quotes); I6e escapes
+ * open angles that would break out of the agent-message tag.
  */
 export function formatObserverReportDelivery(
   fromLabel: string,
   report: string,
 ): string {
-  return `<observer-report from="${sanitizeObserverNameToken(fromLabel)}">\n${escapeObserverXmlFragments(truncateObserverPayload(report))}\n</observer-report>`
+  // densable Ll: keep colon; escape quotes for attribute safety
+  const from = fromLabel
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;')
+  // densable I6e("agent-message", body) + local SUr truncate
+  const body = truncateObserverPayload(report).replace(
+    /<(?=\/?agent-message(?:[>\s/]|$))/gi,
+    '<\\',
+  )
+  return `<agent-message from="${from}">\n${body}\n</agent-message>`
+}
+
+/** densable origin object on ObserverReport enqueue (kind:"observer"). */
+export type ObserverReportOrigin = {
+  kind: 'observer'
+  from: string
+  senderTaskId: string
 }
 
 // ---------------------------------------------------------------------------
@@ -2088,10 +2110,20 @@ export function deliverObserverReport(input: {
   report: string
   /** Optional: resolve whether observed local-agent task is still running. */
   isObservedRunning?: (observedTaskId: string) => boolean
-  /** Deliver to main conversation (priority next, meta). */
-  enqueueMain: (value: string) => void
-  /** Deliver to a running local-agent task's pending messages. */
-  enqueueAgent?: (observedTaskId: string, value: string) => void
+  /**
+   * densable IT(... origin:l ...): deliver to main conversation queue.
+   * Origin is always kind:"observer" (not observer-activity).
+   */
+  enqueueMain: (value: string, origin: ObserverReportOrigin) => void
+  /**
+   * densable sqe(... {origin:l,isMeta:!0}): deliver to running observed agent.
+   * Origin is kind:"observer" — same object densable uses for both paths.
+   */
+  enqueueAgent?: (
+    observedTaskId: string,
+    value: string,
+    origin: ObserverReportOrigin,
+  ) => void
 }): DeliverObserverReportResult {
   const observerTaskId = input.observerTaskId
   if (observerTaskId === undefined) {
@@ -2120,8 +2152,14 @@ export function deliverObserverReport(input: {
   }
   const fromLabel = `observer:${observerAgentType}`
   const payload = formatObserverReportDelivery(fromLabel, input.report)
+  // densable l={kind:"observer",from:s,senderTaskId:r}
+  const origin: ObserverReportOrigin = {
+    kind: 'observer',
+    from: fromLabel,
+    senderTaskId: observerTaskId,
+  }
   if (observedTaskId === undefined) {
-    input.enqueueMain(payload)
+    input.enqueueMain(payload, origin)
     return {
       success: true,
       message: 'Report queued for the main conversation.',
@@ -2134,7 +2172,7 @@ export function deliverObserverReport(input: {
       message: `The observed agent (${observedEnvelopeName}) has no delivery channel. The report was not delivered.`,
     }
   }
-  input.enqueueAgent(observedTaskId, payload)
+  input.enqueueAgent(observedTaskId, payload, origin)
   return {
     success: true,
     message: `Report queued for ${observedEnvelopeName}.`,

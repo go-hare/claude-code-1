@@ -225,11 +225,12 @@ describe('observer pairing registry + deliverObserverReport', () => {
     expect(getArmedObserverPairing('obs-1')).toBeUndefined()
   })
 
-  test('formatObserverReportDelivery wraps report', () => {
+  test('formatObserverReportDelivery wraps report in densable agent-message', () => {
     const xml = formatObserverReportDelivery('observer:watcher', 'look out')
-    expect(xml).toContain('<observer-report from="observer-watcher">')
+    // densable Ll keeps colon in from= (not EUr dash-sanitize)
+    expect(xml).toContain('<agent-message from="observer:watcher">')
     expect(xml).toContain('look out')
-    expect(xml).toContain('</observer-report>')
+    expect(xml).toContain('</agent-message>')
   })
 
   test('deliver to main when no observedTaskId', () => {
@@ -238,16 +239,19 @@ describe('observer pairing registry + deliverObserverReport', () => {
       observerAgentType: 'watcher',
       observedEnvelopeName: 'main',
     })
-    const main: string[] = []
+    const main: Array<{ v: string; origin: { kind: string; from: string } }> =
+      []
     const r = deliverObserverReport({
       observerTaskId: 'obs-1',
       report: 'fix the bug',
-      enqueueMain: v => main.push(v),
+      enqueueMain: (v, origin) => main.push({ v, origin }),
     })
     expect(r.success).toBe(true)
     if (r.success) expect(r.target).toBe('main')
     expect(main.length).toBe(1)
-    expect(main[0]).toContain('fix the bug')
+    expect(main[0]!.v).toContain('fix the bug')
+    expect(main[0]!.origin.kind).toBe('observer')
+    expect(main[0]!.origin.from).toBe('observer:watcher')
   })
 
   test('deliver to agent when observedTaskId set and running', () => {
@@ -257,19 +261,24 @@ describe('observer pairing registry + deliverObserverReport', () => {
       observedTaskId: 'agent-9',
       observedEnvelopeName: 'worker',
     })
-    const agent: Array<{ id: string; v: string }> = []
+    const agent: Array<{
+      id: string
+      v: string
+      origin: { kind: string }
+    }> = []
     const r = deliverObserverReport({
       observerTaskId: 'obs-2',
       report: 'missed constraint',
       isObservedRunning: id => id === 'agent-9',
       enqueueMain: () => {},
-      enqueueAgent: (id, v) => agent.push({ id, v }),
+      enqueueAgent: (id, v, origin) => agent.push({ id, v, origin }),
     })
     expect(r.success).toBe(true)
     if (r.success) expect(r.target).toBe('agent')
-    expect(agent).toEqual([
-      { id: 'agent-9', v: expect.stringContaining('missed constraint') },
-    ])
+    expect(agent).toHaveLength(1)
+    expect(agent[0]!.id).toBe('agent-9')
+    expect(agent[0]!.v).toContain('missed constraint')
+    expect(agent[0]!.origin.kind).toBe('observer')
   })
 
   test('fails without pairing / without agentId', () => {

@@ -37,6 +37,7 @@ import type { ProcessUserInputContext } from './processUserInput/processUserInpu
 import { processUserInput } from './processUserInput/processUserInput.js'
 import type { QueryGuard } from './QueryGuard.js'
 import { queryCheckpoint, startQueryProfile } from './queryProfiler.js'
+import { applyTurnStartOriginFraming } from './messages.js'
 import { runWithWorkload } from './workloadContext.js'
 
 function exit(): void {
@@ -527,6 +528,9 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           }
           // Stamp origin here rather than threading another arg through
           // processUserInput → processUserInputBase → processTextPrompt → createUserMessage.
+          // densable Dfr/HXd instead passes origin into HXd and runs Fws there
+          // (turn-start peer/observer framing). We stamp + Fws after process
+          // so content is framed before the model sees it.
           // Derive origin from mode for task-notifications — mirrors the origin
           // derivation at messages.ts (case 'queued_command'); intentionally
           // does NOT mirror its isMeta:true so idle-dequeued notifications stay
@@ -538,7 +542,14 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               : undefined)
           if (origin) {
             for (const m of result.messages) {
-              if (m.type === 'user') m.origin = origin
+              if (m.type === 'user') {
+                m.origin = origin as typeof m.origin
+                // densable Fws(message, origin) — midTurn:false peer/observer
+                applyTurnStartOriginFraming(
+                  m,
+                  origin as { kind?: string; from?: string },
+                )
+              }
             }
           }
           newMessages.push(...result.messages)
