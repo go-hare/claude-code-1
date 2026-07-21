@@ -12,7 +12,6 @@
 import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { getSystemPrompt } from '../../constants/prompts.js'
-import { TEAMMATE_MESSAGE_TAG } from '../../constants/xml.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
   processMailboxPermissionResponse,
@@ -100,6 +99,7 @@ import type { TeammateContext } from '../teammateContext.js'
 import { runWithTeammateContext } from '../teammateContext.js'
 import {
   createIdleNotification,
+  formatTeammateMessage,
   getLastPeerDmSummary,
   isPermissionResponse,
   isShutdownRequest,
@@ -464,7 +464,7 @@ function createInProcessCanUseTool(
 
 /**
  * Formats a message as <teammate-message> XML for injection into the conversation.
- * This ensures the model sees messages in the same format as tmux teammates.
+ * densable cZt — shared with formatTeammateMessages (Ll attrs + I6e body).
  */
 function formatAsTeammateMessage(
   from: string,
@@ -472,9 +472,7 @@ function formatAsTeammateMessage(
   color?: string,
   summary?: string,
 ): string {
-  const colorAttr = color ? ` color="${color}"` : ''
-  const summaryAttr = summary ? ` summary="${summary}"` : ''
-  return `<${TEAMMATE_MESSAGE_TAG} teammate_id="${from}"${colorAttr}${summaryAttr}>\n${content}\n</${TEAMMATE_MESSAGE_TAG}>`
+  return formatTeammateMessage({ from, text: content, color, summary })
 }
 
 /**

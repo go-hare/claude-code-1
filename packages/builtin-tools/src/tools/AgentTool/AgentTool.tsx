@@ -188,7 +188,9 @@ const fullInputSchema = lazySchema(() => {
     name: z
       .string()
       .optional()
-      .describe('Name for the spawned agent. Makes it addressable via SendMessage({to: name}) while running.'),
+      .describe(
+        'Name for the spawned agent. Makes it addressable via SendMessage({to: name}) while running. "main" is reserved — SendMessage routes it to the main conversation.',
+      ),
     team_name: z.string().optional().describe('Team name for spawning. Uses current team context if omitted.'),
     mode: permissionModeSchema()
       .optional()

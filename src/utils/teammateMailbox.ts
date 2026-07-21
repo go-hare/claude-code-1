@@ -27,6 +27,7 @@ import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { BackendType } from './swarm/backends/types.js'
 import { TEAM_LEAD_NAME } from './swarm/constants.js'
 import { sanitizePathComponent } from './tasks.js'
+import { escapeXmlAttr } from './xml.js'
 import { getAgentName, getTeammateColor, getTeamName } from './teammate.js'
 
 // Lock options: retry with backoff so concurrent callers (multiple Claudes
@@ -669,6 +670,27 @@ export async function clearMailbox(
 }
 
 /**
+ * densable cZt: single teammate-message envelope (Ll attrs + I6e body).
+ */
+export function formatTeammateMessage(entry: {
+  from: string
+  text: string
+  color?: string
+  summary?: string
+}): string {
+  const colorAttr = entry.color ? ` color="${escapeXmlAttr(entry.color)}"` : ''
+  const summaryAttr = entry.summary
+    ? ` summary="${escapeXmlAttr(entry.summary)}"`
+    : ''
+  // densable I6e(d9, text) — break out of teammate-message tag
+  const text = entry.text.replace(
+    new RegExp(`<(?=/?${TEAMMATE_MESSAGE_TAG}(?:[>\\s/]|$))`, 'gi'),
+    '<\\',
+  )
+  return `<${TEAMMATE_MESSAGE_TAG} teammate_id="${escapeXmlAttr(entry.from)}"${colorAttr}${summaryAttr}>\n${text}\n</${TEAMMATE_MESSAGE_TAG}>`
+}
+
+/**
  * densable cZt + jot — format teammate messages as XML; when recipient is the
  * team lead (recipientIsLead), wrap with peer midTurn:false laundering note
  * (fjr) so the model does not treat mailbox content as user input.
@@ -683,13 +705,7 @@ export function formatTeammateMessages(
   }>,
   opts?: { recipientIsLead?: boolean },
 ): string {
-  const body = messages
-    .map(m => {
-      const colorAttr = m.color ? ` color="${m.color}"` : ''
-      const summaryAttr = m.summary ? ` summary="${m.summary}"` : ''
-      return `<${TEAMMATE_MESSAGE_TAG} teammate_id="${m.from}"${colorAttr}${summaryAttr}>\n${m.text}\n</${TEAMMATE_MESSAGE_TAG}>`
-    })
-    .join('\n\n')
+  const body = messages.map(formatTeammateMessage).join('\n\n')
   if (!opts?.recipientIsLead || !body) {
     return body
   }
