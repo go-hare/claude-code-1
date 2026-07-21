@@ -1,4 +1,9 @@
 export const TEAM_LEAD_NAME = 'team-lead'
+/**
+ * densable D6 — reserved SendMessage recipient for the main conversation.
+ * Teammate/agent display names must not claim this (see pzg / registerName).
+ */
+export const MAIN_RECIPIENT_NAME = 'main'
 export const SWARM_SESSION_NAME = 'claude-swarm'
 export const SWARM_VIEW_WINDOW_NAME = 'swarm-view'
 export const TMUX_COMMAND = 'tmux'

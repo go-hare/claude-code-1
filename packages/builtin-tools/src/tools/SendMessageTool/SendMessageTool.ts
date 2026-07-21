@@ -31,7 +31,10 @@ import { parseAddress } from 'src/utils/peerAddress.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import type { BackendType } from 'src/utils/swarm/backends/types.js'
-import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js'
+import {
+  MAIN_RECIPIENT_NAME,
+  TEAM_LEAD_NAME,
+} from 'src/utils/swarm/constants.js'
 import { readTeamFileAsync } from 'src/utils/swarm/teamHelpers.js'
 import {
   getAgentId,
@@ -53,7 +56,7 @@ import { DESCRIPTION, getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 /** densable D6 — reserved recipient routed to the main conversation queue. */
-export const MAIN_RECIPIENT = 'main'
+export const MAIN_RECIPIENT = MAIN_RECIPIENT_NAME
 
 const StructuredMessage = lazySchema(() =>
   z.discriminatedUnion('type', [

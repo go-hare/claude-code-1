@@ -8,7 +8,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawnTeammate } from '../spawnMultiAgent'
+import { generateUniqueTeammateName, spawnTeammate } from '../spawnMultiAgent'
 
 let tempHome: string
 let previousConfigDir: string | undefined
@@ -167,6 +167,50 @@ afterEach(() => {
   rmSync(tempHome, { recursive: true, force: true })
 })
 
+describe('generateUniqueTeammateName densable pzg', () => {
+  test('refuses reserved main recipient name', async () => {
+    await expect(generateUniqueTeammateName('main', undefined)).rejects.toThrow(
+      '"main" is a reserved recipient name (SendMessage routes it to the main conversation) — choose another teammate name.',
+    )
+  })
+
+  test('refuses main after @→- sanitization (densable YZi+D6)', async () => {
+    // YZi replaces @ with -; "m@in" stays non-main, but "mai@n" → "mai-n".
+    // Exact reserved is only after sanitize equals "main".
+    await expect(
+      generateUniqueTeammateName('main', 'any-team'),
+    ).rejects.toThrow(/reserved recipient name/)
+  })
+
+  test('uniquifies against existing team members', async () => {
+    writeTeamConfig('alpha')
+    // team-lead already exists in writeTeamConfig
+    const teamDir = join(tempHome, 'teams', 'alpha')
+    const configPath = join(teamDir, 'config.json')
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      members: Array<Record<string, unknown>>
+    }
+    raw.members.push({
+      agentId: 'worker@alpha',
+      name: 'worker',
+      joinedAt: Date.now(),
+      tmuxPaneId: '',
+      cwd: tempHome,
+      subscriptions: [],
+    })
+    writeFileSync(configPath, JSON.stringify(raw, null, 2))
+
+    expect(await generateUniqueTeammateName('worker', 'alpha')).toBe('worker-2')
+    expect(await generateUniqueTeammateName('fresh', 'alpha')).toBe('fresh')
+  })
+
+  test('sanitizes @ in non-reserved names', async () => {
+    expect(await generateUniqueTeammateName('dev@ops', undefined)).toBe(
+      'dev-ops',
+    )
+  })
+})
+
 describe('spawnTeammate', () => {
   test('fails before spawn side effects when the team file is missing', async () => {
     let setAppStateCalled = false
@@ -229,6 +273,22 @@ describe('spawnTeammate', () => {
       agentType: 'reviewer',
       agentDefinition: customAgent,
     })
+  })
+
+  test('refuses spawn when name is reserved main', async () => {
+    writeTeamConfig('alpha')
+    const { context } = createContext()
+    await expect(
+      spawnTeammate(
+        {
+          name: 'main',
+          prompt: 'should not spawn',
+          team_name: 'alpha',
+        },
+        context as any,
+      ),
+    ).rejects.toThrow(/reserved recipient name/)
+    expect(spawnCalls).toHaveLength(0)
   })
 
   test('rolls back spawned teammate when team file persistence fails', async () => {

@@ -70,6 +70,7 @@ import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
 import { asSystemPrompt } from 'src/utils/systemPromptType.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
 import { getTask, getTaskListId, getTaskOwnedFiles } from 'src/utils/tasks.js';
+import { MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js';
 import { getParentSessionId, isTeammate } from 'src/utils/teammate.js';
 import { isInProcessTeammate } from 'src/utils/teammateContext.js';
 import { teleportToRemote } from 'src/utils/teleport.js';
@@ -1032,12 +1033,17 @@ export const AgentTool = buildTool({
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
       // so we don't leave a stale entry if spawn fails. Sync agents skipped —
       // coordinator is blocked, so SendMessage routing doesn't apply.
-      if (name) {
+      // densable registerName: refuse reserved MAIN_RECIPIENT_NAME ("main").
+      if (name && name !== MAIN_RECIPIENT_NAME) {
         rootSetAppState(prev => {
           const next = new Map(prev.agentNameRegistry);
           next.set(name, asAgentId(asyncAgentId));
           return { ...prev, agentNameRegistry: next };
         });
+      } else if (name === MAIN_RECIPIENT_NAME) {
+        logForDebugging(
+          `[registerName] refused reserved name "${name}" for ${asyncAgentId} — SendMessage routes it to the main conversation`,
+        );
       }
 
       // Wrap async agent execution in agent context for analytics attribution

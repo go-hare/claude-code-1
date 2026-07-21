@@ -20,6 +20,7 @@ import type {
   TeammateSpawnResult,
 } from 'src/utils/swarm/backends/types.js'
 import {
+  MAIN_RECIPIENT_NAME,
   SWARM_SESSION_NAME,
   TEAM_LEAD_NAME,
 } from 'src/utils/swarm/constants.js'
@@ -121,37 +122,45 @@ type SpawnInput = {
 // ============================================================================
 
 /**
- * Generates a unique teammate name by checking existing team members.
- * If the name already exists, appends a numeric suffix (e.g., tester-2, tester-3).
+ * densable pzg — sanitize (@→-), refuse reserved MAIN_RECIPIENT_NAME, then
+ * uniquify against team members with numeric suffixes (tester-2, tester-3).
  * @internal Exported for testing
  */
 export async function generateUniqueTeammateName(
   baseName: string,
   teamName: string | undefined,
 ): Promise<string> {
+  // densable YZi then D6 gate — always, even without a team file.
+  const sanitized = sanitizeAgentName(baseName)
+  if (sanitized === MAIN_RECIPIENT_NAME) {
+    throw new Error(
+      `"${MAIN_RECIPIENT_NAME}" is a reserved recipient name (SendMessage routes it to the main conversation) — choose another teammate name.`,
+    )
+  }
+
   if (!teamName) {
-    return baseName
+    return sanitized
   }
 
   const teamFile = await readTeamFileAsync(teamName)
   if (!teamFile) {
-    return baseName
+    return sanitized
   }
 
   const existingNames = new Set(teamFile.members.map(m => m.name.toLowerCase()))
 
   // If the base name doesn't exist, use it as-is
-  if (!existingNames.has(baseName.toLowerCase())) {
-    return baseName
+  if (!existingNames.has(sanitized.toLowerCase())) {
+    return sanitized
   }
 
   // Find the next available suffix
   let suffix = 2
-  while (existingNames.has(`${baseName}-${suffix}`.toLowerCase())) {
+  while (existingNames.has(`${sanitized}-${suffix}`.toLowerCase())) {
     suffix++
   }
 
-  return `${baseName}-${suffix}`
+  return `${sanitized}-${suffix}`
 }
 
 // ============================================================================
