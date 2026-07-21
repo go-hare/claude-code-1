@@ -12,7 +12,7 @@ import type { ToolUseContext } from 'src/Tool.js'
 import { assembleToolPool } from 'src/tools.js'
 import {
   killAsyncAgent,
-  queuePendingMessage,
+  markAgentsNotified,
   registerAsyncAgent,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { asAgentId } from 'src/types/ids.js'
@@ -25,11 +25,21 @@ import type {
   EnsureObserverRuntimeHostOptions,
   ObserverRuntimeHost,
 } from 'src/utils/observerAgents.js'
+import {
+  buildObserverFramingPrompt,
+  type ObserverPairing,
+} from 'src/utils/observerAgents.js'
 import { getParentSessionId } from 'src/utils/teammate.js'
+import type { InternalPermissionMode } from 'src/types/permissions.js'
 import { OBSERVER_REPORT_TOOL_NAME } from '../ObserverReportTool/constants.js'
-import { runAsyncAgentLifecycle } from './agentToolUtils.js'
+import {
+  applyObserverExactToolPool,
+  resolveAgentTools,
+  runAsyncAgentLifecycle,
+} from './agentToolUtils.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 import { isBuiltInAgent } from './loadAgentsDir.js'
+import { resolveWorkerPermissionMode } from './resumeAgent.js'
 import { runAgent } from './runAgent.js'
 
 /** Fallback tool allowlist when no observer agent definition is registered. */
@@ -151,14 +161,62 @@ export function createAgentObserverRuntimeHostHandlers(
         } satisfies AgentDefinition)
 
       const observerAppState = armCtx.getAppState()
+      // densable spawnFirstRun: c = MJe(armingPermissionMode, session) ?? session
+      const sessionMode = observerAppState.toolPermissionContext.mode as
+        | InternalPermissionMode
+        | undefined
+      const spawnMode = (resolveWorkerPermissionMode(
+        pairing.armingPermissionMode as string | undefined,
+        sessionMode,
+      ) ??
+        sessionMode ??
+        'default') as InternalPermissionMode
+      // densable spawnMode:c — stamp onto agent def so runAgent's
+      // agentPermissionMode path can apply it (parent bypass/acceptEdits/auto
+      // still win in runAgent, matching densable parent-precedence edges).
+      const observerAgentDefForRun: AgentDefinition = {
+        ...observerAgentDef,
+        permissionMode: spawnMode,
+      }
       const observerPermissionContext = {
         ...observerAppState.toolPermissionContext,
-        mode: observerAgentDef.permissionMode ?? 'acceptEdits',
+        mode: spawnMode,
       }
-      const observerTools = assembleToolPool(
+      // densable: m = Lco(WJ(e, pz(u, l1e(d), ...), !0, !1, !1, f).resolvedTools)
+      // then E8(..., availableTools:m, useExactTools:!0, spawnMode:c)
+      const observerPoolBase = assembleToolPool(
         observerPermissionContext,
         observerAppState.mcp.tools,
       )
+      const observerTools = applyObserverExactToolPool(
+        resolveAgentTools(
+          observerAgentDefForRun,
+          observerPoolBase,
+          true, // isAsync
+          false, // isMainThread
+          true, // isObserverAgent
+        ).resolvedTools,
+      )
+
+      // densable lYy: write sidecar isObserver:!0 before Sot, refuse if read-back fails.
+      const { patchAgentMetadata, readAgentMetadata } = await import(
+        'src/utils/sessionStorage.js'
+      )
+      await patchAgentMetadata(asAgentId(plan.observerTaskId), {
+        agentType: observerAgentDef.agentType,
+        isObserver: true,
+      })
+      const marker = await readAgentMetadata(asAgentId(plan.observerTaskId))
+      if (marker?.isObserver !== true) {
+        throw new Error('observer marker read-back failed')
+      }
+
+      // densable: framing (r) + digest (n) as two user messages — not a merged
+      // single prompt. Digest stamps origin:{kind:"observer-activity"}.
+      const framing =
+        framingPrompt ??
+        buildObserverFramingPrompt(pairing as unknown as ObserverPairing)
+      const firstRunPromptForMeta = framing
 
       // densable observer Sot: ownerAgentId:mi(), isObserver:!0, no Gge
       // (Kle quietly parks notify; attachOwnerKeepalive:false).
@@ -166,8 +224,8 @@ export function createAgentObserverRuntimeHostHandlers(
       const observerTask = registerAsyncAgent({
         agentId: plan.observerTaskId,
         description: plan.description,
-        prompt: plan.prompt,
-        selectedAgent: observerAgentDef,
+        prompt: firstRunPromptForMeta,
+        selectedAgent: observerAgentDefForRun,
         setAppState: armSetAppState as Parameters<
           typeof registerAsyncAgent
         >[0]['setAppState'],
@@ -177,30 +235,42 @@ export function createAgentObserverRuntimeHostHandlers(
         isObserver: true,
         attachOwnerKeepalive: false,
       })
+      // densable spawnFirstRun: Kle(s, a) immediately after Sot
+      markAgentsNotified(
+        plan.observerTaskId,
+        armSetAppState as Parameters<typeof markAgentsNotified>[1],
+      )
 
+      // densable: promptMessages:[Nr({content:r}), Nr({content:n, origin:{kind:"observer-activity"}})]
       const observerPromptMessages = [
-        createUserMessage({ content: plan.prompt }),
+        createUserMessage({ content: framing }),
+        createUserMessage({
+          content: digest,
+          origin: { kind: 'observer-activity' },
+        }),
       ]
 
-      void runWithAgentContext(
-        {
-          agentId: asAgentId(plan.observerTaskId),
-          parentSessionId: getParentSessionId(),
-          agentType: 'subagent' as const,
-          subagentName: plan.observerAgentType,
-          isBuiltIn: isBuiltInAgent(observerAgentDef),
-          invocationKind: 'spawn' as const,
-          invocationEmitted: false,
-          isBackgroundAgent: true,
-        },
-        async () => {
-          try {
+      // densable spawnFirstRun: await fY(..., Yqe(...)) — full lifecycle so
+      // subsequent G0t.deliver Aye can claim (status no longer running).
+      try {
+        await runWithAgentContext(
+          {
+            agentId: asAgentId(plan.observerTaskId),
+            parentSessionId: getParentSessionId(),
+            agentType: 'subagent' as const,
+            subagentName: plan.observerAgentType,
+            isBuiltIn: isBuiltInAgent(observerAgentDef),
+            invocationKind: 'spawn' as const,
+            invocationEmitted: false,
+            isBackgroundAgent: true,
+          },
+          async () => {
             await runAsyncAgentLifecycle({
               taskId: observerTask.agentId,
               abortController: observerTask.abortController!,
               makeStream: onCacheSafeParams =>
                 runAgent({
-                  agentDefinition: observerAgentDef,
+                  agentDefinition: observerAgentDefForRun,
                   promptMessages: observerPromptMessages,
                   toolUseContext: armCtx,
                   canUseTool: armCanUseTool,
@@ -209,6 +279,9 @@ export function createAgentObserverRuntimeHostHandlers(
                     typeof runAgent
                   >[0]['querySource'],
                   availableTools: observerTools,
+                  // densable spawnFirstRun: useExactTools:!0 so Lco pool is not
+                  // re-filtered (and ObserverReport is not stripped).
+                  useExactTools: true,
                   description: plan.description,
                   override: {
                     agentId: asAgentId(observerTask.agentId),
@@ -217,14 +290,14 @@ export function createAgentObserverRuntimeHostHandlers(
                   onCacheSafeParams,
                 }),
               metadata: {
-                prompt: plan.prompt,
+                prompt: firstRunPromptForMeta,
                 resolvedAgentModel: getAgentModel(
-                  observerAgentDef.model,
+                  observerAgentDefForRun.model,
                   armCtx.options.mainLoopModel,
                   undefined,
-                  observerPermissionContext.mode,
+                  spawnMode,
                 ),
-                isBuiltInAgent: isBuiltInAgent(observerAgentDef),
+                isBuiltInAgent: isBuiltInAgent(observerAgentDefForRun),
                 startTime: Date.now(),
                 agentType: plan.observerAgentType,
                 isAsync: true,
@@ -238,29 +311,50 @@ export function createAgentObserverRuntimeHostHandlers(
               enableSummarization: false,
               getWorktreeResult: async () => ({}),
             })
-          } catch (err) {
-            log(
-              `[agentObserver] spawnFirstRun failed for ${plan.observerTaskId}: ${errorMessage(err)}`,
-            )
-          }
-        },
-      )
+          },
+        )
+      } catch (err) {
+        log(
+          `[agentObserver] spawnFirstRun failed for ${plan.observerTaskId}: ${errorMessage(err)}`,
+        )
+        throw err
+      }
     },
 
     deliver: async ({ pairing, digest }) => {
+      // densable G0t.deliver → Aye({
+      //   agentId, prompt:digest, promptOrigin:{kind:"observer-activity"},
+      //   awaitCompletion:!0, suppressOwnerNotification:!0, workerPermissionMode
+      // })
       const armCtx =
         (pairing.armingToolUseContext as ToolUseContext | undefined) ??
         deps.toolUseContext
-      const armSetAppState = resolveSetAppState(
-        pairing.setAppState,
-        deps.setAppState as SetAppState | undefined,
-        armCtx,
-      )
-      queuePendingMessage(
-        pairing.observerTaskId,
-        digest,
-        armSetAppState as Parameters<typeof queuePendingMessage>[2],
-      )
+      if (!armCtx) {
+        throw new Error(
+          'ObserverRuntimeHost.deliver requires armingToolUseContext or install-time toolUseContext',
+        )
+      }
+      const armCanUseTool =
+        (pairing.canUseTool as CanUseToolFn | undefined) ?? deps.canUseTool
+      if (!armCanUseTool) {
+        throw new Error(
+          'ObserverRuntimeHost.deliver requires canUseTool on pairing or install deps',
+        )
+      }
+      const { resumeAgentBackground } = await import('./resumeAgent.js')
+      await resumeAgentBackground({
+        agentId: pairing.observerTaskId,
+        prompt: digest,
+        toolUseContext: armCtx,
+        canUseTool: armCanUseTool,
+        promptOriginKind: 'observer-activity',
+        suppressOwnerNotification: true,
+        awaitCompletion: true,
+        // densable G0t.deliver: workerPermissionMode:o (armingPermissionMode)
+        ...(pairing.armingPermissionMode !== undefined
+          ? { workerPermissionMode: pairing.armingPermissionMode }
+          : {}),
+      })
     },
 
     writeTombstone: async ({ observerTaskId, observerAgentType }) => {

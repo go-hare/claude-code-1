@@ -49,4 +49,55 @@ describe('createAgentObserverRuntimeHostHandlers', () => {
       /agentType: plan\.observerAgentType[\s\S]{0,400}tools:\s*\['\*'\]/,
     )
   })
+
+  test('deliver is densable G0t→Aye observer-activity (not queuePendingMessage)', () => {
+    const src = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '../observerRuntimeHost.ts'),
+      'utf8',
+    ) as string
+    // densable: await Aye({promptOrigin:{kind:"observer-activity"},
+    //   suppressOwnerNotification:!0, awaitCompletion:!0})
+    expect(src).toContain("promptOriginKind: 'observer-activity'")
+    expect(src).toContain('suppressOwnerNotification: true')
+    expect(src).toContain('awaitCompletion: true')
+    expect(src).toContain('resumeAgentBackground')
+    expect(src).not.toContain('queuePendingMessage')
+    // densable lYy sidecar marker + spawn Kle
+    expect(src).toContain('isObserver: true')
+    expect(src).toContain('observer marker read-back failed')
+    expect(src).toContain('markAgentsNotified')
+    // densable G0t.deliver: workerPermissionMode from armingPermissionMode (MJe)
+    expect(src).toContain('workerPermissionMode')
+    expect(src).toContain('armingPermissionMode')
+    expect(src).toMatch(/workerPermissionMode:\s*pairing\.armingPermissionMode/)
+  })
+
+  test('spawnFirstRun uses densable MJe arming + two user messages (framing + digest)', () => {
+    const src = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '../observerRuntimeHost.ts'),
+      'utf8',
+    ) as string
+    // densable: c = MJe(armingPermissionMode, session) ?? session
+    expect(src).toContain('resolveWorkerPermissionMode')
+    expect(src).toContain('pairing.armingPermissionMode')
+    // densable: Nr(framing), Nr(digest, origin observer-activity) — not merged plan.prompt alone
+    expect(src).toContain("origin: { kind: 'observer-activity' }")
+    expect(src).toContain('createUserMessage({ content: framing })')
+    expect(src).toContain('createUserMessage({')
+    expect(src).toContain('content: digest')
+    // Must not only use single merged plan.prompt for first-run messages
+    expect(src).not.toMatch(
+      /observerPromptMessages\s*=\s*\[\s*createUserMessage\(\{\s*content:\s*plan\.prompt\s*\}\)\s*\]/,
+    )
+  })
+
+  test('spawnFirstRun densable Lco + useExactTools so ObserverReport is not re-stripped', () => {
+    const src = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '../observerRuntimeHost.ts'),
+      'utf8',
+    ) as string
+    expect(src).toContain('applyObserverExactToolPool')
+    expect(src).toContain('resolveAgentTools')
+    expect(src).toContain('useExactTools: true')
+  })
 })

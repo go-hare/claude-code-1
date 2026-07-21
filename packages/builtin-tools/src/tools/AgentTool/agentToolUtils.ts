@@ -32,6 +32,7 @@ import {
   getTokenCountFromTracker,
   isLocalAgentTask,
   killAsyncAgent,
+  markAgentsNotified,
   type ProgressTracker,
   rebuildProgressFromMessages,
   scheduleDeferredAgentProgressRebuild,
@@ -43,7 +44,8 @@ import type { Message as MessageType, ContentItem } from 'src/types/message.js'
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isInProtectedNamespace } from 'src/utils/envUtils.js'
-import { AbortError, errorMessage } from 'src/utils/errors.js'
+import { isBackgroundAbortReason } from 'src/utils/abortController.js'
+import { AbortError, errorMessage, isAbortError } from 'src/utils/errors.js'
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
@@ -60,10 +62,32 @@ import {
 import { emitTaskProgress as emitTaskProgressEvent } from 'src/utils/task/sdkProgress.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { getTokenCountFromUsage } from 'src/utils/tokens.js'
+import { WORKFLOW_TOOL_NAME } from '@claude-code/workflow-engine'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
 import { OBSERVER_REPORT_TOOL_NAME } from '../ObserverReportTool/constants.js'
+import { ObserverReportTool } from '../ObserverReportTool/ObserverReportTool.js'
+import { CRON_CREATE_TOOL_NAME } from '../ScheduleCronTool/prompt.js'
+import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
+
+/**
+ * densable Lco / nXg — tools stripped from observer exact pools, then
+ * ObserverReport is always re-appended. Official:
+ *   nXg = [SendMessage, ObserverReport, Agent, Workflow, ScheduleWakeup,
+ *          Monitor, CronCreate]
+ * ScheduleWakeup may be absent in this build; still listed for parity.
+ */
+const OBSERVER_EXACT_STRIP_TOOL_NAMES = [
+  SEND_MESSAGE_TOOL_NAME,
+  OBSERVER_REPORT_TOOL_NAME,
+  AGENT_TOOL_NAME,
+  LEGACY_AGENT_TOOL_NAME,
+  WORKFLOW_TOOL_NAME,
+  'ScheduleWakeup',
+  'Monitor',
+  CRON_CREATE_TOOL_NAME,
+] as const
 export type ResolvedAgentTools = {
   hasWildcard: boolean
   validTools: string[]
@@ -84,6 +108,24 @@ export function isObserverAgentToolPool(input: {
   if (input.isObserverAgent === true) return true
   const qs = input.querySource
   return typeof qs === 'string' && qs.startsWith('agent:observer:')
+}
+
+/**
+ * densable Lco(e) — strip nXg tools then always append ObserverReport.
+ * Used with useExactTools so runAgent does not re-filter the pool.
+ */
+export function applyObserverExactToolPool(tools: Tools): Tools {
+  const stripped = tools.filter(
+    tool =>
+      !OBSERVER_EXACT_STRIP_TOOL_NAMES.some(name =>
+        toolMatchesName(tool, name),
+      ),
+  )
+  const reportFromInput = tools.find(tool =>
+    toolMatchesName(tool, OBSERVER_REPORT_TOOL_NAME),
+  )
+  // densable always appends ZVu singleton even when stripped from input.
+  return [...stripped, reportFromInput ?? ObserverReportTool]
 }
 
 export function filterToolsForAgent({
@@ -272,6 +314,19 @@ export const agentToolResultSchema = lazySchema(() =>
     totalToolUseCount: z.number(),
     totalDurationMs: z.number(),
     totalTokens: z.number(),
+    // toolStats — focus transcript folds these into brief summary
+    toolStats: z
+      .object({
+        readCount: z.number(),
+        searchCount: z.number(),
+        bashCount: z.number(),
+        editFileCount: z.number(),
+        linesAdded: z.number(),
+        linesRemoved: z.number(),
+        otherToolCount: z.number(),
+        frameCount: z.number().optional(),
+      })
+      .optional(),
     usage: z.object({
       input_tokens: z.number(),
       output_tokens: z.number(),
@@ -411,6 +466,31 @@ export function finalizeAgentTool(
     }
   }
 
+  // Optional toolStats for focus-transcript / brief summary fold-in.
+  // Lazy-require focusTranscript: a top-level import cycles AgentTool
+  // (utils → focusTranscript → messages/Tool package graph → AgentTool) and
+  // TDZ's agentToolResultSchema during module init.
+  let toolStats:
+    | {
+        readCount: number
+        searchCount: number
+        bashCount: number
+        editFileCount: number
+        linesAdded: number
+        linesRemoved: number
+        otherToolCount: number
+        frameCount?: number
+      }
+    | undefined
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { computeAgentToolStats } =
+      require('src/utils/focusTranscript.js') as typeof import('src/utils/focusTranscript.js')
+    toolStats = computeAgentToolStats(agentMessages as never)
+  } catch {
+    toolStats = undefined
+  }
+
   return {
     agentId,
     agentType,
@@ -418,6 +498,7 @@ export function finalizeAgentTool(
     totalDurationMs: Date.now() - startTime,
     totalTokens,
     totalToolUseCount,
+    toolStats,
     usage: lastAssistantMessage.message?.usage as AgentToolResult['usage'],
   }
 }
@@ -837,11 +918,12 @@ export async function runAsyncAgentLifecycle({
 
     stopSummarization?.()
 
-    // densable: Jeo(e,s); let Z=JXt(e,s); if(!Z) j("completed");
-    // Cns(..., {suppressTelemetry:Z}); DSu(re,s,...)
-    // Sweep stale KA first, then suppress finalize telemetry when this agent
-    // still holds any agent: child (parked parent finishing with live kids).
-    // JXt must read the same root registry Jeo just mutated (not forked getAppState).
+    // densable Yqe (single Jeo + same Z):
+    //   Jeo(e,s); let Z=JXt(e,s); if(!Z) j("completed");
+    //   Cns(..., {suppressTelemetry:Z}); DSu(re,s,...); if(Z) park return
+    // JXt reads the same root registry Jeo just mutated (set-snapshot).
+    // Do NOT Jeo again inside DSu and do NOT re-sample JXt after DSu —
+    // gold uses one Z for suppressTelemetry and park.
     const preCompleteJxt = sweepAndDetectLiveAgentChildren(
       taskId,
       rootSetAppState,
@@ -854,22 +936,12 @@ export async function runAsyncAgentLifecycle({
     // immediately. classifyHandoffIfNeeded (API call) and getWorktreeResult
     // (git exec) are notification embellishments that can hang — they must
     // not gate the status transition (gh-20236).
-    // completeAgentTask also runs Jeo + may stamp bot idle-window.
-    // Re-check JXt AFTER complete: second Jeo may drop already-notified kids,
-    // so pre-complete Z alone would falsely defer BRt forever.
-    completeAsyncAgent(agentResult, rootSetAppState)
+    // skipJeo: Jeo already ran above for Z.
+    completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true })
 
-    // densable Yqe park-on-keepalive: if JXt after DSu, strip old turn_duration,
-    // append CWr(duration, void0, void0, pe||void0), defer owner BRt (return).
+    // densable: if (Z) CWr(pe) + defer owner BRt — same Z as suppressTelemetry.
     // Bot idle-window alone is NOT JXt (only agent: reasons count).
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { hasLiveAgentKeepaliveChildren } =
-      require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
-    if (
-      hasLiveAgentKeepaliveChildren(taskId, () =>
-        readAppStateViaSet(rootSetAppState),
-      )
-    ) {
+    if (preCompleteJxt) {
       parkAgentOnKeepaliveDeferNotify(
         taskId,
         agentResult.totalDurationMs,
@@ -925,7 +997,21 @@ export async function runAsyncAgentLifecycle({
     })
   } catch (error) {
     stopSummarization?.()
-    if (error instanceof AbortError) {
+    // densable Yqe: te instanceof Xl (AbortError family)
+    if (isAbortError(error) || error instanceof AbortError) {
+      // densable m(): RT(signal.reason)==="background" → XV + Kle, no BRt
+      // Checkpoint handoff (left-arrow / exit) aborts agents with "background"
+      // so the fork can resume them; do not surface killed notification.
+      if (
+        isBackgroundAbortReason(abortController.signal.reason) ||
+        isBackgroundAbortReason(
+          error instanceof Error ? error.message : undefined,
+        )
+      ) {
+        killAsyncAgent(taskId, rootSetAppState)
+        markAgentsNotified(taskId, rootSetAppState)
+        return
+      }
       // killAsyncAgent is a no-op if TaskStop already set status='killed' —
       // but only this catch handler has agentMessages, so the notification
       // must fire unconditionally. Transition status BEFORE worktree cleanup
@@ -941,6 +1027,22 @@ export async function runAsyncAgentLifecycle({
       } catch {
         // densable optional
       }
+      // densable: reason from task.killedBy after XV (parent|system|user)
+      let killedBy: 'user' | 'parent' | 'system' | undefined
+      try {
+        const t = toolUseContext.getAppState().tasks?.[taskId] as
+          | { killedBy?: 'user' | 'parent' | 'system' }
+          | undefined
+        killedBy = t?.killedBy
+      } catch {
+        killedBy = undefined
+      }
+      const killReason =
+        killedBy === 'parent'
+          ? 'parent_kill_async'
+          : killedBy === 'system'
+            ? 'system_kill_async'
+            : 'user_kill_async'
       logEvent('tengu_agent_tool_terminated', {
         agent_type:
           metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -950,7 +1052,7 @@ export async function runAsyncAgentLifecycle({
         is_async: true,
         is_built_in_agent: metadata.isBuiltInAgent,
         reason:
-          'user_kill_async' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          killReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
       const worktreeResult = await getWorktreeResult()
       const partialResult = extractPartialResult(agentMessages)
@@ -958,6 +1060,7 @@ export async function runAsyncAgentLifecycle({
         taskId,
         description,
         status: 'killed',
+        killedBy,
         setAppState: rootSetAppState,
         toolUseId: toolUseContext.toolUseId,
         finalMessage: partialResult,

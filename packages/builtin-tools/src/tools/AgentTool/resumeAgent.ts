@@ -7,6 +7,7 @@ import { getSystemPrompt } from 'src/constants/prompts.js'
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import type { ToolUseContext } from 'src/Tool.js'
+import type { InternalPermissionMode } from 'src/types/permissions.js'
 import { registerAsyncAgent } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { assembleToolPool } from 'src/tools.js'
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js'
@@ -19,6 +20,8 @@ import {
   filterOrphanedThinkingOnlyMessages,
   filterUnresolvedToolUses,
   filterWhitespaceOnlyAssistantMessages,
+  isSidechainVisibleOrigin,
+  wrapResumePromptOrigin,
 } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js'
@@ -33,7 +36,11 @@ import type { SystemPrompt } from 'src/utils/systemPromptType.js'
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js'
 import { getParentSessionId } from 'src/utils/teammate.js'
 import { reconstructForSubagentResume } from 'src/utils/toolResultStorage.js'
-import { runAsyncAgentLifecycle } from './agentToolUtils.js'
+import {
+  applyObserverExactToolPool,
+  resolveAgentTools,
+  runAsyncAgentLifecycle,
+} from './agentToolUtils.js'
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
@@ -46,17 +53,78 @@ export type ResumeAgentResult = {
   description: string
   outputFile: string
   /**
-   * Official Aye alreadyCompleted — when continueInterruptedTurn and the
-   * sidechain already ends on an assistant turn ($co false), skip re-run
-   * and only report completion (orphan EAf path).
+   * When continueInterruptedTurn and the sidechain already ends on an
+   * assistant turn, skip re-run and only report completion (orphan path).
    */
   alreadyCompleted?: boolean
 }
-export class AgentStoppedByUserError extends Error {
+/** Concurrent resume / already running / setup failures. */
+export class ResumeAgentStateError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ResumeAgentStateError'
+  }
+}
+
+/**
+ * User-stopped agents refuse auto-resume. Outer catch swallows this class
+ * (covers CAS races and stopped-by-user; no stranded-resume warning).
+ */
+export class AgentStoppedByUserError extends ResumeAgentStateError {
   constructor(message: string) {
     super(message)
     this.name = 'AgentStoppedByUserError'
   }
+}
+
+/**
+ * Resume prompt origin — object form (kind + extras). When set, resume
+ * prompt is mid-turn-wrapped and stamped origin + isMeta:true.
+ */
+export type ResumePromptOrigin = {
+  kind: string
+  [key: string]: unknown
+}
+
+/**
+ * densable `eyl` — permission-mode permissiveness ranks (higher = wider).
+ * Used by `resolveWorkerPermissionMode` (MJe).
+ */
+export const PERMISSION_MODE_RANK: Readonly<Record<string, number>> = {
+  plan: 0,
+  bubble: 1,
+  default: 1,
+  dontAsk: 1,
+  acceptEdits: 2,
+  auto: 3,
+  bypassPermissions: 4,
+}
+
+/**
+ * densable MJe(e, t): cap worker/arming permission mode to the current session.
+ *
+ * - missing arming → undefined
+ * - session `auto` + arming `acceptEdits` → undefined (special case)
+ * - arming rank ≤ session rank → arming; else undefined
+ *
+ * Callers typically do `resolveWorkerPermissionMode(...) ?? sessionMode`
+ * (observer deliver / spawnFirstRun: `MJe(d,y) ?? y`).
+ */
+export function resolveWorkerPermissionMode(
+  armingMode: string | undefined,
+  sessionMode: InternalPermissionMode | undefined,
+): InternalPermissionMode | undefined {
+  if (!armingMode) return undefined
+  if (sessionMode === 'auto' && armingMode === 'acceptEdits') return undefined
+  const armRank = PERMISSION_MODE_RANK[armingMode]
+  const sessionRank =
+    sessionMode !== undefined ? PERMISSION_MODE_RANK[sessionMode] : undefined
+  // densable: eyl[e]<=eyl[t] — missing keys → undefined comparison → reject
+  if (armRank === undefined || sessionRank === undefined) return undefined
+  if (armRank <= sessionRank) {
+    return armingMode as InternalPermissionMode
+  }
+  return undefined
 }
 
 export async function resumeAgentBackground({
@@ -68,7 +136,11 @@ export async function resumeAgentBackground({
   continueInterruptedTurn,
   promptIsMeta,
   userInitiated,
+  promptOrigin,
   promptOriginKind,
+  suppressOwnerNotification,
+  awaitCompletion,
+  workerPermissionMode,
 }: {
   agentId: string
   prompt: string
@@ -76,50 +148,173 @@ export async function resumeAgentBackground({
   canUseTool: CanUseToolFn
   invokingRequestId?: string
   /**
-   * Official Aye `continueInterruptedTurn` (orphan auto-resume / send-message
-   * resume). When true and the filtered transcript is already complete
-   * (ends on assistant), return alreadyCompleted without spawning.
-   * Also densable: skip re-appending the resume prompt to promptMessages.
+   * Orphan auto-resume / send-message resume. When true and the filtered
+   * transcript is already complete (ends on assistant), return
+   * alreadyCompleted without spawning. Also skips re-appending the resume
+   * prompt to promptMessages.
    */
   continueInterruptedTurn?: boolean
   /**
-   * Official Aye `promptIsMeta` (n) — reserved for call-site parity when the
-   * resume prompt is already on the sidechain.
+   * When no promptOrigin, stamp isMeta on the resume user message. With
+   * promptOrigin, always uses isMeta:true.
    */
   promptIsMeta?: boolean
   /**
-   * densable Aye `userInitiated` (c) — when true, allow resume even if
-   * sidecar has stoppedByUser and clear the disk marker. Auto-resume paths
-   * omit this and throw AgentStoppedByUserError.
+   * When true, allow resume even if sidecar has stoppedByUser and clear the
+   * disk marker. Auto-resume paths omit this and throw AgentStoppedByUserError.
    */
   userInitiated?: boolean
   /**
-   * densable Aye promptOrigin.kind — observer-activity resumes skip the
-   * stoppedByUser gate (observer may re-deliver after user stop of observed).
+   * Full origin object for mid-turn wrap + message.origin.
+   */
+  promptOrigin?: ResumePromptOrigin
+  /**
+   * Convenience / back-compat when only kind is known. Prefer `promptOrigin`
+   * when available.
    */
   promptOriginKind?: string
+  /**
+   * After re-register, mark notified so the owner is not notified for
+   * observer-activity digests.
+   */
+  suppressOwnerNotification?: boolean
+  /**
+   * Await the lifecycle run. When true, finally marks notified + grace.
+   */
+  awaitCompletion?: boolean
+  /**
+   * densable Aye workerPermissionMode (armingPermissionMode for observer deliver).
+   * Capped to current session mode via resolveWorkerPermissionMode (MJe).
+   */
+  workerPermissionMode?: string
 }): Promise<ResumeAgentResult> {
-  void promptIsMeta
   const startTime = Date.now()
   const appState = toolUseContext.getAppState()
   // In-process teammates get a no-op setAppState; setAppStateForTasks
   // reaches the root store so task registration/progress/kill stay visible.
   const rootSetAppState =
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
-  const permissionMode = appState.toolPermissionContext.mode
+  const sessionMode = appState.toolPermissionContext.mode
 
-  const [transcript, meta] = await Promise.all([
-    getAgentTranscript(asAgentId(agentId)),
-    readAgentMetadata(asAgentId(agentId)),
-  ])
-  if (!transcript) {
-    throw new Error(`No transcript found for agent ID: ${agentId}`)
+  // CAS at entry (before disk reads): claim resuming; else throw already
+  // running/being resumed. clearResuming on setup failure paths.
+  const { tryClaimAgentResume, clearAgentResuming } = await import(
+    'src/tasks/LocalAgentTask/LocalAgentTask.js'
+  )
+  if (
+    !tryClaimAgentResume(agentId, rootSetAppState, () =>
+      toolUseContext.getAppState(),
+    )
+  ) {
+    throw new ResumeAgentStateError(
+      `Agent ${agentId} is already running or being resumed`,
+    )
+  }
+  const clearResuming = (): void => {
+    clearAgentResuming(agentId, rootSetAppState)
   }
 
-  // densable Aye: b?.stoppedByUser && r?.kind !== "observer-activity"
-  // if (!c) throw orr; else clear disk marker and proceed.
+  // Safety net: any throw between claim and register must clear resuming so
+  // a mid-setup failure cannot stick the CAS (double-clear is idempotent).
+  const resolvedOrigin: ResumePromptOrigin | undefined =
+    promptOrigin ??
+    (promptOriginKind !== undefined ? { kind: promptOriginKind } : undefined)
+  try {
+    return await resumeAgentBackgroundAfterClaim({
+      agentId,
+      prompt,
+      toolUseContext,
+      canUseTool,
+      invokingRequestId,
+      continueInterruptedTurn,
+      promptIsMeta,
+      userInitiated,
+      promptOrigin: resolvedOrigin,
+      suppressOwnerNotification,
+      awaitCompletion,
+      workerPermissionMode,
+      startTime,
+      appState,
+      rootSetAppState,
+      sessionMode,
+      clearResuming,
+    })
+  } catch (err) {
+    clearResuming()
+    throw err
+  }
+}
+
+/** Setup + spawn body after resume CAS claim. */
+async function resumeAgentBackgroundAfterClaim({
+  agentId,
+  prompt,
+  toolUseContext,
+  canUseTool,
+  invokingRequestId,
+  continueInterruptedTurn,
+  promptIsMeta,
+  userInitiated,
+  promptOrigin,
+  suppressOwnerNotification,
+  awaitCompletion,
+  workerPermissionMode,
+  startTime,
+  appState,
+  rootSetAppState,
+  sessionMode,
+  clearResuming,
+}: {
+  agentId: string
+  prompt: string
+  toolUseContext: ToolUseContext
+  canUseTool: CanUseToolFn
+  invokingRequestId?: string
+  continueInterruptedTurn?: boolean
+  promptIsMeta?: boolean
+  userInitiated?: boolean
+  promptOrigin?: ResumePromptOrigin
+  suppressOwnerNotification?: boolean
+  awaitCompletion?: boolean
+  workerPermissionMode?: string
+  startTime: number
+  appState: ReturnType<ToolUseContext['getAppState']>
+  rootSetAppState: NonNullable<
+    ToolUseContext['setAppStateForTasks'] | ToolUseContext['setAppState']
+  >
+  sessionMode: ReturnType<
+    ToolUseContext['getAppState']
+  >['toolPermissionContext']['mode']
+  clearResuming: () => void
+}): Promise<ResumeAgentResult> {
+  const promptOriginKind = promptOrigin?.kind
+  let transcript: Awaited<ReturnType<typeof getAgentTranscript>>
+  let meta: Awaited<ReturnType<typeof readAgentMetadata>>
+  try {
+    ;[transcript, meta] = await Promise.all([
+      getAgentTranscript(asAgentId(agentId)),
+      readAgentMetadata(asAgentId(agentId)),
+    ])
+  } catch (err) {
+    clearResuming()
+    throw err instanceof ResumeAgentStateError
+      ? err
+      : new ResumeAgentStateError(
+          err instanceof Error ? err.message : String(err),
+        )
+  }
+  if (!transcript) {
+    clearResuming()
+    throw new ResumeAgentStateError(
+      `No transcript found for agent ID: ${agentId}`,
+    )
+  }
+
+  // stoppedByUser (except observer-activity): refuse unless userInitiated,
+  // else clear disk marker and proceed.
   if (meta?.stoppedByUser && promptOriginKind !== 'observer-activity') {
     if (!userInitiated) {
+      clearResuming()
       throw new AgentStoppedByUserError(
         `Agent ${agentId} was stopped by the user and won't be resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`,
       )
@@ -136,8 +331,8 @@ export async function resumeAgentBackground({
     }
   }
 
-  // Official Aye: P = continueInterruptedTurn ? LVr(messages) : messages
-  // then O = filters(P); if (continueInterruptedTurn && O.length>0 && !$co(O)) alreadyCompleted.
+  // continueInterruptedTurn: strip incomplete trailing turns; if filtered
+  // transcript already complete → alreadyCompleted (no re-run).
   let rawForResume = transcript.messages as Array<{
     type?: string
     message?: { content?: unknown; stop_reason?: string | null }
@@ -159,7 +354,8 @@ export async function resumeAgentBackground({
       'src/utils/orphanAgentResume.js'
     )
     if (!isAgentTranscriptIncomplete(resumedMessages as never)) {
-      // Official Aye alreadyCompleted: mark notified + grace, return without re-run.
+      // alreadyCompleted: mark notified + grace, return without re-run.
+      // Always clearResuming() after — setAppState best-effort must not stick CAS.
       try {
         const { PANEL_GRACE_MS } = await import('src/utils/task/framework.js')
         rootSetAppState(prev => {
@@ -173,6 +369,7 @@ export async function resumeAgentBackground({
           const nextTask = {
             ...task,
             resuming: false,
+            adoptResumePending: false,
             notified: true as const,
             evictAfter: retain
               ? (task as { evictAfter?: number }).evictAfter
@@ -189,6 +386,7 @@ export async function resumeAgentBackground({
       } catch {
         /* best-effort — task may not be registered on orphan cold resume */
       }
+      clearResuming()
       return {
         agentId,
         description: meta?.description ?? '(resumed)',
@@ -266,14 +464,49 @@ export async function resumeAgentBackground({
       })
     }
     if (!forkParentSystemPrompt) {
-      throw new Error(
+      clearResuming()
+      throw new ResumeAgentStateError(
         'Cannot resume fork agent: unable to reconstruct parent system prompt',
       )
     }
   }
 
+  // observer-activity requires sidecar isObserver confirmation
+  if (promptOriginKind === 'observer-activity' && meta?.isObserver !== true) {
+    clearResuming()
+    throw new ResumeAgentStateError(
+      `Observer sidecar for ${agentId} missing or did not confirm isObserver; refusing delivery`,
+    )
+  }
+
+  // densable Aye:
+  //   y = session mode
+  //   J = isObserver ? MJe(workerPermissionMode, y) ?? y : void 0
+  //   mode = J ?? workerPermissionMode ?? spawnMode ?? agent.permissionMode ?? "acceptEdits"
+  // MJe only applies when sidecar isObserver (observer deliver path).
+  const isObserverSidecar = meta?.isObserver === true
+  const observerCappedMode = isObserverSidecar
+    ? (resolveWorkerPermissionMode(workerPermissionMode, sessionMode) ??
+      sessionMode)
+    : undefined
+  // densable b?.spawnMode — local AgentMetadata has no spawnMode yet; keep
+  // optional read for densable parity without widening the persisted type.
+  const metaRecord = meta as Record<string, unknown> | null | undefined
+  const metaSpawnMode =
+    typeof metaRecord?.spawnMode === 'string'
+      ? (metaRecord.spawnMode as InternalPermissionMode)
+      : undefined
+  const resolvedWorkerMode: InternalPermissionMode =
+    observerCappedMode ??
+    (workerPermissionMode as InternalPermissionMode | undefined) ??
+    metaSpawnMode ??
+    (selectedAgent.permissionMode as InternalPermissionMode | undefined) ??
+    'acceptEdits'
+
   // Resolve model for analytics metadata (runAgent resolves its own internally).
-  // Official $6e: Explore firstParty cap-to-opus before getAgentModel.
+  // densable uce(..., y) — model resolution uses session mode, not worker mode.
+  // Explore firstParty may cap-to-opus before getAgentModel. Observer resumes
+  // skip sidecar model pin (local meta has no model field yet).
   const resolvedAgentModel = getAgentModel(
     resolveAgentDefinitionModel(
       selectedAgent,
@@ -281,31 +514,70 @@ export async function resumeAgentBackground({
     ),
     toolUseContext.options.mainLoopModel,
     undefined,
-    permissionMode,
+    sessionMode,
   )
 
   const workerPermissionContext = {
     ...appState.toolPermissionContext,
-    mode: selectedAgent.permissionMode ?? 'acceptEdits',
+    mode: resolvedWorkerMode,
   }
-  const workerTools = isResumedFork
-    ? filterParentToolsForFork(toolUseContext.options.tools)
-    : assembleToolPool(workerPermissionContext, appState.mcp.tools)
+  // densable Aye:
+  //   G = parent tools.filter(IH)  (MCP subset; local uses full assemble)
+  //   ae = fork? parent tools : pz(X, l1e(mcp+G))
+  //   se = isObserver ? Lco(WJ(j, pz(X,l1e(G)), !0,...).resolvedTools) : ae
+  //   ...(fork || isObserver) && { useExactTools: true }
+  //   model: isObserver ? void 0 : meta.model
+  const workerTools = (() => {
+    if (isResumedFork) {
+      return filterParentToolsForFork(toolUseContext.options.tools)
+    }
+    const pool = assembleToolPool(workerPermissionContext, appState.mcp.tools)
+    if (!isObserverSidecar) return pool
+    return applyObserverExactToolPool(
+      resolveAgentTools(
+        selectedAgent,
+        pool,
+        true, // isAsync
+        false, // isMainThread
+        true, // isObserverAgent
+      ).resolvedTools,
+    )
+  })()
 
-  // Official densable: promptMessages: o ? O : [...O, ie]
-  // continueInterruptedTurn skips re-appending the resume prompt (already mid-turn).
+  // Resume user message: with origin → mid-turn wrap + isMeta; else raw
+  // prompt (+ isMeta when promptIsMeta). continueInterruptedTurn skips re-append.
+  // MessageOrigin in model-provider is a loose alias; runtime origin is an object.
+  const resumeUserMessage =
+    promptOrigin !== undefined
+      ? createUserMessage({
+          content: wrapResumePromptOrigin(prompt, promptOrigin),
+          origin:
+            promptOrigin as unknown as import('src/types/message.js').MessageOrigin,
+          isMeta: true,
+        })
+      : createUserMessage({
+          content: prompt,
+          ...(promptIsMeta ? { isMeta: true as const } : {}),
+        })
+  const resumeQuerySource = isObserverSidecar
+    ? (`agent:observer:${selectedAgent.agentType}` as Parameters<
+        typeof runAgent
+      >[0]['querySource'])
+    : getQuerySourceForAgent(
+        selectedAgent.agentType,
+        isBuiltInAgent(selectedAgent),
+      )
   const runAgentParams: Parameters<typeof runAgent>[0] = {
     agentDefinition: selectedAgent,
     promptMessages: continueInterruptedTurn
       ? [...resumedMessages]
-      : [...resumedMessages, createUserMessage({ content: prompt })],
+      : [...resumedMessages, resumeUserMessage],
     toolUseContext,
     canUseTool,
     isAsync: true,
-    querySource: getQuerySourceForAgent(
-      selectedAgent.agentType,
-      isBuiltInAgent(selectedAgent),
-    ),
+    querySource: resumeQuerySource,
+    // densable: model pin skipped for observer (b?.isObserver?void 0:b?.model);
+    // local AgentMetadata has no model field yet — always undefined here.
     model: undefined,
     // Fork resume: pass parent's system prompt (cache-identical prefix).
     // Non-fork: undefined → runAgent recomputes under wrapWithCwd so
@@ -317,15 +589,16 @@ export async function resumeAgentBackground({
     // Transcript already contains the parent context slice from the
     // original fork. Re-supplying it would cause duplicate tool_use IDs.
     forkContextMessages: undefined,
-    ...(isResumedFork && { useExactTools: true }),
+    // densable: (fork || isObserver) → useExactTools so Lco / fork pool sticks
+    ...((isResumedFork || isObserverSidecar) && { useExactTools: true }),
     // Re-persist so metadata survives runAgent's writeAgentMetadata overwrite
     worktreePath: resumedWorktreePath,
     description: meta?.description,
     contentReplacementState: resumedReplacementState,
   }
 
-  // Official zOu densable — resume re-arm observer pairing from agent metadata
-  // pointer (observerTaskId / armingPermissionMode) when observed declares observer.
+  // Resume re-arm observer pairing from agent metadata pointer
+  // (observerTaskId / armingPermissionMode) when observed declares observer.
   try {
     const { ensureObservedAgentObserver } = await import(
       'src/utils/observerAgents.js'
@@ -336,7 +609,7 @@ export async function resumeAgentBackground({
     const { readAgentMetadata: readObsMeta } = await import(
       'src/utils/sessionStorage.js'
     )
-    // Real G0t host before re-arm so first post-resume delivery can fork.
+    // Install runtime host before re-arm so first post-resume delivery can fork.
     await installAgentObserverRuntimeHost({
       toolUseContext,
       canUseTool,
@@ -482,23 +755,30 @@ export async function resumeAgentBackground({
     )
   }
 
-  // densable Aye Sot:
-  //   ownerAgentId: mi()
-  //   parentAgentId: b?.parentAgentId  (from prior metadata / ekg task)
-  //   no Gge (resume re-stamps only; attachOwnerKeepalive:false)
+  // Re-register async agent (owner from main thread; parent from prior task;
+  // attachOwnerKeepalive:false — resume re-stamps only).
+  // Second stoppedByUser gate on live registry flag (not just sidecar).
   const mainOwnerId = getMainThreadAgentId()
   let parentFromTask: string | undefined
   try {
     const live = toolUseContext.getAppState().tasks?.[agentId] as
-      | { parentAgentId?: string }
+      | { parentAgentId?: string; stoppedByUser?: boolean }
       | undefined
     parentFromTask =
       typeof live?.parentAgentId === 'string' ? live.parentAgentId : undefined
-  } catch {
+    if (!userInitiated && live?.stoppedByUser === true) {
+      clearResuming()
+      throw new AgentStoppedByUserError(
+        `Agent ${agentId} was stopped by the user and won't be resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`,
+      )
+    }
+  } catch (err) {
+    if (err instanceof AgentStoppedByUserError) throw err
     parentFromTask = undefined
   }
 
   // Skip name-registry write — original entry persists from the initial spawn
+  // observer-activity resume stamps isObserver on the re-registered task
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
     description: uiDescription,
@@ -509,8 +789,45 @@ export async function resumeAgentBackground({
     ownerAgentId: mainOwnerId,
     notificationTargetAgentId: asAgentId(mainOwnerId),
     ...(parentFromTask ? { parentAgentId: parentFromTask } : {}),
+    ...(promptOriginKind === 'observer-activity' ? { isObserver: true } : {}),
     attachOwnerKeepalive: false,
   })
+
+  // Mirror resume prompt onto the sidechain transcript when neither
+  // promptIsMeta nor continueInterruptedTurn. Official store can write
+  // transcripts before re-register; local task.messages needs the task first,
+  // so append AFTER registerAsyncAgent (cold resume would no-op before).
+  // Sidechain-visible origins keep the mid-turn-wrapped meta message;
+  // otherwise append raw prompt + origin.
+  if (!promptIsMeta && !continueInterruptedTurn) {
+    const { appendMessageToLocalAgent } = await import(
+      'src/tasks/LocalAgentTask/LocalAgentTask.js'
+    )
+    const sidechainMsg = isSidechainVisibleOrigin(promptOrigin)
+      ? resumeUserMessage
+      : createUserMessage({
+          content: prompt,
+          ...(promptOrigin !== undefined
+            ? {
+                origin:
+                  promptOrigin as unknown as import('src/types/message.js').MessageOrigin,
+              }
+            : {}),
+        })
+    appendMessageToLocalAgent(
+      agentBackgroundTask.agentId,
+      sidechainMsg,
+      rootSetAppState,
+    )
+  }
+
+  // suppress owner notify for observer digests
+  if (suppressOwnerNotification) {
+    const { markAgentsNotified } = await import(
+      'src/tasks/LocalAgentTask/LocalAgentTask.js'
+    )
+    markAgentsNotified(agentBackgroundTask.agentId, rootSetAppState)
+  }
 
   const metadata = {
     prompt,
@@ -536,7 +853,7 @@ export async function resumeAgentBackground({
   const wrapWithCwd = <T>(fn: () => T): T =>
     resumedWorktreePath ? runWithCwdOverride(resumedWorktreePath, fn) : fn()
 
-  void runWithAgentContext(asyncAgentContext, () =>
+  const lifecyclePromise = runWithAgentContext(asyncAgentContext, () =>
     wrapWithCwd(() =>
       runAsyncAgentLifecycle({
         taskId: agentBackgroundTask.agentId,
@@ -565,6 +882,37 @@ export async function resumeAgentBackground({
       }),
     ),
   )
+
+  // awaitCompletion: await lifecycle, then mark notified + grace
+  if (awaitCompletion) {
+    try {
+      await lifecyclePromise
+    } finally {
+      try {
+        const { PANEL_GRACE_MS } = await import('src/utils/task/framework.js')
+        rootSetAppState(prev => {
+          const tasks = prev.tasks
+          const task = tasks?.[agentId]
+          if (!task || !tasks) return prev
+          return {
+            ...prev,
+            tasks: {
+              ...tasks,
+              [agentId]: {
+                ...task,
+                notified: true as const,
+                evictAfter: Date.now() + PANEL_GRACE_MS,
+              } as typeof task,
+            },
+          }
+        })
+      } catch {
+        /* best-effort */
+      }
+    }
+  } else {
+    void lifecyclePromise
+  }
 
   return {
     agentId,

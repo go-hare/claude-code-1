@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { OBSERVER_REPORT_TOOL_NAME } from '../../ObserverReportTool/constants.js'
+import { SEND_MESSAGE_TOOL_NAME } from '../../SendMessageTool/constants.js'
 import {
+  applyObserverExactToolPool,
   filterToolsForAgent,
   isObserverAgentToolPool,
   resolveAgentTools,
@@ -70,5 +72,45 @@ describe('ObserverReport tool pool densable', () => {
     expect(obs.resolvedTools.map(t => t.name)).toContain(
       OBSERVER_REPORT_TOOL_NAME,
     )
+  })
+
+  test('applyObserverExactToolPool densable Lco strips nXg and re-appends ObserverReport', () => {
+    const tools = [
+      tool('Read'),
+      tool('Bash'),
+      tool(SEND_MESSAGE_TOOL_NAME),
+      tool('Agent'),
+      tool('Workflow'),
+      tool('Monitor'),
+      tool('CronCreate'),
+      tool('ScheduleWakeup'),
+      tool(OBSERVER_REPORT_TOOL_NAME),
+      tool('Grep'),
+    ]
+    const exact = applyObserverExactToolPool(tools as any)
+    const names = exact.map(t => t.name)
+    expect(names).toContain('Read')
+    expect(names).toContain('Bash')
+    expect(names).toContain('Grep')
+    expect(names).toContain(OBSERVER_REPORT_TOOL_NAME)
+    expect(names).not.toContain(SEND_MESSAGE_TOOL_NAME)
+    expect(names).not.toContain('Agent')
+    expect(names).not.toContain('Workflow')
+    expect(names).not.toContain('Monitor')
+    expect(names).not.toContain('CronCreate')
+    expect(names).not.toContain('ScheduleWakeup')
+    // ObserverReport is last (densable [...filtered, ZVu])
+    expect(names[names.length - 1]).toBe(OBSERVER_REPORT_TOOL_NAME)
+  })
+
+  test('applyObserverExactToolPool injects ObserverReport when missing from input', () => {
+    const exact = applyObserverExactToolPool([
+      tool('Read'),
+      tool(SEND_MESSAGE_TOOL_NAME),
+    ] as any)
+    const names = exact.map(t => t.name)
+    expect(names).toContain('Read')
+    expect(names).not.toContain(SEND_MESSAGE_TOOL_NAME)
+    expect(names).toContain(OBSERVER_REPORT_TOOL_NAME)
   })
 })
