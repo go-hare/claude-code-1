@@ -9,7 +9,7 @@ afterEach(() => {
   _resetKeepAliveForTesting()
 })
 
-describe('shouldDisableFetchTimeoutForBodyIdle (official F_)', () => {
+describe('shouldDisableFetchTimeoutForBodyIdle (densable J_)', () => {
   test('false when not forAnthropicAPI', () => {
     expect(
       shouldDisableFetchTimeoutForBodyIdle({
@@ -30,31 +30,47 @@ describe('shouldDisableFetchTimeoutForBodyIdle (official F_)', () => {
     ).toBe(true)
   })
 
-  test('true when API_FORCE_IDLE_TIMEOUT truthy even without watchdog', () => {
+  test('false when API_FORCE_IDLE_TIMEOUT truthy (force undici idle ON)', () => {
+    // densable: !ut(t) fails → never timeout:!1
+    expect(
+      shouldDisableFetchTimeoutForBodyIdle({
+        forAnthropicAPI: true,
+        hasBodyIdleWatchdog: true,
+        env: { API_FORCE_IDLE_TIMEOUT: '1' },
+      }),
+    ).toBe(false)
     expect(
       shouldDisableFetchTimeoutForBodyIdle({
         forAnthropicAPI: true,
         hasBodyIdleWatchdog: false,
-        env: { API_FORCE_IDLE_TIMEOUT: '1' },
+        env: { API_FORCE_IDLE_TIMEOUT: 'true' },
       }),
-    ).toBe(true)
+    ).toBe(false)
   })
 
-  test('false when API_FORCE_IDLE_TIMEOUT explicitly falsy (ou)', () => {
+  test('true when API_FORCE_IDLE_TIMEOUT explicitly falsy (Zc) even without watchdog', () => {
+    // densable: !ut("0") && Zc("0") → timeout:!1 regardless of hasBodyIdleWatchdog
     expect(
       shouldDisableFetchTimeoutForBodyIdle({
         forAnthropicAPI: true,
         hasBodyIdleWatchdog: true,
         env: { API_FORCE_IDLE_TIMEOUT: '0' },
       }),
-    ).toBe(false)
+    ).toBe(true)
     expect(
       shouldDisableFetchTimeoutForBodyIdle({
         forAnthropicAPI: true,
-        hasBodyIdleWatchdog: true,
+        hasBodyIdleWatchdog: false,
         env: { API_FORCE_IDLE_TIMEOUT: 'false' },
       }),
-    ).toBe(false)
+    ).toBe(true)
+    expect(
+      shouldDisableFetchTimeoutForBodyIdle({
+        forAnthropicAPI: true,
+        hasBodyIdleWatchdog: false,
+        env: { API_FORCE_IDLE_TIMEOUT: 'off' },
+      }),
+    ).toBe(true)
   })
 
   test('false when neither watchdog nor force', () => {

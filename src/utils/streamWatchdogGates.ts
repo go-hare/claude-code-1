@@ -11,6 +11,7 @@
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import { isFirstPartyAnthropicBaseUrl } from './model/providers.js'
 
 /** Official IAi floor — 5 minutes. */
 export const STREAM_IDLE_TIMEOUT_FLOOR_MS = 300_000
@@ -64,13 +65,19 @@ export function isByteWatchdogEnabled(input?: {
 }
 
 /**
- * Official eyc — firstParty always; anthropicAws only without custom base URL.
+ * Official densable fxc — firstParty only when Ud() (first-party base URL);
+ * anthropicAws only without custom ANTHROPIC_AWS_BASE_URL.
+ *
+ *   fxc(e) = e==="firstParty"&&Ud() || e==="anthropicAws"&&!ANTHROPIC_AWS_BASE_URL
  */
 export function isByteWatchdogProviderEligible(
   provider: string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (provider === 'firstParty') return true
+  if (provider === 'firstParty') {
+    // densable Ud / local isFirstPartyAnthropicBaseUrl
+    return isFirstPartyAnthropicBaseUrl(env)
+  }
   if (provider === 'anthropicAws') {
     return !env.ANTHROPIC_AWS_BASE_URL
   }

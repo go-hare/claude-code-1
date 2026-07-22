@@ -320,10 +320,16 @@ export function getWebSocketProxyUrl(url: string): string | undefined {
 }
 
 /**
- * Official F_ densable — when forAnthropicAPI and body-idle watchdog is
- * eligible (or API_FORCE_IDLE_TIMEOUT is truthy), disable the undici/Bun
- * whole-request timeout so the byte-stream idle watchdog owns hang detection.
- * Explicit falsy API_FORCE_IDLE_TIMEOUT forces the SDK timeout back on.
+ * Official densable J_ / F_ timeout:!1 gate:
+ *
+ *   forAnthropicAPI && !ut(API_FORCE_IDLE_TIMEOUT)
+ *     && (hasBodyIdleWatchdog || Zc(API_FORCE_IDLE_TIMEOUT))
+ *
+ * Naming: API_FORCE_IDLE_TIMEOUT **forces the undici/Bun whole-request idle
+ * timeout to stay ON** (do not set `timeout:false`). Explicit falsy force
+ * disables undici timeout even without a body watchdog (J_ Zc branch).
+ * Unset + hasBodyIdleWatchdog → timeout:false so the byte-stream idle
+ * watchdog owns hang detection.
  */
 export function shouldDisableFetchTimeoutForBodyIdle(opts?: {
   forAnthropicAPI?: boolean
@@ -333,8 +339,10 @@ export function shouldDisableFetchTimeoutForBodyIdle(opts?: {
   if (!opts?.forAnthropicAPI) return false
   const env = opts.env ?? process.env
   const force = env.API_FORCE_IDLE_TIMEOUT
-  if (isEnvDefinedFalsy(force)) return false
-  return Boolean(opts.hasBodyIdleWatchdog) || isEnvTruthy(force)
+  // densable: !ut(t) — truthy FORCE keeps undici idle timeout enabled
+  if (isEnvTruthy(force)) return false
+  // densable: hasBodyIdleWatchdog || Zc(t)
+  return Boolean(opts.hasBodyIdleWatchdog) || isEnvDefinedFalsy(force)
 }
 
 /**
@@ -348,9 +356,10 @@ export function shouldDisableFetchTimeoutForBodyIdle(opts?: {
  *   non-Anthropic-API fetch paths (MCP HTTP/SSE transports, etc.) or those
  *   requests get misrouted to api.anthropic.com. Only the Anthropic SDK client
  *   should pass `true` here.
- * - hasBodyIdleWatchdog — when true (official CAh), disable fetch timeout so
- *   the byte-body idle watchdog owns hang detection (unless
- *   API_FORCE_IDLE_TIMEOUT is explicitly falsy).
+ * - hasBodyIdleWatchdog — when true (densable NMh/CAh), disable fetch timeout
+ *   so the byte-body idle watchdog owns hang detection, unless
+ *   API_FORCE_IDLE_TIMEOUT is truthy (forces undici idle timeout ON).
+ *   Explicit falsy FORCE also disables undici timeout (densable Zc branch).
  */
 export function getProxyFetchOptions(opts?: {
   forAnthropicAPI?: boolean

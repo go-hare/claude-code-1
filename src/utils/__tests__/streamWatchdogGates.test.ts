@@ -56,12 +56,47 @@ describe('isByteWatchdogEnabled (Zgc)', () => {
   })
 })
 
-describe('shouldEnableBodyIdleWatchdog (k_h)', () => {
-  test('firstParty both sides when Zgc on', () => {
+describe('shouldEnableBodyIdleWatchdog (k_h / densable NMh)', () => {
+  test('firstParty both sides when Zgc on and Ud (first-party base)', () => {
+    // no ANTHROPIC_BASE_URL → Ud() true
     expect(
       shouldEnableBodyIdleWatchdog({
         requestProvider: 'firstParty',
         currentProvider: 'firstParty',
+        env: {},
+        gbDefaultOn: true,
+      }),
+    ).toBe(true)
+    expect(
+      shouldEnableBodyIdleWatchdog({
+        requestProvider: 'firstParty',
+        currentProvider: 'firstParty',
+        env: { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' },
+        gbDefaultOn: true,
+      }),
+    ).toBe(true)
+  })
+
+  test('firstParty blocked when custom ANTHROPIC_BASE_URL (densable fxc/Ud)', () => {
+    expect(
+      shouldEnableBodyIdleWatchdog({
+        requestProvider: 'firstParty',
+        currentProvider: 'firstParty',
+        env: { ANTHROPIC_BASE_URL: 'https://proxy.example.com' },
+        gbDefaultOn: true,
+      }),
+    ).toBe(false)
+  })
+
+  test('firstParty allowed with ASSUME_FIRST_PARTY even on custom base', () => {
+    expect(
+      shouldEnableBodyIdleWatchdog({
+        requestProvider: 'firstParty',
+        currentProvider: 'firstParty',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://proxy.example.com',
+          _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL: '1',
+        },
         gbDefaultOn: true,
       }),
     ).toBe(true)

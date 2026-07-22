@@ -3,6 +3,7 @@ import {
   BodyIdleTimeoutError,
   type BodyIdleFetch,
   rewrapResponseWithBody,
+  shouldWrapResponseBodyWithIdleWatchdog,
   wrapFetchWithBodyIdleWatchdog,
   wrapReadableStreamWithBodyIdleTimeout,
 } from '../bodyIdleWatchdog.js'
@@ -144,18 +145,78 @@ describe('rewrapResponseWithBody', () => {
   })
 })
 
+describe('shouldWrapResponseBodyWithIdleWatchdog (densable FMh)', () => {
+  test('text/event-stream always', () => {
+    expect(
+      shouldWrapResponseBodyWithIdleWatchdog({
+        contentType: 'text/event-stream; charset=utf-8',
+      }),
+    ).toBe(true)
+  })
+
+  test('bedrock eventstream only for bedrock provider', () => {
+    expect(
+      shouldWrapResponseBodyWithIdleWatchdog({
+        contentType: 'application/vnd.amazon.eventstream',
+        provider: 'bedrock',
+      }),
+    ).toBe(true)
+    expect(
+      shouldWrapResponseBodyWithIdleWatchdog({
+        contentType: 'application/vnd.amazon.eventstream',
+        provider: 'firstParty',
+      }),
+    ).toBe(false)
+  })
+
+  test('json / empty content-type not wrapped', () => {
+    expect(
+      shouldWrapResponseBodyWithIdleWatchdog({
+        contentType: 'application/json',
+        provider: 'firstParty',
+      }),
+    ).toBe(false)
+    expect(shouldWrapResponseBodyWithIdleWatchdog({ contentType: null })).toBe(
+      false,
+    )
+  })
+})
+
 describe('wrapFetchWithBodyIdleWatchdog', () => {
-  test('wraps body when enabled', async () => {
+  test('wraps SSE body when enabled', async () => {
     const base = (async () =>
-      new Response(new ReadableStream(), { status: 200 })) as BodyIdleFetch
+      new Response(new ReadableStream(), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })) as BodyIdleFetch
     const wrapped = wrapFetchWithBodyIdleWatchdog(base, () => ({
       enabled: true,
       idleTimeoutMs: 30,
+      provider: 'firstParty',
     }))
     const res = await wrapped('https://example.com')
     expect(res.body).toBeTruthy()
     const reader = res.body!.getReader()
     await expect(reader.read()).rejects.toBeInstanceOf(BodyIdleTimeoutError)
+  })
+
+  test('passes through non-SSE body even when enabled', async () => {
+    const hang = new ReadableStream<Uint8Array>({ start() {} })
+    const base = (async () =>
+      new Response(hang, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as BodyIdleFetch
+    const wrapped = wrapFetchWithBodyIdleWatchdog(base, () => ({
+      enabled: true,
+      idleTimeoutMs: 20,
+      provider: 'firstParty',
+    }))
+    const res = await wrapped('https://example.com')
+    // Must not install idle watchdog — hang body would otherwise time out.
+    expect(res.headers.get('content-type')).toBe('application/json')
+    // Same body instance path: cancel without BodyIdleTimeoutError
+    await res.body?.cancel()
   })
 
   test('preserves upstream response.url after wrap', async () => {
@@ -166,7 +227,10 @@ describe('wrapFetchWithBodyIdleWatchdog', () => {
           c.close()
         },
       })
-      const response = new Response(body, { status: 200 })
+      const response = new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
       Object.defineProperty(response, 'url', {
         value: 'https://api.example/v1/messages',
         configurable: true,
@@ -176,6 +240,7 @@ describe('wrapFetchWithBodyIdleWatchdog', () => {
     const wrapped = wrapFetchWithBodyIdleWatchdog(base, () => ({
       enabled: true,
       idleTimeoutMs: 5_000,
+      provider: 'firstParty',
     }))
     const res = await wrapped('https://api.example/v1/messages')
     expect(res.url).toBe('https://api.example/v1/messages')

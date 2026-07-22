@@ -137,6 +137,30 @@ export function wrapReadableStreamWithBodyIdleTimeout(
 export type BodyIdleWatchdogFetchOptions = {
   enabled: boolean
   idleTimeoutMs: number
+  /**
+   * densable FMh content-type gate: only wrap SSE / bedrock eventstream.
+   * When omitted, defaults to first-party-style `text/event-stream` only
+   * (provider-less callers).
+   */
+  provider?: string
+}
+
+/**
+ * densable FMh body wrap predicate after pxc/NMh already enabled the fetch wrap:
+ *   f = content-type includes text/event-stream
+ *   m = provider==="bedrock" && content-type includes vnd.amazon.eventstream
+ * Only (f || m) && body are re-wrapped with LMh/idle.
+ */
+export function shouldWrapResponseBodyWithIdleWatchdog(input: {
+  contentType: string | null | undefined
+  provider?: string
+}): boolean {
+  const p = (input.contentType ?? '').toLowerCase()
+  if (p.includes('text/event-stream')) return true
+  if (input.provider === 'bedrock' && p.includes('vnd.amazon.eventstream')) {
+    return true
+  }
+  return false
 }
 
 /** Minimal fetch shape — SDK Fetch / Bun fetch both satisfy this. */
@@ -180,8 +204,9 @@ export function rewrapResponseWithBody(
 }
 
 /**
- * Wrap fetch so successful responses with a body are guarded by the byte-idle
- * watchdog. Headers / non-body responses pass through unchanged.
+ * Wrap fetch so densable-eligible streaming bodies are guarded by the
+ * byte-idle watchdog (FMh → LMh). Non-SSE / non-eventstream bodies pass
+ * through even when the outer NMh gate installed this wrap.
  */
 export function wrapFetchWithBodyIdleWatchdog(
   baseFetch: BodyIdleFetch,
@@ -190,8 +215,16 @@ export function wrapFetchWithBodyIdleWatchdog(
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
   return async (input, init) => {
     const response = await baseFetch(input, init)
-    const { enabled, idleTimeoutMs } = getOptions()
+    const { enabled, idleTimeoutMs, provider } = getOptions()
     if (!enabled || !(idleTimeoutMs > 0) || !response.body) {
+      return response
+    }
+    if (
+      !shouldWrapResponseBodyWithIdleWatchdog({
+        contentType: response.headers.get('content-type'),
+        provider,
+      })
+    ) {
       return response
     }
 
