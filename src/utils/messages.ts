@@ -6184,17 +6184,22 @@ export function isSidechainVisibleOrigin(
 }
 
 /**
- * densable Ace — meta-visible origins for UI count / brief filter / synthetic
- * bridge / Xeo sidechain selection. Broader than HDd for observer-activity;
+ * densable Ace — meta-visible origins for UI count / brief filter /
+ * shouldShowUserMessage (IDd). Broader than HDd for observer-activity;
  * stricter for bare peer (needs senderTaskId unless forcePeer).
  *
  * true for: channel | observer | observer-activity | peer(with senderTaskId)
+ *
+ * NOT densable U4i (brief queue keep): that also allows task-notification /
+ * auto-continuation. Do not merge U4i kinds into Ace — brief/meta visibility
+ * would diverge from densable IDd.
  */
 export function isMetaVisibleOrigin(
   origin: { kind?: string; senderTaskId?: string } | undefined,
   forcePeer = false,
 ): boolean {
   if (!origin?.kind) return false
+  // densable Ace(e,t): channel | observer | observer-activity | peer(+senderTaskId|force)
   if (origin.kind === 'channel') return true
   if (origin.kind === 'observer') return true
   if (origin.kind === 'observer-activity') return true
@@ -6228,15 +6233,16 @@ export function isHumanLikeOrigin(
  */
 export function applyTurnStartOriginFraming(
   message: {
-    message: {
-      content:
+    message?: {
+      content?:
         | string
         | Array<{ type: string; text?: string; [k: string]: unknown }>
+        | unknown
     }
   },
   origin: { kind?: string; from?: string } | undefined,
 ): void {
-  if (!origin?.kind) return
+  if (!origin?.kind || !message.message) return
   let frame: ((raw: string) => string) | undefined
   if (origin.kind === 'peer') {
     frame = raw => wrapPeerOriginText(raw, { midTurn: false })
@@ -6250,14 +6256,27 @@ export function applyTurnStartOriginFraming(
     message.message.content = frame(n)
   } else if (Array.isArray(n)) {
     if (origin.kind === 'peer') {
-      const first = n[0]
+      const first = n[0] as
+        | { type: string; text?: string; [k: string]: unknown }
+        | undefined
       if (first && first.type === 'text' && typeof first.text === 'string') {
         first.text = frame(first.text)
       } else {
-        message.message.content = [{ type: 'text', text: frame('') }, ...n]
+        message.message.content = [
+          { type: 'text', text: frame('') },
+          ...(n as Array<{
+            type: string
+            text?: string
+            [k: string]: unknown
+          }>),
+        ]
       }
     } else {
-      for (const block of n) {
+      for (const block of n as Array<{
+        type: string
+        text?: string
+        [k: string]: unknown
+      }>) {
         if (block.type === 'text' && typeof block.text === 'string') {
           block.text = frame(block.text)
         }

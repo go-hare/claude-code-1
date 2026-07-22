@@ -68,10 +68,13 @@ describe('isMetaVisibleOrigin densable Ace', () => {
     expect(isMetaVisibleOrigin({ kind: 'peer' }, true)).toBe(true)
   })
 
-  test('human / task-notification / undefined false', () => {
+  test('human / task-notification / auto-continuation / undefined false', () => {
+    // densable Ace — not U4i: task-notification / auto-continuation stay hidden
+    // as bare isMeta in shouldShowUserMessage / brief meta filter.
     expect(isMetaVisibleOrigin(undefined)).toBe(false)
     expect(isMetaVisibleOrigin({ kind: 'human' })).toBe(false)
     expect(isMetaVisibleOrigin({ kind: 'task-notification' })).toBe(false)
+    expect(isMetaVisibleOrigin({ kind: 'auto-continuation' })).toBe(false)
     expect(isMetaVisibleOrigin({ kind: 'coordinator' })).toBe(false)
   })
 })
