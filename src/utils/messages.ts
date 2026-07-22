@@ -5176,22 +5176,22 @@ export function getMessagesAfterCompactBoundary<
   return sliced
 }
 
+/**
+ * densable IDd — user messages visible in the transcript UI.
+ * Meta users show only when Ace(origin) (peer/channel/observer/…).
+ * isVisibleInTranscriptOnly hidden unless transcript mode.
+ */
 export function shouldShowUserMessage(
   message: NormalizedMessage,
   isTranscriptMode: boolean,
 ): boolean {
   if (message.type !== 'user') return true
   if (message.isMeta) {
-    // Channel messages stay isMeta (for snip-tag/turn-boundary/brief-mode
-    // semantics) but render in the default transcript — the keyboard user
-    // should see what arrived. The <channel> tag in UserTextMessage handles
-    // the actual rendering.
-    if (
-      (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
-      (message.origin as { kind?: string } | undefined)?.kind === 'channel'
+    // densable Ace: channel / observer / observer-activity / peer(senderTaskId)
+    // stay visible despite isMeta (brief + default transcript).
+    return isMetaVisibleOrigin(
+      message.origin as { kind?: string; senderTaskId?: string } | undefined,
     )
-      return true
-    return false
   }
   if (message.isVisibleInTranscriptOnly && !isTranscriptMode) return false
   return true
@@ -6181,6 +6181,42 @@ export function isSidechainVisibleOrigin(
     return true
   }
   return false
+}
+
+/**
+ * densable Ace — meta-visible origins for UI count / brief filter / synthetic
+ * bridge / Xeo sidechain selection. Broader than HDd for observer-activity;
+ * stricter for bare peer (needs senderTaskId unless forcePeer).
+ *
+ * true for: channel | observer | observer-activity | peer(with senderTaskId)
+ */
+export function isMetaVisibleOrigin(
+  origin: { kind?: string; senderTaskId?: string } | undefined,
+  forcePeer = false,
+): boolean {
+  if (!origin?.kind) return false
+  if (origin.kind === 'channel') return true
+  if (origin.kind === 'observer') return true
+  if (origin.kind === 'observer-activity') return true
+  if (origin.kind === 'peer') {
+    if (origin.senderTaskId !== undefined) return true
+    if (forcePeer) return true
+  }
+  return false
+}
+
+/**
+ * densable Mj — human-like origin for brief attachment keep / turn count.
+ * undefined, human, and auto-continuation count as human-typed prompts.
+ */
+export function isHumanLikeOrigin(
+  origin: { kind?: string } | undefined,
+): boolean {
+  return (
+    origin === undefined ||
+    origin.kind === 'human' ||
+    origin.kind === 'auto-continuation'
+  )
 }
 
 /**

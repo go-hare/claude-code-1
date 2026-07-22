@@ -93,7 +93,8 @@ describe('resumeAgent', () => {
     // (cold resume); official separate transcript store can exist earlier.
     const src = readFileSync(join(import.meta.dir, '../resumeAgent.ts'), 'utf8')
     expect(src).toContain('appendMessageToLocalAgent')
-    expect(src).toContain('isSidechainVisibleOrigin')
+    // densable Ace/Xeo: meta-visible origin (not HDd) selects wrapped sidechain msg
+    expect(src).toContain('isMetaVisibleOrigin')
     expect(src).toContain('!promptIsMeta && !continueInterruptedTurn')
     // Sidechain-visible origin uses wrapped resumeUserMessage; else raw prompt + origin
     expect(src).toContain('sidechainMsg')

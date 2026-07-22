@@ -45,6 +45,8 @@ import {
   getToolUseID,
   getToolUseIDs,
   hasUnresolvedHooksFromLookup,
+  isHumanLikeOrigin,
+  isMetaVisibleOrigin,
   isNotEmptyMessage,
   normalizeMessages,
   reorderMessagesInUI,
@@ -130,6 +132,7 @@ export function filterForBriefTool<
     subtype?: string;
     isMeta?: boolean;
     isApiErrorMessage?: boolean;
+    origin?: { kind?: string; senderTaskId?: string };
     message?: {
       content: Array<{
         type: string;
@@ -140,7 +143,7 @@ export function filterForBriefTool<
     attachment?: {
       type: string;
       isMeta?: boolean;
-      origin?: unknown;
+      origin?: { kind?: string; senderTaskId?: string };
       commandMode?: string;
     };
   },
@@ -174,18 +177,18 @@ export function filterForBriefTool<
       if (block?.type === 'tool_result') {
         return block.tool_use_id !== undefined && briefToolUseIDs.has(block.tool_use_id);
       }
-      // Real user input only — drop meta/tick messages.
-      return !msg.isMeta;
+      // densable Ace: keep meta peer/channel/observer/observer-activity.
+      // Real user input (!isMeta) always kept; other meta (ticks) drop.
+      return !msg.isMeta || isMetaVisibleOrigin(msg.origin);
     }
     if (msg.type === 'attachment') {
-      // Human input drained mid-turn arrives as a queued_command attachment
-      // (query.ts mid-chain drain → getQueuedCommandAttachments). Keep it —
-      // it's what the user typed. commandMode === 'prompt' positively
-      // identifies human-typed input; task-notification callers set
-      // mode: 'task-notification' but not origin/isMeta, so the positive
-      // commandMode check is required to exclude them.
+      // densable: queued_command prompt kept when Ace(origin) OR
+      // (!isMeta && human-like origin). Human mid-turn drain has no origin.
       const att = msg.attachment;
-      return att?.type === 'queued_command' && att.commandMode === 'prompt' && !att.isMeta && att.origin === undefined;
+      if (att?.type !== 'queued_command' || att.commandMode !== 'prompt') {
+        return false;
+      }
+      return isMetaVisibleOrigin(att.origin) || (!att.isMeta && isHumanLikeOrigin(att.origin));
     }
     return false;
   });
@@ -280,19 +283,21 @@ export function dropTextInBriefTurns<
   T extends {
     type: string;
     isMeta?: boolean;
+    origin?: { kind?: string; senderTaskId?: string };
     message?: { content: Array<{ type: string; name?: string }> };
   },
 >(messages: T[], briefToolNames: string[]): T[] {
   const nameSet = new Set(briefToolNames);
-  // First pass: find which turns (bounded by non-meta user messages) contain
-  // a Brief tool_use. Tag each assistant text block with its turn index.
+  // First pass: find which turns (bounded by non-meta user messages, densable
+  // Ace-visible meta still counts as a turn boundary) contain a Brief tool_use.
+  // Tag each assistant text block with its turn index.
   const turnsWithBrief = new Set<number>();
   const textIndexToTurn: number[] = [];
   let turn = 0;
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
     const block = msg.message?.content[0];
-    if (msg.type === 'user' && block?.type !== 'tool_result' && !msg.isMeta) {
+    if (msg.type === 'user' && block?.type !== 'tool_result' && (!msg.isMeta || isMetaVisibleOrigin(msg.origin))) {
       turn++;
       continue;
     }

@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import {
   applyTurnStartOriginFraming,
   createUserMessage,
+  isHumanLikeOrigin,
+  isMetaVisibleOrigin,
   isSidechainVisibleOrigin,
   normalizeMessagesForAPI,
+  shouldShowUserMessage,
   TASK_NOTIFICATION_DISCLAIMER_PREFIX,
   wrapCommandText,
   wrapPeerOriginText,
@@ -47,6 +50,76 @@ describe('isSidechainVisibleOrigin densable HDd', () => {
     expect(isSidechainVisibleOrigin(undefined)).toBe(false)
     expect(isSidechainVisibleOrigin({ kind: 'human' })).toBe(false)
     expect(isSidechainVisibleOrigin({ kind: 'task-notification' })).toBe(false)
+  })
+})
+
+describe('isMetaVisibleOrigin densable Ace', () => {
+  test('channel / observer / observer-activity true', () => {
+    expect(isMetaVisibleOrigin({ kind: 'channel' })).toBe(true)
+    expect(isMetaVisibleOrigin({ kind: 'observer' })).toBe(true)
+    expect(isMetaVisibleOrigin({ kind: 'observer-activity' })).toBe(true)
+  })
+
+  test('peer needs senderTaskId unless forcePeer', () => {
+    expect(isMetaVisibleOrigin({ kind: 'peer' })).toBe(false)
+    expect(isMetaVisibleOrigin({ kind: 'peer', senderTaskId: 'task-1' })).toBe(
+      true,
+    )
+    expect(isMetaVisibleOrigin({ kind: 'peer' }, true)).toBe(true)
+  })
+
+  test('human / task-notification / undefined false', () => {
+    expect(isMetaVisibleOrigin(undefined)).toBe(false)
+    expect(isMetaVisibleOrigin({ kind: 'human' })).toBe(false)
+    expect(isMetaVisibleOrigin({ kind: 'task-notification' })).toBe(false)
+    expect(isMetaVisibleOrigin({ kind: 'coordinator' })).toBe(false)
+  })
+})
+
+describe('isHumanLikeOrigin densable Mj', () => {
+  test('undefined / human / auto-continuation true', () => {
+    expect(isHumanLikeOrigin(undefined)).toBe(true)
+    expect(isHumanLikeOrigin({ kind: 'human' })).toBe(true)
+    expect(isHumanLikeOrigin({ kind: 'auto-continuation' })).toBe(true)
+  })
+
+  test('peer / channel / task-notification false', () => {
+    expect(isHumanLikeOrigin({ kind: 'peer' })).toBe(false)
+    expect(isHumanLikeOrigin({ kind: 'channel' })).toBe(false)
+    expect(isHumanLikeOrigin({ kind: 'task-notification' })).toBe(false)
+  })
+})
+
+describe('shouldShowUserMessage densable IDd', () => {
+  test('meta + Ace origin visible; bare meta hidden', () => {
+    const peerMeta = createUserMessage({
+      content: 'from peer',
+      isMeta: true,
+      origin: { kind: 'peer', senderTaskId: 'a-1' } as never,
+    })
+    const tickMeta = createUserMessage({
+      content: 'tick',
+      isMeta: true,
+    })
+    const channelMeta = createUserMessage({
+      content: 'from channel',
+      isMeta: true,
+      origin: { kind: 'channel' } as never,
+    })
+    expect(shouldShowUserMessage(peerMeta as never, false)).toBe(true)
+    expect(shouldShowUserMessage(channelMeta as never, false)).toBe(true)
+    expect(shouldShowUserMessage(tickMeta as never, false)).toBe(false)
+  })
+
+  test('non-meta always shown; transcriptOnly respects mode', () => {
+    const human = createUserMessage({ content: 'hi' })
+    expect(shouldShowUserMessage(human as never, false)).toBe(true)
+    const onlyTx = createUserMessage({
+      content: 'summary',
+      isVisibleInTranscriptOnly: true,
+    })
+    expect(shouldShowUserMessage(onlyTx as never, false)).toBe(false)
+    expect(shouldShowUserMessage(onlyTx as never, true)).toBe(true)
   })
 })
 

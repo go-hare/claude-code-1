@@ -21,7 +21,7 @@ import {
   filterOrphanedThinkingOnlyMessages,
   filterUnresolvedToolUses,
   filterWhitespaceOnlyAssistantMessages,
-  isSidechainVisibleOrigin,
+  isMetaVisibleOrigin,
   wrapResumePromptOrigin,
 } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
@@ -814,13 +814,13 @@ async function resumeAgentBackgroundAfterClaim({
   // promptIsMeta nor continueInterruptedTurn. Official store can write
   // transcripts before re-register; local task.messages needs the task first,
   // so append AFTER registerAsyncAgent (cold resume would no-op before).
-  // Sidechain-visible origins keep the mid-turn-wrapped meta message;
-  // otherwise append raw prompt + origin.
+  // densable Ace/Xeo: meta-visible origins keep the mid-turn-wrapped
+  // message; otherwise append raw prompt + origin.
   if (!promptIsMeta && !continueInterruptedTurn) {
     const { appendMessageToLocalAgent } = await import(
       'src/tasks/LocalAgentTask/LocalAgentTask.js'
     )
-    const sidechainMsg = isSidechainVisibleOrigin(promptOrigin)
+    const sidechainMsg = isMetaVisibleOrigin(promptOrigin)
       ? resumeUserMessage
       : createUserMessage({
           content: prompt,
