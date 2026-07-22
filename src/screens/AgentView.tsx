@@ -58,6 +58,7 @@ import {
   countNewlines,
   FLEET_MIN_INTENT_LEN,
   FLEET_PASTE_CHAR_THRESHOLD,
+  FLEET_EXIT_ARM_MS,
   FLEET_STATE_GROUP_LABELS,
   FLEET_STATE_GROUP_DESCRIPTIONS,
   type FleetColumnWidths,
@@ -506,11 +507,25 @@ function AgentViewApp({
   }, [onAction]);
 
   /**
+   * densable CJ clear — only on second press (forceExit), timeout, or
+   * forceExit from Esc cascade. densable does **not** disarm Mt on other keys;
+   * Mt stays until fSg window elapses.
+   */
+  const disarmExitArm = useCallback(() => {
+    if (!exitArmedRef.current) return;
+    if (exitArmTimerRef.current) {
+      clearTimeout(exitArmTimerRef.current);
+      exitArmTimerRef.current = null;
+    }
+    exitArmedRef.current = false;
+    setExitArmed(false);
+  }, []);
+
+  /**
    * densable ur = CJ(Et, Tt): Ctrl+C only double-press exit.
    * Esc is cascade then one-shot Tt() — never arms Mt (see densable 2.1.211:
    * ctrl+c → ur(); escape → … else Tt()).
-   * Refs so re-renders cannot reset the arm window.
-   * Window 2000ms — densable CJ default is 800ms; slightly longer is easier.
+   * densable fSg = 800ms arm window.
    */
   const handleCtrlCDoublePress = useCallback(() => {
     if (exitArmedRef.current) {
@@ -524,7 +539,7 @@ function AgentViewApp({
       exitArmedRef.current = false;
       setExitArmed(false);
       exitArmTimerRef.current = null;
-    }, 2000);
+    }, FLEET_EXIT_ARM_MS);
   }, [forceExit]);
 
   useEffect(
@@ -1300,15 +1315,14 @@ function AgentViewApp({
 
     dispatchingRef.current = true;
     try {
-      // Bash `!` mode: spawn a session whose intent is the shell command prefixed
-      // so the worker treats it as an executable prompt (local stand-in for exec template).
-      // Matched template → agent name (official template → cxe/agent flag).
-      const intent = expandedExec ? `!${expandedExec}` : expandedIntent;
-      const agent = expandedExec ? undefined : (parsed.templateName ?? parsed.routine);
+      // densable: n?.exec → launch.mode exec via $F_; template → agent;
+      // routine is a separate dispatch field (not agent).
       await submitDispatch({
-        intent,
+        intent: expandedExec ? expandedExec : expandedIntent,
         name: expandedExec ? expandedExec.slice(0, 40) : (parsed.templateName ?? parsed.routine),
-        agent,
+        agent: expandedExec ? undefined : parsed.templateName,
+        routine: expandedExec ? undefined : parsed.routine,
+        exec: expandedExec,
         cwd: parsed.cwd ?? getCwd(),
         extraArgs: dispatchExtraArgs,
         source: 'fleet',
@@ -1451,6 +1465,29 @@ function AgentViewApp({
     if (!session) return;
     const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
     if (!short) return;
+    // densable archive also clears pins.json so daemon retire is not blocked
+    // by a stale pin entry (state.json alone is not enough — bgWorker reads pins).
+    try {
+      const { join } = await import('path');
+      const { readFile, writeFile, mkdir } = await import('fs/promises');
+      const { getClaudeConfigHomeDir } = await import('../utils/envUtils.js');
+      const pinsPath = join(getClaudeConfigHomeDir(), 'pins.json');
+      let pins: string[] = [];
+      try {
+        const raw = await readFile(pinsPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) pins = parsed.filter((s: unknown) => typeof s === 'string');
+      } catch {
+        /* missing pins.json ok */
+      }
+      if (pins.includes(short)) {
+        pins = pins.filter(s => s !== short);
+        await mkdir(getClaudeConfigHomeDir(), { recursive: true }).catch(() => {});
+        await writeFile(pinsPath, JSON.stringify(pins, null, 2));
+      }
+    } catch {
+      /* best-effort pins clear */
+    }
     const { patchBgJobState } = await import('../daemon/jobState.js');
     patchBgJobState(short, { archived: true, pinned: false });
     setDeleteConfirmSessionId(null);
@@ -1595,6 +1632,9 @@ function AgentViewApp({
     // Esc never arms — only Ctrl+C uses double-press (Mt footer: Press Ctrl-C again).
     // Match both parsed form (input='c'+ctrl) and raw ETX (\x03) for robustness.
     if ((input === 'c' && key.ctrl) || input === '\x03') {
+      // densable: Ctrl+C cancels transient modes without disarming Mt (exit arm).
+      // Only timeout / 2nd Ctrl+C / forceExit clear arm — otherwise arm →
+      // rename → Ctrl+C cancel rename → need arm again becomes triple Ctrl+C.
       if (viewMode === 'rename' || viewMode === 'group') {
         setViewMode('list');
         setGroupValue('');
@@ -1614,6 +1654,7 @@ function AgentViewApp({
         return;
       }
       // densable: clear composer then still ur() — first Ctrl+C arms, second exits.
+      // densable does not disarm Mt on other keys; only timeout / 2nd press / forceExit.
       if (dispatchInput) {
         setDispatchInput('');
         setCursorOffset(0);

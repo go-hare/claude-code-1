@@ -8,6 +8,7 @@ import type {
   NormalizedUserMessage,
   RenderableMessage,
 } from '../types/message.js'
+import { registerBriefBashNotificationCount } from './focusTranscript.js'
 import { isFullscreenEnvEnabled } from './fullscreen.js'
 import { extractTag } from './messages.js'
 
@@ -64,18 +65,21 @@ export function collapseBackgroundBashNotifications(
       } else {
         // Synthesize a task-notification that UserAgentNotificationMessage
         // already knows how to render — no new renderer needed.
-        result.push({
+        // Also register multi-count so focus transcript folds N bash notifications.
+        const synthetic: NormalizedUserMessage = {
           ...msg,
           message: {
             role: 'user',
             content: [
               {
-                type: 'text',
+                type: 'text' as const,
                 text: `<${TASK_NOTIFICATION_TAG}><${STATUS_TAG}>completed</${STATUS_TAG}><${SUMMARY_TAG}>${count} background commands completed</${SUMMARY_TAG}></${TASK_NOTIFICATION_TAG}>`,
               },
             ],
           },
-        })
+        }
+        registerBriefBashNotificationCount(synthetic, count)
+        result.push(synthetic)
       }
     } else {
       result.push(msg)

@@ -28,13 +28,38 @@ declare module '*/sdk/coreTypes.generated.js' {
     [key: string]: unknown
   }
 
-  // MCP
-  export type McpServerConfigForProcessTransport = {
-    command: string
-    args: string[]
-    type?: 'stdio'
-    env?: Record<string, string>
-  } & { scope: string; pluginSource?: string }
+  // MCP — densable UQb/qQb/kMf process transport union
+  export type McpServerToolPolicy = {
+    name: string
+    permission_policy?: 'always_allow' | 'always_ask' | 'always_deny'
+    org_max_permission?: 'allow' | 'ask' | 'blocked'
+  }
+  export type McpServerConfigForProcessTransport =
+    | {
+        type?: 'stdio'
+        command: string
+        args?: string[]
+        env?: Record<string, string>
+        scope?: string
+        pluginSource?: string
+      }
+    | {
+        type: 'sse' | 'http'
+        url: string
+        headers?: Record<string, string>
+        tools?: McpServerToolPolicy[]
+        toolPermissions?: Record<string, 'allow' | 'ask' | 'blocked'>
+        timeout?: number
+        alwaysLoad?: boolean
+        scope?: string
+        pluginSource?: string
+      }
+    | {
+        type: 'sdk'
+        name: string
+        scope?: string
+        pluginSource?: string
+      }
   export type McpServerStatus = {
     name: string
     status: 'connected' | 'disconnected' | 'error'

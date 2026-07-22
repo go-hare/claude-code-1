@@ -107,6 +107,34 @@ export const ThinkingConfigSchema = lazySchema(() =>
 // MCP Server Config Types (serializable only)
 // ============================================================================
 
+/**
+ * densable kMf — per-tool permission policy on mcp_set_servers for remote
+ * servers. `org_max_permission` folds into toolPermissions (a$f → uUt).
+ */
+export const McpServerToolPolicySchema = lazySchema(() =>
+  z
+    .object({
+      name: z.string(),
+      permission_policy: z
+        .enum(['always_allow', 'always_ask', 'always_deny'])
+        .optional(),
+      org_max_permission: z
+        .enum(['allow', 'ask', 'blocked'])
+        .optional()
+        .describe(
+          "Org admin's per-tool ceiling. Drives the auto-mode isOrgAskCeiling gate so an admin 'ask' cap forces a user prompt even in auto mode.",
+        ),
+    })
+    .describe(
+      'Per-tool permission policy carried on mcp_set_servers for remote servers.',
+    ),
+)
+
+/** densable qHr — org max permission value. */
+export const McpToolPermissionWireSchema = lazySchema(() =>
+  z.enum(['allow', 'ask', 'blocked']),
+)
+
 export const McpStdioServerConfigSchema = lazySchema(() =>
   z.object({
     type: z.literal('stdio').optional(), // Optional for backwards compatibility
@@ -121,6 +149,13 @@ export const McpSSEServerConfigSchema = lazySchema(() =>
     type: z.literal('sse'),
     url: z.string(),
     headers: z.record(z.string(), z.string()).optional(),
+    // densable UQb: tools[] + org ceiling map for dynamic remote MCP.
+    tools: z.array(McpServerToolPolicySchema()).optional(),
+    toolPermissions: z
+      .record(z.string(), McpToolPermissionWireSchema())
+      .optional(),
+    timeout: z.number().optional(),
+    alwaysLoad: z.boolean().optional(),
   }),
 )
 
@@ -129,6 +164,13 @@ export const McpHttpServerConfigSchema = lazySchema(() =>
     type: z.literal('http'),
     url: z.string(),
     headers: z.record(z.string(), z.string()).optional(),
+    // densable qQb: tools[] + org ceiling map for dynamic remote MCP.
+    tools: z.array(McpServerToolPolicySchema()).optional(),
+    toolPermissions: z
+      .record(z.string(), McpToolPermissionWireSchema())
+      .optional(),
+    timeout: z.number().optional(),
+    alwaysLoad: z.boolean().optional(),
   }),
 )
 
@@ -1280,6 +1322,21 @@ export const SDKStatusSchema = lazySchema(() =>
   z.union([z.literal('compacting'), z.null()]),
 )
 
+/**
+ * densable W6a / NMf — message origin on the SDK wire.
+ * Official accepts many kinds (human, channel, peer, observer,
+ * observer-activity, task-notification, auto-continuation, coordinator, …)
+ * plus catchall fields (senderTaskId, from, server, name…).
+ * Structural validation of required peer/channel fields is Ace-side, not schema.
+ */
+export const SDKMessageOriginSchema = lazySchema(() =>
+  z
+    .object({
+      kind: z.string().min(1),
+    })
+    .catchall(z.unknown()),
+)
+
 // SDKUserMessage content without uuid/session_id
 const SDKUserMessageContentSchema = lazySchema(() =>
   z.object({
@@ -1289,6 +1346,8 @@ const SDKUserMessageContentSchema = lazySchema(() =>
     isSynthetic: z.boolean().optional(),
     tool_use_result: z.unknown().optional(),
     priority: z.enum(['now', 'next', 'later']).optional(),
+    // densable NMf: origin rides the wire for remote Ace / peer visibility.
+    origin: SDKMessageOriginSchema().optional(),
     timestamp: z
       .string()
       .optional()

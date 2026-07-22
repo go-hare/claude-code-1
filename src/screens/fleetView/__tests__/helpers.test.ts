@@ -660,6 +660,21 @@ describe('parseDispatch (official e$a)', () => {
     // AgentView short-prompt guard skips when matched
     expect(r.matched || r.intent.length >= 4).toBe(true)
   })
+
+  test('@routine is separate from template agent field', () => {
+    const r = parseDispatch(
+      'look at flaky tests @nightly',
+      [{ name: 'auth' }],
+      {},
+      [{ name: 'nightly' }],
+    )
+    expect(r.routine).toBe('nightly')
+    expect(r.templateName).toBeUndefined()
+    expect(r.intent).toBe('look at flaky tests')
+    expect(r.matched).toBe(false)
+    // Must not be collapsed into templateName (submitDispatch agent vs routine)
+    expect(Object.hasOwn(r, 'templateName')).toBe(false)
+  })
 })
 
 describe('paste helpers', () => {

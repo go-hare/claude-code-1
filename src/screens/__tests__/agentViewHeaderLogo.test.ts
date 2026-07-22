@@ -94,5 +94,23 @@ describe('AgentView header logo / path layout', () => {
     expect(agentViewSrc).toContain('handleCtrlCDoublePress')
     expect(agentViewSrc).toMatch(/key\.escape[\s\S]{0,400}forceExit\(\)/)
     expect(agentViewSrc).not.toContain('requestExit')
+    // densable CJ fSg=800 — not 2000; no any-key disarm (only timeout / 2nd / forceExit)
+    expect(agentViewSrc).toContain('FLEET_EXIT_ARM_MS')
+    expect(agentViewSrc).not.toContain(', 2000)')
+    expect(agentViewSrc).not.toMatch(
+      /\/\/ Any non-Ctrl-C key[\s\S]{0,80}disarmExitArm/,
+    )
+    // Ctrl+C cancel of rename/group/reply/help/pending must not disarmExitArm
+    // (arm → cancel mode → 2nd Ctrl+C should exit, not re-arm as triple).
+    expect(agentViewSrc).toMatch(
+      /viewMode === 'rename' \|\| viewMode === 'group'[\s\S]{0,200}setViewMode\('list'\)/,
+    )
+    expect(agentViewSrc).not.toMatch(
+      /viewMode === 'rename'[\s\S]{0,120}disarmExitArm\(\)/,
+    )
+    expect(agentViewSrc).not.toMatch(
+      /viewMode === 'reply'[\s\S]{0,80}disarmExitArm\(\)/,
+    )
+    expect(agentViewSrc).not.toMatch(/helpOpen[\s\S]{0,80}disarmExitArm\(\)/)
   })
 })

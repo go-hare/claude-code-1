@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { filterTasksByDecorationContent } from '../CoordinatorAgentStatus.js'
-import type { LocalAgentTaskState } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
+import {
+  isLocalAgentPanelActive,
+  type LocalAgentTaskState,
+} from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 
 function task(id: string): LocalAgentTaskState {
   return {
@@ -34,5 +37,24 @@ describe('filterTasksByDecorationContent densable G7', () => {
     expect(
       filterTasksByDecorationContent(tasks, { a: { content: 'x' } }),
     ).toEqual(tasks)
+  })
+})
+
+describe('isLocalAgentPanelActive panel adopt UX', () => {
+  test('PSu completed + adoptResumePending is panel-active (not tick-done)', () => {
+    const t = {
+      ...task('adopt'),
+      status: 'completed' as const,
+      adoptResumePending: true,
+    }
+    expect(isLocalAgentPanelActive(t)).toBe(true)
+  })
+
+  test('plain completed is not panel-active', () => {
+    const t = {
+      ...task('done'),
+      status: 'completed' as const,
+    }
+    expect(isLocalAgentPanelActive(t)).toBe(false)
   })
 })

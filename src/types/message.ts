@@ -107,5 +107,18 @@ export type CollapsedReadSearchGroup = {
   teamMemoryWriteCount?: number
   thoughtForMs?: number
   latestThinkingSummary?: string
+  // densable ySu brief re-collapse extras
+  agentCount?: number
+  agentDescriptions?: string[]
+  editFileCount?: number
+  linesAdded?: number
+  linesRemoved?: number
+  otherToolCount?: number
+  frameCount?: number
+  scratchpadWriteCount?: number
+  scratchpadLinesAdded?: number
+  scratchpadLinesRemoved?: number
+  /** densable pendingText — streaming tail hung on last brief collapse group */
+  pendingText?: string
   [key: string]: unknown
 }

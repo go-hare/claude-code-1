@@ -2,6 +2,7 @@ import type { RefObject } from 'react'
 import {
   useCallback,
   useDeferredValue,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -207,6 +208,17 @@ export function useVirtualScroll(
   const prevLayoutEpoch = useRef(layoutEpoch)
   const pendingRemeasureRef = useRef(false)
   const needsOffsetRebuildRef = useRef(false)
+  // First-paint settle: cold-start spacers use DEFAULT_ESTIMATE while sticky
+  // pins to real Yoga scrollHeight. Measure updates heightCache without
+  // setState (anti-flicker), so without one post-paint remeasure commit the
+  // viewport can land in inflated topSpacer — blank until the user scrolls
+  // (scroll notify is the first natural React re-render).
+  // needsViewportWake: one commit after Ink first writes viewportHeight>0
+  // (leave COLD_START). needsHeightSettle: one commit after the first real
+  // Yoga measure batch rebuilds spacers. Cleared independently — do not clear
+  // height settle on viewport wake or measure never forces the second commit.
+  const needsViewportWakeRef = useRef(true)
+  const needsHeightSettleRef = useRef(true)
   // List origin in content-wrapper coords. scrollTop is content-wrapper-
   // relative, but offsets[] are list-local (0 = first virtualized item).
   // Siblings that render BEFORE this list inside the ScrollBox — Logo,
@@ -263,6 +275,9 @@ export function useVirtualScroll(
     if (el) {
       el.scrollHeightHwm = undefined
     }
+    // Collapse/expand cleared heights — need a height-settle commit again
+    // once post-toggle Yoga lands (layoutEpoch path also uses needsOffsetRebuild).
+    needsHeightSettleRef.current = true
   }
   const frozenRange = freezeRendersRef.current > 0 ? prevRangeRef.current : null
 
@@ -274,9 +289,34 @@ export function useVirtualScroll(
   // triggers: scrollToBottom sets sticky=true without moving scrollTop
   // (Ink moves it later), and the first scrollBy after may land in the
   // same bin. NaN sentinel = ref not attached.
+  //
+  // Ref may not be attached on first subscribe (ScrollBox mounts same commit
+  // as VirtualMessageList). Retry a few microtasks so we do not permanently
+  // NOOP-unsub and miss all scroll notify until remount.
   const subscribe = useCallback(
-    (listener: () => void) =>
-      scrollRef.current?.subscribe(listener) ?? NOOP_UNSUB,
+    (listener: () => void) => {
+      const attached = scrollRef.current?.subscribe(listener)
+      if (attached) return attached
+      let active = true
+      let realUnsub = NOOP_UNSUB
+      let attempts = 0
+      const tryAttach = (): void => {
+        if (!active) return
+        const unsub = scrollRef.current?.subscribe(listener)
+        if (unsub) {
+          realUnsub = unsub
+          // Snapshot was NaN while unattached — nudge once ref is live.
+          listener()
+          return
+        }
+        if (++attempts < 32) queueMicrotask(tryAttach)
+      }
+      queueMicrotask(tryAttach)
+      return () => {
+        active = false
+        realUnsub()
+      }
+    },
     [scrollRef],
   )
   useSyncExternalStore(subscribe, () => {
@@ -331,6 +371,10 @@ export function useVirtualScroll(
       if (!live.has(k)) refCache.current.delete(k)
     }
     if (dirty) offsetVersionRef.current++
+    // Transcript identity swap (agent view enter, /clear, compaction) —
+    // re-run first-paint settle so spacers rebuild after new heights land.
+    needsViewportWakeRef.current = true
+    needsHeightSettleRef.current = true
   }, [itemKeys])
 
   // Offsets cached across renders, invalidated by offsetVersion ref bump.
@@ -750,7 +794,16 @@ export function useVirtualScroll(
         anyChanged = true
       }
     }
-    if (anyChanged) offsetVersionRef.current++
+    if (anyChanged) {
+      offsetVersionRef.current++
+      // First measure batch after cold start / transcript swap: one forced
+      // commit so topSpacer/bottomSpacer leave DEFAULT_ESTIMATE and match the
+      // sticky pin. Streaming height tweaks keep the no-setState path.
+      if (needsHeightSettleRef.current) {
+        needsHeightSettleRef.current = false
+        queueMicrotask(() => setRemeasureTick(t => t + 1))
+      }
+    }
     // Intentional layoutEpoch path only (not streaming markdown freeze):
     // force a commit so offsets rebuild from freshly written heights, and
     // clamp scrollTop to real maxScroll when non-sticky (collapse after
@@ -776,6 +829,36 @@ export function useVirtualScroll(
           }
         }
       }
+    }
+  })
+
+  // Post-paint: viewportHeight is written by render-node-to-output AFTER
+  // useLayoutEffect, so the first commit often still sees viewportH=0 and
+  // stays on COLD_START range forever until scroll notify. One effect after
+  // Ink paints with a positive viewport forces the sticky/real-range path.
+  // Does NOT clear needsHeightSettle — measure must still force a second
+  // commit after real Yoga heights land in the cache.
+  //
+  // Retry: first paint can still report vh=0 (ScrollBox flex not resolved yet
+  // or ref late). Microtask retries cover the common "vh lands one paint
+  // later without a React commit" window without polling forever.
+  useEffect(() => {
+    if (!needsViewportWakeRef.current) return
+    let active = true
+    let attempts = 0
+    const tryWake = (): void => {
+      if (!active || !needsViewportWakeRef.current) return
+      const s = scrollRef.current
+      if (s && s.getViewportHeight() > 0) {
+        needsViewportWakeRef.current = false
+        setRemeasureTick(t => t + 1)
+        return
+      }
+      if (++attempts < 32) queueMicrotask(tryWake)
+    }
+    tryWake()
+    return () => {
+      active = false
     }
   })
 

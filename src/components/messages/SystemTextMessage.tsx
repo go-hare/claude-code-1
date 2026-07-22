@@ -320,7 +320,18 @@ function TurnDurationMessage({
     return `${showTurnDuration ? ' \u00B7 ' : ''}${usage}${nudges}`;
   })();
 
-  if (!showTurnDuration && !hasBudget) {
+  // densable ySu stamps briefHiddenCount on turn_duration when focus view
+  // collapses chrome — "N messages hidden (/focus to show)".
+  const briefHiddenRaw = (message as unknown as { briefHiddenCount?: unknown }).briefHiddenCount;
+  const briefHidden = typeof briefHiddenRaw === 'number' && Number.isFinite(briefHiddenRaw) ? briefHiddenRaw : 0;
+  const briefHiddenSuffix =
+    briefHidden > 0
+      ? `${showTurnDuration || hasBudget || backgroundTaskSummary ? ' \u00B7 ' : ''}${briefHidden} ${
+          briefHidden === 1 ? 'message' : 'messages'
+        } hidden (/focus to show)`
+      : '';
+
+  if (!showTurnDuration && !hasBudget && !briefHiddenSuffix) {
     return null;
   }
 
@@ -333,6 +344,7 @@ function TurnDurationMessage({
         {showTurnDuration && `${verb} for ${duration}`}
         {budgetSuffix}
         {backgroundTaskSummary && ` \u00B7 ${backgroundTaskSummary} still running`}
+        {briefHiddenSuffix}
       </Text>
     </Box>
   );

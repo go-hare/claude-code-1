@@ -14,8 +14,13 @@ import type { ImageDimensions } from '../utils/imageResizer.js'
 import { getPlatform } from '../utils/platform.js'
 
 const CLIPBOARD_CHECK_DEBOUNCE_MS = 50
-/** If pastePending sticks (async image hang / cancelled debounce), free Enter. */
-const PASTE_PENDING_SAFETY_MS = 2000
+/**
+ * densable UZr only clears pending after paste actually finishes (finally /
+ * maybeReplayReturn). Keep a high safety ceiling so slow image disk reads do
+ * not free Enter early (review: 2s was too short for large screenshots).
+ * Hung clipboard still must not swallow Enter forever.
+ */
+const PASTE_PENDING_SAFETY_MS = 30_000
 
 type PasteHandlerProps = {
   onPaste?: (text: string) => void

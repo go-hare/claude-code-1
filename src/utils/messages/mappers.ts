@@ -51,9 +51,10 @@ export function toInternalMessages(
             isMeta: message.isSynthetic,
             // densable: origin rides the SDK catchall so Ace can keep
             // peer/channel/observer meta visible on the remote path.
-            ...((message as { origin?: unknown }).origin !== undefined
+            ...((message as unknown as { origin?: unknown }).origin !==
+            undefined
               ? {
-                  origin: (message as { origin: unknown }).origin,
+                  origin: (message as unknown as { origin: unknown }).origin,
                 }
               : {}),
           } as unknown as Message,

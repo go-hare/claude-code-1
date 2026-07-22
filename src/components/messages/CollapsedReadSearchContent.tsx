@@ -150,6 +150,15 @@ export function CollapsedReadSearchContent({
   const gitOpBashCount = message.gitOpBashCount ?? 0;
   const bashCount = isFullscreenEnvEnabled() ? Math.max(0, maxBashCountRef.current - gitOpBashCount) : 0;
 
+  // densable ySu brief extras: agent / edit / other / frame
+  const agentCount = message.agentCount ?? 0;
+  const editFileCount = message.editFileCount ?? 0;
+  const otherToolCount = message.otherToolCount ?? 0;
+  const frameCount = message.frameCount ?? 0;
+  const linesAdded = message.linesAdded ?? 0;
+  const linesRemoved = message.linesRemoved ?? 0;
+  const pendingText = message.pendingText;
+
   const hasNonMemoryOps =
     searchCount > 0 ||
     readCount > 0 ||
@@ -157,7 +166,11 @@ export function CollapsedReadSearchContent({
     replCount > 0 ||
     mcpCallCount > 0 ||
     bashCount > 0 ||
-    gitOpBashCount > 0;
+    gitOpBashCount > 0 ||
+    agentCount > 0 ||
+    editFileCount > 0 ||
+    otherToolCount > 0 ||
+    frameCount > 0;
 
   const readPaths = message.readFilePaths;
   const searchArgs = message.searchArgs;
@@ -295,20 +308,43 @@ export function CollapsedReadSearchContent({
     }
   }
 
-  // Build non-memory parts first (search, read, repl, mcp, bash) — these render
-  // before memory so the line reads "Ran 3 bash commands, recalled 1 memory".
+  // Build non-memory parts first (edit, search, read, repl, mcp, agent, other, bash)
+  // densable order: edit → git → frame → search → read → list → repl → mcp → agent → other → bash
   const nonMemParts: React.ReactNode[] = [];
 
   // Git operations lead the line — they're the load-bearing outcome.
-  function pushPart(key: string, verb: string, body: React.ReactNode): void {
+  function pushPart(key: string, verb: string, body: React.ReactNode | null): void {
     const isFirst = nonMemParts.length === 0;
     if (!isFirst) nonMemParts.push(<Text key={`comma-${key}`}>, </Text>);
+    const verbText = isFirst ? verb[0]!.toUpperCase() + verb.slice(1) : verb;
     nonMemParts.push(
       <Text key={key}>
-        {isFirst ? verb[0]!.toUpperCase() + verb.slice(1) : verb} {body}
+        {verbText}
+        {body != null ? <> {body}</> : null}
       </Text>,
     );
   }
+
+  // densable: edited N files +lines -lines
+  if (editFileCount > 0) {
+    const verb = isActiveGroup ? 'editing' : 'edited';
+    pushPart(
+      'edit',
+      verb,
+      <Text>
+        <Text bold>{editFileCount}</Text> {editFileCount === 1 ? 'file' : 'files'}
+        {(linesAdded > 0 || linesRemoved > 0) && (
+          <Text>
+            {' '}
+            <Text color="success">+{linesAdded}</Text>
+            <Text dimColor>/</Text>
+            <Text color="error">-{linesRemoved}</Text>
+          </Text>
+        )}
+      </Text>,
+    );
+  }
+
   if (isFullscreenEnvEnabled() && message.commits?.length) {
     const byKind = {
       committed: 'committed',
@@ -348,6 +384,11 @@ export function CollapsedReadSearchContent({
         pr.url ? <PrBadge number={pr.number} url={pr.url} bold /> : <Text bold>PR #{pr.number}</Text>,
       );
     }
+  }
+
+  // densable: frame after git, before search
+  if (frameCount > 0) {
+    pushPart('frame', isActiveGroup ? 'publishing' : 'published', null);
   }
 
   if (searchCount > 0) {
@@ -410,7 +451,8 @@ export function CollapsedReadSearchContent({
   if (mcpCallCount > 0) {
     const serverLabel = message.mcpServerNames?.map(n => n.replace(/^claude\.ai /, '')).join(', ') || 'MCP';
     const isFirst = nonMemParts.length === 0;
-    const verb = isActiveGroup ? (isFirst ? 'Querying' : 'querying') : isFirst ? 'Queried' : 'queried';
+    // densable focus uses "calling/called"; local non-focus still "querying"
+    const verb = isActiveGroup ? (isFirst ? 'Calling' : 'calling') : isFirst ? 'Called' : 'called';
     if (!isFirst) {
       nonMemParts.push(<Text key="comma-mcp">, </Text>);
     }
@@ -423,6 +465,40 @@ export function CollapsedReadSearchContent({
             <Text bold>{mcpCallCount}</Text> times
           </>
         )}
+      </Text>,
+    );
+  }
+
+  // densable: ran/running N agents · description
+  if (agentCount > 0) {
+    const desc = agentCount === 1 ? (message as { agentDescriptions?: string[] }).agentDescriptions?.[0] : undefined;
+    const verb = isActiveGroup ? 'running' : 'ran';
+    if (desc !== undefined) {
+      pushPart(
+        'agent',
+        verb,
+        <Text>
+          agent · <Text bold>{desc}</Text>
+        </Text>,
+      );
+    } else {
+      pushPart(
+        'agent',
+        verb,
+        <Text>
+          <Text bold>{agentCount}</Text> {agentCount === 1 ? 'agent' : 'agents'}
+        </Text>,
+      );
+    }
+  }
+
+  if (otherToolCount > 0) {
+    const verb = isActiveGroup ? 'calling' : 'called';
+    pushPart(
+      'other',
+      verb,
+      <Text>
+        <Text bold>{otherToolCount}</Text> {otherToolCount === 1 ? 'tool' : 'tools'}
       </Text>,
     );
   }
@@ -523,6 +599,19 @@ export function CollapsedReadSearchContent({
           {'  ⎿  '}Ran {message.hookCount} PreToolUse {message.hookCount === 1 ? 'hook' : 'hooks'} (
           {formatSecondsShort(message.hookTotalMs)})
         </Text>
+      )}
+      {/* densable ySu pendingText — streaming tail hung on last collapse group */}
+      {isActiveGroup && pendingText !== undefined && pendingText.trim().length > 0 && (
+        <Box flexDirection="row" marginTop={1}>
+          <Box width={2} flexShrink={0}>
+            <Text dimColor aria-hidden>
+              {'● '}
+            </Text>
+          </Box>
+          <Box flexDirection="column" flexGrow={1}>
+            <Text dimColor>{pendingText}</Text>
+          </Box>
+        </Box>
       )}
     </Box>
   );

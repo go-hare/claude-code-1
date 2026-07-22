@@ -28,6 +28,8 @@ const focus = {
   name: 'focus',
   description: 'Toggle focus view: just your prompt, summary, and response',
   immediate: true,
+  // densable dLy has requires:{ink:!0}; local Command type has no requires field —
+  // fullscreen gate is enforced in call() via isFullscreenFeatureGateEnabled.
   load: () =>
     Promise.resolve({
       async call(

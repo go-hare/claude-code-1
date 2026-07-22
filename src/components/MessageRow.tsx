@@ -327,6 +327,21 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
   // Only bail out for truly static messages
   if (isStreaming || !isResolved) return false;
 
+  // densable bT_: turn_duration briefHiddenCount can change under focus filter
+  // even when the row is otherwise static (stamp is applied via new object, so
+  // the reference check above usually catches it; keep field equality for
+  // fidelity if the message object is reused with an updated stamp).
+  if (
+    prev.message.type === 'system' &&
+    prev.message.subtype === 'turn_duration' &&
+    next.message.type === 'system' &&
+    next.message.subtype === 'turn_duration'
+  ) {
+    const prevHidden = (prev.message as { briefHiddenCount?: number }).briefHiddenCount;
+    const nextHidden = (next.message as { briefHiddenCount?: number }).briefHiddenCount;
+    if (prevHidden !== nextHidden) return false;
+  }
+
   // Static message - safe to skip re-render
   return true;
 }

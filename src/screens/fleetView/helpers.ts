@@ -290,6 +290,12 @@ export const FLEET_MIN_INTENT_LEN = 4
 export const FLEET_PASTE_CHAR_THRESHOLD = 800
 
 /**
+ * densable CJ fSg — Ctrl+C double-press arm window (ms).
+ * Second Ctrl+C within this window → Tt exit; else Mt auto-clears.
+ */
+export const FLEET_EXIT_ARM_MS = 800
+
+/**
  * Parse dispatch input text into a structured command.
  * Upstream: e$a (parseDispatch)
  *

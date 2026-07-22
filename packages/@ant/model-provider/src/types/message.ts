@@ -34,6 +34,18 @@ export type MessageContent = string | ContentBlockParam[] | ContentBlock[]
  */
 export type TypedMessageContent = ContentItem[]
 
+/**
+ * densable message provenance (Ace / NMf / W6a).
+ * `kind` is required; extra fields (senderTaskId, from, …) ride the catchall.
+ * Declared before Message so index signature does not widen origin to unknown.
+ */
+export type MessageOrigin = {
+  kind: string
+  senderTaskId?: string
+  from?: string
+  [key: string]: unknown
+}
+
 export type Message = {
   type: MessageType
   uuid: UUID
@@ -41,6 +53,8 @@ export type Message = {
   isCompactSummary?: boolean
   toolUseResult?: unknown
   isVisibleInTranscriptOnly?: boolean
+  /** densable Ace provenance — peer/channel/observer/goal/… */
+  origin?: MessageOrigin
   attachment?: {
     type: string
     toolUseID?: string
@@ -93,7 +107,6 @@ export type SystemCompactBoundaryMessage = Message & {
 }
 export type TombstoneMessage = Message
 export type ToolUseSummaryMessage = Message
-export type MessageOrigin = string
 export type CompactMetadata = Record<string, unknown>
 export type SystemAPIErrorMessage = Message & { type: 'system' }
 export type SystemFileSnapshotMessage = Message & { type: 'system' }

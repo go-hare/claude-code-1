@@ -861,6 +861,10 @@ export type Props = {
     };
     sessionPermissionRules?: { allow: string[]; deny: string[] };
     memoryToggledOff?: boolean;
+    /** densable aAf replyOnResume → spawn --reply-on-resume */
+    replyOnResume?: boolean;
+    /** densable aAf abortAfterFlush — main query AbortController */
+    abortAfterFlush?: AbortController;
   }) => void;
   /**
    * Official resume-return densable — inject a continue prompt once after
@@ -1613,6 +1617,21 @@ export function REPL({
 
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
+  // densable je/Wt — turn-start snapshot for idle-fork nzu(replyOnResume).
+  // Marked whenever a new query AbortController is armed.
+  const turnStartRef = useRef<{ length: number; uuid?: string } | null>(null);
+  const markTurnStart = useCallback(() => {
+    const msgs = messagesRef.current;
+    const last = msgs[msgs.length - 1] as { uuid?: string } | undefined;
+    turnStartRef.current = last ? { length: msgs.length, uuid: last.uuid } : null;
+  }, []);
+  const setAbortControllerForQuery = useCallback(
+    (ac: AbortController | null) => {
+      if (ac) markTurnStart();
+      setAbortController(ac);
+    },
+    [markTurnStart],
+  );
   // Stores the willowMode variant that was shown (or false if no hint shown).
   // Captured at hint_shown time so hint_converted telemetry reports the same
   // variant — the GrowthBook value shouldn't change mid-session, but reading
@@ -1780,6 +1799,17 @@ export function REPL({
                 } catch {
                   /* best-effort */
                 }
+              },
+              // densable w5u: real toolUseContext + canUseTool (never {} / allow-all).
+              getWorkflowResumeContext: () => {
+                const ctx = deferredResumeRefs.current.getToolUseContext;
+                const can = deferredResumeRefs.current.canUseTool;
+                const model = deferredResumeRefs.current.mainLoopModel;
+                if (!ctx || !can || !model) return null;
+                return {
+                  toolUseContext: ctx(messagesRef.current, [], new AbortController(), model),
+                  canUseTool: can as (input: unknown, toolUseContext: unknown) => Promise<unknown> | unknown,
+                };
               },
               resumeAgent: async entry => {
                 const resume = deferredResumeRefs.current.resumeAgentBackground;
@@ -4210,7 +4240,9 @@ export function REPL({
           if (m.isMeta && !isMetaVisibleOrigin(m.origin as { kind?: string; senderTaskId?: string } | undefined)) {
             continue;
           }
-          const textContent = getContentText(m.message.content as string | ContentBlockParam[]);
+          const userContent = m.message?.content;
+          if (userContent === undefined) continue;
+          const textContent = getContentText(userContent as string | ContentBlockParam[]);
           if (textContent === null) continue;
           enqueue({
             value: textContent,
@@ -4430,6 +4462,97 @@ export function REPL({
     initialMessageRef.current = true;
 
     async function processInitialMessage(initialMsg: NonNullable<typeof pending>) {
+      // densable: if ("replay" in vr) — mid-turn --reply-on-resume consume path.
+      // LVr strip → $co → optional mZ prefill → onQuery([], ac, true, [], model).
+      if ('replay' in initialMsg) {
+        setAppState(prev => (prev.initialMessage === null ? prev : { ...prev, initialMessage: null }));
+        await awaitPendingHooks();
+        if (queryGuard.isActive) {
+          // densable: guard active → skip (markReplayNoOp residual omitted)
+          logForDebugging('[reply-on-resume] query already active — skip');
+        } else {
+          const {
+            stripTrailingIncompleteTurnMessages,
+            canReplayContinueFromMessages,
+            findForkBoundaryUuidAfterStrip,
+            checkInterruptedOutputBoundary,
+            buildInterruptedOutputHintContent,
+            buildInterruptedOutputNotice,
+            formatPrefillBoundaryMismatchLog,
+            formatPartialHintLog,
+          } = await import('../utils/replyOnResume.js');
+
+          setMessages(prev => {
+            const next = stripTrailingIncompleteTurnMessages(prev);
+            return next === prev ? prev : next;
+          });
+
+          // Read after strip via messagesRef (setMessages may batch)
+          const stripped = stripTrailingIncompleteTurnMessages(messagesRef.current);
+          if (stripped !== messagesRef.current) {
+            // ensure ref sees strip for $co / boundary when state lags
+            messagesRef.current = stripped as typeof messagesRef.current;
+          }
+
+          if (canReplayContinueFromMessages(messagesRef.current)) {
+            // Optional adopt.json prefill (densable mZ) — CLAUDE_JOB_DIR mid-turn
+            let prefillText: string | undefined;
+            let prefillBoundary: string | undefined;
+            try {
+              const jobDir = process.env.CLAUDE_JOB_DIR;
+              if (jobDir) {
+                const { readAdoptPrefill } = await import('../utils/bgCheckpoint.js');
+                const prefill = await readAdoptPrefill(jobDir);
+                if (prefill?.text) {
+                  prefillText = prefill.text;
+                  prefillBoundary = prefill.boundaryUuid ?? undefined;
+                }
+              }
+            } catch {
+              /* best-effort */
+            }
+
+            const forkBoundary = findForkBoundaryUuidAfterStrip(messagesRef.current);
+            const boundaryCheck = checkInterruptedOutputBoundary(
+              prefillText ? { text: prefillText, boundaryUuid: prefillBoundary } : null,
+              forkBoundary,
+            );
+            if (prefillText && !boundaryCheck.accept) {
+              logForDebugging(formatPrefillBoundaryMismatchLog(prefillBoundary ?? '', forkBoundary ?? ''));
+            } else if (prefillText && boundaryCheck.accept) {
+              const hint = buildInterruptedOutputHintContent(prefillText);
+              setMessages(prev => [
+                ...prev,
+                createSystemMessage(buildInterruptedOutputNotice(prefillText), 'warning'),
+                createUserMessage({ content: hint, isMeta: true }),
+              ]);
+              logForDebugging(formatPartialHintLog(prefillText.length));
+            }
+
+            logForDebugging('[reply-on-resume] → onQuery');
+            const newAbortController = createAbortController();
+            setAbortControllerForQuery(newAbortController);
+            void onQuery(
+              [], // densable tn([],es,!0,[],vt) — continue from transcript
+              newAbortController,
+              true,
+              [],
+              mainLoopModel,
+            );
+          } else {
+            logForDebugging('[reply-on-resume] → markReplayNoOp ($co false)');
+          }
+        }
+        setTimeout(
+          ref => {
+            ref.current = false;
+          },
+          100,
+          initialMessageRef,
+        );
+        return;
+      }
+
       // Clear context if requested (plan mode exit)
       if (initialMsg.clearContext) {
         // Preserve the plan slug before clearing context, so the new session
@@ -4520,7 +4643,7 @@ export function REPL({
         // Plan messages use onQuery to preserve planContent metadata for rendering
         // TODO: Once onSubmit supports ContentBlockParam arrays, remove this branch
         const newAbortController = createAbortController();
-        setAbortController(newAbortController);
+        setAbortControllerForQuery(newAbortController);
 
         void onQuery(
           [initialMsg.message],
@@ -4856,7 +4979,7 @@ export function REPL({
         );
         if (queryRequired) {
           const newAbortController = createAbortController();
-          setAbortController(newAbortController);
+          setAbortControllerForQuery(newAbortController);
           void onQuery([], newAbortController, true, [], mainLoopModel);
         }
         return;
@@ -4954,7 +5077,7 @@ export function REPL({
         pastedContents,
         ideSelection,
         setUserInputOnProcessing,
-        setAbortController,
+        setAbortController: setAbortControllerForQuery,
         abortController,
         onQuery,
         setAppState,
@@ -5009,7 +5132,7 @@ export function REPL({
       pastedContents,
       ideSelection,
       setUserInputOnProcessing,
-      setAbortController,
+      setAbortControllerForQuery,
       addNotification,
       onQuery,
       stashedPrompt,
@@ -5043,6 +5166,9 @@ export function REPL({
             canUseTool,
             // densable Aye userInitiated — panel user resume clears stoppedByUser
             userInitiated: true,
+            // densable human mid-turn wrap (cIt Lws) + isMeta
+            promptIsMeta: true,
+            promptOrigin: { kind: 'human' },
           }).catch(err => {
             logForDebugging(`resumeAgentBackground failed: ${errorMessage(err)}`);
             addNotification({
@@ -5421,7 +5547,7 @@ export function REPL({
         mainLoopModel,
         ideSelection,
         setUserInputOnProcessing,
-        setAbortController,
+        setAbortController: setAbortControllerForQuery,
         onQuery,
         setAppState,
         querySource: getQuerySourceForREPL(),
@@ -5442,7 +5568,7 @@ export function REPL({
       ideSelection,
       setUserInputOnProcessing,
       canUseTool,
-      setAbortController,
+      setAbortControllerForQuery,
       onQuery,
       addNotification,
       setAppState,
@@ -5618,7 +5744,7 @@ export function REPL({
         if (!command) return;
 
         const newAbortController = createAbortController();
-        setAbortController(newAbortController);
+        setAbortControllerForQuery(newAbortController);
 
         // Create a user message with the formatted content (includes XML wrapper).
         // densable HXd/Fws: when origin is peer/observer, apply turn-start
@@ -7167,7 +7293,7 @@ export function REPL({
                               const { buildInFlightPartialText, findForkBoundaryUuid, collectPortableCheckpoint } =
                                 require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
                               // eslint-disable-next-line @typescript-eslint/no-require-imports
-                              const { getSessionCronTasks, removeSessionCronTasks } =
+                              const { getSessionCronTasks } =
                                 require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
                               const partialFromMsgs = buildInFlightPartialText(snap, isLoading ? streamingText : null);
                               const boundaryUuid = findForkBoundaryUuid(snap);
@@ -7202,23 +7328,35 @@ export function REPL({
                               // Official aAf: CAo stays live across Jlr write, then
                               // checkpointAgents + disown. Local unmounts REPL first —
                               // stash live handle for openAgentsViaLeftArrow post-write.
+                              // densable: do NOT removeSessionCronTasks here — pre-detach
+                              // is irreversible if adopt/spawn fails. Cron is disowned
+                              // in runLeftArrowPostAdoptCheckpoint after adopt write ok.
                               if (collected) {
                                 // eslint-disable-next-line @typescript-eslint/no-require-imports
                                 const { stashLeftArrowCheckpointLive } =
                                   require('../utils/bgCheckpoint.js') as typeof import('../utils/bgCheckpoint.js');
                                 stashLeftArrowCheckpointLive(collected);
                               }
-                              // Drop session cron from this process now (module-global).
-                              // Official disown after Jlr also removes cron; task registry
-                              // remove is no-op after unmount — abort runs post-write.
-                              if (collected?.cronIds?.length) {
-                                removeSessionCronTasks(collected.cronIds);
-                              }
+                              // densable aAf Cl payload:
+                              //   abort-then-fork → replyOnResume:true + abortAfterFlush:fn
+                              //   idle-fork → replyOnResume:nzu(je,tl)
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              const { shouldReplyOnIdleFork } =
+                                require('../cli/bg/leftArrowAgents.js') as typeof import('../cli/bg/leftArrowAgents.js');
+                              const via = isLoading ? 'abort-then-fork' : 'idle-fork';
+                              const replyOnResume =
+                                via === 'abort-then-fork' ? true : shouldReplyOnIdleFork(turnStartRef.current, snap);
+                              const abortAfterFlush =
+                                via === 'abort-then-fork' &&
+                                abortControllerRef.current &&
+                                !abortControllerRef.current.signal.aborted
+                                  ? abortControllerRef.current
+                                  : undefined;
                               onOpenAgents({
                                 // Snapshot for official Sj4 / Vy6 seed (main → A8q).
                                 messages: snap,
                                 // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
-                                via: isLoading ? 'abort-then-fork' : 'idle-fork',
+                                via,
                                 partialText: isLoading ? partialFromMsgs || streamingText : null,
                                 boundaryUuid,
                                 agentsCount: checkpoint?.agents?.length ?? 0,
@@ -7232,6 +7370,8 @@ export function REPL({
                                   : undefined,
                                 sessionPermissionRules,
                                 memoryToggledOff,
+                                replyOnResume,
+                                abortAfterFlush,
                               });
                             }
                           : undefined

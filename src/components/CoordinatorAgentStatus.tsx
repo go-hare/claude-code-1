@@ -14,7 +14,11 @@ import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Ansi, Box, Text, stringWidth, wrapText } from '@anthropic/ink';
 import { type AppState, useAppState, useSetAppState } from '../state/AppState.js';
 import { enterTeammateView, exitTeammateView } from '../state/teammateViewHelpers.js';
-import { isLocalAgentTask, type LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js';
+import {
+  isLocalAgentPanelActive,
+  isLocalAgentTask,
+  type LocalAgentTaskState,
+} from '../tasks/LocalAgentTask/LocalAgentTask.js';
 import { isInProcessTeammateTask } from '../tasks/InProcessTeammateTask/types.js';
 import { formatDuration, formatNumber } from '../utils/format.js';
 import {
@@ -251,9 +255,15 @@ function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: Ag
   const isTeammate = isInProcessTeammateTask(task);
   const isIdleTeammate = isTeammate && task.isIdle;
   // densable pAb: non-terminal local_agent isIdle → "waiting" (not "idle")
-  const isIdleLocalAgent = !isTeammate && isLocalAgentTask(task) && Boolean((task as LocalAgentTaskState).isIdle);
+  const localAgent = !isTeammate && isLocalAgentTask(task) ? (task as LocalAgentTaskState) : null;
+  const isAdopting = localAgent !== null && Boolean(localAgent.adoptResumePending || localAgent.resuming);
+  // densable pAb: skip waiting while adopt/Aye placeholder is in flight.
+  const isIdleLocalAgent = localAgent !== null && !isAdopting && Boolean(localAgent.isIdle);
   const isIdleRow = isIdleTeammate || isIdleLocalAgent;
-  const isRunning = !isTerminalStatus(task.status) && !isIdleRow;
+  // densable wSr residual + product adopt placeholder: completed+keepalive /
+  // resuming / adoptResumePending stay "active" (not tick-done).
+  const isPanelActive = localAgent !== null ? isLocalAgentPanelActive(localAgent) : !isTerminalStatus(task.status);
+  const isRunning = isPanelActive && !isIdleRow;
   const pausedMs = (task as LocalAgentTaskState).totalPausedMs ?? 0;
   const elapsedMs = Math.max(
     0,
@@ -261,13 +271,16 @@ function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: Ag
   );
 
   // densable pAb: teammate isIdle → "idle"; local_agent isIdle → "waiting".
-  const elapsed = isIdleTeammate
-    ? 'idle'
-    : isIdleLocalAgent
-      ? 'waiting'
-      : isTeammate && task.awaitingPlanApproval && task.status === 'running'
-        ? 'awaiting approval'
-        : formatDuration(elapsedMs);
+  // Product: adopt PSu→Aye gap / Aye CAS window → "resuming" (not completed tick).
+  const elapsed = isAdopting
+    ? 'resuming'
+    : isIdleTeammate
+      ? 'idle'
+      : isIdleLocalAgent
+        ? 'waiting'
+        : isTeammate && task.awaitingPlanApproval && task.status === 'running'
+          ? 'awaiting approval'
+          : formatDuration(elapsedMs);
   const tokenCount = task.progress?.tokenCount;
 
   // Derive direction arrow from activity state, same logic as Spinner
