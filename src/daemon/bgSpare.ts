@@ -49,7 +49,40 @@ export type BgSpareClaimFrame = {
   env: Record<string, string>
   argv: string[]
   sessionId?: string
+  /**
+   * Local product: must match CLAUDE_BG_SPARE_CLAIM_NONCE on spare host.
+   * densable has no claim auth; this blocks casual cross-process claim.
+   */
+  nonce?: string
 }
+
+/** Env injected into spare host so claim frames can prove supervisor origin. */
+export const SPARE_CLAIM_NONCE_ENV = 'CLAUDE_BG_SPARE_CLAIM_NONCE'
+
+/**
+ * Keys never accepted from claim.env (product fortify vs densable full assign).
+ * Blocks classic local-process hijacks if a claim sock is reachable.
+ */
+const CLAIM_ENV_DENY = new Set([
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'DYLD_FRAMEWORK_PATH',
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'BASH_ENV',
+  'ENV',
+  'SHELLOPTS',
+  'IFS',
+  'CDPATH',
+  'PROMPT_COMMAND',
+  'PERL5OPT',
+  'PYTHONSTARTUP',
+  'RUBYOPT',
+  'JAVA_TOOL_OPTIONS',
+  'SSLKEYLOGFILE',
+])
 
 function isClaimFrame(v: unknown): v is BgSpareClaimFrame {
   if (!v || typeof v !== 'object') return false
@@ -63,12 +96,31 @@ function isClaimFrame(v: unknown): v is BgSpareClaimFrame {
 }
 
 /**
+ * Filter claim.env before Object.assign — drop deny-list + non-string values.
+ * densable assigns whole e.env after stripping host-managed auth; we keep that
+ * shape for CLAUDE_* worker keys but refuse loader/shell injection keys.
+ */
+export function sanitizeClaimEnv(
+  env: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof k !== 'string' || typeof v !== 'string') continue
+    if (CLAIM_ENV_DENY.has(k)) continue
+    if (k.startsWith('LD_') || k.startsWith('DYLD_')) continue
+    out[k] = v
+  }
+  return out
+}
+
+/**
  * Listen once on claimSock; resolve with first newline-delimited JSON object.
- * Official b64.
+ * Official b64 + local nonce check when expectedNonce is set.
  */
 export function recvSpareClaim(
   claimSockPath: string,
   onListening?: () => void,
+  expectedNonce?: string,
 ): Promise<BgSpareClaimFrame> {
   return new Promise((resolve, reject) => {
     let server: Server
@@ -93,6 +145,12 @@ export function recvSpareClaim(
           if (!isClaimFrame(parsed)) {
             fail(new Error('invalid claim frame'))
             return
+          }
+          if (expectedNonce) {
+            if (parsed.nonce !== expectedNonce) {
+              fail(new Error('claim nonce mismatch'))
+              return
+            }
           }
           resolve(parsed)
         } catch (err) {
@@ -130,7 +188,12 @@ export async function applySpareClaimAndRunMain(
   if (claim.sessionId) {
     switchSession(asSessionId(claim.sessionId))
   }
-  Object.assign(process.env, claim.env)
+  // densable: strip host auth tokens then Object.assign(process.env, e.env).
+  // Product: also deny loader/shell injection keys from claim.env.
+  delete process.env.ANTHROPIC_AUTH_TOKEN
+  delete process.env.ANTHROPIC_API_KEY
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+  Object.assign(process.env, sanitizeClaimEnv(claim.env))
   process.argv = [process.argv[0]!, process.argv[1]!, ...claim.argv]
   const { main } = await mainImport
   await main()
@@ -194,7 +257,13 @@ export async function runBgSpare(args: string[]): Promise<void> {
 
   let claim: BgSpareClaimFrame
   try {
-    claim = await recvSpareClaim(claimSock)
+    // Local product: spare host carries SPARE_CLAIM_NONCE_ENV from supervisor.
+    const expectedNonce = process.env[SPARE_CLAIM_NONCE_ENV]
+    claim = await recvSpareClaim(
+      claimSock,
+      undefined,
+      expectedNonce || undefined,
+    )
   } catch (err) {
     cleanupSock()
     process.stderr.write(`[bg-spare] claim recv failed: ${errorMessage(err)}\n`)
@@ -276,6 +345,8 @@ export type HeldSpare = {
   claimSock: string
   startedAt: number
   cliVersion: string
+  /** Local product: nonce embedded in spare host env + claim frame. */
+  claimNonce: string
   dispose(): void
 }
 
@@ -307,7 +378,9 @@ export function isBgLowMem(): boolean {
 }
 
 /** Official _mO — env for spare host process. */
-export function buildSpareHostEnv(): Record<string, string | undefined> {
+export function buildSpareHostEnv(opts?: {
+  claimNonce?: string
+}): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env }
   for (const key of SPARE_STRIP_ENV_KEYS) {
     delete env[key]
@@ -324,6 +397,10 @@ export function buildSpareHostEnv(): Record<string, string | undefined> {
     COLORTERM: 'truecolor',
     BROWSER: 'true',
   })
+  // Local product: bind claim sock to supervisor-issued nonce.
+  if (opts?.claimNonce) {
+    env[SPARE_CLAIM_NONCE_ENV] = opts.claimNonce
+  }
   return env
 }
 
@@ -351,6 +428,7 @@ export async function spawnSpare(opts: {
   if (process.platform === 'win32') return null
 
   const id = randomBytes(4).toString('hex')
+  const claimNonce = randomBytes(16).toString('hex')
   const ptySock = getSparePtySockPath(id)
   const claimSock = getSpareClaimSockPath(id)
   const spareDir = getSpareDir()
@@ -375,7 +453,7 @@ export async function spawnSpare(opts: {
 
   const child = Bun.spawn(spawnArgv, {
     cwd: spareDir,
-    env: buildSpareHostEnv(),
+    env: buildSpareHostEnv({ claimNonce }),
     stdio: ['ignore', 'ignore', 'ignore'],
     detached: true,
     windowsHide: true,
@@ -388,6 +466,7 @@ export async function spawnSpare(opts: {
     claimSock,
     startedAt: Date.now(),
     cliVersion: MACRO.VERSION,
+    claimNonce,
     dispose() {
       try {
         child.kill('SIGTERM')
@@ -508,58 +587,85 @@ function killSparePty(ptySock: string): void {
 }
 
 /**
- * Official D3q — claim held spare into a BgWorker; fire async sendClaim.
- * On sendClaim failure: kill the spare PTY host.
+ * Claim held spare into a BgWorker **after** send-claim succeeds.
+ *
+ * densable sWa (gold 2.1.211):
+ *   t.claimed=!0
+ *   o = eue.claim(...)          // BgWorker.claim first
+ *   return lxs(...).then(qlT)   // fire-and-forget sendClaim
+ *     .catch(kill pty); return o
+ * Dispatch registers o.set(short, ie) **synchronously** before sendClaim
+ * finishes — oAp always sees a handle+pid. On sendClaim fail gold only
+ * kills spare PTY; handle may already be acked (ghost left-arrow job).
+ *
+ * Local product (intentional ≠ densable):
+ *   1. await sendClaim (qlT up to ~5s retries)
+ *   2. only then BgWorker.claim; bgManager handles.set after resolve
+ *   3. on failure: kill spare PTY, throw → cold spawn
+ *   4. claimingShorts occupies short while awaiting so oAp/dup dispatch
+ *      do not race empty handles (product stand-in for gold early set)
  */
-export function claimSpare(
+export async function claimSpare(
   dispatch: DispatchRequest,
   spare: HeldSpare,
   spawnPty: SpawnPtyFn,
   getAuthSnapshot?: () => Promise<string | undefined>,
-): BgWorker {
-  const worker = BgWorker.claim(dispatch, {
+): Promise<BgWorker> {
+  try {
+    const authPath = await writeClaimAuthSnapshot(
+      dispatch.short,
+      getAuthSnapshot,
+    )
+    const { env, argv } = BgWorker.buildClaimFrame(dispatch, authPath)
+    const stringEnv: Record<string, string> = {}
+    for (const [k, v] of Object.entries(env)) {
+      if (v !== undefined) stringEnv[k] = v
+    }
+    const frame: BgSpareClaimFrame = {
+      cwd: dispatch.cwd,
+      env: stringEnv,
+      argv,
+      sessionId: dispatch.sessionId,
+      // Local product: prove claim came from the supervisor that spawned spare.
+      nonce: spare.claimNonce,
+    }
+    await sendClaim(spare.claimSock, frame)
+  } catch (err: unknown) {
+    // densable: tengu_bg_sendclaim_failed + kill spare pty
+    const msg = errorMessage(err)
+    logEvent('tengu_bg_sendclaim_failed', {})
+    console.warn(
+      `[bg-spare] send-claim failed: short=${dispatch.short} errno=${errnoCode(err) ?? ''} ${msg.slice(0, 100)}`,
+    )
+    killSparePty(spare.ptySock)
+    throw err
+  }
+
+  return BgWorker.claim(dispatch, {
     pid: spare.hostPid,
     ptySockPath: spare.ptySock,
     spawnPty,
     getAuthSnapshot,
   })
-
-  void writeClaimAuthSnapshot(dispatch.short, getAuthSnapshot)
-    .then(authPath => {
-      const { env, argv } = BgWorker.buildClaimFrame(dispatch, authPath)
-      const stringEnv: Record<string, string> = {}
-      for (const [k, v] of Object.entries(env)) {
-        if (v !== undefined) stringEnv[k] = v
-      }
-      const frame: BgSpareClaimFrame = {
-        cwd: dispatch.cwd,
-        env: stringEnv,
-        argv,
-        sessionId: dispatch.sessionId,
-      }
-      return sendClaim(spare.claimSock, frame)
-    })
-    .catch((err: unknown) => {
-      // Official: tengu_bg_sendclaim_failed + kill spare pty
-      // logEvent metadata is bool|number only — keep short/errno/error on console.
-      const msg = errorMessage(err)
-      logEvent('tengu_bg_sendclaim_failed', {})
-      console.warn(
-        `[bg-spare] send-claim failed: short=${dispatch.short} errno=${errnoCode(err) ?? ''} ${msg.slice(0, 100)}`,
-      )
-      killSparePty(spare.ptySock)
-    })
-
-  return worker
 }
 
 /**
  * Official f3q — reap roster-less spare pty socks + claim socks.
  * Windows: no-op.
+ *
+ * densable claim.sock rule: only unlink when the paired `{id}.pty.sock` is
+ * **not** in the known roster set. Local previously unlinked every
+ * `*.claim.sock`, which could yank a live held spare's listening claim sock
+ * during adopt/startup reap.
  */
 export async function reapOrphanSpares(
   handles: Map<string, BgWorker>,
   log: (msg: string) => void,
+  /**
+   * Optional live held-spare socks (not yet in roster). When provided, those
+   * pty/claim paths are treated as known and never reaped.
+   */
+  extraKnownPtySocks?: Iterable<string>,
 ): Promise<void> {
   if (process.platform === 'win32') return
 
@@ -567,6 +673,9 @@ export async function reapOrphanSpares(
   for (const w of handles.values()) {
     const entry = w.rosterEntry()
     if (entry.ptySock) knownSocks.add(entry.ptySock)
+  }
+  if (extraKnownPtySocks) {
+    for (const s of extraKnownPtySocks) knownSocks.add(s)
   }
 
   const spareDir = getSpareDir()
@@ -595,17 +704,28 @@ export async function reapOrphanSpares(
     })
   }
 
+  const sideJobs: Promise<unknown>[] = []
   for (const file of files) {
-    if (file.endsWith('.pty.sock.err')) {
-      const sockFile = file.slice(0, -4) // strip .err → *.pty.sock
-      if (!files.includes(sockFile)) {
-        void unlink(join(spareDir, file)).catch(() => {})
+    // densable: side-car .err/.late/.err.read without base .pty.sock
+    const side = ['.err', '.late', '.err.read'].find(s =>
+      file.endsWith(`.pty.sock${s}`),
+    )
+    if (side) {
+      const base = file.slice(0, -side.length)
+      if (!files.includes(base)) {
+        sideJobs.push(unlink(join(spareDir, file)).catch(() => {}))
       }
     }
+    // densable: only unlink claim.sock when paired pty.sock is not known live
     if (file.endsWith('.claim.sock')) {
-      void unlink(join(spareDir, file)).catch(() => {})
+      // `${id}.claim.sock` → `${id}.pty.sock` (strip `.claim.sock` = 11 chars)
+      const pairedPty = join(spareDir, `${file.slice(0, -11)}.pty.sock`)
+      if (!knownSocks.has(pairedPty)) {
+        sideJobs.push(unlink(join(spareDir, file)).catch(() => {}))
+      }
     }
   }
+  if (sideJobs.length) await Promise.all(sideJobs)
 
   if (reaped) log(`bg orphan-spare reap: ${reaped}`)
 }

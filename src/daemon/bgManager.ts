@@ -475,6 +475,15 @@ export async function startBgManager(opts?: {
   // Official Y / A — held spare + in-flight refill
   let heldSpare: HeldSpare | null = null
   let spareRefilling = false
+  /**
+   * Local product: shorts with in-flight claimSpare (await sendClaim, no
+   * handles entry yet). densable D3q registers handle first so oAp sees a
+   * pid; we await sendClaim before register, so without this set:
+   *   - concurrent dispatch for same short can cold-spawn in parallel
+   *   - awaitWorkerAck 5s timeout races sendClaim's 5s retry budget →
+   *     ETIMEOUT while claim still succeeds (ghost left-arrow / double work)
+   */
+  const claimingShorts = new Set<string>()
 
   /**
    * Official J() — refill single held spare when eligible.
@@ -643,6 +652,17 @@ export async function startBgManager(opts?: {
       )
       return
     }
+    // Claim in flight (no handle yet) — retry like settling, never cold-parallel.
+    if (claimingShorts.has(req.short)) {
+      if (retryCount < 30) {
+        setTimeout(handleDispatch, 100, req, retryCount + 1, afterUpgrade)
+        return
+      }
+      log(
+        `bg: dispatch ${req.short} dropped — spare claim still in flight after retries`,
+      )
+      return
+    }
 
     // Official: low-mem with live handles → retire settled before spawn
     const free = freemem()
@@ -676,7 +696,9 @@ export async function startBgManager(opts?: {
 
     seedJobState(req)
 
-    // Official claim path: held spare + not afterUpgrade + non-exec + version match + feature on
+    // Spare claim path (local: await sendClaim before register handle).
+    // densable D3q is fire-and-forget; we await so fail → cold spawn and
+    // awaitWorkerAck never acks a dead spare pid (ghost left-arrow job).
     if (
       heldSpare &&
       !afterUpgrade &&
@@ -687,46 +709,101 @@ export async function startBgManager(opts?: {
     ) {
       const spare = heldSpare
       heldSpare = null
-      try {
-        const worker = claimSpare(req, spare, spawnPty, opts?.getAuthSnapshot)
-        handles.set(req.short, worker)
-        wireWorkerLifecycle(
-          handles,
-          worker,
-          onKeepAliveChange,
-          pendingSettleWrites,
-          log,
-        )
-        onKeepAliveChange()
-        logEvent('tengu_bg_spare_claim', {
-          age_ms: Date.now() - spare.startedAt,
+      // Occupy short before await sendClaim so concurrent dispatch + oAp
+      // see "in flight" rather than empty (product vs densable fire-and-forget).
+      claimingShorts.add(req.short)
+      void claimSpare(req, spare, spawnPty, opts?.getAuthSnapshot)
+        .then(worker => {
+          if (closed) {
+            claimingShorts.delete(req.short)
+            try {
+              worker.kill('SIGTERM')
+            } catch {
+              /* ignore */
+            }
+            try {
+              spare.dispose()
+            } catch {
+              /* ignore */
+            }
+            return
+          }
+          // Race: cold path or prior handle may own short already
+          if (handles.has(req.short)) {
+            claimingShorts.delete(req.short)
+            log(
+              `bg claimed-spare ${req.short} dropped — handle already present`,
+            )
+            // sendClaim already started the spare session — must kill worker,
+            // not just spare.dispose() (host may already be the claimed job).
+            try {
+              worker.kill('SIGTERM')
+            } catch {
+              /* ignore */
+            }
+            try {
+              spare.dispose()
+            } catch {
+              /* ignore */
+            }
+            return
+          }
+          // Register before clearing claiming so waiters never see a gap.
+          handles.set(req.short, worker)
+          claimingShorts.delete(req.short)
+          wireWorkerLifecycle(
+            handles,
+            worker,
+            onKeepAliveChange,
+            pendingSettleWrites,
+            log,
+          )
+          onKeepAliveChange()
+          logEvent('tengu_bg_spare_claim', {
+            age_ms: Date.now() - spare.startedAt,
+          })
+          log(`bg claimed-spare ${req.short} (${req.source})`)
+          refillSpare()
         })
-        log(`bg claimed-spare ${req.short} (${req.source})`)
-        refillSpare()
-        return
-      } catch (err) {
-        // Official: tengu_bg_spare_claim_fail + dispose spare, fall through to cold
-        const code =
-          err && typeof err === 'object' && 'code' in err
-            ? String((err as { code?: unknown }).code)
-            : undefined
-        // Official reason: enoent|econnrefused|error|unknown (string metadata
-        // not accepted by local logEvent — keep reason in log line)
-        const reason =
-          code === 'ENOENT'
-            ? 'enoent'
-            : code === 'ECONNREFUSED'
-              ? 'econnrefused'
-              : err instanceof Error
-                ? 'error'
-                : 'unknown'
-        logEvent('tengu_bg_spare_claim_fail', {})
-        log(`bg-spare claim failed (${reason}): ${errorMessage(err)}`)
-        spare.dispose()
-      }
+        .catch((err: unknown) => {
+          // sendClaim failed (spare killed in claimSpare) → cold spawn.
+          // Keep claimingShorts until coldSpawn registers handle (or we abort)
+          // so awaitWorkerAck never sees an empty gap after deadline.
+          const code =
+            err && typeof err === 'object' && 'code' in err
+              ? String((err as { code?: unknown }).code)
+              : undefined
+          const reason =
+            code === 'ENOENT'
+              ? 'enoent'
+              : code === 'ECONNREFUSED'
+                ? 'econnrefused'
+                : err instanceof Error
+                  ? 'error'
+                  : 'unknown'
+          logEvent('tengu_bg_spare_claim_fail', {})
+          log(`bg-spare claim failed (${reason}): ${errorMessage(err)}`)
+          try {
+            spare.dispose()
+          } catch {
+            /* already killed */
+          }
+          if (closed || handles.has(req.short)) {
+            claimingShorts.delete(req.short)
+            return
+          }
+          coldSpawn(req, afterUpgrade)
+          claimingShorts.delete(req.short)
+        })
+      return
     }
 
-    // Cold spawn (official zF.spawn)
+    coldSpawn(req, afterUpgrade)
+  }
+
+  /** Cold spawn (official zF.spawn) + wire lifecycle. */
+  function coldSpawn(req: DispatchRequest, afterUpgrade?: boolean): void {
+    if (closed || handles.has(req.short)) return
     const worker = BgWorker.spawn(
       req,
       spawnPty,
@@ -786,6 +863,7 @@ export async function startBgManager(opts?: {
         socket,
         remainder,
         log,
+        claimingShorts,
       )
     },
   )
@@ -879,7 +957,9 @@ export async function startBgManager(opts?: {
   if (!roster.parseFailed) {
     await reapOrphanPtyHosts(handles, log)
   }
-  // Reap orphan spare socks (official f3q) — only when roster parse ok
+  // Reap orphan spare socks (official f3q) — only when roster parse ok.
+  // Adoption finishes before refillSpare is eligible (needs adoptionComplete),
+  // so heldSpare is always null here; spare socks are not yet held.
   if (!roster.parseFailed) {
     await reapOrphanSpares(handles, log)
   }
@@ -1010,6 +1090,8 @@ async function handleControlRequest(
   socket: Socket,
   remainder: Buffer,
   log: (msg: string) => void,
+  /** In-flight spare claims (no handle yet) — gates awaitWorkerAck ETIMEOUT. */
+  claimingShorts?: Set<string>,
 ): Promise<ControlResponse | null | undefined> {
   const op = req.op
 
@@ -1109,6 +1191,7 @@ async function handleControlRequest(
         d.short,
         d.nonce,
         req.timeoutMs as number | undefined,
+        claimingShorts,
       )
     }
 
@@ -1120,6 +1203,7 @@ async function handleControlRequest(
         req.short as string,
         req.nonce as string | undefined,
         req.timeoutMs as number | undefined,
+        claimingShorts,
       )
 
     case 'reply': {
@@ -1571,6 +1655,13 @@ function handleSubscribeOp(
 // Waits for a worker to appear and emit its first state update.
 // ---------------------------------------------------------------------------
 
+/**
+ * Default ack budget must cover local claimSpare await sendClaim (~5s retries)
+ * + cold spawn / wire. densable oAp sees a handle immediately (fire-and-forget
+ * D3q); our product await needs headroom past sendClaim alone.
+ */
+const DEFAULT_WORKER_ACK_TIMEOUT_MS = 12_000
+
 function awaitWorkerAck(
   handles: Map<string, BgWorker>,
   socket: Socket,
@@ -1578,49 +1669,146 @@ function awaitWorkerAck(
   short: string,
   nonce: string | undefined,
   timeoutMs: number | undefined,
+  /** Local product: shorts with claimSpare in flight (no handle yet). */
+  claimingShorts?: Set<string>,
 ): ControlResponse | null {
-  const worker = handles.get(short)
-  if (!worker) {
-    // Worker not yet created — respond immediately with ack
-    return { ok: true, op, short }
+  // densable oAp polls for handle. Local used to return ok:true immediately
+  // when worker missing — that ghost-acked claimSpare before sendClaim, so
+  // left-arrow disowned while spare never started. Poll until handle or timeout.
+  // While claimingShorts has short, treat as "in flight" (do not ETIMEOUT early
+  // solely because handles is empty mid-sendClaim).
+  const timeout = timeoutMs ?? DEFAULT_WORKER_ACK_TIMEOUT_MS
+  const deadline = Date.now() + timeout
+  let done = false
+  let pollTimer: ReturnType<typeof setTimeout> | undefined
+  let unsub: (() => void) | undefined
+  let unsubSettle: (() => void) | undefined
+
+  const finish = (resp: ControlResponse) => {
+    if (done) return
+    done = true
+    if (pollTimer !== undefined) clearTimeout(pollTimer)
+    unsub?.()
+    unsubSettle?.()
+    respond(socket, resp)
   }
 
-  // If worker already has a PID, respond immediately
-  if (worker.record.pid > 0) {
-    return { ok: true, op, short, pid: worker.record.pid }
-  }
-
-  // Wait for first state update with PID
-  const timeout = timeoutMs ?? 30_000
-  const timer = setTimeout(() => {
-    unsub()
-    respond(socket, { ok: true, op, short, timeout: true })
-  }, timeout)
-  timer.unref()
-
-  const unsub = worker.onState.subscribe((patch: Record<string, unknown>) => {
-    if (patch.pid) {
-      clearTimeout(timer)
-      unsub()
-      respond(socket, { ok: true, op, short, pid: patch.pid })
+  const checkNonceConflict = (worker: BgWorker): ControlResponse | null => {
+    const workerNonce = (worker.record as { nonce?: string }).nonce
+    if (
+      nonce !== undefined &&
+      workerNonce !== undefined &&
+      workerNonce !== nonce
+    ) {
+      const live =
+        !worker.record.outcome && !worker.isKilling && !worker.isRetiring
+      if (live) {
+        return {
+          ok: false,
+          op,
+          short,
+          code: 'EALIVE',
+          alive: true,
+          error: `Session ${short} is already running — \`claude attach ${short}\` to join it`,
+        }
+      }
+      return {
+        ok: false,
+        op,
+        short,
+        code: 'ESTALE',
+        error:
+          'a previous dispatch with this id is still being cleaned up — retry in a moment',
+      }
     }
-  })
+    return null
+  }
 
-  // If worker settles before ack
-  const unsubSettle = worker.onSettle.subscribe(() => {
-    clearTimeout(timer)
-    unsub()
-    unsubSettle()
-    respond(socket, { ok: true, op, short, settled: worker.record.outcome })
-  })
+  const attachToWorker = (worker: BgWorker): void => {
+    const conflict = checkNonceConflict(worker)
+    if (conflict) {
+      finish(conflict)
+      return
+    }
+
+    if (worker.record.pid > 0) {
+      finish({ ok: true, op, short, pid: worker.record.pid })
+      return
+    }
+
+    unsub = worker.onState.subscribe((patch: Record<string, unknown>) => {
+      if (patch.pid) {
+        finish({ ok: true, op, short, pid: patch.pid as number })
+      }
+    })
+
+    unsubSettle = worker.onSettle.subscribe(() => {
+      finish({
+        ok: true,
+        op,
+        short,
+        settled: worker.record.outcome,
+      })
+    })
+
+    if (worker.record.pid > 0) {
+      finish({ ok: true, op, short, pid: worker.record.pid })
+    }
+  }
+
+  const poll = (): void => {
+    if (done || socket.destroyed) return
+    const worker = handles.get(short)
+    if (worker) {
+      attachToWorker(worker)
+      return
+    }
+    const stillClaiming = claimingShorts?.has(short) === true
+    if (Date.now() >= deadline && !stillClaiming) {
+      finish({
+        ok: false,
+        op,
+        short,
+        timeout: true,
+        code: 'ETIMEOUT',
+        error: 'worker ack timeout',
+      })
+      return
+    }
+    // Mid-claim past nominal deadline: keep polling a bit, hard-cap +5s so a
+    // stuck claimingShort never hangs the control socket forever.
+    if (Date.now() >= deadline + 5_000) {
+      finish({
+        ok: false,
+        op,
+        short,
+        timeout: true,
+        code: 'ETIMEOUT',
+        error: 'worker ack timeout (claim still in flight)',
+      })
+      return
+    }
+    pollTimer = setTimeout(poll, 25)
+    pollTimer.unref?.()
+  }
 
   socket.once('close', () => {
-    clearTimeout(timer)
-    unsub()
-    unsubSettle()
+    if (done) return
+    done = true
+    if (pollTimer !== undefined) clearTimeout(pollTimer)
+    unsub?.()
+    unsubSettle?.()
   })
 
-  return null // Will respond asynchronously
+  const existing = handles.get(short)
+  if (existing) {
+    attachToWorker(existing)
+  } else {
+    pollTimer = setTimeout(poll, 25)
+    pollTimer.unref?.()
+  }
+
+  return null // Always async respond via finish()
 }
 
 // ---------------------------------------------------------------------------
@@ -1634,13 +1822,61 @@ const MAX_REQUEST_SIZE = 1_048_576
 // ---------------------------------------------------------------------------
 
 /**
+ * densable BF_ / yNo failure shape — `alive:true` when short is already
+ * running (short-alive / EALIVE). Left-arrow queues only when `!alive`.
+ */
+export type SubmitDispatchError = Error & {
+  alive?: boolean
+  reason?: string
+  short?: string
+  code?: string
+}
+
+export function isSubmitDispatchAliveError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'alive' in err &&
+    (err as { alive?: unknown }).alive === true
+  )
+}
+
+function throwSubmitDispatchError(
+  message: string,
+  opts?: {
+    alive?: boolean
+    reason?: string
+    short?: string
+    code?: string
+  },
+): never {
+  const err = new Error(message) as SubmitDispatchError
+  err.name = 'SubmitDispatchError'
+  if (opts?.alive !== undefined) err.alive = opts.alive
+  if (opts?.reason !== undefined) err.reason = opts.reason
+  if (opts?.short !== undefined) err.short = opts.short
+  if (opts?.code !== undefined) err.code = opts.code
+  throw err
+}
+
+/**
  * Create and submit a dispatch request.
  * Tries control socket first, falls back to file-based dispatch.
+ * On short-alive (EALIVE) throws with `alive:true` — no file fallback.
  */
 export async function submitDispatch(opts: {
   intent: string
   name?: string
   agent?: string
+  /**
+   * densable routine field (separate from agent/template) — Fleet @routine.
+   */
+  routine?: string
+  /**
+   * densable n.exec — bash `!cmd` body. When set, launch.mode=exec via $F_.
+   * Mutually exclusive with resumeSessionId for launch shape.
+   */
+  exec?: string
   cwd?: string
   extraArgs?: string[]
   source?: string
@@ -1674,7 +1910,11 @@ export async function submitDispatch(opts: {
   // A8q already seeded (left-arrow empty). deriveSessionName('') → "new session".
   const derivedName =
     opts.name ??
-    (opts.intent.trim() ? deriveSessionName(opts.intent) : undefined)
+    (opts.exec?.trim()
+      ? opts.exec.trim().slice(0, 40)
+      : opts.intent.trim()
+        ? deriveSessionName(opts.intent)
+        : undefined)
 
   // Official BF_: merge permission/memory into worker env.
   const inheritEnv: Record<string, string> = {}
@@ -1693,17 +1933,61 @@ export async function submitDispatch(opts: {
     ...(opts.reattachEnv ?? {}),
   }
 
+  // densable launch: n?.exec ? {mode:"exec", ...$F_(n.exec)} : resume | prompt
+  const { shellExecSpec } = await import('./bgWorker.js')
+  let launch: DispatchRequest['launch']
+  if (opts.exec !== undefined && opts.exec.trim()) {
+    const spec = shellExecSpec(opts.exec.trim())
+    launch = {
+      mode: 'exec',
+      cmd: spec.cmd,
+      args: spec.args,
+    }
+  } else if (opts.resumeSessionId) {
+    launch = {
+      mode: 'resume',
+      sessionId: opts.resumeSessionId,
+      fork: opts.forkSession !== false,
+      flagArgs: [
+        ...(derivedName ? ['-n', derivedName] : []),
+        ...(opts.agent ? ['--agent', opts.agent] : []),
+        ...(opts.extraArgs || []),
+      ],
+    }
+  } else {
+    launch = {
+      mode: 'prompt',
+      sessionId,
+      args: [
+        '--session-id',
+        sessionId,
+        ...(derivedName ? ['-n', derivedName] : []),
+        ...(opts.agent ? ['--agent', opts.agent] : []),
+        ...(opts.extraArgs || []),
+      ],
+    }
+  }
+
+  // densable uea: nonce for await-ack / short-alive (EALIVE) discrimination.
+  const nonce = randomUUID().slice(0, 8)
+
   const dispatch: DispatchRequest = {
     short,
     sessionId,
-    intent: opts.intent,
+    nonce,
+    // densable exec jobs still carry intent for Fleet label (often the cmd)
+    intent: opts.exec?.trim() ? opts.exec.trim() : opts.intent,
     name: derivedName,
     agent: opts.agent,
+    routine: opts.routine,
     cwd: opts.cwd || process.cwd(),
     respawnFlags: opts.extraArgs || [],
     source: opts.source || 'fleet',
     createdAt: Date.now(),
-    seed: { intent: opts.intent, name: opts.name },
+    seed: {
+      intent: opts.exec?.trim() ? opts.exec.trim() : opts.intent,
+      name: opts.name,
+    },
     isolation: opts.isolation,
     worktree: opts.worktree,
     env: Object.keys(env).length > 0 ? env : undefined,
@@ -1711,43 +1995,101 @@ export async function submitDispatch(opts: {
       Object.keys(opts.reattachEnv ?? {}).length > 0
         ? opts.reattachEnv
         : undefined,
-    launch: opts.resumeSessionId
-      ? {
-          mode: 'resume',
-          sessionId: opts.resumeSessionId,
-          fork: opts.forkSession !== false,
-          flagArgs: [
-            ...(derivedName ? ['-n', derivedName] : []),
-            ...(opts.agent ? ['--agent', opts.agent] : []),
-            ...(opts.extraArgs || []),
-          ],
-        }
-      : {
-          mode: 'prompt',
-          sessionId,
-          args: [
-            '--session-id',
-            sessionId,
-            ...(derivedName ? ['-n', derivedName] : []),
-            ...(opts.agent ? ['--agent', opts.agent] : []),
-            ...(opts.extraArgs || []),
-          ],
-        },
+    launch,
   }
 
   // Try control socket
   const { sendControlRequest } = await import('./controlSocketClient.js')
-  const resp = await sendControlRequest({
-    op: 'dispatch',
-    proto: PROTO_VERSION,
-    d: dispatch,
-  })
+  // Align client socket timeout + server awaitWorkerAck (req.timeoutMs).
+  // Must cover claimSpare await sendClaim (~5s) + register; densable D3q
+  // fire-and-forget needs less headroom. Keep client == server to avoid
+  // early client cut → file-fallback double-dispatch.
+  const DISPATCH_ACK_TIMEOUT_MS = DEFAULT_WORKER_ACK_TIMEOUT_MS
+  const resp = await sendControlRequest(
+    {
+      op: 'dispatch',
+      proto: PROTO_VERSION,
+      d: dispatch,
+      timeoutMs: DISPATCH_ACK_TIMEOUT_MS,
+    },
+    { timeoutMs: DISPATCH_ACK_TIMEOUT_MS },
+  )
 
   if (resp.ok) {
+    // densable yNo / await-ack: settled crashed|failed must NOT look like success
+    // — hNo only disowns on n.ok; treating crashed as ok leaves shells orphaned
+    // and skip abandon.
+    const settled = resp.settled
+    if (
+      typeof settled === 'string' &&
+      (settled === 'crashed' || settled === 'failed' || settled === 'killed')
+    ) {
+      throwSubmitDispatchError(
+        `Background dispatch settled immediately (${settled})${
+          typeof resp.error === 'string' && resp.error ? `: ${resp.error}` : ''
+        }`,
+        { short, reason: 'settled' },
+      )
+    }
     return { short, sessionId }
   }
 
-  // Fallback: write dispatch file
+  // densable BF_: short-alive → {ok:false, alive:true}; no file fallback.
+  // code may be EALIVE / ealive (Pwp.EALIVE); reason short-alive / short_alive.
+  const code =
+    typeof resp.code === 'string' ? resp.code.toUpperCase() : undefined
+  const reasonRaw =
+    typeof resp.reason === 'string'
+      ? resp.reason
+      : typeof resp.error === 'string'
+        ? resp.error
+        : undefined
+  const reasonNorm = reasonRaw?.toLowerCase().replace(/_/g, '-') ?? ''
+  if (
+    code === 'EALIVE' ||
+    reasonNorm === 'short-alive' ||
+    resp.alive === true
+  ) {
+    throwSubmitDispatchError(
+      typeof resp.error === 'string' && resp.error
+        ? resp.error
+        : `Session ${short} is already running — \`claude attach ${short}\` to join it`,
+      {
+        alive: true,
+        reason: 'short_alive',
+        short,
+        code: 'EALIVE',
+      },
+    )
+  }
+
+  // ESTALE: previous handle still settling — do not double-dispatch via file.
+  if (code === 'ESTALE' || reasonNorm === 'stale-short') {
+    throwSubmitDispatchError(
+      typeof resp.error === 'string' && resp.error
+        ? resp.error
+        : 'Previous session is still shutting down — try again in a moment',
+      {
+        alive: false,
+        reason: 'stale_short',
+        short,
+        code: 'ESTALE',
+      },
+    )
+  }
+
+  // Worker-ack timeout: do NOT file-fallback (would double-dispatch after a
+  // slow-but-alive spawn). Only use file fallback on genuine disconnect.
+  if (resp.timeout === true || code === 'ETIMEOUT') {
+    throwSubmitDispatchError(
+      typeof resp.error === 'string' && resp.error
+        ? resp.error
+        : 'Background dispatch worker ack timeout',
+      { reason: 'ack_timeout', short, code: 'ETIMEOUT' },
+    )
+  }
+
+  // Fallback: write dispatch file (ENOCONN / daemon offline)
   const dispatchDir = getDispatchDir()
   await mkdir(dispatchDir, { recursive: true }).catch(() => {})
   const { writeFile } = await import('fs/promises')

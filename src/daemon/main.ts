@@ -379,7 +379,7 @@ async function runSupervisor(
   // Official daemon.lock (EvK) — KF asK / oAO ENOCONN probe.
   // Official tG4: claim slot (bW + optional yield) BEFORE write.
   const {
-    writeDaemonLock,
+    installDaemonLock,
     clearDaemonLockIfOwned,
     claimDaemonSupervisorSlot,
     detectDaemonLockRace,
@@ -401,11 +401,21 @@ async function runSupervisor(
     return
   }
 
-  const lockWritten = await writeDaemonLock({
+  // densable: R9d exclusive create; R0o only when peer pid is dead (never clobber live).
+  // Stamp procStart so cI/iPs can refuse PID reuse on takeover paths.
+  let procStart: unknown
+  try {
+    const { readProcessStartIdentity } = await import('./daemonLock.js')
+    procStart = await readProcessStartIdentity(lockOwner.pid)
+  } catch {
+    procStart = undefined
+  }
+  const lockWritten = await installDaemonLock({
     pid: lockOwner.pid,
     version: MACRO.VERSION,
     startedAt: lockOwner.startedAt,
     origin,
+    ...(procStart !== undefined ? { procStart } : {}),
     ...(lockOpts?.spawnedBy ? { spawnedBy: lockOpts.spawnedBy } : {}),
   })
   if (!lockWritten) {
@@ -679,7 +689,7 @@ async function runBgManagerStandalone(opts?: {
 }): Promise<void> {
   const { startBgManager } = await import('./bgManager.js')
   const {
-    writeDaemonLock,
+    installDaemonLock,
     clearDaemonLockIfOwned,
     claimDaemonSupervisorSlot,
     detectDaemonLockRace,
@@ -704,11 +714,20 @@ async function runBgManagerStandalone(opts?: {
     return
   }
 
-  const lockWritten = await writeDaemonLock({
+  // densable R9d→R0o: exclusive install; never rename-over a live peer lock.
+  let procStart: unknown
+  try {
+    const { readProcessStartIdentity } = await import('./daemonLock.js')
+    procStart = await readProcessStartIdentity(lockOwner.pid)
+  } catch {
+    procStart = undefined
+  }
+  const lockWritten = await installDaemonLock({
     pid: lockOwner.pid,
     version: MACRO.VERSION,
     startedAt: lockOwner.startedAt,
     origin,
+    ...(procStart !== undefined ? { procStart } : {}),
     ...(opts?.spawnedBy ? { spawnedBy: opts.spawnedBy } : {}),
   })
   if (!lockWritten) {

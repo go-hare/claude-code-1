@@ -2116,7 +2116,14 @@ export class BgWorker {
 
     let ptyConn: PtyConnection
     try {
-      const { cmd, prefixArgs } = getBinaryPath({ pinToCurrentBinary: true })
+      // densable: mode==="exec" ? {cmd:KI(launch.cmd), prefixArgs:[]} : XA(cli)
+      const { cmd, prefixArgs } =
+        dispatch.launch.mode === 'exec'
+          ? {
+              cmd: dispatch.launch.cmd || shellExecSpec('true').cmd,
+              prefixArgs: [] as string[],
+            }
+          : getBinaryPath({ pinToCurrentBinary: true })
       ptyConn = this.spawnPty(cmd, [...prefixArgs, ...argv], {
         cols,
         rows,
@@ -2389,12 +2396,14 @@ export class BgWorker {
   private async buildBridgeReattachEnvFromState(): Promise<
     Record<string, string> | undefined
   > {
+    // densable: rit(bridgeSessionId, bridgeSessionSeq, bridgeOutboundOnly, bridgeSessionGroupingId)
     const state = readBgJobState(this.dispatch.short)
     if (!state) return undefined
     return buildBridgeReattachEnv(
       state.bridgeSessionId,
       state.bridgeSessionSeq,
       state.bridgeOutboundOnly,
+      state.bridgeSessionGroupingId,
     )
   }
 
@@ -2578,6 +2587,25 @@ export interface AttacherEntry {
 // Build worker args — official e64
 // ---------------------------------------------------------------------------
 
+/**
+ * densable $F_(command) — shell argv for Fleet `!cmd` / launch.mode exec.
+ * SHELL -c / Windows COMSPEC /c / /bin/sh -c.
+ */
+export function shellExecSpec(command: string): {
+  cmd: string
+  args: string[]
+} {
+  const shell = process.env.SHELL
+  if (shell) return { cmd: shell, args: ['-c', command] }
+  if (process.platform === 'win32') {
+    return {
+      cmd: process.env.COMSPEC || 'cmd.exe',
+      args: ['/d', '/s', '/c', command],
+    }
+  }
+  return { cmd: '/bin/sh', args: ['-c', command] }
+}
+
 export function buildWorkerArgs(
   dispatch: DispatchRequest,
   attempt: number,
@@ -2585,6 +2613,7 @@ export function buildWorkerArgs(
   sessionId: string,
   respawnFlags: string[],
 ): string[] {
+  // densable J2d: if (mode==="exec") return launch.args.map(KI)
   if (dispatch.launch.mode === 'exec') return dispatch.launch.args ?? []
   if (attempt > 1 && transcriptExists)
     return ['--resume', sessionId, ...respawnFlags]
@@ -2697,16 +2726,24 @@ export function buildWorkerEnv(
 // Bridge reattach env — official VjH
 // ---------------------------------------------------------------------------
 
-function buildBridgeReattachEnv(
+/**
+ * densable rit(session, seq, outboundOnly, grouping) → CLAUDE_BRIDGE_REATTACH_*.
+ * Must stay aligned with leftArrowAgents.buildBridgeReattachEnv.
+ * Exported for unit tests (worker respawn path).
+ */
+export function buildBridgeReattachEnv(
   sessionId?: string,
   seq?: number,
   outboundOnly?: boolean,
+  grouping?: string,
 ): Record<string, string> | undefined {
   if (!sessionId) return undefined
   const env: Record<string, string> = {
     CLAUDE_BRIDGE_REATTACH_SESSION: sessionId,
   }
   if (seq !== undefined && seq > 0) env.CLAUDE_BRIDGE_REATTACH_SEQ = String(seq)
+  if (grouping) env.CLAUDE_BRIDGE_REATTACH_GROUPING = grouping
+  // densable: if (r !== !1) OUTBOUND_ONLY=1
   if (outboundOnly !== false) env.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY = '1'
   return env
 }

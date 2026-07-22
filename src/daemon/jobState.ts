@@ -70,6 +70,11 @@ export interface BgJobState {
   bridgeSessionId?: string
   bridgeOutboundOnly?: boolean
   bridgeSessionSeq?: number
+  /**
+   * densable bridgeSessionGroupingId → CLAUDE_BRIDGE_REATTACH_GROUPING (rit n).
+   * Pattern in gold: /^sgrp_[A-Za-z0-9_]{1,128}$/
+   */
+  bridgeSessionGroupingId?: string
   /** Backend that manages this job */
   backend?: 'daemon' | 'peer'
   /** PTY socket path */
@@ -313,6 +318,7 @@ export function createInitialJobState(opts: {
   bridgeSessionId?: string
   bridgeOutboundOnly?: boolean
   bridgeSessionSeq?: number
+  bridgeSessionGroupingId?: string
   /** Official hcn/aAf session permission allow/deny rules. */
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official hcn memoryToggledOff when auto-memory is off. */
@@ -353,6 +359,7 @@ export function createInitialJobState(opts: {
     bridgeSessionId: opts.bridgeSessionId,
     bridgeOutboundOnly: opts.bridgeOutboundOnly,
     bridgeSessionSeq: opts.bridgeSessionSeq,
+    bridgeSessionGroupingId: opts.bridgeSessionGroupingId,
     sessionPermissionRules: opts.sessionPermissionRules,
     memoryToggledOff: opts.memoryToggledOff,
   }
@@ -380,6 +387,8 @@ export function writeA8qJobState(opts: {
   bridgeSessionId?: string
   bridgeOutboundOnly?: boolean
   bridgeSessionSeq?: number
+  /** densable bridgeSessionGroupingId for rit GROUPING on respawn. */
+  bridgeSessionGroupingId?: string
   /** Official aAf → hcn sessionPermissionRules. */
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official aAf → hcn memoryToggledOff. */
@@ -406,6 +415,7 @@ export function writeA8qJobState(opts: {
     bridgeSessionId: opts.bridgeSessionId,
     bridgeOutboundOnly: opts.bridgeOutboundOnly,
     bridgeSessionSeq: opts.bridgeSessionSeq,
+    bridgeSessionGroupingId: opts.bridgeSessionGroupingId,
     sessionPermissionRules: opts.sessionPermissionRules,
     memoryToggledOff: opts.memoryToggledOff,
   })

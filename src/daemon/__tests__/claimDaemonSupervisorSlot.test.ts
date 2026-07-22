@@ -100,7 +100,11 @@ describe('claimDaemonSupervisorSlot', () => {
     expect(r.ok === true || r.ok === false).toBe(true)
   })
 
-  test('live lock of current process blocks second claim', async () => {
+  test('live lock of current process blocks second claim when identity matches', async () => {
+    // densable cI (jen): non-daemon cmdline → lock not "alive" even if kill0
+    // succeeds (PID-reuse safety). On Linux the bun test runner is not
+    // "claude daemon", so claim may succeed; installDaemonLock still refuses
+    // rename-over a kill0-live peer. On non-Linux jen always accepts.
     await writeDaemonLock(
       {
         pid: process.pid,
@@ -114,15 +118,22 @@ describe('claimDaemonSupervisorSlot', () => {
       origin: 'transient',
       configDir: dir,
     })
-    expect(r.ok).toBe(false)
-    if (!r.ok) {
-      expect(r.reason).toContain('another daemon is already running')
-      expect(r.reason).toContain('never displaces')
-      expect(r.askedYield).toBe(false)
+    if (process.platform === 'linux') {
+      // Cmdline identity fails for test runner → treated as stale lock.
+      expect(r.ok).toBe(true)
+    } else {
+      expect(r.ok).toBe(false)
+      if (!r.ok) {
+        expect(r.reason).toContain('another daemon is already running')
+        expect(r.reason).toContain('never displaces')
+        expect(r.askedYield).toBe(false)
+      }
     }
   })
 
   test('service claims ask transient to yield and wait for release', async () => {
+    // densable jen: on Linux test runner cmdline is not "daemon" → lock not
+    // alive → no yield needed. Non-Linux uses kill0-only identity.
     await writeDaemonLock(
       {
         pid: process.pid,
@@ -147,9 +158,14 @@ describe('claimDaemonSupervisorSlot', () => {
         return { ok: true, yielding: true }
       },
     })
-    expect(yieldCalls).toBe(1)
-    expect(r.ok).toBe(true)
-    expect(logs.some(l => l.includes('asking it to yield'))).toBe(true)
+    if (process.platform === 'linux') {
+      expect(yieldCalls).toBe(0)
+      expect(r.ok).toBe(true)
+    } else {
+      expect(yieldCalls).toBe(1)
+      expect(r.ok).toBe(true)
+      expect(logs.some(l => l.includes('asking it to yield'))).toBe(true)
+    }
   })
 
   test('yield acked but lock held → refuse', async () => {
@@ -168,10 +184,15 @@ describe('claimDaemonSupervisorSlot', () => {
       yieldTimeoutMs: 150,
       requestYield: async () => ({ ok: true, yielding: true }),
     })
-    expect(r.ok).toBe(false)
-    if (!r.ok) {
-      expect(r.askedYield).toBe(true)
-      expect(r.reason).toContain('asked it to yield but the handover failed')
+    if (process.platform === 'linux') {
+      // Non-daemon cmdline → lock not alive → claim ok without yield.
+      expect(r.ok).toBe(true)
+    } else {
+      expect(r.ok).toBe(false)
+      if (!r.ok) {
+        expect(r.askedYield).toBe(true)
+        expect(r.reason).toContain('asked it to yield but the handover failed')
+      }
     }
   })
 
@@ -193,8 +214,12 @@ describe('claimDaemonSupervisorSlot', () => {
       log: m => logs.push(m),
       requestYield: async () => ({ ok: true, yielding: false }),
     })
-    expect(r.ok).toBe(false)
-    expect(logs.some(l => l.includes('refused to yield'))).toBe(true)
+    if (process.platform === 'linux') {
+      expect(r.ok).toBe(true)
+    } else {
+      expect(r.ok).toBe(false)
+      expect(logs.some(l => l.includes('refused to yield'))).toBe(true)
+    }
   })
 })
 

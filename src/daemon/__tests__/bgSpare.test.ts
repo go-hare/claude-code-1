@@ -6,15 +6,19 @@ import { join } from 'path'
 import {
   recvSpareClaim,
   type BgSpareClaimFrame,
+  type HeldSpare,
   buildClaimFrame,
   spawnSpare,
   sendClaim,
+  claimSpare,
   reapOrphanSpares,
   getSparePtySockPath,
   getSpareClaimSockPath,
   buildSpareHostEnv,
   getBgLowMemThresholdBytes,
   getSpareBinaryArgv,
+  sanitizeClaimEnv,
+  SPARE_CLAIM_NONCE_ENV,
 } from '../bgSpare.js'
 import { getSpareDir, type DispatchRequest } from '../bgWorker.js'
 
@@ -149,6 +153,30 @@ describe('buildSpareHostEnv (official _mO)', () => {
       else process.env.CLAUDECODE = prev
     }
   })
+
+  test('embeds claim nonce when provided', () => {
+    const env = buildSpareHostEnv({ claimNonce: 'deadbeef' })
+    expect(env[SPARE_CLAIM_NONCE_ENV]).toBe('deadbeef')
+  })
+})
+
+describe('sanitizeClaimEnv (local product fortify)', () => {
+  test('drops loader/shell injection keys', () => {
+    const out = sanitizeClaimEnv({
+      CLAUDE_CODE_SESSION_KIND: 'bg',
+      LD_PRELOAD: '/evil.so',
+      DYLD_INSERT_LIBRARIES: '/evil.dylib',
+      NODE_OPTIONS: '--require ./x',
+      BASH_ENV: '/tmp/x',
+      SAFE: '1',
+    })
+    expect(out.CLAUDE_CODE_SESSION_KIND).toBe('bg')
+    expect(out.SAFE).toBe('1')
+    expect(out.LD_PRELOAD).toBeUndefined()
+    expect(out.DYLD_INSERT_LIBRARIES).toBeUndefined()
+    expect(out.NODE_OPTIONS).toBeUndefined()
+    expect(out.BASH_ENV).toBeUndefined()
+  })
 })
 
 describe('getBgLowMemThresholdBytes (official jy6)', () => {
@@ -170,6 +198,38 @@ describe('getSpareBinaryArgv (official TmO)', () => {
     expect(argv[0]).toBe(process.execPath)
     expect(argv.length).toBeGreaterThanOrEqual(1)
   })
+})
+
+describe('claimSpare (local product: await sendClaim before register)', () => {
+  test('sendClaim failure throws — no BgWorker handle registered', async () => {
+    // Missing claim sock → sendClaim times out / ENOENT → throw.
+    // Critical invariant: must NOT return a worker (register happens only after
+    // claimSpare resolves in bgManager). Ghost left-arrow jobs came from the
+    // densable fire-and-forget path that registered before sendClaim.
+    const dir = await mkdtemp(join(tmpdir(), 'bg-spare-claim-fail-'))
+    const missingClaim = join(dir, 'no-such.claim.sock')
+    const missingPty = join(dir, 'no-such.pty.sock')
+    const spare: HeldSpare = {
+      hostPid: process.pid,
+      ptySock: missingPty,
+      claimSock: missingClaim,
+      startedAt: Date.now(),
+      cliVersion: 'test',
+      claimNonce: 'test-nonce',
+      dispose() {},
+    }
+    const dispatch = makeDispatch({ short: 'ghostchk' })
+    let threw = false
+    try {
+      // sendClaim retries ~5s on ENOENT; keep test under default timeout.
+      await claimSpare(dispatch, spare, (() => null) as never)
+    } catch {
+      threw = true
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+    expect(threw).toBe(true)
+  }, 15_000)
 })
 
 describe('sendClaim (official KmO/OmO)', () => {
@@ -230,7 +290,7 @@ describe('reapOrphanSpares (official f3q)', () => {
     await reapOrphanSpares(new Map(), () => {})
   })
 
-  test('cleans claim.sock files under spare dir', async () => {
+  test('cleans orphan claim.sock when paired pty is unknown', async () => {
     if (process.platform === 'win32') return
     // Uses real getSpareDir(); only create claim sock and verify cleanup attempt.
     const spareDir = getSpareDir()
@@ -239,11 +299,59 @@ describe('reapOrphanSpares (official f3q)', () => {
     await writeFile(claim, '').catch(() => {})
     const logs: string[] = []
     await reapOrphanSpares(new Map(), m => logs.push(m))
-    // claim.sock should be unlinked (best-effort)
+    // claim.sock should be unlinked (best-effort) — paired pty not known
     const { access } = await import('fs/promises')
     const stillThere = await access(claim)
       .then(() => true)
       .catch(() => false)
     expect(stillThere).toBe(false)
+  })
+
+  test('keeps claim.sock when paired pty is known live', async () => {
+    if (process.platform === 'win32') return
+    const spareDir = getSpareDir()
+    await mkdir(spareDir, { recursive: true, mode: 0o700 }).catch(() => {})
+    const id = 'liveheld'
+    const claim = join(spareDir, `${id}.claim.sock`)
+    const pty = join(spareDir, `${id}.pty.sock`)
+    await writeFile(claim, '').catch(() => {})
+    // densable f3q: if knownSocks has paired pty → do not unlink claim
+    await reapOrphanSpares(new Map(), () => {}, [pty])
+    const { access } = await import('fs/promises')
+    const stillThere = await access(claim)
+      .then(() => true)
+      .catch(() => false)
+    expect(stillThere).toBe(true)
+    await unlink(claim).catch(() => {})
+  })
+})
+
+describe('recvSpareClaim nonce (local product)', () => {
+  test('rejects claim when nonce mismatches', async () => {
+    if (process.platform === 'win32') return
+    const dir = await mkdtemp(join(tmpdir(), 'bg-spare-nonce-'))
+    const sock = join(dir, 'claim.sock')
+    try {
+      const pending = recvSpareClaim(sock, undefined, 'expected-nonce')
+      await new Promise(r => setTimeout(r, 30))
+      await sendClaim(sock, {
+        cwd: dir,
+        env: {},
+        argv: [],
+        nonce: 'wrong',
+      })
+      let threw = false
+      try {
+        await pending
+      } catch {
+        threw = true
+      }
+      expect(threw).toBe(true)
+    } catch {
+      // AF_UNIX unavailable
+    } finally {
+      await unlink(sock).catch(() => {})
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

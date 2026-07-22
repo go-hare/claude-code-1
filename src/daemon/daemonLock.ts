@@ -66,18 +66,118 @@ export async function readDaemonLock(
 }
 
 /**
- * Official bW (simplified) — lock exists + pid alive.
- * Full official also checks cmdline contains "daemon" and procStart match;
- * those are platform-specific and optional for KF zombie signalling.
+ * densable jen — cmdline must look like a claude daemon process.
+ * Linux: /proc/<pid>/cmdline. Other platforms: best-effort (accept if unreadable).
+ */
+export async function isDaemonCmdline(pid: number): Promise<boolean> {
+  if (process.platform !== 'linux') {
+    // Non-Linux: no portable cmdline; rely on pid live + optional procStart.
+    return true
+  }
+  try {
+    const { readFile } = await import('fs/promises')
+    const raw = await readFile(`/proc/${pid}/cmdline`, 'utf8')
+    const parts = raw.split('\0')
+    // densable: r[0]==="claude daemon" || r.slice(1,4).includes("daemon")
+    if (parts[0] === 'claude daemon') return true
+    return parts.slice(1, 4).includes('daemon')
+  } catch {
+    // Unreadable (permission / gone): densable treats as alive candidate.
+    return true
+  }
+}
+
+/**
+ * densable iPs / Ex — compare process start identity when lock.procStart set.
+ * When procStart is missing (older writers), accept pid-only.
+ */
+export async function matchesDaemonProcStart(
+  pid: number,
+  expected: unknown,
+  attempts: number = 1,
+): Promise<boolean> {
+  if (expected === undefined || expected === null) return true
+  for (let n = 0; n < attempts; n++) {
+    if (n > 0) {
+      await new Promise(r => setTimeout(r, 50))
+    }
+    const live = await readProcessStartIdentity(pid)
+    if (live !== undefined) {
+      return live === expected || deepEqualProcStart(live, expected)
+    }
+  }
+  // Could not read live identity — densable iPs returns false after retries.
+  return false
+}
+
+function deepEqualProcStart(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable Ex/phh — process start identity for PID reuse detection.
+ * Linux: /proc/<pid>/stat starttime; others: ps -o lstart= (best-effort).
+ */
+export async function readProcessStartIdentity(
+  pid: number,
+): Promise<unknown | undefined> {
+  if (process.platform === 'linux') {
+    try {
+      const { readFile } = await import('fs/promises')
+      const stat = await readFile(`/proc/${pid}/stat`, 'utf8')
+      // Field 22 (1-indexed) is starttime after comm in parens.
+      const close = stat.lastIndexOf(')')
+      if (close >= 0) {
+        const rest = stat.slice(close + 2).split(' ')
+        // After comm: state(3) ... starttime is field 22 overall → index 19 in rest
+        // (fields 1-2 consumed by pid+comm). rest[0]=state → rest[19]=starttime.
+        const starttime = rest[19]
+        if (starttime !== undefined) return starttime
+      }
+    } catch {
+      return undefined
+    }
+  }
+  try {
+    const { execFile } = await import('child_process')
+    const { promisify } = await import('util')
+    const execFileAsync = promisify(execFile)
+    const { stdout } = await execFileAsync(
+      'ps',
+      ['-o', 'lstart=', '-p', String(pid)],
+      {
+        timeout: 1000,
+        env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+      },
+    )
+    const s = stdout.trim()
+    return s.length > 0 ? s : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Official bW / densable cI — lock exists + pid alive + cmdline + procStart.
+ *
+ * Live probe matches densable post-R9d race: only ESRCH = dead.
+ * EPERM (e.g. Windows privilege) must not open a free supervisor slot for tG4.
  */
 export async function readAliveDaemonLock(
   configDir?: string,
 ): Promise<DaemonLockData | null> {
   const lock = await readDaemonLock(configDir)
   if (!lock) return null
-  try {
-    process.kill(lock.pid, 0)
-  } catch {
+  if (!isDaemonPidRaceLive(lock.pid)) return null
+  // densable jen: refuse PID reuse of non-daemon process.
+  if (!(await isDaemonCmdline(lock.pid))) return null
+  // densable iPs: refuse when procStart diverges (PID recycled).
+  if (!(await matchesDaemonProcStart(lock.pid, lock.procStart, 1))) {
     return null
   }
   return lock
@@ -113,9 +213,65 @@ export async function signalSupervisorRestart(
   return 'timed-out'
 }
 
+function errnoCode(err: unknown): string | undefined {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const c = (err as { code?: unknown }).code
+    return typeof c === 'string' ? c : undefined
+  }
+  return undefined
+}
+
 /**
- * Write daemon.lock (atomic-ish: tmp + rename when possible).
- * Official Yo8 / SvK — best-effort for local supervisor start.
+ * densable race probe after R9d miss:
+ *   try process.kill(pid,0); if ESRCH only → dead; any other throw → live.
+ * EPERM (e.g. Windows privilege) must not be treated as "stale → overwrite".
+ */
+export function isDaemonPidRaceLive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return errnoCode(err) !== 'ESRCH'
+  }
+}
+
+/** densable ccT — settle after R0o replace before ownership re-read. */
+export const DAEMON_LOCK_REPLACE_SETTLE_MS = 100
+
+/**
+ * densable R9d — exclusive create of daemon.lock (flag wx on final path).
+ * Succeeds only when the file does not exist. Never unlinks a peer lock.
+ */
+export async function tryCreateDaemonLockExclusive(
+  data: DaemonLockData,
+  configDir?: string,
+): Promise<boolean> {
+  const path = getDaemonLockPath(configDir)
+  const body = JSON.stringify(data, null, 2)
+  try {
+    await writeFile(path, body, { encoding: 'utf8', flag: 'wx' })
+    return true
+  } catch (err) {
+    if (errnoCode(err) === 'EEXIST') return false
+    process.stderr.write(
+      `daemon: failed exclusive lock create: ${errorMessage(err)}\n`,
+    )
+    return false
+  }
+}
+
+/**
+ * Write daemon.lock — densable R0o (tmp + wx + rename; EEXIST/EPERM unlink-retry).
+ *
+ * Used only to replace a **stale** lock after R9d fails and the peer pid is dead.
+ * Must not be the sole install path on a live peer (Windows rename-over would
+ * steal the lock). Prefer {@link installDaemonLock}.
+ *
+ *   1. write tmp with flag wx
+ *   2. rename tmp → lock
+ *   3. on EEXIST/EPERM/EACCES: unlink lock, rename again; still fail → false
+ *   4. re-read: must match pid + startedAt or return false
+ * Never falls back to writeFile(lockPath) success (would clobber live peers).
  */
 export async function writeDaemonLock(
   data: DaemonLockData,
@@ -123,29 +279,121 @@ export async function writeDaemonLock(
 ): Promise<boolean> {
   const path = getDaemonLockPath(configDir)
   const tmp = `${path}.tmp.${data.pid}.${data.startedAt}`
+  const body = JSON.stringify(data, null, 2)
+
   try {
-    await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
-    try {
-      await rename(tmp, path)
-    } catch {
-      // Windows may block rename over existing — overwrite.
-      await writeFile(path, JSON.stringify(data, null, 2), 'utf8')
-      await unlink(tmp).catch(() => {})
-    }
-    return true
+    // densable R0o: wx so two writers don't share the same tmp path content race
+    await writeFile(tmp, body, { encoding: 'utf8', flag: 'wx' })
   } catch (err) {
-    await unlink(tmp).catch(() => {})
-    // last resort direct write
-    try {
-      await writeFile(path, JSON.stringify(data, null, 2), 'utf8')
-      return true
-    } catch {
+    // Rare: same pid+startedAt retry — fall back to truncate write of tmp
+    if (errnoCode(err) === 'EEXIST') {
+      try {
+        await writeFile(tmp, body, 'utf8')
+      } catch (err2) {
+        process.stderr.write(
+          `daemon: failed to write lock tmp: ${errorMessage(err2)}\n`,
+        )
+        return false
+      }
+    } else {
       process.stderr.write(
-        `daemon: failed to write lock: ${errorMessage(err)}\n`,
+        `daemon: failed to write lock tmp: ${errorMessage(err)}\n`,
       )
       return false
     }
   }
+
+  try {
+    await rename(tmp, path)
+  } catch (err) {
+    const code = errnoCode(err)
+    // densable R0o: Windows/EEXIST — unlink target then rename; never silent overwrite
+    if (code === 'EEXIST' || code === 'EPERM' || code === 'EACCES') {
+      await unlink(path).catch(() => {})
+      try {
+        await rename(tmp, path)
+      } catch (err2) {
+        await unlink(tmp).catch(() => {})
+        const code2 = errnoCode(err2)
+        if (code2 === 'EEXIST' || code2 === 'EPERM' || code2 === 'EACCES') {
+          return false
+        }
+        process.stderr.write(
+          `daemon: failed to rename lock: ${errorMessage(err2)}\n`,
+        )
+        return false
+      }
+    } else {
+      await unlink(tmp).catch(() => {})
+      process.stderr.write(
+        `daemon: failed to rename lock: ${errorMessage(err)}\n`,
+      )
+      return false
+    }
+  }
+
+  // densable R0o post-check: r?.pid===e.pid && r?.startedAt===e.startedAt
+  const readBack = await readDaemonLock(configDir)
+  if (readBack?.pid === data.pid && readBack?.startedAt === data.startedAt) {
+    return true
+  }
+  return false
+}
+
+/**
+ * densable post-tG4 lock install: R9d first; only R0o when peer is dead/missing.
+ *
+ *   S = R9d(_)
+ *   if (!S) {
+ *     ie = Gne()
+ *     if (ie) {
+ *       ne = live peer (kill0 + !ESRCH; densable also cmdline/procStart)
+ *       if (ne) refuse
+ *       S = R0o(_)
+ *     } else S = R0o(_)
+ *     if (!S) refuse
+ *     sleep(ccT); re-read ownership or refuse
+ *   }
+ *
+ * Prevents Windows rename/unlink path from overwriting a live supervisor lock.
+ */
+export async function installDaemonLock(
+  data: DaemonLockData,
+  configDir?: string,
+  opts?: { settleMs?: number },
+): Promise<boolean> {
+  if (await tryCreateDaemonLockExclusive(data, configDir)) {
+    return true
+  }
+
+  const existing = await readDaemonLock(configDir)
+  if (existing) {
+    // densable: kill0 success then cmdline/procStart; on non-ESRCH throw → live.
+    // Portable: race-live probe only (no /proc cmdline on macOS/Windows).
+    let peerLive = false
+    try {
+      process.kill(existing.pid, 0)
+      peerLive = true
+    } catch (err) {
+      if (errnoCode(err) !== 'ESRCH') peerLive = true
+    }
+    if (peerLive) {
+      return false
+    }
+  }
+
+  const replaced = await writeDaemonLock(data, configDir)
+  if (!replaced) return false
+
+  const settle = opts?.settleMs ?? DAEMON_LOCK_REPLACE_SETTLE_MS
+  if (settle > 0) {
+    await new Promise(r => setTimeout(r, settle))
+  }
+  const after = await readDaemonLock(configDir)
+  if (!after || after.pid !== data.pid || after.startedAt !== data.startedAt) {
+    return false
+  }
+  return true
 }
 
 /**
@@ -351,10 +599,7 @@ export async function detectDaemonLockRace(
   if (lock.pid === owner.pid && lock.startedAt === owner.startedAt) {
     return null
   }
-  try {
-    process.kill(lock.pid, 0)
-  } catch {
-    return null
-  }
+  // densable post-install: non-ESRCH (incl. EPERM) counts as a live peer.
+  if (!isDaemonPidRaceLive(lock.pid)) return null
   return lock
 }

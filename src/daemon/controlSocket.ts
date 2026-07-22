@@ -13,7 +13,7 @@
  *   Windows: named pipe \\.\pipe\cc-daemon-<pipeKey>-control
  */
 
-import { createServer, type Server, type Socket } from 'net'
+import { createConnection, createServer, type Server, type Socket } from 'net'
 import { mkdir, unlink } from 'fs/promises'
 import { dirname } from 'path'
 import {
@@ -31,6 +31,14 @@ import { logEvent } from '../services/analytics/index.js'
 
 /** Max request size (1MB) — official $S_ */
 const MAX_REQUEST_SIZE = 1_048_576
+
+/**
+ * densable aAp GZs — EADDRINUSE bind retry budget (ms).
+ * Official: `let E=Date.now()+GZs; for(;;){ listen; if EADDRINUSE && now<E sleep 100 }`.
+ * Windows named pipes and Unix AF_UNIX both surface EADDRINUSE when a live
+ * peer still holds the endpoint; retry covers race with a dying predecessor.
+ */
+export const CONTROL_SOCKET_BIND_RETRY_MS = 10_000
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,10 +90,22 @@ export async function startControlSocket(
 ): Promise<ControlSocketInstance> {
   const socketPath = getControlSocketPath()
 
-  // Ensure directory exists with correct permissions
+  // densable aAp:
+  //   await QQr() (unix mkdir 0o700); controlKey = e2d();
+  //   await unlink(path).catch; listen with EADDRINUSE retry ≤ GZs (10s)
+  // Windows named pipe (qRs/Hne): no unlink; bind fails EADDRINUSE if live peer.
+  // Exclusivity primary: daemon.lock R9d/installDaemonLock.
+  // Local product (unix only): probe live connect before unlink — densable does
+  // not probe; refuse dual-supervisor if a peer still answers after lock race.
   if (process.platform !== 'win32') {
     const dir = getDaemonInstanceDir()
     await mkdir(dir, { recursive: true, mode: 0o700 }).catch(() => {})
+    const peerLive = await probeControlSocketLive(socketPath)
+    if (peerLive) {
+      throw new Error(
+        `control socket already in use by a live daemon (${socketPath}) — another supervisor holds the path`,
+      )
+    }
     await unlink(socketPath).catch(() => {})
   }
 
@@ -144,22 +164,47 @@ export async function startControlSocket(
     socket.on('data', onData)
   })
 
-  server.on('error', err =>
-    console.error('[daemon] control socket error:', err),
-  )
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(socketPath, () => {
-      server.removeListener('error', reject)
-      resolve()
-    })
+  // densable aAp: post-listen errors soft-warn; pre-listen uses once(error).
+  let bindSettled = false
+  server.on('error', err => {
+    if (!bindSettled) return
+    console.error('[daemon] control socket error:', err)
   })
+
+  // densable aAp: retry listen on EADDRINUSE until GZs (10s), 100ms sleep.
+  const bindDeadline = Date.now() + CONTROL_SOCKET_BIND_RETRY_MS
+  for (;;) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onErr = (err: Error): void => {
+          reject(err)
+        }
+        server.once('error', onErr)
+        server.listen(socketPath, () => {
+          server.removeListener('error', onErr)
+          resolve()
+        })
+      })
+      bindSettled = true
+      break
+    } catch (err) {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : undefined
+      if (code !== 'EADDRINUSE' || Date.now() >= bindDeadline) {
+        throw err
+      }
+      server.removeAllListeners('listening')
+      await new Promise(r => setTimeout(r, 100))
+    }
+  }
 
   return {
     async close() {
       for (const sock of connections) sock.destroy()
       await new Promise<void>(r => server.close(() => r()))
+      // densable aAp close: unlink unless skipUnlink; windows named pipe no path file
       if (process.platform !== 'win32') {
         await unlink(socketPath).catch(() => {})
       }
@@ -167,6 +212,44 @@ export async function startControlSocket(
     leaseCount: () => leases.size,
     onLeaseChange,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stale-path probe — product fortify before unlink+listen
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a peer still accepts connects on the control sock path.
+ * Stale leftover files fail connect (ENOENT/ECONNREFUSED) → false → safe unlink.
+ * Timeout → treat as live (refuse steal) to avoid dual supervisor on slow peer.
+ */
+async function probeControlSocketLive(
+  socketPath: string,
+  timeoutMs = 250,
+): Promise<boolean> {
+  return await new Promise(resolve => {
+    let settled = false
+    const done = (live: boolean): void => {
+      if (settled) return
+      settled = true
+      resolve(live)
+    }
+    const sock = createConnection(socketPath)
+    const timer = setTimeout(() => {
+      sock.destroy()
+      done(true)
+    }, timeoutMs)
+    timer.unref?.()
+    sock.once('connect', () => {
+      clearTimeout(timer)
+      sock.destroy()
+      done(true)
+    })
+    sock.once('error', () => {
+      clearTimeout(timer)
+      done(false)
+    })
+  })
 }
 
 // ---------------------------------------------------------------------------

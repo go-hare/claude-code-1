@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  buildBridgeReattachEnv,
   buildPtyHostSpawnArgs,
+  buildWorkerArgs,
   buildWorkerEnv,
+  shellExecSpec,
   type DispatchRequest,
 } from '../bgWorker'
 
@@ -109,5 +112,79 @@ describe('buildWorkerEnv exec EXTRA_BODY (2.1.206)', () => {
     // Other CLAUDE_ session vars are still stripped in exec mode
     expect(env.CLAUDE_CODE_SESSION_KIND).toBeUndefined()
     expect(env.CLAUDE_JOB_DIR).toBe('/tmp/job-dir')
+  })
+})
+
+describe('buildBridgeReattachEnv densable rit()', () => {
+  test('mirrors rit(session, seq, outboundOnly, grouping)', () => {
+    expect(buildBridgeReattachEnv(undefined)).toBeUndefined()
+    expect(buildBridgeReattachEnv('sid')).toEqual({
+      CLAUDE_BRIDGE_REATTACH_SESSION: 'sid',
+      CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY: '1',
+    })
+    expect(buildBridgeReattachEnv('sid', 7, false, 'sgrp_x')).toEqual({
+      CLAUDE_BRIDGE_REATTACH_SESSION: 'sid',
+      CLAUDE_BRIDGE_REATTACH_SEQ: '7',
+      CLAUDE_BRIDGE_REATTACH_GROUPING: 'sgrp_x',
+    })
+    expect(buildBridgeReattachEnv('sid', 0, true, 'g')).toEqual({
+      CLAUDE_BRIDGE_REATTACH_SESSION: 'sid',
+      CLAUDE_BRIDGE_REATTACH_GROUPING: 'g',
+      CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY: '1',
+    })
+  })
+})
+
+describe('shellExecSpec densable $F_', () => {
+  const prevShell = process.env.SHELL
+  const prevComspec = process.env.COMSPEC
+
+  afterEach(() => {
+    if (prevShell === undefined) delete process.env.SHELL
+    else process.env.SHELL = prevShell
+    if (prevComspec === undefined) delete process.env.COMSPEC
+    else process.env.COMSPEC = prevComspec
+  })
+
+  test('uses SHELL -c when SHELL is set', () => {
+    process.env.SHELL = '/bin/zsh'
+    expect(shellExecSpec('echo hi')).toEqual({
+      cmd: '/bin/zsh',
+      args: ['-c', 'echo hi'],
+    })
+  })
+
+  test('falls back to /bin/sh -c when SHELL unset (non-win)', () => {
+    delete process.env.SHELL
+    if (process.platform === 'win32') {
+      // On Windows without SHELL densable uses COMSPEC /c
+      process.env.COMSPEC = 'C:\\Windows\\System32\\cmd.exe'
+      expect(shellExecSpec('dir')).toEqual({
+        cmd: 'C:\\Windows\\System32\\cmd.exe',
+        args: ['/d', '/s', '/c', 'dir'],
+      })
+      return
+    }
+    expect(shellExecSpec('true')).toEqual({
+      cmd: '/bin/sh',
+      args: ['-c', 'true'],
+    })
+  })
+
+  test('buildWorkerArgs returns launch.args for exec mode', () => {
+    process.env.SHELL = '/bin/bash'
+    const spec = shellExecSpec('sleep 1')
+    const args = buildWorkerArgs(makeDispatch('exec'), 1, false, 'sess', [])
+    // makeDispatch only sets mode — without args, returns []
+    expect(args).toEqual([])
+
+    const withArgs: DispatchRequest = {
+      ...makeDispatch('exec'),
+      launch: { mode: 'exec', cmd: spec.cmd, args: spec.args },
+    }
+    expect(buildWorkerArgs(withArgs, 1, false, 'sess', [])).toEqual([
+      '-c',
+      'sleep 1',
+    ])
   })
 })
