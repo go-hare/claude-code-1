@@ -19,10 +19,15 @@ import {
   handleIngressMessage,
   handleServerControlRequest,
   makeResultMessage,
+  makeWorkerShuttingDownMessage,
   isEligibleBridgeMessage,
   extractTitleText,
   BoundedUUIDSet,
 } from './bridgeMessaging.js'
+import {
+  clearBridgeSessionMeta,
+  saveBridgeSessionMeta,
+} from './bridgeSessionMeta.js'
 import {
   decodeWorkSecret,
   buildSdkUrl,
@@ -83,10 +88,16 @@ import {
 
 export type ReplBridgeTeardownOpts = {
   /**
-   * Official aAf left-arrow: teardown({skipArchive:true}) so the session can
-   * be reattached by the forked bg worker (rit). Best-effort when unsupported.
+   * densable To/Ks left-arrow: teardown({skipArchive:true}) so the session can
+   * be reattached by the forked bg worker (rit). Skips archiveSession /
+   * stopWork / deregister; closes transport only.
    */
   skipArchive?: boolean
+  /**
+   * densable To(lr).reason — optional host-exit reason written before result
+   * on full teardown (env-less path). Best-effort.
+   */
+  reason?: string
 }
 
 export type ReplBridgeHandle = {
@@ -263,6 +274,16 @@ export type BridgeCoreParams = {
    * history. REPL callers omit (fresh session each run → 0 is correct).
    */
   initialSSESequenceNum?: number
+  /**
+   * densable classic Qt: outboundOnly:B??!1 on handle for left-arrow rit.
+   * When false, rit omits CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY.
+   */
+  outboundOnly?: boolean
+  /**
+   * densable classic Qt: sessionGroupingId:He → CLAUDE_BRIDGE_REATTACH_GROUPING.
+   * Pass-through from initReplBridge (env reattach or option k/Q).
+   */
+  sessionGroupingId?: string
 }
 
 /**
@@ -339,7 +360,13 @@ export async function initBridgeCore(
     onUserMessage,
     perpetual,
     initialSSESequenceNum = 0,
+    outboundOnly: outboundOnlyParam,
+    sessionGroupingId: sessionGroupingIdParam,
   } = params
+
+  // densable Qt: B??!1 / He on handle for left-arrow rit
+  const outboundOnly = outboundOnlyParam ?? false
+  const sessionGroupingId = sessionGroupingIdParam
 
   const seq = ++initSequence
 
@@ -931,7 +958,9 @@ export async function initBridgeCore(
 
   // Teardown reference — set after definition below. All callers are async
   // callbacks that run after assignment, so the reference is always valid.
-  let doTeardownImpl: (() => Promise<void>) | null = null
+  let doTeardownImpl:
+    | ((opts?: ReplBridgeTeardownOpts) => Promise<void>)
+    | null = null
   function triggerTeardown(): void {
     void doTeardownImpl?.()
   }
@@ -1634,126 +1663,167 @@ export async function initBridgeCore(
 
   // Shared teardown sequence used by both cleanup registration and
   // the explicit teardown() method on the returned handle.
+  // densable To: latch skipArchive/reason even if teardown already running.
   let teardownStarted = false
-  doTeardownImpl = async (): Promise<void> => {
-    if (teardownStarted) {
+  let skipArchiveLatch = false
+  let teardownReason: string | undefined
+  let teardownPromise: Promise<void> | undefined
+  doTeardownImpl = async (opts?: ReplBridgeTeardownOpts): Promise<void> => {
+    if (opts?.skipArchive) skipArchiveLatch = true
+    if (opts?.reason) teardownReason = opts.reason
+    if (teardownPromise) {
       logForDebugging(
-        `[bridge:repl] Teardown already in progress, skipping duplicate call env=${environmentId} session=${currentSessionId}`,
+        `[bridge:repl] Teardown already in progress, joining (skipArchive=${skipArchiveLatch}) env=${environmentId} session=${currentSessionId}`,
       )
-      return
+      return teardownPromise
     }
     teardownStarted = true
     const teardownStart = Date.now()
-    logForDebugging(
-      `[bridge:repl] Teardown starting: env=${environmentId} session=${currentSessionId} workId=${currentWorkId ?? 'none'} transportState=${transport?.getStateLabel() ?? 'null'}`,
-    )
+    const skipArchive = skipArchiveLatch
+    teardownPromise = (async () => {
+      logForDebugging(
+        `[bridge:repl] Teardown starting: env=${environmentId} session=${currentSessionId} workId=${currentWorkId ?? 'none'} transportState=${transport?.getStateLabel() ?? 'null'}${skipArchive ? ' (skipArchive)' : ''}`,
+      )
 
-    if (pointerRefreshTimer !== null) {
-      clearInterval(pointerRefreshTimer)
-    }
-    if (keepAliveTimer !== null) {
-      clearInterval(keepAliveTimer)
-    }
-    if (sigusr2Handler) {
-      process.off('SIGUSR2', sigusr2Handler)
-    }
-    if (process.env.USER_TYPE === 'ant') {
-      clearBridgeDebugHandle()
-      debugFireClose = null
-    }
-    pollController.abort()
-    logForDebugging('[bridge:repl] Teardown: poll loop aborted')
-
-    // Capture the live transport's seq BEFORE close() — close() is sync
-    // (just aborts the SSE fetch) and does NOT invoke onClose, so the
-    // setOnClose capture path never runs for explicit teardown.
-    // Without this, getSSESequenceNum() after teardown returns the stale
-    // lastTransportSequenceNum (captured at the last transport swap), and
-    // daemon callers persisting that value lose all events since then.
-    if (transport) {
-      const finalSeq = transport.getLastSequenceNum()
-      if (finalSeq > lastTransportSequenceNum) {
-        lastTransportSequenceNum = finalSeq
+      if (pointerRefreshTimer !== null) {
+        clearInterval(pointerRefreshTimer)
       }
-    }
+      if (keepAliveTimer !== null) {
+        clearInterval(keepAliveTimer)
+      }
+      if (sigusr2Handler) {
+        process.off('SIGUSR2', sigusr2Handler)
+      }
+      if (process.env.USER_TYPE === 'ant') {
+        clearBridgeDebugHandle()
+        debugFireClose = null
+      }
+      pollController.abort()
+      logForDebugging('[bridge:repl] Teardown: poll loop aborted')
 
-    if (perpetual) {
-      // Perpetual teardown is LOCAL-ONLY — do not send result, do not call
-      // stopWork, do not close the transport. All of those signal the
-      // server (and any mobile/attach subscribers) that the session is
-      // ending. Instead: stop polling, let the socket die with the
-      // process; the backend times the work-item lease back to pending on
-      // its own (TTL 300s). Next daemon start reads the pointer and
-      // reconnectSession re-queues work.
+      // Capture the live transport's seq BEFORE close() — close() is sync
+      // (just aborts the SSE fetch) and does NOT invoke onClose, so the
+      // setOnClose capture path never runs for explicit teardown.
+      // Without this, getSSESequenceNum() after teardown returns the stale
+      // lastTransportSequenceNum (captured at the last transport swap), and
+      // daemon callers persisting that value lose all events since then.
+      if (transport) {
+        const finalSeq = transport.getLastSequenceNum()
+        if (finalSeq > lastTransportSequenceNum) {
+          lastTransportSequenceNum = finalSeq
+        }
+      }
+
+      if (perpetual) {
+        // Perpetual teardown is LOCAL-ONLY — do not send result, do not call
+        // stopWork, do not close the transport. All of those signal the
+        // server (and any mobile/attach subscribers) that the session is
+        // ending. Instead: stop polling, let the socket die with the
+        // process; the backend times the work-item lease back to pending on
+        // its own (TTL 300s). Next daemon start reads the pointer and
+        // reconnectSession re-queues work.
+        transport = null
+        flushGate.drop()
+        // Refresh the pointer mtime so that sessions lasting longer than
+        // BRIDGE_POINTER_TTL_MS (4h) don't appear stale on next start.
+        await writeBridgePointer(dir, {
+          sessionId: currentSessionId,
+          environmentId,
+          source: 'repl',
+        })
+        logForDebugging(
+          `[bridge:repl] Teardown (perpetual): leaving env=${environmentId} session=${currentSessionId} alive on server, duration=${Date.now() - teardownStart}ms`,
+        )
+        return
+      }
+
+      // densable Ks: mzu(reason) then result, then skip or archive.
+      // Re-read latch so late To(skipArchive) during this async work is honored
+      // when we reach the skip branch (archive race still possible mid-flight).
+      const skipNow = skipArchiveLatch
+      const reasonNow = teardownReason
+      const teardownTransport = transport
       transport = null
       flushGate.drop()
-      // Refresh the pointer mtime so that sessions lasting longer than
-      // BRIDGE_POINTER_TTL_MS (4h) don't appear stale on next start.
-      await writeBridgePointer(dir, {
-        sessionId: currentSessionId,
-        environmentId,
-        source: 'repl',
+      if (teardownTransport) {
+        if (reasonNow !== undefined) {
+          const reasonMsg = {
+            ...makeWorkerShuttingDownMessage(currentSessionId, reasonNow),
+            session_id: currentSessionId,
+          } as unknown as TransportMessage
+          void teardownTransport.write(reasonMsg as StdoutMessage)
+        }
+        const resultMsg = {
+          ...makeResultMessage(currentSessionId),
+          session_id: currentSessionId,
+        } as unknown as TransportMessage
+        void teardownTransport.write(resultMsg as StdoutMessage)
+      }
+
+      // densable Ks/Kr left-arrow: skip archive + stopWork + deregister so the
+      // child can unarchive + reattach (rit CLAUDE_BRIDGE_REATTACH_*). Close
+      // transport only; leave server session alive.
+      if (skipNow) {
+        // densable Kr: leave CXr so child/re-init can wXr (kEo only on full archive).
+        saveBridgeSessionMeta(currentSessionId, lastTransportSequenceNum, {
+          groupingId: sessionGroupingId,
+        })
+        if (teardownTransport?.flush) {
+          try {
+            await Promise.race([teardownTransport.flush(), sleep(300)])
+          } catch {
+            /* best-effort drain */
+          }
+        }
+        teardownTransport?.close()
+        logForDebugging(
+          `[bridge:repl] Teardown complete (skipArchive): env=${environmentId} session=${currentSessionId} duration=${Date.now() - teardownStart}ms`,
+        )
+        return
+      }
+
+      const stopWorkP = currentWorkId
+        ? api
+            .stopWork(environmentId, currentWorkId, true)
+            .then(() => {
+              logForDebugging('[bridge:repl] Teardown: stopWork completed')
+            })
+            .catch((err: unknown) => {
+              logForDebugging(
+                `[bridge:repl] Teardown stopWork failed: ${errorMessage(err)}`,
+              )
+            })
+        : Promise.resolve()
+
+      // Run stopWork and archiveSession in parallel. gracefulShutdown.ts:407
+      // races runCleanupFunctions() against 2s (NOT the 5s outer failsafe),
+      // so archive is capped at 1.5s at the injection site to stay under budget.
+      // archiveSession is contractually no-throw; the injected implementations
+      // log their own success/failure internally.
+      await Promise.all([stopWorkP, archiveSession(currentSessionId)])
+
+      teardownTransport?.close()
+      logForDebugging('[bridge:repl] Teardown: transport closed')
+
+      await api.deregisterEnvironment(environmentId).catch((err: unknown) => {
+        logForDebugging(
+          `[bridge:repl] Teardown deregister failed: ${errorMessage(err)}`,
+        )
       })
+
+      // Clear the crash-recovery pointer — explicit disconnect or clean REPL
+      // exit means the user is done with this session. Crash/kill-9 never
+      // reaches this line, leaving the pointer for next-launch recovery.
+      await clearBridgePointer(dir)
+
+      // densable kEo on full teardown
+      clearBridgeSessionMeta()
+
       logForDebugging(
-        `[bridge:repl] Teardown (perpetual): leaving env=${environmentId} session=${currentSessionId} alive on server, duration=${Date.now() - teardownStart}ms`,
+        `[bridge:repl] Teardown complete: env=${environmentId} duration=${Date.now() - teardownStart}ms`,
       )
-      return
-    }
-
-    // Fire the result message, then archive, THEN close. transport.write()
-    // only enqueues (SerialBatchEventUploader resolves on buffer-add); the
-    // stopWork/archive latency (~200-500ms) is the drain window for the
-    // result POST. Closing BEFORE archive meant relying on HybridTransport's
-    // void-ed 3s grace period, which nothing awaits — forceExit can kill the
-    // socket mid-POST. Same reorder as remoteBridgeCore.ts teardown (#22803).
-    const teardownTransport = transport
-    transport = null
-    flushGate.drop()
-    if (teardownTransport) {
-      const resultMsg = {
-        ...makeResultMessage(currentSessionId),
-        session_id: currentSessionId,
-      } as unknown as TransportMessage
-      void teardownTransport.write(resultMsg as StdoutMessage)
-    }
-
-    const stopWorkP = currentWorkId
-      ? api
-          .stopWork(environmentId, currentWorkId, true)
-          .then(() => {
-            logForDebugging('[bridge:repl] Teardown: stopWork completed')
-          })
-          .catch((err: unknown) => {
-            logForDebugging(
-              `[bridge:repl] Teardown stopWork failed: ${errorMessage(err)}`,
-            )
-          })
-      : Promise.resolve()
-
-    // Run stopWork and archiveSession in parallel. gracefulShutdown.ts:407
-    // races runCleanupFunctions() against 2s (NOT the 5s outer failsafe),
-    // so archive is capped at 1.5s at the injection site to stay under budget.
-    // archiveSession is contractually no-throw; the injected implementations
-    // log their own success/failure internally.
-    await Promise.all([stopWorkP, archiveSession(currentSessionId)])
-
-    teardownTransport?.close()
-    logForDebugging('[bridge:repl] Teardown: transport closed')
-
-    await api.deregisterEnvironment(environmentId).catch((err: unknown) => {
-      logForDebugging(
-        `[bridge:repl] Teardown deregister failed: ${errorMessage(err)}`,
-      )
-    })
-
-    // Clear the crash-recovery pointer — explicit disconnect or clean REPL
-    // exit means the user is done with this session. Crash/kill-9 never
-    // reaches this line, leaving the pointer for next-launch recovery.
-    await clearBridgePointer(dir)
-
-    logForDebugging(
-      `[bridge:repl] Teardown complete: env=${environmentId} duration=${Date.now() - teardownStart}ms`,
-    )
+    })()
+    return teardownPromise
   }
 
   // 8. Register cleanup for graceful shutdown
@@ -1764,7 +1834,12 @@ export async function initBridgeCore(
   )
   onStateChange?.('ready')
 
-  // densable Qt: sessionGroupingId + outboundOnly:B??!1 on handle for left-arrow rit
+  // densable CXr: seed process meta for re-init / wXr without REATTACH env.
+  saveBridgeSessionMeta(currentSessionId, lastTransportSequenceNum, {
+    groupingId: sessionGroupingId,
+  })
+
+  // densable Qt: sessionGroupingId:He + outboundOnly:B??!1 on handle for left-arrow rit
   return {
     get bridgeSessionId() {
       return currentSessionId
@@ -1780,9 +1855,17 @@ export async function initBridgeCore(
       const live = transport?.getLastSequenceNum() ?? 0
       return Math.max(lastTransportSequenceNum, live)
     },
+    getLastSequenceNum() {
+      const live = transport?.getLastSequenceNum() ?? 0
+      return Math.max(lastTransportSequenceNum, live)
+    },
+    flush() {
+      return transport?.flush?.() ?? Promise.resolve()
+    },
     // densable B??!1 — boolean so left-arrow does not treat unset as true
-    outboundOnly: false,
-    sessionGroupingId: undefined,
+    outboundOnly,
+    // densable He — pass-through (may be undefined when no Project grouping)
+    sessionGroupingId,
     sessionIngressUrl,
     writeMessages(messages) {
       // Filter to user/assistant messages that haven't already been sent.
@@ -1937,15 +2020,19 @@ export async function initBridgeCore(
       )
     },
     async teardown(opts?: ReplBridgeTeardownOpts) {
-      // opts.skipArchive is accepted for left-arrow reattach callers; full
-      // skip-archive archive/env behavior lands with bridge reattach wiring.
-      void opts
+      // densable To/Ks: honor skipArchive so left-arrow reattach does not
+      // archive/stopWork/deregister the server session.
       unregister()
-      await doTeardownImpl?.()
+      await doTeardownImpl?.(opts)
       logForDebugging(
         `[bridge:repl] Torn down${opts?.skipArchive ? ' (skipArchive)' : ''}`,
       )
-      logEvent('tengu_bridge_repl_teardown', {})
+      logEvent('tengu_bridge_repl_teardown', {
+        archive_status: (opts?.skipArchive
+          ? 'skipped_teleport'
+          : 'ok') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        archive_ok: !opts?.skipArchive,
+      })
     },
   }
 }

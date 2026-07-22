@@ -34,6 +34,7 @@ import {
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { logForDebugging } from '../utils/debug.js'
 import { stripDisplayTagsAllowEmpty } from '../utils/displayTags.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
 import { getBranch, getRemoteUrl } from '../utils/git.js'
 import { toSDKMessages } from '../utils/messages/mappers.js'
 import {
@@ -65,6 +66,7 @@ import {
   createBridgeSession,
   updateBridgeSessionTitle,
 } from './createSession.js'
+import { getPersistedBridgeSession } from './bridgeSessionMeta.js'
 import { logBridgeSkip } from './debugUtils.js'
 import { checkEnvLessBridgeMinVersion } from './envLessBridgeConfig.js'
 import { getPollIntervalConfig } from './pollConfig.js'
@@ -110,6 +112,22 @@ export type InitBridgeOptions = {
    */
   outboundOnly?: boolean
   tags?: string[]
+  /**
+   * densable reattachSessionId (P/q) — optional explicit reattach override.
+   * Env CLAUDE_BRIDGE_REATTACH_SESSION takes precedence and is consumed
+   * (deleted) when present so child re-init does not loop.
+   */
+  reattachSessionId?: string
+  /**
+   * densable reattachSequenceNum (O/V) — high-water for SSE resume.
+   * Env CLAUDE_BRIDGE_REATTACH_SEQ overrides when REATTACH_SESSION is set.
+   */
+  reattachSequenceNum?: number
+  /**
+   * densable sessionGroupingId (k/Q) — project grouping for create + rit.
+   * Env CLAUDE_BRIDGE_REATTACH_GROUPING used when reattaching from env.
+   */
+  sessionGroupingId?: string
 }
 
 export async function initReplBridge(
@@ -129,9 +147,60 @@ export async function initReplBridge(
     previouslyFlushedUUIDs,
     initialName,
     perpetual,
-    outboundOnly,
+    outboundOnly: outboundOnlyOpt,
     tags,
+    reattachSessionId: reattachSessionIdOpt,
+    reattachSequenceNum: reattachSequenceNumOpt,
+    sessionGroupingId: sessionGroupingIdOpt,
   } = options ?? {}
+
+  // densable initReplBridge: consume CLAUDE_BRIDGE_REATTACH_* once at entry
+  // (W/q/j/B/V) so left-arrow child reattach cannot loop on re-init.
+  // Then densable wXr: if no explicit reattach, resume process-local CXr meta.
+  const envReattachSession = process.env.CLAUDE_BRIDGE_REATTACH_SESSION
+  const envReattachSeq = process.env.CLAUDE_BRIDGE_REATTACH_SEQ
+  const envReattachGrouping = process.env.CLAUDE_BRIDGE_REATTACH_GROUPING
+  const envOutboundOnly = process.env.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY
+  if (envReattachSession) {
+    delete process.env.CLAUDE_BRIDGE_REATTACH_SESSION
+    delete process.env.CLAUDE_BRIDGE_REATTACH_SEQ
+    delete process.env.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY
+    delete process.env.CLAUDE_BRIDGE_REATTACH_GROUPING
+  }
+  let reattachSessionId = envReattachSession ?? reattachSessionIdOpt
+  let reattachSequenceNum = envReattachSession
+    ? envReattachSeq
+      ? Number.parseInt(envReattachSeq, 10) || undefined
+      : undefined
+    : reattachSequenceNumOpt
+  // densable: if (!q) { let Me=wXr(); if(Me) q=Me.id, V=Me.seq }
+  if (!reattachSessionId) {
+    const persisted = getPersistedBridgeSession()
+    if (persisted) {
+      reattachSessionId = persisted.id
+      reattachSequenceNum = persisted.seq
+      logForDebugging(
+        `[bridge:repl] Reattaching to persisted bridge session ${persisted.id} at seq ${persisted.seq}`,
+      )
+    }
+  }
+  // densable Q: if (q) Q=W?B:wXr()?.groupingId; else Q=k
+  // When reattaching from env use GROUPING env; from wXr use meta grouping;
+  // when creating fresh use option k.
+  let sessionGroupingId: string | undefined
+  if (reattachSessionId) {
+    if (envReattachSession) {
+      sessionGroupingId = envReattachGrouping || undefined
+    } else {
+      sessionGroupingId =
+        getPersistedBridgeSession()?.groupingId ?? sessionGroupingIdOpt
+    }
+  } else {
+    sessionGroupingId = sessionGroupingIdOpt
+  }
+  // Env OUTBOUND_ONLY forces outbound when set; else honor option.
+  const outboundOnly =
+    envReattachSession && isEnvTruthy(envOutboundOnly) ? true : outboundOnlyOpt
 
   // Wire the cse_ shim kill switch so toCompatSessionId respects the
   // GrowthBook gate. Daemon/SDK paths skip this — shim defaults to active.
@@ -416,10 +485,17 @@ export async function initReplBridge(
   // The env-based path below can ALSO use CCR v2 via CLAUDE_CODE_USE_CCR_V2.
   // tengu_bridge_repl_v2 gates env-less (no poll loop), not transport version.
   //
+  // densable 2.1.211 init is env-less-only (always Hzu). Local still keeps
+  // the v1 env-based path for GrowthBook-off / perpetual (KAIROS pointer).
+  // Reattach (rit / wXr) MUST use env-less: v1 cannot unarchive + resume Se.
+  // Force env-less when reattachSessionId is set (even if GB gate is off).
+  //
   // perpetual (assistant-mode session continuity via bridge-pointer.json) is
-  // env-coupled and not yet implemented here — fall back to env-based when set
-  // so KAIROS users don't silently lose cross-restart continuity.
-  if (isEnvLessBridgeEnabled() && !perpetual) {
+  // env-coupled and not yet implemented on env-less — fall back to env-based
+  // when set so KAIROS users don't silently lose cross-restart continuity
+  // (reattach overrides perpetual: left-arrow child reattach is densable Hzu).
+  const forceEnvLessReattach = Boolean(reattachSessionId)
+  if ((isEnvLessBridgeEnabled() || forceEnvLessReattach) && !perpetual) {
     const versionError = await checkEnvLessBridgeMinVersion()
     if (versionError) {
       logBridgeSkip(
@@ -431,7 +507,9 @@ export async function initReplBridge(
       return null
     }
     logForDebugging(
-      '[bridge:repl] Using env-less bridge path (tengu_bridge_repl_v2)',
+      forceEnvLessReattach && !isEnvLessBridgeEnabled()
+        ? `[bridge:repl] Forcing env-less path for reattach ${reattachSessionId}`
+        : '[bridge:repl] Using env-less bridge path (tengu_bridge_repl_v2)',
     )
     const { initEnvLessBridgeCore } = await import('./remoteBridgeCore.js')
     return initEnvLessBridgeCore({
@@ -443,13 +521,10 @@ export async function initReplBridge(
       toSDKMessages,
       initialHistoryCap,
       initialMessages,
-      // v2 always creates a fresh server session (new cse_* id), so
-      // previouslyFlushedUUIDs is not passed — there's no cross-session
-      // UUID collision risk, and the ref persists across enable→disable→
-      // re-enable cycles which would cause the new session to receive zero
-      // history (all UUIDs already in the set from the prior enable).
-      // v1 handles this by calling previouslyFlushedUUIDs.clear() on fresh
-      // session creation (replBridge.ts:768); v2 skips the param entirely.
+      // densable Hzu: reattachSessionId / reattachSequenceNum reuse Se when set.
+      // Fresh sessions mint a new cse_* id (no previouslyFlushedUUIDs — the set
+      // would block history across enable→disable→re-enable). Reattach skips
+      // initial history flush the same way (server already has events).
       onInboundMessage,
       onUserMessage,
       onPermissionResponse,
@@ -461,10 +536,14 @@ export async function initReplBridge(
       onStateChange,
       outboundOnly,
       tags,
+      sessionGroupingId,
+      reattachSessionId,
+      reattachSequenceNum,
     })
   }
 
   // ── v1 path: env-based (register/poll/ack/heartbeat) ──────────────────
+  // Not used for reattach (see forceEnvLessReattach above).
 
   const versionError = checkBridgeMinVersion()
   if (versionError) {
@@ -551,6 +630,9 @@ export async function initReplBridge(
     onSetMcpPermissionModeOverride,
     onStateChange,
     perpetual,
+    // densable classic Qt: B / He pass-through for left-arrow rit
+    outboundOnly,
+    sessionGroupingId,
   })
 }
 

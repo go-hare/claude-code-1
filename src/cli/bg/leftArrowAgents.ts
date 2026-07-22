@@ -10,21 +10,30 @@
  */
 
 import { randomUUID } from 'crypto'
-import { rm } from 'fs/promises'
+import { copyFile, mkdir, rm } from 'fs/promises'
+import { dirname } from 'path'
 import {
   deriveBackgroundSeed,
   seedForLeftArrow,
   type BackgroundSeedMessage,
 } from './helpers.js'
-import { writeA8qJobState } from '../../daemon/jobState.js'
+import {
+  readBgJobState,
+  writeA8qJobState,
+  writeBgJobState,
+} from '../../daemon/jobState.js'
 import {
   getOriginalCwd,
   getSessionId,
   isSessionPersistenceDisabled,
 } from '../../bootstrap/state.js'
-import { getCurrentSessionTitle } from '../../utils/sessionStorage.js'
+import {
+  getCurrentSessionTitle,
+  getTranscriptPathForSession,
+} from '../../utils/sessionStorage.js'
 import { asSessionId } from '../../types/ids.js'
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
+import { clearBridgeSessionMeta } from '../../bridge/bridgeSessionMeta.js'
 import { getReplBridgeHandle } from '../../bridge/replBridgeHandle.js'
 import {
   abandonCheckpointShells,
@@ -37,6 +46,13 @@ import {
   type BgCheckpointPayload,
   writeAdoptJson,
 } from '../../utils/bgCheckpoint.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { errorMessage } from '../../utils/errors.js'
+import { logError } from '../../utils/log.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js'
 
 export type LeftArrowOpenResult =
   | { ok: true; short: string; sessionId: string }
@@ -76,6 +92,17 @@ export type LeftArrowOpenOptions = {
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official aAf → hcn memoryToggledOff. */
   memoryToggledOff?: boolean
+  /**
+   * densable aAf `replyOnResume` — spawn with `--reply-on-resume` and
+   * lengthen bridge flush cap to 5s (default 2s).
+   */
+  replyOnResume?: boolean
+  /**
+   * densable aAf `abortAfterFlush` — query AbortController. After bridge
+   * teardown, session-storage flush (2s cap); after spawn kickoff, abort
+   * with reason `"background"` (official J0("background")).
+   */
+  abortAfterFlush?: AbortController
 }
 
 /**
@@ -106,9 +133,45 @@ export function buildBridgeReattachEnv(
   return env
 }
 
-const BRIDGE_FLUSH_CAP_MS = 2000
+/** densable aAf bridge flush cap (ms) when not replyOnResume. */
+export const BRIDGE_FLUSH_CAP_MS = 2000
+/** densable aAf bridge flush cap (ms) when replyOnResume. */
+export const BRIDGE_FLUSH_CAP_REPLY_ON_RESUME_MS = 5000
+/** densable aAf session-storage flush cap when abortAfterFlush (ms). */
+export const SESSION_FLUSH_CAP_MS = 2000
 /** Official pqb task-list carry cap (ms). */
 const TASK_LIST_CARRY_CAP_MS = 2000
+
+/**
+ * densable bridge flush timeout: replyOnResume → 5s else 2s.
+ */
+export function bridgeFlushCapMs(replyOnResume?: boolean): number {
+  return replyOnResume
+    ? BRIDGE_FLUSH_CAP_REPLY_ON_RESUME_MS
+    : BRIDGE_FLUSH_CAP_MS
+}
+
+/**
+ * densable nzu(je, tl) — idle-fork replyOnResume when turn-start snapshot
+ * still prefixes current messages and only non-user/assistant rows were
+ * appended since (no new user/assistant turn content).
+ */
+export function shouldReplyOnIdleFork(
+  snap: { length: number; uuid?: string } | null | undefined,
+  messages: readonly { type?: string; uuid?: string }[],
+): boolean {
+  if (snap == null || snap.length < 1 || snap.length > messages.length) {
+    return false
+  }
+  if (messages[snap.length - 1]?.uuid !== snap.uuid) {
+    return false
+  }
+  for (let i = snap.length; i < messages.length; i++) {
+    const t = messages[i]?.type
+    if (t === 'user' || t === 'assistant') return false
+  }
+  return true
+}
 
 async function withTimeout<T>(
   p: Promise<T>,
@@ -179,6 +242,149 @@ export async function carryTaskListToFork(
 }
 
 /**
+ * densable jo: attach telemetryMessage when object is extensible and field free.
+ * Swallows assign failures (same as official).
+ */
+export function attachErrorTelemetryMessage(
+  error: object,
+  telemetryMessage: string,
+): void {
+  try {
+    if (!('telemetryMessage' in error) && Object.isExtensible(error)) {
+      Object.assign(error, { telemetryMessage })
+    }
+  } catch {
+    /* densable jo swallows */
+  }
+}
+
+/**
+ * densable yNo reason suffix from err.code when it looks like a Node system code
+ * (`_p`: /^[A-Z][A-Z0-9_]{0,63}$/), else `spawn_failed_unknown`.
+ */
+export function spawnFailReasonFromError(err: unknown): string {
+  const code =
+    err !== null &&
+    typeof err === 'object' &&
+    'code' in err &&
+    typeof (err as { code?: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : undefined
+  if (code && /^[A-Z][A-Z0-9_]{0,63}$/.test(code)) {
+    return `spawn_failed_${code}`
+  }
+  return 'spawn_failed_unknown'
+}
+
+/**
+ * densable aAf yNo fail branch gate:
+ *   reason undefined | spawn_failed_unknown | spawn_failed_ERR_* → xe
+ *   else → C warn
+ * Note: spawn_failed_ENOENT (plain system codes) is **warn**, not xe.
+ */
+export function isBackgroundSpawnLogErrorReason(reason?: string): boolean {
+  return (
+    reason === undefined ||
+    reason === 'spawn_failed_unknown' ||
+    reason.startsWith('spawn_failed_ERR_')
+  )
+}
+
+/**
+ * densable aAf yNo fail branch:
+ *   logError path → xe(jo(Error(`background spawn failed: ${error}`), telemetry))
+ *   else → C(…, {level:"warn"})
+ *
+ * Local: logError ≈ xe; logForDebugging warn ≈ C. No UI toast (official none).
+ */
+export function reportBackgroundSpawnFail(
+  errorText: string,
+  reason?: string,
+): void {
+  if (isBackgroundSpawnLogErrorReason(reason)) {
+    const err = new Error(`background spawn failed: ${errorText}`)
+    attachErrorTelemetryMessage(
+      err,
+      `background spawn failed: ${reason ?? 'unclassified'}`,
+    )
+    logError(err)
+    return
+  }
+  logForDebugging(`background spawn failed: ${errorText}`, { level: 'warn' })
+}
+
+/** densable left-arrow fail detail when adopt delayed expire / retry. */
+export const LEFT_ARROW_SPAWN_FAIL_RETRY_DETAIL =
+  "couldn't start in the background \u2014 press Enter to retry"
+
+/**
+ * densable yNo fail branch when `!x.ok && left_arrow && providedSessionId &&
+ * resumeTranscript && !x.alive`:
+ *   copy resume jsonl → fork session jsonl
+ *   patch job state failed/idle + linkScanPath + respawnFlags
+ *   → We("repl_background_fork","queued_for_later")
+ *
+ * Returns true when job is kept for Enter-to-retry (do NOT rm job dir).
+ * densable short_alive skips this (`!x.alive` gate).
+ */
+export async function tryQueueLeftArrowSpawnFail(opts: {
+  short: string
+  providedSessionId: string
+  resumeSessionId: string
+  respawnFlags?: string[]
+}): Promise<boolean> {
+  const state = readBgJobState(opts.short)
+  if (!state) return false
+  const src = getTranscriptPathForSession(opts.resumeSessionId)
+  const dest = getTranscriptPathForSession(opts.providedSessionId)
+  try {
+    await mkdir(dirname(dest), { recursive: true })
+    await copyFile(src, dest)
+    writeBgJobState(opts.short, {
+      ...state,
+      state: 'failed',
+      tempo: 'idle',
+      needs: undefined,
+      block: undefined,
+      inFlight: undefined,
+      detail: LEFT_ARROW_SPAWN_FAIL_RETRY_DETAIL,
+      linkScanPath: dest,
+      respawnFlags: opts.respawnFlags ?? state.respawnFlags ?? [],
+      updatedAt: new Date().toISOString(),
+    })
+    return true
+  } catch (err) {
+    logError(err)
+    // densable: copy/rm fail → I=false, drop linkScanPath file best-effort
+    await rm(dest, { force: true }).catch(() => {})
+    return false
+  }
+}
+
+/**
+ * densable left_arrow fail telemetry:
+ *   queued → We / tengu_feature_sad queued_for_later
+ *   else → me / tengu_feature_bad spawn_failed
+ */
+export function reportLeftArrowSpawnFailOutcome(queued: boolean): void {
+  if (queued) {
+    logEvent('tengu_feature_sad', {
+      feature_name:
+        'repl_background_fork' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code:
+        'queued_for_later' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  } else {
+    logEvent('tengu_feature_bad', {
+      feature_name:
+        'repl_background_fork' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code:
+        'spawn_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
+}
+
+/**
  * Official Sj4/aAf body (without process.exit). Returns short/sessionId for FleetView.
  * Spawn is fire-and-forget like official ky6().then(...).
  */
@@ -193,14 +399,31 @@ export async function openAgentsViaLeftArrow(
     resumeSessionId = undefined
   }
 
+  // Handoff requires a resumable session. Without resumeSessionId we cannot
+  // submitDispatch — must not checkpoint/disown (would kill agents with no
+  // worker to resume them) and must not report ok.
+  if (!resumeSessionId) {
+    try {
+      takeLeftArrowCheckpointLive()
+    } catch {
+      /* best-effort — drop stashed CAo without abort */
+    }
+    return {
+      ok: false,
+      error:
+        'Cannot open agents — no active session id; background handoff requires a resumable session.',
+    }
+  }
+
   const sessionTitle =
     options?.sessionTitle ??
-    (resumeSessionId
-      ? getCurrentSessionTitle(asSessionId(resumeSessionId))
-      : undefined)
+    getCurrentSessionTitle(asSessionId(resumeSessionId))
 
   // Official Sj4: Vy6 non-null + persistence disabled → refuse.
   // Empty conversation (Vy6 null) still opens agents.
+  // densable aAf: return error string only — do NOT checkpoint/disown (would
+  // abort live agents with no fork to resume). Drop stashed CAo like the
+  // !resumeSessionId / job-state write-fail paths.
   if (
     isSessionPersistenceDisabled() &&
     deriveBackgroundSeed(messages, '', {
@@ -209,11 +432,10 @@ export async function openAgentsViaLeftArrow(
       agentColor: options?.agentColor,
     }) !== null
   ) {
-    // Still run post-adopt cleanup on stashed CAo so parent aborts don't leak.
     try {
-      await runLeftArrowPostAdoptCheckpoint()
+      takeLeftArrowCheckpointLive()
     } catch {
-      /* best-effort */
+      /* best-effort — drop stashed CAo without abort */
     }
     return {
       ok: false,
@@ -275,12 +497,19 @@ export async function openAgentsViaLeftArrow(
         ? reattachEnv.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY === '1'
         : undefined,
       bridgeSessionSeq: seq,
+      // densable hcn bridgeSessionGroupingId for rit n on worker respawn
+      bridgeSessionGroupingId: bridge?.sessionGroupingId,
       sessionPermissionRules: options?.sessionPermissionRules,
       memoryToggledOff: options?.memoryToggledOff,
     }))
   } catch (e) {
+    // densable: job-state write failed before handoff — drop stashed CAo
+    // without checkpointAgents/disown so session cron/agents stay in parent.
     try {
-      await runLeftArrowPostAdoptCheckpoint()
+      const { takeLeftArrowCheckpointLive } = await import(
+        '../../utils/bgCheckpoint.js'
+      )
+      takeLeftArrowCheckpointLive()
     } catch {
       /* best-effort */
     }
@@ -373,16 +602,40 @@ export async function openAgentsViaLeftArrow(
     takeLeftArrowCheckpointLive()
   }
 
-  // Official aAf: bridge flush (capped) + teardown({skipArchive:true}) before spawn.
+  // Official aAf: bridge flush (capped; 5s when replyOnResume) +
+  // teardown({skipArchive:true}) before spawn.
   if (bridge) {
     if (bridge.flush) {
-      await withTimeout(bridge.flush(), BRIDGE_FLUSH_CAP_MS, 'bridge flush')
+      await withTimeout(
+        bridge.flush(),
+        bridgeFlushCapMs(options?.replyOnResume),
+        'bridge flush',
+      )
     }
     try {
       await bridge.teardown({ skipArchive: true })
     } catch {
       // ignore
     }
+    // densable useReplBridge Rt&&!Be → kEo: left-arrow child has rit env;
+    // drop process-local wXr so parent re-init cannot reattach the same Se.
+    clearBridgeSessionMeta()
+  }
+
+  // densable yNo: await Ca(Gx(), 2000, "flush timeout") UNCONDITIONAL before
+  // Fbe spawn (idle-fork and abort-then-fork). Local previously only flushed
+  // when abortAfterFlush was set — idle left-arrow missed mid-turn bytes.
+  try {
+    const { flushSessionStorage } = await import(
+      '../../utils/sessionStorage.js'
+    )
+    await withTimeout(
+      flushSessionStorage(),
+      SESSION_FLUSH_CAP_MS,
+      'flush timeout',
+    )
+  } catch {
+    /* best-effort */
   }
 
   const abandonOnSpawnFail = (): void => {
@@ -402,43 +655,111 @@ export async function openAgentsViaLeftArrow(
     }
   }
 
-  // Official ky6 fire-and-forget; on failure abandon shells + rm job dir.
-  if (resumeSessionId) {
-    void (async () => {
-      try {
-        const { ensureDaemonRunning } = await import(
-          '../../daemon/installPrompt.js'
-        )
-        const daemon = await ensureDaemonRunning({
-          forceTransient: true,
-          mayPromptInstall: false,
-        })
-        if (!daemon.ok) {
-          abandonOnSpawnFail()
-          await rm(jobDir, { recursive: true, force: true }).catch(() => {})
-          return
-        }
-        const { submitDispatch } = await import('../../daemon/bgManager.js')
-        await submitDispatch({
-          intent: seed.intent ?? '',
-          name: seed.name,
-          cwd,
-          source: 'left_arrow',
-          resumeSessionId,
-          forkSession: true,
+  // densable yNo: eit(pNo(w)) → store non-resume/session-id flags for Enter retry.
+  // Local launch already encodes --resume/--fork; respawnFlags carry extras only.
+  const leftArrowRespawnFlags = options?.replyOnResume
+    ? ['--reply-on-resume']
+    : []
+
+  // Official ky6 fire-and-forget; on failure densable yNo may queue_for_later
+  // (copy transcript + failed job) instead of rm when !alive.
+  // densable gate: left_arrow && providedSessionId && resume && !x.alive
+  // short_alive (alive:true) must NOT queue — session already running.
+  // resumeSessionId is required (early return above); always dispatch.
+  void (async () => {
+    const handleSpawnFail = async (
+      errorText: string,
+      reason?: string,
+      /** densable x.alive — short already running skips queue_for_later */
+      alreadyAlive?: boolean,
+    ): Promise<void> => {
+      // densable M("tengu_background_spawn_failed",{})
+      logEvent('tengu_background_spawn_failed', {})
+      // densable: !x.alive required for queue; short_alive → spawn_failed only
+      let queued = false
+      if (!alreadyAlive) {
+        queued = await tryQueueLeftArrowSpawnFail({
+          short,
           providedSessionId,
-          isolation: worktree ? 'worktree' : undefined,
-          worktree: worktree ? { path: worktree.path } : undefined,
-          reattachEnv,
-          // Official BF_: CLAUDE_BG_SESSION_PERMISSION_RULES / MEMORY_TOGGLED_OFF
-          sessionPermissionRules: options?.sessionPermissionRules,
-          memoryToggledOff: options?.memoryToggledOff,
+          resumeSessionId,
+          respawnFlags: leftArrowRespawnFlags,
         })
-      } catch {
-        abandonOnSpawnFail()
-        await rm(jobDir, { recursive: true, force: true }).catch(() => {})
       }
-    })()
+      if (!queued) {
+        abandonOnSpawnFail()
+        // densable short_alive keeps job dir (attach target); only rm when
+        // queue failed / soft fail without alive worker.
+        if (!alreadyAlive) {
+          await rm(jobDir, { recursive: true, force: true }).catch(() => {})
+        }
+      }
+      // densable: if(I) We queued_for_later else me spawn_failed
+      reportLeftArrowSpawnFailOutcome(queued)
+      reportBackgroundSpawnFail(errorText, reason)
+    }
+
+    try {
+      const { ensureDaemonRunning } = await import(
+        '../../daemon/installPrompt.js'
+      )
+      const daemon = await ensureDaemonRunning({
+        forceTransient: true,
+        mayPromptInstall: false,
+      })
+      if (!daemon.ok) {
+        // densable: no {ok,reason} from yNo here — map soft daemon fail via
+        // reason text; non-spawn_failed_* → warn path after promote unknown.
+        const text =
+          typeof daemon.reason === 'string' && daemon.reason.length > 0
+            ? daemon.reason
+            : 'daemon not running'
+        // Soft probe fails are not Node ERR_* — use unknown so xe/logError fires
+        // (matches densable unclassified / spawn_failed_unknown severity).
+        // alive undefined → !alive → may queue.
+        await handleSpawnFail(text, 'spawn_failed_unknown', false)
+        return
+      }
+      const { submitDispatch } = await import('../../daemon/bgManager.js')
+      await submitDispatch({
+        intent: seed.intent ?? '',
+        name: seed.name,
+        cwd,
+        source: 'left_arrow',
+        resumeSessionId,
+        forkSession: true,
+        providedSessionId,
+        isolation: worktree ? 'worktree' : undefined,
+        worktree: worktree ? { path: worktree.path } : undefined,
+        reattachEnv,
+        // densable yNo: ...c?.replyOnResume?["--reply-on-resume"]:[]
+        extraArgs: options?.replyOnResume ? ['--reply-on-resume'] : undefined,
+        // Official BF_: CLAUDE_BG_SESSION_PERMISSION_RULES / MEMORY_TOGGLED_OFF
+        sessionPermissionRules: options?.sessionPermissionRules,
+        memoryToggledOff: options?.memoryToggledOff,
+      })
+    } catch (err) {
+      // densable yNo: x.alive from BF_ short_alive — gate queue on !alive
+      const alreadyAlive =
+        typeof err === 'object' &&
+        err !== null &&
+        'alive' in err &&
+        (err as { alive?: unknown }).alive === true
+      await handleSpawnFail(
+        errorMessage(err),
+        spawnFailReasonFromError(err),
+        alreadyAlive,
+      )
+    }
+  })()
+
+  // densable aAf: after yNo fire-and-forget kickoff —
+  //   a?.abortAfterFlush?.abort(J0("background"))
+  // J0 caches DOMException AbortError("background") so Yqe m()/RT matches.
+  if (options?.abortAfterFlush) {
+    const { createAbortErrorReason } = await import(
+      '../../utils/abortController.js'
+    )
+    options.abortAfterFlush.abort(createAbortErrorReason('background'))
   }
 
   return { ok: true, short, sessionId: providedSessionId }

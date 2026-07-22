@@ -47,12 +47,17 @@ import {
   handleIngressMessage,
   handleServerControlRequest,
   makeResultMessage,
+  makeWorkerShuttingDownMessage,
   isEligibleBridgeMessage,
   extractTitleText,
   shouldReportRunningForMessage,
   shouldReportRunningForMessages,
   BoundedUUIDSet,
 } from './bridgeMessaging.js'
+import {
+  clearBridgeSessionMeta,
+  saveBridgeSessionMeta,
+} from './bridgeSessionMeta.js'
 import { logBridgeSkip } from './debugUtils.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
@@ -64,7 +69,11 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
-import type { ReplBridgeHandle, BridgeState } from './replBridge.js'
+import type {
+  ReplBridgeHandle,
+  BridgeState,
+  ReplBridgeTeardownOpts,
+} from './replBridge.js'
 import type { Message } from '../types/message.js'
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import type {
@@ -147,6 +156,22 @@ export type EnvLessBridgeParams = {
   outboundOnly?: boolean
   /** Free-form tags for session categorization (e.g. ['ccr-mirror']). */
   tags?: string[]
+  /**
+   * densable sessionGroupingId (He) → handle.sessionGroupingId → rit GROUPING.
+   * Optional until bootstrap currentSessionBridgeGroupingId is fully densified.
+   */
+  sessionGroupingId?: string
+  /**
+   * densable reattachSessionId (se) — resume an existing cse_* session
+   * (left-arrow / teleport child). Unarchives then reuses the id; on gone
+   * falls back to createCodeSession.
+   */
+  reattachSessionId?: string
+  /**
+   * densable reattachSequenceNum (ie) → createV2ReplTransport initialSequenceNum
+   * so SSE resumes from the parent high-water mark (CLAUDE_BRIDGE_REATTACH_SEQ).
+   */
+  reattachSequenceNum?: number
 }
 
 /**
@@ -179,31 +204,95 @@ export async function initEnvLessBridgeCore(
     onStateChange,
     outboundOnly,
     tags,
+    sessionGroupingId,
+    reattachSessionId,
+    reattachSequenceNum,
   } = params
 
   const cfg = await getEnvLessBridgeConfig()
 
-  // ── 1. Create session (POST /v1/code/sessions, no env_id) ───────────────
-  const accessToken = getAccessToken()
-  if (!accessToken) {
+  // ── 1. Create or reattach session ───────────────────────────────────────
+  const initialAccessToken = getAccessToken()
+  if (!initialAccessToken) {
     logForDebugging('[remote-bridge] No OAuth token')
     return null
   }
+  // Stable non-undefined fallback for nested async paths (tsc control-flow).
+  const fallbackAccessToken: string = initialAccessToken
 
-  const createdSessionId = await withRetry(
-    () =>
-      createCodeSession(baseUrl, accessToken, title, cfg.http_timeout_ms, tags),
-    'createCodeSession',
-    cfg,
-  )
-  if (!createdSessionId) {
-    onStateChange?.('failed', 'Session creation failed — see debug log')
-    logBridgeSkip('v2_session_create_failed', undefined, true)
-    return null
+  // densable Hzu: reattachSessionId → unarchive → reuse Se; gone → mint fresh.
+  // `isReattaching` tracks whether the final sessionId is the reattached one
+  // (affects archive-on-creds-fail: densable skips archive when reattaching).
+  let isReattaching = Boolean(reattachSessionId)
+  let sessionId: string
+
+  async function mintFreshSession(): Promise<string | null> {
+    const created = await withRetry(
+      () =>
+        createCodeSession(
+          baseUrl,
+          // Prefer a fresh token if the caller refreshed mid-flight.
+          getAccessToken() ?? fallbackAccessToken,
+          title,
+          cfg.http_timeout_ms,
+          tags,
+          sessionGroupingId,
+        ),
+      'createCodeSession',
+      cfg,
+    )
+    if (created) {
+      logForDebugging(`[remote-bridge] Created session ${created}`)
+      logForDiagnosticsNoPII('info', 'bridge_repl_v2_session_created')
+    }
+    return created
   }
-  const sessionId: string = createdSessionId
-  logForDebugging(`[remote-bridge] Created session ${sessionId}`)
-  logForDiagnosticsNoPII('info', 'bridge_repl_v2_session_created')
+
+  if (reattachSessionId) {
+    sessionId = reattachSessionId
+    logForDebugging(`[remote-bridge] Reattaching to session ${sessionId}`)
+    logForDiagnosticsNoPII('info', 'bridge_repl_v2_session_reattached')
+    const unarchiveResult = await withRetry(
+      () =>
+        unarchiveSession(
+          sessionId,
+          baseUrl,
+          getAccessToken() ?? fallbackAccessToken,
+          orgUUID,
+          cfg.http_timeout_ms,
+        ),
+      'unarchiveSession',
+      cfg,
+    )
+    if (unarchiveResult?.outcome === 'gone') {
+      logForDebugging(
+        `[remote-bridge] Reattach ${sessionId} gone (unarchive ${String(unarchiveResult.status)}); minting fresh session`,
+      )
+      logForDiagnosticsNoPII('info', 'bridge_repl_v2_reattach_fallback')
+      logEvent('tengu_bridge_repl_env_expired_fresh_session', {
+        v2: true,
+        via: 'unarchive' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      const minted = await mintFreshSession()
+      if (!minted) {
+        onStateChange?.('failed', 'Session creation failed — see debug log')
+        logBridgeSkip('v2_session_create_failed', undefined, true)
+        return null
+      }
+      sessionId = minted
+      isReattaching = false
+    }
+    // unarchiveResult null = transient failure after retries; still try
+    // /bridge — server may accept without unarchive (409 already-active).
+  } else {
+    const minted = await mintFreshSession()
+    if (!minted) {
+      onStateChange?.('failed', 'Session creation failed — see debug log')
+      logBridgeSkip('v2_session_create_failed', undefined, true)
+      return null
+    }
+    sessionId = minted
+  }
 
   // ── 2. Fetch bridge credentials (POST /bridge → worker_jwt, expires_in, api_base_url) ──
   const credentials = await withRetry(
@@ -211,19 +300,33 @@ export async function initEnvLessBridgeCore(
       fetchRemoteCredentials(
         sessionId,
         baseUrl,
-        accessToken,
+        getAccessToken() ?? fallbackAccessToken,
         cfg.http_timeout_ms,
       ),
     'fetchRemoteCredentials',
     cfg,
   )
   if (!credentials) {
+    if (isReattaching) {
+      // densable: reattach /bridge fail is transient — surface retry prompt,
+      // do NOT archive the parent session.
+      logForDebugging(
+        `[remote-bridge] Reattach ${sessionId}: /bridge failed after unarchive; surfacing retry prompt`,
+      )
+      logForDiagnosticsNoPII('info', 'v2_remote_creds_reattach_transient')
+      onStateChange?.(
+        'failed',
+        "Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume.",
+      )
+      logBridgeSkip('v2_remote_creds_reattach_transient', undefined, true)
+      return null
+    }
     onStateChange?.('failed', 'Remote credentials fetch failed — see debug log')
     logBridgeSkip('v2_remote_creds_failed', undefined, true)
     void archiveSession(
       sessionId,
       baseUrl,
-      accessToken,
+      getAccessToken() ?? fallbackAccessToken,
       orgUUID,
       cfg.http_timeout_ms,
     )
@@ -246,6 +349,8 @@ export async function initEnvLessBridgeCore(
       epoch: credentials.worker_epoch,
       heartbeatIntervalMs: cfg.heartbeat_interval_ms,
       heartbeatJitterFraction: cfg.heartbeat_jitter_fraction,
+      // densable: initialSequenceNum only when still reattaching (ne?ie:void 0)
+      initialSequenceNum: isReattaching ? reattachSequenceNum : undefined,
       // Per-instance closure — keeps the worker JWT out of
       // process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN, which mcp/client.ts
       // reads ungatedly and would otherwise send to user-configured ws/http
@@ -261,13 +366,17 @@ export async function initEnvLessBridgeCore(
     )
     onStateChange?.('failed', `Transport setup failed: ${errorMessage(err)}`)
     logBridgeSkip('v2_transport_setup_failed', undefined, true)
-    void archiveSession(
-      sessionId,
-      baseUrl,
-      accessToken,
-      orgUUID,
-      cfg.http_timeout_ms,
-    )
+    // densable: skip archive on failed reattach transport so parent session
+    // remains recoverable.
+    if (!isReattaching) {
+      void archiveSession(
+        sessionId,
+        baseUrl,
+        getAccessToken() ?? fallbackAccessToken,
+        orgUUID,
+        cfg.http_timeout_ms,
+      )
+    }
     return null
   }
   logForDebugging(
@@ -694,25 +803,83 @@ export async function initEnvLessBridgeCore(
   //   - archive: teardown_archive_timeout_ms (default 1500, cap 2000)
   //   - result write: fire-and-forget, archive latency covers the drain
   //   - 401 retry: only if first archive 401s, shares the same budget
-  async function teardown(): Promise<void> {
-    if (tornDown) return
+  // densable To/Ks: skipArchive → idle/result + close, no archive
+  // (left-arrow rit reattach).
+  let teardownPromise: Promise<void> | undefined
+  let skipArchiveLatch = false
+  let teardownReason: string | undefined
+  async function teardown(opts?: ReplBridgeTeardownOpts): Promise<void> {
+    if (opts?.skipArchive) skipArchiveLatch = true
+    if (opts?.reason) teardownReason = opts.reason
+    if (teardownPromise) return teardownPromise
     tornDown = true
+    teardownPromise = runTeardown()
+    return teardownPromise
+  }
+  async function runTeardown(): Promise<void> {
     refresh.cancelAll()
     clearTimeout(connectDeadline)
     flushGate.drop()
 
-    // Fire the result message before archive — transport.write() only awaits
-    // enqueue (SerialBatchEventUploader resolves once buffered, drain is
-    // async). Archiving before close() gives the uploader's drain loop a
-    // window (typical archive ≈ 100-500ms) to POST the result without an
-    // explicit sleep. close() sets closed=true which interrupts drain at the
-    // next while-check, so close-before-archive drops the result.
+    // densable Ks: idle → optional mzu(reason) → qls(result) → skip or archive.
     transport.reportState('idle')
+    if (teardownReason !== undefined) {
+      const reasonMsg = {
+        ...makeWorkerShuttingDownMessage(sessionId, teardownReason),
+        session_id: sessionId,
+      } as unknown as TransportMessage
+      void transport.write(reasonMsg as StdoutMessage)
+    }
     const resultMsg = {
       ...makeResultMessage(sessionId),
       session_id: sessionId,
     } as unknown as TransportMessage
     void transport.write(resultMsg as StdoutMessage)
+
+    // densable Ks Kr: skipArchive → flush(300) only when reason set + close; no archive.
+    // Leave CXr meta so child/re-init can wXr (hook kEo on left-arrow Rt).
+    if (skipArchiveLatch) {
+      try {
+        const seq = transport.getLastSequenceNum()
+        saveBridgeSessionMeta(sessionId, seq, {
+          groupingId: sessionGroupingId,
+        })
+      } catch {
+        /* best-effort CXr */
+      }
+      // densable: if (eo!==void 0) await Promise.race([flush, 300])
+      if (teardownReason !== undefined) {
+        try {
+          await Promise.race([
+            transport.flush?.() ?? Promise.resolve(),
+            sleep(300),
+          ])
+        } catch {
+          /* best-effort */
+        }
+      }
+      transport.close()
+      logForDebugging(
+        `[remote-bridge] Teardown complete (skipArchive): session=${sessionId}`,
+      )
+      logForDiagnosticsNoPII('info', 'bridge_repl_v2_teardown')
+      logEvent(
+        feature('CCR_MIRROR') && outboundOnly
+          ? 'tengu_ccr_mirror_teardown'
+          : 'tengu_bridge_repl_teardown',
+        {
+          v2: true,
+          archive_status:
+            'skipped_teleport' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          archive_ok: false,
+        },
+      )
+      return
+    }
+
+    // Full teardown: densable kEo — clear in-process bridge meta.
+    clearBridgeSessionMeta()
+
     let token = getAccessToken()
     let status = await archiveSession(
       sessionId,
@@ -779,7 +946,7 @@ export async function initEnvLessBridgeCore(
       },
     )
   }
-  const unregister = registerCleanup(teardown)
+  const unregister = registerCleanup(() => teardown())
 
   if (feature('CCR_MIRROR') && outboundOnly) {
     logEvent('tengu_ccr_mirror_started', {
@@ -796,7 +963,19 @@ export async function initEnvLessBridgeCore(
   }
 
   // ── 10. Handle ──────────────────────────────────────────────────────────
-  // densable Qt: sessionGroupingId:He, outboundOnly:B??!1
+  // densable CXr: seed process meta so re-init / wXr can reattach without
+  // REATTACH env (same-process disable→enable). skipArchive leaves this set.
+  const effectiveGrouping = sessionGroupingId
+  saveBridgeSessionMeta(
+    sessionId,
+    isReattaching ? (reattachSequenceNum ?? 0) : 0,
+    {
+      groupingId: effectiveGrouping,
+    },
+  )
+
+  // densable Qt: sessionGroupingId:He, outboundOnly:B??!1,
+  // getLastSequenceNum, flush for left-arrow rit CLAUDE_BRIDGE_REATTACH_SEQ.
   // outboundOnly must be a boolean on the handle so left-arrow rit() sees
   // false (omit env) when unset — not undefined (local rit treated as true).
   return {
@@ -804,9 +983,17 @@ export async function initEnvLessBridgeCore(
     environmentId: '',
     sessionIngressUrl: credentials.api_base_url,
     outboundOnly: outboundOnly ?? false,
-    // Grouping id is densable He (reattach B / wXr grouping / new k). Local
-    // has no bootstrap currentSessionBridgeGroupingId yet — leave undefined.
-    sessionGroupingId: undefined,
+    // densable He — pass-through from params / reattach bootstrap when present.
+    sessionGroupingId: effectiveGrouping,
+    getLastSequenceNum() {
+      return transport.getLastSequenceNum()
+    },
+    getSSESequenceNum() {
+      return transport.getLastSequenceNum()
+    },
+    flush() {
+      return transport.flush?.() ?? Promise.resolve()
+    },
     writeMessages(messages) {
       const filtered = messages.filter(
         m =>
@@ -939,9 +1126,9 @@ export async function initEnvLessBridgeCore(
       void transport.write(resultMsg as StdoutMessage)
       logForDebugging(`[remote-bridge] Sent result`)
     },
-    async teardown() {
+    async teardown(opts?: ReplBridgeTeardownOpts) {
       unregister()
-      await teardown()
+      await teardown(opts)
     },
   }
 }
@@ -976,11 +1163,13 @@ async function withRetry<T>(
 // without pulling in this file's heavy CLI tree (analytics, transport).
 export {
   createCodeSession,
+  unarchiveCodeSession,
   type RemoteCredentials,
 } from './codeSessionApi.js'
 import {
   createCodeSession,
   fetchRemoteCredentials as fetchRemoteCredentialsRaw,
+  unarchiveCodeSession,
   type RemoteCredentials,
 } from './codeSessionApi.js'
 import { getBridgeBaseUrlOverride } from './bridgeConfig.js'
@@ -1019,6 +1208,55 @@ type ArchiveTelemetryStatus =
   | 'network_error'
   | 'server_4xx'
   | 'server_5xx'
+  | 'skipped_teleport'
+
+/**
+ * densable $Xg unarchive outcome for reattach.
+ * - ok: 2xx or 409 (already active)
+ * - gone: invalid id / 400 / 403 / 404 — mint fresh session
+ * - null: transient failure — still try /bridge
+ */
+type UnarchiveOutcome =
+  | { outcome: 'ok' }
+  | { outcome: 'gone'; status: number | 'invalid' }
+  | null
+
+async function unarchiveSession(
+  sessionId: string,
+  baseUrl: string,
+  accessToken: string | undefined,
+  orgUUID: string,
+  timeoutMs: number,
+): Promise<UnarchiveOutcome> {
+  // densable $Xg: missing token → treat as ok (skip unarchive).
+  if (!accessToken) return { outcome: 'ok' }
+  const status = await unarchiveCodeSession(
+    sessionId,
+    baseUrl,
+    accessToken,
+    orgUUID,
+    timeoutMs,
+    getTrustedDeviceToken(),
+  )
+  if (status === 'invalid') {
+    logForDiagnosticsNoPII('info', 'bridge_repl_v2_unarchive_invalid_id')
+    return { outcome: 'gone', status: 'invalid' }
+  }
+  if (typeof status !== 'number') {
+    logForDiagnosticsNoPII('info', 'bridge_repl_v2_unarchive_failed')
+    return null
+  }
+  const ok = status < 300 || status === 409
+  logForDiagnosticsNoPII(
+    'info',
+    ok ? 'bridge_repl_v2_unarchive_ok' : 'bridge_repl_v2_unarchive_failed',
+  )
+  if (ok) return { outcome: 'ok' }
+  if (status === 400 || status === 403 || status === 404) {
+    return { outcome: 'gone', status }
+  }
+  return null
+}
 
 async function archiveSession(
   sessionId: string,

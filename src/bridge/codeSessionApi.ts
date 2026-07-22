@@ -12,6 +12,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { extractErrorDetail } from './debugUtils.js'
+import { toCompatSessionId } from './sessionIdCompat.js'
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -29,6 +30,11 @@ export async function createCodeSession(
   title: string,
   timeoutMs: number,
   tags?: string[],
+  /**
+   * densable session_grouping_id (l) — optional project grouping for
+   * claude.ai session cards / reattach GROUPING.
+   */
+  sessionGroupingId?: string,
 ): Promise<string | null> {
   const url = `${baseUrl}/v1/code/sessions`
   let response
@@ -38,7 +44,15 @@ export async function createCodeSession(
       // bridge: {} is the positive signal for the oneof runner — omitting it
       // (or sending environment_id: "") now 400s. BridgeRunner is an empty
       // message today; it's a placeholder for future bridge-specific options.
-      { title, bridge: {}, ...(tags?.length ? { tags } : {}) },
+      // densable: ...l && {session_grouping_id:l}
+      {
+        title,
+        bridge: {},
+        ...(tags?.length ? { tags } : {}),
+        ...(sessionGroupingId
+          ? { session_grouping_id: sessionGroupingId }
+          : {}),
+      },
       {
         headers: oauthHeaders(accessToken),
         timeout: timeoutMs,
@@ -88,6 +102,53 @@ export type RemoteCredentials = {
   api_base_url: string
   expires_in: number
   worker_epoch: number
+}
+
+/**
+ * densable Nls/czu Unarchive — POST /v1/sessions/{compatId}/unarchive.
+ * Same compat path as archive (not /v1/code/sessions). Returns status or
+ * error token; "invalid" when session id cannot be retagged.
+ */
+export async function unarchiveCodeSession(
+  sessionId: string,
+  baseUrl: string,
+  accessToken: string,
+  orgUUID: string,
+  timeoutMs: number,
+  /** Optional: inject trusted-device header (CLI path). */
+  trustedDeviceToken?: string,
+): Promise<number | 'timeout' | 'error' | 'invalid'> {
+  if (!sessionId) return 'invalid'
+  const compatId = toCompatSessionId(sessionId)
+  if (!compatId) return 'invalid'
+  try {
+    const headers = oauthHeaders(accessToken)
+    headers['anthropic-beta'] = 'ccr-byoc-2025-07-29'
+    headers['x-organization-uuid'] = orgUUID
+    if (trustedDeviceToken) {
+      headers['X-Trusted-Device-Token'] = trustedDeviceToken
+    }
+    const response = await axios.post(
+      `${baseUrl}/v1/sessions/${compatId}/unarchive`,
+      {},
+      {
+        headers,
+        timeout: timeoutMs,
+        validateStatus: () => true,
+      },
+    )
+    logForDebugging(
+      `[code-session] Unarchive ${compatId} status=${response.status}`,
+    )
+    return response.status
+  } catch (err: unknown) {
+    logForDebugging(
+      `[code-session] Unarchive ${compatId} failed: ${errorMessage(err)}`,
+    )
+    return axios.isAxiosError(err) && err.code === 'ECONNABORTED'
+      ? 'timeout'
+      : 'error'
+  }
 }
 
 export async function fetchRemoteCredentials(

@@ -577,6 +577,29 @@ export function makeResultMessage(sessionId: string): SDKResultSuccess {
   }
 }
 
+/**
+ * densable mzu(e,t) — host-exit reason before result on teardown.
+ * Written when teardown({ reason }) is set (useReplBridge host_exit / disable).
+ */
+export function makeWorkerShuttingDownMessage(
+  sessionId: string,
+  reason: string,
+): {
+  type: 'system'
+  subtype: 'worker_shutting_down'
+  reason: string
+  session_id: string
+  uuid: string
+} {
+  return {
+    type: 'system',
+    subtype: 'worker_shutting_down',
+    reason,
+    session_id: sessionId,
+    uuid: randomUUID(),
+  }
+}
+
 // ─── BoundedUUIDSet (echo-dedup ring buffer) ─────────────────────────────────
 
 /**

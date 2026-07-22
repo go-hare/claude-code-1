@@ -10,6 +10,7 @@ import {
 import { handleRemoteInterrupt } from '../bridge/remoteInterruptHandling.js';
 import { isTranscriptResetResultReady, shouldDeferBridgeResult } from '../bridge/bridgeResultScheduling.js';
 import { buildBridgeConnectUrl } from '../bridge/bridgeStatusUtil.js';
+import { clearBridgeSessionMeta, saveBridgeSessionMeta } from '../bridge/bridgeSessionMeta.js';
 import { extractInboundMessageFields } from '../bridge/inboundMessages.js';
 import type { BridgeState, ReplBridgeHandle } from '../bridge/replBridge.js';
 import { setReplBridgeHandle } from '../bridge/replBridgeHandle.js';
@@ -635,6 +636,16 @@ export function useReplBridge(
           // already loaded as session events during creation.
           lastWrittenIndexRef.current = initialMessageCount;
 
+          // densable CXr on connect — process-local meta for wXr re-init
+          // (same-process disable→enable / left-arrow without REATTACH env).
+          if (!outboundOnly) {
+            saveBridgeSessionMeta(
+              handle.bridgeSessionId,
+              handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0,
+              { groupingId: handle.sessionGroupingId },
+            );
+          }
+
           if (outboundOnly) {
             setAppState(prev => {
               if (prev.replBridgeConnected && prev.replBridgeSessionId === handle.bridgeSessionId) return prev;
@@ -777,10 +788,34 @@ export function useReplBridge(
         clearTimeout(failureTimeoutRef.current);
         failureTimeoutRef.current = undefined;
         if (handleRef.current) {
+          const handle = handleRef.current;
+          // densable cleanup: reason + CXr/kEo before teardown.
+          // - remote_control_disabled: user toggled /config off (enabled false)
+          // - host_exit: process exit / unmount while still enabled
+          // Left-arrow may have already latched skipArchive via handle.teardown
+          // ({skipArchive:true}); joining To preserves the latch.
+          const stillEnabled = store.getState().replBridgeEnabled;
+          const isDisable = !stillEnabled;
+          if (!outboundOnly) {
+            if (isDisable) {
+              // densable FCs / kEo on full disable — drop wXr reattach target.
+              clearBridgeSessionMeta();
+            } else {
+              // densable CXr: keep seq/grouping for same-process re-init.
+              saveBridgeSessionMeta(
+                handle.bridgeSessionId,
+                handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0,
+                { groupingId: handle.sessionGroupingId },
+              );
+            }
+          }
+          // densable: ur = Rt||Be||Et ? void 0 : Tt?"remote_control_disabled":"host_exit"
+          // (skipArchive / outbound / mode-flip → no reason; else disable vs exit)
+          const reason = outboundOnly ? undefined : isDisable ? 'remote_control_disabled' : 'host_exit';
           logForDebugging(
-            `[bridge:repl] Hook cleanup: starting teardown for env=${handleRef.current.environmentId} session=${handleRef.current.bridgeSessionId}`,
+            `[bridge:repl] Hook cleanup: starting teardown for env=${handle.environmentId} session=${handle.bridgeSessionId}${reason ? ` reason=${reason}` : ''}`,
           );
-          teardownPromiseRef.current = handleRef.current.teardown();
+          teardownPromiseRef.current = handle.teardown(reason ? { reason } : undefined);
           handleRef.current = null;
           setReplBridgeHandle(null);
         }
