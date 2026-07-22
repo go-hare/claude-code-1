@@ -17,11 +17,20 @@ import { isTestNoGitBash } from './residualFinalEnvGates.js'
  */
 export function setShellIfWindows(): void {
   if (getPlatform() === 'windows') {
-    const gitBashPath = findGitBashPath()
-    process.env.SHELL = gitBashPath
-    // Propagate to child processes so they skip filesystem probing
-    process.env.CLAUDE_CODE_GIT_BASH_PATH = gitBashPath
-    logForDebugging(`Using bash path: "${gitBashPath}"`)
+    // densable: missing Git Bash must not process.exit when PowerShell tool is
+    // available — resolveDefaultShell already prefers powershell on Windows.
+    const gitBashPath = findGitBashPathOrNull()
+    if (gitBashPath) {
+      process.env.SHELL = gitBashPath
+      // Propagate to child processes so they skip filesystem probing
+      process.env.CLAUDE_CODE_GIT_BASH_PATH = gitBashPath
+      logForDebugging(`Using bash path: "${gitBashPath}"`)
+      return
+    }
+    // No Git Bash: leave SHELL unset / prior value; PowerShell tool remains default.
+    logForDebugging(
+      'Git Bash not found on Windows; PowerShell tool remains available (Bash tool will fail if invoked)',
+    )
   }
 }
 

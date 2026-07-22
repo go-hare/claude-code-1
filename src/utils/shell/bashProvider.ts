@@ -87,7 +87,9 @@ export async function createBashShellProvider(
     // is the "shell popup appears then vanishes" flash. BashTool children
     // do not need to outlive the parent (tree-kill / taskkill /T); keep
     // detached only where POSIX process groups matter.
-    detached: getPlatform() !== 'windows',
+    // Use process.platform (not getPlatform) so unit tests that mock
+    // platform.js to "windows" do not flip Unix detached in the same process.
+    detached: process.platform !== 'win32',
 
     async buildExecCommand(
       command: string,
