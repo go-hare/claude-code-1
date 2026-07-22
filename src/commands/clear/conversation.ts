@@ -212,8 +212,10 @@ export async function clearConversation({
         },
         // Reset MCP state to default to trigger re-initialization.
         // Preserve pluginReconnectKey so /clear doesn't cause a no-op
-        // (it's only bumped by /reload-plugins).
+        // (it's only bumped by /reload-plugins). densable clientsInitialized
+        // resets to false so gDs waits for the next pending-init stamp.
         mcp: {
+          clientsInitialized: false,
           clients: [],
           tools: [],
           commands: [],

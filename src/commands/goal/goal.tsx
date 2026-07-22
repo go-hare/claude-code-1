@@ -45,7 +45,15 @@ function truncateForDisplay(objective: string): string {
 }
 
 function drainGoalContinuationQueue(): void {
-  removeByFilter(cmd => cmd.origin === 'goal-continuation' || cmd.origin === 'goal-budget-limit');
+  removeByFilter(cmd => {
+    const kind =
+      typeof cmd.origin === 'string'
+        ? cmd.origin
+        : cmd.origin && typeof cmd.origin === 'object'
+          ? cmd.origin.kind
+          : undefined;
+    return kind === 'goal-continuation' || kind === 'goal-budget-limit';
+  });
 }
 
 function formatGoalStatus(): string {

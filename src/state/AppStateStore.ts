@@ -194,6 +194,12 @@ export type AppState = DeepImmutable<{
   companionPetAt?: number
   // TODO (ashwin): see if we can use utility-types DeepReadonly for this
   mcp: {
+    /**
+     * densable `clientsInitialized` — flips true after the first pending-init
+     * pass (useManageMCPConnections initializeServersAsPending). gDs /
+     * isMcpClientsSettled requires this === true before deferred adopt resume.
+     */
+    clientsInitialized: boolean
     clients: MCPServerConnection[]
     tools: Tool[]
     commands: Command[]
@@ -429,14 +435,22 @@ export type AppState = DeepImmutable<{
   // Auth version - incremented on login/logout to trigger re-fetching of auth-dependent data
   authVersion: number
   // Initial message to process (from CLI args or plan mode exit)
-  // When set, REPL will process the message and trigger a query
-  initialMessage: {
-    message: UserMessage
-    clearContext?: boolean
-    mode?: PermissionMode
-    // Session-scoped permission rules from plan mode (e.g., "run tests", "install dependencies")
-    allowedPrompts?: AllowedPrompt[]
-  } | null
+  // When set, REPL will process the message and trigger a query.
+  // densable `a.replyOnResume?{replay:!0}` — mid-turn bg fork sets replay
+  // without a fresh user string; REPL strips NRR sentinel and onQuery([]).
+  initialMessage:
+    | {
+        message: UserMessage
+        clearContext?: boolean
+        mode?: PermissionMode
+        // Session-scoped permission rules from plan mode (e.g., "run tests", "install dependencies")
+        allowedPrompts?: AllowedPrompt[]
+      }
+    | {
+        /** densable reply-on-resume interactive consume path */
+        replay: true
+      }
+    | null
   // Pending plan verification state (set when exiting plan mode)
   // Used by VerifyPlanExecution tool to trigger background verification
   pendingPlanVerification?: {
@@ -551,6 +565,7 @@ export function getDefaultAppState(): AppState {
     },
     attribution: createEmptyAttributionState(),
     mcp: {
+      clientsInitialized: false,
       clients: [],
       tools: [],
       commands: [],

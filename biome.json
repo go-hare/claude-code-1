@@ -13,7 +13,9 @@
       "!!**/*.workflow.mjs",
       "!!src/workflow/bundled/*.js",
       "!!docs/reference",
-      "!!docs/upstream-extraction"
+      "!!docs/upstream-extraction",
+      "!!tmp",
+      "!!tmp"
     ]
   },
   "formatter": {

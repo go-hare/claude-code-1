@@ -20,7 +20,15 @@ export type LeftArrowAgentsHandoff = {
   messages?: BackgroundSeedMessage[];
 } & Pick<
   LeftArrowOpenOptions,
-  'via' | 'partialText' | 'boundaryUuid' | 'agentsCount' | 'checkpoint' | 'sessionPermissionRules' | 'memoryToggledOff'
+  | 'via'
+  | 'partialText'
+  | 'boundaryUuid'
+  | 'agentsCount'
+  | 'checkpoint'
+  | 'sessionPermissionRules'
+  | 'memoryToggledOff'
+  | 'replyOnResume'
+  | 'abortAfterFlush'
 >;
 
 export type LaunchReplResult =
@@ -63,6 +71,9 @@ export async function launchRepl(
             checkpoint: payload?.checkpoint,
             sessionPermissionRules: payload?.sessionPermissionRules,
             memoryToggledOff: payload?.memoryToggledOff,
+            // densable aAf: replyOnResume + abortAfterFlush (query AC)
+            replyOnResume: payload?.replyOnResume,
+            abortAfterFlush: payload?.abortAfterFlush,
           };
           // In normal mode: hand off alt screen / raw mode so unmount does NOT
           // write EXIT_ALT_SCREEN (or drop raw on Windows). Without this, ←

@@ -3293,6 +3293,8 @@ async function run(): Promise<CommanderCommand> {
           ...defaultState,
           mcp: {
             ...defaultState.mcp,
+            // Prefetched clients are already known — densable clientsInitialized.
+            clientsInitialized: true,
             clients: mcpClients,
             commands: mcpCommands,
             tools: mcpTools,
@@ -3348,6 +3350,9 @@ async function run(): Promise<CommanderCommand> {
             ...prev,
             mcp: {
               ...prev.mcp,
+              // densable: stamp clientsInitialized when server registry known
+              // (pending entries still block gDs until they leave "pending").
+              clientsInitialized: true,
               clients: [
                 ...prev.mcp.clients,
                 ...Object.entries(configs).map(([name, config]) => ({
@@ -3363,6 +3368,7 @@ async function run(): Promise<CommanderCommand> {
               ...prev,
               mcp: {
                 ...prev.mcp,
+                clientsInitialized: true,
                 clients: prev.mcp.clients.some(c => c.name === client.name)
                   ? prev.mcp.clients.map(c => (c.name === client.name ? client : c))
                   : [...prev.mcp.clients, client],
@@ -3639,6 +3645,7 @@ async function run(): Promise<CommanderCommand> {
         agent: mainThreadAgentDefinition?.agentType,
         agentDefinitions,
         mcp: {
+          clientsInitialized: false,
           clients: [],
           tools: [],
           commands: [],
@@ -3714,13 +3721,18 @@ async function run(): Promise<CommanderCommand> {
         pendingWorkerRequest: null,
         pendingSandboxRequest: null,
         authVersion: 0,
+        // densable: Fr?{message}:a.replyOnResume?{replay:!0}:null
+        // Mid-turn bg worker has no prompt string — REPL consumes {replay:true}
+        // via LVr strip + onQuery([]) (not print.ts headless path).
         initialMessage: inputPrompt
           ? {
               message: createUserMessage({
                 content: String(inputPrompt),
               }),
             }
-          : null,
+          : options.replyOnResume
+            ? { replay: true as const }
+            : null,
         effortValue: parseEffortValue(options.effort) ?? getInitialEffortSetting(),
         activeOverlays: new Set<string>(),
         fastMode: getInitialFastModeSetting(resolvedInitialModel),
@@ -3832,7 +3844,10 @@ async function run(): Promise<CommanderCommand> {
           const { clearSessionCaches } = await import('./commands/clear/caches.js');
           clearSessionCaches();
 
-          const result = await loadConversationForResume(undefined /* sessionId */, undefined /* sourceFile */);
+          // densable p1e(..., {forkSession, replyOnResume})
+          const result = await loadConversationForResume(undefined /* sessionId */, undefined /* sourceFile */, {
+            replyOnResume: !!options.replyOnResume,
+          });
           if (!result) {
             logEvent('tengu_continue', {
               success: false,
@@ -3846,6 +3861,7 @@ async function run(): Promise<CommanderCommand> {
               forkSession: !!options.forkSession,
               includeAttribution: true,
               transcriptPath: result.fullPath,
+              replyOnResume: !!options.replyOnResume,
             },
             resumeContext,
           );
@@ -4453,7 +4469,10 @@ async function run(): Promise<CommanderCommand> {
             const resumeStart = performance.now();
             // Use matchedLog if available (for cross-worktree resume by custom title)
             // Otherwise fall back to sessionId string (for direct UUID resume)
-            const result = await loadConversationForResume(matchedLog ?? sessionId, undefined);
+            // densable p1e(sid, ..., {forkSession, replyOnResume})
+            const result = await loadConversationForResume(matchedLog ?? sessionId, undefined, {
+              replyOnResume: !!options.replyOnResume,
+            });
 
             if (!result) {
               logEvent('tengu_session_resumed', {
@@ -4470,6 +4489,7 @@ async function run(): Promise<CommanderCommand> {
                 forkSession: !!options.forkSession,
                 sessionIdOverride: sessionId,
                 transcriptPath: fullPath,
+                replyOnResume: !!options.replyOnResume,
               },
               resumeContext,
             );
@@ -4626,7 +4646,8 @@ async function run(): Promise<CommanderCommand> {
             process.stdin.ref();
           }
           const { openAgentsViaLeftArrow } = await import('./cli/bg/leftArrowAgents.js');
-          // Official aAf: forward full left-arrow payload (via/partial/boundary/checkpoint).
+          // Official aAf: forward full left-arrow payload
+          // (via/partial/boundary/checkpoint/replyOnResume/abortAfterFlush).
           const handoff = await openAgentsViaLeftArrow(replResult.messages, {
             via: replResult.via,
             partialText: replResult.partialText,
@@ -4635,6 +4656,8 @@ async function run(): Promise<CommanderCommand> {
             checkpoint: replResult.checkpoint,
             sessionPermissionRules: replResult.sessionPermissionRules,
             memoryToggledOff: replResult.memoryToggledOff,
+            replyOnResume: replResult.replyOnResume,
+            abortAfterFlush: replResult.abortAfterFlush,
           });
           const { renderAgentView } = await import('./screens/AgentView.js');
           if (!handoff.ok) {

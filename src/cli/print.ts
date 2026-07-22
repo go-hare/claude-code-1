@@ -175,6 +175,7 @@ import { extractInboundMessageFields } from 'src/bridge/inboundMessages.js'
 import { resolveAndPrepend } from 'src/bridge/inboundAttachments.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import { hasPermissionsToUseTool } from 'src/utils/permissions/permissions.js'
+import { buildMcpToolName } from 'src/services/mcp/mcpStringUtils.js'
 import { safeParseJSON } from 'src/utils/json.js'
 import {
   outputSchema as permissionToolOutputSchema,
@@ -5535,7 +5536,7 @@ function handleChannelEnable(
         value: wrapChannelMessage(serverName, content, meta),
         priority: 'next',
         isMeta: true,
-        origin: { kind: 'channel', server: serverName } as unknown as string,
+        origin: { kind: 'channel', server: serverName },
         skipSlashCommands: true,
       })
     },
@@ -5614,7 +5615,7 @@ function reregisterChannelHandlerAfterReconnect(
         origin: {
           kind: 'channel',
           server: connection.name,
-        } as unknown as string,
+        },
         skipSlashCommands: true,
       })
     },
@@ -5698,6 +5699,8 @@ async function loadInitialMessages(
     try {
       logEvent('tengu_continue_print', {})
 
+      // Print path keeps interrupt+NRR sentinel so removeInterruptedMessage +
+      // re-enqueue works; interactive mid-turn uses {replay:true} instead.
       const result = await loadConversationForResume(
         undefined /* sessionId */,
         undefined /* file path */,
@@ -6196,15 +6199,167 @@ export type DynamicMcpState = {
 }
 
 /**
- * Converts a process transport config to a scoped config.
- * The types are structurally compatible, so we just add the scope.
+ * densable a$f — fold mcp_set_servers tools[].org_max_permission into
+ * toolPermissions (skip "allow"; only non-allow ceilings matter).
+ * Official: org map fully replaces top-level toolPermissions when present —
+ * peer cannot lower an admin "blocked" ceiling via toolPermissions.
+ */
+function toolPermissionsFromSetServersTools(
+  tools:
+    | ReadonlyArray<{
+        name: string
+        org_max_permission?: 'allow' | 'ask' | 'blocked' | string
+      }>
+    | undefined,
+): Record<string, 'allow' | 'ask' | 'blocked'> | undefined {
+  if (!tools?.length) return undefined
+  const out: Record<string, 'allow' | 'ask' | 'blocked'> = {}
+  for (const t of tools) {
+    if (!t.org_max_permission || t.org_max_permission === 'allow') continue
+    if (t.org_max_permission === 'ask' || t.org_max_permission === 'blocked') {
+      out[t.name] = t.org_max_permission
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+type McpSetServersToolPolicy = {
+  name: string
+  permission_policy?: 'always_allow' | 'always_ask' | 'always_deny' | string
+  org_max_permission?: 'allow' | 'ask' | 'blocked' | string
+}
+
+/**
+ * densable hpi — aggregate dynamic MCP tools[].permission_policy into
+ * always_allow / always_deny / always_ask lists of fully-qualified tool names.
+ * Stricter policy wins when the same tool appears on multiple servers.
+ */
+export function permissionPoliciesFromDynamicMcpConfigs(
+  configs: Record<
+    string,
+    {
+      type?: string
+      tools?: ReadonlyArray<McpSetServersToolPolicy>
+    }
+  >,
+): {
+  allow: string[]
+  deny: string[]
+  ask: string[]
+} {
+  const rank: Record<string, number> = {
+    always_allow: 0,
+    always_ask: 1,
+    always_deny: 2,
+  }
+  const byTool = new Map<
+    string,
+    'always_allow' | 'always_ask' | 'always_deny'
+  >()
+  for (const [serverName, cfg] of Object.entries(configs)) {
+    if (cfg.type !== 'http' && cfg.type !== 'sse') continue
+    for (const tool of cfg.tools ?? []) {
+      const pol = tool.permission_policy
+      if (
+        pol !== 'always_allow' &&
+        pol !== 'always_ask' &&
+        pol !== 'always_deny'
+      ) {
+        continue
+      }
+      const fq = buildMcpToolName(serverName, tool.name)
+      const prev = byTool.get(fq)
+      if (prev === undefined || rank[pol]! > (rank[prev] ?? -1)) {
+        byTool.set(fq, pol)
+      }
+    }
+  }
+  const allow: string[] = []
+  const deny: string[] = []
+  const ask: string[] = []
+  for (const [name, pol] of byTool) {
+    if (pol === 'always_allow') allow.push(name)
+    else if (pol === 'always_deny') deny.push(name)
+    else ask.push(name)
+  }
+  return { allow, deny, ask }
+}
+
+/**
+ * densable Ryl / u$f seed — replace mcpServerPolicy buckets on permission
+ * context from the current dynamic MCP desired map (empty list clears key).
+ */
+function withMcpServerPolicyRules<
+  T extends {
+    alwaysAllowRules: Record<string, string[] | undefined>
+    alwaysDenyRules: Record<string, string[] | undefined>
+    alwaysAskRules: Record<string, string[] | undefined>
+  },
+>(ctx: T, policies: { allow: string[]; deny: string[]; ask: string[] }): T {
+  const setBucket = (
+    rules: Record<string, string[] | undefined>,
+    names: string[],
+  ): Record<string, string[] | undefined> => {
+    const prev = rules.mcpServerPolicy ?? []
+    if (names.length === prev.length && names.every((n, i) => n === prev[i])) {
+      return rules
+    }
+    if (names.length === 0) {
+      if (!('mcpServerPolicy' in rules)) return rules
+      const { mcpServerPolicy: _drop, ...rest } = rules
+      return rest
+    }
+    return { ...rules, mcpServerPolicy: names }
+  }
+  const alwaysAllowRules = setBucket(ctx.alwaysAllowRules, policies.allow)
+  const alwaysDenyRules = setBucket(ctx.alwaysDenyRules, policies.deny)
+  const alwaysAskRules = setBucket(ctx.alwaysAskRules, policies.ask)
+  if (
+    alwaysAllowRules === ctx.alwaysAllowRules &&
+    alwaysDenyRules === ctx.alwaysDenyRules &&
+    alwaysAskRules === ctx.alwaysAskRules
+  ) {
+    return ctx
+  }
+  return {
+    ...ctx,
+    alwaysAllowRules,
+    alwaysDenyRules,
+    alwaysAskRules,
+  }
+}
+
+/**
+ * densable uUt — convert process transport config to a scoped config.
+ * For http/sse: drop tools[], fold org_max_permission → toolPermissions
+ * (a$f replaces any top-level toolPermissions when present), scope:"dynamic".
+ * tools[] is kept only long enough for hpi; callers that need permission_policy
+ * seed must read the raw desired map before uUt.
  */
 function toScopedConfig(
   config: McpServerConfigForProcessTransport,
 ): ScopedMcpServerConfig {
   // McpServerConfigForProcessTransport is a subset of McpServerConfig
   // (it excludes IDE-specific types like sse-ide and ws-ide)
-  // Adding scope makes it a valid ScopedMcpServerConfig
+  const rec = config as McpServerConfigForProcessTransport & {
+    type?: string
+    tools?: ReadonlyArray<McpSetServersToolPolicy>
+    toolPermissions?: Record<string, 'allow' | 'ask' | 'blocked'>
+  }
+  if (rec.type === 'http' || rec.type === 'sse') {
+    const { tools, toolPermissions: existing, ...rest } = rec
+    // densable a$f/uUt: when tools carry org ceilings, they WIN exclusively.
+    // Top-level toolPermissions is only used when a$f yields nothing.
+    const fromTools = toolPermissionsFromSetServersTools(tools)
+    const toolPermissions = fromTools ?? existing
+    return {
+      ...rest,
+      ...(toolPermissions && Object.keys(toolPermissions).length > 0
+        ? { toolPermissions }
+        : {}),
+      scope: 'dynamic',
+    } as ScopedMcpServerConfig
+  }
   return { ...config, scope: 'dynamic' } as ScopedMcpServerConfig
 }
 
@@ -6440,7 +6595,11 @@ export async function reconcileMcpServers(
     configs: newConfigs,
   }
 
-  // Update AppState with the new tools
+  // densable hpi: seed permission context from desired RAW tools[].permission_policy
+  // (before uUt strips tools[]). Always recompute so removals clear mcpServerPolicy.
+  const policies = permissionPoliciesFromDynamicMcpConfigs(desiredConfigs)
+
+  // Update AppState with the new tools + densable Ryl mcpServerPolicy seed
   setAppState(prev => {
     // Get all dynamic server names (current + new)
     const allDynamicServerNames = new Set([
@@ -6463,6 +6622,11 @@ export async function reconcileMcpServers(
       return !allDynamicServerNames.has(c.name)
     })
 
+    const toolPermissionContext = withMcpServerPolicyRules(
+      prev.toolPermissionContext,
+      policies,
+    )
+
     return {
       ...prev,
       mcp: {
@@ -6470,6 +6634,7 @@ export async function reconcileMcpServers(
         tools: [...nonDynamicTools, ...newTools],
         clients: [...nonDynamicClients, ...newClients],
       },
+      toolPermissionContext,
     }
   })
 
