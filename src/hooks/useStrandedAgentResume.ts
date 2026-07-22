@@ -10,7 +10,7 @@ import type { AppState } from '../state/AppState.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import {
-  AgentStoppedByUserError,
+  ResumeAgentStateError,
   resumeAgentBackground,
 } from '@claude-code/builtin-tools/tools/AgentTool/resumeAgent.js'
 
@@ -18,8 +18,13 @@ import {
  * densable luf / Weo.subscribe:
  * On agent complete with non-empty pendingMessages, drain queue and
  * resumeAgentBackground (Aye) with the first message; re-queue the rest.
- * Failures re-queue the head and surface a low-priority warning (except
- * AgentStoppedByUserError which is expected for user-killed agents).
+ *
+ * densable:
+ *   Qeo → [a,...l]; for c of l: sqe(i,c.text,e,{origin:c.origin,isMeta:c.isMeta})
+ *   try Aye({prompt:a.text,promptOrigin:a.origin,promptIsMeta:a.isMeta})
+ *   catch { re-queue head; rethrow }
+ *   outer: if (s instanceof B6) return; else xe + warning notify
+ * B6 covers ResumeAgentStateError and AgentStoppedByUserError (orr⊂B6).
  */
 export function useStrandedAgentResume({
   getAppState,
@@ -44,45 +49,41 @@ export function useStrandedAgentResume({
       const drained = drainPendingMessages(agentId, getAppState, setAppState)
       if (drained.length === 0) return
       const [head, ...rest] = drained
-      for (const msg of rest) {
-        queuePendingMessage(agentId, msg, setAppState)
+      for (const entry of rest) {
+        // densable: sqe(i, c.text, e, {origin:c.origin, isMeta:c.isMeta})
+        queuePendingMessage(agentId, entry, setAppState)
       }
       try {
         await resumeAgentBackground({
           agentId,
-          prompt: head,
+          prompt: head.text,
           toolUseContext: getToolUseContext(),
           canUseTool,
+          // densable Aye promptOrigin / promptIsMeta → cIt + isMeta on sidechain
+          promptIsMeta: head.isMeta,
+          promptOrigin: head.origin,
+          promptOriginKind: head.origin?.kind,
         })
       } catch (err) {
-        // densable: re-queue head on failure so message is not lost
+        // densable: re-queue head then rethrow — outer swallows B6 / notifies rest
         queuePendingMessage(agentId, head, setAppState)
-        if (err instanceof AgentStoppedByUserError) {
-          logForDebugging(
-            `[stranded-resume] skip user-stopped agent ${agentId}: ${errorMessage(err)}`,
-          )
-          return
-        }
-        logForDebugging(
-          `[stranded-resume] failed for ${agentId}: ${errorMessage(err)}`,
-        )
-        addNotification({
-          key: `stranded-resume-failed-${agentId}`,
-          text: `Failed to deliver queued message to agent: ${errorMessage(err)}`,
-          color: 'error',
-          priority: 'low',
-        })
+        throw err
       }
     },
-    [getAppState, setAppState, getToolUseContext, canUseTool, addNotification],
+    [getAppState, setAppState, getToolUseContext, canUseTool],
   )
 
   useEffect(
     () =>
       strandedAgentResume.subscribe(agentId => {
         void deliver(agentId).catch(err => {
-          // densable: B6/ResumeAgentStateError swallowed; others notify
-          if (err instanceof AgentStoppedByUserError) return
+          // densable: if (s instanceof B6) return — covers CAS + stoppedByUser
+          if (err instanceof ResumeAgentStateError) {
+            logForDebugging(
+              `[stranded-resume] skip B6 for ${agentId}: ${errorMessage(err)}`,
+            )
+            return
+          }
           logForDebugging(
             `[stranded-resume] unhandled: ${errorMessage(err as Error)}`,
           )

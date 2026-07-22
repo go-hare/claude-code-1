@@ -71,6 +71,26 @@ import type { TaskState } from '../types.js';
  */
 export const strandedAgentResume = createSignal<[agentId: string]>();
 
+/**
+ * densable sqe pending entry: `{text, origin, isMeta}`.
+ * `origin` mirrors densable promptOrigin (`kind: human|observer-activity|…`).
+ */
+export type PendingAgentMessageOrigin = {
+  kind: string;
+  [key: string]: unknown;
+};
+
+export type PendingAgentMessage = {
+  text: string;
+  origin?: PendingAgentMessageOrigin;
+  isMeta: boolean;
+};
+
+export type QueuePendingMessageOpts = {
+  origin?: PendingAgentMessageOrigin;
+  isMeta?: boolean;
+};
+
 export type ToolActivity = {
   toolName: string;
   input: Record<string, unknown>;
@@ -442,8 +462,11 @@ export type LocalAgentTaskState = TaskStateBase & {
   lastReportedTokenCount: number;
   // Whether the task has been backgrounded (false = foreground running, true = backgrounded)
   isBackgrounded: boolean;
-  // Messages queued mid-turn via SendMessage, drained at tool-round boundaries
-  pendingMessages: string[];
+  /**
+   * densable sqe/Qeo pending queue — objects `{text, origin, isMeta}` (not bare
+   * strings). Drained at tool-round boundaries and on Weo stranded resume.
+   */
+  pendingMessages: PendingAgentMessage[];
   /**
    * densable local_agent isIdle (Yqe D): true only when every in-flight tool is a
    * nested Agent/Task spawn — panel shows "waiting". Not teammate park/idle.
@@ -683,14 +706,31 @@ export function resolvePanelOwnerAgentId(
   return isPanelAgentTask(t) ? parentAgentId : undefined;
 }
 
+/**
+ * densable sqe(e,t,r,n={}): append `{text, origin, isMeta:n.isMeta??!1}`.
+ * Overload accepts a full entry (re-queue path after Qeo) or text + opts.
+ */
 export function queuePendingMessage(
   taskId: string,
-  msg: string,
+  msg: string | PendingAgentMessage,
   setAppState: (f: (prev: AppState) => AppState) => void,
+  opts?: QueuePendingMessageOpts,
 ): void {
+  const entry: PendingAgentMessage =
+    typeof msg === 'string'
+      ? {
+          text: msg,
+          ...(opts?.origin !== undefined ? { origin: opts.origin } : {}),
+          isMeta: opts?.isMeta ?? false,
+        }
+      : {
+          text: msg.text,
+          ...(msg.origin !== undefined ? { origin: msg.origin } : {}),
+          isMeta: msg.isMeta ?? false,
+        };
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => ({
     ...task,
-    pendingMessages: [...task.pendingMessages, msg],
+    pendingMessages: [...task.pendingMessages, entry],
   }));
 }
 
@@ -711,20 +751,42 @@ export function appendMessageToLocalAgent(
   }));
 }
 
+/**
+ * densable Qeo: drain and clear pendingMessages; returns entry objects.
+ *
+ * Product fortification vs gold snapshot-then-clear:
+ * Capture + clear inside a single setAppState updater so concurrent drains
+ * cannot both return the same batch (read→clear race). Callers still rely on
+ * tryClaimAgentResume / B6 for resume serialization; this only hardens drain.
+ */
 export function drainPendingMessages(
   taskId: string,
   getAppState: () => AppState,
   setAppState: (f: (prev: AppState) => AppState) => void,
-): string[] {
-  const task = getAppState().tasks[taskId];
-  if (!isLocalAgentTask(task) || task.pendingMessages.length === 0) {
+): PendingAgentMessage[] {
+  // Fast path: avoid setAppState when already empty (same as densable early return).
+  const peek = getAppState().tasks?.[taskId];
+  if (!isLocalAgentTask(peek) || peek.pendingMessages.length === 0) {
     return [];
   }
-  const drained = task.pendingMessages;
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, t => ({
-    ...t,
-    pendingMessages: [],
-  }));
+  let drained: PendingAgentMessage[] = [];
+  setAppState(prev => {
+    const task = prev.tasks?.[taskId];
+    if (!isLocalAgentTask(task) || task.pendingMessages.length === 0) {
+      return prev;
+    }
+    drained = task.pendingMessages;
+    return {
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [taskId]: {
+          ...task,
+          pendingMessages: [],
+        },
+      },
+    };
+  });
   return drained;
 }
 

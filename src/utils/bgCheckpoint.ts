@@ -1626,7 +1626,7 @@ export function registerResumedAgentTask(
     lastReportedToolCount: 0,
     lastReportedTokenCount: 0,
     isBackgrounded: true,
-    pendingMessages: [] as string[],
+    pendingMessages: [] as Array<{ text: string; isMeta: boolean }>,
     retain: false,
     diskLoaded: false,
     notified: true,

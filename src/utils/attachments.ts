@@ -1181,16 +1181,20 @@ export function getAgentPendingMessageAttachments(
 ): Attachment[] {
   const agentId = toolUseContext.agentId
   if (!agentId) return []
+  // densable Fxd/pts: Qeo → map {type:queued_command, prompt:n.text, origin, isMeta}
   const drained = drainPendingMessages(
     agentId,
     toolUseContext.getAppState,
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState,
   )
-  return drained.map(msg => ({
+  return drained.map(entry => ({
     type: 'queued_command' as const,
-    prompt: msg,
-    origin: { kind: 'coordinator' as const } as unknown as MessageOrigin,
-    isMeta: true,
+    prompt: entry.text,
+    // Prefer densable entry.origin; fall back to coordinator for legacy bare paths
+    origin: (entry.origin ?? {
+      kind: 'coordinator' as const,
+    }) as unknown as MessageOrigin,
+    isMeta: entry.isMeta,
   }))
 }
 
