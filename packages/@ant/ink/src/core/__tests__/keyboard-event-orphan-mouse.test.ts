@@ -68,8 +68,11 @@ describe('KeyboardEvent SGR mouse fragment suppress (fag + residue)', () => {
       new KeyboardEvent(nameless('<64;32;19M4;32;19M32;19M;19M<65;32;19M')).key,
     ).toBe('')
     expect(new KeyboardEvent(nameless('<64;32;19M')).key).toBe('')
+    // 3-param complete without `<` is residue
     expect(new KeyboardEvent(nameless('4;32;19M')).key).toBe('')
-    expect(new KeyboardEvent(nameless('32;19M')).key).toBe('')
+    // 2-param col;rowM is ambiguous typed text — keep (densable Q_g / review P1)
+    expect(new KeyboardEvent(nameless('32;19M')).key).toBe('32;19M')
+    // Progressive peel tail after params dropped
     expect(new KeyboardEvent(nameless(';19M')).key).toBe('')
   })
 
@@ -113,40 +116,44 @@ describe('KeyboardEvent SGR mouse fragment suppress (fag + residue)', () => {
     expect(typed.key).toBe('hello')
   })
 
-  test('pure MMMM is emptied by residue sink (not typed)', () => {
-    expect(new KeyboardEvent(nameless('MMMM')).key).toBe('')
+  test('pure MMMM is kept (review: not silently deleted; absorbMm is post-wheel only)', () => {
+    expect(new KeyboardEvent(nameless('MMMM')).key).toBe('MMMM')
   })
 
-  test('2-param residue col;rowM is emptied', () => {
-    expect(new KeyboardEvent(nameless('17;19M')).key).toBe('')
-    expect(new KeyboardEvent(nameless('17;19m')).key).toBe('')
+  test('2-param col;rowM is kept (ambiguous with typed text; densable Q_g)', () => {
+    expect(new KeyboardEvent(nameless('17;19M')).key).toBe('17;19M')
+    expect(new KeyboardEvent(nameless('17;19m')).key).toBe('17;19m')
+    // bare "1;2;3" kept — review P1 silent data loss (not pure SGR without `<`/`[`)
+    expect(new KeyboardEvent(nameless('1;2;3')).key).toBe('1;2;3')
   })
 
-  test('mixed finalizer + digit noise (MMM8MMMM) is emptied', () => {
-    expect(new KeyboardEvent(nameless('MMM8MMMM')).key).toBe('')
-    expect(new KeyboardEvent(nameless('MM64MM')).key).toBe('')
-    // Lone single finalizer + digit still types (not multi-finalizer desync)
+  test('mixed finalizer digit noise without < is kept; leading-< still emptied', () => {
+    // Without `<` marker, multi-finalizer digit runs are not residue (review).
+    expect(new KeyboardEvent(nameless('MMM8MMMM')).key).toBe('MMM8MMMM')
+    expect(new KeyboardEvent(nameless('MM64MM')).key).toBe('MM64MM')
     expect(new KeyboardEvent(nameless('M8')).key).toBe('M8')
   })
 
-  test('short progressive tail 4M / 12m is emptied (scroll residual)', () => {
-    // Live Apple Terminal: peel leaves last coord + M in the prompt.
-    expect(new KeyboardEvent(nameless('4M')).key).toBe('')
-    expect(new KeyboardEvent(nameless('12m')).key).toBe('')
-    expect(new KeyboardEvent(nameless('64M')).key).toBe('')
-    // Bare M still types; longer digit runs (not typical coords) still type
+  test('short progressive tail 4M / 12m is kept (legitimate input; densable Q_g)', () => {
+    // Review P1: bare "4M" / "RAM 64M" must not be silently deleted.
+    // Official Q_g has no short-tail strip; post-wheel lone M is absorbMm only.
+    expect(new KeyboardEvent(nameless('4M')).key).toBe('4M')
+    expect(new KeyboardEvent(nameless('12m')).key).toBe('12m')
+    expect(new KeyboardEvent(nameless('64M')).key).toBe('64M')
     expect(new KeyboardEvent(nameless('M')).key).toBe('M')
     expect(new KeyboardEvent(nameless('1234M')).key).toBe('1234M')
+    // Letters + digits + M still type (never residue charset)
+    expect(new KeyboardEvent(nameless('RAM 64M')).key).toBe('RAM 64M')
   })
 
-  test('mixed chip + short 4M tail keeps chip only', () => {
-    expect(new KeyboardEvent(nameless('[Image #1]4M')).key).toBe('[Image #1]')
+  test('mixed chip + short 4M tail keeps both (no short-tail strip)', () => {
+    expect(new KeyboardEvent(nameless('[Image #1]4M')).key).toBe('[Image #1]4M')
   })
 
-  test('incomplete param run without finalizer is emptied', () => {
-    expect(new KeyboardEvent(nameless('64;32;19')).key).toBe('')
-    expect(new KeyboardEvent(nameless('32;19')).key).toBe('')
-    // Bare number is still typed
+  test('incomplete 3-param / 2-param without finalizer kept; bare numbers kept', () => {
+    // Review P1: bare "1;2;3" / "64;32;19" must not be silently deleted.
+    expect(new KeyboardEvent(nameless('64;32;19')).key).toBe('64;32;19')
+    expect(new KeyboardEvent(nameless('32;19')).key).toBe('32;19')
     expect(new KeyboardEvent(nameless('64')).key).toBe('64')
   })
 

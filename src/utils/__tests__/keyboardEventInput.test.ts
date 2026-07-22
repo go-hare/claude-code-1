@@ -133,17 +133,19 @@ describe('insertInputFromKeyboardEvent (official tS_ + insert(q.key))', () => {
     expect(insertInputFromKeyboardEvent(e)).toBe('')
   })
 
-  test('param residue and MMMM never insert', () => {
+  test('ambiguous 2-param and pure MMMM insert (review P1 no silent drop)', () => {
+    // densable fag + review: pure "MMMM" / "17;19M" are ambiguous typed text,
+    // not silent-stripped. 3-param progressive residue still empties above.
     expect(
       insertInputFromKeyboardEvent(
         new KeyboardEvent(key({ sequence: '17;19M' })),
       ),
-    ).toBe('')
+    ).toBe('17;19M')
     expect(
       insertInputFromKeyboardEvent(
         new KeyboardEvent(key({ sequence: 'MMMM' })),
       ),
-    ).toBe('')
+    ).toBe('MMMM')
   })
 
   test('live Image chip wall + SGR residue inserts chips only', () => {

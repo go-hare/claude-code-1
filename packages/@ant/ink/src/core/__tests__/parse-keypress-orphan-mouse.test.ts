@@ -138,8 +138,9 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
       }
     }
     ;[items, state] = parseMultipleKeypresses(state, 'MMMMMMMM')
-    // Pure finalizer run absorbed — never typed
-    expect(items).toHaveLength(0)
+    // Review: no persistent absorbMm window after wheel — pure MMMM types
+    // (KeyboardEvent keeps it; InputEvent sji may empty pure Mm runs).
+    expect(items.length).toBeGreaterThanOrEqual(1)
   })
 
   test('incomplete orphan SGR with junk after body stays sji-empty', () => {
@@ -176,8 +177,8 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     ;[items, state] = parseMultipleKeypresses(state, 'M')
     expect(names(items)).toEqual(['wheeldown'])
     ;[items, state] = parseMultipleKeypresses(state, 'MMMM')
-    // Absorb trailing finalizers after complete wheel
-    expect(items).toHaveLength(0)
+    // Review: complete wheel clears absorbMm — later MMMM is typed, not absorbed.
+    expect(items.length).toBeGreaterThanOrEqual(1)
   })
 
   test('typed M alone still inserts (not swallowed as SGR residue)', () => {
@@ -191,16 +192,19 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     }
   })
 
-  test('typed M after a complete wheel is absorbed (desync window)', () => {
-    // Live walls of M come from finalizers arriving after a complete SGR.
-    // After any complete wheel we open an absorb window for pure M/m runs.
-    // Idle single M without a recent mouse event still inserts (test above).
+  test('typed M after a complete wheel is kept (no multi-key absorb window)', () => {
+    // Review residual: persistent absorbMmFinalizers=12 silently dropped legal
+    // "M" after scroll. densable: same-token peel only; later M inserts.
     let state = INITIAL_STATE
     let items: ParsedInput[]
     ;[items, state] = parseMultipleKeypresses(state, '\x1b[<65;23;12M')
     expect(names(items)).toEqual(['wheeldown'])
     ;[items, state] = parseMultipleKeypresses(state, 'M')
-    expect(items).toHaveLength(0)
+    expect(items).toHaveLength(1)
+    expect(items[0]!.kind).toBe('key')
+    if (items[0]!.kind === 'key') {
+      expect(items[0].sequence).toBe('M')
+    }
   })
 
   test('2-param residue col;rowM is not recovered as mouse (live 17;19M)', () => {
@@ -254,8 +258,8 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
   })
 
   test('flush of incomplete ESC+[ is swallowed (mouse-start, not typed)', () => {
-    // Tokenizer holds "\x1b["; flush would emit sequence. We treat bare CSI
-    // mouse start as non-text and open the M/m absorb window instead.
+    // Tokenizer holds "\x1b["; flush must not type CSI start as text.
+    // Incomplete CSI must NOT open a multi-key M absorb window (review residual).
     let state = INITIAL_STATE
     let items: ParsedInput[]
     ;[items, state] = parseMultipleKeypresses(state, '\x1b[')
@@ -263,8 +267,8 @@ describe('orphan SGR/X10 mouse tails (whole-token + complete prefix peel)', () =
     expect(state.incomplete).toBe('\x1b[')
     ;[items, state] = parseMultipleKeypresses(state, null)
     expect(items).toHaveLength(0)
-    // Subsequent pure M run absorbed
+    // Subsequent pure MMMM types — no absorb window from flushed CSI start.
     ;[items, state] = parseMultipleKeypresses(state, 'MMMM')
-    expect(items).toHaveLength(0)
+    expect(items.length).toBeGreaterThanOrEqual(1)
   })
 })

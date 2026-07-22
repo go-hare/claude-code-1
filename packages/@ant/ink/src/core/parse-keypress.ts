@@ -443,9 +443,11 @@ export function parseMultipleKeypresses(
         keys.push(pk)
       }
     }
-    // Burst desync often delivers a run of bare finalizers after one complete
-    // event — absorb a handful so they never type as "M".
-    absorbMmFinalizers = Math.max(absorbMmFinalizers, 12)
+    // Burst desync: absorb only the immediate trailing finalizers in THIS
+    // token (tryAbsorbMmText already peels pure M/m run). Do NOT open a
+    // persistent multi-key absorb window — review: scroll then later "M"
+    // was silently dropped when absorbMmFinalizers stayed at 12.
+    absorbMmFinalizers = 0
   }
 
   const tryAbsorbMmText = (text: string): string | null => {
@@ -629,9 +631,8 @@ export function parseMultipleKeypresses(
           const mouse = parseMouseEvent(token.value)
           if (mouse) {
             keys.push(mouse)
-            // Completed SGR mouse (non-wheel click) — also open absorb window
-            // so trailing finalizer desync doesn't type M.
-            absorbMmFinalizers = Math.max(absorbMmFinalizers, 8)
+            // Completed SGR mouse — do not open persistent absorb for later M.
+            absorbMmFinalizers = 0
           } else {
             // Flush incomplete UTF-8 assembly before unrelated keys
             // (official: d() before ZUr for non-mouse sequences).
@@ -650,8 +651,8 @@ export function parseMultipleKeypresses(
               continue
             }
             if (INCOMPLETE_CSI_MOUSE_START_RE.test(token.value)) {
-              // Bare ESC[ / ESC[< — open absorb window only; nothing to complete.
-              absorbMmFinalizers = Math.max(absorbMmFinalizers, 12)
+              // Bare ESC[ / ESC[< — hold for incomplete body; no persistent
+              // absorb window for later typed M/m (review silent drop).
               continue
             }
             const pk = parseKeypress(token.value)
@@ -660,7 +661,9 @@ export function parseMultipleKeypresses(
               pk.name === 'wheeldown' ||
               pk.name === 'mouse'
             ) {
-              absorbMmFinalizers = Math.max(absorbMmFinalizers, 12)
+              // Complete wheel/mouse: clear any leftover absorb (same-token
+              // trailing M/m already handled by pushCompletedSgr / text peel).
+              absorbMmFinalizers = 0
               keys.push(pk)
             } else if (!tryAbsorbMmKey(pk.sequence ?? token.value)) {
               keys.push(pk)
@@ -703,7 +706,7 @@ export function parseMultipleKeypresses(
             const seq = '\x1b' + m[0]!
             const mouse = parseMouseEvent(seq)
             keys.push(mouse ?? parseKeypress(seq))
-            absorbMmFinalizers = Math.max(absorbMmFinalizers, 12)
+            absorbMmFinalizers = 0
             rest = rest.slice(m[0]!.length)
           }
           if (!rest) {
@@ -733,7 +736,7 @@ export function parseMultipleKeypresses(
                 break
               }
               if (INCOMPLETE_CSI_MOUSE_START_RE.test(rest)) {
-                absorbMmFinalizers = Math.max(absorbMmFinalizers, 12)
+                // Incomplete CSI mouse start — hold for completion, no absorb.
                 break
               }
               // Official densable ZXc (2.1.210): whole text token → one ZUr key.

@@ -78,45 +78,22 @@ function isSgrResidueCharset(seq: string): boolean {
  */
 export function isSgrMouseResidue(seq: string): boolean {
   if (!seq) return false
-  // Pure finalizer runs of length ≥2 (single M/m still types).
-  if (/^[Mm]{2,}$/.test(seq)) return true
-  // Mixed finalizer desync: only M/m + digits, ≥2 finalizers, length ≥3
-  // (live walls like "MMM8MMMM" / "MM64MM" after peel leaves finalizer noise).
-  // Lone "M8" / "8M" still type; require multi-finalizer + digit noise.
-  if (
-    seq.length >= 3 &&
-    /^[Mm\d]+$/.test(seq) &&
-    /\d/.test(seq) &&
-    (seq.match(/[Mm]/g) ?? []).length >= 2
-  ) {
-    return true
-  }
-  // Official: pure orphan SGR with leading `[` (complete or incomplete tails).
+  // Official densable fag: pure orphan SGR with leading `[` (complete/incomplete).
+  // Keep pure "MMMM", "17;19M", "1;2", bare "4M" — review P1 silent data loss.
+  // Post-wheel lone M/m is absorbMm in parse-keypress (short window only).
   if (/^(\[<\d[\d;]*[Mm]?)+$/.test(seq)) return true
-  // ESC lost AND often `[` lost: leading-`<` forms + progressive param tails.
-  // Fragments: `[?<btn;col;row[Mm]?`, `btn;col;rowM`, `col;rowM`, `;rowM`, `M+`.
-  if (
-    isSgrResidueCharset(seq) &&
-    /[Mm]/.test(seq) &&
-    // At least one SGR-ish marker: `<digits`, `digits;digits`, or `;digitsM`
-    /(?:<\d|\d;\d|;\d+[Mm])/.test(seq)
-  ) {
+  // ESC lost AND often `[` lost: leading-`<` SGR forms only.
+  if (isSgrResidueCharset(seq) && /<\d/.test(seq) && /[Mm]/.test(seq)) {
     return true
   }
-  // Incomplete body held without finalizer (`[<64;19;15` / `<64;19;15` /
-  // `\x1b[<64;19;15`). Strip optional ESC then match printable form.
+  // Incomplete body held without finalizer (`[<64;19;15` / `<64;19;15`).
   const noEsc = seq.charCodeAt(0) === 0x1b ? seq.slice(1) : seq
   if (/^(?:\[<\d[\d;]*|<\d[\d;]*)$/.test(noEsc)) return true
-  // Incomplete param runs without finalizer (btn;col;row / col;row) — live
-  // stream often peels the head and leaves `64;32;19` or `32;19` as text.
-  // Never letters; single numbers / "1" still type (no `;`).
-  if (/^(?:\d+;){1,2}\d+$/.test(seq)) return true
-  // Progressive short tail after ESC/`[`/`<` loss: last coord + finalizer.
-  // Live screenshot: bare "4M" in the prompt after scroll-over-input.
-  // Terminal col/row are 1–3 digits; bare "M"/"m" still type; "M8" still types
-  // (digit after finalizer — not a torn row). Intentional "4M" is rare in
-  // prompts vs constant SGR desync on Apple Terminal scroll.
-  if (/^\d{1,3}[Mm]$/.test(seq)) return true
+  // Incomplete bare "1;2;3" / "64;32;19" is kept (review P1: silent data loss).
+  // Progressive complete 3-param without `<` (`64;32;19M`) after peel only.
+  if (/^(?:\d+;){2}\d+[Mm]$/.test(seq)) return true
+  // Progressive peel tail after col/row dropped: ";19M" / ";19m"
+  if (/^;\d+[Mm]$/.test(seq)) return true
   return false
 }
 
@@ -132,25 +109,22 @@ export function stripSgrMouseFragments(text: string): string {
   const esc = String.fromCharCode(0x1b)
   let out = text.split(esc).join('')
   out = out.replace(/\[<\d+;\d+;\d+[Mm]/g, '')
-  // Finalizer glued to progressive params after ESC/`[` loss:
+  // Finalizer glued to progressive 3-param after ESC/`[` loss:
   // live `[Image #4]M5;12;11M[<65;…` → chip + `M5;12;11M` after complete strip.
-  out = out.replace(/[Mm](?:\d+;){1,2}\d+[Mm]/g, '')
-  // Glued progressive param residue (lost `[<`): `5;23;12M` / `17;19M`
-  out = out.replace(/(?:^|[^0-9A-Za-z])(?:\d+;){1,2}\d+[Mm]/g, m => {
+  // Require 3 params (two `;`) — 2-param `17;19M` is ambiguous typed text.
+  out = out.replace(/[Mm](?:\d+;){2}\d+[Mm]/g, '')
+  // Glued progressive 3-param residue (lost `[<`): `5;23;12M` only — not `17;19M`.
+  out = out.replace(/(?:^|[^0-9A-Za-z])(?:\d+;){2}\d+[Mm]/g, m => {
     const first = m[0]!
     if ((first >= '0' && first <= '9') || first === ';') return ''
     return first
   })
-  out = out.replace(/^(?:\d+;){1,2}\d+[Mm]/, '')
-  // Short last-coord + finalizer glued after text/chip (`…4M` / `…12m`)
-  out = out.replace(/(?:^|[^0-9A-Za-z])\d{1,3}[Mm]/g, m => {
-    const first = m[0]!
-    if (first >= '0' && first <= '9') return ''
-    return first
-  })
-  out = out.replace(/^\d{1,3}[Mm]/, '')
-  // Pure finalizer runs of length ≥2 left after peel
-  out = out.replace(/[Mm]{2,}/g, '')
+  // Pure progressive 3-param with finalizer only (`5;23;12M`). Keep 2-param.
+  out = out.replace(/^(?:\d+;){2}\d+[Mm]/, '')
+  // Pure progressive peel tail only (do not strip middle of "17;19M" / "32;19M").
+  if (/^;\d+[Mm]$/.test(out)) return ''
+  // Do NOT strip pure "MMMM" / "MMM8MMMM" — review: not silently deleted;
+  // post-wheel lone M is absorbMm only (parse-keypress short window).
   // Leading-`<` progressive desync without `[`
   out = out.replace(/<\d[\d;]*[Mm]/g, '')
   return out
