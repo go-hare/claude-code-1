@@ -249,6 +249,7 @@ import {
   createSystemMessage,
   createCommandInputMessage,
   formatCommandInputTags,
+  applyTurnStartOriginFraming,
 } from '../utils/messages.js';
 import { generateSessionTitle } from '../utils/sessionTitle.js';
 import {
@@ -5015,7 +5016,11 @@ export function REPL({
       if (isLocalAgentTask(task)) {
         appendMessageToLocalAgent(task.id, createUserMessage({ content: input }), setAppState);
         if (task.status === 'running') {
-          queuePendingMessage(task.id, input, setAppState);
+          // densable panel human queue: sqe(…,{isMeta:!0, origin:{kind:"human"}})
+          queuePendingMessage(task.id, input, setAppState, {
+            isMeta: true,
+            origin: { kind: 'human' },
+          });
         } else {
           void resumeAgentBackground({
             agentId: task.id,
@@ -5601,12 +5606,17 @@ export function REPL({
         const newAbortController = createAbortController();
         setAbortController(newAbortController);
 
-        // Create a user message with the formatted content (includes XML wrapper)
+        // Create a user message with the formatted content (includes XML wrapper).
+        // densable HXd/Fws: when origin is peer/observer, apply turn-start
+        // framing (midTurn:false) so the model sees the laundering note.
         const userMessage = createUserMessage({
           content: command.value,
           isMeta: command.isMeta ? true : undefined,
           origin: command.origin,
         });
+        if (command.origin) {
+          applyTurnStartOriginFraming(userMessage, command.origin as { kind?: string; from?: string });
+        }
 
         let executed = false;
         try {

@@ -1190,6 +1190,8 @@ export function getAgentPendingMessageAttachments(
   return drained.map(entry => ({
     type: 'queued_command' as const,
     prompt: entry.text,
+    // densable Fxd: source_uuid:kvs.randomUUID() for sidechain dedup
+    source_uuid: randomUUID() as UUID,
     // Prefer densable entry.origin; fall back to coordinator for legacy bare paths
     origin: (entry.origin ?? {
       kind: 'coordinator' as const,
