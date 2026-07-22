@@ -378,8 +378,9 @@ async function processUserInputBase(
 
   // Store images to disk so Claude can reference the path in context
   // (for manipulation with CLI tools, uploading to PRs, etc.)
+  // densable j9d: write disk + stamp AppState so UserImageMessage is clickable
   const storedImagePaths = pastedContents
-    ? await storeImages(pastedContents)
+    ? await storeImages(pastedContents, context.setAppState)
     : new Map<number, string>()
 
   // Resize pasted images to ensure they fit within API limits (parallel processing)

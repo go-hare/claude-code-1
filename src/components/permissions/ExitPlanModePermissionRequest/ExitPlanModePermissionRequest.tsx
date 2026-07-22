@@ -218,8 +218,8 @@ export function ExitPlanModePermissionRequest({
       filename: filename || 'Pasted image',
       dimensions,
     };
-    cacheImagePath(newContent);
-    void storeImage(newContent);
+    cacheImagePath(newContent, setAppState);
+    void storeImage(newContent, setAppState);
     setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));
   }
 

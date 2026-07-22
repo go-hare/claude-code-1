@@ -8,7 +8,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../../services/analytics/index.js';
-import { useAppState } from '../../../state/AppState.js';
+import { useAppState, useSetAppState } from '../../../state/AppState.js';
 import type { Question } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import { AskUserQuestionTool } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import { type CliHighlight, getCliHighlightPromise } from '../../../utils/cliHighlight.js';
@@ -72,6 +72,8 @@ function AskUserQuestionPermissionRequestBody({
   // (or CLAUDE_AFK_TIMEOUT_MS). Memoize once per dialog open.
   const afkTimeoutMs = useMemo(() => askUserQuestionTimeoutToMs(), []);
   const isTerminalFocused = useTerminalFocus();
+  // densable G9d path stamp for [Image #N] click-to-open
+  const setAppState = useSetAppState();
 
   // Calculate consistent content dimensions across all questions to prevent layout shifts.
   // globalContentHeight represents the total height of the content area below the nav/title,
@@ -161,8 +163,8 @@ function AskUserQuestionPermissionRequestBody({
       filename: filename || 'Pasted image',
       dimensions,
     };
-    cacheImagePath(newContent);
-    void storeImage(newContent);
+    cacheImagePath(newContent, setAppState);
+    void storeImage(newContent, setAppState);
     setPastedContentsByQuestion(prev => ({
       ...prev,
       [questionText]: { ...(prev[questionText] ?? {}), [pasteId]: newContent },

@@ -184,6 +184,12 @@ export type AppState = DeepImmutable<{
   // Name → AgentId registry populated by Agent tool when `name` is provided.
   // Latest-wins on collision. Used by SendMessage to route by name.
   agentNameRegistry: Map<string, AgentId>
+  /**
+   * densable storedImagePaths — imageId → absolute file path for [Image #N]
+   * click-to-open (ClickableImageRef / UserImageMessage). Module-level Map
+   * alone does not re-render when async storeImage finishes; AppState does.
+   */
+  storedImagePaths: Map<number, string>
   // Task ID that has been foregrounded - its messages are shown in main view
   foregroundedTaskId?: string
   // Task ID of in-process teammate whose transcript is being viewed (undefined = leader's view)
@@ -513,6 +519,7 @@ export function getDefaultAppState(): AppState {
     tasks: {},
     taskDecorations: {},
     agentNameRegistry: new Map(),
+    storedImagePaths: new Map(),
     verbose: false,
     mainLoopModel: null, // alias, full name (as with --model or env var), or null (default)
     mainLoopModelForSession: null,

@@ -1419,11 +1419,11 @@ function PromptInput({
       sourcePath,
     };
 
-    // Cache path immediately (fast) so links work on render
-    cacheImagePath(newContent);
+    // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
+    cacheImagePath(newContent, setAppState);
 
-    // Store image to disk in background
-    void storeImage(newContent);
+    // Store image to disk in background (re-stamps path after write)
+    void storeImage(newContent, setAppState);
 
     // Update UI
     setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));

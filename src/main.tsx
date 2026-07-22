@@ -3607,6 +3607,8 @@ async function run(): Promise<CommanderCommand> {
         // densable taskDecorations — filled by useSubagentStatusLine.
         taskDecorations: {},
         agentNameRegistry: new Map(),
+        // densable storedImagePaths — [Image #N] click-to-open file paths
+        storedImagePaths: new Map(),
         verbose: verbose ?? getGlobalConfig().verbose ?? false,
         mainLoopModel: initialMainLoopModel,
         mainLoopModelForSession: null,
