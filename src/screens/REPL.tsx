@@ -60,6 +60,7 @@ import {
   getLastInteractionTime,
   getOriginalCwd,
   getProjectRoot,
+  getMainThreadAgentId,
   getSessionId,
   switchSession,
   setCostStateForRestore,
@@ -250,6 +251,7 @@ import {
   createCommandInputMessage,
   formatCommandInputTags,
   applyTurnStartOriginFraming,
+  isMetaVisibleOrigin,
 } from '../utils/messages.js';
 import { generateSessionTitle } from '../utils/sessionTitle.js';
 import {
@@ -4199,19 +4201,31 @@ export function REPL({
       if (thisGeneration === null) {
         logEvent('tengu_concurrent_onquery_detected', {});
 
-        // Extract and enqueue user message text, skipping meta messages
-        // (e.g. expanded skill content, tick prompts) that should not be
-        // replayed as user-visible text.
-        newMessages
-          .filter((m): m is UserMessage => m.type === 'user' && !m.isMeta)
-          .map(_ => getContentText(_.message.content as string | ContentBlockParam[]))
-          .filter(_ => _ !== null)
-          .forEach((msg, i) => {
-            enqueue({ value: msg, mode: 'prompt' });
-            if (i === 0) {
-              logEvent('tengu_concurrent_onquery_enqueued', {});
-            }
+        // densable concurrent onquery: skip bare meta ticks, but keep Ace-
+        // visible peer/channel/observer meta and re-queue with origin/isMeta/
+        // skipSlashCommands so framing/routing survive the re-drain.
+        let enqueued = false;
+        for (const m of newMessages) {
+          if (m.type !== 'user') continue;
+          if (m.isMeta && !isMetaVisibleOrigin(m.origin as { kind?: string; senderTaskId?: string } | undefined)) {
+            continue;
+          }
+          const textContent = getContentText(m.message.content as string | ContentBlockParam[]);
+          if (textContent === null) continue;
+          enqueue({
+            value: textContent,
+            mode: 'prompt',
+            agentId: getMainThreadAgentId(),
+            uuid: m.uuid,
+            origin: m.origin,
+            isMeta: m.isMeta,
+            skipSlashCommands: isMetaVisibleOrigin(m.origin as { kind?: string; senderTaskId?: string } | undefined),
           });
+          if (!enqueued) {
+            enqueued = true;
+            logEvent('tengu_concurrent_onquery_enqueued', {});
+          }
+        }
         return false;
       }
 
