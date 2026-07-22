@@ -291,6 +291,17 @@ export type AgentMetadata = {
    * Aye resume blocks auto-resume unless userInitiated clears it.
    */
   stoppedByUser?: boolean
+  /**
+   * densable observer sidecar marker (lYy / Aye gate):
+   * spawnFirstRun writes isObserver:true; Aye observer-activity refuses
+   * delivery when sidecar is missing or isObserver !== true.
+   */
+  isObserver?: boolean
+  /**
+   * densable E8/T1e `name` — display name for SendMessage registry.
+   * Aye re-registers when registry entry is missing after cold resume.
+   */
+  name?: string
 }
 
 /**

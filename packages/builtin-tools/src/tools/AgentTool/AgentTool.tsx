@@ -900,6 +900,7 @@ export const AgentTool = buildTool({
           void writeAgentMetadata(asAgentId(earlyAgentId), {
             agentType: selectedAgent.agentType,
             description,
+            ...(name ? { name } : {}),
             observerTaskId: installed.observerTaskId,
             ...(installed.armingPermissionMode ? { armingPermissionMode: installed.armingPermissionMode } : {}),
           }).catch(_err => logForDebugging(`Failed to write observer pointer metadata: ${_err}`));
@@ -967,6 +968,8 @@ export const AgentTool = buildTool({
       ...(isForkPath && { useExactTools: true }),
       worktreePath: worktreeInfo?.worktreePath,
       description,
+      // densable E8 name:H → sidecar for Aye registerName rehydrate
+      ...(name ? { name } : {}),
     };
 
     // Helper to wrap execution with a cwd override: explicit cwd arg (KAIROS)
@@ -999,6 +1002,7 @@ export const AgentTool = buildTool({
           void writeAgentMetadata(asAgentId(earlyAgentId), {
             agentType: selectedAgent.agentType,
             description,
+            ...(name ? { name } : {}),
           }).catch(_err => logForDebugging(`Failed to clear worktree metadata: ${_err}`));
           return {};
         }

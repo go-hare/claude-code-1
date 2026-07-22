@@ -12,6 +12,7 @@ import { registerAsyncAgent } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { assembleToolPool } from 'src/tools.js'
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js'
 import { asAgentId } from 'src/types/ids.js'
+import { MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js'
 import { runWithAgentContext } from 'src/utils/agentContext.js'
 import { runWithCwdOverride } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -777,8 +778,10 @@ async function resumeAgentBackgroundAfterClaim({
     parentFromTask = undefined
   }
 
-  // Skip name-registry write — original entry persists from the initial spawn
-  // observer-activity resume stamps isObserver on the re-registered task
+  // densable Aye: b?.name && registry missing → registerName(b.name, id).
+  // Registry is in-memory; cold resume / process restart loses it unless we
+  // rehydrate from sidecar meta.name (persisted at spawn via E8/T1e).
+  // observer-activity resume stamps isObserver on the re-registered task.
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
     description: uiDescription,
@@ -792,6 +795,20 @@ async function resumeAgentBackgroundAfterClaim({
     ...(promptOriginKind === 'observer-activity' ? { isObserver: true } : {}),
     attachOwnerKeepalive: false,
   })
+
+  const resumeDisplayName = meta?.name
+  if (
+    resumeDisplayName &&
+    resumeDisplayName !== MAIN_RECIPIENT_NAME &&
+    toolUseContext.getAppState().agentNameRegistry.get(resumeDisplayName) ===
+      undefined
+  ) {
+    rootSetAppState(prev => {
+      const next = new Map(prev.agentNameRegistry)
+      next.set(resumeDisplayName, asAgentId(agentId))
+      return { ...prev, agentNameRegistry: next }
+    })
+  }
 
   // Mirror resume prompt onto the sidechain transcript when neither
   // promptIsMeta nor continueInterruptedTurn. Official store can write

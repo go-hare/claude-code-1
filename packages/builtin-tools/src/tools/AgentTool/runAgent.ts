@@ -281,6 +281,7 @@ export async function* runAgent({
   useExactTools,
   worktreePath,
   description,
+  name,
   transcriptSubdir,
   onQueryProgress,
 }: {
@@ -338,6 +339,11 @@ export async function* runAgent({
   /** Original task description from AgentTool input. Persisted to metadata
    * so a resumed agent's notification can show the original description. */
   description?: string
+  /**
+   * densable E8 `name:H` — display name persisted to sidecar so Aye can
+   * re-register agentNameRegistry after cold resume.
+   */
+  name?: string
   /** Optional subdirectory under subagents/ to group this agent's transcript
    * with related ones (e.g. workflows/<runId> for workflow subagents). */
   transcriptSubdir?: string
@@ -787,6 +793,8 @@ export async function* runAgent({
     agentType: agentDefinition.agentType,
     ...(worktreePath && { worktreePath }),
     ...(description && { description }),
+    // densable E8/T1e: ...H&&{name:H}
+    ...(name && { name }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 
   // Track the last recorded message UUID for parent chain continuity
