@@ -96,13 +96,14 @@ describe('parked keepalive agent pure matrix', () => {
       ),
       'utf8',
     )
-    // nested owner keepalive on mid-bg; not full park package
+    // densable Yeo??mi() owner stamp + mid-bg Gge
     expect(agent.includes('addKeepaliveReason')).toBe(true)
     expect(agent.includes('agentKeepaliveReason')).toBe(true)
     expect(agent.includes('resolvePanelOwnerAgentId')).toBe(true)
+    expect(agent.includes('getMainThreadAgentId')).toBe(true)
     expect(agent.includes('getIsNonInteractiveSession')).toBe(true)
     // fg register stamps owner; mid-bg re-stamps if missing
-    expect(agent.includes('nestedFgOwnerId')).toBe(true)
+    expect(agent.includes('fgOwnerId')).toBe(true)
     expect(agent.includes('ownerAgentId: t.ownerAgentId ?? ownerId')).toBe(true)
 
     const local = readFileSync(

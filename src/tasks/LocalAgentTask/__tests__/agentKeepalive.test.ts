@@ -242,6 +242,26 @@ describe('agent keepalive Gge/tB', () => {
     ).toBeUndefined()
   })
 
+  test('Yeo ?? mi composition: top-level → main, nested panel → parent', () => {
+    // densable Sot/OSu: Re = Yeo(He)??mi(); AgentTool call sites compose the same way.
+    const s = store()
+    seedOwner(s, { agentType: 'general-purpose' })
+    const yeoThenMi = (parent?: string | null) =>
+      resolvePanelOwnerAgentId(parent, () => s.get() as any) ?? 's'
+    expect(yeoThenMi(undefined)).toBe('s')
+    expect(yeoThenMi(null)).toBe('s')
+    expect(yeoThenMi('missing')).toBe('s')
+    expect(yeoThenMi('owner')).toBe('owner')
+    // main-session parent is not panel → fall through to mi()
+    s.set((p: any) => ({
+      tasks: {
+        ...p.tasks,
+        owner: { ...p.tasks.owner, agentType: 'main-session' },
+      },
+    }))
+    expect(yeoThenMi('owner')).toBe('s')
+  })
+
   test('registerAsyncAgent attaches agent:id to owner when interactive', () => {
     const s = store()
     seedOwner(s)

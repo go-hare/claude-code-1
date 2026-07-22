@@ -8,6 +8,7 @@ import { z } from 'zod/v4';
 import {
   clearInvokedSkillsForAgent,
   getIsNonInteractiveSession,
+  getMainThreadAgentId,
   getSdkAgentProgressSummariesEnabled,
 } from 'src/bootstrap/state.js';
 import { enhanceSystemPromptWithEnvDetails, getSystemPrompt } from 'src/constants/prompts.js';
@@ -1013,9 +1014,11 @@ export const AgentTool = buildTool({
 
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId;
-      // densable Sot: ownerAgentId: Yeo(parent)??mi()
-      // Local: only stamp nested panel parents (never sessionId/main-session).
-      const nestedOwnerId = resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState);
+      // densable Sot: Re = Yeo(parent)??mi(); always stamp ownerAgentId:Re
+      // (top-level → mi(); nested panel parent → Yeo). Gge via registerAsyncAgent
+      // no-ops when owner is not local_agent (main).
+      const ownerId =
+        resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
       const agentBackgroundTask = registerAsyncAgent({
         agentId: asyncAgentId,
         description,
@@ -1027,13 +1030,9 @@ export const AgentTool = buildTool({
         // They are killed explicitly via chat:killAgents.
         toolUseId: toolUseContext.toolUseId,
         activeTaskExecutionContext,
-        ...(nestedOwnerId
-          ? {
-              ownerAgentId: nestedOwnerId,
-              notificationTargetAgentId: asAgentId(nestedOwnerId),
-              parentAgentId: nestedOwnerId,
-            }
-          : {}),
+        ownerAgentId: ownerId,
+        notificationTargetAgentId: asAgentId(ownerId),
+        parentAgentId: ownerId,
       });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -1178,8 +1177,9 @@ export const AgentTool = buildTool({
           let cancelAutoBackground: (() => void) | undefined;
           if (!isBackgroundTasksDisabled) {
             // densable OSu: ownerAgentId:Re at foreground register (Yeo(parent)??mi()).
-            // Local: panel parent only — never sessionId (main AL is undefined).
-            const nestedFgOwnerId = resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState);
+            // Top-level → mi(); nested panel parent → Yeo. No Gge until mid-bg.
+            const fgOwnerId =
+              resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
             const registration = registerAgentForeground({
               agentId: syncAgentId,
               description,
@@ -1188,13 +1188,9 @@ export const AgentTool = buildTool({
               setAppState: rootSetAppState,
               toolUseId: toolUseContext.toolUseId,
               autoBackgroundMs: getAutoBackgroundMs() || undefined,
-              ...(nestedFgOwnerId
-                ? {
-                    ownerAgentId: nestedFgOwnerId,
-                    notificationTargetAgentId: asAgentId(nestedFgOwnerId),
-                    parentAgentId: nestedFgOwnerId,
-                  }
-                : {}),
+              ownerAgentId: fgOwnerId,
+              notificationTargetAgentId: asAgentId(fgOwnerId),
+              parentAgentId: fgOwnerId,
             });
             foregroundTaskId = registration.taskId;
             backgroundPromise = registration.backgroundSignal.then(() => ({
@@ -1287,34 +1283,33 @@ export const AgentTool = buildTool({
                   wasBackgrounded = true;
                   // densable Gge(Re, `agent:${ze}`) on mid-bg async_launched —
                   // !pn() interactive only; Re = Yeo(parent)??mi().
-                  // Local only attaches when parent is a nested panel agent —
-                  // never stamp sessionId as owner (main AL is undefined).
                   // OSu already stamps child.ownerAgentId at fg register; mid-bg
                   // re-stamps if missing so BRt can tB(owner) (auto-bg path).
+                  // Gge no-ops when owner is not local_agent (main/mi()).
                   if (!getIsNonInteractiveSession()) {
-                    const ownerId = resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState);
-                    if (ownerId) {
-                      addKeepaliveReason(ownerId, agentKeepaliveReason(backgroundedTaskId), rootSetAppState);
-                      rootSetAppState(prev => {
-                        const t = prev.tasks[backgroundedTaskId];
-                        if (!isLocalAgentTask(t)) return prev;
-                        if (t.ownerAgentId === ownerId && t.notificationTargetAgentId === asAgentId(ownerId)) {
-                          return prev;
-                        }
-                        return {
-                          ...prev,
-                          tasks: {
-                            ...prev.tasks,
-                            [backgroundedTaskId]: {
-                              ...t,
-                              ownerAgentId: t.ownerAgentId ?? ownerId,
-                              notificationTargetAgentId: t.notificationTargetAgentId ?? asAgentId(ownerId),
-                              parentAgentId: t.parentAgentId ?? ownerId,
-                            },
+                    const ownerId =
+                      resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ??
+                      getMainThreadAgentId();
+                    addKeepaliveReason(ownerId, agentKeepaliveReason(backgroundedTaskId), rootSetAppState);
+                    rootSetAppState(prev => {
+                      const t = prev.tasks[backgroundedTaskId];
+                      if (!isLocalAgentTask(t)) return prev;
+                      if (t.ownerAgentId === ownerId && t.notificationTargetAgentId === asAgentId(ownerId)) {
+                        return prev;
+                      }
+                      return {
+                        ...prev,
+                        tasks: {
+                          ...prev.tasks,
+                          [backgroundedTaskId]: {
+                            ...t,
+                            ownerAgentId: t.ownerAgentId ?? ownerId,
+                            notificationTargetAgentId: t.notificationTargetAgentId ?? asAgentId(ownerId),
+                            parentAgentId: t.parentAgentId ?? ownerId,
                           },
-                        };
-                      });
-                    }
+                        },
+                      };
+                    });
                   }
                   // Stop foreground summarization; the backgrounded closure
                   // below owns its own independent stop function.

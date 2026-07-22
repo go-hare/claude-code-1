@@ -812,9 +812,9 @@ export function killDescendantAgents(
  * densable Yeo(parentId, registry):
  *   if parent is local_agent && agentType !== "main-session" → parentId else void 0
  *
- * densable BRt/Sot then does `Yeo(parent) ?? mi()`. Local maps main-session /
- * missing parent to `undefined` so caller falls through to mi() at BRt/enqueue
- * (official AL is agentId===mi()).
+ * densable Sot/OSu/mid-bg/BRt then do `Yeo(parent) ?? mi()`. This helper is Yeo
+ * only — callers fall through to getMainThreadAgentId() (AgentTool spawn,
+ * BRt/enqueue). Official AL is agentId===mi().
  */
 export function resolvePanelOwnerAgentId(
   parentAgentId: string | undefined | null,
