@@ -425,6 +425,11 @@ export async function processResumedConversation(
     sessionIdOverride?: string
     transcriptPath?: string
     includeAttribution?: boolean
+    /**
+     * densable a.replyOnResume — seed initialMessage:{replay:true} when
+     * interactive mid-turn fork has no CLI prompt string.
+     */
+    replyOnResume?: boolean
   },
   context: {
     modeApi: CoordinatorModeApi | null
@@ -555,6 +560,12 @@ export async function processResumedConversation(
     context.agentDefinitions,
   )
 
+  // densable: Fr?{message}:a.replyOnResume?{replay:!0}:null
+  // Keep any CLI prompt initialMessage; else when --reply-on-resume seed replay.
+  const seededInitialMessage =
+    context.initialState.initialMessage ??
+    (opts.replyOnResume ? ({ replay: true as const } as const) : null)
+
   return {
     messages: result.messages,
     fileHistorySnapshots: result.fileHistorySnapshots,
@@ -566,6 +577,7 @@ export async function processResumedConversation(
     restoredAgentDef: restoredAgent,
     initialState: {
       ...context.initialState,
+      initialMessage: seededInitialMessage,
       ...(resumedAgentType && { agent: resumedAgentType }),
       ...(restoredAttribution && { attribution: restoredAttribution }),
       ...(standaloneAgentContext && { standaloneAgentContext }),

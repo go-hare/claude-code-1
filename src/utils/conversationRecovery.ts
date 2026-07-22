@@ -167,6 +167,12 @@ export function deserializeMessages(serializedMessages: Message[]): Message[] {
  */
 export function deserializeMessagesWithInterruptDetection(
   serializedMessages: Message[],
+  /**
+   * densable lrs third arg `r=replyOnResume`. When true: skip N4g interrupt
+   * detection (turnInterruptionState = none) and skip NRR sentinel — the
+   * interactive REPL replay path owns continue via initialMessage:{replay}.
+   */
+  replyOnResume = false,
 ): DeserializeResult {
   try {
     // Transform legacy attachment types before processing
@@ -205,27 +211,33 @@ export function deserializeMessagesWithInterruptDetection(
       filteredThinking,
     ) as NormalizedMessage[]
 
-    const internalState = detectTurnInterruption(filteredMessages)
-
-    // Transform mid-turn interruptions into interrupted_prompt by appending
-    // a synthetic continuation message. This unifies both interruption kinds
-    // so the consumer only needs to handle interrupted_prompt.
+    // densable lrs: f = t?.size||r ? {kind:"none"} : N4g(p)
+    // replyOnResume skips interrupt classification (REPL uses {replay:true}).
     let turnInterruptionState: TurnInterruptionState
-    if (internalState.kind === 'interrupted_turn') {
-      // Official kdo — CLAUDE_CODE_RESUME_PROMPT overrides default.
-      const [continuationMessage] = normalizeMessages([
-        createUserMessage({
-          content: getResumePrompt(),
-          isMeta: true,
-        }),
-      ])
-      filteredMessages.push(continuationMessage!)
-      turnInterruptionState = {
-        kind: 'interrupted_prompt',
-        message: continuationMessage!,
-      }
+    if (replyOnResume) {
+      turnInterruptionState = { kind: 'none' }
     } else {
-      turnInterruptionState = internalState
+      const internalState = detectTurnInterruption(filteredMessages)
+
+      // Transform mid-turn interruptions into interrupted_prompt by appending
+      // a synthetic continuation message. This unifies both interruption kinds
+      // so the consumer only needs to handle interrupted_prompt.
+      if (internalState.kind === 'interrupted_turn') {
+        // Official kdo — CLAUDE_CODE_RESUME_PROMPT overrides default.
+        const [continuationMessage] = normalizeMessages([
+          createUserMessage({
+            content: getResumePrompt(),
+            isMeta: true,
+          }),
+        ])
+        filteredMessages.push(continuationMessage!)
+        turnInterruptionState = {
+          kind: 'interrupted_prompt',
+          message: continuationMessage!,
+        }
+      } else {
+        turnInterruptionState = internalState
+      }
     }
 
     // Append a synthetic assistant sentinel after the last user message so
@@ -233,20 +245,23 @@ export function deserializeMessagesWithInterruptDetection(
     // trailing system/progress messages and insert right after the user
     // message so removeInterruptedMessage's splice(idx, 2) removes the
     // correct pair.
-    const lastRelevantIdx = filteredMessages.findLastIndex(
-      m => m.type !== 'system' && m.type !== 'progress',
-    )
-    if (
-      lastRelevantIdx !== -1 &&
-      filteredMessages[lastRelevantIdx]!.type === 'user'
-    ) {
-      filteredMessages.splice(
-        lastRelevantIdx + 1,
-        0,
-        createAssistantMessage({
-          content: NO_RESPONSE_REQUESTED,
-        }) as NormalizedMessage,
+    // densable lrs: if (!r && last is user) inject NRR sentinel.
+    if (!replyOnResume) {
+      const lastRelevantIdx = filteredMessages.findLastIndex(
+        m => m.type !== 'system' && m.type !== 'progress',
       )
+      if (
+        lastRelevantIdx !== -1 &&
+        filteredMessages[lastRelevantIdx]!.type === 'user'
+      ) {
+        filteredMessages.splice(
+          lastRelevantIdx + 1,
+          0,
+          createAssistantMessage({
+            content: NO_RESPONSE_REQUESTED,
+          }) as NormalizedMessage,
+        )
+      }
     }
 
     return { messages: filteredMessages, turnInterruptionState }
@@ -487,6 +502,11 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
 export async function loadConversationForResume(
   source: string | LogOption | undefined,
   sourceJsonlFile: string | undefined,
+  /**
+   * densable p1e / lrs replyOnResume — when true, skip interrupt+NRR sentinel
+   * so interactive REPL can consume via initialMessage:{replay:true}.
+   */
+  opts?: { replyOnResume?: boolean },
 ): Promise<{
   messages: Message[]
   turnInterruptionState: TurnInterruptionState
@@ -591,7 +611,11 @@ export async function loadConversationForResume(
     restoreSkillStateFromMessages(messages!)
 
     // Deserialize messages to handle unresolved tool uses and ensure proper format
-    const deserialized = deserializeMessagesWithInterruptDetection(messages!)
+    // densable lrs(..., replyOnResume) — skip interrupt+sentinel for mid-turn fork
+    const deserialized = deserializeMessagesWithInterruptDetection(
+      messages!,
+      Boolean(opts?.replyOnResume),
+    )
     messages = deserialized.messages
 
     // Process session start hooks for resume

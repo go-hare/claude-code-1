@@ -3,6 +3,8 @@ import { getCommandQueue, resetCommandQueue } from '../messageQueueManager.js'
 import {
   buildOrphanWorkflowStoppedSummary,
   classifyOrphanAgent,
+  clearAgentResumeInFlightForTests,
+  isAgentResumeInFlight,
   isAgentTranscriptIncomplete,
   stripInterruptedTrailingTurns,
   notifyOrphanAgentAlreadyCompleted,
@@ -18,9 +20,11 @@ import {
   processOrphanAgentCandidates,
   processOrphanShells,
   processOrphanWorkflows,
+  releaseAgentResumeInFlight,
   runOrphanAgentResumePass,
   scanAsyncAgentsFromMessages,
   scheduleDeferredOrphanAutoResume,
+  tryClaimAgentResumeInFlight,
 } from '../orphanAgentResume.js'
 
 afterEach(() => {
@@ -29,6 +33,7 @@ afterEach(() => {
   } catch {
     /* optional */
   }
+  clearAgentResumeInFlightForTests()
 })
 
 describe('scanAsyncAgentsFromMessages (Rqb agent subset)', () => {
@@ -599,6 +604,61 @@ describe('classifyOrphanAgent (kqb subset)', () => {
       { nowMs: now },
     )
     expect(r.kind).not.toBe('auto-resume')
+  })
+
+  test('sidecar stoppedByUser classifies stopped (no auto-resume)', () => {
+    const now = Date.now()
+    const r = classifyOrphanAgent(
+      {
+        agentId: 'a1',
+        description: 'explore',
+        launchedByAgentTool: true,
+        hasMeta: true,
+        mtimeMs: now - 1000,
+        stoppedByUser: true,
+      },
+      { nowMs: now },
+    )
+    expect(r.kind).toBe('stopped')
+    if (r.kind === 'stopped') {
+      expect(r.summary).toContain('stopped by the user')
+      expect(r.summary).toContain('will not be auto-resumed')
+    }
+  })
+})
+
+describe('agentResumeInFlight claim de-dupe', () => {
+  test('tryClaim / release is exclusive per agentId', () => {
+    expect(tryClaimAgentResumeInFlight('x')).toBe(true)
+    expect(tryClaimAgentResumeInFlight('x')).toBe(false)
+    expect(isAgentResumeInFlight('x')).toBe(true)
+    expect(tryClaimAgentResumeInFlight('y')).toBe(true)
+    releaseAgentResumeInFlight('x')
+    expect(isAgentResumeInFlight('x')).toBe(false)
+    expect(tryClaimAgentResumeInFlight('x')).toBe(true)
+  })
+
+  test('scheduleDeferredOrphanAutoResume skips agents already in-flight', async () => {
+    expect(tryClaimAgentResumeInFlight('held')).toBe(true)
+    const called: string[] = []
+    const r = await scheduleDeferredOrphanAutoResume({
+      agents: [
+        { agentId: 'held', description: 'skip-me' },
+        { agentId: 'free', description: 'run-me' },
+      ],
+      waitForMcp: false,
+      notify: false,
+      resumeAgent: async entry => {
+        called.push(entry.agentId)
+      },
+    })
+    expect(called).toEqual(['free'])
+    expect(r.resumed).toBe(1)
+    expect(r.failed).toBe(0)
+    // held still owned by outer claim
+    expect(isAgentResumeInFlight('held')).toBe(true)
+    // free released after attempt
+    expect(isAgentResumeInFlight('free')).toBe(false)
   })
 })
 

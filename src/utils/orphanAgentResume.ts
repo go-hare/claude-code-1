@@ -88,6 +88,42 @@ export type OrphanClassifyInput = OrphanAgentEntry & {
   mtimeMs?: number | null
   /** Official F3 meta present (agent metadata readable). */
   hasMeta?: boolean
+  /**
+   * densable Gzg/hAe sidecar marker. When true, classify as stopped
+   * (no auto-resume) so orphan pass does not flail into Aye orr.
+   */
+  stoppedByUser?: boolean
+}
+
+/**
+ * Process-local claim/orphan resume de-dupe (agentId).
+ * Covers race where claim BSe + orphan ese both schedule Aye for the same id
+ * before registry resuming CAS is visible (cold disk / dual schedule).
+ * densable relies on Aye Wl(_) CAS once a task is in-registry; this set
+ * covers the pre-registry window shared by claim+orphan paths.
+ */
+const agentResumeInFlight = new Set<string>()
+
+/** Try to claim agentId for deferred resume. Returns false if already claimed. */
+export function tryClaimAgentResumeInFlight(agentId: string): boolean {
+  if (!agentId) return false
+  if (agentResumeInFlight.has(agentId)) return false
+  agentResumeInFlight.add(agentId)
+  return true
+}
+
+/** Release agentId after deferred resume attempt finishes (success or fail). */
+export function releaseAgentResumeInFlight(agentId: string): void {
+  agentResumeInFlight.delete(agentId)
+}
+
+export function isAgentResumeInFlight(agentId: string): boolean {
+  return agentResumeInFlight.has(agentId)
+}
+
+/** Test helper — clear process-local claim set. */
+export function clearAgentResumeInFlightForTests(): void {
+  agentResumeInFlight.clear()
 }
 
 export type ScannedAsyncAgents = {
@@ -519,17 +555,22 @@ export async function enrichOrphanCandidatesWithDisk(
       } catch {
         mtimeMs = null
       }
+      let stoppedByUser = false
       try {
         const meta = await readAgentMetadata(asAgentId(a.agentId))
         hasMeta = meta !== null && meta !== undefined
+        stoppedByUser = meta?.stoppedByUser === true
       } catch {
         hasMeta = false
+        stoppedByUser = false
       }
+      out.push({ ...a, mtimeMs, hasMeta, stoppedByUser })
+      continue
     } catch {
       mtimeMs = null
       hasMeta = false
     }
-    out.push({ ...a, mtimeMs, hasMeta })
+    out.push({ ...a, mtimeMs, hasMeta, stoppedByUser: false })
   }
   return out
 }
@@ -551,10 +592,13 @@ export async function runOrphanAgentResumePass(input: {
    * Official ese Aye. When omitted, auto-resume candidates are still returned
    * but not scheduled.
    */
-  resumeAgent?: (entry: OrphanAgentEntry) => Promise<{
-    alreadyCompleted?: boolean
-    outputFile?: string
-  } | void>
+  resumeAgent?: (entry: OrphanAgentEntry) => Promise<
+    | {
+        alreadyCompleted?: boolean
+        outputFile?: string
+      }
+    | undefined
+  >
   isCurrent?: () => boolean
   notify?: boolean
   autoResumeEnabled?: boolean
@@ -698,6 +742,16 @@ export function classifyOrphanAgent(
       : null
   const hasMeta = input.hasMeta === true
   const desc = input.description ?? input.agentId
+
+  // Sidecar stoppedByUser → classify stopped (no auto-resume). densable only
+  // gates in Aye (orr); pre-classify avoids failed auto-resume noise on cold start.
+  if (input.stoppedByUser === true) {
+    return {
+      kind: 'stopped',
+      entry: input,
+      summary: `Background agent "${desc}" was stopped by the user and will not be auto-resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`,
+    }
+  }
 
   if (
     autoOk &&
@@ -1280,10 +1334,13 @@ export async function scheduleDeferredOrphanAutoResume(input: {
   /**
    * Official Aye. Return `{ alreadyCompleted?: boolean; outputFile?: string }`.
    */
-  resumeAgent: (entry: OrphanAgentEntry) => Promise<{
-    alreadyCompleted?: boolean
-    outputFile?: string
-  } | void>
+  resumeAgent: (entry: OrphanAgentEntry) => Promise<
+    | {
+        alreadyCompleted?: boolean
+        outputFile?: string
+      }
+    | undefined
+  >
   /** Still-held job / session guard. Default always true. */
   isCurrent?: () => boolean
   notify?: boolean
@@ -1322,6 +1379,10 @@ export async function scheduleDeferredOrphanAutoResume(input: {
   let failed = 0
   const doNotify = input.notify !== false
   for (const a of input.agents) {
+    // agentId-level de-dupe vs claim BSe / concurrent orphan passes
+    if (!tryClaimAgentResumeInFlight(a.agentId)) {
+      continue
+    }
     try {
       const r = await input.resumeAgent(a)
       if (r && r.alreadyCompleted) {
@@ -1344,6 +1405,8 @@ export async function scheduleDeferredOrphanAutoResume(input: {
           e instanceof Error ? e.message : String(e),
         )
       }
+    } finally {
+      releaseAgentResumeInFlight(a.agentId)
     }
   }
   return { resumed, alreadyCompleted, failed, skipped: false }

@@ -6,6 +6,40 @@ import { setMaxListeners } from 'events'
 const DEFAULT_MAX_LISTENERS = 50
 
 /**
+ * densable J0 — cache DOMException AbortError reasons for stable identity.
+ * Prefer abort with string "background" or this helper so RT(reason)==="background".
+ */
+const abortReasonCache = new Map<string, DOMException>()
+
+export function createAbortErrorReason(message: string): DOMException {
+  let cached = abortReasonCache.get(message)
+  if (!cached) {
+    cached = new DOMException(message, 'AbortError')
+    abortReasonCache.set(message, cached)
+  }
+  return cached
+}
+
+/**
+ * densable RT — extract comparable abort reason message.
+ * DOMException AbortError → .message; string passthrough; Error → .message.
+ */
+export function getAbortReasonMessage(reason: unknown): string | undefined {
+  if (reason == null) return undefined
+  if (typeof reason === 'string') return reason
+  if (typeof DOMException !== 'undefined' && reason instanceof DOMException) {
+    return reason.message
+  }
+  if (reason instanceof Error) return reason.message
+  return String(reason)
+}
+
+/** densable RT(signal.reason) === "background" — left-arrow / exit checkpoint abort. */
+export function isBackgroundAbortReason(reason: unknown): boolean {
+  return getAbortReasonMessage(reason) === 'background'
+}
+
+/**
  * Creates an AbortController with proper event listener limits set.
  * This prevents MaxListenersExceededWarning when multiple listeners
  * are attached to the abort signal.

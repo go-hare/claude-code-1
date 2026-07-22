@@ -8,7 +8,7 @@
  * the full agent runtime.
  */
 
-import { createHash } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 
@@ -175,8 +175,9 @@ export function mergeCheckpointPayloads(
     w => asRec(w).taskId as string | undefined,
   )
 
+  // densable uKy: writtenAtMs from incoming (t), origin t??e, prefill t??e
   return {
-    writtenAtMs: Math.max(existing.writtenAtMs ?? 0, incoming.writtenAtMs ?? 0),
+    writtenAtMs: incoming.writtenAtMs ?? existing.writtenAtMs ?? 0,
     shells,
     cron,
     ...(agents.length ? { agents } : {}),
@@ -206,8 +207,49 @@ export function adoptJsonPath(jobDir: string): string {
 }
 
 /**
- * Official sQt portable write — merge with existing adopt.json when present,
- * then atomic-ish write. Returns the payload written.
+ * densable Cf portable — write via `${path}.tmp.<hex>` then rename into place
+ * so readers never observe a partial adopt.json (Jlr write path).
+ */
+export async function atomicWriteFile(
+  targetPath: string,
+  data: string,
+  mode?: number,
+): Promise<void> {
+  const tmpPath = `${targetPath}.tmp.${randomBytes(4).toString('hex')}`
+  try {
+    await writeFile(tmpPath, data, {
+      encoding: 'utf8',
+      ...(mode !== undefined ? { mode } : {}),
+    })
+    try {
+      await rename(tmpPath, targetPath)
+    } catch (e) {
+      // densable Cf: on EXDEV-ish rename failure, copyFile fallback then unlink tmp.
+      // Local: try copy via read+write then unlink (rename across devices rare
+      // for same-dir tmp, but keep cleanup hygiene).
+      const code =
+        e && typeof e === 'object' && 'code' in e
+          ? String((e as { code?: unknown }).code)
+          : undefined
+      if (code === 'EXDEV') {
+        const buf = await readFile(tmpPath)
+        await writeFile(targetPath, buf, {
+          ...(mode !== undefined ? { mode } : {}),
+        })
+        await unlink(tmpPath).catch(() => {})
+        return
+      }
+      throw e
+    }
+  } catch (e) {
+    await unlink(tmpPath).catch(() => {})
+    throw e
+  }
+}
+
+/**
+ * Official Jlr/sQt portable write — merge with existing adopt.json when present,
+ * then densable Cf atomic write. Returns the payload written.
  */
 export async function writeAdoptJson(
   jobDir: string,
@@ -232,7 +274,7 @@ export async function writeAdoptJson(
   } catch {
     /* no existing or corrupt — write incoming */
   }
-  await writeFile(path, JSON.stringify(toWrite), { mode: 0o600 })
+  await atomicWriteFile(path, JSON.stringify(toWrite), 0o600)
   return toWrite
 }
 
@@ -655,8 +697,135 @@ export type PortableCheckpointResult = {
 }
 
 /**
+ * densable vAo — adopt/handoff enabled unless CLAUDE_DISABLE_ADOPT is truthy.
+ */
+export function isAdoptEnabled(): boolean {
+  const v = process.env.CLAUDE_DISABLE_ADOPT
+  if (v === undefined || v === '') return true
+  const lower = v.toLowerCase()
+  return !(
+    lower === '1' ||
+    lower === 'true' ||
+    lower === 'yes' ||
+    lower === 'on'
+  )
+}
+
+/**
+ * densable H_e — per-task-id handoff eligibility map.
+ *
+ * A root (parent-less agent / unowned shell / workflow) is eligible only if the
+ * entire descendant subtree is individually handoff-ready. Map entries are
+ * `true` only for tasks in such a fully-eligible tree.
+ *
+ * When adopt is disabled (vAo false), returns empty map → CAo collects nothing.
+ */
+export function buildHandoffEligibilityMap(
+  tasks: Record<string, PortableTaskLike> | null | undefined,
+): Map<string, boolean> {
+  const out = new Map<string, boolean>()
+  if (!isAdoptEnabled()) return out
+  const all = Object.values(tasks ?? {})
+
+  const ownerOf = (t: PortableTaskLike): string | undefined => {
+    if (t.type === 'local_agent') return t.parentAgentId
+    // shells / workflows: agentId is the owning agent when nested
+    if ('agentId' in t && t.agentId !== undefined) return t.agentId
+    return undefined
+  }
+
+  const childrenByOwner = new Map<string, PortableTaskLike[]>()
+  for (const t of all) {
+    if (t.status !== 'running' && t.status !== 'pending') continue
+    const owner = ownerOf(t)
+    if (owner === undefined) continue
+    const list = childrenByOwner.get(owner) ?? []
+    list.push(t)
+    childrenByOwner.set(owner, list)
+  }
+
+  const leafReady = (t: PortableTaskLike): boolean => {
+    if (t.type === 'local_agent') {
+      return (
+        t.agentType !== 'main-session' &&
+        t.status === 'running' &&
+        t.isBackgrounded === true &&
+        t.abortController !== undefined &&
+        t.abortController !== null
+      )
+    }
+    if (t.type === 'local_bash') {
+      return (
+        t.kind !== 'monitor' &&
+        t.status === 'running' &&
+        t.isBackgrounded === true &&
+        t.shellCommand != null &&
+        typeof t.shellCommand.detach === 'function'
+      )
+    }
+    if (t.type === 'local_workflow') {
+      return (
+        t.status === 'running' &&
+        t.scriptPath !== undefined &&
+        t.workflowRunId !== undefined &&
+        t.abortController !== undefined &&
+        t.abortController !== null
+      )
+    }
+    return false
+  }
+
+  const walk = (t: PortableTaskLike, acc: string[]): boolean => {
+    acc.push(t.id)
+    let ok = leafReady(t)
+    for (const child of childrenByOwner.get(t.id) ?? []) {
+      ok = walk(child, acc) && ok
+    }
+    return ok
+  }
+
+  const isRoot = (t: PortableTaskLike): boolean => {
+    if (t.type === 'local_agent') return t.parentAgentId === undefined
+    if (t.type === 'local_bash') return t.agentId === undefined
+    if (t.type === 'local_workflow') return true
+    return false
+  }
+
+  for (const t of all) {
+    if (t.status !== 'running' && t.status !== 'pending') continue
+    if (!isRoot(t)) continue
+    const ids: string[] = []
+    const eligible = walk(t, ids)
+    for (const id of ids) out.set(id, eligible)
+  }
+  return out
+}
+
+/** densable fct — task id is in a fully-eligible handoff tree. */
+export function isHandoffEligible(
+  taskId: string,
+  eligibility: Map<string, boolean>,
+): boolean {
+  return eligibility.get(taskId) ?? false
+}
+
+/**
+ * densable lWe — cron is handoffable when adopt enabled and either unowned
+ * or its agentId is in a fully-eligible tree.
+ */
+export function isCronHandoffEligible(
+  cron: PortableCronLike,
+  eligibility: Map<string, boolean>,
+): boolean {
+  if (!isAdoptEnabled()) return false
+  if (cron.agentId === undefined) return true
+  return eligibility.get(cron.agentId) ?? false
+}
+
+/**
  * Official CAo / fDs portable — snapshot live shells/agents/workflows/cron.
  * Shells: prefer shellCommand.detach() (unref + pid) then getPid.
+ * Filtered by densable H_e subtree eligibility (CAo(yDs/_Ds/bDs/lWe)).
  */
 export function collectPortableCheckpoint(input: {
   tasks?: Record<string, PortableTaskLike> | null
@@ -667,8 +836,17 @@ export function collectPortableCheckpoint(input: {
    * without waiting. Official fDs always detaches.
    */
   detachShells?: boolean
+  /**
+   * Override H_e map (tests). Default: buildHandoffEligibilityMap(tasks).
+   * Pass empty Map to force include-all legacy path is NOT supported —
+   * densable always filters via H_e; empty map → no handoff.
+   */
+  handoffEligibility?: Map<string, boolean>
 }): PortableCheckpointResult | null {
-  const tasks = Object.values(input.tasks ?? {})
+  const taskMap = input.tasks ?? {}
+  const tasks = Object.values(taskMap)
+  const eligibility =
+    input.handoffEligibility ?? buildHandoffEligibilityMap(taskMap)
   const shells: unknown[] = []
   const agents: unknown[] = []
   const workflows: unknown[] = []
@@ -692,8 +870,12 @@ export function collectPortableCheckpoint(input: {
 
   for (const t of tasks) {
     if (t.status !== 'running' && t.status !== 'pending') continue
+    // densable CAo: only yDs/_Ds/bDs-eligible ids enter the payload.
+    if (!isHandoffEligible(t.id, eligibility)) continue
     if (t.type === 'local_bash') {
       // Prefer backgrounded shells; still include running with shellCommand.
+      // densable Jk leaf already requires isBackgrounded+detach; keep soft
+      // guard for partial fixtures that force eligibility via override map.
       if (
         t.isBackgrounded === false &&
         t.shellCommand?.status !== 'backgrounded'
@@ -839,15 +1021,18 @@ export function collectPortableCheckpoint(input: {
     }
   }
 
-  const cron = (input.cron ?? []).map(u => ({
-    id: u.id,
-    cron: u.cron,
-    prompt: u.prompt,
-    createdAt: u.createdAt,
-    recurring: u.recurring,
-    agentId: u.agentId,
-    kind: u.kind,
-  }))
+  // densable CAo: zI().filter(lWe) — only unowned or eligible-owner crons.
+  const cron = (input.cron ?? [])
+    .filter(u => isCronHandoffEligible(u, eligibility))
+    .map(u => ({
+      id: u.id,
+      cron: u.cron,
+      prompt: u.prompt,
+      createdAt: u.createdAt,
+      recurring: u.recurring,
+      agentId: u.agentId,
+      kind: u.kind,
+    }))
   const cronIds = cron.map(c => c.id)
 
   if (
@@ -883,7 +1068,12 @@ export function collectPortableCheckpoint(input: {
       if (cronIds.length) removers.removeCronIds?.(cronIds)
     },
     async checkpointAgents(opts) {
-      const reason = opts?.reason ?? 'background'
+      // densable J0("background") — DOMException AbortError for Yqe m()/RT
+      const { createAbortErrorReason } = await import('./abortController.js')
+      const reason =
+        opts?.reason != null
+          ? opts.reason
+          : createAbortErrorReason('background')
       const abortedWorkflowIds: string[] = []
       const abortedAgentIds: string[] = []
       // Official: workflows first — abort(J0("background")) then zit(id, reg).
@@ -1614,7 +1804,8 @@ export function registerResumedAgentTask(
       ? { startTime: entry.startTime }
       : {}),
     type: 'local_agent' as const,
-    // Official PSu: status completed (transcript already done; not re-run).
+    // Official PSu: status completed (shell ownership + Aye CAS can claim).
+    // Do NOT set resuming/running here — densable Aye rejects those.
     status: 'completed' as const,
     agentId: entry.agentId,
     ownerAgentId,
@@ -1626,10 +1817,13 @@ export function registerResumedAgentTask(
     lastReportedToolCount: 0,
     lastReportedTokenCount: 0,
     isBackgrounded: true,
+    isIdle: false,
     pendingMessages: [] as Array<{ text: string; isMeta: boolean }>,
     retain: false,
     diskLoaded: false,
     notified: true,
+    // Product UX: panel shows "resuming" until deferred Aye settles.
+    adoptResumePending: true,
   }
 
   const setState = setAppState as unknown as Parameters<typeof registerTask>[1]
@@ -2355,10 +2549,26 @@ export async function runLeftArrowPostAdoptCheckpoint(opts?: {
     /* best-effort */
   }
   try {
+    // densable aAf disown after Jlr: default cron remover is session-global
+    // removeSessionCronTasks — REPL must NOT pre-detach cron (irreversible
+    // if adopt/spawn fails). Callers can override for tests.
+    let removeCronIds = opts?.removeCronIds
+    if (!removeCronIds) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { removeSessionCronTasks } =
+          require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+        removeCronIds = ids => {
+          removeSessionCronTasks(ids)
+        }
+      } catch {
+        removeCronIds = undefined
+      }
+    }
     live.disown({
       removeTaskIds: opts?.removeTaskIds,
       removeAgentIds: opts?.removeAgentIds,
-      removeCronIds: opts?.removeCronIds,
+      removeCronIds,
     })
   } catch {
     /* best-effort */
@@ -2367,16 +2577,16 @@ export async function runLeftArrowPostAdoptCheckpoint(opts?: {
 }
 
 /**
- * Official gDs portable — MCP ready when no client is still `"pending"`.
- * Official also requires clientsInitialized; local AppState may omit that
- * flag → treat missing as initialized.
+ * densable gDs — MCP ready only when `clientsInitialized === true` and no
+ * client is still `"pending"`. Missing mcp / missing flag is NOT ready
+ * (official: `e.mcp.clientsInitialized===!0&&!e.mcp.clients.some(...)`).
  */
 export function isMcpClientsSettled(state: {
   mcp?: { clientsInitialized?: boolean; clients?: Array<{ type?: string }> }
 }): boolean {
   const mcp = state.mcp
-  if (!mcp) return true
-  if (mcp.clientsInitialized === false) return false
+  if (!mcp) return false
+  if (mcp.clientsInitialized !== true) return false
   const clients = mcp.clients ?? []
   return !clients.some(c => c.type === 'pending')
 }
@@ -2462,6 +2672,19 @@ export async function resumeAdoptedWorkflow(
     }) => Promise<void>
     /** Override parse for tests — throw to simulate parse fail. */
     parseScript?: (source: string) => unknown
+    /**
+     * densable w5u `toolUseContext` — required for product launch path.
+     * Tests that pass `launch` may omit.
+     */
+    toolUseContext?: unknown
+    /**
+     * densable w5u `canUseTool` — required for product launch path.
+     * Tests that pass `launch` may omit.
+     */
+    canUseTool?: (
+      input: unknown,
+      toolUseContext: unknown,
+    ) => Promise<unknown> | unknown
   },
 ): Promise<void> {
   if (!entry.scriptPath) {
@@ -2559,6 +2782,13 @@ export async function resumeAdoptedWorkflow(
     return
   }
 
+  // densable w5u: AGr({..., toolUseContext, canUseTool}) — never empty allow-all.
+  if (opts?.toolUseContext == null || opts?.canUseTool == null) {
+    throw new Error(
+      'adopted workflow resume requires toolUseContext and canUseTool (densable w5u)',
+    )
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getWorkflowService } =
     require('../workflow/service.js') as typeof import('../workflow/service.js')
@@ -2570,9 +2800,8 @@ export async function resumeAdoptedWorkflow(
       ...(args !== undefined ? { args: args as never } : {}),
       ...(entry.description ? { description: entry.description } : {}),
     },
-    // Tool context filled by product schedule path when available.
-    {} as never,
-    async () => ({ behavior: 'allow' as const }),
+    opts.toolUseContext as never,
+    opts.canUseTool as never,
   )
 }
 
@@ -2605,6 +2834,29 @@ export async function scheduleDeferredAdoptResume(input: {
    * already running. Product path supplies setAppState remover.
    */
   removeTask?: (taskId: string) => void
+  /**
+   * densable w5u toolUseContext — product path must supply (same as Aye adapter).
+   * Tests that pass resumeWorkflow may omit.
+   */
+  toolUseContext?: unknown
+  /**
+   * densable w5u canUseTool — product path must supply.
+   */
+  canUseTool?: (
+    input: unknown,
+    toolUseContext: unknown,
+  ) => Promise<unknown> | unknown
+  /**
+   * Lazy product-path resolver when context is not ready at schedule time
+   * (REPL closes over deferredResumeRefs after first paint).
+   */
+  getWorkflowResumeContext?: () => {
+    toolUseContext?: unknown
+    canUseTool?: (
+      input: unknown,
+      toolUseContext: unknown,
+    ) => Promise<unknown> | unknown
+  } | null
 }): Promise<{
   resumed: number
   failed: number
@@ -2632,8 +2884,11 @@ export async function scheduleDeferredAdoptResume(input: {
   let agentsFailed = 0
   const resume =
     input.resumeWorkflow ??
-    ((e: AdoptedWorkflowEntry) =>
-      resumeAdoptedWorkflow(e, {
+    ((e: AdoptedWorkflowEntry) => {
+      const lazy = input.getWorkflowResumeContext?.() ?? null
+      const toolUseContext = input.toolUseContext ?? lazy?.toolUseContext
+      const canUseTool = input.canUseTool ?? lazy?.canUseTool
+      return resumeAdoptedWorkflow(e, {
         getTasks: () => {
           try {
             const s = input.getState() as {
@@ -2645,7 +2900,10 @@ export async function scheduleDeferredAdoptResume(input: {
           }
         },
         removeTask: input.removeTask,
-      }))
+        toolUseContext,
+        canUseTool,
+      })
+    })
   for (const w of workflows) {
     try {
       await resume(w)
@@ -2673,8 +2931,15 @@ export async function scheduleDeferredAdoptResume(input: {
   }
 
   // Official: for (let qn of ft) Aye({... continueInterruptedTurn:!0 ...})
+  // agentId-level in-flight de-dupe vs orphan ese (shared process Set).
   if (input.resumeAgent) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { tryClaimAgentResumeInFlight, releaseAgentResumeInFlight } =
+      require('./orphanAgentResume.js') as typeof import('./orphanAgentResume.js')
     for (const a of agents) {
+      if (!tryClaimAgentResumeInFlight(a.agentId)) {
+        continue
+      }
       try {
         await input.resumeAgent(a)
         agentsResumed++
@@ -2698,6 +2963,8 @@ export async function scheduleDeferredAdoptResume(input: {
         } catch {
           /* best-effort */
         }
+      } finally {
+        releaseAgentResumeInFlight(a.agentId)
       }
     }
   }
