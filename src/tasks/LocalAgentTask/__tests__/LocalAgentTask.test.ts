@@ -146,8 +146,13 @@ const {
   registerAsyncAgent,
   updateAgentProgress,
   scheduleDeferredAgentProgressRebuild,
+  clearDeferredAgentProgressRebuild,
+  clearAllDeferredAgentProgressRebuildsForTests,
   isLocalAgentTask,
   clearAllIdleWindowTimersForTests,
+  tryClaimAgentResume,
+  clearAgentResuming,
+  isLocalAgentPanelActive,
 } = await import('../LocalAgentTask.js')
 const { IDLE_WINDOW_KEEPALIVE_REASON } = await import(
   '../../../utils/task/framework.js'
@@ -224,6 +229,178 @@ describe('createProgressTracker', () => {
     expect(tracker.latestInputTokens).toBe(0)
     expect(tracker.cumulativeOutputTokens).toBe(0)
     expect(tracker.recentActivities).toEqual([])
+  })
+})
+
+describe('tryClaimAgentResume (densable Aye CAS)', () => {
+  test('cold resume (no task) returns true and is no-op', () => {
+    const { setAppState, getState } = createSetAppState()
+    expect(
+      tryClaimAgentResume(
+        'missing',
+        setAppState as any,
+        () => getState() as any,
+      ),
+    ).toBe(true)
+    expect(getState().tasks).toEqual({})
+  })
+
+  test('claims completed agent (sets resuming:true)', () => {
+    const task = makeRunningTask({ status: 'completed', resuming: false })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    expect(
+      tryClaimAgentResume(task.id, setAppState as any, () => getState() as any),
+    ).toBe(true)
+    expect(getState().tasks[task.id].resuming).toBe(true)
+  })
+
+  test('claims PSu adopt placeholder without treating adoptResumePending as CAS block', () => {
+    // Product: PSu sets status completed + adoptResumePending; Aye CAS must still claim.
+    const task = makeRunningTask({
+      status: 'completed',
+      resuming: false,
+      adoptResumePending: true,
+    })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    expect(
+      tryClaimAgentResume(task.id, setAppState as any, () => getState() as any),
+    ).toBe(true)
+    const next = getState().tasks[task.id]
+    expect(next.resuming).toBe(true)
+    expect(next.adoptResumePending).toBe(false)
+  })
+
+  test('blocks when status is running', () => {
+    const task = makeRunningTask({ status: 'running' })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    expect(
+      tryClaimAgentResume(task.id, setAppState as any, () => getState() as any),
+    ).toBe(false)
+    expect(getState().tasks[task.id].resuming).not.toBe(true)
+  })
+
+  test('blocks when already resuming', () => {
+    const task = makeRunningTask({ status: 'completed', resuming: true })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    expect(
+      tryClaimAgentResume(task.id, setAppState as any, () => getState() as any),
+    ).toBe(false)
+  })
+
+  test('clearAgentResuming only clears when resuming', () => {
+    const task = makeRunningTask({ status: 'completed', resuming: true })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    clearAgentResuming(task.id, setAppState as any)
+    expect(getState().tasks[task.id].resuming).toBe(false)
+  })
+
+  test('clearAgentResuming also clears adoptResumePending', () => {
+    const task = makeRunningTask({
+      status: 'completed',
+      resuming: false,
+      adoptResumePending: true,
+    })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    clearAgentResuming(task.id, setAppState as any)
+    expect(getState().tasks[task.id].adoptResumePending).toBe(false)
+  })
+
+  test('killAsyncAgent does NOT clear resuming (densable XV)', () => {
+    // densable XV terminal update omits resuming:!1 — only S()/Sot/complete clear.
+    // Sticky resuming blocks tryClaimAgentResume dual-worker race after stop mid-resume.
+    const task = makeRunningTask({ status: 'running', resuming: true })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    killAsyncAgent(task.id, setAppState as any)
+    expect(getState().tasks[task.id].status).toBe('killed')
+    expect(getState().tasks[task.id].resuming).toBe(true)
+    // Production resumeAgent always passes getAppState — dual claim blocked.
+    expect(
+      tryClaimAgentResume(task.id, setAppState as any, () => getState() as any),
+    ).toBe(false)
+    // Without getAppState, blocked update must still return false (not cold-ok).
+    expect(tryClaimAgentResume(task.id, setAppState as any)).toBe(false)
+  })
+
+  test('tryClaim without getAppState still blocks sticky resuming', () => {
+    const task = makeRunningTask({ status: 'killed', resuming: true })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    expect(tryClaimAgentResume(task.id, setAppState as any)).toBe(false)
+    expect(getState().tasks[task.id].resuming).toBe(true)
+  })
+
+  test('completeAgentTask clears resuming flag', () => {
+    const task = makeRunningTask({ status: 'running', resuming: true })
+    const { setAppState, getState } = createSetAppState({
+      tasks: { [task.id]: task },
+    })
+    completeAgentTask(
+      {
+        agentId: task.id,
+        content: [{ type: 'text', text: 'done' }],
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        totalDurationMs: 1,
+      } as any,
+      setAppState as any,
+    )
+    expect(getState().tasks[task.id].status).toBe('completed')
+    expect(getState().tasks[task.id].resuming).toBe(false)
+  })
+})
+
+describe('isLocalAgentPanelActive (product adopt UX)', () => {
+  test('completed alone is not active', () => {
+    expect(
+      isLocalAgentPanelActive(
+        makeRunningTask({ status: 'completed', resuming: false }),
+      ),
+    ).toBe(false)
+  })
+
+  test('adoptResumePending completed is active', () => {
+    expect(
+      isLocalAgentPanelActive(
+        makeRunningTask({
+          status: 'completed',
+          adoptResumePending: true,
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  test('resuming completed is active', () => {
+    expect(
+      isLocalAgentPanelActive(
+        makeRunningTask({ status: 'completed', resuming: true }),
+      ),
+    ).toBe(true)
+  })
+
+  test('completed with keepalive is active (densable YC)', () => {
+    expect(
+      isLocalAgentPanelActive(
+        makeRunningTask({
+          status: 'completed',
+          keepaliveReasons: new Set(['agent:child']),
+        }),
+      ),
+    ).toBe(true)
   })
 })
 
@@ -552,6 +729,65 @@ describe('scheduleDeferredAgentProgressRebuild', () => {
     expect(tracker.latestInputTokens).toBe(7800)
     expect(tracker.cumulativeOutputTokens).toBe(120)
   })
+
+  test('clearDeferredAgentProgressRebuild cancels timers; no-ops after complete', async () => {
+    clearAllDeferredAgentProgressRebuildsForTests()
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        'test-agent-clear': makeRunningTask({
+          progress: { toolUseCount: 0, tokenCount: 0 },
+        }),
+      },
+    })
+    const tracker = createProgressTracker()
+    const msg = makeAssistantMessage({
+      input_tokens: 0,
+      output_tokens: 0,
+    })
+    rebuildProgressFromMessages(tracker, [msg])
+    updateAgentProgress(
+      'test-agent-clear',
+      getProgressUpdate(tracker),
+      setAppState as any,
+    )
+
+    scheduleDeferredAgentProgressRebuild(
+      'test-agent-clear',
+      tracker,
+      [msg],
+      setAppState as any,
+    )
+    // Cancel before deferred ticks fire — tokenCount stays 0 even if usage mutates.
+    clearDeferredAgentProgressRebuild('test-agent-clear')
+    msg.message.usage = {
+      input_tokens: 9000,
+      output_tokens: 50,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    }
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(getState().tasks['test-agent-clear'].progress.tokenCount).toBe(0)
+
+    // Re-schedule then complete: stillRunning guard + clear on complete path.
+    scheduleDeferredAgentProgressRebuild(
+      'test-agent-clear',
+      tracker,
+      [msg],
+      setAppState as any,
+    )
+    completeAgentTask(
+      {
+        agentId: 'test-agent-clear',
+        content: [{ type: 'text', text: 'done' }],
+        totalTokens: 0,
+        totalToolUseCount: 0,
+      } as any,
+      setAppState as any,
+    )
+    await new Promise(resolve => setTimeout(resolve, 60))
+    // complete clears timers; progress must not jump after status left running.
+    expect(getState().tasks['test-agent-clear'].status).not.toBe('running')
+  })
 })
 
 describe('getProgressUpdate', () => {
@@ -658,9 +894,9 @@ describe('completeAgentTask', () => {
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('completed')
     expect(task.endTime).toBeDefined()
-    // densable DSu a=true: stamps flag:idle-window → YC park, no grace yet
-    expect(task.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON)).toBe(true)
-    expect(task.evictAfter).toBeUndefined()
+    // densable DSu a=!1: no bot stamp; empty KA → panel grace (not YC)
+    expect(task.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON)).toBe(false)
+    expect(task.evictAfter).toBeDefined()
   })
 
   test('syncs progress token count from finalized result', () => {

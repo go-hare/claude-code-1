@@ -565,6 +565,13 @@ export type Tool<
    */
   readonly shouldDefer?: boolean
   /**
+   * densable ySu: in focus/brief transcript, keep the last tool_use of this
+   * name per turn (plus its tool_result) as a standalone visible block rather
+   * than folding it into collapsed_read_search. Used by SendUserMessage /
+   * SendUserFile / Artifact — primary user-visible output channels.
+   */
+  readonly briefStandalone?: boolean
+  /**
    * When true, this tool is never deferred — its full schema appears in the
    * initial prompt even when SearchExtraTools is enabled. For MCP tools, set via
    * `_meta['anthropic/alwaysLoad']`. Use for tools the model must see on
@@ -914,12 +921,15 @@ type ToolDefaults = typeof TOOL_DEFAULTS
 type AnyToolDef = ToolDef<any, any, any>
 
 export function buildTool<D extends AnyToolDef>(def: D): BuiltTool<D> {
-  // The runtime spread is straightforward; the `as` bridges the gap between
-  // the structural-any constraint and the precise BuiltTool<D> return. The
-  // type semantics are proven by the 0-error typecheck across all 60+ tools.
-  return {
+  // Do NOT object-spread `def`: tools often define `get outputSchema()` (and
+  // similar) that close over sibling lazySchema factories. Spreading invokes
+  // getters immediately, which re-enters incomplete modules under circular
+  // imports (AgentTool ↔ agentToolUtils) and TDZs exports like
+  // agentToolResultSchema. Copy property descriptors so getters stay lazy.
+  const built = {
     ...TOOL_DEFAULTS,
     userFacingName: () => def.name,
-    ...def,
   } as BuiltTool<D>
+  Object.defineProperties(built, Object.getOwnPropertyDescriptors(def))
+  return built
 }

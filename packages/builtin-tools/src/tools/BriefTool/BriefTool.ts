@@ -197,6 +197,8 @@ export const BriefTool = buildTool({
   aliases: [LEGACY_BRIEF_TOOL_NAME],
   searchHint:
     'send a message to the user — your primary visible output channel',
+  // densable ySu: keep last SendUserMessage per turn in focus transcript
+  briefStandalone: true,
   maxResultSizeChars: 100_000,
   userFacingName() {
     return ''

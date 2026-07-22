@@ -207,6 +207,29 @@ describe('registerTask', () => {
     expect(t.spawnDepth).toBe(2)
     expect(t.isObserver).toBe(true)
   })
+
+  test('ekg merge preserves isIdle on re-register (local carry)', () => {
+    const { setAppState, getState } = createSetAppState()
+    registerTask(
+      makeTask({
+        retain: true,
+        isIdle: true,
+      }),
+      setAppState as any,
+    )
+    // Resume replace seeds isIdle:false (Sot/OSu) — carry prior true.
+    registerTask(
+      makeTask({
+        retain: false,
+        isIdle: false,
+        description: 'resumed-waiting',
+      }),
+      setAppState as any,
+    )
+    const t = getState().tasks['task-001']
+    expect(t.isIdle).toBe(true)
+    expect(t.description).toBe('resumed-waiting')
+  })
 })
 
 describe('QYi computePanelEvictAfter / YC isParkedKeepaliveAgent', () => {

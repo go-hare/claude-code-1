@@ -24,6 +24,8 @@ type SendUserFileOutput = { sent: boolean; file_path: string }
 export const SendUserFileTool = buildTool({
   name: SEND_USER_FILE_TOOL_NAME,
   searchHint: 'send file to user mobile device upload share',
+  // densable ySu: keep last SendUserFile per turn in focus transcript
+  briefStandalone: true,
   maxResultSizeChars: 5_000,
   strict: true,
 

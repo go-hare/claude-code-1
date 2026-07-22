@@ -32,9 +32,9 @@ export const STOPPED_DISPLAY_MS = 3_000
 export const PANEL_GRACE_MS = 30_000
 
 /**
- * densable bot="flag:idle-window" — temporary self-KA reason stamped on DSu
- * complete so the agent stays YC-parked for CSu ms even with no live children.
- * okg timer tB's this reason after IDLE_WINDOW_MS.
+ * densable bot="flag:idle-window" + CSu/okg helpers.
+ * Gold DSu leaves `a=!1` so complete never stamps bot / never arms okg —
+ * dead code in 2.1.211. Helpers kept 1:1 for fidelity (manual arm / tests).
  */
 export const IDLE_WINDOW_KEEPALIVE_REASON = 'flag:idle-window'
 
@@ -102,6 +102,8 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
     // keepaliveReasons/ownerAgentId/parentAgentId/spawnDepth so resume
     // replace does not drop live Gge holds or adopt owner tree.
     // Local also preserves messages (viewed transcript not yet on disk).
+    // Optional local carry: isIdle (densable ekg omits; avoids panel flash
+    // on resume re-register before stream tracker re-yields).
     type EkgCarry = {
       retain: boolean
       startTime: number
@@ -113,6 +115,7 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
       parentAgentId?: string
       spawnDepth?: number
       isObserver?: boolean
+      isIdle?: boolean
     }
     const prevTask = existing as EkgCarry | undefined
     const merged: TaskState =
@@ -125,7 +128,7 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
               ? { messages: prevTask.messages }
               : {}),
             diskLoaded: prevTask.diskLoaded,
-            pendingMessages: prevTask.pendingMessages as string[] | undefined,
+            pendingMessages: prevTask.pendingMessages as unknown[] | undefined,
             ...(prevTask.keepaliveReasons !== undefined
               ? { keepaliveReasons: prevTask.keepaliveReasons }
               : {}),
@@ -141,6 +144,9 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
             // Official ekg: ...s.isObserver!==void 0&&{isObserver:s.isObserver}
             ...(prevTask.isObserver !== undefined
               ? { isObserver: prevTask.isObserver }
+              : {}),
+            ...(typeof prevTask.isIdle === 'boolean'
+              ? { isIdle: prevTask.isIdle }
               : {}),
           } as TaskState)
         : task

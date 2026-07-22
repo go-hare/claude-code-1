@@ -52,6 +52,8 @@ export const ArtifactTool = buildTool({
   name: ARTIFACT_TOOL_NAME,
   searchHint:
     'upload html markdown artifact share url cloud publish progress report public link',
+  // densable ySu: keep last Artifact per turn in focus transcript
+  briefStandalone: true,
   maxResultSizeChars: 2_000,
   shouldDefer: true,
   strict: true,
