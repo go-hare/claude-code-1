@@ -196,7 +196,7 @@ export async function getAnthropicClient({
     // isGatewayAuthExpired check below still surfaces permanent failure.
   }
 
-  // Official CAh → F_({ forAnthropicAPI: true, hasBodyIdleWatchdog: CAh(provider) })
+  // densable NMh → J_({ forAnthropicAPI: true, hasBodyIdleWatchdog: NMh(provider) })
   // Provider for this client request matches current session provider (getAPIProvider).
   // Must run AFTER env/secure-storage gateway apply so first cold start with
   // CLAUDE_CODE_USE_GATEWAY does not mis-route to BedrockClient.
@@ -210,13 +210,13 @@ export async function getAnthropicClient({
     requestProvider,
     currentProvider: requestProvider,
   })
-  // Official HAi — only resolve when CAh is on; consumer wraps response body.
+  // densable zPi/HAi — only resolve when NMh is on; consumer wraps response body.
   const bodyIdleTimeoutMs = hasBodyIdleWatchdog
     ? resolveByteStreamIdleTimeoutMs({ provider: requestProvider })
     : 0
 
   // Base fetch (gzip / client-request-id), then byte-body idle watchdog when
-  // CAh is on so F_ timeout:false is not a hang hole.
+  // NMh is on so J_ timeout:false is not a hang hole.
   let resolvedFetch = buildFetch(fetchOverride, source)
   if (hasBodyIdleWatchdog && bodyIdleTimeoutMs > 0) {
     resolvedFetch = wrapFetchWithBodyIdleWatchdog(
@@ -228,12 +228,15 @@ export async function getAnthropicClient({
       () => ({
         enabled: true,
         idleTimeoutMs: bodyIdleTimeoutMs,
+        // densable FMh: only re-wrap SSE / bedrock eventstream bodies
+        provider: requestProvider,
       }),
     ) as ClientOptions['fetch']
   }
 
-  // Base proxy/TLS options; gateway TLS pin (B_c) may override dispatcher
-  // so enterprise pin verification is enforced on the live request path.
+  // densable J_: proxy / unix / mTLS fetchOptions only.
+  // Enterprise TLS pin (densable uIc / B_c) is NOT on the Anthropic SDK path —
+  // densable applies pin only to managed-settings axios (Cad + httpsAgent).
   const baseFetchOptions = getProxyFetchOptions({
     forAnthropicAPI: true,
     hasBodyIdleWatchdog,
@@ -642,32 +645,6 @@ export async function getAnthropicClient({
         Authorization: `Bearer ${gatewaySession.jwt}`,
       }
     : undefined
-
-  // Official B_c: when enterprise gateway has a TLS pin, force undici
-  // dispatcher with checkServerIdentity pin on the live request path.
-  // Env-unpinned sessions skip. Bun may ignore undici dispatcher — pin
-  // still enforced on Node and restore/probe densables.
-  if (gatewaySession) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { createPinnedGatewayFetchDispatcher } =
-        require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
-      const pinnedDispatcher =
-        createPinnedGatewayFetchDispatcher(gatewaySession)
-      if (pinnedDispatcher) {
-        const fo = (ARGS.fetchOptions ?? {}) as {
-          dispatcher?: unknown
-          [key: string]: unknown
-        }
-        ARGS.fetchOptions = {
-          ...fo,
-          dispatcher: pinnedDispatcher,
-        } as ClientOptions['fetchOptions']
-      }
-    } catch {
-      // optional pin — restore path already verified when possible
-    }
-  }
 
   // Determine authentication method based on available tokens
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {

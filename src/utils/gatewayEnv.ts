@@ -51,11 +51,23 @@ let secureStorageSkipUntilMs = 0
 /** Why skipUntil is active — for distinct skip reasons in results. */
 let secureStorageSkipKind: 'miss' | 'read_fail' | null = null
 /**
+ * densable VPr: at most one background live TLS pin probe per process from
+ * ensureGatewayAuthApplied cold path (avoid thrashing on every getAPIProvider).
+ */
+let gatewayLiveTlsProbeScheduled = false
+/**
  * After store-path IdP refresh transient failure: ms epoch at which
  * expired+idpRefreshToken permanent skip reopens so external re-login can
  * replace a dead refreshable session. 0 = no reopen scheduled.
  */
 let gatewayIdpTransientRereadAfterMs = 0
+
+/**
+ * Store-path HTTP IdP refresh backoff: ms epoch until which maybeRefreshGatewayIdp
+ * returns retryable error without awaiting axios. Prevents thrashing
+ * getAnthropicClient when IdP is down. 0 = no backoff.
+ */
+let gatewayIdpRefreshBackoffUntilMs = 0
 
 /** TTL after a successful empty/blocked secure-storage read (default host). */
 export const GATEWAY_SECURE_STORAGE_MISS_TTL_MS = 30_000
@@ -70,6 +82,13 @@ export const GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS = 5_000
  */
 export const GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS =
   GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+
+/**
+ * After store-path IdP HTTP refresh transient failure, skip further HTTP
+ * refresh attempts until this TTL elapses (unless login/invalidate clears).
+ */
+export const GATEWAY_IDP_REFRESH_HTTP_BACKOFF_MS =
+  GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS
 
 /**
  * Test-only override for the default secure-storage read path (avoids
@@ -104,12 +123,15 @@ function clearSecureStorageRestoreSkipState(): void {
   secureStorageSkipUntilMs = 0
   secureStorageSkipKind = null
   gatewayIdpTransientRereadAfterMs = 0
+  gatewayIdpRefreshBackoffUntilMs = 0
+  gatewayLiveTlsProbeScheduled = false
 }
 
 /**
  * Store-path IdP refresh hit a retryable error. Keep the expired+refresh
- * identity for provider ranking, but schedule a secure-storage re-read so
- * an external /login can replace dead credentials after the TTL.
+ * identity for provider ranking, schedule a secure-storage re-read so an
+ * external /login can replace dead credentials after the TTL, and arm HTTP
+ * refresh backoff so getAnthropicClient does not await axios on every call.
  */
 function noteGatewayIdpRefreshTransientFailure(
   nowMs: number = gatewaySecureStorageNowMs(),
@@ -120,6 +142,13 @@ function noteGatewayIdpRefreshTransientFailure(
     after < gatewayIdpTransientRereadAfterMs
   ) {
     gatewayIdpTransientRereadAfterMs = after
+  }
+  const backoffUntil = nowMs + GATEWAY_IDP_REFRESH_HTTP_BACKOFF_MS
+  if (
+    gatewayIdpRefreshBackoffUntilMs === 0 ||
+    backoffUntil > gatewayIdpRefreshBackoffUntilMs
+  ) {
+    gatewayIdpRefreshBackoffUntilMs = backoffUntil
   }
 }
 
@@ -187,9 +216,42 @@ export function getGatewayAuth(): GatewayAuthSession | null {
   return gatewayAuth
 }
 
+/**
+ * Logical session identity for store-path mid-refresh discard.
+ * densable uses object reference (`S_() !== e`). Fork fortifies: ensure/restore
+ * often re-`setGatewayAuth` with the same url/jwt/idp as a new object; that must
+ * not discard a successful IdP response. Real /login or clear still differs on
+ * jwt and/or idpRefreshToken (or null) and discards.
+ */
+export function isSameGatewayAuthIdentity(
+  a: GatewayAuthSession | null | undefined,
+  b: GatewayAuthSession | null | undefined,
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.url === b.url &&
+    a.jwt === b.jwt &&
+    (a.idpRefreshToken ?? undefined) === (b.idpRefreshToken ?? undefined)
+  )
+}
+
+/** Store-path: true when memory no longer matches the refresh-captured identity. */
+function storeAuthIdentityChangedMidRefresh(
+  captured: GatewayAuthSession,
+): boolean {
+  return !isSameGatewayAuthIdentity(getGatewayAuth(), captured)
+}
+
 /** Official XFe — pin/replace gateway auth session. */
 export function setGatewayAuth(session: GatewayAuthSession | null): void {
   gatewayAuth = session
+  // Non-null replace (login / restore / refresh apply): drop stale transient
+  // reread + HTTP backoff scheduled against a prior session.
+  if (session !== null) {
+    gatewayIdpTransientRereadAfterMs = 0
+    gatewayIdpRefreshBackoffUntilMs = 0
+  }
 }
 
 export function clearGatewayAuth(): void {
@@ -249,8 +311,31 @@ export function decodeJwtExpSeconds(token: string): number | null {
   }
 }
 
+/**
+ * densable lqn — normalize gateway base URL:
+ * 1. bare hostname → https://
+ * 2. strip trailing slash
+ * 3. plain http:// only for loopback (localhost / 127.0.0.1 / ::1)
+ *
+ * Remote http:// must never carry a bearer JWT.
+ */
 export function normalizeGatewayBaseUrl(raw: string): string {
-  const url = new URL(raw)
+  let t = raw.trim()
+  if (!/^https?:\/\//i.test(t)) {
+    t = `https://${t}`
+  }
+  t = t.replace(/\/$/, '')
+  const url = new URL(t)
+  if (url.protocol === 'http:') {
+    const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    const isLoopback =
+      hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+    if (!isLoopback) {
+      throw new Error(
+        'Gateway URL must use https:// (got http://). Plain HTTP is only allowed for localhost during development.',
+      )
+    }
+  }
   // Strip trailing slash for stable Anthropic client baseURL.
   return url.toString().replace(/\/$/, '')
 }
@@ -341,7 +426,76 @@ export function ensureGatewayAuthApplied(): GatewayAuthSession | null {
   // No explicit env session: attempt secure-storage refresh without clearing
   // any existing gateway identity first (clearing would mis-route getAPIProvider).
   try {
-    tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    // Prefer async restore with live TLS probe when not already scheduled.
+    // Review: sync-restore-then-async-probe left unverified JWT in memory
+    // for the race window; when pin present we only apply after probe (or
+    // clear on mismatch). Cold path still uses sync restore only when the
+    // one-shot probe is already in flight / completed for this process.
+    if (!gatewayLiveTlsProbeScheduled) {
+      gatewayLiveTlsProbeScheduled = true
+      // Capture memory before probe so a concurrent /login or IdP refresh
+      // is not clobbered by a stale disk restore completing later.
+      // Critical: restoreGatewayAuth applies via setGatewayAuth *before* the
+      // .then handler runs — post-apply "fresher" checks cannot undo a
+      // clobber. CAS in apply so we only write when memory is still empty or
+      // still the pre-probe identity (stillLoser).
+      const beforeProbe = getGatewayAuth()
+      void restoreGatewayAuth({
+        quiet: true,
+        apply: session => {
+          const cur = getGatewayAuth()
+          if (!cur) {
+            setGatewayAuth(session)
+            return
+          }
+          if (beforeProbe) {
+            // Only replace if memory still holds the pre-probe session.
+            if (
+              cur.jwt === beforeProbe.jwt &&
+              cur.idpRefreshToken === beforeProbe.idpRefreshToken
+            ) {
+              setGatewayAuth(session)
+            }
+            // else concurrent /login or IdP refresh — keep memory
+            return
+          }
+          // beforeProbe empty: do not clobber a session that appeared while
+          // the probe/read was in flight (login race).
+        },
+      })
+        .then(result => {
+          if (result.status === 'blocked' && result.reason === 'tls_mismatch') {
+            // restoreGatewayAuth already CAS-clears when memory still matches
+            // the rejected disk credential. Extra ensure-path clear only when
+            // memory still holds the pre-probe identity (not a concurrent login).
+            const cur = getGatewayAuth()
+            if (
+              cur &&
+              beforeProbe &&
+              cur.jwt === beforeProbe.jwt &&
+              cur.idpRefreshToken === beforeProbe.idpRefreshToken
+            ) {
+              clearGatewayAuth()
+            }
+            // Do NOT clear when beforeProbe was empty: concurrent /login may
+            // have filled memory during the probe window.
+          }
+        })
+        .catch(() => {
+          /* live probe optional */
+        })
+    }
+    // Sync restore when memory is empty OR expired so external re-login and
+    // cold ranking pick up a fresher disk credential immediately. planRestore
+    // rejects pure-expired disk (status expired → miss_ttl), so a dead disk
+    // never overwrites a still-held identity; only valid restore applies.
+    // When a pin is required without live fingerprint, densable Cad applies
+    // https.Agent pin (createPinnedGatewayHttpsAgent) on managed-settings
+    // axios only — not Anthropic SDK fetch.
+    const mem = getGatewayAuth()
+    if (!mem || isGatewayAuthExpired(mem, nowMs)) {
+      tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
+    }
   } catch {
     // secure-storage restore optional
   }
@@ -560,6 +714,17 @@ export async function persistEnterpriseGatewayCredential(input: {
         '[gateway-refresh] auth changed during persist; discarding outcome',
         'debug',
       )
+      // densable clc: re-hydrate memory from disk winner ONLY when memory still
+      // holds the expected loser (mid-refresh race). Do not clobber concurrent
+      // /login that already wrote a different idpRefreshToken into memory.
+      const winner = parseEnterpriseGatewayCredential(planned.applied)
+      const cur = getGatewayAuth()
+      const stillLoser =
+        input.expectedIdpRefreshToken !== undefined &&
+        cur?.idpRefreshToken === input.expectedIdpRefreshToken
+      if (winner && stillLoser) {
+        setGatewayAuth(winner)
+      }
       // Storage may have a newer credential; allow a subsequent restore.
       invalidateGatewaySecureStorageRestoreCache()
       return { success: true, discarded: true }
@@ -681,6 +846,17 @@ export async function maybeRefreshGatewayIdp(input?: {
     ) {
       return { status: 'skipped', reason: 'not_due' }
     }
+    // Transient IdP failure backoff: skip HTTP refresh without awaiting axios.
+    if (
+      gatewayIdpRefreshBackoffUntilMs > 0 &&
+      nowMs < gatewayIdpRefreshBackoffUntilMs
+    ) {
+      return {
+        status: 'error',
+        message: 'idp refresh backoff active after transient failure',
+        retryable: true,
+      }
+    }
     if (gatewayRefreshInFlight) {
       return gatewayRefreshInFlight
     }
@@ -775,8 +951,9 @@ async function runGatewayIdpRefresh(
         retryable: true,
       }
     }
-    // Official: discard if auth changed mid-refresh (store path only).
-    if (opts.usesStoreSession && getGatewayAuth() !== session) {
+    // densable: discard if S_() !== e (object ref). Fork: identity fields only —
+    // same jwt/idp/url re-set by ensure restore must not drop a good refresh.
+    if (opts.usesStoreSession && storeAuthIdentityChangedMidRefresh(session)) {
       log('[gateway-refresh] auth changed mid-refresh; discarding')
       return {
         status: 'error',
@@ -791,8 +968,9 @@ async function runGatewayIdpRefresh(
     } catch {
       // secureStorage densable optional — in-memory already applied
     }
-    // Successful refresh: no need to reopen secure-storage for external login.
+    // Successful refresh: no need to reopen secure-storage / HTTP backoff.
     gatewayIdpTransientRereadAfterMs = 0
+    gatewayIdpRefreshBackoffUntilMs = 0
     log('[gateway-refresh] refreshed gateway JWT')
     return { status: 'refreshed', session: next }
   } catch (err) {
@@ -806,7 +984,10 @@ async function runGatewayIdpRefresh(
         (err as { response: { data: { error: string } } }).response.data
           .error === 'invalid_grant')
     if (invalid) {
-      if (opts.usesStoreSession && getGatewayAuth() !== session) {
+      if (
+        opts.usesStoreSession &&
+        storeAuthIdentityChangedMidRefresh(session)
+      ) {
         log(
           '[gateway-refresh] auth changed mid-refresh; discarding invalid_grant',
         )
@@ -823,17 +1004,19 @@ async function runGatewayIdpRefresh(
         try {
           await runPersist(cleared)
         } catch {
-          // optional
+          // optional — disk may still hold rejected token
         }
       }
-      // Stop thrashing: dead refresh must not re-load from disk every client
-      // build when persist lags or storage still holds the rejected token.
+      // Permanent skip until explicit invalidate (login/logout/credential write).
+      // 30s miss TTL alone thrash-loops when persist(cleared) fails and disk
+      // still holds the rejected refresh token.
       if (opts.usesStoreSession) {
         secureStorageRestoreSucceeded = false
-        secureStorageSkipUntilMs = nowMs + GATEWAY_SECURE_STORAGE_MISS_TTL_MS
+        secureStorageSkipUntilMs = Number.MAX_SAFE_INTEGER
         secureStorageSkipKind = 'miss'
       }
       gatewayIdpTransientRereadAfterMs = 0
+      gatewayIdpRefreshBackoffUntilMs = 0
       return { status: 'invalid_grant', clearedRefresh: clear }
     }
     log(
@@ -1258,6 +1441,12 @@ export async function restoreGatewayAuth(input?: {
       `[gateway] TLS fingerprint mismatch on restore for ${plan.host}: pinned ${plan.pinned}, live ${plan.live}`,
       'warn',
     )
+    // densable: never keep an untrusted session after live pin mismatch.
+    // Clear only when memory still matches the storage credential we rejected.
+    const cur = getGatewayAuth()
+    if (cur && cur.jwt === session.jwt && cur.url === session.url) {
+      clearGatewayAuth()
+    }
     return {
       status: 'blocked',
       reason: 'tls_mismatch',
@@ -1592,10 +1781,11 @@ export function resolveGatewayTlsPinForSession(
 }
 
 /**
- * Official B_c consumer densable — undici Agent with TLS pin for gateway
- * fetchOptions.dispatcher. Returns undefined when no pin / unpinned session.
- * When present, callers should prefer this dispatcher over a plain proxy agent
- * so pin verification is not skipped on the live request path.
+ * Optional undici Agent with TLS pin (connect.checkServerIdentity).
+ *
+ * densable live path uses https.Agent (uIc) on managed-settings axios only —
+ * not Anthropic SDK fetchOptions.dispatcher. Kept for undici consumers / tests.
+ * Returns undefined when no pin / unpinned session.
  */
 export function createPinnedGatewayFetchDispatcher(
   session: GatewayAuthSession | null | undefined,

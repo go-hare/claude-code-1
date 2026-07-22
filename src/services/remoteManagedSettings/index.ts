@@ -268,6 +268,10 @@ async function fetchRemoteManagedSettings(
     const headers: Record<string, string> = {
       ...authHeaders.headers,
       'User-Agent': getClaudeCodeUserAgent(),
+      // densable Cad: no-cache so ETag revalidation is not short-circuited by
+      // intermediate caches (paired with If-None-Match below).
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
     }
 
     // Add If-None-Match header for ETag-based caching
@@ -275,9 +279,46 @@ async function fetchRemoteManagedSettings(
       headers['If-None-Match'] = `"${cachedChecksum}"`
     }
 
+    // densable Cad/uIc (B_c): enterprise gateway TLS pin on managed-settings
+    // axios only — NOT Anthropic SDK fetch. With HTTPS proxy, pin is skipped
+    // (known densable gap: per-request pin cannot ride CONNECT proxy).
+    let pinnedHttpsAgent: unknown | undefined
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const {
+        ensureGatewayAuthApplied,
+        getGatewayAuth,
+        resolveGatewayTlsPinForSession,
+        createPinnedGatewayHttpsAgent,
+      } =
+        require('../../utils/gatewayEnv.js') as typeof import('../../utils/gatewayEnv.js')
+      // densable Cad: await xQe() then S_() before pin lookup.
+      ensureGatewayAuthApplied()
+      const gatewaySession = getGatewayAuth()
+      if (gatewaySession) {
+        const pin = resolveGatewayTlsPinForSession(gatewaySession)
+        if (pin) {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { getProxyUrl } =
+            require('../../utils/proxy.js') as typeof import('../../utils/proxy.js')
+          if (getProxyUrl()) {
+            logForDebugging(
+              '[gateway] HTTPS proxy configured — per-request cert pin not applied to managed-settings fetch (known gap)',
+              { level: 'warn' },
+            )
+          } else {
+            pinnedHttpsAgent = createPinnedGatewayHttpsAgent(pin)
+          }
+        }
+      }
+    } catch {
+      // pin optional — restore probe already verified when possible
+    }
+
     const response = await axios.get(endpoint, {
       headers,
       timeout: SETTINGS_TIMEOUT_MS,
+      ...(pinnedHttpsAgent ? { httpsAgent: pinnedHttpsAgent } : {}),
       // Allow 204, 304, and 404 responses without treating them as errors.
       // 204/404 are returned when no settings exist for the user or the feature flag is off.
       validateStatus: status =>

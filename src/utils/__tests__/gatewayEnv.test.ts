@@ -11,6 +11,7 @@ import {
   invalidateGatewaySecureStorageRestoreCache,
   isGatewayAuthExpired,
   isGatewayAuthPinned,
+  isSameGatewayAuthIdentity,
   maybeRefreshGatewayIdp,
   normalizeGatewayBaseUrl,
   parseGatewayIdpTokenResponse,
@@ -44,6 +45,7 @@ import {
   tryRestoreGatewayAuthFromSecureStorage,
   GATEWAY_HTTP_LOOPBACK_FINGERPRINT,
   GATEWAY_IDP_REFRESH_TRANSIENT_REREAD_TTL_MS,
+  GATEWAY_IDP_REFRESH_HTTP_BACKOFF_MS,
   GATEWAY_SECURE_STORAGE_MISS_TTL_MS,
   GATEWAY_SECURE_STORAGE_READ_FAIL_BACKOFF_MS,
   GATEWAY_TLS_PIN_MISMATCH_MESSAGE,
@@ -123,6 +125,32 @@ describe('normalizeGatewayBaseUrl', () => {
     expect(normalizeGatewayBaseUrl('https://x.example/')).toBe(
       'https://x.example',
     )
+  })
+  test('bare hostname gets https://', () => {
+    expect(normalizeGatewayBaseUrl('gw.example.com')).toBe(
+      'https://gw.example.com',
+    )
+  })
+  test('loopback http allowed', () => {
+    expect(normalizeGatewayBaseUrl('http://localhost:8080')).toBe(
+      'http://localhost:8080',
+    )
+    expect(normalizeGatewayBaseUrl('http://127.0.0.1:9000/')).toBe(
+      'http://127.0.0.1:9000',
+    )
+  })
+  test('remote plain http rejected (densable lqn)', () => {
+    expect(() => normalizeGatewayBaseUrl('http://gateway.example')).toThrow(
+      /must use https/,
+    )
+  })
+  test('resolveGatewayFromEnv rejects remote http', () => {
+    const r = resolveGatewayFromEnv({
+      CLAUDE_CODE_USE_GATEWAY: '1',
+      ANTHROPIC_BASE_URL: 'http://gateway.example',
+      ANTHROPIC_AUTH_TOKEN: 'tok',
+    })
+    expect(r.status).toBe('invalid_url')
   })
 })
 
@@ -225,11 +253,14 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       }),
     ).toBeNull()
 
+    // unpinned: avoid auto-persist to real keychain during unit tests (CAS
+    // rehydrate from disk would undo invalid_grant clear if peer token wins).
     const base = {
       url: 'https://gw.example',
       jwt: 'old',
       expiresAtMs: Date.now() + 60_000,
       idpRefreshToken: 'r1',
+      unpinned: true as const,
     }
     expect(shouldRefreshGatewayIdp(base, Date.now(), 300_000)).toBe(true)
     expect(
@@ -286,6 +317,7 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     const refreshed = await maybeRefreshGatewayIdp({
       session: base,
       nowMs: Date.now(),
+      autoPersist: false,
       postToken: async () => ({
         data: {
           access_token: 'fresh',
@@ -307,6 +339,7 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
         idpRefreshToken: 'bad',
       },
       nowMs: Date.now(),
+      autoPersist: false,
       postToken: async () => {
         throw {
           isAxiosError: true,
@@ -362,6 +395,122 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
       expect(posts).toBe(1)
       expect(getGatewayAuth()?.jwt).toBe('coalesced')
       expect(getGatewayRefreshInFlight()).toBeNull()
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      clearGatewayAuth()
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    }
+  })
+
+  test('isSameGatewayAuthIdentity compares url/jwt/idp not object ref', () => {
+    const a = {
+      url: 'https://gw.example',
+      jwt: 'j1',
+      expiresAtMs: 1,
+      idpRefreshToken: 'r1',
+    }
+    const b = { ...a, expiresAtMs: 999 }
+    expect(isSameGatewayAuthIdentity(a, b)).toBe(true)
+    expect(isSameGatewayAuthIdentity(a, { ...a, jwt: 'other' })).toBe(false)
+    expect(isSameGatewayAuthIdentity(a, { ...a, idpRefreshToken: 'r2' })).toBe(
+      false,
+    )
+    expect(isSameGatewayAuthIdentity(a, null)).toBe(false)
+    expect(isSameGatewayAuthIdentity(null, null)).toBe(true)
+  })
+
+  test('store-path IdP refresh keeps result when same-identity re-set mid-flight', async () => {
+    // ensure/restore often setGatewayAuth(clone) with same jwt/idp as a new
+    // object. densable S_()!==e would discard; fork identity compare must apply.
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let release!: (v: { data: unknown }) => void
+    const gate = new Promise<{ data: unknown }>(resolve => {
+      release = resolve
+    })
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => gate)
+
+    const captured = {
+      url: 'https://gw.example',
+      jwt: 'expired-jwt',
+      expiresAtMs: Date.now() + 1,
+      idpRefreshToken: 'r1',
+      unpinned: true as const,
+    }
+    setGatewayAuth(captured)
+
+    try {
+      const pending = maybeRefreshGatewayIdp()
+      // Concurrent ensure restore: same logical session, new object.
+      setGatewayAuth({
+        url: captured.url,
+        jwt: captured.jwt,
+        expiresAtMs: captured.expiresAtMs,
+        idpRefreshToken: captured.idpRefreshToken,
+        unpinned: true,
+      })
+      release({
+        data: {
+          access_token: 'refreshed-jwt',
+          expires_in: 600,
+          refresh_token: 'r2',
+        },
+      })
+      const result = await pending
+      expect(result.status).toBe('refreshed')
+      expect(getGatewayAuth()?.jwt).toBe('refreshed-jwt')
+      expect(getGatewayAuth()?.idpRefreshToken).toBe('r2')
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      clearGatewayAuth()
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    }
+  })
+
+  test('store-path IdP refresh discards when /login changes identity mid-flight', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let release!: (v: { data: unknown }) => void
+    const gate = new Promise<{ data: unknown }>(resolve => {
+      release = resolve
+    })
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => gate)
+
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'old-jwt',
+      expiresAtMs: Date.now() + 1,
+      idpRefreshToken: 'r-old',
+      unpinned: true,
+    })
+
+    try {
+      const pending = maybeRefreshGatewayIdp()
+      // Real /login: different jwt + idp.
+      setGatewayAuth({
+        url: 'https://gw.example',
+        jwt: 'login-jwt',
+        expiresAtMs: Date.now() + 300_000,
+        idpRefreshToken: 'r-login',
+        unpinned: true,
+      })
+      release({
+        data: {
+          access_token: 'stale-refresh-jwt',
+          expires_in: 600,
+          refresh_token: 'r-stale',
+        },
+      })
+      const result = await pending
+      expect(result.status).toBe('error')
+      if (result.status === 'error') {
+        expect(result.message).toBe('auth changed mid-refresh')
+      }
+      // Login session must win — not the discarded refresh.
+      expect(getGatewayAuth()?.jwt).toBe('login-jwt')
+      expect(getGatewayAuth()?.idpRefreshToken).toBe('r-login')
     } finally {
       setTestGatewayIdpPostToken_FOR_TESTS(null)
       clearGatewayAuth()
@@ -446,6 +595,123 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     })
     expect(refreshed.status).toBe('refreshed')
     expect(persisted[0]?.jwt).toBe('fresh2')
+
+    // densable clc: CAS discard rehydrates memory from disk winner so
+    // mid-refresh loser JWT does not stick in gatewayAuth.
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'loser',
+      expiresAtMs: Date.now() + 60_000,
+      idpRefreshToken: 'r-loser',
+    })
+    const cas = await persistEnterpriseGatewayCredential({
+      session: {
+        url: 'https://gw.example',
+        jwt: 'loser',
+        expiresAtMs: Date.now() + 60_000,
+        idpRefreshToken: 'r-loser',
+      },
+      expectedIdpRefreshToken: 'r-loser',
+      storage: {
+        read: () => ({
+          enterpriseGateway: {
+            url: 'https://gw.example',
+            jwt: 'winner',
+            expiresAtMs: Date.now() + 120_000,
+            idpRefreshToken: 'r-winner',
+          },
+        }),
+        update: () => {
+          throw new Error('update must not run on CAS discard')
+        },
+      },
+    })
+    expect(cas).toEqual({ success: true, discarded: true })
+    expect(getGatewayAuth()?.jwt).toBe('winner')
+    expect(getGatewayAuth()?.idpRefreshToken).toBe('r-winner')
+
+    // Concurrent /login already refreshed memory — CAS discard must NOT
+    // overwrite with disk winner when memory no longer holds expected loser.
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'login-fresh',
+      expiresAtMs: Date.now() + 300_000,
+      idpRefreshToken: 'r-login',
+    })
+    const casLogin = await persistEnterpriseGatewayCredential({
+      session: {
+        url: 'https://gw.example',
+        jwt: 'loser',
+        expiresAtMs: Date.now() + 60_000,
+        idpRefreshToken: 'r-loser',
+      },
+      expectedIdpRefreshToken: 'r-loser',
+      storage: {
+        read: () => ({
+          enterpriseGateway: {
+            url: 'https://gw.example',
+            jwt: 'winner2',
+            expiresAtMs: Date.now() + 120_000,
+            idpRefreshToken: 'r-winner2',
+          },
+        }),
+        update: () => {
+          throw new Error('update must not run on CAS discard')
+        },
+      },
+    })
+    expect(casLogin).toEqual({ success: true, discarded: true })
+    expect(getGatewayAuth()?.jwt).toBe('login-fresh')
+    expect(getGatewayAuth()?.idpRefreshToken).toBe('r-login')
+  })
+
+  test('async live restore apply CAS does not clobber concurrent /login', async () => {
+    // ensureGatewayAuthApplied fires restoreGatewayAuth with a CAS apply:
+    // if /login writes memory while probe is in flight, disk restore must not
+    // overwrite (post-.then checks cannot undo setGatewayAuth inside restore).
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    const pin = 'aa'.repeat(32)
+    const diskJwt = 'disk-stale-jwt'
+    const storage = {
+      enterpriseGateway: {
+        url: 'https://gw.example',
+        jwt: diskJwt,
+        expiresAtMs: Date.now() + 120_000,
+        idpRefreshToken: 'r-disk',
+      },
+      gatewayTrust: { 'gw.example': pin },
+    }
+
+    // Pin matches so status is restored and apply runs (the race window).
+    const result = await restoreGatewayAuth({
+      quiet: true,
+      readStorage: () => storage,
+      probeFingerprint: async () => ({ fingerprint: pin }),
+      apply: session => {
+        // Concurrent login wins the race before apply would write disk
+        setGatewayAuth({
+          url: 'https://gw.example',
+          jwt: 'login-race-jwt',
+          expiresAtMs: Date.now() + 300_000,
+          idpRefreshToken: 'r-login',
+        })
+        // CAS apply as ensureGatewayAuthApplied does with beforeProbe=null:
+        // refuse to clobber a session that appeared during the probe window.
+        const cur = getGatewayAuth()
+        if (!cur) {
+          setGatewayAuth(session)
+        }
+      },
+    })
+    expect(result.status).toBe('restored')
+    expect(getGatewayAuth()?.jwt).toBe('login-race-jwt')
+    expect(getGatewayAuth()?.idpRefreshToken).toBe('r-login')
+    expect(getGatewayAuth()?.jwt).not.toBe(diskJwt)
+
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+    clearGatewayAuth()
   })
 
   test('gatewayTrust TLS pin densables (U_c / zPr / uRi restore)', async () => {
@@ -1024,7 +1290,7 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     }
   })
 
-  test('invalid_grant on store path sets secure-storage miss TTL (no thrash)', async () => {
+  test('invalid_grant on store path sets permanent secure-storage skip (no thrash)', async () => {
     clearGatewayAuth()
     resetGatewaySecureStorageRestoreCache_FOR_TESTS()
 
@@ -1063,17 +1329,27 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
         status: 'invalid_grant',
         clearedRefresh: true,
       })
-      // Permanent skip cleared + miss TTL — must not re-load rejected token.
+      // Permanent miss skip — must not re-load rejected token (persist may fail).
       expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
         status: 'skipped',
         reason: 'miss_ttl',
       })
       expect(reads).toBe(1)
 
+      // 30s miss TTL alone is not enough: rejected token would thrash-loop.
       now += GATEWAY_SECURE_STORAGE_MISS_TTL_MS
-      // After miss TTL, storage may be re-read (external re-login path).
-      const afterTtl = tryRestoreGatewayAuthFromSecureStorage({ quiet: true })
-      expect(afterTtl.status).toBe('restored')
+      expect(tryRestoreGatewayAuthFromSecureStorage({ quiet: true })).toEqual({
+        status: 'skipped',
+        reason: 'miss_ttl',
+      })
+      expect(reads).toBe(1)
+
+      // Explicit invalidate (login/logout) reopens storage re-read.
+      invalidateGatewaySecureStorageRestoreCache()
+      const afterInvalidate = tryRestoreGatewayAuthFromSecureStorage({
+        quiet: true,
+      })
+      expect(afterInvalidate.status).toBe('restored')
       expect(reads).toBe(2)
     } finally {
       setTestGatewayIdpPostToken_FOR_TESTS(null)
@@ -1126,6 +1402,8 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
     try {
       await maybeRefreshGatewayIdp({ nowMs: now })
       // Successful refresh clears schedule — permanent skip remains even past TTL.
+      // Must wait past HTTP backoff first (same clock as store-path early return).
+      now += GATEWAY_IDP_REFRESH_HTTP_BACKOFF_MS
       setTestGatewayIdpPostToken_FOR_TESTS(async () => ({
         data: {
           access_token: 'fresh-after-transient',
@@ -1145,6 +1423,108 @@ describe('gatewayAuth store o_/XFe/eGo/Sht densable', () => {
         reason: 'already_attempted',
       })
       expect(reads).toBe(1)
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
+  })
+
+  test('store-path IdP transient failure arms HTTP backoff without awaiting axios', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 4_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
+
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'dead-jwt',
+      expiresAtMs: now - 1,
+      idpRefreshToken: 'r',
+      tokenEndpoint: 'https://idp.example/token',
+      unpinned: true,
+    })
+
+    let posts = 0
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      posts++
+      throw new Error('idp down')
+    })
+    try {
+      const failed = await maybeRefreshGatewayIdp({ nowMs: now })
+      expect(failed.status).toBe('error')
+      if (failed.status === 'error') {
+        expect(failed.retryable).toBe(true)
+      }
+      expect(posts).toBe(1)
+
+      // Within HTTP backoff: early retryable error, no second postToken.
+      const backedOff = await maybeRefreshGatewayIdp({ nowMs: now + 1 })
+      expect(backedOff).toEqual({
+        status: 'error',
+        message: 'idp refresh backoff active after transient failure',
+        retryable: true,
+      })
+      expect(posts).toBe(1)
+
+      // After backoff elapses: HTTP refresh attempted again.
+      now += GATEWAY_IDP_REFRESH_HTTP_BACKOFF_MS
+      const retried = await maybeRefreshGatewayIdp({ nowMs: now })
+      expect(retried.status).toBe('error')
+      expect(posts).toBe(2)
+    } finally {
+      setTestGatewayIdpPostToken_FOR_TESTS(null)
+      resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+      clearGatewayAuth()
+    }
+  })
+
+  test('setGatewayAuth(non-null) clears IdP HTTP backoff and transient reread', async () => {
+    clearGatewayAuth()
+    resetGatewaySecureStorageRestoreCache_FOR_TESTS()
+
+    let now = 5_000_000
+    setGatewaySecureStorageNowMs_FOR_TESTS(() => now)
+
+    setGatewayAuth({
+      url: 'https://gw.example',
+      jwt: 'dead',
+      expiresAtMs: now - 1,
+      idpRefreshToken: 'r',
+      tokenEndpoint: 'https://idp.example/token',
+      unpinned: true,
+    })
+
+    let posts = 0
+    setTestGatewayIdpPostToken_FOR_TESTS(async () => {
+      posts++
+      throw new Error('transient')
+    })
+    try {
+      await maybeRefreshGatewayIdp({ nowMs: now })
+      expect(posts).toBe(1)
+
+      // Login/replace session clears backoff so refresh can proceed immediately.
+      setGatewayAuth({
+        url: 'https://gw.example',
+        jwt: 'still-dead',
+        expiresAtMs: now - 1,
+        idpRefreshToken: 'r2',
+        tokenEndpoint: 'https://idp.example/token',
+        unpinned: true,
+      })
+      setTestGatewayIdpPostToken_FOR_TESTS(async () => ({
+        data: {
+          access_token: 'after-login',
+          expires_in: 3600,
+          refresh_token: 'r3',
+        },
+      }))
+      const ok = await maybeRefreshGatewayIdp({ nowMs: now })
+      expect(ok.status).toBe('refreshed')
+      expect(getGatewayAuth()?.jwt).toBe('after-login')
+      expect(posts).toBe(1) // prior inject only; success used new inject
     } finally {
       setTestGatewayIdpPostToken_FOR_TESTS(null)
       resetGatewaySecureStorageRestoreCache_FOR_TESTS()
