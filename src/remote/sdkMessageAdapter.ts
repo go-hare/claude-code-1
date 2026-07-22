@@ -17,7 +17,8 @@ import type {
 } from '../types/message.js'
 import { logForDebugging } from '../utils/debug.js'
 import { fromSDKCompactMetadata } from '../utils/messages/mappers.js'
-import { createUserMessage } from '../utils/messages.js'
+import { createUserMessage, isMetaVisibleOrigin } from '../utils/messages.js'
+import type { MessageOrigin } from '../types/message.js'
 
 /**
  * Converts SDKMessage from CCR to REPL Message types.
@@ -198,6 +199,18 @@ export function convertSDKMessage(
           }),
         }
       }
+      // densable Nke: synthetic without Ace(origin) is ignored (ticks /
+      // system scaffolding). Ace-visible peer/channel/observer synthetic
+      // still converts when convertUserTextMessages is on.
+      // MessageOrigin is a loose model-provider alias; runtime origin is object.
+      const origin = (
+        userMsg as {
+          origin?: { kind?: string; senderTaskId?: string }
+        }
+      ).origin
+      if (userMsg.isSynthetic && !isMetaVisibleOrigin(origin)) {
+        return { type: 'ignored' }
+      }
       // When converting historical events, user-typed messages need to be
       // rendered (they weren't added locally by the REPL). Skip tool_results
       // here — already handled above.
@@ -210,6 +223,10 @@ export function convertSDKMessage(
               toolUseResult: userMsg.tool_use_result,
               uuid: userMsg.uuid,
               timestamp: userMsg.timestamp,
+              ...(userMsg.isSynthetic ? { isMeta: true as const } : {}),
+              ...(origin !== undefined
+                ? { origin: origin as unknown as MessageOrigin }
+                : {}),
             }),
           }
         }

@@ -49,6 +49,13 @@ export function toInternalMessages(
             uuid: message.uuid ?? randomUUID(),
             timestamp: message.timestamp ?? new Date().toISOString(),
             isMeta: message.isSynthetic,
+            // densable: origin rides the SDK catchall so Ace can keep
+            // peer/channel/observer meta visible on the remote path.
+            ...((message as { origin?: unknown }).origin !== undefined
+              ? {
+                  origin: (message as { origin: unknown }).origin,
+                }
+              : {}),
           } as unknown as Message,
         ]
         // Handle compact boundary messages
@@ -153,6 +160,9 @@ export function toSDKMessages(messages: Message[]): SDKMessage[] {
             uuid: message.uuid,
             timestamp: message.timestamp,
             isSynthetic: message.isMeta || message.isVisibleInTranscriptOnly,
+            // densable: origin on the wire so remote Ace can un-ignore
+            // peer/channel/observer synthetic user messages.
+            ...(message.origin !== undefined ? { origin: message.origin } : {}),
             // Structured tool output (not the string content sent to the
             // model — the full Output object). Rides the protobuf catchall
             // so web viewers can read things like BriefTool's file_uuid
