@@ -1,7 +1,7 @@
 {
   "name": "@go-hare/claude-code",
-  "version": "2.7.0",
-  "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
+  "version": "2.7.1",
+  "description": "Source restoration / engineering rebuild of Anthropic Claude Code CLI — multi-provider models, self-hosted Remote Control, ACP, daemon sessions, MCP, plugins, and terminal automation",
   "type": "module",
   "author": "DeQiang",
   "repository": {
@@ -19,7 +19,12 @@
     "ai",
     "coding-assistant",
     "terminal",
-    "repl"
+    "repl",
+    "mcp",
+    "acp",
+    "remote-control",
+    "daemon",
+    "multi-provider"
   ],
   "engines": {
     "node": ">=18.0.0"
@@ -39,14 +44,14 @@
     "cli-wrapper.cjs"
   ],
   "optionalDependencies": {
-    "@go-hare/claude-code-darwin-arm64": ">=2.7.0",
-    "@go-hare/claude-code-darwin-x64": ">=2.7.0",
-    "@go-hare/claude-code-linux-x64": ">=2.7.0",
-    "@go-hare/claude-code-linux-arm64": ">=2.7.0",
-    "@go-hare/claude-code-linux-x64-musl": ">=2.7.0",
-    "@go-hare/claude-code-linux-arm64-musl": ">=2.7.0",
-    "@go-hare/claude-code-win32-x64": ">=2.7.0",
-    "@go-hare/claude-code-win32-arm64": ">=2.7.0",
+    "@go-hare/claude-code-darwin-arm64": ">=2.7.1",
+    "@go-hare/claude-code-darwin-x64": ">=2.7.1",
+    "@go-hare/claude-code-linux-x64": ">=2.7.1",
+    "@go-hare/claude-code-linux-arm64": ">=2.7.1",
+    "@go-hare/claude-code-linux-x64-musl": ">=2.7.1",
+    "@go-hare/claude-code-linux-arm64-musl": ">=2.7.1",
+    "@go-hare/claude-code-win32-x64": ">=2.7.1",
+    "@go-hare/claude-code-win32-arm64": ">=2.7.1",
     "doubaoime-asr": "^0.1.0"
   },
   "scripts": {
