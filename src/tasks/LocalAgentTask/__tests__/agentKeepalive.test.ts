@@ -270,11 +270,11 @@ describe('agent keepalive Gge/tB', () => {
     // Official DSu: no owner tB on complete — BRt decides.
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
     expect(s.get().tasks.child1.status).toBe('completed')
-    // densable DSu a=true: stamps bot idle-window → YC park, no grace yet
+    // densable DSu a=!1: no bot; empty self KA after complete → panel grace
     expect(
       s.get().tasks.child1.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
-    ).toBe(true)
-    expect(s.get().tasks.child1.evictAfter).toBeUndefined()
+    ).toBe(false)
+    expect(s.get().tasks.child1.evictAfter).toBeDefined()
     clearAllIdleWindowTimersForTests()
   })
 
@@ -303,7 +303,7 @@ describe('agent keepalive Gge/tB', () => {
     }))
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
 
-    // Parent completes: Jeo detaches agent:child; DSu stamps bot → YC park
+    // Parent completes: Jeo detaches agent:child; DSu a=!1 → empty KA, Zeo path
     completeAgentTask(
       {
         agentId: 'owner',
@@ -317,11 +317,11 @@ describe('agent keepalive Gge/tB', () => {
       false,
     )
     expect(s.get().tasks.owner.status).toBe('completed')
-    // densable DSu a=true: bot idle-window only → YC, no grace until okg
+    // densable DSu a=!1: no bot; empty KA → not YC, panel grace
     expect(
       s.get().tasks.owner.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
-    ).toBe(true)
-    expect(s.get().tasks.owner.evictAfter).toBeUndefined()
+    ).toBe(false)
+    expect(s.get().tasks.owner.evictAfter).toBeDefined()
     clearAllIdleWindowTimersForTests()
   })
 
@@ -390,11 +390,218 @@ describe('agent keepalive Gge/tB', () => {
       status: 'completed',
       setAppState: s.set as any,
     })
-    // densable BRt: !ownerBusy → tB detaches
+    // Local BRt: !ownerRunning → tB detaches
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(
       false,
     )
     expect(s.get().tasks.child1.notified).toBe(true)
+  })
+
+  test('park hang patch: last child of YC parent tB + deferred parent BRt', async () => {
+    // Official densable holds KA when owner is YC-parked → last child never
+    // tB's → parent stuck on board until next user turn. Local: tB always for
+    // non-running owner + fire deferred parent completion when no live agent:.
+    const s = store()
+    seedOwner(s, {
+      status: 'running',
+      notified: false,
+      description: 'parent-parked',
+      result: {
+        agentId: 'owner',
+        content: [{ type: 'text', text: 'parent done' }],
+        totalToolUseCount: 2,
+        totalDurationMs: 99,
+        totalTokens: 10,
+      },
+    })
+    spawnChild(s, 'child1')
+    // Parent completes while holding agent:child → YC parked, never notified
+    // (AgentTool Yqe if(Z) defers BRt).
+    completeAgentTask(
+      {
+        agentId: 'owner',
+        totalTokens: 10,
+        totalToolUseCount: 2,
+        content: [{ type: 'text', text: 'parent done' }],
+        totalDurationMs: 99,
+      } as any,
+      s.set as any,
+    )
+    expect(s.get().tasks.owner.status).toBe('completed')
+    expect(s.get().tasks.owner.notified).toBe(false)
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
+
+    completeAgentTask(
+      {
+        agentId: 'child1',
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        content: [{ type: 'text', text: 'child done' }],
+      } as any,
+      s.set as any,
+    )
+    await enqueueAgentNotification({
+      taskId: 'child1',
+      description: 'c',
+      status: 'completed',
+      setAppState: s.set as any,
+    })
+
+    // Child KA detached (owner not running)
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(
+      false,
+    )
+    expect(s.get().tasks.child1.notified).toBe(true)
+    // Deferred parent completion BRt
+    expect(s.get().tasks.owner.notified).toBe(true)
+    // Empty KA after last agent: → panel grace
+    expect(s.get().tasks.owner.evictAfter).toBeDefined()
+
+    // Child + parent notifs both route to main (owner not running)
+    const notifs = zeoQueue.filter(c => c.mode === 'task-notification')
+    expect(notifs.length).toBeGreaterThanOrEqual(2)
+    expect(notifs.every(c => c.agentId === 's')).toBe(true)
+    expect(notifs.some(c => c.taskId === 'child1')).toBe(true)
+    expect(notifs.some(c => c.taskId === 'owner')).toBe(true)
+    clearAllIdleWindowTimersForTests()
+  })
+
+  test('park hang fortification: child notifies while parent running then parent parks', async () => {
+    // densable + prior local patch stuck: child BRt while parent running skips tB
+    // and routes notif to parent queue; parent Jeo keeps agent:child → park without
+    // BRt; Zeo skips YC. resolveParkedOwnerAfterChildrenSettled on DSu fixes it.
+    const s = store()
+    seedOwner(s, {
+      status: 'running',
+      notified: false,
+      description: 'parent-child-first',
+      result: {
+        agentId: 'owner',
+        content: [{ type: 'text', text: 'parent done' }],
+        totalToolUseCount: 1,
+        totalDurationMs: 50,
+        totalTokens: 5,
+      },
+    })
+    spawnChild(s, 'child1')
+
+    completeAgentTask(
+      {
+        agentId: 'child1',
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        content: [{ type: 'text', text: 'child done first' }],
+      } as any,
+      s.set as any,
+    )
+    await enqueueAgentNotification({
+      taskId: 'child1',
+      description: 'c',
+      status: 'completed',
+      setAppState: s.set as any,
+    })
+
+    // Parent still running → KA held, child notif on owner queue
+    expect(s.get().tasks.owner.status).toBe('running')
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
+    expect(s.get().tasks.child1.notified).toBe(true)
+    expect(
+      zeoQueue.some(
+        c =>
+          c.mode === 'task-notification' &&
+          c.taskId === 'child1' &&
+          c.agentId === 'owner',
+      ),
+    ).toBe(true)
+
+    completeAgentTask(
+      {
+        agentId: 'owner',
+        totalTokens: 5,
+        totalToolUseCount: 1,
+        content: [{ type: 'text', text: 'parent done' }],
+        totalDurationMs: 50,
+      } as any,
+      s.set as any,
+    )
+    // resolveParkedOwnerAfterChildrenSettled is async void after DSu
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(s.get().tasks.owner.status).toBe('completed')
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(
+      false,
+    )
+    expect(s.get().tasks.owner.notified).toBe(true)
+    const notifs = zeoQueue.filter(c => c.mode === 'task-notification')
+    expect(notifs.some(c => c.taskId === 'child1' && c.agentId === 's')).toBe(
+      true,
+    )
+    expect(notifs.some(c => c.taskId === 'owner' && c.agentId === 's')).toBe(
+      true,
+    )
+    clearAllIdleWindowTimersForTests()
+  })
+
+  test('park hang patch: multi-child keeps parent parked until last agent:', async () => {
+    const s = store()
+    seedOwner(s, {
+      status: 'running',
+      notified: false,
+      description: 'multi-parent',
+    })
+    spawnChild(s, 'c1')
+    spawnChild(s, 'c2')
+    completeAgentTask(
+      {
+        agentId: 'owner',
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        content: [],
+      } as any,
+      s.set as any,
+    )
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c1')).toBe(true)
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c2')).toBe(true)
+
+    completeAgentTask(
+      {
+        agentId: 'c1',
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        content: [],
+      } as any,
+      s.set as any,
+    )
+    await enqueueAgentNotification({
+      taskId: 'c1',
+      description: 'c1',
+      status: 'completed',
+      setAppState: s.set as any,
+    })
+    // First child detaches but sibling still live → parent stays un-notified
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c1')).toBe(false)
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c2')).toBe(true)
+    expect(s.get().tasks.owner.notified).toBe(false)
+
+    completeAgentTask(
+      {
+        agentId: 'c2',
+        totalTokens: 1,
+        totalToolUseCount: 0,
+        content: [],
+      } as any,
+      s.set as any,
+    )
+    await enqueueAgentNotification({
+      taskId: 'c2',
+      description: 'c2',
+      status: 'completed',
+      setAppState: s.set as any,
+    })
+    expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c2')).toBe(false)
+    expect(s.get().tasks.owner.notified).toBe(true)
+    clearAllIdleWindowTimersForTests()
   })
 
   test('complete park:true defers evictAfter when self holds KA', () => {
@@ -446,17 +653,18 @@ describe('agent keepalive Gge/tB', () => {
     expect(
       s.get().tasks['parent-agent'].keepaliveReasons.has('agent:nested'),
     ).toBe(true)
+    // densable a=!1: live agent: only — no bot stamp
     expect(
       s
         .get()
         .tasks['parent-agent'].keepaliveReasons.has(
           IDLE_WINDOW_KEEPALIVE_REASON,
         ),
-    ).toBe(true)
+    ).toBe(false)
     clearAllIdleWindowTimersForTests()
   })
 
-  test('densable bot idle-window: complete stamps flag + arms okg', () => {
+  test('densable bot idle-window: complete does not stamp (a=!1); helpers remain', () => {
     expect(idleWindowKeepaliveReason()).toBe('flag:idle-window')
     expect(IDLE_WINDOW_MS).toBe(30_000)
     expect(hasNonIdleWindowKeepalive(new Set(['flag:idle-window']))).toBe(false)
@@ -478,9 +686,10 @@ describe('agent keepalive Gge/tB', () => {
     )
     const child = s.get().tasks['idle-child']
     expect(child.status).toBe('completed')
-    expect(child.keepaliveReasons.has(IDLE_WINDOW_KEEPALIVE_REASON)).toBe(true)
-    // YC park: no evictAfter until bot expires and set is empty
-    expect(child.evictAfter).toBeUndefined()
+    // densable DSu a=!1: never stamps bot on complete
+    expect(child.keepaliveReasons.has(IDLE_WINDOW_KEEPALIVE_REASON)).toBe(false)
+    // empty KA → panel grace (not YC)
+    expect(child.evictAfter).toBeDefined()
     clearAllIdleWindowTimersForTests()
   })
 
@@ -598,17 +807,26 @@ describe('agent keepalive Gge/tB', () => {
       } as any,
       s.set as any,
     )
-    // still armed
+    // densable a=!1: complete does not arm bot
     expect(
       s
         .get()
         .tasks['timer-kid'].keepaliveReasons.has(IDLE_WINDOW_KEEPALIVE_REASON),
-    ).toBe(true)
+    ).toBe(false)
+    // manual arm (helper fidelity) then kill must clear timer + KA
+    armIdleWindowTimer('timer-kid', s.set as any)
+    s.set((p: any) => ({
+      tasks: {
+        ...p.tasks,
+        'timer-kid': {
+          ...p.tasks['timer-kid'],
+          keepaliveReasons: new Set([IDLE_WINDOW_KEEPALIVE_REASON]),
+        },
+      },
+    }))
     killAsyncAgent('timer-kid', s.set as any)
     expect(s.get().tasks['timer-kid'].status).toBe('killed')
     expect(s.get().tasks['timer-kid'].keepaliveReasons?.size ?? 0).toBe(0)
-    // re-arm then clearIdleWindowTimer unit
-    armIdleWindowTimer('timer-kid', s.set as any)
     clearIdleWindowTimer('timer-kid')
     clearAllIdleWindowTimersForTests()
   })
@@ -871,7 +1089,7 @@ describe('agent keepalive Gge/tB', () => {
       taskId: 'kid',
       value: 'x',
     })
-    // densable DSu a=true: stamps bot → YC park interactive → Zeo skipped
+    // densable DSu a=!1 + Jeo empty KA → !YC → Zeo immediately on complete
     completeAgentTask(
       {
         agentId: 'owner',
@@ -884,12 +1102,8 @@ describe('agent keepalive Gge/tB', () => {
     expect(s.get().tasks.owner.status).toBe('completed')
     expect(
       s.get().tasks.owner.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
-    ).toBe(true)
-    // still parked → queue not rewired yet
-    expect(zeoQueue[0]!.agentId).toBe('owner')
-
-    // densable okg: drop bot → empty KA → Zeo re-cf agentId:mi()
-    expireIdleWindowKeepalive('owner', s.set as any)
+    ).toBe(false)
+    // not YC-parked → Zeo re-cf agentId:mi() without waiting okg
     expect(zeoQueue.length).toBe(1)
     expect(zeoQueue[0]!.agentId).toBe('s')
     expect(zeoQueue[0]!.taskId).toBe('kid')

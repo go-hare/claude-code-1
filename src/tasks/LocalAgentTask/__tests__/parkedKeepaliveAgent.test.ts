@@ -7,12 +7,12 @@ import {
 import type { AppState } from '../../../state/AppState.js'
 
 /**
- * densable — JXt park-on-complete / YC / UE pure matrix.
- * AgentTool source anchors only cover carefully ported Gge/Yeo pieces.
+ * Park-on-complete pure matrix: terminal status, isParkedKeepaliveAgent,
+ * hasLiveAgentKeepaliveChildren, and AgentTool/LocalAgentTask source anchors.
  */
 
-describe('densable JXt / YC / UE pure', () => {
-  test('UE isTerminalTaskStatus matches densable completed|failed|killed', () => {
+describe('parked keepalive agent pure matrix', () => {
+  test('isTerminalTaskStatus matches completed|failed|killed', () => {
     expect(isTerminalTaskStatus('completed')).toBe(true)
     expect(isTerminalTaskStatus('failed')).toBe(true)
     expect(isTerminalTaskStatus('killed')).toBe(true)
@@ -20,7 +20,7 @@ describe('densable JXt / YC / UE pure', () => {
     expect(isTerminalTaskStatus('pending')).toBe(false)
   })
 
-  test('YC isParkedKeepaliveAgent = local_agent completed + keepalive non-empty', () => {
+  test('isParkedKeepaliveAgent = local_agent completed + keepalive non-empty', () => {
     expect(
       isParkedKeepaliveAgent({
         type: 'local_agent',
@@ -51,7 +51,7 @@ describe('densable JXt / YC / UE pure', () => {
     ).toBe(false)
   })
 
-  test('JXt hasLiveAgentKeepaliveChildren true only for agent: reasons', () => {
+  test('hasLiveAgentKeepaliveChildren true only for agent: reasons', () => {
     const withAgent: AppState = {
       tasks: {
         owner: {
@@ -77,7 +77,7 @@ describe('densable JXt / YC / UE pure', () => {
     expect(hasLiveAgentKeepaliveChildren(undefined, () => missing)).toBe(false)
   })
 
-  test('J5r gate: terminal non-parked refuses background (pure predicate)', () => {
+  test('terminal non-parked refuses background (pure predicate)', () => {
     const refuse = (status: string, parked: boolean): boolean =>
       isTerminalTaskStatus(status as never) && !parked
     expect(refuse('completed', false)).toBe(true)
@@ -86,7 +86,7 @@ describe('densable JXt / YC / UE pure', () => {
     expect(refuse('failed', false)).toBe(true)
   })
 
-  test('source anchors densable Gge on async spawn + mid-bg + BRt mi→undefined', async () => {
+  test('source anchors: keepalive attach on spawn/mid-bg + owner notify path', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const agent = readFileSync(
@@ -96,12 +96,12 @@ describe('densable JXt / YC / UE pure', () => {
       ),
       'utf8',
     )
-    // Ported carefully: nested Yeo owner + Gge on mid-bg; not full Zt park package
+    // nested owner keepalive on mid-bg; not full park package
     expect(agent.includes('addKeepaliveReason')).toBe(true)
     expect(agent.includes('agentKeepaliveReason')).toBe(true)
     expect(agent.includes('resolvePanelOwnerAgentId')).toBe(true)
     expect(agent.includes('getIsNonInteractiveSession')).toBe(true)
-    // densable OSu: fg register stamps owner; mid-bg re-stamps if missing
+    // fg register stamps owner; mid-bg re-stamps if missing
     expect(agent.includes('nestedFgOwnerId')).toBe(true)
     expect(agent.includes('ownerAgentId: t.ownerAgentId ?? ownerId')).toBe(true)
 
@@ -112,20 +112,18 @@ describe('densable JXt / YC / UE pure', () => {
     expect(local.includes('isTerminalTaskStatus(task.status)')).toBe(true)
     expect(local.includes('hasLiveAgentKeepaliveChildren(taskId')).toBe(true)
     expect(local.includes('isParkedKeepaliveAgent(task)')).toBe(true)
-    // densable AL: main stamp is mi() via getMainThreadAgentId (not undefined dual)
+    // main stamp via getMainThreadAgentId (not undefined dual)
     expect(local.includes('getMainThreadAgentId')).toBe(true)
     expect(local.includes("priority: 'next'")).toBe(true)
-    // densable OSu stamps owner at foreground register
-    expect(local.includes('// densable OSu: ownerAgentId:t at register')).toBe(
-      true,
-    )
-    // densable Beo/gtf/hAe stop cascade helpers
+    // stamps owner at foreground register
+    expect(local.includes('ownerAgentId')).toBe(true)
+    // stop cascade helpers
     expect(local.includes('isDescendantAgentOf')).toBe(true)
     expect(local.includes('killDescendantAgents')).toBe(true)
     expect(local.includes('markAgentStoppedByUser')).toBe(true)
-    // densable Sot Gge is call-site only (resume/observer attachOwnerKeepalive:false)
+    // registerAsyncAgent keepalive is call-site only (resume/observer attachOwnerKeepalive:false)
     expect(local.includes('attachOwnerKeepalive')).toBe(true)
-    // densable bot idle-window / full Zt park package (DSu a=true + okg)
+    // idle-window helpers exist; complete never stamps bot idle-window
     expect(
       local.includes('flag:idle-window') ||
         local.includes('IDLE_WINDOW_KEEPALIVE_REASON'),
@@ -144,7 +142,7 @@ describe('densable JXt / YC / UE pure', () => {
     expect(fw.includes('hasNonIdleWindowKeepalive')).toBe(true)
     expect(fw.includes('computePanelEvictAfter')).toBe(true)
 
-    // densable Yqe JXt defer BRt (AgentTool complete path)
+    // park-on-keepalive defer owner notify (AgentTool complete path)
     const utils = readFileSync(
       join(
         import.meta.dir,

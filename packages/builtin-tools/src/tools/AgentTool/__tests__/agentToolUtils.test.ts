@@ -1,5 +1,6 @@
 import { mock, describe, expect, test } from 'bun:test'
 import * as realToolsConstants from 'src/constants/tools.js'
+import * as realTool from 'src/Tool.js'
 import * as realErrors from 'src/utils/errors.js'
 import * as realMessages from 'src/utils/messages.js'
 import { debugMock } from '../../../../../../tests/mocks/debug'
@@ -38,8 +39,10 @@ mock.module('src/services/api/dumpPrompts.js', () => ({
   clearDumpState: noop,
 }))
 
+// Keep real toolMatchesName (pure). Mocking it to always false poisons sibling
+// suites (observerReportToolPool) via process-global mock.module.
 mock.module('src/Tool.js', () => ({
-  toolMatchesName: () => false,
+  ...realTool,
   findToolByName: noop,
 }))
 
@@ -65,6 +68,7 @@ mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', () => ({
   getTokenCountFromTracker: () => 0,
   isLocalAgentTask: () => false,
   killAsyncAgent: noop,
+  markAgentsNotified: noop,
   rebuildProgressFromMessages: noop,
   scheduleDeferredAgentProgressRebuild: noop,
   updateAgentProgress: noop,

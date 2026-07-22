@@ -1425,8 +1425,9 @@ export const AgentTool = buildTool({
                         getProgressUpdate(tracker, agentMessages),
                         rootSetAppState,
                       );
-                      // densable: Jeo → JXt (root registry) → Cns(suppressTelemetry:Z) → DSu
-                      // JXt must read root via set-snapshot (same store as Jeo).
+                      // densable Yqe (single Jeo + same Z):
+                      // Jeo → Z=JXt → Cns(suppressTelemetry:Z) → DSu → if(Z) park
+                      // JXt reads root via set-snapshot (same store as Jeo).
                       const preCompleteJxt = sweepAndDetectLiveAgentChildren(backgroundedTaskId, rootSetAppState);
                       const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata, {
                         suppressTelemetry: preCompleteJxt,
@@ -1436,25 +1437,11 @@ export const AgentTool = buildTool({
                       // unblocks immediately. classifyHandoffIfNeeded and
                       // cleanupWorktreeIfNeeded can hang — they must not gate
                       // the status transition (gh-20236).
-                      // Re-check JXt AFTER complete (complete's Jeo may drop
-                      // already-notified kids — pre Z alone would false-defer).
-                      completeAsyncAgent(agentResult, rootSetAppState);
+                      // skipJeo: Jeo already ran for Z; DSu must not re-Jeo.
+                      completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true });
 
-                      // densable Yqe: if JXt after DSu, CWr + defer owner BRt
-                      // eslint-disable-next-line @typescript-eslint/no-require-imports
-                      const { hasLiveAgentKeepaliveChildren } =
-                        require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js');
-                      let rootSnapAfter: AppState | undefined;
-                      rootSetAppState(prev => {
-                        rootSnapAfter = prev;
-                        return prev;
-                      });
-                      if (
-                        hasLiveAgentKeepaliveChildren(
-                          backgroundedTaskId,
-                          () => rootSnapAfter ?? toolUseContext.getAppState(),
-                        )
-                      ) {
+                      // densable: if (Z) CWr + defer BRt — same Z as suppressTelemetry
+                      if (preCompleteJxt) {
                         parkAgentOnKeepaliveDeferNotify(
                           backgroundedTaskId,
                           agentResult.totalDurationMs,

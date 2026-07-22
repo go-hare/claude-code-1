@@ -407,6 +407,36 @@ export function getProgressUpdate(tracker: ProgressTracker, messages?: readonly 
  * Multiple delays: some proxies attach usage slightly after the local event
  * loop drains microtasks; re-probe at 0/50/250ms while still on the same turn.
  */
+/**
+ * Per-task deferred rebuild timers. Each schedule cancels prior timers for the
+ * same taskId so long agents do not pile O(n) rebuildProgressFromMessages.
+ * Generation tokens also invalidate in-flight queueMicrotask callbacks that
+ * clearTimeout cannot cancel.
+ */
+const deferredProgressRebuildTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
+const deferredProgressRebuildGeneration = new Map<string, number>();
+
+/** Cancel deferred progress rebuild timers for one agent (complete/kill/fail). */
+export function clearDeferredAgentProgressRebuild(taskId: string): void {
+  const timers = deferredProgressRebuildTimers.get(taskId);
+  if (timers) {
+    for (const t of timers) clearTimeout(t);
+    deferredProgressRebuildTimers.delete(taskId);
+  }
+  // Bump generation so already-queued microtasks no-op even if timers were empty.
+  deferredProgressRebuildGeneration.set(taskId, (deferredProgressRebuildGeneration.get(taskId) ?? 0) + 1);
+}
+
+/** @internal test helper — clear all deferred rebuild timers. */
+export function clearAllDeferredAgentProgressRebuildsForTests(): void {
+  for (const taskId of [
+    ...new Set([...deferredProgressRebuildTimers.keys(), ...deferredProgressRebuildGeneration.keys()]),
+  ]) {
+    clearDeferredAgentProgressRebuild(taskId);
+  }
+  deferredProgressRebuildGeneration.clear();
+}
+
 export function scheduleDeferredAgentProgressRebuild(
   taskId: string,
   tracker: ProgressTracker,
@@ -415,7 +445,21 @@ export function scheduleDeferredAgentProgressRebuild(
   resolveActivityDescription?: ActivityDescriptionResolver,
   tools?: Tools,
 ): void {
+  clearDeferredAgentProgressRebuild(taskId);
+  const generation = (deferredProgressRebuildGeneration.get(taskId) ?? 0) + 1;
+  deferredProgressRebuildGeneration.set(taskId, generation);
   const run = (): void => {
+    // Cancelled by clearDeferred / re-schedule (microtasks are not clearTimeout-able).
+    if (deferredProgressRebuildGeneration.get(taskId) !== generation) return;
+    // Skip after task left running (complete/kill/fail), even if a timeout races.
+    let stillRunning = false;
+    setAppState(prev => {
+      const t = prev.tasks?.[taskId];
+      stillRunning = t?.type === 'local_agent' && t.status === 'running';
+      return prev;
+    });
+    if (!stillRunning) return;
+    if (deferredProgressRebuildGeneration.get(taskId) !== generation) return;
     rebuildProgressFromMessages(tracker, messages, resolveActivityDescription, tools);
     updateAgentProgress(taskId, getProgressUpdate(tracker, messages), setAppState);
   };
@@ -424,9 +468,8 @@ export function scheduleDeferredAgentProgressRebuild(
   queueMicrotask(() => {
     queueMicrotask(run);
   });
-  setTimeout(run, 0);
-  setTimeout(run, 50);
-  setTimeout(run, 250);
+  const timers: ReturnType<typeof setTimeout>[] = [setTimeout(run, 0), setTimeout(run, 50), setTimeout(run, 250)];
+  deferredProgressRebuildTimers.set(taskId, timers);
 }
 
 /**
@@ -518,6 +561,19 @@ export type LocalAgentTaskState = TaskStateBase & {
    * BRt summary: parent→"was stopped by Claude", user→"was stopped by user".
    */
   killedBy?: 'user' | 'parent' | 'system';
+  /**
+   * densable Aye `resuming` CAS gate — set true while resume setup runs
+   * (before status becomes running again). Concurrent Aye throws B6 when
+   * status==="running" || resuming.
+   */
+  resuming?: boolean;
+  /**
+   * Product UX: PSu adopt placeholder is status:"completed" so Aye CAS can
+   * claim (must not set resuming/running). Panel treats this as non-done
+   * ("resuming") until Aye claim / alreadyCompleted / re-register clears it.
+   * Ignored by tryClaimAgentResume.
+   */
+  adoptResumePending?: boolean;
 };
 
 function initAgentTaskOutput(agentId: string): void {
@@ -556,6 +612,69 @@ export function updateLocalAgentIsIdle(taskId: string, isIdle: boolean, setAppSt
 
 export function isLocalAgentTask(task: unknown): task is LocalAgentTaskState {
   return typeof task === 'object' && task !== null && 'type' in task && task.type === 'local_agent';
+}
+
+/**
+ * densable Aye CAS:
+ *   if (Wl(_)) {
+ *     pe=false; update: if status==="running"||resuming return same; else pe=true, resuming:!0
+ *     if (!pe) throw B6("already running or being resumed")
+ *   }
+ * No-op (ok) when task is not in registry (cold resume from disk only).
+ * Returns true if claim applied (or no task to claim); false if blocked.
+ *
+ * Prefer passing getAppState so missing-task short-circuit matches densable Wl(_).
+ */
+export function tryClaimAgentResume(agentId: string, setAppState: SetAppState, getAppState?: () => AppState): boolean {
+  // Peek: no local_agent task → densable skips CAS entirely (cold disk resume).
+  // Prefer getAppState when provided so blocked (running/resuming) short-circuits
+  // without a write; update path still enforces CAS under concurrent setAppState.
+  if (getAppState) {
+    const cur = getAppState().tasks?.[agentId];
+    if (!isLocalAgentTask(cur)) return true;
+    if (cur.status === 'running' || cur.resuming) return false;
+  }
+
+  let claimed = false;
+  let seen = false;
+  updateTaskState<LocalAgentTaskState>(agentId, setAppState, task => {
+    seen = true;
+    if (task.status === 'running' || task.resuming) {
+      return task;
+    }
+    claimed = true;
+    // Clear adopt placeholder when CAS takes over (resuming is the setup gate).
+    return { ...task, resuming: true, adoptResumePending: false };
+  });
+  // Missing task → densable Wl(_) false → cold resume ok.
+  // Seen but not claimed → blocked (running/resuming). Never treat blocked as cold.
+  if (!seen) return true;
+  return claimed;
+}
+
+/**
+ * densable Aye S(): clear resuming flag after failed setup paths.
+ *   g.update(e, pe => pe.resuming ? {...pe, resuming:!1} : pe)
+ */
+export function clearAgentResuming(agentId: string, setAppState: SetAppState): void {
+  updateTaskState<LocalAgentTaskState>(agentId, setAppState, task => {
+    if (!task.resuming && !task.adoptResumePending) return task;
+    return { ...task, resuming: false, adoptResumePending: false };
+  });
+}
+
+/**
+ * Panel "active" for local_agent: non-terminal, or densable YC keepalive hold,
+ * or product adopt/Aye in-flight (completed placeholder + resuming CAS).
+ * Does not affect tryClaimAgentResume (CAS still only running||resuming).
+ */
+export function isLocalAgentPanelActive(task: LocalAgentTaskState): boolean {
+  if (task.status === 'running') return true;
+  if (task.resuming || task.adoptResumePending) return true;
+  if (task.status === 'completed' && (task.keepaliveReasons?.size ?? 0) > 0) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -869,15 +988,19 @@ export async function enqueueAgentNotification({
    */
   ownerAgentId?: string;
 }): Promise<void> {
-  // densable BRt (2.1.211):
-  //   1. atomic notified gate; capture m = task.ownerAgentId
-  //   2. m ??= ownerAgentId arg
-  //   3. ownerBusy = (YC(owner) && !pn()) || owner.running
-  //   4. if (!(firstNotify && ownerBusy)) tB(owner, `agent:${id}`)
-  //   5. if (!firstNotify) return
-  //   6. cf({ priority:"next", agentId: ownerBusy&&m ? Qc(m) : mi(), taskId })
-  // Official AL is agentId===mi(); enqueuePendingNotification stamps mi() when
-  // agentId omitted. Nested ownerBusy routes to Qc(owner). No dual-OR.
+  // BRt owner notify (local patch over densable 2.1.211 hole):
+  // densable: ownerBusy = YC(parked)||running → skip tB + route to owner.
+  // That permanently sticks a parent that park-on-keepalive deferred its own
+  // BRt: last child never tB's, parent never unparks, child notif sits on a
+  // dead owner queue (Zeo also skips YC interactive).
+  //
+  // Local:
+  //   1. atomic notified gate; capture owner
+  //   2. hold KA (skip tB) ONLY while owner.status==="running" (can drain)
+  //   3. YC-parked / terminal / missing owner → always tB
+  //   4. route to owner only when running; else main-thread
+  //   5. after tB, if parked owner now has no live agent: children and never
+  //      notified → fire deferred parent completion BRt + Zeo rewire
   let shouldEnqueue = false;
   let shouldCompletePlanVerification = false;
   let owner: string | undefined;
@@ -897,25 +1020,31 @@ export async function enqueueAgentNotification({
   });
   owner ??= ownerAgentId;
 
-  // densable: _ = Wl(g)&&YC(g)&&!pn() || Wl(g)&&g.status==="running"
-  let ownerBusy = false;
+  // Hold KA only while owner is still running (can drain mid-turn notifs).
+  // YC-parked is NOT busy for hold/route — see deferred parent BRt below.
+  let ownerRunning = false;
+  let ownerWasParked = false;
   if (owner) {
     setAppState(prev => {
       const g = prev.tasks?.[owner!];
       if (g && g.type === 'local_agent') {
-        const parked = isParkedKeepaliveAgent(g) && !getIsNonInteractiveSession();
-        const running = g.status === 'running';
-        ownerBusy = parked || running;
+        ownerRunning = g.status === 'running';
+        ownerWasParked = isParkedKeepaliveAgent(g) && !getIsNonInteractiveSession();
       }
       return prev;
     });
   }
-  // densable: if (!(p && _)) tB(m, `agent:${e}`, i) — also on already-notified
-  if (!(shouldEnqueue && ownerBusy)) {
+  // Skip tB only on first-notify + owner still running.
+  // already-notified re-entry and parked/terminal owners always detach.
+  if (!(shouldEnqueue && ownerRunning)) {
     removeKeepaliveReason(owner, agentKeepaliveReason(taskId), setAppState);
   }
 
   if (!shouldEnqueue) {
+    // Re-notify / kill paths still tB above; finish park-deferred parent if ready.
+    if (owner && ownerWasParked && !ownerRunning) {
+      await fireDeferredParkedOwnerCompletion(owner, setAppState);
+    }
     return;
   }
 
@@ -975,16 +1104,115 @@ export async function enqueueAgentNotification({
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>${noteSection}${resultSection}${usageSection}${worktreeSection}
 </${TASK_NOTIFICATION_TAG}>`;
 
-  // densable: agentId: _&&m ? Qc(m) : mi(); priority always "next"; taskId for Jeo.
+  // Local route: owner only while running (can drain). Parked/terminal → main.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getMainThreadAgentId } = require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js');
-  const routeAgentId = ownerBusy && owner ? asAgentId(owner) : getMainThreadAgentId();
+  const routeAgentId = ownerRunning && owner ? asAgentId(owner) : getMainThreadAgentId();
   enqueuePendingNotification({
     value: message,
     mode: 'task-notification',
     agentId: routeAgentId,
     priority: 'next',
     taskId,
+  });
+
+  // After child notif: last agent: child of a park-deferred parent → parent BRt.
+  if (owner && ownerWasParked && !ownerRunning) {
+    await fireDeferredParkedOwnerCompletion(owner, setAppState);
+  }
+}
+
+/**
+ * Local fortification for child-first hang (densable also stuck here):
+ * Child BRt while parent still `running` → skip tB, notif on parent queue.
+ * Parent DSu then Jeo keeps `agent:child` (queue hold) → park without BRt.
+ * Zeo skips YC interactive → notifs stuck; parent never notified.
+ *
+ * After parent parks: force-rewire owner-routed notifs to main, Jeo-detach
+ * notified/missing agent: children, then deferred parent BRt if no agent: left.
+ * Live (running) children keep the parent parked.
+ */
+export async function resolveParkedOwnerAfterChildrenSettled(ownerId: string, setAppState: SetAppState): Promise<void> {
+  let shouldResolve = false;
+  setAppState(prev => {
+    const t = prev.tasks?.[ownerId];
+    if (t && t.type === 'local_agent' && t.status === 'completed' && t.notified !== true && isParkedKeepaliveAgent(t)) {
+      shouldResolve = true;
+    }
+    return prev;
+  });
+  if (!shouldResolve) return;
+
+  // Bypass densable Zeo YC guard — parked parent will never drain these.
+  rewireOrphanedOwnerNotifications(ownerId, setAppState, { force: true });
+  // Queue holds cleared → Jeo can detach notified/missing agent: children.
+  sweepStaleKeepaliveReasons(ownerId, setAppState);
+  await fireDeferredParkedOwnerCompletion(ownerId, setAppState);
+}
+
+/**
+ * Local patch over densable BRt/YC hang: when a park-deferred parent
+ * (`completed` + live `agent:` children, never notified) loses its last
+ * agent: hold via child tB, rewire orphan notifs and fire the deferred
+ * parent completion BRt so the panel does not stick until the next user turn.
+ *
+ * Safe under concurrent child notifies: parent notified gate is atomic inside
+ * enqueueAgentNotification; remaining live agent: children keep the parent parked.
+ */
+async function fireDeferredParkedOwnerCompletion(ownerId: string, setAppState: SetAppState): Promise<void> {
+  let description = 'agent';
+  let notified = true;
+  let status: string | undefined;
+  let result: AgentToolResult | undefined;
+  let appState: AppState | undefined;
+  setAppState(prev => {
+    appState = prev;
+    const t = prev.tasks?.[ownerId];
+    if (t && t.type === 'local_agent') {
+      const agent = t as LocalAgentTaskState;
+      description = agent.description || 'agent';
+      notified = agent.notified === true;
+      status = agent.status;
+      result = agent.result;
+    }
+    return prev;
+  });
+
+  // Only park-deferred completion (Yqe if(Z) return without BRt).
+  if (notified || status !== 'completed') {
+    return;
+  }
+  // Still has other live agent: children → stay parked.
+  if (!appState || hasLiveAgentKeepaliveChildren(ownerId, () => appState!)) {
+    return;
+  }
+
+  // KA may still hold non-agent reasons (bash:/monitor:); Zeo skips only while
+  // YC interactive. After last agent: tB, empty-KA parents rewire; non-empty
+  // still attempt BRt (notified gate) so user sees completion.
+  rewireOrphanedOwnerNotifications(ownerId, setAppState);
+
+  const finalMessage =
+    result?.content
+      ?.map(block => (block && typeof block.text === 'string' ? block.text : ''))
+      .filter(Boolean)
+      .join('\n') || undefined;
+  const usage =
+    result !== undefined
+      ? {
+          totalTokens: result.totalTokens ?? 0,
+          toolUses: result.totalToolUseCount ?? 0,
+          durationMs: result.totalDurationMs ?? 0,
+        }
+      : undefined;
+
+  await enqueueAgentNotification({
+    taskId: ownerId,
+    description,
+    status: 'completed',
+    setAppState,
+    finalMessage,
+    usage,
   });
 }
 
@@ -1116,7 +1344,10 @@ export function killAsyncAgent(
       /* ignore */
     }
     task.unregisterCleanup?.();
-    // Official XV: status killed + killedBy:r; notified = s.notified || YC(s)
+    // Official XV: status killed + killedBy:r; notified = s.notified || YC(s).
+    // densable XV does NOT clear Aye resuming — only S()/Sot/complete/fail do.
+    // Clearing here races dual claim: stop mid-resume → resuming false → second
+    // worker can claim the same agent id.
     return {
       ...task,
       status: 'killed',
@@ -1132,6 +1363,7 @@ export function killAsyncAgent(
     };
   });
   if (killed) {
+    clearDeferredAgentProgressRebuild(taskId);
     // Running kill: detach owner KA (local residual; densable pre-steps only
     // cover YC). Parked paths already handled tB/BRt above — avoid double tB.
     if (!wasParked) {
@@ -1277,18 +1509,25 @@ export function updateAgentSummary(taskId: string, summary: string, setAppState:
  * target this agent as owner onto main-thread AL.
  *
  * densable re-cf with agentId:mi() (main-thread AL).
- * Guard: if owner is still YC parked in an interactive session, skip.
+ * Guard: if owner is still YC parked in an interactive session, skip —
+ * unless `force` (local child-first park fortification).
  */
-export function rewireOrphanedOwnerNotifications(ownerTaskId: string, setAppState: SetAppState): void {
+export function rewireOrphanedOwnerNotifications(
+  ownerTaskId: string,
+  setAppState: SetAppState,
+  opts?: { force?: boolean },
+): void {
   // Official: if (Wl(r)&&YC(r)&&!pn()) return
   let skip = false;
-  setAppState(prev => {
-    const t = prev.tasks?.[ownerTaskId];
-    if (t && t.type === 'local_agent' && isParkedKeepaliveAgent(t) && !getIsNonInteractiveSession()) {
-      skip = true;
-    }
-    return prev;
-  });
+  if (!opts?.force) {
+    setAppState(prev => {
+      const t = prev.tasks?.[ownerTaskId];
+      if (t && t.type === 'local_agent' && isParkedKeepaliveAgent(t) && !getIsNonInteractiveSession()) {
+        skip = true;
+      }
+      return prev;
+    });
+  }
   if (skip) return;
 
   // densable Zeo: re-cf with agentId:mi() for orphaned owner-routed notifs.
@@ -1346,8 +1585,8 @@ export function clearIdleWindowTimer(taskId: string): void {
  * 2. if completed && KA empty: zS + Zeo; if notified && no pending owner notif for
  *    this taskId → tB(owner, agent:id)
  *
- * Gold densable DSu arms a=true always in our port (bundle has dead `a=!1` —
- * known densable wip bug; without arming, bot/okg is unreachable dead code).
+ * Gold DSu uses `a=!1` so complete never arms this path; helpers remain for
+ * fidelity / manual armIdleWindowTimer (tests, future densable revival).
  */
 export function expireIdleWindowKeepalive(taskId: string, setAppState: SetAppState): void {
   idleWindowTimers.delete(taskId);
@@ -1400,7 +1639,7 @@ export function expireIdleWindowKeepalive(taskId: string, setAppState: SetAppSta
 
 /**
  * densable DSu arm: if (o&&a) clearTimeout + setTimeout(okg, CSu).
- * Always armed on successful complete in this port (see expireIdleWindowKeepalive).
+ * Gold a=!1 → complete never calls this; exported for okg fidelity/tests.
  */
 export function armIdleWindowTimer(taskId: string, setAppState: SetAppState): void {
   clearIdleWindowTimer(taskId);
@@ -1413,21 +1652,33 @@ export function armIdleWindowTimer(taskId: string, setAppState: SetAppState): vo
 }
 
 /**
- * Complete an agent task with result.
- * densable: Jeo(taskId) before DSu so already-notified children drop their
- * agent: holds; then DSu stamps bot idle-window KA + QYi(park:true) + arms okg;
- * no owner tB (BRt does conditional tB); Zeo when not YC-parked interactive.
+ * Complete an agent task with result (densable DSu body).
+ *
+ * densable Yqe: `Jeo → Z=JXt → Cns(suppress:Z) → DSu → if(Z) park`.
+ * DSu itself has **no** Jeo. Callers that already swept (lifecycle / mid-bg)
+ * pass `skipJeo: true` so park/suppress share that single pre-DSu Z.
+ * Standalone callers (tests, other complete sites) leave default: Jeo here
+ * once before DSu (same net as Yqe when they don't pre-sweep).
+ *
+ * densable DSu `a=!1` (2.1.211): do **not** stamp flag:idle-window / arm okg.
+ * u = keepaliveReasons (unchanged); QYi(park:true); Zeo when !YC interactive.
+ * No owner tB (BRt does conditional tB).
  */
-export function completeAgentTask(result: AgentToolResult, setAppState: SetAppState): void {
+export function completeAgentTask(
+  result: AgentToolResult,
+  setAppState: SetAppState,
+  opts?: { skipJeo?: boolean },
+): void {
   const taskId = result.agentId;
-  // densable async complete: Jeo(e,s) before DSu — detaches agent:/workflow:
-  // reasons whose child is missing or already notified (no pending queue hold).
-  // Without this, a nested parent that held KA while children notified under
-  // ownerBusy would YC-park forever on stale agent: holds.
-  sweepStaleKeepaliveReasons(taskId, setAppState);
+  // densable Jeo before DSu — skip when caller already ran Jeo for the same Z.
+  if (!opts?.skipJeo) {
+    sweepStaleKeepaliveReasons(taskId, setAppState);
+  }
 
   let completed = false;
   let parkedInteractive = false;
+  // densable DSu: a=!1 — never arm bot/okg on complete (dead branch in gold)
+  const a = false;
   let armedIdleWindow = false;
   // densable DSu: s = (d.pendingMessages?.length ?? 0) > 0 → Weo.emit after update
   let hasPendingMessages = false;
@@ -1447,19 +1698,18 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
     const tokenCount = Math.max(result.totalTokens ?? 0, prevProgress?.tokenCount ?? 0);
     const toolUseCount = Math.max(result.totalToolUseCount ?? 0, prevProgress?.toolUseCount ?? 0);
 
-    // densable DSu (fixed a=true — gold bundle leaves a=!1 dead):
-    // u = a ? Wge.add(bot) : keepaliveReasons
-    // Always stamp flag:idle-window so okg can expire after CSu.
-    // densable l=hasNonIdleWindowKeepalive(prev) only gates telemetry
-    // `else if (o&&a&&!l) Ee` — no local telemetry sink, so l is unused.
-    const bot = IDLE_WINDOW_KEEPALIVE_REASON;
+    // densable DSu: a=!1 → u = c.keepaliveReasons (no bot stamp).
+    // Gold `l` (hasNonIdleWindowKeepalive) only gates dead `o&&a&&!l` telemetry.
     const prevReasons = task.keepaliveReasons ?? new Set<string>();
-    const nextKeepalive = new Set(prevReasons).add(bot);
-    armedIdleWindow = true;
+    const nextKeepalive = a ? new Set(prevReasons).add(IDLE_WINDOW_KEEPALIVE_REASON) : new Set(prevReasons);
+    armedIdleWindow = a;
 
     const next = {
       ...task,
       status: 'completed' as const,
+      // densable: terminal clears in-flight resume CAS flag
+      resuming: false,
+      adoptResumePending: false,
       result,
       progress: {
         toolUseCount,
@@ -1470,7 +1720,7 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
       },
       endTime: Date.now(),
       keepaliveReasons: nextKeepalive,
-      // park:true + non-empty (bot at least) → evictAfter undefined (YC hold)
+      // densable QYi(park:true): non-empty KA → no grace; empty → panel grace
       evictAfter: computePanelEvictAfter({ retain: task.retain, keepaliveReasons: nextKeepalive }, { park: true }),
       abortController: undefined,
       unregisterCleanup: undefined,
@@ -1481,12 +1731,18 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
     return next;
   });
   if (completed) {
+    clearDeferredAgentProgressRebuild(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
     // Official DSu: if (o && !i) ... Zeo(n,t)
     if (!parkedInteractive) {
       rewireOrphanedOwnerNotifications(taskId, setAppState);
+    } else {
+      // Local fortification (not densable): child-first hang — children that
+      // notified while we were still running left agent: holds + owner-queue
+      // notifs. densable defers until resume; we settle notified children now.
+      void resolveParkedOwnerAfterChildrenSettled(taskId, setAppState);
     }
-    // densable: if (o&&a) arm okg timer
+    // densable: if (o&&a) arm okg — gold a=!1 never enters
     if (armedIdleWindow) {
       armIdleWindowTimer(taskId, setAppState);
     }
@@ -1510,6 +1766,7 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
     if (task.status !== 'running') {
       return task;
     }
+    // clear Aye CAS if fail races mid-resume
 
     task.unregisterCleanup?.();
     failed = true;
@@ -1517,6 +1774,8 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
     return {
       ...task,
       status: 'failed',
+      resuming: false,
+      adoptResumePending: false,
       error,
       endTime: Date.now(),
       // densable eto: leave keepaliveReasons as-is (no bot arm on fail path)
@@ -1527,6 +1786,7 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
     };
   });
   if (failed) {
+    clearDeferredAgentProgressRebuild(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
     // Official eto: always Zeo after fail (no YC park)
     rewireOrphanedOwnerNotifications(taskId, setAppState);
@@ -1612,6 +1872,9 @@ export function registerAsyncAgent({
     isBackgrounded: true, // registerAsyncAgent immediately backgrounds
     pendingMessages: [],
     isIdle: false, // densable Sot isIdle:!1
+    // densable Sot replaces Aye resuming CAS with status:running
+    resuming: false,
+    adoptResumePending: false,
     retain: false,
     diskLoaded: false,
     ...(isObserver === true ? { isObserver: true } : {}),

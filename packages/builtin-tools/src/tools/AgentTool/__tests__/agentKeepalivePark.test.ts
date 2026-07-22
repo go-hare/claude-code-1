@@ -9,11 +9,11 @@ import {
 import type { AppState } from 'src/state/AppState.js'
 
 /**
- * densable Yqe park CWr + pe (JXt count) + defer BRt source anchors.
+ * Park-on-keepalive: turn_duration pe count + defer owner notify source anchors.
  * Runtime park path is in agentToolUtils.runAsyncAgentLifecycle.
  */
-describe('densable Yqe park CWr + pe (JXt count)', () => {
-  test('createTurnDurationMessage densable CWr pe/n fields', () => {
+describe('agent keepalive park + defer owner notify', () => {
+  test('createTurnDurationMessage pe/n pendingBackgroundAgentCount fields', () => {
     const m = createTurnDurationMessage(1234, undefined, undefined, 2)
     expect(m.type).toBe('system')
     expect(m.subtype).toBe('turn_duration')
@@ -51,7 +51,7 @@ describe('densable Yqe park CWr + pe (JXt count)', () => {
     expect(hasLiveAgentKeepaliveChildren('missing', () => state)).toBe(false)
   })
 
-  test('JXt false when only non-agent keepalive (bot/workflow)', () => {
+  test('hasLiveAgentKeepaliveChildren false when only non-agent keepalive', () => {
     const state = {
       tasks: {
         parent: {
@@ -65,7 +65,7 @@ describe('densable Yqe park CWr + pe (JXt count)', () => {
     expect(hasLiveAgentKeepaliveChildren('parent', () => state)).toBe(false)
   })
 
-  test('runAsyncAgentLifecycle park path: CWr + defer notify when JXt', () => {
+  test('runAsyncAgentLifecycle park path: turn_duration + defer notify when live children', () => {
     const utils = readFileSync(
       join(import.meta.dir, '../agentToolUtils.ts'),
       'utf8',
@@ -77,7 +77,7 @@ describe('densable Yqe park CWr + pe (JXt count)', () => {
     expect(utils).toContain('sweepAndDetectLiveAgentChildren')
     expect(utils).toContain('parkAgentOnKeepaliveDeferNotify')
     expect(utils).toContain('suppressTelemetry')
-    // densable Yqe D isIdle tracking (shared tracker)
+    // isIdle tracking (shared tracker)
     expect(utils).toContain('createLocalAgentIsIdleTracker')
     expect(utils).toContain('computeLocalAgentIsIdle')
     expect(utils).toContain('updateLocalAgentIsIdle')
@@ -89,25 +89,34 @@ describe('densable Yqe park CWr + pe (JXt count)', () => {
     expect(agentTool).toContain('createLocalAgentIsIdleTracker')
     expect(agentTool).toContain('seedFromMessages')
     expect(agentTool).toContain('isIdleTracker.track')
-    // order: completeAsyncAgent → post-complete JXt park return → enqueue
+    // order: sweep → finalize(suppress) → complete(skipJeo) → if live children park → else enqueue
+    const sweepIdx = utils.indexOf('sweepAndDetectLiveAgentChildren(')
+    const suppressIdx = utils.indexOf('suppressTelemetry: preCompleteJxt')
     const completeIdx = utils.indexOf('completeAsyncAgent(agentResult')
+    const skipJeoIdx = utils.indexOf('skipJeo: true', completeIdx)
     const parkIdx = utils.indexOf(
       'parkAgentOnKeepaliveDeferNotify(',
       completeIdx,
     )
+    const parkGateIdx = utils.indexOf('if (preCompleteJxt)', completeIdx)
     const returnIdx = utils.indexOf('return', parkIdx)
     const notifyIdx = utils.indexOf('enqueueAgentNotification({', returnIdx)
-    expect(completeIdx).toBeGreaterThan(0)
-    expect(parkIdx).toBeGreaterThan(completeIdx)
+    expect(sweepIdx).toBeGreaterThan(0)
+    expect(suppressIdx).toBeGreaterThan(sweepIdx)
+    expect(completeIdx).toBeGreaterThan(suppressIdx)
+    expect(skipJeoIdx).toBeGreaterThan(completeIdx)
+    expect(parkGateIdx).toBeGreaterThan(completeIdx)
+    expect(parkIdx).toBeGreaterThan(parkGateIdx)
     expect(returnIdx).toBeGreaterThan(parkIdx)
     expect(notifyIdx).toBeGreaterThan(returnIdx)
-    // post-complete re-check JXt (not pre-only)
-    expect(utils).toContain('hasLiveAgentKeepaliveChildren')
+    // same preComplete flag for park — no post-complete hasLiveAgentKeepaliveChildren re-sample
+    const postComplete = utils.slice(completeIdx, parkIdx)
+    expect(postComplete).not.toContain('hasLiveAgentKeepaliveChildren(')
     // strips old turn_duration
     expect(utils).toContain("subtype === 'turn_duration'")
   })
 
-  test('AgentTool mid-bg complete path also defers BRt on JXt', () => {
+  test('AgentTool mid-bg complete path also defers owner notify on live children', () => {
     const agent = readFileSync(
       join(import.meta.dir, '../AgentTool.tsx'),
       'utf8',
@@ -115,6 +124,8 @@ describe('densable Yqe park CWr + pe (JXt count)', () => {
     expect(agent).toContain('sweepAndDetectLiveAgentChildren')
     expect(agent).toContain('parkAgentOnKeepaliveDeferNotify')
     expect(agent).toContain('suppressTelemetry: preCompleteJxt')
+    expect(agent).toContain('skipJeo: true')
+    expect(agent).toContain('if (preCompleteJxt)')
     const completeIdx = agent.indexOf('completeAsyncAgent(agentResult')
     const parkIdx = agent.indexOf(
       'parkAgentOnKeepaliveDeferNotify(',
@@ -126,5 +137,9 @@ describe('densable Yqe park CWr + pe (JXt count)', () => {
     expect(parkIdx).toBeGreaterThan(completeIdx)
     expect(returnIdx).toBeGreaterThan(parkIdx)
     expect(notifyIdx).toBeGreaterThan(returnIdx)
+    // mid-bg: no post-complete re-sample between complete and park
+    expect(agent.slice(completeIdx, parkIdx)).not.toContain(
+      'hasLiveAgentKeepaliveChildren(',
+    )
   })
 })
