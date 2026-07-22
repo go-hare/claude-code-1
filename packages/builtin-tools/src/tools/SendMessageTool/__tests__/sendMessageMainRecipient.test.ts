@@ -34,7 +34,11 @@ describe('SendMessage densable main recipient (Hco D6)', () => {
         setAppState: () => {},
       } as any,
       (async () => ({ behavior: 'allow' as const, updatedInput: {} })) as any,
-      undefined,
+      {
+        type: 'assistant',
+        uuid: '00000000-0000-4000-8000-000000000001',
+        message: { role: 'assistant', content: [] },
+      } as any,
     )
     expect(result.data.success).toBe(false)
     expect(result.data.message).toContain('You are the main conversation')
@@ -64,7 +68,11 @@ describe('SendMessage densable main recipient (Hco D6)', () => {
         setAppState: () => {},
       } as any,
       (async () => ({ behavior: 'allow' as const, updatedInput: {} })) as any,
-      undefined,
+      {
+        type: 'assistant',
+        uuid: '00000000-0000-4000-8000-000000000002',
+        message: { role: 'assistant', content: [] },
+      } as any,
     )
     expect(result.data.success).toBe(true)
     expect(result.data.message).toContain(

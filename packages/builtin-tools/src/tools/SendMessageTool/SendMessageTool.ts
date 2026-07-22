@@ -627,6 +627,131 @@ async function handleShutdownRejection(
   }
 }
 
+/**
+ * Format a plan_approval_response for local_agent queue/resume delivery.
+ * Mirrors densable Ejr wording so the subagent can proceed or revise.
+ */
+function formatPlanApprovalForLocalAgent(
+  approved: boolean,
+  requestId: string,
+  feedback?: string,
+): string {
+  if (approved) {
+    const base = feedback
+      ? `[Plan Approved] ${feedback}`
+      : '[Plan Approved] You can now proceed with implementation'
+    return `${base} (request_id=${requestId})`
+  }
+  return `[Plan Rejected] ${feedback || 'Please revise your plan'} (request_id=${requestId})`
+}
+
+/**
+ * densable Hco local_agent path: name registry or raw createAgentId →
+ * queue when running, resume when stopped/evicted. Returns null when `to`
+ * is not a local subagent address (teammate names fall through to mailbox).
+ */
+async function tryDeliverToLocalAgent(
+  to: string,
+  message: string,
+  context: ToolUseContext,
+  canUseTool: Parameters<NonNullable<Tool['call']>>[2],
+  assistantMessage: Parameters<NonNullable<Tool['call']>>[3],
+): Promise<{ data: MessageOutput } | null> {
+  if (to === '*' || to === MAIN_RECIPIENT) {
+    return null
+  }
+  const appState = context.getAppState()
+  const registered = appState.agentNameRegistry.get(to)
+  const agentId = registered ?? toAgentId(to)
+  if (!agentId) {
+    return null
+  }
+  const task = appState.tasks[agentId]
+  if (isLocalAgentTask(task) && !isMainSessionTask(task)) {
+    const observerRefuse = await refuseIfObserverRecipient(agentId, task)
+    if (observerRefuse) return observerRefuse
+    if (task.stoppedByUser) {
+      return {
+        data: {
+          success: false,
+          message: `Agent "${to}" was stopped by the user and was not resumed. Treat its work as cancelled; only start a new agent for it if the user explicitly asks.`,
+        },
+      }
+    }
+    const { origin: sendOrigin, body: sendBody } =
+      resolveSendMessageOriginAndBody(context, message)
+    if (task.status === 'running') {
+      queuePendingMessage(
+        agentId,
+        sendBody,
+        context.setAppStateForTasks ?? context.setAppState,
+        { isMeta: true, origin: sendOrigin },
+      )
+      return {
+        data: {
+          success: true,
+          message: `Message queued for delivery to ${to} at its next tool round.`,
+        },
+      }
+    }
+    try {
+      const result = await resumeAgentBackground({
+        agentId,
+        prompt: sendBody,
+        toolUseContext: context,
+        canUseTool,
+        invokingRequestId: assistantMessage?.requestId as string | undefined,
+        promptOrigin: sendOrigin,
+        promptIsMeta: true,
+      })
+      return {
+        data: {
+          success: true,
+          message: `Agent "${to}" was stopped (${task.status}); resumed it in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
+        },
+      }
+    } catch (e) {
+      return {
+        data: {
+          success: false,
+          message: `Agent "${to}" is stopped (${task.status}) and could not be resumed: ${errorMessage(e)}`,
+        },
+      }
+    }
+  }
+  if (!task || !isLocalAgentTask(task)) {
+    const observerRefuse = await refuseIfObserverRecipient(agentId, task)
+    if (observerRefuse) return observerRefuse
+    const { origin: sendOrigin, body: sendBody } =
+      resolveSendMessageOriginAndBody(context, message)
+    try {
+      const result = await resumeAgentBackground({
+        agentId,
+        prompt: sendBody,
+        toolUseContext: context,
+        canUseTool,
+        invokingRequestId: assistantMessage?.requestId as string | undefined,
+        promptOrigin: sendOrigin,
+        promptIsMeta: true,
+      })
+      return {
+        data: {
+          success: true,
+          message: `Agent "${to}" had no active task; resumed from transcript in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
+        },
+      }
+    } catch (e) {
+      return {
+        data: {
+          success: false,
+          message: `Agent "${to}" is registered but has no transcript to resume. It may have been cleaned up. (${errorMessage(e)})`,
+        },
+      }
+    }
+  }
+  return null
+}
+
 async function handlePlanApproval(
   recipientName: string,
   requestId: string,
@@ -1114,114 +1239,29 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       // Route to in-process subagent by name or raw agentId before falling
       // through to ambient-team resolution. Stopped agents are auto-resumed.
-      // promptOrigin: peer when subagent-sent, else coordinator (from main).
+      // Also covers plan_approval_response when the model targets a local
+      // subagent id (createAgentId) — must not hit team-lead mailbox gate.
       // (Observer sender gate is at call() entry — covers UDS/mailbox/etc.)
-      if (typeof input.message === 'string' && input.to !== '*') {
-        const appState = context.getAppState()
-        const registered = appState.agentNameRegistry.get(input.to)
-        const agentId = registered ?? toAgentId(input.to)
-        if (agentId) {
-          const task = appState.tasks[agentId]
-          if (isLocalAgentTask(task) && !isMainSessionTask(task)) {
-            // refuse observer recipients (live or stopped)
-            const observerRefuse = await refuseIfObserverRecipient(
-              agentId,
-              task,
-            )
-            if (observerRefuse) return observerRefuse
-            // user-stopped → refuse (no auto-resume)
-            if (task.stoppedByUser) {
-              return {
-                data: {
-                  success: false,
-                  message: `Agent "${input.to}" was stopped by the user and was not resumed. Treat its work as cancelled; only start a new agent for it if the user explicitly asks.`,
-                },
-              }
-            }
-            // peer when context.agentId set, else coordinator
-            const { origin: sendOrigin, body: sendBody } =
-              resolveSendMessageOriginAndBody(context, input.message)
-            if (task.status === 'running') {
-              // queue with origin + isMeta for live SendMessage
-              queuePendingMessage(
-                agentId,
-                sendBody,
-                context.setAppStateForTasks ?? context.setAppState,
-                { isMeta: true, origin: sendOrigin },
-              )
-              return {
-                data: {
-                  success: true,
-                  message: `Message queued for delivery to ${input.to} at its next tool round.`,
-                },
-              }
-            }
-            // agent stopped — auto-resume with promptOrigin
-            try {
-              const result = await resumeAgentBackground({
-                agentId,
-                prompt: sendBody,
-                toolUseContext: context,
-                canUseTool,
-                invokingRequestId: assistantMessage?.requestId as
-                  | string
-                  | undefined,
-                promptOrigin: sendOrigin,
-                promptIsMeta: true,
-              })
-              return {
-                data: {
-                  success: true,
-                  message: `Agent "${input.to}" was stopped (${task.status}); resumed it in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
-                },
-              }
-            } catch (e) {
-              return {
-                data: {
-                  success: false,
-                  message: `Agent "${input.to}" is stopped (${task.status}) and could not be resumed: ${errorMessage(e)}`,
-                },
-              }
-            }
-          } else if (!task || !isLocalAgentTask(task)) {
-            // agent-evicted — same observer refuse before resume from disk.
-            // agentId is either a registered name or a format-matching raw ID
-            // (toAgentId validates the createAgentId format, so teammate names
-            // never reach this block).
-            const observerRefuse = await refuseIfObserverRecipient(
-              agentId,
-              task,
-            )
-            if (observerRefuse) return observerRefuse
-            const { origin: sendOrigin, body: sendBody } =
-              resolveSendMessageOriginAndBody(context, input.message)
-            try {
-              const result = await resumeAgentBackground({
-                agentId,
-                prompt: sendBody,
-                toolUseContext: context,
-                canUseTool,
-                invokingRequestId: assistantMessage?.requestId as
-                  | string
-                  | undefined,
-                promptOrigin: sendOrigin,
-                promptIsMeta: true,
-              })
-              return {
-                data: {
-                  success: true,
-                  message: `Agent "${input.to}" had no active task; resumed from transcript in the background with your message. You'll be notified when it finishes. Output: ${result.outputFile}`,
-                },
-              }
-            } catch (e) {
-              return {
-                data: {
-                  success: false,
-                  message: `Agent "${input.to}" is registered but has no transcript to resume. It may have been cleaned up. (${errorMessage(e)})`,
-                },
-              }
-            }
-          }
+      if (input.to !== '*') {
+        let localText: string | null = null
+        if (typeof input.message === 'string') {
+          localText = input.message
+        } else if (input.message.type === 'plan_approval_response') {
+          localText = formatPlanApprovalForLocalAgent(
+            Boolean(input.message.approve),
+            input.message.request_id,
+            input.message.feedback,
+          )
+        }
+        if (localText !== null) {
+          const local = await tryDeliverToLocalAgent(
+            input.to,
+            localText,
+            context,
+            canUseTool,
+            assistantMessage,
+          )
+          if (local) return local
         }
       }
 
