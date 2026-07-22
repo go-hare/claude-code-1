@@ -1,150 +1,55 @@
-# Claude Code
+# Claude Code（go-hare）
 
-[![GitHub Stars](https://img.shields.io/github/stars/claude-code/claude-code?style=flat-square&logo=github&color=yellow)](https://github.com/claude-code/claude-code/stargazers)
-[![GitHub Contributors](https://img.shields.io/github/contributors/claude-code/claude-code?style=flat-square&color=green)](https://github.com/claude-code/claude-code/graphs/contributors)
-[![GitHub Issues](https://img.shields.io/github/issues/claude-code/claude-code?style=flat-square&color=orange)](https://github.com/claude-code/claude-code/issues)
-[![GitHub License](https://img.shields.io/github/license/claude-code/claude-code?style=flat-square)](https://github.com/claude-code/claude-code/blob/main/LICENSE)
-[![Last Commit](https://img.shields.io/github/last-commit/claude-code/claude-code?style=flat-square&color=blue)](https://github.com/claude-code/claude-code/commits/main)
+[English README](./README_EN.md)
+
+[![GitHub Stars](https://img.shields.io/github/stars/go-hare/claude-code-1?style=flat-square&logo=github&color=yellow)](https://github.com/go-hare/claude-code-1/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/go-hare/claude-code-1?style=flat-square&color=orange)](https://github.com/go-hare/claude-code-1/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/go-hare/claude-code-1?style=flat-square&color=blue)](https://github.com/go-hare/claude-code-1/commits/main)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black?style=flat-square&logo=bun)](https://bun.sh/)
+[![npm](https://img.shields.io/npm/v/@go-hare/claude-code?style=flat-square&logo=npm)](https://www.npmjs.com/package/@go-hare/claude-code)
 
-> Which Claude do you like? The open source one is the best.
+基于官方 Claude Code CLI 的**源码还原 / 工程化重建**项目。目标是在保留 Claude Code 终端交互体验的同时，补齐多模型接入、自托管 Remote Control、ACP、daemon / 后台会话、MCP、插件与本地自动化等能力。
 
-本项目是基于官方 Claude Code CLI 工具进行源码还原、工程化重建与能力增强的开源项目。目标是在保留 Claude Code 交互体验的基础上，补齐多模型接入、远程控制、ACP、群控、MCP、插件、KAIROS 常驻助手、Buddy agent 宠物、可观测性与本地自动化等能力。
+> 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
 
-| 特性                        | 说明                                                                                                                         |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **Claude 群控技术**         | Pipe IPC 多实例协作：同机 main/sub 自动编排 + LAN 跨机器零配置发现与通讯，`/pipes` 选择面板 + `Shift+↓` 交互 + 消息广播路由 |
-| **ACP 协议一等一支持**      | 支持接入 Zed、Cursor 等 IDE，支持会话恢复、Skills、权限桥接                                                                  |
-| **Remote Control 私有部署** | Docker 自托管远程界面, 可以手机上看 CC                                                                                       |
-| **Agents / BG 后台会话**    | `claude agents` 全屏 dashboard、daemon job dispatch、`/exit` 后台移交（resume/fork）、WMI 自启与 Windows 终端稳固            |
-| **Fullscreen densable**     | 对齐官方 2.1.210：fullscreen 默认开、滚轮/Jump-to-bottom、spinner 可见性恢复、alt-screen 退出序列防闪窗                      |
-| **Langfuse 监控**           | 企业级 Agent 监控, 可以清晰看到每次 agent loop 细节, 可以一键转化为数据集                                                    |
-| **Web Search**              | 内置网页搜索工具, 支持 bing 和 brave 搜索                                                                                    |
-| **Poor Mode**               | 穷鬼模式，关闭记忆提取和键入建议,大幅度减少并发请求，`/poor` 可以开关                                                       |
-| **KAIROS 常驻助手**         | 持久化 AI 助手模式，支持 brief 输出、后台等待、频道消息、每日记忆日志、PR 订阅与推送通知等主动 Agent 能力                    |
-| **Buddy Agent 宠物**        | 终端里的 AI 伙伴/宠物系统，支持 `/buddy` 唤出、陪伴展示、互动摸摸、上下文反应与提示输入联动                                  |
-| **Channels 频道通知**       | MCP 服务器推送外部消息到会话（飞书/Slack/Discord/微信等），`--channels plugin:name@marketplace` 启用                         |
-| **自定义模型供应商**        | OpenAI/Anthropic/Gemini/Grok 兼容（`/login`）；含 Sonnet 5 / Org default 映射                                                 |
-| **Gateway / IdP 会话**      | 过期 session 优先 tryRestore、secure-storage 负缓存、refreshable 会话恢复，避免静默回落 Bedrock                              |
-| Voice Mode                  | 语音输入，支持豆包语言输入（`/voice doubao`）                                                                                |
-| Computer Use                | 屏幕截图、键鼠控制                                                                                                           |
-| Chrome Use                  | 浏览器自动化、表单填写、数据抓取                                                                                             |
-| Artifacts                   | HTML/Markdown 上传托管、代码高亮与 mermaid                                                                                   |
-| Sentry                      | 企业级错误追踪                                                                                                               |
-| GrowthBook                  | 企业级特性开关                                                                                                               |
-| /dream 记忆整理             | 自动整理和优化记忆文件                                                                                                       |
+| 能力 | 说明 |
+| ---- | ---- |
+| **多模型** | `/login` 配置 Anthropic / OpenAI / Gemini / Grok 兼容端点 |
+| **Remote Control** | 自托管 RCS + Web UI；`claude remote-control` / bridge |
+| **ACP** | Agent Client Protocol，可对接 IDE / 代理宿主 |
+| **Agents / Daemon** | `claude agents` dashboard、daemon job、后台会话 resume / fork |
+| **Fullscreen** | 对齐 densable 滚轮、Jump-to-bottom、alt-screen 等交互 |
+| **Poor Mode** | `/poor` 穷鬼模式：跳过记忆提取 / 建议等，降 token |
+| **KAIROS / Buddy** | 常驻助手与终端 buddy（feature 可开关） |
+| **Computer Use / Chrome** | 截图键鼠、Chrome MCP（平台完整度不一） |
+| **Artifacts** | HTML 上传托管（独立 Cloudflare Worker 包） |
+| **Voice** | 语音输入（含豆包 ASR 路径） |
+| **Web Search** | 内置搜索工具 |
+| **Langfuse** | Agent loop 可观测（可选） |
+
+部分能力由 **feature flag** 控制（见下方）；Analytics / GrowthBook / Sentry 等为占位实现，**不要当成可用企业集成**。
+
+---
 
 ## 项目定位
 
-当前主线已融合 `core-clean` 的 Agent Core / runtime 分层。这个项目不再只是一个反编译 CLI 的功能堆叠，而是面向终端交互、headless 嵌入、direct-connect、server、bridge、daemon、ACP 和远程控制场景的 AI coding runtime。
+这是 **CLI-first** 的 Claude Code 兼容运行时：
 
-当前目标不是继续围绕单一 CLI 入口做大规模堆叠，而是：
+- 主交互宿主：`src/screens/REPL.tsx` + `src/main.tsx` / `src/entrypoints/cli.tsx`
+- 查询主链：`src/query.ts` / `src/QueryEngine.ts`
+- 工具：`packages/builtin-tools`（经 `@claude-code/builtin-tools` 导出）
+- 远程 / 守护：`src/bridge/`、`src/daemon/`、`packages/remote-control-server/`
+- ACP：`src/services/acp/`、`packages/acp-link/`
 
-- 保持 CLI / REPL 作为官方交互宿主
-- 将可复用执行能力下沉到 `src/core` / `AgentSession`
-- 让外部宿主通过 Agent Core 事件和 host adapter 接入
-- 保留本项目已有的多模型、群控、KAIROS、Buddy、Remote Control、ACP、MCP、插件与可观测性能力
-- 在不破坏主链行为的前提下持续收口 runtime 能力
+仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-## Core-Clean 增强对比
+近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` 为准**（当前常见为 `2.6.x`），与 git tag 可能不同步。
 
-相比旧结构，这次融合后增强点主要是：
+---
 
-| 方向 | 旧结构 | 当前结构 |
-| ---- | ------ | -------- |
-| 执行主链 | CLI / REPL / server 各自直接接入 query lifecycle | `src/core` 提供 `AgentSession.stream()` 与 `AgentEvent` 主链 |
-| 宿主接入 | headless、ACP、bridge、server 各自维护适配逻辑 | `src/hosts/*` 统一承接 CLI、headless、REPL、server、remote-control、daemon、terminal |
-| runtime 能力 | 分散在入口、server、bridge、工具注册与状态模块中 | `src/runtime/capabilities/*` 收口 execution、server、bridge、daemon、mcp、persistence、tools、commands |
-| 外部嵌入 | 主要依赖 CLI 或 REPL 行为 | `./core` 包级入口为 headless embedding / direct-connect / server host 打基础 |
-| 事件协议 | SDKMessage、stream-json、UI state、server packet 混在各宿主里 | `AgentEvent` 作为 core event contract，宿主再投影为 stdout、Ink、ACP、WebSocket/SSE |
-| 工具体系 | 工具列表直接面向当前入口装配 | runtime tool catalog 保留现有工具，同时提供统一描述、策略与过滤入口 |
+## 安装（npm）
 
-## 当前能力
-
-- 交互式 CLI / REPL（fullscreen 默认开，对齐官方 2.1.210 滚轮 / sticky / Jump-to-bottom）
-- headless runtime session
-- direct-connect / server
-- ACP agent 模式
-- bridge / remote-control / daemon host（含 Windows WMI 自启与 exit 后台移交）
-- `claude agents` 后台会话 dashboard（分组 / PR 列 / needs-input nudge / token footer）
-- MCP、channels、plugins
-- OpenAI / Anthropic / Gemini / Grok 兼容模型接入（含 Sonnet 5 / Org default）
-- Buddy agent 宠物、KAIROS 常驻助手、Coordinator、task、subagent、team 主链
-- computer-use / chrome bridge / remote-control / artifacts 相关能力
-- Langfuse、Sentry、GrowthBook 等可观测性与企业集成能力
-
-## 近期更新（2.6.x）
-
-对照近期 git 主线，已合入并发布到 npm 的方向包括：
-
-| 版本区间 | 要点 |
-| -------- | ---- |
-| **2.6.37** | Windows taskkill 用 System32 绝对路径对齐 densable；Ctrl+C 退出前抢先关鼠标与 cleanup 避 move 残字（LOCAL） |
-| **2.6.36** | Windows taskkill/shell 探测 windowsHide，避免 Bash 中断与 /exit 闪窗（LOCAL） |
-| **2.6.35** | Windows 打包 rg.exe 主路径 spawn+windowsHide，避免 Grep/Glob 闪 conhost |
-| **2.6.34** | Jump-to-bottom 后立即恢复 spinner；agents 左箭头/daemon skew；CSI u 全角冒号等 |
-| **2.6.32–2.6.30** | alt-screen 双次 EXIT 防 Windows Terminal 多层闪窗；fullscreen / 滚轮 densable 对齐官方 2.1.210 |
-| **2.6.29** | modal 双线、滚轮残片与折叠空白修复；残差端口对齐 |
-| **2.6.x agents** | agents view 分组顺序 / review 列表 / done fold / PR 列 / fleet token / fleet needs-input / token footer |
-| **Gateway** | 过期 session tryRestore、IdP transient 重读、secure-storage 负缓存、显式 Gateway env 与 refreshable 恢复 |
-| **Daemon / exit** | `/exit` 走 daemon `submitDispatch(resume/fork)`；`cliLaunch` 优先稳定 user-bin；Windows WMI `Win32_Process.Create` densable |
-| **2.6.27 及前** | vendor 可执行权限 postinstall、Windows Bash/ripgrep、swarm banner 宽度、macOS 粘贴图片等 |
-
-当前发布包版本见 `package.json`（`@go-hare/claude-code`）。
-
-## 使用 Agent Core
-
-当前包级 core 入口已经通过 `package.json` 的 `./core` 子路径暴露：
-
-```ts
-import { createAgent } from 'claude/core'
-```
-
-仓库内部的 headless、ACP、direct-connect、server、bridge、daemon 等场景正在向 `src/core`、`src/hosts` 与 `src/runtime` 收口。外部接入不建议直接建立在 `src/screens/REPL.tsx` 上，优先选择下面这些方向：
-
-- headless embedding
-- direct-connect client
-- server host
-- bridge / remote-control host
-- daemon worker
-- ACP / IDE agent host
-
-## 项目结构
-
-- [`src/entrypoints/cli.tsx`](src/entrypoints/cli.tsx)
-  - CLI 入口与快速路径分发
-- [`src/entrypoints/core.ts`](src/entrypoints/core.ts)
-  - 包级 Agent Core 入口
-- [`src/core`](src/core)
-  - Agent Core session / turn / event 主链
-- [`src/runtime/capabilities/execution/SessionRuntime.ts`](src/runtime/capabilities/execution/SessionRuntime.ts)
-  - 现有 query lifecycle 的 runtime execution asset
-- [`src/runtime`](src/runtime)
-  - 内部 runtime capability 层
-- [`src/hosts`](src/hosts)
-  - CLI、headless、REPL、server、remote-control、daemon、terminal 等宿主适配层
-- [`src/main.tsx`](src/main.tsx)
-  - CLI 启动装配与模式分发
-- [`src/screens/REPL.tsx`](src/screens/REPL.tsx)
-  - 官方终端交互宿主
-- [`src/query.ts`](src/query.ts)
-  - turn loop 与 query orchestration
-
-## 开发原则
-
-- CLI 主链优先稳定
-- REPL 只做交互宿主，不把执行中枢继续当成重构主战场
-- 新宿主优先通过 `src/core` / `AgentSession` / `src/hosts` / `src/runtime` 接入
-- 共享行为变更优先补测试
-- 不为“结构更优雅”发起高风险重排
-
-- 🚀 [想要启动项目](#-快速开始源码版)
-- 🐛 [想要调试项目](#vs-code-调试)
-- 📖 [想要学习项目](#teach-me-学习项目)
-
-## ⚡ 快速开始(安装版)
-
-不用克隆仓库, 从 NPM 下载后, 直接使用。本仓库发布的 scoped 包名为 **`@go-hare/claude-code`**（平台二进制在 `@go-hare/claude-code-<os>-<arch>` optionalDependencies）。
+发布包名：**`@go-hare/claude-code`**（平台二进制在 `@go-hare/claude-code-<os>-<arch>` optionalDependencies）。
 
 ```sh
 npm i -g @go-hare/claude-code
@@ -152,208 +57,137 @@ npm i -g @go-hare/claude-code
 # Windows 若 claude.exe 被占用导致 EBUSY，先结束占用进程再装
 # taskkill /F /IM claude.exe
 
-claude                 # 启动（postinstall 会把对应平台 native 二进制落到 bin/）
+claude                 # 启动（postinstall 落到 bin/）
 claude --version
 claude agents          # 后台会话 dashboard（需 daemon）
-claude update          # 更新到最新版本
+claude update          # 更新
 
-# 自托管 Remote Control 示例
-CLAUDE_BRIDGE_BASE_URL=https://remote-control.claude-code.win/ \
-CLAUDE_BRIDGE_OAUTH_TOKEN=test-my-key \
+# 自托管 Remote Control 示例（按你的 RCS 改 URL / token）
+CLAUDE_BRIDGE_BASE_URL=https://your-rcs.example/ \
+CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-> **安装/更新失败？** 先 `npm rm -g @go-hare/claude-code` 清理旧版本，再 `npm i -g @go-hare/claude-code@latest`。仍失败可钉版本：`npm i -g @go-hare/claude-code@2.6.37`。
->
-> 旧文档里的全局包名 `claude-code` 已不再对应本仓库发布流；请使用 `@go-hare/claude-code`。
+安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`。  
+旧文档里的全局包名 `claude-code` **不再**对应本仓库发布流。
 
-## ⚡ 快速开始(源码版)
+---
 
-### ⚙️ 环境要求
+## 源码开发
 
-一定要最新版本的 bun 啊, 不然一堆奇奇怪怪的 BUG!!! bun upgrade!!!
+### 环境
 
-- 📦 [Bun](https://bun.sh/) >= 1.3.11
-
-**安装 Bun：**
+需要较新的 [Bun](https://bun.sh/)（建议 ≥ 1.3.11）：
 
 ```bash
-# Linux 和 macOS
-curl -fsSL https://bun.sh/install | bash
-
-# Windows (PowerShell)
-powershell -c "irm bun.sh/install.ps1 | iex"
+curl -fsSL https://bun.sh/install | bash   # macOS / Linux
+# Windows: powershell -c "irm bun.sh/install.ps1 | iex"
+bun upgrade
 ```
 
-**安装后的操作：**
+### 安装与运行
 
-1. **让当前终端识别 `bun` 命令**
-
-   安装脚本会把 `~/.bun/bin` 写入对应的 shell 配置文件。macOS 默认 zsh 环境通常会看到：
-
-   ```text
-   Added "~/.bun/bin" to $PATH in "~/.zshrc"
-   ```
-
-   可以按安装脚本提示重启当前 shell：
-
-   ```bash
-   exec /bin/zsh
-   ```
-
-   如果你使用 bash，重新加载 bash 配置：
-
-   ```bash
-   source ~/.bashrc
-   ```
-
-   Windows PowerShell 用户关闭并重新打开 PowerShell 即可。
-
-2. **验证 Bun 是否可用**
-
-   ```bash
-   bun --help
-   bun --version
-   ```
-
-3. **如果已经安装过 Bun，更新到最新版本**
-
-   ```bash
-   bun upgrade
-   ```
-
-- ⚙️ 常规的配置 CC 的方式, 各大提供商都有自己的配置方式
-
-### 📍 命令执行位置
-
-- 安装或检查 Bun 的命令可以在任意目录执行：
-  `curl -fsSL https://bun.sh/install | bash`、`bun --help`、`bun --version`、`bun upgrade`
-- 安装本项目依赖、启动开发模式、构建项目时，必须先进入本仓库根目录，也就是包含 `package.json` 的目录。
-
-### 📥 安装
+在**仓库根目录**（含本 `package.json` 的目录）：
 
 ```bash
-cd /path/to/claude-code
 bun install
+bun run dev          # 开发模式（MACRO.* 由 scripts/dev.ts 注入）
+bun run build        # 代码分割产物 → dist/cli.js + chunks
+bun run precheck     # typecheck + biome fix + 全量测试（改完请跑）
 ```
 
-### ▶️ 运行
+跨平台二进制与发布：
 
 ```bash
-# 开发模式, 看到版本号 888 说明就是对了
-bun run dev
-
-# 构建
-bun run build
+bun run build:compile                          # 仅编译当前/指定平台二进制
+bun run scripts/publish.ts --build-only        # 同上（publish 脚本路径）
+bun run scripts/publish.ts --dry-run           # 构建 + npm publish --dry-run
+bun run scripts/publish.ts --with-main         # 含主包 @go-hare/claude-code
 ```
 
-构建采用 code splitting 多文件打包（`build.ts`），产物输出到 `dist/` 目录（入口 `dist/cli.js` + 多 chunk）。
+> 平台包内的 `claude` 二进制由 build 生成，**不应**长期提交进 git。
 
-跨平台原生包与主包发布：
+### `/login` 配置模型
+
+REPL 中 `/login` 可选 Anthropic Compatible / OpenAI / Gemini 等：
+
+| 字段 | 说明 | 示例 |
+| ---- | ---- | ---- |
+| Base URL | API 地址 | `https://api.example.com/v1` |
+| API Key | 密钥 | `sk-xxx` |
+| Haiku / Sonnet / Opus | 模型 ID 映射 | 按你的上游填写 |
+
+Tab / Shift+Tab 切字段，Enter 确认。
+
+### Feature Flags
 
 ```bash
-bun run build:compile          # 仅编译各平台二进制到 packages/@go-hare/*
-bun run scripts/publish.ts     # 构建并 publish 平台包
-bun run scripts/publish.ts --with-main   # 同时 publish 主包 @go-hare/claude-code
+FEATURE_BUDDY=1 bun run dev
 ```
 
-构建出的版本 bun 和 node 都可以启动；若你 fork 后 publish 到私有源，可直接按上面的全局安装方式使用。
+构建默认会打开一批 flag（见 `build.ts` / `scripts/defines.ts`）；**默认关闭**的包括 `LAN_PIPES`、`UDS_INBOX`、`FORK_SUBAGENT` 等。群控 / Pipe 相关能力需对应 flag，不要默认当成全开。
 
-如果遇到 bug 请直接提 issues, 我们优先解决。提交前建议：
+### VS Code 调试
+
+TUI 需真实终端，用 attach：
 
 ```bash
-bun run precheck   # typecheck + biome fix + test
+bun run dev:inspect   # 输出 ws://localhost:… 
 ```
 
-### 👤 新人配置 /login
+VS Code F5 → **Attach to Bun (TUI debug)**。
 
-首次运行后，在 REPL 中输入 `/login` 命令进入登录配置界面，选择 **Anthropic Compatible** 即可对接第三方 API 兼容服务（无需 Anthropic 官方账号）。
-选择 OpenAI 和 Gemini 对应的栏目都是支持相应协议的
+### Teach Me
 
-需要填写的字段：
-
-
-| 📌 字段      | 📝 说明       | 💡 示例                      |
-| ------------ | ------------- | ---------------------------- |
-| Base URL     | API 服务地址  | `https://api.example.com/v1` |
-| API Key      | 认证密钥      | `sk-xxx`                     |
-| Haiku Model  | 快速模型 ID   | `claude-haiku-4-5-20251001`  |
-| Sonnet Model | 均衡模型 ID   | `claude-sonnet-4-6`          |
-| Opus Model   | 高性能模型 ID | `claude-opus-4-6`            |
-
-- ⌨️ **Tab / Shift+Tab** 切换字段，**Enter** 确认并跳到下一个，最后一个字段按 Enter 保存
-
-> ℹ️ 支持所有 Anthropic API 兼容服务（如 OpenRouter、AWS Bedrock 代理等），只要接口兼容 Messages API 即可。
-
-## Feature Flags
-
-所有功能开关通过 `FEATURE_<FLAG_NAME>=1` 环境变量启用，例如：
-
-```bash
-FEATURE_BUDDY=1 FEATURE_FORK_SUBAGENT=1 bun run dev
-```
-
-## VS Code 调试
-
-TUI (REPL) 模式需要真实终端，无法直接通过 VS Code launch 启动调试。使用 **attach 模式**：
-
-### 步骤
-
-1. **终端启动 inspect 服务**：
-
-   ```bash
-   bun run dev:inspect
-   ```
-
-   会输出类似 `ws://localhost:8888/xxxxxxxx` 的地址。
-2. **VS Code 附着调试器**：
-
-   - 在 `src/` 文件中打断点
-   - F5 → 选择 **"Attach to Bun (TUI debug)"**
-
-## Teach Me 学习项目
-
-我们新加了一个 teach-me skills, 通过问答式引导帮你理解这个项目的任何模块。(调整 [sigma skill 而来](https://github.com/sanyuan0704/sanyuan-skills))
-
-```bash
-# 在 REPL 中直接输入
+```text
 /teach-me Claude Code 架构
 /teach-me React Ink 终端渲染 --level beginner
-/teach-me Tool 系统 --resume
 ```
 
-### 它能做什么
+进度在 `.claude/skills/teach-me/`（若已安装该 skill）。
 
-- **诊断水平** — 自动评估你对相关概念的掌握程度，跳过已知的、聚焦薄弱的
-- **构建学习路径** — 将主题拆解为 5-15 个原子概念，按依赖排序逐步推进
-- **苏格拉底式提问** — 用选项引导思考，而非直接给答案
-- **错误概念追踪** — 发现并纠正深层误解
-- **断点续学** — `--resume` 从上次进度继续
+---
 
-### 学习记录
+## 仓库结构（精简）
 
-学习进度保存在 `.claude/skills/teach-me/` 目录下，支持跨主题学习者档案。
+| 路径 | 作用 |
+| ---- | ---- |
+| `src/entrypoints/cli.tsx` | 真入口与快速路径 |
+| `src/main.tsx` | Commander CLI 与启动装配 |
+| `src/screens/REPL.tsx` | 交互 REPL |
+| `src/query.ts` / `QueryEngine.ts` | API 查询与 turn 编排 |
+| `packages/builtin-tools/` | 内置工具 |
+| `packages/@ant/ink/` | 终端 Ink 框架 |
+| `src/bridge/` / `packages/remote-control-server/` | Remote Control |
+| `src/daemon/` | 长驻 daemon |
+| `src/services/acp/` / `packages/acp-link/` | ACP |
+| `scripts/publish.ts` | 平台二进制编译与 npm 发布 |
+| `CLAUDE.md` | 给 agent / 贡献者的详细工程说明 |
+
+更完整的架构与测试约定见 [`CLAUDE.md`](./CLAUDE.md)。
+
+---
 
 ## Contributors
 
-<a href="https://github.com/claude-code/claude-code/graphs/contributors">
+<a href="https://github.com/go-hare/claude-code-1/graphs/contributors">
   <img src="contributors.svg" alt="Contributors" />
 </a>
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=claude-code%2Fclaude-code&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=claude-code/claude-code&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=claude-code/claude-code&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=claude-code/claude-code&type=date&legend=top-left" />
- </picture>
+<a href="https://www.star-history.com/?repos=go-hare%2Fclaude-code-1&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=go-hare/claude-code-1&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=go-hare/claude-code-1&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/image?repos=go-hare/claude-code-1&type=date&legend=top-left" />
+  </picture>
 </a>
 
 ## 致谢
 
-- [doubaoime-asr](https://github.com/starccy/doubaoime-asr) — 豆包 ASR 语音识别 SDK，为 Voice Mode 提供无需 Anthropic OAuth 的语音输入方案
+- [doubaoime-asr](https://github.com/starccy/doubaoime-asr) — 豆包 ASR，Voice Mode 可选路径
 
 ## 许可证
 
-本项目仅供学习研究用途。Claude Code 的所有权利归 [Anthropic](https://www.anthropic.com/) 所有。
+仅供学习研究。Claude Code 相关权利归 Anthropic。请遵守上游与依赖的许可条款。

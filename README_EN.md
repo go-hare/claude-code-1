@@ -1,54 +1,55 @@
-# Claude Code
+# Claude Code (go-hare)
 
-[![GitHub Stars](https://img.shields.io/github/stars/claude-code/claude-code?style=flat-square&logo=github&color=yellow)](https://github.com/claude-code/claude-code/stargazers)
-[![GitHub Contributors](https://img.shields.io/github/contributors/claude-code/claude-code?style=flat-square&color=green)](https://github.com/claude-code/claude-code/graphs/contributors)
-[![GitHub Issues](https://img.shields.io/github/issues/claude-code/claude-code?style=flat-square&color=orange)](https://github.com/claude-code/claude-code/issues)
-[![GitHub License](https://img.shields.io/github/license/claude-code/claude-code?style=flat-square)](https://github.com/claude-code/claude-code/blob/main/LICENSE)
-[![Last Commit](https://img.shields.io/github/last-commit/claude-code/claude-code?style=flat-square&color=blue)](https://github.com/claude-code/claude-code/commits/main)
+[![GitHub Stars](https://img.shields.io/github/stars/go-hare/claude-code-1?style=flat-square&logo=github&color=yellow)](https://github.com/go-hare/claude-code-1/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/go-hare/claude-code-1?style=flat-square&color=orange)](https://github.com/go-hare/claude-code-1/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/go-hare/claude-code-1?style=flat-square&color=blue)](https://github.com/go-hare/claude-code-1/commits/main)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black?style=flat-square&logo=bun)](https://bun.sh/)
+[![npm](https://img.shields.io/npm/v/@go-hare/claude-code?style=flat-square&logo=npm)](https://www.npmjs.com/package/@go-hare/claude-code)
 
-> Which Claude do you like? The open source one is the best.
+[中文 README](./README.md)
 
-A reverse-engineered / decompiled source restoration of Anthropic's official Claude Code CLI tool. The goal is to keep the Claude Code interaction model while restoring multi-model providers, remote control, ACP, swarm/pipes, MCP, plugins, KAIROS, Buddy, observability, and local automation.
+A **source restoration / engineering rebuild** of Anthropic’s official Claude Code CLI. The goal is to keep the Claude Code terminal experience while adding multi-provider models, self-hosted Remote Control, ACP, daemon / background sessions, MCP, plugins, and local automation.
 
-The published npm package is **`@go-hare/claude-code`** (current line: **2.6.37**). Platform binaries ship as optionalDependencies: `@go-hare/claude-code-<os>-<arch>`.
+> This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
 
-| Feature | Notes |
-| ------- | ----- |
-| **Pipes / multi-instance** | Same-host main/sub orchestration + LAN discovery; `/pipes` panel + `Shift+↓` routing |
-| **ACP** | First-class agent protocol for IDEs (Zed/Cursor), session resume, skills, permission bridge |
-| **Remote Control** | Self-hosted Docker remote UI — use Claude Code from a phone/browser |
-| **Agents / background sessions** | `claude agents` fullscreen dashboard, daemon job dispatch, `/exit` handoff (resume/fork), Windows WMI self-spawn |
-| **Fullscreen densable** | Official 2.1.210 alignment: fullscreen on by default, wheel / Jump-to-bottom, spinner visibility resume, alt-screen exit anti-flash |
-| **Langfuse** | Agent-loop observability and dataset export |
-| **Web Search** | Built-in search (Bing / Brave) |
-| **Poor Mode** | `/poor` — drop memory extract + prompt suggestions to cut concurrent spend |
-| **KAIROS** | Persistent assistant mode (brief, wait, channels, daily memory, PR push) |
-| **Buddy** | Terminal companion pet (`/buddy`) |
-| **Channels** | External push into the session (Feishu/Slack/Discord/WeChat plugins) |
-| **Custom providers** | OpenAI / Anthropic / Gemini / Grok via `/login` (incl. Sonnet 5 / Org default) |
-| **Gateway / IdP sessions** | Expired session tryRestore, secure-storage negative cache, refreshable restore without silent Bedrock fallback |
-| Voice / Computer Use / Chrome Use | Doubao ASR, screenshot+input, browser automation |
-| Artifacts | HTML/Markdown hosting with highlight + mermaid |
-| Sentry / GrowthBook | Enterprise error tracking and feature flags |
-| `/dream` | Memory file consolidation |
+| Capability | Notes |
+| ---------- | ----- |
+| **Multi-provider** | Configure Anthropic / OpenAI / Gemini / Grok-compatible endpoints via `/login` |
+| **Remote Control** | Self-hosted RCS + Web UI; `claude remote-control` / bridge |
+| **ACP** | Agent Client Protocol for IDE / proxy hosts |
+| **Agents / Daemon** | `claude agents` dashboard, daemon jobs, background session resume / fork |
+| **Fullscreen** | densable-aligned wheel, Jump-to-bottom, alt-screen behavior |
+| **Poor Mode** | `/poor` skips memory extract / suggestions to cut token spend |
+| **KAIROS / Buddy** | Persistent assistant and terminal buddy (feature-gated) |
+| **Computer Use / Chrome** | Screenshot + input, Chrome MCP (platform coverage varies) |
+| **Artifacts** | HTML upload hosting (standalone Cloudflare Worker package) |
+| **Voice** | Speech input (including Doubao ASR path) |
+| **Web Search** | Built-in search tool |
+| **Langfuse** | Optional agent-loop observability |
 
-## Recent updates (2.6.x)
+Some capabilities are **feature-flagged** (see below). Analytics / GrowthBook / Sentry are **stub / empty implementations** — do not treat them as production enterprise integrations.
 
-| Range | Highlights |
-| ----- | ---------- |
-| **2.6.37** | Windows taskkill via System32 absolute path (densable); Ctrl+C preempt mouse-off + cleanup before hooks (LOCAL, avoids move residue / flash) |
-| **2.6.36** | Windows taskkill/shell probes use windowsHide (no flash on Bash abort/exit; LOCAL) |
-| **2.6.35** | Windows packaged rg.exe main path uses spawn+windowsHide (no conhost flash on Grep/Glob) |
-| **2.6.34** | Jump-to-bottom spinner resume; agents left-arrow / daemon skew; CSI u fullwidth colon |
-| **2.6.32–2.6.30** | Alt-screen double-EXIT flash fix on Windows Terminal; fullscreen/wheel densable vs official 2.1.210 |
-| **2.6.29** | Modal double-border, wheel residue, collapse blank fixes |
-| **Agents view** | Group order / review list / done fold / PR column / theme tokens / needs-input nudge / token footer |
-| **Gateway** | tryRestore, IdP transient re-read, secure-storage negative cache, explicit Gateway env |
-| **Daemon / exit** | `/exit` → daemon `submitDispatch(resume/fork)`; stable user-bin launch; Windows WMI densable |
-| **≤2.6.27** | vendor +x postinstall, Windows Bash/ripgrep, swarm banner width, macOS image paste |
+---
 
-## Quick start (install from npm)
+## Positioning
+
+This is a **CLI-first** Claude Code–compatible runtime:
+
+- Interactive host: `src/screens/REPL.tsx` + `src/main.tsx` / `src/entrypoints/cli.tsx`
+- Query loop: `src/query.ts` / `src/QueryEngine.ts`
+- Tools: `packages/builtin-tools` (exported as `@claude-code/builtin-tools`)
+- Remote / daemon: `src/bridge/`, `src/daemon/`, `packages/remote-control-server/`
+- ACP: `src/services/acp/`, `packages/acp-link/`
+
+There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
+
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (often `2.6.x`) and may not match git tags.
+
+---
+
+## Install (npm)
+
+Published name: **`@go-hare/claude-code`** (platform binaries as `@go-hare/claude-code-<os>-<arch>` optionalDependencies).
 
 ```sh
 npm i -g @go-hare/claude-code
@@ -56,91 +57,137 @@ npm i -g @go-hare/claude-code
 # Windows: if install hits EBUSY, kill the locked binary first
 # taskkill /F /IM claude.exe
 
-claude
+claude                 # start (postinstall places the native binary under bin/)
 claude --version
-claude agents
+claude agents          # background-session dashboard (needs daemon)
 claude update
+
+# Self-hosted Remote Control example (use your RCS URL / token)
+CLAUDE_BRIDGE_BASE_URL=https://your-rcs.example/ \
+CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
+claude --remote-control
 ```
 
-If install/update fails: `npm rm -g @go-hare/claude-code` then `npm i -g @go-hare/claude-code@latest` (or pin e.g. `@2.6.37`).
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again.  
+Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
-> Older docs that say `npm i -g claude-code` do **not** match this fork’s publish stream — use `@go-hare/claude-code`.
+---
 
-## Quick start (from source)
+## Develop from source
 
 ### Prerequisites
 
-Use a recent Bun (`bun upgrade`). Target: [Bun](https://bun.sh/) >= 1.3.11.
+Use a recent [Bun](https://bun.sh/) (recommended ≥ 1.3.11):
 
 ```bash
-# Linux / macOS
-curl -fsSL https://bun.sh/install | bash
-
-# Windows (PowerShell)
-powershell -c "irm bun.sh/install.ps1 | iex"
+curl -fsSL https://bun.sh/install | bash   # macOS / Linux
+# Windows: powershell -c "irm bun.sh/install.ps1 | iex"
+bun upgrade
 ```
 
-Reload the shell so `bun` is on `PATH`, then:
+### Install & run
+
+From the **repo root** (directory with this `package.json`):
 
 ```bash
-cd /path/to/claude-code
 bun install
-bun run dev      # dev REPL (version 888 = defines injected)
-bun run build    # code-split dist/cli.js + chunks
-bun run precheck # typecheck + biome fix + test
+bun run dev          # dev mode (MACRO.* injected by scripts/dev.ts)
+bun run build        # code-split output → dist/cli.js + chunks
+bun run precheck     # typecheck + biome fix + full test suite
 ```
 
-Cross-platform native publish:
+Cross-platform binaries and publish:
 
 ```bash
-bun run build:compile
-bun run scripts/publish.ts
-bun run scripts/publish.ts --with-main
+bun run build:compile                          # compile platform binary only
+bun run scripts/publish.ts --build-only        # same via publish script
+bun run scripts/publish.ts --dry-run           # build + npm publish --dry-run
+bun run scripts/publish.ts --with-main         # include main @go-hare/claude-code
 ```
 
-### First-time `/login`
+> The `claude` binary inside platform packages is **build output** and should not live in git long-term.
 
-In the REPL, run `/login` and pick **Anthropic Compatible** (or OpenAI / Gemini). Settings land under `~/.claude/settings.json` → `env`.
+### `/login` model config
+
+In the REPL, `/login` can select Anthropic Compatible / OpenAI / Gemini / etc.:
 
 | Field | Example |
-|-------|---------|
+| ----- | ------- |
 | Base URL | `https://api.example.com/v1` |
 | API Key | `sk-xxx` |
-| Haiku / Sonnet / Opus model IDs | provider-specific model names |
+| Haiku / Sonnet / Opus | model IDs for your upstream |
 
-## Feature flags
+Tab / Shift+Tab moves fields; Enter confirms.
 
-Enable with `FEATURE_<FLAG_NAME>=1`, e.g.:
+### Feature flags
 
 ```bash
-FEATURE_BUDDY=1 FEATURE_BG_SESSIONS=1 bun run dev
+FEATURE_BUDDY=1 bun run dev
 ```
 
-See [`docs/features/`](docs/features/) for per-feature notes.
+The build enables a default set of flags (see `build.ts` / `scripts/defines.ts`). **Off by default** includes `LAN_PIPES`, `UDS_INBOX`, `FORK_SUBAGENT`, and others. Multi-instance / pipe features need the matching flags — they are not always on.
 
-## VS Code debugging
+### VS Code debugging
 
-TUI needs a real terminal — use attach mode:
+TUI needs a real terminal — attach:
 
-1. `bun run dev:inspect` → note `ws://localhost:8888/...`
-2. F5 → **Attach to Bun (TUI debug)**
+```bash
+bun run dev:inspect   # prints ws://localhost:…
+```
+
+VS Code F5 → **Attach to Bun (TUI debug)**.
+
+### Teach Me
+
+```text
+/teach-me Claude Code architecture
+/teach-me React Ink terminal rendering --level beginner
+```
+
+Progress lives under `.claude/skills/teach-me/` when the skill is installed.
+
+---
+
+## Layout (short)
+
+| Path | Role |
+| ---- | ---- |
+| `src/entrypoints/cli.tsx` | True entry + fast paths |
+| `src/main.tsx` | Commander CLI and startup |
+| `src/screens/REPL.tsx` | Interactive REPL |
+| `src/query.ts` / `QueryEngine.ts` | API query and turn orchestration |
+| `packages/builtin-tools/` | Built-in tools |
+| `packages/@ant/ink/` | Terminal Ink framework |
+| `src/bridge/` / `packages/remote-control-server/` | Remote Control |
+| `src/daemon/` | Long-lived daemon |
+| `src/services/acp/` / `packages/acp-link/` | ACP |
+| `scripts/publish.ts` | Platform binary compile + npm publish |
+| `CLAUDE.md` | Detailed engineering notes for agents / contributors |
+
+More architecture and testing rules: [`CLAUDE.md`](./CLAUDE.md).
+
+---
 
 ## Contributors
 
-<a href="https://github.com/claude-code/claude-code/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=claude-code/claude-code" />
+<a href="https://github.com/go-hare/claude-code-1/graphs/contributors">
+  <img src="contributors.svg" alt="Contributors" />
 </a>
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=claude-code%2Fclaude-code&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=claude-code%2Fclaude-code&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=claude-code%2Fclaude-code&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=claude-code%2Fclaude-code&type=date&legend=top-left" />
- </picture>
+<a href="https://www.star-history.com/?repos=go-hare%2Fclaude-code-1&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=go-hare/claude-code-1&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=go-hare/claude-code-1&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/image?repos=go-hare/claude-code-1&type=date&legend=top-left" />
+  </picture>
 </a>
+
+## Acknowledgments
+
+- [doubaoime-asr](https://github.com/starccy/doubaoime-asr) — Doubao ASR for optional Voice Mode path
 
 ## License
 
-This project is for educational and research purposes only. All rights to Claude Code belong to [Anthropic](https://www.anthropic.com/).
+For learning and research only. Claude Code rights belong to Anthropic. Respect upstream and dependency licenses.
