@@ -4,7 +4,8 @@
  * Helper functions for in-process teammate integration.
  * Provides utilities to:
  * - Find task ID by agent name
- * - Handle plan approval responses
+ * - Handle plan approval responses (densable mFu)
+ * - Format plan approval text for the model (densable Ejr)
  * - Update awaitingPlanApproval state
  * - Detect permission-related messages
  */
@@ -14,12 +15,16 @@ import {
   type InProcessTeammateTaskState,
   isInProcessTeammateTask,
 } from '../tasks/InProcessTeammateTask/types.js'
+import type { PermissionMode } from '../types/permissions.js'
+import { logForDebugging } from './debug.js'
+import { sanitizeInheritedPermissionMode } from './permissions/permissionSetup.js'
 import { updateTaskState } from './task/framework.js'
 import {
   isPermissionResponse,
   isSandboxPermissionResponse,
   type PlanApprovalResponseMessage,
 } from './teammateMailbox.js'
+import { setMemberMode } from './swarm/teamHelpers.js'
 
 type SetAppState = (updater: (prev: AppState) => AppState) => void
 
@@ -64,22 +69,89 @@ export function setAwaitingPlanApproval(
 }
 
 /**
- * Handle plan approval response for an in-process teammate.
- * Called by the message callback when a plan_approval_response arrives.
+ * densable Ejr — plain-text plan approval outcome for the model.
+ * No request_id suffix (mailbox path; local SendMessage path may add one).
+ */
+export function formatPlanApprovalForModel(
+  response: Pick<PlanApprovalResponseMessage, 'approved' | 'feedback'>,
+): string {
+  if (response.approved) {
+    return response.feedback
+      ? `[Plan Approved] ${response.feedback}`
+      : '[Plan Approved] You can now proceed with implementation'
+  }
+  return `[Plan Rejected] ${response.feedback || 'Please revise your plan'}`
+}
+
+/**
+ * densable mFu — apply lead plan_approval_response to an in-process teammate.
  *
- * This resets awaitingPlanApproval to false. The permissionMode from the
- * response is handled separately by the agent loop (Task #11).
+ * Only acts when the task is still awaitingPlanApproval (stale replies ignored).
+ * On approve: clear awaiting, set task.permissionMode via Urs sanitize, persist
+ * member mode. On reject: clear awaiting only.
  *
- * @param taskId - Task ID of the in-process teammate
- * @param _response - The plan approval response message (for future use)
- * @param setAppState - AppState setter
+ * @returns true if the response was applied (caller should inject Ejr text)
+ */
+export function applyPlanApprovalToInProcessTeammate(
+  taskId: string,
+  response: PlanApprovalResponseMessage,
+  setAppState: SetAppState,
+): boolean {
+  let applied = false
+  let appliedMode: PermissionMode | undefined
+  let teamName: string | undefined
+  let agentName: string | undefined
+
+  updateTaskState<InProcessTeammateTaskState>(taskId, setAppState, prev => {
+    // densable mFu: only apply while still awaiting (stale replies ignored)
+    if (!prev.awaitingPlanApproval) {
+      return prev
+    }
+    applied = true
+    if (!response.approved) {
+      return { ...prev, awaitingPlanApproval: false }
+    }
+    const mode = sanitizeInheritedPermissionMode(response.permissionMode)
+    appliedMode = mode
+    teamName = prev.identity.teamName
+    agentName = prev.identity.agentName
+    return {
+      ...prev,
+      awaitingPlanApproval: false,
+      permissionMode: mode,
+    }
+  })
+
+  if (!applied) {
+    return false
+  }
+
+  if (response.approved && appliedMode && teamName && agentName) {
+    setMemberMode(teamName, agentName, appliedMode)
+  }
+
+  logForDebugging(
+    `[inProcessTeammate] applied plan_approval_response task=${taskId} approved=${response.approved}${
+      appliedMode ? ` mode=${appliedMode}` : ''
+    }`,
+  )
+  return true
+}
+
+/**
+ * @deprecated densable leader auto-approve does NOT clear awaitingPlanApproval
+ * on the teammate task — that is mFu's job when the teammate drains the
+ * mailbox. Prefer applyPlanApprovalToInProcessTeammate from the runner.
+ *
+ * Kept for call sites that only need to clear the UI flag without mode apply
+ * (should not be used from leader InboxPoller).
  */
 export function handlePlanApprovalResponse(
   taskId: string,
-  _response: PlanApprovalResponseMessage,
+  response: PlanApprovalResponseMessage,
   setAppState: SetAppState,
 ): void {
-  setAwaitingPlanApproval(taskId, setAppState, false)
+  applyPlanApprovalToInProcessTeammate(taskId, response, setAppState)
 }
 
 // ============ Permission Delegation Helpers ============

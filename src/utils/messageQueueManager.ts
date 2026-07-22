@@ -121,9 +121,12 @@ export function recheckCommandQueue(): void {
 // ============================================================================
 
 /**
- * densable: callers that omit agentId mean main thread. Stamp mi() so AL
- * (`agentId===mi()`) drains them. Explicit agentId (nested owner / subagent)
- * is preserved. Not dual-OR drain — single official address.
+ * Local fortify over densable 2.1.211 IT/cf: official push does NOT stamp
+ * agentId — every densable call site passes agentId:mi() explicitly. Local
+ * callers sometimes omit; stamp sticky mi() so AL drains them. Explicit
+ * agentId (nested owner / subagent) is preserved. Not dual-OR drain.
+ * densable also never rewrites agentId on mJo/ZR — sticky mi() keeps old
+ * main stamps AL-matchable without queue rewrite.
  */
 function withMainThreadAgentId(command: QueuedCommand): QueuedCommand {
   if (command.agentId !== undefined) return command
@@ -134,7 +137,7 @@ function withMainThreadAgentId(command: QueuedCommand): QueuedCommand {
  * Add a command to the queue.
  * Used for user-initiated commands (prompt, bash, orphaned-permission).
  * Defaults priority to 'next' (processed before task notifications).
- * densable IT: omit agentId → stamp mi() (main).
+ * densable IT does not stamp agentId; local stamps sticky mi() when omitted.
  */
 export function enqueue(command: QueuedCommand): void {
   const stamped = withMainThreadAgentId(command)
@@ -150,7 +153,8 @@ export function enqueue(command: QueuedCommand): void {
  * Add a task notification to the queue.
  * Convenience wrapper that defaults priority to 'later' so user input
  * is never starved by system messages.
- * densable cf: omit agentId → stamp mi() (main). Explicit agentId kept.
+ * densable cf does not stamp agentId; local stamps sticky mi() when omitted.
+ * Explicit agentId (owner / subagent) is preserved.
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
   const stamped = withMainThreadAgentId(command)

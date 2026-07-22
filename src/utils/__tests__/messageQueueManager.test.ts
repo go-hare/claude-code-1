@@ -63,6 +63,28 @@ describe('messageQueueManager.enqueue', () => {
     const cmd = dequeue()
     expect(cmd!.priority).toBe('now')
   })
+
+  test('stamps sticky main-thread agentId so AL still matches after session regenerate', () => {
+    const {
+      getMainThreadAgentId,
+      isMainThreadQueuedCommand,
+      regenerateSessionId,
+    } =
+      require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+
+    const mainAgentIdBefore = getMainThreadAgentId()
+    enqueue({ value: 'survive-clear', mode: 'prompt' } as any)
+    const sessionAfter = regenerateSessionId()
+    expect(sessionAfter).not.toBe(
+      mainAgentIdBefore as unknown as typeof sessionAfter,
+    )
+    // sticky mainAgentId — no queue rewrite needed (densable 2.1.211)
+    expect(getMainThreadAgentId()).toBe(mainAgentIdBefore)
+    const cmd = dequeue(isMainThreadQueuedCommand)
+    expect(cmd).toBeDefined()
+    expect(cmd!.value).toBe('survive-clear')
+    expect(cmd!.agentId).toBe(mainAgentIdBefore)
+  })
 })
 
 describe('messageQueueManager.enqueuePendingNotification', () => {

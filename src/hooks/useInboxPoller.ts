@@ -15,15 +15,9 @@ import { isInProcessTeammateTask } from '../tasks/InProcessTeammateTask/types.js
 import { getAllBaseTools } from '../tools.js'
 import type { PermissionUpdate } from '../types/permissions.js'
 import { logForDebugging } from '../utils/debug.js'
-import {
-  findInProcessTeammateTaskId,
-  handlePlanApprovalResponse,
-} from '../utils/inProcessTeammateHelpers.js'
 import { createAssistantMessage } from '../utils/messages.js'
-import {
-  permissionModeFromString,
-  toExternalPermissionMode,
-} from '../utils/permissions/PermissionMode.js'
+import { toExternalPermissionMode } from '../utils/permissions/PermissionMode.js'
+import { applyInheritedPermissionMode } from '../utils/permissions/permissionSetup.js'
 import { applyPermissionUpdate } from '../utils/permissions/PermissionUpdate.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { isInsideTmux } from '../utils/swarm/backends/detection.js'
@@ -37,7 +31,7 @@ import { getLeaderToolUseConfirmQueue } from '../utils/swarm/leaderPermissionBri
 import { sendPermissionResponseViaMailbox } from '../utils/swarm/permissionSync.js'
 import {
   removeTeammateFromTeamFile,
-  setMemberMode,
+  syncTeammateMode,
 } from '../utils/swarm/teamHelpers.js'
 import { unassignTeammateTasks } from '../utils/tasks.js'
 import {
@@ -153,45 +147,56 @@ export function useInboxPoller({
 
     logForDebugging(`[InboxPoller] Found ${unread.length} unread message(s)`)
 
-    // Check for plan approval responses and transition out of plan mode if approved
-    // Security: Only accept approval responses from the team lead
+    // densable InboxPoller plan_approval_response (process teammate):
+    // 1. only team-lead  2. only while mode==="plan"  3. B$a guards  4. Sxt member mode
     if (isTeammate() && isPlanModeRequired()) {
       for (const msg of unread) {
         const approvalResponse = isPlanApprovalResponse(msg.text)
-        // Verify the message is from the team lead to prevent teammates from forging approvals
-        if (approvalResponse && msg.from === 'team-lead') {
-          logForDebugging(
-            `[InboxPoller] Received plan approval response from team-lead: approved=${approvalResponse.approved}`,
-          )
-          if (approvalResponse.approved) {
-            // Use leader's permission mode if provided, otherwise default
-            const targetMode = approvalResponse.permissionMode ?? 'default'
-
-            // Transition out of plan mode
-            setAppState(prev => ({
-              ...prev,
-              toolPermissionContext: applyPermissionUpdate(
-                prev.toolPermissionContext,
-                {
-                  type: 'setMode',
-                  mode: toExternalPermissionMode(targetMode),
-                  destination: 'session',
-                },
-              ),
-            }))
-            logForDebugging(
-              `[InboxPoller] Plan approved by team lead, exited plan mode to ${targetMode}`,
-            )
-          } else {
-            logForDebugging(
-              `[InboxPoller] Plan rejected by team lead: ${approvalResponse.feedback || 'No feedback provided'}`,
-            )
-          }
-        } else if (approvalResponse) {
+        if (!approvalResponse) continue
+        if (msg.from !== 'team-lead') {
           logForDebugging(
             `[InboxPoller] Ignoring plan approval response from non-team-lead: ${msg.from}`,
           )
+          continue
         }
+        if (store.getState().toolPermissionContext.mode !== 'plan') {
+          logForDebugging(
+            '[InboxPoller] Ignoring plan approval response while not in plan mode',
+          )
+          continue
+        }
+        logForDebugging(
+          `[InboxPoller] Received plan approval response from team-lead: approved=${approvalResponse.approved}`,
+        )
+        if (!approvalResponse.approved) {
+          logForDebugging(
+            `[InboxPoller] Plan rejected by team lead: ${approvalResponse.feedback || 'No feedback provided'}`,
+          )
+          continue
+        }
+        const requestedMode = approvalResponse.permissionMode ?? 'default'
+        const applied = applyInheritedPermissionMode(
+          requestedMode,
+          store.getState().toolPermissionContext,
+          setAppState,
+        )
+        let finalMode = applied.ok ? applied.mode : 'default'
+        if (!applied.ok) {
+          logForDebugging(
+            `[InboxPoller] Refusing inherited mode ${requestedMode} from plan approval: ${applied.error}; exiting plan mode to default`,
+            { level: 'warn' },
+          )
+          applyInheritedPermissionMode(
+            'default',
+            store.getState().toolPermissionContext,
+            setAppState,
+          )
+          finalMode = 'default'
+        }
+        syncTeammateMode(finalMode, currentAppState.teamContext?.teamName)
+        logForDebugging(
+          `[InboxPoller] Plan approved by team lead, exited plan mode to ${finalMode}`,
+        )
       }
     }
 
@@ -569,30 +574,28 @@ export function useInboxPoller({
           continue
         }
 
-        const targetMode = permissionModeFromString(parsed.mode)
+        // densable B$a: refuse invalid modes; on failure re-sync current mode
         logForDebugging(
-          `[InboxPoller] Applying mode change from team-lead: ${targetMode}`,
+          `[InboxPoller] Applying mode change from team-lead: ${parsed.mode}`,
         )
-
-        // Update local permission context
-        setAppState(prev => ({
-          ...prev,
-          toolPermissionContext: applyPermissionUpdate(
-            prev.toolPermissionContext,
-            {
-              type: 'setMode',
-              mode: toExternalPermissionMode(targetMode),
-              destination: 'session',
-            },
-          ),
-        }))
-
-        // Update config.json so team lead can see the new mode
         const teamName = currentAppState.teamContext?.teamName
-        const agentName = getAgentName()
-        if (teamName && agentName) {
-          setMemberMode(teamName, agentName, targetMode)
+        const applied = applyInheritedPermissionMode(
+          parsed.mode,
+          store.getState().toolPermissionContext,
+          setAppState,
+        )
+        if (!applied.ok) {
+          logForDebugging(
+            `[InboxPoller] Refusing mode set request for ${parsed.mode}: ${applied.error}`,
+            { level: 'warn' },
+          )
+          syncTeammateMode(
+            store.getState().toolPermissionContext.mode,
+            teamName,
+          )
+          continue
         }
+        syncTeammateMode(applied.mode, teamName)
       }
     }
 
@@ -635,21 +638,8 @@ export function useInboxPoller({
           teamName,
         )
 
-        // Update in-process teammate task state if applicable
-        const taskId = findInProcessTeammateTaskId(m.from, currentAppState)
-        if (taskId) {
-          handlePlanApprovalResponse(
-            taskId,
-            {
-              type: 'plan_approval_response',
-              requestId: parsed.requestId,
-              approved: true,
-              timestamp: new Date().toISOString(),
-              permissionMode: modeToInherit,
-            },
-            setAppState,
-          )
-        }
+        // densable: leader auto-approve only writes mailbox; in-process mFu
+        // applies mode when the teammate drains the response (awaiting gate).
 
         logForDebugging(
           `[InboxPoller] Auto-approved plan from ${m.from} (request ${parsed.requestId})`,

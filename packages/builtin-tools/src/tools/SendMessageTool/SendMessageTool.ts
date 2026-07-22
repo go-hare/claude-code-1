@@ -756,6 +756,7 @@ async function handlePlanApproval(
   recipientName: string,
   requestId: string,
   context: ToolUseContext,
+  feedback?: string,
 ): Promise<{ data: ResponseOutput }> {
   const appState = context.getAppState()
   const teamName = appState.teamContext?.teamName
@@ -769,10 +770,12 @@ async function handlePlanApproval(
   const leaderMode = appState.toolPermissionContext.mode
   const modeToInherit = leaderMode === 'plan' ? 'default' : leaderMode
 
+  // densable tQg: include feedback when present
   const approvalResponse = {
     type: 'plan_approval_response',
     requestId,
     approved: true,
+    ...(feedback !== undefined ? { feedback } : {}),
     timestamp: new Date().toISOString(),
     permissionMode: modeToInherit,
   }
@@ -1293,6 +1296,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               input.to,
               input.message.request_id,
               context,
+              input.message.feedback,
             )
           }
           return handlePlanRejection(

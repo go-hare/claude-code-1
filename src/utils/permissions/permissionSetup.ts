@@ -23,8 +23,10 @@ import {
   hasAutoModeOptIn,
 } from '../settings/settings.js'
 import {
+  isExternalPermissionMode,
   type PermissionMode,
   permissionModeFromString,
+  toExternalPermissionMode,
 } from './PermissionMode.js'
 import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
 import { applyPermissionRulesToPermissionContext } from './permissions.js'
@@ -1625,4 +1627,117 @@ export function transitionPlanAutoMode(
   autoModeStateModule?.setAutoModeActive(false)
   setNeedsAutoModeExitAttachment(true)
   return restoreDangerousPermissions(context)
+}
+
+/**
+ * densable Urs — soft sanitize of an inherited permission mode for in-process
+ * teammate task state (mFu). Falls back to default when bypass/auto are
+ * policy-disabled; does not check session launch flags.
+ */
+export function sanitizeInheritedPermissionMode(
+  mode: string | undefined,
+): PermissionMode {
+  const parsed = permissionModeFromString(mode ?? 'default')
+  const external = isExternalPermissionMode(parsed)
+    ? parsed
+    : toExternalPermissionMode(parsed)
+  if (external === 'bypassPermissions' && isBypassPermissionsModeDisabled()) {
+    return 'default'
+  }
+  if (external === 'auto' && !isAutoModeGateEnabled()) {
+    return 'default'
+  }
+  return external
+}
+
+export type SetPermissionModeResult =
+  | { ok: true; mode: PermissionMode }
+  | { ok: false; error: string }
+
+/**
+ * densable Sce — apply a permission mode with policy guards (bypass settings /
+ * session availability, auto gate). Caller supplies `apply` to write the
+ * transitioned context (session AppState or equivalent).
+ */
+export function setPermissionModeWithGuards(
+  mode: PermissionMode,
+  context: ToolPermissionContext,
+  apply: (
+    updater: (ctx: ToolPermissionContext) => ToolPermissionContext,
+  ) => void,
+): SetPermissionModeResult {
+  if (mode === 'bypassPermissions') {
+    if (isBypassPermissionsModeDisabled()) {
+      return {
+        ok: false,
+        error:
+          'Cannot set permission mode to bypassPermissions because it is disabled by settings or configuration',
+      }
+    }
+    if (!context.isBypassPermissionsModeAvailable) {
+      return {
+        ok: false,
+        error:
+          'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions',
+      }
+    }
+  }
+  if (mode === 'auto' && !isAutoModeGateEnabled()) {
+    const reason = getAutoModeUnavailableReason()
+    return {
+      ok: false,
+      error: reason
+        ? `Cannot set permission mode to auto: ${getAutoModeUnavailableNotification(reason)}`
+        : 'Cannot set permission mode to auto',
+    }
+  }
+
+  apply(ctx => {
+    if (ctx.mode === mode) return ctx
+    return {
+      ...transitionPermissionMode(ctx.mode, mode, ctx),
+      mode,
+    }
+  })
+  return { ok: true, mode }
+}
+
+/**
+ * densable B$a — inherit a leader-provided mode into a teammate session.
+ * When the target is bypassPermissions, temporarily marks the mode available
+ * so Sce's session-launch check does not block lead-pushed bypass; settings
+ * disable (UM) still rejects.
+ */
+export function applyInheritedPermissionMode(
+  modeInput: string,
+  context: ToolPermissionContext,
+  // AppState setter; avoid circular import on AppState type
+  setAppState: (updater: (prev: any) => any) => void,
+): SetPermissionModeResult {
+  const parsed = permissionModeFromString(modeInput)
+  const mode: PermissionMode = isExternalPermissionMode(parsed)
+    ? parsed
+    : toExternalPermissionMode(parsed)
+  // densable B$a: force bypass availability for lead-pushed bypass (settings
+  // disable still rejected by Sce via isBypassPermissionsModeDisabled).
+  const forceBypassAvailable = mode === 'bypassPermissions'
+  const guardedContext = forceBypassAvailable
+    ? { ...context, isBypassPermissionsModeAvailable: true }
+    : context
+
+  return setPermissionModeWithGuards(mode, guardedContext, updater => {
+    setAppState(prev => {
+      const prevCtx = prev.toolPermissionContext as ToolPermissionContext
+      const ctxForUpdate =
+        forceBypassAvailable && !prevCtx.isBypassPermissionsModeAvailable
+          ? { ...prevCtx, isBypassPermissionsModeAvailable: true }
+          : prevCtx
+      const nextCtx = updater(ctxForUpdate)
+      if (nextCtx === ctxForUpdate) return prev
+      return {
+        ...prev,
+        toolPermissionContext: nextCtx,
+      }
+    })
+  })
 }

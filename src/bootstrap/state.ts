@@ -133,6 +133,11 @@ type State = {
   activeTimeCounter: AttributedCounter | null
   statsStore: { observe(name: string, value: number): void } | null
   sessionId: SessionId
+  /**
+   * densable Ot.mainAgentId — sticky main-thread AgentId for queue AL / BRt / Zeo.
+   * Latched by mi() on first use to Qc(sessionId); NOT cleared on mJo/ZR.
+   */
+  mainAgentId: import('src/types/ids.js').AgentId | null
   // Parent session ID for tracking session lineage (e.g., plan mode -> implementation)
   parentSessionId: SessionId | undefined
   // Logger state
@@ -373,6 +378,7 @@ function getInitialState(): State {
     activeTimeCounter: null,
     statsStore: null,
     sessionId: randomUUID() as SessionId,
+    mainAgentId: null,
     parentSessionId: undefined,
     // Logger state
     loggerProvider: null,
@@ -479,22 +485,35 @@ export function getSessionId(): SessionId {
 }
 
 /**
- * densable `mi()` — main-thread AgentId for queue AL / BRt / Zeo.
+ * densable `mi()` — main-thread AgentId for queue AL / BRt / Zeo (2.1.211).
  *
- * Gold: `VO()?.sessionId ? Qc(e) : (Ot.mainAgentId ??= Qc(Ot.sessionId))` —
- * official reads the live session id (no process-long sticky cache). We mirror
- * that: always return current STATE.sessionId so /clear (regenerateSessionId)
- * and /resume (switchSession) rebind AL/drain without stale queue agentId.
- * Call sites that need current session as string still use getSessionId().
+ * Gold:
+ * ```
+ * function mi(){
+ *   let e = VO()?.sessionId;
+ *   if (e) return Qc(e);
+ *   return Ot.mainAgentId ??= Qc(Ot.sessionId), Ot.mainAgentId
+ * }
+ * ```
+ * VO is an optional process overlay (default `() => {}` → no sessionId); CLI
+ * path latches sticky `Ot.mainAgentId` on first call and never clears it on
+ * mJo(/clear) or ZR(/resume). Queue IT/cf do not auto-stamp or rewrite agentId
+ * on session rebind — callers that omit agentId leave AL miss (official).
+ * Call sites that need live session as string still use getSessionId().
  */
 export function getMainThreadAgentId(): import('src/types/ids.js').AgentId {
   // Inline brand — bootstrap is a DAG leaf; avoid importing asAgentId here.
-  return STATE.sessionId as unknown as import('src/types/ids.js').AgentId
+  if (STATE.mainAgentId === null) {
+    STATE.mainAgentId =
+      STATE.sessionId as unknown as import('src/types/ids.js').AgentId
+  }
+  return STATE.mainAgentId
 }
 
 /**
  * densable `AL(cmd)`: main-thread queue entry is `cmd.agentId === mi()`.
- * Not dual-OR with undefined — callers must stamp mi() for main (enqueue does).
+ * Not dual-OR with undefined — callers must stamp mi() for main (enqueue does
+ * not auto-stamp in densable; local withMainThreadAgentId is a local fortify).
  */
 export function isMainThreadQueuedCommand(cmd: {
   agentId?: string | null

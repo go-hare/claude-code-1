@@ -98,15 +98,24 @@ import { claimTask, listTasks, type Task, updateTask } from '../tasks.js'
 import type { TeammateContext } from '../teammateContext.js'
 import { runWithTeammateContext } from '../teammateContext.js'
 import {
+  applyPlanApprovalToInProcessTeammate,
+  formatPlanApprovalForModel,
+} from '../inProcessTeammateHelpers.js'
+import {
   createIdleNotification,
   formatTeammateMessage,
   getLastPeerDmSummary,
+  isModeSetRequest,
   isPermissionResponse,
+  isPlanApprovalResponse,
   isShutdownRequest,
+  isStructuredProtocolMessage,
   markMessageAsReadByIdentity,
   readMailbox,
   writeToMailbox,
 } from '../teammateMailbox.js'
+import { permissionModeFromString } from '../permissions/PermissionMode.js'
+import { sanitizeInheritedPermissionMode } from '../permissions/permissionSetup.js'
 import { unregisterAgent as unregisterPerfettoAgent } from '../telemetry/perfettoTracing.js'
 import { createContentReplacementState } from '../toolResultStorage.js'
 import { TEAM_LEAD_NAME } from './constants.js'
@@ -118,7 +127,7 @@ import {
   createPermissionRequest,
   sendPermissionRequestViaMailbox,
 } from './permissionSync.js'
-import { setMemberActive } from './teamHelpers.js'
+import { setMemberActive, setMemberMode } from './teamHelpers.js'
 import { TEAMMATE_SYSTEM_PROMPT_ADDENDUM } from './teammatePromptAddendum.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
@@ -823,31 +832,114 @@ async function waitForNextPromptOrShutdown(
         }
       }
 
-      // No shutdown request found. Prioritize team-lead messages over peer
-      // messages — the leader represents user intent and coordination, so
-      // their messages should not be starved behind peer-to-peer chatter.
-      // Fall back to FIFO for peer messages.
-      let selectedIndex = -1
+      // densable fqu: drain structured protocol frames before peer text.
+      // plan_approval_response → mFu (awaiting + mode) + Ejr model text.
+      // mode_set_request → Urs sanitize + task.permissionMode + setMemberMode.
+      // Non-lead protocol frames are dropped (not injected as model context).
+      const protocolMsgs: typeof allMessages = []
+      const peerMsgs: typeof allMessages = []
+      for (const m of allMessages) {
+        if (!m || m.read) continue
+        if (isStructuredProtocolMessage(m.text)) {
+          protocolMsgs.push(m)
+        } else {
+          peerMsgs.push(m)
+        }
+      }
 
-      // Check for unread team-lead messages first
-      for (let i = 0; i < allMessages.length; i++) {
-        const m = allMessages[i]
-        if (m && !m.read && m.from === TEAM_LEAD_NAME) {
+      let planApprovalText: string | null = null
+      if (protocolMsgs.length > 0) {
+        for (const m of protocolMsgs) {
+          const approval = isPlanApprovalResponse(m.text)
+          if (approval && m.from === TEAM_LEAD_NAME) {
+            if (
+              applyPlanApprovalToInProcessTeammate(
+                taskId,
+                approval,
+                setAppState,
+              )
+            ) {
+              logForDebugging(
+                `[inProcessRunner] ${identity.agentName} applied lead plan_approval_response: approved=${approval.approved}`,
+              )
+              planApprovalText = formatPlanApprovalForModel(approval)
+            } else {
+              logForDebugging(
+                `[inProcessRunner] ${identity.agentName} ignoring stale plan_approval_response (not awaiting approval)`,
+              )
+            }
+            await markMessageAsReadByIdentity(
+              identity.agentName,
+              identity.teamName,
+              m,
+            )
+            continue
+          }
+
+          const modeSet = isModeSetRequest(m.text)
+          if (modeSet && m.from === TEAM_LEAD_NAME) {
+            const mode = sanitizeInheritedPermissionMode(
+              permissionModeFromString(modeSet.mode),
+            )
+            logForDebugging(
+              `[inProcessRunner] ${identity.agentName} applying lead mode_set_request: ${mode}`,
+            )
+            updateTaskState(
+              taskId,
+              task =>
+                task.permissionMode === mode
+                  ? task
+                  : { ...task, permissionMode: mode },
+              setAppState,
+            )
+            setMemberMode(identity.teamName, identity.agentName, mode)
+            await markMessageAsReadByIdentity(
+              identity.agentName,
+              identity.teamName,
+              m,
+            )
+            continue
+          }
+
+          logForDebugging(
+            `[inProcessRunner] ${identity.agentName} dropping protocol frame from ${m.from}: ${m.text.substring(0, 80)}`,
+            { level: 'warn' },
+          )
+          await markMessageAsReadByIdentity(
+            identity.agentName,
+            identity.teamName,
+            m,
+          )
+        }
+
+        if (planApprovalText) {
+          return {
+            type: 'new_message',
+            message: planApprovalText,
+            from: TEAM_LEAD_NAME,
+          }
+        }
+      }
+
+      // No shutdown / no pending model-facing protocol text. Prioritize
+      // team-lead peer messages over other peers — densable lead-first FIFO.
+      let selectedIndex = -1
+      for (let i = 0; i < peerMsgs.length; i++) {
+        const m = peerMsgs[i]
+        if (m && m.from === TEAM_LEAD_NAME) {
           selectedIndex = i
           break
         }
       }
-
-      // Fall back to first unread message (any sender)
-      if (selectedIndex === -1) {
-        selectedIndex = allMessages.findIndex(m => !m.read)
+      if (selectedIndex === -1 && peerMsgs.length > 0) {
+        selectedIndex = 0
       }
 
       if (selectedIndex !== -1) {
-        const msg = allMessages[selectedIndex]
+        const msg = peerMsgs[selectedIndex]
         if (msg) {
           logForDebugging(
-            `[inProcessRunner] ${identity.agentName} received new message from ${msg.from} (index ${selectedIndex})`,
+            `[inProcessRunner] ${identity.agentName} received new message from ${msg.from}`,
           )
           await markMessageAsReadByIdentity(
             identity.agentName,
