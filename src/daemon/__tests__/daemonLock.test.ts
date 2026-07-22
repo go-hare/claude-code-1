@@ -282,7 +282,7 @@ describe('installDaemonLock (densable R9d→R0o, never steal live)', () => {
   })
 })
 
-describe('isDaemonPidRaceLive', () => {
+describe('isDaemonPidRaceLive (densable cI: any throw → dead)', () => {
   test('current process is live', () => {
     expect(isDaemonPidRaceLive(process.pid)).toBe(true)
   })
@@ -293,9 +293,26 @@ describe('isDaemonPidRaceLive', () => {
     if (isDaemonPidRaceLive(dead)) return
     expect(isDaemonPidRaceLive(dead)).toBe(false)
   })
+
+  test('EPERM is treated as dead (not fortify-live)', () => {
+    const orig = process.kill.bind(process)
+    process.kill = ((pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0 || signal === undefined) {
+        const e = new Error('EPERM') as NodeJS.ErrnoException
+        e.code = 'EPERM'
+        throw e
+      }
+      return orig(pid, signal as number | NodeJS.Signals)
+    }) as typeof process.kill
+    try {
+      expect(isDaemonPidRaceLive(12345)).toBe(false)
+    } finally {
+      process.kill = orig
+    }
+  })
 })
 
-describe('readAliveDaemonLock (tG4 bW, non-ESRCH = live)', () => {
+describe('readAliveDaemonLock (official bW / densable cI)', () => {
   let dir: string
 
   beforeEach(async () => {

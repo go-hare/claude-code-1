@@ -18,10 +18,13 @@ import { detectImageFormatFromBase64 } from '../utils/imageResizer.js'
  * Returns the extracted fields, or undefined if the message should be
  * skipped (non-user type, missing/empty content).
  */
-export function extractInboundMessageFields(
-  msg: SDKMessage,
-):
-  | { content: string | Array<ContentBlockParam>; uuid: UUID | undefined }
+export function extractInboundMessageFields(msg: SDKMessage):
+  | {
+      content: string | Array<ContentBlockParam>
+      uuid: UUID | undefined
+      /** Official: `client_platform` on inbound user → QueuedCommand.clientPlatform. */
+      clientPlatform: string | undefined
+    }
   | undefined {
   if (msg.type !== 'user') return undefined
   const content = (
@@ -35,9 +38,16 @@ export function extractInboundMessageFields(
       ? (msg.uuid as UUID)
       : undefined
 
+  // Official IPO/g94: "client_platform" in H && typeof === string
+  const rawPlatform = (msg as unknown as { client_platform?: unknown })
+    .client_platform
+  const clientPlatform =
+    typeof rawPlatform === 'string' ? rawPlatform : undefined
+
   return {
     content: Array.isArray(content) ? normalizeImageBlocks(content) : content,
     uuid,
+    clientPlatform,
   }
 }
 

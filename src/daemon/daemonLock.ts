@@ -163,10 +163,12 @@ export async function readProcessStartIdentity(
 }
 
 /**
- * Official bW / densable cI — lock exists + pid alive + cmdline + procStart.
+ * Official bW — lock exists + pid alive + cmdline + procStart.
  *
- * Live probe matches densable post-R9d race: only ESRCH = dead.
- * EPERM (e.g. Windows privilege) must not open a free supervisor slot for tG4.
+ * Live probe is densable cI:
+ *   try { process.kill(pid, 0) } catch { return null }
+ * Any throw (ESRCH **or** EPERM) → treat as dead so the supervisor slot
+ * can be released. Do not fortify EPERM as live (that stuck install/restart).
  */
 export async function readAliveDaemonLock(
   configDir?: string,
@@ -222,16 +224,19 @@ function errnoCode(err: unknown): string | undefined {
 }
 
 /**
- * densable race probe after R9d miss:
- *   try process.kill(pid,0); if ESRCH only → dead; any other throw → live.
- * EPERM (e.g. Windows privilege) must not be treated as "stale → overwrite".
+ * densable cI / bW live probe:
+ *   try { process.kill(pid, 0); return true } catch { return false }
+ *
+ * Official treats **any** throw (ESRCH and EPERM) as dead so a
+ * permission-denied peer does not permanently occupy the supervisor slot.
+ * Matches `PM7` / `RM6` style probes elsewhere in densable.
  */
 export function isDaemonPidRaceLive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
-  } catch (err) {
-    return errnoCode(err) !== 'ESRCH'
+  } catch {
+    return false
   }
 }
 
@@ -347,7 +352,7 @@ export async function writeDaemonLock(
  *   if (!S) {
  *     ie = Gne()
  *     if (ie) {
- *       ne = live peer (kill0 + !ESRCH; densable also cmdline/procStart)
+ *       ne = live peer (densable cI: kill0 success only; any throw → dead)
  *       if (ne) refuse
  *       S = R0o(_)
  *     } else S = R0o(_)
@@ -368,16 +373,8 @@ export async function installDaemonLock(
 
   const existing = await readDaemonLock(configDir)
   if (existing) {
-    // densable: kill0 success then cmdline/procStart; on non-ESRCH throw → live.
-    // Portable: race-live probe only (no /proc cmdline on macOS/Windows).
-    let peerLive = false
-    try {
-      process.kill(existing.pid, 0)
-      peerLive = true
-    } catch (err) {
-      if (errnoCode(err) !== 'ESRCH') peerLive = true
-    }
-    if (peerLive) {
+    // densable cI: kill0 success → live peer (refuse); any throw (ESRCH/EPERM) → dead.
+    if (isDaemonPidRaceLive(existing.pid)) {
       return false
     }
   }
@@ -599,7 +596,7 @@ export async function detectDaemonLockRace(
   if (lock.pid === owner.pid && lock.startedAt === owner.startedAt) {
     return null
   }
-  // densable post-install: non-ESRCH (incl. EPERM) counts as a live peer.
+  // densable cI: only kill0 success counts as a live peer (EPERM → dead/null).
   if (!isDaemonPidRaceLive(lock.pid)) return null
   return lock
 }

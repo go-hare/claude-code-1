@@ -18,6 +18,7 @@ import {
   scheduleDeferredAdoptResume,
   stashDeferredAdoptResume,
   truncatePartialTextForPrefill,
+  atomicWriteFile,
   writeAdoptJson,
   registerResumedAgentTask,
   type AdoptedWorkflowEntry,
@@ -402,5 +403,19 @@ describe('registerResumedAgentTask (densable PSu + product adopt UX)', () => {
     expect(task.adoptResumePending).toBe(true)
     expect(task.notified).toBe(true)
     expect(task.isIdle).toBe(false)
+  })
+})
+
+describe('atomicWriteFile densable Cf', () => {
+  test('writes target with mode via rename path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'atomic-write-'))
+    tmpDirs.push(dir)
+    const target = join(dir, 'adopt.json')
+    await atomicWriteFile(target, '{"ok":true}', 0o600)
+    const { readFile, stat } = await import('fs/promises')
+    expect(await readFile(target, 'utf8')).toBe('{"ok":true}')
+    const mode = (await stat(target)).mode & 0o777
+    // umask may clear bits; at least owner-read should be set
+    expect(mode & 0o400).toBe(0o400)
   })
 })

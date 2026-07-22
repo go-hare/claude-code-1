@@ -232,11 +232,15 @@ function executeInBackground({
         outcome: result.code === 0 ? 'success' : 'error',
       })
       if (result.code === 2) {
+        // Official oO(... stopHookActive:!0) — drain must seed query with
+        // stop_hook_active so nested stop hooks see the continuation.
         enqueuePendingNotification({
           value: wrapInSystemReminder(
             `Stop hook blocking error from command "${hookName}": ${stderr || stdout}`,
           ),
           mode: 'task-notification',
+          priority: 'next',
+          stopHookActive: true,
         })
       }
     })

@@ -9,7 +9,7 @@
  */
 
 import { createHash, randomBytes } from 'crypto'
-import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises'
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 
 export const ADOPT_JSON_NAME = 'adopt.json'
@@ -209,6 +209,11 @@ export function adoptJsonPath(jobDir: string): string {
 /**
  * densable Cf portable — write via `${path}.tmp.<hex>` then rename into place
  * so readers never observe a partial adopt.json (Jlr write path).
+ *
+ * Rename fallback codes match official: EXDEV | EPERM | EEXIST | EBUSY
+ * (Windows rename-over commonly returns EPERM/EEXIST). After success, chmod
+ * to preserve mode. On partial-target write failure (ENOSPC/EIO/EDQUOT/EFBIG),
+ * unlink the corrupt target so readers do not pick up a truncated adopt.json.
  */
 export async function atomicWriteFile(
   targetPath: string,
@@ -216,6 +221,13 @@ export async function atomicWriteFile(
   mode?: number,
 ): Promise<void> {
   const tmpPath = `${targetPath}.tmp.${randomBytes(4).toString('hex')}`
+  const renameFallbackCodes = new Set(['EXDEV', 'EPERM', 'EEXIST', 'EBUSY'])
+  const partialTargetUnlinkCodes = new Set(['ENOSPC', 'EIO', 'EDQUOT', 'EFBIG'])
+  const errnoCode = (e: unknown): string | undefined =>
+    e && typeof e === 'object' && 'code' in e
+      ? String((e as { code?: unknown }).code)
+      : undefined
+
   try {
     await writeFile(tmpPath, data, {
       encoding: 'utf8',
@@ -224,22 +236,30 @@ export async function atomicWriteFile(
     try {
       await rename(tmpPath, targetPath)
     } catch (e) {
-      // densable Cf: on EXDEV-ish rename failure, copyFile fallback then unlink tmp.
-      // Local: try copy via read+write then unlink (rename across devices rare
-      // for same-dir tmp, but keep cleanup hygiene).
-      const code =
-        e && typeof e === 'object' && 'code' in e
-          ? String((e as { code?: unknown }).code)
-          : undefined
-      if (code === 'EXDEV') {
+      const code = errnoCode(e)
+      if (code && renameFallbackCodes.has(code)) {
         const buf = await readFile(tmpPath)
-        await writeFile(targetPath, buf, {
-          ...(mode !== undefined ? { mode } : {}),
-        })
+        try {
+          await writeFile(targetPath, buf, {
+            ...(mode !== undefined ? { mode } : {}),
+          })
+        } catch (writeErr) {
+          const wcode = errnoCode(writeErr)
+          if (wcode && partialTargetUnlinkCodes.has(wcode)) {
+            await unlink(targetPath).catch(() => {})
+          }
+          throw writeErr
+        }
         await unlink(tmpPath).catch(() => {})
+        if (mode !== undefined) {
+          await chmod(targetPath, mode).catch(() => {})
+        }
         return
       }
       throw e
+    }
+    if (mode !== undefined) {
+      await chmod(targetPath, mode).catch(() => {})
     }
   } catch (e) {
     await unlink(tmpPath).catch(() => {})

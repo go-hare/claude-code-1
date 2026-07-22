@@ -249,6 +249,12 @@ export type QueryParams = {
   maxOutputTokensOverride?: number
   maxTurns?: number
   skipCacheWrite?: boolean
+  /**
+   * Official drain: when the dequeued turn carried stopHookActive (stop-hook
+   * continuation / concurrent re-queue), seed the loop so nested stop hooks
+   * see stop_hook_active=true. Undefined on normal keyboard turns.
+   */
+  stopHookActive?: boolean
   // API task_budget (output_config.task_budget, beta task-budgets-2026-03-13).
   // Distinct from the tokenBudget +500k auto-continue feature. `total` is the
   // budget for the whole agentic turn; `remaining` is computed per iteration
@@ -612,7 +618,9 @@ async function* queryLoop(
     toolUseContext: params.toolUseContext,
     maxOutputTokensOverride: params.maxOutputTokensOverride,
     autoCompactTracking: undefined,
-    stopHookActive: undefined,
+    // Seed from drain when the turn was a stop-hook continuation / concurrent
+    // re-queue (official JWH.stopHookActive from onQuery e9).
+    stopHookActive: params.stopHookActive,
     stopHookBlockCount: 0,
     maxOutputTokensRecoveryCount: 0,
     hasAttemptedReactiveCompact: false,

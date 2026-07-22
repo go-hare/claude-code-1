@@ -77,6 +77,10 @@ type BaseExecutionParams = {
     onBeforeQuery?: (input: string, newMessages: Message[]) => Promise<boolean>,
     input?: string,
     effort?: EffortValue,
+    /** Official drain: any command in the batch carried stopHookActive. */
+    stopHookActive?: boolean,
+    /** Official drain: first clientPlatform on the batch (remote/SDK). */
+    clientPlatform?: string,
   ) => Promise<boolean>
   setAppState: (updater: (prev: AppState) => AppState) => void
   onBeforeQuery?: (input: string, newMessages: Message[]) => Promise<boolean>
@@ -599,6 +603,14 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               ? primaryCmd.value
               : undefined
           const shouldCallBeforeQuery = primaryMode === 'prompt'
+          // Official: d=C.some(a=>a.stopHookActive)?!0:void 0,
+          // r=C.find(a=>a.clientPlatform)?.clientPlatform
+          const stopHookActive = commands.some(c => c.stopHookActive)
+            ? true
+            : undefined
+          const clientPlatform = commands.find(
+            c => c.clientPlatform,
+          )?.clientPlatform
           await onQuery(
             newMessages,
             abortController,
@@ -610,6 +622,8 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             shouldCallBeforeQuery ? onBeforeQuery : undefined,
             primaryInput,
             effort,
+            stopHookActive,
+            clientPlatform,
           )
         } else {
           // Local slash commands that skip messages (e.g., /model, /theme).

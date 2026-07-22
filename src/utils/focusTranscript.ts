@@ -32,8 +32,6 @@ import {
   extractTag,
   INTERRUPT_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
-  isHumanLikeOrigin,
-  isMetaVisibleOrigin,
 } from './messages.js'
 
 /** Bash completion summary prefix (keep free of task module import) */
@@ -370,12 +368,15 @@ function isStreamingSkippable(msg: FocusTranscriptMessage): boolean {
   return false
 }
 
-/** Turn boundary user / Ace-visible prompt attachment (densable brief turn count). */
+/**
+ * Turn boundary for densable brief turn count.
+ * Official uSu: any non-tool_result user message is a boundary (no isMeta gate).
+ * Official gSu: queued_command prompt attachments only when origin is channel
+ * (not full Ace peer/observer — those are not turn starts).
+ */
 function isTurnBoundary(msg: FocusTranscriptMessage): boolean {
   if (msg.type === 'user') {
     if (firstBlock(msg)?.type === 'tool_result') return false
-    // densable Ace: meta peer/channel/observer still starts a turn
-    if (msg.isMeta && !isMetaVisibleOrigin(msg.origin)) return false
     return true
   }
   if (msg.type === 'attachment') {
@@ -383,10 +384,8 @@ function isTurnBoundary(msg: FocusTranscriptMessage): boolean {
     if (att?.type !== 'queued_command' || att.commandMode !== 'prompt') {
       return false
     }
-    return (
-      isMetaVisibleOrigin(att.origin) ||
-      (!att.isMeta && isHumanLikeOrigin(att.origin))
-    )
+    const origin = att.origin as { kind?: string } | undefined
+    return origin?.kind === 'channel'
   }
   return false
 }

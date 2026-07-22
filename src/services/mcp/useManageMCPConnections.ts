@@ -939,21 +939,17 @@ export function useManageMCPConnections(
                   : ('pending' as const),
                 config,
               }))
+            // Official: this branch only merges claude.ai clients. Do NOT stamp
+            // clientsInitialized here — initializeServersAsPending owns that
+            // flag. Stamping early lets deferred adopt-resume settle before
+            // local/project MCP servers are registered as pending.
             if (newClients.length === 0) {
-              if (prevState.mcp.clientsInitialized) return prevState
-              return {
-                ...prevState,
-                mcp: {
-                  ...prevState.mcp,
-                  clientsInitialized: true,
-                },
-              }
+              return prevState
             }
             return {
               ...prevState,
               mcp: {
                 ...prevState.mcp,
-                clientsInitialized: true,
                 clients: [...prevState.mcp.clients, ...newClients],
               },
             }

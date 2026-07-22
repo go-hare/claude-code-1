@@ -377,6 +377,19 @@ export type QueuedCommand = {
     flowStepId?: string
     flowStepName?: string
   }
+  /**
+   * Official concurrent onQuery re-queue + drain field: when true, the turn
+   * was already inside a stop-hook continuation. handlePromptSubmit aggregates
+   * `commands.some(c => c.stopHookActive)` and passes it into query() so nested
+   * stop hooks see stop_hook_active=true.
+   */
+  stopHookActive?: boolean
+  /**
+   * Official concurrent onQuery re-queue + drain field: remote/SDK client
+   * platform string (e.g. mobile/web). Stamped onto queue entries from remote
+   * inject paths; preserved across concurrent re-queue.
+   */
+  clientPlatform?: string
 }
 
 /**

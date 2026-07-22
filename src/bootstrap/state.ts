@@ -479,20 +479,17 @@ export function getSessionId(): SessionId {
 }
 
 /**
- * densable `mi()` — stable main-thread AgentId for queue AL / BRt / Zeo.
+ * densable `mi()` — main-thread AgentId for queue AL / BRt / Zeo.
  *
- * Gold: `VO()?.sessionId ? Qc(e) : (Ot.mainAgentId ??= Qc(Ot.sessionId))`.
- * Local has no VO bridge; cache once per process on first call (same as Ot.mainAgentId).
+ * Gold: `VO()?.sessionId ? Qc(e) : (Ot.mainAgentId ??= Qc(Ot.sessionId))` —
+ * official reads the live session id (no process-long sticky cache). We mirror
+ * that: always return current STATE.sessionId so /clear (regenerateSessionId)
+ * and /resume (switchSession) rebind AL/drain without stale queue agentId.
  * Call sites that need current session as string still use getSessionId().
  */
-let mainAgentIdCache: import('src/types/ids.js').AgentId | null = null
-
 export function getMainThreadAgentId(): import('src/types/ids.js').AgentId {
-  if (mainAgentIdCache) return mainAgentIdCache
   // Inline brand — bootstrap is a DAG leaf; avoid importing asAgentId here.
-  mainAgentIdCache =
-    STATE.sessionId as unknown as import('src/types/ids.js').AgentId
-  return mainAgentIdCache
+  return STATE.sessionId as unknown as import('src/types/ids.js').AgentId
 }
 
 /**

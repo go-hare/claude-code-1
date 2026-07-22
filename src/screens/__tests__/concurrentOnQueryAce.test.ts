@@ -5,6 +5,8 @@ import { describe, expect, test } from 'bun:test'
 /**
  * densable concurrent onQuery re-queue: Ace-visible meta must survive
  * tryStart() contention with origin/isMeta/skipSlashCommands preserved.
+ * Official also rides stopHookActive (e9) + clientPlatform (t5) on the
+ * enqueue payload — not message extras / priority inventing.
  */
 describe('REPL concurrent onquery densable Ace', () => {
   const src = readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8')
@@ -23,5 +25,17 @@ describe('REPL concurrent onquery densable Ace', () => {
     expect(src).toContain('origin: m.origin')
     expect(src).toContain('isMeta: m.isMeta')
     expect(src).toContain('agentId: getMainThreadAgentId()')
+  })
+
+  test('official e9/t5: stopHookActive + clientPlatform on concurrent re-queue', () => {
+    expect(src).toContain('stopHookActive')
+    expect(src).toContain('clientPlatform')
+    // Must ride onQuery args (e9/t5), not invent priority from message extras
+    expect(src).toContain(
+      '...(stopHookActive !== undefined ? { stopHookActive } : {})',
+    )
+    expect(src).toContain(
+      '...(clientPlatform !== undefined ? { clientPlatform } : {})',
+    )
   })
 })

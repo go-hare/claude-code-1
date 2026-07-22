@@ -3929,6 +3929,8 @@ export function REPL({
       additionalAllowedTools: string[],
       mainLoopModelParam: string,
       effort?: EffortValue,
+      /** Official JWH.stopHookActive — seed query loop for stop-hook continuations. */
+      stopHookActive?: boolean,
     ) => {
       // Prepare IDE integration for new prompt. Read mcpClients fresh from
       // store — useManageMCPConnections may have populated it since the
@@ -4107,6 +4109,10 @@ export function REPL({
         canUseTool,
         toolUseContext,
         querySource: getQuerySourceForREPL(),
+        // Official drain: seed stopHookActive so nested stop hooks see
+        // stop_hook_active=true when this turn was a stop-hook continuation
+        // or concurrent re-queue of one.
+        stopHookActive,
       })) {
         onQueryEvent(event);
       }
@@ -4213,6 +4219,10 @@ export function REPL({
       onBeforeQueryCallback?: (input: string, newMessages: MessageType[]) => Promise<boolean>,
       input?: string,
       effort?: EffortValue,
+      /** Official e9 — stop-hook continuation flag for concurrent re-queue + query seed. */
+      stopHookActive?: boolean,
+      /** Official t5 — remote/SDK client platform preserved across concurrent re-queue. */
+      clientPlatform?: string,
     ): Promise<boolean> => {
       // If this is a teammate, mark them as active when starting a turn
       if (isAgentSwarmsEnabled()) {
@@ -4231,9 +4241,10 @@ export function REPL({
       if (thisGeneration === null) {
         logEvent('tengu_concurrent_onquery_detected', {});
 
-        // densable concurrent onquery: skip bare meta ticks, but keep Ace-
-        // visible peer/channel/observer meta and re-queue with origin/isMeta/
-        // skipSlashCommands so framing/routing survive the re-drain.
+        // Official concurrent onquery (dI when tryStart null):
+        // mw({ value, mode:"prompt", origin, isMeta, skipSlashCommands:LOH(origin),
+        //      stopHookActive:e9, clientPlatform:t5 })
+        // densable Ace: keep peer/channel/observer meta (skip bare meta ticks).
         let enqueued = false;
         for (const m of newMessages) {
           if (m.type !== 'user') continue;
@@ -4252,6 +4263,9 @@ export function REPL({
             origin: m.origin,
             isMeta: m.isMeta,
             skipSlashCommands: isMetaVisibleOrigin(m.origin as { kind?: string; senderTaskId?: string } | undefined),
+            // Official e9/t5 — ride the onQuery args, not message extras.
+            ...(stopHookActive !== undefined ? { stopHookActive } : {}),
+            ...(clientPlatform !== undefined ? { clientPlatform } : {}),
           });
           if (!enqueued) {
             enqueued = true;
@@ -4308,6 +4322,7 @@ export function REPL({
             additionalAllowedTools,
             mainLoopModelParam,
             effort,
+            stopHookActive,
           );
         } catch (error) {
           if (feature('UDS_INBOX')) {

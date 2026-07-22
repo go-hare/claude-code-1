@@ -4646,12 +4646,17 @@ function runHeadlessStreaming(
                   onInboundMessage(msg) {
                     const fields = extractInboundMessageFields(msg)
                     if (!fields) return
-                    const { content, uuid } = fields
+                    const { content, uuid, clientPlatform } = fields
                     enqueue({
                       value: content,
                       mode: 'prompt' as const,
                       uuid,
                       skipSlashCommands: true,
+                      // Official: stamp clientPlatform so concurrent re-queue
+                      // and drain can round-trip remote platform identity.
+                      ...(clientPlatform !== undefined
+                        ? { clientPlatform }
+                        : {}),
                     })
                     void run()
                   },
