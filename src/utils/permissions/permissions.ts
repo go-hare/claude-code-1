@@ -120,6 +120,8 @@ const PERMISSION_RULE_SOURCES = [
   'cliArg',
   'command',
   'session',
+  // densable Ryl — dynamic MCP tools[].permission_policy buckets
+  'mcpServerPolicy',
 ] as const satisfies readonly PermissionRuleSource[]
 
 export function permissionRuleSourceDisplayString(

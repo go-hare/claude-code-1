@@ -818,8 +818,17 @@ export function useManageMCPConnections(
             config,
           }))
 
+        // densable gDs stamp: even with no new/stale clients, flip
+        // clientsInitialized so deferred adopt resume can settle.
         if (newClients.length === 0 && stale.length === 0) {
-          return prevState
+          if (prevState.mcp.clientsInitialized) return prevState
+          return {
+            ...prevState,
+            mcp: {
+              ...prevState.mcp,
+              clientsInitialized: true,
+            },
+          }
         }
 
         return {
@@ -827,6 +836,7 @@ export function useManageMCPConnections(
           mcp: {
             ...prevState.mcp,
             ...mcpWithoutStale,
+            clientsInitialized: true,
             clients: [...mcpWithoutStale.clients, ...newClients],
           },
         }
@@ -929,11 +939,21 @@ export function useManageMCPConnections(
                   : ('pending' as const),
                 config,
               }))
-            if (newClients.length === 0) return prevState
+            if (newClients.length === 0) {
+              if (prevState.mcp.clientsInitialized) return prevState
+              return {
+                ...prevState,
+                mcp: {
+                  ...prevState.mcp,
+                  clientsInitialized: true,
+                },
+              }
+            }
             return {
               ...prevState,
               mcp: {
                 ...prevState.mcp,
+                clientsInitialized: true,
                 clients: [...prevState.mcp.clients, ...newClients],
               },
             }

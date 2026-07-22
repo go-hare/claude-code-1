@@ -63,6 +63,8 @@ export type PermissionRuleSource =
   | 'cliArg'
   | 'command'
   | 'session'
+  /** densable mcpServerPolicy — tools[].permission_policy from dynamic MCP. */
+  | 'mcpServerPolicy'
 
 /**
  * The value of a permission rule - specifies which tool and optional content

@@ -184,17 +184,21 @@ export function hashMcpConfig(config: ScopedMcpServerConfig): string {
  */
 export function excludeStalePluginClients(
   mcp: {
+    clientsInitialized?: boolean
     clients: MCPServerConnection[]
     tools: Tool[]
     commands: Command[]
     resources: Record<string, ServerResource[]>
+    pluginReconnectKey?: number
   },
   configs: Record<string, ScopedMcpServerConfig>,
 ): {
+  clientsInitialized?: boolean
   clients: MCPServerConnection[]
   tools: Tool[]
   commands: Command[]
   resources: Record<string, ServerResource[]>
+  pluginReconnectKey?: number
   stale: MCPServerConnection[]
 } {
   const stale = mcp.clients.filter(c => {

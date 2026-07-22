@@ -762,6 +762,7 @@ function rootPathForSource(source: PermissionRuleSource): string {
     case 'cliArg':
     case 'command':
     case 'session':
+    case 'mcpServerPolicy':
       return expandPath(getOriginalCwd())
     case 'userSettings':
     case 'policySettings':
