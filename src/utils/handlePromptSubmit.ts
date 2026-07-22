@@ -611,6 +611,18 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           const clientPlatform = commands.find(
             c => c.clientPlatform,
           )?.clientPlatform
+          // densable c8o: stamp verifiedSlackHumanTurn onto matching user msgs
+          // by queue uuid so foreign_user_input guards treat Slack human turns.
+          for (const cmd of commands) {
+            if (!cmd.verifiedSlackHumanTurn || cmd.uuid === undefined) continue
+            for (const msg of newMessages) {
+              if (msg.type === 'user' && msg.uuid === cmd.uuid) {
+                ;(
+                  msg as { verifiedSlackHumanTurn?: boolean }
+                ).verifiedSlackHumanTurn = true
+              }
+            }
+          }
           await onQuery(
             newMessages,
             abortController,

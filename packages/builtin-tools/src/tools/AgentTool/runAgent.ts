@@ -442,10 +442,19 @@ export async function* runAgent({
   // Override permission mode if agent defines one
   // However, don't override if parent is in bypassPermissions or acceptEdits mode - those should always take precedence
   // For async agents, also set shouldAvoidPermissionPrompts since they can't show UI
-  const agentPermissionMode = agentDefinition.permissionMode
+  // Live-read selectedAgent.permissionMode so local plan_approval can exit plan
+  // mid-run (SendMessage stamps task.selectedAgent.permissionMode).
   const agentGetAppState = () => {
     const state = toolUseContext.getAppState()
     let toolPermissionContext = state.toolPermissionContext
+
+    const liveTask = state.tasks?.[agentId]
+    const liveSelectedAgent =
+      liveTask && typeof liveTask === 'object' && 'selectedAgent' in liveTask
+        ? (liveTask as { selectedAgent?: AgentDefinition }).selectedAgent
+        : undefined
+    const agentPermissionMode =
+      liveSelectedAgent?.permissionMode ?? agentDefinition.permissionMode
 
     // Override permission mode if agent defines one (unless parent is bypassPermissions, acceptEdits, or auto)
     if (

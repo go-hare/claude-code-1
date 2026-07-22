@@ -38,4 +38,16 @@ describe('REPL concurrent onquery densable Ace', () => {
       '...(clientPlatform !== undefined ? { clientPlatform } : {})',
     )
   })
+
+  test('densable concurrent fields: priority / verifiedSlack / inputSource / preExpansion / skip stackedExpansion', () => {
+    // Gold IT payload extras beyond e9/t5 (still Kce text-only for value)
+    expect(src).toContain('queuePriority')
+    expect(src).toContain('verifiedSlackHumanTurn')
+    expect(src).toContain('suggestion_accepted')
+    expect(src).toContain('preExpansionValue')
+    expect(src).toContain('stackedExpansion')
+    expect(src).toContain('stackedOriginalInput')
+    // Document gold: concurrent value is text-only (Kce), not ContentBlock[]
+    expect(src).toContain('getContentText')
+  })
 })

@@ -4241,20 +4241,33 @@ export function REPL({
       if (thisGeneration === null) {
         logEvent('tengu_concurrent_onquery_detected', {});
 
-        // Official concurrent onquery (dI when tryStart null):
-        // mw({ value, mode:"prompt", origin, isMeta, skipSlashCommands:LOH(origin),
-        //      stopHookActive:e9, clientPlatform:t5 })
-        // densable Ace: keep peer/channel/observer meta (skip bare meta ticks).
+        // densable concurrent onquery when tryStart null:
+        // IT({ value: stackedOriginal??Kce(content), mode:"prompt", agentId:mi(),
+        //      uuid, origin, isMeta, skipSlashCommands:Ace(origin),
+        //      stopHookActive:e9, clientPlatform:t5, priority:queuePriority,
+        //      verifiedSlackHumanTurn, inputSource, preExpansionValue })
+        // Kce is text-only (images/blocks collapse) — gold does the same.
+        // Skip stackedExpansion intermediate skill-stack messages.
+        // Ace: keep peer/channel/observer meta (skip bare meta ticks).
         let enqueued = false;
         for (const m of newMessages) {
           if (m.type !== 'user') continue;
           if (m.isMeta && !isMetaVisibleOrigin(m.origin as { kind?: string; senderTaskId?: string } | undefined)) {
             continue;
           }
+          // densable: if (Ad.stackedExpansion) continue
+          if ((m as { stackedExpansion?: boolean }).stackedExpansion) {
+            continue;
+          }
           const userContent = m.message?.content;
           if (userContent === undefined) continue;
-          const textContent = getContentText(userContent as string | ContentBlockParam[]);
-          if (textContent === null) continue;
+          // densable: _y?.value ?? stackedOriginalInput ?? Kce(content)
+          const stackedOriginal = (m as { stackedOriginalInput?: string }).stackedOriginalInput;
+          const textContent = stackedOriginal ?? getContentText(userContent as string | ContentBlockParam[]);
+          if (textContent === null || textContent === undefined) continue;
+          const queuePriority = (m as { queuePriority?: 'now' | 'next' | 'later' }).queuePriority;
+          const verifiedSlackHumanTurn = (m as { verifiedSlackHumanTurn?: boolean }).verifiedSlackHumanTurn;
+          const promptSource = (m as { promptSource?: string }).promptSource;
           enqueue({
             value: textContent,
             mode: 'prompt',
@@ -4266,6 +4279,10 @@ export function REPL({
             // Official e9/t5 — ride the onQuery args, not message extras.
             ...(stopHookActive !== undefined ? { stopHookActive } : {}),
             ...(clientPlatform !== undefined ? { clientPlatform } : {}),
+            ...(queuePriority !== undefined ? { priority: queuePriority } : {}),
+            ...(verifiedSlackHumanTurn !== undefined ? { verifiedSlackHumanTurn } : {}),
+            ...(promptSource === 'suggestion_accepted' ? { inputSource: 'suggestion_accepted' } : {}),
+            ...(stackedOriginal !== undefined ? { preExpansionValue: stackedOriginal } : {}),
           });
           if (!enqueued) {
             enqueued = true;

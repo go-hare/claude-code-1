@@ -8,6 +8,8 @@ import {
   getDaemonLockPath,
   installDaemonLock,
   isDaemonCmdline,
+  isDaemonPeerBlockingInstall,
+  isDaemonPidInstallLive,
   isDaemonPidRaceLive,
   matchesDaemonProcStart,
   readAliveDaemonLock,
@@ -231,7 +233,9 @@ describe('installDaemonLock (densable R9d→R0o, never steal live)', () => {
         { settleMs: 0 },
       ),
     ).toBe(true)
-    // Second install with different ownership must not clobber via R0o.
+    // densable: kill0 + jen + iPs. On Linux, test runner cmdline is not
+    // "claude daemon" so jen is false and R0o may reclaim (PID-reuse path).
+    // On non-Linux, jen always true → refuse clobber.
     const second = await installDaemonLock(
       {
         pid: process.pid + 1,
@@ -242,10 +246,62 @@ describe('installDaemonLock (densable R9d→R0o, never steal live)', () => {
       dir,
       { settleMs: 0 },
     )
-    expect(second).toBe(false)
-    const got = await readDaemonLock(dir)
-    expect(got?.pid).toBe(process.pid)
-    expect(got?.startedAt).toBe(10)
+    if (process.platform === 'linux') {
+      // jen rejects bun test PID as non-daemon — replace allowed by gold.
+      expect(second).toBe(true)
+      const got = await readDaemonLock(dir)
+      expect(got?.pid).toBe(process.pid + 1)
+      expect(got?.startedAt).toBe(20)
+    } else {
+      expect(second).toBe(false)
+      const got = await readDaemonLock(dir)
+      expect(got?.pid).toBe(process.pid)
+      expect(got?.startedAt).toBe(10)
+    }
+  })
+
+  test('refuses replace when kill0 throws EPERM (not cI-dead)', async () => {
+    expect(
+      await writeDaemonLock(
+        {
+          pid: 99_999,
+          version: 'foreign',
+          startedAt: 1,
+          origin: 'service',
+        },
+        dir,
+      ),
+    ).toBe(true)
+    const orig = process.kill.bind(process)
+    process.kill = ((pid: number, signal?: number | NodeJS.Signals): true => {
+      if ((signal === 0 || signal === undefined) && pid === 99_999) {
+        const e = new Error('EPERM') as NodeJS.ErrnoException
+        e.code = 'EPERM'
+        throw e
+      }
+      return orig(pid, signal as number | NodeJS.Signals)
+    }) as typeof process.kill
+    try {
+      expect(await isDaemonPeerBlockingInstall({ pid: 99_999 })).toBe(true)
+      // cI still treats EPERM as dead — install must NOT reuse that probe.
+      expect(isDaemonPidRaceLive(99_999)).toBe(false)
+      const second = await installDaemonLock(
+        {
+          pid: process.pid,
+          version: 'thief',
+          startedAt: 50,
+          origin: 'service',
+        },
+        dir,
+        { settleMs: 0 },
+      )
+      expect(second).toBe(false)
+      const got = await readDaemonLock(dir)
+      expect(got?.pid).toBe(99_999)
+      expect(got?.startedAt).toBe(1)
+    } finally {
+      process.kill = orig
+    }
   })
 
   test('replaces stale dead-pid lock via R0o', async () => {
@@ -262,8 +318,8 @@ describe('installDaemonLock (densable R9d→R0o, never steal live)', () => {
         dir,
       ),
     ).toBe(true)
-    // Only run replace path when probe agrees peer is dead.
-    if (isDaemonPidRaceLive(deadPid)) return
+    // Only run replace path when install probe agrees peer is dead (ESRCH).
+    if (isDaemonPidInstallLive(deadPid)) return
     expect(
       await installDaemonLock(
         {
@@ -306,6 +362,42 @@ describe('isDaemonPidRaceLive (densable cI: any throw → dead)', () => {
     }) as typeof process.kill
     try {
       expect(isDaemonPidRaceLive(12345)).toBe(false)
+    } finally {
+      process.kill = orig
+    }
+  })
+})
+
+describe('isDaemonPidInstallLive / isDaemonPeerBlockingInstall (install ≠ cI)', () => {
+  test('EPERM is treated as live for install/race', () => {
+    const orig = process.kill.bind(process)
+    process.kill = ((pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0 || signal === undefined) {
+        const e = new Error('EPERM') as NodeJS.ErrnoException
+        e.code = 'EPERM'
+        throw e
+      }
+      return orig(pid, signal as number | NodeJS.Signals)
+    }) as typeof process.kill
+    try {
+      expect(isDaemonPidInstallLive(12345)).toBe(true)
+    } finally {
+      process.kill = orig
+    }
+  })
+
+  test('ESRCH is treated as dead for install/race', () => {
+    const orig = process.kill.bind(process)
+    process.kill = ((pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0 || signal === undefined) {
+        const e = new Error('ESRCH') as NodeJS.ErrnoException
+        e.code = 'ESRCH'
+        throw e
+      }
+      return orig(pid, signal as number | NodeJS.Signals)
+    }) as typeof process.kill
+    try {
+      expect(isDaemonPidInstallLive(12345)).toBe(false)
     } finally {
       process.kill = orig
     }

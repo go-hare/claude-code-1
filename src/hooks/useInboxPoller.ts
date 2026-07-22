@@ -18,7 +18,6 @@ import { logForDebugging } from '../utils/debug.js'
 import { createAssistantMessage } from '../utils/messages.js'
 import { toExternalPermissionMode } from '../utils/permissions/PermissionMode.js'
 import { applyInheritedPermissionMode } from '../utils/permissions/permissionSetup.js'
-import { applyPermissionUpdate } from '../utils/permissions/PermissionUpdate.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { isInsideTmux } from '../utils/swarm/backends/detection.js'
 import {
@@ -51,13 +50,12 @@ import {
   isSandboxPermissionRequest,
   isSandboxPermissionResponse,
   isShutdownApproved,
-  isShutdownRequest,
-  isTeamPermissionUpdate,
   markMessagesAsRead,
   readUnreadMessages,
   type TeammateMessage,
   writeToMailbox,
 } from '../utils/teammateMailbox.js'
+import { classifyInboxProtocolMessages } from './inboxPollerProtocol.js'
 import {
   hasPermissionCallback,
   hasSandboxPermissionCallback,
@@ -149,6 +147,9 @@ export function useInboxPoller({
 
     // densable InboxPoller plan_approval_response (process teammate):
     // 1. only team-lead  2. only while mode==="plan"  3. B$a guards  4. Sxt member mode
+    // Track handled msgs in handledPlanApprovals (densable `b`); reject still joins
+    // so classification rewrites to Ejr text instead of leaking raw protocol JSON.
+    const handledPlanApprovals = new Set<TeammateMessage>()
     if (isTeammate() && isPlanModeRequired()) {
       for (const msg of unread) {
         const approvalResponse = isPlanApprovalResponse(msg.text)
@@ -165,6 +166,7 @@ export function useInboxPoller({
           )
           continue
         }
+        handledPlanApprovals.add(msg)
         logForDebugging(
           `[InboxPoller] Received plan approval response from team-lead: approved=${approvalResponse.approved}`,
         )
@@ -206,49 +208,35 @@ export function useInboxPoller({
       void markMessagesAsRead(agentName, currentAppState.teamContext?.teamName)
     }
 
-    // Separate permission messages from regular teammate messages
-    const permissionRequests: TeammateMessage[] = []
-    const permissionResponses: TeammateMessage[] = []
-    const sandboxPermissionRequests: TeammateMessage[] = []
-    const sandboxPermissionResponses: TeammateMessage[] = []
-    const shutdownRequests: TeammateMessage[] = []
-    const shutdownApprovals: TeammateMessage[] = []
-    const teamPermissionUpdates: TeammateMessage[] = []
-    const modeSetRequests: TeammateMessage[] = []
-    const planApprovalRequests: TeammateMessage[] = []
-    const regularMessages: TeammateMessage[] = []
+    // densable classify: team_permission_update always dropped; handled
+    // plan_approval_response → Ejr into regularMessages; other unrouted kre drop.
+    const {
+      permissionRequests,
+      permissionResponses,
+      sandboxPermissionRequests,
+      sandboxPermissionResponses,
+      shutdownRequests,
+      shutdownApprovals,
+      modeSetRequests,
+      planApprovalRequests,
+      regularMessages,
+      droppedProtocolFrames,
+    } = classifyInboxProtocolMessages(unread, handledPlanApprovals)
 
-    for (const m of unread) {
-      const permReq = isPermissionRequest(m.text)
-      const permResp = isPermissionResponse(m.text)
-      const sandboxReq = isSandboxPermissionRequest(m.text)
-      const sandboxResp = isSandboxPermissionResponse(m.text)
-      const shutdownReq = isShutdownRequest(m.text)
-      const shutdownApproval = isShutdownApproved(m.text)
-      const teamPermUpdate = isTeamPermissionUpdate(m.text)
-      const modeSetReq = isModeSetRequest(m.text)
-      const planApprovalReq = isPlanApprovalRequest(m.text)
-
-      if (permReq) {
-        permissionRequests.push(m)
-      } else if (permResp) {
-        permissionResponses.push(m)
-      } else if (sandboxReq) {
-        sandboxPermissionRequests.push(m)
-      } else if (sandboxResp) {
-        sandboxPermissionResponses.push(m)
-      } else if (shutdownReq) {
-        shutdownRequests.push(m)
-      } else if (shutdownApproval) {
-        shutdownApprovals.push(m)
-      } else if (teamPermUpdate) {
-        teamPermissionUpdates.push(m)
-      } else if (modeSetReq) {
-        modeSetRequests.push(m)
-      } else if (planApprovalReq) {
-        planApprovalRequests.push(m)
+    for (const m of droppedProtocolFrames) {
+      if (
+        m.text.includes('"type":"team_permission_update"') ||
+        m.text.includes('"type": "team_permission_update"')
+      ) {
+        logForDebugging(
+          '[InboxPoller] Dropping team_permission_update message: permission rules are never accepted from the inbox',
+          { level: 'warn' },
+        )
       } else {
-        regularMessages.push(m)
+        logForDebugging(
+          `[InboxPoller] Dropping unrouted protocol frame from ${m.from}: ${m.text.substring(0, 80)}`,
+          { level: 'warn' },
+        )
       }
     }
 
@@ -499,57 +487,7 @@ export function useInboxPoller({
       }
     }
 
-    // Handle team permission updates (teammate side) - apply permission to context
-    if (teamPermissionUpdates.length > 0 && isTeammate()) {
-      logForDebugging(
-        `[InboxPoller] Found ${teamPermissionUpdates.length} team permission update(s)`,
-      )
-
-      for (const m of teamPermissionUpdates) {
-        const parsed = isTeamPermissionUpdate(m.text)
-        if (!parsed) {
-          logForDebugging(
-            `[InboxPoller] Failed to parse team permission update: ${m.text.substring(0, 100)}`,
-          )
-          continue
-        }
-
-        // Validate required nested fields to prevent crashes from malformed messages
-        if (
-          !parsed.permissionUpdate?.rules ||
-          !parsed.permissionUpdate?.behavior
-        ) {
-          logForDebugging(
-            `[InboxPoller] Invalid team permission update: missing permissionUpdate.rules or permissionUpdate.behavior`,
-          )
-          continue
-        }
-
-        // Apply the permission update to the teammate's context
-        logForDebugging(
-          `[InboxPoller] Applying team permission update: ${parsed.toolName} allowed in ${parsed.directoryPath}`,
-        )
-        logForDebugging(
-          `[InboxPoller] Permission update rules: ${jsonStringify(parsed.permissionUpdate.rules)}`,
-        )
-
-        setAppState(prev => {
-          const updated = applyPermissionUpdate(prev.toolPermissionContext, {
-            type: 'addRules',
-            rules: parsed.permissionUpdate.rules,
-            behavior: parsed.permissionUpdate.behavior,
-            destination: 'session',
-          })
-          logForDebugging(
-            `[InboxPoller] Updated session allow rules: ${jsonStringify(updated.alwaysAllowRules.session)}`,
-          )
-          return {
-            ...prev,
-            toolPermissionContext: updated,
-          }
-        })
-      }
-    }
+    // densable: team_permission_update is never applied from the inbox (dropped above).
 
     // Handle mode set requests (teammate side) - team lead changing teammate's mode
     if (modeSetRequests.length > 0 && isTeammate()) {

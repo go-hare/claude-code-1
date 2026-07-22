@@ -1014,9 +1014,10 @@ export const AgentTool = buildTool({
 
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId;
-      // densable Sot: Re = Yeo(parent)??mi(); always stamp ownerAgentId:Re
-      // (top-level → mi(); nested panel parent → Yeo). Gge via registerAsyncAgent
-      // no-ops when owner is not local_agent (main).
+      // densable Sot: He = c.agentId (raw caller); Re = Yeo(He)??mi().
+      // ownerAgentId:Re (BRt/keepalive); parentAgentId:He (lineage walk).
+      // Gge via registerAsyncAgent no-ops when owner is not local_agent (main).
+      const parentAgentId = toolUseContext.agentId;
       const ownerId =
         resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
       const agentBackgroundTask = registerAsyncAgent({
@@ -1032,7 +1033,7 @@ export const AgentTool = buildTool({
         activeTaskExecutionContext,
         ownerAgentId: ownerId,
         notificationTargetAgentId: asAgentId(ownerId),
-        parentAgentId: ownerId,
+        parentAgentId,
       });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -1176,8 +1177,9 @@ export const AgentTool = buildTool({
           let backgroundPromise: Promise<{ type: 'background' }> | undefined;
           let cancelAutoBackground: (() => void) | undefined;
           if (!isBackgroundTasksDisabled) {
-            // densable OSu: ownerAgentId:Re at foreground register (Yeo(parent)??mi()).
-            // Top-level → mi(); nested panel parent → Yeo. No Gge until mid-bg.
+            // densable OSu: He = c.agentId; Re = Yeo(He)??mi().
+            // ownerAgentId:Re; parentAgentId:He. No Gge until mid-bg.
+            const fgParentAgentId = toolUseContext.agentId;
             const fgOwnerId =
               resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
             const registration = registerAgentForeground({
@@ -1190,7 +1192,7 @@ export const AgentTool = buildTool({
               autoBackgroundMs: getAutoBackgroundMs() || undefined,
               ownerAgentId: fgOwnerId,
               notificationTargetAgentId: asAgentId(fgOwnerId),
-              parentAgentId: fgOwnerId,
+              parentAgentId: fgParentAgentId,
             });
             foregroundTaskId = registration.taskId;
             backgroundPromise = registration.backgroundSignal.then(() => ({
@@ -1287,6 +1289,8 @@ export const AgentTool = buildTool({
                   // re-stamps if missing so BRt can tB(owner) (auto-bg path).
                   // Gge no-ops when owner is not local_agent (main/mi()).
                   if (!getIsNonInteractiveSession()) {
+                    // densable: re-stamp owner Re only; parent stays He (raw c.agentId)
+                    const parentAgentId = toolUseContext.agentId;
                     const ownerId =
                       resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ??
                       getMainThreadAgentId();
@@ -1294,7 +1298,12 @@ export const AgentTool = buildTool({
                     rootSetAppState(prev => {
                       const t = prev.tasks[backgroundedTaskId];
                       if (!isLocalAgentTask(t)) return prev;
-                      if (t.ownerAgentId === ownerId && t.notificationTargetAgentId === asAgentId(ownerId)) {
+                      const nextParentId = t.parentAgentId ?? parentAgentId;
+                      if (
+                        t.ownerAgentId === ownerId &&
+                        t.notificationTargetAgentId === asAgentId(ownerId) &&
+                        t.parentAgentId === nextParentId
+                      ) {
                         return prev;
                       }
                       return {
@@ -1305,7 +1314,7 @@ export const AgentTool = buildTool({
                             ...t,
                             ownerAgentId: t.ownerAgentId ?? ownerId,
                             notificationTargetAgentId: t.notificationTargetAgentId ?? asAgentId(ownerId),
-                            parentAgentId: t.parentAgentId ?? ownerId,
+                            parentAgentId: nextParentId,
                           },
                         },
                       };

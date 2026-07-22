@@ -31,9 +31,13 @@ type TaskSlice = {
   isIdle?: boolean
   resuming?: boolean
   stoppedByUser?: boolean
+  selectedAgent?: { agentType?: string; permissionMode?: string }
 }
 
-function makeRunningAgent(agentId: string): TaskSlice {
+function makeRunningAgent(
+  agentId: string,
+  selectedAgent?: { agentType?: string; permissionMode?: string },
+): TaskSlice {
   return {
     type: 'local_agent',
     status: 'running',
@@ -44,6 +48,10 @@ function makeRunningAgent(agentId: string): TaskSlice {
     retain: false,
     isIdle: false,
     resuming: false,
+    selectedAgent: selectedAgent ?? {
+      agentType: 'general-purpose',
+      permissionMode: 'plan',
+    },
   }
 }
 
@@ -134,10 +142,12 @@ describe('SendMessage plan_approval_response local_agent vs team mailbox', () =>
     expect(pending.length).toBe(1)
     expect(pending[0]?.text).toContain('[Plan Approved]')
     expect(pending[0]?.text).toContain('plan_approval-1')
+    // Local fortify mFu-equivalent: exit plan mode on selectedAgent
+    expect(getTasks()[agentId]?.selectedAgent?.permissionMode).toBe('default')
     expect(writeToMailboxMock).not.toHaveBeenCalled()
   })
 
-  test('main → running local agentId plan reject queues rejection text', async () => {
+  test('main → running local agentId plan reject queues rejection text without mode change', async () => {
     const agentId = 'a81c8d8229cca26eb'
     const { context, getTasks } = makeContext({
       tasks: { [agentId]: makeRunningAgent(agentId) },
@@ -162,6 +172,8 @@ describe('SendMessage plan_approval_response local_agent vs team mailbox', () =>
     const pending = getTasks()[agentId]?.pendingMessages ?? []
     expect(pending[0]?.text).toContain('[Plan Rejected]')
     expect(pending[0]?.text).toContain('add tests')
+    // Reject: only Ejr text; stay in plan
+    expect(getTasks()[agentId]?.selectedAgent?.permissionMode).toBe('plan')
     expect(writeToMailboxMock).not.toHaveBeenCalled()
   })
 

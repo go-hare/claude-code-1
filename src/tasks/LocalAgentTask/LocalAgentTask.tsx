@@ -988,13 +988,13 @@ export async function enqueueAgentNotification({
    */
   ownerAgentId?: string;
 }): Promise<void> {
-  // BRt owner notify (local patch over densable 2.1.211 hole):
-  // densable: ownerBusy = YC(parked)||running → skip tB + route to owner.
+  // BRt owner notify — INTENTIONAL fortify over densable 2.1.211 (do not "align"):
+  // densable gold: ownerBusy = YC(parked)||running → skip tB + route to owner.
   // That permanently sticks a parent that park-on-keepalive deferred its own
   // BRt: last child never tB's, parent never unparks, child notif sits on a
-  // dead owner queue (Zeo also skips YC interactive).
+  // dead owner queue (Zeo also skips YC interactive). Known hang class.
   //
-  // Local:
+  // Local (keep this fork; tests/automation must expect local timing):
   //   1. atomic notified gate; capture owner
   //   2. hold KA (skip tB) ONLY while owner.status==="running" (can drain)
   //   3. YC-parked / terminal / missing owner → always tB
@@ -1123,7 +1123,7 @@ export async function enqueueAgentNotification({
 }
 
 /**
- * Local fortification for child-first hang (densable also stuck here):
+ * INTENTIONAL fortify for child-first hang (densable 2.1.211 also stuck):
  * Child BRt while parent still `running` → skip tB, notif on parent queue.
  * Parent DSu then Jeo keeps `agent:child` (queue hold) → park without BRt.
  * Zeo skips YC interactive → notifs stuck; parent never notified.
@@ -1131,6 +1131,8 @@ export async function enqueueAgentNotification({
  * After parent parks: force-rewire owner-routed notifs to main, Jeo-detach
  * notified/missing agent: children, then deferred parent BRt if no agent: left.
  * Live (running) children keep the parent parked.
+ *
+ * Do not "align to gold" by restoring YC-as-busy — that reintroduces hang.
  */
 export async function resolveParkedOwnerAfterChildrenSettled(ownerId: string, setAppState: SetAppState): Promise<void> {
   let shouldResolve = false;
@@ -1151,13 +1153,14 @@ export async function resolveParkedOwnerAfterChildrenSettled(ownerId: string, se
 }
 
 /**
- * Local patch over densable BRt/YC hang: when a park-deferred parent
+ * INTENTIONAL fortify over densable BRt/YC hang: when a park-deferred parent
  * (`completed` + live `agent:` children, never notified) loses its last
  * agent: hold via child tB, rewire orphan notifs and fire the deferred
  * parent completion BRt so the panel does not stick until the next user turn.
  *
  * Safe under concurrent child notifies: parent notified gate is atomic inside
  * enqueueAgentNotification; remaining live agent: children keep the parent parked.
+ * Keep this fork — gold YC-as-busy hangs permanently.
  */
 async function fireDeferredParkedOwnerCompletion(ownerId: string, setAppState: SetAppState): Promise<void> {
   let description = 'agent';

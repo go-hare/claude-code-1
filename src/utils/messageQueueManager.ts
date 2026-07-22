@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { Permutations } from 'src/types/utils.js'
 import { getMainThreadAgentId, getSessionId } from '../bootstrap/state.js'
@@ -14,7 +13,7 @@ import type {
   QueuePriority,
 } from '../types/textInputTypes.js'
 import type { PastedContent } from './config.js'
-import { extractTextContent } from './messages.js'
+import { extractTextContent, isHumanLikeOrigin } from './messages.js'
 import { objectGroupBy } from './objectGroupBy.js'
 import { recordQueueOperation } from './sessionStorage.js'
 import { createSignal } from './signal.js'
@@ -370,27 +369,44 @@ export function isPromptInputModeEditable(
 
 /**
  * Whether this queued command can be pulled into the input buffer via UP/ESC.
- * System-generated commands (proactive ticks, scheduled tasks, plan
- * verification, channel messages) contain raw XML and must not leak into
- * the user's input.
+ * densable aJ: editable mode && !isMeta && Mj(origin) — non-human origins
+ * (even non-meta) must not leak into the user's input buffer.
  */
 export function isQueuedCommandEditable(cmd: QueuedCommand): boolean {
-  return isPromptInputModeEditable(cmd.mode) && !cmd.isMeta
+  return (
+    isPromptInputModeEditable(cmd.mode) &&
+    !cmd.isMeta &&
+    isHumanLikeOrigin(cmd.origin)
+  )
 }
 
 /**
- * Whether this queued command should render in the queue preview under the
- * prompt. Superset of editable — channel messages show (so the keyboard user
- * sees what arrived) but stay non-editable (raw XML).
+ * densable U4i — queue preview under the prompt.
+ * Visible for: channel | task-notification | auto-continuation | observer |
+ * peer(+senderTaskId|force) | else aJ (editable && !isMeta && Mj(origin)).
+ * Superset of editable — meta system origins show but stay non-editable.
+ * Ace ≠ U4i: do not shrink this to Ace-only kinds.
  */
-export function isQueuedCommandVisible(cmd: QueuedCommand): boolean {
-  if (
-    (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
-    (cmd as Record<string, unknown>).origin !== undefined &&
-    ((cmd as Record<string, unknown>).origin as Record<string, unknown>)
-      ?.kind === 'channel'
-  )
-    return true
+/**
+ * densable U4i(e,t): `t` is forcePeer only when typeof t==="boolean".
+ * Array.prototype.filter passes (element, index) — without the typeof guard,
+ * index leaks as forcePeer and incorrectly shows peer-without-senderTaskId.
+ */
+export function isQueuedCommandVisible(
+  cmd: QueuedCommand,
+  forcePeer?: boolean,
+): boolean {
+  // densable: let r = typeof t === "boolean" ? t : !1
+  const force = typeof forcePeer === 'boolean' ? forcePeer : false
+  const origin = cmd.origin
+  if (origin?.kind === 'channel') return true
+  if (origin?.kind === 'task-notification') return true
+  if (origin?.kind === 'auto-continuation') return true
+  if (origin?.kind === 'observer') return true
+  if (origin?.kind === 'peer') {
+    if (origin.senderTaskId !== undefined) return true
+    if (force) return true
+  }
   return isQueuedCommandEditable(cmd)
 }
 

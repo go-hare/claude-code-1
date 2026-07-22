@@ -390,6 +390,17 @@ export type QueuedCommand = {
    * inject paths; preserved across concurrent re-queue.
    */
   clientPlatform?: string
+  /**
+   * densable concurrent onQuery: Ad.verifiedSlackHumanTurn — when true, drain
+   * stamps the matching user message so foreign_user_input guards treat it
+   * as human Slack turn (not later/meta noise).
+   */
+  verifiedSlackHumanTurn?: boolean
+  /**
+   * densable concurrent onQuery: Ad.promptSource === "suggestion_accepted"
+   * → inputSource: "suggestion_accepted". Other sources omit.
+   */
+  inputSource?: 'suggestion_accepted' | string
 }
 
 /**

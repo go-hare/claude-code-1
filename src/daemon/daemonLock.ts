@@ -224,12 +224,13 @@ function errnoCode(err: unknown): string | undefined {
 }
 
 /**
- * densable cI / bW live probe:
+ * densable cI / bW live probe (readAliveDaemonLock only):
  *   try { process.kill(pid, 0); return true } catch { return false }
  *
  * Official treats **any** throw (ESRCH and EPERM) as dead so a
- * permission-denied peer does not permanently occupy the supervisor slot.
- * Matches `PM7` / `RM6` style probes elsewhere in densable.
+ * permission-denied peer does not permanently occupy the **read** path
+ * (claim slot / status). Do **not** reuse this for install/race replace —
+ * that path must treat non-ESRCH (EPERM) as live (see isDaemonPidInstallLive).
  */
 export function isDaemonPidRaceLive(pid: number): boolean {
   try {
@@ -237,6 +238,51 @@ export function isDaemonPidRaceLive(pid: number): boolean {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * densable install/race kill0 probe (post-R9d / detectDaemonLockRace):
+ *   try { process.kill(pid, 0); return true }
+ *   catch (re) { return zt(re) !== "ESRCH" }
+ *
+ * EPERM → live (refuse steal / report race). ESRCH → dead.
+ * Distinct from cI (`isDaemonPidRaceLive`) where any throw is dead.
+ */
+export function isDaemonPidInstallLive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return errnoCode(err) !== 'ESRCH'
+  }
+}
+
+/**
+ * densable post-R9d peer gate before R0o:
+ *   try {
+ *     process.kill(ie.pid, 0)
+ *     ne = await jen(ie.pid) && await iPs(ie.pid, ie.procStart, …)
+ *   } catch (re) {
+ *     if (zt(re) !== "ESRCH") ne = true
+ *   }
+ *   if (ne) refuse replace
+ *
+ * kill0 success alone is not enough — non-daemon cmdline / procStart
+ * mismatch allows stale lock reclaim (PID reuse). Non-ESRCH throw
+ * (EPERM) still blocks steal.
+ */
+export async function isDaemonPeerBlockingInstall(
+  lock: Pick<DaemonLockData, 'pid' | 'procStart'>,
+): Promise<boolean> {
+  try {
+    process.kill(lock.pid, 0)
+    return (
+      (await isDaemonCmdline(lock.pid)) &&
+      (await matchesDaemonProcStart(lock.pid, lock.procStart, 1))
+    )
+  } catch (err) {
+    return errnoCode(err) !== 'ESRCH'
   }
 }
 
@@ -352,7 +398,12 @@ export async function writeDaemonLock(
  *   if (!S) {
  *     ie = Gne()
  *     if (ie) {
- *       ne = live peer (densable cI: kill0 success only; any throw → dead)
+ *       try {
+ *         process.kill(ie.pid, 0)
+ *         ne = jen(ie.pid) && iPs(ie.pid, ie.procStart, …)
+ *       } catch (re) {
+ *         if (zt(re) !== "ESRCH") ne = true  // EPERM → live, refuse
+ *       }
  *       if (ne) refuse
  *       S = R0o(_)
  *     } else S = R0o(_)
@@ -361,6 +412,7 @@ export async function writeDaemonLock(
  *   }
  *
  * Prevents Windows rename/unlink path from overwriting a live supervisor lock.
+ * Do not use cI (EPERM=dead) here — that would steal under permission-denied.
  */
 export async function installDaemonLock(
   data: DaemonLockData,
@@ -373,8 +425,7 @@ export async function installDaemonLock(
 
   const existing = await readDaemonLock(configDir)
   if (existing) {
-    // densable cI: kill0 success → live peer (refuse); any throw (ESRCH/EPERM) → dead.
-    if (isDaemonPidRaceLive(existing.pid)) {
+    if (await isDaemonPeerBlockingInstall(existing)) {
       return false
     }
   }
@@ -596,7 +647,8 @@ export async function detectDaemonLockRace(
   if (lock.pid === owner.pid && lock.startedAt === owner.startedAt) {
     return null
   }
-  // densable cI: only kill0 success counts as a live peer (EPERM → dead/null).
-  if (!isDaemonPidRaceLive(lock.pid)) return null
+  // densable install/race: EPERM (non-ESRCH) counts as live peer — report race.
+  // Do not use cI here (that treats EPERM as dead and would miss dual-supervisor).
+  if (!isDaemonPidInstallLive(lock.pid)) return null
   return lock
 }

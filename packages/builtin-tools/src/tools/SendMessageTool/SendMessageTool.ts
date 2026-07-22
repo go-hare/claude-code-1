@@ -12,7 +12,10 @@ import {
   isLocalAgentTask,
   isObserverAgentTask,
   queuePendingMessage,
+  type LocalAgentTaskState,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import { sanitizeInheritedPermissionMode } from 'src/utils/permissions/permissionSetup.js'
+import type { PermissionMode } from 'src/types/permissions.js'
 import { isInProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/types.js'
 import { isMainSessionTask } from 'src/tasks/LocalMainSessionTask.js'
 import { asAgentId, toAgentId } from 'src/types/ids.js'
@@ -646,6 +649,39 @@ function formatPlanApprovalForLocalAgent(
 }
 
 /**
+ * Local fortify over densable (no local_agent mFu): when plan is approved for a
+ * local_agent task, stamp selectedAgent.permissionMode so runAgent's live
+ * agentGetAppState exits plan tool-set. Reject only queues Ejr text.
+ * Teammate path still uses mailbox + mFu/inProcessRunner.
+ */
+function applyPlanApprovalModeToLocalAgent(
+  agentId: string,
+  approved: boolean,
+  permissionMode: string | undefined,
+  setAppState: ToolUseContext['setAppState'],
+): void {
+  if (!approved) return
+  const mode = sanitizeInheritedPermissionMode(permissionMode) as PermissionMode
+  setAppState(prev => {
+    const t = prev.tasks[agentId]
+    if (!isLocalAgentTask(t) || isMainSessionTask(t)) return prev
+    const nextSelected = t.selectedAgent
+      ? { ...t.selectedAgent, permissionMode: mode }
+      : ({ permissionMode: mode } as LocalAgentTaskState['selectedAgent'])
+    return {
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [agentId]: {
+          ...t,
+          selectedAgent: nextSelected,
+        },
+      },
+    }
+  })
+}
+
+/**
  * densable Hco local_agent path: name registry or raw createAgentId →
  * queue when running, resume when stopped/evicted. Returns null when `to`
  * is not a local subagent address (teammate names fall through to mailbox).
@@ -656,6 +692,10 @@ async function tryDeliverToLocalAgent(
   context: ToolUseContext,
   canUseTool: Parameters<NonNullable<Tool['call']>>[2],
   assistantMessage: Parameters<NonNullable<Tool['call']>>[3],
+  planApproval?: {
+    approved: boolean
+    permissionMode?: string
+  },
 ): Promise<{ data: MessageOutput } | null> {
   if (to === '*' || to === MAIN_RECIPIENT) {
     return null
@@ -678,15 +718,23 @@ async function tryDeliverToLocalAgent(
         },
       }
     }
+    const setAppState = context.setAppStateForTasks ?? context.setAppState
+    // Local fortify: apply mode before queue so next tool round sees new mode.
+    if (planApproval) {
+      applyPlanApprovalModeToLocalAgent(
+        agentId,
+        planApproval.approved,
+        planApproval.permissionMode,
+        setAppState,
+      )
+    }
     const { origin: sendOrigin, body: sendBody } =
       resolveSendMessageOriginAndBody(context, message)
     if (task.status === 'running') {
-      queuePendingMessage(
-        agentId,
-        sendBody,
-        context.setAppStateForTasks ?? context.setAppState,
-        { isMeta: true, origin: sendOrigin },
-      )
+      queuePendingMessage(agentId, sendBody, setAppState, {
+        isMeta: true,
+        origin: sendOrigin,
+      })
       return {
         data: {
           success: true,
@@ -1247,14 +1295,25 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       // (Observer sender gate is at call() entry — covers UDS/mailbox/etc.)
       if (input.to !== '*') {
         let localText: string | null = null
+        let planApproval:
+          | { approved: boolean; permissionMode?: string }
+          | undefined
         if (typeof input.message === 'string') {
           localText = input.message
         } else if (input.message.type === 'plan_approval_response') {
+          const approved = Boolean(input.message.approve)
           localText = formatPlanApprovalForLocalAgent(
-            Boolean(input.message.approve),
+            approved,
             input.message.request_id,
             input.message.feedback,
           )
+          // Leader mode inherit (same as mailbox tQg): plan → default.
+          const leaderMode = context.getAppState().toolPermissionContext.mode
+          const modeToInherit = leaderMode === 'plan' ? 'default' : leaderMode
+          planApproval = {
+            approved,
+            permissionMode: approved ? modeToInherit : undefined,
+          }
         }
         if (localText !== null) {
           const local = await tryDeliverToLocalAgent(
@@ -1263,6 +1322,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             context,
             canUseTool,
             assistantMessage,
+            planApproval,
           )
           if (local) return local
         }

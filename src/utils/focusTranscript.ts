@@ -32,6 +32,7 @@ import {
   extractTag,
   INTERRUPT_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
+  isHumanLikeOrigin,
 } from './messages.js'
 
 /** Bash completion summary prefix (keep free of task module import) */
@@ -371,7 +372,8 @@ function isStreamingSkippable(msg: FocusTranscriptMessage): boolean {
 /**
  * Turn boundary for densable brief turn count.
  * Official uSu: any non-tool_result user message is a boundary (no isMeta gate).
- * Official gSu: queued_command prompt attachments only when origin is channel
+ * Official gSu: queued_command + commandMode==="prompt" when
+ *   (!isMeta && Mj(origin)) || origin.kind==="channel"
  * (not full Ace peer/observer — those are not turn starts).
  */
 function isTurnBoundary(msg: FocusTranscriptMessage): boolean {
@@ -385,6 +387,9 @@ function isTurnBoundary(msg: FocusTranscriptMessage): boolean {
       return false
     }
     const origin = att.origin as { kind?: string } | undefined
+    const isMeta = (att as { isMeta?: boolean }).isMeta
+    // densable gSu: human-like non-meta prompts OR channel origin
+    if (!isMeta && isHumanLikeOrigin(origin)) return true
     return origin?.kind === 'channel'
   }
   return false
