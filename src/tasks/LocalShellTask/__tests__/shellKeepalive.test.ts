@@ -1,6 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
-import * as realMessageQueue from 'src/utils/messageQueueManager.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 
@@ -8,18 +7,8 @@ const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 
-// Spread real modules so process-global mock.module does not strip exports
-// needed by framework.ts (getCommandQueue) when this file co-runs with others.
-function messageQueueMock() {
-  return {
-    ...realMessageQueue,
-    enqueuePendingNotification: noop,
-    dequeueAllMatching: () => [],
-    getCommandQueue: () => [],
-  }
-}
-mock.module('src/utils/messageQueueManager.js', messageQueueMock)
-mock.module('../../../utils/messageQueueManager.js', messageQueueMock)
+// Do not mock messageQueueManager — Bun mock.module is process-global and
+// incomplete stubs break SleepTool (hasCommandsInQueue / enqueue).
 
 mock.module('src/utils/sdkEventQueue.js', () => ({
   enqueueSdkEvent: () => {},

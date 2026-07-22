@@ -1,6 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
-import * as realMessageQueue from 'src/utils/messageQueueManager.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 
@@ -23,17 +22,7 @@ mock.module('src/constants/xml.js', () => ({
   TASK_TYPE_TAG: 'task_type',
 }))
 
-// Spread reals so process-global mock.module does not strip exports
-// (getCommandQueue / DiskTaskOutput) for co-running suites.
-function messageQueueMock() {
-  return {
-    ...realMessageQueue,
-    enqueuePendingNotification: noop,
-    dequeueAllMatching: () => [],
-    getCommandQueue: () => [],
-  }
-}
-mock.module('src/utils/messageQueueManager.js', messageQueueMock)
+// Do not mock messageQueueManager — process-global stubs break SleepTool.
 
 mock.module('src/utils/sdkEventQueue.js', () => ({
   enqueueSdkEvent: noop,

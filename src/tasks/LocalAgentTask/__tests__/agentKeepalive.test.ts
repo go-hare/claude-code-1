@@ -1,10 +1,17 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import * as realBootstrapState from '../../../bootstrap/state.js'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
+import * as realTasks from '../../../utils/tasks.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 const noop = () => {}
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const bootstrapSnap = snapshotModuleExports(realBootstrapState)
+const diskOutputSnap = snapshotModuleExports(realDiskOutput)
+const tasksSnap = snapshotModuleExports(realTasks)
+
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/sessionStorage.js', () => ({
@@ -21,7 +28,7 @@ mock.module('src/utils/sessionStorage.js', () => ({
 }))
 function diskOutputMock() {
   return {
-    ...realDiskOutput,
+    ...diskOutputSnap,
     evictTaskOutput: noop,
     getTaskOutputPath: (id: string) => `/tmp/o/${id}`,
     initTaskOutput: async () => {},
@@ -31,39 +38,23 @@ function diskOutputMock() {
 }
 mock.module('src/utils/task/diskOutput.js', diskOutputMock)
 mock.module('../../../utils/task/diskOutput.js', diskOutputMock)
-import * as realMessageQueue from 'src/utils/messageQueueManager.js'
+// Use the real messageQueueManager (no mock.module). Replacing hasCommandsInQueue
+// / enqueue with a private array breaks SleepTool co-suites under Bun's
+// process-global last-write-wins mock registry. Zeo / Jeo tests seed and assert
+// via the real queue APIs instead.
+import {
+  enqueuePendingNotification,
+  getCommandQueue,
+  resetCommandQueue,
+} from 'src/utils/messageQueueManager.js'
 
-/** In-memory queue surface for Zeo rewire tests (process-global mock.module). */
-const zeoQueue: Array<Record<string, unknown>> = []
-function messageQueueMock() {
-  return {
-    ...realMessageQueue,
-    // Jeo (sweepStaleKeepaliveReasons) reads getCommandQueue for pending
-    // task-notification holds — must share zeoQueue with Zeo rewire mocks.
-    getCommandQueue: () => zeoQueue as any[],
-    getCommandQueueSnapshot: () => zeoQueue as any[],
-    getCommandQueueLength: () => zeoQueue.length,
-    enqueuePendingNotification: (cmd: Record<string, unknown>) => {
-      zeoQueue.push({ ...cmd })
-    },
-    dequeueAllMatching: (pred: (cmd: Record<string, unknown>) => boolean) => {
-      const matched: Array<Record<string, unknown>> = []
-      const remaining: Array<Record<string, unknown>> = []
-      for (const cmd of zeoQueue) {
-        if (pred(cmd)) matched.push(cmd)
-        else remaining.push(cmd)
-      }
-      zeoQueue.length = 0
-      zeoQueue.push(...remaining)
-      return matched
-    },
-  }
+/** Live view of the real queue for Zeo rewire assertions (same store product uses). */
+function zeoQueueView(): Array<Record<string, unknown>> {
+  return getCommandQueue() as Array<Record<string, unknown>>
 }
-mock.module('src/utils/messageQueueManager.js', messageQueueMock)
-mock.module('../../../utils/messageQueueManager.js', messageQueueMock)
 function bootstrapStateMock() {
   return {
-    ...realBootstrapState,
+    ...bootstrapSnap,
     getSdkAgentProgressSummariesEnabled: () => false,
     getSessionId: () => 's',
     // densable mi() — stable main AgentId for AL / Zeo rewire
@@ -84,6 +75,17 @@ function bootstrapStateMock() {
 }
 mock.module('src/bootstrap/state.js', bootstrapStateMock)
 mock.module('../../bootstrap/state.js', bootstrapStateMock)
+afterAll(() => {
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+  mock.module('../../../utils/task/diskOutput.js', () => ({
+    ...diskOutputSnap,
+  }))
+  mock.module('src/utils/tasks.js', () => ({ ...tasksSnap }))
+  mock.module('../../utils/tasks.js', () => ({ ...tasksSnap }))
+  mock.module('../../../utils/tasks.js', () => ({ ...tasksSnap }))
+})
 mock.module('src/services/PromptSuggestion/speculation.js', () => ({
   abortSpeculation: noop,
 }))
@@ -113,15 +115,26 @@ mock.module('src/coordinator/workerResultValidator.js', () => ({
     wasTruncated: false,
   }),
 }))
-mock.module('src/services/tokenEstimation.js', () => ({
-  roughTokenCountEstimationForMessages: () => 0,
-}))
-mock.module('src/utils/tasks.js', () => ({
-  getTaskExecutionMetadata: () => undefined,
-  getTaskListId: () => undefined,
-  listTasks: () => [],
-  markTaskCompletionSuggested: noop,
-}))
+// Do not mock tokenEstimation — constant 0 / fixed returns break
+// LocalAgentTask estimateContentTokensCached cache-invalidation tests
+// under Bun process-global mock.module.
+//
+// tasks.js: only override completion-hint helpers. NEVER leave a thin
+// getTaskListId: () => undefined without restore — co-suites (Agent Teams /
+// spawnInProcess) call sanitizePathComponent(getTaskListId()) and throw.
+// Spread pre-mock snapshot so createTask/getTasksDir/etc. stay real, and
+// restore the full module in afterAll (process-global last-write-wins).
+function tasksMock() {
+  return {
+    ...tasksSnap,
+    getTaskExecutionMetadata: () => undefined,
+    listTasks: async () => [],
+    markTaskCompletionSuggested: async () => false,
+  }
+}
+mock.module('src/utils/tasks.js', tasksMock)
+mock.module('../../utils/tasks.js', tasksMock)
+mock.module('../../../utils/tasks.js', tasksMock)
 
 const {
   registerAsyncAgent,
@@ -201,7 +214,7 @@ function spawnChild(s: ReturnType<typeof store>, id = 'child1') {
 describe('agent keepalive Gge/tB', () => {
   afterEach(() => {
     clearAllIdleWindowTimersForTests()
-    zeoQueue.length = 0
+    resetCommandQueue()
   })
 
   test('resolvePanelOwnerAgentId mirrors densable Yeo (panel only)', () => {
@@ -458,7 +471,7 @@ describe('agent keepalive Gge/tB', () => {
     expect(s.get().tasks.owner.evictAfter).toBeDefined()
 
     // Child + parent notifs both route to main (owner not running)
-    const notifs = zeoQueue.filter(c => c.mode === 'task-notification')
+    const notifs = zeoQueueView().filter(c => c.mode === 'task-notification')
     expect(notifs.length).toBeGreaterThanOrEqual(2)
     expect(notifs.every(c => c.agentId === 's')).toBe(true)
     expect(notifs.some(c => c.taskId === 'child1')).toBe(true)
@@ -506,7 +519,7 @@ describe('agent keepalive Gge/tB', () => {
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
     expect(s.get().tasks.child1.notified).toBe(true)
     expect(
-      zeoQueue.some(
+      zeoQueueView().some(
         c =>
           c.mode === 'task-notification' &&
           c.taskId === 'child1' &&
@@ -533,7 +546,7 @@ describe('agent keepalive Gge/tB', () => {
       false,
     )
     expect(s.get().tasks.owner.notified).toBe(true)
-    const notifs = zeoQueue.filter(c => c.mode === 'task-notification')
+    const notifs = zeoQueueView().filter(c => c.mode === 'task-notification')
     expect(notifs.some(c => c.taskId === 'child1' && c.agentId === 's')).toBe(
       true,
     )
@@ -779,18 +792,18 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    zeoQueue.push({
+    enqueuePendingNotification({
       mode: 'task-notification',
       agentId: 'owner',
       taskId: 'pend-kid',
       value: 'x',
-    })
+    } as never)
     expireIdleWindowKeepalive('pend-kid', s.set as any)
     // owner still holds agent: (pending notif blocks tB)
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:pend-kid')).toBe(
       true,
     )
-    zeoQueue.length = 0
+    resetCommandQueue()
     clearAllIdleWindowTimersForTests()
   })
 
@@ -1051,7 +1064,7 @@ describe('agent keepalive Gge/tB', () => {
   })
 
   test('Zeo: complete defers rewire until okg clears bot idle-window', () => {
-    zeoQueue.length = 0
+    resetCommandQueue()
     const s = store()
     seedOwner(s)
     // Child of owner already completed (notif targeted owner)
@@ -1083,12 +1096,12 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    zeoQueue.push({
+    enqueuePendingNotification({
       mode: 'task-notification',
       agentId: 'owner',
       taskId: 'kid',
       value: 'x',
-    })
+    } as never)
     // densable DSu a=!1 + Jeo empty KA → !YC → Zeo immediately on complete
     completeAgentTask(
       {
@@ -1104,14 +1117,15 @@ describe('agent keepalive Gge/tB', () => {
       s.get().tasks.owner.keepaliveReasons?.has(IDLE_WINDOW_KEEPALIVE_REASON),
     ).toBe(false)
     // not YC-parked → Zeo re-cf agentId:mi() without waiting okg
-    expect(zeoQueue.length).toBe(1)
-    expect(zeoQueue[0]!.agentId).toBe('s')
-    expect(zeoQueue[0]!.taskId).toBe('kid')
+    const q = zeoQueueView()
+    expect(q.length).toBe(1)
+    expect(q[0]!.agentId).toBe('s')
+    expect(q[0]!.taskId).toBe('kid')
     clearAllIdleWindowTimersForTests()
   })
 
   test('Zeo: complete YC parked interactive skips rewire', () => {
-    zeoQueue.length = 0
+    resetCommandQueue()
     const s = store()
     seedOwner(s)
     // Live nested (running, !notified) so Jeo keeps agent:nested → YC park after DSu
@@ -1147,12 +1161,12 @@ describe('agent keepalive Gge/tB', () => {
       },
     }))
     // Orphan notif routed to owner — Zeo would rewire unless YC-park skip
-    zeoQueue.push({
+    enqueuePendingNotification({
       mode: 'task-notification',
       agentId: 'owner',
       taskId: 'other',
       value: 'x',
-    })
+    } as never)
     completeAgentTask(
       {
         agentId: 'owner',
@@ -1166,12 +1180,13 @@ describe('agent keepalive Gge/tB', () => {
     expect(s.get().tasks.owner.status).toBe('completed')
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:nested')).toBe(true)
     // Zeo skipped — queue entry still points at owner
-    expect(zeoQueue.length).toBe(1)
-    expect(zeoQueue[0]!.agentId).toBe('owner')
+    const q = zeoQueueView()
+    expect(q.length).toBe(1)
+    expect(q[0]!.agentId).toBe('owner')
   })
 
   test('Zeo: fail always rewires (no park)', () => {
-    zeoQueue.length = 0
+    resetCommandQueue()
     const s = store()
     seedOwner(s)
     s.set((p: any) => ({
@@ -1202,22 +1217,22 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    zeoQueue.push({
+    enqueuePendingNotification({
       mode: 'task-notification',
       agentId: 'owner',
       taskId: 'kid2',
       value: 'y',
-    })
+    } as never)
     failAgentTask('owner', 'boom', s.set as any)
     expect(s.get().tasks.owner.status).toBe('failed')
-    expect(zeoQueue[0]!.agentId).toBe('s')
+    expect(zeoQueueView()[0]!.agentId).toBe('s')
   })
 
   test('Zeo: rewireOrphanedOwnerNotifications no-op when queue empty', () => {
-    zeoQueue.length = 0
+    resetCommandQueue()
     const s = store()
     seedOwner(s)
     rewireOrphanedOwnerNotifications('owner', s.set as any)
-    expect(zeoQueue.length).toBe(0)
+    expect(zeoQueueView().length).toBe(0)
   })
 })

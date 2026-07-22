@@ -57,10 +57,26 @@ mock.module('src/utils/mcpOutputStorage.js', () => ({
   }),
 }))
 
-mock.module('src/utils/settings/settings.js', () => ({
-  getInitialSettings: () => ({}),
-  getSettings_DEPRECATED: () => ({ skipWebFetchPreflight: true }),
-}))
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+import * as realSettings from 'src/utils/settings/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../../../tests/mocks/settings.js'
+const settingsSnap = snapshotModuleExports(realSettings)
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getInitialSettings: () => ({}),
+    getSettings_DEPRECATED: () => ({ skipWebFetchPreflight: true }),
+  }),
+)
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
+})
 
 beforeEach(() => {
   getMock = async () => ({

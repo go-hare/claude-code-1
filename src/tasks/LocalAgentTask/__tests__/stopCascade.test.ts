@@ -52,15 +52,18 @@ function diskOutputMock() {
 mock.module('src/utils/task/diskOutput.js', diskOutputMock)
 mock.module('../../../utils/task/diskOutput.js', diskOutputMock)
 
+// Capture notifications but keep the real queue store so SleepTool /
+// hasCommandsInQueue / enqueue stay consistent under process-global mock.module.
 const enqueued: Array<Record<string, unknown>> = []
+const realEnqueuePendingNotification =
+  realMessageQueue.enqueuePendingNotification
 function messageQueueMock() {
   return {
     ...realMessageQueue,
     enqueuePendingNotification: (opts: Record<string, unknown>) => {
       enqueued.push(opts)
+      realEnqueuePendingNotification(opts as never)
     },
-    dequeueAllMatching: () => [],
-    getCommandQueue: () => [],
   }
 }
 mock.module('src/utils/messageQueueManager.js', messageQueueMock)

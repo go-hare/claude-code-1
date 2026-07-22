@@ -14,12 +14,16 @@ import { debugMock } from '../../../../tests/mocks/debug'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('bun:bundle', () => ({ feature: () => false }))
-// Pre-import the real settings module so we keep all its exports for any
-// downstream test file in the same process (mock.module is global).
-// We override the two keys this suite uses; the rest delegates to real impls.
+// Snapshot BEFORE mock.module — live namespace rebinds under Bun mock.module,
+// so afterAll `() => _realConfig` would restore the mock, not the real module.
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
 const _realSettings = await import('src/utils/settings/settings.js')
+const settingsSnap = snapshotModuleExports(_realSettings)
 mock.module('src/utils/settings/settings.js', () => ({
-  ..._realSettings,
+  ...settingsSnap,
   getCachedOrDefaultSettings: () => ({}),
   getSettings: () => ({}),
 }))
@@ -28,29 +32,43 @@ mock.module('src/utils/settings/settings.js', () => ({
 // fallback. Other test files (e.g. processSlashCommand.test.ts) run in the
 // same process and call saveGlobalConfig via recordSkillUsage; if our last
 // mock leaves a "throw new Error('disk full')" body installed, those calls
-// crash. After this suite we flip useMockForConfig=false so the noop fallback
-// returns undefined for getGlobalConfig/saveGlobalConfig — matching the
-// behavior of unmocked side-effect-free defaults rather than throwing.
+// crash. After this suite restore from pre-mock snapshot.
 let _useMockForConfig = true
 let _mockGetGlobalConfig: () => unknown = () => ({
   workspaceApiKey: undefined,
 })
 let _mockSaveGlobalConfig: (updater: unknown) => unknown = (_u: unknown) =>
   undefined
-mock.module('src/utils/config.ts', () => ({
-  isConfigEnabled: () => true,
-  getGlobalConfig: () =>
-    _useMockForConfig ? _mockGetGlobalConfig() : { workspaceApiKey: undefined },
-  saveGlobalConfig: (updater: unknown) =>
-    _useMockForConfig ? _mockSaveGlobalConfig(updater) : undefined,
-}))
+const _realConfig = await import('src/utils/config.js')
+const configSnap = snapshotModuleExports(_realConfig)
+const realGetGlobalConfig =
+  configSnap.getGlobalConfig as typeof _realConfig.getGlobalConfig
+const realSaveGlobalConfig =
+  configSnap.saveGlobalConfig as typeof _realConfig.saveGlobalConfig
+function configMock() {
+  return {
+    ...configSnap,
+    isConfigEnabled: () => true,
+    getGlobalConfig: () =>
+      _useMockForConfig ? _mockGetGlobalConfig() : realGetGlobalConfig(),
+    saveGlobalConfig: (updater: unknown) =>
+      _useMockForConfig
+        ? _mockSaveGlobalConfig(updater)
+        : realSaveGlobalConfig(updater as never),
+  }
+}
+mock.module('src/utils/config.ts', configMock)
+mock.module('src/utils/config.js', configMock)
 
 afterAll(() => {
   _useMockForConfig = false
-  // Reset closure state so nothing leaks even if a teammate test elsewhere
-  // re-flips the flag.
   _mockGetGlobalConfig = () => ({ workspaceApiKey: undefined })
   _mockSaveGlobalConfig = () => undefined
+  mock.module('src/utils/config.ts', () => ({ ...configSnap }))
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
 })
 // Provide a stable path so tryChmod600 at least knows which file to chmod
 // (it will fail gracefully for a non-existent file and log via logError)

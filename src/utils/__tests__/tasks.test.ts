@@ -1,10 +1,23 @@
 import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { beforeEach, afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  beforeEach,
+  afterEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import {
+  createSlowOperationsMock,
+  restoreSlowOperationsMock,
+} from '../../../tests/mocks/slowOperations.js'
 
 // Mock dependencies before importing the module under test
 mock.module('src/utils/log.ts', logMock)
@@ -12,20 +25,48 @@ mock.module('src/utils/debug.ts', debugMock)
 mock.module('bun:bundle', () => ({
   feature: () => false,
 }))
-mock.module('src/bootstrap/state.ts', () => ({
-  getSessionId: () => 'test-session-123',
-  getIsNonInteractiveSession: () => false,
-}))
+import * as realBootstrapState from 'src/bootstrap/state.js'
+import * as realTeammate from 'src/utils/teammate.js'
+import * as realSlowOps from 'src/utils/slowOperations.js'
+
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const bootstrapSnap = snapshotModuleExports(realBootstrapState)
+const teammateSnap = snapshotModuleExports(realTeammate)
+const slowOpsSnap = snapshotModuleExports(realSlowOps)
+
+// Thin bootstrap stubs make getSessionId undefined for Agent Teams / TaskCreate
+// co-suites under Bun process-global mock.module.
+function bootstrapMock() {
+  return {
+    ...bootstrapSnap,
+    getSessionId: () => 'test-session-123',
+    getIsNonInteractiveSession: () => false,
+  }
+}
+mock.module('src/bootstrap/state.ts', bootstrapMock)
+mock.module('src/bootstrap/state.js', bootstrapMock)
 mock.module('src/utils/teammate.ts', () => ({
+  ...teammateSnap,
   getTeamName: () => undefined,
 }))
-mock.module('src/utils/slowOperations.ts', () => ({
-  jsonParse: (s: string) => JSON.parse(s),
-  jsonStringify: (
-    v: unknown,
-    ...args: Parameters<typeof JSON.stringify>[1][]
-  ) => JSON.stringify(v, ...args),
+mock.module('src/utils/teammate.js', () => ({
+  ...teammateSnap,
+  getTeamName: () => undefined,
 }))
+// Preserve callable slowLogging (template tag used by fsOperations).
+const slowOpsMock = createSlowOperationsMock(slowOpsSnap, {
+  jsonParse: JSON.parse as typeof realSlowOps.jsonParse,
+  jsonStringify: JSON.stringify as typeof realSlowOps.jsonStringify,
+})
+mock.module('src/utils/slowOperations.ts', slowOpsMock)
+mock.module('src/utils/slowOperations.js', slowOpsMock)
+afterAll(() => {
+  mock.module('src/bootstrap/state.ts', () => ({ ...bootstrapSnap }))
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/teammate.ts', () => ({ ...teammateSnap }))
+  mock.module('src/utils/teammate.js', () => ({ ...teammateSnap }))
+  restoreSlowOperationsMock(mock.module, slowOpsSnap)
+})
 
 import {
   createTask,

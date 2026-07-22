@@ -1,11 +1,29 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
+import * as realConfig from '../config.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
-mock.module('../config.js', () => ({
-  getGlobalConfig: () => ({
-    fableOverageConsentV2: { 'org-1': true },
-  }),
-  saveGlobalConfig: () => {},
-}))
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+// Thin { getGlobalConfig, saveGlobalConfig: noop } permanently breaks
+// installPrompt / daemonInstall co-suites (save becomes no-op).
+const configSnap = snapshotModuleExports(realConfig)
+const realGetGlobalConfig =
+  configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig
+
+function configMock() {
+  return {
+    ...configSnap,
+    getGlobalConfig: () => ({
+      ...realGetGlobalConfig(),
+      fableOverageConsentV2: { 'org-1': true },
+    }),
+  }
+}
+mock.module('../config.js', configMock)
+mock.module('src/utils/config.js', configMock)
+afterAll(() => {
+  mock.module('../config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+})
 
 import {
   buildFableOverageConsentPayload,

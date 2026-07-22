@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import * as realConfig from '../../config.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 type CacheShape = {
   name: string
@@ -11,10 +21,18 @@ type CacheShape = {
 let mockCache: CacheShape | null = null
 let mockOrgUuid: string | undefined
 
-// Pure config surface — do not call real getGlobalConfig (mock.module replaces it).
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+// Thin { getGlobalConfig, saveGlobalConfig } drops checkHasTrustDialogAccepted
+// and no-ops saveGlobalConfig, breaking installPrompt co-suites.
+const configSnap = snapshotModuleExports(realConfig)
+const realGetGlobalConfig =
+  configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig
+
 function configMock() {
   return {
+    ...configSnap,
     getGlobalConfig: () => ({
+      ...realGetGlobalConfig(),
       orgModelDefaultCache: mockCache,
       oauthAccount:
         mockOrgUuid === undefined
@@ -24,13 +42,17 @@ function configMock() {
               accountUuid: 'acct-test',
             },
     }),
-    saveGlobalConfig: () => {},
   }
 }
 
 mock.module('../../config.js', configMock)
 mock.module('src/utils/config.js', configMock)
 mock.module('src/utils/config.ts', configMock)
+afterAll(() => {
+  mock.module('../../config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/config.ts', () => ({ ...configSnap }))
+})
 
 const {
   getDefaultModelAttributionBadge,

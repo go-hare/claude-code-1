@@ -1,12 +1,19 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import * as realBootstrapState from '../../../bootstrap/state.js'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import * as realMessageQueue from 'src/utils/messageQueueManager.js'
+import { createMessageQueueManagerMock } from '../../../../tests/mocks/messageQueueManager.js'
 
 // ─── Mocks ───
 
 const noop = () => {}
+
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const bootstrapSnap = snapshotModuleExports(realBootstrapState)
+const diskOutputSnap = snapshotModuleExports(realDiskOutput)
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
@@ -24,11 +31,11 @@ mock.module('src/utils/sessionStorage.js', () => ({
   }),
 }))
 
-// Spread real diskOutput so DiskTaskOutput and other named exports stay intact
-// for sibling suites (process-global mock.module pollution).
+// Spread pre-mock diskOutput snapshot so DiskTaskOutput and other named exports
+// stay intact for sibling suites (process-global mock.module pollution).
 function diskOutputMock() {
   return {
-    ...realDiskOutput,
+    ...diskOutputSnap,
     evictTaskOutput: noop,
     getTaskOutputPath: (id: string) => `/tmp/output/${id}`,
     initTaskOutput: async () => {},
@@ -39,27 +46,29 @@ function diskOutputMock() {
 mock.module('src/utils/task/diskOutput.js', diskOutputMock)
 mock.module('../../utils/task/diskOutput.js', diskOutputMock)
 
-// Capture enqueuePendingNotification calls for verification
+// Capture enqueuePendingNotification calls for verification.
+// Call through to the real queue — never stub hasCommandsInQueue/enqueue/reset.
+// Bun mock.module is process-global; empty stubs break SleepTool co-suites
+// (static enqueue vs runtime hasCommandsInQueue on different stores).
 const enqueuedNotifications: string[] = []
-// densable okg / Jeo / Zeo read getCommandQueue — keep empty stub so complete
-// with bot idle-window does not throw under process-global mock.
-mock.module('src/utils/messageQueueManager.js', () => ({
-  enqueuePendingNotification: (cmd: any) => {
-    enqueuedNotifications.push(cmd.value)
-  },
-  getCommandQueue: () => [],
-  getCommandQueueSnapshot: () => [],
-  getCommandQueueLength: () => 0,
-  dequeueAllMatching: () => [],
-  enqueue: () => {},
-  dequeue: () => undefined,
-}))
+const realEnqueuePendingNotification =
+  realMessageQueue.enqueuePendingNotification
+mock.module(
+  'src/utils/messageQueueManager.js',
+  createMessageQueueManagerMock(realMessageQueue, {
+    enqueuePendingNotification: (cmd: any) => {
+      enqueuedNotifications.push(
+        typeof cmd.value === 'string' ? cmd.value : String(cmd.value),
+      )
+      realEnqueuePendingNotification(cmd)
+    },
+  }),
+)
 
-// Spread real bootstrap/state so getUseCoworkPlugins and the rest of the
-// surface remain available to settings/plugin suites in the same process.
+// Snapshot bootstrap so getSessionId stays defined for Agent Teams co-suites.
 function bootstrapStateMock() {
   return {
-    ...realBootstrapState,
+    ...bootstrapSnap,
     getSdkAgentProgressSummariesEnabled: () => false,
     getSessionId: () => 'test-session-001',
     getProjectRoot: () => '/test/project',
@@ -76,6 +85,12 @@ function bootstrapStateMock() {
 }
 mock.module('src/bootstrap/state.js', bootstrapStateMock)
 mock.module('../../bootstrap/state.js', bootstrapStateMock)
+afterAll(() => {
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+  mock.module('../../utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+})
 
 mock.module('src/services/PromptSuggestion/speculation.js', () => ({
   abortSpeculation: noop,
@@ -218,6 +233,7 @@ function makeAssistantMessage(
 
 afterEach(() => {
   enqueuedNotifications.length = 0
+  realMessageQueue.resetCommandQueue()
 })
 
 // ─── Tests ───

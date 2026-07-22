@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -59,68 +59,85 @@ describe('hard_deny / soft_deny classifier prompts (2.1.205)', () => {
 })
 
 // getAutoModeConfig hard_deny merge — mock settings sources only.
-const getSettingsForSourceMock = mock((_source?: string) => null as unknown)
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+import * as realSettings from 'src/utils/settings/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
+
+const getSettingsForSourceMock = mock(
+  (_source?: string) =>
+    null as ReturnType<typeof realSettings.getSettingsForSource>,
+)
+const settingsSnap = snapshotModuleExports(realSettings)
 
 mock.module('bun:bundle', () => ({
   feature: (name: string) => name === 'TRANSCRIPT_CLASSIFIER',
 }))
 
-mock.module('src/utils/settings/settings.ts', () => {
-  // Re-export a thin getAutoModeConfig that mirrors production merge of hard_deny
-  // without loading the full settings module graph.
-  return {
-    getSettingsForSource: getSettingsForSourceMock,
-    getSettings_DEPRECATED: () => ({}),
-    getInitialSettings: () => ({}),
-    hasAutoModeOptIn: () => true,
-    getAutoModeConfig: () => {
-      const allow: string[] = []
-      const soft_deny: string[] = []
-      const hard_deny: string[] = []
-      const environment: string[] = []
-      for (const source of [
-        'userSettings',
-        'flagSettings',
-        'policySettings',
-      ] as const) {
-        const settings = getSettingsForSourceMock(source) as {
-          autoMode?: {
-            allow?: string[]
-            soft_deny?: string[]
-            hard_deny?: string[]
-            environment?: string[]
-          }
-        } | null
-        const am = settings?.autoMode
-        if (!am) continue
-        if (am.allow) allow.push(...am.allow)
-        if (am.soft_deny) soft_deny.push(...am.soft_deny)
-        if (am.hard_deny) hard_deny.push(...am.hard_deny)
-        if (am.environment) environment.push(...am.environment)
+function mockGetAutoModeConfig() {
+  const allow: string[] = []
+  const soft_deny: string[] = []
+  const hard_deny: string[] = []
+  const environment: string[] = []
+  for (const source of [
+    'userSettings',
+    'flagSettings',
+    'policySettings',
+  ] as const) {
+    const settings = getSettingsForSourceMock(source) as {
+      autoMode?: {
+        allow?: string[]
+        soft_deny?: string[]
+        hard_deny?: string[]
+        environment?: string[]
       }
-      if (
-        allow.length ||
-        soft_deny.length ||
-        hard_deny.length ||
-        environment.length
-      ) {
-        return {
-          ...(allow.length && { allow }),
-          ...(soft_deny.length && { soft_deny }),
-          ...(hard_deny.length && { hard_deny }),
-          ...(environment.length && { environment }),
-        }
-      }
-      return undefined
-    },
+    } | null
+    const am = settings?.autoMode
+    if (!am) continue
+    if (am.allow) allow.push(...am.allow)
+    if (am.soft_deny) soft_deny.push(...am.soft_deny)
+    if (am.hard_deny) hard_deny.push(...am.hard_deny)
+    if (am.environment) environment.push(...am.environment)
   }
+  if (
+    allow.length ||
+    soft_deny.length ||
+    hard_deny.length ||
+    environment.length
+  ) {
+    return {
+      ...(allow.length && { allow }),
+      ...(soft_deny.length && { soft_deny }),
+      ...(hard_deny.length && { hard_deny }),
+      ...(environment.length && { environment }),
+    }
+  }
+  return undefined
+}
+
+const settingsMock = createSettingsMock(settingsSnap, {
+  getSettingsForSource:
+    getSettingsForSourceMock as typeof realSettings.getSettingsForSource,
+  getSettings_DEPRECATED: () => ({}),
+  getInitialSettings: () => ({}),
+  hasAutoModeOptIn: () => true,
+  getAutoModeConfig: mockGetAutoModeConfig,
 })
+mock.module('src/utils/settings/settings.ts', settingsMock)
+mock.module('src/utils/settings/settings.js', settingsMock)
 
 const { getAutoModeConfig } = await import('src/utils/settings/settings.js')
 
 afterEach(() => {
   getSettingsForSourceMock.mockReset()
   getSettingsForSourceMock.mockImplementation(() => null)
+})
+
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap)
 })
 
 describe('getAutoModeConfig hard_deny merge', () => {

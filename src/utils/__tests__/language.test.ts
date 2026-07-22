@@ -1,11 +1,21 @@
-import { describe, test, expect, mock } from 'bun:test'
+import { afterAll, describe, test, expect, mock } from 'bun:test'
+import * as realConfig from 'src/utils/config.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 // Mock dependencies before importing the module under test
 let mockPreferredLanguage: string | undefined
 let mockSystemLocale: string | undefined
 
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const configSnap = snapshotModuleExports(realConfig)
+const realGetGlobalConfig = configSnap.getGlobalConfig
+
+// Spread snapshot — thin stubs drop saveGlobalConfig and break installPrompt
+// / daemonInstall under Bun process-global mock.module.
 mock.module('src/utils/config.js', () => ({
+  ...configSnap,
   getGlobalConfig: () => ({
+    ...realGetGlobalConfig(),
     preferredLanguage: mockPreferredLanguage,
   }),
 }))
@@ -13,6 +23,10 @@ mock.module('src/utils/config.js', () => ({
 mock.module('src/utils/intl.js', () => ({
   getSystemLocaleLanguage: () => mockSystemLocale,
 }))
+
+afterAll(() => {
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+})
 
 const { getResolvedLanguage, getLanguageDisplayName } = await import(
   'src/utils/language.js'

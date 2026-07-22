@@ -23,24 +23,36 @@ import { debugMock } from '../../../../tests/mocks/debug.js';
 import { logMock } from '../../../../tests/mocks/log.js';
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js';
 
-// Pre-import the real react and ink modules so we can delegate after this
-// suite. Bun's mock.module is process-global / last-write-wins; without
-// delegation the stub createElement / stub ink components leak into other
-// test files (e.g. SnapshotUpdateDialog.test.tsx, AgentsPlatformView.test.tsx)
-// that need real React.createElement and real Box/Text components.
+// Pre-import real react/ink and snapshot BEFORE mock.module — live bindings
+// re-point into the mock registry, so flag-flip `return _realInkMod` still
+// exposes stub Box/Text/createElement and hangs AgentsPlatformView etc.
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js';
 const _realReactMod = (await import('react')) as Record<string, unknown> & {
   default?: Record<string, unknown>;
 };
 const _realInkMod = (await import('@anthropic/ink')) as Record<string, unknown>;
+const _reactSnap = snapshotModuleExports(_realReactMod);
+const _inkSnap = snapshotModuleExports(_realInkMod);
+// Nested default on react needs its own plain copy for createElement restore.
+const _reactDefaultSnap = {
+  ...((_realReactMod.default as Record<string, unknown> | undefined) ?? {}),
+};
 let _useStubReactForUltrareview = true;
 let _useStubInkForUltrareview = true;
 afterAll(() => {
   _useStubReactForUltrareview = false;
   _useStubInkForUltrareview = false;
-  // The handle reference exists by the time afterAll runs (TDZ resolves via
-  // closure). Flip useStubs off so the spread-real fall-through kicks in for
-  // any test file that runs after this one in the same process.
   _ultrareviewAxiosHandle.useStubs = false;
+  // Re-register from pre-mock snapshots (not live namespaces).
+  mock.module('react', () => ({
+    ..._reactSnap,
+    default: {
+      ..._reactDefaultSnap,
+      createElement: _reactDefaultSnap.createElement ?? _reactSnap.createElement,
+    },
+    createElement: _reactSnap.createElement,
+  }));
+  mock.module('@anthropic/ink', () => ({ ..._inkSnap }));
 });
 
 // Mock dependency chain before any subject import
@@ -145,34 +157,31 @@ mock.module('react', () => {
       props: { ...propsObj, children: finalChildren },
     };
   };
-  const realCreate = ((_realReactMod.default as Record<string, unknown> | undefined)?.createElement ??
-    _realReactMod.createElement) as (...args: unknown[]) => unknown;
+  const realCreate = (_reactDefaultSnap.createElement ?? _reactSnap.createElement) as (...args: unknown[]) => unknown;
   const createElement = (...args: unknown[]) =>
     _useStubReactForUltrareview ? stubCreateElement(args[0], args[1], ...args.slice(2)) : realCreate(...args);
   return {
-    ..._realReactMod,
+    ..._reactSnap,
     default: {
-      ...((_realReactMod.default as Record<string, unknown> | undefined) ?? {}),
+      ..._reactDefaultSnap,
       createElement,
     },
     createElement,
   };
 });
 
-// Spread real ink + flag-gate the stub components. Without spread, the bare
-// { Box: 'Box', Dialog: 'Dialog', Text: 'Text' } leaks into every later test
-// file (e.g. AgentsPlatformView.test.tsx) that imports @anthropic/ink — those
-// consumers receive strings instead of real components and rendering breaks.
+// Spread pre-mock ink snapshot + flag-gate stubs. Live `_realInkMod` rebinds
+// under mock.module and must not be used for restore.
 mock.module('@anthropic/ink', () => {
   if (_useStubInkForUltrareview) {
     return {
-      ..._realInkMod,
+      ..._inkSnap,
       Box: 'Box',
       Dialog: 'Dialog',
       Text: 'Text',
     };
   }
-  return _realInkMod;
+  return { ..._inkSnap };
 });
 
 mock.module('src/components/CustomSelect/select.js', () => ({

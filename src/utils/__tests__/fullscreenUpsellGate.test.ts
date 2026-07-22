@@ -1,4 +1,14 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
+import * as realConfig from '../config.js'
+import * as realSettings from '../settings/settings.js'
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
+
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const configSnap = snapshotModuleExports(realConfig)
+const settingsSnap = snapshotModuleExports(realSettings)
 
 mock.module('src/services/analytics/growthbook.js', () => ({
   getFeatureValue_CACHED_MAY_BE_STALE: () => false,
@@ -8,14 +18,20 @@ mock.module('src/services/analytics/growthbook.js', () => ({
   resetGrowthBook: () => {},
 }))
 
-mock.module('../config.js', () => ({
-  getGlobalConfig: () => ({}),
-  saveGlobalConfig: () => {},
-}))
-
-mock.module('../settings/settings.js', () => ({
-  getSettingsForSource: () => ({}),
-}))
+// Re-register snapshots (no overrides) so co-suites keep full surfaces, and
+// afterAll can restore without re-exporting a live-bound mock namespace.
+mock.module('../config.js', () => ({ ...configSnap }))
+mock.module('src/utils/config.js', () => ({ ...configSnap }))
+mock.module('../settings/settings.js', () => ({ ...settingsSnap }))
+mock.module('src/utils/settings/settings.js', () => ({ ...settingsSnap }))
+afterAll(() => {
+  mock.module('../config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    '../settings/settings.js',
+    'src/utils/settings/settings.js',
+  ])
+})
 
 import {
   FULLSCREEN_UPSELL_MAX_SEEN,

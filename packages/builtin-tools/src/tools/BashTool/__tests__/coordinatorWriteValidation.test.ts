@@ -1,12 +1,26 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { resetFileLockStateForTests } from 'src/coordinator/fileLockManager.js'
 import { runWithAgentContext } from 'src/utils/agentContext.js'
 import { expandPath } from 'src/utils/path.js'
+import * as realCoordinatorMode from 'src/coordinator/coordinatorMode.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
-mock.module('src/coordinator/coordinatorMode.js', () => ({
-  isCoordinatorMode: () => true,
-  getWorkerAntiInjectionAddendum: () => '',
-}))
+// Snapshot BEFORE mock. Re-apply in beforeEach so processBashCommand / others
+// that last-write BashTool or coordinatorMode cannot skip the write guard.
+const coordinatorModeSnap = snapshotModuleExports(realCoordinatorMode)
+function coordinatorModeMock() {
+  return {
+    ...coordinatorModeSnap,
+    isCoordinatorMode: () => true,
+    getWorkerAntiInjectionAddendum: () => '',
+  }
+}
+mock.module('src/coordinator/coordinatorMode.js', coordinatorModeMock)
+afterAll(() => {
+  mock.module('src/coordinator/coordinatorMode.js', () => ({
+    ...coordinatorModeSnap,
+  }))
+})
 
 const { validateCoordinatorBashWriteAccess } = await import(
   '../coordinatorWriteValidation.js'
@@ -26,6 +40,7 @@ function validateAsWorker(command: string, ownedFiles: string[]) {
 describe('validateCoordinatorBashWriteAccess', () => {
   beforeEach(() => {
     resetFileLockStateForTests()
+    mock.module('src/coordinator/coordinatorMode.js', coordinatorModeMock)
   })
 
   test('validates output redirection targets through the coordinator write guard', async () => {

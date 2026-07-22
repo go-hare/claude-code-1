@@ -1,19 +1,60 @@
 /**
  * Windows default shell: PowerShell tool on by default; ! routing prefers it.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import * as realSettings from 'src/utils/settings/settings.js'
+import * as realPlatform from 'src/utils/platform.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
 
 const settingsState: { defaultShell?: 'bash' | 'powershell' } = {}
 
-mock.module('src/utils/settings/settings.js', () => ({
-  getInitialSettings: () => ({ ...settingsState }),
-}))
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const settingsSnap = snapshotModuleExports(realSettings)
+const platformSnap = snapshotModuleExports(realPlatform)
+const realGetInitialSettings =
+  settingsSnap.getInitialSettings as typeof realSettings.getInitialSettings
+
+// Spread snapshot so co-running suites (processBashCommand, tui, etc.)
+// keep the full surface under Bun process-global mock.module.
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getInitialSettings: () => ({
+      ...realGetInitialSettings(),
+      ...settingsState,
+    }),
+    getSettings_DEPRECATED: () => ({
+      ...realGetInitialSettings(),
+      ...settingsState,
+    }),
+  }),
+)
 
 // Force windows platform for these unit tests regardless of host OS.
+// bashProvider.detached uses process.platform (not getPlatform) so this
+// mock does not flip Unix detached in the same process.
 mock.module('src/utils/platform.js', () => ({
+  ...platformSnap,
   getPlatform: () => 'windows' as const,
-  SUPPORTED_PLATFORMS: ['macos', 'wsl'],
 }))
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
+  mock.module('src/utils/platform.js', () => ({ ...platformSnap }))
+})
 
 import { isPowerShellToolEnabled } from '../shellToolUtils.js'
 import { resolveDefaultShell } from '../resolveDefaultShell.js'

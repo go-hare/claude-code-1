@@ -1,12 +1,49 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { logMock } from '../../../../../../tests/mocks/log'
 
 mock.module('src/utils/log.ts', logMock)
 
+function roughTokenCountEstimationForMessages(msgs: unknown[]): number {
+  let n = 0
+  for (const msg of msgs as any[]) {
+    const content = msg?.message?.content
+    if (typeof content === 'string') n += content.length
+    else if (Array.isArray(content)) {
+      for (const block of content) {
+        if (typeof block === 'string') n += block.length
+        else if (block && typeof block === 'object') {
+          if (typeof block.text === 'string') n += block.text.length
+          if (typeof block.thinking === 'string') n += block.thinking.length
+        }
+      }
+    }
+  }
+  return Math.ceil(n / 4)
+}
 mock.module('src/services/tokenEstimation.ts', () => ({
   roughTokenCountEstimation: (text: string) => Math.ceil(text.length / 4),
-  roughTokenCountEstimationForMessages: (msgs: unknown[]) => msgs.length * 64,
-  roughTokenCountEstimationForMessage: () => 64,
+  roughTokenCountEstimationForMessages,
+  roughTokenCountEstimationForMessage: (msg: unknown) =>
+    roughTokenCountEstimationForMessages([msg]),
+  roughTokenCountEstimationForFileType: () => 64,
+  bytesPerTokenForFileType: () => 4,
+  countTokensWithAPI: async () => 0,
+  countMessagesTokensWithAPI: async () => 0,
+  countTokensViaHaikuFallback: async () => 0,
+}))
+mock.module('src/services/tokenEstimation.js', () => ({
+  roughTokenCountEstimation: (text: string) => Math.ceil(text.length / 4),
+  roughTokenCountEstimationForMessages,
+  roughTokenCountEstimationForMessage: (msg: unknown) =>
+    roughTokenCountEstimationForMessages([msg]),
   roughTokenCountEstimationForFileType: () => 64,
   bytesPerTokenForFileType: () => 4,
   countTokensWithAPI: async () => 0,
@@ -34,16 +71,28 @@ mock.module('src/services/SessionMemory/sessionMemoryUtils.ts', () => ({
   DEFAULT_SESSION_MEMORY_CONFIG: {},
 }))
 
-mock.module('src/utils/slowOperations.ts', () => ({
-  jsonStringify: JSON.stringify,
-  jsonParse: JSON.parse,
-  slowLogging: { enabled: false },
-  clone: (value: unknown) => structuredClone(value),
-  cloneDeep: (value: unknown) => structuredClone(value),
+// Snapshot + callable slowLogging — thin `{ enabled: false }` is not a
+// template tag and crashes fsOperations.mkdirSync → /tui settings writes.
+import * as realSlowOps from 'src/utils/slowOperations.js'
+import {
+  createSlowOperationsMock,
+  restoreSlowOperationsMock,
+  snapshotModuleExports,
+} from '../../../../../../tests/mocks/slowOperations.js'
+const slowOpsSnap = snapshotModuleExports(realSlowOps)
+const slowOpsMock = createSlowOperationsMock(slowOpsSnap, {
+  jsonStringify: JSON.stringify as typeof realSlowOps.jsonStringify,
+  jsonParse: JSON.parse as typeof realSlowOps.jsonParse,
+  clone: structuredClone as typeof realSlowOps.clone,
+  cloneDeep: structuredClone as typeof realSlowOps.cloneDeep,
   callerFrame: () => '',
-  SLOW_OPERATION_THRESHOLD_MS: 100,
   writeFileSync_DEPRECATED: () => {},
-}))
+})
+mock.module('src/utils/slowOperations.ts', slowOpsMock)
+mock.module('src/utils/slowOperations.js', slowOpsMock)
+afterAll(() => {
+  restoreSlowOperationsMock(mock.module, slowOpsSnap)
+})
 
 const { initContextCollapse, resetContextCollapse } = await import(
   'src/services/contextCollapse/index.js'

@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import * as realDiskOutput from '../diskOutput.js'
+import {
+  enqueuePendingNotification,
+  resetCommandQueue,
+} from 'src/utils/messageQueueManager.js'
 
 // ─── Mocks ───
 
@@ -27,19 +31,10 @@ function diskOutputMock() {
 mock.module('src/utils/task/diskOutput.js', diskOutputMock)
 mock.module('../diskOutput.js', diskOutputMock)
 
-// Mutable queue for Jeo pending-notification probes (official Hte()).
-// Keep full export surface so co-running suites that import real
-// messageQueueManager helpers still resolve under process-global mock.
-let mockCommandQueue: any[] = []
-mock.module('src/utils/messageQueueManager.js', () => ({
-  enqueuePendingNotification: noop,
-  dequeueAllMatching: () => [],
-  getCommandQueue: () => mockCommandQueue,
-  getCommandQueueSnapshot: () => mockCommandQueue,
-  getCommandQueueLength: () => mockCommandQueue.length,
-  enqueue: noop,
-  dequeue: () => undefined,
-}))
+// Do NOT mock messageQueueManager. Bun mock.module is process-global —
+// replacing hasCommandsInQueue/enqueue with a private array breaks SleepTool
+// (static enqueue vs runtime hasCommandsInQueue on different stores).
+// Jeo pending-notification probes seed the real queue instead.
 
 // ─── Import after mocks ───
 
@@ -96,7 +91,7 @@ function createSetAppState(initial: AppStateLike = { tasks: {} }): {
 
 afterEach(() => {
   sdkEvents.length = 0
-  mockCommandQueue = []
+  resetCommandQueue()
 })
 
 // ─── Tests ───
@@ -387,14 +382,12 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
         }),
       },
     })
-    mockCommandQueue = [
-      {
-        mode: 'task-notification',
-        agentId: 'owner',
-        taskId: 'pending',
-        value: 'x',
-      },
-    ]
+    enqueuePendingNotification({
+      mode: 'task-notification',
+      agentId: 'owner',
+      taskId: 'pending',
+      value: 'x',
+    } as never)
     sweepStaleKeepaliveReasons('owner', setAppState as any)
     const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
     expect(reasons.has('agent:pending')).toBe(true)

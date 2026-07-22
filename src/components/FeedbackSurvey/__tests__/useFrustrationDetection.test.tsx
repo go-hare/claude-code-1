@@ -1,23 +1,41 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import * as React from 'react';
+import * as realConfig from '../../../utils/config.js';
 import { renderToString } from '../../../utils/staticRender.js';
 import type { Message } from '../../../types/message.js';
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js';
 
 let transcriptShareDismissed = false;
 let productFeedbackAllowed = true;
 const mockSubmitTranscriptShare = mock(async () => ({ success: true }));
 
-mock.module('../../../utils/config.js', () => ({
-  getGlobalConfig: () => ({ transcriptShareDismissed }),
-  saveGlobalConfig: (
-    updater: (current: { transcriptShareDismissed?: boolean }) => {
-      transcriptShareDismissed?: boolean;
+// Snapshot BEFORE mock — thin config mock no-ops saveGlobalConfig for co-suites.
+const configSnap = snapshotModuleExports(realConfig);
+const realGetGlobalConfig = configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig;
+
+function configMock() {
+  return {
+    ...configSnap,
+    getGlobalConfig: () => ({
+      ...realGetGlobalConfig(),
+      transcriptShareDismissed,
+    }),
+    saveGlobalConfig: (
+      updater: (current: { transcriptShareDismissed?: boolean }) => {
+        transcriptShareDismissed?: boolean;
+      },
+    ) => {
+      const next = updater({ transcriptShareDismissed });
+      transcriptShareDismissed = next.transcriptShareDismissed ?? false;
     },
-  ) => {
-    const next = updater({ transcriptShareDismissed });
-    transcriptShareDismissed = next.transcriptShareDismissed ?? false;
-  },
-}));
+  };
+}
+mock.module('../../../utils/config.js', configMock);
+mock.module('src/utils/config.js', configMock);
+afterAll(() => {
+  mock.module('../../../utils/config.js', () => ({ ...configSnap }));
+  mock.module('src/utils/config.js', () => ({ ...configSnap }));
+});
 mock.module('../../../services/policyLimits/index.js', () => ({
   isPolicyAllowed: () => productFeedbackAllowed,
 }));

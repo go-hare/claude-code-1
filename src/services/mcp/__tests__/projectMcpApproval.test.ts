@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
 
 let mockSettings: {
   enabledMcpjsonServers?: string[]
@@ -8,18 +13,46 @@ let mockSettings: {
 let nonInteractive = false
 let skipDangerous = false
 
-mock.module('src/utils/settings/settings.js', () => ({
-  getSettings_DEPRECATED: () => mockSettings,
-  hasSkipDangerousModePermissionPrompt: () => skipDangerous,
-}))
+import * as realSettings from 'src/utils/settings/settings.js'
+import * as realBootstrapState from 'src/bootstrap/state.js'
+import * as realSettingsConstants from 'src/utils/settings/constants.js'
+
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const settingsSnap = snapshotModuleExports(realSettings)
+const bootstrapSnap = snapshotModuleExports(realBootstrapState)
+const constantsSnap = snapshotModuleExports(realSettingsConstants)
+const realGetInitialSettings =
+  settingsSnap.getInitialSettings as typeof realSettings.getInitialSettings
+
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getSettings_DEPRECATED: () => mockSettings,
+    getInitialSettings: () => ({
+      ...realGetInitialSettings(),
+      ...mockSettings,
+    }),
+    hasSkipDangerousModePermissionPrompt: () => skipDangerous,
+  }),
+)
 
 mock.module('src/bootstrap/state.js', () => ({
+  ...bootstrapSnap,
   getIsNonInteractiveSession: () => nonInteractive,
 }))
 
 mock.module('src/utils/settings/constants.js', () => ({
+  ...constantsSnap,
   isSettingSourceEnabled: () => true,
 }))
+
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/settings/constants.js', () => ({ ...constantsSnap }))
+})
 
 const { getProjectMcpServerStatus, getProjectMcpServerStatusStrict } =
   await import('../utils.js')

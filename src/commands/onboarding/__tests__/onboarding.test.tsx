@@ -3,14 +3,16 @@ import * as React from 'react';
 import { logMock } from '../../../../tests/mocks/log';
 import { debugMock } from '../../../../tests/mocks/debug';
 
-// Pre-import real ink so we can fall through after this suite. Bun's
-// mock.module is process-global / last-write-wins; without delegation the
-// stub Box/Pane/Text/useTheme leak into other test files (e.g.
-// AgentsPlatformView.test.tsx) that need real ink components.
+// Pre-import real ink and snapshot BEFORE mock.module — ESM live bindings
+// re-point into the mock registry, so afterAll `() => _realInkMod` would
+// restore the stub Box/Text (hangs AgentsPlatformView / AuthPlaneSummary).
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js';
 const _realOnboardingInkMod = (await import('@anthropic/ink')) as Record<string, unknown>;
+const _inkSnap = snapshotModuleExports(_realOnboardingInkMod);
 let _useStubInkForOnboarding = true;
 afterAll(() => {
   _useStubInkForOnboarding = false;
+  mock.module('@anthropic/ink', () => ({ ..._inkSnap }));
 });
 
 mock.module('bun:bundle', () => ({
@@ -36,30 +38,49 @@ const fakeGlobalConfig: {
 } = {};
 const fakeProjectConfig: { hasTrustDialogAccepted?: boolean } = {};
 
-mock.module('src/utils/config.js', () => ({
-  getGlobalConfig: () => ({ ...fakeGlobalConfig }),
-  saveGlobalConfig: (updater: (cur: typeof fakeGlobalConfig) => typeof fakeGlobalConfig) => {
-    Object.assign(fakeGlobalConfig, updater({ ...fakeGlobalConfig }));
-  },
-  saveCurrentProjectConfig: (updater: (cur: typeof fakeProjectConfig) => typeof fakeProjectConfig) => {
-    Object.assign(fakeProjectConfig, updater({ ...fakeProjectConfig }));
-  },
-}));
+const _realConfig = await import('src/utils/config.js');
+// Snapshot before mock — live namespace rebinds under Bun mock.module.
+const _configSnap = snapshotModuleExports(_realConfig as Record<string, unknown>);
+const realGetGlobalConfig = _configSnap.getGlobalConfig as typeof _realConfig.getGlobalConfig;
+let _useOnboardingConfigMock = true;
+afterAll(() => {
+  _useOnboardingConfigMock = false;
+  mock.module('src/utils/config.js', () => ({ ..._configSnap }));
+  mock.module('src/utils/config.ts', () => ({ ..._configSnap }));
+});
+
+// When flag is on, isolate onboarding persistence; when off (afterAll),
+// fall through to pre-mock snapshot so installPrompt/daemonInstall keep working.
+function onboardingConfigMock() {
+  if (!_useOnboardingConfigMock) return { ..._configSnap };
+  return {
+    ..._configSnap,
+    getGlobalConfig: () => ({ ...realGetGlobalConfig(), ...fakeGlobalConfig }),
+    saveGlobalConfig: (updater: (cur: typeof fakeGlobalConfig) => typeof fakeGlobalConfig) => {
+      Object.assign(fakeGlobalConfig, updater({ ...fakeGlobalConfig }));
+    },
+    saveCurrentProjectConfig: (updater: (cur: typeof fakeProjectConfig) => typeof fakeProjectConfig) => {
+      Object.assign(fakeProjectConfig, updater({ ...fakeProjectConfig }));
+    },
+  };
+}
+mock.module('src/utils/config.js', onboardingConfigMock);
+mock.module('src/utils/config.ts', onboardingConfigMock);
 
 // Stub heavy theme + ink imports — the launcher only references them for
-// the `theme` subcommand JSX render path. Spread real ink so when the flag
-// flips off in afterAll, later test files see real components.
+// the `theme` subcommand JSX render path. Spread pre-mock snapshot (not the
+// live namespace) so co-suite afterAll restore cannot re-export stubs.
 mock.module('@anthropic/ink', () => {
   if (_useStubInkForOnboarding) {
     return {
-      ..._realOnboardingInkMod,
+      ..._inkSnap,
       Box: ({ children }: { children?: React.ReactNode }) => React.createElement('box', null, children),
       Pane: ({ children }: { children?: React.ReactNode }) => React.createElement('pane', null, children),
       Text: ({ children }: { children?: React.ReactNode }) => React.createElement('text', null, children),
       useTheme: () => ['dark', (_t: string) => undefined],
     };
   }
-  return _realOnboardingInkMod;
+  return { ..._inkSnap };
 });
 
 mock.module('src/components/ThemePicker.js', () => ({

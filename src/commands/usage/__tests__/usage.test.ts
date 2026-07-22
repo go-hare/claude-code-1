@@ -7,7 +7,7 @@
  *   - cost/stats index files emit commands with matching name
  */
 
-import { mock, describe, test, expect } from 'bun:test'
+import { afterAll, mock, describe, test, expect } from 'bun:test'
 
 // Must mock before importing anything that pulls in bootstrap/state
 import { logMock } from '../../../../tests/mocks/log.js'
@@ -31,11 +31,24 @@ mock.module('src/cost-tracker.ts', () => ({
   formatTotalCost: () => 'Total cost: $0.0012',
 }))
 
-mock.module('src/utils/config.ts', () => ({
-  getCurrentProjectConfig: () => ({}),
-  saveCurrentProjectConfig: () => {},
-  getGlobalConfig: () => ({}),
-}))
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+import * as realConfig from 'src/utils/config.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+const configSnap = snapshotModuleExports(realConfig)
+function usageConfigMock() {
+  return {
+    ...configSnap,
+    getCurrentProjectConfig: () => ({}),
+    saveCurrentProjectConfig: () => {},
+    getGlobalConfig: () => ({}),
+  }
+}
+mock.module('src/utils/config.ts', usageConfigMock)
+mock.module('src/utils/config.js', usageConfigMock)
+afterAll(() => {
+  mock.module('src/utils/config.ts', () => ({ ...configSnap }))
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+})
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

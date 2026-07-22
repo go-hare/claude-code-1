@@ -7,46 +7,66 @@
  */
 import { afterAll, describe, expect, test, beforeEach, mock } from 'bun:test'
 import * as settingsModule from '../../../utils/settings/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
+
+// Snapshot BEFORE mock.module — live namespace rebinds under Bun mock.module.
+const settingsSnap = snapshotModuleExports(settingsModule)
+const realGetInitialSettings =
+  settingsSnap.getInitialSettings as typeof settingsModule.getInitialSettings
 
 // ── Mocks must be declared before the module under test is imported ──────────
 
 let mockSettings: Record<string, unknown> = {}
 let lastUpdate: { source: string; patch: Record<string, unknown> } | null = null
 
-mock.module('src/utils/settings/settings.js', () => ({
-  loadManagedFileSettings: () => ({ settings: null, errors: [] }),
-  getManagedFileSettingsPresence: () => ({
-    hasBase: false,
-    hasDropIns: false,
+// Spread pre-mock snapshot and override only poor-mode paths — thin full stubs
+// break tui updateSettingsForSource under Bun process-global mock.module.
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getInitialSettings: () => ({
+      ...realGetInitialSettings(),
+      ...mockSettings,
+    }),
+    getSettingsForSource: () => ({
+      ...realGetInitialSettings(),
+      ...mockSettings,
+    }),
+    getSettingsWithErrors: () => ({
+      settings: { ...realGetInitialSettings(), ...mockSettings },
+      errors: [],
+    }),
+    getSettingsWithSources: () => ({
+      effective: { ...realGetInitialSettings(), ...mockSettings },
+      sources: [],
+    }),
+    getSettings_DEPRECATED: () => ({
+      ...realGetInitialSettings(),
+      ...mockSettings,
+    }),
+    rawSettingsContainsKey: (key: string) =>
+      key in mockSettings ||
+      key in (realGetInitialSettings() as Record<string, unknown>),
+    updateSettingsForSource: (
+      source: string,
+      patch: Record<string, unknown>,
+    ) => {
+      lastUpdate = { source, patch }
+      mockSettings = { ...mockSettings, ...patch }
+      // Do not write through real settings (would mutate user settings.json).
+      return { error: null }
+    },
   }),
-  parseSettingsFile: () => ({ settings: null, errors: [] }),
-  getSettingsRootPathForSource: () => '',
-  getSettingsFilePathForSource: () => undefined,
-  getRelativeSettingsFilePathForSource: () => '',
-  getInitialSettings: () => mockSettings,
-  getSettingsForSource: () => mockSettings,
-  getPolicySettingsOrigin: () => null,
-  getSettingsWithErrors: () => ({ settings: mockSettings, errors: [] }),
-  getSettingsWithSources: () => ({ effective: mockSettings, sources: [] }),
-  getSettings_DEPRECATED: () => mockSettings,
-  settingsMergeCustomizer: () => undefined,
-  getManagedSettingsKeysForLogging: () => [],
-  // Keep unrelated exports aligned with the real settings module so this
-  // full-surface mock cannot change later test files if Bun keeps it alive.
-  hasAutoModeOptIn: () => true,
-  hasSkipDangerousModePermissionPrompt: () => false,
-  getAutoModeConfig: () => undefined,
-  getUseAutoModeDuringPlan: () => true,
-  rawSettingsContainsKey: (key: string) => key in mockSettings,
-  updateSettingsForSource: (source: string, patch: Record<string, unknown>) => {
-    lastUpdate = { source, patch }
-    mockSettings = { ...mockSettings, ...patch }
-  },
-}))
+)
 
 afterAll(() => {
-  mock.restore()
-  mock.module('src/utils/settings/settings.js', () => settingsModule)
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
 })
 
 // Import AFTER mocks are registered. The query suffix gives this file its own

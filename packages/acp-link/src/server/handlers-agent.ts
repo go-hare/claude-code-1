@@ -22,6 +22,15 @@ export async function handleConnect(ws: WSContext): Promise<void> {
     cwd: AGENT_CWD,
   } = getAgentConfig()
 
+  // Tests may dispatch initialize without configureServer; refuse spawn with
+  // undefined command instead of hanging / throwing TypeError from child_process.
+  if (!AGENT_COMMAND) {
+    logAgent.error({ error: 'agent command not configured' }, 'connect failed')
+    sendJsonRpcError(ws, state, null, -32603, 'Agent command is not configured')
+    send(ws, 'status', { connected: false })
+    return
+  }
+
   // If already connected to a running agent, just resend status
   // This handles frontend reconnections without restarting the agent process
   // Check both .killed and .exitCode to detect crashed processes

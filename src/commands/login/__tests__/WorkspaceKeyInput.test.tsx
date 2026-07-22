@@ -14,23 +14,43 @@
  * and instead verify the component's behaviour through pure validation logic tests
  * plus a direct JSX snapshot check against a minimal stub render.
  */
-import { describe, expect, test, mock } from 'bun:test';
+import { afterAll, describe, expect, test, mock } from 'bun:test';
 import * as React from 'react';
 import { logMock } from '../../../../tests/mocks/log';
 import { debugMock } from '../../../../tests/mocks/debug';
+import { restoreSettingsMockWith, snapshotModuleExports } from '../../../../tests/mocks/settings.js';
+
+import * as realSettings from 'src/utils/settings/settings.js';
+import * as realConfig from 'src/utils/config.js';
+const settingsSnap = snapshotModuleExports(realSettings);
+const configSnap = snapshotModuleExports(realConfig);
+const realGetGlobalConfig = configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig;
 
 mock.module('src/utils/log.ts', logMock);
 mock.module('src/utils/debug.ts', debugMock);
 mock.module('bun:bundle', () => ({ feature: () => false }));
 mock.module('src/utils/settings/settings.js', () => ({
+  ...settingsSnap,
   getCachedOrDefaultSettings: () => ({}),
   getSettings: () => ({}),
 }));
-mock.module('src/utils/config.ts', () => ({
-  isConfigEnabled: () => true,
-  getGlobalConfig: () => ({ workspaceApiKey: undefined }),
-  saveGlobalConfig: (_updater: unknown) => undefined,
-}));
+function configMock() {
+  return {
+    ...configSnap,
+    isConfigEnabled: () => true,
+    getGlobalConfig: () => ({
+      ...realGetGlobalConfig(),
+      workspaceApiKey: undefined,
+    }),
+  };
+}
+mock.module('src/utils/config.ts', configMock);
+mock.module('src/utils/config.js', configMock);
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, ['src/utils/settings/settings.js']);
+  mock.module('src/utils/config.ts', () => ({ ...configSnap }));
+  mock.module('src/utils/config.js', () => ({ ...configSnap }));
+});
 // ---------------------------------------------------------------------------
 // Inline validation logic tests (key prefix / length rules)
 // These verify the guard behaviour without needing Ink render or useInput

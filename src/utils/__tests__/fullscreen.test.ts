@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   _resetTmuxControlModeProbeForTesting,
   _setWindowsPlatformForTesting,
@@ -7,6 +7,11 @@ import {
   isFullscreenFeatureGateEnabled,
   isWindowsOverSSH,
 } from '../fullscreen.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
 
 const ORIG = {
   NO_FLICKER: process.env.CLAUDE_CODE_NO_FLICKER,
@@ -21,15 +26,41 @@ const ORIG = {
   SSH_TTY: process.env.SSH_TTY,
 }
 
-let settingsTui: string | undefined
+let settingsTui: 'default' | 'fullscreen' | undefined
+
+import * as realSettings from '../settings/settings.js'
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const settingsSnap = snapshotModuleExports(realSettings)
+const realGetSettingsForSource =
+  settingsSnap.getSettingsForSource as typeof realSettings.getSettingsForSource
+const realGetInitialSettings =
+  settingsSnap.getInitialSettings as typeof realSettings.getInitialSettings
 
 // Relative specifier matches fullscreen.ts dynamic require('./settings/settings.js').
-mock.module('../settings/settings.js', () => ({
-  getSettingsForSource: () =>
-    settingsTui === undefined ? {} : { tui: settingsTui },
-  getInitialSettings: () =>
-    settingsTui === undefined ? {} : { tui: settingsTui },
-}))
+const settingsMock = createSettingsMock(settingsSnap, {
+  getSettingsForSource: (
+    source: Parameters<typeof realGetSettingsForSource>[0],
+  ) => {
+    if (settingsTui !== undefined) {
+      return { ...(realGetSettingsForSource(source) ?? {}), tui: settingsTui }
+    }
+    return realGetSettingsForSource(source)
+  },
+  getInitialSettings: () => {
+    if (settingsTui !== undefined) {
+      return { ...realGetInitialSettings(), tui: settingsTui }
+    }
+    return realGetInitialSettings()
+  },
+})
+mock.module('../settings/settings.js', settingsMock)
+mock.module('src/utils/settings/settings.js', settingsMock)
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    '../settings/settings.js',
+    'src/utils/settings/settings.js',
+  ])
+})
 
 afterEach(() => {
   const restore = (k: string, v: string | undefined) => {

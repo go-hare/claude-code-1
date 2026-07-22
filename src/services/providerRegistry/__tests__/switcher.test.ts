@@ -1,12 +1,34 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
+import {
+  afterAll,
+  describe,
+  test,
+  expect,
+  beforeEach,
+  afterEach,
+  mock,
+} from 'bun:test'
 import { logMock } from '../../../../tests/mocks/log.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('bun:bundle', () => ({ feature: () => false }))
-mock.module('src/utils/settings/settings.js', () => ({
-  getSettings_DEPRECATED: () => ({}),
-  updateSettingsForSource: () => {},
-}))
+import * as realSettings from 'src/utils/settings/settings.js'
+const settingsSnap = snapshotModuleExports(realSettings)
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getSettings_DEPRECATED: () => ({}),
+  }),
+)
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
+})
 
 beforeEach(() => {
   // Clean OpenAI env vars before each test

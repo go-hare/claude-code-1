@@ -1,14 +1,48 @@
-import { mock, describe, expect, test } from 'bun:test'
+import { afterAll, mock, describe, expect, test } from 'bun:test'
 import { logMock } from '../../../tests/mocks/log'
 
 // Mock heavy dependency chain: tokenEstimation.ts → log.ts → bootstrap/state.ts
 mock.module('src/utils/log.ts', logMock)
 
 // Mock tokenEstimation to avoid pulling in API provider deps
+// Content-aware message estimate so LocalAgentTask cache-invalidation tests
+// survive process-global mock.module when this file co-runs first.
+function roughTokenCountEstimationForMessages(msgs: any[]): number {
+  let n = 0
+  for (const msg of msgs) {
+    const content = msg?.message?.content
+    if (typeof content === 'string') n += content.length
+    else if (Array.isArray(content)) {
+      for (const block of content) {
+        if (typeof block === 'string') n += block.length
+        else if (block && typeof block === 'object') {
+          if (typeof (block as any).text === 'string')
+            n += (block as any).text.length
+          if (typeof (block as any).thinking === 'string')
+            n += (block as any).thinking.length
+        }
+      }
+    }
+  }
+  return Math.ceil(n / 4)
+}
 mock.module('src/services/tokenEstimation.ts', () => ({
   roughTokenCountEstimation: (text: string) => Math.ceil(text.length / 4),
-  roughTokenCountEstimationForMessages: (msgs: any[]) => msgs.length * 100,
-  roughTokenCountEstimationForMessage: () => 100,
+  roughTokenCountEstimationForMessages,
+  roughTokenCountEstimationForMessage: (msg: any) =>
+    roughTokenCountEstimationForMessages([msg]),
+  roughTokenCountEstimationForFileType: () => 100,
+  bytesPerTokenForFileType: () => 4,
+  countTokensWithAPI: async () => 0,
+  countMessagesTokensWithAPI: async () => 0,
+  countTokensViaHaikuFallback: async () => 0,
+}))
+// Also mock .js specifier (Bun registry is per-specifier).
+mock.module('src/services/tokenEstimation.js', () => ({
+  roughTokenCountEstimation: (text: string) => Math.ceil(text.length / 4),
+  roughTokenCountEstimationForMessages,
+  roughTokenCountEstimationForMessage: (msg: any) =>
+    roughTokenCountEstimationForMessages([msg]),
   roughTokenCountEstimationForFileType: () => 100,
   bytesPerTokenForFileType: () => 4,
   countTokensWithAPI: async () => 0,
@@ -16,17 +50,40 @@ mock.module('src/services/tokenEstimation.ts', () => ({
   countTokensViaHaikuFallback: async () => 0,
 }))
 
-// Mock slowOperations to avoid bun:bundle import
-mock.module('src/utils/slowOperations.ts', () => ({
-  jsonStringify: JSON.stringify,
-  jsonParse: JSON.parse,
-  slowLogging: { enabled: false },
-  clone: (v: any) => structuredClone(v),
-  cloneDeep: (v: any) => structuredClone(v),
-  callerFrame: () => '',
-  SLOW_OPERATION_THRESHOLD_MS: 100,
-  writeFileSync_DEPRECATED: () => {},
-}))
+// Snapshot + callable slowLogging — thin `{ enabled: false }` is not a
+// template tag and crashes fsOperations.mkdirSync → /tui settings writes.
+import * as realSlowOps from 'src/utils/slowOperations.js'
+import {
+  createSlowOperationsMock,
+  restoreSlowOperationsMock,
+  snapshotModuleExports,
+} from '../../../tests/mocks/slowOperations.js'
+const slowOpsSnap = snapshotModuleExports(realSlowOps)
+mock.module(
+  'src/utils/slowOperations.ts',
+  createSlowOperationsMock(slowOpsSnap, {
+    jsonStringify: JSON.stringify,
+    jsonParse: JSON.parse,
+    clone: (v: any) => structuredClone(v),
+    cloneDeep: (v: any) => structuredClone(v),
+    callerFrame: () => '',
+    writeFileSync_DEPRECATED: () => {},
+  }),
+)
+mock.module(
+  'src/utils/slowOperations.js',
+  createSlowOperationsMock(slowOpsSnap, {
+    jsonStringify: JSON.stringify,
+    jsonParse: JSON.parse,
+    clone: (v: any) => structuredClone(v),
+    cloneDeep: (v: any) => structuredClone(v),
+    callerFrame: () => '',
+    writeFileSync_DEPRECATED: () => {},
+  }),
+)
+afterAll(() => {
+  restoreSlowOperationsMock(mock.module, slowOpsSnap)
+})
 
 const {
   getTokenCountFromUsage,

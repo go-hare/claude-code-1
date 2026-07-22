@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
+import * as realInstallPrompt from '../../../daemon/installPrompt.js'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -217,6 +218,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getReplBridgeHandle: () => null,
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => ({ ok: false }),
     }))
 
@@ -268,6 +270,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     // If handoff proceeded it would call ensureDaemonRunning / write job —
     // these must not be reached without a session id.
     mock.module('../../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => {
         throw new Error('must not reach daemon without session')
       },
@@ -307,6 +310,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getReplBridgeHandle: () => null,
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => {
         throw new Error('must not reach daemon when persistence disabled')
       },
@@ -385,6 +389,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getReplBridgeHandle: () => null,
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => ({ ok: false }),
     }))
 
@@ -505,6 +510,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       getReplBridgeHandle: () => null,
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     mock.module('../../../daemon/controlSocketClient.js', () => ({

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { pathToFileURL } from 'node:url'
 
 let ffiShouldThrow = false
 let nativeFlags = 0
@@ -24,8 +25,15 @@ mock.module('bun:ffi', () => ({
 
 const originalPlatform = process.platform
 
+// Absolute file URL bypasses process-global mock.module('modifiers-napi')
+// from src/utils/__tests__/modifiers.test.ts. Relative `../index.ts` can
+// still resolve through the package name mock under full-suite order.
+const INDEX_URL = pathToFileURL(
+  new URL('../index.ts', import.meta.url).pathname,
+).href
+
 async function loadModule() {
-  return import(`../index.ts?case=${Math.random()}`)
+  return import(`${INDEX_URL}?case=${Math.random()}`)
 }
 
 beforeEach(() => {

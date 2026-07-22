@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 
 // Mock bun:bundle before any imports that use feature()
 // Note: in the test environment AWAY_SUMMARY compile-time flag is false, so
@@ -19,12 +27,27 @@ mock.module('src/utils/debug.ts', () => ({
   isDebug: () => false,
 }))
 
-// Mock settings to avoid filesystem side effects
-mock.module('src/utils/settings/settings.js', () => ({
-  getCachedSettings: () => ({}),
-  getSettings: async () => ({}),
-  updateSettings: async () => {},
-}))
+// Mock settings to avoid filesystem side effects.
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+import * as realSettings from 'src/utils/settings/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
+const settingsSnap = snapshotModuleExports(realSettings)
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getInitialSettings: () => ({}),
+    getSettings_DEPRECATED: () => ({}),
+  }),
+)
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
+})
 
 // Mock analytics (GrowthBook) — required for isEnabled()
 let gbValue = true

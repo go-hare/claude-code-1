@@ -9,7 +9,10 @@
 import { describe, test, expect } from 'bun:test'
 import { resolve, relative } from 'path'
 
-const PROJECT_ROOT = resolve(__dirname, '..', '..', '..', '..', '..')
+// __dirname = src/services/searchExtraTools/__tests__ → 4 levels up = repo root.
+// (Previously 5 levels landed in parent of monorepo and broke workspace package
+// resolution for @claude-code/builtin-tools in the subprocess.)
+const PROJECT_ROOT = resolve(__dirname, '..', '..', '..', '..')
 const RUNNER_ABS = resolve(__dirname, 'prefetch.runner.ts')
 const RUNNER_REL = './' + relative(PROJECT_ROOT, RUNNER_ABS).replace(/\\/g, '/')
 

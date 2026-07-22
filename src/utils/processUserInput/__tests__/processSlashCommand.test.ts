@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import type { QueuedCommand } from '../../../types/textInputTypes'
 import {
   resetStateForTests,
@@ -18,7 +26,19 @@ import {
   cleanupTempDir,
   createTempDir,
 } from '../../../../tests/mocks/file-system'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import * as realMessageQueueManager from '../../messageQueueManager.js'
+import * as realRunAgent from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
+import * as realAgentUI from '@claude-code/builtin-tools/tools/AgentTool/UI.js'
 
+// Snapshot BEFORE mock — Bun mock.module is process-global last-write-wins.
+// Leaving feature('KAIROS') permanently true makes SleepTool (and other
+// packages) take the proactive path forever when co-run under full `bun test`.
+const mqmSnap = snapshotModuleExports(realMessageQueueManager)
+const runAgentSnap = snapshotModuleExports(realRunAgent)
+const agentUiSnap = snapshotModuleExports(realAgentUI)
+
+let useSlashCommandMocks = true
 let runAgentBlocker: Promise<void> | null = null
 let releaseRunAgentBlocker: (() => void) | null = null
 let runAgentStartCount = 0
@@ -47,7 +67,11 @@ function resetCommandQueue(): void {
 }
 
 function createMessageQueueManagerMock() {
+  if (!useSlashCommandMocks) {
+    return { ...mqmSnap }
+  }
   return {
+    ...mqmSnap,
     enqueue,
     enqueuePendingNotification,
     getCommandQueue,
@@ -68,54 +92,92 @@ function releaseRunAgent(): void {
   releaseRunAgentBlocker = null
 }
 
-mock.module('bun:bundle', () => ({
-  feature: (name: string) => name === 'KAIROS',
-}))
+function bunBundleMock() {
+  return {
+    // While this suite owns the mock: only KAIROS. After afterAll: all false
+    // so SleepTool / proactive gates don't stay latched open for co-suites.
+    feature: (name: string) =>
+      useSlashCommandMocks ? name === 'KAIROS' : false,
+  }
+}
+mock.module('bun:bundle', bunBundleMock)
 
-mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
-  runAgent: async function* () {
-    runAgentStartCount += 1
-    if (runAgentBlocker) {
-      await runAgentBlocker
-    }
-    yield {
-      type: 'assistant',
-      uuid: 'assistant-1',
-      timestamp: new Date().toISOString(),
-      message: {
-        id: 'msg_1',
-        type: 'message',
-        role: 'assistant',
-        model: 'test-model',
-        content: [{ type: 'text', text: 'forked command done' }],
-        stop_reason: 'end_turn',
-        stop_sequence: null,
-        usage: {
-          input_tokens: 0,
-          output_tokens: 0,
+function runAgentMock() {
+  if (!useSlashCommandMocks) {
+    return { ...runAgentSnap }
+  }
+  return {
+    ...runAgentSnap,
+    runAgent: async function* () {
+      runAgentStartCount += 1
+      if (runAgentBlocker) {
+        await runAgentBlocker
+      }
+      yield {
+        type: 'assistant',
+        uuid: 'assistant-1',
+        timestamp: new Date().toISOString(),
+        message: {
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          model: 'test-model',
+          content: [{ type: 'text', text: 'forked command done' }],
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+          },
         },
-      },
-    }
-  },
-}))
+      }
+    },
+  }
+}
+mock.module(
+  '@claude-code/builtin-tools/tools/AgentTool/runAgent.js',
+  runAgentMock,
+)
 
-mock.module('@claude-code/builtin-tools/tools/AgentTool/UI.js', () => ({
-  AgentPromptDisplay: () => null,
-  AgentResponseDisplay: () => null,
-  extractLastToolInfo: () => null,
-  renderGroupedAgentToolUse: () => null,
-  renderToolResultMessage: () => null,
-  renderToolUseErrorMessage: () => null,
-  renderToolUseMessage: () => null,
-  renderToolUseProgressMessage: () => null,
-  renderToolUseRejectedMessage: () => null,
-  renderToolUseTag: () => null,
-  userFacingName: () => 'Agent',
-  userFacingNameBackgroundColor: () => 'gray',
-}))
+function agentUiMock() {
+  if (!useSlashCommandMocks) {
+    return { ...agentUiSnap }
+  }
+  return {
+    ...agentUiSnap,
+    AgentPromptDisplay: () => null,
+    AgentResponseDisplay: () => null,
+    extractLastToolInfo: () => null,
+    renderGroupedAgentToolUse: () => null,
+    renderToolResultMessage: () => null,
+    renderToolUseErrorMessage: () => null,
+    renderToolUseMessage: () => null,
+    renderToolUseProgressMessage: () => null,
+    renderToolUseRejectedMessage: () => null,
+    renderToolUseTag: () => null,
+    userFacingName: () => 'Agent',
+    userFacingNameBackgroundColor: () => 'gray',
+  }
+}
+mock.module('@claude-code/builtin-tools/tools/AgentTool/UI.js', agentUiMock)
 
 mock.module('../../messageQueueManager', createMessageQueueManagerMock)
 mock.module('../../messageQueueManager.js', createMessageQueueManagerMock)
+mock.module('src/utils/messageQueueManager.js', createMessageQueueManagerMock)
+
+afterAll(() => {
+  useSlashCommandMocks = false
+  mock.module('bun:bundle', () => ({ feature: () => false }))
+  mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
+    ...runAgentSnap,
+  }))
+  mock.module('@claude-code/builtin-tools/tools/AgentTool/UI.js', () => ({
+    ...agentUiSnap,
+  }))
+  mock.module('../../messageQueueManager', () => ({ ...mqmSnap }))
+  mock.module('../../messageQueueManager.js', () => ({ ...mqmSnap }))
+  mock.module('src/utils/messageQueueManager.js', () => ({ ...mqmSnap }))
+})
 
 const { processSlashCommand } = await import('../processSlashCommand')
 

@@ -1,13 +1,37 @@
-import { describe, expect, test, beforeEach, afterEach, mock } from 'bun:test'
+import {
+  afterAll,
+  describe,
+  expect,
+  test,
+  beforeEach,
+  afterEach,
+  mock,
+} from 'bun:test'
+import * as realSettings from 'src/utils/settings/settings.js'
+import * as realThinking from 'src/utils/thinking.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
 
-// Mock heavy dependencies to avoid import chain issues
+// Snapshot BEFORE mock.module — live namespace rebinds under Bun mock.module,
+// so afterAll `() => realSettings` would restore the mock, not the real module.
+const settingsSnap = snapshotModuleExports(realSettings)
+const thinkingSnap = snapshotModuleExports(realThinking)
+
+// Mock heavy dependencies to avoid import chain issues.
 mock.module('src/utils/thinking.js', () => ({
+  ...thinkingSnap,
   isUltrathinkEnabled: () => false,
 }))
-mock.module('src/utils/settings/settings.js', () => ({
-  getInitialSettings: () => ({}),
-  getSettingsForSource: () => ({}),
-}))
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getInitialSettings: () => ({}),
+    getSettingsForSource: () => ({}),
+  }),
+)
 mock.module('src/utils/auth.js', () => ({
   isProSubscriber: () => false,
   isMaxSubscriber: () => false,
@@ -20,6 +44,11 @@ mock.module('src/services/analytics/growthbook.js', () => ({
 mock.module('src/utils/model/modelSupportOverrides.js', () => ({
   get3PModelCapabilityOverride: () => undefined,
 }))
+
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap)
+  mock.module('src/utils/thinking.js', () => ({ ...thinkingSnap }))
+})
 
 const {
   isEffortLevel,

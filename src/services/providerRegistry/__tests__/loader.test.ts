@@ -1,4 +1,12 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
+import {
+  afterAll,
+  describe,
+  test,
+  expect,
+  beforeEach,
+  afterEach,
+  mock,
+} from 'bun:test'
 import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -10,11 +18,26 @@ mock.module('src/utils/log.ts', logMock)
 // bun:bundle must be mocked before imports that use feature()
 mock.module('bun:bundle', () => ({ feature: () => false }))
 
-// settings.js must be mocked to cut bootstrap chain
-mock.module('src/utils/settings/settings.js', () => ({
-  getSettings_DEPRECATED: () => ({}),
-  updateSettingsForSource: () => {},
-}))
+// settings.js must be mocked to cut bootstrap chain.
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+import * as realSettings from 'src/utils/settings/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
+const settingsSnap = snapshotModuleExports(realSettings)
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getSettings_DEPRECATED: () => ({}),
+  }),
+)
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+  ])
+})
 
 let tmpDir: string
 

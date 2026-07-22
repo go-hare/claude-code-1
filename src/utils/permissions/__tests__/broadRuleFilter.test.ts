@@ -1,4 +1,10 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import * as realSettings from 'src/utils/settings/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
 import {
   _resetBroadRuleCacheForTesting,
   isAutoModeFilteringActive,
@@ -6,20 +12,31 @@ import {
   isClassifyAllShellEnabled,
 } from '../broadRuleFilter.js'
 
-const getSettingsForSourceMock = mock((_source?: string) => null as unknown)
-mock.module('src/utils/settings/settings.ts', () => ({
-  getSettingsForSource: getSettingsForSourceMock,
+const getSettingsForSourceMock = mock(
+  (_source?: string) =>
+    null as ReturnType<typeof realSettings.getSettingsForSource>,
+)
+// Snapshot BEFORE mock — live namespace rebinds; afterAll must restore snapshot.
+const settingsSnap = snapshotModuleExports(realSettings)
+const settingsMock = createSettingsMock(settingsSnap, {
+  getSettingsForSource:
+    getSettingsForSourceMock as typeof realSettings.getSettingsForSource,
   getSettings_DEPRECATED: () => ({}),
   getInitialSettings: () => ({}),
-  updateSettingsForSource: () => ({ error: null }),
   hasAutoModeOptIn: () => true,
   getAutoModeConfig: () => undefined,
-}))
+})
+mock.module('src/utils/settings/settings.ts', settingsMock)
+mock.module('src/utils/settings/settings.js', settingsMock)
 
 afterEach(() => {
   getSettingsForSourceMock.mockReset()
   getSettingsForSourceMock.mockImplementation((_source?: string) => null)
   _resetBroadRuleCacheForTesting()
+})
+
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap)
 })
 
 describe('isClassifyAllShellEnabled / classifyAllShell', () => {

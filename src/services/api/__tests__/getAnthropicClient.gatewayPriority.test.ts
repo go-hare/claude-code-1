@@ -13,9 +13,22 @@
  * breaks bedrockClient.test.ts and other SDK importers). Real BedrockClient
  * construction is safe with CLAUDE_CODE_SKIP_BEDROCK_AUTH=1.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import Anthropic from '@anthropic-ai/sdk'
 import * as realSettings from '../../../utils/settings/settings.js'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../tests/mocks/settings.js'
 import { BedrockClient } from '../bedrockClient.js'
 
 // MACRO.VERSION is only injected in dev/build.
@@ -23,20 +36,28 @@ import { BedrockClient } from '../bedrockClient.js'
   VERSION: '0.0.0-test',
 }
 
+// Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
+const settingsSnap = snapshotModuleExports(realSettings)
+
 // getAPIProvider reads settings.modelType first. Force empty settings while
 // re-exporting the real module so other named exports stay intact (no pollution
 // of updateSettingsForSource etc. beyond getInitialSettings return value).
-function settingsMock() {
-  return {
-    ...realSettings,
-    getInitialSettings: () => ({}),
-    getSettingsForSource: () => ({}),
-  }
-}
+const settingsMock = createSettingsMock(settingsSnap, {
+  getInitialSettings: () => ({}),
+  getSettingsForSource: () => ({}),
+})
 mock.module('src/utils/settings/settings.js', settingsMock)
 mock.module('src/utils/settings/settings.ts', settingsMock)
 mock.module('../../utils/settings/settings.js', settingsMock)
 mock.module('../../../utils/settings/settings.js', settingsMock)
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    'src/utils/settings/settings.js',
+    'src/utils/settings/settings.ts',
+    '../../utils/settings/settings.js',
+    '../../../utils/settings/settings.js',
+  ])
+})
 
 function makeJwt(expSecondsFromNow = 3600): string {
   const header = Buffer.from(

@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
+import * as realInstallPrompt from '../../daemon/installPrompt.js'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -83,6 +84,7 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     const order: string[] = []
 
     mock.module('../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => {
         order.push('daemon')
         return { ok: true }
@@ -188,6 +190,7 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     delete process.env.CLAUDE_JOB_DIR
 
     mock.module('../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     // densable yNo settled crashed → real submitDispatch throws (do NOT mock
@@ -249,6 +252,7 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     delete process.env.CLAUDE_JOB_DIR
 
     mock.module('../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     mock.module('../../daemon/controlSocketClient.js', () => ({
@@ -308,6 +312,7 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
     process.env.CLAUDE_JOB_DIR = join(dir, 'poison-job')
 
     mock.module('../../daemon/installPrompt.js', () => ({
+      ...realInstallPrompt,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     // Offline control socket → real submitDispatch file fallback (no bgManager mock).
@@ -402,6 +407,7 @@ describe('runExitBackgroundHandoff densable hNo order', () => {
 
     try {
       mock.module('../../daemon/installPrompt.js', () => ({
+        ...realInstallPrompt,
         ensureDaemonRunning: async () => ({ ok: true }),
       }))
       mock.module('../../daemon/controlSocketClient.js', () => ({

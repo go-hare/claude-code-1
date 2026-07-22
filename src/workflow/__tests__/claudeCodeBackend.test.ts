@@ -1,8 +1,15 @@
-import { expect, test, mock } from 'bun:test'
+import { afterAll, expect, test, mock } from 'bun:test'
+import * as realUuid from 'src/utils/uuid.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 // Note: mock specifier must resolve to the same module that impl actually imports (bun mock.module
 // matches by resolved module). impl uses '@claude-code/builtin-tools/...' and 'src/*' alias
 // path imports, so the same specifier is used here.
+//
+// CRITICAL: createAgentId must stay createAgentId-shaped (a + 16 hex). A stub
+// like 'agent-1' fails toAgentId() and makes SendMessage fall through to team
+// mailbox under full-suite co-run. Snapshot+restore uuid after this file.
+const uuidSnap = snapshotModuleExports(realUuid)
 mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
   runAgent: async function* () {
     yield {
@@ -47,7 +54,14 @@ mock.module('src/utils/messages.js', () => ({
   }),
   extractTextContent: () => 'agent-text',
 }))
-mock.module('src/utils/uuid.js', () => ({ createAgentId: () => 'agent-1' }))
+mock.module('src/utils/uuid.js', () => ({
+  ...uuidSnap,
+  // Valid createAgentId shape so toAgentId() accepts it if this mock leaks.
+  createAgentId: () => 'a0000000000000001',
+}))
+afterAll(() => {
+  mock.module('src/utils/uuid.js', () => ({ ...uuidSnap }))
+})
 mock.module('src/services/analytics/index.js', () => ({ logEvent: () => {} }))
 mock.module('src/utils/debug.js', () => ({ logForDebugging: () => {} }))
 
