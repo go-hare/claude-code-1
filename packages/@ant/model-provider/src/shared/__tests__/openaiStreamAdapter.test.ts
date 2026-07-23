@@ -308,6 +308,121 @@ describe('adaptOpenAIStreamToAnthropic', () => {
     expect(blockStarts[0].content_block.type).toBe('text')
     expect(blockStarts[1].content_block.type).toBe('tool_use')
   })
+
+  test('ignores content after first finish_reason (broken multi-finish proxies)', async () => {
+    // Broken OpenAI-compatible proxies re-emit the full sentence with
+    // finish_reason on every chunk. Without streamFinished, each finish
+    // closed the text block and the next content opened a new one → N ●.
+    const full = '先看接口清单现状'
+    const events = await collectEvents(
+      Array.from({ length: 7 }, () =>
+        makeChunk({
+          choices: [
+            {
+              index: 0,
+              delta: { content: full },
+              finish_reason: 'stop',
+            },
+          ],
+        }),
+      ),
+    )
+
+    const textStarts = events.filter(
+      e => e.type === 'content_block_start' && e.content_block?.type === 'text',
+    )
+    expect(textStarts.length).toBe(1)
+
+    const textDeltas = events.filter(
+      e => e.type === 'content_block_delta' && e.delta?.type === 'text_delta',
+    ) as any[]
+    expect(textDeltas.map(d => d.delta.text).join('')).toBe(full)
+
+    // Single message_delta / message_stop after the first finish
+    expect(events.filter(e => e.type === 'message_delta').length).toBe(1)
+    expect(events.filter(e => e.type === 'message_stop').length).toBe(1)
+  })
+
+  test('emits only suffix for cumulative full-text deltas', async () => {
+    // Some providers re-send the whole answer so far on each chunk.
+    // Emitting each chunk as incremental would concatenate prefixes.
+    const events = await collectEvents([
+      makeChunk({
+        choices: [
+          { index: 0, delta: { content: '先看' }, finish_reason: null },
+        ],
+      }),
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { content: '先看接口' },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [
+          {
+            index: 0,
+            delta: { content: '先看接口清单现状' },
+            finish_reason: null,
+          },
+        ],
+      }),
+      makeChunk({
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      }),
+    ])
+
+    const textStarts = events.filter(
+      e => e.type === 'content_block_start' && e.content_block?.type === 'text',
+    )
+    expect(textStarts.length).toBe(1)
+
+    const textDeltas = events.filter(
+      e => e.type === 'content_block_delta' && e.delta?.type === 'text_delta',
+    ) as any[]
+    expect(textDeltas.map(d => d.delta.text)).toEqual([
+      '先看',
+      '接口',
+      '清单现状',
+    ])
+    expect(textDeltas.map(d => d.delta.text).join('')).toBe('先看接口清单现状')
+  })
+
+  test('still accepts trailing usage-only chunks after finish', async () => {
+    const full = 'done'
+    const events = await collectEvents([
+      makeChunk({
+        choices: [
+          { index: 0, delta: { content: full }, finish_reason: 'stop' },
+        ],
+      }),
+      // Broken proxy: another finish+content pair (must be ignored)
+      makeChunk({
+        choices: [
+          { index: 0, delta: { content: full }, finish_reason: 'stop' },
+        ],
+      }),
+      // Legitimate trailing usage
+      makeChunk({
+        choices: [],
+        usage: { prompt_tokens: 50, completion_tokens: 3, total_tokens: 53 },
+      }),
+    ])
+
+    expect(
+      events.filter(
+        e =>
+          e.type === 'content_block_start' && e.content_block?.type === 'text',
+      ).length,
+    ).toBe(1)
+
+    const msgDelta = events.find(e => e.type === 'message_delta') as any
+    expect(msgDelta.usage.input_tokens).toBe(50)
+    expect(msgDelta.usage.output_tokens).toBe(3)
+  })
 })
 
 describe('thinking support (reasoning_content)', () => {

@@ -14,8 +14,12 @@ mock.module('../../../../utils/messages.js', () => messagesMock)
 mock.module('src/utils/messages.js', () => messagesMock)
 mock.module('src/utils/messages.ts', () => messagesMock)
 
-const { assembleFinalAssistantOutputs, EMPTY_OPENAI_USAGE, updateOpenAIUsage } =
-  await import('../openaiShared.js')
+const {
+  assembleFinalAssistantOutputs,
+  collapseAdjacentDuplicateTextBlocks,
+  EMPTY_OPENAI_USAGE,
+  updateOpenAIUsage,
+} = await import('../openaiShared.js')
 
 describe('updateOpenAIUsage', () => {
   test('merges delta values and preserves cache fields when delta is zero/undefined', () => {
@@ -97,5 +101,80 @@ describe('assembleFinalAssistantOutputs', () => {
       maxTokens: 0,
     })
     expect(outputs).toEqual([])
+  })
+
+  test('collapses adjacent identical text blocks into one', () => {
+    const full = '先看接口清单现状'
+    const outputs = assembleFinalAssistantOutputs({
+      partialMessage: {
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        content: [],
+        model: 'test-model',
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { ...EMPTY_OPENAI_USAGE },
+      } as any,
+      contentBlocks: {
+        0: { type: 'text', text: full },
+        1: { type: 'text', text: full },
+        2: { type: 'text', text: full },
+        3: { type: 'text', text: full },
+        4: { type: 'text', text: full },
+        5: { type: 'text', text: full },
+        6: { type: 'text', text: full },
+      },
+      tools: [],
+      agentId: undefined,
+      usage: { ...EMPTY_OPENAI_USAGE },
+      stopReason: 'end_turn',
+      maxTokens: 0,
+    })
+
+    expect(outputs).toHaveLength(1)
+    const content = (outputs[0] as any).message.content
+    expect(content).toHaveLength(1)
+    expect(content[0]).toEqual({ type: 'text', text: full })
+  })
+
+  test('does not collapse different adjacent text or non-text blocks', () => {
+    const outputs = assembleFinalAssistantOutputs({
+      partialMessage: {
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        content: [],
+        model: 'test-model',
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { ...EMPTY_OPENAI_USAGE },
+      } as any,
+      contentBlocks: {
+        0: { type: 'text', text: 'a' },
+        1: { type: 'text', text: 'b' },
+        2: { type: 'tool_use', id: 't1', name: 'bash', input: {} },
+        3: { type: 'text', text: 'a' },
+      },
+      tools: [],
+      agentId: undefined,
+      usage: { ...EMPTY_OPENAI_USAGE },
+      stopReason: 'tool_use',
+      maxTokens: 0,
+    })
+
+    const content = (outputs[0] as any).message.content
+    expect(content).toHaveLength(4)
+  })
+})
+
+describe('collapseAdjacentDuplicateTextBlocks', () => {
+  test('keeps a single block when all adjacent text is identical', () => {
+    const collapsed = collapseAdjacentDuplicateTextBlocks([
+      { type: 'text', text: 'same' },
+      { type: 'text', text: 'same' },
+      { type: 'text', text: 'same' },
+    ])
+    expect(collapsed).toEqual([{ type: 'text', text: 'same' }])
   })
 })

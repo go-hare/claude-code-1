@@ -67,6 +67,14 @@ export async function* adaptOpenAIStreamToAnthropic(
   // Deferred finish state
   let pendingFinishReason: string | null = null
   let pendingHasToolCalls = false
+  // After first finish_reason, ignore further content/tool deltas. Broken
+  // OpenAI-compatible proxies sometimes re-emit the full sentence with
+  // finish_reason on every chunk; each finish closed the text block and the
+  // next content opened a new one → N identical ● bullets after normalize.
+  let streamFinished = false
+  // Text already emitted into the open text block (for cumulative full-text
+  // deltas where each chunk re-sends the whole answer so far).
+  let emittedText = ''
 
   for await (const chunk of stream) {
     const choice = chunk.choices?.[0]
@@ -114,6 +122,9 @@ export async function* adaptOpenAIStreamToAnthropic(
     // Skip chunks that carry only usage data (no delta content)
     if (!delta) continue
 
+    // Post-finish content must not open new blocks (usage already handled).
+    if (streamFinished) continue
+
     // Handle reasoning_content → Anthropic thinking block.
     // Empty string is a valid signal: DeepSeek v4 thinking mode sometimes
     // returns reasoning_content: "" when the model answers directly. The
@@ -151,39 +162,51 @@ export async function* adaptOpenAIStreamToAnthropic(
 
     // Handle text content
     if (delta.content != null && delta.content !== '') {
-      if (!textBlockOpen) {
-        // Close thinking block if still open
-        if (thinkingBlockOpen) {
+      // Cumulative full-text deltas: chunk N re-sends prefix+new. Emit only
+      // the suffix so we do not concatenate "先看"+"先看接口"+…
+      let piece = delta.content
+      if (emittedText.length > 0 && piece.startsWith(emittedText)) {
+        piece = piece.slice(emittedText.length)
+        emittedText = delta.content
+      } else {
+        emittedText += piece
+      }
+
+      if (piece !== '') {
+        if (!textBlockOpen) {
+          // Close thinking block if still open
+          if (thinkingBlockOpen) {
+            yield {
+              type: 'content_block_stop',
+              index: currentContentIndex,
+            } as BetaRawMessageStreamEvent
+            openBlockIndices.delete(currentContentIndex)
+            thinkingBlockOpen = false
+          }
+
+          currentContentIndex++
+          textBlockOpen = true
+          openBlockIndices.add(currentContentIndex)
+
           yield {
-            type: 'content_block_stop',
+            type: 'content_block_start',
             index: currentContentIndex,
+            content_block: {
+              type: 'text',
+              text: '',
+            },
           } as BetaRawMessageStreamEvent
-          openBlockIndices.delete(currentContentIndex)
-          thinkingBlockOpen = false
         }
 
-        currentContentIndex++
-        textBlockOpen = true
-        openBlockIndices.add(currentContentIndex)
-
         yield {
-          type: 'content_block_start',
+          type: 'content_block_delta',
           index: currentContentIndex,
-          content_block: {
-            type: 'text',
-            text: '',
+          delta: {
+            type: 'text_delta',
+            text: piece,
           },
         } as BetaRawMessageStreamEvent
       }
-
-      yield {
-        type: 'content_block_delta',
-        index: currentContentIndex,
-        delta: {
-          type: 'text_delta',
-          text: delta.content,
-        },
-      } as BetaRawMessageStreamEvent
     }
 
     // Handle tool calls
@@ -284,8 +307,12 @@ export async function* adaptOpenAIStreamToAnthropic(
         }
       }
 
-      pendingFinishReason = choice.finish_reason
+      // Prefer first finish_reason; ignore later finish+content pairs.
+      if (pendingFinishReason === null) {
+        pendingFinishReason = choice.finish_reason
+      }
       pendingHasToolCalls = toolBlocks.size > 0
+      streamFinished = true
     }
   }
 

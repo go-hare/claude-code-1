@@ -107,6 +107,33 @@ export function updateOpenAIUsage(
 }
 
 /**
+ * Drop adjacent identical text blocks produced by broken stream adapters /
+ * proxies (each finish_reason closed a block; next content opened another
+ * with the same full sentence). normalizeMessages yields one ● per text
+ * block, so collapsing here prevents multi-bullet UI pollution even if the
+ * stream adapter failed to de-dupe.
+ */
+export function collapseAdjacentDuplicateTextBlocks(
+  blocks: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = []
+  for (const block of blocks) {
+    const prev = out[out.length - 1]
+    if (
+      block?.type === 'text' &&
+      prev?.type === 'text' &&
+      typeof block.text === 'string' &&
+      typeof prev.text === 'string' &&
+      block.text === prev.text
+    ) {
+      continue
+    }
+    out.push(block)
+  }
+  return out
+}
+
+/**
  * Assemble the final AssistantMessage (and optional max_tokens error) from
  * accumulated stream state. Used at `message_stop` (or post-loop safety
  * fallback) so real usage from `message_delta` is present on the yielded
@@ -134,10 +161,12 @@ export function assembleFinalAssistantOutputs(params: {
   } = params
   const outputs: (AssistantMessage | SystemAPIErrorMessage)[] = []
 
-  const allBlocks = Object.keys(contentBlocks)
-    .sort((a, b) => Number(a) - Number(b))
-    .map(k => contentBlocks[Number(k)])
-    .filter(Boolean)
+  const allBlocks = collapseAdjacentDuplicateTextBlocks(
+    Object.keys(contentBlocks)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(k => contentBlocks[Number(k)])
+      .filter((b): b is Record<string, unknown> => Boolean(b)),
+  )
 
   if (allBlocks.length > 0 && partialMessage) {
     outputs.push({
