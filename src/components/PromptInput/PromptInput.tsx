@@ -130,6 +130,7 @@ import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
 import { TeamsDialog } from '../teams/TeamsDialog.js';
 import VimTextInput from '../VimTextInput.js';
 import { getModeFromInput, getValueFromInput } from './inputModes.js';
+import { mergePastedContentsDualWrite } from './inputPaste.js';
 import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications } from './Notifications.js';
 import PromptInputFooter from './PromptInputFooter.js';
 import type { SuggestionItem } from './PromptInputFooterSuggestions.js';
@@ -335,26 +336,11 @@ function PromptInput({
   // setAppState (cacheImagePath) re-renders with still-empty parent state.
   // Keep dual-write entries that input still references until prop catches up.
   const pastedContentsRef = React.useRef(pastedContents);
-  {
-    const propKeys = Object.keys(pastedContents).length;
-    if (propKeys === 0) {
-      const stillReferenced = parseReferences(liveInputRef.current).some(
-        r => pastedContentsRef.current[r.id] !== undefined,
-      );
-      if (!stillReferenced) {
-        pastedContentsRef.current = pastedContents;
-      }
-    } else {
-      const next: Record<number, PastedContent> = { ...pastedContents };
-      for (const r of parseReferences(liveInputRef.current)) {
-        const live = pastedContentsRef.current[r.id];
-        if (next[r.id] === undefined && live !== undefined) {
-          next[r.id] = live;
-        }
-      }
-      pastedContentsRef.current = next;
-    }
-  }
+  pastedContentsRef.current = mergePastedContentsDualWrite(
+    pastedContents,
+    pastedContentsRef.current,
+    liveInputRef.current,
+  );
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
     (value: string) => {
@@ -453,7 +439,9 @@ function PromptInput({
   }, [viewedTeammate, toolPermissionContext]);
   const { historyQuery, setHistoryQuery, historyMatch, historyFailedMatch } = useHistorySearch(
     entry => {
+      // Dual-write before same-tick onSubmit — parent prop has not re-rendered yet.
       setPastedContents(entry.pastedContents);
+      pastedContentsRef.current = entry.pastedContents;
       void onSubmit(entry.display);
     },
     input,
@@ -1155,10 +1143,12 @@ function PromptInput({
   );
 
   const { resetHistory, onHistoryUp, onHistoryDown, dismissSearchHint, historyIndex } = useArrowKeyHistory(
-    (value: string, historyMode: HistoryMode, pastedContents: Record<number, PastedContent>) => {
+    (value: string, historyMode: HistoryMode, historyPasted: Record<number, PastedContent>) => {
       onChange(value);
       onModeChange(historyMode);
-      setPastedContents(pastedContents);
+      setPastedContents(historyPasted);
+      // Keep dual-write in lockstep so Enter before parent re-render keeps images.
+      pastedContentsRef.current = historyPasted;
     },
     input,
     pastedContents,
@@ -1465,42 +1455,49 @@ function PromptInput({
     };
 
     // densable 2.1.211 qie: k(setState) AND ht.current={...ht.current,[id]:U1}
-    // Dual-write FIRST so N1 / multi-paste / same-tick submit see the image
-    // before cacheImagePath setAppState can re-render with empty parent state.
+    // Dual-write + insert BEFORE cacheImagePath: setAppState can re-render with
+    // still-empty parent pastedContents; liveInputRef must already hold the pill
+    // so the dual-write merge keeps the entry (stillReferenced).
     setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));
     pastedContentsRef.current = {
       ...pastedContentsRef.current,
       [pasteId]: newContent,
     };
-
-    // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
-    cacheImagePath(newContent, setAppState);
-
-    // Store image to disk in background (re-stamps path after write)
-    void storeImage(newContent, setAppState);
     // Multi-image paste calls onImagePaste in a loop. If the ref is already
     // armed, the previous pill's lazy space fires now (before this pill)
     // rather than being lost. densable: pK=Cs.current?" ":""; N1(pK+Tmo(id))
     const prefix = pendingSpaceAfterPillRef.current ? ' ' : '';
     insertTextAtCursor(prefix + formatImageRef(pasteId));
     pendingSpaceAfterPillRef.current = true;
+
+    // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
+    cacheImagePath(newContent, setAppState);
+
+    // Store image to disk in background (re-stamps path after write)
+    void storeImage(newContent, setAppState);
   }
 
   // densable 2.1.211 OSe: only run orphan prune when any image is attached
   // (fork PastedContent has text|image only; densable also gates on audio).
   // Covers pill backspace / Ctrl+U / char delete. Gating matches official
   // early-return when !OSe.
+  //
+  // densable OSe updates only setState H — it does NOT write ht in the prune
+  // callback. Fork previously set pastedContentsRef.current = pruned {}, which
+  // wiped dual-write when prop `input` lagged behind liveInputRef after paste
+  // (paste map arrives one render before [Image #N] is in input prop) → submit
+  // saw empty map → swallow. Use liveInputRef for referenced ids; never clobber
+  // the dual-write ref here (merge + dual-write on paste keep submit path live).
   const hasImagePaste = useMemo(() => Object.values(pastedContents).some(c => c.type === 'image'), [pastedContents]);
   useEffect(() => {
     if (!hasImagePaste) return;
-    const referencedIds = new Set(parseReferences(input).map(r => r.id));
+    // Prefer live text (N1 already wrote the pill) over render-prop input.
+    const referencedIds = new Set(parseReferences(liveInputRef.current).map(r => r.id));
     setPastedContents(prev => {
       const orphaned = Object.values(prev).filter(c => c.type === 'image' && !referencedIds.has(c.id));
       if (orphaned.length === 0) return prev;
       const next = { ...prev };
       for (const img of orphaned) delete next[img.id];
-      // Keep ref in lockstep with densable ht when prune commits.
-      pastedContentsRef.current = next;
       return next;
     });
   }, [input, hasImagePaste, setPastedContents]);
@@ -1538,7 +1535,13 @@ function PromptInput({
         content: text,
       };
 
+      // Same dual-write as onImagePaste: paste+Enter same tick can race parent
+      // setState; expandPastedTextRefs would otherwise leave the placeholder bare.
       setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));
+      pastedContentsRef.current = {
+        ...pastedContentsRef.current,
+        [pasteId]: newContent,
+      };
 
       insertTextAtCursor(formatPastedTextRef(pasteId, numLines));
     } else {
@@ -1585,13 +1588,14 @@ function PromptInput({
     onModeChange('prompt'); // Always prompt mode for queued commands
     setCursorOffset(result.cursorOffset);
 
-    // Restore images from queued commands to pastedContents
+    // Restore images from queued commands to pastedContents (+ dual-write).
     if (result.images.length > 0) {
       setPastedContents(prev => {
         const newContents = { ...prev };
         for (const image of result.images) {
           newContents[image.id] = image;
         }
+        pastedContentsRef.current = newContents;
         return newContents;
       });
     }
@@ -1629,6 +1633,7 @@ function PromptInput({
         trackAndSetInput(previousState.text);
         setCursorOffset(previousState.cursorOffset);
         setPastedContents(previousState.pastedContents);
+        pastedContentsRef.current = previousState.pastedContents;
       }
     }
   }, [canUndo, undo, trackAndSetInput, setPastedContents]);
@@ -1688,6 +1693,7 @@ function PromptInput({
       trackAndSetInput(stashedPrompt.text);
       setCursorOffset(stashedPrompt.cursorOffset);
       setPastedContents(stashedPrompt.pastedContents);
+      pastedContentsRef.current = stashedPrompt.pastedContents;
       setStashedPrompt(undefined);
     } else if (input.trim() !== '') {
       // Push to stash (save text, cursor position, and pasted contents)
@@ -1695,6 +1701,7 @@ function PromptInput({
       trackAndSetInput('');
       setCursorOffset(0);
       setPastedContents({});
+      pastedContentsRef.current = {};
       // Track usage for /discover and stop showing hint
       saveGlobalConfig(c => {
         if (c.hasUsedStash) return c;
@@ -2502,6 +2509,7 @@ function PromptInput({
           onModeChange(entryMode);
           trackAndSetInput(value);
           setPastedContents(entry.pastedContents);
+          pastedContentsRef.current = entry.pastedContents;
           setCursorOffset(value.length);
           setShowHistoryPicker(false);
         }}
@@ -2597,6 +2605,7 @@ function PromptInput({
             trackAndSetInput(previousState.text);
             setCursorOffset(previousState.cursorOffset);
             setPastedContents(previousState.pastedContents);
+            pastedContentsRef.current = previousState.pastedContents;
           }
         }
       : undefined,

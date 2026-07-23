@@ -4736,9 +4736,14 @@ export function REPL({
         pastedContentsOverride?: Record<number, PastedContent>;
       },
     ) => {
-      // Prefer override: PromptInput passes dual-written ref; idle-return
-      // Continue passes snapshot. Parent pastedContents can still be {}.
-      const effectivePastedContents = options?.pastedContentsOverride ?? pastedContents;
+      // Union paste maps: PromptInput dual-write override backfills lagging parent
+      // state; parent state backfills if override was emptied (fork OSe used to
+      // wipe the ref while prop already had the image). Never prefer empty
+      // override over non-empty parent — that re-swallowed images.
+      const effectivePastedContents =
+        options?.pastedContentsOverride != null
+          ? { ...pastedContents, ...options.pastedContentsOverride }
+          : pastedContents;
 
       // Re-pin scroll to bottom on submit so the user always sees the new
       // exchange (matches OpenCode's auto-scroll behavior).

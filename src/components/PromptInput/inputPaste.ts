@@ -1,4 +1,4 @@
-import { getPastedTextRefNumLines } from 'src/history.js'
+import { getPastedTextRefNumLines, parseReferences } from 'src/history.js'
 import type { PastedContent } from 'src/utils/config.js'
 
 const TRUNCATION_THRESHOLD = 10000 // Characters before we truncate
@@ -87,4 +87,48 @@ export function maybeTruncateInput(
       },
     },
   }
+}
+
+/**
+ * densable 2.1.211 ht dual-write merge for each PromptInput render.
+ *
+ * densable assigns `ht.current = prop` every render, which wipes dual-write when
+ * a sibling `setAppState` (cacheImagePath) re-renders with still-empty parent
+ * state. We instead:
+ * - prop empty + no live refs of dual-write → adopt prop (submit/clear)
+ * - prop empty + dual-write still referenced by input → keep only those entries
+ * - prop non-empty → prefer prop, backfill dual-write for refs not yet in prop
+ *
+ * Pure helper so unit tests can cover paste+Enter / cacheImagePath races
+ * without mounting Ink.
+ */
+export function mergePastedContentsDualWrite(
+  prop: Record<number, PastedContent>,
+  live: Record<number, PastedContent>,
+  input: string,
+): Record<number, PastedContent> {
+  const refs = parseReferences(input)
+  const propKeys = Object.keys(prop).length
+  if (propKeys === 0) {
+    const stillReferenced = refs.some(r => live[r.id] !== undefined)
+    if (!stillReferenced) {
+      return prop
+    }
+    const next: Record<number, PastedContent> = {}
+    for (const r of refs) {
+      const entry = live[r.id]
+      if (entry !== undefined) {
+        next[r.id] = entry
+      }
+    }
+    return next
+  }
+  const next: Record<number, PastedContent> = { ...prop }
+  for (const r of refs) {
+    const entry = live[r.id]
+    if (next[r.id] === undefined && entry !== undefined) {
+      next[r.id] = entry
+    }
+  }
+  return next
 }
