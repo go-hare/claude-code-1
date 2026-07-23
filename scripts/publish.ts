@@ -265,61 +265,117 @@ const MAIN_PKG_STRIP_SCRIPTS = [
   'rcs',
 ] as const
 
-function withStrippedMainPackageJson(pkgDir: string, fn: () => void): void {
-  if (resolve(pkgDir) !== resolve(ROOT)) {
-    fn()
-    return
-  }
+/**
+ * Publish the monorepo root as a clean consumer package.
+ *
+ * Must NOT run `npm publish` from the live monorepo root: even with a
+ * temporarily rewritten package.json, arborist/npm may still see workspace
+ * state and ship monorepo fields (observed on 2.7.3: workspaces still on
+ * registry after in-place strip + bare `npm publish`). Always stage a
+ * throwaway directory with only consumer files.
+ */
+function publishMainPackage(): void {
+  const dryRunFlag = dryRun ? ['--dry-run'] : []
+  const staging = join(ROOT, '.publish-main-staging')
+  console.log(
+    `\nPublishing main package from staging${dryRun ? ' (dry-run)' : ''}...`,
+  )
 
-  const pkgPath = join(pkgDir, 'package.json')
-  const original = readFileSync(pkgPath, 'utf8')
-  const pkg = JSON.parse(original) as Record<string, unknown>
+  rmSync(staging, { recursive: true, force: true })
+  mkdirSync(join(staging, 'bin'), { recursive: true })
 
-  for (const key of MAIN_PKG_STRIP_FIELDS) {
-    delete pkg[key]
-  }
+  try {
+    const original = readFileSync(join(ROOT, 'package.json'), 'utf8')
+    const pkg = JSON.parse(original) as Record<string, unknown>
 
-  if (pkg.scripts && typeof pkg.scripts === 'object') {
-    const scripts = { ...(pkg.scripts as Record<string, string>) }
-    for (const name of MAIN_PKG_STRIP_SCRIPTS) {
-      delete scripts[name]
+    for (const key of MAIN_PKG_STRIP_FIELDS) {
+      delete pkg[key]
     }
-    pkg.scripts = scripts
-  }
 
-  // Ensure consumer-facing install surface is explicit.
-  if (!pkg.files) {
+    if (pkg.scripts && typeof pkg.scripts === 'object') {
+      const scripts = { ...(pkg.scripts as Record<string, string>) }
+      for (const name of MAIN_PKG_STRIP_SCRIPTS) {
+        delete scripts[name]
+      }
+      // Consumer postinstall only — never husky/prepublish monorepo hooks.
+      pkg.scripts = {
+        postinstall: scripts.postinstall ?? 'node install.cjs',
+      }
+    }
+
     pkg.files = [
       'bin/claude.exe',
       'install.cjs',
       'cli-wrapper.cjs',
       'README.md',
     ]
-  }
 
-  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
-  try {
-    fn()
+    if (pkg.workspaces) {
+      console.error(
+        'Internal error: staged main package.json still has workspaces',
+      )
+      process.exit(1)
+    }
+
+    writeFileSync(
+      join(staging, 'package.json'),
+      `${JSON.stringify(pkg, null, 2)}\n`,
+    )
+
+    for (const rel of [
+      'install.cjs',
+      'cli-wrapper.cjs',
+      'README.md',
+    ] as const) {
+      const src = join(ROOT, rel)
+      if (!existsSync(src)) {
+        console.error(`Missing ${rel} for main package publish`)
+        process.exit(1)
+      }
+      copyFileSync(src, join(staging, rel))
+    }
+
+    // Keep the tiny bin stub that npm uses as the package bin entry; real
+    // native binary is placed by postinstall from optionalDependencies.
+    const binStub = join(ROOT, 'bin', 'claude.exe')
+    if (!existsSync(binStub)) {
+      console.error('Missing bin/claude.exe stub for main package publish')
+      process.exit(1)
+    }
+    copyFileSync(binStub, join(staging, 'bin', 'claude.exe'))
+
+    const result = Bun.spawnSync(
+      ['npm', 'publish', '--access', 'public', ...dryRunFlag],
+      { cwd: staging, stdio: ['inherit', 'inherit', 'inherit'] },
+    )
+
+    if (result.exitCode !== 0) {
+      console.error('Publish failed for main @go-hare/claude-code')
+      process.exit(1)
+    }
   } finally {
-    writeFileSync(pkgPath, original)
+    rmSync(staging, { recursive: true, force: true })
   }
 }
 
 function publishPkg(pkgDir: string): void {
+  if (resolve(pkgDir) === resolve(ROOT)) {
+    publishMainPackage()
+    return
+  }
+
   const dryRunFlag = dryRun ? ['--dry-run'] : []
   console.log(`\nPublishing ${pkgDir}${dryRun ? ' (dry-run)' : ''}...`)
 
-  withStrippedMainPackageJson(pkgDir, () => {
-    const result = Bun.spawnSync(
-      ['npm', 'publish', '--access', 'public', ...dryRunFlag],
-      { cwd: pkgDir, stdio: ['inherit', 'inherit', 'inherit'] },
-    )
+  const result = Bun.spawnSync(
+    ['npm', 'publish', '--access', 'public', ...dryRunFlag],
+    { cwd: pkgDir, stdio: ['inherit', 'inherit', 'inherit'] },
+  )
 
-    if (result.exitCode !== 0) {
-      console.error(`Publish failed for ${pkgDir}`)
-      process.exit(1)
-    }
-  })
+  if (result.exitCode !== 0) {
+    console.error(`Publish failed for ${pkgDir}`)
+    process.exit(1)
+  }
 }
 
 function main() {

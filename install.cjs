@@ -10,6 +10,7 @@
 const { spawnSync } = require('child_process')
 const {
   copyFileSync,
+  cpSync,
   existsSync,
   linkSync,
   unlinkSync,
@@ -18,6 +19,7 @@ const {
   writeFileSync,
   statSync,
   readdirSync,
+  mkdirSync,
 } = require('fs')
 const { arch } = require('os')
 const path = require('path')
@@ -211,13 +213,41 @@ function main() {
 
   try {
     placeBinary(src, dest)
+    // Bundled claude.exe resolves vendored rg next to process.execPath
+    // (bin/vendor/ripgrep/<platform>/rg[.exe]). Copy platform-package vendor
+    // tree beside the placed binary so Grep/Glob work without system rg.
+    copyVendorBesideBinary(pkgDir, dest)
     ensureVendorBinariesExecutable(pkgDir)
+    ensureVendorBinariesExecutable(path.dirname(dest))
   } catch (err) {
     console.error(
       `[${WRAPPER_NAME} postinstall] Failed to place binary: ${err.message}`,
     )
     console.error('  Fallback: node ' + path.join(__dirname, 'cli-wrapper.cjs'))
     process.exitCode = 1
+  }
+}
+
+/**
+ * Copy platform package `vendor/` next to the installed native binary.
+ * Required on Windows (and useful elsewhere) so builtin ripgrep is found at:
+ *   <dir of claude.exe>/vendor/ripgrep/<arch>-win32/rg.exe
+ */
+function copyVendorBesideBinary(pkgDir, destBinary) {
+  const srcVendor = path.join(pkgDir, 'vendor')
+  if (!existsSync(srcVendor)) return
+
+  const destVendor = path.join(path.dirname(destBinary), 'vendor')
+  try {
+    mkdirSync(path.dirname(destVendor), { recursive: true })
+    cpSync(srcVendor, destVendor, { recursive: true, force: true })
+  } catch (err) {
+    console.error(
+      `[${WRAPPER_NAME} postinstall] Warning: could not copy vendor helpers: ${err.message}`,
+    )
+    console.error(
+      '  Grep/Glob may fall back to system ripgrep if available.',
+    )
   }
 }
 

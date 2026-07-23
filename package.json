@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code",
-  "version": "2.7.3",
+  "version": "2.7.4",
   "description": "Source restoration / engineering rebuild of Anthropic Claude Code CLI — multi-provider models, self-hosted Remote Control, ACP, daemon sessions, MCP, plugins, and terminal automation",
   "type": "module",
   "author": "DeQiang",
@@ -44,14 +44,14 @@
     "cli-wrapper.cjs"
   ],
   "optionalDependencies": {
-    "@go-hare/claude-code-darwin-arm64": ">=2.7.3",
-    "@go-hare/claude-code-darwin-x64": ">=2.7.3",
-    "@go-hare/claude-code-linux-x64": ">=2.7.3",
-    "@go-hare/claude-code-linux-arm64": ">=2.7.3",
-    "@go-hare/claude-code-linux-x64-musl": ">=2.7.3",
-    "@go-hare/claude-code-linux-arm64-musl": ">=2.7.3",
-    "@go-hare/claude-code-win32-x64": ">=2.7.3",
-    "@go-hare/claude-code-win32-arm64": ">=2.7.3",
+    "@go-hare/claude-code-darwin-arm64": ">=2.7.4",
+    "@go-hare/claude-code-darwin-x64": ">=2.7.4",
+    "@go-hare/claude-code-linux-x64": ">=2.7.4",
+    "@go-hare/claude-code-linux-arm64": ">=2.7.4",
+    "@go-hare/claude-code-linux-x64-musl": ">=2.7.4",
+    "@go-hare/claude-code-linux-arm64-musl": ">=2.7.4",
+    "@go-hare/claude-code-win32-x64": ">=2.7.4",
+    "@go-hare/claude-code-win32-arm64": ">=2.7.4",
     "doubaoime-asr": "^0.1.0"
   },
   "scripts": {
@@ -62,7 +62,7 @@
     "build:compile": "bun run scripts/publish.ts --build-only",
     "dev": "bun run scripts/dev.ts",
     "dev:inspect": "bun run scripts/dev-debug.ts",
-    "prepublishOnly": "echo 'Use: bun run scripts/publish.ts'",
+    "prepublishOnly": "node -e \"const p=require('./package.json'); if (p.workspaces) { console.error('Refuse npm publish from monorepo root (workspaces present). Use: bun run scripts/publish.ts --publish-only --with-main --platform <plat>'); process.exit(1) }\"",
     "lint": "biome lint .",
     "lint:fix": "biome lint --fix .",
     "format": "biome format --write .",
