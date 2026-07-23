@@ -441,7 +441,10 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_kairos_brief_config: { enable_slash_command: true }, // Brief /slash command visibility
   tengu_sedge_lantern: true, // Away summary
   tengu_onyx_plover: { enabled: true }, // Auto dream (memory consolidation)
-  tengu_willow_mode: 'dialog', // Idle return prompt
+  // Idle-return: default dialog (blocking Continue / new conversation).
+  // densable 2.1.211 is hint-only; fork keeps dialog as product choice.
+  // Paste-safe: dialog path snapshots pastedContents (see REPL onSubmit).
+  tengu_willow_mode: 'dialog',
 
   // ── Kill switches (keep true to prevent remote disable) ──────────
   tengu_turtle_carbon: true, // Ultrathink extended thinking

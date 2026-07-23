@@ -2215,10 +2215,14 @@ export function REPL({
   const [showCostDialog, setShowCostDialog] = useState(false);
   const [conversationId, setConversationId] = useState(randomUUID());
 
-  // Idle-return dialog: shown when user submits after a long idle gap
+  // Idle-return dialog: shown when user submits after a long idle gap.
+  // Must snapshot pastedContents: clearing the input for the dialog would
+  // otherwise fire PromptInput's orphan-image prune and wipe the paste map
+  // before the user continues (first image+text after /resume / long idle).
   const [idleReturnPending, setIdleReturnPending] = useState<{
     input: string;
     idleMinutes: number;
+    pastedContents: Record<number, PastedContent>;
   } | null>(null);
   const skipIdleCheckRef = useRef(false);
   const lastQueryCompletionTimeRef = useRef(lastQueryCompletionTime);
@@ -2737,8 +2741,10 @@ export function REPL({
         // Clear any active tool JSX
         setToolJSX(null);
 
-        // Clear input to ensure no residual state
-        setInputValue('');
+        // densable: y0("") only when entrypoint !== "fork" (fork keeps draft).
+        if (entrypoint !== 'fork') {
+          setInputValue('');
+        }
 
         // Official wvr(messages, Je) on in-session /resume — orphan scan after
         // messages restored (skip fork: new session id, no prior orphans).
@@ -4708,8 +4714,20 @@ export function REPL({
         speculationSessionTimeSavedMs: number;
         setAppState: SetAppState;
       },
-      options?: { fromKeybinding?: boolean },
+      options?: {
+        fromKeybinding?: boolean;
+        /**
+         * Live paste map when parent state is not yet committed:
+         * - PromptInput dual-write ref on paste+Enter same tick
+         * - idle-return Continue re-submit after dialog
+         */
+        pastedContentsOverride?: Record<number, PastedContent>;
+      },
     ) => {
+      // Prefer override: PromptInput passes dual-written ref; idle-return
+      // Continue passes snapshot. Parent pastedContents can still be {}.
+      const effectivePastedContents = options?.pastedContentsOverride ?? pastedContents;
+
       // Re-pin scroll to bottom on submit so the user always sees the new
       // exchange (matches OpenCode's auto-scroll behavior).
       repinScroll();
@@ -4728,7 +4746,7 @@ export function REPL({
         if (!options?.fromKeybinding) {
           addToHistory({
             display: prependModeCharacterToInput(input, inputMode),
-            pastedContents,
+            pastedContents: effectivePastedContents,
           });
         }
         setInputValue('');
@@ -4747,7 +4765,7 @@ export function REPL({
         // Expand [Pasted text #N] refs so immediate commands (e.g. /btw) receive
         // the pasted content, not the placeholder. The non-immediate path gets
         // this expansion later in handlePromptSubmit.
-        const trimmedInput = expandPastedTextRefs(input, pastedContents).trim();
+        const trimmedInput = expandPastedTextRefs(input, effectivePastedContents).trim();
         const spaceIndex = trimmedInput.indexOf(' ');
         const commandName = spaceIndex === -1 ? trimmedInput.slice(1) : trimmedInput.slice(1, spaceIndex);
         const commandArgs = spaceIndex === -1 ? '' : trimmedInput.slice(spaceIndex + 1).trim();
@@ -4784,10 +4802,10 @@ export function REPL({
             setPastedContents({});
           }
 
-          const pastedTextRefs = parseReferences(input).filter(r => pastedContents[r.id]?.type === 'text');
+          const pastedTextRefs = parseReferences(input).filter(r => effectivePastedContents[r.id]?.type === 'text');
           const pastedTextCount = pastedTextRefs.length;
           const pastedTextBytes = pastedTextRefs.reduce(
-            (sum, r) => sum + (pastedContents[r.id]?.content.length ?? 0),
+            (sum, r) => sum + (effectivePastedContents[r.id]?.content.length ?? 0),
             0,
           );
           logEvent('tengu_paste_text', { pastedTextCount, pastedTextBytes });
@@ -4907,10 +4925,18 @@ export function REPL({
           const idleMs = Date.now() - lastQueryCompletionTimeRef.current;
           const idleMinutes = idleMs / 60_000;
           if (idleMinutes >= idleThresholdMin && willowMode === 'dialog') {
-            setIdleReturnPending({ input, idleMinutes });
+            // Snapshot paste map BEFORE clearing input — empty input would
+            // prune images via PromptInput OSe effect, then continue would
+            // re-submit text-only (swallows first image after /resume / idle).
+            setIdleReturnPending({
+              input,
+              idleMinutes,
+              pastedContents: effectivePastedContents,
+            });
             setInputValue('');
             helpers.setCursorOffset(0);
             helpers.clearBuffer();
+            // Keep paste map until continue/dismiss; do not setPastedContents({}).
             return;
           }
         }
@@ -4923,7 +4949,7 @@ export function REPL({
       if (!options?.fromKeybinding) {
         addToHistory({
           display: speculationAccept ? input : prependModeCharacterToInput(input, inputMode),
-          pastedContents: speculationAccept ? {} : pastedContents,
+          pastedContents: speculationAccept ? {} : effectivePastedContents,
         });
         // Add the just-submitted command to the front of the ghost-text
         // cache so it's suggested immediately (not after the 60s TTL).
@@ -5036,7 +5062,7 @@ export function REPL({
         )
       ) {
         // Build content blocks when there are pasted attachments (images)
-        const pastedValues = Object.values(pastedContents);
+        const pastedValues = Object.values(effectivePastedContents);
         const imageContents = pastedValues.filter(c => c.type === 'image');
         const imagePasteIds = imageContents.length > 0 ? imageContents.map(c => c.id) : undefined;
 
@@ -5106,7 +5132,7 @@ export function REPL({
         getToolUseContext,
         messages: messagesRef.current,
         mainLoopModel,
-        pastedContents,
+        pastedContents: effectivePastedContents,
         ideSelection,
         setUserInputOnProcessing,
         setAbortController: setAbortControllerForQuery,
@@ -5686,6 +5712,7 @@ export function REPL({
   useEffect(() => {
     if (lastQueryCompletionTime === 0) return;
     if (isLoading) return;
+    // hint / hint_v2 only — dialog mode uses blocking IdleReturnDialog on submit.
     const willowMode: string = getFeatureValue_CACHED_MAY_BE_STALE('tengu_willow_mode', 'off');
     if (willowMode !== 'hint' && willowMode !== 'hint_v2') return;
     if (getGlobalConfig().idleReturnDismissed) return;
@@ -6995,6 +7022,7 @@ export function REPL({
                       });
                       if (action === 'dismiss') {
                         setInputValue(pending.input);
+                        setPastedContents(pending.pastedContents);
                         return;
                       }
                       if (action === 'never') {
@@ -7022,11 +7050,20 @@ export function REPL({
                         bashToolsProcessedIdx.current = 0;
                       }
                       skipIdleCheckRef.current = true;
-                      void onSubmitRef.current(pending.input, {
-                        setCursorOffset: () => {},
-                        clearBuffer: () => {},
-                        resetHistory: () => {},
-                      });
+                      // Restore paste map before re-submit so history/UI stay
+                      // consistent; override ensures handlePromptSubmit sees
+                      // images even if setState has not committed yet.
+                      setPastedContents(pending.pastedContents);
+                      void onSubmitRef.current(
+                        pending.input,
+                        {
+                          setCursorOffset: () => {},
+                          clearBuffer: () => {},
+                          resetHistory: () => {},
+                        },
+                        undefined,
+                        { pastedContentsOverride: pending.pastedContents },
+                      );
                     }}
                   />
                 )}

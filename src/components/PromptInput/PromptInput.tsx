@@ -201,7 +201,15 @@ type Props = {
       speculationSessionTimeSavedMs: number;
       setAppState: (f: (prev: AppState) => AppState) => void;
     },
-    options?: { fromKeybinding?: boolean },
+    options?: {
+      fromKeybinding?: boolean;
+      /**
+       * Live paste map from PromptInput dual-write ref. Parent React state can
+       * still be {} on the same tick as paste+Enter; without this, images are
+       * filtered out in handlePromptSubmit (text-only / swallow).
+       */
+      pastedContentsOverride?: Record<number, PastedContent>;
+    },
   ) => Promise<void>;
   onAgentSubmit?: (
     input: string,
@@ -322,11 +330,31 @@ function PromptInput({
   // densable 2.1.211 ze.current — cursor offset mirror for N1-style insert.
   const cursorOffsetRef = React.useRef(cursorOffset);
   cursorOffsetRef.current = cursorOffset;
-  // densable 2.1.211 ht: ht=useRef(H); ht.current=H each render; dual-write on
-  // image paste so N1 pushToBuffer / multi-paste see the new image before the
-  // parent setState re-render lands.
+  // densable 2.1.211 ht dual-write for N1 / multi-paste / submit. densable also
+  // assigns ht.current=H every render; that would wipe dual-write when a sibling
+  // setAppState (cacheImagePath) re-renders with still-empty parent state.
+  // Keep dual-write entries that input still references until prop catches up.
   const pastedContentsRef = React.useRef(pastedContents);
-  pastedContentsRef.current = pastedContents;
+  {
+    const propKeys = Object.keys(pastedContents).length;
+    if (propKeys === 0) {
+      const stillReferenced = parseReferences(liveInputRef.current).some(
+        r => pastedContentsRef.current[r.id] !== undefined,
+      );
+      if (!stillReferenced) {
+        pastedContentsRef.current = pastedContents;
+      }
+    } else {
+      const next: Record<number, PastedContent> = { ...pastedContents };
+      for (const r of parseReferences(liveInputRef.current)) {
+        const live = pastedContentsRef.current[r.id];
+        if (next[r.id] === undefined && live !== undefined) {
+          next[r.id] = live;
+        }
+      }
+      pastedContentsRef.current = next;
+    }
+  }
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
     (value: string) => {
@@ -1232,8 +1260,10 @@ function PromptInput({
         return;
       }
 
-      // Check for images early - we need this for suggestion logic below
-      const hasImages = Object.values(pastedContents).some(c => c.type === 'image');
+      // Prefer dual-written ref — parent `pastedContents` prop can lag one tick
+      // after paste (cacheImagePath/setAppState, or paste+Enter same batch).
+      const livePastedContents = pastedContentsRef.current;
+      const hasImages = Object.values(livePastedContents).some(c => c.type === 'image');
 
       // If input is empty OR matches the suggestion, submit it
       // But if there are images attached, don't auto-accept the suggestion -
@@ -1260,6 +1290,7 @@ function PromptInput({
               speculationSessionTimeSavedMs: speculationSessionTimeSavedMs,
               setAppState,
             },
+            { pastedContentsOverride: livePastedContents },
           );
           return; // Skip normal query - speculation handled it
         }
@@ -1339,12 +1370,18 @@ function PromptInput({
         return;
       }
 
-      // Normal leader submission
-      await onSubmitProp(inputParam, {
-        setCursorOffset,
-        clearBuffer,
-        resetHistory,
-      });
+      // Normal leader submission — always pass live paste map so parent does not
+      // depend on setState having committed (paste then Enter / idle-return continue).
+      await onSubmitProp(
+        inputParam,
+        {
+          setCursorOffset,
+          clearBuffer,
+          resetHistory,
+        },
+        undefined,
+        { pastedContentsOverride: livePastedContents },
+      );
     },
     [
       promptSuggestionState,
@@ -1361,7 +1398,6 @@ function PromptInput({
       logOutcomeAtSubmission,
       setAppState,
       markAccepted,
-      pastedContents,
       removeNotification,
     ],
   );
@@ -1428,20 +1464,20 @@ function PromptInput({
       sourcePath,
     };
 
-    // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
-    cacheImagePath(newContent, setAppState);
-
-    // Store image to disk in background (re-stamps path after write)
-    void storeImage(newContent, setAppState);
-
     // densable 2.1.211 qie: k(setState) AND ht.current={...ht.current,[id]:U1}
-    // Dual-write so N1(insert) / multi-image loop read the image immediately,
-    // not the pre-paste {} snapshot still pending in React state.
+    // Dual-write FIRST so N1 / multi-paste / same-tick submit see the image
+    // before cacheImagePath setAppState can re-render with empty parent state.
     setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));
     pastedContentsRef.current = {
       ...pastedContentsRef.current,
       [pasteId]: newContent,
     };
+
+    // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
+    cacheImagePath(newContent, setAppState);
+
+    // Store image to disk in background (re-stamps path after write)
+    void storeImage(newContent, setAppState);
     // Multi-image paste calls onImagePaste in a loop. If the ref is already
     // armed, the previous pill's lazy space fires now (before this pill)
     // rather than being lost. densable: pK=Cs.current?" ":""; N1(pK+Tmo(id))
