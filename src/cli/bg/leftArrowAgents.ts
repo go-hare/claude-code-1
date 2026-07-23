@@ -702,9 +702,12 @@ export async function openAgentsViaLeftArrow(
       const { ensureDaemonRunning } = await import(
         '../../daemon/installPrompt.js'
       )
+      // quiet: REPL already unmounted with alt-screen frozen (handoffAltScreen).
+      // stderr takeover / Starting… would paint over the old footer and flash.
       const daemon = await ensureDaemonRunning({
         forceTransient: true,
         mayPromptInstall: false,
+        quiet: true,
       })
       if (!daemon.ok) {
         // densable: no {ok,reason} from yNo here — map soft daemon fail via

@@ -4665,14 +4665,18 @@ async function run(): Promise<CommanderCommand> {
           if (!handoff.ok) {
             process.stderr.write(`${handoff.error}\n`);
             // Still open fleet view without origin (matches empty-open fallback).
+            // Daemon may not have been ensured (spawn fail path) — let AgentView ensure.
             await renderAgentView({ enteredViaLeftArrow: true });
           } else {
             // Official CLAUDE_AGENTS_SELECT / initialJobId = short; isOrigin uses it.
             process.env.CLAUDE_AGENTS_SELECT = handoff.short;
+            // openAgentsViaLeftArrow already ran ensureDaemonRunning({quiet:true}).
+            // Skip second ensure so takeover/Starting… cannot flash again on mount.
             await renderAgentView({
               enteredViaLeftArrow: true,
               currentSessionId: handoff.sessionId,
               restoreSessionId: handoff.short,
+              daemonAlreadyEnsured: true,
             });
           }
           // Left-arrow REPL → Agents is a one-way handoff (REPL already unmounted).

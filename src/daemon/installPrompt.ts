@@ -183,6 +183,19 @@ export function shouldRetireStaleDaemonBinary(
 }
 
 /**
+ * Surface a daemon lifecycle message. When `quiet` (left-arrow / mid alt-screen
+ * handoff), only log — raw stderr would paint over a frozen Ink frame and flash
+ * the terminal. CLI entry (`claude agents`) keeps stderr so users still see why
+ * the supervisor restarted.
+ */
+function surfaceDaemonLifecycleMsg(msg: string, quiet: boolean): void {
+  logForDebugging(msg, { level: 'warn' })
+  if (!quiet) {
+    process.stderr.write(msg.endsWith('\n') ? msg : `${msg}\n`)
+  }
+}
+
+/**
  * Official tAO — retire a live transient daemon when this client is a newer
  * binary so subsequent bg sessions run the current build.
  *
@@ -194,10 +207,13 @@ export function shouldRetireStaleDaemonBinary(
  *      → defer (install prompt path owns the decision)
  *   5. sAO comparison on lock vs client binary
  *   6. SIGTERM (then SIGKILL) supervisor until exited
+ *
+ * @param quiet When true, do not write takeover notice to stderr (debug log only).
  */
 export async function tryBinaryTakeover(
   nudgeVersion: unknown,
   forceTransient: boolean,
+  quiet = false,
 ): Promise<boolean> {
   const clientVersion = MACRO.VERSION
   if (typeof nudgeVersion === 'string' && nudgeVersion === clientVersion) {
@@ -269,13 +285,11 @@ export async function tryBinaryTakeover(
   }
 
   // Official N(..., { level: 'warn' }) — surface on stderr so the user sees
-  // why their agents session just restarted the supervisor.
-  process.stderr.write(
-    `bg: daemon pid ${lock.pid} runs ${lock.version}; this binary (${clientVersion}) is a newer build — retired the stale daemon so new sessions use the current binary\n`,
-  )
-  logForDebugging(
-    `bg: binary takeover retired pid ${lock.pid} (${lock.version} → ${clientVersion})`,
-    { level: 'warn' },
+  // why their agents session just restarted the supervisor. Quiet during
+  // left-arrow handoff: REPL already unmounted but alt-screen still frozen.
+  surfaceDaemonLifecycleMsg(
+    `bg: daemon pid ${lock.pid} runs ${lock.version}; this binary (${clientVersion}) is a newer build — retired the stale daemon so new sessions use the current binary`,
+    quiet,
   )
   logEvent('tengu_bg_daemon_binary_takeover', {
     daemon_age_ms: Date.now() - lock.startedAt,
@@ -288,9 +302,12 @@ export async function tryBinaryTakeover(
  * Returns "up" when daemon is healthy enough to skip spawn.
  * On healthy non-restarting nudge, runs tAO binary-takeover; if takeover
  * retires the stale transient supervisor, returns "down" so KF respawns.
+ *
+ * @param quiet Suppress stderr from binary-takeover notices (mid TUI handoff).
  */
 export async function probeDaemonSkew(
   forceTransient: boolean,
+  quiet = false,
 ): Promise<'up' | 'down'> {
   const started = Date.now()
   let sawLive = false
@@ -307,7 +324,7 @@ export async function probeDaemonSkew(
       sawLive = true
       if (!resp.restarting) {
         // Official: if tAO(version, forceTransient) → 'down' to respawn.
-        if (await tryBinaryTakeover(resp.version, forceTransient)) {
+        if (await tryBinaryTakeover(resp.version, forceTransient, quiet)) {
           return 'down'
         }
         if (Date.now() - started > 200) {
@@ -357,8 +374,12 @@ export async function probeDaemonSkew(
 /**
  * Official asK — lock alive but control socket dead → signal restart.
  * Returns error reason string on EPERM, else null (caller may continue spawn).
+ *
+ * @param quiet Suppress stderr (mid TUI handoff); still logs + analytics.
  */
-export async function restartZombieSupervisor(): Promise<string | null> {
+export async function restartZombieSupervisor(
+  quiet = false,
+): Promise<string | null> {
   const lock = await readAliveDaemonLock().catch(() => null)
   if (!lock || Date.now() - lock.startedAt <= 5000) return null
 
@@ -390,8 +411,9 @@ export async function restartZombieSupervisor(): Promise<string | null> {
     sockExists = false
   }
 
-  process.stderr.write(
-    `bg: supervisor pid ${lock.pid} alive but control socket unreachable — signalling restart\n`,
+  surfaceDaemonLifecycleMsg(
+    `bg: supervisor pid ${lock.pid} alive but control socket unreachable — signalling restart`,
+    quiet,
   )
 
   const signalled = await signalSupervisorRestart(lock.pid)
@@ -409,6 +431,11 @@ export async function restartZombieSupervisor(): Promise<string | null> {
 
 /**
  * Official KF / ensureDaemonRunning denser with install prompt.
+ *
+ * `quiet`: suppress all stderr lifecycle chatter (takeover, Starting…, service
+ * fallthrough). Use during left-arrow REPL→Agents handoff when alt-screen is
+ * still frozen — stderr would collide with the footer and flash the window.
+ * Install prompt still requires interactive stderr and is skipped when quiet.
  */
 export async function ensureDaemonRunning(opts?: {
   forceTransient?: boolean
@@ -416,25 +443,34 @@ export async function ensureDaemonRunning(opts?: {
   mayPromptInstall?: boolean
   /** Official onStarting — called once before service/transient start work. */
   onStarting?: () => void
+  /**
+   * Suppress stderr lifecycle messages (binary takeover, Starting…, service
+   * fallthrough). Debug log still receives them. Default false.
+   */
+  quiet?: boolean
 }): Promise<EnsureDaemonRunningResult> {
   const t0 = Date.now()
   const forceTransient = opts?.forceTransient ?? false
+  const quiet = opts?.quiet ?? false
 
   // 1. oAO — fast path when daemon already healthy.
-  if ((await probeDaemonSkew(forceTransient)) === 'up') {
+  if ((await probeDaemonSkew(forceTransient, quiet)) === 'up') {
     return { ok: true, manager: null }
   }
 
   const mayPrompt =
-    opts?.mayPromptInstall ??
-    (process.stdout.isTTY === true &&
-      process.stdin.isTTY === true &&
-      process.stderr.isTTY === true)
+    !quiet &&
+    (opts?.mayPromptInstall ??
+      (process.stdout.isTTY === true &&
+        process.stdin.isTTY === true &&
+        process.stderr.isTTY === true))
 
   const emitStarting = (): void => {
     opts?.onStarting?.()
     if (mayPrompt) {
       process.stderr.write('Starting daemon…\n')
+    } else if (quiet) {
+      logForDebugging('Starting daemon…', { level: 'info' })
     }
   }
 
@@ -444,8 +480,9 @@ export async function ensureDaemonRunning(opts?: {
     serviceInstalled && (await isDaemonServiceExecStale().catch(() => false))
   if (stale) {
     logEvent('tengu_bg_daemon_service_stale_exec', {})
-    process.stderr.write(
-      "daemon service exec path is stale (binary deleted) — falling back to transient spawn. Run 'claude daemon install' to repair.\n",
+    surfaceDaemonLifecycleMsg(
+      "daemon service exec path is stale (binary deleted) — falling back to transient spawn. Run 'claude daemon install' to repair.",
+      quiet,
     )
   }
 
@@ -454,7 +491,7 @@ export async function ensureDaemonRunning(opts?: {
   if (serviceInstalled && !stale) {
     triedService = true
     emitStarting()
-    const zombieFail = await restartZombieSupervisor()
+    const zombieFail = await restartZombieSupervisor(quiet)
     if (zombieFail) {
       return { ok: false, manager: null, reason: zombieFail }
     }
@@ -474,14 +511,16 @@ export async function ensureDaemonRunning(opts?: {
     logEvent('tengu_bg_daemon_service_poll_fallthrough', {
       sr_ok: startRes.ok,
     })
-    process.stderr.write(
+    surfaceDaemonLifecycleMsg(
       `daemon service did not become reachable within 5s${
         startRes.ok ? '' : ` (${startRes.error})`
-      } — falling back to transient spawn. Run 'claude daemon install' to repair.\n`,
+      } — falling back to transient spawn. Run 'claude daemon install' to repair.`,
+      quiet,
     )
   }
 
   // 4. ask_install (official: only when !service && !forceTransient)
+  // quiet path never prompts — install Dialog would corrupt frozen alt-screen.
   if (!serviceInstalled && !forceTransient) {
     const plan = planDaemonColdStart({
       forceTransient,
@@ -563,7 +602,7 @@ export async function ensureDaemonRunning(opts?: {
   // 5. Transient path — asK if we did not already do service path.
   if (!triedService) {
     emitStarting()
-    const zombieFail = await restartZombieSupervisor()
+    const zombieFail = await restartZombieSupervisor(quiet)
     if (zombieFail) {
       return { ok: false, manager: null, reason: zombieFail }
     }
