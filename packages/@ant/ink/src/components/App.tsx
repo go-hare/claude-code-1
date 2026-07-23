@@ -32,7 +32,6 @@ function isEnvTruthy(value: string | undefined): boolean {
 }
 import { EventEmitter } from '../core/events/emitter.js';
 import { InputEvent } from '../core/events/input-event.js';
-import { isSgrMouseResidue } from '../core/events/keyboard-event.js';
 import { TerminalFocusEvent } from '../core/events/terminal-focus-event.js';
 import {
   createArrowBurstWindow,
@@ -236,15 +235,6 @@ export default class App extends PureComponent<Props, State> {
   // and trigger terminal mode re-assert. Initialized to now so startup
   // doesn't false-trigger.
   lastStdinTime = performance.now();
-
-  /**
-   * Last time we saw a wheel/mouse event (performance.now()).
-   * Apple Terminal scroll-over-input often desyncs and emits lone SGR
-   * finalizers (`M`/`m`) right after wheel/mouse tokens. densable stays
-   * clean via tokenizer + wheel routing; this short absorb window is a
-   * fork sink for the remaining single-char leak only.
-   */
-  lastMouseOrWheelTime = 0;
 
   // Determines if TTY is supported on the provided stdin
   isRawModeSupported(): boolean {
@@ -664,39 +654,6 @@ export default class App extends PureComponent<Props, State> {
   };
 }
 
-/** Absorb lone SGR finalizers for this long after a wheel/mouse event. */
-const LATE_SGR_FINALIZER_ABSORB_MS = 80;
-
-/**
- * True when a lone SGR finalizer is almost certainly torn mouse residue
- * right after wheel/mouse activity (Apple Terminal desync).
- *
- * parseKeypress quirks for printable letters:
- * - `M` → name `"m"`, shift=true (uppercase)
- * - `m` → name `"m"`, shift=false
- * So we accept name "" or "m", and allow shift only for sequence "M".
- * Legitimate typing of "M"/"m" after the window still works.
- */
-export function shouldAbsorbLateSgrFinalizer(
-  item: ParsedKey,
-  lastMouseOrWheelTime: number,
-  now: number,
-  windowMs = LATE_SGR_FINALIZER_ABSORB_MS,
-): boolean {
-  if (item.isPasted) return false;
-  // name is "" (rare) or "m" (normal letter parse). Reject other named keys.
-  if (item.name && item.name !== 'm') return false;
-  const seq = item.sequence ?? '';
-  if (seq !== 'M' && seq !== 'm') return false;
-  // Uppercase letter parse sets shift=true; that is not a real modifier chord.
-  if (item.ctrl || item.meta || item.option || item.super || item.fn) {
-    return false;
-  }
-  if (item.shift && seq !== 'M') return false;
-  if (lastMouseOrWheelTime <= 0) return false;
-  return now - lastMouseOrWheelTime <= windowMs;
-}
-
 // Helper to process all keys within a single discrete update context.
 // discreteUpdates expects (fn, a, b, c, d) -> fn(a, b, c, d)
 function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined, _unused2: undefined): void {
@@ -736,7 +693,6 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
     // Terminal sends 1-indexed col/row; convert to 0-indexed for the
     // screen buffer. Button bit 0x20 = drag (motion while button held).
     if (item.kind === 'mouse') {
-      app.lastMouseOrWheelTime = now;
       // Official densable: getMouseMode()==="scroll" skips left-button click
       // handling (button&3===0) so selection/cursor don't fight wheel-only mode.
       const mode = app.props.getMouseMode?.() ?? 'full';
@@ -802,28 +758,14 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
     // Official: wheel/mouse never enter KeyboardEvent / insert path.
     // Fork has no dispatchWheelEvent prop — scroll:lineUp/lineDown keybindings
     // listen on the InputEvent emitter, so emit only that for wheel/mouse.
+    // No post-wheel multi-key absorb of lone M/m here (review residual:
+    // persistent absorb silently dropped legitimate M after scroll).
+    // Incomplete SGR hold/complete lives in parse-keypress pendingSgrPrefix;
+    // progressive desync empties in KeyboardEvent isSgrMouseResidue (under-strip).
     if (item.name === 'wheelup' || item.name === 'wheeldown' || item.name === 'mouse') {
-      app.lastMouseOrWheelTime = now;
       const event = new InputEvent(item);
       app.internal_eventEmitter.emit('input', event);
       continue;
-    }
-    // Fork sink: lone M/m finalizers immediately after wheel/mouse desync.
-    // Must not reach KeyboardEvent insert (main prompt has no sji gate).
-    if (shouldAbsorbLateSgrFinalizer(item, app.lastMouseOrWheelTime, now)) {
-      if (isEnvTruthy(process.env.CLAUDE_CODE_DEBUG_MOUSE_RESIDUE)) {
-        defaultCallbacks.logForDebugging(
-          `[mouse-residue] absorb late finalizer seq=${JSON.stringify(item.sequence)} dt=${(now - app.lastMouseOrWheelTime).toFixed(1)}ms`,
-          { level: 'debug' },
-        );
-      }
-      continue;
-    }
-    // Incomplete / progressive SGR residue (name empty, key emptied by fag) still
-    // counts as mouse activity so a torn finalizer in the next stdin chunk is
-    // absorbed. Example: "[<64;19;15" then "M".
-    if (!item.name && isSgrMouseResidue(item.sequence ?? '')) {
-      app.lastMouseOrWheelTime = now;
     }
     // Official: keyboard DOM path (onKeyDown / focus tree).
     app.props.dispatchKeyboardEvent(item);

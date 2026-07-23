@@ -157,9 +157,10 @@ describe('KeyboardEvent SGR mouse fragment suppress (fag + residue)', () => {
     expect(new KeyboardEvent(nameless('64')).key).toBe('64')
   })
 
-  test('lone M after wheel still has key "M" at KeyboardEvent layer (absorb is App)', () => {
-    // densable Q_g also returns "M" for lone finalizer — absorption is
-    // time-windowed in processKeysInBatch, not in fag/keyFromParsed.
+  test('lone M is kept at KeyboardEvent layer (no multi-key post-wheel absorb)', () => {
+    // densable Q_g returns "M"; review residual forbids App/parse multi-key
+    // absorb windows that silently drop later legitimate M after scroll.
+    // Incomplete body + M completes via parse-keypress pendingSgrPrefix only.
     expect(new KeyboardEvent(nameless('M')).key).toBe('M')
   })
 })

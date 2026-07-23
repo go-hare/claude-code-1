@@ -15,7 +15,8 @@ import { TerminalEvent } from './terminal-event.js'
  * Official densable relies on tokenizer buffering + lag wheel routing +
  * InputEvent sji for multi-codepoint. This fork's main prompt inserts via
  * KeyboardEvent.key (no sji), so progressive Terminal.app desync residue
- * (`MMM8MMMM`, `<64;32;19M…`, `17;19M`) must empty here via isSgrMouseResidue.
+ * (leading-`<` runs, pure `[<\d…`, 3-param without `<`) empties here.
+ * Under-strip policy: keep pure MMMM / 17;19M / 1;2;3 / short 4M.
  */
 export class KeyboardEvent extends TerminalEvent {
   readonly key: string
@@ -67,20 +68,16 @@ function isSgrResidueCharset(seq: string): boolean {
  * True when `seq` is pure SGR-mouse desync residue (no legitimate typed text).
  *
  * Official densable fag only empties pure `\[<\d…` bursts. Live Terminal.app /
- * scroll desync often loses ESC and the `[` as well, producing glued runs like:
- *   `<64;32;19M4;32;19M32;19M;19M<65;32;19M`
- * and mixed finalizer noise like `MMM8MMMM` (digit from a torn button code
- * between late `M`/`m` finalizers). Main prompt inserts via KeyboardEvent.key
- * (no sji), so those must empty here.
+ * scroll desync often loses ESC and the `[`, producing glued leading-`<` runs.
+ * Main prompt inserts via KeyboardEvent.key (no sji), so those empty here.
  *
- * Charset is only `[]<\d;Mm` plus optional leading ESC — never letters, so
- * `[MAX]`, image chips, and normal text never match.
+ * Under-strip (review residual): do NOT empty pure MMMM, 2-param 17;19M,
+ * bare 1;2;3 / 32;19, short 4M, or multi-finalizer digit noise without `<`.
+ * Charset for leading-`<` path is only `[]<\d;Mm` + optional ESC — never letters.
  */
 export function isSgrMouseResidue(seq: string): boolean {
   if (!seq) return false
   // Official densable fag: pure orphan SGR with leading `[` (complete/incomplete).
-  // Keep pure "MMMM", "17;19M", "1;2", bare "4M" — review P1 silent data loss.
-  // Post-wheel lone M/m is absorbMm in parse-keypress (short window only).
   if (/^(\[<\d[\d;]*[Mm]?)+$/.test(seq)) return true
   // ESC lost AND often `[` lost: leading-`<` SGR forms only.
   if (isSgrResidueCharset(seq) && /<\d/.test(seq) && /[Mm]/.test(seq)) {
@@ -89,8 +86,8 @@ export function isSgrMouseResidue(seq: string): boolean {
   // Incomplete body held without finalizer (`[<64;19;15` / `<64;19;15`).
   const noEsc = seq.charCodeAt(0) === 0x1b ? seq.slice(1) : seq
   if (/^(?:\[<\d[\d;]*|<\d[\d;]*)$/.test(noEsc)) return true
-  // Incomplete bare "1;2;3" / "64;32;19" is kept (review P1: silent data loss).
   // Progressive complete 3-param without `<` (`64;32;19M`) after peel only.
+  // Bare "1;2;3" / "32;19" / "4M" / pure Mm runs are kept (review under-strip).
   if (/^(?:\d+;){2}\d+[Mm]$/.test(seq)) return true
   // Progressive peel tail after col/row dropped: ";19M" / ";19m"
   if (/^;\d+[Mm]$/.test(seq)) return true
@@ -123,8 +120,8 @@ export function stripSgrMouseFragments(text: string): string {
   out = out.replace(/^(?:\d+;){2}\d+[Mm]/, '')
   // Pure progressive peel tail only (do not strip middle of "17;19M" / "32;19M").
   if (/^;\d+[Mm]$/.test(out)) return ''
-  // Do NOT strip pure "MMMM" / "MMM8MMMM" — review: not silently deleted;
-  // post-wheel lone M is absorbMm only (parse-keypress short window).
+  // Do NOT strip pure "MMMM" / "MMM8MMMM" / short "4M" — under-strip policy.
+  // Incomplete hold + same-token peel lives in parse-keypress pendingSgrPrefix.
   // Leading-`<` progressive desync without `[`
   out = out.replace(/<\d[\d;]*[Mm]/g, '')
   return out
