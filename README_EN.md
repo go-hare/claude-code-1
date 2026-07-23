@@ -43,12 +43,13 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.8**; trust `package.json` / npm) and may not match git tags.
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.9**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.8)
+### Recent updates (2.7.5 → 2.7.9)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.9** | Full multi-platform binary rebuild/publish of current main (includes 2.7.8 Enter fix, etc.). |
 | **2.7.8** | **Enter dropped-message fix**: densable-aligned Enter path (typeahead / history search / PromptInput) so submit no longer drops input in some states. |
 | **2.7.7** | **OpenAI-compatible multi-bullet fix**: broken proxies that re-emit the full sentence with `finish_reason` on every chunk no longer open/close a new text block each time (`normalizeMessages` → one ● per block). Cumulative full-text deltas emit only the suffix; assemble collapses adjacent identical text blocks as a safety net. |
 | **2.7.6** | densable streaming alignment: Esc salvages thinking only; streaming/final dual-● render fix; daemon lifecycle logs only (no stderr); quiet daemon takeover during agents handoff. |
@@ -77,7 +78,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.8`).  
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.9`).  
 Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
 ---
