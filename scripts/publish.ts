@@ -10,7 +10,15 @@
  *   bun run scripts/publish.ts --with-main        # also publish the main @go-hare/claude-code pkg
  *   bun run scripts/publish.ts --dry-run          # npm publish --dry-run
  */
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { join, resolve } from 'path'
 import { DEFAULT_BUILD_FEATURES, getMacroDefines } from './defines.ts'
 
@@ -208,19 +216,110 @@ function copyClipboardImageToPlatformPkg(platformKey: string): void {
   console.log(`Copied clipboard-image to ${dest}`)
 }
 
+/**
+ * Fields that belong only to the monorepo workspace root.
+ * Shipping them on the npm tarball confuses arborist (workspace/link
+ * resolution) and can crash installs with:
+ *   TypeError: Cannot read properties of null (reading 'edgesOut')
+ */
+const MAIN_PKG_STRIP_FIELDS = [
+  'workspaces',
+  'devDependencies',
+  'peerDependencies',
+  'peerDependenciesMeta',
+  'overrides',
+  'resolutions',
+  'packageManager',
+] as const
+
+/**
+ * Scripts that only make sense in the monorepo checkout.
+ * Keep postinstall (binary placement) for consumers.
+ */
+const MAIN_PKG_STRIP_SCRIPTS = [
+  'build',
+  'build:vite',
+  'build:vite:only',
+  'build:bun',
+  'build:compile',
+  'dev',
+  'dev:inspect',
+  'prepublishOnly',
+  'lint',
+  'lint:fix',
+  'format',
+  'check',
+  'check:fix',
+  'prepare',
+  'test',
+  'test:production',
+  'test:production:offline',
+  'test:production:verbose',
+  'test:production:bun',
+  'check:bundle',
+  'check:unused',
+  'health',
+  'docs:dev',
+  'typecheck',
+  'precheck',
+  'rcs',
+] as const
+
+function withStrippedMainPackageJson(pkgDir: string, fn: () => void): void {
+  if (resolve(pkgDir) !== resolve(ROOT)) {
+    fn()
+    return
+  }
+
+  const pkgPath = join(pkgDir, 'package.json')
+  const original = readFileSync(pkgPath, 'utf8')
+  const pkg = JSON.parse(original) as Record<string, unknown>
+
+  for (const key of MAIN_PKG_STRIP_FIELDS) {
+    delete pkg[key]
+  }
+
+  if (pkg.scripts && typeof pkg.scripts === 'object') {
+    const scripts = { ...(pkg.scripts as Record<string, string>) }
+    for (const name of MAIN_PKG_STRIP_SCRIPTS) {
+      delete scripts[name]
+    }
+    pkg.scripts = scripts
+  }
+
+  // Ensure consumer-facing install surface is explicit.
+  if (!pkg.files) {
+    pkg.files = [
+      'bin/claude.exe',
+      'install.cjs',
+      'cli-wrapper.cjs',
+      'README.md',
+    ]
+  }
+
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+  try {
+    fn()
+  } finally {
+    writeFileSync(pkgPath, original)
+  }
+}
+
 function publishPkg(pkgDir: string): void {
   const dryRunFlag = dryRun ? ['--dry-run'] : []
   console.log(`\nPublishing ${pkgDir}${dryRun ? ' (dry-run)' : ''}...`)
 
-  const result = Bun.spawnSync(
-    ['npm', 'publish', '--access', 'public', ...dryRunFlag],
-    { cwd: pkgDir, stdio: ['inherit', 'inherit', 'inherit'] },
-  )
+  withStrippedMainPackageJson(pkgDir, () => {
+    const result = Bun.spawnSync(
+      ['npm', 'publish', '--access', 'public', ...dryRunFlag],
+      { cwd: pkgDir, stdio: ['inherit', 'inherit', 'inherit'] },
+    )
 
-  if (result.exitCode !== 0) {
-    console.error(`Publish failed for ${pkgDir}`)
-    process.exit(1)
-  }
+    if (result.exitCode !== 0) {
+      console.error(`Publish failed for ${pkgDir}`)
+      process.exit(1)
+    }
+  })
 }
 
 function main() {
