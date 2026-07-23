@@ -2,7 +2,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import type { UUID } from 'crypto'
 import type React from 'react'
 import type { PermissionResult } from '../entrypoints/agentSdkTypes.js'
-import type { InputEvent, Key } from '@anthropic/ink'
+import type { InputEvent, Key, KeyboardEvent } from '@anthropic/ink'
 import type { PastedContent } from '../utils/config.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
 import type { TextHighlight } from '../utils/textHighlighting.js'
@@ -206,6 +206,12 @@ export type BaseTextInputProps = {
    * input drops the event.
    */
   readonly inputFilter?: (input: string, key: Key) => string
+
+  /**
+   * densable rfo `onKeyDownBefore`: runs before BaseTextInput insert/submit.
+   * Typeahead / history should preventDefault here so Enter is not double-handled.
+   */
+  readonly onKeyDownBefore?: (event: KeyboardEvent) => void
 }
 
 /**

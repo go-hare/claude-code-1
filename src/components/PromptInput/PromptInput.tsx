@@ -36,7 +36,16 @@ import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { usePromptSuggestion } from '../../hooks/usePromptSuggestion.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTypeahead } from '../../hooks/useTypeahead.js';
-import { Box, type BorderTextOptions, type ClickEvent, type Key, stringWidth, Text, useInput } from '@anthropic/ink';
+import {
+  Box,
+  type BorderTextOptions,
+  type ClickEvent,
+  type Key,
+  type KeyboardEvent,
+  stringWidth,
+  Text,
+  useInput,
+} from '@anthropic/ink';
 import { useOptionalKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -323,9 +332,13 @@ function PromptInput({
   // Synchronous ref for keybinding handlers (chat:submit) that fire within the
   // same stdin batch as TextInput's onChange. React state lags one tick, so
   // reading `input` in the handler closure would submit the stale value.
-  // densable 2.1.211 Ct.current — kept in lockstep with onInputChange.
+  // densable 2.1.211 Ct.current — dual-write via trackAndSetInput; only sync from
+  // prop when the prop actually changes (prevProp guard). Unconditional
+  // `live = input` each render would wipe mid-batch typed chars on sibling re-render.
   const liveInputRef = React.useRef(input);
-  if (input !== liveInputRef.current) {
+  const prevPropInputRef = React.useRef(input);
+  if (input !== prevPropInputRef.current) {
+    prevPropInputRef.current = input;
     liveInputRef.current = input;
   }
   // densable 2.1.211 ze.current — cursor offset mirror for N1-style insert.
@@ -437,7 +450,13 @@ function PromptInput({
     }
     return toolPermissionContext;
   }, [viewedTeammate, toolPermissionContext]);
-  const { historyQuery, setHistoryQuery, historyMatch, historyFailedMatch } = useHistorySearch(
+  const {
+    historyQuery,
+    setHistoryQuery,
+    historyMatch,
+    historyFailedMatch,
+    handleKeyDown: historyKeyDown,
+  } = useHistorySearch(
     entry => {
       // Dual-write before same-tick onSubmit — parent prop has not re-rendered yet.
       setPastedContents(entry.pastedContents);
@@ -1392,7 +1411,14 @@ function PromptInput({
     ],
   );
 
-  const { suggestions, selectedSuggestion, commandArgumentHint, inlineGhostText, maxColumnWidth } = useTypeahead({
+  const {
+    suggestions,
+    selectedSuggestion,
+    commandArgumentHint,
+    inlineGhostText,
+    maxColumnWidth,
+    handleKeyDown: typeaheadKeyDown,
+  } = useTypeahead({
     commands,
     onInputChange: trackAndSetInput,
     onSubmit,
@@ -2542,8 +2568,20 @@ function PromptInput({
     );
   }
 
+  // densable UI(Bt): vo(history) then $F(typeahead); short-circuit on prevent/stopImmediate.
+  const onKeyDownBefore = React.useCallback(
+    (event: KeyboardEvent) => {
+      historyKeyDown(event);
+      if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
+      typeaheadKeyDown(event);
+    },
+    [historyKeyDown, typeaheadKeyDown],
+  );
+
   const baseProps: BaseTextInputProps = {
     multiline: true,
+    // densable rfo onKeyDownBefore:UI — history vo then typeahead Me before insert/submit
+    onKeyDownBefore,
     onSubmit,
     onChange,
     value: historyMatch

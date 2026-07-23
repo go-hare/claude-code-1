@@ -65,8 +65,11 @@ export function BaseTextInput({
   //   inputState.handleKeyDown(B)
   // Fork maps KeyboardEvent → onInput(input, Key) (legacy mapKey) instead of
   // native inputState.handleKeyDown — functional parity for insert/nav/ctrl.
+  const onKeyDownBefore = props.onKeyDownBefore;
   const baseHandleKeyDown = React.useCallback(
     (event: KeyboardEvent) => {
+      // densable: typeahead/history first — preventDefault skips insert+submit.
+      onKeyDownBefore?.(event);
       if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
 
       if (
@@ -92,7 +95,7 @@ export function BaseTextInput({
       const input = insertInputFromKeyboardEvent(event);
       onInput(input, key);
     },
-    [onInput],
+    [onInput, onKeyDownBefore],
   );
 
   // Official densable d7r

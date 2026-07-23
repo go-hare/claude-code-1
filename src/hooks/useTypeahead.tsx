@@ -7,8 +7,7 @@ import { type Command, getCommandName } from '../commands.js';
 import { getModeFromInput, getValueFromInput } from '../components/PromptInput/inputModes.js';
 import type { SuggestionItem, SuggestionType } from '../components/PromptInput/PromptInputFooterSuggestions.js';
 import { useIsModalOverlayActive, useRegisterOverlay } from '../context/overlayContext.js';
-import { KeyboardEvent, useInput } from '@anthropic/ink';
-// backward-compat bridge until consumers wire handleKeyDown to <Box onKeyDown>
+import { KeyboardEvent } from '@anthropic/ink';
 import { useOptionalKeybindingContext, useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
@@ -63,6 +62,17 @@ function isPathMetadata(metadata: unknown): metadata is { type: 'directory' | 'f
     (metadata.type === 'directory' || metadata.type === 'file')
   );
 }
+
+/** densable YPo — slash commands whose arg is a directory path. */
+const DIRECTORY_ARG_COMMANDS = new Set(['add-dir', 'cd']);
+
+/**
+ * densable `ne.current` for directory suggestion provenance.
+ * - command-arg: /add-dir|/cd arg completions (Enter → pe + submit slash)
+ * - bash-path: !bash path word completions (Enter → pe + submit bash)
+ * - at-path: @path / general path token (Enter → apply token)
+ */
+type DirectorySource = 'command-arg' | 'bash-path' | 'at-path';
 
 // Helper to determine selectedSuggestion when updating suggestions
 function getPreservedSelection(
@@ -484,6 +494,8 @@ export function useTypeahead({
   suggestionsRef.current = suggestions;
   // Track the input value when suggestions were manually dismissed to prevent re-triggering
   const dismissedForInputRef = useRef<string | null>(null);
+  // densable ne.current — which directory completion path produced current suggestions
+  const directorySourceRef = useRef<DirectorySource>('at-path');
 
   // Clear all suggestions
   const clearSuggestions = useCallback(() => {
@@ -495,6 +507,7 @@ export function useTypeahead({
     setSuggestionType('none');
     setMaxColumnWidth(undefined);
     setInlineGhostText(undefined);
+    directorySourceRef.current = 'at-path';
   }, [setSuggestionsState]);
 
   // Expensive async operation to fetch file/resource suggestions
@@ -719,11 +732,41 @@ export function useTypeahead({
         value.length > 0 &&
         value[effectiveCursorOffset - 1] === ' ';
 
-      // Handle directory completion for commands
+      // densable bash-path: path-like token under !bash → directory suggestions
+      if (mode === 'bash' && value.trim()) {
+        const wordStart = value.slice(0, effectiveCursorOffset).lastIndexOf(' ') + 1;
+        const word = value.slice(wordStart, effectiveCursorOffset);
+        if (word && isPathLikeToken(word)) {
+          latestPathTokenRef.current = word;
+          const pathSuggestions = await getPathCompletions(word, { maxResults: 10 });
+          if (latestPathTokenRef.current !== word) {
+            return;
+          }
+          if (pathSuggestions.length > 0) {
+            setSuggestionsState(prev => ({
+              suggestions: pathSuggestions,
+              selectedSuggestion: getPreservedSelection(prev.suggestions, prev.selectedSuggestion, pathSuggestions),
+              commandArgumentHint: undefined,
+            }));
+            directorySourceRef.current = 'bash-path';
+            setSuggestionType('directory');
+            return;
+          }
+        }
+        if (suggestionType === 'directory' && directorySourceRef.current === 'bash-path') {
+          clearSuggestions();
+        }
+      }
+      if (suggestionType === 'directory' && directorySourceRef.current === 'bash-path' && mode !== 'bash') {
+        debouncedFetchFileSuggestions.cancel();
+        clearSuggestions();
+      }
+
+      // Handle directory completion for commands (densable YPo: add-dir, cd)
       if (mode === 'prompt' && isCommandInput(value) && effectiveCursorOffset > 0) {
         const parsedCommand = extractCommandNameAndArgs(value);
 
-        if (parsedCommand && parsedCommand.commandName === 'add-dir' && parsedCommand.args) {
+        if (parsedCommand && DIRECTORY_ARG_COMMANDS.has(parsedCommand.commandName) && parsedCommand.args) {
           const { args } = parsedCommand;
 
           // Clear suggestions if args end with whitespace (user is done with path)
@@ -740,6 +783,7 @@ export function useTypeahead({
               selectedSuggestion: getPreservedSelection(prev.suggestions, prev.selectedSuggestion, dirSuggestions),
               commandArgumentHint: undefined,
             }));
+            directorySourceRef.current = 'command-arg';
             setSuggestionType('directory');
             return;
           }
@@ -916,6 +960,7 @@ export function useTypeahead({
                 selectedSuggestion: getPreservedSelection(prev.suggestions, prev.selectedSuggestion, pathSuggestions),
                 commandArgumentHint: undefined,
               }));
+              directorySourceRef.current = 'at-path';
               setSuggestionType('directory');
               return;
             }
@@ -1055,11 +1100,22 @@ export function useTypeahead({
       } else if (suggestionType === 'directory' && suggestions.length > 0) {
         const suggestion = suggestions[index];
         if (suggestion) {
-          // Check if this is a command context (e.g., /add-dir) or general path completion
-          const isInCommandContext = isCommandInput(input);
-
+          // densable Be directory: bash-path / command-arg / at-path
           let newInput: string;
-          if (isInCommandContext) {
+          if (directorySourceRef.current === 'bash-path') {
+            const wordStart = input.slice(0, cursorOffset).lastIndexOf(' ') + 1;
+            const isDir = isPathMetadata(suggestion.metadata) && suggestion.metadata.type === 'directory';
+            const insert = suggestion.displayText + (isDir ? '' : ' ');
+            newInput = input.slice(0, wordStart) + insert + input.slice(cursorOffset);
+            const newCursor = wordStart + insert.length;
+            onInputChange(newInput);
+            setCursorOffset(newCursor);
+            if (isDir) {
+              void updateSuggestions(newInput, newCursor);
+            } else {
+              clearSuggestions();
+            }
+          } else if (directorySourceRef.current === 'command-arg') {
             // Command context: replace just the argument portion
             const spaceIndex = input.indexOf(' ');
             const commandPart = input.slice(0, spaceIndex + 1); // Include the space
@@ -1071,7 +1127,6 @@ export function useTypeahead({
             setCursorOffset(newInput.length);
 
             if (isPathMetadata(suggestion.metadata) && suggestion.metadata.type === 'directory') {
-              // For directories, fetch new suggestions for the updated path
               setSuggestionsState(prev => ({
                 ...prev,
                 commandArgumentHint: undefined,
@@ -1081,8 +1136,7 @@ export function useTypeahead({
               clearSuggestions();
             }
           } else {
-            // General path completion: replace the path token in input with @-prefixed path
-            // Try to get token with @ prefix first to check if already prefixed
+            // at-path / general: replace the path token
             const completionTokenWithAt = extractCompletionToken(input, cursorOffset, true);
             const completionToken = completionTokenWithAt ?? extractCompletionToken(input, cursorOffset, false);
 
@@ -1101,19 +1155,15 @@ export function useTypeahead({
               setCursorOffset(result.cursorPos);
 
               if (isDir) {
-                // For directories, fetch new suggestions for the updated path
                 setSuggestionsState(prev => ({
                   ...prev,
                   commandArgumentHint: undefined,
                 }));
                 void updateSuggestions(newInput, result.cursorPos);
               } else {
-                // For files, clear suggestions
                 clearSuggestions();
               }
             } else {
-              // No completion token found (e.g., cursor after space) - just clear suggestions
-              // without modifying input to avoid data loss
               clearSuggestions();
             }
           }
@@ -1289,13 +1339,18 @@ export function useTypeahead({
     effectiveGhostText,
   ]);
 
-  // Handle enter key press - apply and execute suggestions
+  // Handle enter key press - apply and execute suggestions.
+  // densable Me(): Er = hover ?? selected; if Er<0 or empty return; directory
+  // command-arg Enter is pe() + r(o,!0) (clear + onSubmit), not clear-only.
   const handleEnter = useCallback(() => {
-    if (selectedSuggestion < 0 || suggestions.length === 0) return;
+    if (suggestions.length === 0) return;
+    // densable kke / Me: empty selection → first item (Tab path already did -1→0).
+    const index = selectedSuggestion < 0 ? 0 : selectedSuggestion;
+    if (index < 0 || index >= suggestions.length) return;
 
-    const suggestion = suggestions[selectedSuggestion];
+    const suggestion = suggestions[index];
 
-    if (suggestionType === 'command' && selectedSuggestion < suggestions.length) {
+    if (suggestionType === 'command' && index < suggestions.length) {
       if (suggestion) {
         applyCommandSuggestion(
           suggestion,
@@ -1308,7 +1363,7 @@ export function useTypeahead({
         debouncedFetchFileSuggestions.cancel();
         clearSuggestions();
       }
-    } else if (suggestionType === 'custom-title' && selectedSuggestion < suggestions.length) {
+    } else if (suggestionType === 'custom-title' && index < suggestions.length) {
       // Apply custom title and execute /resume command with sessionId
       if (suggestion) {
         const newInput = buildResumeInputFromSuggestion(suggestion);
@@ -1318,29 +1373,24 @@ export function useTypeahead({
         debouncedFetchFileSuggestions.cancel();
         clearSuggestions();
       }
-    } else if (suggestionType === 'shell' && selectedSuggestion < suggestions.length) {
-      const suggestion = suggestions[selectedSuggestion];
+    } else if (suggestionType === 'shell' && index < suggestions.length) {
       if (suggestion) {
         const metadata = suggestion.metadata as { completionType: ShellCompletionType } | undefined;
         applyShellSuggestion(suggestion, input, cursorOffset, onInputChange, setCursorOffset, metadata?.completionType);
         debouncedFetchFileSuggestions.cancel();
         clearSuggestions();
       }
-    } else if (
-      suggestionType === 'agent' &&
-      selectedSuggestion < suggestions.length &&
-      suggestion?.id?.startsWith('dm-')
-    ) {
+    } else if (suggestionType === 'agent' && index < suggestions.length && suggestion?.id?.startsWith('dm-')) {
       applyTriggerSuggestion(suggestion, input, cursorOffset, DM_MEMBER_RE, onInputChange, setCursorOffset);
       debouncedFetchFileSuggestions.cancel();
       clearSuggestions();
-    } else if (suggestionType === 'slack-channel' && selectedSuggestion < suggestions.length) {
+    } else if (suggestionType === 'slack-channel' && index < suggestions.length) {
       if (suggestion) {
         applyTriggerSuggestion(suggestion, input, cursorOffset, HASH_CHANNEL_RE, onInputChange, setCursorOffset);
         debouncedFetchSlackChannels.cancel();
         clearSuggestions();
       }
-    } else if (suggestionType === 'file' && selectedSuggestion < suggestions.length) {
+    } else if (suggestionType === 'file' && index < suggestions.length) {
       // Extract completion token directly when needed
       const completionInfo = extractCompletionToken(input, cursorOffset, true);
       if (completionInfo) {
@@ -1368,18 +1418,27 @@ export function useTypeahead({
           clearSuggestions();
         }
       }
-    } else if (suggestionType === 'directory' && selectedSuggestion < suggestions.length) {
+    } else if (suggestionType === 'directory' && index < suggestions.length) {
       if (suggestion) {
-        // In command context (e.g., /add-dir), Enter submits the command
-        // rather than applying the directory suggestion. Just clear
-        // suggestions and let the submit handler process the current input.
-        if (isCommandInput(input)) {
+        // densable Me directory:
+        //   bash-path Enter (no explicit index): pe() + r(o,!1)
+        //   command-arg Enter (no explicit index): pe() + r(o,!0)
+        //   Tab/explicit index applies path; bare Enter submits after clear.
+        // preventDefault already ate base submit — clear-only was a swallow.
+        if (directorySourceRef.current === 'bash-path') {
           debouncedFetchFileSuggestions.cancel();
           clearSuggestions();
+          onSubmit(input, /* isSubmittingSlashCommand */ false);
+          return;
+        }
+        if (directorySourceRef.current === 'command-arg') {
+          debouncedFetchFileSuggestions.cancel();
+          clearSuggestions();
+          onSubmit(input, /* isSubmittingSlashCommand */ true);
           return;
         }
 
-        // General path completion: replace the path token
+        // at-path: replace the path token
         const completionTokenWithAt = extractCompletionToken(input, cursorOffset, true);
         const completionToken = completionTokenWithAt ?? extractCompletionToken(input, cursorOffset, false);
 
@@ -1395,8 +1454,6 @@ export function useTypeahead({
           onInputChange(result.newInput);
           setCursorOffset(result.cursorPos);
         }
-        // If no completion token found (e.g., cursor after space), don't modify input
-        // to avoid data loss - just clear suggestions
 
         debouncedFetchFileSuggestions.cancel();
         clearSuggestions();
@@ -1549,26 +1606,17 @@ export function useTypeahead({
       return;
     }
 
-    // Handle selection and execution via return/enter
-    // Shift+Enter and Meta+Enter insert newlines (handled by useTextInput),
-    // so don't accept the suggestion for those.
-    if (e.key === 'return' && !e.shift && !e.meta) {
+    // Handle selection and execution via return/enter.
+    // densable Me key path: Et.name==="return" (also accept key for fork KeyboardEvent).
+    // Shift+Enter / Meta+Enter insert newlines in base TextInput — do not intercept.
+    if ((e.name === 'return' || e.key === 'return') && !e.shift && !e.meta) {
       e.preventDefault();
       handleEnter();
     }
   };
 
-  // Backward-compat bridge: PromptInput doesn't yet wire handleKeyDown to
-  // <Box onKeyDown>. Subscribe via useInput and adapt InputEvent →
-  // KeyboardEvent until the consumer is migrated (separate PR).
-  // TODO(onKeyDown-migration): remove once PromptInput passes handleKeyDown.
-  useInput((_input, _key, event) => {
-    const kbEvent = new KeyboardEvent(event.keypress);
-    handleKeyDown(kbEvent);
-    if (kbEvent.didStopImmediatePropagation()) {
-      event.stopImmediatePropagation();
-    }
-  });
+  // densable: PromptInput wires handleKeyDown via BaseTextInput onKeyDownBefore
+  // (before insert/submit). No dual useInput bridge — that raced DOM submit.
 
   return {
     suggestions,
