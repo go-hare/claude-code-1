@@ -93,11 +93,10 @@ export async function runExitBackgroundHandoff(input: {
   cwd?: string;
 }): Promise<ExitBackgroundHandoffResult> {
   const { ensureDaemonRunning } = await import('../daemon/installPrompt.js');
-  // quiet: exit handoff may still have alt-screen / REPL chrome visible.
+  // densable: lifecycle log-only; no install prompt mid exit handoff.
   const daemon = await ensureDaemonRunning({
     forceTransient: true,
     mayPromptInstall: false,
-    quiet: true,
   });
   if (!daemon.ok) {
     return {

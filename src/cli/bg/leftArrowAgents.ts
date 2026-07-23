@@ -702,12 +702,11 @@ export async function openAgentsViaLeftArrow(
       const { ensureDaemonRunning } = await import(
         '../../daemon/installPrompt.js'
       )
-      // quiet: REPL already unmounted with alt-screen frozen (handoffAltScreen).
-      // stderr takeover / Starting… would paint over the old footer and flash.
+      // densable: lifecycle is log-only (no stderr). mayPromptInstall false —
+      // install Dialog would corrupt frozen alt-screen after REPL unmount.
       const daemon = await ensureDaemonRunning({
         forceTransient: true,
         mayPromptInstall: false,
-        quiet: true,
       })
       if (!daemon.ok) {
         // densable: no {ok,reason} from yNo here — map soft daemon fail via

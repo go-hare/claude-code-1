@@ -4670,8 +4670,8 @@ async function run(): Promise<CommanderCommand> {
           } else {
             // Official CLAUDE_AGENTS_SELECT / initialJobId = short; isOrigin uses it.
             process.env.CLAUDE_AGENTS_SELECT = handoff.short;
-            // openAgentsViaLeftArrow already ran ensureDaemonRunning({quiet:true}).
-            // Skip second ensure so takeover/Starting… cannot flash again on mount.
+            // openAgentsViaLeftArrow already ran ensureDaemonRunning.
+            // Skip second ensure (densable agentsMain pattern; no dual KF).
             await renderAgentView({
               enteredViaLeftArrow: true,
               currentSessionId: handoff.sessionId,
