@@ -244,8 +244,6 @@ import {
   getContentText,
   createUserMessage,
   createAssistantMessage,
-  shouldPromoteStreamingText,
-  appendAssistantMessageDedupingPartial,
   createTurnDurationMessage,
   createAgentsKilledMessage,
   createApiMetricsMessage,
@@ -2214,16 +2212,11 @@ export function REPL({
   // char-by-char. lastIndexOf returns -1 when no newline, giving '' → null.
   // Guard on showStreamingText so toggling reducedMotion mid-stream
   // immediately hides the streaming preview.
-  //
-  // Also suppress once messages already hold the same/overlapping assistant
-  // text (shouldPromoteStreamingText === false). Transcript evidence shows a
-  // single committed TEXT line while the UI still painted two ● — stream
-  // preview + final message concurrent for the rest of the tool turn.
+  // densable: no text-overlap hide — stream → final is atomic clear+onMessage.
   const visibleStreamingText = useMemo(() => {
     if (!streamingText || !showStreamingText) return null;
-    if (!shouldPromoteStreamingText(messages, streamingText)) return null;
     return streamingText.substring(0, streamingText.lastIndexOf('\n') + 1) || null;
-  }, [streamingText, showStreamingText, messages]);
+  }, [streamingText, showStreamingText]);
 
   const [lastQueryCompletionTime, setLastQueryCompletionTime] = useState(0);
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
@@ -3206,14 +3199,23 @@ export function REPL({
     setMainLoopBusy(false);
     skipIdleCheckRef.current = false;
 
-    // Preserve partially-streamed text so the user can read what was
-    // generated before pressing Esc. Pushed before resetLoadingState clears
-    // streamingText, and before query.ts yields the async interrupt marker,
-    // giving final order [user, partial-assistant, [Request interrupted by user]].
-    // Skip if content_block_stop already committed the same text (race with
-    // abort) — otherwise the UI shows two identical ● assistant bullets.
-    if (streamingText?.trim() && shouldPromoteStreamingText(messagesRef.current, streamingText)) {
-      setMessages(prev => [...prev, createAssistantMessage({ content: streamingText })]);
+    // densable FBe: Esc salvages in-progress **thinking only** (isVirtual),
+    // not streaming body text — body promote races content_block_stop → double ●.
+    const thinkingPartial = streamingThinking?.thinking?.trim();
+    if (thinkingPartial && streamMode === 'thinking') {
+      setMessages(prev => [
+        ...prev,
+        createAssistantMessage({
+          content: [
+            {
+              type: 'thinking',
+              thinking: thinkingPartial,
+              signature: '',
+            },
+          ],
+          isVirtual: true,
+        }),
+      ]);
     }
 
     resetLoadingState();
@@ -3867,13 +3869,11 @@ export function REPL({
               return [...oldMessages, newMessage];
             });
           } else {
-            // Dedupe Esc-promoted streaming partial vs late content_block_stop
-            // so interrupt races do not render two identical ● bullets.
-            setMessages(oldMessages => appendAssistantMessageDedupingPartial(oldMessages, newMessage));
-            // Belt-and-suspenders: handleMessageFromStream already clears via
-            // onStreamingText(() => null), but if that updater is dropped or
-            // races, a trailing-newline short reply (e.g. "正在推送。\n") would
-            // keep painting streaming ● while isLoading stays true for tools.
+            setMessages(oldMessages => [...oldMessages, newMessage]);
+            // densable slt: onStreamingText(() => null) then onMessage in same
+            // call. Extra clear here if that updater is dropped/races, so a
+            // trailing-newline short reply cannot keep painting streaming ●
+            // while isLoading stays true through tools.
             if (newMessage.type === 'assistant') {
               setStreamingText(null);
             }
