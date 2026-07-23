@@ -85,6 +85,10 @@ export function renderToolResultMessage(
   _progressMessagesForMessage: ProgressMessage[],
   { style, verbose }: { style?: 'condensed'; verbose: boolean },
 ): React.ReactNode {
+  // Official densable sp_: empty path → null (no empty-filePath card).
+  if (!filePath) {
+    return null;
+  }
   // For plan files, show /plan hint above the diff
   const isPlanFile = filePath.startsWith(getPlansDirectory());
 
@@ -92,12 +96,13 @@ export function renderToolResultMessage(
     <FileEditToolUpdatedMessage
       filePath={filePath}
       structuredPatch={structuredPatch}
-      firstLine={originalFile.split('\n')[0] ?? null}
-      fileContent={originalFile}
+      // Official: firstLineOf(originalFile) only when originalFile is truthy.
+      firstLine={originalFile ? firstLineOf(originalFile) : null}
+      fileContent={originalFile || undefined}
       style={style}
       verbose={verbose}
       previewHint={isPlanFile ? '/plan to preview' : undefined}
-      // Official densable: collapse full diff only for scratchpad files.
+      // Official densable: collapse full diff only for scratchpad files (Zsr).
       collapsed={!isPlanFile && isScratchpadFile(filePath)}
     />
   );

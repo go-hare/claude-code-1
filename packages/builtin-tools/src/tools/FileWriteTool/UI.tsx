@@ -23,6 +23,7 @@ import { logError } from 'src/utils/log.js';
 import { isScratchpadFile } from 'src/utils/permissions/filesystem.js';
 import { getPlansDirectory } from 'src/utils/plans.js';
 import { openForScan, readCapped } from 'src/utils/readEditContext.js';
+import { firstLineOf } from 'src/utils/stringUtils.js';
 import type { Output } from './FileWriteTool.js';
 
 const MAX_LINES_TO_RENDER = 10;
@@ -258,6 +259,10 @@ export function renderToolResultMessage(
   _progressMessagesForMessage: ProgressMessage<ToolProgressData>[],
   { style, verbose }: { style?: 'condensed'; verbose: boolean },
 ): React.ReactNode {
+  // Official densable: empty path → null before create/update branching.
+  if (!filePath) {
+    return null;
+  }
   switch (type) {
     case 'create': {
       const isPlanFile = filePath.startsWith(getPlansDirectory());
@@ -274,14 +279,16 @@ export function renderToolResultMessage(
           );
         }
       } else if (style === 'condensed' && !verbose) {
+        // Official densable: "Wrote N line(s) to <relpath>"
         const numLines = countLines(content);
         return (
           <Text>
-            Wrote <Text bold>{numLines}</Text> lines to <Text bold>{relative(getCwd(), filePath)}</Text>
+            Wrote <Text bold>{numLines}</Text> {numLines === 1 ? 'line' : 'lines'} to{' '}
+            <Text bold>{relative(getCwd(), filePath)}</Text>
           </Text>
         );
       } else if (!verbose && isScratchpadFile(filePath)) {
-        // Official densable: scratchpad creates keep line count + expand hint.
+        // Official densable: scratchpad creates keep line count + expand hint (no path).
         const numLines = countLines(content);
         return (
           <MessageResponse>
@@ -300,12 +307,13 @@ export function renderToolResultMessage(
         <FileEditToolUpdatedMessage
           filePath={filePath}
           structuredPatch={structuredPatch}
-          firstLine={content.split('\n')[0] ?? null}
+          // Official densable: firstLine from written content (Zd), not original.
+          firstLine={firstLineOf(content)}
           fileContent={originalFile ?? undefined}
           style={style}
           verbose={verbose}
           previewHint={isPlanFile ? '/plan to preview' : undefined}
-          // Official densable: collapse full diff only for scratchpad files.
+          // Official densable: collapse full diff only for scratchpad files (Zsr).
           collapsed={!isPlanFile && isScratchpadFile(filePath)}
         />
       );
