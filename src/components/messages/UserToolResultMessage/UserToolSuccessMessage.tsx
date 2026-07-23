@@ -26,7 +26,6 @@ type Props = {
   verbose: boolean;
   width: number | string;
   isTranscriptMode?: boolean;
-  shouldCollapseDiffs?: boolean;
 };
 
 export function UserToolSuccessMessage({
@@ -40,7 +39,6 @@ export function UserToolSuccessMessage({
   verbose,
   width,
   isTranscriptMode,
-  shouldCollapseDiffs,
 }: Props): React.ReactNode {
   const [theme] = useTheme();
   // Always call hook unconditionally; feature gate applied to the value.
@@ -76,12 +74,11 @@ export function UserToolSuccessMessage({
     return null;
   }
 
-  // Collapse diff display for old messages (verbose/ctrl+o overrides)
-  const effectiveStyle = shouldCollapseDiffs && !verbose ? 'condensed' : style;
-
+  // Official densable: style only from subagent/grouped condensed views —
+  // never forced by message-distance collapse (fork PR #376 removed).
   const renderedMessage =
     tool.renderToolResultMessage?.(toolResult as never, filterToolProgressMessages(progressMessagesForMessage), {
-      style: effectiveStyle,
+      style,
       theme,
       tools,
       verbose,

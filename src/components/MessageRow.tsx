@@ -62,7 +62,6 @@ export type Props = {
   columns: number;
   isLoading: boolean;
   lookups: ReturnType<typeof buildMessageLookups>;
-  shouldCollapseDiffs?: boolean;
 };
 
 /**
@@ -141,7 +140,6 @@ function MessageRowImpl({
   columns,
   isLoading,
   lookups,
-  shouldCollapseDiffs,
 }: Props): React.ReactNode {
   const isTranscriptMode = screen === 'transcript';
   const isGrouped = msg.type === 'grouped_tool_use';
@@ -211,7 +209,6 @@ function MessageRowImpl({
       isUserContinuation={isUserContinuation}
       lastThinkingBlockId={lastThinkingBlockId}
       latestBashOutputUUID={latestBashOutputUUID}
-      shouldCollapseDiffs={shouldCollapseDiffs}
     />
   );
   // OffscreenFreeze: the outer React.memo already bails for static messages,

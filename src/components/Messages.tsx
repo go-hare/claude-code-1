@@ -857,12 +857,10 @@ const MessagesImpl = ({
       msg.type === 'collapsed_read_search' &&
       (!!streamingText || hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs));
 
-    // Official 2.1.210 does NOT collapse diffs by message distance.
+    // Official densable 2.1.210: no message-distance diff collapse prop.
     // Condensed style is only for subagent/grouped tool views; scratchpad
-    // files use FileEditToolUpdatedMessage.collapsed instead. Fork PR #376
-    // distance collapse turned long scrolls into bare "Added N lines" walls.
-    const shouldCollapseDiffs = false;
-
+    // files use FileEditToolUpdatedMessage.collapsed (isScratchpadFile).
+    // Fork PR #376 distance collapse removed (bare "Added N lines" walls).
     const k = messageKey(msg);
     const row = (
       <MessageRow
@@ -883,7 +881,6 @@ const MessagesImpl = ({
         columns={columns}
         isLoading={isLoading}
         lookups={lookups}
-        shouldCollapseDiffs={shouldCollapseDiffs}
       />
     );
 
