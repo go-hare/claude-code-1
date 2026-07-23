@@ -314,10 +314,19 @@ function PromptInput({
   // Synchronous ref for keybinding handlers (chat:submit) that fire within the
   // same stdin batch as TextInput's onChange. React state lags one tick, so
   // reading `input` in the handler closure would submit the stale value.
+  // densable 2.1.211 Ct.current — kept in lockstep with onInputChange.
   const liveInputRef = React.useRef(input);
   if (input !== liveInputRef.current) {
     liveInputRef.current = input;
   }
+  // densable 2.1.211 ze.current — cursor offset mirror for N1-style insert.
+  const cursorOffsetRef = React.useRef(cursorOffset);
+  cursorOffsetRef.current = cursorOffset;
+  // densable 2.1.211 ht: ht=useRef(H); ht.current=H each render; dual-write on
+  // image paste so N1 pushToBuffer / multi-paste see the new image before the
+  // parent setState re-render lands.
+  const pastedContentsRef = React.useRef(pastedContents);
+  pastedContentsRef.current = pastedContents;
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
     (value: string) => {
@@ -1425,30 +1434,40 @@ function PromptInput({
     // Store image to disk in background (re-stamps path after write)
     void storeImage(newContent, setAppState);
 
-    // Update UI
+    // densable 2.1.211 qie: k(setState) AND ht.current={...ht.current,[id]:U1}
+    // Dual-write so N1(insert) / multi-image loop read the image immediately,
+    // not the pre-paste {} snapshot still pending in React state.
     setPastedContents(prev => ({ ...prev, [pasteId]: newContent }));
+    pastedContentsRef.current = {
+      ...pastedContentsRef.current,
+      [pasteId]: newContent,
+    };
     // Multi-image paste calls onImagePaste in a loop. If the ref is already
     // armed, the previous pill's lazy space fires now (before this pill)
-    // rather than being lost.
+    // rather than being lost. densable: pK=Cs.current?" ":""; N1(pK+Tmo(id))
     const prefix = pendingSpaceAfterPillRef.current ? ' ' : '';
     insertTextAtCursor(prefix + formatImageRef(pasteId));
     pendingSpaceAfterPillRef.current = true;
   }
 
-  // Prune images whose [Image #N] placeholder is no longer in the input text.
-  // Covers pill backspace, Ctrl+U, char-by-char deletion — any edit that drops
-  // the ref. onImagePaste batches setPastedContents + insertTextAtCursor in the
-  // same event, so this effect sees the placeholder already present.
+  // densable 2.1.211 OSe: only run orphan prune when any image is attached
+  // (fork PastedContent has text|image only; densable also gates on audio).
+  // Covers pill backspace / Ctrl+U / char delete. Gating matches official
+  // early-return when !OSe.
+  const hasImagePaste = useMemo(() => Object.values(pastedContents).some(c => c.type === 'image'), [pastedContents]);
   useEffect(() => {
+    if (!hasImagePaste) return;
     const referencedIds = new Set(parseReferences(input).map(r => r.id));
     setPastedContents(prev => {
       const orphaned = Object.values(prev).filter(c => c.type === 'image' && !referencedIds.has(c.id));
       if (orphaned.length === 0) return prev;
       const next = { ...prev };
       for (const img of orphaned) delete next[img.id];
+      // Keep ref in lockstep with densable ht when prune commits.
+      pastedContentsRef.current = next;
       return next;
     });
-  }, [input, setPastedContents]);
+  }, [input, hasImagePaste, setPastedContents]);
 
   function onTextPaste(rawText: string) {
     pendingSpaceAfterPillRef.current = false;
@@ -1500,12 +1519,18 @@ function PromptInput({
   }, []);
 
   function insertTextAtCursor(text: string) {
-    // Push current state to buffer before inserting
-    pushToBuffer(input, cursorOffset, pastedContents);
+    // densable 2.1.211 N1: Kt(Ct.current, ze.current, ht.current); splice via
+    // live refs so multi-image paste / same-tick insert sees dual-written map
+    // and prior pill text, not the render-time closure snapshot.
+    const currentInput = liveInputRef.current;
+    const currentOffset = cursorOffsetRef.current;
+    pushToBuffer(currentInput, currentOffset, pastedContentsRef.current);
 
-    const newInput = input.slice(0, cursorOffset) + text + input.slice(cursorOffset);
+    const newInput = currentInput.slice(0, currentOffset) + text + currentInput.slice(currentOffset);
     trackAndSetInput(newInput);
-    setCursorOffset(cursorOffset + text.length);
+    const newOffset = currentOffset + text.length;
+    cursorOffsetRef.current = newOffset;
+    setCursorOffset(newOffset);
   }
 
   const doublePressEscFromEmpty = useDoublePress(
