@@ -244,6 +244,8 @@ import {
   getContentText,
   createUserMessage,
   createAssistantMessage,
+  shouldPromoteStreamingText,
+  appendAssistantMessageDedupingPartial,
   createTurnDurationMessage,
   createAgentsKilledMessage,
   createApiMetricsMessage,
@@ -2194,8 +2196,16 @@ export function REPL({
   const showStreamingText = !reducedMotion && !hasCursorUpViewportYankBug();
   const onStreamingText = useCallback(
     (f: (current: string | null) => string | null) => {
-      if (!showStreamingText) return;
-      setStreamingText(f);
+      // Always apply clears (null/empty) even when preview is disabled, so a
+      // content_block_stop that races with reducedMotion / viewport-bug toggles
+      // cannot leave stale streamingText that paints a second ● while tools run
+      // (isLoading stays true through the whole tool phase).
+      setStreamingText(current => {
+        const next = f(current);
+        if (next == null || next === '') return null;
+        if (!showStreamingText) return current;
+        return next;
+      });
     },
     [showStreamingText],
   );
@@ -2204,8 +2214,16 @@ export function REPL({
   // char-by-char. lastIndexOf returns -1 when no newline, giving '' → null.
   // Guard on showStreamingText so toggling reducedMotion mid-stream
   // immediately hides the streaming preview.
-  const visibleStreamingText =
-    streamingText && showStreamingText ? streamingText.substring(0, streamingText.lastIndexOf('\n') + 1) || null : null;
+  //
+  // Also suppress once messages already hold the same/overlapping assistant
+  // text (shouldPromoteStreamingText === false). Transcript evidence shows a
+  // single committed TEXT line while the UI still painted two ● — stream
+  // preview + final message concurrent for the rest of the tool turn.
+  const visibleStreamingText = useMemo(() => {
+    if (!streamingText || !showStreamingText) return null;
+    if (!shouldPromoteStreamingText(messages, streamingText)) return null;
+    return streamingText.substring(0, streamingText.lastIndexOf('\n') + 1) || null;
+  }, [streamingText, showStreamingText, messages]);
 
   const [lastQueryCompletionTime, setLastQueryCompletionTime] = useState(0);
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
@@ -3192,7 +3210,9 @@ export function REPL({
     // generated before pressing Esc. Pushed before resetLoadingState clears
     // streamingText, and before query.ts yields the async interrupt marker,
     // giving final order [user, partial-assistant, [Request interrupted by user]].
-    if (streamingText?.trim()) {
+    // Skip if content_block_stop already committed the same text (race with
+    // abort) — otherwise the UI shows two identical ● assistant bullets.
+    if (streamingText?.trim() && shouldPromoteStreamingText(messagesRef.current, streamingText)) {
       setMessages(prev => [...prev, createAssistantMessage({ content: streamingText })]);
     }
 
@@ -3847,7 +3867,16 @@ export function REPL({
               return [...oldMessages, newMessage];
             });
           } else {
-            setMessages(oldMessages => [...oldMessages, newMessage]);
+            // Dedupe Esc-promoted streaming partial vs late content_block_stop
+            // so interrupt races do not render two identical ● bullets.
+            setMessages(oldMessages => appendAssistantMessageDedupingPartial(oldMessages, newMessage));
+            // Belt-and-suspenders: handleMessageFromStream already clears via
+            // onStreamingText(() => null), but if that updater is dropped or
+            // races, a trailing-newline short reply (e.g. "正在推送。\n") would
+            // keep painting streaming ● while isLoading stays true for tools.
+            if (newMessage.type === 'assistant') {
+              setStreamingText(null);
+            }
           }
           // Block ticks on API errors to prevent tick → error → tick
           // runaway loops (e.g., auth failure, rate limit, blocking limit).

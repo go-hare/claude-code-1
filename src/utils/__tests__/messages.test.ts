@@ -32,6 +32,8 @@ import {
   buildMessageLookups,
   updateMessageLookupsIncremental,
   computeMessageStructureKey,
+  shouldPromoteStreamingText,
+  appendAssistantMessageDedupingPartial,
 } from '../messages'
 import type {
   Message,
@@ -116,6 +118,101 @@ describe('createAssistantMessage', () => {
   test('has isApiErrorMessage false', () => {
     const msg = createAssistantMessage({ content: 'test' })
     expect(msg.isApiErrorMessage).toBe(false)
+  })
+})
+
+describe('shouldPromoteStreamingText', () => {
+  test('promotes when no trailing assistant text', () => {
+    const msgs = [createUserMessage({ content: 'hi' })]
+    expect(shouldPromoteStreamingText(msgs, 'partial answer')).toBe(true)
+  })
+
+  test('skips when content_block_stop already committed same text', () => {
+    const msgs = [
+      createUserMessage({ content: 'hi' }),
+      createAssistantMessage({ content: 'partial answer' }),
+    ]
+    // Give the committed message a non-synthetic model like the API path.
+    ;(msgs[1] as AssistantMessage).message.model = 'claude-opus-4'
+    expect(shouldPromoteStreamingText(msgs, 'partial answer')).toBe(false)
+  })
+
+  test('skips when committed text is a prefix of streaming text', () => {
+    const msgs = [
+      createUserMessage({ content: 'hi' }),
+      createAssistantMessage({ content: 'partial' }),
+    ]
+    ;(msgs[1] as AssistantMessage).message.model = 'claude-opus-4'
+    expect(shouldPromoteStreamingText(msgs, 'partial answer')).toBe(false)
+  })
+
+  test('promotes empty/whitespace streaming text as false', () => {
+    expect(shouldPromoteStreamingText([], '   ')).toBe(false)
+  })
+
+  test('skips when tool_use follows committed text (stream+tool turn)', () => {
+    // UI paints streamingText while isLoading through tool execution; once
+    // content_block_stop committed the same text, preview must hide.
+    const msgs = [
+      createUserMessage({ content: 'push' }),
+      createAssistantMessage({ content: '正在推送。' }),
+      createAssistantMessage({
+        content: [
+          {
+            type: 'tool_use',
+            id: 'call-1',
+            name: 'Bash',
+            input: { command: 'git push' },
+          } as never,
+        ],
+      }),
+    ]
+    ;(msgs[1] as AssistantMessage).message.model = 'claude-opus-4'
+    ;(msgs[2] as AssistantMessage).message.model = 'claude-opus-4'
+    expect(shouldPromoteStreamingText(msgs, '正在推送。')).toBe(false)
+    expect(shouldPromoteStreamingText(msgs, '正在推送。\n')).toBe(false)
+  })
+})
+
+describe('appendAssistantMessageDedupingPartial', () => {
+  test('appends when no prior assistant', () => {
+    const user = createUserMessage({ content: 'hi' })
+    const asst = createAssistantMessage({ content: 'hello' })
+    asst.message.model = 'claude-opus-4'
+    const next = appendAssistantMessageDedupingPartial([user], asst)
+    expect(next).toHaveLength(2)
+    expect(next[1]).toBe(asst)
+  })
+
+  test('drops exact duplicate of synthetic Esc partial', () => {
+    const user = createUserMessage({ content: 'hi' })
+    const partial = createAssistantMessage({ content: 'same text' })
+    const late = createAssistantMessage({ content: 'same text' })
+    late.message.model = 'claude-opus-4'
+    const next = appendAssistantMessageDedupingPartial([user, partial], late)
+    expect(next).toHaveLength(2)
+    expect(next[1]).toBe(late)
+    expect((next[1] as AssistantMessage).message.model).toBe('claude-opus-4')
+  })
+
+  test('replaces synthetic partial with fuller real message', () => {
+    const user = createUserMessage({ content: 'hi' })
+    const partial = createAssistantMessage({ content: 'partial' })
+    const full = createAssistantMessage({ content: 'partial answer more' })
+    full.message.model = 'claude-opus-4'
+    const next = appendAssistantMessageDedupingPartial([user, partial], full)
+    expect(next).toHaveLength(2)
+    expect(next[1]).toBe(full)
+  })
+
+  test('does not collapse distinct non-synthetic assistant messages', () => {
+    const user = createUserMessage({ content: 'hi' })
+    const first = createAssistantMessage({ content: 'first' })
+    first.message.model = 'claude-opus-4'
+    const second = createAssistantMessage({ content: 'second' })
+    second.message.model = 'claude-opus-4'
+    const next = appendAssistantMessageDedupingPartial([user, first], second)
+    expect(next).toHaveLength(3)
   })
 })
 
