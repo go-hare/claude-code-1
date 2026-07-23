@@ -39,6 +39,7 @@ import { isEnvTruthy } from './envUtils.js'
 import { getCurrentSessionTitle, sessionIdExists } from './sessionStorage.js'
 import { sleep } from './sleep.js'
 import { closeSentry } from './sentry.js'
+import { emitScrollTelemetrySummary } from './scrollTelemetry.js'
 import { profileReport } from './startupProfiler.js'
 
 /**
@@ -549,6 +550,9 @@ export async function gracefulShutdown(
         lastRequestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
   }
+
+  // Official DTo densable — tengu_scroll_summary before analytics sinks close.
+  emitScrollTelemetrySummary()
 
   // Flush analytics — capped at 500ms. Previously unbounded: the 1P exporter
   // awaits all pending axios POSTs (10s each), eating the full failsafe budget.

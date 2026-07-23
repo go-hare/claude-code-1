@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from 'react'
 import type { ScrollBoxHandle, DOMElement } from '@anthropic/ink'
+import { recordStickyState } from '../utils/scrollTelemetry.js'
 
 /**
  * Estimated height (rows) for items not yet measured. Intentionally LOW:
@@ -353,6 +354,16 @@ export function useVirtualScroll(
   // directly, minus the instability. Default true: before the ref attaches,
   // assume bottom (sticky will pin us there on first Ink render).
   const isSticky = scrollRef.current?.isSticky() ?? true
+
+  // Official densable ALi: track unpinned dwell whenever sticky flips
+  // (including renderer-driven pin / non-keybinding scroll). Cleanup pins
+  // the clock so unmount does not leave an open unpinned window.
+  useEffect(() => {
+    recordStickyState(isSticky)
+    return () => {
+      recordStickyState(true)
+    }
+  }, [isSticky])
 
   // GC stale cache entries (compaction, /clear, screenToggleId bump). Only
   // runs when itemKeys identity changes — scrolling doesn't touch keys.

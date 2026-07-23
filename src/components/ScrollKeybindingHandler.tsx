@@ -1,4 +1,4 @@
-import React, { type RefObject, useEffect, useRef } from 'react';
+import React, { type RefObject, useCallback, useEffect, useRef } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
 import type { ScrollBoxHandle, FocusMove, SelectionState } from '@anthropic/ink';
@@ -17,6 +17,12 @@ import {
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logForDebugging } from '../utils/debug.js';
 import { resolveScrollSpeedBase } from '../utils/residualUiEnvGates.js';
+import {
+  recordPageJump,
+  recordReachedScrollbackCap,
+  recordScroll,
+  recordStickyState,
+} from '../utils/scrollTelemetry.js';
 
 type Props = {
   scrollRef: RefObject<ScrollBoxHandle | null>;
@@ -445,6 +451,29 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
   const wheelAccel = useRef<WheelAccelState | null>(null);
   const wheelProfileRef = useRef<WheelProfile | null>(null);
 
+  // Official g gate: only count when an onScroll listener is mounted
+  // (fullscreen / transcript chrome path). Headless / non-scroll hosts skip.
+  const trackTelemetry = onScroll != null;
+  // Stable wrapper so we can both record sticky dwell time (ALi densable)
+  // and forward to the caller's onScroll without identity thrash.
+  const callerOnScrollRef = useRef(onScroll);
+  callerOnScrollRef.current = onScroll;
+  const notifyScroll = useCallback(
+    (sticky: boolean, handle: ScrollBoxHandle) => {
+      if (trackTelemetry) recordStickyState(sticky);
+      callerOnScrollRef.current?.(sticky, handle);
+    },
+    [trackTelemetry],
+  );
+
+  // When the handler unmounts, stop the unpinned clock (official cleanup ALi(true)).
+  useEffect(() => {
+    if (!trackTelemetry) return;
+    return () => {
+      recordStickyState(true);
+    };
+  }, [trackTelemetry]);
+
   // Official VSp densable — arrow-burst / jediterm-scroll-bug toasts.
   useEffect(() => {
     if (!internal_eventEmitter) return;
@@ -589,18 +618,20 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
       'scroll:pageUp': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
       'scroll:pageDown': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
       'scroll:lineUp': () => {
         // Wheel: scrollBy accumulates into pendingScrollDelta, drained async
@@ -613,25 +644,29 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
         // the wheel event instead (e.g. Settings Config's list navigation
         // inside the centered Modal, where the paginated slice always fits).
         if (!s || s.getScrollHeight() <= s.getViewportHeight()) return false;
+        if (trackTelemetry) recordScroll();
         const accel = ensureWheelAccel();
-        scrollUp(s, computeWheelStep(accel, -1, performance.now()));
-        onScroll?.(false, s);
+        scrollUp(s, computeWheelStep(accel, -1, performance.now()), trackTelemetry);
+        notifyScroll(false, s);
       },
       'scroll:lineDown': () => {
         selection.clearSelection();
         const s = scrollRef.current;
         if (!s || s.getScrollHeight() <= s.getViewportHeight()) return false;
+        if (trackTelemetry) recordScroll();
         const accel = ensureWheelAccel();
         const step = computeWheelStep(accel, 1, performance.now());
         const reachedBottom = scrollDown(s, step);
-        onScroll?.(reachedBottom, s);
+        notifyScroll(reachedBottom, s);
       },
       'scroll:top': () => {
         const s = scrollRef.current;
         if (!s) return;
+        // Official p2r densable: top jump marks scrollback cap reached.
+        if (trackTelemetry) recordReachedScrollbackCap();
         translateSelectionForJump(s, -(s.getScrollTop() + s.getPendingDelta()));
         s.scrollTo(0);
-        onScroll?.(false, s);
+        notifyScroll(false, s);
       },
       'scroll:bottom': () => {
         const s = scrollRef.current;
@@ -645,7 +680,7 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
         // above, 2× offset. scrollToBottom() then re-enables sticky.
         s.scrollTo(max);
         s.scrollToBottom();
-        onScroll?.(true, s);
+        notifyScroll(true, s);
       },
       'selection:copy': copyAndToast,
     },
@@ -661,34 +696,38 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
       'scroll:halfPageUp': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
       'scroll:halfPageDown': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
       'scroll:fullPageUp': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, s.getViewportHeight());
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
       'scroll:fullPageDown': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (trackTelemetry) recordPageJump();
         const d = Math.max(1, s.getViewportHeight());
         translateSelectionForJump(s, d);
-        const sticky = jumpBy(s, d);
-        onScroll?.(sticky, s);
+        const sticky = jumpBy(s, d, trackTelemetry);
+        notifyScroll(sticky, s);
       },
     },
     { context: 'Scroll', isActive },
@@ -714,9 +753,16 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
     (input, key, event) => {
       const s = scrollRef.current;
       if (!s) return;
-      const sticky = applyModalPagerAction(s, modalPagerAction(input, key), d => translateSelectionForJump(s, d));
+      const act = modalPagerAction(input, key);
+      // Official y densable telemetry: line → scrolls, top → cap, other jumps → page.
+      if (trackTelemetry && act !== null) {
+        if (act === 'lineUp' || act === 'lineDown') recordScroll();
+        else if (act === 'top') recordReachedScrollbackCap();
+        else if (act !== 'bottom') recordPageJump();
+      }
+      const sticky = applyModalPagerAction(s, act, d => translateSelectionForJump(s, d), trackTelemetry);
       if (sticky === null) return;
-      onScroll?.(sticky, s);
+      notifyScroll(sticky, s);
       event.stopImmediatePropagation();
     },
     { isActive: isActive && isModal },
@@ -759,7 +805,7 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
     { isActive },
   );
 
-  useDragToScroll(scrollRef, selection, isActive, onScroll);
+  useDragToScroll(scrollRef, selection, isActive, notifyScroll);
   useCopyOnSelect(selection, isActive, showCopiedToast);
   useSelectionBgColor(selection);
 
@@ -990,7 +1036,10 @@ export function dragScrollDirection(
 // wheel smoothness, wrong for PgUp/ctrl+u where the user expects a snap.
 // Target is relative to scrollTop+pendingDelta so a jump mid-wheel-burst
 // lands where the wheel was heading.
-export function jumpBy(s: ScrollBoxHandle, delta: number): boolean {
+//
+// trackTelemetry (official poe r flag): when a jump lands at scrollTop 0,
+// mark reachedScrollbackCap (p2r densable).
+export function jumpBy(s: ScrollBoxHandle, delta: number, trackTelemetry = false): boolean {
   const max = Math.max(0, s.getScrollHeight() - s.getViewportHeight());
   const target = s.getScrollTop() + s.getPendingDelta() + delta;
   if (target >= max) {
@@ -1000,6 +1049,9 @@ export function jumpBy(s: ScrollBoxHandle, delta: number): boolean {
     s.scrollTo(max);
     s.scrollToBottom();
     return true;
+  }
+  if (target <= 0 && trackTelemetry) {
+    recordReachedScrollbackCap();
   }
   s.scrollTo(Math.max(0, target));
   return false;
@@ -1029,11 +1081,13 @@ function scrollDown(s: ScrollBoxHandle, amount: number): boolean {
 // useVirtualScroll's [effLo, effHi] span grows past what MAX_MOUNTED_ITEMS
 // can cover and intermediate drain frames render at scrollTops with no
 // mounted children — blank viewport.
-export function scrollUp(s: ScrollBoxHandle, amount: number): void {
+export function scrollUp(s: ScrollBoxHandle, amount: number, trackTelemetry = false): void {
   // Include pendingDelta: scrollBy accumulates without updating scrollTop,
   // so getScrollTop() alone is stale within a batch of wheel events.
   const effectiveTop = s.getScrollTop() + s.getPendingDelta();
   if (effectiveTop - amount <= 0) {
+    // Official UP_ densable: wheel-up past top marks scrollback cap.
+    if (trackTelemetry) recordReachedScrollbackCap();
     s.scrollTo(0);
     return;
   }
@@ -1141,6 +1195,7 @@ export function applyModalPagerAction(
   s: ScrollBoxHandle,
   act: ModalPagerAction | null,
   onBeforeJump: (delta: number) => void,
+  trackTelemetry = false,
 ): boolean | null {
   switch (act) {
     case null:
@@ -1149,21 +1204,21 @@ export function applyModalPagerAction(
     case 'lineDown': {
       const d = act === 'lineDown' ? 1 : -1;
       onBeforeJump(d);
-      return jumpBy(s, d);
+      return jumpBy(s, d, trackTelemetry);
     }
     case 'halfPageUp':
     case 'halfPageDown': {
       const half = Math.max(1, Math.floor(s.getViewportHeight() / 2));
       const d = act === 'halfPageDown' ? half : -half;
       onBeforeJump(d);
-      return jumpBy(s, d);
+      return jumpBy(s, d, trackTelemetry);
     }
     case 'fullPageUp':
     case 'fullPageDown': {
       const page = Math.max(1, s.getViewportHeight());
       const d = act === 'fullPageDown' ? page : -page;
       onBeforeJump(d);
-      return jumpBy(s, d);
+      return jumpBy(s, d, trackTelemetry);
     }
     case 'top':
       onBeforeJump(-(s.getScrollTop() + s.getPendingDelta()));

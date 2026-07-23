@@ -3105,6 +3105,18 @@ export function REPL({
     prevDialogRef.current = focusedInputDialog;
   }, [focusedInputDialog, repinScroll]);
 
+  // Transcript swap (enter/exit agent view): ScrollBox is shared — leftover
+  // scrollTop / scrollHeightHwm from the leader (or previous agent) can pin
+  // the viewport into empty virtual-scroll spacer until the user scrolls.
+  // Same repin path as overlay; first-paint settle in useVirtualScroll then
+  // rebuilds spacers against a sticky bottom.
+  const prevViewingAgentRef = useRef(viewingAgentTaskId);
+  useLayoutEffect(() => {
+    if (prevViewingAgentRef.current === viewingAgentTaskId) return;
+    prevViewingAgentRef.current = viewingAgentTaskId;
+    repinScroll();
+  }, [viewingAgentTaskId, repinScroll]);
+
   function onCancel() {
     if (focusedInputDialog === 'elicitation') {
       // Elicitation dialog handles its own Escape, and closing it shouldn't affect any loading state.
