@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
+import type { AgentId } from '../../types/ids.js'
 import {
   clearCommandQueue,
   dequeue,
   dequeueAllMatching,
   enqueue,
   enqueuePendingNotification,
+  getCommandQueueLength,
+  getMainThreadQueueLength,
   hasCommandsInQueue,
   isQueuedCommandEditable,
   isQueuedCommandVisible,
@@ -235,6 +238,39 @@ describe('messageQueueManager priority ordering', () => {
 
     expect(dequeue()!.value).toBe('next')
     expect(dequeue()!.value).toBe('later')
+  })
+})
+
+describe('getMainThreadQueueLength densable Xwt', () => {
+  test('0 when empty', () => {
+    expect(getMainThreadQueueLength()).toBe(0)
+    expect(getCommandQueueLength()).toBe(0)
+  })
+
+  test('counts only AL (agentId === mi()) entries', () => {
+    enqueue({ value: 'main', mode: 'prompt' } as any)
+    enqueue({
+      value: 'sub notif',
+      mode: 'task-notification',
+      agentId: 'agent-xyz' as AgentId,
+    } as any)
+    enqueuePendingNotification({
+      value: '<task/>',
+      mode: 'task-notification',
+    } as any)
+    // Full queue has subagent-addressed noise; spinner must ignore it.
+    expect(getCommandQueueLength()).toBe(3)
+    expect(getMainThreadQueueLength()).toBe(2)
+  })
+
+  test('subagent-only queue does not inflate main-thread length', () => {
+    enqueue({
+      value: 'parked',
+      mode: 'task-notification',
+      agentId: 'nested-owner' as AgentId,
+    } as any)
+    expect(getCommandQueueLength()).toBe(1)
+    expect(getMainThreadQueueLength()).toBe(0)
   })
 })
 

@@ -411,6 +411,7 @@ import {
   type SetAppState,
   getCommandQueue,
   getCommandQueueLength,
+  getMainThreadQueueLength,
   removeByFilter,
 } from '../utils/messageQueueManager.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
@@ -2448,15 +2449,17 @@ export function REPL({
     toolUseConfirmQueue.length === 0 &&
     promptQueue.length === 0 &&
     // Show spinner during input processing, API call, while teammates are running,
-    // or while pending task notifications are queued (prevents spinner bounce between consecutive notifications)
+    // or while pending main-thread queue items remain (densable Xwt — not full
+    // queue length). Full getCommandQueueLength() includes subagent-addressed
+    // entries processQueueIfReady never drains → spinner stuck after Sautéed.
     (isLoading ||
       userInputOnProcessing ||
       hasRunningTeammates ||
-      // Keep spinner visible while task notifications are queued for processing.
-      // Without this, the spinner briefly disappears between consecutive notifications
-      // (e.g., multiple background agents completing in rapid succession) because
-      // isLoading goes false momentarily between processing each one.
-      getCommandQueueLength() > 0) &&
+      // Keep spinner visible while main-thread task notifications are queued.
+      // Without this, the spinner briefly disappears between consecutive
+      // notifications (e.g., multiple background agents completing in rapid
+      // succession) because isLoading goes false momentarily between each one.
+      getMainThreadQueueLength() > 0) &&
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&

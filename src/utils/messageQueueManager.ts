@@ -1,6 +1,10 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { Permutations } from 'src/types/utils.js'
-import { getMainThreadAgentId, getSessionId } from '../bootstrap/state.js'
+import {
+  getMainThreadAgentId,
+  getSessionId,
+  isMainThreadQueuedCommand,
+} from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
 import type {
   QueueOperation,
@@ -92,9 +96,25 @@ export function getCommandQueue(): QueuedCommand[] {
 
 /**
  * Get the current queue length without copying.
+ * densable j4i — full queue including nested/subagent-addressed entries.
  */
 export function getCommandQueueLength(): number {
   return commandQueue.length
+}
+
+/**
+ * densable Xwt / getMainThreadQueueLength — count of AL entries only
+ * (`cmd.agentId === mi()`). Full length would keep the REPL spinner spinning
+ * when only nested/subagent notifications remain (processQueueIfReady never
+ * drains them on the main thread). Spinner and mainIsBusy must use this, not
+ * getCommandQueueLength().
+ */
+export function getMainThreadQueueLength(): number {
+  let n = 0
+  for (const cmd of commandQueue) {
+    if (isMainThreadQueuedCommand(cmd)) n++
+  }
+  return n
 }
 
 /**
