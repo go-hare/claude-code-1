@@ -8,6 +8,7 @@
  *   bun run scripts/publish.ts --publish-only     # publish pre-built packages
  *   bun run scripts/publish.ts --platform darwin-arm64  # target specific platform
  *   bun run scripts/publish.ts --with-main        # also publish the main @go-hare/claude-code pkg
+ *   bun run scripts/publish.ts --main-only        # publish only the main package (staging)
  *   bun run scripts/publish.ts --dry-run          # npm publish --dry-run
  */
 import {
@@ -29,6 +30,7 @@ const buildOnly = args.includes('--build-only')
 const publishOnly = args.includes('--publish-only')
 const dryRun = args.includes('--dry-run')
 const withMain = args.includes('--with-main')
+const mainOnly = args.includes('--main-only')
 const platformIdx = args.indexOf('--platform')
 const platformArg =
   platformIdx >= 0 ? args[platformIdx + 1] : process.env.TARGET_PLATFORM
@@ -379,6 +381,16 @@ function publishPkg(pkgDir: string): void {
 }
 
 function main() {
+  if (mainOnly) {
+    if (buildOnly) {
+      console.error('--main-only cannot be combined with --build-only')
+      process.exit(1)
+    }
+    publishMainPackage()
+    console.log('\nDone.')
+    return
+  }
+
   const targetPlatform = platformArg || getCurrentPlatform()
 
   if (!publishOnly) {
