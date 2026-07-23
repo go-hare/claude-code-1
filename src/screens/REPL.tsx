@@ -2744,7 +2744,15 @@ export function REPL({
         // densable: y0("") only when entrypoint !== "fork" (fork keeps draft).
         if (entrypoint !== 'fork') {
           setInputValue('');
+          setPastedContents({});
         }
+        // Restart idle clock after in-session /resume. Stale lastQueryCompletionTime
+        // from the previous conversation would trip willow dialog on the first
+        // submit (user reports full message swallow after /resume). densable has
+        // no dialog so does not need this; fork dialog product does.
+        setLastQueryCompletionTime(Date.now());
+        skipIdleCheckRef.current = false;
+        setIdleReturnPending(null);
 
         // Official wvr(messages, Je) on in-session /resume — orphan scan after
         // messages restored (skip fork: new session id, no prior orphans).
@@ -2998,6 +3006,13 @@ export function REPL({
     // High priority dialogs (always show regardless of typing)
     if (isMessageSelectorVisible) return 'message-selector';
 
+    // Idle-return must win over typing-suppression AND toolJSX gating.
+    // onSubmit already stashed the message in idleReturnPending without clearing
+    // the draft; if this check sits behind isPromptInputActive (true while the
+    // prompt still has text) or allowDialogsWithAnimation, the dialog never
+    // mounts and Enter looks like a full swallow.
+    if (idleReturnPending) return 'idle-return';
+
     // Suppress interrupt dialogs while user is actively typing
     if (isPromptInputActive) return undefined;
 
@@ -3012,7 +3027,6 @@ export function REPL({
     if (allowDialogsWithAnimation && workerSandboxPermissions.queue[0]) return 'worker-sandbox-permission';
     if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation';
     if (allowDialogsWithAnimation && showingCostDialog) return 'cost';
-    if (allowDialogsWithAnimation && idleReturnPending) return 'idle-return';
 
     if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice)
       return 'ultraplan-choice';
@@ -4942,18 +4956,16 @@ export function REPL({
           const idleMs = Date.now() - lastQueryCompletionTimeRef.current;
           const idleMinutes = idleMs / 60_000;
           if (idleMinutes >= idleThresholdMin && willowMode === 'dialog') {
-            // Snapshot paste map BEFORE clearing input — empty input would
-            // prune images via PromptInput OSe effect, then continue would
-            // re-submit text-only (swallows first image after /resume / idle).
+            // Stash only — do NOT clear input/paste. Clearing here caused
+            // "entire message gone": PromptInput emptied, and if the dialog
+            // failed to mount (toolJSX gate / layout) there was no recovery.
+            // Dialog still gets focus via idleReturnPending; Continue re-submits
+            // the snapshot; Dismiss leaves the draft in the prompt.
             setIdleReturnPending({
               input,
               idleMinutes,
               pastedContents: effectivePastedContents,
             });
-            setInputValue('');
-            helpers.setCursorOffset(0);
-            helpers.clearBuffer();
-            // Keep paste map until continue/dismiss; do not setPastedContents({}).
             return;
           }
         }
@@ -7067,9 +7079,11 @@ export function REPL({
                         bashToolsProcessedIdx.current = 0;
                       }
                       skipIdleCheckRef.current = true;
-                      // Restore paste map before re-submit so history/UI stay
-                      // consistent; override ensures handlePromptSubmit sees
-                      // images even if setState has not committed yet.
+                      // Draft was left in the prompt while the dialog was open
+                      // (we no longer clear on intercept). Clear before re-submit
+                      // so the prompt doesn't flash the pending text; override
+                      // carries paste map even if setState has not committed.
+                      setInputValue('');
                       setPastedContents(pending.pastedContents);
                       void onSubmitRef.current(
                         pending.input,
