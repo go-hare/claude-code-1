@@ -43,12 +43,13 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.9**），与 git tag 可能不同步。
+近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.10**），与 git tag 可能不同步。
 
-### 近期更新（2.7.5 → 2.7.9）
+### 近期更新（2.7.5 → 2.7.10）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.10** | **Shell 对话框 hooks 崩溃修复**：打开 BackgroundTasksDialog 时 PromptInput 的 `onKeyDownBefore` useCallback 位于 early return 之后导致 "Rendered fewer hooks than expected"；钩子上移 + onDoneEvent 延后触发。 |
 | **2.7.9** | 全平台二进制重编发布（含 2.7.8 Enter 吞消息修复等当前 main）。 |
 | **2.7.8** | **Enter 偶发吞消息修复**：对齐 densable Enter 路径（typeahead / history search / PromptInput），避免提交键在部分状态下丢输入。 |
 | **2.7.7** | **OpenAI 兼容流多 ● 修复**：坏代理对每个 chunk 重发全文并带 `finish_reason` 时，不再反复开闭 text block（`normalizeMessages` 一行一个 ●）；累计全文 delta 只 emit 后缀；assemble 侧合并相邻相同 text block 作防御。 |
@@ -78,7 +79,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.9`）。  
+安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.10`）。  
 旧文档里的全局包名 `claude-code` **不再**对应本仓库发布流。
 
 ---
