@@ -3,6 +3,7 @@ import type { PastedContent } from 'src/utils/config.js'
 import {
   maybeTruncateInput,
   mergePastedContentsDualWrite,
+  resolveSubmitInputFromLive,
 } from '../inputPaste.js'
 
 function image(id: number): PastedContent {
@@ -94,6 +95,38 @@ describe('mergePastedContentsDualWrite', () => {
   test('does not invent entries for refs with no dual-write or prop data', () => {
     const result = mergePastedContentsDualWrite({}, {}, '[Image #9]')
     expect(result).toEqual({})
+  })
+})
+
+describe('resolveSubmitInputFromLive', () => {
+  test('prefers live when Enter submits empty after paste insert same tick', () => {
+    expect(resolveSubmitInputFromLive('', 'hello [Image #1]')).toBe(
+      'hello [Image #1]',
+    )
+  })
+
+  test('prefers live when submitted text is missing image pill still on live', () => {
+    expect(resolveSubmitInputFromLive('hello', 'hello [Image #1]')).toBe(
+      'hello [Image #1]',
+    )
+  })
+
+  test('keeps submitted when live and submitted already match', () => {
+    expect(
+      resolveSubmitInputFromLive('hello [Image #1]  ', 'hello [Image #1]  '),
+    ).toBe('hello [Image #1]')
+  })
+
+  test('does not invent live when submitted has more content and all live pills', () => {
+    // User typed more after paste committed — submitted is fresher.
+    expect(
+      resolveSubmitInputFromLive('hello [Image #1] world', 'hello [Image #1]'),
+    ).toBe('hello [Image #1] world')
+  })
+
+  test('empty both stays empty', () => {
+    expect(resolveSubmitInputFromLive('', '')).toBe('')
+    expect(resolveSubmitInputFromLive('   ', '  ')).toBe('')
   })
 })
 

@@ -132,3 +132,37 @@ export function mergePastedContentsDualWrite(
   }
   return next
 }
+
+/**
+ * Prefer the dual-written live input when Enter arrives before React re-renders
+ * the value prop after paste insert (image pill / large text ref).
+ *
+ * useTextInput's liveValueRef only syncs from the value prop. PromptInput's
+ * insertTextAtCursor writes liveInputRef only. Same-tick Enter would otherwise
+ * submit the pre-paste snapshot → REPL clears the box → handlePromptSubmit
+ * early-returns empty / drops images → flash + swallow.
+ */
+export function resolveSubmitInputFromLive(
+  submitted: string,
+  liveInput: string,
+): string {
+  const submittedTrim = submitted.trimEnd()
+  const liveTrim = liveInput.trimEnd()
+  if (liveTrim === submittedTrim) {
+    return submittedTrim
+  }
+  if (submittedTrim === '' && liveTrim !== '') {
+    return liveTrim
+  }
+  const liveRefIds = new Set(parseReferences(liveInput).map(r => r.id))
+  if (liveRefIds.size === 0) {
+    return submittedTrim
+  }
+  const submittedRefIds = new Set(parseReferences(submitted).map(r => r.id))
+  for (const id of liveRefIds) {
+    if (!submittedRefIds.has(id)) {
+      return liveTrim
+    }
+  }
+  return submittedTrim
+}

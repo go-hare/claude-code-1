@@ -139,7 +139,7 @@ import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
 import { TeamsDialog } from '../teams/TeamsDialog.js';
 import VimTextInput from '../VimTextInput.js';
 import { getModeFromInput, getValueFromInput } from './inputModes.js';
-import { mergePastedContentsDualWrite } from './inputPaste.js';
+import { mergePastedContentsDualWrite, resolveSubmitInputFromLive } from './inputPaste.js';
 import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications } from './Notifications.js';
 import PromptInputFooter from './PromptInputFooter.js';
 import type { SuggestionItem } from './PromptInputFooterSuggestions.js';
@@ -1250,7 +1250,10 @@ function PromptInput({
 
   const onSubmit = useCallback(
     async (inputParam: string, isSubmittingSlashCommand = false) => {
-      inputParam = inputParam.trimEnd();
+      // densable N1 / live dual-write: paste insert updates liveInputRef same tick;
+      // useTextInput liveValueRef lags until value prop re-renders. Prefer live
+      // when caller is empty or missing paste pills (flash + swallow otherwise).
+      inputParam = resolveSubmitInputFromLive(inputParam, liveInputRef.current);
 
       // Don't submit if a footer indicator is being opened. Read fresh from
       // store — footer:openSelected calls selectFooterItem(null) then onSubmit
@@ -2505,6 +2508,18 @@ function PromptInput({
     [historyKeyDown, typeaheadKeyDown],
   );
 
+  // TextInput/useTextInput submits via its own liveValueRef, which only syncs from
+  // the value prop. Image/text paste inserts through insertTextAtCursor →
+  // liveInputRef without going through useTextInput, so Enter in the same tick
+  // would otherwise submit the pre-paste snapshot. Always read liveInputRef.
+  // Must stay before early returns (same as onKeyDownBefore) for hooks count.
+  const onTextInputSubmit = useCallback(
+    (_value: string) => {
+      void onSubmit(liveInputRef.current);
+    },
+    [onSubmit],
+  );
+
   if (showBashesDialog) {
     return (
       <BackgroundTasksDialog
@@ -2586,7 +2601,7 @@ function PromptInput({
     multiline: true,
     // densable rfo onKeyDownBefore:UI — history vo then typeahead Me before insert/submit
     onKeyDownBefore,
-    onSubmit,
+    onSubmit: onTextInputSubmit,
     onChange,
     value: historyMatch
       ? getValueFromInput(typeof historyMatch === 'string' ? historyMatch : historyMatch.display)
