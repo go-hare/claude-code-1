@@ -245,9 +245,7 @@ function copyVendorBesideBinary(pkgDir, destBinary) {
     console.error(
       `[${WRAPPER_NAME} postinstall] Warning: could not copy vendor helpers: ${err.message}`,
     )
-    console.error(
-      '  Grep/Glob may fall back to system ripgrep if available.',
-    )
+    console.error('  Grep/Glob may fall back to system ripgrep if available.')
   }
 }
 
