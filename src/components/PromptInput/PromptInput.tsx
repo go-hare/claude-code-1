@@ -2491,6 +2491,20 @@ function PromptInput({
   // Must be called before early returns below to satisfy rules-of-hooks.
   useSetPromptOverlayDialog(null);
 
+  // densable UI(Bt): vo(history) then $F(typeahead); short-circuit on prevent/stopImmediate.
+  // Hook must run unconditionally — placed before the early returns below
+  // (showBashesDialog / showTeamsDialog / pickers), otherwise opening those
+  // dialogs drops this useCallback and React throws
+  // "Rendered fewer hooks than expected".
+  const onKeyDownBefore = React.useCallback(
+    (event: KeyboardEvent) => {
+      historyKeyDown(event);
+      if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
+      typeaheadKeyDown(event);
+    },
+    [historyKeyDown, typeaheadKeyDown],
+  );
+
   if (showBashesDialog) {
     return (
       <BackgroundTasksDialog
@@ -2567,16 +2581,6 @@ function PromptInput({
       />
     );
   }
-
-  // densable UI(Bt): vo(history) then $F(typeahead); short-circuit on prevent/stopImmediate.
-  const onKeyDownBefore = React.useCallback(
-    (event: KeyboardEvent) => {
-      historyKeyDown(event);
-      if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
-      typeaheadKeyDown(event);
-    },
-    [historyKeyDown, typeaheadKeyDown],
-  );
 
   const baseProps: BaseTextInputProps = {
     multiline: true,

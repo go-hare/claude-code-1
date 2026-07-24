@@ -376,8 +376,13 @@ export function BackgroundTasksDialog({ onDone, toolUseContext, initialDetailTas
         // Task was removed or is no longer a background task (e.g. killed).
         // If we skipped the list on mount, close the dialog entirely.
         if (skippedListOnMount.current) {
-          onDoneEvent('Background tasks dialog dismissed', {
-            display: 'system',
+          // Defer to next tick: calling onDone synchronously unmounts this
+          // component while it's still inside useEffect, causing React to
+          // detect a hooks count mismatch ("Rendered fewer hooks than expected").
+          queueMicrotask(() => {
+            onDoneEvent('Background tasks dialog dismissed', {
+              display: 'system',
+            });
           });
         } else {
           setViewState({ mode: 'list' });
