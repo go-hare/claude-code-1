@@ -50,8 +50,13 @@ export type Props = {
   /**
    * densable: effort is EffortLevel only. Ultracode is applied as session
    * AppState inside the picker (not via this callback).
+   *
+   * When `deferEffortApply` is true, N9 / settings / AppState effort writes
+   * are NOT applied here — caller must invoke the third `commitEffort`
+   * callback after any gate (e.g. Fable consent) succeeds. Decline/cancel
+   * must not call `commitEffort`.
    */
-  onSelect: (model: string | null, effort: EffortLevel | undefined) => void;
+  onSelect: (model: string | null, effort: EffortLevel | undefined, commitEffort?: () => void) => void;
   onCancel?: () => void;
   isStandaloneCommand?: boolean;
   showFastModeNotice?: boolean;
@@ -65,6 +70,12 @@ export type Props = {
    * densable mk_: also skips session ultracode / effort AppState writes.
    */
   skipSettingsWrite?: boolean;
+  /**
+   * Defer N9 + effort AppState/settings writes until caller runs
+   * `commitEffort` from onSelect. Used by /model Fable consent so decline
+   * does not unpin launch pins or sticky effort.
+   */
+  deferEffortApply?: boolean;
 };
 
 const NO_PREFERENCE = '__NO_PREFERENCE__';
@@ -81,6 +92,7 @@ export function ModelPicker({
   showFastModeNotice,
   headerText,
   skipSettingsWrite,
+  deferEffortApply,
 }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const exitState = useExitOnCtrlCDWithKeybindings();
@@ -258,7 +270,10 @@ export function ModelPicker({
 
     // densable Dan: only touch effort/ultracode AppState when user cycled (IGe).
     // Model-only confirm leaves session effort / ultracode alone.
-    if (!skipSettingsWrite && hasToggledEffort) {
+    // When deferEffortApply (Fable consent), N9 + writes run only after accept
+    // via commitEffort — decline must not unpin or sticky-write.
+    const commitEffort = (): void => {
+      if (skipSettingsWrite || !hasToggledEffort) return;
       if (wantsUltracode && ultracodeWire !== undefined) {
         // densable Dan: ultracode → N9 + session effortValue=wire + ultracode:true.
         // Do not write effortLevel to userSettings (session-only orchestration).
@@ -268,30 +283,34 @@ export function ModelPicker({
           effortValue: ultracodeWire,
           ultracode: true,
         }));
-      } else {
-        // Prior comes from userSettings on disk — NOT merged settings (which
-        // includes project/policy layers that must not leak into the user's
-        // global ~/.claude/settings.json), and NOT AppState.effortValue (which
-        // includes session-ephemeral sources like --effort CLI flag).
-        // See resolvePickerEffortPersistence JSDoc.
-        const effortLevel = resolvePickerEffortPersistence(
-          effortForModel,
-          getDefaultEffortLevelForOption(value),
-          getSettingsForSource('userSettings')?.effortLevel,
-          hasToggledEffort,
-        );
-        const persistable = toPersistableEffort(effortLevel);
-        if (persistable !== undefined) {
-          updateSettingsForSource('userSettings', { effortLevel: persistable });
-        }
-        // densable: non-ultracode confirm clears ultracode flag.
-        unpinAllEffortLaunchPins();
-        setAppState(prev => ({
-          ...prev,
-          effortValue: effortLevel,
-          ultracode: false,
-        }));
+        return;
       }
+      // Prior comes from userSettings on disk — NOT merged settings (which
+      // includes project/policy layers that must not leak into the user's
+      // global ~/.claude/settings.json), and NOT AppState.effortValue (which
+      // includes session-ephemeral sources like --effort CLI flag).
+      // See resolvePickerEffortPersistence JSDoc.
+      const effortLevel = resolvePickerEffortPersistence(
+        effortForModel,
+        getDefaultEffortLevelForOption(value),
+        getSettingsForSource('userSettings')?.effortLevel,
+        hasToggledEffort,
+      );
+      const persistable = toPersistableEffort(effortLevel);
+      if (persistable !== undefined) {
+        updateSettingsForSource('userSettings', { effortLevel: persistable });
+      }
+      // densable: non-ultracode confirm clears ultracode flag.
+      unpinAllEffortLaunchPins();
+      setAppState(prev => ({
+        ...prev,
+        effortValue: effortLevel,
+        ultracode: false,
+      }));
+    };
+
+    if (!deferEffortApply) {
+      commitEffort();
     }
 
     // densable: onSelect gets EffortLevel only; ultracode is session AppState.
@@ -299,8 +318,9 @@ export function ModelPicker({
       hasToggledEffort && selectedModel && modelSupportsEffort(selectedModel) && !wantsUltracode
         ? effortForModel
         : undefined;
+    const deferredCommit = deferEffortApply ? commitEffort : undefined;
     if (value === NO_PREFERENCE) {
-      onSelect(null, selectedEffort);
+      onSelect(null, selectedEffort, deferredCommit);
       return;
     }
     // Apply or strip [1m] suffix based on user toggle. marked1MValues is keyed
@@ -310,7 +330,7 @@ export function ModelPicker({
     const baseValue = value.replace(/\[1m\]/i, '');
     const wants1M = marked1MValues.has(baseValue);
     const finalValue = wants1M ? `${baseValue}[1m]` : baseValue;
-    onSelect(finalValue, selectedEffort);
+    onSelect(finalValue, selectedEffort, deferredCommit);
   }
 
   const content = (

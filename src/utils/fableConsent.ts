@@ -97,6 +97,18 @@ export function shouldShowFableConsentDialog(
   return !hasFableOverageConsent(key, input.consentMap)
 }
 
+/**
+ * When ModelPicker defers N9/effort behind Fable consent, only apply after
+ * accept (or immediately when consent is not required). Decline/cancel → false.
+ */
+export function shouldApplyDeferredEffortCommit(input: {
+  consentRequired: boolean
+  accepted?: boolean
+}): boolean {
+  if (!input.consentRequired) return true
+  return input.accepted === true
+}
+
 export type FableConsentCopy = {
   title: string
   body: string

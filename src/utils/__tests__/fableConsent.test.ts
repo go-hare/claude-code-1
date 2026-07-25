@@ -34,6 +34,7 @@ import {
   planFablePurchaseIntent,
   resolveFableConsentKey,
   resolveUsageCreditsCommandName,
+  shouldApplyDeferredEffortCommit,
   shouldShowFableConsentDialog,
   showFableOverageConsentDialog,
   runFableOverageConsentFlow,
@@ -124,6 +125,30 @@ describe('fableConsent densables', () => {
         consentMap: {},
       }),
     ).toBe(false)
+  })
+
+  test('shouldApplyDeferredEffortCommit only after accept', () => {
+    // No consent gate → apply immediately (non-Fable / already consented).
+    expect(shouldApplyDeferredEffortCommit({ consentRequired: false })).toBe(
+      true,
+    )
+    // Fable consent shown → decline must not N9 / sticky effort.
+    expect(
+      shouldApplyDeferredEffortCommit({
+        consentRequired: true,
+        accepted: false,
+      }),
+    ).toBe(false)
+    expect(shouldApplyDeferredEffortCommit({ consentRequired: true })).toBe(
+      false,
+    )
+    // Accept only.
+    expect(
+      shouldApplyDeferredEffortCommit({
+        consentRequired: true,
+        accepted: true,
+      }),
+    ).toBe(true)
   })
 
   test('getFableConsentCopy variants', () => {

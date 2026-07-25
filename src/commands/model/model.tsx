@@ -21,7 +21,7 @@ import {
 } from '../../utils/fastMode.js';
 import { getOauthAccountInfo } from '../../utils/auth.js';
 import { getFableSessionFallbackConsented, setFableSessionFallbackConsented } from '../../bootstrap/state.js';
-import { shouldShowFableConsentDialog } from '../../utils/fableConsent.js';
+import { shouldApplyDeferredEffortCommit, shouldShowFableConsentDialog } from '../../utils/fableConsent.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 import { MODEL_ALIASES } from '../../utils/model/aliases.js';
@@ -46,6 +46,8 @@ function ModelPickerWrapper({
   const [pendingFable, setPendingFable] = useState<{
     model: string | null;
     effort: EffortLevel | undefined;
+    /** ModelPicker N9/effort apply deferred until accept (not on decline). */
+    commitEffort?: () => void;
   } | null>(null);
 
   function handleCancel(): void {
@@ -107,21 +109,24 @@ function ModelPickerWrapper({
     onDone(message);
   }
 
-  function handleSelect(model: string | null, effort: EffortLevel | undefined): void {
+  function handleSelect(model: string | null, effort: EffortLevel | undefined, commitEffort?: () => void): void {
     // Official model_fable_consent densable gate before committing Fable.
     // Pass org/account identity so persisted fableOverageConsentV2 is honored
     // (query.ts already does this; the /model picker previously omitted it).
+    // Effort/N9 is deferred via commitEffort so decline does not unpin pins.
     const oauth = getOauthAccountInfo();
-    if (
-      shouldShowFableConsentDialog({
-        model,
-        organizationUuid: oauth?.organizationUuid ?? null,
-        accountUuid: oauth?.accountUuid ?? null,
-        sessionFallbackConsented: getFableSessionFallbackConsented(),
-      })
-    ) {
-      setPendingFable({ model, effort });
+    const consentRequired = shouldShowFableConsentDialog({
+      model,
+      organizationUuid: oauth?.organizationUuid ?? null,
+      accountUuid: oauth?.accountUuid ?? null,
+      sessionFallbackConsented: getFableSessionFallbackConsented(),
+    });
+    if (consentRequired) {
+      setPendingFable({ model, effort, commitEffort });
       return;
+    }
+    if (shouldApplyDeferredEffortCommit({ consentRequired: false })) {
+      commitEffort?.();
     }
     commitModel(model, effort);
   }
@@ -135,11 +140,17 @@ function ModelPickerWrapper({
         onAccept={({ sessionFallback }) => {
           // Persist key-less latch in bootstrap state so query() honors /model accept.
           if (sessionFallback) setFableSessionFallbackConsented(true);
-          const { model, effort } = pendingFable;
+          const { model, effort, commitEffort } = pendingFable;
           setPendingFable(null);
+          // Accept only: apply deferred N9 + effort writes after consent.
+          if (shouldApplyDeferredEffortCommit({ consentRequired: true, accepted: true })) {
+            commitEffort?.();
+          }
           commitModel(model, effort);
         }}
         onDecline={() => {
+          // Decline: drop deferred commitEffort (no N9 / no effort sticky).
+          // shouldApplyDeferredEffortCommit({ consentRequired: true, accepted: false }) === false
           setPendingFable(null);
           handleCancel();
         }}
@@ -154,6 +165,7 @@ function ModelPickerWrapper({
       onSelect={handleSelect}
       onCancel={handleCancel}
       isStandaloneCommand
+      deferEffortApply
       showFastModeNotice={
         isFastModeEnabled() && isFastMode && isFastModeSupportedByModel(mainLoopModel) && isFastModeAvailable()
       }
