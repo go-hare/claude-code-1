@@ -43,12 +43,13 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.12**; trust `package.json` / npm) and may not match git tags.
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.13**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.12)
+### Recent updates (2.7.5 → 2.7.13)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.13** | **Paste Enter race fix**: clear footer on image paste so two shells no longer fight over Enter and drop the message; Fable consent rejection no longer writes sticky effort / N9. |
 | **2.7.12** | **Post-paste typing dropped-message fix**: shared live ref so same-tick typing no longer overwrites an image paste pill; further Enter path alignment. |
 | **2.7.11** | **Effort densable alignment**: model-driven effort resolve, ultracode session mode, ModelPicker pin convention, effort pin persistence; sticky-scroll blank-screen and effort toast same-key refresh fixes; text+image same-tick Enter dropped-message fix. |
 | **2.7.10** | **Shell dialog hooks crash fix**: opening BackgroundTasksDialog skipped PromptInput's `onKeyDownBefore` useCallback after an early return ("Rendered fewer hooks than expected"); moved the hook before early returns and deferred onDoneEvent. |
@@ -81,7 +82,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.12`).  
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.13`).  
 Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
 ---
