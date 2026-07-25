@@ -69,7 +69,10 @@ import type {
   ImageBlockParam,
   Base64ImageSource,
 } from '@anthropic-ai/sdk/resources/messages.mjs'
-import { maybeResizeAndDownsampleImageBlock } from './imageResizer.js'
+import {
+  ImageResizeError,
+  maybeResizeAndDownsampleImageBlock,
+} from './imageResizer.js'
 import type { PastedContent } from './config.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import {
@@ -1218,7 +1221,21 @@ export async function getQueuedCommandAttachments(
   )
   return Promise.all(
     filtered.map(async _ => {
-      const imageBlocks = await buildImageContentBlocks(_.pastedContents)
+      // densable: ImageResizeError drops images for this queued command only,
+      // keeps its text (I3 already degrades per-image; this is the outer net).
+      let imageBlocks: ContentBlockParam[] = []
+      try {
+        imageBlocks = await buildImageContentBlocks(_.pastedContents)
+      } catch (error) {
+        if (error instanceof ImageResizeError) {
+          logForDebugging(
+            `getQueuedCommandAttachments: dropping images for one queued command, keeping its text: ${error.message}`,
+            { level: 'error' },
+          )
+        } else {
+          logError(toError(error))
+        }
+      }
       let prompt: string | Array<ContentBlockParam> = _.value
       if (imageBlocks.length > 0) {
         // Build content block array with text + images so the model sees them
@@ -1232,7 +1249,9 @@ export async function getQueuedCommandAttachments(
         type: 'queued_command' as const,
         prompt,
         source_uuid: _.uuid,
-        imagePasteIds: getImagePasteIds(_.pastedContents),
+        imagePasteIds: imageBlocks.some(b => b.type === 'image')
+          ? getImagePasteIds(_.pastedContents)
+          : undefined,
         commandMode: _.mode,
         origin: _.origin,
         isMeta: _.isMeta,
@@ -1267,7 +1286,7 @@ export function getAgentPendingMessageAttachments(
 
 async function buildImageContentBlocks(
   pastedContents: Record<number, PastedContent> | undefined,
-): Promise<ImageBlockParam[]> {
+): Promise<ContentBlockParam[]> {
   if (!pastedContents) {
     return []
   }
@@ -1275,6 +1294,7 @@ async function buildImageContentBlocks(
   if (imageContents.length === 0) {
     return []
   }
+  // densable I3: each image may degrade to a text placeholder; still include it.
   const results = await Promise.all(
     imageContents.map(async img => {
       const imageBlock: ImageBlockParam = {

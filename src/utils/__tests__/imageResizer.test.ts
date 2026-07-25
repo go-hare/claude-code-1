@@ -107,3 +107,26 @@ describe('detectImageFormatFromBase64', () => {
     expect(result).toBe('image/png')
   })
 })
+
+// densable I3: ImageResizeError degrades to text instead of aborting submit
+describe('maybeResizeAndDownsampleImageBlock degraded path', () => {
+  test('ImageResizeError becomes text placeholder block', async () => {
+    // Empty buffer → ImageResizeError inside maybeResizeAndDownsampleImageBuffer
+    const emptyPng = {
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: 'image/png' as const,
+        data: '',
+      },
+    }
+    const { maybeResizeAndDownsampleImageBlock } = await import(
+      '../imageResizer.js'
+    )
+    const result = await maybeResizeAndDownsampleImageBlock(emptyPng)
+    expect(result.block.type).toBe('text')
+    if (result.block.type === 'text') {
+      expect(result.block.text).toMatch(/Image could not be processed/)
+    }
+  })
+})

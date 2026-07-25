@@ -1,4 +1,4 @@
-import type { Base64ImageSource, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
+import type { Base64ImageSource, ContentBlockParam, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import React, { Suspense, use, useCallback, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../../../hooks/useSettings.js';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
@@ -495,7 +495,8 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
   return null;
 }
 
-async function convertImagesToBlocks(images: PastedContent[]): Promise<ImageBlockParam[] | undefined> {
+// densable I3: resize may degrade to text placeholders
+async function convertImagesToBlocks(images: PastedContent[]): Promise<ContentBlockParam[] | undefined> {
   if (images.length === 0) return undefined;
   return Promise.all(
     images.map(async img => {

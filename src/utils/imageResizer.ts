@@ -1,5 +1,6 @@
 import type {
   Base64ImageSource,
+  ContentBlockParam,
   ImageBlockParam,
 } from '@anthropic-ai/sdk/resources/messages.mjs'
 import {
@@ -448,7 +449,11 @@ export async function maybeResizeAndDownsampleImageBuffer(
 }
 
 export interface ImageBlockWithDimensions {
-  block: ImageBlockParam
+  /**
+   * densable I3: on ImageResizeError this is a text placeholder so the turn
+   * still submits (text+image must not vanish after the prompt was cleared).
+   */
+  block: ContentBlockParam
   dimensions?: ImageDimensions
 }
 
@@ -456,6 +461,10 @@ export interface ImageBlockWithDimensions {
  * Resizes an image content block if needed
  * Takes an image ImageBlockParam and returns a resized version if necessary
  * Also returns dimension information for coordinate mapping
+ *
+ * densable I3: ImageResizeError becomes a text block
+ * `[Image could not be processed: …]` (tengu_image_resize_degraded) instead of
+ * aborting the whole submit — matches official paste/submit resilience.
  */
 export async function maybeResizeAndDownsampleImageBlock(
   imageBlock: ImageBlockParam,
@@ -473,25 +482,39 @@ export async function maybeResizeAndDownsampleImageBlock(
   const mediaType = imageBlock.source.media_type
   const ext = mediaType?.split('/')[1] || 'png'
 
-  // Resize if needed
-  const resized = await maybeResizeAndDownsampleImageBuffer(
-    imageBuffer,
-    originalSize,
-    ext,
-  )
+  try {
+    // Resize if needed
+    const resized = await maybeResizeAndDownsampleImageBuffer(
+      imageBuffer,
+      originalSize,
+      ext,
+    )
 
-  // Return resized image block with dimension info
-  return {
-    block: {
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type:
-          `image/${resized.mediaType}` as Base64ImageSource['media_type'],
-        data: resized.buffer.toString('base64'),
+    // Return resized image block with dimension info
+    return {
+      block: {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type:
+            `image/${resized.mediaType}` as Base64ImageSource['media_type'],
+          data: resized.buffer.toString('base64'),
+        },
       },
-    },
-    dimensions: resized.dimensions,
+      dimensions: resized.dimensions,
+    }
+  } catch (error) {
+    // densable I3: ImageResizeError → text placeholder (do not abort submit)
+    if (error instanceof ImageResizeError) {
+      logEvent('tengu_image_resize_degraded', {})
+      return {
+        block: {
+          type: 'text',
+          text: `[Image could not be processed: ${error.message}]`,
+        },
+      }
+    }
+    throw error
   }
 }
 

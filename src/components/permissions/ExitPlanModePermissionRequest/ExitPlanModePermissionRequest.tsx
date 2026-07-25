@@ -66,7 +66,7 @@ const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
   ? (require('../../../utils/permissions/autoModeState.js') as typeof import('../../../utils/permissions/autoModeState.js'))
   : null;
 
-import type { Base64ImageSource, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
+import type { Base64ImageSource, ContentBlockParam, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 /* eslint-enable @typescript-eslint/no-require-imports */
 import type { PastedContent } from '../../../utils/config.js';
 import type { ImageDimensions } from '../../../utils/imageResizer.js';
@@ -551,8 +551,8 @@ export function ExitPlanModePermissionRequest({
         planStructureVariant,
       });
 
-      // Convert pasted images to ImageBlockParam[] with resizing
-      let imageBlocks: ImageBlockParam[] | undefined;
+      // densable I3: resize may degrade to text placeholders (ContentBlockParam)
+      let imageBlocks: ContentBlockParam[] | undefined;
       if (hasImages) {
         imageBlocks = await Promise.all(
           imageAttachments.map(async img => {

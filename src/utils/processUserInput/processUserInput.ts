@@ -387,7 +387,6 @@ async function processUserInputBase(
   const imageContents = pastedContents
     ? Object.values(pastedContents).filter(isValidImagePaste)
     : []
-  const imagePasteIds = imageContents.map(img => img.id)
 
   // Store images to disk so Claude can reference the path in context
   // (for manipulation with CLI tools, uploading to PRs, etc.)
@@ -412,8 +411,10 @@ async function processUserInputBase(
       logEvent('tengu_pasted_image_resize_attempt', {
         original_size_bytes: pastedImage.content.length,
       })
+      // densable I3: ImageResizeError degrades to a text block (not throw)
       const resized = await maybeResizeAndDownsampleImageBlock(imageBlock)
       return {
+        id: pastedImage.id,
         resized,
         originalDimensions: pastedImage.dimensions,
         sourcePath:
@@ -421,13 +422,22 @@ async function processUserInputBase(
       }
     }),
   )
-  // Collect results preserving order
+  // Collect results preserving order. densable: only real image blocks keep
+  // paste ids / dimension metadata; degraded text placeholders still go in
+  // content so the user message is not empty after a failed resize.
   const imageContentBlocks: ContentBlockParam[] = []
+  const imagePasteIds: number[] = []
   for (const {
+    id,
     resized,
     originalDimensions,
     sourcePath,
   } of imageProcessingResults) {
+    imageContentBlocks.push(resized.block)
+    if (resized.block.type !== 'image') {
+      continue
+    }
+    imagePasteIds.push(id)
     // Collect image metadata for isMeta message (prefer resized dimensions)
     if (resized.dimensions) {
       const metadataText = createImageMetadataText(
@@ -450,7 +460,6 @@ async function processUserInputBase(
       // If we have a source path but no dimensions, still add source info
       imageMetadataTexts.push(`[Image source: ${sourcePath}]`)
     }
-    imageContentBlocks.push(resized.block)
   }
   queryCheckpoint('query_pasted_image_processing_end')
 
