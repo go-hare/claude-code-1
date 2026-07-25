@@ -30,7 +30,7 @@ import {
 } from './model/effortCatalog.js'
 
 export type { EffortLevel }
-export { unpinAllEffortLaunchPins }
+export { isEffortLaunchPinned, unpinAllEffortLaunchPins }
 
 // NOTE: 'ultracode' is NOT an effort level. It is a session-scoped multi-agent
 // orchestration opt-in injected by the harness (claude.ai/client) as a

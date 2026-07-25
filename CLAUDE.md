@@ -267,6 +267,26 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 - 启用后跳过 `extract_memories`、`prompt_suggestion` 和 `verification_agent`，显著减少 token 消耗。
 - 实现在 `src/commands/poor/poorMode.ts`。
 
+### Effort / launch pin（densable 对齐约定）
+
+Effort 解析对齐 densable 2.1.211 的 model-driven 链路：`resolveAppliedEffort` ≈ `cme`，catalog 在 `src/utils/model/effortCatalog.ts`，UI 经 `getSupportedEffortLevels` 过滤。`ultracode` **不是** `EffortLevel`，而是 session flag + wire 顶档 + Workflow 编排。
+
+**Launch pin（densable `Ave` / `N9`）**：
+
+- 模型族：`opus-4-7` / `opus-4-8` / `fable-5` 启动时 pin catalog 默认 effort（忽略 session 旧值）。
+- `N9` = `unpinAllEffortLaunchPins()`：用户**真正改 effort** 后释放 pin。
+- 必须 N9 的本地入口：`/effort`（interactive）、EffortPanel confirm、`ModelPicker` **confirm（Dan）**、settings `effortLevel` 变更、bootstrap CLI effort / ultracode。
+- **禁止**在 ModelPicker ←/→ cycle 时 N9（densable `gbp` 只动本地 cursor；Esc 必须保留 pin）。
+
+**densable 有、我们故意不补的 N9 入口（勿发明）**：
+
+| densable 路径 | 含义 | 我们的策略 |
+|---------------|------|------------|
+| slash skill/command `getEffort` 展开 | 命令自带 effort，交互会话里 N9 | 无对等 `getEffort` 产品 API；**不**造假入口 |
+| remote / bridge 下发 `effortLevel` 或 `ultracode` | 云端控制面改会话 effort 时 N9 | 未接 remote 改 effort 协议；**不**在 bridge 硬塞 N9 |
+
+以后若真正接上「skill 可指定 effort」或「remote 可改 effort」，在**写入 session effort 的那一刻**补 `unpinAllEffortLaunchPins()`，不要为 checklist 写死代码。
+
 ### Stubbed/Deleted Modules
 
 | Module | Status |

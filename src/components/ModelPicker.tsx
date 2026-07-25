@@ -23,6 +23,7 @@ import {
   getDefaultEffortForModel,
   getSupportedEffortLevels,
   getUltracodeEffortForModel,
+  isEffortLaunchPinned,
   isEffortLevel,
   isUltracodeOfferable,
   modelSupportsEffort,
@@ -174,9 +175,12 @@ export function ModelPicker({
   }, [focusedEffortLevels, focusedUltracodeOfferable]);
   const focusedDefaultEffort = getDefaultEffortLevelForOption(focusedValue);
   const focusedUltracodeWire = focusedModel ? getUltracodeEffortForModel(focusedModel) : undefined;
-  // densable display: ultracode cursor stays "ultracode"; else clamp EffortLevel
-  // onto the focused model (exclusive ladders + org).
+  // densable r7s: !IGe && Ave(focused) → force model default for display/cycle base.
+  // Session effort under pin is ignored until the user cycles (then confirm N9).
+  const pinHoldsDisplay = !hasToggledEffort && focusedModel !== undefined && isEffortLaunchPinned(focusedModel);
+  // densable display: pin forces hMt; ultracode cursor stays "ultracode"; else clamp.
   const displayEffort = ((): PickerEffort | undefined => {
+    if (pinHoldsDisplay) return focusedDefaultEffort;
     if (effort === undefined) return effort;
     if (effort === 'ultracode') {
       // densable: ultracode + !offerable → fall back to max/high
@@ -200,16 +204,23 @@ export function ModelPicker({
     [hasToggledEffort, effortValue, ultracodeFlag],
   );
 
-  // Effort level cycling keybindings (densable gbp)
+  // Effort level cycling keybindings (densable gbp).
+  // densable: ←/→ only moves local cursor (IGe); N9 runs in Dan on confirm,
+  // not here — Esc after cycle must leave launch pin intact.
+  // densable gbp base: r7s ? hMt : (T50 ?? hMt).
   const handleCycleEffort = useCallback(
     (direction: 'left' | 'right') => {
       if (!focusedSupportsEffort || focusedPickerLadder.length === 0) return;
-      // densable N9: user changed effort → unpin launch defaults.
-      unpinAllEffortLaunchPins();
-      setEffort(prev => cyclePickerEffort(prev ?? focusedDefaultEffort, direction, focusedPickerLadder));
+      setEffort(prev =>
+        cyclePickerEffort(
+          pinHoldsDisplay ? focusedDefaultEffort : (prev ?? focusedDefaultEffort),
+          direction,
+          focusedPickerLadder,
+        ),
+      );
       setHasToggledEffort(true);
     },
-    [focusedSupportsEffort, focusedPickerLadder, focusedDefaultEffort],
+    [focusedSupportsEffort, focusedPickerLadder, focusedDefaultEffort, pinHoldsDisplay],
   );
 
   useKeybindings(
