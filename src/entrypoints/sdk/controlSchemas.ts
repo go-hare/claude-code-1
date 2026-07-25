@@ -545,6 +545,21 @@ export const SDKControlGetSettingsResponseSchema = lazySchema(() =>
             .describe(
               'Whether ultracode (top-tier effort plus standing dynamic-workflow orchestration) is active for the session. Set per session via the `ultracode` settings key (--settings or apply_flag_settings).',
             ),
+          // Fork extension (densable applied has only model/effort/advisor/
+          // ultracode) — lets hosts render the effort slider without a
+          // client-side catalog copy. Optional: absent on older workers.
+          effortLevels: z
+            .array(z.enum(['low', 'medium', 'high', 'xhigh', 'max']))
+            .optional()
+            .describe(
+              'Effort levels the current model supports (capability ladder filtered by org limit). Empty when the model has no effort capability. Fork extension — not present in densable applied.',
+            ),
+          ultracodeOfferable: z
+            .boolean()
+            .optional()
+            .describe(
+              'Whether ultracode can be offered for the current model (workflows feature enabled AND the model has a top-tier wire). Hosts should hide the Ultracode tier when false. Fork extension — not present in densable applied.',
+            ),
         })
         .optional()
         .describe(
