@@ -2062,10 +2062,13 @@ export function REPL({
       // Skipped if the user scrolled within the last 3s — they're actively
       // reading, not lost. lastUserScrollTsRef starts at 0 so the first-
       // ever keypress (no scroll yet) always repins.
+      // Also skip when already sticky: scrollToBottom would force-remount
+      // the virtual list and flash white until the next repin (e.g. Enter).
       if (
         inputValueRef.current === '' &&
         value !== '' &&
-        Date.now() - lastUserScrollTsRef.current >= RECENT_SCROLL_REPIN_WINDOW_MS
+        Date.now() - lastUserScrollTsRef.current >= RECENT_SCROLL_REPIN_WINDOW_MS &&
+        scrollRef.current?.isSticky() !== true
       ) {
         repinScroll();
       }

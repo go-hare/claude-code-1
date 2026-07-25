@@ -271,10 +271,11 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 
 Effort 解析对齐 densable 2.1.211 的 model-driven 链路：`resolveAppliedEffort` ≈ `cme`，catalog 在 `src/utils/model/effortCatalog.ts`，UI 经 `getSupportedEffortLevels` 过滤。`ultracode` **不是** `EffortLevel`，而是 session flag + wire 顶档 + Workflow 编排。
 
-**Launch pin（densable `Ave` / `N9`）**：
+**Launch pin（densable `Ave` / `N9` / `St`·`pr`）**：
 
 - 模型族：`opus-4-7` / `opus-4-8` / `fable-5` 启动时 pin catalog 默认 effort（忽略 session 旧值）。
-- `N9` = `unpinAllEffortLaunchPins()`：用户**真正改 effort** 后释放 pin。
+- 存储：`GlobalConfig.unpinOpus*LaunchEffort`（对齐 densable `St()`/`pr()` 全局配置，**落盘跨会话**；不是 React AppState，也不是进程模块变量）。
+- `N9` = `unpinAllEffortLaunchPins()`：用户**真正改 effort** 后释放 pin（写 config）。
 - 必须 N9 的本地入口：`/effort`（interactive）、EffortPanel confirm、`ModelPicker` **confirm（Dan）**、settings `effortLevel` 变更、bootstrap CLI effort / ultracode。
 - **禁止**在 ModelPicker ←/→ cycle 时 N9（densable `gbp` 只动本地 cursor；Esc 必须保留 pin）。
 

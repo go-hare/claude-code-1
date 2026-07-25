@@ -192,6 +192,27 @@ function ScrollBox({
         if (!el) return;
         el.pendingScrollDelta = undefined;
         el.scrollAnchor = undefined;
+        // stickyScroll=false attribute means never auto-pin; jump to bottom
+        // once without re-enabling sticky (official).
+        if (stickyScroll === false) {
+          el.scrollTop = Math.max(0, (el.scrollHeight ?? 0) - (el.scrollViewportHeight ?? 0));
+          scrollMutated(el);
+          return;
+        }
+        // Already live-following: do not clear clamp/HWM or forceRender.
+        // Type-into-empty (and other return-to-live paths) call scrollToBottom
+        // while sticky; the remount path paints topSpacer for a frame → white
+        // flash until the next repin (often Enter). Just re-assert bottom pin.
+        // Same truth as isSticky(): explicit false wins; else attribute default.
+        const alreadySticky = el.stickyScroll ?? Boolean(el.attributes?.['stickyScroll']);
+        if (alreadySticky) {
+          const vh = el.scrollViewportHeight ?? 0;
+          const sh = el.scrollHeight ?? 0;
+          if (vh > 0 && sh > 0) {
+            el.scrollTop = Math.max(0, sh - vh);
+          }
+          return;
+        }
         // Drop virtual-scroll clamp + HWM BEFORE the sticky remount paints.
         // useVirtualScroll's setClampBounds is useLayoutEffect (after Ink's
         // resetAfterCommit), so a leftover clamp from the scrolled-up range
@@ -200,13 +221,6 @@ function ScrollBox({
         el.scrollClampMin = undefined;
         el.scrollClampMax = undefined;
         el.scrollHeightHwm = undefined;
-        // stickyScroll=false attribute means never auto-pin; jump to bottom
-        // once without re-enabling sticky (official).
-        if (stickyScroll === false) {
-          el.scrollTop = Math.max(0, (el.scrollHeight ?? 0) - (el.scrollViewportHeight ?? 0));
-          scrollMutated(el);
-          return;
-        }
         el.stickyScroll = true;
         // Eager pin so the first paint after notify (tail remount) is already
         // at bottom even if React/Ink batching reorders the sticky follow.

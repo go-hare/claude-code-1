@@ -478,41 +478,86 @@ export function providerDefaultsEffortSupport(
   )
 }
 
-// ─── Launch pin (densable Ave / N9) ─────────────────────────────────────────
+// ─── Launch pin (densable Ave / N9 via St/pr → GlobalConfig) ────────────────
+// densable stores unpin* on global config (St()/pr()), not React AppState and
+// not a process-only module variable. Once N9 runs, pins stay released across
+// CLI restarts until config is cleared/reset.
 
-type LaunchPinFlags = {
+function readLaunchPinFlags(): {
   unpinOpus47LaunchEffort: boolean
   unpinOpus48LaunchEffort: boolean
   unpinFable5LaunchEffort: boolean
-}
-
-const launchPinFlags: LaunchPinFlags = {
-  unpinOpus47LaunchEffort: false,
-  unpinOpus48LaunchEffort: false,
-  unpinFable5LaunchEffort: false,
+} {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getGlobalConfig } =
+      require('../config.js') as typeof import('../config.js')
+    const c = getGlobalConfig()
+    return {
+      unpinOpus47LaunchEffort: c.unpinOpus47LaunchEffort === true,
+      unpinOpus48LaunchEffort: c.unpinOpus48LaunchEffort === true,
+      unpinFable5LaunchEffort: c.unpinFable5LaunchEffort === true,
+    }
+  } catch {
+    return {
+      unpinOpus47LaunchEffort: false,
+      unpinOpus48LaunchEffort: false,
+      unpinFable5LaunchEffort: false,
+    }
+  }
 }
 
 /** densable Ave — true while launch default is pinned for this model family. */
 export function isEffortLaunchPinned(model: string): boolean {
+  const flags = readLaunchPinFlags()
   const c = getEffortCanonical(model)
-  if (c.includes('opus-4-7')) return !launchPinFlags.unpinOpus47LaunchEffort
-  if (c.includes('opus-4-8')) return !launchPinFlags.unpinOpus48LaunchEffort
-  if (c.includes('fable-5')) return !launchPinFlags.unpinFable5LaunchEffort
+  if (c.includes('opus-4-7')) return !flags.unpinOpus47LaunchEffort
+  if (c.includes('opus-4-8')) return !flags.unpinOpus48LaunchEffort
+  if (c.includes('fable-5')) return !flags.unpinFable5LaunchEffort
   return false
 }
 
-/** densable N9 — user changed effort; unpin all launch defaults. */
+/** densable N9 — user changed effort; unpin all launch defaults (persisted). */
 export function unpinAllEffortLaunchPins(): void {
-  launchPinFlags.unpinOpus47LaunchEffort = true
-  launchPinFlags.unpinOpus48LaunchEffort = true
-  launchPinFlags.unpinFable5LaunchEffort = true
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { saveGlobalConfig } =
+      require('../config.js') as typeof import('../config.js')
+    saveGlobalConfig(e => {
+      if (
+        e.unpinOpus47LaunchEffort === true &&
+        e.unpinOpus48LaunchEffort === true &&
+        e.unpinFable5LaunchEffort === true
+      ) {
+        return e
+      }
+      return {
+        ...e,
+        unpinOpus47LaunchEffort: true,
+        unpinOpus48LaunchEffort: true,
+        unpinFable5LaunchEffort: true,
+      }
+    })
+  } catch {
+    // isolated tests / early bootstrap without config
+  }
 }
 
-/** Test-only reset. */
+/** Test-only: restore densable p0e defaults (all pins active). */
 export function resetEffortLaunchPinsForTests(): void {
-  launchPinFlags.unpinOpus47LaunchEffort = false
-  launchPinFlags.unpinOpus48LaunchEffort = false
-  launchPinFlags.unpinFable5LaunchEffort = false
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { saveGlobalConfig } =
+      require('../config.js') as typeof import('../config.js')
+    saveGlobalConfig(e => ({
+      ...e,
+      unpinOpus47LaunchEffort: false,
+      unpinOpus48LaunchEffort: false,
+      unpinFable5LaunchEffort: false,
+    }))
+  } catch {
+    // isolated tests without config
+  }
 }
 
 // ─── Org maxEffortLevel (densable S8t / wve / qOr) ──────────────────────────

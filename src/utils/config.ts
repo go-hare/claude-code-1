@@ -616,6 +616,15 @@ export type GlobalConfig = {
     maxEffortLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   }>
 
+  /**
+   * densable launch-effort pin release flags (p0e / St / N9).
+   * false/absent = still pinned to catalog default for that family;
+   * true = user changed effort — pin released (persists across CLI restarts).
+   */
+  unpinOpus47LaunchEffort?: boolean
+  unpinOpus48LaunchEffort?: boolean
+  unpinFable5LaunchEffort?: boolean
+
   /** Last-seen org_model_default.updated_at (suppresses repeat clear/notice). */
   lastSeenOrgDefaultUpdatedAt?: string
 
@@ -675,6 +684,10 @@ function createDefaultGlobalConfig(): GlobalConfig {
     cachedGrowthBookFeatures: {},
     respectGitignore: true,
     copyFullResponse: false,
+    // densable p0e: launch pins active until N9
+    unpinOpus47LaunchEffort: false,
+    unpinOpus48LaunchEffort: false,
+    unpinFable5LaunchEffort: false,
   }
 }
 

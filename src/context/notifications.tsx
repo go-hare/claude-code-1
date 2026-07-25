@@ -144,21 +144,19 @@ export function useNotifications(): {
 
       // Handle non-immediate notifications
       setAppState(prev => {
-        // Check if we can fold into an existing notification with the same key
-        if (notif.fold) {
-          // Fold into current notification if keys match
-          if (prev.notifications.current?.key === notif.key) {
-            const folded = notif.fold(prev.notifications.current, notif);
-            // Reset timeout for the folded notification
-            if (currentTimeoutId) {
-              clearTimeout(currentTimeoutId);
-              currentTimeoutId = null;
-            }
+        const applied = applyNonImmediateNotification(prev.notifications, notif);
+        if (applied.timeoutAction !== 'none') {
+          if (currentTimeoutId) {
+            clearTimeout(currentTimeoutId);
+            currentTimeoutId = null;
+          }
+          if (applied.timeoutAction === 'reset' && applied.notifications.current) {
+            const shown = applied.notifications.current;
             currentTimeoutId = setTimeout(
-              (setAppState, foldedKey, processQueue) => {
+              (setAppState, key, processQueue) => {
                 currentTimeoutId = null;
                 setAppState(p => {
-                  if (p.notifications.current?.key !== foldedKey) {
+                  if (p.notifications.current?.key !== key) {
                     return p;
                   }
                   return {
@@ -171,62 +169,22 @@ export function useNotifications(): {
                 });
                 processQueue();
               },
-              folded.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+              shown.timeoutMs ?? DEFAULT_TIMEOUT_MS,
               setAppState,
-              folded.key,
+              shown.key,
               processQueue,
             );
-
-            return {
-              ...prev,
-              notifications: {
-                current: folded,
-                queue: prev.notifications.queue,
-              },
-            };
-          }
-
-          // Fold into queued notification if keys match
-          const queueIdx = prev.notifications.queue.findIndex(_ => _.key === notif.key);
-          if (queueIdx !== -1) {
-            const folded = notif.fold(prev.notifications.queue[queueIdx]!, notif);
-            const newQueue = [...prev.notifications.queue];
-            newQueue[queueIdx] = folded;
-            return {
-              ...prev,
-              notifications: {
-                current: prev.notifications.current,
-                queue: newQueue,
-              },
-            };
           }
         }
-
-        // Only add to queue if not already present (prevent duplicates)
-        const queuedKeys = new Set(prev.notifications.queue.map(_ => _.key));
-        const shouldAdd = !queuedKeys.has(notif.key) && prev.notifications.current?.key !== notif.key;
-
-        if (!shouldAdd) return prev;
-
-        const invalidatesCurrent =
-          prev.notifications.current !== null && notif.invalidates?.includes(prev.notifications.current.key);
-
-        if (invalidatesCurrent && currentTimeoutId) {
-          clearTimeout(currentTimeoutId);
-          currentTimeoutId = null;
+        if (
+          applied.notifications.current === prev.notifications.current &&
+          applied.notifications.queue === prev.notifications.queue
+        ) {
+          return prev;
         }
-
         return {
           ...prev,
-          notifications: {
-            current: invalidatesCurrent ? null : prev.notifications.current,
-            queue: [
-              ...prev.notifications.queue.filter(
-                _ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key),
-              ),
-              notif,
-            ],
-          },
+          notifications: applied.notifications,
         };
       });
 
@@ -287,4 +245,86 @@ const PRIORITIES: Record<Priority, number> = {
 export function getNext(queue: Notification[]): Notification | undefined {
   if (queue.length === 0) return undefined;
   return queue.reduce((min, n) => (PRIORITIES[n.priority] < PRIORITIES[min.priority] ? n : min));
+}
+
+export type NotificationsBucket = {
+  current: Notification | null;
+  queue: Notification[];
+};
+
+/**
+ * Pure merge for non-immediate addNotification.
+ * Same key on current/queue is replaced (latest text wins) so effort/ultracode
+ * toasts update while a prior toast with the same key is still visible.
+ */
+export function applyNonImmediateNotification(
+  state: NotificationsBucket,
+  notif: Notification,
+): {
+  notifications: NotificationsBucket;
+  /** none | clear existing current timeout | clear + schedule for new current */
+  timeoutAction: 'none' | 'clear' | 'reset';
+} {
+  // Check if we can fold into an existing notification with the same key
+  if (notif.fold) {
+    if (state.current?.key === notif.key) {
+      const folded = notif.fold(state.current, notif);
+      return {
+        notifications: {
+          current: folded,
+          queue: state.queue,
+        },
+        timeoutAction: 'reset',
+      };
+    }
+    const foldIdx = state.queue.findIndex(_ => _.key === notif.key);
+    if (foldIdx !== -1) {
+      const folded = notif.fold(state.queue[foldIdx]!, notif);
+      const newQueue = [...state.queue];
+      newQueue[foldIdx] = folded;
+      return {
+        notifications: {
+          current: state.current,
+          queue: newQueue,
+        },
+        timeoutAction: 'none',
+      };
+    }
+  }
+
+  // Same key already displayed: replace content (caller resets timeout).
+  if (state.current?.key === notif.key) {
+    return {
+      notifications: {
+        current: notif,
+        queue: state.queue.filter(_ => _.key !== notif.key),
+      },
+      timeoutAction: 'reset',
+    };
+  }
+
+  // Same key already queued: replace the queued entry (latest wins).
+  const queueIdx = state.queue.findIndex(_ => _.key === notif.key);
+  if (queueIdx !== -1) {
+    const newQueue = [...state.queue];
+    newQueue[queueIdx] = notif;
+    return {
+      notifications: {
+        current: state.current,
+        queue: newQueue,
+      },
+      timeoutAction: 'none',
+    };
+  }
+
+  const invalidatesCurrent = state.current !== null && notif.invalidates?.includes(state.current.key);
+
+  return {
+    notifications: {
+      current: invalidatesCurrent ? null : state.current,
+      queue: [...state.queue.filter(_ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key)), notif],
+    },
+    // Invalidate clears the current toast timeout; processQueue will arm the next.
+    timeoutAction: invalidatesCurrent ? 'clear' : 'none',
+  };
 }
