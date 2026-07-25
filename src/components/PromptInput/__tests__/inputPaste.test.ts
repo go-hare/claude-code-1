@@ -146,6 +146,41 @@ describe('resolveSubmitInputFromLive', () => {
     expect(src).toMatch(/liveValueRef:\s*externalLiveValueRef/)
     expect(src).toMatch(/externalLiveValueRef\s*\?\?\s*ownedLiveValueRef/)
   })
+
+  // With "2 shells" the tasks footer can be selected; paste inserts via N1
+  // without onChange, so footerSelection stayed set and Enter opened bashes
+  // instead of submitting [Image #N]. Insert must clear footer, and
+  // footer:openSelected must prefer a live draft.
+  test('source: insertTextAtCursor clears footerSelection on paste', async () => {
+    const src = await Bun.file(
+      new URL('../PromptInput.tsx', import.meta.url).pathname,
+    ).text()
+    expect(src).toMatch(/function insertTextAtCursor/)
+    expect(src).toMatch(
+      /footerSelection === null[\s\S]*?footerSelection: null[\s\S]*?trackAndSetInput\(newInput\)/,
+    )
+  })
+
+  test('source: footer:openSelected prefers live draft over bashes panel', async () => {
+    const src = await Bun.file(
+      new URL('../PromptInput.tsx', import.meta.url).pathname,
+    ).text()
+    expect(src).toMatch(/'footer:openSelected':\s*\(\)\s*=>\s*\{/)
+    expect(src).toMatch(/draftHasImages/)
+    expect(src).toMatch(/void onSubmit\(draft\)/)
+  })
+
+  // Defense in depth: even if openSelected still races into onSubmit with
+  // footerSelection set, do not early-return when the box has a live draft.
+  test('source: onSubmit does not swallow Enter when footer selected with draft', async () => {
+    const src = await Bun.file(
+      new URL('../PromptInput.tsx', import.meta.url).pathname,
+    ).text()
+    expect(src).toMatch(
+      /const hasDraft = inputParam\.trim\(\) !== '' \|\| hasImages/,
+    )
+    expect(src).toMatch(/if \(!hasDraft\) \{\s*return;/)
+  })
 })
 
 describe('maybeTruncateInput', () => {

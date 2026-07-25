@@ -1258,14 +1258,30 @@ function PromptInput({
       // when caller is empty or missing paste pills (flash + swallow otherwise).
       inputParam = resolveSubmitInputFromLive(inputParam, liveInputRef.current);
 
+      // Prefer dual-written ref — parent `pastedContents` prop can lag one tick
+      // after paste (cacheImagePath/setAppState, or paste+Enter same batch).
+      const livePastedContents = pastedContentsRef.current;
+      const hasImages = Object.values(livePastedContents).some(c => c.type === 'image');
+
       // Don't submit if a footer indicator is being opened. Read fresh from
       // store — footer:openSelected calls selectFooterItem(null) then onSubmit
       // in the same tick, and the closure value hasn't updated yet. Apply the
       // same "still visible?" derivation as footerItemSelected so a stale
       // selection (pill disappeared) doesn't swallow Enter.
+      //
+      // Exception: paste/N1 inserts draft without onChange, so footer can still
+      // be "tasks" (2 shells) while the box already has [Image #N]/ then Enter
+      // would early-return forever. If there is a draft/images, clear footer and
+      // submit instead of treating Enter as openSelected only.
       const state = store.getState();
       if (state.footerSelection && footerItems.includes(state.footerSelection)) {
-        return;
+        const hasDraft = inputParam.trim() !== '' || hasImages;
+        if (!hasDraft) {
+          return;
+        }
+        setAppState(prev =>
+          prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
+        );
       }
 
       // Enter in selection modes confirms selection (useBackgroundTaskNavigation).
@@ -1274,11 +1290,6 @@ function PromptInput({
       if (state.viewSelectionMode === 'selecting-agent') {
         return;
       }
-
-      // Prefer dual-written ref — parent `pastedContents` prop can lag one tick
-      // after paste (cacheImagePath/setAppState, or paste+Enter same batch).
-      const livePastedContents = pastedContentsRef.current;
-      const hasImages = Object.values(livePastedContents).some(c => c.type === 'image');
 
       // If input is empty OR matches the suggestion, submit it
       // But if there are images attached, don't auto-accept the suggestion -
@@ -1598,6 +1609,13 @@ function PromptInput({
     pushToBuffer(currentInput, currentOffset, pastedContentsRef.current);
 
     const newInput = currentInput.slice(0, currentOffset) + text + currentInput.slice(currentOffset);
+    // Paste / N1 does not go through onChange, so footerSelection (e.g. "2 shells"
+    // tasks pill) would stay set: TextInput focus=false and Enter maps to
+    // footer:openSelected → bashes dialog, pill left in the box ("吞"). Clear
+    // footer so Chat context + chat:submit own the next Enter.
+    setAppState(prev =>
+      prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
+    );
     trackAndSetInput(newInput);
     const newOffset = currentOffset + text.length;
     cursorOffsetRef.current = newOffset;
@@ -2072,6 +2090,17 @@ function PromptInput({
       },
       'footer:openSelected': () => {
         if (viewSelectionMode === 'selecting-agent') {
+          return;
+        }
+        // When shells/tasks pill is focused, Enter is Footer openSelected — not
+        // chat:submit. Paste inserts the image pill without deselecting the
+        // footer, so Enter would open bashes and leave [Image #N] in the box.
+        // Prefer submitting any live draft (text or paste map) over the panel.
+        const draft = liveInputRef.current;
+        const draftHasImages = Object.values(pastedContentsRef.current).some(c => c.type === 'image');
+        if (draft.trim() !== '' || draftHasImages) {
+          selectFooterItem(null);
+          void onSubmit(draft);
           return;
         }
         switch (footerItemSelected) {

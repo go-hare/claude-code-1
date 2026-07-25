@@ -44,8 +44,9 @@ export async function getImageProcessor(): Promise<SharpFunction> {
     try {
       // Use the native image processor module
       const imageProcessor = await import('image-processor-napi')
-      const sharpFn = (imageProcessor.sharp ??
-        imageProcessor.default) as SharpFunction
+      // Bun/CJS interop can yield { sharp: { default: fn } } or { default: fn }.
+      // Casting a non-function object caused: sharp2 is not a function (Object).
+      const sharpFn = unwrapCallable<SharpFunction>(imageProcessor)
       imageProcessorModule = { default: sharpFn }
       return sharpFn
     } catch {
@@ -58,10 +59,8 @@ export async function getImageProcessor(): Promise<SharpFunction> {
 
   // Use sharp for non-bundled builds or as fallback.
   // Single structural cast: our SharpFunction is a subset of sharp's actual type surface.
-  const imported = (await import(
-    'sharp'
-  )) as unknown as MaybeDefault<SharpFunction>
-  const sharp = unwrapDefault(imported)
+  const imported = await import('sharp')
+  const sharp = unwrapCallable<SharpFunction>(imported)
   imageProcessorModule = { default: sharp }
   return sharp
 }
@@ -76,19 +75,49 @@ export async function getImageCreator(): Promise<SharpCreator> {
     return imageCreatorModule.default
   }
 
-  const imported = (await import(
-    'sharp'
-  )) as unknown as MaybeDefault<SharpCreator>
-  const sharp = unwrapDefault(imported)
+  const imported = await import('sharp')
+  const sharp = unwrapCallable<SharpCreator>(imported)
   imageCreatorModule = { default: sharp }
   return sharp
 }
 
-// Dynamic import shape varies by module interop mode — ESM yields { default: fn }, CJS yields fn directly.
-type MaybeDefault<T> = T | { default: T }
-
-function unwrapDefault<T extends (...args: never[]) => unknown>(
-  mod: MaybeDefault<T>,
+/**
+ * Dynamic import shape varies by module interop:
+ * - ESM: { default: fn }
+ * - CJS: fn
+ * - image-processor-napi: { sharp: fn } or nested { sharp: { default: fn } }
+ * Walk default/sharp until a callable is found.
+ * Exported for unit tests (Bun CJS interop regressions).
+ */
+export function unwrapCallable<T extends (...args: never[]) => unknown>(
+  mod: unknown,
 ): T {
-  return typeof mod === 'function' ? mod : mod.default
+  let cur: unknown = mod
+  for (let i = 0; i < 4; i++) {
+    if (typeof cur === 'function') {
+      return cur as T
+    }
+    if (!cur || typeof cur !== 'object') {
+      break
+    }
+    const o = cur as Record<string, unknown>
+    if (typeof o.default === 'function') {
+      cur = o.default
+      continue
+    }
+    if (typeof o.sharp === 'function') {
+      cur = o.sharp
+      continue
+    }
+    if (o.default && typeof o.default === 'object') {
+      cur = o.default
+      continue
+    }
+    if (o.sharp && typeof o.sharp === 'object') {
+      cur = o.sharp
+      continue
+    }
+    break
+  }
+  throw new Error('Image processor module export is not a function')
 }
