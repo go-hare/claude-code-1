@@ -22,7 +22,7 @@ import { ensureKeychainPrefetchCompleted, startKeychainPrefetch } from './utils/
 startKeychainPrefetch();
 
 import { feature } from 'bun:bundle';
-import { Command as CommanderCommand, InvalidArgumentError, Option } from '@commander-js/extra-typings';
+import { Command as CommanderCommand, Option } from '@commander-js/extra-typings';
 import chalk from 'chalk';
 import { readFileSync } from 'fs';
 import mapValues from 'lodash-es/mapValues.js';
@@ -96,7 +96,13 @@ import {
   saveGlobalConfig,
 } from './utils/config.js';
 import { seedEarlyInput, stopCapturingEarlyInput } from './utils/earlyInput.js';
-import { getInitialEffortSetting, parseEffortValue } from './utils/effort.js';
+import {
+  emitOrgEffortExceedWarning,
+  getInitialEffortSetting,
+  parseCliEffortArg,
+  resolveBootstrapEffortValue,
+  resolveBootstrapUltracodeFlag,
+} from './utils/effort.js';
 import {
   getInitialFastModeSetting,
   isFastModeEnabled,
@@ -212,6 +218,7 @@ import { logError } from './utils/log.js';
 import { getModelDeprecationWarning } from './utils/model/deprecation.js';
 import {
   getDefaultMainLoopModel,
+  getMainLoopModel,
   getUserSpecifiedModelSetting,
   normalizeModelStringForAPI,
   parseUserSpecifiedModel,
@@ -1456,16 +1463,18 @@ async function run(): Promise<CommanderCommand> {
       `Model for the current session. Provide an alias for the latest model (e.g. 'sonnet' or 'opus') or a model's full name (e.g. 'claude-sonnet-4-6').`,
     )
     .addOption(
-      new Option('--effort <level>', `Effort level for the current session (low, medium, high, max)`).argParser(
-        (rawValue: string) => {
-          const value = rawValue.toLowerCase();
-          const allowed = ['low', 'medium', 'high', 'max'];
-          if (!allowed.includes(value)) {
-            throw new InvalidArgumentError(`It must be one of: ${allowed.join(', ')}`);
-          }
-          return value;
-        },
-      ),
+      // densable YBn: soft-warn unknown --effort; accept cH + med alias + ultracode.
+      new Option(
+        '--effort <level>',
+        `Effort level for the current session (low, medium, high, xhigh, max, ultracode)`,
+      ).argParser((rawValue: string) => {
+        const { level, warning } = parseCliEffortArg(rawValue);
+        if (warning !== undefined) {
+          // densable YBn: soft-warn on stderr with trailing newline
+          process.stderr.write(`Warning: ${warning}\n`);
+        }
+        return level;
+      }),
     )
     .option('--agent <agent>', `Agent for the current session. Overrides the 'agent' setting.`)
     .option('--betas <betas...>', 'Beta headers to include in API requests (API key users only)')
@@ -3300,7 +3309,33 @@ async function run(): Promise<CommanderCommand> {
             tools: mcpTools,
           },
           toolPermissionContext,
-          effortValue: parseEffortValue(options.effort) ?? getInitialEffortSetting(),
+          // densable QBn/Qwi + sAi: cli effort / ultracode alias / settings.ultracode
+          // QBn unpins on parseable CLI level; no trailing ?? — Qwi already
+          // falls through to settings.effortLevel (explicit ultracode with no
+          // wire stays undefined instead of re-applying stale settings).
+          // densable Ulc after QBn: org maxEffortLevel exceed warn.
+          ...(() => {
+            const bootstrapModel = effectiveModel ?? getMainLoopModel();
+            // densable: Kt=QBn(a.effort) then Ulc(Kt, model).
+            // QBn ≡ Qwi(cli.effort + settings), not CLI-only parse.
+            const bootstrapEffort = resolveBootstrapEffortValue({
+              cliEffort: options.effort,
+              settingsUltracode: getInitialSettings().ultracode,
+              settingsEffortLevel: getInitialEffortSetting(),
+              model: bootstrapModel,
+            });
+            emitOrgEffortExceedWarning(bootstrapEffort, bootstrapModel, {
+              outputFormat: outputFormat ?? 'text',
+            });
+            return {
+              effortValue: bootstrapEffort,
+              ultracode: resolveBootstrapUltracodeFlag({
+                cliEffort: options.effort,
+                settingsUltracode: getInitialSettings().ultracode,
+                model: bootstrapModel,
+              }),
+            };
+          })(),
           ...(isFastModeEnabled() && {
             fastMode: getInitialFastModeSetting(effectiveModel ?? null),
           }),
@@ -3735,7 +3770,29 @@ async function run(): Promise<CommanderCommand> {
           : options.replyOnResume
             ? { replay: true as const }
             : null,
-        effortValue: parseEffortValue(options.effort) ?? getInitialEffortSetting(),
+        // densable QBn/Qwi + sAi: cli effort / ultracode alias / settings.ultracode
+        // densable Ulc after QBn: org maxEffortLevel exceed warn.
+        ...(() => {
+          // densable: Kt=QBn(a.effort) then Ulc(Kt, model).
+          // QBn ≡ Qwi(cli.effort + settings), not CLI-only parse.
+          const bootstrapEffort = resolveBootstrapEffortValue({
+            cliEffort: options.effort,
+            settingsUltracode: getInitialSettings().ultracode,
+            settingsEffortLevel: getInitialEffortSetting(),
+            model: resolvedInitialModel,
+          });
+          emitOrgEffortExceedWarning(bootstrapEffort, resolvedInitialModel, {
+            outputFormat: outputFormat ?? 'text',
+          });
+          return {
+            effortValue: bootstrapEffort,
+            ultracode: resolveBootstrapUltracodeFlag({
+              cliEffort: options.effort,
+              settingsUltracode: getInitialSettings().ultracode,
+              model: resolvedInitialModel,
+            }),
+          };
+        })(),
         activeOverlays: new Set<string>(),
         fastMode: getInitialFastModeSetting(resolvedInitialModel),
         ...(isAdvisorEnabled() && advisorModel && { advisorModel }),
@@ -5358,7 +5415,17 @@ async function run(): Promise<CommanderCommand> {
     .option('--plugin-dir <path>', 'Plugin directory to forward to dispatched sessions')
     .option('--permission-mode <mode>', 'Permission mode for dispatched sessions')
     .option('--model <model>', 'Model for dispatched sessions')
-    .option('--effort <level>', 'Effort level for dispatched sessions')
+    .addOption(
+      // densable agents --effort: same YBn soft-parse as main CLI.
+      new Option('--effort <level>', 'Effort level for dispatched sessions').argParser((rawValue: string) => {
+        const { level, warning } = parseCliEffortArg(rawValue);
+        if (warning !== undefined) {
+          // densable YBn: soft-warn on stderr with trailing newline
+          process.stderr.write(`Warning: ${warning}\n`);
+        }
+        return level;
+      }),
+    )
     .option('--dangerously-skip-permissions', 'Skip permissions for dispatched sessions')
     .option('--allow-dangerously-skip-permissions', 'Allow dangerously-skip-permissions for dispatched sessions')
     .option('--fallback-model <model>', 'Fallback model for dispatched sessions')

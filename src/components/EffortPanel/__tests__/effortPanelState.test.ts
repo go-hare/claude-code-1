@@ -8,8 +8,10 @@ import {
   HOME_POSITION,
   PANEL_POSITIONS,
   type PanelPosition,
+  clampCursorToPositions,
   computeConfirmOutcome,
   getInitialCursor,
+  getPanelPositionsForModel,
   isUltracode,
   moveLeft,
   moveRight,
@@ -108,29 +110,30 @@ describe('effortPanelState', () => {
 describe('computeConfirmOutcome', () => {
   const mockApply: ApplyFn = cursor => ({
     message: `applied:${cursor}`,
-    // 测试里 cursor 是 PanelPosition（含 ultracode），但 ApplyFn 的契约要求 EffortValue。
-    // 实际运行时 mockApply 只会被 computeConfirmOutcome 在非 ultracode 档位调用，
-    // 因此 cast 是安全的。生产代码用真 executeEffort 不会出现 ultracode。
-    effortUpdate: { value: cursor as unknown as EffortValue },
+    // PanelPosition 含 ultracode；真路径走 executeEffort(model) 会映射 wire effort。
+    effortUpdate: {
+      value:
+        cursor === 'ultracode' ? 'high' : (cursor as unknown as EffortValue),
+    },
   })
 
-  test('ultracode → kind=ultracode-hint，含 /ultracode 引导', () => {
+  test('ultracode → kind=apply，走 applyFn（catalog wire effort）', () => {
     const out = computeConfirmOutcome('ultracode', mockApply)
-    expect(out.kind).toBe('ultracode-hint')
-    if (out.kind === 'ultracode-hint') {
-      expect(out.message).toBe(ULTRACODE_HINT)
-      expect(out.message).toContain('/ultracode')
+    expect(out.kind).toBe('apply')
+    if (out.kind === 'apply') {
+      expect(out.message).toBe('applied:ultracode')
+      expect(out.effortUpdate?.value).toBe('high')
     }
   })
 
-  test('ultracode 不调 applyFn（不会被副作用触发）', () => {
+  test('ultracode 调用 applyFn', () => {
     let called = false
     const spy: ApplyFn = c => {
       called = true
-      return { message: `applied:${c}` }
+      return { message: `applied:${c}`, effortUpdate: { value: 'xhigh' } }
     }
     computeConfirmOutcome('ultracode', spy)
-    expect(called).toBe(false)
+    expect(called).toBe(true)
   })
 
   test('low → kind=apply，message 来自 applyFn，effortUpdate 透传', () => {
@@ -142,7 +145,7 @@ describe('computeConfirmOutcome', () => {
     }
   })
 
-  test('high → apply 路径不调 ultracode 分支', () => {
+  test('high → apply 路径', () => {
     const out = computeConfirmOutcome('high', mockApply)
     expect(out.kind).toBe('apply')
   })
@@ -159,5 +162,67 @@ describe('computeConfirmOutcome', () => {
 
 test('常量字符串', () => {
   expect(CANCEL_MESSAGE).toBe('Effort unchanged.')
-  expect(ULTRACODE_HINT).toContain('/ultracode <context>')
+  expect(ULTRACODE_HINT).toContain('ultracode')
+  expect(ULTRACODE_HINT).toContain('dynamic workflow orchestration')
+})
+
+describe('getPanelPositionsForModel', () => {
+  // Pin ultracodeOfferable so full-suite growthbook/workflow mock pollution
+  // cannot hide the densable ultracode slot in ladder unit tests.
+  const withUltra = { ultracodeOfferable: true as const }
+  const noUltra = { ultracodeOfferable: false as const }
+
+  test('sonnet-4-6 omits xhigh (densable ume denylist)', () => {
+    expect(getPanelPositionsForModel('claude-sonnet-4-6', withUltra)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'max',
+      'ultracode',
+    ])
+  })
+
+  test('opus-4-7 includes full ladder', () => {
+    expect(getPanelPositionsForModel('claude-opus-4-7', withUltra)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultracode',
+    ])
+  })
+
+  test('hides ultracode slot when workflows unavailable', () => {
+    expect(getPanelPositionsForModel('claude-opus-4-7', noUltra)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+  })
+
+  test('moveLeft/Right honor filtered positions', () => {
+    const positions = getPanelPositionsForModel('claude-sonnet-4-6', withUltra)
+    expect(moveRight('high', positions)).toBe('max')
+    expect(moveLeft('max', positions)).toBe('high')
+  })
+
+  test('clampCursorToPositions snaps xhigh → high when unsupported', () => {
+    const positions = getPanelPositionsForModel('claude-sonnet-4-6', withUltra)
+    expect(clampCursorToPositions('xhigh', positions)).toBe('high')
+  })
+
+  test('getInitialCursor clamps displayed to filtered ladder', () => {
+    const positions = getPanelPositionsForModel('claude-sonnet-4-6', withUltra)
+    expect(
+      getInitialCursor({
+        envOverride: undefined,
+        appStateEffort: undefined,
+        displayed: 'xhigh',
+        positions,
+      }),
+    ).toBe('high')
+  })
 })

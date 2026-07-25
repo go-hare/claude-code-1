@@ -49,6 +49,7 @@ export function EffortCallout({ model, onDone }: Props): React.ReactNode {
   }, [handleCancel]);
 
   const defaultEffort = getDefaultEffortForModel(model);
+  // densable LQe: opus-4-6 catalog default is xhigh (not medium).
   const defaultLevel = defaultEffort ? convertEffortValueToLevel(defaultEffort) : 'high';
 
   const handleSelect = useCallback(
@@ -62,14 +63,17 @@ export function EffortCallout({ model, onDone }: Props): React.ReactNode {
     [defaultLevel],
   );
 
-  const options: OptionWithDescription<EffortLevel>[] = [
-    {
-      label: <EffortOptionLabel level="medium" text="Medium (recommended)" />,
-      value: 'medium',
-    },
-    { label: <EffortOptionLabel level="high" text="High" />, value: 'high' },
-    { label: <EffortOptionLabel level="low" text="Low" />, value: 'low' },
-  ];
+  // Options follow catalog default: recommended = model default, not a fixed medium.
+  const optionLevels: EffortLevel[] = ['low', 'medium', 'high', 'xhigh'];
+  const options: OptionWithDescription<EffortLevel>[] = optionLevels.map(level => ({
+    label: (
+      <EffortOptionLabel
+        level={level}
+        text={`${level[0]!.toUpperCase()}${level.slice(1)}${level === defaultLevel ? ' (recommended)' : ''}`}
+      />
+    ),
+    value: level,
+  }));
 
   return (
     <PermissionDialog title={defaultEffortConfig.dialogTitle}>
@@ -80,7 +84,7 @@ export function EffortCallout({ model, onDone }: Props): React.ReactNode {
         <Box marginBottom={1}>
           <Text dimColor>
             <EffortIndicatorSymbol level="low" /> low {'·'} <EffortIndicatorSymbol level="medium" /> medium {'·'}{' '}
-            <EffortIndicatorSymbol level="high" /> high
+            <EffortIndicatorSymbol level="high" /> high {'·'} <EffortIndicatorSymbol level="xhigh" /> xhigh
           </Text>
         </Box>
         <Select options={options} onChange={handleSelect} onCancel={handleCancel} />

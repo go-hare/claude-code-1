@@ -7,8 +7,8 @@
  *   GB off                       → unavailable
  *   else                         → available, defaultOn = subscription !== "pro"
  *
- * wIr densable core (policy allow_workflows left denser / injectable):
- *   !DISABLE_WORKFLOWS && feh().available
+ * wIr densable core:
+ *   zBn Wi("allow_workflows") && !DISABLE_WORKFLOWS && feh().available
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
@@ -69,8 +69,28 @@ export function isWorkflowKeywordTriggerEnabled(
 }
 
 /**
- * Official wIr densable (without policy Xi("allow_workflows")).
- * DISABLE_WORKFLOWS / settings.disableWorkflows or feh unavailable → disabled.
+ * densable zBn — Wi("allow_workflows") via policy limits (fail open).
+ * Injectable via input.policyAllow for tests.
+ */
+function resolveWorkflowsPolicyAllow(
+  policyAllow: boolean | null | undefined,
+): boolean {
+  if (policyAllow === false) return false
+  if (policyAllow === true) return true
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isPolicyAllowed } =
+      require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
+    return isPolicyAllowed('allow_workflows')
+  } catch {
+    // densable fail-open when policy service unavailable
+    return true
+  }
+}
+
+/**
+ * Official wIr densable: policy allow_workflows (zBn) + DISABLE_WORKFLOWS /
+ * settings.disableWorkflows + feh available.
  */
 export function isWorkflowsDisabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -81,7 +101,10 @@ export function isWorkflowsDisabled(
     settingsDisableWorkflows?: boolean
   },
 ): boolean {
-  if (input?.policyAllow === false) return true
+  // densable zBn / Wi("allow_workflows") — false → disabled
+  if (!resolveWorkflowsPolicyAllow(input?.policyAllow)) {
+    return true
+  }
   if (
     isWorkflowsSettingsDisabled({
       env,
@@ -110,4 +133,38 @@ export function isWorkflowsAvailable(
   },
 ): boolean {
   return !isWorkflowsDisabled(env, input)
+}
+
+/**
+ * densable FE-shaped: workflows available AND settings.enableWorkflows
+ * (or product defaultOn when unset). Used to gate keyword/ultra workflow
+ * attachment injection, matching densable's FE()?[workflow_keyword…] branch.
+ */
+export function isWorkflowFeatureEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  input?: {
+    gbEnabled?: boolean
+    subscriptionType?: string | null
+    policyAllow?: boolean | null
+    settingsDisableWorkflows?: boolean
+    enableWorkflows?: boolean
+  },
+): boolean {
+  if (
+    isWorkflowsDisabled(env, {
+      gbEnabled: input?.gbEnabled,
+      subscriptionType: input?.subscriptionType,
+      policyAllow: input?.policyAllow,
+      settingsDisableWorkflows: input?.settingsDisableWorkflows,
+    })
+  ) {
+    return false
+  }
+  const { defaultOn } = resolveWorkflowsAvailability({
+    env,
+    gbEnabled: input?.gbEnabled,
+    subscriptionType: input?.subscriptionType,
+  })
+  // densable FE: GO()?.settings.enableWorkflows ?? defaultOn
+  return input?.enableWorkflows ?? defaultOn
 }

@@ -407,6 +407,12 @@ export type QueuedCommand = {
    * → inputSource: "suggestion_accepted". Other sources omit.
    */
   inputSource?: 'suggestion_accepted' | string
+  /**
+   * densable suppressWorkflowKeyword — skip ultracode keyword attachment
+   * for this turn (e.g. suggestion accept / agent-view paths that must not
+   * auto-opt into multi-agent orchestration).
+   */
+  suppressWorkflowKeyword?: boolean
 }
 
 /**

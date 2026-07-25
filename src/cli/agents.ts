@@ -33,6 +33,28 @@ const PASSTHROUGH_FLAGS = [
   '--strict-mcp-config',
 ]
 
+/**
+ * densable YBn soft-parse for --effort on agents dispatch path.
+ * agentsMain forwards raw argv (commander parse result is discarded), so we
+ * re-apply the same soft-warn + drop-unknown as main CLI here.
+ */
+function rewriteEffortPassthrough(flag: string, rawValue: string): string[] {
+  // Lazy require: agents entry stays light until effort is actually used.
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { parseCliEffortArg } =
+    require('../utils/effort.js') as typeof import('../utils/effort.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const { level, warning } = parseCliEffortArg(rawValue)
+  if (warning !== undefined) {
+    // densable YBn: soft-warn on stderr with trailing newline
+    process.stderr.write(`Warning: ${warning}\n`)
+  }
+  if (level === undefined) return []
+  // Normalize med → medium / keep ultracode alias for child process.
+  if (flag.includes('=')) return [`--effort=${level}`]
+  return ['--effort', level]
+}
+
 function extractPassthroughArgs(args: string[]): string[] {
   const result: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -43,7 +65,24 @@ function extractPassthroughArgs(args: string[]): string[] {
       arg === '--strict-mcp-config'
     ) {
       result.push(arg)
-    } else if (PASSTHROUGH_FLAGS.some(f => arg.startsWith(f))) {
+      continue
+    }
+
+    // densable YBn: soft-parse --effort / --effort=… before generic passthrough.
+    if (arg === '--effort' || arg.startsWith('--effort=')) {
+      let rawValue: string | undefined
+      if (arg.startsWith('--effort=')) {
+        rawValue = arg.slice('--effort='.length)
+        result.push(...rewriteEffortPassthrough(arg, rawValue))
+      } else if (i + 1 < args.length && !args[i + 1]!.startsWith('--')) {
+        rawValue = args[++i]!
+        result.push(...rewriteEffortPassthrough('--effort', rawValue))
+      }
+      // bare --effort with no value → drop
+      continue
+    }
+
+    if (PASSTHROUGH_FLAGS.some(f => arg.startsWith(f))) {
       result.push(arg)
       // If it's a flag that takes a value and the value is the next arg
       if (

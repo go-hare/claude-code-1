@@ -355,6 +355,8 @@ export async function handlePromptSubmit(
       pastedContents: hasImages ? pastedContents : undefined,
       skipSlashCommands,
       bridgeOrigin,
+      // densable prompt enqueue stamps human origin so Wzn keyword gate can fire.
+      origin: { kind: 'human' },
       uuid,
     })
 
@@ -379,6 +381,8 @@ export async function handlePromptSubmit(
     pastedContents: hasImages ? pastedContents : undefined,
     skipSlashCommands,
     bridgeOrigin,
+    // densable prompt path: origin.kind === "human" (Wzn for ultracode keyword).
+    origin: { kind: 'human' },
     uuid,
   }
 
@@ -526,6 +530,9 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             isMeta: cmd.isMeta,
             skipAttachments: !isFirst,
             autonomy: cmd.autonomy,
+            // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
+            origin: cmd.origin,
+            suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
           })
           if (runId && result.deferAutonomyCompletion) {
             deferredAutonomyRunIds.add(runId)

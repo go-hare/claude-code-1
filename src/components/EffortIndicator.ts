@@ -9,19 +9,29 @@ import {
   type EffortLevel,
   type EffortValue,
   getDisplayedEffortLevel,
+  getUltracodeEffortForModel,
+  isUltracodeModeActive,
   modelSupportsEffort,
 } from '../utils/effort.js'
 
 /**
- * Build the text for the effort-changed notification, e.g. "◐ medium · /effort".
- * Returns undefined if the model doesn't support effort.
+ * densable Z_p — effort-changed notification.
+ * Normal: "◐ medium · /effort"
+ * Ultracode: "⦿ ultracode · {wire} effort + dynamic workflows for maximum thoroughness"
+ * Wire tier is catalog-driven (Grok → high, Claude 4.7 → xhigh).
  */
 export function getEffortNotificationText(
   effortValue: EffortValue | undefined,
   model: string,
+  ultracodeFlag?: boolean,
 ): string | undefined {
   if (!modelSupportsEffort(model)) return undefined
   const level = getDisplayedEffortLevel(model, effortValue)
+  if (isUltracodeModeActive(model, effortValue, ultracodeFlag)) {
+    const wire = getUltracodeEffortForModel(model) ?? level
+    // densable uses the effort symbol for the wire tier (vHr), not a separate ultra glyph.
+    return `${effortLevelToSymbol(wire)} ultracode · ${wire} effort + dynamic workflows for maximum thoroughness`
+  }
   return `${effortLevelToSymbol(level)} ${level} · /effort`
 }
 

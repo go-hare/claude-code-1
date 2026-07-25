@@ -454,8 +454,10 @@ function configureEffortParams(
   if (effortValue === undefined) {
     betas.push(EFFORT_BETA_HEADER)
   } else if (typeof effortValue === 'string') {
-    // Send string effort level as is
-    outputConfig.effort = effortValue as 'high' | 'medium' | 'low' | 'max'
+    // densable: string effort levels including xhigh pass through as-is.
+    // resolveAppliedEffort already clamped unsupported max/xhigh → high.
+    // SDK BetaOutputConfig.effort types lag wire (no xhigh yet) — cast.
+    ;(outputConfig as { effort?: EffortValue }).effort = effortValue
     betas.push(EFFORT_BETA_HEADER)
   } else if (process.env.USER_TYPE === 'ant') {
     // Numeric effort override - ant-only (uses anthropic_internal)

@@ -8,7 +8,6 @@ import {
   calculateOptimalLeftWidth,
   formatWelcomeMessage,
   truncatePath,
-  getRecentActivitySync,
   getRecentReleaseNotesSync,
   getLogoDisplayData,
 } from '../../utils/logoV2Utils.js';
@@ -16,12 +15,7 @@ import { truncate } from '../../utils/format.js';
 import { getDisplayPath } from '../../utils/file.js';
 import { Clawd } from './Clawd.js';
 import { FeedColumn } from './FeedColumn.js';
-import {
-  createRecentActivityFeed,
-  createWhatsNewFeed,
-  createProjectOnboardingFeed,
-  createGuestPassesFeed,
-} from './feedConfigs.js';
+import { createWhatsNewFeed, createProjectOnboardingFeed } from './feedConfigs.js';
 import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js';
 import { resolveThemeSetting } from 'src/utils/systemTheme.js';
 import { getInitialSettings } from 'src/utils/settings/settings.js';
@@ -36,7 +30,6 @@ import { CondensedLogo } from './CondensedLogo.js';
 import { OffscreenFreeze } from '../OffscreenFreeze.js';
 import { checkForReleaseNotesSync } from '../../utils/releaseNotes.js';
 import { getDumpPromptsPath } from 'src/services/api/dumpPrompts.js';
-import { isEnvTruthy } from 'src/utils/envUtils.js';
 import { isForceFullLogoEnabled } from 'src/utils/residualUiEnvGates.js';
 import { getStartupPerfLogPath, isDetailedProfilingEnabled } from 'src/utils/startupProfiler.js';
 import { EmergencyTip } from './EmergencyTip.js';
@@ -58,12 +51,6 @@ const ChannelsNoticeModule =
     : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
-import { useShowGuestPassesUpsell, incrementGuestPassesSeenCount } from './GuestPassesUpsell.js';
-import {
-  useShowOverageCreditUpsell,
-  incrementOverageCreditUpsellSeenCount,
-  createOverageCreditFeed,
-} from './OverageCreditUpsell.js';
 import { useAppState } from '../../state/AppState.js';
 import { getEffortSuffix } from '../../utils/effort.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
@@ -72,16 +59,14 @@ import { renderModelSetting } from '../../utils/model/model.js';
 const LEFT_PANEL_MAX_WIDTH = 50;
 
 export function LogoV2(): React.ReactNode {
-  const activities = getRecentActivitySync();
   const username = getGlobalConfig().oauthAccount?.displayName ?? '';
 
   const { columns } = useTerminalSize();
   const showOnboarding = shouldShowProjectOnboarding();
   const showSandboxStatus = SandboxManager.isSandboxingEnabled();
-  const showGuestPassesUpsell = useShowGuestPassesUpsell();
-  const showOverageCreditUpsell = useShowOverageCreditUpsell();
   const agent = useAppState(s => s.agent);
   const effortValue = useAppState(s => s.effortValue);
+  const ultracode = useAppState(s => s.ultracode);
 
   const config = getGlobalConfig();
 
@@ -118,30 +103,14 @@ export function LogoV2(): React.ReactNode {
     }
   }, [config, showOnboarding]);
 
-  // In condensed mode (early-return below renders <CondensedLogo/>),
-  // CondensedLogo's own useEffect handles the impression count. Skipping
-  // here avoids double-counting since hooks fire before the early return.
-  const isCondensedMode = !hasReleaseNotes && !showOnboarding && !isForceFullLogoEnabled();
-
-  useEffect(() => {
-    if (showGuestPassesUpsell && !showOnboarding && !isCondensedMode) {
-      incrementGuestPassesSeenCount();
-    }
-  }, [showGuestPassesUpsell, showOnboarding, isCondensedMode]);
-
-  useEffect(() => {
-    if (showOverageCreditUpsell && !showOnboarding && !showGuestPassesUpsell && !isCondensedMode) {
-      incrementOverageCreditUpsellSeenCount();
-    }
-  }, [showOverageCreditUpsell, showOnboarding, showGuestPassesUpsell, isCondensedMode]);
-
   const model = useMainLoopModel();
   const fullModelDisplayName = renderModelSetting(model);
   const { version, cwd, billingType, agentName: agentNameFromSettings } = getLogoDisplayData();
   // Prefer AppState.agent (set from --agent CLI flag) over settings
   const agentName = agent ?? agentNameFromSettings;
   // -20 to account for the max length of subscription name " · Claude Enterprise".
-  const effortSuffix = getEffortSuffix(model, effortValue);
+  // densable OQe: only when AppState effort is set; resolved wire (clamp max→high for grok).
+  const effortSuffix = getEffortSuffix(model, effortValue, ultracode);
   const modelDisplayName = truncate(fullModelDisplayName + effortSuffix, LEFT_PANEL_MAX_WIDTH - 20);
 
   // Show condensed logo if no new changelog and not showing onboarding and not forcing full logo
@@ -331,17 +300,14 @@ export function LogoV2(): React.ReactNode {
               />
             )}
 
-            {/* Right Panel - Project Onboarding or Recent Activity and What's New */}
+            {/* Right Panel — densable 2.1.211: onboarding → Tips + What's new; else What's new only.
+                (No Recent activity / guest / overage feeds in the welcome box.) */}
             {layoutMode === 'horizontal' && (
               <FeedColumn
                 feeds={
                   showOnboarding
-                    ? [createProjectOnboardingFeed(getSteps()), createRecentActivityFeed(activities)]
-                    : showGuestPassesUpsell
-                      ? [createRecentActivityFeed(activities), createGuestPassesFeed()]
-                      : showOverageCreditUpsell
-                        ? [createRecentActivityFeed(activities), createOverageCreditFeed()]
-                        : [createRecentActivityFeed(activities), createWhatsNewFeed(changelog)]
+                    ? [createProjectOnboardingFeed(getSteps()), createWhatsNewFeed(changelog)]
+                    : [createWhatsNewFeed(changelog)]
                 }
                 maxWidth={rightWidth}
               />

@@ -956,6 +956,18 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .catch(undefined)
         .describe('Persisted effort level for supported models.'),
+      // densable settings.ultracode — session-scoped via --settings / apply_flag_settings.
+      // Interactive /effort ultracode never persists this; bootstrap maps it to wire
+      // effort (catalog top tier; densable hardcodes xhigh) + AppState.ultracode.
+      ultracode: z
+        .boolean()
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Enable ultracode for the session: catalog top effort plus standing dynamic-workflow orchestration. ' +
+            'Session-scoped — typically provided via --settings or the apply_flag_settings control request; ' +
+            'interactive toggles never persist it. Requires workflows enabled and an effort-capable model.',
+        ),
       advisorModel: z
         .string()
         .optional()

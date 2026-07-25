@@ -43,6 +43,24 @@ const bootstrapResponseSchema = lazySchema(() =>
         override_user_selection: z.boolean(),
       })
       .nullish(),
+    // densable model_access → modelAccessCache (S8t maxEffortLevel).
+    model_access: z
+      .array(
+        z
+          .object({
+            api_name: z.string(),
+            entitled: z.boolean(),
+            max_effort_level: z.string().nullish(),
+          })
+          .transform(({ api_name, entitled, max_effort_level }) => ({
+            apiName: api_name,
+            entitled,
+            ...(max_effort_level != null
+              ? { maxEffortLevel: max_effort_level }
+              : {}),
+          })),
+      )
+      .nullish(),
     oauth_account: z
       .object({
         account_uuid: z.string().nullish(),
@@ -134,6 +152,36 @@ export async function fetchBootstrapData(): Promise<void> {
 
     const clientData = response.client_data ?? null
     const additionalModelOptions = response.additional_model_options ?? []
+    // densable model_access → modelAccessCache (S8t). Absent field leaves
+    // prior cache; null/[] clears. Validate maxEffortLevel against EffortLevel.
+    type EffortLevelStr = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+    const asEffortLevel = (
+      level: string | undefined,
+    ): EffortLevelStr | undefined =>
+      level === 'low' ||
+      level === 'medium' ||
+      level === 'high' ||
+      level === 'xhigh' ||
+      level === 'max'
+        ? level
+        : undefined
+    const modelAccessUpdate:
+      | Array<{
+          apiName: string
+          entitled: boolean
+          maxEffortLevel?: EffortLevelStr
+        }>
+      | undefined =
+      response.model_access === undefined
+        ? undefined
+        : (response.model_access ?? []).map(row => {
+            const maxEffortLevel = asEffortLevel(row.maxEffortLevel)
+            return {
+              apiName: row.apiName,
+              entitled: row.entitled,
+              ...(maxEffortLevel !== undefined ? { maxEffortLevel } : {}),
+            }
+          })
     const orgUuid =
       response.oauth_account?.organization_uuid ??
       getGlobalConfig().oauthAccount?.organizationUuid
@@ -154,6 +202,8 @@ export async function fetchBootstrapData(): Promise<void> {
     if (
       isEqual(config.clientDataCache, clientData) &&
       isEqual(config.additionalModelOptionsCache, additionalModelOptions) &&
+      (modelAccessUpdate === undefined ||
+        isEqual(config.modelAccessCache ?? [], modelAccessUpdate)) &&
       (orgModelDefaultUpdate === undefined ||
         isEqual(config.orgModelDefaultCache ?? null, orgModelDefaultUpdate))
     ) {
@@ -166,6 +216,9 @@ export async function fetchBootstrapData(): Promise<void> {
       ...current,
       clientDataCache: clientData,
       additionalModelOptionsCache: additionalModelOptions,
+      ...(modelAccessUpdate !== undefined
+        ? { modelAccessCache: modelAccessUpdate }
+        : {}),
       ...(orgModelDefaultUpdate !== undefined
         ? { orgModelDefaultCache: orgModelDefaultUpdate }
         : {}),

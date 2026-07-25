@@ -275,6 +275,11 @@ export const AUTO_MODE_ATTACHMENT_CONFIG = {
   FULL_REMINDER_EVERY_N_ATTACHMENTS: 5,
 } as const
 
+/** densable Lxd — sparse ultra_effort_enter every N human turns while mode stays on. */
+export const ULTRA_EFFORT_CONFIG = {
+  TURNS_BETWEEN_MAINTENANCE: 10,
+} as const
+
 const MAX_MEMORY_LINES = 200
 // Line cap alone doesn't bound size (200 × 500-char lines = 100KB).  The
 // surfacer injects up to 5 files per turn via <system-reminder>, bypassing
@@ -618,6 +623,26 @@ export type Attachment =
       type: 'auto_mode_exit'
     }
   | {
+      /**
+       * densable ultra_effort_enter — session ultracode orchestration reminder.
+       * full on first enter / re-enter; sparse maintenance every
+       * ULTRA_EFFORT_CONFIG.TURNS_BETWEEN_MAINTENANCE human turns.
+       */
+      type: 'ultra_effort_enter'
+      reminderType: 'full' | 'sparse'
+    }
+  | {
+      /** densable ultra_effort_exit — one-shot when ultracode mode turns off. */
+      type: 'ultra_effort_exit'
+    }
+  | {
+      /**
+       * densable workflow_keyword_request (p2y) — turn-scoped opt-in when the
+       * user typed the word "ultracode" (not session ultracode mode).
+       */
+      type: 'workflow_keyword_request'
+    }
+  | {
       type: 'critical_system_reminder'
       content: string
     }
@@ -790,6 +815,27 @@ export type TeamContextAttachment = {
  * This is janky
  * TODO: Generate attachments when we create messages
  */
+export type GetAttachmentsOptions = {
+  skipSkillDiscovery?: boolean
+  /**
+   * densable isRegularUserPrompt — non-meta prompt turns (ultra_effort path).
+   * densable only ran f2y on this gate; we still run ultra_effort more broadly
+   * but keyword p2y requires isHumanTypedPrompt.
+   */
+  isRegularUserPrompt?: boolean
+  /**
+   * densable isHumanTypedPrompt = isRegularUserPrompt && Wzn(origin).
+   * Required for workflow_keyword_request (p2y).
+   */
+  isHumanTypedPrompt?: boolean
+  /**
+   * densable preExpansionInput — keyword detection uses pre-paste-expansion text.
+   */
+  preExpansionInput?: string
+  /** densable suppressWorkflowKeyword — force-skip p2y for this turn. */
+  suppressWorkflowKeyword?: boolean
+}
+
 export async function getAttachments(
   input: string | null,
   toolUseContext: ToolUseContext,
@@ -797,7 +843,7 @@ export async function getAttachments(
   queuedCommands: QueuedCommand[],
   messages?: Message[],
   querySource?: QuerySource,
-  options?: { skipSkillDiscovery?: boolean },
+  options?: GetAttachmentsOptions,
 ): Promise<Attachment[]> {
   let attachmentsDisabled = isEnvTruthy(
     process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS,
@@ -963,6 +1009,25 @@ export async function getAttachments(
     // replaces it; see src/services/skillSearch/prefetch.ts.
     maybe('plan_mode', () => getPlanModeAttachments(messages, toolUseContext)),
     maybe('plan_mode_exit', () => getPlanModeExitAttachment(toolUseContext)),
+    // densable p2y: human-typed "ultracode" keyword → workflow_keyword_request.
+    // densable gates: FE() (workflows enabled) && isHumanTypedPrompt &&
+    // !suppressWorkflowKeyword && VBn() (workflowKeywordTriggerEnabled).
+    maybe('workflow_keyword', () =>
+      Promise.resolve(
+        getWorkflowKeywordAttachments(input, {
+          isHumanTypedPrompt: options?.isHumanTypedPrompt === true,
+          preExpansionInput: options?.preExpansionInput,
+          suppressWorkflowKeyword: options?.suppressWorkflowKeyword === true,
+        }),
+      ),
+    ),
+    // densable f2y: session ultracode enter/exit/sparse maintenance reminders.
+    // densable only ran this on isRegularUserPrompt; we attach on every
+    // getAttachments call but f2y itself throttles via human-turn counting
+    // and only emits when the mode state flips or maintenance is due.
+    maybe('ultra_effort', () =>
+      Promise.resolve(getUltraEffortAttachments(messages, toolUseContext)),
+    ),
     ...(feature('TRANSCRIPT_CLASSIFIER')
       ? [
           maybe('auto_mode', () =>
@@ -1497,6 +1562,144 @@ async function getAutoModeExitAttachment(
 
   setNeedsAutoModeExitAttachment(false)
   return [{ type: 'auto_mode_exit' }]
+}
+
+/**
+ * densable p2y(preExpansionInput) — ultracode keyword turn opt-in.
+ * Emits workflow_keyword_request when human-typed prompt contains the word
+ * "ultracode" (pSs word-boundary, quote/path skip) and VBn + FE gates pass.
+ */
+export function getWorkflowKeywordAttachments(
+  input: string | null,
+  opts: {
+    isHumanTypedPrompt: boolean
+    preExpansionInput?: string
+    suppressWorkflowKeyword?: boolean
+  },
+): Attachment[] {
+  if (!opts.isHumanTypedPrompt || opts.suppressWorkflowKeyword) {
+    return []
+  }
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { isWorkflowFeatureEnabled, isWorkflowKeywordTriggerEnabled } =
+      require('./workflowDisableGate.js') as typeof import('./workflowDisableGate.js')
+    const { getInitialSettings } =
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const { hasUltracodeKeyword } =
+      require('./ultraplan/keyword.js') as typeof import('./ultraplan/keyword.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+
+    const settings = getInitialSettings()
+    // densable FE: workflows feature enabled (env/GB/settings.enableWorkflows).
+    if (
+      !isWorkflowFeatureEnabled(process.env, {
+        settingsDisableWorkflows: settings.disableWorkflows,
+        enableWorkflows: settings.enableWorkflows,
+      })
+    ) {
+      return []
+    }
+    // densable VBn: workflowKeywordTriggerEnabled default true.
+    if (
+      !isWorkflowKeywordTriggerEnabled(settings.workflowKeywordTriggerEnabled)
+    ) {
+      return []
+    }
+    const text = opts.preExpansionInput ?? input
+    if (!text || !hasUltracodeKeyword(text)) {
+      return []
+    }
+    logEvent(
+      'tengu_workflow_keyword',
+      {} as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    )
+    return [{ type: 'workflow_keyword_request' }]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * densable f2y(messages, toolUseContext) — ultracode session reminders.
+ *
+ * Active (Dee-shaped via isUltracodeModeActive):
+ *   - no prior ultra_effort_enter since last exit → full enter
+ *   - ≥ TURNS_BETWEEN_MAINTENANCE human turns since last enter → sparse enter
+ * Inactive but last attachment was enter → exit
+ *
+ * Wire effort is catalog-driven (not hard-coded xhigh); the reminder text
+ * only steers Workflow orchestration.
+ */
+export function getUltraEffortAttachments(
+  messages: Message[] | undefined,
+  toolUseContext: ToolUseContext,
+): Attachment[] {
+  // Lazy require avoids static cycle risk (effort ↔ attachments via messages).
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { isUltracodeModeActive } =
+    require('./effort.js') as typeof import('./effort.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+
+  const appState = toolUseContext.getAppState()
+  const model = toolUseContext.options.mainLoopModel
+  const active = isUltracodeModeActive(
+    model,
+    appState.effortValue,
+    appState.ultracode,
+  )
+
+  let last: 'none' | 'enter' | 'exit' = 'none'
+  let humanTurnsSince = 0
+  if (messages && messages.length > 0) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message === undefined) continue
+      if (message.type === 'attachment') {
+        const t = message.attachment?.type
+        if (t === 'ultra_effort_enter') {
+          last = 'enter'
+          break
+        }
+        if (t === 'ultra_effort_exit') {
+          last = 'exit'
+          break
+        }
+      } else if (
+        message.type === 'user' &&
+        !message.isMeta &&
+        !hasToolResultContent(message.message?.content)
+      ) {
+        humanTurnsSince++
+      }
+    }
+  }
+
+  if (active) {
+    if (last !== 'enter') {
+      logEvent('tengu_ultra_effort', {
+        is_enter: true,
+        is_full: true,
+      } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+      return [{ type: 'ultra_effort_enter', reminderType: 'full' }]
+    }
+    if (humanTurnsSince >= ULTRA_EFFORT_CONFIG.TURNS_BETWEEN_MAINTENANCE) {
+      logEvent('tengu_ultra_effort', {
+        is_enter: true,
+        is_full: false,
+      } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+      return [{ type: 'ultra_effort_enter', reminderType: 'sparse' }]
+    }
+    return []
+  }
+
+  if (last === 'enter') {
+    logEvent('tengu_ultra_effort', {
+      is_enter: false,
+    } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+    return [{ type: 'ultra_effort_exit' }]
+  }
+  return []
 }
 
 /**
@@ -3075,7 +3278,7 @@ export async function* getAttachmentMessages(
   queuedCommands: QueuedCommand[],
   messages?: Message[],
   querySource?: QuerySource,
-  options?: { skipSkillDiscovery?: boolean },
+  options?: GetAttachmentsOptions,
 ): AsyncGenerator<AttachmentMessage, void> {
   // TODO: Compute this upstream
   const attachments = await getAttachments(

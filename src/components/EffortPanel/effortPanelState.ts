@@ -1,4 +1,8 @@
-import type { EffortValue } from '../../utils/effort.js'
+import type { EffortLevel, EffortValue } from '../../utils/effort.js'
+import {
+  getSupportedEffortLevels,
+  isUltracodeOfferable,
+} from '../../utils/effort.js'
 
 /**
  * 光标在面板上的位置。仅面板内部使用，不进入 AppState / settings / API。
@@ -23,6 +27,39 @@ export const PANEL_POSITIONS: readonly PanelPosition[] = [
 
 export const HOME_POSITION: PanelPosition = 'low'
 export const END_POSITION: PanelPosition = 'ultracode'
+
+/**
+ * densable-aligned panel ladder for a model: supported effort levels +
+ * trailing ultracode visual slot when isUltracodeOfferable(model).
+ * Unsupported max/xhigh are omitted so sonnet-4-6 never offers xhigh
+ * (API still clamps if forced). Ultracode slot requires workflows + a
+ * catalog wire tier (densable gY).
+ *
+ * `opts.ultracodeOfferable` is test-injectable so full-suite mock.module
+ * pollution of workflowDisableGate/growthbook cannot hide the slot in
+ * ladder unit tests. Production callers omit opts.
+ */
+export function getPanelPositionsForModel(
+  model: string,
+  opts?: { ultracodeOfferable?: boolean },
+): PanelPosition[] {
+  const ultracodeOfferable =
+    opts?.ultracodeOfferable ?? isUltracodeOfferable(model)
+  const supported = new Set<EffortLevel>(getSupportedEffortLevels(model))
+  const levels = (PANEL_POSITIONS as readonly PanelPosition[]).filter(p => {
+    if (p === 'ultracode') return ultracodeOfferable
+    return supported.has(p as EffortLevel)
+  })
+  // If model supports no effort, still show a basic ladder so the panel
+  // isn't empty; resolveAppliedEffort will no-op on API send. Ultracode
+  // only if offerable (usually false when no effort support).
+  if (levels.length === 0) {
+    return ultracodeOfferable
+      ? ['low', 'medium', 'high', 'ultracode']
+      : ['low', 'medium', 'high']
+  }
+  return levels
+}
 
 /**
  * 判断一个值是否可作为面板光标位置（不含 ultracode，因 ultracode 仅由面板内部产生）。
@@ -53,18 +90,43 @@ function normalizeToPanelPosition(
   return undefined
 }
 
-export function moveLeft(cursor: PanelPosition): PanelPosition {
-  const idx = PANEL_POSITIONS.indexOf(cursor)
-  if (idx <= 0) return PANEL_POSITIONS[0]
-  return PANEL_POSITIONS[idx - 1]
+export function moveLeft(
+  cursor: PanelPosition,
+  positions: readonly PanelPosition[] = PANEL_POSITIONS,
+): PanelPosition {
+  const idx = positions.indexOf(cursor)
+  if (idx <= 0) return positions[0]!
+  return positions[idx - 1]!
 }
 
-export function moveRight(cursor: PanelPosition): PanelPosition {
-  const idx = PANEL_POSITIONS.indexOf(cursor)
-  if (idx === -1 || idx >= PANEL_POSITIONS.length - 1) {
-    return PANEL_POSITIONS[PANEL_POSITIONS.length - 1]
+export function moveRight(
+  cursor: PanelPosition,
+  positions: readonly PanelPosition[] = PANEL_POSITIONS,
+): PanelPosition {
+  const idx = positions.indexOf(cursor)
+  if (idx === -1 || idx >= positions.length - 1) {
+    return positions[positions.length - 1]!
   }
-  return PANEL_POSITIONS[idx + 1]
+  return positions[idx + 1]!
+}
+
+/** Snap a desired cursor onto the nearest available position for this ladder. */
+export function clampCursorToPositions(
+  cursor: PanelPosition,
+  positions: readonly PanelPosition[],
+): PanelPosition {
+  if (positions.includes(cursor)) return cursor
+  // Prefer lower neighbor in the full ladder, then first available.
+  const fullIdx = PANEL_POSITIONS.indexOf(cursor)
+  for (let i = fullIdx - 1; i >= 0; i--) {
+    const candidate = PANEL_POSITIONS[i]!
+    if (positions.includes(candidate)) return candidate
+  }
+  for (let i = fullIdx + 1; i < PANEL_POSITIONS.length; i++) {
+    const candidate = PANEL_POSITIONS[i]!
+    if (positions.includes(candidate)) return candidate
+  }
+  return positions[0]!
 }
 
 export function isUltracode(cursor: PanelPosition): boolean {
@@ -83,30 +145,42 @@ export function getInitialCursor(args: {
   envOverride: EffortValue | null | undefined
   appStateEffort: EffortValue | undefined
   displayed: PanelPosition
+  /** When provided, cursor is clamped to model-supported ladder. */
+  positions?: readonly PanelPosition[]
 }): PanelPosition {
   const fromEnv = normalizeToPanelPosition(args.envOverride)
-  if (fromEnv !== undefined) return fromEnv
-  // displayed 已经是 EffortLevel（不含 ultracode），合法
-  return args.displayed
+  const raw = fromEnv !== undefined ? fromEnv : args.displayed
+  if (args.positions) {
+    return clampCursorToPositions(raw, args.positions)
+  }
+  return raw
 }
 
 // ---- 确认/取消决策（注入 ApplyFn 避免循环依赖 + 便于测试）----
 
-export type ConfirmOutcome =
-  | {
-      kind: 'apply'
-      message: string
-      effortUpdate?: { value: EffortValue | undefined }
-    }
-  | { kind: 'ultracode-hint'; message: string }
+export type EffortUpdate = {
+  value: EffortValue | undefined
+  ultracode?: boolean
+}
+
+export type ConfirmOutcome = {
+  kind: 'apply'
+  message: string
+  effortUpdate?: EffortUpdate
+}
 
 export type ApplyFn = (cursor: PanelPosition) => {
   message: string
-  effortUpdate?: { value: EffortValue | undefined }
+  effortUpdate?: EffortUpdate
 }
 
+/**
+ * densable-aligned: panel ultracode confirms session wire effort + orchestration.
+ * Production path uses executeEffort → `${wire} + dynamic workflow orchestration`;
+ * this static hint mirrors that shape when wire is model-unknown (tests / fallback).
+ */
 export const ULTRACODE_HINT =
-  'ultracode is not an effort level. Use /ultracode <context> to start a multi-agent workflow.'
+  'Set effort level to ultracode (this session only): catalog top effort + dynamic workflow orchestration'
 
 export const CANCEL_MESSAGE = 'Effort unchanged.'
 
@@ -114,9 +188,7 @@ export function computeConfirmOutcome(
   cursor: PanelPosition,
   applyFn: ApplyFn,
 ): ConfirmOutcome {
-  if (isUltracode(cursor)) {
-    return { kind: 'ultracode-hint', message: ULTRACODE_HINT }
-  }
+  // densable: ultracode is a real confirm path (wire effort via applyFn), not a reject.
   const result = applyFn(cursor)
   return {
     kind: 'apply',

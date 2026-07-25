@@ -42,6 +42,7 @@ import {
   type ClickEvent,
   type Key,
   type KeyboardEvent,
+  color,
   stringWidth,
   Text,
   useInput,
@@ -72,9 +73,10 @@ import { count } from '../../utils/array.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { Cursor } from '../../utils/Cursor.js';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
+import { resolveThemeSetting } from '../../utils/systemTheme.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
-import type { EffortLevel } from '../../utils/effort.js';
+import { type EffortLevel, isUltracodeModeActive } from '../../utils/effort.js';
 import { env } from '../../utils/env.js';
 import { errorMessage } from '../../utils/errors.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
@@ -425,6 +427,7 @@ function PromptInput({
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
   const effortValue = useAppState(s => s.effortValue);
+  const ultracode = useAppState(s => s.ultracode);
   const viewedTeammate = getViewedTeammateTask(store.getState());
   const viewingAgentName = viewedTeammate?.identity.agentName;
   // identity.color is typed as `string | undefined` (not AgentColorName) because
@@ -2301,7 +2304,10 @@ function PromptInput({
   // Show effort notification on startup and when effort changes.
   // Suppressed in brief/assistant mode — the value reflects the local
   // client's effort, not the connected agent's.
-  const effortNotificationText = briefOwnsGap ? undefined : getEffortNotificationText(effortValue, mainLoopModel);
+  const ultracodeActive = isUltracodeModeActive(mainLoopModel, effortValue, ultracode);
+  const effortNotificationText = briefOwnsGap
+    ? undefined
+    : getEffortNotificationText(effortValue, mainLoopModel, ultracode);
   useEffect(() => {
     if (!effortNotificationText) {
       removeNotification('effort-level');
@@ -2770,7 +2776,7 @@ function PromptInput({
           borderRight={false}
           borderBottom
           width="100%"
-          borderText={buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown)}
+          borderText={buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive)}
         >
           <PromptInputModeIndicator
             mode={mode}
@@ -2895,17 +2901,32 @@ function getInitialPasteId(messages: Message[]): number {
   return maxId + 1;
 }
 
+/**
+ * densable tbp([Yie, WI]) — top-right border chip.
+ * Ultracode: effortUltra-colored "ultracode" (ebp).
+ * Fast: lightning / /fast hint. Both may appear, joined by two spaces.
+ */
 function buildBorderText(
   showFastIcon: boolean,
   showFastIconHint: boolean,
   fastModeCooldown: boolean,
+  ultracodeActive = false,
 ): BorderTextOptions | undefined {
-  if (!showFastIcon) return undefined;
-  const fastSeg = showFastIconHint
-    ? `${getFastIconString(true, fastModeCooldown)} ${chalk.dim('/fast')}`
-    : getFastIconString(true, fastModeCooldown);
+  const parts: string[] = [];
+  if (ultracodeActive) {
+    const themeName = resolveThemeSetting(getGlobalConfig().theme);
+    parts.push(color('effortUltra', themeName)('ultracode'));
+  }
+  if (showFastIcon) {
+    parts.push(
+      showFastIconHint
+        ? `${getFastIconString(true, fastModeCooldown)} ${chalk.dim('/fast')}`
+        : getFastIconString(true, fastModeCooldown),
+    );
+  }
+  if (parts.length === 0) return undefined;
   return {
-    content: ` ${fastSeg} `,
+    content: ` ${parts.join('  ')} `,
     position: 'top',
     align: 'end',
     offset: 0,

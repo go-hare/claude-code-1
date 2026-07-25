@@ -1,6 +1,9 @@
 import type { AppState } from '../../state/AppState.js'
 import { logForDebugging } from '../debug.js'
+import { getUltracodeEffortForModel } from '../effort.js'
 import { updateHooksConfigSnapshot } from '../hooks/hooksConfigSnapshot.js'
+import { getMainLoopModel } from '../model/model.js'
+import { unpinAllEffortLaunchPins } from '../model/effortCatalog.js'
 import {
   createDisabledBypassPermissionsContext,
   findOverlyBroadBashPermissions,
@@ -67,26 +70,59 @@ export function applySettingsChange(
 
     newContext = transitionPlanAutoMode(newContext)
 
-    // Sync effortLevel from settings to top-level AppState when it changes
-    // (e.g. via applyFlagSettings from IDE). Only propagate if the setting
-    // itself changed — otherwise unrelated settings churn (e.g. tips dismissal
-    // on startup) would clobber a --effort CLI flag value held in AppState.
+    // Sync effortLevel / ultracode from settings to top-level AppState when
+    // they change (e.g. via applyFlagSettings from IDE). Only propagate if
+    // the setting itself changed — otherwise unrelated settings churn
+    // (e.g. tips dismissal on startup) would clobber a --effort CLI flag
+    // value held in AppState.
     const prevEffort = prev.settings.effortLevel
     const newEffort = newSettings.effortLevel
     const effortChanged = prevEffort !== newEffort
+    const prevUltra = prev.settings.ultracode === true
+    const newUltra = newSettings.ultracode === true
+    const ultraChanged = prevUltra !== newUltra
 
-    return {
-      ...prev,
-      settings: newSettings,
-      toolPermissionContext: newContext,
+    // densable: normal effortLevel sync clears ultracode; settings.ultracode
+    // maps to catalog wire + flag (densable hardcodes xhigh).
+    // densable: if (prev.effortLevel !== next.effortLevel) N9() — any effort
+    // level change releases launch pins so AppState effortValue can win cme.
+    if (effortChanged) {
+      unpinAllEffortLaunchPins()
+    }
+
+    let effortPatch: Partial<AppState> = {}
+    if (ultraChanged && newUltra) {
+      const model =
+        typeof prev.mainLoopModel === 'string' && prev.mainLoopModel.length > 0
+          ? prev.mainLoopModel
+          : getMainLoopModel()
+      const wire = getUltracodeEffortForModel(model)
+      if (wire === undefined) {
+        // No catalog ultracode wire (e.g. haiku) — do not invent xhigh or
+        // raise an empty ultracode flag (matches bootstrap empty-flag guard).
+        effortPatch = { ultracode: false }
+      } else {
+        // densable sAi: enabling ultracode unpins launch defaults (N9).
+        // (May already be unpinned via effortChanged above.)
+        unpinAllEffortLaunchPins()
+        effortPatch = { effortValue: wire, ultracode: true }
+      }
+    } else if (effortChanged && newEffort !== undefined) {
       // Only propagate a defined new value — when the disk key is absent
       // (e.g. /effort max for non-ants writes undefined; --effort CLI flag),
       // prev.settings.effortLevel can be stale (internal writes suppress the
       // watcher that would resync AppState.settings), so effortChanged would
       // be true and we'd wipe a session-scoped value held in effortValue.
-      ...(effortChanged && newEffort !== undefined
-        ? { effortValue: newEffort }
-        : {}),
+      effortPatch = { effortValue: newEffort, ultracode: false }
+    } else if (ultraChanged && !newUltra) {
+      effortPatch = { ultracode: false }
+    }
+
+    return {
+      ...prev,
+      settings: newSettings,
+      toolPermissionContext: newContext,
+      ...effortPatch,
     }
   })
 }

@@ -606,6 +606,16 @@ export type GlobalConfig = {
     orgUuid?: string
   } | null
 
+  /**
+   * densable modelAccessCache from bootstrap `model_access`.
+   * Drives S8t org maxEffortLevel clamp (firstParty/gateway).
+   */
+  modelAccessCache?: Array<{
+    apiName: string
+    entitled: boolean
+    maxEffortLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  }>
+
   /** Last-seen org_model_default.updated_at (suppresses repeat clear/notice). */
   lastSeenOrgDefaultUpdatedAt?: string
 

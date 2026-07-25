@@ -474,6 +474,9 @@ export type AppState = DeepImmutable<{
   advisorModel?: string
   // Effort value
   effortValue?: EffortValue
+  // densable AppState.ultracode — session multi-agent orchestration mode.
+  // Orthogonal to EffortLevel; wire effort is set separately (prefer catalog top).
+  ultracode?: boolean
   // Set synchronously in launchUltraplan before the detached flow starts.
   // Prevents duplicate launches during the ~5s window before
   // ultraplanSessionUrl is set by teleportToRemote. Cleared by launchDetached
@@ -626,6 +629,7 @@ export function getDefaultAppState(): AppState {
     authVersion: 0,
     initialMessage: null,
     effortValue: undefined,
+    ultracode: false,
     activeOverlays: new Set<string>(),
     fastMode: false,
   }

@@ -40,6 +40,10 @@ const NULL_RENDERING_TYPES = [
   'task_reminder',
   'auto_mode',
   'auto_mode_exit',
+  // densable ultra_effort_* / workflow_keyword_request are model-facing only
+  'ultra_effort_enter',
+  'ultra_effort_exit',
+  'workflow_keyword_request',
   'output_token_usage',
   'verify_plan_reminder',
   'current_session_memory',

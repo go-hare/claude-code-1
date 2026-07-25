@@ -106,6 +106,8 @@ export async function processUserInput({
   isMeta,
   skipAttachments,
   autonomy,
+  origin,
+  suppressWorkflowKeyword,
 }: {
   input: string | Array<ContentBlockParam>
   /**
@@ -144,6 +146,13 @@ export async function processUserInput({
   isMeta?: boolean
   skipAttachments?: boolean
   autonomy?: QueuedCommand['autonomy']
+  /**
+   * densable Dfr origin — Wzn(origin) gates ultracode keyword (p2y).
+   * undefined is treated as non-human for keyword (must be kind==="human").
+   */
+  origin?: QueuedCommand['origin']
+  /** densable suppressWorkflowKeyword — skip p2y for this turn. */
+  suppressWorkflowKeyword?: boolean
 }): Promise<ProcessUserInputBaseResult> {
   const inputString = typeof input === 'string' ? input : null
   // Immediately show the user input prompt while we are still processing the input.
@@ -177,6 +186,8 @@ export async function processUserInput({
     skipAttachments,
     preExpansionInput,
     autonomy,
+    origin,
+    suppressWorkflowKeyword,
   )
   queryCheckpoint('query_process_user_input_base_end')
 
@@ -317,6 +328,8 @@ async function processUserInputBase(
   skipAttachments?: boolean,
   preExpansionInput?: string,
   autonomy?: QueuedCommand['autonomy'],
+  origin?: QueuedCommand['origin'],
+  suppressWorkflowKeyword?: boolean,
 ): Promise<ProcessUserInputBaseResult> {
   let inputString: string | null = null
   let precedingInputBlocks: ContentBlockParam[] = []
@@ -524,6 +537,9 @@ async function processUserInputBase(
     inputString !== null &&
     (mode !== 'prompt' || effectiveSkipSlash || !inputString.startsWith('/'))
 
+  // densable: isRegularUserPrompt = !isMeta && prompt mode; isHumanTyped = regular && Wzn(origin).
+  const isRegularUserPrompt = mode === 'prompt' && !isMeta
+  const isHumanTypedPrompt = isRegularUserPrompt && origin?.kind === 'human'
   queryCheckpoint('query_attachment_loading_start')
   const attachmentMessages = shouldExtractAttachments
     ? await toArray(
@@ -534,6 +550,12 @@ async function processUserInputBase(
           [], // queuedCommands - handled by query.ts for mid-turn attachments
           messages,
           querySource,
+          {
+            isRegularUserPrompt,
+            isHumanTypedPrompt,
+            preExpansionInput,
+            suppressWorkflowKeyword,
+          },
         ),
       )
     : []

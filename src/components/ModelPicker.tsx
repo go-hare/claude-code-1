@@ -17,14 +17,18 @@ import { Box, Text } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import {
+  clampEffortForModel,
   convertEffortValueToLevel,
   type EffortLevel,
   getDefaultEffortForModel,
+  getSupportedEffortLevels,
+  getUltracodeEffortForModel,
+  isEffortLevel,
+  isUltracodeOfferable,
   modelSupportsEffort,
-  modelSupportsMaxEffort,
-  modelSupportsXhighEffort,
   resolvePickerEffortPersistence,
   toPersistableEffort,
+  unpinAllEffortLaunchPins,
 } from '../utils/effort.js';
 import {
   getDefaultMainLoopModel,
@@ -42,6 +46,10 @@ import { effortLevelToSymbol } from './EffortIndicator.js';
 export type Props = {
   initial: string | null;
   sessionModel?: ModelSetting;
+  /**
+   * densable: effort is EffortLevel only. Ultracode is applied as session
+   * AppState inside the picker (not via this callback).
+   */
   onSelect: (model: string | null, effort: EffortLevel | undefined) => void;
   onCancel?: () => void;
   isStandaloneCommand?: boolean;
@@ -53,11 +61,15 @@ export type Props = {
    * Used by the assistant installer wizard where the model choice is
    * project-scoped (written to the assistant's .claude/settings.json via
    * install.ts) and should not leak to the user's global ~/.claude/settings.
+   * densable mk_: also skips session ultracode / effort AppState writes.
    */
   skipSettingsWrite?: boolean;
 };
 
 const NO_PREFERENCE = '__NO_PREFERENCE__';
+
+/** densable ModelPicker effort cursor: EffortLevel + optional ultracode slot. */
+type PickerEffort = EffortLevel | 'ultracode';
 
 export function ModelPicker({
   initial,
@@ -101,9 +113,12 @@ export function ModelPicker({
 
   const [hasToggledEffort, setHasToggledEffort] = useState(false);
   const effortValue = useAppState(s => s.effortValue);
-  const [effort, setEffort] = useState<EffortLevel | undefined>(
-    effortValue !== undefined ? convertEffortValueToLevel(effortValue) : undefined,
-  );
+  const ultracodeFlag = useAppState(s => s.ultracode);
+  // densable: AppState.ultracode → cursor "ultracode"; else effortValue level.
+  const [effort, setEffort] = useState<PickerEffort | undefined>(() => {
+    if (ultracodeFlag) return 'ultracode';
+    return effortValue !== undefined ? convertEffortValueToLevel(effortValue) : undefined;
+  });
 
   // Memoize all derived values to prevent re-renders
   const modelOptions = useMemo(() => getModelOptions(isFastMode ?? false), [isFastMode]);
@@ -147,40 +162,54 @@ export function ModelPicker({
     focusedValue !== NO_PREFERENCE &&
     marked1MValues.has(focusedValue.replace(/\[1m\]/i, ''));
   const focusedSupportsEffort = focusedModel ? modelSupportsEffort(focusedModel) : false;
-  const focusedSupportsXhigh = focusedModel ? modelSupportsXhighEffort(focusedModel) : false;
-  const focusedSupportsMax = focusedModel ? modelSupportsMaxEffort(focusedModel) : false;
+  // densable MDe-shaped ladder (capability ∩ org). Exclusive catalog rows
+  // (DeepSeek high|max, Grok low|medium|high, Kimi low|high|max) replace the
+  // densable low/medium/high + max/xhigh flag filter.
+  const focusedEffortLevels = focusedModel ? getSupportedEffortLevels(focusedModel) : [];
+  // densable gbp `i` (gY): append ultracode when FE + wire tier available.
+  const focusedUltracodeOfferable = focusedModel ? isUltracodeOfferable(focusedModel) : false;
+  const focusedPickerLadder = useMemo((): readonly PickerEffort[] => {
+    if (focusedEffortLevels.length === 0) return [];
+    return focusedUltracodeOfferable ? [...focusedEffortLevels, 'ultracode'] : focusedEffortLevels;
+  }, [focusedEffortLevels, focusedUltracodeOfferable]);
   const focusedDefaultEffort = getDefaultEffortLevelForOption(focusedValue);
-  // Clamp display when selected effort isn't supported by the focused model.
-  // resolveAppliedEffort() does the same downgrade at API-send time.
-  const displayEffort =
-    effort === 'max' && !focusedSupportsMax
-      ? focusedSupportsXhigh
-        ? 'xhigh'
-        : 'high'
-      : effort === 'xhigh' && !focusedSupportsXhigh
-        ? 'high'
-        : effort;
+  const focusedUltracodeWire = focusedModel ? getUltracodeEffortForModel(focusedModel) : undefined;
+  // densable display: ultracode cursor stays "ultracode"; else clamp EffortLevel
+  // onto the focused model (exclusive ladders + org).
+  const displayEffort = ((): PickerEffort | undefined => {
+    if (effort === undefined) return effort;
+    if (effort === 'ultracode') {
+      // densable: ultracode + !offerable → fall back to max/high
+      if (focusedUltracodeOfferable) return 'ultracode';
+      if (focusedEffortLevels.includes('max')) return 'max';
+      if (focusedEffortLevels.includes('high')) return 'high';
+      return focusedDefaultEffort;
+    }
+    if (!focusedModel) return effort;
+    const clamped = clampEffortForModel(effort, focusedModel);
+    return typeof clamped === 'string' && isEffortLevel(clamped) ? clamped : effort;
+  })();
 
   const handleFocus = useCallback(
     (value: string) => {
       setFocusedValue(value);
-      if (!hasToggledEffort && effortValue === undefined) {
+      if (!hasToggledEffort && effortValue === undefined && !ultracodeFlag) {
         setEffort(getDefaultEffortLevelForOption(value));
       }
     },
-    [hasToggledEffort, effortValue],
+    [hasToggledEffort, effortValue, ultracodeFlag],
   );
 
-  // Effort level cycling keybindings
+  // Effort level cycling keybindings (densable gbp)
   const handleCycleEffort = useCallback(
     (direction: 'left' | 'right') => {
-      if (!focusedSupportsEffort) return;
-      setEffort(prev =>
-        cycleEffortLevel(prev ?? focusedDefaultEffort, direction, focusedSupportsXhigh, focusedSupportsMax),
-      );
+      if (!focusedSupportsEffort || focusedPickerLadder.length === 0) return;
+      // densable N9: user changed effort → unpin launch defaults.
+      unpinAllEffortLaunchPins();
+      setEffort(prev => cyclePickerEffort(prev ?? focusedDefaultEffort, direction, focusedPickerLadder));
       setHasToggledEffort(true);
     },
-    [focusedSupportsEffort, focusedSupportsXhigh, focusedSupportsMax, focusedDefaultEffort],
+    [focusedSupportsEffort, focusedPickerLadder, focusedDefaultEffort],
   );
 
   useKeybindings(
@@ -193,30 +222,72 @@ export function ModelPicker({
   );
 
   function handleSelect(value: string): void {
+    const selectedModel = resolveOptionModel(value);
+    const wantsUltracode = effort === 'ultracode' && selectedModel !== undefined && isUltracodeOfferable(selectedModel);
+    const ultracodeWire = wantsUltracode ? getUltracodeEffortForModel(selectedModel) : undefined;
+
+    // densable: wve(fMt, model) on confirm for non-ultracode; ultracode is
+    // session-only wire (catalog top tier) + AppState.ultracode.
+    const effortForModel: EffortLevel | undefined = wantsUltracode
+      ? ultracodeWire
+      : effort !== undefined && effort !== 'ultracode' && selectedModel
+        ? (() => {
+            const c = clampEffortForModel(effort, selectedModel);
+            return typeof c === 'string' && isEffortLevel(c) ? c : effort;
+          })()
+        : effort === 'ultracode'
+          ? undefined
+          : effort;
+
     logEvent('tengu_model_command_menu_effort', {
-      effort: effort as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      effort: (wantsUltracode
+        ? 'ultracode'
+        : effortForModel) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
-    if (!skipSettingsWrite) {
-      // Prior comes from userSettings on disk — NOT merged settings (which
-      // includes project/policy layers that must not leak into the user's
-      // global ~/.claude/settings.json), and NOT AppState.effortValue (which
-      // includes session-ephemeral sources like --effort CLI flag).
-      // See resolvePickerEffortPersistence JSDoc.
-      const effortLevel = resolvePickerEffortPersistence(
-        effort,
-        getDefaultEffortLevelForOption(value),
-        getSettingsForSource('userSettings')?.effortLevel,
-        hasToggledEffort,
-      );
-      const persistable = toPersistableEffort(effortLevel);
-      if (persistable !== undefined) {
-        updateSettingsForSource('userSettings', { effortLevel: persistable });
+
+    // densable Dan: only touch effort/ultracode AppState when user cycled (IGe).
+    // Model-only confirm leaves session effort / ultracode alone.
+    if (!skipSettingsWrite && hasToggledEffort) {
+      if (wantsUltracode && ultracodeWire !== undefined) {
+        // densable Dan: ultracode → N9 + session effortValue=wire + ultracode:true.
+        // Do not write effortLevel to userSettings (session-only orchestration).
+        unpinAllEffortLaunchPins();
+        setAppState(prev => ({
+          ...prev,
+          effortValue: ultracodeWire,
+          ultracode: true,
+        }));
+      } else {
+        // Prior comes from userSettings on disk — NOT merged settings (which
+        // includes project/policy layers that must not leak into the user's
+        // global ~/.claude/settings.json), and NOT AppState.effortValue (which
+        // includes session-ephemeral sources like --effort CLI flag).
+        // See resolvePickerEffortPersistence JSDoc.
+        const effortLevel = resolvePickerEffortPersistence(
+          effortForModel,
+          getDefaultEffortLevelForOption(value),
+          getSettingsForSource('userSettings')?.effortLevel,
+          hasToggledEffort,
+        );
+        const persistable = toPersistableEffort(effortLevel);
+        if (persistable !== undefined) {
+          updateSettingsForSource('userSettings', { effortLevel: persistable });
+        }
+        // densable: non-ultracode confirm clears ultracode flag.
+        unpinAllEffortLaunchPins();
+        setAppState(prev => ({
+          ...prev,
+          effortValue: effortLevel,
+          ultracode: false,
+        }));
       }
-      setAppState(prev => ({ ...prev, effortValue: effortLevel }));
     }
 
-    const selectedModel = resolveOptionModel(value);
-    const selectedEffort = hasToggledEffort && selectedModel && modelSupportsEffort(selectedModel) ? effort : undefined;
+    // densable: onSelect gets EffortLevel only; ultracode is session AppState.
+    const selectedEffort =
+      hasToggledEffort && selectedModel && modelSupportsEffort(selectedModel) && !wantsUltracode
+        ? effortForModel
+        : undefined;
     if (value === NO_PREFERENCE) {
       onSelect(null, selectedEffort);
       return;
@@ -272,8 +343,21 @@ export function ModelPicker({
         <Box marginBottom={1} flexDirection="column">
           {focusedSupportsEffort ? (
             <Text dimColor>
-              <EffortLevelIndicator effort={displayEffort} /> {capitalize(displayEffort)} effort
-              {displayEffort === focusedDefaultEffort ? ` (default)` : ``} <Text color="subtle">← → to adjust</Text>
+              <EffortLevelIndicator
+                effort={displayEffort === 'ultracode' ? (focusedUltracodeWire ?? focusedDefaultEffort) : displayEffort}
+              />{' '}
+              {displayEffort === 'ultracode' ? (
+                <>
+                  ultracode
+                  {focusedUltracodeWire ? ` · ${focusedUltracodeWire} + workflows` : ''}
+                </>
+              ) : (
+                <>
+                  {displayEffort === 'xhigh' ? 'xHigh' : capitalize(displayEffort ?? 'high')} effort
+                  {displayEffort === focusedDefaultEffort ? ` (default)` : ``}
+                </>
+              )}{' '}
+              <Text color="subtle">← → to adjust</Text>
             </Text>
           ) : (
             <Text color="subtle">
@@ -344,28 +428,24 @@ function EffortLevelIndicator({ effort }: { effort?: EffortLevel }): React.React
   return <Text color={effort ? 'claude' : 'subtle'}>{effortLevelToSymbol(effort ?? 'low')}</Text>;
 }
 
-function cycleEffortLevel(
-  current: EffortLevel,
+/**
+ * densable gbp-shaped cycle over the picker ladder (MDe levels + optional
+ * ultracode). When current isn't in the ladder (e.g. medium on DeepSeek),
+ * snap to high if present else the last rung, then step.
+ */
+function cyclePickerEffort(
+  current: PickerEffort,
   direction: 'left' | 'right',
-  includeXhigh: boolean,
-  includeMax: boolean,
-): EffortLevel {
-  const levels: EffortLevel[] = [
-    'low',
-    'medium',
-    'high',
-    ...(includeXhigh ? (['xhigh'] as const) : []),
-    ...(includeMax ? (['max'] as const) : []),
-  ];
-  // If the current level isn't in the cycle (e.g. 'max' after switching to a
-  // non-Opus model), clamp to 'high'.
+  levels: readonly PickerEffort[],
+): PickerEffort {
+  if (levels.length === 0) return current;
   const idx = levels.indexOf(current);
-  const currentIndex = idx !== -1 ? idx : levels.indexOf('high');
+  const highIdx = levels.indexOf('high');
+  const currentIndex = idx !== -1 ? idx : highIdx !== -1 ? highIdx : levels.length - 1;
   if (direction === 'right') {
     return levels[(currentIndex + 1) % levels.length]!;
-  } else {
-    return levels[(currentIndex - 1 + levels.length) % levels.length]!;
   }
+  return levels[(currentIndex - 1 + levels.length) % levels.length]!;
 }
 
 function getDefaultEffortLevelForOption(value?: string): EffortLevel {
