@@ -15,8 +15,9 @@
 | 4 | **会话中开/关 ultracode** | control `apply_flag_settings { "ultracode": true/false }` | 开：flag + 强制顶档 wire + N9；关：清 flag |
 | 5 | 别名开 ultracode | control `apply_flag_settings { "effortLevel": "ultracode" }` | 与 densable 一致：等价于 `ultracode: true` |
 | 6 | **查询当前状态** | control `get_settings` → `applied` | 返回运行时真实值，见 §3 |
-| 7 | 非法值不崩 | `--effort not-a-level` | soft-warn 到 stderr，走默认 effort |
-| 8 | fenced JSON 容错 | buddy / memdir | 模型输出带 \`\`\` 不再刷 ERROR（densable eee） |
+| 7 | **查询模型能力** | `get_settings` → `applied.effortLevels` / `applied.ultracodeOfferable` | fork 扩展：滑条刻度 + Ultracode 档是否可显示，Host 不用再维护模型表 |
+| 8 | 非法值不崩 | `--effort not-a-level` | soft-warn 到 stderr，走默认 effort |
+| 9 | fenced JSON 容错 | buddy / memdir | 模型输出带 \`\`\` 不再刷 ERROR（densable eee） |
 
 ---
 
@@ -41,13 +42,16 @@
     "model": "claude-opus-4-7",
     "effort": "xhigh",      // 当前 wire 档 | null（模型不支持 effort 时）
     "ultracode": true,       // footer「· Ultracode」/ 滑条末档高亮
-    "advisor": null          // 可选
+    "advisor": null,          // 可选
+    "effortLevels": ["low", "medium", "high", "xhigh", "max"], // 可选：滑条刻度（该模型支持的档）
+    "ultracodeOfferable": true // 可选：false 时 UI 隐藏 Ultracode 档
   }
 }
 ```
 
 - 改完 `apply_flag_settings` 再查一次 `get_settings`，以 `applied` 为准刷新 UI。
 - 模型不支持 effort / workflows 门闩关闭时，`applied.ultracode` 必为 `false`——**UI 应隐藏 Ultracode 档，不要假开**。
+- 滑条刻度直接用 `applied.effortLevels`（如 deepseek-v4-pro 为 `["high","max"]`）；旧版本 CLI 没有这两个扩展字段，Host 需按模型表做缺省回退。
 
 ---
 

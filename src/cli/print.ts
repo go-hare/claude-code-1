@@ -315,6 +315,8 @@ import {
   resolveAppliedEffort,
   isUltracodeModeActive,
   isUltracodeEffortAlias,
+  isUltracodeOfferable,
+  getSupportedEffortLevels,
   parseEffortValue,
   getUltracodeEffortForModel,
   unpinAllEffortLaunchPins,
@@ -4580,6 +4582,10 @@ function runHeadlessStreaming(
               effort: typeof effort === 'string' ? effort : null,
               advisor,
               ultracode,
+              // Fork extension: host slider capability surface (densable
+              // applied does not include these; optional + backward-compat).
+              effortLevels: getSupportedEffortLevels(model),
+              ultracodeOfferable: isUltracodeOfferable(model),
             },
             ...(settingsErrors.length > 0 ? { errors: settingsErrors } : {}),
           })

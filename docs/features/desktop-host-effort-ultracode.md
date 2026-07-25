@@ -119,7 +119,9 @@ await client.applyFlagSettings({ ultracode: false })
     "model": "claude-opus-4-7",
     "effort": "xhigh",          // string 档 | null（模型不支持 effort / 数值 ant-only 等）
     "ultracode": true,          // boolean：当前是否处于 ultracode 模式（Dee）
-    "advisor": null             // string | null，可选
+    "advisor": null,            // string | null，可选
+    "effortLevels": ["low", "medium", "high", "xhigh", "max"],  // 可选（fork 扩展）
+    "ultracodeOfferable": true  // 可选（fork 扩展）：UI 是否应显示 Ultracode 档
   },
   "errors": [ /* 可选：settings 校验错误 */ ]
 }
@@ -131,6 +133,8 @@ await client.applyFlagSettings({ ultracode: false })
 | `applied.ultracode` | footer「· Ultracode」、末档高亮 |
 | `applied.model` | 当前主模型 |
 | `applied.advisor` | 可选；无 advisor 时为 `null` |
+| `applied.effortLevels` | **可选（fork 扩展）**：该模型支持的 effort 档列表，滑条刻度用。模型无 effort 能力时为 `[]`；旧版本 CLI 无此字段，Host 需做缺省回退（按模型表缓存） |
+| `applied.ultracodeOfferable` | **可选（fork 扩展）**：workflows 可用且模型有顶档 wire 时为 `true`；为 `false` 时 UI 应隐藏 Ultracode 档，不要假开 |
 
 **查询幂等：** 改完 `apply_flag_settings` 后再发 `get_settings`，以 `applied.ultracode` / `applied.effort` 为准刷新 UI。
 
@@ -154,7 +158,7 @@ await client.applyFlagSettings({ ultracode: false })
 - 模型 **无 effort 能力** 时：`applied.effort` 可为 `null`；ultracode **不会** 伪造成 active（`applied.ultracode === false`）。
 - ultracode **还依赖 workflows 门闩**（`disableWorkflows` / `enableWorkflows` / 环境与策略）。门闩关时：`isUltracodeOfferable` 为 false → **查出来也是 false**，Host 应隐藏 Ultracode 档，不要假开。
 - Host **暂无** 启动 JSON 字段 `effort_supported` / `ultracode_supported`（可选增强，未做）。探测方式：
-  1. 会话内 `get_settings` 看 `applied`；
+  1. 会话内 `get_settings` 看 `applied.effortLevels` / `applied.ultracodeOfferable`（fork 扩展字段，见 §3；旧版本 CLI 无此字段，需缺省回退）；
   2. 或产品侧按模型表缓存（推荐与 catalog 一致）。
 
 ---
