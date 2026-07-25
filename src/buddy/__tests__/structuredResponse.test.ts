@@ -36,4 +36,12 @@ describe('parseStructuredJSONObject', () => {
   test('returns null for non-JSON plain text', () => {
     expect(parseStructuredJSONObject('我这小仙人掌先不扎人。')).toBeNull()
   })
+
+  test('densable eee: outer fence only, no ERROR path on raw ```', () => {
+    // First strategy used to safeParseJSON(raw) with shouldLogError=true and
+    // log SyntaxError for fenced text; densable peels eee then silent parse.
+    expect(parseStructuredJSONObject('```\n{"reaction":"ok"}\n```')).toEqual({
+      reaction: 'ok',
+    })
+  })
 })

@@ -1,5 +1,12 @@
-import { safeParseJSON } from '../utils/json.js'
+import { safeParseJSON, stripMarkdownJsonFence } from '../utils/json.js'
 
+/**
+ * Parse model-emitted structured JSON.
+ *
+ * densable: strip outer fence (eee) first, then parse with shouldLogError=false
+ * (Ol(eee(e), !1)) so speculative model text never logError as SyntaxError.
+ * Mid-string fence / prose+object fall back to balanced `{…}` extract.
+ */
 export function parseStructuredJSONObject(
   text: string,
 ): Record<string, unknown> | null {
@@ -8,8 +15,11 @@ export function parseStructuredJSONObject(
     return null
   }
 
+  // densable eee path first — silent on failure (model output is speculative).
+  const stripped = stripMarkdownJsonFence(trimmed)
   const parsed =
-    safeParseJSON(trimmed) ??
+    safeParseJSON(stripped, false) ??
+    (stripped !== trimmed ? safeParseJSON(trimmed, false) : null) ??
     safeParseJSON(extractJsonFromFencedBlock(trimmed), false) ??
     safeParseJSON(extractBalancedJsonObject(trimmed), false)
 
@@ -19,6 +29,8 @@ export function parseStructuredJSONObject(
 }
 
 function extractJsonFromFencedBlock(text: string): string | null {
+  // densable eee only peels outer fence; keep mid-string ```json … ``` extract
+  // as fork fallback for models that wrap JSON mid-prose.
   const match = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
   return match?.[1]?.trim() || null
 }

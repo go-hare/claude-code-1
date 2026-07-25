@@ -4,6 +4,7 @@ import { errorMessage } from '../utils/errors.js'
 import { getDefaultSonnetModel } from '../utils/model/model.js'
 import { sideQuery } from '../utils/sideQuery.js'
 import type { LangfuseSpan } from '../services/langfuse/index.js'
+import { stripMarkdownJsonFence } from '../utils/json.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import {
   formatMemoryManifest,
@@ -132,7 +133,11 @@ async function selectRelevantMemories(
       return []
     }
 
-    const parsed: { selected_memories: string[] } = jsonParse(textBlock.text)
+    // densable: Ut(eee(u.text)) — strip outer ``` fence before strict parse.
+    // Without eee, fenced model output throws → WARN noise; densable peels first.
+    const parsed: { selected_memories: string[] } = jsonParse(
+      stripMarkdownJsonFence(textBlock.text),
+    )
     return parsed.selected_memories.filter(f => validFilenames.has(f))
   } catch (e) {
     if (signal.aborted) {

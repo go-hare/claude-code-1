@@ -39,6 +39,19 @@ function parseJSONUncached(json: string, shouldLogError: boolean): CachedParse {
   }
 }
 
+/**
+ * densable eee — strip one outer markdown fence from model text before JSON.parse.
+ * Leading ```lang (optional) and trailing ``` only; does not search mid-string.
+ * Used by memdir / buddy / side-query consumers that must tolerate fenced output.
+ */
+export function stripMarkdownJsonFence(text: string): string {
+  return text
+    .trim()
+    .replace(/^```[a-zA-Z]*\s*/, '')
+    .replace(/\s*```$/, '')
+    .trim()
+}
+
 const parseJSONCached = memoizeWithLRU(parseJSONUncached, json => json, 50)
 
 // Important: memoized for performance (LRU-bounded to 50 entries, small inputs only).
