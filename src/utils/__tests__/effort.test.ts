@@ -247,6 +247,8 @@ describe('parseCliEffortArg (densable YBn)', () => {
     expect(r.level).toBeUndefined()
     expect(r.warning).toContain("Unknown --effort value 'turbo'")
     expect(r.warning).toContain('low, medium, high, xhigh, max')
+    // densable YBn Valid values = cH only — ultracode is XLr alias, not listed
+    expect(r.warning).not.toContain('ultracode')
   })
 })
 

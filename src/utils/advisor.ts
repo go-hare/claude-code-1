@@ -121,6 +121,46 @@ export function getInitialAdvisorSetting(): string | undefined {
   return getInitialSettings().advisorModel
 }
 
+/**
+ * densable nZn body after enablement gate — base support + advisor allowlist.
+ * densable also has a capability-rank gate (advisor ≥ base); fork claude.ts
+ * does not — match the live request path, not invent rank.
+ */
+export function resolveAdvisorModelForBase(
+  advisorModel: string,
+  baseModel: string,
+): string | undefined {
+  // Lazy import avoids circular deps with model.js in some test graphs.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { normalizeModelStringForAPI, parseUserSpecifiedModel } =
+    require('./model/model.js') as typeof import('./model/model.js')
+  const normalized = normalizeModelStringForAPI(
+    parseUserSpecifiedModel(advisorModel),
+  )
+  if (!modelSupportsAdvisor(baseModel)) {
+    return undefined
+  }
+  if (!isValidAdvisorModel(normalized)) {
+    return undefined
+  }
+  return normalized
+}
+
+/**
+ * densable nZn — resolve the advisor model that will actually attach to API
+ * requests (enablement + base-model support + advisor-model allowlist).
+ * Used by get_settings.applied.advisor so hosts can query runtime state.
+ */
+export function resolveAppliedAdvisorModel(
+  advisorModel: string | undefined,
+  baseModel: string,
+): string | undefined {
+  if (!isAdvisorEnabled() || !advisorModel) {
+    return undefined
+  }
+  return resolveAdvisorModelForBase(advisorModel, baseModel)
+}
+
 export function getAdvisorUsage(
   usage: BetaUsage,
 ): Array<BetaUsage & { model: string }> {

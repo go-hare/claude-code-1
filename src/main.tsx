@@ -1464,17 +1464,17 @@ async function run(): Promise<CommanderCommand> {
     )
     .addOption(
       // densable YBn: soft-warn unknown --effort; accept cH + med alias + ultracode.
-      new Option(
-        '--effort <level>',
-        `Effort level for the current session (low, medium, high, xhigh, max, ultracode)`,
-      ).argParser((rawValue: string) => {
-        const { level, warning } = parseCliEffortArg(rawValue);
-        if (warning !== undefined) {
-          // densable YBn: soft-warn on stderr with trailing newline
-          process.stderr.write(`Warning: ${warning}\n`);
-        }
-        return level;
-      }),
+      // Help lists cH only (densable); ultracode is a XLr alias, not EffortLevel.
+      new Option('--effort <level>', `Effort level for the current session (low, medium, high, xhigh, max)`).argParser(
+        (rawValue: string) => {
+          const { level, warning } = parseCliEffortArg(rawValue);
+          if (warning !== undefined) {
+            // densable YBn: soft-warn on stderr with trailing newline
+            process.stderr.write(`Warning: ${warning}\n`);
+          }
+          return level;
+        },
+      ),
     )
     .option('--agent <agent>', `Agent for the current session. Overrides the 'agent' setting.`)
     .option('--betas <betas...>', 'Beta headers to include in API requests (API key users only)')

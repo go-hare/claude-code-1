@@ -198,6 +198,7 @@ import {
 import { TEAMMATE_MESSAGE_TAG, TICK_TAG } from 'src/constants/xml.js'
 import {
   getSettings_DEPRECATED,
+  getSettingsWithErrors,
   getSettingsWithSources,
 } from 'src/utils/settings/settings.js'
 import { settingsChangeDetector } from 'src/utils/settings/changeDetector.js'
@@ -312,7 +313,13 @@ import {
   modelSupportsMaxEffort,
   EFFORT_LEVELS,
   resolveAppliedEffort,
+  isUltracodeModeActive,
+  isUltracodeEffortAlias,
+  parseEffortValue,
+  getUltracodeEffortForModel,
+  unpinAllEffortLaunchPins,
 } from 'src/utils/effort.js'
+import { resolveAppliedAdvisorModel } from 'src/utils/advisor.js'
 import { modelSupportsAdaptiveThinking } from 'src/utils/thinking.js'
 import { modelSupportsAutoMode } from 'src/utils/betas.js'
 import { ensureModelStringsInitialized } from 'src/utils/model/modelStrings.js'
@@ -4476,6 +4483,69 @@ function runHeadlessStreaming(
             injectModelSwitchBreadcrumbs(modelArg, newModel)
           }
 
+          // densable apply_flag: effortLevel / ultracode write AppState directly
+          // (M9/UBn + XLr ultracode + N9), not only via settings disk sync.
+          // settings.effortLevel enum rejects "ultracode", so flag-only alias
+          // must be handled here. Model for wire resolution is post-override.
+          const effortModel = newModel
+          if ('effortLevel' in incoming) {
+            const raw = incoming.effortLevel
+            if (raw == null) {
+              setAppState(prev =>
+                prev.effortValue === undefined
+                  ? prev
+                  : { ...prev, effortValue: undefined },
+              )
+              unpinAllEffortLaunchPins()
+            } else {
+              // densable: M9(effortLevel) ?? UBn(effortLevel)
+              const wire =
+                parseEffortValue(raw) ??
+                (isUltracodeEffortAlias(raw)
+                  ? getUltracodeEffortForModel(effortModel)
+                  : undefined)
+              if (wire !== undefined || isUltracodeEffortAlias(raw)) {
+                // densable still N9 when clearing known null path only; here
+                // N9 on any accepted effortLevel write (including ultracode).
+                if (wire !== undefined) {
+                  setAppState(prev =>
+                    prev.effortValue === wire
+                      ? prev
+                      : { ...prev, effortValue: wire },
+                  )
+                  unpinAllEffortLaunchPins()
+                }
+                if (isUltracodeEffortAlias(raw)) {
+                  setAppState(prev =>
+                    prev.ultracode ? prev : { ...prev, ultracode: true },
+                  )
+                }
+              }
+            }
+          }
+          if ('ultracode' in incoming) {
+            const on = incoming.ultracode === true
+            setAppState(prev => {
+              if (
+                prev.ultracode === on &&
+                (!on ||
+                  prev.effortValue === getUltracodeEffortForModel(effortModel))
+              ) {
+                return prev
+              }
+              // densable: force catalog ultracode wire when enabling (xhigh).
+              const wire = getUltracodeEffortForModel(effortModel)
+              return {
+                ...prev,
+                ultracode: on,
+                effortValue: on && wire !== undefined ? wire : prev.effortValue,
+              }
+            })
+            if (on) {
+              unpinAllEffortLaunchPins()
+            }
+          }
+
           sendControlResponseSuccess(msg)
         } else if (msg.request.subtype === 'get_settings') {
           const currentAppState = getAppState()
@@ -4485,13 +4555,33 @@ function runHeadlessStreaming(
           const effort = modelSupportsEffort(model)
             ? resolveAppliedEffort(model, currentAppState.effortValue)
             : undefined
+          // densable Dee / nZn on applied.
+          const ultracode = isUltracodeModeActive(
+            model,
+            currentAppState.effortValue,
+            currentAppState.ultracode,
+          )
+          const advisor =
+            resolveAppliedAdvisorModel(currentAppState.advisorModel, model) ??
+            null
+          // densable: non-warning validation errors only.
+          const settingsErrors = getSettingsWithErrors()
+            .errors.filter(e => e.mcpErrorMetadata?.severity !== 'warning')
+            .map(e => ({
+              file: e.file,
+              path: String(e.path ?? ''),
+              message: e.message,
+            }))
           sendControlResponseSuccess(msg, {
             ...getSettingsWithSources(),
             applied: {
               model,
               // Numeric effort (ant-only) → null; SDK schema is string-level only.
               effort: typeof effort === 'string' ? effort : null,
+              advisor,
+              ultracode,
             },
+            ...(settingsErrors.length > 0 ? { errors: settingsErrors } : {}),
           })
         } else if (msg.request.subtype === 'stop_task') {
           const { task_id: taskId } = msg.request

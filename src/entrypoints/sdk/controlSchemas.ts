@@ -531,10 +531,46 @@ export const SDKControlGetSettingsResponseSchema = lazySchema(() =>
           // String levels only — numeric effort is ant-only and the
           // Zod→proto generator can't emit enum∪number unions.
           effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).nullable(),
+          // densable get_settings.applied.advisor / ultracode (nZn / Dee).
+          advisor: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              'Advisor model that will be attached to API requests, after enablement, allowlist, and pairing validation. Null when none will be attached; absent on workers that predate the field.',
+            ),
+          ultracode: z
+            .boolean()
+            .optional()
+            .describe(
+              'Whether ultracode (top-tier effort plus standing dynamic-workflow orchestration) is active for the session. Set per session via the `ultracode` settings key (--settings or apply_flag_settings).',
+            ),
         })
         .optional()
         .describe(
           'Runtime-resolved values after env overrides, session state, and model-specific defaults are applied. Unlike `effective` (disk merge), these reflect what will actually be sent to the API.',
+        ),
+      // densable get_settings.errors — non-warning validation failures.
+      errors: z
+        .array(
+          z.object({
+            file: z
+              .string()
+              .optional()
+              .describe(
+                'Path to the settings file that failed to parse or validate.',
+              ),
+            path: z
+              .string()
+              .describe(
+                'Dot-notation path to the field with the error, or empty string for whole-file errors.',
+              ),
+            message: z.string().describe('Human-readable error message.'),
+          }),
+        )
+        .optional()
+        .describe(
+          'Settings parse and validation errors. When non-empty, the listed files were skipped during the merge — their settings are not reflected in `effective` or `sources`.',
         ),
     })
     .describe(
