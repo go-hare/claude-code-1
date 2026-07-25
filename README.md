@@ -43,12 +43,13 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.15**），与 git tag 可能不同步。
+近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.16**），与 git tag 可能不同步。
 
-### 近期更新（2.7.5 → 2.7.15）
+### 近期更新（2.7.5 → 2.7.16）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.16** | **Host effort 元数据**：`get_settings.applied` 增加 `effortLevels` / `ultracodeOfferable`，桌面端可据此渲染可用 effort 档位与 ultracode 入口。 |
 | **2.7.15** | **Host Effort/Ultracode 链路**：densable Host `get_settings.ultracode` + `apply_flag` 直写；`eee` 剥 fence 再 parse，fenced JSON 不再刷 ERROR。 |
 | **2.7.14** | **贴图降级修复**：图片 resize 失败时降级为文本提示，不再整轮吞消息。 |
 | **2.7.13** | **贴图 Enter 抢键修复**：贴图时清 footer，避免两个 shell 同时响应 Enter 吞消息；Fable consent 拒绝时不再错误写入 sticky effort / N9。 |
@@ -84,7 +85,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.15`）。  
+安装失败时：`npm rm -g @go-hare/claude-code` 后再装 `@latest`（可钉版本 `@2.7.16`）。  
 旧文档里的全局包名 `claude-code` **不再**对应本仓库发布流。
 
 ---

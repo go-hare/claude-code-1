@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/claude-code-darwin-x64",
-  "version": "2.7.15",
+  "version": "2.7.16",
   "description": "Platform-specific binary for @go-hare/claude-code (macOS x64)",
   "os": [
     "darwin"
