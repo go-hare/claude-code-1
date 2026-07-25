@@ -114,6 +114,8 @@ export default function TextInput(props: Props): React.ReactNode {
     inputFilter: props.inputFilter,
     inlineGhostText: props.inlineGhostText,
     dim: chalk.dim,
+    liveValueRef: props.liveValueRef,
+    liveOffsetRef: props.liveOffsetRef,
   });
 
   return (

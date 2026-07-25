@@ -45,6 +45,8 @@ export default function VimTextInput(props: Props): React.ReactNode {
     inputFilter: props.inputFilter,
     onModeChange: props.onModeChange,
     onUndo: props.onUndo,
+    liveValueRef: props.liveValueRef,
+    liveOffsetRef: props.liveOffsetRef,
   });
 
   const { mode, setMode } = vimInputState;

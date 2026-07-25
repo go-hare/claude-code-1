@@ -2609,6 +2609,10 @@ function PromptInput({
     onKeyDownBefore,
     onSubmit: onTextInputSubmit,
     onChange,
+    // Share dual-write refs with useTextInput so paste insert + next keystroke
+    // (and Enter) rebuild from the post-paste buffer, not the stale value prop.
+    liveValueRef: liveInputRef,
+    liveOffsetRef: cursorOffsetRef,
     value: historyMatch
       ? getValueFromInput(typeof historyMatch === 'string' ? historyMatch : historyMatch.display)
       : input,

@@ -72,6 +72,12 @@ export type UseTextInputProps = {
   inputFilter?: (input: string, key: Key) => string
   inlineGhostText?: InlineGhostText
   dim?: (text: string) => string
+  /**
+   * Shared with PromptInput dual-write so paste insertTextAtCursor is visible
+   * to the next keystroke before the value prop re-renders.
+   */
+  liveValueRef?: { current: string }
+  liveOffsetRef?: { current: number }
 }
 
 export function useTextInput({
@@ -100,6 +106,8 @@ export function useTextInput({
   inputFilter,
   inlineGhostText,
   dim,
+  liveValueRef: externalLiveValueRef,
+  liveOffsetRef: externalLiveOffsetRef,
 }: UseTextInputProps): TextInputState {
   // Pre-warm the modifiers module for Apple Terminal (has internal guard, safe to call multiple times)
   if (env.terminal === 'Apple_Terminal') {
@@ -119,8 +127,15 @@ export function useTextInput({
   // wrong: after onChange('hello') live is ahead of props until the next
   // parent render; a sibling re-render with old originalValue would wipe it
   // and Enter would submit '' (message swallowed).
-  const liveValueRef = useRef(originalValue)
-  const liveOffsetRef = useRef(offset)
+  //
+  // PromptInput may pass shared refs written by insertTextAtCursor on image/
+  // large-text paste. Without sharing, paste dual-writes liveInputRef only;
+  // the next keystroke rebuilds from this hook's empty liveValueRef and
+  // onChange replaces the pill (text+image swallow).
+  const ownedLiveValueRef = useRef(originalValue)
+  const ownedLiveOffsetRef = useRef(offset)
+  const liveValueRef = externalLiveValueRef ?? ownedLiveValueRef
+  const liveOffsetRef = externalLiveOffsetRef ?? ownedLiveOffsetRef
   const prevPropValueRef = useRef(originalValue)
   const prevPropOffsetRef = useRef(offset)
   if (prevPropValueRef.current !== originalValue) {

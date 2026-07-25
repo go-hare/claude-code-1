@@ -212,6 +212,20 @@ export type BaseTextInputProps = {
    * Typeahead / history should preventDefault here so Enter is not double-handled.
    */
   readonly onKeyDownBefore?: (event: KeyboardEvent) => void
+
+  /**
+   * Optional shared live value ref (PromptInput dual-write / densable Ct).
+   * Image/text paste inserts via insertTextAtCursor write this before React
+   * re-renders. useTextInput must share it so the next keystroke rebuilds from
+   * the post-paste buffer instead of the stale value prop (pill wipe → swallow).
+   */
+  readonly liveValueRef?: React.MutableRefObject<string>
+
+  /**
+   * Optional shared live cursor offset ref (PromptInput dual-write / densable ze).
+   * Paired with liveValueRef for paste-then-type same-batch correctness.
+   */
+  readonly liveOffsetRef?: React.MutableRefObject<number>
 }
 
 /**

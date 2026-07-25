@@ -128,6 +128,24 @@ describe('resolveSubmitInputFromLive', () => {
     expect(resolveSubmitInputFromLive('', '')).toBe('')
     expect(resolveSubmitInputFromLive('   ', '  ')).toBe('')
   })
+
+  // Structural: shared live refs must bridge paste insert → useTextInput so the
+  // next keystroke does not rebuild from a stale empty liveValueRef and wipe the pill.
+  test('source: PromptInput passes liveInputRef/cursorOffsetRef into TextInput', async () => {
+    const src = await Bun.file(
+      new URL('../PromptInput.tsx', import.meta.url).pathname,
+    ).text()
+    expect(src).toMatch(/liveValueRef:\s*liveInputRef/)
+    expect(src).toMatch(/liveOffsetRef:\s*cursorOffsetRef/)
+  })
+
+  test('source: useTextInput accepts shared liveValueRef', async () => {
+    const src = await Bun.file(
+      new URL('../../../hooks/useTextInput.ts', import.meta.url).pathname,
+    ).text()
+    expect(src).toMatch(/liveValueRef:\s*externalLiveValueRef/)
+    expect(src).toMatch(/externalLiveValueRef\s*\?\?\s*ownedLiveValueRef/)
+  })
 })
 
 describe('maybeTruncateInput', () => {
