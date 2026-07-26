@@ -11,20 +11,41 @@
  * Avoid mocking getAPIProvider (process-global pollution). Select OpenAI via
  * CLAUDE_CODE_USE_OPENAI env. Mock only client + ChatGPT token surface.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
+// mock.module is process-global (last-write-wins). Spread the real module and
+// restore it afterwards — a no-op attachAnalyticsSink stub leaks out of this
+// file and makes scrollTelemetry.test.ts observe zero logged events.
+const analyticsSnap = snapshotModuleExports(
+  await import('src/services/analytics/index.js'),
+)
+
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   logEventAsync: async () => {},
   stripProtoFields: <V>(v: V) => v,
   attachAnalyticsSink: () => {},
   _resetForTesting: () => {},
 }))
+
+afterAll(() => {
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+})
 
 let getOpenAIClientCallCount = 0
 let chatCompletionsCreateCount = 0

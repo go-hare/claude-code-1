@@ -1,23 +1,49 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { mkdir, mkdtemp, writeFile, symlink, link } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.js', debugMock)
 mock.module('src/utils/log.js', logMock)
 
-// Isolate session id for uploads dir
+// Isolate session id for uploads dir.
+// mock.module is process-global (last-write-wins): spread the real module so
+// other exports (e.g. isMainThreadQueuedCommand) survive for later test files.
+// snapshotModuleExports copies own keys eagerly — a live namespace object would
+// rebind under mock.module and spread our own stub back in.
+const bootstrapSnap = snapshotModuleExports(
+  await import('../../../bootstrap/state.js'),
+)
 const TEST_SESSION = 'chrome-fileupload-test-session'
-mock.module('../../bootstrap/state.js', () => ({
+const chromeStateMock = () => ({
+  ...bootstrapSnap,
   getSessionId: () => TEST_SESSION,
   getOriginalCwd: () => process.cwd(),
   getCwd: () => process.cwd(),
-}))
+})
+mock.module('src/bootstrap/state.ts', chromeStateMock)
+mock.module('src/bootstrap/state.js', chromeStateMock)
+
+// Restore the real module — the stubbed getSessionId otherwise persists
+// process-wide for every test file loaded after this one.
+afterAll(() => {
+  mock.module('src/bootstrap/state.ts', () => ({ ...bootstrapSnap }))
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+})
 
 import { getEmptyToolPermissionContext } from '../../../Tool.js'
 import {

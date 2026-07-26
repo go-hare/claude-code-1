@@ -7,6 +7,16 @@ import {
 } from '../../../tests/mocks/settings.js'
 
 const settingsSnap = snapshotModuleExports(realSettings)
+// mock.module is process-global (last-write-wins) — snapshot the real modules
+// and spread them so co-suites keep the full export surface. Replacing
+// analytics/index wholesale stomps attachAnalyticsSink / _resetForTesting and
+// silently breaks scrollTelemetry.test.ts when it loads later.
+const analyticsSnap = snapshotModuleExports(
+  await import('src/services/analytics/index.js'),
+)
+const growthbookSnap = snapshotModuleExports(
+  await import('src/services/analytics/growthbook.js'),
+)
 
 let settingsState: {
   workflowKeywordTriggerEnabled?: boolean
@@ -23,16 +33,22 @@ mock.module(
 )
 
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
 
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, defaultValue: unknown) =>
     defaultValue ?? true,
 }))
 
 afterAll(() => {
   restoreSettingsMockWith(mock.module, settingsSnap)
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
 })
 
 const { getWorkflowKeywordAttachments } = await import(

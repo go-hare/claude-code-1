@@ -1,4 +1,12 @@
-import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import {
   _resetTmuxControlModeProbeForTesting,
   _setWindowsPlatformForTesting,
@@ -24,7 +32,28 @@ const ORIG = {
   SSH_CONNECTION: process.env.SSH_CONNECTION,
   SSH_CLIENT: process.env.SSH_CLIENT,
   SSH_TTY: process.env.SSH_TTY,
+  ENTRYPOINT: process.env.CLAUDE_CODE_ENTRYPOINT,
 }
+
+/**
+ * Env keys that gate isFullscreenEnvEnabled / isFullscreenFeatureGateEnabled.
+ * Cleared before every test: the suite asserts against an unset baseline, but
+ * the harness itself may run under CLAUDE_CODE_SESSION_KIND=bg (backgrounded
+ * session) or inside tmux, and those short-circuit the gate before any
+ * per-test setup runs. Tests that need a value set it explicitly.
+ */
+const GATE_ENV_KEYS = [
+  'CLAUDE_CODE_NO_FLICKER',
+  'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN',
+  'CLAUDE_CODE_SESSION_KIND',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'TMUX',
+  'TERM_PROGRAM',
+  'USER_TYPE',
+  'SSH_CONNECTION',
+  'SSH_CLIENT',
+  'SSH_TTY',
+] as const
 
 let settingsTui: 'default' | 'fullscreen' | undefined
 
@@ -62,11 +91,18 @@ afterAll(() => {
   ])
 })
 
+beforeEach(() => {
+  for (const k of GATE_ENV_KEYS) delete process.env[k]
+  _setWindowsPlatformForTesting(undefined)
+  _resetTmuxControlModeProbeForTesting()
+})
+
 afterEach(() => {
   const restore = (k: string, v: string | undefined) => {
     if (v === undefined) delete process.env[k]
     else process.env[k] = v
   }
+  restore('CLAUDE_CODE_ENTRYPOINT', ORIG.ENTRYPOINT)
   restore('CLAUDE_CODE_NO_FLICKER', ORIG.NO_FLICKER)
   restore('CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN', ORIG.DISABLE_ALT)
   restore('CLAUDE_CODE_SESSION_KIND', ORIG.SESSION_KIND)
@@ -111,6 +147,22 @@ describe('isFullscreenEnvEnabled', () => {
     delete process.env.CLAUDE_CODE_NO_FLICKER
     process.env.CLAUDE_CODE_SESSION_KIND = 'bg'
     expect(isFullscreenEnvEnabled()).toBe(true)
+  })
+
+  // The bare "bg → true" case above cannot fail: unset env already defaults to
+  // true. Pin the precedence that actually distinguishes the bg branch — it is
+  // checked before the NO_FLICKER opt-out, so bg beats an explicit 0, but it
+  // sits after DISABLE_ALTERNATE_SCREEN, which still wins.
+  test('bg session outranks NO_FLICKER=0 but not DISABLE_ALTERNATE_SCREEN', () => {
+    process.env.CLAUDE_CODE_NO_FLICKER = '0'
+    expect(isFullscreenEnvEnabled()).toBe(false)
+
+    process.env.CLAUDE_CODE_SESSION_KIND = 'bg'
+    expect(isFullscreenEnvEnabled()).toBe(true)
+
+    delete process.env.CLAUDE_CODE_NO_FLICKER
+    process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = '1'
+    expect(isFullscreenEnvEnabled()).toBe(false)
   })
 
   test('settings.tui=default forces off (absent env)', () => {

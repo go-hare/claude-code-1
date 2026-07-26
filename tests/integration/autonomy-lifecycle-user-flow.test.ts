@@ -63,11 +63,29 @@ beforeAll(async () => {
 }, 120_000)
 
 async function runAutonomyCli(args: string[]): Promise<string> {
+  // This helper asserts the child writes nothing to stderr, so drop the
+  // inherited vars that make it talk: FORCE_COLOR contradicts our NO_COLOR=1
+  // (Bun then warns "the 'NO_COLOR' env is ignored"), and the bg-session vars
+  // leak in when the suite runs from a backgrounded Claude Code session.
+  const STRIPPED_CHILD_ENV = new Set([
+    'FORCE_COLOR',
+    'CLAUDE_CODE_SESSION_KIND',
+    'CLAUDE_CODE_SESSION_NAME',
+    'CLAUDE_BG_BACKEND',
+    'CLAUDE_BG_SOURCE',
+    'CLAUDE_JOB_DIR',
+  ])
+  const inherited: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined || STRIPPED_CHILD_ENV.has(k)) continue
+    inherited[k] = v
+  }
+
   const proc = Bun.spawn({
     cmd: [process.execPath, CLI_ENTRYPOINT, 'autonomy', ...args],
     cwd: tempDir,
     env: {
-      ...process.env,
+      ...inherited,
       CLAUDE_CONFIG_DIR: configDir,
       CI: 'true',
       GITHUB_ACTIONS: 'true',
