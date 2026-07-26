@@ -26,13 +26,11 @@ const path = require('path')
 
 // Dev environment detection: if .git exists at package root, we're in the monorepo
 if (existsSync(path.join(__dirname, '.git'))) {
+  // densable Claude in Chrome uses @ant/claude-for-chrome-mcp + native host
+  // (CLI --chrome / /chrome). Do not run hangye mcp-chrome-bridge setup.
   const r = spawnSync(
     'node',
-    [
-      'scripts/run-parallel.mjs',
-      'scripts/postinstall.cjs',
-      'scripts/setup-chrome-mcp.mjs',
-    ],
+    ['scripts/run-parallel.mjs', 'scripts/postinstall.cjs'],
     { cwd: __dirname, stdio: 'inherit' },
   )
   process.exit(r.status ?? 0)

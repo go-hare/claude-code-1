@@ -3,8 +3,6 @@ node_modules
 dist
 .publish-main-staging/
 *.tgz
-!packages/mcp-chrome-bridge/dist/
-!packages/mcp-chrome-bridge/dist/**
 coverage
 .env
 *.log
