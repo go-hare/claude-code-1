@@ -56,27 +56,43 @@ function getWtPaneTimeoutMs(): number {
     : WT_PANE_TIMEOUT_DEFAULT_MS
 }
 
+/**
+ * One read attempt: the pid on success, or the Error describing why this
+ * attempt failed (missing file, non-numeric content, non-positive pid).
+ */
+async function readPidFileOnce(pidFile: string): Promise<number | Error> {
+  try {
+    const content = (await readFile(pidFile, 'utf-8')).trim()
+    if (!/^\d+$/.test(content)) {
+      return new Error(
+        `pidFile content not a valid pid: ${JSON.stringify(content)}`,
+      )
+    }
+    const pid = Number.parseInt(content, 10)
+    if (Number.isFinite(pid) && pid > 0) return pid
+    return new Error(`pidFile content parsed to invalid pid: ${pid}`)
+  } catch (err) {
+    return err instanceof Error ? err : new Error(String(err))
+  }
+}
+
 async function waitForPidFile(
   pidFile: string,
   timeoutMs: number,
 ): Promise<number> {
   const deadline = Date.now() + timeoutMs
-  let lastErr: unknown
-  while (Date.now() < deadline) {
-    try {
-      const content = (await readFile(pidFile, 'utf-8')).trim()
-      if (!/^\d+$/.test(content)) {
-        lastErr = new Error(
-          `pidFile content not a valid pid: ${JSON.stringify(content)}`,
-        )
-      } else {
-        const pid = Number.parseInt(content, 10)
-        if (Number.isFinite(pid) && pid > 0) return pid
-        lastErr = new Error(`pidFile content parsed to invalid pid: ${pid}`)
-      }
-    } catch (err) {
-      lastErr = err
-    }
+  let lastErr: Error | undefined
+  // Read first, check the clock after. A `while (Date.now() < deadline)`
+  // head-test loop reports whatever it saw *before* the final sleep, and
+  // setTimeout only guarantees a lower bound — under load the poll sleep
+  // overshoots the deadline, so the surfaced diagnostic degrades to a stale
+  // ENOENT even though the pidFile did land (with bad content) while we
+  // slept. That hides the real launch failure from the wrapped error.
+  for (;;) {
+    const attempt = await readPidFileOnce(pidFile)
+    if (typeof attempt === 'number') return attempt
+    lastErr = attempt
+    if (Date.now() >= deadline) break
     await new Promise(r => setTimeout(r, WT_PANE_POLL_INTERVAL_MS))
   }
   throw lastErr ?? new Error('pidFile never appeared')

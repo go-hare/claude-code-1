@@ -1,20 +1,14 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
-
-// Mock analytics / interactive / fullscreen so the module stays side-effect free.
-const logEventMock = mock((_name: string, _meta: Record<string, unknown>) => {})
-mock.module('../../services/analytics/index.ts', () => ({
-  logEvent: logEventMock,
-  logEventAsync: async () => {},
-  attachAnalyticsSink: () => {},
-  stripProtoFields: <T>(m: T) => m,
-}))
-mock.module('../../bootstrap/state.ts', () => ({
-  getIsInteractive: () => true,
-}))
-mock.module('../fullscreen.ts', () => ({
-  isFullscreenEnvEnabled: () => true,
-}))
-
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import { getIsInteractive, setIsInteractive } from '../../bootstrap/state.js'
 import {
   emitScrollTelemetrySummary,
   getScrollTelemetryForTesting,
@@ -27,6 +21,79 @@ import {
   resetScrollTelemetryForTesting,
   takeScrollTelemetrySummary,
 } from '../scrollTelemetry.js'
+
+// mock.module is process-global (last-write-wins). The previous version of this
+// file stubbed isFullscreenEnvEnabled → true on fullscreen.js, and that stub
+// leaked into fullscreen.test.ts whenever afterAll restore lost the race —
+// every expect(false) case there flaked. Do NOT mock fullscreen or
+// bootstrap/state. Drive those through real injection points:
+//   getIsInteractive       → setIsInteractive
+//   isFullscreenEnvEnabled → CLAUDE_CODE_NO_FLICKER=1
+// Only analytics is mocked so emit's logEvent is interceptable even when an
+// earlier suite already bound scrollTelemetry to a foreign analytics stub.
+const logEventMock = mock(
+  (_name: string, _meta: Record<string, boolean | number | undefined>) => {},
+)
+
+const analyticsSnap = snapshotModuleExports(
+  await import('../../services/analytics/index.js'),
+)
+const analyticsMock = () => ({
+  ...analyticsSnap,
+  logEvent: logEventMock,
+  logEventAsync: async (
+    name: string,
+    meta: Record<string, boolean | number | undefined>,
+  ) => {
+    logEventMock(name, meta)
+  },
+})
+mock.module('../../services/analytics/index.ts', analyticsMock)
+mock.module('../../services/analytics/index.js', analyticsMock)
+mock.module('src/services/analytics/index.ts', analyticsMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
+
+afterAll(() => {
+  const restore = () => ({ ...analyticsSnap })
+  mock.module('../../services/analytics/index.ts', restore)
+  mock.module('../../services/analytics/index.js', restore)
+  mock.module('src/services/analytics/index.ts', restore)
+  mock.module('src/services/analytics/index.js', restore)
+})
+
+const origInteractive = getIsInteractive()
+const ORIG_ENV = {
+  NO_FLICKER: process.env.CLAUDE_CODE_NO_FLICKER,
+  DISABLE_ALT: process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN,
+  SESSION_KIND: process.env.CLAUDE_CODE_SESSION_KIND,
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[key]
+  else process.env[key] = value
+}
+
+afterAll(() => {
+  setIsInteractive(origInteractive)
+  restoreEnv('CLAUDE_CODE_NO_FLICKER', ORIG_ENV.NO_FLICKER)
+  restoreEnv('CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN', ORIG_ENV.DISABLE_ALT)
+  restoreEnv('CLAUDE_CODE_SESSION_KIND', ORIG_ENV.SESSION_KIND)
+})
+
+beforeEach(() => {
+  // Force-on path of isFullscreenEnvEnabled (before settings / GB / win-ssh).
+  delete process.env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+  delete process.env.CLAUDE_CODE_SESSION_KIND
+  process.env.CLAUDE_CODE_NO_FLICKER = '1'
+  setIsInteractive(true)
+  // Re-claim analytics in case a sibling file re-mocked it between tests.
+  mock.module('../../services/analytics/index.ts', analyticsMock)
+  mock.module('../../services/analytics/index.js', analyticsMock)
+  mock.module('src/services/analytics/index.ts', analyticsMock)
+  mock.module('src/services/analytics/index.js', analyticsMock)
+  resetScrollTelemetryForTesting()
+  logEventMock.mockClear()
+})
 
 afterEach(() => {
   resetScrollTelemetryForTesting()
@@ -90,5 +157,18 @@ describe('scrollTelemetry', () => {
   test('emitScrollTelemetrySummary is a no-op when empty', () => {
     emitScrollTelemetrySummary()
     expect(logEventMock).not.toHaveBeenCalled()
+  })
+
+  test('emitScrollTelemetrySummary is a no-op when non-interactive', () => {
+    setIsInteractive(false)
+    try {
+      recordScroll()
+      emitScrollTelemetrySummary()
+      expect(logEventMock).not.toHaveBeenCalled()
+      // counters survive — nothing was taken
+      expect(hasScrollTelemetry()).toBe(true)
+    } finally {
+      setIsInteractive(true)
+    }
   })
 })
