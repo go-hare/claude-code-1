@@ -21,6 +21,7 @@ import { createAbortController } from './abortController.js'
 import type { FileStateCache } from './fileStateCache.js'
 import type { CacheSafeParams } from './forkedAgent.js'
 import { getMainLoopModel } from './model/model.js'
+import { resolveChromeAppendSystemPrompt } from './claudeInChrome/prompt.js'
 import { asSystemPrompt } from './systemPromptType.js'
 import {
   shouldEnableThinkingByDefault,
@@ -124,11 +125,13 @@ export async function buildSideQuestionFallbackParams({
       customSystemPrompt,
     })
 
+  const chromeResolvedAppend =
+    resolveChromeAppendSystemPrompt(appendSystemPrompt)
   const systemPrompt = asSystemPrompt([
     ...(customSystemPrompt !== undefined
       ? [customSystemPrompt]
       : defaultSystemPrompt),
-    ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+    ...(chromeResolvedAppend ? [chromeResolvedAppend] : []),
   ])
 
   // Strip in-progress assistant message (stop_reason === null) — same guard

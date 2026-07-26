@@ -6,7 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 
 import { createBridgeClient } from './bridgeClient.js'
-import { BROWSER_TOOLS } from './browserTools.js'
+import { BRIDGE_ONLY_BROWSER_TOOLS, BROWSER_TOOLS } from './browserTools.js'
 import { createMcpSocketClient } from './mcpSocketClient.js'
 import { createMcpSocketPool } from './mcpSocketPool.js'
 import { handleToolCall } from './toolCalls.js'
@@ -53,10 +53,11 @@ export function createClaudeForChromeMcpServer(
     if (context.isDisabled?.()) {
       return { tools: [] }
     }
+    // densable: multi-browser tools only with bridge; socket-only omits them.
     return {
       tools: context.bridgeConfig
         ? BROWSER_TOOLS
-        : BROWSER_TOOLS.filter(t => t.name !== 'switch_browser'),
+        : BROWSER_TOOLS.filter(t => !BRIDGE_ONLY_BROWSER_TOOLS.has(t.name)),
     }
   })
 

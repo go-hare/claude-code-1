@@ -999,7 +999,7 @@ export function Config({
     {
       id: 'claudeInChromeDefaultEnabled',
       label: 'Claude in Chrome enabled by default',
-      value: globalConfig.claudeInChromeDefaultEnabled ?? true,
+      value: globalConfig.claudeInChromeDefaultEnabled ?? false, // densable: undefined → false
       type: 'boolean' as const,
       onChange(enabled: boolean) {
         saveGlobalConfig(current => ({

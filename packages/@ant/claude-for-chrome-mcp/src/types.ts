@@ -204,4 +204,10 @@ export interface SocketClient {
     | 'no_other_browsers'
     | null
   >
+  /** densable listConnectedExtensions — bridge multi-browser. */
+  listConnectedExtensions?(): Promise<
+    Array<ChromeExtensionInfo & { isLocal?: boolean }>
+  >
+  /** densable selectExtensionById — pick browser without pairing broadcast. */
+  selectExtensionById?(deviceId: string, name: string): void
 }

@@ -310,6 +310,7 @@ import {
   setAllowedChannels,
   setAllowedSettingSources,
   setChromeFlagOverride,
+  setClaudeInChromeSessionPromptActive,
   setClientType,
   setCwdState,
   setDirectConnectServerUrl,
@@ -2128,7 +2129,8 @@ async function run(): Promise<CommanderCommand> {
         }
       }
 
-      // Extract Claude in Chrome option and enforce claude.ai subscriber check (unless user is ant)
+      // Claude in Chrome: explicit --chrome/--no-chrome, CFC, or defaultEnabled (densable Dtn).
+      // Auto-enable (densable YOs) still requires subscriber + extension evidence + GB.
       const chromeOpts = options as { chrome?: boolean };
       // Store the explicit CLI flag so teammates can inherit it
       setChromeFlagOverride(chromeOpts.chrome);
@@ -2152,6 +2154,9 @@ async function run(): Promise<CommanderCommand> {
             ...chromeMcpConfig,
           };
           allowedTools.push(...chromeMcpTools);
+          // Mark full chrome prompt active so mid-session Off can strip it
+          // and This session On can inject without restart.
+          setClaudeInChromeSessionPromptActive(true);
           if (chromeSystemPrompt) {
             appendSystemPrompt = appendSystemPrompt
               ? `${chromeSystemPrompt}\n\n${appendSystemPrompt}`

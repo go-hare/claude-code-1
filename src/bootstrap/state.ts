@@ -167,6 +167,9 @@ type State = {
   inlinePlugins: Array<string>
   // Explicit --chrome / --no-chrome flag value (undefined = not set on CLI)
   chromeFlagOverride: boolean | undefined
+  // Full chrome system prompt active for this session (launch --chrome or /chrome This session On).
+  // Mid-session Off clears this so subsequent turns drop chrome automation instructions.
+  claudeInChromeSessionPromptActive: boolean
   // Use cowork_plugins directory instead of plugins (--cowork flag or env var)
   useCoworkPlugins: boolean
   // Session-only bypass permissions mode flag (not persisted)
@@ -401,6 +404,7 @@ function getInitialState(): State {
     inlinePlugins: [],
     // Explicit --chrome / --no-chrome flag value (undefined = not set on CLI)
     chromeFlagOverride: undefined,
+    claudeInChromeSessionPromptActive: false,
     // Use cowork_plugins directory instead of plugins
     useCoworkPlugins: false,
     // Session-only bypass permissions mode flag (not persisted)
@@ -1517,6 +1521,14 @@ export function setChromeFlagOverride(value: boolean | undefined): void {
 
 export function getChromeFlagOverride(): boolean | undefined {
   return STATE.chromeFlagOverride
+}
+
+export function setClaudeInChromeSessionPromptActive(value: boolean): void {
+  STATE.claudeInChromeSessionPromptActive = value
+}
+
+export function getClaudeInChromeSessionPromptActive(): boolean {
+  return STATE.claudeInChromeSessionPromptActive
 }
 
 export function setUseCoworkPlugins(value: boolean): void {

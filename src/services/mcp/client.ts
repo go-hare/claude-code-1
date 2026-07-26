@@ -273,6 +273,10 @@ function getMcpToolIdleTimeoutMs(
 }
 
 import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.js'
+import {
+  isChromeFileUploadToolName,
+  prepareChromeFileUploadInput,
+} from '../../utils/claudeInChrome/fileUpload.js'
 
 // Lazy: toolRendering.tsx pulls React/ink; only needed when Claude-in-Chrome MCP server is connected
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -1752,7 +1756,11 @@ export const connectToServer = memoize(
 )
 
 /**
- * Clears the memoize cache for a specific server
+ * Clears the memoize cache for a specific server.
+ * Only runs connect/cleanup when the connection is already memoized — never
+ * starts a fresh connect just to tear it down (pending/failed /chrome Off,
+ * config-only entries). Always drops connection + tools/resources/commands
+ * cache entries so the next mount fetches clean state.
  * @param name Server name
  * @param serverRef Server configuration
  */
@@ -1762,14 +1770,23 @@ export async function clearServerCache(
 ): Promise<void> {
   const key = getServerCacheKey(name, serverRef)
 
-  try {
-    const wrappedClient = await connectToServer(name, serverRef)
+  // lodash memoize Cache supports .has; avoid connectToServer when missing so
+  // disable paths do not race a brand-new Chrome native-host connect.
+  const alreadyCached =
+    typeof connectToServer.cache?.has === 'function'
+      ? connectToServer.cache.has(key)
+      : connectToServer.cache.get(key) !== undefined
 
-    if (wrappedClient.type === 'connected') {
-      await wrappedClient.cleanup()
+  if (alreadyCached) {
+    try {
+      const wrappedClient = await connectToServer(name, serverRef)
+
+      if (wrappedClient.type === 'connected') {
+        await wrappedClient.cleanup()
+      }
+    } catch {
+      // Ignore errors - server might have failed to connect
     }
-  } catch {
-    // Ignore errors - server might have failed to connect
   }
 
   // Clear from cache (both connection and fetch caches so reconnect
@@ -2011,6 +2028,27 @@ export const fetchToolsForClient = memoizeWithLRU(
               }
 
               const startTime = Date.now()
+              // densable Biy: Host-side file_upload path policy (Uiy/Ned) with live
+              // ToolPermissionContext before forwarding to Claude in Chrome MCP.
+              let callArgs = args
+              if (
+                isClaudeInChromeMCPServer(client.name) &&
+                isChromeFileUploadToolName(tool.name)
+              ) {
+                const permCtx = context.getAppState().toolPermissionContext
+                const prepared = await prepareChromeFileUploadInput(
+                  tool.name,
+                  args,
+                  permCtx,
+                )
+                if ('error' in prepared) {
+                  throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                    prepared.error,
+                    'chrome file_upload path rejected',
+                  )
+                }
+                callArgs = prepared.input
+              }
               const MAX_SESSION_RETRIES = 1
               // Official 2.1.193/206: headersHelper may mint short-lived auth
               // headers; OAuth may hold a refresh_token. On 401 re-run the
@@ -2030,7 +2068,7 @@ export const fetchToolsForClient = memoizeWithLRU(
                     client: connectedClient,
                     clientConnection: client,
                     tool: tool.name,
-                    args,
+                    args: callArgs,
                     meta,
                     signal: context.abortController.signal,
                     setAppState: context.setAppState,

@@ -1,3 +1,17 @@
+/**
+ * densable: multi-browser tools only when copper/chrome bridge is on.
+ * Shared by ListTools, CLI allowedTools, and browser_batch prep.
+ */
+export const BRIDGE_ONLY_BROWSER_TOOL_NAMES = [
+  'switch_browser',
+  'list_connected_browsers',
+  'select_browser',
+] as const
+
+export const BRIDGE_ONLY_BROWSER_TOOLS = new Set<string>(
+  BRIDGE_ONLY_BROWSER_TOOL_NAMES,
+)
+
 export const BROWSER_TOOLS = [
   {
     name: 'javascript_tool',
@@ -106,6 +120,39 @@ export const BROWSER_TOOLS = [
         },
       },
       required: ['ref', 'value', 'tabId'],
+    },
+  },
+  {
+    name: 'browser_batch',
+    description:
+      "Execute a sequence of browser tool calls in ONE round trip. Each item is {name, input} where input is exactly what you'd pass to that tool standalone. Actions execute SEQUENTIALLY (not in parallel) and stop on the first error. Use this tool extensively to quickly execute work whenever you can predict two or more steps ahead — e.g. navigate, click a field, type, press Return, screenshot. Each tool's own permission check runs per item — if an action navigates to a domain without permission, the next item's check fails and the batch stops. Screenshots and other images are returned interleaved with outputs; coordinates you write in THIS batch refer to the screenshot taken BEFORE this call. browser_batch cannot be nested.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        actions: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description:
+                  'Tool name (e.g. computer, navigate, find, tabs_create_mcp). browser_batch cannot be nested.',
+              },
+              input: {
+                type: 'object',
+                description:
+                  "That tool's input — same shape you'd pass when calling it directly.",
+              },
+            },
+            required: ['name', 'input'],
+          },
+          description:
+            'List of tool calls to execute sequentially. Example: [{"name":"computer","input":{"action":"left_click","coordinate":[100,200],"tabId":123}},{"name":"computer","input":{"action":"type","text":"hello","tabId":123}},{"name":"navigate","input":{"url":"https://example.com","tabId":123}}]',
+        },
+      },
+      required: ['actions'],
     },
   },
   {
@@ -378,14 +425,14 @@ export const BROWSER_TOOLS = [
     name: 'tabs_context_mcp',
     title: 'Tabs Context',
     description:
-      'Get context information about the current MCP tab group. Returns all tab IDs inside the group if it exists. CRITICAL: You must get the context at least once before using other browser automation tools so you know what tabs exist. Each new conversation should create its own new tab (using tabs_create_mcp) rather than reusing existing tabs, unless the user explicitly asks to use an existing tab.',
+      'Get context information about the current MCP tab group. Returns all tab IDs inside the group if it exists. CRITICAL: Call this first (with createIfEmpty: true, or omit createIfEmpty — Host defaults it to true) before tabs_create_mcp / navigate / computer. Without a group, tabs_create_mcp fails with "No MCP tab group exists". Each new conversation should create its own new tab (using tabs_create_mcp) rather than reusing existing tabs, unless the user explicitly asks to use an existing tab.',
     inputSchema: {
       type: 'object',
       properties: {
         createIfEmpty: {
           type: 'boolean',
           description:
-            'Creates a new MCP tab group if none exists, creates a new Window with a new tab group containing an empty tab (which can be used for this conversation). If a MCP tab group already exists, this parameter has no effect.',
+            'Creates a new MCP tab group if none exists (new window + empty tab). If a group already exists, no effect. Omit or true for session start; pass false only to probe without creating.',
         },
       },
       required: [],
@@ -395,11 +442,28 @@ export const BROWSER_TOOLS = [
     name: 'tabs_create_mcp',
     title: 'Tabs Create',
     description:
-      'Creates a new empty tab in the MCP tab group. CRITICAL: You must get the context using tabs_context_mcp at least once before using other browser automation tools so you know what tabs exist.',
+      'Creates a new empty tab in the existing MCP tab group. Does NOT create the group itself — if you get "No MCP tab group exists", call tabs_context_mcp with createIfEmpty: true first, then retry. Prefer that bootstrap before any other browser tools.',
     inputSchema: {
       type: 'object',
       properties: {},
       required: [],
+    },
+  },
+  {
+    name: 'tabs_close_mcp',
+    title: 'Tabs Close',
+    description:
+      "Close a tab in the MCP tab group by its ID. Use to clean up tabs you're done with. Only tabs in this session's group are closable; call tabs_context_mcp first to get valid IDs. If you close the group's last tab, Chrome auto-removes the group — the next tabs_context_mcp with createIfEmpty starts fresh.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'integer',
+          description:
+            "The ID of the tab to close. Must be in this session's tab group. Get valid IDs from tabs_context_mcp.",
+        },
+      },
+      required: ['tabId'],
     },
   },
   {
@@ -534,13 +598,65 @@ export const BROWSER_TOOLS = [
     },
   },
   {
+    name: 'file_upload',
+    description:
+      'Upload one or multiple files to a file input element on the page. Do not click on file upload buttons or file inputs — clicking opens a native file picker dialog that you cannot see or interact with. Instead, use read_page or find to locate the file input element, then use this tool with its ref to upload files directly. Pass `paths` only (never pre-encoded `files`). When run via Claude Code, the Host enforces densable session allowlist (attachments, /add-dir, project cwd, or bypass-permissions) before the bridge sees contents. Symlinks are resolved; hard-linked files (e.g. many node_modules entries) are rejected — copy the file first. Combined size of all files in a single call must stay under 10 MB.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Absolute paths for Host session-allowlist expansion (attachments, /add-dir, project cwd). Combined size ≤10 MB. Do not pass base64 `files`.',
+        },
+        ref: {
+          type: 'string',
+          description:
+            'Element reference ID of the file input from read_page or find tools (e.g., "ref_1", "ref_2").',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            "Tab ID where the file input is located. Use tabs_context_mcp first if you don't have a valid tab ID.",
+        },
+      },
+      required: ['paths', 'ref', 'tabId'],
+    },
+  },
+  {
     name: 'switch_browser',
     description:
-      "Switch which Chrome browser is used for browser automation. Call this when the user wants to connect to a different Chrome browser. Broadcasts a connection request to all Chrome browsers with the extension installed — the user clicks 'Connect' in the desired browser.",
+      "Send a connection request to every Chrome browser with the extension installed and wait (up to 2 minutes) for the user to click 'Connect' in the one they want to use. The user can name the browser when they connect. Use this when the user wants to pick the browser themselves from inside Chrome rather than choosing from a list; otherwise prefer select_browser with a known deviceId.",
     inputSchema: {
       type: 'object',
       properties: {},
       required: [],
+    },
+  },
+  {
+    name: 'list_connected_browsers',
+    description:
+      "List all Chrome browsers (extension instances) currently connected to this account. Returns each browser's deviceId, display name, OS platform, and whether it appears to be on this computer. Use this before select_browser to present choices to the user.",
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'select_browser',
+    description:
+      'Select a specific Chrome browser by deviceId for browser automation, without broadcasting a pairing request. Use this after list_connected_browsers when the user has chosen one from the list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        deviceId: {
+          type: 'string',
+          description: 'The deviceId from list_connected_browsers.',
+        },
+      },
+      required: ['deviceId'],
     },
   },
 ]

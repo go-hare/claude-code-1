@@ -1,4 +1,4 @@
-import { readdirSync } from 'fs'
+import { readdirSync, statSync } from 'fs'
 import { stat } from 'fs/promises'
 import { homedir, platform, tmpdir, userInfo } from 'os'
 import { join } from 'path'
@@ -485,9 +485,24 @@ export function getSecureSocketPath(): string {
   return join(getSocketDir(), `${process.pid}.sock`)
 }
 
+/** True when path exists and is a Unix domain socket (not a directory). */
+function isExistingUnixSocket(path: string): boolean {
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- getSocketPaths is sync () => string[]
+    return statSync(path).isSocket()
+  } catch {
+    return false
+  }
+}
+
 /**
  * Get all socket paths including PID-based sockets in the directory
- * and legacy fallback paths
+ * and legacy single-file socket fallbacks.
+ *
+ * Only returns paths that currently exist and are sockets. densable used to
+ * always append legacy dir paths; that made the pool try to connect to the
+ * socket **directory** (`/tmp/claude-mcp-browser-bridge-$USER`) which fails
+ * security validation and can race tool calls into false "not connected".
  */
 export function getAllSocketPaths(): string[] {
   // Windows uses named pipes, not Unix sockets
@@ -503,24 +518,22 @@ export function getAllSocketPaths(): string[] {
     // eslint-disable-next-line custom-rules/no-sync-fs -- ClaudeForChromeContext.getSocketPaths (external @ant/claude-for-chrome-mcp) requires a sync () => string[] callback
     const files = readdirSync(socketDir)
     for (const file of files) {
-      if (file.endsWith('.sock')) {
-        paths.push(join(socketDir, file))
+      if (!file.endsWith('.sock')) continue
+      const full = join(socketDir, file)
+      if (isExistingUnixSocket(full)) {
+        paths.push(full)
       }
     }
   } catch {
     // Directory may not exist yet
   }
 
-  // Legacy fallback paths
+  // Legacy: single-file sockets (not the modern directory layout)
   const legacyName = `claude-mcp-browser-bridge-${getUsername()}`
-  const legacyTmpdir = join(tmpdir(), legacyName)
-  const legacyTmp = `/tmp/${legacyName}`
-
-  if (!paths.includes(legacyTmpdir)) {
-    paths.push(legacyTmpdir)
-  }
-  if (legacyTmpdir !== legacyTmp && !paths.includes(legacyTmp)) {
-    paths.push(legacyTmp)
+  for (const legacy of [join(tmpdir(), legacyName), `/tmp/${legacyName}`]) {
+    if (!paths.includes(legacy) && isExistingUnixSocket(legacy)) {
+      paths.push(legacy)
+    }
   }
 
   return paths

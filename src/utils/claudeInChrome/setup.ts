@@ -1,8 +1,13 @@
-import { BROWSER_TOOLS } from '@ant/claude-for-chrome-mcp'
+import {
+  BRIDGE_ONLY_BROWSER_TOOLS,
+  BROWSER_TOOLS,
+} from '@ant/claude-for-chrome-mcp'
+import { existsSync } from 'fs'
 import { chmod, mkdir, readFile, writeFile } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
 import {
+  getChromeFlagOverride,
   getIsInteractive,
   getIsNonInteractiveSession,
   getSessionBypassPermissionsMode,
@@ -21,6 +26,7 @@ import {
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getPlatform } from '../platform.js'
 import { jsonStringify } from '../slowOperations.js'
+import { isChromeBridgeTransportEnabled } from './chromeBridgeTransport.js'
 import {
   CLAUDE_IN_CHROME_MCP_SERVER_NAME,
   getAllBrowserDataPaths,
@@ -36,12 +42,37 @@ const CHROME_EXTENSION_RECONNECT_URL = 'https://clau.de/chrome/reconnect'
 const NATIVE_HOST_IDENTIFIER = 'com.anthropic.claude_code_browser_extension'
 const NATIVE_HOST_MANIFEST_NAME = `${NATIVE_HOST_IDENTIFIER}.json`
 
-export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
-  // Disable by default in non-interactive sessions (e.g., SDK, CI)
-  if (getIsNonInteractiveSession() && chromeFlag !== true) {
-    return false
+/**
+ * Path to the CLI entry used by native-host wrapper and non-bundled MCP spawn.
+ *
+ * `distRoot` in dev is the **repo root** (from `src/utils/…`), not `dist/`.
+ * Prefer built `dist/cli.js` when present; else fall back to `src/entrypoints/cli.tsx`
+ * so `bun run dev -- --chrome` does not write a dead `…/cli.js` wrapper.
+ */
+export function resolveChromeCliJsPath(): string {
+  const built = join(distRoot, 'dist', 'cli.js')
+  if (existsSync(built)) {
+    return built
   }
+  const atRoot = join(distRoot, 'cli.js')
+  if (existsSync(atRoot)) {
+    // Production layout when distRoot already points at the dist directory.
+    return atRoot
+  }
+  const srcEntry = join(distRoot, 'src', 'entrypoints', 'cli.tsx')
+  if (existsSync(srcEntry)) {
+    return srcEntry
+  }
+  // Last resort — same as historical join(distRoot, 'cli.js')
+  return atRoot
+}
 
+/**
+ * densable 2.1.211 `Dtn` order:
+ * flag true/false → CLAUDE_CODE_ENABLE_CFC true/false → non-interactive → defaultEnabled → false.
+ * CFC must win over non-interactive so SDK/CI can force-enable without `--chrome`.
+ */
+export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
   // Check CLI flags
   if (chromeFlag === true) {
     return true
@@ -50,7 +81,7 @@ export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
     return false
   }
 
-  // Official ENABLE_CFC densable.
+  // Official ENABLE_CFC densable (before non-interactive gate).
   let cfcEnabled = isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_CFC)
   try {
     const { isCfcEnvEnabled } =
@@ -67,6 +98,11 @@ export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
     return false
   }
 
+  // Disable by default in non-interactive sessions (e.g., SDK, CI) unless CFC/flag
+  if (getIsNonInteractiveSession()) {
+    return false
+  }
+
   // Check default config settings
   const config = getGlobalConfig()
   if (config.claudeInChromeDefaultEnabled !== undefined) {
@@ -78,18 +114,70 @@ export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
 
 let shouldAutoEnable: boolean | undefined
 
+/**
+ * densable 2.1.211 `YOs` ≈ `IRo() && (de_() || HRo()) && tengu_chrome_auto_enable`.
+ * densable IRo ends with claude.ai subscriber; this fork drops that gate so
+ * API-key / non-subscriber interactive sessions can auto-enable with extension evidence.
+ * Remaining IRo-ish: flag not false, CFC not false, defaultEnabled unset, interactive.
+ * HRo/de_: extension install cache or paired device evidence.
+ */
 export function shouldAutoEnableClaudeInChrome(): boolean {
   if (shouldAutoEnable !== undefined) {
     return shouldAutoEnable
   }
 
   shouldAutoEnable =
-    getIsInteractive() &&
-    isChromeExtensionInstalled_CACHED_MAY_BE_STALE() &&
-    (process.env.USER_TYPE === 'ant' ||
-      getFeatureValue_CACHED_MAY_BE_STALE('tengu_chrome_auto_enable', false))
+    hasBaseChromeAutoEnableEligibility() &&
+    hasChromeExtensionEvidence() &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_chrome_auto_enable', false)
 
   return shouldAutoEnable
+}
+
+/** densable `IRo` base gates — fork: no subscriber requirement. */
+function hasBaseChromeAutoEnableEligibility(): boolean {
+  if (getChromeFlagOverride() === false) {
+    return false
+  }
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ENABLE_CFC)) {
+    return false
+  }
+  const config = getGlobalConfig()
+  if (config.claudeInChromeDefaultEnabled !== undefined) {
+    return false
+  }
+  if (!getIsInteractive()) {
+    return false
+  }
+  return true
+}
+
+/** densable `HRo` ∪ positive `de_()` — install cache or bridge pairing evidence. */
+function hasChromeExtensionEvidence(): boolean {
+  // Side-effect: refresh positive install cache (same as densable de_).
+  // Return value already reads cachedChromeExtensionInstalled from disk.
+  if (isChromeExtensionInstalled_CACHED_MAY_BE_STALE()) {
+    return true
+  }
+  return Boolean(getGlobalConfig().chromeExtension?.pairedDeviceId)
+}
+
+/**
+ * densable ListTools: multi-browser tools only when copper bridge transport
+ * is actually usable. Must match getChromeBridgeUrl() in mcpServer.
+ */
+function isChromeBridgeLikelyEnabled(env?: Record<string, string>): boolean {
+  return isChromeBridgeTransportEnabled(env)
+}
+
+export type SetupClaudeInChromeOptions = {
+  /**
+   * Fork Connect local / unpacked: pin MCP to native Unix socket — no
+   * claude.ai token, no bridge WebSocket. Does **not** change official
+   * Reconnect (still opens clau.de). Official bridge remains available when
+   * this is unset and the user has OAuth + copper flag.
+   */
+  forceNative?: boolean
 }
 
 /**
@@ -97,20 +185,25 @@ export function shouldAutoEnableClaudeInChrome(): boolean {
  *
  * @returns MCP config and allowed tools, or throws an error if platform is unsupported
  */
-export function setupClaudeInChrome(): {
+export function setupClaudeInChrome(options?: SetupClaudeInChromeOptions): {
   mcpConfig: Record<string, ScopedMcpServerConfig>
   allowedTools: string[]
   systemPrompt: string
 } {
   const isNativeBuild = isInBundledMode()
-  const allowedTools = BROWSER_TOOLS.map(
-    tool => `mcp__claude-in-chrome__${tool.name}`,
-  )
-
   const env: Record<string, string> = {}
+  if (options?.forceNative) {
+    // In-process createChromeContext(serverRef.env) + stdio child both honor this.
+    env.CLAUDE_CHROME_FORCE_NATIVE = '1'
+  }
   if (getSessionBypassPermissionsMode()) {
     env.CLAUDE_CHROME_PERMISSION_MODE = 'skip_all_permission_checks'
   }
+  const bridgeLikely = isChromeBridgeLikelyEnabled(env)
+  const allowedTools = BROWSER_TOOLS.filter(
+    tool => bridgeLikely || !BRIDGE_ONLY_BROWSER_TOOLS.has(tool.name),
+  ).map(tool => `mcp__claude-in-chrome__${tool.name}`)
+
   const hasEnv = Object.keys(env).length > 0
 
   if (isNativeBuild) {
@@ -144,7 +237,7 @@ export function setupClaudeInChrome(): {
       systemPrompt: getChromeSystemPrompt(),
     }
   } else {
-    const cliPath = join(distRoot, 'cli.js')
+    const cliPath = resolveChromeCliJsPath()
 
     void createWrapperScript(
       `"${process.execPath}" "${cliPath}" --chrome-native-host`,
@@ -195,9 +288,20 @@ function getNativeMessagingHostsDirs(): string[] {
   return getAllNativeMessagingHostsDirs().map(({ path }) => path)
 }
 
+export type InstallChromeNativeHostOptions = {
+  /**
+   * densable opens https://clau.de/chrome/reconnect after first manifest write
+   * so the Web Store extension re-binds. Local unpacked / fork menus pass false
+   * and never open a browser tab.
+   */
+  openReconnectPage?: boolean
+}
+
 export async function installChromeNativeHostManifest(
   manifestBinaryPath: string,
+  options?: InstallChromeNativeHostOptions,
 ): Promise<void> {
+  const openReconnectPage = options?.openReconnectPage !== false
   const manifestDirs = getNativeMessagingHostsDirs()
   if (manifestDirs.length === 0) {
     throw Error('Claude in Chrome Native Host not supported on this platform')
@@ -255,8 +359,9 @@ export async function installChromeNativeHostManifest(
     registerWindowsNativeHosts(manifestPath)
   }
 
-  // Restart the native host if we have rewritten any manifest
-  if (anyManifestUpdated) {
+  // densable: open reconnect page so Web Store extension re-binds after first write.
+  // Local connect path opts out via openReconnectPage: false.
+  if (anyManifestUpdated && openReconnectPage) {
     void isChromeExtensionInstalled().then(isInstalled => {
       if (isInstalled) {
         logForDebugging(
@@ -270,6 +375,33 @@ export async function installChromeNativeHostManifest(
       }
     })
   }
+}
+
+/**
+ * Fork: reinstall native-messaging wrapper + manifest for local extension
+ * (unpacked / Load unpacked) without opening claude.ai reconnect.
+ * Returns wrapper path and whether the extension is currently detected.
+ */
+export async function ensureChromeNativeHostLocal(): Promise<{
+  wrapperPath: string
+  extensionInstalled: boolean
+  cliPath: string | null
+}> {
+  const isNativeBuild = isInBundledMode()
+  const cliPath = isNativeBuild ? null : resolveChromeCliJsPath()
+  const execCommand = isNativeBuild
+    ? `"${process.execPath}" --chrome-native-host`
+    : `"${process.execPath}" "${cliPath}" --chrome-native-host`
+
+  const wrapperPath = await createWrapperScript(execCommand)
+  await installChromeNativeHostManifest(wrapperPath, {
+    openReconnectPage: false,
+  })
+  const extensionInstalled = await isChromeExtensionInstalled()
+  logForDebugging(
+    `[Claude in Chrome] Local native host ready wrapper=${wrapperPath} cliPath=${cliPath ?? '(bundled)'} extensionInstalled=${extensionInstalled}`,
+  )
+  return { wrapperPath, extensionInstalled, cliPath }
 }
 
 /**

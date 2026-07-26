@@ -37,13 +37,15 @@ Explain what you attempted, what went wrong, and ask how the user would like to 
 
 ## Tab context and session startup
 
-IMPORTANT: At the start of each browser automation session, call mcp__claude-in-chrome__tabs_context_mcp first to get information about the user's current browser tabs. Use this context to understand what the user might want to work with before creating new tabs.
+IMPORTANT: At the start of each browser automation session, call mcp__claude-in-chrome__tabs_context_mcp **with createIfEmpty: true** (or omit createIfEmpty — the Host defaults it to true) first. That creates the MCP tab group if none exists and returns tab IDs. **tabs_create_mcp alone cannot create the group** — it only adds a tab inside an existing group; without a prior context bootstrap you get "No MCP tab group exists".
 
 Never reuse tab IDs from a previous/other session. Follow these guidelines:
-1. Only reuse an existing tab if the user explicitly asks to work with it
-2. Otherwise, create a new tab with mcp__claude-in-chrome__tabs_create_mcp
-3. If a tool returns an error indicating the tab doesn't exist or is invalid, call tabs_context_mcp to get fresh tab IDs
-4. When a tab is closed by the user or a navigation error occurs, call tabs_context_mcp to see what tabs are available`
+1. First: tabs_context_mcp (createIfEmpty true / omitted) — bootstrap group + list tabs
+2. Only reuse an existing tab if the user explicitly asks to work with it
+3. Otherwise, create a new tab with mcp__claude-in-chrome__tabs_create_mcp (after step 1)
+4. Navigate / computer / read_page always need a tabId from context or create
+5. If a tool returns an error indicating the tab doesn't exist or is invalid, call tabs_context_mcp again (createIfEmpty true) for fresh tab IDs
+6. When a tab is closed by the user or a navigation error occurs, call tabs_context_mcp to see what tabs are available`
 
 /**
  * Additional instructions for chrome tools when tool search is enabled.
@@ -67,6 +69,80 @@ For example, to get tab context:
  */
 export function getChromeSystemPrompt(): string {
   return BASE_CHROME_PROMPT
+}
+
+const CHROME_PROMPT_MARKER = '# Claude in Chrome browser automation'
+
+/**
+ * Merge or strip the full chrome system prompt for the current session.
+ *
+ * Launch `--chrome` bakes the prompt into appendSystemPrompt once; mid-session
+ * `/chrome` This session On/Off toggles bootstrap
+ * `claudeInChromeSessionPromptActive` so later turns can inject without a
+ * restart (and Off can drop launch-baked chrome text).
+ *
+ * Auto-enable skill hints stay when full chrome is inactive. When full chrome
+ * becomes active (This session On after YOs auto-enable), skill hints are
+ * stripped so the model does not get skill-invoke + full BASE stack.
+ */
+export function resolveChromeAppendSystemPrompt(
+  append?: string,
+): string | undefined {
+  // Lazy import keeps prompt.ts free of bootstrap cycles at module eval.
+  const { getClaudeInChromeSessionPromptActive } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+
+  const active = getClaudeInChromeSessionPromptActive()
+  const chrome = getChromeSystemPrompt()
+  let base = append?.trim() ? append : undefined
+
+  if (base?.includes(CHROME_PROMPT_MARKER)) {
+    if (active) {
+      // Full chrome already present — drop any leftover auto-enable skill hint.
+      const cleaned = stripChromeSkillHints(base)
+      return cleaned?.trim() ? cleaned : chrome
+    }
+    base = stripChromeSystemPromptBlock(base, chrome)
+  }
+
+  if (!active) {
+    return base?.trim() ? base : undefined
+  }
+
+  // Full enable supersedes skill-only auto-enable hint.
+  base = stripChromeSkillHints(base)
+  return base ? `${chrome}\n\n${base}` : chrome
+}
+
+function stripChromeSkillHints(append: string | undefined): string | undefined {
+  if (!append) return undefined
+  let out = append
+  // Longer variant first so the shorter hint is not a partial residue.
+  if (out.includes(CLAUDE_IN_CHROME_SKILL_HINT_WITH_WEBBROWSER)) {
+    out = out.split(CLAUDE_IN_CHROME_SKILL_HINT_WITH_WEBBROWSER).join('')
+  }
+  if (out.includes(CLAUDE_IN_CHROME_SKILL_HINT)) {
+    out = out.split(CLAUDE_IN_CHROME_SKILL_HINT).join('')
+  }
+  return out.replace(/\n{3,}/g, '\n\n').trim() || undefined
+}
+
+function stripChromeSystemPromptBlock(append: string, chrome: string): string {
+  if (append === chrome) {
+    return ''
+  }
+  if (append.startsWith(`${chrome}\n\n`)) {
+    return append.slice(chrome.length + 2)
+  }
+  if (append.endsWith(`\n\n${chrome}`)) {
+    return append.slice(0, -(chrome.length + 2))
+  }
+  return append
+    .split(chrome)
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 /**

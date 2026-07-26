@@ -78,6 +78,7 @@ import {
   flushSessionStorage,
   recordTranscript,
 } from './utils/sessionStorage.js'
+import { resolveChromeAppendSystemPrompt } from './utils/claudeInChrome/prompt.js'
 import { asSystemPrompt } from './utils/systemPromptType.js'
 import { resolveThemeSetting } from './utils/systemTheme.js'
 import {
@@ -338,10 +339,12 @@ export class QueryEngine {
         ? await loadMemoryPrompt()
         : null
 
+    const chromeResolvedAppend =
+      resolveChromeAppendSystemPrompt(appendSystemPrompt)
     const systemPrompt = asSystemPrompt([
       ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
       ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
-      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+      ...(chromeResolvedAppend ? [chromeResolvedAppend] : []),
     ])
 
     // Register function hook for structured output enforcement

@@ -1,4 +1,4 @@
-import { readdir } from 'fs/promises'
+import { access, readdir, readFile } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
 import { isFsInaccessible } from '../errors.js'
@@ -135,8 +135,110 @@ export function getAllBrowserDataPathsPortable(): BrowserPath[] {
 }
 
 /**
+ * True when Chrome preferences mark the extension as disabled.
+ * disable_reasons may be a list (older) or object map (newer Chromium).
+ * state === 0 is the classic disabled flag when present.
+ */
+function isExtensionPrefsDisabled(meta: Record<string, unknown>): boolean {
+  if (meta.state === 0) {
+    return true
+  }
+  const reasons = meta.disable_reasons
+  if (Array.isArray(reasons) && reasons.length > 0) {
+    return true
+  }
+  if (
+    reasons !== null &&
+    typeof reasons === 'object' &&
+    !Array.isArray(reasons) &&
+    Object.keys(reasons as object).length > 0
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Web-store / packed installs live under `<profile>/Extensions/<id>/`.
+ * Developer unpacked loads (Load unpacked) keep the official id via manifest
+ * `key` but only appear under Preferences / Secure Preferences with an absolute
+ * `path` — they never create `Extensions/<id>/`. Local forks often ship this way.
+ */
+async function profileHasExtension(
+  browserBasePath: string,
+  profile: string,
+  extensionId: string,
+  log?: Logger,
+): Promise<boolean> {
+  const packedPath = join(browserBasePath, profile, 'Extensions', extensionId)
+  try {
+    await readdir(packedPath)
+    log?.(
+      `[Claude in Chrome] Extension ${extensionId} found (packed) in ${profile}`,
+    )
+    return true
+  } catch {
+    // fall through to preferences (unpacked)
+  }
+
+  for (const prefName of ['Secure Preferences', 'Preferences'] as const) {
+    const prefPath = join(browserBasePath, profile, prefName)
+    let raw: string
+    try {
+      raw = await readFile(prefPath, 'utf-8')
+    } catch (e) {
+      if (isFsInaccessible(e)) continue
+      throw e
+    }
+
+    let data: unknown
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      continue
+    }
+    if (!data || typeof data !== 'object') continue
+    const settings = (data as { extensions?: { settings?: unknown } })
+      .extensions?.settings
+    if (!settings || typeof settings !== 'object') continue
+    const meta = (settings as Record<string, unknown>)[extensionId]
+    if (!meta || typeof meta !== 'object') continue
+    const record = meta as Record<string, unknown>
+    if (isExtensionPrefsDisabled(record)) {
+      log?.(
+        `[Claude in Chrome] Extension ${extensionId} present but disabled in ${profile}/${prefName}`,
+      )
+      continue
+    }
+    const installPath = record.path
+    if (typeof installPath !== 'string' || installPath.length === 0) {
+      continue
+    }
+    // Absolute unpacked path: require directory still exists.
+    // Relative path is under the profile (component/external) — prefs entry is enough.
+    if (installPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(installPath)) {
+      try {
+        await access(installPath)
+      } catch {
+        log?.(
+          `[Claude in Chrome] Extension ${extensionId} prefs path missing: ${installPath}`,
+        )
+        continue
+      }
+    }
+    log?.(
+      `[Claude in Chrome] Extension ${extensionId} found (prefs/${prefName}) in ${profile} path=${installPath}`,
+    )
+    return true
+  }
+
+  return false
+}
+
+/**
  * Detects if the Claude in Chrome extension is installed by checking the Extensions
- * directory across all supported Chromium-based browsers and their profiles.
+ * directory and Chrome Preferences / Secure Preferences (unpacked developer installs)
+ * across all supported Chromium-based browsers and their profiles.
  *
  * This is a portable version that can be used by both TUI and VS Code extension.
  *
@@ -185,24 +287,16 @@ export async function detectExtensionInstallationPortable(
       )
     }
 
-    // Check each profile for any of the extension IDs
+    // Check each profile for any of the extension IDs (packed + unpacked prefs)
     for (const profile of profileDirs) {
       for (const extensionId of extensionIds) {
-        const extensionPath = join(
-          browserBasePath,
-          profile,
-          'Extensions',
-          extensionId,
-        )
-
-        try {
-          await readdir(extensionPath)
+        if (
+          await profileHasExtension(browserBasePath, profile, extensionId, log)
+        ) {
           log?.(
             `[Claude in Chrome] Extension ${extensionId} found in ${browser} ${profile}`,
           )
           return { isInstalled: true, browser }
-        } catch {
-          // Extension not found in this profile, continue checking
         }
       }
     }

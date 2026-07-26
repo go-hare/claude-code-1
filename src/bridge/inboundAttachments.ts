@@ -12,11 +12,12 @@
 
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import axios from 'axios'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 import { z } from 'zod/v4'
 import { getSessionId } from '../bootstrap/state.js'
+import { registerChromeUploadAttachmentDigest } from '../utils/claudeInChrome/fileUpload.js'
 import { logForDebugging } from '../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { lazySchema } from '../utils/lazySchema.js'
@@ -107,6 +108,11 @@ async function resolveOne(att: InboundAttachment): Promise<string | undefined> {
   try {
     await mkdir(dir, { recursive: true })
     await writeFile(outPath, data)
+    // densable jzu/Wzu: bind attachment content for Chrome file_upload allowlist.
+    registerChromeUploadAttachmentDigest(
+      outPath,
+      createHash('sha256').update(data).digest('hex'),
+    )
   } catch (e) {
     debug(`write ${outPath} failed: ${e}`)
     return undefined

@@ -1,5 +1,4 @@
 import { Text } from '@anthropic/ink';
-import { isClaudeAISubscriber } from '../utils/auth.js';
 import { isChromeExtensionInstalled, shouldEnableClaudeInChrome } from '../utils/claudeInChrome/setup.js';
 import { isRunningOnHomespace } from '../utils/envUtils.js';
 import { useStartupNotification } from './notifs/useStartupNotification.js';
@@ -19,15 +18,7 @@ export function useChromeExtensionNotification(): void {
     const chromeFlag = getChromeFlag();
     if (!shouldEnableClaudeInChrome(chromeFlag)) return null;
 
-    // Claude in Chrome is only supported for claude.ai subscribers (unless user is ant)
-    if (process.env.USER_TYPE !== 'ant' && !isClaudeAISubscriber()) {
-      return {
-        key: 'chrome-requires-subscription',
-        jsx: <Text color="error">Claude in Chrome requires a claude.ai subscription</Text>,
-        priority: 'immediate',
-        timeoutMs: 5000,
-      };
-    }
+    // Fork: no claude.ai subscription gate (densable shows subscription error for non-subscribers).
 
     const installed = await isChromeExtensionInstalled();
     if (!installed && !isRunningOnHomespace()) {

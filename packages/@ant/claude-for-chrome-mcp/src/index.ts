@@ -1,5 +1,10 @@
 export { BridgeClient, createBridgeClient } from './bridgeClient.js'
-export { BROWSER_TOOLS } from './browserTools.js'
+export {
+  BRIDGE_ONLY_BROWSER_TOOL_NAMES,
+  BRIDGE_ONLY_BROWSER_TOOLS,
+  BROWSER_TOOLS,
+} from './browserTools.js'
+export { sanitizeArgsForLog } from './toolCalls.js'
 export {
   createChromeSocketClient,
   createClaudeForChromeMcpServer,

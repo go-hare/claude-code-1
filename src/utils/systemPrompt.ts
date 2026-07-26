@@ -7,9 +7,15 @@ import type { ToolUseContext } from '../Tool.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { isBuiltInAgent } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { isEnvTruthy } from './envUtils.js'
+import { resolveChromeAppendSystemPrompt } from './claudeInChrome/prompt.js'
 import { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
 
 export { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
+
+function withChromeAppend(appendSystemPrompt: string | undefined): string[] {
+  const resolved = resolveChromeAppendSystemPrompt(appendSystemPrompt)
+  return resolved ? [resolved] : []
+}
 
 // Dead code elimination: conditional import for proactive mode.
 // Same pattern as prompts.ts — lazy require to avoid pulling the module
@@ -70,7 +76,7 @@ export function buildEffectiveSystemPrompt({
       require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js')
     return asSystemPrompt([
       getCoordinatorSystemPrompt(),
-      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+      ...withChromeAppend(appendSystemPrompt),
     ])
   }
 
@@ -108,7 +114,7 @@ export function buildEffectiveSystemPrompt({
     return asSystemPrompt([
       ...defaultSystemPrompt,
       `\n# Custom Agent Instructions\n${agentSystemPrompt}`,
-      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+      ...withChromeAppend(appendSystemPrompt),
     ])
   }
 
@@ -118,6 +124,6 @@ export function buildEffectiveSystemPrompt({
       : customSystemPrompt
         ? [customSystemPrompt]
         : defaultSystemPrompt),
-    ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+    ...withChromeAppend(appendSystemPrompt),
   ])
 }

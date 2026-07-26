@@ -10,7 +10,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { format } from 'util'
 import { shutdownDatadog } from '../../services/analytics/datadog.js'
 import { shutdown1PEventLogging } from '../../services/analytics/firstPartyEventLogger.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -21,6 +20,7 @@ import { enableConfigs, getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { sideQuery } from '../sideQuery.js'
+import { isChromeBridgeTransportEnabled } from './chromeBridgeTransport.js'
 import { getAllSocketPaths, getSecureSocketPath } from './common.js'
 
 const EXTENSION_DOWNLOAD_URL = 'https://claude.ai/chrome'
@@ -47,34 +47,42 @@ function isPermissionMode(raw: string): raw is PermissionMode {
 
 /**
  * Resolves the Chrome bridge URL based on environment and feature flag.
- * Bridge is used when the feature flag is enabled; ant users always get
- * bridge. API key / 3P users fall back to native messaging.
+ * Bridge is used when copper transport is enabled **and** authenticable;
+ * otherwise native messaging (Unix socket / named pipe). See
+ * `isChromeBridgeTransportEnabled` for the OAuth / FORCE_NATIVE fork gate.
+ *
+ * `env` is MCP server config env — Connect local pins FORCE_NATIVE here so
+ * local socket never needs a token; official bridge stays available when
+ * FORCE_NATIVE is unset and the user has OAuth.
  */
-function getChromeBridgeUrl(): string | undefined {
-  const bridgeEnabled =
-    process.env.USER_TYPE === 'ant' ||
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_copper_bridge', false)
-
-  if (!bridgeEnabled) {
+function getChromeBridgeUrl(env?: Record<string, string>): string | undefined {
+  if (!isChromeBridgeTransportEnabled(env)) {
     return undefined
   }
 
   if (
+    isEnvTruthy(env?.USE_LOCAL_OAUTH) ||
+    isEnvTruthy(env?.LOCAL_BRIDGE) ||
     isEnvTruthy(process.env.USE_LOCAL_OAUTH) ||
     isEnvTruthy(process.env.LOCAL_BRIDGE)
   ) {
     return 'ws://localhost:8765'
   }
 
-  if (isEnvTruthy(process.env.USE_STAGING_OAUTH)) {
+  if (
+    isEnvTruthy(env?.USE_STAGING_OAUTH) ||
+    isEnvTruthy(process.env.USE_STAGING_OAUTH)
+  ) {
     return 'wss://bridge-staging.claudeusercontent.com'
   }
 
   return 'wss://bridge.claudeusercontent.com'
 }
 
-function isLocalBridge(): boolean {
+function isLocalBridge(env?: Record<string, string>): boolean {
   return (
+    isEnvTruthy(env?.USE_LOCAL_OAUTH) ||
+    isEnvTruthy(env?.LOCAL_BRIDGE) ||
     isEnvTruthy(process.env.USE_LOCAL_OAUTH) ||
     isEnvTruthy(process.env.LOCAL_BRIDGE)
   )
@@ -88,7 +96,7 @@ export function createChromeContext(
   env?: Record<string, string>,
 ): ClaudeForChromeContext {
   const logger = new DebugLogger()
-  const chromeBridgeUrl = getChromeBridgeUrl()
+  const chromeBridgeUrl = getChromeBridgeUrl(env)
   logger.info(`Bridge URL: ${chromeBridgeUrl ?? 'none (using native socket)'}`)
   const rawPermissionMode =
     env?.CLAUDE_CHROME_PERMISSION_MODE ??
@@ -115,6 +123,23 @@ export function createChromeContext(
       )
     },
     onToolCallDisconnected: () => {
+      // Local native socket path does NOT require claude.ai login. densable's
+      // stock copy mentioned account matching for bridge/Web Store users and
+      // misled local unpacked + API-key sessions.
+      if (!chromeBridgeUrl) {
+        const live = getAllSocketPaths()
+        const sockHint =
+          live.length > 0
+            ? `Found socket(s): ${live.join(', ')} — MCP could not attach; restart Claude Code with --chrome or /chrome → Connect local.`
+            : 'No *.sock under /tmp/claude-mcp-browser-bridge-$USER — reload the Chrome extension so it connectNative-s the host.'
+        return [
+          'Browser extension is not connected over the local native-messaging socket (no claude.ai login required for this path).',
+          sockHint,
+          'Then: tabs_context_mcp with createIfEmpty:true, then navigate with that tabId.',
+          'Do not use list_connected_browsers / select_browser — those are bridge-only.',
+          `Docs: ${EXTENSION_DOWNLOAD_URL}`,
+        ].join(' ')
+      }
       return `Browser extension is not connected. Please ensure the Claude browser extension is installed and running (${EXTENSION_DOWNLOAD_URL}), and that you are logged into claude.ai with the same account as Claude Code. If this is your first time connecting to Chrome, you may need to restart Chrome for the installation to take effect. If you continue to experience issues, please report a bug: ${BUG_REPORT_URL}`
     },
     onExtensionPaired: (deviceId: string, name: string) => {
@@ -147,7 +172,7 @@ export function createChromeContext(
         getOAuthToken: async () => {
           return getClaudeAIOAuthTokens()?.accessToken ?? ''
         },
-        ...(isLocalBridge() && { devUserId: 'dev_user_local' }),
+        ...(isLocalBridge(env) && { devUserId: 'dev_user_local' }),
       },
     }),
     ...(initialPermissionMode && { initialPermissionMode }),

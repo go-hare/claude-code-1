@@ -390,6 +390,37 @@ export class BridgeClient implements SocketClient {
   }
 
   /**
+   * densable listConnectedExtensions — list bridge peers for list_connected_browsers.
+   */
+  public async listConnectedExtensions(): Promise<
+    Array<ChromeExtensionInfo & { isLocal?: boolean }>
+  > {
+    if (!(await this.ensureConnected())) {
+      return []
+    }
+    const extensions = await this.queryBridgeExtensions()
+    return extensions.map(ext => ({
+      ...ext,
+      isLocal: this.isLocalExtension(ext),
+    }))
+  }
+
+  /**
+   * densable selectExtensionById — select without pairing broadcast.
+   */
+  public selectExtensionById(deviceId: string, name: string): void {
+    this.discoveryComplete = true
+    this.pairingInProgress = false
+    this.pendingPairingRequestId = undefined
+    this.selectExtension(deviceId)
+    this.context.onExtensionPaired?.(deviceId, name)
+    if (this.pendingSwitchResolve) {
+      this.pendingSwitchResolve({ deviceId, name })
+      this.pendingSwitchResolve = null
+    }
+  }
+
+  /**
    * Check if an extension might be on the same machine as this MCP client
    * by comparing OS platform. Extensions can't provide a real hostname from
    * the service worker sandbox, so platform is a weak heuristic. The profile

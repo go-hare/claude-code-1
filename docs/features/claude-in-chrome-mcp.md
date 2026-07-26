@@ -16,7 +16,7 @@ Claude in Chrome 让 Claude Code 直接控制你的 Chrome 浏览器。你可以
 
 | 条件 | 说明 |
 |------|------|
-| Claude Code 订阅 | 需要 Claude Pro、Max 或 Team 订阅，浏览器插件功能不向免费用户开放 |
+| 账号 | **本 fork 不强制** claude.ai 订阅；官方 densable 仍要求 Pro/Max/Team。本地 MCP + 扩展即可用 |
 | Chrome 浏览器 | 需已安装 Google Chrome |
 | Claude in Chrome 扩展 | 从 Chrome Web Store 安装（`claude.ai/chrome`） |
 | Claude Code CLI | 已通过 `bun run dev` 或构建产物运行 |
@@ -43,7 +43,18 @@ node dist/cli.js --chrome
 bun run dev -- --no-chrome
 ```
 
-或在 REPL 中通过 `/chrome` 命令切换启用/禁用状态。
+### `/chrome` 菜单（分轨）
+
+REPL 中 `/chrome`：
+
+| 菜单项 | 行为 |
+|--------|------|
+| **This session: On/Off** | 当前会话热挂载/卸载 `claude-in-chrome` MCP（**不**写全局 default）；On 注入与 `--chrome` 同形的 chrome system prompt，Off 从后续 turn 去掉 |
+| **Install Chrome extension** | **官方**：打开 `claude.ai/chrome`（Web Store） |
+| **Install local extension** | **本 fork**：从 [go-hare/claude-chrome release](https://github.com/go-hare/claude-chrome/releases/download/claude_1.0.81/claude_1.0.81.zip) **下载 zip** → 解压到 `~/.claude/chrome/extensions/claude_1.0.81` → 打开 `chrome://extensions` 提示 **Load unpacked**（Chrome 不能静默装）。可用 `CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL` / `CLAUDE_CHROME_LOCAL_EXTENSION_DIR` 覆盖 |
+| **Reconnect extension** | **官方路径**：打开 `clau.de/chrome/reconnect`（Web Store 扩展握手） |
+| **Connect local** | **本 fork**：重装 native host + 检测 unpacked；**强制本地 socket**（`CLAUDE_CHROME_FORCE_NATIVE`，**不要 token**）；**不**开 claude.ai；**不**改官方 Reconnect。若 This session 为 Off 则顺带挂载 MCP |
+| **Enabled by default: Yes/No** | 仅改 `claudeInChromeDefaultEnabled`，影响**下次**启动；**不**自动挂载/卸载当前 session |
 
 ### 通过配置默认启用
 
@@ -69,8 +80,10 @@ bun run dev -- --no-chrome
 |------|------|
 | `navigate` | 导航到指定 URL，或前进/后退 |
 | `computer` | 鼠标点击、移动、拖拽、键盘输入、截图等（13 种 action） |
+| `browser_batch` | 一次顺序执行多步工具（densable 对齐；不可嵌套） |
 | `form_input` | 填写表单字段 |
 | `upload_image` | 上传图片到文件输入框或拖拽区域 |
+| `file_upload` | 只传 `paths`（不要传 base64 `files`）。Host densable Uiy：attachments、`/add-dir`、cwd 或 bypass；硬链拒绝；单次 ≤10MB。策略在 Host intercept，不在裸 MCP 子进程 |
 | `javascript_tool` | 在页面上下文执行 JavaScript |
 
 ### 页面读取
@@ -87,6 +100,7 @@ bun run dev -- --no-chrome
 |------|------|
 | `tabs_context_mcp` | 获取当前标签组信息 |
 | `tabs_create_mcp` | 创建新标签页 |
+| `tabs_close_mcp` | 关闭本会话组内标签页 |
 
 ### 监控与调试
 
@@ -104,7 +118,9 @@ bun run dev -- --no-chrome
 | `shortcuts_list` | 列出可用快捷方式 |
 | `shortcuts_execute` | 执行快捷方式 |
 | `update_plan` | 向你提交操作计划供审批 |
-| `switch_browser` | 切换到其他 Chrome 浏览器（仅 Bridge 模式） |
+| `switch_browser` | 广播配对，从 Chrome 内点选浏览器（仅 Bridge） |
+| `list_connected_browsers` | 列出当前已连接浏览器（仅 Bridge） |
+| `select_browser` | 按 deviceId 选择浏览器（仅 Bridge） |
 
 ## 6. 通信模式
 
@@ -116,21 +132,36 @@ Chrome 扩展通过 Native Messaging Host 与 CLI 建立 Unix socket 连接。�
 
 ### Bridge WebSocket
 
-通过 Anthropic 的 bridge 服务中转，支持远程操控浏览器。需要 claude.ai OAuth 登录。
+通过 Anthropic 的 bridge 服务中转，支持远程多浏览器。需要 **claude.ai OAuth access token**。  
+本 fork 分轨：
+
+| 路径 | 行为 |
+|------|------|
+| **Connect local** / `CLAUDE_CHROME_FORCE_NATIVE=1` | **只**本地 socket，**不要** claude.ai token |
+| 官方 Reconnect / copper flag + OAuth token | densable Bridge（**不动**官方链接与握手页） |
+| flag 开但无 token | 自动回退本地 socket（避免误走 bridge 假断开） |
 
 ## 7. 常见问题
 
 ### 扩展显示未安装
 
-确认已从 Chrome Web Store 安装 "Claude in Chrome" 扩展，安装后重启浏览器。
+1. **商店安装**：从 Chrome Web Store 安装 "Claude in Chrome"（`claude.ai/chrome`），安装后重启浏览器。
+2. **本地 Load unpacked**：CLI 会扫各 profile 的 `Extensions/<官方 id>/` **以及** `Preferences` / `Secure Preferences` 里同 id 的绝对路径。本地包需带官方 `manifest.key`（id 仍为 `fcoeoabgfenejglbffodgkkbkcdhcgfn`）；路径目录须仍存在。若只改了代码未保留 `key`，会变成随机 id，**无法**被 native host `allowed_origins` 接受。
+3. **多 profile**：扩展装在 `Profile 1` 而检测以前只看 packed 目录时会误报；当前版本已覆盖 Secure Preferences。在 `/chrome` 选 **Reconnect extension** 刷新状态。
+4. **连接 vs 检测**：`Extension: Installed` 只表示磁盘/偏好里有扩展；`Status: Enabled` 还需要 **This session: On**（或 `--chrome` / default）且 MCP + native messaging 通。
 
 ### 工具未出现在工具列表
 
 检查启动时是否加了 `--chrome` 参数，或通过 `/chrome` 命令确认状态。
 
-### 连接超时
+### 连接超时 / 工具报「扩展未连接」
 
-确保 Chrome 浏览器正在运行且扩展已启用。Native Messaging Host 在扩展安装时自动注册，如果重装过扩展需要重启浏览器。
+`/chrome` 显示 **Status: Enabled** 只表示 **CLI 侧 MCP 进程**起来了；真正控浏览器还要 **扩展 → Native Host → Unix socket**。
+
+1. **Connect local**（或重新 setup）会重写 `~/.claude/chrome/chrome-native-host`。dev 下路径应为 `dist/cli.js` 或 `src/entrypoints/cli.tsx`，**不能**是不存在的仓库根 `cli.js`。
+2. 改完 wrapper 后：重启 Chrome（或重载扩展），再 `/chrome` → **Connect local**。
+3. 确认扩展是带官方 `manifest.key` 的 unpacked（id=`fcoeoabgfenejglbffodgkkbkcdhcgfn`），且用的是装了扩展的 profile。
+4. **`tengu_copper_bridge: true` 缓存**（`~/.claude.json` → `cachedGrowthBookFeatures`）会让 densable 走 **Bridge WebSocket**。无 claude.ai OAuth 时本 fork **自动回退本地 socket**；仍异常可设 `CLAUDE_CHROME_FORCE_NATIVE=1`。错误文案若仍写 “same account as Claude Code”，多半是旧进程/旧产物还在用 bridge 断开文案——**整进程退出再 `bun run dev -- --chrome`**。
 
 ### 不使用 Chrome 功能时
 
