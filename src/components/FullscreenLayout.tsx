@@ -365,7 +365,12 @@ export function FullscreenLayout({
     // header comes back (viewportTop 0→1, a single 1-row shift —
     // acceptable since user explicitly scrolled).
     const sticky = hideSticky ? null : stickyPrompt;
+    // densable: header only for {text,scrollTo}; pad collapses for sticky OR
+    // 'clicked' (keep viewportTop=0 after header click). Overlay wins.
     const headerPrompt = sticky != null && sticky !== 'clicked' && overlay == null ? sticky : null;
+    // React #185: padCollapsed flips paddingTop 1↔0 and can make StickyTracker
+    // firstVisible flicker. Keep collapse only while we actually have sticky
+    // chrome (object or clicked) — null always restores pad=1 (densable OhR).
     const padCollapsed = sticky != null && overlay == null;
     return (
       <PromptOverlayProvider>

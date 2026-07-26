@@ -45,6 +45,26 @@ export type StickyPrompt =
  *  2 rows via overflow:hidden — this just bounds the React prop size. */
 const STICKY_TEXT_CAP = 500;
 
+/**
+ * Frames of consecutive "no sticky candidate" needed before clearing the
+ * header. padCollapsed flips paddingTop by 1 row; firstVisible can miss for
+ * a single frame and would otherwise thrash setStickyPrompt null↔object
+ * (React minified #185 / Maximum update depth under MessagesBoundary).
+ */
+export const STICKY_CLEAR_HYSTERESIS_FRAMES = 2;
+
+/**
+ * Whether StickyTracker should clear sticky after a miss frame.
+ * @param missStreak consecutive frames with text===null while not at bottom
+ * @param hadSticky whether we currently hold a sticky idx/text
+ * @param force after header click ('clicked' suppress path)
+ */
+export function shouldClearStickyOnMiss(missStreak: number, hadSticky: boolean, force: boolean): boolean {
+  if (force) return true;
+  if (!hadSticky) return false;
+  return missStreak >= STICKY_CLEAR_HYSTERESIS_FRAMES;
+}
+
 /** Imperative handle for transcript navigation. Methods compute matches
  *  HERE (renderableMessages indices are only valid inside this component —
  *  Messages.tsx filters and reorders, REPL can't compute externally). */
@@ -949,6 +969,14 @@ function StickyTracker({
   // closure still captures the current estimate; it just doesn't need to
   // re-fire when only estimate moved.
   const lastIdx = useRef(-1);
+  // padCollapsed (FullscreenLayout paddingTop 1↔0) + sticky header mount
+  // shifts viewport by ~1 row. firstVisible/idx can flicker -1↔N for a
+  // single frame and drive setStickyPrompt null↔object → React #185
+  // (Maximum update depth) under MessagesBoundary. Require two consecutive
+  // "no sticky" frames before clearing; clear immediately when sticky-scroll
+  // (at bottom). Also bail setState when text is unchanged (stable ref).
+  const clearStickyStreak = useRef(0);
+  const lastStickyText = useRef<string | null>(null);
 
   // setStickyPrompt effect FIRST — must see pending.idx before the
   // correction effect below clears it. On the estimate-fallback path, the
@@ -965,12 +993,37 @@ function StickyTracker({
     }
     const force = suppress.current === 'force';
     suppress.current = 'none';
-    if (!force && lastIdx.current === idx) return;
-    lastIdx.current = idx;
-    if (text === null) {
+
+    const clearSticky = (): void => {
+      clearStickyStreak.current = 0;
+      lastIdx.current = -1;
+      lastStickyText.current = null;
+      // Context setter is not React.Dispatch — always null; outer guards
+      // avoid redundant calls when already clear.
       setStickyPrompt(null);
+    };
+
+    // At bottom: never show sticky; clear without hysteresis.
+    if (isSticky) {
+      if (force || lastIdx.current !== -1 || lastStickyText.current !== null) {
+        clearSticky();
+      }
       return;
     }
+
+    if (text === null || idx < 0) {
+      // One-frame miss after padCollapsed flip — keep previous sticky.
+      const hadSticky = lastIdx.current >= 0 || lastStickyText.current !== null;
+      if (hadSticky && !force) {
+        clearStickyStreak.current += 1;
+      }
+      if (!shouldClearStickyOnMiss(clearStickyStreak.current, hadSticky, force)) {
+        return;
+      }
+      clearSticky();
+      return;
+    }
+
     // First paragraph only (split on blank line) — a prompt like
     // "still seeing bugs:\n\n1. foo\n2. bar" previews as just the
     // lead-in. trimStart so a leading blank line (queued_command mid-
@@ -982,9 +1035,19 @@ function StickyTracker({
       .replace(/\s+/g, ' ')
       .trim();
     if (collapsed === '') {
-      setStickyPrompt(null);
+      if (!force && lastIdx.current === -1 && lastStickyText.current === null) {
+        return;
+      }
+      clearSticky();
       return;
     }
+
+    clearStickyStreak.current = 0;
+    if (!force && lastIdx.current === idx && lastStickyText.current === collapsed) {
+      return;
+    }
+    lastIdx.current = idx;
+    lastStickyText.current = collapsed;
     const capturedIdx = idx;
     const capturedEstimate = estimate;
     setStickyPrompt({
