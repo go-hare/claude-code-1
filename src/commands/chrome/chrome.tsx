@@ -391,7 +391,7 @@ function ClaudeInChromeMenu({
   const isDisabled = isWSL;
 
   return (
-    <Dialog title="Claude in Chrome (Beta)" onCancel={() => onDone()} color="chromeYellow">
+    <Dialog title="Claude in Chrome" onCancel={() => onDone()} color="chromeYellow">
       <Box flexDirection="column" gap={1}>
         <Text>
           Claude in Chrome works with the Chrome extension to let you control your browser directly from Claude Code.
