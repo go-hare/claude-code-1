@@ -5,11 +5,12 @@ import { platform } from 'os'
 import { dirname } from 'path'
 
 import type {
+  ChromeExtensionInfo,
   ClaudeForChromeContext,
   PermissionMode,
   PermissionOverrides,
 } from './types.js'
-import { toLoggerDetail } from './types.js'
+import { localPlatformLabel, toLoggerDetail } from './types.js'
 
 export class SocketConnectionError extends Error {
   constructor(message: string) {
@@ -381,6 +382,39 @@ class McpSocketClient {
     _allowedDomains?: string[],
   ): Promise<void> {
     // No-op: permission mode is only supported over the bridge (WebSocket) transport
+  }
+
+  /**
+   * Native single-socket: one local browser (this socket). No OAuth.
+   * deviceId is the socket path so select_browser can match.
+   */
+  public async listConnectedExtensions(): Promise<
+    Array<ChromeExtensionInfo & { isLocal?: boolean }>
+  > {
+    if (!(await this.ensureConnected().catch(() => false))) {
+      return []
+    }
+    const socketPath = this.context.getSocketPath?.() ?? this.context.socketPath
+    return [
+      {
+        deviceId: socketPath,
+        name: 'Local Chrome',
+        osPlatform: localPlatformLabel(),
+        connectedAt: Date.now(),
+        isLocal: true,
+      },
+    ]
+  }
+
+  public selectExtensionById(deviceId: string, name: string): void {
+    // Single socket has nothing to switch; still notify host for UI/config.
+    this.context.onExtensionPaired?.(deviceId, name)
+  }
+
+  public async switchBrowser(): Promise<
+    { deviceId: string; name: string } | 'no_other_browsers' | null
+  > {
+    return 'no_other_browsers'
   }
 
   public isConnected(): boolean {

@@ -118,9 +118,9 @@ REPL 中 `/chrome`：
 | `shortcuts_list` | 列出可用快捷方式 |
 | `shortcuts_execute` | 执行快捷方式 |
 | `update_plan` | 向你提交操作计划供审批 |
-| `switch_browser` | 广播配对，从 Chrome 内点选浏览器（仅 Bridge） |
-| `list_connected_browsers` | 列出当前已连接浏览器（仅 Bridge） |
-| `select_browser` | 按 deviceId 选择浏览器（仅 Bridge） |
+| `switch_browser` | Bridge：广播配对；**本地 native（无 OAuth）**：在已连接 socket/profile 间切换 |
+| `list_connected_browsers` | 列出可用浏览器：Bridge 为账号 peers；**本地 native** 为已连接 socket（deviceId=路径） |
+| `select_browser` | 按 deviceId 选定浏览器（Bridge peers 或本地 socket） |
 
 ## 6. 通信模式
 

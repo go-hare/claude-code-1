@@ -451,12 +451,14 @@ async function handleListConnectedBrowsers(
   context: ClaudeForChromeContext,
   socketClient: SocketClient,
 ): Promise<CallToolResult> {
-  if (!context.bridgeConfig || !socketClient.listConnectedExtensions) {
+  // Bridge: cloud peers. Native: local socket(s) / multi-profile pool.
+  // No OAuth required when listConnectedExtensions is implemented on the client.
+  if (!socketClient.listConnectedExtensions) {
     return {
       content: [
         {
           type: 'text',
-          text: 'Listing browsers is only available with bridge connections.',
+          text: 'Listing browsers is not supported by this Chrome transport.',
         },
       ],
       isError: true,
@@ -476,7 +478,12 @@ async function handleListConnectedBrowsers(
   if (extensions.length > 1) {
     content.push({
       type: 'text',
-      text: `${extensions.length} browsers are connected. Use select_browser with a deviceId, or switch_browser to pair from Chrome.`,
+      text: `${extensions.length} browsers are connected. Use select_browser with a deviceId, or switch_browser to pick another.`,
+    })
+  } else if (extensions.length === 0) {
+    content.push({
+      type: 'text',
+      text: 'No browsers connected. Open Chrome with the Claude extension (native host) or connect via bridge.',
     })
   }
   return { content }
@@ -489,7 +496,6 @@ async function handleSelectBrowser(
 ): Promise<CallToolResult> {
   const deviceId = typeof args.deviceId === 'string' ? args.deviceId : ''
   if (
-    !context.bridgeConfig ||
     !socketClient.selectExtensionById ||
     !socketClient.listConnectedExtensions ||
     !deviceId
@@ -498,7 +504,7 @@ async function handleSelectBrowser(
       content: [
         {
           type: 'text',
-          text: 'select_browser requires a bridge connection and a deviceId argument.',
+          text: 'select_browser requires a deviceId argument (from list_connected_browsers).',
         },
       ],
       isError: true,
@@ -693,12 +699,13 @@ async function handleSwitchBrowser(
   context: ClaudeForChromeContext,
   socketClient: SocketClient,
 ): Promise<CallToolResult> {
-  if (!context.bridgeConfig) {
+  // Bridge: broadcast pairing. Native: cycle among connected local sockets.
+  if (!socketClient.switchBrowser) {
     return {
       content: [
         {
           type: 'text',
-          text: 'Browser switching is only available with bridge connections.',
+          text: 'Browser switching is not supported by this Chrome transport.',
         },
       ],
       isError: true,
@@ -710,14 +717,14 @@ async function handleSwitchBrowser(
     return handleToolCallDisconnected(context)
   }
 
-  const result = (await socketClient.switchBrowser?.()) ?? null
+  const result = (await socketClient.switchBrowser()) ?? null
 
   if (result === 'no_other_browsers') {
     return {
       content: [
         {
           type: 'text',
-          text: 'No other browsers available to switch to. Open Chrome with the Claude extension in another browser to switch.',
+          text: 'No other browsers available to switch to. Open another Chrome profile with the Claude extension, or use list_connected_browsers.',
         },
       ],
       isError: true,
@@ -736,7 +743,9 @@ async function handleSwitchBrowser(
     content: [
       {
         type: 'text',
-        text: 'No browser responded within the timeout. Make sure Chrome is open with the Claude extension installed, then try again.',
+        text: context.bridgeConfig
+          ? 'No browser responded within the timeout. Make sure Chrome is open with the Claude extension installed, then try again.'
+          : 'Could not switch browser. Call list_connected_browsers and select_browser with a deviceId.',
       },
     ],
     isError: true,

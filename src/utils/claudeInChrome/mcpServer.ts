@@ -136,7 +136,7 @@ export function createChromeContext(
           'Browser extension is not connected over the local native-messaging socket (no claude.ai login required for this path).',
           sockHint,
           'Then: tabs_context_mcp with createIfEmpty:true, then navigate with that tabId.',
-          'Do not use list_connected_browsers / select_browser — those are bridge-only.',
+          'Or list_connected_browsers / select_browser for local native sockets (no OAuth).',
           `Docs: ${EXTENSION_DOWNLOAD_URL}`,
         ].join(' ')
       }

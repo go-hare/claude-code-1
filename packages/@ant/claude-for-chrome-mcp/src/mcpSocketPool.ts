@@ -4,10 +4,12 @@ import {
 } from './mcpSocketClient.js'
 import type { McpSocketClient } from './mcpSocketClient.js'
 import type {
+  ChromeExtensionInfo,
   ClaudeForChromeContext,
   PermissionMode,
   PermissionOverrides,
 } from './types.js'
+import { localPlatformLabel } from './types.js'
 
 /**
  * Manages connections to multiple Chrome native host sockets (one per Chrome profile).
@@ -20,6 +22,8 @@ import type {
 export class McpSocketPool {
   private clients: Map<string, McpSocketClient> = new Map()
   private tabRoutes: Map<number, string> = new Map()
+  /** Preferred native socket for tools without tabId routing (select_browser). */
+  private preferredSocketPath: string | undefined
   private context: ClaudeForChromeContext
   private notificationHandler:
     | ((notification: {
@@ -100,7 +104,11 @@ export class McpSocketPool {
       // Tab route not found or client disconnected — fall through to any connected
     }
 
-    // Fallback: use first connected client
+    // Fallback: preferred socket (select_browser), else first connected
+    const preferred = this.getPreferredClient()
+    if (preferred) {
+      return preferred.callTool(name, args)
+    }
     const connected = this.getConnectedClients()
     if (connected.length === 0) {
       throw new SocketConnectionError(
@@ -108,6 +116,66 @@ export class McpSocketPool {
       )
     }
     return connected[0]!.callTool(name, args)
+  }
+
+  /**
+   * List local native-host sockets as "browsers" (no OAuth / cloud bridge).
+   * deviceId = socket path so select_browser can pin routing.
+   */
+  public async listConnectedExtensions(): Promise<
+    Array<ChromeExtensionInfo & { isLocal?: boolean }>
+  > {
+    await this.ensureConnected()
+    const connected = this.getConnectedClients()
+    return connected.map((client, index) => {
+      const path = this.getSocketPathForClient(client)
+      return {
+        deviceId: path || `local-${index}`,
+        name: `Local Chrome ${index + 1}`,
+        osPlatform: localPlatformLabel(),
+        connectedAt: Date.now(),
+        isLocal: true,
+      }
+    })
+  }
+
+  public selectExtensionById(deviceId: string, name: string): void {
+    const client = this.clients.get(deviceId)
+    if (!client?.isConnected()) {
+      return
+    }
+    this.preferredSocketPath = deviceId
+    this.context.onExtensionPaired?.(deviceId, name)
+  }
+
+  /**
+   * Cycle preferred socket among connected local profiles.
+   * Not a cloud pairing broadcast — no OAuth.
+   */
+  public async switchBrowser(): Promise<
+    { deviceId: string; name: string } | 'no_other_browsers' | null
+  > {
+    await this.ensureConnected()
+    const extensions = await this.listConnectedExtensions()
+    if (extensions.length === 0) {
+      return null
+    }
+    if (extensions.length === 1) {
+      return 'no_other_browsers'
+    }
+    const current = this.preferredSocketPath
+    const idx = extensions.findIndex(e => e.deviceId === current)
+    const next = extensions[(idx + 1) % extensions.length]!
+    const name =
+      next.name?.trim() || `Local Chrome ${extensions.indexOf(next) + 1}`
+    this.selectExtensionById(next.deviceId, name)
+    return { deviceId: next.deviceId, name }
+  }
+
+  private getPreferredClient(): McpSocketClient | undefined {
+    if (!this.preferredSocketPath) return undefined
+    const client = this.clients.get(this.preferredSocketPath)
+    return client?.isConnected() ? client : undefined
   }
 
   public async setPermissionMode(
@@ -130,6 +198,7 @@ export class McpSocketPool {
     }
     this.clients.clear()
     this.tabRoutes.clear()
+    this.preferredSocketPath = undefined
   }
 
   private getConnectedClients(): McpSocketClient[] {

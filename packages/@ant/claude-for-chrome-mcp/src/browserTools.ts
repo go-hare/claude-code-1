@@ -1,6 +1,7 @@
 /**
- * densable: multi-browser tools only when copper/chrome bridge is on.
- * Shared by ListTools, CLI allowedTools, and browser_batch prep.
+ * Multi-browser tools handled in CLI (toolCalls.ts) — never inside browser_batch
+ * and never as extension tool_request. Always ListTools-visible (native sockets
+ * or copper bridge). Name kept for densable parity / batch rejection.
  */
 export const BRIDGE_ONLY_BROWSER_TOOL_NAMES = [
   'switch_browser',
@@ -627,7 +628,7 @@ export const BROWSER_TOOLS = [
   {
     name: 'switch_browser',
     description:
-      "Send a connection request to every Chrome browser with the extension installed and wait (up to 2 minutes) for the user to click 'Connect' in the one they want to use. The user can name the browser when they connect. Use this when the user wants to pick the browser themselves from inside Chrome rather than choosing from a list; otherwise prefer select_browser with a known deviceId.",
+      'Switch the active browser for automation. With cloud bridge: broadcasts a pairing request and waits (up to 2 minutes) for the user to click Connect in Chrome. With local native sockets (no OAuth): cycles among connected Chrome profiles/hosts. Prefer select_browser with a known deviceId when you already have a list from list_connected_browsers.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -637,7 +638,7 @@ export const BROWSER_TOOLS = [
   {
     name: 'list_connected_browsers',
     description:
-      "List all Chrome browsers (extension instances) currently connected to this account. Returns each browser's deviceId, display name, OS platform, and whether it appears to be on this computer. Use this before select_browser to present choices to the user.",
+      'List Chrome browsers currently available for automation. Cloud bridge: account-connected extension instances. Local native (no OAuth): live native-messaging sockets (deviceId is the socket path). Returns deviceId, display name, OS platform, and whether it appears local. Use before select_browser.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -647,7 +648,7 @@ export const BROWSER_TOOLS = [
   {
     name: 'select_browser',
     description:
-      'Select a specific Chrome browser by deviceId for browser automation, without broadcasting a pairing request. Use this after list_connected_browsers when the user has chosen one from the list.',
+      'Select a specific Chrome browser by deviceId for browser automation. After list_connected_browsers: cloud bridge routes by peer deviceId; local native pins the preferred socket (no pairing broadcast).',
     inputSchema: {
       type: 'object',
       properties: {

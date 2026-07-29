@@ -1,7 +1,4 @@
-import {
-  BRIDGE_ONLY_BROWSER_TOOLS,
-  BROWSER_TOOLS,
-} from '@ant/claude-for-chrome-mcp'
+import { BROWSER_TOOLS } from '@ant/claude-for-chrome-mcp'
 import { existsSync } from 'fs'
 import { chmod, mkdir, readFile, writeFile } from 'fs/promises'
 import { homedir } from 'os'
@@ -26,7 +23,6 @@ import {
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getPlatform } from '../platform.js'
 import { jsonStringify } from '../slowOperations.js'
-import { isChromeBridgeTransportEnabled } from './chromeBridgeTransport.js'
 import {
   CLAUDE_IN_CHROME_MCP_SERVER_NAME,
   getAllBrowserDataPaths,
@@ -165,14 +161,6 @@ function hasChromeExtensionEvidence(): boolean {
   return Boolean(getGlobalConfig().chromeExtension?.pairedDeviceId)
 }
 
-/**
- * densable ListTools: multi-browser tools only when copper bridge transport
- * is actually usable. Must match getChromeBridgeUrl() in mcpServer.
- */
-function isChromeBridgeLikelyEnabled(env?: Record<string, string>): boolean {
-  return isChromeBridgeTransportEnabled(env)
-}
-
 export type SetupClaudeInChromeOptions = {
   /**
    * Fork Connect local / unpacked: pin MCP to native Unix socket — no
@@ -202,10 +190,11 @@ export function setupClaudeInChrome(options?: SetupClaudeInChromeOptions): {
   if (getSessionBypassPermissionsMode()) {
     env.CLAUDE_CHROME_PERMISSION_MODE = 'skip_all_permission_checks'
   }
-  const bridgeLikely = isChromeBridgeLikelyEnabled(env)
-  const allowedTools = BROWSER_TOOLS.filter(
-    tool => bridgeLikely || !BRIDGE_ONLY_BROWSER_TOOLS.has(tool.name),
-  ).map(tool => `mcp__claude-in-chrome__${tool.name}`)
+  // Always allow multi-browser tools (list/select/switch). Without OAuth they
+  // resolve against local native sockets; with copper bridge, against peers.
+  const allowedTools = BROWSER_TOOLS.map(
+    tool => `mcp__claude-in-chrome__${tool.name}`,
+  )
 
   const hasEnv = Object.keys(env).length > 0
 
