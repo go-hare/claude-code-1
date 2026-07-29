@@ -43,12 +43,13 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.16**; trust `package.json` / npm) and may not match git tags.
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.17**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.16)
+### Recent updates (2.7.5 → 2.7.17)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.17** | **Claude in Chrome extension pipeline**: allow agent-extension fork ID by default with optional extra whitelist; local extension download via go-hare/agent-extension release; Install local opens the repo page; drop (Beta) suffix from `/chrome`. |
 | **2.7.16** | **Host effort metadata**: `get_settings.applied` now includes `effortLevels` / `ultracodeOfferable` so the desktop host can render available effort tiers and the ultracode entry. |
 | **2.7.15** | **Host Effort/Ultracode pipeline**: densable Host `get_settings.ultracode` + `apply_flag` direct write; `eee` strips fences before parsing so fenced JSON no longer spams ERROR. |
 | **2.7.14** | **Paste fallback fix**: when image resize fails, fall back to a text notice instead of swallowing the whole turn. |
@@ -85,7 +86,7 @@ CLAUDE_BRIDGE_OAUTH_TOKEN=your-token \
 claude --remote-control
 ```
 
-On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.16`).  
+On install failure: `npm rm -g @go-hare/claude-code`, then install `@latest` again (or pin e.g. `@2.7.17`).  
 Legacy docs that say `npm i -g claude-code` do **not** match this fork’s publish stream.
 
 ---
