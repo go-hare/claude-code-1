@@ -13,13 +13,21 @@ import { openInChrome } from './common.js'
 export const LOCAL_CHROME_EXTENSION_PROD_ID = 'fcoeoabgfenejglbffodgkkbkcdhcgfn'
 
 /**
- * Default release asset for fork local unpacked install.
+ * Fork extension repo (browser page). Install local opens this so users can
+ * grab the latest release / clone — easier to update than a pinned zip URL.
+ * Override with CLAUDE_CHROME_LOCAL_EXTENSION_REPO_URL.
+ */
+export const DEFAULT_LOCAL_CHROME_EXTENSION_REPO_URL =
+  'https://github.com/go-hare/agent-extension/'
+
+/**
+ * Optional direct zip download for offline/scripted install.
+ * Empty by default (open repo in browser instead).
  * Override with CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL.
  */
-export const DEFAULT_LOCAL_CHROME_EXTENSION_ZIP_URL =
-  'https://github.com/go-hare/agent-extension/releases/download/claude_1.0.81/claude_1.0.81.zip'
+export const DEFAULT_LOCAL_CHROME_EXTENSION_ZIP_URL = ''
 
-/** Tag / folder name under ~/.claude/chrome/extensions/ */
+/** Tag / folder name under ~/.claude/chrome/extensions/ when zip is used */
 export const DEFAULT_LOCAL_CHROME_EXTENSION_VERSION = 'claude_1.0.81'
 
 const MAX_ZIP_BYTES = 80 * 1024 * 1024 // 80MB — extension zip is small
@@ -34,6 +42,12 @@ export function getLocalChromeExtensionInstallDir(
   return join(getClaudeConfigHomeDir(), 'chrome', 'extensions', version)
 }
 
+export function getLocalChromeExtensionRepoUrl(): string {
+  const env = process.env.CLAUDE_CHROME_LOCAL_EXTENSION_REPO_URL?.trim()
+  return env && env.length > 0 ? env : DEFAULT_LOCAL_CHROME_EXTENSION_REPO_URL
+}
+
+/** Direct zip URL when set; empty means “open repo page, no auto-download”. */
 export function getLocalChromeExtensionZipUrl(): string {
   const env = process.env.CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL?.trim()
   return env && env.length > 0 ? env : DEFAULT_LOCAL_CHROME_EXTENSION_ZIP_URL
@@ -70,10 +84,12 @@ export function resolveLocalChromeExtensionPackageDir(): string | null {
   }
 
   const candidates = [
+    join(root, '..', 'agent-extension', 'dist'),
     join(root, '..', 'claude_1.0.81'),
     join(root, 'claude_1.0.81'),
     join(root, 'extensions', 'claude-in-chrome'),
     join(root, 'vendor', 'claude-in-chrome'),
+    join(homedir(), 'work-py', 'hare-code', 'agent-extension', 'dist'),
     join(homedir(), 'work-py', 'hare-code', 'claude_1.0.81'),
   ]
 
@@ -180,7 +196,12 @@ export async function downloadAndExtractLocalChromeExtension(options?: {
     return { packageDir, downloaded: false }
   }
 
-  const zipUrl = options?.zipUrl ?? getLocalChromeExtensionZipUrl()
+  const zipUrl = (options?.zipUrl ?? getLocalChromeExtensionZipUrl()).trim()
+  if (!zipUrl) {
+    throw new Error(
+      'No extension zip URL configured. Open https://github.com/go-hare/agent-extension/ or set CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL.',
+    )
+  }
   logForDebugging(
     `[Claude in Chrome] Downloading local extension zip: ${zipUrl}`,
   )
@@ -275,76 +296,89 @@ export type OpenLocalExtensionInstallResult = {
 }
 
 /**
- * Fork: download release zip (if needed) → extract → reveal folder +
- * chrome://extensions. User still Load unpacked (Chrome API cannot silent-install).
+ * Fork: open go-hare/agent-extension in the browser (latest releases / clone),
+ * optionally download a zip when CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL is set,
+ * reveal any local package, open chrome://extensions.
+ * User still Load unpacked (Chrome cannot silent-install).
  */
 export async function openLocalExtensionInstallHelpers(options?: {
   forceDownload?: boolean
 }): Promise<OpenLocalExtensionInstallResult> {
+  const repoUrl = getLocalChromeExtensionRepoUrl()
   const zipUrl = getLocalChromeExtensionZipUrl()
   let packageDir: string | null = null
   let downloaded = false
   let downloadError: string | null = null
 
-  // Prefer download into ~/.claude so every machine gets the same release.
-  // If download fails, fall back to already-discovered local tree.
-  try {
-    const result = await downloadAndExtractLocalChromeExtension({
-      force: options?.forceDownload === true,
-      zipUrl,
-    })
-    packageDir = result.packageDir
-    downloaded = result.downloaded
-  } catch (e) {
-    downloadError = e instanceof Error ? e.message : String(e)
-    logForDebugging(
-      `[Claude in Chrome] Extension zip download failed: ${downloadError}`,
-      { level: 'warn' },
-    )
+  // Default: open the repo page so users can update from GitHub.
+  // Zip auto-download only when an explicit zip URL is configured.
+  if (zipUrl) {
+    try {
+      const result = await downloadAndExtractLocalChromeExtension({
+        force: options?.forceDownload === true,
+        zipUrl,
+      })
+      packageDir = result.packageDir
+      downloaded = result.downloaded
+    } catch (e) {
+      downloadError = e instanceof Error ? e.message : String(e)
+      logForDebugging(
+        `[Claude in Chrome] Extension zip download failed: ${downloadError}`,
+        { level: 'warn' },
+      )
+      packageDir = resolveLocalChromeExtensionPackageDir()
+    }
+  } else {
     packageDir = resolveLocalChromeExtensionPackageDir()
   }
 
   let revealedFolder = false
   let openedExtensionsPage = false
+  let openedRepoPage = false
 
+  openedRepoPage = await openInChrome(repoUrl)
   if (packageDir) {
     revealedFolder = await revealPathInFileManager(packageDir)
   }
   openedExtensionsPage = await openInChrome('chrome://extensions')
 
   const steps: string[] = []
+  steps.push(`Opened ${repoUrl}`)
+  if (!openedRepoPage) {
+    steps.push('(could not open browser — open the URL manually)')
+  }
   if (downloadError && !packageDir) {
-    steps.push(`Download failed: ${downloadError}`)
-    steps.push(`Zip: ${zipUrl}`)
+    steps.push(`Zip download failed: ${downloadError}`)
   } else if (downloadError && packageDir) {
-    steps.push(`Download failed (${downloadError}); using existing package.`)
+    steps.push(
+      `Zip download failed (${downloadError}); using existing package.`,
+    )
   } else if (downloaded) {
-    steps.push(`Downloaded from ${zipUrl}`)
-  } else {
-    steps.push(`Using cached package (already extracted).`)
+    steps.push(`Also downloaded zip to cache.`)
   }
 
   if (packageDir) {
     steps.push(`Package: ${packageDir}`)
     steps.push(
-      'In Chrome: Developer mode → Load unpacked → select that folder.',
+      'In Chrome: Developer mode → Load unpacked → select that folder (or rebuild from the repo).',
     )
-    steps.push(
-      `Confirm extension id is ${LOCAL_CHROME_EXTENSION_PROD_ID} (needs official manifest.key).`,
-    )
-    steps.push('Then /chrome → Connect local (native socket, no token).')
   } else {
     steps.push(
-      'No package available. Check network, or set CLAUDE_CHROME_LOCAL_EXTENSION_DIR / CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL.',
+      'Clone/build the repo or download a release, then Load unpacked in chrome://extensions.',
+    )
+    steps.push(
+      'Optional: CLAUDE_CHROME_LOCAL_EXTENSION_DIR / CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL.',
     )
   }
+  steps.push('Then /chrome → Connect local (native socket, no token).')
 
   return {
     packageDir,
     revealedFolder,
     openedExtensionsPage,
     downloaded,
-    zipUrl,
+    // Prefer repo URL in result when no zip; keep field for callers/tests.
+    zipUrl: zipUrl || repoUrl,
     hint: steps.join(' '),
   }
 }

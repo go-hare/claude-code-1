@@ -51,7 +51,7 @@ REPL 中 `/chrome`：
 |--------|------|
 | **This session: On/Off** | 当前会话热挂载/卸载 `claude-in-chrome` MCP（**不**写全局 default）；On 注入与 `--chrome` 同形的 chrome system prompt，Off 从后续 turn 去掉 |
 | **Install Chrome extension** | **官方**：打开 `claude.ai/chrome`（Web Store） |
-| **Install local extension** | **本 fork**：从 [go-hare/agent-extension release](https://github.com/go-hare/agent-extension/releases/download/claude_1.0.81/claude_1.0.81.zip) **下载 zip** → 解压到 `~/.claude/chrome/extensions/claude_1.0.81` → 打开 `chrome://extensions` 提示 **Load unpacked**（Chrome 不能静默装）。可用 `CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL` / `CLAUDE_CHROME_LOCAL_EXTENSION_DIR` 覆盖 |
+| **Install local extension** | **本 fork**：浏览器打开 [go-hare/agent-extension](https://github.com/go-hare/agent-extension/)（方便跟最新更新）+ 打开 `chrome://extensions` → **Load unpacked**。可选 `CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL`（直接下 zip）/ `CLAUDE_CHROME_LOCAL_EXTENSION_DIR` / `CLAUDE_CHROME_LOCAL_EXTENSION_REPO_URL` |
 | **Reconnect extension** | **官方路径**：打开 `clau.de/chrome/reconnect`（Web Store 扩展握手） |
 | **Connect local** | **本 fork**：重装 native host + 检测 unpacked；**强制本地 socket**（`CLAUDE_CHROME_FORCE_NATIVE`，**不要 token**）；**不**开 claude.ai；**不**改官方 Reconnect。若 This session 为 Off 则顺带挂载 MCP |
 | **Enabled by default: Yes/No** | 仅改 `claudeInChromeDefaultEnabled`，影响**下次**启动；**不**自动挂载/卸载当前 session |
