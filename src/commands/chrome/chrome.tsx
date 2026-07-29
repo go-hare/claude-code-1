@@ -339,7 +339,7 @@ function ClaudeInChromeMenu({
       value: 'install-local',
       description: localPackageDir
         ? `Fork: use/cache ${localPackageDir}; download zip if needed → chrome://extensions → Load unpacked`
-        : 'Fork: download go-hare/claude-chrome release zip → ~/.claude/chrome/extensions → Load unpacked',
+        : 'Fork: download go-hare/agent-extension release zip → ~/.claude/chrome/extensions → Load unpacked',
     });
   }
 

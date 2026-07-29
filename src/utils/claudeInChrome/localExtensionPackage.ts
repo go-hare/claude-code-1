@@ -17,7 +17,7 @@ export const LOCAL_CHROME_EXTENSION_PROD_ID = 'fcoeoabgfenejglbffodgkkbkcdhcgfn'
  * Override with CLAUDE_CHROME_LOCAL_EXTENSION_ZIP_URL.
  */
 export const DEFAULT_LOCAL_CHROME_EXTENSION_ZIP_URL =
-  'https://github.com/go-hare/claude-chrome/releases/download/claude_1.0.81/claude_1.0.81.zip'
+  'https://github.com/go-hare/agent-extension/releases/download/claude_1.0.81/claude_1.0.81.zip'
 
 /** Tag / folder name under ~/.claude/chrome/extensions/ */
 export const DEFAULT_LOCAL_CHROME_EXTENSION_VERSION = 'claude_1.0.81'
