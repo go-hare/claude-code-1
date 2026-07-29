@@ -43,12 +43,13 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.17**），与 git tag 可能不同步。
+近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.18**），与 git tag 可能不同步。
 
-### 近期更新（2.7.5 → 2.7.17）
+### 近期更新（2.7.5 → 2.7.18）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.18** | **Chrome multi-browser 无 OAuth**：无 OAuth 时也暴露并支持本地 multi-browser 工具（对齐 densable 本地 Chrome MCP 能力）。 |
 | **2.7.17** | **Claude in Chrome 扩展链路**：默认放行 agent-extension fork ID、可追加扩展白名单；本地扩展下载改走 go-hare/agent-extension release；Install local 打开仓库页；`/chrome` 去掉 (Beta) 后缀。 |
 | **2.7.16** | **Host effort 元数据**：`get_settings.applied` 增加 `effortLevels` / `ultracodeOfferable`，桌面端可据此渲染可用 effort 档位与 ultracode 入口。 |
 | **2.7.15** | **Host Effort/Ultracode 链路**：densable Host `get_settings.ultracode` + `apply_flag` 直写；`eee` 剥 fence 再 parse，fenced JSON 不再刷 ERROR。 |
