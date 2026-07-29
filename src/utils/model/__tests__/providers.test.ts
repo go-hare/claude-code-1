@@ -62,6 +62,9 @@ function getAPIProviderTest(
   )
     return 'vertex'
 
+  // modelType=anthropic pins Anthropic firstParty; ignore leftover USE_OPENAI/etc.
+  if (modelType === 'anthropic') return 'firstParty'
+
   if (
     process.env.CLAUDE_CODE_USE_OPENAI === '1' ||
     process.env.CLAUDE_CODE_USE_OPENAI === 'true'
@@ -161,6 +164,21 @@ describe('getAPIProvider', () => {
   test('modelType takes precedence over environment variables', () => {
     process.env.CLAUDE_CODE_USE_BEDROCK = '1'
     expect(getAPIProviderTest({ modelType: 'gemini' })).toBe('gemini')
+  })
+
+  test('modelType anthropic ignores leftover CLAUDE_CODE_USE_OPENAI', () => {
+    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    expect(getAPIProviderTest({ modelType: 'anthropic' })).toBe('firstParty')
+  })
+
+  test('modelType anthropic still allows bedrock env (cloud Anthropic path)', () => {
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    expect(getAPIProviderTest({ modelType: 'anthropic' })).toBe('bedrock')
+  })
+
+  test('modelType anthropic still allows gateway session', () => {
+    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    expect(getAPIProviderTest({ modelType: 'anthropic' }, true)).toBe('gateway')
   })
 
   test('returns "gemini" when CLAUDE_CODE_USE_GEMINI is set', () => {

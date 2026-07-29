@@ -47,7 +47,19 @@ const call: LocalCommandCall = async (args, _context) => {
 
   // unset - clear settings, fallback to env vars
   if (arg === 'unset') {
-    updateSettingsForSource('userSettings', { modelType: undefined })
+    updateSettingsForSource('userSettings', {
+      modelType: undefined,
+      // Clear persisted provider flags so applyConfigEnvironmentVariables
+      // cannot resurrect a previous /login choice.
+      env: {
+        CLAUDE_CODE_USE_OPENAI: undefined,
+        CLAUDE_CODE_USE_GEMINI: undefined,
+        CLAUDE_CODE_USE_GROK: undefined,
+        CLAUDE_CODE_USE_BEDROCK: undefined,
+        CLAUDE_CODE_USE_VERTEX: undefined,
+        CLAUDE_CODE_USE_FOUNDRY: undefined,
+      } as unknown as Record<string, string>,
+    })
     // Also clear all provider-specific env vars to prevent conflicts
     delete process.env.CLAUDE_CODE_USE_BEDROCK
     delete process.env.CLAUDE_CODE_USE_VERTEX
@@ -132,15 +144,26 @@ const call: LocalCommandCall = async (args, _context) => {
     arg === 'gemini' ||
     arg === 'grok'
   ) {
-    // Clear any cloud provider env vars to avoid conflicts
+    // Clear any cloud / third-party provider env vars to avoid conflicts
     delete process.env.CLAUDE_CODE_USE_BEDROCK
     delete process.env.CLAUDE_CODE_USE_VERTEX
     delete process.env.CLAUDE_CODE_USE_FOUNDRY
     delete process.env.CLAUDE_CODE_USE_OPENAI
     delete process.env.CLAUDE_CODE_USE_GEMINI
     delete process.env.CLAUDE_CODE_USE_GROK
-    // Update settings.json
-    updateSettingsForSource('userSettings', { modelType: arg })
+    // Update settings.json — also strip persisted USE_* flags from settings.env
+    // so applyConfigEnvironmentVariables() cannot re-pin a previous provider.
+    updateSettingsForSource('userSettings', {
+      modelType: arg,
+      env: {
+        CLAUDE_CODE_USE_OPENAI: undefined,
+        CLAUDE_CODE_USE_GEMINI: undefined,
+        CLAUDE_CODE_USE_GROK: undefined,
+        CLAUDE_CODE_USE_BEDROCK: undefined,
+        CLAUDE_CODE_USE_VERTEX: undefined,
+        CLAUDE_CODE_USE_FOUNDRY: undefined,
+      } as unknown as Record<string, string>,
+    })
     // Ensure settings.env gets applied to process.env
     applyConfigEnvironmentVariables()
     return { type: 'text', value: `API provider set to ${arg}.` }

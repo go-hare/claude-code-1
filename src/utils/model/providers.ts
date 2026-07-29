@@ -29,6 +29,7 @@ export function getAPIProvider(
   settings: Pick<SettingsJson, 'modelType'> = getInitialSettings(),
 ): APIProvider {
   const modelType = settings.modelType
+  // Explicit third-party modelType always pins (beats gateway + env).
   if (modelType === 'openai') return 'openai'
   if (modelType === 'gemini') return 'gemini'
   if (modelType === 'grok') return 'grok'
@@ -38,6 +39,7 @@ export function getAPIProvider(
   ensureGatewayAuthApplied()
 
   // Official xn(): if (o_()) return "gateway" — pinned gatewayAuth session wins.
+  // Still above modelType=anthropic so OAuth+gateway users keep gateway routing.
   if (getGatewayAuth()) return 'gateway'
 
   // Official xn() order: bedrock → foundry → anthropicAws → mantle → vertex → firstParty
@@ -49,6 +51,13 @@ export function getAPIProvider(
   }
   if (isMantleProviderEnabled()) return 'mantle'
   if (isUseVertexEnvEnabled()) return 'vertex'
+
+  // modelType=anthropic means Anthropic stack. Do NOT honor leftover
+  // CLAUDE_CODE_USE_OPENAI/GEMINI/GROK from a previous /login or settings.env
+  // (OAuth login sets modelType anthropic but often leaves those env flags).
+  if (modelType === 'anthropic') {
+    return 'firstParty'
+  }
 
   if (isUseOpenAIEnvEnabled()) return 'openai'
   if (isUseGeminiEnvEnabled()) return 'gemini'

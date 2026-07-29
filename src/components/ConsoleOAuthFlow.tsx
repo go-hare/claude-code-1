@@ -278,10 +278,20 @@ export function ConsoleOAuthFlow({
         if (!orgResult.valid) {
           throw new Error((orgResult as { valid: false; message: string }).message);
         }
-        // Reset modelType to anthropic when using OAuth login
-        updateSettingsForSource('userSettings', { modelType: 'anthropic' } as unknown as Parameters<
-          typeof updateSettingsForSource
-        >[1]);
+        // Reset modelType to anthropic when using OAuth login, and strip leftover
+        // CLAUDE_CODE_USE_OPENAI/GEMINI/GROK from settings.env so getAPIProvider
+        // does not stay on a previous third-party provider after login.
+        updateSettingsForSource('userSettings', {
+          modelType: 'anthropic',
+          env: {
+            CLAUDE_CODE_USE_OPENAI: undefined,
+            CLAUDE_CODE_USE_GEMINI: undefined,
+            CLAUDE_CODE_USE_GROK: undefined,
+          },
+        } as unknown as Parameters<typeof updateSettingsForSource>[1]);
+        delete process.env.CLAUDE_CODE_USE_OPENAI;
+        delete process.env.CLAUDE_CODE_USE_GEMINI;
+        delete process.env.CLAUDE_CODE_USE_GROK;
 
         setOAuthStatus({ state: 'success' });
         void sendNotification(
