@@ -5,16 +5,59 @@ import { isFsInaccessible } from '../errors.js'
 
 export const CHROME_EXTENSION_URL = 'https://claude.ai/chrome'
 
-// Production extension ID
-const PROD_EXTENSION_ID = 'fcoeoabgfenejglbffodgkkbkcdhcgfn'
+// Production extension ID (Chrome Web Store / official key)
+export const PROD_EXTENSION_ID = 'fcoeoabgfenejglbffodgkkbkcdhcgfn'
+/**
+ * go-hare / agent-extension fork (custom manifest.key).
+ * Default-allow so local Connect works without CLAUDE_CHROME_EXTENSION_IDS.
+ * Official store id stays first so densable + Web Store installs still match.
+ */
+export const FORK_EXTENSION_ID = 'bbkeopmjdjdiiaahndbbjhckdbgblpjn'
 // Dev extension IDs (for internal use)
 const DEV_EXTENSION_ID = 'dihbgbndebgnbjfmelmegjepbnkhlgni'
 const ANT_EXTENSION_ID = 'dngcpimnedloihjnnfngkgjoidhnaolf'
 
+/** Chromium extension ids are 32 chars in a–p (public-key hash encoding). */
+const CHROME_EXTENSION_ID_RE = /^[a-p]{32}$/
+
+/**
+ * Extra ids from `CLAUDE_CHROME_EXTENSION_IDS` (comma-separated).
+ * Appended on top of official + built-in fork ids.
+ */
+export function parseExtraChromeExtensionIds(
+  raw: string | undefined = process.env.CLAUDE_CHROME_EXTENSION_IDS,
+): string[] {
+  if (!raw?.trim()) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of raw.split(',')) {
+    const id = part.trim().toLowerCase()
+    if (!id || seen.has(id)) continue
+    if (!CHROME_EXTENSION_ID_RE.test(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+}
+
+/**
+ * Extension ids accepted for install detection + native-host allowed_origins.
+ * Always: official store + hare fork; optional ant ids; optional env extras.
+ */
+export function getClaudeChromeExtensionIds(): string[] {
+  const ids: string[] = [PROD_EXTENSION_ID, FORK_EXTENSION_ID]
+  if (process.env.USER_TYPE === 'ant') {
+    ids.push(DEV_EXTENSION_ID, ANT_EXTENSION_ID)
+  }
+  for (const extra of parseExtraChromeExtensionIds()) {
+    if (!ids.includes(extra)) ids.push(extra)
+  }
+  return ids
+}
+
+/** @deprecated use getClaudeChromeExtensionIds — kept as internal alias */
 function getExtensionIds(): string[] {
-  return process.env.USER_TYPE === 'ant'
-    ? [PROD_EXTENSION_ID, DEV_EXTENSION_ID, ANT_EXTENSION_ID]
-    : [PROD_EXTENSION_ID]
+  return getClaudeChromeExtensionIds()
 }
 
 // Must match ChromiumBrowser from common.ts

@@ -146,7 +146,11 @@ Chrome 扩展通过 Native Messaging Host 与 CLI 建立 Unix socket 连接。�
 ### 扩展显示未安装
 
 1. **商店安装**：从 Chrome Web Store 安装 "Claude in Chrome"（`claude.ai/chrome`），安装后重启浏览器。
-2. **本地 Load unpacked**：CLI 会扫各 profile 的 `Extensions/<官方 id>/` **以及** `Preferences` / `Secure Preferences` 里同 id 的绝对路径。本地包需带官方 `manifest.key`（id 仍为 `fcoeoabgfenejglbffodgkkbkcdhcgfn`）；路径目录须仍存在。若只改了代码未保留 `key`，会变成随机 id，**无法**被 native host `allowed_origins` 接受。
+2. **本地 Load unpacked**：CLI 会扫各 profile 的 `Extensions/<id>/` **以及** `Preferences` / `Secure Preferences` 里同 id 的绝对路径。
+   - **官方 / 兼容包**：带官方 `manifest.key` → id `fcoeoabgfenejglbffodgkkbkcdhcgfn`。
+   - **go-hare / agent-extension fork**（自有 `manifest.key`）：id `bbkeopmjdjdiiaahndbbjhckdbgblpjn` — **CLI 默认已放行**（检测 + native host `allowed_origins`），无需 export 环境变量。`/chrome` → **Connect local** 会重写 host manifest（**不要**只手改 JSON）。
+   - 其它自定义 id：`export CLAUDE_CHROME_EXTENSION_IDS=<id1>,<id2>` 追加白名单。
+   - 无 `key` 的路径随机 id：**无法**被检测 / native host 接受。路径目录须仍存在。
 3. **多 profile**：扩展装在 `Profile 1` 而检测以前只看 packed 目录时会误报；当前版本已覆盖 Secure Preferences。在 `/chrome` 选 **Reconnect extension** 刷新状态。
 4. **连接 vs 检测**：`Extension: Installed` 只表示磁盘/偏好里有扩展；`Status: Enabled` 还需要 **This session: On**（或 `--chrome` / default）且 MCP + native messaging 通。
 

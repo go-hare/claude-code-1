@@ -2,9 +2,16 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { detectExtensionInstallationPortable } from '../setupPortable.js'
+import {
+  detectExtensionInstallationPortable,
+  FORK_EXTENSION_ID,
+  getClaudeChromeExtensionIds,
+  parseExtraChromeExtensionIds,
+  PROD_EXTENSION_ID,
+} from '../setupPortable.js'
 
-const PROD_ID = 'fcoeoabgfenejglbffodgkkbkcdhcgfn'
+const PROD_ID = PROD_EXTENSION_ID
+const FORK_ID = FORK_EXTENSION_ID
 
 const tempRoots: string[] = []
 
@@ -128,5 +135,65 @@ describe('detectExtensionInstallationPortable', () => {
     ])
     expect(result.isInstalled).toBe(false)
     expect(result.browser).toBe(null)
+  })
+
+  test('finds built-in fork extension id without env', async () => {
+    const prev = process.env.CLAUDE_CHROME_EXTENSION_IDS
+    delete process.env.CLAUDE_CHROME_EXTENSION_IDS
+    try {
+      const root = await makeBrowserRoot()
+      await mkdir(join(root, 'Default', 'Extensions', FORK_ID, '0.1.0'), {
+        recursive: true,
+      })
+
+      const result = await detectExtensionInstallationPortable([
+        { browser: 'chrome', path: root },
+      ])
+      expect(result.isInstalled).toBe(true)
+      expect(result.browser).toBe('chrome')
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_CHROME_EXTENSION_IDS
+      else process.env.CLAUDE_CHROME_EXTENSION_IDS = prev
+    }
+  })
+})
+
+describe('parseExtraChromeExtensionIds / getClaudeChromeExtensionIds', () => {
+  test('parses comma-separated valid ids and drops invalid', () => {
+    const extra = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    expect(
+      parseExtraChromeExtensionIds(
+        ` ${extra}, not-an-id, ${extra}, ${PROD_ID} `,
+      ),
+    ).toEqual([extra, PROD_ID])
+  })
+
+  test('getClaudeChromeExtensionIds defaults to official + fork without env', () => {
+    const prev = process.env.CLAUDE_CHROME_EXTENSION_IDS
+    delete process.env.CLAUDE_CHROME_EXTENSION_IDS
+    try {
+      const ids = getClaudeChromeExtensionIds()
+      expect(ids[0]).toBe(PROD_ID)
+      expect(ids).toContain(FORK_ID)
+      // no env → only built-in pair (ant ids may append if USER_TYPE=ant)
+      expect(ids).toContain(PROD_ID)
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_CHROME_EXTENSION_IDS
+      else process.env.CLAUDE_CHROME_EXTENSION_IDS = prev
+    }
+  })
+
+  test('env extras append without duplicating fork id', () => {
+    const prev = process.env.CLAUDE_CHROME_EXTENSION_IDS
+    const extra = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    process.env.CLAUDE_CHROME_EXTENSION_IDS = `${FORK_ID},${extra}`
+    try {
+      const ids = getClaudeChromeExtensionIds()
+      expect(ids.filter(id => id === FORK_ID)).toHaveLength(1)
+      expect(ids).toContain(extra)
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_CHROME_EXTENSION_IDS
+      else process.env.CLAUDE_CHROME_EXTENSION_IDS = prev
+    }
   })
 })
