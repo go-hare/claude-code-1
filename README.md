@@ -237,9 +237,8 @@ TUI (REPL) 模式需要真实终端，无法直接通过 VS Code launch 启动�
 </a>
 
 ## 致谢
-
+- [((https://linux.do/))](https://linux.do/) — linux.do 社区
 - [doubaoime-asr](https://github.com/starccy/doubaoime-asr) — 豆包 ASR 语音识别 SDK，为 Voice Mode 提供无需 Anthropic OAuth 的语音输入方案
-
 ## 许可证
 
 本项目仅供学习研究用途。Claude Code 的所有权利归 [Anthropic](https://www.anthropic.com/) 所有。
