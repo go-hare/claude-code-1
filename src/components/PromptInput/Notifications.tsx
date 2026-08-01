@@ -24,6 +24,7 @@ import { setEnvHookNotifier } from '../../utils/hooks/fileChangedWatcher.js';
 import { toIDEDisplayName } from '../../utils/ide.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
 import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js';
+import { AutoUpdaterWrapper } from '../AutoUpdaterWrapper.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { IdeStatusIndicator } from '../IdeStatusIndicator.js';
 import { MemoryUsageIndicator } from '../MemoryUsageIndicator.js';
@@ -56,13 +57,13 @@ type Props = {
 
 export function Notifications({
   apiKeyStatus,
-  autoUpdaterResult: _autoUpdaterResult,
+  autoUpdaterResult,
   debug,
-  isAutoUpdating: _isAutoUpdating,
+  isAutoUpdating,
   verbose,
   messages,
-  onAutoUpdaterResult: _onAutoUpdaterResult,
-  onChangeIsUpdating: _onChangeIsUpdating,
+  onAutoUpdaterResult,
+  onChangeIsUpdating,
   ideSelection,
   mcpClients,
   isInputWrapped = false,
@@ -139,6 +140,49 @@ export function Notifications({
     }
   }, [shouldShowExternalEditorHint, editor, addNotification, removeNotification]);
 
+  // Surface update status in the shared notification queue (fullscreen used to
+  // clip the inline AutoUpdater row to a single height=1 slot).
+  useEffect(() => {
+    if (autoUpdaterResult?.status === 'available' && autoUpdaterResult.version) {
+      addNotification({
+        key: 'auto-updater-result',
+        text: `Update available (${autoUpdaterResult.version}) · run claude update`,
+        color: 'warning',
+        priority: 'high',
+        timeoutMs: 60_000,
+      });
+      return;
+    }
+    if (autoUpdaterResult?.status === 'success' && autoUpdaterResult.version) {
+      addNotification({
+        key: 'auto-updater-result',
+        text: `✓ Update installed · Restart to apply (${autoUpdaterResult.version})`,
+        color: 'success',
+        priority: 'high',
+        timeoutMs: 30_000,
+      });
+      return;
+    }
+    if (autoUpdaterResult?.status === 'install_failed' || autoUpdaterResult?.status === 'no_permissions') {
+      addNotification({
+        key: 'auto-updater-result',
+        text: `✗ Auto-update failed · try claude update`,
+        color: 'error',
+        priority: 'high',
+        timeoutMs: 20_000,
+      });
+      return;
+    }
+    if (isAutoUpdating) {
+      addNotification({
+        key: 'auto-updater-result',
+        text: 'Auto-updating…',
+        priority: 'low',
+        timeoutMs: 15_000,
+      });
+    }
+  }, [autoUpdaterResult, isAutoUpdating, addNotification]);
+
   return (
     <SentryErrorBoundary>
       <Box flexDirection="column" alignItems={isNarrow ? 'flex-start' : 'flex-end'} flexShrink={0} overflowX="hidden">
@@ -153,6 +197,15 @@ export function Notifications({
           verbose={verbose}
           tokenUsage={tokenUsage}
           mainLoopModel={mainLoopModel}
+        />
+        {/* Keep mounted: unmount re-fires AutoUpdater initial check (PR#22413). */}
+        <AutoUpdaterWrapper
+          verbose={verbose}
+          onAutoUpdaterResult={onAutoUpdaterResult}
+          autoUpdaterResult={autoUpdaterResult}
+          isUpdating={isAutoUpdating}
+          onChangeIsUpdating={onChangeIsUpdating}
+          showSuccessMessage={true}
         />
       </Box>
     </SentryErrorBoundary>

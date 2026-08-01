@@ -37,6 +37,8 @@ export type InstallStatus =
   | 'no_permissions'
   | 'install_failed'
   | 'in_progress'
+  /** Newer version on registry; auto-install skipped (config/env). UI should prompt. */
+  | 'available'
 
 export type AutoUpdaterResult = {
   version: string | null

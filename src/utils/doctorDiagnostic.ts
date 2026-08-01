@@ -84,6 +84,36 @@ function getNormalizedPaths(): [invokedPath: string, execPath: string] {
   return [invokedPath, execPath]
 }
 
+/**
+ * True when this process is the Bun-compiled binary shipped under npm's
+ * `@go-hare/claude-code` / `@go-hare/claude-code-*` packages (optionalDeps).
+ * Those binaries report isInBundledMode() but must upgrade via npm, not GCS.
+ */
+export function isGoHareNpmShippedBinary(
+  invokedPath?: string,
+  execPath?: string,
+): boolean {
+  const [inv, exec] =
+    invokedPath !== undefined && execPath !== undefined
+      ? [invokedPath, execPath]
+      : getNormalizedPaths()
+  const haystack = `${inv}\0${exec}\0${process.execPath || ''}`
+  // node_modules/@go-hare/claude-code or platform package
+  if (/node_modules\/@go-hare\/claude-code(?:-[^/]+)?(?:\/|$)/.test(haystack)) {
+    return true
+  }
+  // Scoped npm global layout sometimes omits intermediate package path segments
+  // in edge cases; also match plain @go-hare path segments near claude binary.
+  if (
+    haystack.includes('/@go-hare/') &&
+    (haystack.includes('claude-code') ||
+      /\/claude(?:\.exe)?(?:\0|$)/.test(haystack))
+  ) {
+    return true
+  }
+  return false
+}
+
 export async function getCurrentInstallationType(): Promise<InstallationType> {
   if (process.env.NODE_ENV === 'development') {
     return 'development'
@@ -93,6 +123,14 @@ export async function getCurrentInstallationType(): Promise<InstallationType> {
 
   // Check if running in bundled mode first
   if (isInBundledMode()) {
+    // @go-hare ships Bun-compiled binaries via npm optionalDeps
+    // (node_modules/@go-hare/claude-code[-platform]/…). Those are
+    // "bundled" to Bun, but upgrades must use npm/bun install -g — not
+    // Anthropic native/GCS. Treat as npm-global so AutoUpdater hits
+    // MACRO.PACKAGE_URL on the public registry.
+    if (isGoHareNpmShippedBinary()) {
+      return 'npm-global'
+    }
     // Check if this bundled instance was installed by a package manager
     if (
       detectHomebrew() ||

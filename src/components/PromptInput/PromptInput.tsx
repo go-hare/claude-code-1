@@ -2874,10 +2874,12 @@ function PromptInput({
         // bottom row. Keeping Notifications mounted prevents AutoUpdater's
         // initial-check effect from re-firing on every slash-completion
         // toggle (PR#22413).
+        // height: allow 2 rows when an update banner may show (notify-only
+        // or install result); still 0 while slash suggestions are open.
         <Box
           position="absolute"
           marginTop={briefOwnsGap ? -2 : -1}
-          height={suggestions.length === 0 ? 1 : 0}
+          height={suggestions.length === 0 ? 2 : 0}
           width="100%"
           paddingLeft={2}
           paddingRight={1}

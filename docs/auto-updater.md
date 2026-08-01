@@ -42,11 +42,12 @@ useInterval(checkForUpdates, 30 * 60 * 1000); // 每 30 分钟
 
 任何更新尝试之前，系统会依次检查：
 
-1. **自动更新是否被禁用？** — `getAutoUpdaterDisabledReason()`（`src/utils/config.ts:1737`）
+1. **自动更新是否被禁用？** — `getAutoUpdaterDisabledReason()`（`src/utils/config.ts`）
    - `NODE_ENV === 'development'`
-   - 设置了 `DISABLE_AUTOUPDATER` 环境变量
+   - 设置了 `DISABLE_AUTOUPDATER` 环境变量（opt-out）
    - 仅限必要流量模式
    - `config.autoUpdates === false`（native 安装的保护模式除外）
+   - **不再**要求 `ENABLE_AUTOUPDATER=1`（fork 曾默认关闭，会导致 REPL 永不提示更新）
 2. **最大版本上限？** — `getMaxVersion()`（`src/utils/autoUpdater.ts:108`）— 服务端熔断开关，防止更新到已知有问题的版本
 3. **是否跳过该版本？** — `shouldSkipVersion()`（`src/utils/autoUpdater.ts:145`）— 尊重用户的 `minimumVersion` 设置，防止切换到 stable 频道时发生意外的版本降级
 

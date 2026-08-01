@@ -4,6 +4,7 @@ import { useInterval } from 'usehooks-ts';
 import { Text } from '@anthropic/ink';
 import {
   type AutoUpdaterResult,
+  getLatestVersion,
   getLatestVersionFromGcs,
   getMaxVersion,
   shouldSkipVersion,
@@ -50,10 +51,26 @@ export function PackageManagerAutoUpdater({ verbose }: Props): React.ReactNode {
     ]);
     setPackageManager(pm);
 
-    let latest = await getLatestVersionFromGcs(channel);
+    // Prefer npm registry (MACRO.PACKAGE_URL = @go-hare/claude-code). GCS is
+    // Anthropic native release pointers and will never list fork versions.
+    let latest = (await getLatestVersion(channel)) ?? (await getLatestVersionFromGcs(channel));
+
+    // Set availability before optional maxVersion gate (may be slow/hung).
+    let hasUpdate = !!latest && !gte(MACRO.VERSION, latest) && !shouldSkipVersion(latest);
+    setUpdateAvailable(hasUpdate);
 
     // Check if max version is set (server-side kill switch for auto-updates)
-    const maxVersion = await getMaxVersion();
+    let maxVersion: string | undefined;
+    try {
+      maxVersion = await Promise.race([
+        getMaxVersion(),
+        new Promise<undefined>(resolve => {
+          setTimeout(resolve, 3000, undefined);
+        }),
+      ]);
+    } catch {
+      maxVersion = undefined;
+    }
 
     if (maxVersion && latest && gt(latest, maxVersion)) {
       logForDebugging(
@@ -67,11 +84,9 @@ export function PackageManagerAutoUpdater({ verbose }: Props): React.ReactNode {
         return;
       }
       latest = maxVersion;
+      hasUpdate = !!latest && !gte(MACRO.VERSION, latest) && !shouldSkipVersion(latest);
+      setUpdateAvailable(hasUpdate);
     }
-
-    const hasUpdate = latest && !gte(MACRO.VERSION, latest) && !shouldSkipVersion(latest);
-
-    setUpdateAvailable(!!hasUpdate);
 
     if (hasUpdate) {
       logForDebugging(`PackageManagerAutoUpdater: Update available ${MACRO.VERSION} -> ${latest}`);
@@ -92,7 +107,7 @@ export function PackageManagerAutoUpdater({ verbose }: Props): React.ReactNode {
 
   // pacman, deb, and rpm don't get specific commands because they each have
   // multiple frontends (pacman: yay/paru/makepkg, deb: apt/apt-get/aptitude/nala,
-  // rpm: dnf/yum/zypper)
+  // rpm: dnf/yum/zypper). Fork default path is npm/bun global.
   const updateCommand =
     packageManager === 'homebrew'
       ? 'brew upgrade claude-code'
@@ -100,7 +115,7 @@ export function PackageManagerAutoUpdater({ verbose }: Props): React.ReactNode {
         ? 'winget upgrade Anthropic.ClaudeCode'
         : packageManager === 'apk'
           ? 'apk upgrade claude-code'
-          : 'your package manager update command';
+          : `npm i -g ${MACRO.PACKAGE_URL}@latest`;
 
   return (
     <>

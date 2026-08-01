@@ -74,8 +74,23 @@ export function AutoUpdater({
     let latestVersion = await getLatestVersion(channel);
     const isDisabled = isAutoUpdaterDisabled();
 
+    // Publish versions ASAP so notify-only UI can render even if GrowthBook
+    // getMaxVersion() is slow/hung (BLOCKS_ON_INIT). Without this, autoUpdates
+    // false never showed "Update available" because setVersions never ran.
+    setVersions({ global: currentVersion, latest: latestVersion });
+
     // Check if max version is set (server-side kill switch for auto-updates)
-    const maxVersion = await getMaxVersion();
+    let maxVersion: string | undefined;
+    try {
+      maxVersion = await Promise.race([
+        getMaxVersion(),
+        new Promise<undefined>(resolve => {
+          setTimeout(resolve, 3000, undefined);
+        }),
+      ]);
+    } catch {
+      maxVersion = undefined;
+    }
     if (maxVersion && latestVersion && gt(latestVersion, maxVersion)) {
       logForDebugging(
         `AutoUpdater: maxVersion ${maxVersion} is set, capping update from ${latestVersion} to ${maxVersion}`,
@@ -88,18 +103,23 @@ export function AutoUpdater({
         return;
       }
       latestVersion = maxVersion;
+      setVersions({ global: currentVersion, latest: latestVersion });
     }
 
-    setVersions({ global: currentVersion, latest: latestVersion });
+    const needsUpdate =
+      !!currentVersion && !!latestVersion && !gte(currentVersion, latestVersion) && !shouldSkipVersion(latestVersion);
+
+    // Auto-install off: still report so Notifications can toast "Update available".
+    if (isDisabled && needsUpdate && latestVersion) {
+      onAutoUpdaterResult({
+        version: latestVersion,
+        status: 'available',
+      });
+      return;
+    }
 
     // Check if update needed and perform update
-    if (
-      !isDisabled &&
-      currentVersion &&
-      latestVersion &&
-      !gte(currentVersion, latestVersion) &&
-      !shouldSkipVersion(latestVersion)
-    ) {
+    if (!isDisabled && needsUpdate) {
       const startTime = Date.now();
       onChangeIsUpdating(true);
 
@@ -193,11 +213,22 @@ export function AutoUpdater({
   // Check every 30 minutes
   useInterval(checkForUpdates, 30 * 60 * 1000);
 
-  if (!autoUpdaterResult?.version && (!versions.global || !versions.latest)) {
+  const updateAvailable =
+    !!versions.global &&
+    !!versions.latest &&
+    !gte(versions.global, versions.latest) &&
+    !shouldSkipVersion(versions.latest);
+
+  // Notify-only when auto-install is off (config.autoUpdates=false / DISABLE_…)
+  // or when status is 'available' from the check path.
+  const showAvailableHint =
+    !isUpdating && (autoUpdaterResult?.status === 'available' || (updateAvailable && !autoUpdaterResult?.version));
+
+  if (!autoUpdaterResult?.version && !isUpdating && !showAvailableHint) {
     return null;
   }
 
-  if (!autoUpdaterResult?.version && !isUpdating) {
+  if (!versions.global && !versions.latest && !autoUpdaterResult?.version) {
     return null;
   }
 
@@ -224,6 +255,14 @@ export function AutoUpdater({
             ✓ Update installed · Restart to apply
           </Text>
         )
+      )}
+      {showAvailableHint && (
+        <Text color="warning" wrap="truncate">
+          Update available! Run:{' '}
+          <Text bold>
+            {hasLocalInstall ? `cd ~/.claude/local && npm update ${MACRO.PACKAGE_URL}` : `claude update`}
+          </Text>
+        </Text>
       )}
       {(autoUpdaterResult?.status === 'install_failed' || autoUpdaterResult?.status === 'no_permissions') && (
         <Text color="error" wrap="truncate">

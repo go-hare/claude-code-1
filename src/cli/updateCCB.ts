@@ -16,7 +16,8 @@ import { execFileNoThrowWithCwd } from '../utils/execFileNoThrow.js'
 import { gracefulShutdown } from '../utils/gracefulShutdown.js'
 import { writeToStdout } from '../utils/process.js'
 
-const PACKAGE_NAME = 'claude'
+/** Published npm package name (fork: @go-hare/claude-code via MACRO). */
+const PACKAGE_NAME = MACRO.PACKAGE_URL
 
 function getCurrentVersion(): string {
   // Read version from the nearest package.json (walks up from dist root)
@@ -52,9 +53,11 @@ function isBunInstallation(): boolean {
     return true
   }
 
-  // Check bun's global install directory
+  // Check bun's global install directory (scoped packages live under @scope/)
   const bunGlobalDir = join(homedir(), '.bun', 'install', 'global')
-  if (existsSync(join(bunGlobalDir, 'node_modules', PACKAGE_NAME))) {
+  if (
+    existsSync(join(bunGlobalDir, 'node_modules', ...PACKAGE_NAME.split('/')))
+  ) {
     return true
   }
 
