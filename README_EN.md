@@ -43,12 +43,13 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.22**; trust `package.json` / npm) and may not match git tags.
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.23**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.22)
+### Recent updates (2.7.5 → 2.7.23)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.23** | **Tasks dual-emit**: once-gated `system/task_notification` bookends (with ISO `timestamp`) when agent/shell/monitor/dream/workflow terminate so Host Tasks can settle on densable Jp; print residual re-emit once-gated — do not invent lifecycle from TaskOutput alone. |
 | **2.7.22** | **REPL update banner / go-hare upgrade path**: drop default-off `ENABLE_AUTOUPDATER`; toast "Update available" even when `autoUpdates=false`; mount AutoUpdater in Notifications; treat npm-shipped binaries as `npm-global`; `claude update` targets `@go-hare/claude-code`. |
 | **2.7.21** | **Workflow / ultracode densable alignment**: full playbook on the Workflow tool prompt (ONLY-call-when opt-in); `/ultracode` is user-only (`disableModelInvocation`), no wide whenToUse bootstrap. |
 | **2.7.20** | **Workflow host densable alignment**: `/workflows` is history browser (GsK); live monitor is Tasks `WorkflowDetailDialog` (fv_) on `task.workflowProgress`; remove dual-pane `WorkflowsPanel`; add progress fold / SDK `task_progress` bridge and history navigation keybinding fix. |
