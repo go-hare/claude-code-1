@@ -292,6 +292,7 @@ export const claudeCodeBackend: AgentAdapter = {
     // Accumulate running progress (onProgress push -> agent_progress event -> panel refreshes token/tool in real time).
     let tokenCount = 0
     let toolCount = 0
+    let lastToolName: string | undefined
 
     try {
       await runInCwd(async () => {
@@ -318,19 +319,39 @@ export const claudeCodeBackend: AgentAdapter = {
               | undefined
             if (usage) tokenCount = getTokenCountFromUsage(usage)
             const content = msg.message.content as
-              | Array<{ type: string }>
+              | Array<{ type: string; name?: string }>
               | undefined
-            if (content)
-              toolCount += content.filter(b => b.type === 'tool_use').length
+            if (content) {
+              for (const b of content) {
+                if (b.type === 'tool_use') {
+                  toolCount++
+                  if (typeof b.name === 'string' && b.name)
+                    lastToolName = b.name
+                }
+              }
+            }
           }
-          ctx.onProgress?.({ tokenCount, toolCount })
+          ctx.onProgress?.({
+            tokenCount,
+            toolCount,
+            ...(lastToolName ? { lastToolName } : {}),
+          })
         }
       })
     } catch (e) {
-      // abort (kill workflow / kill agent): must rethrow WorkflowAbortedError after detection,
-      // otherwise hooks.agent will swallow the abort as an ordinary failure into dead, and the workflow won't know it was killed
-      // (the other side of the 'x' kill path being ineffective: the signal did arrive, but the result was disguised as a normal completion).
+      // densable: signal.reason discriminates kill vs user-skip vs user-retry.
+      // - user-skip → {kind:'skipped'} (agent returns null; journal records skipped)
+      // - user-retry → throw plain Error so hooks.agent auto-retries once (not WorkflowAbortedError)
+      // - kill / other abort → WorkflowAbortedError (workflow terminates / agent dead path)
       if (agentAbort.signal.aborted || (e as Error)?.name === 'AbortError') {
+        const reason = agentAbort.signal.reason
+        if (reason === 'user-skip') {
+          logEvent('tengu_workflow_agent', { ok: 0 })
+          return { kind: 'skipped' }
+        }
+        if (reason === 'user-retry') {
+          throw new Error('user-retry')
+        }
         throw new WorkflowAbortedError()
       }
       const detail = (e as Error).message
@@ -350,6 +371,20 @@ export const claudeCodeBackend: AgentAdapter = {
         worktreeInfo = null
         await cleanupWorkflowWorktree(info, agentDef.agentType)
       }
+    }
+
+    // Abort may complete the generator without throwing — re-check after the loop
+    // (densable checks signal.reason on the quiet path too).
+    if (agentAbort.signal.aborted) {
+      const reason = agentAbort.signal.reason
+      if (reason === 'user-skip') {
+        logEvent('tengu_workflow_agent', { ok: 0 })
+        return { kind: 'skipped' }
+      }
+      if (reason === 'user-retry') {
+        throw new Error('user-retry')
+      }
+      throw new WorkflowAbortedError()
     }
 
     const finalized = finalizeAgentTool(messages, coreAgentId, {

@@ -9,4 +9,9 @@ export type ToolProgressData = any
 export type WebSearchProgress = any
 export type ShellProgress = any
 export type PowerShellProgress = any
-export type SdkWorkflowProgress = any
+export type {
+  SdkWorkflowAgentProgress,
+  SdkWorkflowLogProgress,
+  SdkWorkflowPhaseProgress,
+  SdkWorkflowProgress,
+} from './workflowProgress.js'

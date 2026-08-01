@@ -31,6 +31,8 @@ export type AgentRunParams = {
 export type AgentProgressUpdate = {
   tokenCount: number
   toolCount: number
+  /** densable last_tool_name — most recent tool_use name when available. */
+  lastToolName?: string
 }
 
 /**
@@ -95,6 +97,11 @@ export type ProgressEvent =
       agentId: number
       label?: string
       phase?: string
+      /** densable-shaped optional display fields for Desktop / task_progress. */
+      model?: string
+      agentType?: string
+      isolation?: 'worktree'
+      promptPreview?: string
     }
   | {
       type: 'agent_done'
@@ -103,6 +110,8 @@ export type ProgressEvent =
       label?: string
       phase?: string
       result: AgentRunResult
+      /** true when result came from journal resume cache (densable cached). */
+      cached?: boolean
     }
   | {
       type: 'agent_progress'
@@ -112,6 +121,7 @@ export type ProgressEvent =
       phase?: string
       tokenCount: number
       toolCount: number
+      lastToolName?: string
     }
   | { type: 'log'; runId: string; message: string }
   | {

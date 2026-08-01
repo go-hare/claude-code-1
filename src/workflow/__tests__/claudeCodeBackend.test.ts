@@ -221,6 +221,8 @@ test('ctx.signal pre-abort → backend bridge: override.abortController.signal.a
       override?: { abortController?: AbortController }
     }) {
       capturedController = opts.override?.abortController
+      // Quiet-path abort: generator may complete without throwing; densable post-loop
+      // re-check converts agentAbort.signal.aborted into WorkflowAbortedError.
       yield {
         type: 'assistant',
         message: { content: [{ type: 'text', text: 'x' }] },
@@ -229,12 +231,14 @@ test('ctx.signal pre-abort → backend bridge: override.abortController.signal.a
   }))
   const parentAbort = new AbortController()
   parentAbort.abort()
-  // mock does not throw → backend takes the normal return path; but the bridge `if (ctx.signal.aborted) agentAbort.abort()`
-  // has already triggered synchronously, capturedController.signal.aborted must be true (root cause of kill bridge)
-  await claudeCodeBackend.run(
-    { prompt: 'pre-aborted' },
-    { ...ctx(), signal: parentAbort.signal },
-  )
+  // Bridge fires synchronously: if (ctx.signal.aborted) agentAbort.abort().
+  // Post-loop densable check then throws WorkflowAbortedError (not success return).
+  await expect(
+    claudeCodeBackend.run(
+      { prompt: 'pre-aborted' },
+      { ...ctx(), signal: parentAbort.signal },
+    ),
+  ).rejects.toBeInstanceOf(WorkflowAbortedError)
   expect(capturedController?.signal.aborted).toBe(true)
 })
 

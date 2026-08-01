@@ -11,10 +11,10 @@ WORKFLOW_SCRIPTS 让 Claude Code 用**确定性 JavaScript 脚本**编排多个�
 - **编排原语**：`agent` / `parallel` / `pipeline` / `phase` / `log` / `workflow`（见引擎包）。
 - **确定性**：脚本在受限沙箱内执行，禁用 `Date.now()` / `Math.random()` / 无参 `new Date()`，保证 journal 可重放。
 - **深度后端**：单一 `claude-code` AgentAdapter 接入当前会话体系（provider / model / agentType / 工具），workflow 内的 `agent()` 调用真实子 agent。
-- **监控面板**：`/workflows` 双栏实时面板（见 §六）。
+- **Host 交互（densable 对齐）**：`/workflows` = 历史浏览器（GsK）；实时 phase/agent 监控 = Shift+Down Tasks → `WorkflowDetailDialog`（fv_），数据源为 `task.workflowProgress`（tm8），见 §六。
 - **编排手册**：`/ultracode` 注入编排工作法（见 §七）。
 
-> 历史说明：早期版本为 YAML/JSON DSL + 全 Stub 实现（`WorkflowDetailDialog` 等），已全量重写为引擎驱动的 JS 方案。
+> 历史说明：早期版本为 YAML/JSON DSL + 全 Stub 实现；随后自研过 `/workflows` 双栏读 `WorkflowService` progress store 的面板。现已按 densable 源头对齐：历史与 live 分面。
 
 ## 二、实现架构
 
@@ -53,8 +53,10 @@ WORKFLOW_SCRIPTS 让 Claude Code 用**确定性 JavaScript 脚本**编排多个�
 | 深度后端 | `src/workflow/backends/claudeCodeBackend.ts` | AgentAdapter：按 `agentType`/`model` 解析会话体系，跑真实子 agent，结构化输出 |
 | Host 句柄 | `src/workflow/hostHandle.ts` | `buildHostBundle()` 不透明包装 `toolUseContext`/`canUseTool`/`parentMessage` |
 | 进度总线 | `src/workflow/progress/bus.ts` | 基于 Set 的进度事件发射 |
-| 进度状态 | `src/workflow/progress/store.ts` | reducer：按 `agentId` 精确关联 `agent_done`（修并发竞态） |
-| 监控面板 | `src/workflow/panel/*.tsx` | `/workflows` 双栏 UI（见 §六） |
+| 进度状态 | `src/workflow/progress/store.ts` | reducer：按 `agentId` 精确关联 `agent_done`（修并发竞态；服务/telemetry 用） |
+| 进度折叠 | `src/workflow/foldProgress.ts` | densable aP6/op8/B03/ep8/G7K：`task.workflowProgress` → phases/agents |
+| Host 历史 | `src/workflow/panel/WorkflowHistoryDialog.tsx` | densable GsK：`/workflows` 历史列表（live AppState + disk） |
+| Host 实时 | `src/components/tasks/WorkflowDetailDialog.tsx` | densable fv_：Tasks 详情，读 `task.workflowProgress` |
 | 命名命令 | `src/workflow/namedWorkflowCommands.ts` | 扫描 `.claude/workflows/` 生成 `/<name>` 命令 |
 | 权限请求 | `src/workflow/WorkflowPermissionRequest.tsx` | workflow 启动权限 UI |
 
@@ -135,19 +137,35 @@ return results.flat().filter(Boolean)
 | `args` | 透传给脚本的 `args`（任意 JSON 值） |
 | `resumeFromRunId` | 从既有 runId 重放（已完成 `agent()` 秒回，发散点后现场重跑） |
 
-## 六、监控面板：`/workflows`
+## 六、Host 交互（densable GsK / fv_）
 
-`/workflows` 打开三区焦点面板（local-jsx，全屏）：
+官方 densable 把 **历史** 与 **实时监控** 拆成两个入口，本仓库已按同一架构对齐。
 
-- **顶部 tabs**：每个 run 一个 tab（状态圆点 + workflow 名 + `#runId短码`）；同名脚本多次跑会多个 tab。
-- **左 phase 侧栏**：`All` + 合并 meta 声明的 phase（未启动 `○` pending 灰）与实际 phase（`●` running / `✓` done）；选中即决定右栏筛选。
-- **右 agent 列表**：按选中 phase 过滤；状态色 + 行尾文字（`running` / `object` / `text` / `dead`）。
+### 6.1 `/workflows` — 历史浏览器（GsK）
 
-**键位**：`Tab`/`Shift+Tab` 切 run · `←`/`→` 切左右焦点列（phases ↔ agents）· `↑`/`↓` 列内移动 · `r` resume · `x` kill · `n` 新建提示 · `q`/`Esc` 退出。
+命令：`src/commands/workflows` → `panelCall` → `WorkflowHistoryDialog`。
 
-**视觉**：无内框，左右一条竖线分隔；聚焦列标题橙粗；选中/光标行铺橙底（`backgroundColor`），文字色不变。
+- **数据**：AppState 中 `local_workflow` 任务（live）+ `WorkflowService.loadPersistedRuns()` 磁盘快照（非 live 去重合并）。
+- **不是** 双栏实时 phase/agent 监控。
+- **Enter**：live 行 → 直接打开 Tasks 详情（`BackgroundTasksDialog` + `initialDetailTaskId` / fv_）；历史行 → 简单详情（summary / script / runId）。
+- **副标题**：分计 running / paused / failed / completed（不再把 failed/paused 算进 completed）。
+- **键位**：`↑`/`↓` 选择 · `enter` 详情/live · `x` stop **live** 运行中 · `Esc` 关闭。
 
-进度按引擎 `agentId` 精确关联 `agent_done`（解决并发 LIFO 竞态）。pending phase 来自 `run_started` 事件携带的 `meta.phases`，store 落地 `declaredPhases`，面板 `mergePhases` 合并。`useSyncExternalStore` 订阅 `WorkflowService`，稳定快照，无变更不重渲染。
+### 6.2 Tasks（Shift+Down）— 实时监控（fv_）
+
+选中 `local_workflow` 任务后打开 `WorkflowDetailDialog`：
+
+- **数据源唯一**：`task.workflowProgress`（densable tm8）+ `task.declaredPhases`（run_started meta.phases，B03 骨架），经 `foldProgress.foldWorkflowPhases` 折叠为左 phases / 右 agents。**不读** `WorkflowService` progress store 做 UI。
+- **进度分子**：`finishedAgents/totalAgents`（done + error），失败 agent 也推进分子。
+- **键位**：`←`/`→` 焦点列 · `↑`/`↓` 移动 · `x` 在 agent 上 skip（prefer `service.skipAgent` 中止 in-flight，否则 `pendingAgentAction`）· 在 phases 上 stop workflow（`service.kill`）· `r` retry · `p` pause · `Esc`/`←` 返回。
+- **kill/skip/retry**：优先 `getWorkflowService().kill|skipAgent|retryAgent(runId, …)`（绑定 run 的 agent AbortController）；绑定已释放时回退 task 级 API。
+- **pause（`p`）**：当前为 task 级 soft-stop（`pauseWorkflowTask` abort task signal + status `paused`），非 densable 完整 pause/resume（Hp8）；无 resume 键。
+
+### 6.3 进度链路（与面板分工）
+
+- 引擎 progress bus → `taskProgressBridge` → `task.workflowProgress` + SDK `task_progress`（Desktop mid-run）。
+- `WorkflowService` progress store 仍服务 resume/telemetry/history hydrate，**不再**作为 host 实时 UI 主数据源。
+- 双栏 store 驱动的遗留 `WorkflowsPanel` 及 `useWorkflowKeyboard` / `AgentList` / `PhaseSidebar` / `TabsBar` / `panel/status` / `panel/selectors` **已删除**；`src/workflow/panel/` 仅保留 `panelCall.tsx` + `WorkflowHistoryDialog.tsx`。
 
 ## 七、`/ultracode` skill
 
@@ -161,6 +179,10 @@ return results.flat().filter(Boolean)
 - **budget**：`budget.total` 为 token 硬顶（默认 `null` = 无限）；`budget.spent()` / `budget.remaining()` 读实时消耗；耗尽后再发 `agent()` 抛错。
 - **并发**：引擎 `Semaphore` 默认许可 3（`DEFAULT_MAX_CONCURRENCY`），可经 Workflow 工具的 `maxConcurrency` 入参 per-run 覆盖（钳到 `[1, MAX_CONCURRENCY_CAP=16]`）。
 - **错误**：脚本语法/meta 错 → `parseScript` 即时返错（不进后台）；agent 抛错 → `kind:'dead'` → `null`，workflow 继续（`parallel`/`pipeline` 容错）；`WorkflowAbortedError` → `killed`。
+- **SDK task_progress（densable jrH 对齐）**：progress bus 事件经 `src/workflow/taskProgressBridge.ts` 节流（16ms）映射为 `system/task_progress`，附带 `workflow_progress` 增量（phase/agent；log 不进 SDK payload）。仅 headless/non-interactive 下入队（与 `enqueueSdkEvent` 一致）。Desktop Tasks 依赖这些中途帧启用 Running 中的 `local_workflow` 行；仅有 `task_started` + 结束 `task-notification` 时该行会保持 disabled。
+- **Task state progress（densable tm8 对齐）**：同一批 delta 会 upsert 进 `LocalWorkflowTaskState.workflowProgress`（agent/phase 按 `${type}:${index}`），并维护 `progressVersion` / `agentCount` / `totalTokens` / `totalToolCalls`；`workflow_log` 只留在 task 上，超 `2*500` 裁旧 log。
+- **pendingAction skip/retry（densable yqK）**：Tasks `WorkflowDetailDialog` 的 `x`/`r` → `service.skipAgent`/`retryAgent`：若 agent 在飞则 `AbortController.abort('user-skip'|'user-retry')`（backend：skip→`{kind:'skipped'}`，retry→抛错触发 hooks 单次重试）；若无 controller 则写 `pendingAgentAction`，引擎下一拍 `agent()` 前 `pendingAction` 消费——`skip` 直接 null。
+- **终端通知（densable MP6）**：`task-notification` 带 `<usage>`（agent_count / total_tokens / tool_uses / duration_ms）、可选 `<result>`；failed/killed 且有 `scriptPath` 时附 `<recovery>`（`Workflow({scriptPath, resumeFromRunId[, args]})`）。
 
 ## 九、文件索引
 
@@ -173,8 +195,10 @@ return results.flat().filter(Boolean)
 | `src/workflow/backends/claudeCodeBackend.ts` | 深度后端 AgentAdapter |
 | `src/workflow/hostHandle.ts` | 不透明 host 句柄（`buildHostBundle`） |
 | `src/workflow/progress/bus.ts` | 进度事件总线 |
-| `src/workflow/progress/store.ts` | 进度 reducer（`agentId` 关联） |
-| `src/workflow/panel/*.tsx` | `/workflows` 双栏面板 |
+| `src/workflow/progress/store.ts` | 进度 reducer（`agentId` 关联；非 host live UI） |
+| `src/workflow/foldProgress.ts` | densable progress fold |
+| `src/workflow/panel/WorkflowHistoryDialog.tsx` | `/workflows` 历史（GsK） |
+| `src/components/tasks/WorkflowDetailDialog.tsx` | Tasks 实时详情（fv_） |
 | `src/workflow/namedWorkflowCommands.ts` | `/<name>` 命令发现 |
 | `src/workflow/WorkflowPermissionRequest.tsx` | 启动权限 UI |
 | `src/skills/bundled/ultracode.ts` | `/ultracode` 知识 skill |

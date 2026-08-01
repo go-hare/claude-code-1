@@ -82,8 +82,18 @@ export type TaskRegistrar = {
   /**
    * Abort a single agent. Returns whether it hit (false = agent already completed/does not exist).
    * Does not affect other agents in the same run; the workflow continues (the aborted agent returns dead → null).
+   * Optional densable abort reason: `'user-skip'` / `'user-retry'` (backend maps these to skipped / retry).
    */
-  killAgent?(runId: string, agentId: number): boolean
+  killAgent?(runId: string, agentId: number, reason?: string): boolean
+  /**
+   * densable skipWorkflowAgent: mark pending skip for the next agent() poll and abort
+   * in-flight agent with reason `user-skip` when present.
+   */
+  skipAgent?(runId: string, agentId: number): boolean
+  /**
+   * densable retryWorkflowAgent: mark pending retry and abort in-flight with `user-retry`.
+   */
+  retryAgent?(runId: string, agentId: number): boolean
   /** Returns the current pending skip/retry action, or null. */
   pendingAction(runId: string): { kind: 'skip' | 'retry' } | null
 }

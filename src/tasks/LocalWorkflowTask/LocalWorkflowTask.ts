@@ -8,6 +8,7 @@ import type { AppState } from '../../state/AppState.js'
 import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type { AgentId } from '../../types/ids.js'
+import type { SdkWorkflowProgress } from '../../types/workflowProgress.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
   addKeepaliveReason,
@@ -17,6 +18,9 @@ import {
   workflowKeepaliveReason,
 } from '../../utils/task/framework.js'
 
+/** densable NqK=500 — keep at most this many workflow_log entries after trim. */
+export const WORKFLOW_PROGRESS_LOG_CAP = 500
+
 export type LocalWorkflowTaskState = TaskStateBase & {
   type: 'local_workflow'
   /** meta.name from the workflow script (e.g. 'spec'). */
@@ -25,12 +29,30 @@ export type LocalWorkflowTaskState = TaskStateBase & {
   workflowFile: string
   /** Human-readable one-line summary for the task list. */
   summary?: string
-  /** Number of sub-agents spawned by this workflow. */
-  agentCount?: number
+  /**
+   * densable sm8/tm8: cumulative progress deltas for Desktop / panel fold.
+   * Upsert key for agent/phase is `${type}:${index}`; logs append.
+   */
+  workflowProgress: SdkWorkflowProgress[]
+  /** densable progressVersion — bumps by delta batch length on each apply. */
+  progressVersion: number
+  /** Highest workflow_agent index seen in start state (densable agentCount). */
+  agentCount: number
+  /** Sum of workflow_agent.tokens across current progress list. */
+  totalTokens: number
+  /** Sum of workflow_agent.toolCalls across current progress list. */
+  totalToolCalls: number
+  /**
+   * densable meta.phases titles from run_started — host fold shows not-started
+   * skeleton phases before agents emit (B03 declaredPhases).
+   */
+  declaredPhases?: string[]
   /** Captured output from workflow execution. */
   output?: string
   /** Failure reason surfaced to BackgroundTasksDialog (parallels RunProgress.error). */
   error?: string
+  /** Engine run id (may equal task id when not resumed). densable workflowRunId. */
+  workflowRunId?: string
   /** Agent that spawned this task. Used for orphan cleanup. */
   agentId?: AgentId
   /** Abort controller for cancellation. */
@@ -38,6 +60,7 @@ export type LocalWorkflowTaskState = TaskStateBase & {
   /**
    * Pending action for a sub-agent within this workflow.
    * The workflow execution loop polls this field and acts on it.
+   * `agentId` is the engine numeric agent() index as string for UI keys.
    */
   pendingAgentAction?: {
     kind: 'skip' | 'retry'
@@ -67,6 +90,7 @@ export function registerLocalWorkflowTask(
     toolUseId?: string
     agentId?: AgentId
     abortController?: AbortController
+    workflowRunId?: string
   },
 ): string {
   const id = generateTaskId('local_workflow')
@@ -82,6 +106,14 @@ export function registerLocalWorkflowTask(
     workflowName: opts.workflowName,
     workflowFile: opts.workflowFile,
     summary: opts.summary,
+    // densable sm8 defaults
+    workflowProgress: [],
+    progressVersion: 0,
+    agentCount: 0,
+    totalTokens: 0,
+    totalToolCalls: 0,
+    declaredPhases: undefined,
+    workflowRunId: opts.workflowRunId,
     agentId: opts.agentId,
     abortController: opts.abortController,
   }
@@ -92,6 +124,155 @@ export function registerLocalWorkflowTask(
     addKeepaliveReason(opts.agentId, workflowKeepaliveReason(id), setAppState)
   }
   return id
+}
+
+/**
+ * densable B03 — store meta.phases titles for host fold skeleton rows.
+ * Called from taskProgressBridge on run_started.
+ */
+export function setWorkflowDeclaredPhases(
+  taskId: string,
+  phases: string[],
+  setAppState: SetAppState,
+): void {
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    if (task.type !== 'local_workflow') return task
+    if (task.status !== 'running' && task.status !== 'paused') return task
+    return {
+      ...task,
+      declaredPhases: phases.length > 0 ? phases : undefined,
+    }
+  })
+}
+
+/**
+ * densable tm8 — merge a batch of progress deltas into task.workflowProgress.
+ *
+ * - workflow_agent / workflow_phase: upsert by `${type}:${index}`
+ * - workflow_log (and other append-only): push; when length > 2*cap, drop oldest logs
+ * - recomputes agentCount / totalTokens / totalToolCalls
+ * - no-ops when task is not running
+ *
+ * Returns the updated progress snapshot when applied, else null.
+ */
+export function applyWorkflowProgressDeltas(
+  taskId: string,
+  deltas: SdkWorkflowProgress[],
+  setAppState: SetAppState,
+  logCap: number = WORKFLOW_PROGRESS_LOG_CAP,
+): {
+  workflowProgress: SdkWorkflowProgress[]
+  progressVersion: number
+  agentCount: number
+  totalTokens: number
+  totalToolCalls: number
+} | null {
+  if (deltas.length === 0) return null
+  let applied: {
+    workflowProgress: SdkWorkflowProgress[]
+    progressVersion: number
+    agentCount: number
+    totalTokens: number
+    totalToolCalls: number
+  } | null = null
+
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    if (task.status !== 'running') return task
+    if (task.type !== 'local_workflow') return task
+
+    const next = [...(task.workflowProgress ?? [])]
+    const indexMap = new Map<string, number>()
+    for (let i = 0; i < next.length; i++) {
+      const item = next[i]!
+      if (item.type === 'workflow_agent' || item.type === 'workflow_phase') {
+        indexMap.set(`${item.type}:${item.index}`, i)
+      }
+    }
+
+    let agentCount = task.agentCount ?? 0
+    let sawAppendOnly = false
+    for (const delta of deltas) {
+      if (delta.type === 'workflow_agent' || delta.type === 'workflow_phase') {
+        const key = `${delta.type}:${delta.index}`
+        const existing = indexMap.get(key)
+        if (existing !== undefined) {
+          next[existing] = delta
+        } else {
+          indexMap.set(key, next.length)
+          next.push(delta)
+        }
+        if (delta.type === 'workflow_agent' && delta.state === 'start') {
+          agentCount = Math.max(agentCount, delta.index)
+        }
+      } else {
+        next.push(delta)
+        sawAppendOnly = true
+      }
+    }
+
+    let trimmed = next
+    if (sawAppendOnly && next.length > logCap * 2) {
+      let toDrop = next.length - logCap
+      const kept: SdkWorkflowProgress[] = []
+      for (const item of next) {
+        if (toDrop > 0 && item.type === 'workflow_log') {
+          toDrop--
+          continue
+        }
+        kept.push(item)
+      }
+      trimmed = kept
+    }
+
+    let totalTokens = 0
+    let totalToolCalls = 0
+    for (const item of trimmed) {
+      if (item.type === 'workflow_agent') {
+        if (item.tokens) totalTokens += item.tokens
+        if (item.toolCalls) totalToolCalls += item.toolCalls
+      }
+    }
+
+    const progressVersion = (task.progressVersion ?? 0) + deltas.length
+    applied = {
+      workflowProgress: trimmed,
+      progressVersion,
+      agentCount,
+      totalTokens,
+      totalToolCalls,
+    }
+    return {
+      ...task,
+      ...applied,
+    }
+  })
+
+  return applied
+}
+
+/**
+ * Consume and clear pendingAgentAction (skip/retry) for engine pendingAction().
+ * Returns the kind when present and task is running; otherwise null.
+ */
+export function consumePendingAgentAction(
+  taskId: string,
+  setAppState: SetAppState,
+): { kind: 'skip' | 'retry'; agentId: AgentId } | null {
+  let consumed: { kind: 'skip' | 'retry'; agentId: AgentId } | null = null
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    if (task.status !== 'running') return task
+    const pending = task.pendingAgentAction
+    if (!pending) return task
+    consumed = {
+      kind: pending.kind,
+      agentId: pending.agentId,
+    }
+    return {
+      ...task,
+      pendingAgentAction: undefined,
+    }
+  })
+  return consumed
 }
 
 function detachWorkflowKeepalive(

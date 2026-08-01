@@ -73,6 +73,15 @@ export type WorkflowService = {
    */
   killAgent(runId: string, agentId: number): boolean
   /**
+   * densable skipWorkflowAgent — pending skip + abort in-flight with user-skip.
+   * Returns false when the run binding is missing.
+   */
+  skipAgent(runId: string, agentId: number): boolean
+  /**
+   * densable retryWorkflowAgent — pending retry + abort in-flight with user-retry.
+   */
+  retryAgent(runId: string, agentId: number): boolean
+  /**
    * Cleanup on process exit / config unload: kill all running runs to avoid orphan tasks.
    * Completed/failed runs are unaffected. Idempotent — safe to call multiple times.
    */
@@ -225,6 +234,32 @@ export function makeService(
         }
       }
 
+      // densable MP6: stamp scriptPath/args onto the progress store so terminal
+      // notifications can build resume recovery hints (scriptPath + resumeFromRunId).
+      // At launch time the store usually has no row yet (run_started emits later),
+      // so hydrate a running stub; if a row already exists (resume / race), mutate it.
+      const recoveryScriptPath = workflowFile ?? persistedScriptPath
+      const existing = store.get(runId)
+      if (existing) {
+        if (recoveryScriptPath) existing.scriptPath = recoveryScriptPath
+        if (input.args !== undefined) existing.args = input.args
+      } else {
+        store.hydrate({
+          runId,
+          workflowName,
+          status: 'running',
+          phases: [],
+          declaredPhases: [],
+          currentPhase: null,
+          agents: [],
+          agentCount: 0,
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+          ...(recoveryScriptPath ? { scriptPath: recoveryScriptPath } : {}),
+          ...(input.args !== undefined ? { args: input.args } : {}),
+        })
+      }
+
       // detached: do not await, let the caller get runId immediately; on completion route to the registrar.
       void runWorkflow({
         script,
@@ -264,6 +299,12 @@ export function makeService(
     },
     killAgent(runId, agentId) {
       return ports.taskRegistrar.killAgent?.(runId, agentId) ?? false
+    },
+    skipAgent(runId, agentId) {
+      return ports.taskRegistrar.skipAgent?.(runId, agentId) ?? false
+    },
+    retryAgent(runId, agentId) {
+      return ports.taskRegistrar.retryAgent?.(runId, agentId) ?? false
     },
 
     shutdown() {

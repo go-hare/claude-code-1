@@ -22,13 +22,23 @@ export type SubWorkflowRunner = (opts: {
 type HookProgressInit =
   | { type: 'phase_started'; phase: string }
   | { type: 'phase_done'; phase: string }
-  | { type: 'agent_started'; agentId: number; label?: string; phase?: string }
+  | {
+      type: 'agent_started'
+      agentId: number
+      label?: string
+      phase?: string
+      model?: string
+      agentType?: string
+      isolation?: 'worktree'
+      promptPreview?: string
+    }
   | {
       type: 'agent_done'
       agentId: number
       label?: string
       phase?: string
       result: AgentRunResult
+      cached?: boolean
     }
   | {
       type: 'agent_progress'
@@ -37,6 +47,7 @@ type HookProgressInit =
       phase?: string
       tokenCount: number
       toolCount: number
+      lastToolName?: string
     }
   | { type: 'log'; message: string }
 
@@ -80,6 +91,7 @@ export function makeHooks(
           label,
           phase,
           result: entry.result,
+          cached: true,
         })
         return resultToOutput(entry.result)
       }
@@ -111,7 +123,18 @@ export function makeHooks(
       }
 
       ctx.resources.agentCountBox.value++
-      emit({ type: 'agent_started', agentId, label, phase })
+      // densable-shaped start fields: model/agentType/isolation/promptPreview for Desktop fold.
+      emit({
+        type: 'agent_started',
+        agentId,
+        label,
+        phase,
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.agentType ? { agentType: params.agentType } : {}),
+        ...(params.isolation ? { isolation: params.isolation } : {}),
+        promptPreview:
+          typeof prompt === 'string' ? prompt.slice(0, 200) : undefined,
+      })
       const registry = ctx.ports.agentAdapterRegistry
       // onProgress closure: the backend loop accumulates token/tool counts -> emits an agent_progress event (carrying agentId for association)
       const onProgress = (update: AgentProgressUpdate): void => {

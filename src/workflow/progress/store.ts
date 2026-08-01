@@ -34,6 +34,13 @@ export type RunProgress = {
   startedAt: number
   /** workflow description (from run_started.meta.description). */
   description?: string
+  /**
+   * densable MP6 recovery fields — set by service.launch so terminal notifications
+   * can include `Workflow({scriptPath, resumeFromRunId})` hints.
+   */
+  scriptPath?: string
+  /** Launch args (JSON-serializable); included in recovery when present. */
+  args?: unknown
   updatedAt: number
 }
 

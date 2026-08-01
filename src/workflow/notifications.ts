@@ -1,88 +1,190 @@
-/**
- * Bridge for workflow status-change notifications.
- *
- * The engine emits events via progressEmitter.emit({ type: 'run_done', ... }),
- * and the progress/store reducer records the status into RunProgress. But the
- * old implementation had no code bridging status transitions to the host
- * notification mechanism — the "notifies automatically on completion" promise
- * in WorkflowTool's return text went unfulfilled.
- *
- * This module subscribes to WorkflowService.subscribe, watches status transitions
- * from running → completed/failed/killed, and emits a host notification via the
- * injected notifier callback (defaults to enqueuePendingNotification task-notification mode).
- */
+// Listens to WorkflowService state changes and, when a run transitions from
+// running → terminal, injects a <task-notification> so the main agent knows
+// the workflow finished (mirrors LocalAgentTask / LocalShellTask).
+// densable MP6: include usage (agent_count / total_tokens / tool_uses / duration_ms)
+// and recovery hint when scriptPath + workflowRunId are available.
+//
+// Why not put this in the tool's finally block: the tool returns immediately
+// after launch; the run finishes asynchronously in the background. The service
+// is the only place that sees the full lifecycle.
+
 import {
+  OUTPUT_FILE_TAG,
   STATUS_TAG,
   SUMMARY_TAG,
   TASK_ID_TAG,
   TASK_NOTIFICATION_TAG,
-  TASK_TYPE_TAG,
+  TOOL_USE_ID_TAG,
 } from '../constants/xml.js'
+import { getTaskOutputPath } from '../utils/task/diskOutput.js'
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import type { RunProgress } from './progress/store.js'
 import type { WorkflowService } from './service.js'
 
-const WORKFLOW_TASK_TYPE = 'local_workflow'
-
-/** Notifier abstraction (lets tests inject a spy). */
-export type WorkflowNotifier = (message: string) => void
-
-const TERMINAL_STATUSES: ReadonlySet<RunProgress['status']> = new Set([
-  'completed',
-  'failed',
-  'killed',
-])
-
-/** Default notifier: uses the host message queue's task-notification mode. */
-const defaultNotifier: WorkflowNotifier = message => {
-  enqueuePendingNotification({ value: message, mode: 'task-notification' })
+function escapeXml(s: string): string {
+  return s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
 }
 
-export function installWorkflowNotifications(
-  service: WorkflowService,
-  notify: WorkflowNotifier = defaultNotifier,
-): () => void {
-  const prevStatus = new Map<string, RunProgress['status'] | undefined>()
+function buildNotificationXml(opts: {
+  taskId: string
+  toolUseId?: string
+  status: 'completed' | 'failed' | 'stopped'
+  summary: string
+  agentCount: number
+  totalTokens: number
+  toolUses: number
+  durationMs: number
+  recovery?: string
+  resultPreview?: string
+  failures?: string
+}): string {
+  const toolUse =
+    opts.toolUseId !== undefined
+      ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
+      : ''
+  const recovery = opts.recovery
+    ? `\n<recovery>${escapeXml(opts.recovery)}</recovery>`
+    : ''
+  const result =
+    opts.resultPreview !== undefined
+      ? `\n<result>${escapeXml(opts.resultPreview)}</result>`
+      : ''
+  const failures = opts.failures
+    ? `\n<failures>${escapeXml(opts.failures)}</failures>`
+    : ''
+  const usage = `\n<usage><agent_count>${opts.agentCount}</agent_count><total_tokens>${opts.totalTokens}</total_tokens><tool_uses>${opts.toolUses}</tool_uses><duration_ms>${opts.durationMs}</duration_ms></usage>`
+  return `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>${toolUse}
+<${OUTPUT_FILE_TAG}>${escapeXml(getTaskOutputPath(opts.taskId))}</${OUTPUT_FILE_TAG}>
+<${STATUS_TAG}>${opts.status}</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(opts.summary)}</${SUMMARY_TAG}>${recovery}${result}${failures}${usage}
+</${TASK_NOTIFICATION_TAG}>`
+}
 
-  const unsubscribe = service.subscribe(() => {
-    const runs = service.listRuns()
-    for (const run of runs) {
-      const prev = prevStatus.get(run.runId)
-      // First time seeing this run: just record the current status without notifying
-      // (avoids treating existing historical runs as new notifications on install)
-      if (prev === undefined) {
-        prevStatus.set(run.runId, run.status)
-        continue
+function summarizeTerminal(run: RunProgress): {
+  status: 'completed' | 'failed' | 'stopped'
+  summary: string
+} {
+  // densable MP6 wording: completed without "successfully"; failed includes error.
+  const name = run.workflowName || 'workflow'
+  switch (run.status) {
+    case 'completed':
+      return {
+        status: 'completed',
+        summary: `Dynamic workflow "${name}" completed`,
       }
-      // Status changed + entered terminal state → emit notification
-      if (prev !== run.status && TERMINAL_STATUSES.has(run.status)) {
-        notify(buildMessage(run))
+    case 'failed':
+      return {
+        status: 'failed',
+        summary: `Dynamic workflow "${name}" failed: ${run.error || 'Unknown error'}`,
       }
-      prevStatus.set(run.runId, run.status)
-    }
-  })
-
-  return () => {
-    unsubscribe()
-    prevStatus.clear()
+    case 'killed':
+      return {
+        status: 'stopped',
+        summary: `Dynamic workflow "${name}" was stopped`,
+      }
+    default:
+      return {
+        status: 'stopped',
+        summary: `Dynamic workflow "${name}" ended`,
+      }
   }
 }
 
-function buildMessage(run: RunProgress): string {
-  const statusText =
-    run.status === 'completed'
-      ? 'completed successfully'
-      : run.status === 'failed'
-        ? 'failed'
-        : 'was stopped'
-  const errorSuffix =
-    run.status === 'failed' && run.error ? `: ${run.error}` : ''
-  const summary = `Workflow "${run.workflowName}" ${statusText}${errorSuffix}`
+/**
+ * densable MP6 recovery block for failed/killed runs when scriptPath is known.
+ * `To resume after editing the script, call: Workflow({scriptPath: '...', resumeFromRunId: '...'})`
+ */
+export function buildRecoveryHint(run: RunProgress): string | undefined {
+  if (run.status !== 'failed' && run.status !== 'killed') return undefined
+  if (!run.scriptPath) return undefined
+  let argsPart = ''
+  if (run.args !== undefined) {
+    try {
+      argsPart = `, args: ${JSON.stringify(run.args)}`
+    } catch {
+      argsPart = ''
+    }
+  }
+  return `To resume after editing the script, call: Workflow({scriptPath: '${run.scriptPath}', resumeFromRunId: '${run.runId}'${argsPart}})`
+}
 
-  return `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${run.runId}</${TASK_ID_TAG}>
-<${TASK_TYPE_TAG}>${WORKFLOW_TASK_TYPE}</${TASK_TYPE_TAG}>
-<${STATUS_TAG}>${run.status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>
-</${TASK_NOTIFICATION_TAG}>`
+function resultPreview(run: RunProgress): string | undefined {
+  if (run.status !== 'completed' || run.returnValue === undefined) {
+    return undefined
+  }
+  try {
+    const raw =
+      typeof run.returnValue === 'string'
+        ? run.returnValue
+        : JSON.stringify(run.returnValue)
+    if (raw.length <= 8000) return raw
+    return `${raw.slice(0, 8000)}\n... (truncated ${raw.length - 8000} chars)`
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Subscribes to the service; when a known run goes from running to a terminal
+ * state, enqueues a task-notification (priority: next).
+ * Returns an unsubscribe function.
+ *
+ * Note: the first snapshot is only used to seed the previous-status map so we
+ * do not notify for historical runs that are already terminal at install time.
+ */
+export function installWorkflowNotifications(
+  service: WorkflowService,
+  enqueue: (msg: string) => void = msg =>
+    enqueuePendingNotification({ value: msg, mode: 'task-notification' }),
+): () => void {
+  const prevStatus = new Map<string, RunProgress['status']>()
+
+  // Seed: record current status without notifying
+  for (const r of service.listRuns()) {
+    prevStatus.set(r.runId, r.status)
+  }
+
+  return service.subscribe(() => {
+    for (const run of service.listRuns()) {
+      const prev = prevStatus.get(run.runId)
+      prevStatus.set(run.runId, run.status)
+      // Only notify on a transition from running → terminal
+      if (prev !== 'running') continue
+      if (
+        run.status !== 'completed' &&
+        run.status !== 'failed' &&
+        run.status !== 'killed'
+      ) {
+        continue
+      }
+      const { status, summary } = summarizeTerminal(run)
+      const durationMs = Math.max(0, run.updatedAt - run.startedAt)
+      // Token/tool totals from progress store agents (mirrors task.total*).
+      let totalTokens = 0
+      let toolUses = 0
+      for (const a of run.agents) {
+        totalTokens += a.tokenCount ?? 0
+        toolUses += a.toolCount ?? 0
+      }
+      enqueue(
+        buildNotificationXml({
+          taskId: run.runId,
+          status,
+          summary,
+          agentCount: run.agentCount,
+          totalTokens,
+          toolUses,
+          durationMs,
+          recovery: buildRecoveryHint(run),
+          resultPreview: resultPreview(run),
+          failures: run.error,
+        }),
+      )
+    }
+  })
 }

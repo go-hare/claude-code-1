@@ -110,12 +110,17 @@ type ListItem =
 // ~1.3K lines into external builds. Gate with feature() + require so the
 // bundler can dead-code-eliminate the branch.
 /* eslint-disable @typescript-eslint/no-require-imports */
-// WorkflowDetailDialog 已移除：workflow 详情改由 /workflows 面板展示。
+// densable: Tasks detail uses WorkflowDetailDialog (fv_) over task.workflowProgress.
 const workflowTaskModule = feature('WORKFLOW_SCRIPTS')
   ? (require('src/tasks/LocalWorkflowTask/LocalWorkflowTask.js') as typeof import('src/tasks/LocalWorkflowTask/LocalWorkflowTask.js'))
   : null;
 const killWorkflowTask = workflowTaskModule?.killWorkflowTask ?? null;
-// skipWorkflowAgent / retryWorkflowAgent 仅由 /workflows 面板调用（原详情对话框已移除）。
+const skipWorkflowAgent = workflowTaskModule?.skipWorkflowAgent ?? null;
+const retryWorkflowAgent = workflowTaskModule?.retryWorkflowAgent ?? null;
+const pauseWorkflowTask = workflowTaskModule?.pauseWorkflowTask ?? null;
+const WorkflowDetailDialog = feature('WORKFLOW_SCRIPTS')
+  ? (require('./WorkflowDetailDialog.js') as typeof import('./WorkflowDetailDialog.js')).WorkflowDetailDialog
+  : null;
 // Relative path, not `src/...` path-mapping — Bun's DCE can statically
 // resolve + eliminate `./` requires, but path-mapped strings stay opaque
 // and survive as dead literals in the bundle. Matches tasks.ts pattern.
@@ -283,12 +288,20 @@ export function BackgroundTasksDialog({ onDone, toolUseContext, initialDetailTas
         void killAgentTask(currentSelection.id);
       } else if (currentSelection.type === 'in_process_teammate' && currentSelection.status === 'running') {
         void killTeammateTask(currentSelection.id);
-      } else if (
-        currentSelection.type === 'local_workflow' &&
-        currentSelection.status === 'running' &&
-        killWorkflowTask
-      ) {
-        killWorkflowTask(currentSelection.id, setAppState);
+      } else if (currentSelection.type === 'local_workflow' && currentSelection.status === 'running') {
+        // densable: service.kill aborts run binding + agents (no-op if unbound);
+        // always also task-kill (idempotent) so list selection terminates.
+        const runId = currentSelection.task.workflowRunId ?? currentSelection.id;
+        try {
+          const { getWorkflowService } =
+            require('../../workflow/service.js') as typeof import('../../workflow/service.js');
+          getWorkflowService().kill(runId);
+        } catch {
+          /* service unavailable */
+        }
+        if (killWorkflowTask) {
+          killWorkflowTask(currentSelection.id, setAppState);
+        }
       } else if (currentSelection.type === 'monitor_mcp' && currentSelection.status === 'running' && killMonitorMcp) {
         killMonitorMcp(currentSelection.id, setAppState);
       } else if (currentSelection.type === 'dream' && currentSelection.status === 'running') {
@@ -474,55 +487,76 @@ export function BackgroundTasksDialog({ onDone, toolUseContext, initialDetailTas
           />
         );
       case 'local_workflow': {
-        // shift+下/Enter 进入的 workflow 详情。原 WorkflowDetailDialog 已移除，
-        // 详情改由 /workflows 面板展示，但此处仍需一个能退出的占位视图——
-        // 否则用户进入后 Esc/←/q 全无效，卡死。照 MonitorMcpDetailDialog 模式：
-        // ←/Esc 返回（goBackToList：单任务关闭、多任务回列表），x kill（running）。
+        // densable: WorkflowDetailDialog (fv_) — phases/agents from task.workflowProgress.
+        if (!WorkflowDetailDialog) return null;
         const onKill =
-          task.status === 'running' && killWorkflowTask ? () => killWorkflowTask(task.id, setAppState) : undefined;
+          task.status === 'running'
+            ? () => {
+                const runId = task.workflowRunId ?? task.id;
+                // service.kill aborts run binding + agents; no-ops if unbound.
+                // Always fall through to task kill (idempotent) so UI/task state terminate.
+                try {
+                  const { getWorkflowService } =
+                    require('../../workflow/service.js') as typeof import('../../workflow/service.js');
+                  getWorkflowService().kill(runId);
+                } catch {
+                  /* service unavailable */
+                }
+                killWorkflowTask?.(task.id, setAppState);
+              }
+            : undefined;
+        const onSkip =
+          task.status === 'running'
+            ? (agentId: string) => {
+                // Prefer densable yqK path via service (abort in-flight controller);
+                // fall back to pendingAgentAction when run binding is gone.
+                const n = Number(agentId);
+                const runId = task.workflowRunId ?? task.id;
+                if (Number.isFinite(n)) {
+                  try {
+                    const { getWorkflowService } =
+                      require('../../workflow/service.js') as typeof import('../../workflow/service.js');
+                    if (getWorkflowService().skipAgent(runId, n)) return;
+                  } catch {
+                    /* service unavailable */
+                  }
+                }
+                skipWorkflowAgent?.(task.id, agentId as import('src/types/ids.js').AgentId, setAppState);
+              }
+            : undefined;
+        const onRetry =
+          task.status === 'running'
+            ? (agentId: string) => {
+                const n = Number(agentId);
+                const runId = task.workflowRunId ?? task.id;
+                if (Number.isFinite(n)) {
+                  try {
+                    const { getWorkflowService } =
+                      require('../../workflow/service.js') as typeof import('../../workflow/service.js');
+                    if (getWorkflowService().retryAgent(runId, n)) return;
+                  } catch {
+                    /* service unavailable */
+                  }
+                }
+                retryWorkflowAgent?.(task.id, agentId as import('src/types/ids.js').AgentId, setAppState);
+              }
+            : undefined;
+        const onPause =
+          task.status === 'running' && pauseWorkflowTask
+            ? () => {
+                pauseWorkflowTask(task.id, setAppState);
+              }
+            : undefined;
         return (
-          <Box
+          <WorkflowDetailDialog
             key={`workflow-${task.id}`}
-            flexDirection="column"
-            tabIndex={0}
-            borderStyle="round"
-            onKeyDown={(e: KeyboardEvent) => {
-              if (e.key === 'left') {
-                e.preventDefault();
-                goBackToList();
-              } else if (e.key === 'x' && onKill) {
-                e.preventDefault();
-                onKill();
-              }
-            }}
-          >
-            <Dialog
-              title={task.workflowName}
-              subtitle={
-                <Text dimColor>
-                  {task.status}
-                  {task.summary ? ` · ${task.summary}` : ''}
-                </Text>
-              }
-              onCancel={goBackToList}
-              inputGuide={() => (
-                <Byline>
-                  <KeyboardShortcutHint shortcut="←" action="go back" />
-                  <KeyboardShortcutHint shortcut="Esc" action="close" />
-                  {onKill && <KeyboardShortcutHint shortcut="x" action="stop" />}
-                </Byline>
-              )}
-            >
-              {task.status === 'failed' && task.error ? (
-                <Box flexDirection="column">
-                  <Text color="error">失败原因：{task.error}</Text>
-                  <Text color="subtle">用 /workflows 查看阶段与 agent 实时进度</Text>
-                </Box>
-              ) : (
-                <Text color="subtle">用 /workflows 查看阶段与 agent 实时进度</Text>
-              )}
-            </Dialog>
-          </Box>
+            task={task}
+            onBack={goBackToList}
+            onKill={onKill}
+            onSkipAgent={onSkip}
+            onRetryAgent={onRetry}
+            onPause={onPause}
+          />
         );
       }
       case 'monitor_mcp':

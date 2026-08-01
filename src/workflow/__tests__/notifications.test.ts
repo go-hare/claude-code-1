@@ -73,8 +73,12 @@ describe('installWorkflowNotifications', () => {
 
     expect(calls.length).toBe(1)
     expect(calls[0]).toMatch(/task-notification/)
-    expect(calls[0]).toMatch(/completed successfully/)
-    expect(calls[0]).toMatch(/"wf"/)
+    expect(calls[0]).toMatch(/completed/)
+    expect(calls[0]).toMatch(/wf/)
+    expect(calls[0]).toMatch(/<usage>/)
+    expect(calls[0]).toMatch(/<agent_count>/)
+    expect(calls[0]).toMatch(/<total_tokens>/)
+    expect(calls[0]).not.toMatch(/<recovery>/)
     unsubscribe()
   })
 
@@ -93,6 +97,31 @@ describe('installWorkflowNotifications', () => {
     expect(calls.length).toBe(1)
     expect(calls[0]).toMatch(/failed/)
     expect(calls[0]).toMatch(/agent X boom/)
+  })
+
+  test('failed with scriptPath includes densable MP6 recovery hint', async () => {
+    const { installWorkflowNotifications } = await import('../notifications.js')
+    const { service, emit, setRuns } = makeMockService([
+      makeRun('r1', 'running'),
+    ])
+    const calls: string[] = []
+    installWorkflowNotifications(service, msg => calls.push(msg))
+
+    emit()
+    setRuns([
+      makeRun('r1', 'failed', {
+        error: 'boom',
+        scriptPath: '/tmp/wf.js',
+        args: { k: 1 },
+      }),
+    ])
+    emit()
+
+    expect(calls.length).toBe(1)
+    expect(calls[0]).toMatch(/<recovery>/)
+    expect(calls[0]).toMatch(/scriptPath: '\/tmp\/wf\.js'/)
+    expect(calls[0]).toMatch(/resumeFromRunId: 'r1'/)
+    expect(calls[0]).toMatch(/args:/)
   })
 
   test('running → killed triggers notification', async () => {

@@ -147,6 +147,61 @@ test('taskRegistrar agentAbortControllers: register/killAgent precise abort; kil
   expect(tr.killAgent(runId, 2)).toBe(false)
 })
 
+test('skipAgent/retryAgent abort in-flight with densable reasons; pending when idle', () => {
+  const bus = createProgressBus()
+  const store = createProgressStoreFromBus(bus)
+  const ports = createWorkflowPorts({ bus, store })
+  const tr = ports.taskRegistrar as Required<typeof ports.taskRegistrar>
+
+  const state = { tasks: {} } as unknown as AppState
+  const setAppState: SetAppState = f => {
+    Object.assign(state, f(state))
+  }
+  const hostCtx = ports.hostFactory({
+    context: { agentId: 'a-1', toolUseId: 'tu-1', setAppState },
+    canUseTool: (() => Promise.resolve({ behavior: 'allow' })) as never,
+    parentMessage: {} as never,
+  })
+  const { runId } = tr.register(
+    {
+      workflowName: 'wf',
+      summary: 'summary',
+      workflowFile: 'wf.ts',
+      toolUseId: 'tu-1',
+    },
+    hostCtx.handle,
+  )
+
+  const ac1 = new AbortController()
+  tr.registerAgentAbort(runId, 1, ac1)
+  expect(tr.skipAgent(runId, 1)).toBe(true)
+  expect(ac1.signal.aborted).toBe(true)
+  expect(ac1.signal.reason).toBe('user-skip')
+  // no pending when in-flight abort path took effect
+  expect(tr.pendingAction(runId)).toBeNull()
+  // second skip while aborted controller still registered (before unregister) must NOT queue pending
+  expect(tr.skipAgent(runId, 1)).toBe(true)
+  expect(tr.pendingAction(runId)).toBeNull()
+  tr.unregisterAgentAbort(runId, 1)
+
+  // no controller registered → queue pending skip for next agent()
+  expect(tr.skipAgent(runId, 2)).toBe(true)
+  expect(tr.pendingAction(runId)).toEqual({ kind: 'skip' })
+  // consume-once
+  expect(tr.pendingAction(runId)).toBeNull()
+
+  const ac2 = new AbortController()
+  tr.registerAgentAbort(runId, 3, ac2)
+  expect(tr.retryAgent(runId, 3)).toBe(true)
+  expect(ac2.signal.aborted).toBe(true)
+  expect(ac2.signal.reason).toBe('user-retry')
+  // second retry while still registered does not queue pending
+  expect(tr.retryAgent(runId, 3)).toBe(true)
+  expect(tr.pendingAction(runId)).toBeNull()
+
+  tr.kill(runId)
+})
+
 test('unregisterAgentAbort deletes from Map (backend finally cleanup idempotent)', () => {
   const bus = createProgressBus()
   const store = createProgressStoreFromBus(bus)

@@ -1816,6 +1816,47 @@ export const SDKSessionStateChangedMessageSchema = lazySchema(() =>
     ),
 )
 
+/** densable workflow_progress item (PhaseProgress fold key `${type}:${index}`). */
+export const SdkWorkflowProgressSchema = lazySchema(() =>
+  z.union([
+    z.object({
+      type: z.literal('workflow_phase'),
+      index: z.number(),
+      title: z.string().optional(),
+      state: z.enum(['start', 'done']),
+      lastProgressAt: z.number().optional(),
+    }),
+    z.object({
+      type: z.literal('workflow_agent'),
+      index: z.number(),
+      label: z.string().optional(),
+      phaseIndex: z.number().optional(),
+      phaseTitle: z.string().optional(),
+      agentId: z.string().optional(),
+      agentType: z.string().optional(),
+      isolation: z.enum(['worktree', 'remote']).optional(),
+      model: z.string().optional(),
+      state: z.enum(['start', 'done', 'error']),
+      tokens: z.number().optional(),
+      toolCalls: z.number().optional(),
+      durationMs: z.number().optional(),
+      startedAt: z.number().optional(),
+      queuedAt: z.number().optional(),
+      lastProgressAt: z.number().optional(),
+      lastToolName: z.string().optional(),
+      promptPreview: z.string().optional(),
+      resultPreview: z.string().optional(),
+      error: z.string().optional(),
+      cached: z.boolean().optional(),
+    }),
+    z.object({
+      type: z.literal('workflow_log'),
+      message: z.string(),
+      lastProgressAt: z.number().optional(),
+    }),
+  ]),
+)
+
 export const SDKTaskProgressMessageSchema = lazySchema(() =>
   z.object({
     type: z.literal('system'),
@@ -1830,6 +1871,10 @@ export const SDKTaskProgressMessageSchema = lazySchema(() =>
     }),
     last_tool_name: z.string().optional(),
     summary: z.string().optional(),
+    // densable jrH: delta batch of workflow state changes for Desktop Tasks /
+    // PhaseProgress fold (`${type}:${index}` upsert). Optional; agent tasks omit.
+    // Logs are stripped from SDK payload (live on task.workflowProgress only).
+    workflow_progress: z.array(SdkWorkflowProgressSchema()).optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
   }),
