@@ -19,7 +19,7 @@ afterEach(() => {
 })
 
 describe('registerUltracodeSkill', () => {
-  test('registers a user-invocable prompt command named ultracode', () => {
+  test('registers user-only prompt command (disableModelInvocation)', () => {
     clearBundledSkills()
     registerUltracodeSkill()
 
@@ -28,13 +28,13 @@ describe('registerUltracodeSkill', () => {
     expect(ultracode).toBeDefined()
     expect(ultracode!.type).toBe('prompt')
     expect(ultracode!.userInvocable).toBe(true)
-    expect(ultracode!.whenToUse).toBeTruthy()
-    expect(ultracode!.description).toContain('workflow')
+    expect(ultracode!.disableModelInvocation).toBe(true)
+    expect(ultracode!.description).toContain('playbook')
     const promptCmd = asPrompt(ultracode!)
     expect(promptCmd.source).toBe('bundled')
   })
 
-  test('getPromptForCommand injects the orchestration playbook with key sections', async () => {
+  test('getPromptForCommand injects the shared Workflow tool playbook', async () => {
     clearBundledSkills()
     registerUltracodeSkill()
 
@@ -47,22 +47,21 @@ describe('registerUltracodeSkill', () => {
     expect(blocks[0]!.type).toBe('text')
 
     const text = (blocks[0] as { type: 'text'; text: string }).text
-    // Title + opt-in rule + harness-injection note
     expect(text).toContain('Workflow Orchestration Playbook')
     expect(text).toContain('explicitly opted into multi-agent orchestration')
-    expect(text).toContain('harness')
-    // Orchestration primitives
+    expect(text).toContain('does **not** set session ultracode')
+    // Orchestration primitives (from tool playbook)
     expect(text).toContain('Script body hooks')
     expect(text).toContain('parallel')
     expect(text).toContain('pipeline')
-    // Determinism / script-execution-model constraints (JS not TS; Date.now/Math.random throw)
     expect(text).toContain('plain JavaScript, NOT TypeScript')
     expect(text).toContain('Date.now()')
-    // Barrier vs pipeline guidance, quality patterns, resume, hard limits
     expect(text).toContain('DEFAULT TO pipeline()')
     expect(text).toContain('Quality patterns')
     expect(text).toContain('resumeFromRunId')
     expect(text).toContain('4096')
+    // densable: playbook on tool — no "See /ultracode" deferral
+    expect(text).not.toContain('See /ultracode for the full playbook')
   })
 
   test('appends user-provided args to the prompt when given', async () => {
@@ -80,8 +79,6 @@ describe('registerUltracodeSkill', () => {
   })
 
   test('is not gated behind USER_TYPE — registers with no env set', () => {
-    // No USER_TYPE env is configured in this test process. If the skill were
-    // ant-gated (like stuck.ts), it would not appear here.
     const previousUserType = process.env.USER_TYPE
     delete process.env.USER_TYPE
     clearBundledSkills()
@@ -90,7 +87,6 @@ describe('registerUltracodeSkill', () => {
     const skills = getBundledSkills()
     expect(skills.some(s => s.name === 'ultracode')).toBe(true)
 
-    // Restore so we never mutate the process env for other test files.
     if (previousUserType === undefined) delete process.env.USER_TYPE
     else process.env.USER_TYPE = previousUserType
   })

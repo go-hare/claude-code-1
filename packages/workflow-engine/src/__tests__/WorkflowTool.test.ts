@@ -246,7 +246,8 @@ test('prompt includes default concurrency 3 + AskUserQuestion guidance', async (
   const { ports } = mockPorts('/tmp', new Map())
   const tool = createWorkflowTool(ports)
   const p = await tool.prompt()
-  expect(p).toMatch(/default is 3/i)
+  // densable playbook wording: "capped at 3 by default" / "OMIT it to use 3"
+  expect(p).toMatch(/capped at 3 by default|OMIT it to use 3/i)
   expect(p).toMatch(/maxConcurrency/i)
   expect(p).toMatch(/AskUserQuestion/i)
 })
@@ -524,4 +525,17 @@ test('returnValue is an object → complete (formatValue takes JSON branch)', as
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('prompt is densable full playbook on the tool (not See /ultracode stub)', async () => {
+  const { ports } = mockPorts('/tmp', new Map())
+  const tool = createWorkflowTool(ports)
+  const prompt = await tool.prompt()
+  expect(prompt).toContain(
+    'ONLY call this tool when the user has explicitly opted',
+  )
+  expect(prompt).toContain('Script body hooks')
+  expect(prompt).toContain('Quality patterns')
+  expect(prompt).toContain('resumeFromRunId')
+  expect(prompt).not.toContain('See /ultracode for the full playbook')
 })

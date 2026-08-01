@@ -20,12 +20,14 @@ export * from './progress/events.js'
 import {
   createWorkflowTool,
   type WorkflowToolDescriptor,
+  WORKFLOW_TOOL_PROMPT,
 } from './tool/WorkflowTool.js'
 import { workflowInputSchema, type WorkflowInput } from './tool/schema.js'
 import { persistInlineScript } from './tool/persistInline.js'
 export {
   createWorkflowTool,
   type WorkflowToolDescriptor,
+  WORKFLOW_TOOL_PROMPT,
   workflowInputSchema,
   type WorkflowInput,
   persistInlineScript,

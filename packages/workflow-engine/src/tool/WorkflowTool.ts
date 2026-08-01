@@ -10,6 +10,9 @@ import type { WorkflowPorts } from '../ports.js'
 import type { WorkflowRunResult } from '../types.js'
 import { workflowInputSchema, type WorkflowInput } from './schema.js'
 import { persistInlineScript } from './persistInline.js'
+import { WORKFLOW_TOOL_PROMPT } from './playbook.js'
+
+export { WORKFLOW_TOOL_PROMPT } from './playbook.js'
 
 /** Self-contained tool descriptor (core wiring wraps it with buildTool). Zero core-layer dependencies. */
 export type WorkflowToolDescriptor = {
@@ -36,21 +39,6 @@ export type WorkflowToolDescriptor = {
     content: Array<{ type: 'text'; text: string }>
   }
 }
-
-const WORKFLOW_TOOL_PROMPT = `Use the Workflow tool to execute a workflow script that orchestrates multiple subagents deterministically. The script runs in the background; you receive a run_id immediately and are notified on completion.
-
-Provide the script inline via "script", or reference a named workflow via "name" (resolved from .claude/workflows/), or an existing file via "scriptPath". Pass "args" as a real JSON value (object/array/string), not a stringified string.
-
-Use "resumeFromRunId" to resume a prior run — completed agent() calls replay from the journal instantly.
-
-Concurrency: default is 3 (hard ceiling 16). OMIT maxConcurrency to use 3. To set maxConcurrency to ANY value other than 3, you MUST first ask the user via AskUserQuestion — propose 3 / 6 / 9 (or other tiers matching the fan-out width) with 3 marked "(Recommended)". The ONLY exception: the user has ALREADY specified a concurrency number in this session ("use 6", "maxConcurrency 9") — then honor it without re-asking. Never silently raise concurrency above 3 just because the workflow fans out; 3 is the recommended default.
-
-Script execution model (common pitfalls — getting these wrong is the #1 cause of script errors): the script is the body of \`new AsyncFunction\` — NOT an ESM module, and TypeScript is NOT transpiled. Therefore:
-- Do NOT use \`import\` — \`agent\`, \`parallel\`, \`pipeline\`, \`phase\`, \`log\`, \`workflow\`, \`args\`, and \`budget\` are injected as parameters; reference them directly.
-- Do NOT use TS type annotations, \`interface\`, \`enum\`, \`as\`, or generics — the engine does not transpile, so even a .ts file with type syntax fails to parse.
-- Keep EXACTLY ONE \`export const meta = {...}\` (plain literal) and remove every other \`export\` / \`export default\`.
-- Return the result with a top-level \`return\`.
-Prefer .js / .mjs. See /ultracode for the full playbook and quality patterns.`
 
 export function createWorkflowTool(
   ports: WorkflowPorts,
@@ -119,7 +107,7 @@ export function createWorkflowTool(
       )
 
       // Inline entry: persist the script to the run directory and return a reusable path (the
-      // inline -> persist -> edit -> resubmit-as-scriptPath iteration loop promised by the ultracode skill).
+      // inline -> persist -> edit -> resubmit-as-scriptPath iteration loop promised by the tool playbook).
       // On write failure degrade to a placeholder + warn, do not abort the run (script is already in memory).
       if (!workflowFile && input.script) {
         try {
