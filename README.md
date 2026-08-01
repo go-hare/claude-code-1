@@ -43,12 +43,13 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.21**），与 git tag 可能不同步。
+近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.22**），与 git tag 可能不同步。
 
-### 近期更新（2.7.5 → 2.7.21）
+### 近期更新（2.7.5 → 2.7.22）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.22** | **REPL 更新提示 / go-hare 自动升级路径**：去掉 `ENABLE_AUTOUPDATER` 默认关闭；`autoUpdates=false` 仍 toast「Update available」；Notifications 挂载 AutoUpdater；npm 包二进制识别为 `npm-global`；`claude update` 使用 `@go-hare/claude-code`。 |
 | **2.7.21** | **Workflow / ultracode densable 对齐**：完整 playbook 挂在 Workflow 工具 prompt（ONLY-call-when opt-in）；`/ultracode` 改为 `disableModelInvocation` 用户只读，去掉宽 whenToUse 自举路径。 |
 | **2.7.20** | **Workflow host densable 对齐**：`/workflows` 改为历史浏览器（GsK）；live 监控走 Tasks `WorkflowDetailDialog`（fv_）+ `task.workflowProgress`；删除双栏 `WorkflowsPanel`；补 progress fold / SDK `task_progress` 桥接与 history 导航键位修复。 |
 | **2.7.19** | **Provider 优先级修复**：`modelType=anthropic` 不再被残留 `USE_OPENAI` / `USE_GEMINI` / `USE_GROK` 等环境变量抢优先级。 |
