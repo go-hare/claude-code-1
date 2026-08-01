@@ -43,12 +43,14 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.18**; trust `package.json` / npm) and may not match git tags.
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.20**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.18)
+### Recent updates (2.7.5 → 2.7.20)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.20** | **Workflow host densable alignment**: `/workflows` is history browser (GsK); live monitor is Tasks `WorkflowDetailDialog` (fv_) on `task.workflowProgress`; remove dual-pane `WorkflowsPanel`; add progress fold / SDK `task_progress` bridge and history navigation keybinding fix. |
+| **2.7.19** | **Provider priority fix**: `modelType=anthropic` is no longer overridden by leftover `USE_OPENAI` / `USE_GEMINI` / `USE_GROK` env vars. |
 | **2.7.18** | **Chrome multi-browser without OAuth**: expose and support local multi-browser tools even without OAuth (local Chrome MCP path). |
 | **2.7.17** | **Claude in Chrome extension pipeline**: allow agent-extension fork ID by default with optional extra whitelist; local extension download via go-hare/agent-extension release; Install local opens the repo page; drop (Beta) suffix from `/chrome`. |
 | **2.7.16** | **Host effort metadata**: `get_settings.applied` now includes `effortLevels` / `ultracodeOfferable` so the desktop host can render available effort tiers and the ultracode entry. |
