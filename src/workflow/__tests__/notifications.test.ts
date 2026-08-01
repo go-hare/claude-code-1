@@ -55,6 +55,14 @@ function makeRun(
 
 describe('installWorkflowNotifications', () => {
   test('running → completed triggers notification (incl. workflow name)', async () => {
+    const { setIsInteractive } = await import('../../bootstrap/state.js')
+    const { clearTaskTerminatedSdkGate, drainSdkEvents } = await import(
+      '../../utils/sdkEventQueue.js'
+    )
+    setIsInteractive(false)
+    clearTaskTerminatedSdkGate('r1')
+    drainSdkEvents()
+
     const { installWorkflowNotifications } = await import('../notifications.js')
     const { service, emit, setRuns } = makeMockService([
       makeRun('r1', 'running'),
@@ -79,7 +87,18 @@ describe('installWorkflowNotifications', () => {
     expect(calls[0]).toMatch(/<agent_count>/)
     expect(calls[0]).toMatch(/<total_tokens>/)
     expect(calls[0]).not.toMatch(/<recovery>/)
+
+    // Dual SDK bookend for Host Tasks (Jp) — same task_id as task_started (runId).
+    const sdk = drainSdkEvents()
+    expect(sdk).toHaveLength(1)
+    expect(sdk[0]).toMatchObject({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: 'r1',
+      status: 'completed',
+    })
     unsubscribe()
+    setIsInteractive(true)
   })
 
   test('running → failed triggers notification, includes error text', async () => {

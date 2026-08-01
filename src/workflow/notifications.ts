@@ -185,6 +185,27 @@ export function installWorkflowNotifications(
           failures: run.error,
         }),
       )
+
+      // densable Host contract (same as Agent BRt / Shell Ovu): XML still feeds
+      // the model via print.ts; dual-emit once-gated SDK task_notification so
+      // Jp Tasks / Htr settle without waiting solely on XML→SDK conversion.
+      // task_id = run.runId matches registerTask / task_started for local_workflow.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { emitTaskTerminatedSdk } =
+          require('../utils/sdkEventQueue.js') as typeof import('../utils/sdkEventQueue.js')
+        emitTaskTerminatedSdk(run.runId, status, {
+          summary,
+          outputFile: getTaskOutputPath(run.runId),
+          usage: {
+            total_tokens: totalTokens,
+            tool_uses: toolUses,
+            duration_ms: durationMs,
+          },
+        })
+      } catch {
+        // best-effort — never block workflow completion on SDK bookend
+      }
     }
   })
 }

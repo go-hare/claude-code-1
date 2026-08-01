@@ -103,6 +103,22 @@ export function addDreamTurn(
   })
 }
 
+function emitDreamTerminatedSdk(
+  taskId: string,
+  status: 'completed' | 'failed' | 'stopped',
+  summary: string,
+): void {
+  // Host Tasks pane keys on system task_notification; dream has no XML path.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { emitTaskTerminatedSdk } =
+      require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js')
+    emitTaskTerminatedSdk(taskId, status, { summary })
+  } catch {
+    // best-effort
+  }
+}
+
 export function completeDreamTask(
   taskId: string,
   setAppState: SetAppState,
@@ -117,6 +133,7 @@ export function completeDreamTask(
     notified: true,
     abortController: undefined,
   }))
+  emitDreamTerminatedSdk(taskId, 'completed', 'Dream completed')
 }
 
 export function failDreamTask(taskId: string, setAppState: SetAppState): void {
@@ -127,6 +144,7 @@ export function failDreamTask(taskId: string, setAppState: SetAppState): void {
     notified: true,
     abortController: undefined,
   }))
+  emitDreamTerminatedSdk(taskId, 'failed', 'Dream failed')
 }
 
 export const DreamTask: Task = {
@@ -135,10 +153,12 @@ export const DreamTask: Task = {
 
   async kill(taskId, setAppState) {
     let priorMtime: number | undefined
+    let killed = false
     updateTaskState<DreamTaskState>(taskId, setAppState, task => {
       if (task.status !== 'running') return task
       task.abortController?.abort()
       priorMtime = task.priorMtime
+      killed = true
       return {
         ...task,
         status: 'killed',
@@ -147,6 +167,9 @@ export const DreamTask: Task = {
         abortController: undefined,
       }
     })
+    if (killed) {
+      emitDreamTerminatedSdk(taskId, 'stopped', 'Dream was stopped')
+    }
     // Rewind the lock mtime so the next session can retry. Same path as the
     // fork-failure catch in autoDream.ts. If updateTaskState was a no-op
     // (already terminal), priorMtime stays undefined and we skip.

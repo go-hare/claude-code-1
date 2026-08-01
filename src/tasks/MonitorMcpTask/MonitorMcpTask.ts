@@ -80,13 +80,34 @@ function detachMonitorKeepalive(
   removeKeepaliveReason(agentId, monitorKeepaliveReason(taskId), setAppState)
 }
 
+function emitMonitorTerminatedSdk(
+  taskId: string,
+  status: 'completed' | 'failed' | 'stopped',
+  summary: string,
+  toolUseId?: string,
+): void {
+  // densable Host bookend — monitor has no model XML path; SDK alone closes Jp.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { emitTaskTerminatedSdk } =
+      require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js')
+    emitTaskTerminatedSdk(taskId, status, { toolUseId, summary })
+  } catch {
+    // best-effort
+  }
+}
+
 export function completeMonitorMcpTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
   let agentId: AgentId | undefined
+  let toolUseId: string | undefined
+  let description = 'Monitor'
   updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
     agentId = task.agentId
+    toolUseId = task.toolUseId
+    description = task.description || description
     return {
       ...task,
       status: 'completed',
@@ -97,6 +118,12 @@ export function completeMonitorMcpTask(
   })
   // densable: tB(c, `monitor:${taskId}`) on finish
   detachMonitorKeepalive(taskId, agentId, setAppState)
+  emitMonitorTerminatedSdk(
+    taskId,
+    'completed',
+    `Monitor "${description}" completed`,
+    toolUseId,
+  )
 }
 
 export function failMonitorMcpTask(
@@ -104,8 +131,12 @@ export function failMonitorMcpTask(
   setAppState: SetAppState,
 ): void {
   let agentId: AgentId | undefined
+  let toolUseId: string | undefined
+  let description = 'Monitor'
   updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
     agentId = task.agentId
+    toolUseId = task.toolUseId
+    description = task.description || description
     return {
       ...task,
       status: 'failed',
@@ -115,14 +146,24 @@ export function failMonitorMcpTask(
     }
   })
   detachMonitorKeepalive(taskId, agentId, setAppState)
+  emitMonitorTerminatedSdk(
+    taskId,
+    'failed',
+    `Monitor "${description}" failed`,
+    toolUseId,
+  )
 }
 
 export function killMonitorMcp(taskId: string, setAppState: SetAppState): void {
   let agentId: AgentId | undefined
+  let toolUseId: string | undefined
+  let description = 'Monitor'
   let killed = false
   updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') return task
     agentId = task.agentId
+    toolUseId = task.toolUseId
+    description = task.description || description
     killed = true
     task.abortController?.abort()
     return {
@@ -135,6 +176,12 @@ export function killMonitorMcp(taskId: string, setAppState: SetAppState): void {
   })
   if (killed) {
     detachMonitorKeepalive(taskId, agentId, setAppState)
+    emitMonitorTerminatedSdk(
+      taskId,
+      'stopped',
+      `Monitor "${description}" was stopped`,
+      toolUseId,
+    )
   }
 }
 

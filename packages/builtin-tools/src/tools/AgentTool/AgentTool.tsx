@@ -64,7 +64,7 @@ import { getAgentModel } from 'src/utils/model/agent.js';
 import { permissionModeSchema } from 'src/utils/permissions/PermissionMode.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
 import { filterDeniedAgents, getDenyRuleForAgent } from 'src/utils/permissions/permissions.js';
-import { enqueueSdkEvent } from 'src/utils/sdkEventQueue.js';
+import { emitTaskTerminatedSdk } from 'src/utils/sdkEventQueue.js';
 import { writeAgentMetadata } from 'src/utils/sessionStorage.js';
 import { sleep } from 'src/utils/sleep.js';
 import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
@@ -1750,20 +1750,20 @@ export const AgentTool = buildTool({
               // NOT trigger the print.ts XML task_notification parser or the LLM loop.
               if (!wasBackgrounded) {
                 const progress = getProgressUpdate(syncTracker, agentMessages);
-                enqueueSdkEvent({
-                  type: 'system',
-                  subtype: 'task_notification',
-                  task_id: foregroundTaskId,
-                  tool_use_id: toolUseContext.toolUseId,
-                  status: syncAgentError ? 'failed' : wasAborted ? 'stopped' : 'completed',
-                  output_file: '',
-                  summary: description,
-                  usage: {
-                    total_tokens: progress.tokenCount,
-                    tool_uses: progress.toolUseCount,
-                    duration_ms: Date.now() - agentStartTime,
+                // densable lf — once-gated bookend for Host Tasks (Jp).
+                emitTaskTerminatedSdk(
+                  foregroundTaskId,
+                  syncAgentError ? 'failed' : wasAborted ? 'stopped' : 'completed',
+                  {
+                    toolUseId: toolUseContext.toolUseId,
+                    summary: description,
+                    usage: {
+                      total_tokens: progress.tokenCount,
+                      tool_uses: progress.toolUseCount,
+                      duration_ms: Date.now() - agentStartTime,
+                    },
                   },
-                });
+                );
               }
             }
 

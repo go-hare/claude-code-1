@@ -1116,6 +1116,30 @@ export async function enqueueAgentNotification({
     taskId,
   });
 
+  // densable Host contract: system task_notification bookend for Jp Tasks.
+  // BRt XML still feeds the model via print.ts; dual-emit SDK so Hosts that
+  // only subscribe to system events (or drain before ask()) still settle.
+  // Once-gated in emitTaskTerminatedSdk (c7c) — print re-emit is a no-op.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { emitTaskTerminatedSdk } =
+      require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js');
+    emitTaskTerminatedSdk(taskId, status === 'killed' ? 'stopped' : status, {
+      toolUseId,
+      summary,
+      outputFile: outputPath,
+      usage: usage
+        ? {
+            total_tokens: usage.totalTokens,
+            tool_uses: usage.toolUses,
+            duration_ms: usage.durationMs,
+          }
+        : undefined,
+    });
+  } catch {
+    // best-effort — never block agent completion on SDK bookend
+  }
+
   // After child notif: last agent: child of a park-deferred parent → parent BRt.
   if (owner && ownerWasParked && !ownerRunning) {
     await fireDeferredParkedOwnerCompletion(owner, setAppState);
@@ -1260,6 +1284,7 @@ export function killAsyncAgent(
   clearIdleWindowTimer(taskId);
 
   // Official XV step 1: YC + quietlyParked → un-notify so kill can re-surface.
+  // Also clear densable c7c gate so re-BRt can emit a new SDK bookend.
   setAppState(prev => {
     const t = prev.tasks?.[taskId];
     if (
@@ -1268,6 +1293,14 @@ export function killAsyncAgent(
       isParkedKeepaliveAgent(t) &&
       (t as LocalAgentTaskState).quietlyParked === true
     ) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { clearTaskTerminatedSdkGate } =
+          require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js');
+        clearTaskTerminatedSdkGate(taskId);
+      } catch {
+        // optional
+      }
       return {
         ...prev,
         tasks: {

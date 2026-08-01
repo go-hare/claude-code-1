@@ -411,7 +411,10 @@ import {
   nextPrintBgWaitGate,
   PRINT_BG_WAIT_GRACE_MS,
 } from './printBgWait.js'
-import { drainSdkEvents } from '../utils/sdkEventQueue.js'
+import {
+  drainSdkEvents,
+  emitTaskTerminatedSdk,
+} from '../utils/sdkEventQueue.js'
 import { initializeGrowthBook } from '../services/analytics/growthbook.js'
 import { errorMessage, toError } from '../utils/errors.js'
 import { sleep } from '../utils/sleep.js'
@@ -2431,30 +2434,32 @@ function runHeadlessStreaming(
             // failed/stopped). Stream events from enqueueStreamEvent carry no
             // <status> (they're progress pings); emitting them here would
             // default to 'completed' and falsely close the task for SDK
-            // consumers. Terminal bookends are now emitted directly via
-            // emitTaskTerminatedSdk, so skipping statusless events is safe.
+            // consumers.
+            // densable lf + c7c: BRt/Ovu may already have bookended; once-gate
+            // skips duplicate. Flush drain so Host sees the event on this tick
+            // even when BRt dual-emitted earlier but drain had not run yet.
             if (statusMatch) {
-              output.enqueue({
-                type: 'system',
-                subtype: 'task_notification',
-                task_id: taskIdMatch?.[1] ?? '',
-                tool_use_id: toolUseIdMatch?.[1],
-                status,
-                output_file: outputFileMatch?.[1] ?? '',
-                summary: summaryMatch?.[1] ?? '',
-                usage:
-                  totalTokensMatch && toolUsesMatch
-                    ? {
-                        total_tokens: parseInt(totalTokensMatch[1]!, 10),
-                        tool_uses: parseInt(toolUsesMatch[1]!, 10),
-                        duration_ms: durationMsMatch
-                          ? parseInt(durationMsMatch[1]!, 10)
-                          : 0,
-                      }
-                    : undefined,
-                session_id: getSessionId(),
-                uuid: randomUUID(),
-              })
+              const taskId = taskIdMatch?.[1] ?? ''
+              if (taskId) {
+                emitTaskTerminatedSdk(taskId, status, {
+                  toolUseId: toolUseIdMatch?.[1],
+                  outputFile: outputFileMatch?.[1] ?? '',
+                  summary: summaryMatch?.[1] ?? '',
+                  usage:
+                    totalTokensMatch && toolUsesMatch
+                      ? {
+                          total_tokens: parseInt(totalTokensMatch[1]!, 10),
+                          tool_uses: parseInt(toolUsesMatch[1]!, 10),
+                          duration_ms: durationMsMatch
+                            ? parseInt(durationMsMatch[1]!, 10)
+                            : 0,
+                        }
+                      : undefined,
+                })
+              }
+              for (const event of drainSdkEvents()) {
+                output.enqueue(event)
+              }
             }
             // No continue -- fall through to ask() so the model processes the result
           }

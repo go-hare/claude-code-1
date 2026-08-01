@@ -292,6 +292,21 @@ function enqueueShellNotification(
     priority: feature('MONITOR_TOOL') ? 'next' : 'later',
     agentId,
   });
+
+  // densable Ovu dual bookend: XML for model + once-gated SDK task_notification
+  // so Host Tasks (Jp) closes without waiting for print→ask drain alone.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { emitTaskTerminatedSdk } =
+      require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js');
+    emitTaskTerminatedSdk(taskId, status === 'killed' ? 'stopped' : status, {
+      toolUseId,
+      summary,
+      outputFile: outputPath,
+    });
+  } catch {
+    // best-effort
+  }
 }
 
 export const LocalShellTask: Task = {

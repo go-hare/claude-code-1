@@ -1779,6 +1779,12 @@ export const SDKTaskNotificationMessageSchema = lazySchema(() =>
       .optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
+    timestamp: z
+      .string()
+      .optional()
+      .describe(
+        'ISO timestamp when the bookend was emitted. Hosts use this for Tasks completedAt; older emitters omit it.',
+      ),
   }),
 )
 
@@ -1799,6 +1805,12 @@ export const SDKTaskStartedMessageSchema = lazySchema(() =>
     prompt: z.string().optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
+    timestamp: z
+      .string()
+      .optional()
+      .describe(
+        'ISO timestamp when the task was registered. Hosts use this for Tasks startedAt; older emitters omit it.',
+      ),
   }),
 )
 
@@ -1810,6 +1822,7 @@ export const SDKSessionStateChangedMessageSchema = lazySchema(() =>
       state: z.enum(['idle', 'running', 'requires_action']),
       uuid: UUIDPlaceholder(),
       session_id: z.string(),
+      timestamp: z.string().optional(),
     })
     .describe(
       "Mirrors notifySessionStateChanged. 'idle' fires after heldBackResult flushes and the bg-agent do-while exits — authoritative turn-over signal.",
@@ -1877,6 +1890,7 @@ export const SDKTaskProgressMessageSchema = lazySchema(() =>
     workflow_progress: z.array(SdkWorkflowProgressSchema()).optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
+    timestamp: z.string().optional(),
   }),
 )
 
