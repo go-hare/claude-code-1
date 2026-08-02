@@ -13,9 +13,28 @@ const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
 
 const sdkEvents: any[] = []
-mock.module('src/utils/sdkEventQueue.js', () => ({
-  enqueueSdkEvent: (event: any) => sdkEvents.push(event),
-}))
+function sdkEventQueueMock() {
+  return {
+    enqueueSdkEvent: (event: any) => sdkEvents.push(event),
+    // Official 2.1 task_updated path used by updateTaskState (require).
+    emitTaskUpdatedSdk: (taskId: string, patch: Record<string, unknown>) => {
+      sdkEvents.push({
+        type: 'system',
+        subtype: 'task_updated',
+        task_id: taskId,
+        patch,
+      })
+    },
+    emitTaskTerminatedSdk: () => true,
+    emitTaskSummarySdk: () => {},
+    emitThinkingTokensSdk: () => {},
+    emitModelFallbackSdk: () => {},
+    drainSdkEvents: () => [],
+    clearTaskTerminatedSdkGate: () => {},
+  }
+}
+mock.module('src/utils/sdkEventQueue.js', sdkEventQueueMock)
+mock.module('../sdkEventQueue.js', sdkEventQueueMock)
 
 // Spread real diskOutput so DiskTaskOutput survives process-global mock.module
 // pollution when this file runs with agentKeepalive / LocalAgentTask suites.
@@ -132,6 +151,59 @@ describe('updateTaskState', () => {
 
     // No crash, tasks unchanged
     expect(Object.keys(getState().tasks)).toHaveLength(0)
+  })
+
+  test('emits system/task_updated wire-safe patch on status change', () => {
+    const { setAppState } = createSetAppState({
+      tasks: { 'task-001': makeTask({ status: 'running' }) },
+    })
+
+    updateTaskState('task-001', setAppState as any, (task: any) => ({
+      ...task,
+      status: 'completed',
+      endTime: 1_700_000_000_000,
+      description: 'done',
+    }))
+
+    const updated = sdkEvents.filter(e => e.subtype === 'task_updated')
+    expect(updated).toHaveLength(1)
+    expect(updated[0]).toMatchObject({
+      type: 'system',
+      subtype: 'task_updated',
+      task_id: 'task-001',
+      patch: {
+        status: 'completed',
+        description: 'done',
+        end_time: 1_700_000_000_000,
+      },
+    })
+  })
+
+  test('emits is_backgrounded when isBackgrounded flips', () => {
+    const { setAppState } = createSetAppState({
+      tasks: {
+        'task-001': makeTask({ status: 'running', isBackgrounded: false }),
+      },
+    })
+
+    updateTaskState('task-001', setAppState as any, (task: any) => ({
+      ...task,
+      isBackgrounded: true,
+    }))
+
+    const updated = sdkEvents.filter(e => e.subtype === 'task_updated')
+    expect(updated).toHaveLength(1)
+    expect(updated[0].patch).toEqual({ is_backgrounded: true })
+  })
+
+  test('no task_updated on no-op same-reference updater', () => {
+    const task = makeTask({ status: 'running' })
+    const { setAppState } = createSetAppState({
+      tasks: { 'task-001': task },
+    })
+
+    updateTaskState('task-001', setAppState as any, (t: any) => t)
+    expect(sdkEvents.filter(e => e.subtype === 'task_updated')).toHaveLength(0)
   })
 })
 

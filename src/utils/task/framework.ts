@@ -64,6 +64,8 @@ export function updateTaskState<T extends TaskState>(
   setAppState: SetAppState,
   updater: (task: T) => T,
 ): void {
+  let before: TaskState | undefined
+  let after: TaskState | undefined
   setAppState(prev => {
     const task = prev.tasks?.[taskId] as T | undefined
     if (!task) {
@@ -75,6 +77,8 @@ export function updateTaskState<T extends TaskState>(
       // spread so s.tasks subscribers don't re-render on unchanged state.
       return prev
     }
+    before = task
+    after = updated
     return {
       ...prev,
       tasks: {
@@ -83,6 +87,87 @@ export function updateTaskState<T extends TaskState>(
       },
     }
   })
+  // Official 2.1.x system/task_updated — Host merges wire-safe patch.
+  if (before && after) {
+    emitTaskUpdatedPatch(taskId, before, after)
+  }
+}
+
+/** Wire-safe subset for Host Tasks map (official task_updated.patch). */
+function emitTaskUpdatedPatch(
+  taskId: string,
+  before: TaskState,
+  after: TaskState,
+): void {
+  try {
+    const { emitTaskUpdatedSdk } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../sdkEventQueue.js') as typeof import('../sdkEventQueue.js')
+    type Patch = Parameters<typeof emitTaskUpdatedSdk>[1]
+    const patch: Patch = {}
+    if (before.status !== after.status) {
+      // Map internal statuses to official wire enum when possible.
+      const s = after.status as string
+      if (
+        s === 'pending' ||
+        s === 'running' ||
+        s === 'completed' ||
+        s === 'failed' ||
+        s === 'killed' ||
+        s === 'paused'
+      ) {
+        patch.status = s
+      }
+    }
+    if (before.description !== after.description) {
+      patch.description = after.description
+    }
+    const beforeBg =
+      'isBackgrounded' in before
+        ? Boolean((before as { isBackgrounded?: boolean }).isBackgrounded)
+        : undefined
+    const afterBg =
+      'isBackgrounded' in after
+        ? Boolean((after as { isBackgrounded?: boolean }).isBackgrounded)
+        : undefined
+    if (beforeBg !== afterBg && afterBg !== undefined) {
+      patch.is_backgrounded = afterBg
+    }
+    const beforeErr =
+      'error' in before
+        ? (before as { error?: string }).error
+        : undefined
+    const afterErr =
+      'error' in after ? (after as { error?: string }).error : undefined
+    if (beforeErr !== afterErr && afterErr !== undefined) {
+      patch.error = afterErr
+    }
+    const beforeEnd =
+      'endTime' in before
+        ? (before as { endTime?: number }).endTime
+        : undefined
+    const afterEnd =
+      'endTime' in after ? (after as { endTime?: number }).endTime : undefined
+    if (beforeEnd !== afterEnd && typeof afterEnd === 'number') {
+      patch.end_time = afterEnd
+    }
+    const beforePaused =
+      'totalPausedMs' in before
+        ? (before as { totalPausedMs?: number }).totalPausedMs
+        : undefined
+    const afterPaused =
+      'totalPausedMs' in after
+        ? (after as { totalPausedMs?: number }).totalPausedMs
+        : undefined
+    if (beforePaused !== afterPaused && typeof afterPaused === 'number') {
+      patch.total_paused_ms = afterPaused
+    }
+    if (Object.keys(patch).length > 0) {
+      emitTaskUpdatedSdk(taskId, patch)
+    }
+  } catch {
+    // sdkEventQueue optional / bootstrap
+  }
 }
 
 /**

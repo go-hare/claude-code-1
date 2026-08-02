@@ -225,6 +225,15 @@ export function useRemoteSession({
           if (sdkMessage.subtype === 'task_progress') {
             return
           }
+          // Official 2.1 Host progress patches / mid-turn phrase — not renderable.
+          if (
+            sdkMessage.subtype === 'task_updated' ||
+            sdkMessage.subtype === 'task_summary' ||
+            sdkMessage.subtype === 'thinking_tokens' ||
+            sdkMessage.subtype === 'model_fallback'
+          ) {
+            return
+          }
           // Track compaction state. The CLI emits status='compacting' at
           // the start and status=null when done; compact_boundary also
           // signals completion. Repeated 'compacting' status messages

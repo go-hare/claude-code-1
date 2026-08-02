@@ -383,6 +383,24 @@ export function notifySessionMetadataChanged(
 ): void {
   applyMetadataUpdate(metadata)
   metadataListener?.(metadata)
+  // Official 2.1.x: stream system/task_summary so non-CCR Hosts see the same
+  // mid-turn phrase as external_metadata.task_summary (detail null = clear).
+  if (Object.prototype.hasOwnProperty.call(metadata, 'task_summary')) {
+    try {
+      const { emitTaskSummarySdk } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./sdkEventQueue.js') as typeof import('./sdkEventQueue.js')
+      const detail =
+        typeof metadata.task_summary === 'string'
+          ? metadata.task_summary
+          : metadata.task_summary === null
+            ? null
+            : null
+      emitTaskSummarySdk(detail)
+    } catch {
+      // optional
+    }
+  }
 }
 
 export function notifyAutomationStateChanged(

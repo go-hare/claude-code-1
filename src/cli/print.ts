@@ -404,6 +404,10 @@ import { getRunningTasks } from '../utils/task/framework.js'
 import { isBackgroundTask } from '../tasks/types.js'
 import { stopTask } from '../tasks/stopTask.js'
 import {
+  backgroundAll,
+  backgroundTaskByToolUseId,
+} from '../tasks/LocalShellTask/LocalShellTask.js'
+import {
   canReportSessionIdleWithBgActivity,
   formatPrintBgWaitCeilingMessage,
   formatPrintWindDownMessage,
@@ -1135,7 +1139,10 @@ export async function runHeadless(
     // Also filter out streamlined types since they're only produced by the transformer.
     // SDK-only system events are excluded so lastMessage stays at the result
     // (session_state_changed(idle) and any late task_notification drain after
-    // result in the finally block).
+    // result in the finally block). command_lifecycle is Official 2.1 ack
+    // frames — not result content (densable oWK non-transcript).
+    // Official 2.1 also excludes task_updated / task_summary / model_fallback
+    // from lastMessage so Host progress bookends never pin json output.
     if (
       message.type !== 'control_response' &&
       message.type !== 'control_request' &&
@@ -1146,8 +1153,13 @@ export async function runHeadless(
           message.subtype === 'task_notification' ||
           message.subtype === 'task_started' ||
           message.subtype === 'task_progress' ||
+          message.subtype === 'task_updated' ||
+          message.subtype === 'task_summary' ||
+          message.subtype === 'thinking_tokens' ||
+          message.subtype === 'model_fallback' ||
           message.subtype === 'post_turn_summary')
       ) &&
+      message.type !== 'command_lifecycle' &&
       message.type !== 'stream_event' &&
       message.type !== 'keep_alive' &&
       message.type !== 'streamlined_text' &&
@@ -4602,6 +4614,25 @@ function runHeadlessStreaming(
               setAppState,
             })
             sendControlResponseSuccess(msg, {})
+          } catch (error) {
+            sendControlResponseError(msg, errorMessage(error))
+          }
+        } else if (msg.request.subtype === 'background_tasks') {
+          // Official 2.1.x: Ctrl+B over stream-json. With tool_use_id, target
+          // that originating tool_use's task; without, backgroundAll.
+          try {
+            const toolUseId = msg.request.tool_use_id
+            if (typeof toolUseId === 'string' && toolUseId.length > 0) {
+              const backgrounded = backgroundTaskByToolUseId(
+                toolUseId,
+                getAppState,
+                setAppState,
+              )
+              sendControlResponseSuccess(msg, { backgrounded })
+            } else {
+              backgroundAll(getAppState, setAppState)
+              sendControlResponseSuccess(msg, {})
+            }
           } catch (error) {
             sendControlResponseError(msg, errorMessage(error))
           }

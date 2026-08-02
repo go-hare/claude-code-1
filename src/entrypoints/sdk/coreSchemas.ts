@@ -1829,6 +1829,121 @@ export const SDKSessionStateChangedMessageSchema = lazySchema(() =>
     ),
 )
 
+/** Official 2.1.x stream-json command ack (densable Host non-transcript / oWK). */
+export const SDKCommandLifecycleMessageSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('command_lifecycle'),
+      uuid: z
+        .string()
+        .describe(
+          'User-command uuid being acked (same id Host/CCR delivery tracks).',
+        ),
+      state: z.enum(['started', 'completed']),
+      session_id: z.string().optional(),
+      timestamp: z.string().optional(),
+    })
+    .describe(
+      'Emitted when a queued user command starts processing and when it completes. Not conversation content.',
+    ),
+)
+
+/**
+ * Official 2.1.x live thinking-token estimate (redacted-thinking phase).
+ * Digested from thinking_delta.estimated_tokens; not conversation content.
+ */
+export const SDKThinkingTokensMessageSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('system'),
+      subtype: z.literal('thinking_tokens'),
+      estimated_tokens: z.number(),
+      estimated_tokens_delta: z.number(),
+      uuid: UUIDPlaceholder(),
+      session_id: z.string(),
+      timestamp: z.string().optional(),
+    })
+    .describe(
+      'Live thinking-token estimate during redacted-thinking (where the API otherwise streams only pings). estimated_tokens is cumulative for the current assistant message; estimated_tokens_delta is the increment from this thinking_delta.',
+    ),
+)
+
+/**
+ * Official 2.1.x wire-safe TaskState patch for Host Tasks map merge.
+ * Excludes abortController / messages / result.
+ */
+export const SDKTaskUpdatedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('task_updated'),
+    task_id: z.string(),
+    patch: z
+      .object({
+        status: z
+          .enum([
+            'pending',
+            'running',
+            'completed',
+            'failed',
+            'killed',
+            'paused',
+          ])
+          .optional(),
+        description: z.string().optional(),
+        end_time: z.number().optional(),
+        total_paused_ms: z.number().optional(),
+        error: z.string().optional(),
+        is_backgrounded: z.boolean().optional(),
+      })
+      .describe(
+        'Wire-safe subset of TaskState fields that changed. Excludes abortController, messages, result. Clients merge into their local task map.',
+      ),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+    timestamp: z.string().optional(),
+  }),
+)
+
+/**
+ * Official 2.1.x mid-turn progress line (mirrors external_metadata.task_summary).
+ * detail null clears on idle.
+ */
+export const SDKTaskSummaryMessageSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('system'),
+      subtype: z.literal('task_summary'),
+      detail: z.string().nullable(),
+      uuid: UUIDPlaceholder(),
+      session_id: z.string(),
+      timestamp: z.string().optional(),
+    })
+    .describe(
+      '@internal Mid-turn progress line from the debounced classifier. Mirrors external_metadata.task_summary so non-CCR consumers (desktop LocalSessionManager) see the same live phrase. detail is null on the idle clear.',
+    ),
+)
+
+/**
+ * Official 2.1.x permanent model fallback notification for Host/SDK.
+ */
+export const SDKModelFallbackMessageSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('system'),
+      subtype: z.literal('model_fallback'),
+      trigger: z.enum(['model_not_found', 'overloaded']),
+      original_model: z.string(),
+      fallback_model: z.string(),
+      content: z.string(),
+      uuid: UUIDPlaceholder(),
+      session_id: z.string(),
+      timestamp: z.string().optional(),
+    })
+    .describe(
+      '@internal Emitted when the session is permanently switched to the configured fallback model because the primary model failed with a permanent API error (currently trigger "model_not_found": the API reports the requested model does not exist or is retired). Not yet in the public SDKMessage union.',
+    ),
+)
+
 /** densable workflow_progress item (PhaseProgress fold key `${type}:${index}`). */
 export const SdkWorkflowProgressSchema = lazySchema(() =>
   z.union([
@@ -2000,6 +2115,11 @@ export const SDKMessageSchema = lazySchema(() =>
     SDKTaskStartedMessageSchema(),
     SDKTaskProgressMessageSchema(),
     SDKSessionStateChangedMessageSchema(),
+    SDKCommandLifecycleMessageSchema(),
+    SDKThinkingTokensMessageSchema(),
+    SDKTaskUpdatedMessageSchema(),
+    SDKTaskSummaryMessageSchema(),
+    SDKModelFallbackMessageSchema(),
     SDKFilesPersistedEventSchema(),
     SDKToolUseSummaryMessageSchema(),
     SDKRateLimitEventSchema(),

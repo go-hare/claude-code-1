@@ -65,11 +65,84 @@ type SessionStateChangedEvent = {
   state: 'idle' | 'running' | 'requires_action'
 }
 
+/**
+ * Official 2.1.x stream-json: query yields
+ * `{ type: "command_lifecycle", uuid, state }` for user-command ack
+ * (started when batch begins, completed on turn/control close).
+ * densable Host treats this as non-transcript (oWK skip).
+ * `uuid` is the **command** uuid — must not be rewritten on drain.
+ */
+type CommandLifecycleSdkEvent = {
+  type: 'command_lifecycle'
+  uuid: string
+  state: 'started' | 'completed'
+}
+
+/**
+ * Official 2.1.x: live thinking-token estimate during redacted-thinking
+ * (API often streams only pings + thinking_delta.estimated_tokens).
+ * Host/SDK progress; not conversation content.
+ */
+type ThinkingTokensSdkEvent = {
+  type: 'system'
+  subtype: 'thinking_tokens'
+  estimated_tokens: number
+  estimated_tokens_delta: number
+}
+
+/**
+ * Official 2.1.x: wire-safe TaskState patch for Host Tasks map merge.
+ * Excludes abortController / messages / result.
+ */
+export type TaskUpdatedPatch = {
+  status?:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'killed'
+    | 'paused'
+  description?: string
+  end_time?: number
+  total_paused_ms?: number
+  error?: string
+  is_backgrounded?: boolean
+}
+
+type TaskUpdatedSdkEvent = {
+  type: 'system'
+  subtype: 'task_updated'
+  task_id: string
+  patch: TaskUpdatedPatch
+}
+
+/** Official 2.1.x mid-turn progress line for non-CCR Hosts. */
+type TaskSummarySdkEvent = {
+  type: 'system'
+  subtype: 'task_summary'
+  detail: string | null
+}
+
+/** Official 2.1.x permanent model fallback notification. */
+type ModelFallbackSdkEvent = {
+  type: 'system'
+  subtype: 'model_fallback'
+  trigger: 'model_not_found' | 'overloaded'
+  original_model: string
+  fallback_model: string
+  content: string
+}
+
 export type SdkEvent =
   | TaskStartedEvent
   | TaskProgressEvent
   | TaskNotificationSdkEvent
   | SessionStateChangedEvent
+  | CommandLifecycleSdkEvent
+  | ThinkingTokensSdkEvent
+  | TaskUpdatedSdkEvent
+  | TaskSummarySdkEvent
+  | ModelFallbackSdkEvent
 
 const MAX_QUEUE_SIZE = 1000
 const queue: SdkEvent[] = []
@@ -102,12 +175,19 @@ export function enqueueSdkEvent(event: SdkEvent): void {
   }
   if (queue.length >= MAX_QUEUE_SIZE) {
     // densable BC: prefer evicting non-bookend events so task_started /
-    // task_notification stay available for Host Tasks UI.
-    const nonBookend = queue.findIndex(
-      e =>
-        e.type !== 'system' ||
-        (e.subtype !== 'task_started' && e.subtype !== 'task_notification'),
-    )
+    // task_notification stay available for Host Tasks UI. Also keep
+    // command_lifecycle (Official 2.1 command uuid ack) when possible.
+    const nonBookend = queue.findIndex(e => {
+      if (e.type === 'command_lifecycle') return false
+      if (e.type !== 'system') return true
+      // Keep Tasks / Host-critical bookends under pressure.
+      return (
+        e.subtype !== 'task_started' &&
+        e.subtype !== 'task_notification' &&
+        e.subtype !== 'task_updated' &&
+        e.subtype !== 'thinking_tokens'
+      )
+    })
     if (nonBookend === -1) {
       queue.shift()
     } else {
@@ -118,7 +198,7 @@ export function enqueueSdkEvent(event: SdkEvent): void {
 }
 
 export function drainSdkEvents(): Array<
-  SdkEvent & { uuid: UUID; session_id: string; timestamp: string }
+  SdkEvent & { uuid: UUID | string; session_id: string; timestamp: string }
 > {
   if (queue.length === 0) {
     return []
@@ -130,10 +210,71 @@ export function drainSdkEvents(): Array<
   const timestamp = new Date().toISOString()
   return events.map(e => ({
     ...e,
-    uuid: randomUUID(),
+    // command_lifecycle.uuid is the user-command id Host/CCR ack against —
+    // never replace with a fresh randomUUID (Official 2.1 yield shape).
+    uuid: e.type === 'command_lifecycle' ? e.uuid : (randomUUID() as UUID),
     session_id: getSessionId(),
     timestamp,
   }))
+}
+
+/**
+ * Official 2.1.x — emit system/thinking_tokens for Host live estimate.
+ * Call from QueryEngine when thinking_delta carries estimated_tokens.
+ */
+export function emitThinkingTokensSdk(
+  estimatedTokens: number,
+  estimatedTokensDelta: number,
+): void {
+  enqueueSdkEvent({
+    type: 'system',
+    subtype: 'thinking_tokens',
+    estimated_tokens: estimatedTokens,
+    estimated_tokens_delta: estimatedTokensDelta,
+  })
+}
+
+/** Official 2.1.x — Host Tasks map patch (clients merge by task_id). */
+export function emitTaskUpdatedSdk(
+  taskId: string,
+  patch: TaskUpdatedPatch,
+): void {
+  if (!taskId || Object.keys(patch).length === 0) return
+  enqueueSdkEvent({
+    type: 'system',
+    subtype: 'task_updated',
+    task_id: taskId,
+    patch,
+  })
+}
+
+/**
+ * Official 2.1.x — mid-turn progress phrase for LocalSessionManager.
+ * detail null clears (idle).
+ */
+export function emitTaskSummarySdk(detail: string | null): void {
+  enqueueSdkEvent({
+    type: 'system',
+    subtype: 'task_summary',
+    detail,
+  })
+}
+
+/** Official 2.1.x — permanent fallback model switch. */
+export function emitModelFallbackSdk(args: {
+  trigger: 'model_not_found' | 'overloaded'
+  originalModel: string
+  fallbackModel: string
+  content: string
+}): void {
+  enqueueSdkEvent({
+    type: 'system',
+    subtype: 'model_fallback',
+    trigger: args.trigger,
+    original_model: args.originalModel,
+    fallback_model: args.fallbackModel,
+    content: args.content,
+  })
 }
 
 /**

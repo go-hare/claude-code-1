@@ -1281,12 +1281,14 @@ export async function checkRuleBasedPermissions(
     return toolPermissionResult
   }
 
-  // 1g. Safety checks (e.g. .git/, .claude/, .vscode/, shell configs) are
-  // bypass-immune — they must prompt even when a PreToolUse hook returned
-  // allow. checkPathSafetyForAutoEdit returns {type:'safetyCheck'} for these.
+  // 1g. Non-classifier-approvable safety checks stay immune even when a
+  // PreToolUse hook returned allow. classifierApprovable safetyChecks
+  // (sensitive-file paths under .claude/, .git/, etc.) are not hard-blocks
+  // here — callers that apply mode (bypassPermissions) may still allow them.
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    toolPermissionResult.decisionReason?.type === 'safetyCheck'
+    toolPermissionResult.decisionReason?.type === 'safetyCheck' &&
+    !toolPermissionResult.decisionReason.classifierApprovable
   ) {
     return toolPermissionResult
   }
@@ -1441,12 +1443,16 @@ async function hasPermissionsToUseToolInner(
     }
   }
 
-  // 1g. Safety checks (e.g. .git/, .claude/, .vscode/, shell configs) are
-  // bypass-immune — they must prompt even in bypassPermissions mode.
-  // checkPathSafetyForAutoEdit returns {type:'safetyCheck'} for these paths.
+  // 1g. Non-classifier-approvable safety checks (e.g. suspicious Windows path
+  // tricks) are bypass-immune — they must prompt even in bypassPermissions.
+  // densable 2.1.218+: classifierApprovable safetyChecks (`.claude/**`,
+  // `.git/`, shell configs, etc.) fall through to step 2a so bypass mode
+  // can allow them without Host can_use_tool. auto mode still uses the
+  // classifier for those (see TRANSCRIPT_CLASSIFIER branch above).
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    toolPermissionResult.decisionReason?.type === 'safetyCheck'
+    toolPermissionResult.decisionReason?.type === 'safetyCheck' &&
+    !toolPermissionResult.decisionReason.classifierApprovable
   ) {
     return toolPermissionResult
   }

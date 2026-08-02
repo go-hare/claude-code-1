@@ -1704,8 +1704,10 @@ async function* queryLoop(
               queryDepth: queryTracking.depth,
             })
 
-            // Yield system message about fallback — use 'warning' level so
-            // users see the notification without needing verbose mode
+            // Official 2.1.x parity: capacity/overloaded fallback only yields a
+            // warning system message — NOT system/model_fallback. Official
+            // emits model_fallback only for permanent model_not_found (error
+            // carries reason); FallbackTriggeredError here is the 529 path.
             yield createSystemMessage(
               `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
               'warning',

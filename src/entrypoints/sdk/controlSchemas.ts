@@ -484,6 +484,27 @@ export const SDKControlStopTaskRequestSchema = lazySchema(() =>
     .describe('Stops a running task.'),
 )
 
+/**
+ * Official 2.1.x control: Ctrl+B semantics over stream-json.
+ * tool_use_id targets the single task started by that tool_use; omit = all
+ * foreground tasks.
+ */
+export const SDKControlBackgroundTasksRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('background_tasks'),
+      tool_use_id: z
+        .string()
+        .optional()
+        .describe(
+          'When set, backgrounds only the task whose originating tool_use block has this id. When omitted, backgrounds all foreground tasks (Ctrl+B semantics).',
+        ),
+    })
+    .describe(
+      'Backgrounds in-flight foreground tasks (Bash commands and subagents). With tool_use_id, targets the single task started by that tool_use block; without it, backgrounds all foreground tasks — the control-request equivalent of pressing Ctrl+B in the terminal. Each blocking tool call returns immediately with a "running in the background" tool_result and the turn continues; the task keeps running and emits a task_notification when it settles.',
+    ),
+)
+
 export const SDKControlApplyFlagSettingsRequestSchema = lazySchema(() =>
   z
     .object({
@@ -733,6 +754,7 @@ export const SDKControlRequestInnerSchema = lazySchema(() =>
     SDKControlMcpToggleRequestSchema(),
     SDKControlSetMcpPermissionModeOverrideRequestSchema(),
     SDKControlStopTaskRequestSchema(),
+    SDKControlBackgroundTasksRequestSchema(),
     SDKControlApplyFlagSettingsRequestSchema(),
     SDKControlGetSettingsRequestSchema(),
     SDKControlElicitationRequestSchema(),

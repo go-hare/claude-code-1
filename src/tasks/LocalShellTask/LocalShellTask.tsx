@@ -451,10 +451,10 @@ export function registerForeground(
 }
 
 /**
- * Background a specific foreground task.
+ * Background a specific foreground shell task.
  * @returns true if backgrounded successfully, false otherwise
  */
-function backgroundTask(taskId: string, getAppState: () => AppState, setAppState: SetAppState): boolean {
+export function backgroundTask(taskId: string, getAppState: () => AppState, setAppState: SetAppState): boolean {
   // Step 1: Get the task and shell command from current state
   const state = getAppState();
   const task = state.tasks[taskId];
@@ -471,11 +471,13 @@ function backgroundTask(taskId: string, getAppState: () => AppState, setAppState
     return false;
   }
 
+  let didBackground = false;
   setAppState(prev => {
     const prevTask = prev.tasks[taskId];
     if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
       return prev;
     }
+    didBackground = true;
     return {
       ...prev,
       tasks: {
@@ -484,6 +486,18 @@ function backgroundTask(taskId: string, getAppState: () => AppState, setAppState
       },
     };
   });
+  // Official 2.1 task_updated only when state actually flipped (setAppState
+  // path bypasses updateTaskState).
+  if (didBackground) {
+    try {
+      const { emitTaskUpdatedSdk } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
+      emitTaskUpdatedSdk(taskId, { is_backgrounded: true });
+    } catch {
+      // optional
+    }
+  }
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
 
@@ -566,14 +580,48 @@ export function backgroundAll(getAppState: () => AppState, setAppState: SetAppSt
     backgroundTask(taskId, getAppState, setAppState);
   }
 
-  // Background all foreground agent tasks
+  // Background all foreground agent tasks (exclude main session — same
+  // filter as hasForegroundTasks; Host background_tasks without tool_use_id).
   const foregroundAgentTaskIds = Object.keys(state.tasks).filter(id => {
     const task = state.tasks[id];
-    return isLocalAgentTask(task) && !task.isBackgrounded;
+    return (
+      isLocalAgentTask(task) && !task.isBackgrounded && !isMainSessionTask(task)
+    );
   });
   for (const taskId of foregroundAgentTaskIds) {
     backgroundAgentTask(taskId, getAppState, setAppState);
   }
+}
+
+/**
+ * Official 2.1.x control `background_tasks` with tool_use_id (xPK densable).
+ * Backgrounds the single foreground shell/agent task that originated from the
+ * given tool_use block id.
+ * @returns true if a matching task was backgrounded
+ */
+export function backgroundTaskByToolUseId(
+  toolUseId: string,
+  getAppState: () => AppState,
+  setAppState: SetAppState,
+): boolean {
+  if (!toolUseId) {
+    return false;
+  }
+  const state = getAppState();
+  for (const [taskId, task] of Object.entries(state.tasks)) {
+    if (task.toolUseId !== toolUseId) {
+      continue;
+    }
+    if (isLocalShellTask(task) && !task.isBackgrounded && task.shellCommand) {
+      return backgroundTask(taskId, getAppState, setAppState);
+    }
+    if (isLocalAgentTask(task) && !task.isBackgrounded && !isMainSessionTask(task)) {
+      return backgroundAgentTask(taskId, getAppState, setAppState);
+    }
+    // Matched tool_use_id but not backgroundable (already bg / terminal / main).
+    return false;
+  }
+  return false;
 }
 
 /**
@@ -597,12 +645,14 @@ export function backgroundExistingForegroundTask(
   }
 
   let agentId: AgentId | undefined;
+  let didBackground = false;
   setAppState(prev => {
     const prevTask = prev.tasks[taskId];
     if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
       return prev;
     }
     agentId = prevTask.agentId;
+    didBackground = true;
     return {
       ...prev,
       tasks: {
@@ -611,6 +661,17 @@ export function backgroundExistingForegroundTask(
       },
     };
   });
+  // Official 2.1 task_updated only when state actually flipped.
+  if (didBackground) {
+    try {
+      const { emitTaskUpdatedSdk } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
+      emitTaskUpdatedSdk(taskId, { is_backgrounded: true });
+    } catch {
+      // optional
+    }
+  }
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, undefined, toolUseId, agentId);
 

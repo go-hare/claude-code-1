@@ -2028,11 +2028,13 @@ export function registerAgentForeground({
     const timer = setTimeout(
       (setAppState, agentId) => {
         // Mark task as backgrounded and resolve the signal
+        let didBackground = false;
         setAppState(prev => {
           const prevTask = prev.tasks[agentId];
           if (!isLocalAgentTask(prevTask) || prevTask.isBackgrounded) {
             return prev;
           }
+          didBackground = true;
           return {
             ...prev,
             tasks: {
@@ -2041,6 +2043,17 @@ export function registerAgentForeground({
             },
           };
         });
+        // Official 2.1 task_updated (auto-bg setAppState bypasses updateTaskState)
+        if (didBackground) {
+          try {
+            const { emitTaskUpdatedSdk } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
+            emitTaskUpdatedSdk(agentId, { is_backgrounded: true });
+          } catch {
+            // optional
+          }
+        }
         const resolver = backgroundSignalResolvers.get(agentId);
         if (resolver) {
           resolver();
@@ -2074,11 +2087,13 @@ export function backgroundAgentTask(taskId: string, getAppState: () => AppState,
   }
 
   // Update state to mark as backgrounded
+  let didBackground = false;
   setAppState(prev => {
     const prevTask = prev.tasks[taskId];
-    if (!isLocalAgentTask(prevTask)) {
+    if (!isLocalAgentTask(prevTask) || prevTask.isBackgrounded) {
       return prev;
     }
+    didBackground = true;
     return {
       ...prev,
       tasks: {
@@ -2087,6 +2102,17 @@ export function backgroundAgentTask(taskId: string, getAppState: () => AppState,
       },
     };
   });
+  // Official 2.1 task_updated only when state actually flipped.
+  if (didBackground) {
+    try {
+      const { emitTaskUpdatedSdk } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
+      emitTaskUpdatedSdk(taskId, { is_backgrounded: true });
+    } catch {
+      // optional
+    }
+  }
 
   // Resolve the background signal to interrupt the agent loop
   const resolver = backgroundSignalResolvers.get(taskId);

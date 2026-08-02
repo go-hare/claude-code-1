@@ -682,6 +682,8 @@ export class QueryEngine {
 
     // Track current message usage (reset on each message_start)
     let currentMessageUsage: NonNullableUsage = EMPTY_USAGE
+    // Official 2.1: cumulative thinking_delta.estimated_tokens per message
+    let thinkingTokenEstimate = 0
     let turnCount = 1
     let hasAcknowledgedInitialMessages = false
     // Track structured output from StructuredOutput tool calls
@@ -830,6 +832,8 @@ export class QueryEngine {
           if (event.type === 'message_start') {
             // Reset current message usage for new message
             currentMessageUsage = EMPTY_USAGE
+            // Official 2.1: per-message thinking estimate accumulator
+            thinkingTokenEstimate = 0
             const eventMessage = event.message as {
               usage: BetaMessageDeltaUsage
             }
@@ -858,6 +862,30 @@ export class QueryEngine {
               this.totalUsage,
               currentMessageUsage,
             )
+          }
+          // Official 2.1.x: digest thinking_delta.estimated_tokens into
+          // system/thinking_tokens for Host (redacted-thinking often has no
+          // text deltas). Yield on the main stream (not gated by
+          // includePartialMessages) — same shape as official query loop.
+          if (event.type === 'content_block_delta') {
+            const delta = event.delta as {
+              type?: string
+              estimated_tokens?: unknown
+            }
+            if (
+              delta?.type === 'thinking_delta' &&
+              typeof delta.estimated_tokens === 'number'
+            ) {
+              thinkingTokenEstimate += delta.estimated_tokens
+              yield {
+                type: 'system' as const,
+                subtype: 'thinking_tokens' as const,
+                estimated_tokens: thinkingTokenEstimate,
+                estimated_tokens_delta: delta.estimated_tokens,
+                session_id: getSessionId(),
+                uuid: randomUUID(),
+              }
+            }
           }
 
           if (includePartialMessages) {
