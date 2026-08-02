@@ -30,8 +30,8 @@
 --permission-prompt-tool stdio
 ```
 
-| 写路径 | 官方 2.1.218 | fork **2.7.23**（已发，有 bug） | fork **2.7.24+**（已发 npm） |
-|--------|--------------|--------------------------------|------------------------------|
+| 写路径 | 官方 2.1.218 | fork **2.7.23**（有 bug） | fork **2.7.24+**（已发 npm） |
+|--------|--------------|----------------------|------------------------------|
 | 普通 `docs/...` | 0× `can_use_tool` | 0 | 0 |
 | `.claude/workflow-runs/...` | **0** | **1**（safety 误 ask） | **0**（1g 已对齐） |
 
@@ -114,8 +114,8 @@ Host 应对返回值做 **explicit ok**（`ok===true` / 约定 status）；void 
 | `system/model_fallback` | **仅**永久 `model_not_found`：`FallbackTriggeredError.reason` + query yield camelCase → QueryEngine snake_case Host wire；rebind `mainLoopModel` / 可选 `userSpecifiedModel`。**529/overloaded** → **只** `createSystemMessage` warning，**不** emit `model_fallback`（不双发 `emitModelFallbackSdk`） | 勿把 overloaded warning 当 `model_fallback` |
 | thinking 内容 | `assistant` / partial `stream_event` thinking block | 非 `task_*` |
 
-生产 `model_not_found` 路径：本仓已实现（`withRetry` / `query` / `QueryEngine`），见 §5；**未进 2.7.24 npm**。  
-`background_tasks_changed` 生产路径：本仓已实现（`onChangeAppState` + schema），见 §5；**未进 2.7.24 npm**。
+生产 `model_not_found` 路径：本仓已实现（`withRetry` / `query` / `QueryEngine`），见 §5；**2.7.25 npm**。  
+`background_tasks_changed` 生产路径：本仓已实现（`onChangeAppState` + schema），见 §5；**2.7.25 npm**。
 
 ### 3.5 P1：Host Tasks Stop/Jp 实现位置
 
@@ -153,7 +153,7 @@ Effort / ultracode 细节见：`docs/features/desktop-host-effort-ultracode.md`�
 |------|------|
 | **2.7.23** | Tasks dual-emit bookend + schema timestamp（`94157da0`）；**1g 仍误 ask `.claude`** |
 | **2.7.24** | **已发 npm + push**：bypass 1g；`command_lifecycle`；`thinking_tokens`；`task_updated`（含 auto-bg）；`task_summary` stream 镜像 + idle null；control `background_tasks`（`backgroundAll` 排除 main session）；`model_fallback` **schema/helper only**（无生产 `model_not_found` 路径） |
-| **本仓已 commit / 未进 npm** | 生产 `model_not_found` → `system/model_fallback`（`FallbackTriggeredError.reason` + QueryEngine wire）；**`system/background_tasks_changed`**（211 Zlr REPLACE live set，经 `onChangeAppState`）；eviction 保护 `task_summary`/`model_fallback`/`background_tasks_changed`；`backgroundTask`/`backgroundAgentTask` 返回 `didBackground`；sessionState 注释对齐 211 |
+| **2.7.25** | **已发 npm**：生产 `model_not_found` → `system/model_fallback`（`FallbackTriggeredError.reason` + QueryEngine wire）；**`system/background_tasks_changed`**（211 Zlr REPLACE live set，经 `onChangeAppState`）；eviction 保护 `task_summary`/`model_fallback`/`background_tasks_changed`；`backgroundTask`/`backgroundAgentTask` 返回 `didBackground`；sessionState 注释对齐 211 |
 | **故意不接** | mid-turn `task_summary` non-null producer — densable **2.1.211** binary 无 `task_summary:<non-null>` 赋值；midturn LLM/`zey` 写 BG job `detail`。见 memory `project_task_summary_211.md`。**不**接 densable `running_background_tasks` / `orphaned_background_tasks_pending_notification`（internal_metadata / resume 支路，非 print Host 主契约） |
 | Host sibling | Stop/Jp/bookends 等：**不在本仓**；点名 desktop/web 再改 |
 
@@ -167,7 +167,7 @@ Effort / ultracode 细节见：`docs/features/desktop-host-effort-ultracode.md`�
 4. Stop：是否 `stop_task` + 成功后 echo `task_notification(stopped)`，且失败不假成功？  
 5. 重载后 Tasks 是否仍有 bookend（sidecar）？  
 6. mid-bg：是否消费 `task_updated.patch.is_backgrounded`（Ctrl+B / `background_tasks`）？  
-7. model 切换：仅 `system/model_fallback` + `trigger=model_not_found` 当永久切模；529 文案 warning **不是**该 subtype（未进 npm 包前 Host 可能只见 warning）  
+7. model 切换：仅 `system/model_fallback` + `trigger=model_not_found` 当永久切模；529 文案 warning **不是**该 subtype（**2.7.25+** 有生产路径）  
 
 ---
 
