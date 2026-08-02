@@ -5,6 +5,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
 import { FallbackTriggeredError } from './services/api/withRetry.js'
+import { randomUUID } from 'crypto'
 import {
   calculateTokenWarningState,
   estimateMaxTurnGrowth,
@@ -1704,14 +1705,51 @@ async function* queryLoop(
               queryDepth: queryTracking.depth,
             })
 
-            // Official 2.1.x parity: capacity/overloaded fallback only yields a
-            // warning system message — NOT system/model_fallback. Official
-            // emits model_fallback only for permanent model_not_found (error
-            // carries reason); FallbackTriggeredError here is the 529 path.
-            yield createSystemMessage(
-              `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
-              'warning',
-            )
+            // Official densable (2.1.x): reason discriminates Host stream.
+            // - model_not_found → system/model_fallback (permanent switch)
+            // - overloaded / default → warning only (capacity 529 path)
+            const fallbackReason =
+              'reason' in innerError &&
+              typeof (innerError as { reason?: unknown }).reason === 'string'
+                ? (innerError as { reason: string }).reason
+                : 'overloaded'
+            if (fallbackReason === 'model_not_found') {
+              // Permanent primary-model failure: rebind session model (official
+              // BD + setAppState mainLoopModel) and emit Host model_fallback.
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const { setMainLoopModelOverride } =
+                  require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+                setMainLoopModelOverride(switchTo)
+                toolUseContext.setAppState(prev => ({
+                  ...prev,
+                  mainLoopModel: switchTo,
+                  mainLoopModelForSession: null,
+                }))
+              } catch {
+                // optional
+              }
+              // Official yields system/model_fallback once; QueryEngine maps
+              // camelCase → snake_case Host wire. Do not also
+              // emitModelFallbackSdk (would double on stream-json drain).
+              yield {
+                type: 'system' as const,
+                subtype: 'model_fallback' as const,
+                content: `Switched to ${renderModelName(switchTo)} because ${renderModelName(innerError.originalModel)} is not available`,
+                level: 'warning' as const,
+                trigger: 'model_not_found' as const,
+                originalModel: innerError.originalModel,
+                fallbackModel: switchTo,
+                isMeta: false as const,
+                timestamp: new Date().toISOString(),
+                uuid: randomUUID(),
+              }
+            } else {
+              yield createSystemMessage(
+                `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
+                'warning',
+              )
+            }
 
             continue
           }

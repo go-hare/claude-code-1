@@ -160,7 +160,7 @@ function makeShellTask(
   id: string,
   overrides: Record<string, unknown> = {},
 ): any {
-  const shellCommand = {
+  const defaultShellCommand = {
     background: mock(() => true),
     result: neverResolvingResult(),
   }
@@ -174,13 +174,13 @@ function makeShellTask(
     outputFile: `/tmp/out/${id}`,
     outputOffset: 0,
     notified: false,
-    isBackgrounded: false,
-    shellCommand,
+    isBackgrounded: false as boolean,
     completionStatusSentInAttachment: false,
     lastReportedTotalLines: 0,
     toolUseId: overrides.toolUseId ?? `tu-${id}`,
     ...overrides,
-    shellCommand: (overrides.shellCommand as any) ?? shellCommand,
+    // Always ensure a shellCommand (override may replace background mock).
+    shellCommand: (overrides.shellCommand as any) ?? defaultShellCommand,
   }
 }
 

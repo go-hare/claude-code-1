@@ -30,12 +30,12 @@
 --permission-prompt-tool stdio
 ```
 
-| 写路径 | 官方 2.1.218 | fork 2.7.23（已发 npm） |
-|--------|--------------|-------------------------|
-| 普通 `docs/...` | 0× `can_use_tool` | 0 |
-| `.claude/workflow-runs/...` | **0** | **1**（safety） |
+| 写路径 | 官方 2.1.218 | fork **2.7.23**（已发，有 bug） | fork **2.7.24+**（已发 npm） |
+|--------|--------------|--------------------------------|------------------------------|
+| 普通 `docs/...` | 0× `can_use_tool` | 0 | 0 |
+| `.claude/workflow-runs/...` | **0** | **1**（safety 误 ask） | **0**（1g 已对齐） |
 
-init `permissionMode` 两边都是 `bypassPermissions` → **不是 Host Mode pill 假状态**，是 CLI 决策不同。
+init `permissionMode` 两边都是 `bypassPermissions` → 2.7.23 上的差异 **不是** Host Mode pill 假状态，是 CLI 1g 决策错误；**2.7.24 已修**。
 
 ### 2.2 CLI 管道（1g）
 
@@ -46,12 +46,12 @@ behavior: ask
 decisionReason: { type: 'safetyCheck', classifierApprovable: true|false, ... }
 ```
 
-| `classifierApprovable` | densable 在 **bypassPermissions** | fork 2.7.23 |
-|------------------------|-----------------------------------|-------------|
-| `true`（`.claude/**`、多数敏感路径） | **allow**（落到 mode 2a） | 错误地 **仍 ask**（1g 全免疫） |
+| `classifierApprovable` | densable 在 **bypassPermissions** | fork **2.7.24+** |
+|------------------------|-----------------------------------|------------------|
+| `true`（`.claude/**`、多数敏感路径） | **allow**（落到 mode 2a） | **allow**（同 densable） |
 | `false`（路径花招等） | 仍 **ask**（bypass-immune） | 同 |
 
-**修复（本仓，未进 2.7.23 包）：**  
+**实现（shipped 2.7.24 / `35dd6ce1`）：**  
 `src/utils/permissions/permissions.ts` — 1g 仅当 `!classifierApprovable` 提前 return ask；  
 测试：`src/utils/permissions/__tests__/bypassSafetyCheck.test.ts`。
 
@@ -101,7 +101,7 @@ Host 应对返回值做 **explicit ok**（`ok===true` / 约定 status）；void 
 | remote_agent archive | densable Xr 远程支路 | 本地 Host 栈可不实现 |
 | usage 行 | densable 可仅 usage 对象出 tokens | Host 可用 bookend 时长 fallback（产品 residual） |
 
-### 3.5 Official 2.1 stream：`command_lifecycle` / thinking / Host progress
+### 3.4 Official 2.1 stream：`command_lifecycle` / thinking / Host progress
 
 | 项 | CLI | Host |
 |----|-----|------|
@@ -109,14 +109,18 @@ Host 应对返回值做 **explicit ok**（`ok===true` / 约定 status）；void 
 | `set_max_thinking_tokens` | control 已实现（null/0/budget） | Host 调 control 即可 |
 | `system/thinking_tokens` | QueryEngine 在 `thinking_delta.estimated_tokens` 上 **直接 yield**（不依赖 `includePartialMessages`）：`estimated_tokens` 累计 + `estimated_tokens_delta` | live 估算进度；**不是** `get_settings` 回读 budget；**不是**主聊正文 |
 | `system/task_updated` | `updateTaskState` + mid-bg / auto-bg `setAppState` 路径 → `emitTaskUpdatedSdk`（wire-safe `patch`：status/description/is_backgrounded/error/end_time/total_paused_ms） | Jp 合并进 Tasks map；**不** invent 行 |
-| `system/task_summary` | `notifySessionMetadataChanged({task_summary})` → `emitTaskSummarySdk(detail\|null)` | 中途进度短语；idle 清 null |
-| `system/model_fallback` | schema + `emitModelFallbackSdk` 已就绪；**Official 2.1 仅 `model_not_found` 永久切换发 subtype**。当前 `FallbackTriggeredError` 是 529/overloaded 路径 → **只** yield warning `createSystemMessage`，**不** emit `model_fallback`（避免与官方 / Host 双通知） | 勿把 overloaded warning 当 `model_fallback` |
+| `system/task_summary` | `notifySessionMetadataChanged({task_summary})` → `emitTaskSummarySdk(detail\|null)` | densable **2.1.211**：stream 镜像 + idle `null` 清；**无** non-null mid-turn 生产端（BG midturn LLM 写 job `detail`，不是此 subtype）。**禁止**发明 forked summarizer |
+| `system/background_tasks_changed` | densable **2.1.211** `JNe`/`Zlr`/`Kw`：`onChangeAppState` 在 `tasks` 引用变且 **live 成员**（running\|pending 且非 `isBackgrounded===false`）集合变化时 → `emitBackgroundTasksChangedSdk({task_id,task_type,description}[])`。**REPLACE** 全量 level 信号；与 bookend **不要**做序相关联 | Host 可整表替换「是否有后台活任务」；**不是**边沿；不要当主聊 |
+| `system/model_fallback` | **仅**永久 `model_not_found`：`FallbackTriggeredError.reason` + query yield camelCase → QueryEngine snake_case Host wire；rebind `mainLoopModel` / 可选 `userSpecifiedModel`。**529/overloaded** → **只** `createSystemMessage` warning，**不** emit `model_fallback`（不双发 `emitModelFallbackSdk`） | 勿把 overloaded warning 当 `model_fallback` |
 | thinking 内容 | `assistant` / partial `stream_event` thinking block | 非 `task_*` |
 
-### 3.4 P1：Host Tasks Stop/Jp 实现位置
+生产 `model_not_found` 路径：本仓已实现（`withRetry` / `query` / `QueryEngine`），见 §5；**未进 2.7.24 npm**。  
+`background_tasks_changed` 生产路径：本仓已实现（`onChangeAppState` + schema），见 §5；**未进 2.7.24 npm**。
+
+### 3.5 P1：Host Tasks Stop/Jp 实现位置
 
 **不在本仓库。** 实现落在 Desktop LocalSessions / Web Epitaxy（sibling），需用户 **点名** 对应仓库再改。  
-本仓只保证：dual-emit、`stop_task`、`background_tasks`、permissions 1g、SDK schema timestamp。
+本仓只保证：dual-emit、`stop_task`、`background_tasks`、permissions 1g、Official 2.1 stream/control、SDK schema。
 
 ---
 
@@ -147,20 +151,23 @@ Effort / ultracode 细节见：`docs/features/desktop-host-effort-ultracode.md`�
 
 | 版本 | 内容 |
 |------|------|
-| **2.7.23** | Tasks dual-emit bookend + schema timestamp |
-| **未发布（WIP）** | bypass 1g；`command_lifecycle`；`thinking_tokens`；`task_updated`（含 auto-bg）；`task_summary` stream；`model_fallback` schema/helper（overloaded 不 emit）；control `background_tasks`（`backgroundAll` 排除 main session） |
-| Host sibling | Stop/Jp/bookends 等：见会话记忆；**未由本仓提交** |
+| **2.7.23** | Tasks dual-emit bookend + schema timestamp（`94157da0`）；**1g 仍误 ask `.claude`** |
+| **2.7.24** | **已发 npm + push**：bypass 1g；`command_lifecycle`；`thinking_tokens`；`task_updated`（含 auto-bg）；`task_summary` stream 镜像 + idle null；control `background_tasks`（`backgroundAll` 排除 main session）；`model_fallback` **schema/helper only**（无生产 `model_not_found` 路径） |
+| **本仓已 commit / 未进 npm** | 生产 `model_not_found` → `system/model_fallback`（`FallbackTriggeredError.reason` + QueryEngine wire）；**`system/background_tasks_changed`**（211 Zlr REPLACE live set，经 `onChangeAppState`）；eviction 保护 `task_summary`/`model_fallback`/`background_tasks_changed`；`backgroundTask`/`backgroundAgentTask` 返回 `didBackground`；sessionState 注释对齐 211 |
+| **故意不接** | mid-turn `task_summary` non-null producer — densable **2.1.211** binary 无 `task_summary:<non-null>` 赋值；midturn LLM/`zey` 写 BG job `detail`。见 memory `project_task_summary_211.md`。**不**接 densable `running_background_tasks` / `orphaned_background_tasks_pending_notification`（internal_metadata / resume 支路，非 print Host 主契约） |
+| Host sibling | Stop/Jp/bookends 等：**不在本仓**；点名 desktop/web 再改 |
 
 ---
 
 ## 6. 自检清单（对接 Host 时）
 
 1. spawn 是否真的带上 `--permission-mode bypassPermissions` + allow-dangerously-skip？  
-2. 审批前：CLI 是否已 `allow`？（bypass + `.claude` 应 0 次 control，修 1g 后）  
+2. 审批前：CLI 是否已 `allow`？（**2.7.24+** bypass + `.claude` 应 0 次 control；2.7.23 会误弹）  
 3. Tasks：是否以 `system/task_*` 为准，而非 TaskOutput 单独建行？  
 4. Stop：是否 `stop_task` + 成功后 echo `task_notification(stopped)`，且失败不假成功？  
 5. 重载后 Tasks 是否仍有 bookend（sidecar）？  
 6. mid-bg：是否消费 `task_updated.patch.is_backgrounded`（Ctrl+B / `background_tasks`）？  
+7. model 切换：仅 `system/model_fallback` + `trigger=model_not_found` 当永久切模；529 文案 warning **不是**该 subtype（未进 npm 包前 Host 可能只见 warning）  
 
 ---
 
@@ -168,12 +175,16 @@ Effort / ultracode 细节见：`docs/features/desktop-host-effort-ultracode.md`�
 
 | 路径 | 角色 |
 |------|------|
-| `src/utils/permissions/permissions.ts` | 1g / 2a bypass |
+| `src/utils/permissions/permissions.ts` | 1g / 2a bypass（**2.7.24**） |
 | `src/utils/permissions/filesystem.ts` | `checkPathSafetyForAutoEdit`、`.claude` 危险目录 |
-| `src/utils/sdkEventQueue.ts` | dual-emit + `task_updated`/`task_summary`/`thinking_tokens`/`model_fallback` |
+| `src/utils/sdkEventQueue.ts` | dual-emit + `task_updated`/`task_summary`/`thinking_tokens`/`model_fallback`/`background_tasks_changed` |
+| `src/utils/sessionState.ts` | idle 清 `task_summary:null`；metadata → stream mirror |
+| `src/state/onChangeAppState.ts` | densable 211：`tasks` 成员变化 → `background_tasks_changed` |
 | `src/utils/task/framework.ts` | `updateTaskState` → `task_updated` |
 | `src/cli/print.ts` | control 分发、`stop_task`、`background_tasks`、`get_settings` |
 | `src/cli/structuredIO.ts` | `can_use_tool` 上线 |
 | `src/entrypoints/sdk/coreSchemas.ts` | task bookend + Official 2.1 Host schemas |
 | `src/entrypoints/sdk/controlSchemas.ts` | `stop_task` / `background_tasks` |
-| `src/tasks/*` / workflow notifications | dual-emit 调用点 |
+| `src/services/api/withRetry.ts` | `FallbackTriggeredError.reason` + `isModelNotFoundAPIError` |
+| `src/query.ts` / `src/QueryEngine.ts` | model_not_found → Host `model_fallback` wire |
+| `src/tasks/*` / workflow notifications | dual-emit 调用点；bg 返回 `didBackground` |

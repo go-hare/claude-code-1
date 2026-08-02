@@ -133,6 +133,22 @@ type ModelFallbackSdkEvent = {
   content: string
 }
 
+/**
+ * densable 2.1.211 Zlr/BC — full live background-task set (REPLACE semantics).
+ * Level signal; not an edge bookend. Host swaps its set for `tasks`.
+ */
+export type BackgroundTasksChangedTask = {
+  task_id: string
+  task_type: string
+  description: string
+}
+
+type BackgroundTasksChangedSdkEvent = {
+  type: 'system'
+  subtype: 'background_tasks_changed'
+  tasks: BackgroundTasksChangedTask[]
+}
+
 export type SdkEvent =
   | TaskStartedEvent
   | TaskProgressEvent
@@ -143,6 +159,7 @@ export type SdkEvent =
   | TaskUpdatedSdkEvent
   | TaskSummarySdkEvent
   | ModelFallbackSdkEvent
+  | BackgroundTasksChangedSdkEvent
 
 const MAX_QUEUE_SIZE = 1000
 const queue: SdkEvent[] = []
@@ -181,11 +198,17 @@ export function enqueueSdkEvent(event: SdkEvent): void {
       if (e.type === 'command_lifecycle') return false
       if (e.type !== 'system') return true
       // Keep Tasks / Host-critical bookends under pressure.
+      // Official 2.1 also treats task_summary / model_fallback as
+      // scarce Host signals (prefer drop high-volume noise first).
       return (
         e.subtype !== 'task_started' &&
         e.subtype !== 'task_notification' &&
         e.subtype !== 'task_updated' &&
-        e.subtype !== 'thinking_tokens'
+        e.subtype !== 'thinking_tokens' &&
+        e.subtype !== 'task_summary' &&
+        e.subtype !== 'model_fallback' &&
+        // densable 2.1.211 level set — keep latest membership under pressure
+        e.subtype !== 'background_tasks_changed'
       )
     })
     if (nonBookend === -1) {
@@ -274,6 +297,20 @@ export function emitModelFallbackSdk(args: {
     original_model: args.originalModel,
     fallback_model: args.fallbackModel,
     content: args.content,
+  })
+}
+
+/**
+ * densable 2.1.211 BC({type:"system",subtype:"background_tasks_changed",tasks})
+ * REPLACE semantics: full live set after membership change.
+ */
+export function emitBackgroundTasksChangedSdk(
+  tasks: BackgroundTasksChangedTask[],
+): void {
+  enqueueSdkEvent({
+    type: 'system',
+    subtype: 'background_tasks_changed',
+    tasks,
   })
 }
 

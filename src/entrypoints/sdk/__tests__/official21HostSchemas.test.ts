@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import {
+  SDKBackgroundTasksChangedMessageSchema,
   SDKCommandLifecycleMessageSchema,
   SDKMessageSchema,
   SDKModelFallbackMessageSchema,
@@ -102,6 +103,33 @@ describe('Official 2.1 Host stream schemas', () => {
       state: 'completed',
     })
     expect(b.type).toBe('command_lifecycle')
+  })
+
+  test('background_tasks_changed REPLACE live set', () => {
+    const msg = SDKBackgroundTasksChangedMessageSchema().parse({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [
+        {
+          task_id: 'a1',
+          task_type: 'local_agent',
+          description: 'Agent "x"',
+        },
+      ],
+      uuid: '00000000-0000-4000-8000-000000000006',
+      session_id: 's1',
+    })
+    expect(msg.subtype).toBe('background_tasks_changed')
+    expect(msg.tasks).toHaveLength(1)
+
+    const empty = SDKMessageSchema().parse({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [],
+      uuid: '00000000-0000-4000-8000-000000000007',
+      session_id: 's1',
+    })
+    expect(empty).toMatchObject({ subtype: 'background_tasks_changed', tasks: [] })
   })
 })
 

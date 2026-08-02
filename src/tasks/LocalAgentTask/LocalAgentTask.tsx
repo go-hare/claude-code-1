@@ -2114,14 +2114,17 @@ export function backgroundAgentTask(taskId: string, getAppState: () => AppState,
     }
   }
 
-  // Resolve the background signal to interrupt the agent loop
-  const resolver = backgroundSignalResolvers.get(taskId);
-  if (resolver) {
-    resolver();
-    backgroundSignalResolvers.delete(taskId);
+  // Resolve the background signal only when we actually flipped (official
+  // J5r refuse paths already returned false). If already bg, leave resolver.
+  if (didBackground) {
+    const resolver = backgroundSignalResolvers.get(taskId);
+    if (resolver) {
+      resolver();
+      backgroundSignalResolvers.delete(taskId);
+    }
   }
 
-  return true;
+  return didBackground;
 }
 
 /**

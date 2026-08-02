@@ -56,9 +56,10 @@ export type SessionExternalMetadata = {
   // would leak the import path string into sdk.d.ts via agentSdkBridge's
   // re-export of SessionState.
   post_turn_summary?: unknown
-  // Mid-turn progress line from the forked-agent summarizer — fires every
-  // ~5 steps / 2min so long-running turns still surface "what's happening
-  // right now" before post_turn_summary arrives.
+  // Host mid-turn progress phrase (external_metadata.task_summary). densable
+  // 2.1.211 ships stream mirror + idle null clear only; non-null writer is not
+  // present in the official binary (BG midturn LLM writes job `detail`, not
+  // this key). Callers may still set a string; Host sees it via stream mirror.
   task_summary?: string | null
 }
 
@@ -275,13 +276,13 @@ export function notifySessionStateChanged(
     })
   }
 
-  // task_summary is written mid-turn by the forked summarizer; clear it at
-  // idle so the next turn doesn't briefly show the previous turn's progress.
-  // Official completed-turn densable: heuristic emit immediately; when mode is
-  // llm and a host is wired, async upgrade post_turn_summary (never blocks idle).
+  // densable 2.1.211: clear task_summary at idle (hasTaskSummary path) so the
+  // next turn doesn't briefly show prior progress. Non-null mid-turn writer is
+  // not in official 211 either — only mirror + this clear. Completed-turn
+  // densable: heuristic post_turn_summary immediately; optional LLM upgrade.
   if (state === 'idle') {
     let completedSummary: SessionExternalMetadata['post_turn_summary']
-    // Capture mid-turn progress before we clear task_summary for LLM context.
+    // Capture any prior task_summary before clear (LLM completed context).
     const priorTaskSummary =
       typeof currentMetadata.task_summary === 'string'
         ? currentMetadata.task_summary
@@ -383,8 +384,8 @@ export function notifySessionMetadataChanged(
 ): void {
   applyMetadataUpdate(metadata)
   metadataListener?.(metadata)
-  // Official 2.1.x: stream system/task_summary so non-CCR Hosts see the same
-  // mid-turn phrase as external_metadata.task_summary (detail null = clear).
+  // densable 2.1.211 notifyMetadataChanged: stream system/task_summary so
+  // non-CCR Hosts mirror external_metadata.task_summary (detail null = clear).
   if (Object.prototype.hasOwnProperty.call(metadata, 'task_summary')) {
     try {
       const { emitTaskSummarySdk } =

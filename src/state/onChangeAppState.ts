@@ -17,7 +17,45 @@ import {
   notifySessionMetadataChanged,
   type SessionExternalMetadata,
 } from '../utils/sessionState.js'
+import type { TaskState } from '../tasks/types.js'
 import type { AppState } from './AppStateStore.js'
+
+/**
+ * densable 2.1.211 Kw — live background membership for stream level signal.
+ * running|pending, and if isBackgrounded is present it must not be false
+ * (foreground-registered agents are excluded until mid-bg flip).
+ */
+function isLiveBackgroundTask(task: TaskState): boolean {
+  if (task.status !== 'running' && task.status !== 'pending') {
+    return false
+  }
+  if ('isBackgrounded' in task && task.isBackgrounded === false) {
+    return false
+  }
+  return true
+}
+
+/** densable 2.1.211 Zlr — wire list for background_tasks_changed. */
+function listLiveBackgroundTasks(
+  tasks: AppState['tasks'] | undefined,
+): Array<{ task_id: string; task_type: string; description: string }> {
+  if (!tasks) return []
+  return Object.values(tasks)
+    .filter(isLiveBackgroundTask)
+    .map(t => ({
+      task_id: t.id,
+      task_type: t.type,
+      description: t.description,
+    }))
+}
+
+function backgroundTasksMembershipChanged(
+  prev: Array<{ task_id: string }>,
+  next: Array<{ task_id: string }>,
+): boolean {
+  if (prev.length !== next.length) return true
+  return next.some((t, i) => t.task_id !== prev[i]?.task_id)
+}
 
 // Inverse of the push below — restore on worker restart.
 export function externalMetadataToAppState(
@@ -88,6 +126,25 @@ export function onChangeAppState({
       })
     }
     notifyPermissionModeChanged(newMode)
+  }
+
+  // densable 2.1.211 JNe: e.tasks!==t.tasks → Zlr membership → BC
+  // system/background_tasks_changed (REPLACE full live set). Level signal
+  // only — not edge bookends; do not invent running_background_tasks
+  // internal_metadata (CCR-only) unless a host path needs it.
+  if (newState.tasks !== oldState.tasks) {
+    const prevLive = listLiveBackgroundTasks(oldState.tasks)
+    const nextLive = listLiveBackgroundTasks(newState.tasks)
+    if (backgroundTasksMembershipChanged(prevLive, nextLive)) {
+      try {
+        const { emitBackgroundTasksChangedSdk } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/sdkEventQueue.js') as typeof import('../utils/sdkEventQueue.js')
+        emitBackgroundTasksChangedSdk(nextLive)
+      } catch {
+        // optional
+      }
+    }
   }
 
   // mainLoopModel: session-scoped only (do NOT persist to userSettings).

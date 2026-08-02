@@ -177,14 +177,53 @@ export class CannotRetryError extends Error {
   }
 }
 
+/**
+ * Official densable dXH — model switch for query.ts retry.
+ * reason defaults to "overloaded" (529 capacity path); "model_not_found"
+ * is the permanent primary-model failure that yields system/model_fallback.
+ */
+export type FallbackTriggeredReason = 'overloaded' | 'model_not_found'
+
 export class FallbackTriggeredError extends Error {
+  public readonly reason: FallbackTriggeredReason
+
   constructor(
     public readonly originalModel: string,
     public readonly fallbackModel: string,
+    reason: FallbackTriggeredReason = 'overloaded',
   ) {
     super(`Model fallback triggered: ${originalModel} -> ${fallbackModel}`)
     this.name = 'FallbackTriggeredError'
+    this.reason = reason
   }
+}
+
+/**
+ * Official qF3 — 404 not_found_error whose body mentions model:.
+ * Permanent primary-model failure (retired / does not exist).
+ */
+export function isModelNotFoundAPIError(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status !== 404) {
+    return false
+  }
+  const message = error.message ?? ''
+  const body =
+    error.error && typeof error.error === 'object'
+      ? (error.error as { type?: unknown; message?: unknown })
+      : undefined
+  const bodyType = typeof body?.type === 'string' ? body.type : undefined
+  const bodyMessage =
+    typeof body?.message === 'string' ? body.message : undefined
+  // Official densable qF3: (type not_found_error OR message embeds it)
+  // AND message includes "model:" (API: `model: <name>`).
+  const isNotFound =
+    bodyType === 'not_found_error' ||
+    message.includes('"type":"not_found_error"') ||
+    message.includes('"type": "not_found_error"')
+  const mentionsModel =
+    message.includes('model:') ||
+    (bodyMessage !== undefined && bodyMessage.includes('model:'))
+  return isNotFound && mentionsModel
 }
 
 export async function* withRetry<T>(
@@ -287,6 +326,27 @@ export async function* withRetry<T>(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
         { level: 'error' },
       )
+
+      // Official densable: permanent model_not_found → FallbackTriggeredError
+      // with reason (before capacity/529 retry path). Host gets system/model_fallback.
+      if (
+        isModelNotFoundAPIError(error) &&
+        options.fallbackModel &&
+        options.fallbackModel !== options.model
+      ) {
+        logEvent('tengu_api_model_not_found_fallback_triggered', {
+          original_model:
+            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          fallback_model:
+            options.fallbackModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          provider: getAPIProviderForStatsig(),
+        })
+        throw new FallbackTriggeredError(
+          options.model,
+          options.fallbackModel,
+          'model_not_found',
+        )
+      }
 
       // Fast mode fallback: on 429/529, either wait and retry (short delays)
       // or fall back to standard speed (long delays) to avoid cache thrashing.

@@ -1141,8 +1141,9 @@ export async function runHeadless(
     // (session_state_changed(idle) and any late task_notification drain after
     // result in the finally block). command_lifecycle is Official 2.1 ack
     // frames — not result content (densable oWK non-transcript).
-    // Official 2.1 also excludes task_updated / task_summary / model_fallback
-    // from lastMessage so Host progress bookends never pin json output.
+    // Official 2.1 also excludes task_updated / task_summary / model_fallback /
+    // background_tasks_changed from lastMessage so Host progress bookends
+    // never pin json output.
     if (
       message.type !== 'control_response' &&
       message.type !== 'control_request' &&
@@ -1157,6 +1158,7 @@ export async function runHeadless(
           message.subtype === 'task_summary' ||
           message.subtype === 'thinking_tokens' ||
           message.subtype === 'model_fallback' ||
+          message.subtype === 'background_tasks_changed' ||
           message.subtype === 'post_turn_summary')
       ) &&
       message.type !== 'command_lifecycle' &&

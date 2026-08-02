@@ -1940,7 +1940,36 @@ export const SDKModelFallbackMessageSchema = lazySchema(() =>
       timestamp: z.string().optional(),
     })
     .describe(
-      '@internal Emitted when the session is permanently switched to the configured fallback model because the primary model failed with a permanent API error (currently trigger "model_not_found": the API reports the requested model does not exist or is retired). Not yet in the public SDKMessage union.',
+      '@internal Emitted when the session is permanently switched to the configured fallback model because the primary model failed with a permanent API error (currently trigger "model_not_found": the API reports the requested model does not exist or is retired). In SDKMessage union; capacity/overloaded uses a warning system message only — trigger "overloaded" is reserved and not emitted on the 529 path.',
+    ),
+)
+
+/**
+ * densable 2.1.211 Zlr/BC — full live background-task set (REPLACE semantics).
+ * Level signal; membership changes only (start / complete / kill / mid-bg).
+ */
+export const SDKBackgroundTasksChangedMessageSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('system'),
+      subtype: z.literal('background_tasks_changed'),
+      tasks: z
+        .array(
+          z.object({
+            task_id: z.string(),
+            task_type: z.string(),
+            description: z.string(),
+          }),
+        )
+        .describe(
+          'Every live background task after the change. REPLACE semantics: swap your set for this payload.',
+        ),
+      uuid: UUIDPlaceholder(),
+      session_id: z.string(),
+      timestamp: z.string().optional(),
+    })
+    .describe(
+      "The full set of live background tasks, emitted whenever membership changes (start, completion, kill, a foreground agent being backgrounded). A level signal, unlike the task_started/task_notification edge bookends: consumers that only need 'is background work running' should replace their set with each payload rather than pairing edges. Ordering relative to bookends is unspecified; payload carries ids only — do not correlate with the edge stream.",
     ),
 )
 
@@ -2120,6 +2149,7 @@ export const SDKMessageSchema = lazySchema(() =>
     SDKTaskUpdatedMessageSchema(),
     SDKTaskSummaryMessageSchema(),
     SDKModelFallbackMessageSchema(),
+    SDKBackgroundTasksChangedMessageSchema(),
     SDKFilesPersistedEventSchema(),
     SDKToolUseSummaryMessageSchema(),
     SDKRateLimitEventSchema(),

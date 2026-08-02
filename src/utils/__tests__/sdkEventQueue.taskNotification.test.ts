@@ -36,6 +36,7 @@ afterAll(() => {
 const {
   clearTaskTerminatedSdkGate,
   drainSdkEvents,
+  emitBackgroundTasksChangedSdk,
   emitModelFallbackSdk,
   emitTaskSummarySdk,
   emitTaskTerminatedSdk,
@@ -274,5 +275,77 @@ describe('task_updated / task_summary / model_fallback (Official 2.1)', () => {
         e.type === 'system' && e.subtype === 'task_updated',
     )
     expect(updated.some(e => e.task_id === 'keep-updated')).toBe(true)
+  })
+
+  test('eviction prefers keeping task_summary and model_fallback', () => {
+    for (let i = 0; i < 1000; i++) {
+      enqueueSdkEvent({
+        type: 'system',
+        subtype: 'session_state_changed',
+        state: 'running',
+      })
+    }
+    emitTaskSummarySdk('mid-turn phrase')
+    emitModelFallbackSdk({
+      trigger: 'model_not_found',
+      originalModel: 'gone',
+      fallbackModel: 'sonnet',
+      content: 'switched',
+    })
+    const events = drainSdkEvents()
+    expect(
+      events.some(e => e.type === 'system' && e.subtype === 'task_summary'),
+    ).toBe(true)
+    expect(
+      events.some(e => e.type === 'system' && e.subtype === 'model_fallback'),
+    ).toBe(true)
+  })
+
+  test('emitBackgroundTasksChangedSdk REPLACE full live set', () => {
+    emitBackgroundTasksChangedSdk([
+      {
+        task_id: 'a1',
+        task_type: 'local_agent',
+        description: 'Agent "x"',
+      },
+    ])
+    emitBackgroundTasksChangedSdk([])
+    const events = drainSdkEvents()
+    expect(events).toHaveLength(2)
+    expect(events[0]).toMatchObject({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [
+        {
+          task_id: 'a1',
+          task_type: 'local_agent',
+          description: 'Agent "x"',
+        },
+      ],
+    })
+    expect(events[1]).toMatchObject({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [],
+    })
+  })
+
+  test('eviction prefers keeping background_tasks_changed', () => {
+    for (let i = 0; i < 1000; i++) {
+      enqueueSdkEvent({
+        type: 'system',
+        subtype: 'session_state_changed',
+        state: 'running',
+      })
+    }
+    emitBackgroundTasksChangedSdk([
+      { task_id: 'keep', task_type: 'local_bash', description: 'sleep' },
+    ])
+    const events = drainSdkEvents()
+    expect(
+      events.some(
+        e => e.type === 'system' && e.subtype === 'background_tasks_changed',
+      ),
+    ).toBe(true)
   })
 })

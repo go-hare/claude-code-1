@@ -544,7 +544,10 @@ export function backgroundTask(taskId: string, getAppState: () => AppState, setA
     void evictTaskOutput(taskId);
   });
 
-  return true;
+  // Official densable NZ6 returns true after shell.background succeeds; if
+  // AppState was already backgrounded (race), still true — shell left FG.
+  // Prefer reporting actual state flip for Host background_tasks response.
+  return didBackground;
 }
 
 /**
@@ -717,7 +720,7 @@ export function backgroundExistingForegroundTask(
     void evictTaskOutput(taskId);
   });
 
-  return true;
+  return didBackground;
 }
 
 /**

@@ -1037,6 +1037,38 @@ export class QueryEngine {
               uuid: msg.uuid,
             }
           }
+          // Official densable: permanent model_not_found → stream
+          // system/model_fallback (snake_case Host wire). Capacity
+          // overloaded stays createSystemMessage informational only.
+          if (msg.subtype === 'model_fallback') {
+            const fb = msg as Message & {
+              subtype: 'model_fallback'
+              content?: string
+              trigger?: string
+              originalModel?: string
+              fallbackModel?: string
+            }
+            if (
+              fb.trigger === 'model_not_found' &&
+              this.config.userSpecifiedModel &&
+              typeof fb.fallbackModel === 'string' &&
+              fb.fallbackModel.length > 0
+            ) {
+              this.config.userSpecifiedModel = fb.fallbackModel
+            }
+            yield {
+              type: 'system' as const,
+              subtype: 'model_fallback' as const,
+              trigger: (fb.trigger ?? 'model_not_found') as
+                | 'model_not_found'
+                | 'overloaded',
+              original_model: fb.originalModel ?? '',
+              fallback_model: fb.fallbackModel ?? '',
+              content: fb.content ?? '',
+              session_id: getSessionId(),
+              uuid: msg.uuid,
+            }
+          }
           // Don't yield other system messages in headless mode
           break
         }

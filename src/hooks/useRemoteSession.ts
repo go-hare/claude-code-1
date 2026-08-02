@@ -226,11 +226,13 @@ export function useRemoteSession({
             return
           }
           // Official 2.1 Host progress patches / mid-turn phrase — not renderable.
+          // densable 2.1.211 background_tasks_changed is a level set, not chat.
           if (
             sdkMessage.subtype === 'task_updated' ||
             sdkMessage.subtype === 'task_summary' ||
             sdkMessage.subtype === 'thinking_tokens' ||
-            sdkMessage.subtype === 'model_fallback'
+            sdkMessage.subtype === 'model_fallback' ||
+            sdkMessage.subtype === 'background_tasks_changed'
           ) {
             return
           }
