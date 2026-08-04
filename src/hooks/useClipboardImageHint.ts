@@ -53,9 +53,11 @@ export function useClipboardImageHint(
         // Check if clipboard has an image (async osascript call)
         if (await hasImageInClipboard()) {
           lastHintTimeRef.current = now
+          // Windows binds chat:imagePaste to alt+v (ctrl+v is system paste).
+          const fallback = process.platform === 'win32' ? 'alt+v' : 'ctrl+v'
           addNotification({
             key: NOTIFICATION_KEY,
-            text: `Image in clipboard · ${getShortcutDisplay('chat:imagePaste', 'Chat', 'ctrl+v')} to paste`,
+            text: `Image in clipboard · ${getShortcutDisplay('chat:imagePaste', 'Chat', fallback)} to paste`,
             priority: 'immediate',
             timeoutMs: 8000,
           })

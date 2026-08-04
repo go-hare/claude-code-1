@@ -42,7 +42,7 @@ type PasteHandlerProps = {
  * - handlePaste(PasteEvent): bracketed paste → image paths / clipboard / onPaste
  * - handleKeyDown wraps typed keys: swallow return while pasting; large
  *   non-bracketed key payloads (>pkt=800) route as paste
- * - empty paste → macOS/WSL clipboard image
+ * - empty paste → clipboard image (macOS/WSL official; Windows LOCAL)
  * - mid-paste Enter deferred then replayed via `_()` after text paste
  *
  * Fork hardening: pastePending must never stick forever — that silently
@@ -69,10 +69,14 @@ export function usePasteHandler({
   const innerKeyDownRef = React.useRef(innerHandleKeyDown)
   innerKeyDownRef.current = innerHandleKeyDown
 
-  // Official: Mt()==="macos" / Mt()==="wsl"
+  // Official densable empty-paste → clipboard image: macOS / WSL.
+  // LOCAL: also enable on native Windows — terminals often deliver empty
+  // bracketed paste for Ctrl+V image, and imagePaste.ts has a win32 path.
+  // Explicit image paste key remains alt+v on Windows (ctrl+v is system paste).
   const isMacOS = React.useMemo(() => getPlatform() === 'macos', [])
   const isWsl = React.useMemo(() => getPlatform() === 'wsl', [])
-  const canClipboardImage = isMacOS || isWsl
+  const isWindows = React.useMemo(() => getPlatform() === 'windows', [])
+  const canClipboardImage = isMacOS || isWsl || isWindows
 
   React.useEffect(() => {
     return () => {
@@ -228,7 +232,7 @@ export function usePasteHandler({
       try {
         const pastedText = rawText.replace(/\[I$/, '').replace(/\[O$/, '')
 
-        // Empty bracketed paste → clipboard image (macOS / WSL official).
+        // Empty bracketed paste → clipboard image (macOS/WSL official; Windows LOCAL).
         if (pastedText.length === 0 && canClipboardImage && onImagePaste) {
           checkClipboardForImage()
           return

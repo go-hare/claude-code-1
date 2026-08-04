@@ -43,13 +43,13 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.25**），与 git tag 可能不同步。
+近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.26**），与 git tag 可能不同步。
 
-### 近期更新（2.7.5 → 2.7.25）
+### 近期更新（2.7.5 → 2.7.26）
 
 | 版本 | 要点 |
 | ---- | ---- |
-| **2.7.25** | **Host densable 211 生产路径**：永久 `model_not_found` → `system/model_fallback`；`system/background_tasks_changed`（REPLACE live set）；mid-bg `didBackground` 真 flip；eviction 保 Host progress 事件。 |
+| **2.7.26** | **Host densable 211 生产路径**：永久 `model_not_found` → `system/model_fallback`；`system/background_tasks_changed`（REPLACE live set）；mid-bg `didBackground` 真 flip；eviction 保 Host progress 事件。 |
 | **2.7.24** | **Official 2.1 Host 流/控制 + bypass 1g**：`command_lifecycle` / `thinking_tokens` / `task_updated` / `task_summary` / `background_tasks`（Ctrl+B）对齐；mid-bg 发 `task_updated`；`backgroundAll` 排除 main-session；bypass 下 `classifierApprovable` safetyCheck 可过（densable 1g）。 |
 | **2.7.23** | **Tasks dual-emit**：agent/shell/monitor/dream/workflow 终止时 once-gated 发 `system/task_notification` bookend（含 ISO `timestamp`），Host Tasks 可按 densable Jp 结算；print residual 再发一次-gated，不再只靠 TaskOutput 冒充生命周期。 |
 | **2.7.22** | **REPL 更新提示 / go-hare 自动升级路径**：去掉 `ENABLE_AUTOUPDATER` 默认关闭；`autoUpdates=false` 仍 toast「Update available」；Notifications 挂载 AutoUpdater；npm 包二进制识别为 `npm-global`；`claude update` 使用 `@go-hare/claude-code`。 |

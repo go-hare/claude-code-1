@@ -1877,7 +1877,13 @@ function PromptInput({
       if (imageData) {
         onImagePaste(imageData.base64, imageData.mediaType);
       } else {
-        const shortcutDisplay = getShortcutDisplay('chat:imagePaste', 'Chat', 'ctrl+v');
+        // Windows default binding is alt+v (ctrl+v is system paste); fall back
+        // display must match defaultBindings IMAGE_PASTE_KEY, not hardcode ctrl+v.
+        const shortcutDisplay = getShortcutDisplay(
+          'chat:imagePaste',
+          'Chat',
+          getPlatform() === 'windows' ? 'alt+v' : 'ctrl+v',
+        );
         const message = env.isSSH()
           ? "No image found in clipboard. You're SSH'd; try scp?"
           : `No image found in clipboard. Use ${shortcutDisplay} to paste images.`;

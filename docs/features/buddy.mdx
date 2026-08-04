@@ -8,26 +8,48 @@ keywords: ["buddy", "宠物", "companion", "伴侣", "虚拟宠物"]
 
 Buddy 是 Claude Code 内置的虚拟宠物系统。在 REPL 中通过 `/buddy` 命令可以孵化一只随机生成的宠物伴侣，它会出现在输入框旁边，陪伴你的编码过程。
 
-> Feature Flag: `FEATURE_BUDDY=1`
+> Feature Flag: `FEATURE_BUDDY=1`（构建期）  
+> 运行时开关: `CLAUDE_CODE_ENABLE_BUDDY`（`0`/`false`/`no`/`off` 强制关；truthy 强制开）
+
+外部构建（`USER_TYPE !== 'ant'`）下，即使未设 feature flag，Buddy 默认仍可用；`CLAUDE_CODE_ENABLE_BUDDY=0` 可整条关闭。
 
 ## 启用方式
 
 ```bash
+# 开发：显式打开构建期 flag
 FEATURE_BUDDY=1 bun run dev
+
+# 运行时强制关闭
+CLAUDE_CODE_ENABLE_BUDDY=0 claude
 ```
 
-孵化窗口：2026 年 4 月 1-7 日期间启动时，会在 REPL 顶部显示彩虹色的 `/buddy` 提示。4 月 7 日之后命令仍然可用，但不再自动提示。
+彩虹 teaser 窗口：2026 年 4 月 1–7 日期间启动且尚未孵化时，REPL 顶部会显示彩虹色的 `/buddy` 提示。4 月 7 日之后命令仍然可用（`isBuddyLive`），但不再自动提示。
 
 ## 命令
 
+实现见 `src/commands/buddy/buddy.ts`。当前**仅**支持以下子命令：
+
 | 命令 | 说明 |
 |---|---|
-| `/buddy` | 查看当前宠物信息和属性 |
-| `/buddy hatch` | 孵化一只新宠物（首次使用） |
-| `/buddy rehatch` | 重新随机生成宠物（替换现有） |
-| `/buddy pet` | 撸宠物，触发爱心动画 |
-| `/buddy mute` | 静音宠物（隐藏） |
-| `/buddy unmute` | 取消静音 |
+| `/buddy` | **无宠物**：孵化一只新伴侣并写入配置；**已有宠物**：展示 `CompanionCard`，并自动 unmute |
+| `/buddy pet` | 撸宠物：爱心动画 + 自动 unmute + 触发一句 reaction；尚无宠物时提示先 `/buddy` |
+| `/buddy off` | 静音/隐藏宠物（`companionMuted: true`） |
+| `/buddy on` | 取消静音（`companionMuted: false`） |
+
+说明：
+
+- **没有** `/buddy hatch` / `/buddy rehatch` / `/buddy mute` / `/buddy unmute` 子命令。
+- 首次孵化 = 无参 `/buddy`；静音/取消静音 = `off` / `on`。
+- 代码内有 `generateSeed()` 等 rehatch 相关工具函数，但**未**挂到 slash 命令入口。
+- 孵化成功后的提示文案也会引导：`Say its name · /buddy pet · /buddy off`。
+
+## 互动行为
+
+- 宠物挂在输入框旁（`CompanionSprite`）；`/buddy pet` 后约 2.5s 爱心浮动。
+- 每轮 query 结束后，若未 mute 且（被点名 **或** 距上次反应 ≥ 45s），会触发 companion reaction：
+  - 有 Anthropic OAuth + orgId 时走官方 `buddy_react` API
+  - 否则走当前配置的 model provider（small/fast 或主模型）生成短反应
+- 用户在消息里**点名宠物名字**时，主模型 intro 会要求把回复压成一行，把舞台让给宠物气泡（见 `companionIntroText`）。
 
 ## 宠物属性
 
@@ -51,7 +73,7 @@ FEATURE_BUDDY=1 bun run dev
 | Epic | ★★★★ | 4% |
 | Legendary | ★★★★★ | 1% |
 
-孵化时基于种子随机决定，存在极低概率出现 Shiny（闪光）变体。
+孵化时基于 seed 确定性 roll，另有约 1% 概率出现 Shiny（闪光）变体。
 
 ### 属性值
 
@@ -72,19 +94,28 @@ FEATURE_BUDDY=1 bun run dev
 
 ## 数据存储
 
-宠物信息存储在 `~/.claude.json` 的 `companion` 字段中。宠物的外观属性（物种、稀有度、属性值等）基于用户 ID 的哈希确定性生成，不可通过编辑配置文件来篡改稀有度。
+宠物信息存储在 `~/.claude.json`：
+
+| 字段 | 说明 |
+|---|---|
+| `companion` | `{ name, personality, seed?, hatchedAt }` |
+| `companionMuted` | `true` 时隐藏 sprite / 不注入 intro / 不反应 |
+
+外观与数值（物种、稀有度、属性等）由 `seed`（或 legacy 无 seed 时的 userId）经固定 salt 确定性生成，**不**把稀有度等 bones 直接写成可篡改字段。首次 hatch 的名字/性格按物种表本地生成，不依赖 soul-gen API。
 
 ## 相关源码
 
 | 文件 | 说明 |
 |---|---|
-| `src/commands/buddy/index.ts` | `/buddy` 命令注册 |
-| `src/commands/buddy/buddy.ts` | `/buddy` 命令处理 |
+| `src/commands/buddy/index.ts` | `/buddy` 命令注册（`isBuddyLive` 控制是否 hidden） |
+| `src/commands/buddy/buddy.ts` | `/buddy` 处理：`off` / `on` / `pet` / 无参 show-or-hatch |
+| `src/buddy/enabled.ts` | `isBuddyEnabled()` 运行时闸门 |
 | `src/buddy/companion.ts` | 宠物生成与加载 |
-| `src/buddy/companionReact.ts` | 宠物反应系统（REPL 每轮查询后触发） |
+| `src/buddy/companionReact.ts` | 宠物反应（REPL 每轮后 / `/buddy pet`） |
 | `src/buddy/types.ts` | 类型定义（物种、稀有度、属性） |
 | `src/buddy/sprites.ts` | 终端像素画渲染 |
 | `src/buddy/CompanionSprite.tsx` | React 组件（输入框旁显示） |
-| `src/buddy/CompanionCard.tsx` | 宠物信息卡片（`/buddy` 无参数时展示） |
-| `src/buddy/useBuddyNotification.tsx` | 启动提示通知 |
-| `src/buddy/prompt.ts` | 宠物相关 prompt 模板 |
+| `src/buddy/CompanionCard.tsx` | 宠物信息卡片（`/buddy` 无参且已有宠物） |
+| `src/buddy/useBuddyNotification.tsx` | 启动 teaser / live 窗口 |
+| `src/buddy/prompt.ts` | companion intro prompt |
+| `src/buddy/protocol/*` | go-hare 扩展：pack / runtime / ascii |

@@ -92,10 +92,145 @@ export type ImageWithDimensions = {
   dimensions?: ImageDimensions
 }
 
+function escapePowerShellSingleQuoted(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+/**
+ * Run PowerShell without `shell: true`.
+ *
+ * Critical on Windows: Claude Code is often launched from Git Bash / MSYS.
+ * `execa(..., { shell: true })` then goes through bash, which expands `$img`
+ * / `$null` out of the PowerShell script before powershell.exe ever sees them.
+ * That makes the historical win32 clipboard commands always fail.
+ */
+async function runPowerShell(
+  script: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  // Prefer Windows PowerShell 5.1 (Desktop) — System.Windows.Forms clipboard
+  // works more reliably there than some pwsh hosts. -STA helps apartment-model
+  // clipboard access when the parent process is MTA.
+  const result = await execa(
+    'powershell.exe',
+    ['-NoProfile', '-STA', '-NonInteractive', '-Command', script],
+    {
+      shell: false,
+      reject: false,
+      timeout: 15_000,
+      windowsHide: true,
+    },
+  )
+  return {
+    code: result.exitCode ?? 1,
+    stdout: result.stdout?.toString() ?? '',
+    stderr: result.stderr?.toString() ?? '',
+  }
+}
+
+/**
+ * Some providers reject tiny images (e.g. "both width and height must be at
+ * least 8 pixels"). Client-side floor so we don't ship a 1×1 placeholder /
+ * leftover test pixel as a real paste.
+ */
+export const MIN_CLIPBOARD_IMAGE_EDGE = 8
+
+/**
+ * Windows clipboard → temp PNG via PowerShell (argv, no bash shell).
+ *
+ * Prefer raw PNG/DIB streams from IDataObject (full-res screenshot bytes)
+ * before GetImage()/Get-Clipboard Image — those can surface a 1×1 or
+ * thumbnail-like bitmap when multiple formats are on the clipboard (or when a
+ * prior test left a tiny image on the clipboard).
+ */
+async function saveClipboardImageWin32(
+  screenshotPath: string,
+): Promise<{ ok: boolean; width?: number; height?: number }> {
+  const pathLit = escapePowerShellSingleQuoted(screenshotPath)
+  // PowerShell: try PNG stream → DIB stream → GetImage → Get-Clipboard.
+  // Write dims as "W H" on stdout for logging.
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    'Add-Type -AssemblyName System.Drawing',
+    "$out = '" + pathLit + "'",
+    '$saved = $false',
+    '$w = 0',
+    '$h = 0',
+    // 1) Prefer raw PNG bytes if present (browser / snipping tool often set this)
+    'try {',
+    '  $data = [System.Windows.Forms.Clipboard]::GetDataObject()',
+    '  if ($data -ne $null -and $data.GetDataPresent("PNG")) {',
+    '    $ms = $data.GetData("PNG")',
+    '    if ($ms -is [System.IO.MemoryStream]) {',
+    '      $bytes = $ms.ToArray()',
+    '      if ($bytes.Length -gt 32) {',
+    '        [System.IO.File]::WriteAllBytes($out, $bytes)',
+    '        $imgPng = [System.Drawing.Image]::FromFile($out)',
+    '        $w = $imgPng.Width; $h = $imgPng.Height',
+    '        $imgPng.Dispose()',
+    '        $saved = $true',
+    '      }',
+    '    }',
+    '  }',
+    '} catch {}',
+    // 2) Fall back to GDI+ bitmap from clipboard
+    'if (-not $saved) {',
+    '  $img = $null',
+    '  try { $img = [System.Windows.Forms.Clipboard]::GetImage() } catch {}',
+    '  if ($null -eq $img) {',
+    '    try { $img = Get-Clipboard -Format Image -ErrorAction SilentlyContinue } catch {}',
+    '  }',
+    '  if ($null -ne $img) {',
+    '    $w = $img.Width; $h = $img.Height',
+    '    $img.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '    if ($img -is [System.IDisposable]) { $img.Dispose() }',
+    '    $saved = $true',
+    '  }',
+    '}',
+    'if (-not $saved -or -not (Test-Path -LiteralPath $out)) { exit 1 }',
+    'Write-Output ("$w $h")',
+    'exit 0',
+  ].join('; ')
+
+  const result = await runPowerShell(script)
+  if (result.code !== 0) {
+    logForDebugging(
+      `win32 clipboard image save failed code=${result.code} stderr=${result.stderr.trim()}`,
+      { level: 'warn' },
+    )
+    return { ok: false }
+  }
+  const match = result.stdout.trim().match(/(\d+)\s+(\d+)/)
+  const width = match ? Number(match[1]) : undefined
+  const height = match ? Number(match[2]) : undefined
+  logForDebugging(
+    `win32 clipboard image saved ${width ?? '?'}x${height ?? '?'} → ${screenshotPath}`,
+  )
+  return { ok: true, width, height }
+}
+
+async function hasClipboardImageWin32(): Promise<boolean> {
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    "if ([System.Windows.Forms.Clipboard]::ContainsImage()) { 'true'; exit 0 }",
+    'try {',
+    '  $img = Get-Clipboard -Format Image -ErrorAction SilentlyContinue',
+    "  if ($null -ne $img) { 'true'; exit 0 }",
+    '} catch {}',
+    "'false'; exit 1",
+  ].join('; ')
+  const result = await runPowerShell(script)
+  return (
+    result.code === 0 && result.stdout.trim().toLowerCase().includes('true')
+  )
+}
+
 /**
  * Check if clipboard contains an image without retrieving it.
  */
 export async function hasImageInClipboard(): Promise<boolean> {
+  if (process.platform === 'win32') {
+    return hasClipboardImageWin32()
+  }
   if (process.platform !== 'darwin') {
     return false
   }
@@ -123,6 +258,54 @@ export async function hasImageInClipboard(): Promise<boolean> {
     'the clipboard as «class PNGf»',
   ])
   return result.code === 0
+}
+
+async function finalizeClipboardImageBuffer(
+  imageBuffer: Buffer,
+): Promise<ImageWithDimensions | null> {
+  if (imageBuffer.length === 0) {
+    return null
+  }
+
+  // BMP is not supported by the API — convert to PNG via Sharp.
+  // This handles WSL2 / some Windows copy paths that produce BMP.
+  let buffer = imageBuffer
+  if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) {
+    const sharp = await getImageProcessor()
+    buffer = await sharp(buffer).png().toBuffer()
+  }
+
+  const resized = await maybeResizeAndDownsampleImageBuffer(
+    buffer,
+    buffer.length,
+    'png',
+  )
+
+  // Reject tiny images before shipping to the API (providers require ≥8px).
+  // Common sources: leftover test 1×1 on clipboard, icon-only formats.
+  const w =
+    resized.dimensions?.displayWidth ?? resized.dimensions?.originalWidth
+  const h =
+    resized.dimensions?.displayHeight ?? resized.dimensions?.originalHeight
+  if (
+    typeof w === 'number' &&
+    typeof h === 'number' &&
+    (w < MIN_CLIPBOARD_IMAGE_EDGE || h < MIN_CLIPBOARD_IMAGE_EDGE)
+  ) {
+    logForDebugging(
+      `clipboard image ${w}x${h} below ${MIN_CLIPBOARD_IMAGE_EDGE}px floor — ignoring`,
+      { level: 'warn' },
+    )
+    return null
+  }
+
+  const base64Image = resized.buffer.toString('base64')
+  const mediaType = detectImageFormatFromBase64(base64Image)
+  return {
+    base64: base64Image,
+    mediaType,
+    dimensions: resized.dimensions,
+  }
 }
 
 export async function getImageFromClipboard(): Promise<ImageWithDimensions | null> {
@@ -191,6 +374,57 @@ export async function getImageFromClipboard(): Promise<ImageWithDimensions | nul
     }
   }
 
+  // Windows: never shell out a PS one-liner through bash (see runPowerShell).
+  // Use a unique temp path per read so a concurrent/stale claude_cli_latest_*
+  // file (e.g. leftover 1×1 from a previous test) cannot be re-read.
+  if (process.platform === 'win32') {
+    const { screenshotPath: basePath } = getClipboardCommands()
+    const screenshotPath = basePath.replace(
+      /\.png$/i,
+      `-${Date.now()}-${randomBytes(4).toString('hex')}.png`,
+    )
+    try {
+      const saved = await saveClipboardImageWin32(screenshotPath)
+      if (!saved.ok) {
+        return null
+      }
+      // Fast reject if PowerShell already reported tiny dims (before sharp).
+      if (
+        typeof saved.width === 'number' &&
+        typeof saved.height === 'number' &&
+        (saved.width < MIN_CLIPBOARD_IMAGE_EDGE ||
+          saved.height < MIN_CLIPBOARD_IMAGE_EDGE)
+      ) {
+        logForDebugging(
+          `win32 clipboard image ${saved.width}x${saved.height} below floor — ignoring`,
+          { level: 'warn' },
+        )
+        try {
+          getFsImplementation().unlinkSync(screenshotPath)
+        } catch {
+          // best-effort
+        }
+        return null
+      }
+      const imageBuffer =
+        getFsImplementation().readFileBytesSync(screenshotPath)
+      try {
+        getFsImplementation().unlinkSync(screenshotPath)
+      } catch {
+        // best-effort cleanup
+      }
+      return finalizeClipboardImageBuffer(imageBuffer)
+    } catch (e) {
+      logError(e as Error)
+      try {
+        getFsImplementation().unlinkSync(screenshotPath)
+      } catch {
+        // best-effort
+      }
+      return null
+    }
+  }
+
   const { commands, screenshotPath } = getClipboardCommands()
   try {
     // Check if clipboard has image
@@ -212,38 +446,12 @@ export async function getImageFromClipboard(): Promise<ImageWithDimensions | nul
     }
 
     // Read the image and convert to base64
-    let imageBuffer = getFsImplementation().readFileBytesSync(screenshotPath)
-
-    // BMP is not supported by the API — convert to PNG via Sharp.
-    // This handles WSL2 where Windows copies images as BMP by default.
-    if (
-      imageBuffer.length >= 2 &&
-      imageBuffer[0] === 0x42 &&
-      imageBuffer[1] === 0x4d
-    ) {
-      const sharp = await getImageProcessor()
-      imageBuffer = await sharp(imageBuffer).png().toBuffer()
-    }
-
-    // Resize if needed to stay under 5MB API limit
-    const resized = await maybeResizeAndDownsampleImageBuffer(
-      imageBuffer,
-      imageBuffer.length,
-      'png',
-    )
-    const base64Image = resized.buffer.toString('base64')
-
-    // Detect format from magic bytes
-    const mediaType = detectImageFormatFromBase64(base64Image)
+    const imageBuffer = getFsImplementation().readFileBytesSync(screenshotPath)
 
     // Cleanup (fire-and-forget, don't await)
     void execa(commands.deleteFile, { shell: true, reject: false })
 
-    return {
-      base64: base64Image,
-      mediaType,
-      dimensions: resized.dimensions,
-    }
+    return finalizeClipboardImageBuffer(imageBuffer)
   } catch {
     return null
   }

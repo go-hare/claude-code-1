@@ -43,13 +43,13 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.25**; trust `package.json` / npm) and may not match git tags.
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.26**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.25)
+### Recent updates (2.7.5 → 2.7.26)
 
 | Version | Highlights |
 | ------- | ---------- |
-| **2.7.25** | **Host densable 211 production path**: permanent `model_not_found` → `system/model_fallback`; `system/background_tasks_changed` (REPLACE live set); mid-bg `didBackground` true flip; eviction keeps Host progress events. |
+| **2.7.26** | **Host densable 211 production path**: permanent `model_not_found` → `system/model_fallback`; `system/background_tasks_changed` (REPLACE live set); mid-bg `didBackground` true flip; eviction keeps Host progress events. |
 | **2.7.24** | **Official 2.1 Host stream/control + bypass 1g**: `command_lifecycle` / `thinking_tokens` / `task_updated` / `task_summary` / `background_tasks` (Ctrl+B); mid-bg emits `task_updated`; `backgroundAll` skips main-session agents; bypass allows `classifierApprovable` safetyChecks (densable 1g). |
 | **2.7.23** | **Tasks dual-emit**: once-gated `system/task_notification` bookends (with ISO `timestamp`) when agent/shell/monitor/dream/workflow terminate so Host Tasks can settle on densable Jp; print residual re-emit once-gated — do not invent lifecycle from TaskOutput alone. |
 | **2.7.22** | **REPL update banner / go-hare upgrade path**: drop default-off `ENABLE_AUTOUPDATER`; toast "Update available" even when `autoUpdates=false`; mount AutoUpdater in Notifications; treat npm-shipped binaries as `npm-global`; `claude update` targets `@go-hare/claude-code`. |

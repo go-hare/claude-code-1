@@ -438,17 +438,22 @@ AI 可通过 `WorkflowTool` 自动执行工作流：
 
 ---
 
-## 15. Proactive 自主模式
+## 15. Proactive / KAIROS 自主与常驻助手
 
 **PR**: #241（同上）
-**Feature Flag**: `PROACTIVE` / `KAIROS`
+**Feature Flag**: `PROACTIVE` / `KAIROS`（build 默认开 `KAIROS`+`KAIROS_BRIEF`；门控 OR，见 `docs/features/kairos.md`）
 
 ### 说明
-启用后 AI 会主动发起操作（而不仅回应用户输入），例如自动检测文件变更、主动提出优化建议。
+- **Proactive**：`Sleep` + `<tick>` 心跳，用户不输入时也可继续工作。
+- **KAIROS**：常驻助手栈（assistant latch、Brief/`SendUserMessage`、可选频道/推送等）；开 KAIROS 即带 proactive 编译门控。
+- 运行时仍可能被 GrowthBook（如 `tengu_kairos_assistant`）挡住；本地强开可用 `--assistant` / `--proactive`。
 
 ### 使用
 ```
 /proactive         — 切换 proactive 模式开/关
+/brief             — brief-only 显示（另受 GB config）
+/assistant         — 助手 daemon 安装/附着向导
+claude --proactive / --brief / --assistant
 ```
 
 ---
@@ -533,14 +538,14 @@ AI 也可通过 `SnipTool` 自动截断过长的对话：
 | `MONITOR_TOOL` | ✅ dev+build | 后台监控 |
 | `WORKFLOW_SCRIPTS` | ✅ dev+build | 工作流脚本 |
 | `FORK_SUBAGENT` | ✅ dev+build | 子 Agent |
-| `KAIROS` | ✅ dev+build | Kairos 调度 |
+| `KAIROS` | ✅ dev+build | 常驻助手（tick/Sleep/assistant；见 kairos.md） |
 | `COORDINATOR_MODE` | ✅ dev+build | 多 Worker |
 | `HISTORY_SNIP` | ✅ dev+build | 历史管理 |
 | `CONTEXT_COLLAPSE` | ✅ dev+build | 上下文折叠 |
 | `ULTRATHINK` | ✅ dev+build | 扩展思考 |
 | `EXTRACT_MEMORIES` | ✅ dev+build | 自动记忆提取 |
 | `VERIFICATION_AGENT` | ✅ dev+build | 验证 Agent |
-| `KAIROS_BRIEF` | ✅ dev+build | Brief 模式 |
+| `KAIROS_BRIEF` | ✅ dev+build | Brief / SendUserMessage |
 | `AWAY_SUMMARY` | ✅ dev+build | 离开摘要 |
 | `ACP` | ✅ dev+build | ACP 协议 |
 | `LODESTONE` | ✅ dev+build | 深度链接 |
