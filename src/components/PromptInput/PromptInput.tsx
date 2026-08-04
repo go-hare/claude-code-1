@@ -2880,12 +2880,17 @@ function PromptInput({
         // bottom row. Keeping Notifications mounted prevents AutoUpdater's
         // initial-check effect from re-firing on every slash-completion
         // toggle (PR#22413).
-        // height: allow 2 rows when an update banner may show (notify-only
-        // or install result); still 0 while slash suggestions are open.
+        // height MUST stay 1: this box is pulled into the single marginTop=1
+        // gap row above the prompt top border (marginTop=-1). height=2 +
+        // justifyContent=flex-end paints the latest notification ON the
+        // border line and erases ─ (e.g. "Image in clipboard · alt+v").
+        // Update status is already mirrored into the notification queue
+        // (Notifications.tsx), so a second visual row is unnecessary.
+        // Still 0 while slash suggestions are open.
         <Box
           position="absolute"
           marginTop={briefOwnsGap ? -2 : -1}
-          height={suggestions.length === 0 ? 2 : 0}
+          height={suggestions.length === 0 ? 1 : 0}
           width="100%"
           paddingLeft={2}
           paddingRight={1}
