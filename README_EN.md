@@ -49,7 +49,9 @@ Recent work aligns agent / session / queue / inbox / daemon behavior with **dens
 
 | Version | Highlights |
 | ------- | ---------- |
-| **2.7.27** | **Host densable 211 production path**: permanent `model_not_found` → `system/model_fallback`; `system/background_tasks_changed` (REPLACE live set); mid-bg `didBackground` true flip; eviction keeps Host progress events. |
+| **2.7.27** | **Prompt notification strip height**: absolute box height 2→1 so the latest notice does not paint over the prompt top border (e.g. clipboard image `alt+v` hint). |
+| **2.7.26** | **Windows clipboard image paste**: PowerShell argv `shell:false` under Git Bash; empty paste on Windows; prefer PNG stream; client ≥8px floor rejects 1×1; Buddy/KAIROS docs aligned to densable 211. |
+| **2.7.25** | **Host densable 211 production path**: permanent `model_not_found` → `system/model_fallback`; `system/background_tasks_changed` (REPLACE live set); mid-bg `didBackground` true flip; eviction keeps Host progress events. |
 | **2.7.24** | **Official 2.1 Host stream/control + bypass 1g**: `command_lifecycle` / `thinking_tokens` / `task_updated` / `task_summary` / `background_tasks` (Ctrl+B); mid-bg emits `task_updated`; `backgroundAll` skips main-session agents; bypass allows `classifierApprovable` safetyChecks (densable 1g). |
 | **2.7.23** | **Tasks dual-emit**: once-gated `system/task_notification` bookends (with ISO `timestamp`) when agent/shell/monitor/dream/workflow terminate so Host Tasks can settle on densable Jp; print residual re-emit once-gated — do not invent lifecycle from TaskOutput alone. |
 | **2.7.22** | **REPL update banner / go-hare upgrade path**: drop default-off `ENABLE_AUTOUPDATER`; toast "Update available" even when `autoUpdates=false`; mount AutoUpdater in Notifications; treat npm-shipped binaries as `npm-global`; `claude update` targets `@go-hare/claude-code`. |

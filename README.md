@@ -49,7 +49,9 @@
 
 | 版本 | 要点 |
 | ---- | ---- |
-| **2.7.27** | **Host densable 211 生产路径**：永久 `model_not_found` → `system/model_fallback`；`system/background_tasks_changed`（REPLACE live set）；mid-bg `didBackground` 真 flip；eviction 保 Host progress 事件。 |
+| **2.7.27** | **Prompt 通知条高度**：绝对定位区 height 2→1，避免最新通知盖住 prompt 顶边框（如剪贴板图片 `alt+v` 提示）。 |
+| **2.7.26** | **Win 剪贴板图片粘贴**：Git Bash 下 PowerShell `shell:false` argv；空 paste 开 Windows；优先 PNG 流；客户端 ≥8px 拦截 1×1；Buddy/KAIROS 文档对齐 densable 211。 |
+| **2.7.25** | **Host densable 211 生产路径**：永久 `model_not_found` → `system/model_fallback`；`system/background_tasks_changed`（REPLACE live set）；mid-bg `didBackground` 真 flip；eviction 保 Host progress 事件。 |
 | **2.7.24** | **Official 2.1 Host 流/控制 + bypass 1g**：`command_lifecycle` / `thinking_tokens` / `task_updated` / `task_summary` / `background_tasks`（Ctrl+B）对齐；mid-bg 发 `task_updated`；`backgroundAll` 排除 main-session；bypass 下 `classifierApprovable` safetyCheck 可过（densable 1g）。 |
 | **2.7.23** | **Tasks dual-emit**：agent/shell/monitor/dream/workflow 终止时 once-gated 发 `system/task_notification` bookend（含 ISO `timestamp`），Host Tasks 可按 densable Jp 结算；print residual 再发一次-gated，不再只靠 TaskOutput 冒充生命周期。 |
 | **2.7.22** | **REPL 更新提示 / go-hare 自动升级路径**：去掉 `ENABLE_AUTOUPDATER` 默认关闭；`autoUpdates=false` 仍 toast「Update available」；Notifications 挂载 AutoUpdater；npm 包二进制识别为 `npm-global`；`claude update` 使用 `@go-hare/claude-code`。 |
