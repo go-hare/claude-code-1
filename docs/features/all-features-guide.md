@@ -481,21 +481,26 @@ AI 也可通过 `SnipTool` 自动截断过长的对话：
 
 ## 17. Fork 子Agent
 
-**PR**: #241（同上）
-**Feature Flag**: `FORK_SUBAGENT`
+**PR**: #241（同上）  
+**Feature Flag**: `FORK_SUBAGENT`（**默认 build 未列入**；`FEATURE_FORK_SUBAGENT=1` 或 `CLAUDE_CODE_FORK_SUBAGENT=1` / GB `tengu_fork_subagent`）
 
 ### 说明
-在当前对话上下文中 fork 一个独立的子 agent，继承完整会话状态独立执行。
+在当前对话上下文中 fork 一个独立的子 agent，继承完整会话状态独立执行。  
+**`/fork` 与 AgentTool 隐式 fork 共用** `isForkSubagentEnabled()`（见 `docs/features/fork-subagent.md`）— 不是 stub。
 
 ### 使用
 ```
-/fork              — 基于当前上下文 fork 子 agent
+FEATURE_FORK_SUBAGENT=1 claude
+# 或
+CLAUDE_CODE_FORK_SUBAGENT=1 claude
+
+/fork Fix the null check in validate.ts
 ```
 
 子 agent 会：
 - 继承当前的全部对话历史
-- 在独立的执行环境中运行
-- 不影响主会话状态
+- 在独立的执行环境中运行（默认后台 + task-notification）
+- 权限可 bubble 到父终端
 
 ---
 
@@ -537,7 +542,7 @@ AI 也可通过 `SnipTool` 自动截断过长的对话：
 | `LAN_PIPES` | ✅ dev only | LAN 群控 |
 | `MONITOR_TOOL` | ✅ dev+build | 后台监控 |
 | `WORKFLOW_SCRIPTS` | ✅ dev+build | 工作流脚本 |
-| `FORK_SUBAGENT` | ✅ dev+build | 子 Agent |
+| `FORK_SUBAGENT` | ❌ 默认 build 关；dev/env 可开 | 隐式 fork + `/fork`（与 AgentTool 统一门控） |
 | `KAIROS` | ✅ dev+build | 常驻助手（tick/Sleep/assistant；见 kairos.md） |
 | `COORDINATOR_MODE` | ✅ dev+build | 多 Worker |
 | `HISTORY_SNIP` | ✅ dev+build | 历史管理 |

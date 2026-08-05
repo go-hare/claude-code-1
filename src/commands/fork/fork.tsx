@@ -1,7 +1,6 @@
-import { feature } from 'bun:bundle';
 import React from 'react';
 import { AgentTool } from '@claude-code/builtin-tools/tools/AgentTool/AgentTool.js';
-import { isInForkChild } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js';
+import { isForkSubagentEnabled, isInForkChild } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js';
 import { logForDebugging } from '../../utils/debug.js';
 import type { LocalJSXCommandOnDone, LocalJSXCommandContext } from '../../types/command.js';
 
@@ -10,13 +9,13 @@ export async function call(
   context: LocalJSXCommandContext,
   args: string,
 ): Promise<React.ReactNode> {
-  // Feature flag OR official CLAUDE_CODE_FORK_SUBAGENT / GB tengu_fork_subagent.
-  const forkEnvEnabled = (
-    require('../../utils/forkSubagentGate.js') as typeof import('../../utils/forkSubagentGate.js')
-  ).isForkSubagentEnabled();
-  if (!feature('FORK_SUBAGENT') && !forkEnvEnabled) {
+  // Same gate as AgentTool (compile FEATURE_FORK_SUBAGENT OR portable
+  // CLAUDE_CODE_FORK_SUBAGENT / GB tengu_fork_subagent; not coordinator /
+  // non-interactive). Do not re-check env alone — dual-gate drift caused
+  // /fork to fire while AgentTool stayed on general-purpose.
+  if (!isForkSubagentEnabled()) {
     onDone(
-      'Fork subagent feature is not enabled. Set FEATURE_FORK_SUBAGENT=1 or CLAUDE_CODE_FORK_SUBAGENT=1 to enable.',
+      'Fork subagent is not available. Enable with FEATURE_FORK_SUBAGENT=1 or CLAUDE_CODE_FORK_SUBAGENT=1 (interactive session, not coordinator mode).',
       { display: 'system' },
     );
     return null;

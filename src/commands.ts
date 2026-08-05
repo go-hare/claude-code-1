@@ -153,7 +153,8 @@ const historyCmd = feature('UDS_INBOX')
 const claimMainCmd = feature('UDS_INBOX')
   ? require('./commands/claim-main/index.js').default
   : null
-// feature('FORK_SUBAGENT') OR official CLAUDE_CODE_FORK_SUBAGENT / GB.
+// Same enable OR as AgentTool (compile feature OR portable env/GB).
+// Coordinator / non-interactive constraints: package isForkSubagentEnabled().
 const forkCmd =
   feature('FORK_SUBAGENT') ||
   (

@@ -16,7 +16,7 @@ import { createUserMessage } from 'src/utils/messages.js'
 import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
 
 /**
- * Fork subagent feature gate.
+ * Fork subagent feature gate (AgentTool + `/fork` share this).
  *
  * When enabled:
  * - `subagent_type` becomes optional on the Agent tool schema
@@ -26,16 +26,32 @@ import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
  *   `<task-notification>` interaction model
  * - `/fork <directive>` slash command is available
  *
- * Mutually exclusive with coordinator mode — coordinator already owns the
- * orchestration role and has its own delegation model.
+ * Enable paths (densable-aligned OR):
+ * 1. Compile-time `feature('FORK_SUBAGENT')` (FEATURE_FORK_SUBAGENT=1 / build list)
+ * 2. Portable env/GB: CLAUDE_CODE_FORK_SUBAGENT / tengu_fork_subagent
+ *    (`src/utils/forkSubagentGate.ts`) — same resolver `/fork` used to call alone
+ *
+ * Session constraints (always applied after enable path):
+ * - Mutually exclusive with coordinator mode
+ * - Disabled in non-interactive (pipe/SDK) sessions
  */
 export function isForkSubagentEnabled(): boolean {
+  // Compile feature first (bun:bundle — only valid in if/ternary condition).
+  let enabled = false
   if (feature('FORK_SUBAGENT')) {
-    if (isCoordinatorMode()) return false
-    if (getIsNonInteractiveSession()) return false
-    return true
+    enabled = true
+  } else if (
+    (
+      require('src/utils/forkSubagentGate.js') as typeof import('src/utils/forkSubagentGate.js')
+    ).isForkSubagentEnabled()
+  ) {
+    // Portable densable path when compile flag is off (default build).
+    enabled = true
   }
-  return false
+  if (!enabled) return false
+  if (isCoordinatorMode()) return false
+  if (getIsNonInteractiveSession()) return false
+  return true
 }
 
 /** Synthetic agent type name used for analytics when the fork path fires. */

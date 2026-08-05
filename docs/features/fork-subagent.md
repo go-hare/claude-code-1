@@ -31,24 +31,36 @@ Agent({ subagent_type: "general-purpose", prompt: "..." })
 
 ### /fork 命令
 
-注册了 `/fork` 斜杠命令（当前为 stub）。当 FORK_SUBAGENT 开启时，`/branch` 命令失去 `fork` 别名，避免冲突。
+**已实现**（`src/commands/fork/fork.tsx`），不是 stub。调用 `AgentTool` 的隐式 fork 路径（`fork: true` + 省略 `subagent_type`，后台跑）。
+
+门控与 **AgentTool 共用** `packages/.../forkSubagent.isForkSubagentEnabled()`（见下）。开启时 `/branch` 失去 `fork` 别名，避免冲突。
+
+本地开启示例：
+
+```bash
+FEATURE_FORK_SUBAGENT=1 bun run dev
+# 或 portable densable 路径（默认 build 未列入 FORK_SUBAGENT 时）：
+CLAUDE_CODE_FORK_SUBAGENT=1 claude
+```
 
 ## 三、实现架构
 
-### 3.1 门控与互斥
+### 3.1 门控与互斥（AgentTool 与 `/fork` 统一）
 
-文件：`packages/builtin-tools/src/tools/AgentTool/forkSubagent.ts:32-39`
+文件：`packages/builtin-tools/src/tools/AgentTool/forkSubagent.ts`
 
 ```ts
-export function isForkSubagentEnabled(): boolean {
-  if (feature('FORK_SUBAGENT')) {
-    if (isCoordinatorMode()) return false   // Coordinator 有自己的委派模型
-    if (getIsNonInteractiveSession()) return false  // pipe/SDK 模式禁用
-    return true
-  }
-  return false
-}
+// 启用路径 OR：
+// 1) feature('FORK_SUBAGENT') — 编译 FEATURE_FORK_SUBAGENT=1 / build 列表
+// 2) CLAUDE_CODE_FORK_SUBAGENT / GB tengu_fork_subagent
+//    （src/utils/forkSubagentGate.ts，densable  portable）
+// 然后：
+// - coordinator 模式 → false
+// - 非交互（pipe/SDK）→ false
+export function isForkSubagentEnabled(): boolean
 ```
+
+**默认 build 未列入 `FORK_SUBAGENT`**（`scripts/defines.ts` 注释：Agent 特殊路径已覆盖多数需求）。需要隐式 fork / `/fork` 时用 env 或 dev feature。
 
 ### 3.2 FORK_AGENT 定义
 
@@ -192,4 +204,5 @@ FEATURE_FORK_SUBAGENT=1 bun run dev
 | `packages/builtin-tools/src/tools/AgentTool/resumeAgent.ts` | — | Fork agent 恢复 |
 | `src/constants/xml.ts` | — | XML 标签常量 |
 | `src/utils/forkedAgent.ts` | — | CacheSafeParams + ContentReplacementState 克隆 |
-| `src/commands/fork/index.ts` | — | /fork 命令（stub） |
+| `src/commands/fork/index.ts` + `fork.tsx` | — | `/fork` 命令（已实现，与 AgentTool 共用门控） |
+| `src/utils/forkSubagentGate.ts` | — | portable densable：`CLAUDE_CODE_FORK_SUBAGENT` / `tengu_fork_subagent` |
