@@ -2064,25 +2064,82 @@ export const fetchToolsForClient = memoizeWithLRU(
                   const connectedClient =
                     preferredClient ?? (await ensureConnectedClient(client))
                   preferredClient = null
-                  const mcpResult = await callMCPToolWithUrlElicitationRetry({
-                    client: connectedClient,
-                    clientConnection: client,
-                    tool: tool.name,
-                    args: callArgs,
-                    meta,
-                    signal: context.abortController.signal,
-                    setAppState: context.setAppState,
-                    onProgress:
-                      onProgress && toolUseId
-                        ? progressData => {
-                            onProgress({
-                              toolUseID: toolUseId,
-                              data: progressData,
-                            })
-                          }
-                        : undefined,
-                    handleElicitation: context.handleElicitation,
+                  // densable 2.1.212: MCP > threshold → auto-background
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const {
+                    resolveMcpAutoBackgroundMs,
+                    callMcpToolWithAutoBackground,
+                  } =
+                    require('../../utils/mcpAutoBackground.js') as typeof import('../../utils/mcpAutoBackground.js')
+                  const transportType =
+                    typeof client === 'object' &&
+                    client &&
+                    'config' in client &&
+                    client.config &&
+                    typeof client.config === 'object' &&
+                    'type' in client.config
+                      ? String((client.config as { type?: string }).type ?? '')
+                      : typeof client === 'object' && client && 'type' in client
+                        ? String((client as { type?: string }).type ?? '')
+                        : ''
+                  const autoBgMs = resolveMcpAutoBackgroundMs(process.env, {
+                    transportType,
+                    isNonInteractiveSession:
+                      context.options.isNonInteractiveSession,
                   })
+
+                  const runMcp = (signal: AbortSignal) =>
+                    callMCPToolWithUrlElicitationRetry({
+                      client: connectedClient,
+                      clientConnection: client,
+                      tool: tool.name,
+                      args: callArgs,
+                      meta,
+                      signal,
+                      setAppState: context.setAppState,
+                      onProgress:
+                        onProgress && toolUseId
+                          ? progressData => {
+                              onProgress({
+                                toolUseID: toolUseId,
+                                data: progressData,
+                              })
+                            }
+                          : undefined,
+                      handleElicitation: context.handleElicitation,
+                    })
+
+                  const mcpResult =
+                    autoBgMs > 0
+                      ? await callMcpToolWithAutoBackground({
+                          run: runMcp,
+                          serverName: client.name,
+                          toolName: tool.name,
+                          toolUseId,
+                          parentAbortController: context.abortController,
+                          setAppState:
+                            context.setAppStateForTasks ?? context.setAppState,
+                          autoBackgroundMs: autoBgMs,
+                          toolLabel: fullyQualifiedName,
+                          // densable $cy: defer auto-bg while URL elicitation open
+                          hasPendingElicitation: () => {
+                            try {
+                              // eslint-disable-next-line @typescript-eslint/no-require-imports
+                              const { hasPendingMcpElicitation } =
+                                require('./transportErrorState.js') as typeof import('./transportErrorState.js')
+                              if (hasPendingMcpElicitation()) return true
+                            } catch {
+                              /* optional */
+                            }
+                            try {
+                              const q = context.getAppState().elicitation?.queue
+                              return Array.isArray(q) && q.length > 0
+                            } catch {
+                              return false
+                            }
+                          },
+                        })
+                      : await runMcp(context.abortController.signal)
 
                   // Emit progress when tool completes successfully
                   if (onProgress && toolUseId) {
@@ -2098,18 +2155,39 @@ export const fetchToolsForClient = memoizeWithLRU(
                     })
                   }
 
+                  const mcpMeta =
+                    mcpResult &&
+                    typeof mcpResult === 'object' &&
+                    (('_meta' in mcpResult && mcpResult._meta) ||
+                      ('structuredContent' in mcpResult &&
+                        mcpResult.structuredContent))
+                      ? {
+                          ...('_meta' in mcpResult && mcpResult._meta
+                            ? {
+                                _meta: mcpResult._meta as Record<
+                                  string,
+                                  unknown
+                                >,
+                              }
+                            : {}),
+                          ...('structuredContent' in mcpResult &&
+                          mcpResult.structuredContent
+                            ? {
+                                structuredContent:
+                                  mcpResult.structuredContent as Record<
+                                    string,
+                                    unknown
+                                  >,
+                              }
+                            : {}),
+                        }
+                      : undefined
+
                   return {
                     data: mcpResult.content,
-                    ...((mcpResult._meta || mcpResult.structuredContent) && {
-                      mcpMeta: {
-                        ...(mcpResult._meta && {
-                          _meta: mcpResult._meta,
-                        }),
-                        ...(mcpResult.structuredContent && {
-                          structuredContent: mcpResult.structuredContent,
-                        }),
-                      },
-                    }),
+                    ...(mcpMeta && Object.keys(mcpMeta).length > 0
+                      ? { mcpMeta }
+                      : {}),
                   }
                 } catch (error) {
                   // Session expired — the connection cache has been
@@ -3329,108 +3407,121 @@ export async function callMCPToolWithUrlElicitationRetry({
       // Process each URL elicitation from the error.
       // The completion notification handler (in registerElicitationHandler) sets
       // `completed: true` on the matching queue event; the dialog reacts to this flag.
-      for (const elicitation of elicitations) {
-        const { elicitationId } = elicitation
+      // densable $cy: mark pending so MCP auto-background defers while open.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { beginMcpElicitation, endMcpElicitation } =
+        require('./transportErrorState.js') as typeof import('./transportErrorState.js')
+      beginMcpElicitation()
+      try {
+        for (const elicitation of elicitations) {
+          const { elicitationId } = elicitation
 
-        // Run elicitation hooks — they can resolve URL elicitations programmatically
-        const hookResponse = await runElicitationHooks(
-          serverName,
-          elicitation,
-          signal,
-        )
-        if (hookResponse) {
-          logMCPDebug(
+          // Run elicitation hooks — they can resolve URL elicitations programmatically
+          const hookResponse = await runElicitationHooks(
             serverName,
-            `URL elicitation ${elicitationId} resolved by hook: ${jsonStringify(hookResponse)}`,
+            elicitation,
+            signal,
           )
-          if (hookResponse.action !== 'accept') {
+          if (hookResponse) {
+            logMCPDebug(
+              serverName,
+              `URL elicitation ${elicitationId} resolved by hook: ${jsonStringify(hookResponse)}`,
+            )
+            if (hookResponse.action !== 'accept') {
+              return {
+                content: `URL elicitation was ${hookResponse.action === 'decline' ? 'declined' : hookResponse.action + 'ed'} by a hook. The tool "${tool}" could not complete because it requires the user to open a URL.`,
+              }
+            }
+            // Hook accepted — skip the UI and proceed to retry
+            continue
+          }
+
+          // Resolve the URL elicitation via callback (print/SDK mode) or queue (REPL mode).
+          let userResult: ElicitResult
+          if (handleElicitation) {
+            // Print/SDK mode: delegate to structuredIO which sends a control request
+            userResult = await handleElicitation(
+              serverName,
+              elicitation,
+              signal,
+            )
+          } else {
+            // REPL mode: queue for ElicitationDialog with two-phase consent/waiting flow
+            const waitingState: ElicitationWaitingState = {
+              actionLabel: 'Retry now',
+              showCancel: true,
+            }
+            userResult = await new Promise<ElicitResult>(resolve => {
+              const onAbort = () => {
+                void resolve({ action: 'cancel' })
+              }
+              if (signal.aborted) {
+                onAbort()
+                return
+              }
+              signal.addEventListener('abort', onAbort, { once: true })
+
+              setAppState(prev => ({
+                ...prev,
+                elicitation: {
+                  queue: [
+                    ...prev.elicitation.queue,
+                    {
+                      serverName,
+                      requestId: `error-elicit-${elicitationId}`,
+                      params: elicitation,
+                      signal,
+                      waitingState,
+                      respond: result => {
+                        // Phase 1 consent: accept is a no-op (doesn't resolve retry Promise)
+                        if (result.action === 'accept') {
+                          return
+                        }
+                        // Decline or cancel: resolve the retry Promise
+                        signal.removeEventListener('abort', onAbort)
+                        void resolve(result)
+                      },
+                      onWaitingDismiss: action => {
+                        signal.removeEventListener('abort', onAbort)
+                        if (action === 'retry') {
+                          void resolve({ action: 'accept' })
+                        } else {
+                          void resolve({ action: 'cancel' })
+                        }
+                      },
+                    },
+                  ],
+                },
+              }))
+            })
+          }
+
+          // Run ElicitationResult hooks — they can modify or block the response
+          const finalResult = await runElicitationResultHooks(
+            serverName,
+            userResult,
+            signal,
+            'url',
+            elicitationId,
+          )
+
+          if (finalResult.action !== 'accept') {
+            logMCPDebug(
+              serverName,
+              `User ${finalResult.action === 'decline' ? 'declined' : finalResult.action + 'ed'} URL elicitation ${elicitationId}`,
+            )
             return {
-              content: `URL elicitation was ${hookResponse.action === 'decline' ? 'declined' : hookResponse.action + 'ed'} by a hook. The tool "${tool}" could not complete because it requires the user to open a URL.`,
+              content: `URL elicitation was ${finalResult.action === 'decline' ? 'declined' : finalResult.action + 'ed'} by the user. The tool "${tool}" could not complete because it requires the user to open a URL.`,
             }
           }
-          // Hook accepted — skip the UI and proceed to retry
-          continue
-        }
 
-        // Resolve the URL elicitation via callback (print/SDK mode) or queue (REPL mode).
-        let userResult: ElicitResult
-        if (handleElicitation) {
-          // Print/SDK mode: delegate to structuredIO which sends a control request
-          userResult = await handleElicitation(serverName, elicitation, signal)
-        } else {
-          // REPL mode: queue for ElicitationDialog with two-phase consent/waiting flow
-          const waitingState: ElicitationWaitingState = {
-            actionLabel: 'Retry now',
-            showCancel: true,
-          }
-          userResult = await new Promise<ElicitResult>(resolve => {
-            const onAbort = () => {
-              void resolve({ action: 'cancel' })
-            }
-            if (signal.aborted) {
-              onAbort()
-              return
-            }
-            signal.addEventListener('abort', onAbort, { once: true })
-
-            setAppState(prev => ({
-              ...prev,
-              elicitation: {
-                queue: [
-                  ...prev.elicitation.queue,
-                  {
-                    serverName,
-                    requestId: `error-elicit-${elicitationId}`,
-                    params: elicitation,
-                    signal,
-                    waitingState,
-                    respond: result => {
-                      // Phase 1 consent: accept is a no-op (doesn't resolve retry Promise)
-                      if (result.action === 'accept') {
-                        return
-                      }
-                      // Decline or cancel: resolve the retry Promise
-                      signal.removeEventListener('abort', onAbort)
-                      void resolve(result)
-                    },
-                    onWaitingDismiss: action => {
-                      signal.removeEventListener('abort', onAbort)
-                      if (action === 'retry') {
-                        void resolve({ action: 'accept' })
-                      } else {
-                        void resolve({ action: 'cancel' })
-                      }
-                    },
-                  },
-                ],
-              },
-            }))
-          })
-        }
-
-        // Run ElicitationResult hooks — they can modify or block the response
-        const finalResult = await runElicitationResultHooks(
-          serverName,
-          userResult,
-          signal,
-          'url',
-          elicitationId,
-        )
-
-        if (finalResult.action !== 'accept') {
           logMCPDebug(
             serverName,
-            `User ${finalResult.action === 'decline' ? 'declined' : finalResult.action + 'ed'} URL elicitation ${elicitationId}`,
+            `Elicitation ${elicitationId} completed, retrying tool call`,
           )
-          return {
-            content: `URL elicitation was ${finalResult.action === 'decline' ? 'declined' : finalResult.action + 'ed'} by the user. The tool "${tool}" could not complete because it requires the user to open a URL.`,
-          }
         }
-
-        logMCPDebug(
-          serverName,
-          `Elicitation ${elicitationId} completed, retrying tool call`,
-        )
+      } finally {
+        endMcpElicitation()
       }
 
       // Loop back to retry the tool call

@@ -55,6 +55,7 @@ import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { resolveAgentAutoBackgroundMs } from 'src/utils/autoBackgroundTimeout.js';
 import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
+import { assertCanSpawnSubagent } from 'src/utils/sessionSpawnCaps.js';
 import { AbortError, errorMessage, toError } from 'src/utils/errors.js';
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js';
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js';
@@ -410,9 +411,23 @@ export const AgentTool = buildTool({
       );
     }
 
+    // densable N() — session subagent spawn cap (before any real spawn path)
+    const consumeSessionSpawnSlot = (): void => {
+      try {
+        assertCanSpawnSubagent({ abortSignal: toolUseContext.abortController.signal });
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('Subagent spawn limit reached')) {
+          logEvent('subagent_count_cap', {});
+        }
+        throw error;
+      }
+    };
+
     // Check if this is a multi-agent spawn request
     // Spawn is triggered when team_name is set (from param or context) and name is provided
     if (teamName && name) {
+      // densable: N() before teammate spawn
+      consumeSessionSpawnSlot();
       // Set agent definition color for grouped UI display before spawning
       const agentDef = subagent_type
         ? toolUseContext.options.agentDefinitions.activeAgents.find(a => a.agentType === subagent_type)
@@ -627,6 +642,9 @@ export const AgentTool = buildTool({
     if (selectedAgent.color) {
       setAgentColor(selectedAgent.agentType, selectedAgent.color);
     }
+
+    // densable N() — count after type/permission/MCP guards, before worktree/remote/run
+    consumeSessionSpawnSlot();
 
     // Resolve agent params for logging (these are already resolved in runAgent).
     // Official $6e: built-in Explore may rewrite model to opus cap before getAgentModel.

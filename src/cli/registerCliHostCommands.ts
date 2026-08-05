@@ -744,6 +744,18 @@ export function registerCliHostCommands(
           await autoModeCritiqueHandler(commandOptions)
           process.exit()
         })
+
+      autoModeCmd
+        .command('reset')
+        .description(describe(['auto-mode', 'reset']))
+        .option('-y, --yes', 'Skip confirmation prompt')
+        .action(async (commandOptions: { yes?: boolean }) => {
+          const { autoModeResetHandler } = await import(
+            '../cli/handlers/autoMode.js'
+          )
+          await autoModeResetHandler(commandOptions)
+          process.exit(process.exitCode ?? 0)
+        })
     }
   }
 

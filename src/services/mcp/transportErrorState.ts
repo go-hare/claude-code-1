@@ -17,6 +17,31 @@ export function createMcpTransportErrorState(): McpTransportErrorState {
   }
 }
 
+/**
+ * densable `$cy` hasPendingElicitation — process-wide count of MCP URL
+ * elicitations currently awaiting user/hook resolution. Auto-background
+ * must not fire while > 0 (call site defers another full timeout window).
+ */
+let processPendingMcpElicitations = 0
+
+export function beginMcpElicitation(): void {
+  processPendingMcpElicitations += 1
+}
+
+export function endMcpElicitation(): void {
+  processPendingMcpElicitations = Math.max(0, processPendingMcpElicitations - 1)
+}
+
+/** densable hasPendingElicitation callback body */
+export function hasPendingMcpElicitation(): boolean {
+  return processPendingMcpElicitations > 0
+}
+
+/** Test-only */
+export function _resetPendingMcpElicitationsForTests(): void {
+  processPendingMcpElicitations = 0
+}
+
 /** Official M(): arm every unarmed in-flight call watchdog. */
 export function armAllCallWatchdogs(state: McpTransportErrorState): void {
   const now = Date.now()

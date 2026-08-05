@@ -44,4 +44,26 @@ describe('transportErrorState mid-call drop (official O / M)', () => {
     expect(w.armedAt).toBe(0)
     expect(shouldAbortForTransportDrop(w, Date.now() + 999_999)).toBe(false)
   })
+
+  test('process pending MCP elicitation counter for auto-bg defer', () => {
+    const {
+      beginMcpElicitation,
+      endMcpElicitation,
+      hasPendingMcpElicitation,
+      _resetPendingMcpElicitationsForTests,
+    } =
+      require('../transportErrorState.js') as typeof import('../transportErrorState.js')
+    _resetPendingMcpElicitationsForTests()
+    expect(hasPendingMcpElicitation()).toBe(false)
+    beginMcpElicitation()
+    expect(hasPendingMcpElicitation()).toBe(true)
+    beginMcpElicitation()
+    endMcpElicitation()
+    expect(hasPendingMcpElicitation()).toBe(true)
+    endMcpElicitation()
+    expect(hasPendingMcpElicitation()).toBe(false)
+    endMcpElicitation()
+    expect(hasPendingMcpElicitation()).toBe(false)
+    _resetPendingMcpElicitationsForTests()
+  })
 })

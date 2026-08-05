@@ -169,6 +169,35 @@ export const WebSearchTool = buildTool({
     const startTime = performance.now()
     const { query } = input
 
+    // densable 2.1.212: vtu + taskRegistry web search budget (soft return).
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { consumeWebSearchBudgetOrCapMessage } =
+        require('src/utils/sessionSpawnCaps.js') as typeof import('src/utils/sessionSpawnCaps.js')
+      const cap = consumeWebSearchBudgetOrCapMessage()
+      if (cap) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { logEvent } =
+            require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
+          logEvent('web_search_session_cap', {
+            max_web_searches_per_session: cap.max,
+          })
+        } catch {
+          // analytics optional
+        }
+        return {
+          data: {
+            query,
+            results: [cap.message],
+            durationSeconds: 0,
+          },
+        }
+      }
+    } catch {
+      // cap module optional — never block search if import fails
+    }
+
     // Official X0d/Q0d (2.1.207): firstParty + WEBSEARCH_USE_CCR_PROXY +
     // CLAUDE_CODE_SESSION_ID (cse_*|session_*) → session worker web-search.
     try {

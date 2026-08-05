@@ -150,6 +150,16 @@ export async function clearConversation({
   // tracking) is retained so those agents keep functioning.
   clearSessionCaches(preservedAgentIds)
 
+  // densable 2.1.212: /clear resets WebSearch + subagent session budgets
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { resetSessionSpawnCaps } =
+      require('../../utils/sessionSpawnCaps.js') as typeof import('../../utils/sessionSpawnCaps.js')
+    resetSessionSpawnCaps()
+  } catch {
+    // optional
+  }
+
   // Clear large STATE-held data that outlives the message array.
   // lastAPIRequestMessages can hold the full post-compaction conversation
   // (hundreds of KB–MB) for /share; resetCostState clears modelUsage.

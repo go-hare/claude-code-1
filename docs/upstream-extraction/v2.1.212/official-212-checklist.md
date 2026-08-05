@@ -7,10 +7,10 @@
 | # | 官方条目 | 状态 | 本地备注 |
 |---|----------|------|----------|
 | 1 | **`/fork` → 复制对话到新后台会话**（`claude agents` 单独一行，主会话继续）；原会话内子代理改 **`/subtask`** | **HAVE** | 2026-08-05 densable `nZ_→L2p→D$t keepParent` + residual-3 + P0–P1：L2p `Forking…`、`kei/Iei`、`Hei/xei` sticky、`gXe/rti`、`D6e` leaf、dual reg live、gwd/subtask agentId toast、bgIsolation/git/permission-mode/memory。extract: `keepParent-fork.extract.md` |
-| 2 | **`claude auto-mode reset`**（确认提示，`--yes` 跳过） | **GAP** | 无此 CLI 子命令 |
-| 3 | **WebSearch 会话上限** 默认 200，`CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | **GAP** | densable `zpg=200`；本地无计数/拦截 |
-| 4 | **子代理 spawn 上限** 默认 200，`CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION`；`/clear` 重置 | **GAP** | densable `qpg=200` + taskRegistry counters；本地无 |
-| 5 | **MCP 调用 >2min 自动后台**，`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS` | **PARTIAL** | `src/utils/mcpAutoBackground.ts` 仅解析 env，未接线；默认是否 120000 待 extract |
+| 2 | **`claude auto-mode reset`**（确认提示，`--yes` 跳过） | **HAVE** | 2026-08-05 densable `PbS`：`autoModeResetHandler` + `--yes`；userSettings 删 `autoMode` |
+| 3 | **WebSearch 会话上限** 默认 200，`CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | **HAVE** | densable `vtu`+soft return；`sessionSpawnCaps` + WebSearchTool |
+| 4 | **子代理 spawn 上限** 默认 200，`CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION`；`/clear` 重置 | **HAVE** | densable `Etu`+throw；AgentTool `N()` + `/clear` reset |
+| 5 | **MCP 调用 >2min 自动后台**，`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS` | **HAVE** | densable `Ncy`/`$cy`：默认 120s GB on；wired in mcp `client.ts` via monitor_mcp |
 | 6 | **Agent view `/resume`**：含已删列表项的 picker → 作后台会话恢复 | **AUDIT** | agents/LogSelector 需对照 densable |
 | 7 | Plan mode 不再自动跑改文件类 Bash（`touch`/`rm`…），需权限或 SDK `canUseTool` | **AUDIT** | permission / plan mode 路径 |
 | 8 | worktree 创建不跟随仓库内 `.claude/worktrees` 符号链接（防写出仓外） | **AUDIT** | EnterWorktree |

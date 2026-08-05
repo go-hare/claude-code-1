@@ -333,6 +333,16 @@ export const cliCommandGraph = [
     },
   ),
   command(
+    'auto-mode.reset',
+    ['auto-mode', 'reset'],
+    'Restore default auto mode configuration (removes autoMode from user settings)',
+    {
+      ownership: 'product-operation',
+      reuse: 'reuse-as-is',
+      capability: 'policy',
+    },
+  ),
+  command(
     'autonomy',
     ['autonomy'],
     'Inspect and manage automatic autonomy runs and flows',
