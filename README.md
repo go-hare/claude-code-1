@@ -43,12 +43,13 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.27**），与 git tag 可能不同步。
+近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.28**），与 git tag 可能不同步。
 
-### 近期更新（2.7.5 → 2.7.27）
+### 近期更新（2.7.5 → 2.7.28）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.28** | **Win 打包剪贴板贴图**：`bun --compile` 下 sharp 原生模块不可用时改走 System.Drawing 缩放/JPEG；dev 仍用 sharp。 |
 | **2.7.27** | **Prompt 通知条高度**：绝对定位区 height 2→1，避免最新通知盖住 prompt 顶边框（如剪贴板图片 `alt+v` 提示）。 |
 | **2.7.26** | **Win 剪贴板图片粘贴**：Git Bash 下 PowerShell `shell:false` argv；空 paste 开 Windows；优先 PNG 流；客户端 ≥8px 拦截 1×1；Buddy/KAIROS 文档对齐 densable 211。 |
 | **2.7.25** | **Host densable 211 生产路径**：永久 `model_not_found` → `system/model_fallback`；`system/background_tasks_changed`（REPLACE live set）；mid-bg `didBackground` 真 flip；eviction 保 Host progress 事件。 |

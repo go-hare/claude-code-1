@@ -4,12 +4,14 @@ import { execa } from 'execa'
 import { tmpdir } from 'os'
 import { basename, extname, isAbsolute, join } from 'path'
 import {
+  API_IMAGE_MAX_BASE64_SIZE,
   IMAGE_MAX_HEIGHT,
   IMAGE_MAX_WIDTH,
   IMAGE_TARGET_RAW_SIZE,
 } from '../constants/apiLimits.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getImageProcessor } from '@claude-code/builtin-tools/tools/FileReadTool/imageProcessor.js'
+import { isInBundledMode } from './bundledMode.js'
 import { logForDebugging } from './debug.js'
 import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -260,6 +262,256 @@ export async function hasImageInClipboard(): Promise<boolean> {
   return result.code === 0
 }
 
+/**
+ * Read PNG IHDR width/height without native image deps.
+ * PNG signature 8 bytes + IHDR length/type 8 bytes → dims at offset 16.
+ */
+function readPngIhdrDims(
+  buffer: Buffer,
+): { width: number; height: number } | undefined {
+  if (
+    buffer.length < 24 ||
+    buffer[0] !== 0x89 ||
+    buffer[1] !== 0x50 ||
+    buffer[2] !== 0x4e ||
+    buffer[3] !== 0x47
+  ) {
+    return undefined
+  }
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  }
+}
+
+/**
+ * bun --compile cannot load sharp's win32 native addon (optionalDependency
+ * .node is not embedded). Use System.Drawing to resize/recompress the temp
+ * file in place so packaged Windows binaries can still paste large screenshots.
+ *
+ * Returns display dims + whether the file was rewritten as JPEG.
+ */
+async function downsampleClipboardFileWin32(
+  path: string,
+  originalWidth: number,
+  originalHeight: number,
+): Promise<{ width: number; height: number; jpeg: boolean } | null> {
+  const pathLit = escapePowerShellSingleQuoted(path)
+  const maxW = IMAGE_MAX_WIDTH
+  const maxH = IMAGE_MAX_HEIGHT
+  const targetRaw = Math.floor(IMAGE_TARGET_RAW_SIZE)
+  // Write to a sibling temp file then Move-Item — GDI+ locks the source path
+  // while FromFile is open; overwriting $path in-place often fails.
+  const script = [
+    'Add-Type -AssemblyName System.Drawing',
+    `$path = '${pathLit}'`,
+    `$maxW = ${maxW}`,
+    `$maxH = ${maxH}`,
+    `$targetRaw = ${targetRaw}`,
+    '$img = $null',
+    '$bmp = $null',
+    'try {',
+    '  $img = [System.Drawing.Image]::FromFile($path)',
+    '  if ($null -eq $img) { exit 1 }',
+    '  $w = [double]$img.Width',
+    '  $h = [double]$img.Height',
+    '  if ($w -le 0 -or $h -le 0) { exit 1 }',
+    '  $scale = 1.0',
+    '  if ($w -gt $maxW) { $scale = [Math]::Min($scale, $maxW / $w) }',
+    '  if ($h -gt $maxH) { $scale = [Math]::Min($scale, $maxH / $h) }',
+    '  $nw = [int][Math]::Max(1, [Math]::Round($w * $scale))',
+    '  $nh = [int][Math]::Max(1, [Math]::Round($h * $scale))',
+    '  $fi = New-Object System.IO.FileInfo $path',
+    '  $needResize = ($scale -lt 1.0)',
+    '  $needCompress = ($fi.Length -gt $targetRaw)',
+    '  if (-not $needResize -and -not $needCompress) {',
+    '    Write-Output ("$([int]$w) $([int]$h) png")',
+    '    exit 0',
+    '  }',
+    '  if ($needResize) {',
+    '    $bmp = New-Object System.Drawing.Bitmap $nw, $nh',
+    '    $g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
+    '    $g.DrawImage($img, 0, 0, $nw, $nh)',
+    '    $g.Dispose()',
+    '  } else {',
+    '    $bmp = New-Object System.Drawing.Bitmap $img',
+    '    $nw = $bmp.Width; $nh = $bmp.Height',
+    '  }',
+    '  $img.Dispose(); $img = $null',
+    '  $tmp = $path + ".claude-ds.tmp.jpg"',
+    '  $codec = $null',
+    '  foreach ($c in [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()) {',
+    '    if ($c.MimeType -eq "image/jpeg") { $codec = $c; break }',
+    '  }',
+    '  if ($null -eq $codec) { exit 1 }',
+    '  $ep = New-Object System.Drawing.Imaging.EncoderParameters 1',
+    '  foreach ($q in @(85, 70, 55, 40, 25)) {',
+    '    $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]$q)',
+    '    $bmp.Save($tmp, $codec, $ep)',
+    '    $fi2 = New-Object System.IO.FileInfo $tmp',
+    '    if ($fi2.Length -le $targetRaw) { break }',
+    '  }',
+    '  $bmp.Dispose(); $bmp = $null',
+    '  Move-Item -LiteralPath $tmp -Destination $path -Force',
+    '  Write-Output ("$nw $nh jpeg")',
+    '  exit 0',
+    '} catch {',
+    '  if ($null -ne $img) { try { $img.Dispose() } catch {} }',
+    '  if ($null -ne $bmp) { try { $bmp.Dispose() } catch {} }',
+    '  Write-Error $_',
+    '  exit 1',
+    '}',
+  ].join('; ')
+
+  const result = await runPowerShell(script)
+  if (result.code !== 0) {
+    logForDebugging(
+      `win32 System.Drawing downsample failed code=${result.code} stderr=${result.stderr.trim()} stdout=${result.stdout.trim()}`,
+      { level: 'warn' },
+    )
+    return null
+  }
+  const match = result.stdout.trim().match(/(\d+)\s+(\d+)\s+(png|jpeg)/i)
+  if (!match) {
+    logForDebugging(
+      `win32 System.Drawing downsample bad stdout: ${result.stdout.trim()}`,
+      { level: 'warn' },
+    )
+    return null
+  }
+  return {
+    width: Number(match[1]),
+    height: Number(match[2]),
+    jpeg: match[3]!.toLowerCase() === 'jpeg',
+  }
+}
+
+/**
+ * Finalize a win32 clipboard temp file into API-ready base64.
+ *
+ * Packaged (`bun --compile`) binaries cannot load sharp's native addon on
+ * Windows — resize/metadata would throw and large screenshots fail paste.
+ * Prefer a no-sharp path when bundled, or when the sharp path fails.
+ */
+async function finalizeClipboardImageWin32(
+  screenshotPath: string,
+  known?: { width?: number; height?: number },
+): Promise<ImageWithDimensions | null> {
+  const fs = getFsImplementation()
+  let imageBuffer = fs.readFileBytesSync(screenshotPath)
+  if (imageBuffer.length === 0) {
+    return null
+  }
+
+  let originalWidth = known?.width
+  let originalHeight = known?.height
+  if (
+    (originalWidth === undefined || originalHeight === undefined) &&
+    imageBuffer.length >= 24
+  ) {
+    const ihdr = readPngIhdrDims(imageBuffer)
+    if (ihdr) {
+      originalWidth = ihdr.width
+      originalHeight = ihdr.height
+    }
+  }
+
+  if (
+    typeof originalWidth === 'number' &&
+    typeof originalHeight === 'number' &&
+    (originalWidth < MIN_CLIPBOARD_IMAGE_EDGE ||
+      originalHeight < MIN_CLIPBOARD_IMAGE_EDGE)
+  ) {
+    logForDebugging(
+      `win32 clipboard image ${originalWidth}x${originalHeight} below floor — ignoring`,
+      { level: 'warn' },
+    )
+    return null
+  }
+
+  const needsResize =
+    imageBuffer.length > IMAGE_TARGET_RAW_SIZE ||
+    (typeof originalWidth === 'number' && originalWidth > IMAGE_MAX_WIDTH) ||
+    (typeof originalHeight === 'number' && originalHeight > IMAGE_MAX_HEIGHT)
+
+  // Dev (non-bundled): sharp works — keep existing high-quality path.
+  // Bundled: skip sharp entirely when we need resize, or try pass-through first.
+  if (!isInBundledMode()) {
+    try {
+      return await finalizeClipboardImageBuffer(imageBuffer)
+    } catch (e) {
+      logForDebugging(
+        `win32 sharp finalize failed, falling back to System.Drawing: ${e}`,
+        { level: 'warn' },
+      )
+    }
+  } else if (!needsResize) {
+    // Under caps: ship raw PNG without native image deps.
+    const base64Image = imageBuffer.toString('base64')
+    const mediaType = detectImageFormatFromBase64(base64Image)
+    return {
+      base64: base64Image,
+      mediaType,
+      dimensions:
+        typeof originalWidth === 'number' && typeof originalHeight === 'number'
+          ? {
+              originalWidth,
+              originalHeight,
+              displayWidth: originalWidth,
+              displayHeight: originalHeight,
+            }
+          : undefined,
+    }
+  }
+
+  // System.Drawing downsample (bundled large images, or sharp failed).
+  const ow = originalWidth ?? IMAGE_MAX_WIDTH
+  const oh = originalHeight ?? IMAGE_MAX_HEIGHT
+  const ds = await downsampleClipboardFileWin32(screenshotPath, ow, oh)
+  if (!ds) {
+    // Last resort: if raw still under base64 limit, ship uncompressed.
+    const base64Size = Math.ceil((imageBuffer.length * 4) / 3)
+    if (base64Size <= API_IMAGE_MAX_BASE64_SIZE) {
+      const base64Image = imageBuffer.toString('base64')
+      return {
+        base64: base64Image,
+        mediaType: detectImageFormatFromBase64(base64Image),
+        dimensions:
+          typeof originalWidth === 'number' &&
+          typeof originalHeight === 'number'
+            ? {
+                originalWidth,
+                originalHeight,
+                displayWidth: originalWidth,
+                displayHeight: originalHeight,
+              }
+            : undefined,
+      }
+    }
+    return null
+  }
+
+  imageBuffer = fs.readFileBytesSync(screenshotPath)
+  if (imageBuffer.length === 0) {
+    return null
+  }
+  const base64Image = imageBuffer.toString('base64')
+  const mediaType = ds.jpeg
+    ? 'image/jpeg'
+    : detectImageFormatFromBase64(base64Image)
+  return {
+    base64: base64Image,
+    mediaType,
+    dimensions: {
+      originalWidth: originalWidth ?? ds.width,
+      originalHeight: originalHeight ?? ds.height,
+      displayWidth: ds.width,
+      displayHeight: ds.height,
+    },
+  }
+}
+
 async function finalizeClipboardImageBuffer(
   imageBuffer: Buffer,
 ): Promise<ImageWithDimensions | null> {
@@ -269,6 +521,7 @@ async function finalizeClipboardImageBuffer(
 
   // BMP is not supported by the API — convert to PNG via Sharp.
   // This handles WSL2 / some Windows copy paths that produce BMP.
+  // (win32 clipboard save path already writes PNG via System.Drawing.)
   let buffer = imageBuffer
   if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) {
     const sharp = await getImageProcessor()
@@ -406,14 +659,18 @@ export async function getImageFromClipboard(): Promise<ImageWithDimensions | nul
         }
         return null
       }
-      const imageBuffer =
-        getFsImplementation().readFileBytesSync(screenshotPath)
+      // Keep the temp file until finalize finishes — bundled mode may rewrite
+      // it via System.Drawing when sharp's native addon is unavailable.
+      const finalized = await finalizeClipboardImageWin32(screenshotPath, {
+        width: saved.width,
+        height: saved.height,
+      })
       try {
         getFsImplementation().unlinkSync(screenshotPath)
       } catch {
         // best-effort cleanup
       }
-      return finalizeClipboardImageBuffer(imageBuffer)
+      return finalized
     } catch (e) {
       logError(e as Error)
       try {

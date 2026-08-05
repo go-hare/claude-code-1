@@ -43,12 +43,13 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.27**; trust `package.json` / npm) and may not match git tags.
+Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.28**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.27)
+### Recent updates (2.7.5 → 2.7.28)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.28** | **Windows packaged clipboard paste**: when `bun --compile` cannot load sharp natives, fall back to System.Drawing resize/JPEG; dev still uses sharp. |
 | **2.7.27** | **Prompt notification strip height**: absolute box height 2→1 so the latest notice does not paint over the prompt top border (e.g. clipboard image `alt+v` hint). |
 | **2.7.26** | **Windows clipboard image paste**: PowerShell argv `shell:false` under Git Bash; empty paste on Windows; prefer PNG stream; client ≥8px floor rejects 1×1; Buddy/KAIROS docs aligned to densable 211. |
 | **2.7.25** | **Host densable 211 production path**: permanent `model_not_found` → `system/model_fallback`; `system/background_tasks_changed` (REPLACE live set); mid-bg `didBackground` true flip; eviction keeps Host progress events. |
