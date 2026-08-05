@@ -58,8 +58,12 @@ export interface BgJobState {
   linkScanPath?: string
   /** Flags to pass on respawn */
   respawnFlags: string[]
-  /** Worktree isolation mode */
-  bgIsolation?: 'none' | 'worktree'
+  /**
+   * Worktree isolation mode.
+   * densable keepParent /fork writes `default` (not a handoff of the parent's
+   * owned worktree); left-arrow may write `worktree` when handing off.
+   */
+  bgIsolation?: 'none' | 'worktree' | 'default'
   /** Origin CWD (before worktree) */
   originCwd?: string
   /** Worktree path if using worktree isolation */
@@ -117,6 +121,18 @@ export interface BgJobState {
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Memory toggled off */
   memoryToggledOff?: boolean
+  /**
+   * densable keepParent /fork (D$t): parent REPL still owns the source
+   * transcript — child resume uses a job-local snapshot; do not treat parent
+   * as handed-off/dead for live-parent protection.
+   */
+  forkSourceAlive?: boolean
+  /** densable forkBoundaryAt — ISO timestamp of last parent message at fork. */
+  forkBoundaryAt?: string
+  /** densable forkSessionId — child session id allocated for the fork. */
+  forkSessionId?: string
+  /** densable forkParentSessionId — parent session that stayed live. */
+  forkParentSessionId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -309,8 +325,8 @@ export function createInitialJobState(opts: {
   color?: string
   /** Resume/fork source transcript (left-arrow / exit handoff). */
   resumeSessionId?: string
-  /** Worktree isolation (official hcn/A8q). */
-  bgIsolation?: 'none' | 'worktree'
+  /** Worktree isolation (official hcn/A8q / densable keepParent). */
+  bgIsolation?: 'none' | 'worktree' | 'default'
   originCwd?: string
   worktreePath?: string
   worktreeBranch?: string
@@ -323,6 +339,11 @@ export function createInitialJobState(opts: {
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official hcn memoryToggledOff when auto-memory is off. */
   memoryToggledOff?: boolean
+  /** densable keepParent live-parent fields (D$t). */
+  forkSourceAlive?: boolean
+  forkBoundaryAt?: string
+  forkSessionId?: string
+  forkParentSessionId?: string
 }): BgJobState {
   const now = new Date().toISOString()
   // Official A8q/tHH: empty intent+detail → idle blocked needs prompt.
@@ -362,11 +383,16 @@ export function createInitialJobState(opts: {
     bridgeSessionGroupingId: opts.bridgeSessionGroupingId,
     sessionPermissionRules: opts.sessionPermissionRules,
     memoryToggledOff: opts.memoryToggledOff,
+    forkSourceAlive: opts.forkSourceAlive,
+    forkBoundaryAt: opts.forkBoundaryAt,
+    forkSessionId: opts.forkSessionId,
+    forkParentSessionId: opts.forkParentSessionId,
   }
 }
 
 /**
  * Official A8q / hcn — write job dir + state.json for left-arrow open before spawn.
+ * densable keepParent /fork also uses this with forkSourceAlive + snapshot resume.
  * Returns short + jobDir for CLAUDE_AGENTS_SELECT / FleetView origin.
  */
 export function writeA8qJobState(opts: {
@@ -384,6 +410,11 @@ export function writeA8qJobState(opts: {
     hookBased?: boolean
     originCwd?: string
   }
+  /**
+   * densable keepParent: `default` (parent keeps worktree).
+   * When omitted: `worktree` if worktree meta present, else `none`.
+   */
+  bgIsolation?: 'none' | 'worktree' | 'default'
   bridgeSessionId?: string
   bridgeOutboundOnly?: boolean
   bridgeSessionSeq?: number
@@ -393,9 +424,15 @@ export function writeA8qJobState(opts: {
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official aAf → hcn memoryToggledOff. */
   memoryToggledOff?: boolean
+  /** densable keepParent live-parent protection fields. */
+  forkSourceAlive?: boolean
+  forkBoundaryAt?: string
+  forkSessionId?: string
+  forkParentSessionId?: string
 }): { short: string; jobDir: string } {
   const short = opts.sessionId.slice(0, 8)
   const jobDir = getJobDirPath(short)
+  const bgIsolation = opts.bgIsolation ?? (opts.worktree ? 'worktree' : 'none')
   const state = createInitialJobState({
     intent: opts.intent,
     name: opts.name,
@@ -407,7 +444,7 @@ export function writeA8qJobState(opts: {
     short,
     template: 'bg',
     resumeSessionId: opts.resumeSessionId,
-    bgIsolation: opts.worktree ? 'worktree' : 'none',
+    bgIsolation,
     originCwd: opts.worktree?.originCwd,
     worktreePath: opts.worktree?.path,
     worktreeBranch: opts.worktree?.branch,
@@ -418,6 +455,10 @@ export function writeA8qJobState(opts: {
     bridgeSessionGroupingId: opts.bridgeSessionGroupingId,
     sessionPermissionRules: opts.sessionPermissionRules,
     memoryToggledOff: opts.memoryToggledOff,
+    forkSourceAlive: opts.forkSourceAlive,
+    forkBoundaryAt: opts.forkBoundaryAt,
+    forkSessionId: opts.forkSessionId,
+    forkParentSessionId: opts.forkParentSessionId,
   })
   writeBgJobState(short, state)
   return { short, jobDir }

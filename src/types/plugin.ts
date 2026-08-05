@@ -65,6 +65,12 @@ export type LoadedPlugin = {
   outputStylesPaths?: string[] // Additional output style paths from manifest
   hooksConfig?: HooksSettings
   mcpServers?: Record<string, McpServerConfig>
+  /**
+   * densable `skipMcpDiscovery` — set by `--plugin-dir-no-mcp` session plugins.
+   * When true, the engine must not read this plugin's `.mcp.json` / MCPB
+   * (caller owns its MCP connections).
+   */
+  skipMcpDiscovery?: boolean
   lspServers?: Record<string, LspServerConfig>
   settings?: Record<string, unknown>
 }

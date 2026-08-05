@@ -83,7 +83,16 @@ export type AiTitleMessage = {
 export type LastPromptMessage = {
   type: 'last-prompt'
   sessionId: UUID
-  lastPrompt: string
+  /** densable optional when D6e writes leaf-only boundary. */
+  lastPrompt?: string
+  /**
+   * densable D6e leafUuid — hard boundary for keepParent `/fork` snapshot.
+   * null = no leaf (still explicit boundary).
+   */
+  leafUuid?: string | null
+  /** densable D6e explicit:true — fork/rewind boundary, not a soft re-append. */
+  explicit?: boolean
+  timestamp?: string
 }
 
 /**

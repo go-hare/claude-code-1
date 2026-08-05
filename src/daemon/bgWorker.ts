@@ -2788,6 +2788,21 @@ async function getTranscriptPath(
   sessionId: string,
   cwd: string,
 ): Promise<string | undefined> {
+  // densable keepParent /fork: --resume may be an absolute snapshot path
+  // (jobs/<short>/tmp/parent-transcript.jsonl), not a session UUID.
+  if (
+    sessionId.endsWith('.jsonl') ||
+    sessionId.endsWith('.json') ||
+    (typeof sessionId === 'string' &&
+      (sessionId.includes('/') || sessionId.includes('\\')))
+  ) {
+    try {
+      await access(sessionId)
+      return sessionId
+    } catch {
+      return undefined
+    }
+  }
   try {
     const projectsDir = join(getClaudeConfigHomeDir(), 'projects')
     const dirs = await readdir(projectsDir)
@@ -2799,6 +2814,14 @@ async function getTranscriptPath(
       } catch {}
     }
   } catch {}
+  // cwd-relative fallback (unused by densable path but useful for tests)
+  if (cwd) {
+    try {
+      const candidate = join(cwd, `${sessionId}.jsonl`)
+      await access(candidate)
+      return candidate
+    } catch {}
+  }
   return undefined
 }
 

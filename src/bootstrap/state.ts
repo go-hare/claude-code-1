@@ -165,6 +165,8 @@ type State = {
   inMemoryErrorLog: Array<{ error: string; timestamp: string }>
   // Session-only plugins from --plugin-dir flag
   inlinePlugins: Array<string>
+  // densable inlinePluginsNoMcp — --plugin-dir-no-mcp (load plugin, skip .mcp.json)
+  inlinePluginsNoMcp: Array<string>
   // Explicit --chrome / --no-chrome flag value (undefined = not set on CLI)
   chromeFlagOverride: boolean | undefined
   // Full chrome system prompt active for this session (launch --chrome or /chrome This session On).
@@ -402,6 +404,8 @@ function getInitialState(): State {
     inMemoryErrorLog: [],
     // Session-only plugins from --plugin-dir flag
     inlinePlugins: [],
+    // densable --plugin-dir-no-mcp
+    inlinePluginsNoMcp: [],
     // Explicit --chrome / --no-chrome flag value (undefined = not set on CLI)
     chromeFlagOverride: undefined,
     claudeInChromeSessionPromptActive: false,
@@ -1513,6 +1517,16 @@ export function setInlinePlugins(plugins: Array<string>): void {
 
 export function getInlinePlugins(): Array<string> {
   return STATE.inlinePlugins
+}
+
+/** densable `mxr` — session plugins that skip MCP discovery. */
+export function setInlinePluginsNoMcp(plugins: Array<string>): void {
+  STATE.inlinePluginsNoMcp = plugins
+}
+
+/** densable `Hfe` — paths from `--plugin-dir-no-mcp`. */
+export function getInlinePluginsNoMcp(): Array<string> {
+  return STATE.inlinePluginsNoMcp
 }
 
 export function setChromeFlagOverride(value: boolean | undefined): void {

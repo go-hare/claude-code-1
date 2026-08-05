@@ -1,6 +1,10 @@
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join } from 'path'
-import { getInlinePlugins, getSessionId } from '../../bootstrap/state.js'
+import {
+  getInlinePlugins,
+  getInlinePluginsNoMcp,
+  getSessionId,
+} from '../../bootstrap/state.js'
 import type { Command } from '../../types/command.js'
 import { getPluginErrorMessage } from '../../types/plugin.js'
 import {
@@ -416,7 +420,12 @@ export const getPluginCommands = memoize(async (): Promise<Command[]> => {
   // works — getInlinePlugins() is set by main.tsx from --plugin-dir.
   // loadAllPluginsCacheOnly already short-circuits to inline-only when
   // inlinePlugins.length > 0.
-  if (isBareMode() && getInlinePlugins().length === 0) {
+  // densable: Cfe().length>0 || Hfe().length>0 — honor --plugin-dir-no-mcp too
+  if (
+    isBareMode() &&
+    getInlinePlugins().length === 0 &&
+    getInlinePluginsNoMcp().length === 0
+  ) {
     return []
   }
   // Only load commands from enabled plugins
@@ -839,8 +848,12 @@ async function loadSkillsFromDirectory(
 
 export const getPluginSkills = memoize(async (): Promise<Command[]> => {
   // --bare: same gate as getPluginCommands above — honor explicit
-  // --plugin-dir, skip marketplace auto-load.
-  if (isBareMode() && getInlinePlugins().length === 0) {
+  // --plugin-dir / --plugin-dir-no-mcp, skip marketplace auto-load.
+  if (
+    isBareMode() &&
+    getInlinePlugins().length === 0 &&
+    getInlinePluginsNoMcp().length === 0
+  ) {
     return []
   }
   // Only load skills from enabled plugins

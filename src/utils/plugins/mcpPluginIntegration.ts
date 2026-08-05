@@ -132,6 +132,11 @@ export async function loadPluginMcpServers(
   plugin: LoadedPlugin,
   errors: PluginError[] = [],
 ): Promise<Record<string, McpServerConfig> | undefined> {
+  // densable: if (e.skipMcpDiscovery) return {}
+  if (plugin.skipMcpDiscovery) {
+    return {}
+  }
+
   let servers: Record<string, McpServerConfig> = {}
 
   // Check for .mcp.json in plugin directory first (lowest priority)

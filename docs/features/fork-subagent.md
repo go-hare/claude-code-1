@@ -29,13 +29,25 @@ Agent({ prompt: "修复这个 bug" })  // 无 subagent_type
 Agent({ subagent_type: "general-purpose", prompt: "..." })
 ```
 
-### /fork 命令
+### /fork 与 /subtask（densable 2.1.212 — `D$t keepParent` / `xZr`）
 
-**已实现**（`src/commands/fork/fork.tsx`），不是 stub。调用 `AgentTool` 的隐式 fork 路径（`fork: true` + 省略 `subagent_type`，后台跑）。
+| 命令 | densable | 行为 | 门控 |
+|------|----------|------|------|
+| **`/fork [prompt]`** | `L2p` → `D$t(..., {keepParent:true})` via=`fork_session` | **复制当前对话到新后台 session**（`claude agents` 独立一行），**主会话继续**。flush 10s 硬失败；parent transcript **快照**到 `jobs/<short>/tmp/parent-transcript.jsonl`（live-parent）；job 写 `forkSourceAlive` + boundary/ids + `bgIsolation:"default"`；densable 多行 toast | 非 coordinator；`BG_SESSIONS` + daemon |
+| **`/subtask <task>`** | `s$y` → `xZr` | **会话内**全上下文 fork worker（212 前 `/fork`），结果经 task-notification 回主会话 | `isForkSubagentEnabled()`（`FEATURE_FORK_SUBAGENT` 或 portable env/GB） |
 
-门控与 **AgentTool 共用** `packages/.../forkSubagent.isForkSubagentEnabled()`（见下）。开启时 `/branch` 失去 `fork` 别名，避免冲突。
+实现入口：
 
-本地开启示例：
+- `src/utils/spawnBackgroundSessionFork.ts` — keepParent spawn + toast helpers
+- `src/commands/fork/fork.tsx` — slash body
+- `src/commands/subtask/subtask.tsx` — AgentTool omit `subagent_type`
+- extract：`docs/upstream-extraction/v2.1.212/keepParent-fork.extract.md`
+
+`/branch` **不再**占用 `fork` 别名（`/fork` 始终注册为独立命令）。
+
+**densable agent-view OFF**：旧 `gwd` 把 `/fork` 指到 `xZr`。本地产品默认 agent view 路径（session-copy）；关闭 agent view 时仍用 session-copy（不回退到 directive-only xZr），避免双语义混淆。
+
+本地开启会话内 subtask：
 
 ```bash
 FEATURE_FORK_SUBAGENT=1 bun run dev
@@ -45,7 +57,12 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 
 ## 三、实现架构
 
-### 3.1 门控与互斥（AgentTool 与 `/fork` 统一）
+### 3.1 门控
+
+| 路径 | 门控 |
+|------|------|
+| **`/fork` session copy** | 始终注册；`isCoordinatorMode()` 禁用；运行时 `feature('BG_SESSIONS')` + daemon |
+| **`/subtask` + AgentTool 隐式 fork** | `isForkSubagentEnabled()`：`feature('FORK_SUBAGENT')` **或** portable `CLAUDE_CODE_FORK_SUBAGENT` / GB；再排除 coordinator / non-interactive |
 
 文件：`packages/builtin-tools/src/tools/AgentTool/forkSubagent.ts`
 
@@ -53,14 +70,14 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 // 启用路径 OR：
 // 1) feature('FORK_SUBAGENT') — 编译 FEATURE_FORK_SUBAGENT=1 / build 列表
 // 2) CLAUDE_CODE_FORK_SUBAGENT / GB tengu_fork_subagent
-//    （src/utils/forkSubagentGate.ts，densable  portable）
+//    （src/utils/forkSubagentGate.ts，densable portable）
 // 然后：
 // - coordinator 模式 → false
 // - 非交互（pipe/SDK）→ false
 export function isForkSubagentEnabled(): boolean
 ```
 
-**默认 build 未列入 `FORK_SUBAGENT`**（`scripts/defines.ts` 注释：Agent 特殊路径已覆盖多数需求）。需要隐式 fork / `/fork` 时用 env 或 dev feature。
+**默认 build 未列入 `FORK_SUBAGENT`**。需要 `/subtask` / 隐式 fork 时用 env 或 dev feature。**`/fork` session copy 不依赖 FORK_SUBAGENT。**
 
 ### 3.2 FORK_AGENT 定义
 
@@ -204,5 +221,7 @@ FEATURE_FORK_SUBAGENT=1 bun run dev
 | `packages/builtin-tools/src/tools/AgentTool/resumeAgent.ts` | — | Fork agent 恢复 |
 | `src/constants/xml.ts` | — | XML 标签常量 |
 | `src/utils/forkedAgent.ts` | — | CacheSafeParams + ContentReplacementState 克隆 |
-| `src/commands/fork/index.ts` + `fork.tsx` | — | `/fork` 命令（已实现，与 AgentTool 共用门控） |
+| `src/commands/fork/index.ts` + `fork.tsx` | — | densable 212 `/fork`：bg session 拷贝 |
+| `src/utils/spawnBackgroundSessionFork.ts` | — | `/fork` → writeA8q + submitDispatch resume/fork |
+| `src/commands/subtask/index.ts` + `subtask.tsx` | — | densable 212 `/subtask`：AgentTool 隐式 fork |
 | `src/utils/forkSubagentGate.ts` | — | portable densable：`CLAUDE_CODE_FORK_SUBAGENT` / `tengu_fork_subagent` |

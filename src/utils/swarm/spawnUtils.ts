@@ -6,6 +6,7 @@ import {
   getChromeFlagOverride,
   getFlagSettingsPath,
   getInlinePlugins,
+  getInlinePluginsNoMcp,
   getMainLoopModelOverride,
   getSessionBypassPermissionsMode,
 } from '../../bootstrap/state.js'
@@ -81,6 +82,10 @@ export function buildInheritedCliArgParts(options?: {
   const inlinePlugins = getInlinePlugins()
   for (const pluginDir of inlinePlugins) {
     flags.push('--plugin-dir', pluginDir)
+  }
+  // densable Hfe: --plugin-dir-no-mcp for each no-mcp session plugin
+  for (const pluginDir of getInlinePluginsNoMcp()) {
+    flags.push('--plugin-dir-no-mcp', pluginDir)
   }
 
   // Propagate --teammate-mode so tmux teammates use the same mode as leader

@@ -317,6 +317,7 @@ import {
   setFlagSettingsPath,
   setInitialMainLoopModel,
   setInlinePlugins,
+  setInlinePluginsNoMcp,
   setIsInteractive,
   setKairosActive,
   setOriginalCwd,
@@ -1200,6 +1201,16 @@ async function run(): Promise<CommanderCommand> {
       setInlinePlugins(pluginDir);
       clearPluginCache('preAction: --plugin-dir inline plugins');
     }
+    // densable: pluginDirNoMcp → setInlinePluginsNoMcp (Hfe / mxr)
+    const pluginDirNoMcp = thisCommand.getOptionValue('pluginDirNoMcp');
+    if (
+      Array.isArray(pluginDirNoMcp) &&
+      pluginDirNoMcp.length > 0 &&
+      pluginDirNoMcp.every((p: unknown) => typeof p === 'string')
+    ) {
+      setInlinePluginsNoMcp(pluginDirNoMcp as string[]);
+      clearPluginCache('preAction: --plugin-dir-no-mcp inline plugins');
+    }
 
     runMigrations();
     profileCheckpoint('preAction_after_migrations');
@@ -1518,6 +1529,14 @@ async function run(): Promise<CommanderCommand> {
       (val: string, prev: string[]) => [...prev, val],
       [] as string[],
     )
+    // densable --plugin-dir-no-mcp: like --plugin-dir but engine will not read
+    // this plugin's .mcp.json (caller owns its MCP connections)
+    .option(
+      '--plugin-dir-no-mcp <path>',
+      "Like --plugin-dir but the engine will not read this plugin's .mcp.json (caller owns its MCP connections)",
+      (val: string, prev: string[]) => [...prev, val],
+      [] as string[],
+    )
     .option('--disable-slash-commands', 'Disable all skills', () => true)
     .option('--chrome', 'Enable Claude in Chrome integration')
     .option('--no-chrome', 'Disable Claude in Chrome integration')
@@ -1637,6 +1656,59 @@ async function run(): Promise<CommanderCommand> {
       const agentCli = options.agent;
       if (feature('BG_SESSIONS') && agentCli) {
         process.env.CLAUDE_CODE_AGENT = agentCli;
+      }
+
+      // densable 2.1.212 launch sticky state for keepParent /fork:
+      //   xei(Ajs(a)) + Iei({appendSystemPrompt, agent, agents}) + rti(gXe argv)
+      try {
+        const {
+          setForkReplayLaunchConfig,
+          setForkRestrictedLaunchConfig,
+          setReplConfigArgv,
+          isForkRestrictedLaunchOptions,
+          buildReplConfigArgv,
+        } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./utils/forkReplayLaunchConfig.js') as typeof import('./utils/forkReplayLaunchConfig.js');
+        const rawAppend = typeof options.appendSystemPrompt === 'string' ? options.appendSystemPrompt : undefined;
+        // densable Iei
+        setForkReplayLaunchConfig({
+          ...(typeof rawAppend === 'string' && rawAppend !== '' && { appendSystemPrompt: rawAppend }),
+          ...(typeof agentCli === 'string' && agentCli !== '' && { agent: agentCli }),
+          ...(typeof agentsJson === 'string' && agentsJson !== '' && { agents: agentsJson }),
+        });
+        // densable xei(Ajs(a)) — sticky restricted launch for nZ_/Hei()
+        setForkRestrictedLaunchConfig(
+          isForkRestrictedLaunchOptions({
+            systemPrompt: options.systemPrompt,
+            systemPromptFile: options.systemPromptFile,
+            appendSystemPromptFile: options.appendSystemPromptFile,
+            permissionPromptTool: options.permissionPromptTool,
+            settingSources: options.settingSources,
+            managedSettings: (options as { managedSettings?: unknown }).managedSettings,
+            tools: options.tools,
+          }),
+        );
+        // densable rti([...Q4t(J4t({...})), fallback-model, allow-dangerously…, channels])
+        setReplConfigArgv(
+          buildReplConfigArgv({
+            settings: typeof options.settings === 'string' ? options.settings : undefined,
+            pluginDir: options.pluginDir as string | string[] | undefined,
+            // densable gXe includes pluginDirNoMcp (Hfe)
+            pluginDirNoMcp: (options as { pluginDirNoMcp?: string | string[] }).pluginDirNoMcp,
+            addDir: options.addDir as string | string[] | undefined,
+            mcpConfig: options.mcpConfig as string | string[] | undefined,
+            strictMcpConfig: Boolean(options.strictMcpConfig),
+            fallbackModel: typeof options.fallbackModel === 'string' ? options.fallbackModel : undefined,
+            allowDangerouslySkipPermissions: Boolean(
+              (options as { allowDangerouslySkipPermissions?: boolean }).allowDangerouslySkipPermissions,
+            ),
+            disableSlashCommands: Boolean(options.disableSlashCommands),
+            channels: (options as { channels?: string | string[] }).channels,
+          }),
+        );
+      } catch {
+        /* optional at launch */
       }
 
       // NOTE: LSP manager initialization is intentionally deferred until after

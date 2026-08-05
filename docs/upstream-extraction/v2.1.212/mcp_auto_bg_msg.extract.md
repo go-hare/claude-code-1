@@ -1,0 +1,67 @@
+# mcp_auto_bg_msg
+offset=121808786
+
+```
+
+
+ 
+
+text
+
+ 
+
+ 
+
+MCP tool "
+
+ 
+
+" is still running after 
+
+ 
+
+*
+
+s. It was moved to the background as task 
+
+ 
+
+ and keeps running; you'll receive a notification with the result when it completes. You can keep working in the meantime. To stop it, use TaskStop with task_id "
+
+ 
+
+2
+
+". Note: it does not survive exiting this session.
+
+S
+
+B
+
+=
+@ 
+@ 
+
+<
+
+B4
+@`<
+@ 
+G
+
+J
+3
+@
+<
+E
+
+Qt
+3?
+
+!
+
+@
+4
+0
+@
+```

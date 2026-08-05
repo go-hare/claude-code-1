@@ -153,17 +153,53 @@ const historyCmd = feature('UDS_INBOX')
 const claimMainCmd = feature('UDS_INBOX')
   ? require('./commands/claim-main/index.js').default
   : null
-// Same enable OR as AgentTool (compile feature OR portable env/GB).
-// Coordinator / non-interactive constraints: package isForkSubagentEnabled().
-const forkCmd =
-  feature('FORK_SUBAGENT') ||
-  (
-    require('./utils/forkSubagentGate.js') as typeof import('./utils/forkSubagentGate.js')
-  ).isForkSubagentEnabled()
-    ? (
-        require('./commands/fork/index.js') as typeof import('./commands/fork/index.js')
-      ).default
-    : null
+// densable 2.1.212 dual registration:
+//   CP() && !IS_DEMO ? [_wd, vwd] : [gwd]
+// Resolved at COMMANDS() call time (not module load) so settings/env are live.
+function isAgentViewOffForFork(): boolean {
+  if (process.env.IS_DEMO) return true
+  try {
+    const { isAgentViewDisabled } =
+      require('./utils/residualUiEnvGates.js') as typeof import('./utils/residualUiEnvGates.js')
+    let settingsDisable: boolean | undefined
+    try {
+      const { getSettings_DEPRECATED } =
+        require('./utils/settings/settings.js') as typeof import('./utils/settings/settings.js')
+      const s = getSettings_DEPRECATED?.() as
+        | { disableAgentView?: boolean }
+        | undefined
+      settingsDisable = s?.disableAgentView
+    } catch {
+      /* settings optional */
+    }
+    return isAgentViewDisabled(process.env, settingsDisable)
+  } catch {
+    return false
+  }
+}
+// densable _wd — session-copy keepParent /fork
+const sessionForkCmd = (
+  require('./commands/fork/index.js') as typeof import('./commands/fork/index.js')
+).default
+// densable gwd — in-session xZr /fork (always available when agent view off;
+// runtime gate inside call for FORK_SUBAGENT, matching densable isEnabled:!fb only)
+const inSessionForkCmd = (
+  require('./commands/fork/inSessionIndex.js') as typeof import('./commands/fork/inSessionIndex.js')
+).default
+// densable vwd — /subtask when agent view on
+// feature() only in ternary condition position (bun:bundle constraint)
+const forkSubagentPortable = (
+  require('./utils/forkSubagentGate.js') as typeof import('./utils/forkSubagentGate.js')
+).isForkSubagentEnabled()
+const subtaskCmdModule = (
+  feature('FORK_SUBAGENT')
+    ? true
+    : forkSubagentPortable
+)
+  ? (
+      require('./commands/subtask/index.js') as typeof import('./commands/subtask/index.js')
+    ).default
+  : null
 const buddy = isBuddyEnabled()
   ? (
       require('./commands/buddy/index.js') as typeof import('./commands/buddy/index.js')
@@ -390,7 +426,10 @@ const COMMANDS = memoize((): Command[] => [
   vim,
   webTools,
   ...(webCmd ? [webCmd] : []),
-  ...(forkCmd ? [forkCmd] : []),
+  // densable CP()&&!IS_DEMO ? [_wd,vwd] : [gwd] — live at COMMANDS() time
+  ...(isAgentViewOffForFork()
+    ? [inSessionForkCmd]
+    : [sessionForkCmd, ...(subtaskCmdModule ? [subtaskCmdModule] : [])]),
   ...(buddy ? [buddy] : []),
   ...(poor ? [poor] : []),
   ...(goalCmd ? [goalCmd] : []),
@@ -631,6 +670,11 @@ export async function getCommands(cwd: string): Promise<Command[]> {
  * Use this when dynamic skills are added to invalidate cached command lists.
  */
 export function clearCommandMemoizationCaches(): void {
+  // Built-in list is memoized once; clear so dual-reg (fork/subtask vs gwd)
+  // and other env/settings-gated built-ins re-evaluate after /clear / plugin
+  // reloads. densable re-reads CP() when command lists are rebuilt.
+  COMMANDS.cache?.clear?.()
+  builtInCommandNames.cache?.clear?.()
   loadAllCommands.cache?.clear?.()
   getSkillToolCommands.cache?.clear?.()
   getSlashCommandToolSkills.cache?.clear?.()

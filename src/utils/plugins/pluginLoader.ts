@@ -46,7 +46,10 @@ import {
 } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join, relative, resolve, sep } from 'path'
-import { getInlinePlugins } from '../../bootstrap/state.js'
+import {
+  getInlinePlugins,
+  getInlinePluginsNoMcp,
+} from '../../bootstrap/state.js'
 import {
   BUILTIN_MARKETPLACE_NAME,
   getBuiltinPlugins,
@@ -2919,16 +2922,20 @@ async function finishLoadingPluginFromPath(
 }
 
 /**
- * Load session-only plugins from --plugin-dir CLI flag.
+ * Load session-only plugins from --plugin-dir / --plugin-dir-no-mcp CLI flags.
  *
  * These plugins are loaded directly without going through the marketplace system.
  * They appear with source='plugin-name@inline' and are always enabled for the current session.
+ *
+ * densable: `--plugin-dir-no-mcp` sets `skipMcpDiscovery` so the engine will not
+ * read the plugin's `.mcp.json` (caller owns MCP connections).
  *
  * @param sessionPluginPaths - Array of plugin directory paths from CLI
  * @returns LoadedPlugin objects and any errors encountered
  */
 async function loadSessionOnlyPlugins(
   sessionPluginPaths: Array<string>,
+  options?: { skipMcpDiscovery?: boolean },
 ): Promise<{ plugins: LoadedPlugin[]; errors: PluginError[] }> {
   if (sessionPluginPaths.length === 0) {
     return { plugins: [], errors: [] }
@@ -2936,6 +2943,7 @@ async function loadSessionOnlyPlugins(
 
   const plugins: LoadedPlugin[] = []
   const errors: PluginError[] = []
+  const skipMcp = options?.skipMcpDiscovery === true
 
   for (const [index, pluginPath] of sessionPluginPaths.entries()) {
     try {
@@ -2966,11 +2974,18 @@ async function loadSessionOnlyPlugins(
       // Update source to use the actual plugin name from manifest
       plugin.source = `${plugin.name}@inline`
       plugin.repository = `${plugin.name}@inline`
+      // densable: s.skipMcpDiscovery → d.skipMcpDiscovery=!0, d.mcpServers={}
+      if (skipMcp) {
+        plugin.skipMcpDiscovery = true
+        plugin.mcpServers = {}
+      }
 
       plugins.push(plugin)
       errors.push(...pluginErrors)
 
-      logForDebugging(`Loaded inline plugin from path: ${plugin.name}`)
+      logForDebugging(
+        `Loaded inline plugin from path: ${plugin.name}${skipMcp ? ' (no-mcp)' : ''}`,
+      )
     } catch (error) {
       const errorMsg = errorMessage(error)
       logForDebugging(
@@ -2987,7 +3002,7 @@ async function loadSessionOnlyPlugins(
 
   if (plugins.length > 0) {
     logForDebugging(
-      `Loaded ${plugins.length} session-only plugins from --plugin-dir`,
+      `Loaded ${plugins.length} session-only plugins from --plugin-dir${skipMcp ? '-no-mcp' : ''}`,
     )
   }
 
@@ -3164,12 +3179,24 @@ async function assemblePluginLoadResult(
   // getInlinePlugins() is a synchronous state read with no dependency on
   // marketplace loading, so these two sources can be fetched concurrently.
   const inlinePlugins = getInlinePlugins()
-  const [marketplaceResult, sessionResult] = await Promise.all([
-    marketplaceLoader(),
-    inlinePlugins.length > 0
-      ? loadSessionOnlyPlugins(inlinePlugins)
-      : Promise.resolve({ plugins: [], errors: [] }),
-  ])
+  const inlinePluginsNoMcp = getInlinePluginsNoMcp()
+  // densable: Cfe() + Hfe(skipMcpDiscovery) as parallel session sources
+  const [marketplaceResult, sessionMcpResult, sessionNoMcpResult] =
+    await Promise.all([
+      marketplaceLoader(),
+      inlinePlugins.length > 0
+        ? loadSessionOnlyPlugins(inlinePlugins)
+        : Promise.resolve({ plugins: [], errors: [] }),
+      inlinePluginsNoMcp.length > 0
+        ? loadSessionOnlyPlugins(inlinePluginsNoMcp, {
+            skipMcpDiscovery: true,
+          })
+        : Promise.resolve({ plugins: [], errors: [] }),
+    ])
+  const sessionResult = {
+    plugins: [...sessionMcpResult.plugins, ...sessionNoMcpResult.plugins],
+    errors: [...sessionMcpResult.errors, ...sessionNoMcpResult.errors],
+  }
   // 3. Load built-in plugins that ship with the CLI
   const builtinResult = getBuiltinPlugins()
 

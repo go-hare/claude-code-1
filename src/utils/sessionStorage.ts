@@ -49,6 +49,7 @@ import {
   type Entry,
   type FileHistorySnapshotMessage,
   type GoalState,
+  type LastPromptMessage,
   type LogOption,
   type PersistedWorktreeSession,
   type SerializedMessage,
@@ -811,6 +812,8 @@ class Project {
   // Minimal cache for current session only (not all sessions)
   currentSessionTag: string | undefined
   currentSessionTitle: string | undefined
+  /** densable `currentSessionAiTitle` — v$e() for M9e seed when no user title. */
+  currentSessionAiTitle: string | undefined
   currentSessionAgentName: string | undefined
   currentSessionAgentColor: string | undefined
   currentSessionLastPrompt: string | undefined
@@ -2989,6 +2992,11 @@ export async function saveCustomTitle(
  * where the AI title lands after a mid-flight user rename.
  */
 export function saveAiGeneratedTitle(sessionId: UUID, aiTitle: string): void {
+  // densable JCe: cache aiTitle for v$e() / M9e seed (user title still wins)
+  if (sessionId === getSessionId()) {
+    const project = getProject()
+    project.currentSessionAiTitle ??= aiTitle
+  }
   appendEntryToFile(getTranscriptPathForSession(sessionId), {
     type: 'ai-title',
     aiTitle,
@@ -3112,8 +3120,49 @@ export function getCurrentSessionTitle(
   return undefined
 }
 
+/**
+ * densable `v$e(sessionId)` — process-level AI title cache for M9e seed.
+ * User custom title still wins via getCurrentSessionTitle / nameSource.
+ */
+export function getCurrentSessionAiTitle(
+  sessionId?: SessionId,
+): string | undefined {
+  if (sessionId === undefined || sessionId === getSessionId()) {
+    return getProject().currentSessionAiTitle
+  }
+  return undefined
+}
+
 export function getCurrentSessionAgentColor(): string | undefined {
   return getProject().currentSessionAgentColor
+}
+
+/**
+ * densable `D6e(leafUuid)` — write last-prompt leaf before keepParent fork flush.
+ *
+ * densable:
+ *   r.currentSessionLeafUuid = e
+ *   r.currentSessionLeafTs = now
+ *   await r.appendEntry({ type:"last-prompt", lastPrompt?, leafUuid, explicit:true, sessionId })
+ *
+ * Local: append last-prompt with leafUuid/explicit so the snapshot resume
+ * path has a hard boundary marker at the fork point.
+ */
+export async function recordForkBoundaryLeaf(
+  leafUuid: string | null | undefined,
+): Promise<void> {
+  const project = getProject()
+  const entry: LastPromptMessage = {
+    type: 'last-prompt',
+    sessionId: getSessionId() as UUID,
+    ...(project.currentSessionLastPrompt
+      ? { lastPrompt: project.currentSessionLastPrompt }
+      : {}),
+    leafUuid: leafUuid ?? null,
+    explicit: true,
+    timestamp: new Date().toISOString(),
+  }
+  await project.appendEntry(entry)
 }
 
 /**
@@ -3123,6 +3172,8 @@ export function getCurrentSessionAgentColor(): string | undefined {
  */
 export function restoreSessionMetadata(meta: {
   customTitle?: string
+  /** densable JCe aiTitle → currentSessionAiTitle for v$e/M9e. */
+  aiTitle?: string
   tag?: string
   agentName?: string
   agentColor?: string
@@ -3139,6 +3190,8 @@ export function restoreSessionMetadata(meta: {
   // ??= so --name (cacheSessionTitle) wins over the resumed
   // session's title. REPL.tsx clears before calling, so /resume is unaffected.
   if (meta.customTitle) project.currentSessionTitle ??= meta.customTitle
+  // densable JCe: e.aiTitle → currentSessionAiTitle ??=
+  if (meta.aiTitle) project.currentSessionAiTitle ??= meta.aiTitle
   if (meta.tag !== undefined) project.currentSessionTag = meta.tag || undefined
   if (meta.agentName) project.currentSessionAgentName = meta.agentName
   if (meta.agentColor) project.currentSessionAgentColor = meta.agentColor
@@ -3162,6 +3215,7 @@ export function restoreSessionMetadata(meta: {
 export function clearSessionMetadata(): void {
   const project = getProject()
   project.currentSessionTitle = undefined
+  project.currentSessionAiTitle = undefined
   project.currentSessionTag = undefined
   project.currentSessionAgentName = undefined
   project.currentSessionAgentColor = undefined
