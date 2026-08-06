@@ -514,9 +514,10 @@ export function useRemoteSession({
       // before the POST promise resolves.
       if (opts?.uuid) sentUUIDsRef.current.add(opts.uuid)
 
-      const success = await manager.sendMessage(content, opts)
+      // densable RSM returns {ok, reason?}; public hook still exposes boolean.
+      const result = await manager.sendMessage(content, opts)
 
-      if (!success) {
+      if (!result.ok) {
         // No need to undo the pre-POST add — BoundedUUIDSet's ring evicts it.
         setIsLoading(false)
         return false
@@ -582,7 +583,7 @@ export function useRemoteSession({
         )
       }
 
-      return success
+      return true
     },
     [config, setIsLoading, setMessages],
   )

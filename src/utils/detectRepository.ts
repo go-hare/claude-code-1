@@ -1,6 +1,7 @@
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
-import { getRemoteUrl } from './git.js'
+import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import { getRemoteUrl, gitExe } from './git.js'
 
 export type ParsedRepository = {
   host: string
@@ -28,16 +29,30 @@ export async function detectCurrentRepository(): Promise<string | null> {
  * Like detectCurrentRepository, but also returns the host (e.g. "github.com"
  * or a GHE hostname). Callers that need to construct URLs against a specific
  * GitHub host should use this variant.
+ *
+ * densable k$(cwd): optional `cwd` overrides process CWD (teleport Qre `e.cwd`).
  */
-export async function detectCurrentRepositoryWithHost(): Promise<ParsedRepository | null> {
-  const cwd = getCwd()
-
+export async function detectCurrentRepositoryWithHost(
+  cwd: string = getCwd(),
+): Promise<ParsedRepository | null> {
   if (repositoryWithHostCache.has(cwd)) {
     return repositoryWithHostCache.get(cwd) ?? null
   }
 
   try {
-    const remoteUrl = await getRemoteUrl()
+    // Process-CWD path uses the shared git watcher cache; arbitrary cwd queries
+    // git directly so teleport/cwd overrides do not pollute the session cache.
+    let remoteUrl: string | null
+    if (cwd === getCwd()) {
+      remoteUrl = await getRemoteUrl()
+    } else {
+      const result = await execFileNoThrowWithCwd(
+        gitExe(),
+        ['remote', 'get-url', 'origin'],
+        { cwd, preserveOutputOnError: false },
+      )
+      remoteUrl = result.code === 0 ? result.stdout.trim() || null : null
+    }
     logForDebugging(`Git remote URL: ${remoteUrl}`)
     if (!remoteUrl) {
       logForDebugging('No git remote URL found')

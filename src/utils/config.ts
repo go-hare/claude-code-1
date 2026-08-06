@@ -114,6 +114,12 @@ export type ProjectConfig = {
   projectOnboardingSeenCount: number
   hasClaudeMdExternalIncludesApproved?: boolean
   hasClaudeMdExternalIncludesWarningShown?: boolean
+  /**
+   * densable `kp().hasUsedRemoteSession` — project-scoped. Set by ZCu when a
+   * remote session is created with a GitHub source (project:true). Gates
+   * tengu_neapolitan + analytics hasUsedRemoteSession.
+   */
+  hasUsedRemoteSession?: boolean
   // MCP server approval fields - migrated to settings but kept for backward compatibility
   enabledMcpjsonServers?: string[]
   disabledMcpjsonServers?: string[]
@@ -246,6 +252,13 @@ export type GlobalConfig = {
   hasSeenTasksHint?: boolean // Whether the user has seen the tasks hint
   hasUsedStash?: boolean // Whether the user has used the stash feature (Ctrl+S)
   hasUsedBackgroundTask?: boolean // Whether the user has backgrounded a task (Ctrl+B)
+  /**
+   * densable `At().hasRemoteEnvironment` — global. True when the org has ≥1
+   * environment_providers entry (synced in fetchEnvironments) or after a
+   * non-bundle CCR session create (ZCu global:true when seed_bundle is null).
+   * Gates tengu_neapolitan with hasUsedRemoteSession.
+   */
+  hasRemoteEnvironment?: boolean
   queuedCommandUpHintCount?: number // Counter for how many times the user has seen the queued command up hint
   diffTool?: DiffTool // Which tool to use for displaying diffs (terminal or vscode)
 
@@ -688,6 +701,8 @@ function createDefaultGlobalConfig(): GlobalConfig {
     unpinOpus47LaunchEffort: false,
     unpinOpus48LaunchEffort: false,
     unpinFable5LaunchEffort: false,
+    // densable At().hasRemoteEnvironment — synced from fetchEnvironments + ZCu
+    hasRemoteEnvironment: false,
   }
 }
 

@@ -1,6 +1,11 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
 import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/command.js';
-import { checkOverageGate, confirmOverage, launchRemoteReview } from './reviewRemote.js';
+import {
+  checkOverageGate,
+  isUltrareviewOverageConfirmed,
+  launchRemoteReview,
+  markUltrareviewOverageConfirmed,
+} from './reviewRemote.js';
 import { UltrareviewOverageDialog } from './UltrareviewOverageDialog.js';
 
 function contentBlocksToString(blocks: ContentBlockParam[]): string {
@@ -17,7 +22,9 @@ async function launchAndDone(
   billingNote: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  const result = await launchRemoteReview(args, context, billingNote);
+  const result = await launchRemoteReview(args, context, billingNote, {
+    invocation: '/ultrareview',
+  });
   // User hit Escape during the ~5s launch — the dialog already showed
   // "cancelled" and unmounted, so skip onDone (would write to a dead
   // transcript slot) and let the caller skip confirmOverage.
@@ -35,7 +42,10 @@ async function launchAndDone(
 }
 
 export const call: LocalJSXCommandCall = async (onDone, context, args) => {
-  const gate = await checkOverageGate();
+  // densable isUltrareviewOverageConfirmed from AppState (reset on /clear)
+  const gate = await checkOverageGate({
+    overageConfirmed: isUltrareviewOverageConfirmed(context),
+  });
 
   if (gate.kind === 'not-enabled') {
     onDone('Free ultrareviews used. Enable Extra Usage at https://claude.ai/settings/billing to continue.', {
@@ -64,10 +74,8 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
       <UltrareviewOverageDialog
         onProceed={async signal => {
           await launchAndDone(args, context, onDone, billingNote, signal);
-          // Only persist the confirmation flag after a non-aborted launch —
-          // otherwise Escape-during-launch would leave the flag set and
-          // skip this dialog on the next attempt.
-          if (!signal.aborted) confirmOverage();
+          // densable: only mark after non-aborted launch (M6e)
+          if (!signal.aborted) markUltrareviewOverageConfirmed(context);
         }}
         onCancel={() => onDone('Ultrareview cancelled.', { display: 'system' })}
       />

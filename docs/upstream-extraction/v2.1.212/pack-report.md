@@ -149,36 +149,31 @@ Usage: /subtask <task>
 - Child first user message via `buildChildMessage` / `o3r(e)` (fork boilerplate).
 - Success toast: `` `${KW} forked ${name} (${agentId.slice(-4)})` ``.
 
-**Implication for go-hare:** current `/fork` still does **in-session AgentTool fork** (`fork: true`, `run_in_background: true`, description `forked from main`). densable 212 **product meaning of `/fork` is background session copy**; in-session path is **`/subtask`**. Aligning 212 requires **behavioral split**, not just gate unify (already done in 211).
+**Implication for go-hare (resolved 2026-08-06):** densable 212 product `/fork` = **background session copy** (`spawnBackgroundSessionFork` + keepParent); in-session full-context worker = **`/subtask`**. Local tree matches; do **not** re-read this section as “still GAP”.
 
 ---
 
-## 3. Gap matrix vs go-hare (2.7.27 / main)
+## 3. Gap matrix vs go-hare — **STALE SNAPSHOT (2026-08-05 pack day)**
+
+> **2026-08-06 closeout:** 官方 checklist `official-212-checklist.md` = **HAVE 44 + N/A 1**，**0 GAP/PARTIAL**。  
+> 下表是 pack 当日历史矩阵，**禁止当现状**。以 checklist + `residual-qre-jes-2026-08-06.md`（Qre/code-sessions 深挖）为准。  
+> 对抗抽查已确认：`/fork` keepParent、`/subtask`、`sessionSpawnCaps`、`mcpAutoBackground` wire、`auto-mode reset`、ultrareview→Qre、OTe/KLc/H8/F1g/nts 均在树。
 
 Legend: **GAP** = not present or wrong semantics · **PARTIAL** · **HAVE** · **N/A** product fork choice
 
-| # | densable 212 item | Local status | Notes / entry points |
-|---|-------------------|--------------|----------------------|
-| 1 | `/fork` → **bg session copy** | **GAP** | `src/commands/fork/fork.tsx` still AgentTool implicit fork |
-| 2 | `/subtask` in-session full-context worker | **GAP** | no `commands/subtask` |
-| 3 | `spawnForkFromDirective` + `deriveForkName` | **GAP** | densable extract only |
-| 4 | WebSearch session cap (200 + env) | **GAP** | no `incrementWebSearchCalls` / env consumer |
-| 5 | Subagent spawn cap (200 + env + `/clear` reset) | **GAP** | no taskRegistry spawn counters |
-| 6 | MCP auto-background (threshold + move task) | **PARTIAL** | `src/utils/mcpAutoBackground.ts` resolver + test only; **not wired** into MCP tool runner |
-| 7 | Agent-view `/resume` picker → bg | **PARTIAL?** | need UI audit of LogSelector / agents view (not verified this pack) |
-| 8 | `claude auto-mode reset` | **GAP** | no auto-mode command tree found |
-| 9 | Plan-mode Bash file-mutate prompt | **audit** | permission path — extract before claim |
-| 10 | PS7 prefer for bg daemon on Win | **audit** | bgManager / daemon |
-| 11 | WebSearch/Fetch 529 + rate-limit retry | **audit** | adapters |
-| 12 | Gateway prompt-cache mid system block | **audit** | 211-adjacent; may already partial |
-| 13 | Task `mode` param deprecated | **audit** | AgentTool schema |
-| 14 | Effort on assistant transcript messages | **audit** | effort 211 work may partial |
-| 15 | “Needs input” agent status | **audit** | agents view JSON |
-| 16 | SendMessage no history dup | **audit** | swarm / teammate messaging |
-| 17 | Live elapsed on collapsed tool (210) | **PARTIAL** | `useElapsedTime` exists; used in task dialogs/spinners — **collapsed tool summary line** not confirmed |
-| 18 | Fork dual-gate (compile OR env/GB) | **HAVE** | 211 commit `3dbad654` |
-| 19 | Host model_fallback / background_tasks_changed | **HAVE** (211 product) | earlier Host work |
-| 20 | UDS/LAN/TEAMMEM default off | **HAVE** (intentional) | do not default-on for 212 |
+| # | densable 212 item | Pack-day status (stale) | Notes / entry points |
+|---|-------------------|-------------------------|----------------------|
+| 1 | `/fork` → **bg session copy** | ~~GAP~~ → **HAVE** | `spawnBackgroundSessionFork` + keepParent |
+| 2 | `/subtask` in-session full-context worker | ~~GAP~~ → **HAVE** | `src/commands/subtask` |
+| 3 | `spawnForkFromDirective` + `deriveForkName` | ~~GAP~~ → **HAVE** | launchInSessionForkAgent / deriveForkName |
+| 4 | WebSearch session cap (200 + env) | ~~GAP~~ → **HAVE** | `sessionSpawnCaps` + WebSearchTool |
+| 5 | Subagent spawn cap (200 + env + `/clear` reset) | ~~GAP~~ → **HAVE** | `assertCanSpawnSubagent` + clear |
+| 6 | MCP auto-background (threshold + move task) | ~~PARTIAL~~ → **HAVE** | wired `mcp/client.ts` + `mcpAutoBackground` |
+| 7 | Agent-view `/resume` picker → bg | ~~PARTIAL?~~ → **HAVE** | openResumePicker batch3 |
+| 8 | `claude auto-mode reset` | ~~GAP~~ → **HAVE** | autoModeResetHandler |
+| 9–16 | reliability / UX audits | ~~audit~~ → **HAVE** | see official checklist rows |
+| 17 | Live elapsed on collapsed tool (210) | PARTIAL (out of 212) | 210 adjacent |
+| 18–20 | gates / host / intentional off | **HAVE** | unchanged |
 
 ---
 
@@ -238,7 +233,17 @@ Permission/hooks/Windows bg/Web retry — one extract per fix.
 - [x] Keyword / surface inventory on binary
 - [x] Gap matrix vs current main
 - [x] Raw extracts under `docs/upstream-extraction/v2.1.212/`
-- [ ] Per-item full function extract at implement time (not done for every fix)
-- [ ] Implementation (blocked until user greenlights phase)
+- [x] Official 48-row checklist → **HAVE 44 + N/A 1** (`official-212-checklist.md`)
+- [x] Phases A–D product paths landed (caps/MCP auto-bg, `/fork`+`/subtask`, auto-mode reset, reliability/UX)
+- [x] Ultrareview / Qre / code-sessions peripheral 1:1 (`residual-qre-jes-2026-08-06.md`)
 
-**Next user decision:** start Phase A (caps + MCP auto-bg), Phase B (`/fork`/`/subtask`), or both.
+## 8. Closeout (2026-08-06)
+
+| 范围 | 结论 |
+|------|------|
+| 官方 2.1.212 changelog 48 条 | **收口** — 0 产品 GAP |
+| densable Qre/Jes/eHu/ZCu + OTe/KLc/H8/F1g/nts | **1:1 落地** — 见 residual 文档 |
+| 故意不扩 | UDS/LAN/TEAMMEM OFF；KAIROS 不再动；不混 **214** EndConversation / **210** collapsed-tool elapsed |
+| 工程债（非 212 产品） | autofix `mock.module` 与 sibling 套件同进程污染；全量 precheck 可能慢 |
+
+**权威状态源：** `official-212-checklist.md` + `residual-qre-jes-2026-08-06.md`。本 pack-report §2–§4 含历史叙事，仅作考古。

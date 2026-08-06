@@ -2,6 +2,7 @@ import axios from 'axios'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
 import { getClaudeAIOAuthTokens } from '../auth.js'
+import { getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { toError } from '../errors.js'
 import { logError } from '../log.js'
 import { getOAuthHeaders } from './api.js'
@@ -58,6 +59,16 @@ export async function fetchEnvironments(): Promise<EnvironmentResource[]> {
     if (response.status !== 200) {
       throw new Error(
         `Failed to fetch environments: ${response.status} ${response.statusText}`,
+      )
+    }
+
+    // densable Nye: sync hasRemoteEnvironment = environments.length > 0
+    const hasAny = response.data.environments.length > 0
+    if (getGlobalConfig().hasRemoteEnvironment !== hasAny) {
+      saveGlobalConfig(s =>
+        s.hasRemoteEnvironment === hasAny
+          ? s
+          : { ...s, hasRemoteEnvironment: hasAny },
       )
     }
 

@@ -215,31 +215,35 @@ export class RemoteSessionManager {
   }
 
   /**
-   * Send a user message to the remote session via HTTP POST
+   * densable $Ur path — send user message; returns {ok, reason?} (not bare boolean).
    */
   async sendMessage(
     content: RemoteMessageContent,
     opts?: { uuid?: string },
-  ): Promise<boolean> {
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
     logForDebugging(
       `[RemoteSessionManager] Sending message to session ${this.config.sessionId}`,
     )
 
-    const success = await sendEventToRemoteSession(
+    const result = await sendEventToRemoteSession(
       this.config.sessionId,
       content,
       opts,
     )
 
-    if (!success) {
+    if (!result.ok) {
+      logForDebugging(
+        `[RemoteSessionManager] Failed to send message to session ${this.config.sessionId}: ${result.reason}`,
+        { level: 'error' },
+      )
       logError(
         new Error(
-          `[RemoteSessionManager] Failed to send message to session ${this.config.sessionId}`,
+          `[RemoteSessionManager] Failed to send message to session ${this.config.sessionId}: ${result.reason}`,
         ),
       )
     }
 
-    return success
+    return result
   }
 
   /**

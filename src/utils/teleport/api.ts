@@ -3,13 +3,19 @@ import { randomUUID } from 'crypto'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
 import z from 'zod/v4'
-import { getClaudeAIOAuthTokens } from '../auth.js'
+import {
+  checkAndRefreshOAuthTokenIfNeeded,
+  getClaudeAIOAuthTokens,
+} from '../auth.js'
+import { getOAuthTokenFromFileDescriptor } from '../authFileDescriptor.js'
 import { getGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { parseGitHubRepository } from '../detectRepository.js'
-import { errorMessage, toError } from '../errors.js'
+import { isEnvTruthy } from '../envUtils.js'
+import { errorMessage, TeleportOperationError, toError } from '../errors.js'
 import { lazySchema } from '../lazySchema.js'
 import { logError } from '../log.js'
+import { getAPIProvider } from '../model/providers.js'
 import { sleep } from '../sleep.js'
 import { jsonStringify } from '../slowOperations.js'
 
@@ -253,13 +259,72 @@ export async function prepareWorkspaceApiRequest(): Promise<{
 }
 
 /**
- * Validates and prepares for API requests
- * @returns Object containing access token and organization UUID
+ * densable tP() — anthropic-client-platform header value from CLAUDE_CODE_ENTRYPOINT.
+ */
+export function getAnthropicClientPlatform(): string {
+  switch (process.env.CLAUDE_CODE_ENTRYPOINT) {
+    case 'claude-vscode':
+      return 'claude_code_vscode'
+    case 'remote':
+    case 'remote_baku':
+    case 'remote_cowork':
+    case 'remote_desktop':
+    case 'remote_mobile':
+      return 'claude_code_remote'
+    case 'claude-in-teams':
+      return 'claude_code_remote'
+    case 'sdk-cli':
+    case 'sdk-ts':
+    case 'sdk-py':
+      return 'claude_code_sdk'
+    case 'mcp':
+      return 'claude_code_mcp'
+    case 'claude-code-github-action':
+      return 'claude_code_github_action'
+    case 'local-agent':
+      return 'claude_code_local_agent'
+    case 'claude_in_slack':
+      return 'claude_in_slack'
+    case 'claude-in-slack':
+      return 'claude-in-slack'
+    case 'cli':
+    default:
+      return 'claude_code_cli'
+  }
+}
+
+/**
+ * densable o9t / getAccessTokenWithCcrFallback —
+ * keychain OAuth first; when CLAUDE_CODE_REMOTE, fall back to
+ * CLAUDE_CODE_OAUTH_TOKEN env or FD/well-known file token.
+ */
+export function getAccessTokenWithCcrFallback(): string | undefined {
+  const fromKeychain = getClaudeAIOAuthTokens()?.accessToken
+  if (fromKeychain) return fromKeychain
+  if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    return (
+      process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+      getOAuthTokenFromFileDescriptor() ||
+      undefined
+    )
+  }
+  return undefined
+}
+
+/**
+ * OAuth access token + org UUID for Anthropic first-party APIs.
+ *
+ * densable J7 also gates `ou()` (first-party only), but that J7 is the
+ * **teleport/code-sessions** helper. Locally this function is shared by
+ * non-session callers (usageCredits, referral, adminRequests, schedule, …),
+ * so the first-party gate stays on session APIs (fetchSession / poll / send /
+ * list / archive / interrupt) — not here.
  */
 export async function prepareApiRequest(): Promise<{
   accessToken: string
   orgUUID: string
 }> {
+  await checkAndRefreshOAuthTokenIfNeeded()
   const accessToken = getClaudeAIOAuthTokens()?.accessToken
   if (accessToken === undefined) {
     throw new Error(
@@ -276,24 +341,87 @@ export async function prepareApiRequest(): Promise<{
 }
 
 /**
- * Fetches code sessions from the new Sessions API (/v1/sessions)
- * @returns Array of code sessions
+ * densable zLc / ccrSessionToResource — map code-session API shape → SessionResource.
+ */
+export function ccrSessionToResource(raw: {
+  id: string
+  title?: string | null
+  status?: string
+  worker_status?: string | null
+  environment_id?: string
+  created_at: string
+  updated_at?: string
+  last_event_at?: string
+  config?: {
+    sources?: SessionContextSource[]
+    outcomes?: Outcome[] | null
+    model?: string | null
+  }
+}): SessionResource {
+  const sessionStatus =
+    raw.status === 'archived'
+      ? 'archived'
+      : ((raw.worker_status ?? 'idle') as SessionStatus)
+  return {
+    type: 'session',
+    id: raw.id,
+    title: raw.title || null,
+    session_status: sessionStatus,
+    environment_id: raw.environment_id ?? '',
+    created_at: raw.created_at,
+    updated_at:
+      'updated_at' in raw && raw.updated_at
+        ? raw.updated_at
+        : (raw.last_event_at ?? raw.created_at),
+    session_context: {
+      sources: raw.config?.sources ?? [],
+      outcomes: raw.config?.outcomes ?? null,
+      model: raw.config?.model ?? null,
+      cwd: '',
+      custom_system_prompt: null,
+      append_system_prompt: null,
+    },
+  }
+}
+
+/**
+ * densable $Ni — list sessions via GET /v1/code/sessions (OAuth headers only).
  */
 export async function fetchCodeSessionsFromSessionsAPI(): Promise<
   CodeSession[]
 > {
-  const { accessToken, orgUUID } = await prepareApiRequest()
+  // densable J7 first-party gate (session list only)
+  if (getAPIProvider() !== 'firstParty') {
+    throw new Error(
+      'Cloud sessions are only available on the first-party Anthropic API provider.',
+    )
+  }
+  const { accessToken } = await prepareApiRequest()
 
-  const url = `${getOauthConfig().BASE_API_URL}/v1/sessions`
+  const url = `${getOauthConfig().BASE_API_URL}/v1/code/sessions`
 
   try {
-    const headers = {
-      ...getOAuthHeaders(accessToken),
-      'anthropic-beta': 'ccr-byoc-2025-07-29',
-      'x-organization-uuid': orgUUID,
-    }
+    // densable: headers Px(token) only — no beta / org uuid on code/sessions list
+    const headers = getOAuthHeaders(accessToken)
 
-    const response = await axiosGetWithRetry<ListSessionsResponse>(url, {
+    type CodeListItem = {
+      id: string
+      title?: string | null
+      status?: string
+      worker_status?: string | null
+      created_at: string
+      last_event_at?: string
+      config?: {
+        sources?: Array<{
+          type: string
+          url?: string
+          revision?: string | null
+        }>
+      }
+    }
+    type CodeListResponse = { data: CodeListItem[] }
+
+    const response = await axiosGetWithRetry<CodeListResponse>(url, {
       headers,
     })
 
@@ -301,25 +429,26 @@ export async function fetchCodeSessionsFromSessionsAPI(): Promise<
       throw new Error(`Failed to fetch code sessions: ${response.statusText}`)
     }
 
-    // Transform SessionResource[] to CodeSession[] format
-    const sessions: CodeSession[] = response.data.data.map(session => {
-      // Extract repository info from git sources
-      const gitSource = session.session_context.sources.find(
-        (source): source is GitSource => source.type === 'git_repository',
+    const sessions: CodeSession[] = (response.data.data ?? []).map(session => {
+      const gitSource = session.config?.sources?.find(
+        (
+          source,
+        ): source is {
+          type: 'git_repository'
+          url?: string
+          revision?: string | null
+        } => source.type === 'git_repository',
       )
 
       let repo: CodeSession['repo'] = null
       if (gitSource?.url) {
-        // Parse GitHub URL using the existing utility function
         const repoPath = parseGitHubRepository(gitSource.url)
         if (repoPath) {
           const [owner, name] = repoPath.split('/')
           if (owner && name) {
             repo = {
               name,
-              owner: {
-                login: owner,
-              },
+              owner: { login: owner },
               default_branch: gitSource.revision || undefined,
             }
           }
@@ -329,70 +458,96 @@ export async function fetchCodeSessionsFromSessionsAPI(): Promise<
       return {
         id: session.id,
         title: session.title || 'Untitled',
-        description: '', // SessionResource doesn't have description field
-        status: session.session_status as CodeSession['status'], // Map session_status to status
+        description: '',
+        // densable: status==="archived"?"archived":worker_status??"idle"
+        status: (session.status === 'archived'
+          ? 'archived'
+          : (session.worker_status ?? 'idle')) as CodeSession['status'],
         repo,
-        turns: [], // SessionResource doesn't have turns field
+        turns: [],
         created_at: session.created_at,
-        updated_at: session.updated_at,
+        updated_at: session.last_event_at ?? session.created_at,
       }
     })
 
     return sessions
   } catch (error) {
     const err = toError(error)
-    logError(err)
+    if (isTransientNetworkError(error)) {
+      logForDebugging(`Failed to fetch code sessions: ${err.message}`, {
+        level: 'error',
+      })
+    } else {
+      logError(err)
+    }
     throw error
   }
 }
 
 /**
- * Creates OAuth headers for API requests
- * @param accessToken The OAuth access token
- * @returns Headers object with Authorization, Content-Type, and anthropic-version
+ * densable Px getOAuthHeaders — Authorization + Content-Type + anthropic-version
+ * + anthropic-client-platform. No beta / org uuid (those are call-site specific).
  */
 export function getOAuthHeaders(accessToken: string): Record<string, string> {
   return {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
+    'anthropic-client-platform': getAnthropicClientPlatform(),
   }
 }
 
 /**
- * Fetches a single session by ID from the Sessions API
- * @param sessionId The session ID to fetch
- * @returns The session resource
+ * densable l3e fetchSession — GET /v1/code/sessions/{id}, first-party only.
+ * Optional accessToken avoids a second prepareApiRequest when caller already has one.
  */
 export async function fetchSession(
   sessionId: string,
+  opts?: { accessToken?: string },
 ): Promise<SessionResource> {
-  const { accessToken, orgUUID } = await prepareApiRequest()
-
-  const url = `${getOauthConfig().BASE_API_URL}/v1/sessions/${sessionId}`
-  const headers = {
-    ...getOAuthHeaders(accessToken),
-    'anthropic-beta': 'ccr-byoc-2025-07-29',
-    'x-organization-uuid': orgUUID,
+  if (getAPIProvider() !== 'firstParty') {
+    throw new TeleportOperationError(
+      'Cloud sessions are only available on the first-party Anthropic API provider.',
+      'Cloud sessions are only available on the first-party Anthropic API provider.',
+    )
   }
+  const accessToken =
+    opts?.accessToken ?? (await prepareApiRequest()).accessToken
 
-  const response = await axios.get<SessionResource>(url, {
+  const url = `${getOauthConfig().BASE_API_URL}/v1/code/sessions/${sessionId}`
+  const headers = getOAuthHeaders(accessToken)
+
+  const response = await axios.get<{
+    response_shape?: Parameters<typeof ccrSessionToResource>[0]
+    session?: Parameters<typeof ccrSessionToResource>[0]
+    error?: { message?: string }
+  }>(url, {
     headers,
     timeout: 15000,
     validateStatus: status => status < 500,
   })
 
   if (response.status !== 200) {
-    // Extract error message from response if available
-    const errorData = response.data as { error?: { message?: string } }
-    const apiMessage = errorData?.error?.message
+    const apiMessage = response.data?.error?.message
 
     if (response.status === 404) {
-      throw new Error(`Session not found: ${sessionId}`)
+      const a = `Session not found: ${sessionId}`
+      throw new TeleportOperationError(a, a)
     }
 
     if (response.status === 401) {
-      throw new Error('Session expired. Please run /login to sign in again.')
+      throw new TeleportOperationError(
+        'Session expired. Please run /login to sign in again.',
+        'Session expired. Please run /login to sign in again.',
+      )
+    }
+
+    if (
+      response.status === 400 &&
+      typeof apiMessage === 'string' &&
+      apiMessage.startsWith('invalid session ID')
+    ) {
+      throw new TeleportOperationError(apiMessage, apiMessage)
     }
 
     throw new Error(
@@ -401,13 +556,17 @@ export async function fetchSession(
     )
   }
 
-  return response.data
+  // densable: response_shape ?? session
+  const raw = response.data.response_shape ?? response.data.session
+  if (!raw?.id) {
+    throw new Error(`Session not found: ${sessionId}`)
+  }
+  return ccrSessionToResource(raw)
 }
 
 /**
  * Extracts the first branch name from a session's git repository outcomes
- * @param session The session resource to extract from
- * @returns The first branch name, or undefined if none found
+ * densable oqn
  */
 export function getBranchFromSession(
   session: SessionResource,
@@ -428,30 +587,75 @@ export type RemoteMessageContent =
   | string
   | Array<{ type: string; [key: string]: unknown }>
 
+/** densable KLc / $Ur result shape */
+export type SendRemoteEventResult = { ok: true } | { ok: false; reason: string }
+
 /**
- * Sends a user message event to an existing remote session via the Sessions API
- * @param sessionId The session ID to send the event to
- * @param messageContent The user message content (string or content blocks)
- * @param opts.uuid Optional UUID for the event — callers that added a local
- *   UserMessage first should pass its UUID so echo filtering can dedup
- * @returns Promise<boolean> True if successful, false otherwise
+ * densable KLc — POST /v1/code/sessions/{id}/events with payload-wrapped event.
+ * first-party only. Returns {ok, reason?}.
+ */
+export async function sendPayloadToRemoteSession(
+  sessionId: string,
+  payload: Record<string, unknown>,
+  logPrefix: string,
+): Promise<SendRemoteEventResult> {
+  if (getAPIProvider() !== 'firstParty') {
+    return {
+      ok: false,
+      reason:
+        'Cloud sessions are only available on the first-party Anthropic API provider.',
+    }
+  }
+  try {
+    const { accessToken } = await prepareApiRequest()
+    const url = `${getOauthConfig().BASE_API_URL}/v1/code/sessions/${sessionId}/events`
+    const headers = getOAuthHeaders(accessToken)
+    logForDebugging(`${logPrefix} Sending event to session ${sessionId}`)
+    const response = await axios.post(
+      url,
+      { events: [{ payload }] },
+      {
+        headers,
+        validateStatus: status => status < 500,
+        timeout: 30000,
+      },
+    )
+    if (response.status === 200 || response.status === 201) {
+      logForDebugging(
+        `${logPrefix} Successfully sent event to session ${sessionId}`,
+      )
+      return { ok: true }
+    }
+    logForDebugging(
+      `${logPrefix} Failed with status ${response.status}: ${jsonStringify(response.data)}`,
+    )
+    const apiMessage = (
+      response.data as { error?: { message?: string } } | undefined
+    )?.error?.message
+    return {
+      ok: false,
+      reason:
+        typeof apiMessage === 'string'
+          ? `${apiMessage} (HTTP ${response.status})`
+          : `HTTP ${response.status}`,
+    }
+  } catch (error) {
+    logForDebugging(`${logPrefix} Error: ${errorMessage(error)}`)
+    return { ok: false, reason: errorMessage(error) }
+  }
+}
+
+/**
+ * densable $Ur sendEventToRemoteSession — user message via KLc payload path.
  */
 export async function sendEventToRemoteSession(
   sessionId: string,
   messageContent: RemoteMessageContent,
   opts?: { uuid?: string },
-): Promise<boolean> {
-  try {
-    const { accessToken, orgUUID } = await prepareApiRequest()
-
-    const url = `${getOauthConfig().BASE_API_URL}/v1/sessions/${sessionId}/events`
-    const headers = {
-      ...getOAuthHeaders(accessToken),
-      'anthropic-beta': 'ccr-byoc-2025-07-29',
-      'x-organization-uuid': orgUUID,
-    }
-
-    const userEvent = {
+): Promise<SendRemoteEventResult> {
+  return sendPayloadToRemoteSession(
+    sessionId,
+    {
       uuid: opts?.uuid ?? randomUUID(),
       session_id: sessionId,
       type: 'user',
@@ -460,64 +664,51 @@ export async function sendEventToRemoteSession(
         role: 'user',
         content: messageContent,
       },
-    }
-
-    const requestBody = {
-      events: [userEvent],
-    }
-
-    logForDebugging(
-      `[sendEventToRemoteSession] Sending event to session ${sessionId}`,
-    )
-    // The endpoint may block until the CCR worker is ready. Observed ~2.6s
-    // in normal cases; allow a generous margin for cold-start containers.
-    const response = await axios.post(url, requestBody, {
-      headers,
-      validateStatus: status => status < 500,
-      timeout: 30000,
-    })
-
-    if (response.status === 200 || response.status === 201) {
-      logForDebugging(
-        `[sendEventToRemoteSession] Successfully sent event to session ${sessionId}`,
-      )
-      return true
-    }
-
-    logForDebugging(
-      `[sendEventToRemoteSession] Failed with status ${response.status}: ${jsonStringify(response.data)}`,
-    )
-    return false
-  } catch (error) {
-    logForDebugging(`[sendEventToRemoteSession] Error: ${errorMessage(error)}`)
-    return false
-  }
+    },
+    '[sendEventToRemoteSession]',
+  )
 }
 
 /**
- * Updates the title of an existing remote session via the Sessions API
- * @param sessionId The session ID to update
- * @param title The new title for the session
- * @returns Promise<boolean> True if successful, false otherwise
+ * densable FNi sendBashCommandToRemoteSession.
+ */
+export async function sendBashCommandToRemoteSession(
+  sessionId: string,
+  command: { command: string; cwd?: string },
+  opts?: { uuid?: string },
+): Promise<SendRemoteEventResult> {
+  return sendPayloadToRemoteSession(
+    sessionId,
+    {
+      uuid: opts?.uuid ?? randomUUID(),
+      session_id: sessionId,
+      type: 'bash_command',
+      command: command.command,
+      ...(command.cwd !== undefined && { cwd: command.cwd }),
+    },
+    '[sendBashCommandToRemoteSession]',
+  )
+}
+
+/**
+ * densable UNi updateSessionTitle — PUT /v1/code/sessions/{id} (not PATCH /v1/sessions).
  */
 export async function updateSessionTitle(
   sessionId: string,
   title: string,
 ): Promise<boolean> {
   try {
-    const { accessToken, orgUUID } = await prepareApiRequest()
+    // densable UNi uses J7 (first-party); soft-fail boolean like densable
+    if (getAPIProvider() !== 'firstParty') return false
+    const { accessToken } = await prepareApiRequest()
 
-    const url = `${getOauthConfig().BASE_API_URL}/v1/sessions/${sessionId}`
-    const headers = {
-      ...getOAuthHeaders(accessToken),
-      'anthropic-beta': 'ccr-byoc-2025-07-29',
-      'x-organization-uuid': orgUUID,
-    }
+    const url = `${getOauthConfig().BASE_API_URL}/v1/code/sessions/${sessionId}`
+    const headers = getOAuthHeaders(accessToken)
 
     logForDebugging(
       `[updateSessionTitle] Updating title for session ${sessionId}: "${title}"`,
     )
-    const response = await axios.patch(
+    const response = await axios.put(
       url,
       { title },
       {
@@ -540,5 +731,72 @@ export async function updateSessionTitle(
   } catch (error) {
     logForDebugging(`[updateSessionTitle] Error: ${errorMessage(error)}`)
     return false
+  }
+}
+
+/**
+ * densable BNi markSessionRead — POST /v1/code/sessions/{id}/mark_read
+ */
+export async function markSessionRead(
+  sessionId: string,
+  eventId?: string,
+): Promise<void> {
+  try {
+    if (getAPIProvider() !== 'firstParty') return
+    const { accessToken } = await prepareApiRequest()
+    const url = `${getOauthConfig().BASE_API_URL}/v1/code/sessions/${sessionId}/mark_read`
+    const response = await axios.post(
+      url,
+      eventId ? { event_id: eventId } : {},
+      {
+        headers: getOAuthHeaders(accessToken),
+        timeout: 10_000,
+        validateStatus: s => s < 500,
+      },
+    )
+    if (response.status !== 200) {
+      logForDebugging(
+        `[markSessionRead] Failed with status ${response.status}: ${jsonStringify(response.data)}`,
+      )
+    }
+  } catch (error) {
+    logForDebugging(`[markSessionRead] Error: ${errorMessage(error)}`)
+  }
+}
+
+/**
+ * densable FUr reportClientPresence — POST /v1/code/sessions/{id}/client/presence
+ * Returns refresh_after_seconds or null.
+ */
+export async function reportClientPresence(
+  sessionId: string,
+  clientId: string,
+  clear = false,
+): Promise<number | null> {
+  try {
+    if (getAPIProvider() !== 'firstParty') return null
+    const { accessToken } = await prepareApiRequest()
+    const url = `${getOauthConfig().BASE_API_URL}/v1/code/sessions/${sessionId}/client/presence`
+    const response = await axios.post(
+      url,
+      { client_id: clientId, clear },
+      {
+        headers: getOAuthHeaders(accessToken),
+        timeout: 10_000,
+        validateStatus: s => s < 500,
+      },
+    )
+    if (response.status !== 200) {
+      logForDebugging(
+        `[reportClientPresence] Failed with status ${response.status}: ${jsonStringify(response.data)}`,
+      )
+      return null
+    }
+    const refresh = (response.data as { refresh_after_seconds?: number })
+      ?.refresh_after_seconds
+    return refresh ?? null
+  } catch (error) {
+    logForDebugging(`[reportClientPresence] Error: ${errorMessage(error)}`)
+    return null
   }
 }

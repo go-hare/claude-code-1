@@ -88,6 +88,8 @@ const _capturedLaunchArgs: string[] = [];
 mock.module('src/commands/review/reviewRemote.js', () => ({
   checkOverageGate: async () => _gateResult,
   confirmOverage: () => {},
+  isUltrareviewOverageConfirmed: () => false,
+  markUltrareviewOverageConfirmed: () => {},
   launchRemoteReview: async (args: string) => {
     _capturedLaunchArgs.push(args);
     return _launchResult;
