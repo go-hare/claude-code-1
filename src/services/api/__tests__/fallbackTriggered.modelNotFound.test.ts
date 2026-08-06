@@ -38,27 +38,23 @@ describe('FallbackTriggeredError reason', () => {
 
 describe('isModelNotFoundAPIError (official qF3)', () => {
   test('true for 404 not_found_error body mentioning model:', () => {
-    const err = makeApiError(
-      404,
-      'model: claude-bad-xyz',
-      { type: 'not_found_error', message: 'model: claude-bad-xyz' },
-    )
+    const err = makeApiError(404, 'model: claude-bad-xyz', {
+      type: 'not_found_error',
+      message: 'model: claude-bad-xyz',
+    })
     expect(isModelNotFoundAPIError(err)).toBe(true)
   })
 
   test('true when message string embeds not_found_error JSON and model:', () => {
     // SDK may stringify the API body into message; official qF3 scans message.
-    const err = Object.assign(
-      makeApiError(404, 'x', { type: 'error' }),
-      {
-        message:
-          '404 {"type":"not_found_error","message":"model: retired-model"}',
-        error: {
-          type: 'not_found_error',
-          message: 'model: retired-model',
-        },
+    const err = Object.assign(makeApiError(404, 'x', { type: 'error' }), {
+      message:
+        '404 {"type":"not_found_error","message":"model: retired-model"}',
+      error: {
+        type: 'not_found_error',
+        message: 'model: retired-model',
       },
-    )
+    })
     expect(isModelNotFoundAPIError(err)).toBe(true)
   })
 

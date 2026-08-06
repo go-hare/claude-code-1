@@ -179,9 +179,30 @@ export class StreamingToolExecutor {
 
   private createSyntheticErrorMessage(
     toolUseId: string,
-    reason: 'sibling_error' | 'user_interrupted' | 'streaming_fallback',
+    reason:
+      | 'sibling_error'
+      | 'user_interrupted'
+      | 'streaming_fallback'
+      | 'conversation_ended',
     assistantMessage: AssistantMessage,
   ): Message {
+    // densable 2.1.214: sibling tools cancelled by EndConversation abort
+    // content = Cancelled…; toolUseResult = "Conversation ended by model"
+    if (reason === 'conversation_ended') {
+      const msg = 'Cancelled: Claude ended the conversation'
+      return createUserMessage({
+        content: [
+          {
+            type: 'tool_result',
+            content: `<tool_use_error>${msg}</tool_use_error>`,
+            is_error: true,
+            tool_use_id: toolUseId,
+          },
+        ],
+        toolUseResult: 'Conversation ended by model',
+        sourceToolAssistantUUID: assistantMessage.uuid,
+      })
+    }
     // For user interruptions (ESC to reject), use REJECT_MESSAGE so the UI shows
     // "User rejected edit" instead of "Error editing file"
     if (reason === 'user_interrupted') {
@@ -236,7 +257,12 @@ export class StreamingToolExecutor {
    */
   private getAbortReason(
     tool: TrackedTool,
-  ): 'sibling_error' | 'user_interrupted' | 'streaming_fallback' | null {
+  ):
+    | 'sibling_error'
+    | 'user_interrupted'
+    | 'streaming_fallback'
+    | 'conversation_ended'
+    | null {
     if (this.discarded) {
       return 'streaming_fallback'
     }
@@ -244,10 +270,19 @@ export class StreamingToolExecutor {
       return 'sibling_error'
     }
     if (this.toolUseContext.abortController.signal.aborted) {
+      const reason = this.toolUseContext.abortController.signal.reason
+      // densable 2.1.214: EndConversation aborts with "end_conversation".
+      // The EndConversation tool itself is not cancelled (null); siblings
+      // get conversation_ended synthetic tool_result.
+      if (reason === 'end_conversation') {
+        return tool.block.name === 'EndConversation'
+          ? null
+          : 'conversation_ended'
+      }
       // 'interrupt' means the user typed a new message while tools were
       // running. Only cancel tools whose interruptBehavior is 'cancel';
       // 'block' tools shouldn't reach here (abort isn't fired).
-      if (this.toolUseContext.abortController.signal.reason === 'interrupt') {
+      if (reason === 'interrupt') {
         return this.getToolInterruptBehavior(tool) === 'cancel'
           ? 'user_interrupted'
           : null

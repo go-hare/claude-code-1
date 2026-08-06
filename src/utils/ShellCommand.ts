@@ -363,6 +363,8 @@ class ShellCommandImpl implements ShellCommand {
 
   async #handleExit(code: number): Promise<void> {
     this.#cleanupListeners()
+    // densable #w: capture killed BEFORE flipping running/backgrounded → completed
+    const wasKilled = this.#status === 'killed'
     if (this.#status === 'running' || this.#status === 'backgrounded') {
       this.#status = 'completed'
     }
@@ -372,13 +374,14 @@ class ShellCommandImpl implements ShellCommand {
       code,
       stdout,
       stderr: this.taskOutput.getStderr(),
-      interrupted: code === SIGKILL,
+      // densable: interrupted only when we killed AND exit is SIGKILL (137)
+      interrupted: wasKilled && code === SIGKILL,
       backgroundTaskId: this.#backgroundTaskId,
     }
 
     if (this.taskOutput.stdoutToFile && !this.#backgroundTaskId) {
-      if (this.taskOutput.outputFileRedundant) {
-        // Small file — full content is in result.stdout, delete the file
+      if (this.taskOutput.outputFileRedundant || this.#killedForSize) {
+        // densable: also delete when size-killed; small file → full content in stdout
         void this.taskOutput.deleteOutputFile()
       } else {
         // Large file — tell the caller where the full output lives
@@ -388,12 +391,15 @@ class ShellCommandImpl implements ShellCommand {
       }
     }
 
+    // densable stderr prefixes: size kill; OR (killed && code===143) timeout.
+    // External SIGTERM (exit 143 without local #doKill) must NOT say "timed out".
     if (this.#killedForSize) {
       result.stderr = prependStderr(
         `Background command killed: output file exceeded ${MAX_TASK_OUTPUT_BYTES_DISPLAY}`,
         result.stderr,
       )
-    } else if (code === SIGTERM) {
+      result.outputFileSize = this.taskOutput.outputFileSize
+    } else if (wasKilled && code === SIGTERM) {
       result.stderr = prependStderr(
         `Command timed out after ${formatDuration(this.#timeout)}`,
         result.stderr,

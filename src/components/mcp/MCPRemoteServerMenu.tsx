@@ -25,6 +25,7 @@ import {
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import { getOauthAccountInfo } from '../../utils/auth.js';
 import { openBrowser } from '../../utils/browser.js';
+import { BG_NO_TERMINAL_MCP_AUTH_MSG, isBgSessionWithoutTerminal } from '../../utils/concurrentSessions.js';
 import { errorMessage } from '../../utils/errors.js';
 import { logMCPDebug } from '../../utils/log.js';
 import { capitalize } from '../../utils/stringUtils.js';
@@ -294,6 +295,13 @@ export function MCPRemoteServerMenu({
 
   const handleAuthenticate = React.useCallback(async () => {
     if (server.config.type === 'claudeai-proxy') return;
+
+    // densable KGo / Pte: OAuth needs an attached terminal on bg sessions.
+    if (isBgSessionWithoutTerminal()) {
+      setError(BG_NO_TERMINAL_MCP_AUTH_MSG);
+      onComplete?.(BG_NO_TERMINAL_MCP_AUTH_MSG);
+      return;
+    }
 
     setIsAuthenticating(true);
     setError(null);

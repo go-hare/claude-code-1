@@ -2,7 +2,10 @@ import { isRemoteManagedSettingsEligible } from '../services/remoteManagedSettin
 import { clearCACertsCache } from './caCerts.js'
 import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
+import { logForDebugging } from './debug.js'
 import {
+  isHostProxyEnvVar,
+  isHostTransportSensitiveEnvVar,
   isProviderManagedEnvVar,
   SAFE_ENV_VARS,
 } from './managedEnvConstants.js'
@@ -13,6 +16,29 @@ import {
   getSettings_DEPRECATED,
   getSettingsForSource,
 } from './settings/settings.js'
+
+/** densable $Ss — warn once per stripped settings.env key under host-managed. */
+const hostManagedStripWarnedKeys = new Set<string>()
+
+/**
+ * densable s_o — warn that settings-sourced provider/auth/transport env is ignored.
+ */
+export function warnHostManagedSettingsEnvIgnored(
+  key: string,
+  source: string,
+): void {
+  if (hostManagedStripWarnedKeys.has(key)) return
+  hostManagedStripWarnedKeys.add(key)
+  logForDebugging(
+    `Ignoring ${key} from ${source} — this session's provider routing is managed by the host (CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST or a host-auth-callback marker), so settings-sourced provider/auth configuration does not apply.`,
+    { level: 'warn' },
+  )
+}
+
+/** Test helper densable kyy fragment — clear strip-warn set. */
+export function clearHostManagedSettingsEnvStripWarnsForTests(): void {
+  hostManagedStripWarnedKeys.clear()
+}
 
 /**
  * `claude ssh` remote: ANTHROPIC_UNIX_SOCKET routes auth through a -R forwarded
@@ -36,17 +62,10 @@ function withoutSSHTunnelVars(
 }
 
 /**
- * When the host owns inference routing (sets
- * CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST in spawn env), strip
- * provider-selection / model-default vars from settings-sourced env so a
- * user's ~/.claude/settings.json can't redirect requests away from the
- * host-configured provider.
+ * densable managedByHostFlag — CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST only
+ * (not HOST_AUTH_ENV_VAR alone; that is managedByHost for provider strip).
  */
-function withoutHostManagedProviderVars(
-  env: Record<string, string> | undefined,
-): Record<string, string> {
-  if (!env) return {}
-  // Official PROVIDER_MANAGED_BY_HOST densable.
+function isProviderManagedByHostFlag(): boolean {
   let providerManagedByHost = isEnvTruthy(
     process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
   )
@@ -58,16 +77,79 @@ function withoutHostManagedProviderVars(
   } catch {
     // keep raw env fallback
   }
-  if (!providerManagedByHost) {
+  return providerManagedByHost
+}
+
+/**
+ * densable managedByHost — PROVIDER_MANAGED_BY_HOST or host-auth-callback marker.
+ */
+function isManagedByHostSession(): boolean {
+  if (isProviderManagedByHostFlag()) return true
+  return Boolean(process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR)
+}
+
+/**
+ * densable byy host-managed branch of settings.env filter (pure).
+ * When the host owns inference routing (CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+ * and/or host-auth marker), strip provider-selection / model-default vars,
+ * and under managedByHostFlag also strip densable LGm (mTLS/CA/OAuth scopes/
+ * TLS reject) + PGm (HTTP(S)_PROXY/NO_PROXY) so repo settings cannot break
+ * Desktop host-injected transport (2.1.212 #19).
+ *
+ * densable s_o warns once per stripped key when `onStrip` is provided (or
+ * default warnHostManagedSettingsEnvIgnored when source is set).
+ */
+export function stripHostManagedSettingsEnv(
+  env: Record<string, string> | undefined,
+  opts: {
+    managedByHost: boolean
+    managedByHostFlag: boolean
+    source?: string
+    onStrip?: (key: string, source: string) => void
+  },
+): Record<string, string> {
+  if (!env) return {}
+  const { managedByHost, managedByHostFlag } = opts
+  if (!managedByHost && !managedByHostFlag) {
     return env
   }
+  const source = opts.source ?? 'settings'
+  const onStrip = opts.onStrip ?? warnHostManagedSettingsEnvIgnored
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
-    if (!isProviderManagedEnvVar(key)) {
-      out[key] = value
+    // densable PLn provider routing — strip when managedByHost
+    if (isProviderManagedEnvVar(key) && managedByHost) {
+      onStrip(key, source)
+      continue
     }
+    // densable ANTHROPIC_CUSTOM_HEADERS under managedByHost
+    if (managedByHost && key.toUpperCase() === 'ANTHROPIC_CUSTOM_HEADERS') {
+      onStrip(key, source)
+      continue
+    }
+    // densable LLn / KVt — only when managedByHostFlag (PROVIDER_MANAGED_BY_HOST)
+    if (managedByHostFlag && isHostProxyEnvVar(key)) {
+      onStrip(key, source)
+      continue
+    }
+    if (managedByHostFlag && isHostTransportSensitiveEnvVar(key)) {
+      onStrip(key, source)
+      continue
+    }
+    out[key] = value
   }
   return out
+}
+
+function withoutHostManagedProviderVars(
+  env: Record<string, string> | undefined,
+  source = 'settings',
+): Record<string, string> {
+  return stripHostManagedSettingsEnv(env, {
+    managedByHost: isManagedByHostSession(),
+    managedByHostFlag: isProviderManagedByHostFlag(),
+    source,
+  })
 }
 
 /**
@@ -96,9 +178,10 @@ function withoutCcdSpawnEnvKeys(
  */
 function filterSettingsEnv(
   env: Record<string, string> | undefined,
+  source = 'settings',
 ): Record<string, string> {
   return withoutCcdSpawnEnvKeys(
-    withoutHostManagedProviderVars(withoutSSHTunnelVars(env)),
+    withoutHostManagedProviderVars(withoutSSHTunnelVars(env), source),
   )
 }
 
@@ -145,7 +228,10 @@ export function applySafeConfigEnvironmentVariables(): void {
   // Global config (~/.claude.json) is user-controlled. In CCD mode,
   // filterSettingsEnv strips keys that were in the spawn env snapshot so
   // the desktop host's operational vars (OTEL, etc.) are not overridden.
-  Object.assign(process.env, filterSettingsEnv(getGlobalConfig().env))
+  Object.assign(
+    process.env,
+    filterSettingsEnv(getGlobalConfig().env, 'globalConfig'),
+  )
 
   // Apply ALL env vars from trusted setting sources, policySettings last.
   // Gate on isSettingSourceEnabled so SDK settingSources: [] (isolation mode)
@@ -156,7 +242,7 @@ export function applySafeConfigEnvironmentVariables(): void {
     if (!isSettingSourceEnabled(source)) continue
     Object.assign(
       process.env,
-      filterSettingsEnv(getSettingsForSource(source)?.env),
+      filterSettingsEnv(getSettingsForSource(source)?.env, source),
     )
   }
 
@@ -170,7 +256,10 @@ export function applySafeConfigEnvironmentVariables(): void {
 
   Object.assign(
     process.env,
-    filterSettingsEnv(getSettingsForSource('policySettings')?.env),
+    filterSettingsEnv(
+      getSettingsForSource('policySettings')?.env,
+      'policySettings',
+    ),
   )
 
   // Apply only safe env vars from the fully-merged settings (which includes
@@ -179,9 +268,12 @@ export function applySafeConfigEnvironmentVariables(): void {
   // will overwrite the trusted value — this is acceptable since these vars are
   // in the safe allowlist. Only policySettings values are guaranteed to survive
   // unchanged (it has the highest merge priority in both loops) — except
-  // provider-routing vars, which filterSettingsEnv strips from every source
-  // when CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST is set.
-  const settingsEnv = filterSettingsEnv(getSettings_DEPRECATED()?.env)
+  // provider-routing vars + densable LGm transport vars, which filterSettingsEnv
+  // strips from every source when CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST is set.
+  const settingsEnv = filterSettingsEnv(
+    getSettings_DEPRECATED()?.env,
+    'settings',
+  )
   for (const [key, value] of Object.entries(settingsEnv)) {
     if (SAFE_ENV_VARS.has(key.toUpperCase())) {
       process.env[key] = value
@@ -197,9 +289,15 @@ export function applySafeConfigEnvironmentVariables(): void {
  * dangerous environment variables such as LD_PRELOAD, PATH, etc.
  */
 export function applyConfigEnvironmentVariables(): void {
-  Object.assign(process.env, filterSettingsEnv(getGlobalConfig().env))
+  Object.assign(
+    process.env,
+    filterSettingsEnv(getGlobalConfig().env, 'globalConfig'),
+  )
 
-  Object.assign(process.env, filterSettingsEnv(getSettings_DEPRECATED()?.env))
+  Object.assign(
+    process.env,
+    filterSettingsEnv(getSettings_DEPRECATED()?.env, 'settings'),
+  )
 
   // Clear caches so agents are rebuilt with the new env vars
   clearCACertsCache()

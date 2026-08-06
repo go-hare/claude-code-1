@@ -79,8 +79,17 @@ export type RequestHandler = (
 // Server — official SG4
 // ---------------------------------------------------------------------------
 
+export type ControlSocketCloseOpts = {
+  /**
+   * densable aAp close(A): when true, do not server.close()+unlink path —
+   * unref only. Yielding supervisor must leave the path for the successor
+   * (214 #26: dying daemon must not delete successor control socket).
+   */
+  skipUnlink?: boolean
+}
+
 export interface ControlSocketInstance {
-  close: () => Promise<void>
+  close: (opts?: ControlSocketCloseOpts) => Promise<void>
   leaseCount: () => number
   onLeaseChange: Signal<[]>
 }
@@ -200,12 +209,26 @@ export async function startControlSocket(
     }
   }
 
+  // densable aAp: y flag — once skipUnlink, never unlink later from this instance
+  let skipUnlinkSticky = false
+
   return {
-    async close() {
+    // densable:
+    //   close:(A)=>new Promise((w)=>{for(let x of c)x.destroy();
+    //     if(A?.skipUnlink)return y=!0,_.unref(),void w();
+    //     _.close(()=>{if(!A?.skipUnlink)Oca.unlink(a).catch(()=>{});w()})})
+    async close(opts?: ControlSocketCloseOpts) {
       for (const sock of connections) sock.destroy()
+      if (opts?.skipUnlink) {
+        skipUnlinkSticky = true
+        // Leave FD open until process exit so successor bind race is not
+        // compounded by a half-closed listener; unref so exit is not blocked.
+        server.unref()
+        return
+      }
       await new Promise<void>(r => server.close(() => r()))
       // densable aAp close: unlink unless skipUnlink; windows named pipe no path file
-      if (process.platform !== 'win32') {
+      if (!skipUnlinkSticky && process.platform !== 'win32') {
         await unlink(socketPath).catch(() => {})
       }
     },

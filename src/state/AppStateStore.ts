@@ -495,12 +495,24 @@ export type AppState = DeepImmutable<{
   // Remote-harness side: set via set_permission_mode control_request,
   // pushed to CCR external_metadata.is_ultraplan_mode by onChangeAppState.
   isUltraplanMode?: boolean
+  /**
+   * densable ultrareviewOverageConfirmed — session flag after user confirms
+   * Extra Usage billing for /ultrareview. Survives within a conversation but
+   * must reset on /clear (fresh AppState / explicit clear) so the dialog
+   * re-prompts. densable M6e / isUltrareviewOverageConfirmed.
+   */
+  ultrareviewOverageConfirmed: boolean
   // Always-on bridge: permission callbacks for bidirectional permission checks
   replBridgePermissionCallbacks?: BridgePermissionCallbacks
   // Channel permission callbacks — permission prompts over Telegram/iMessage/etc.
   // Races against local UI + bridge + hooks + classifier via claim() in
   // interactiveHandler.ts. Constructed once in useManageMCPConnections.
   channelPermissionCallbacks?: ChannelPermissionCallbacks
+  /**
+   * densable 2.1.214 endedByModel — set by EndConversation on successful end
+   * (interactive path). Blocks further queries until /clear or new session.
+   */
+  endedByModel: boolean
 }
 
 export type AppStateStore = Store<AppState>
@@ -630,6 +642,10 @@ export function getDefaultAppState(): AppState {
     initialMessage: null,
     effortValue: undefined,
     ultracode: false,
+    // densable default ultrareviewOverageConfirmed:!1
+    ultrareviewOverageConfirmed: false,
+    // densable 2.1.214 EndConversation
+    endedByModel: false,
     activeOverlays: new Set<string>(),
     fastMode: false,
   }

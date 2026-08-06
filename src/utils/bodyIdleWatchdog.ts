@@ -36,10 +36,29 @@ export class BodyIdleTimeoutError extends Error {
  * Pull-driven so we honor consumer backpressure (desiredSize) instead of
  * eagerly pumping the upstream reader into an unbounded queue.
  */
+/**
+ * densable s8h 4th arg / Response `_chunkTimes` — shared mutable clock
+ * stamped on every successful body pull so the query loop can schedule
+ * "Waiting for API response · check your network" without using token
+ * deltas (advisor thinking can be silent at the event layer).
+ */
+export type BodyChunkTimes = {
+  lastAt: number
+}
+
+export function createBodyChunkTimes(): BodyChunkTimes {
+  return { lastAt: 0 }
+}
+
 export function wrapReadableStreamWithBodyIdleTimeout(
   source: ReadableStream<Uint8Array>,
   idleTimeoutMs: number,
   onTimeout?: (error: BodyIdleTimeoutError) => void,
+  /**
+   * densable s8h `n` — when provided, each successful pull stamps
+   * `n.lastAt = performance.now()` (byte-level activity, not SSE events).
+   */
+  chunkTimes?: BodyChunkTimes,
 ): ReadableStream<Uint8Array> {
   if (!(idleTimeoutMs > 0)) {
     return source
@@ -107,6 +126,10 @@ export function wrapReadableStreamWithBodyIdleTimeout(
             // already closed
           }
           return
+        }
+        // densable s8h: if (n) n.lastAt = performance.now()
+        if (chunkTimes) {
+          chunkTimes.lastAt = performance.now()
         }
         // Fresh bytes — reset idle window for the next wait.
         arm()
@@ -179,6 +202,11 @@ export type BodyIdleFetch = (
 export function rewrapResponseWithBody(
   response: Response,
   body: ReadableStream<Uint8Array>,
+  /**
+   * densable FMh: Object.defineProperty(v, "_chunkTimes", { value: _ })
+   * so query can read `response._chunkTimes.lastAt` for stalled UI.
+   */
+  chunkTimes?: BodyChunkTimes,
 ): Response {
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
   const next = new Response(body, {
@@ -200,7 +228,29 @@ export function rewrapResponseWithBody(
       // Runtime may freeze the property — body idle still functions.
     }
   }
+  if (chunkTimes) {
+    try {
+      Object.defineProperty(next, '_chunkTimes', {
+        value: chunkTimes,
+        writable: false,
+        enumerable: false,
+        configurable: true,
+      })
+    } catch {
+      // Property may be frozen — stall UI falls back to no lastAt.
+    }
+  }
   return next
+}
+
+/** densable `at._chunkTimes` reader — Response is not typed with the field. */
+export function getResponseChunkTimes(
+  response: Response | undefined | null,
+): BodyChunkTimes | undefined {
+  if (!response) return undefined
+  const times = (response as Response & { _chunkTimes?: BodyChunkTimes })
+    ._chunkTimes
+  return times ?? undefined
 }
 
 /**
@@ -228,14 +278,17 @@ export function wrapFetchWithBodyIdleWatchdog(
       return response
     }
 
+    // densable FMh: _={lastAt:0}; s8h(body,g,y,_); defineProperty(v,"_chunkTimes")
+    const chunkTimes = createBodyChunkTimes()
     const wrappedBody = wrapReadableStreamWithBodyIdleTimeout(
       response.body,
       idleTimeoutMs,
       err => {
         logForDebugging(err.message, { level: 'error' })
       },
+      chunkTimes,
     )
 
-    return rewrapResponseWithBody(response, wrappedBody)
+    return rewrapResponseWithBody(response, wrappedBody, chunkTimes)
   }
 }

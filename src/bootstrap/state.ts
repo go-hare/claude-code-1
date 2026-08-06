@@ -99,6 +99,12 @@ type State = {
   modelStrings: ModelStrings | null
   isInteractive: boolean
   /**
+   * densable kt.attacherCaps (uE/tii) — set when a terminal attaches to this
+   * bg worker via rendezvous `attacher-caps`; null when detached. Pte() =
+   * isBg && !attacherCaps gates interactive MCP/OAuth panels.
+   */
+  attacherCaps: Record<string, unknown> | null
+  /**
    * Official mainLoopBusy (qGo/jGo) — true while the REPL query loop is
    * executing. Blocks bg shell memory-pressure reaping so we don't kill
    * shells mid-turn.
@@ -251,6 +257,22 @@ type State = {
   mainThreadAgentType: string | undefined
   // Remote mode (--remote flag)
   isRemoteMode: boolean
+  /**
+   * densable FC / eDe — true while REPL Remote Control bridge is connected
+   * (or init succeeded and not yet torn down). Gates JT/enqueueSdkEvent so
+   * interactive sessions still queue task_progress for mid-join RC clients.
+   */
+  replBridgeActive: boolean
+  /**
+   * densable stickyBetas (GRe) — session sticky sent/rejected beta headers.
+   * mid-conv o3 reject → rejected set (DV) until /clear.
+   */
+  stickyBetas: { sent: Set<string>; rejected: Set<string> }
+  /**
+   * densable midConvCachePromotionRejected (Gri/Vri) — proxy rejected
+   * cache_control on api_system tail; demote breakpoint for this conversation.
+   */
+  midConvCachePromotionRejected: boolean
   // Direct connect server URL (for display in header)
   directConnectServerUrl: string | undefined
   // System prompt section cache state
@@ -351,6 +373,7 @@ function getInitialState(): State {
     refusalFallbackModelLatch: undefined,
     modelStrings: null,
     isInteractive: false,
+    attacherCaps: null,
     mainLoopBusy: false,
     kairosActive: false,
     strictToolResultPairing: false,
@@ -449,11 +472,10 @@ function getInitialState(): State {
     mainThreadAgentType: undefined,
     // Remote mode
     isRemoteMode: false,
-    ...(process.env.USER_TYPE === 'ant'
-      ? {
-          replBridgeActive: false,
-        }
-      : {}),
+    // densable FC — REPL Remote Control bridge live flag
+    replBridgeActive: false,
+    stickyBetas: { sent: new Set(), rejected: new Set() },
+    midConvCachePromotionRejected: false,
     // Direct connect server URL
     directConnectServerUrl: undefined,
     // System prompt section cache state
@@ -814,7 +836,17 @@ export function flushInteractionTime(): void {
 function flushInteractionTime_inner(): void {
   STATE.lastInteractionTime = Date.now()
   interactionTimeDirty = false
+  // densable toi.emit — notify onInteraction subscribers (Dkr = toi.subscribe)
+  interactionSignal.emit()
 }
+
+/**
+ * densable Dkr = toi.subscribe. Fires when user interaction is flushed
+ * (keypress/click → updateLastInteractionTime → flush).
+ * useReplBridge uses this as the A.current latch for ready-push suppression.
+ */
+const interactionSignal = createSignal()
+export const onInteraction = interactionSignal.subscribe
 
 export function addToTotalLinesChanged(added: number, removed: number): void {
   STATE.totalLinesAdded += added
@@ -1206,6 +1238,7 @@ export function resetStateForTests(): void {
   currentTurnTokenBudget = null
   budgetContinuationCount = 0
   sessionSwitched.clear()
+  interactionSignal.clear()
 }
 
 // You shouldn't use this directly. See src/utils/model/modelStrings.ts::getModelStrings()
@@ -1343,6 +1376,22 @@ export function getIsInteractive(): boolean {
 
 export function setIsInteractive(value: boolean): void {
   STATE.isInteractive = value
+}
+
+/**
+ * densable uE — truthy when a terminal is attached to this bg session.
+ */
+export function getAttacherCaps(): Record<string, unknown> | null {
+  return STATE.attacherCaps
+}
+
+/**
+ * densable tii — set/clear attacher caps from rendezvous `attacher-caps`.
+ */
+export function setAttacherCaps(
+  caps: Record<string, unknown> | null | undefined,
+): void {
+  STATE.attacherCaps = caps ?? null
 }
 
 export function getClientType(): string {
@@ -2041,11 +2090,16 @@ export function setCacheEditingHeaderLatched(v: boolean): void {
 /**
  * Reset beta header latches to null. Called on /clear and /compact so a
  * fresh conversation gets fresh header evaluation.
+ * densable: also resets stickyBetas + midConvCachePromotionRejected so o3
+ * and api_system cache promotion can be retried after /clear or /compact.
+ * Callers that also need getAllModelBetas re-evaluation must clearBetasCaches().
  */
 export function clearBetaHeaderLatches(): void {
   STATE.afkModeHeaderLatched = null
   STATE.fastModeHeaderLatched = null
   STATE.cacheEditingHeaderLatched = null
+  STATE.stickyBetas = { sent: new Set(), rejected: new Set() }
+  STATE.midConvCachePromotionRejected = false
 }
 
 export function getPromptId(): string | null {
@@ -2055,6 +2109,44 @@ export function getPromptId(): string | null {
 export function setPromptId(id: string | null): void {
   STATE.promptId = id
 }
+/** densable FC — true while REPL Remote Control bridge is live. */
 export function isReplBridgeActive(): boolean {
-  return false
+  return STATE.replBridgeActive ?? false
+}
+
+/** densable eDe — set when bridge connects / fails / tears down. */
+export function setReplBridgeActive(active: boolean): void {
+  if (STATE.replBridgeActive === active) return
+  STATE.replBridgeActive = active
+}
+
+/** densable p1 stickyBetas */
+export function getStickyBetas(): { sent: Set<string>; rejected: Set<string> } {
+  return STATE.stickyBetas
+}
+
+/** densable GRe reset (session clear). */
+export function resetStickyBetas(): void {
+  STATE.stickyBetas = { sent: new Set(), rejected: new Set() }
+}
+
+/** densable DV — sticky-reject a beta until session clear. */
+export function stickyRejectBeta(beta: string): void {
+  STATE.stickyBetas.sent.delete(beta)
+  STATE.stickyBetas.rejected.add(beta)
+}
+
+/** densable Iz — has beta been sticky-rejected? */
+export function isStickyBetaRejected(beta: string): boolean {
+  return STATE.stickyBetas.rejected.has(beta)
+}
+
+/** densable Gri */
+export function getMidConvCachePromotionRejected(): boolean {
+  return STATE.midConvCachePromotionRejected
+}
+
+/** densable Vri */
+export function setMidConvCachePromotionRejected(rejected: boolean): void {
+  STATE.midConvCachePromotionRejected = rejected
 }

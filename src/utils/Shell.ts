@@ -329,17 +329,19 @@ export async function exec(
         // Git-for-Windows conhost; prefer serial/combined git on Windows too.
         GIT_PAGER: 'cat',
         CLAUDECODE: '1',
+        // densable TCt: always stamp session id + child marker + CLAUDE_PID
+        // so snapshot pkill self-guard (K2g) can refuse patterns matching us.
+        CLAUDE_CODE_SESSION_ID: getSessionId(),
+        CLAUDE_CODE_CHILD_SESSION: '1',
+        CLAUDE_PID: String(process.pid),
         ...envOverrides,
-        ...(process.env.USER_TYPE === 'ant'
-          ? {
-              CLAUDE_CODE_SESSION_ID: getSessionId(),
-            }
-          : {}),
       },
       cwd,
+      // densable 2.1.214 #21: PowerShell provider.stdin === 'ignore' so children
+      // waiting on stdin do not hang until tool timeout. Bash keeps 'pipe'.
       stdio: usePipeMode
-        ? ['pipe', 'pipe', 'pipe']
-        : ['pipe', outputHandle?.fd, outputHandle?.fd],
+        ? [provider.stdin ?? 'pipe', 'pipe', 'pipe']
+        : [provider.stdin ?? 'pipe', outputHandle?.fd, outputHandle?.fd],
       // Don't pass the signal - we'll handle termination ourselves with tree-kill
       detached: provider.detached,
       // Prevent visible console window on Windows (no-op on other platforms)

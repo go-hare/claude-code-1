@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import { type FSWatcher, watch } from 'fs';
 import React, { useCallback, useEffect, useRef } from 'react';
-import { setMainLoopModelOverride } from '../bootstrap/state.js';
+import { getSessionId, onInteraction, setMainLoopModelOverride, setReplBridgeActive } from '../bootstrap/state.js';
 import {
   type BridgePermissionCallbacks,
   type BridgePermissionResponse,
@@ -30,6 +30,15 @@ import { errorMessage } from '../utils/errors.js';
 import { enqueue } from '../utils/messageQueueManager.js';
 import { buildSystemInitMessage } from '../utils/messages/systemInit.js';
 import { createBridgeStatusMessage, createSystemMessage } from '../utils/messages.js';
+import {
+  createReadyPushSdkMessage,
+  loadRemoteControlReadyNudgeConfig,
+  recordRemoteControlReadyPushSent,
+  REMOTE_CONTROL_READY_PUSH_MESSAGE,
+  shouldEmitReadyPushByProbability,
+  shouldSendRemoteControlReadyPushLive,
+} from '../utils/remoteControlReadyPush.js';
+import { drainSdkEvents, setSdkEventEnqueueListener } from '../utils/sdkEventQueue.js';
 import { buildTaskStateMessage, getTaskStateSnapshotKey, shouldPublishTaskState } from '../utils/taskStateMessage.js';
 import omit from 'lodash-es/omit.js';
 import { getMcpConfigByName } from '../services/mcp/config.js';
@@ -98,6 +107,12 @@ export function useReplBridge(
   // task_state publish even when the snapshot key + handle identity match.
   // Remote clients lose ephemeral task status across the transport rebuild.
   const forceTaskStatePublishRef = useRef<(() => void) | null>(null);
+  // densable A.current — user-activity latch while bridge handle exists (Dkr/toi)
+  const userActivityWhileConnectedRef = useRef(false);
+  // densable w.current — already-sent ready-push for this connect cycle
+  const readyPushSentRef = useRef(false);
+  // densable x.current — reattach session treated like outboundOnly for oZp gate
+  const bridgeReattachRef = useRef(process.env.CLAUDE_BRIDGE_REATTACH_SESSION !== undefined);
   const setAppState = useSetAppState();
   const commandsRef = useRef(commands);
   commandsRef.current = commands;
@@ -118,6 +133,18 @@ export function useReplBridge(
   const replBridgeInitialNameRaw = useAppState(s => s.replBridgeInitialName);
   const replBridgeInitialName = feature('BRIDGE_MODE') ? replBridgeInitialNameRaw : undefined;
 
+  // densable: qE.useEffect(()=>Dkr(()=>{if(d.current)A.current=!0}),[])
+  // Latch user activity while a bridge handle is live — suppress ready-push.
+  useEffect(() => {
+    if (feature('BRIDGE_MODE')) {
+      return onInteraction(() => {
+        if (handleRef.current) {
+          userActivityWhileConnectedRef.current = true;
+        }
+      });
+    }
+  }, []);
+
   // Initialize/teardown bridge when enabled state changes.
   // Passes current messages as initialMessages so the remote session
   // starts with the existing conversation context (e.g. from /bridge).
@@ -127,6 +154,10 @@ export function useReplBridge(
     // dynamic imports below.
     if (feature('BRIDGE_MODE')) {
       if (!replBridgeEnabled) return;
+
+      // densable resets A/w latches per connect cycle (new effect run)
+      userActivityWhileConnectedRef.current = false;
+      readyPushSentRef.current = false;
 
       const outboundOnly = replBridgeOutboundOnly;
       function notifyBridgeFailed(detail?: string): void {
@@ -258,6 +289,13 @@ export function useReplBridge(
           // State change callback — maps bridge lifecycle events to AppState.
           function handleStateChange(state: BridgeState, detail?: string): void {
             if (cancelled) return;
+            // densable eDe: FC/replBridgeActive true on connected|ready (when
+            // handle exists), false on failed — gates JT enqueue for RC mid-join.
+            if (state === 'failed') {
+              setReplBridgeActive(false);
+            } else if ((state === 'connected' || state === 'ready') && handleRef.current) {
+              setReplBridgeActive(true);
+            }
             if (outboundOnly) {
               logForDebugging(`[bridge:repl] Mirror state=${state}${detail ? ` detail=${detail}` : ''}`);
               // Sync replBridgeConnected so the forwarding effect starts/stops
@@ -341,6 +379,28 @@ export function useReplBridge(
                 // inactive (reconnecting path), the task-state effect remounts
                 // and publishes on its own; this covers the still-active path.
                 forceTaskStatePublishRef.current?.();
+                // densable #31 ready-push:
+                // if (zt&&!w.current&&!A.current){cfg=nZp(); if(cfg&&oZp(cfg,we,He)){
+                //   w.current=!0; if(prob) zt.writeSdkMessages([bzu(YQp,Et())]); iZp(cfg)}}
+                // we = replBridgeExplicit; He = reattach (x.current) | densable also
+                // folds outbound into oZp third arg — local outboundOnly already
+                // returned above, so only reattach remains for He.
+                if (handle && !readyPushSentRef.current && !userActivityWhileConnectedRef.current) {
+                  const readyCfg = loadRemoteControlReadyNudgeConfig();
+                  const explicit = store.getState().replBridgeExplicit;
+                  const reattachOrOutbound = bridgeReattachRef.current;
+                  if (readyCfg && shouldSendRemoteControlReadyPushLive(readyCfg, explicit, reattachOrOutbound)) {
+                    // densable: w.current=!0 always once gate passes; write+iZp only if prob
+                    readyPushSentRef.current = true;
+                    if (shouldEmitReadyPushByProbability(readyCfg.probability, Math.random())) {
+                      handle.writeSdkMessages([
+                        createReadyPushSdkMessage(REMOTE_CONTROL_READY_PUSH_MESSAGE, getSessionId()),
+                      ]);
+                      // densable iZp only on the write path (comma after writeSdkMessages)
+                      recordRemoteControlReadyPushSent(readyCfg);
+                    }
+                  }
+                }
                 // Send system/init so remote clients (web/iOS/Android) get
                 // session metadata. REPL uses query() directly — never hits
                 // QueryEngine's SDKMessage layer — so this is the only path
@@ -634,6 +694,9 @@ export function useReplBridge(
           }
           handleRef.current = handle;
           setReplBridgeHandle(handle);
+          // densable eDe(!0) after successful init — enable JT/task_progress queue
+          // so Remote Control clients joining mid-run receive workflow agent grid.
+          setReplBridgeActive(true);
           consecutiveFailuresRef.current = 0;
           // Skip initial messages in the forwarding effect — they were
           // already loaded as session events during creation.
@@ -821,6 +884,8 @@ export function useReplBridge(
           teardownPromiseRef.current = handle.teardown(reason ? { reason } : undefined);
           handleRef.current = null;
           setReplBridgeHandle(null);
+          // densable eDe(!1) on teardown — stop interactive JT enqueue.
+          setReplBridgeActive(false);
         }
         setAppState(prev => {
           if (!prev.replBridgeConnected && !prev.replBridgeSessionActive && !prev.replBridgeError) {
@@ -903,6 +968,45 @@ export function useReplBridge(
       }
     }
   }, [messages, replBridgeConnected]);
+
+  // densable MGe / DCt drain: forward task_* SDK events (incl. task_progress with
+  // workflow_progress full snapshots) to Remote Control clients. Without this,
+  // mid-run joiners only see empty workflow agent grids (changelog #22).
+  useEffect(() => {
+    if (!feature('BRIDGE_MODE')) return;
+    if (!replBridgeConnected) return;
+
+    const drainTaskEventsToBridge = (): void => {
+      const handle = handleRef.current;
+      if (!handle) return;
+      const drained = drainSdkEvents();
+      const taskEvents = drained.filter(
+        e =>
+          e.type === 'system' &&
+          (e.subtype === 'task_started' ||
+            e.subtype === 'task_progress' ||
+            e.subtype === 'task_updated' ||
+            e.subtype === 'task_notification' ||
+            e.subtype === 'background_tasks_changed' ||
+            e.subtype === 'thinking_tokens'),
+      );
+      if (taskEvents.length === 0) return;
+      try {
+        // SDKMessage shape is a superset of drained events; bridge transport
+        // stamps session_id on write.
+        handle.writeSdkMessages(taskEvents as unknown as SDKMessage[]);
+      } catch (err) {
+        logForDebugging(`[bridge:sdk] task-event forward failed: ${errorMessage(err)}`, { level: 'error' });
+      }
+    };
+
+    setSdkEventEnqueueListener(drainTaskEventsToBridge);
+    // Catch anything queued before the listener was registered.
+    drainTaskEventsToBridge();
+    return () => {
+      setSdkEventEnqueueListener(null);
+    };
+  }, [replBridgeConnected]);
 
   useEffect(() => {
     if (feature('BRIDGE_MODE')) {

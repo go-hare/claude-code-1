@@ -2769,7 +2769,10 @@ async function* executeHooks({
         result.stdout,
       )
 
-      if (validationError) {
+      // densable 2.1.214 #40: `if(ge&&we.status!==2)` — schema/parse failure
+      // must NOT swallow exit code 2 blocking (fall through to status===2 path).
+      // See hookExit2Priority.ts for pure gate.
+      if (validationError && result.status !== 2) {
         emitHookResponse({
           hookId,
           hookName,
@@ -2821,6 +2824,15 @@ async function* executeHooks({
           exitCode: result.status,
           durationMs,
         })
+
+        // densable: exit 2 still blocks even when JSON did not set blockingError
+        // (`if(we.status===2&&!pe.blockingError) pe.blockingError = stderr...`).
+        if (result.status === 2 && !processed.blockingError) {
+          processed.blockingError = {
+            blockingError: `[${hook.command}]: ${result.stderr || 'No stderr output'}`,
+            command: hook.command,
+          }
+        }
 
         // Handle suppressOutput (skip for async responses)
         const syncJson = json as TypedSyncHookOutput
@@ -2876,7 +2888,10 @@ async function* executeHooks({
         })
         yield {
           ...processed,
-          outcome: 'success' as const,
+          // densable: outcome = pe.blockingError ? "blocking" : "success"
+          outcome: processed.blockingError
+            ? ('blocking' as const)
+            : ('success' as const),
           hook,
         }
         return
@@ -3609,8 +3624,10 @@ async function executeHooksOutsideREPL({
         )
 
         // Parse JSON for any messages to print out.
+        // densable 2.1.214 #40: `if(L&&k.status!==2)throw Error(L)` — schema
+        // failure must not override exit code 2 blocking.
         const { json, validationError } = parseHookOutput(result.stdout)
-        if (validationError) {
+        if (validationError && result.status !== 2) {
           // Validation error is logged via logForDebugging and returned in output
           throw new Error(validationError)
         }
@@ -3630,9 +3647,13 @@ async function executeHooksOutsideREPL({
           typedJson?.decision === 'block'
         const blocked = result.status === 2 || !!jsonBlocked
 
-        // For successful hooks (exit code 0), use stdout; for failed hooks, use stderr
-        const output =
-          result.status === 0 ? result.stdout || '' : result.stderr || ''
+        // densable: block path uses decision reason or stderr; exit 2 keeps stderr
+        // even when stdout JSON schema failed (json ignored / absent).
+        const output = jsonBlocked
+          ? typedJson?.reason || result.stderr || ''
+          : result.status === 0
+            ? result.stdout || ''
+            : result.stderr || ''
 
         const watchPaths =
           json &&
@@ -4180,7 +4201,8 @@ export async function* executeUserPromptSubmitHooks(
  * @returns Async generator that yields progress messages and hook results
  */
 export async function* executeSessionStartHooks(
-  source: 'startup' | 'resume' | 'clear' | 'compact',
+  // densable 2.1.214 #47: source enum includes "fork"
+  source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork',
   sessionId?: string,
   agentType?: string,
   model?: string,

@@ -5,6 +5,7 @@ import { constants as fsConstants } from 'fs'
 import {
   access,
   copyFile,
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -15,10 +16,11 @@ import {
 } from 'fs/promises'
 import ignore from 'ignore'
 import { basename, dirname, join, resolve, sep } from 'path'
+import { logEvent } from 'src/services/analytics/index.js'
 import { saveCurrentProjectConfig } from './config.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
-import { errorMessage, getErrnoCode } from './errors.js'
+import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
 import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { parseGitConfigValue } from './git/gitConfigParser.js'
@@ -393,6 +395,95 @@ function worktreesDir(repoRoot: string): string {
   return join(repoRoot, '.claude', 'worktrees')
 }
 
+/**
+ * densable 2.1.212 `xqi(repoRoot, worktreePath)`:
+ * Before creating a worktree, lstat `.claude`, `.claude/worktrees`, and the
+ * target path. ENOENT is fine (not created yet). Any other lstat failure or a
+ * symbolic link is fatal — a repository-committed symlink at those locations
+ * can redirect `git worktree add` outside the repository.
+ *
+ * Telemetry reasons match densable `me("git_worktree_create", …)` event names.
+ */
+export async function assertWorktreeCreatePathsNotSymlinked(
+  repoRoot: string,
+  worktreePath: string,
+): Promise<void> {
+  const candidates = [
+    join(repoRoot, '.claude'),
+    worktreesDir(repoRoot),
+    worktreePath,
+  ]
+  for (const path of candidates) {
+    let st: Awaited<ReturnType<typeof lstat>>
+    try {
+      st = await lstat(path)
+    } catch (err) {
+      if (isENOENT(err)) {
+        continue
+      }
+      // densable: me("git_worktree_create", "git_worktree_create_lstat_failed")
+      logEvent('git_worktree_create_lstat_failed', {})
+      throw new Error(
+        `Cannot create worktree: failed to lstat ${path}: ${errorMessage(err)}`,
+      )
+    }
+    if (st.isSymbolicLink()) {
+      // densable: me("git_worktree_create", "git_worktree_create_symlink_rejected")
+      logEvent('git_worktree_create_symlink_rejected', {})
+      throw new Error(
+        `Cannot create worktree: ${path} is a symlink. A repository-committed symlink at .claude, .claude/worktrees, or .claude/worktrees/<name> could redirect worktree creation outside the repository. Remove the symlink and retry.`,
+      )
+    }
+  }
+}
+
+/**
+ * densable post-`git worktree add` containment check: realpath(worktreePath)
+ * must still be the expected location. Catches races / residual redirects
+ * after the pre-create xqi guard.
+ */
+function worktreePathsEqual(a: string, b: string): boolean {
+  if (a === b) {
+    return true
+  }
+  // Windows: drive-letter / 8.3 short-name casing only.
+  return process.platform === 'win32' && a.toLowerCase() === b.toLowerCase()
+}
+
+export async function assertWorktreeCreateContainment(
+  worktreePath: string,
+): Promise<void> {
+  const expected = resolve(worktreePath)
+  let real: string
+  try {
+    real = await realpath(worktreePath)
+  } catch {
+    // densable: me("git_worktree_create", "git_worktree_create_realpath_failed")
+    logEvent('git_worktree_create_realpath_failed', {})
+    throw new Error(
+      `Cannot create worktree: failed to verify containment of ${worktreePath}. The path no longer resolves, so the checkout may have been written outside the repository — check ~/.claude/skills and other sensitive locations for unexpected content.`,
+    )
+  }
+  if (worktreePathsEqual(real, expected)) {
+    return
+  }
+  // Windows 8.3 short paths: resolve(path) may keep ADMINI~1 while realpath
+  // expands to Administrator — re-realpath the expected string when possible.
+  try {
+    const expectedReal = await realpath(expected)
+    if (worktreePathsEqual(real, expectedReal)) {
+      return
+    }
+  } catch {
+    // expected no longer resolves independently — fall through to reject
+  }
+  // densable: me("git_worktree_create", "git_worktree_create_containment_failed")
+  logEvent('git_worktree_create_containment_failed', {})
+  throw new Error(
+    `Cannot create worktree: ${worktreePath} resolved to ${real}, which is not the expected worktree location ${expected}`,
+  )
+}
+
 // Flatten nested slugs (`user/feature` → `user+feature`) for both the branch
 // name and the directory path. Nesting in either location is unsafe:
 //   - git refs: `worktree-user` (file) vs `worktree-user/feature` (needs dir)
@@ -441,6 +532,10 @@ async function getOrCreateWorktree(
       existed: true,
     }
   }
+
+  // densable 2.1.212 xqi: refuse symlink at .claude / worktrees / target
+  // before any mkdir or `git worktree add` that could follow it out of tree.
+  await assertWorktreeCreatePathsNotSymlinked(repoRoot, worktreePath)
 
   // New worktree: fetch base branch then add
   await mkdir(worktreesDir(repoRoot), { recursive: true })
@@ -518,8 +613,13 @@ async function getOrCreateWorktree(
   const { code: createCode, stderr: createStderr } =
     await execFileNoThrowWithCwd(gitExe(), addArgs, { cwd: repoRoot })
   if (createCode !== 0) {
+    // densable: me("git_worktree_create", "git_worktree_create_add_failed")
+    logEvent('git_worktree_create_add_failed', {})
     throw new Error(`Failed to create worktree: ${createStderr}`)
   }
+
+  // densable: post-add realpath containment (defense in depth after xqi)
+  await assertWorktreeCreateContainment(worktreePath)
 
   if (sparsePaths?.length) {
     // Linked sparse worktrees require extensions.worktreeConfig=true in the

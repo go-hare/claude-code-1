@@ -6,11 +6,13 @@ import { getEmptyToolPermissionContext } from '../../Tool.js'
 import type { AppState } from '../AppStateStore.js'
 import { getDefaultAppState } from '../AppStateStore.js'
 
-const emitted: Array<{
-  task_id: string
-  task_type: string
-  description: string
-}[]> = []
+const emitted: Array<
+  {
+    task_id: string
+    task_type: string
+    description: string
+  }[]
+> = []
 
 mock.module('../../utils/sdkEventQueue.js', () => ({
   emitBackgroundTasksChangedSdk: (
@@ -26,9 +28,7 @@ mock.module('../../utils/sdkEventQueue.js', () => ({
 
 const { onChangeAppState } = await import('../onChangeAppState.js')
 
-function baseState(
-  tasks: AppState['tasks'] = {},
-): AppState {
+function baseState(tasks: AppState['tasks'] = {}): AppState {
   return {
     ...getDefaultAppState(),
     toolPermissionContext: getEmptyToolPermissionContext(),

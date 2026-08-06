@@ -136,13 +136,14 @@ export const TaskStopTool = buildTool({
       throw new Error('Missing required parameter: task_id')
     }
 
-    // densable H1e: callerAgentId from toolUseContext.agentId (undefined = main)
+    // densable H1e / TaskStop call (~0xe201e9a):
+    // pNe({ callerAgentId, killedBy:"parent" }) — NO source:"user".
+    // parent kill → BRt "was stopped by Claude"; jCe only when source==="user".
     const result = await stopTask(id, {
       getAppState,
       setAppState,
       callerAgentId: agentId,
-      source: 'user',
-      killedBy: 'user',
+      killedBy: 'parent',
     })
 
     return {

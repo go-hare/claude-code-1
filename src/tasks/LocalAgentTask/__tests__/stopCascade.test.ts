@@ -306,6 +306,41 @@ describe('densable Beo / gtf / H1e stop cascade pure', () => {
     expect(getState().tasks.a1.stoppedByUser).toBe(true)
   })
 
+  test('densable TaskStop path: killedBy parent, no source → no jCe stamp', async () => {
+    // densable TaskStop tool: pNe({ killedBy:"parent" }) — omits source
+    const { setAppState, getAppState, getState } = createSetState({
+      tasks: {
+        a1: agent('a1', { ownerAgentId: 'main', agentId: 'a1' }),
+      },
+    })
+    const result = await stopTask('a1', {
+      getAppState: getAppState as any,
+      setAppState: setAppState as any,
+      callerAgentId: undefined,
+      killedBy: 'parent',
+    })
+    expect(result.taskId).toBe('a1')
+    expect(getState().tasks.a1.status).toBe('killed')
+    expect(getState().tasks.a1.killedBy).toBe('parent')
+    expect(getState().tasks.a1.stoppedByUser).toBeUndefined()
+  })
+
+  test('densable TaskStop default omit source does not stamp stoppedByUser', async () => {
+    // pNe has no source default; bare stopTask must not jCe
+    const { setAppState, getAppState, getState } = createSetState({
+      tasks: {
+        a1: agent('a1', { agentId: 'a1' }),
+      },
+    })
+    await stopTask('a1', {
+      getAppState: getAppState as any,
+      setAppState: setAppState as any,
+    })
+    expect(getState().tasks.a1.status).toBe('killed')
+    expect(getState().tasks.a1.killedBy).toBe('user') // default killedBy only
+    expect(getState().tasks.a1.stoppedByUser).toBeUndefined()
+  })
+
   test('H1e stopTask cascades descendants only when target was YC-parked', async () => {
     const { setAppState, getAppState, getState } = createSetState({
       tasks: {

@@ -29,7 +29,6 @@ import {
   ATTR_SERVICE_VERSION,
   SEMRESATTRS_HOST_ARCH,
 } from '@opentelemetry/semantic-conventions'
-import { HttpsProxyAgent } from 'https-proxy-agent'
 import {
   getLoggerProvider,
   getMeterProvider,
@@ -47,19 +46,17 @@ import {
 } from 'src/utils/auth.js'
 import { getPlatform, getWslVersion } from 'src/utils/platform.js'
 
-import { getCACertificates } from '../caCerts.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { getHasFormattedOutput, logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { errorMessage } from '../errors.js'
-import { getMTLSConfig } from '../mtls.js'
-import { getProxyUrl, shouldBypassProxy } from '../proxy.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { jsonStringify } from '../slowOperations.js'
 import { profileCheckpoint } from '../startupProfiler.js'
 import { isBetaTracingEnabled } from './betaSessionTracing.js'
 import { BigQueryMetricsExporter } from './bigqueryExporter.js'
 import { ClaudeCodeDiagLogger } from './logger.js'
+import { createOtlpHttpAgentFactory } from './otlpHttpAgent.js'
 import { initializePerfettoTracing } from './perfettoTracing.js'
 import {
   endInteractionSpan,
@@ -775,13 +772,11 @@ function parseOtelHeadersEnvVar(): Record<string, string> {
 }
 
 /**
- * Get configuration for OTLP exporters including:
- * - HTTP agent options (proxy, mTLS)
- * - Dynamic headers via otelHeadersHelper or static headers from env var
+ * densable JAo — OTLP exporter config:
+ * - headers (static env / otelHeadersHelper)
+ * - httpAgentOptions always = Mvd(endpoint) so YAo sets Content-Length (#31)
  */
 function getOTLPExporterConfig() {
-  const proxyUrl = getProxyUrl()
-  const mtlsConfig = getMTLSConfig()
   const settings = getSettings_DEPRECATED()
 
   // Build base config
@@ -801,39 +796,9 @@ function getOTLPExporterConfig() {
     config.headers = async (): Promise<Record<string, string>> => staticHeaders
   }
 
-  // Check if we should bypass proxy for OTEL endpoint
+  // densable always wires Mvd → YAo-wrapped agents (proxy or direct), not only
+  // when a proxy is set — required so Azure Monitor etc. get Content-Length.
   const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
-  if (!proxyUrl || (otelEndpoint && shouldBypassProxy(otelEndpoint))) {
-    // No proxy configured or OTEL endpoint should bypass proxy
-    const caCerts = getCACertificates()
-    if (mtlsConfig || caCerts) {
-      config.httpAgentOptions = {
-        ...mtlsConfig,
-        ...(caCerts && { ca: caCerts }),
-      }
-    }
-    return config
-  }
-
-  // Return an HttpAgentFactory function that creates our proxy agent
-  const caCerts = getCACertificates()
-  const agentFactory = (_protocol: string) => {
-    // Create and return the proxy agent with mTLS and CA cert config
-    const proxyAgent =
-      mtlsConfig || caCerts
-        ? new HttpsProxyAgent(proxyUrl, {
-            ...(mtlsConfig && {
-              cert: mtlsConfig.cert,
-              key: mtlsConfig.key,
-              passphrase: mtlsConfig.passphrase,
-            }),
-            ...(caCerts && { ca: caCerts }),
-          })
-        : new HttpsProxyAgent(proxyUrl)
-
-    return proxyAgent
-  }
-
-  config.httpAgentOptions = agentFactory
+  config.httpAgentOptions = createOtlpHttpAgentFactory(otelEndpoint)
   return config
 }

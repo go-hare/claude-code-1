@@ -35,9 +35,17 @@ export type ConnectionErrorDetails = {
 }
 
 /**
- * Extracts connection error details from the error cause chain.
+ * densable Sxg — Bun/fetch message prefix when the socket dies mid-stream
+ * without a Node-style errno code (Windows corporate proxy #18).
+ */
+export const SOCKET_CONNECTION_CLOSED_PREFIX =
+  'The socket connection was closed unexpectedly'
+
+/**
+ * densable T2 — extract connection error details from the error cause chain.
  * The Anthropic SDK wraps underlying errors in the `cause` property.
- * This function walks the cause chain to find the root error code/message.
+ * Also maps Bun's "socket connection was closed" message to ConnectionClosed
+ * so stale-connection retry / keep-alive disable can fire (#18/#46).
  */
 export function extractConnectionErrorDetails(
   error: unknown,
@@ -52,17 +60,23 @@ export function extractConnectionErrorDetails(
   let depth = 0
 
   while (current && depth < maxDepth) {
-    if (
-      current instanceof Error &&
-      'code' in current &&
-      typeof current.code === 'string'
-    ) {
-      const code = current.code
-      const isSSLError = SSL_ERROR_CODES.has(code)
-      return {
-        code,
-        message: current.message,
-        isSSLError,
+    if (current instanceof Error) {
+      if ('code' in current && typeof current.code === 'string') {
+        const code = current.code
+        const isSSLError = SSL_ERROR_CODES.has(code)
+        return {
+          code,
+          message: current.message,
+          isSSLError,
+        }
+      }
+      // densable T2: message.startsWith(Sxg) → ConnectionClosed
+      if (current.message.startsWith(SOCKET_CONNECTION_CLOSED_PREFIX)) {
+        return {
+          code: 'ConnectionClosed',
+          message: current.message,
+          isSSLError: false,
+        }
       }
     }
 

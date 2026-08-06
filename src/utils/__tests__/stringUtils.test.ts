@@ -10,6 +10,7 @@ import {
   safeJoinLines,
   EndTruncatingAccumulator,
   truncateToLines,
+  truncateCodeUnitsSafe,
 } from '../stringUtils'
 
 describe('escapeRegExp', () => {
@@ -192,5 +193,41 @@ describe('truncateToLines', () => {
 
   test('handles single line', () => {
     expect(truncateToLines('hello', 1)).toBe('hello')
+  })
+})
+
+// densable 2.1.212 #13 — Jd(e, t) surrogate-safe code-unit slice
+describe('truncateCodeUnitsSafe (densable Jd)', () => {
+  test('returns original when within limit', () => {
+    expect(truncateCodeUnitsSafe('hello', 10)).toBe('hello')
+  })
+
+  test('slices at maxCodeUnits for ASCII', () => {
+    expect(truncateCodeUnitsSafe('abcdefghij', 5)).toBe('abcde')
+  })
+
+  test('drops lone high surrogate at cut (emoji mid-pair)', () => {
+    // 👋 is U+1F44B → surrogate pair \uD83D\uDC4B (2 code units)
+    const text = 'hello👋world'
+    // slice(0, 6) lands on high surrogate of 👋 — densable drops it
+    expect(truncateCodeUnitsSafe(text, 6)).toBe('hello')
+    // slice(0, 7) keeps full emoji
+    expect(truncateCodeUnitsSafe(text, 7)).toBe('hello👋')
+  })
+
+  test('auto-mode reason formula length>80 → Jd(reason,79)+…', () => {
+    // Build a reason that ends with a high surrogate at unit 79
+    const prefix = 'x'.repeat(78)
+    const emoji = '👋' // 2 units
+    const reason = prefix + emoji + 'tail'
+    expect(reason.length).toBeGreaterThan(80)
+    let hint = reason
+    if (hint.length > 80) {
+      hint = `${truncateCodeUnitsSafe(hint, 79)}…`
+    }
+    // 78 x's + high-surrogate would be cut → densable drops high → 78 x's + …
+    expect(hint).toBe(`${prefix}…`)
+    expect(hint.includes('\uD83D')).toBe(false)
+    expect(hint.includes('\uDC4B')).toBe(false)
   })
 })

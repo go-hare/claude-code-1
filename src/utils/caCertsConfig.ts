@@ -15,6 +15,8 @@
 
 import { getGlobalConfig } from './config.js'
 import { logForDebugging } from './debug.js'
+import { isEnvTruthy } from './envUtils.js'
+import { isHostTransportSensitiveEnvVar } from './managedEnvConstants.js'
 import { getSettingsForSource } from './settings/settings.js'
 
 /**
@@ -58,6 +60,18 @@ export function applyExtraCACertsFromConfig(): void {
  */
 function getExtraCertsPathFromConfig(): string | undefined {
   try {
+    // densable qp_ / KVt: under host-managed provider, never apply
+    // settings-sourced NODE_EXTRA_CA_CERTS (Desktop injects TLS separately).
+    if (
+      isEnvTruthy(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) &&
+      isHostTransportSensitiveEnvVar('NODE_EXTRA_CA_CERTS')
+    ) {
+      logForDebugging(
+        'CA certs: skipping settings-sourced NODE_EXTRA_CA_CERTS under host-managed provider',
+      )
+      return undefined
+    }
+
     const globalConfig = getGlobalConfig()
     const globalEnv = globalConfig?.env
     // Only read from user-controlled settings (~/.claude/settings.json),

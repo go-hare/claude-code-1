@@ -146,9 +146,11 @@ export const StructuredDiff = memo(function StructuredDiff({
   // rawHeight=lines.length, so one tall leaf gets the same noSelect
   // coverage N per-row Boxes would — without the per-row Yoga cost.
   if (gutterWidth > 0 && gutters && contents) {
+    // densable 2.1.212 #29: flexShrink:0 on gutter NoSelect so narrow layouts
+    // cannot collapse line numbers / +/- markers to zero width.
     return (
       <Box flexDirection="row">
-        <NoSelect fromLeftEdge>
+        <NoSelect fromLeftEdge flexShrink={0}>
           <RawAnsi lines={gutters} width={gutterWidth} />
         </NoSelect>
         <RawAnsi lines={contents} width={safeWidth - gutterWidth} />

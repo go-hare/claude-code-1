@@ -23,6 +23,7 @@ import { getSessionId } from '../../bootstrap/state.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { jsonParse } from '../../utils/slowOperations.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
+import type { Message } from '../../types/message.js'
 
 type GeneratedAgent = {
   identifier: string
@@ -163,7 +164,8 @@ export async function generateAgent(
     : null
 
   const response = await queryModelWithoutStreaming({
-    messages: normalizeMessagesForAPI(messagesWithContext),
+    // normalize without model → no api_system; still User|Assistant only
+    messages: normalizeMessagesForAPI(messagesWithContext) as Message[],
     systemPrompt: asSystemPrompt([systemPrompt]),
     thinkingConfig: { type: 'disabled' as const },
     tools: [],

@@ -142,7 +142,7 @@ function prependDeferredToolListIfNeeded(
 }
 
 function isOpenAIConvertibleMessage(
-  msg: Message,
+  msg: Message | { type: string; message?: unknown },
 ): msg is AssistantMessage | UserMessage {
   return msg.type === 'assistant' || msg.type === 'user'
 }

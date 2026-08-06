@@ -2419,7 +2419,9 @@ export const fetchResourcesForClient = memoizeWithLRU(
         client.name,
         `Failed to fetch resources: ${errorMessage(error)}`,
       )
-      return []
+      // densable #42: rethrow so list_changed can keep previous resources
+      // (soft-returning [] would cache empty and wipe slash resources).
+      throw error
     }
   },
   (client: MCPServerConnection) => client.name,
@@ -2513,7 +2515,9 @@ export const fetchCommandsForClient = memoizeWithLRU(
         client.name,
         `Failed to fetch commands: ${errorMessage(error)}`,
       )
-      return []
+      // densable #42: rethrow so list_changed can keep previous commands
+      // (soft-returning [] would cache empty and clear slash prompts).
+      throw error
     }
   },
   (client: MCPServerConnection) => client.name,
@@ -2582,13 +2586,25 @@ export async function reconnectMcpServerImpl(
 
     const supportsResources = !!client.capabilities?.resources
 
+    // densable #42: fetchCommands/Resources throw on error (list_changed keep-
+    // previous). Initial reconnect still soft-defaults empty on failure.
+    const settleEmpty = async <T>(p: Promise<T>, empty: T): Promise<T> => {
+      try {
+        return await p
+      } catch {
+        return empty
+      }
+    }
+
     const [tools, mcpCommands, mcpSkills, resources] = await Promise.all([
       fetchToolsForClient(client),
-      fetchCommandsForClient(client),
+      settleEmpty(fetchCommandsForClient(client), []),
       feature('MCP_SKILLS') && supportsResources
-        ? fetchMcpSkillsForClient!(client)
+        ? settleEmpty(fetchMcpSkillsForClient!(client), [])
         : Promise.resolve([]),
-      supportsResources ? fetchResourcesForClient(client) : Promise.resolve([]),
+      supportsResources
+        ? settleEmpty(fetchResourcesForClient(client), [])
+        : Promise.resolve([]),
     ])
     const commands = [...mcpCommands, ...mcpSkills]
 
@@ -2755,16 +2771,25 @@ export async function getMcpToolsCommandsAndResources(
 
       const supportsResources = !!client.capabilities?.resources
 
+      // densable #42: list fetch throws; first connect soft-defaults empty.
+      const settleEmpty = async <T>(p: Promise<T>, empty: T): Promise<T> => {
+        try {
+          return await p
+        } catch {
+          return empty
+        }
+      }
+
       const [tools, mcpCommands, mcpSkills, resources] = await Promise.all([
         fetchToolsForClient(client),
-        fetchCommandsForClient(client),
+        settleEmpty(fetchCommandsForClient(client), []),
         // Discover skills from skill:// resources
         feature('MCP_SKILLS') && supportsResources
-          ? fetchMcpSkillsForClient!(client)
+          ? settleEmpty(fetchMcpSkillsForClient!(client), [])
           : Promise.resolve([]),
         // Fetch resources if supported
         supportsResources
-          ? fetchResourcesForClient(client)
+          ? settleEmpty(fetchResourcesForClient(client), [])
           : Promise.resolve([]),
       ])
       const commands = [...mcpCommands, ...mcpSkills]

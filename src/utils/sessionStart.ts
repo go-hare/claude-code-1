@@ -76,7 +76,8 @@ function reloadSkillsFromSessionStartHook(): void {
 
 // Note to CLAUDE: do not add ANY "warmup" logic. It is **CRITICAL** that you do not add extra work on startup.
 export async function processSessionStartHooks(
-  source: 'startup' | 'resume' | 'clear' | 'compact',
+  // densable 2.1.214 #47: SessionStart source includes "fork" (branch / --fork-session)
+  source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork',
   {
     sessionId,
     agentType,
@@ -212,8 +213,12 @@ export async function processSessionStartHooks(
     reloadSkillsFromSessionStartHook()
   }
 
-  // Official: only cache title for startup/resume (not clear/compact).
-  if ((source === 'startup' || source === 'resume') && sessionTitleFromHooks) {
+  // densable: Wos = e==="startup"||e==="resume"||e==="fork" ? c : void 0
+  // (title cache for startup/resume/fork; not clear/compact).
+  if (
+    (source === 'startup' || source === 'resume' || source === 'fork') &&
+    sessionTitleFromHooks
+  ) {
     pendingSessionTitle = sessionTitleFromHooks
     // Also apply immediately so interactive UI can show it without waiting
     // for takeSessionStartTitle consumers.

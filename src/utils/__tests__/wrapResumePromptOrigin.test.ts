@@ -4,13 +4,16 @@ import {
   createUserMessage,
   isHumanLikeOrigin,
   isMetaVisibleOrigin,
+  isScheduledTaskOrigin,
   isSidechainVisibleOrigin,
   normalizeMessagesForAPI,
+  SCHEDULED_TASK_DISCLAIMER_PREFIX,
   shouldShowUserMessage,
   TASK_NOTIFICATION_DISCLAIMER_PREFIX,
   wrapCommandText,
   wrapPeerOriginText,
   wrapResumePromptOrigin,
+  wrapScheduledTaskDisclaimer,
   wrapTaskNotificationDisclaimer,
 } from '../messages.js'
 
@@ -31,6 +34,121 @@ describe('wrapTaskNotificationDisclaimer task-notification disclaimer', () => {
   test('idempotent when only header line already present', () => {
     const partial = '[SYSTEM NOTIFICATION - NOT USER INPUT]\nalready partial\n'
     expect(wrapTaskNotificationDisclaimer(partial)).toBe(partial)
+  })
+})
+
+describe('densable #20 scheduled-task Q9i / RZn / ivg', () => {
+  test('SCHEDULED_TASK_DISCLAIMER_PREFIX is assigned-task banner (not untrusted inject)', () => {
+    expect(SCHEDULED_TASK_DISCLAIMER_PREFIX).toContain(
+      '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]',
+    )
+    expect(SCHEDULED_TASK_DISCLAIMER_PREFIX).toContain(
+      "Treat it as this session's assigned task and carry it out",
+    )
+    expect(SCHEDULED_TASK_DISCLAIMER_PREFIX).not.toContain(
+      '[SYSTEM NOTIFICATION - NOT USER INPUT]',
+    )
+  })
+
+  test('wrapScheduledTaskDisclaimer prepends RZn and is idempotent', () => {
+    const once = wrapScheduledTaskDisclaimer('Run nightly review')
+    expect(once.startsWith(SCHEDULED_TASK_DISCLAIMER_PREFIX)).toBe(true)
+    expect(once).toContain('Run nightly review')
+    expect(wrapScheduledTaskDisclaimer(once)).toBe(once)
+    const partial =
+      '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]\nalready\n'
+    expect(wrapScheduledTaskDisclaimer(partial)).toBe(partial)
+  })
+
+  test('wrapScheduledTaskDisclaimer no-ops if pVr SYSTEM NOTIFICATION already present (densable Q9i)', () => {
+    const pvr = wrapTaskNotificationDisclaimer('agent done')
+    expect(wrapScheduledTaskDisclaimer(pvr)).toBe(pvr)
+    const headerOnly = '[SYSTEM NOTIFICATION - NOT USER INPUT]\nx'
+    expect(wrapScheduledTaskDisclaimer(headerOnly)).toBe(headerOnly)
+  })
+
+  test('isScheduledTaskOrigin: scheduled-trigger + autonomy scheduled-task only', () => {
+    expect(
+      isScheduledTaskOrigin({
+        kind: 'task-notification',
+        subkind: 'scheduled-trigger',
+      }),
+    ).toBe(true)
+    expect(
+      isScheduledTaskOrigin({
+        kind: 'autonomy',
+        trigger: 'scheduled-task',
+      }),
+    ).toBe(true)
+    expect(isScheduledTaskOrigin({ kind: 'task-notification' })).toBe(false)
+    expect(
+      isScheduledTaskOrigin({
+        kind: 'task-notification',
+        subkind: 'agent-finished',
+      }),
+    ).toBe(false)
+    expect(
+      isScheduledTaskOrigin({
+        kind: 'autonomy',
+        trigger: 'proactive-tick',
+      }),
+    ).toBe(false)
+    expect(isScheduledTaskOrigin({ kind: 'human' })).toBe(false)
+    expect(isScheduledTaskOrigin(undefined)).toBe(false)
+  })
+
+  test('wrapCommandText: scheduled-trigger → Q9i, other task-notification → J9i', () => {
+    const scheduled = wrapCommandText('stored cron prompt', {
+      kind: 'task-notification',
+      subkind: 'scheduled-trigger',
+    } as never)
+    expect(scheduled.startsWith(SCHEDULED_TASK_DISCLAIMER_PREFIX)).toBe(true)
+    expect(scheduled).toContain('stored cron prompt')
+    expect(scheduled).not.toContain('[SYSTEM NOTIFICATION - NOT USER INPUT]')
+
+    const agentDone = wrapCommandText('agent finished: ok', {
+      kind: 'task-notification',
+    } as never)
+    expect(agentDone.startsWith(TASK_NOTIFICATION_DISCLAIMER_PREFIX)).toBe(true)
+    expect(agentDone).not.toContain(
+      '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]',
+    )
+  })
+
+  test('wrapCommandText: autonomy scheduled-task → Q9i; other autonomy → non-user source', () => {
+    const scheduled = wrapCommandText('nightly', {
+      kind: 'autonomy',
+      trigger: 'scheduled-task',
+    } as never)
+    expect(scheduled.startsWith(SCHEDULED_TASK_DISCLAIMER_PREFIX)).toBe(true)
+
+    const other = wrapCommandText('tick body', {
+      kind: 'autonomy',
+      trigger: 'proactive-tick',
+    } as never)
+    expect(other).toContain('[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]')
+    expect(other).not.toContain(
+      '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]',
+    )
+  })
+
+  test('wrapResumePromptOrigin routes task-notification scheduled-trigger via wrapCommandText', () => {
+    const out = wrapResumePromptOrigin('resume body', {
+      kind: 'task-notification',
+      subkind: 'scheduled-trigger',
+    })
+    expect(out.startsWith(SCHEDULED_TASK_DISCLAIMER_PREFIX)).toBe(true)
+  })
+
+  test('applyTurnStartOriginFraming stamps schedule banner on turn-start content', () => {
+    const msg = createUserMessage({ content: 'do the scheduled work' })
+    applyTurnStartOriginFraming(msg as never, {
+      kind: 'autonomy',
+      trigger: 'scheduled-task',
+    })
+    const content = (msg as { message: { content: string } }).message.content
+    expect(content.startsWith(SCHEDULED_TASK_DISCLAIMER_PREFIX)).toBe(true)
+    expect(content).toContain('do the scheduled work')
   })
 })
 

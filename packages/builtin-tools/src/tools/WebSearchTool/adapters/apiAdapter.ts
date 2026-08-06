@@ -16,7 +16,8 @@ import {
 } from 'src/services/langfuse/index.js'
 import { getSessionId } from 'src/bootstrap/state.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
-import { createUserMessage } from 'src/utils/messages.js'
+import { createUserMessage, getContentText } from 'src/utils/messages.js'
+import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/utils/errors.js'
 import { getMainLoopModel, getSmallFastModel } from 'src/utils/model/model.js'
 import { jsonParse } from 'src/utils/slowOperations.js'
 import { asSystemPrompt } from 'src/utils/systemPromptType.js'
@@ -98,10 +99,22 @@ export class ApiSearchAdapter implements WebSearchAdapter {
     let currentToolUseJson = ''
     const toolUseQueries = new Map<string, string>()
     let progressCounter = 0
+    // densable: S = $c(I.message.content) when I.isApiErrorMessage — do NOT
+    // treat overload/API Error text as search results (#34 / #35).
+    let apiErrorText: string | null = null
 
     for await (const event of queryStream) {
       if (event.type === 'assistant') {
-        const msg = event as { message: { content: BetaContentBlock[] } }
+        const msg = event as {
+          message: { content: BetaContentBlock[] }
+          isApiErrorMessage?: boolean
+        }
+        // densable: if (I.isApiErrorMessage) { S=$c(...); continue }
+        if (msg.isApiErrorMessage) {
+          apiErrorText =
+            getContentText(msg.message.content as never) ?? 'API Error'
+          continue
+        }
         allContentBlocks.push(...msg.message.content)
         continue
       }
@@ -186,7 +199,15 @@ export class ApiSearchAdapter implements WebSearchAdapter {
     endTrace(langfuseTrace)
 
     // Extract SearchResult[] from content blocks
-    return extractSearchResults(allContentBlocks)
+    const results = extractSearchResults(allContentBlocks)
+    // densable: if (S!==null && x.results.length===0) throw new tn(S, "web-search-side-query-api-error")
+    if (apiErrorText !== null && results.length === 0) {
+      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+        apiErrorText,
+        'web-search-side-query-api-error',
+      )
+    }
+    return results
   }
 }
 

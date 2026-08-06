@@ -195,6 +195,25 @@ export function getUltrareviewDiffLimits(
   }
 }
 
+/** densable IXs — git empty tree object SHA (git hash-object -t tree /dev/null) */
+export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+/**
+ * densable Wau — empty_tree_fallback_enabled !== false on
+ * tengu_review_bughunter_config (default ON).
+ */
+export function isEmptyTreeFallbackEnabled(
+  config: Record<
+    string,
+    unknown
+  > | null = getFeatureValue_CACHED_MAY_BE_STALE<Record<
+    string,
+    unknown
+  > | null>('tengu_review_bughunter_config', null),
+): boolean {
+  return config?.empty_tree_fallback_enabled !== false
+}
+
 /**
  * densable Dro — parse `git diff --shortstat` English LC_ALL=C output.
  * e.g. " 3 files changed, 10 insertions(+), 2 deletions(-)"
@@ -784,6 +803,7 @@ export async function launchRemoteReview(
   let command
   let target
   let scopeDiffStat = ''
+  let noMergeBaseKind: 'unrelated_history' | 'base_ref_missing' | undefined
   let launchMode: 'pr' | 'branch' = 'branch'
   let createFailMessage: string | undefined
   let createFailReason: string | undefined
@@ -1056,89 +1076,233 @@ export async function launchRemoteReview(
         outcome: meta(outcome),
       })
     }
+    // densable noMergeBase tag for empty-tree fallback (tFo $)
+    let noMergeBase: 'unrelated_history' | 'base_ref_missing' | undefined
+    let effectiveMergeBase = mergeBaseSha
+
     if (mbCode !== 0 || !mergeBaseSha) {
-      logEvent('tengu_review_remote_precondition_failed', {
-        reason: meta('no_merge_base'),
-        cwd_is_home: isCwdHome(),
-      })
-      logFetchRecovery('failed')
-      const hint = fetchedFromOrigin
-        ? `${baseBranch} was fetched from origin but shares no history with HEAD — this can happen in shallow clones. Try \`git fetch --unshallow origin\` (or deepen the clone) and rerun.`
-        : trimmed
-          ? `Make sure ${baseBranch} exists locally or on origin (try \`git fetch origin ${baseBranch}\`).`
-          : `Pass the base branch explicitly (e.g. \`${invocation} develop\`) or make sure you're in a git repo with a ${baseBranch} branch.`
-      return [
-        {
-          type: 'text',
-          text: `Could not find merge-base with ${baseBranch}. ${hint}`,
-        },
-      ]
-    }
+      // densable Z$o: HEAD + non-shallow + Wau() → empty-tree shortstat path
+      const git = async (args: string[]) =>
+        execFileNoThrow(gitExe(), args, { preserveOutputOnError: false })
+      const headOk =
+        (await git(['rev-parse', '--verify', '--quiet', 'HEAD'])).code === 0
+      const shallowOut = (
+        await git(['rev-parse', '--is-shallow-repository'])
+      ).stdout.trim()
+      const isShallow = shallowOut === 'true'
+      if (headOk && shallowOut === 'false' && isEmptyTreeFallbackEnabled()) {
+        // densable R: arg present OR base ref resolves → "unrelated_history"
+        const baseExists =
+          trimmed.length > 0 ||
+          (
+            await git([
+              'rev-parse',
+              '--verify',
+              '--quiet',
+              `origin/${baseBranch}`,
+            ])
+          ).code === 0 ||
+          (await git(['rev-parse', '--verify', '--quiet', baseBranch])).code ===
+            0
+        const { stdout: emptyStat, code: emptyCode } = await execFileNoThrow(
+          gitExe(),
+          [
+            'diff',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--shortstat',
+            EMPTY_TREE_SHA,
+          ],
+          {
+            preserveOutputOnError: false,
+            env: { ...process.env, LC_ALL: 'C' },
+          },
+        )
+        if (emptyCode === 0) {
+          if (!emptyStat.trim()) {
+            logEvent('tengu_review_remote_precondition_failed', {
+              reason: meta('empty_diff'),
+              cwd_is_home: isCwdHome(),
+            })
+            logFetchRecovery('failed')
+            return [
+              {
+                type: 'text',
+                text: baseExists
+                  ? `It doesn't look like you have any new commits or changes to review against your ${baseBranch} branch. Stage or commit them first?`
+                  : "It doesn't look like you have any changes to review. Stage or commit them first?",
+              },
+            ]
+          }
+          const parsedEmpty = parseGitShortstat(emptyStat)
+          const emptyLines = parsedEmpty
+            ? parsedEmpty.linesAdded + parsedEmpty.linesRemoved
+            : 0
+          const { maxFiles, maxLines } = getUltrareviewDiffLimits()
+          if (
+            parsedEmpty &&
+            (parsedEmpty.filesCount > maxFiles || emptyLines > maxLines)
+          ) {
+            logEvent('tengu_review_remote_precondition_failed', {
+              reason: meta('local_diff_too_large'),
+              files: parsedEmpty.filesCount,
+              lines: emptyLines,
+              max_files: maxFiles,
+              max_lines: maxLines,
+              after_fallback: true,
+              cwd_is_home: isCwdHome(),
+            })
+            logFetchRecovery('failed')
+            const hint = baseExists
+              ? `Review a smaller subset by committing it on a branch off an empty base, or push a PR and use \`${invocation} <PR#>\`.`
+              : `This repo has no ${baseBranch} branch — if another branch is your base, pass it explicitly (\`${invocation} <branch>\`). Otherwise review a smaller subset by committing it on a branch off an empty base, or push a PR and use \`${invocation} <PR#>\`.`
+            return [
+              {
+                type: 'text',
+                text: `This looks like a first review of the entire repository (${emptyStat.trim()}), which exceeds ultrareview's limit. ${hint}`,
+              },
+            ]
+          }
+          logEvent('tengu_review_remote_precondition_recovery', {
+            reason: meta('no_merge_base'),
+            method: meta('empty_tree_bundle'),
+            outcome: meta('offered'),
+            ...(parsedEmpty
+              ? { files: parsedEmpty.filesCount, lines: emptyLines }
+              : {}),
+            is_shallow: false,
+          })
+          logFetchRecovery('succeeded')
+          noMergeBase = baseExists ? 'unrelated_history' : 'base_ref_missing'
+          noMergeBaseKind = noMergeBase
+          effectiveMergeBase = EMPTY_TREE_SHA
+          launchMode = 'branch'
+          scopeDiffStat = emptyStat.trim()
+          // fall through to teleport with empty-tree base + forceScope squashed
+        }
+      }
 
-    // Bail early on empty diffs instead of launching a container that
-    // will just echo "no changes".
-    const { stdout: diffStat, code: diffCode } = await execFileNoThrow(
-      gitExe(),
-      ['diff', '--no-ext-diff', '--no-textconv', '--shortstat', mergeBaseSha],
-      {
-        preserveOutputOnError: false,
-        env: { ...process.env, LC_ALL: 'C' },
-      },
-    )
-    if (diffCode === 0 && !diffStat.trim()) {
-      logEvent('tengu_review_remote_precondition_failed', {
-        reason: meta('empty_diff'),
-        cwd_is_home: isCwdHome(),
-      })
-      logFetchRecovery('failed')
-      return [
-        {
-          type: 'text',
-          text: `It doesn't look like you have any new commits or changes to review against your ${baseBranch} branch. Stage or commit them first?`,
-        },
-      ]
-    }
-
-    // densable Dro + qqi → local_diff_too_large
-    const parsedStat = parseGitShortstat(diffStat)
-    if (parsedStat) {
-      const { maxFiles, maxLines } = getUltrareviewDiffLimits(raw)
-      const totalLines = parsedStat.linesAdded + parsedStat.linesRemoved
-      if (parsedStat.filesCount > maxFiles || totalLines > maxLines) {
+      if (!noMergeBase) {
         logEvent('tengu_review_remote_precondition_failed', {
-          reason: meta('local_diff_too_large'),
-          files: parsedStat.filesCount,
-          lines: totalLines,
-          max_files: maxFiles,
-          max_lines: maxLines,
+          reason: meta('no_merge_base'),
+          cwd_is_home: isCwdHome(),
+          is_shallow: isShallow,
+          head_resolves: headOk,
+          arg_was_explicit: trimmed.length > 0,
+        })
+        logFetchRecovery('failed')
+        if (!headOk) {
+          return [
+            {
+              type: 'text',
+              text: `Your current branch has no commits yet, so there is nothing to review. Commit your changes first, then rerun ${invocation}.`,
+            },
+          ]
+        }
+        if (isShallow) {
+          logEvent('tengu_review_remote_precondition_recovery', {
+            reason: meta('no_merge_base'),
+            method: meta('deepen_hint'),
+            outcome: meta('offered'),
+            is_shallow: true,
+          })
+          return [
+            {
+              type: 'text',
+              text: trimmed
+                ? `Your clone is shallow and doesn't contain the point where your branch forked from ${baseBranch}. Run \`git fetch --deepen=100 origin ${baseBranch}\` (or \`git fetch --unshallow origin\`) and rerun ${invocation}.`
+                : `Your clone is shallow and doesn't contain the point where your branch forked from ${baseBranch}. Run \`git fetch --unshallow origin\` and rerun ${invocation}. If your base branch isn't ${baseBranch}, pass it explicitly (\`${invocation} <branch>\`).`,
+            },
+          ]
+        }
+        const hint = fetchedFromOrigin
+          ? `${baseBranch} was fetched from origin but shares no history with HEAD. Try \`git fetch --unshallow origin\` (or deepen the clone) and rerun.`
+          : trimmed
+            ? `Make sure ${baseBranch} exists locally or on origin (try \`git fetch origin ${baseBranch}\`).`
+            : `Pass the base branch explicitly (e.g. \`${invocation} develop\`) or make sure you're in a git repo with a ${baseBranch} branch.`
+        return [
+          {
+            type: 'text',
+            text: `Could not find merge-base with ${baseBranch}. ${hint}`,
+          },
+        ]
+      }
+    }
+
+    if (!noMergeBase) {
+      // Bail early on empty diffs instead of launching a container that
+      // will just echo "no changes".
+      const { stdout: diffStat, code: diffCode } = await execFileNoThrow(
+        gitExe(),
+        [
+          'diff',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--shortstat',
+          effectiveMergeBase,
+        ],
+        {
+          preserveOutputOnError: false,
+          env: { ...process.env, LC_ALL: 'C' },
+        },
+      )
+      if (diffCode === 0 && !diffStat.trim()) {
+        logEvent('tengu_review_remote_precondition_failed', {
+          reason: meta('empty_diff'),
           cwd_is_home: isCwdHome(),
         })
         logFetchRecovery('failed')
         return [
           {
             type: 'text',
-            text: `Diff is too large for ultrareview: ${diffStat.trim()}. Pass a closer base branch (\`${invocation} <branch>\`) to narrow the scope, or split the change.`,
+            text: `It doesn't look like you have any new commits or changes to review against your ${baseBranch} branch. Stage or commit them first?`,
           },
         ]
       }
+
+      // densable Dro + qqi → local_diff_too_large
+      const parsedStat = parseGitShortstat(diffStat)
+      if (parsedStat) {
+        const { maxFiles, maxLines } = getUltrareviewDiffLimits()
+        const totalLines = parsedStat.linesAdded + parsedStat.linesRemoved
+        if (parsedStat.filesCount > maxFiles || totalLines > maxLines) {
+          logEvent('tengu_review_remote_precondition_failed', {
+            reason: meta('local_diff_too_large'),
+            files: parsedStat.filesCount,
+            lines: totalLines,
+            max_files: maxFiles,
+            max_lines: maxLines,
+            cwd_is_home: isCwdHome(),
+          })
+          logFetchRecovery('failed')
+          return [
+            {
+              type: 'text',
+              text: `Diff is too large for ultrareview: ${diffStat.trim()}. Pass a closer base branch (\`${invocation} <branch>\`) to narrow the scope, or split the change.`,
+            },
+          ]
+        }
+      }
+
+      logFetchRecovery('succeeded')
+      launchMode = 'branch'
+      scopeDiffStat = diffStat.trim()
     }
 
-    logFetchRecovery('succeeded')
-    launchMode = 'branch'
-    scopeDiffStat = diffStat.trim()
     session = await teleportToRemote({
       initialMessage: null,
       // densable JOo: description uses headBranch (k), not baseBranch
       description: `ultrareview: ${headBranch}`,
       signal: context.abortController.signal,
-      // densable JOo: useBundle + bundleBaseRef:mergeBaseSha + tags
+      // densable tFo: useBundle + bundleBaseRef + forceScope when noMergeBase
       useBundle: true,
-      bundleBaseRef: mergeBaseSha,
+      bundleBaseRef: effectiveMergeBase,
+      bundleForceScope: noMergeBase ? 'squashed' : undefined,
       environmentId: CODE_REVIEW_ENV_ID,
       source: 'ultrareview',
       tags: ['ultrareview'],
       environmentVariables: {
-        BUGHUNTER_BASE_BRANCH: mergeBaseSha,
+        BUGHUNTER_BASE_BRANCH: effectiveMergeBase,
         ...commonEnvVars,
       },
       onBundleFail: (message, kind) => {
@@ -1155,7 +1319,6 @@ export async function launchRemoteReview(
     })
     if (!session) {
       // densable JOo branch fail: onBundleFail msg || createFail || short "Repo is too large."
-      // telemetry: mode/reason/bundle_fail_kind/status_code/server_type/server_reason
       logEvent('tengu_review_remote_teleport_failed', {
         mode: meta('branch'),
         ...(createFailReason ? { reason: meta(createFailReason) } : {}),
@@ -1170,6 +1333,13 @@ export async function launchRemoteReview(
           ? { server_reason: meta(createFailServerReason) }
           : {}),
       })
+      if (noMergeBase && !context.abortController.signal.aborted) {
+        logEvent('tengu_review_remote_precondition_recovery', {
+          reason: meta('no_merge_base'),
+          method: meta('empty_tree_bundle'),
+          outcome: meta('failed'),
+        })
+      }
       return [
         {
           type: 'text',
@@ -1182,8 +1352,14 @@ export async function launchRemoteReview(
       ]
     }
     command = invocation
-    target =
-      headBranch === baseBranch ? baseBranch : `${headBranch} → ${baseBranch}`
+    // densable tFo target labels for empty-tree fallback
+    target = noMergeBase
+      ? noMergeBase === 'unrelated_history'
+        ? `${headBranch} (all files — no common history with ${baseBranch})`
+        : `${headBranch} (all files)`
+      : headBranch === baseBranch
+        ? baseBranch
+        : `${headBranch} → ${baseBranch}`
   }
 
   if (!session) {
@@ -1223,6 +1399,14 @@ export async function launchRemoteReview(
     mode: meta(launchMode),
     had_arg: trimmed.length > 0,
   })
+  // densable tFo: empty-tree fallback recovery succeeded
+  if (launchMode === 'branch' && noMergeBaseKind) {
+    logEvent('tengu_review_remote_precondition_recovery', {
+      reason: meta('no_merge_base'),
+      method: meta('empty_tree_bundle'),
+      outcome: meta('succeeded'),
+    })
+  }
   const sessionUrl = getRemoteTaskSessionUrl(session.id)
   // densable JOo: optional Scope: ${diffStat} line for branch launches
   const scopeLine = scopeDiffStat ? `\nScope: ${scopeDiffStat}` : ''

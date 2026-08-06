@@ -52,6 +52,11 @@ export type LogOption = {
   worktreeSession?: PersistedWorktreeSession | null // Worktree state at session end (null = exited, undefined = never entered)
   contentReplacements?: ContentReplacementRecord[] // Replacement decisions for resume reconstruction
   goal?: GoalState // Active goal state at session end (for resume)
+  /**
+   * densable 2.1.214 — session has an `ended-by-model` transcript marker
+   * (EndConversation succeeded). Hydrated into AppState.endedByModel on resume.
+   */
+  endedByModel?: boolean
 }
 
 export type SummaryMessage = {
@@ -112,6 +117,16 @@ export type TagMessage = {
   type: 'tag'
   sessionId: UUID
   tag: string
+}
+
+/**
+ * densable 2.1.214 `ended-by-model` — written by EndConversation on successful
+ * end. Last-wins / set-membership on read (session ended by model).
+ */
+export type EndedByModelMessage = {
+  type: 'ended-by-model'
+  sessionId: UUID
+  timestamp: string
 }
 
 export type AgentNameMessage = {
@@ -401,6 +416,7 @@ export type Entry =
   | LastPromptMessage
   | TaskSummaryMessage
   | TagMessage
+  | EndedByModelMessage
   | AgentNameMessage
   | AgentColorMessage
   | AgentSettingMessage

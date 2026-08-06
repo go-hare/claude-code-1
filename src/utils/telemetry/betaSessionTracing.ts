@@ -33,10 +33,17 @@ import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.
 import type { AssistantMessage, UserMessage } from '../../types/message.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
-import { logOTelEvent } from './events.js'
+import {
+  getOTelContentMaxLength,
+  logOTelEvent,
+  truncateOTelContent,
+} from './events.js'
 
-// Message type for API calls (UserMessage or AssistantMessage)
-type APIMessage = UserMessage | AssistantMessage
+// Message type for API calls (User|Assistant + densable api_system wire shape)
+type APIMessage =
+  | UserMessage
+  | AssistantMessage
+  | { type: string; message?: { role?: string; content?: unknown } }
 
 /**
  * Track hashes we've already logged this session (system prompts, tools, etc).
@@ -67,8 +74,6 @@ export function clearBetaTracingState(): void {
   lastReportedMessageHash.clear()
 }
 
-const MAX_CONTENT_SIZE = 60 * 1024 // 60KB (Honeycomb limit is 64KB, staying safe)
-
 /**
  * Check if beta detailed tracing is enabled.
  * - Requires ENABLE_BETA_TRACING_DETAILED=1 and BETA_TRACING_ENDPOINT
@@ -98,22 +103,14 @@ export function isBetaTracingEnabled(): boolean {
 }
 
 /**
- * Truncate content to fit within Honeycomb limits.
+ * Truncate content to fit within Honeycomb / OTel attribute limits.
+ * densable W1 via events.truncateOTelContent (Ptg env-aware max).
  */
 export function truncateContent(
   content: string,
-  maxSize: number = MAX_CONTENT_SIZE,
+  maxSize?: number,
 ): { content: string; truncated: boolean } {
-  if (content.length <= maxSize) {
-    return { content, truncated: false }
-  }
-
-  return {
-    content:
-      content.slice(0, maxSize) +
-      '\n\n[TRUNCATED - Content exceeds 60KB limit]',
-    truncated: true,
-  }
+  return truncateOTelContent(content, maxSize ?? getOTelContentMaxLength())
 }
 
 /**
@@ -134,7 +131,7 @@ function hashSystemPrompt(systemPrompt: string): string {
  * Generate a hash for a message based on its content.
  */
 function hashMessage(message: APIMessage): string {
-  const content = jsonStringify(message.message.content)
+  const content = jsonStringify(message.message?.content)
   return `msg_${shortHash(content)}`
 }
 

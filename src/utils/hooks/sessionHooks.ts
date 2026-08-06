@@ -184,13 +184,26 @@ function addHookToSession(
 
     let updatedMatchers: SessionHookMatcher[]
     if (existingMatcherIndex >= 0) {
-      // Add to existing matcher
+      // densable gZc: same-id function hooks replace (not append) so re-init
+      // (e.g. teammate-idle-notification) cannot stack duplicate Stop hooks.
       updatedMatchers = [...eventMatchers]
       const existingMatcher = updatedMatchers[existingMatcherIndex]!
+      const replaceIdx =
+        hook.type === 'function' && hook.id
+          ? existingMatcher.hooks.findIndex(
+              h => h.hook.type === 'function' && h.hook.id === hook.id,
+            )
+          : -1
+      const nextHooks =
+        replaceIdx >= 0
+          ? existingMatcher.hooks.map((h, i) =>
+              i === replaceIdx ? { hook, onHookSuccess } : h,
+            )
+          : [...existingMatcher.hooks, { hook, onHookSuccess }]
       updatedMatchers[existingMatcherIndex] = {
         matcher: existingMatcher.matcher,
         skillRoot: existingMatcher.skillRoot,
-        hooks: [...existingMatcher.hooks, { hook, onHookSuccess }],
+        hooks: nextHooks,
       }
     } else {
       // Create new matcher

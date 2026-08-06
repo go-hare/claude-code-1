@@ -108,14 +108,8 @@ function localAgentTaskMock() {
     },
   }
 }
-mock.module(
-  '../../LocalAgentTask/LocalAgentTask.js',
-  localAgentTaskMock,
-)
-mock.module(
-  'src/tasks/LocalAgentTask/LocalAgentTask.js',
-  localAgentTaskMock,
-)
+mock.module('../../LocalAgentTask/LocalAgentTask.js', localAgentTaskMock)
+mock.module('src/tasks/LocalAgentTask/LocalAgentTask.js', localAgentTaskMock)
 
 function mainSessionTaskMock() {
   return {
@@ -296,11 +290,7 @@ describe('backgroundTaskByToolUseId', () => {
     const agent = makeAgentTask('ag1', { toolUseId: 'tool-agent' })
     const { getAppState, setAppState, getState } = createState({ ag1: agent })
 
-    const ok = backgroundTaskByToolUseId(
-      'tool-agent',
-      getAppState,
-      setAppState,
-    )
+    const ok = backgroundTaskByToolUseId('tool-agent', getAppState, setAppState)
     expect(ok).toBe(true)
     expect(getState().tasks.ag1.isBackgrounded).toBe(true)
     expect(agentBgCalls).toEqual(['ag1'])
@@ -310,9 +300,9 @@ describe('backgroundTaskByToolUseId', () => {
     const { getAppState, setAppState } = createState({
       sh1: makeShellTask('sh1', { toolUseId: 'other' }),
     })
-    expect(
-      backgroundTaskByToolUseId('missing', getAppState, setAppState),
-    ).toBe(false)
+    expect(backgroundTaskByToolUseId('missing', getAppState, setAppState)).toBe(
+      false,
+    )
     expect(sdkEvents.filter(e => e.subtype === 'task_updated')).toHaveLength(0)
   })
 

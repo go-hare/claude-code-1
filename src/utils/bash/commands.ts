@@ -7,6 +7,7 @@ import {
   createSubcommandPrefixExtractor,
 } from '../shell/prefix.js'
 import { extractHeredocs, restoreHeredocs } from './heredoc.js'
+import { MAX_COMMAND_LENGTH } from './parser.js'
 import { quote, tryParseShellCommand } from './shellQuote.js'
 
 /**
@@ -83,6 +84,11 @@ function isStaticRedirectTarget(target: string): boolean {
 export type { CommandPrefixResult, CommandSubcommandPrefixResult }
 
 export function splitCommandWithOperators(command: string): string[] {
+  // densable CE / 2.1.214 #4: over-length cannot be safely split → return [e]
+  // so downstream treats the whole string as one opaque unit (no partial allow).
+  if (!command) return []
+  if (command.length > MAX_COMMAND_LENGTH) return [command]
+
   const parts: (ParseEntry | null)[] = []
 
   // Generate unique placeholders for this parse to prevent injection attacks
@@ -607,6 +613,9 @@ function isCommandList(command: string): boolean {
  * unavailable. The primary gate is parseForSecurity (ast.ts).
  */
 export function isUnsafeCompoundCommand_DEPRECATED(command: string): boolean {
+  // densable Uto / 2.1.214 #4: over-length is unanalyzable → unsafe (true).
+  if (!command || command.length > MAX_COMMAND_LENGTH) return true
+
   // Defense-in-depth: if shell-quote can't parse the command at all,
   // treat it as unsafe so it always prompts the user. Even though bash
   // would likely also reject malformed syntax, we don't want to rely
@@ -636,6 +645,16 @@ export function extractOutputRedirections(cmd: string): {
   redirections: Array<{ target: string; operator: '>' | '>>' }>
   hasDangerousRedirection: boolean
 } {
+  // densable zOe / 2.1.214 #4: over-length returns empty redirection analysis
+  // (over-length is fail-closed on parse/read-only/sed paths instead).
+  if (!cmd || cmd.length > MAX_COMMAND_LENGTH) {
+    return {
+      commandWithoutRedirections: cmd,
+      redirections: [],
+      hasDangerousRedirection: false,
+    }
+  }
+
   const redirections: Array<{ target: string; operator: '>' | '>>' }> = []
   let hasDangerousRedirection = false
 

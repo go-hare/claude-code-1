@@ -52,6 +52,8 @@ import {
   writeBgJobState,
   getJobDirPath,
   isTerminalState,
+  isEligibleForRetire,
+  hasBlockingInFlight,
 } from './jobState.js'
 
 // ---------------------------------------------------------------------------
@@ -1040,6 +1042,18 @@ export interface DispatchRequest {
   attachStallRespawns?: number
   seed?: { intent?: string; name?: string }
   reattachEnv?: Record<string, string>
+  /**
+   * densable Xyr `forceRefusalRetry` — second enter after tYo / fork_transcript
+   * refuse; allows fresh spawn when own transcript never materialized.
+   */
+  forceRefusalRetry?: boolean
+  /** densable Xyr `force` — skip alive/refuse soft gates when true. */
+  force?: boolean
+  /**
+   * densable Xyr `initialPrompt` — when refuse/spawn-fail, gpn queues this as
+   * job.queuedPrompt for a later successful respawn.
+   */
+  initialPrompt?: string
   launch: {
     mode: 'prompt' | 'resume' | 'exec'
     sessionId?: string
@@ -1943,9 +1957,14 @@ export class BgWorker {
     pinned?: Set<string>,
     bridgeGraceMs: number = graceMs,
   ): Promise<{ retired: boolean; reason?: string }> {
+    // densable zF.retireIfSettled — reclaim idle/blocked non-exec workers (#27)
     if (this.isTransitioning) return { retired: false, reason: 'in-progress' }
     if (this.record.outcome) return { retired: false, reason: 'no-state' }
     if (this.attachers.size > 0) return { retired: false, reason: 'attached' }
+    // densable exe(dispatch) = CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+    if (this.dispatch.env?.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) {
+      return { retired: false, reason: 'host-managed' }
+    }
     if (pinned?.has(this.dispatch.short))
       return { retired: false, reason: 'pinned' }
     if (this.adoptedAt && Date.now() - this.adoptedAt < RECENT_ADOPT_GRACE_MS) {
@@ -1978,7 +1997,7 @@ export class BgWorker {
       return { retired: false, reason: 'no-state' }
     }
 
-    // Empty idle session (no name, no intent, blocked)
+    // Empty idle session (no name, no intent, blocked) — densable empty-idle
     if (
       this.dispatch.source !== 'shell' &&
       !state.name &&
@@ -1999,13 +2018,25 @@ export class BgWorker {
       return { retired: true }
     }
 
-    if (!isTerminalState(state))
+    // densable: bh(n) || non-exec (tempo idle | blocked-blocked | YP lineage)
+    // Previously only isTerminalState — left-arrow park (tempo:idle) never retired.
+    if (
+      !isEligibleForRetire(state, {
+        launchMode: this.dispatch.launch.mode,
+        workerCliVersion: this.record.cliVersion,
+        hostCliVersion:
+          typeof MACRO !== 'undefined' ? MACRO.VERSION : undefined,
+      })
+    ) {
       return { retired: false, reason: 'not-settled' }
-    if ((state.inFlight?.tasks ?? 1) > 0 || (state.inFlight?.queued ?? 1) > 0) {
-      return { retired: false, reason: 'inflight' }
     }
-    if (state.inFlight?.kinds.includes('session_cron')) {
-      return { retired: false, reason: 'session-cron' }
+    if (hasBlockingInFlight(state)) {
+      return {
+        retired: false,
+        reason: state.inFlight?.kinds.includes('session_cron')
+          ? 'session-cron'
+          : 'inflight',
+      }
     }
     if (state.routine) return { retired: false, reason: 'routine' }
 
@@ -2668,6 +2699,8 @@ export function buildWorkerEnv(
     CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
     CLAUDE_BG_SOURCE: dispatch.source,
     CLAUDE_JOB_DIR: jobDir,
+    // densable: short id for a7u / needs bridge (basename of job dir fallback)
+    CLAUDE_BG_SHORT: dispatch.short,
     CLAUDE_CODE_SESSION_NAME:
       dispatch.seed?.name || dispatch.seed?.intent || dispatch.short,
     CLAUDE_BG_RENDEZVOUS_SOCK: rvSockPath,
@@ -2774,14 +2807,10 @@ async function checkTranscriptExists(
   sessionId: string,
   cwd: string,
 ): Promise<boolean> {
-  const path = await getTranscriptPath(sessionId, cwd)
-  if (!path) return false
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
+  // densable NPn/IAe: existence alone is insufficient — need user|assistant lines.
+  const { probeResumeTranscript } = await import('./transcriptProbe.js')
+  const probe = await probeResumeTranscript(sessionId, cwd)
+  return probe.hasMessages
 }
 
 async function getTranscriptPath(
@@ -2790,37 +2819,35 @@ async function getTranscriptPath(
 ): Promise<string | undefined> {
   // densable keepParent /fork: --resume may be an absolute snapshot path
   // (jobs/<short>/tmp/parent-transcript.jsonl), not a session UUID.
+  // densable 2.1.214 #30: require regular file (skip dirs named *.jsonl).
+  const isFile = async (p: string): Promise<boolean> => {
+    try {
+      const { lstat } = await import('fs/promises')
+      return (await lstat(p)).isFile()
+    } catch {
+      return false
+    }
+  }
   if (
     sessionId.endsWith('.jsonl') ||
     sessionId.endsWith('.json') ||
     (typeof sessionId === 'string' &&
       (sessionId.includes('/') || sessionId.includes('\\')))
   ) {
-    try {
-      await access(sessionId)
-      return sessionId
-    } catch {
-      return undefined
-    }
+    return (await isFile(sessionId)) ? sessionId : undefined
   }
   try {
     const projectsDir = join(getClaudeConfigHomeDir(), 'projects')
     const dirs = await readdir(projectsDir)
     for (const d of dirs) {
       const candidate = join(projectsDir, d, `${sessionId}.jsonl`)
-      try {
-        await access(candidate)
-        return candidate
-      } catch {}
+      if (await isFile(candidate)) return candidate
     }
   } catch {}
   // cwd-relative fallback (unused by densable path but useful for tests)
   if (cwd) {
-    try {
-      const candidate = join(cwd, `${sessionId}.jsonl`)
-      await access(candidate)
-      return candidate
-    } catch {}
+    const candidate = join(cwd, `${sessionId}.jsonl`)
+    if (await isFile(candidate)) return candidate
   }
   return undefined
 }

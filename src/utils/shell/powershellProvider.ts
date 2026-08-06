@@ -1,9 +1,55 @@
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { join as posixJoin } from 'path/posix'
+import { getPlatform } from '../platform.js'
 import { buildPowerShellInvocationFlags } from '../powershellExecutionPolicy.js'
 import { getSessionEnvVars } from '../sessionEnvVars.js'
 import type { ShellProvider } from './shellProvider.js'
+
+/**
+ * densable 2.1.214 Erg — UTF-8 redirect + OutputEncoding + PSStyle PlainText.
+ * Prepended to user command unless shouldSkipPowerShellEncodingPreamble.
+ * Fixes #23 (non-ASCII / raw ANSI) and #25 (PS 5.1 `>`/`>>` UTF-16LE).
+ */
+export const POWERSHELL_ENCODING_PREAMBLE =
+  "try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; "
+
+/**
+ * densable Arg — default child env for PowerShell tool (#22 Python stdin).
+ * Applied only when the process env does not already define the key.
+ */
+export const POWERSHELL_DEFAULT_ENV: Readonly<Record<string, string>> = {
+  PYTHONIOENCODING: 'utf-8:surrogateescape',
+  NO_COLOR: '1',
+}
+
+/**
+ * densable vrg — skip Erg when the command already opens with a statement
+ * form that must be the first token (using / param / begin… / type literal).
+ */
+export function shouldSkipPowerShellEncodingPreamble(command: string): boolean {
+  let i = 0
+  for (;;) {
+    while (i < command.length && /[\s;]/.test(command[i]!)) i++
+    if (command[i] === '#') {
+      while (i < command.length && command[i] !== '\n') i++
+      continue
+    }
+    if (command.startsWith('<#', i)) {
+      const end = command.indexOf('#>', i + 2)
+      i = end === -1 ? command.length : end + 2
+      continue
+    }
+    break
+  }
+  const rest = command.slice(i)
+  return (
+    /^using\s+(namespace|module|assembly)\b/i.test(rest) ||
+    /^param\s*\(/i.test(rest) ||
+    /^(begin|process|end|clean|dynamicparam)\s*\{/i.test(rest) ||
+    (/^\[\w/.test(rest) && !/^\[[\w.]+\]::/.test(rest))
+  )
+}
 
 /**
  * PowerShell invocation flags + command. Shared by the provider's getSpawnArgs
@@ -34,6 +80,8 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
     type: 'powershell' as ShellProvider['type'],
     shellPath,
     detached: false,
+    // densable 2.1.214 #21 — child waiting on stdin must not hang the tool
+    stdin: 'ignore',
 
     async buildExecCommand(
       command: string,
@@ -52,21 +100,21 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
       // on Windows native, sandbox is never enabled so this branch is dead.
       const cwdFilePath =
         opts.useSandbox && opts.sandboxTmpDir
-          ? posixJoin(opts.sandboxTmpDir, `claude-pwd-ps-${opts.id}`)
+          ? (getPlatform() === 'windows' ? join : posixJoin)(
+              opts.sandboxTmpDir,
+              `claude-pwd-ps-${opts.id}`,
+            )
           : join(tmpdir(), `claude-pwd-ps-${opts.id}`)
+      // densable nnt — single-quote path for PS literal (escape ' as '')
       const escapedCwdFilePath = cwdFilePath.replace(/'/g, "''")
       // Exit-code capture: prefer $LASTEXITCODE when a native exe ran.
-      // On PS 5.1, a native command that writes to stderr while the stream
-      // is PS-redirected (e.g. `git push 2>&1`) sets $? = $false even when
-      // the exe returned exit 0 — so `if (!$?)` reports a false positive.
-      // $LASTEXITCODE is $null only when no native exe has run in the
-      // session; in that case fall back to $? for cmdlet-only pipelines.
-      // Tradeoff: `native-ok; cmdlet-fail` now returns 0 (was 1). Reverse
-      // is also true: `native-fail; cmdlet-ok` now returns the native
-      // exit code (was 0 — old logic only looked at $? which the trailing
-      // cmdlet set true). Both rarer than the git/npm/curl stderr case.
-      const cwdTracking = `\n; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }\n; (Get-Location).Path | Out-File -FilePath '${escapedCwdFilePath}' -Encoding utf8 -NoNewline\n; exit $_ec`
-      const psCommand = command + cwdTracking
+      // densable: FullLanguage uses $host.SetShouldExit; constrained uses exit.
+      const cwdTracking = `\n; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }\n; (Get-Location).Path | Out-File -FilePath '${escapedCwdFilePath}' -Encoding utf8 -NoNewline\n; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $host.SetShouldExit($_ec) } else { exit $_ec }`
+      // densable: l = (vrg(r) ? "" : Erg) + r + s
+      const preamble = shouldSkipPowerShellEncodingPreamble(command)
+        ? ''
+        : POWERSHELL_ENCODING_PREAMBLE
+      const psCommand = preamble + command + cwdTracking
 
       // Sandbox wraps the returned commandString as `<binShell> -c '<cmd>'` —
       // hardcoded `-c`, no way to inject -NoProfile -NonInteractive. So for
@@ -76,24 +124,18 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
       // The non-sandbox path returns the bare PS command; getSpawnArgs() adds
       // the flags via buildPowerShellArgs().
       //
+      // densable: EncodedCommand only when sandboxed AND not windows.
       // -EncodedCommand (base64 UTF-16LE), not -Command: the sandbox runtime
-      // applies its OWN shellquote.quote() on top of whatever we build. Any
-      // string containing ' triggers double-quote mode which escapes ! as \! —
-      // POSIX sh preserves that literally, pwsh parse error. Base64 is
-      // [A-Za-z0-9+/=] — no chars that any quoting layer can corrupt.
-      // Review 2964609818.
-      //
-      // shellPath is POSIX-single-quoted so a space-containing install path
-      // (e.g. /opt/my tools/pwsh) survives the inner `/bin/sh -c` word-split.
-      // Flags and base64 are [A-Za-z0-9+/=-] only — no quoting needed.
-      const commandString = opts.useSandbox
-        ? [
-            `'${shellPath.replace(/'/g, `'\\''`)}'`,
-            ...buildPowerShellInvocationFlags(),
-            '-EncodedCommand',
-            encodePowerShellCommand(psCommand),
-          ].join(' ')
-        : psCommand
+      // applies its OWN shellquote.quote() on top of whatever we build.
+      const commandString =
+        opts.useSandbox && getPlatform() !== 'windows'
+          ? [
+              `'${shellPath.replace(/'/g, `'\\''`)}'`,
+              ...buildPowerShellInvocationFlags(),
+              '-EncodedCommand',
+              encodePowerShellCommand(psCommand),
+            ].join(' ')
+          : psCommand
 
       return { commandString, cwdFilePath }
     },
@@ -104,13 +146,22 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
 
     async getEnvironmentOverrides(): Promise<Record<string, string>> {
       const env: Record<string, string> = {}
+      // densable Arg defaults — only when not already present on process.env.
+      // Skip NO_COLOR when FORCE_COLOR is set (densable i check).
+      const forceColorPresent =
+        process.env.FORCE_COLOR !== undefined ||
+        getSessionEnvVars().has('FORCE_COLOR')
+      for (const [key, value] of Object.entries(POWERSHELL_DEFAULT_ENV)) {
+        if (process.env[key] !== undefined) continue
+        if (key === 'NO_COLOR' && forceColorPresent) continue
+        env[key] = value
+      }
       // Apply session env vars set via /env (child processes only, not
       // the REPL). Without this, `/env PATH=...` affects Bash tool
       // commands but not PowerShell — so PyCharm users with a stripped
       // PATH can't self-rescue.
-      // Ordering: session vars FIRST so the sandbox TMPDIR below can't be
-      // overridden by `/env TMPDIR=...`. bashProvider.ts has these in the
-      // opposite order (pre-existing), but sandbox isolation should win.
+      // Ordering: session vars after Arg so /env can override defaults;
+      // sandbox TMPDIR still wins last.
       for (const [key, value] of getSessionEnvVars()) {
         env[key] = value
       }

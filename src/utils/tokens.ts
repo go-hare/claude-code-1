@@ -64,11 +64,23 @@ export function getTokenCountFromUsage(usage: Usage): number {
   )
 }
 
-export function tokenCountFromLastAPIResponse(messages: Message[]): number {
+export function tokenCountFromLastAPIResponse(
+  messages: ReadonlyArray<Message | { type: string; message?: unknown }>,
+): number {
   let i = messages.length - 1
   while (i >= 0) {
     const message = messages[i]
-    const usage = message ? getTokenUsage(message) : undefined
+    // densable api_system has no usage — skip non-Message shapes
+    if (
+      !message ||
+      message.type === 'api_system' ||
+      !('message' in message) ||
+      message.type !== 'assistant'
+    ) {
+      i--
+      continue
+    }
+    const usage = getTokenUsage(message as Message)
     if (usage) {
       return getTokenCountFromUsage(usage)
     }

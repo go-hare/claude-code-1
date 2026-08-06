@@ -6,7 +6,7 @@
 // - ownership: callerAgentId may only stop tasks it owns (tns: undefined=main ok)
 // - observer: cannot stop self; OH path uses agentId ownership + Fjr
 // - YC park (zle): running || parked allowed
-// - source=user → hAe stoppedByUser stamp (mem + disk Gzg)
+// - source=user → jCe/hAe stoppedByUser stamp (mem + disk Gzg); TaskStop omits source
 // - after kill, if target was YC: cascade descendants via Beo (parentAgentId chain)
 // - bash: suppress exit-137 notify; cross-owner XFu notify true bash owner
 
@@ -64,11 +64,13 @@ type StopTaskContext = {
    */
   callerAgentId?: string
   /**
-   * densable H1e source — user UI/tool vs system. User stamps hAe + Fjr.
+   * densable H1e source — only when explicitly "user" stamps jCe/hAe + Fjr.
+   * densable pNe has NO default; TaskStop tool omits source (parent kill).
+   * True user UI (BackgroundTasksDialog / SDK stop_task) must pass source:"user".
    */
   source?: 'user' | 'system'
   /**
-   * densable H1e killedBy (default "user").
+   * densable H1e killedBy (default "user"). TaskStop tool uses "parent".
    */
   killedBy?: 'user' | 'parent' | 'system'
 }
@@ -148,7 +150,8 @@ export async function stopTask(
     getAppState,
     setAppState,
     callerAgentId,
-    source = 'user',
+    // densable pNe: no default for source — only stamp when source==="user"
+    source,
     killedBy = 'user',
   } = context
   const appState = getAppState()

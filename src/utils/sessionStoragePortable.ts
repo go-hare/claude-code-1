@@ -407,18 +407,31 @@ export async function resolveSessionFilePath(
 > {
   const fileName = `${sessionId}.jsonl`
 
+  // densable 2.1.214 #30 / rWe: only regular files with size>0 — a directory
+  // named `${sessionId}.jsonl` must not short-circuit the search.
+  const tryFile = async (
+    filePath: string,
+    projectPath: string | undefined,
+  ): Promise<
+    | { filePath: string; projectPath: string | undefined; fileSize: number }
+    | undefined
+  > => {
+    try {
+      const s = await stat(filePath)
+      if (s.isFile() && s.size > 0)
+        return { filePath, projectPath, fileSize: s.size }
+    } catch {
+      // ENOENT/EACCES/EISDIR — keep searching
+    }
+    return undefined
+  }
+
   if (dir) {
     const canonical = await canonicalizePath(dir)
     const projectDir = await findProjectDir(canonical)
     if (projectDir) {
-      const filePath = join(projectDir, fileName)
-      try {
-        const s = await stat(filePath)
-        if (s.size > 0)
-          return { filePath, projectPath: canonical, fileSize: s.size }
-      } catch {
-        // ENOENT/EACCES — keep searching
-      }
+      const hit = await tryFile(join(projectDir, fileName), canonical)
+      if (hit) return hit
     }
     // Worktree fallback — sessions may live under a different worktree root
     let worktreePaths: string[]
@@ -431,13 +444,8 @@ export async function resolveSessionFilePath(
       if (wt === canonical) continue
       const wtProjectDir = await findProjectDir(wt)
       if (!wtProjectDir) continue
-      const filePath = join(wtProjectDir, fileName)
-      try {
-        const s = await stat(filePath)
-        if (s.size > 0) return { filePath, projectPath: wt, fileSize: s.size }
-      } catch {
-        // ENOENT/EACCES — keep searching
-      }
+      const hit = await tryFile(join(wtProjectDir, fileName), wt)
+      if (hit) return hit
     }
     return undefined
   }
@@ -451,14 +459,8 @@ export async function resolveSessionFilePath(
     return undefined
   }
   for (const name of dirents) {
-    const filePath = join(projectsDir, name, fileName)
-    try {
-      const s = await stat(filePath)
-      if (s.size > 0)
-        return { filePath, projectPath: undefined, fileSize: s.size }
-    } catch {
-      // ENOENT/ENOTDIR — not in this project, keep scanning
-    }
+    const hit = await tryFile(join(projectsDir, name, fileName), undefined)
+    if (hit) return hit
   }
   return undefined
 }

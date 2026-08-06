@@ -329,6 +329,15 @@ FIND_GREP_FUNC_END
     `
   }
 
+  // densable K2g: refuse pkill patterns that match the Claude CLI process
+  const pkillGuard = createPkillSelfGuardShellIntegration()
+  content += `
+      echo "# Shadow pkill to refuse patterns matching the CLI process" >> "$SNAPSHOT_FILE"
+      cat >> "$SNAPSHOT_FILE" << 'PKILL_FUNC_END'
+${pkillGuard}
+PKILL_FUNC_END
+    `
+
   // Add PATH to the file
   content += `
 
@@ -337,6 +346,38 @@ FIND_GREP_FUNC_END
   `
 
   return content
+}
+
+/**
+ * densable `K2g` — shadow `pkill` so patterns matching the Claude CLI process
+ * (CLAUDE_PID) are refused. Prevents `pkill -f` self-kill on Linux (#16).
+ */
+export function createPkillSelfGuardShellIntegration(): string {
+  return [
+    'unalias pkill 2>/dev/null || true',
+    'function pkill {',
+    '  if [ -n "${CLAUDE_PID:-}" ] && [ -r "/proc/${CLAUDE_PID}/comm" ]; then',
+    '    local _cc_skip="" _cc_a',
+    '    local -a _cc_probe=()',
+    '    for _cc_a in ${1+"$@"}; do',
+    '      if [ -n "$_cc_skip" ]; then _cc_skip=""; continue; fi',
+    '      case "$_cc_a" in',
+    '        --signal) _cc_skip=1 ;;',
+    '        --signal=*|-e|--echo) ;;',
+    '        -[0-9]*) ;;',
+    '        -[PUGOF]?*) _cc_probe+=("$_cc_a") ;;',
+    '        -[ABCDEFGHIJKLMNOPQRSTUVWXYZ][ABCDEFGHIJKLMNOPQRSTUVWXYZ0-9]*) ;;',
+    '        *) _cc_probe+=("$_cc_a") ;;',
+    '      esac',
+    '    done',
+    '    if command pgrep ${_cc_probe[@]+"${_cc_probe[@]}"} 2>/dev/null | command grep -qx "${CLAUDE_PID}"; then',
+    '      printf \'pkill: refusing to run — this pattern matches the Claude CLI process (PID %s). Narrow the pattern, or target your own children with `pkill -P $$ ...`.\\n\' "${CLAUDE_PID}" >&2',
+    '      return 1',
+    '    fi',
+    '  fi',
+    '  command pkill ${1+"$@"}',
+    '}',
+  ].join('\n')
 }
 
 /**

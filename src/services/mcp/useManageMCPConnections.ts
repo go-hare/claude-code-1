@@ -12,6 +12,11 @@ import {
   getMcpToolsCommandsAndResources,
   reconnectMcpServerImpl,
 } from './client.js'
+import {
+  formatListChangedRefreshFailed,
+  resolvePromptsListChangedRefresh,
+  resolveResourcesListChangedRefresh,
+} from './mcpListChangedRefresh.js'
 import type {
   MCPServerConnection,
   ScopedMcpServerConfig,
@@ -669,6 +674,12 @@ export function useManageMCPConnections(
                 logEvent('tengu_mcp_list_changed', {
                   type: 'prompts' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 })
+                // densable #42: snapshot previous AppState commands; on failure keep.
+                const previousCommands = store
+                  .getState()
+                  .mcp.commands.filter(c =>
+                    commandBelongsToServer(c, client.name),
+                  )
                 try {
                   // Skills come from resources, not prompts — don't invalidate their
                   // cache here. fetchMcpSkillsForClient returns the cached result.
@@ -679,18 +690,33 @@ export function useManageMCPConnections(
                       ? fetchMcpSkillsForClient!(client)
                       : Promise.resolve([]),
                   ])
+                  const resolved = resolvePromptsListChangedRefresh(
+                    previousCommands,
+                    { ok: true, value: [...mcpPrompts, ...mcpSkills] },
+                  )
                   updateServer({
                     ...client,
-                    commands: [...mcpPrompts, ...mcpSkills],
+                    commands: resolved.next,
                   })
                   // MCP skills changed — invalidate skill-search index so
                   // next discovery rebuilds with the new set.
                   clearSkillIndexCache?.()
                 } catch (error) {
+                  const err = errorMessage(error)
+                  logMCPDebug(
+                    client.name,
+                    formatListChangedRefreshFailed(
+                      client.name,
+                      'prompts',
+                      err,
+                      'full',
+                    ),
+                  )
                   logMCPError(
                     client.name,
-                    `Failed to refresh prompts after list_changed notification: ${errorMessage(error)}`,
+                    `Failed to refresh prompts after list_changed notification: ${err}`,
                   )
+                  // densable: keeping previous commands — do not updateServer
                 }
               },
             )
@@ -707,6 +733,14 @@ export function useManageMCPConnections(
                 logEvent('tengu_mcp_list_changed', {
                   type: 'resources' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 })
+                // densable #42: partial failure keeps previous for failed fields
+                const previousResources =
+                  store.getState().mcp.resources[client.name] ?? []
+                const previousCommands = store
+                  .getState()
+                  .mcp.commands.filter(c =>
+                    commandBelongsToServer(c, client.name),
+                  )
                 try {
                   fetchResourcesForClient.cache.delete(client.name)
                   if (feature('MCP_SKILLS')) {
@@ -716,29 +750,107 @@ export function useManageMCPConnections(
                     // us stomp its fresh result with our cached stale one.
                     fetchMcpSkillsForClient!.cache.delete(client.name)
                     fetchCommandsForClient.cache.delete(client.name)
-                    const [newResources, mcpPrompts, mcpSkills] =
-                      await Promise.all([
-                        fetchResourcesForClient(client),
-                        fetchCommandsForClient(client),
-                        fetchMcpSkillsForClient!(client),
-                      ])
+                    const settled = await Promise.allSettled([
+                      fetchResourcesForClient(client),
+                      fetchCommandsForClient(client),
+                      fetchMcpSkillsForClient!(client),
+                    ])
+                    const resourcesField =
+                      settled[0].status === 'fulfilled'
+                        ? {
+                            ok: true as const,
+                            value: settled[0].value,
+                          }
+                        : {
+                            ok: false as const,
+                            error:
+                              settled[0].reason instanceof Error
+                                ? settled[0].reason.message
+                                : String(settled[0].reason),
+                          }
+                    let commandsField:
+                      | { ok: true; value: Command[] }
+                      | { ok: false; error: string }
+                    if (
+                      settled[1].status === 'fulfilled' &&
+                      settled[2].status === 'fulfilled'
+                    ) {
+                      commandsField = {
+                        ok: true,
+                        value: [...settled[1].value, ...settled[2].value],
+                      }
+                    } else {
+                      const errParts: string[] = []
+                      if (settled[1].status === 'rejected') {
+                        errParts.push(
+                          settled[1].reason instanceof Error
+                            ? settled[1].reason.message
+                            : String(settled[1].reason),
+                        )
+                      }
+                      if (settled[2].status === 'rejected') {
+                        errParts.push(
+                          settled[2].reason instanceof Error
+                            ? settled[2].reason.message
+                            : String(settled[2].reason),
+                        )
+                      }
+                      commandsField = {
+                        ok: false,
+                        error: errParts.join('; ') || 'commands refresh failed',
+                      }
+                    }
+                    const merged = resolveResourcesListChangedRefresh(
+                      {
+                        resources: previousResources,
+                        commands: previousCommands,
+                      },
+                      {
+                        resources: resourcesField,
+                        commands: commandsField,
+                      },
+                    )
+                    if (merged.failedFields.length > 0) {
+                      logMCPDebug(
+                        client.name,
+                        formatListChangedRefreshFailed(
+                          client.name,
+                          'resources',
+                          merged.failedFields.join(','),
+                          'partial',
+                        ),
+                      )
+                    }
                     updateServer({
                       ...client,
-                      resources: newResources,
-                      commands: [...mcpPrompts, ...mcpSkills],
+                      resources: merged.resources,
+                      commands: merged.commands,
                     })
                     // MCP skills changed — invalidate skill-search index so
                     // next discovery rebuilds with the new set.
-                    clearSkillIndexCache?.()
+                    if (commandsField.ok) {
+                      clearSkillIndexCache?.()
+                    }
                   } else {
                     const newResources = await fetchResourcesForClient(client)
                     updateServer({ ...client, resources: newResources })
                   }
                 } catch (error) {
+                  const err = errorMessage(error)
+                  logMCPDebug(
+                    client.name,
+                    formatListChangedRefreshFailed(
+                      client.name,
+                      'resources',
+                      err,
+                      'partial',
+                    ),
+                  )
                   logMCPError(
                     client.name,
-                    `Failed to refresh resources after list_changed notification: ${errorMessage(error)}`,
+                    `Failed to refresh resources after list_changed notification: ${err}`,
                   )
+                  // densable: keep previous resources/commands — do not updateServer
                 }
               },
             )

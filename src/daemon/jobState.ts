@@ -102,10 +102,25 @@ export interface BgJobState {
    * Archived jobs can reappear under "Earlier" without hard delete.
    */
   archived?: boolean
-  /** In-flight operations */
+  /** In-flight operations (densable tDt stamp) */
   inFlight?: { tasks: number; queued: number; kinds: string[] }
+  /**
+   * densable u7u `fan` — fan-out item roster from t7r.items when non-empty.
+   * Compared via densable Jat() before write.
+   */
+  fan?: Array<Record<string, unknown>>
+  /**
+   * densable u7u `budget` — token/budget snapshot from t7r.budget.
+   * Compared via densable Xat() before write.
+   */
+  budget?: { spent: number; target: number } | Record<string, unknown>
   /** What the session needs from the user */
   needs?: string
+  /**
+   * densable interactiveLineage — left-arrow / interactive → bg lineage.
+   * Used by retireIfSettled empty-prompt special case (needs===YP).
+   */
+  interactiveLineage?: boolean
   /** Permission/question block */
   block?: {
     questions: Array<{
@@ -115,6 +130,12 @@ export interface BgJobState {
   }
   /** Suggested reply for blocked sessions */
   suggestedReply?: string
+  /**
+   * densable gpn / Xyr `queuedPrompt` — prompt queued while respawn was refused
+   * or spawn failed. Successful job_respawn consumes it as `$` (`--` arg) then
+   * clears to void 0: `$ = initialPrompt ?? queuedPrompt ?? intent`.
+   */
+  queuedPrompt?: string
   /** Provider environment overrides */
   providerEnv?: Record<string, string>
   /** Session permission rules */
@@ -189,7 +210,7 @@ export function patchBgJobState(
 }
 
 // ---------------------------------------------------------------------------
-// Terminal state helpers
+// Terminal / settle helpers (densable cF / bh / retireIfSettled)
 // ---------------------------------------------------------------------------
 
 export function isTerminalState(state: BgJobState): boolean {
@@ -198,6 +219,79 @@ export function isTerminalState(state: BgJobState): boolean {
     state.state === 'failed' ||
     state.state === 'stopped'
   )
+}
+
+/**
+ * densable bh(e) = cF(e.state) && e.tempo !== "active"
+ * Terminal session states that are not actively streaming.
+ */
+export function isBhSettled(state: BgJobState): boolean {
+  return isTerminalState(state) && state.tempo !== 'active'
+}
+
+/** densable YP — empty interactive bg waiting for first prompt. */
+export const EMPTY_PROMPT_NEEDS = 'send a prompt to start'
+
+/**
+ * densable L4d — inFlight kinds that do not block retire when session is
+ * otherwise bh-settled (detritus-only background noise).
+ */
+export const RETIRE_DETRITUS_KINDS = [
+  'local_bash',
+  'in_process_teammate',
+  'dream',
+  'auto_mode_scan',
+] as const
+
+/**
+ * densable retireIfSettled settle predicate (non-exec path):
+ *   bh(n) || tempo==="idle" || (state==="blocked" && tempo==="blocked") ||
+ *   interactiveLineage empty-prompt special
+ *
+ * #27: idle/blocked non-exec workers must be reclaimable — terminal-only
+ * settle left ←/`/background` park sessions holding daemon+worker forever.
+ */
+export function isEligibleForRetire(
+  state: BgJobState,
+  opts: {
+    launchMode: 'prompt' | 'resume' | 'exec'
+    workerCliVersion?: string
+    hostCliVersion?: string
+  },
+): boolean {
+  if (isBhSettled(state)) return true
+  if (opts.launchMode === 'exec') return false
+  if (state.tempo === 'idle') return true
+  if (state.state === 'blocked' && state.tempo === 'blocked') return true
+  // densable i: same VERSION + working/blocked + needs===YP + interactiveLineage
+  if (
+    opts.workerCliVersion !== undefined &&
+    opts.hostCliVersion !== undefined &&
+    opts.workerCliVersion === opts.hostCliVersion &&
+    state.state === 'working' &&
+    state.tempo === 'blocked' &&
+    state.needs === EMPTY_PROMPT_NEEDS &&
+    state.interactiveLineage === true
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * densable inflight gate with detritus exception:
+ * queued always blocks; tasks block unless bh-settled and every kind ∈ L4d.
+ */
+export function hasBlockingInFlight(state: BgJobState): boolean {
+  const kinds = state.inFlight?.kinds ?? []
+  const detritusOnly =
+    isBhSettled(state) &&
+    kinds.length > 0 &&
+    kinds.every(k => (RETIRE_DETRITUS_KINDS as readonly string[]).includes(k))
+  if ((state.inFlight?.queued ?? 0) > 0) return true
+  if ((state.inFlight?.tasks ?? 0) > 0 && !detritusOnly) return true
+  if (kinds.includes('session_cron')) return true
+  return false
 }
 
 // ---------------------------------------------------------------------------
@@ -254,9 +348,11 @@ async function readLastAssistantLine(
       for (const pd of projectDirs) {
         const candidate = join(projectsDir, pd, `${sessionId}.jsonl`)
         try {
-          statSync(candidate)
-          transcriptPath = candidate
-          break
+          // densable 2.1.214 #30: only regular files (skip *.jsonl dirs)
+          if (statSync(candidate).isFile()) {
+            transcriptPath = candidate
+            break
+          }
         } catch {}
       }
     } catch {}

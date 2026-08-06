@@ -1066,6 +1066,12 @@ export async function teleportToRemote(options: {
    */
   bundleBaseRef?: string;
   /**
+   * densable Qre `bundleForceScope` → Jes `{forceScope}`. Ultrareview
+   * no_merge_base empty-tree fallback sets `"squashed"` so the seed bundle
+   * skips --all/HEAD tiers (full history would be the entire repo).
+   */
+  bundleForceScope?: 'all' | 'head' | 'squashed';
+  /**
    * densable Qre top-level CreateSession `tags` (e.g. ultrareview →
    * `["ultrareview"]`). Pass-through; not interpreted client-side.
    */
@@ -1251,8 +1257,9 @@ export async function teleportToRemote(options: {
 
       // Bundle mode: upload local working tree (uncommitted changes via
       // refs/seed/stash), container clones from the bundle. No GitHub.
-      // densable Qre: Jes({..., baseRef: e.bundleBaseRef}); onBundleFail only
-      // when failReason !== "too_large". Otherwise: github source.
+      // densable Qre: Jes({..., baseRef: e.bundleBaseRef, forceScope:
+      // e.bundleForceScope}); onBundleFail only when failReason !== "too_large".
+      // Otherwise: github source.
       let gitSource: GitSource | null = null;
       let seedBundleFileId: string | null = null;
       if (options.useBundle) {
@@ -1262,7 +1269,11 @@ export async function teleportToRemote(options: {
             sessionId: getSessionId(),
             baseUrl: getOauthConfig().BASE_API_URL,
           },
-          { signal, baseRef: options.bundleBaseRef },
+          {
+            signal,
+            baseRef: options.bundleBaseRef,
+            forceScope: options.bundleForceScope,
+          },
         );
         if (!bundle.success) {
           const failBundle = bundle as {

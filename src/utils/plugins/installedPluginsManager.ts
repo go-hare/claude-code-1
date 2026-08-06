@@ -43,17 +43,21 @@ export type PersistableScope = Exclude<PluginScope, never> // All scopes are per
 import { getOriginalCwd } from '../../bootstrap/state.js'
 import { getCwd } from '../cwd.js'
 import { getHeadForDir } from '../git/gitFilesystem.js'
-import type { EditableSettingSource } from '../settings/constants.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
 } from '../settings/settings.js'
-import { getPluginById } from './marketplaceManager.js'
 import {
-  parsePluginIdentifier,
-  settingSourceToScope,
-} from './pluginIdentifier.js'
-import { getPluginCachePath, getVersionedCachePath } from './pluginLoader.js'
+  resolveEnabledPluginScopesForInstallSync,
+  shouldRunEnabledPluginsInstallSync,
+} from './flagSettingsEnabledPlugins.js'
+import { getPluginById } from './marketplaceManager.js'
+import { parsePluginIdentifier } from './pluginIdentifier.js'
+import {
+  copyPluginToVersionedCache,
+  getPluginCachePath,
+  getVersionedCachePath,
+} from './pluginLoader.js'
 
 // Migration state to prevent running migration multiple times per session
 let migrationCompleted = false
@@ -1049,9 +1053,19 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
   // Use merged settings for shouldSkipSync check
   const settings = getSettings_DEPRECATED()
   const enabledPlugins = settings.enabledPlugins || {}
+  const flagEnabled = getSettingsForSource('flagSettings')?.enabledPlugins || {}
+  const policyEnabled =
+    getSettingsForSource('policySettings')?.enabledPlugins || {}
 
-  // No plugins in settings = nothing to sync
-  if (Object.keys(enabledPlugins).length === 0) {
+  // densable Dhy: do not early-return solely on merged map — flag/policy
+  // true entries must still drive install-record sync (#33).
+  if (
+    !shouldRunEnabledPluginsInstallSync(
+      enabledPlugins,
+      flagEnabled,
+      policyEnabled,
+    )
+  ) {
     return
   }
 
@@ -1059,6 +1073,19 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
   const rawFileData = readInstalledPluginsFileRaw()
   const fileExists = rawFileData !== null
   const isV2Format = fileExists && rawFileData?.version === 2
+
+  // densable: build scopes before skip check so flag-only ids are included
+  const now = new Date().toISOString()
+  const projectPath = getCwd()
+  const { scopes: pluginScopeFromSettings, flagOnlyPluginIds } =
+    resolveEnabledPluginScopesForInstallSync({
+      user: getSettingsForSource('userSettings')?.enabledPlugins,
+      project: getSettingsForSource('projectSettings')?.enabledPlugins,
+      local: getSettingsForSource('localSettings')?.enabledPlugins,
+      flag: flagEnabled,
+      policy: policyEnabled,
+      projectPath,
+    })
 
   // If file exists with V2 format, check if we can skip the expensive migration
   if (isV2Format && rawFileData) {
@@ -1070,12 +1097,12 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
 
     if (existingData?.success) {
       const plugins = existingData.data.plugins
-      const allPluginsExist = Object.keys(enabledPlugins)
-        .filter(id => id.includes('@'))
-        .every(id => {
-          const installations = plugins[id]
-          return installations && installations.length > 0
-        })
+      // densable: every key in r must have install record; managed needs
+      // single managed entry. We require presence for all resolved scopes.
+      const allPluginsExist = [...pluginScopeFromSettings.keys()].every(id => {
+        const installations = plugins[id]
+        return installations && installations.length > 0
+      })
 
       if (allPluginsExist) {
         logForDebugging('All plugins already exist, skipping migration')
@@ -1089,44 +1116,6 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
       ? 'Syncing installed_plugins.json with enabledPlugins from all settings.json files'
       : 'Creating installed_plugins.json from settings.json files',
   )
-
-  const now = new Date().toISOString()
-  const projectPath = getCwd()
-
-  // Step 1: Build a map of pluginId -> scope from all settings.json files
-  // Settings.json is the source of truth for scope
-  const pluginScopeFromSettings = new Map<
-    string,
-    {
-      scope: 'user' | 'project' | 'local'
-      projectPath: string | undefined
-    }
-  >()
-
-  // Iterate through each editable settings source (order matters: user first)
-  const settingSources: EditableSettingSource[] = [
-    'userSettings',
-    'projectSettings',
-    'localSettings',
-  ]
-
-  for (const source of settingSources) {
-    const sourceSettings = getSettingsForSource(source)
-    const sourceEnabledPlugins = sourceSettings?.enabledPlugins || {}
-
-    for (const pluginId of Object.keys(sourceEnabledPlugins)) {
-      // Skip non-standard plugin IDs
-      if (!pluginId.includes('@')) continue
-
-      // Settings.json is source of truth - always update scope
-      // Use the most specific scope (last one wins: local > project > user)
-      const scope = settingSourceToScope(source)
-      pluginScopeFromSettings.set(pluginId, {
-        scope,
-        projectPath: scope === 'user' ? undefined : projectPath,
-      })
-    }
-  }
 
   // Step 2: Start with existing data (or start empty if no file exists)
   let v2Plugins: InstalledPluginsMapV2 = {}
@@ -1191,9 +1180,39 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
         let gitCommitSha: string | undefined
 
         if (typeof entry.source === 'string') {
-          installPath = join(marketplaceInstallLocation, entry.source)
-          version = getPluginVersionFromManifest(installPath, pluginId)
-          gitCommitSha = await getGitCommitSha(installPath)
+          const marketplaceDir = marketplaceInstallLocation
+          const sourcePluginPath = join(marketplaceDir, entry.source)
+          version = getPluginVersionFromManifest(sourcePluginPath, pluginId)
+          gitCommitSha = await getGitCommitSha(sourcePluginPath)
+
+          if (version === 'unknown' && entry.version) {
+            version = entry.version
+          }
+          if (version === 'unknown' && gitCommitSha) {
+            version = gitCommitSha.substring(0, 12)
+          }
+
+          // densable LPt: --settings-enabled plugins must be copied into the
+          // versioned cache so the session can load them without a prior
+          // /plugin install write to user settings.
+          if (flagOnlyPluginIds.has(pluginId)) {
+            try {
+              installPath = await copyPluginToVersionedCache(
+                sourcePluginPath,
+                pluginId,
+                version,
+                entry,
+                marketplaceDir,
+              )
+            } catch (materializeError) {
+              logForDebugging(
+                `Cannot materialize versioned cache for --settings-enabled ${pluginId} from ${sourcePluginPath}: ${errorMessage(materializeError)}, skipping`,
+              )
+              continue
+            }
+          } else {
+            installPath = getVersionedCachePath(pluginId, version)
+          }
         } else {
           const cachePath = getPluginCachePath()
           const sanitizedName = pluginName.replace(/[^a-zA-Z0-9-_]/g, '-')
@@ -1226,19 +1245,23 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
           }
 
           gitCommitSha = await getGitCommitSha(pluginCachePath)
-        }
 
-        if (version === 'unknown' && entry.version) {
-          version = entry.version
-        }
-        if (version === 'unknown' && gitCommitSha) {
-          version = gitCommitSha.substring(0, 12)
+          if (version === 'unknown' && entry.version) {
+            version = entry.version
+          }
+          if (version === 'unknown' && gitCommitSha) {
+            version = gitCommitSha.substring(0, 12)
+          }
+
+          // densable: external plugins still record versioned path when cache
+          // content already exists (flag-only or not).
+          installPath = getVersionedCachePath(pluginId, version)
         }
 
         v2Plugins[pluginId] = [
           {
             scope: scopeInfo.scope,
-            installPath: getVersionedCachePath(pluginId, version),
+            installPath,
             version,
             installedAt: now,
             lastUpdated: now,

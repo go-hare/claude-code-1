@@ -305,8 +305,21 @@ export function FullscreenLayout({
   // sticky changes ~5-20×/transcript) — re-rendering FullscreenLayout on
   // those is fine; re-rendering the 6966-line REPL + its 22+ useAppState
   // selectors per-scroll-frame was not.
-  const [stickyPrompt, setStickyPrompt] = useState<StickyPrompt | null>(null);
-  const chromeCtx = useMemo(() => ({ setStickyPrompt }), []);
+  const [stickyPrompt, setStickyPromptState] = useState<StickyPrompt | null>(null);
+  // StickyTracker's effect runs every render; skip only true no-ops
+  // (null→null / clicked→clicked / same ref). Same text with a new object
+  // is accepted — idx can change while collapsed text is identical, and
+  // scrollTo must refresh. Identity thrash is stopped in StickyTracker
+  // (mid-list miss hold + idx/text dedup), not by dropping updates here.
+  const setStickyPrompt = useCallback((p: StickyPrompt | null) => {
+    setStickyPromptState(prev => {
+      if (prev === p) return prev;
+      if (p === null && prev === null) return prev;
+      if (p === 'clicked' && prev === 'clicked') return prev;
+      return p;
+    });
+  }, []);
+  const chromeCtx = useMemo(() => ({ setStickyPrompt }), [setStickyPrompt]);
   // Boolean-quantized scroll subscription. Snapshot is "is viewport bottom
   // above the divider y?" — Object.is on a boolean → FullscreenLayout only
   // re-renders when the pill should actually flip, not per-frame.
@@ -319,6 +332,14 @@ export function FullscreenLayout({
     const dividerY = dividerYRef?.current;
     if (!s || dividerY == null) return false;
     return s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight() < dividerY;
+  });
+  // Latch pad collapse on "scrolled away from bottom", not only on sticky
+  // object presence. densable: once scrolled away, padding drops to 0 and
+  // stays until repin — sticky null↔object must not flip paddingTop (React #185).
+  const scrolledAwayFromBottom = useSyncExternalStore(subscribe, () => {
+    const s = scrollRef?.current;
+    if (!s) return false;
+    return !s.isSticky();
   });
   // Wire up hyperlink click handling — in fullscreen mode, mouse tracking
   // intercepts clicks before the terminal can open OSC 8 links natively.
@@ -365,13 +386,15 @@ export function FullscreenLayout({
     // header comes back (viewportTop 0→1, a single 1-row shift —
     // acceptable since user explicitly scrolled).
     const sticky = hideSticky ? null : stickyPrompt;
-    // densable: header only for {text,scrollTo}; pad collapses for sticky OR
-    // 'clicked' (keep viewportTop=0 after header click). Overlay wins.
+    // densable: header only for {text,scrollTo}; pad collapses while scrolled
+    // away OR sticky/'clicked' chrome is active (keep viewportTop=0 after
+    // header click / during pill jump). Overlay wins.
     const headerPrompt = sticky != null && sticky !== 'clicked' && overlay == null ? sticky : null;
-    // React #185: padCollapsed flips paddingTop 1↔0 and can make StickyTracker
-    // firstVisible flicker. Keep collapse only while we actually have sticky
-    // chrome (object or clicked) — null always restores pad=1 (densable OhR).
-    const padCollapsed = sticky != null && overlay == null;
+    // React #185: do NOT couple padCollapsed solely to sticky != null —
+    // sticky null↔object thrash was flipping paddingTop 1↔0 every frame and
+    // re-entering StickyTracker. Latch on scrolledAwayFromBottom; also hold
+    // pad while sticky/'clicked' (pill jump may already be isSticky).
+    const padCollapsed = (scrolledAwayFromBottom || sticky != null) && overlay == null;
     return (
       <PromptOverlayProvider>
         <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">

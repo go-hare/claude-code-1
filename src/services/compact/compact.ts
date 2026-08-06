@@ -420,6 +420,15 @@ export async function compactConversation(
   recompactionInfo?: RecompactionInfo,
 ): Promise<CompactionResult> {
   try {
+    // densable 2.1.214: refuse compact when EndConversation ended the session
+    const endedAppState = context.getAppState()
+    if (endedAppState.endedByModel) {
+      const { END_CONVERSATION_SESSION_ENDED_MESSAGE } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
+      throw new Error(END_CONVERSATION_SESSION_ENDED_MESSAGE)
+    }
+
     if (messages.length === 0) {
       throw new Error(ERROR_MESSAGE_NOT_ENOUGH_MESSAGES)
     }
@@ -1332,6 +1341,7 @@ async function streamCompactSummary({
         : [FileReadTool]
 
       const streamingGen = queryModelWithStreaming({
+        // No model arg → no api_system at runtime; cast for Message[] query path
         messages: normalizeMessagesForAPI(
           stripImagesFromMessages(
             stripReinjectedAttachments([
@@ -1340,7 +1350,7 @@ async function streamCompactSummary({
             ]),
           ),
           context.options.tools,
-        ),
+        ) as Message[],
         systemPrompt: asSystemPrompt([
           'You are a helpful AI assistant tasked with summarizing conversations.',
         ]),

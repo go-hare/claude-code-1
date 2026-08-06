@@ -39,7 +39,9 @@ import {
 } from '../../utils/plugins/marketplaceManager.js'
 import { deletePluginDataDir } from '../../utils/plugins/pluginDirectories.js'
 import {
+  findPluginKeyCaseInsensitive,
   parsePluginIdentifier,
+  pluginIdEquals,
   scopeToSettingSource,
 } from '../../utils/plugins/pluginIdentifier.js'
 import {
@@ -201,7 +203,9 @@ function findPluginInSettings(plugin: string): {
 }
 
 /**
- * Helper function to find a plugin from loaded plugins
+ * densable N9d — find loaded plugin by identifier (case-insensitive Lwe).
+ * When marketplace is specified, also require source to include @marketplace
+ * (case-insensitive); bare name still matches first via densable N9d order.
  */
 function findPluginByIdentifier(
   plugin: string,
@@ -210,41 +214,64 @@ function findPluginByIdentifier(
   const { name, marketplace } = parsePluginIdentifier(plugin)
 
   return plugins.find(p => {
-    // Check exact name match
-    if (p.name === plugin || p.name === name) return true
-
-    // If marketplace specified, check if it matches the source
-    if (marketplace && p.source) {
-      return p.name === name && p.source.includes(`@${marketplace}`)
+    // densable: Lwe(o.name, e) || Lwe(o.name, r)
+    if (pluginIdEquals(p.name, plugin) || pluginIdEquals(p.name, name)) {
+      return true
     }
-
+    // densable: n && o.source → Lwe(name) && source includes @marketplace (lower)
+    if (marketplace && p.source) {
+      return (
+        pluginIdEquals(p.name, name) &&
+        p.source.toLowerCase().includes(`@${marketplace.toLowerCase()}`)
+      )
+    }
     return false
   })
 }
 
 /**
- * Resolve a plugin ID from V2 installed plugins data for a plugin that may
- * have been delisted from its marketplace. Returns null if the plugin is not
- * found in V2 data.
+ * densable wu_ — resolve delisted plugin id from V2 installed_plugins.
+ * When input includes `@`, only bare (no-marketplace) keys match the name
+ * fallback after exact/case-insensitive key resolve (densable `!a||!p`).
  */
 function resolveDelistedPluginId(
   plugin: string,
+  scope?: InstallableScope,
+  projectPath?: string | undefined,
 ): { pluginId: string; pluginName: string } | null {
   const { name } = parsePluginIdentifier(plugin)
   const installedData = loadInstalledPluginsV2()
+  const keys = Object.keys(installedData.plugins)
 
-  // Try exact match first, then search by name
-  if (installedData.plugins[plugin]?.length) {
-    return { pluginId: plugin, pluginName: name }
+  // densable: are(i,e) exact/Lwe key with installations
+  const exactKey = findPluginKeyCaseInsensitive(keys, plugin)
+  if (exactKey && (installedData.plugins[exactKey]?.length ?? 0) > 0) {
+    return { pluginId: exactKey, pluginName: name }
   }
 
-  const matchingKey = Object.keys(installedData.plugins).find(key => {
-    const { name: keyName } = parsePluginIdentifier(key)
-    return keyName === name && (installedData.plugins[key]?.length ?? 0) > 0
+  const inputHasMarketplace = plugin.includes('@')
+  const matchingKeys = keys.filter(key => {
+    const { name: keyName, marketplace: keyMkt } = parsePluginIdentifier(key)
+    return (
+      pluginIdEquals(keyName, name) &&
+      // densable: (!a || !p) — with @ in input, only bare keys; without, any
+      (!inputHasMarketplace || !keyMkt) &&
+      (installedData.plugins[key]?.length ?? 0) > 0
+    )
   })
 
-  if (matchingKey) {
-    return { pluginId: matchingKey, pluginName: name }
+  // Prefer installation matching requested scope/project when provided
+  const preferred =
+    scope !== undefined
+      ? (matchingKeys.find(u =>
+          installedData.plugins[u]?.some(
+            d => d.scope === scope && d.projectPath === projectPath,
+          ),
+        ) ?? matchingKeys[0])
+      : matchingKeys[0]
+
+  if (preferred) {
+    return { pluginId: preferred, pluginName: name }
   }
 
   return null
@@ -435,31 +462,52 @@ export async function uninstallPluginOp(
   const { enabled, disabled } = await loadAllPlugins()
   const allPlugins = [...enabled, ...disabled]
 
-  // Find the plugin
+  // densable _Fe: N9d find + settings key priority with marketplace-aware list
   const foundPlugin = findPluginByIdentifier(plugin, allPlugins)
 
   const settingSource = scopeToSettingSource(scope)
   const settings = getSettingsForSource(settingSource)
 
+  const projectPath = getProjectPathForScope(scope)
+  const installedData = loadInstalledPluginsV2()
+  const installedKeys = Object.keys(installedData.plugins)
+
   let pluginId: string
   let pluginName: string
 
   if (foundPlugin) {
-    // Find the matching settings key for this plugin (may differ from `plugin`
-    // if user gave short name but settings has plugin@marketplace)
+    // densable P candidate order for settings keys:
+    // exact e, Lwe(e), then (if no @ in e) name / name@* / case variants, then fallback
+    const enabledKeys = Object.keys(settings?.enabledPlugins ?? {})
+    const nameLower = foundPlugin.name.toLowerCase()
+    const inputHasMarketplace = plugin.includes('@')
+    const candidates: string[] = [
+      ...enabledKeys.filter(L => L === plugin),
+      ...enabledKeys.filter(L => pluginIdEquals(L, plugin)),
+      ...(inputHasMarketplace
+        ? []
+        : [
+            ...enabledKeys.filter(L => L === foundPlugin.name),
+            ...enabledKeys.filter(L => L.startsWith(`${foundPlugin.name}@`)),
+            ...enabledKeys.filter(L => L.toLowerCase() === nameLower),
+            ...enabledKeys.filter(L =>
+              L.toLowerCase().startsWith(`${nameLower}@`),
+            ),
+          ]),
+      inputHasMarketplace ? plugin : foundPlugin.name,
+    ]
+    // densable: pick first candidate whose V2 install matches scope+projectPath
     pluginId =
-      Object.keys(settings?.enabledPlugins ?? {}).find(
-        k =>
-          k === plugin ||
-          k === foundPlugin.name ||
-          k.startsWith(`${foundPlugin.name}@`),
-      ) ?? (plugin.includes('@') ? plugin : foundPlugin.name)
+      candidates.find(L => {
+        const N = findPluginKeyCaseInsensitive(installedKeys, L) ?? L
+        return (installedData.plugins[N] ?? []).some(
+          $ => $.scope === scope && $.projectPath === projectPath,
+        )
+      }) ?? candidates[0]!
     pluginName = foundPlugin.name
   } else {
-    // Plugin not found via marketplace lookup — it may have been delisted.
-    // Fall back to installed_plugins.json (V2) which tracks installations
-    // independently of marketplace state.
-    const resolved = resolveDelistedPluginId(plugin)
+    // densable wu_ delisted fallback (scope+project aware)
+    const resolved = resolveDelistedPluginId(plugin, scope, projectPath)
     if (!resolved) {
       return {
         success: false,
@@ -470,9 +518,10 @@ export async function uninstallPluginOp(
     pluginName = resolved.pluginName
   }
 
+  // densable: u = are(f, u) ?? u  — normalize to installed key casing
+  pluginId = findPluginKeyCaseInsensitive(installedKeys, pluginId) ?? pluginId
+
   // Check if the plugin is installed in this scope (in V2 file)
-  const projectPath = getProjectPathForScope(scope)
-  const installedData = loadInstalledPluginsV2()
   const installations = installedData.plugins[pluginId]
   const scopeInstallation = installations?.find(
     i => i.scope === scope && i.projectPath === projectPath,

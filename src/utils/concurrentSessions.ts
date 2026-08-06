@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle'
 import { chmod, mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {
+  getAttacherCaps,
   getOriginalCwd,
   getSessionId,
   onSessionSwitch,
@@ -44,6 +45,32 @@ function envSessionKind(): SessionKind | undefined {
 export function isBgSession(): boolean {
   return envSessionKind() === 'bg'
 }
+
+/**
+ * densable Pte() = ts() && !uE()
+ *   ts = SESSION_KIND === 'bg'
+ *   uE = attacherCaps truthy (terminal attached via attach / agent-view)
+ *
+ * Interactive panels that need a TTY (MCP OAuth, /mcp settings,
+ * /install-github-app) refuse when this is true; agent-view attach sets
+ * caps so the same commands work after attach (#32).
+ */
+export function isBgSessionWithoutTerminal(): boolean {
+  if (!isBgSession()) return false
+  return !getAttacherCaps()
+}
+
+/** densable KGo — MCP OAuth while bg has no attached terminal. */
+export const BG_NO_TERMINAL_MCP_AUTH_MSG =
+  "Can't authenticate MCP servers while no terminal is attached to this background session. Attach to it and try again."
+
+/** densable uYp — /mcp panel while bg has no attached terminal. */
+export const BG_NO_TERMINAL_MCP_SETTINGS_MSG =
+  "Can't open MCP settings while no terminal is attached to this background session. Attach to it and run /mcp again, or use `/mcp enable|disable|reconnect <server>` to steer without the panel."
+
+/** densable install-github-app entry refuse. */
+export const BG_NO_TERMINAL_INSTALL_GITHUB_APP_MSG =
+  "Can't run /install-github-app while no terminal is attached to this background session. Attach to it and run the command again."
 
 /**
  * Write a PID file for this session and register cleanup.

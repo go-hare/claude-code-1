@@ -4,6 +4,7 @@ import { useMemo, useRef } from 'react';
 import { Box, Text, useAnimationFrame, stringWidth, Byline, ProgressBar } from '@anthropic/ink';
 import { toInkColor } from '../../utils/ink.js';
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js';
+import { remainingRetryMs, type RetryStatus } from '../../utils/advisorNetworkStall.js';
 import { formatDuration, formatNumber } from '../../utils/format.js';
 
 import type { Theme } from '../../utils/theme.js';
@@ -61,6 +62,11 @@ export type SpinnerAnimationRowProps = {
   // Thinking (state owned by parent, mode-dependent)
   thinkingStatus: 'thinking' | number | null;
   effortSuffix: string;
+  /**
+   * densable 2.1.214 #39 / Msn — when set, replaces the verb row with
+   * stalled or error retry countdown.
+   */
+  retryStatus?: RetryStatus | null;
 };
 
 /**
@@ -95,8 +101,10 @@ export function SpinnerAnimationRow({
   leaderIsIdle = false,
   thinkingStatus,
   effortSuffix,
+  retryStatus = null,
 }: SpinnerAnimationRowProps): React.ReactNode {
-  const [viewportRef, time] = useAnimationFrame(reducedMotion ? null : 50);
+  // densable Msn always animates countdown; keep the 50ms clock when status is set.
+  const [viewportRef, time] = useAnimationFrame(reducedMotion && !retryStatus ? null : 50);
 
   // === Elapsed time (wall-clock, derived from refs each frame) ===
   const now = Date.now();
@@ -292,6 +300,51 @@ export function SpinnerAnimationRow({
   const isCompacting = compactProgressActiveRef?.current === true;
   const compactRatio = isCompacting ? 1 - Math.exp(-leaderTokens / 1200) : 0;
   const compactBarWidth = Math.max(10, Math.min(30, columns - 20));
+
+  // densable Msn(status) — replaces verb/glimmer row when retryStatus is set.
+  // void time keeps the 50ms clock subscribed so the countdown ticks live.
+  if (retryStatus) {
+    void time;
+    const remainMs = remainingRetryMs(retryStatus.deadline);
+    const mostSignificantOnly = remainMs >= 300_000;
+    const countdown = formatDuration(remainMs, { mostSignificantOnly });
+    const errorMark = (
+      <Box aria-hidden flexWrap="wrap" height={1} width={2}>
+        <Text color="error">{figures.cross}</Text>
+      </Box>
+    );
+    if (retryStatus.kind === 'stalled') {
+      return (
+        <Box ref={viewportRef} flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
+          {errorMark}
+          <Box flexShrink={1}>
+            <Text color="error">Waiting for API response</Text>
+            <Text dimColor>
+              {' · will retry in '}
+              {countdown}
+              {' · check your network'}
+            </Text>
+          </Box>
+        </Box>
+      );
+    }
+    // densable error path: " · Retrying in {n} · attempt a/b"
+    const rateLimits = (retryStatus.error as { rateLimits?: { resetsAt?: number } } | undefined)?.rateLimits;
+    const resetsSuffix =
+      rateLimits?.resetsAt != null
+        ? ` (${formatDuration(Math.max(0, rateLimits.resetsAt * 1000 - Date.now()), { mostSignificantOnly: true })})`
+        : '';
+    return (
+      <Box ref={viewportRef} flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
+        {errorMark}
+        <Box flexShrink={1}>
+          <Text dimColor>
+            {` · Retrying in ${countdown}${resetsSuffix} · attempt ${retryStatus.attempt}/${retryStatus.maxRetries}`}
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
 
   const spinnerRow = (
     <Box ref={viewportRef} flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">

@@ -135,6 +135,49 @@ export type FsOperations = {
  * @param filePath The path to resolve
  * @returns Object containing the resolved path and whether it was a symlink
  */
+/**
+ * densable `qvl` — refuse non-files and oversize paths before a full read.
+ * Throws ErrnoException-shaped errors:
+ *   - EISDIR when path is a directory
+ *   - ERR_NOT_REGULAR_FILE when path is a device/FIFO/socket/etc.
+ *   - ERR_FILE_TOO_LARGE when size > maxBytes (when maxBytes is set)
+ */
+export function assertRegularFileWithinMaxBytes(
+  fs: FsOperations,
+  filePath: string,
+  maxBytes?: number,
+): void {
+  const stats = fs.statSync(filePath)
+  if (stats.isDirectory()) {
+    throw Object.assign(
+      new Error('EISDIR: illegal operation on a directory, read'),
+      {
+        code: 'EISDIR',
+        errno: -21,
+        syscall: 'read',
+        path: filePath,
+      },
+    )
+  }
+  if (!stats.isFile()) {
+    throw Object.assign(
+      new Error('Not a regular file (device, FIFO, or socket)'),
+      {
+        code: 'ERR_NOT_REGULAR_FILE',
+        path: filePath,
+      },
+    )
+  }
+  if (maxBytes !== undefined && stats.size > maxBytes) {
+    throw Object.assign(new Error('File exceeds maxBytes limit'), {
+      code: 'ERR_FILE_TOO_LARGE',
+      path: filePath,
+      size: stats.size,
+      maxBytes,
+    })
+  }
+}
+
 export function safeResolvePath(
   fs: FsOperations,
   filePath: string,

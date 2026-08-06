@@ -16,7 +16,7 @@ import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
-import { countLinesChanged } from 'src/utils/diff.js'
+import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
 import { isBareMode, isEnvTruthy } from 'src/utils/envUtils.js'
 import { isENOENT } from 'src/utils/errors.js'
 import {
@@ -26,6 +26,10 @@ import {
   suggestPathUnderCwd,
   writeTextContent,
 } from 'src/utils/file.js'
+import {
+  fileStateContentMatches,
+  isFullEnoughFileRead,
+} from 'src/utils/fileStateCache.js'
 import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
@@ -39,13 +43,14 @@ import { formatFileSize } from 'src/utils/format.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
 import { logError } from 'src/utils/log.js'
+import { stampNewMemoryContent } from 'src/memdir/stampNewMemoryContent.js'
 import { expandPath } from 'src/utils/path.js'
 import {
   checkWritePermissionForTool,
   matchingRuleForInput,
+  matchesPathRule,
 } from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
-import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
 import { validateInputForSettingsFileEdit } from 'src/utils/settings/validateEditTool.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.js'
 import {
@@ -134,7 +139,8 @@ export const FileEditTool = buildTool({
     }
   },
   async preparePermissionMatcher({ file_path }) {
-    return pattern => matchWildcardPattern(pattern, file_path)
+    // densable hqe: allow-style single-segment dir/** is cwd-only (#44)
+    return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
     const appState = context.getAppState()
@@ -302,28 +308,41 @@ export const FileEditTool = buildTool({
       }
     }
 
+    // densable: !p || p.isPartialView → "File has not been read yet" (errorCode 6)
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
+    if (!readTimestamp || readTimestamp.isPartialView) {
+      logEvent('tengu_edit_tool_not_read_hypothetical', {
+        isPartialView: readTimestamp?.isPartialView === true,
+        isFilePathAbsolute: isAbsolute(file_path),
+      })
+      return {
+        result: false,
+        behavior: 'ask',
+        message:
+          'File has not been read yet. Read it first before writing to it.',
+        meta: {
+          isFilePathAbsolute: String(isAbsolute(file_path)),
+        },
+        errorCode: 6,
+      }
+    }
 
-    // Check if file exists and get its last modified time
-    if (readTimestamp) {
-      const lastWriteTime = getFileModificationTime(fullFilePath)
-      if (lastWriteTime > readTimestamp.timestamp) {
-        // Timestamp indicates modification, but on Windows timestamps can change
-        // without content changes (cloud sync, antivirus, etc.). For full reads,
-        // compare content as a fallback to avoid false positives.
-        const isFullRead =
-          readTimestamp.offset === undefined &&
-          readTimestamp.limit === undefined
-        if (isFullRead && fileContent === readTimestamp.content) {
-          // Content unchanged, safe to proceed
-        } else {
-          return {
-            result: false,
-            behavior: 'ask',
-            message:
-              'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-            errorCode: 7,
-          }
+    // densable: mtime > timestamp → HOe (full-enough) && xOe (content) bypass, else stale errorCode 7
+    const lastWriteTime = getFileModificationTime(fullFilePath)
+    if (lastWriteTime > readTimestamp.timestamp) {
+      if (
+        !(
+          isFullEnoughFileRead(readTimestamp) &&
+          fileStateContentMatches(readTimestamp, fileContent)
+        )
+      ) {
+        logEvent('tengu_edit_tool_stale_read', {})
+        return {
+          result: false,
+          behavior: 'ask',
+          message:
+            'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+          errorCode: 7,
         }
       }
     }
@@ -477,19 +496,17 @@ export const FileEditTool = buildTool({
     if (fileExists) {
       const lastWriteTime = getFileModificationTime(absoluteFilePath)
       const lastRead = readFileState.get(absoluteFilePath)
-      if (!lastRead || lastWriteTime > lastRead.timestamp) {
-        // Timestamp indicates modification, but on Windows timestamps can change
-        // without content changes (cloud sync, antivirus, etc.). For full reads,
-        // compare content as a fallback to avoid false positives.
-        const isFullRead =
-          lastRead &&
-          lastRead.offset === undefined &&
-          lastRead.limit === undefined
-        const contentUnchanged =
-          isFullRead && originalFileContents === lastRead.content
-        if (!contentUnchanged) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
-        }
+      // densable call-path: missing/partial read or stale mtime without HOe+xOe
+      if (
+        !lastRead ||
+        lastRead.isPartialView ||
+        (lastWriteTime > lastRead.timestamp &&
+          !(
+            isFullEnoughFileRead(lastRead) &&
+            fileStateContentMatches(lastRead, originalFileContents)
+          ))
+      ) {
+        throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
       }
     }
 
@@ -498,13 +515,31 @@ export const FileEditTool = buildTool({
       findActualString(originalFileContents, old_string) || old_string
 
     // 4. Generate patch
-    const { patch, updatedFile } = getPatchForEdit({
+    const { patch, updatedFile: editedFile } = getPatchForEdit({
       filePath: absoluteFilePath,
       fileContents: originalFileContents,
       oldString: actualOldString,
       newString: new_string,
       replaceAll: replace_all,
     })
+
+    // densable Zto after edit — stamp memdir .md modified/provenance
+    const updatedFile = stampNewMemoryContent(absoluteFilePath, editedFile)
+    const memdirStamped = updatedFile !== editedFile
+    // densable: when stamped, recompute patch from oldContent→stamped (Ast)
+    const patchForDisplay = !memdirStamped
+      ? patch
+      : getPatchForDisplay({
+          filePath: absoluteFilePath,
+          fileContents: originalFileContents,
+          edits: [
+            {
+              old_string: originalFileContents,
+              new_string: updatedFile,
+              replace_all: false,
+            },
+          ],
+        })
 
     // 5. Write to disk
     writeTextContent(absoluteFilePath, updatedFile, encoding, endings)
@@ -547,7 +582,7 @@ export const FileEditTool = buildTool({
     if (absoluteFilePath.endsWith(`${sep}CLAUDE.md`)) {
       logEvent('tengu_write_claudemd', {})
     }
-    countLinesChanged(patch)
+    countLinesChanged(patchForDisplay)
 
     logFileOperation({
       operation: 'edit',
@@ -592,7 +627,7 @@ export const FileEditTool = buildTool({
       oldString: actualOldString,
       newString: new_string,
       originalFile: originalFileContents,
-      structuredPatch: patch,
+      structuredPatch: patchForDisplay,
       userModified: userModified ?? false,
       replaceAll: replace_all,
       ...(gitDiff && { gitDiff }),

@@ -68,6 +68,11 @@ type Props = {
   hasActiveTools?: boolean;
   /** Leader's turn has completed (no active query). Used to suppress stall-red spinner when only teammates are running. */
   leaderIsIdle?: boolean;
+  /**
+   * densable 2.1.214 #39 retryStatus — when set, SpinnerAnimationRow shows
+   * Msn-style stalled / retry countdown instead of the normal verb row.
+   */
+  retryStatus?: import('../utils/advisorNetworkStall.js').RetryStatus | null;
 };
 
 // Thin wrapper: branches on isBriefOnly so the two variants have independent
@@ -115,6 +120,7 @@ function SpinnerWithVerbInner({
   compactProgressActiveRef,
   hasActiveTools = false,
   leaderIsIdle = false,
+  retryStatus = null,
 }: Props): React.ReactNode {
   const settings = useSettings();
   const reducedMotion = settings.prefersReducedMotion ?? false;
@@ -363,6 +369,7 @@ function SpinnerWithVerbInner({
         leaderIsIdle={leaderIsIdle}
         thinkingStatus={thinkingStatus}
         effortSuffix={effortSuffix}
+        retryStatus={retryStatus}
       />
       {showSpinnerTree && hasRunningTeammates ? (
         <TeammateSpinnerTree

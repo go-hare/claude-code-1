@@ -39,6 +39,7 @@ import type { BashToolInput } from '@claude-code/builtin-tools/tools/BashTool/Ba
 import { startSpeculativeClassifierCheck } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { FILE_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileEditTool/constants.js'
+import { getTokenCapBanner } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/NotebookEditTool/constants.js'
@@ -91,6 +92,8 @@ import {
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { Stream } from '../../utils/stream.js'
 import { logOTelEvent } from '../../utils/telemetry/events.js'
+import { toolSourceAttributes } from '../../utils/telemetry/toolSource.js'
+import { startToolHeartbeat } from '../../utils/toolHeartbeat.js'
 import {
   addToolContentEvent,
   endToolBlockedOnUserSpan,
@@ -841,6 +844,29 @@ async function checkPermissionsAndCallTool(
   let hookPermissionResult: PermissionResult | undefined
   const preToolHookInfos: StopHookInfo[] = []
   const preToolHookStart = Date.now()
+  /**
+   * densable `LKr`: emit PreToolUse `hook_stopped_continuation` so query.ts
+   * sets shouldPreventContinuation even when the tool fails, is denied, or
+   * stops mid-stream. Without this attachment the halt from `continue:false`
+   * is dropped after non-success paths.
+   */
+  const pushPreToolUsePreventContinuation = (message: string): void => {
+    if (
+      !shouldPreventContinuation ||
+      toolUseContext.abortController.signal.aborted
+    ) {
+      return
+    }
+    resultingMessages.push({
+      message: createAttachmentMessage({
+        type: 'hook_stopped_continuation',
+        message,
+        hookName: `PreToolUse:${tool.name}`,
+        toolUseID: toolUseID,
+        hookEvent: 'PreToolUse',
+      }),
+    })
+  }
   for await (const result of runPreToolUseHooks(
     toolUseContext,
     tool,
@@ -889,19 +915,40 @@ async function checkPermissionsAndCallTool(
       case 'additionalContext':
         resultingMessages.push(result.message)
         break
-      case 'stop':
+      case 'stop': {
+        // densable: stop may carry stopReason (ZFu infra default or continue:false)
         getStatsStore()?.observe(
           'pre_tool_hook_duration_ms',
           Date.now() - preToolHookStart,
         )
+        // densable: oe=ae.stopReason??R
+        const eventStopReason =
+          'stopReason' in result && typeof result.stopReason === 'string'
+            ? result.stopReason
+            : undefined
+        const oe = eventStopReason ?? stopReason
+        if (eventStopReason) {
+          stopReason = eventStopReason
+        }
+        // densable MKr: tool_result stop message; content overridden by stopReason
+        const stopContent = createToolResultStopMessage(toolUseID)
+        if (oe) {
+          stopContent.content = oe
+        }
         resultingMessages.push({
           message: createUserMessage({
-            content: [createToolResultStopMessage(toolUseID)],
-            toolUseResult: `Error: ${stopReason}`,
+            content: [stopContent],
+            toolUseResult: oe ? `Error: ${oe}` : CANCEL_MESSAGE,
             sourceToolAssistantUUID: assistantMessage.uuid,
           }),
         })
+        // densable: I&&ae.stopReason&&!aborted → LKr
+        // Infra ZFu alone does NOT set I — only continue:false does.
+        if (shouldPreventContinuation && eventStopReason) {
+          pushPreToolUsePreventContinuation(oe || 'Execution stopped by hook')
+        }
         return resultingMessages
+      }
     }
   }
   const preToolHookDurationMs = Date.now() - preToolHookStart
@@ -1003,10 +1050,19 @@ async function checkPermissionsAndCallTool(
       permissionDecision.decisionReason,
       permissionDecision.behavior,
     )
+    // densable u8n(e.mcpInfo) → tool_source; also tool_use_id
     void logOTelEvent('tool_decision', {
       decision,
       source,
       tool_name: sanitizeToolNameForAnalytics(tool.name),
+      tool_use_id: toolUseID,
+      ...toolSourceAttributes(
+        tool.mcpInfo
+          ? {
+              serverType: mcpServerType,
+            }
+          : undefined,
+      ),
     })
 
     // Increment code-edit tool decision counter for headless mode
@@ -1113,6 +1169,17 @@ async function checkPermissionsAndCallTool(
         sourceToolAssistantUUID: assistantMessage.uuid,
       }),
     })
+
+    // densable: I&&U.behavior==="deny"&&U.decisionReason.type==="hook"&&!aborted → LKr
+    // Preserves continue:false halt when PreToolUse both denies and stops.
+    if (
+      permissionDecision.behavior === 'deny' &&
+      permissionDecision.decisionReason?.type === 'hook'
+    ) {
+      pushPreToolUsePreventContinuation(
+        stopReason ?? errorMessage ?? 'Execution stopped by hook',
+      )
+    }
 
     // Run PermissionDenied hooks for auto mode classifier denials.
     // If a hook returns {retry: true}, tell the model it may retry.
@@ -1257,6 +1324,22 @@ async function checkPermissionsAndCallTool(
   } else if (processedInput !== backfilledClone) {
     callInput = processedInput
   }
+  // densable: agentId?()=>{}:_Lu(...) — nested agent contexts skip heartbeat;
+  // _Lu itself also no-ops when toolName===Agent. Cleanup in finally.
+  const stopToolHeartbeat = toolUseContext.agentId
+    ? () => {}
+    : startToolHeartbeat({
+        toolName: tool.name,
+        toolUseID,
+        abortSignal: toolUseContext.abortController.signal,
+        onProgress: progress => {
+          onToolProgress({
+            toolUseID: progress.toolUseID,
+            data: progress.data,
+          })
+        },
+      })
+
   try {
     // AC1 parity: wrap the single canonical tool.call site with deterministic
     // tool-event observation hooks (codex review follow-up). Hooks are
@@ -1565,6 +1648,25 @@ async function checkPermissionsAndCallTool(
       await addToolResult(toolOutput, mappedToolResultBlock)
     }
 
+    // densable: after mapToolResult, XAu(Read data) → read_truncation_notice
+    // attachment (before PostToolUse Pe / newMessages for non-MCP).
+    if (
+      tool.name === FILE_READ_TOOL_NAME &&
+      result.data &&
+      typeof result.data === 'object'
+    ) {
+      const banner = getTokenCapBanner(result.data as object)
+      if (banner !== undefined) {
+        resultingMessages.push({
+          message: createAttachmentMessage({
+            type: 'read_truncation_notice',
+            banner,
+            toolUseID,
+          }),
+        })
+      }
+    }
+
     const postToolHookInfos: StopHookInfo[] = []
     const postToolHookStart = Date.now()
     for await (const hookResult of runPostToolUseHooks(
@@ -1655,18 +1757,8 @@ async function checkPermissionsAndCallTool(
         resultingMessages.push({ message })
       }
     }
-    // If hook indicated to prevent continuation after successful execution, yield a stop reason message
-    if (shouldPreventContinuation) {
-      resultingMessages.push({
-        message: createAttachmentMessage({
-          type: 'hook_stopped_continuation',
-          message: stopReason || 'Execution stopped by hook',
-          hookName: `PreToolUse:${tool.name}`,
-          toolUseID: toolUseID,
-          hookEvent: 'PreToolUse',
-        }),
-      })
-    }
+    // densable success path: I&&!aborted → LKr
+    pushPreToolUsePreventContinuation(stopReason || 'Execution stopped by hook')
 
     // Yield the remaining hook results after the other messages are sent
     for (const hookResult of hookResults) {
@@ -1810,7 +1902,10 @@ async function checkPermissionsAndCallTool(
       hookMessages.push(hookResult)
     }
 
-    return [
+    // densable catch: after error tool_result + PostToolUseFailure hooks,
+    // still LKr when continue:false and not abort — halt must not be dropped
+    // when the tool fails mid-stream.
+    const errorMessages = [
       {
         message: createUserMessage({
           content: [
@@ -1833,7 +1928,24 @@ async function checkPermissionsAndCallTool(
       },
       ...hookMessages,
     ]
+    if (
+      shouldPreventContinuation &&
+      !isInterrupt &&
+      !toolUseContext.abortController.signal.aborted
+    ) {
+      errorMessages.push({
+        message: createAttachmentMessage({
+          type: 'hook_stopped_continuation',
+          message: stopReason || 'Execution stopped by hook',
+          hookName: `PreToolUse:${tool.name}`,
+          toolUseID: toolUseID,
+          hookEvent: 'PreToolUse',
+        }),
+      })
+    }
+    return errorMessages
   } finally {
+    stopToolHeartbeat()
     stopSessionActivity('tool_exec', sessionActivityAgentId)
     // Clean up decision info after logging
     if (decisionInfo) {

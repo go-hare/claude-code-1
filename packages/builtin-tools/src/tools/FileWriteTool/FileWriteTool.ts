@@ -1,4 +1,4 @@
-import { dirname, sep } from 'path'
+import { dirname, isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { z } from 'zod/v4'
@@ -22,6 +22,10 @@ import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { getFileModificationTime, writeTextContent } from 'src/utils/file.js'
 import {
+  fileStateContentMatches,
+  isFullEnoughFileRead,
+} from 'src/utils/fileStateCache.js'
+import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
 } from 'src/utils/fileHistory.js'
@@ -31,13 +35,14 @@ import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
+import { stampNewMemoryContent } from 'src/memdir/stampNewMemoryContent.js'
 import { expandPath } from 'src/utils/path.js'
 import {
   checkWritePermissionForTool,
   matchingRuleForInput,
+  matchesPathRule,
 } from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
-import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
 import { FILE_UNEXPECTEDLY_MODIFIED_ERROR } from '../FileEditTool/constants.js'
 import { gitDiffSchema, hunkSchema } from '../FileEditTool/types.js'
 import { FILE_WRITE_TOOL_NAME, getWriteToolDescription } from './prompt.js'
@@ -128,7 +133,8 @@ export const FileWriteTool = buildTool({
     }
   },
   async preparePermissionMatcher({ file_path }) {
-    return pattern => matchWildcardPattern(pattern, file_path)
+    // densable hqe: allow-style single-segment dir/** is cwd-only (#44)
+    return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
     const appState = context.getAppState()
@@ -207,13 +213,50 @@ export const FileWriteTool = buildTool({
       throw e
     }
 
+    // densable Write: existing file requires prior non-partial read (errorCode 2);
+    // stale mtime uses HOe+xOe content equality bypass (errorCode 3).
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
+    if (!readTimestamp || readTimestamp.isPartialView) {
+      logEvent('tengu_write_tool_not_read_hypothetical', {
+        isPartialView: readTimestamp?.isPartialView === true,
+        isFilePathAbsolute: isAbsolute(fullFilePath),
+      })
+      // densable velvet_mallet: only skip when completely unread (not partial)
+      // and GB flag is on. Default false → enforce not-read gate.
+      const velvetMallet =
+        !readTimestamp &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvet_mallet', false)
+      if (!velvetMallet) {
+        return {
+          result: false,
+          message:
+            'File has not been read yet. Read it first before writing to it.',
+          errorCode: 2,
+        }
+      }
+      return validateCoordinatorWriteAccess({
+        filePath: fullFilePath,
+        sourceTool: 'FileWriteTool',
+      })
+    }
 
     // Reuse mtime from the stat above — avoids a redundant statSync via
     // getFileModificationTime.
-    if (readTimestamp) {
-      const lastWriteTime = Math.floor(fileMtimeMs)
-      if (lastWriteTime > readTimestamp.timestamp) {
+    const lastWriteTime = Math.floor(fileMtimeMs)
+    if (lastWriteTime > readTimestamp.timestamp) {
+      let contentUnchanged = false
+      if (isFullEnoughFileRead(readTimestamp)) {
+        try {
+          const fileBuffer = await fs.readFileBytes(fullFilePath)
+          const diskContent = fileBuffer
+            .toString('utf8')
+            .replaceAll('\r\n', '\n')
+          contentUnchanged = fileStateContentMatches(readTimestamp, diskContent)
+        } catch {
+          contentUnchanged = false
+        }
+      }
+      if (!contentUnchanged) {
         return {
           result: false,
           message:
@@ -287,30 +330,33 @@ export const FileWriteTool = buildTool({
     if (meta !== null) {
       const lastWriteTime = getFileModificationTime(fullFilePath)
       const lastRead = readFileState.get(fullFilePath)
-      if (!lastRead || lastWriteTime > lastRead.timestamp) {
-        // Timestamp indicates modification, but on Windows timestamps can change
-        // without content changes (cloud sync, antivirus, etc.). For full reads,
-        // compare content as a fallback to avoid false positives.
-        const isFullRead =
-          lastRead &&
-          lastRead.offset === undefined &&
-          lastRead.limit === undefined
-        // meta.content is CRLF-normalized — matches readFileState's normalized form.
-        if (!isFullRead || meta.content !== lastRead.content) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
-        }
+      // densable call-path: missing/partial or stale without HOe+xOe
+      if (
+        !lastRead ||
+        lastRead.isPartialView ||
+        (lastWriteTime > lastRead.timestamp &&
+          !(
+            isFullEnoughFileRead(lastRead) &&
+            fileStateContentMatches(lastRead, meta.content)
+          ))
+      ) {
+        throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
       }
     }
 
     const enc = meta?.encoding ?? 'utf8'
     const oldContent = meta?.content ?? null
 
+    // densable Zto: stamp auto-memory .md with originSessionId + ISO modified
+    // before disk (preserves inline # via quoteLossyValues / hRg).
+    const contentToWrite = stampNewMemoryContent(fullFilePath, content)
+
     // Write is a full content replacement — the model sent explicit line endings
     // in `content` and meant them. Do not rewrite them. Previously we preserved
     // the old file's line endings (or sampled the repo via ripgrep for new
     // files), which silently corrupted e.g. bash scripts with \r on Linux when
     // overwriting a CRLF file or when binaries in cwd poisoned the repo sample.
-    writeTextContent(fullFilePath, content, enc, 'LF')
+    writeTextContent(fullFilePath, contentToWrite, enc, 'LF')
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()
@@ -318,12 +364,14 @@ export const FileWriteTool = buildTool({
       // Clear previously delivered diagnostics so new ones will be shown
       clearDeliveredDiagnosticsForFile(`file://${fullFilePath}`)
       // didChange: Content has been modified
-      lspManager.changeFile(fullFilePath, content).catch((err: Error) => {
-        logForDebugging(
-          `LSP: Failed to notify server of file change for ${fullFilePath}: ${err.message}`,
-        )
-        logError(err)
-      })
+      lspManager
+        .changeFile(fullFilePath, contentToWrite)
+        .catch((err: Error) => {
+          logForDebugging(
+            `LSP: Failed to notify server of file change for ${fullFilePath}: ${err.message}`,
+          )
+          logError(err)
+        })
       // didSave: File has been saved to disk (triggers diagnostics in TypeScript server)
       lspManager.saveFile(fullFilePath).catch((err: Error) => {
         logForDebugging(
@@ -334,11 +382,11 @@ export const FileWriteTool = buildTool({
     }
 
     // Notify VSCode about the file change for diff view
-    notifyVscodeFileUpdated(fullFilePath, oldContent, content)
+    notifyVscodeFileUpdated(fullFilePath, oldContent, contentToWrite)
 
     // Update read timestamp, to invalidate stale writes
     readFileState.set(fullFilePath, {
-      content,
+      content: contentToWrite,
       timestamp: getFileModificationTime(fullFilePath),
       offset: undefined,
       limit: undefined,
@@ -381,7 +429,7 @@ export const FileWriteTool = buildTool({
         edits: [
           {
             old_string: oldContent,
-            new_string: content,
+            new_string: contentToWrite,
             replace_all: false,
           },
         ],
@@ -390,7 +438,7 @@ export const FileWriteTool = buildTool({
       const data = {
         type: 'update' as const,
         filePath: file_path,
-        content,
+        content: contentToWrite,
         structuredPatch: patch,
         originalFile: oldContent,
         ...(gitDiff && { gitDiff }),
@@ -413,14 +461,14 @@ export const FileWriteTool = buildTool({
     const data = {
       type: 'create' as const,
       filePath: file_path,
-      content,
+      content: contentToWrite,
       structuredPatch: [],
       originalFile: null,
       ...(gitDiff && { gitDiff }),
     }
 
     // For creation of new files, count all lines as additions, right before yielding the result
-    countLinesChanged([], content)
+    countLinesChanged([], contentToWrite)
 
     logFileOperation({
       operation: 'write',

@@ -194,9 +194,14 @@ const fullInputSchema = lazySchema(() => {
         'Name for the spawned agent. Makes it addressable via SendMessage({to: name}) while running. "main" is reserved — SendMessage routes it to the main conversation.',
       ),
     team_name: z.string().optional().describe('Team name for spawning. Uses current team context if omitted.'),
+    // densable 2.1.212: mode is accepted for schema compatibility but ignored.
+    // Subagents inherit the parent session permission mode; agent frontmatter
+    // may still override via selectedAgent.permissionMode.
     mode: permissionModeSchema()
       .optional()
-      .describe('Permission mode for spawned teammate (e.g., "plan" to require plan approval).'),
+      .describe(
+        "Deprecated; ignored. Subagents inherit the parent session's permission mode; agent-definition frontmatter may override it.",
+      ),
   });
 
   return baseInputSchema()
@@ -369,7 +374,7 @@ export const AgentTool = buildTool({
       owned_files,
       name,
       team_name,
-      mode: spawnMode,
+      mode: _deprecatedSpawnMode,
       isolation,
       cwd,
     }: AgentToolInput,
@@ -381,8 +386,22 @@ export const AgentTool = buildTool({
     const startTime = Date.now();
     const model = isCoordinatorMode() ? undefined : modelParam;
 
+    // densable 2.1.212 #42: Task/Agent `mode` param is deprecated and ignored.
+    // Keep the field on the schema so old tool calls still validate, but never
+    // read `_deprecatedSpawnMode` — parent session mode + agent frontmatter win.
+    void _deprecatedSpawnMode;
+
     // Get app state for permission mode and agent filtering
     const appState = toolUseContext.getAppState();
+    // densable 2.1.214: refuse Agent/fork launch after EndConversation
+    // (spawnForkFromDirective → subagent_fork_ended_by_model).
+    if (appState.endedByModel) {
+      const { END_CONVERSATION_SESSION_ENDED_MESSAGE } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../EndConversationTool/prompt.js') as typeof import('../EndConversationTool/prompt.js');
+      throw new Error(END_CONVERSATION_SESSION_ENDED_MESSAGE);
+    }
+    // densable `_ = y.mode` — parent session permission mode
     const permissionMode = appState.toolPermissionContext.mode;
     // In-process teammates get a no-op setAppState; setAppStateForTasks
     // reaches the root store so task registration/progress/kill stay visible.
@@ -442,7 +461,9 @@ export const AgentTool = buildTool({
           description,
           team_name: teamName,
           use_splitpane: true,
-          plan_mode_required: spawnMode === 'plan',
+          // densable: plan_mode_required:_==="plan" where _ is parent session mode
+          // (input `mode` is deprecated/ignored).
+          plan_mode_required: permissionMode === 'plan',
           model: model ?? agentDef?.model,
           agent_type: subagent_type,
           invokingRequestId: assistantMessage?.requestId as string | undefined,
@@ -835,14 +856,13 @@ export const AgentTool = buildTool({
         (proactiveModule?.isProactiveActive() ?? false) ||
         (!isInProcessTeammate() && run_in_background !== false)) &&
       !isBackgroundTasksDisabled;
-    // Assemble the worker's tool pool independently of the parent's.
-    // Workers always get their tools from assembleToolPool with their own
-    // permission mode, so they aren't affected by the parent's tool
-    // restrictions. This is computed here so that runAgent doesn't need to
-    // import from tools.ts (which would create a circular dependency).
+    // densable `ie={...y,mode:$.permissionMode??_}`:
+    // worker tool pool uses agent-definition frontmatter permissionMode, else
+    // inherits the parent session mode `_` (not hard-coded acceptEdits).
+    // Input `mode` is ignored (#42).
     const workerPermissionContext = {
       ...appState.toolPermissionContext,
-      mode: selectedAgent.permissionMode ?? 'acceptEdits',
+      mode: selectedAgent.permissionMode ?? permissionMode,
     };
     const workerTools = assembleToolPool(workerPermissionContext, appState.mcp.tools);
 
@@ -1888,7 +1908,8 @@ export const AgentTool = buildTool({
   },
   toAutoClassifierInput(input) {
     const i = input as AgentToolInput;
-    const tags = [i.subagent_type, i.mode ? `mode=${i.mode}` : undefined].filter((t): t is string => t !== undefined);
+    // densable #42: mode is deprecated/ignored — do not surface as a tag.
+    const tags = [i.subagent_type].filter((t): t is string => t !== undefined);
     const prefix = tags.length > 0 ? `(${tags.join(', ')}): ` : ': ';
     return `${prefix}${i.prompt}`;
   },

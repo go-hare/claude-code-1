@@ -68,11 +68,22 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
       return <MCPReconnect serverName={parts.slice(1).join(' ')} onComplete={onDone} />;
     }
 
+    // densable: enable/disable stay available without terminal (steer without panel)
     if (parts[0] === 'enable' || parts[0] === 'disable') {
       return (
         <MCPToggle action={parts[0]} target={parts.length > 1 ? parts.slice(1).join(' ') : 'all'} onComplete={onDone} />
       );
     }
+  }
+
+  // densable Pte: refuse interactive MCP settings panel when bg has no attacher.
+  // enable/disable/reconnect above still work (steer without the panel).
+  const { isBgSessionWithoutTerminal, BG_NO_TERMINAL_MCP_SETTINGS_MSG } = await import(
+    '../../utils/concurrentSessions.js'
+  );
+  if (isBgSessionWithoutTerminal()) {
+    onDone(BG_NO_TERMINAL_MCP_SETTINGS_MSG, { display: 'system' });
+    return null;
   }
 
   // Redirect base /mcp command to /plugins installed tab for ant users

@@ -374,7 +374,7 @@ export function logAPIError({
     ...getAnthropicEnvMetadata(),
   })
 
-  // Log API error event for OTLP
+  // Log API error event for OTLP (densable: client_request_id)
   void logOTelEvent('api_error', {
     model: model,
     error: errStr,
@@ -382,6 +382,9 @@ export function logAPIError({
     duration_ms: String(durationMs),
     attempt: String(attempt),
     speed: fastMode ? 'fast' : 'normal',
+    ...(requestId ? { request_id: requestId } : {}),
+    ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
+    ...(querySource ? { query_source: querySource } : {}),
   })
 
   // Pass the span to correctly match responses to requests when beta tracing is enabled
@@ -599,6 +602,7 @@ export function logAPISuccessAndDuration({
   messageCount,
   messageTokens,
   requestId,
+  clientRequestId,
   stopReason,
   didFallBackToNonStreaming,
   querySource,
@@ -625,6 +629,8 @@ export function logAPISuccessAndDuration({
   messageCount: number
   messageTokens: number
   requestId: string | null
+  /** densable client_request_id on api_request / assistant_response OTel */
+  clientRequestId?: string
   stopReason: BetaStopReason | null
   didFallBackToNonStreaming: boolean
   querySource: string
@@ -733,7 +739,7 @@ export function logAPISuccessAndDuration({
     previousRequestId,
     betas,
   })
-  // Log API request event for OTLP
+  // Log API request event for OTLP (densable: client_request_id)
   void logOTelEvent('api_request', {
     model,
     input_tokens: String(usage.input_tokens),
@@ -744,11 +750,13 @@ export function logAPISuccessAndDuration({
     duration_ms: String(durationMs),
     speed: fastMode ? 'fast' : 'normal',
     ...(requestId ? { request_id: requestId } : {}),
+    ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
     ...(querySource ? { query_source: querySource } : {}),
   })
 
   // Official 208: ou("assistant_response", …) after api_request when text present.
-  // Gate: OTEL_LOG_ASSISTANT_RESPONSES ?? OTEL_LOG_USER_PROMPTS (xkc); body WU-truncated.
+  // densable 214: message.uuid = last assistant message uuid; body W1-truncated.
+  // Gate: OTEL_LOG_ASSISTANT_RESPONSES ?? OTEL_LOG_USER_PROMPTS (xkc).
   if (newMessages) {
     const assistantText = newMessages
       .flatMap(m => {
@@ -760,11 +768,14 @@ export function logAPISuccessAndDuration({
       })
       .join('\n')
     if (assistantText) {
+      const lastUuid = newMessages.at(-1)?.uuid
       void logOTelEvent('assistant_response', {
         response_length: String(assistantText.length),
         response: formatAssistantResponseForOTel(assistantText),
         model,
         ...(requestId ? { request_id: requestId } : {}),
+        ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
+        ...(lastUuid ? { 'message.uuid': lastUuid } : {}),
         ...(querySource ? { query_source: querySource } : {}),
       })
     }

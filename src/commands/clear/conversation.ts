@@ -214,6 +214,11 @@ export async function clearConversation({
         attribution: createEmptyAttributionState(),
         // densable session_start: clear clickable image path map
         storedImagePaths: new Map(),
+        // densable 2.1.212 #17: /clear must re-prompt ultrareview overage
+        // (AppState.ultrareviewOverageConfirmed — not a module flag)
+        ultrareviewOverageConfirmed: false,
+        // densable 2.1.214: /clear resets EndConversation session lock
+        endedByModel: false,
         // Clear standalone agent context (name/color set by /rename, /color)
         // so the new session doesn't display the old session's identity badge
         standaloneAgentContext: undefined,

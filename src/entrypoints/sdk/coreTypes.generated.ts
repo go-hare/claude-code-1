@@ -147,7 +147,8 @@ export type HookInput =
   | (HookInputBase & { hook_event_name: 'UserPromptSubmit'; prompt: string })
   | (HookInputBase & {
       hook_event_name: 'SessionStart'
-      source: 'startup' | 'resume' | 'clear' | 'compact'
+      // densable 2.1.214 #47
+      source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork'
       agent_type?: string
       model?: string
     })
@@ -451,6 +452,8 @@ export type SDKToolProgressMessage = {
   type: 'tool_progress'
   tool_name?: string
   elapsed_time_seconds?: number
+  /** densable 214 tool_heartbeat twin yield */
+  heartbeat?: boolean
   uuid?: UUID
   tool_use_id?: string
   [key: string]: unknown

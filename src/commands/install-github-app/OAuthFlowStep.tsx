@@ -93,6 +93,19 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
     timersRef.current.forEach(timer => clearTimeout(timer));
     timersRef.current.clear();
 
+    // densable Stt(!0) — install-github-app always creates claude.ai long-lived token
+    const { INSTALL_GITHUB_APP_FORCE_LOGIN_REFUSED_SUFFIX, validateForcedLoginMethod } = await import(
+      '../../utils/forceLoginMethod.js'
+    );
+    const pin = validateForcedLoginMethod(true);
+    if (!pin.valid) {
+      setOAuthStatus({
+        state: 'error',
+        message: `${pin.message} ${INSTALL_GITHUB_APP_FORCE_LOGIN_REFUSED_SUFFIX}`,
+      });
+      return;
+    }
+
     try {
       const result = await oauthService.startOAuthFlow(
         async url => {

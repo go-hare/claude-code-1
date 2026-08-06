@@ -10,6 +10,10 @@
 
 import type { ProgressEvent } from '@claude-code/workflow-engine'
 import {
+  getIsNonInteractiveSession,
+  isReplBridgeActive,
+} from '../bootstrap/state.js'
+import {
   applyWorkflowProgressDeltas,
   setWorkflowDeclaredPhases,
 } from '../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
@@ -19,8 +23,22 @@ import { emitTaskProgress } from '../utils/task/sdkProgress.js'
 import type { ProgressBus } from './progress/bus.js'
 import type { ProgressStore } from './progress/store.js'
 
-/** densable C=16 — coalesce high-frequency agent_progress into one SDK frame. */
+/** densable HGg=16 — coalesce high-frequency agent_progress into one SDK frame. */
 export const WORKFLOW_TASK_PROGRESS_FLUSH_MS = 16
+
+/**
+ * densable xGg=250 — min spacing between SDK flushes when interactive+bridge
+ * (IGg rate-limit so bridge wire is not flooded).
+ */
+export const WORKFLOW_TASK_PROGRESS_MIN_SDK_GAP_MS = 250
+
+/**
+ * densable kGg=1e4 — when a batch is ONLY workflow_agent state:"progress"
+ * ticks, re-emit full workflowProgress snapshot at most every 10s so Remote
+ * Control clients that join mid-run can rebuild the agent grid without
+ * flooding on every token tick.
+ */
+export const WORKFLOW_TASK_PROGRESS_FULL_SNAPSHOT_MS = 10_000
 
 export type WorkflowTaskProgressBinding = {
   taskId: string
@@ -30,6 +48,14 @@ export type WorkflowTaskProgressBinding = {
   startTime: number
   /** densable tm8 writes into AppState.tasks[taskId].workflowProgress. */
   setAppState?: SetAppState
+  /**
+   * densable IGg rate-limit override:
+   * - `undefined` (production default): apply xGg when interactive **and**
+   *   `isReplBridgeActive()` (densable `!dn()&&FC()`)
+   * - `false`: force xGg (tests)
+   * - `true`: never rate-limit (tests / print flood OK)
+   */
+  rateLimitSdk?: boolean
 }
 
 type PhaseIndexMap = Map<string, number>
@@ -133,9 +159,9 @@ export function mapProgressEventToSdk(
         label: event.label,
         phaseIndex,
         phaseTitle: event.phase,
-        // densable keeps mid-flight updates on the same agent key; state stays
-        // non-terminal so clients upsert `${type}:${index}` as still running.
-        state: 'start',
+        // densable mid-flight tick uses state:"progress" (not start) so IGg
+        // can throttle full-snapshot SDK emits (every(k) === progress → kGg).
+        state: 'progress',
         tokens: event.tokenCount,
         toolCalls: event.toolCount,
         lastProgressAt: now,
@@ -214,6 +240,13 @@ export function installWorkflowTaskProgressBridge(
   const flushMs = opts.flushMs ?? WORKFLOW_TASK_PROGRESS_FLUSH_MS
   const emit = opts.emit ?? emitTaskProgress
   const buffers = new Map<string, RunBuffer>()
+  /** densable IGg last SDK emit time (for xGg gap when rate-limited). */
+  let lastSdkEmitAt = 0
+  /**
+   * densable j8r `x` — last time a full workflowProgress snapshot was attached
+   * for a progress-only batch (kGg throttle).
+   */
+  let lastFullSnapshotAt = 0
 
   const ensure = (runId: string): RunBuffer => {
     let b = buffers.get(runId)
@@ -229,7 +262,7 @@ export function installWorkflowTaskProgressBridge(
     return b
   }
 
-  const flushOne = (runId: string): void => {
+  const flushOne = (runId: string, force = false): void => {
     const buf = buffers.get(runId)
     if (!buf) return
     if (buf.timer !== undefined) {
@@ -237,15 +270,44 @@ export function installWorkflowTaskProgressBridge(
       buf.timer = undefined
     }
     if (buf.pending.length === 0) return
+
+    const binding = opts.getBinding(runId)
+    if (!binding) {
+      // Drop pending if binding vanished (task unregistered).
+      buf.pending = []
+      return
+    }
+
+    // densable IGg: `if(!i&&!dn()&&FC())` wait xGg between SDK flushes.
+    // force (run_done / dispose / forceFlush) always bypasses.
+    const densableRateLimit =
+      !getIsNonInteractiveSession() && isReplBridgeActive()
+    const applyRateLimit =
+      binding.rateLimitSdk === false
+        ? true
+        : binding.rateLimitSdk === true
+          ? false
+          : densableRateLimit
+    if (!force && applyRateLimit) {
+      const wait =
+        lastSdkEmitAt + WORKFLOW_TASK_PROGRESS_MIN_SDK_GAP_MS - Date.now()
+      if (wait > 0) {
+        buf.timer = setTimeout(() => {
+          buf.timer = undefined
+          flushOne(runId, false)
+        }, wait)
+        buf.timer.unref?.()
+        return
+      }
+    }
+
     const batch = buf.pending
     buf.pending = []
 
-    const binding = opts.getBinding(runId)
-    if (!binding) return
-
-    // densable tm8: always merge full batch (incl. logs) into task state first.
+    // densable tm8 / Vss: always merge full batch (incl. logs) into task state first.
     let totalTokens = 0
     let toolUses = 0
+    let taskProgressSnapshot: SdkWorkflowProgress[] | undefined
     if (binding.setAppState) {
       const applied = applyWorkflowProgressDeltas(
         binding.taskId,
@@ -255,6 +317,7 @@ export function installWorkflowTaskProgressBridge(
       if (applied) {
         totalTokens = applied.totalTokens
         toolUses = applied.totalToolCalls
+        taskProgressSnapshot = applied.workflowProgress
       }
     } else {
       // Fallback: store agents (tests / no AppState).
@@ -267,7 +330,7 @@ export function installWorkflowTaskProgressBridge(
       }
     }
 
-    // densable jrH: strip workflow_log from SDK payload (logs live on task only).
+    // densable UNu / jrH: strip workflow_log from SDK payload.
     const forSdk = batch.filter(item => item.type !== 'workflow_log')
     if (forSdk.length === 0) return
 
@@ -277,12 +340,34 @@ export function installWorkflowTaskProgressBridge(
       | Extract<SdkWorkflowProgress, { type: 'workflow_agent' }>
       | undefined
 
+    // densable j8r onSdkEmit: full snapshot when batch has non-progress items,
+    // or every kGg when batch is progress-only — so RC mid-join can rebuild grid.
+    const progressOnly = forSdk.every(
+      item => item.type === 'workflow_agent' && item.state === 'progress',
+    )
+    const now = Date.now()
+    const includeFullSnapshot =
+      !progressOnly ||
+      force ||
+      now - lastFullSnapshotAt >= WORKFLOW_TASK_PROGRESS_FULL_SNAPSHOT_MS
+    if (includeFullSnapshot) {
+      lastFullSnapshotAt = now
+    }
+
+    // densable: workflowProgress:q ? U.workflowProgress.filter(UNu) : void 0
+    // Prefer task-state cumulative snapshot; fall back to this batch's deltas.
+    const snapshotSource =
+      taskProgressSnapshot?.filter(item => item.type !== 'workflow_log') ??
+      forSdk
+    const workflowProgress = includeFullSnapshot ? snapshotSource : undefined
+
     const description = lastAgent
       ? lastAgent.phaseTitle
         ? `${lastAgent.phaseTitle}: ${lastAgent.label ?? `agent ${lastAgent.index}`}`
         : (lastAgent.label ?? binding.description)
       : binding.description
 
+    lastSdkEmitAt = now
     emit({
       taskId: binding.taskId,
       toolUseId: binding.toolUseId,
@@ -292,7 +377,7 @@ export function installWorkflowTaskProgressBridge(
       toolUses,
       lastToolName: lastAgent?.lastToolName ?? lastAgent?.label,
       summary: binding.summary ?? binding.description,
-      workflowProgress: forSdk,
+      workflowProgress,
     })
   }
 
@@ -301,7 +386,7 @@ export function installWorkflowTaskProgressBridge(
     if (buf.timer !== undefined) return
     buf.timer = setTimeout(() => {
       buf.timer = undefined
-      flushOne(runId)
+      flushOne(runId, false)
     }, flushMs)
     // Don't keep the process alive solely for progress frames.
     buf.timer.unref?.()
@@ -330,7 +415,7 @@ export function installWorkflowTaskProgressBridge(
     // Terminal run: force flush so Desktop sees a last progress frame before
     // task_notification (complete path deletes the binding).
     if (event.type === 'run_done') {
-      flushOne(runId)
+      flushOne(runId, true)
       buffers.delete(runId)
     }
   }
@@ -342,16 +427,16 @@ export function installWorkflowTaskProgressBridge(
       unsubscribe()
       for (const [runId, buf] of buffers) {
         if (buf.timer !== undefined) clearTimeout(buf.timer)
-        flushOne(runId)
+        flushOne(runId, true)
       }
       buffers.clear()
     },
     forceFlush: (runId?: string) => {
       if (runId) {
-        flushOne(runId)
+        flushOne(runId, true)
         return
       }
-      for (const id of [...buffers.keys()]) flushOne(id)
+      for (const id of [...buffers.keys()]) flushOne(id, true)
     },
   }
 }

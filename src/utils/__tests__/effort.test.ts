@@ -52,6 +52,7 @@ afterAll(() => {
 
 const {
   isEffortLevel,
+  transcriptEffortFromOutputConfig,
   parseEffortValue,
   parseEffortLevelString,
   parseCliEffortArg,
@@ -156,6 +157,35 @@ describe('isEffortLevel', () => {
 
   test('returns false for empty string', () => {
     expect(isEffortLevel('')).toBe(false)
+  })
+})
+
+// ─── densable 2.1.212 #44 transcript effort (Ie / MPe) ───────────────────
+
+describe('transcriptEffortFromOutputConfig (densable Ie)', () => {
+  test('records string wire levels (AR / MPe)', () => {
+    for (const level of EFFORT_LEVELS) {
+      expect(transcriptEffortFromOutputConfig({ effort: level })).toBe(level)
+    }
+  })
+
+  test('undefined when output_config.effort missing', () => {
+    expect(transcriptEffortFromOutputConfig({})).toBeUndefined()
+    expect(transcriptEffortFromOutputConfig(undefined)).toBeUndefined()
+    expect(transcriptEffortFromOutputConfig(null)).toBeUndefined()
+  })
+
+  test('numeric effort_override is NOT recorded (densable string-only)', () => {
+    // ant-only path writes anthropic_internal.effort_override, not output_config.effort
+    // even if a number sneaks into output_config.effort, densable typeof==="string" rejects it
+    expect(transcriptEffortFromOutputConfig({ effort: 42 })).toBeUndefined()
+  })
+
+  test('unknown / non-AR string is not recorded', () => {
+    expect(
+      transcriptEffortFromOutputConfig({ effort: 'ultracode' }),
+    ).toBeUndefined()
+    expect(transcriptEffortFromOutputConfig({ effort: 'auto' })).toBeUndefined()
   })
 })
 

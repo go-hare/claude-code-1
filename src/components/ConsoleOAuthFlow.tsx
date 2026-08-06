@@ -19,10 +19,12 @@ import { clearOpenAIClientCache } from '../services/api/openai/client.js';
 import { OAuthService } from '../services/oauth/index.js';
 import { getOauthAccountInfo, validateForceLoginOrg } from '../utils/auth.js';
 import { openBrowser } from '../utils/browser.js';
+import { resolveInteractiveForceLoginMethod } from '../utils/forceLoginMethod.js';
 import { logError } from '../utils/log.js';
 import { getSettings_DEPRECATED, updateSettingsForSource } from '../utils/settings/settings.js';
 import { CHINA_LLM_PROVIDERS, type ProviderPreset, resolveChinaProviderBaseURL } from 'src/utils/chinaLlmProviders.js';
 import { Select } from './CustomSelect/select.js';
+import { GatewayConnect } from './GatewayConnect.js';
 import { Spinner } from './Spinner.js';
 import TextInput from './TextInput.js';
 
@@ -30,7 +32,8 @@ type Props = {
   onDone(): void;
   startingMessage?: string;
   mode?: 'login' | 'setup-token';
-  forceLoginMethod?: 'claudeai' | 'console';
+  /** densable 2.1.212: includes gateway for Cloud gateway OIDC device flow */
+  forceLoginMethod?: 'claudeai' | 'console' | 'gateway';
 };
 
 type OAuthStatus =
@@ -75,6 +78,10 @@ type OAuthStatus =
   | { state: 'ready_to_start' } // Flow started, waiting for browser to open
   | { state: 'waiting_for_login'; url: string } // Browser opened, waiting for user to login
   | { state: 'creating_api_key' } // Got access token, creating API key
+  /** densable g2s / gateway_setup — interactive Cloud gateway OIDC device flow */
+  | { state: 'gateway_setup' }
+  /** densable gateway_done — credential stored; Enter continues */
+  | { state: 'gateway_done' }
   | { state: 'about_to_retry'; nextState: OAuthStatus }
   | { state: 'success'; token?: string }
   | {
@@ -90,15 +97,27 @@ export function ConsoleOAuthFlow({
   mode = 'login',
   forceLoginMethod: forceLoginMethodProp,
 }: Props): React.ReactNode {
+  // densable n8e — A9t-style interactive forceLoginMethod + admin gateway URL
+  const { forceLoginMethod, forceLoginGatewayUrl, gatewayForced } =
+    resolveInteractiveForceLoginMethod(forceLoginMethodProp);
   const settings = getSettings_DEPRECATED() || {};
-  const forceLoginMethod = forceLoginMethodProp ?? settings.forceLoginMethod;
-  const orgUUID = settings.forceLoginOrgUUID;
+  // densable: suppress forceLoginOrgUUID when selected method mismatches pin
+  const loginWithClaudeAiInitial = mode === 'setup-token' || forceLoginMethod === 'claudeai';
+  const methodMismatch =
+    settings.forceLoginMethod !== undefined && loginWithClaudeAiInitial !== (settings.forceLoginMethod === 'claudeai');
+  const orgUUID =
+    typeof settings.forceLoginOrgUUID === 'string' && !methodMismatch ? settings.forceLoginOrgUUID : undefined;
   const forcedMethodMessage =
     forceLoginMethod === 'claudeai'
       ? 'Login method pre-selected: Subscription Plan (Claude Pro/Max)'
       : forceLoginMethod === 'console'
         ? 'Login method pre-selected: API Usage Billing (Anthropic Console)'
         : null;
+  // densable: gatewayScreenLocked = forceLoginMethod === 'gateway'
+  // (cancel cannot leave gateway path to idle method picker)
+  const gatewayScreenLocked = forceLoginMethod === 'gateway';
+  // densable currently passes gatewayUnsupportedWarning:null in n8e
+  const gatewayUnsupportedWarning: string | null = null;
 
   const terminal = useTerminalNotification();
 
@@ -108,6 +127,10 @@ export function ConsoleOAuthFlow({
     }
     if (forceLoginMethod === 'claudeai' || forceLoginMethod === 'console') {
       return { state: 'ready_to_start' };
+    }
+    // densable: g → gateway_setup (forceLoginMethod gateway or admin URL prefill)
+    if (gatewayForced) {
+      return { state: 'gateway_setup' };
     }
     return { state: 'idle' };
   });
@@ -133,8 +156,10 @@ export function ConsoleOAuthFlow({
       logEvent('tengu_oauth_claudeai_forced', {});
     } else if (forceLoginMethod === 'console') {
       logEvent('tengu_oauth_console_forced', {});
+    } else if (gatewayForced && mode !== 'setup-token') {
+      logEvent('tengu_oauth_gateway_forced', {});
     }
-  }, [forceLoginMethod]);
+  }, [forceLoginMethod, gatewayForced, mode]);
 
   // Retry logic
   useEffect(() => {
@@ -144,16 +169,18 @@ export function ConsoleOAuthFlow({
     }
   }, [oauthStatus]);
 
-  // Handle Enter to continue on success state
+  // densable: Enter on success or gateway_done
   useKeybinding(
     'confirm:yes',
     () => {
-      logEvent('tengu_oauth_success', { loginWithClaudeAi });
+      logEvent(oauthStatus.state === 'gateway_done' ? 'tengu_oauth_gateway_done' : 'tengu_oauth_success', {
+        loginWithClaudeAi,
+      });
       onDone();
     },
     {
       context: 'Confirmation',
-      isActive: oauthStatus.state === 'success' && mode !== 'setup-token',
+      isActive: (oauthStatus.state === 'success' && mode !== 'setup-token') || oauthStatus.state === 'gateway_done',
     },
   );
 
@@ -392,6 +419,9 @@ export function ConsoleOAuthFlow({
           mode={mode}
           startingMessage={startingMessage}
           forcedMethodMessage={forcedMethodMessage}
+          gatewayUnsupportedWarning={gatewayUnsupportedWarning}
+          forceLoginGatewayUrl={forceLoginGatewayUrl}
+          gatewayScreenLocked={gatewayScreenLocked}
           showPastePrompt={showPastePrompt}
           pastedCode={pastedCode}
           setPastedCode={setPastedCode}
@@ -413,6 +443,10 @@ type OAuthStatusMessageProps = {
   mode: 'login' | 'setup-token';
   startingMessage: string | undefined;
   forcedMethodMessage: string | null;
+  /** densable currently null — reserved warning surface */
+  gatewayUnsupportedWarning: string | null;
+  forceLoginGatewayUrl: string | undefined;
+  gatewayScreenLocked: boolean;
   showPastePrompt: boolean;
   pastedCode: string;
   setPastedCode: (value: string) => void;
@@ -430,6 +464,9 @@ function OAuthStatusMessage({
   mode,
   startingMessage,
   forcedMethodMessage,
+  gatewayUnsupportedWarning,
+  forceLoginGatewayUrl,
+  gatewayScreenLocked,
   showPastePrompt,
   pastedCode,
   setPastedCode,
@@ -442,6 +479,27 @@ function OAuthStatusMessage({
   onDone,
 }: OAuthStatusMessageProps): React.ReactNode {
   switch (oauthStatus.state) {
+    case 'gateway_setup':
+      // densable g2s — Cloud gateway OIDC device flow
+      return (
+        <GatewayConnect
+          initialUrl={forceLoginGatewayUrl}
+          screenLocked={gatewayScreenLocked}
+          onDone={() => {
+            setOAuthStatus({ state: 'gateway_done' });
+          }}
+          onCancel={() => setOAuthStatus({ state: 'idle' })}
+        />
+      );
+    case 'gateway_done':
+      return (
+        <Box flexDirection="column" gap={1} marginTop={1}>
+          <Text color="success">Connected to Cloud gateway.</Text>
+          <Text dimColor>
+            Press <Text bold>Enter</Text> to continue.
+          </Text>
+        </Box>
+      );
     case 'idle':
       return (
         <Box flexDirection="column" gap={1} marginTop={1}>
@@ -450,6 +508,7 @@ function OAuthStatusMessage({
               ? startingMessage
               : `Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.`}
           </Text>
+          {gatewayUnsupportedWarning ? <Text color="warning">{gatewayUnsupportedWarning}</Text> : null}
 
           <Text>Select login method:</Text>
 

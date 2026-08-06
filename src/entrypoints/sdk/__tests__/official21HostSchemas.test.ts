@@ -129,7 +129,10 @@ describe('Official 2.1 Host stream schemas', () => {
       uuid: '00000000-0000-4000-8000-000000000007',
       session_id: 's1',
     })
-    expect(empty).toMatchObject({ subtype: 'background_tasks_changed', tasks: [] })
+    expect(empty).toMatchObject({
+      subtype: 'background_tasks_changed',
+      tasks: [],
+    })
   })
 })
 

@@ -362,7 +362,7 @@ export const getAllModelBetas = memoize((model: string): string[] => {
     betaHeaders.push(WEB_SEARCH_BETA_HEADER)
   }
 
-  // Official mid_conversation_system beta (qqt → push Ppe).
+  // densable J8t → push o3 (not firstParty-gated; xNi keeps o3 on 3P).
   if (shouldUseMidConversationSystem({ model })) {
     betaHeaders.push(MID_CONVERSATION_SYSTEM_BETA_HEADER)
   }
@@ -384,12 +384,48 @@ export const getAllModelBetas = memoize((model: string): string[] => {
   return betaHeaders
 })
 
+/**
+ * densable LLc — betas kept when xNi strips non-1P-ish provider lists.
+ * o3 (mid-conversation-system) MUST stay so gateways still get the beta.
+ */
+export const THIRD_PARTY_BETA_ALLOWLIST = new Set<string>([
+  CLAUDE_CODE_20250219_BETA_HEADER,
+  INTERLEAVED_THINKING_BETA_HEADER,
+  CONTEXT_1M_BETA_HEADER,
+  CONTEXT_MANAGEMENT_BETA_HEADER,
+  STRUCTURED_OUTPUTS_BETA_HEADER,
+  WEB_SEARCH_BETA_HEADER,
+  SEARCH_EXTRA_TOOLS_BETA_HEADER_1P,
+  SEARCH_EXTRA_TOOLS_BETA_HEADER_3P,
+  OAUTH_BETA_HEADER,
+  MID_CONVERSATION_SYSTEM_BETA_HEADER,
+])
+
+/**
+ * densable xNi — for non-1P-ish providers keep only LLc allowlist.
+ * firstParty / anthropicAws / foundry pass through unchanged.
+ */
+export function filterBetasForProvider(betas: string[]): string[] {
+  const provider = getAPIProvider()
+  if (
+    provider === 'firstParty' ||
+    provider === 'anthropicAws' ||
+    provider === 'foundry'
+  ) {
+    return betas
+  }
+  return betas.filter(b => THIRD_PARTY_BETA_ALLOWLIST.has(b))
+}
+
 export const getModelBetas = memoize((model: string): string[] => {
   const modelBetas = getAllModelBetas(model)
-  if (getAPIProvider() === 'bedrock') {
-    return modelBetas.filter(b => !BEDROCK_EXTRA_PARAMS_HEADERS.has(b))
-  }
-  return modelBetas
+  let filtered =
+    getAPIProvider() === 'bedrock'
+      ? modelBetas.filter(b => !BEDROCK_EXTRA_PARAMS_HEADERS.has(b))
+      : modelBetas
+  // densable xNi on non-1P-ish (bedrock/vertex/gateway/openai/…): keep o3.
+  filtered = filterBetasForProvider(filtered)
+  return filtered
 })
 
 export const getBedrockExtraBodyParamsBetas = memoize(

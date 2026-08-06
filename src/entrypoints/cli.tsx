@@ -370,19 +370,23 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Backward-compat: ps/logs/attach/kill → daemon <sub> (deprecated)
+  // densable emO top-level `claude rm <id>` (gJ_) — primary product path for #28.
+  // Also keep deprecated ps/logs/attach/kill → daemon <sub>.
   if (
     feature('BG_SESSIONS') &&
-    (args[0] === 'ps' || args[0] === 'logs' || args[0] === 'attach' || args[0] === 'kill')
+    (args[0] === 'ps' || args[0] === 'logs' || args[0] === 'attach' || args[0] === 'kill' || args[0] === 'rm')
   ) {
-    const mapped = args[0] === 'ps' ? 'status' : args[0];
-    console.error(`[deprecated] Use: claude daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
+    const isRm = args[0] === 'rm';
+    if (!isRm) {
+      const mapped = args[0] === 'ps' ? 'status' : args[0];
+      console.error(`[deprecated] Use: claude daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
+    }
     profileCheckpoint('cli_daemon_path');
-    // Official emO bg path: loadFastPathPolicy (warn-only for logs/kill style).
+    // Official emO bg path: loadFastPathPolicy (warn-only for logs/kill/rm style).
     const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
     {
       const policyErr = await loadFastPathPolicy();
-      const warnOnly = args[0] === 'logs' || args[0] === 'kill' || args[0] === 'ps';
+      const warnOnly = args[0] === 'logs' || args[0] === 'kill' || args[0] === 'ps' || args[0] === 'rm';
       if (policyErr) {
         if (warnOnly) {
           process.stderr.write(`${policyErr}\n`);
@@ -396,6 +400,13 @@ async function main(): Promise<void> {
     setShellIfWindows();
     const { initSinks } = await import('../utils/sinks.js');
     initSinks();
+    if (isRm) {
+      // densable: y.rmHandler(t[1]) — top-level, not nested under daemon only
+      const bg = await import('../cli/bg.js');
+      await bg.rmHandler(args[1]);
+      // densable process.exit after analytics drain; exitCode already set by handler
+      process.exit(process.exitCode ?? 0);
+    }
     const { daemonMain } = await import('../daemon/main.js');
     await daemonMain([args[0] === 'ps' ? 'status' : args[0]!, ...args.slice(1)]);
     return;

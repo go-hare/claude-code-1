@@ -293,19 +293,161 @@ export async function killHandler(target: string | undefined): Promise<void> {
 }
 
 /**
- * `claude daemon bg [args]` — start a background session.
+ * densable gJ_ — `claude rm <id>` / `claude daemon rm <id>`.
+ * Delete a background job + worktree via C2e (deleteJob), not bare removeJob.
+ */
+export async function rmHandler(target: string | undefined): Promise<void> {
+  if (target === '--help' || target === '-h') {
+    process.stdout.write(
+      `Usage: claude rm <id>\n\n  Delete a background session and its worktree. Unlike \`stop\`, works on already-exited sessions.\n`,
+    )
+    process.exitCode = 0
+    return
+  }
+  if (target?.startsWith('-')) {
+    process.stderr.write(`unknown option '${target}'\nUsage: claude rm <id>\n`)
+    process.exitCode = 1
+    return
+  }
+  if (!target) {
+    process.stderr.write(`Usage: claude rm <id>\n`)
+    process.exitCode = 1
+    return
+  }
+
+  const { resolveJobShortByPrefix, deleteJob, formatKeptWorktreeReason } =
+    await import('../daemon/deleteJob.js')
+  const { readBgJobState } = await import('../daemon/jobState.js')
+
+  const resolved = await resolveJobShortByPrefix(target)
+  if (!resolved.ok) {
+    if (resolved.kind === 'none') {
+      process.stderr.write(`No job matching '${target}'\n`)
+    } else {
+      process.stderr.write(
+        `Ambiguous prefix '${target}', matches: ${resolved.matches.join(', ')}\n`,
+      )
+    }
+    process.exitCode = 1
+    return
+  }
+
+  const short = resolved.short
+  const state = readBgJobState(short)
+  const result = await deleteJob(short)
+
+  if (!result.removed) {
+    if (result.keptWorktree) {
+      // densable: kept ${n} — worktree ${Kjo(c,u)}
+      process.stdout.write(
+        `kept ${short} \u2014 worktree ${formatKeptWorktreeReason(result.keptReason, result.keptErrorSummary)}\n  worktree kept at ${result.keptWorktree}\n  resolve that (commit/push, or remove the worktree), then run 'claude rm ${short}' again\n`,
+      )
+      process.exitCode = 1
+      return
+    }
+    process.stderr.write(
+      `couldn't remove ${short} \u2014 ${result.error ?? 'the background service may be restarting. Try again in a moment.'}\n`,
+    )
+    process.exitCode = 1
+    return
+  }
+
+  // densable success: removed ${n} [+ worktree left / worktree path]
+  let msg = `removed ${short}`
+  if (result.leftWorktreeDir) {
+    msg += `\n  worktree directory left at ${result.leftWorktreeDir} (git no longer recognized it)`
+  } else if (state?.worktreePath) {
+    msg += `\n  worktree: ${state.worktreePath}`
+  }
+  process.stdout.write(`${msg}\n`)
+}
+
+/**
+ * `claude daemon bg [args]` / `claude --bg …` — start a background session.
  *
- * Cross-platform: uses TmuxEngine on macOS/Linux when tmux is available,
- * falls back to DetachedEngine on Windows or when tmux is absent.
+ * densable path: e6_ gate → xSe/Uq_ (daemon dispatch) when BG_SESSIONS + daemon.
+ * Legacy engine path kept as fallback when xSe gate-ok but daemon offline and
+ * engines can still start detached/tmux (non-daemon product path).
+ *
+ * Cross-platform engines: TmuxEngine on macOS/Linux when tmux is available,
+ * DetachedEngine on Windows or when tmux is absent.
  */
 export async function handleBgStart(args: string[]): Promise<void> {
-  const engine = await selectEngine()
-
   // Official Iia: strip --bg/--background before `--`, keep rest intact.
   const filteredArgs = stripBgFlags(args)
 
+  // densable e6_ + xSe shell (gate before any spawn). Use full argv so
+  // `--print`/`bypass`/`auto` flags densable blocks are visible.
+  try {
+    const { gateBgSpawnArgs, xSeSpawn } = await import('../daemon/xSeSpawn.js')
+    const gate = gateBgSpawnArgs(filteredArgs)
+    if (gate) {
+      console.error(gate)
+      process.exitCode = 1
+      return
+    }
+
+    // densable Bq_/xSe: prefer daemon dispatch (source shell).
+    // Full Uq_ peel happens inside xSeSpawn from argv (agent/name/resume/intent).
+    const { peelUqArgv } = await import('../daemon/uqArgvPeel.js')
+    const peeled = peelUqArgv(filteredArgs)
+    const xse = await xSeSpawn({
+      intent: peeled.intent ?? '',
+      name: peeled.name,
+      agent: peeled.agent,
+      resumeSessionId: peeled.resumeSessionId,
+      forkSession: peeled.hasForkSession ? true : undefined,
+      argv: filteredArgs,
+      source: 'shell',
+      extraArgs: peeled.allowlistedRespawnFlags,
+    })
+    if (xse.ok) {
+      // densable xmt(short, idle?, name)
+      console.log(
+        formatBgHints(
+          xse.short,
+          xse.idle ? '(idle — waiting for input)' : undefined,
+          xse.name,
+        ),
+      )
+      if (xse.rescued) {
+        console.error(
+          'warning: dispatch ack timed out but worker is live (rescued)',
+        )
+      }
+      return
+    }
+    // gate already handled; other hard fails surface and stop (no engine double-spawn)
+    if (
+      xse.reason === 'gate_blocked' ||
+      xse.reason === 'short_alive' ||
+      xse.reason === 'stale_short' ||
+      xse.reason === 'ack_timeout'
+    ) {
+      console.error(xse.error)
+      process.exitCode = 1
+      return
+    }
+    // daemon offline / dispatch_write already file-fallbacked inside xSe when possible
+    if (
+      xse.reason === 'dispatch_write' ||
+      xse.reason.includes('spawn_failed')
+    ) {
+      console.error(xse.error)
+      process.exitCode = 1
+      return
+    }
+    // Fall through to legacy engine only when xSe returned soft offline without write
+  } catch {
+    // xSe module / daemon path unavailable — legacy engine below
+  }
+
+  const engine = await selectEngine()
+
   // Engines without interactive TTY input (e.g. detached) require -p/--print
   // or piped input. Tmux provides a virtual terminal so it works without -p.
+  // densable e6_ already blocked --print for daemon path; engine path still
+  // needs -p for detached (product constraint, not densable xSe).
   if (
     !engine.supportsInteractiveInput &&
     !filteredArgs.some(a => a === '-p' || a === '--print' || a === '--pipe')
@@ -353,3 +495,5 @@ export async function handleBgStart(args: string[]): Promise<void> {
     process.exitCode = 1
   }
 }
+
+// densable t6_/r2o peel moved to daemon/uqArgvPeel.ts (full Uq_ 1:1).

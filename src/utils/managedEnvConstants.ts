@@ -113,6 +113,40 @@ export function isProviderManagedEnvVar(key: string): boolean {
 }
 
 /**
+ * densable LGm / KVt — transport / TLS / OAuth-scope vars that host-managed
+ * sessions must not take from settings.env (repo or user). Applying these from
+ * project settings under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST breaks Desktop /
+ * host-injected TLS and credential flows (2.1.212 #19).
+ */
+export const HOST_TRANSPORT_SENSITIVE_ENV_VARS = new Set([
+  'CLAUDE_CODE_CLIENT_CERT',
+  'CLAUDE_CODE_CLIENT_KEY',
+  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  'CLAUDE_CODE_OAUTH_SCOPES',
+])
+
+/** densable KVt(key) */
+export function isHostTransportSensitiveEnvVar(key: string): boolean {
+  return HOST_TRANSPORT_SENSITIVE_ENV_VARS.has(key.toUpperCase())
+}
+
+/**
+ * densable PGm / LLn — proxy vars also stripped under managedByHostFlag.
+ */
+export const HOST_PROXY_ENV_VARS = new Set([
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+])
+
+/** densable LLn(key) */
+export function isHostProxyEnvVar(key: string): boolean {
+  return HOST_PROXY_ENV_VARS.has(key.toUpperCase())
+}
+
+/**
  * Dangerous shell settings that can execute arbitrary shell code
  */
 export const DANGEROUS_SHELL_SETTINGS = [

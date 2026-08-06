@@ -143,6 +143,12 @@ export async function daemonMain(args: string[]): Promise<void> {
       await bg.killHandler(args[1])
       break
     }
+    // densable gJ_ also reachable as `claude daemon rm <id>`
+    case 'rm': {
+      const bg = await import('../cli/bg.js')
+      await bg.rmHandler(args[1])
+      break
+    }
 
     case '--help':
     case '-h':
@@ -173,6 +179,7 @@ SUBCOMMANDS
   attach      Attach to a background session
   logs        Show session logs
   kill        Kill a session
+  rm          Delete a session + worktree (works on exited sessions)
   help        Show this help
 
 REPL
@@ -765,18 +772,24 @@ async function runBgManagerStandalone(opts?: {
   // manager assigned after startBgManager; shutdown/onYield close over the let.
   let manager: Awaited<ReturnType<typeof startBgManager>> | null = null
   let shuttingDown = false
-  const shutdown = async (reason?: string): Promise<void> => {
+  const shutdown = async (
+    reason?: string,
+    closeOpts?: { displaced?: boolean; skipPathCleanup?: boolean },
+  ): Promise<void> => {
     if (shuttingDown) return
     shuttingDown = true
     console.log(
       `[daemon] bg-manager shutting down${reason ? ` (${reason})` : ''}...`,
     )
     try {
-      await manager?.close()
+      // densable 2.1.214 #26: yield/handover close({skipUnlink/displaced}) so we
+      // do not unlink the successor's control socket path.
+      await manager?.close(closeOpts)
     } catch {
       // best-effort
     }
     removeDaemonState('bg-manager')
+    // densable CvK: only clear lock if still owned — successor may have rewritten it
     await clearOwnedLock()
     process.exit(0)
   }
@@ -790,7 +803,8 @@ async function runBgManagerStandalone(opts?: {
         '[daemon] yielding to a foreground/service daemon — bg workers will be re-adopted',
       )
       logEvent('tengu_daemon_yield', {})
-      void shutdown('yield')
+      // densable: te.close({skipPathCleanup:!0}) / close({displaced:true})
+      void shutdown('yield', { displaced: true, skipPathCleanup: true })
     }
     return true
   }

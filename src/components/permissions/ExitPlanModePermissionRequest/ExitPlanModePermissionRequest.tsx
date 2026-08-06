@@ -57,6 +57,7 @@ import {
 import { getSettings_DEPRECATED } from '../../../utils/settings/settings.js';
 import { type OptionWithDescription, Select } from '../../CustomSelect/index.js';
 import { Markdown } from '../../Markdown.js';
+import { KeyboardShortcutHint } from '../../design-system/KeyboardShortcutHint.js';
 import { PermissionDialog } from '../PermissionDialog.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
@@ -627,12 +628,13 @@ export function ExitPlanModePermissionRequest({
           />
         </Box>
         {editorName && (
+          // densable 2.1.212 #27: single Fe chord+action Text so long path cannot
+          // split "ctrl+g to edit in <editor>" mid-phrase.
           <Box flexDirection="row" gap={1} marginTop={1}>
-            <Text dimColor>ctrl-g to edit in </Text>
-            <Text bold dimColor>
-              {editorName}
+            <Text dimColor>
+              <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+              {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
             </Text>
-            {isV2 && planFilePath && <Text dimColor> · {getDisplayPath(planFilePath)}</Text>}
             {showSaveMessage && (
               <>
                 <Text dimColor>{' · '}</Text>
@@ -769,14 +771,13 @@ export function ExitPlanModePermissionRequest({
         </Box>
       </PermissionDialog>
       {!useStickyFooter && editorName && (
+        // densable 2.1.212 #27: Fe({chord:"ctrl+g", action:`edit in ${editor}`})
+        // + path in the same dimColor Text (non-sticky footer path).
         <Box flexDirection="row" gap={1} paddingX={1} marginTop={1}>
-          <Box>
-            <Text dimColor>ctrl-g to edit in </Text>
-            <Text bold dimColor>
-              {editorName}
-            </Text>
-            {isV2 && planFilePath && <Text dimColor> · {getDisplayPath(planFilePath)}</Text>}
-          </Box>
+          <Text dimColor>
+            <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+            {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
+          </Text>
           {showSaveMessage && (
             <Box>
               <Text dimColor>{' · '}</Text>

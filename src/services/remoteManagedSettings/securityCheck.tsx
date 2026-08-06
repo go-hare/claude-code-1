@@ -55,6 +55,13 @@ export async function checkManagedSettingsSecurity(
   // Log that dialog is being shown
   logEvent('tengu_managed_settings_security_dialog_shown', {});
 
+  // densable msf managed-settings → Needs input on bg job list
+  void import('../../utils/bgNeedsInputBridge.js').then(m => {
+    if (!m.isBgJobSession()) return;
+    m.ensureBgNeedsPermissionBridge();
+    m.emitBgNeedsInput(m.MANAGED_SETTINGS_NEEDS, 'managed-settings');
+  });
+
   // Show blocking dialog
   return new Promise<SecurityCheckResult>(resolve => {
     void (async () => {
@@ -65,11 +72,17 @@ export async function checkManagedSettingsSecurity(
               settings={newSettings}
               onAccept={() => {
                 logEvent('tengu_managed_settings_security_dialog_accepted', {});
+                void import('../../utils/bgNeedsInputBridge.js').then(m => {
+                  m.emitBgNeedsInput(null, 'managed-settings');
+                });
                 unmount();
                 void resolve('approved');
               }}
               onReject={() => {
                 logEvent('tengu_managed_settings_security_dialog_rejected', {});
+                void import('../../utils/bgNeedsInputBridge.js').then(m => {
+                  m.emitBgNeedsInput(null, 'managed-settings');
+                });
                 unmount();
                 void resolve('rejected');
               }}

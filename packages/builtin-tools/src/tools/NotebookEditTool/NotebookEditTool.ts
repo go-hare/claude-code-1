@@ -139,6 +139,12 @@ export const NotebookEditTool = buildTool({
   getPath(input): string {
     return input.notebook_path
   },
+  async preparePermissionMatcher({ notebook_path }) {
+    // densable hqe: allow-style single-segment dir/** is cwd-only (#44)
+    const { matchesPathRule } =
+      require('src/utils/permissions/filesystem.js') as typeof import('src/utils/permissions/filesystem.js')
+    return (pattern: string) => matchesPathRule(pattern, notebook_path)
+  },
   async checkPermissions(input, context): Promise<PermissionDecision> {
     const appState = context.getAppState()
     return checkWritePermissionForTool(

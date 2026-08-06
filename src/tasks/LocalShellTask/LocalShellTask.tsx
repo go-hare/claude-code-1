@@ -587,9 +587,7 @@ export function backgroundAll(getAppState: () => AppState, setAppState: SetAppSt
   // filter as hasForegroundTasks; Host background_tasks without tool_use_id).
   const foregroundAgentTaskIds = Object.keys(state.tasks).filter(id => {
     const task = state.tasks[id];
-    return (
-      isLocalAgentTask(task) && !task.isBackgrounded && !isMainSessionTask(task)
-    );
+    return isLocalAgentTask(task) && !task.isBackgrounded && !isMainSessionTask(task);
   });
   for (const taskId of foregroundAgentTaskIds) {
     backgroundAgentTask(taskId, getAppState, setAppState);

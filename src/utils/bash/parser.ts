@@ -16,7 +16,8 @@ export interface ParsedCommandData {
   originalCommand: string
 }
 
-const MAX_COMMAND_LENGTH = 10000
+/** densable `Jru` / `K0e` = 1e4 — shared security length cap. */
+export const MAX_COMMAND_LENGTH = 10000
 const DECLARATION_COMMANDS = new Set([
   'export',
   'declare',
@@ -104,7 +105,16 @@ export const PARSE_ABORTED = Symbol('parse-aborted')
 export async function parseCommandRaw(
   command: string,
 ): Promise<Node | null | typeof PARSE_ABORTED> {
-  if (!command || command.length > MAX_COMMAND_LENGTH) return null
+  if (!command) return null
+  // densable 2.1.214 #4: over-length is PARSE_ABORTED (y0e / Jru), not null.
+  // null → parse-unavailable → legacy auto-allow path; abort → too-complex → ask.
+  if (command.length > MAX_COMMAND_LENGTH) {
+    logEvent('tengu_tree_sitter_parse_abort', {
+      cmdLength: command.length,
+      panic: false,
+    })
+    return PARSE_ABORTED
+  }
   if (feature('TREE_SITTER_BASH') || feature('TREE_SITTER_BASH_SHADOW')) {
     await ensureParserInitialized()
     const mod = getParserModule()
@@ -132,6 +142,9 @@ export async function parseCommandRaw(
       return PARSE_ABORTED
     }
   }
+  // Feature off / external build: still fail-closed on over-length so
+  // bashPermissions cannot treat >10k as parse-unavailable → legacy allow.
+  // densable tJt always returns y0e above Jru regardless of module load.
   return null
 }
 

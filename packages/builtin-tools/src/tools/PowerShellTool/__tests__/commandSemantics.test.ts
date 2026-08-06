@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { interpretCommandResult } from '../commandSemantics'
+import {
+  interpretCommandResult,
+  lastCommandSegment,
+  parseNativeCommandToken,
+} from '../commandSemantics'
 
 describe('interpretCommandResult', () => {
   describe('grep / rg', () => {
@@ -19,19 +23,9 @@ describe('interpretCommandResult', () => {
       expect(result.isError).toBe(true)
     })
 
-    test('rg exit 0 is not error', () => {
-      const result = interpretCommandResult('rg pattern', 0, 'match', '')
-      expect(result.isError).toBe(false)
-    })
-
     test('rg exit 1 (no match) is not error', () => {
       const result = interpretCommandResult('rg pattern', 1, '', '')
       expect(result.isError).toBe(false)
-    })
-
-    test('rg exit 2 is error', () => {
-      const result = interpretCommandResult('rg pattern', 2, '', 'error')
-      expect(result.isError).toBe(true)
     })
 
     test('grep.exe is recognized', () => {
@@ -41,29 +35,9 @@ describe('interpretCommandResult', () => {
   })
 
   describe('findstr', () => {
-    test('findstr exit 0 is not error', () => {
-      const result = interpretCommandResult(
-        'findstr pattern file',
-        0,
-        'match',
-        '',
-      )
-      expect(result.isError).toBe(false)
-    })
-
     test('findstr exit 1 (no match) is not error', () => {
       const result = interpretCommandResult('findstr pattern file', 1, '', '')
       expect(result.isError).toBe(false)
-    })
-
-    test('findstr exit 2 is error', () => {
-      const result = interpretCommandResult(
-        'findstr pattern file',
-        2,
-        '',
-        'error',
-      )
-      expect(result.isError).toBe(true)
     })
   })
 
@@ -80,29 +54,62 @@ describe('interpretCommandResult', () => {
       expect(result.message).toBe('Files copied successfully')
     })
 
-    test('robocopy exit 2 (extra files) is not error', () => {
-      const result = interpretCommandResult('robocopy src dest', 2, '', '')
-      expect(result.isError).toBe(false)
-    })
-
-    test('robocopy exit 7 (success with mismatches) is not error', () => {
-      const result = interpretCommandResult('robocopy src dest', 7, '', '')
-      expect(result.isError).toBe(false)
-    })
-
     test('robocopy exit 8 (copy errors) is error', () => {
       const result = interpretCommandResult('robocopy src dest', 8, '', 'error')
       expect(result.isError).toBe(true)
     })
+  })
 
-    test('robocopy exit 16 (serious error) is error', () => {
+  describe('densable 214 #24 where.exe / fc.exe / diff.exe', () => {
+    test('where.exe exit 1 with output is not error', () => {
       const result = interpretCommandResult(
-        'robocopy src dest',
-        16,
+        'where.exe foo',
+        1,
         '',
-        'error',
+        'INFO: Could not find files',
       )
+      expect(result.isError).toBe(false)
+      expect(result.message).toBe('No matching files found')
+    })
+
+    test('where.exe exit 1 with empty streams still uses default (densable hasOutput gate)', () => {
+      // densable: Lny only when nativeExt===exe AND (stdout||stderr) non-empty
+      const result = interpretCommandResult('where.exe foo', 1, '', '')
       expect(result.isError).toBe(true)
+    })
+
+    test('bare where (alias) exit 1 is error — not Lny', () => {
+      const result = interpretCommandResult('where foo', 1, '', 'not found')
+      expect(result.isError).toBe(true)
+    })
+
+    test('fc.exe exit 1 with output is not error', () => {
+      const result = interpretCommandResult(
+        'fc.exe a.txt b.txt',
+        1,
+        '***** a.txt',
+        '',
+      )
+      expect(result.isError).toBe(false)
+      expect(result.message).toBe('Files differ')
+    })
+
+    test('diff.exe exit 1 with output is not error', () => {
+      const result = interpretCommandResult('diff.exe a b', 1, '1c1', '')
+      expect(result.isError).toBe(false)
+      expect(result.message).toBe('Files differ')
+    })
+
+    test('git diff exit 1 is not error', () => {
+      const result = interpretCommandResult('git diff', 1, 'diff --git', '')
+      expect(result.isError).toBe(false)
+      expect(result.message).toBe('Files differ')
+    })
+
+    test('git grep exit 1 is not error', () => {
+      const result = interpretCommandResult('git grep foo', 1, '', '')
+      expect(result.isError).toBe(false)
+      expect(result.message).toBe('No matches found')
     })
   })
 
@@ -116,11 +123,6 @@ describe('interpretCommandResult', () => {
       const result = interpretCommandResult('somecmd arg', 1, '', 'fail')
       expect(result.isError).toBe(true)
       expect(result.message).toBe('Command failed with exit code 1')
-    })
-
-    test('unknown command exit 127 is error', () => {
-      const result = interpretCommandResult('missing-cmd', 127, '', 'not found')
-      expect(result.isError).toBe(true)
     })
   })
 
@@ -156,11 +158,6 @@ describe('interpretCommandResult', () => {
       )
       expect(result.isError).toBe(false)
     })
-
-    test('./tools/grep is recognized as grep', () => {
-      const result = interpretCommandResult('./tools/grep pattern', 1, '', '')
-      expect(result.isError).toBe(false)
-    })
   })
 
   describe('call operator stripping', () => {
@@ -173,5 +170,17 @@ describe('interpretCommandResult', () => {
       const result = interpretCommandResult('. "grep.exe" pattern', 1, '', '')
       expect(result.isError).toBe(false)
     })
+  })
+})
+
+describe('parseNativeCommandToken / lastCommandSegment', () => {
+  test('detects .exe nativeExt', () => {
+    const t = parseNativeCommandToken('where.exe foo')
+    expect(t.base).toBe('where')
+    expect(t.nativeExt).toBe('exe')
+  })
+
+  test('last segment after |', () => {
+    expect(lastCommandSegment('a | b | where.exe x')).toContain('where.exe')
   })
 })

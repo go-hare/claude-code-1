@@ -6,6 +6,12 @@ export type ShellProvider = {
   type: ShellType
   shellPath: string
   detached: boolean
+  /**
+   * densable 2.1.214 #21 — spawn stdio[0].
+   * PowerShell provider sets `"ignore"` so child processes that wait on
+   * stdin do not hang until tool timeout. Bash keeps default `"pipe"`.
+   */
+  stdin?: 'pipe' | 'ignore'
 
   /**
    * Build the full command string including all shell-specific setup.

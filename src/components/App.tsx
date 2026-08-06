@@ -6,6 +6,7 @@ import { onChangeAppState } from '../state/onChangeAppState.js';
 import type { FpsMetrics } from '../utils/fpsTracker.js';
 import { ThemeProvider } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
+import { JFaInFlightProducer } from './JFaInFlightProducer.js';
 
 type Props = {
   getFpsMetrics: () => FpsMetrics | undefined;
@@ -17,6 +18,7 @@ type Props = {
 /**
  * Top-level wrapper for interactive sessions.
  * Provides FPS metrics, stats context, and app state to the component tree.
+ * densable JFa mounts under AppStateProvider so todos/tasks feed shs.
  */
 export function App({ getFpsMetrics, stats, initialState, children }: Props): React.ReactNode {
   return (
@@ -27,6 +29,7 @@ export function App({ getFpsMetrics, stats, initialState, children }: Props): Re
             initialState={getGlobalConfig().theme}
             onThemeSave={setting => saveGlobalConfig(current => ({ ...current, theme: setting }))}
           >
+            <JFaInFlightProducer />
             {children}
           </ThemeProvider>
         </AppStateProvider>

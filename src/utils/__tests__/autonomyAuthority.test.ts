@@ -93,7 +93,7 @@ describe('autonomyAuthority', () => {
     expect(snapshot.heartbeatContent).not.toContain('Nested heartbeat')
   })
 
-  test('buildAutonomyTurnPrompt returns the original prompt when no authority files exist', async () => {
+  test('buildAutonomyTurnPrompt stamps densable Q9i schedule banner when no authority files', async () => {
     const prompt = await buildAutonomyTurnPrompt({
       basePrompt: 'Run the scheduled task.',
       trigger: 'scheduled-task',
@@ -101,7 +101,12 @@ describe('autonomyAuthority', () => {
       currentDir: tempDir,
     })
 
-    expect(prompt).toBe('Run the scheduled task.')
+    // densable #20 RZn: scheduled fires are assigned-task, not bare basePrompt
+    expect(prompt).toContain(
+      '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]',
+    )
+    expect(prompt).toContain("Treat it as this session's assigned task")
+    expect(prompt).toContain('Run the scheduled task.')
   })
 
   test('buildAutonomyTurnPrompt injects AGENTS.md and HEARTBEAT.md for automated turns', async () => {
@@ -124,6 +129,9 @@ describe('autonomyAuthority', () => {
     })
 
     expect(scheduledPrompt).toContain(
+      '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]',
+    )
+    expect(scheduledPrompt).toContain(
       'This prompt was generated automatically. Follow the workspace authority below before acting.',
     )
     expect(scheduledPrompt).toContain('<autonomy_authority>')
@@ -132,6 +140,10 @@ describe('autonomyAuthority', () => {
     expect(scheduledPrompt).toContain('Check heartbeat directives')
     expect(scheduledPrompt).toContain('Review the nightly report.')
 
+    // proactive-tick must NOT get the schedule assigned-task banner
+    expect(tickPrompt).not.toContain(
+      '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]',
+    )
     expect(tickPrompt).toContain(
       'This is an autonomous proactive turn. Follow the workspace authority below before acting.',
     )

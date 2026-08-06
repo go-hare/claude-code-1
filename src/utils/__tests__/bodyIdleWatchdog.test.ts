@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import {
   BodyIdleTimeoutError,
   type BodyIdleFetch,
+  createBodyChunkTimes,
+  getResponseChunkTimes,
   rewrapResponseWithBody,
   shouldWrapResponseBodyWithIdleWatchdog,
   wrapFetchWithBodyIdleWatchdog,
@@ -266,5 +268,75 @@ describe('wrapFetchWithBodyIdleWatchdog', () => {
     }))
     const res = await wrapped('https://example.com')
     expect(res.body).toBe(body)
+  })
+
+  test('densable #39: stamps _chunkTimes.lastAt on each body pull', async () => {
+    const times = createBodyChunkTimes()
+    expect(times.lastAt).toBe(0)
+    const source = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('a'))
+        c.enqueue(new TextEncoder().encode('b'))
+        c.close()
+      },
+    })
+    const wrapped = wrapReadableStreamWithBodyIdleTimeout(
+      source,
+      5_000,
+      undefined,
+      times,
+    )
+    const reader = wrapped.getReader()
+    await reader.read()
+    const afterFirst = times.lastAt
+    expect(afterFirst).toBeGreaterThan(0)
+    await reader.read()
+    expect(times.lastAt).toBeGreaterThanOrEqual(afterFirst)
+    await reader.read() // done
+  })
+
+  test('densable #39: rewrap attaches _chunkTimes on Response', async () => {
+    const times = createBodyChunkTimes()
+    times.lastAt = 42
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.close()
+      },
+    })
+    const source = new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+    const rewrapped = rewrapResponseWithBody(source, body, times)
+    expect(getResponseChunkTimes(rewrapped)).toBe(times)
+    expect(getResponseChunkTimes(rewrapped)?.lastAt).toBe(42)
+  })
+
+  test('wrapFetch attaches _chunkTimes for SSE', async () => {
+    const base = (async () =>
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('data: hi\n\n'))
+            c.close()
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      )) as BodyIdleFetch
+    const wrapped = wrapFetchWithBodyIdleWatchdog(base, () => ({
+      enabled: true,
+      idleTimeoutMs: 5_000,
+      provider: 'firstParty',
+    }))
+    const res = await wrapped('https://example.com')
+    const times = getResponseChunkTimes(res)
+    expect(times).toBeTruthy()
+    expect(times!.lastAt).toBe(0)
+    const reader = res.body!.getReader()
+    await reader.read()
+    expect(times!.lastAt).toBeGreaterThan(0)
   })
 })

@@ -54,6 +54,7 @@ export {
 export {
   formatAPIError,
   extractConnectionErrorDetails,
+  SOCKET_CONNECTION_CLOSED_PREFIX,
   sanitizeAPIError,
   getSSLErrorHint,
   type ConnectionErrorDetails,

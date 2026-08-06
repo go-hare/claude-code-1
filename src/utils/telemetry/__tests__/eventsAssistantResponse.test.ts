@@ -36,7 +36,7 @@ describe('isAssistantResponseLoggingEnabled (official xkc)', () => {
   })
 })
 
-describe('truncateOTelContent (official WU / bLh=61440)', () => {
+describe('truncateOTelContent (densable W1 / Dtg=61440)', () => {
   test('passes short content through', () => {
     expect(truncateOTelContent('hello')).toEqual({
       content: 'hello',
@@ -44,18 +44,13 @@ describe('truncateOTelContent (official WU / bLh=61440)', () => {
     })
   })
 
-  test('truncates past 60KB with marker', () => {
+  test('truncates past 60KB with marker; total length = limit', () => {
     const big = 'a'.repeat(OTEL_CONTENT_TRUNCATE_LIMIT + 10)
-    const out = truncateOTelContent(big)
+    const out = truncateOTelContent(big, OTEL_CONTENT_TRUNCATE_LIMIT)
     expect(out.truncated).toBe(true)
-    expect(
-      out.content.startsWith('a'.repeat(OTEL_CONTENT_TRUNCATE_LIMIT)),
-    ).toBe(true)
     expect(out.content).toContain('[TRUNCATED - Content exceeds 60KB limit]')
-    expect(out.content.length).toBe(
-      OTEL_CONTENT_TRUNCATE_LIMIT +
-        '\n\n[TRUNCATED - Content exceeds 60KB limit]'.length,
-    )
+    // densable W1: content.slice(0, limit-marker.length)+marker → length===limit
+    expect(out.content.length).toBe(OTEL_CONTENT_TRUNCATE_LIMIT)
   })
 })
 

@@ -224,6 +224,23 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
             uuid: message.uuid,
           }
         }
+      } else if (progressData.type === 'tool_heartbeat') {
+        // densable 214: twin yield tool_progress with heartbeat:!0 (no remote gate)
+        const hb = progressData as unknown as {
+          type: 'tool_heartbeat'
+          toolName: string
+          elapsedTimeSeconds: number
+        }
+        yield {
+          type: 'tool_progress',
+          tool_use_id: message.toolUseID as string,
+          tool_name: hb.toolName,
+          parent_tool_use_id: message.parentToolUseID as string,
+          elapsed_time_seconds: hb.elapsedTimeSeconds,
+          heartbeat: true,
+          session_id: getSessionId(),
+          uuid: message.uuid,
+        }
       }
       break
     }
@@ -391,7 +408,36 @@ export async function* handleOrphanedPermission(
   }
 }
 
+/** densable P3e — token-cap partial-view system-reminder prefix. */
+const PARTIAL_VIEW_SYSTEM_REMINDER_PREFIX =
+  '<system-reminder>[Truncated: PARTIAL view — '
+
+/**
+ * densable yZt — coerce model-emitted string numbers to numbers for offset/limit.
+ */
+function coerceSemanticNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const t = value.trim()
+    if (/^[-+]?\d+(\.\d+)?$/.test(t)) {
+      const n = Number(t)
+      if (Number.isFinite(n)) return n
+    }
+  }
+  return undefined
+}
+
+type ExtractedReadUse = {
+  filePath: string
+  offset: number | undefined
+  limit: number | undefined
+}
+
 // Create a function to extract read files from messages
+// densable Woo: include ranged Reads (offset/limit); mark isPartialView when
+// token-cap truncated / read_truncation_notice / PARTIAL view reminder.
 export function extractReadFilesFromMessages(
   messages: Message[],
   cwd: string,
@@ -400,14 +446,26 @@ export function extractReadFilesFromMessages(
   const cache = createFileStateCacheWithSizeLimit(maxSize)
 
   // First pass: find all FileReadTool/FileWriteTool/FileEditTool uses in assistant messages
-  const fileReadToolUseIds = new Map<string, string>() // toolUseId -> filePath
+  const fileReadToolUseIds = new Map<string, ExtractedReadUse>() // toolUseId -> read meta
   const fileWriteToolUseIds = new Map<
     string,
     { filePath: string; content: string }
   >() // toolUseId -> { filePath, content }
   const fileEditToolUseIds = new Map<string, string>() // toolUseId -> filePath
+  // densable: attachment.type === 'read_truncation_notice' → mark partial
+  const truncatedReadToolUseIds = new Set<string>()
 
   for (const message of messages) {
+    if (
+      message.type === 'attachment' &&
+      (message as { attachment?: { type?: string; toolUseID?: string } })
+        .attachment?.type === 'read_truncation_notice'
+    ) {
+      const id = (message as { attachment?: { toolUseID?: string } }).attachment
+        ?.toolUseID
+      if (typeof id === 'string') truncatedReadToolUseIds.add(id)
+      continue
+    }
     if (
       message.type === 'assistant' &&
       Array.isArray(message.message!.content)
@@ -417,17 +475,25 @@ export function extractReadFilesFromMessages(
           content.type === 'tool_use' &&
           content.name === FILE_READ_TOOL_NAME
         ) {
-          // Extract file_path from the tool use input
+          // densable Uoo/yZt: accept full and ranged reads (offset/limit)
           const input = content.input as FileReadInput | undefined
-          // Ranged reads are not added to the cache.
-          if (
-            input?.file_path &&
-            input?.offset === undefined &&
-            input?.limit === undefined
-          ) {
-            // Normalize to absolute path for consistent cache lookups
+          const offset = coerceSemanticNumber(input?.offset)
+          const limit = coerceSemanticNumber(input?.limit)
+          const offsetOk =
+            offset === undefined ||
+            (typeof offset === 'number' &&
+              Number.isInteger(offset) &&
+              offset >= 0)
+          const limitOk =
+            limit === undefined ||
+            (typeof limit === 'number' && Number.isInteger(limit) && limit >= 1)
+          if (typeof input?.file_path === 'string' && offsetOk && limitOk) {
             const absolutePath = expandPath(input.file_path, cwd)
-            fileReadToolUseIds.set(content.id, absolutePath)
+            fileReadToolUseIds.set(content.id, {
+              filePath: absolutePath,
+              offset,
+              limit,
+            })
           }
         } else if (
           content.type === 'tool_use' &&
@@ -470,16 +536,26 @@ export function extractReadFilesFromMessages(
     if (message.type === 'user' && Array.isArray(message.message!.content)) {
       for (const content of message.message!.content) {
         if (content.type === 'tool_result' && content.tool_use_id) {
-          // Handle Read tool results
-          const readFilePath = fileReadToolUseIds.get(content.tool_use_id)
+          // Handle Read tool results (densable Woo)
+          const readUse = fileReadToolUseIds.get(content.tool_use_id)
           if (
-            readFilePath &&
+            readUse &&
+            content.is_error !== true &&
             typeof content.content === 'string' &&
             // Dedup stubs contain no file content — the earlier real Read
             // already cached it. Chronological last-wins would otherwise
             // overwrite the real entry with stub text.
             !content.content.startsWith(FILE_UNCHANGED_STUB)
           ) {
+            const msg = message as {
+              timestamp?: string | number
+              toolUseResult?: { file?: { truncatedByTokenCap?: boolean } }
+            }
+            const isPartialView =
+              msg.toolUseResult?.file?.truncatedByTokenCap === true ||
+              truncatedReadToolUseIds.has(content.tool_use_id) ||
+              content.content.startsWith(PARTIAL_VIEW_SYSTEM_REMINDER_PREFIX)
+
             // Remove system-reminder blocks from the content
             const processedContent = content.content.replace(
               /<system-reminder>[\s\S]*?<\/system-reminder>/g,
@@ -495,15 +571,15 @@ export function extractReadFilesFromMessages(
               .trim()
 
             // Cache the file content with the message timestamp
-            if (message.timestamp) {
-              const timestamp = new Date(
-                message.timestamp as string | number,
-              ).getTime()
-              cache.set(readFilePath, {
+            // densable: offset:u.offset??1, limit:u.limit, isPartialView when truncated
+            if (msg.timestamp) {
+              const timestamp = new Date(msg.timestamp).getTime()
+              cache.set(readUse.filePath, {
                 content: fileContent,
                 timestamp,
-                offset: undefined,
-                limit: undefined,
+                offset: readUse.offset ?? 1,
+                limit: readUse.limit,
+                ...(isPartialView ? { isPartialView: true } : {}),
               })
             }
           }

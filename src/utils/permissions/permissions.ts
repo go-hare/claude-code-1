@@ -590,12 +590,30 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         }
         return result
       }
-      // Official 2.1.198/207 plan_mode_floor: plan-mode asks for non-RO Chrome MCP
-      // (and other plan-floor tools) must not be auto-approved by the classifier.
-      // RO chrome tools (heo) are exempt and may continue through auto paths.
+      // Official 2.1.198/207/212 plan_mode_floor densable:
+      // k = (B8u(decisionReason) || u==="plan" && !isReadOnly) && !chromeRO
+      // Must not auto-approve via classifier OR allowlist while in plan for
+      // non-readonly tools (Bash touch/rm, Edit, Write, non-RO MCP).
+      let planModeFloorHit =
+        (result.decisionReason?.type === 'mode' &&
+          result.decisionReason.mode === 'plan') ||
+        appState.toolPermissionContext.mode === 'plan' ||
+        effectiveModeForAuto === 'plan'
+      if (planModeFloorHit) {
+        try {
+          const parsedForRo = tool.inputSchema.safeParse(input)
+          if (
+            parsedForRo.success &&
+            tool.isReadOnly?.(parsedForRo.data) === true
+          ) {
+            planModeFloorHit = false
+          }
+        } catch {
+          // keep floor
+        }
+      }
       if (
-        result.decisionReason?.type === 'mode' &&
-        result.decisionReason.mode === 'plan' &&
+        planModeFloorHit &&
         !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), input)
       ) {
         if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
@@ -694,11 +712,18 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         tool.name,
         context.options.mainLoopModel,
       )
+      // densable 2.1.212: `$=u==="plan"` — never acceptEdits-fastpath while
+      // effective/session mode is plan (incl. planActingAsAuto). Otherwise
+      // Bash touch/rm/mkdir auto-run via modeValidation acceptEdits allow.
+      const skipAcceptEditsFastPathForPlan =
+        appState.toolPermissionContext.mode === 'plan' ||
+        effectiveModeForAuto === 'plan'
       if (
         result.behavior === 'ask' &&
         tool.name !== REPL_TOOL_NAME &&
         !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
-        !editClassificationGated
+        !editClassificationGated &&
+        !skipAcceptEditsFastPathForPlan
       ) {
         try {
           const parsedInput = tool.inputSchema.parse(input)

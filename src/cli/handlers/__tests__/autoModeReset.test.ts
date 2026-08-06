@@ -21,7 +21,8 @@ describe('autoModeResetHandler densable PbS', () => {
 
   beforeEach(() => {
     prevConfigDir = process.env.CLAUDE_CONFIG_DIR
-    prevExitCode = process.exitCode
+    // process.exitCode may be null; store only string|number for restore.
+    prevExitCode = process.exitCode ?? undefined
     // Bun keeps exitCode sticky across tests; force-clear each case.
     process.exitCode = 0
     rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -32,7 +33,7 @@ describe('autoModeResetHandler densable PbS', () => {
   afterEach(() => {
     if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = prevConfigDir
-    process.exitCode = prevExitCode as never
+    process.exitCode = prevExitCode
     rmSync(TEST_ROOT, { recursive: true, force: true })
   })
 

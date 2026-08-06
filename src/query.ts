@@ -1298,6 +1298,8 @@ async function* queryLoop(
               isBackgroundAgent: toolUseContext.isBackgroundAgent,
               requestDialog: toolUseContext.requestDialog,
               addNotification: toolUseContext.addNotification,
+              // densable 2.1.214 #39: wire spinner stalled / retry status
+              onRetryStatus: toolUseContext.setRetryStatus,
               ...(params.taskBudget && {
                 taskBudget: {
                   total: params.taskBudget.total,

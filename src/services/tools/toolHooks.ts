@@ -464,10 +464,14 @@ export async function* runPreToolUseHooks(
       type: 'additionalContext'
       message: MessageUpdateLazy<AttachmentMessage>
     }
-  // stop execution
-  | { type: 'stop' }
+  // stop execution — densable may attach stopReason (ZFu infra default)
+  | { type: 'stop'; stopReason?: string }
 > {
   const hookStartTime = Date.now()
+  // densable `u`: last hookPermissionResult seen this PreToolUse pass
+  let lastHookPermissionResult: PermissionResult | undefined
+  // densable `d`: last stopReason from preventContinuation
+  let lastStopReason: string | undefined
   try {
     const appState = toolUseContext.getAppState()
 
@@ -498,17 +502,19 @@ export async function* runPreToolUseHooks(
             `PreToolUse:${tool.name}`,
             result.blockingError,
           )
+          const permissionResult: PermissionResult = {
+            behavior: 'deny',
+            message: denialMessage,
+            decisionReason: {
+              type: 'hook',
+              hookName: `PreToolUse:${tool.name}`,
+              reason: denialMessage,
+            },
+          }
+          lastHookPermissionResult = permissionResult
           yield {
             type: 'hookPermissionResult',
-            hookPermissionResult: {
-              behavior: 'deny',
-              message: denialMessage,
-              decisionReason: {
-                type: 'hook',
-                hookName: `PreToolUse:${tool.name}`,
-                reason: denialMessage,
-              },
-            },
+            hookPermissionResult: permissionResult,
           }
         }
         // Check if hook wants to prevent continuation
@@ -518,6 +524,7 @@ export async function* runPreToolUseHooks(
             shouldPreventContinuation: true,
           }
           if (result.stopReason) {
+            lastStopReason = result.stopReason
             yield { type: 'stopReason', stopReason: result.stopReason }
           }
         }
@@ -533,37 +540,43 @@ export async function* runPreToolUseHooks(
             reason: result.hookPermissionDecisionReason,
           }
           if (result.permissionBehavior === 'allow') {
+            const permissionResult: PermissionResult = {
+              behavior: 'allow',
+              updatedInput: result.updatedInput,
+              decisionReason,
+            }
+            lastHookPermissionResult = permissionResult
             yield {
               type: 'hookPermissionResult',
-              hookPermissionResult: {
-                behavior: 'allow',
-                updatedInput: result.updatedInput,
-                decisionReason,
-              },
+              hookPermissionResult: permissionResult,
             }
           } else if (result.permissionBehavior === 'ask') {
+            const permissionResult: PermissionResult = {
+              behavior: 'ask',
+              updatedInput: result.updatedInput,
+              message:
+                result.hookPermissionDecisionReason ||
+                `Hook PreToolUse:${tool.name} ${getRuleBehaviorDescription(result.permissionBehavior)} this tool`,
+              decisionReason,
+            }
+            lastHookPermissionResult = permissionResult
             yield {
               type: 'hookPermissionResult',
-              hookPermissionResult: {
-                behavior: 'ask',
-                updatedInput: result.updatedInput,
-                message:
-                  result.hookPermissionDecisionReason ||
-                  `Hook PreToolUse:${tool.name} ${getRuleBehaviorDescription(result.permissionBehavior)} this tool`,
-                decisionReason,
-              },
+              hookPermissionResult: permissionResult,
             }
           } else {
             // deny - updatedInput is irrelevant since tool won't run
+            const permissionResult: PermissionResult = {
+              behavior: result.permissionBehavior,
+              message:
+                result.hookPermissionDecisionReason ||
+                `Hook PreToolUse:${tool.name} ${getRuleBehaviorDescription(result.permissionBehavior)} this tool`,
+              decisionReason,
+            }
+            lastHookPermissionResult = permissionResult
             yield {
               type: 'hookPermissionResult',
-              hookPermissionResult: {
-                behavior: result.permissionBehavior,
-                message:
-                  result.hookPermissionDecisionReason ||
-                  `Hook PreToolUse:${tool.name} ${getRuleBehaviorDescription(result.permissionBehavior)} this tool`,
-                decisionReason,
-              },
+              hookPermissionResult: permissionResult,
             }
           }
         }
@@ -654,11 +667,27 @@ export async function* runPreToolUseHooks(
             }),
           },
         }
-        yield { type: 'stop' }
+        // densable: if a permission decision was already made (u), re-yield it
+        // and return — do NOT stop as infra failure (misreport as user reject).
+        // Else stop with ZFu stopReason so toolExecution emits a non-user halt.
+        if (lastHookPermissionResult) {
+          yield {
+            type: 'hookPermissionResult',
+            hookPermissionResult: lastHookPermissionResult,
+          }
+          return
+        }
+        yield {
+          type: 'stop',
+          stopReason:
+            lastStopReason ??
+            'PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed.',
+        }
       }
     }
   } catch (error) {
     logError(error)
+    // densable outer catch: bare stop (abort/timeout handled by isAbortError paths)
     yield { type: 'stop' }
     return
   }

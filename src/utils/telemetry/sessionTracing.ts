@@ -11,8 +11,15 @@
  */
 
 import { feature } from 'bun:bundle'
-import { context as otelContext, type Span, trace } from '@opentelemetry/api'
+import {
+  context as otelContext,
+  defaultTextMapGetter,
+  type Span,
+  trace,
+} from '@opentelemetry/api'
+import { W3CTraceContextPropagator } from '@opentelemetry/core'
 import { AsyncLocalStorage } from 'async_hooks'
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { AssistantMessage, UserMessage } from '../../types/message.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
@@ -27,6 +34,7 @@ import {
   type LLMRequestNewContext,
   truncateContent,
 } from './betaSessionTracing.js'
+import { setActiveInteractionOTelContext } from './interactionOtelContext.js'
 import {
   endInteractionPerfettoSpan,
   endLLMRequestPerfettoSpan,
@@ -44,7 +52,10 @@ export type { Span }
 export { isBetaTracingEnabled, type LLMRequestNewContext }
 
 // Message type for API calls (UserMessage or AssistantMessage)
-type APIMessage = UserMessage | AssistantMessage
+type APIMessage =
+  | UserMessage
+  | AssistantMessage
+  | { type: string; message?: { role?: string; content?: unknown } }
 
 type SpanType =
   | 'interaction'
@@ -68,6 +79,25 @@ interface SpanContext {
 // it and the WeakRef goes stale.
 const interactionContext = new AsyncLocalStorage<SpanContext | undefined>()
 const toolContext = new AsyncLocalStorage<SpanContext | undefined>()
+
+/**
+ * densable 2.1.214 #41 — OTel Context from interaction ALS when the active
+ * OTel async context has no span (timers / fire-and-forget after turn fork).
+ * Used by getOTelEventParentContext so log records keep interaction trace_id.
+ */
+export function getInteractionOTelContext():
+  | ReturnType<typeof otelContext.active>
+  | undefined {
+  const store = interactionContext.getStore()
+  if (!store || store.ended) return undefined
+  const sc = store.span.spanContext()
+  if (!trace.isSpanContextValid(sc)) return undefined
+  return trace.setSpan(otelContext.active(), store.span)
+}
+
+function syncInteractionOTelBridge(): void {
+  setActiveInteractionOTelContext(getInteractionOTelContext())
+}
 const activeSpans = new Map<string, WeakRef<SpanContext>>()
 // Spans not stored in ALS (LLM request, blocked-on-user, tool execution, hook)
 // need a strong reference to prevent GC from collecting the SpanContext before
@@ -194,6 +224,7 @@ export function startInteractionSpan(userPrompt: string): Span {
       }
       activeSpans.set(spanId, new WeakRef(spanContextObj))
       interactionContext.enterWith(spanContextObj)
+      syncInteractionOTelBridge()
       return dummySpan
     }
     return trace.getActiveSpan() || getTracer().startSpan('dummy')
@@ -213,9 +244,28 @@ export function startInteractionSpan(userPrompt: string): Span {
     'interaction.sequence': interactionSequence,
   })
 
-  const span = tracer.startSpan('claude_code.interaction', {
-    attributes,
-  })
+  // densable: dn()&&Z.TRACEPARENT ? propagation.extract(...) : active
+  // so headless/SDK interaction spans inherit parent trace_id/span_id.
+  const activeCtx = otelContext.active()
+  let parentCtx = activeCtx
+  if (getIsNonInteractiveSession() && process.env.TRACEPARENT) {
+    parentCtx = new W3CTraceContextPropagator().extract(
+      activeCtx,
+      {
+        traceparent: process.env.TRACEPARENT,
+        tracestate: process.env.TRACESTATE,
+      },
+      defaultTextMapGetter,
+    )
+  }
+
+  const span = tracer.startSpan(
+    'claude_code.interaction',
+    {
+      attributes,
+    },
+    parentCtx,
+  )
 
   // Add experimental attributes (new_context)
   addBetaInteractionAttributes(span, userPrompt)
@@ -230,6 +280,7 @@ export function startInteractionSpan(userPrompt: string): Span {
   activeSpans.set(spanId, new WeakRef(spanContextObj))
 
   interactionContext.enterWith(spanContextObj)
+  syncInteractionOTelBridge()
 
   return span
 }
@@ -257,6 +308,7 @@ export function endInteractionSpan(): void {
     // enterWith(undefined) is intentional: exit(() => {}) is a no-op because it
     // only suppresses the store inside the callback and returns immediately.
     interactionContext.enterWith(undefined)
+    syncInteractionOTelBridge()
     return
   }
 
@@ -269,6 +321,7 @@ export function endInteractionSpan(): void {
   spanContext.ended = true
   activeSpans.delete(getSpanId(spanContext.span))
   interactionContext.enterWith(undefined)
+  syncInteractionOTelBridge()
 }
 
 export function startLLMRequestSpan(

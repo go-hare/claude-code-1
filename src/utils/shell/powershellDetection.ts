@@ -1,7 +1,15 @@
-import { realpath, stat } from 'fs/promises'
+import { readlink, realpath, stat } from 'fs/promises'
+import { join } from 'path'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import { getPlatform } from '../platform.js'
 import { which } from '../which.js'
 
+/**
+ * densable `CKt` — probe a path is a regular file.
+ */
 async function probePath(p: string): Promise<string | null> {
   try {
     return (await stat(p)).isFile() ? p : null
@@ -11,15 +19,50 @@ async function probePath(p: string): Promise<string | null> {
 }
 
 /**
- * Attempts to find PowerShell on the system via PATH.
- * Prefers pwsh (PowerShell Core 7+), falls back to powershell (5.1).
+ * densable `KKh` — resolve WindowsApps store alias (readlink → probe target).
+ * Store app execution aliases are reparse points; plain stat may fail or hang.
+ */
+async function probeWindowsAppsAlias(p: string): Promise<string | null> {
+  let target: string
+  try {
+    target = await readlink(p)
+  } catch {
+    return null
+  }
+  return probePath(target)
+}
+
+/**
+ * densable `Be("shell_powershell_detect", reason)` — fallback path telemetry.
+ */
+function logPsDetectFallback(reason: string): void {
+  logEvent('shell_powershell_detect', {
+    reason:
+      reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+}
+
+/**
+ * densable `Ae("shell_powershell_detect")` — PATH pwsh success (no fallback).
+ */
+function logPsDetectPathHit(): void {
+  logEvent('shell_powershell_detect', {})
+}
+
+/**
+ * densable `YKh` — find PowerShell, preferring Core (pwsh) over Desktop 5.1.
  *
- * On Linux, if PATH resolves to a snap launcher (/snap/…) — directly or
- * via a symlink chain like /usr/bin/pwsh → /snap/bin/pwsh — probe known
- * apt/rpm install locations instead: the snap launcher can hang in
- * subprocesses while snapd initializes confinement, but the underlying
- * binary at /opt/microsoft/powershell/7/pwsh is reliable. On
- * Windows/macOS, PATH is sufficient.
+ * Order (densable 2.1.212):
+ * 1. `which("pwsh")` (+ Linux snap → /opt/microsoft|/usr/bin workaround)
+ * 2. Windows fixed paths when PATH has no pwsh:
+ *    - `%ProgramFiles%\PowerShell\7\pwsh.exe`
+ *    - `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe` (via readlink)
+ *    - `%USERPROFILE%\.dotnet\tools\pwsh.exe`
+ * 3. `which("powershell")` (5.1)
+ * 4. Windows `%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\powershell.exe`
+ *
+ * #11: when GP blocks PS5.1, uv_spawn fails if only 5.1 is on PATH; probing
+ * ProgramFiles\PowerShell\7 first keeps daemon/bg/hooks on PS7.
  */
 export async function findPowerShell(): Promise<string | null> {
   // Official CLAUDE_CODE_TEST_NO_PWSH — force "not found" for tests.
@@ -30,12 +73,10 @@ export async function findPowerShell(): Promise<string | null> {
   ) {
     return null
   }
+
   const pwshPath = await which('pwsh')
   if (pwshPath) {
-    // Snap launcher hangs in subprocesses. Prefer the direct binary.
-    // Check both the resolved PATH entry and its symlink target: on
-    // some distros /usr/bin/pwsh is a symlink to /snap/bin/pwsh, which
-    // would bypass a naive startsWith('/snap/') on the which() result.
+    // densable snap_workaround: PATH/snap launcher hangs in subprocesses.
     if (getPlatform() === 'linux') {
       const resolved = await realpath(pwshPath).catch(() => pwshPath)
       if (pwshPath.startsWith('/snap/') || resolved.startsWith('/snap/')) {
@@ -48,17 +89,62 @@ export async function findPowerShell(): Promise<string | null> {
             !direct.startsWith('/snap/') &&
             !directResolved.startsWith('/snap/')
           ) {
+            logPsDetectFallback('snap_workaround')
             return direct
           }
         }
       }
     }
+    logPsDetectPathHit()
     return pwshPath
+  }
+
+  // densable windows_fallback_path: fixed PS7 locations when `which(pwsh)` misses.
+  // Covers MSI install not on PATH, Store alias, and dotnet tool install.
+  if (getPlatform() === 'windows') {
+    const programFiles = process.env.ProgramFiles
+    const localAppData = process.env.LOCALAPPDATA
+    const userProfile = process.env.USERPROFILE
+    const fixed =
+      (programFiles
+        ? await probePath(join(programFiles, 'PowerShell', '7', 'pwsh.exe'))
+        : null) ??
+      (localAppData
+        ? await probeWindowsAppsAlias(
+            join(localAppData, 'Microsoft', 'WindowsApps', 'pwsh.exe'),
+          )
+        : null) ??
+      (userProfile
+        ? await probePath(join(userProfile, '.dotnet', 'tools', 'pwsh.exe'))
+        : null)
+    if (fixed) {
+      logPsDetectFallback('windows_fallback_path')
+      return fixed
+    }
   }
 
   const powershellPath = await which('powershell')
   if (powershellPath) {
+    logPsDetectFallback('fell_back_to_powershell_5')
     return powershellPath
+  }
+
+  // densable absolute 5.1 when PATH `powershell` is missing/blocked.
+  if (getPlatform() === 'windows') {
+    const systemRoot = process.env.SYSTEMROOT ?? 'C:\\Windows'
+    const desktop = await probePath(
+      join(
+        systemRoot,
+        'System32',
+        'WindowsPowerShell',
+        'v1.0',
+        'powershell.exe',
+      ),
+    )
+    if (desktop) {
+      logPsDetectFallback('fell_back_to_powershell_5')
+      return desktop
+    }
   }
 
   return null
@@ -67,8 +153,7 @@ export async function findPowerShell(): Promise<string | null> {
 let cachedPowerShellPath: Promise<string | null> | null = null
 
 /**
- * Gets the cached PowerShell path. Returns a memoized promise that
- * resolves to the PowerShell executable path or null.
+ * densable `pX` — memoized PowerShell path (session).
  */
 export function getCachedPowerShellPath(): Promise<string | null> {
   if (!cachedPowerShellPath) {
@@ -80,25 +165,13 @@ export function getCachedPowerShellPath(): Promise<string | null> {
 export type PowerShellEdition = 'core' | 'desktop'
 
 /**
- * Infers the PowerShell edition from the binary name without spawning.
- * - `pwsh` / `pwsh.exe` → 'core' (PowerShell 7+: supports `&&`, `||`, `?:`, `??`)
- * - `powershell` / `powershell.exe` → 'desktop' (Windows PowerShell 5.1:
- *   no pipeline chain operators, stderr-sets-$? bug, UTF-16 default encoding)
- *
- * PowerShell 6 (also `pwsh`, no `&&`) has been EOL since 2020 and is not
- * a realistic install target, so 'core' safely implies 7+ semantics.
- *
- * Used by the tool prompt to give version-appropriate syntax guidance so
- * the model doesn't emit `cmd1 && cmd2` on 5.1 (parser error) or avoid
- * `&&` on 7+ where it's the correct short-circuiting operator.
+ * densable `WBr` — edition from basename without spawning.
+ * - `pwsh` / `pwsh.exe` → 'core' (PowerShell 7+)
+ * - `powershell` / `powershell.exe` → 'desktop' (Windows PowerShell 5.1)
  */
 export async function getPowerShellEdition(): Promise<PowerShellEdition | null> {
   const p = await getCachedPowerShellPath()
   if (!p) return null
-  // basename without extension, case-insensitive. Covers:
-  //   C:\Program Files\PowerShell\7\pwsh.exe
-  //   /opt/microsoft/powershell/7/pwsh
-  //   C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
   const base = p
     .split(/[/\\]/)
     .pop()!

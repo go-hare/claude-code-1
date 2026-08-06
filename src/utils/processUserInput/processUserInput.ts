@@ -167,6 +167,21 @@ export async function processUserInput({
 
   const appState = context.getAppState()
 
+  // densable 2.1.214: after EndConversation sets endedByModel, refuse further
+  // queries until /clear or a new session (fnr / processUserInput gate).
+  if (appState.endedByModel) {
+    const { END_CONVERSATION_SESSION_ENDED_MESSAGE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
+    return {
+      messages: [
+        createSystemMessage(END_CONVERSATION_SESSION_ENDED_MESSAGE, 'warning'),
+      ],
+      shouldQuery: false,
+      resultText: END_CONVERSATION_SESSION_ENDED_MESSAGE,
+    }
+  }
+
   const result = await processUserInputBase(
     input,
     mode,

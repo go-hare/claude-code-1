@@ -20,6 +20,18 @@ import { isAnthropicAuthEnabled } from '../../utils/auth.js';
 export async function setupTokenHandler(root: Root): Promise<void> {
   logEvent('tengu_setup_token_command', {});
 
+  // densable Stt(!0) — setup-token is always claude.ai / subscription long-lived token
+  const { SETUP_TOKEN_FORCE_LOGIN_REFUSED_SUFFIX, validateForcedLoginMethod } = await import(
+    '../../utils/forceLoginMethod.js'
+  );
+  const pin = validateForcedLoginMethod(true);
+  if (!pin.valid) {
+    root.unmount();
+    process.stderr.write(`${pin.message}\n${SETUP_TOKEN_FORCE_LOGIN_REFUSED_SUFFIX}\n`);
+    logEvent('tengu_cli_setup_token_force_login_method_refused', {});
+    process.exit(1);
+  }
+
   const showAuthWarning = !isAnthropicAuthEnabled();
   const { ConsoleOAuthFlow } = await import('../../components/ConsoleOAuthFlow.js');
   await new Promise<void>(resolve => {

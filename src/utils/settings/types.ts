@@ -782,12 +782,22 @@ export const SettingsSchema = lazySchema(() =>
             'these exact sources are blocked from being added as marketplaces. The check happens BEFORE ' +
             'downloading, so blocked sources never touch the filesystem.',
         ),
-      // Force a specific login method: 'claudeai' for Claude Pro/Max, 'console' for Console billing
+      // densable 2.1.212: claudeai | console | gateway (Cloud gateway OIDC device flow)
       forceLoginMethod: z
-        .enum(['claudeai', 'console'])
+        .enum(['claudeai', 'console', 'gateway'])
         .optional()
+        .catch(undefined)
         .describe(
-          'Force a specific login method: "claudeai" for Claude Pro/Max, "console" for Console billing',
+          'Force a specific login method: "claudeai" for Claude Pro/Max, "console" for Console billing, "gateway" for the Cloud gateway OIDC device flow',
+        ),
+      // densable forceLoginGatewayUrl — pre-fill / auto-connect URL with forceLoginMethod:"gateway"
+      forceLoginGatewayUrl: z
+        .string()
+        .url()
+        .optional()
+        .catch(undefined)
+        .describe(
+          '@internal Cloud gateway URL to pre-fill and auto-connect to during login. Typically set in local managed settings alongside forceLoginMethod: "gateway" so users never type the URL. Hidden from public SDK types until Cloud gateway is documented.',
         ),
       // Organization UUID to use for OAuth login (will be added as URL param to authorization URL)
       forceLoginOrgUUID: z

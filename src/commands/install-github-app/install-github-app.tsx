@@ -709,5 +709,14 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
 }
 
 export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNode> {
+  // densable Pte / ufb: refuse interactive wizard when bg has no attached terminal.
+  // After `claude attach` / agent-view, attacherCaps is set and this allows.
+  const { isBgSessionWithoutTerminal, BG_NO_TERMINAL_INSTALL_GITHUB_APP_MSG } = await import(
+    '../../utils/concurrentSessions.js'
+  );
+  if (isBgSessionWithoutTerminal()) {
+    onDone(BG_NO_TERMINAL_INSTALL_GITHUB_APP_MSG, { display: 'system' });
+    return null;
+  }
   return <InstallGitHubApp onDone={onDone} />;
 }

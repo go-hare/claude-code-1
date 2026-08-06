@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import { randomUUID } from 'crypto'
-import { hostname, tmpdir } from 'os'
+import { homedir, hostname, tmpdir } from 'os'
 import { basename, join, resolve } from 'path'
 import { getRemoteSessionUrl } from '../constants/product.js'
 import { shutdownDatadog } from '../services/analytics/datadog.js'
@@ -2095,15 +2095,21 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
 
   // Set the bootstrap CWD so that trust checks, project config lookups, and
   // git utilities (getBranch, getRemoteUrl) resolve against the correct path.
-  const { setOriginalCwd, setCwdState } = await import('../bootstrap/state.js')
+  const { setOriginalCwd, setCwdState, getCwdState } = await import(
+    '../bootstrap/state.js'
+  )
   setOriginalCwd(dir)
   setCwdState(dir)
 
   // The bridge bypasses main.tsx (which renders the interactive TrustDialog via showSetupScreens),
   // so we must verify trust was previously established by a normal `claude` session.
+  // densable 2.1.214 #43: Rdr.homedir()===At() → special home-directory copy
   if (!checkHasTrustDialogAccepted()) {
+    const isHomeDir = homedir() === getCwdState()
     console.error(
-      `Error: Workspace not trusted. Please run \`claude\` in ${dir} first to review and accept the workspace trust dialog.`,
+      isHomeDir
+        ? `Error: Workspace not trusted. ${dir} is your home directory, and for security home-directory trust is never saved, so running \`claude\` here first won't help. Run \`claude rc\` from a project directory instead (run \`claude\` there once to accept the trust dialog).`
+        : `Error: Workspace not trusted. Please run \`claude\` in ${dir} first to review and accept the workspace trust dialog.`,
     )
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(1)
@@ -2817,7 +2823,9 @@ async function runBridgeHeadlessImpl(
   // (getBranch/getRemoteUrl) — which read from bootstrap CWD state set
   // below — resolve against the right repo.
   process.chdir(dir)
-  const { setOriginalCwd, setCwdState } = await import('../bootstrap/state.js')
+  const { setOriginalCwd, setCwdState, getCwdState } = await import(
+    '../bootstrap/state.js'
+  )
   setOriginalCwd(dir)
   setCwdState(dir)
 
@@ -2828,9 +2836,13 @@ async function runBridgeHeadlessImpl(
   const { initSinks } = await import('../utils/sinks.js')
   initSinks()
 
+  // densable 2.1.214 #43 headless: Rdr.homedir()===At() with em-dash home copy
   if (!checkHasTrustDialogAccepted()) {
+    const isHomeDir = homedir() === getCwdState()
     throw new BridgeHeadlessPermanentError(
-      `Workspace not trusted: ${dir}. Run \`claude\` in that directory first to accept the trust dialog.`,
+      isHomeDir
+        ? `Workspace not trusted: ${dir} is the home directory, whose trust is never saved \u2014 running \`claude\` there first won't help. Run Remote Control from a project directory instead.`
+        : `Workspace not trusted: ${dir}. Run \`claude\` in that directory first to accept the trust dialog.`,
     )
   }
 

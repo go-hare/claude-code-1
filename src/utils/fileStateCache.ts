@@ -11,7 +11,56 @@ export type FileState = {
   // frontmatter, truncated MEMORY.md). The model has only seen a partial view;
   // Edit/Write must require an explicit Read first. `content` here holds the
   // RAW disk bytes (for getChangedFiles diffing), not what the model saw.
+  // Also set on resume rehydrate when the Read result was token-cap truncated
+  // (densable isPartialView on Woo extract).
   isPartialView?: boolean
+  /**
+   * densable contentHash (Bun.hash → base36). When present, stale content
+   * equality (xOe) compares hashes instead of full strings.
+   */
+  contentHash?: string
+}
+
+/** densable DAu — content fingerprint for xOe. */
+export function fileStateContentHash(content: string): string {
+  return Bun.hash(content).toString(36)
+}
+
+/**
+ * densable HOe — true when the cached read is "full enough" for content-based
+ * stale bypass: offset starts at file start, not a partial view, and either
+ * no limit was applied or the returned content is shorter than the limit
+ * (so the whole file was returned).
+ */
+export function isFullEnoughFileRead(state: FileState): boolean {
+  if ((state.offset ?? 1) > 1 || state.isPartialView) {
+    return false
+  }
+  if (state.limit === undefined) {
+    return true
+  }
+  if (state.content === '') {
+    return false
+  }
+  // densable Tu(content, "\n") + 1 < limit
+  let newlines = 0
+  for (let i = 0; i < state.content.length; i++) {
+    if (state.content.charCodeAt(i) === 10) newlines++
+  }
+  return newlines + 1 < state.limit
+}
+
+/**
+ * densable xOe — content equality against disk, preferring contentHash when set.
+ */
+export function fileStateContentMatches(
+  state: FileState,
+  diskContent: string,
+): boolean {
+  if (state.contentHash !== undefined) {
+    return state.contentHash === fileStateContentHash(diskContent)
+  }
+  return state.content === diskContent
 }
 
 // Default max entries for read file state caches

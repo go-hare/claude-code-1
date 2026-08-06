@@ -371,6 +371,8 @@ async function handleMessage(
 
   const recipientColor = findTeammateColor(appState, recipientName)
 
+  // densable vKg: routing.content = Bs(t, 50) — full body lives only in the
+  // mailbox write above; tool_result / replay must not re-embed the whole message.
   return {
     data: {
       success: true,
@@ -381,7 +383,7 @@ async function handleMessage(
         target: `@${recipientName}`,
         targetColor: recipientColor,
         summary,
-        content,
+        content: truncate(content, 50),
       },
     },
   }
@@ -448,6 +450,8 @@ async function handleBroadcast(
     )
   }
 
+  // densable: same Bs(…, 50) preview on routing as unicast (token savings in
+  // tool_result / replayed history).
   return {
     data: {
       success: true,
@@ -458,7 +462,7 @@ async function handleBroadcast(
         senderColor,
         target: '@team',
         summary,
-        content,
+        content: truncate(content, 50),
       },
     },
   }
@@ -914,6 +918,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       return typeof input.message === 'string'
     },
 
+    // densable xKg.backfillObservableInput: content/reason/feedback via Bs(…, 50)
+    // so telemetry / observable clones never carry the full message body.
     backfillObservableInput(input) {
       if (typeof input.to !== 'string') return
 
@@ -922,11 +928,13 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       if (input.to === '*') {
         input.type = 'broadcast'
-        if (typeof input.message === 'string') input.content = input.message
+        if (typeof input.message === 'string') {
+          input.content = truncate(input.message, 50)
+        }
       } else if (typeof input.message === 'string') {
         input.type = 'message'
         input.recipient = recipientForDisplay(input.to)
-        input.content = input.message
+        input.content = truncate(input.message, 50)
       } else if (typeof input.message === 'object' && input.message !== null) {
         const msg = input.message as {
           type?: string
@@ -940,7 +948,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         if (msg.request_id !== undefined) input.request_id = msg.request_id
         if (msg.approve !== undefined) input.approve = msg.approve
         const content = msg.reason ?? msg.feedback
-        if (content !== undefined) input.content = content
+        if (content !== undefined) input.content = truncate(content, 50)
       }
     },
 

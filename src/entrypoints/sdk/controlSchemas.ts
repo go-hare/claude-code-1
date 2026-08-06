@@ -777,6 +777,14 @@ export const ControlResponseSchema = lazySchema(() =>
     subtype: z.literal('success'),
     request_id: z.string(),
     response: z.record(z.string(), z.unknown()).optional(),
+    // densable 2.1.214: prompt redelivery fields also on success responses
+    // (sibling of error schema; RemoteSessionManager may re-arm dialogs).
+    pending_permission_requests: z
+      .array(z.lazy(() => SDKControlRequestSchema()))
+      .optional(),
+    pending_user_dialog_requests: z
+      .array(z.lazy(() => SDKControlRequestSchema()))
+      .optional(),
   }),
 )
 

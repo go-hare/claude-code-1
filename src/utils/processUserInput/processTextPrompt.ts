@@ -48,11 +48,16 @@ export function processTextPrompt(
     typeof input === 'string'
       ? input
       : input.findLast(block => block.type === 'text')?.text || ''
+  // densable: message uuid is assigned before user_prompt OTel so message.uuid
+  // rides the event (vc("user_prompt", {..., "message.uuid": de})).
+  const messageUuid = uuid ?? randomUUID()
+
   if (otelPromptText) {
     void logOTelEvent('user_prompt', {
       prompt_length: String(otelPromptText.length),
       prompt: redactIfDisabled(otelPromptText),
       'prompt.id': promptId,
+      'message.uuid': messageUuid,
     })
   }
 
@@ -74,7 +79,7 @@ export function processTextPrompt(
         : input
     const userMessage = createUserMessage({
       content: [...textContent, ...imageContentBlocks],
-      uuid: uuid,
+      uuid: messageUuid,
       imagePasteIds: imagePasteIds.length > 0 ? imagePasteIds : undefined,
       permissionMode,
       isMeta: isMeta || undefined,
@@ -88,7 +93,7 @@ export function processTextPrompt(
 
   const userMessage = createUserMessage({
     content: input,
-    uuid,
+    uuid: messageUuid,
     permissionMode,
     isMeta: isMeta || undefined,
   })

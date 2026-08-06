@@ -11,6 +11,7 @@ import type {
 } from 'src/types/permissions.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { isCurrentDirectoryBareGitRepo } from 'src/utils/git.js'
+import { getPlatform } from 'src/utils/platform.js'
 import type { PermissionRule } from 'src/utils/permissions/PermissionRule.js'
 import type { PermissionUpdate } from 'src/utils/permissions/PermissionUpdateSchema.js'
 import {
@@ -82,6 +83,34 @@ const GIT_SAFETY_WRITE_CMDLETS = new Set([
   'export-csv',
   'export-clixml',
 ])
+
+/**
+ * densable `$mo` — basename stem of a write target for 5.1 cwd-first shadow
+ * detection (strip path + extension).
+ */
+export function psShadowStem(target: string): string {
+  const t = target.replace(/^['"]|['"]$/g, '').trim()
+  if (t === '') return ''
+  const base = t.split(/[/\\]/).pop() ?? t
+  const dot = base.lastIndexOf('.')
+  // Keep leading-dot names as whole stem; otherwise strip last extension
+  if (dot > 0) return base.slice(0, dot).toLowerCase()
+  return base.toLowerCase()
+}
+
+/**
+ * densable `Fmo` — command base (with extension) and stem (without).
+ */
+export function psCommandBaseAndStem(name: string): {
+  base: string
+  stem: string
+} {
+  const raw = name.replace(/^['"]|['"]$/g, '').trim()
+  const base = (raw.split(/[/\\]/).pop() ?? raw).toLowerCase()
+  const dot = base.lastIndexOf('.')
+  const stem = dot > 0 ? base.slice(0, dot) : base
+  return { base, stem }
+}
 
 /**
  * External archive-extraction applications that write files to cwd with
@@ -1163,6 +1192,47 @@ export async function powershellToolHasPermission(
       message:
         'Git command in a directory with bare-repository indicators (HEAD, objects/, refs/ in cwd without .git/HEAD). Git may execute hooks from cwd.',
     })
+  }
+
+  // densable 2.1.214 #2 — Windows PowerShell 5.1 cwd-first command shadowing.
+  // An earlier sub-command writes `./name.*` then a later bare `name` resolves
+  // to the written file under 5.1 (cwd before PATH). Force ask.
+  // densable string (offset ~237731942):
+  // "An earlier sub-command writes a file (./${G}.*) that would shadow the later `${G}` command under Windows PowerShell 5.1 cwd-first resolution."
+  if (getPlatform() === 'windows' && allSubCommands.length > 1) {
+    const writeStems = new Set<string>()
+    for (const r of getFileRedirections(parsed)) {
+      writeStems.add(psShadowStem(r.target))
+    }
+    let shadowedName: string | null = null
+    for (const { element } of allSubCommands) {
+      const { base, stem } = psCommandBaseAndStem(element.name)
+      if (
+        (stem !== '' && writeStems.has(stem)) ||
+        (base !== stem && writeStems.has(base))
+      ) {
+        shadowedName = element.name
+        break
+      }
+      for (const r of element.redirections ?? []) {
+        writeStems.add(psShadowStem(r.target))
+      }
+      const canonical = resolveToCanonical(element.name)
+      if (GIT_SAFETY_WRITE_CMDLETS.has(canonical)) {
+        for (const arg of element.args.flatMap(a => a.split(','))) {
+          // densable: strip leading dash-bound param names then normalize path
+          const stripped = arg.replace(/^[-\u2013\u2014\u2015]+[A-Za-z]+:?/, '')
+          const pathish = stripped.replace(/^['"]|['"]$/g, '').trim()
+          if (pathish !== '') writeStems.add(psShadowStem(pathish))
+        }
+      }
+    }
+    if (shadowedName !== null) {
+      decisions.push({
+        behavior: 'ask',
+        message: `An earlier sub-command writes a file (./${shadowedName}.*) that would shadow the later \`${shadowedName}\` command under Windows PowerShell 5.1 cwd-first resolution.`,
+      })
+    }
   }
 
   // Decision: git-internal-paths write guard — bash parity.

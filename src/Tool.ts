@@ -284,6 +284,13 @@ export type ToolUseContext = {
    *  Called by subagent streaming when a new API request starts. */
   pushApiMetricsEntry?: (ttftMs: number) => void
   setStreamMode?: (mode: SpinnerMode) => void
+  /**
+   * densable 2.1.214 #39 setRetryStatus / onRetryStatus — stalled API /
+   * retry countdown shown on the spinner row (advisor grace uses byte lastAt).
+   */
+  setRetryStatus?: (
+    status: import('./utils/advisorNetworkStall.js').RetryStatus | null,
+  ) => void
   onCompactProgress?: (event: CompactProgressEvent) => void
   setSDKStatus?: (status: SDKStatus) => void
   openMessageSelector?: () => void

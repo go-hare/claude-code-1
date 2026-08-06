@@ -318,7 +318,8 @@ function generateWordDiffElements(
 
     return (
       <Box key={key} flexDirection="row">
-        <NoSelect fromLeftEdge>
+        {/* densable 2.1.212 #29: keep gutter (line# + marker) from shrinking away */}
+        <NoSelect fromLeftEdge flexShrink={0}>
           <Text color={overrideTheme ? 'text' : undefined} backgroundColor={lineBgColor} dimColor={dim}>
             {lineNumStr}
             {diffPrefix}
@@ -403,7 +404,8 @@ function formatDiff(
       // so the visual continuity (solid red/green bar) is unchanged.
       return (
         <Box key={key} flexDirection="row">
-          <NoSelect fromLeftEdge>
+          {/* densable 2.1.212 #29: flexShrink:0 preserves line numbers + +/- markers */}
+          <NoSelect fromLeftEdge flexShrink={0}>
             <Text
               color={overrideTheme ? 'text' : undefined}
               backgroundColor={bgColor}

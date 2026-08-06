@@ -16,6 +16,13 @@
 import { mkdir, unlink, readdir, rm, lstat } from 'fs/promises'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
+import {
+  ATTACH_WAITING_REDRAW,
+  COLD_ATTACH_ONCE_READY,
+  formatColdAttachTranscriptPreview,
+  paintColdAttachPreview,
+} from './attachTranscriptPreview.js'
+import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { StringDecoder } from 'string_decoder'
 import type { Socket } from 'net'
 import { freemem } from 'os'
@@ -80,13 +87,21 @@ import { errorMessage } from '../utils/errors.js'
 
 export type { DispatchRequest } from './bgWorker.js'
 
+/** densable BG4 close(V): {displaced, skipPathCleanup} */
+export type BgManagerCloseOpts = {
+  /** Yield/handover: successor already owns the slot — do not unlink control sock / rm instance dir */
+  displaced?: boolean
+  /** densable skipPathCleanup — same unlink/rm skip as displaced for path cleanup */
+  skipPathCleanup?: boolean
+}
+
 export interface BgManagerInstance {
   handles: Map<string, BgWorker>
   dispatch(req: DispatchRequest): void
   leaseCount(): number
   liveHandleCount(): number
   killAll(reap?: boolean, sig?: string): number
-  close(): Promise<void>
+  close(opts?: BgManagerCloseOpts): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -1036,7 +1051,13 @@ export async function startBgManager(opts?: {
       return count
     },
     killAll,
-    async close() {
+    // densable:
+    //   close:async(V)=>{let G=V?.displaced??!1;...;w.close({skipUnlink:G||V?.skipPathCleanup});
+    //     ... if(!G&&o.size===0&&!x.parseFailed&&!V?.skipPathCleanup&&!windows) rm(instanceDir)
+    async close(opts?: BgManagerCloseOpts) {
+      const displaced = opts?.displaced ?? false
+      const skipPathCleanup = opts?.skipPathCleanup ?? false
+      const skipUnlink = displaced || skipPathCleanup
       closed = true
       clearInterval(tickTimer)
       watcher.close()
@@ -1045,11 +1066,13 @@ export async function startBgManager(opts?: {
         heldSpare.dispose()
         heldSpare = null
       }
-      await controlSocket.close()
+      await controlSocket.close({ skipUnlink })
       for (const w of handles.values()) w.stop()
       await Promise.allSettled([...pendingSettleWrites])
-      // Clean up instance dir if empty
+      // Clean up instance dir if empty — densable skips when displaced/skipPathCleanup
       if (
+        !displaced &&
+        !skipPathCleanup &&
         handles.size === 0 &&
         !roster.parseFailed &&
         process.platform !== 'win32'
@@ -1181,6 +1204,115 @@ async function handleControlRequest(
       const d = req.d as DispatchRequest
       if (!d || !d.short || !d.sessionId) {
         return { ok: false, error: 'missing dispatch fields' }
+      }
+      // densable Xyr core: refuse fork handoff with no materialized transcript
+      // on respawn / resume before cold spawn (forceRefusalRetry bypasses).
+      // Non-refuse empty path runs BJe orphan rename inside the gate; refuse
+      // path may densable-gpn queue initialPrompt.
+      if (
+        d.source === 'respawn' ||
+        d.launch?.mode === 'resume' ||
+        d.forceRefusalRetry
+      ) {
+        const state = readBgJobState(d.short)
+        const {
+          evaluateRespawnTranscriptGate,
+          queueRespawnInitialPrompt,
+          resolveRespawnLaunchPrompt,
+          clearQueuedPrompt,
+          FORK_TRANSCRIPT_NEVER_MATERIALIZED,
+        } = await import('./transcriptProbe.js')
+        const resumeSessionId =
+          state?.resumeSessionId ??
+          (d.launch?.mode === 'resume'
+            ? (d.launch.sessionId ?? d.sessionId)
+            : d.sessionId)
+        const jobSessionId = state?.sessionId ?? d.sessionId
+        const gate = await evaluateRespawnTranscriptGate({
+          short: d.short,
+          sessionId: jobSessionId,
+          resumeSessionId,
+          cwd: state?.cwd ?? d.cwd,
+          bgIsolation: state?.bgIsolation ?? d.isolation ?? 'none',
+          linkScanPath: state?.linkScanPath,
+          force: d.force === true,
+          forceRefusalRetry: d.forceRefusalRetry === true,
+          forceFreshPrompt: d.launch?.mode === 'prompt',
+        })
+        if (!gate.allow) {
+          log(
+            `bg: respawn of ${d.short} refused — fork handoff whose own transcript never materialized`,
+          )
+          // densable gpn: queue initialPrompt when present so next force retry can use it
+          let queued = false
+          const initialPrompt =
+            d.initialPrompt ??
+            (typeof d.intent === 'string' && d.intent.trim()
+              ? d.intent
+              : undefined)
+          if (initialPrompt && state) {
+            queued = await queueRespawnInitialPrompt(
+              d.short,
+              state,
+              initialPrompt,
+            )
+          }
+          return {
+            ok: false,
+            error: gate.error,
+            errorCode: FORK_TRANSCRIPT_NEVER_MATERIALIZED,
+            code: FORK_TRANSCRIPT_NEVER_MATERIALIZED,
+            queued,
+          }
+        }
+
+        // densable Xyr `$` / gpn consume (job_respawn path only — not /resume picker):
+        //   w = hasMessages; N = resumeSessionId !== job.sessionId
+        //   $ = initialPrompt ?? queuedPrompt ?? (w||N ? undefined : intent)
+        //   D = [...R?["--resume",id]:[], ...$?["--",$]:[]]
+        //   success → queuedPrompt: void 0
+        if (d.source === 'respawn' || d.forceRefusalRetry || d.force) {
+          const hasMessages = gate.probe.hasMessages
+          // densable N: resume id points at a different session than the job's own
+          const resumePointsElsewhere =
+            state?.resumeSessionId !== undefined &&
+            state.resumeSessionId !== jobSessionId
+          const skipIntentReplay = hasMessages || resumePointsElsewhere
+          const resolvedPrompt = resolveRespawnLaunchPrompt({
+            initialPrompt: d.initialPrompt,
+            queuedPrompt: state?.queuedPrompt,
+            intent:
+              typeof d.intent === 'string' && d.intent.trim()
+                ? d.intent
+                : state?.intent,
+            skipIntentReplay,
+          })
+          // densable R = w && !x (x=exec). Local: resume when messages and not force-fresh.
+          const useResume = hasMessages && !d.forceRefusalRetry && !d.force
+          // densable D: only append `-- $` when $ is defined. Never trust
+          // client launch.args for intent replay when $ is void 0 (w||N).
+          const promptArgs = resolvedPrompt
+            ? (['--', resolvedPrompt] as string[])
+            : []
+          if (useResume) {
+            d.launch = {
+              ...d.launch,
+              mode: 'resume',
+              sessionId: d.launch?.sessionId ?? resumeSessionId ?? d.sessionId,
+              flagArgs: d.launch?.flagArgs ?? d.respawnFlags,
+              args: promptArgs,
+            }
+          } else {
+            d.launch = {
+              mode: 'prompt',
+              args: promptArgs,
+              flagArgs: d.launch?.flagArgs ?? d.respawnFlags,
+            }
+          }
+          if (state?.queuedPrompt !== undefined) {
+            await clearQueuedPrompt(d.short)
+          }
+        }
       }
       dispatch(d)
       // Wait for worker to acknowledge (await-ack pattern)
@@ -1323,6 +1455,64 @@ async function handleControlRequest(
 // Attach op handler — official case "attach" in JmO
 // ---------------------------------------------------------------------------
 
+/**
+ * densable liveTranscriptPath / resume launch.transcriptPath resolution.
+ * Prefer projects/<hash>/<sessionId>.jsonl under CLAUDE_CONFIG_DIR.
+ *
+ * densable 2.1.214 #30: only accept regular files — a directory named
+ * `*.jsonl` (or unreadable non-file) must not shadow the real transcript.
+ */
+function isRegularTranscriptFile(path: string): boolean {
+  try {
+    const { statSync } = require('fs') as typeof import('fs')
+    return statSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+function resolveAttachTranscriptPath(worker: BgWorker): string | undefined {
+  const launch = worker.dispatch.launch
+  // densable: resume launch may carry explicit transcriptPath (typed loosely)
+  const launchAny = launch as {
+    mode: string
+    sessionId?: string
+    transcriptPath?: string
+  }
+  if (
+    typeof launchAny.transcriptPath === 'string' &&
+    launchAny.transcriptPath.length > 0 &&
+    isRegularTranscriptFile(launchAny.transcriptPath)
+  ) {
+    return launchAny.transcriptPath
+  }
+  const sessionId =
+    (launch.mode === 'resume' ? launch.sessionId : undefined) ||
+    worker.record.sessionId ||
+    worker.dispatch.sessionId
+  if (!sessionId) return undefined
+  // Absolute snapshot path (keepParent fork)
+  if (
+    sessionId.endsWith('.jsonl') ||
+    sessionId.includes('/') ||
+    sessionId.includes('\\')
+  ) {
+    return isRegularTranscriptFile(sessionId) ? sessionId : undefined
+  }
+  try {
+    const projectsDir = join(getClaudeConfigHomeDir(), 'projects')
+    // Synchronous scan — attach path must not await.
+    const { readdirSync } = require('fs') as typeof import('fs')
+    for (const d of readdirSync(projectsDir)) {
+      const candidate = join(projectsDir, d, `${sessionId}.jsonl`)
+      if (isRegularTranscriptFile(candidate)) return candidate
+    }
+  } catch {
+    // ignore
+  }
+  return undefined
+}
+
 function handleAttachOp(
   handles: Map<string, BgWorker>,
   dispatch: (
@@ -1366,7 +1556,39 @@ function handleAttachOp(
     }
   }
 
-  // Send ack with initial state
+  const cols = (req.cols as number) || 120
+  const rows = (req.rows as number) || 30
+  const attachId = (req.attachId as string) ?? socket
+  const holdingFrame = req.holdingFrame as boolean | undefined
+  const caps = req.caps as
+    | { colorLevel?: number; systemTheme?: string }
+    | undefined
+
+  // densable: cold-attach Nia preview while worker is still booting.
+  // isBooting ≈ phase not running / pid 0 / state starting|resuming|adopted.
+  const isBooting =
+    worker.getPhase().kind !== 'running' ||
+    worker.record.pid === 0 ||
+    worker.record.state === 'starting' ||
+    worker.record.state === 'resuming' ||
+    worker.record.state === 'adopted'
+  const liveTranscriptPath = resolveAttachTranscriptPath(worker)
+  let cachedPreview: string | null = null
+  if (holdingFrame !== true && isBooting && liveTranscriptPath) {
+    // densable Nia(path, cols, rows, { colorLevel, theme })
+    cachedPreview = formatColdAttachTranscriptPreview(
+      liveTranscriptPath,
+      cols,
+      rows,
+      {
+        colorLevel: caps?.colorLevel,
+        theme: caps?.systemTheme,
+        systemTheme: caps?.systemTheme,
+      },
+    )
+  }
+
+  // Send ack with initial state (densable includes cached flag)
   addLease(socket, null)
   socket.write(
     JSON.stringify({
@@ -1376,13 +1598,13 @@ function handleAttachOp(
       via: worker.via,
       tempo: worker.record.tempo,
       state: worker.record.state,
+      cached: cachedPreview !== null,
     }) + '\n',
   )
-
-  const cols = (req.cols as number) || 120
-  const rows = (req.rows as number) || 30
-  const attachId = (req.attachId as string) ?? socket
-  const holdingFrame = req.holdingFrame as boolean | undefined
+  if (cachedPreview !== null && !socket.destroyed) {
+    socket.write(paintColdAttachPreview(cachedPreview))
+  }
+  void caps
 
   // Buffering: collect output until we see clear-screen or timeout
   let outputBuffer: string[] | null = []
@@ -1405,7 +1627,9 @@ function handleAttachOp(
 
   const flushTimeout = setTimeout(() => {
     const isEmpty = outputBuffer !== null && bufferBytes === 0
-    const shouldHold = isEmpty && holdingFrame === true
+    // densable: hold stall text when holdingFrame OR cached preview already painted
+    const shouldHold =
+      isEmpty && (holdingFrame === true || cachedPreview !== null)
 
     if (!shouldHold) flushBuffer(true)
 
@@ -1418,8 +1642,8 @@ function handleAttachOp(
           state === 'resuming' ||
           state === 'adopted' ||
           state === 'crashed'
-            ? 'Session is starting — it will appear once ready. Ctrl+Z to detach'
-            : 'Waiting for session to redraw… Ctrl+Z to detach'
+            ? COLD_ATTACH_ONCE_READY
+            : ATTACH_WAITING_REDRAW
         socket.write(`${CLEAR_SCREEN}${ERASE_LINE}\n  \x1B[2m${msg}\x1B[0m\n`)
       }
 
@@ -1861,7 +2085,7 @@ function throwSubmitDispatchError(
 
 /**
  * Create and submit a dispatch request.
- * Tries control socket first, falls back to file-based dispatch.
+ * densable xSe/Uq_ shell (gate → mkdir tmp → seed → isa → rescue).
  * On short-alive (EALIVE) throws with `alive:true` — no file fallback.
  */
 export async function submitDispatch(opts: {
@@ -1879,6 +2103,8 @@ export async function submitDispatch(opts: {
   exec?: string
   cwd?: string
   extraArgs?: string[]
+  /** densable argv for e6_ gate (shell `--bg` path). */
+  argv?: string[]
   source?: string
   sessionId?: string
   /** Resume an existing transcript in a newly forked background session. */
@@ -1901,210 +2127,48 @@ export async function submitDispatch(opts: {
    */
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   memoryToggledOff?: boolean
+  bgIsolation?: 'none' | 'worktree' | 'default'
 }): Promise<{ short: string; sessionId: string }> {
-  const { randomUUID } = await import('crypto')
-  // New job session id (fork target). Resume source is resumeSessionId.
-  const sessionId = opts.providedSessionId ?? opts.sessionId ?? randomUUID()
-  const short = sessionId.slice(0, 8)
-  // Prefer explicit name; empty intent should not become "new session" when
-  // A8q already seeded (left-arrow empty). deriveSessionName('') → "new session".
-  const derivedName =
-    opts.name ??
-    (opts.exec?.trim()
-      ? opts.exec.trim().slice(0, 40)
-      : opts.intent.trim()
-        ? deriveSessionName(opts.intent)
-        : undefined)
-
-  // Official BF_: merge permission/memory into worker env.
-  const inheritEnv: Record<string, string> = {}
-  if (opts.sessionPermissionRules) {
-    inheritEnv.CLAUDE_BG_SESSION_PERMISSION_RULES = JSON.stringify(
-      opts.sessionPermissionRules,
-    )
-  }
-  if (opts.memoryToggledOff) {
-    inheritEnv.CLAUDE_BG_MEMORY_TOGGLED_OFF = '1'
-  }
-
-  const env = {
-    ...inheritEnv,
-    ...(opts.env ?? {}),
-    ...(opts.reattachEnv ?? {}),
-  }
-
-  // densable launch: n?.exec ? {mode:"exec", ...$F_(n.exec)} : resume | prompt
-  const { shellExecSpec } = await import('./bgWorker.js')
-  let launch: DispatchRequest['launch']
-  if (opts.exec !== undefined && opts.exec.trim()) {
-    const spec = shellExecSpec(opts.exec.trim())
-    launch = {
-      mode: 'exec',
-      cmd: spec.cmd,
-      args: spec.args,
-    }
-  } else if (opts.resumeSessionId) {
-    launch = {
-      mode: 'resume',
-      sessionId: opts.resumeSessionId,
-      fork: opts.forkSession !== false,
-      flagArgs: [
-        ...(derivedName ? ['-n', derivedName] : []),
-        ...(opts.agent ? ['--agent', opts.agent] : []),
-        ...(opts.extraArgs || []),
-      ],
-    }
-  } else {
-    launch = {
-      mode: 'prompt',
-      sessionId,
-      args: [
-        '--session-id',
-        sessionId,
-        ...(derivedName ? ['-n', derivedName] : []),
-        ...(opts.agent ? ['--agent', opts.agent] : []),
-        ...(opts.extraArgs || []),
-      ],
-    }
-  }
-
-  // densable uea: nonce for await-ack / short-alive (EALIVE) discrimination.
-  const nonce = randomUUID().slice(0, 8)
-
-  const dispatch: DispatchRequest = {
-    short,
-    sessionId,
-    nonce,
-    // densable exec jobs still carry intent for Fleet label (often the cmd)
-    intent: opts.exec?.trim() ? opts.exec.trim() : opts.intent,
-    name: derivedName,
+  const { xSeSpawn } = await import('./xSeSpawn.js')
+  const result = await xSeSpawn({
+    intent: opts.intent,
+    name: opts.name,
     agent: opts.agent,
     routine: opts.routine,
-    cwd: opts.cwd || process.cwd(),
-    respawnFlags: opts.extraArgs || [],
+    exec: opts.exec,
+    cwd: opts.cwd,
+    extraArgs: opts.extraArgs,
+    argv: opts.argv,
     source: opts.source || 'fleet',
-    createdAt: Date.now(),
-    seed: {
-      intent: opts.exec?.trim() ? opts.exec.trim() : opts.intent,
-      name: opts.name,
-    },
+    sessionId: opts.sessionId,
+    resumeSessionId: opts.resumeSessionId,
+    forkSession: opts.forkSession,
+    providedSessionId: opts.providedSessionId,
     isolation: opts.isolation,
     worktree: opts.worktree,
-    env: Object.keys(env).length > 0 ? env : undefined,
-    reattachEnv:
-      Object.keys(opts.reattachEnv ?? {}).length > 0
-        ? opts.reattachEnv
-        : undefined,
-    launch,
+    env: opts.env,
+    reattachEnv: opts.reattachEnv,
+    sessionPermissionRules: opts.sessionPermissionRules,
+    memoryToggledOff: opts.memoryToggledOff,
+    bgIsolation: opts.bgIsolation,
+    ackTimeoutMs: DEFAULT_WORKER_ACK_TIMEOUT_MS,
+  })
+
+  if (result.ok) {
+    return { short: result.short, sessionId: result.sessionId }
   }
 
-  // Try control socket
-  const { sendControlRequest } = await import('./controlSocketClient.js')
-  // Align client socket timeout + server awaitWorkerAck (req.timeoutMs).
-  // Must cover claimSpare await sendClaim (~5s) + register; densable D3q
-  // fire-and-forget needs less headroom. Keep client == server to avoid
-  // early client cut → file-fallback double-dispatch.
-  const DISPATCH_ACK_TIMEOUT_MS = DEFAULT_WORKER_ACK_TIMEOUT_MS
-  const resp = await sendControlRequest(
-    {
-      op: 'dispatch',
-      proto: PROTO_VERSION,
-      d: dispatch,
-      timeoutMs: DISPATCH_ACK_TIMEOUT_MS,
-    },
-    { timeoutMs: DISPATCH_ACK_TIMEOUT_MS },
-  )
-
-  if (resp.ok) {
-    // densable yNo / await-ack: settled crashed|failed must NOT look like success
-    // — hNo only disowns on n.ok; treating crashed as ok leaves shells orphaned
-    // and skip abandon.
-    const settled = resp.settled
-    if (
-      typeof settled === 'string' &&
-      (settled === 'crashed' || settled === 'failed' || settled === 'killed')
-    ) {
-      throwSubmitDispatchError(
-        `Background dispatch settled immediately (${settled})${
-          typeof resp.error === 'string' && resp.error ? `: ${resp.error}` : ''
-        }`,
-        { short, reason: 'settled' },
-      )
-    }
-    return { short, sessionId }
-  }
-
-  // densable BF_: short-alive → {ok:false, alive:true}; no file fallback.
-  // code may be EALIVE / ealive (Pwp.EALIVE); reason short-alive / short_alive.
-  const code =
-    typeof resp.code === 'string' ? resp.code.toUpperCase() : undefined
-  const reasonRaw =
-    typeof resp.reason === 'string'
-      ? resp.reason
-      : typeof resp.error === 'string'
-        ? resp.error
-        : undefined
-  const reasonNorm = reasonRaw?.toLowerCase().replace(/_/g, '-') ?? ''
-  if (
-    code === 'EALIVE' ||
-    reasonNorm === 'short-alive' ||
-    resp.alive === true
-  ) {
-    throwSubmitDispatchError(
-      typeof resp.error === 'string' && resp.error
-        ? resp.error
-        : `Session ${short} is already running — \`claude attach ${short}\` to join it`,
-      {
-        alive: true,
-        reason: 'short_alive',
-        short,
-        code: 'EALIVE',
-      },
-    )
-  }
-
-  // ESTALE: previous handle still settling — do not double-dispatch via file.
-  if (code === 'ESTALE' || reasonNorm === 'stale-short') {
-    throwSubmitDispatchError(
-      typeof resp.error === 'string' && resp.error
-        ? resp.error
-        : 'Previous session is still shutting down — try again in a moment',
-      {
-        alive: false,
-        reason: 'stale_short',
-        short,
-        code: 'ESTALE',
-      },
-    )
-  }
-
-  // Worker-ack timeout: do NOT file-fallback (would double-dispatch after a
-  // slow-but-alive spawn). Only use file fallback on genuine disconnect.
-  if (resp.timeout === true || code === 'ETIMEOUT') {
-    throwSubmitDispatchError(
-      typeof resp.error === 'string' && resp.error
-        ? resp.error
-        : 'Background dispatch worker ack timeout',
-      { reason: 'ack_timeout', short, code: 'ETIMEOUT' },
-    )
-  }
-
-  // Fallback: write dispatch file (ENOCONN / daemon offline)
-  const dispatchDir = getDispatchDir()
-  await mkdir(dispatchDir, { recursive: true }).catch(() => {})
-  const { writeFile } = await import('fs/promises')
-  await writeFile(join(dispatchDir, `${short}.json`), JSON.stringify(dispatch))
-
-  return { short, sessionId }
-}
-
-function deriveSessionName(intent: string): string {
-  const words = intent
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .split(/\s+/)
-    .filter(Boolean)
-  if (words.length === 0) return 'new session'
-  const name = words.slice(0, 4).join(' ')
-  return name.length > 30 ? name.slice(0, 29) + '…' : name
+  throwSubmitDispatchError(result.error, {
+    alive: result.alive,
+    reason: result.reason,
+    short: result.short,
+    code:
+      result.reason === 'short_alive'
+        ? 'EALIVE'
+        : result.reason === 'stale_short'
+          ? 'ESTALE'
+          : result.reason === 'ack_timeout'
+            ? 'ETIMEOUT'
+            : undefined,
+  })
 }

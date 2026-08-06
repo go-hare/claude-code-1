@@ -1,6 +1,12 @@
 import { getAllowedSettingSources } from '../../bootstrap/state.js'
 
 /**
+ * densable `Jme` — max size for a `--settings` path (2 MiB).
+ * Device / directory / oversize paths fail startup before init().
+ */
+export const FLAG_SETTINGS_MAX_BYTES = 2 * 1024 * 1024
+
+/**
  * All possible sources where settings can come from
  * Order matters - later sources override earlier ones
  */

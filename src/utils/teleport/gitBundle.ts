@@ -75,9 +75,11 @@ async function countPackStats(
 // on a commit-tree of baseRef^{tree} so the container can diff against it;
 // identical trees → no_changes.
 // densable also pre-skips tiers via JCu size-pack:
-//   a = size > max → skip --all
-//   l = size > 3*max → skip HEAD
-//   c = l && (size > 100*max || inPack > 5e6) → too_large before squash
+//   a = forceScope==="squashed"  (ultrareview no_merge_base empty-tree)
+//   l = a || size > max → skip --all
+//   u = a || size > 3*max → skip HEAD
+//   d = (size > 3*max) && (size > 100*max || inPack > 5e6) → too_large before squash
+// forceScope only skips --all/HEAD; size gates still decide skipSquash.
 async function _bundleWithFallback(
   gitRoot: string,
   bundlePath: string,
@@ -85,6 +87,7 @@ async function _bundleWithFallback(
   hasStash: boolean,
   signal: AbortSignal | undefined,
   baseRef?: string,
+  forceScope?: BundleScope,
 ): Promise<BundleCreateResult> {
   // --all picks up refs/seed/stash; HEAD needs it explicit.
   const extra = hasStash ? ['refs/seed/stash'] : []
@@ -99,13 +102,21 @@ async function _bundleWithFallback(
     gitRoot,
     signal,
   )
-  const skipAll = packBytes !== null && packBytes > maxBytes
-  const skipHead = packBytes !== null && packBytes > 3 * maxBytes
+  const forcedSquash = forceScope === 'squashed'
+  const sizeSkipAll = packBytes !== null && packBytes > maxBytes
+  const sizeSkipHead = packBytes !== null && packBytes > 3 * maxBytes
+  const skipAll = forcedSquash || sizeSkipAll
+  const skipHead = forcedSquash || sizeSkipHead
+  // densable `d` uses size-based `c` only — forceScope does not auto too_large
   const skipSquash =
-    skipHead &&
+    sizeSkipHead &&
     ((packBytes !== null && packBytes > 100 * maxBytes) ||
       (inPackCount !== null && inPackCount > 5_000_000))
-  if (skipAll) {
+  if (forcedSquash) {
+    logForDebugging(
+      '[gitBundle] forceScope=squashed — skipping --all and HEAD tiers',
+    )
+  } else if (skipAll) {
     logForDebugging(
       `[gitBundle] size-pack ${((packBytes ?? 0) / 1024 / 1024).toFixed(0)}MB > ${(maxBytes / 1024 / 1024).toFixed(0)}MB cap; skipping --all${skipHead ? ' and HEAD' : ''}${skipSquash ? ' and squashed' : ''}`,
     )
@@ -248,11 +259,17 @@ async function _bundleWithFallback(
 // seed_bundle_file_id. --all → HEAD → squashed-root fallback chain.
 // Tracked WIP via stash create → refs/seed/stash (or baked into the
 // squashed tree); untracked not captured.
-// densable Jes opts: { cwd, signal, baseRef } — baseRef is ultrareview
-// merge-base SHA (bundleBaseRef on teleportToRemote).
+// densable Jes opts: { cwd, signal, baseRef, forceScope } — baseRef is
+// ultrareview merge-base / EMPTY_TREE_SHA; forceScope:"squashed" for
+// no_merge_base empty-tree fallback (skip --all/HEAD tiers).
 export async function createAndUploadGitBundle(
   config: FilesApiConfig,
-  opts?: { cwd?: string; signal?: AbortSignal; baseRef?: string },
+  opts?: {
+    cwd?: string
+    signal?: AbortSignal
+    baseRef?: string
+    forceScope?: BundleScope
+  },
 ): Promise<BundleUploadResult> {
   // CLAUDE_CODE_SKIP_REPO_UPLOAD is densable-only (2.1.207 schema export, no
   // product consumer). Do not short-circuit upload here.
@@ -356,6 +373,7 @@ export async function createAndUploadGitBundle(
       hasWip,
       opts?.signal,
       opts?.baseRef,
+      opts?.forceScope,
     )
 
     if (!bundle.ok) {

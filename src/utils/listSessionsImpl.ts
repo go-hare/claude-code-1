@@ -171,22 +171,27 @@ export async function listCandidates(
   doStat: boolean,
   projectPath?: string,
 ): Promise<Candidate[]> {
-  let names: string[]
+  // densable NMt / 2.1.214 #30: withFileTypes + isFile() so a directory named
+  // `*.jsonl` (or unreadable non-file) cannot enter the candidate set and
+  // break reopen / list when the real session file lives elsewhere.
+  let dirents: Dirent[]
   try {
-    names = await readdir(projectDir)
+    dirents = await readdir(projectDir, { withFileTypes: true })
   } catch {
     return []
   }
 
   const results = await Promise.all(
-    names.map(async (name): Promise<Candidate | null> => {
-      if (!name.endsWith('.jsonl')) return null
-      const sessionId = validateUuid(name.slice(0, -6))
+    dirents.map(async (dirent): Promise<Candidate | null> => {
+      if (!dirent.isFile() || !dirent.name.endsWith('.jsonl')) return null
+      const sessionId = validateUuid(dirent.name.slice(0, -6))
       if (!sessionId) return null
-      const filePath = join(projectDir, name)
+      const filePath = join(projectDir, dirent.name)
       if (!doStat) return { sessionId, filePath, mtime: 0, projectPath }
       try {
         const s = await stat(filePath)
+        // densable: race / non-file after readdir — skip
+        if (!s.isFile()) return null
         return { sessionId, filePath, mtime: s.mtime.getTime(), projectPath }
       } catch {
         return null

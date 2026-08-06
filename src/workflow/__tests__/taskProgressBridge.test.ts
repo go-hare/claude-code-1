@@ -109,7 +109,8 @@ describe('mapProgressEventToSdk', () => {
       index: 1,
       tokens: 12,
       toolCalls: 2,
-      state: 'start',
+      // densable mid-flight tick is state:"progress" (IGg kGg full-snapshot gate)
+      state: 'progress',
       lastToolName: 'Grep',
     })
     expect(
@@ -262,9 +263,17 @@ describe('installWorkflowTaskProgressBridge', () => {
     expect(frame.workflowProgress?.some(p => p.type === 'workflow_phase')).toBe(
       true,
     )
-    expect(
-      frame.workflowProgress?.filter(p => p.type === 'workflow_agent').length,
-    ).toBeGreaterThanOrEqual(2)
+    // densable j8r emits cumulative task snapshot (upsert by index) — not raw deltas
+    const agents =
+      frame.workflowProgress?.filter(p => p.type === 'workflow_agent') ?? []
+    expect(agents.length).toBe(1)
+    expect(agents[0]).toMatchObject({
+      type: 'workflow_agent',
+      index: 1,
+      state: 'progress',
+      tokens: 9,
+      toolCalls: 2,
+    })
     expect(frame.description).toMatch(/Review:\s*a1|a1/)
     // task state got logs + progress (tm8)
     const task = appState.tasks[taskId]
@@ -331,5 +340,78 @@ describe('installWorkflowTaskProgressBridge', () => {
 
   test('default flush interval matches densable 16ms constant', () => {
     expect(WORKFLOW_TASK_PROGRESS_FLUSH_MS).toBe(16)
+  })
+
+  test('progress-only second flush omits workflowProgress until kGg (RC mid-join snapshot)', async () => {
+    // densable j8r: batch of only state:"progress" → full snapshot at most every kGg.
+    // First flush after agent_started includes full snapshot; pure progress
+    // batch shortly after should omit workflowProgress on the wire.
+    const bus = createProgressBus()
+    const store = createProgressStoreFromBus(bus)
+    const emits: Array<{ workflowProgress?: SdkWorkflowProgress[] }> = []
+    let appState: { tasks: Record<string, any> } = { tasks: {} }
+    const setAppState = (f: (p: typeof appState) => typeof appState) => {
+      appState = f(appState)
+    }
+    const { registerLocalWorkflowTask } = await import(
+      '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
+    )
+    const taskId = registerLocalWorkflowTask(setAppState as any, {
+      description: 'wf',
+      workflowName: 'wf',
+      workflowFile: 'wf.js',
+    })
+    const bridge = installWorkflowTaskProgressBridge({
+      bus,
+      store,
+      flushMs: 5,
+      getBinding: () => ({
+        taskId,
+        description: 'wf',
+        startTime: Date.now(),
+        setAppState: setAppState as any,
+      }),
+      emit: params => {
+        emits.push({ workflowProgress: params.workflowProgress })
+      },
+    })
+
+    bus.emit({
+      type: 'agent_started',
+      runId: 'r3',
+      agentId: 0,
+      label: 'a',
+    })
+    await new Promise<void>(r => {
+      const t = setTimeout(r, 20)
+      timers.push(t)
+    })
+    expect(emits.length).toBe(1)
+    expect(emits[0]!.workflowProgress).toBeDefined()
+    expect(
+      emits[0]!.workflowProgress?.some(
+        p => p.type === 'workflow_agent' && p.state === 'start',
+      ),
+    ).toBe(true)
+
+    bus.emit({
+      type: 'agent_progress',
+      runId: 'r3',
+      agentId: 0,
+      label: 'a',
+      tokenCount: 3,
+      toolCount: 1,
+    })
+    await new Promise<void>(r => {
+      const t = setTimeout(r, 20)
+      timers.push(t)
+    })
+    expect(emits.length).toBe(2)
+    // densable: progress-only batch within kGg → workflowProgress undefined
+    expect(emits[1]!.workflowProgress).toBeUndefined()
+    // task state still upserted
+    expect(appState.tasks[taskId].totalTokens).toBe(3)
+
+    bridge.dispose()
   })
 })

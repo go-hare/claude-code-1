@@ -72,6 +72,12 @@ export function runPostCompactCleanup(querySource?: QuerySource): void {
     resetGetMemoryFilesCache('compact')
   }
   clearSystemPromptSections()
+  // densable: stickyBetas reset in clearBetaHeaderLatches — re-eval o3 memo.
+  if (isMainThreadCompact) {
+    void import('../../utils/betas.js').then(({ clearBetasCaches }) =>
+      clearBetasCaches(),
+    )
+  }
   clearClassifierApprovals()
   clearSpeculativeChecks()
   // Intentionally NOT calling resetSentSkillNames(): re-injecting the full

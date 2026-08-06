@@ -47,6 +47,7 @@ import type { PermissionRule, PermissionRuleSource } from './PermissionRule.js'
 import { createReadRuleSuggestion } from './PermissionUpdate.js'
 import type { PermissionUpdate } from './PermissionUpdateSchema.js'
 import { getRuleByContentsForToolName } from './permissions.js'
+import { matchWildcardPattern } from './shellRuleMatching.js'
 
 declare const MACRO: { VERSION: string }
 
@@ -931,6 +932,72 @@ function patternWithRoot(
   }
 }
 
+/**
+ * densable `n1d` — normalize path patterns before ignore/o1d.
+ * Collapse `//`, preserve empty/`/**`, escape BOM-prefixed `!`/`#`.
+ */
+function normalizePermissionPattern(pattern: string): string {
+  const collapsed = pattern.replace(/\/{2,}/g, '/')
+  if (/^\s*(?:\/\*\*)?$/.test(collapsed)) {
+    return collapsed
+  }
+  return collapsed
+    .replace(/^\uFEFF([!#]?)/, (_m, lead: string) => (lead ? `\\${lead}` : ''))
+    .replace(/^\uFEFF/, '[\uFEFF]')
+}
+
+/**
+ * densable `o1d` — strip `/**` for the ignore engine, with allow-only
+ * single-segment cwd anchoring.
+ *
+ * - `src/**` + allow → `/src` (cwd-root only; not any-depth)
+ * - `src/**` + deny/ask → `src` (any-depth, densable pre-214 behavior)
+ * - `foo/bar/**` → `foo/bar` (multi-segment; no extra anchor)
+ * - bare `/**` → `/**`
+ */
+export function adjustPermissionPatternForIgnore(
+  pattern: string,
+  allowMode: boolean,
+): string {
+  if (!pattern.endsWith('/**')) {
+    return pattern
+  }
+  const without = pattern.slice(0, -3)
+  if (!/[^/]/.test(without)) {
+    return '/**'
+  }
+  // Multi-segment, non-allow, or gitignore negation/comment prefixes stay unanchored
+  if (without.includes('/') || !allowMode || /^[!#]/.test(without)) {
+    return without
+  }
+  // Single-segment allow: anchor at pattern root (cwd when root is null)
+  return `/${without}`
+}
+
+/**
+ * densable `PXi` — true when pattern contains an unescaped `*`.
+ * Patterns ending with `:*` (tool content separator) are not wildcards here.
+ */
+function patternHasUnescapedStar(pattern: string): boolean {
+  if (pattern.endsWith(':*')) {
+    return false
+  }
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] === '*') {
+      let backslashes = 0
+      let j = i - 1
+      while (j >= 0 && pattern[j] === '\\') {
+        backslashes++
+        j--
+      }
+      if (backslashes % 2 === 0) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 function getPatternsByRoot(
   toolPermissionContext: ToolPermissionContext,
   toolType: 'edit' | 'read',
@@ -956,13 +1023,15 @@ function getPatternsByRoot(
   const patternsByRoot = new Map<string | null, Map<string, PermissionRule>>()
   for (const [pattern, rule] of rules.entries()) {
     const { relativePattern, root } = patternWithRoot(pattern, rule.source)
+    // densable APs: store n1d-normalized pattern keys
+    const normalized = normalizePermissionPattern(relativePattern)
     let patternsForRoot = patternsByRoot.get(root)
     if (patternsForRoot === undefined) {
       patternsForRoot = new Map<string, PermissionRule>()
       patternsByRoot.set(root, patternsForRoot)
     }
     // Store the rule keyed by the root
-    patternsForRoot.set(relativePattern, rule)
+    patternsForRoot.set(normalized, rule)
   }
   return patternsByRoot
 }
@@ -985,21 +1054,14 @@ export function matchingRuleForInput(
     toolType,
     behavior,
   )
+  const allowMode = behavior === 'allow'
 
   // Check each root for a matching pattern
   for (const [root, patternMap] of patternsByRoot.entries()) {
-    // Transform patterns for the ignore library
-    const patterns = Array.from(patternMap.keys()).map(pattern => {
-      let adjustedPattern = pattern
-
-      // Remove /** suffix - ignore library treats 'path' as matching both
-      // the path itself and everything inside it
-      if (adjustedPattern.endsWith('/**')) {
-        adjustedPattern = adjustedPattern.slice(0, -3)
-      }
-
-      return adjustedPattern
-    })
+    // densable APs.getIg: o1d(_, behavior==="allow")
+    const patterns = Array.from(patternMap.keys()).map(pattern =>
+      adjustPermissionPatternForIgnore(pattern, allowMode),
+    )
 
     const ig = ignore().add(patterns)
 
@@ -1022,21 +1084,68 @@ export function matchingRuleForInput(
     const igResult = ig.test(relativePathStr)
 
     if (igResult.ignored && igResult.rule) {
-      // Map the matched pattern back to the original rule
-      const originalPattern = igResult.rule.pattern
-
-      // Check if this was a /** pattern we simplified
-      const withWildcard = originalPattern + '/**'
-      if (patternMap.has(withWildcard)) {
+      // densable zw reverse-map of ignore pattern → original rule
+      const matched = igResult.rule.pattern
+      const withWildcard = `${matched}/**`
+      // For allow + single-segment (`/src` from `src/**`), do NOT recover via
+      // bare `src/**` any-depth branch — only via leading-`/` reverse map.
+      if (
+        patternMap.has(withWildcard) &&
+        (matched.includes('/') || behavior !== 'allow')
+      ) {
         return patternMap.get(withWildcard) ?? null
       }
-
-      return patternMap.get(originalPattern) ?? null
+      if (matched.startsWith('/')) {
+        const singleSegmentOriginal = `${matched.slice(1)}/**`
+        if (patternMap.has(singleSegmentOriginal)) {
+          return patternMap.get(singleSegmentOriginal) ?? null
+        }
+      }
+      return patternMap.get(matched) ?? null
     }
   }
 
   // No matching rule found
   return null
+}
+
+/**
+ * densable `hqe` / export `matchesPathRule` — session-root path match with
+ * **allow-style** single-segment `dir/**` anchoring (always `o1d(..., true)`).
+ * Used by File/Notebook preparePermissionMatcher for hook `if:` (#44).
+ *
+ * Falls back to `matchWildcardPattern` for leading-`*` patterns or pure
+ * literals without unescaped `*` (densable `$ce` path).
+ */
+export function matchesPathRule(pattern: string, path: string): boolean {
+  let fileAbsolutePath = expandPath(path)
+  if (getPlatform() === 'windows' && fileAbsolutePath.includes('\\')) {
+    fileAbsolutePath = windowsPathToPosixPath(fileAbsolutePath)
+  }
+
+  const { relativePattern, root } = patternWithRoot(pattern, 'session')
+  const ignorePattern = adjustPermissionPatternForIgnore(
+    normalizePermissionPattern(relativePattern),
+    true,
+  )
+  const patternRoot = root ?? getCwd()
+  const relativePathStr = relativePath(patternRoot, fileAbsolutePath)
+
+  if (
+    relativePathStr &&
+    !relativePathStr.startsWith(`..${DIR_SEP}`) &&
+    ignore().add(ignorePattern).test(relativePathStr).ignored
+  ) {
+    return true
+  }
+
+  const trimmed = pattern.trim()
+  const noUnescapedStar =
+    !patternHasUnescapedStar(trimmed) && !trimmed.endsWith(':*')
+  if (trimmed.startsWith('*') || noUnescapedStar) {
+    return matchWildcardPattern(trimmed, path)
+  }
+  return false
 }
 
 /**
@@ -1294,7 +1403,10 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
     // this is an additional scope check. Reject '..' to prevent a rule like
     // '/.claude/../**' from leaking this bypass outside .claude/.
     const ruleContent = claudeFolderAllowRule.ruleValue.ruleContent
+    // densable wit: session .claude allow is skipped while mode==="plan"
+    // (plan must not auto-write via Edit(.claude/**) allow).
     if (
+      toolPermissionContext.mode !== 'plan' &&
       ruleContent &&
       (ruleContent.startsWith(CLAUDE_FOLDER_PERMISSION_PATTERN.slice(0, -2)) ||
         ruleContent.startsWith(
@@ -1374,6 +1486,26 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
           rule: askRule,
         },
       }
+    }
+  }
+
+  // densable wit: after safety/ask rules, plan mode forces ask for writes
+  // (before acceptEdits / Edit allow rules). Exception: internal plan/scratch
+  // paths already returned above via checkEditableInternalPath.
+  if (toolPermissionContext.mode === 'plan') {
+    return {
+      behavior: 'ask',
+      message: `Cannot write to ${path} while in plan mode.`,
+      decisionReason: {
+        type: 'mode',
+        mode: 'plan',
+      },
+      suggestions: generateSuggestions(
+        path,
+        'write',
+        toolPermissionContext,
+        pathsToCheck,
+      ),
     }
   }
 
@@ -1461,9 +1593,19 @@ export function generateSuggestions(
   // everything is allowed; in acceptEdits it's a no-op. Suggesting it
   // anyway and having the SDK host apply it on "Always allow" silently
   // downgrades auto → acceptEdits, which then prompts for MCP/Bash.
+  // densable Zlr: suppress setMode:acceptEdits when plan was entered from
+  // elevated prePlanMode (auto/bypass/acceptEdits/dontAsk) — suggesting
+  // acceptEdits would downgrade on "Always allow".
+  const prePlanElevated =
+    toolPermissionContext.mode === 'plan' &&
+    (toolPermissionContext.prePlanMode === 'auto' ||
+      toolPermissionContext.prePlanMode === 'bypassPermissions' ||
+      toolPermissionContext.prePlanMode === 'acceptEdits' ||
+      toolPermissionContext.prePlanMode === 'dontAsk')
   const shouldSuggestAcceptEdits =
-    toolPermissionContext.mode === 'default' ||
-    toolPermissionContext.mode === 'plan'
+    (toolPermissionContext.mode === 'default' ||
+      toolPermissionContext.mode === 'plan') &&
+    !prePlanElevated
 
   if (operationType === 'write' || operationType === 'create') {
     const updates: PermissionUpdate[] = shouldSuggestAcceptEdits

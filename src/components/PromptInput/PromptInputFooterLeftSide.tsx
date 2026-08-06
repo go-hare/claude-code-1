@@ -66,9 +66,10 @@ const GOAL_TICK_INTERVAL_MS = 1_000;
 const FLEET_NUDGE_FLASH_MS = 2_500;
 
 /**
- * Official FFe — fleet/agents entry hint.
+ * densable K2e / FFe — fleet/agents entry hint.
  * - Default / GB off / zero needs: "← for agents" (or "← again for agents")
- * - GB on + needsInput > 0: "← N agent(s)" with warning/success flash on change
+ * - needs===0 + succeeded delta (fpf>0): pulse "← N done" (success on N) for Ozo=2500ms
+ * - needsInput > 0: "← N agent(s)" with warning/success flash on change
  */
 function AgentsFooterHint({ leftArrowAgain }: { leftArrowAgain?: boolean }): React.ReactNode {
   const nudgeEnabled = isFleetNeedsInputNudgeEnabled();
@@ -91,13 +92,19 @@ function AgentsFooterHint({ leftArrowAgain }: { leftArrowAgain?: boolean }): Rea
   const reducedMotion = useAppState(s => s.settings.prefersReducedMotion) ?? false;
 
   const [flash, setFlash] = useState<'none' | 'awaiting' | 'done'>('none');
+  /** densable fpf — temporary succeeded-delta while needsInput is empty. */
+  const [donePulse, setDonePulse] = useState(0);
   const prevNeedsRef = useRef<number | undefined>(undefined);
   const prevSucceededRef = useRef<number | undefined>(undefined);
   const flashClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const donePulseClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** densable AYe — active flash kind so done-pulse does not clobber awaiting. */
+  const flashKindRef = useRef<'none' | 'awaiting' | 'done'>('none');
 
   useEffect(() => {
     return () => {
       if (flashClearRef.current) clearTimeout(flashClearRef.current);
+      if (donePulseClearRef.current) clearTimeout(donePulseClearRef.current);
     };
   }, []);
 
@@ -107,26 +114,69 @@ function AgentsFooterHint({ leftArrowAgain }: { leftArrowAgain?: boolean }): Rea
     prevNeedsRef.current = needsInput;
     prevSucceededRef.current = succeeded;
 
-    if (needsInput === undefined || needsInput === 0) return;
-    if (reducedMotion) return;
-
-    // Flash only on increase — a drop (3→1) is not a new arrival.
-    const needsUp = prevNeeds !== undefined && needsInput > prevNeeds;
+    // densable: needsChanged = any change (not only increase); succeededUp = strict increase.
+    const needsChanged = prevNeeds !== undefined && needsInput !== undefined && needsInput !== prevNeeds;
     const succeededUp = prevSucceeded !== undefined && succeeded !== undefined && succeeded > prevSucceeded;
-    if (!needsUp && !succeededUp) return;
-    // Prefer awaiting flash when needs count is rising.
-    if (!needsUp && flashClearRef.current && flash === 'awaiting') return;
+    const hasNeeds = needsInput !== undefined && needsInput > 0;
+
+    // densable: !hasNeeds && succeededUp && !reducedMotion → fpf pulse ("N done")
+    if (!hasNeeds && succeededUp && !reducedMotion) {
+      if (flashClearRef.current) {
+        clearTimeout(flashClearRef.current);
+        flashClearRef.current = null;
+      }
+      if (donePulseClearRef.current) {
+        clearTimeout(donePulseClearRef.current);
+        donePulseClearRef.current = null;
+      }
+      setFlash('none');
+      flashKindRef.current = 'none';
+      const delta = (succeeded as number) - (prevSucceeded as number);
+      setDonePulse(delta);
+      donePulseClearRef.current = setTimeout(() => {
+        donePulseClearRef.current = null;
+        setDonePulse(0);
+      }, FLEET_NUDGE_FLASH_MS);
+      return;
+    }
+
+    if (!hasNeeds || (!needsChanged && !succeededUp) || reducedMotion) {
+      return;
+    }
+    // densable: while awaiting flash active, ignore pure succeeded-up on needs>0 path.
+    if (!needsChanged && flashKindRef.current === 'awaiting') {
+      return;
+    }
 
     if (flashClearRef.current) clearTimeout(flashClearRef.current);
-    const kind: 'awaiting' | 'done' = needsUp ? 'awaiting' : 'done';
+    if (donePulseClearRef.current) {
+      clearTimeout(donePulseClearRef.current);
+      donePulseClearRef.current = null;
+      setDonePulse(0);
+    }
+    const kind: 'awaiting' | 'done' = needsChanged ? 'awaiting' : 'done';
+    flashKindRef.current = kind;
     setFlash(kind);
     flashClearRef.current = setTimeout(() => {
       flashClearRef.current = null;
+      flashKindRef.current = 'none';
       setFlash('none');
     }, FLEET_NUDGE_FLASH_MS);
-  }, [needsInput, succeeded, reducedMotion, flash]);
+  }, [needsInput, succeeded, reducedMotion]);
 
-  // Official: !ppn || needs===0 → plain "← for agents"
+  // densable: zAr && (needs===0|void) && fpf>0 → "← N done"
+  if (nudgeEnabled && (needsInput === 0 || needsInput === undefined) && donePulse > 0) {
+    const countLabel = donePulse > 99 ? '99+' : String(donePulse);
+    return (
+      <Text>
+        <Text dimColor>{figures.arrowLeft} </Text>
+        <Text color={'success' as never}>{countLabel}</Text>
+        <Text dimColor> done</Text>
+      </Text>
+    );
+  }
+
+  // densable: !zAr || needs void/0 → plain "← for agents"
   if (!nudgeEnabled || needsInput === undefined || needsInput === 0) {
     return (
       <Text dimColor>

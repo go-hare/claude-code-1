@@ -505,8 +505,9 @@ export async function loadConversationForResume(
   /**
    * densable p1e / lrs replyOnResume — when true, skip interrupt+NRR sentinel
    * so interactive REPL can consume via initialMessage:{replay:true}.
+   * densable 2.1.214 #47: forkSession → SessionStart source "fork".
    */
-  opts?: { replyOnResume?: boolean },
+  opts?: { replyOnResume?: boolean; forkSession?: boolean },
 ): Promise<{
   messages: Message[]
   turnInterruptionState: TurnInterruptionState
@@ -531,6 +532,8 @@ export async function loadConversationForResume(
   fullPath?: string
   // Goal state for hydration on resume
   goal?: import('../types/logs.js').GoalState
+  /** densable 2.1.214 EndConversation marker → AppState.endedByModel */
+  endedByModel?: boolean
 } | null> {
   try {
     let log: LogOption | null = null
@@ -618,8 +621,11 @@ export async function loadConversationForResume(
     )
     messages = deserialized.messages
 
-    // Process session start hooks for resume
-    const hookMessages = await processSessionStartHooks('resume', { sessionId })
+    // densable 2.1.214 #47: I1e(r.forkSession?"fork":"resume", ...)
+    const hookMessages = await processSessionStartHooks(
+      opts?.forkSession ? 'fork' : 'resume',
+      { sessionId },
+    )
 
     // Append hook messages to the conversation
     messages.push(...hookMessages)
@@ -648,6 +654,8 @@ export async function loadConversationForResume(
       fullPath: log?.fullPath,
       // Goal state for hydration on resume
       goal: log?.goal,
+      // densable 2.1.214: hydrate ended-by-model into AppState
+      endedByModel: log?.endedByModel,
     }
   } catch (error) {
     logError(error as Error)

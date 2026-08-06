@@ -152,9 +152,19 @@ function handleMessage(line: string): void {
       break
     }
 
-    case 'attacher-caps':
-      // Could update terminal capabilities here if needed
+    case 'attacher-caps': {
+      // densable yfy: tii(e.caps) — truthy caps means a terminal is attached
+      // (Pte becomes false so MCP OAuth / install-github-app can run).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { setAttacherCaps } =
+        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      const caps =
+        msg && typeof msg === 'object' && 'caps' in msg
+          ? (msg as { caps?: Record<string, unknown> | null }).caps
+          : null
+      setAttacherCaps(caps ?? null)
       break
+    }
 
     case 'reply':
       if (typeof msg.text === 'string') {

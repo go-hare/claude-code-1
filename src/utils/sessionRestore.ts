@@ -100,6 +100,14 @@ export function restoreSessionStateFromLog(
   result: ResumeResult,
   setAppState: (f: (prev: AppState) => AppState) => void,
 ): void {
+  // densable 2.1.214 Ern(Brt(ur), setAppState) — hydrate EndConversation lock
+  const endedByModel = Boolean(
+    (result as { endedByModel?: boolean }).endedByModel,
+  )
+  setAppState(prev =>
+    prev.endedByModel === endedByModel ? prev : { ...prev, endedByModel },
+  )
+
   // Restore file history state
   if (result.fileHistorySnapshots && result.fileHistorySnapshots.length > 0) {
     fileHistoryRestoreStateFromLog(result.fileHistorySnapshots, newState => {
@@ -324,6 +332,8 @@ type ResumeLoadResult = {
   prUrl?: string
   prRepository?: string
   goal?: import('../types/logs.js').GoalState
+  /** densable 2.1.214 EndConversation marker → AppState.endedByModel */
+  endedByModel?: boolean
 }
 
 /**
@@ -578,6 +588,8 @@ export async function processResumedConversation(
     initialState: {
       ...context.initialState,
       initialMessage: seededInitialMessage,
+      // densable: ...e.endedByModel?{endedByModel:!0}:{}
+      ...(result.endedByModel ? { endedByModel: true } : {}),
       ...(resumedAgentType && { agent: resumedAgentType }),
       ...(restoredAttribution && { attribution: restoredAttribution }),
       ...(standaloneAgentContext && { standaloneAgentContext }),

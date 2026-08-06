@@ -43,12 +43,27 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work aligns agent / session / queue / inbox / daemon behavior with **densable 2.1.211** (git tags `v2.8.5` pre-merge, `v2.8.6` post-merge). **Published npm version is whatever `package.json` says** (currently **2.7.28**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → 2.1.212** product alignment (211 host/agent paths + 212 official 48 changelog rows + Qre/code-sessions periphery). **Published npm version is whatever `package.json` says** (currently **2.7.29**; trust `package.json` / npm) and may not match git tags.
 
-### Recent updates (2.7.5 → 2.7.28)
+#### densable 2.1.212 alignment (2.7.29)
+
+Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (**HAVE 44 + N/A 1, 0 GAP**), `pack-report.md` closeout, `residual-qre-jes-2026-08-06.md`.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **Session safety valves** | WebSearch / subagent default 200 + env; `/clear` resets; MCP long-call auto-background (default 2min / env) | — |
+| **`/fork` · `/subtask`** | `/fork` = background session copy + keepParent; in-session full-context worker = `/subtask` | Do not keep legacy in-session path named `/fork` |
+| **Agents UX** | agent-view `/resume` picker → bg; reopen stopped; cold attach transcript; footer `N done`; **Needs input** | — |
+| **`claude auto-mode reset`** | confirm prompt + `--yes` | — |
+| **Reliability / UX batch** | plan bash writes, worktree symlink guard, hook `continue:false`, print SIGTERM 143, Win PS7 bg, shell `!` paths, bare `/btw`, SendMessage preview, Web 529, mid-conv cache, etc. (see checklist) | No **2.1.214** EndConversation; no **2.1.210** collapsed-tool live elapsed (adjacent) |
+| **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
+| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF; **KAIROS** already in build defaults — no further product code |
+
+### Recent updates (2.7.5 → 2.7.29)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.29** | **densable 2.1.212 closeout**: official 48 rows 0 GAP; `/fork` keepParent + `/subtask`; session caps / MCP auto-bg / auto-mode reset; ultrareview + Qre/code-sessions (OTe/KLc/H8/F1g/nts) 1:1. Intentionally off: UDS/LAN/TEAMMEM; KAIROS no further code; no 214/210 adjacent. |
 | **2.7.28** | **Windows packaged clipboard paste**: when `bun --compile` cannot load sharp natives, fall back to System.Drawing resize/JPEG; dev still uses sharp. |
 | **2.7.27** | **Prompt notification strip height**: absolute box height 2→1 so the latest notice does not paint over the prompt top border (e.g. clipboard image `alt+v` hint). |
 | **2.7.26** | **Windows clipboard image paste**: PowerShell argv `shell:false` under Git Bash; empty paste on Windows; prefer PNG stream; client ≥8px floor rejects 1×1; Buddy/KAIROS docs aligned to densable 211. |

@@ -76,7 +76,7 @@ import {
   isPrecompactSkipDisabled,
   shouldSkipPromptHistory,
 } from './residualFinalEnvGates.js'
-import { isFsInaccessible } from './errors.js'
+import { errorMessage, isFsInaccessible } from './errors.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
 import { formatFileSize } from './format.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -1476,6 +1476,9 @@ class Project {
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'task-summary') {
       void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'ended-by-model') {
+      // densable: ended-by-model always append (EndConversation marker)
+      void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'tag') {
       // Tags can always be appended
       void this.enqueueWrite(sessionFile, entry)
@@ -2634,6 +2637,7 @@ export async function loadTranscriptFromFile(
       leafUuids,
       contentReplacements,
       worktreeStates,
+      endedByModelSessions,
     } = await loadTranscriptFile(filePath)
 
     if (messages.size === 0) {
@@ -2679,6 +2683,8 @@ export async function loadTranscriptFromFile(
       worktreeSession: worktreeStates.has(sessionId)
         ? worktreeStates.get(sessionId)
         : undefined,
+      // densable OGe({}, sessionId ? endedSet.has(sessionId) : false)
+      endedByModel: endedByModelSessions.has(sessionId),
     }
   }
 
@@ -3019,6 +3025,29 @@ export function saveTaskSummary(sessionId: UUID, summary: string): void {
   })
 }
 
+/**
+ * densable Ams / markSessionEndedByModel — append `ended-by-model` transcript
+ * marker when EndConversation successfully ends the main session.
+ * Skips when session persistence is disabled (densable JM()).
+ */
+export async function markSessionEndedByModel(
+  sessionId: UUID | string,
+): Promise<void> {
+  if (isSessionPersistenceDisabled()) return
+  const id = sessionId as UUID
+  try {
+    appendEntryToFile(getTranscriptPathForSession(id), {
+      type: 'ended-by-model',
+      timestamp: new Date().toISOString(),
+      sessionId: id,
+    })
+  } catch (err) {
+    logForDebugging(
+      `markSessionEndedByModel: transcript append failed: ${errorMessage(err)}`,
+    )
+  }
+}
+
 export async function saveTag(sessionId: UUID, tag: string, fullPath?: string) {
   // Fall back to computed path if fullPath is not provided
   const resolvedPath = fullPath ?? getTranscriptPathForSession(sessionId)
@@ -3340,6 +3369,21 @@ export function saveWorktreeState(
     : null
   const project = getProject()
   project.currentSessionWorktree = stripped
+  // densable hne → Tmo.emit(worktreeSession) so c7u → l7u can patch job state
+  // in bg workers. Dynamic import keeps sessionStorage free of hard bridge deps.
+  void import('./bgNeedsInputBridge.js')
+    .then(({ emitBgWorktreeMeta }) => {
+      if (!stripped) {
+        emitBgWorktreeMeta(null)
+        return
+      }
+      emitBgWorktreeMeta({
+        worktreePath: stripped.worktreePath,
+        worktreeBranch: stripped.worktreeBranch,
+        worktreeHookBased: stripped.hookBased,
+      })
+    })
+    .catch(() => {})
   // Write eagerly when the file already exists (mid-session enter/exit).
   // For --worktree startup, sessionFile is null — materializeSessionFile
   // will write it on the first message via reAppendSessionMetadata.
@@ -3412,6 +3456,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       contextCollapseCommits,
       contextCollapseSnapshot,
       leafUuids,
+      endedByModelSessions,
     } = await loadTranscriptFile(sessionFile)
 
     if (messages.size === 0) {
@@ -3459,6 +3504,9 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
           ? worktreeStates.get(sessionId)
           : log.worktreeSession,
       goal: sessionId ? goals.get(sessionId) : log.goal,
+      endedByModel: sessionId
+        ? endedByModelSessions.has(sessionId)
+        : log.endedByModel,
       prNumber: sessionId ? prNumbers.get(sessionId) : log.prNumber,
       prUrl: sessionId ? prUrls.get(sessionId) : log.prUrl,
       prRepository: sessionId
@@ -3554,6 +3602,8 @@ export async function searchSessionsByCustomTitle(
 const METADATA_TYPE_MARKERS = [
   '"type":"summary"',
   '"type":"custom-title"',
+  // densable 2.1.214 EndConversation marker — session-scoped like custom-title
+  '"type":"ended-by-model"',
   '"type":"tag"',
   '"type":"agent-name"',
   '"type":"agent-color"',
@@ -3936,6 +3986,11 @@ export async function loadTranscriptFile(
   contextCollapseCommits: ContextCollapseCommitEntry[]
   contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
   leafUuids: Set<UUID>
+  /**
+   * densable 2.1.214 — sessionIds that have an `ended-by-model` marker
+   * (unless hard-disable stub eKn() is true — always false in 214).
+   */
+  endedByModelSessions: Set<UUID>
 }> {
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
@@ -3957,6 +4012,8 @@ export async function loadTranscriptFile(
     AgentId,
     ContentReplacementRecord[]
   >()
+  // densable: sessions with ended-by-model marker (i.add when !eKn())
+  const endedByModelSessions = new Set<UUID>()
   // Array, not Map — commit order matters (nested collapses).
   const contextCollapseCommits: ContextCollapseCommitEntry[] = []
   // Last-wins — later entries supersede.
@@ -4038,6 +4095,9 @@ export async function loadTranscriptFile(
           summaries.set(entry.leafUuid, entry.summary)
         } else if (entry.type === 'custom-title' && entry.sessionId) {
           customTitles.set(entry.sessionId, entry.customTitle)
+        } else if (entry.type === 'ended-by-model' && entry.sessionId) {
+          // densable: eKn() always false → always record marker
+          endedByModelSessions.add(entry.sessionId)
         } else if (entry.type === 'tag' && entry.sessionId) {
           tags.set(entry.sessionId, entry.tag)
         } else if (entry.type === 'agent-name' && entry.sessionId) {
@@ -4110,6 +4170,9 @@ export async function loadTranscriptFile(
         summaries.set(entry.leafUuid, entry.summary)
       } else if (entry.type === 'custom-title' && entry.sessionId) {
         customTitles.set(entry.sessionId, entry.customTitle)
+      } else if (entry.type === 'ended-by-model' && entry.sessionId) {
+        // densable: if (X.type==="ended-by-model"&&X.sessionId&&!eKn()) i.add
+        endedByModelSessions.add(entry.sessionId)
       } else if (entry.type === 'tag' && entry.sessionId) {
         tags.set(entry.sessionId, entry.tag)
       } else if (entry.type === 'agent-name' && entry.sessionId) {
@@ -4265,6 +4328,7 @@ export async function loadTranscriptFile(
     contextCollapseCommits,
     contextCollapseSnapshot,
     leafUuids,
+    endedByModelSessions,
   }
 }
 
@@ -5123,6 +5187,7 @@ export async function loadAllLogsFromSessionFile(
     attributionSnapshots,
     contentReplacements,
     leafUuids,
+    endedByModelSessions,
   } = await loadTranscriptFile(sessionFile, { keepAllLeaves: true })
 
   if (messages.size === 0) return []
@@ -5195,6 +5260,7 @@ export async function loadAllLogsFromSessionFile(
         chain,
       ),
       contentReplacements: contentReplacements.get(sessionId) ?? [],
+      endedByModel: endedByModelSessions.has(sessionId),
     })
   }
 

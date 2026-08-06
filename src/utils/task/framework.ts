@@ -66,6 +66,7 @@ export function updateTaskState<T extends TaskState>(
 ): void {
   let before: TaskState | undefined
   let after: TaskState | undefined
+  let nextTasks: Record<string, TaskState> | undefined
   setAppState(prev => {
     const task = prev.tasks?.[taskId] as T | undefined
     if (!task) {
@@ -79,17 +80,22 @@ export function updateTaskState<T extends TaskState>(
     }
     before = task
     after = updated
+    nextTasks = {
+      ...prev.tasks,
+      [taskId]: updated,
+    }
     return {
       ...prev,
-      tasks: {
-        ...prev.tasks,
-        [taskId]: updated,
-      },
+      tasks: nextTasks,
     }
   })
   // Official 2.1.x system/task_updated — Host merges wire-safe patch.
   if (before && after) {
     emitTaskUpdatedPatch(taskId, before, after)
+  }
+  // densable shs producer (JFa): stamp t7r when bg job so ihs→u7u can write.
+  if (nextTasks) {
+    scheduleBgInFlightStamp(nextTasks)
   }
 }
 
@@ -134,18 +140,14 @@ function emitTaskUpdatedPatch(
       patch.is_backgrounded = afterBg
     }
     const beforeErr =
-      'error' in before
-        ? (before as { error?: string }).error
-        : undefined
+      'error' in before ? (before as { error?: string }).error : undefined
     const afterErr =
       'error' in after ? (after as { error?: string }).error : undefined
     if (beforeErr !== afterErr && afterErr !== undefined) {
       patch.error = afterErr
     }
     const beforeEnd =
-      'endTime' in before
-        ? (before as { endTime?: number }).endTime
-        : undefined
+      'endTime' in before ? (before as { endTime?: number }).endTime : undefined
     const afterEnd =
       'endTime' in after ? (after as { endTime?: number }).endTime : undefined
     if (beforeEnd !== afterEnd && typeof afterEnd === 'number') {
@@ -175,6 +177,7 @@ function emitTaskUpdatedPatch(
  */
 export function registerTask(task: TaskState, setAppState: SetAppState): void {
   let isReplacement = false
+  let nextTasks: Record<string, TaskState> | undefined
   setAppState(prev => {
     const existing = prev.tasks[task.id]
     isReplacement = existing !== undefined
@@ -235,11 +238,15 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
               : {}),
           } as TaskState)
         : task
-    return { ...prev, tasks: { ...prev.tasks, [task.id]: merged } }
+    nextTasks = { ...prev.tasks, [task.id]: merged }
+    return { ...prev, tasks: nextTasks }
   })
 
   // Replacement (resume) — not a new start. Skip to avoid double-emit.
-  if (isReplacement) return
+  if (isReplacement) {
+    if (nextTasks) scheduleBgInFlightStamp(nextTasks)
+    return
+  }
 
   enqueueSdkEvent({
     type: 'system',
@@ -254,6 +261,43 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
         : undefined,
     prompt: 'prompt' in task ? (task.prompt as string) : undefined,
   })
+  if (nextTasks) scheduleBgInFlightStamp(nextTasks)
+}
+
+/**
+ * densable JFa/shs — when running as a bg job worker, recompute t7r from
+ * live tasks + command queue so c7u→u7u can patch fan/budget/inFlight.
+ * Debounced microtask; no-op outside CLAUDE_JOB_DIR sessions.
+ */
+let bgInFlightStampScheduled = false
+let bgInFlightStampTasks: Record<string, TaskState> | null = null
+function scheduleBgInFlightStamp(tasks: Record<string, TaskState>): void {
+  bgInFlightStampTasks = tasks
+  if (bgInFlightStampScheduled) return
+  bgInFlightStampScheduled = true
+  queueMicrotask(() => {
+    bgInFlightStampScheduled = false
+    const snap = bgInFlightStampTasks
+    bgInFlightStampTasks = null
+    if (snap) void stampBgInFlightFromLiveState(snap)
+  })
+}
+
+/**
+ * densable JFa/shs producer — full VFa/qFa/zFa + W6e + AWt/vWt budget.
+ * Partial running-only stamp would clear budget/items on shs full replace.
+ */
+async function stampBgInFlightFromLiveState(
+  tasks: Record<string, TaskState>,
+): Promise<void> {
+  try {
+    const { stampJFaInFlightFromLiveState } = await import(
+      './jfaInFlightStamp.js'
+    )
+    await stampJFaInFlightFromLiveState(tasks)
+  } catch {
+    // never throw into task path
+  }
 }
 
 /**

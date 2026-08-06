@@ -5,10 +5,12 @@ import { describe, expect, test } from 'bun:test'
 import {
   baseRefArgDiagnostics,
   damerauLevenshtein,
+  EMPTY_TREE_SHA,
   getUltrareviewDiffLimits,
   isAnthropicMonorepoBlocked,
   isCwdHome,
   isDesktopLikeEntrypoint,
+  isEmptyTreeFallbackEnabled,
   isGithubComHost,
   isRepoPackTooLarge,
   normalizeReviewHost,
@@ -132,6 +134,26 @@ describe('getUltrareviewDiffLimits (densable qqi)', () => {
     expect(
       getUltrareviewDiffLimits({ max_diff_files: 0, max_diff_lines: -1 }),
     ).toEqual({ maxFiles: 500, maxLines: 8000 })
+  })
+})
+
+describe('densable #35 empty-tree fallback helpers (IXs / Wau)', () => {
+  test('EMPTY_TREE_SHA is git empty tree object id', () => {
+    expect(EMPTY_TREE_SHA).toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904')
+  })
+
+  test('isEmptyTreeFallbackEnabled defaults ON (null / missing)', () => {
+    expect(isEmptyTreeFallbackEnabled(null)).toBe(true)
+    expect(isEmptyTreeFallbackEnabled({})).toBe(true)
+    expect(
+      isEmptyTreeFallbackEnabled({ empty_tree_fallback_enabled: true }),
+    ).toBe(true)
+  })
+
+  test('isEmptyTreeFallbackEnabled only false when explicitly false', () => {
+    expect(
+      isEmptyTreeFallbackEnabled({ empty_tree_fallback_enabled: false }),
+    ).toBe(false)
   })
 })
 

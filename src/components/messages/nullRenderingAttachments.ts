@@ -49,6 +49,8 @@ const NULL_RENDERING_TYPES = [
   'current_session_memory',
   'compaction_reminder',
   'date_change',
+  // densable read_truncation_notice — model-facing only (normalizeAttachmentForAPI)
+  'read_truncation_notice',
 ] as const satisfies readonly Attachment['type'][]
 
 export type NullRenderingAttachmentType = (typeof NULL_RENDERING_TYPES)[number]

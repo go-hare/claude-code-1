@@ -53,24 +53,27 @@ export function analyzeContext(messages: Message[]): TokenStats {
 
   const normalizedMessages = normalizeMessagesForAPI(messages)
   normalizedMessages.forEach(msg => {
-    const { content } = msg.message!
+    // densable api_system is wire-only; skip for context stats
+    if (msg.type === 'api_system') return
+    const apiMsg = msg as UserMessage | AssistantMessage
+    const { content } = apiMsg.message!
 
     // Not sure if this path is still used, but adding as a fallback
     if (typeof content === 'string') {
       const tokens = countTokens(content)
       stats.total += tokens
       // Check if this is a local command output
-      if (msg.type === 'user' && content.includes('local-command-stdout')) {
+      if (apiMsg.type === 'user' && content.includes('local-command-stdout')) {
         stats.localCommandOutputs += tokens
       } else {
-        stats[msg.type === 'user' ? 'humanMessages' : 'assistantMessages'] +=
+        stats[apiMsg.type === 'user' ? 'humanMessages' : 'assistantMessages'] +=
           tokens
       }
     } else {
       content!.forEach(block =>
         processBlock(
           block,
-          msg,
+          apiMsg,
           stats,
           toolIdsToToolNames,
           readToolIdToFilePath,

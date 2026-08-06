@@ -86,6 +86,8 @@ type LangfuseInputMessage =
   | UserMessage
   | AssistantMessage
   | ChatCompletionMessageParam
+  // densable api_system (role:system mid-conversation block)
+  | { type: string; message?: { role?: string; content?: unknown } }
 
 /** Normalize a content block into a LangfuseContentPart (non-tool_use, non-tool_result) */
 function toContentPart(
@@ -237,7 +239,11 @@ export function convertMessagesToLangfuse(
     if (!isRecord(msg)) continue
     const wrappedMessage = msg.message
     const isWrappedMessage = isRecord(wrappedMessage)
-    const inner = isWrappedMessage ? wrappedMessage : msg
+    // Cast after isRecord: union includes api_system / ChatCompletion shapes
+    const inner = (isWrappedMessage ? wrappedMessage : msg) as Record<
+      string,
+      unknown
+    >
     const role = isLangfuseRole(inner.role)
       ? inner.role
       : isWrappedMessage

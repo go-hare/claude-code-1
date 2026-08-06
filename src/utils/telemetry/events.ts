@@ -1,8 +1,59 @@
-import type { Attributes } from '@opentelemetry/api'
-import { getEventLogger, getPromptId } from 'src/bootstrap/state.js'
+import {
+  type Attributes,
+  type Context,
+  context as otelContext,
+  defaultTextMapGetter,
+  trace,
+} from '@opentelemetry/api'
+import { W3CTraceContextPropagator } from '@opentelemetry/core'
+import {
+  getEventLogger,
+  getIsNonInteractiveSession,
+  getPromptId,
+} from 'src/bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { getTelemetryAttributes } from '../telemetryAttributes.js'
+import { getActiveInteractionOTelContext } from './interactionOtelContext.js'
+
+/** densable DKh — shared propagator for TRACEPARENT extract. */
+const w3cTraceContextPropagator = new W3CTraceContextPropagator()
+
+/**
+ * densable PKh / 2.1.214 #41 — parent context for log records.
+ *
+ * Order:
+ * 1. active OTel context with a valid span
+ * 2. interaction bridge (sessionTracing enterWith) — covers emit **outside**
+ *    turn async context while interaction is still open
+ * 3. non-interactive + TRACEPARENT → W3C extract (SDK/headless 212 #32)
+ */
+export function getOTelEventParentContext(): Context | undefined {
+  const active = otelContext.active()
+  // Prefer spanContext on the active context (covers setSpanContext without a Span)
+  const spanCtx =
+    trace.getSpanContext(active) ?? trace.getSpan(active)?.spanContext()
+  if (spanCtx && trace.isSpanContextValid(spanCtx)) {
+    return active
+  }
+  // densable 214 #41: interaction bridge when active OTel ctx has no span
+  const interactionCtx = getActiveInteractionOTelContext()
+  if (interactionCtx) {
+    return interactionCtx
+  }
+  // densable: dn() && Z.TRACEPARENT — dn = !isInteractive
+  if (getIsNonInteractiveSession() && process.env.TRACEPARENT) {
+    return w3cTraceContextPropagator.extract(
+      active,
+      {
+        traceparent: process.env.TRACEPARENT,
+        tracestate: process.env.TRACESTATE,
+      },
+      defaultTextMapGetter,
+    )
+  }
+  return undefined
+}
 
 // Monotonically increasing counter for ordering events within a session
 let eventSequence = 0
@@ -10,8 +61,36 @@ let eventSequence = 0
 // Track whether we've already warned about a null event logger to avoid spamming
 let hasWarnedNoEventLogger = false
 
-/** Official bLh — max chars kept when OTEL content logging is enabled. */
+/** densable Dtg / official bLh — default max chars for OTEL content. */
 export const OTEL_CONTENT_TRUNCATE_LIMIT = 61440
+
+/**
+ * densable Ptg() — effective OTel content max length.
+ * min(CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH ?? 61440,
+ *     OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT ?? ∞,
+ *     OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT ?? ∞,
+ *     OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT ?? ∞)
+ */
+export function getOTelContentMaxLength(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const parseLimit = (raw: string | undefined): number => {
+    if (raw === undefined || raw === '') return Number.POSITIVE_INFINITY
+    const n = Number(raw)
+    return Number.isFinite(n) && n >= 0 ? n : Number.POSITIVE_INFINITY
+  }
+  const claude =
+    env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH !== undefined &&
+    env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH !== ''
+      ? parseLimit(env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH)
+      : OTEL_CONTENT_TRUNCATE_LIMIT
+  return Math.min(
+    claude,
+    parseLimit(env.OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT),
+    parseLimit(env.OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT),
+    parseLimit(env.OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT),
+  )
+}
 
 function isUserPromptLoggingEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -38,18 +117,25 @@ export function isAssistantResponseLoggingEnabled(
 }
 
 /**
- * Official WU densable — truncate OTEL content past 60KB with a marker.
+ * densable W1 — truncate OTEL content past effective max with dynamic marker.
+ * Marker: `\n\n[TRUNCATED - Content exceeds ${NKB|N character} limit]`
+ * If marker alone ≥ limit, return raw slice(0, limit) without marker.
  */
 export function truncateOTelContent(
   content: string,
-  limit: number = OTEL_CONTENT_TRUNCATE_LIMIT,
+  limit: number = getOTelContentMaxLength(),
 ): { content: string; truncated: boolean } {
   if (content.length <= limit) {
     return { content, truncated: false }
   }
+  const unit =
+    limit >= 1024 ? `${Math.floor(limit / 1024)}KB` : `${limit} character`
+  const marker = `\n\n[TRUNCATED - Content exceeds ${unit} limit]`
+  if (marker.length >= limit) {
+    return { content: content.slice(0, limit), truncated: true }
+  }
   return {
-    content:
-      content.slice(0, limit) + '\n\n[TRUNCATED - Content exceeds 60KB limit]',
+    content: content.slice(0, limit - marker.length) + marker,
     truncated: true,
   }
 }
@@ -117,9 +203,13 @@ export async function logOTelEvent(
     }
   }
 
-  // Emit log record as an event
+  // densable gu: ...a&&{context:a} so exporters stamp trace_id/span_id
+  const parentContext = getOTelEventParentContext()
   eventLogger.emit({
     body: `claude_code.${eventName}`,
     attributes,
+    timestamp: new Date(),
+    observedTimestamp: new Date(),
+    ...(parentContext && { context: parentContext }),
   })
 }

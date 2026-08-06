@@ -157,8 +157,21 @@ export function getForkSessionPreflightError(opts: {
   isCoordinator?: boolean
   persistenceDisabled?: boolean
   restrictedLaunch?: boolean
+  /** densable 2.1.214 endedByModel — refuse /fork after EndConversation. */
+  endedByModel?: boolean
   seed: BackgroundSeed | null
 }): string | null {
+  if (opts.endedByModel) {
+    // Same product string as processUserInput / compact refuse gates.
+    try {
+      const { END_CONVERSATION_SESSION_ENDED_MESSAGE } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
+      return END_CONVERSATION_SESSION_ENDED_MESSAGE
+    } catch {
+      return 'Claude ended this conversation. Start a new session (or /clear) to continue.'
+    }
+  }
   if (opts.isCoordinator) {
     return 'Forking is not available in coordinator sessions. Use /branch instead.'
   }

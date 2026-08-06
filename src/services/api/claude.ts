@@ -62,10 +62,21 @@ import {
 } from '../../utils/api.js'
 import { getOauthAccountInfo } from '../../utils/auth.js'
 import {
+  clearBetasCaches,
   getBedrockExtraBodyParamsBetas,
   getMergedBetas,
   getModelBetas,
 } from '../../utils/betas.js'
+import {
+  type ApiSystemMessage,
+  isApiSystemCacheControlRejected,
+  isApiSystemMessage,
+  isMidConvSystemRoleRejected,
+  latchMidConvCachePromotionRejected,
+  latchMidConvSystemRejected,
+  shouldCacheControlOnApiSystem,
+} from '../../utils/midConversationSystem.js'
+import { isStickyBetaRejected } from '../../bootstrap/state.js'
 import { getOrCreateUserID } from '../../utils/config.js'
 import {
   CAPPED_DEFAULT_MAX_TOKENS,
@@ -151,6 +162,11 @@ import {
 import type { QuerySource } from 'src/constants/querySource.js'
 import type { Notification } from 'src/context/notifications.js'
 import { addToTotalSessionCost } from 'src/cost-tracker.js'
+import {
+  onMessageDeltaCostCredit,
+  onMessageStopCostCredit,
+  type StreamCostCreditState,
+} from 'src/services/api/streamCostCredit.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import type { AgentId } from 'src/types/ids.js'
 import {
@@ -177,7 +193,12 @@ import {
   shouldSimulateProxyUsage,
 } from 'src/utils/residualFinalEnvGates.js'
 import { OAUTH_BETA_HEADER } from 'src/constants/oauth.js'
-import { type EffortValue, modelSupportsEffort } from 'src/utils/effort.js'
+import {
+  type EffortLevel,
+  type EffortValue,
+  modelSupportsEffort,
+  transcriptEffortFromOutputConfig,
+} from 'src/utils/effort.js'
 import {
   isFastModeAvailable,
   isFastModeCooldown,
@@ -199,7 +220,10 @@ import {
   isSearchExtraToolsEnabled,
 } from 'src/utils/searchExtraTools.js'
 import { API_MAX_MEDIA_PER_REQUEST } from '../../constants/apiLimits.js'
-import { ADVISOR_BETA_HEADER } from '../../constants/betas.js'
+import {
+  ADVISOR_BETA_HEADER,
+  MID_CONVERSATION_SYSTEM_BETA_HEADER,
+} from '../../constants/betas.js'
 import {
   formatDeferredToolLine,
   isDeferredTool,
@@ -269,6 +293,7 @@ import {
   CannotRetryError,
   FallbackTriggeredError,
   is529Error,
+  MidConvSystemRetryError,
   type RetryContext,
   withRetry,
 } from './withRetry.js'
@@ -766,6 +791,14 @@ export type Options = {
   fastMode?: boolean
   advisorModel?: string
   addNotification?: (notif: Notification) => void
+  /**
+   * densable 2.1.214 #39 onRetryStatus — stream stall / retry UI status.
+   * `null` clears; `{kind:"stalled", deadline}` shows
+   * "Waiting for API response · will retry in … · check your network".
+   */
+  onRetryStatus?: (
+    status: import('../../utils/advisorNetworkStall.js').RetryStatus | null,
+  ) => void
   // API-side task budget (output_config.task_budget). Distinct from the
   // tokenBudget.ts +500k auto-continue feature — this one is sent to the API
   // so the model can pace itself. `remaining` is computed by the caller
@@ -1075,12 +1108,15 @@ export function appendSystemReminderToLastUserMessage(
  * Ensures messages contain at most `limit` media items (images + documents).
  * Strips oldest media first to preserve the most recent.
  */
-export function stripExcessMediaItems(
-  messages: (UserMessage | AssistantMessage)[],
-  limit: number,
-): (UserMessage | AssistantMessage)[] {
+export function stripExcessMediaItems<
+  T extends {
+    type: string
+    message?: { content?: unknown }
+  },
+>(messages: T[], limit: number): T[] {
   let toRemove = 0
   for (const msg of messages) {
+    if (msg.type === 'api_system') continue
     if (!Array.isArray(msg.message!.content)) continue
     for (const block of msg.message!.content) {
       if (isMedia(block)) toRemove++
@@ -1095,6 +1131,7 @@ export function stripExcessMediaItems(
   if (toRemove <= 0) return messages
 
   return messages.map(msg => {
+    if (msg.type === 'api_system') return msg
     if (toRemove <= 0) return msg
     const content = msg.message!.content
     if (!Array.isArray(content)) return msg
@@ -1129,11 +1166,11 @@ export function stripExcessMediaItems(
 
     return before === toRemove
       ? msg
-      : {
+      : ({
           ...msg,
           message: { ...msg.message, content: stripped },
-        }
-  }) as (UserMessage | AssistantMessage)[]
+        } as T)
+  })
 }
 
 /**
@@ -1200,7 +1237,15 @@ async function* queryModel(
     options.querySource === 'sdk' ||
     options.querySource === 'hook_agent' ||
     options.querySource === 'verification_agent'
-  const betas = getMergedBetas(options.model, { isAgenticQuery })
+  // densable mzt → sticky-filter o3: if midConvLatchedOff (Iz sticky reject),
+  // drop o3 from the request beta list for the rest of the session.
+  let betas = getMergedBetas(options.model, { isAgenticQuery }).filter(
+    b =>
+      !(
+        b === MID_CONVERSATION_SYSTEM_BETA_HEADER &&
+        isStickyBetaRejected(MID_CONVERSATION_SYSTEM_BETA_HEADER)
+      ),
+  )
 
   // Always send the advisor beta header when advisor is enabled, so
   // non-agentic queries (compact, side_question, extract_memories, etc.)
@@ -1387,79 +1432,107 @@ async function* queryModel(
   })
 
   queryCheckpoint('query_message_normalization_start')
-  let messagesForAPI = normalizeMessagesForAPI(messages, filteredTools)
+  // densable Ydy / eN: pass model so J8t can inject api_system after user turns.
+  // When o3 is sticky-rejected, omit model so mid-conv path stays off.
+  const midConvLatchedOff = isStickyBetaRejected(
+    MID_CONVERSATION_SYSTEM_BETA_HEADER,
+  )
+  const normalizeModel = midConvLatchedOff ? undefined : options.model
+
+  // densable post-normalize pipeline shared by primary + midConvFallback.
+  const postNormalizeForAPI = (
+    normalized: (UserMessage | AssistantMessage | ApiSystemMessage)[],
+  ): (UserMessage | AssistantMessage | ApiSystemMessage)[] => {
+    let next = normalized
+    // Model-specific post-processing: strip tool-search-specific fields if the
+    // selected model doesn't support tool search.
+    //
+    // Why is this needed in addition to normalizeMessagesForAPI?
+    // - normalizeMessagesForAPI uses isSearchExtraToolsEnabledNoModelCheck() because it's
+    //   called from ~20 places (analytics, feedback, sharing, etc.), many of which
+    //   don't have model context. Adding model to its signature would be a large refactor.
+    // - This post-processing uses the model-aware isSearchExtraToolsEnabled() check
+    // - This handles mid-conversation model switching (e.g., Sonnet → Haiku) where
+    //   stale tool-search fields from the previous model would cause 400 errors
+    //
+    // Note: For assistant messages, normalizeMessagesForAPI already normalized the
+    // tool inputs, so stripCallerFieldFromAssistantMessage only needs to remove the
+    // 'caller' field (not re-normalize inputs).
+    if (!useSearchExtraTools) {
+      next = next.map(msg => {
+        switch (msg.type) {
+          case 'user':
+            // Strip tool_reference blocks from tool_result content
+            return stripToolReferenceBlocksFromUserMessage(msg)
+          case 'assistant':
+            // Strip 'caller' field from tool_use blocks
+            return stripCallerFieldFromAssistantMessage(msg)
+          default:
+            return msg
+        }
+      })
+    }
+
+    // Repair tool_use/tool_result pairing mismatches that can occur when resuming
+    // remote/teleport sessions. Inserts synthetic error tool_results for orphaned
+    // tool_uses and strips orphaned tool_results referencing non-existent tool_uses.
+    next = ensureToolResultPairing(next)
+
+    // Strip advisor blocks — the API rejects them without the beta header.
+    if (!betas.includes(ADVISOR_BETA_HEADER)) {
+      next = stripAdvisorBlocks(next)
+    }
+
+    // Strip excess media items before making the API call.
+    // The API rejects requests with >100 media items but returns a confusing error.
+    // Rather than erroring (which is hard to recover from in Cowork/CCD), we
+    // silently drop the oldest media items to stay within the limit.
+    next = stripExcessMediaItems(next, API_MAX_MEDIA_PER_REQUEST)
+    return next
+  }
+
+  let messagesForAPI = postNormalizeForAPI(
+    normalizeMessagesForAPI(messages, filteredTools, normalizeModel),
+  )
   queryCheckpoint('query_message_normalization_end')
 
-  // Model-specific post-processing: strip tool-search-specific fields if the
-  // selected model doesn't support tool search.
-  //
-  // Why is this needed in addition to normalizeMessagesForAPI?
-  // - normalizeMessagesForAPI uses isSearchExtraToolsEnabledNoModelCheck() because it's
-  //   called from ~20 places (analytics, feedback, sharing, etc.), many of which
-  //   don't have model context. Adding model to its signature would be a large refactor.
-  // - This post-processing uses the model-aware isSearchExtraToolsEnabled() check
-  // - This handles mid-conversation model switching (e.g., Sonnet → Haiku) where
-  //   stale tool-search fields from the previous model would cause 400 errors
-  //
-  // Note: For assistant messages, normalizeMessagesForAPI already normalized the
-  // tool inputs, so stripCallerFieldFromAssistantMessage only needs to remove the
-  // 'caller' field (not re-normalize inputs).
-  if (!useSearchExtraTools) {
-    messagesForAPI = messagesForAPI.map(msg => {
-      switch (msg.type) {
-        case 'user':
-          // Strip tool_reference blocks from tool_result content
-          return stripToolReferenceBlocksFromUserMessage(msg)
-        case 'assistant':
-          // Strip 'caller' field from tool_use blocks
-          return stripCallerFieldFromAssistantMessage(msg)
-        default:
-          return msg
-      }
-    })
+  // densable Ydy midConvFallback: if primary path emitted api_system and o3 is
+  // live, precompute a demoted re-normalize (model omitted) so KQn can swap
+  // bodies without another full turn setup.
+  let midConvFallback:
+    | (() => (UserMessage | AssistantMessage | ApiSystemMessage)[])
+    | null = null
+  if (
+    !midConvLatchedOff &&
+    betas.includes(MID_CONVERSATION_SYSTEM_BETA_HEADER)
+  ) {
+    const primary = messagesForAPI
+    midConvFallback = primary.some(m => isApiSystemMessage(m))
+      ? () =>
+          postNormalizeForAPI(
+            normalizeMessagesForAPI(messages, filteredTools, undefined),
+          )
+      : () => primary
   }
-
-  // Repair tool_use/tool_result pairing mismatches that can occur when resuming
-  // remote/teleport sessions. Inserts synthetic error tool_results for orphaned
-  // tool_uses and strips orphaned tool_results referencing non-existent tool_uses.
-  messagesForAPI = ensureToolResultPairing(messagesForAPI)
-
-  // Strip advisor blocks — the API rejects them without the beta header.
-  if (!betas.includes(ADVISOR_BETA_HEADER)) {
-    messagesForAPI = stripAdvisorBlocks(messagesForAPI)
-  }
-
-  // Strip excess media items before making the API call.
-  // The API rejects requests with >100 media items but returns a confusing error.
-  // Rather than erroring (which is hard to recover from in Cowork/CCD), we
-  // silently drop the oldest media items to stay within the limit.
-  messagesForAPI = stripExcessMediaItems(
-    messagesForAPI,
-    API_MAX_MEDIA_PER_REQUEST,
-  )
 
   // OpenAI-compatible provider: delegate to the OpenAI adapter layer
   // after shared preprocessing (message normalization, tool filtering,
   // media stripping) but before Anthropic-specific logic (betas, thinking, caching).
+  // Non-Anthropic adapters re-normalize Message[] themselves and do not use
+  // densable api_system wire shape — pass original messages (not mid-conv API list).
   if (getAPIProvider() === 'openai') {
     const { queryModelOpenAI } = await import('./openai/index.js')
     // OpenAI emulates Anthropic's dynamic tool loading client-side. It needs
     // the full tool pool so SearchExtraToolsTool can search deferred MCP tools that
     // were intentionally filtered out of the initial API tool list above.
-    yield* queryModelOpenAI(
-      messagesForAPI,
-      systemPrompt,
-      tools,
-      signal,
-      options,
-    )
+    yield* queryModelOpenAI(messages, systemPrompt, tools, signal, options)
     return
   }
 
   if (getAPIProvider() === 'gemini') {
     const { queryModelGemini } = await import('./gemini/index.js')
     yield* queryModelGemini(
-      messagesForAPI,
+      messages,
       systemPrompt,
       filteredTools,
       signal,
@@ -1472,7 +1545,7 @@ async function* queryModel(
   if (getAPIProvider() === 'grok') {
     const { queryModelGrok } = await import('./grok/index.js')
     yield* queryModelGrok(
-      messagesForAPI,
+      messages,
       systemPrompt,
       filteredTools,
       signal,
@@ -1643,6 +1716,10 @@ async function* queryModel(
   }
 
   const effort = resolveAppliedEffort(options.model, options.effortValue)
+  // densable Ie — string effort level from last request's output_config.effort
+  // stamped onto every AssistantMessage for transcript persistence (#44).
+  // Numeric effort_override (ant-only) is intentionally NOT recorded.
+  let effortLevelForTranscript: EffortLevel | undefined
 
   if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
     // Exclude defer_loading tools from the hash -- the API strips them from the
@@ -1913,6 +1990,10 @@ async function* queryModel(
     // Official: send betas when useBetas and (!simulate || remaining > 0)
     const sendBetas = useBetas && (!simulateProxy || filteredBetas.length > 0)
 
+    // densable: Ie = typeof ra === "string" && MPe(ra) ? ra : void 0
+    // Capture wire string effort for transcript stamping on assistant msgs.
+    effortLevelForTranscript = transcriptEffortFromOutputConfig(outputConfig)
+
     return {
       model: normalizeModelStringForAPI(options.model),
       messages: addCacheBreakpoints(
@@ -1990,6 +2071,9 @@ async function* queryModel(
   let usage: NonNullableUsage = EMPTY_USAGE
   let costUSD = 0
   let stopReason: BetaStopReason | null = null
+  // densable 2.1.214 #38: multi-frame message_delta is cumulative — credit
+  // session cost only once per stream (gr: none → pending → credited).
+  let streamCostCredit: StreamCostCreditState = 'none'
   let didFallBackToNonStreaming = false
   let fallbackMessage: AssistantMessage | undefined
   let maxOutputTokens = 0
@@ -2049,21 +2133,90 @@ async function* queryModel(
         // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
         // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
         // since we handle tool input accumulation ourselves
-        const result = await anthropic.beta.messages
-          .create(
-            { ...params, stream: true },
-            {
-              signal,
-              ...(clientRequestId && {
-                headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
-              }),
-            },
-          )
-          .withResponse()
-        queryCheckpoint('query_response_headers_received')
-        streamRequestId = result.request_id
-        streamResponse = result.response
-        return result.data
+        try {
+          const result = await anthropic.beta.messages
+            .create(
+              { ...params, stream: true },
+              {
+                signal,
+                ...(clientRequestId && {
+                  headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
+                }),
+              },
+            )
+            .withResponse()
+          queryCheckpoint('query_response_headers_received')
+          streamRequestId = result.request_id
+          streamResponse = result.response
+          return result.data
+        } catch (createError) {
+          // densable vi() — sticky mid-conv system / api_system cache demote.
+          // Latch + rewrite body/betas, then MidConvSystemRetryError → withRetry continue.
+          if (createError instanceof APIError && createError.status === 400) {
+            const roleRejected = isMidConvSystemRoleRejected(createError)
+            if (midConvFallback && roleRejected) {
+              messagesForAPI = midConvFallback()
+              midConvFallback = null
+              latchMidConvSystemRejected()
+              // densable: p = p.filter o3; getAllModelBetas is memoized — clear so
+              // subsequent turns re-run J8t against sticky reject.
+              clearBetasCaches()
+              betas = betas.filter(
+                b => b !== MID_CONVERSATION_SYSTEM_BETA_HEADER,
+              )
+              logForDebugging(
+                '[mid-conv-system] server rejected role:"system" — falling back to a body with no {role:"system"} turn, sticky-rejecting the beta until /clear or /compact',
+                { level: 'warn' },
+              )
+              logEvent('tengu_mid_conv_system_fallback_retry', {
+                per_turn_effort:
+                  false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+              throw new MidConvSystemRetryError('mid-conv-system')
+            }
+            // densable e9i: proxy rejected cache_control on api_system tail
+            // only when we actually promoted cache_control onto a system message.
+            // densable Q — last request put cache_control on a role:system block.
+            // MessageParam is user|assistant; api_system is cast through as system.
+            const requestHasApiSystemCache =
+              shouldCacheControlOnApiSystem() &&
+              (
+                params.messages as Array<{
+                  role?: string
+                  content?: unknown
+                }>
+              ).some(m => {
+                if (m.role !== 'system' || !Array.isArray(m.content)) {
+                  return false
+                }
+                return (m.content as Array<Record<string, unknown>>).some(
+                  block =>
+                    block &&
+                    typeof block === 'object' &&
+                    'cache_control' in block &&
+                    block.cache_control != null,
+                )
+              })
+            if (
+              requestHasApiSystemCache &&
+              isApiSystemCacheControlRejected(createError)
+            ) {
+              latchMidConvCachePromotionRejected()
+              logForDebugging(
+                '[mid-conv-system] proxy rejected cache_control on the api_system tail — demoting the breakpoint to the trailing message for this conversation',
+                { level: 'warn' },
+              )
+              logEvent('tengu_mid_conv_system_fallback_retry', {
+                // densable Be("api_midconv_cache_proxy","proxy_rejected")
+                // local analytics: same event family, reason via string field
+                per_turn_effort:
+                  false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+              throw new MidConvSystemRetryError('api-system-cache-demote')
+            }
+          }
+          throw createError
+        }
       },
       {
         model: options.model,
@@ -2094,6 +2247,7 @@ async function* queryModel(
     textDeltas.clear()
     usage = EMPTY_USAGE
     stopReason = null
+    streamCostCredit = 'none'
     isAdvisorInProgress = false
 
     // Streaming idle timeout watchdog: abort the stream if no chunks arrive
@@ -2104,6 +2258,7 @@ async function* queryModel(
     // initial fetch(), not the streaming body.
     // Official 2.1.207: STREAM_WATCHDOG default ON (va); IAi floor 5 min.
     // BYTE body idle densable lives in streamWatchdogGates (Zgc/k_h/HAi).
+    // densable 2.1.214 #39: Rn = at._chunkTimes; ss poll Avs + advisor Vr/Gt.
     let streamWatchdogEnabled = !isEnvDefinedFalsy(
       process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
     )
@@ -2111,22 +2266,73 @@ async function* queryModel(
       parseInt(process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '', 10) || 0,
       300_000,
     )
+    let byteStreamIdleTimeoutMs = STREAM_IDLE_TIMEOUT_MS
     try {
-      const { isStreamWatchdogEnabled, resolveStreamIdleTimeoutMs } =
+      const {
+        isStreamWatchdogEnabled,
+        resolveStreamIdleTimeoutMs,
+        resolveByteStreamIdleTimeoutMs,
+      } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../../utils/streamWatchdogGates.js') as typeof import('../../utils/streamWatchdogGates.js')
       streamWatchdogEnabled = isStreamWatchdogEnabled()
       STREAM_IDLE_TIMEOUT_MS = resolveStreamIdleTimeoutMs()
+      byteStreamIdleTimeoutMs = resolveByteStreamIdleTimeoutMs({
+        provider: getAPIProvider(),
+      })
     } catch {
       // densable optional — keep inline fallbacks above
     }
     const STREAM_IDLE_WARNING_MS = STREAM_IDLE_TIMEOUT_MS / 2
+    // densable: Rn = at?._chunkTimes; la = performance.now()
+    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+    const streamResponseForChunkTimes = streamResponse as Response | undefined
+    let chunkTimes: { lastAt: number } | undefined
+    try {
+      const { getResponseChunkTimes } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/bodyIdleWatchdog.js') as typeof import('../../utils/bodyIdleWatchdog.js')
+      chunkTimes = getResponseChunkTimes(streamResponseForChunkTimes)
+    } catch {
+      chunkTimes = undefined
+    }
+    const streamLoopStartedAt = performance.now()
+    let stallPollTimer: ReturnType<typeof setTimeout> | null = null
+    let stallStatusActive = false
+    let stallPollMs = 20_000
+    let stallDt = byteStreamIdleTimeoutMs
+    let stallGraceMs = 0
+    try {
+      const { ADVISOR_STALL_POLL_MS, resolveAdvisorStallGraceMs } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/advisorNetworkStall.js') as typeof import('../../utils/advisorNetworkStall.js')
+      stallPollMs = ADVISOR_STALL_POLL_MS
+      const grace = resolveAdvisorStallGraceMs({
+        byteIdleTimeoutMs: byteStreamIdleTimeoutMs,
+        streamWatchdogEnabled,
+        streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
+        pollMs: stallPollMs,
+      })
+      stallDt = grace.dt
+      stallGraceMs = grace.graceMs
+    } catch {
+      // pure helper optional
+    }
     let streamIdleAborted = false
     // performance.now() snapshot when watchdog fires, for measuring abort propagation delay
     let streamWatchdogFiredAt: number | null = null
     let streamIdleWarningTimer: ReturnType<typeof setTimeout> | null = null
     let streamIdleTimer: ReturnType<typeof setTimeout> | null = null
+    // densable $o — clear stall + stream idle timers; clear stalled UI if shown
     function clearStreamIdleTimers(): void {
+      if (stallPollTimer !== null) {
+        clearTimeout(stallPollTimer)
+        stallPollTimer = null
+      }
+      if (stallStatusActive) {
+        stallStatusActive = false
+        options.onRetryStatus?.(null)
+      }
       if (streamIdleWarningTimer !== null) {
         clearTimeout(streamIdleWarningTimer)
         streamIdleWarningTimer = null
@@ -2136,8 +2342,44 @@ async function* queryModel(
         streamIdleTimer = null
       }
     }
+    // densable ss — schedule Avs poll on Rn.lastAt with advisor Vr grace
+    function scheduleNetworkStallPoll(): void {
+      if (!options.onRetryStatus || !chunkTimes) return
+      const lastAtAtSchedule = chunkTimes.lastAt
+      const armedAt = performance.now()
+      stallPollTimer = setTimeout(() => {
+        // densable: if (performance.now()-sl < Avs/2) return
+        if (performance.now() - armedAt < stallPollMs / 2) return
+        try {
+          const { decideAdvisorNetworkStallPoll } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/advisorNetworkStall.js') as typeof import('../../utils/advisorNetworkStall.js')
+          const decision = decideAdvisorNetworkStallPoll({
+            lastAtAtSchedule,
+            lastAtNow: chunkTimes!.lastAt,
+            streamStartedAt: streamLoopStartedAt,
+            now: performance.now(),
+            wallNow: Date.now(),
+            isAdvisorInProgress,
+            graceMs: stallGraceMs,
+            dt: stallDt,
+          })
+          if (decision.action === 'reschedule') {
+            scheduleNetworkStallPoll()
+            return
+          }
+          stallStatusActive = true
+          options.onRetryStatus?.(decision.status)
+        } catch {
+          // helper unavailable — skip UI
+        }
+      }, stallPollMs)
+      stallPollTimer.unref?.()
+    }
+    // densable ks — $o(); ss(); stream watchdog timers if Te
     function resetStreamIdleTimer(): void {
       clearStreamIdleTimers()
+      scheduleNetworkStallPoll()
       if (!streamWatchdogEnabled) {
         return
       }
@@ -2463,6 +2705,10 @@ async function* queryModel(
               timestamp: new Date().toISOString(),
               ...(research !== undefined && { research }),
               ...(advisorModel && { advisorModel }),
+              // densable ...Ie!==void 0&&{effort:Ie}
+              ...(effortLevelForTranscript !== undefined && {
+                effort: effortLevelForTranscript,
+              }),
             }
             newMessages.push(m)
             yield m
@@ -2484,12 +2730,11 @@ async function* queryModel(
               }
             }
 
-            // Write final usage and stop_reason back to the last yielded
-            // message. Messages are created at content_block_stop from
-            // partialMessage, which was set at message_start before any tokens
-            // were generated (output_tokens: 0, stop_reason: null).
-            // message_delta arrives after content_block_stop with the real
-            // values.
+            // Write final usage and stop_reason back to ALL yielded messages.
+            // densable: for (let Qo of ve) Qo.message.usage=tt, stop_reason=wt
+            // Messages are created at content_block_stop from partialMessage
+            // (output_tokens: 0, stop_reason: null). message_delta arrives
+            // after with the real cumulative values.
             //
             // IMPORTANT: Use direct property mutation, not object replacement.
             // The transcript write queue holds a reference to message.message
@@ -2499,22 +2744,30 @@ async function* queryModel(
             // captures the final values.
             stopReason = part.delta.stop_reason
 
-            const lastMsg = newMessages.at(-1)
-            if (lastMsg) {
-              lastMsg.message.usage = usage
-              lastMsg.message.stop_reason = stopReason
+            for (const msg of newMessages) {
+              msg.message.usage = usage
+              msg.message.stop_reason = stopReason
             }
 
-            // Update cost
-            const costUSDForPart = calculateUSDCost(
-              resolvedModel,
-              usage as unknown as BetaUsage,
-            )
-            costUSD += addToTotalSessionCost(
-              costUSDForPart,
-              usage as unknown as BetaUsage,
-              options.model,
-            )
+            // densable #38 cost credit gate (gr) — pure transition in streamCostCredit.ts
+            {
+              const credit = onMessageDeltaCostCredit(
+                streamCostCredit,
+                stopReason,
+              )
+              streamCostCredit = credit.next
+              if (credit.shouldCredit) {
+                const costUSDForPart = calculateUSDCost(
+                  resolvedModel,
+                  usage as unknown as BetaUsage,
+                )
+                costUSD += addToTotalSessionCost(
+                  costUSDForPart,
+                  usage as unknown as BetaUsage,
+                  options.model,
+                )
+              }
+            }
 
             const refusalMessage = getErrorMessageIfRefusal(
               part.delta.stop_reason,
@@ -2714,6 +2967,22 @@ async function* queryModel(
             break
           }
           case 'message_stop':
+            // densable: if (gr==="pending") gr="credited"; tr+=Zce(...)
+            {
+              const credit = onMessageStopCostCredit(streamCostCredit)
+              streamCostCredit = credit.next
+              if (credit.shouldCredit) {
+                const costUSDForStop = calculateUSDCost(
+                  resolvedModel,
+                  usage as unknown as BetaUsage,
+                )
+                costUSD += addToTotalSessionCost(
+                  costUSDForStop,
+                  usage as unknown as BetaUsage,
+                  options.model,
+                )
+              }
+            }
             break
         }
 
@@ -3036,6 +3305,10 @@ async function* queryModel(
         ...(advisorModel && {
           advisorModel,
         }),
+        // densable ...Ie!==void 0&&{effort:Ie}
+        ...(effortLevelForTranscript !== undefined && {
+          effort: effortLevelForTranscript,
+        }),
       }
       newMessages.push(m)
       fallbackMessage = m
@@ -3131,6 +3404,10 @@ async function* queryModel(
           timestamp: new Date().toISOString(),
           ...(research !== undefined && { research }),
           ...(advisorModel && { advisorModel }),
+          // densable ...Ie!==void 0&&{effort:Ie}
+          ...(effortLevelForTranscript !== undefined && {
+            effort: effortLevelForTranscript,
+          }),
         }
         newMessages.push(m)
         fallbackMessage = m
@@ -3342,6 +3619,7 @@ async function* queryModel(
       messageCount: logMessageCount,
       messageTokens: logMessageTokens,
       requestId: streamRequestId ?? null,
+      clientRequestId,
       stopReason,
       ttftMs,
       didFallBackToNonStreaming,
@@ -3537,7 +3815,7 @@ type CachedMCPinnedEdits = {
 
 // Exported for testing cache_reference placement constraints
 export function addCacheBreakpoints(
-  messages: (UserMessage | AssistantMessage)[],
+  messages: (UserMessage | AssistantMessage | ApiSystemMessage)[],
   enablePromptCaching: boolean,
   querySource?: QuerySource,
   useCachedMC = false,
@@ -3545,26 +3823,80 @@ export function addCacheBreakpoints(
   pinnedEdits?: CachedMCPinnedEdits[],
   skipCacheWrite = false,
 ): MessageParam[] {
+  // densable Jdy: prefer cache_control on trailing nonempty api_system when
+  // experimental betas live and promotion not demoted (Gri/Vme).
+  const allowApiSystemCache = shouldCacheControlOnApiSystem()
+
+  const isCacheableAssistant = (m: (typeof messages)[number]): boolean => {
+    if (m.type !== 'assistant') return true
+    const v = m.message.content
+    if (typeof v === 'string') return true
+    const last = Array.isArray(v) ? v.at(-1) : undefined
+    return (
+      last !== undefined &&
+      last.type !== 'thinking' &&
+      last.type !== 'redacted_thinking'
+    )
+  }
+  const findCacheableIndex = (from: number): number => {
+    let v = from
+    while (
+      v >= 0 &&
+      (isApiSystemMessage(messages[v]!) || !isCacheableAssistant(messages[v]!))
+    ) {
+      v--
+    }
+    return v
+  }
+  let markerIndex = findCacheableIndex(messages.length - 1)
+  if (skipCacheWrite) {
+    markerIndex = findCacheableIndex(markerIndex - 1)
+  }
+  const last = messages[messages.length - 1]
+  const trailingApiSystem =
+    last !== undefined &&
+    isApiSystemMessage(last) &&
+    typeof last.message.content === 'string' &&
+    last.message.content.trim() !== ''
+  // densable: c && t && !n && l>=0 && p → prefer last index (api_system)
+  if (
+    allowApiSystemCache &&
+    enablePromptCaching &&
+    !skipCacheWrite &&
+    markerIndex >= 0 &&
+    trailingApiSystem
+  ) {
+    markerIndex = messages.length - 1
+  }
+
   logEvent('tengu_api_cache_breakpoints', {
     totalMessageCount: messages.length,
     cachingEnabled: enablePromptCaching,
     skipCacheWrite,
   })
 
-  // Exactly one message-level cache_control marker per request. Mycro's
-  // turn-to-turn eviction (page_manager/index.rs: Index::insert) frees
-  // local-attention KV pages at any cached prefix position NOT in
-  // cache_store_int_token_boundaries. With two markers the second-to-last
-  // position is protected and its locals survive an extra turn even though
-  // nothing will ever resume from there — with one marker they're freed
-  // immediately. For fire-and-forget forks (skipCacheWrite) we shift the
-  // marker to the second-to-last message: that's the last shared-prefix
-  // point, so the write is a no-op merge on mycro (entry already exists)
-  // and the fork doesn't leave its own tail in the KVCC. Dense pages are
-  // refcounted and survive via the new hash either way.
-  const markerIndex = skipCacheWrite ? messages.length - 2 : messages.length - 1
   const result = messages.map((msg, index) => {
     const addCache = index === markerIndex
+    if (isApiSystemMessage(msg)) {
+      // densable: role:"system" + optional cache_control on text block
+      const text = msg.message.content
+      if (addCache && enablePromptCaching && allowApiSystemCache) {
+        return {
+          role: 'system' as const,
+          content: [
+            {
+              type: 'text' as const,
+              text,
+              cache_control: getCacheControl({ querySource }),
+            },
+          ],
+        } as unknown as MessageParam
+      }
+      return {
+        role: 'system' as const,
+        content: text || [],
+      } as unknown as MessageParam
+    }
     if (msg.type === 'user') {
       return userMessageToMessageParam(
         msg,

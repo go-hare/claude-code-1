@@ -47,8 +47,9 @@ const STICKY_TEXT_CAP = 500;
 
 /**
  * Frames of consecutive "no sticky candidate" needed before clearing the
- * header. padCollapsed flips paddingTop by 1 row; firstVisible can miss for
- * a single frame and would otherwise thrash setStickyPrompt null↔object
+ * header when firstVisible is already at the list top. padCollapsed /
+ * sticky-header mount shifts the viewport by ~1 row; firstVisible can miss
+ * for a frame and would otherwise thrash setStickyPrompt null↔object
  * (React minified #185 / Maximum update depth under MessagesBoundary).
  */
 export const STICKY_CLEAR_HYSTERESIS_FRAMES = 2;
@@ -58,11 +59,34 @@ export const STICKY_CLEAR_HYSTERESIS_FRAMES = 2;
  * @param missStreak consecutive frames with text===null while not at bottom
  * @param hadSticky whether we currently hold a sticky idx/text
  * @param force after header click ('clicked' suppress path)
+ * @param firstVisible first message index at-or-below the viewport top.
+ *   Mid-list misses (firstVisible > 0) are layout thrash from header/pad —
+ *   never clear; only clear when the list top is visible or force/isSticky.
  */
-export function shouldClearStickyOnMiss(missStreak: number, hadSticky: boolean, force: boolean): boolean {
+export function shouldClearStickyOnMiss(
+  missStreak: number,
+  hadSticky: boolean,
+  force: boolean,
+  firstVisible = 0,
+): boolean {
   if (force) return true;
   if (!hadSticky) return false;
+  // Content still exists above the viewport — keep last sticky text. Header
+  // mount/unmount and paddingTop 1↔0 routinely produce multi-frame misses
+  // here; hysteresis alone was not enough under long streaming sessions.
+  if (firstVisible > 0) return false;
   return missStreak >= STICKY_CLEAR_HYSTERESIS_FRAMES;
+}
+
+/**
+ * Whether two sticky setter payloads are equivalent (skip setState).
+ * New {text,scrollTo} objects with the same text must not re-render chrome.
+ */
+export function isSameStickyPrompt(prev: StickyPrompt | null, next: StickyPrompt | null): boolean {
+  if (prev === next) return true;
+  if (prev == null || next == null) return false;
+  if (prev === 'clicked' || next === 'clicked') return prev === next;
+  return prev.text === next.text;
 }
 
 /** Imperative handle for transcript navigation. Methods compute matches
@@ -1012,12 +1036,19 @@ function StickyTracker({
     }
 
     if (text === null || idx < 0) {
-      // One-frame miss after padCollapsed flip — keep previous sticky.
+      // Layout thrash (padCollapsed / sticky header mount) can miss for
+      // many frames mid-list. Hold sticky while firstVisible > 0; only
+      // clear at list top (or force / isSticky above).
       const hadSticky = lastIdx.current >= 0 || lastStickyText.current !== null;
+      if (hadSticky && !force && firstVisible > 0) {
+        // Stable hold — do not accumulate streak; miss is not real.
+        clearStickyStreak.current = 0;
+        return;
+      }
       if (hadSticky && !force) {
         clearStickyStreak.current += 1;
       }
-      if (!shouldClearStickyOnMiss(clearStickyStreak.current, hadSticky, force)) {
+      if (!shouldClearStickyOnMiss(clearStickyStreak.current, hadSticky, force, firstVisible)) {
         return;
       }
       clearSticky();

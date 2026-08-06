@@ -25,7 +25,8 @@ import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
 import { submitDispatch } from '../daemon/bgManager.js';
-import { listAllJobs, removeJob, type BgJobState } from '../daemon/jobState.js';
+import { listAllJobs, type BgJobState } from '../daemon/jobState.js';
+import { deleteJob } from '../daemon/deleteJob.js';
 import { VoiceProvider } from '../context/voice.js';
 import { getPlatform } from '../utils/platform.js';
 import {
@@ -90,14 +91,37 @@ import { getMainLoopModel, renderModelName } from '../utils/model/model.js';
 import { getCwd } from '../utils/cwd.js';
 import { truncatePathMiddle } from '../utils/truncate.js';
 import { stringWidth } from '@anthropic/ink';
+import { formatRelativeTimeAgo } from '../utils/format.js';
 import { listTemplates, type TemplateInfo } from '../jobs/templates.js';
 import { listRoutines, type RoutineInfo } from '../jobs/routines.js';
+import {
+  FLEET_FORCE_RESTART_MSG,
+  FORK_TRANSCRIPT_NEVER_MATERIALIZED,
+  evaluateRespawnTranscriptGate,
+} from '../daemon/transcriptProbe.js';
+
+export { FLEET_FORCE_RESTART_MSG };
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const REFRESH_INTERVAL_MS = 3000;
+
+/** Module-level arm for densable double-enter force fresh after tYo. */
+let forceFreshNextShort: string | null = null;
+
+type ResumePickerEntry = {
+  sessionId: string;
+  title: string;
+  modified: Date;
+};
+
+type ResumePickerState = {
+  entries: ResumePickerEntry[] | null;
+  failed: boolean;
+  selected: number;
+};
 const AUTO_RELAUNCH_MIN_INTERVAL_MS = 30_000;
 
 const EMPTY_STATE_HINT =
@@ -459,8 +483,16 @@ function AgentViewApp({
    */
   const [mouseSelectedIndex, setMouseSelectedIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
+  // densable: when remounted with tYo, keep force arm for next enter on same short
+  useEffect(() => {
+    if (initialError === FLEET_FORCE_RESTART_MSG && forceFreshNextShort) {
+      // already armed by attachToPtySession
+    }
+  }, [initialError]);
   const [dispatchInput, setDispatchInput] = useState('');
   const [cursorOffset, setCursorOffset] = useState(0);
+  /** densable /resume past-session overlay (Tt). */
+  const [resumePicker, setResumePicker] = useState<ResumePickerState | null>(null);
   /** Official Ld / yp — prompt vs bash (`!`) composer mode. */
   const [dispatchMode, setDispatchMode] = useState<'prompt' | 'bash'>('prompt');
   /** Official paste map for `[Pasted text #N]` expand on submit. */
@@ -1271,6 +1303,82 @@ function AgentViewApp({
   // Actions
   // -------------------------------------------------------------------------
 
+  const openResumePicker = useCallback(async () => {
+    setResumePicker({ entries: null, failed: false, selected: 0 });
+    setDispatchInput('');
+    setCursorOffset(0);
+    try {
+      // densable fWa(excludeSet, includeBg=true) + soft-deleted/list-hidden:
+      // 1) enumerate past project sessions (B7b=200)
+      // 2) exclude sessions already in the main (non-archived) Fleet list
+      // 3) still include soft-archived / Earlier jobs (deleted from main list)
+      const { listSessionsImpl } = await import('../utils/listSessionsImpl.js');
+      const excludeIds = new Set<string>();
+      for (const s of sessions) {
+        if (s.archived || !s.sessionId) continue;
+        excludeIds.add(s.sessionId);
+        excludeIds.add(s.sessionId.slice(0, 8));
+        if (s.pid) excludeIds.add(String(s.pid));
+      }
+      const listed = await listSessionsImpl({
+        dir: getCwd(),
+        limit: 200,
+        includeWorktrees: true,
+      });
+      const byId = new Map<string, ResumePickerEntry>();
+      for (const s of listed) {
+        if (!s.sessionId) continue;
+        if (excludeIds.has(s.sessionId) || excludeIds.has(s.sessionId.slice(0, 8))) {
+          continue;
+        }
+        byId.set(s.sessionId, {
+          sessionId: s.sessionId,
+          title: s.customTitle || s.summary || s.sessionId.slice(0, 8),
+          modified: new Date(s.lastModified),
+        });
+      }
+      // Merge soft-archived Fleet jobs (Earlier) — densable "deleted from the list"
+      for (const s of sessions) {
+        if (!s.archived || !s.sessionId) continue;
+        if (byId.has(s.sessionId)) continue;
+        byId.set(s.sessionId, {
+          sessionId: s.sessionId,
+          title: s.name || s.sessionId.slice(0, 8),
+          modified: new Date(s.updatedAt || s.startedAt || Date.now()),
+        });
+      }
+      const entries = [...byId.values()].sort((a, b) => b.modified.getTime() - a.modified.getTime());
+      setResumePicker({ entries, failed: false, selected: 0 });
+    } catch {
+      setResumePicker({ entries: [], failed: true, selected: 0 });
+    }
+  }, [sessions]);
+
+  const resumePastAsBackground = useCallback(
+    async (sessionId: string, title: string) => {
+      setResumePicker(null);
+      dispatchingRef.current = true;
+      try {
+        await submitDispatch({
+          intent: title || 'resume',
+          name: title.slice(0, 40) || undefined,
+          resumeSessionId: sessionId,
+          forkSession: true,
+          cwd: getCwd(),
+          extraArgs: dispatchExtraArgs,
+          source: 'fleet-resume',
+        });
+        setError(null);
+        await refresh();
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        dispatchingRef.current = false;
+      }
+    },
+    [dispatchExtraArgs, refresh],
+  );
+
   const handleDispatch = useCallback(async () => {
     if (dispatchingRef.current) return;
     const rawForParse = dispatchMode === 'bash' ? `!${dispatchInput}` : dispatchInput;
@@ -1284,6 +1392,11 @@ function AgentViewApp({
         setCursorOffset(0);
         setDispatchMode('prompt');
         forceExit();
+        return;
+      }
+      // densable: bare /resume opens past-session picker → bg resume
+      if (quitToken === '/resume' || quitToken.startsWith('/resume ')) {
+        await openResumePicker();
         return;
       }
     }
@@ -1337,7 +1450,17 @@ function AgentViewApp({
     } finally {
       dispatchingRef.current = false;
     }
-  }, [dispatchInput, dispatchMode, refresh, dispatchExtraArgs, sessions, fleetTemplates, fleetRoutines, forceExit]);
+  }, [
+    dispatchInput,
+    dispatchMode,
+    refresh,
+    dispatchExtraArgs,
+    sessions,
+    fleetTemplates,
+    fleetRoutines,
+    forceExit,
+    openResumePicker,
+  ]);
 
   /** Resolve the currently selected job from flatRows at call time (not a stale closure). */
   const getSelectedSession = useCallback((): SessionEntry | undefined => {
@@ -1394,12 +1517,14 @@ function AgentViewApp({
     await refresh();
   }, [getSelectedSession, renameValue, refresh]);
 
+  // densable FleetView delete: C2e(id,{force:!0}) — kill-confirm + worktree
+  // gates with force (dirty/unpushed skip); bare removeJob left stranded workers.
   const handleDelete = useCallback(async () => {
     const session = getSelectedSession();
     if (!session) return;
     const short = session.short ?? session.sessionId?.slice(0, 8);
     if (!short) return;
-    await removeJob(short);
+    await deleteJob(short, { force: true });
     await refresh();
   }, [getSelectedSession, refresh]);
 
@@ -1408,7 +1533,8 @@ function AgentViewApp({
       // Prefer daemon short (attach correctness) over sessionId slice.
       const short = session.short ?? session.sessionId?.slice(0, 8);
       if (!short) continue;
-      await removeJob(short);
+      // densable force:true for fleet delete (non-git / dirty still clears jobdir)
+      await deleteJob(short, { force: true });
     }
     await refresh();
   }, [done, refresh]);
@@ -1628,6 +1754,45 @@ function AgentViewApp({
       setUngroupConfirmSessionId(null);
     };
 
+    // densable /resume past-session overlay key handling
+    if (resumePicker) {
+      if (key.escape) {
+        setResumePicker(null);
+        return;
+      }
+      const entries = resumePicker.entries;
+      if (entries && entries.length > 0) {
+        if (key.upArrow) {
+          setResumePicker(p =>
+            p
+              ? {
+                  ...p,
+                  selected: Math.max(0, p.selected - 1),
+                }
+              : p,
+          );
+          return;
+        }
+        if (key.downArrow) {
+          setResumePicker(p =>
+            p
+              ? {
+                  ...p,
+                  selected: Math.min((p.entries?.length ?? 1) - 1, p.selected + 1),
+                }
+              : p,
+          );
+          return;
+        }
+        if (key.return) {
+          const pick = entries[resumePicker.selected];
+          if (pick) void resumePastAsBackground(pick.sessionId, pick.title);
+          return;
+        }
+      }
+      return;
+    }
+
     // densable: Ctrl+C cancels transient modes / clears dispatch, else ur() double-exit.
     // Esc never arms — only Ctrl+C uses double-press (Mt footer: Press Ctrl-C again).
     // Match both parsed form (input='c'+ctrl) and raw ETX (\x03) for robustness.
@@ -1800,8 +1965,9 @@ function AgentViewApp({
 
     // Dispatch input handling (with cursor / bash / paste / multiline support)
     if (focusArea === 'dispatch') {
-      // Shift+Enter → newline (official dw multiline)
-      if (key.return && key.shift) {
+      // densable 2.1.212 #14: Ctrl+J inserts newline (extended key reporting);
+      // Shift+Enter kept for terminals that map it to a return+shift event.
+      if ((key.return && key.shift) || (input === 'j' && key.ctrl)) {
         setDispatchInput(v => v.slice(0, cursorOffset) + '\n' + v.slice(cursorOffset));
         setCursorOffset(o => o + 1);
         return;
@@ -2309,19 +2475,55 @@ function AgentViewApp({
 
         {/* Bottom: fixed input area */}
         <Box flexShrink={0} flexDirection="column">
+          {/* densable /resume past-session overlay (Tt) */}
+          {resumePicker && (
+            <Box flexDirection="column" borderStyle="round" paddingX={1} marginX={1} marginBottom={1}>
+              <Text bold>Resume a past session</Text>
+              {resumePicker.entries === null ? (
+                <Text dimColor>Looking for past sessions…</Text>
+              ) : resumePicker.failed ? (
+                <Text dimColor>{"Couldn't load past sessions — press esc, then try /resume again"}</Text>
+              ) : resumePicker.entries.length === 0 ? (
+                <Text dimColor>No past sessions to resume</Text>
+              ) : (
+                <Box flexDirection="column">
+                  {resumePicker.entries.map((entry, idx) => {
+                    const selected = idx === resumePicker.selected;
+                    return (
+                      <Box key={entry.sessionId}>
+                        <Text
+                          bold={selected}
+                          backgroundColor={selected ? 'userMessageBackground' : undefined}
+                          wrap={'truncate' as never}
+                        >
+                          {entry.title}
+                          <Text dimColor>
+                            {' · '}
+                            {formatRelativeTimeAgo(entry.modified, { style: 'short' })}
+                          </Text>
+                        </Text>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              )}
+              <Text dimColor>↑/↓ to navigate · enter to resume as a background session · esc to close</Text>
+            </Box>
+          )}
+
           {/* Help overlay (official ? shortcuts) */}
-          {helpOpen && (
+          {helpOpen && !resumePicker && (
             <Box paddingLeft={2} flexDirection="column" marginBottom={1}>
               <Text bold>Agents View shortcuts</Text>
               <Text dimColor>enter open · space reply · ctrl+e group · ctrl+s views</Text>
               <Text dimColor>ctrl+t pin · ctrl+r rename · ctrl+x delete/ungroup · a archive</Text>
-              <Text dimColor>! bash · @ mention · shift+enter newline · shift+↑↓ reorder · alt+1-9 open</Text>
+              <Text dimColor>! bash · @ mention · ctrl+j for newline · shift+↑↓ reorder · alt+1-9 open</Text>
               <Text dimColor>esc to quit · ctrl+c exit · ? close</Text>
             </Box>
           )}
 
           {/* Group assign mode */}
-          {viewMode === 'group' && (
+          {viewMode === 'group' && !resumePicker && (
             <Box paddingLeft={2} flexDirection="column">
               <Box>
                 <Text bold>{'group \u276f '}</Text>
@@ -2332,7 +2534,7 @@ function AgentViewApp({
           )}
 
           {/* Reply mode */}
-          {viewMode === 'reply' && (
+          {viewMode === 'reply' && !resumePicker && (
             <Box paddingLeft={2} flexDirection="column">
               <Box>
                 <Text bold>{'reply \u276f '}</Text>
@@ -2343,7 +2545,7 @@ function AgentViewApp({
           )}
 
           {/* Dispatch input */}
-          {viewMode === 'list' && !helpOpen && (
+          {viewMode === 'list' && !helpOpen && !resumePicker && (
             <Box flexDirection="column">
               {suggestions.length > 0 && focusArea === 'dispatch' && (
                 <SuggestionList
@@ -2406,12 +2608,15 @@ function AgentViewApp({
             </Box>
           )}
 
-          {/* Keyboard hints — FleetView footer. Arm message stays prominent. */}
-          <Box paddingLeft={2} height={1} flexShrink={0}>
-            <Text dimColor={!exitArmed} color={exitArmed ? 'warning' : undefined} wrap={'truncate' as never}>
-              {footerHints}
-            </Text>
-          </Box>
+          {/* Keyboard hints — FleetView footer. Arm message stays prominent.
+              densable: resume overlay owns its own footer line. */}
+          {!resumePicker && (
+            <Box paddingLeft={2} height={1} flexShrink={0}>
+              <Text dimColor={!exitArmed} color={exitArmed ? 'warning' : undefined} wrap={'truncate' as never}>
+                {footerHints}
+              </Text>
+            </Box>
+          )}
         </Box>
       </Box>
     </AlternateScreen>
@@ -2442,36 +2647,94 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
   const { sendControlRequest } = await import('../daemon/controlSocket.js');
   const { listAllJobs } = await import('../daemon/jobState.js');
 
+  // densable tYo: second enter while force-armed → force fresh prompt
+  const forceFresh = forceFreshNextShort === short;
+  if (forceFresh) forceFreshNextShort = null;
+
   // Official flow: try attach → if ENOJOB → respawn → retry attach
   let result = await attachToSession(short, { alreadyInAlt: true });
   let respawned = false;
 
   if (result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
-    // Session not in daemon — respawn it (official: S8_ / respawnJob)
+    // Session not in daemon — respawn it (official: S8_ / densable Xyr)
     const jobs = await listAllJobs();
     const job = jobs.find(j => j.short === short || j.state.sessionId === short || j.state.sessionId.startsWith(short));
     if (job) {
-      // Official: check if transcript exists before deciding resume vs fresh start
-      const { existsSync } = await import('fs');
-      const { join } = await import('path');
-      const { getProjectDir } = await import('../utils/sessionStorage.js');
-      const transcriptPath = join(getProjectDir(job.state.cwd), `${job.state.sessionId}.jsonl`);
-      const transcriptExists = existsSync(transcriptPath);
-
-      // Build launch config: resume if transcript exists, fresh prompt otherwise
-      const launch = transcriptExists
-        ? {
-            mode: 'resume' as const,
-            sessionId: job.state.sessionId,
-            fork: false,
-            flagArgs: job.state.respawnFlags ?? [],
-          }
-        : {
-            mode: 'prompt' as const,
-            args: job.state.intent ? ['--', job.state.intent] : [],
-          };
-
+      const resumeId = job.state.resumeSessionId ?? job.state.sessionId;
       const attachShort = job.short || short;
+      // densable Xyr: hLp / D9e / gLp before IAe (Zxe after hasMessages)
+      const { xyrPreflightBeforeRespawn, findResumeSessionConflict } = await import('../daemon/xyrRespawn.js');
+      const preflightErr = await xyrPreflightBeforeRespawn({
+        short: attachShort,
+        resumeSessionId: resumeId,
+        hasMessages: false,
+        force: forceFresh,
+        forceRefusalRetry: forceFresh,
+      });
+      if (preflightErr) {
+        process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+        return { error: preflightErr };
+      }
+      // densable IAe/NPn/Xyr gate (client-side preflight + daemon re-check)
+      const gate = await evaluateRespawnTranscriptGate({
+        short: attachShort,
+        sessionId: job.state.sessionId,
+        resumeSessionId: resumeId,
+        cwd: job.state.cwd,
+        bgIsolation: job.state.bgIsolation ?? 'none',
+        linkScanPath: job.state.linkScanPath,
+        forceRefusalRetry: forceFresh,
+        forceFreshPrompt: forceFresh,
+      });
+      const hasMessages = gate.allow && gate.probe.hasMessages;
+
+      // densable tYo: refuse + arm when fork handoff never materialized
+      if (!gate.allow) {
+        forceFreshNextShort = short;
+        process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+        return { error: FLEET_FORCE_RESTART_MSG };
+      }
+
+      // densable R = hasMessages && !exec → Zxe resume_session_live_elsewhere
+      if (hasMessages) {
+        const conflict = await findResumeSessionConflict(resumeId);
+        const ownJob = conflict?.jobId !== undefined && (conflict.jobId === short || conflict.jobId === attachShort);
+        if (conflict && !ownJob) {
+          process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+          return {
+            error:
+              'This conversation is already open in another running Claude session — use that one, or close it and try again',
+          };
+        }
+      }
+
+      // densable Xyr `$`: initialPrompt ?? queuedPrompt ?? (w||N ? void : intent)
+      // w = hasMessages; N = resumeSessionId points at a different session.
+      // Daemon re-resolves and strips client args when $ is void 0.
+      const { resolveRespawnLaunchPrompt } = await import('../daemon/transcriptProbe.js');
+      const resumePointsElsewhere =
+        job.state.resumeSessionId !== undefined && job.state.resumeSessionId !== job.state.sessionId;
+      const skipIntentReplay = hasMessages || resumePointsElsewhere;
+      const resolvedPrompt = resolveRespawnLaunchPrompt({
+        queuedPrompt: job.state.queuedPrompt,
+        intent: job.state.intent,
+        skipIntentReplay,
+      });
+      const launch =
+        hasMessages && !forceFresh
+          ? {
+              mode: 'resume' as const,
+              sessionId: resumeId,
+              fork: false,
+              flagArgs: job.state.respawnFlags ?? [],
+              // densable: only attach `-- $` when $ is defined
+              args: resolvedPrompt ? ['--', resolvedPrompt] : [],
+            }
+          : {
+              mode: 'prompt' as const,
+              args: resolvedPrompt ? ['--', resolvedPrompt] : [],
+            };
+
       const resp = await sendControlRequest(
         {
           proto: 1,
@@ -2484,10 +2747,12 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
             cwd: job.state.cwd,
             launch,
             env: {},
-            isolation: 'none',
+            isolation: job.state.bgIsolation === 'worktree' ? 'worktree' : 'none',
             respawnFlags: job.state.respawnFlags ?? [],
             cols: process.stdout.columns || 120,
             rows: process.stdout.rows || 30,
+            // densable Xyr forceRefusalRetry on second enter
+            ...(forceFresh ? { forceRefusalRetry: true, force: true } : {}),
           },
           timeoutMs: 10000,
         },
@@ -2496,18 +2761,24 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
 
       if (resp.ok) {
         respawned = true;
-        // Wait for worker to become available, then retry attach
         for (let i = 0; i < 20; i++) {
           await new Promise(r => setTimeout(r, 500));
           result = await attachToSession(attachShort, { alreadyInAlt: true });
           if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) break;
         }
       } else {
-        // After detach/error: restore alt screen for FleetView re-render
         process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
-        return {
-          error: formatAttachError((resp as { error?: string }).error ?? 'respawn failed'),
-        };
+        const errMsg = (resp as { error?: string; errorCode?: string; code?: string }).error ?? 'respawn failed';
+        const code = (resp as { errorCode?: string; code?: string }).errorCode ?? (resp as { code?: string }).code;
+        if (
+          code === FORK_TRANSCRIPT_NEVER_MATERIALIZED ||
+          code === 'fork_transcript_never_materialized' ||
+          errMsg.includes('no saved transcript')
+        ) {
+          forceFreshNextShort = short;
+          return { error: FLEET_FORCE_RESTART_MSG };
+        }
+        return { error: formatAttachError(errMsg) };
       }
     }
   }

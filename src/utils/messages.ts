@@ -72,6 +72,14 @@ import type {
   ToolUseSummaryMessage,
   UserMessage,
 } from '../types/message.js'
+import {
+  type ApiSystemMessage,
+  createApiSystemMessage,
+  demoteOrphanApiSystemMessages,
+  extractPureTextFromUserMessages,
+  isApiSystemMessage,
+  shouldUseMidConversationSystem,
+} from './midConversationSystem.js'
 import { isAdvisorBlock } from './advisor.js'
 import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.js'
 import { count } from './array.js'
@@ -84,7 +92,19 @@ import {
 import { quote } from './bash/shellQuote.js'
 import { formatNumber, formatTokens } from './format.js'
 import { getPewterLedgerVariant } from './planModeV2.js'
+// densable #20 Q9i/RZn leaf (avoids autonomyAuthority ↔ messages cycle)
+import {
+  isScheduledTaskOrigin,
+  SCHEDULED_TASK_DISCLAIMER_PREFIX,
+  wrapScheduledTaskDisclaimer,
+} from './scheduledTaskDisclaimer.js'
 import { jsonStringify } from './slowOperations.js'
+
+export {
+  isScheduledTaskOrigin,
+  SCHEDULED_TASK_DISCLAIMER_PREFIX,
+  wrapScheduledTaskDisclaimer,
+}
 
 // Hook attachments that have a hookName field (excludes HookPermissionDecisionAttachment)
 type HookAttachmentWithName = Exclude<
@@ -2295,10 +2315,19 @@ function relocateToolReferenceSiblings(
   return result
 }
 
+/**
+ * densable eN — normalize for API.
+ * When `model` is set and J8t(model), pure-text meta attachments after a user
+ * turn become `api_system` (role:system on the wire) instead of isMeta user.
+ */
 export function normalizeMessagesForAPI(
   messages: Message[],
   tools: Tools = [],
-): (UserMessage | AssistantMessage)[] {
+  model?: string,
+): (UserMessage | AssistantMessage | ApiSystemMessage)[] {
+  // densable o = r!==void 0 && J8t(r) — mid-conv system inject path
+  const midConvEnabled =
+    model !== undefined && shouldUseMidConversationSystem({ model })
   // Build set of available tool names for filtering unavailable tool references
   const availableToolNames = new Set(tools.map(t => t.name))
 
@@ -2362,7 +2391,33 @@ export function normalizeMessagesForAPI(
     }
   }
 
-  const result: (UserMessage | AssistantMessage)[] = []
+  const result: (UserMessage | AssistantMessage | ApiSystemMessage)[] = []
+  // densable w — pure-text meta buffer flushed into api_system after user
+  const metaBuffer: string[] = []
+  let emittedApiSystem = false
+  const flushMetaBuffer = (): void => {
+    if (metaBuffer.length === 0) return
+    const text = metaBuffer.join('\n\n')
+    metaBuffer.length = 0
+    const lastMessage = last(result)
+    if (isApiSystemMessage(lastMessage)) {
+      lastMessage.message.content += `\n\n${text}`
+      return
+    }
+    if (lastMessage?.type === 'user') {
+      // densable: last is user → B6n mid-conversation system block
+      emittedApiSystem = true
+      result.push(createApiSystemMessage(text))
+      return
+    }
+    // else → meta user (pre-conversation or after assistant)
+    result.push(
+      createUserMessage({
+        content: wrapInSystemReminder(text),
+        isMeta: true,
+      }),
+    )
+  }
   reorderedMessages
     .filter(
       (
@@ -2622,20 +2677,13 @@ export function normalizeMessagesForAPI(
             },
           }
 
-          // Find a previous assistant message with the same message ID and merge.
-          // Walk backwards, skipping different-ID assistants, since concurrent
-          // agents (teammates) can interleave streaming content blocks from
-          // multiple API responses with different message IDs.
-          //
-          // Do NOT skip tool_result messages — when claude.ts yields separate
-          // AssistantMessages for thinking and tool_use blocks (same message.id),
-          // a StreamingToolExecutor tool_result can land between them. Merging
-          // across that boundary produces duplicate tool_use IDs that downstream
-          // ensureToolResultPairing strips, leaving orphaned tool_results and
-          // ultimately consecutive user messages → API 400 (CC-1215).
+          // densable: skip over trailing api_system when merging same-id assistants
           for (let i = result.length - 1; i >= 0; i--) {
             const msg = result[i]!
 
+            if (msg.type === 'api_system') {
+              continue
+            }
             if (msg.type !== 'assistant') {
               break
             }
@@ -2646,6 +2694,8 @@ export function normalizeMessagesForAPI(
             }
           }
 
+          // densable I() — flush meta buffer before a new assistant turn
+          flushMetaBuffer()
           result.push(normalizedMessage)
           return
         }
@@ -2658,6 +2708,15 @@ export function normalizeMessagesForAPI(
           )
             ? rawAttachmentMessage.map(ensureSystemReminderWrap)
             : rawAttachmentMessage
+
+          // densable o: pure-text attachments → meta buffer → api_system after user
+          if (midConvEnabled) {
+            const pure = extractPureTextFromUserMessages(attachmentMessage)
+            if (pure !== null) {
+              metaBuffer.push(pure)
+              return
+            }
+          }
 
           // If the last message is also a user message, merge them
           const lastMessage = last(result)
@@ -2675,6 +2734,36 @@ export function normalizeMessagesForAPI(
       }
     })
 
+  // densable end-of-loop I() flush residual meta buffer
+  flushMetaBuffer()
+
+  // densable: post-process user|assistant only; re-interleave api_system by
+  // original index so mid-conv system blocks keep position for Jdy cache.
+  type NormMsg = UserMessage | AssistantMessage | ApiSystemMessage
+  const apiSystemSlots: Array<{ index: number; msg: ApiSystemMessage }> = []
+  const baseOnly: (UserMessage | AssistantMessage)[] = []
+  for (let i = 0; i < result.length; i++) {
+    const m = result[i]!
+    if (isApiSystemMessage(m)) {
+      apiSystemSlots.push({ index: baseOnly.length, msg: m })
+    } else {
+      baseOnly.push(m)
+    }
+  }
+  const reinsertApiSystem = (
+    base: (UserMessage | AssistantMessage)[],
+  ): NormMsg[] => {
+    if (apiSystemSlots.length === 0) return base
+    const out: NormMsg[] = [...base]
+    // insert from end so earlier indices stay valid
+    for (let s = apiSystemSlots.length - 1; s >= 0; s--) {
+      const { index, msg } = apiSystemSlots[s]!
+      const at = Math.min(index, out.length)
+      out.splice(at, 0, msg)
+    }
+    return out
+  }
+
   // Relocate text siblings off tool_reference messages — prevents the
   // anomalous two-consecutive-human-turns pattern that teaches the model
   // to emit the stop sequence after tool results. See #21049.
@@ -2684,8 +2773,8 @@ export function normalizeMessagesForAPI(
   const relocated = checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
     'tengu_toolref_defer_j8m',
   )
-    ? relocateToolReferenceSiblings(result)
-    : result
+    ? relocateToolReferenceSiblings(baseOnly)
+    : baseOnly
 
   // Filter orphaned thinking-only assistant messages (likely introduced by
   // compaction slicing away intervening messages between a failed streaming
@@ -2723,7 +2812,17 @@ export function normalizeMessagesForAPI(
   // Unconditional — catches transcripts persisted before smooshIntoToolResult
   // learned to filter on is_error. Without this a resumed session with an
   // image-in-error tool_result 400s forever.
-  const sanitized = sanitizeErrorToolResultContent(smooshed)
+  const sanitizedBase = sanitizeErrorToolResultContent(smooshed)
+  let sanitized: NormMsg[] = reinsertApiSystem(sanitizedBase)
+
+  // densable w3y — demote orphan api_system when mid-conv path emitted any
+  if (midConvEnabled && emittedApiSystem) {
+    sanitized = demoteOrphanApiSystemMessages(sanitized, {
+      createUserMeta: content =>
+        createUserMessage({ content, isMeta: true }) as NormMsg,
+      wrapSystemReminder: wrapInSystemReminder,
+    })
+  }
 
   // Append message ID tags for snip tool visibility (after all merging,
   // so tags always match the surviving message's messageId field).
@@ -2747,7 +2846,11 @@ export function normalizeMessagesForAPI(
   }
 
   // Validate all images are within API size limits before sending
-  validateImagesForAPI(sanitized)
+  validateImagesForAPI(
+    sanitized.filter(
+      (m): m is UserMessage | AssistantMessage => m.type !== 'api_system',
+    ),
+  )
 
   return sanitized
 }
@@ -4791,6 +4894,19 @@ You have exited auto mode. The user may now want to interact more directly. You 
         createUserMessage({ content, isMeta: true }),
       ])
     }
+    case 'read_truncation_notice': {
+      // densable: nm([Ur({content:j5e(e.banner),isMeta:!0})])
+      // j5e XML-escapes the banner so it is safe inside system-reminder.
+      const escaped = attachment.banner
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('\r', '&#13;')
+        .replaceAll('\n', '&#10;')
+      return wrapMessagesInSystemReminder([
+        createUserMessage({ content: escaped, isMeta: true }),
+      ])
+    }
     case 'already_read_file':
     case 'command_permissions':
     case 'edited_image_file':
@@ -5703,9 +5819,9 @@ export function createToolUseSummaryMessage(
  * that will be rejected at submission anyway.
  */
 export function ensureToolResultPairing(
-  messages: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
-  const result: (UserMessage | AssistantMessage)[] = []
+  messages: (UserMessage | AssistantMessage | ApiSystemMessage)[],
+): (UserMessage | AssistantMessage | ApiSystemMessage)[] {
+  const result: (UserMessage | AssistantMessage | ApiSystemMessage)[] = []
   let repaired = false
 
   // Cross-message tool_use ID tracking. The per-message seenToolUseIds below
@@ -5720,6 +5836,12 @@ export function ensureToolResultPairing(
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!
+
+    // densable: api_system is not part of tool pairing — pass through
+    if (isApiSystemMessage(msg)) {
+      result.push(msg)
+      continue
+    }
 
     if (msg.type !== 'assistant') {
       // A user message with tool_result blocks but NO preceding assistant
@@ -6065,12 +6187,13 @@ export function ensureToolResultPairing(
  * Strip advisor blocks from messages. The API rejects server_tool_use blocks
  * with name "advisor" unless the advisor beta header is present.
  */
-export function stripAdvisorBlocks(
-  messages: (UserMessage | AssistantMessage)[],
-): (UserMessage | AssistantMessage)[] {
+export function stripAdvisorBlocks<
+  T extends UserMessage | AssistantMessage | ApiSystemMessage,
+>(messages: T[]): T[] {
   let changed = false
   const result = messages.map(msg => {
-    if (msg.type !== 'assistant') return msg
+    // densable: api_system pass-through (not assistant content)
+    if (msg.type === 'api_system' || msg.type !== 'assistant') return msg
     const content = Array.isArray(msg.message.content)
       ? msg.message.content
       : []
@@ -6270,7 +6393,14 @@ export function applyTurnStartOriginFraming(
         | unknown
     }
   },
-  origin: { kind?: string; from?: string } | undefined,
+  origin:
+    | {
+        kind?: string
+        from?: string
+        subkind?: string
+        trigger?: string
+      }
+    | undefined,
 ): void {
   if (!origin?.kind || !message.message) return
   let frame: ((raw: string) => string) | undefined
@@ -6278,6 +6408,10 @@ export function applyTurnStartOriginFraming(
     frame = raw => wrapPeerOriginText(raw, { midTurn: false })
   } else if (origin.kind === 'observer') {
     frame = raw => wrapObserverOriginText(raw, origin.from, { midTurn: false })
+  } else if (isScheduledTaskOrigin(origin)) {
+    // densable #20: schedule fires are turn-start isMeta prompts — stamp RZn
+    // here (Fws densable only does peer/observer; local autonomy path needs this).
+    frame = wrapScheduledTaskDisclaimer
   } else {
     return
   }
@@ -6331,12 +6465,21 @@ export function wrapCommandText(
         kind?: string
         server?: string
         from?: string
+        subkind?: string
+        trigger?: string
       }
     | undefined
   switch (originObj?.kind) {
     case 'task-notification':
-      // task-notification: strong disclaimer. Body may already include summary lines.
-      return wrapTaskNotificationDisclaimer(raw)
+      // densable: subkind==="scheduled-trigger" → Q9i else J9i
+      return isScheduledTaskOrigin(originObj)
+        ? wrapScheduledTaskDisclaimer(raw)
+        : wrapTaskNotificationDisclaimer(raw)
+    case 'autonomy':
+      // Local schedule path (origin kind autonomy + trigger scheduled-task)
+      return isScheduledTaskOrigin(originObj)
+        ? wrapScheduledTaskDisclaimer(raw)
+        : `[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]\n${raw}`
     case 'coordinator':
       return `The coordinator sent a message while you were working:\n${raw}\n\nAddress this before completing your current task.`
     case 'channel':
@@ -6384,6 +6527,8 @@ export function wrapResumePromptOrigin(
   const asOrigin = origin as unknown as MessageOrigin | undefined
   switch (origin?.kind) {
     case 'task-notification':
+      return wrapCommandText(raw, asOrigin)
+    case 'autonomy':
       return wrapCommandText(raw, asOrigin)
     case 'coordinator':
       return wrapCommandText(raw, asOrigin)

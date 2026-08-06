@@ -89,7 +89,8 @@ export const getHookEventMetadata = memoize(
           'Input to command is JSON with session start source.\nExit code 0 - stdout shown to Claude\nBlocking errors are ignored\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'source',
-          values: ['startup', 'resume', 'clear', 'compact'],
+          // densable 2.1.214 #47: values: ["startup","resume","clear","compact","fork"]
+          values: ['startup', 'resume', 'clear', 'compact', 'fork'],
         },
       },
       Stop: {

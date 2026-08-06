@@ -43,12 +43,27 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线在对齐 **densable 2.1.211** 的 agent / 会话 / 队列 / inbox / daemon 行为（git tag `v2.8.5` 合入前、`v2.8.6` 合入后）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.28**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → 2.1.212** 产品对齐（git 上 211 host/agent 路径 + 212 官方 48 条 changelog + Qre/code-sessions 外围）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.29**），与 git tag 可能不同步。
 
-### 近期更新（2.7.5 → 2.7.28）
+#### densable 2.1.212 对齐说明（2.7.29）
+
+对照文档：`docs/upstream-extraction/v2.1.212/official-212-checklist.md`（**HAVE 44 + N/A 1，0 GAP**）、`pack-report.md` closeout、`residual-qre-jes-2026-08-06.md`。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **会话安全阀** | WebSearch / subagent 默认 200 + env；`/clear` 重置；MCP 长调用自动后台（默认 2min / env） | — |
+| **`/fork` · `/subtask`** | `/fork` = 后台会话副本 + keepParent；原会话内 full-context 工人 = `/subtask` | 不把 legacy in-session 仍叫 `/fork` |
+| **Agents UX** | agent-view `/resume` picker→bg；重开 stopped；冷 attach transcript；footer `N done`；**Needs input** | — |
+| **`claude auto-mode reset`** | 确认提示 + `--yes` | — |
+| **可靠性 / UX 批次** | plan bash 写权限、worktree 符号链接、hook `continue:false`、print SIGTERM 143、Win PS7 bg、shell `!` 路径、btw 重开、SendMessage 预览、Web 529、mid-conv cache 等（见 checklist） | 不混 **2.1.214** EndConversation；不补 **2.1.210** collapsed-tool 实时 elapsed（邻版） |
+| **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
+| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF；**KAIROS** 已在构建默认中、产品侧不再加码改动 |
+
+### 近期更新（2.7.5 → 2.7.29）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.29** | **densable 2.1.212 收口**：官方 48 条 0 GAP；`/fork` keepParent + `/subtask`；会话 caps / MCP auto-bg / auto-mode reset；ultrareview + Qre/code-sessions（OTe/KLc/H8/F1g/nts）1:1。故意不扩 UDS/LAN/TEAMMEM、KAIROS 不再动、不混 214/210 邻版。 |
 | **2.7.28** | **Win 打包剪贴板贴图**：`bun --compile` 下 sharp 原生模块不可用时改走 System.Drawing 缩放/JPEG；dev 仍用 sharp。 |
 | **2.7.27** | **Prompt 通知条高度**：绝对定位区 height 2→1，避免最新通知盖住 prompt 顶边框（如剪贴板图片 `alt+v` 提示）。 |
 | **2.7.26** | **Win 剪贴板图片粘贴**：Git Bash 下 PowerShell `shell:false` argv；空 paste 开 Windows；优先 PNG 流；客户端 ≥8px 拦截 1×1；Buddy/KAIROS 文档对齐 densable 211。 |

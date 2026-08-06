@@ -439,6 +439,14 @@ export type GlobalConfig = {
   // Remote callout tracking - shown once before first bridge enable
   remoteDialogSeen?: boolean
 
+  /**
+   * densable remoteControlReadyPushKey / remoteControlReadyPushCount (#31).
+   * Impression counter for RC "session ready" push (tengu_kairos_ready_nudge).
+   * Key resets the counter when GrowthBook rotates impressionKey.
+   */
+  remoteControlReadyPushKey?: string
+  remoteControlReadyPushCount?: number
+
   // Cross-process backoff for initReplBridge's oauth_expired_unrefreshable skip.
   // `expiresAt` is the dedup key — content-addressed, self-clears when /login
   // replaces the token. `failCount` caps false positives: transient refresh

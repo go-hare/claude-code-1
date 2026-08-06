@@ -66,14 +66,15 @@ import {
 import {
   checkReadPermissionForTool,
   matchingRuleForInput,
+  matchesPathRule,
 } from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
-import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
 import { readFileInRange } from 'src/utils/readFileInRange.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
 import { getDefaultFileReadingLimits } from './limits.js'
+import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
 import {
   DESCRIPTION,
   FILE_READ_TOOL_NAME,
@@ -183,6 +184,26 @@ export class MaxFileReadTokenExceededError extends Error {
   }
 }
 
+/**
+ * densable YAu/XAu/KAu — token-cap truncation banner keyed by Output object.
+ * Survives toolExecution so a `read_truncation_notice` attachment can be
+ * emitted without polluting file content (content stays pure page bytes).
+ */
+const tokenCapBannerByOutput = new WeakMap<object, string>()
+
+/** densable YAu */
+export function storeTokenCapBanner(data: object, banner: string): void {
+  tokenCapBannerByOutput.set(data, banner)
+}
+
+/** densable XAu */
+export function getTokenCapBanner(data: object): string | undefined {
+  return tokenCapBannerByOutput.get(data)
+}
+
+/** densable P3e — banner prefix for token-cap auto-page */
+const TOKEN_CAP_BANNER_PREFIX = '[Truncated: PARTIAL view — '
+
 // Common image extensions
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
 
@@ -264,6 +285,15 @@ const outputSchema = lazySchema(() => {
           .describe('Number of lines in the returned content'),
         startLine: z.number().describe('The starting line number'),
         totalLines: z.number().describe('Total number of lines in the file'),
+        // densable 2.1.212: whole-file read auto-paginated under token cap.
+        // Programmatic signal for internal consumers (Eio attachments);
+        // survives output reconstruction (unlike the render-time banner).
+        truncatedByTokenCap: z
+          .boolean()
+          .optional()
+          .describe(
+            'True when a whole-file read was auto-paginated because it exceeded the token cap (the content is a partial first page).',
+          ),
       }),
     }),
     z.object({
@@ -393,7 +423,8 @@ export const FileReadTool = buildTool({
     }
   },
   async preparePermissionMatcher({ file_path }) {
-    return pattern => matchWildcardPattern(pattern, file_path)
+    // densable hqe: allow-style single-segment dir/** is cwd-only (#44)
+    return pattern => matchesPathRule(pattern, file_path)
   },
   async checkPermissions(input, context): Promise<PermissionDecision> {
     const appState = context.getAppState()
@@ -1036,31 +1067,110 @@ async function callInner(
       context.abortController.signal,
     )
 
-  await validateContentTokens(content, ext, maxTokens)
+  // densable token-cap auto-page: whole-file reads that exceed the cap return
+  // the first page with truncatedByTokenCap + isPartialView instead of throw.
+  // P = (offset??1)<=1 && limit===undefined && pages===undefined
+  let outContent = content
+  let outLineCount = lineCount
+  let outLimit = limit
+  // densable k: banner string when auto-paged; undefined when full read OK
+  let tokenCapBanner: string | undefined
+  const isWholeFileRead =
+    (offset ?? 1) <= 1 && limit === undefined && pages === undefined
+  const effectiveMaxTokens =
+    maxTokens ?? getDefaultFileReadingLimits().maxTokens
+
+  try {
+    await validateContentTokens(content, ext, maxTokens)
+  } catch (err) {
+    if (!(err instanceof MaxFileReadTokenExceededError) || !isWholeFileRead) {
+      throw err
+    }
+    // densable: estimate bytes/token from full content vs measured tokenCount,
+    // shrink line window until under cap (max 6 shrinks), else char-slice path.
+    const lines = content.split('\n')
+    const bytesPerToken = Math.max(
+      0.5,
+      content.length / Math.max(1, err.tokenCount),
+    )
+    const estimateTokens = (s: string) => s.length / bytesPerToken
+    let take = Math.max(
+      1,
+      Math.min(
+        lines.length,
+        Math.floor(
+          ((lines.length * effectiveMaxTokens) / Math.max(1, err.tokenCount)) *
+            0.85,
+        ),
+      ),
+    )
+    let page = lines.slice(0, take).join('\n')
+    for (let q = 0; q < 6; q++) {
+      if (estimateTokens(page) <= effectiveMaxTokens || take <= 1) break
+      take = Math.max(1, Math.floor(take * 0.7))
+      page = lines.slice(0, take).join('\n')
+    }
+    let charTruncated = false
+    if (estimateTokens(page) > effectiveMaxTokens || page.trim() === '') {
+      let chars = Math.max(
+        1,
+        Math.floor(effectiveMaxTokens * bytesPerToken * 0.85),
+      )
+      for (let ne = 0; ne < 6; ne++) {
+        page = content.slice(0, chars)
+        if (estimateTokens(page) <= effectiveMaxTokens) break
+        chars = Math.max(1, Math.floor(chars * 0.7))
+      }
+      // densable: drop trailing high-surrogate
+      const last = page.charCodeAt(page.length - 1)
+      if (last >= 0xd800 && last <= 0xdbff) {
+        page = page.slice(0, -1)
+      }
+      charTruncated = true
+    }
+    outContent = page
+    outLineCount = charTruncated ? countCharInStringLocal(page, '\n') + 1 : take
+    outLimit = outLineCount
+    // densable k = !J && I < v ? lineBanner : charBanner  (always set on auto-page)
+    if (!charTruncated && outLineCount < totalLines) {
+      tokenCapBanner = `${TOKEN_CAP_BANNER_PREFIX}${file_path}: showing lines 1-${outLineCount} of ${totalLines} total (${err.tokenCount} tokens, cap ${effectiveMaxTokens}). Call ${FILE_READ_TOOL_NAME} with offset=${outLineCount + 1} limit=${outLineCount} for the next page, or ${GREP_TOOL_NAME} to find a specific section. Do NOT answer from this page alone if the answer may be further in the file.]`
+    } else {
+      tokenCapBanner = `${TOKEN_CAP_BANNER_PREFIX}${file_path}: showing the first ${page.length} of ${content.length} characters (${err.tokenCount} tokens, cap ${effectiveMaxTokens}); this file has very long lines and cannot be paginated by line. Use ${GREP_TOOL_NAME} to find a specific section, or ${FILE_READ_TOOL_NAME} with offset/limit to page through it. Do NOT answer from this excerpt alone if the answer may be elsewhere in the file.]`
+    }
+  }
 
   readFileState.set(fullFilePath, {
-    content,
+    content: outContent,
     timestamp: Math.floor(mtimeMs),
     offset,
-    limit,
+    limit: outLimit,
+    ...(tokenCapBanner !== undefined && { isPartialView: true as const }),
   })
   context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 
   // Snapshot before iterating — a listener that unsubscribes mid-callback
   // would splice the live array and skip the next listener.
   for (const listener of fileReadListeners.slice()) {
-    listener(resolvedFilePath, content)
+    listener(resolvedFilePath, outContent)
   }
 
   const data = {
     type: 'text' as const,
     file: {
       filePath: file_path,
-      content,
-      numLines: lineCount,
-      startLine: offset,
+      content: outContent,
+      numLines: outLineCount,
+      // densable: startLine = k!==void0 ? Math.max(1,i) : i
+      startLine: tokenCapBanner !== undefined ? Math.max(1, offset) : offset,
       totalLines,
+      ...(tokenCapBanner !== undefined && {
+        truncatedByTokenCap: true as const,
+      }),
     },
+  }
+  // densable YAu(N, k)
+  if (tokenCapBanner !== undefined) {
+    storeTokenCapBanner(data, tokenCapBanner)
   }
   if (isAutoMemFile(fullFilePath)) {
     memoryFileMtimes.set(data, mtimeMs)
@@ -1070,18 +1180,21 @@ async function callInner(
     operation: 'read',
     tool: 'FileReadTool',
     filePath: fullFilePath,
-    content,
+    content: outContent,
   })
 
   const sessionFileType = detectSessionFileType(fullFilePath)
   const analyticsExt = getFileExtensionForAnalytics(fullFilePath)
   logEvent('tengu_session_file_read', {
     totalLines,
-    readLines: lineCount,
+    readLines: outLineCount,
     totalBytes,
-    readBytes,
+    readBytes:
+      tokenCapBanner !== undefined
+        ? Buffer.byteLength(outContent, 'utf8')
+        : readBytes,
     offset,
-    ...(limit !== undefined && { limit }),
+    ...(outLimit !== undefined && { limit: outLimit }),
     ...(analyticsExt !== undefined && { ext: analyticsExt }),
     ...(messageId !== undefined && {
       messageID:
@@ -1092,6 +1205,16 @@ async function callInner(
   })
 
   return { data }
+}
+
+/** densable Tu — count char occurrences without importing stringUtils cycle. */
+function countCharInStringLocal(s: string, ch: string): number {
+  let n = 0
+  const code = ch.charCodeAt(0)
+  for (let i = 0; i < s.length; i++) {
+    if (s.charCodeAt(i) === code) n++
+  }
+  return n
 }
 
 /**

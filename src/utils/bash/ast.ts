@@ -443,16 +443,13 @@ export function parseForSecurityFromAst(
   }
 
   if (root === PARSE_ABORTED) {
-    // SECURITY: module loaded but parse aborted (timeout / node budget /
-    // panic). Adversarially triggerable — `(( a[0][0]... ))` with ~2800
-    // subscripts hits PARSE_TIMEOUT_MICROS under the 10K length limit.
-    // Previously indistinguishable from module-not-loaded → routed to
-    // legacy (parse-unavailable), which lacks EVAL_LIKE_BUILTINS — `trap`,
-    // `enable`, `hash` leaked with Bash(*). Fail closed: too-complex → ask.
+    // densable: t===y0e → too-complex with PARSE_ABORT reason.
+    // Covers timeout / node budget / panic AND over-length (Jru/K0e=1e4).
+    // SECURITY: previously over-length returned null → parse-unavailable →
+    // legacy path could auto-allow; densable 2.1.214 #4 always prompts.
     return {
       kind: 'too-complex',
-      reason:
-        'Parser aborted (timeout or resource limit) — possible adversarial input',
+      reason: 'Parser aborted (timeout, resource limit, or over-length)',
       nodeType: 'PARSE_ABORT',
     }
   }
@@ -895,21 +892,31 @@ function collectCommands(
   }
 
   if (node.type === 'test_command') {
-    // `[[ EXPR ]]` or `[ EXPR ]` — conditional test. Evaluates to true/false
-    // based on file tests (-f, -d), string comparisons (==, !=), etc.
-    // No code execution (no command_substitution inside — that would be a
-    // child and we'd recurse into it via walkArgument and reject it).
+    // densable 2.1.214 #5: fnu unparsed-bytes + mnu zsh $name[expr]/$name:mod
+    // in [[ ]] are NOT inert — fail-closed too-complex → prompt.
+    const isDoubleBracket = node.children.some(c => c?.type === '[[')
+    const unparsed = precheckTestCommand(node, isDoubleBracket)
+    if (unparsed) return unparsed
     // Push as a synthetic command with argv[0]='[[' so permission rules
     // can match — `Bash([[ :*)` would be unusual but legal.
-    // Walk arguments to validate (no cmdsub/expansion inside operands).
     const argv: string[] = ['[[']
     for (const child of node.children) {
       if (!child) continue
-      if (child.type === '[[' || child.type === ']]') continue
-      if (child.type === '[' || child.type === ']') continue
-      // Recurse into test expression structure: unary_expression,
-      // binary_expression, parenthesized_expression, negated_expression.
-      // The leaves are test_operator (-f, -d, ==) and operand words.
+      if (
+        child.type === '[[' ||
+        child.type === ']]' ||
+        child.type === '[' ||
+        child.type === ']'
+      ) {
+        // densable: empty bracket token = early-close / quote in operator position
+        if (child.text === '') {
+          return {
+            kind: 'too-complex',
+            reason: 'test_command early-close (quote in operator position)',
+          }
+        }
+        continue
+      }
       const err = walkTestExpr(child, argv, commands, varScope)
       if (err) return err
     }
@@ -954,10 +961,144 @@ function collectCommands(
   return tooComplex(node)
 }
 
+/** densable `pnu` — structural nodes inside test_command expressions. */
+const TEST_EXPR_STRUCTURAL = new Set([
+  'unary_expression',
+  'binary_expression',
+  'negated_expression',
+  'parenthesized_expression',
+])
+
+/**
+ * densable `tnu` — only whitespace / line-continuations / comments are OK
+ * between children of a test_command (unparsed bytes otherwise fail closed).
+ */
+function testUnparsedBytesAreInert(
+  gap: string,
+  allowComments: boolean,
+): boolean {
+  let i = 0
+  while (i < gap.length) {
+    const ch = gap[i]
+    if (ch === ' ' || ch === '\t') {
+      i++
+      continue
+    }
+    if (ch === '\\' && gap[i + 1] === '\n') {
+      i += 2
+      continue
+    }
+    if (allowComments && ch === '\n') {
+      i++
+      continue
+    }
+    if (allowComments && ch === '#') {
+      i++
+      while (i < gap.length && gap[i] !== '\n') i++
+      continue
+    }
+    return false
+  }
+  return true
+}
+
+/**
+ * densable `fnu` — fail-closed on unparsed bytes inside `[[ ]]` / `[ ]`.
+ * Exported for unit tests.
+ */
+export function precheckTestCommand(
+  node: Node,
+  allowComments: boolean,
+): ParseForSecurityResult | null {
+  const buf = Buffer.from(node.text, 'utf8')
+  let cursor = node.startIndex
+  for (const child of node.children) {
+    if (!child) continue
+    if (child.endIndex > node.endIndex || child.startIndex < node.startIndex) {
+      return {
+        kind: 'too-complex',
+        reason:
+          'Test command child extends past the node span — gap byte accounting is untrustworthy',
+      }
+    }
+    if (child.startIndex > cursor) {
+      const gap = buf
+        .subarray(cursor - node.startIndex, child.startIndex - node.startIndex)
+        .toString('utf8')
+      if (!testUnparsedBytesAreInert(gap, allowComments)) {
+        return {
+          kind: 'too-complex',
+          reason:
+            'Test command has unparsed bytes between children — parser dropped content that shell will see',
+        }
+      }
+    }
+    cursor = Math.max(cursor, child.endIndex)
+    if (TEST_EXPR_STRUCTURAL.has(child.type)) {
+      const nested = precheckTestCommand(child, allowComments)
+      if (nested) return nested
+    }
+  }
+  if (cursor < node.endIndex) {
+    const trailing = buf.subarray(cursor - node.startIndex).toString('utf8')
+    if (!testUnparsedBytesAreInert(trailing, allowComments)) {
+      return {
+        kind: 'too-complex',
+        reason:
+          'Test command has unparsed bytes after its last child — parser dropped content that shell will see',
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * densable `mnu` — zsh `$name[expr]` / `$name:mod` next to expansion nodes
+ * inside [[ ]] are recursive eval, not inert text.
+ * Exported for unit tests.
+ */
+export function detectZshSubscriptOrModifier(
+  node: Node,
+): ParseForSecurityResult | null {
+  if (TEST_EXPR_STRUCTURAL.has(node.type)) {
+    for (let i = 0; i < node.children.length; i++) {
+      const child = node.children[i]
+      if (!child) continue
+      if (
+        (child.type === 'simple_expansion' || child.type === 'expansion') &&
+        (() => {
+          const next = node.children[i + 1]
+          const nextText = next?.text ?? ''
+          if (nextText.startsWith('[')) return true
+          if (/^:[a-zA-Z&]/.test(nextText)) return true
+          if (
+            child.children.some(c => c?.type === 'special_variable_name') &&
+            /^\w*(\[|:[a-zA-Z&])/.test(nextText)
+          ) {
+            return true
+          }
+          return false
+        })()
+      ) {
+        return {
+          kind: 'too-complex',
+          reason:
+            'zsh $name[expr] / $name:mod in [[ ]] operand — recursive eval',
+          nodeType: node.type,
+        }
+      }
+      const nested = detectZshSubscriptOrModifier(child)
+      if (nested) return nested
+    }
+  }
+  return null
+}
+
 /**
  * Recursively walk a test_command expression tree (unary/binary/negated/
  * parenthesized expressions). Leaves are test_operator tokens and operands
  * (word/string/number/etc). Operands are validated via walkArgument.
+ * densable mnu: also fail-closed on zsh subscript/modifier forms (#5).
  */
 function walkTestExpr(
   node: Node,
@@ -965,6 +1106,10 @@ function walkTestExpr(
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
 ): ParseForSecurityResult | null {
+  // densable mnu first — structural nodes may hide $name[expr] / $name:mod
+  const zsh = detectZshSubscriptOrModifier(node)
+  if (zsh) return zsh
+
   switch (node.type) {
     case 'unary_expression':
     case 'binary_expression':
@@ -989,17 +1134,42 @@ function walkTestExpr(
     case '<':
     case '>':
     case '=~':
+      if (node.text === '') {
+        return {
+          kind: 'too-complex',
+          reason:
+            'Test command has a synthesized zero-width token — parser diverged from shell',
+        }
+      }
       argv.push(node.text)
       return null
     case 'regex':
     case 'extglob_pattern':
-      // RHS of =~ or ==/!= in [[ ]]. Pattern text only — no code execution.
-      // Parser emits these as leaf nodes with no children (any $(...) or ${...}
-      // inside the pattern is a sibling, not a child, and is walked separately).
+      // densable: expansion / cmdsub / process-sub inside [[ ]] pattern
+      if (/\$[({[\w#?!*@$'"+~^=-]|`|[<>]\(/.test(node.text)) {
+        return {
+          kind: 'too-complex',
+          reason: `[[ ]] ${node.type} contains expansion / command / process substitution`,
+          nodeType: node.type,
+        }
+      }
       argv.push(node.text)
       return null
     default: {
       // Operand — word, string, number, etc. Validate via walkArgument.
+      // Also reject bare word that looks like zsh $name:mod glued as text
+      // when tree-sitter did not split expansion+modifier (defense).
+      if (
+        (node.type === 'word' || node.type === 'string') &&
+        /\$[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\]|:[a-zA-Z&])/.test(node.text)
+      ) {
+        return {
+          kind: 'too-complex',
+          reason:
+            'zsh $name[expr] / $name:mod in [[ ]] operand — recursive eval',
+          nodeType: node.type,
+        }
+      }
       const arg = walkArgument(node, innerCommands, varScope)
       if (typeof arg !== 'string') return arg
       argv.push(arg)
@@ -1065,14 +1235,117 @@ function walkRedirectedStatement(
 }
 
 /**
+ * densable `hnu` — fail-closed precheck on a `file_redirect` node before
+ * extracting op/target. Covers fd-variable assignment, close-fd + hidden
+ * args, multi-target redirects, and unparsed bytes between children.
+ * Returns a too-complex result, or null when the shape is analyzable.
+ *
+ * Exported for focused unit tests (tree-sitter may be unavailable in CI).
+ */
+export function precheckFileRedirect(
+  node: Node,
+): ParseForSecurityResult | null {
+  // densable hnu: reject unparsed bytes between children / trailing that
+  // the shell would still see (parser dropped content).
+  let cursor = node.startIndex
+  for (const child of node.children) {
+    if (!child) continue
+    if (child.startIndex > cursor) {
+      // Node API may not expose raw buffer; use text span when available.
+      const gap = node.text.slice(
+        cursor - node.startIndex,
+        child.startIndex - node.startIndex,
+      )
+      if (!/^(?:[ \t]|\\\n)*$/.test(gap)) {
+        return {
+          kind: 'too-complex',
+          reason:
+            'Redirect has unparsed bytes between children — parser dropped content that shell will see',
+          nodeType: node.type,
+        }
+      }
+    }
+    cursor = child.endIndex
+  }
+  if (cursor < node.endIndex) {
+    const trailing = node.text.slice(cursor - node.startIndex)
+    if (!/^(?:[ \t]|\\\n)*$/.test(trailing)) {
+      return {
+        kind: 'too-complex',
+        reason:
+          'Redirect has unparsed trailing bytes — parser dropped content that shell will see',
+        nodeType: node.type,
+      }
+    }
+  }
+
+  let lastOp: string | null = null
+  let targetCount = 0
+  for (const child of node.children) {
+    if (!child) continue
+    if (child.type === 'variable_name') {
+      return {
+        kind: 'too-complex',
+        reason: `Redirect uses ${child.text} fd-variable assignment — modifies shell variable as side effect`,
+        nodeType: child.type,
+      }
+    }
+    if (child.type === 'file_descriptor') {
+      continue
+    }
+    if (child.type === '>&-' || child.type === '<&-') {
+      lastOp = child.type
+      continue
+    }
+    if (child.type in REDIRECT_OPS) {
+      lastOp = child.type
+      continue
+    }
+    // Target-like child
+    if ((lastOp === '>&' || lastOp === '<&') && child.text.startsWith('-')) {
+      return {
+        kind: 'too-complex',
+        reason:
+          'Redirect target after >& or <& starts with - — bash treats the dash as close-fd and passes the rest to the command as a hidden argument',
+        nodeType: child.type,
+      }
+    }
+    if (lastOp === '>&-' || lastOp === '<&-') {
+      return {
+        kind: 'too-complex',
+        reason:
+          'Close-fd redirect is followed by a word — bash passes it to the command as a hidden argument',
+        nodeType: child.type,
+      }
+    }
+    targetCount++
+    lastOp = null
+  }
+  if (targetCount > 1) {
+    return {
+      kind: 'too-complex',
+      reason: 'Redirect has multiple targets — post-redirect args swallowed',
+      nodeType: node.type,
+    }
+  }
+  return null
+}
+
+/**
  * Extract operator + target from a `file_redirect` node. The target must be
  * a static word or string.
+ *
+ * densable 2.1.214 #3: hnu/h6i fail-closed for fd-variable, close-fd+word,
+ * multi-target, and `>& -…` hidden args.
  */
 function walkFileRedirect(
   node: Node,
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
 ): Redirect | ParseForSecurityResult {
+  const pre = precheckFileRedirect(node)
+  if (pre) return pre
+
   let op: Redirect['op'] | null = null
   let target: string | null = null
   let fd: number | undefined
@@ -1081,8 +1354,44 @@ function walkFileRedirect(
     if (!child) continue
     if (child.type === 'file_descriptor') {
       fd = Number(child.text)
+    } else if (child.type === 'variable_name') {
+      // densable h6i — also caught by precheck; keep for defense-in-depth
+      return {
+        kind: 'too-complex',
+        reason: `Redirect uses ${child.text} fd-variable assignment — modifies shell variable as side effect`,
+        nodeType: child.type,
+      }
+    } else if (child.type === '>&-' || child.type === '<&-') {
+      // densable: pure close-fd is too-complex (or followed-by-word already
+      // failed precheck). Fail closed rather than inventing a redirect shape.
+      if (
+        node.children.some(
+          c => c && c !== child && c.type !== 'file_descriptor',
+        )
+      ) {
+        return {
+          kind: 'too-complex',
+          reason:
+            'Close-fd redirect is followed by a word — bash passes it to the command as a hidden argument',
+          nodeType: child.type,
+        }
+      }
+      return tooComplex(child)
     } else if (child.type in REDIRECT_OPS) {
       op = REDIRECT_OPS[child.type] ?? null
+    } else if (target !== null) {
+      return {
+        kind: 'too-complex',
+        reason: 'Redirect has multiple targets — post-redirect args swallowed',
+        nodeType: child.type,
+      }
+    } else if ((op === '>&' || op === '<&') && child.text.startsWith('-')) {
+      return {
+        kind: 'too-complex',
+        reason:
+          'Redirect target after >& or <& starts with - — bash treats the dash as close-fd and passes the rest to the command as a hidden argument',
+        nodeType: child.type,
+      }
     } else if (child.type === 'word' || child.type === 'number') {
       // SECURITY: `number` nodes can contain expansion children via the
       // `NN#<expansion>` arithmetic-base grammar quirk — same issue as
@@ -1121,6 +1430,15 @@ function walkFileRedirect(
     return {
       kind: 'too-complex',
       reason: 'Unrecognized redirect shape',
+      nodeType: node.type,
+    }
+  }
+  // densable h6i post-checks: close-fd-as-target after >&/<&
+  if ((op === '>&' || op === '<&') && target.startsWith('-')) {
+    return {
+      kind: 'too-complex',
+      reason:
+        'Redirect target after >& or <& starts with - — bash treats the dash as close-fd and passes the rest to the command as a hidden argument',
       nodeType: node.type,
     }
   }

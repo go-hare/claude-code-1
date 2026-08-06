@@ -48,7 +48,6 @@ import { isNonCustomOpusModel } from '../../utils/model/model.js'
 import { disableKeepAlive } from '../../utils/proxy.js'
 import { sleep } from '../../utils/sleep.js'
 import type { ThinkingConfig } from '../../utils/thinking.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -67,14 +66,13 @@ const FLOOR_OUTPUT_TOKENS = 3000
 const MAX_529_RETRIES = 3
 export const BASE_DELAY_MS = 500
 
-// Foreground query sources where the user IS blocking on the result — these
-// retry on 529. Everything else (summaries, titles, suggestions, classifiers)
-// bails immediately: during a capacity cascade each retry is 3-10× gateway
-// amplification, and the user never sees those fail anyway. New sources
-// default to no-retry — add here only if the user is waiting on the result.
+// densable 2.1.212 swh — FOREGROUND_529 set used by O6t(shouldRetry529).
+// Web tool side-queries (web_search_tool / web_fetch_apply) MUST be here so
+// 529/429 get bounded backoff instead of background-dropped (#35).
 const FOREGROUND_529_RETRY_SOURCES = new Set<QuerySource>([
   'repl_main_thread',
   'repl_main_thread:outputStyle:custom',
+  'repl_main_thread:outputStyle:Proactive',
   'repl_main_thread:outputStyle:Explanatory',
   'repl_main_thread:outputStyle:Learning',
   'sdk',
@@ -84,21 +82,33 @@ const FOREGROUND_529_RETRY_SOURCES = new Set<QuerySource>([
   'compact',
   'hook_agent',
   'hook_prompt',
-  'verification_agent',
   'side_question',
-  // Security classifiers — must complete for auto-mode correctness.
-  // yoloClassifier.ts uses 'auto_mode' (not 'yolo_classifier' — that's
-  // type-only). bash_classifier is ant-only; feature-gate so the string
-  // tree-shakes out of external builds (excluded-strings.txt).
+  'web_search_tool',
+  'web_fetch_apply',
+  'repl_sampling',
   'auto_mode',
+  'compact_fab_check',
+  'auto_mode_critique',
+  'auto_mode_setup_propose',
+  'chrome_mcp',
+  // Local extras (not in densable swh; keep for product paths):
+  'verification_agent',
+  // Security classifiers — must complete for auto-mode correctness.
+  // bash_classifier is ant-only; feature-gate so the string tree-shakes out
+  // of external builds (excluded-strings.txt).
   ...(feature('BASH_CLASSIFIER') ? (['bash_classifier'] as const) : []),
 ])
 
-function shouldRetry529(querySource: QuerySource | undefined): boolean {
-  // undefined → retry (conservative for untagged call paths)
-  return (
-    querySource === undefined || FOREGROUND_529_RETRY_SOURCES.has(querySource)
-  )
+/**
+ * densable O6t — should this querySource retry 529 with bounded backoff?
+ * undefined → true; agent:* → true; else swh.has(source).
+ */
+export function shouldRetry529(querySource: QuerySource | undefined): boolean {
+  if (querySource === undefined) return true
+  // densable: all agent: prefixes retry (agent:custom:foo → agent:custom via qb
+  // is separate; O6t itself uses startsWith("agent:")).
+  if (querySource.startsWith('agent:')) return true
+  return FOREGROUND_529_RETRY_SOURCES.has(querySource)
 }
 
 // CLAUDE_CODE_UNATTENDED_RETRY: for unattended sessions (ant-only). Retries 429/529
@@ -129,12 +139,27 @@ function isTransientCapacityError(error: unknown): boolean {
   )
 }
 
+/**
+ * densable Cye — codes treated as stale keep-alive / dead pooled socket.
+ * densable EYy: APIConnectionError + T2(code) ∈ Cye → disableKeepAlive + reconnect.
+ */
+const STALE_CONNECTION_CODES = new Set([
+  'ECONNRESET',
+  'EPIPE',
+  'ConnectionClosed',
+  'ETIMEDOUT',
+  'ECONNABORTED',
+  'ERR_SOCKET_CLOSED',
+  'StreamSuspended',
+])
+
+/** densable EYy / 2.1.214 #18+#46 */
 function isStaleConnectionError(error: unknown): boolean {
   if (!(error instanceof APIConnectionError)) {
     return false
   }
   const details = extractConnectionErrorDetails(error)
-  return details?.code === 'ECONNRESET' || details?.code === 'EPIPE'
+  return details !== null && STALE_CONNECTION_CODES.has(details.code)
 }
 
 export interface RetryContext {
@@ -202,6 +227,20 @@ export class FallbackTriggeredError extends Error {
  * Official qF3 — 404 not_found_error whose body mentions model:.
  * Permanent primary-model failure (retired / does not exist).
  */
+/**
+ * densable vi() → "retry:mid-conv-system" / "retry:api-system-cache-demote".
+ * Thrown from the stream create path after latching sticky state so withRetry
+ * immediately re-enters with rewritten messages/betas (no delay).
+ */
+export class MidConvSystemRetryError extends Error {
+  constructor(
+    public readonly reason: 'mid-conv-system' | 'api-system-cache-demote',
+  ) {
+    super(`retry:${reason}`)
+    this.name = 'MidConvSystemRetryError'
+  }
+}
+
 export function isModelNotFoundAPIError(error: unknown): boolean {
   if (!(error instanceof APIError) || error.status !== 404) {
     return false
@@ -273,18 +312,10 @@ export async function* withRetry<T>(
       // - 403 "OAuth token has been revoked" (another process refreshed the token)
       // - Bedrock-specific auth errors (403 or CredentialsProviderError)
       // - Vertex-specific auth errors (credential refresh failures, 401)
-      // - ECONNRESET/EPIPE: stale keep-alive socket; disable pooling and reconnect
+      // densable 214 #46: always disable keep-alive on stale socket (no GB gate)
       const isStaleConnection = isStaleConnectionError(lastError)
-      if (
-        isStaleConnection &&
-        getFeatureValue_CACHED_MAY_BE_STALE(
-          'tengu_disable_keepalive_on_econnreset',
-          false,
-        )
-      ) {
-        logForDebugging(
-          'Stale connection (ECONNRESET/EPIPE) — disabling keep-alive for retry',
-        )
+      if (isStaleConnection) {
+        logForDebugging('Stale connection — disabling keep-alive for retry')
         disableKeepAlive()
       }
 
@@ -322,6 +353,16 @@ export async function* withRetry<T>(
       return await operation(client, attempt, retryContext)
     } catch (error) {
       lastError = error
+
+      // densable mid-conv sticky retry — already latched; re-enter immediately.
+      if (error instanceof MidConvSystemRetryError) {
+        logForDebugging(
+          `API mid-conv retry (${error.reason}) attempt ${attempt}/${maxRetries + 1}`,
+          { level: 'warn' },
+        )
+        continue
+      }
+
       logForDebugging(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
         { level: 'error' },

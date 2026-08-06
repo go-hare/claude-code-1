@@ -141,6 +141,56 @@ export function isENOENT(e: unknown): boolean {
 }
 
 /**
+ * densable `Tae` — true when the error is EISDIR (path is a directory).
+ */
+export function isEISDIR(e: unknown): boolean {
+  return getErrnoCode(e) === 'EISDIR'
+}
+
+/**
+ * densable `eWe` — true when assertRegularFileWithinMaxBytes rejected a
+ * non-regular path (device / FIFO / socket) with ERR_NOT_REGULAR_FILE.
+ */
+export function isNotRegularFileError(e: unknown): boolean {
+  return getErrnoCode(e) === 'ERR_NOT_REGULAR_FILE'
+}
+
+/**
+ * densable `BEt` ∪ `CXy` — transient / environment FS errors that shell-config
+ * alias scan should skip rather than throw (update/doctor hang surface).
+ */
+export function isTransientShellConfigError(e: unknown): boolean {
+  const code = getErrnoCode(e)
+  if (!code) return false
+  if (
+    code === 'EDEADLK' ||
+    code === 'EINTR' ||
+    code === 'ENXIO' ||
+    code === 'ENODEV' ||
+    code === 'ECANCELED' ||
+    code === 'ENEEDAUTH' ||
+    code === 'ESTALE' ||
+    code === 'EUNKNOWN' ||
+    code === 'UNKNOWN' ||
+    code === 'ENOMEM' ||
+    code.startsWith('Unknown system error')
+  ) {
+    return true
+  }
+  // densable CXy set on shell-config alias scan
+  return (
+    code === 'EBUSY' ||
+    code === 'EOPNOTSUPP' ||
+    code === 'ENOTSUP' ||
+    code === 'ERR_FS_FILE_TOO_LARGE' ||
+    code === 'ENOTCONN' ||
+    code === 'EHOSTDOWN' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ETIMEDOUT'
+  )
+}
+
+/**
  * Extract the errno path (the filesystem path that triggered the error)
  * from a caught error. Returns undefined if the error has no path.
  * Replaces the `(e as NodeJS.ErrnoException).path` cast pattern.

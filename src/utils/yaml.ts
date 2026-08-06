@@ -13,3 +13,19 @@ export function parseYaml(input: string): unknown {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return (require('yaml') as typeof import('yaml')).parse(input)
 }
+
+/**
+ * densable SYt — YAML stringify for memory frontmatter rewrite.
+ * Bun: Bun.YAML.stringify(obj, null, 2) + "\n"
+ * Node: yaml npm package stringify.
+ */
+export function stringifyYaml(value: unknown): string {
+  if (typeof Bun !== 'undefined' && Bun.YAML?.stringify) {
+    return Bun.YAML.stringify(value, null, 2) + '\n'
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return (require('yaml') as typeof import('yaml')).stringify(value, {
+    indent: 2,
+    lineWidth: 0,
+  })
+}

@@ -5,9 +5,13 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { queryHaiku } from 'src/services/api/claude.js'
-import { AbortError } from 'src/utils/errors.js'
+import {
+  AbortError,
+  TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from 'src/utils/errors.js'
 import { getWebFetchUserAgent } from 'src/utils/http.js'
 import { logError } from 'src/utils/log.js'
+import { getContentText } from 'src/utils/messages.js'
 import {
   isBinaryContentType,
   persistBinaryContent,
@@ -645,6 +649,8 @@ export async function applyPromptToMarkdown(
     userPrompt: modelPrompt,
     signal,
     options: {
+      // densable querySource:"web_fetch_apply" — in swh/FOREGROUND_529 so 529/429
+      // get bounded backoff via withRetry (#35).
       querySource: 'web_fetch_apply',
       agents: [],
       isNonInteractiveSession,
@@ -657,6 +663,17 @@ export async function applyPromptToMarkdown(
   // an is_error tool_use block to the server, and render a red dot in the UI.
   if (signal.aborted) {
     throw new AbortError()
+  }
+
+  // densable: if (c.isApiErrorMessage) throw new tn($c(c.message.content), "web-fetch-apply-api-error")
+  // Avoid returning "API Error: …" overload text as the tool result body (#34).
+  if (assistantMessage.isApiErrorMessage) {
+    const text =
+      getContentText(assistantMessage.message?.content as never) ?? 'API Error'
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      text,
+      'web-fetch-apply-api-error',
+    )
   }
 
   const { content } = assistantMessage.message!

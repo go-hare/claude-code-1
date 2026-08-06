@@ -1602,6 +1602,77 @@ export function REPL({
     }
   }, [sessionStatus, waitingFor]);
 
+  // densable msf / Vce — bg job needs-input producers (agents --json "Needs input")
+  // Priority: sandbox > worker-sandbox > elicitation > managed-settings > permission > dialog
+  useEffect(() => {
+    if (!feature('BG_SESSIONS') && !process.env.CLAUDE_JOB_DIR) return;
+    void import('../utils/bgNeedsInputBridge.js').then(m => {
+      if (!m.isBgJobSession()) return;
+      m.ensureBgNeedsPermissionBridge();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
+      return;
+    }
+    void import('../utils/bgNeedsInputBridge.js').then(m => {
+      if (!m.isBgJobSession()) return;
+      const host = sandboxPermissionRequestQueue[0]?.hostPattern?.host;
+      m.emitBgNeedsInput(host ? m.formatSandboxNeeds(host) : null, 'sandbox');
+    });
+  }, [sandboxPermissionRequestQueue]);
+
+  useEffect(() => {
+    if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
+      return;
+    }
+    void import('../utils/bgNeedsInputBridge.js').then(m => {
+      if (!m.isBgJobSession()) return;
+      const host = workerSandboxPermissions.queue[0]?.host;
+      m.emitBgNeedsInput(host ? m.formatSandboxNeeds(host) : null, 'worker-sandbox');
+    });
+  }, [workerSandboxPermissions.queue]);
+
+  useEffect(() => {
+    if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
+      return;
+    }
+    void import('../utils/bgNeedsInputBridge.js').then(m => {
+      if (!m.isBgJobSession()) return;
+      const server = elicitation.queue[0]?.serverName;
+      m.emitBgNeedsInput(server ? m.formatMcpElicitationNeeds(server) : null, 'elicitation');
+    });
+  }, [elicitation.queue]);
+
+  useEffect(() => {
+    if (!process.env.CLAUDE_JOB_DIR && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') {
+      return;
+    }
+    void import('../utils/bgNeedsInputBridge.js').then(m => {
+      if (!m.isBgJobSession()) return;
+      const confirm = toolUseConfirmQueue[0];
+      if (!confirm) {
+        m.emitBgNeedsInput(null, 'permission');
+        return;
+      }
+      let userFacingName: string | undefined;
+      try {
+        userFacingName = confirm.tool.userFacingName?.(confirm.input as never);
+      } catch {
+        userFacingName = undefined;
+      }
+      m.emitBgNeedsInput(
+        m.formatPermissionNeeds({
+          toolName: confirm.tool.name,
+          userFacingName,
+          input: (confirm.input ?? null) as Record<string, unknown> | null,
+        }),
+        'permission',
+      );
+    });
+  }, [toolUseConfirmQueue]);
+
   // 3P default: off — OSC 21337 is ant-only while the spec stabilizes.
   // Gated so we can roll back if the sidebar indicator conflicts with
   // the title spinner in terminals that render both. When the flag is
@@ -2225,6 +2296,8 @@ export function REPL({
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
   const [spinnerColor, setSpinnerColor] = useState<keyof Theme | null>(null);
   const [spinnerShimmerColor, setSpinnerShimmerColor] = useState<keyof Theme | null>(null);
+  // densable 2.1.214 #39 retryStatus — stalled / error countdown on spinner
+  const [retryStatus, setRetryStatus] = useState<import('../utils/advisorNetworkStall.js').RetryStatus | null>(null);
   const [isMessageSelectorVisible, setIsMessageSelectorVisible] = useState(false);
   const [messageSelectorPreselect, setMessageSelectorPreselect] = useState<UserMessage | undefined>(undefined);
   const [showCostDialog, setShowCostDialog] = useState(false);
@@ -2337,6 +2410,7 @@ export function REPL({
     setSpinnerMessage(null);
     setSpinnerColor(null);
     setSpinnerShimmerColor(null);
+    setRetryStatus(null);
     pickNewSpinnerTip();
     endInteractionSpan();
     // Speculative bash classifier checks are only valid for the current
@@ -2594,8 +2668,8 @@ export function REPL({
           timeoutMs: sessionEndTimeoutMs,
         });
 
-        // Process session start hooks for resume
-        const hookMessages = await processSessionStartHooks('resume', {
+        // densable 2.1.214 #47: I1e(xr==="fork"?"fork":"resume", ...)
+        const hookMessages = await processSessionStartHooks(entrypoint === 'fork' ? 'fork' : 'resume', {
           sessionId,
           agentType: mainThreadAgentDefinition?.agentType,
           model: mainLoopModel,
@@ -3615,6 +3689,8 @@ export function REPL({
               }
             : undefined,
         setStreamMode,
+        // densable 2.1.214 #39 dYd/setRetryStatus
+        setRetryStatus,
         onCompactProgress: event => {
           switch (event.type) {
             case 'hooks_start':
@@ -6831,6 +6907,7 @@ export function REPL({
                   overrideShimmerColor={spinnerShimmerColor}
                   hasActiveTools={inProgressToolUseIDs.size > 0}
                   leaderIsIdle={!isLoading}
+                  retryStatus={retryStatus}
                 />
               )}
               {!showSpinner &&

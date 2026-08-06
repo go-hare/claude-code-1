@@ -97,8 +97,9 @@ export function computeElementViewportVisibility(
 /**
  * Hook to detect if a component is within the terminal viewport.
  *
- * Returns a callback ref and a viewport entry object.
- * Attach the ref to the component you want to track.
+ * densable YVe returns `[ref, entry, recompute, pureCheck]`:
+ * - recompute: update entry + return current visibility (side-effecting)
+ * - pureCheck: visibility without mutating entry (null when no yoga node)
  *
  * Visibility flips DO re-render the consumer (via an epoch state). That is
  * load-bearing for useAnimationFrame resume after "Jump to bottom" / scroll
@@ -113,6 +114,8 @@ export function computeElementViewportVisibility(
 export function useTerminalViewport(): [
   ref: (element: DOMElement | null) => void,
   entry: ViewportEntry,
+  recompute: () => boolean,
+  pureCheck: () => boolean | null,
 ] {
   const terminalSize = useContext(TerminalSizeContext)
   const elementRef = useRef<DOMElement | null>(null)
@@ -120,23 +123,40 @@ export function useTerminalViewport(): [
   // Epoch bumps only when isVisible flips — forces useAnimationFrame (and
   // other consumers) to re-render and re-subscribe to the animation clock.
   const [, setVisibilityEpoch] = useState(0)
+  // densable a.current=e: pureCheck reads latest terminalSize without
+  // closing over a stale recompute dependency.
+  const terminalSizeRef = useRef(terminalSize)
+  terminalSizeRef.current = terminalSize
 
   const setElement = useCallback((el: DOMElement | null) => {
     elementRef.current = el
   }, [])
 
-  const recompute = useCallback((): void => {
+  // densable o() — recompute with side effect; returns current visibility.
+  const recompute = useCallback((): boolean => {
     const element = elementRef.current
-    if (!element?.yogaNode || !terminalSize) {
-      return
+    const size = terminalSizeRef.current
+    if (!element?.yogaNode || !size) {
+      return entryRef.current.isVisible
     }
 
-    const visible = computeElementViewportVisibility(element, terminalSize.rows)
+    const visible = computeElementViewportVisibility(element, size.rows)
     if (visible !== entryRef.current.isVisible) {
       entryRef.current = { isVisible: visible }
       setVisibilityEpoch(n => n + 1)
     }
-  }, [terminalSize])
+    return visible
+  }, [])
+
+  // densable l() — pure F_u without mutating entry; null when unmeasurable.
+  const pureCheck = useCallback((): boolean | null => {
+    const element = elementRef.current
+    const size = terminalSizeRef.current
+    if (!element?.yogaNode || !size) {
+      return null
+    }
+    return computeElementViewportVisibility(element, size.rows)
+  }, [])
 
   // Runs on every render because yoga layout values can change
   // without React being aware. Flip-only setState (above) keeps this safe.
@@ -146,7 +166,13 @@ export function useTerminalViewport(): [
 
   // Imperative scroll (pill / PgDn / wheel) mutates scrollTop without
   // re-rendering this consumer — recheck immediately after ScrollBox notify.
-  useEffect(() => subscribeScrollVisibility(recompute), [recompute])
+  useEffect(
+    () =>
+      subscribeScrollVisibility(() => {
+        recompute()
+      }),
+    [recompute],
+  )
 
-  return [setElement, entryRef.current]
+  return [setElement, entryRef.current, recompute, pureCheck]
 }

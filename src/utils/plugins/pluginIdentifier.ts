@@ -49,11 +49,31 @@ export type ParsedPluginIdentifier = {
  * This is intentional as marketplace names should not contain '@'.
  */
 export function parsePluginIdentifier(plugin: string): ParsedPluginIdentifier {
+  // densable hi — first '@' splits name/marketplace (marketplace must not contain @)
   if (plugin.includes('@')) {
     const parts = plugin.split('@')
     return { name: parts[0] || '', marketplace: parts[1] }
   }
   return { name: plugin }
+}
+
+/**
+ * densable Lwe — case-insensitive plugin id/name equality.
+ */
+export function pluginIdEquals(a: string, b: string): boolean {
+  return a === b || a.toLowerCase() === b.toLowerCase()
+}
+
+/**
+ * densable are — find key in list with exact match first, then Lwe.
+ */
+export function findPluginKeyCaseInsensitive(
+  keys: readonly string[],
+  target: string,
+): string | undefined {
+  return (
+    keys.find(k => k === target) ?? keys.find(k => pluginIdEquals(k, target))
+  )
 }
 
 /**

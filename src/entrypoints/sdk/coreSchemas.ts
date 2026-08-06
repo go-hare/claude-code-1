@@ -544,7 +544,8 @@ export const SessionStartHookInputSchema = lazySchema(() =>
   BaseHookInputSchema().and(
     z.object({
       hook_event_name: z.literal('SessionStart'),
-      source: z.enum(['startup', 'resume', 'clear', 'compact']),
+      // densable 2.1.214 #47: S.enum(["startup","resume","clear","compact","fork"])
+      source: z.enum(['startup', 'resume', 'clear', 'compact', 'fork']),
       agent_type: z.string().optional(),
       model: z.string().optional(),
     }),
@@ -1723,6 +1724,8 @@ export const SDKToolProgressMessageSchema = lazySchema(() =>
     parent_tool_use_id: z.string().nullable(),
     elapsed_time_seconds: z.number(),
     task_id: z.string().optional(),
+    /** densable 214 tool_heartbeat twin yield */
+    heartbeat: z.boolean().optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
   }),
@@ -1993,7 +1996,8 @@ export const SdkWorkflowProgressSchema = lazySchema(() =>
       agentType: z.string().optional(),
       isolation: z.enum(['worktree', 'remote']).optional(),
       model: z.string().optional(),
-      state: z.enum(['start', 'done', 'error']),
+      // densable mid-flight ticks use 'progress' (IGg kGg full-snapshot gate)
+      state: z.enum(['start', 'progress', 'done', 'error']),
       tokens: z.number().optional(),
       toolCalls: z.number().optional(),
       durationMs: z.number().optional(),

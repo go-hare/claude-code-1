@@ -648,6 +648,23 @@ export function checkSedConstraints(
   input: { command: string },
   toolPermissionContext: ToolPermissionContext,
 ): PermissionResult {
+  // densable Eys / 2.1.214 #4: over-length cannot be statically validated.
+  // densable reason string is explicit; keep bashMissKind sed-dangerous.
+  // densable K0e=1e4 — keep literal 10000 to match Eys gate without cyclic imports
+  if (input.command.length > 10000) {
+    return {
+      behavior: 'ask',
+      message:
+        'sed command requires approval (contains potentially dangerous operations)',
+      decisionReason: {
+        type: 'other',
+        reason:
+          'sed command could not be statically validated (command is over-length or contains characters bash and the analyzer tokenize differently)',
+        bashMissKind: 'sed-dangerous',
+      },
+    }
+  }
+
   const commands = splitCommand_DEPRECATED(input.command)
 
   for (const cmd of commands) {

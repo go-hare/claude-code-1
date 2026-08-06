@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { BoundedUUIDSet } from '../bridge/bridgeMessaging.js'
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
 import type { SpinnerMode } from '../components/Spinner/types.js'
+import type { SDKControlRequest } from '../entrypoints/sdk/controlTypes.js'
 import {
   type RemotePermissionResponse,
   type RemoteSessionConfig,
+  type RemoteUserDialogResponse,
   RemoteSessionManager,
 } from '../remote/RemoteSessionManager.js'
 import {
@@ -35,6 +37,10 @@ import {
 import { generateSessionTitle } from '../utils/sessionTitle.js'
 import type { RemoteMessageContent } from '../utils/teleport/api.js'
 import { updateSessionTitle } from '../utils/teleport/api.js'
+import {
+  type RemoteRequestDialog,
+  useRemoteUserDialog,
+} from './useRemoteUserDialog.js'
 
 // How long to wait for a response before showing a warning
 const RESPONSE_TIMEOUT_MS = 60000 // 60 seconds
@@ -55,6 +61,11 @@ type UseRemoteSessionProps = {
   >
   setStreamMode?: React.Dispatch<React.SetStateAction<SpinnerMode>>
   setInProgressToolUseIDs?: (f: (prev: Set<string>) => Set<string>) => void
+  /**
+   * densable wEf requestDialog — host for request_user_dialog (EEf).
+   * Optional: without it, known kinds cancel (no host) and unknown kinds cancel.
+   */
+  requestDialog?: RemoteRequestDialog
 }
 
 type UseRemoteSessionResult = {
@@ -86,6 +97,7 @@ export function useRemoteSession({
   setStreamingToolUses,
   setStreamMode,
   setInProgressToolUseIDs,
+  requestDialog,
 }: UseRemoteSessionProps): UseRemoteSessionResult {
   const isRemoteMode = !!config
 
@@ -99,6 +111,26 @@ export function useRemoteSession({
       ),
     [setAppState],
   )
+
+  // densable EEf — must be created before manager so callbacks can dispatch.
+  // managerRef is populated in the connect effect; sendResponse reads it live.
+  const managerRef = useRef<RemoteSessionManager | null>(null)
+  const sendUserDialogResponse = useCallback(
+    (requestId: string, result: RemoteUserDialogResponse) => {
+      managerRef.current?.respondToUserDialogRequest(requestId, result)
+    },
+    [],
+  )
+  const { dispatch: dispatchUserDialog, cancel: cancelUserDialog } =
+    useRemoteUserDialog({
+      sessionKey: config?.sessionId,
+      sendResponse: sendUserDialogResponse,
+      requestDialog,
+    })
+  const dispatchUserDialogRef = useRef(dispatchUserDialog)
+  dispatchUserDialogRef.current = dispatchUserDialog
+  const cancelUserDialogRef = useRef(cancelUserDialog)
+  cancelUserDialogRef.current = cancelUserDialog
 
   // Event-sourced count of subagents running inside the remote daemon child.
   // The viewer's own AppState.tasks is empty — tasks live in a different
@@ -120,8 +152,6 @@ export function useRemoteSession({
   // CLI worker is busy with an API call and won't emit messages for a while;
   // use a longer timeout and suppress spurious "unresponsive" warnings.
   const isCompactingRef = useRef(false)
-
-  const managerRef = useRef<RemoteSessionManager | null>(null)
 
   // Track whether we've already updated the session title (for no-initial-prompt sessions)
   const hasUpdatedTitleRef = useRef(false)
@@ -436,6 +466,27 @@ export function useRemoteSession({
         )
         setIsLoading(true)
       },
+      // densable onUserDialogRequest / onUserDialogCancelled (EEf via Lt/Tt)
+      onUserDialogRequest: (request, requestId) => {
+        logForDebugging(
+          `[useRemoteSession] User dialog request: ${request.dialog_kind}`,
+        )
+        setIsLoading(false)
+        // densable: viewerOnly does not dispatch host dialog (still parks in RSM)
+        if (config.viewerOnly) return
+        const envelope: SDKControlRequest = {
+          type: 'control_request',
+          request_id: requestId,
+          request,
+        }
+        dispatchUserDialogRef.current(envelope)
+      },
+      onUserDialogCancelled: requestId => {
+        logForDebugging(
+          `[useRemoteSession] User dialog request cancelled: ${requestId}`,
+        )
+        cancelUserDialogRef.current(requestId)
+      },
       onConnected: () => {
         logForDebugging('[useRemoteSession] Connected')
         setConnStatus('connected')
@@ -488,6 +539,8 @@ export function useRemoteSession({
     setInProgressToolUseIDs,
     setConnStatus,
     writeTaskCount,
+    // requestDialog is read via useRemoteUserDialog refs; manager rebuild
+    // not required when only the host function identity changes.
   ])
 
   // Send a user message to the remote session

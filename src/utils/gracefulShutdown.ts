@@ -36,6 +36,11 @@ import { runCleanupFunctions } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { isEnvTruthy } from './envUtils.js'
+import {
+  drainStdoutBeforeExit,
+  getStdoutDrainBudgetMs,
+  markStdoutDrainExternallyClocked,
+} from './process.js'
 import { getCurrentSessionTitle, sessionIdExists } from './sessionStorage.js'
 import { sleep } from './sleep.js'
 import { closeSentry } from './sentry.js'
@@ -264,6 +269,24 @@ function preemptTerminalForShutdown(): void {
 /**
  * Set up global signal handlers for graceful shutdown
  */
+/**
+ * densable `Vwo` / `uxs` — print/SDK `run()` has registered its own SIGINT +
+ * SIGTERM handlers that abort the in-flight query (killing Bash process trees)
+ * before exiting. Global handlers must no-op once this is set, or they race
+ * and exit without aborting the turn / orphaning shell children.
+ */
+let printModeSignalHandlersRegistered = false
+
+/** densable `uxs` — mark print/SDK signal handlers as owning SIGINT/SIGTERM. */
+export function markPrintModeSignalHandlersRegistered(): void {
+  printModeSignalHandlersRegistered = true
+}
+
+/** densable `Vwo` — true after print/SDK registered SIGINT+SIGTERM handlers. */
+export function isPrintModeSignalHandlersRegistered(): boolean {
+  return printModeSignalHandlersRegistered
+}
+
 export const setupGracefulShutdown = memoize(() => {
   // Work around a Bun bug where process.removeListener(sig, fn) resets the
   // kernel sigaction for that signal even when other JS listeners remain —
@@ -283,13 +306,17 @@ export const setupGracefulShutdown = memoize(() => {
   // active for Ink cleanup.
   onExit(() => {})
 
+  // Capture ppid at setup for densable SIGTERM diagnostics (ppid_changed).
+  const setupPpid = process.ppid
+
   process.on('SIGINT', () => {
-    // In print mode, print.ts registers its own SIGINT handler that aborts
-    // the in-flight query and calls gracefulShutdown(0); skip here to
-    // avoid racing with it. Only check print mode — other non-interactive
-    // sessions (--sdk-url, --init-only, non-TTY) don't register their own
-    // SIGINT handler and need gracefulShutdown to run.
-    if (process.argv.includes('-p') || process.argv.includes('--print')) {
+    // densable: if(Vwo)return — print/SDK owns SIGINT after uxs().
+    // Fallback: argv -p/--print for paths that register SIGINT before uxs.
+    if (
+      printModeSignalHandlersRegistered ||
+      process.argv.includes('-p') ||
+      process.argv.includes('--print')
+    ) {
       return
     }
     // Windows: stop mouse tracking + drain stdin BEFORE any async import in
@@ -300,8 +327,32 @@ export const setupGracefulShutdown = memoize(() => {
     void gracefulShutdown(0)
   })
   process.on('SIGTERM', () => {
+    // densable SIGTERM diagnostics: uptime / ppid / stdin / tty.
+    const termMeta = {
+      uptime_s: Math.round(process.uptime()),
+      ppid_changed: process.ppid !== setupPpid,
+      stdin_at_eof: process.stdin.readableEnded,
+      stdin_destroyed: process.stdin.destroyed,
+      is_tty: process.stdin.isTTY ?? false,
+    }
+    logForDiagnosticsNoPII('info', 'shutdown_signal', {
+      signal: 'SIGTERM',
+      ...termMeta,
+    })
+    logEvent('tengu_shutdown_signal', {
+      signal:
+        'SIGTERM' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      uptime_s: termMeta.uptime_s,
+      ppid_changed: termMeta.ppid_changed,
+      stdin_at_eof: termMeta.stdin_at_eof,
+      stdin_destroyed: termMeta.stdin_destroyed,
+      is_tty: termMeta.is_tty,
+    })
+    // densable: if(Vwo)return — print/SDK handler aborts turn + Ts(143).
+    if (printModeSignalHandlersRegistered) {
+      return
+    }
     preemptTerminalForShutdown()
-    logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGTERM' })
     void gracefulShutdown(143) // Exit code 143 (128 + 15) for SIGTERM
   })
   process.on('SIGHUP', () => {
@@ -413,6 +464,7 @@ export function isShuttingDown(): boolean {
 export function resetShutdownState(): void {
   shutdownInProgress = false
   resumeHintPrinted = false
+  printModeSignalHandlersRegistered = false
   if (failsafeTimer !== undefined) {
     clearTimeout(failsafeTimer)
     failsafeTimer = undefined
@@ -477,14 +529,29 @@ export async function gracefulShutdown(
 
   // Failsafe: guarantee process exits even if cleanup hangs (e.g., MCP connections).
   // Runs cleanupTerminalModes first so a hung cleanup doesn't leave the terminal dirty.
-  // Budget = max(5s, hook budget + 3.5s headroom for cleanup + analytics flush).
+  // densable FMd/EDs: budget includes zRn()+P8y (1500) so stream-json drain
+  // headroom is not truncated by a fixed 5s; failsafe body drains 500ms
+  // unscaled before forceExit (scaleBudgetToQueue:false).
+  // Local also keeps sessionEndHooks budget: max(5s, hooks+3.5s, drain+1.5s).
+  const drainBudgetMs = getStdoutDrainBudgetMs()
+  const FAILSAFE_DRAIN_HEADROOM_MS = 1500 // densable P8y
   failsafeTimer = setTimeout(
-    code => {
+    (code: number) => {
       cleanupTerminalModes()
       printResumeHint()
-      forceExit(code)
+      // densable EDs body: fVt(500,{scaleBudgetToQueue:!1}).then(()=>ADs(r))
+      markStdoutDrainExternallyClocked()
+      void drainStdoutBeforeExit(500, { scaleBudgetToQueue: false })
+        .catch(() => {})
+        .finally(() => {
+          forceExit(code)
+        })
     },
-    Math.max(5000, sessionEndTimeoutMs + 3500),
+    Math.max(
+      5000,
+      sessionEndTimeoutMs + 3500,
+      drainBudgetMs + FAILSAFE_DRAIN_HEADROOM_MS,
+    ),
     exitCode,
   )
   failsafeTimer.unref()
@@ -577,6 +644,15 @@ export async function gracefulShutdown(
     } catch {
       // stderr may be closed (e.g., SSH disconnect). Ignore write errors.
     }
+  }
+
+  // densable FMd: await fVt() before ADs(forceExit) — scale drain to
+  // stream-json queue depth so large result payloads are not truncated
+  // by a fixed 2s budget (2.1.214 #19).
+  try {
+    await drainStdoutBeforeExit()
+  } catch {
+    // drain never throws by design; belt-and-suspenders
   }
 
   forceExit(exitCode)

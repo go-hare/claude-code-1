@@ -117,7 +117,11 @@ import {
   FILE_READ_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { getDefaultFileReadingLimits } from '@claude-code/builtin-tools/tools/FileReadTool/limits.js'
-import { cacheKeys, type FileStateCache } from './fileStateCache.js'
+import {
+  cacheKeys,
+  isFullEnoughFileRead,
+  type FileStateCache,
+} from './fileStateCache.js'
 import {
   createAbortController,
   createChildAbortController,
@@ -349,6 +353,16 @@ export type AlreadyReadFileAttachment = {
   displayPath: string
 }
 
+/**
+ * densable read_truncation_notice — emitted after FileRead when token-cap
+ * auto-page set YAu banner on the Output object (XAu lookup in toolExecution).
+ */
+export type ReadTruncationNoticeAttachment = {
+  type: 'read_truncation_notice'
+  banner: string
+  toolUseID: string
+}
+
 export type AgentMentionAttachment = {
   type: 'agent_mention'
   agentType: string
@@ -462,6 +476,7 @@ export type Attachment =
   | CompactFileReferenceAttachment
   | PDFReferenceAttachment
   | AlreadyReadFileAttachment
+  | ReadTruncationNoticeAttachment
   /**
    * An at-mentioned file was edited
    */
@@ -3430,28 +3445,25 @@ export async function generateFileAttachment(
     }
   }
 
-  // Check if file is already in context with latest version
+  // densable Eio: at-mention already_read only when HOe full-enough cache
+  // entry still matches mtime. Partial/offset reads must re-read so the
+  // attachment is not empty after a prior limited Read.
   const existingFileState = toolUseContext.readFileState.get(filename)
   if (existingFileState && mode === 'at-mention') {
+    // densable: HOe(l) && (l.content !== "" || (l.contentLength ?? 0) === 0)
+    // Local FileState has no contentLength; empty content is only valid for a
+    // truly empty full read (HOe true when limit undefined).
+    const fullEnough =
+      isFullEnoughFileRead(existingFileState) &&
+      (existingFileState.content !== '' ||
+        ((existingFileState as { contentLength?: number }).contentLength ??
+          0) === 0)
     try {
-      // Check if the file has been modified since we last read it
-      const mtimeMs = await getFileModificationTimeAsync(filename)
-
-      // Handle timestamp format inconsistency:
-      // - FileReadTool stores Date.now() (current time when read)
-      // - FileEdit/WriteTools store mtimeMs (file modification time)
-      //
-      // If timestamp > mtimeMs, it was stored by FileReadTool using Date.now()
-      // In this case, we should not use the optimization since we can't reliably
-      // compare modification times. Only use optimization when timestamp <= mtimeMs,
-      // indicating it was stored by FileEdit/WriteTool with actual mtimeMs.
-
       if (
-        existingFileState.timestamp <= mtimeMs &&
-        mtimeMs === existingFileState.timestamp
+        fullEnough &&
+        (await getFileModificationTimeAsync(filename)) ===
+          existingFileState.timestamp
       ) {
-        // File hasn't been modified, return already_read_file attachment
-        // This tells the system the file is already in context and doesn't need to be sent to API
         logEvent(successEventName, {})
         return {
           type: 'already_read_file',
@@ -3533,6 +3545,23 @@ export async function generateFileAttachment(
 
     try {
       const result = await FileReadTool.call(fileInput, toolUseContext)
+      // densable Eio: FileRead dedup → already_read_file (content is file_unchanged)
+      if (result.data.type === 'file_unchanged') {
+        logEvent(successEventName, {})
+        return {
+          type: 'already_read_file',
+          filename,
+          displayPath: relative(getCwd(), filename),
+          content: result.data,
+        }
+      }
+      // densable: token-cap auto-page first page still routes through truncated path
+      if (
+        result.data.type === 'text' &&
+        result.data.file.truncatedByTokenCap === true
+      ) {
+        return await readTruncatedFile()
+      }
       logEvent(successEventName, {})
       return {
         type: 'file',

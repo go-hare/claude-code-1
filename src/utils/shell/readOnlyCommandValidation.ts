@@ -1381,7 +1381,60 @@ export const GH_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
 
 // ---------------------------------------------------------------------------
 // DOCKER_READ_ONLY_COMMANDS — docker inspect/logs read-only commands
+// densable 2.1.214: oGr + aQn daemon-redirect flags require permission (#14)
 // ---------------------------------------------------------------------------
+
+/** densable `oGr` — docker client daemon-redirect / remote flags */
+export const DOCKER_DAEMON_REDIRECT_FLAGS = [
+  '-H',
+  '-c',
+  '-r',
+  '--host',
+  '--context',
+  '--config',
+  '--tlscacert',
+  '--tlscert',
+  '--tlskey',
+  '--url',
+  '--connection',
+  '--identity',
+  '--remote',
+  '--module',
+  '--out',
+] as const
+
+const DOCKER_DAEMON_REDIRECT_SHORT_CHARS = new Set(
+  DOCKER_DAEMON_REDIRECT_FLAGS.filter(f => f.length === 2).map(f => f[1]!),
+)
+
+/**
+ * densable `aQn` — true if args contain a docker daemon-redirect flag
+ * (`--url` / `--connection` / `--identity` / `--remote` / `-H` / clustered short flags).
+ */
+export function dockerDaemonRedirectIsDangerous(args: string[]): boolean {
+  return args.some(arg => {
+    if (
+      DOCKER_DAEMON_REDIRECT_FLAGS.some(
+        flag =>
+          arg === flag ||
+          arg.startsWith(`${flag}=`) ||
+          (flag.length === 2 && arg.length > 2 && arg.startsWith(flag)),
+      )
+    ) {
+      return true
+    }
+    // Clustered short flags: `-Hc` / `-cr` etc.
+    const cluster = arg.match(/^-([A-Za-z]+)/)?.[1]
+    if (cluster !== undefined && cluster.length >= 2) {
+      for (const ch of cluster) {
+        if (DOCKER_DAEMON_REDIRECT_SHORT_CHARS.has(ch)) {
+          return true
+        }
+      }
+    }
+    return false
+  })
+}
 
 export const DOCKER_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> =
   {
@@ -1397,6 +1450,8 @@ export const DOCKER_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> =
         '--until': 'string',
         '--details': 'none',
       },
+      additionalCommandIsDangerousCallback: (_raw, args) =>
+        dockerDaemonRedirectIsDangerous(args),
     },
     'docker inspect': {
       safeFlags: {
@@ -1406,6 +1461,8 @@ export const DOCKER_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> =
         '--size': 'none',
         '-s': 'none',
       },
+      additionalCommandIsDangerousCallback: (_raw, args) =>
+        dockerDaemonRedirectIsDangerous(args),
     },
   }
 

@@ -33,6 +33,7 @@ import { getAPIProvider } from 'src/utils/model/providers.js'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import {
   API_PDF_MAX_PAGES,
+  API_REQUEST_BODY_MAX_SIZE,
   PDF_TARGET_RAW_SIZE,
 } from '../../constants/apiLimits.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
@@ -118,20 +119,17 @@ export function getPromptTooLongTokenGap(
 }
 
 /**
- * Is this raw API error text a media-size rejection that stripImagesFromMessages
- * can fix? Reactive compact's summarize retry uses this to decide whether to
- * strip and retry (media error) or bail (anything else).
+ * densable Gvg — media / request-body size rejections that stripImagesFromMessages
+ * can fix. Reactive compact uses this to strip+retry vs bail.
  *
- * Patterns MUST stay in sync with the getAssistantMessageFromError branches
- * that populate errorDetails (~L523 PDF, ~L560 image, ~L573 many-image) and
- * the classifyAPIError branches (~L929-946). The closed loop: errorDetails is
- * only set after those branches already matched these same substrings, so
- * isMediaSizeError(errorDetails) is tautologically true for that path. API
- * wording drift causes graceful degradation (errorDetails stays undefined,
- * caller short-circuits), not a false negative.
+ * Patterns MUST stay in sync with getAssistantMessageFromError branches that
+ * populate errorDetails (PDF / image / many-image / densable 413 X8i
+ * `request_too_large: …`). Closed loop: errorDetails is only set after those
+ * branches matched; API wording drift degrades gracefully (undefined details).
  */
 function isMediaSizeError(raw: string): boolean {
   return (
+    raw.includes('request_too_large') ||
     (raw.includes('image exceeds') && raw.includes('maximum')) ||
     (raw.includes('image dimensions exceed') && raw.includes('many-image')) ||
     /maximum of \d+ PDF pages/.test(raw)
@@ -188,11 +186,15 @@ export function getImageTooLargeErrorMessage(): string {
     ? 'Image was too large. Try resizing the image or using a different approach.'
     : 'Image was too large. Double press esc to go back and try again with a smaller image.'
 }
+/**
+ * densable X8i — 413 request body over R5i (32MB). Multi-image conversations
+ * commonly hit this via accumulated attachments, not a single oversized file.
+ */
 export function getRequestTooLargeErrorMessage(): string {
-  const limits = `max ${formatFileSize(PDF_TARGET_RAW_SIZE)}`
+  const limits = `max ${formatFileSize(API_REQUEST_BODY_MAX_SIZE)}`
   return getIsNonInteractiveSession()
-    ? `Request too large (${limits}). Try with a smaller file.`
-    : `Request too large (${limits}). Double press esc to go back and try with a smaller file.`
+    ? `Request too large (${limits}). Accumulated images and attachments in the conversation pushed the request over the limit. Remove older images or compact the conversation.`
+    : `Request too large (${limits}). Accumulated images and attachments in the conversation pushed the request over the limit. Run /compact, or double press esc to go back and remove attachments.`
 }
 export const OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE =
   'Your account does not have access to Claude Code. Please run /login.'
@@ -230,18 +232,23 @@ function isCCRMode(): boolean {
 function logToolUseToolResultMismatch(
   toolUseId: string,
   messages: Message[],
-  messagesForAPI: (UserMessage | AssistantMessage)[],
+  messagesForAPI: Array<
+    UserMessage | AssistantMessage | { type: string; message?: unknown }
+  >,
 ): void {
   try {
     // Find tool_use in normalized messages
     let normalizedIndex = -1
     for (let i = 0; i < messagesForAPI.length; i++) {
       const msg = messagesForAPI[i]
-      if (!msg) continue
-      const content = msg.message!.content
+      if (!msg || msg.type === 'api_system') continue
+      const content = (msg as UserMessage | AssistantMessage).message?.content
       if (Array.isArray(content)) {
         for (const block of content) {
           if (
+            typeof block === 'object' &&
+            block &&
+            'type' in block &&
             block.type === 'tool_use' &&
             'id' in block &&
             block.id === toolUseId
@@ -281,15 +288,22 @@ function logToolUseToolResultMismatch(
     const normalizedSeq: string[] = []
     for (let i = normalizedIndex + 1; i < messagesForAPI.length; i++) {
       const msg = messagesForAPI[i]
-      if (!msg) continue
-      const content = msg.message!.content
+      if (!msg || msg.type === 'api_system') continue
+      const m = msg as UserMessage | AssistantMessage
+      const content = m.message?.content
       if (Array.isArray(content)) {
         for (const block of content) {
-          const role = msg.message!.role
+          if (typeof block !== 'object' || !block || !('type' in block))
+            continue
+          const role = m.message!.role
           if (block.type === 'tool_use' && 'id' in block) {
-            normalizedSeq.push(`${role}:tool_use:${block.id}`)
+            normalizedSeq.push(
+              `${role}:tool_use:${(block as { id: string }).id}`,
+            )
           } else if (block.type === 'tool_result' && 'tool_use_id' in block) {
-            normalizedSeq.push(`${role}:tool_result:${block.tool_use_id}`)
+            normalizedSeq.push(
+              `${role}:tool_result:${(block as { tool_use_id: string }).tool_use_id}`,
+            )
           } else if (block.type === 'text') {
             normalizedSeq.push(`${role}:text`)
           } else if (block.type === 'thinking') {
@@ -301,7 +315,7 @@ function logToolUseToolResultMismatch(
           }
         }
       } else if (typeof content === 'string') {
-        normalizedSeq.push(`${msg.message.role}:string_content`)
+        normalizedSeq.push(`${m.message!.role}:string_content`)
       }
     }
 
@@ -435,7 +449,9 @@ export function getAssistantMessageFromError(
   model: string,
   options?: {
     messages?: Message[]
-    messagesForAPI?: (UserMessage | AssistantMessage)[]
+    messagesForAPI?: Array<
+      UserMessage | AssistantMessage | { type: string; message?: unknown }
+    >
   },
 ): AssistantMessage {
   // Check for SDK timeout errors
@@ -662,12 +678,20 @@ export function getAssistantMessageFromError(
     })
   }
 
-  // Check for request too large errors (413 status)
-  // This typically happens when a large PDF + conversation context exceeds the 32MB API limit
+  // densable 413: context-window phrasing → prompt_too_long (W3); else X8i
+  // request_too_large with errorDetails for Gvg/isMediaSizeError (#33).
   if (error instanceof APIError && error.status === 413) {
+    if (error.message.toLowerCase().includes('context window')) {
+      return createAssistantAPIErrorMessage({
+        content: PROMPT_TOO_LONG_ERROR_MESSAGE,
+        error: 'invalid_request',
+        errorDetails: error.message,
+      })
+    }
     return createAssistantAPIErrorMessage({
       content: getRequestTooLargeErrorMessage(),
       error: 'invalid_request',
+      errorDetails: `request_too_large: ${error.message}`,
     })
   }
 

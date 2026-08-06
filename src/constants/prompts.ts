@@ -603,6 +603,23 @@ ${CYBER_RISK_INSTRUCTION}`,
       () => getFocusModeSection({ model }),
       'focus view toggled mid-session via /focus or apply_flag_settings',
     ),
+    // densable 2.1.214 endconv_deferred_hint — one-liner when EndConversation
+    // is enabled + deferred tool search is on + tool is in the pool.
+    systemPromptSection('endconv_deferred_hint', () => {
+      try {
+        const gate =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('@claude-code/builtin-tools/tools/EndConversationTool/endConversationGate.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/endConversationGate.js')
+        const { END_CONVERSATION_TOOL_NAME } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
+        // densable: d.has(END_CONVERSATION_TOOL_NAME) && model !== void 0
+        if (!enabledTools.has(END_CONVERSATION_TOOL_NAME)) return null
+        return gate.getEndConversationDeferredHintSection(model)
+      } catch {
+        return null
+      }
+    }),
   ]
 
   const resolvedDynamicSections =

@@ -9,6 +9,7 @@ import type {
   StreamEvent,
   SystemAPIErrorMessage,
   AssistantMessage,
+  UserMessage,
 } from '../../../types/message.js'
 import type { Tools } from '../../../Tool.js'
 import type {
@@ -61,7 +62,11 @@ export async function* queryModelGrok(
 > {
   try {
     const grokModel = resolveGrokModel(options.model)
-    const messagesForAPI = normalizeMessagesForAPI(messages, tools)
+    // No model arg → densable eN mid-conv off; filter keeps converter User|Assistant only
+    const messagesForAPI = normalizeMessagesForAPI(messages, tools).filter(
+      (m): m is UserMessage | AssistantMessage =>
+        m.type === 'user' || m.type === 'assistant',
+    )
 
     const toolSchemas = await Promise.all(
       tools.map(tool =>

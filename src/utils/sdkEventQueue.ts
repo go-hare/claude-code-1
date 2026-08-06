@@ -1,6 +1,10 @@
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
-import { getIsNonInteractiveSession, getSessionId } from '../bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  getSessionId,
+  isReplBridgeActive,
+} from '../bootstrap/state.js'
 import type { SdkWorkflowProgress } from '../types/tools.js'
 
 type TaskStartedEvent = {
@@ -95,13 +99,7 @@ type ThinkingTokensSdkEvent = {
  * Excludes abortController / messages / result.
  */
 export type TaskUpdatedPatch = {
-  status?:
-    | 'pending'
-    | 'running'
-    | 'completed'
-    | 'failed'
-    | 'killed'
-    | 'paused'
+  status?: 'pending' | 'running' | 'completed' | 'failed' | 'killed' | 'paused'
   description?: string
   end_time?: number
   total_paused_ms?: number
@@ -165,6 +163,23 @@ const MAX_QUEUE_SIZE = 1000
 const queue: SdkEvent[] = []
 
 /**
+ * densable NZc / MGe — optional listener fired after each successful enqueue.
+ * useReplBridge registers a drain that writeSdkMessages task_* frames so RC
+ * clients that join mid-run receive workflow agent grid progress.
+ */
+let onEnqueueListener: (() => void) | null = null
+
+/**
+ * densable MGe — register (or clear with null) the post-enqueue listener.
+ * Replaces any previous listener (one-slot, densable process-global).
+ */
+export function setSdkEventEnqueueListener(
+  listener: (() => void) | null,
+): void {
+  onEnqueueListener = listener
+}
+
+/**
  * densable c7c — once-gate so lf / print dual paths never double-close a task
  * for SDK / Host consumers (Jp Tasks pane).
  */
@@ -185,9 +200,9 @@ function claimTaskTerminatedSdkGate(taskId: string): boolean {
 }
 
 export function enqueueSdkEvent(event: SdkEvent): void {
-  // SDK events are only consumed (drained) in headless/streaming mode.
-  // In TUI mode they would accumulate up to the cap and never be read.
-  if (!getIsNonInteractiveSession()) {
+  // densable JT: queue when headless/print (dn) OR REPL Remote Control live (FC).
+  // Pure TUI with no bridge would never drain — skip to avoid cap churn.
+  if (!getIsNonInteractiveSession() && !isReplBridgeActive()) {
     return
   }
   if (queue.length >= MAX_QUEUE_SIZE) {
@@ -218,6 +233,7 @@ export function enqueueSdkEvent(event: SdkEvent): void {
     }
   }
   queue.push(event)
+  onEnqueueListener?.()
 }
 
 export function drainSdkEvents(): Array<

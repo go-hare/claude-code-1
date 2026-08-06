@@ -6,7 +6,13 @@
 import { open, readFile, stat } from 'fs/promises'
 import { homedir as osHomedir } from 'os'
 import { join } from 'path'
-import { isFsInaccessible } from './errors.js'
+import { logForDebugging } from './debug.js'
+import {
+  errorMessage,
+  isEISDIR,
+  isFsInaccessible,
+  isTransientShellConfigError,
+} from './errors.js'
 import { getLocalClaudePath } from './localInstaller.js'
 
 export const CLAUDE_ALIAS_REGEX = /^\s*alias\s+claude\s*=/
@@ -75,8 +81,11 @@ export function filterClaudeAliases(lines: string[]): {
 }
 
 /**
- * Read a file and split it into lines
- * Returns null if file doesn't exist or can't be read
+ * densable `mnn` — read a shell config and split into lines.
+ * Returns null if file doesn't exist / is inaccessible.
+ * densable 2.1.214 #36: EISDIR (path is a directory) is soft-skipped with a
+ * warn so update/doctor/status do not hang or blank when a shell-config path
+ * resolves to a directory.
  */
 export async function readFileLines(
   filePath: string,
@@ -85,7 +94,15 @@ export async function readFileLines(
     const content = await readFile(filePath, { encoding: 'utf8' })
     return content.split('\n')
   } catch (e: unknown) {
+    // densable Ko → null
     if (isFsInaccessible(e)) return null
+    // densable Tae → warn + null (directory named like .bashrc)
+    if (isEISDIR(e)) {
+      logForDebugging(`Skipping ${filePath}: path is a directory`, {
+        level: 'warn',
+      })
+      return null
+    }
     throw e
   }
 }
@@ -107,8 +124,10 @@ export async function writeFileLines(
 }
 
 /**
- * Check if a claude alias exists in any shell config file
- * Returns the alias target if found, null otherwise
+ * densable `cMs` — scan shell configs for a claude alias.
+ * densable 2.1.214 #36: unreadable configs (EISDIR already soft in mnn; plus
+ * L4e/BEt/CXy transient FS errors) are skipped with a warn so alias scan
+ * cannot hang update/doctor or blank /status.
  * @param options Optional overrides for testing (env, homedir)
  */
 export async function findClaudeAlias(
@@ -117,7 +136,24 @@ export async function findClaudeAlias(
   const configs = getShellConfigPaths(options)
 
   for (const configPath of Object.values(configs)) {
-    const lines = await readFileLines(configPath)
+    // densable: mnn(r).catch(o => L4e||BEt||CXy → warn skip unreadable)
+    let lines: string[] | null
+    try {
+      lines = await readFileLines(configPath)
+    } catch (e: unknown) {
+      if (
+        isFsInaccessible(e) ||
+        isEISDIR(e) ||
+        isTransientShellConfigError(e)
+      ) {
+        logForDebugging(
+          `Skipping unreadable shell config ${configPath} during alias scan: ${errorMessage(e)}`,
+          { level: 'warn' },
+        )
+        continue
+      }
+      throw e
+    }
     if (!lines) continue
 
     for (const line of lines) {

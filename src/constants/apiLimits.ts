@@ -47,6 +47,12 @@ export const IMAGE_MAX_HEIGHT = 2000
 // =============================================================================
 
 /**
+ * densable R5i — Anthropic API total HTTP request body hard limit (bytes).
+ * Used in 413 / request_too_large user-facing copy (X8i).
+ */
+export const API_REQUEST_BODY_MAX_SIZE = 32 * 1024 * 1024 // 32 MB
+
+/**
  * Maximum raw PDF file size that fits within the API request limit after encoding.
  * The API has a 32MB total request size limit. Base64 encoding increases size by
  * ~33% (4/3), so 20MB raw → ~27MB base64, leaving room for conversation context.

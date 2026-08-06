@@ -386,7 +386,7 @@ export function notifySessionMetadataChanged(
   metadataListener?.(metadata)
   // densable 2.1.211 notifyMetadataChanged: stream system/task_summary so
   // non-CCR Hosts mirror external_metadata.task_summary (detail null = clear).
-  if (Object.prototype.hasOwnProperty.call(metadata, 'task_summary')) {
+  if (Object.hasOwn(metadata, 'task_summary')) {
     try {
       const { emitTaskSummarySdk } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports

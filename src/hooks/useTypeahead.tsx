@@ -34,6 +34,8 @@ import {
 import { getShellHistoryCompletion } from '../utils/suggestions/shellHistoryCompletion.js';
 import { getSlackChannelSuggestions, hasSlackMcpServer } from '../utils/suggestions/slackChannelSuggestions.js';
 import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js';
+import { env } from '../utils/env.js';
+import { isModifierPressed } from '../utils/modifiers.js';
 import {
   applyFileSuggestion,
   findLongestCommonPrefix,
@@ -496,6 +498,9 @@ export function useTypeahead({
   const dismissedForInputRef = useRef<string | null>(null);
   // densable ne.current — which directory completion path produced current suggestions
   const directorySourceRef = useRef<DirectorySource>('at-path');
+  // densable ie.current — bash-path bare Enter double-submit guard (reset each render)
+  const bashPathSubmitGuardRef = useRef(false);
+  bashPathSubmitGuardRef.current = false;
 
   // Clear all suggestions
   const clearSuggestions = useCallback(() => {
@@ -1420,15 +1425,21 @@ export function useTypeahead({
       }
     } else if (suggestionType === 'directory' && index < suggestions.length) {
       if (suggestion) {
-        // densable Me directory:
-        //   bash-path Enter (no explicit index): pe() + r(o,!1)
-        //   command-arg Enter (no explicit index): pe() + r(o,!0)
-        //   Tab/explicit index applies path; bare Enter submits after clear.
-        // preventDefault already ate base submit — clear-only was a swallow.
+        // densable Ye/Me directory (Lt === void 0 bare Enter):
+        //   bash-path: Ee() + r(q1e(), !0) — bn=true bypasses onSubmit
+        //     every(description==="directory") gate; lKs items have no description
+        //   command-arg: Ee() + r(o, !0)
+        // Tab / explicit Lt applies path; preventDefault already ate base submit.
         if (directorySourceRef.current === 'bash-path') {
           debouncedFetchFileSuggestions.cancel();
           clearSuggestions();
-          onSubmit(input, /* isSubmittingSlashCommand */ false);
+          // densable ie: once-per-tick guard against double Ye()
+          if (!bashPathSubmitGuardRef.current) {
+            bashPathSubmitGuardRef.current = true;
+            // bn=true: PromptInput onSubmit skips suggestion-popup early return
+            // so `! cat ./src/…` still runs while path popup is open (#12).
+            onSubmit(input, /* isSubmittingSlashCommand / densable bn */ true);
+          }
           return;
         }
         if (directorySourceRef.current === 'command-arg') {
@@ -1609,7 +1620,15 @@ export function useTypeahead({
     // Handle selection and execution via return/enter.
     // densable Me key path: Et.name==="return" (also accept key for fork KeyboardEvent).
     // Shift+Enter / Meta+Enter insert newlines in base TextInput — do not intercept.
+    // densable bash-path: if cursor after `\` or Apple_Terminal+shift (GLs), do not
+    // preventDefault — let useTextInput insert newline (path popup stays open).
     if ((e.name === 'return' || e.key === 'return') && !e.shift && !e.meta) {
+      if (suggestionType === 'directory' && directorySourceRef.current === 'bash-path') {
+        const ch = input[cursorOffset - 1];
+        if (ch === '\\' || (env.terminal === 'Apple_Terminal' && isModifierPressed('shift'))) {
+          return;
+        }
+      }
       e.preventDefault();
       handleEnter();
     }

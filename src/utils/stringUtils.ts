@@ -233,3 +233,25 @@ export function truncateToLines(text: string, maxLines: number): string {
   }
   return lines.slice(0, maxLines).join('\n') + '…'
 }
+
+/**
+ * densable `Jd(e, t)` — UTF-16 code-unit slice that never leaves a lone high
+ * surrogate at the cut. Used for notification reasons (not grapheme/width-aware).
+ *
+ * If `text.length <= maxCodeUnits`, returns text unchanged.
+ * Else slices to `maxCodeUnits`; if the last retained unit is a high surrogate
+ * (0xD800–0xDBFF), drops it so a broken emoji half is never shown.
+ */
+export function truncateCodeUnitsSafe(
+  text: string,
+  maxCodeUnits: number,
+): string {
+  if (text.length <= maxCodeUnits) return text
+  const sliced = text.slice(0, maxCodeUnits)
+  const last = sliced.charCodeAt(maxCodeUnits - 1)
+  // High surrogate: incomplete pair — densable Jd drops it.
+  if (last >= 0xd800 && last <= 0xdbff) {
+    return sliced.slice(0, -1)
+  }
+  return sliced
+}

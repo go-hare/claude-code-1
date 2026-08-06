@@ -28,6 +28,7 @@ import { logError } from '../utils/log.js';
 import type { PermissionDecision } from '../utils/permissions/PermissionResult.js';
 import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js';
 import { jsonStringify } from '../utils/slowOperations.js';
+import { truncateCodeUnitsSafe } from '../utils/stringUtils.js';
 import { handleCoordinatorPermission } from './toolPermission/handlers/coordinatorHandler.js';
 import { handleInteractivePermission } from './toolPermission/handlers/interactiveHandler.js';
 import { handleSwarmWorkerPermission } from './toolPermission/handlers/swarmWorkerHandler.js';
@@ -130,18 +131,30 @@ function useCanUseTool(
                   result.decisionReason?.type === 'classifier' &&
                   result.decisionReason.classifier === 'auto-mode'
                 ) {
+                  // densable: reason D2b → K8o; if length>80 then Jd(K8o,79)+…
+                  const rawReason = result.decisionReason.reason ?? '';
                   recordAutoModeDenial({
                     toolName: tool.name,
                     display: description,
-                    reason: result.decisionReason.reason ?? '',
+                    reason: rawReason,
                     timestamp: Date.now(),
                   });
+                  let reasonHint = rawReason;
+                  if (reasonHint.length > 80) {
+                    reasonHint = `${truncateCodeUnitsSafe(reasonHint, 79)}…`;
+                  }
                   toolUseContext.addNotification?.({
                     key: 'auto-mode-denied',
                     priority: 'immediate',
                     jsx: (
                       <>
                         <Text color="error">{tool.userFacingName(input).toLowerCase()} denied by auto mode</Text>
+                        {reasonHint ? (
+                          <Text dimColor>
+                            {' · '}
+                            {reasonHint}
+                          </Text>
+                        ) : null}
                         <Text dimColor> · /permissions</Text>
                       </>
                     ),

@@ -802,13 +802,26 @@ export function createPathChecker(
         }
       }
 
-      // For write operations, also suggest enabling accept-edits mode
+      // densable Tzu/Zlr: suggest acceptEdits only when mode is default|plan
+      // and plan was not entered from elevated prePlanMode.
       if (operationType === 'write' || operationType === 'create') {
-        suggestions.push({
-          type: 'setMode',
-          mode: 'acceptEdits',
-          destination: 'session',
-        })
+        const ctx = context
+        const prePlanElevated =
+          ctx.mode === 'plan' &&
+          (ctx.prePlanMode === 'auto' ||
+            ctx.prePlanMode === 'bypassPermissions' ||
+            ctx.prePlanMode === 'acceptEdits' ||
+            ctx.prePlanMode === 'dontAsk')
+        if (
+          (ctx.mode === 'default' || ctx.mode === 'plan') &&
+          !prePlanElevated
+        ) {
+          suggestions.push({
+            type: 'setMode',
+            mode: 'acceptEdits',
+            destination: 'session',
+          })
+        }
       }
 
       result.suggestions = suggestions

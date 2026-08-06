@@ -33,6 +33,13 @@ const SleepTool =
     ? require('@claude-code/builtin-tools/tools/SleepTool/SleepTool.js')
         .SleepTool
     : null
+// densable 2.1.214 EndConversation — always in base pool; isEnabled() gates
+// via GB flag + model floor + CLAUDE_CODE_ENTRYPOINT.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const EndConversationTool =
+  require('@claude-code/builtin-tools/tools/EndConversationTool/EndConversationTool.js')
+    .EndConversationTool as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/EndConversationTool.js').EndConversationTool
+/* eslint-enable @typescript-eslint/no-require-imports */
 const cronTools = [
   require('@claude-code/builtin-tools/tools/ScheduleCronTool/CronCreateTool.js')
     .CronCreateTool,
@@ -265,6 +272,7 @@ export function getAllBaseTools(): Tools {
     ...(process.env.USER_TYPE === 'ant' && REPLTool ? [REPLTool] : []),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
+    EndConversationTool,
     ...cronTools,
     ...(RemoteTriggerTool ? [RemoteTriggerTool] : []),
     ...(MonitorTool ? [MonitorTool] : []),

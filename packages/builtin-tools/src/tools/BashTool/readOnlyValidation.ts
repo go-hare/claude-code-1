@@ -49,6 +49,86 @@ type CommandConfig = {
   respectsDoubleDash?: boolean
 }
 
+/**
+ * densable `qm` — true when an arg carries command-substitution markers.
+ * Used by help/man dangerous callbacks (2.1.214 #6).
+ */
+function argHasCommandSubstitutionMarkers(arg: string): boolean {
+  return (
+    arg.includes('$(') ||
+    arg.includes('`') ||
+    arg.includes('${') ||
+    // tracked placeholders from AST substitution (defense in depth)
+    arg.includes('__CMDSUB_OUTPUT__') ||
+    arg.includes('__TRACKED_VAR__')
+  )
+}
+
+/**
+ * densable man.additionalCommandIsDangerousCallback:
+ * - cmdsub in operands → dangerous
+ * - apropos mode (-k/-f/--apropos/--whatis) + operand starting with `-` → dangerous
+ * - NOT whatis-mode and path-like (`/` `\` `~`) → dangerous
+ */
+export function manArgsAreDangerous(args: string[]): boolean {
+  const aproposWhatisFlags = new Set(['-k', '-f', '--apropos', '--whatis'])
+  const sectionFlags = new Set(['-S', '-s'])
+
+  // First pass: detect apropos/whatis mode (including short cluster -kf)
+  let aproposMode = false
+  for (const a of args) {
+    if (a === '--') break
+    if (!a.startsWith('-') || a === '-') continue
+    if (a.startsWith('--')) {
+      if (aproposWhatisFlags.has(a)) aproposMode = true
+    } else if (/[kf]/.test(a.slice(1))) {
+      aproposMode = true
+    }
+  }
+
+  let whatisMode = false
+  let pastEndOfOptions = false
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!
+    if (!pastEndOfOptions && a === '--') {
+      pastEndOfOptions = true
+      continue
+    }
+    if (!(pastEndOfOptions || !a.startsWith('-') || a === '-')) {
+      if (aproposWhatisFlags.has(a)) {
+        whatisMode = true
+      } else if (sectionFlags.has(a)) {
+        i++ // skip section value
+      }
+      continue
+    }
+    pastEndOfOptions = true
+    if (argHasCommandSubstitutionMarkers(a)) return true
+    if (aproposMode && a.startsWith('-')) return true
+    if (
+      !whatisMode &&
+      (a.includes('/') || a.includes('\\') || a.includes('~'))
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * densable help.additionalCommandIsDangerousCallback:
+ * path-like or command-substitution operands are dangerous.
+ */
+export function helpArgsAreDangerous(args: string[]): boolean {
+  return args.some(
+    a =>
+      a.includes('/') ||
+      a.includes('\\') ||
+      a.includes('~') ||
+      argHasCommandSubstitutionMarkers(a),
+  )
+}
+
 // Shared safe flags for fd and fdfind (Debian/Ubuntu package name)
 // SECURITY: -x/--exec and -X/--exec-batch are deliberately excluded —
 // they execute arbitrary commands for each search result.
@@ -179,7 +259,8 @@ const COMMAND_ALLOWLIST: Record<string, CommandConfig> = {
       '--exclude-quiet': 'string',
       '--print0': 'none',
       '-0': 'none',
-      '-f': 'string',
+      // densable 2.1.214 #45: omit -f/--files-from and -m/--magic-file —
+      // those require permission (not read-only auto-allow).
       '-F': 'string',
       '--separator': 'string',
       '--help': 'none',
@@ -190,9 +271,6 @@ const COMMAND_ALLOWLIST: Record<string, CommandConfig> = {
       '-h': 'none',
       '--dereference': 'none',
       '-L': 'none',
-      // Magic file options (safe when just reading)
-      '--magic-file': 'string',
-      '-m': 'string',
       // Other safe options
       '--keep-going': 'none',
       '-k': 'none',
@@ -302,32 +380,32 @@ const COMMAND_ALLOWLIST: Record<string, CommandConfig> = {
     },
   },
   man: {
+    // densable 2.1.214 #6: man safeFlags omit -l (local file) and add
+    // additionalCommandIsDangerousCallback for path-like / cmdsub operands.
+    additionalCommandIsDangerousCallback: (_raw, args) =>
+      manArgsAreDangerous(args),
     safeFlags: {
-      // Safe display options
-      '-a': 'none', // Display all manual pages
-      '--all': 'none', // Same as -a
-      '-d': 'none', // Debug mode
-      '-f': 'none', // Emulate whatis
-      '--whatis': 'none', // Same as -f
-      '-h': 'none', // Help
-      '-k': 'none', // Emulate apropos
-      '--apropos': 'none', // Same as -k
-      '-l': 'string', // Local file (safe for reading, Linux only)
-      '-w': 'none', // Display location instead of content
-
-      // Safe formatting options
-      '-S': 'string', // Restrict manual sections
-      '-s': 'string', // Same as -S for whatis/apropos mode
+      // densable man.safeFlags (exact)
+      '-a': 'none',
+      '--all': 'none',
+      '-d': 'none',
+      '-f': 'none',
+      '--whatis': 'none',
+      '-h': 'none',
+      '-k': 'none',
+      '--apropos': 'none',
+      '-w': 'none',
+      '-S': 'string',
+      '-s': 'string',
     },
   },
-  // help command - only allow bash builtin help flags to prevent attacks when
-  // help is aliased to man (e.g., in oh-my-zsh common-aliases plugin).
-  // man's -P flag allows arbitrary command execution via pager.
+  // densable help: only -d is safe; path-like / cmdsub operands are dangerous
+  // (oh-my-zsh help→man alias can escalate to man -P).
   help: {
+    additionalCommandIsDangerousCallback: (_raw, args) =>
+      helpArgsAreDangerous(args),
     safeFlags: {
-      '-d': 'none', // Output short description for each topic
-      '-m': 'none', // Display usage in pseudo-manpage format
-      '-s': 'none', // Output only a short usage synopsis
+      '-d': 'none',
     },
   },
   netstat: {
@@ -1874,11 +1952,22 @@ export function commandWritesToGitInternalPaths(command: string): boolean {
  *                              This is computed by commandHasAnyCd() and passed in to avoid duplicate computation.
  * @returns PermissionResult indicating whether the command is read-only
  */
+/** densable `K0e` — read-only analysis length cap (same 1e4 as parse Jru). */
+export const READ_ONLY_ANALYSIS_MAX_LENGTH = 10000
+
 export function checkReadOnlyConstraints(
   input: z.infer<typeof BashTool.inputSchema>,
   compoundCommandHasCd: boolean,
 ): PermissionResult {
   const { command } = input
+
+  // densable F7u / 2.1.214 #4: over-length cannot be auto-allowed as read-only
+  if (command.length > READ_ONLY_ANALYSIS_MAX_LENGTH) {
+    return {
+      behavior: 'passthrough',
+      message: 'Command too long for read-only analysis',
+    }
+  }
 
   // Detect if the command is not parseable and return early
   const result = tryParseShellCommand(command, env => `$${env}`)

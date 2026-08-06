@@ -27,7 +27,12 @@ export type SdkWorkflowAgentProgress = {
   agentType?: string
   isolation?: 'worktree' | 'remote'
   model?: string
-  state: 'start' | 'done' | 'error'
+  /**
+   * densable: start (queued/running), progress (mid-flight token/tool tick),
+   * done / error (terminal). Mid-flight ticks use `progress` so IGg can
+   * throttle full-snapshot SDK emits (kGg=10s) while still upserting task state.
+   */
+  state: 'start' | 'progress' | 'done' | 'error'
   tokens?: number
   toolCalls?: number
   durationMs?: number

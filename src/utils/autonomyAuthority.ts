@@ -9,6 +9,7 @@ import {
 import { getProjectRoot } from '../bootstrap/state.js'
 import { getCwd } from './cwd.js'
 import { getFsImplementation } from './fsOperations.js'
+import { wrapScheduledTaskDisclaimer } from './scheduledTaskDisclaimer.js'
 import { normalizePathForConfigKey } from './path.js'
 
 export const AUTONOMY_DIR = join('.claude', 'autonomy')
@@ -515,12 +516,19 @@ export async function prepareAutonomyTurnPrompt(params: {
     )
   }
 
+  // densable #20 Q9i/RZn: scheduled fires get assigned-task banner so the
+  // model treats the stored prompt as this session's work, not untrusted inject.
+  const stampScheduled = (prompt: string): string =>
+    params.trigger === 'scheduled-task'
+      ? wrapScheduledTaskDisclaimer(prompt)
+      : prompt
+
   if (sections.length === 0) {
     return {
       rootDir: snapshot.rootDir,
       currentDir: snapshot.currentDir,
       trigger: params.trigger,
-      prompt: params.basePrompt,
+      prompt: stampScheduled(params.basePrompt),
       dueHeartbeatTasks,
       nowMs,
     }
@@ -535,13 +543,15 @@ export async function prepareAutonomyTurnPrompt(params: {
     rootDir: snapshot.rootDir,
     currentDir: snapshot.currentDir,
     trigger: params.trigger,
-    prompt: [
-      prelude,
-      '<autonomy_authority>',
-      ...sections,
-      '</autonomy_authority>',
-      params.basePrompt,
-    ].join('\n\n'),
+    prompt: stampScheduled(
+      [
+        prelude,
+        '<autonomy_authority>',
+        ...sections,
+        '</autonomy_authority>',
+        params.basePrompt,
+      ].join('\n\n'),
+    ),
     dueHeartbeatTasks,
     nowMs,
   }

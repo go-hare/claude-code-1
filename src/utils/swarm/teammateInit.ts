@@ -94,7 +94,9 @@ export function initializeTeammateHooks(
     `[TeammateInit] Registering Stop hook for teammate ${agentName} to notify leader ${leadAgentName}`,
   )
 
-  // Register Stop hook to notify leader when this teammate stops
+  // densable hZc … {timeout:1e4,id:"teammate-idle-notification"}:
+  // stable id so re-running initializeTeammateHooks within a session replaces
+  // the prior Stop hook instead of stacking duplicates (2.1.212 #26).
   addFunctionHook(
     setAppState,
     sessionId,
@@ -124,6 +126,7 @@ export function initializeTeammateHooks(
     'Failed to send idle notification to team leader',
     {
       timeout: 10000,
+      id: 'teammate-idle-notification',
     },
   )
 }

@@ -290,15 +290,23 @@ import { createEmptyAttributionState } from 'src/utils/commitAttribution.js';
 import { countConcurrentSessions, registerSession, updateSessionName } from 'src/utils/concurrentSessions.js';
 import { getCwd } from 'src/utils/cwd.js';
 import { logForDebugging, setHasFormattedOutput } from 'src/utils/debug.js';
-import { errorMessage, getErrnoCode, isENOENT, TeleportOperationError, toError } from 'src/utils/errors.js';
-import { getFsImplementation, safeResolvePath } from 'src/utils/fsOperations.js';
+import {
+  errorMessage,
+  getErrnoCode,
+  isEISDIR,
+  isENOENT,
+  isNotRegularFileError,
+  TeleportOperationError,
+  toError,
+} from 'src/utils/errors.js';
+import { assertRegularFileWithinMaxBytes, getFsImplementation, safeResolvePath } from 'src/utils/fsOperations.js';
 import { gracefulShutdown, gracefulShutdownSync } from 'src/utils/gracefulShutdown.js';
 import { setAllHookEventsEnabled } from 'src/utils/hooks/hookEvents.js';
 import { refreshModelCapabilities } from 'src/utils/model/modelCapabilities.js';
 import { peekForStdinData, writeToStderr } from 'src/utils/process.js';
 import { setCwd } from 'src/utils/Shell.js';
 import { type ProcessedResume, processResumedConversation } from 'src/utils/sessionRestore.js';
-import { parseSettingSourcesFlag } from 'src/utils/settings/constants.js';
+import { FLAG_SETTINGS_MAX_BYTES, parseSettingSourcesFlag } from 'src/utils/settings/constants.js';
 import { plural } from 'src/utils/stringUtils.js';
 import {
   type ChannelEntry,
@@ -622,6 +630,8 @@ export function startDeferredPrefetches(): void {
 }
 
 function loadSettingsFromFlag(settingsFile: string): void {
+  // densable 2.1.214 #17: path form uses bj(path, Jme=2MiB) — refuse device /
+  // directory / oversize before init; inline JSON form is unchanged.
   try {
     const trimmedSettings = settingsFile.trim();
     const looksLikeJson = trimmedSettings.startsWith('{') && trimmedSettings.endsWith('}');
@@ -645,18 +655,44 @@ function loadSettingsFromFlag(settingsFile: string): void {
       // the cache prefix and causing a 12x input token cost penalty.
       // The content hash ensures identical settings produce the same path
       // across process boundaries (each SDK query() spawns a new process).
+      // densable: contentHash via JSON.stringify + control-char escape; we
+      // keep trimmedSettings as the write body (1:1 with prior local) while
+      // still content-hashing for stable temp path.
+      const contentHash = JSON.stringify(parsedJson).replace(
+        /[\u007f-\u009f]/g,
+        s => '\\u' + s.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0'),
+      );
       settingsPath = generateTempFilePath('claude-settings', '.json', {
-        contentHash: trimmedSettings,
+        contentHash,
       });
       writeFileSync_DEPRECATED(settingsPath, trimmedSettings, 'utf8');
     } else {
-      // It's a file path - resolve and validate by attempting to read
-      const { resolvedPath: resolvedSettingsPath } = safeResolvePath(getFsImplementation(), settingsFile);
+      // densable: yf → bj(o, Jme) with ar / ERR_FILE_TOO_LARGE / eWe|Tae
+      const fsImpl = getFsImplementation();
+      const { resolvedPath: resolvedSettingsPath } = safeResolvePath(fsImpl, settingsFile);
       try {
+        // densable qvl via assertRegularFileWithinMaxBytes (Jme = 2MiB)
+        assertRegularFileWithinMaxBytes(fsImpl, resolvedSettingsPath, FLAG_SETTINGS_MAX_BYTES);
+        // Still open to surface other IO errors (parity with prior full read)
         readFileSync(resolvedSettingsPath, 'utf8');
       } catch (e) {
         if (isENOENT(e)) {
           process.stderr.write(chalk.red(`Error: Settings file not found: ${resolvedSettingsPath}\n`));
+          process.exit(1);
+        }
+        if (getErrnoCode(e) === 'ERR_FILE_TOO_LARGE') {
+          process.stderr.write(
+            chalk.red(
+              `Error: Settings file exceeds the ${FLAG_SETTINGS_MAX_BYTES / 1048576}MiB limit: ${resolvedSettingsPath}\n`,
+            ),
+          );
+          process.exit(1);
+        }
+        // densable eWe (ERR_NOT_REGULAR_FILE) || Tae (EISDIR)
+        if (isNotRegularFileError(e) || isEISDIR(e)) {
+          process.stderr.write(
+            chalk.red(`Error: Cannot use settings file (${errorMessage(e)}): ${resolvedSettingsPath}\n`),
+          );
           process.exit(1);
         }
         throw e;
@@ -668,6 +704,7 @@ function loadSettingsFromFlag(settingsFile: string): void {
     resetSettingsCache();
   } catch (error) {
     if (error instanceof Error) {
+      // densable T(`Error processing --settings: …`, {level:"error"})
       logError(error);
     }
     process.stderr.write(chalk.red(`Error processing settings: ${errorMessage(error)}\n`));
@@ -3871,6 +3908,10 @@ async function run(): Promise<CommanderCommand> {
           };
         })(),
         activeOverlays: new Set<string>(),
+        // densable ultrareviewOverageConfirmed:!1 — reset on /clear
+        ultrareviewOverageConfirmed: false,
+        // densable 2.1.214 endedByModel — EndConversation session lock
+        endedByModel: false,
         fastMode: getInitialFastModeSetting(resolvedInitialModel),
         ...(isAdvisorEnabled() && advisorModel && { advisorModel }),
         // Compute teamContext synchronously to avoid useEffect setState during render.
@@ -3983,6 +4024,7 @@ async function run(): Promise<CommanderCommand> {
           // densable p1e(..., {forkSession, replyOnResume})
           const result = await loadConversationForResume(undefined /* sessionId */, undefined /* sourceFile */, {
             replyOnResume: !!options.replyOnResume,
+            forkSession: !!options.forkSession,
           });
           if (!result) {
             logEvent('tengu_continue', {
@@ -4559,7 +4601,9 @@ async function run(): Promise<CommanderCommand> {
                 // ENOENT: not a file path — fall through to session-ID handling
               }
               if (logOption) {
-                const result = await loadConversationForResume(logOption, undefined /* sourceFile */);
+                const result = await loadConversationForResume(logOption, undefined /* sourceFile */, {
+                  forkSession: !!options.forkSession,
+                });
                 if (result) {
                   processedResume = await processResumedConversation(
                     result,
@@ -4608,6 +4652,7 @@ async function run(): Promise<CommanderCommand> {
             // densable p1e(sid, ..., {forkSession, replyOnResume})
             const result = await loadConversationForResume(matchedLog ?? sessionId, undefined, {
               replyOnResume: !!options.replyOnResume,
+              forkSession: !!options.forkSession,
             });
 
             if (!result) {

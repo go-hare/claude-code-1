@@ -210,22 +210,31 @@ export async function call(
     agentColor,
   });
 
+  let endedByModel = false;
+  try {
+    endedByModel = Boolean(context.getAppState?.()?.endedByModel);
+  } catch {
+    endedByModel = false;
+  }
   const preflight = getForkSessionPreflightError({
     isCoordinator: isCoordinatorMode(),
     persistenceDisabled: isSessionPersistenceDisabled(),
     restrictedLaunch: isForkRestrictedLaunch(),
+    endedByModel,
     seed,
   });
   if (preflight) {
     logEvent('tengu_feature_sad', {
       feature_name: 'repl_session_fork' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      error_code: (preflight.includes('persistence')
-        ? 'persistence_off'
-        : preflight.includes('launch flags')
-          ? 'restricted_launch'
-          : preflight.includes('coordinator')
-            ? 'coordinator_mode'
-            : 'nothing_to_fork') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code: (preflight.includes('ended this conversation')
+        ? 'ended_by_model'
+        : preflight.includes('persistence')
+          ? 'persistence_off'
+          : preflight.includes('launch flags')
+            ? 'restricted_launch'
+            : preflight.includes('coordinator')
+              ? 'coordinator_mode'
+              : 'nothing_to_fork') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
     onDone(preflight, { display: 'system' });
     return null;

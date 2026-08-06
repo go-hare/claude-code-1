@@ -22,6 +22,7 @@ import {
 } from './hooks/hooksConfigSnapshot.js'
 import { shouldSkipHookDueToTrust } from './hooks.js'
 import { getContextWindowForModel } from './context.js'
+import type { EffortValue } from './effort.js'
 import { getPlatform } from './platform.js'
 import {
   getSettings_DEPRECATED,
@@ -61,6 +62,8 @@ export type SubagentStatusTaskRow = {
   label: string
   startTime: number
   model: string | undefined
+  /** densable 214: agent definition / task effort for status-line scripts */
+  effort: EffortValue | undefined
   contextWindowSize: number | undefined
   tokenCount: number
   tokenSamples: number[]
@@ -183,6 +186,8 @@ export async function executeSubagentStatusLine(
         label: taskLabelForStatusLine(g),
         startTime: g.startTime,
         model,
+        // densable: effort:g.effort (task field; falls back to agent def)
+        effort: g.effort ?? g.selectedAgent?.effort,
         contextWindowSize: model ? getContextWindowForModel(model) : undefined,
         tokenCount: g.progress?.tokenCount ?? 0,
         tokenSamples: tokenSamples.get(g.id) ?? [],

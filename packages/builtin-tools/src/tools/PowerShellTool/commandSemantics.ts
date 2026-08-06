@@ -1,20 +1,12 @@
 /**
  * Command semantics configuration for interpreting exit codes in PowerShell.
  *
- * PowerShell-native cmdlets do NOT need exit-code semantics:
- *   - Select-String (grep equivalent) exits 0 on no-match (returns $null)
- *   - Compare-Object (diff equivalent) exits 0 regardless
- *   - Test-Path exits 0 regardless (returns bool via pipeline)
- * Native cmdlets signal failure via terminating errors ($?), not exit codes.
- *
- * However, EXTERNAL executables invoked from PowerShell DO set $LASTEXITCODE,
- * and many use non-zero codes to convey information rather than failure:
- *   - grep.exe / rg.exe (Git for Windows, scoop, etc.): 1 = no match
- *   - findstr.exe (Windows native): 1 = no match
- *   - robocopy.exe (Windows native): 0-7 = success, 8+ = error (notorious!)
- *
- * Without this module, PowerShellTool throws ShellError on any non-zero exit,
- * so `robocopy` reporting "files copied successfully" (exit 1) shows as an error.
+ * densable 2.1.214 #24 (u9u / Qhs / Lny / Pny / F7r):
+ * - External grep/rg/findstr/robocopy always use informational exit codes.
+ * - where.exe / fc.exe / diff.exe only when the token has a native .exe
+ *   extension AND stdout/stderr is non-empty (bare `where`/`fc`/`diff` are
+ *   PowerShell aliases — do not treat alias exit codes as "no match").
+ * - git grep / git diff subcommands map to the same informational semantics.
  */
 
 export type CommandSemantic = (
@@ -26,61 +18,40 @@ export type CommandSemantic = (
   message?: string
 }
 
-/**
- * Default semantic: treat only 0 as success, everything else as error
- */
+/** densable Rny */
 const DEFAULT_SEMANTIC: CommandSemantic = (exitCode, _stdout, _stderr) => ({
   isError: exitCode !== 0,
   message:
     exitCode !== 0 ? `Command failed with exit code ${exitCode}` : undefined,
 })
 
-/**
- * grep / ripgrep: 0 = matches found, 1 = no matches, 2+ = error
- */
-const GREP_SEMANTIC: CommandSemantic = (exitCode, _stdout, _stderr) => ({
-  isError: exitCode >= 2,
-  message: exitCode === 1 ? 'No matches found' : undefined,
-})
+/** densable F7r — exit 0 or 1 is non-error; 1 carries an informational message */
+function informationalExit1(messageOn1: string): CommandSemantic {
+  return (exitCode, _stdout, _stderr) => ({
+    isError: exitCode !== 0 && exitCode !== 1,
+    message: exitCode === 1 ? messageOn1 : undefined,
+  })
+}
+
+/** densable Air */
+const NO_MATCHES = informationalExit1('No matches found')
+/** densable Dny */
+const FILES_DIFFER = informationalExit1('Files differ')
 
 /**
- * Command-specific semantics for external executables.
- * Keys are lowercase command names WITHOUT .exe suffix.
- *
- * Deliberately omitted:
- *   - 'diff': Ambiguous. Windows PowerShell 5.1 aliases `diff` → Compare-Object
- *     (exit 0 on differ), but PS Core / Git for Windows may resolve to diff.exe
- *     (exit 1 on differ). Cannot reliably interpret.
- *   - 'fc': Ambiguous. PowerShell aliases `fc` → Format-Custom (a native cmdlet),
- *     but `fc.exe` is the Windows file compare utility (exit 1 = files differ).
- *     Same aliasing problem as `diff`.
- *   - 'find': Ambiguous. Windows find.exe (text search) vs Unix find.exe
- *     (file search via Git for Windows) have different semantics.
- *   - 'test', '[': Not PowerShell constructs.
- *   - 'select-string', 'compare-object', 'test-path': Native cmdlets exit 0.
+ * densable Pny — always applied (no .exe gate).
  */
-const COMMAND_SEMANTICS: Map<string, CommandSemantic> = new Map([
-  // External grep/ripgrep (Git for Windows, scoop, choco)
-  ['grep', GREP_SEMANTIC],
-  ['rg', GREP_SEMANTIC],
-
-  // findstr.exe: Windows native text search
-  // 0 = match found, 1 = no match, 2 = error
-  ['findstr', GREP_SEMANTIC],
-
-  // robocopy.exe: Windows native robust file copy
-  // Exit codes are a BITFIELD — 0-7 are success, 8+ indicates at least one failure:
-  //   0 = no files copied, no mismatch, no failures (already in sync)
-  //   1 = files copied successfully
-  //   2 = extra files/dirs detected (no copy)
-  //   4 = mismatched files/dirs detected
-  //   8 = some files/dirs could not be copied (copy errors)
-  //  16 = serious error (robocopy did not copy any files)
-  // This is the single most common "CI failed but nothing's wrong" Windows gotcha.
+const ALWAYS_SEMANTICS: Map<string, CommandSemantic> = new Map([
+  ['grep', NO_MATCHES],
+  ['rg', NO_MATCHES],
+  ['egrep', NO_MATCHES],
+  ['fgrep', NO_MATCHES],
+  ['findstr', NO_MATCHES],
   [
     'robocopy',
     (exitCode, _stdout, _stderr) => ({
-      isError: exitCode >= 8,
+      // densable: isError: e < 0 || e >= 8
+      isError: exitCode < 0 || exitCode >= 8,
       message:
         exitCode === 0
           ? 'No files copied (already in sync)'
@@ -94,38 +65,136 @@ const COMMAND_SEMANTICS: Map<string, CommandSemantic> = new Map([
 ])
 
 /**
- * Extract the command name from a single pipeline segment.
- * Strips leading `&` / `.` call operators and `.exe` suffix, lowercases.
+ * densable Lny — only when nativeExt === "exe" AND (stdout||stderr) non-empty.
  */
-function extractBaseCommand(segment: string): string {
-  // Strip PowerShell call operators: & "cmd", . "cmd"
-  // (& and . at segment start followed by whitespace invoke the next token)
+const NATIVE_EXE_SEMANTICS: Map<string, CommandSemantic> = new Map([
+  ['where', informationalExit1('No matching files found')],
+  ['fc', FILES_DIFFER],
+  ['diff', FILES_DIFFER],
+])
+
+/**
+ * densable Qhs — base command + optional native extension.
+ */
+export function parseNativeCommandToken(segment: string): {
+  base: string
+  nativeExt: 'exe' | 'cmd' | 'bat' | null
+  hadNativeExt: boolean
+} {
   const stripped = segment.trim().replace(/^[&.]\s+/, '')
-  const firstToken = stripped.split(/\s+/)[0] || ''
-  // Strip surrounding quotes if command was invoked as & "grep.exe"
-  const unquoted = firstToken.replace(/^["']|["']$/g, '')
-  // Strip path: C:\bin\grep.exe → grep.exe, .\rg.exe → rg.exe
-  const basename = unquoted.split(/[\\/]/).pop() || unquoted
-  // Strip .exe suffix (Windows is case-insensitive)
-  return basename.toLowerCase().replace(/\.exe$/, '')
+  const quoted = /^"([^"]*)"|^'([^']*)'/.exec(stripped)
+  const firstToken =
+    quoted?.[1] ??
+    quoted?.[2] ??
+    (stripped.split(/\s+/)[0] || '').replace(/^["']|["']$/g, '')
+  const basename = (firstToken.split(/[\\/]/).pop() || firstToken).toLowerCase()
+  const nativeExt =
+    (['exe', 'cmd', 'bat'] as const).find(ext =>
+      basename.endsWith(`.${ext}`),
+    ) ?? null
+  return {
+    base: nativeExt
+      ? basename.slice(0, -(nativeExt.length + 1))
+      : basename.replace(/\.exe$/, ''),
+    nativeExt,
+    hadNativeExt: nativeExt !== null,
+  }
 }
 
 /**
- * Extract the primary command from a PowerShell command line.
- * Takes the LAST pipeline segment since that determines the exit code.
- *
- * Heuristic split on `;` and `|` — may get it wrong for quoted strings or
- * complex constructs. Do NOT depend on this for security; it's only used
- * for exit-code interpretation (false negatives just fall back to default).
+ * densable Mny (simplified) — last pipeline/statement segment drives exit code.
+ * Respects single/double quotes and PowerShell backticks inside doubles.
  */
-function heuristicallyExtractBaseCommand(command: string): string {
-  const segments = command.split(/[;|]/).filter(s => s.trim())
-  const last = segments[segments.length - 1] || command
-  return extractBaseCommand(last)
+export function lastCommandSegment(command: string): string {
+  const segments: string[] = []
+  let start = 0
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!
+    if (inSingle) {
+      if (ch === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      if (ch === '`') {
+        i++
+        continue
+      }
+      if (ch === '"') inDouble = false
+      continue
+    }
+    // densable: # after space/tab/start/newline starts a comment to EOL
+    if (
+      ch === '#' &&
+      (i === 0 ||
+        command[i - 1] === ' ' ||
+        command[i - 1] === '\t' ||
+        command[i - 1] === '\n' ||
+        command[i - 1] === '\r')
+    ) {
+      segments.push(command.slice(start, i))
+      while (
+        i + 1 < command.length &&
+        command[i + 1] !== '\n' &&
+        command[i + 1] !== '\r'
+      ) {
+        i++
+      }
+      start = i + 1
+      continue
+    }
+    if (ch === "'") {
+      inSingle = true
+      continue
+    }
+    if (ch === '"') {
+      inDouble = true
+      continue
+    }
+    if (ch === ';' || ch === '\n' || ch === '\r') {
+      segments.push(command.slice(start, i))
+      start = i + 1
+      continue
+    }
+    // densable Mny: | and || / & and && split segments
+    if (ch === '|' || ch === '&') {
+      segments.push(command.slice(start, i))
+      if (command[i + 1] === ch) i++
+      start = i + 1
+    }
+  }
+  segments.push(command.slice(start))
+  const nonEmpty = segments.map(s => s.trim()).filter(Boolean)
+  return nonEmpty[nonEmpty.length - 1] || command
+}
+
+/** densable Ony — first non-flag token after `git` */
+function gitSubcommand(segment: string): string | null {
+  const stripped = segment.trim().replace(/^[&.]\s+/, '')
+  const tokens = stripped.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
+  // skip git / path-to-git.exe
+  let i = 0
+  if (tokens.length === 0) return null
+  i = 1
+  while (i < tokens.length) {
+    const t = tokens[i]!.replace(/^["']|["']$/g, '')
+    if (t.startsWith('-')) {
+      // git -C path … / --git-dir=…
+      if (t === '-C' || t === '--git-dir' || t === '--work-tree') {
+        i += 2
+        continue
+      }
+      i++
+      continue
+    }
+    return t.toLowerCase()
+  }
+  return null
 }
 
 /**
- * Interpret command result based on semantic rules
+ * densable u9u — interpret PowerShell command result.
  */
 export function interpretCommandResult(
   command: string,
@@ -136,7 +205,21 @@ export function interpretCommandResult(
   isError: boolean
   message?: string
 } {
-  const baseCommand = heuristicallyExtractBaseCommand(command)
-  const semantic = COMMAND_SEMANTICS.get(baseCommand) ?? DEFAULT_SEMANTIC
+  const segment = lastCommandSegment(command)
+  const { base, nativeExt } = parseNativeCommandToken(segment)
+
+  if (base === 'git') {
+    const sub = gitSubcommand(segment)
+    if (sub === 'grep') return NO_MATCHES(exitCode, stdout, stderr)
+    if (sub === 'diff') return FILES_DIFFER(exitCode, stdout, stderr)
+  }
+
+  const hasOutput = stdout.trim() !== '' || stderr.trim() !== ''
+  const nativeSemantic =
+    nativeExt === 'exe' && hasOutput
+      ? NATIVE_EXE_SEMANTICS.get(base)
+      : undefined
+  const semantic =
+    nativeSemantic ?? ALWAYS_SEMANTICS.get(base) ?? DEFAULT_SEMANTIC
   return semantic(exitCode, stdout, stderr)
 }

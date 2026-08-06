@@ -1589,8 +1589,10 @@ export const InstalledPluginsFileSchemaV1 = lazySchema(() =>
  * - project: Shared project settings ($project/.claude/settings.json)
  * - local: Personal project overrides ($project/.claude/settings.local.json)
  *
- * Note: 'flag' scope plugins (from --settings) are session-only and
- * are NOT persisted to installed_plugins.json.
+ * Note: session-only 'flag' UI scope is not a persisted enum value.
+ * densable 2.1.214 #33: plugins enabled only via --settings (flagSettings)
+ * are written as scope "user" install records (with versioned cache
+ * materialize) so the loader can resolve them for the session.
  */
 export const PluginScopeSchema = lazySchema(() =>
   z.enum(['managed', 'user', 'project', 'local']),

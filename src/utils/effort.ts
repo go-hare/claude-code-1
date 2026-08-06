@@ -448,6 +448,24 @@ export function isEffortLevel(value: string): value is EffortLevel {
 }
 
 /**
+ * densable `Ie` capture for assistant transcript stamping (2.1.212 #44).
+ *
+ * densable (paramsFromContext / queryModel):
+ * ```js
+ * let ra = Qa.output_config?.effort
+ * Ie = typeof ra === "string" && MPe(ra) ? ra : void 0
+ * ```
+ * Only string wire levels in AR (`MPe` ≡ `isEffortLevel`) are recorded.
+ * Numeric `effort_override` (ant-only) is intentionally NOT stamped.
+ */
+export function transcriptEffortFromOutputConfig(
+  outputConfig: { effort?: unknown } | null | undefined,
+): EffortLevel | undefined {
+  const ra = outputConfig?.effort
+  return typeof ra === 'string' && isEffortLevel(ra) ? ra : undefined
+}
+
+/**
  * densable qlc — CLI/settings effort string aliases that are not EffortLevels.
  * `med` → `medium` (densable only; keep table explicit so we do not invent more).
  */

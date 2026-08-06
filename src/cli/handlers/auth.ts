@@ -128,12 +128,26 @@ export async function authLogin({
   }
 
   const settings = getInitialSettings()
-  // forceLoginMethod is a hard constraint (enterprise setting) — matches ConsoleOAuthFlow behavior.
-  // Without it, --console selects Console; --claudeai (or no flag) selects claude.ai.
-  const loginWithClaudeAi = settings.forceLoginMethod
-    ? settings.forceLoginMethod === 'claudeai'
+  // densable A9t / ibS — forceLoginMethod hard pin; gateway cannot use CLI auth login
+  const { FORCE_LOGIN_GATEWAY_CLI_MESSAGE, resolveEffectiveForceLoginMethod } =
+    await import('../../utils/forceLoginMethod.js')
+  const forcedMethod = resolveEffectiveForceLoginMethod()
+  if (forcedMethod === 'gateway') {
+    process.stderr.write(`${FORCE_LOGIN_GATEWAY_CLI_MESSAGE}\n`)
+    process.exit(1)
+  }
+  // Without pin, --console selects Console; --claudeai (or no flag) selects claude.ai.
+  const loginWithClaudeAi = forcedMethod
+    ? forcedMethod === 'claudeai'
     : !useConsole
-  const orgUUID = settings.forceLoginOrgUUID
+  // densable: suppress forceLoginOrgUUID when effective method mismatches settings pin
+  const methodMismatch =
+    settings.forceLoginMethod !== undefined &&
+    loginWithClaudeAi !== (settings.forceLoginMethod === 'claudeai')
+  const orgUUID =
+    typeof settings.forceLoginOrgUUID === 'string' && !methodMismatch
+      ? settings.forceLoginOrgUUID
+      : undefined
 
   // Fast path: if a refresh token is provided via env var, skip the browser
   // OAuth flow and exchange it directly for tokens.

@@ -863,7 +863,7 @@ export function buildFleetFooterHints(input: {
     if (input.bashMode) {
       return 'enter run bash \u00b7 backspace exit ! \u00b7 esc clear \u00b7 ? shortcuts'
     }
-    return 'enter dispatch \u00b7 ! bash \u00b7 @ mention \u00b7 shift+enter newline \u00b7 \u2191 list \u00b7 esc clear'
+    return 'enter dispatch \u00b7 ! bash \u00b7 @ mention \u00b7 ctrl+j for newline \u00b7 \u2191 list \u00b7 esc clear'
   }
 
   const parts: string[] = []

@@ -25,6 +25,7 @@ import { asAgentId } from '../../types/ids.js';
 import type { AgentId } from '../../types/ids.js';
 import type { Message } from '../../types/message.js';
 import { createAbortController, createChildAbortController } from '../../utils/abortController.js';
+import type { EffortValue } from '../../utils/effort.js';
 import type { ActiveTaskExecutionContext } from '../../utils/tasks.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js';
@@ -490,6 +491,11 @@ export type LocalAgentTaskState = TaskStateBase & {
   selectedAgent?: AgentDefinition;
   agentType: string;
   model?: string;
+  /**
+   * densable 214: effort stamped at register (from agent definition).
+   * Surfaced on subagentStatusLine payload as `effort`.
+   */
+  effort?: EffortValue;
   activeTaskExecutionContext?: ActiveTaskExecutionContext;
   ownedFiles?: string[];
   notificationTargetAgentId?: AgentId;
@@ -1895,6 +1901,8 @@ export function registerAsyncAgent({
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
+    // densable Sot: effort:a.effort from agent definition
+    ...(selectedAgent.effort !== undefined ? { effort: selectedAgent.effort } : {}),
     activeTaskExecutionContext,
     ownedFiles,
     notificationTargetAgentId,
@@ -1997,6 +2005,8 @@ export function registerAgentForeground({
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
+    // densable OSu: effort:a.effort from agent definition
+    ...(selectedAgent.effort !== undefined ? { effort: selectedAgent.effort } : {}),
     notificationTargetAgentId,
     ownerAgentId: resolvedOwner,
     parentAgentId,

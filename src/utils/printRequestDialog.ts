@@ -133,6 +133,15 @@ export function createPrintRequestDialog(
   options?: RequestDialogOptions,
 ) => Promise<unknown> {
   return async function requestDialog(spec, payload, options) {
+    // densable msf/UIb: while a known dialog is open, emit dialog needs for bg jobs
+    const emitDialogNeeds = (kind: string | null) => {
+      void import('./bgNeedsInputBridge.js').then(m => {
+        if (!m.isBgJobSession()) return
+        m.ensureBgNeedsPermissionBridge()
+        m.emitBgNeedsFromDialogKind(kind)
+      })
+    }
+
     if (spec.kind === MCP_URL_ELICITATION_DIALOG_KIND) {
       const p = payload as {
         serverName?: string
@@ -145,15 +154,20 @@ export function createPrintRequestDialog(
         }
       }
       if (!p?.serverName || !p.params) return spec.default
-      return await host.handleElicitation(
-        p.serverName,
-        p.params.message ?? '',
-        undefined,
-        options?.signal,
-        p.params.mode,
-        p.params.url,
-        p.params.elicitationId,
-      )
+      emitDialogNeeds(MCP_URL_ELICITATION_DIALOG_KIND)
+      try {
+        return await host.handleElicitation(
+          p.serverName,
+          p.params.message ?? '',
+          undefined,
+          options?.signal,
+          p.params.mode,
+          p.params.url,
+          p.params.elicitationId,
+        )
+      } finally {
+        emitDialogNeeds(null)
+      }
     }
 
     if (
@@ -165,20 +179,25 @@ export function createPrintRequestDialog(
         host.cancelPendingUserDialogs?.(spec.kind, 'queued_at_park')
         return spec.default
       }
-      const response = await host.requestUserDialog(spec.kind, payload, {
-        signal: options?.signal,
-      })
-      if (response.behavior === 'cancelled') return spec.default
-      if (spec.result) {
-        const parsed = spec.result().safeParse(response.result)
-        return parsed.success ? parsed.data : spec.default
+      emitDialogNeeds(spec.kind)
+      try {
+        const response = await host.requestUserDialog(spec.kind, payload, {
+          signal: options?.signal,
+        })
+        if (response.behavior === 'cancelled') return spec.default
+        if (spec.result) {
+          const parsed = spec.result().safeParse(response.result)
+          return parsed.success ? parsed.data : spec.default
+        }
+        const known = findDialogKindSpec(spec.kind)
+        if (known?.parseResult) {
+          const parsed = known.parseResult(response.result)
+          return parsed.success ? parsed.data : spec.default
+        }
+        return response.result ?? spec.default
+      } finally {
+        emitDialogNeeds(null)
       }
-      const known = findDialogKindSpec(spec.kind)
-      if (known?.parseResult) {
-        const parsed = known.parseResult(response.result)
-        return parsed.success ? parsed.data : spec.default
-      }
-      return response.result ?? spec.default
     }
 
     return spec.default
