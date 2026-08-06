@@ -137,6 +137,8 @@ const codeReview = {
     'Thorough code review covering bugs, security, performance, and maintainability',
   argumentHint: '[low|medium|high|xhigh|max] [--comment] [--fix] [<target>]',
   userInvocable: true,
+  // densable 2.1.215: model must not auto-run /code-review; user slash only
+  disableModelInvocation: true,
   source: 'builtin' as const,
   progressMessage: 'Reviewing code...',
   contentLength: 2000,

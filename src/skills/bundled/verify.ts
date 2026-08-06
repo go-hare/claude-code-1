@@ -18,6 +18,8 @@ export function registerVerifySkill(): void {
     name: 'verify',
     description: DESCRIPTION,
     userInvocable: true,
+    // densable 2.1.215: model must not auto-run /verify; user slash only
+    disableModelInvocation: true,
     files: SKILL_FILES,
     async getPromptForCommand(args) {
       const parts: string[] = [SKILL_BODY.trimStart()]

@@ -1,0 +1,1 @@
+Both the user (\`/<skill-name>\`) and Claude can invoke skills by default. For workflows with side effects (e.g., \`/deploy\`, \`/fix-issue 123\`), add \`disable-model-invocation: true\` so only the user can trigger it, and use \`$ARGUMENTS\` to accept input.
