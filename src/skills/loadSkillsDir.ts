@@ -278,6 +278,7 @@ export function createSkillCommand({
   description,
   hasUserSpecifiedDescription,
   markdownContent,
+  contentHash,
   allowedTools,
   argumentHint,
   argumentNames,
@@ -301,6 +302,8 @@ export function createSkillCommand({
   description: string
   hasUserSpecifiedDescription: boolean
   markdownContent: string
+  /** densable contentHash (JoS fingerprint). Defaults to Bun.hash(markdown). */
+  contentHash?: string
   allowedTools: string[]
   argumentHint: string | undefined
   argumentNames: string[]
@@ -337,6 +340,8 @@ export function createSkillCommand({
     effort,
     paths,
     contentLength: markdownContent.length,
+    // densable Xen: contentHash:i??Bun.hash(o).toString(36)
+    contentHash: contentHash ?? Bun.hash(markdownContent).toString(36),
     isHidden: !userInvocable,
     progressMessage: 'running',
     userFacingName(): string {
@@ -467,6 +472,8 @@ async function loadSkillsFromSkillsDir(
             ...parsed,
             skillName,
             markdownContent,
+            // densable disk load: contentHash:Bun.hash(p).toString(36) on full file
+            contentHash: Bun.hash(content).toString(36),
             source,
             baseDir: skillDirPath,
             loadedFrom: 'skills',

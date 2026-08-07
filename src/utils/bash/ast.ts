@@ -1179,57 +1179,161 @@ function walkTestExpr(
 }
 
 /**
+ * densable `$uu` — peel nested `list` / `negated_command` to the last
+ * non-separator child. Used when a redirect wraps a compound list so we can
+ * fail-closed on unanalyzable leaves (subshell/compound/control) that densable
+ * cannot statically attach redirects to.
+ */
+function peelRedirectBodyLeaf(node: Node): Node | null {
+  let last: Node | null = null
+  for (const child of node.children) {
+    if (!child) continue
+    if (
+      child.type === '!' ||
+      child.type === 'comment' ||
+      SEPARATOR_TYPES.has(child.type)
+    ) {
+      continue
+    }
+    last = child
+  }
+  if (!last) return null
+  if (last.type === 'list' || last.type === 'negated_command') {
+    return peelRedirectBodyLeaf(last)
+  }
+  return last
+}
+
+/**
+ * densable `Duu` ∪ `exg` — body node types that may sit under a
+ * `redirected_statement`. Anything else (subshell, compound_statement, …)
+ * is fail-closed as too-complex when it is the peel leaf of list/negation.
+ */
+const REDIRECT_BODY_TYPES = new Set([
+  'command',
+  'pipeline',
+  'list',
+  'negated_command',
+  'declaration_command',
+  'unset_command',
+  'test_command',
+  'redirected_statement',
+])
+
+/**
  * A `redirected_statement` wraps a command (or pipeline) plus one or more
- * `file_redirect`/`heredoc_redirect` nodes. Extract redirects, walk the
- * inner command, attach redirects to the LAST command (the one whose output
- * is being redirected).
+ * `file_redirect`/`heredoc_redirect` nodes.
+ *
+ * densable 2.1.216 `uxg` / `$uu` (#13):
+ * 1. Peel list/negation leaves — unanalyzable last leaf → too-complex.
+ * 2. Walk the body first; expand redirect targets with the densable scope
+ *    rules (post-`A` snapshot for exact `A && B`, else pre-body snapshot for
+ *    simple bodies so assignments in the body do not silently rewrite the
+ *    redirect path without the list/`&&` form).
+ * 3. Attach redirects to the LAST extracted command (bash semantics).
  */
 function walkRedirectedStatement(
   node: Node,
   commands: SimpleCommand[],
   varScope: Map<string, string>,
 ): ParseForSecurityResult | null {
-  const redirects: Redirect[] = []
-  let innerCommand: Node | null = null
+  const redirectNodes: Node[] = []
+  const heredocNodes: Node[] = []
+  let body: Node | null = null
 
   for (const child of node.children) {
     if (!child) continue
     if (child.type === 'file_redirect') {
-      // Thread `commands` so $() in redirect targets (e.g., `> $(mktemp)`)
-      // extracts the inner command for permission checking.
-      const r = walkFileRedirect(child, commands, varScope)
-      if ('kind' in r) return r
-      redirects.push(r)
+      redirectNodes.push(child)
     } else if (child.type === 'heredoc_redirect') {
-      const r = walkHeredocRedirect(child)
-      if (r) return r
-    } else if (
-      child.type === 'command' ||
-      child.type === 'pipeline' ||
-      child.type === 'list' ||
-      child.type === 'negated_command' ||
-      child.type === 'declaration_command' ||
-      child.type === 'unset_command'
-    ) {
-      innerCommand = child
+      heredocNodes.push(child)
+    } else if (REDIRECT_BODY_TYPES.has(child.type)) {
+      // densable `$uu` peel: list/negated last leaf must be analyzable.
+      if (child.type === 'list' || child.type === 'negated_command') {
+        const leaf = peelRedirectBodyLeaf(child)
+        if (leaf && !REDIRECT_BODY_TYPES.has(leaf.type)) {
+          return tooComplex(leaf)
+        }
+      }
+      body = child
     } else {
       return tooComplex(child)
     }
   }
 
-  if (!innerCommand) {
+  if (!body) {
     // `> file` alone is valid bash (truncates file). Represent as a command
     // with empty argv so downstream sees the write.
+    const redirects: Redirect[] = []
+    for (const rn of redirectNodes) {
+      const r = walkFileRedirect(rn, commands, varScope)
+      if ('kind' in r) return r
+      redirects.push(r)
+    }
+    for (const hn of heredocNodes) {
+      const r = walkHeredocRedirect(hn)
+      if (r) return r
+    }
     commands.push({ argv: [], envVars: [], redirects, text: node.text })
     return null
   }
 
   const before = commands.length
-  const err = collectCommands(innerCommand, commands, varScope)
-  if (err) return err
-  if (commands.length > before && redirects.length > 0) {
-    const last = commands[commands.length - 1]
-    if (last) last.redirects.push(...redirects)
+  // densable redirect-target scope `c` after body walk:
+  // - exact `A && B` list (3 children): walk A, snapshot, walk B; redirects
+  //   use post-A scope so `FOO=/tmp && echo > $FOO/out` resolves FOO.
+  // - other list / pipeline / nested redirected_statement: walk body; c = r
+  // - else (command, negation, declaration, unset, test): snapshot PRE-body
+  //   then walk body (redirects do not see body-side assignments).
+  let redirectScope: Map<string, string>
+  if (body.type === 'list') {
+    const kids = body.children
+    if (kids.length === 3 && kids[0] && kids[1]?.type === '&&' && kids[2]) {
+      const errA = collectCommands(kids[0], commands, varScope)
+      if (errA) return errA
+      redirectScope = new Map(varScope)
+      const errB = collectCommands(kids[2], commands, varScope)
+      if (errB) return errB
+    } else {
+      const err = collectCommands(body, commands, varScope)
+      if (err) return err
+      redirectScope = varScope
+    }
+  } else if (body.type === 'pipeline' || body.type === 'redirected_statement') {
+    const err = collectCommands(body, commands, varScope)
+    if (err) return err
+    redirectScope = varScope
+  } else {
+    redirectScope = new Map(varScope)
+    const err = collectCommands(body, commands, varScope)
+    if (err) return err
+  }
+
+  const redirects: Redirect[] = []
+  for (const rn of redirectNodes) {
+    // Thread `commands` so $() in redirect targets (e.g., `> $(mktemp)`)
+    // extracts the inner command for permission checking.
+    const r = walkFileRedirect(rn, commands, redirectScope)
+    if ('kind' in r) return r
+    redirects.push(r)
+  }
+  for (const hn of heredocNodes) {
+    const r = walkHeredocRedirect(hn)
+    if (r) return r
+  }
+
+  if (redirects.length > 0) {
+    if (commands.length > before) {
+      const last = commands[commands.length - 1]
+      if (last) last.redirects.push(...redirects)
+    } else {
+      commands.push({
+        argv: [],
+        envVars: [],
+        redirects,
+        text: node.text,
+      })
+    }
   }
   return null
 }
@@ -1414,10 +1518,14 @@ function walkFileRedirect(
       const s = walkString(child, innerCommands, varScope)
       if (typeof s !== 'string') return s
       target = s
-    } else if (child.type === 'concatenation') {
-      // `echo > "foo"bar` — tree-sitter produces a concatenation of string +
-      // word children. walkArgument already validates concatenation (rejects
-      // expansions, checks brace syntax) and returns the joined text.
+    } else if (
+      child.type === 'concatenation' ||
+      child.type === 'simple_expansion'
+    ) {
+      // densable 2.1.216 #13: redirect targets may be `$FOO` or `$FOO/out`
+      // (concatenation). walkArgument resolves tracked vars from the
+      // redirect-scope Map threaded by walkRedirectedStatement (post-`A`
+      // snapshot for `A && B > $FOO`).
       const s = walkArgument(child, innerCommands, varScope)
       if (typeof s !== 'string') return s
       target = s

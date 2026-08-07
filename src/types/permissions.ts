@@ -360,6 +360,17 @@ export type YoloClassifierResult = {
   reason: string
   unavailable?: boolean
   /**
+   * densable 2.1.216 — APIError.status when the classifier call failed
+   * (includes 401 after unrecovered OAuth). Used by hUd/f6d message builders
+   * and model demotion probes (Mhd excludes /^http_401/).
+   */
+  httpStatus?: number
+  /**
+   * densable fO_ errorKind: wall_clock_timeout | connection_timeout |
+   * connection_error | http_${status} | http_${status}_no_retry | other…
+   */
+  errorKind?: string
+  /**
    * Official CLAUDE_CODE_AUTO_MODE_OUTCOME_CODES — machine-readable outcome
    * when outcomeVisibility is enabled.
    */
@@ -376,6 +387,11 @@ export type YoloClassifierResult = {
   transcriptTooLong?: boolean
   /** The model used for this classifier call */
   model: string
+  /**
+   * densable: when primary classifier model failed and a fallback model was
+   * used, the original primary model id (telemetry).
+   */
+  fallbackFrom?: string
   /** Token usage from the classifier API call (for overhead telemetry) */
   usage?: ClassifierUsage
   /** Duration of the classifier API call in ms */

@@ -12,7 +12,13 @@ import { setClipboard } from '@anthropic/ink';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow menu navigation
 import { Box, color, Link, Text, useInput, useTheme } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
-import { AuthenticationCancelledError, performMCPOAuthFlow, revokeServerTokens } from '../../services/mcp/auth.js';
+import {
+  AuthenticationCancelledError,
+  performMCPOAuthFlow,
+  revokeReplacedMcpTokens,
+  revokeServerTokens,
+  snapshotMcpOAuthTokens,
+} from '../../services/mcp/auth.js';
 import { clearServerCache } from '../../services/mcp/client.js';
 import { useMcpReconnect, useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
 import {
@@ -310,15 +316,14 @@ export function MCPRemoteServerMenu({
     authAbortControllerRef.current = controller;
 
     try {
-      // Revoke existing tokens if re-authenticating, but preserve step-up
-      // auth state so the next OAuth flow can reuse cached scope/discovery.
-      if (server.isAuthenticated && server.config) {
-        await revokeServerTokens(server.name, server.config, {
-          preserveStepUpState: true,
-        });
-      }
-
+      // densable 2.1.216 #19: do NOT revoke working credentials before OAuth.
+      // Snapshot pre-auth tokens (QLu); OAuth overwrites local storage; only
+      // after reconnect is "connected" revoke the *replaced* set (eMu).
       if (server.config) {
+        const previousTokens = server.isAuthenticated
+          ? await snapshotMcpOAuthTokens(server.name, server.config)
+          : undefined;
+
         await performMCPOAuthFlow(server.name, server.config, setAuthorizationUrl, controller.signal, {
           onWaitingForCallback: submit => {
             setManualCallbackSubmit(() => submit);
@@ -332,19 +337,29 @@ export function MCPRemoteServerMenu({
         const result = await reconnectMcpServer(server.name);
 
         if (result.client.type === 'connected') {
+          if (previousTokens) {
+            await revokeReplacedMcpTokens(server.name, server.config, previousTokens);
+          }
           const message = isEffectivelyAuthenticated
             ? `Authentication successful. Reconnected to ${server.name}.`
             : `Authentication successful. Connected to ${server.name}.`;
           onComplete?.(message);
         } else if (result.client.type === 'needs-auth') {
+          // densable: Got new credentials, but server rejected them on reconnect.
           onComplete?.(
-            'Authentication successful, but server still requires authentication. You may need to manually restart Claude Code.',
+            `Got new credentials, but ${server.name} rejected them on reconnect. Try re-authenticating, or restart Claude Code if it persists.`,
           );
         } else {
           // result.client.type === 'failed'
           logMCPDebug(server.name, `Reconnection failed after authentication`);
+          const failDetail =
+            result.client.type === 'failed' && 'error' in result.client && result.client.error
+              ? String(result.client.error)
+              : '';
           onComplete?.(
-            'Authentication successful, but server reconnection failed. You may need to manually restart Claude Code for the changes to take effect.',
+            failDetail
+              ? `Got new credentials, but reconnecting to ${server.name} failed: ${failDetail}`
+              : `Got new credentials, but reconnecting to ${server.name} failed. Restart Claude Code to retry.`,
           );
         }
       }

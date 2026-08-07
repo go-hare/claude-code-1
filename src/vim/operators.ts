@@ -299,6 +299,9 @@ export function executePaste(
   const register = ctx.getRegister()
   if (!register) return
 
+  // densable Hmn: record paste for dot-repeat before mutating buffer
+  ctx.recordChange({ type: 'paste', after, count })
+
   const isLinewise = register.endsWith('\n')
   const content = isLinewise ? register.slice(0, -1) : register
 

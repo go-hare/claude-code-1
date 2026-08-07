@@ -10,10 +10,12 @@ import { firstGrapheme, lastGrapheme } from '../utils/intl.js'
 import {
   executeIndent,
   executeJoin,
+  executeLineOp,
   executeOpenLine,
   executeOperatorFind,
   executeOperatorMotion,
   executeOperatorTextObj,
+  executePaste,
   executeReplace,
   executeToggleCase,
   executeX,
@@ -23,6 +25,7 @@ import { type TransitionContext, transition } from '../vim/transitions.js'
 import {
   createInitialPersistentState,
   createInitialVimState,
+  isChangeOperatorRecord,
   type PersistentState,
   type RecordedChange,
   type VimState,
@@ -49,6 +52,9 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
   const persistentRef = React.useRef<PersistentState>(
     createInitialPersistentState(),
   )
+  // densable S.current — lastChange ref when a change-op enters INSERT (Poa).
+  // Esc merges insertedText only if lastChange is still that same object.
+  const changeOpEnteredInsertRef = React.useRef<RecordedChange | null>(null)
   // Official _.current — first key of a two-key INSERT remap sequence.
   const pendingRemapRef = React.useRef<PendingVimInsertRemap | null>(null)
 
@@ -73,28 +79,57 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
   )
 
   const switchToNormalMode = useCallback(
-    (opts?: { claimEmptyInsert?: boolean }): void => {
+    (opts?: {
+      claimEmptyInsert?: boolean
+      buffer?: { text: string; offset: number }
+    }): void => {
       const current = vimStateRef.current
-      // Official claimEmptyInsert: do not record the insert as lastChange
-      // (used when a remap sequence exits INSERT without a real edit).
-      if (
-        !opts?.claimEmptyInsert &&
-        current.mode === 'INSERT' &&
-        current.insertedText
-      ) {
-        persistentRef.current.lastChange = {
-          type: 'insert',
-          text: current.insertedText,
+      // densable exit-INSERT lastChange merge (S.current + Poa):
+      //   c-motion + typed text → lastChange keeps operator + insertedText
+      //   claimEmptyInsert (jj remap) without Poa → still records empty insert
+      //   plain insert → type:"insert"
+      if (current.mode === 'INSERT') {
+        const last = persistentRef.current.lastChange
+        const isTrackedChangeOp = last === changeOpEnteredInsertRef.current
+        if (
+          last &&
+          isTrackedChangeOp &&
+          current.insertedText &&
+          (last.type === 'operator' ||
+            last.type === 'operatorFind' ||
+            last.type === 'operatorTextObj') &&
+          last.op === 'change'
+        ) {
+          persistentRef.current.lastChange = {
+            ...last,
+            insertedText: current.insertedText,
+          }
+        } else if (
+          current.insertedText ||
+          (opts?.claimEmptyInsert && !isChangeOperatorRecord(last))
+        ) {
+          // densable: claimEmptyInsert || insertedText → type insert
+          // (claimEmptyInsert true with empty text still stamps insert "")
+          if (current.insertedText || opts?.claimEmptyInsert) {
+            persistentRef.current.lastChange = {
+              type: 'insert',
+              text: current.insertedText,
+            }
+          }
         }
+        changeOpEnteredInsertRef.current = null
       }
 
       pendingRemapRef.current = null
 
       // Vim behavior: move cursor left by 1 when exiting insert mode
-      // (unless at beginning of line or at offset 0)
-      const offset = textInput.offset
-      if (offset > 0 && props.value[offset - 1] !== '\n') {
+      // densable: prefer opts.buffer when remap rewrote the buffer.
+      const bufText = opts?.buffer?.text ?? props.value
+      const offset = opts?.buffer?.offset ?? textInput.offset
+      if (offset > 0 && bufText[offset - 1] !== '\n') {
         textInput.setOffset(offset - 1)
+      } else if (opts?.buffer) {
+        textInput.setOffset(offset)
       }
 
       vimStateRef.current = { mode: 'NORMAL', command: { type: 'idle' } }
@@ -127,7 +162,42 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
         ? () => {}
         : (change: RecordedChange) => {
             persistentRef.current.lastChange = change
+            // densable: when change-op enters INSERT, track for Esc merge
+            if (
+              isChangeOperatorRecord(change) &&
+              vimStateRef.current.mode === 'INSERT'
+            ) {
+              changeOpEnteredInsertRef.current = change
+            }
           },
+    }
+  }
+
+  /**
+   * densable F/L — when replaying a change that carried insertedText,
+   * wrap setText/enterInsert so the typed text is re-applied after the op.
+   */
+  function withInsertedText(
+    ctx: OperatorContext,
+    insertedText: string | undefined,
+  ): OperatorContext {
+    if (!insertedText) return ctx
+    let text = ctx.text
+    return {
+      ...ctx,
+      setText: (newText: string) => {
+        text = newText
+        ctx.setText(newText)
+      },
+      enterInsert: (offset: number) => {
+        const next = text.slice(0, offset) + insertedText + text.slice(offset)
+        ctx.setText(next)
+        ctx.setOffset(
+          offset +
+            insertedText.length -
+            (lastGrapheme(insertedText).length || 1),
+        )
+      },
     }
   }
 
@@ -136,7 +206,10 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
     if (!change) return
 
     const cursor = Cursor.fromText(props.value, props.columns, textInput.offset)
-    const ctx = createOperatorContext(cursor, true)
+    let ctx = createOperatorContext(cursor, true)
+    if ('insertedText' in change && change.insertedText !== undefined) {
+      ctx = withInsertedText(ctx, change.insertedText)
+    }
 
     switch (change.type) {
       case 'insert':
@@ -172,7 +245,12 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
         break
 
       case 'operator':
-        executeOperatorMotion(change.op, change.motion, change.count, ctx)
+        if (change.motion === change.op[0]) {
+          // line op (cc/dd/yy)
+          executeLineOp(change.op, change.count, ctx)
+        } else {
+          executeOperatorMotion(change.op, change.motion, change.count, ctx)
+        }
         break
 
       case 'operatorFind':
@@ -194,6 +272,22 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
           ctx,
         )
         break
+
+      case 'paste':
+        executePaste(change.after, change.count, ctx)
+        break
+
+      case 'visualChange': {
+        // densable vPp simplified: replace [from,to) with text
+        const { from, to, text: ins } = change
+        const next = props.value.slice(0, from) + ins + props.value.slice(to)
+        props.onChange(next)
+        const lastGr = lastGrapheme(ins)
+        textInput.setOffset(
+          Math.max(from, from + ins.length - (lastGr.length || 1)),
+        )
+        break
+      }
     }
   }
 

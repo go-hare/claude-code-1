@@ -60,6 +60,38 @@ describe('resumeAgent', () => {
     expect(tasks[taskId]?.resuming).toBe(false)
   })
 
+  test('disk transcript missing uses in-memory task.messages before throw', () => {
+    // densable 2.1.216 Aye: P = disk; if (!P) mirror g.getTranscript messages
+    const src = readFileSync(join(import.meta.dir, '../resumeAgent.ts'), 'utf8')
+    expect(src).toContain('disk transcript missing; using')
+    expect(src).toContain('in-memory messages mirrored during the run')
+    expect(src).toContain('contentReplacements: []')
+    expect(src).toMatch(
+      /if \(!transcript\) \{[\s\S]*?task\.messages[\s\S]*?if \(!transcript\) \{[\s\S]*?No transcript found for agent ID/,
+    )
+  })
+
+  test('densable me/Ce taxonomy: tengu_feature_bad/ok on resume paths', () => {
+    // densable: me(e,t) → tengu_feature_bad {feature_name:Se(e), error_code:t}
+    //          Ce(e)   → tengu_feature_ok  {feature_name:Se(e)}
+    const src = readFileSync(join(import.meta.dir, '../resumeAgent.ts'), 'utf8')
+    expect(src).toContain("logEvent('tengu_feature_bad'")
+    expect(src).toContain("logEvent('tengu_feature_ok'")
+    expect(src).toContain("'subagent_resume_transcript_missing'")
+    expect(src).toContain("'subagent_resume_fork_prompt_missing'")
+    expect(src).toContain("'subagent_launch'")
+    // bad before throw; ok before alreadyCompleted + final return
+    const missingBad = src.indexOf("'subagent_resume_transcript_missing'")
+    const missingThrow = src.indexOf('No transcript found for agent ID:')
+    expect(missingBad).toBeGreaterThan(0)
+    expect(missingThrow).toBeGreaterThan(missingBad)
+    const acOk = src.lastIndexOf("logEvent('tengu_feature_ok'")
+    const acReturn = src.indexOf('alreadyCompleted: true')
+    expect(acOk).toBeGreaterThan(0)
+    // at least one ok before alreadyCompleted
+    expect(src.indexOf("logEvent('tengu_feature_ok'")).toBeLessThan(acReturn)
+  })
+
   test('source wraps post-claim body in try/catch clearResuming (CAS safety net)', () => {
     // Structural guard: sticky resuming residual — claim then any throw clears CAS.
     const src = readFileSync(join(import.meta.dir, '../resumeAgent.ts'), 'utf8')

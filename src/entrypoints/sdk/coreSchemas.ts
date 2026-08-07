@@ -1268,14 +1268,22 @@ export const SdkPluginConfigSchema = lazySchema(() =>
 // Rewind Types
 // ============================================================================
 
+/** densable lrl — only on real (non-dryRun) rewind. */
+const REWIND_SKIPPED_LINKS_DESCRIBE =
+  'Count of tracked files NOT restored or deleted because a symlink, hard link, or other non-regular file was detected at the tracked path, its parent directory no longer resolves to where it pointed when the checkpoint was taken, or its backup could not be safely read. Only populated by a real (non-dryRun) rewind — on a dryRun response the field is never set and the preview counts do not reflect link-safety refusals. Absent or 0 on a real rewind means no link-safety refusals occurred; other per-file failures (for example a missing backup file) are logged and reported in telemetry but are not counted here.'
+
 export const RewindFilesResultSchema = lazySchema(() =>
   z
     .object({
       canRewind: z.boolean(),
       error: z.string().optional(),
       filesChanged: z.array(z.string()).optional(),
-      insertions: z.number().optional(),
-      deletions: z.number().optional(),
+      insertions: z.number().int().optional(),
+      deletions: z.number().int().optional(),
+      skippedLinks: z
+        .number()
+        .optional()
+        .describe(REWIND_SKIPPED_LINKS_DESCRIBE),
     })
     .describe('Result of a rewindFiles operation.'),
 )
@@ -1764,6 +1772,28 @@ export const SDKFilesPersistedEventSchema = lazySchema(() =>
   }),
 )
 
+/**
+ * densable 2.1.216 #27 — stream-json notifies hosts when slash commands/skills
+ * change mid-session (skill watcher reload).
+ * densable aa: {type:"system",subtype:"commands_changed",commands:DVe(...)}
+ */
+export const SDKCommandsChangedMessageSchema = lazySchema(() =>
+  z.object({
+    type: z.literal('system'),
+    subtype: z.literal('commands_changed'),
+    commands: z.array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        argumentHint: z.string().optional(),
+        aliases: z.array(z.string()).optional(),
+      }),
+    ),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
+  }),
+)
+
 export const SDKTaskNotificationMessageSchema = lazySchema(() =>
   z.object({
     type: z.literal('system'),
@@ -2155,6 +2185,7 @@ export const SDKMessageSchema = lazySchema(() =>
     SDKModelFallbackMessageSchema(),
     SDKBackgroundTasksChangedMessageSchema(),
     SDKFilesPersistedEventSchema(),
+    SDKCommandsChangedMessageSchema(),
     SDKToolUseSummaryMessageSchema(),
     SDKRateLimitEventSchema(),
     SDKElicitationCompleteMessageSchema(),

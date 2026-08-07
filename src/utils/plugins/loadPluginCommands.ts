@@ -270,7 +270,22 @@ function createPluginCommand(
     )
     const whenToUse = frontmatter.when_to_use as string | undefined
     const version = frontmatter.version as string | undefined
-    const displayName = frontmatter.name as string | undefined
+    // densable 2.1.216 #28: frontmatter `name` must NOT drop the plugin prefix
+    // in autocomplete. densable uzr:
+    //   x = a.name; I = e.slice(0, e.lastIndexOf(":")+1); D = x ? `${I}${x}` : e
+    //   aliases = x && !x.includes(":") ? [x] : undefined
+    //   userFacingName(){ return D }
+    const frontmatterName =
+      frontmatter.name != null ? String(frontmatter.name) : undefined
+    const pluginPrefix = commandName.slice(0, commandName.lastIndexOf(':') + 1)
+    const userFacing =
+      frontmatterName !== undefined
+        ? `${pluginPrefix}${frontmatterName}`
+        : commandName
+    const aliases =
+      frontmatterName !== undefined && !frontmatterName.includes(':')
+        ? [frontmatterName]
+        : undefined
 
     // Handle model configuration, resolving aliases like 'haiku', 'sonnet', 'opus'
     const model =
@@ -324,9 +339,11 @@ function createPluginCommand(
       },
       isHidden: !userInvocable,
       progressMessage: isSkill || config.isSkillMode ? 'loading' : 'running',
+      // densable: userFacingName(){return D} where D keeps plugin prefix
       userFacingName(): string {
-        return displayName || commandName
+        return userFacing
       },
+      aliases,
       async getPromptForCommand(args, context) {
         // For skills from skills/ directory, include base directory
         let finalContent = config.isSkillMode

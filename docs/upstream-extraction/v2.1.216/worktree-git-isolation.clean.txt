@@ -1,0 +1,21 @@
+`).filter(Boolean))if(s.ignores(f))l.push(f)}}let u=[],d;try{d=await _a.realpath(t)}catch(p){return C(`Skipping .worktreeinclude copy: realpath(${t}) failed: ${ue(p)}`,{level:"warn"}),u}for(let p of l){let f=ya.join(e,p),m=ya.join(t,p);try{if((await _a.lstat(f)).isSymbolicLink()){C(`Skipping symlink in .worktreeinclude: ${p}`,{level:"warn"});continue}if(await lno(m,d)){C(`Skipping .worktreeinclude
+
+---
+
+`))if(a.startsWith("worktree ")){if(s)i.push(s);s={worktreePath:a.slice(9)}}else if(a.startsWith("branch ")&&s)s.worktreeBranch=a.slice(7).replace(/^refs\/heads\//,"");else if((a==="locked"||a.startsWith("locked "))&&s)s.lockReason=a.slice(6).trim();else if((a==="prunable"||a.startsWith("prunable "))&&s)s.prunable=!0;if(s)i.push(s);return i}function IGr(e,t){let r=ya.win32.normalize(e);return BZt(
+
+---
+
+`,Rao=Nr(async(e)=>L9g)});function PGe(e,t){let r=gxu.get(e);if(r!==void 0&&r===t)return r;return gxu.set(e,t),t}var gxu;var Eos=b(()=>{gxu=new Map});function DVr(e){return e.match(/^(.+):\*$/)?.[1]??null}function vos(e){if(e.endsWith(":*"))return!1;for(let t=0;t<e.length;t++)if(e[t]==="*"){let r=0,n=t-1;while(n>=0&&e[n]==="\\")r++,n--;if(r%2===0)return!0}return!1}function _xu(e){let t=e.trimEnd()
+
+---
+
+`]),Duu=new Set(["command","pipeline","list","negated_command","declaration_command","unset_command"]),exg=new Set(["test_command","redirected_statement"]);Euu=/[ \t\n*?[]/,txg=/^-[ioe]$/,rxg=/^-[ioe]./,nxg=/^--(input|output|error)=/,nYi=new Set(["HOME","PWD","OLDPWD","USER","LOGNAME","SHELL","PATH","HOSTNAME","UID","EUID","PPID","RANDOM","SECONDS","LINENO","TMPDIR","BASH_VERSION","BASHPID","SHLVL
+
+---
+
+`,r:"\r",f:"\f",v:"\v"};c5g={"0":"\x00"}});function FIu(e){if(!e.startsWith("../"))return e;let t=c0e(z4.basename(St()));if(!t)return e;let r="../"+t+"/",n=e;while(n.startsWith(r))n=n.slice(r.length);if(n==="../"+t)return".";return n}function ylo(e){let t=e;if(t=goe(t),t.length>0&&(NX.has(t[0])||t[0]==="/")){let n=t.indexOf(":",1);if(n>0)t=goe(t.slice(n+1))}if(t=$N(t),t=wW(t),t=t.replace(/^(?:[A-Z
+
+---
+
+`;loi.writeSync(s,d)}if(GQ())return;for(let u of c.flickers){if(u.reason==="resize")continue;let d=Date.now();if(d-t<1000)M("tengu_flicker",{desiredHeight:u.desiredHeight,actualHeight:u.availableHeight,reason:u.reason});t=d}}}}}var loi,_L,WDS=2000,BXf="GB post-onboarding init";var _tl=b(()=>{ht();Fm();at();gna();_Q();E0n();BNe();qie();R0n();Yt();Jr();uur();eqs();MZ();iFt();uGo();yo();bM();Xu();cn(

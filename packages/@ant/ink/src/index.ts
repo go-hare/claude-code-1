@@ -157,6 +157,7 @@ export {
   SHOW_CURSOR,
   DBP,
   DFE,
+  EFE,
   DISABLE_MOUSE_TRACKING,
   EXIT_ALT_SCREEN,
   exitAltScreenSequence,

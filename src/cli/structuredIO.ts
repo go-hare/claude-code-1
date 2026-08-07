@@ -36,12 +36,24 @@ import type { Tool, ToolUseContext } from 'src/Tool.js'
 import { type HookCallback, hookJSONOutputSchema } from 'src/types/hooks.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logForDiagnosticsNoPII } from 'src/utils/diagLogs.js'
-import { AbortError } from 'src/utils/errors.js'
+import {
+  AbortError,
+  ControlStreamClosedError,
+  isAbortError,
+} from 'src/utils/errors.js'
 import {
   type Output as PermissionToolOutput,
   permissionPromptToolResultToPermissionDecision,
   outputSchema as permissionToolOutputSchema,
 } from 'src/utils/permissions/PermissionPromptToolResultSchema.js'
+import {
+  canUseToolAbortedDenyReason,
+  canUseToolInvalidResultDenyReason,
+  canUseToolRequestFailedDenyReason,
+  PERMISSION_RESULT_SHAPE_HINT,
+  permissionStreamClosedDenyReason,
+  TOOL_PERMISSION_STREAM_CLOSED_REASON,
+} from 'src/utils/permissions/permissionDecisionReasons.js'
 import type {
   PermissionDecision,
   PermissionDecisionReason,
@@ -296,9 +308,10 @@ export class StructuredIO {
     }
     this.inputClosed = true
     for (const request of this.pendingRequests.values()) {
-      // Reject all pending requests if the input stream
+      // densable jS: stream closed ≠ user interrupt — telemetry maps to config
+      // (permissionStreamClosed), not user_reject / user_abort.
       request.reject(
-        new Error('Tool permission stream closed before response received'),
+        new ControlStreamClosedError(TOOL_PERMISSION_STREAM_CLOSED_REASON),
       )
     }
   }
@@ -817,16 +830,39 @@ export class StructuredIO {
           this.publishedPendingActionDetails.delete(requestId)
         }
       } catch (error) {
-        return permissionPromptToolResultToPermissionDecision(
-          {
-            behavior: 'deny',
-            message: `Tool permission request failed: ${error}`,
-            toolUseID,
-          },
-          tool,
-          input,
-          toolUseContext,
-        )
+        // densable createCanUseTool catch — do NOT wrap as permissionPromptTool
+        // (that would OTel as user_reject). Classify:
+        //   ZodError → canUseToolInvalidResult (config)
+        //   ControlStreamClosedError → permissionStreamClosed (config)
+        //   AbortError + parent aborted → user_abort
+        //   else → canUseToolRequestFailed (config)
+        let message = `Tool permission request failed: ${error}`
+        let decisionReason: PermissionDecisionReason =
+          canUseToolRequestFailedDenyReason
+        if (
+          error instanceof Error &&
+          (error.name === 'ZodError' ||
+            // zod v4 may use ZodError class name
+            error.constructor?.name === 'ZodError')
+        ) {
+          logForDebugging(
+            `canUseTool returned a schema-invalid permission result for ${tool.name}: ${error.message.slice(0, 2000)}`,
+            { level: 'error' },
+          )
+          message = `The canUseTool callback returned an invalid permission result. ${PERMISSION_RESULT_SHAPE_HINT}`
+          decisionReason = canUseToolInvalidResultDenyReason
+        } else if (error instanceof ControlStreamClosedError) {
+          decisionReason = permissionStreamClosedDenyReason
+        } else if (isAbortError(error) && parentSignal.aborted) {
+          message = 'Tool permission request aborted'
+          decisionReason = canUseToolAbortedDenyReason
+        }
+        return {
+          behavior: 'deny',
+          message,
+          toolUseID,
+          decisionReason,
+        }
       } finally {
         // Only transition back to 'running' if no other permission prompts
         // are pending (concurrent tool execution can have multiple in-flight).

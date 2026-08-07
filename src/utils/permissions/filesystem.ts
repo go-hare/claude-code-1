@@ -606,10 +606,10 @@ function hasSuspiciousWindowsPathPattern(path: string): boolean {
     return true
   }
 
-  // Check for UNC paths (on all platforms for defense-in-depth)
-  // Examples: \\server\share, \\foo.com\file, //server/share, \\192.168.1.1\share
-  // UNC paths can access remote resources, leak credentials, and bypass working directory restrictions
-  if (containsVulnerableUncPath(path)) {
+  // densable sI(path, /* forPath */ true) — path-mode UNC (network paths)
+  // Examples: \\server\share, //server/share, /\server\share (path mode)
+  // UNC can access remote resources, leak credentials, and bypass cwd restrictions
+  if (containsVulnerableUncPath(path, true)) {
     return true
   }
 

@@ -12,6 +12,7 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { ScopedMcpServerConfig } from '../../services/mcp/types.js'
 import { isInBundledMode } from '../bundledMode.js'
+import { hasOauthValidateAcceptedScope } from '../auth.js'
 import { distRoot } from '../distRoot.js'
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
@@ -67,11 +68,22 @@ export function resolveChromeCliJsPath(): string {
 }
 
 /**
- * densable 2.1.211 `Dtn` order:
- * flag true/false → CLAUDE_CODE_ENABLE_CFC true/false → non-interactive → defaultEnabled → false.
+ * densable 2.1.216 `yhn` / 2.1.211 `Dtn` order:
+ * JKn (oauth validate scopes) first → flag true/false → CLAUDE_CODE_ENABLE_CFC
+ * true/false → non-interactive → defaultEnabled → false.
  * CFC must win over non-interactive so SDK/CI can force-enable without `--chrome`.
+ * Missing-scope tokens never wire Chrome (prevents 403 reconnect loop).
  */
+export const CHROME_DISABLED_NO_VALIDATE_SCOPE =
+  '[Claude in Chrome] Disabled: OAuth token has no scope accepted by /api/oauth/validate (needs user:profile, user:office, or user:ccr_inference; env-var and setup-token sessions default to user:inference only)'
+
 export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
+  // densable yhn: JKn() before any flag/CFC/default path
+  if (!hasOauthValidateAcceptedScope()) {
+    logForDebugging(CHROME_DISABLED_NO_VALIDATE_SCOPE)
+    return false
+  }
+
   // Check CLI flags
   if (chromeFlag === true) {
     return true
@@ -133,7 +145,10 @@ export function shouldAutoEnableClaudeInChrome(): boolean {
   return shouldAutoEnable
 }
 
-/** densable `IRo` base gates — fork: no subscriber requirement. */
+/**
+ * densable `Z4o` / `IRo` base gates — fork: no subscriber requirement.
+ * densable Z4o ends with `JKn()` so auto-enable also refuses inference-only tokens.
+ */
 function hasBaseChromeAutoEnableEligibility(): boolean {
   if (getChromeFlagOverride() === false) {
     return false
@@ -146,6 +161,10 @@ function hasBaseChromeAutoEnableEligibility(): boolean {
     return false
   }
   if (!getIsInteractive()) {
+    return false
+  }
+  // densable Z4o: … && JKn()
+  if (!hasOauthValidateAcceptedScope()) {
     return false
   }
   return true

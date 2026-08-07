@@ -1,12 +1,15 @@
 import { createHash, type UUID } from 'crypto'
 import { diffLines } from 'diff'
-import type { Stats } from 'fs'
+import { constants as fsConstants, type Stats } from 'fs'
 import {
   chmod,
   copyFile,
   link,
+  lstat,
   mkdir,
+  open,
   readFile,
+  realpath,
   stat,
   unlink,
 } from 'fs/promises'
@@ -34,6 +37,11 @@ export type FileHistoryBackup = {
   backupFileName: BackupFileName
   version: number
   backupTime: Date
+  /**
+   * densable realParentDir — realpath of parent dir at backup create time.
+   * Q3g/Z3g refuse restore when parent has moved since the checkpoint.
+   */
+  realParentDir?: string
 }
 
 export type FileHistorySnapshot = {
@@ -365,16 +373,42 @@ export async function fileHistoryMakeSnapshot(
 }
 
 /**
+ * densable TYn — user-facing reason string for skippedLinks (MessageSelector / CLI).
+ * Do not invent alternate wording; changelog #36 surface copy is fixed in SEA.
+ */
+export const REWIND_SKIPPED_LINKS_REASON =
+  'the tracked path is (or became) a link or other non-regular file, its directory changed since the checkpoint, or its backup could not be safely read' as const
+
+/**
+ * densable MessageSelector partial-restore UX when skippedLinks > 0.
+ */
+export function formatRewindSkippedLinksMessage(skippedLinks: number): string {
+  const unit = skippedLinks === 1 ? 'file' : 'files'
+  return `Restored the code, but skipped ${skippedLinks} ${unit}: ${REWIND_SKIPPED_LINKS_REASON}. Skipped files were left untouched \u2014 run with --debug for the paths.`
+}
+
+/**
+ * densable CLI --rewind-files stderr Warning when skippedLinks > 0.
+ */
+export function formatRewindSkippedLinksCliWarning(
+  skippedLinks: number,
+): string {
+  const verb = skippedLinks === 1 ? 'path was' : 'paths were'
+  return `Warning: ${skippedLinks} tracked ${verb} skipped: ${REWIND_SKIPPED_LINKS_REASON}. Run with --debug for the paths.`
+}
+
+/**
  * Rewinds the file system to a previous snapshot.
+ * densable tVr — returns filesChanged + skippedLinks for SDK/CLI report.
  */
 export async function fileHistoryRewind(
   updateFileHistoryState: (
     updater: (prev: FileHistoryState) => FileHistoryState,
   ) => void,
   messageId: UUID,
-): Promise<void> {
+): Promise<{ filesChanged: string[]; skippedLinks: number }> {
   if (!fileHistoryEnabled()) {
-    return
+    return { filesChanged: [], skippedLinks: 0 }
   }
 
   // Rewind is a pure filesystem side-effect and does not mutate
@@ -384,7 +418,9 @@ export async function fileHistoryRewind(
     captured = state
     return state
   })
-  if (!captured) return
+  if (!captured) {
+    return { filesChanged: [], skippedLinks: 0 }
+  }
 
   const targetSnapshot = captured.snapshots.findLast(
     snapshot => snapshot.messageId === messageId,
@@ -402,13 +438,23 @@ export async function fileHistoryRewind(
     logForDebugging(
       `FileHistory: [Rewind] Rewinding to snapshot for ${messageId}`,
     )
-    const filesChanged = await applySnapshot(captured, targetSnapshot)
+    const { filesChanged, skippedLinks } = await applySnapshot(
+      captured,
+      targetSnapshot,
+    )
 
-    logForDebugging(`FileHistory: [Rewind] Finished rewinding to ${messageId}`)
+    logForDebugging(
+      `FileHistory: [Rewind] Finished rewinding to ${messageId}` +
+        (skippedLinks > 0
+          ? ` (skipped ${skippedLinks} link-unsafe path(s))`
+          : ''),
+    )
     logEvent('tengu_file_history_rewind_success', {
       trackedFilesCount: captured.trackedFiles.size,
       filesChangedCount: filesChanged.length,
+      skippedLinksCount: skippedLinks,
     })
+    return { filesChanged, skippedLinks }
   } catch (error) {
     logError(error)
     logEvent('tengu_file_history_rewind_failed', {
@@ -554,14 +600,116 @@ export async function fileHistoryHasAnyChanges(
 }
 
 /**
+ * densable Q3g — refuse restore/delete through symlink or hardlink destinations.
+ * ENOENT is safe (restore may create). Optional expectedRealParentDir refuses
+ * when the parent realpath drifted since the checkpoint. Exported for tests.
+ */
+export async function assertRewindDestinationSafe(
+  destPath: string,
+  expectedRealParentDir?: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const st = await lstat(destPath)
+    if (st.isSymbolicLink()) {
+      return { ok: false, reason: 'destination is a symlink' }
+    }
+    if (!st.isFile()) {
+      return { ok: false, reason: 'destination is not a regular file' }
+    }
+    if (st.nlink > 1) {
+      return {
+        ok: false,
+        reason: `destination is hard-linked (nlink=${st.nlink})`,
+      }
+    }
+  } catch (e: unknown) {
+    if (!isENOENT(e)) {
+      const code = getErrnoCode(e)
+      if (code === 'ELOOP' || code === 'ENOTDIR') {
+        return {
+          ok: false,
+          reason: `destination path does not resolve (${code})`,
+        }
+      }
+      throw e
+    }
+    // ENOENT: restore may create — densable still runs parent check below
+  }
+  if (expectedRealParentDir !== undefined) {
+    const parent = dirname(destPath)
+    let parentReal: string | undefined
+    try {
+      parentReal = await realpath(parent)
+    } catch (e: unknown) {
+      const code = getErrnoCode(e)
+      if (code === 'ELOOP' || code === 'ENOTDIR') {
+        return {
+          ok: false,
+          reason: `parent path does not resolve (${code})`,
+        }
+      }
+      if (!isENOENT(e)) throw e
+      // densable: dangling parent symlink / walk up for realpath reconstruction
+      try {
+        const parentLstat = await lstat(parent)
+        if (parentLstat.isSymbolicLink()) {
+          return { ok: false, reason: 'parent directory is a dangling symlink' }
+        }
+      } catch (inner: unknown) {
+        if (!isENOENT(inner)) throw inner
+      }
+      let walk = parent
+      for (;;) {
+        const up = dirname(walk)
+        if (up === walk) break
+        walk = up
+        try {
+          await lstat(walk)
+        } catch (inner: unknown) {
+          if (!isENOENT(inner)) throw inner
+          continue
+        }
+        try {
+          const walkReal = await realpath(walk)
+          parentReal = join(walkReal, relative(walk, parent))
+        } catch (inner: unknown) {
+          if (isENOENT(inner)) {
+            parentReal = undefined
+          } else {
+            throw inner
+          }
+        }
+        break
+      }
+    }
+    if (parentReal !== undefined && parentReal !== expectedRealParentDir) {
+      return {
+        ok: false,
+        reason: `parent directory moved (${parentReal} != ${expectedRealParentDir})`,
+      }
+    }
+    try {
+      const parentStat = await stat(parent)
+      if (!parentStat.isDirectory()) {
+        return { ok: false, reason: 'parent path is not a directory' }
+      }
+    } catch (e: unknown) {
+      if (!isENOENT(e)) throw e
+    }
+  }
+  return { ok: true }
+}
+
+/**
  * Applies the given file snapshot state to the tracked files (writes/deletes
- * on disk), returning the list of changed file paths. Async IO only.
+ * on disk), returning changed paths and densable skippedLinks count.
  */
 async function applySnapshot(
   state: FileHistoryState,
   targetSnapshot: FileHistorySnapshot,
-): Promise<string[]> {
+): Promise<{ filesChanged: string[]; skippedLinks: number }> {
   const filesChanged: string[] = []
+  let skippedLinks = 0
   for (const trackingPath of state.trackedFiles) {
     try {
       const filePath = maybeExpandFilePath(trackingPath)
@@ -582,6 +730,21 @@ async function applySnapshot(
         continue
       }
 
+      // densable Q3g before any unlink/restore (optional realParentDir from backup)
+      const expectedParent = targetBackup?.realParentDir
+      const safety = await assertRewindDestinationSafe(filePath, expectedParent)
+      if (!safety.ok) {
+        skippedLinks++
+        logEvent('tengu_file_history_rewind_restore_file_failed', {
+          dryRun: false,
+        })
+        logForDebugging(
+          `FileHistory: [Rewind] Refusing to touch ${filePath}: ${safety.reason}`,
+          { level: 'error' },
+        )
+        continue
+      }
+
       if (backupFileName === null) {
         // File did not exist at the target version; delete it if present.
         try {
@@ -589,6 +752,32 @@ async function applySnapshot(
           logForDebugging(`FileHistory: [Rewind] Deleted ${filePath}`)
           filesChanged.push(filePath)
         } catch (e: unknown) {
+          const code = getErrnoCode(e)
+          if (code === 'ENOTDIR' || code === 'ELOOP' || code === 'EISDIR') {
+            skippedLinks++
+            logEvent('tengu_file_history_rewind_restore_file_failed', {
+              dryRun: false,
+            })
+            logForDebugging(
+              `FileHistory: [Rewind] Refusing to delete ${filePath}: path does not resolve or is not a regular file (${code})`,
+              { level: 'error' },
+            )
+            continue
+          }
+          if (code === 'EPERM') {
+            const d = await lstat(filePath).catch(() => undefined)
+            if (d !== undefined && !d.isFile()) {
+              skippedLinks++
+              logEvent('tengu_file_history_rewind_restore_file_failed', {
+                dryRun: false,
+              })
+              logForDebugging(
+                `FileHistory: [Rewind] Refusing to delete ${filePath}: destination is not a regular file (EPERM)`,
+                { level: 'error' },
+              )
+              continue
+            }
+          }
           if (!isENOENT(e)) throw e
           // Already absent; nothing to do.
         }
@@ -597,11 +786,21 @@ async function applySnapshot(
 
       // File should exist at a specific version. Restore only if it differs.
       if (await checkOriginFileChanged(filePath, backupFileName)) {
-        await restoreBackup(filePath, backupFileName)
-        logForDebugging(
-          `FileHistory: [Rewind] Restored ${filePath} from ${backupFileName}`,
+        // densable Z3g — O_NOFOLLOW restore; refused counts as skippedLinks
+        const outcome = await restoreBackupNoFollow(
+          filePath,
+          backupFileName,
+          expectedParent,
         )
-        filesChanged.push(filePath)
+        if (outcome === 'restored') {
+          logForDebugging(
+            `FileHistory: [Rewind] Restored ${filePath} from ${backupFileName}`,
+          )
+          filesChanged.push(filePath)
+        } else if (outcome === 'refused') {
+          skippedLinks++
+        }
+        // backup-missing: telemetry only (not skippedLinks)
       }
     } catch (error) {
       logError(error)
@@ -610,7 +809,7 @@ async function applySnapshot(
       })
     }
   }
-  return filesChanged
+  return { filesChanged, skippedLinks }
 }
 
 /**
@@ -813,50 +1012,211 @@ async function createBackup(
     fileSize: srcStats.size,
   })
 
+  // densable realParentDir — realpath of parent at checkpoint time for Q3g/Z3g
+  let realParentDir: string | undefined
+  try {
+    realParentDir = await realpath(dirname(filePath))
+  } catch {
+    realParentDir = undefined
+  }
+
   return {
     backupFileName,
     version,
     backupTime: new Date(),
+    ...(realParentDir !== undefined ? { realParentDir } : {}),
   }
 }
 
 /**
- * Restores a file from its backup path with proper directory creation and permissions.
- * Lazy mkdir: tries copyFile first, creates the directory on ENOENT.
+ * densable Z3g — restore backup with O_NOFOLLOW open flags so restore never
+ * writes through a symlink/hardlink race. Returns:
+ * - restored: content written
+ * - refused: link-safety refuse (counts as skippedLinks)
+ * - backup-missing: telemetry only (not skippedLinks)
  */
-async function restoreBackup(
+export async function restoreBackupNoFollow(
   filePath: string,
   backupFileName: string,
-): Promise<void> {
+  expectedRealParentDir?: string,
+): Promise<'restored' | 'refused' | 'backup-missing'> {
   const backupPath = resolveBackupPath(backupFileName)
+  const refuse = (detail: string): 'refused' => {
+    logEvent('tengu_file_history_rewind_restore_file_failed', {
+      dryRun: false,
+    })
+    logForDebugging(
+      `FileHistory: [Rewind] Refusing to restore ${filePath}: ${detail}`,
+      { level: 'error' },
+    )
+    return 'refused'
+  }
 
-  // Stat first: if the backup is missing, log and bail before attempting
-  // the copy. Separates "backup missing" from "destination dir missing".
   let backupStats: Stats
   try {
     backupStats = await stat(backupPath)
   } catch (e: unknown) {
     if (isENOENT(e)) {
-      logEvent('tengu_file_history_rewind_restore_file_failed', {})
-      logError(
-        new Error(`FileHistory: [Rewind] Backup file not found: ${backupPath}`),
+      logEvent('tengu_file_history_rewind_restore_file_failed', {
+        dryRun: false,
+      })
+      logForDebugging(
+        `FileHistory: [Rewind] Backup file not found: ${backupPath}`,
+        { level: 'error' },
       )
-      return
+      return 'backup-missing'
+    }
+    throw e
+  }
+  if (!backupStats.isFile()) {
+    return refuse('backup source is not a regular file')
+  }
+
+  const O_NONBLOCK = fsConstants.O_NONBLOCK ?? 0
+  const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
+  let backupFd: Awaited<ReturnType<typeof open>>
+  try {
+    backupFd = await open(
+      backupPath,
+      fsConstants.O_RDONLY | O_NONBLOCK | O_NOFOLLOW,
+    )
+  } catch (e: unknown) {
+    const code = getErrnoCode(e)
+    if (code === 'ELOOP' || code === 'EMLINK') {
+      return refuse('backup source became a symlink (O_NOFOLLOW)')
     }
     throw e
   }
 
-  // Lazy mkdir: 99% of calls hit the fast path (destination dir exists).
   try {
-    await copyFile(backupPath, filePath)
-  } catch (e: unknown) {
-    if (!isENOENT(e)) throw e
-    await mkdir(dirname(filePath), { recursive: true })
-    await copyFile(backupPath, filePath)
-  }
+    if (!(await backupFd.stat()).isFile()) {
+      return refuse('backup source is not a regular file')
+    }
 
-  // Restore the file permissions
-  await chmod(filePath, backupStats.mode)
+    const destFlags =
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | O_NOFOLLOW | O_NONBLOCK
+    const isNofollowError = (err: unknown): boolean => {
+      const code = getErrnoCode(err)
+      return code === 'ELOOP' || code === 'EMLINK'
+    }
+    const isFifoError = (err: unknown): boolean => getErrnoCode(err) === 'ENXIO'
+    const isPathTypeError = (err: unknown): boolean => {
+      const code = getErrnoCode(err)
+      return code === 'EISDIR' || code === 'ENOTDIR'
+    }
+    const mode = backupStats.mode & 0o777
+
+    let destFd: Awaited<ReturnType<typeof open>>
+    try {
+      destFd = await open(filePath, destFlags, mode)
+    } catch (e: unknown) {
+      if (isNofollowError(e)) {
+        return refuse('destination became a symlink (O_NOFOLLOW)')
+      }
+      if (isFifoError(e)) {
+        return refuse('destination became a FIFO (ENXIO)')
+      }
+      if (isPathTypeError(e)) {
+        return refuse(
+          `destination path was changed during restore (${getErrnoCode(e)})`,
+        )
+      }
+      if (!isENOENT(e)) throw e
+      if (expectedRealParentDir !== undefined) {
+        const parentNow = await realpath(dirname(filePath)).catch(
+          () => undefined,
+        )
+        // densable eVr parent-chain check before mkdir
+        if (parentNow !== undefined && parentNow !== expectedRealParentDir) {
+          return refuse('parent chain changed before directory creation')
+        }
+      }
+      try {
+        await mkdir(dirname(filePath), { recursive: true })
+      } catch (mkdirErr: unknown) {
+        if (isPathTypeError(mkdirErr) || getErrnoCode(mkdirErr) === 'EEXIST') {
+          return refuse(
+            `destination path was changed during restore (${getErrnoCode(mkdirErr)})`,
+          )
+        }
+        throw mkdirErr
+      }
+      try {
+        destFd = await open(filePath, destFlags, mode)
+      } catch (e2: unknown) {
+        if (isNofollowError(e2)) {
+          return refuse('destination became a symlink (O_NOFOLLOW)')
+        }
+        if (isFifoError(e2)) {
+          return refuse('destination became a FIFO (ENXIO)')
+        }
+        if (isPathTypeError(e2)) {
+          return refuse(
+            `destination path was changed during restore (${getErrnoCode(e2)})`,
+          )
+        }
+        throw e2
+      }
+    }
+
+    try {
+      const destStat = await destFd.stat({ bigint: true })
+      if (!destStat.isFile()) {
+        return refuse('destination is not a regular file')
+      }
+      if (destStat.nlink > 1n) {
+        return refuse(
+          `destination is hard-linked (nlink=${destStat.nlink.toString()})`,
+        )
+      }
+      if (expectedRealParentDir !== undefined) {
+        const parentNow = await realpath(dirname(filePath)).catch(
+          () => undefined,
+        )
+        if (parentNow !== expectedRealParentDir) {
+          return refuse('parent directory changed during restore')
+        }
+      }
+      const pathLstat = await lstat(filePath, { bigint: true }).catch(
+        () => undefined,
+      )
+      if (
+        pathLstat === undefined ||
+        !pathLstat.isFile() ||
+        pathLstat.dev !== destStat.dev ||
+        (destStat.ino !== 0n && pathLstat.ino !== destStat.ino)
+      ) {
+        return refuse(
+          'destination changed identity during restore (fd/path mismatch)',
+        )
+      }
+
+      await destFd.truncate(0)
+      const buf = Buffer.allocUnsafe(65536)
+      for (;;) {
+        const { bytesRead } = await backupFd.read(buf, 0, buf.length, null)
+        if (bytesRead === 0) break
+        let offset = 0
+        while (offset < bytesRead) {
+          const { bytesWritten } = await destFd.write(
+            buf,
+            offset,
+            bytesRead - offset,
+          )
+          if (bytesWritten === 0) {
+            throw new Error('write returned 0 bytes with data remaining')
+          }
+          offset += bytesWritten
+        }
+      }
+      await destFd.chmod(backupStats.mode)
+    } finally {
+      await destFd.close()
+    }
+  } finally {
+    await backupFd.close()
+  }
+  return 'restored'
 }
 
 /**

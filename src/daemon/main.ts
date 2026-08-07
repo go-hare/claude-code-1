@@ -9,8 +9,16 @@ import {
   writeDaemonState,
   removeDaemonState,
   queryDaemonStatus,
-  stopDaemonByPid,
 } from './state.js'
+import {
+  type DaemonLockData,
+  classifyDaemonLockHolder,
+  getDaemonLockPath,
+  isDaemonLockSignalable,
+  isDaemonPidRaceLive,
+  readAliveDaemonLock,
+  readDaemonLockLoose,
+} from './daemonLock.js'
 
 /**
  * Exit code used by workers for permanent (non-retryable) failures.
@@ -113,7 +121,7 @@ export async function daemonMain(args: string[]): Promise<void> {
       await handleDaemonUninstall()
       break
     case 'stop':
-      await handleDaemonStop()
+      await handleDaemonStop(args.slice(1))
       break
 
     // --- Unified status ---
@@ -174,7 +182,7 @@ SUBCOMMANDS
   start       Start the daemon supervisor
   install     Install as a persistent user service (launchd/systemd)
   uninstall   Remove the persistent user service
-  stop        Stop the daemon
+  stop        Shut down the supervisor and terminate background sessions
   bg          Start a background session
   attach      Attach to a background session
   logs        Show session logs
@@ -184,6 +192,10 @@ SUBCOMMANDS
 
 REPL
   /daemon [subcommand]    Same commands available in interactive mode
+
+OPTIONS (for stop)
+  --any                     also stop a transient (non-service) daemon
+  --keep-workers            leave detached sessions running
 
 OPTIONS (for start)
   --dir <path>              Working directory (default: current)
@@ -291,29 +303,244 @@ async function handleDaemonUninstall(): Promise<void> {
 }
 
 /**
- * Stop a running daemon from another CLI process.
+ * densable LTt — warn on unexpected stop args (ignore known flags + debug).
  */
-async function handleDaemonStop(): Promise<void> {
-  const result = queryDaemonStatus()
+function warnIgnoredDaemonArgs(args: string[], allowed: string[]): void {
+  const ignored: string[] = []
+  for (let n = 0; n < args.length; n++) {
+    const o = args[n]!
+    if (allowed.includes(o)) continue
+    if (
+      o === '--debug' ||
+      o === '-d' ||
+      o === '--debug-to-stderr' ||
+      o === '-d2e' ||
+      o.startsWith('--debug=') ||
+      o.startsWith('--debug-file=')
+    ) {
+      continue
+    }
+    if (o === '--debug-file' && n + 1 < args.length) {
+      n++
+      continue
+    }
+    ignored.push(o)
+  }
+  if (ignored.length > 0) {
+    console.error(`warning: extra arguments ignored: ${ignored.join(' ')}`)
+  }
+}
 
-  if (result.status === 'stopped') {
-    console.log('daemon is not running')
+function pluralDaemonUnit(n: number, unit: string): string {
+  return n === 1 ? unit : `${unit}s`
+}
+
+/**
+ * densable case "stop" — control-socket shutdown first; never SIGTERM an
+ * unverified lock holder; require `--any` for transient (non-service) daemons.
+ */
+async function handleDaemonStop(args: string[]): Promise<void> {
+  const keepWorkers = args.includes('--keep-workers')
+  const anyFlag = args.includes('--any')
+  warnIgnoredDaemonArgs(args, ['--keep-workers', '--any'])
+
+  const formatStopped = (reaped: number): string =>
+    keepWorkers || reaped === 0
+      ? 'stopped'
+      : `stopped (terminated ${reaped} ${pluralDaemonUnit(reaped, 'background session')})`
+
+  const finish = async (
+    ok: boolean,
+    reaped: number,
+    metric: string = 'daemon_stop_failed',
+  ): Promise<void> => {
+    logEvent('tengu_daemon_control', {
+      op_stop:
+        true as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ok: ok as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      reaped:
+        reaped as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      holderUnverified: (metric ===
+        'daemon_stop_holder_unverified') as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    process.exitCode = ok ? 0 : 1
+  }
+
+  const { isDaemonServiceInstalled, stopDaemonService } = await import(
+    './serviceInstall.js'
+  )
+  const serviceInstalled = await isDaemonServiceInstalled().catch(() => false)
+
+  // densable hk / UTe classification
+  let verified: DaemonLockData | null = null
+  let holder: DaemonLockData | null = null
+  let stalePid: number | undefined
+
+  const alive = await readAliveDaemonLock().catch(() => null)
+  if (alive && isDaemonLockSignalable(alive)) {
+    verified = alive
+    holder = alive
+  } else if (alive) {
+    holder = alive
+  }
+
+  if (!holder) {
+    const raw = await readDaemonLockLoose().catch(() => null)
+    if (raw && isDaemonPidRaceLive(raw.pid)) {
+      const kind = await classifyDaemonLockHolder(raw)
+      if (kind === 'stale') {
+        stalePid = raw.pid
+      } else if (kind === 'verified') {
+        verified = raw
+        holder = raw
+      } else {
+        holder = raw
+      }
+    }
+  }
+
+  // Gate: without service, refuse unless --any
+  if (!serviceInstalled && holder && !anyFlag) {
+    if (verified) {
+      console.error(
+        `no background service is installed, but a daemon is running (pid=${holder.pid}, origin=${holder.origin ?? 'unknown'}). Run \`claude daemon stop --any\` to stop it.`,
+      )
+    } else {
+      console.error(
+        `no background service is installed, but pid=${holder.pid} is holding the daemon lock. Run \`claude daemon stop --any\` to stop any background sessions and report on the holder.`,
+      )
+    }
+    await finish(false, 0)
     return
   }
 
-  if (result.status === 'stale') {
-    console.log('daemon was stale (cleaned up)')
+  // Preferred: control socket shutdown
+  const { sendControlRequest } = await import('./controlSocketClient.js')
+  const { PROTO_VERSION } = await import('./bgWorker.js')
+  const shut = await sendControlRequest(
+    {
+      proto: PROTO_VERSION,
+      op: 'shutdown',
+      reapWorkers: !keepWorkers,
+    },
+    { timeoutMs: 5000 },
+  )
+
+  const { clientBgReapAll, formatUnverifiedKeptNote } = await import(
+    './clientBgReap.js'
+  )
+  const warnKept = (kept: number): void => {
+    if (kept > 0) console.error(formatUnverifiedKeptNote(kept))
+  }
+
+  if (shut.ok && shut.op === 'shutdown') {
+    // densable: wUs({supervisorKilledAll:!0}) unless --keep-workers; Math.max
+    const client = keepWorkers
+      ? { reaped: 0, kept: 0 }
+      : await clientBgReapAll({ supervisorKilledAll: true })
+    warnKept(client.kept)
+    const controlReaped =
+      typeof shut.reaped === 'number' && Number.isFinite(shut.reaped)
+        ? shut.reaped
+        : 0
+    const reaped = Math.max(controlReaped, client.reaped)
+    if (serviceInstalled) {
+      const svc = await stopDaemonService()
+      if (!svc.ok) {
+        console.error(`stop failed: ${svc.error}`)
+        await finish(false, reaped)
+        return
+      }
+    }
+    console.log(formatStopped(reaped))
+    if (!serviceInstalled) {
+      console.log(
+        'note: the next `claude agents` or `claude --bg` will start a new one',
+      )
+    }
+    await finish(true, reaped)
     return
   }
 
-  console.log(`stopping daemon (PID: ${result.state!.pid})...`)
-  const stopped = await stopDaemonByPid()
+  // Fallback: service stop OR verified SIGTERM (never unverified; never win32 kill)
+  let stopped = false
+  if (serviceInstalled) {
+    const svc = await stopDaemonService()
+    if (!svc.ok) {
+      console.error(`stop failed: ${svc.error}`)
+      await finish(false, 0)
+      return
+    }
+    stopped = true
+  } else if (verified && process.platform !== 'win32') {
+    try {
+      process.kill(verified.pid, 'SIGTERM')
+      stopped = true
+    } catch (err) {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : ''
+      if (code === 'ESRCH') {
+        stopped = true
+      } else {
+        const eperm =
+          code === 'EPERM'
+            ? ' (running as another user — try with elevated privileges)'
+            : ''
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(
+          `could not stop daemon (pid=${verified.pid}): ${msg}${eperm}`,
+        )
+        await finish(false, 0)
+        return
+      }
+    }
+  }
 
-  if (stopped) {
-    console.log('daemon stopped')
+  // densable wUs after fallback (no supervisorKilledAll) unless --keep-workers
+  const client = keepWorkers ? { reaped: 0, kept: 0 } : await clientBgReapAll()
+  warnKept(client.kept)
+  const reaped = client.reaped
+
+  if (verified && !stopped && process.platform === 'win32') {
+    console.error(
+      (reaped > 0 ? `terminated ${reaped} background session(s); ` : '') +
+        `supervisor (pid=${verified.pid}) is still running — stop it with \`taskkill /PID ${verified.pid}\` or close the terminal it was started in.`,
+    )
+    await finish(false, reaped)
+    return
+  }
+
+  if (!stopped && !verified && holder) {
+    const lockPath = getDaemonLockPath()
+    console.error(
+      (reaped > 0
+        ? `terminated ${reaped} background ${pluralDaemonUnit(reaped, 'session')}; `
+        : '') +
+        `the daemon was not stopped: pid=${holder.pid} is holding ${lockPath} but could not be verified as the daemon, so it was not signalled. If no daemon is running, delete that file; if pid ${holder.pid} is a live process you own, stop it yourself.`,
+    )
+    await finish(false, reaped, 'daemon_stop_holder_unverified')
+    return
+  }
+
+  if (stalePid !== undefined) {
+    console.error(
+      `note: ${getDaemonLockPath()} is stale (pid=${stalePid} is not the daemon). The next daemon start reclaims it automatically.`,
+    )
+  }
+
+  if (!stopped && !verified && reaped === 0) {
+    console.log('no daemon running')
   } else {
-    console.log('daemon could not be stopped (may have already exited)')
+    console.log(formatStopped(reaped))
+    if (!serviceInstalled && verified) {
+      console.log(
+        'note: the next `claude agents` or `claude --bg` will start a new one',
+      )
+    }
   }
+  await finish(true, reaped)
 }
 
 /**

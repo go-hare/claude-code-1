@@ -23,9 +23,14 @@ import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
 import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import {
+  registerWorktreeSessionProvider,
+  scrubGitEnvForWorktree,
+} from './worktreeGitIsolation.js'
 import { parseGitConfigValue } from './git/gitConfigParser.js'
 import {
   getCommonDir,
+  readWorktreeGitDir,
   readWorktreeHeadSha,
   resolveGitDir,
   resolveRef,
@@ -64,7 +69,7 @@ export async function ensureExtensionsWorktreeConfig(
   const { stdout, code } = await execFileNoThrowWithCwd(
     gitExe(),
     ['config', '--local', '--get', 'extensions.worktreeConfig'],
-    { cwd: repoRoot },
+    { cwd: repoRoot, env: gitWorktreeEnv() },
   )
   if (code === 0 && stdout.trim() === 'true') {
     return
@@ -72,7 +77,7 @@ export async function ensureExtensionsWorktreeConfig(
   await execFileNoThrowWithCwd(
     gitExe(),
     ['config', '--local', 'extensions.worktreeConfig', 'true'],
-    { cwd: repoRoot },
+    { cwd: repoRoot, env: gitWorktreeEnv() },
   )
 }
 
@@ -105,7 +110,7 @@ export async function maybeRestoreExtensionsWorktreeConfig(
   const { stdout, code } = await execFileNoThrowWithCwd(
     gitExe(),
     ['worktree', 'list', '--porcelain'],
-    { cwd: repoRoot },
+    { cwd: repoRoot, env: gitWorktreeEnv() },
   )
   if (code !== 0) {
     return
@@ -117,7 +122,7 @@ export async function maybeRestoreExtensionsWorktreeConfig(
   const { code: unsetCode, stderr: unsetErr } = await execFileNoThrowWithCwd(
     gitExe(),
     ['config', '--local', '--unset-all', 'extensions.worktreeConfig'],
-    { cwd: repoRoot },
+    { cwd: repoRoot, env: gitWorktreeEnv() },
   )
   if (unsetCode === 0) {
     logForDebugging(
@@ -245,6 +250,10 @@ export function getCurrentWorktreeSession(): WorktreeSession | null {
   return currentWorktreeSession
 }
 
+// densable 2.1.216: shell shared-checkout guard reads session via provider
+// (avoids worktree ↔ worktreeGitIsolation circular import).
+registerWorktreeSessionProvider(() => currentWorktreeSession)
+
 /**
  * Official 2.1.207: classify a path as a Claude-managed linked worktree
  * under `<repo>/.claude/worktrees/…` of the current repository (or a nested
@@ -285,7 +294,7 @@ export async function classifyManagedClaudeWorktree(
   const { stdout, code } = await execFileNoThrowWithCwd(
     gitExe(),
     ['worktree', 'list', '--porcelain'],
-    { cwd: repoRoot },
+    { cwd: repoRoot, env: gitWorktreeEnv() },
   )
   if (code !== 0) {
     return { managed: false }
@@ -322,13 +331,13 @@ export async function enterExistingWorktreeSession(
   const { stdout: branchOut } = await execFileNoThrowWithCwd(
     gitExe(),
     ['rev-parse', '--abbrev-ref', 'HEAD'],
-    { cwd: worktreePath },
+    { cwd: worktreePath, env: gitWorktreeEnv() },
   )
   const worktreeBranch = branchOut.trim() || undefined
   const { stdout: headOut } = await execFileNoThrowWithCwd(
     gitExe(),
     ['rev-parse', 'HEAD'],
-    { cwd: worktreePath },
+    { cwd: worktreePath, env: gitWorktreeEnv() },
   )
   const worktreeName = basename(worktreePath)
 
@@ -390,6 +399,18 @@ const GIT_NO_PROMPT_ENV = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_ASKPASS: '',
 }
+
+/**
+ * densable 2.1.216 XB — every git subprocess for worktree lifecycle must scrub
+ * GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE so a polluted parent
+ * env cannot retarget the shared checkout. Extra overrides apply last (XB).
+ */
+function gitWorktreeEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return scrubGitEnvForWorktree({ ...GIT_NO_PROMPT_ENV, ...extra })
+}
+
+// Re-export densable XB for callers outside this module.
+export { scrubGitEnvForWorktree } from './worktreeGitIsolation.js'
 
 function worktreesDir(repoRoot: string): string {
   return join(repoRoot, '.claude', 'worktrees')
@@ -506,6 +527,57 @@ function worktreePathFor(repoRoot: string, slug: string): string {
 }
 
 /**
+ * densable `DXi` foreign-repo guard (2.1.216 #9):
+ * When resuming an existing worktree dir, compare the parent of its
+ * `gitdir:` pointer against `<repoGitDir>/worktrees` by **dev+ino**
+ * (not string path). A leftover directory from another project's
+ * worktree with the same slug must not be silently resumed.
+ *
+ * densable gold:
+ *   me("git_worktree_create","git_worktree_resume_foreign_repo")
+ *   "The worktree directory at ${n} belongs to a different repository
+ *    (registered under ${dirname(gitdir)}, expected under ${S}).
+ *    Remove that directory or choose a different worktree name."
+ */
+export async function assertWorktreeNotForeignRepo(
+  repoRoot: string,
+  worktreePath: string,
+): Promise<void> {
+  const worktreeGitDir = await readWorktreeGitDir(worktreePath)
+  const repoGitDir = await resolveGitDir(repoRoot)
+  if (!worktreeGitDir || !repoGitDir) {
+    return
+  }
+  const expectedWorktreesDir = join(repoGitDir, 'worktrees')
+  const registeredParent = dirname(worktreeGitDir)
+  let registeredStat: Awaited<ReturnType<typeof stat>> | null
+  let expectedStat: Awaited<ReturnType<typeof stat>> | 'enoent' | null
+  try {
+    ;[registeredStat, expectedStat] = await Promise.all([
+      stat(registeredParent).catch(() => null),
+      stat(expectedWorktreesDir).catch(err =>
+        isENOENT(err) ? ('enoent' as const) : null,
+      ),
+    ])
+  } catch {
+    return
+  }
+  // densable: both stats present and (expected enoent OR dev/ino mismatch) → foreign
+  if (
+    registeredStat !== null &&
+    expectedStat !== null &&
+    (expectedStat === 'enoent' ||
+      registeredStat.dev !== expectedStat.dev ||
+      registeredStat.ino !== expectedStat.ino)
+  ) {
+    logEvent('git_worktree_resume_foreign_repo', {})
+    throw new Error(
+      `The worktree directory at ${worktreePath} belongs to a different repository (registered under ${registeredParent}, expected under ${expectedWorktreesDir}). Remove that directory or choose a different worktree name.`,
+    )
+  }
+}
+
+/**
  * Creates a new git worktree for the given slug, or resumes it if it already exists.
  * Named worktrees reuse the same path across invocations, so the existence check
  * prevents unconditionally running `git fetch` (which can hang waiting for credentials)
@@ -525,6 +597,8 @@ async function getOrCreateWorktree(
   // task, and the await yield lets background spawnSyncs pile on (seen at 55ms).
   const existingHead = await readWorktreeHeadSha(worktreePath)
   if (existingHead) {
+    // densable 2.1.216 #9: refuse leftover worktree from another repository
+    await assertWorktreeNotForeignRepo(repoRoot, worktreePath)
     return {
       worktreePath,
       worktreeBranch,
@@ -540,7 +614,7 @@ async function getOrCreateWorktree(
   // New worktree: fetch base branch then add
   await mkdir(worktreesDir(repoRoot), { recursive: true })
 
-  const fetchEnv = { ...process.env, ...GIT_NO_PROMPT_ENV }
+  const fetchEnv = gitWorktreeEnv()
 
   let baseBranch: string
   let baseSha: string | null = null
@@ -591,7 +665,7 @@ async function getOrCreateWorktree(
     const { stdout, code: shaCode } = await execFileNoThrowWithCwd(
       gitExe(),
       ['rev-parse', baseBranch],
-      { cwd: repoRoot },
+      { cwd: repoRoot, env: gitWorktreeEnv() },
     )
     if (shaCode !== 0) {
       throw new Error(
@@ -611,7 +685,10 @@ async function getOrCreateWorktree(
   addArgs.push('-B', worktreeBranch, worktreePath, baseBranch)
 
   const { code: createCode, stderr: createStderr } =
-    await execFileNoThrowWithCwd(gitExe(), addArgs, { cwd: repoRoot })
+    await execFileNoThrowWithCwd(gitExe(), addArgs, {
+      cwd: repoRoot,
+      env: gitWorktreeEnv(),
+    })
   if (createCode !== 0) {
     // densable: me("git_worktree_create", "git_worktree_create_add_failed")
     logEvent('git_worktree_create_add_failed', {})
@@ -635,7 +712,7 @@ async function getOrCreateWorktree(
       await execFileNoThrowWithCwd(
         gitExe(),
         ['worktree', 'remove', '--force', worktreePath],
-        { cwd: repoRoot },
+        { cwd: repoRoot, env: gitWorktreeEnv() },
       )
       throw new Error(msg)
     }
@@ -643,7 +720,7 @@ async function getOrCreateWorktree(
       await execFileNoThrowWithCwd(
         gitExe(),
         ['sparse-checkout', 'set', '--cone', '--', ...sparsePaths],
-        { cwd: worktreePath },
+        { cwd: worktreePath, env: gitWorktreeEnv() },
       )
     if (sparseCode !== 0) {
       await tearDown(`Failed to configure sparse-checkout: ${sparseErr}`)
@@ -651,7 +728,7 @@ async function getOrCreateWorktree(
     const { code: coCode, stderr: coErr } = await execFileNoThrowWithCwd(
       gitExe(),
       ['checkout', 'HEAD'],
-      { cwd: worktreePath },
+      { cwd: worktreePath, env: gitWorktreeEnv() },
     )
     if (coCode !== 0) {
       await tearDown(`Failed to checkout sparse worktree: ${coErr}`)
@@ -709,7 +786,7 @@ export async function copyWorktreeIncludeFiles(
   const gitignored = await execFileNoThrowWithCwd(
     gitExe(),
     ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'],
-    { cwd: repoRoot },
+    { cwd: repoRoot, env: gitWorktreeEnv() },
   )
   if (gitignored.code !== 0 || !gitignored.stdout.trim()) {
     return []
@@ -765,7 +842,7 @@ export async function copyWorktreeIncludeFiles(
         '--',
         ...dirsToExpand,
       ],
-      { cwd: repoRoot },
+      { cwd: repoRoot, env: gitWorktreeEnv() },
     )
     if (expanded.code === 0 && expanded.stdout.trim()) {
       for (const f of expanded.stdout.trim().split('\n').filter(Boolean)) {
@@ -861,7 +938,7 @@ async function performPostCreationSetup(
         await execFileNoThrowWithCwd(
           gitExe(),
           ['config', 'core.hooksPath', hooksPath],
-          { cwd: worktreePath },
+          { cwd: worktreePath, env: gitWorktreeEnv() },
         )
       if (configCode === 0) {
         logForDebugging(
@@ -1145,7 +1222,7 @@ export async function cleanupWorktree(): Promise<void> {
         await execFileNoThrowWithCwd(
           gitExe(),
           ['worktree', 'remove', '--force', worktreePath],
-          { cwd: originalCwd },
+          { cwd: originalCwd, env: gitWorktreeEnv() },
         )
 
       if (removeCode !== 0) {
@@ -1180,7 +1257,7 @@ export async function cleanupWorktree(): Promise<void> {
         await execFileNoThrowWithCwd(
           gitExe(),
           ['branch', '-D', worktreeBranch],
-          { cwd: originalCwd },
+          { cwd: originalCwd, env: gitWorktreeEnv() },
         )
 
       if (deleteBranchCode !== 0) {
@@ -1297,7 +1374,7 @@ export async function removeAgentWorktree(
     await execFileNoThrowWithCwd(
       gitExe(),
       ['worktree', 'remove', '--force', worktreePath],
-      { cwd: gitRoot },
+      { cwd: gitRoot, env: gitWorktreeEnv() },
     )
 
   if (removeCode !== 0) {
@@ -1316,6 +1393,7 @@ export async function removeAgentWorktree(
   const { code: deleteBranchCode, stderr: deleteBranchError } =
     await execFileNoThrowWithCwd(gitExe(), ['branch', '-D', worktreeBranch], {
       cwd: gitRoot,
+      env: gitWorktreeEnv(),
     })
 
   if (deleteBranchCode !== 0) {
@@ -1412,12 +1490,12 @@ export async function cleanupStaleAgentWorktrees(
       execFileNoThrowWithCwd(
         gitExe(),
         ['--no-optional-locks', 'status', '--porcelain', '-uno'],
-        { cwd: worktreePath },
+        { cwd: worktreePath, env: gitWorktreeEnv() },
       ),
       execFileNoThrowWithCwd(
         gitExe(),
         ['rev-list', '--max-count=1', 'HEAD', '--not', '--remotes'],
-        { cwd: worktreePath },
+        { cwd: worktreePath, env: gitWorktreeEnv() },
       ),
     ])
     if (status.code !== 0 || status.stdout.trim().length > 0) {
@@ -1437,6 +1515,7 @@ export async function cleanupStaleAgentWorktrees(
   if (removed > 0) {
     await execFileNoThrowWithCwd(gitExe(), ['worktree', 'prune'], {
       cwd: gitRoot,
+      env: gitWorktreeEnv(),
     })
     logForDebugging(
       `cleanupStaleAgentWorktrees: removed ${removed} stale worktree(s)`,
@@ -1458,6 +1537,7 @@ export async function hasWorktreeChanges(
   const { code: statusCode, stdout: statusOutput } =
     await execFileNoThrowWithCwd(gitExe(), ['status', '--porcelain'], {
       cwd: worktreePath,
+      env: gitWorktreeEnv(),
     })
   if (statusCode !== 0) {
     return true
@@ -1470,7 +1550,7 @@ export async function hasWorktreeChanges(
     await execFileNoThrowWithCwd(
       gitExe(),
       ['rev-list', '--count', `${headCommit}..HEAD`],
-      { cwd: worktreePath },
+      { cwd: worktreePath, env: gitWorktreeEnv() },
     )
   if (revListCode !== 0) {
     return true

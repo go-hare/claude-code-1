@@ -46,7 +46,9 @@ describe('densable Pte source contract #32', () => {
   test('mcp.tsx gates panel but not enable/disable', () => {
     const src = readFileSync(join(ROOT, 'commands/mcp/mcp.tsx'), 'utf8')
     expect(src).toContain('isBgSessionWithoutTerminal')
-    expect(src).toContain('BG_NO_TERMINAL_MCP_SETTINGS_MSG')
+    // densable 2.1.216 sof/CUt: park via bgCommandNeedsPark (not bare MSG const)
+    expect(src).toContain('parkMcpSettingsNeedsInput')
+    expect(src).toContain('bgCommandNeedsPark')
     // enable/disable path before the gate
     const enableIdx = src.indexOf("parts[0] === 'enable'")
     const gateIdx = src.indexOf('isBgSessionWithoutTerminal()')
@@ -60,7 +62,9 @@ describe('densable Pte source contract #32', () => {
       'utf8',
     )
     expect(src).toContain('isBgSessionWithoutTerminal')
-    expect(src).toContain('BG_NO_TERMINAL_INSTALL_GITHUB_APP_MSG')
+    // densable 2.1.216 CRb/CUt
+    expect(src).toContain('parkInstallGithubAppNeedsInput')
+    expect(src).toContain('bgCommandNeedsPark')
   })
 
   test('rendezvous sets attacherCaps from attacher-caps', () => {

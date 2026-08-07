@@ -289,8 +289,102 @@ export function classifyCreditsPurchaseOutcome(input: {
 }
 
 /**
+ * densable `Per(e)` — only surface server `error.message` when
+ * `error.details.error_visibility === "user_facing"`.
+ * Non-axios / missing visibility → null (UI falls back to generic copy).
+ */
+export function extractUserFacingApiErrorReason(e: unknown): string | null {
+  if (!axios.isAxiosError(e)) {
+    return null
+  }
+  const data = e.response?.data as
+    | {
+        error?: {
+          message?: string | null
+          details?: { error_visibility?: string }
+        }
+      }
+    | undefined
+  const err = data?.error
+  if (err?.details?.error_visibility !== 'user_facing') {
+    return null
+  }
+  return err.message ?? null
+}
+
+/** densable ExtraUsageDialog adjust-limit error: `Failed to update spend limit[: reason]`. */
+export function formatSpendLimitUpdateFailedMessage(
+  reason: string | null | undefined,
+): string {
+  return reason
+    ? `Failed to update spend limit: ${reason}`
+    : 'Failed to update spend limit'
+}
+
+/** densable spend-limit nudge save error. */
+export function formatSpendLimitNudgeFailedMessage(
+  reason: string | null | undefined,
+): string {
+  return reason
+    ? `Could not update your spend limit: ${reason}`
+    : 'Could not update your spend limit. Press Enter to retry.'
+}
+
+export type UpdateSpendLimitResult = {
+  ok: boolean
+  disabledUntil: string | null
+  usedCredits: number | null
+  reason: string | null
+}
+
+/**
+ * densable `HWr(e, t)` — PUT overage_spend_limit with is_enabled:true.
+ * `monthlyCreditLimit: null` → unlimited. On failure returns `{ok:false, reason:Per(e)}`
+ * so UI can show the server's user_facing reason (216 #34).
+ */
+export async function updateSpendLimit(
+  monthlyCreditLimit: number | null,
+  currency: string,
+): Promise<UpdateSpendLimitResult> {
+  try {
+    const { headers, orgUUID, base } = await orgHeaders()
+    const url = `${base}/api/oauth/organizations/${orgUUID}/overage_spend_limit`
+    const res = await axios.put(
+      url,
+      {
+        is_enabled: true,
+        monthly_credit_limit: monthlyCreditLimit,
+        currency,
+      },
+      { headers, timeout: 15_000 },
+    )
+    const data = res.data as
+      | {
+          disabled_until?: string | null
+          used_credits?: number | null
+        }
+      | undefined
+    return {
+      ok: true,
+      disabledUntil: data?.disabled_until ?? null,
+      usedCredits: data?.used_credits ?? null,
+      reason: null,
+    }
+  } catch (n) {
+    logForDebugging(`updateSpendLimit failed: ${errorMessage(n)}`)
+    return {
+      ok: false,
+      disabledUntil: null,
+      usedCredits: null,
+      reason: extractUserFacingApiErrorReason(n),
+    }
+  }
+}
+
+/**
  * PUT/POST overage_spend_limit — enable overage and/or set monthly cap.
  * Official api_spend_limit_update. `monthly_credit_limit: null` → unlimited.
+ * Prefer `updateSpendLimit` when the caller needs densable HWr reason shaping.
  */
 export async function updateOverageSpendLimit(
   update: SpendLimitUpdate,

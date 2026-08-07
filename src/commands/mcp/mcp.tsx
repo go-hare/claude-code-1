@@ -76,13 +76,12 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
     }
   }
 
-  // densable Pte: refuse interactive MCP settings panel when bg has no attacher.
+  // densable 2.1.216 sof/CUt: park needs-input in agent view when bg has no attacher.
   // enable/disable/reconnect above still work (steer without the panel).
-  const { isBgSessionWithoutTerminal, BG_NO_TERMINAL_MCP_SETTINGS_MSG } = await import(
-    '../../utils/concurrentSessions.js'
-  );
+  const { isBgSessionWithoutTerminal } = await import('../../utils/concurrentSessions.js');
   if (isBgSessionWithoutTerminal()) {
-    onDone(BG_NO_TERMINAL_MCP_SETTINGS_MSG, { display: 'system' });
+    const { parkMcpSettingsNeedsInput } = await import('../../utils/bgCommandNeedsPark.js');
+    onDone(await parkMcpSettingsNeedsInput(), { display: 'system' });
     return null;
   }
 

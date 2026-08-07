@@ -94,22 +94,20 @@ export function openFileInExternalEditor(
   const guiFamily = classifyGuiEditor(editor)
 
   if (guiFamily) {
+    // densable jCo: detached GUI spawn with windowsHide (no shell on POSIX).
     const gotoArgv = guiGotoArgv(guiFamily, filePath, line)
-    const detachedOpts: SpawnOptions = { detached: true, stdio: 'ignore' }
-    let child
-    if (process.platform === 'win32') {
-      // shell: true on win32 so code.cmd / cursor.cmd / windsurf.cmd resolve —
-      // CreateProcess can't execute .cmd/.bat directly. Assemble quoted command
-      // string; cmd.exe doesn't expand $() or backticks inside double quotes.
-      // Quote each arg so paths with spaces survive the shell join.
-      const gotoStr = gotoArgv.map(a => `"${a}"`).join(' ')
-      child = spawn(`${editor} ${gotoStr}`, { ...detachedOpts, shell: true })
-    } else {
-      // POSIX: argv array with no shell — injection-safe. shell: true would
-      // expand $() / backticks inside double quotes, and filePath is
-      // filesystem-sourced (possible RCE from a malicious repo filename).
-      child = spawn(base, [...editorArgs, ...gotoArgv], detachedOpts)
+    const detachedOpts: SpawnOptions = {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
     }
+    // POSIX + densable: argv array with no shell — injection-safe. shell: true
+    // would expand $() / backticks inside double quotes, and filePath is
+    // filesystem-sourced (possible RCE from a malicious repo filename).
+    // win32 .cmd resolution: spawn(base, argv) still works for code.cmd when
+    // base is the bare command name on PATH (CreateProcess PATHEXT); avoid
+    // shell:true so quoting matches densable jCo.
+    const child = spawn(base, [...editorArgs, ...gotoArgv], detachedOpts)
     // spawn() emits ENOENT asynchronously. ENOENT on $VISUAL/$EDITOR is a
     // user-config error, not an internal bug — don't pollute error telemetry.
     child.on('error', e =>

@@ -59,20 +59,28 @@ export function Dialog({
     </Byline>
   );
 
+  // densable nr (2.1.216): keyboard-hint footer is flexShrink:0 so yoga never
+  // collapses it when the dialog body is taller than the fullscreen modal
+  // panel. Title/body use minWidth:0 so long labels clamp inside the panel
+  // width instead of stretching past the right edge.
   const content = (
     <>
-      <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text bold color={color}>
+      <Box flexDirection="column" gap={1} minWidth={0} width="100%">
+        <Box flexDirection="column" minWidth={0}>
+          <Text bold color={color} wrap="truncate-end">
             {title}
           </Text>
-          {subtitle && <Text dimColor>{subtitle}</Text>}
+          {subtitle && (
+            <Text dimColor wrap="truncate-end">
+              {subtitle}
+            </Text>
+          )}
         </Box>
         {children}
       </Box>
       {!hideInputGuide && (
-        <Box marginTop={1}>
-          <Text dimColor italic>
+        <Box marginTop={1} flexShrink={0} minWidth={0}>
+          <Text dimColor italic wrap="truncate-end">
             {inputGuide ? inputGuide(exitState) : defaultInputGuide}
           </Text>
         </Box>

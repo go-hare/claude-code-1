@@ -1,0 +1,17 @@
+Additional paths to allow writing within the sandbox. Merged with paths from Edit(...) allow permission rules.
+---
+Additional paths to deny writing within the sandbox. Merged with paths from Edit(...) deny permission rules.
+---
+Additional paths to deny reading within the sandbox. Merged with paths from Read(...) deny permission rules.
+---
+Paths to re-allow reading within denyRead regions. Takes precedence over denyRead for matching paths.
+---
+When true (set in managed settings), only allowRead paths from policySettings are used.
+---
+macOS and Linux/WSL only: skip filesystem isolation entirely while keeping network and seccomp isolation. Ignored on native Windows, where the sandboxed process runs as a separate user with no inherent rights, so skipping the filesystem rules would 
+---
+Sandboxed commands get unrestricted read/write access to the host filesystem; network egress is still confined to network.allowedDomains. Intended for deployments whose goal is egress control rather than filesystem containment. Does not change Bash prompting: sandbox.autoAllowBashIfSandboxed is independent and still defaults to true, so set it to false to keep prompting for sandboxed commands. Drops the read protection from filesystem.denyRead and credentials.files for sandboxed commands, since both are enforced by the filesystem layer this turns off; credentials.envVars deny/mask is unaffected. 
+---
+project settings (.claude/settings.json and .claude/settings.local.json) are ignored. If managed settings configure sandbox.filesystem at all, or list any sandbox.credentials.files entry, only managed settings can set this: an admin who deployed filesystem restrictions must not have them switched off by a user-writable 
+---
+the filesystem layer and survives this setting.) When unset, filesystem isolation stays on.

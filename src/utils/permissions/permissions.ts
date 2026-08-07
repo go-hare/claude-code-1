@@ -1012,6 +1012,8 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
                 message: buildClassifierUnavailableMessage(
                   tool.name,
                   classifierResult.model,
+                  classifierResult.httpStatus,
+                  classifierResult.errorKind,
                 ),
               }
             }
@@ -1029,6 +1031,8 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
               message: buildClassifierUnavailableMessage(
                 tool.name,
                 classifierResult.model,
+                classifierResult.httpStatus,
+                classifierResult.errorKind,
               ),
             }
           }

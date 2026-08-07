@@ -30,7 +30,8 @@ import type { PromptInputMode, VimMode } from '../types/textInputTypes.js'
 import {
   clearCommandQueue,
   enqueuePendingNotification,
-  hasCommandsInQueue,
+  hasEditableCommandsInQueue,
+  isQueuedCommandEditable,
 } from '../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 
@@ -79,7 +80,8 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   } = props
   const store = useAppStateStore()
   const setAppState = useSetAppState()
-  const queuedCommandsLength = useCommandQueue().length
+  // Subscribe so isActive re-evaluates when the queue mutates (useSyncExternalStore).
+  const queuedCommands = useCommandQueue()
   const { addNotification, removeNotification } = useNotifications()
   const lastKillAgentsPressRef = useRef<number>(0)
   const viewSelectionMode = useAppState(s => s.viewSelectionMode)
@@ -101,8 +103,10 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       return
     }
 
-    // Priority 2: Pop queue when Claude is idle (no running task to cancel)
-    if (hasCommandsInQueue()) {
+    // Priority 2: Pop editable queue when Claude is idle (densable Opu/x4).
+    // task-notification / meta / non-human origins do not count — Esc must
+    // fall through to PromptInput double-press → rewind picker (#12).
+    if (hasEditableCommandsInQueue()) {
       if (popCommandFromQueue) {
         popCommandFromQueue()
         return
@@ -127,7 +131,10 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // Local JSX commands (like /model, /btw) handle their own input
   const isOverlayActive = useIsOverlayActive()
   const canCancelRunningTask = abortSignal !== undefined && !abortSignal.aborted
-  const hasQueuedCommands = queuedCommandsLength > 0
+  // densable xja: q = y.some(x4) — only editable (human) queue entries activate
+  // cancel. Full queue length would keep Esc bound while only bg
+  // task-notifications sit in the queue (long-running sessions / #12).
+  const hasEditableQueuedCommands = queuedCommands.some(isQueuedCommandEditable)
   // When in bash/background mode with empty input, escape should exit the mode
   // rather than cancel the request. Let PromptInput handle mode exit.
   // This only applies to Escape, not Ctrl+C which should always cancel.
@@ -149,7 +156,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // input, and to useBackgroundTaskNavigation when viewing a teammate
   const isEscapeActive =
     isContextActive &&
-    (canCancelRunningTask || hasQueuedCommands) &&
+    (canCancelRunningTask || hasEditableQueuedCommands) &&
     !isInSpecialModeWithEmptyInput &&
     !isViewingTeammate
 
@@ -159,7 +166,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // handler and double-press-to-exit from ever seeing the keypress.
   const isCtrlCActive =
     isContextActive &&
-    (canCancelRunningTask || hasQueuedCommands || isViewingTeammate)
+    (canCancelRunningTask || hasEditableQueuedCommands || isViewingTeammate)
 
   useKeybinding('chat:cancel', handleCancel, {
     context: 'Chat',
@@ -202,7 +209,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       killAllAgentsAndNotify()
       exitTeammateView(setAppState)
     }
-    if (canCancelRunningTask || hasQueuedCommands) {
+    if (canCancelRunningTask || hasEditableQueuedCommands) {
       handleCancel()
     }
   }, [
@@ -210,7 +217,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     killAllAgentsAndNotify,
     setAppState,
     canCancelRunningTask,
-    hasQueuedCommands,
+    hasEditableQueuedCommands,
     handleCancel,
   ])
 

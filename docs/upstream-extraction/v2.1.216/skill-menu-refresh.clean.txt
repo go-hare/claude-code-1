@@ -1,0 +1,29 @@
+getSlashCommandToolSkills
+
+---
+
+invoke a slash-command skill
+
+---
+
+tengu_skill_tool_slash_prefix
+
+---
+
+cmd_load_slash_tool_skills_failed
+
+---
+
+Skill name (without the leading slash)
+
+---
+
+memory-skills: not loaded with slash commands disabled (no surface reads the registry)
+
+---
+
+- The user invoked a skill or slash command whose instructions tell you to call Workflow.
+
+---
+
+If false, hides the slash command from users; only the model can invoke it via the Skill tool.

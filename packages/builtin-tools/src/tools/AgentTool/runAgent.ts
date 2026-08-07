@@ -94,6 +94,7 @@ import type { ContentReplacementState } from 'src/utils/toolResultStorage.js'
 import { createAgentId } from 'src/utils/uuid.js'
 import type { ActiveTaskExecutionContext } from 'src/utils/tasks.js'
 import { resolveAgentTools } from './agentToolUtils.js'
+import { FORK_SUBAGENT_TYPE } from './forkSubagent.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
 
 /**
@@ -280,8 +281,19 @@ export async function* runAgent({
   activeTaskExecutionContext,
   useExactTools,
   worktreePath,
+  worktreeBranch,
+  cwd,
+  spawnMode,
   description,
   name,
+  toolUseId,
+  parentAgentId,
+  spawnDepth,
+  taskKind,
+  teamName,
+  color,
+  planModeRequired,
+  customAgentType,
   transcriptSubdir,
   onQueryProgress,
 }: {
@@ -336,6 +348,15 @@ export async function* runAgent({
   /** Worktree path if the agent was spawned with isolation: "worktree".
    * Persisted to metadata so resume can restore the correct cwd. */
   worktreePath?: string
+  /** densable worktreeBranch — paired with worktreePath for resume. */
+  worktreeBranch?: string
+  /** densable cwd — explicit non-worktree cwd snapshot for resume. */
+  cwd?: string
+  /**
+   * densable spawnMode — worker permission mode at spawn (persisted so Aye
+   * can restore mode chain without default-agent reversion).
+   */
+  spawnMode?: string
   /** Original task description from AgentTool input. Persisted to metadata
    * so a resumed agent's notification can show the original description. */
   description?: string
@@ -344,6 +365,22 @@ export async function* runAgent({
    * re-register agentNameRegistry after cold resume.
    */
   name?: string
+  /** densable toolUseId that spawned this agent. */
+  toolUseId?: string
+  /** densable parentAgentId lineage. */
+  parentAgentId?: string
+  /** densable spawnDepth for nested agents. */
+  spawnDepth?: number
+  /** densable taskKind when set. */
+  taskKind?: string
+  /** densable teamName for swarm teammates. */
+  teamName?: string
+  /** densable color label. */
+  color?: string
+  /** densable planModeRequired. */
+  planModeRequired?: boolean
+  /** densable customAgentType wrapper type. */
+  customAgentType?: string
   /** Optional subdirectory under subagents/ to group this agent's transcript
    * with related ones (e.g. workflows/<runId> for workflow subagents). */
   transcriptSubdir?: string
@@ -798,12 +835,33 @@ export async function* runAgent({
   void recordSidechainTranscript(initialMessages, agentId).catch(_err =>
     logForDebugging(`Failed to record sidechain transcript: ${_err}`),
   )
+  // densable vp_/H4d spawn identity (changelog #7):
+  // {agentType, isFork when fork+built-in, worktree*, cwd, spawnMode,
+  //  description, name, toolUseId, parentAgentId, spawnDepth, model, …}
+  // H4d merge preserves $Ns observer keys when omitted.
   void writeAgentMetadata(agentId, {
     agentType: agentDefinition.agentType,
+    ...(agentDefinition.agentType === FORK_SUBAGENT_TYPE &&
+      isBuiltInAgent(agentDefinition) && { isFork: true as const }),
     ...(worktreePath && { worktreePath }),
+    ...(worktreePath && worktreeBranch && { worktreeBranch }),
+    ...(cwd && { cwd }),
+    ...(spawnMode && { spawnMode }),
     ...(description && { description }),
     // densable E8/T1e: ...H&&{name:H}
     ...(name && { name }),
+    ...(toolUseId && { toolUseId }),
+    ...(parentAgentId && { parentAgentId }),
+    ...(spawnDepth !== undefined && { spawnDepth }),
+    ...(model && { model: String(model) }),
+    ...(agentDefinition.permissionMode && {
+      permissionMode: agentDefinition.permissionMode,
+    }),
+    ...(taskKind && { taskKind }),
+    ...(teamName && { teamName }),
+    ...(color && { color }),
+    ...(planModeRequired !== undefined && { planModeRequired }),
+    ...(customAgentType && { customAgentType }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 
   // Track the last recorded message UUID for parent chain continuity

@@ -103,6 +103,8 @@ const UNIQUENESS_REFINE = {
 const commonFields = lazySchema(() => ({
   answers: z.record(z.string(), z.string()).optional().describe('User answers collected by the permission component'),
   annotations: annotationsSchema(),
+  // densable 2.1.216: freeform text typed instead of selecting a structured option
+  response: z.string().optional().describe('Freeform text the user typed instead of selecting a structured option'),
   // Official 2.1.200: AFK auto-continue stamps timeout on the resolved input
   afkTimeoutMs: z
     .number()
@@ -146,6 +148,8 @@ const outputSchema = lazySchema(() =>
         'The answers provided by the user (question text -> answer string; multi-select answers are comma-separated)',
       ),
     annotations: annotationsSchema(),
+    // densable 2.1.216: freeform text typed instead of a structured option
+    response: z.string().optional().describe('Freeform text the user typed instead of selecting a structured option'),
     // Official 2.1.200: set when dialog auto-resolved after AFK idle timeout
     afkTimeoutMs: z
       .number()
@@ -167,6 +171,114 @@ export const _sdkOutputSchema = outputSchema;
 export type Question = z.infer<ReturnType<typeof questionSchema>>;
 export type QuestionOption = z.infer<ReturnType<typeof questionOptionSchema>>;
 export type Output = z.infer<OutputSchema>;
+
+/** densable Yho — answer sentinel when user only left notes */
+export const NOTES_ONLY_ANSWER = '(notes only)' as const;
+
+/**
+ * densable c7u — AFK timeout body (tool_result).
+ */
+export function formatAfkTimeoutMessage(afkTimeoutMs: number): string {
+  const secs = Math.round(afkTimeoutMs / 1000);
+  return `No response after ${secs}s — the user may be away from keyboard. Proceed using your best judgment based on the context so far; you can re-ask this question later if it's still relevant.`;
+}
+
+type AnswerValue = string | string[] | undefined;
+
+/**
+ * densable mapToolResult purity: every answer is a known option label (or
+ * multi-select of labels), with no free-text notes. Notes / custom free-text
+ * force neutral careful-read wording (no NLP of answer content).
+ */
+export function areAskUserAnswersPureStructured(
+  questions: Question[],
+  answers: Record<string, AnswerValue>,
+  annotations?: Record<string, { preview?: string; notes?: string }>,
+): boolean {
+  return questions.every(({ question: qText, options, multiSelect }) => {
+    if (annotations?.[qText]?.notes) return false;
+    const ans = answers[qText];
+    const labels = new Set(options.map(o => o.label));
+    if (Array.isArray(ans)) {
+      return multiSelect === true && ans.length > 0 && ans.every(x => labels.has(x));
+    }
+    if (!ans || ans === NOTES_ONLY_ANSWER) return true;
+    if (labels.has(ans)) return true;
+    if (!multiSelect) return false;
+    const parts = ans.split(', ');
+    return parts.length > 1 && parts.every(x => labels.has(x));
+  });
+}
+
+/**
+ * densable summary token builder for mapToolResult.
+ * Exported for unit tests.
+ */
+export function buildAskUserAnswersSummary(
+  questions: Question[],
+  answers: Record<string, AnswerValue>,
+  annotations?: Record<string, { preview?: string; notes?: string }>,
+): string {
+  const pieces: string[] = [];
+  for (const { question: qText } of questions) {
+    const raw = answers[qText];
+    const annotation = annotations?.[qText];
+    const notes = annotation?.notes;
+    let ansStr: string | undefined;
+    if (Array.isArray(raw)) {
+      ansStr = raw.join(', ');
+    } else if (typeof raw === 'string') {
+      ansStr = raw;
+    }
+    const hasOption = Boolean(ansStr && ansStr !== NOTES_ONLY_ANSWER);
+    if (!hasOption && !notes) continue;
+    const display = hasOption ? ansStr! : '(no option selected)';
+    const parts = [`"${qText}"="${display}"`];
+    if (annotation?.preview) {
+      parts.push(`selected preview:\n${annotation.preview}`);
+    }
+    if (notes) {
+      parts.push(`notes: ${notes}`);
+    }
+    pieces.push(parts.join(' '));
+  }
+  return pieces.join(', ');
+}
+
+/**
+ * densable mapToolResult content priority: afk → response → pure/neutral → empty.
+ * Exported for unit tests.
+ */
+export function buildAskUserToolResultContent(input: {
+  questions: Question[];
+  answers?: Record<string, AnswerValue>;
+  annotations?: Record<string, { preview?: string; notes?: string }>;
+  response?: string;
+  afkTimeoutMs?: number;
+}): string {
+  const answers = input.answers ?? {};
+  const summary = buildAskUserAnswersSummary(input.questions, answers, input.annotations);
+
+  if (input.afkTimeoutMs) {
+    return summary
+      ? `${formatAfkTimeoutMessage(input.afkTimeoutMs)}\n\nBefore going idle the user had selected: ${summary}.`
+      : formatAfkTimeoutMessage(input.afkTimeoutMs);
+  }
+
+  const freeform = input.response?.trim();
+  if (freeform) {
+    return `The user responded: ${freeform}`;
+  }
+
+  if (summary) {
+    const pure = areAskUserAnswersPureStructured(input.questions, answers, input.annotations);
+    return pure
+      ? `Your questions have been answered: ${summary}. You can now continue with these answers in mind.`
+      : `The user answered: ${summary}. Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.`;
+  }
+
+  return 'The user did not answer the questions.';
+}
 
 function AskUserQuestionResultMessage({ answers }: { answers: Output['answers'] }): React.ReactNode {
   return (
@@ -282,36 +394,37 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   renderToolUseErrorMessage() {
     return null;
   },
-  async call({ questions, answers = {}, annotations, afkTimeoutMs }, _context) {
+  async call({ questions, answers = {}, annotations, afkTimeoutMs, response }, _context) {
+    // densable sd_: array-of-strings join ", " if UI ever emits arrays
+    const normalizedAnswers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
+      if (Array.isArray(v)) {
+        normalizedAnswers[k] = v.map(String).join(', ');
+      } else if (v !== undefined && v !== null) {
+        normalizedAnswers[k] = String(v);
+      }
+    }
+    const freeform = typeof response === 'string' && response.trim() ? response.trim() : undefined;
     return {
       data: {
         questions,
-        answers,
+        answers: normalizedAnswers,
         ...(annotations && { annotations }),
+        ...(freeform ? { response: freeform } : {}),
         ...(afkTimeoutMs ? { afkTimeoutMs } : {}),
       },
     };
   },
-  mapToolResultToToolResultBlockParam({ answers, annotations, afkTimeoutMs }, toolUseID) {
-    const answersText = Object.entries(answers)
-      .map(([questionText, answer]) => {
-        const annotation = annotations?.[questionText];
-        const parts = [`"${questionText}"="${answer}"`];
-        if (annotation?.preview) {
-          parts.push(`selected preview:\n${annotation.preview}`);
-        }
-        if (annotation?.notes) {
-          parts.push(`user notes: ${annotation.notes}`);
-        }
-        return parts.join(' ');
-      })
-      .join(', ');
-
-    const afkNote = afkTimeoutMs ? ` (auto-continued after ${Math.round(afkTimeoutMs / 1000)}s idle)` : '';
-
+  mapToolResultToToolResultBlockParam({ questions, answers, annotations, afkTimeoutMs, response }, toolUseID) {
     return {
       type: 'tool_result',
-      content: `User has answered your questions: ${answersText}${afkNote}. You can now continue with the user's answers in mind.`,
+      content: buildAskUserToolResultContent({
+        questions,
+        answers,
+        annotations,
+        response,
+        afkTimeoutMs,
+      }),
       tool_use_id: toolUseID,
     };
   },

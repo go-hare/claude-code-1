@@ -55,6 +55,7 @@ import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { resolveAgentAutoBackgroundMs } from 'src/utils/autoBackgroundTimeout.js';
 import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
+import { isInterruptAbortReason } from 'src/utils/abortController.js';
 import { assertCanSpawnSubagent } from 'src/utils/sessionSpawnCaps.js';
 import { AbortError, errorMessage, toError } from 'src/utils/errors.js';
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js';
@@ -430,10 +431,15 @@ export const AgentTool = buildTool({
       );
     }
 
-    // densable N() — session subagent spawn cap (before any real spawn path)
-    const consumeSessionSpawnSlot = (): void => {
+    // densable L(Me)/N() — session subagent spawn cap (before any real spawn path).
+    // Me=true (allowInterrupt) only for local async spawn: high-priority
+    // "interrupt" must not cancel bg agents mid-startup (2.1.216 #15).
+    const consumeSessionSpawnSlot = (allowInterrupt = false): void => {
       try {
-        assertCanSpawnSubagent({ abortSignal: toolUseContext.abortController.signal });
+        assertCanSpawnSubagent({
+          abortSignal: toolUseContext.abortController.signal,
+          allowInterrupt,
+        });
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('Subagent spawn limit reached')) {
           logEvent('subagent_count_cap', {});
@@ -664,8 +670,43 @@ export const AgentTool = buildTool({
       setAgentColor(selectedAgent.agentType, selectedAgent.color);
     }
 
-    // densable N() — count after type/permission/MCP guards, before worktree/remote/run
-    consumeSessionSpawnSlot();
+    // densable G before L(G&&!B): async decision must precede spawn-slot consume so
+    // interrupt-immunity applies only to local async (2.1.216 #15).
+    // isCoordinatorMode densable (COORDINATOR_MODE feature + env).
+    const isCoordinator = isCoordinatorMode();
+    // Fork subagent experiment: force ALL spawns async for a unified
+    // <task-notification> interaction model (not just fork spawns — all of them).
+    const forceAsync = isForkSubagentEnabled();
+    // Assistant mode: force all agents async. Synchronous subagents hold the
+    // main loop's turn open until they complete — the daemon's inputQueue
+    // backs up, and the first overdue cron catch-up on spawn becomes N
+    // serial subagent turns blocking all user input. Same gate as
+    // executeForkedSlashCommand's fire-and-forget path; the
+    // <task-notification> re-entry there is handled by the else branch
+    // below (registerAsyncAgentTask + notifyOnCompletion).
+    const assistantForceAsync = feature('KAIROS') ? appState.kairosEnabled : false;
+    // Official 208: te || (o===true || agent.background || coordinator ||
+    // forceAsync || (!inProcessTeammate && o!==false)) && !disabled
+    // Unset run_in_background → background by default (except in-process teammates).
+    const shouldRunAsync =
+      (run_in_background === true ||
+        selectedAgent.background === true ||
+        isCoordinator ||
+        forceAsync ||
+        assistantForceAsync ||
+        (proactiveModule?.isProactiveActive() ?? false) ||
+        (!isInProcessTeammate() && run_in_background !== false)) &&
+      !isBackgroundTasksDisabled;
+
+    // Resolve effective isolation mode early — densable B=remote for L(G&&!B).
+    const effectiveIsolation = isolation ?? selectedAgent.isolation;
+    // densable B: remote isolation is "async" for product but Me=G&&!B (no interrupt
+    // immunity) — remote still uses parent abort signal for teleport.
+    const isRemoteIsolation = process.env.USER_TYPE === 'ant' && effectiveIsolation === 'remote';
+
+    // densable L(G&&!B) — count after type/permission/MCP guards, before worktree/remote/run.
+    // Me = local async only: high-priority "interrupt" must not cancel bg startup.
+    consumeSessionSpawnSlot(shouldRunAsync && !isRemoteIsolation);
 
     // Resolve agent params for logging (these are already resolved in runAgent).
     // Official $6e: built-in Explore may rewrite model to opus cap before getAgentModel.
@@ -683,16 +724,9 @@ export const AgentTool = buildTool({
       color: selectedAgent.color as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       is_built_in_agent: isBuiltInAgent(selectedAgent),
       is_resume: false,
-      is_async:
-        (run_in_background === true ||
-          selectedAgent.background === true ||
-          (!isInProcessTeammate() && run_in_background !== false)) &&
-        !isBackgroundTasksDisabled,
+      is_async: shouldRunAsync,
       is_fork: isForkPath,
     });
-
-    // Resolve effective isolation mode (explicit param overrides agent def)
-    const effectiveIsolation = isolation ?? selectedAgent.isolation;
 
     // Remote isolation: delegate to CCR. Gated ant-only — the guard enables
     // dead code elimination of the entire block for external builds.
@@ -818,44 +852,16 @@ export const AgentTool = buildTool({
       agentType: selectedAgent.agentType,
       // Official 208: default background (run_in_background !== false) unless
       // in-process teammate; explicit true / agent.background still force async.
-      isAsync:
-        (run_in_background === true ||
-          selectedAgent.background === true ||
-          (!isInProcessTeammate() && run_in_background !== false)) &&
-        !isBackgroundTasksDisabled,
+      isAsync: shouldRunAsync,
     };
 
-    // isCoordinatorMode densable (COORDINATOR_MODE feature + env).
-    const isCoordinator = isCoordinatorMode();
+    // shouldRunAsync / isCoordinator / forceAsync / assistantForceAsync computed
+    // earlier (before L(G&&!B) spawn-slot consume) so interrupt immunity matches
+    // densable G. Coordinator anti-injection addendum still applied here after
+    // system prompt assembly.
     if (isCoordinator && !isForkPath && enhancedSystemPrompt) {
       enhancedSystemPrompt = [...enhancedSystemPrompt, getWorkerAntiInjectionAddendum()];
     }
-
-    // Fork subagent experiment: force ALL spawns async for a unified
-    // <task-notification> interaction model (not just fork spawns — all of them).
-    const forceAsync = isForkSubagentEnabled();
-
-    // Assistant mode: force all agents async. Synchronous subagents hold the
-    // main loop's turn open until they complete — the daemon's inputQueue
-    // backs up, and the first overdue cron catch-up on spawn becomes N
-    // serial subagent turns blocking all user input. Same gate as
-    // executeForkedSlashCommand's fire-and-forget path; the
-    // <task-notification> re-entry there is handled by the else branch
-    // below (registerAsyncAgentTask + notifyOnCompletion).
-    const assistantForceAsync = feature('KAIROS') ? appState.kairosEnabled : false;
-
-    // Official 208: te || (o===true || agent.background || coordinator ||
-    // forceAsync || (!inProcessTeammate && o!==false)) && !disabled
-    // Unset run_in_background → background by default (except in-process teammates).
-    const shouldRunAsync =
-      (run_in_background === true ||
-        selectedAgent.background === true ||
-        isCoordinator ||
-        forceAsync ||
-        assistantForceAsync ||
-        (proactiveModule?.isProactiveActive() ?? false) ||
-        (!isInProcessTeammate() && run_in_background !== false)) &&
-      !isBackgroundTasksDisabled;
     // densable `ie={...y,mode:$.permissionMode??_}`:
     // worker tool pool uses agent-definition frontmatter permissionMode, else
     // inherits the parent session mode `_` (not hard-coded acceptEdits).
@@ -1006,6 +1012,13 @@ export const AgentTool = buildTool({
       forkContextMessages: isForkPath ? toolUseContext.messages : undefined,
       ...(isForkPath && { useExactTools: true }),
       worktreePath: worktreeInfo?.worktreePath,
+      // densable #7 identity: worktreeBranch/cwd/spawnMode/toolUseId/parent
+      // so resume restores prompt + tool restrictions (not general-purpose).
+      worktreeBranch: worktreeInfo?.worktreeBranch,
+      cwd: cwd ?? worktreeInfo?.worktreePath,
+      spawnMode: appState.toolPermissionContext.mode,
+      toolUseId: toolUseContext.toolUseId,
+      parentAgentId: toolUseContext.agentId,
       description,
       // densable E8 name:H → sidecar for Aye registerName rehydrate
       ...(name ? { name } : {}),
@@ -1049,6 +1062,19 @@ export const AgentTool = buildTool({
       logForDebugging(`Agent worktree has changes, keeping: ${worktreePath}`);
       return { worktreePath, worktreeBranch };
     };
+
+    // densable post-setup gate (after worktree/MCP/prompt awaits, before Flt):
+    // if(l.abortController.signal.aborted){
+    //   let Me=q_(reason); if(!(G&&Me==="interrupt")) throw await De(), new wl
+    // }
+    // High-priority "interrupt" during startup must not cancel local async
+    // bg registration (2.1.216 #15). Sync / non-interrupt aborts still fail.
+    if (toolUseContext.abortController.signal.aborted) {
+      if (!(shouldRunAsync && isInterruptAbortReason(toolUseContext.abortController.signal.reason))) {
+        await cleanupWorktreeIfNeeded();
+        throw new AbortError();
+      }
+    }
 
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId;

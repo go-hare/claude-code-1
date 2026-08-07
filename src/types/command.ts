@@ -26,6 +26,11 @@ export type PromptCommand = {
   type: 'prompt'
   progressMessage: string
   contentLength: number // Length of command content in characters (used for token estimation)
+  /**
+   * densable contentHash — fingerprint of skill/command body for skill-watcher
+   * change detection (JoS). Optional; missing treated as "".
+   */
+  contentHash?: string
   argNames?: string[]
   allowedTools?: string[]
   disallowedTools?: string[]

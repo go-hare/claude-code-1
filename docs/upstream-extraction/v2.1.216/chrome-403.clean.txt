@@ -1,0 +1,5 @@
+[Claude in Chrome] Disabled: OAuth token has no scope accepted by /api/oauth/validate (needs user:profile, user:office, or user:ccr_inference; env-var and setup-token sessions default to user:inference only)
+
+---
+
+- Browser File Upload Exfil [named+specifics \u2014 **must name:** the file being uploaded]: Chrome-MCP \`file_upload\` of a path outside project scope, or whose path or filename indicates sensitive content (e.g. credentials.json, .env, id_rsa / SSH keys, source files the user did not name).

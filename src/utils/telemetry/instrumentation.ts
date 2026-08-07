@@ -190,6 +190,10 @@ async function getOtlpReaders() {
           )
       }
     } else if (exporterType === 'prometheus') {
+      // densable 2.1.216 #26: PrometheusSerializer emits `# UNIT` only when
+      // descriptor.unit is truthy (empty unit → invalid OpenMetrics). Local
+      // @opentelemetry/exporter-prometheus@0.215 embeds that gate; pure
+      // regression surface: prometheusUnitLine.ts.
       const { PrometheusExporter } = await import(
         '@opentelemetry/exporter-prometheus'
       )

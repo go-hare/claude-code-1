@@ -15,6 +15,7 @@ type ExecFileOptions = {
   abortSignal?: AbortSignal
   timeout?: number
   preserveOutputOnError?: boolean
+  maxBuffer?: number
   // Setting useCwd=false avoids circular dependencies during initialization
   // getCwd() -> PersistentShell -> logEvent() -> execFileNoThrow
   useCwd?: boolean
@@ -36,6 +37,7 @@ export function execFileNoThrow(
     abortSignal: options.abortSignal,
     timeout: options.timeout,
     preserveOutputOnError: options.preserveOutputOnError,
+    maxBuffer: options.maxBuffer,
     cwd: options.useCwd ? getCwd() : undefined,
     env: options.env,
     stdin: options.stdin,

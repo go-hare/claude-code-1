@@ -194,7 +194,10 @@ function byteAt(L: Lexer, charIdx: number): number {
 }
 
 function isWordChar(c: string): boolean {
-  // Bash word chars: alphanumeric + various punctuation that doesn't start operators
+  // densable 2.1.216 `guu`: ASCII word/punct class + all high-bit (non-ASCII)
+  // code units. Bash treats UTF-8 multibyte bytes as word characters, so
+  // `中文>out` / `café/file` must stay one word token — not split at the
+  // first non-ASCII char (which would invent a false redirect boundary).
   return (
     (c >= 'a' && c <= 'z') ||
     (c >= 'A' && c <= 'Z') ||
@@ -215,7 +218,8 @@ function isWordChar(c: string): boolean {
     c === '!' ||
     c === '=' ||
     c === '[' ||
-    c === ']'
+    c === ']' ||
+    c >= '\x80'
   )
 }
 

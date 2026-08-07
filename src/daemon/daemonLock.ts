@@ -5,22 +5,41 @@
  * Fields used by KF: pid, version, startedAt, origin, (optional) procStart/launchTarget.
  */
 
-import { readFile, writeFile, unlink, rename } from 'fs/promises'
+import { lstat, readFile, writeFile, unlink, rename, rm } from 'fs/promises'
 import { join } from 'path'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
-import { errorMessage } from '../utils/errors.js'
+import { errorMessage, isENOENT } from '../utils/errors.js'
 
 export type DaemonLockOrigin = 'transient' | 'service' | string
+
+/** densable UTe max lock file size (bytes). Oversized → unlink + null. */
+export const DAEMON_LOCK_MAX_BYTES = 65_536
 
 export type DaemonLockData = {
   pid: number
   version: string
-  /** Epoch ms — official uses Date.now(). */
-  startedAt: number
+  /** Epoch ms — official uses Date.now(). Optional on loose UTe reads of legacy locks. */
+  startedAt?: number
   origin?: DaemonLockOrigin
   spawnedBy?: string
   launchTarget?: string
   procStart?: unknown
+}
+
+/** densable DSr — only locks with procStart are signalable as the daemon. */
+export function isDaemonLockSignalable(
+  lock: Pick<DaemonLockData, 'procStart'> | null | undefined,
+): boolean {
+  return lock != null && lock.procStart !== undefined
+}
+
+/**
+ * densable LFp — stop hint when another daemon holds the lock.
+ */
+export function buildDaemonStopAnyHint(
+  configDir: string = getClaudeConfigHomeDir(),
+): string {
+  return `Stop it with \`claude daemon stop --any\` (a graceful, socket-based stop); if nothing is running at that pid, delete ${getDaemonLockPath(configDir)}`
 }
 
 export function getDaemonLockPath(
@@ -30,39 +49,62 @@ export function getDaemonLockPath(
 }
 
 /**
- * Official iV_ — read lock file; null if missing/invalid.
+ * densable UTe — loose lock read: pid (number) + version (string) only.
+ * lstat: must be file, size ≤ 65536; otherwise rm + null.
+ * Missing startedAt is OK (legacy). Used by hk / stop classification.
+ */
+export async function readDaemonLockLoose(
+  configDir?: string,
+): Promise<DaemonLockData | null> {
+  const path = getDaemonLockPath(configDir)
+  let raw: string
+  try {
+    const st = await lstat(path)
+    if (!st.isFile() || st.size > DAEMON_LOCK_MAX_BYTES) {
+      await rm(path, { recursive: true, force: true }).catch(() => {})
+      return null
+    }
+    raw = await readFile(path, 'utf8')
+  } catch (err) {
+    if (isENOENT(err)) return null
+    throw err
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const r = parsed as Record<string, unknown>
+  if (typeof r.pid !== 'number' || typeof r.version !== 'string') {
+    return null
+  }
+  // Normalize ISO startedAt from older local writers when present.
+  if (typeof r.startedAt === 'string') {
+    const ms = Date.parse(r.startedAt)
+    if (!Number.isNaN(ms)) {
+      return { ...(r as DaemonLockData), startedAt: ms }
+    }
+    const { startedAt: _drop, ...rest } = r
+    return rest as DaemonLockData
+  }
+  return r as DaemonLockData
+}
+
+/**
+ * Official iV_ / local ownership reads — requires startedAt for ownership match.
+ * Prefer {@link readDaemonLockLoose} (UTe) for alive/stop probes.
  */
 export async function readDaemonLock(
   configDir?: string,
 ): Promise<DaemonLockData | null> {
-  try {
-    const raw = await readFile(getDaemonLockPath(configDir), 'utf8')
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    if (
-      typeof parsed.pid === 'number' &&
-      typeof parsed.version === 'string' &&
-      typeof parsed.startedAt === 'number'
-    ) {
-      return parsed as DaemonLockData
-    }
-    // Tolerate ISO startedAt from older local writers.
-    if (
-      typeof parsed.pid === 'number' &&
-      typeof parsed.version === 'string' &&
-      typeof parsed.startedAt === 'string'
-    ) {
-      const ms = Date.parse(parsed.startedAt)
-      if (!Number.isNaN(ms)) {
-        return {
-          ...(parsed as DaemonLockData),
-          startedAt: ms,
-        }
-      }
-    }
-    return null
-  } catch {
-    return null
+  const loose = await readDaemonLockLoose(configDir)
+  if (!loose) return null
+  if (typeof loose.startedAt === 'number') {
+    return loose
   }
+  return null
 }
 
 /**
@@ -163,26 +205,61 @@ export async function readProcessStartIdentity(
 }
 
 /**
- * Official bW — lock exists + pid alive + cmdline + procStart.
+ * Official bW / densable hk — UTe + kill0(any throw=dead) + vhn + vla.
  *
  * Live probe is densable cI:
  *   try { process.kill(pid, 0) } catch { return null }
  * Any throw (ESRCH **or** EPERM) → treat as dead so the supervisor slot
  * can be released. Do not fortify EPERM as live (that stuck install/restart).
+ *
+ * Note: densable hk does **not** require startedAt (UTe only). DSr
+ * (procStart defined) is a separate signalability gate used by stop.
  */
 export async function readAliveDaemonLock(
   configDir?: string,
+  procStartAttempts: number = 1,
 ): Promise<DaemonLockData | null> {
-  const lock = await readDaemonLock(configDir)
+  const lock = await readDaemonLockLoose(configDir)
   if (!lock) return null
   if (!isDaemonPidRaceLive(lock.pid)) return null
-  // densable jen: refuse PID reuse of non-daemon process.
+  // densable jen / vhn: refuse PID reuse of non-daemon process.
   if (!(await isDaemonCmdline(lock.pid))) return null
-  // densable iPs: refuse when procStart diverges (PID recycled).
-  if (!(await matchesDaemonProcStart(lock.pid, lock.procStart, 1))) {
+  // densable iPs / vla: refuse when procStart diverges (PID recycled).
+  if (
+    !(await matchesDaemonProcStart(lock.pid, lock.procStart, procStartAttempts))
+  ) {
     return null
   }
   return lock
+}
+
+/**
+ * densable stop-path classification for a loose lock when hk() returned null
+ * but a raw UTe lock exists with a live pid.
+ *
+ * Returns:
+ * - stale: cmdline bad or procStart mismatch (do not signal)
+ * - verified: both lock and live have matching procStart
+ * - unverified: live pid, but missing/unreadable procStart pair
+ */
+export async function classifyDaemonLockHolder(
+  raw: DaemonLockData,
+): Promise<'stale' | 'verified' | 'unverified'> {
+  const cmdlineOk = await isDaemonCmdline(raw.pid)
+  const liveStart = cmdlineOk
+    ? await readProcessStartIdentity(raw.pid)
+    : undefined
+  const bothHaveStart = raw.procStart !== undefined && liveStart !== undefined
+  if (
+    !cmdlineOk ||
+    (bothHaveStart && !deepEqualProcStart(liveStart, raw.procStart))
+  ) {
+    return 'stale'
+  }
+  if (bothHaveStart) {
+    return 'verified'
+  }
+  return 'unverified'
 }
 
 /**
@@ -294,7 +371,7 @@ export const DAEMON_LOCK_REPLACE_SETTLE_MS = 100
  * Succeeds only when the file does not exist. Never unlinks a peer lock.
  */
 export async function tryCreateDaemonLockExclusive(
-  data: DaemonLockData,
+  data: DaemonLockData & { startedAt: number },
   configDir?: string,
 ): Promise<boolean> {
   const path = getDaemonLockPath(configDir)
@@ -325,7 +402,7 @@ export async function tryCreateDaemonLockExclusive(
  * Never falls back to writeFile(lockPath) success (would clobber live peers).
  */
 export async function writeDaemonLock(
-  data: DaemonLockData,
+  data: DaemonLockData & { startedAt: number },
   configDir?: string,
 ): Promise<boolean> {
   const path = getDaemonLockPath(configDir)
@@ -415,7 +492,7 @@ export async function writeDaemonLock(
  * Do not use cI (EPERM=dead) here — that would steal under permission-denied.
  */
 export async function installDaemonLock(
-  data: DaemonLockData,
+  data: DaemonLockData & { startedAt: number },
   configDir?: string,
   opts?: { settleMs?: number },
 ): Promise<boolean> {
@@ -537,7 +614,7 @@ export function buildAnotherDaemonRunningMessage(input: {
   const stopHint =
     (input.platform ?? process.platform) === 'win32'
       ? `Stop it with \`taskkill /PID ${input.pid}\`, then retry.`
-      : 'Run `claude daemon stop` to stop it, then retry.'
+      : `${buildDaemonStopAnyHint()}.`
   return `another daemon is already running (pid=${input.pid}, version=${input.version}, ${why}). ${stopHint}`
 }
 

@@ -20,7 +20,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.2.114",
         "@anthropic-ai/foundry-sdk": "^0.2.3",
         "@anthropic-ai/mcpb": "^2.1.2",
-        "@anthropic-ai/sandbox-runtime": "^0.0.44",
+        "@anthropic-ai/sandbox-runtime": "0.0.70",
         "@anthropic-ai/sdk": "^0.81.0",
         "@anthropic-ai/vertex-sdk": "^0.16.0",
         "@anthropic/ink": "workspace:*",
@@ -148,14 +148,14 @@
         "zod": "^4.3.6",
       },
       "optionalDependencies": {
-        "@go-hare/claude-code-darwin-arm64": ">=2.7.16",
-        "@go-hare/claude-code-darwin-x64": ">=2.7.16",
-        "@go-hare/claude-code-linux-arm64": ">=2.7.16",
-        "@go-hare/claude-code-linux-arm64-musl": ">=2.7.16",
-        "@go-hare/claude-code-linux-x64": ">=2.7.16",
-        "@go-hare/claude-code-linux-x64-musl": ">=2.7.16",
-        "@go-hare/claude-code-win32-arm64": ">=2.7.16",
-        "@go-hare/claude-code-win32-x64": ">=2.7.16",
+        "@go-hare/claude-code-darwin-arm64": ">=2.7.30",
+        "@go-hare/claude-code-darwin-x64": ">=2.7.30",
+        "@go-hare/claude-code-linux-arm64": ">=2.7.30",
+        "@go-hare/claude-code-linux-arm64-musl": ">=2.7.30",
+        "@go-hare/claude-code-linux-x64": ">=2.7.30",
+        "@go-hare/claude-code-linux-x64-musl": ">=2.7.30",
+        "@go-hare/claude-code-win32-arm64": ">=2.7.30",
+        "@go-hare/claude-code-win32-x64": ">=2.7.30",
         "doubaoime-asr": "^0.1.0",
       },
     },
@@ -208,35 +208,35 @@
     },
     "packages/@go-hare/claude-code-darwin-arm64": {
       "name": "@go-hare/claude-code-darwin-arm64",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/@go-hare/claude-code-darwin-x64": {
       "name": "@go-hare/claude-code-darwin-x64",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/@go-hare/claude-code-linux-arm64": {
       "name": "@go-hare/claude-code-linux-arm64",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/@go-hare/claude-code-linux-arm64-musl": {
       "name": "@go-hare/claude-code-linux-arm64-musl",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/@go-hare/claude-code-linux-x64": {
       "name": "@go-hare/claude-code-linux-x64",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/@go-hare/claude-code-linux-x64-musl": {
       "name": "@go-hare/claude-code-linux-x64-musl",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/@go-hare/claude-code-win32-arm64": {
       "name": "@go-hare/claude-code-win32-arm64",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/@go-hare/claude-code-win32-x64": {
       "name": "@go-hare/claude-code-win32-x64",
-      "version": "2.7.16",
+      "version": "2.7.30",
     },
     "packages/acp-link": {
       "name": "acp-link",
@@ -454,7 +454,7 @@
 
     "@anthropic-ai/mcpb": ["@anthropic-ai/mcpb@2.1.2", "https://registry.npmmirror.com/@anthropic-ai/mcpb/-/mcpb-2.1.2.tgz", { "dependencies": { "@inquirer/prompts": "^6.0.1", "commander": "^13.1.0", "fflate": "^0.8.2", "galactus": "^1.0.0", "ignore": "^7.0.5", "node-forge": "^1.3.2", "pretty-bytes": "^5.6.0", "zod": "^3.25.67", "zod-to-json-schema": "^3.24.6" }, "bin": { "mcpb": "dist/cli/cli.js" } }, "sha512-goRbBC8ySo7SWb7tRzr+tL6FxDc4JPTRCdgfD2omba7freofvjq5rom1lBnYHZHo6Mizs1jAHJeN53aZbDoy8A=="],
 
-    "@anthropic-ai/sandbox-runtime": ["@anthropic-ai/sandbox-runtime@0.0.44", "https://registry.npmmirror.com/@anthropic-ai/sandbox-runtime/-/sandbox-runtime-0.0.44.tgz", { "dependencies": { "@pondwader/socks5-server": "^1.0.10", "@types/lodash-es": "^4.17.12", "commander": "^12.1.0", "lodash-es": "^4.17.23", "shell-quote": "^1.8.3", "zod": "^3.24.1" }, "bin": { "srt": "dist/cli.js" } }, "sha512-mmyjq0mzsHnQZyiU+FGYyaiJcPckuQpP78VB8iqFi2IOu8rcb9i5SmaOKyJENJNfY8l/1grzLMQgWq4Apvmozw=="],
+    "@anthropic-ai/sandbox-runtime": ["@anthropic-ai/sandbox-runtime@0.0.70", "https://mirrors.cloud.tencent.com/npm/@anthropic-ai/sandbox-runtime/-/sandbox-runtime-0.0.70.tgz", { "dependencies": { "@pondwader/socks5-server": "^1.0.10", "commander": "^12.1.0", "node-forge": "^1.4.0", "zod": "^3.24.1" }, "bin": { "srt": "dist/cli.js" } }, "sha512-Pr0d3J3UyJISxvFxTOldchW3a8P/nAZiIV+nU9wIHoW5Ym1PM0XDPzWX8mMJsXWpnURzI+u3OdULiaucYZ9e2g=="],
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.81.0", "https://registry.npmmirror.com/@anthropic-ai/sdk/-/sdk-0.81.0.tgz", { "dependencies": { "json-schema-to-ts": "^3.1.1" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-D4K5PvEV6wPiRtVlVsJHIUhHAmOZ6IT/I9rKlTf84gR7GyyAurPJK7z9BOf/AZqC5d1DhYQGJNKRmV+q8dGhgw=="],
 

@@ -14,6 +14,15 @@ export function runWithCwdOverride<T>(cwd: string, fn: () => T): T {
 }
 
 /**
+ * densable 2.1.216 worktree git isolation — agent isolation cwd when set via
+ * runWithCwdOverride (isolation: "worktree" / explicit cwd). Undefined outside
+ * an override ALS context.
+ */
+export function getCwdOverride(): string | undefined {
+  return cwdOverrideStorage.getStore()
+}
+
+/**
  * Get the current working directory
  */
 export function pwd(): string {

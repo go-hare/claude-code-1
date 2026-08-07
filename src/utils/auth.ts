@@ -1529,6 +1529,15 @@ function recordRemoteAuthFailExit(recovered: boolean): 'continue' | 'exit' {
   return result.decision
 }
 
+/**
+ * densable T9r — clear the remote OAuth 401 fail-exit timer after a
+ * successful sideQuery recover+retry (or any recovered auth path that
+ * should reset the zombie-exit clock without going through WYt).
+ */
+export function clearRemoteAuthFailExitTimer(): void {
+  remoteAuthFailFirstAtMs = null
+}
+
 /** Test helper — reset official cjt state. */
 export function _resetRemoteAuthFailExitStateForTesting(): void {
   remoteAuthFailFirstAtMs = null
@@ -1864,6 +1873,32 @@ export function hasProfileScope(): boolean {
   return (
     getClaudeAIOAuthTokens()?.scopes?.includes(CLAUDE_AI_PROFILE_SCOPE) ?? false
   )
+}
+
+/**
+ * densable 2.1.216 pure form of `JKn` scope set accepted by
+ * `/api/oauth/validate` for Claude-in-Chrome bridge.
+ * Accepts user:profile (WCe) | user:office | user:ccr_inference.
+ * Env-var / setup-token sessions default to user:inference only → false.
+ */
+export function oauthScopesAcceptedByValidate(
+  scopes: string[] | null | undefined,
+): boolean {
+  return (
+    Array.isArray(scopes) &&
+    (scopes.includes(CLAUDE_AI_PROFILE_SCOPE) ||
+      scopes.includes('user:office') ||
+      scopes.includes('user:ccr_inference'))
+  )
+}
+
+/**
+ * densable `JKn()` — token scopes accepted by Chrome oauth validate.
+ * Gate Chrome enable (`yhn`) so missing-scope sessions never wire MCP and
+ * 403-reconnect-loop.
+ */
+export function hasOauthValidateAcceptedScope(): boolean {
+  return oauthScopesAcceptedByValidate(getClaudeAIOAuthTokens()?.scopes)
 }
 
 export function is1PApiCustomer(): boolean {

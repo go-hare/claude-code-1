@@ -88,6 +88,9 @@ export type PersistentState = {
 /**
  * Recorded change for dot-repeat.
  * Captures everything needed to replay a command.
+ *
+ * densable 2.1.216: change-operators may carry `insertedText` (typed after `c`);
+ * `paste` records p/P; `visualChange` records visual-mode change + insert.
  */
 export type RecordedChange =
   | { type: 'insert'; text: string }
@@ -96,6 +99,7 @@ export type RecordedChange =
       op: Operator
       motion: string
       count: number
+      insertedText?: string
     }
   | {
       type: 'operatorTextObj'
@@ -103,6 +107,7 @@ export type RecordedChange =
       objType: string
       scope: TextObjScope
       count: number
+      insertedText?: string
     }
   | {
       type: 'operatorFind'
@@ -110,6 +115,7 @@ export type RecordedChange =
       find: FindType
       char: string
       count: number
+      insertedText?: string
     }
   | { type: 'replace'; char: string; count: number }
   | { type: 'x'; count: number }
@@ -117,6 +123,34 @@ export type RecordedChange =
   | { type: 'indent'; dir: '>' | '<'; count: number }
   | { type: 'openLine'; direction: 'above' | 'below' }
   | { type: 'join'; count: number }
+  | { type: 'paste'; after: boolean; count: number }
+  | {
+      type: 'visualChange'
+      from: number
+      to: number
+      linewise: boolean
+      text: string
+    }
+
+/**
+ * densable Poa — operators that enter INSERT (change / openLine / substitute).
+ * Used so Esc after `c` merges typed text into lastChange instead of overwriting.
+ */
+export function isChangeOperatorRecord(
+  change: RecordedChange | null | undefined,
+): boolean {
+  if (!change) return false
+  switch (change.type) {
+    case 'openLine':
+      return true
+    case 'operator':
+    case 'operatorFind':
+    case 'operatorTextObj':
+      return change.op === 'change'
+    default:
+      return false
+  }
+}
 
 // ============================================================================
 // Key Groups - Named constants, no magic strings

@@ -19,6 +19,17 @@ export type FileState = {
    * equality (xOe) compares hashes instead of full strings.
    */
   contentHash?: string
+  /**
+   * densable contentNotInModelContext — true when cache holds disk bytes the
+   * model never saw (e.g. Edit pre-image, auto-injected strip). H1e/already_read
+   * must re-read so @-mention is not empty after file-modifying hooks/tools.
+   */
+  contentNotInModelContext?: boolean
+  /**
+   * densable contentLength — optional; empty content is only "full enough" when
+   * contentLength is 0 (truly empty file), not when content was stripped.
+   */
+  contentLength?: number
 }
 
 /** densable DAu — content fingerprint for xOe. */
@@ -33,6 +44,10 @@ export function fileStateContentHash(content: string): string {
  * (so the whole file was returned).
  */
 export function isFullEnoughFileRead(state: FileState): boolean {
+  // densable H1e = mGe(e) && !e.contentNotInModelContext
+  if (state.contentNotInModelContext) {
+    return false
+  }
   if ((state.offset ?? 1) > 1 || state.isPartialView) {
     return false
   }

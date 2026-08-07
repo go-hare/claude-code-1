@@ -187,6 +187,11 @@ import {
   outputSchema as permissionToolOutputSchema,
   permissionPromptToolResultToPermissionDecision,
 } from 'src/utils/permissions/PermissionPromptToolResultSchema.js'
+import {
+  canUseToolAbortedDenyReason,
+  canUseToolInvalidResultDenyReason,
+  PERMISSION_RESULT_SHAPE_HINT,
+} from 'src/utils/permissions/permissionDecisionReasons.js'
 import { createAbortController } from 'src/utils/abortController.js'
 import { createCombinedAbortSignal } from 'src/utils/combinedAbortSignal.js'
 import { generateSessionTitle } from 'src/utils/sessionTitle.js'
@@ -357,6 +362,7 @@ import {
   fileHistoryCanRestore,
   fileHistoryEnabled,
   fileHistoryGetDiffStats,
+  formatRewindSkippedLinksCliWarning,
 } from 'src/utils/fileHistory.js'
 import {
   restoreAgentFromSession,
@@ -871,6 +877,14 @@ export async function runHeadless(
     }
   }
 
+  // densable tuu/o0g: only when unavailable is absent; needs getConfig after init.
+  if (!sandboxUnavailableReason) {
+    const maskCredentialWarning = SandboxManager.getMaskCredentialWarning()
+    if (maskCredentialWarning) {
+      process.stderr.write(`\n⚠ ${maskCredentialWarning}\n`)
+    }
+  }
+
   if (options.outputFormat === 'stream-json' && options.verbose) {
     registerHookEventHandler(event => {
       const message: StdoutMessage = (() => {
@@ -1009,7 +1023,12 @@ export async function runHeadless(
       return
     }
 
-    // Rewind complete - exit successfully
+    // densable: Warning on stderr with TYn when skippedLinks > 0; success line clean
+    if (typeof result.skippedLinks === 'number' && result.skippedLinks > 0) {
+      process.stderr.write(
+        `${formatRewindSkippedLinksCliWarning(result.skippedLinks)}\n`,
+      )
+    }
     process.stdout.write(
       `Files rewound to state at message ${options.rewindFiles}\n`,
     )
@@ -1289,6 +1308,8 @@ function runHeadlessStreaming(
     workload?: string | undefined
     /** Official --reply-on-resume: auto-continue interrupted turn on resume. */
     replyOnResume?: boolean | undefined
+    /** densable #27 stream-json commands_changed emission gate */
+    outputFormat?: string | undefined
   },
   turnInterruptionState?: TurnInterruptionState,
   /**
@@ -1506,6 +1527,14 @@ function runHeadlessStreaming(
     logForDebugging(
       `[print.ts] Auto-resuming interrupted turn (kind: ${turnInterruptionState.kind}${options.replyOnResume ? ', reply-on-resume' : ''})`,
     )
+    // densable BJr: tengu_resume_interrupted_turn surface/kind
+    logEvent('tengu_resume_interrupted_turn', {
+      surface:
+        'print' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      kind: (turnInterruptionState.message.isMeta
+        ? 'synthetic_continue'
+        : 'resubmit') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
 
     // Remove the interrupted message and its sentinel, then re-enqueue so
     // the model sees it exactly once. For mid-turn interruptions, the
@@ -2206,12 +2235,46 @@ function runHeadlessStreaming(
     )
   }
 
+  // densable print aa/Wl — skill watcher → clear, reload, stream-json commands_changed
+  const emitCommandsChanged = (commands: Command[]) => {
+    // densable: if (!el || d.outputFormat !== "stream-json") return
+    if (options.outputFormat !== 'stream-json') return
+    // densable DVe: filter user-invocable, map name via userFacingName + aliases
+    const serialized = commands
+      .filter(cmd => cmd.userInvocable !== false)
+      .map(cmd => {
+        const face = getCommandName(cmd)
+        const qualified =
+          cmd.name !== face && cmd.name.includes(':') ? cmd.name : undefined
+        const aliases =
+          qualified && !cmd.aliases?.includes(qualified)
+            ? [...(cmd.aliases ?? []), qualified]
+            : cmd.aliases
+        return {
+          name: face,
+          description: formatDescriptionWithSource(cmd),
+          argumentHint: cmd.argumentHint || '',
+          aliases: aliases?.length ? aliases : undefined,
+        }
+      })
+    output.enqueue({
+      type: 'system',
+      subtype: 'commands_changed',
+      commands: serialized,
+      uuid: randomUUID(),
+      session_id: getSessionId(),
+    } as StdoutMessage)
+  }
+
   // Subscribe to skill changes for hot reloading
   const unsubscribeSkillChanges = skillChangeDetector.subscribe(() => {
     clearCommandsCache()
-    void getCommands(cwd()).then(newCommands => {
-      currentCommands = newCommands
-    })
+    void getCommands(cwd())
+      .then(newCommands => {
+        currentCommands = newCommands
+        emitCommandsChanged(newCommands)
+      })
+      .catch(logError)
   })
 
   // Proactive mode: schedule a tick to keep the model looping autonomously.
@@ -5279,16 +5342,14 @@ export function createCanUseToolWithPermissionPrompt(
       createCombinedAbortSignal(toolUseContext.abortController.signal)
 
     // Check if already aborted before starting the race
+    // densable Nnm: decisionReason g8t (other+h8t) → OTel user_abort, not
+    // permissionPromptTool (which would mis-count as user_reject).
     if (combinedSignal.aborted) {
       cleanupAbortListener()
       return {
         behavior: 'deny',
         message: 'Permission prompt was aborted.',
-        decisionReason: {
-          type: 'permissionPromptTool' as const,
-          permissionPromptToolName: tool.name,
-          toolResult: undefined,
-        },
+        decisionReason: canUseToolAbortedDenyReason,
       }
     }
 
@@ -5326,11 +5387,7 @@ export function createCanUseToolWithPermissionPrompt(
         return {
           behavior: 'deny',
           message: 'Permission prompt was aborted.',
-          decisionReason: {
-            type: 'permissionPromptTool' as const,
-            permissionPromptToolName: tool.name,
-            toolResult: undefined,
-          },
+          decisionReason: canUseToolAbortedDenyReason,
         }
       }
 
@@ -5353,10 +5410,24 @@ export function createCanUseToolWithPermissionPrompt(
           'Permission prompt tool returned an invalid result. Expected a single text block param with type="text" and a string text value.',
         )
       }
+      // densable Nnm: safeParse → schema-invalid deny with iNr (config), not throw
+      // (throw would bubble as unhandled / mis-count as user_reject).
+      const parsed = permissionToolOutputSchema().safeParse(
+        safeParseJSON(permissionToolResultBlockParam.content[0].text),
+      )
+      if (!parsed.success) {
+        logForDebugging(
+          `Permission prompt tool returned a schema-invalid result for ${tool.name}: ${parsed.error.message.slice(0, 2000)}`,
+          { level: 'error' },
+        )
+        return {
+          behavior: 'deny',
+          message: `The permission prompt tool returned an invalid permission result. ${PERMISSION_RESULT_SHAPE_HINT}`,
+          decisionReason: canUseToolInvalidResultDenyReason,
+        }
+      }
       return permissionPromptToolResultToPermissionDecision(
-        permissionToolOutputSchema().parse(
-          safeParseJSON(permissionToolResultBlockParam.content[0].text),
-        ),
+        parsed.data,
         permissionPromptTool,
         input,
         toolUseContext,
@@ -5443,6 +5514,65 @@ export function getCanUseToolFn(
   }
 }
 
+/**
+ * densable inl — full initialize payload for first init and reinit redelivery.
+ */
+async function buildSdkInitializeResponse(
+  commands: Command[],
+  agents: AgentDefinition[],
+  modelInfos: ModelInfo[],
+  options: { userSpecifiedModel?: string | undefined },
+  getAppState: () => AppState,
+): Promise<SDKControlInitializeResponse> {
+  const settings = getSettings_DEPRECATED()
+  const outputStyle = settings?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME
+  const availableOutputStyles = await getAllOutputStyles(getCwd())
+  const accountInfo = getAccountInformation()
+  const initResponse: SDKControlInitializeResponse = {
+    commands: commands
+      .filter(cmd => cmd.userInvocable !== false)
+      .map(cmd => ({
+        name: getCommandName(cmd),
+        description: formatDescriptionWithSource(cmd),
+        argumentHint: cmd.argumentHint || '',
+      })),
+    agents: agents.map(agent => ({
+      name: agent.agentType,
+      description: agent.whenToUse,
+      // 'inherit' is an internal sentinel; normalize to undefined for the public API
+      model: agent.model === 'inherit' ? undefined : agent.model,
+    })),
+    output_style: outputStyle,
+    available_output_styles: Object.keys(availableOutputStyles),
+    models: modelInfos as unknown as SDKControlInitializeResponse['models'],
+    account: {
+      email: accountInfo?.email,
+      organization: accountInfo?.organization,
+      subscriptionType: accountInfo?.subscription,
+      tokenSource: accountInfo?.tokenSource,
+      apiKeySource: accountInfo?.apiKeySource,
+      // getAccountInformation() returns undefined under 3P providers, so the
+      // other fields are all absent. apiProvider disambiguates "not logged
+      // in" (firstParty + tokenSource:none) from "3P, login not applicable".
+      apiProvider: getAPIProvider() as
+        | 'firstParty'
+        | 'bedrock'
+        | 'vertex'
+        | 'foundry',
+    },
+    pid: process.pid,
+  }
+
+  if (isFastModeEnabled() && isFastModeAvailable()) {
+    const appState = getAppState()
+    initResponse.fast_mode_state = getFastModeState(
+      options.userSpecifiedModel ?? null,
+      appState.fastMode,
+    )
+  }
+  return initResponse
+}
+
 async function handleInitializeRequest(
   request: SDKControlInitializeRequest,
   requestId: string,
@@ -5462,18 +5592,48 @@ async function handleInitializeRequest(
   agents: AgentDefinition[],
   getAppState: () => AppState,
 ): Promise<void> {
+  // densable 2.1.216 #5 / l1S: re-initialize after web idle returns **success**
+  // with full init payload + pending permission/dialog requests so the host
+  // redelivers AskUserQuestion / permission UI instead of re-asking or
+  // dropping the answer. Pre-216 error "Already initialized" broke CCR web.
   if (initialized) {
+    const {
+      buildReinitSuccessResponse,
+      reinitRedeliveryTelemetry,
+      TENG_U_REINIT_PENDING_REDELIVERY,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/sdkReinitRedelivery.js') as typeof import('../utils/sdkReinitRedelivery.js')
+    const pendingPermissionRequests =
+      structuredIO.getPendingPermissionRequests()
+    const pendingUserDialogRequests =
+      structuredIO.getPendingUserDialogRequests()
+    // densable M("tengu_reinit_pending_redelivery", { n_pending_*: Mh(len) })
+    // — local logEvent accepts numeric metadata directly.
+    logEvent(
+      TENG_U_REINIT_PENDING_REDELIVERY,
+      reinitRedeliveryTelemetry(
+        pendingPermissionRequests.length,
+        pendingUserDialogRequests.length,
+      ),
+    )
+    const initResponse = await buildSdkInitializeResponse(
+      commands,
+      agents,
+      modelInfos,
+      options,
+      getAppState,
+    )
     output.enqueue({
       type: 'control_response',
-      response: {
-        subtype: 'error',
-        error: 'Already initialized',
-        request_id: requestId,
-        pending_permission_requests:
-          structuredIO.getPendingPermissionRequests(),
-        pending_user_dialog_requests:
-          structuredIO.getPendingUserDialogRequests(),
-      },
+      response: buildReinitSuccessResponse({
+        requestId,
+        // SDKControlInitializeResponse is a structured object; control schema
+        // types response as Record<string, unknown>.
+        initResponse: initResponse as unknown as Record<string, unknown>,
+        pendingPermissionRequests,
+        pendingUserDialogRequests,
+      }),
     })
     return
   }
@@ -5538,12 +5698,6 @@ async function handleInitializeRequest(
     }
   }
 
-  const settings = getSettings_DEPRECATED()
-  const outputStyle = settings?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME
-  const availableOutputStyles = await getAllOutputStyles(getCwd())
-
-  // Get account information
-  const accountInfo = getAccountInformation()
   if (request.hooks) {
     const hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {}
     for (const [event, matchers] of Object.entries(request.hooks) as [
@@ -5580,48 +5734,13 @@ async function handleInitializeRequest(
       // densable optional
     }
   }
-  const initResponse: SDKControlInitializeResponse = {
-    commands: commands
-      .filter(cmd => cmd.userInvocable !== false)
-      .map(cmd => ({
-        name: getCommandName(cmd),
-        description: formatDescriptionWithSource(cmd),
-        argumentHint: cmd.argumentHint || '',
-      })),
-    agents: agents.map(agent => ({
-      name: agent.agentType,
-      description: agent.whenToUse,
-      // 'inherit' is an internal sentinel; normalize to undefined for the public API
-      model: agent.model === 'inherit' ? undefined : agent.model,
-    })),
-    output_style: outputStyle,
-    available_output_styles: Object.keys(availableOutputStyles),
-    models: modelInfos as unknown as SDKControlInitializeResponse['models'],
-    account: {
-      email: accountInfo?.email,
-      organization: accountInfo?.organization,
-      subscriptionType: accountInfo?.subscription,
-      tokenSource: accountInfo?.tokenSource,
-      apiKeySource: accountInfo?.apiKeySource,
-      // getAccountInformation() returns undefined under 3P providers, so the
-      // other fields are all absent. apiProvider disambiguates "not logged
-      // in" (firstParty + tokenSource:none) from "3P, login not applicable".
-      apiProvider: getAPIProvider() as
-        | 'firstParty'
-        | 'bedrock'
-        | 'vertex'
-        | 'foundry',
-    },
-    pid: process.pid,
-  }
-
-  if (isFastModeEnabled() && isFastModeAvailable()) {
-    const appState = getAppState()
-    initResponse.fast_mode_state = getFastModeState(
-      options.userSpecifiedModel ?? null,
-      appState.fastMode,
-    )
-  }
+  const initResponse = await buildSdkInitializeResponse(
+    commands,
+    agents,
+    modelInfos,
+    options,
+    getAppState,
+  )
 
   output.enqueue({
     type: 'control_response',
@@ -5686,7 +5805,8 @@ async function handleRewindFiles(
   }
 
   try {
-    await fileHistoryRewind(
+    // densable: real rewind returns filesChanged + skippedLinks (dryRun omits)
+    const { filesChanged, skippedLinks } = await fileHistoryRewind(
       updater =>
         setAppState(prev => ({
           ...prev,
@@ -5694,6 +5814,11 @@ async function handleRewindFiles(
         })),
       userMessageId,
     )
+    return {
+      canRewind: true,
+      filesChanged,
+      skippedLinks,
+    }
   } catch (error) {
     return {
       canRewind: false,
@@ -5701,8 +5826,6 @@ async function handleRewindFiles(
       filesChanged: [],
     }
   }
-
-  return { canRewind: true, filesChanged: [] }
 }
 
 function handleSetPermissionMode(

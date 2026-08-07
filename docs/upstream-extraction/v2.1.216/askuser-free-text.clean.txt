@@ -1,0 +1,29 @@
+getAskUserQuestionTimeout
+
+---
+
+## CRITICAL: Use AskUserQuestion for Ambiguity
+
+---
+
+yet. First use the AskUserQuestion tool to ask whether to run
+
+---
+
+When the user's request is ambiguous, use AskUserQuestion to clarify:
+
+---
+
+Check the environment and ask about each gap you find (use AskUserQuestion):
+
+---
+
+- Use AskUserQuestion for ALL questions! Never ask questions via plain text.
+
+---
+
+(for plan approval). Never ask about plan approval via text or AskUserQuestion.
+
+---
+
+You will use the AskUserQuestion to understand what the user wants to automate. Important notes:

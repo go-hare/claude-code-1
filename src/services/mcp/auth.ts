@@ -45,6 +45,7 @@ import { sleep } from '../../utils/sleep.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
+import { emitMcpNeedsReauth } from './mcpReauthSignal.js'
 import { buildRedirectUri, findAvailablePort } from './oauthPort.js'
 import type { McpHTTPServerConfig, McpSSEServerConfig } from './types.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
@@ -73,6 +74,9 @@ type MCPRefreshFailureReason =
   | 'no_client_info'
   | 'no_tokens_returned'
   | 'invalid_grant'
+  | 'invalid_client'
+  | 'unauthorized_client'
+  | 'concurrent_reregister'
   | 'transient_retries_exhausted'
   | 'request_failed'
 
@@ -472,10 +476,199 @@ async function revokeToken({
 }
 
 /**
- * Revokes tokens on the OAuth server if a revocation endpoint is available.
+ * densable QLu — snapshot currently stored MCP OAuth tokens for later
+ * server-side revoke-after-success (eMu). Does not clear local storage.
+ * densable 2.1.216 #19: re-auth must not revoke working credentials before
+ * the new sign-in succeeds.
+ */
+export type McpOAuthTokenSnapshot = {
+  accessToken?: string
+  refreshToken?: string
+  clientId?: string
+  clientSecret?: string
+  discoveryState?: {
+    authorizationServerUrl?: string
+  }
+}
+
+export async function snapshotMcpOAuthTokens(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+): Promise<McpOAuthTokenSnapshot | undefined> {
+  const entry =
+    getSecureStorage().read()?.mcpOAuth?.[
+      getServerKey(serverName, serverConfig)
+    ]
+  if (!entry?.accessToken && !entry?.refreshToken) return undefined
+  return {
+    accessToken: entry.accessToken || undefined,
+    refreshToken: entry.refreshToken,
+    clientId: entry.clientId,
+    clientSecret: entry.clientSecret,
+    ...(entry.discoveryState
+      ? {
+          discoveryState: {
+            authorizationServerUrl: entry.discoveryState.authorizationServerUrl,
+          },
+        }
+      : {}),
+  }
+}
+
+/**
+ * densable ZLu — server-side RFC 7009 revoke of the given token set only.
+ * Does **not** clear local secure storage (unlike revokeServerTokens / wat).
+ * Returns failure kind string or undefined on success / no-op path.
+ */
+export async function revokeTokensAtServer(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+  tokens: McpOAuthTokenSnapshot,
+): Promise<string | undefined> {
+  let failure: string | undefined
+  try {
+    const asUrl =
+      tokens.discoveryState?.authorizationServerUrl ?? serverConfig.url
+    const metadata = await fetchAuthServerMetadata(
+      serverName,
+      asUrl,
+      serverConfig.oauth?.authServerMetadataUrl,
+    )
+    if (!metadata) {
+      logMCPDebug(serverName, 'No OAuth metadata found')
+      failure = 'no_metadata'
+    } else {
+      const revocationEndpoint =
+        'revocation_endpoint' in metadata ? metadata.revocation_endpoint : null
+      if (!revocationEndpoint) {
+        logMCPDebug(serverName, 'Server does not support token revocation')
+        failure = 'no_revocation_endpoint'
+      } else {
+        const revocationEndpointStr = String(revocationEndpoint)
+        const authMethods =
+          ('revocation_endpoint_auth_methods_supported' in metadata
+            ? metadata.revocation_endpoint_auth_methods_supported
+            : undefined) ??
+          ('token_endpoint_auth_methods_supported' in metadata
+            ? metadata.token_endpoint_auth_methods_supported
+            : undefined)
+        const authMethod: 'client_secret_basic' | 'client_secret_post' =
+          authMethods &&
+          !authMethods.includes('client_secret_basic') &&
+          authMethods.includes('client_secret_post')
+            ? 'client_secret_post'
+            : 'client_secret_basic'
+        logMCPDebug(
+          serverName,
+          `Revoking tokens via ${revocationEndpointStr} (${authMethod})`,
+        )
+        if (tokens.refreshToken) {
+          try {
+            await revokeToken({
+              serverName,
+              endpoint: revocationEndpointStr,
+              token: tokens.refreshToken,
+              tokenTypeHint: 'refresh_token',
+              clientId: tokens.clientId,
+              clientSecret: tokens.clientSecret,
+              accessToken: tokens.accessToken,
+              authMethod,
+            })
+          } catch (error: unknown) {
+            logMCPDebug(
+              serverName,
+              `Failed to revoke refresh token: ${errorMessage(error)}`,
+            )
+            failure = 'server_revoke_failed'
+          }
+        }
+        if (tokens.accessToken) {
+          try {
+            await revokeToken({
+              serverName,
+              endpoint: revocationEndpointStr,
+              token: tokens.accessToken,
+              tokenTypeHint: 'access_token',
+              clientId: tokens.clientId,
+              clientSecret: tokens.clientSecret,
+              accessToken: tokens.accessToken,
+              authMethod,
+            })
+          } catch (error: unknown) {
+            logMCPDebug(
+              serverName,
+              `Failed to revoke access token: ${errorMessage(error)}`,
+            )
+            failure = 'server_revoke_failed'
+          }
+        }
+      }
+    }
+  } catch (error: unknown) {
+    logMCPDebug(serverName, `Failed to revoke tokens: ${errorMessage(error)}`)
+    failure = 'server_revoke_failed'
+  }
+  return failure
+}
+
+/**
+ * densable eMu — after successful re-auth reconnect, revoke only the
+ * **replaced** (pre-OAuth) tokens if they differ from the newly stored set.
+ * Never clears the new local credentials.
+ */
+export async function revokeReplacedMcpTokens(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+  previous: McpOAuthTokenSnapshot,
+): Promise<void> {
+  let failure: string | undefined
+  try {
+    const current =
+      getSecureStorage().read()?.mcpOAuth?.[
+        getServerKey(serverName, serverConfig)
+      ]
+    const toRevoke: McpOAuthTokenSnapshot = {
+      ...previous,
+      accessToken:
+        previous.accessToken && previous.accessToken !== current?.accessToken
+          ? previous.accessToken
+          : undefined,
+      refreshToken:
+        previous.refreshToken && previous.refreshToken !== current?.refreshToken
+          ? previous.refreshToken
+          : undefined,
+    }
+    if (!toRevoke.accessToken && !toRevoke.refreshToken) {
+      logMCPDebug(serverName, 'No replaced tokens to revoke')
+      logEvent('mcp_oauth_revoke', {})
+      return
+    }
+    failure = await revokeTokensAtServer(serverName, serverConfig, toRevoke)
+  } catch (error: unknown) {
+    logMCPDebug(
+      serverName,
+      `Failed to revoke replaced tokens: ${errorMessage(error)}`,
+    )
+    failure = 'server_revoke_failed'
+  }
+  if (failure) {
+    logEvent('mcp_oauth_revoke', {
+      failure:
+        failure as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  } else {
+    logEvent('mcp_oauth_revoke', {})
+  }
+}
+
+/**
+ * densable wat — clear-auth path: revoke current tokens on server + clear local.
  * Per RFC 7009, we revoke the refresh token first (the long-lived credential),
  * then the access token. Revoking the refresh token prevents generation of new
  * access tokens and many servers implicitly invalidate associated access tokens.
+ *
+ * Do **not** use this before interactive re-auth (2.1.216 #19) — use
+ * snapshotMcpOAuthTokens + revokeReplacedMcpTokens after connected instead.
  */
 export async function revokeServerTokens(
   serverName: string,
@@ -491,96 +684,20 @@ export async function revokeServerTokens(
 
   // Attempt server-side revocation if there are tokens to revoke (best-effort)
   if (tokenData?.accessToken || tokenData?.refreshToken) {
-    try {
-      // For XAA (and any PRM-discovered auth), the AS is at a different host
-      // than the MCP URL — use the persisted discoveryState if we have it.
-      const asUrl =
-        tokenData.discoveryState?.authorizationServerUrl ?? serverConfig.url
-      const metadata = await fetchAuthServerMetadata(
-        serverName,
-        asUrl,
-        serverConfig.oauth?.authServerMetadataUrl,
-      )
-
-      if (!metadata) {
-        logMCPDebug(serverName, 'No OAuth metadata found')
-      } else {
-        const revocationEndpoint =
-          'revocation_endpoint' in metadata
-            ? metadata.revocation_endpoint
-            : null
-        if (!revocationEndpoint) {
-          logMCPDebug(serverName, 'Server does not support token revocation')
-        } else {
-          const revocationEndpointStr = String(revocationEndpoint)
-          // RFC 7009 defines revocation_endpoint_auth_methods_supported
-          // separately from the token endpoint's list; prefer it if present.
-          const authMethods =
-            ('revocation_endpoint_auth_methods_supported' in metadata
-              ? metadata.revocation_endpoint_auth_methods_supported
-              : undefined) ??
-            ('token_endpoint_auth_methods_supported' in metadata
-              ? metadata.token_endpoint_auth_methods_supported
-              : undefined)
-          const authMethod: 'client_secret_basic' | 'client_secret_post' =
-            authMethods &&
-            !authMethods.includes('client_secret_basic') &&
-            authMethods.includes('client_secret_post')
-              ? 'client_secret_post'
-              : 'client_secret_basic'
-          logMCPDebug(
-            serverName,
-            `Revoking tokens via ${revocationEndpointStr} (${authMethod})`,
-          )
-
-          // Revoke refresh token first (more important - prevents future access token generation)
-          if (tokenData.refreshToken) {
-            try {
-              await revokeToken({
-                serverName,
-                endpoint: revocationEndpointStr,
-                token: tokenData.refreshToken,
-                tokenTypeHint: 'refresh_token',
-                clientId: tokenData.clientId,
-                clientSecret: tokenData.clientSecret,
-                accessToken: tokenData.accessToken,
-                authMethod,
-              })
-            } catch (error: unknown) {
-              // Log but continue
-              logMCPDebug(
-                serverName,
-                `Failed to revoke refresh token: ${errorMessage(error)}`,
-              )
-            }
+    await revokeTokensAtServer(serverName, serverConfig, {
+      accessToken: tokenData.accessToken || undefined,
+      refreshToken: tokenData.refreshToken,
+      clientId: tokenData.clientId,
+      clientSecret: tokenData.clientSecret,
+      ...(tokenData.discoveryState
+        ? {
+            discoveryState: {
+              authorizationServerUrl:
+                tokenData.discoveryState.authorizationServerUrl,
+            },
           }
-
-          // Then revoke access token (may already be invalidated by refresh token revocation)
-          if (tokenData.accessToken) {
-            try {
-              await revokeToken({
-                serverName,
-                endpoint: revocationEndpointStr,
-                token: tokenData.accessToken,
-                tokenTypeHint: 'access_token',
-                clientId: tokenData.clientId,
-                clientSecret: tokenData.clientSecret,
-                accessToken: tokenData.accessToken,
-                authMethod,
-              })
-            } catch (error: unknown) {
-              logMCPDebug(
-                serverName,
-                `Failed to revoke access token: ${errorMessage(error)}`,
-              )
-            }
-          }
-        }
-      }
-    } catch (error: unknown) {
-      // Log error but don't throw - revocation is best-effort
-      logMCPDebug(serverName, `Failed to revoke tokens: ${errorMessage(error)}`)
-    }
+        : {}),
+    })
   } else {
     logMCPDebug(serverName, 'No tokens to revoke')
   }
@@ -2187,6 +2304,43 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     }
   }
 
+  /**
+   * densable readConcurrentRefreshWinner — another process may have rotated
+   * tokens while this refresh failed. Prefer those if access is still fresh
+   * (null expiry or >5min remaining).
+   */
+  private async readConcurrentRefreshWinner(): Promise<{
+    tokenData: NonNullable<SecureStorageData['mcpOAuth']>[string] | undefined
+    freshTokens: OAuthTokens | undefined
+  }> {
+    clearKeychainCache()
+    const storage = getSecureStorage()
+    const data = storage.read()
+    const serverKey = getServerKey(this.serverName, this.serverConfig)
+    const tokenData = data?.mcpOAuth?.[serverKey]
+    const expiresIn =
+      tokenData?.expiresAt != null
+        ? (tokenData.expiresAt - Date.now()) / 1000
+        : undefined
+    if (tokenData?.accessToken && (expiresIn == null || expiresIn > 300)) {
+      logMCPDebug(
+        this.serverName,
+        `Another process landed fresh tokens; using those`,
+      )
+      return {
+        tokenData,
+        freshTokens: {
+          access_token: tokenData.accessToken,
+          refresh_token: tokenData.refreshToken,
+          expires_in: expiresIn,
+          scope: tokenData.scope,
+          token_type: 'Bearer',
+        },
+      }
+    }
+    return { tokenData, freshTokens: undefined }
+  }
+
   private async _doRefresh(
     refreshToken: string,
   ): Promise<OAuthTokens | undefined> {
@@ -2221,6 +2375,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     }
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      // densable `i` — client used for this refresh attempt; catch compares
+      // storage clientId against this, not a re-read (concurrent re-register).
+      let refreshClientInfo: OAuthClientInformation | undefined
       try {
         logMCPDebug(this.serverName, `Starting token refresh`)
         const authFetch = createAuthFetch()
@@ -2268,8 +2425,8 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         // Cache for future refreshes
         this._metadata = metadata
 
-        const clientInfo = await this.clientInformation()
-        if (!clientInfo) {
+        refreshClientInfo = await this.clientInformation()
+        if (!refreshClientInfo) {
           logMCPDebug(this.serverName, `No client information available`)
           emitRefreshEvent('failure', 'no_client_info')
           return undefined
@@ -2279,7 +2436,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           new URL(this.serverConfig.url),
           {
             metadata,
-            clientInformation: clientInfo,
+            clientInformation: refreshClientInfo,
             refreshToken,
             resource: new URL(this.serverConfig.url),
             fetchFn: authFetch,
@@ -2299,34 +2456,16 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       } catch (error) {
         // Invalid grant means the refresh token itself is invalid/revoked/expired.
         // But another process may have already refreshed successfully — check first.
+        // densable 2.1.216: on permanent clear → t7r.emit(serverName) for UI reauth.
         if (error instanceof InvalidGrantError) {
           logMCPDebug(
             this.serverName,
             `Token refresh failed with invalid_grant: ${error.message}`,
           )
-          clearKeychainCache()
-          const storage = getSecureStorage()
-          const data = storage.read()
-          const serverKey = getServerKey(this.serverName, this.serverConfig)
-          const tokenData = data?.mcpOAuth?.[serverKey]
-          if (tokenData) {
-            const expiresIn = (tokenData.expiresAt - Date.now()) / 1000
-            if (expiresIn > 300) {
-              logMCPDebug(
-                this.serverName,
-                `Another process refreshed tokens, using those`,
-              )
-              // Not emitted as success: this process did not perform a
-              // refresh, and the winning process already emitted its own
-              // success event. Emitting here would double-count.
-              return {
-                access_token: tokenData.accessToken,
-                refresh_token: tokenData.refreshToken,
-                expires_in: expiresIn,
-                scope: tokenData.scope,
-                token_type: 'Bearer',
-              }
-            }
+          const { freshTokens } = await this.readConcurrentRefreshWinner()
+          if (freshTokens) {
+            // Concurrent winner — do not emit reauth toast or failure.
+            return freshTokens
           }
           logMCPDebug(
             this.serverName,
@@ -2334,6 +2473,45 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           )
           await this.invalidateCredentials('tokens')
           emitRefreshEvent('failure', 'invalid_grant')
+          emitMcpNeedsReauth(this.serverName)
+          return undefined
+        }
+
+        // densable: invalid_client / unauthorized_client → clear all + t7r.emit
+        // (DCR client expired). Concurrent re-register preserves without emit.
+        if (
+          error instanceof OAuthError &&
+          (error.errorCode === 'invalid_client' ||
+            error.errorCode === 'unauthorized_client')
+        ) {
+          logMCPDebug(
+            this.serverName,
+            `Token refresh failed: DCR client expired or invalid; clearing stored client registration`,
+          )
+          const { tokenData, freshTokens } =
+            await this.readConcurrentRefreshWinner()
+          if (freshTokens) {
+            return freshTokens
+          }
+          if (
+            tokenData?.clientId &&
+            refreshClientInfo &&
+            tokenData.clientId !== refreshClientInfo.client_id
+          ) {
+            logMCPDebug(
+              this.serverName,
+              `Another process re-registered client; preserving`,
+            )
+            emitRefreshEvent('failure', 'concurrent_reregister')
+            return undefined
+          }
+          const reason: MCPRefreshFailureReason =
+            error.errorCode === 'unauthorized_client'
+              ? 'unauthorized_client'
+              : 'invalid_client'
+          emitRefreshEvent('failure', reason)
+          await this.invalidateCredentials('all')
+          emitMcpNeedsReauth(this.serverName)
           return undefined
         }
 

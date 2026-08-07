@@ -309,19 +309,51 @@ export function buildYoloRejectionMessage(reason: string): string {
 }
 
 /**
- * Build a message for when the auto mode classifier is temporarily unavailable.
+ * densable f6d(httpStatus, errorKind) — extension point for detail suffix after
+ * "temporarily unavailable". Empty body in densable 2.1.216 (do NOT invent
+ * user-facing "HTTP 401" text).
+ */
+export function formatClassifierUnavailableDetail(
+  _httpStatus?: number,
+  _errorKind?: string,
+): string {
+  return ''
+}
+
+/**
+ * densable hUd — auto mode classifier temporarily unavailable (main path).
  * Tells the agent to wait and retry, and suggests working on other tasks.
+ * Signature: (toolName, model, httpStatus?, errorKind?) — f6d detail empty in 216.
  */
 export function buildClassifierUnavailableMessage(
   toolName: string,
   classifierModel: string,
+  httpStatus?: number,
+  errorKind?: string,
 ): string {
+  const detail = formatClassifierUnavailableDetail(httpStatus, errorKind)
   return (
-    `${classifierModel} is temporarily unavailable, so auto mode cannot determine the safety of ${toolName} right now. ` +
+    `${classifierModel} is temporarily unavailable${detail}, so auto mode cannot determine the safety of ${toolName} right now. ` +
     `Wait briefly and then try this action again. ` +
     `If it keeps failing, continue with other tasks that don't require this action and come back to it later. ` +
     `Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used.`
   )
+}
+
+/**
+ * densable CYu — handoff allow-with-warning when classifier is unavailable.
+ * Distinct from main-path fail-closed deny (hUd).
+ */
+export function buildHandoffClassifierUnavailableMessage(
+  classifierModel?: string,
+  httpStatus?: number,
+  errorKind?: string,
+): string {
+  const detail = formatClassifierUnavailableDetail(httpStatus, errorKind)
+  const who = classifierModel
+    ? `${classifierModel} (the safety classifier)`
+    : 'The safety classifier'
+  return `Note: ${who} was unavailable${detail} when reviewing this subagent's work. Please carefully verify the subagent's actions and output before acting on them.`
 }
 
 export const SYNTHETIC_MODEL = '<synthetic>'
@@ -2392,6 +2424,23 @@ export function normalizeMessagesForAPI(
   }
 
   const result: (UserMessage | AssistantMessage | ApiSystemMessage)[] = []
+  // densable 2.1.216 LN — linear same-id assistant merge (Map + cursor).
+  // Replaces 215 reverse for-loop O(n) per assistant → O(n²) stalls.
+  // Segment ends on non-assistant that is not api_system and not tool_result
+  // user; those two types are TRANSPARENT (do not clear the map).
+  const assistantIdToIndex = new Map<string, number>()
+  let mapScanFrom = 0
+  const advanceAssistantIdMap = (): void => {
+    for (; mapScanFrom < result.length; mapScanFrom++) {
+      const y = result[mapScanFrom]!
+      if (y.type === 'assistant') {
+        assistantIdToIndex.set(y.message.id ?? '', mapScanFrom)
+      } else if (y.type !== 'api_system' && !isToolResultMessage(y)) {
+        assistantIdToIndex.clear()
+      }
+      // api_system + tool_result users: transparent — keep map
+    }
+  }
   // densable w — pure-text meta buffer flushed into api_system after user
   const metaBuffer: string[] = []
   let emittedApiSystem = false
@@ -2677,21 +2726,21 @@ export function normalizeMessagesForAPI(
             },
           }
 
-          // densable: skip over trailing api_system when merging same-id assistants
-          for (let i = result.length - 1; i >= 0; i--) {
-            const msg = result[i]!
-
-            if (msg.type === 'api_system') {
-              continue
-            }
-            if (msg.type !== 'assistant') {
-              break
-            }
-
-            if (msg.message.id === normalizedMessage.message.id) {
-              result[i] = mergeAssistantMessages(msg, normalizedMessage)
-              return
-            }
+          // densable 2.1.216 LN: Map lookup (linear) instead of reverse walk.
+          // tool_result users + api_system are transparent; real users clear.
+          advanceAssistantIdMap()
+          const mergeIdx = assistantIdToIndex.get(
+            normalizedMessage.message.id ?? '',
+          )
+          if (
+            mergeIdx !== undefined &&
+            result[mergeIdx]?.type === 'assistant'
+          ) {
+            result[mergeIdx] = mergeAssistantMessages(
+              result[mergeIdx] as AssistantMessage,
+              normalizedMessage,
+            )
+            return
           }
 
           // densable I() — flush meta buffer before a new assistant turn
@@ -2892,7 +2941,10 @@ export function mergeAssistantMessages(
   }
 }
 
-function isToolResultMessage(msg: Message): boolean {
+function isToolResultMessage(msg: {
+  type: string
+  message?: { content?: unknown }
+}): boolean {
   if (msg.type !== 'user') {
     return false
   }

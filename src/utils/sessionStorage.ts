@@ -269,8 +269,49 @@ function getAgentMetadataPath(agentId: AgentId): string {
 
 export type AgentMetadata = {
   agentType: string
+  /**
+   * densable `isFork` — true when spawn was FORK_AGENT (agentType "fork").
+   * Aye: `S?.isFork===true` short-circuits type lookup and forces fork
+   * system-prompt + exact tool pool restore (prevents default-agent revert).
+   */
+  isFork?: boolean
   /** Worktree path if the agent was spawned with isolation: "worktree" */
   worktreePath?: string
+  /** densable worktree branch name (paired with worktreePath). */
+  worktreeBranch?: string
+  /**
+   * densable `cwd` — explicit cwd when not worktree-isolated (or host cwd
+   * snapshot). Resume prefers meta.cwd, else live worktree path.
+   */
+  cwd?: string
+  /**
+   * densable `spawnMode` — worker permission mode at spawn (Aye mode chain:
+   * observerCap ?? workerPermissionMode ?? spawnMode ?? agent.permissionMode).
+   */
+  spawnMode?: string
+  /**
+   * densable `permissionMode` on agent_metadata mirror — agent definition
+   * permission mode snapshot when present.
+   */
+  permissionMode?: string
+  /** densable model pin for non-observer resume (`S?.model`). */
+  model?: string
+  /** densable spawnDepth for nested agent analytics / depth caps. */
+  spawnDepth?: number
+  /** densable parentAgentId lineage. */
+  parentAgentId?: string
+  /** densable tool_use id that spawned this agent. */
+  toolUseId?: string
+  /** densable taskKind (workflow/teammate/etc.) when set. */
+  taskKind?: string
+  /** densable teamName for swarm teammates. */
+  teamName?: string
+  /** densable color label. */
+  color?: string
+  /** densable planModeRequired flag. */
+  planModeRequired?: boolean
+  /** densable customAgentType when agentType is a generic wrapper. */
+  customAgentType?: string
   /** Original task description from the AgentTool input. Persisted so a
    * resumed agent's notification can show the original description instead
    * of a placeholder. Optional — older metadata files lack this field. */
@@ -306,21 +347,50 @@ export type AgentMetadata = {
 }
 
 /**
- * Persist the agentType used to launch a subagent. Read by resume to
- * route correctly when subagent_type is omitted — without this, resuming
- * a fork silently degrades to general-purpose (4KB system prompt, no
- * inherited history). Sidecar file avoids JSONL schema changes.
+ * densable `$Ns` — observer pairing keys preserved across full sidecar
+ * rewrites (H4d). When a write omits these, keep prior values so runAgent
+ * spawn metadata cannot clobber observer pointer/tombstone fields.
+ */
+export const AGENT_METADATA_PRESERVE_KEYS = [
+  'isObserver',
+  'observerStopped',
+  'observerTaskId',
+  'armingPermissionMode',
+] as const satisfies ReadonlyArray<keyof AgentMetadata>
+
+/**
+ * Persist agent identity used to launch a subagent. Read by resume to
+ * restore prompt + tool restrictions — without agentType/isFork/model,
+ * resuming silently degrades to general-purpose (changelog #7). Sidecar
+ * file avoids JSONL schema changes.
  *
- * Also stores the worktreePath when the agent was spawned with worktree
- * isolation, enabling resume to restore the correct cwd.
+ * densable H4d: when the write omits `$Ns` observer keys, merge prior
+ * values from disk so spawn rewrites cannot drop observer pairing state.
  */
 export async function writeAgentMetadata(
   agentId: AgentId,
   metadata: AgentMetadata,
 ): Promise<void> {
   const path = getAgentMetadataPath(agentId)
+  let toWrite: AgentMetadata = metadata
+  if (AGENT_METADATA_PRESERVE_KEYS.some(key => metadata[key] === undefined)) {
+    try {
+      const prev = await readAgentMetadata(agentId)
+      if (prev) {
+        let merged = metadata
+        for (const key of AGENT_METADATA_PRESERVE_KEYS) {
+          if (metadata[key] === undefined && prev[key] !== undefined) {
+            merged = { ...merged, [key]: prev[key] }
+          }
+        }
+        toWrite = merged
+      }
+    } catch {
+      // Best-effort preserve; fall through to write as given.
+    }
+  }
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(metadata))
+  await writeFile(path, JSON.stringify(toWrite))
 }
 
 export async function readAgentMetadata(

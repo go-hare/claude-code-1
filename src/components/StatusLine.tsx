@@ -441,8 +441,15 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     );
   }, [doUpdate]);
 
+  // densable 2.1.216: skip first effect fire so mount's doUpdate() is the only
+  // initial statusline run (avoids double shell on resume/mount).
+  const skipFirstStatusDepsEffect = useRef(true);
   // Only trigger update when assistant message, permission mode, vim mode, or model actually changes
   useEffect(() => {
+    if (skipFirstStatusDepsEffect.current) {
+      skipFirstStatusDepsEffect.current = false;
+      return;
+    }
     if (
       lastAssistantMessageId !== previousStateRef.current.messageId ||
       permissionMode !== previousStateRef.current.permissionMode ||

@@ -395,8 +395,9 @@ export function validatePath(
   // Remove surrounding quotes if present
   const cleanPath = expandTilde(path.replace(/^['"]|['"]$/g, ''))
 
-  // SECURITY: Block UNC paths that could leak credentials
-  if (containsVulnerableUncPath(cleanPath)) {
+  // densable Rjr: sI(path, /* forPath */ true) — path-mode UNC (network paths)
+  // must not auto-allow even for read-only commands on Windows.
+  if (containsVulnerableUncPath(cleanPath, true)) {
     return {
       allowed: false,
       resolvedPath: cleanPath,
@@ -426,19 +427,18 @@ export function validatePath(
     }
   }
 
-  // SECURITY: Reject paths containing ANY shell expansion syntax ($ or % characters,
-  // or paths starting with = which triggers Zsh equals expansion)
-  // - $VAR (Unix/Linux environment variables like $HOME, $PWD)
-  // - ${VAR} (brace expansion)
-  // - $(cmd) (command substitution)
-  // - %VAR% (Windows environment variables like %TEMP%, %USERPROFILE%)
-  // - Nested combinations like $(echo $HOME)
-  // - =cmd (Zsh equals expansion, e.g. =rg expands to /usr/bin/rg)
-  // All of these are preserved as literal strings during validation but expanded
-  // by the shell during execution, creating a TOCTOU vulnerability
+  // densable Rjr expansion gate:
+  //   o.includes("$") || (windows && o.includes("%")) || o.includes("`") || o.startsWith("=")
+  // - $VAR / ${VAR} / $(cmd) — Unix env / command substitution
+  // - %VAR% — Windows env (windows-only, densable)
+  // - `cmd` — backtick command substitution
+  // - =cmd — Zsh equals expansion
+  // Literals here are expanded by the shell at exec time → TOCTOU if we only
+  // validate the unexpanded form.
   if (
     cleanPath.includes('$') ||
-    cleanPath.includes('%') ||
+    (getPlatform() === 'windows' && cleanPath.includes('%')) ||
+    cleanPath.includes('`') ||
     cleanPath.startsWith('=')
   ) {
     return {

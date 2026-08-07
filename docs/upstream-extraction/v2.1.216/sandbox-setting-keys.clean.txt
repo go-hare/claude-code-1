@@ -1,0 +1,29 @@
+is in sandbox.network.deniedDomains
+
+---
+
+[sandbox] Blocked network request to
+
+---
+
+sandbox.network.allowManagedDomainsOnly is set and
+
+---
+
+Auto mode classifier blocked sandbox network access to
+
+---
+
+Couldn't install the sandbox user and network filters:
+
+---
+
+Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced.
+
+---
+
+Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced.
+
+---
+
+Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced.

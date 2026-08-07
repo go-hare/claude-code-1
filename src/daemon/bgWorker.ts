@@ -647,11 +647,9 @@ export function connectRendezvous(
 // ---------------------------------------------------------------------------
 
 /** Daemon instance directory — official: ~/.claude/daemon/bg/ */
-let _instanceDir: string | undefined
+/** densable U1e-style instance root — always derive from config home (no sticky cache). */
 export function getDaemonInstanceDir(): string {
-  if (_instanceDir) return _instanceDir
-  _instanceDir = join(getClaudeConfigHomeDir(), 'daemon', 'bg')
-  return _instanceDir
+  return join(getClaudeConfigHomeDir(), 'daemon', 'bg')
 }
 
 /** PTY socket directory — official u__() */
@@ -892,14 +890,26 @@ export function killPtyHost(sockPath: string): Promise<boolean> {
       finish(false)
     })
     sock.on('error', () => {
+      // densable bNt error path: sock + .err + .err.read + .late
       unlink(sockPath).catch(() => {})
-      unlink(getPtyErrPath(sockPath)).catch(() => {})
+      const errPath = getPtyErrPath(sockPath)
+      unlink(errPath).catch(() => {})
+      unlink(`${errPath}.read`).catch(() => {})
+      const latePath =
+        process.platform === 'win32'
+          ? join(
+              getDaemonConfigDir(),
+              'pty-pids',
+              `${sockPath.split('\\').pop()}.late`,
+            )
+          : `${sockPath}.late`
+      unlink(latePath).catch(() => {})
       finish(false)
     })
     sock.once('connect', () => {
       sock.resume()
       sock.write(encodeCtrlFrame({ t: 'kill', sig: 'SIGTERM' }))
-      sock.end()
+      // densable bNt: write kill frame and wait for close (do not sock.end())
     })
     sock.once('close', () => finish(true))
     sock.connect(sockPath)

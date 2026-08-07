@@ -1604,77 +1604,100 @@ export const EXTERNAL_READONLY_COMMANDS: readonly string[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Check if a path or command contains a UNC path that could trigger network
- * requests (NTLM/Kerberos credential leakage, WebDAV attacks).
+ * densable 2.1.216 `sI(e, t=!1)` — UNC / network-path detection for Windows.
  *
- * This function detects:
- * - Basic UNC paths: \\server\share, \\foo.com\file
- * - WebDAV patterns: \\server@SSL@8443\, \\server@8443@SSL\, \\server\DavWWWRoot\
- * - IP-based UNC: \\192.168.1.1\share, \\[2001:db8::1]\share
- * - Forward-slash variants: //server/share
+ * Detects paths that can trigger network requests (NTLM/Kerberos credential
+ * leakage, WebDAV attacks):
+ * - Basic UNC: `\\server\share`, `//server/share`
+ * - WebDAV: `\\server@SSL@8443\`, `\\server\DavWWWRoot\`
+ * - IP-based: `\\192.168.1.1\share`, `\\[2001:db8::1]\share`
+ * - Mixed separators: `/\server\…`, `\\/server/…`
  *
- * @param pathOrCommand The path or command string to check
- * @returns true if the path/command contains potentially vulnerable UNC paths
+ * @param pathOrCommand Path or full command string to inspect
+ * @param forPath densable `t` — **path mode** (`true`) used for path tokens /
+ *   `validatePath` / RO argv+redirect targets. Enables:
+ *   - bare leading `//` or `\\`
+ *   - strip of leading short flags (`-n…`) then re-check
+ *   - single-separator mixed forms (`/\server\…`, `\/server/…`) with
+ *     `(?<![:\w])` guard (command mode still requires 2+ separators so bash
+ *     escape processing is not over-matched)
  */
-export function containsVulnerableUncPath(pathOrCommand: string): boolean {
-  // Only check on Windows platform
+export function containsVulnerableUncPath(
+  pathOrCommand: string,
+  forPath = false,
+): boolean {
+  // densable: if(It()!=="windows")return!1
   if (getPlatform() !== 'windows') {
     return false
   }
 
-  // 1. Check for general UNC paths with backslashes
-  // Pattern matches: \\server, \\server\share, \\server/share, \\server@port\share
-  // Uses [^\s\\/]+ for hostname to catch Unicode homoglyphs and other non-ASCII chars
-  // Trailing accepts both \ and / since Windows treats both as path separators
-  const backslashUncPattern = /\\\\[^\s\\/]+(?:@(?:\d+|ssl))?(?:[\\/]|$|\s)/i
-  if (backslashUncPattern.test(pathOrCommand)) {
+  // densable path mode: bare leading // or \\ is UNC
+  if (forPath && /^[\\/]{2}/.test(pathOrCommand)) {
     return true
   }
 
-  // 2. Check for forward-slash UNC paths
-  // Pattern matches: //server, //server/share, //server\share, //192.168.1.1/share
-  // Uses negative lookbehind (?<!:) to exclude URLs (https://, http://, ftp://)
-  // while catching // preceded by quotes, =, or any other non-colon character.
-  // Trailing accepts both / and \ since Windows treats both as path separators
-  const forwardSlashUncPattern =
-    // eslint-disable-next-line custom-rules/no-lookbehind-regex -- .test() on short command strings
-    /(?<!:)\/\/[^\s\\/]+(?:@(?:\d+|ssl))?(?:[\\/]|$|\s)/i
-  if (forwardSlashUncPattern.test(pathOrCommand)) {
+  // densable path mode: strip leading short flags then re-check remainder
+  // e.g. path-like tokens that begin with -n / -rf before the UNC body
+  if (forPath && /^-[A-Za-z0-9]/.test(pathOrCommand)) {
+    const stripped = pathOrCommand.replace(/^(?:-[A-Za-z0-9]+)+/, '')
+    if (stripped.length > 0 && containsVulnerableUncPath(stripped, true)) {
+      return true
+    }
+  }
+
+  // densable host class: [^ \t\r\n\f\v\\/]+ (not \s — avoids over-matching
+  // unicode space separators that Windows UNC does not treat as delimiters)
+  // 1. Backslash UNC: \\server, \\server\share, \\server@port\share
+  if (
+    /\\\\[^ \t\r\n\f\v\\/]+(?:@(?:\d+|ssl))?(?:[\\/]|$|\s)/i.test(pathOrCommand)
+  ) {
     return true
   }
 
-  // 3. Check for mixed-separator UNC paths (forward slash + backslashes)
-  // On Windows/Cygwin, /\ is equivalent to // since both are path separators.
-  // In bash, /\\server becomes /\server after escape processing, which is a UNC path.
-  // Requires 2+ backslashes after / because a single backslash just escapes the next char
-  // (e.g., /\a → /a after bash processing, which is NOT a UNC path).
-  const mixedSlashUncPattern = /\/\\{2,}[^\s\\/]/
-  if (mixedSlashUncPattern.test(pathOrCommand)) {
+  // 2. Forward-slash UNC (exclude URL schemes via (?<!:))
+  // eslint-disable-next-line custom-rules/no-lookbehind-regex -- densable sI; short strings
+  if (
+    /(?<!:)\/\/[^ \t\r\n\f\v\\/]+(?:@(?:\d+|ssl))?(?:[\\/]|$|\s)/i.test(
+      pathOrCommand,
+    )
+  ) {
     return true
   }
 
-  // 4. Check for mixed-separator UNC paths (backslashes + forward slash)
-  // \\/server in bash becomes \/server after escape processing, which is a UNC path
-  // on Windows since both \ and / are path separators.
-  const reverseMixedSlashUncPattern = /\\{2,}\/[^\s\\/]/
-  if (reverseMixedSlashUncPattern.test(pathOrCommand)) {
+  // 3. Mixed /\\ — path mode allows single `\`; command mode needs 2+
+  //    (bash: single `\` only escapes next char, not a UNC introducer)
+  // eslint-disable-next-line custom-rules/no-lookbehind-regex -- densable sI path mode
+  if (
+    (forPath
+      ? /(?<![:\w])\/\\{1,}[^ \t\r\n\f\v\\/]+[\\/]/
+      : /\/\\{2,}[^ \t\r\n\f\v\\/]/
+    ).test(pathOrCommand)
+  ) {
     return true
   }
 
-  // 5. Check for WebDAV SSL/port patterns
-  // Examples: \\server@SSL@8443\path, \\server@8443@SSL\path
+  // 4. Mixed \\/ — path mode allows single `\`; command mode needs 2+
+  // eslint-disable-next-line custom-rules/no-lookbehind-regex -- densable sI path mode
+  if (
+    (forPath
+      ? /(?<![:\w])\\{1,}\/[^ \t\r\n\f\v\\/]+[\\/]/
+      : /\\{2,}\/[^ \t\r\n\f\v\\/]/
+    ).test(pathOrCommand)
+  ) {
+    return true
+  }
+
+  // 5. WebDAV SSL/port patterns
   if (/@SSL@\d+/i.test(pathOrCommand) || /@\d+@SSL/i.test(pathOrCommand)) {
     return true
   }
 
-  // 6. Check for DavWWWRoot marker (Windows WebDAV redirector)
-  // Example: \\server\DavWWWRoot\path
+  // 6. DavWWWRoot marker (Windows WebDAV redirector)
   if (/DavWWWRoot/i.test(pathOrCommand)) {
     return true
   }
 
-  // 7. Check for UNC paths with IPv4 addresses (explicit check for defense-in-depth)
-  // Examples: \\192.168.1.1\share, \\10.0.0.1\path
+  // 7. IPv4 UNC (defense-in-depth)
   if (
     /^\\\\(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\\/]/.test(pathOrCommand) ||
     /^\/\/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\\/]/.test(pathOrCommand)
@@ -1682,8 +1705,7 @@ export function containsVulnerableUncPath(pathOrCommand: string): boolean {
     return true
   }
 
-  // 8. Check for UNC paths with bracketed IPv6 addresses (explicit check for defense-in-depth)
-  // Examples: \\[2001:db8::1]\share, \\[::1]\path
+  // 8. Bracketed IPv6 UNC (defense-in-depth)
   if (
     /^\\\\(\[[\da-fA-F:]+\])[\\/]/.test(pathOrCommand) ||
     /^\/\/(\[[\da-fA-F:]+\])[\\/]/.test(pathOrCommand)

@@ -544,6 +544,8 @@ export async function mcpLoginHandler(name: string, options: { browser?: boolean
       const keepAlive = setInterval(() => {}, 60_000);
 
       try {
+        // densable 2.1.216 CLI mcp login still: await wat(...,{preserveStepUpState:!0}), await ebe(...)
+        // UI re-auth uses QLu→ebe→eMu (#19); do NOT invent CLI eMu unless densable drops wat here.
         await revokeServerTokens(name, target.config, {
           preserveStepUpState: true,
         });

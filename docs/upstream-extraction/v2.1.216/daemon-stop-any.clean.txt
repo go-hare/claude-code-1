@@ -1,0 +1,17 @@
+). Run `claude daemon stop --any` to stop it.
+
+---
+
+--any           also stop a transient (non-service) daemon
+
+---
+
+--any           also stop a transient (non-service) daemon
+
+---
+
+Stop it with `claude daemon stop --any` (a graceful, socket-based stop); if nothing is running at that pid, delete
+
+---
+
+is holding the daemon lock. Run `claude daemon stop --any` to stop any background sessions and report on the holder.

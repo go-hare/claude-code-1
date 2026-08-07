@@ -29,6 +29,7 @@ import { splitCommand_DEPRECATED, splitCommandWithOperators } from 'src/utils/ba
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
 import { detectCodeIndexingFromCommand } from 'src/utils/codeIndexing.js';
 import { clampTimeoutForAutoBackground } from 'src/utils/autoBackgroundTimeout.js';
+import { CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG, hasNoHiddenControlChars } from 'src/utils/controlChars.js';
 import {
   isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv,
   isBashSandboxShowIndicatorEnabled,
@@ -306,7 +307,11 @@ const isBackgroundTasksDisabled = isBackgroundTasksDisabledEnv();
 
 const fullInputSchema = lazySchema(() =>
   z.strictObject({
-    command: z.string().describe('The command to execute'),
+    // densable 2.1.216: command.refine(r0e, Ya_) — same C0/C1 gate as PowerShell.
+    command: z
+      .string()
+      .refine(hasNoHiddenControlChars, CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG)
+      .describe('The command to execute'),
     timeout: semanticNumber(z.number().optional()).describe(
       `Optional timeout in milliseconds (max ${getMaxTimeoutMs()})`,
     ),

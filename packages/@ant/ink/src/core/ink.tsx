@@ -94,6 +94,7 @@ import {
   DBP,
   DFE,
   DISABLE_MOUSE_TRACKING,
+  EFE,
   enableMouseTracking,
   ENTER_ALT_SCREEN,
   exitAltScreenSequence,
@@ -559,6 +560,28 @@ export default class Ink {
   resolveExitPromise: () => void = () => {};
   rejectExitPromise: (reason?: Error) => void = () => {};
   unsubscribeExit: () => void = () => {};
+
+  /**
+   * densable 2.1.216 prepareTerminalForHandoff — GUI external editor path.
+   * Pause Ink, disable mouse tracking + focus events, release stdin so the
+   * host terminal does not emit mouse/focus garbage while a detached GUI
+   * editor owns the window. Pair with restoreTerminalAfterHandoff().
+   */
+  prepareTerminalForHandoff(): void {
+    this.pause();
+    this.options.stdout.write((this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') + DFE);
+    this.suspendStdin();
+  }
+
+  /**
+   * densable 2.1.216 restoreTerminalAfterHandoff — reverse of
+   * prepareTerminalForHandoff after a GUI editor spawnSync returns.
+   */
+  restoreTerminalAfterHandoff(): void {
+    this.resumeStdin();
+    this.options.stdout.write(enableMouseTracking(this.altScreenMouseTracking) + EFE);
+    this.resume();
+  }
 
   /**
    * Pause Ink and hand the terminal over to an external TUI (e.g. git

@@ -28,6 +28,7 @@ import { isEnvTruthy } from 'src/utils/envUtils.js';
 import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
 import { errorMessage as getErrorMessage, ShellError } from 'src/utils/errors.js';
 import { truncate } from 'src/utils/format.js';
+import { CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG, hasNoHiddenControlChars } from 'src/utils/controlChars.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { logError } from 'src/utils/log.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
@@ -258,7 +259,12 @@ const isBackgroundTasksDisabled = isBackgroundTasksDisabledEnv();
 
 const fullInputSchema = lazySchema(() =>
   z.strictObject({
-    command: z.string().describe('The PowerShell command to execute'),
+    // densable 2.1.216: command.refine(r0e, Wjg) — reject C0/C1 controls
+    // (except TAB/LF) so they cannot hide intent in the approval dialog.
+    command: z
+      .string()
+      .refine(hasNoHiddenControlChars, CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG)
+      .describe('The PowerShell command to execute'),
     timeout: semanticNumber(z.number().optional()).describe(
       `Optional timeout in milliseconds (max ${getMaxTimeoutMs()})`,
     ),

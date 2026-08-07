@@ -1,0 +1,29 @@
+ is too large for ultrareview (
+
+====
+
+Diff is too large for ultrareview: 
+
+====
+
+highest-signal files (largest or most central ones, entry points, anything
+
+====
+
+`+jFs({filename:e.filename,durationSec:e.durationSec,transcript:e.transcript}),isMeta:!0})]),pdf_reference:(e)=>Ff([Gr({content:`PDF file: ${e.filename} (${e.pageCount} pages, ${tl(e.fileSize)}). This PDF is too large to read all at once. You MUST use the ${Ni} tool with the pages parameter to read specific page ranges (e.g., pages: "1-5"). Do NOT call ${Ni} without the pages parameter or it will fail. Start by reading the first few pages to understand the structure, then read more as needed. Maximum 20 pages per request.`,isMeta:!0})]),selected_lines_in_ide:(e)=>Ff([Gr({content:`The user selected the lines ${e.lineStart} to ${e.lineEnd} from ${e.filename}:
+
+====
+
+`:"");o.jsonlPaths.push(m),o.titles.push(i(l)),o.conversationProjects[c]=l.project_uuid??null;let v=[...u].filter(([E])=>!a.has(E)).map(([,E])=>E).sort();if(v.length>0)o.attachmentFiles[c]=v;if(o.messages+=f.length,!t.dryRun){if(!await bkn(m,y)){o.skipped+=1;continue}}o.conversations+=1}return o.manifestDiff=sUS(r.manifest,o),o}async function cUS(e,t){if(!Z.CLAUDE_IMPORT_CONVERSATIONS)return os("import-conversations is not enabled");if(!t.cwd)return os("--cwd is required");let r,n;try{r=await t0(t.cwd),n=await Adm(e,{cwd:r,dryRun:t.dryRun})}catch(i){Re(i);let s=ue(i),a=s.startsWith("export file exceeds MAX_EXPORT_BYTES")||s.startsWith("Archive total size is too large")||s.startsWith("Suspicious compression ratio detected")||s.startsWith("Archive contains too many files")||s.startsWith('File "')&&s.includes("is too large:");$w("cli_error"),await new Promise((l)=>process.stderr.write(`import-conversations failed: ${Yu(Nfr(rp(s)),400)}
+
+====
+
+.debug_abbrev.dwo.debug_cu_index.debug_info.dwo.debug_line.dwo.debug_loc.dwo.debug_loclists.dwo.debug_rnglists.dwo.debug_str.dwo.debug_str_offsets.dwo.debug_tu_indexa formatting trait implementation returned an error when the underlying stream did notOsmessageErrorCustomerrorpermission deniedconnection refusednetwork unreachableconnection abortednot connectedaddress in useaddress not availablenetwork downbroken pipeentity already existsoperation would blocknot a directoryis a directorydirectory not emptyread-only filesystem or storage mediumfilesystem loop or indirection limit (e.g. symlink loop)stale network file handleinvalid input parameterinvalid datatimed outwrite zeroseek on unseekable filequota exceededfile too largeresource busyexecutable file busycross-device link or renametoo many linksargument list too longoperation interruptedunsupportedunexpected end of fileout of memoryin progressother erroruncategorized erroradvancing IoSlice beyond its lengthadvancing io slices beyond their lengthfatal runtime error: the System allocator may not use TLS with destructors, aborting
+
+====
+
+.debug_abbrev.dwo.debug_cu_index.debug_info.dwo.debug_line.dwo.debug_loc.dwo.debug_loclists.dwo.debug_rnglists.dwo.debug_str.dwo.debug_str_offsets.dwo.debug_tu_indexa formatting trait implementation returned an error when the underlying stream did notfailed to write whole bufferinternal error: entered unreachable codeOsmessageErrorCustomerrorpermission deniedconnection refusednetwork unreachableconnection abortednot connectedaddress in useaddress not availablenetwork downbroken pipeentity already existsoperation would blocknot a directoryis a directorydirectory not emptyread-only filesystem or storage mediumfilesystem loop or indirection limit (e.g. symlink loop)stale network file handleinvalid input parameterinvalid datatimed outwrite zeroseek on unseekable filequota exceededfile too largeresource busyexecutable file busycross-device link or renametoo many linksargument list too longoperation interruptedunsupportedunexpected end of fileout of memoryin progressother erroruncategorized erroradvancing io slices beyond their lengthadvancing IoSlice beyond its lengthfatal runtime error: the System allocator may not use TLS with destructors, aborting
+
+====
+
+.debug_abbrev.dwo.debug_cu_index.debug_info.dwo.debug_line.dwo.debug_loc.dwo.debug_loclists.dwo.debug_rnglists.dwo.debug_str.dwo.debug_str_offsets.dwo.debug_tu_indexa formatting trait implementation returned an error when the underlying stream did notfailed to write whole bufferinternal error: entered unreachable codeOsmessageErrorCustomerrorpermission deniedconnection refusednetwork unreachableconnection abortednot connectedaddress in useaddress not availablenetwork downbroken pipeentity already existsoperation would blocknot a directoryis a directorydirectory not emptyread-only filesystem or storage mediumfilesystem loop or indirection limit (e.g. symlink loop)stale network file handleinvalid input parameterinvalid datatimed outwrite zeroseek on unseekable filequota exceededfile too largeresource busyexecutable file busycross-device link or renametoo many linksargument list too longoperation interruptedunsupportedunexpected end of fileout of memoryin progressother erroruncategorized errorstderradvancing IoSlice beyond its lengthadvancing io slices beyond their lengthfatal runtime error: the System allocator may not use TLS with destructors, aborting

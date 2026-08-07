@@ -237,8 +237,85 @@ export function resolveKeepParentForkName(opts: {
   return { name: 'fork', nameSource: 'auto' }
 }
 
+/** densable `Npn` — middle-dot join for one-line session toasts. */
+export const FORK_SESSION_TOAST_SEP = ' · '
+
+/** densable `Mpn` / `Tyr` / `h6y` state labels. */
+export const FORK_SESSION_STATE_RUNNING = 'session running'
+export const FORK_SESSION_STATE_WAITING_PROMPT = 'session waiting for a prompt'
+export const FORK_SESSION_STATE_WAITING = 'session waiting'
+
+/** densable chip when fork `editsIn === "this-tree"` (shared checkout note). */
+export const FORK_SESSION_CHIP_EDITS_THIS_CHECKOUT = 'edits this checkout'
+/** densable chip when fork relocated back to origin tree. */
+export const FORK_SESSION_CHIP_RUNS_ORIGIN = 'runs in the origin tree'
+
 /**
- * densable L2p toast after successful keepParent fork.
+ * densable `rBo` — one-line join:
+ *   [state, name?, id?, ...chips].join(" · ")
+ */
+export function formatSessionStatusLine(parts: {
+  state: string
+  name?: string
+  id?: string
+  chips?: string[]
+}): string {
+  return [
+    parts.state,
+    ...(parts.name ? [parts.name] : []),
+    ...(parts.id ? [parts.id] : []),
+    ...(parts.chips ?? []),
+  ].join(FORK_SESSION_TOAST_SEP)
+}
+
+/**
+ * densable `HXs` — parse one-line rBo toast; rejects multiline.
+ * id is last 8-hex token; chips follow id.
+ */
+export function parseSessionStatusLine(text: string): {
+  state: string
+  name?: string
+  id?: string
+  chips: string[]
+} | null {
+  if (
+    !text.startsWith(FORK_SESSION_STATE_RUNNING) &&
+    !text.startsWith(FORK_SESSION_STATE_WAITING_PROMPT)
+  ) {
+    return null
+  }
+  if (text.includes('\n')) return null
+  const t = text.split(FORK_SESSION_TOAST_SEP)
+  const r = t[0]
+  if (
+    r !== FORK_SESSION_STATE_RUNNING &&
+    r !== FORK_SESSION_STATE_WAITING_PROMPT
+  ) {
+    return null
+  }
+  const hex8 = /^[0-9a-f]{8}$/
+  let n = -1
+  for (let i = t.length - 1; i >= 0; i--) {
+    if (hex8.test(t[i]!)) {
+      n = i
+      break
+    }
+  }
+  const o = n === -1 ? undefined : t[n]
+  const i = n === -1 ? t.length : n
+  const s = t.slice(1, i)
+  const a = s.length > 0 ? s.join(FORK_SESSION_TOAST_SEP) : undefined
+  const l = n === -1 ? [] : t.slice(n + 1)
+  return { state: r, name: a, id: o, chips: l }
+}
+
+/**
+ * densable 2.1.216 L2p toast after successful keepParent fork — **one line**:
+ *   session running|waiting… · <name> · <8-hex attach id> · [shared-checkout chip]
+ *
+ * Official: name + claude-attach id + note when copy shares checkout.
+ * densable chips: relocated → "runs in the origin tree"; this-tree → "edits this checkout".
+ * Multi-line 212 prose (permission inherit, attach how-to) is intentionally dropped.
  */
 export function formatForkSessionToast(opts: {
   name: string
@@ -246,53 +323,29 @@ export function formatForkSessionToast(opts: {
   hadPrompt: boolean
   editsIn?: 'this-tree' | 'own-worktree'
   relocatedTo?: string
+  /** densable toast no longer includes permission inherit; kept for call-site compat. */
   permissionMode?: string
 }): string {
-  const label = opts.name ? collapseForkPromptLabel(opts.name, 40) : opts.short
-  const lines: string[] = [
-    `${FORK_GLYPH} forked into a background session · ${label}`,
-  ]
-  if (opts.hadPrompt) {
-    lines.push(
-      'it is already working, with everything from this conversation up to now · nothing here changes',
-    )
-  } else {
-    lines.push(
-      'it has everything from this conversation up to now and is waiting for your first prompt · nothing here changes',
-    )
-  }
+  void opts.permissionMode
+  const state = opts.hadPrompt
+    ? FORK_SESSION_STATE_RUNNING
+    : FORK_SESSION_STATE_WAITING_PROMPT
+  const name = opts.name ? collapseForkPromptLabel(opts.name, 40) : undefined
+  // densable id = bfe.short (8-hex attach id used with `claude attach`)
+  const id = opts.short
+  let chip: string | undefined
   if (opts.relocatedTo) {
-    lines.push(
-      `it runs in ${opts.relocatedTo} — this session keeps its worktree and its uncommitted work`,
-    )
-  } else if (opts.editsIn === 'own-worktree') {
-    lines.push('its edits go to its own worktree and branch, not this checkout')
+    chip = FORK_SESSION_CHIP_RUNS_ORIGIN
   } else if (opts.editsIn === 'this-tree') {
-    lines.push(
-      'it edits this checkout in place — the same files you have open here, so mind overlapping work',
-    )
+    chip = FORK_SESSION_CHIP_EDITS_THIS_CHECKOUT
   }
-  const mode = opts.permissionMode
-  if (
-    opts.hadPrompt &&
-    (mode === 'default' || mode === 'acceptEdits' || mode === 'plan')
-  ) {
-    lines.push(
-      `it inherited ${mode} mode, so it will pause to ask before running commands — the ask shows up in the agent view, not here`,
-    )
-  }
-  if (opts.hadPrompt) {
-    lines.push(
-      `to check on it: ← opens the agent view, or claude attach ${opts.short} in another terminal · its result lands there, not in this conversation`,
-    )
-  } else {
-    const row =
-      opts.name && opts.name !== 'fork' ? `the ${FORK_GLYPH} row` : 'its row'
-    lines.push(
-      `to give it its first prompt: claude attach ${opts.short} in another terminal, or ← then space on ${row} (← moves this session into the agent view too) · tip: /fork <prompt> starts the copy working right away`,
-    )
-  }
-  return lines.join('\n')
+  // own-worktree: densable leaves chip void (no shared-checkout note)
+  return formatSessionStatusLine({
+    state,
+    name,
+    id,
+    chips: chip ? [chip] : [],
+  })
 }
 
 /**

@@ -606,6 +606,24 @@ export async function getHeadForDir(cwd: string): Promise<string | null> {
 }
 
 /**
+ * densable `OGr` — resolve the per-worktree gitdir from `<worktreePath>/.git`
+ * pointer only (no upward walk). Returns null if missing/malformed.
+ */
+export async function readWorktreeGitDir(
+  worktreePath: string,
+): Promise<string | null> {
+  try {
+    const ptr = (await readFile(join(worktreePath, '.git'), 'utf-8')).trim()
+    if (!ptr.startsWith('gitdir:')) {
+      return null
+    }
+    return resolve(worktreePath, ptr.slice('gitdir:'.length).trim())
+  } catch {
+    return null
+  }
+}
+
+/**
  * Read the HEAD SHA for a git worktree directory (not the main repo).
  *
  * Unlike `getHeadForDir`, this reads `<worktreePath>/.git` directly as a
@@ -619,14 +637,8 @@ export async function getHeadForDir(cwd: string): Promise<string | null> {
 export async function readWorktreeHeadSha(
   worktreePath: string,
 ): Promise<string | null> {
-  let gitDir: string
-  try {
-    const ptr = (await readFile(join(worktreePath, '.git'), 'utf-8')).trim()
-    if (!ptr.startsWith('gitdir:')) {
-      return null
-    }
-    gitDir = resolve(worktreePath, ptr.slice('gitdir:'.length).trim())
-  } catch {
+  const gitDir = await readWorktreeGitDir(worktreePath)
+  if (!gitDir) {
     return null
   }
   const head = await readGitHead(gitDir)

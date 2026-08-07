@@ -11,7 +11,7 @@ import {
 import { parseTokenBudget } from '../utils/tokenBudget.js';
 import { count } from '../utils/array.js';
 import { countUserPromptsInMessages } from '../utils/attribution.js';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
 import figures from 'figures';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- / n N Esc [ v are bare letters in transcript modal context, same class as g/G/j/k in ScrollKeybindingHandler
@@ -21,12 +21,15 @@ import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { useSearchHighlight } from '@anthropic/ink';
 import type { JumpHandle } from '../components/VirtualMessageList.js';
 import { renderMessagesToPlainText } from '../utils/exportRenderer.js';
-import { openFileInExternalEditor } from '../utils/editor.js';
+import { getExternalEditor, openFileInExternalEditor } from '../utils/editor.js';
+import { pickTranscriptVirtualScrollHints } from '../utils/transcriptFooterHints.js';
 import { writeFile } from 'fs/promises';
 import {
   type TabStatusKind,
   Box,
+  Byline,
   Text,
+  stringWidth,
   useStdin,
   useTheme,
   useTerminalFocus,
@@ -578,6 +581,31 @@ function TranscriptModeFooter({
 }): React.ReactNode {
   const toggleShortcut = useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
   const showAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'ctrl+e');
+  const { columns } = useTerminalSize();
+  // densable Ktn: short editor basename (≤8) for "v to open in <editor>".
+  const editorName = (() => {
+    const editor = getExternalEditor();
+    if (!editor) return undefined;
+    const base = basename(editor.split(' ')[0] ?? '');
+    return base && base.length <= 8 ? base : undefined;
+  })();
+  const openInLabel = editorName ? `open in ${editorName}` : 'open in editor';
+  // densable CZa F0S: ↑↓ scroll · v to <editor> · ? for shortcuts
+  // Width gate collapses only this segment so the sticky left side never wraps.
+  const fullVirtualHints = `${figures.arrowUp}${figures.arrowDown} scroll · v to ${openInLabel} · ? for shortcuts`;
+  const virtualHints = pickTranscriptVirtualScrollHints(columns, {
+    stringWidth,
+    toggleShortcut,
+    fullHints: fullVirtualHints,
+    status,
+  });
+  const midHint = searchBadge
+    ? 'n/N to navigate'
+    : virtualScroll
+      ? virtualHints
+      : suppressShowAll
+        ? ''
+        : `${showAllShortcut} to ${showAllInTranscript ? 'collapse' : 'show all'}`;
   return (
     <Box
       noSelect
@@ -592,15 +620,13 @@ function TranscriptModeFooter({
       paddingLeft={2}
       width="100%"
     >
-      <Text dimColor>
-        Showing detailed transcript · {toggleShortcut} to toggle
-        {searchBadge
-          ? ' · n/N to navigate'
-          : virtualScroll
-            ? ` · ${figures.arrowUp}${figures.arrowDown} scroll · home/end top/bottom`
-            : suppressShowAll
-              ? ''
-              : ` · ${showAllShortcut} to ${showAllInTranscript ? 'collapse' : 'show all'}`}
+      {/* densable CZa: sticky left + truncate-end so <104 cols never wrap the footer. */}
+      <Text dimColor wrap="truncate-end">
+        <Byline>
+          <Text>Showing detailed transcript</Text>
+          <Text>{toggleShortcut} to toggle</Text>
+          {midHint ? <Text>{midHint}</Text> : null}
+        </Byline>
       </Text>
       {status ? (
         // v-for-editor render progress — transient, preempts the search
@@ -1073,8 +1099,16 @@ export function REPL({
   // Local state for commands (hot-reloadable when skill files change)
   const [localCommands, setLocalCommands] = useState(initialCommands);
 
+  // densable mOf — skill watcher reloads commands + agents (lU)
+  const handleAgentsChange = useCallback(
+    (agents: typeof agentDefinitions) => {
+      setAppState(prev => ({ ...prev, agentDefinitions: agents }));
+    },
+    [setAppState],
+  );
+
   // Watch for skill file changes and reload all commands
-  useSkillsChange(isRemoteSession ? undefined : getProjectRoot(), setLocalCommands);
+  useSkillsChange(isRemoteSession ? undefined : getProjectRoot(), setLocalCommands, handleAgentsChange);
 
   // Track proactive mode for tools dependency - SleepTool filters by proactive state
   const proactiveActive = React.useSyncExternalStore(
@@ -3502,26 +3536,33 @@ export function REPL({
   // addNotification is stable (useCallback) so the effect fires once.
   useEffect(() => {
     const reason = SandboxManager.getSandboxUnavailableReason();
-    if (!reason) return;
-    if (SandboxManager.isSandboxRequired()) {
-      process.stderr.write(
-        `\nError: sandbox required but unavailable: ${reason}\n` +
-          `  sandbox.failIfUnavailable is set — refusing to start without a working sandbox.\n\n`,
-      );
-      gracefulShutdownSync(1, 'other');
-      return;
+    if (reason) {
+      if (SandboxManager.isSandboxRequired()) {
+        process.stderr.write(
+          `\nError: sandbox required but unavailable: ${reason}\n` +
+            `  sandbox.failIfUnavailable is set — refusing to start without a working sandbox.\n\n`,
+        );
+        gracefulShutdownSync(1, 'other');
+        return;
+      }
+      logForDebugging(`sandbox disabled: ${reason}`, { level: 'warn' });
+      addNotification({
+        key: 'sandbox-unavailable',
+        jsx: (
+          <>
+            <Text color="warning">sandbox disabled</Text>
+            <Text dimColor> · /sandbox</Text>
+          </>
+        ),
+        priority: 'medium',
+      });
     }
-    logForDebugging(`sandbox disabled: ${reason}`, { level: 'warn' });
-    addNotification({
-      key: 'sandbox-unavailable',
-      jsx: (
-        <>
-          <Text color="warning">sandbox disabled</Text>
-          <Text dimColor> · /sandbox</Text>
-        </>
-      ),
-      priority: 'medium',
-    });
+    // densable: only when unavailable is absent — mask warning is independent
+    // (needs getConfig after init; may be empty on first mount).
+    const maskWarning = reason ? undefined : SandboxManager.getMaskCredentialWarning();
+    if (maskWarning) {
+      logForDebugging(`sandbox: ${maskWarning}`, { level: 'warn' });
+    }
   }, [addNotification]);
 
   if (SandboxManager.isSandboxingEnabled()) {
@@ -7605,12 +7646,17 @@ export function REPL({
                     preselectedMessage={messageSelectorPreselect}
                     onPreRestore={onCancel}
                     onRestoreCode={async (message: UserMessage) => {
-                      await fileHistoryRewind((updater: (prev: FileHistoryState) => FileHistoryState) => {
-                        setAppState(prev => ({
-                          ...prev,
-                          fileHistory: updater(prev.fileHistory),
-                        }));
-                      }, message.uuid);
+                      // densable: return skippedLinks so MessageSelector can show TYn
+                      const { skippedLinks } = await fileHistoryRewind(
+                        (updater: (prev: FileHistoryState) => FileHistoryState) => {
+                          setAppState(prev => ({
+                            ...prev,
+                            fileHistory: updater(prev.fileHistory),
+                          }));
+                        },
+                        message.uuid,
+                      );
+                      return { skippedLinks };
                     }}
                     onSummarize={async (
                       message: UserMessage,

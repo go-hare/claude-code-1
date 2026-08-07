@@ -209,6 +209,17 @@ export interface ContextData {
   readonly skills?: SkillInfo
   readonly autoCompactThreshold?: number
   readonly isAutoCompactEnabled: boolean
+  /**
+   * densable p7().source for the displayed window (Ftn over-limit copy).
+   * `"auto"` = full model window; `"env"` when CLAUDE_CODE_AUTO_COMPACT_WINDOW caps it.
+   */
+  readonly autocompactSource?:
+    | 'auto'
+    | 'env'
+    | 'settings'
+    | 'clientdata'
+    | 'experiment'
+    | 'model-default'
   messageBreakdown?: {
     toolCallTokens: number
     toolResultTokens: number
@@ -953,8 +964,28 @@ export async function analyzeContextUsage(
     permissionMode: (await getToolPermissionContext()).mode,
     mainLoopModel: model,
   })
-  // Get context window size
-  const contextWindow = getContextWindowForModel(runtimeModel, getSdkBetas())
+  // densable p7 subset: model window, optionally capped by AUTO_COMPACT_WINDOW env.
+  let contextWindow = getContextWindowForModel(runtimeModel, getSdkBetas())
+  let autocompactSource: NonNullable<ContextData['autocompactSource']> = 'auto'
+  try {
+    const { resolveAutoCompactWindowOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    const envOverride = resolveAutoCompactWindowOverride()
+    if (envOverride !== null) {
+      contextWindow = Math.min(contextWindow, envOverride)
+      autocompactSource = 'env'
+    }
+  } catch {
+    const raw = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
+    if (raw) {
+      const parsed = parseInt(raw, 10)
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        contextWindow = Math.min(contextWindow, parsed)
+        autocompactSource = 'env'
+      }
+    }
+  }
 
   // Build the effective system prompt using the shared utility
   const defaultSystemPrompt = await getSystemPrompt(tools, runtimeModel)
@@ -1398,6 +1429,7 @@ export async function analyzeContextUsage(
         : undefined,
     autoCompactThreshold,
     isAutoCompactEnabled: isAutoCompact,
+    autocompactSource,
     messageBreakdown: formattedMessageBreakdown,
     apiUsage,
     ...(() => {

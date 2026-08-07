@@ -1,0 +1,29 @@
+Classifier transcript exceeded context window
+
+---
+
+**Long-running conversations (may exceed context window):**
+
+---
+
+# Context window exhausted \u2014 compact or split the conversation
+
+---
+
+Agent aborted: auto mode classifier transcript exceeded context window in headless mode
+
+---
+
+This command configures when auto-compaction happens. The actual threshold is the minimum of this setting and your model's maximum context window.
+
+---
+
+Auto-compact summarizes the conversation when context usage approaches this limit. The actual threshold is the minimum of this setting and your model's maximum context window.
+
+---
+
+- The skill listing is budgeted at ~1% of the context window; when summed descriptions exceed it, entries get truncated and skill routing degrades \u2014 so a bloated listing matters even before raw token cost does.
+
+---
+
+Fraction of the context window (in characters) reserved for the skill listing sent to Claude (default: 0.01 = 1%). When the listing exceeds this, descriptions are shortened to fit. Raise to opt in to higher per-turn context cost.

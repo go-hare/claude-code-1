@@ -125,6 +125,17 @@ export function hasCommandsInQueue(): boolean {
 }
 
 /**
+ * densable Opu: whether the queue has an Esc-cancellable / poppable command.
+ * Uses x4 = isQueuedCommandEditable (mode ∉ {task-notification}, !isMeta,
+ * human-like origin). Background task-notification entries alone must NOT
+ * keep chat:cancel active at an idle prompt — otherwise Esc-Esc never reaches
+ * the rewind message selector (densable 2.1.216 #12).
+ */
+export function hasEditableCommandsInQueue(): boolean {
+  return commandQueue.some(isQueuedCommandEditable)
+}
+
+/**
  * Trigger a re-check by notifying subscribers.
  * Use after async processing completes to ensure remaining commands
  * are picked up by useSyncExternalStore consumers.

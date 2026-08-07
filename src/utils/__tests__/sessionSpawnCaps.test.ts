@@ -80,6 +80,21 @@ describe('assertCanSpawnSubagent', () => {
     c.abort()
     expect(() => assertCanSpawnSubagent({ abortSignal: c.signal })).toThrow()
   })
+
+  test('allowInterrupt + interrupt continues (densable 2.1.216 #15)', () => {
+    const c = new AbortController()
+    c.abort('interrupt')
+    assertCanSpawnSubagent({ abortSignal: c.signal, allowInterrupt: true })
+    expect(getTotalAgentSpawns()).toBe(1)
+  })
+
+  test('allowInterrupt does not ignore other abort reasons', () => {
+    const c = new AbortController()
+    c.abort('user-cancel')
+    expect(() =>
+      assertCanSpawnSubagent({ abortSignal: c.signal, allowInterrupt: true }),
+    ).toThrow()
+  })
 })
 
 describe('consumeWebSearchBudgetOrCapMessage', () => {

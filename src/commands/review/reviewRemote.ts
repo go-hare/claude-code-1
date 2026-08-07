@@ -234,6 +234,125 @@ export function parseGitShortstat(stat: string): {
   }
 }
 
+/** densable `_t(n, word)` — English count plural for error copy. */
+export function pluralizeCount(n: number, word: string): string {
+  return n === 1 ? word : `${word}s`
+}
+
+/**
+ * densable Hmo — parse `git diff --numstat` into per-file added/removed.
+ * Binary rows (`-`) contribute 0 lines but still count as a file entry.
+ */
+export function parseGitNumstat(
+  numstat: string,
+  maxFiles: number = Number.POSITIVE_INFINITY,
+): {
+  filesCount: number
+  linesAdded: number
+  linesRemoved: number
+  perFileStats: Map<
+    string,
+    { added: number; removed: number; isBinary: boolean }
+  >
+} {
+  const lines = numstat.trim().split('\n').filter(Boolean)
+  let filesCount = 0
+  let linesAdded = 0
+  let linesRemoved = 0
+  const perFileStats = new Map<
+    string,
+    { added: number; removed: number; isBinary: boolean }
+  >()
+  for (const row of lines) {
+    const parts = row.split('\t')
+    if (parts.length < 3) continue
+    filesCount++
+    const aRaw = parts[0] ?? '0'
+    const rRaw = parts[1] ?? '0'
+    const path = parts.slice(2).join('\t')
+    const isBinary = aRaw === '-' || rRaw === '-'
+    const added = isBinary ? 0 : parseInt(aRaw, 10) || 0
+    const removed = isBinary ? 0 : parseInt(rRaw, 10) || 0
+    linesAdded += added
+    linesRemoved += removed
+    if (perFileStats.size < maxFiles) {
+      perFileStats.set(path, { added, removed, isBinary })
+    }
+  }
+  return { filesCount, linesAdded, linesRemoved, perFileStats }
+}
+
+/**
+ * densable DHp — top-N largest files by |lines| from numstat, for too-large errors.
+ * Returns "" when empty; otherwise " Largest files: path (N lines), …."
+ */
+export function formatLargestDiffFiles(numstat: string, limit = 3): string {
+  const { perFileStats } = parseGitNumstat(numstat, Number.POSITIVE_INFINITY)
+  const ranked = [...perFileStats.entries()]
+    .map(([path, s]) => ({ path, lines: s.added + s.removed }))
+    .filter(e => e.lines > 0)
+  if (ranked.length === 0) return ''
+  ranked.sort((a, b) => b.lines - a.lines)
+  const body = ranked
+    .slice(0, limit)
+    .map(
+      e =>
+        `${e.path} (${e.lines.toLocaleString()} ${pluralizeCount(e.lines, 'line')})`,
+    )
+    .join(', ')
+  return ` Largest files: ${body}.`
+}
+
+/**
+ * densable 2.1.216 #32 local_diff_too_large body:
+ * `Diff is too large for ultrareview: N files, M lines changed (limits: …).{Largest files…} Pass a closer base…`
+ */
+export function formatLocalDiffTooLargeError(input: {
+  filesCount: number
+  totalLines: number
+  maxFiles: number
+  maxLines: number
+  largestFilesSuffix: string
+  invocation: string
+}): string {
+  const {
+    filesCount,
+    totalLines,
+    maxFiles,
+    maxLines,
+    largestFilesSuffix,
+    invocation,
+  } = input
+  return (
+    `Diff is too large for ultrareview: ${filesCount.toLocaleString()} ${pluralizeCount(filesCount, 'file')}, ` +
+    `${totalLines.toLocaleString()} ${pluralizeCount(totalLines, 'line')} changed ` +
+    `(limits: ${maxFiles.toLocaleString()} ${pluralizeCount(maxFiles, 'file')}, ` +
+    `${maxLines.toLocaleString()} ${pluralizeCount(maxLines, 'line')}).` +
+    `${largestFilesSuffix} Pass a closer base branch (\`${invocation} <branch>\`) to narrow the scope, or split the change.`
+  )
+}
+
+/**
+ * densable 2.1.216 #33 empty_diff (merge-base path): names ref + short merge-base
+ * and suggests explicit base.
+ */
+export function formatEmptyDiffAgainstBaseError(input: {
+  diffAgainstRef: string
+  mergeBaseSha: string
+  hadExplicitBase: boolean
+  invocation: string
+}): string {
+  const shortMb = input.mergeBaseSha.slice(0, 7)
+  const suggest = input.hadExplicitBase
+    ? `try a different base, e.g. \`${input.invocation} <branch>\``
+    : `pass one explicitly, e.g. \`${input.invocation} <branch>\``
+  return (
+    `No changes to review: the diff against ${input.diffAgainstRef} (merge-base ${shortMb}) is empty. ` +
+    `If you have local edits, stage or commit them first. ` +
+    `If your branch was already merged or you meant a different base, ${suggest}.`
+  )
+}
+
 /**
  * densable XCu — bundle max bytes from GrowthBook or H1g=104857600.
  */
@@ -1054,12 +1173,15 @@ export async function launchRemoteReview(
     // from HEAD's history so `git diff <sha>` works without a named ref.
     let mbOut = ''
     let mbCode = 1
+    /** densable `p` — ref used for successful merge-base (origin/base or base). */
+    let mergeBaseAgainstRef = `origin/${baseBranch}`
     ;({ stdout: mbOut, code: mbCode } = await execFileNoThrow(
       gitExe(),
       ['merge-base', `origin/${baseBranch}`, 'HEAD'],
       { preserveOutputOnError: false },
     ))
     if (mbCode !== 0) {
+      mergeBaseAgainstRef = baseBranch
       ;({ stdout: mbOut, code: mbCode } = await execFileNoThrow(
         gitExe(),
         ['merge-base', baseBranch, 'HEAD'],
@@ -1247,20 +1369,30 @@ export async function launchRemoteReview(
         },
       )
       if (diffCode === 0 && !diffStat.trim()) {
+        // densable empty_diff (merge-base path): name ref + short sha + explicit base hint
+        const usedOriginRef = mergeBaseAgainstRef.startsWith('origin/')
+        const hadExplicitBase = trimmed.length > 0
         logEvent('tengu_review_remote_precondition_failed', {
           reason: meta('empty_diff'),
+          used_origin_ref: usedOriginRef,
+          had_explicit_base: hadExplicitBase,
           cwd_is_home: isCwdHome(),
         })
         logFetchRecovery('failed')
         return [
           {
             type: 'text',
-            text: `It doesn't look like you have any new commits or changes to review against your ${baseBranch} branch. Stage or commit them first?`,
+            text: formatEmptyDiffAgainstBaseError({
+              diffAgainstRef: mergeBaseAgainstRef,
+              mergeBaseSha: effectiveMergeBase,
+              hadExplicitBase,
+              invocation,
+            }),
           },
         ]
       }
 
-      // densable Dro + qqi → local_diff_too_large
+      // densable Dro + qqi + DHp → local_diff_too_large with limits + largest files
       const parsedStat = parseGitShortstat(diffStat)
       if (parsedStat) {
         const { maxFiles, maxLines } = getUltrareviewDiffLimits()
@@ -1275,10 +1407,38 @@ export async function launchRemoteReview(
             cwd_is_home: isCwdHome(),
           })
           logFetchRecovery('failed')
+          // densable: git diff --numstat mergeBase → DHp largest files (top 3)
+          const { stdout: numstatOut, code: numstatCode } =
+            await execFileNoThrow(
+              gitExe(),
+              [
+                '-c',
+                'core.quotepath=false',
+                'diff',
+                '--no-ext-diff',
+                '--no-textconv',
+                '--numstat',
+                effectiveMergeBase,
+              ],
+              {
+                preserveOutputOnError: false,
+                timeout: 10_000,
+                maxBuffer: 10_485_760,
+              },
+            )
+          const largest =
+            numstatCode === 0 ? formatLargestDiffFiles(numstatOut) : ''
           return [
             {
               type: 'text',
-              text: `Diff is too large for ultrareview: ${diffStat.trim()}. Pass a closer base branch (\`${invocation} <branch>\`) to narrow the scope, or split the change.`,
+              text: formatLocalDiffTooLargeError({
+                filesCount: parsedStat.filesCount,
+                totalLines,
+                maxFiles,
+                maxLines,
+                largestFilesSuffix: largest,
+                invocation,
+              }),
             },
           ]
         }

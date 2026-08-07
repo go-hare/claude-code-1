@@ -23,7 +23,6 @@ import type { ExternalCommandConfig } from 'src/utils/shell/readOnlyCommandValid
 import {
   DOCKER_READ_ONLY_COMMANDS,
   EXTERNAL_READONLY_COMMANDS,
-  GH_READ_ONLY_COMMANDS,
   GIT_READ_ONLY_COMMANDS,
   validateFlags,
 } from 'src/utils/shell/readOnlyCommandValidation.js'
@@ -1534,6 +1533,11 @@ function isExternalCommandSafe(command: string, args: string[]): boolean {
   }
 }
 
+/**
+ * densable 2.1.216 `I5g` — git global flags that are never auto-allow safe.
+ * Includes value-taking path/repo pins plus `--bare` / help / `--attr-source`
+ * (parser differential) and `--shallow-file`.
+ */
 const DANGEROUS_GIT_GLOBAL_FLAGS = new Set([
   '-c',
   '-C',
@@ -1541,6 +1545,7 @@ const DANGEROUS_GIT_GLOBAL_FLAGS = new Set([
   '--config-env',
   '--git-dir',
   '--work-tree',
+  '--bare',
   // SECURITY: --attr-source creates a parser differential. Git treats the
   // token after the tree-ish value as a pathspec (not the subcommand), but
   // our skip-by-2 loop would treat it as the subcommand:
@@ -1550,19 +1555,19 @@ const DANGEROUS_GIT_GLOBAL_FLAGS = new Set([
   // Verified with `GIT_TRACE=1 git --attr-source HEAD~10 log status` →
   // `trace: built-in: git status`. Reject outright rather than skip-by-2.
   '--attr-source',
+  '--help',
+  '-h',
+  '--shallow-file',
 ])
 
-// Git global flags that accept a separate (space-separated) value argument.
-// When the loop encounters one without an inline `=` value, it must skip the
-// next token so the value isn't mistaken for the subcommand.
-//
-// SECURITY: This set must be COMPLETE. Any value-consuming global flag not
-// listed here creates a parser differential: validator sees the value as the
-// subcommand, git consumes it and runs the NEXT token. Audited against
-// `man git` + GIT_TRACE for git 2.51; --list-cmds is `=`-only, booleans
-// (-p/--bare/--no-*/--*-pathspecs/--html-path/etc.) advance by 1 via the
-// default path. --attr-source REMOVED: it also triggers pathspec parsing,
-// creating a second differential — moved to DANGEROUS_GIT_GLOBAL_FLAGS above.
+/**
+ * densable 2.1.216 `oDu` — git global flags that consume a following value
+ * token (or have `=` form). Must skip next argv when no inline `=`.
+ *
+ * SECURITY: This set must be COMPLETE. Any value-consuming global flag not
+ * listed here creates a parser differential: validator sees the value as the
+ * subcommand, git consumes it and runs the NEXT token.
+ */
 const GIT_GLOBAL_FLAGS_WITH_VALUES = new Set([
   '-c',
   '-C',
@@ -1575,13 +1580,101 @@ const GIT_GLOBAL_FLAGS_WITH_VALUES = new Set([
   '--shallow-file',
 ])
 
-// Git short global flags that accept attached-form values (no space between
-// flag letter and value). Long options (--git-dir etc.) require `=` or space,
-// so the split-on-`=` check handles them. But `-ccore.pager=sh` and `-C/path`
-// need prefix matching: git parses `-c<name>=<value>` and `-C<path>` directly.
-const DANGEROUS_GIT_SHORT_FLAGS_ATTACHED = ['-c', '-C']
+// densable `D5g` — short globals with attached values (`-ccore.pager=…`, `-C/path`)
+const DANGEROUS_GIT_SHORT_FLAGS_ATTACHED = ['-c', '-C'] as const
 
-function isGitSafe(args: string[]): boolean {
+/** densable `qAe` — unicode dash → ASCII hyphen for flag-shape compare. */
+function normalizeUnicodeDashes(s: string): string {
+  return s.replace(/[\u2013\u2014\u2015]/g, '-')
+}
+
+/**
+ * densable `Sis`/`wW` — collapse PS backtick line-continuations and decode
+ * backtick escapes (`n, `u{…}, ``, etc.) the way PowerShell would.
+ */
+function stripPsBacktickEscapes(s: string): string {
+  return s
+    .replace(/`[\r\n]+\s*/g, '')
+    .replace(
+      /`(?:u\{([0-9a-fA-F]{1,6})\}|([\s\S]?))/g,
+      (_m, hex: string | undefined, ch: string | undefined) => {
+        if (hex !== undefined) {
+          const cp = parseInt(hex, 16)
+          return cp <= 0x10ffff ? String.fromCodePoint(cp) : '\uFFFD'
+        }
+        return ch ?? ''
+      },
+    )
+}
+
+/** densable `Ris` — normalize argv before dual-pass git safety. */
+function normalizeGitArgv(args: string[]): string[] {
+  return args.map(a =>
+    normalizeUnicodeDashes(
+      stripPsBacktickEscapes(a.replace(/`[\r\n]+\s*/g, '')),
+    ),
+  )
+}
+
+/** densable `JQt` — token looks like a flag (not lone `-`). */
+function looksLikeFlagToken(s: string): boolean {
+  return s.startsWith('-') && s.length > 1
+}
+
+/**
+ * densable `YIu` — bare value-taking global flag (no `=`), so next token is
+ * the value under oDu skip-by-2.
+ */
+function isBareValueTakingGitGlobal(flag: string): boolean {
+  return !flag.includes('=') && GIT_GLOBAL_FLAGS_WITH_VALUES.has(flag)
+}
+
+/**
+ * densable `iDu` — raw vs normalized argv must preserve flag shape / `--` and
+ * must not smuggle NUL via backtick decoding.
+ */
+function gitArgvNormalizeInvariant(
+  raw: string[],
+  normalized: string[],
+): boolean {
+  if (raw.length !== normalized.length) return false
+  for (let i = 0; i < raw.length; i++) {
+    const n = raw[i] ?? ''
+    const o = normalized[i] ?? ''
+    if (o.includes('\x00') || stripPsBacktickEscapes(n).includes('\x00')) {
+      return false
+    }
+    if (
+      looksLikeFlagToken(o) !== looksLikeFlagToken(n) ||
+      (o === '--') !== (n === '--')
+    ) {
+      return false
+    }
+    if (
+      looksLikeFlagToken(n) &&
+      n !== o &&
+      isBareValueTakingGitGlobal(n) !== isBareValueTakingGitGlobal(o)
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * densable `JIu` — core git RO safety after argv is fixed.
+ * Exported for unit tests (densable 2.1.216 #31).
+ */
+export function isGitSafe(args: string[]): boolean {
+  // densable H5g: Ris + iDu, then JIu(raw) && JIu(normalized)
+  const normalized = normalizeGitArgv(args)
+  if (!gitArgvNormalizeInvariant(args, normalized)) {
+    return false
+  }
+  return isGitSafeCore(args) && isGitSafeCore(normalized)
+}
+
+function isGitSafeCore(args: string[]): boolean {
   if (args.length === 0) {
     return true
   }
@@ -1595,7 +1688,7 @@ function isGitSafe(args: string[]): boolean {
   //   → PowerShell runs `git diff --output=/tmp/evil` → file write
   // This generalizes the ls-remote inline `$` guard below to all git subcommands.
   // Bash equivalent: BashTool blanket
-  // `$` rejection at readOnlyValidation.ts:~1352. isGhSafe has the same guard.
+  // `$` rejection at readOnlyValidation.ts:~1352.
   for (const arg of args) {
     if (arg.includes('$')) {
       return false
@@ -1611,14 +1704,7 @@ function isGitSafe(args: string[]): boolean {
     if (!arg || !arg.startsWith('-')) {
       break
     }
-    // SECURITY: Attached-form short flags. `-ccore.pager=sh` splits on `=` to
-    // `-ccore.pager`, which isn't in DANGEROUS_GIT_GLOBAL_FLAGS. Git accepts
-    // `-c<name>=<value>` and `-C<path>` with no space. We must prefix-match.
-    // Note: `--cached`, `--config-env`, etc. already fail startsWith('-c') at
-    // position 1 (`-` ≠ `c`). The `!== '-'` guard only applies to `-c`
-    // (git config keys never start with `-`, so `-c-key` is implausible).
-    // It does NOT apply to `-C` — directory paths CAN start with `-`, so
-    // `git -C-trap status` must reject. `git -ccore.pager=sh log` spawns a shell.
+    // SECURITY: Attached-form short flags. densable D5g.
     for (const shortFlag of DANGEROUS_GIT_SHORT_FLAGS_ATTACHED) {
       if (
         arg.length > shortFlag.length &&
@@ -1633,7 +1719,7 @@ function isGitSafe(args: string[]): boolean {
     if (DANGEROUS_GIT_GLOBAL_FLAGS.has(flagName)) {
       return false
     }
-    // Consume the next token if the flag takes a separate value
+    // Consume the next token if the flag takes a separate value (densable oDu)
     if (!hasInlineValue && GIT_GLOBAL_FLAGS_WITH_VALUES.has(flagName)) {
       idx += 2
     } else {
@@ -1668,25 +1754,17 @@ function isGitSafe(args: string[]): boolean {
 
   const flagArgs = args.slice(idx + subcommandTokens)
 
-  // git ls-remote URL rejection — ported from BashTool's inline guard
-  // (src/tools/BashTool/readOnlyValidation.ts:~962). ls-remote with a URL
-  // is a data-exfiltration vector (encode secrets in hostname → DNS/HTTP).
-  // Reject URL-like positionals: `://` (http/git protocols), `@` + `:` (SSH
-  // git@host:path), and `$` (variable refs — $env:URL reaches here as the
-  // literal string '$env:URL' when the arg's elementType is Variable; the
-  // security-flag checks don't gate bare Variable positionals passed to
-  // external commands).
+  // densable 2.1.216 JIu ls-remote: reject ANY positional (URL or not), including
+  // after `--`. Network/exfil surface is too wide for RO auto-allow.
   if (first === 'ls-remote') {
+    let afterDoubleDash = false
     for (const arg of flagArgs) {
-      if (!arg.startsWith('-')) {
-        if (
-          arg.includes('://') ||
-          arg.includes('@') ||
-          arg.includes(':') ||
-          arg.includes('$')
-        ) {
-          return false
-        }
+      if (!afterDoubleDash && arg === '--') {
+        afterDoubleDash = true
+        continue
+      }
+      if (afterDoubleDash || arg === '-' || !arg.startsWith('-')) {
+        return false
       }
     }
   }
@@ -1700,60 +1778,12 @@ function isGitSafe(args: string[]): boolean {
   return validateFlags(flagArgs, 0, config, { commandName: 'git' })
 }
 
-function isGhSafe(args: string[]): boolean {
-  // gh commands are network-dependent; only allow for ant users
-  if (process.env.USER_TYPE !== 'ant') {
-    return false
-  }
-
-  if (args.length === 0) {
-    return true
-  }
-
-  // Try two-word subcommand first (e.g. 'pr view')
-  let config: ExternalCommandConfig | undefined
-  let subcommandTokens = 0
-
-  if (args.length >= 2) {
-    const twoWordKey = `gh ${args[0]?.toLowerCase()} ${args[1]?.toLowerCase()}`
-    config = GH_READ_ONLY_COMMANDS[twoWordKey]
-    subcommandTokens = 2
-  }
-
-  // Try single-word subcommand (e.g. 'gh version')
-  if (!config && args.length >= 1) {
-    const oneWordKey = `gh ${args[0]?.toLowerCase()}`
-    config = GH_READ_ONLY_COMMANDS[oneWordKey]
-    subcommandTokens = 1
-  }
-
-  if (!config) {
-    return false
-  }
-
-  const flagArgs = args.slice(subcommandTokens)
-
-  // SECURITY: Reject any arg containing `$` (variable reference). Bare
-  // VariableExpressionAst positionals reach here as literal text ($env:SECRET).
-  // deriveSecurityFlags does not gate bare Variable args — only subexpressions,
-  // splatting, expandable strings, etc. All gh subcommands are network-facing,
-  // so a variable arg is a data-exfiltration vector:
-  //   gh search repos $env:SECRET_API_KEY
-  //   → PowerShell expands at runtime → secret sent to GitHub API.
-  // git ls-remote has an equivalent inline guard; this generalizes it for gh.
-  // Bash equivalent: BashTool blanket `$` rejection at readOnlyValidation.ts:~1352.
-  for (const arg of flagArgs) {
-    if (arg.includes('$')) {
-      return false
-    }
-  }
-  if (
-    config.additionalCommandIsDangerousCallback &&
-    config.additionalCommandIsDangerousCallback('', flagArgs)
-  ) {
-    return false
-  }
-  return validateFlags(flagArgs, 0, config)
+/**
+ * densable 2.1.216 `O5g`/`XIu` — gh is never RO-auto-allow in PowerShell.
+ * (`XIu` is the constant `return false` body.)
+ */
+export function isGhSafe(_args: string[]): boolean {
+  return false
 }
 
 function isDockerSafe(args: string[]): boolean {

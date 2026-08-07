@@ -1,0 +1,21 @@
+`),pu(1),Error(f)}o=Nnm(p)}return o(i,s,a,l,c,u)}}function a1S(e){return Array.isArray(e)&&e.length===1&&e[0]===""}async function l1S(e,t,r,n,o,i,s,a,l,c,u,d,p){let f;if(r){let y=a.getPendingPermissionRequests(),v=a.getPendingUserDialogRequests();return M("tengu_reinit_pending_redelivery",{n_pending_permissions:Mh(y.length),n_pending_dialogs:Mh(v.length)}),n.enqueue({type:"control_response",respon
+
+---
+
+`);return""}async function YMS(e,t){let r=Hoi().safeParse(e);if(!r.success)return jv("tool_error",`invalid request: ${r.error.message}`);let n=r.data;if(It()==="windows")return jv("tool_error","staged mcp_call is not supported on this platform");if(n.output_files!==void 0&&n.expires_at===void 0)return jv("tool_error","invalid request: expires_at is required when output_files are declared");if(n.ex
+
+---
+
+`);await bs(0);return}if(q==="stream-json"||q==="json")Fhi(!0);s8(),Xkr();let xe=(t.continue||t.resume||ie)&&!fGa()?null:rLi(U??J);if(xe&&q!=="json"&&q!=="stream-json")MU(xe);let ke=performance.now(),fe=t.continue||t.resume||ie||te?void 0:n4e({kind:"session-start",source:"startup"}).then((Qe)=>(Od("hooks_init_ms",performance.now()-ke,ke),Qe));fe?.catch(()=>{}),Il("before_validateForceLoginOrg");le
+
+---
+
+Base model: ${r}${n}`;return`Current model: ${r}${n}`}function fCo(e){let t=e??m2();if(!WC(mi(t)))return!1;return vAc()}function cie(e){if(e===null)return!1;return WC(mi(e))&&UBr()}var V8e=b(()=>{ad();at();Yt();XLt();$a();it();Rtn();hv();yy();D$r();Tce();ri();eq();uCo();Dn()});var myd;var hyd=b(()=>{Nn();myd=Te(()=>{let e=T.object({enable_email:T.boolean().nullish(),enable_push:T.boolean().nullish
+
+---
+
+${Tue()} \xB7 Est. cost ${zje()} USD`,billingNote:o.billingNote};let i=await i3o(n.scope,t.context,o.billingNote,{skipTaskRegistration:t.skipTaskRegistration,invocation:t.invocation});if(!i?.launched)return{status:"error",message:i?.blocks.map((s)=>s.type==="text"?s.text:"").join("").trim()||"Failed to launch cloud review session."};return{status:"launched",sessionId:i.sessionId,sessionUrl:i.sessi
+
+---
+
+`]),M3g=new Set([...VAu,"comment","string_content","simple_expansion","variable_name","special_variable_name"]),N3g=new Set([...VAu,"comment","$(","`","<(",">(",")"]),jAu=new Set([..._jr,...KQt,...Object.keys(CYi),...wYi,...wto,...Sjr,"find","jobs","setpriv","setarch","linux32","linux64","arch","xargs","parallel","su","runuser","pkexec","chroot","time","command","builtin","noglob","env","nice","no

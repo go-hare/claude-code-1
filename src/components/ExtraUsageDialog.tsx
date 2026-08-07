@@ -21,7 +21,8 @@ import {
   purchaseCredits,
   USAGE_CREDITS_SETTINGS_URL,
   updateAutoReloadSettings,
-  updateOverageSpendLimit,
+  updateSpendLimit,
+  formatSpendLimitUpdateFailedMessage,
   type PaymentMethod,
   type PrepaidBundle,
   type TaxPreview,
@@ -446,22 +447,19 @@ export function ExtraUsageDialog({ onDone, renamedFromExtraUsage = false }: Prop
                 setStep({ s: 'limit_input' });
                 return;
               }
-              try {
-                await updateOverageSpendLimit({
-                  is_enabled: true,
-                  monthly_credit_limit: step.cents,
-                  currency,
-                });
-                setStep({
-                  s: 'message',
-                  text: step.cents === null ? 'Monthly limit set to unlimited' : `Monthly limit set to ${label}`,
-                });
-              } catch (e) {
+              // densable HWr + dialog: show server user_facing reason on reject (#34)
+              const result = await updateSpendLimit(step.cents, currency);
+              if (!result.ok) {
                 setStep({
                   s: 'error',
-                  text: `Failed to update spend limit: ${errorMessage(e)}`,
+                  text: formatSpendLimitUpdateFailedMessage(result.reason),
                 });
+                return;
               }
+              setStep({
+                s: 'message',
+                text: step.cents === null ? 'Monthly limit set to unlimited' : `Monthly limit updated to ${label}`,
+              });
             }}
           />
         </Box>

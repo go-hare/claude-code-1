@@ -1,0 +1,21 @@
+stdintv_sectv_nsecConnectionRefusedConnectionResetHostUnreachableNetworkUnreachableConnectionAbortedNotConnectedAddrInUseNetworkDownBrokenPipeAlreadyExistsNotADirectoryIsADirectoryDirectoryNotEmptyReadOnlyFilesystemFilesystemLoopStaleNetworkFileHandleInvalidInputInvalidDataWriteZeroStorageFullNotSeekableQuotaExceededFileTooLargeResourceBusyExecutableFileBusyCrossesDevicesTooManyLinksInvalidFilenam
+
+---
+
+${l}`:""}`}function qir(e){if(!e||e.length===0)return e;return jo(e)}function pOt(e){if(!e||e.length<=hgs)return e;let t=e.length-hgs;return[...e.slice(0,hgs),`... and ${t} more (truncated for prompt size)`]}function wWu(){if(!xo.isSandboxingEnabled())return"";let e=xo.getFsReadConfig(),t=xo.getFsWriteConfig(),r=xo.getNetworkRestrictionConfig(),n=xo.getAllowUnixSockets(),o=xo.getIgnoreViolations()
+
+---
+
+`),c=l.find((g)=>g.includes("Sandbox:")&&g.includes("deny")),u=l.find((g)=>g.startsWith("CMD64_"));if(!c)return;let d=c.match(n);if(!d?.[1])return;let p=d[1],f,m;if(u){if(m=u.match(r)?.[1],m)try{f=xZn(m)}catch{}}if(p.includes("mDNSResponder")||p.includes("mach-lookup com.apple.diagnosticd")||p.includes("mach-lookup com.apple.analyticsd"))return;if(t&&f){if(o.length>0){if(o.some((_)=>p.includes(_))
+
+---
+
+`),XJn=e,C(`Session environment script ready (${$nt.length} chars total)`),$nt}function Vdg(e,t){let r=e.match(QJn),n=t.match(QJn),o=r?.[1]||"",i=n?.[1]||"";if(o!==i)return(FVc[o]??99)-(FVc[i]??99);let s=parseInt(r?.[2]||"0",10),a=parseInt(n?.[2]||"0",10);return s-a}var Bnt,q6r,$nt=void 0,XJn=void 0,FVc,QJn;var V0t=b(()=>{at();qe();Er();Br();it();Bi();Bnt=require("fs/promises"),q6r=require("path")
+
+---
+
+`," ").trim();if(!s)continue;let a=XZm.exec(s);if(a){if(!t.commandFallback)t.commandFallback=a[1];continue}let l=/<bash-input>([\s\S]*?)<\/bash-input>/.exec(s);if(l)return`! ${l[1].trim()}`;if(KTi.test(s))continue;if(s.length>200)s=Yu(s,200).trim()+"\u2026";return s}return}var KTi,XZm;var i1r=b(()=>{Lr();KTi=/^(?:\s*<[a-z][\w-]*[\s>]|\[Request interrupted by user[^\]]*\])/,XZm=/<command-name>(.*?)
+
+---
+
+`);return`${s} -c ${iue([c])}`}}function Lzi(e){try{if(W_.lstatSync(e).isSymbolicLink())return W_.realpathSync(e)}catch{}return e}function Unu(e,t,r,n){let o=t==="/"?"/":t+"/";e.push("--tmpfs",t);for(let i of r)if(i.startsWith(o)||i===t)e.push("--bind",i,i),fo(`[Sandbox Linux] Re-bound write path wiped by denyRead tmpfs: ${i}`);for(let i of n)if(i.startsWith(o)||i===t){if(!W_.existsSync(i)){fo(`[S

@@ -25,8 +25,9 @@ import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
 import { submitDispatch } from '../daemon/bgManager.js';
-import { listAllJobs, type BgJobState } from '../daemon/jobState.js';
-import { deleteJob } from '../daemon/deleteJob.js';
+import { listAllJobs, patchBgJobState, type BgJobState } from '../daemon/jobState.js';
+import { deleteJob, formatKeptWorktreeReason, type DeleteJobResult } from '../daemon/deleteJob.js';
+import { killJobConfirmed } from '../daemon/xyrRespawn.js';
 import { VoiceProvider } from '../context/voice.js';
 import { getPlatform } from '../utils/platform.js';
 import {
@@ -60,6 +61,7 @@ import {
   FLEET_MIN_INTENT_LEN,
   FLEET_PASTE_CHAR_THRESHOLD,
   FLEET_EXIT_ARM_MS,
+  FLEET_DELETE_ARM_MS,
   FLEET_STATE_GROUP_LABELS,
   FLEET_STATE_GROUP_DESCRIPTIONS,
   type FleetColumnWidths,
@@ -332,6 +334,7 @@ function SessionRow({
   showSelectionBg,
   isRenaming,
   isDeletePending,
+  isJustKilled,
   isUngroupPending,
   renameValue,
   cols,
@@ -349,6 +352,8 @@ function SessionRow({
   showSelectionBg?: boolean;
   isRenaming: boolean;
   isDeletePending: boolean;
+  /** densable cy.justKilled — first Ctrl+X ran stop; second deletes. */
+  isJustKilled?: boolean;
   isUngroupPending?: boolean;
   renameValue: string;
   cols: FleetColumnWidths;
@@ -364,11 +369,12 @@ function SessionRow({
   const artifact = sessionArtifactLabel(session);
 
   // Official xhO detail: "→ to return" only when origin session is focused.
+  // densable Z3e: ungroup | justKilled → "stopped · ctrl+x again to delete" | delete.
   let detail = '';
   if (isUngroupPending) {
     detail = 'ctrl+x again to ungroup';
   } else if (isDeletePending) {
-    detail = 'ctrl+x again to delete';
+    detail = isJustKilled ? 'stopped \u00b7 ctrl+x again to delete' : 'ctrl+x again to delete';
   } else if (isOrigin && isSelected) {
     if (band === 'blocked') {
       const needs = session.waitingFor ?? session.lastMessage ?? '';
@@ -520,6 +526,23 @@ function AgentViewApp({
    * - `group:<name>` → ungroup entire custom group header (official Lyt)
    */
   const [ungroupConfirmSessionId, setUngroupConfirmSessionId] = useState<string | null>(null);
+  /**
+   * densable cy.justKilled — first Ctrl+X on active/blocked ran stop; UI shows
+   * "stopped · ctrl+x again to delete". Cleared with arm timeout / Esc / second X.
+   */
+  const [justKilledSessionId, setJustKilledSessionId] = useState<string | null>(null);
+  /**
+   * densable wL / yte — tombstone job shorts + full sessionIds while delete is
+   * in flight so refresh cannot resurrect a row (zombie reappear when worker dead).
+   */
+  const deletedJobIdsRef = useRef(new Set<string>());
+  const deletedSessionIdsRef = useRef(new Set<string>());
+  /** densable bte — Esc cancelled arm; stop failure must not re-arm justKilled. */
+  const escCancelledDeleteIdsRef = useRef(new Set<string>());
+  /** densable Oc(() => cO(null), cy ? 2000 : null) */
+  const deleteArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** densable Pk.current — latest arm target id (sessionId / group: / *done*). */
+  const deleteArmIdRef = useRef<string | null>(null);
   // densable Mt — only Ctrl+C double-press (CJ) arms exit; Esc is one-shot Tt.
   const [exitArmed, setExitArmed] = useState(false);
   const exitArmedRef = useRef(false);
@@ -574,12 +597,46 @@ function AgentViewApp({
     }, FLEET_EXIT_ARM_MS);
   }, [forceExit]);
 
-  useEffect(
-    () => () => {
-      if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
-    },
-    [],
-  );
+  /** densable cO(null) — clear delete/ungroup arm + justKilled. */
+  const clearDeleteArm = useCallback(() => {
+    if (deleteArmTimerRef.current) {
+      clearTimeout(deleteArmTimerRef.current);
+      deleteArmTimerRef.current = null;
+    }
+    deleteArmIdRef.current = null;
+    setDeleteConfirmSessionId(null);
+    setUngroupConfirmSessionId(null);
+    setJustKilledSessionId(null);
+  }, []);
+
+  /**
+   * densable cO(id, justKilled, …) — arm second Ctrl+X; auto-clear after 2000ms.
+   * densable also clears bte for that id on arm.
+   */
+  const armDeleteConfirm = useCallback((sessionId: string, opts?: { justKilled?: boolean; ungroup?: boolean }) => {
+    if (deleteArmTimerRef.current) {
+      clearTimeout(deleteArmTimerRef.current);
+      deleteArmTimerRef.current = null;
+    }
+    escCancelledDeleteIdsRef.current.delete(sessionId);
+    deleteArmIdRef.current = sessionId;
+    if (opts?.ungroup) {
+      setDeleteConfirmSessionId(null);
+      setJustKilledSessionId(null);
+      setUngroupConfirmSessionId(sessionId);
+    } else {
+      setUngroupConfirmSessionId(null);
+      setDeleteConfirmSessionId(sessionId);
+      setJustKilledSessionId(opts?.justKilled ? sessionId : null);
+    }
+    deleteArmTimerRef.current = setTimeout(() => {
+      deleteArmTimerRef.current = null;
+      deleteArmIdRef.current = null;
+      setDeleteConfirmSessionId(null);
+      setUngroupConfirmSessionId(null);
+      setJustKilledSessionId(null);
+    }, FLEET_DELETE_ARM_MS);
+  }, []);
 
   const dispatchingRef = useRef(false);
   const lastRelaunchRef = useRef(0);
@@ -588,6 +645,33 @@ function AgentViewApp({
   /** When a refresh is in flight, a trailing refresh is scheduled after it settles. */
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
+
+  /**
+   * densable wL + yte + jF — mark job short / sessionIds as deleting so refresh
+   * filters them out; returns release that removes the tombstone (on failure).
+   */
+  const tombstoneJob = useCallback((session: SessionEntry) => {
+    const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
+    if (!short) return () => {};
+    deletedJobIdsRef.current.add(short);
+    const sids = [session.sessionId].filter((id): id is string => typeof id === 'string' && id.length > 0);
+    for (const id of sids) deletedSessionIdsRef.current.add(id);
+    // Bump generation so any in-flight refresh cannot clobber after optimistic remove.
+    refreshGenerationRef.current += 1;
+    return () => {
+      deletedJobIdsRef.current.delete(short);
+      for (const id of sids) deletedSessionIdsRef.current.delete(id);
+      refreshGenerationRef.current += 1;
+    };
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
+      if (deleteArmTimerRef.current) clearTimeout(deleteArmTimerRef.current);
+    },
+    [],
+  );
   const [commands, setCommands] = useState<Command[]>([]);
   /** Official fleet templates list (e$a `t` arg) for @mention / leading token. */
   const [fleetTemplates, setFleetTemplates] = useState<TemplateInfo[]>([]);
@@ -938,6 +1022,16 @@ function AgentViewApp({
         entries = entries.filter(s => s.cwd?.replace(/\\/g, '/').toLowerCase().startsWith(normalized));
       }
 
+      // densable wL / yte: hide jobs mid-delete so dead-worker refresh cannot resurrect them.
+      if (deletedJobIdsRef.current.size > 0 || deletedSessionIdsRef.current.size > 0) {
+        entries = entries.filter(s => {
+          const short = s.short ?? s.sessionId?.slice(0, 8) ?? '';
+          if (short && deletedJobIdsRef.current.has(short)) return false;
+          if (s.sessionId && deletedSessionIdsRef.current.has(s.sessionId)) return false;
+          return true;
+        });
+      }
+
       // Drop stale results if a newer generation was started (or we were
       // superseded while awaiting listAllJobs / gh probes).
       if (generation !== refreshGenerationRef.current) return;
@@ -1216,6 +1310,7 @@ function AgentViewApp({
     viewMode,
     deletePending: !!deleteConfirmSessionId || !!ungroupConfirmSessionId,
     ungroupPending: !!ungroupConfirmSessionId,
+    justKilled: !!justKilledSessionId && justKilledSessionId === deleteConfirmSessionId,
     rowKind: currentRow?.kind,
     band: selectedSession ? deriveBand(selectedSession) : undefined,
     canPin: !!selectedSession,
@@ -1517,27 +1612,121 @@ function AgentViewApp({
     await refresh();
   }, [getSelectedSession, renameValue, refresh]);
 
-  // densable FleetView delete: C2e(id,{force:!0}) — kill-confirm + worktree
-  // gates with force (dirty/unpushed skip); bare removeJob left stranded workers.
+  /**
+   * densable FSS delete: optimistic filter via r(..., o.id); C2e force;
+   * finally always releases tombstone then refresh (e()).
+   */
   const handleDelete = useCallback(async () => {
     const session = getSelectedSession();
     if (!session) return;
     const short = session.short ?? session.sessionId?.slice(0, 8);
     if (!short) return;
-    await deleteJob(short, { force: true });
-    await refresh();
-  }, [getSelectedSession, refresh]);
+    clearDeleteArm();
+    const releaseTombstone = tombstoneJob(session);
+    // densable optimistic remove from list while delete runs
+    setSessions(prev =>
+      prev.filter(s => {
+        const sShort = s.short ?? s.sessionId?.slice(0, 8) ?? '';
+        return sShort !== short && s.sessionId !== session.sessionId;
+      }),
+    );
+    let result: DeleteJobResult | undefined;
+    try {
+      result = await deleteJob(short, { force: true });
+      if (!result.removed && !result.keptWorktree) {
+        throw new Error(result.error ?? 'worker may still be running');
+      }
+    } catch (err) {
+      setError(`Couldn't delete \u2014 ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      // densable finally: i?.() release wL, then e() refresh
+      releaseTombstone();
+      await refresh();
+    }
+    if (!result) return;
+    if (result.removed) {
+      if (result.leftWorktreeDir) {
+        setError(
+          `Worktree directory left at ${result.leftWorktreeDir} \u2014 git no longer recognized it; the session was deleted`,
+        );
+      } else {
+        setError(null);
+      }
+      return;
+    }
+    if (result.keptWorktree) {
+      const phrase = formatKeptWorktreeReason(result.keptReason, result.keptErrorSummary);
+      setError(`Worktree kept at ${result.keptWorktree} \u2014 ${phrase}; the session was not deleted`);
+    }
+  }, [getSelectedSession, refresh, clearDeleteArm, tombstoneJob]);
+
+  /**
+   * densable FSS stop then cO(id, justKilled=true): first Ctrl+X on active/blocked.
+   * Stop failure re-arms without justKilled unless Esc cancelled (bte).
+   */
+  const handleStopThenArmDelete = useCallback(
+    async (session: SessionEntry) => {
+      const short = session.short ?? session.sessionId?.slice(0, 8);
+      if (!short) return;
+      armDeleteConfirm(session.sessionId, { justKilled: true });
+      // Optimistic UI: mark stopped like densable state patch
+      const nowIso = new Date().toISOString();
+      setSessions(prev =>
+        prev.map(s => {
+          if (s.sessionId !== session.sessionId && (s.short ?? '') !== short) {
+            return s;
+          }
+          return {
+            ...s,
+            status: 'stopped',
+            lastMessage: 'stopped',
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+      try {
+        const kill = await killJobConfirmed(short, { force: true });
+        if (!kill.confirmed) {
+          throw new Error(kill.error ?? 'worker may still be running');
+        }
+        patchBgJobState(short, {
+          state: 'stopped',
+          detail: 'stopped',
+          tempo: 'idle',
+          updatedAt: nowIso,
+        });
+      } catch (err) {
+        // densable: !wL && still listed && (Pk null|same id) && !bte → re-arm justKilled:false
+        if (
+          !deletedJobIdsRef.current.has(short) &&
+          !escCancelledDeleteIdsRef.current.has(session.sessionId) &&
+          (deleteArmIdRef.current === null || deleteArmIdRef.current === session.sessionId)
+        ) {
+          armDeleteConfirm(session.sessionId, { justKilled: false });
+        }
+        setError(`Couldn't stop \u2014 ${err instanceof Error ? err.message : String(err)}`);
+        await refresh();
+      }
+    },
+    [armDeleteConfirm, refresh],
+  );
 
   const handleDeleteAll = useCallback(async () => {
+    clearDeleteArm();
     for (const session of done) {
       // Prefer daemon short (attach correctness) over sessionId slice.
       const short = session.short ?? session.sessionId?.slice(0, 8);
       if (!short) continue;
-      // densable force:true for fleet delete (non-git / dirty still clears jobdir)
-      await deleteJob(short, { force: true });
+      const releaseTombstone = tombstoneJob(session);
+      try {
+        // densable force:true for fleet delete (non-git / dirty still clears jobdir)
+        await deleteJob(short, { force: true });
+      } finally {
+        releaseTombstone();
+      }
     }
     await refresh();
-  }, [done, refresh]);
+  }, [done, refresh, clearDeleteArm, tombstoneJob]);
 
   const handleGroupStart = useCallback(() => {
     const session = getSelectedSession();
@@ -1750,8 +1939,14 @@ function AgentViewApp({
 
   useInput((input, key) => {
     const clearPending = () => {
-      setDeleteConfirmSessionId(null);
-      setUngroupConfirmSessionId(null);
+      // densable Esc on armed: bte.add(id) then cO(null)
+      if (deleteConfirmSessionId) {
+        escCancelledDeleteIdsRef.current.add(deleteConfirmSessionId);
+      }
+      if (ungroupConfirmSessionId) {
+        escCancelledDeleteIdsRef.current.add(ungroupConfirmSessionId);
+      }
+      clearDeleteArm();
     };
 
     // densable /resume past-session overlay key handling
@@ -2172,17 +2367,17 @@ function AgentViewApp({
         setReplyInput('');
       }
     } else if (input === 'x' && key.ctrl) {
-      // Official: job → delete (2x); custom group header → ungroup all (2x);
-      // grouped job may ungroup first when already confirmed for ungroup.
+      // densable R4e("x"): active/blocked first X = stop+arm justKilled; second X = delete.
+      // completed first X = arm delete; second X = delete. Grouped jobs: ungroup arm first.
       if (currentRow?.kind === 'header' && currentRow.group.startsWith('group:')) {
         const gname = currentRow.group.slice(6);
         if (gname === UNGROUPED_LABEL) return;
         const token = `group:${gname}`;
         if (ungroupConfirmSessionId === token) {
+          clearDeleteArm();
           void handleUngroupAll(gname);
         } else {
-          setDeleteConfirmSessionId(null);
-          setUngroupConfirmSessionId(token);
+          armDeleteConfirm(token, { ungroup: true });
         }
         return;
       }
@@ -2192,32 +2387,36 @@ function AgentViewApp({
         // and always require a second confirm via deleteConfirmSessionId='*done*'.
         if (currentRow?.kind === 'header' && currentRow.group === 'done' && done.length > 0) {
           if (deleteConfirmSessionId === '*done*') {
-            setDeleteConfirmSessionId(null);
+            clearDeleteArm();
             void handleDeleteAll();
           } else {
-            setUngroupConfirmSessionId(null);
-            setDeleteConfirmSessionId('*done*');
+            armDeleteConfirm('*done*');
           }
         }
         return;
       }
       // Prefer ungroup when job is in a custom group and second press is ungroup-confirm
       if (session.group && ungroupConfirmSessionId === session.sessionId) {
+        clearDeleteArm();
         void handleUngroup();
         return;
       }
       if (deleteConfirmSessionId === session.sessionId) {
-        setDeleteConfirmSessionId(null);
+        // densable second X → delete (works for justKilled arm too)
+        clearDeleteArm();
         void handleDelete();
         return;
       }
-      // First press: grouped jobs offer ungroup; otherwise arm delete.
+      // First press: grouped jobs offer ungroup; active/blocked stop+arm; else arm delete.
       if (session.group) {
-        setDeleteConfirmSessionId(null);
-        setUngroupConfirmSessionId(session.sessionId);
+        armDeleteConfirm(session.sessionId, { ungroup: true });
       } else {
-        setUngroupConfirmSessionId(null);
-        setDeleteConfirmSessionId(session.sessionId);
+        const band = deriveBand(session);
+        if (band === 'blocked' || band === 'active') {
+          void handleStopThenArmDelete(session);
+        } else {
+          armDeleteConfirm(session.sessionId);
+        }
       }
     } else if (input === 'a' && !key.ctrl && !key.meta && sessions.length > 0) {
       // Soft-archive / unarchive (local product surface for official archive)
@@ -2450,6 +2649,7 @@ function AgentViewApp({
                   showSelectionBg={showSelectionBg}
                   isRenaming={viewMode === 'rename' && isRowSelected}
                   isDeletePending={deleteConfirmSessionId === session.sessionId}
+                  isJustKilled={justKilledSessionId === session.sessionId}
                   isUngroupPending={ungroupConfirmSessionId === session.sessionId}
                   renameValue={renameValue}
                   cols={cols}

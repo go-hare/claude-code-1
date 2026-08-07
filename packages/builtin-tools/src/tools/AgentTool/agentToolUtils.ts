@@ -615,7 +615,12 @@ export async function classifyHandoffIfNeeded({
           'Handoff classifier unavailable, allowing sub-agent output with warning',
           { level: 'warn' },
         )
-        return `Note: The safety classifier was unavailable when reviewing this sub-agent's work. Please carefully verify the sub-agent's actions and output before acting on them.`
+        // densable CYu — allow-with-warning (not fail-closed deny). f6d empty in 216.
+        const detail = '' // densable f6d(httpStatus, errorKind) body empty in 2.1.216
+        const who = classifierResult.model
+          ? `${classifierResult.model} (the safety classifier)`
+          : 'The safety classifier'
+        return `Note: ${who} was unavailable${detail} when reviewing this subagent's work. Please carefully verify the subagent's actions and output before acting on them.`
       }
 
       logForDebugging(

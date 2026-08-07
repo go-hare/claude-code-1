@@ -6,6 +6,9 @@ import {
   baseRefArgDiagnostics,
   damerauLevenshtein,
   EMPTY_TREE_SHA,
+  formatEmptyDiffAgainstBaseError,
+  formatLargestDiffFiles,
+  formatLocalDiffTooLargeError,
   getUltrareviewDiffLimits,
   isAnthropicMonorepoBlocked,
   isCwdHome,
@@ -17,7 +20,9 @@ import {
   normalizeUltrareviewPrArg,
   notGitRepoHint,
   parseGithubPullUrl,
+  parseGitNumstat,
   parseGitShortstat,
+  pluralizeCount,
   reviewHostsEqual,
 } from '../reviewRemote.js'
 
@@ -174,6 +179,91 @@ describe('parseGitShortstat (densable Dro)', () => {
 
   test('returns null for empty', () => {
     expect(parseGitShortstat('')).toBeNull()
+  })
+})
+
+describe('pluralizeCount / numstat / DHp (2.1.216 #32)', () => {
+  test('pluralizeCount', () => {
+    expect(pluralizeCount(1, 'file')).toBe('file')
+    expect(pluralizeCount(2, 'file')).toBe('files')
+    expect(pluralizeCount(1, 'line')).toBe('line')
+    expect(pluralizeCount(8000, 'line')).toBe('lines')
+  })
+
+  test('parseGitNumstat ranks binary as 0 lines', () => {
+    const n = parseGitNumstat(
+      ['10\t2\tsrc/a.ts', '-\t-\tbin/img.png', '1\t0\tsrc/b.ts'].join('\n'),
+    )
+    expect(n.filesCount).toBe(3)
+    expect(n.linesAdded).toBe(11)
+    expect(n.linesRemoved).toBe(2)
+    expect(n.perFileStats.get('bin/img.png')).toEqual({
+      added: 0,
+      removed: 0,
+      isBinary: true,
+    })
+  })
+
+  test('formatLargestDiffFiles top 3 by total lines', () => {
+    const numstat = [
+      '100\t0\tbig.ts',
+      '5\t5\tmid.ts',
+      '1\t0\tsmall.ts',
+      '50\t50\thuge.ts',
+    ].join('\n')
+    const s = formatLargestDiffFiles(numstat, 3)
+    expect(s.startsWith(' Largest files: ')).toBe(true)
+    expect(s).toContain('huge.ts (100 lines)')
+    expect(s).toContain('big.ts (100 lines)')
+    expect(s).toContain('mid.ts (10 lines)')
+    expect(s).not.toContain('small.ts')
+    expect(s.endsWith('.')).toBe(true)
+  })
+
+  test('formatLocalDiffTooLargeError densable shape', () => {
+    const msg = formatLocalDiffTooLargeError({
+      filesCount: 600,
+      totalLines: 12000,
+      maxFiles: 500,
+      maxLines: 8000,
+      largestFilesSuffix: ' Largest files: a.ts (9,000 lines).',
+      invocation: '/code-review ultra',
+    })
+    expect(msg).toContain(
+      'Diff is too large for ultrareview: 600 files, 12,000 lines changed',
+    )
+    expect(msg).toContain('(limits: 500 files, 8,000 lines).')
+    expect(msg).toContain('Largest files: a.ts (9,000 lines).')
+    expect(msg).toContain(
+      'Pass a closer base branch (`/code-review ultra <branch>`)',
+    )
+  })
+})
+
+describe('formatEmptyDiffAgainstBaseError (2.1.216 #33)', () => {
+  test('names ref + short merge-base and suggests explicit base', () => {
+    const msg = formatEmptyDiffAgainstBaseError({
+      diffAgainstRef: 'origin/main',
+      mergeBaseSha: 'abcdef1234567890',
+      hadExplicitBase: false,
+      invocation: '/code-review ultra',
+    })
+    expect(msg).toContain(
+      'No changes to review: the diff against origin/main (merge-base abcdef1) is empty',
+    )
+    expect(msg).toContain(
+      'pass one explicitly, e.g. `/code-review ultra <branch>`',
+    )
+  })
+
+  test('hadExplicitBase suggests different base', () => {
+    const msg = formatEmptyDiffAgainstBaseError({
+      diffAgainstRef: 'develop',
+      mergeBaseSha: 'deadbeef',
+      hadExplicitBase: true,
+      invocation: '/ultrareview',
+    })
+    expect(msg).toContain('try a different base, e.g. `/ultrareview <branch>`')
   })
 })
 

@@ -1,0 +1,215 @@
+ 
+
+ resolving package '
+
+' at '
+
+'
+
+ '
+
+' for package '
+
+' (but package exists)
+"HTTP 5xx while resolving package '
+
+' at '
+
+'
+"HTTP 4xx while resolving package '
+
+' at '
+
+'
+
+Package '
+
+' was not found
+"HTTP 403 while resolving package '
+
+' at '
+
+'
+"HTTP 402 while resolving package '
+
+' at '
+
+'
+"HTTP 401 while resolving package '
+
+' at '
+
+'
+"HTTP 400 while resolving package '
+
+' at '
+
+'
+
+ downloading package '
+
+@
+
+'
+'Failed to extract tarball for package '
+
+@
+
+'
+
+HTTP 5xx downloading package '
+
+@
+
+'
+
+HTTP 4xx downloading package '
+
+@
+
+'
+
+HTTP 404 downloading package '
+
+@
+
+'
+
+HTTP 403 downloading package '
+
+@
+
+'
+
+HTTP 402 downloading package '
+
+@
+
+'
+
+HTTP 401 downloading package '
+
+@
+
+'
+
+HTTP 400 downloading package '
+
+@
+
+'
+
+BuildMessage: 
+
+ResolveMessage: 
+
+ while resolving '
+
+' from '
+
+'
+
+ while resolving package '
+
+' from '
+
+'
+
+Cannot resolve invalid URL '
+
+' from '
+
+'
+!Cannot resolve invalid data URL '
+
+' from '
+
+'
+
+Module not found '
+
+'
+
+Cannot find module '
+
+' from '
+
+'
+
+Cannot find package '
+
+' from '
+
+'
+
+No such built-in module: 
+
+5expected depth to be greater than or equal to 0, got 
+
+%expected depth to be an integer, got 
+
+ warn: Unable to start IPC socket
+
+1
+[33mwarn
+[0m
+[2m:
+[0m Unable to start IPC socket
+
+      at 
+
+[0m      
+[2mat 
+[0m
+
+[2m
+
+[0m      
+[2mat 
+[0m
+
+      at 
+
+ (
+
+)
+
+[0m      
+[2mat 
+[0m
+
+[2m (
+[0m
+
+[2m)
+[0m
+
+::error file=
+
+,line=
+
+,col=
+
+,title=
+
+: 
+
+::
+
+%0A      at 
+
+%0A      at 
+
+ (
+
+)
+
+ | 
+
+[0m
+[1m
+
+ |
+[0m 
+
+[

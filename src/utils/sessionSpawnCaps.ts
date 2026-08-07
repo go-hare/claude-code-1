@@ -7,7 +7,11 @@
  *
  * Local product: session-scoped module counters (single CLI process = session).
  * /clear calls reset*; WebSearchTool + AgentTool call get/increment.
+ *
+ * 2.1.216 #15: L(Me) interrupt immunity for async local spawn (see assertCanSpawnSubagent).
  */
+
+import { getAbortReasonMessage } from 'src/utils/abortController.js'
 
 /** densable qpg / zpg */
 export const DEFAULT_MAX_SUBAGENTS_PER_SESSION = 200
@@ -78,17 +82,33 @@ export function resetSessionSpawnCaps(): void {
 }
 
 /**
- * densable AgentTool N(): abort → throw AbortError-like; at cap → throw message;
- * else increment. Returns null when allowed (caller continues).
+ * densable AgentTool L(Me)/N():
+ *   if aborted:
+ *     if Me && q_(reason)==="interrupt" → continue (bg startup immunity)
+ *     else throw AbortError-like
+ *   at cap → throw message; else increment.
+ *
+ * densable: L(G&&!B) where G=async, B=remote — only local async spawns ignore
+ * "interrupt" during the pre-register startup window (2.1.216 #15).
  */
 export function assertCanSpawnSubagent(options?: {
   abortSignal?: AbortSignal
   env?: NodeJS.ProcessEnv
+  /** densable Me — allow "interrupt" reason through for async local spawn */
+  allowInterrupt?: boolean
 }): void {
   if (options?.abortSignal?.aborted) {
-    const err = new Error('Aborted')
-    err.name = 'AbortError'
-    throw err
+    // densable: if(!(Me&&Ze==="interrupt")) throw new wl
+    if (
+      !(
+        options.allowInterrupt === true &&
+        getAbortReasonMessage(options.abortSignal.reason) === 'interrupt'
+      )
+    ) {
+      const err = new Error('Aborted')
+      err.name = 'AbortError'
+      throw err
+    }
   }
   const max = resolveMaxSubagentsPerSession(options?.env)
   const used = getTotalAgentSpawns()

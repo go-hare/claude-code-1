@@ -1,0 +1,9 @@
+pending loop wakeup(s) on user abort
+
+---
+
+ABORT_ERR (20): the user aborted an operation
+
+---
+
+ABORT_ERR (20): the user aborted an operation

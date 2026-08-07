@@ -79,7 +79,13 @@ declare module '*/sdk/coreTypes.generated.js' {
 
   // Rewind
   export type RewindFilesResult = {
-    filesChanged: string[]
+    canRewind?: boolean
+    error?: string
+    filesChanged?: string[]
+    insertions?: number
+    deletions?: number
+    /** densable skippedLinks — only on real (non-dryRun) rewind */
+    skippedLinks?: number
     [key: string]: unknown
   }
 

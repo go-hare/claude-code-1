@@ -26,6 +26,10 @@ import {
   copyFileHistoryForResume,
   type FileHistorySnapshot,
 } from './fileHistory.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import { logError } from './log.js'
 import {
   createAssistantMessage,
@@ -150,6 +154,31 @@ export type DeserializeResult = {
 }
 
 /**
+ * densable Szu — suppress auto-resume of interrupted turns older than
+ * CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS (default 1h when env set but
+ * non-numeric; unset → never stale).
+ */
+export function isResumeInterruptedTurnStale(
+  messages: Array<{ type: string; timestamp?: string }>,
+  env: NodeJS.ProcessEnv = process.env,
+  nowMs: number = Date.now(),
+): boolean {
+  const raw = env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS
+  if (!raw) return false
+  const parsed = Number(raw)
+  if (parsed === 0) return false
+  const maxAge = Number.isFinite(parsed) && parsed > 0 ? parsed : 3_600_000
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (m.type === 'system' || m.type === 'progress') continue
+    const ts = Date.parse(m.timestamp ?? '')
+    if (Number.isFinite(ts)) return nowMs - ts >= maxAge
+  }
+  // No timestamped turn message → treat as stale (densable: return true)
+  return true
+}
+
+/**
  * Deserializes messages from a log file into the format expected by the REPL.
  * Filters unresolved tool uses, orphaned thinking messages, and appends a
  * synthetic assistant sentinel when the last message is from the user.
@@ -213,17 +242,27 @@ export function deserializeMessagesWithInterruptDetection(
 
     // densable lrs: f = t?.size||r ? {kind:"none"} : N4g(p)
     // replyOnResume skips interrupt classification (REPL uses {replay:true}).
+    // densable Szu: age-out → force none (+ tengu_resume_stale_turn_suppressed).
     let turnInterruptionState: TurnInterruptionState
     if (replyOnResume) {
       turnInterruptionState = { kind: 'none' }
     } else {
       const internalState = detectTurnInterruption(filteredMessages)
 
-      // Transform mid-turn interruptions into interrupted_prompt by appending
-      // a synthetic continuation message. This unifies both interruption kinds
-      // so the consumer only needs to handle interrupted_prompt.
-      if (internalState.kind === 'interrupted_turn') {
-        // Official kdo — CLAUDE_CODE_RESUME_PROMPT overrides default.
+      if (
+        internalState.kind !== 'none' &&
+        isResumeInterruptedTurnStale(filteredMessages)
+      ) {
+        if (process.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN) {
+          logEvent('tengu_resume_stale_turn_suppressed', {
+            kind: internalState.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        }
+        turnInterruptionState = { kind: 'none' }
+      } else if (internalState.kind === 'interrupted_turn') {
+        // Transform mid-turn interruptions into interrupted_prompt by appending
+        // a synthetic continuation message. Official kdo —
+        // CLAUDE_CODE_RESUME_PROMPT overrides default.
         const [continuationMessage] = normalizeMessages([
           createUserMessage({
             content: getResumePrompt(),

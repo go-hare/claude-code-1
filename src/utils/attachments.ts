@@ -2975,6 +2975,19 @@ export function resetSentSkillNames(): void {
 }
 
 /**
+ * densable oNs — drop specific skill names from per-agent sent sets so only
+ * changed skills are re-announced (skill watcher fingerprint delta).
+ */
+export function forgetSentSkillNames(names: string[]): void {
+  if (names.length === 0) return
+  for (const set of sentSkillNames.values()) {
+    for (const name of names) {
+      set.delete(name)
+    }
+  }
+}
+
+/**
  * Suppress the next skill-listing injection. Called by conversationRecovery
  * on --resume when a skill_listing attachment already exists in the
  * transcript.
@@ -3445,19 +3458,17 @@ export async function generateFileAttachment(
     }
   }
 
-  // densable Eio: at-mention already_read only when HOe full-enough cache
-  // entry still matches mtime. Partial/offset reads must re-read so the
-  // attachment is not empty after a prior limited Read.
+  // densable Eio: at-mention already_read only when H1e/HOe full-enough cache
+  // entry still matches mtime. Partial/offset / contentNotInModelContext /
+  // empty-but-nonzero contentLength must re-read so @-mention is not empty
+  // after file-modifying hooks or tools.
   const existingFileState = toolUseContext.readFileState.get(filename)
   if (existingFileState && mode === 'at-mention') {
-    // densable: HOe(l) && (l.content !== "" || (l.contentLength ?? 0) === 0)
-    // Local FileState has no contentLength; empty content is only valid for a
-    // truly empty full read (HOe true when limit undefined).
+    // densable: H1e(l) && (l.content !== "" || (l.contentLength ?? 0) === 0)
     const fullEnough =
       isFullEnoughFileRead(existingFileState) &&
       (existingFileState.content !== '' ||
-        ((existingFileState as { contentLength?: number }).contentLength ??
-          0) === 0)
+        (existingFileState.contentLength ?? 0) === 0)
     try {
       if (
         fullEnough &&

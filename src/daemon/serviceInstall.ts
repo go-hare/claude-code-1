@@ -351,31 +351,88 @@ export async function isDaemonServiceExecStale(): Promise<boolean> {
 }
 
 export async function startDaemonService(): Promise<ServiceOpResult> {
+  return controlDaemonService('start')
+}
+
+/**
+ * densable t_n — stop the installed user service (launchd kill SIGTERM /
+ * systemctl --user stop). Stop failures that only mean "already gone" are ok.
+ */
+export async function stopDaemonService(): Promise<ServiceOpResult> {
+  return controlDaemonService('stop')
+}
+
+/**
+ * densable mga — start | stop | restart via launchctl/systemctl.
+ * stop: launchctl kill SIGTERM <target>; non-zero treated as ok (already down).
+ */
+async function controlDaemonService(
+  op: 'start' | 'stop' | 'restart',
+): Promise<ServiceOpResult> {
   const platform = getPlatform()
   if (platform === 'macos') {
-    const { code, stderr, error } = await execFileNoThrow(
-      'launchctl',
-      ['kickstart', launchdTarget()],
-      { useCwd: false, timeout: 15_000 },
-    )
+    if (op === 'restart') {
+      await execFileNoThrow('launchctl', ['kill', 'SIGTERM', launchdTarget()], {
+        useCwd: false,
+        timeout: 15_000,
+      })
+      let exited = false
+      for (let a = 0; a < 200; a++) {
+        const print = await execFileNoThrow(
+          'launchctl',
+          ['print', launchdTarget()],
+          { useCwd: false, timeout: 5_000 },
+        )
+        if (print.code !== 0 || !/^\s*pid = /m.test(print.stdout)) {
+          exited = true
+          break
+        }
+        await new Promise(r => setTimeout(r, 50))
+      }
+      if (!exited) {
+        return {
+          ok: false,
+          error:
+            'daemon did not exit within 10s of SIGTERM; restart aborted before kickstart',
+        }
+      }
+    }
+    const args =
+      op === 'start' || op === 'restart'
+        ? (['kickstart', launchdTarget()] as string[])
+        : (['kill', 'SIGTERM', launchdTarget()] as string[])
+    const { code, stderr, error } = await execFileNoThrow('launchctl', args, {
+      useCwd: false,
+      timeout: 15_000,
+    })
     if (code !== 0) {
+      // densable: stop non-zero → ok (unit already down / no pid)
+      if (op === 'stop') return { ok: true }
       return {
         ok: false,
-        error: stderr || error || 'launchctl kickstart failed',
+        error: stderr || error || `launchctl ${args[0]} failed`,
       }
     }
     return { ok: true }
   }
   if (platform === 'linux' || platform === 'wsl') {
+    const action = op === 'restart' ? 'restart' : op
     const { code, stderr, error } = await execFileNoThrow(
       'systemctl',
-      ['--user', 'start', DAEMON_SYSTEMD_UNIT],
+      ['--user', action, DAEMON_SYSTEMD_UNIT],
       { useCwd: false, timeout: 15_000 },
     )
     if (code !== 0) {
-      return { ok: false, error: stderr || error || 'systemctl start failed' }
+      if (op === 'stop') return { ok: true }
+      return {
+        ok: false,
+        error: stderr || error || `systemctl ${action} failed`,
+      }
     }
     return { ok: true }
   }
-  return { ok: false, error: `service start not available on ${platform}` }
+  return {
+    ok: false,
+    error: `service ${op} not available on ${platform} — the daemon runs on demand instead`,
+  }
 }

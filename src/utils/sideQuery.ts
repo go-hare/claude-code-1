@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk'
+import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import type { BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages.js'
 import {
   getLastApiCompletionTimestamp,
@@ -15,6 +15,11 @@ import { logEvent } from '../services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/metadata.js'
 import { getAPIMetadata } from '../services/api/claude.js'
 import { getAnthropicClient } from '../services/api/client.js'
+import {
+  clearRemoteAuthFailExitTimer,
+  getClaudeAIOAuthTokens,
+  handleOAuth401Error,
+} from './auth.js'
 import {
   createTrace,
   createChildSpan,
@@ -144,6 +149,17 @@ function messageParamsToOpenAIRoleContent(
 }
 
 /**
+ * densable FRe — 403 OAuth token revoked (same recover path as 401).
+ */
+function isOAuthTokenRevokedError(error: unknown): boolean {
+  return (
+    error instanceof APIError &&
+    error.status === 403 &&
+    (error.message?.includes('OAuth token has been revoked') ?? false)
+  )
+}
+
+/**
  * Lightweight API wrapper for "side queries" outside the main conversation loop.
  *
  * Use this instead of direct client.beta.messages.create() calls to ensure
@@ -157,6 +173,7 @@ function messageParamsToOpenAIRoleContent(
  * - API metadata
  * - Model string normalization (strips [1m] suffix for API)
  * - Third-party provider routing (OpenAI, Grok, Gemini)
+ * - densable 2.1.216: mid-session OAuth 401/revoked → recover + single rebuild+retry
  *
  * @example
  * // Permission explainer
@@ -195,11 +212,18 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     return sideQueryViaGemini(opts)
   }
 
-  const client = await getAnthropicClient({
-    maxRetries,
-    model,
-    source: 'side_query',
-  })
+  // densable: snapshot access token before the request so 401 recover
+  // can compare against the failed credential (not a post-rotate value).
+  const accessTokenSnapshot = getClaudeAIOAuthTokens()?.accessToken
+
+  const buildClient = (): Promise<Anthropic> =>
+    getAnthropicClient({
+      maxRetries,
+      model,
+      source: 'side_query',
+    })
+
+  let client = await buildClient()
   const betas = [...getModelBetas(model)]
   // Add structured-outputs beta if using output_format and provider supports it
   if (
@@ -281,32 +305,80 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
           querySource: opts.querySource,
         })
 
+  const createParams = {
+    model: normalizedModel,
+    max_tokens,
+    system: systemBlocks,
+    messages,
+    ...(tools && { tools }),
+    ...(tool_choice && { tool_choice }),
+    ...(output_format && { output_config: { format: output_format } }),
+    ...(temperature !== undefined && { temperature }),
+    ...(stop_sequences && { stop_sequences }),
+    ...(thinkingConfig && { thinking: thinkingConfig }),
+    ...(betas.length > 0 && { betas }),
+    metadata: getAPIMetadata(),
+  }
+
+  const doCreate = (c: Anthropic): Promise<BetaMessage> =>
+    c.beta.messages.create(createParams, { signal }) as Promise<BetaMessage>
+
   let response: BetaMessage
   try {
-    response = await client.beta.messages.create(
-      {
-        model: normalizedModel,
-        max_tokens,
-        system: systemBlocks,
-        messages,
-        ...(tools && { tools }),
-        ...(tool_choice && { tool_choice }),
-        ...(output_format && { output_config: { format: output_format } }),
-        ...(temperature !== undefined && { temperature }),
-        ...(stop_sequences && { stop_sequences }),
-        ...(thinkingConfig && { thinking: thinkingConfig }),
-        ...(betas.length > 0 && { betas }),
-        metadata: getAPIMetadata(),
-      },
-      { signal },
-    )
+    response = await doCreate(client)
   } catch (error) {
-    endTrace(
-      langfuseTrace,
-      { error: errorMessage(error) },
-      opts.optional ? 'interrupted' : 'error',
-    )
-    throw error
+    // densable 2.1.216 sideQuery catch:
+    // APIError 401 | token-revoked + accessTokenSnapshot + !aborted
+    //   → handleOAuth401Error (fog/_B) → rebuild client → single retry
+    //   → tengu_oauth_401_sidequery_recovered + T9r clear fail timer
+    const isAuthFailure =
+      error instanceof APIError &&
+      (error.status === 401 || isOAuthTokenRevokedError(error))
+    if (!isAuthFailure || !accessTokenSnapshot || signal?.aborted) {
+      endTrace(
+        langfuseTrace,
+        { error: errorMessage(error) },
+        opts.optional ? 'interrupted' : 'error',
+      )
+      throw error
+    }
+
+    let recovered = false
+    try {
+      recovered = await handleOAuth401Error(accessTokenSnapshot)
+    } catch (refreshErr) {
+      logForDebugging(
+        `sideQuery: OAuth refresh after ${error.status} failed: ${errorMessage(refreshErr)}`,
+        { level: 'error' },
+      )
+    }
+    if (!recovered || signal?.aborted) {
+      endTrace(
+        langfuseTrace,
+        { error: errorMessage(error) },
+        opts.optional ? 'interrupted' : 'error',
+      )
+      throw error
+    }
+
+    try {
+      client = await buildClient()
+      response = await doCreate(client)
+      logEvent('tengu_oauth_401_sidequery_recovered', {
+        querySource:
+          opts.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        httpStatus: error.status,
+      })
+      // densable T9r — clear remote auth fail-exit clock after successful recover
+      clearRemoteAuthFailExitTimer()
+    } catch (retryError) {
+      endTrace(
+        langfuseTrace,
+        { error: errorMessage(retryError) },
+        opts.optional ? 'interrupted' : 'error',
+      )
+      throw retryError
+    }
   }
 
   const requestId =

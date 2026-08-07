@@ -30,6 +30,7 @@ import { ResumeReturnDialog } from '../components/ResumeReturnDialog.js';
 import { loadConversationForResume } from '../utils/conversationRecovery.js';
 import { checkCrossProjectResume } from '../utils/crossProjectResume.js';
 import type { FileHistorySnapshot } from '../utils/fileHistory.js';
+import { toError } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
 import { createSystemMessage, getMessagesAfterCompactBoundary } from '../utils/messages.js';
 import {
@@ -119,7 +120,13 @@ export function ResumeConversation({
   const [logs, setLogs] = React.useState<LogOption[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [resuming, setResuming] = React.useState(false);
+  /** densable IQf: sticky fail state so picker does not hang on load/onSelect errors */
+  const [resumeFailed, setResumeFailed] = React.useState<{
+    sessionId?: string;
+  } | null>(null);
   const [showAllProjects, setShowAllProjects] = React.useState(false);
+  /** densable q.current — ignore double-select while resuming */
+  const selectingRef = React.useRef(false);
   const [resumeData, setResumeData] = React.useState<{
     messages: Message[];
     fileHistorySnapshots?: FileHistorySnapshot[];
@@ -234,25 +241,49 @@ export function ResumeConversation({
   }
 
   async function onSelect(log: LogOption) {
+    // densable pe: q.current guard against double-select hang
+    if (selectingRef.current) return;
+    selectingRef.current = true;
     setResuming(true);
+    setResumeFailed(null);
     const resumeStart = performance.now();
 
-    const crossProjectCheck = checkCrossProjectResume(log, showAllProjects, worktreePaths);
-    if (crossProjectCheck.isCrossProject) {
-      if (!crossProjectCheck.isSameRepoWorktree) {
-        const cmd = (crossProjectCheck as { command: string }).command;
-        const raw = await setClipboard(cmd);
-        if (raw) process.stdout.write(raw);
-        setCrossProjectCommand(cmd);
-        return;
+    try {
+      const crossProjectCheck = checkCrossProjectResume(log, showAllProjects, worktreePaths);
+      if (crossProjectCheck.isCrossProject) {
+        if (!crossProjectCheck.isSameRepoWorktree) {
+          const cmd = (crossProjectCheck as { command: string }).command;
+          const raw = await setClipboard(cmd);
+          if (raw) process.stdout.write(raw);
+          setCrossProjectCommand(cmd);
+          selectingRef.current = false;
+          setResuming(false);
+          return;
+        }
       }
+    } catch (e) {
+      // densable pre-load failed → sticky error (not hang)
+      logError(new Error(`resume picker: pre-load failed: ${e instanceof Error ? e.message : String(e)}`));
+      setResumeFailed({ sessionId: log.sessionId });
+      selectingRef.current = false;
+      setResuming(false);
+      return;
     }
 
+    let failureReason: 'load_error' | 'processing_error' = 'load_error';
+    let alreadyLoggedNotFound = false;
     try {
       const result = await loadConversationForResume(log, undefined);
       if (!result) {
+        logEvent('tengu_session_resumed', {
+          entrypoint: 'picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          success: false,
+          failure_reason: 'not_found_picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+        alreadyLoggedNotFound = true;
         throw new Error('Failed to load conversation');
       }
+      failureReason = 'processing_error';
 
       if (feature('COORDINATOR_MODE')) {
         /* eslint-disable @typescript-eslint/no-require-imports */
@@ -356,17 +387,27 @@ export function ResumeConversation({
       );
       if (offer) {
         setResumeReturnOffer({ offer, pending });
+        selectingRef.current = false;
         setResuming(false);
         return;
       }
       setResumeData(pending);
+      selectingRef.current = false;
+      setResuming(false);
     } catch (e) {
-      logEvent('tengu_session_resumed', {
-        entrypoint: 'picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        success: false,
-      });
-      logError(e as Error);
-      throw e;
+      // densable onSelect failed → sticky IQf error UI (not rethrow hang)
+      if (!alreadyLoggedNotFound) {
+        logEvent('tengu_session_resumed', {
+          entrypoint: 'picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          success: false,
+          failure_reason: failureReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_name: toError(e).name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+      }
+      logError(toError(e));
+      setResumeFailed({ sessionId: log.sessionId });
+      selectingRef.current = false;
+      setResuming(false);
     }
   }
 
@@ -440,6 +481,21 @@ export function ResumeConversation({
       <Box>
         <Spinner />
         <Text> Loading conversations…</Text>
+      </Box>
+    );
+  }
+
+  if (resumeFailed) {
+    // densable IQf
+    const sid = resumeFailed.sessionId;
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text>Failed to resume the conversation.</Text>
+        <Text dimColor>
+          {sid
+            ? `Run claude --resume ${sid} to retry, or claude to start a new session.`
+            : 'Run claude to start a new session.'}
+        </Text>
       </Box>
     );
   }

@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'crypto'
 import { readFileSync } from 'fs'
-import { mkdir, writeFile } from 'fs/promises'
+import { mkdir } from 'fs/promises'
 import { join } from 'path'
 import {
   addSessionCronTask,
@@ -26,6 +26,12 @@ import { getFsImplementation } from './fsOperations.js'
 import { safeParseJSON } from './json.js'
 import { logError } from './log.js'
 import { jsonStringify } from './slowOperations.js'
+import {
+  CLAUDE_ATOMIC_STAGING_LEAF,
+  assertDirChainReal,
+  isClaudeConfigDirPath,
+  writeFileAndFlush,
+} from './symlinkWriteGuard.js'
 
 export type CronTask = {
   id: string
@@ -158,26 +164,40 @@ export function hasCronTasksSync(dir?: string): boolean {
 }
 
 /**
- * Overwrite .claude/scheduled_tasks.json with the given tasks. Creates .claude/ if
- * missing. Empty task list writes an empty file (rather than deleting) so
- * the file watcher sees a change event on last-task-removed.
+ * densable nWr — overwrite .claude/scheduled_tasks.json with the given tasks.
+ * Creates .claude/ if missing. Empty task list writes an empty file (rather
+ * than deleting) so the file watcher sees a change event on last-task-removed.
+ *
+ * Project roots: YNn chain guard + M6 O_NOFOLLOW (checkParentDir + staging).
+ * Claude config home `.claude`: allowSymlink (VEt) — user-scope may use links.
  */
 export async function writeCronTasks(
   tasks: CronTask[],
   dir?: string,
 ): Promise<void> {
   const root = dir ?? getProjectRoot()
-  await mkdir(join(root, '.claude'), { recursive: true })
+  const claudeDir = join(root, '.claude')
+  // densable: needsChainGuard = !VEt(join(root, ".claude"))
+  const needsChainGuard = !isClaudeConfigDirPath(claudeDir)
+  if (needsChainGuard) {
+    await assertDirChainReal(root, claudeDir)
+  }
+  await mkdir(claudeDir, { recursive: true })
   // Strip the runtime-only `durable` flag — everything on disk is durable
   // by definition, and keeping the flag out means readCronTasks() naturally
   // yields durable: undefined without having to set it explicitly.
   const body: CronFile = {
     tasks: tasks.map(({ durable: _durable, ...rest }) => rest),
   }
-  await writeFile(
+  await writeFileAndFlush(
     getCronFilePath(root),
     jsonStringify(body, null, 2) + '\n',
-    'utf-8',
+    {
+      encoding: 'utf-8',
+      allowSymlink: !needsChainGuard,
+      checkParentDir: needsChainGuard,
+      stagingDir: join(claudeDir, CLAUDE_ATOMIC_STAGING_LEAF),
+    },
   )
 }
 

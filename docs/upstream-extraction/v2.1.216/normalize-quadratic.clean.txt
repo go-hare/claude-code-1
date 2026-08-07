@@ -1,0 +1,29 @@
+preNormalizedMessageCount
+
+---
+
+postNormalizedMessageCount
+
+---
+
+query_message_normalization_end
+
+---
+
+query_message_normalization_end
+
+---
+
+query_message_normalization_start
+
+---
+
+query_message_normalization_start
+
+---
+
+return socket.connect(normalized);
+
+---
+
+return normalizeAsyncSource(input);

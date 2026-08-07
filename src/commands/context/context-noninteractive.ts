@@ -8,6 +8,7 @@ import {
   analyzeContextUsage,
   type ContextData,
 } from '../../utils/analyzeContext.js'
+import { formatContextOverLimitWarning } from '../../utils/contextOverLimit.js'
 import { formatTokens } from '../../utils/format.js'
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js'
 import { getSourceDisplayName } from '../../utils/settings/constants.js'
@@ -106,6 +107,15 @@ function formatContextAsMarkdownTable(data: ContextData): string {
   let output = `## Context Usage\n\n`
   output += `**Model:** ${model}  \n`
   output += `**Tokens:** ${formatTokens(totalTokens)} / ${formatTokens(rawMaxTokens)} (${percentage}%)\n`
+  // densable Ftn / $tn — markdown path includes Over limit line
+  const overLimit = formatContextOverLimitWarning({
+    totalTokens,
+    rawMaxTokens,
+    autocompactSource: data.autocompactSource,
+  })
+  if (overLimit) {
+    output += `**Over limit:** ${overLimit}\n`
+  }
 
   // Context-collapse status. Always show when the runtime gate is on —
   // the user needs to know which strategy is managing their context

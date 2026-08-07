@@ -277,7 +277,8 @@ export async function tryBinaryTakeover(
     { level: 'warn' },
   )
   logEvent('tengu_bg_daemon_binary_takeover', {
-    daemon_age_ms: Date.now() - lock.startedAt,
+    daemon_age_ms:
+      typeof lock.startedAt === 'number' ? Date.now() - lock.startedAt : 0,
   })
   return true
 }
@@ -360,14 +361,20 @@ export async function probeDaemonSkew(
  */
 export async function restartZombieSupervisor(): Promise<string | null> {
   const lock = await readAliveDaemonLock().catch(() => null)
-  if (!lock || Date.now() - lock.startedAt <= 5000) return null
+  // densable asK: only act on locks old enough; missing startedAt (legacy UTe)
+  // is treated as age 0 → skip zombie path (cannot prove age).
+  if (!lock) return null
+  const startedAt = lock.startedAt
+  if (typeof startedAt !== 'number' || Date.now() - startedAt <= 5000) {
+    return null
+  }
 
   const ping = await sendControlRequest(
     { op: 'ping', proto: 1 },
     { timeoutMs: 1000 },
   )
   const meta = {
-    started_ago_ms: Date.now() - lock.startedAt,
+    started_ago_ms: Date.now() - startedAt,
     origin_transient: lock.origin === 'transient',
     origin_service: lock.origin === 'service',
     version_skew: lock.version !== MACRO.VERSION,

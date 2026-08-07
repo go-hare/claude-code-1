@@ -479,7 +479,9 @@ export function FullscreenLayout({
               <Box flexShrink={0}>
                 <Text color="permission">{'▔'.repeat(columns)}</Text>
               </Box>
-              <Box flexDirection="column" paddingX={2} flexShrink={0} overflow="hidden">
+              {/* densable 2.1.216 #23: minWidth=0 clamps dialog children to panel
+                  width so content never paints past the right-hand edge. */}
+              <Box flexDirection="column" paddingX={2} flexShrink={0} overflow="hidden" minWidth={0} width="100%">
                 {modal}
               </Box>
             </Box>

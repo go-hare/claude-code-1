@@ -13,6 +13,7 @@ import {
   fileHistoryCanRestore,
   fileHistoryEnabled,
   fileHistoryGetDiffStats,
+  formatRewindSkippedLinksMessage,
 } from 'src/utils/fileHistory.js';
 import { logError } from 'src/utils/log.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
@@ -61,7 +62,11 @@ type Props = {
   messages: Message[];
   onPreRestore: () => void;
   onRestoreMessage: (message: UserMessage) => Promise<void>;
-  onRestoreCode: (message: UserMessage) => Promise<void>;
+  /**
+   * densable: may return `{ skippedLinks }` so partial link-safety skips
+   * surface TYn copy without treating the restore as a hard failure.
+   */
+  onRestoreCode: (message: UserMessage) => Promise<{ skippedLinks?: number } | undefined>;
   onSummarize: (message: UserMessage, feedback?: string, direction?: PartialCompactDirection) => Promise<void>;
   onClose: () => void;
   /** Skip pick-list, land on confirm. Caller ran skip-check first. Esc closes fully (no back-to-list). */
@@ -255,10 +260,13 @@ export function MessageSelector({
 
     let codeError: Error | null = null;
     let conversationError: Error | null = null;
+    // densable De — skippedLinks from onRestoreCode (TYn partial UX)
+    let skippedLinks = 0;
 
     if (option === 'code' || option === 'both') {
       try {
-        await onRestoreCode(messageToRestore);
+        const restoreResult = await onRestoreCode(messageToRestore);
+        skippedLinks = restoreResult?.skippedLinks ?? 0;
       } catch (error) {
         codeError = error as Error;
         logError(codeError);
@@ -277,13 +285,23 @@ export function MessageSelector({
     setIsRestoring(false);
     setMessageToRestore(undefined);
 
-    // Handle errors
+    // densable Ge — partial restore warning (still success path for code)
+    const skippedLinksMessage = skippedLinks > 0 ? formatRewindSkippedLinksMessage(skippedLinks) : undefined;
+
+    // densable order: both fail → code fail → conversation fail and/or Ge → close
     if (conversationError && codeError) {
       setError(`Failed to restore the conversation and code:\n${conversationError}\n${codeError}`);
-    } else if (conversationError) {
-      setError(`Failed to restore the conversation:\n${conversationError}`);
     } else if (codeError) {
       setError(`Failed to restore the code:\n${codeError}`);
+    } else if (conversationError || skippedLinksMessage) {
+      setError(
+        [
+          conversationError ? `Failed to restore the conversation:\n${conversationError}` : undefined,
+          skippedLinksMessage,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      );
     } else {
       // Success - close the selector
       onClose();

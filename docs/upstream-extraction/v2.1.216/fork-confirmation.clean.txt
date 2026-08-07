@@ -1,0 +1,13 @@
+). Use `claude agents` to find and attach to it, or add --fork-session to branch off a copy.
+
+---
+
+). Use `claude agents` to find and attach to it, or add --fork-session to branch off a copy.
+
+---
+
+Stop a background session. Its conversation is kept; resume it later with `claude attach <id>`.
+
+---
+
+`)}async function vdb(e){let t=await zga(e,"claude stop <id>","Stop a background session. Its conversation is kept; resume it later with `claude attach <id>`."),r=await Ca(ec(t)),{confirmed:n,error:o}=await yKe(t,r??void 0);if(!n){await cu("cli_bg_stop","kill_unconfirmed"),process.stderr.write(o?`couldn't confirm ${t} was stopped \u2014 ${o}

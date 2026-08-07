@@ -27,6 +27,7 @@ import { parseCommandRaw } from 'src/utils/bash/parser.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { denyWorktreeGitRedirectIfNeeded } from 'src/utils/worktreeGitIsolation.js'
 import { isCommandInjectionCheckDisabled } from 'src/utils/residualFinalEnvGates.js'
 import { AbortError } from 'src/utils/errors.js'
 import type {
@@ -1052,6 +1053,20 @@ export const bashToolCheckPermission = (
   astCommand?: SimpleCommand,
 ): PermissionResult => {
   const command = input.command.trim()
+
+  // densable 2.1.216: worktree-isolated agents cannot retarget git at the
+  // shared checkout via git -C / --git-dir / GIT_DIR / GIT_WORK_TREE.
+  const worktreeGitDeny = denyWorktreeGitRedirectIfNeeded(command, getCwd())
+  if (worktreeGitDeny) {
+    return {
+      behavior: 'deny',
+      message: `Permission to use ${BashTool.name} with command ${command} has been denied: ${worktreeGitDeny}.`,
+      decisionReason: {
+        type: 'other',
+        reason: worktreeGitDeny,
+      },
+    }
+  }
 
   // 1. Check exact match first
   const exactMatchResult = bashToolCheckExactMatchPermission(

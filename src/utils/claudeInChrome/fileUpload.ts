@@ -146,7 +146,7 @@ export function uploadRootsForSession(
 
 function isNetworkOrUncPath(path: string): boolean {
   if (path.startsWith('\\\\') || path.startsWith('//')) return true
-  if (containsVulnerableUncPath(path)) return true
+  if (containsVulnerableUncPath(path, true)) return true
   return false
 }
 

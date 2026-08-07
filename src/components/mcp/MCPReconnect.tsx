@@ -40,11 +40,15 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
             setIsReconnecting(false);
             onComplete(`Successfully reconnected to ${serverName}`);
             break;
-          case 'needs-auth':
+          case 'needs-auth': {
+            // densable 2.1.216: bg no-terminal parks needs-input in agent view
+            const { formatMcpNeedsAuthMessage } = await import('../../utils/bgCommandNeedsPark.js');
+            const msg = await formatMcpNeedsAuthMessage(serverName);
             setError(`${serverName} requires authentication`);
             setIsReconnecting(false);
-            onComplete(`${serverName} requires authentication. Use /mcp to authenticate.`);
+            onComplete(msg);
             break;
+          }
           case 'pending':
           case 'failed':
           case 'disabled':

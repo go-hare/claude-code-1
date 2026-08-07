@@ -58,6 +58,18 @@ describe('isFullEnoughFileRead densable HOe', () => {
       isFullEnoughFileRead(state({ content: '', offset: 1, limit: 10 })),
     ).toBe(false)
   })
+
+  test('contentNotInModelContext is not full enough (H1e)', () => {
+    expect(
+      isFullEnoughFileRead(
+        state({
+          content: 'disk-bytes',
+          offset: undefined,
+          contentNotInModelContext: true,
+        }),
+      ),
+    ).toBe(false)
+  })
 })
 
 describe('fileStateContentMatches densable xOe', () => {

@@ -615,17 +615,28 @@ describe('ensureToolResultPairing', () => {
   })
 })
 
-// ─── CC-1215: normalizeMessagesForAPI must not merge assistants across tool_results ──
+// ─── densable 2.1.216 LN: same-id assistants merge across transparent tool_result ──
+// CC-1215 historically asserted NO merge across tool_result (reverse-scan stop).
+// densable 2.1.216 gold treats tool_result users as TRANSPARENT and merges
+// same-id streaming partials; ensureToolResultPairing repairs orphan pairing.
 
-describe('normalizeMessagesForAPI – thinking + tool_use same turn (CC-1215)', () => {
-  test('does not merge same-id assistants across a tool_result boundary', () => {
-    // Simulate the streaming sequence when extended thinking + tool_use appear
-    // in the same turn, and StreamingToolExecutor inserts a tool_result
-    // between the two assistant content-block messages.
+function isToolResultLike(m: {
+  type: string
+  message?: { content?: unknown }
+}): boolean {
+  if (m.type !== 'user') return false
+  const c = m.message?.content
+  if (!c || typeof c === 'string') return false
+  return (c as Array<{ type: string }>).some(b => b.type === 'tool_result')
+}
+
+describe('normalizeMessagesForAPI – thinking + tool_use same turn (densable 2.1.216 LN)', () => {
+  test('merges same-id assistants across a tool_result boundary (transparent)', () => {
+    // Streaming: thinking partial → tool_result insert → tool_use partial.
+    // densable LN Map keeps the same-id assistant and merges across tool_result.
     const sharedMessageId = 'msg_shared_001'
     const toolUseId = 'toolu_cc1215'
 
-    // assistant[thinking] — first content_block_stop yield
     const thinkingMsg = createAssistantMessage({
       content: [
         { type: 'thinking', thinking: 'Let me think...', signature: 'sig1' },
@@ -633,7 +644,6 @@ describe('normalizeMessagesForAPI – thinking + tool_use same turn (CC-1215)', 
     })
     thinkingMsg.message.id = sharedMessageId
 
-    // user[tool_result] — from StreamingToolExecutor completing fast
     const toolResultMsg = createUserMessage({
       content: [
         {
@@ -644,7 +654,6 @@ describe('normalizeMessagesForAPI – thinking + tool_use same turn (CC-1215)', 
       ],
     })
 
-    // assistant[tool_use] — second content_block_stop yield
     const toolUseMsg = createAssistantMessage({
       content: [
         {
@@ -666,32 +675,13 @@ describe('normalizeMessagesForAPI – thinking + tool_use same turn (CC-1215)', 
 
     const result = normalizeMessagesForAPI(messages)
 
-    // Before the fix, the backward walk would skip the tool_result and merge
-    // thinking + tool_use into one assistant. This produced duplicate tool_use
-    // IDs after ensureToolResultPairing ran, leading to orphaned tool_results
-    // and consecutive user messages → API 400.
-    //
-    // After the fix, the backward walk stops at the tool_result, so the two
-    // assistants remain separate. The result should have 4 messages:
-    //   user, assistant[thinking], user[tool_result], assistant[tool_use]
-    expect(result).toHaveLength(4)
-    expect(result[0]!.type).toBe('user')
-    expect(result[1]!.type).toBe('assistant')
-    expect(result[2]!.type).toBe('user')
-    expect(result[3]!.type).toBe('assistant')
-
-    // The thinking assistant should NOT have been merged with the tool_use one
-    const thinkingAssistant = result[1] as AssistantMessage
-    const thinkingContent = thinkingAssistant.message.content as Array<{
-      type: string
-    }>
-    expect(thinkingContent.some(b => b.type === 'tool_use')).toBe(false)
-
-    const toolUseAssistant = result[3] as AssistantMessage
-    const toolUseContent = toolUseAssistant.message.content as Array<{
-      type: string
-    }>
-    expect(toolUseContent.some(b => b.type === 'tool_use')).toBe(true)
+    const assistants = result.filter(m => m.type === 'assistant')
+    expect(assistants).toHaveLength(1)
+    const merged = assistants[0] as AssistantMessage
+    const content = merged.message.content as Array<{ type: string }>
+    expect(content.some(b => b.type === 'thinking')).toBe(true)
+    expect(content.some(b => b.type === 'tool_use')).toBe(true)
+    expect(result.some(m => isToolResultLike(m))).toBe(true)
   })
 
   test('still merges consecutive same-id assistants without intervening tool_result', () => {
@@ -714,7 +704,6 @@ describe('normalizeMessagesForAPI – thinking + tool_use same turn (CC-1215)', 
     })
     toolUseMsg.message.id = sharedMessageId
 
-    // No tool_result between them — they should still be merged
     const messages: Message[] = [
       makeUserMsg('List files'),
       thinkingMsg,
@@ -723,7 +712,6 @@ describe('normalizeMessagesForAPI – thinking + tool_use same turn (CC-1215)', 
 
     const result = normalizeMessagesForAPI(messages)
 
-    // Should be: user, assistant[thinking + tool_use]
     expect(result).toHaveLength(2)
     expect(result[0]!.type).toBe('user')
 

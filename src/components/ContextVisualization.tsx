@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import type { ContextData } from '../utils/analyzeContext.js';
+import { formatContextOverLimitWarning } from '../utils/contextOverLimit.js';
 import { generateContextSuggestions } from '../utils/contextSuggestions.js';
 import { getDisplayPath } from '../utils/file.js';
 import { formatTokens } from '../utils/format.js';
@@ -117,6 +118,7 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
     messageBreakdown,
     cacheHitRate,
     cacheThreshold,
+    autocompactSource,
   } = data;
 
   // Filter out categories with 0 tokens for the legend, and exclude Free space, Autocompact buffer, and deferred
@@ -128,10 +130,21 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
   // Check if builtin tools are deferred
   const hasDeferredBuiltinTools = deferredBuiltinTools.length > 0;
   const autocompactCategory = categories.find(cat => cat.name === RESERVED_CATEGORY_NAME);
+  // densable Ftn — explicit red warning when over the displayed window
+  const overLimitWarning = formatContextOverLimitWarning({
+    totalTokens,
+    rawMaxTokens,
+    autocompactSource,
+  });
 
   return (
     <Box flexDirection="column" paddingLeft={1}>
       <Text bold>Context Usage</Text>
+      {overLimitWarning ? (
+        <Text color="error" wrap="wrap">
+          {overLimitWarning}
+        </Text>
+      ) : null}
       <Box flexDirection="row" gap={2}>
         {/* Fixed size grid */}
         <Box flexDirection="column" flexShrink={0}>

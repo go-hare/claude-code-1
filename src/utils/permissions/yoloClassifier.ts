@@ -1,5 +1,10 @@
 import { feature } from 'bun:bundle'
 import type Anthropic from '@anthropic-ai/sdk'
+import {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+} from '@anthropic-ai/sdk'
 import type { BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages.js'
 import { mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
@@ -24,7 +29,7 @@ import type {
 } from '../../types/permissions.js'
 import { isDebugMode, logForDebugging } from '../debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
-import { errorMessage } from '../errors.js'
+import { errorMessage, isAbortError } from '../errors.js'
 import { lazySchema } from '../lazySchema.js'
 import { extractTextContent } from '../messages.js'
 import { resolveAntModel } from '../model/antModels.js'
@@ -76,6 +81,66 @@ const ANTHROPIC_PERMISSIONS_TEMPLATE: string =
     ? txtRequire(require('./yolo-classifier-prompts/permissions_anthropic.txt'))
     : ''
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
+
+/**
+ * densable fO_ — classify classifier API/transport errors into errorKind.
+ * http_401 is intentional for unrecovered OAuth so Mhd excludes demotion.
+ */
+export function classifyClassifierErrorKind(error: unknown): string {
+  if (isAbortError(error)) return 'wall_clock_timeout'
+  if (error instanceof APIConnectionTimeoutError) return 'connection_timeout'
+  if (error instanceof APIConnectionError) return 'connection_error'
+  if (error instanceof APIError && typeof error.status === 'number') {
+    if (error.headers?.get('x-should-retry') === 'false') {
+      return `http_${error.status}_no_retry`
+    }
+    return `http_${error.status}`
+  }
+  if (error instanceof Error && error.name) {
+    return error.name.toLowerCase()
+  }
+  return 'other'
+}
+
+/**
+ * densable mO_ — only true for transient kinds eligible for fallbackModelByModel.
+ * NOT 401 — pure auth failure must not demote models.
+ */
+export function isTransientClassifierErrorKind(
+  kind: string | undefined,
+): boolean {
+  if (kind === undefined) return false
+  if (
+    kind === 'wall_clock_timeout' ||
+    kind === 'connection_timeout' ||
+    kind === 'connection_error'
+  ) {
+    return true
+  }
+  const m = kind.match(/^http_(\d{3})/)
+  if (m) {
+    const status = Number(m[1])
+    return status === 429 || (status >= 500 && status < 600)
+  }
+  return false
+}
+
+/**
+ * densable Mhd — allow Sonnet-5 probe demotion / model fallback only when
+ * errorKind is defined and NOT /^http_401/.
+ */
+export function allowClassifierModelDemotion(
+  kind: string | undefined,
+): boolean {
+  return kind !== undefined && !/^http_401/.test(kind)
+}
+
+function extractHttpStatus(error: unknown): number | undefined {
+  if (error instanceof APIError && typeof error.status === 'number') {
+    return error.status
+  }
+  return undefined
+}
 
 function isUsingExternalPermissions(): boolean {
   // Official CLAUDE_CODE_AUTO_MODE_EXTERNAL_PERMISSIONS densable — force external template.
@@ -1102,22 +1167,29 @@ async function classifyYoloActionXml(
         ...dumpContextInfo,
         model,
       })) ?? undefined
+    // densable: skip fO_ when prompt-too-long (errorKind only on true API errors)
+    const errorKind = tooLong ? undefined : classifyClassifierErrorKind(error)
+    const httpStatus = extractHttpStatus(error)
     logAutoModeOutcome(tooLong ? 'transcript_too_long' : 'error', model, {
       classifierType,
       ...(tooLong && {
         transcriptActualTokens: tooLong.actualTokens,
         transcriptLimitTokens: tooLong.limitTokens,
       }),
+      ...(!tooLong && errorKind !== undefined && { errorKind }),
     })
     return {
       shouldBlock: true,
+      // densable stage2 suffix: usually transient — retrying often succeeds
       reason: tooLong
         ? 'Classifier transcript exceeded context window'
         : stage1Usage
-          ? 'Stage 2 classifier error - blocking based on stage 1 assessment'
+          ? 'Stage 2 classifier error - blocking based on stage 1 assessment (usually transient — retrying often succeeds)'
           : 'Classifier unavailable - blocking for safety',
       model,
       unavailable: stage1Usage === undefined,
+      httpStatus,
+      errorKind,
       transcriptTooLong: Boolean(tooLong),
       stage: stage1Usage ? 'thinking' : undefined,
       durationMs: Date.now() - overallStart,
@@ -1298,205 +1370,233 @@ export async function classifyYoloAction(
 
   const model = getClassifierModel()
 
-  // Dispatch to 2-stage XML classifier if enabled via GrowthBook
+  // densable nPt: wrap primary model call with mO_/Mhd-gated fallbackModelByModel
+  // (http_401 never demotes — only OAuth recovery in sideQuery heals auth).
   if (isTwoStageClassifierEnabled()) {
     return withOutcomeCode(
-      await classifyYoloActionXml(
-        prefixMessages,
-        systemPrompt,
-        userPrompt,
-        userContentBlocks,
+      await withClassifierModelFallback(
         model,
-        promptLengths,
+        m =>
+          classifyYoloActionXml(
+            prefixMessages,
+            systemPrompt,
+            userPrompt,
+            userContentBlocks,
+            m,
+            promptLengths,
+            signal,
+            {
+              mainLoopTokens:
+                mainLoopTokens ?? tokenCountWithEstimation(messages),
+              classifierChars,
+              classifierTokensEst,
+              transcriptEntries: transcriptEntries.length,
+              messages: messages.length,
+              action: actionCompact,
+            },
+            getTwoStageMode(),
+            parentSpan,
+          ),
         signal,
-        {
-          mainLoopTokens: mainLoopTokens ?? tokenCountWithEstimation(messages),
+      ),
+    )
+  }
+
+  return withOutcomeCode(
+    await withClassifierModelFallback(
+      model,
+      m => classifyYoloActionToolUse(m),
+      signal,
+    ),
+  )
+
+  async function classifyYoloActionToolUse(
+    model: string,
+  ): Promise<YoloClassifierResult> {
+    const [disableThinking, thinkingPadding] =
+      getClassifierThinkingConfig(model)
+    try {
+      const start = Date.now()
+      const sideQueryOpts = {
+        model,
+        max_tokens: 4096 + thinkingPadding,
+        system: [
+          {
+            type: 'text' as const,
+            text: systemPrompt,
+            cache_control: getCacheControl({ querySource: 'auto_mode' }),
+          },
+        ],
+        skipSystemPromptPrefix: true,
+        temperature: getClassifierTemperature(),
+        thinking: disableThinking,
+        messages: [
+          ...prefixMessages,
+          { role: 'user' as const, content: userContentBlocks },
+        ],
+        tools: [YOLO_CLASSIFIER_TOOL_SCHEMA],
+        tool_choice: {
+          type: 'tool' as const,
+          name: YOLO_CLASSIFIER_TOOL_NAME,
+        },
+        maxRetries: getDefaultMaxRetries(),
+        signal,
+        querySource: 'auto_mode' as const,
+        parentSpan,
+      }
+      const result = await sideQuery(sideQueryOpts)
+      void maybeDumpAutoMode(sideQueryOpts, result, start)
+      setLastClassifierRequests([sideQueryOpts])
+      const durationMs = Date.now() - start
+      const stage1RequestId = extractRequestId(result)
+      const stage1MsgId = result.id
+
+      // Extract usage for overhead telemetry
+      const usage = {
+        inputTokens: result.usage.input_tokens,
+        outputTokens: result.usage.output_tokens,
+        cacheReadInputTokens: result.usage.cache_read_input_tokens ?? 0,
+        cacheCreationInputTokens: result.usage.cache_creation_input_tokens ?? 0,
+      }
+      // Actual total input tokens the classifier API consumed (uncached + cache)
+      const classifierInputTokens =
+        usage.inputTokens +
+        usage.cacheReadInputTokens +
+        usage.cacheCreationInputTokens
+      if (isDebugMode()) {
+        logForDebugging(
+          `[auto-mode] API usage: ` +
+            `actualInputTokens=${classifierInputTokens} ` +
+            `(uncached=${usage.inputTokens} ` +
+            `cacheRead=${usage.cacheReadInputTokens} ` +
+            `cacheCreate=${usage.cacheCreationInputTokens}) ` +
+            `estimateWas=${classifierTokensEst} ` +
+            `deltaVsMainLoop=${classifierInputTokens - mainLoopTokens} ` +
+            `durationMs=${durationMs}`,
+        )
+      }
+
+      // Extract the tool use result using shared utility
+      const toolUseBlock = extractToolUseBlock(
+        result.content,
+        YOLO_CLASSIFIER_TOOL_NAME,
+      )
+
+      if (!toolUseBlock) {
+        logForDebugging('Auto mode classifier: No tool use block found', {
+          level: 'warn',
+        })
+        logAutoModeOutcome('parse_failure', model, {
+          failureKind: 'no_tool_use',
+        })
+        return {
+          shouldBlock: true,
+          reason: 'Classifier returned no tool use block - blocking for safety',
+          model,
+          usage,
+          durationMs,
+          promptLengths,
+          stage1RequestId,
+          stage1MsgId,
+        }
+      }
+
+      // Parse response using shared utility
+      const parsed = parseClassifierResponse(
+        toolUseBlock,
+        yoloClassifierResponseSchema(),
+      )
+      if (!parsed) {
+        logForDebugging('Auto mode classifier: Invalid response schema', {
+          level: 'warn',
+        })
+        logAutoModeOutcome('parse_failure', model, {
+          failureKind: 'invalid_schema',
+        })
+        return {
+          shouldBlock: true,
+          reason: 'Invalid classifier response - blocking for safety',
+          model,
+          usage,
+          durationMs,
+          promptLengths,
+          stage1RequestId,
+          stage1MsgId,
+        }
+      }
+
+      const classifierResult = {
+        thinking: parsed.thinking,
+        shouldBlock: parsed.shouldBlock,
+        reason: parsed.reason ?? 'No reason provided',
+        model,
+        usage,
+        durationMs,
+        promptLengths,
+        stage1RequestId,
+        stage1MsgId,
+      }
+      // Context-delta telemetry: chart classifierInputTokens / mainLoopTokens
+      // in Datadog. Expect ~0.6-0.8 steady state; alert on p95 > 1.0 (means
+      // classifier is bigger than main loop — auto-compact won't save us).
+      logAutoModeOutcome('success', model, {
+        durationMs,
+        mainLoopTokens,
+        classifierInputTokens,
+        classifierTokensEst,
+      })
+      return classifierResult
+    } catch (error) {
+      if (signal.aborted) {
+        logForDebugging('Auto mode classifier: aborted by user')
+        logAutoModeOutcome('interrupted', model)
+        return {
+          shouldBlock: true,
+          reason: 'Classifier request aborted',
+          model,
+          unavailable: true,
+        }
+      }
+      const tooLong = detectPromptTooLong(error)
+      logForDebugging(`Auto mode classifier error: ${errorMessage(error)}`, {
+        level: 'warn',
+      })
+      const errorDumpPath =
+        (await dumpErrorPrompts(systemPrompt, userPrompt, error, {
+          mainLoopTokens,
           classifierChars,
           classifierTokensEst,
           transcriptEntries: transcriptEntries.length,
           messages: messages.length,
           action: actionCompact,
-        },
-        getTwoStageMode(),
-        parentSpan,
-      ),
-    )
-  }
-  const [disableThinking, thinkingPadding] = getClassifierThinkingConfig(model)
-  try {
-    const start = Date.now()
-    const sideQueryOpts = {
-      model,
-      max_tokens: 4096 + thinkingPadding,
-      system: [
-        {
-          type: 'text' as const,
-          text: systemPrompt,
-          cache_control: getCacheControl({ querySource: 'auto_mode' }),
-        },
-      ],
-      skipSystemPromptPrefix: true,
-      temperature: getClassifierTemperature(),
-      thinking: disableThinking,
-      messages: [
-        ...prefixMessages,
-        { role: 'user' as const, content: userContentBlocks },
-      ],
-      tools: [YOLO_CLASSIFIER_TOOL_SCHEMA],
-      tool_choice: {
-        type: 'tool' as const,
-        name: YOLO_CLASSIFIER_TOOL_NAME,
-      },
-      maxRetries: getDefaultMaxRetries(),
-      signal,
-      querySource: 'auto_mode' as const,
-      parentSpan,
-    }
-    const result = await sideQuery(sideQueryOpts)
-    void maybeDumpAutoMode(sideQueryOpts, result, start)
-    setLastClassifierRequests([sideQueryOpts])
-    const durationMs = Date.now() - start
-    const stage1RequestId = extractRequestId(result)
-    const stage1MsgId = result.id
-
-    // Extract usage for overhead telemetry
-    const usage = {
-      inputTokens: result.usage.input_tokens,
-      outputTokens: result.usage.output_tokens,
-      cacheReadInputTokens: result.usage.cache_read_input_tokens ?? 0,
-      cacheCreationInputTokens: result.usage.cache_creation_input_tokens ?? 0,
-    }
-    // Actual total input tokens the classifier API consumed (uncached + cache)
-    const classifierInputTokens =
-      usage.inputTokens +
-      usage.cacheReadInputTokens +
-      usage.cacheCreationInputTokens
-    if (isDebugMode()) {
-      logForDebugging(
-        `[auto-mode] API usage: ` +
-          `actualInputTokens=${classifierInputTokens} ` +
-          `(uncached=${usage.inputTokens} ` +
-          `cacheRead=${usage.cacheReadInputTokens} ` +
-          `cacheCreate=${usage.cacheCreationInputTokens}) ` +
-          `estimateWas=${classifierTokensEst} ` +
-          `deltaVsMainLoop=${classifierInputTokens - mainLoopTokens} ` +
-          `durationMs=${durationMs}`,
-      )
-    }
-
-    // Extract the tool use result using shared utility
-    const toolUseBlock = extractToolUseBlock(
-      result.content,
-      YOLO_CLASSIFIER_TOOL_NAME,
-    )
-
-    if (!toolUseBlock) {
-      logForDebugging('Auto mode classifier: No tool use block found', {
-        level: 'warn',
+          model,
+        })) ?? undefined
+      const errorKind = tooLong ? undefined : classifyClassifierErrorKind(error)
+      const httpStatus = extractHttpStatus(error)
+      // No API usage on error — use classifierTokensEst / mainLoopTokens
+      // for the ratio. Overflow errors are the critical divergence signal.
+      logAutoModeOutcome(tooLong ? 'transcript_too_long' : 'error', model, {
+        mainLoopTokens,
+        classifierTokensEst,
+        ...(tooLong && {
+          transcriptActualTokens: tooLong.actualTokens,
+          transcriptLimitTokens: tooLong.limitTokens,
+        }),
+        ...(!tooLong && errorKind !== undefined && { errorKind }),
       })
-      logAutoModeOutcome('parse_failure', model, { failureKind: 'no_tool_use' })
-      return withOutcomeCode({
+      return {
         shouldBlock: true,
-        reason: 'Classifier returned no tool use block - blocking for safety',
-        model,
-        usage,
-        durationMs,
-        promptLengths,
-        stage1RequestId,
-        stage1MsgId,
-      })
-    }
-
-    // Parse response using shared utility
-    const parsed = parseClassifierResponse(
-      toolUseBlock,
-      yoloClassifierResponseSchema(),
-    )
-    if (!parsed) {
-      logForDebugging('Auto mode classifier: Invalid response schema', {
-        level: 'warn',
-      })
-      logAutoModeOutcome('parse_failure', model, {
-        failureKind: 'invalid_schema',
-      })
-      return withOutcomeCode({
-        shouldBlock: true,
-        reason: 'Invalid classifier response - blocking for safety',
-        model,
-        usage,
-        durationMs,
-        promptLengths,
-        stage1RequestId,
-        stage1MsgId,
-      })
-    }
-
-    const classifierResult = {
-      thinking: parsed.thinking,
-      shouldBlock: parsed.shouldBlock,
-      reason: parsed.reason ?? 'No reason provided',
-      model,
-      usage,
-      durationMs,
-      promptLengths,
-      stage1RequestId,
-      stage1MsgId,
-    }
-    // Context-delta telemetry: chart classifierInputTokens / mainLoopTokens
-    // in Datadog. Expect ~0.6-0.8 steady state; alert on p95 > 1.0 (means
-    // classifier is bigger than main loop — auto-compact won't save us).
-    logAutoModeOutcome('success', model, {
-      durationMs,
-      mainLoopTokens,
-      classifierInputTokens,
-      classifierTokensEst,
-    })
-    return withOutcomeCode(classifierResult)
-  } catch (error) {
-    if (signal.aborted) {
-      logForDebugging('Auto mode classifier: aborted by user')
-      logAutoModeOutcome('interrupted', model)
-      return withOutcomeCode({
-        shouldBlock: true,
-        reason: 'Classifier request aborted',
+        reason: tooLong
+          ? 'Classifier transcript exceeded context window'
+          : 'Classifier unavailable - blocking for safety',
         model,
         unavailable: true,
-      })
+        httpStatus,
+        errorKind,
+        transcriptTooLong: Boolean(tooLong),
+        errorDumpPath,
+      }
     }
-    const tooLong = detectPromptTooLong(error)
-    logForDebugging(`Auto mode classifier error: ${errorMessage(error)}`, {
-      level: 'warn',
-    })
-    const errorDumpPath =
-      (await dumpErrorPrompts(systemPrompt, userPrompt, error, {
-        mainLoopTokens,
-        classifierChars,
-        classifierTokensEst,
-        transcriptEntries: transcriptEntries.length,
-        messages: messages.length,
-        action: actionCompact,
-        model,
-      })) ?? undefined
-    // No API usage on error — use classifierTokensEst / mainLoopTokens
-    // for the ratio. Overflow errors are the critical divergence signal.
-    logAutoModeOutcome(tooLong ? 'transcript_too_long' : 'error', model, {
-      mainLoopTokens,
-      classifierTokensEst,
-      ...(tooLong && {
-        transcriptActualTokens: tooLong.actualTokens,
-        transcriptLimitTokens: tooLong.limitTokens,
-      }),
-    })
-    return withOutcomeCode({
-      shouldBlock: true,
-      reason: tooLong
-        ? 'Classifier transcript exceeded context window'
-        : 'Classifier unavailable - blocking for safety',
-      model,
-      unavailable: true,
-      transcriptTooLong: Boolean(tooLong),
-      errorDumpPath,
-    })
   }
 }
 
@@ -1607,6 +1707,52 @@ function getClassifierModel(): string {
 }
 
 /**
+ * densable uO_ — lookup fallbackModelByModel for a primary classifier model.
+ * Only used when mO_(errorKind) is true (transient); never for http_401.
+ */
+function resolveClassifierFallbackModel(
+  primaryModel: string,
+): string | undefined {
+  const config = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_auto_mode_config',
+    {} as AutoModeConfig,
+  )
+  const map = config?.fallbackModelByModel
+  if (map == null || typeof map !== 'object') return undefined
+  const mapped = map[primaryModel]
+  return mapped && mapped !== primaryModel ? mapped : undefined
+}
+
+/**
+ * densable nPt unavailable branch: if primary returns unavailable with a
+ * transient errorKind (mO_), retry once on fallbackModelByModel[primary].
+ * Mhd excludes /^http_401/ — pure auth must not demote models.
+ */
+async function withClassifierModelFallback(
+  primaryModel: string,
+  run: (model: string) => Promise<YoloClassifierResult>,
+  signal: AbortSignal,
+): Promise<YoloClassifierResult> {
+  const primary = await run(primaryModel)
+  if (signal.aborted || !primary.unavailable) return primary
+  // densable: only mO_ transient kinds get model fallback; Mhd excludes http_401
+  if (
+    !isTransientClassifierErrorKind(primary.errorKind) ||
+    !allowClassifierModelDemotion(primary.errorKind)
+  ) {
+    return primary
+  }
+  const fallback = resolveClassifierFallbackModel(primaryModel)
+  if (!fallback) return primary
+  logForDebugging(
+    `Auto mode classifier: primary ${primaryModel} unavailable (${primary.errorKind}); trying fallback ${fallback}`,
+    { level: 'warn' },
+  )
+  const secondary = await run(fallback)
+  return { ...secondary, fallbackFrom: primaryModel }
+}
+
+/**
  * Resolve the XML classifier setting: ant-only env var takes precedence,
  * then GrowthBook. Returns undefined when unset (caller decides default).
  */
@@ -1688,6 +1834,8 @@ function logAutoModeOutcome(
   extra?: {
     classifierType?: string
     failureKind?: string
+    /** densable fO_ errorKind on outcome=error */
+    errorKind?: string
     durationMs?: number
     mainLoopTokens?: number
     classifierInputTokens?: number
@@ -1696,7 +1844,7 @@ function logAutoModeOutcome(
     transcriptLimitTokens?: number
   },
 ): void {
-  const { classifierType, failureKind, ...rest } = extra ?? {}
+  const { classifierType, failureKind, errorKind, ...rest } = extra ?? {}
   logEvent('tengu_auto_mode_outcome', {
     outcome:
       outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1709,6 +1857,10 @@ function logAutoModeOutcome(
     ...(failureKind !== undefined && {
       failureKind:
         failureKind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }),
+    ...(errorKind !== undefined && {
+      errorKind:
+        errorKind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     }),
     ...rest,
   })

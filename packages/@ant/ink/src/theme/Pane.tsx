@@ -40,16 +40,19 @@ export function Pane({ children, color }: PaneProps): React.ReactNode {
     // (grows to fit, maxHeight cap). With flexGrow=1, re-renders cause
     // yoga to resolve this Box's height to 0 against the undetermined
     // parent — /permissions body blanks on Down arrow. See #23592.
+    // densable 2.1.216 #23: minWidth=0 so dialog children clamp to the
+    // modal panel width (FullscreenLayout paddingX=2) instead of stretching
+    // past the right-hand edge.
     return (
-      <Box flexDirection="column" paddingX={1} flexShrink={0}>
+      <Box flexDirection="column" paddingX={1} flexShrink={0} minWidth={0} width="100%">
         {children}
       </Box>
     );
   }
   return (
-    <Box flexDirection="column" paddingTop={1}>
+    <Box flexDirection="column" paddingTop={1} minWidth={0} width="100%">
       <Divider color={color} />
-      <Box flexDirection="column" paddingX={2}>
+      <Box flexDirection="column" paddingX={2} minWidth={0} width="100%">
         {children}
       </Box>
     </Box>

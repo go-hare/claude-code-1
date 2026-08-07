@@ -17,6 +17,10 @@ import { runWithAgentContext } from 'src/utils/agentContext.js'
 import { runWithCwdOverride } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
+import {
   createUserMessage,
   filterOrphanedThinkingOnlyMessages,
   filterUnresolvedToolUses,
@@ -25,6 +29,7 @@ import {
   wrapResumePromptOrigin,
 } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
+import { isModelAlias, type ModelAlias } from 'src/utils/model/aliases.js'
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js'
 import {
   getAgentTranscript,
@@ -304,7 +309,37 @@ async function resumeAgentBackgroundAfterClaim({
           err instanceof Error ? err.message : String(err),
         )
   }
+  // densable Aye: disk missing → in-memory mirror (taskRegistry.getTranscript
+  // messages written during the run). Local mirror is LocalAgentTask.messages.
   if (!transcript) {
+    const liveTasks = toolUseContext.getAppState().tasks
+    const task = liveTasks?.[agentId]
+    const mirrored =
+      task &&
+      typeof task === 'object' &&
+      'messages' in task &&
+      Array.isArray(task.messages) &&
+      task.messages.length > 0
+        ? task.messages
+        : undefined
+    if (mirrored) {
+      logForDebugging(
+        `[resumeAgentBackground ${agentId}] disk transcript missing; using ${mirrored.length} in-memory messages mirrored during the run`,
+      )
+      transcript = {
+        messages: mirrored as NonNullable<typeof transcript>['messages'],
+        contentReplacements: [],
+      }
+    }
+  }
+  if (!transcript) {
+    // densable me(e,t) → logEvent('tengu_feature_bad', {feature_name:Se(e), error_code:t})
+    logEvent('tengu_feature_bad', {
+      feature_name:
+        'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code:
+        'subagent_resume_transcript_missing' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
     clearResuming()
     throw new ResumeAgentStateError(
       `No transcript found for agent ID: ${agentId}`,
@@ -387,6 +422,11 @@ async function resumeAgentBackgroundAfterClaim({
       } catch {
         /* best-effort — task may not be registered on orphan cold resume */
       }
+      // densable Ce("subagent_launch") → tengu_feature_ok
+      logEvent('tengu_feature_ok', {
+        feature_name:
+          'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
       clearResuming()
       return {
         agentId,
@@ -420,20 +460,28 @@ async function resumeAgentBackgroundAfterClaim({
     await fsp.utimes(resumedWorktreePath, now, now)
   }
 
-  // Skip filterDeniedAgents re-gating — original spawn already passed permission checks
-  let selectedAgent: AgentDefinition
-  let isResumedFork = false
-  if (meta?.agentType === FORK_AGENT.agentType) {
-    selectedAgent = FORK_AGENT
-    isResumedFork = true
-  } else if (meta?.agentType) {
-    const found = toolUseContext.options.agentDefinitions.activeAgents.find(
-      a => a.agentType === meta.agentType,
-    )
-    selectedAgent = found ?? GENERAL_PURPOSE_AGENT
-  } else {
-    selectedAgent = GENERAL_PURPOSE_AGENT
-  }
+  // densable Aye agent identity restore (changelog #7):
+  //   j = isFork===true ? void 0 : agentType lookup in activeAgents
+  //   B = isFork===true || (!j && isFork===void 0 && agentType===fork)
+  //   G = j ?? (B ? FORK_AGENT : GENERAL_PURPOSE)
+  // Explicit isFork short-circuits lookup so custom agents named "fork"
+  // cannot steal the fork pool; missing isFork + agentType "fork" still
+  // treats as fork (legacy sidecars before isFork field).
+  const foundByType =
+    meta?.isFork === true
+      ? undefined
+      : meta?.agentType
+        ? toolUseContext.options.agentDefinitions.activeAgents.find(
+            a => a.agentType === meta.agentType,
+          )
+        : undefined
+  const isResumedFork =
+    meta?.isFork === true ||
+    (!foundByType &&
+      meta?.isFork === undefined &&
+      meta?.agentType === FORK_AGENT.agentType)
+  const selectedAgent: AgentDefinition =
+    foundByType ?? (isResumedFork ? FORK_AGENT : GENERAL_PURPOSE_AGENT)
 
   const uiDescription = meta?.description ?? '(resumed)'
 
@@ -465,6 +513,13 @@ async function resumeAgentBackgroundAfterClaim({
       })
     }
     if (!forkParentSystemPrompt) {
+      // densable me("subagent_launch","subagent_resume_fork_prompt_missing")
+      logEvent('tengu_feature_bad', {
+        feature_name:
+          'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'subagent_resume_fork_prompt_missing' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
       clearResuming()
       throw new ResumeAgentStateError(
         'Cannot resume fork agent: unable to reconstruct parent system prompt',
@@ -490,12 +545,9 @@ async function resumeAgentBackgroundAfterClaim({
     ? (resolveWorkerPermissionMode(workerPermissionMode, sessionMode) ??
       sessionMode)
     : undefined
-  // densable b?.spawnMode — local AgentMetadata has no spawnMode yet; keep
-  // optional read for densable parity without widening the persisted type.
-  const metaRecord = meta as Record<string, unknown> | null | undefined
   const metaSpawnMode =
-    typeof metaRecord?.spawnMode === 'string'
-      ? (metaRecord.spawnMode as InternalPermissionMode)
+    typeof meta?.spawnMode === 'string'
+      ? (meta.spawnMode as InternalPermissionMode)
       : undefined
   const resolvedWorkerMode: InternalPermissionMode =
     observerCappedMode ??
@@ -505,16 +557,20 @@ async function resumeAgentBackgroundAfterClaim({
     'acceptEdits'
 
   // Resolve model for analytics metadata (runAgent resolves its own internally).
-  // densable uce(..., y) — model resolution uses session mode, not worker mode.
-  // Explore firstParty may cap-to-opus before getAgentModel. Observer resumes
-  // skip sidecar model pin (local meta has no model field yet).
+  // densable: model pin S?.isObserver ? void 0 : S?.model; getAgentModel
+  // uses session mode, not worker mode. Only alias strings re-pin via
+  // toolSpecifiedModel; full IDs still flow through runAgent.model.
+  const resumeModelRaw =
+    isObserverSidecar || !meta?.model ? undefined : meta.model
+  const resumeModelAlias: ModelAlias | undefined =
+    resumeModelRaw && isModelAlias(resumeModelRaw) ? resumeModelRaw : undefined
   const resolvedAgentModel = getAgentModel(
     resolveAgentDefinitionModel(
       selectedAgent,
       toolUseContext.options.mainLoopModel,
     ),
     toolUseContext.options.mainLoopModel,
-    undefined,
+    resumeModelAlias,
     sessionMode,
   )
 
@@ -577,9 +633,8 @@ async function resumeAgentBackgroundAfterClaim({
     canUseTool,
     isAsync: true,
     querySource: resumeQuerySource,
-    // densable: model pin skipped for observer (b?.isObserver?void 0:b?.model);
-    // local AgentMetadata has no model field yet — always undefined here.
-    model: undefined,
+    // densable: model pin skipped for observer (b?.isObserver?void 0:b?.model)
+    model: resumeModelAlias,
     // Fork resume: pass parent's system prompt (cache-identical prefix).
     // Non-fork: undefined → runAgent recomputes under wrapWithCwd so
     // getCwd() sees resumedWorktreePath.
@@ -594,7 +649,15 @@ async function resumeAgentBackgroundAfterClaim({
     ...((isResumedFork || isObserverSidecar) && { useExactTools: true }),
     // Re-persist so metadata survives runAgent's writeAgentMetadata overwrite
     worktreePath: resumedWorktreePath,
+    worktreeBranch: meta?.worktreeBranch,
+    // densable W = S?.cwd ?? q
+    cwd: meta?.cwd ?? resumedWorktreePath,
+    spawnMode: metaSpawnMode,
     description: meta?.description,
+    name: meta?.name,
+    toolUseId: meta?.toolUseId ?? toolUseContext.toolUseId,
+    parentAgentId: meta?.parentAgentId,
+    spawnDepth: meta?.spawnDepth,
     contentReplacementState: resumedReplacementState,
   }
 
@@ -931,6 +994,11 @@ async function resumeAgentBackgroundAfterClaim({
     void lifecyclePromise
   }
 
+  // densable Ce("subagent_launch") after lifecycle spawn wired
+  logEvent('tengu_feature_ok', {
+    feature_name:
+      'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
   return {
     agentId,
     description: uiDescription,

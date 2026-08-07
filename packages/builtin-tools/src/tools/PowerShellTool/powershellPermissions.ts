@@ -743,7 +743,11 @@ export async function powershellToolHasPermission(
   // and leak NTLM/Kerberos credentials. DEFERRED into decisions[].
   // The raw-string UNC check must not early-return before sub-command deny
   // (step 4+). Same fix as 2b above.
-  if (preParseAskDecision === null && containsVulnerableUncPath(command)) {
+  // densable sI(..., /* forPath */ true) — RO/network path must prompt
+  if (
+    preParseAskDecision === null &&
+    containsVulnerableUncPath(command, true)
+  ) {
     preParseAskDecision = {
       behavior: 'ask',
       message:
@@ -1037,7 +1041,8 @@ export async function powershellToolHasPermission(
         message: `Command argument '${arg}' uses a non-filesystem provider path and requires approval`,
       }
     }
-    if (containsVulnerableUncPath(value)) {
+    // densable sI(pathToken, !0) path mode
+    if (containsVulnerableUncPath(value, true)) {
       return {
         behavior: 'ask',
         message: `Command argument '${arg}' contains a UNC path that could trigger network requests`,

@@ -1,0 +1,25 @@
+filesystem.disabled)return{denyOnly:[],allowWithinDeny:[]};let e=Dou(hl.filesystem.denyRead,Vzi(hl.credentials,hl.network.allowedDomains)),t=[];for(let n of e){let o=kne(n);if(Vx()==="linux"&&wq(o)){let i=Pxt(n);fo(`[Sandbox] Expanded glob pattern "${n}" to ${i.length} paths on Linux`),t.push(...i)}else t.push(o)}let r=[];for(let n of hl.filesystem
+
+---
+
+filesystem.disabled)return{allowOnly:["/"],denyWithinAllow:[]};let e=hl.filesystem.allowWrite.map((n)=>kne(n)).filter((n)=>{if(Vx()==="linux"&&wq(n))return fo(`Skipping glob pattern on Linux/WSL: ${n}`),!1;return!0}),t=hl.filesystem.denyWrite.map((n)=>kne(n)).filter((n)=>{if(Vx()==="linux"&&wq(n))return fo(`Skipping glob pattern on Linux/WSL: ${n}`
+
+---
+
+filesystem.disabled??!1,denyRead:[...e.filesystem.denyRead],denyWrite:[...e.filesystem.denyWrite],allowRead:[...e.filesystem.allowRead??[]],allowWrite:[...e.filesystem.allowWrite],credFiles:WZn(e.credentials)}}function v5r(e,t){if(e.length!==t.length)return!1;let r=new Set(e);return t.every((n)=>r.has(n))}function zvg(e,t){return e.disabled===t.dis
+
+---
+
+filesystem.disabled??!1:hl?.filesystem.disabled??!1,s=Vzi(r?.credentials??hl?.credentials,r?.network?.allowedDomains??hl?.network?.allowedDomains),a,l;if(!i){let f=(E)=>E.map((S)=>kne(S)).filter((S)=>{if(Vx()==="linux"&&wq(S))return fo(`[Sandbox] Skipping glob write pattern on Linux: ${S}`),!1;return!0}),m=f(r?.filesystem?.allowWrite??hl?.filesyste
+
+---
+
+filesystem.disabled)return[];let e=[],t=[...hl.filesystem.allowWrite,...hl.filesystem.denyWrite];for(let r of t){let n=kne(r);if(wq(n))e.push(r)}return e}var Wzi,GZn,BZn,xou,hl,C5r,w5r,A5r,N_e,Mot,Eou=!1,UZn,gQt,Fot,WB,$ot,_Qt,Not,qZn,vou=!1,R5r,hQt,Mxt,jZn,sCg=1500,XS;var Uou=b(()=>{rnu();unu();gnu();Czi();Cnu();Rnu();cZn();b5r();TZn();Vnu();Znu()
+
+---
+
+filesystem.disabled)return{denyOnly:e.filesystem.denyRead.map(kne),allowWithinDeny:(e.filesystem.allowRead??[]).map(kne)};return XS.getFsReadConfig()},getFsWriteConfig:()=>{let e=XS.getConfig();if(e?.filesystem.disabled)return{allowOnly:e.filesystem.allowWrite.map(kne),denyWithinAllow:e.filesystem.denyWrite.map(kne)};return XS.getFsWriteConfig()},g
+
+---
+
+filesystem.disabled)return{allowOnly:e.filesystem.allowWrite.map(kne),denyWithinAllow:e.filesystem.denyWrite.map(kne)};return XS.getFsWriteConfig()},getNetworkRestrictionConfig:()=>{if(XS.getConfig()?.network?.allowedDomains===void 0)return{};return XS.getNetworkRestrictionConfig()},getIgnoreViolations:XS.getIgnoreViolations,getLinuxGlobPatternWarn

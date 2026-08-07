@@ -104,6 +104,15 @@ mock.module('src/utils/powershell/parser.js', () => ({
     hasStopParsing: false,
     originalCommand: '',
   }),
+  // densable export alias used by PowerShellTool / permissions
+  parsePowerShellCommand: () => ({
+    valid: false,
+    errors: [],
+    statements: [],
+    variables: [],
+    hasStopParsing: false,
+    originalCommand: '',
+  }),
   PARSE_SCRIPT_BODY: '',
   WINDOWS_MAX_COMMAND_LENGTH: 32000,
   MAX_COMMAND_LENGTH: 32000,
@@ -112,6 +121,20 @@ mock.module('src/utils/powershell/parser.js', () => ({
   mapElementType: (t: string) => t,
   classifyCommandName: () => ({ type: 'external', name: '' }),
   stripModulePrefix: (n: string) => n,
+  // Stubs required so later files that import readOnlyValidation (process-global
+  // mock.module) still resolve — Bun mock is last-write-wins for the whole process.
+  getPipelineSegments: (parsed: any) =>
+    (parsed?.statements ?? []).map((s: any) => ({
+      commands: s.commands || [],
+    })),
+  isNullRedirectionTarget: () => false,
+  isPowerShellParameter: (s: string) => s.startsWith('-'),
+  getAllCommandNames: () => [],
+  getAllRedirections: () => [],
+  getFileRedirections: () => [],
+  hasDirectoryChange: () => false,
+  isSingleCommand: () => true,
+  commandHasArg: () => false,
 }))
 
 // Real parser functions work without mocks since they're pure

@@ -40,6 +40,15 @@ export function isBackgroundAbortReason(reason: unknown): boolean {
 }
 
 /**
+ * densable q_(signal.reason) === "interrupt" — high-priority / submit-interrupt
+ * (REPL priority==='now', handlePromptSubmit). Async bg agent spawn must not
+ * treat this as fatal during the startup window (2.1.216 #15).
+ */
+export function isInterruptAbortReason(reason: unknown): boolean {
+  return getAbortReasonMessage(reason) === 'interrupt'
+}
+
+/**
  * Creates an AbortController with proper event listener limits set.
  * This prevents MaxListenersExceededWarning when multiple listeners
  * are attached to the abort signal.

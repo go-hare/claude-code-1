@@ -1,9 +1,19 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { persistInlineScript } from '../tool/persistInline.js'
+import {
+  persistInlineScript,
+  SymlinkWriteRefusedError,
+} from '../tool/persistInline.js'
 
 test('persists to <cwd>/.claude/workflow-runs/<runId>/script.js and returns path', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wf-pi-'))
@@ -37,5 +47,38 @@ test('different runId do not interfere (independent subdirectories)', async () =
     expect(await readFile(p2, 'utf-8')).toBe('b')
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('refuses when .claude is escape symlink (YNn O_NOFOLLOW chain)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wf-pi-'))
+  const outside = await mkdtemp(join(tmpdir(), 'wf-pi-out-'))
+  try {
+    await symlink(outside, join(root, '.claude'))
+    await expect(persistInlineScript('pwn', 'r', root)).rejects.toBeInstanceOf(
+      SymlinkWriteRefusedError,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  }
+})
+
+test('refuses when leaf script.js is a symlink', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wf-pi-'))
+  const outside = await mkdtemp(join(tmpdir(), 'wf-pi-out-'))
+  try {
+    const runDir = join(root, '.claude', 'workflow-runs', 'r')
+    await mkdir(runDir, { recursive: true })
+    const secret = join(outside, 'secret')
+    await writeFile(secret, 'secret')
+    await symlink(secret, join(runDir, 'script.js'))
+    await expect(persistInlineScript('pwn', 'r', root)).rejects.toBeInstanceOf(
+      SymlinkWriteRefusedError,
+    )
+    expect(await readFile(secret, 'utf-8')).toBe('secret')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
   }
 })

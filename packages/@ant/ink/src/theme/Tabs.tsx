@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { useIsInsideModal, useModalScrollRef } from './modalContext.js';
+import { useIsInsideModal, useModalOrTerminalSize, useModalScrollRef } from './modalContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import ScrollBox from '../components/ScrollBox.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
@@ -81,7 +81,11 @@ export function Tabs({
   contentHeight,
   navFromContent = false,
 }: TabsProps): React.ReactNode {
-  const { columns: terminalWidth } = useTerminalSize();
+  // densable 2.1.216 #23: inside FullscreenLayout modal, ModalContext.columns
+  // is terminal-4 (paddingX=2 each side). useTerminalSize() alone over-reports
+  // and lets tab content/dialogs stretch past the panel's right edge.
+  const terminalSize = useTerminalSize();
+  const { columns: terminalWidth } = useModalOrTerminalSize(terminalSize);
   const tabs = children.map(child => [child.props.id ?? child.props.title, child.props.title]);
   const defaultTabIndex = defaultTab ? tabs.findIndex(tab => defaultTab === tab[0]) : 0;
 

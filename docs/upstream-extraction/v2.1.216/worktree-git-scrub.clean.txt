@@ -1,0 +1,22 @@
+86208448
+................X.......................`.......................h.......................GIT_DIR.........................GIT_WORK_TREE...................GIT_COMMON_DIR..................GIT_INDEX_FILE................M..)..'.....M.(.....M...M......H..P.......................................................x...............
+
+---
+
+182718784
+........................os..............................path............................GIT_DIR.........................GIT_WORK_TREE...................GIT_COMMON_DIR..................GIT_OBJECT_DIRECTORY............................GIT_INDEX_FILE..................GIT_SHALLOW_FILE................`...............p.......
+
+---
+
+182719104
+........................................................................................GIT_DIR.........................GIT_WORK_TREE...................GIT_COMMON_DIR..................GIT_OBJECT_DIRECTORY............................GIT_INDEX_FILE..................GIT_SHALLOW_FILE................--namespace.............
+
+---
+
+224041711
+e_create"),{worktreePath:o,worktreeBranch:i,headCommit:s,gitRoot:n}}function XB(e){return{...process.env,GIT_DIR:void 0,GIT_WORK_TREE:void 0,GIT_COMMON_DIR:void 0,GIT_INDEX_FILE:void 0,...e}}async function qgu(e){let t=await qn(io(),[...rl,"rev-parse","--show-toplevel"],{cwd:e,env:XB({LC_ALL:"C"})}),r=t.stdout.trim();i
+
+---
+
+224859008
+,Q9g,Axu,Z9g,xos;var kxu=b(()=>{K_e();tp();Bd();Lr();Aos();Cxu=require("os"),y7=require("path");Ros=new Set(["GIT_DIR","GIT_WORK_TREE","GIT_COMMON_DIR","GIT_OBJECT_DIRECTORY","GIT_INDEX_FILE","GIT_SHALLOW_FILE"]),U9g=new Set(["--namespace","--attr-source","--shallow-file"]),q9g=["--git-dir","--work-tree"],j9g=/(^|[\\/]

@@ -64,10 +64,19 @@ import {
   useAppStateStore,
   useSetAppState,
 } from '../../state/AppState.js'
+import { getClaudeAIOAuthTokens } from '../../utils/auth.js'
 import { errorMessage } from '../../utils/errors.js'
+import { getAPIProvider } from '../../utils/model/providers.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { logMCPDebug, logMCPError } from '../../utils/log.js'
 import { enqueue } from '../../utils/messageQueueManager.js'
+import {
+  formatMcpNeedsReauthNotification,
+  mcpNeedsReauthNotificationKey,
+  shouldSkipMcpNeedsReauthNotification,
+  subscribeMcpNeedsReauth,
+} from './mcpReauthSignal.js'
+import { isXaaEnabled } from './xaaIdpLogin.js'
 import {
   CHANNEL_PERMISSION_METHOD,
   ChannelMessageNotificationSchema,
@@ -204,6 +213,63 @@ export function useManageMCPConnections(
     }
   }, [setAppState])
   const { addNotification } = useNotifications()
+
+  // densable 2.1.216 #19 t7r.subscribe — per-server reauth toast when OAuth
+  // refresh permanently invalidates credentials. Silent only for densable
+  // oKn || XAA: Authorization (n5e), DYt WeakSet mark, design MCP+Claude auth,
+  // or XAA. Not truthy headersHelper string (that is nKn, not oKn).
+  const reauthNotifiedRef = useRef(new Set<string>())
+  useEffect(() => {
+    return subscribeMcpNeedsReauth(serverName => {
+      if (reauthNotifiedRef.current.has(serverName)) return
+      const client = store
+        .getState()
+        .mcp.clients.find(c => c.name === serverName)
+      if (client?.type !== 'connected') return
+      const cfg = client.config
+      const headers =
+        cfg && typeof cfg === 'object' && 'headers' in cfg
+          ? (cfg.headers as Record<string, string> | undefined)
+          : undefined
+      const url =
+        cfg && typeof cfg === 'object' && 'url' in cfg
+          ? (cfg.url as string | undefined)
+          : undefined
+      const oauthXaa =
+        cfg &&
+        typeof cfg === 'object' &&
+        'oauth' in cfg &&
+        cfg.oauth &&
+        typeof cfg.oauth === 'object' &&
+        'xaa' in cfg.oauth
+          ? Boolean((cfg.oauth as { xaa?: unknown }).xaa)
+          : false
+      if (
+        shouldSkipMcpNeedsReauthNotification({
+          configType: cfg?.type,
+          headers,
+          configObject: cfg,
+          url,
+          oauthXaa,
+          xaaEnabled: isXaaEnabled(),
+          isFirstPartyProvider: getAPIProvider() === 'firstParty',
+          hasClaudeAiAccessToken: Boolean(
+            getClaudeAIOAuthTokens()?.accessToken,
+          ),
+        })
+      ) {
+        return
+      }
+      reauthNotifiedRef.current.add(serverName)
+      addNotification({
+        key: mcpNeedsReauthNotificationKey(serverName),
+        priority: 'high',
+        text: formatMcpNeedsReauthNotification(serverName),
+        color: 'warning',
+        timeoutMs: 12000,
+      })
+    })
+  }, [store, addNotification])
 
   // Batched MCP state updates: queue individual server updates and flush them
   // in a single setAppState call via setTimeout. Using a time-based window

@@ -17,6 +17,18 @@ export class AbortError extends Error {
 }
 
 /**
+ * densable jS extends AbortError (wl) — control/permission stream closed while a
+ * can_use_tool request was still pending. Distinct from user interrupt so
+ * telemetry can label permissionStreamClosed (config) vs user_abort.
+ */
+export class ControlStreamClosedError extends AbortError {
+  constructor(message?: string) {
+    super(message)
+    this.name = 'ControlStreamClosedError'
+  }
+}
+
+/**
  * True iff `e` is any of the abort-shaped errors the codebase encounters:
  * our AbortError class, a DOMException from AbortController.abort()
  * (.name === 'AbortError'), or the SDK's APIUserAbortError. The SDK class

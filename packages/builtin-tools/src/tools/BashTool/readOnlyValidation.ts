@@ -1763,9 +1763,10 @@ function isCommandReadOnly(command: string): boolean {
     testCommand = testCommand.slice(0, -5).trim()
   }
 
-  // Check for Windows UNC paths that could be vulnerable to WebDAV attacks
-  // Do this early to prevent any command with UNC paths from being marked as read-only
-  if (containsVulnerableUncPath(testCommand)) {
+  // densable isCommandReadOnly: sI(token, /* forPath */ true) on redirects/argv.
+  // Whole-command check uses path mode so single-separator mixed UNC forms
+  // (e.g. `/\server\share`) still force a permission prompt on Windows.
+  if (containsVulnerableUncPath(testCommand, true)) {
     return false
   }
 
@@ -1988,9 +1989,8 @@ export function checkReadOnlyConstraints(
     }
   }
 
-  // Check for Windows UNC paths in the original command before transformation
-  // This must be done before splitCommand_DEPRECATED because splitCommand_DEPRECATED may transform backslashes
-  if (containsVulnerableUncPath(command)) {
+  // densable: path-mode UNC before split (backslash transforms can hide forms)
+  if (containsVulnerableUncPath(command, true)) {
     return {
       behavior: 'ask',
       message:

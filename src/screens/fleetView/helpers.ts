@@ -295,6 +295,9 @@ export const FLEET_PASTE_CHAR_THRESHOLD = 800
  */
 export const FLEET_EXIT_ARM_MS = 800
 
+/** densable Oc(() => cO(null), cy ? 2000 : null) — Ctrl+X delete/ungroup arm window. */
+export const FLEET_DELETE_ARM_MS = 2000
+
 /**
  * Parse dispatch input text into a structured command.
  * Upstream: e$a (parseDispatch)
@@ -801,6 +804,8 @@ export function buildFleetFooterHints(input: {
   viewMode: 'list' | 'rename' | 'reply' | 'group'
   deletePending: boolean
   ungroupPending: boolean
+  /** densable cy.justKilled — first X stopped the worker. */
+  justKilled?: boolean
   rowKind?: 'header' | 'job' | 'fold'
   band?: StatusBand
   canPin: boolean
@@ -855,9 +860,12 @@ export function buildFleetFooterHints(input: {
     return 'enter to send \u00b7 esc to cancel'
   }
   if (input.deletePending) {
-    return input.ungroupPending
-      ? 'ctrl+x again to ungroup'
-      : 'ctrl+x again to delete'
+    if (input.ungroupPending) return 'ctrl+x again to ungroup'
+    // densable footer: justKilled → "stopped · ctrl+x again to delete · esc to keep"
+    if (input.justKilled) {
+      return 'stopped \u00b7 ctrl+x again to delete \u00b7 esc to keep'
+    }
+    return 'ctrl+x again to delete \u00b7 esc to keep'
   }
   if (input.focusArea === 'dispatch') {
     if (input.bashMode) {

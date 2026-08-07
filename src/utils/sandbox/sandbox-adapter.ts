@@ -35,7 +35,11 @@ import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { expandPath } from '../path.js'
 import { getPlatform, type Platform } from '../platform.js'
 import { settingsChangeDetector } from '../settings/changeDetector.js'
-import { SETTING_SOURCES, type SettingSource } from '../settings/constants.js'
+import {
+  isSettingSourceEnabled,
+  SETTING_SOURCES,
+  type SettingSource,
+} from '../settings/constants.js'
 import { getManagedSettingsDropInDir } from '../settings/managedPath.js'
 import {
   getInitialSettings,
@@ -282,6 +286,190 @@ function shouldAllowManagedReadPathsOnly(): boolean {
 }
 
 /**
+ * densable 2.1.216 — managed lock for sandbox.filesystem.disabled.
+ * If policySettings configures sandbox.filesystem at all, or lists any
+ * sandbox.credentials.files entry, only managed settings may set disabled.
+ * credentials.envVars does not pin (env scrubbing is independent of FS layer).
+ */
+export function isSandboxFilesystemDisabledLockedByManaged(): boolean {
+  const managedSandbox = getSettingsForSource('policySettings')?.sandbox
+  if (!managedSandbox) {
+    return false
+  }
+  if (managedSandbox.filesystem !== undefined) {
+    return true
+  }
+  // densable: managed lock when credentials.files has any entry (envVars do not pin).
+  const files = managedSandbox.credentials?.files
+  return Array.isArray(files) && files.length > 0
+}
+
+/**
+ * densable 2.1.216 Gvg/Wvg gate — effective sandbox.filesystem.disabled.
+ *
+ * - Native Windows: always false (isolation must stay on).
+ * - projectSettings / localSettings: ignored for this flag.
+ * - Honored only from userSettings, flagSettings (`--settings`), policySettings.
+ * - When managed locks filesystem (or credentials.files), only policySettings.disabled.
+ * - Unset → false (FS isolation on).
+ */
+export function resolveSandboxFilesystemDisabled(): boolean {
+  // densable: ignored on native Windows (separate-user sandbox has no grants
+  // to loosen by dropping FS rules).
+  if (getPlatform() === 'windows') {
+    return false
+  }
+
+  if (isSandboxFilesystemDisabledLockedByManaged()) {
+    return (
+      getSettingsForSource('policySettings')?.sandbox?.filesystem?.disabled ===
+      true
+    )
+  }
+
+  // Later sources win among allowed sources (user < flag). policy is only
+  // consulted when it does not lock; if it sets filesystem.disabled without
+  // "configuring filesystem" it can't happen — lock checks filesystem !== undefined.
+  // Allowed sources when unlocked: userSettings, flagSettings.
+  // densable also honors managed when unlocked — if managed has disabled without
+  // filesystem object it can't; if managed has only other sandbox keys, user/flag apply.
+  const flagDisabled =
+    getSettingsForSource('flagSettings')?.sandbox?.filesystem?.disabled
+  if (flagDisabled !== undefined) {
+    return flagDisabled === true
+  }
+
+  const userDisabled =
+    getSettingsForSource('userSettings')?.sandbox?.filesystem?.disabled
+  if (userDisabled !== undefined) {
+    return userDisabled === true
+  }
+
+  // policySettings without locking filesystem object: still allow explicit true
+  // if somehow present under a partial shape (defensive; lock covers normal path).
+  const policyDisabled =
+    getSettingsForSource('policySettings')?.sandbox?.filesystem?.disabled
+  if (policyDisabled !== undefined) {
+    return policyDisabled === true
+  }
+
+  return false
+}
+
+/** densable Gvg when disabled — enforcement unrestricted (empty deny). */
+export function getDisabledSandboxFsReadConfig(): FsReadRestrictionConfig {
+  return { denyOnly: [], allowWithinDeny: [] }
+}
+
+/** densable Wvg when disabled — enforcement unrestricted write via root allowOnly. */
+export function getDisabledSandboxFsWriteConfig(): FsWriteRestrictionConfig {
+  return { allowOnly: ['/'], denyWithinAllow: [] }
+}
+
+/**
+ * densable dual facade diagnostic lists when filesystem.disabled.
+ * OUTER getFs* returns these raw configured paths for UI/prompt;
+ * package Gvg/Wvg enforcement is unrestricted when filesystem.disabled.
+ * Populated by convertToSandboxRuntimeConfig; null when isolation is on.
+ */
+export type DisabledFsDiagnosticLists = {
+  denyRead: string[]
+  allowRead: string[]
+  allowWrite: string[]
+  denyWrite: string[]
+}
+
+let disabledFsDiagnostic: DisabledFsDiagnosticLists | null = null
+
+/** Test/diagnostic access to last convert dual-facade stash. */
+export function getDisabledFsDiagnosticLists(): DisabledFsDiagnosticLists | null {
+  return disabledFsDiagnostic
+}
+
+/**
+ * densable host credentials merge for SandboxRuntimeConfig.credentials.
+ *
+ * - files: path-resolved via resolveSandboxFilesystemPath; settings schema only
+ *   accepts mode "deny" (package may still run file mask if ever fed that shape).
+ * - envVars: later sources win, but mode "deny" is sticky (not overwritten).
+ * - mask from projectSettings/localSettings is skipped (untrusted repo).
+ * - mask from userSettings is skipped when userSettings source is disabled
+ *   (densable `ug("userSettings")` / isSettingSourceEnabled).
+ * - allowPlaintextInject only from trusted sources (not project/local, not
+ *   disabled user).
+ * - Package Vzi/Anu/vnu turns this into unsetEnvVars/setEnvVars/maskedFileBinds.
+ */
+export function mergeSandboxCredentialsForRuntime():
+  | SandboxRuntimeConfig['credentials']
+  | undefined {
+  type Cred = NonNullable<SandboxRuntimeConfig['credentials']>
+  const files: NonNullable<Cred['files']> = []
+  const envByName = new Map<string, NonNullable<Cred['envVars']>[number]>()
+  let seen = false
+  let allowPlaintextInject: boolean | undefined
+
+  for (const source of SETTING_SOURCES) {
+    const cred = getSettingsForSource(source)?.sandbox?.credentials
+    if (!cred) {
+      continue
+    }
+    seen = true
+    const isProjectLocal =
+      source === 'projectSettings' || source === 'localSettings'
+    const isUntrustedUser =
+      source === 'userSettings' && !isSettingSourceEnabled('userSettings')
+
+    for (const entry of cred.files ?? []) {
+      if (!entry?.path) {
+        continue
+      }
+      files.push({
+        path: resolveSandboxFilesystemPath(entry.path, source),
+        mode: entry.mode,
+      })
+    }
+
+    for (const entry of cred.envVars ?? []) {
+      if (!entry?.name) {
+        continue
+      }
+      // densable: skip mask from untrusted project/local or disabled user
+      if (entry.mode === 'mask' && (isProjectLocal || isUntrustedUser)) {
+        continue
+      }
+      // deny sticky — densable does not let a later entry replace deny
+      if (envByName.get(entry.name)?.mode === 'deny') {
+        continue
+      }
+      envByName.set(entry.name, {
+        name: entry.name,
+        mode: entry.mode,
+        ...(entry.injectHosts !== undefined
+          ? { injectHosts: [...entry.injectHosts] }
+          : {}),
+      })
+    }
+
+    if (
+      !isProjectLocal &&
+      !isUntrustedUser &&
+      cred.allowPlaintextInject !== undefined
+    ) {
+      allowPlaintextInject = cred.allowPlaintextInject
+    }
+  }
+
+  if (!seen) {
+    return undefined
+  }
+  return {
+    files,
+    envVars: [...envByName.values()],
+    ...(allowPlaintextInject !== undefined ? { allowPlaintextInject } : {}),
+  }
+}
+
+/**
  * Convert Claude Code settings format to SandboxRuntimeConfig format
  * (Function exported for testing)
  *
@@ -340,6 +528,8 @@ export function convertToSandboxRuntimeConfig(
   // Extract filesystem paths from Edit and Read rules
   // Always include current directory and Claude temp directory as writable
   // The temp directory is needed for Shell.ts cwd tracking files
+  // densable dual facade: when filesystem.disabled we still build full path
+  // lists for OUTER getFs* diagnostics; package gets disabled:true + same lists.
   const allowWrite: string[] = ['.', getClaudeTempDir()]
   const denyWrite: string[] = []
   const denyRead: string[] = []
@@ -615,6 +805,12 @@ export function convertToSandboxRuntimeConfig(
         }
       }
     }
+
+    // densable: credentials.files are NOT merged into filesystem.denyRead here.
+    // Host convert only path-resolves them onto runtime `credentials` (merge
+    // below). Package Gvg/Dou unions WZn(credentials) with filesystem.denyRead
+    // at enforcement time (Vzi). When filesystem.disabled, Gvg drops both FS
+    // denyRead and credential file denies; env scrub still applies.
   }
   // Ripgrep config for sandbox. User settings take priority; otherwise pass our rg.
   // In embedded mode (argv0='rg' dispatch), sandbox-runtime spawns with argv0 set.
@@ -628,29 +824,146 @@ export function convertToSandboxRuntimeConfig(
   // Official: host-injected CLAUDE_CODE_HOST_*_PROXY_PORT fill sandbox
   // network ports when settings omit them (bwrap --setenv path).
   const hostProxy = readHostProxyPorts()
+
+  // densable credentials merge (files path-resolved; env mask trust gates)
+  const credentials = mergeSandboxCredentialsForRuntime()
+
+  // densable Xot()==="relaxed": attach filesystem.disabled + keep full path lists
+  // on getConfig(). sandbox-runtime@0.0.70 honors filesystem.disabled natively
+  // (Gvg empty / Wvg allowOnly['/'] / Bou skip FS mounts). OUTER getFs* still
+  // returns raw diagnostic lists from this stash.
+  const filesystemDisabled = resolveSandboxFilesystemDisabled()
+  if (filesystemDisabled) {
+    disabledFsDiagnostic = {
+      denyRead: [...denyRead],
+      allowRead: [...allowRead],
+      allowWrite: [...allowWrite],
+      denyWrite: [...denyWrite],
+    }
+  } else {
+    disabledFsDiagnostic = null
+  }
+
+  // densable FQt tlsTerminate: policy → flag → enabled userSettings only
+  // (project/local ignored). Windows without CA paths: warn + skip ephemeral.
+  const network: SandboxRuntimeConfig['network'] = {
+    allowedDomains,
+    deniedDomains,
+    allowUnixSockets: settings.sandbox?.network?.allowUnixSockets,
+    allowAllUnixSockets: settings.sandbox?.network?.allowAllUnixSockets,
+    allowLocalBinding: settings.sandbox?.network?.allowLocalBinding,
+    httpProxyPort:
+      settings.sandbox?.network?.httpProxyPort ?? hostProxy.httpProxyPort,
+    socksProxyPort:
+      settings.sandbox?.network?.socksProxyPort ?? hostProxy.socksProxyPort,
+  }
+  const tlsTerminate = resolveSandboxTlsTerminate()
+  if (tlsTerminate !== undefined) {
+    if (
+      getPlatform() === 'windows' &&
+      tlsTerminate.caCertPath === undefined &&
+      tlsTerminate.caKeyPath === undefined
+    ) {
+      logForDebugging(
+        '[sandbox] settings tlsTerminate has no caCertPath/caKeyPath; on Windows an ephemeral CA cannot pass srt-win user trust-ca — ignoring until a persistent CA is configured',
+        { level: 'warn' },
+      )
+    } else {
+      network.tlsTerminate = tlsTerminate
+    }
+  }
+
   return {
-    network: {
-      allowedDomains,
-      deniedDomains,
-      allowUnixSockets: settings.sandbox?.network?.allowUnixSockets,
-      allowAllUnixSockets: settings.sandbox?.network?.allowAllUnixSockets,
-      allowLocalBinding: settings.sandbox?.network?.allowLocalBinding,
-      httpProxyPort:
-        settings.sandbox?.network?.httpProxyPort ?? hostProxy.httpProxyPort,
-      socksProxyPort:
-        settings.sandbox?.network?.socksProxyPort ?? hostProxy.socksProxyPort,
-    },
+    network,
     filesystem: {
       denyRead,
       allowRead,
       allowWrite,
       denyWrite,
+      ...(filesystemDisabled ? { disabled: true as const } : {}),
     },
+    ...(credentials !== undefined ? { credentials } : {}),
     ignoreViolations: settings.sandbox?.ignoreViolations,
     enableWeakerNestedSandbox: settings.sandbox?.enableWeakerNestedSandbox,
     enableWeakerNetworkIsolation:
       settings.sandbox?.enableWeakerNetworkIsolation,
     ripgrep: ripgrepConfig,
+  }
+}
+
+/**
+ * densable FQt slice for network.tlsTerminate — managed/policy, flag, then
+ * userSettings only when that source is enabled. Project/local ignored.
+ */
+export function resolveSandboxTlsTerminate():
+  | NonNullable<SandboxRuntimeConfig['network']['tlsTerminate']>
+  | undefined {
+  const sources: Array<SettingsJson | null | undefined> = [
+    getSettingsForSource('policySettings'),
+    getSettingsForSource('flagSettings'),
+    isSettingSourceEnabled('userSettings')
+      ? getSettingsForSource('userSettings')
+      : null,
+  ]
+  return sources
+    .map(s => s?.sandbox?.network?.tlsTerminate)
+    .find(v => v !== undefined)
+}
+
+/**
+ * densable `tuu` — pure warning when envVars mask is configured but neither
+ * network.tlsTerminate nor credentials.allowPlaintextInject is set.
+ * Exported for tests / doctor; package Anu still masks to sentinels either way.
+ */
+export function maskCredentialInjectionWarning(
+  config: SandboxRuntimeConfig | undefined | null,
+): string | undefined {
+  if (!config) {
+    return undefined
+  }
+  const maskNames = (config.credentials?.envVars ?? [])
+    .filter(r => r.mode === 'mask')
+    .map(r => r.name)
+  if (maskNames.length === 0) {
+    return undefined
+  }
+  if (
+    config.network.tlsTerminate !== undefined ||
+    config.credentials?.allowPlaintextInject
+  ) {
+    return undefined
+  }
+  return (
+    `sandbox.credentials mask entries (${maskNames.join(', ')}) are configured ` +
+    'but TLS termination is unavailable — sandboxed commands see only a ' +
+    'sentinel value and the proxy cannot substitute the real credential on egress, so tools needing these will fail to authenticate. Enable sandbox.network.tlsTerminate, or remove the mask entries'
+  )
+}
+
+/**
+ * densable `ruu` — gate for mask-credential warning path.
+ * densable: (tkt() || (zO()&&false)) && cjr() ≡ settings sandbox.enabled && platform allowed.
+ */
+function canMaskCredentialWarningFire(): boolean {
+  return getSandboxEnabledSetting() && isPlatformInEnabledList()
+}
+
+/**
+ * densable `o0g` / getMaskCredentialWarning — needs package getConfig() (after init).
+ */
+function getMaskCredentialWarning(): string | undefined {
+  try {
+    if (!canMaskCredentialWarningFire()) {
+      return undefined
+    }
+    const cfg = BaseSandboxManager.getConfig?.()
+    if (cfg === undefined) {
+      return undefined
+    }
+    return maskCredentialInjectionWarning(cfg)
+  } catch (e) {
+    logForDebugging(`Failed to compute mask credential warning: ${e}`)
+    return undefined
   }
 }
 
@@ -875,6 +1188,11 @@ function getLinuxGlobPatternWarnings(): string[] {
     return []
   }
 
+  // densable uCg: when filesystem.disabled, no glob warnings (FS rules not enforced)
+  if (resolveSandboxFilesystemDisabled()) {
+    return []
+  }
+
   try {
     const settings = getSettings_DEPRECATED()
 
@@ -990,6 +1308,11 @@ async function wrapWithSandbox(
     }
   }
 
+  // densable Bou / sandbox-runtime@0.0.70: package wrapWithSandbox itself
+  // applies filesystem.disabled precedence (override.filesystem present →
+  // override.disabled??false, else session). When disabled, package skips FS
+  // mounts while still applying credentials.envVars unset/set (Vzi). No host
+  // rewrite of path lists needed.
   return BaseSandboxManager.wrapWithSandbox(
     command,
     binShell,
@@ -1191,8 +1514,87 @@ export interface ISandboxManager {
   getSandboxViolationStore(): SandboxViolationStore
   annotateStderrWithSandboxFailures(command: string, stderr: string): string
   getLinuxGlobPatternWarnings(): string[]
+  /** densable o0g — mask without tlsTerminate/allowPlaintextInject warning */
+  getMaskCredentialWarning(): string | undefined
+  /** densable ruu — whether mask warning path may fire */
+  canMaskCredentialWarningFire(): boolean
   refreshConfig(): void
   reset(): Promise<void>
+}
+
+/**
+ * densable OUTER getFsReadConfig (~223611065):
+ * when getConfig().filesystem.disabled → RAW config denyRead/allowRead
+ * (diagnostic; does not include credentials.files — those are package-side
+ * WZn/Dou only while isolation is on). Enforcement Gvg is unrestricted when
+ * disabled. When isolation on → forward package getFsReadConfig (Gvg).
+ *
+ * Host keeps a convert-time diagnostic stash so tests / pre-init callers still
+ * see raw lists when package getConfig() is not yet populated; shape matches
+ * densable `e.filesystem.denyRead` (no credential-file paths).
+ */
+function getFsReadConfig(): FsReadRestrictionConfig {
+  const cfg = BaseSandboxManager.getConfig?.()
+  if (cfg?.filesystem?.disabled) {
+    return {
+      denyOnly: [...cfg.filesystem.denyRead],
+      allowWithinDeny: [...(cfg.filesystem.allowRead ?? [])],
+    }
+  }
+  if (resolveSandboxFilesystemDisabled()) {
+    if (disabledFsDiagnostic) {
+      return {
+        denyOnly: disabledFsDiagnostic.denyRead,
+        allowWithinDeny: disabledFsDiagnostic.allowRead,
+      }
+    }
+    // convert not yet run — densable empty until hl is set
+    return getDisabledSandboxFsReadConfig()
+  }
+  return BaseSandboxManager.getFsReadConfig()
+}
+
+/**
+ * densable OUTER getFsWriteConfig:
+ * when getConfig().filesystem.disabled → RAW config allowWrite/denyWrite.
+ * Enforcement Wvg is unrestricted (allowOnly:['/']) when disabled.
+ */
+function getFsWriteConfig(): FsWriteRestrictionConfig {
+  const cfg = BaseSandboxManager.getConfig?.()
+  if (cfg?.filesystem?.disabled) {
+    return {
+      allowOnly: [...cfg.filesystem.allowWrite],
+      denyWithinAllow: [...cfg.filesystem.denyWrite],
+    }
+  }
+  if (resolveSandboxFilesystemDisabled()) {
+    if (disabledFsDiagnostic) {
+      return {
+        allowOnly: disabledFsDiagnostic.allowWrite,
+        denyWithinAllow: disabledFsDiagnostic.denyWrite,
+      }
+    }
+    return getDisabledSandboxFsWriteConfig()
+  }
+  return BaseSandboxManager.getFsWriteConfig()
+}
+
+/**
+ * densable enforcement-only Gvg/Wvg shapes (unrestricted when disabled).
+ * Prefer these for wrap/path-safety when UI must keep raw lists via getFs*.
+ */
+export function getEnforcementFsReadConfig(): FsReadRestrictionConfig {
+  if (resolveSandboxFilesystemDisabled()) {
+    return getDisabledSandboxFsReadConfig()
+  }
+  return BaseSandboxManager.getFsReadConfig()
+}
+
+export function getEnforcementFsWriteConfig(): FsWriteRestrictionConfig {
+  if (resolveSandboxFilesystemDisabled()) {
+    return getDisabledSandboxFsWriteConfig()
+  }
+  return BaseSandboxManager.getFsWriteConfig()
 }
 
 /**
@@ -1216,12 +1618,14 @@ export const SandboxManager: ISandboxManager = {
   reset,
   checkDependencies,
 
-  // Forward to base sandbox manager
-  getFsReadConfig: BaseSandboxManager.getFsReadConfig,
-  getFsWriteConfig: BaseSandboxManager.getFsWriteConfig,
+  // densable 2.1.216 Gvg/Wvg overrides + network forward
+  getFsReadConfig,
+  getFsWriteConfig,
   getNetworkRestrictionConfig: BaseSandboxManager.getNetworkRestrictionConfig,
   getIgnoreViolations: BaseSandboxManager.getIgnoreViolations,
   getLinuxGlobPatternWarnings,
+  getMaskCredentialWarning,
+  canMaskCredentialWarningFire,
   isSupportedPlatform,
   getAllowUnixSockets: BaseSandboxManager.getAllowUnixSockets,
   getAllowLocalBinding: BaseSandboxManager.getAllowLocalBinding,

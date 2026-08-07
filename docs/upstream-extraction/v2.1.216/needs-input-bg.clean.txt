@@ -1,0 +1,9 @@
+It now shows "needs input" in agent view.
+
+---
+
+(?:^|\n)\s*needs input\s*[:\u2014\u2013-]\s*(.{3,200}?)(?=\n|$)
+
+---
+
+**Needs input.** Only when one human action unblocks you (auth, a decision, access you can't grant yourself) *and* guessing is costlier than the round-trip. If a reasonable guess exists: make it, note the assumption, keep working. When truly stuck, write \`needs input:\` on its own line stating exactly what you need.

@@ -24,6 +24,25 @@ mock.module('src/utils/powershell/parser.js', () => ({
     hasStopParsing: false,
     originalCommand: '',
   }),
+  parsePowerShellCommand: () => ({
+    valid: false,
+    errors: [],
+    statements: [],
+    variables: [],
+    hasStopParsing: false,
+    originalCommand: '',
+  }),
+  // Process-global mock.module: include exports used by readOnlyValidation so
+  // suite-order neighbors (e.g. gitGhArgs.216) still load.
+  getPipelineSegments: () => [],
+  isNullRedirectionTarget: () => false,
+  isPowerShellParameter: (s: string) => s.startsWith('-'),
+  getAllCommandNames: () => [],
+  getAllRedirections: () => [],
+  getFileRedirections: () => [],
+  hasDirectoryChange: () => false,
+  isSingleCommand: () => true,
+  commandHasArg: () => false,
 }))
 
 const { isGitInternalPathPS, isDotGitPathPS } = await import('../gitSafety')

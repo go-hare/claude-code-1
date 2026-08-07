@@ -7,10 +7,10 @@ import { getRelativeMemoryPath } from '../../components/memory/MemoryUpdateNotif
 import { Box, Link, Text } from '@anthropic/ink';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import { clearMemoryFileCaches, getMemoryFiles } from '../../utils/claudemd.js';
+import { openFileInExternalEditor } from '../../utils/editor.js';
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js';
 import { getErrnoCode } from '../../utils/errors.js';
 import { logError } from '../../utils/log.js';
-import { editFileInEditor } from '../../utils/promptEditor.js';
 
 function MemoryCommand({
   onDone,
@@ -34,7 +34,14 @@ function MemoryCommand({
         }
       }
 
-      await editFileInEditor(memoryPath);
+      // densable 2.1.216 COb: jCo detached GUI open — do not block on editor close
+      if (!openFileInExternalEditor(memoryPath)) {
+        onDone(
+          `Couldn't open the memory file at ${getRelativeMemoryPath(memoryPath)} in an editor. If no editor is configured, set $EDITOR or $VISUAL, then run /memory again.`,
+          { display: 'system' },
+        );
+        return;
+      }
 
       // Determine which environment variable controls the editor
       let editorSource = 'default';

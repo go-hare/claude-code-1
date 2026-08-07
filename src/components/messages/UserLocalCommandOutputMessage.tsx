@@ -26,12 +26,17 @@ export function UserLocalCommandOutputMessage({ content }: Props): React.ReactNo
     lines.push(<IndentedContent key="stdout">{stdout.trim()}</IndentedContent>);
   }
   if (stderr?.trim()) {
-    lines.push(<IndentedContent key="stderr">{stderr.trim()}</IndentedContent>);
+    // densable $pn(isError:!0) — failed /compact (and other local cmds) render as error
+    lines.push(
+      <IndentedContent key="stderr" isError>
+        {stderr.trim()}
+      </IndentedContent>,
+    );
   }
   return lines;
 }
 
-function IndentedContent({ children }: { children: string }): React.ReactNode {
+function IndentedContent({ children, isError = false }: { children: string; isError?: boolean }): React.ReactNode {
   if (children.startsWith(`${DIAMOND_OPEN} `) || children.startsWith(`${DIAMOND_FILLED} `)) {
     return <CloudLaunchContent>{children}</CloudLaunchContent>;
   }
@@ -39,7 +44,13 @@ function IndentedContent({ children }: { children: string }): React.ReactNode {
     <Box flexDirection="row">
       <Text dimColor>{'  ⎿  '}</Text>
       <Box flexDirection="column" flexGrow={1}>
-        <Markdown>{children}</Markdown>
+        {isError ? (
+          <Text color="error" wrap="wrap">
+            {children}
+          </Text>
+        ) : (
+          <Markdown>{children}</Markdown>
+        )}
       </Box>
     </Box>
   );

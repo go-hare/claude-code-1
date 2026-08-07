@@ -1,8 +1,17 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
-import { type KeyboardEvent, Box, Text, useTheme, useThemeSetting, useTerminalFocus } from '@anthropic/ink';
+import {
+  type DOMElement,
+  type KeyboardEvent,
+  Box,
+  Text,
+  measureElement,
+  useTheme,
+  useThemeSetting,
+  useTerminalFocus,
+} from '@anthropic/ink';
 import * as React from 'react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useLayoutEffect, useRef } from 'react';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import figures from 'figures';
 import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type OutputStyle } from '../../utils/config.js';
@@ -52,7 +61,7 @@ import {
 } from 'src/utils/claudemd.js';
 import { Byline, KeyboardShortcutHint, useTabHeaderFocus } from '@anthropic/ink';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { useIsInsideModal } from '../../context/modalContext.js';
+import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import { SearchBox } from '../SearchBox.js';
 import { isSupportedTerminal, hasAccessToIDEExtensionDiffFeature } from '../../utils/ide.js';
 import { getInitialSettings, getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
@@ -79,6 +88,7 @@ import {
 } from '../../utils/fastMode.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { getPlatform } from '../../utils/platform.js';
+import { configLabelColumnWidth, configMaxVisibleRows } from '../../utils/transcriptFooterHints.js';
 
 type Props = {
   onClose: (result?: string, options?: { display?: CommandResultDisplay }) => void;
@@ -153,13 +163,20 @@ export function Config({
   const [scrollOffset, setScrollOffset] = useState(0);
   const [isSearchMode, setIsSearchMode] = useState(false);
   const isTerminalFocused = useTerminalFocus();
-  const { rows } = useTerminalSize();
+  const terminalSize = useTerminalSize();
+  // densable sda: size against modal columns (terminal-4) when fullscreen.
+  const { rows, columns } = useModalOrTerminalSize(terminalSize);
+  // densable sda X: label col = min(44, max(14, columns-16))
+  const labelWidth = configLabelColumnWidth(columns);
+  // densable sda: measure keyboard-hint footer (flexShrink:0) so list height
+  // never steals its rows — fullscreen /config was clipping the footer.
+  const footerRef = useRef<DOMElement>(null);
+  const [footerHeight, setFooterHeight] = useState(1);
   // contentHeight is set by Settings.tsx (same value passed to Tabs to fix
   // pane height across all tabs — prevents layout jank when switching).
-  // Reserve ~10 rows for chrome (search box, gaps, footer, scroll hints).
-  // Fallback calc for standalone rendering (tests).
+  // densable: maxVisible = max(5, contentHeight - 8 - footerHeight).
   const paneCap = contentHeight ?? Math.min(Math.floor(rows * 0.8), 30);
-  const maxVisible = Math.max(5, paneCap - 10);
+  const maxVisible = configMaxVisibleRows(paneCap, footerHeight);
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const verbose = useAppState(s => s.verbose);
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
@@ -224,6 +241,14 @@ export function Config({
   const isDirty = React.useRef(false);
   const [showThinkingWarning, setShowThinkingWarning] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState<SubMenu | null>(null);
+  // densable sda: measure keyboard-hint footer after paint so maxVisible can
+  // reserve its rows (flexShrink:0 alone isn't enough when list height is
+  // computed up-front).
+  useLayoutEffect(() => {
+    if (!footerRef.current) return;
+    const h = measureElement(footerRef.current).height;
+    if (h > 0 && h !== footerHeight) setFooterHeight(h);
+  }, [headerFocused, isSearchMode, columns, rows, footerHeight, showSubmenu]);
   const {
     query: searchQuery,
     setQuery: setSearchQuery,
@@ -1998,42 +2023,50 @@ export function Config({
 
                   return (
                     <React.Fragment key={setting.id}>
+                      {/* densable sda row: fixed label width + flexGrow value with minWidth:0
+                          so values wrap/truncate inside the panel instead of past the edge. */}
                       <Box width="100%">
-                        <Box width={44}>
-                          <Text color={isSelected ? 'suggestion' : undefined}>
+                        <Box width={labelWidth} flexShrink={0} marginRight={1}>
+                          <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                             {isSelected ? figures.pointer : ' '} {setting.label}
                           </Text>
                         </Box>
-                        <Box flexGrow={1}>
+                        <Box flexGrow={1} minWidth={0}>
                           {setting.type === 'boolean' ? (
                             <>
-                              <Text color={isSelected ? 'suggestion' : undefined}>{setting.value.toString()}</Text>
+                              <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
+                                {setting.value.toString()}
+                              </Text>
                               {showThinkingWarning && setting.id === 'thinkingEnabled' && (
-                                <Text color="warning">
+                                <Text color="warning" wrap="truncate-end">
                                   {' '}
                                   Changing thinking mode mid-conversation will increase latency and may reduce quality.
                                 </Text>
                               )}
                             </>
                           ) : setting.id === 'theme' ? (
-                            <Text color={isSelected ? 'suggestion' : undefined}>
+                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                               {THEME_LABELS[setting.value.toString()] ?? setting.value.toString()}
                             </Text>
                           ) : setting.id === 'notifChannel' ? (
-                            <Text color={isSelected ? 'suggestion' : undefined}>
+                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                               <NotifChannelLabel value={setting.value.toString()} />
                             </Text>
                           ) : setting.id === 'defaultPermissionMode' ? (
-                            <Text color={isSelected ? 'suggestion' : undefined}>
+                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                               {permissionModeShortTitle(setting.value as PermissionMode)}
                             </Text>
                           ) : setting.id === 'autoUpdatesChannel' && autoUpdaterDisabledReason ? (
-                            <Box flexDirection="column">
+                            <Box flexDirection="column" minWidth={0}>
                               <Text color={isSelected ? 'suggestion' : undefined}>disabled</Text>
-                              <Text dimColor>({formatAutoUpdaterDisabledReason(autoUpdaterDisabledReason)})</Text>
+                              <Text dimColor wrap="truncate-end">
+                                ({formatAutoUpdaterDisabledReason(autoUpdaterDisabledReason)})
+                              </Text>
                             </Box>
                           ) : (
-                            <Text color={isSelected ? 'suggestion' : undefined}>{setting.value.toString()}</Text>
+                            <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
+                              {setting.value.toString()}
+                            </Text>
                           )}
                         </Box>
                       </Box>
@@ -2048,48 +2081,57 @@ export function Config({
               </>
             )}
           </Box>
-          {headerFocused ? (
-            <Text dimColor>
-              <Byline>
-                <KeyboardShortcutHint shortcut="←/→ tab" action="switch" />
-                <KeyboardShortcutHint shortcut="↓" action="return" />
-                <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="close" />
-              </Byline>
-            </Text>
-          ) : isSearchMode ? (
-            <Text dimColor>
-              <Byline>
-                <Text>Type to filter</Text>
-                <KeyboardShortcutHint shortcut="Enter/↓" action="select" />
-                <KeyboardShortcutHint shortcut="↑" action="tabs" />
-                <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="clear" />
-              </Byline>
-            </Text>
-          ) : (
-            <Text dimColor>
-              <Byline>
-                <ConfigurableShortcutHint
-                  action="select:accept"
-                  context="Settings"
-                  fallback="Space"
-                  description="change"
-                />
-                <ConfigurableShortcutHint
-                  action="settings:close"
-                  context="Settings"
-                  fallback="Enter"
-                  description="save"
-                />
-                <ConfigurableShortcutHint
-                  action="settings:search"
-                  context="Settings"
-                  fallback="/"
-                  description="search"
-                />
-                <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
-              </Byline>
-            </Text>
-          )}
+          {/* densable sda: footer is flexShrink:0 + measured so list maxVisible
+              never eats its rows (fullscreen /config keyboard-hint clip). */}
+          <Box ref={footerRef} flexDirection="column" flexShrink={0} minWidth={0}>
+            {headerFocused ? (
+              <Text dimColor wrap="truncate-end">
+                <Byline>
+                  <KeyboardShortcutHint shortcut="←/→ tab" action="switch" />
+                  <KeyboardShortcutHint shortcut="↓" action="return" />
+                  <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="close" />
+                </Byline>
+              </Text>
+            ) : isSearchMode ? (
+              <Text dimColor wrap="truncate-end">
+                <Byline>
+                  <Text>Type to filter</Text>
+                  <KeyboardShortcutHint shortcut="Enter/↓" action="select" />
+                  <KeyboardShortcutHint shortcut="↑" action="tabs" />
+                  <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="clear" />
+                </Byline>
+              </Text>
+            ) : (
+              <Text dimColor wrap="truncate-end">
+                <Byline>
+                  <ConfigurableShortcutHint
+                    action="select:accept"
+                    context="Settings"
+                    fallback="Space"
+                    description="change"
+                  />
+                  <ConfigurableShortcutHint
+                    action="settings:close"
+                    context="Settings"
+                    fallback="Enter"
+                    description="save"
+                  />
+                  <ConfigurableShortcutHint
+                    action="settings:search"
+                    context="Settings"
+                    fallback="/"
+                    description="search"
+                  />
+                  <ConfigurableShortcutHint
+                    action="confirm:no"
+                    context="Settings"
+                    fallback="Esc"
+                    description="cancel"
+                  />
+                </Byline>
+              </Text>
+            )}
+          </Box>
         </Box>
       )}
     </Box>

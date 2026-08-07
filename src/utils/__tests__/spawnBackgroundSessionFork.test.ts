@@ -17,6 +17,7 @@ import {
   deriveForkName,
   deriveForkSessionSeed,
   formatForkSessionToast,
+  parseSessionStatusLine,
   getForkSessionPreflightError,
   isForkRestrictedLaunch,
   isResumeTranscriptPath,
@@ -82,33 +83,30 @@ describe('resolveForkEditsIn', () => {
   })
 })
 
-describe('formatForkSessionToast', () => {
-  test('prompt path mentions already working + attach', () => {
+describe('formatForkSessionToast (densable rBo one-liner)', () => {
+  test('prompt + this-tree: running · name · attach-id · edits this checkout', () => {
     const text = formatForkSessionToast({
       name: 'fix-the-null',
       short: 'abcd1234',
       hadPrompt: true,
       editsIn: 'this-tree',
     })
-    expect(text).toContain(`${FORK_GLYPH} forked into a background session`)
-    expect(text).toContain('already working')
-    expect(text).toContain('claude attach abcd1234')
-    expect(text).toContain('edits this checkout in place')
-    expect(text).not.toContain('waiting for your first prompt')
+    expect(text).toBe(
+      'session running · fix-the-null · abcd1234 · edits this checkout',
+    )
+    expect(text).not.toContain('\n')
   })
 
-  test('no-prompt path tips /fork <prompt>', () => {
+  test('no-prompt: waiting for a prompt · name · id', () => {
     const text = formatForkSessionToast({
       name: 'fork',
       short: 'deadbeef',
       hadPrompt: false,
     })
-    expect(text).toContain('waiting for your first prompt')
-    expect(text).toContain('tip: /fork <prompt>')
-    expect(text).toContain('claude attach deadbeef')
+    expect(text).toBe('session waiting for a prompt · fork · deadbeef')
   })
 
-  test('relocated path prefers relocated line over editsIn', () => {
+  test('relocated chip wins over this-tree', () => {
     const text = formatForkSessionToast({
       name: 'x',
       short: '12345678',
@@ -116,28 +114,54 @@ describe('formatForkSessionToast', () => {
       relocatedTo: '/repo',
       editsIn: 'this-tree',
     })
-    expect(text).toContain('it runs in /repo')
-    expect(text).not.toContain('edits this checkout in place')
+    expect(text).toBe(
+      'session running · x · 12345678 · runs in the origin tree',
+    )
+    expect(text).not.toContain('edits this checkout')
   })
 
-  test('own-worktree edit line', () => {
+  test('own-worktree: no shared-checkout chip', () => {
     const text = formatForkSessionToast({
       name: 'x',
       short: '12345678',
       hadPrompt: true,
       editsIn: 'own-worktree',
     })
-    expect(text).toContain('its own worktree and branch')
+    expect(text).toBe('session running · x · 12345678')
   })
 
-  test('permission mode inheritance note', () => {
+  test('permission mode does not expand toast (216 dropped inherit prose)', () => {
     const text = formatForkSessionToast({
       name: 'x',
       short: '12345678',
       hadPrompt: true,
       permissionMode: 'plan',
     })
-    expect(text).toContain('inherited plan mode')
+    expect(text).toBe('session running · x · 12345678')
+    expect(text).not.toContain('inherited')
+  })
+})
+
+describe('parseSessionStatusLine (densable HXs)', () => {
+  test('round-trips rBo one-liner with chip', () => {
+    const text = formatForkSessionToast({
+      name: 'fix-the-null',
+      short: 'abcd1234',
+      hadPrompt: true,
+      editsIn: 'this-tree',
+    })
+    expect(parseSessionStatusLine(text)).toEqual({
+      state: 'session running',
+      name: 'fix-the-null',
+      id: 'abcd1234',
+      chips: ['edits this checkout'],
+    })
+  })
+
+  test('rejects multiline', () => {
+    expect(
+      parseSessionStatusLine('session running · x · abcd1234\nextra'),
+    ).toBeNull()
   })
 })
 

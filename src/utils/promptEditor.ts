@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process'
 import {
   expandPastedTextRefs,
   formatPastedTextRef,
@@ -6,7 +7,6 @@ import {
 import { instances } from '@anthropic/ink'
 import type { PastedContent } from './config.js'
 import { classifyGuiEditor, getExternalEditor } from './editor.js'
-import { execSync_DEPRECATED } from './execSyncWrapper.js'
 import { getFsImplementation } from './fsOperations.js'
 import { toIDEDisplayName } from './ide.js'
 import { writeFileSync_DEPRECATED } from './slowOperations.js'
@@ -46,6 +46,10 @@ export function editFileInEditor(filePath: string): EditorResult {
     return { content: null }
   }
 
+  // densable Wut: terminal editors → enterAlternateScreen; GUI editors →
+  // prepareTerminalForHandoff (pause + disable mouse/focus + suspend stdin)
+  // so the host terminal does not emit mouse/focus garbage while the GUI
+  // editor owns the window (2.1.216 #16).
   const useAlternateScreen = !isGuiEditor(editor)
 
   if (useAlternateScreen) {
@@ -57,45 +61,43 @@ export function editFileInEditor(filePath: string): EditorResult {
     // state so the next render writes from scratch.
     inkInstance.enterAlternateScreen()
   } else {
-    // GUI editors (code, subl, etc.) open in a separate window — just pause
-    // Ink and release stdin while they're open.
-    inkInstance.pause()
-    inkInstance.suspendStdin()
+    inkInstance.prepareTerminalForHandoff()
   }
 
   try {
-    // Use override command if available, otherwise use the editor as-is
+    // densable Wut: spawnSync argv (not shell) + EDITOR_OVERRIDES for -w/--wait
     const editorCommand = EDITOR_OVERRIDES[editor] ?? editor
-    execSync_DEPRECATED(`${editorCommand} "${filePath}"`, {
-      stdio: 'inherit',
-    })
+    const parts = editorCommand.split(' ')
+    const bin = parts[0] ?? editorCommand
+    const args = [...parts.slice(1), filePath]
+    const result = spawnSync(bin, args, { stdio: 'inherit' })
+    const editorName = toIDEDisplayName(editor)
+
+    if (
+      result.error ||
+      result.signal ||
+      (result.status !== null && result.status !== 0)
+    ) {
+      return {
+        content: null,
+        error: result.error
+          ? `Couldn't open ${editorName} — ${result.error.message}`
+          : result.signal
+            ? `${editorName} closed unexpectedly (${result.signal})`
+            : `${editorName} quit unexpectedly (exit code ${result.status})`,
+      }
+    }
 
     // Read the edited content
     const editedContent = fs.readFileSync(filePath, { encoding: 'utf-8' })
     return { content: editedContent }
-  } catch (err) {
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'status' in err &&
-      typeof (err as { status: unknown }).status === 'number'
-    ) {
-      const status = (err as { status: number }).status
-      if (status !== 0) {
-        const editorName = toIDEDisplayName(editor)
-        return {
-          content: null,
-          error: `${editorName} exited with code ${status}`,
-        }
-      }
-    }
+  } catch {
     return { content: null }
   } finally {
     if (useAlternateScreen) {
       inkInstance.exitAlternateScreen()
     } else {
-      inkInstance.resumeStdin()
-      inkInstance.resume()
+      inkInstance.restoreTerminalAfterHandoff()
     }
   }
 }

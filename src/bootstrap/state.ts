@@ -1385,13 +1385,36 @@ export function getAttacherCaps(): Record<string, unknown> | null {
   return STATE.attacherCaps
 }
 
+/** densable Tci listeners — REt = Tci.subscribe; Eci setAttacherCaps emits. */
+const attacherCapsListeners = new Set<() => void>()
+
 /**
- * densable tii — set/clear attacher caps from rendezvous `attacher-caps`.
+ * densable REt / Tci.subscribe — fire when attacher caps change (attach/detach).
+ * Used by CUt park restore: when SB() becomes false (terminal attached),
+ * clear the parked needs and restore prior tempo.
+ */
+export function subscribeAttacherCaps(listener: () => void): () => void {
+  attacherCapsListeners.add(listener)
+  return () => {
+    attacherCapsListeners.delete(listener)
+  }
+}
+
+/**
+ * densable tii / Eci — set/clear attacher caps from rendezvous `attacher-caps`.
+ * Emits Tci so parked CUt restores prior job tempo on attach.
  */
 export function setAttacherCaps(
   caps: Record<string, unknown> | null | undefined,
 ): void {
   STATE.attacherCaps = caps ?? null
+  for (const l of attacherCapsListeners) {
+    try {
+      l()
+    } catch {
+      // ignore listener errors
+    }
+  }
 }
 
 export function getClientType(): string {

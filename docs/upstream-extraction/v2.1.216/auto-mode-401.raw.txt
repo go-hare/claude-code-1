@@ -1,0 +1,29 @@
+auth token expired (code 401)
+
+====
+
+HTTP 401 downloading package '
+
+====
+
+OAuth 401 recovery: waiting up to 
+
+====
+
+"HTTP 401 while resolving package '
+
+====
+
+oauth_401_no_refresh_token_bg_worker
+
+====
+
+oauth_401_no_refresh_token_interactive
+
+====
+
+: 401 received, attempting token refresh
+
+====
+
+# token to the real GitHub API (hard 401).
