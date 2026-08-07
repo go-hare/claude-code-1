@@ -176,7 +176,16 @@ export function parseFrontmatter(
 }
 
 /**
- * Splits a comma-separated string and expands brace patterns.
+ * densable Xug / Jug — brace expansion budget (2.1.217 #13).
+ * Over budget → warn + return unexpanded original pattern (Qug).
+ */
+export const BRACE_EXPANSION_MAX_RESULTS = 1000
+export const BRACE_EXPANSION_MAX_BYTES = 4_194_304
+
+type BraceBudget = { results: number; bytes: number }
+
+/**
+ * densable yJn / G6c — split comma-separated paths + budgeted brace expand.
  * Commas inside braces are not treated as separators.
  * Also accepts a YAML list (string array) for ergonomic frontmatter.
  * @param input - Comma-separated string, or array of strings, with optional brace patterns
@@ -188,13 +197,24 @@ export function parseFrontmatter(
  * splitPathInFrontmatter(["a", "src/*.{ts,tsx}"]) // returns ["a", "src/*.ts", "src/*.tsx"]
  */
 export function splitPathInFrontmatter(input: string | string[]): string[] {
+  // densable yJn → G6c(e, {results:Xug, bytes:Jug})
+  return expandPathFrontmatter(input, {
+    results: BRACE_EXPANSION_MAX_RESULTS,
+    bytes: BRACE_EXPANSION_MAX_BYTES,
+  })
+}
+
+function expandPathFrontmatter(
+  input: string | string[],
+  budget: BraceBudget,
+): string[] {
   if (Array.isArray(input)) {
-    return input.flatMap(splitPathInFrontmatter)
+    return input.flatMap(item => expandPathFrontmatter(item, budget))
   }
   if (typeof input !== 'string') {
     return []
   }
-  // Split by comma while respecting braces
+  // densable G6c: split by comma while respecting braces
   const parts: string[] = []
   let current = ''
   let braceDepth = 0
@@ -209,7 +229,6 @@ export function splitPathInFrontmatter(input: string | string[]): string[] {
       braceDepth--
       current += char
     } else if (char === ',' && braceDepth === 0) {
-      // Split here - we're at a comma outside of braces
       const trimmed = current.trim()
       if (trimmed) {
         parts.push(trimmed)
@@ -220,50 +239,70 @@ export function splitPathInFrontmatter(input: string | string[]): string[] {
     }
   }
 
-  // Add the last part
   const trimmed = current.trim()
   if (trimmed) {
     parts.push(trimmed)
   }
 
-  // Expand brace patterns in each part
   return parts
     .filter(p => p.length > 0)
-    .flatMap(pattern => expandBraces(pattern))
+    .flatMap(pattern => expandBracesBudgeted(pattern, budget))
 }
 
 /**
- * Expands brace patterns in a glob string.
+ * densable Qug — budget-bounded brace expansion.
+ * Over budget: warn + return [original] unexpanded.
  * @example
- * expandBraces("src/*.{ts,tsx}") // returns ["src/*.ts", "src/*.tsx"]
- * expandBraces("{a,b}/{c,d}") // returns ["a/c", "a/d", "b/c", "b/d"]
+ * expandBracesBudgeted("src/*.{ts,tsx}", budget) // ["src/*.ts", "src/*.tsx"]
+ * expandBracesBudgeted("{a,b}/{c,d}", budget) // ["a/c", "a/d", "b/c", "b/d"]
  */
-function expandBraces(pattern: string): string[] {
-  // Find the first brace group
-  const braceMatch = pattern.match(/^([^{]*)\{([^}]+)\}(.*)$/)
-
-  if (!braceMatch) {
-    // No braces found, return pattern as-is
+function expandBracesBudgeted(pattern: string, budget: BraceBudget): string[] {
+  if (!pattern.includes('{')) {
     return [pattern]
   }
 
-  const prefix = braceMatch[1] || ''
-  const alternatives = braceMatch[2] || ''
-  const suffix = braceMatch[3] || ''
+  const results: string[] = []
+  const stack: string[] = [pattern]
 
-  // Split alternatives by comma and expand each one
-  const parts = alternatives.split(',').map(alt => alt.trim())
+  for (let cur = stack.pop(); cur !== undefined; cur = stack.pop()) {
+    const braceMatch = cur.match(/^([^{]*)\{([^}]+)\}(.*)$/)
+    if (!braceMatch) {
+      results.push(cur)
+      continue
+    }
 
-  // Recursively expand remaining braces in suffix
-  const expanded: string[] = []
-  for (const part of parts) {
-    const combined = prefix + part + suffix
-    // Recursively handle additional brace groups
-    const furtherExpanded = expandBraces(combined)
-    expanded.push(...furtherExpanded)
+    const prefix = braceMatch[1] || ''
+    const alternatives = braceMatch[2] || ''
+    const suffix = braceMatch[3] || ''
+    const parts = alternatives.split(',').map(alt => alt.trim())
+
+    // densable: t.bytes -= o.length; u = r.length + n.length + c.length
+    budget.bytes -= cur.length
+    const projected = results.length + stack.length + parts.length
+    if (
+      budget.bytes < 0 ||
+      projected > budget.results ||
+      projected * pattern.length > budget.bytes
+    ) {
+      const preview =
+        pattern.length > 256 ? `${pattern.slice(0, 256)}…` : pattern
+      logForDebugging(
+        `Brace pattern expansion exceeds the budget; using it unexpanded: ${preview}`,
+        { level: 'warn' },
+      )
+      return [pattern]
+    }
+
+    // densable: push alternatives in reverse so pop order is left-to-right
+    for (let d = parts.length - 1; d >= 0; d--) {
+      stack.push(prefix + (parts[d] ?? '') + suffix)
+    }
   }
 
-  return expanded
+  // densable: t.results -= r.length; t.bytes -= r.length * e.length
+  budget.results -= results.length
+  budget.bytes -= results.length * pattern.length
+  return results
 }
 
 /**

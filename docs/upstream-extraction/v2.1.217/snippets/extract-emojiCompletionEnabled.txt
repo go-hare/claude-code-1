@@ -1,0 +1,2 @@
+e 	 autoCompactWindow 	 advisorModel 	 fastMode 	 fastModePerSessionOptIn " promptSuggestionEnabled 	 emojiCompletionEnabled , awaySummaryEnabled 	 showClearContextOnPlanAccept8 d 4 askUserQuestionTimeout I|) agent 	 0 companyAnnouncements 	 
+ mcpServers 	 or 	  pluginConfigs 	 defaultEnvironmentId 	 autoUpdatesChannel 5 

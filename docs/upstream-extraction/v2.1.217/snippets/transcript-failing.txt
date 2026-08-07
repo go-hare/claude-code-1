@@ -1,0 +1,14 @@
+--- b'transcript' @80771934 runlen=44 ---
+../../vendor/boringssl/ssl/ssl_transcript.cc
+
+--- b'transcript' @87356464 runlen=69 ---
+Summarize this portion of a Claude Code session transcript. Focus on:
+
+--- b'transcript' @88305061 runlen=65 ---
+- `suppressOutput` - Hide stdout from transcript (default: false)
+
+--- b'transcript' @95091822 runlen=198 ---
+Number of days to retain chat transcripts before automatic cleanup (default: 30). Minimum 1. Use a large value for long retention; use --no-session-persistence to disable transcript writes entirely.
+
+--- b'transcript' @95091963 runlen=198 ---
+Number of days to retain chat transcripts before automatic cleanup (default: 30). Minimum 1. Use a large value for long retention; use --no-session-persistence to disable transcript writes entirely.

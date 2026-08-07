@@ -304,6 +304,13 @@ export type ToolUseContext = {
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
   /**
+   * densable 2.1.217 #5 `agentWorktree` — absolute path of the agent isolation
+   * worktree when spawned with `isolation: "worktree"`. Consumed by write tools
+   * (`hsr`) and shell isolation guards so shared-checkout paths are blocked even
+   * if the cwd ALS override is lost.
+   */
+  agentWorktree?: string
+  /**
    * Official isBackgroundAgent — when true, session activity passes agentId to
    * $Qn/$BQn so mainLoopRefcount is not bumped. Async agents and forked side
    * queries set this; foreground sync subagents leave it false/undefined.

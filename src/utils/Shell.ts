@@ -12,7 +12,11 @@ import {
   setCwdState,
 } from '../bootstrap/state.js'
 import { generateTaskId } from '../Task.js'
-import { pwd } from './cwd.js'
+import {
+  checkAgentWorktreeCwdEscape,
+  checkAgentWorktreeGoneRecovery,
+} from './bgIsolationContainment.js'
+import { getCwdOverride, pwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, isENOENT } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -26,6 +30,7 @@ import {
 import { getTaskOutputDir } from './task/diskOutput.js'
 import { TaskOutput } from './task/TaskOutput.js'
 import { which } from './which.js'
+import { checkZRuGitRedirectCommand } from './worktreeGitIsolation.js'
 
 export type { ExecResult } from './ShellCommand.js'
 
@@ -177,6 +182,11 @@ export type ExecOptions = {
   shouldAutoBackground?: boolean
   /** When provided, stdout is piped (not sent to file) and this callback fires on each data chunk. */
   onStdout?: (data: string) => void
+  /**
+   * densable 2.1.217 `agentWorktree` — isolation worktree path for VRu/qRu
+   * (cwd must stay inside worktree) and ZRu (git redirect) shell gates.
+   */
+  agentWorktree?: string
 }
 
 /**
@@ -196,6 +206,7 @@ export async function exec(
     shouldUseSandbox,
     shouldAutoBackground,
     onStdout,
+    agentWorktree,
   } = options ?? {}
   const commandTimeout = timeout || DEFAULT_TIMEOUT
 
@@ -223,29 +234,116 @@ export async function exec(
 
   let cwd = pwd()
 
+  // densable shell isolation stack when agentWorktree (p) is set:
+  // 1) context_lost — p && !GZe() (cwd ALS override missing) — before recovery
+  // 2) worktree_gone — cwd missing and recovery only hits sn() (index 0)
+  // 3) VRu/qRu — cwd touches shared roots && !inside worktree
+  // 4) ZRu — bash only, full AST git-redirect guard
+  if (agentWorktree && !getCwdOverride()) {
+    // densable GZe() ≈ getCwdOverride() (ALS store present)
+    logForDebugging(
+      `[worktree] blocked shell exec after cwd-override loss: agentWorktree=${agentWorktree}`,
+      { level: 'warn' },
+    )
+    // densable: O("tengu_agent_worktree_cwd_escape_blocked", {reason: context_lost})
+    logEvent('tengu_agent_worktree_cwd_escape_blocked', {
+      context_lost: true,
+    })
+    return createFailedCommand(
+      `The working-directory isolation context for this agent was lost, so this command would run in the parent session's directory instead of this agent's worktree (${agentWorktree}). Refusing to run it. Retry the command; if this keeps failing, report that worktree isolation was lost.`,
+    )
+  }
+
   // Recover if the current working directory no longer exists on disk.
   // This can happen when a command deletes its own CWD (e.g., temp dir cleanup).
+  // densable 2.1.217: recovery candidates [sn(), homedir, aK()]; if agentWorktree
+  // is set and the only recovery is shared checkout (index 0), refuse.
   try {
     await realpath(cwd)
   } catch {
-    const fallback = getOriginalCwd()
-    logForDebugging(
-      `Shell CWD "${cwd}" no longer exists, recovering to "${fallback}"`,
-    )
+    const candidates: string[] = [getOriginalCwd()]
     try {
-      await realpath(fallback)
-      setCwdState(fallback)
-      cwd = fallback
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { homedir } = require('os') as typeof import('os')
+      candidates.push(homedir())
     } catch {
+      // ignore
+    }
+    let recovered: string | null = null
+    let recoveredIdx = -1
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        recovered = await realpath(candidates[i]!)
+        recoveredIdx = i
+        break
+      } catch {
+        // try next
+      }
+    }
+    if (recovered === null) {
       return createFailedCommand(
         `Working directory "${cwd}" no longer exists. Please restart Claude from an existing directory.`,
       )
     }
+    if (agentWorktree && recoveredIdx === 0) {
+      logForDebugging(
+        `[worktree] blocked shell exec: cwd "${cwd}" is gone and recovery targets the shared checkout; agentWorktree=${agentWorktree}`,
+        { level: 'warn' },
+      )
+      // densable: O("tengu_agent_worktree_cwd_escape_blocked", {reason: worktree_gone})
+      logEvent('tengu_agent_worktree_cwd_escape_blocked', {
+        worktree_gone: true,
+      })
+      return createFailedCommand(
+        checkAgentWorktreeGoneRecovery(cwd, agentWorktree),
+      )
+    }
+    logForDebugging(
+      `Shell CWD "${cwd}" no longer exists, recovering to "${recovered}"`,
+    )
+    setCwdState(recovered)
+    cwd = recovered
   }
 
   // If already aborted, don't spawn the process at all
   if (abortSignal.aborted) {
     return createAbortedCommand()
+  }
+
+  if (agentWorktree) {
+    // densable VRu — agentWorktree cwd must not resolve to shared checkout
+    const cwdBlock = checkAgentWorktreeCwdEscape(cwd, agentWorktree)
+    if (cwdBlock) {
+      logForDebugging(
+        `[worktree] blocked shell exec outside isolation worktree: cwd=${cwd} agentWorktree=${agentWorktree}`,
+        { level: 'warn' },
+      )
+      // densable: O("tengu_agent_worktree_cwd_escape_blocked", {reason: shared_checkout})
+      logEvent('tengu_agent_worktree_cwd_escape_blocked', {
+        shared_checkout: true,
+      })
+      return createFailedCommand(cwdBlock)
+    }
+
+    // densable: r==="bash"?ZRu(...):null — PowerShell gets VRu only
+    if (shellType === 'bash') {
+      const gitRedirectBlock = await checkZRuGitRedirectCommand(
+        command,
+        cwd,
+        agentWorktree,
+      )
+      if (gitRedirectBlock) {
+        logForDebugging(
+          `[worktree] blocked shell exec git redirect: agentWorktree=${agentWorktree}`,
+          { level: 'warn' },
+        )
+        // densable: O("tengu_agent_worktree_cwd_escape_blocked", {reason: command_redirect})
+        logEvent('tengu_agent_worktree_cwd_escape_blocked', {
+          command_redirect: true,
+        })
+        return createFailedCommand(gitRedirectBlock)
+      }
+    }
   }
 
   const binShell = provider.shellPath

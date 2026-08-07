@@ -1393,6 +1393,11 @@ export function saveOAuthTokensIfNeeded(tokens: OAuthTokens): {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresAt: tokens.expiresAt,
+      // densable 2.1.217: refreshTokenExpiresAt feeds mAr() 3-day login warning
+      refreshTokenExpiresAt:
+        tokens.refreshTokenExpiresAt ??
+        existingOauth?.refreshTokenExpiresAt ??
+        undefined,
       scopes: tokens.scopes,
       // Profile fetch in refreshOAuthToken swallows errors and returns null on
       // transient failures (network, 5xx, rate limit). Don't clobber a valid

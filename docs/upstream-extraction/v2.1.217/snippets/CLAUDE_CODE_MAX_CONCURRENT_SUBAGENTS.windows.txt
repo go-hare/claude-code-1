@@ -1,0 +1,17 @@
+ALLOWLIST_ENV          	* (   CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION       ô 0$   CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH           	   %   CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION         	   $   CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS           	   !   CLAUDE_CODE_MANAGED_SETTINGS_PATH{48         	      CLAUDE_CODE_LOOP_PERSISTENT58         	º©5   CLAUDE_CODE_LOOP_KEEPALIVEÈ08         É 0   CLAUDE_CODE_IS_COWORK          	Â*    CLAUDE_CODE_INVESTIGATE_FIRST          	       CLAUDE_CODE_IDLE_TOKEN_THRESHOLD       I& "   CLAUDE_CODE_IDLE_THRESHOLD_MINUTESç58         	      
+
+---
+
+gent_concurrency_cap       	   /   Concurrent subagent limit reached. You can run         	       subagents at once. Do not retry. If the user wants more concurrent subagents, ask them to increase CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS.                                     Àð<Â @p<M Ó4By5P< `p7 ´@ fL BÃ4<@ P N55 ð4 ½à0N ð d® ´À`/PÁ ñÀ±       E   G   g   i   È   Ê       ÿÿÿÿÿÿÿÿÿÿÿÿÿÿ°àøÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ ç6ùÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ0#úÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÀ$úÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿpÞøÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÐ£úÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿP<èøÿÿÿÿÿÿÿÿ
+
+---
+
+BACKGROUND_MS:()=>P6m,CLAUDE_CODE_MCP_ALLOWLIST_ENV:()=>SVm,CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION:()=>Jqm,CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH:()=>Xqm,CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION:()=>Yqm,CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS:()=>Kqm,CLAUDE_CODE_MANAGED_SETTINGS_PATH:()=>bVm,CLAUDE_CODE_LOOP_PERSISTENT:()=>oqm,CLAUDE_CODE_LOOP_KEEPALIVE:()=>nqm,CLAUDE_CODE_IS_COWORK:()=>rqm,CLAUDE_CODE_INVESTIGATE_FIRST:()=>tqm,CLAUDE_CODE_IDLE_TOKEN_THRESHOLD:()=>zqm,CLAUDE_CODE_IDLE_THRESHOLD_MINUTES:()=>qqm,CLAUDE_CODE_IDE_HOST_OVERRIDE:()=>_Vm,CLAUDE_CODE_HOST_PLATFORM:()=>yVm,CLAUDE_CODE_HIDE_S
+
+---
+
+,tL,goe,Dm,otr,wqe,yst,Wue,...e!=="ant"?[FH]:[],vg,LF])}function EBg(e){return new Set([Oi,vK,j4,pd,uw,_d,...ZJ,al,eu,ow,Gg,Xh,Rv,Uue,str,bg,Wv,vO,Jp,...e==="ant"?[FH]:[],pI])}function $vu(){return Z.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS??vBg}function Fvu(){return Z.CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION??ABg}function Uvu(){return Z.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION??TBg}var Hqe,nso,ctr,vBg=20,ABg=200,TBg=200,Bvu,oso;var _st=b(()=>{br();Qm();W4();N_e();mh();yIt();tD();UCe();eL();Z_();dS();EO();lB();fHe();zG();PH();Cqe();jue();$_e();SC();Hqe=SBg("external"),nso=new Set([...Hqe]);ctr=EBg("e
+
+---
+
+nt_launch","subagent_concurrency_cap"),new Dxe(`Concurrent subagent limit reached. You can run ${Me} subagents at once. Do not retry. If the user wants more concurrent subagents, ask them to increase CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS.`)},B=async()=>{let Me=P();if(Me)throw await ze(),Me;return l.taskRegistry.takeConcurrencySlot()};if(S&&i&&!M&&!s&&!a){$();let Me=t?l.options.agentDefinitions.activeAgents.find((Lt)=>Lt.agentType===t):void 0;if(Me?.color)srr(t,Me.color);let Ze=await jsd({name:i,prompt:e,description:r,use_splitpane:!0,plan_mode_required:v==="plan",model:f??(Me?Zqe(Me,l.options.m

@@ -73,6 +73,7 @@ import {
   planScreenReaderFrameUpdate,
   type ScreenReaderPark,
 } from './screenReaderPark.js';
+import { endScreenReaderStartupQuiet, getScreenReaderStartupQuietRemainingMs } from './screenReaderStartupQuiet.js';
 import {
   extractScreenReaderText,
   findScreenReaderNodeStartIndex,
@@ -274,6 +275,15 @@ export default class Ink {
   private readonly accessibilityMode: boolean;
   /** Official isScreenReaderEnabled — routes onRender → onRenderScreenReader. */
   private readonly isScreenReaderEnabled: boolean;
+  /**
+   * densable isExiting — set true at unmount start so SR quiet gate is
+   * skipped for the final paint.
+   */
+  private isExiting = false;
+  /**
+   * densable srStartupQuietTimer — defers first SR paints during quiet window.
+   */
+  private srStartupQuietTimer: ReturnType<typeof setTimeout> | null = null;
   /** Official prevScreenReaderLines — last written SR frame lines. */
   private prevScreenReaderLines: string[] = [];
   /** Official prevScreenReaderPark — last parked SR cursor. */
@@ -1056,10 +1066,28 @@ export default class Ink {
    * Official onRenderScreenReader — plain-text frame write path for
    * INK_SCREEN_READER / isScreenReaderEnabled.
    *
+   * densable 2.1.217: while Xqc()>0 and not exiting, schedule one timer and
+   * skip paint so the startup SR announcement is not cut off.
+   *
    * Extract DOM text (o1r) → hard-wrap lines → plan diff → s3n/i3n/MHe ANSI
    * → stdout.write; park cursor at declared caret.
    */
   onRenderScreenReader(): void {
+    // densable: if (!this.isExiting) { let x=Xqc(); if(x>0){ schedule qXn+onRender; return } }
+    if (!this.isExiting) {
+      const remainingMs = getScreenReaderStartupQuietRemainingMs();
+      if (remainingMs > 0) {
+        if (this.srStartupQuietTimer === null) {
+          this.srStartupQuietTimer = setTimeout(() => {
+            this.srStartupQuietTimer = null;
+            endScreenReaderStartupQuiet();
+            this.onRender();
+          }, remainingMs);
+        }
+        return;
+      }
+    }
+
     const fullText = extractScreenReaderText(this.rootNode as ScreenReaderDOMNode);
     const columns = this.options.stdout.columns || this.terminalColumns || 80;
     const terminalRows = this.options.stdout.rows || this.terminalRows || 24;
@@ -1916,6 +1944,13 @@ export default class Ink {
   unmount(error?: Error | number | null): void {
     if (this.isUnmounted) {
       return;
+    }
+
+    // densable: this.isExiting=!0; clear srStartupQuietTimer; then final onRender
+    this.isExiting = true;
+    if (this.srStartupQuietTimer !== null) {
+      clearTimeout(this.srStartupQuietTimer);
+      this.srStartupQuietTimer = null;
     }
 
     this.onRender();

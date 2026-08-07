@@ -159,8 +159,151 @@ function withoutHostManagedProviderVars(
  * the stdio JSON-RPC transport). Keys added LATER by user/project settings
  * are not in this set, so mid-session settings.json changes still apply.
  * Lazy-captured on first applySafeConfigEnvironmentVariables() call.
+ *
+ * densable `ndr` — also consulted by OTEL supremacy drop so host-orchestrated
+ * spawn keys are never deleted.
  */
 let ccdSpawnEnvKeys: Set<string> | null | undefined
+
+/**
+ * densable 2.1.217 #9 — managed OTEL supremacy (`dTd` / `tdr`).
+ *
+ * When policySettings sets `OTEL_EXPORTER_OTLP_ENDPOINT` (or signal-specific
+ * OTEL keys / otelHeadersHelper), lower-trust scopes must not keep
+ * OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS,PROFILES}_* overrides that would
+ * redirect telemetry away from the managed endpoint (OTEL SDK prefers
+ * signal-specific env over the base ENDPOINT).
+ */
+const OTEL_OTLP_PREFIX = 'OTEL_EXPORTER_OTLP_'
+const OTEL_SIGNALS = ['TRACES', 'METRICS', 'LOGS', 'PROFILES'] as const
+const OTEL_NON_ENDPOINT_SUFFIXES = new Set([
+  'HEADERS',
+  'CLIENT_KEY',
+  'CLIENT_CERTIFICATE',
+])
+/** densable wDs — warn once per dropped key per process. */
+const otelManagedDropWarned = new Set<string>()
+
+/**
+ * densable tdr — delete process.env[key] when not claimed by managed policy map
+ * and not host-orchestrated spawn-protected.
+ */
+function dropLowerTrustOtelEnvKey(
+  key: string,
+  redirectTarget: string,
+  claimSource: string,
+  policyEnvUpper: Map<string, string>,
+): void {
+  // densable: if policy map already claims this key (same value in env), keep it.
+  if (policyEnvUpper.get(key) === process.env[key]) return
+  // densable ndr — host-orchestrated spawn keys are protected.
+  if (ccdSpawnEnvKeys?.has(key)) return
+  if (process.env[key] === undefined) return
+  if (!otelManagedDropWarned.has(key)) {
+    otelManagedDropWarned.add(key)
+    logForDebugging(
+      `Dropping ${key}: managed settings claim ${claimSource}, so lower-trust scopes cannot redirect ${redirectTarget}`,
+      { level: 'warn' },
+    )
+  }
+  delete process.env[key]
+}
+
+/**
+ * densable dTd — after policy env is applied, strip lower-trust OTEL signal
+ * overrides that would bypass managed endpoint / headers.
+ *
+ * Exported for unit tests.
+ */
+export function applyManagedOtelEndpointSupremacy(): void {
+  const policy = getSettingsForSource('policySettings')
+  const env = policy?.env
+  const headersHelper =
+    typeof policy?.otelHeadersHelper === 'string'
+      ? policy.otelHeadersHelper.trim()
+      : ''
+  const hasHeadersHelper = headersHelper !== ''
+  if (!env && !hasHeadersHelper) return
+
+  // densable: upper-case key map; prefer exact-case when both present.
+  const policyEnvUpper = new Map<string, string>()
+  for (const [k, v] of Object.entries(env ?? {})) {
+    const upper = k.toUpperCase()
+    if (!policyEnvUpper.has(upper) || k === upper) {
+      policyEnvUpper.set(upper, String(v))
+    }
+  }
+
+  if (hasHeadersHelper) {
+    for (const signal of OTEL_SIGNALS) {
+      dropLowerTrustOtelEnvKey(
+        `${OTEL_OTLP_PREFIX}${signal}_ENDPOINT`,
+        `the ${signal.toLowerCase()} signal`,
+        'otelHeadersHelper',
+        policyEnvUpper,
+      )
+    }
+    dropLowerTrustOtelEnvKey(
+      `${OTEL_OTLP_PREFIX}ENDPOINT`,
+      'telemetry for any signal',
+      'otelHeadersHelper',
+      policyEnvUpper,
+    )
+  }
+
+  for (const [key, value] of policyEnvUpper) {
+    if (!key.startsWith(OTEL_OTLP_PREFIX)) continue
+    if (value.trim() === '') continue
+    // densable: only act when process.env already holds the managed value
+    // (policy Object.assign just applied it).
+    if (process.env[key] !== value) continue
+
+    const signal = OTEL_SIGNALS.find(s =>
+      key.startsWith(`${OTEL_OTLP_PREFIX}${s}_`),
+    )
+    if (signal) {
+      // densable: signal-scoped HEADERS/CLIENT_* claims drop that signal's ENDPOINT.
+      const suffix = key.slice(`${OTEL_OTLP_PREFIX}${signal}_`.length)
+      if (OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)) {
+        dropLowerTrustOtelEnvKey(
+          `${OTEL_OTLP_PREFIX}${signal}_ENDPOINT`,
+          `the ${signal.toLowerCase()} signal`,
+          key,
+          policyEnvUpper,
+        )
+      }
+      continue
+    }
+
+    // densable: base key OTEL_EXPORTER_OTLP_{SUFFIX}
+    const suffix = key.slice(OTEL_OTLP_PREFIX.length)
+    const isNonEndpoint = OTEL_NON_ENDPOINT_SUFFIXES.has(suffix)
+    const suffixesToStrip = isNonEndpoint ? [suffix, 'ENDPOINT'] : [suffix]
+    for (const strip of suffixesToStrip) {
+      for (const s of OTEL_SIGNALS) {
+        dropLowerTrustOtelEnvKey(
+          `${OTEL_OTLP_PREFIX}${s}_${strip}`,
+          `the ${s.toLowerCase()} signal`,
+          key,
+          policyEnvUpper,
+        )
+      }
+    }
+    if (isNonEndpoint) {
+      dropLowerTrustOtelEnvKey(
+        `${OTEL_OTLP_PREFIX}ENDPOINT`,
+        'telemetry for any signal',
+        key,
+        policyEnvUpper,
+      )
+    }
+  }
+}
+
+/** Test helper — clear densable wDs warn set. */
+export function clearManagedOtelDropWarnsForTests(): void {
+  otelManagedDropWarned.clear()
+}
 
 function withoutCcdSpawnEnvKeys(
   env: Record<string, string> | undefined,
@@ -262,6 +405,10 @@ export function applySafeConfigEnvironmentVariables(): void {
     ),
   )
 
+  // densable gdt → dTd() after policy Object.assign: strip lower-trust OTEL
+  // signal endpoints so OTEL SDK cannot prefer them over managed ENDPOINT.
+  applyManagedOtelEndpointSupremacy()
+
   // Apply only safe env vars from the fully-merged settings (which includes
   // project-scoped sources). For safe vars that also exist in trusted sources,
   // the merged value (which may come from a higher-priority project source)
@@ -270,6 +417,8 @@ export function applySafeConfigEnvironmentVariables(): void {
   // unchanged (it has the highest merge priority in both loops) — except
   // provider-routing vars + densable LGm transport vars, which filterSettingsEnv
   // strips from every source when CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST is set.
+  // Note: SAFE_ENV_VARS does not include OTEL_*_ENDPOINT, so project cannot
+  // re-introduce signal endpoints after dTd.
   const settingsEnv = filterSettingsEnv(
     getSettings_DEPRECATED()?.env,
     'settings',
@@ -298,6 +447,9 @@ export function applyConfigEnvironmentVariables(): void {
     process.env,
     filterSettingsEnv(getSettings_DEPRECATED()?.env, 'settings'),
   )
+
+  // densable Sz → dTd() after settings env Object.assign (policy wins merge).
+  applyManagedOtelEndpointSupremacy()
 
   // Clear caches so agents are rebuilt with the new env vars
   clearCACertsCache()

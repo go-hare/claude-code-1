@@ -1,0 +1,11 @@
+--- b'Transcript' @119658624 runlen=86 ---
+Cannot destructure property 'getTranscriptPathForSession' from null or undefined value
+
+--- b'Transcript' @126287711 runlen=44 ---
+[voice_stream] TranscriptEndpoint received (
+
+--- b'Transcript' @129747079 runlen=63 ---
+relocateSessionTranscript: same-target relocated stamp failed: 
+
+--- b'Transcript' @129747215 runlen=45 ---
+relocateSessionTranscript: old file missing: 

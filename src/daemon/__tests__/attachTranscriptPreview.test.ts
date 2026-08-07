@@ -40,6 +40,24 @@ describe('attachTranscriptPreview densable Nia/J5_', () => {
     expect(frame!).toContain(COLD_ATTACH_SHOWING_TRANSCRIPT)
   })
 
+  test('densable zgb #14: one-line gap before footer rule/pointer chrome', () => {
+    const utf8 = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: 'gap check body' },
+    })
+    // colorLevel 0 keeps footer plain (no dim SGR) so structure is readable.
+    const frame = formatTranscriptTailFrame(utf8, 40, 16, { colorLevel: 0 })
+    expect(frame).not.toBeNull()
+    const lines = frame!.split('\r\n')
+    expect(lines[lines.length - 1]).toBe(COLD_ATTACH_SHOWING_TRANSCRIPT)
+    expect(lines[lines.length - 2]).toBe('─'.repeat(40))
+    expect(lines[lines.length - 3]).toBe('›')
+    expect(lines[lines.length - 4]).toBe('─'.repeat(40))
+    // densable u=["",c,b6p,c,Ngb] — leading "" is the body↔chrome gap
+    expect(lines[lines.length - 5]).toBe('')
+    expect(frame!).toContain('gap check body')
+  })
+
   test('formatColdAttachTranscriptPreview reads file tail', () => {
     dir = mkdtempSync(join(tmpdir(), 'cold-attach-'))
     const path = join(dir, 'sess.jsonl')

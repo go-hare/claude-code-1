@@ -49,14 +49,18 @@ import {
 } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { assembleToolPool } from 'src/tools.js';
 import { asAgentId } from 'src/types/ids.js';
-import { runWithAgentContext, type SubagentContext } from 'src/utils/agentContext.js';
+import { getAgentContext, runWithAgentContext, type SubagentContext } from 'src/utils/agentContext.js';
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js';
 import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { resolveAgentAutoBackgroundMs } from 'src/utils/autoBackgroundTimeout.js';
 import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
 import { isInterruptAbortReason } from 'src/utils/abortController.js';
-import { assertCanSpawnSubagent } from 'src/utils/sessionSpawnCaps.js';
+import {
+  assertAndTakeConcurrencySlot,
+  assertCanSpawnSubagent,
+  assertSubagentDepthAllowed,
+} from 'src/utils/sessionSpawnCaps.js';
 import { AbortError, errorMessage, toError } from 'src/utils/errors.js';
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js';
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js';
@@ -431,6 +435,22 @@ export const AgentTool = buildTool({
       );
     }
 
+    // densable 2.1.217 Bue/cN — nest depth gate before any spawn path.
+    // m = cN(agentContext); g = Bue(); if (m >= g) throw subagent_depth_cap
+    // child depth = m + 1 (spawnDepth / SubagentContext.depth)
+    let childSpawnDepth = 1;
+    try {
+      const parentDepth = assertSubagentDepthAllowed({
+        agentContext: getAgentContext(),
+      });
+      childSpawnDepth = parentDepth + 1;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Subagent nesting limit reached')) {
+        logEvent('subagent_depth_cap', {});
+      }
+      throw error;
+    }
+
     // densable L(Me)/N() — session subagent spawn cap (before any real spawn path).
     // Me=true (allowInterrupt) only for local async spawn: high-priority
     // "interrupt" must not cancel bg agents mid-startup (2.1.216 #15).
@@ -439,10 +459,15 @@ export const AgentTool = buildTool({
         assertCanSpawnSubagent({
           abortSignal: toolUseContext.abortController.signal,
           allowInterrupt,
+          // densable 2.1.217 Hrr — deny new agents when --max-budget-usd reached
+          maxBudgetUsd: toolUseContext.options.maxBudgetUsd,
         });
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('Subagent spawn limit reached')) {
           logEvent('subagent_count_cap', {});
+        }
+        if (error instanceof Error && error.message.startsWith('Budget limit reached')) {
+          logEvent('subagent_budget_exhausted', {});
         }
         throw error;
       }
@@ -1019,6 +1044,8 @@ export const AgentTool = buildTool({
       spawnMode: appState.toolPermissionContext.mode,
       toolUseId: toolUseContext.toolUseId,
       parentAgentId: toolUseContext.agentId,
+      // densable spawnDepth:ie = cN(parent)+1
+      spawnDepth: childSpawnDepth,
       description,
       // densable E8 name:H → sidecar for Aye registerName rehydrate
       ...(name ? { name } : {}),
@@ -1076,6 +1103,33 @@ export const AgentTool = buildTool({
       }
     }
 
+    // densable 2.1.217 B()/P() — live concurrent slot after startup abort gate.
+    // Je = await B(); pt wraps observer paths to release on throw; Oze finally / sync
+    // completion also call Je(). ultracode + tengu_amber_kestrel bypass the deny.
+    let releaseConcurrencySlot: (() => void) | undefined;
+    try {
+      const slotAppState = toolUseContext.getAppState();
+      releaseConcurrencySlot = assertAndTakeConcurrencySlot({
+        mainLoopModel: toolUseContext.options.mainLoopModel,
+        effortValue: slotAppState.effortValue,
+        ultracode: slotAppState.ultracode,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Concurrent subagent limit reached')) {
+        logEvent('subagent_concurrency_cap', {});
+      }
+      await cleanupWorktreeIfNeeded();
+      throw error;
+    }
+    const withConcurrencyRelease = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await fn();
+      } catch (error) {
+        releaseConcurrencySlot?.();
+        throw error;
+      }
+    };
+
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId;
       // densable Sot: He = c.agentId (raw caller); Re = Yeo(He)??mi().
@@ -1098,6 +1152,7 @@ export const AgentTool = buildTool({
         ownerAgentId: ownerId,
         notificationTargetAgentId: asAgentId(ownerId),
         parentAgentId,
+        spawnDepth: childSpawnDepth,
       });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -1130,6 +1185,8 @@ export const AgentTool = buildTool({
         invocationEmitted: false,
         ownedFiles: workerOwnedFiles,
         isBackgroundAgent: true,
+        // densable depth:ie
+        depth: childSpawnDepth,
       };
 
       // Workload propagation: handlePromptSubmit wraps the entire turn in
@@ -1161,6 +1218,8 @@ export const AgentTool = buildTool({
               agentIdForCleanup: asyncAgentId,
               enableSummarization: isCoordinator || isForkSubagentEnabled() || getSdkAgentProgressSummariesEnabled(),
               getWorktreeResult: cleanupWorktreeIfNeeded,
+              // densable Oze finally p?.() — release concurrent slot on settle
+              onRunSettled: releaseConcurrencySlot,
             });
           } finally {
             releaseAgentLocks(agentBackgroundTask.agentId);
@@ -1202,249 +1261,290 @@ export const AgentTool = buildTool({
         ownedFiles: workerOwnedFiles,
         // Official He: sync only backgrounds when parent agentContext is background
         isBackgroundAgent: toolUseContext.isBackgroundAgent ?? false,
+        // densable depth:ie
+        depth: childSpawnDepth,
       };
 
-      // Wrap entire sync agent execution in context for analytics attribution
-      // and optionally in a worktree cwd override for filesystem isolation
-      return runWithAgentContext(syncAgentContext, () =>
-        wrapWithCwd(async () => {
-          const agentMessages: MessageType[] = [];
-          const agentStartTime = Date.now();
-          const syncTracker = createProgressTracker();
-          const syncResolveActivity = createActivityDescriptionResolver(toolUseContext.options.tools);
+      // densable return pt(Ct) — concurrent release on throw; also release on
+      // clean sync settle when not mid-backgrounded (once-safe Je).
+      return withConcurrencyRelease(() =>
+        runWithAgentContext(syncAgentContext, () =>
+          wrapWithCwd(async () => {
+            const agentMessages: MessageType[] = [];
+            const agentStartTime = Date.now();
+            const syncTracker = createProgressTracker();
+            const syncResolveActivity = createActivityDescriptionResolver(toolUseContext.options.tools);
 
-          // Yield initial progress message to carry metadata (prompt)
-          if (promptMessages.length > 0) {
-            const normalizedPromptMessages = normalizeMessages(promptMessages);
-            const normalizedFirstMessage = normalizedPromptMessages.find(
-              (m): m is NormalizedUserMessage => m.type === 'user',
-            );
-            if (normalizedFirstMessage && normalizedFirstMessage.type === 'user' && onProgress) {
-              onProgress({
-                toolUseID: `agent_${assistantMessage.message.id}`,
-                data: {
-                  message: normalizedFirstMessage,
-                  type: 'agent_progress',
-                  prompt,
-                  agentId: syncAgentId,
-                },
-              });
-            }
-          }
-
-          // Register as foreground task immediately so it can be backgrounded at any time
-          // Skip registration if background tasks are disabled
-          let foregroundTaskId: string | undefined;
-          // Create the background race promise once outside the loop — otherwise
-          // each iteration adds a new .then() reaction to the same pending
-          // promise, accumulating callbacks for the lifetime of the agent.
-          let backgroundPromise: Promise<{ type: 'background' }> | undefined;
-          let cancelAutoBackground: (() => void) | undefined;
-          if (!isBackgroundTasksDisabled) {
-            // densable OSu: He = c.agentId; Re = Yeo(He)??mi().
-            // ownerAgentId:Re; parentAgentId:He. No Gge until mid-bg.
-            const fgParentAgentId = toolUseContext.agentId;
-            const fgOwnerId =
-              resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
-            const registration = registerAgentForeground({
-              agentId: syncAgentId,
-              description,
-              prompt,
-              selectedAgent,
-              setAppState: rootSetAppState,
-              toolUseId: toolUseContext.toolUseId,
-              autoBackgroundMs: getAutoBackgroundMs() || undefined,
-              ownerAgentId: fgOwnerId,
-              notificationTargetAgentId: asAgentId(fgOwnerId),
-              parentAgentId: fgParentAgentId,
-            });
-            foregroundTaskId = registration.taskId;
-            backgroundPromise = registration.backgroundSignal.then(() => ({
-              type: 'background' as const,
-            }));
-            cancelAutoBackground = registration.cancelAutoBackground;
-          }
-
-          // Track if we've shown the background hint UI
-          let backgroundHintShown = false;
-          // Track if the agent was backgrounded (cleanup handled by backgrounded finally)
-          let wasBackgrounded = false;
-          // Per-scope stop function — NOT shared with the backgrounded closure.
-          // idempotent: startAgentSummarization's stop() checks `stopped` flag.
-          let stopForegroundSummarization: (() => void) | undefined;
-          // const capture for sound type narrowing inside the callback below
-          const summaryTaskId = foregroundTaskId;
-
-          // Get async iterator for the agent
-          const agentIterator = runAgent({
-            ...runAgentParams,
-            override: {
-              ...runAgentParams.override,
-              agentId: syncAgentId,
-            },
-            activeTaskExecutionContext,
-            onCacheSafeParams:
-              summaryTaskId && getSdkAgentProgressSummariesEnabled()
-                ? (params: CacheSafeParams) => {
-                    const { stop } = startAgentSummarization(summaryTaskId, syncAgentId, params, rootSetAppState);
-                    stopForegroundSummarization = stop;
-                  }
-                : undefined,
-          })[Symbol.asyncIterator]();
-
-          // Track if an error occurred during iteration
-          let syncAgentError: Error | undefined;
-          let wasAborted = false;
-          let worktreeResult: {
-            worktreePath?: string;
-            worktreeBranch?: string;
-          } = {};
-
-          try {
-            while (true) {
-              const elapsed = Date.now() - agentStartTime;
-
-              // Show background hint after threshold (but task is already registered)
-              // Skip if background tasks are disabled
-              if (
-                !isBackgroundTasksDisabled &&
-                !backgroundHintShown &&
-                elapsed >= PROGRESS_THRESHOLD_MS &&
-                toolUseContext.setToolJSX
-              ) {
-                backgroundHintShown = true;
-                toolUseContext.setToolJSX({
-                  jsx: <BackgroundHint />,
-                  shouldHidePromptInput: false,
-                  shouldContinueAnimation: true,
-                  showSpinner: true,
+            // Yield initial progress message to carry metadata (prompt)
+            if (promptMessages.length > 0) {
+              const normalizedPromptMessages = normalizeMessages(promptMessages);
+              const normalizedFirstMessage = normalizedPromptMessages.find(
+                (m): m is NormalizedUserMessage => m.type === 'user',
+              );
+              if (normalizedFirstMessage && normalizedFirstMessage.type === 'user' && onProgress) {
+                onProgress({
+                  toolUseID: `agent_${assistantMessage.message.id}`,
+                  data: {
+                    message: normalizedFirstMessage,
+                    type: 'agent_progress',
+                    prompt,
+                    agentId: syncAgentId,
+                  },
                 });
               }
+            }
 
-              // Race between next message and background signal
-              // If background tasks are disabled, just await the next message directly
-              const nextMessagePromise = agentIterator.next();
-              const raceResult = backgroundPromise
-                ? await Promise.race([
-                    nextMessagePromise.then(r => ({
+            // Register as foreground task immediately so it can be backgrounded at any time
+            // Skip registration if background tasks are disabled
+            let foregroundTaskId: string | undefined;
+            // Create the background race promise once outside the loop — otherwise
+            // each iteration adds a new .then() reaction to the same pending
+            // promise, accumulating callbacks for the lifetime of the agent.
+            let backgroundPromise: Promise<{ type: 'background' }> | undefined;
+            let cancelAutoBackground: (() => void) | undefined;
+            if (!isBackgroundTasksDisabled) {
+              // densable OSu: He = c.agentId; Re = Yeo(He)??mi().
+              // ownerAgentId:Re; parentAgentId:He. No Gge until mid-bg.
+              const fgParentAgentId = toolUseContext.agentId;
+              const fgOwnerId =
+                resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
+              const registration = registerAgentForeground({
+                agentId: syncAgentId,
+                description,
+                prompt,
+                selectedAgent,
+                setAppState: rootSetAppState,
+                toolUseId: toolUseContext.toolUseId,
+                autoBackgroundMs: getAutoBackgroundMs() || undefined,
+                ownerAgentId: fgOwnerId,
+                notificationTargetAgentId: asAgentId(fgOwnerId),
+                parentAgentId: fgParentAgentId,
+                spawnDepth: childSpawnDepth,
+              });
+              foregroundTaskId = registration.taskId;
+              backgroundPromise = registration.backgroundSignal.then(() => ({
+                type: 'background' as const,
+              }));
+              cancelAutoBackground = registration.cancelAutoBackground;
+            }
+
+            // Track if we've shown the background hint UI
+            let backgroundHintShown = false;
+            // Track if the agent was backgrounded (cleanup handled by backgrounded finally)
+            let wasBackgrounded = false;
+            // Per-scope stop function — NOT shared with the backgrounded closure.
+            // idempotent: startAgentSummarization's stop() checks `stopped` flag.
+            let stopForegroundSummarization: (() => void) | undefined;
+            // const capture for sound type narrowing inside the callback below
+            const summaryTaskId = foregroundTaskId;
+
+            // Get async iterator for the agent
+            const agentIterator = runAgent({
+              ...runAgentParams,
+              override: {
+                ...runAgentParams.override,
+                agentId: syncAgentId,
+              },
+              activeTaskExecutionContext,
+              onCacheSafeParams:
+                summaryTaskId && getSdkAgentProgressSummariesEnabled()
+                  ? (params: CacheSafeParams) => {
+                      const { stop } = startAgentSummarization(summaryTaskId, syncAgentId, params, rootSetAppState);
+                      stopForegroundSummarization = stop;
+                    }
+                  : undefined,
+            })[Symbol.asyncIterator]();
+
+            // Track if an error occurred during iteration
+            let syncAgentError: Error | undefined;
+            let wasAborted = false;
+            let worktreeResult: {
+              worktreePath?: string;
+              worktreeBranch?: string;
+            } = {};
+
+            try {
+              while (true) {
+                const elapsed = Date.now() - agentStartTime;
+
+                // Show background hint after threshold (but task is already registered)
+                // Skip if background tasks are disabled
+                if (
+                  !isBackgroundTasksDisabled &&
+                  !backgroundHintShown &&
+                  elapsed >= PROGRESS_THRESHOLD_MS &&
+                  toolUseContext.setToolJSX
+                ) {
+                  backgroundHintShown = true;
+                  toolUseContext.setToolJSX({
+                    jsx: <BackgroundHint />,
+                    shouldHidePromptInput: false,
+                    shouldContinueAnimation: true,
+                    showSpinner: true,
+                  });
+                }
+
+                // Race between next message and background signal
+                // If background tasks are disabled, just await the next message directly
+                const nextMessagePromise = agentIterator.next();
+                const raceResult = backgroundPromise
+                  ? await Promise.race([
+                      nextMessagePromise.then(r => ({
+                        type: 'message' as const,
+                        result: r,
+                      })),
+                      backgroundPromise,
+                    ])
+                  : {
                       type: 'message' as const,
-                      result: r,
-                    })),
-                    backgroundPromise,
-                  ])
-                : {
-                    type: 'message' as const,
-                    result: await nextMessagePromise,
-                  };
+                      result: await nextMessagePromise,
+                    };
 
-              // Check if we were backgrounded via backgroundAll()
-              // foregroundTaskId is guaranteed to be defined if raceResult.type is 'background'
-              // because backgroundPromise is only defined when foregroundTaskId is defined
-              if (raceResult.type === 'background' && foregroundTaskId) {
-                const appState = toolUseContext.getAppState();
-                const task = appState.tasks[foregroundTaskId];
-                if (isLocalAgentTask(task) && task.isBackgrounded) {
-                  // Capture the taskId for use in the async callback
-                  const backgroundedTaskId = foregroundTaskId;
-                  wasBackgrounded = true;
-                  // densable Gge(Re, `agent:${ze}`) on mid-bg async_launched —
-                  // !pn() interactive only; Re = Yeo(parent)??mi().
-                  // OSu already stamps child.ownerAgentId at fg register; mid-bg
-                  // re-stamps if missing so BRt can tB(owner) (auto-bg path).
-                  // Gge no-ops when owner is not local_agent (main/mi()).
-                  if (!getIsNonInteractiveSession()) {
-                    // densable: re-stamp owner Re only; parent stays He (raw c.agentId)
-                    const parentAgentId = toolUseContext.agentId;
-                    const ownerId =
-                      resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ??
-                      getMainThreadAgentId();
-                    addKeepaliveReason(ownerId, agentKeepaliveReason(backgroundedTaskId), rootSetAppState);
-                    rootSetAppState(prev => {
-                      const t = prev.tasks[backgroundedTaskId];
-                      if (!isLocalAgentTask(t)) return prev;
-                      const nextParentId = t.parentAgentId ?? parentAgentId;
-                      if (
-                        t.ownerAgentId === ownerId &&
-                        t.notificationTargetAgentId === asAgentId(ownerId) &&
-                        t.parentAgentId === nextParentId
-                      ) {
-                        return prev;
-                      }
-                      return {
-                        ...prev,
-                        tasks: {
-                          ...prev.tasks,
-                          [backgroundedTaskId]: {
-                            ...t,
-                            ownerAgentId: t.ownerAgentId ?? ownerId,
-                            notificationTargetAgentId: t.notificationTargetAgentId ?? asAgentId(ownerId),
-                            parentAgentId: nextParentId,
+                // Check if we were backgrounded via backgroundAll()
+                // foregroundTaskId is guaranteed to be defined if raceResult.type is 'background'
+                // because backgroundPromise is only defined when foregroundTaskId is defined
+                if (raceResult.type === 'background' && foregroundTaskId) {
+                  const appState = toolUseContext.getAppState();
+                  const task = appState.tasks[foregroundTaskId];
+                  if (isLocalAgentTask(task) && task.isBackgrounded) {
+                    // Capture the taskId for use in the async callback
+                    const backgroundedTaskId = foregroundTaskId;
+                    wasBackgrounded = true;
+                    // densable Gge(Re, `agent:${ze}`) on mid-bg async_launched —
+                    // !pn() interactive only; Re = Yeo(parent)??mi().
+                    // OSu already stamps child.ownerAgentId at fg register; mid-bg
+                    // re-stamps if missing so BRt can tB(owner) (auto-bg path).
+                    // Gge no-ops when owner is not local_agent (main/mi()).
+                    if (!getIsNonInteractiveSession()) {
+                      // densable: re-stamp owner Re only; parent stays He (raw c.agentId)
+                      const parentAgentId = toolUseContext.agentId;
+                      const ownerId =
+                        resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ??
+                        getMainThreadAgentId();
+                      addKeepaliveReason(ownerId, agentKeepaliveReason(backgroundedTaskId), rootSetAppState);
+                      rootSetAppState(prev => {
+                        const t = prev.tasks[backgroundedTaskId];
+                        if (!isLocalAgentTask(t)) return prev;
+                        const nextParentId = t.parentAgentId ?? parentAgentId;
+                        if (
+                          t.ownerAgentId === ownerId &&
+                          t.notificationTargetAgentId === asAgentId(ownerId) &&
+                          t.parentAgentId === nextParentId
+                        ) {
+                          return prev;
+                        }
+                        return {
+                          ...prev,
+                          tasks: {
+                            ...prev.tasks,
+                            [backgroundedTaskId]: {
+                              ...t,
+                              ownerAgentId: t.ownerAgentId ?? ownerId,
+                              notificationTargetAgentId: t.notificationTargetAgentId ?? asAgentId(ownerId),
+                              parentAgentId: nextParentId,
+                            },
                           },
-                        },
-                      };
-                    });
-                  }
-                  // Stop foreground summarization; the backgrounded closure
-                  // below owns its own independent stop function.
-                  stopForegroundSummarization?.();
+                        };
+                      });
+                    }
+                    // Stop foreground summarization; the backgrounded closure
+                    // below owns its own independent stop function.
+                    stopForegroundSummarization?.();
 
-                  // Workload: inherited via ALS at `void` invocation time,
-                  // same as the async-from-start path above.
-                  // Continue agent in background and return async result
-                  transferAgentLocks(syncAgentId, backgroundedTaskId);
-                  // Mid-backgrounded: promote to background agent so session
-                  // activity no longer bumps mainLoopRefcount (HOn).
-                  const backgroundedAgentContext: SubagentContext = {
-                    ...syncAgentContext,
-                    agentId: asAgentId(backgroundedTaskId),
-                    isBackgroundAgent: true,
-                  };
-                  void runWithAgentContext(backgroundedAgentContext, async () => {
-                    let stopBackgroundedSummarization: (() => void) | undefined;
-                    try {
-                      // Clean up the foreground iterator so its finally block runs
-                      // (releases MCP connections, session hooks, prompt cache tracking, etc.)
-                      // Timeout prevents blocking if MCP server cleanup hangs.
-                      // .catch() prevents unhandled rejection if timeout wins the race.
-                      await Promise.race([agentIterator.return(undefined).catch(() => {}), sleep(1000)]);
-                      // Initialize progress tracking from existing messages (rebuild so
-                      // any in-place usage mutations already applied are visible).
-                      const tracker = createProgressTracker();
-                      const resolveActivity2 = createActivityDescriptionResolver(toolUseContext.options.tools);
-                      // densable Yqe D: seed isIdle from pre-bg messages, then track mid-bg stream.
-                      const isIdleTracker = createLocalAgentIsIdleTracker(backgroundedTaskId, rootSetAppState);
-                      isIdleTracker.seedFromMessages(agentMessages);
-                      rebuildProgressFromMessages(
-                        tracker,
-                        agentMessages,
-                        resolveActivity2,
-                        toolUseContext.options.tools,
-                      );
-                      for await (const msg of runAgent({
-                        ...runAgentParams,
-                        isAsync: true, // Agent is now running in background
-                        override: {
-                          ...runAgentParams.override,
-                          agentId: asAgentId(backgroundedTaskId),
-                          abortController: task.abortController,
-                        },
-                        activeTaskExecutionContext,
-                        onCacheSafeParams: getSdkAgentProgressSummariesEnabled()
-                          ? (params: CacheSafeParams) => {
-                              const { stop } = startAgentSummarization(
-                                backgroundedTaskId,
-                                asAgentId(backgroundedTaskId),
-                                params,
-                                rootSetAppState,
-                              );
-                              stopBackgroundedSummarization = stop;
-                            }
-                          : undefined,
-                      })) {
-                        agentMessages.push(msg);
-                        isIdleTracker.track(msg);
+                    // Workload: inherited via ALS at `void` invocation time,
+                    // same as the async-from-start path above.
+                    // Continue agent in background and return async result
+                    transferAgentLocks(syncAgentId, backgroundedTaskId);
+                    // Mid-backgrounded: promote to background agent so session
+                    // activity no longer bumps mainLoopRefcount (HOn).
+                    const backgroundedAgentContext: SubagentContext = {
+                      ...syncAgentContext,
+                      agentId: asAgentId(backgroundedTaskId),
+                      isBackgroundAgent: true,
+                    };
+                    void runWithAgentContext(backgroundedAgentContext, async () => {
+                      let stopBackgroundedSummarization: (() => void) | undefined;
+                      try {
+                        // Clean up the foreground iterator so its finally block runs
+                        // (releases MCP connections, session hooks, prompt cache tracking, etc.)
+                        // Timeout prevents blocking if MCP server cleanup hangs.
+                        // .catch() prevents unhandled rejection if timeout wins the race.
+                        await Promise.race([agentIterator.return(undefined).catch(() => {}), sleep(1000)]);
+                        // Initialize progress tracking from existing messages (rebuild so
+                        // any in-place usage mutations already applied are visible).
+                        const tracker = createProgressTracker();
+                        const resolveActivity2 = createActivityDescriptionResolver(toolUseContext.options.tools);
+                        // densable Yqe D: seed isIdle from pre-bg messages, then track mid-bg stream.
+                        const isIdleTracker = createLocalAgentIsIdleTracker(backgroundedTaskId, rootSetAppState);
+                        isIdleTracker.seedFromMessages(agentMessages);
+                        rebuildProgressFromMessages(
+                          tracker,
+                          agentMessages,
+                          resolveActivity2,
+                          toolUseContext.options.tools,
+                        );
+                        for await (const msg of runAgent({
+                          ...runAgentParams,
+                          isAsync: true, // Agent is now running in background
+                          override: {
+                            ...runAgentParams.override,
+                            agentId: asAgentId(backgroundedTaskId),
+                            abortController: task.abortController,
+                          },
+                          activeTaskExecutionContext,
+                          onCacheSafeParams: getSdkAgentProgressSummariesEnabled()
+                            ? (params: CacheSafeParams) => {
+                                const { stop } = startAgentSummarization(
+                                  backgroundedTaskId,
+                                  asAgentId(backgroundedTaskId),
+                                  params,
+                                  rootSetAppState,
+                                );
+                                stopBackgroundedSummarization = stop;
+                              }
+                            : undefined,
+                        })) {
+                          agentMessages.push(msg);
+                          isIdleTracker.track(msg);
 
-                        // Rebuild so late message_delta usage mutations stick.
+                          // Rebuild so late message_delta usage mutations stick.
+                          rebuildProgressFromMessages(
+                            tracker,
+                            agentMessages,
+                            resolveActivity2,
+                            toolUseContext.options.tools,
+                          );
+                          updateAsyncAgentProgress(
+                            backgroundedTaskId,
+                            getProgressUpdate(tracker, agentMessages),
+                            rootSetAppState,
+                          );
+                          isIdleTracker.sync();
+                          // message_delta often lands with no further yields until the
+                          // next tool result — deferred rebuild unfreezes footer tokens.
+                          scheduleDeferredAgentProgressRebuild(
+                            backgroundedTaskId,
+                            tracker,
+                            agentMessages,
+                            rootSetAppState,
+                            resolveActivity2,
+                            toolUseContext.options.tools,
+                          );
+
+                          const lastToolName = getLastToolUseName(msg);
+                          if (lastToolName) {
+                            emitTaskProgress(
+                              tracker,
+                              backgroundedTaskId,
+                              toolUseContext.toolUseId,
+                              description,
+                              startTime,
+                              lastToolName,
+                            );
+                          }
+                        }
+                        // Final rebuild after stream ends so last message_delta
+                        // usage mutations are reflected before completion.
                         rebuildProgressFromMessages(
                           tracker,
                           agentMessages,
@@ -1456,119 +1556,31 @@ export const AgentTool = buildTool({
                           getProgressUpdate(tracker, agentMessages),
                           rootSetAppState,
                         );
-                        isIdleTracker.sync();
-                        // message_delta often lands with no further yields until the
-                        // next tool result — deferred rebuild unfreezes footer tokens.
-                        scheduleDeferredAgentProgressRebuild(
-                          backgroundedTaskId,
-                          tracker,
-                          agentMessages,
-                          rootSetAppState,
-                          resolveActivity2,
-                          toolUseContext.options.tools,
-                        );
-
-                        const lastToolName = getLastToolUseName(msg);
-                        if (lastToolName) {
-                          emitTaskProgress(
-                            tracker,
-                            backgroundedTaskId,
-                            toolUseContext.toolUseId,
-                            description,
-                            startTime,
-                            lastToolName,
-                          );
-                        }
-                      }
-                      // Final rebuild after stream ends so last message_delta
-                      // usage mutations are reflected before completion.
-                      rebuildProgressFromMessages(
-                        tracker,
-                        agentMessages,
-                        resolveActivity2,
-                        toolUseContext.options.tools,
-                      );
-                      updateAsyncAgentProgress(
-                        backgroundedTaskId,
-                        getProgressUpdate(tracker, agentMessages),
-                        rootSetAppState,
-                      );
-                      // densable Yqe (single Jeo + same Z):
-                      // Jeo → Z=JXt → Cns(suppressTelemetry:Z) → DSu → if(Z) park
-                      // JXt reads root via set-snapshot (same store as Jeo).
-                      const preCompleteJxt = sweepAndDetectLiveAgentChildren(backgroundedTaskId, rootSetAppState);
-                      const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata, {
-                        suppressTelemetry: preCompleteJxt,
-                      });
-
-                      // Mark task completed FIRST so TaskOutput(block=true)
-                      // unblocks immediately. classifyHandoffIfNeeded and
-                      // cleanupWorktreeIfNeeded can hang — they must not gate
-                      // the status transition (gh-20236).
-                      // skipJeo: Jeo already ran for Z; DSu must not re-Jeo.
-                      completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true });
-
-                      // densable: if (Z) CWr + defer BRt — same Z as suppressTelemetry
-                      if (preCompleteJxt) {
-                        parkAgentOnKeepaliveDeferNotify(
-                          backgroundedTaskId,
-                          agentResult.totalDurationMs,
-                          rootSetAppState,
-                        );
-                        return;
-                      }
-
-                      try {
-                        // eslint-disable-next-line @typescript-eslint/no-require-imports
-                        const { maybeStopObserverForObservedTerminal } =
-                          require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
-                        maybeStopObserverForObservedTerminal(backgroundedTaskId, msg =>
-                          logForDebugging(msg, { level: 'debug' }),
-                        );
-                      } catch {
-                        // densable optional
-                      }
-
-                      // Extract text from agent result content for the notification
-                      let finalMessage = extractTextContent(agentResult.content, '\n');
-
-                      if (feature('TRANSCRIPT_CLASSIFIER')) {
-                        const backgroundedAppState = toolUseContext.getAppState();
-                        const handoffWarning = await classifyHandoffIfNeeded({
-                          agentMessages,
-                          tools: toolUseContext.options.tools,
-                          toolPermissionContext: backgroundedAppState.toolPermissionContext,
-                          abortSignal: task.abortController!.signal,
-                          subagentType: selectedAgent.agentType,
-                          totalToolUseCount: agentResult.totalToolUseCount,
+                        // densable Yqe (single Jeo + same Z):
+                        // Jeo → Z=JXt → Cns(suppressTelemetry:Z) → DSu → if(Z) park
+                        // JXt reads root via set-snapshot (same store as Jeo).
+                        const preCompleteJxt = sweepAndDetectLiveAgentChildren(backgroundedTaskId, rootSetAppState);
+                        const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata, {
+                          suppressTelemetry: preCompleteJxt,
                         });
-                        if (handoffWarning) {
-                          finalMessage = `${handoffWarning}\n\n${finalMessage}`;
+
+                        // Mark task completed FIRST so TaskOutput(block=true)
+                        // unblocks immediately. classifyHandoffIfNeeded and
+                        // cleanupWorktreeIfNeeded can hang — they must not gate
+                        // the status transition (gh-20236).
+                        // skipJeo: Jeo already ran for Z; DSu must not re-Jeo.
+                        completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true });
+
+                        // densable: if (Z) CWr + defer BRt — same Z as suppressTelemetry
+                        if (preCompleteJxt) {
+                          parkAgentOnKeepaliveDeferNotify(
+                            backgroundedTaskId,
+                            agentResult.totalDurationMs,
+                            rootSetAppState,
+                          );
+                          return;
                         }
-                      }
 
-                      // Clean up worktree before notification so we can include it
-                      const worktreeResult = await cleanupWorktreeIfNeeded();
-
-                      enqueueAgentNotification({
-                        taskId: backgroundedTaskId,
-                        description,
-                        status: 'completed',
-                        setAppState: rootSetAppState,
-                        finalMessage,
-                        usage: {
-                          totalTokens: getTokenCountFromTracker(tracker),
-                          toolUses: agentResult.totalToolUseCount,
-                          durationMs: agentResult.totalDurationMs,
-                        },
-                        toolUseId: toolUseContext.toolUseId,
-                        ...worktreeResult,
-                      });
-                    } catch (error) {
-                      if (error instanceof AbortError) {
-                        // Transition status BEFORE worktree cleanup so
-                        // TaskOutput unblocks even if git hangs (gh-20236).
-                        killAsyncAgent(backgroundedTaskId, rootSetAppState);
                         try {
                           // eslint-disable-next-line @typescript-eslint/no-require-imports
                           const { maybeStopObserverForObservedTerminal } =
@@ -1579,184 +1591,357 @@ export const AgentTool = buildTool({
                         } catch {
                           // densable optional
                         }
-                        logEvent('tengu_agent_tool_terminated', {
-                          agent_type: metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                          model:
-                            metadata.resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                          duration_ms: Date.now() - metadata.startTime,
-                          is_async: true,
-                          is_built_in_agent: metadata.isBuiltInAgent,
-                          reason:
-                            'user_cancel_background' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                        });
+
+                        // Extract text from agent result content for the notification
+                        let finalMessage = extractTextContent(agentResult.content, '\n');
+
+                        if (feature('TRANSCRIPT_CLASSIFIER')) {
+                          const backgroundedAppState = toolUseContext.getAppState();
+                          const handoffWarning = await classifyHandoffIfNeeded({
+                            agentMessages,
+                            tools: toolUseContext.options.tools,
+                            toolPermissionContext: backgroundedAppState.toolPermissionContext,
+                            abortSignal: task.abortController!.signal,
+                            subagentType: selectedAgent.agentType,
+                            totalToolUseCount: agentResult.totalToolUseCount,
+                          });
+                          if (handoffWarning) {
+                            finalMessage = `${handoffWarning}\n\n${finalMessage}`;
+                          }
+                        }
+
+                        // Clean up worktree before notification so we can include it
                         const worktreeResult = await cleanupWorktreeIfNeeded();
-                        const partialResult = extractPartialResult(agentMessages);
+
                         enqueueAgentNotification({
                           taskId: backgroundedTaskId,
                           description,
-                          status: 'killed',
+                          status: 'completed',
                           setAppState: rootSetAppState,
+                          finalMessage,
+                          usage: {
+                            totalTokens: getTokenCountFromTracker(tracker),
+                            toolUses: agentResult.totalToolUseCount,
+                            durationMs: agentResult.totalDurationMs,
+                          },
                           toolUseId: toolUseContext.toolUseId,
-                          finalMessage: partialResult,
                           ...worktreeResult,
                         });
-                        return;
+                      } catch (error) {
+                        if (error instanceof AbortError) {
+                          // Transition status BEFORE worktree cleanup so
+                          // TaskOutput unblocks even if git hangs (gh-20236).
+                          killAsyncAgent(backgroundedTaskId, rootSetAppState);
+                          try {
+                            // eslint-disable-next-line @typescript-eslint/no-require-imports
+                            const { maybeStopObserverForObservedTerminal } =
+                              require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
+                            maybeStopObserverForObservedTerminal(backgroundedTaskId, msg =>
+                              logForDebugging(msg, { level: 'debug' }),
+                            );
+                          } catch {
+                            // densable optional
+                          }
+                          logEvent('tengu_agent_tool_terminated', {
+                            agent_type:
+                              metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                            model:
+                              metadata.resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                            duration_ms: Date.now() - metadata.startTime,
+                            is_async: true,
+                            is_built_in_agent: metadata.isBuiltInAgent,
+                            reason:
+                              'user_cancel_background' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                          });
+                          const worktreeResult = await cleanupWorktreeIfNeeded();
+                          const partialResult = extractPartialResult(agentMessages);
+                          enqueueAgentNotification({
+                            taskId: backgroundedTaskId,
+                            description,
+                            status: 'killed',
+                            setAppState: rootSetAppState,
+                            toolUseId: toolUseContext.toolUseId,
+                            finalMessage: partialResult,
+                            ...worktreeResult,
+                          });
+                          return;
+                        }
+                        const errMsg = errorMessage(error);
+                        failAsyncAgent(backgroundedTaskId, errMsg, rootSetAppState);
+                        try {
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          const { maybeStopObserverForObservedTerminal } =
+                            require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
+                          maybeStopObserverForObservedTerminal(backgroundedTaskId, msg =>
+                            logForDebugging(msg, { level: 'debug' }),
+                          );
+                        } catch {
+                          // densable optional
+                        }
+                        const worktreeResult = await cleanupWorktreeIfNeeded();
+                        enqueueAgentNotification({
+                          taskId: backgroundedTaskId,
+                          description,
+                          status: 'failed',
+                          error: errMsg,
+                          setAppState: rootSetAppState,
+                          toolUseId: toolUseContext.toolUseId,
+                          ...worktreeResult,
+                        });
+                      } finally {
+                        stopBackgroundedSummarization?.();
+                        releaseAgentLocks(backgroundedTaskId);
+                        clearInvokedSkillsForAgent(syncAgentId);
+                        clearDumpState(syncAgentId);
+                        // densable 2.1.217 concurrent slot — mid-bg continues after
+                        // async_launched return; release when bg lifecycle settles.
+                        releaseConcurrencySlot?.();
+                        // Note: worktree cleanup is done before enqueueAgentNotification
+                        // in both try and catch paths so we can include worktree info
                       }
-                      const errMsg = errorMessage(error);
-                      failAsyncAgent(backgroundedTaskId, errMsg, rootSetAppState);
-                      try {
-                        // eslint-disable-next-line @typescript-eslint/no-require-imports
-                        const { maybeStopObserverForObservedTerminal } =
-                          require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
-                        maybeStopObserverForObservedTerminal(backgroundedTaskId, msg =>
-                          logForDebugging(msg, { level: 'debug' }),
-                        );
-                      } catch {
-                        // densable optional
-                      }
-                      const worktreeResult = await cleanupWorktreeIfNeeded();
-                      enqueueAgentNotification({
-                        taskId: backgroundedTaskId,
-                        description,
-                        status: 'failed',
-                        error: errMsg,
-                        setAppState: rootSetAppState,
-                        toolUseId: toolUseContext.toolUseId,
-                        ...worktreeResult,
-                      });
-                    } finally {
-                      stopBackgroundedSummarization?.();
-                      releaseAgentLocks(backgroundedTaskId);
-                      clearInvokedSkillsForAgent(syncAgentId);
-                      clearDumpState(syncAgentId);
-                      // Note: worktree cleanup is done before enqueueAgentNotification
-                      // in both try and catch paths so we can include worktree info
-                    }
-                  });
+                    });
 
-                  // Return async_launched result immediately
-                  const canReadOutputFile = toolUseContext.options.tools.some(
-                    t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME),
-                  );
-                  return {
-                    data: {
-                      isAsync: true as const,
-                      status: 'async_launched' as const,
-                      agentId: backgroundedTaskId,
-                      description: description,
-                      prompt: prompt,
-                      outputFile: getTaskOutputPath(backgroundedTaskId),
-                      canReadOutputFile,
-                      taskLinkingWarning,
-                    },
-                  };
+                    // Return async_launched result immediately
+                    const canReadOutputFile = toolUseContext.options.tools.some(
+                      t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME),
+                    );
+                    return {
+                      data: {
+                        isAsync: true as const,
+                        status: 'async_launched' as const,
+                        agentId: backgroundedTaskId,
+                        description: description,
+                        prompt: prompt,
+                        outputFile: getTaskOutputPath(backgroundedTaskId),
+                        canReadOutputFile,
+                        taskLinkingWarning,
+                      },
+                    };
+                  }
                 }
-              }
 
-              // Process the message from the race result
-              if (raceResult.type !== 'message') {
-                // This shouldn't happen - background case handled above
-                continue;
-              }
-              const { result } = raceResult;
-              if (result.done) break;
-              const message = result.value as MessageType;
+                // Process the message from the race result
+                if (raceResult.type !== 'message') {
+                  // This shouldn't happen - background case handled above
+                  continue;
+                }
+                const { result } = raceResult;
+                if (result.done) break;
+                const message = result.value as MessageType;
 
-              agentMessages.push(message);
+                agentMessages.push(message);
 
-              // Rebuild so late message_delta usage mutations stick.
-              rebuildProgressFromMessages(
-                syncTracker,
-                agentMessages,
-                syncResolveActivity,
-                toolUseContext.options.tools,
-              );
-              if (foregroundTaskId) {
-                // Always push token progress (not only on tool_use messages).
-                // Text-only turns still need footer updates after message_delta.
-                updateAsyncAgentProgress(
-                  foregroundTaskId,
-                  getProgressUpdate(syncTracker, agentMessages),
-                  rootSetAppState,
-                );
-                scheduleDeferredAgentProgressRebuild(
-                  foregroundTaskId,
+                // Rebuild so late message_delta usage mutations stick.
+                rebuildProgressFromMessages(
                   syncTracker,
                   agentMessages,
-                  rootSetAppState,
                   syncResolveActivity,
                   toolUseContext.options.tools,
                 );
-                const lastToolName = getLastToolUseName(message);
-                if (lastToolName) {
-                  emitTaskProgress(
-                    syncTracker,
+                if (foregroundTaskId) {
+                  // Always push token progress (not only on tool_use messages).
+                  // Text-only turns still need footer updates after message_delta.
+                  updateAsyncAgentProgress(
                     foregroundTaskId,
-                    toolUseContext.toolUseId,
-                    description,
-                    agentStartTime,
-                    lastToolName,
+                    getProgressUpdate(syncTracker, agentMessages),
+                    rootSetAppState,
+                  );
+                  scheduleDeferredAgentProgressRebuild(
+                    foregroundTaskId,
+                    syncTracker,
+                    agentMessages,
+                    rootSetAppState,
+                    syncResolveActivity,
+                    toolUseContext.options.tools,
+                  );
+                  const lastToolName = getLastToolUseName(message);
+                  if (lastToolName) {
+                    emitTaskProgress(
+                      syncTracker,
+                      foregroundTaskId,
+                      toolUseContext.toolUseId,
+                      description,
+                      agentStartTime,
+                      lastToolName,
+                    );
+                  }
+                }
+
+                // Forward bash_progress events from sub-agent to parent so the SDK
+                // receives tool_progress events just as it does for the main agent.
+                if (
+                  message.type === 'progress' &&
+                  ((message.data as { type: string })?.type === 'bash_progress' ||
+                    (message.data as { type: string })?.type === 'powershell_progress') &&
+                  onProgress
+                ) {
+                  onProgress({
+                    toolUseID: message.toolUseID as string,
+                    data: message.data,
+                  });
+                }
+
+                if (message.type !== 'assistant' && message.type !== 'user') {
+                  continue;
+                }
+
+                // Increment token count in spinner for assistant messages
+                // Subagent streaming events are filtered out in runAgent.ts, so we
+                // need to count tokens from completed messages here
+                if (message.type === 'assistant') {
+                  const contentLength = getAssistantMessageContentLength(message as AssistantMessage);
+                  if (contentLength > 0) {
+                    toolUseContext.setResponseLength(len => len + contentLength);
+                  }
+                }
+
+                const normalizedNew = normalizeMessages([message]);
+                for (const m of normalizedNew) {
+                  for (const content of (m.message?.content ?? []) as readonly { readonly type: string }[]) {
+                    if (content.type !== 'tool_use' && content.type !== 'tool_result') {
+                      continue;
+                    }
+
+                    // Forward progress updates
+                    if (onProgress) {
+                      onProgress({
+                        toolUseID: `agent_${assistantMessage.message.id}`,
+                        data: {
+                          message: m,
+                          type: 'agent_progress',
+                          // prompt only needed on first progress message (UI.tsx:624
+                          // reads progressMessages[0]). Omit here to avoid duplication.
+                          prompt: '',
+                          agentId: syncAgentId,
+                        },
+                      });
+                    }
+                  }
+                }
+              }
+            } catch (error) {
+              // Handle errors from the sync agent loop
+              // AbortError should be re-thrown for proper interruption handling
+              if (error instanceof AbortError) {
+                wasAborted = true;
+                logEvent('tengu_agent_tool_terminated', {
+                  agent_type: metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  model: metadata.resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  duration_ms: Date.now() - metadata.startTime,
+                  is_async: false,
+                  is_built_in_agent: metadata.isBuiltInAgent,
+                  reason: 'user_cancel_sync' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                });
+                throw error;
+              }
+
+              // Log the error for debugging
+              logForDebugging(`Sync agent error: ${errorMessage(error)}`, {
+                level: 'error',
+              });
+
+              // Store the error to handle after cleanup
+              syncAgentError = toError(error);
+            } finally {
+              // Clear the background hint UI
+              if (toolUseContext.setToolJSX) {
+                toolUseContext.setToolJSX(null);
+              }
+
+              // Stop foreground summarization. Idempotent — if already stopped at
+              // the backgrounding transition, this is a no-op. The backgrounded
+              // closure owns a separate stop function (stopBackgroundedSummarization).
+              stopForegroundSummarization?.();
+
+              // Final rebuild after stream ends — last message_delta may have mutated
+              // usage after the final content_block_stop yield with no further
+              // messages (runAgent filters stream_event). Always push footer
+              // progress (not only when SDK summaries are enabled).
+              if (!wasBackgrounded) {
+                rebuildProgressFromMessages(
+                  syncTracker,
+                  agentMessages,
+                  syncResolveActivity,
+                  toolUseContext.options.tools,
+                );
+                if (foregroundTaskId) {
+                  updateAsyncAgentProgress(
+                    foregroundTaskId,
+                    getProgressUpdate(syncTracker, agentMessages),
+                    rootSetAppState,
                   );
                 }
               }
 
-              // Forward bash_progress events from sub-agent to parent so the SDK
-              // receives tool_progress events just as it does for the main agent.
-              if (
-                message.type === 'progress' &&
-                ((message.data as { type: string })?.type === 'bash_progress' ||
-                  (message.data as { type: string })?.type === 'powershell_progress') &&
-                onProgress
-              ) {
-                onProgress({
-                  toolUseID: message.toolUseID as string,
-                  data: message.data,
-                });
-              }
-
-              if (message.type !== 'assistant' && message.type !== 'user') {
-                continue;
-              }
-
-              // Increment token count in spinner for assistant messages
-              // Subagent streaming events are filtered out in runAgent.ts, so we
-              // need to count tokens from completed messages here
-              if (message.type === 'assistant') {
-                const contentLength = getAssistantMessageContentLength(message as AssistantMessage);
-                if (contentLength > 0) {
-                  toolUseContext.setResponseLength(len => len + contentLength);
-                }
-              }
-
-              const normalizedNew = normalizeMessages([message]);
-              for (const m of normalizedNew) {
-                for (const content of (m.message?.content ?? []) as readonly { readonly type: string }[]) {
-                  if (content.type !== 'tool_use' && content.type !== 'tool_result') {
-                    continue;
-                  }
-
-                  // Forward progress updates
-                  if (onProgress) {
-                    onProgress({
-                      toolUseID: `agent_${assistantMessage.message.id}`,
-                      data: {
-                        message: m,
-                        type: 'agent_progress',
-                        // prompt only needed on first progress message (UI.tsx:624
-                        // reads progressMessages[0]). Omit here to avoid duplication.
-                        prompt: '',
-                        agentId: syncAgentId,
+              // Unregister foreground task if agent completed without being backgrounded
+              if (foregroundTaskId) {
+                unregisterAgentForeground(foregroundTaskId, rootSetAppState);
+                // Notify SDK consumers (e.g. VS Code subagent panel) that this
+                // foreground agent is done. Goes through drainSdkEvents() — does
+                // NOT trigger the print.ts XML task_notification parser or the LLM loop.
+                if (!wasBackgrounded) {
+                  const progress = getProgressUpdate(syncTracker, agentMessages);
+                  // densable lf — once-gated bookend for Host Tasks (Jp).
+                  emitTaskTerminatedSdk(
+                    foregroundTaskId,
+                    syncAgentError ? 'failed' : wasAborted ? 'stopped' : 'completed',
+                    {
+                      toolUseId: toolUseContext.toolUseId,
+                      summary: description,
+                      usage: {
+                        total_tokens: progress.tokenCount,
+                        tool_uses: progress.toolUseCount,
+                        duration_ms: Date.now() - agentStartTime,
                       },
-                    });
-                  }
+                    },
+                  );
                 }
+              }
+
+              // Clean up scoped skills so they don't accumulate in the global map
+              clearInvokedSkillsForAgent(syncAgentId);
+              releaseAgentLocks(syncAgentId);
+
+              // Official observer densable: stop pairing on pure-sync terminal
+              // (async/backgrounded paths stop via agentToolUtils / bg handlers).
+              if (!wasBackgrounded) {
+                try {
+                  const { maybeStopObserverForObservedTerminal } =
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
+                  maybeStopObserverForObservedTerminal(earlyAgentId, (msg: string) =>
+                    logForDebugging(msg, {
+                      level: 'debug',
+                    }),
+                  );
+                } catch {
+                  // densable optional
+                }
+              }
+
+              // Clean up dumpState entry for this agent to prevent unbounded growth
+              // Skip if backgrounded — the backgrounded agent's finally handles cleanup
+              if (!wasBackgrounded) {
+                clearDumpState(syncAgentId);
+                // densable 2.1.217: release concurrent slot when pure-sync settles
+                // (mid-bg path releases in its own finally). once-safe.
+                releaseConcurrencySlot?.();
+              }
+
+              // Cancel auto-background timer if agent completed before it fired
+              cancelAutoBackground?.();
+
+              // Clean up worktree if applicable (in finally to handle abort/error paths)
+              // Skip if backgrounded — the background continuation is still running in it
+              if (!wasBackgrounded) {
+                worktreeResult = await cleanupWorktreeIfNeeded();
               }
             }
-          } catch (error) {
-            // Handle errors from the sync agent loop
-            // AbortError should be re-thrown for proper interruption handling
-            if (error instanceof AbortError) {
-              wasAborted = true;
+
+            // Re-throw abort errors
+            // TODO: Find a cleaner way to express this
+            const lastMessage = agentMessages.findLast(_ => _.type !== 'system' && _.type !== 'progress');
+            if (lastMessage && isSyntheticMessage(lastMessage)) {
               logEvent('tengu_agent_tool_terminated', {
                 agent_type: metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 model: metadata.resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1765,167 +1950,53 @@ export const AgentTool = buildTool({
                 is_built_in_agent: metadata.isBuiltInAgent,
                 reason: 'user_cancel_sync' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               });
-              throw error;
+              throw new AbortError();
             }
 
-            // Log the error for debugging
-            logForDebugging(`Sync agent error: ${errorMessage(error)}`, {
-              level: 'error',
-            });
+            // If an error occurred during iteration, try to return a result with
+            // whatever messages we have. If we have no assistant messages,
+            // re-throw the error so it's properly handled by the tool framework.
+            if (syncAgentError) {
+              // Check if we have any assistant messages to return
+              const hasAssistantMessages = agentMessages.some(msg => msg.type === 'assistant');
 
-            // Store the error to handle after cleanup
-            syncAgentError = toError(error);
-          } finally {
-            // Clear the background hint UI
-            if (toolUseContext.setToolJSX) {
-              toolUseContext.setToolJSX(null);
+              if (!hasAssistantMessages) {
+                // No messages collected, re-throw the error
+                throw syncAgentError;
+              }
+
+              // We have some messages, try to finalize and return them
+              // This allows the parent agent to see partial progress even after an error
+              logForDebugging(`Sync agent recovering from error with ${agentMessages.length} messages`);
             }
 
-            // Stop foreground summarization. Idempotent — if already stopped at
-            // the backgrounding transition, this is a no-op. The backgrounded
-            // closure owns a separate stop function (stopBackgroundedSummarization).
-            stopForegroundSummarization?.();
+            const agentResult = finalizeAgentTool(agentMessages, syncAgentId, metadata);
 
-            // Final rebuild after stream ends — last message_delta may have mutated
-            // usage after the final content_block_stop yield with no further
-            // messages (runAgent filters stream_event). Always push footer
-            // progress (not only when SDK summaries are enabled).
-            if (!wasBackgrounded) {
-              rebuildProgressFromMessages(
-                syncTracker,
+            if (feature('TRANSCRIPT_CLASSIFIER')) {
+              const currentAppState = toolUseContext.getAppState();
+              const handoffWarning = await classifyHandoffIfNeeded({
                 agentMessages,
-                syncResolveActivity,
-                toolUseContext.options.tools,
-              );
-              if (foregroundTaskId) {
-                updateAsyncAgentProgress(
-                  foregroundTaskId,
-                  getProgressUpdate(syncTracker, agentMessages),
-                  rootSetAppState,
-                );
+                tools: toolUseContext.options.tools,
+                toolPermissionContext: currentAppState.toolPermissionContext,
+                abortSignal: toolUseContext.abortController.signal,
+                subagentType: selectedAgent.agentType,
+                totalToolUseCount: agentResult.totalToolUseCount,
+              });
+              if (handoffWarning) {
+                agentResult.content = [{ type: 'text' as const, text: handoffWarning }, ...agentResult.content];
               }
             }
 
-            // Unregister foreground task if agent completed without being backgrounded
-            if (foregroundTaskId) {
-              unregisterAgentForeground(foregroundTaskId, rootSetAppState);
-              // Notify SDK consumers (e.g. VS Code subagent panel) that this
-              // foreground agent is done. Goes through drainSdkEvents() — does
-              // NOT trigger the print.ts XML task_notification parser or the LLM loop.
-              if (!wasBackgrounded) {
-                const progress = getProgressUpdate(syncTracker, agentMessages);
-                // densable lf — once-gated bookend for Host Tasks (Jp).
-                emitTaskTerminatedSdk(
-                  foregroundTaskId,
-                  syncAgentError ? 'failed' : wasAborted ? 'stopped' : 'completed',
-                  {
-                    toolUseId: toolUseContext.toolUseId,
-                    summary: description,
-                    usage: {
-                      total_tokens: progress.tokenCount,
-                      tool_uses: progress.toolUseCount,
-                      duration_ms: Date.now() - agentStartTime,
-                    },
-                  },
-                );
-              }
-            }
-
-            // Clean up scoped skills so they don't accumulate in the global map
-            clearInvokedSkillsForAgent(syncAgentId);
-            releaseAgentLocks(syncAgentId);
-
-            // Official observer densable: stop pairing on pure-sync terminal
-            // (async/backgrounded paths stop via agentToolUtils / bg handlers).
-            if (!wasBackgrounded) {
-              try {
-                const { maybeStopObserverForObservedTerminal } =
-                  // eslint-disable-next-line @typescript-eslint/no-require-imports
-                  require('src/utils/observerAgents.js') as typeof import('src/utils/observerAgents.js');
-                maybeStopObserverForObservedTerminal(earlyAgentId, (msg: string) =>
-                  logForDebugging(msg, {
-                    level: 'debug',
-                  }),
-                );
-              } catch {
-                // densable optional
-              }
-            }
-
-            // Clean up dumpState entry for this agent to prevent unbounded growth
-            // Skip if backgrounded — the backgrounded agent's finally handles cleanup
-            if (!wasBackgrounded) {
-              clearDumpState(syncAgentId);
-            }
-
-            // Cancel auto-background timer if agent completed before it fired
-            cancelAutoBackground?.();
-
-            // Clean up worktree if applicable (in finally to handle abort/error paths)
-            // Skip if backgrounded — the background continuation is still running in it
-            if (!wasBackgrounded) {
-              worktreeResult = await cleanupWorktreeIfNeeded();
-            }
-          }
-
-          // Re-throw abort errors
-          // TODO: Find a cleaner way to express this
-          const lastMessage = agentMessages.findLast(_ => _.type !== 'system' && _.type !== 'progress');
-          if (lastMessage && isSyntheticMessage(lastMessage)) {
-            logEvent('tengu_agent_tool_terminated', {
-              agent_type: metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              model: metadata.resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              duration_ms: Date.now() - metadata.startTime,
-              is_async: false,
-              is_built_in_agent: metadata.isBuiltInAgent,
-              reason: 'user_cancel_sync' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            });
-            throw new AbortError();
-          }
-
-          // If an error occurred during iteration, try to return a result with
-          // whatever messages we have. If we have no assistant messages,
-          // re-throw the error so it's properly handled by the tool framework.
-          if (syncAgentError) {
-            // Check if we have any assistant messages to return
-            const hasAssistantMessages = agentMessages.some(msg => msg.type === 'assistant');
-
-            if (!hasAssistantMessages) {
-              // No messages collected, re-throw the error
-              throw syncAgentError;
-            }
-
-            // We have some messages, try to finalize and return them
-            // This allows the parent agent to see partial progress even after an error
-            logForDebugging(`Sync agent recovering from error with ${agentMessages.length} messages`);
-          }
-
-          const agentResult = finalizeAgentTool(agentMessages, syncAgentId, metadata);
-
-          if (feature('TRANSCRIPT_CLASSIFIER')) {
-            const currentAppState = toolUseContext.getAppState();
-            const handoffWarning = await classifyHandoffIfNeeded({
-              agentMessages,
-              tools: toolUseContext.options.tools,
-              toolPermissionContext: currentAppState.toolPermissionContext,
-              abortSignal: toolUseContext.abortController.signal,
-              subagentType: selectedAgent.agentType,
-              totalToolUseCount: agentResult.totalToolUseCount,
-            });
-            if (handoffWarning) {
-              agentResult.content = [{ type: 'text' as const, text: handoffWarning }, ...agentResult.content];
-            }
-          }
-
-          return {
-            data: {
-              status: 'completed' as const,
-              prompt,
-              ...agentResult,
-              ...worktreeResult,
-            },
-          };
-        }),
+            return {
+              data: {
+                status: 'completed' as const,
+                prompt,
+                ...agentResult,
+                ...worktreeResult,
+              },
+            };
+          }),
+        ),
       );
     }
   },

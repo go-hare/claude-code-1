@@ -37,6 +37,7 @@ import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
 import { stampNewMemoryContent } from 'src/memdir/stampNewMemoryContent.js'
 import { expandPath } from 'src/utils/path.js'
+import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
   checkWritePermissionForTool,
   matchingRuleForInput,
@@ -156,6 +157,15 @@ export const FileWriteTool = buildTool({
   },
   async validateInput({ file_path, content }, toolUseContext: ToolUseContext) {
     const fullFilePath = expandPath(file_path)
+
+    // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 7)
+    const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
+      agentId: toolUseContext.agentId,
+      agentWorktree: toolUseContext.agentWorktree,
+    })
+    if (isolationBlock) {
+      return { result: false, message: isolationBlock, errorCode: 7 }
+    }
 
     // Reject writes to team memory files that contain secrets
     const secretError = checkTeamMemSecrets(fullFilePath, content)

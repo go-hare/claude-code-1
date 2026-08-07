@@ -1,0 +1,243 @@
+Whether to show tips in the spinner
+I
+append
+I{r4
+replace
+r4
+append
+replace
+Customize spinner verbs. mode: "append" adds verbs to defaults, "replace" uses only your verbs.
+s
+Override spinner tips. tips: array of tip strings. excludeDefault: if true, only show custom tips (default: false).58
+Whether to disable syntax highlighting in diffs
+I
+0t
+Whether /rename updates the terminal tab title (defaults to true). Set to false to keep auto-generated topic titles.
+n
+When false, thinking is disabled. When absent or true, thinking is enabled automatically for supported models.
+low08
+medium
+high
+xhigh
+0
+H
+y(
+P
+h$
+X
+k-
+low58
+J0
+medium
+I;/
+high
+xhigh
+Persisted effort level for supported models.
+Enable ultracode for the session: xhigh effort plus standing dynamic-workflow orchestration. 
+S
+e
+s
+s
+i
+o
+n
+s
+c
+o
+p
+e
+d
+t
+y
+p
+i
+c
+a
+l
+l
+y
+p
+r
+o
+v
+i
+d
+e
+d
+v
+i
+a
+s
+e
+t
+t
+i
+n
+g
+s
+o
+r
+t
+h
+e
+a
+p
+p
+l
+y
+f
+l
+a
+g
+s
+e
+t
+t
+i
+n
+g
+s
+c
+o
+n
+t
+r
+o
+l
+r
+e
+q
+u
+e
+s
+t
+b
+interactive toggles never persist it. Requires workflows to be enabled and an xhigh-capable model.
+@B
+I
+`4
+Auto-compact window size
+Advisor model for the server-side advisor tool.
+ez
+H
+When true, fast mode is enabled. When absent or false, fast mode is off.
+Y
+5^
+When true, fast mode does not persist across sessions. Each session starts with fast mode off.
+a
+When false, prompt suggestions are disabled. When absent or true, prompt suggestions are enabled.
+When false, the :emoji: shortcode typeahead (the suggestion popup and the :name: inline replacement) is disabled. When absent or true, it is enabled.
+5
+@internal When false, the session recap (shown when you return after being away for 5+ minutes) is disabled. When absent or true, recap is enabled. Hidden from public SDK types until external launch.
+W
+When true, the plan-approval dialog offers a "clear context" option. Defaults to false.
+I
+5
+60s
+5m
+Ig
+10m
+never
+3#
+5
+58
+H
+tn48
+P
+48
+X
+58
+60s
+e
+5m
+10m
+never
+4C
+Idle time before Claude's questions auto-continue with any answers 
+s
+e
+l
+e
+c
+t
+e
+d
+s
+o
+f
+a
+r
+D
+e
+f
+a
+u
+l
+t
+s
+t
+o
+n
+e
+v
+e
+r
+a
+u
+t
+o
+c
+o
+n
+t
+i
+n
+u
+e
+o
+n
+l
+y
+r
+u
+n
+s
+6
+when explicitly set to 60s/5m/10m.
+58
+4
+Name of an agent (built-in or custom) to use for the main thread. Applies the agent's system prompt, tool restrictions, and model.t
+d
+Company announcements to display at startup (one will be randomly selected if multiple are provided)
+VM0>
+User configuration values for MCP servers keyed by server name
+Non-sensitive option values from plugin manifest userConfig, keyed by option name. Sensitive values go to secure storage instead.g/
+j
+Per-plugin configuration including MCP server user configs, keyed by plugin ID (plugin@marketplace format)
+0
+Default environment ID to use for cloud sessions
+t
+Cloud session configuration
+latest
+stable
+rc
+0
+58
+8
+58
+latest
+stable
+rc
+3
+Release channel for auto-updates (latest or stable)48
+Q
+Minimum version to stay on - prevents downgrades when switching to stable channel
+Minimum Claude Code version required to start. If the running version is older, Claude Code exits at startup with instructions to update. Only enforced from managed (policy) settings.
+Maximum Claude Code version allowed to start. If the running version is newer, Claude Code exits at startup with instructions to install an approved version. Only enforced from managed (policy) settings.08
+c
+Custom directory for plan files, relative to project root. If not set, defaults to ~/.claude/plans/
+fullscreen
+default
+fullscreen
+08
+Terminal UI renderer. "fullscreen" uses the flicker-free alt-screen renderer with virtualized scrollback (equivalent to CLAUDE_CODE_NO_FLICKER=1

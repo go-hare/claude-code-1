@@ -1,0 +1,14 @@
+--- b'malformed' @59813924 runlen=672 ---
+nativeDependenciesignoreScriptsNo global directory foundMissing global bin directory: try setting $BUN_INSTALLUnexpected lockfile versionOutdated lockfile versionLockfile is missing dataLockfile is malformed (expected 0 at the end)Lockfile is missing resolution dataLockfile validation failed: list is impossibly longLockfile validation failed: alignment mismatchLockfile validation failed: unexpected number of package fieldsLockfile validation failed: invalid package list rangeLockfile validation failed: invalid resolution tagLockfile validation failed: invalid package metaLockfile validation failed: invalid bin tagLockfile validation failed: invalid package scripts
+
+--- b'malformed' @59857052 runlen=366 ---
+Missing package info@root:Invalid package resolutionInvalid package nameMissing dependencies objectMissing package binaries objectUnsupported or malformed integrity hash; ignoringMissing integrity hash for npm package resolved to a tarball URL outside the configured registryMissing integrityInvalid git dependency tagMissing git dependency tagDuplicate package path
+
+--- b'malformed' @60341220 runlen=122 ---
+Lockfile is malformed (dependency path is too long)Lockfile is malformed (dependency name "{}" is not a valid folder name)
+
+--- b'malformed' @60341271 runlen=122 ---
+Lockfile is malformed (dependency path is too long)Lockfile is malformed (dependency name "{}" is not a valid folder name)
+
+--- b'malformed' @60646166 runlen=92 ---
+    // Release assertions for React's behavior. If these break there will be malformed HTML.

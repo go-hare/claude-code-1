@@ -45,6 +45,7 @@ import { fetchSingleFileGitDiff, type ToolUseDiff } from 'src/utils/gitDiff.js'
 import { logError } from 'src/utils/log.js'
 import { stampNewMemoryContent } from 'src/memdir/stampNewMemoryContent.js'
 import { expandPath } from 'src/utils/path.js'
+import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
   checkWritePermissionForTool,
   matchingRuleForInput,
@@ -159,6 +160,15 @@ export const FileEditTool = buildTool({
     // Use expandPath for consistent path normalization (especially on Windows
     // where "/" vs "\" can cause readFileState lookup mismatches)
     const fullFilePath = expandPath(file_path)
+
+    // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
+    const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
+      agentId: toolUseContext.agentId,
+      agentWorktree: toolUseContext.agentWorktree,
+    })
+    if (isolationBlock) {
+      return { result: false, message: isolationBlock, errorCode: 12 }
+    }
 
     // Reject edits to team memory files that introduce secrets
     const secretError = checkTeamMemSecrets(fullFilePath, new_string)

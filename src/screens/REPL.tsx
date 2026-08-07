@@ -484,6 +484,9 @@ import { AwsAuthStatusBox } from '../components/AwsAuthStatusBox.js';
 import { useRateLimitWarningNotification } from 'src/hooks/notifs/useRateLimitWarningNotification.js';
 import { useDeprecationWarningNotification } from 'src/hooks/notifs/useDeprecationWarningNotification.js';
 import { useNpmDeprecationNotification } from 'src/hooks/notifs/useNpmDeprecationNotification.js';
+import { useOauthExpiryNotification } from 'src/hooks/notifs/useOauthExpiryNotification.js';
+import { usePersistenceSuppressedNotification } from 'src/hooks/notifs/usePersistenceSuppressedNotification.js';
+import { useTranscriptWriterDegradedNotification } from 'src/hooks/notifs/useTranscriptWriterDegradedNotification.js';
 import { useIDEStatusIndicator } from 'src/hooks/notifs/useIDEStatusIndicator.js';
 import { useModelMigrationNotifications } from 'src/hooks/notifs/useModelMigrationNotifications.js';
 import { useCanSwitchToExistingSubscription } from 'src/hooks/notifs/useCanSwitchToExistingSubscription.js';
@@ -1199,6 +1202,10 @@ export function REPL({
   useFastModeNotification();
   useDeprecationWarningNotification(mainLoopModel);
   useNpmDeprecationNotification();
+  useOauthExpiryNotification();
+  // densable 2.1.217 #2 — transcript saving off / write fail warnings
+  usePersistenceSuppressedNotification();
+  useTranscriptWriterDegradedNotification();
   useAntOrgWarningNotification();
   useInstallMessages();
   useChromeExtensionNotification();

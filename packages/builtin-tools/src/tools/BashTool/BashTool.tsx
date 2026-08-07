@@ -826,6 +826,8 @@ export const BashTool = buildTool({
         isMainThread,
         toolUseId: toolUseContext.toolUseId,
         agentId: toolUseContext.agentId,
+        // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
+        agentWorktree: toolUseContext.agentWorktree,
       });
 
       // Consume the generator and capture the return value
@@ -1019,6 +1021,7 @@ async function* runShellCommand({
   isMainThread,
   toolUseId,
   agentId,
+  agentWorktree,
 }: {
   input: BashToolInput;
   abortController: AbortController;
@@ -1029,6 +1032,8 @@ async function* runShellCommand({
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
+  /** densable agentWorktree for VRu/ZRu shell isolation gates. */
+  agentWorktree?: string;
 }): AsyncGenerator<
   {
     type: 'progress';
@@ -1086,6 +1091,8 @@ async function* runShellCommand({
     preventCwdChanges,
     shouldUseSandbox: shouldUseSandbox(input),
     shouldAutoBackground,
+    // densable VRu — block shell when cwd is outside agent isolation worktree
+    agentWorktree,
   });
 
   // Start the command execution

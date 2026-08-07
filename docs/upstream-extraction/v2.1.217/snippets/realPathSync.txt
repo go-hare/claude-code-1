@@ -1,0 +1,14 @@
+--- b'realpathSync' @63042693 runlen=40 ---
+      val = lazyFs().realpathSync(path);
+
+--- b'realpathSync' @63048566 runlen=46 ---
+    let real = this.#cache.realpathSync(path);
+
+--- b'realpathSync' @63049426 runlen=46 ---
+    let real = this.#cache.realpathSync(path);
+
+--- b'realpathSync' @63567377 runlen=31 ---
+    realpathSync: ["realpath"],
+
+--- b'realpathSync' @64055126 runlen=94 ---
+var assertEncodingForWindows = @undefined, realpathSync = function realpathSync2(p, options) {

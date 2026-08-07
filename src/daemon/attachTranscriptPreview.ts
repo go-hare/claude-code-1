@@ -130,8 +130,9 @@ export function formatTranscriptTailFrame(
   const rowCost = (s: string): number =>
     Math.max(1, Math.ceil(visibleWidth(s) / width))
   const rule = '─'.repeat(width)
-  // densable footer block: rule + pointer + rule + B5_
-  const footerLines = [rule, POINTER, rule, COLD_ATTACH_SHOWING_TRANSCRIPT]
+  // densable zgb footer: u=["",c,b6p,c,Ngb] — leading "" is the one-line gap
+  // between transcript body and the rule/pointer chrome (2.1.217 #14).
+  const footerLines = ['', rule, POINTER, rule, COLD_ATTACH_SHOWING_TRANSCRIPT]
   const footerRows = footerLines.reduce((sum, line) => sum + rowCost(line), 0)
   const bodyBudget = height - footerRows
   if (bodyBudget < 1) return null

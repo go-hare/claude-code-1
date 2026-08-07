@@ -1,0 +1,17 @@
+--- b'context window' @86973789 runlen=259 ---
+Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.S*
+
+--- b'context window' @95092240 runlen=229 ---
+Fraction of the context window (in characters) reserved for the skill listing sent to Claude (default: 0.01 = 1%). When the listing exceeds this, descriptions are shortened to fit. Raise to opt in to higher per-turn context cost.
+
+--- b'context window' @96761939 runlen=74 ---
+Sonnet 4.6 with 1M context window - for long sessions with large codebases
+
+--- b'context window' @96763465 runlen=73 ---
+Sonnet 5 with 1M context window - for long sessions with large codebases-
+
+--- b'context window' @96765353 runlen=72 ---
+Opus 4.6 with 1M context window - for long sessions with large codebases
+
+--- b'context window' @96766769 runlen=72 ---
+Opus 4.7 with 1M context window - for long sessions with large codebases

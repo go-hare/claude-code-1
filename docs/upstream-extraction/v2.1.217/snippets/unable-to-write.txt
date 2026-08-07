@@ -1,0 +1,11 @@
+--- b'unable to write' @59933202 runlen=57 ---
+node_modules/.cache%error: bun is unable to write files: 
+
+--- b'unable to write' @59933256 runlen=35 ---
+[0m: bun is unable to write files: 
+
+--- b'unable to write' @59933803 runlen=49 ---
+0error: bun is unable to write files to tempdir: 
+
+--- b'unable to write' @59933868 runlen=46 ---
+[0m: bun is unable to write files to tempdir: 

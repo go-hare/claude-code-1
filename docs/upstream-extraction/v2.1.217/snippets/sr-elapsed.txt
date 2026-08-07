@@ -1,0 +1,17 @@
+--- b'elapsed' @61783063 runlen=152 ---
+binary_offsetlinesline_numberabsolute_offsetsubmatchesContextstartStatselapsedsearchessearches_with_matchbytes_searchedbytes_printedmatched_linesmatches
+
+--- b'elapsed' @63148893 runlen=98 ---
+  let elapsed = (performance.now() - initial).toFixed(2), enableANSIColors = Bun.enableANSIColors;
+
+--- b'elapsed' @63149660 runlen=73 ---
+        topLine += ` \x1B[2mready in\x1B[0m \x1B[1m${elapsed}\x1B[0m ms`;
+
+--- b'elapsed' @63149987 runlen=45 ---
+        topLine += ` ready in ${elapsed} ms`;
+
+--- b'elapsed' @137829437 runlen=77 ---
+Cannot destructure property 'elapsedTimeSeconds' from null or undefined value
+
+--- b'elapsed' @151671485 runlen=66 ---
+Cannot destructure property 'elapsed' from null or undefined value

@@ -19,20 +19,45 @@ type SupportsHyperlinksOptions = {
 }
 
 /**
+ * densable Slt / WH FORCE_HYPERLINK gate (2.1.217 #15):
+ *   if "FORCE_HYPERLINK" in env:
+ *     library: parseInt===0 → false; else force true
+ *     densable WH: when FORCE present, return supportsHyperlink(stdout)
+ *       which itself treats non-zero FORCE as force-on.
+ * Local: when FORCE_HYPERLINK is set, honor it over auto-detection —
+ *   "0" / empty-after-parse-0 → false; any other value → true.
+ */
+function forceHyperlinkOverride(env: EnvLike): boolean | undefined {
+  if (!('FORCE_HYPERLINK' in env)) return undefined
+  const raw = env['FORCE_HYPERLINK']
+  // densable supports-hyperlinks Mms: if(r) return !(r.length>0 && parseInt(r,10)===0)
+  // unset key handled above; present:
+  if (raw === undefined) return true
+  if (raw.length > 0 && Number.parseInt(raw, 10) === 0) return false
+  return true
+}
+
+/**
  * Returns whether stdout supports OSC 8 hyperlinks.
  * Extends the supports-hyperlinks library with additional terminal detection.
+ * densable 2.1.217: FORCE_HYPERLINK=0 exits hyperlink mode; set forces on.
  * @param options Optional overrides for testing (env, stdoutSupported)
  */
 export function supportsHyperlinks(
   options?: SupportsHyperlinksOptions,
 ): boolean {
+  const env = options?.env ?? process.env
+
+  const forced = forceHyperlinkOverride(env)
+  if (forced !== undefined) {
+    return forced
+  }
+
   const stdoutSupported =
     options?.stdoutSupported ?? supportsHyperlinksLib.stdout
   if (stdoutSupported) {
     return true
   }
-
-  const env = options?.env ?? process.env
 
   // Check for additional terminals not detected by supports-hyperlinks
   const termProgram = env['TERM_PROGRAM']

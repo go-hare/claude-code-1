@@ -1,0 +1,11 @@
+--- b'realpathSync' @63042510 runlen=22 ---
+  realpathSync(path) {
+
+--- b'realpathSync' @63042693 runlen=40 ---
+      val = lazyFs().realpathSync(path);
+
+--- b'realpathSync' @63048566 runlen=46 ---
+    let real = this.#cache.realpathSync(path);
+
+--- b'realpathSync' @63049426 runlen=46 ---
+    let real = this.#cache.realpathSync(path);

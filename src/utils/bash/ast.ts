@@ -40,7 +40,7 @@ export type SimpleCommand = {
 }
 
 export type ParseForSecurityResult =
-  | { kind: 'simple'; commands: SimpleCommand[] }
+  | { kind: 'simple'; commands: SimpleCommand[]; bareAssignmentNames: string[] }
   | { kind: 'too-complex'; reason: string; nodeType?: string }
   | { kind: 'parse-unavailable' }
 
@@ -385,7 +385,8 @@ export async function parseForSecurity(
   // parseCommandRaw('') returns null (falsy check), so short-circuit here.
   // Don't use .trim() — it strips Unicode whitespace (\u00a0 etc.) which the
   // pre-checks in parseForSecurityFromAst need to see and reject.
-  if (cmd === '') return { kind: 'simple', commands: [] }
+  if (cmd === '')
+    return { kind: 'simple', commands: [], bareAssignmentNames: [] }
   const root = await parseCommandRaw(cmd)
   return root === null
     ? { kind: 'parse-unavailable' }
@@ -439,7 +440,7 @@ export function parseForSecurityFromAst(
 
   const trimmed = cmd.trim()
   if (trimmed === '') {
-    return { kind: 'simple', commands: [] }
+    return { kind: 'simple', commands: [], bareAssignmentNames: [] }
   }
 
   if (root === PARSE_ABORTED) {
@@ -462,15 +463,21 @@ function walkProgram(root: Node): ParseForSecurityResult {
   // (including ERROR) falls through to tooComplex() in the default branch.
   // Avoids a separate full-tree walk for error detection.
   const commands: SimpleCommand[] = []
+  // densable U5e bareAssignmentNames thr `n` — statement-level assigns only
+  // (variable_assignment / declaration_command NAME=val / for-loop var).
+  // Command env-prefix (`VAR=x cmd`) is NOT bare — densable XPg keeps those
+  // in envVars only; ZRu uses bare list for git-redirect env assigns that
+  // persist across subsequent git commands.
+  const bareAssignmentNames: string[] = []
   // Track variables assigned earlier in the same command. When a
   // simple_expansion ($VAR) references a tracked var, we can substitute
   // a placeholder instead of returning too-complex. Enables patterns like
   // `NOW=$(date) && jq --arg now "$NOW" ...` — $NOW is known to be the
   // $(date) output (already extracted as inner command).
   const varScope = new Map<string, string>()
-  const err = collectCommands(root, commands, varScope)
+  const err = collectCommands(root, commands, varScope, bareAssignmentNames)
   if (err) return err
-  return { kind: 'simple', commands }
+  return { kind: 'simple', commands, bareAssignmentNames }
 }
 
 /**
@@ -481,18 +488,30 @@ function collectCommands(
   node: Node,
   commands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): ParseForSecurityResult | null {
   if (node.type === 'command') {
     // Pass `commands` as the innerCommands accumulator — any $() extracted
     // during walkCommand gets appended alongside the outer command.
-    const result = walkCommand(node, [], commands, varScope)
+    const result = walkCommand(
+      node,
+      [],
+      commands,
+      varScope,
+      bareAssignmentNames,
+    )
     if (result.kind !== 'simple') return result
     commands.push(...result.commands)
     return null
   }
 
   if (node.type === 'redirected_statement') {
-    return walkRedirectedStatement(node, commands, varScope)
+    return walkRedirectedStatement(
+      node,
+      commands,
+      varScope,
+      bareAssignmentNames,
+    )
   }
 
   if (node.type === 'comment') {
@@ -556,7 +575,7 @@ function collectCommands(
         }
         continue
       }
-      const err = collectCommands(child, commands, scope)
+      const err = collectCommands(child, commands, scope, bareAssignmentNames)
       if (err) return err
     }
     return null
@@ -569,7 +588,7 @@ function collectCommands(
     for (const child of node.children) {
       if (!child) continue
       if (child.type === '!') continue
-      return collectCommands(child, commands, varScope)
+      return collectCommands(child, commands, varScope, bareAssignmentNames)
     }
     return null
   }
@@ -602,7 +621,12 @@ function collectCommands(
           // (`declare -i 42`). Mirrors walkCommand's argv handling — before
           // this, `export "FOO=bar"` hit tooComplex on the `string` child.
           // walkArgument validates each (expansions still reject).
-          const arg = walkArgument(child, commands, varScope)
+          const arg = walkArgument(
+            child,
+            commands,
+            varScope,
+            bareAssignmentNames,
+          )
           if (typeof arg !== 'string') return arg
           // SECURITY: declare/typeset/local flags that change assignment
           // semantics break our static model. -n (nameref): `declare -n X=Y`
@@ -650,14 +674,34 @@ function collectCommands(
               nodeType: 'declaration_command',
             }
           }
+          // densable U5e/toe: declaration word `NAME=val` / `NAME+=val` → bare name
+          // (quoted forms like export "FOO=bar" resolve via walkArgument).
+          if (arg[0] !== '-') {
+            const eq = arg.indexOf('=')
+            if (eq > 0) {
+              const lhs = arg.slice(0, eq)
+              // densable: /^[A-Za-z_][A-Za-z0-9_]*\+?$/ then strip trailing +
+              if (/^[A-Za-z_][A-Za-z0-9_]*\+?$/.test(lhs)) {
+                const bareName = lhs.endsWith('+') ? lhs.slice(0, -1) : lhs
+                bareAssignmentNames.push(bareName)
+              }
+            }
+          }
           argv.push(arg)
           break
         }
         case 'variable_assignment': {
-          const ev = walkVariableAssignment(child, commands, varScope)
+          const ev = walkVariableAssignment(
+            child,
+            commands,
+            varScope,
+            bareAssignmentNames,
+          )
           if ('kind' in ev) return ev
           // export/declare assignments populate the scope so later $VAR refs resolve.
           applyVarToScope(varScope, ev)
+          // densable U5e/qPg: declaration_command assignment → bareAssignmentNames
+          bareAssignmentNames.push(ev.name)
           argv.push(`${ev.name}=${ev.value}`)
           break
         }
@@ -681,10 +725,17 @@ function collectCommands(
     // inner command. Does NOT push to commands — a bare assignment needs
     // no permission rule (it's inert). Common pattern: `VAR=x && cmd`
     // where cmd references $VAR. ~35% of too-complex in top-5k ant cmds.
-    const ev = walkVariableAssignment(node, commands, varScope)
+    const ev = walkVariableAssignment(
+      node,
+      commands,
+      varScope,
+      bareAssignmentNames,
+    )
     if ('kind' in ev) return ev
     // Populate scope so later `$VAR` references resolve.
     applyVarToScope(varScope, ev)
+    // densable U5e/qPg: statement-level variable_assignment → bareAssignmentNames
+    bareAssignmentNames.push(ev.name)
     return null
   }
 
@@ -720,7 +771,12 @@ function collectCommands(
       ) {
       } else if (child.type === 'command_substitution') {
         // `for i in $(seq 1 3)` — inner cmd IS extracted and rule-checked.
-        const err = collectCommandSubstitution(child, commands, varScope)
+        const err = collectCommandSubstitution(
+          child,
+          commands,
+          varScope,
+          bareAssignmentNames,
+        )
         if (err) return err
       } else {
         // Iteration values — validated via walkArgument. Value discarded:
@@ -728,7 +784,7 @@ function collectCommands(
         // and bare `$i` in body → too-complex (see SECURITY comment above).
         // We still validate to reject e.g. `for i in $(cmd); do ...; done`
         // where the iteration word itself is a disallowed expansion.
-        const arg = walkArgument(child, commands, varScope)
+        const arg = walkArgument(child, commands, varScope, bareAssignmentNames)
         if (typeof arg !== 'string') return arg
       }
     }
@@ -743,6 +799,8 @@ function collectCommands(
         nodeType: 'for_statement',
       }
     }
+    // densable U5e/qPg: for-loop variable is a bare assignment name
+    bareAssignmentNames.push(loopVar)
     // SECURITY: Body uses a scope COPY — vars assigned inside the loop
     // body don't leak to commands after `done`. The loop var itself is
     // set in the REAL scope (bash semantics: $i still set after loop)
@@ -752,7 +810,7 @@ function collectCommands(
     for (const c of doGroup.children) {
       if (!c) continue
       if (c.type === 'do' || c.type === 'done' || c.type === ';') continue
-      const err = collectCommands(c, commands, bodyScope)
+      const err = collectCommands(c, commands, bodyScope, bareAssignmentNames)
       if (err) return err
     }
     return null
@@ -801,7 +859,12 @@ function collectCommands(
         for (const c of child.children) {
           if (!c) continue
           if (c.type === 'do' || c.type === 'done' || c.type === ';') continue
-          const err = collectCommands(c, commands, bodyScope)
+          const err = collectCommands(
+            c,
+            commands,
+            bodyScope,
+            bareAssignmentNames,
+          )
           if (err) return err
         }
         continue
@@ -820,7 +883,12 @@ function collectCommands(
           ) {
             continue
           }
-          const err = collectCommands(c, commands, branchScope)
+          const err = collectCommands(
+            c,
+            commands,
+            branchScope,
+            bareAssignmentNames,
+          )
           if (err) return err
         }
         continue
@@ -831,7 +899,12 @@ function collectCommands(
       // collected, track VAR in the REAL scope so the body COPY inherits it.
       const targetScope = seenThen ? new Map(varScope) : varScope
       const before = commands.length
-      const err = collectCommands(child, commands, targetScope)
+      const err = collectCommands(
+        child,
+        commands,
+        targetScope,
+        bareAssignmentNames,
+      )
       if (err) return err
       // If condition included `read VAR...`, track vars in REAL scope.
       // read var value is UNKNOWN (stdin input) → use VAR_PLACEHOLDER
@@ -885,7 +958,12 @@ function collectCommands(
     for (const child of node.children) {
       if (!child) continue
       if (child.type === '(' || child.type === ')') continue
-      const err = collectCommands(child, commands, innerScope)
+      const err = collectCommands(
+        child,
+        commands,
+        innerScope,
+        bareAssignmentNames,
+      )
       if (err) return err
     }
     return null
@@ -917,7 +995,13 @@ function collectCommands(
         }
         continue
       }
-      const err = walkTestExpr(child, argv, commands, varScope)
+      const err = walkTestExpr(
+        child,
+        argv,
+        commands,
+        varScope,
+        bareAssignmentNames,
+      )
       if (err) return err
     }
     commands.push({ argv, envVars: [], redirects: [], text: node.text })
@@ -945,7 +1029,12 @@ function collectCommands(
           varScope.delete(child.text)
           break
         case 'word': {
-          const arg = walkArgument(child, commands, varScope)
+          const arg = walkArgument(
+            child,
+            commands,
+            varScope,
+            bareAssignmentNames,
+          )
           if (typeof arg !== 'string') return arg
           argv.push(arg)
           break
@@ -1105,6 +1194,7 @@ function walkTestExpr(
   argv: string[],
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): ParseForSecurityResult | null {
   // densable mnu first — structural nodes may hide $name[expr] / $name:mod
   const zsh = detectZshSubscriptOrModifier(node)
@@ -1117,7 +1207,13 @@ function walkTestExpr(
     case 'parenthesized_expression': {
       for (const c of node.children) {
         if (!c) continue
-        const err = walkTestExpr(c, argv, innerCommands, varScope)
+        const err = walkTestExpr(
+          c,
+          argv,
+          innerCommands,
+          varScope,
+          bareAssignmentNames,
+        )
         if (err) return err
       }
       return null
@@ -1170,7 +1266,12 @@ function walkTestExpr(
           nodeType: node.type,
         }
       }
-      const arg = walkArgument(node, innerCommands, varScope)
+      const arg = walkArgument(
+        node,
+        innerCommands,
+        varScope,
+        bareAssignmentNames,
+      )
       if (typeof arg !== 'string') return arg
       argv.push(arg)
       return null
@@ -1236,6 +1337,7 @@ function walkRedirectedStatement(
   node: Node,
   commands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): ParseForSecurityResult | null {
   const redirectNodes: Node[] = []
   const heredocNodes: Node[] = []
@@ -1266,7 +1368,7 @@ function walkRedirectedStatement(
     // with empty argv so downstream sees the write.
     const redirects: Redirect[] = []
     for (const rn of redirectNodes) {
-      const r = walkFileRedirect(rn, commands, varScope)
+      const r = walkFileRedirect(rn, commands, varScope, bareAssignmentNames)
       if ('kind' in r) return r
       redirects.push(r)
     }
@@ -1289,23 +1391,33 @@ function walkRedirectedStatement(
   if (body.type === 'list') {
     const kids = body.children
     if (kids.length === 3 && kids[0] && kids[1]?.type === '&&' && kids[2]) {
-      const errA = collectCommands(kids[0], commands, varScope)
+      const errA = collectCommands(
+        kids[0],
+        commands,
+        varScope,
+        bareAssignmentNames,
+      )
       if (errA) return errA
       redirectScope = new Map(varScope)
-      const errB = collectCommands(kids[2], commands, varScope)
+      const errB = collectCommands(
+        kids[2],
+        commands,
+        varScope,
+        bareAssignmentNames,
+      )
       if (errB) return errB
     } else {
-      const err = collectCommands(body, commands, varScope)
+      const err = collectCommands(body, commands, varScope, bareAssignmentNames)
       if (err) return err
       redirectScope = varScope
     }
   } else if (body.type === 'pipeline' || body.type === 'redirected_statement') {
-    const err = collectCommands(body, commands, varScope)
+    const err = collectCommands(body, commands, varScope, bareAssignmentNames)
     if (err) return err
     redirectScope = varScope
   } else {
     redirectScope = new Map(varScope)
-    const err = collectCommands(body, commands, varScope)
+    const err = collectCommands(body, commands, varScope, bareAssignmentNames)
     if (err) return err
   }
 
@@ -1313,7 +1425,7 @@ function walkRedirectedStatement(
   for (const rn of redirectNodes) {
     // Thread `commands` so $() in redirect targets (e.g., `> $(mktemp)`)
     // extracts the inner command for permission checking.
-    const r = walkFileRedirect(rn, commands, redirectScope)
+    const r = walkFileRedirect(rn, commands, redirectScope, bareAssignmentNames)
     if ('kind' in r) return r
     redirects.push(r)
   }
@@ -1446,6 +1558,7 @@ function walkFileRedirect(
   node: Node,
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): Redirect | ParseForSecurityResult {
   const pre = precheckFileRedirect(node)
   if (pre) return pre
@@ -1515,7 +1628,7 @@ function walkFileRedirect(
     } else if (child.type === 'raw_string') {
       target = stripRawString(child.text)
     } else if (child.type === 'string') {
-      const s = walkString(child, innerCommands, varScope)
+      const s = walkString(child, innerCommands, varScope, bareAssignmentNames)
       if (typeof s !== 'string') return s
       target = s
     } else if (
@@ -1526,7 +1639,12 @@ function walkFileRedirect(
       // (concatenation). walkArgument resolves tracked vars from the
       // redirect-scope Map threaded by walkRedirectedStatement (post-`A`
       // snapshot for `A && B > $FOO`).
-      const s = walkArgument(child, innerCommands, varScope)
+      const s = walkArgument(
+        child,
+        innerCommands,
+        varScope,
+        bareAssignmentNames,
+      )
       if (typeof s !== 'string') return s
       target = s
     } else {
@@ -1638,6 +1756,7 @@ function walkHerestringRedirect(
   node: Node,
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): ParseForSecurityResult | null {
   for (const child of node.children) {
     if (!child) continue
@@ -1645,7 +1764,12 @@ function walkHerestringRedirect(
     // Content node: reuse walkArgument. It returns a string on success
     // (which we discard — content is stdin, irrelevant to permissions) or
     // a too-complex result on failure (expansion found, unresolvable var).
-    const content = walkArgument(child, innerCommands, varScope)
+    const content = walkArgument(
+      child,
+      innerCommands,
+      varScope,
+      bareAssignmentNames,
+    )
     if (typeof content !== 'string') return content
     // Herestring content is discarded (not in argv/envVars/redirects) but
     // remains in .text via raw node.text. Scan it here so checkSemantics's
@@ -1665,6 +1789,7 @@ function walkCommand(
   extraRedirects: Redirect[],
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): ParseForSecurityResult {
   const argv: string[] = []
   const envVars: { name: string; value: string }[] = []
@@ -1675,7 +1800,12 @@ function walkCommand(
 
     switch (child.type) {
       case 'variable_assignment': {
-        const ev = walkVariableAssignment(child, innerCommands, varScope)
+        const ev = walkVariableAssignment(
+          child,
+          innerCommands,
+          varScope,
+          bareAssignmentNames,
+        )
         if ('kind' in ev) return ev
         // SECURITY: Env-prefix assignments (`VAR=x cmd`) are command-local in
         // bash — VAR is only visible to `cmd` as an env var, NOT to
@@ -1689,6 +1819,7 @@ function walkCommand(
           child.children[0] ?? child,
           innerCommands,
           varScope,
+          bareAssignmentNames,
         )
         if (typeof arg !== 'string') return arg
         argv.push(arg)
@@ -1700,7 +1831,12 @@ function walkCommand(
       case 'string':
       case 'concatenation':
       case 'arithmetic_expansion': {
-        const arg = walkArgument(child, innerCommands, varScope)
+        const arg = walkArgument(
+          child,
+          innerCommands,
+          varScope,
+          bareAssignmentNames,
+        )
         if (typeof arg !== 'string') return arg
         argv.push(arg)
         break
@@ -1722,7 +1858,12 @@ function walkCommand(
         break
       }
       case 'file_redirect': {
-        const r = walkFileRedirect(child, innerCommands, varScope)
+        const r = walkFileRedirect(
+          child,
+          innerCommands,
+          varScope,
+          bareAssignmentNames,
+        )
         if ('kind' in r) return r
         redirects.push(r)
         break
@@ -1730,7 +1871,12 @@ function walkCommand(
       case 'herestring_redirect': {
         // `cmd <<< "content"` — content is stdin, not argv. Validate it's
         // literal (no expansion); discard the content string.
-        const err = walkHerestringRedirect(child, innerCommands, varScope)
+        const err = walkHerestringRedirect(
+          child,
+          innerCommands,
+          varScope,
+          bareAssignmentNames,
+        )
         if (err) return err
         break
       }
@@ -1782,10 +1928,454 @@ function walkCommand(
           )
           .join(' ')
       : node.text
+  // densable XPg: env-prefix is NOT bareAssignmentNames (envVars only).
+  // densable YPg: post-pass may still push names written by read/printf -v/
+  // declare-like argv forms / mapfile / etc. into the thr `n` list.
+  const ypg = densableYPg(argv, envVars, varScope, bareAssignmentNames)
+  if (ypg) return ypg
   return {
     kind: 'simple',
     commands: [{ argv, envVars, redirects, text }],
+    bareAssignmentNames: [],
   }
+}
+
+/**
+ * densable YPg — after XPg builds argv/envVars, collect additional bare
+ * assignment names written by the command itself (read, printf -v, mapfile,
+ * declare/export word forms when reached as plain command, etc.).
+ * densable signature: YPg(argv, envVars, varScope, bareAssignmentNames)
+ * returns too-complex | null; on success mutates bare list via n.push(...i).
+ */
+const DENSABLE_YPG_WRAPPERS = new Set([
+  'command',
+  'builtin',
+  'noglob',
+  'nocorrect',
+  'time',
+])
+const DENSABLE_YPG_NMU = new Set([
+  'declare',
+  'typeset',
+  'local',
+  'export',
+  'readonly',
+])
+const DENSABLE_YPG_OMU = new Set([
+  ':',
+  'break',
+  'continue',
+  'return',
+  'exit',
+  'shift',
+  'times',
+  'set',
+  'export',
+  'readonly',
+  'unset',
+])
+// densable LZt — read options that take a value operand
+const DENSABLE_YPG_READ_VALUE_FLAGS = new Set([
+  '-p',
+  '-d',
+  '-n',
+  '-N',
+  '-t',
+  '-u',
+  '-i',
+])
+// densable nLg — zsh print options that take a value (binary exact)
+const DENSABLE_YPG_PRINT_VALUE_FLAGS = new Set(['-f', '-C', '-x', '-X', '-u'])
+// densable eQi — shell special vars; writing them is too-complex (_it)
+const DENSABLE_YPG_EQI = new Set([
+  'RANDOM',
+  'SECONDS',
+  'LINENO',
+  'OPTIND',
+  'MAILCHECK',
+  'HISTCMD',
+  'SRANDOM',
+  'EPOCHSECONDS',
+  'EPOCHREALTIME',
+  'COLUMNS',
+  'LINES',
+  'SHLVL',
+  'ERRNO',
+  'TMOUT',
+  'HISTSIZE',
+  'SAVEHIST',
+  'TRY_BLOCK_ERROR',
+  'TRY_BLOCK_INTERRUPT',
+  'KEYTIMEOUT',
+  'LISTMAX',
+  'LOGCHECK',
+  'PERIOD',
+  'FUNCNEST',
+  'UID',
+  'EUID',
+  'GID',
+  'EGID',
+  'ZLE_RPROMPT_INDENT',
+  'MBEGIN',
+  'MEND',
+  'PPID',
+  'ARGC',
+  'ZSH_SUBSHELL',
+  'TTYIDLE',
+  'status',
+])
+// densable tLg — FJi lower-cased shell env names that alter command lookup
+const DENSABLE_TLG = new Set([
+  'path',
+  'home',
+  'tmpprefix',
+  'bash_env',
+  'env',
+  'cdpath',
+  'globignore',
+  'shell',
+  'fpath',
+  'bash_loadables_path',
+  'module_path',
+  'manpath',
+  'mailpath',
+  'readnullcmd',
+  'nullcmd',
+  'histfile',
+  'zdotdir',
+  'functions',
+  'commands',
+  'aliases',
+  'galiases',
+  'saliases',
+  'lang',
+  'language',
+  'lc_all',
+  'lc_ctype',
+  'lc_collate',
+  'lc_messages',
+  'lc_numeric',
+  'lc_time',
+  'histchars',
+  'textdomain',
+  'textdomaindir',
+])
+
+/** densable FJi — env names that alter command lookup / loader. */
+function densableFJi(name: string): boolean {
+  const t = name.toLowerCase()
+  return (
+    DENSABLE_TLG.has(t) ||
+    t.startsWith('ld_') ||
+    t.startsWith('dyld_') ||
+    t.startsWith('bash_func_')
+  )
+}
+
+/** densable _it — dangerous shell vars that cannot be statically verified. */
+function densableYPgIsDangerousVar(name: string): boolean {
+  // densable: FJi(e) || e==="IFS" || e==="PS4" || e==="PROMPT4" || eQi.has(e)
+  return (
+    densableFJi(name) ||
+    name === 'IFS' ||
+    name === 'PS4' ||
+    name === 'PROMPT4' ||
+    DENSABLE_YPG_EQI.has(name)
+  )
+}
+
+function densableYPg(
+  argvIn: string[],
+  envVars: { name: string; value: string }[],
+  varScope: Map<string, string>,
+  bareAssignmentNames: string[],
+): ParseForSecurityResult | null {
+  // densable: o = all written names (dangerous check + scope Ib);
+  // i = bare list candidates (n.push(...i))
+  const written: string[] = []
+  const bareFromCmd: string[] = []
+  const pushName = (raw: string, toBare = true): void => {
+    const m = raw.match(/^[A-Za-z_][A-Za-z0-9_]*/)
+    if (!m) return
+    written.push(m[0]!)
+    if (toBare) bareFromCmd.push(m[0]!)
+  }
+
+  let a = argvIn.slice()
+  let wrapperOnly = false
+  let lastWrapper: string | undefined
+  for (;;) {
+    const d = a[0]
+    if (d === undefined) break
+    if (DENSABLE_YPG_WRAPPERS.has(d)) {
+      if (
+        (lastWrapper === 'builtin' || lastWrapper === 'command') &&
+        d !== 'builtin' &&
+        d !== 'command'
+      ) {
+        if (d === 'noglob' && !wrapperOnly) {
+          return {
+            kind: 'too-complex',
+            reason: `'${lastWrapper} noglob' runs the wrapped command on zsh (for 'command', under POSIX_BUILTINS) but not bash — cannot statically model whether it executes`,
+            nodeType: 'command',
+          }
+        }
+        wrapperOnly = true
+      }
+      let p = 1
+      while (p < a.length && /^-[-pvV]*$/.test(a[p]!)) {
+        if (/[vV]/.test(a[p]!)) wrapperOnly = true
+        p++
+      }
+      a = a.slice(p)
+      lastWrapper = d
+    } else if (d === '!') {
+      if (lastWrapper === 'builtin' || lastWrapper === 'command') {
+        wrapperOnly = true
+      }
+      a = a.slice(1)
+      lastWrapper = undefined
+    } else if (/^[A-Za-z_]\w*(\[[^\]]*\])?\+?=/.test(d)) {
+      // argv-level assignment word after wrappers (rare; tree-sitter usually
+      // emits variable_assignment nodes instead). densable still tracks it.
+      pushName(d)
+      a = a.slice(1)
+      lastWrapper = undefined
+    } else {
+      break
+    }
+  }
+
+  const u = a[0]
+  if (u === undefined) {
+    // No command left — densable pushes env-prefix names as bare.
+    for (const e of envVars) pushName(e.name)
+  } else if (DENSABLE_YPG_NMU.has(u)) {
+    let seenEnd = false
+    for (let p = 1; p < a.length; p++) {
+      const f = a[p]!
+      if (!seenEnd && f === '--') {
+        seenEnd = true
+        continue
+      }
+      if (!seenEnd && /^[+-].*m/.test(f)) {
+        return {
+          kind: 'too-complex',
+          reason: `'${u} ${f}' (wrapped form) — zsh -m/+m pattern-assigns every matching variable; cannot statically model target set`,
+          nodeType: 'command',
+        }
+      }
+      if (!seenEnd && f.startsWith('-')) continue
+      if (f.includes('=')) pushName(f)
+    }
+  } else if (u === 'read') {
+    let d = 1
+    let endOpts = false
+    let sawName = false
+    while (d < a.length) {
+      const m = a[d]!
+      if (!endOpts && m === '--') {
+        endOpts = true
+        d++
+        continue
+      }
+      if (!endOpts && m.startsWith('-')) {
+        if (DENSABLE_YPG_READ_VALUE_FLAGS.has(m)) {
+          d += 2
+          continue
+        }
+        let consumeNext = false
+        for (let y = 1; y < m.length; y++) {
+          const ch = m[y]
+          if (ch === 'a' || ch === 'A') {
+            const v = y < m.length - 1 ? m.slice(y + 1) : a[d + 1]
+            if (v) {
+              pushName(v)
+              sawName = true
+            }
+            consumeNext = y === m.length - 1
+            break
+          }
+          if (DENSABLE_YPG_READ_VALUE_FLAGS.has(`-${ch}`)) {
+            consumeNext = y === m.length - 1
+            break
+          }
+        }
+        d += consumeNext ? 2 : 1
+        continue
+      }
+      pushName(m)
+      sawName = true
+      d++
+    }
+    if (!sawName) written.push('REPLY')
+  } else if (u === 'printf') {
+    for (let d = 1; d < a.length; d++) {
+      const p = a[d]!
+      if (p === '--' || !p.startsWith('-')) break
+      if (p === '-v') {
+        if (a[d + 1]) pushName(a[d + 1]!)
+        d++
+        continue
+      }
+      if (p.startsWith('-v')) pushName(p.slice(2))
+    }
+  } else if (u === 'getopts') {
+    const d = a[1] === '--' ? 1 : 0
+    if (a[2 + d]) pushName(a[2 + d]!)
+    written.push('OPTARG')
+    varScope.set('OPTIND', VAR_PLACEHOLDER)
+  } else if (u === 'wait') {
+    for (let d = 1; d < a.length; d++) {
+      const p = a[d]!
+      if (p === '--' || !p.startsWith('-')) break
+      for (let f = 1; f < p.length; f++) {
+        if (p[f] === 'p') {
+          if (f < p.length - 1) pushName(p.slice(f + 1))
+          else if (a[d + 1]) {
+            pushName(a[d + 1]!)
+            d++
+          }
+          break
+        }
+      }
+    }
+  } else if (!wrapperOnly && (u === 'unset' || u === 'unsetenv')) {
+    let isFunc = false
+    let sawName = false
+    for (let f = 1; f < a.length; f++) {
+      const m = a[f]!
+      if (m.startsWith('-')) {
+        if (sawName) {
+          return {
+            kind: 'too-complex',
+            reason: `'unset … ${m}' (wrapped form) — flag after name; getopt stops at first non-option`,
+            nodeType: 'command',
+          }
+        }
+        if (m !== '-f' && m !== '-v') {
+          return {
+            kind: 'too-complex',
+            reason: `'unset ${m}' (wrapped form) — flag other than -f/-v (zsh -m pattern-unset, bash -n nameref) cannot be statically modelled`,
+            nodeType: 'command',
+          }
+        }
+        if (m === '-f') isFunc = true
+        continue
+      }
+      sawName = true
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(m)) {
+        return {
+          kind: 'too-complex',
+          reason: `'unset ${m}' (wrapped form) — non-identifier operand may pathname-expand; cannot statically know which var is unset`,
+          nodeType: 'command',
+        }
+      }
+      if (isFunc) continue
+      if (densableYPgIsDangerousVar(m)) {
+        return {
+          kind: 'too-complex',
+          reason: `'unset' targets shell variable ${m} (exec-influencing / integer-attr / IFS / PS4)`,
+          nodeType: 'command',
+        }
+      }
+      varScope.set(m, '')
+    }
+  } else if (u === 'print') {
+    // zsh print -v name
+    for (let d = 1; d < a.length; d++) {
+      const p = a[d]!
+      if (p === '--' || p === '-' || !p.startsWith('-')) break
+      let consumeNext = false
+      for (let m = 1; m < p.length; m++) {
+        const g = p[m]
+        if (g === 'v') {
+          const y = m < p.length - 1 ? p.slice(m + 1) : a[d + 1]
+          if (y) pushName(y)
+          consumeNext = m === p.length - 1
+          break
+        }
+        if (DENSABLE_YPG_PRINT_VALUE_FLAGS.has(`-${g}`)) {
+          consumeNext = m === p.length - 1
+          break
+        }
+      }
+      if (consumeNext) d++
+    }
+  } else if (u === 'set') {
+    for (let d = 1; d < a.length; d++) {
+      const p = a[d]!
+      if (p === '--' || !/^[-+]/.test(p)) break
+      const f = p.indexOf('A', 1)
+      if (f === -1) {
+        if (p.endsWith('o')) d++
+        continue
+      }
+      if (f < p.length - 1) pushName(p.slice(f + 1))
+      else if (a[d + 1]) pushName(a[d + 1]!)
+      break
+    }
+  } else if (u === 'mapfile' || u === 'readarray') {
+    let sawName = false
+    for (let p = 1; p < a.length; p++) {
+      const f = a[p]!
+      if (f.startsWith('-')) {
+        if (/^-[dnOsuCc]$/.test(f)) p++
+        continue
+      }
+      pushName(f)
+      sawName = true
+    }
+    if (!sawName) written.push('MAPFILE')
+  } else if (
+    !wrapperOnly &&
+    (u === 'cd' || u === 'chdir' || u === 'pushd' || u === 'popd')
+  ) {
+    let skipPwd = false
+    if (u === 'pushd' || u === 'popd') {
+      for (let p = 1; p < a.length; p++) {
+        const f = a[p]!
+        if (f === '--') break
+        if (/^-[a-zA-Z]*n[a-zA-Z]*$/.test(f)) {
+          skipPwd = true
+          break
+        }
+        if (u === 'popd' && (/^\+0*[1-9]/.test(f) || /^-0+$/.test(f))) {
+          skipPwd = true
+          break
+        }
+      }
+    }
+    if (!skipPwd) {
+      varScope.set('PWD', VAR_PLACEHOLDER)
+      varScope.set('OLDPWD', VAR_PLACEHOLDER)
+    }
+    if (u === 'pushd' || u === 'popd') {
+      varScope.set('DIRSTACK', VAR_PLACEHOLDER)
+      varScope.set('dirstack', VAR_PLACEHOLDER)
+    }
+  }
+
+  // densable: env-prefix on omu builtins also contributes bare names
+  if (u !== undefined && envVars.length > 0 && DENSABLE_YPG_OMU.has(u)) {
+    for (const e of envVars) pushName(e.name)
+  }
+
+  // densable: for (d of o) { if (_it(d)) too-complex; r.set(d, Ib) }
+  for (const d of written) {
+    if (densableYPgIsDangerousVar(d)) {
+      return {
+        kind: 'too-complex',
+        reason: `'${u ?? envVars[0]?.name}' writes shell variable ${d} (exec-influencing / integer-attr / IFS) — value cannot be statically verified`,
+        nodeType: 'command',
+      }
+    }
+    varScope.set(d, VAR_PLACEHOLDER)
+  }
+
+  // densable: return n.push(...i), null — only bareFromCmd (i), not all written
+  bareAssignmentNames.push(...bareFromCmd)
+  return null
 }
 
 /**
@@ -1801,6 +2391,7 @@ function collectCommandSubstitution(
   csNode: Node,
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): ParseForSecurityResult | null {
   // Vars set BEFORE the $() are visible inside (bash subshell semantics),
   // but vars set INSIDE don't leak out. Pass a COPY of the outer scope so
@@ -1812,7 +2403,12 @@ function collectCommandSubstitution(
     if (child.type === '$(' || child.type === '`' || child.type === ')') {
       continue
     }
-    const err = collectCommands(child, innerCommands, innerScope)
+    const err = collectCommands(
+      child,
+      innerCommands,
+      innerScope,
+      bareAssignmentNames,
+    )
     if (err) return err
   }
   return null
@@ -1826,6 +2422,7 @@ function walkArgument(
   node: Node | null,
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): string | ParseForSecurityResult {
   if (!node) {
     return { kind: 'too-complex', reason: 'Null argument node' }
@@ -1871,7 +2468,7 @@ function walkArgument(
       return stripRawString(node.text)
 
     case 'string':
-      return walkString(node, innerCommands, varScope)
+      return walkString(node, innerCommands, varScope, bareAssignmentNames)
 
     case 'concatenation': {
       if (BRACE_EXPANSION_RE.test(node.text)) {
@@ -1884,7 +2481,12 @@ function walkArgument(
       let result = ''
       for (const child of node.children) {
         if (!child) continue
-        const part = walkArgument(child, innerCommands, varScope)
+        const part = walkArgument(
+          child,
+          innerCommands,
+          varScope,
+          bareAssignmentNames,
+        )
         if (typeof part !== 'string') return part
         result += part
       }
@@ -1935,6 +2537,7 @@ function walkString(
   node: Node,
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): string | ParseForSecurityResult {
   let result = ''
   let cursor = -1
@@ -2023,7 +2626,12 @@ function walkString(
         // `echo "SHA: $(git rev-parse HEAD)"` → extracts BOTH
         // `echo "SHA: $(...)"` AND `git rev-parse HEAD` — both must match
         // permission rules. ~27% of too-complex in top-5k ant cmds.
-        const err = collectCommandSubstitution(child, innerCommands, varScope)
+        const err = collectCommandSubstitution(
+          child,
+          innerCommands,
+          varScope,
+          bareAssignmentNames,
+        )
         if (err) return err
         result += CMDSUB_PLACEHOLDER
         sawDynamicPlaceholder = true
@@ -2204,6 +2812,7 @@ function walkVariableAssignment(
   node: Node,
   innerCommands: SimpleCommand[],
   varScope: Map<string, string>,
+  bareAssignmentNames: string[],
 ): { name: string; value: string; isAppend: boolean } | ParseForSecurityResult {
   let name: string | null = null
   let value = ''
@@ -2224,7 +2833,12 @@ function walkVariableAssignment(
       // `VAR=$(date)` runs `date`, stores output. `VAR=$(rm -rf /)` runs
       // `rm` — the inner command IS checked against permission rules, so
       // `rm` must match a rule. The variable just holds whatever `rm` prints.
-      const err = collectCommandSubstitution(child, innerCommands, varScope)
+      const err = collectCommandSubstitution(
+        child,
+        innerCommands,
+        varScope,
+        bareAssignmentNames,
+      )
       if (err) return err
       value = CMDSUB_PLACEHOLDER
     } else if (child.type === 'simple_expansion') {
@@ -2240,7 +2854,12 @@ function walkVariableAssignment(
       // with containsAnyPlaceholder in the caller to treat as unknown.
       value = v
     } else {
-      const v = walkArgument(child, innerCommands, varScope)
+      const v = walkArgument(
+        child,
+        innerCommands,
+        varScope,
+        bareAssignmentNames,
+      )
       if (typeof v !== 'string') return v
       value = v
     }

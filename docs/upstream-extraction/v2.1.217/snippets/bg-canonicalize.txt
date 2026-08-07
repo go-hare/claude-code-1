@@ -1,0 +1,17 @@
+--- b'canonicalize' @61064078 runlen=212 ---
+priorityexchangerefreshminttlnsnamehostmasterpreferenceservicecanonicalizeIP() expects a string but received no arguments.entriesinternal error: entered unreachable code: Unsupported hostent_with_ttls record type
+
+--- b'canonicalize' @64453377 runlen=361 ---
+} = @getInternalField(@internalModuleRegistry, 89) || @createInternalModuleById(89), { Server: NetServer, Socket: NetSocket } = net, getBundledRootCertificates = @lazy(79), getExtraCACertificates = @lazy(80), getSystemCACertificates = @lazy(81), canonicalizeIP = @lazy(82), getTLSDefaultCiphers = @lazy(83), setTLSDefaultCiphers = @lazy(84), _VALID_CIPHERS_SET;
+
+--- b'canonicalize' @64467008 runlen=92 ---
+        ArrayPrototypePush.@call(ips, canonicalizeIP(StringPrototypeSlice.@call(name, 11)));
+
+--- b'canonicalize' @64467227 runlen=84 ---
+    if (valid = ArrayPrototypeIncludes.@call(ips, canonicalizeIP(hostname)), !valid)
+
+--- b'canonicalize' @64724648 runlen=359 ---
+var $, fmtBinding = @lazy(100), highlightJavaScript = (code) => fmtBinding(code, "highlight-javascript"), highlightJavaScriptRedacted = (code) => fmtBinding(code, "highlight-javascript-redacted"), escapePowershell = (code) => fmtBinding(code, "escape-powershell"), canonicalizeIP = @lazy(82), xxHash3ForTesting = @lazy(101), SQL = @lazy(1), patchInternals = {
+
+--- b'canonicalize' @81022603 runlen=48 ---
+Invalid input to canonicalize a URL host string.

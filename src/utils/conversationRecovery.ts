@@ -30,6 +30,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import { logForDebugging } from './debug.js'
 import { logError } from './log.js'
 import {
   createAssistantMessage,
@@ -80,14 +81,83 @@ const SEND_USER_FILE_TOOL_NAME: string | null = feature('KAIROS')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /**
- * Transforms legacy attachment types to current types for backward compatibility
+ * densable nXu — structural validation of attachment payloads before resume
+ * migration. Null / non-object / missing required fields → invalid (drop).
+ */
+export function isValidAttachmentPayload(attachment: unknown): boolean {
+  if (
+    typeof attachment !== 'object' ||
+    attachment === null ||
+    !('type' in attachment) ||
+    typeof (attachment as { type: unknown }).type !== 'string'
+  ) {
+    return false
+  }
+  const e = attachment as Record<string, unknown>
+  switch (e.type) {
+    case 'new_file':
+      return 'filename' in e && typeof e.filename === 'string'
+    case 'new_directory':
+      return 'path' in e && typeof e.path === 'string'
+    case 'invoked_skills':
+      return (
+        'skills' in e &&
+        Array.isArray(e.skills) &&
+        e.skills.every((t: unknown) => typeof t === 'object' && t !== null)
+      )
+    case 'hook_success':
+      return 'content' in e && typeof e.content === 'string'
+    case 'skill_listing':
+      return !('names' in e) || e.names === undefined || Array.isArray(e.names)
+    case 'hook_additional_context':
+      return (
+        'content' in e &&
+        Array.isArray(e.content) &&
+        e.content.every((t: unknown) => typeof t === 'string')
+      )
+    default:
+      return true
+  }
+}
+
+/**
+ * densable dQr — drop attachment messages with missing/malformed payload so
+ * resume never TypeErrors on `attachment.type` of null/undefined.
+ */
+export function dropMalformedAttachments(messages: Message[]): Message[] {
+  let dropped = 0
+  const kept = messages.filter(n => {
+    if (n.type === 'attachment' && !isValidAttachmentPayload(n.attachment)) {
+      dropped += 1
+      return false
+    }
+    return true
+  })
+  if (dropped === 0) return messages
+  const unit = dropped === 1 ? 'entry' : 'entries'
+  logForDebugging(
+    `resume: dropped ${dropped} attachment ${unit} with a missing or malformed payload — the session transcript appears partially corrupt`,
+    { level: 'error' },
+  )
+  return kept
+}
+
+/**
+ * Transforms legacy attachment types to current types for backward compatibility.
+ * densable Hgy — assumes payload already passed nXu/dQr.
  */
 function migrateLegacyAttachmentTypes(message: Message): Message {
   if (message.type !== 'attachment') {
     return message
   }
 
-  const attachment = message.attachment as {
+  // densable Hgy guard: null/malformed should already be dropped by dQr
+  const raw = message.attachment
+  if (raw == null || typeof raw !== 'object') {
+    return message
+  }
+
+  const attachment = raw as {
     type: string
     [key: string]: unknown
   } // Handle legacy types not in current type system
@@ -118,12 +188,12 @@ function migrateLegacyAttachmentTypes(message: Message): Message {
   // Backfill displayPath for attachments from old sessions
   if (!('displayPath' in attachment)) {
     const path =
-      'filename' in attachment
-        ? (attachment.filename as string)
-        : 'path' in attachment
-          ? (attachment.path as string)
-          : 'skillDir' in attachment
-            ? (attachment.skillDir as string)
+      typeof attachment.filename === 'string'
+        ? attachment.filename
+        : typeof attachment.path === 'string'
+          ? attachment.path
+          : typeof attachment.skillDir === 'string'
+            ? attachment.skillDir
             : undefined
     if (path) {
       return {
@@ -204,10 +274,11 @@ export function deserializeMessagesWithInterruptDetection(
   replyOnResume = false,
 ): DeserializeResult {
   try {
-    // Transform legacy attachment types before processing
-    const migratedMessages = serializedMessages.map(
-      migrateLegacyAttachmentTypes,
-    )
+    // densable dQr before Hgy — drop malformed attachments so resume never
+    // TypeErrors on null/missing attachment payloads (2.1.217 #10).
+    const sanitizedMessages = dropMalformedAttachments(serializedMessages)
+    // Transform legacy attachment types before processing (densable Hgy)
+    const migratedMessages = sanitizedMessages.map(migrateLegacyAttachmentTypes)
 
     // Strip invalid permissionMode values from deserialized user messages.
     // The field is unvalidated JSON from disk and may contain modes from a different build.

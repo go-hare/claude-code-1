@@ -1,0 +1,14 @@
+--- b'Failed to save' @60315297 runlen=107 ---
+lcov.infoFailed to save lcov.info fileFailed to create lcov file|---------|---------|-------------------<r>
+
+--- b'Failed to save' @60669496 runlen=108 ---
+preversion0.0.0Version not changedFailed to save package.json: {}Failed to write package.json: {}postversion
+
+--- b'Failed to save' @98807472 runlen=40 ---
+Failed to save API key to macOS Keychain
+
+--- b'Failed to save' @100891032 runlen=54 ---
+Failed to save sensitive config to secure storage for 
+
+--- b'Failed to save' @100891584 runlen=31 ---
+Failed to save user config for 

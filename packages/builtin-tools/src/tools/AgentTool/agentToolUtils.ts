@@ -813,6 +813,7 @@ export async function runAsyncAgentLifecycle({
   agentIdForCleanup,
   enableSummarization,
   getWorktreeResult,
+  onRunSettled,
 }: {
   taskId: string
   abortController: AbortController
@@ -829,6 +830,12 @@ export async function runAsyncAgentLifecycle({
     worktreePath?: string
     worktreeBranch?: string
   }>
+  /**
+   * densable Oze onRunSettled (p) — called from every terminal exit path
+   * (complete / cancel / error / stall / finally). Used for concurrent slot
+   * release (2.1.217 #18 takeConcurrencySlot).
+   */
+  onRunSettled?: () => void
 }): Promise<void> {
   let stopSummarization: (() => void) | undefined
   const agentMessages: MessageType[] = []
@@ -1096,6 +1103,8 @@ export async function runAsyncAgentLifecycle({
       ...worktreeResult,
     })
   } finally {
+    // densable Oze finally: p?.() — concurrent slot release is once-safe
+    onRunSettled?.()
     clearInvokedSkillsForAgent(agentIdForCleanup)
     clearDumpState(agentIdForCleanup)
   }

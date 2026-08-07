@@ -84,6 +84,14 @@ describe('splitPathInFrontmatter', () => {
       'src/*.tsx',
     ])
   })
+
+  test('densable 2.1.217 #13: over-budget brace expansion stays unexpanded', () => {
+    // 2 groups of 40 alts → 1600 combos > Xug=1000 → Qug returns unexpanded
+    const alts = Array.from({ length: 40 }, (_, i) => `x${i}`).join(',')
+    const pattern = `{${alts}}/{${alts}}`
+    const result = splitPathInFrontmatter(pattern)
+    expect(result).toEqual([pattern])
+  })
 })
 
 describe('parsePositiveIntFromFrontmatter', () => {

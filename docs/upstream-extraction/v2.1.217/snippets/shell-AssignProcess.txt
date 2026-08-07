@@ -1,0 +1,11 @@
+--- b'AssignProcessToJobObject' @61936807 runlen=33 ---
+2AssignProcessToJobObject(child) 
+
+--- b'AssignProcessToJobObject' @61938730 runlen=235 ---
+CryptBinaryToStringA returned non-UTF-8CreateJobObjectWSetInformationJobObject(KILL_ON_JOB_CLOSE)SetInformationJobObject(BasicUIRestrictions)AssignProcessToJobObjectread caller's window-station nameBCryptGenRandom (desktop name suffix)
+
+--- b'AssignProcessToJobObject' @80402889 runlen=24 ---
+AssignProcessToJobObject
+
+--- b'AssignProcessToJobObject' @81456972 runlen=24 ---
+AssignProcessToJobObject

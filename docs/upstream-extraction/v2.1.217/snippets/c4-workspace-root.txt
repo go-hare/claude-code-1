@@ -1,0 +1,14 @@
+--- b'workspaceRoot' @249653616 runlen=71 ---
+// workspaceRoot = the git repo enclosing dirname(NODE_MODULES), else\r
+
+--- b'workspaceRoot' @249654121 runlen=74 ---
+// uploaded verbatim, so a path anywhere under workspaceRoot would let a\r
+
+--- b'workspaceRoot' @249654277 runlen=80 ---
+// extraFonts, docsDir, and guidelinesGlob are bounded to workspaceRoot \u2014\r
+
+--- b'workspaceRoot' @249654659 runlen=78 ---
+const workspaceRoot = gitWorkspaceRoot(realpathSync(dirname(NODE_MODULES)));\r
+
+--- b'workspaceRoot' @249656289 runlen=78 ---
+  // ./ or ../ entry is a repo file (package-relative, workspaceRoot-bounded\r

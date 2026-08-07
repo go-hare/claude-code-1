@@ -1,0 +1,1 @@
+mate"&&!(Co.type==="monitor_ws"&&Co.ambient));if($am(d.maxBudgetUsd,Object.values(ni.tasks??{})))T(`print budget halt: total cost ${nS()} reached --max-budget-usd ${d.maxBudgetUsd}; stopping background agents`),process.stderr.write(`Budget limit reached ($${nS().toFixed(2)} of $${d.maxBudgetUsd}); stopping background agents.

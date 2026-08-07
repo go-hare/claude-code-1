@@ -1,0 +1,14 @@
+--- b'originalCwd' @108449050 runlen=96 ---
+assemblePluginLoadResult: originalCwd changed mid-scan; skipping side-effects (stale early-kick)
+
+--- b'originalCwd' @124857496 runlen=21 ---
+/clear: originalCwd "
+
+--- b'originalCwd' @144120365 runlen=70 ---
+Cannot destructure property 'originalCwd' from null or undefined value
+
+--- b'originalCwd' @159937202 runlen=29 ---
+deeplink: originalCwd changed
+
+--- b'originalCwd' @206300661 runlen=70 ---
+Cannot destructure property 'originalCwd' from null or undefined value

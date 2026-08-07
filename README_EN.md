@@ -43,9 +43,31 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → 2.1.212 → 2.1.214** product alignment (211 host/agent paths + 212 official 48 rows + 214 official 47 rows 1:1 + Qre/code-sessions periphery). **Published npm version is whatever `package.json` says** (currently **2.7.30**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216** product alignment (214 safety-valve pack + 215 no model auto `/verify`/`/code-review` + 216 long-session/sandbox/worktree/bg/UI reliability, 40 rows). **Published npm version is whatever `package.json` says** (currently **2.7.31**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.214 alignment (2.7.30)
+#### densable 2.1.216 alignment (2.7.31)
+
+Source of truth: `docs/upstream-extraction/v2.1.216/official-216-checklist.md` (**HAVE 38 / N/A 1 / GAP 0**), `pack-report.md`, batch extracts. Stacked on **2.1.214/215**.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **Sandbox** | `sandbox.filesystem.disabled` (skip FS isolation, keep network egress); first-class credentials | — |
+| **Long session / normalize** | quadratic message-normalize fix (Map + cursor); `/context` over-limit warning; failed compact as error | — |
+| **Auth / auto mode** | OAuth 401 sideQuery retry; AskUser free-text neutral wording; Chrome missing-scope 403 loop; MCP re-auth without early revoke | — |
+| **worktree / bg** | git isolation (block `git -C`/`GIT_DIR` into shared checkout); foreign-repo resume; deletable no-git worktree; daemon `stop --any` no mis-kill; resume agent identity; bg startup cancel immune to interrupt | — |
+| **Permissions / Shell / PS** | list/negation redirect; Win network-path RO prompt; non-ASCII word boundaries; PS invisible Unicode; stronger git/gh args | — |
+| **UI / session UX** | @-mention/hooks/vim paste/statusline/resume-picker; Esc-Esc rewind; agent list Ctrl+X delete; GUI editor handoff; fullscreen dialog/config/footer; skill menu hot refresh; plugin skill prefix; one-line fork confirm | — |
+| **Other** | `/rewind` no symlink/hardlink; ultrareview size/empty-diff; spend-limit reason; telemetry user_abort; needs-input park; dataviz palette; cloud interrupted-turn re-run | **#39 VSCode RTL** N/A; UDS/LAN/TEAMMEM default OFF |
+
+#### densable 2.1.215 alignment (included in 2.7.31)
+
+Source of truth: `docs/upstream-extraction/v2.1.215/official-215-checklist.md` (**HAVE 2 / N/A 1 / GAP 0**).
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **Skills policy** | `/verify`, `/code-review`: `disableModelInvocation: true` + user `/` still works | Do **not** disable `/simplify` (still model-invocable); verification-agent copy N/A |
+
+#### densable 2.1.214 alignment (2.7.30, included)
 
 Source of truth: `docs/upstream-extraction/v2.1.214/official-214-checklist.md` (**HAVE 47 / GAP 0**), batch extracts. Stacked on the **2.1.212** closeout: safety valves, EndConversation, PS/Bash, bg daemon, RC ready-push, etc.
 
@@ -73,10 +95,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF |
 
-### Recent updates (2.7.5 → 2.7.30)
+### Recent updates (2.7.5 → 2.7.31)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.31** | **densable 2.1.215 + 2.1.216 closeout**: 215 `/verify`·`/code-review` no model auto-invoke (HAVE 2); 216 **HAVE 38 / N/A 1 / GAP 0** (`sandbox.filesystem.disabled`, long-session normalize, auto-mode 401, worktree git isolation, daemon stop --any, bg/agents UX, Win network paths, fullscreen UI, skill menu hot refresh, `/rewind` symlink safety, etc.). Intentionally off: UDS/LAN/TEAMMEM; VSCode RTL N/A. |
 | **2.7.30** | **densable 2.1.214 full 1:1 (47/47 HAVE)**: permission/Bash/PS safety valves; EndConversation; tool heartbeat; GrowthBook null payload + OAuth flag refresh; bg daemon control-socket/retire/deleteJob; RC session-ready push gate; stream cost / advisor stall / hooks exit2 / OTel / MCP list_changed; etc. Intentionally off: UDS/LAN/TEAMMEM. |
 | **2.7.29** | **densable 2.1.212 closeout**: official 48 rows 0 GAP; `/fork` keepParent + `/subtask`; session caps / MCP auto-bg / auto-mode reset; ultrareview + Qre/code-sessions (OTe/KLc/H8/F1g/nts) 1:1. Intentionally off: UDS/LAN/TEAMMEM. |
 | **2.7.28** | **Windows packaged clipboard paste**: when `bun --compile` cannot load sharp natives, fall back to System.Drawing resize/JPEG; dev still uses sharp. |

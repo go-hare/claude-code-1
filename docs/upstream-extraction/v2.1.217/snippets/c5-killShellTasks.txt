@@ -1,0 +1,5 @@
+--- b'killShellTasks' @107258712 runlen=52 ---
+killShellTasksForAgent: killing orphaned shell task 
+
+--- b'killShellTasks' @237920095 runlen=11225 ---
+.o,status:"killed",notified:!0,shellCommand:null,endTime:Date.now()}}),r&&!n)xp(e,"stopped",{toolUseId:r.toolUseId,summary:r.description});Mv(e)}function krr(e,t){for(let r of Object.values(t.all())){if(r.status!=="running")continue;if(r.type==="local_bash"){if(r.isBackgrounded&&r.agentId===e)return!0}else if(r.type==="monitor_mcp"||r.type==="monitor_ws"){if(r.agentId===e)return!0}}return!1}function sku(e,t){for(let[r,n]of Object.entries(t.all()))if(TI(n)&&n.agentId===e&&n.status==="running")T(`killShellTasksForAgent: killing orphaned shell task ${r} (agent ${e} exiting)`),ONe(r,t);J5e((r)=>r.agentId===e)}var zst=b(()=>{Ge();Dr();Eg();KE();AC()});function lku(e){if(e===void 0)return;return gp(process.env.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS)||T5g}function H5g(e){let t=e.trimEnd().split(`

@@ -1,0 +1,17 @@
+TOOL_IDLE_TIMEOUT±48         	   "   CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS             ÉC)    CLAUDE_CODE_MCP_ALLOWLIST_ENV          	* (   CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION       ô 0$   CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH           	   %   CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION         	   $   CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS           	   !   CLAUDE_CODE_MANAGED_SETTINGS_PATH{48         	      CLAUDE_CODE_LOOP_PERSISTENT58         	º©5   CLAUDE_CODE_LOOP_KEEPALIVEÈ08         É 0   CLAUDE_CODE_IS_COWORK          	Â*    CLAUDE_CODE_INVESTIGATE_FIRST          
+
+---
+
+ (depth          	       of            	   »   ). Complete this task directly using your tools instead of spawning another agent. If the user explicitly requested deeper nesting, ask them to raise CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH.            	      r       ÿÿÿÿÿÿÿHFùÿÿÿÿ              	                     	   G   Cannot destructure property 'taskRegistry' from null or undefined value        	      i              	      subagent_nested_teammate          y   T e a m m a t e s   c a n n o t   s p a w n   o t h e r   t e a m m a t e s      t h e   t e a m   r o s t e r   i s 
+
+---
+
+OCK_REMOTE_SETTINGS:()=>iqm,CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:()=>D6m,CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS:()=>P6m,CLAUDE_CODE_MCP_ALLOWLIST_ENV:()=>SVm,CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION:()=>Jqm,CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH:()=>Xqm,CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION:()=>Yqm,CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS:()=>Kqm,CLAUDE_CODE_MANAGED_SETTINGS_PATH:()=>bVm,CLAUDE_CODE_LOOP_PERSISTENT:()=>oqm,CLAUDE_CODE_LOOP_KEEPALIVE:()=>nqm,CLAUDE_CODE_IS_COWORK:()=>rqm,CLAUDE_CODE_INVESTIGATE_FIRST:()=>tqm,CLAUDE_CODE_IDLE_TOKEN_THRESHOLD:()=>zqm,CLAUDE_CODE_IDLE_THRESHOLD_MINUTES:()=>qqm
+
+---
+
+h}),Te("loop_cancel_all"),e.length}var iBg,Izr=60,Qio=3600,sBg=1200,aBg=1;var lNe=b(()=>{st();qt();zr();mt();wzr();$ue();Ge();Wr();iBg=(mIt(),On(fIt))});var Uue="EnterWorktree";function Bue(){let e=Z.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH;if(e!==void 0)return e;if(Hts===null){let{getFeatureValue_CACHED_MAY_BE_STALE:t}=(zr(),On(IHt)),r=t(pBg,Evu);Hts=typeof r==="number"&&Number.isInteger(r)&&r>=1?r:Evu}return Hts}var Evu=1,pBg="tengu_hazel_trellis",Hts=null;var gIt=b(()=>{br()});var IQ="TaskOutput";var otr="ConnectGitHub";var wqe="propose_skills",vvu="Show the user a review card of proposed skill
+
+---
+
+Subagent nesting limit reached (depth ${m} of ${g}). Complete this task directly using your tools instead of spawning another agent. If the user explicitly requested deeper nesting, ask them to raise CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH.`);r=r.replace(/\s+/g," ").trim();let y=l.getAppState(),_=vn(l),v=_.mode,{taskRegistry:E}=l,S=cc()?y.teamContext:void 0,w=!!l.teammateContext;if((w||!!xGe())&&i)throw fe("subagent_launch","subagent_nested_teammate"),new Dxe("Teammates cannot spawn other teammates \u2014 the team roster is flat. To spawn a subagent instead, omit the `name` parameter.");if(w&&o==

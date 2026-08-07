@@ -1,17 +1,27 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  assertAndTakeConcurrencySlot,
   assertCanSpawnSubagent,
+  assertSubagentDepthAllowed,
   consumeWebSearchBudgetOrCapMessage,
+  DEFAULT_MAX_CONCURRENT_SUBAGENTS,
   DEFAULT_MAX_SUBAGENTS_PER_SESSION,
+  DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH,
   DEFAULT_MAX_WEB_SEARCHES_PER_SESSION,
+  formatSubagentConcurrencyCapMessage,
+  formatSubagentDepthCapMessage,
   formatWebSearchSessionCapMessage,
+  getConcurrentSubagents,
   getTotalAgentSpawns,
   getWebSearchCalls,
   incrementTotalAgentSpawns,
   incrementWebSearchCalls,
   resetSessionSpawnCaps,
+  resolveMaxConcurrentSubagents,
   resolveMaxSubagentsPerSession,
+  resolveMaxSubagentSpawnDepth,
   resolveMaxWebSearchesPerSession,
+  takeConcurrencySlot,
 } from '../sessionSpawnCaps.js'
 
 afterEach(() => {
@@ -50,6 +60,38 @@ describe('resolveMax*PerSession', () => {
   })
 })
 
+describe('resolveMaxConcurrentSubagents (densable 2.1.217 #18)', () => {
+  test('default 20', () => {
+    expect(resolveMaxConcurrentSubagents({})).toBe(
+      DEFAULT_MAX_CONCURRENT_SUBAGENTS,
+    )
+  })
+
+  test('env CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS', () => {
+    expect(
+      resolveMaxConcurrentSubagents({
+        CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '5',
+      }),
+    ).toBe(5)
+  })
+})
+
+describe('resolveMaxSubagentSpawnDepth (densable 2.1.217 #19)', () => {
+  test('default 1', () => {
+    expect(resolveMaxSubagentSpawnDepth({})).toBe(
+      DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH,
+    )
+  })
+
+  test('env CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH', () => {
+    expect(
+      resolveMaxSubagentSpawnDepth({
+        CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '3',
+      }),
+    ).toBe(3)
+  })
+})
+
 describe('counters', () => {
   test('increment / reset', () => {
     expect(getTotalAgentSpawns()).toBe(0)
@@ -62,6 +104,68 @@ describe('counters', () => {
     resetSessionSpawnCaps()
     expect(getTotalAgentSpawns()).toBe(0)
     expect(getWebSearchCalls()).toBe(0)
+  })
+})
+
+describe('takeConcurrencySlot', () => {
+  test('increments and once-safe release', () => {
+    expect(getConcurrentSubagents()).toBe(0)
+    const release = takeConcurrencySlot()
+    expect(getConcurrentSubagents()).toBe(1)
+    takeConcurrencySlot()
+    expect(getConcurrentSubagents()).toBe(2)
+    release()
+    expect(getConcurrentSubagents()).toBe(1)
+    release() // once-safe
+    expect(getConcurrentSubagents()).toBe(1)
+  })
+
+  test('assertAndTakeConcurrencySlot blocks at cap', () => {
+    const env = { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '2' }
+    const r1 = assertAndTakeConcurrencySlot({ env })
+    const r2 = assertAndTakeConcurrencySlot({ env })
+    expect(getConcurrentSubagents()).toBe(2)
+    expect(() => assertAndTakeConcurrencySlot({ env })).toThrow(
+      formatSubagentConcurrencyCapMessage(2),
+    )
+    r1()
+    r2()
+    expect(getConcurrentSubagents()).toBe(0)
+    // after release can take again
+    assertAndTakeConcurrencySlot({ env })
+    expect(getConcurrentSubagents()).toBe(1)
+  })
+})
+
+describe('assertSubagentDepthAllowed', () => {
+  test('main (undefined context) depth 0 allowed under default max 1', () => {
+    expect(assertSubagentDepthAllowed({ env: {} })).toBe(0)
+  })
+
+  test('depth 1 blocked when max is 1', () => {
+    expect(() =>
+      assertSubagentDepthAllowed({
+        agentContext: {
+          agentId: 'a1',
+          agentType: 'subagent',
+          depth: 1,
+        },
+        env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1' },
+      }),
+    ).toThrow(formatSubagentDepthCapMessage(1, 1))
+  })
+
+  test('depth 1 allowed when max is 2', () => {
+    expect(
+      assertSubagentDepthAllowed({
+        agentContext: {
+          agentId: 'a1',
+          agentType: 'subagent',
+          depth: 1,
+        },
+        env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '2' },
+      }),
+    ).toBe(1)
   })
 })
 

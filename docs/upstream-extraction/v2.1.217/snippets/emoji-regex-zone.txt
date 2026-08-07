@@ -1,0 +1,40 @@
+### WtS= @ 21055
+WtS=/(^|\s):([a-z0-9_+-]+):$/;Bwn=(lxf(),On(axf));SZo=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$/});function hxf(e,t,r){let n=t.all();for(let o of Object.values(n))if(Yl(o)&&o.id!==e.id&&(o.status==="running"||_w(o))&&Ygo(o,e.agentId,n)){if(r?.source==="user"
+---
+### LGa= @ 21023
+LGa=/(^|\s):([a-z0-9_+-]{2,})$/,WtS=/(^|\s):([a-z0-9_+-]+):$/;Bwn=(lxf(),On(axf));SZo=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$/});function hxf(e,t,r){let n=t.all();for(let o of Object.values(n))if(Yl(o)&&o.id!==e.id&&(o.status==="running"||_w(o))&&Ygo(o,e.a
+---
+### jtS= @ 20902
+jtS=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$/u,PGa=/(^|\s)#([a-z0-9][a-z0-9_-]*)$/,LGa=/(^|\s):([a-z0-9_+-]{2,})$/,WtS=/(^|\s):([a-z0-9_+-]+):$/;Bwn=(lxf(),On(axf));SZo=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$/});functi
+---
+### PGa= @ 20987
+PGa=/(^|\s)#([a-z0-9][a-z0-9_-]*)$/,LGa=/(^|\s):([a-z0-9_+-]{2,})$/,WtS=/(^|\s):([a-z0-9_+-]+):$/;Bwn=(lxf(),On(axf));SZo=/(^|[\s\u3002\u3001\uFF1F\uFF01])@([\w-]*)$/});function hxf(e,t,r){let n=t.all();for(let o of Object.values(n))if(Yl(o)&&o.id!==e.id&&(o.s
+---
+### function GtS @ 125
+function GtS(e,t,r){if(t===void 0)return!1;let n=e.length-t.length,o=r-n;return n>0&&o>=0&&e.slice(0,o)+e.slice(r)===t&&/^[a-z0-9_+-]*:$/.test(e.slice(o,r))}function EWt(e){return typeof e==="object"&&e!==null&&"type"in e&&(e.type==="directory"||e.type==="file
+---
+### function EWt @ 282
+function EWt(e){return typeof e==="object"&&e!==null&&"type"in e&&(e.type==="directory"||e.type==="file")}function VDe(e,t,r){if(r.length===0)return-1;if(t<0)return 0;let n=e[t];if(!n)return 0;let o=r.findIndex((i)=>i.id===n.id);return o>=0?o:0}function uxf(e)
+---
+### function NtS @ -1
+### function OtS @ -1
+### LtS= @ 70
+LtS=20,MtS;var lxf=b(()=>{sxf();MtS=Object.keys(bZo)});function GtS(e,t,r){if(t===void 0)return!1;let n=e.length-t.length,o=r-n;return n>0&&o>=0&&e.slice(0,o)+e.slice(r)===t&&/^[a-z0-9_+-]*:$/.test(e.slice(o,r))}function EWt(e){return typeof e==="object"&&e!==
+---
+re /^[a-z0-9_+-]*:$/
+re /resume ${t.sessionId}`:`/
+re /":" ",s=e.slice(0,r),a=e.slice(r+n),l="@"+t+i;return{newInput:s+l+a,cursorPos:s.length+l.length}}function HXe(e,t,r=!1){if(!e)return null;let n=e.substring(0,t);if(r){let c=/
+re /),f=p?p[0]:"";return{token:u[0]+f,startPos:u.index,isQuoted:!0}}}if(r){let c=n.lastIndexOf("@");if(c>=0&&(c===0||/
+re /.test(n[c-1]))){let u=n.substring(c),d=u.match(FtS);if(d&&d[0].length===u.length){let f=e.substring(t).match(cxf),m=f?f[0]:"";return{token:d[0]+m,startPos:c,isQuoted:!1}}}}let o=r?UtS:BtS,i=n.match(o
+re /"))){ie.current=$r;let En=await Csa($r,{maxResults:10});if(ie.current!==$r)return;if(En.length>0){Q(void 0),l(($n)=>({suggestions:En,selectedSuggestion:VDe($n.suggestions,$n.selectedSuggestion,En),co
+re /)){pe.cancel(),De.cancel(),he();return}let cn=await Jhn($r);if(cn.length>0){l((En)=>({suggestions:cn,selectedSuggestion:VDe(En.suggestions,En.selectedSuggestion,cn),commandArgumentHint:void 0})),ee.c
+re /")){let Se=En.slice(0,$n),Re=fQu(e,Se);if(Re.length>0){if(se.current===En)return;pe.cancel(),De(En,Se,Re);return}}De.cancel()}let $r=HGa(Ht,e),cn=Bi(Ht.slice(1)," ");if(l((En)=>({commandArgumentHint:
+re /":" ";if(Jt=Mr+ht.id+ur,t(Jt),n(Jt.length),EWt(ht.metadata)&&ht.metadata.type==="directory")l(($r)=>({...$r,commandArgumentHint:void 0})),We(Jt,Jt.length);else he()}else{let Mr=HXe(o,i,!0)??HXe(o,i,!
+re /,"").length;else if(Mr)ur=ht.token.length-1;else ur=ht.token.length;if(kt.length>ur){let $r=OGa({displayText:kt,mode:s,hasAtPrefix:Mr,needsQuotes:!1,isQuoted:ht.isQuoted,isComplete:!1});Krn({suggesti
+re /":" ");if(t(cn),n(cn.length),$r)We(cn,cn.length);else he();return}he(),r(o,!0);return}let kt=HXe(o,i,!0)??HXe(o,i,!1);if(kt){let Mr=EWt(ht.metadata)&&ht.metadata.type==="directory",ur=dxf(o,ht.id,kt.
+re /\\()[\]~:]*/u
+re /\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-./
+re /\\()[\]~:]+$/u
+re /});function hxf(e,t,r){let n=t.all();for(let o of Object.values(n))if(Yl(o)&&o.id!==e.id&&(o.status==="running"||_w(o))&&Ygo(o,e.agentId,n)){if(r?.source==="user"&&bk(o))s8r(o.id,{agentType:o.agentTy
+re /t:ArS,u=Math.max(r,Math.round(c*e)),d=e>a,p=r>l||u>l;if(!d&&!p)return;return{axis:d&&p?"both":d?"agents":"tokens",scheduledAgents:e,totalTokens:r,projectedTokens:u,agentCap:a,tokenCap:l,capFromGuidel
+re /${t.total} agents done${a}`,d=e.totalTokens>0?`${Ne.arrowDown} ${dd(e.totalTokens)} tokens`:"",p=[...r?[{text:Mhn(r)}]:[],{text:u},{text:Ws(s)},...d?[{text:d}]:[]];return{name:l,description:c===l?"":

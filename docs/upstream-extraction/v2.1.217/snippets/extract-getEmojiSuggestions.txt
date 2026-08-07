@@ -1,0 +1,1 @@
+	 resolveAndPrepend 	 prependPathRefs 	 extractInboundAttachments 	 initReplBridge 	 ClosedIssueNotice 	 getEmojiSuggestions 	 getEmoji 	 startBackgroundHousekeeping 	 isLastCleanupSentinelFresh 	 # _resetHousekeepingStartedForTesting 	   TRANSCRIPT_HEARTBEAT_INTERVAL_MS 	 STALE_CLEANUP_CATCHUP_DELAY_MS 	 4 DELAY_VERY_SLOW_OPERATIONS_THAT_HAPPEN_EVERY_SESSION 	 useVoice 

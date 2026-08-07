@@ -1,0 +1,17 @@
+--- b'Windows' @59652087 runlen=45 ---
+Bun v1.4.0 (f6d0fcd24) Windows x64 (baseline)
+
+--- b'Windows' @59940048 runlen=28 ---
+WindowsLoop::get() singleton
+
+--- b'Windows' @60342147 runlen=708 ---
+ipcserializationserialization must be "json" or "advanced"spawnAbortSignalonDisconnectonDisconnect must be a function or undefinedonExitonExit must be a function or undefinedenv must be an objectstdiostdio must be an arraystdinlazydetacheduidgidwindowsHidewindowsVerbatimArgumentstimeoutkillSignalmaxBufferterminalterminal pseudoconsole is no longer validterminal was created inline by a previous spawn and cannot be reusedterminal is closedipc and extra stdio are not supported with terminal on WindowsFailed to open PTYFailed to duplicate PTY file descriptorPTY not supported on this platformFailed to start terminal writerFailed to start terminal readerterminal must be a Terminal object or options object
+
+--- b'Windows' @60368822 runlen=532 ---
+constructorTypeScript does not allow decorators on class constructorsawaityieldCannot use "yield" or "await" here.Unexpected "..."Unexpected ":"use strictuse asmThe following expression is not returned because of an automatically-inserted semicolonletusingCannot use "export" with an "await using" declarationCannot use "declare" with an "await using" declarationCannot use "export" with a "using" declarationCannot use "declare" with a "using" declarationCannot use "let" as an identifier hereWindowsWaker used before init()Bundler
+
+--- b'Windows' @60372283 runlen=1624 ---
+" }with{type:"json"} with { type: "json" }with{type:"jsonc"} with { type: "jsonc" }with{type:"toml"} with { type: "toml" }with{type:"wasm"} with { type: "wasm" }with{type:"napi"} with { type: "napi" }with{type:"base64"} with { type: "base64" }with{type:"dataurl"} with { type: "dataurl" }with{type:"text"} with { type: "text" }with{type:"sh"} with { type: "sh" }with{type:"sqlite"} with { type: "sqlite" }with{type:"html"} with { type: "html" }with{type:"yaml"} with { type: "yaml" }with{type:"json5"} with { type: "json5" }with{type:"md"} with { type: "md" }jsxtsxjsoncwasmnapidataurlsqlitejson5infallible: prop has value__proto__prototypegetPromise.resolve(globalThis.Bun)PartialWriteFileSystem.instance accessed before initinternal error: entered unreachable code: StaticPipeWriter stdin requires WindowsStdioResult::BufferACLBINDCHECKOUTCOPYLINKLOCKM-SEARCHMERGEMKACTIVITYMKADDRESSBOOKMKCALENDARMKCOLMOVENOTIFYOPTIONSPATCHPROPFINDPROPPATCHPURGEQUERYREBINDREPORTSEARCHSOURCESUBSCRIBEUNBINDUNLINKUNLOCKUNSUBSCRIBEassertion failed: mid <= self.len()
+
+--- b'Windows' @60392480 runlen=75 ---
+# Remove Entry from Windows Installer, if it is owned by this installation.

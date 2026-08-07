@@ -575,6 +575,8 @@ export const PowerShellTool = buildTool({
         isMainThread,
         toolUseId: toolUseContext.toolUseId,
         agentId: toolUseContext.agentId,
+        // densable 2.1.217 VRu — pin isolation worktree into shell gates
+        agentWorktree: toolUseContext.agentWorktree,
       });
 
       let generatorResult;
@@ -791,6 +793,7 @@ async function* runPowerShellCommand({
   isMainThread,
   toolUseId,
   agentId,
+  agentWorktree,
 }: {
   input: PowerShellToolInput;
   abortController: AbortController;
@@ -801,6 +804,8 @@ async function* runPowerShellCommand({
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
+  /** densable agentWorktree for VRu shell isolation gate. */
+  agentWorktree?: string;
 }): AsyncGenerator<
   {
     type: 'progress';
@@ -876,6 +881,8 @@ async function* runPowerShellCommand({
       // The explicit platform check is redundant-but-obvious.
       shouldUseSandbox: getPlatform() === 'windows' ? false : shouldUseSandbox({ command, dangerouslyDisableSandbox }),
       shouldAutoBackground,
+      // densable VRu — block shell when cwd is outside agent isolation worktree
+      agentWorktree,
     });
   } catch (e) {
     logError(e);

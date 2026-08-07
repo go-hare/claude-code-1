@@ -1,0 +1,17 @@
+--- b'attachment' @59656318 runlen=3547 ---
+ from background-colorbackground-imagebackground-position-xbackground-position-ybackground-positionbackground-sizebackground-repeatbackground-attachmentbackground-clipbackground-originbackgroundbox-shadowopacityvisibilitymin-widthmin-heightmax-widthmax-heightblock-sizeinline-sizemin-block-sizemin-inline-sizemax-block-sizemax-inline-sizebox-sizingaspect-ratiooverflowoverflow-xoverflow-ytext-overflowbottominset-block-startinset-block-endinset-inline-startinset-inline-endinset-blockinset-inlineborder-spacingborder-top-colorborder-bottom-colorborder-left-colorborder-right-colorborder-block-start-colorborder-block-end-colorborder-inline-start-colorborder-inline-end-colorborder-top-styleborder-bottom-styleborder-left-styleborder-right-styleborder-block-start-styleborder-block-end-styleborder-inline-start-styleborder-inline-end-styleborder-top-widthborder-bottom-widthborder-left-widthborder-right-widthborder-block-start-widthborder-block-end-widthborder-inline-start-widthborder-inline-end-widthborder-top-left-radiusborder-top-right-radiusborder-bottom-left-radiusborder-bottom-right-radiusborder-start-start-radiusborder-start-end-radiusborder-end-start-radiusborder-end-end-radiusborder-radiusborder-image-sourceborder-image-outsetborder-image-repeatborder-image-widthborder-image-sliceborder-imageborder-colorborder-styleborder-widthborder-block-colorborder-block-styleborder-block-widthborder-inline-colorborder-inline-styleborder-inline-widthborder-topborder-bottomborder-leftborder-rightborder-blockborder-block-startborder-block-endborder-inlineborder-inline-startborder-inline-endoutlineoutline-coloroutline-styleoutline-widthflex-directionflex-wrapflex-flowflex-growflex-shrinkflex-basisalign-contentjustify-contentplace-cont
+
+--- b'attachment' @65472674 runlen=166 ---
+During tdevelopersartificialequivalentoriginatedCommissionattachment<span id="there wereNederlandsbeyond theregisteredjournalistfrequentlyall of thelang="en" </style>
+
+--- b'attachment' @103892047 runlen=24 ---
+bridge_attachment_upload
+
+--- b'attachment' @103899447 runlen=24 ---
+bridge_attachment_upload
+
+--- b'attachment' @104619705 runlen=53 ---
+from system prompt, tool definitions, or attachments.
+
+--- b'attachment' @104620182 runlen=149 ---
+tool definitions, and attachment content. A single-exchange conversation cannot be compacted; reduce attached files/tools or start with less context.

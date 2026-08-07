@@ -1,0 +1,11 @@
+--- b'budget' @63620654 runlen=157 ---
+  let res = reduceToSingleString(ctx, output, base, braces, extrasType, recurseTimes, value), newLength = (ctx.budget[ctx.indentationLvl] || 0) + res.length;
+
+--- b'budget' @63620711 runlen=72 ---
+  if (ctx.budget[ctx.indentationLvl] = newLength, newLength > 134217728)
+
+--- b'budget' @65428380 runlen=2045 ---
+nddamagesportsexceptratingsignedthingseffectfieldsstatesofficevisualeditorvolumeReportmuseummoviesparentaccessmostlymother" id="marketgroundchancesurveybeforesymbolmomentspeechmotioninsidematterCenterobjectexistsmiddleEuropegrowthlegacymannerenoughcareeransweroriginportalclientselectrandomclosedtopicscomingfatheroptionsimplyraisedescapechosenchurchdefinereasoncorneroutputmemoryiframepolicemodelsNumberduringoffersstyleskilledlistedcalledsilvermargindeletebetterbrowselimitsGlobalsinglewidgetcenterbudgetnowrapcreditclaimsenginesafetychoicespirit-stylespreadmakingneededrussiapleaseextentScriptbrokenallowschargedividefactormember-basedtheoryconfigaroundworkedhelpedChurchimpactshouldalwayslogo" bottomlist">){var prefixorangeHeader.push(couplegardenbridgelaunchReviewtakingvisionlittledatingButtonbeautythemesforgotSearchanchoralmostloadedChangereturnstringreloadMobileincomesupplySourceordersviewed&nbsp;courseAbout island<html cookiename="amazonmodernadvicein</a>: The dialoghousesBEGIN MexicostartscentreheightaddingIslandassetsEmpireSchooleffortdirectnearlymanualSelect.
+
+--- b'budget' @80311326 runlen=62 ---
+Minimum budget for which the wasmInliningFactor does not apply

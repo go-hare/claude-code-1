@@ -1,0 +1,2 @@
+--- b'function Rit' @237070408 runlen=58731 ---
+ containing non-text content"}}await O1e();let n=o6r(t,r),o=r?Le(e,null,2):e;try{await as().writeExclusive(n,o),T(`Persisted tool result to ${n} (${nl(o.length)})`)}catch(a){if(Mt(a)!=="EEXIST")return T(`Failed to persist tool result to ${n}: ${Kmu(dn(a))}`,{level:"error"}),{error:Kmu(dn(a))}}let{preview:i,hasMore:s}=i6r(o,eer);return{filepath:n,originalSize:o.length,isJson:r,preview:i,hasMore:s}}function Rit(e){let t=`${kit}

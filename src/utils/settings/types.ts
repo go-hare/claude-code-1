@@ -1001,6 +1001,13 @@ export const SettingsSchema = lazySchema(() =>
           'When false, prompt suggestions are disabled. When absent or true, ' +
             'prompt suggestions are enabled.',
         ),
+      // densable 2.1.217 #1
+      emojiCompletionEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'When false, the :emoji: shortcode typeahead (the suggestion popup and the :name: inline replacement) is disabled. When absent or true, it is enabled.',
+        ),
       poorMode: z
         .boolean()
         .optional()

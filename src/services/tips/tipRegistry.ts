@@ -54,7 +54,10 @@ import {
   getCachedReferrerReward,
 } from '../api/referral.js'
 import { loadMarketplaceDeclaredPluginTips } from './marketplacePluginTips.js'
-import { getSessionsSinceLastShown } from './tipHistory.js'
+import {
+  getSessionsSinceLastShown,
+  getTipLifetimeShownCount,
+} from './tipHistory.js'
 import type { Tip, TipContext } from './types.js'
 
 let _isOfficialMarketplaceInstalledCache: boolean | undefined
@@ -495,6 +498,8 @@ const externalTips: Tip[] = [
       return `Working with HTML/CSS? Install the frontend-design plugin:\n${blue(`/plugin install frontend-design@${OFFICIAL_MARKETPLACE_NAME}`)}`
     },
     cooldownSessions: 3,
+    // densable 2.1.217 #17: maxLifetimeShows:3 (lifetime impressions, not cooldown)
+    maxLifetimeShows: 3,
     isRelevant: async (context?) =>
       isMarketplacePluginRelevant('frontend-design', context, {
         filePath: /\.(html|css|htm)$/i,
@@ -683,9 +688,15 @@ export async function getRelevantTips(context?: TipContext): Promise<Tip[]> {
   const isRelevant = await Promise.all(
     tips.map(_ => _.isRelevant?.(context) ?? Promise.resolve(true)),
   )
+  // densable Joi: cooldownSessions + optional maxLifetimeShows (Svr < max)
   const filtered = tips
     .filter((_, index) => isRelevant[index])
     .filter(_ => getSessionsSinceLastShown(_.id) >= _.cooldownSessions)
+    .filter(
+      _ =>
+        _.maxLifetimeShows === undefined ||
+        getTipLifetimeShownCount(_.id) < _.maxLifetimeShows,
+    )
 
   return [...filtered, ...customTips]
 }

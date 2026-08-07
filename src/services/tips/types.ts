@@ -15,5 +15,10 @@ export type Tip = {
   id: string // 稳定 id：用于冷却与历史去重
   content: (ctx?: TipContext) => Promise<string> // 异步生成 Spinner 旁提示文案
   cooldownSessions: number // 至少间隔多少会话后才可再次展示
+  /**
+   * densable 2.1.217 `maxLifetimeShows`：跨会话终身展示上限。
+   * 缺省 = 无上限；仅 `recordTipShown` 成功写入 tipsHistory 时计入。
+   */
+  maxLifetimeShows?: number
   isRelevant?: (ctx?: TipContext) => Promise<boolean> // 可选：当前是否应展示该条
 }

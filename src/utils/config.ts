@@ -284,6 +284,13 @@ export type GlobalConfig = {
   tipsHistory: {
     [tipId: string]: number // Key is tipId, value is the numStartups when tip was last shown
   }
+  /**
+   * densable 2.1.217 `tipLifetimeShownCounts` — cumulative show count per tip id
+   * (bumped only when tipsHistory is written for a new startup).
+   */
+  tipLifetimeShownCounts?: {
+    [tipId: string]: number
+  }
 
   // /buddy companion soul — bones regenerated from userId on read. See src/buddy/.
   companion?: import('../buddy/types.js').StoredCompanion
@@ -690,6 +697,7 @@ function createDefaultGlobalConfig(): GlobalConfig {
     },
     env: {},
     tipsHistory: {},
+    tipLifetimeShownCounts: {},
     memoryUsageCount: 0,
     promptQueueUseCount: 0,
     btwUseCount: 0,

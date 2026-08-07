@@ -8,6 +8,7 @@ import { z } from 'zod/v4'
 import { buildTool, type ToolDef, type ToolUseContext } from 'src/Tool.js'
 import type { NotebookCell, NotebookContent } from 'src/types/notebook.js'
 import { getCwd } from 'src/utils/cwd.js'
+import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import { isENOENT } from 'src/utils/errors.js'
 import { getFileModificationTime, writeTextContent } from 'src/utils/file.js'
 import { readFileSyncWithMetadata } from 'src/utils/fileRead.js'
@@ -203,6 +204,15 @@ export const NotebookEditTool = buildTool({
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path
       : resolve(getCwd(), notebook_path)
+
+    // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
+    const isolationBlock = checkBgIsolationWriteBlock(fullPath, {
+      agentId: toolUseContext.agentId,
+      agentWorktree: toolUseContext.agentWorktree,
+    })
+    if (isolationBlock) {
+      return { result: false, message: isolationBlock, errorCode: 12 }
+    }
 
     // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
     if (fullPath.startsWith('\\\\') || fullPath.startsWith('//')) {

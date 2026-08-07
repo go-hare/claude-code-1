@@ -172,10 +172,26 @@ export class OAuthService {
     rateLimitTier: RateLimitTier | null,
     profile?: OAuthProfileResponse,
   ): OAuthTokens {
+    const refreshTokenExpiresIn = (
+      response as { refresh_token_expires_in?: number | string }
+    ).refresh_token_expires_in
+    let refreshTokenExpiresAt: number | undefined
+    if (typeof refreshTokenExpiresIn === 'number') {
+      refreshTokenExpiresAt = Date.now() + refreshTokenExpiresIn * 1000
+    } else if (
+      typeof refreshTokenExpiresIn === 'string' &&
+      refreshTokenExpiresIn.trim() !== ''
+    ) {
+      const n = Number.parseInt(refreshTokenExpiresIn, 10)
+      if (Number.isFinite(n)) {
+        refreshTokenExpiresAt = Date.now() + n * 1000
+      }
+    }
     return {
       accessToken: response.access_token,
       refreshToken: response.refresh_token,
       expiresAt: Date.now() + response.expires_in * 1000,
+      refreshTokenExpiresAt,
       scopes: client.parseScopes(response.scope),
       subscriptionType,
       rateLimitTier,

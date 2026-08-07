@@ -1,0 +1,17 @@
+--- b'abortController' @64438021 runlen=45 ---
+    if (this.#abortController === @undefined)
+
+--- b'abortController' @64438065 runlen=50 ---
+      this.#abortController = new AbortController;
+
+--- b'abortController' @64438121 runlen=40 ---
+    return this.#abortController.signal;
+
+--- b'abortController' @117822709 runlen=74 ---
+Cannot destructure property 'abortController' from null or undefined value
+
+--- b'abortController' @118632629 runlen=74 ---
+Cannot destructure property 'abortController' from null or undefined value
+
+--- b'abortController' @121081447 runlen=67 ---
+[SendMessageTool] Warning: Could not find task/abortController for 

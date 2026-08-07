@@ -1,0 +1,10 @@
+ext-surface            	   
+   push-notif             	   
+   voice-mode             	   
+   no-flicker             	      console-api-key        	      opusplan-mode-reminder         	      frontend-design-plugin         	      subagent-fanout-nudge          	      dynamic-workflows            þÿ       	      loop-command-nudge             	      code-review-low-fast           	      plugin-disuse-review           	      goal-command-nudge             	      guest-passes           	      feedback-command       	      team-onboarding-share   
+                       
+
+---
+
+ctivate Plan Mode and plan with Claude Opus.`,cooldownSessions:2,async isRelevant(){let e=Et(),r=_4()==="opusplan",n=e.lastPlanModeUse?(Date.now()-e.lastPlanModeUse)/86400000:1/0;return r&&n>3}},{id:"frontend-design-plugin",priority:1,providerAgnostic:!0,content:async(e)=>`Working with HTML/CSS? Install the frontend-design plugin:
+${Jn("suggestion",e.theme)(`/plugin install frontend-design@${_O}`)}`,cooldownSessions:3,maxLifetimeShows:3,isRelevant:async(e)=>jYf("frontend-design",e,{filesRead:["**/*.html","**/*.css","**/*.htm"]})},{id:"subagent-fanout-nudge",providerAgnostic:!0,content:async(e)

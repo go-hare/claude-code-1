@@ -1762,12 +1762,19 @@ async function run(): Promise<CommanderCommand> {
       const maintenance = options.maintenance ?? false;
 
       // Official 208: if (!print && stdout.isTTY && screenReader) console.log(banner)
+      // densable 2.1.217: after banner, Yqc() starts SR startup quiet window
       if (!print && process.stdout.isTTY) {
         const { formatScreenReaderModeBanner } =
           require('./utils/screenReaderGate.js') as typeof import('./utils/screenReaderGate.js');
         const banner = formatScreenReaderModeBanner();
         if (banner !== null) {
           console.log(banner);
+          try {
+            const { markScreenReaderStartupQuietStart } = require('@anthropic/ink') as typeof import('@anthropic/ink');
+            markScreenReaderStartupQuietStart();
+          } catch {
+            // ink package optional in some test entrypoints
+          }
         }
       }
 

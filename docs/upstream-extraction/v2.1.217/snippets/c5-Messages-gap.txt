@@ -1,0 +1,11 @@
+--- b'Messages' @61881630 runlen=390 ---
+Print ripgrep's version.FilesFilesWithMatchesFilesWithoutMatchFixedStringsFollowGenerateGlobGlobCaseInsensitiveHeadingHelpNoIgnoreFilesNoIgnoreGlobalNoIgnoreMessagesNoIgnoreParentNoIgnoreVcsNoMessagesNoPcre2UnicodeNoRequireGitNoUnicodeNullDataOneFileSystemOnlyMatchingPathSeparatorPassthruPCRE2PCRE2VersionPrePreGlobPrettyQuietRegexSizeLimitRegexpReplaceSearchZipSmartCasexno-block-buffered
+
+--- b'Messages' @61881665 runlen=390 ---
+Print ripgrep's version.FilesFilesWithMatchesFilesWithoutMatchFixedStringsFollowGenerateGlobGlobCaseInsensitiveHeadingHelpNoIgnoreFilesNoIgnoreGlobalNoIgnoreMessagesNoIgnoreParentNoIgnoreVcsNoMessagesNoPcre2UnicodeNoRequireGitNoUnicodeNullDataOneFileSystemOnlyMatchingPathSeparatorPassthruPCRE2PCRE2VersionPrePreGlobPrettyQuietRegexSizeLimitRegexpReplaceSearchZipSmartCasexno-block-buffered
+
+--- b'Messages' @63007027 runlen=42 ---
+  let draining = !1, pendingMessages = [];
+
+--- b'Messages' @63007140 runlen=38 ---
+        pendingMessages.push(message);

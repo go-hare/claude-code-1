@@ -1,0 +1,80 @@
+Missing script to execute. Bun's provided 'node' cli wrapper does not support a repl.NODEnpm_node_execpath\node_modules\.bin"inline" | "external" | "linked"internal error: entered unreachable code: enqueue_fmt() on non-fd output; caller must check needs_io()write_no_io called on fd output; caller must check needs_io()internal error: entered unreachable code: duplicate_out precedes jsbuf redirectsinternal error: entered unreachable code: enqueue() on non-fd output; caller must check needs_io()http://NewSource.global_this set before useinternal error: entered unreachable code: on_read_chunk never yields None/AmountRead while read_inside_on_pull == JsInvalid state in FileReader: expected file NoSuchKeyThe specified key does not exist.<Error>toBeDefined.helpPrint this help message.exitExit the REPL.clearClear the screen.copyCopy result to clipboard (.copy [expr]).loadLoad a file into the REPL session.saveSave REPL history to a file.editorEnter multi-line editor mode.breakCancel current input.historyShow command history
+hyperlinkskittyGraphicslightcolumnsmarkdown input requires more block metadata than the parser can address (4 GiB)reactVersionsetMaxMarkdownBlockBytesForTesting expects a numberrender
+priorityexchangerefreshminttlnsnamehostmasterpreferenceservicecanonicalizeIP() expects a string but received no arguments.entriesinternal error: entered unreachable code: Unsupported hostent_with_ttls record type
+Session saved to 
+hyperlink creation for 
+# failed, canonicalization returned 
+grep_printer::hyperlink
+hyperlink creation for 
+hyperlink creation for 
+6 failed, error occurred during path canonicalization: 
+^at least a {path} variable is required in a hyperlink format, or otherwise use a valid alias: 
+the {path} variable is required in a hyperlink formatthe hyperlink format contains a {column} variable, but no {line} variable is present$invalid hyperlink format variable: '
+the hyperlink format must start with a valid URL scheme, i.e., [0-9A-Za-z+-.]+:unopened variable: found '}' without a corresponding '{' preceding itunclosed variable: found '{' without a corresponding '}' following itstyleboldunderline%compiled regex exceeds size limit of 
+,found hostname for hyperlink configuration: 
+hyperlink format: 
+    '--hyperlink-format=[specify pattern for hyperlinks]:pattern'
+Force block buffering.block-bufferedStripPrefixErrorHiddenHostnameBinHyperlinkFormatIGlobIgnoreCaseIgnoreFileIgnoreFileCaseInsensitiveIncludeZeroInvertMatchLineBufferedLineNumberLineNumberNoLineRegexpMaxColumnsMaxColumnsPreviewMaxCountMaxDepthMaxFilesizeMmapMultilineMultilineDotallNoConfigNoIgnoreNoIgnoreDotNoIgnoreExcludeSortFilesSortSortrStopOnNonmatchThreadsTraceTrimTypeParseSizeErrororiginal	ignoring 
+This flag also controls whether hyperlinks are emitted. For example, when
+a hyperlink format is specified, hyperlinks won't be used when color is
+suppressed. If one wants to emit hyperlinks but no colors, then one must use
+Process ignore files case insensitively.ignore-file-case-insensitiveHyperlinkFormatErrorno-include-zero
+ripgrep uses your system's hostname for producing hyperlinks.
+Run a program to get this system's hostname.hostname-binFORMATinvalid hyperlink format
+Set the format of hyperlinks to use when printing results. Hyperlinks make
+generally only works in terminal emulators that support OSC-8 hyperlinks. For
+example, the format \fBfile://{host}{path}\fP will emit an RFC 8089 hyperlink.
+\fBnone\fP alias. In this case, hyperlinks will be disabled.
+At present, ripgrep does not enable hyperlinks by default. Users must opt into
+hyperlinks are automatically disabled, regardless of the value of this flag.
+Users can pass \fB\-\-color=always\fP to forcefully emit hyperlinks.
+Note that hyperlinks are only written when a path is also in the output
+and colors are enabled. To write hyperlinks without colors, you'll need to
+but hyperlinks as well. Similarly, colors and hyperlinks are disabled when
+then hyperlinks will not be emitted since the path given does not appear
+in the output. To make the path appear, and thus also a hyperlink, use the
+For more information on hyperlinks in terminal emulators, see:
+Set the format of hyperlinks.hyperlink-format
+' for canonicalization
+  Object.defineProperty(exports, "__esModule", { value: !0 }), exports.unescape = exports.escape = exports.AST = exports.Minimatch = exports.match = exports.makeRe = exports.braceExpand = exports.defaults = exports.filter = exports.GLOBSTAR = exports.sep = exports.minimatch = void 0;
+      braceExpand: (pattern, options = {}) => orig.braceExpand(pattern, ext(def, options)),
+  var braceExpand = (pattern, options = {}) => {
+    return (0, brace_expansion_1.expand)(pattern, { max: options.braceExpandMax });
+  exports.braceExpand = braceExpand, exports.minimatch.braceExpand = exports.braceExpand;
+      if (this.parseNegate(), this.globSet = [...new Set(this.braceExpand())], options.debug)
+    braceExpand() {
+      return (0, exports.braceExpand)(this.pattern, this.options);
+} = @getInternalField(@internalModuleRegistry, 89) || @createInternalModuleById(89), { Server: NetServer, Socket: NetSocket } = net, getBundledRootCertificates = @lazy(79), getExtraCACertificates = @lazy(80), getSystemCACertificates = @lazy(81), canonicalizeIP = @lazy(82), getTLSDefaultCiphers = @lazy(83), setTLSDefaultCiphers = @lazy(84), _VALID_CIPHERS_SET;
+        ArrayPrototypePush.@call(ips, canonicalizeIP(StringPrototypeSlice.@call(name, 11)));
+    if (valid = ArrayPrototypeIncludes.@call(ips, canonicalizeIP(hostname)), !valid)
+var $, fmtBinding = @lazy(100), highlightJavaScript = (code) => fmtBinding(code, "highlight-javascript"), highlightJavaScriptRedacted = (code) => fmtBinding(code, "highlight-javascript-redacted"), escapePowershell = (code) => fmtBinding(code, "escape-powershell"), canonicalizeIP = @lazy(82), xxHash3ForTesting = @lazy(101), SQL = @lazy(1), patchInternals = {
+  canonicalizeIP,
+Copyright javascriptconditionseverything<p class="technologybackground<a class="management&copy; 201javaScriptcharactersbreadcrumbthemselveshorizontalgovernmentCaliforniaactivitiesdiscoveredNavigationtransitionconnectionnavigationappearance</title><mcheckbox" techniquesprotectionapparentlyas well asunt', 'UA-resolutionoperationstelevisiontranslatedWashingtonnavigator. = window.impression&lt;br&gt;literaturepopulationbgcolor="#especially content="productionnewsletterpropertiesdefinitionleadershipTechnologyParliamentcomparisonul class=".indexOf("conclusiondiscussioncomponentsbiologicalRevolution_containerunderstoodnoscript><permissioneach otheratmosphere onfocus="<form id="processingthis.valuegenerationConferencesubsequentwell-knownvariationsreputationphenomenondisciplinelogo.png" (document,boundariesexpressionsettlementBackgroundout of theenterprise("https:" unescape("password" democratic<a href="/wrapper">
+gK,MTLS
+JSC_useB3CanonicalizePrePostIncrements
+no-hyperlink
+--heading, --help, --hex, --hexdump, --hidden or --hyperlink
+--neg-regexp=, --not, --no-any-line, --no-ascii, --no-binary, --no-bool, --no-break, --no-byte-offset, --no-color, --no-config, --no-confirm, --no-count, --no-decompress, --no-dereference, --no-dereference-files, --no-dotall, --no-encoding, --no-empty, --no-filename, --no-files-with-matches, --no-filter, --no-glob-ignore-case, --no-group-separator, --no-heading, --no-hidden, --no-hyperlink, --no-ignore-binary, --no-ignore-case, --no-ignore-files, --no-index, --no-initial-tab, --no-invert-match, --no-line-number, --no-only-line-number, --no-only-matching, --no-messages, --no-mmap, --no-pager, --no-pretty, --no-smart-case, --no-sort, --no-split, --no-stats, --no-tree, --no-ungroup, --no-view, --null or --null-data
+canonicalizeIP
+hyperlink=
+    --hyperlink[=[PREFIX][+]]
+            Hyperlinks are enabled for file names when colors are enabled.
+            with PREFIX:// in the hyperlink.  A `+' includes the line number in
+            the hyperlink and when option -k is specified, the column number.
+Invalid input to canonicalize a URL host string.
+Invalid input to canonicalize a URL IPv6 host string.
+Invalid input to canonicalize a URL port string.
+Invalid input to canonicalize a URL protocol string.
+Invalid input to canonicalize a URL opaque path string.
+            hyperlinks.  Parameter `rv' reverses the `sl=' and `cx=' parameters
+# Enable hyperlinks in color output
+hyperlink=%s
+# Enable hyperlinks in color output
+hyperlink
+# Parameter `hl' enables file name hyperlinks (same as --hyperlink).
+canonicalizeUri
+tengu_ax_screen_reader
+Login expired 
+Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.S*
+resetScreenReaderDiffState
+onRenderScreenReader8

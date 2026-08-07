@@ -43,6 +43,14 @@ import {
   startBackgroundCacheRefresh,
 } from './fileSuggestions.js';
 import { generateUnifiedSuggestions } from './unifiedSuggestions.js';
+import {
+  EMOJI_COMPLETE_RE,
+  EMOJI_PARTIAL_RE,
+  getEmoji,
+  getEmojiSuggestions,
+  isEmojiJustCompleted,
+} from '../utils/emoji/index.js';
+import { getInitialSettings } from '../utils/settings/settings.js';
 
 // Unicode-aware character class for file path tokens:
 // \p{L} = letters (CJK, Latin, Cyrillic, etc.)
@@ -54,6 +62,9 @@ const TOKEN_WITH_AT_RE = /(@[\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|[\p{L}\p{N}\p{M}_\-
 const TOKEN_WITHOUT_AT_RE = /[\p{L}\p{N}\p{M}_\-./\\()[\]~:]+$/u;
 const HAS_AT_SYMBOL_RE = /(^|\s)@([\p{L}\p{N}\p{M}_\-./\\()[\]~:]*|"[^"]*"?)$/u;
 const HASH_CHANNEL_RE = /(^|\s)#([a-z0-9][a-z0-9_-]*)$/;
+// densable LGa / WtS — emoji shortcode typeahead + inline :name: replace
+const EMOJI_PARTIAL_TRIGGER_RE = EMOJI_PARTIAL_RE;
+const EMOJI_COMPLETE_TRIGGER_RE = EMOJI_COMPLETE_RE;
 
 // Type guard for path completion metadata
 function isPathMetadata(metadata: unknown): metadata is { type: 'directory' | 'file' } {
@@ -501,6 +512,8 @@ export function useTypeahead({
   // densable ie.current — bash-path bare Enter double-submit guard (reset each render)
   const bashPathSubmitGuardRef = useRef(false);
   bashPathSubmitGuardRef.current = false;
+  // densable GtS previous-input snapshot for inline :name: completion
+  const previousInputForEmojiRef = useRef<string | undefined>(undefined);
 
   // Clear all suggestions
   const clearSuggestions = useCallback(() => {
@@ -716,12 +729,54 @@ export function useTypeahead({
         const hashMatch = value.substring(0, effectiveCursorOffset).match(HASH_CHANNEL_RE);
         if (hashMatch && hasSlackMcpServer(store.getState().mcp.clients)) {
           debouncedFetchSlackChannels(hashMatch[2]!);
+          previousInputForEmojiRef.current = value;
           return;
         } else if (suggestionType === 'slack-channel') {
           debouncedFetchSlackChannels.cancel();
           clearSuggestions();
         }
       }
+
+      // densable 2.1.217 #1 — :emoji: shortcode typeahead + inline :name: replace
+      // Gate: settings.emojiCompletionEnabled !== false (absent/true = on)
+      if (mode === 'prompt' && getInitialSettings().emojiCompletionEnabled !== false) {
+        const beforeCursor = value.substring(0, effectiveCursorOffset);
+        // densable: if just completed :name: via typing, replace with glyph
+        if (isEmojiJustCompleted(value, previousInputForEmojiRef.current, effectiveCursorOffset)) {
+          const complete = beforeCursor.match(EMOJI_COMPLETE_TRIGGER_RE);
+          if (complete) {
+            const emoji = getEmoji(complete[2]!);
+            if (emoji) {
+              const matchStart = (complete.index ?? 0) + (complete[1]?.length ?? 0);
+              const next = value.slice(0, matchStart) + emoji + value.slice(effectiveCursorOffset);
+              onInputChange(next);
+              setCursorOffset(matchStart + emoji.length);
+              clearSuggestions();
+              previousInputForEmojiRef.current = next;
+              return;
+            }
+          }
+        }
+        const partial = beforeCursor.match(EMOJI_PARTIAL_TRIGGER_RE);
+        if (partial) {
+          const items = getEmojiSuggestions(partial[2]!);
+          if (items.length > 0) {
+            debouncedFetchFileSuggestions.cancel();
+            setSuggestionsState(prev => ({
+              commandArgumentHint: undefined,
+              suggestions: items,
+              selectedSuggestion: getPreservedSelection(prev.suggestions, prev.selectedSuggestion, items),
+            }));
+            setSuggestionType('emoji');
+            setMaxColumnWidth(undefined);
+            previousInputForEmojiRef.current = value;
+            return;
+          }
+        } else if (suggestionType === 'emoji') {
+          clearSuggestions();
+        }
+      }
+      previousInputForEmojiRef.current = value;
 
       // Check for @ symbol to trigger file suggestions (including quoted paths)
       // Includes colon for MCP resources (e.g., server:resource/path)
@@ -1017,6 +1072,8 @@ export function useTypeahead({
       debouncedFetchSlackChannels,
       mode,
       suppressSuggestions,
+      onInputChange,
+      setCursorOffset,
       // Note: using suggestionsRef instead of suggestions to avoid recreating
       // this callback when only selectedSuggestion changes (not the suggestions list)
       allCommandsMaxWidth,
@@ -1197,6 +1254,20 @@ export function useTypeahead({
         const suggestion = suggestions[index];
         if (suggestion) {
           applyTriggerSuggestion(suggestion, input, cursorOffset, HASH_CHANNEL_RE, onInputChange, setCursorOffset);
+          clearSuggestions();
+        }
+      } else if (suggestionType === 'emoji' && suggestions.length > 0) {
+        const suggestion = suggestions[index];
+        if (suggestion) {
+          // densable apply: replace :partial with glyph + trailing space
+          applyTriggerSuggestion(
+            suggestion,
+            input,
+            cursorOffset,
+            EMOJI_PARTIAL_TRIGGER_RE,
+            onInputChange,
+            setCursorOffset,
+          );
           clearSuggestions();
         }
       } else if (suggestionType === 'file' && suggestions.length > 0) {
@@ -1393,6 +1464,18 @@ export function useTypeahead({
       if (suggestion) {
         applyTriggerSuggestion(suggestion, input, cursorOffset, HASH_CHANNEL_RE, onInputChange, setCursorOffset);
         debouncedFetchSlackChannels.cancel();
+        clearSuggestions();
+      }
+    } else if (suggestionType === 'emoji' && index < suggestions.length) {
+      if (suggestion) {
+        applyTriggerSuggestion(
+          suggestion,
+          input,
+          cursorOffset,
+          EMOJI_PARTIAL_TRIGGER_RE,
+          onInputChange,
+          setCursorOffset,
+        );
         clearSuggestions();
       }
     } else if (suggestionType === 'file' && index < suggestions.length) {

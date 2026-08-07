@@ -797,6 +797,8 @@ export async function* runAgent({
     options: agentOptions,
     agentId,
     agentType: agentDefinition.agentType,
+    // densable 2.1.217 #5 — pin isolation worktree onto ToolUseContext for hsr/VRu
+    ...(worktreePath ? { agentWorktree: worktreePath } : {}),
     // Official: async agents are background; sync inherits parent background flag.
     isBackgroundAgent: isAsync || (toolUseContext.isBackgroundAgent ?? false),
     messages: initialMessages,

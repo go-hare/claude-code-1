@@ -1,0 +1,14 @@
+--- b'one-line' @86968679 runlen=48 ---
+post a one-line "launched X" via your comms tool
+
+--- b'one-line' @95110291 runlen=214 ---
+Model-drafted feedback (the SendFeedback tool). "notify" (default) shows a one-line notice when a draft is queued; "quiet" shows only the footer counter; "off" disables the tool entirely so drafts are never queued.
+
+--- b'one-line' @99564656 runlen=51 ---
+After writing the file, add a one-line pointer in `
+
+--- b'one-line' @99684580 runlen=33 ---
+` and add a one-line pointer to `
+
+--- b'one-line' @155309793 runlen=46 ---
+ Before you stop, send a one-line outcome via 

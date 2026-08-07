@@ -1,0 +1,1 @@
+function TO(){return Gsn()!==null}function Gsn(){if(VVd()==="test"&&!Z.TEST_ENABLE_SESSION_PERSISTENCE)return"test_env";if(ere())return"explicit_disable";if(Z.CLAUDE_CODE_SKIP_PROMPT_HISTORY)return"sk

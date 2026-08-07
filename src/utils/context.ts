@@ -53,6 +53,7 @@ export function has1mContext(model: string): boolean {
 }
 
 // @[MODEL LAUNCH]: Update this pattern if the new model supports 1M context
+// densable $q / supports_1m_beta catalog: opus-4-6/4-7/4-8 + sonnet 4/5 family
 export function modelSupports1M(model: string): boolean {
   if (is1mContextDisabled()) {
     return false
@@ -62,7 +63,8 @@ export function modelSupports1M(model: string): boolean {
     canonical.includes('claude-sonnet-5') ||
     canonical.includes('claude-sonnet-4') ||
     canonical.includes('opus-4-6') ||
-    canonical.includes('opus-4-7')
+    canonical.includes('opus-4-7') ||
+    canonical.includes('opus-4-8')
   )
 }
 
@@ -215,7 +217,8 @@ export function getModelMaxOutputTokens(model: string): {
   if (getChatGPTModelContextWindow(model) !== undefined) {
     defaultTokens = 32_000
     upperLimit = CHATGPT_CODEX_MAX_OUTPUT_TOKENS
-  } else if (m.includes('opus-4-7')) {
+  } else if (m.includes('opus-4-8') || m.includes('opus-4-7')) {
+    // densable catalog opus-4-7/4-8: default 64000 / upper 128000
     defaultTokens = 64_000
     upperLimit = 128_000
   } else if (m.includes('opus-4-6')) {

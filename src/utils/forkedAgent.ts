@@ -272,6 +272,12 @@ export type SubagentContextOverrides = {
   /** Override the agentType (for subagents with a specific type) */
   agentType?: string
   /**
+   * densable 2.1.217 #5 — agent isolation worktree path (`agentWorktree`).
+   * When set, write tools gate shared-checkout edits via `hsr`.
+   * Defaults to parentContext.agentWorktree when omitted (densable createSubagentContext copy).
+   */
+  agentWorktree?: string
+  /**
    * Official isBackgroundAgent. Defaults to true for isolated subagents
    * (A$/Who fork default); set false for interactive sync subagents that
    * should still bump mainLoopRefcount.
@@ -469,6 +475,8 @@ export function createSubagentContext(
     // Generate new agentId for subagents (each subagent should have its own ID)
     agentId: overrides?.agentId ?? createAgentId(),
     agentType: overrides?.agentType,
+    // densable: agentWorktree:e.agentWorktree (override or copy from parent)
+    agentWorktree: overrides?.agentWorktree ?? parentContext.agentWorktree,
     // Official Who/A$ — forks default isBackgroundAgent true; interactive
     // sync agents (shareSetAppState) default false so mainLoopRefcount bumps.
     isBackgroundAgent:

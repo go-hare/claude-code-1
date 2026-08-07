@@ -43,9 +43,31 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → 2.1.212 → 2.1.214** 产品对齐（211 host/agent 路径 + 212 官方 48 条 + 214 官方 47 条 1:1 + Qre/code-sessions 外围）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.30**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216** 产品对齐（214 安全阀大包 + 215 禁止模型自启 verify/code-review + 216 长会话/sandbox/worktree/bg/UI 可靠性 40 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.31**），与 git tag 可能不同步。
 
-#### densable 2.1.214 对齐说明（2.7.30）
+#### densable 2.1.216 对齐说明（2.7.31）
+
+对照文档：`docs/upstream-extraction/v2.1.216/official-216-checklist.md`（**HAVE 38 / N/A 1 / GAP 0**）、`pack-report.md`、各 extract。叠在 **2.1.214/215** 之上。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **Sandbox** | `sandbox.filesystem.disabled`（跳过 FS 隔离、保留网络 egress）；credentials 一等公民 | — |
+| **长会话 / 归一化** | message normalize 二次方优化（Map + cursor）；`/context` 超窗警告；失败 compact 标 error | — |
+| **Auth / auto mode** | OAuth 401 sideQuery 重试；AskUser free-text 中立措辞；Chrome 缺 scope 403 循环；MCP re-auth 不提前吊销 | — |
+| **worktree / bg** | git 隔离（防 `git -C`/`GIT_DIR` 指回 shared checkout）；foreign-repo resume；无 git worktree 可删；daemon `stop --any` 不误杀；resume agent identity；bg startup cancel 免疫 interrupt | — |
+| **权限 / Shell / PS** | list/negation redirect；Win 网络路径 RO 弹窗；非 ASCII 词边界；PS 不可见 Unicode；git/gh 参数加强 | — |
+| **UI / 会话 UX** | @-mention/hooks/vim paste/statusline/resume-picker；Esc-Esc rewind；agent list Ctrl+X 删除；GUI 编辑器 handoff；fullscreen dialog/config/footer；skill 菜单热刷新；plugin skill 前缀；fork 一行确认 | — |
+| **其它** | `/rewind` 不经 symlink/hardlink；ultrareview 体积/empty-diff；spend-limit reason；telemetry user_abort；needs-input park；dataviz palette；cloud interrupted turn re-run | **#39 VSCode RTL** N/A；UDS/LAN/TEAMMEM 默认 OFF |
+
+#### densable 2.1.215 对齐说明（已并入 2.7.31）
+
+对照文档：`docs/upstream-extraction/v2.1.215/official-215-checklist.md`（**HAVE 2 / N/A 1 / GAP 0**）。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **Skills 策略** | `/verify`、`/code-review`：`disableModelInvocation: true` + 用户仍可 `/` 调用 | **不**误改 `/simplify`（仍可被模型调用）；verification agent 文案 N/A |
+
+#### densable 2.1.214 对齐说明（2.7.30，已并入）
 
 对照文档：`docs/upstream-extraction/v2.1.214/official-214-checklist.md`（**HAVE 47 / GAP 0**）、各 batch extract。在 **2.1.212** 收口之上叠 214 安全阀 / EndConversation / PS·Bash / bg daemon / RC ready-push 等。
 
@@ -73,10 +95,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF |
 
-### 近期更新（2.7.5 → 2.7.30）
+### 近期更新（2.7.5 → 2.7.31）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.31** | **densable 2.1.215 + 2.1.216 收口**：215 `/verify`·`/code-review` 禁止模型自启（HAVE 2）；216 **HAVE 38 / N/A 1 / GAP 0**（sandbox.filesystem.disabled、长会话 normalize、auto-mode 401、worktree git 隔离、daemon stop --any、bg/agents UX、Win 网络路径、fullscreen UI、skill 菜单热刷新、`/rewind` symlink 安全等）。故意不扩 UDS/LAN/TEAMMEM；VSCode RTL N/A。 |
 | **2.7.30** | **densable 2.1.214 全量 1:1（47/47 HAVE）**：权限/Bash/PS 安全阀；EndConversation；tool heartbeat；GrowthBook null payload + OAuth flag refresh；bg daemon control-socket/retire/deleteJob；RC session-ready push 门闩；stream cost / advisor stall / hooks exit2 / OTel / MCP list_changed 等。故意不扩 UDS/LAN/TEAMMEM。 |
 | **2.7.29** | **densable 2.1.212 收口**：官方 48 条 0 GAP；`/fork` keepParent + `/subtask`；会话 caps / MCP auto-bg / auto-mode reset；ultrareview + Qre/code-sessions（OTe/KLc/H8/F1g/nts）1:1。故意不扩 UDS/LAN/TEAMMEM。 |
 | **2.7.28** | **Win 打包剪贴板贴图**：`bun --compile` 下 sharp 原生模块不可用时改走 System.Drawing 缩放/JPEG；dev 仍用 sharp。 |

@@ -431,6 +431,12 @@ import {
   PRINT_BG_WAIT_GRACE_MS,
 } from './printBgWait.js'
 import {
+  formatPrintBudgetHaltDebug,
+  formatPrintBudgetHaltStderr,
+  haltBackgroundAgentsForBudget,
+  shouldHaltBackgroundAgentsForBudget,
+} from '../utils/budgetHalt.js'
+import {
   drainSdkEvents,
   emitTaskTerminatedSdk,
 } from '../utils/sdkEventQueue.js'
@@ -2928,6 +2934,26 @@ function runHeadlessStreaming(
         waitingForAgents = false
         {
           const state = getAppState()
+          // densable 2.1.217 #20 — $am + tcr: once --max-budget-usd reached,
+          // halt running background agents (deny new spawns is in AgentTool L()).
+          if (
+            shouldHaltBackgroundAgentsForBudget(
+              options.maxBudgetUsd,
+              Object.values(state.tasks ?? {}),
+            )
+          ) {
+            logForDebugging(
+              formatPrintBudgetHaltDebug(options.maxBudgetUsd as number),
+            )
+            process.stderr.write(
+              formatPrintBudgetHaltStderr(options.maxBudgetUsd as number),
+            )
+            await haltBackgroundAgentsForBudget(state.tasks ?? {}, {
+              getAppState,
+              setAppState,
+            })
+          }
+
           const runningBg = getRunningTasks(state).filter(
             t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
           )

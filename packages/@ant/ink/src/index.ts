@@ -91,6 +91,15 @@ export {
   type ScreenReaderAccessibility,
   type ScreenReaderDOMNode,
 } from './core/screenReaderTree.js'
+export {
+  AX_STARTUP_QUIET_ENV_KEY,
+  endScreenReaderStartupQuiet,
+  getScreenReaderStartupQuietRemainingMs,
+  markScreenReaderStartupQuietStart,
+  resetScreenReaderStartupQuietForTests,
+  SR_STARTUP_QUIET_DEFAULT_MS,
+  SR_STARTUP_QUIET_MAX_MS,
+} from './core/screenReaderStartupQuiet.js'
 
 // ============================================================
 // Core types

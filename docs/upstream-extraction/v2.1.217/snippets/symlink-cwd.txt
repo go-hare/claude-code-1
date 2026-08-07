@@ -1,0 +1,11 @@
+--- b'realpath' @61169143 runlen=1395 ---
+iredProfiling timer expiredWindow size changeI/O on asynchronous file descriptor is possibleBad system callPower failureUnknown ErrorTODOdupaccessconnectchmodchownclonefileclonefileatcopy_file_rangecopyfilefchmodfchmodatfchownfcntlfdatasyncfstatfstatatfsyncftruncatefutimensgetdents64getdirentries64lchmodlchownlseeklstatlutimemkdirmkdtempfnctlmemfd_createmunmapopenpreadpwritereadlinkstatstatfssymlinksymlinkatunlinkutimeutimensatgetcwdgetenvchdirfcopyfilerecvsendsendfilesendmmsgsplicermdirtruncaterealpathfutimepidfd_openpollppollwatchscandirkeventkqueueepoll_ctlkillwaitpidposix_spawngetaddrinfowritevpwritevreadvpreadvioctl_ficlonebind2connect2listenpipetry_writesocketpairsetsockoptstatxrmuv_spawnuv_pipeuv_tty_set_modeuv_open_osfhandleuv_os_homedirWriteFileNtQueryDirectoryFileNtSetInformationFileGetFinalPathNameByHandleCloseHandleSetFilePointerExSetEndOfFiledup2fchdirfchownatioctlgetrlimitsetrlimit
+
+--- b'realpath' @63041249 runlen=43 ---
+  #realpathCache = /* @__PURE__ */ new Map;
+
+--- b'realpath' @63042302 runlen=47 ---
+    let cached = this.#realpathCache.get(path);
+
+--- b'realpath' @63042399 runlen=79 ---
+    let promise = lazyFsPromises().realpath(path).then(identity, nullOnReject);

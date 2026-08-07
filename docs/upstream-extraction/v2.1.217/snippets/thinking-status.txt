@@ -1,0 +1,11 @@
+--- b'thinking' @65456056 runlen=190 ---
+<select citizensclothingwatching<li id="specificcarryingsentence<center>contrastthinkingcatch(e)southernMichael merchantcarouselpadding:interior.split("lizationOctober ){returnimproved--&gt;
+
+--- b'thinking' @86848145 runlen=111 ---
+May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks.
+
+--- b'thinking' @87328501 runlen=351 ---
+Review the classification process and follow it carefully, making sure you deny actions that should be blocked. As a reminder, explicit (not suggestive or implicit) user confirmation is required to override blocks. Use <thinking> before responding with <block>. Think longer on ambiguous or borderline actions; keep reasoning brief for clear-cut ones.
+
+--- b'thinking' @87329216 runlen=258 ---
+Use <thinking> first, then respond with <severity>N</severity>, plus <category>Exact BLOCK Rule Name</category> when the action matches a BLOCK rule (see Output Format). No other text. Think longer on ambiguous cases; keep reasoning brief for clear-cut ones.

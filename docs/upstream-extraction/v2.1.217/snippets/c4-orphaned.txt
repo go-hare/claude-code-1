@@ -1,0 +1,14 @@
+--- b'orphaned' @61967797 runlen=500 ---
+ recover sweeps by trustee SID and does not enumerate paths.)Run crash-recovery only: prune dead holders, drop any orphaned sandbox-user ACEsa Display implementation returned an error unexpectedlySbAceSetTOKEN_INFORMATION_CLASSverifythe following required argument was not provided: targetextended_codeStatusPrint WFP fence state as JSON: `{state, filters, port_range?, user_sid?, hint?}`. BFE's `FwpmFilterCreateEnumHandle0` is admin-gated, so a non-elevated caller gets `{state:"cannot-read", hint:
+
+--- b'orphaned' @104109395 runlen=50 ---
+[worktree] removed orphaned worktree directory at 
+
+--- b'orphaned' @104109465 runlen=38 ---
+Cannot self-heal orphaned worktree at 
+
+--- b'orphaned' @107258744 runlen=52 ---
+killShellTasksForAgent: killing orphaned shell task 
+
+--- b'orphaned' @108316033 runlen=39 ---
+Skipping orphaned enabledPlugins entry 

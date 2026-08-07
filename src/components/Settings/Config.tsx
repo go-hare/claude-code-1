@@ -465,6 +465,19 @@ export function Config({
           },
         ]
       : []),
+    // densable 2.1.217 #1 — absent/true = on
+    {
+      id: 'emojiCompletionEnabled',
+      label: 'Emoji shortcode completion',
+      value: settingsData.emojiCompletionEnabled !== false,
+      type: 'boolean' as const,
+      onChange(enabled: boolean) {
+        updateSettingsForSource('userSettings', {
+          emojiCompletionEnabled: enabled ? undefined : false,
+        });
+        setSettingsData(getInitialSettings());
+      },
+    },
     ...(feature('POOR')
       ? [
           {

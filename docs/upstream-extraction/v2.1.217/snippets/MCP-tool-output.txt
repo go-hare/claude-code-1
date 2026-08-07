@@ -1,0 +1,14 @@
+--- b'MCP tool' @94965800 runlen=136 ---
+Arguments passed to the MCP tool. String values support ${path} interpolation from the hook input JSON (e.g. "${tool_input.file_path}").
+
+--- b'MCP tool' @102326513 runlen=261 ---
+IMPORTANT: WebFetch WILL FAIL for authenticated or private URLs. Before using this tool, check if the URL points to an authenticated service (e.g. Google Docs, Confluence, Jira, GitHub). If so, look for a specialized MCP tool that provides authenticated access.
+
+--- b'MCP tool' @105082270 runlen=66 ---
+Workers also have access to MCP tools from connected MCP servers: 
+
+--- b'MCP tool' @105091965 runlen=51 ---
+ tools, plus MCP tools from configured MCP servers.
+
+--- b'MCP tool' @105092159 runlen=179 ---
+Workers have access to standard tools, MCP tools from configured MCP servers, and project skills via the Skill tool. Delegate skill invocations (e.g. /commit, /verify) to workers.

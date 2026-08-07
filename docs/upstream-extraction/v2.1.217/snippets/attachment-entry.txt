@@ -1,0 +1,14 @@
+--- b'attachment' @59656318 runlen=3547 ---
+ from background-colorbackground-imagebackground-position-xbackground-position-ybackground-positionbackground-sizebackground-repeatbackground-attachmentbackground-clipbackground-originbackgroundbox-shadowopacityvisibilitymin-widthmin-heightmax-widthmax-heightblock-sizeinline-sizemin-block-sizemin-inline-sizemax-block-sizemax-inline-sizebox-sizingaspect-ratiooverflowoverflow-xoverflow-ytext-overflowbottominset-block-startinset-block-endinset-inline-startinset-inline-endinset-blockinset-inlineborder-spacingborder-top-colorborder-bottom-colorborder-left-colorborder-right-colorborder-block-start-colorborder-block-end-colorborder-inline-start-colorborder-inline-end-colorborder-top-styleborder-bottom-styleborder-left-styleborder-right-styleborder-block-start-styleborder-block-end-styleborder-inline-start-styleborder-inline-end-styleborder-top-widthborder-bottom-widthborder-left-widthborder-right-widthborder-block-start-widthborder-block-end-widthborder-inline-start-widthborder-inline-end-widthborder-top-left-radiusborder-top-right-radiusborder-bottom-left-radiusborder-bottom-right-radiusborder-start-start-radiusborder-start-end-radiusborder-end-start-radiusborder-end-end-radiusborder-radiusborder-image-sourceborder-image-outsetborder-image-repeatborder-image-widthborder-image-sliceborder-imageborder-colorborder-styleborder-wid
+
+--- b'attachment' @65472674 runlen=166 ---
+During tdevelopersartificialequivalentoriginatedCommissionattachment<span id="there wereNederlandsbeyond theregisteredjournalistfrequentlyall of thelang="en" </style>
+
+--- b'attachment' @104619705 runlen=53 ---
+from system prompt, tool definitions, or attachments.
+
+--- b'attachment' @104620182 runlen=149 ---
+tool definitions, and attachment content. A single-exchange conversation cannot be compacted; reduce attached files/tools or start with less context.
+
+--- b'attachment' @104639570 runlen=141 ---
+). Accumulated images and attachments in the conversation pushed the request over the limit. Remove older images or compact the conversation.

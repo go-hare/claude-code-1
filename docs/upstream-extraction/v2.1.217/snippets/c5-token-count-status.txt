@@ -1,0 +1,5 @@
+--- b'tokens \xb7' @158096699 runlen=58 ---
+Advisor Tool (experimental) is on and may use more tokens 
+
+--- b'tokens \xb7' @158096851 runlen=122 ---
+Advisor will not activate on the main model (advisor is less capable); subagents may still use it and may use more tokens 

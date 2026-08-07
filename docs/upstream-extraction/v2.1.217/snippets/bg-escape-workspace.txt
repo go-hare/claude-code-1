@@ -1,0 +1,17 @@
+--- b'escape' @59537493 runlen=569 ---
+chunk pushed abovesyntax errorhashbang commenttemplate literal"&""&&""*""**""@""|""||""^"")"" ="".""...""==""===""=>""!""!=""!=="">"">="">>"">>>""<""<=""<<""-""--""{""[""(""%""+""++""?""?.""??"";""/""~""&&=""&=""**=""*=""||=""|=""^=""="">>="">>>=""<<=""-=""%=""+=""??=""/="private identifieridentifierescaped keyword"break""case""catch""class""const""continue""debugger""default""delete""do""else""enum""export""extends""false""finally""for""function""if""import""in""instanceof""new""null""return""super""switch""this""throw""true""try""typeof""var""void""while""with"
+
+--- b'escape' @59966051 runlen=159 ---
+Unexpected escaped double quote '"'Unexpected escaped single quote "'"Unexpected escaped backtick '`'Unexpected escaped backslash '\'Unexpected escape sequence
+
+--- b'escape' @59966086 runlen=159 ---
+Unexpected escaped double quote '"'Unexpected escaped single quote "'"Unexpected escaped backtick '`'Unexpected escaped backslash '\'Unexpected escape sequence
+
+--- b'escape' @59966121 runlen=159 ---
+Unexpected escaped double quote '"'Unexpected escaped single quote "'"Unexpected escaped backtick '`'Unexpected escaped backslash '\'Unexpected escape sequence
+
+--- b'escape' @59966152 runlen=159 ---
+Unexpected escaped double quote '"'Unexpected escaped single quote "'"Unexpected escaped backtick '`'Unexpected escaped backslash '\'Unexpected escape sequence
+
+--- b'escape' @59966184 runlen=159 ---
+Unexpected escaped double quote '"'Unexpected escaped single quote "'"Unexpected escaped backtick '`'Unexpected escaped backslash '\'Unexpected escape sequence

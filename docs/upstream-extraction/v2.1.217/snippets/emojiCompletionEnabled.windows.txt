@@ -1,0 +1,10 @@
+e              	      autoCompactWindowÿ            	      advisorModel           	      fastMode       	      fastModePerSessionOptIn        "    promptSuggestionEnabled        	      emojiCompletionEnabled         õ,    awaySummaryEnabled             	      showClearContextOnPlanAccept8         Éd4   askUserQuestionTimeout         I|)    agent          	0   companyAnnouncements           	   
+   mcpServers             	      or             	      pluginConfigs          	      defaultEnvironmentId           	      autoUpdatesChannel             ô5   
+
+---
+
+ Each session starts with fast mode off."),promptSuggestionEnabled:A.boolean().optional().describe("When false, prompt suggestions are disabled. When absent or true, prompt suggestions are enabled."),emojiCompletionEnabled:A.boolean().optional().describe("When false, the :emoji: shortcode typeahead (the suggestion popup and the :name: inline replacement) is disabled. When absent or true, it is enabled."),awaySummaryEnabled:A.boolean().optional().describe("@internal When false, the session recap (shown when you return after being away for 5+ minutes) is disabled. When absent or true, recap is e
+
+---
+
+idden);if(Ht.length===0)return;return Math.max(...Ht.map((hr)=>ip(hr).length))+6},[e]),[R,k]=l_.useState(void 0),D=Ve((Ht)=>Ht.mcp.resources),L=Ve((Ht)=>Ht.mcp.resourceTemplates),M=nc(),$=go(),B=Ih().emojiCompletionEnabled!==!1,W=l_.useCallback(()=>{let Ht=M.getState();Mys(Ht.mcp.clients,Ht.mcp.resourceTemplates).then((cr)=>{if(cr.length===0)return;let hr=!1;if($((ht)=>{let Jt=ht.mcp.resourceTemplates;for(let{client:kt,templates:Mr}of cr){if(kt.name in Jt||!ht.mcp.clients.some((ur)=>ur.type==="connected"&&ur.client===kt.client))continue;Jt={...Jt,[kt.name]:Mr}}if(Jt===ht.mcp.resourceTemplates)

@@ -1,0 +1,11 @@
+--- b'JobObject' @61936822 runlen=33 ---
+2AssignProcessToJobObject(child) 
+
+--- b'JobObject' @61938634 runlen=235 ---
+CryptBinaryToStringA returned non-UTF-8CreateJobObjectWSetInformationJobObject(KILL_ON_JOB_CLOSE)SetInformationJobObject(BasicUIRestrictions)AssignProcessToJobObjectread caller's window-station nameBCryptGenRandom (desktop name suffix)
+
+--- b'JobObject' @61938658 runlen=235 ---
+CryptBinaryToStringA returned non-UTF-8CreateJobObjectWSetInformationJobObject(KILL_ON_JOB_CLOSE)SetInformationJobObject(BasicUIRestrictions)AssignProcessToJobObjectread caller's window-station nameBCryptGenRandom (desktop name suffix)
+
+--- b'JobObject' @61938700 runlen=235 ---
+CryptBinaryToStringA returned non-UTF-8CreateJobObjectWSetInformationJobObject(KILL_ON_JOB_CLOSE)SetInformationJobObject(BasicUIRestrictions)AssignProcessToJobObjectread caller's window-station nameBCryptGenRandom (desktop name suffix)

@@ -76,6 +76,11 @@ import {
   isPrecompactSkipDisabled,
   shouldSkipPromptHistory,
 } from './residualFinalEnvGates.js'
+import { isNestedMarkerSuppressingPersistence } from './sessionPersistenceStatus.js'
+import {
+  recordTranscriptWriteFailure,
+  recordTranscriptWriteSuccess,
+} from './transcriptWriterHealth.js'
 import { errorMessage, isFsInaccessible } from './errors.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
 import { formatFileSize } from './format.js'
@@ -995,11 +1000,20 @@ class Project {
   private async appendToFile(filePath: string, data: string): Promise<void> {
     try {
       await fsAppendFile(filePath, data, { mode: 0o600 })
-    } catch {
+      // densable 2.1.217 #2 — successful drain clears writer degraded state
+      recordTranscriptWriteSuccess(filePath)
+    } catch (firstErr) {
       // Directory may not exist — some NFS-like filesystems return
       // unexpected error codes, so don't discriminate on code.
-      await mkdir(dirname(filePath), { recursive: true, mode: 0o700 })
-      await fsAppendFile(filePath, data, { mode: 0o600 })
+      try {
+        await mkdir(dirname(filePath), { recursive: true, mode: 0o700 })
+        await fsAppendFile(filePath, data, { mode: 0o600 })
+        recordTranscriptWriteSuccess(filePath)
+      } catch (secondErr) {
+        // densable iNt — record write failure for user-visible degraded warning
+        recordTranscriptWriteFailure('drain', secondErr ?? firstErr, filePath)
+        throw secondErr
+      }
     }
   }
 
@@ -1337,11 +1351,14 @@ class Project {
     const allowTestPersistence = isEnvTruthy(
       process.env.TEST_ENABLE_SESSION_PERSISTENCE,
     )
+    // densable Gsn: test_env | explicit_disable | skip_prompt_history | nested_marker
+    // + local cleanupPeriodDays===0 (not in densable Gsn, retained)
     return (
       (getNodeEnv() === 'test' && !allowTestPersistence) ||
       getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
       isSessionPersistenceDisabled() ||
-      shouldSkipPromptHistory()
+      shouldSkipPromptHistory() ||
+      isNestedMarkerSuppressingPersistence()
     )
   }
 
@@ -2980,9 +2997,21 @@ function appendEntryToFile(
   const line = jsonStringify(entry) + '\n'
   try {
     fs.appendFileSync(fullPath, line, { mode: 0o600 })
-  } catch {
-    fs.mkdirSync(dirname(fullPath), { mode: 0o700 })
-    fs.appendFileSync(fullPath, line, { mode: 0o600 })
+    recordTranscriptWriteSuccess(fullPath)
+  } catch (firstErr) {
+    try {
+      fs.mkdirSync(dirname(fullPath), { mode: 0o700 })
+      fs.appendFileSync(fullPath, line, { mode: 0o600 })
+      recordTranscriptWriteSuccess(fullPath)
+    } catch (secondErr) {
+      // densable iNt — materialize/metadata path
+      recordTranscriptWriteFailure(
+        'materialize',
+        secondErr ?? firstErr,
+        fullPath,
+      )
+      throw secondErr
+    }
   }
 }
 

@@ -1,0 +1,11 @@
+--- b'TypeError' @59565658 runlen=138 ---
+    if (typeof value !== 'object' && typeof value !== 'function') throw TypeError('Object expected to be assigned to "using" declaration')
+
+--- b'TypeError' @59565898 runlen=79 ---
+    if (typeof dispose !== 'function') throw TypeError('Object not disposable')
+
+--- b'TypeError' @59579147 runlen=138 ---
+    if (typeof value !== 'object' && typeof value !== 'function') throw TypeError('Object expected to be assigned to "using" declaration')
+
+--- b'TypeError' @59579377 runlen=79 ---
+    if (typeof dispose !== 'function') throw TypeError('Object not disposable')

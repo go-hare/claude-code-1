@@ -180,6 +180,22 @@ export async function refreshOAuthToken(
     } = data
 
     const expiresAt = Date.now() + expiresIn * 1000
+    // densable EXn(refresh_token_expires_in, false) — only when server sends seconds
+    const refreshTokenExpiresIn = (
+      data as { refresh_token_expires_in?: number | string }
+    ).refresh_token_expires_in
+    let refreshTokenExpiresAt: number | undefined
+    if (typeof refreshTokenExpiresIn === 'number') {
+      refreshTokenExpiresAt = Date.now() + refreshTokenExpiresIn * 1000
+    } else if (
+      typeof refreshTokenExpiresIn === 'string' &&
+      refreshTokenExpiresIn.trim() !== ''
+    ) {
+      const n = Number.parseInt(refreshTokenExpiresIn, 10)
+      if (Number.isFinite(n)) {
+        refreshTokenExpiresAt = Date.now() + n * 1000
+      }
+    }
     const scopes = parseScopes(data.scope)
 
     logEvent('tengu_oauth_token_refresh_success', {})
@@ -242,6 +258,7 @@ export async function refreshOAuthToken(
       accessToken,
       refreshToken: newRefreshToken,
       expiresAt,
+      refreshTokenExpiresAt,
       scopes,
       subscriptionType:
         profileInfo?.subscriptionType ?? existing?.subscriptionType ?? null,
