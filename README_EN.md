@@ -43,9 +43,22 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216** product alignment (214 safety-valve pack + 215 no model auto `/verify`/`/code-review` + 216 long-session/sandbox/worktree/bg/UI reliability, 40 rows). **Published npm version is whatever `package.json` says** (currently **2.7.31**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216 → 2.1.217** product alignment (214 safety-valve pack + 215 no model auto `/verify`/`/code-review` + 216 long-session/sandbox/worktree/bg/UI reliability + 217 emoji/caps/brace/hyperlink/tips/bg isolation, 20 rows). **Published npm version is whatever `package.json` says** (currently **2.7.32**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.216 alignment (2.7.31)
+#### densable 2.1.217 alignment (2.7.32)
+
+Source of truth: `docs/upstream-extraction/v2.1.217/official-217-checklist.md` (**HAVE 20 / GAP 0**), `changelog-2.1.217.md`. Stacked on **2.1.216**.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **Caps / budget** | concurrent subagents default 20; nested depth default 1 (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` / hazel_trellis); `--max-budget-usd` halts bg subagents | — |
+| **paths brace** | frontmatter brace budget (Xug=1000 / Jug=4MB); over budget → unexpanded + warn | — |
+| **Hyperlink / tips / login** | `FORCE_HYPERLINK`; frontend-design tip lifetime ≤3; login-expiry warning 3 days | — |
+| **emoji** | shortcode typeahead + `emojiCompletionEnabled` | — |
+| **bg isolation #5** | symlink cwd canonicalize (`eq`/`N6g`/`XNe`/`hsr`); Shell `context_lost`→`worktree_gone`→VRu→bash ZRu; `bareAssignmentNames`+YPg/FJi/tLg; Write e7 / Edit·Notebook e12 | **stricter parse failure** (`parse-unavailable` fail-closed vs densable empty simple) |
+| **Reliability** | transcript writer ENOSPC; MCP truncate no full rehydrate; Opus 4.8 Bedrock 1M; SR startup quiet; managed OTEL endpoint supremacy; malformed attachment resume; attach footer gap; Win absolute taskkill | UDS/LAN/TEAMMEM default OFF |
+
+#### densable 2.1.216 alignment (2.7.31, included)
 
 Source of truth: `docs/upstream-extraction/v2.1.216/official-216-checklist.md` (**HAVE 38 / N/A 1 / GAP 0**), `pack-report.md`, batch extracts. Stacked on **2.1.214/215**.
 
@@ -95,10 +108,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF |
 
-### Recent updates (2.7.5 → 2.7.31)
+### Recent updates (2.7.5 → 2.7.32)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.32** | **densable 2.1.217 full 1:1 (20/20 HAVE)**: concurrent subagents 20 / nest depth 1; brace budget; `FORCE_HYPERLINK`; emoji shortcode typeahead; tip lifetime 3; login 3d; transcript ENOSPC; MCP truncate; Opus 4.8 Bedrock 1M; SR startup quiet; managed OTEL; malformed attachment; attach footer gap; Win taskkill; bg isolation `eq`/`N6g`/`ZRu` bare+YPg (ZRu Shell.exec-only). **Intentionally stricter**: parse-unavailable fail-closed. UDS/LAN/TEAMMEM default OFF. |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 closeout**: 215 `/verify`·`/code-review` no model auto-invoke (HAVE 2); 216 **HAVE 38 / N/A 1 / GAP 0** (`sandbox.filesystem.disabled`, long-session normalize, auto-mode 401, worktree git isolation, daemon stop --any, bg/agents UX, Win network paths, fullscreen UI, skill menu hot refresh, `/rewind` symlink safety, etc.). Intentionally off: UDS/LAN/TEAMMEM; VSCode RTL N/A. |
 | **2.7.30** | **densable 2.1.214 full 1:1 (47/47 HAVE)**: permission/Bash/PS safety valves; EndConversation; tool heartbeat; GrowthBook null payload + OAuth flag refresh; bg daemon control-socket/retire/deleteJob; RC session-ready push gate; stream cost / advisor stall / hooks exit2 / OTel / MCP list_changed; etc. Intentionally off: UDS/LAN/TEAMMEM. |
 | **2.7.29** | **densable 2.1.212 closeout**: official 48 rows 0 GAP; `/fork` keepParent + `/subtask`; session caps / MCP auto-bg / auto-mode reset; ultrareview + Qre/code-sessions (OTe/KLc/H8/F1g/nts) 1:1. Intentionally off: UDS/LAN/TEAMMEM. |

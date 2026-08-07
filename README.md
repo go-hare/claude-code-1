@@ -43,9 +43,22 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216** 产品对齐（214 安全阀大包 + 215 禁止模型自启 verify/code-review + 216 长会话/sandbox/worktree/bg/UI 可靠性 40 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.31**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216 → 2.1.217** 产品对齐（214 安全阀大包 + 215 禁止模型自启 verify/code-review + 216 长会话/sandbox/worktree/bg/UI 可靠性 + 217 emoji/caps/brace/hyperlink/tips/bg 隔离 20 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.32**），与 git tag 可能不同步。
 
-#### densable 2.1.216 对齐说明（2.7.31）
+#### densable 2.1.217 对齐说明（2.7.32）
+
+对照文档：`docs/upstream-extraction/v2.1.217/official-217-checklist.md`（**HAVE 20 / GAP 0**）、`changelog-2.1.217.md`。叠在 **2.1.216** 之上。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **Caps / 预算** | concurrent subagents 默认 20；nested depth 默认 1（`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` / hazel_trellis）；`--max-budget-usd` halt bg subagents | — |
+| **paths brace** | frontmatter brace budget（Xug=1000 / Jug=4MB）；超限 unexpanded + warn | — |
+| **Hyperlink / tips / login** | `FORCE_HYPERLINK`；frontend-design tip 终身 ≤3；login-expiry 警告 3 天 | — |
+| **emoji** | shortcode typeahead + `emojiCompletionEnabled` | — |
+| **bg isolation #5** | cwd 符号链接 canonicalize（`eq`/`N6g`/`XNe`/`hsr`）；Shell `context_lost`→`worktree_gone`→VRu→bash ZRu；`bareAssignmentNames`+YPg/FJi/tLg；Write e7 / Edit·Notebook e12 | **U5e 解析失败本地更严**（`parse-unavailable` fail-closed，非 densable 空 simple） |
+| **可靠性** | transcript writer ENOSPC；MCP truncate 不回灌 full；Opus 4.8 Bedrock 1M；SR 启动 quiet；managed OTEL endpoint 统管；malformed attachment resume；attach footer gap；Win absolute taskkill | UDS/LAN/TEAMMEM 默认 OFF |
+
+#### densable 2.1.216 对齐说明（2.7.31，已并入）
 
 对照文档：`docs/upstream-extraction/v2.1.216/official-216-checklist.md`（**HAVE 38 / N/A 1 / GAP 0**）、`pack-report.md`、各 extract。叠在 **2.1.214/215** 之上。
 
@@ -95,10 +108,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF |
 
-### 近期更新（2.7.5 → 2.7.31）
+### 近期更新（2.7.5 → 2.7.32）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.32** | **densable 2.1.217 全量 1:1（20/20 HAVE）**：subagent concurrent 20 / nest depth 1；brace budget；`FORCE_HYPERLINK`；emoji shortcode typeahead；tip lifetime 3；login 3d；transcript ENOSPC；MCP truncate；Opus 4.8 Bedrock 1M；SR startup quiet；managed OTEL；malformed attachment；attach footer gap；Win taskkill；bg isolation `eq`/`N6g`/`ZRu` bare+YPg（ZRu 仅 Shell.exec）。**故意更严**：parse-unavailable fail-closed。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 收口**：215 `/verify`·`/code-review` 禁止模型自启（HAVE 2）；216 **HAVE 38 / N/A 1 / GAP 0**（sandbox.filesystem.disabled、长会话 normalize、auto-mode 401、worktree git 隔离、daemon stop --any、bg/agents UX、Win 网络路径、fullscreen UI、skill 菜单热刷新、`/rewind` symlink 安全等）。故意不扩 UDS/LAN/TEAMMEM；VSCode RTL N/A。 |
 | **2.7.30** | **densable 2.1.214 全量 1:1（47/47 HAVE）**：权限/Bash/PS 安全阀；EndConversation；tool heartbeat；GrowthBook null payload + OAuth flag refresh；bg daemon control-socket/retire/deleteJob；RC session-ready push 门闩；stream cost / advisor stall / hooks exit2 / OTel / MCP list_changed 等。故意不扩 UDS/LAN/TEAMMEM。 |
 | **2.7.29** | **densable 2.1.212 收口**：官方 48 条 0 GAP；`/fork` keepParent + `/subtask`；会话 caps / MCP auto-bg / auto-mode reset；ultrareview + Qre/code-sessions（OTe/KLc/H8/F1g/nts）1:1。故意不扩 UDS/LAN/TEAMMEM。 |
