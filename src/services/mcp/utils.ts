@@ -583,3 +583,64 @@ export function getLoggingSafeMcpBaseUrl(
     return undefined
   }
 }
+
+/**
+ * densable `kee` (MCP path) — failed+UNCONFIGURED is not a real failure.
+ * Local FailedMCPServer has no errorCode field yet; always false for now.
+ */
+export function isUnconfiguredMcpClient(client: MCPServerConnection): boolean {
+  return (
+    client.type === 'failed' &&
+    'errorCode' in client &&
+    (client as { errorCode?: string }).errorCode === 'UNCONFIGURED'
+  )
+}
+
+/**
+ * densable `DYo` — should this client contribute to needs-auth / failure
+ * startup counts?
+ *
+ * - UNCONFIGURED → never
+ * - claudeai-proxy: if eligible===false and not session-connected (Gsr), skip;
+ *   otherwise only if ever-connected (Vsr) / session-connected predicate
+ * - exclude sse-ide / ws-ide
+ */
+export function shouldCountMcpClientForAuthNotice(
+  client: MCPServerConnection,
+  everConnected: (name: string) => boolean,
+  sessionConnected: (name: string) => boolean,
+): boolean {
+  if (isUnconfiguredMcpClient(client)) return false
+  if (client.config.type === 'claudeai-proxy') {
+    // densable: eligible===false && !Gsr(name) → exclude
+    if (client.config.eligible === false && !sessionConnected(client.name)) {
+      return false
+    }
+    // densable: return Vsr(name) — only count if ever connected in claude.ai
+    // history (or session, which is already in everConnected after Wsr)
+    return everConnected(client.name)
+  }
+  return client.config.type !== 'sse-ide' && client.config.type !== 'ws-ide'
+}
+
+/**
+ * densable `Kka` / `_Ub` — count needs-auth clients for startup notice.
+ * Uses DYo filter so claude.ai connectors not connected in claude.ai are
+ * not over-counted (densable 2.1.218 #19).
+ */
+export function countMcpNeedsAuth(
+  clients: readonly MCPServerConnection[],
+  everConnected: (name: string) => boolean = () => false,
+  sessionConnected: (name: string) => boolean = () => false,
+): number {
+  let n = 0
+  for (const c of clients) {
+    if (
+      c.type === 'needs-auth' &&
+      shouldCountMcpClientForAuthNotice(c, everConnected, sessionConnected)
+    ) {
+      n++
+    }
+  }
+  return n
+}

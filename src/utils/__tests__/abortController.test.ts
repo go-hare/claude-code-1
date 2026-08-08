@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createAbortController,
   createChildAbortController,
+  shouldSuppressInterruptionMessage,
 } from '../abortController'
 
 describe('createAbortController', () => {
@@ -102,5 +103,15 @@ describe('createChildAbortController', () => {
     const parent = createAbortController()
     const child = createChildAbortController(parent, 200)
     expect(child.signal.aborted).toBe(false)
+  })
+})
+
+describe('shouldSuppressInterruptionMessage densable m0e', () => {
+  test('suppresses interrupt and refusal-fallback-edit only', () => {
+    expect(shouldSuppressInterruptionMessage('interrupt')).toBe(true)
+    expect(shouldSuppressInterruptionMessage('refusal-fallback-edit')).toBe(
+      true,
+    )
+    expect(shouldSuppressInterruptionMessage('user-cancel')).toBe(false)
   })
 })

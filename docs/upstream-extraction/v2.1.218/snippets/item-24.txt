@@ -1,0 +1,142 @@
+# densable 2.1.218 #24 — resume malformed delta attachment
+
+Binary: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+Changelog: Fixed a resumed session failing every turn, or crashing on resume, when its history held a malformed delta attachment
+
+## densable symbols (export / minified)
+
+| export / role | minified |
+|---|---|
+| isWellFormedAttachmentPayload | qQu |
+| dropMalformedAttachments | gen |
+| migrateLegacyAttachmentTypes | dw_ |
+| deserializeMessagesWithInterruptDetection | Cvs |
+| string-array coerce (global util) | q0 |
+| deferred tools delta scan | A1s (uses q0) |
+| mcp instructions delta scan | IXd (uses q0) |
+| agent listing delta attachment | uses q0 on addedTypes/removedTypes |
+| normalizeAttachmentForAPI delta cases | deferred/agent/mcp_*_delta via q0 |
+
+Telemetry/event needles also present: resume_hydrate_delta_events, resume_hydrate_delta_fetch_attempted (hydrate path; not the crash fix itself).
+
+## densable bodies (2.1.218 SEA, verbatim)
+
+### q0 — string-array sanitize (the 218 delta fix core)
+
+```js
+function q0(e){
+  if(!Array.isArray(e))return[];
+  return e.every((t)=>typeof t==="string")?e:e.filter((t)=>typeof t==="string")
+}
+```
+
+Used on every delta string[] field before `.length` / `.join` / `for…of` so a missing/null/non-array/mixed-type field cannot throw (resume every-turn fail / crash).
+
+### qQu / gen — structural attachment drop (already in 2.1.217; unchanged body in 218)
+
+```js
+function qQu(e){
+  if(typeof e!=="object"||e===null||!("type"in e)||typeof e.type!=="string")return!1;
+  switch(e.type){
+    case"new_file":return"filename"in e&&typeof e.filename==="string";
+    case"new_directory":return"path"in e&&typeof e.path==="string";
+    case"invoked_skills":return"skills"in e&&Array.isArray(e.skills)&&e.skills.every((t)=>typeof t==="object"&&t!==null);
+    case"hook_success":return"content"in e&&typeof e.content==="string";
+    case"skill_listing":return!("names"in e)||e.names===void 0||Array.isArray(e.names);
+    case"hook_additional_context":return"content"in e&&Array.isArray(e.content)&&e.content.every((t)=>typeof t==="string");
+    default:return!0
+  }
+}
+function gen(e){
+  let t=0,r=e.filter((n)=>{
+    if(n.type==="attachment"&&!qQu(n.attachment))return t+=1,!1;
+    return!0
+  });
+  if(t===0)return e;
+  return C(`resume: dropped ${t} attachment ${St(t,"entry","entries")} with a missing or malformed payload \u2014 the session transcript appears partially corrupt`,{level:"error"}),r
+}
+```
+
+Note: qQu `default: return true` — delta types pass the structural gate; malformed *fields inside* deltas are handled by q0, not by gen.
+
+### normalizeAttachmentForAPI (messages) — delta cases coerce with q0
+
+```js
+case"deferred_tools_delta":{
+  let r=q0(e.addedLines),n=q0(e.addedNames),o=q0(e.removedNames),i=[];
+  // ... use r/n/o only after q0
+  let s=q0(e.readdedNames);
+  let a=q0(e.needsAuthMcpServers);
+  // pendingMcpServers also q0-guarded where present
+}
+case"agent_listing_delta":{
+  let r=q0(e.addedLines),n=q0(e.addedTypes),o=q0(e.removedTypes),i=[];
+  // empty parts → return []
+}
+case"mcp_instructions_delta":{
+  let r=q0(e.addedBlocks),n=q0(e.addedNames),o=q0(e.removedNames),i=[];
+  // empty parts → return []
+}
+// mcp_dropped_tools_delta still maps e.addedEntries directly (no q0 in 218 body)
+```
+
+### History scans (reconstruct announced set) — densable 1:1 guards
+
+**deferred_tools_delta (A1s):**
+```js
+let N=new Set(q0(L.attachment.readdedNames)),
+    P=Array.isArray(L.attachment.addedLines)?q0(L.attachment.addedNames):[];
+for(let q of P){ /* announce */ }
+for(let q of q0(L.attachment.removedNames)) s.delete(q);
+if(Array.isArray(L.attachment.pendingMcpServers)) l=q0(L.attachment.pendingMcpServers);
+if(Array.isArray(L.attachment.needsAuthMcpServers)) c=q0(L.attachment.needsAuthMcpServers);
+```
+
+**mcp_instructions_delta (IXd):**
+```js
+let p=Array.isArray(d.attachment.addedBlocks);
+for(let f of p?q0(d.attachment.addedNames):[]) n.add(f);
+for(let f of q0(d.attachment.removedNames)) n.delete(f)
+```
+
+**agent_listing_delta:**
+```js
+if(Array.isArray(p.attachment.addedLines)) for(let f of q0(p.attachment.addedTypes)) a.add(f);
+for(let f of q0(p.attachment.removedTypes)) a.delete(f)
+```
+
+Pairing rule: only trust `addedNames`/`addedTypes` when the companion `addedLines`/`addedBlocks` array is actually an Array (corrupt half-payload).
+
+## Local status (go-hare)
+
+| path | status |
+|---|---|
+| `src/utils/conversationRecovery.ts` `isValidAttachmentPayload` / `dropMalformedAttachments` / call in `deserializeMessagesWithInterruptDetection` | **HAVE** (217 nXu/dQr ≡ 218 qQu/gen) |
+| densable `q0` helper | **GAP** — no equivalent |
+| `src/utils/messages.ts` normalizeAttachmentForAPI delta cases | **GAP** — bare `.length` / `.join` on `addedLines`/`removedNames`/… |
+| `src/utils/searchExtraTools.ts` `getDeferredToolsDelta` history scan | **GAP** — `for (const n of msg.attachment!.addedNames)` unsanitized |
+| `src/utils/mcpInstructionsDelta.ts` `getMcpInstructionsDelta` scan | **GAP** — same |
+| `src/utils/attachments.ts` `getAgentListingDeltaAttachment` scan | **GAP** — same |
+| local deferred delta type fields (`readdedNames`, `needsAuthMcpServers`, `pendingMcpServers`) | **PARTIAL/GAP** vs densable richer DTD payload (optional follow-on; crash fix still needs q0 on existing fields) |
+
+## 1:1 implement delta (not substitute)
+
+1. Add shared helper matching densable q0 (suggested name `asStringArray` or keep comment `// densable q0`):
+   ```ts
+   export function asStringArray(e: unknown): string[] {
+     if (!Array.isArray(e)) return []
+     return e.every((t): t is string => typeof t === 'string')
+       ? e
+       : e.filter((t): t is string => typeof t === 'string')
+   }
+   ```
+2. Wire into messages.ts delta cases + empty-parts early `return []` when all coerced arrays empty (densable).
+3. Wire into three history scanners with densable pairing:
+   - DTD: `Array.isArray(addedLines) ? asStringArray(addedNames) : []`; always `asStringArray(removedNames)`; `asStringArray(readdedNames)` when field present.
+   - MID: `Array.isArray(addedBlocks) ? asStringArray(addedNames) : []` + `asStringArray(removedNames)`.
+   - ALD: `if (Array.isArray(addedLines)) for (const t of asStringArray(addedTypes))`; `asStringArray(removedTypes)`.
+4. Keep qQu/gen path as-is (already 1:1). Do **not** invent qQu cases for `*_delta` types (densable default true).
+
+## Confidence
+
+high — full SEA bodies for q0, qQu, gen, normalize cases, and three scan sites extracted from 2.1.218 binary.

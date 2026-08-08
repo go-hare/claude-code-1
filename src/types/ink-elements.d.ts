@@ -1,15 +1,19 @@
 // Type declarations for custom Ink JSX elements
 // Note: The detailed prop types are defined in ink-jsx.d.ts via React module augmentation.
 // This file provides the global JSX namespace fallback declarations.
+// Type declarations for custom Ink JSX elements
+// Note: The detailed prop types are defined in ink-jsx.d.ts via React module augmentation.
+// This file provides the global JSX namespace fallback declarations.
 import type { ReactNode, Ref } from 'react'
 import type {
   ClickEvent,
+  DOMAccessibility,
+  DOMElement,
   FocusEvent,
   KeyboardEvent,
   PasteEvent,
   Styles,
   TextStyles,
-  DOMElement,
 } from '@anthropic/ink'
 
 declare global {
@@ -19,6 +23,8 @@ declare global {
         ref?: Ref<DOMElement>
         tabIndex?: number
         autoFocus?: boolean
+        /** densable 2.1.218 accessibility bag */
+        accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void
         onFocus?: (event: FocusEvent) => void
         onFocusCapture?: (event: FocusEvent) => void
@@ -39,6 +45,8 @@ declare global {
       'ink-text': {
         style?: Styles
         textStyles?: TextStyles
+        /** densable 2.1.218 accessibility bag */
+        accessibility?: DOMAccessibility
         children?: ReactNode
       }
       'ink-link': {

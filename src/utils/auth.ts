@@ -914,12 +914,35 @@ export const getDefaultAwsProviderChain = memoize(
         logForDebugging(
           `[API:auth] resolving default AWS provider chain (region: ${region})`,
         )
-        const { fromNodeProviderChain } = await import(
-          '@aws-sdk/credential-providers'
-        )
+        // densable 2.1.218 $5 / iEp family: parentClientConfig.region +
+        // requestHandler on BOTH parentClientConfig and clientConfig so
+        // assume-role STS uses wizard/runtime region (partition fix) and
+        // proxy-only networks (fYt) instead of default us-east-1 bare STS.
+        const [{ fromNodeProviderChain }, { NodeHttpHandler }, proxyHandler] =
+          await Promise.all([
+            import('@aws-sdk/credential-providers'),
+            import('@smithy/node-http-handler'),
+            import('./proxy.js').then(m =>
+              m.getAwsSdkProxyRequestHandler({
+                url: `https://sts.${region}.amazonaws.com`,
+                requestTimeoutMs: m.AWS_SDK_REQUEST_TIMEOUT_MS,
+              }),
+            ),
+          ])
+        const requestHandler =
+          proxyHandler ??
+          new NodeHttpHandler({
+            requestTimeout: 30_000,
+          })
         const provider = fromNodeProviderChain({
           ignoreCache: true,
-          clientConfig: { region },
+          parentClientConfig: {
+            region,
+            requestHandler,
+          },
+          clientConfig: {
+            requestHandler,
+          },
         })
         const identity = await resolveWithStallGuard(provider())
         return {

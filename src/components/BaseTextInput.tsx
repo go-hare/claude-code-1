@@ -165,10 +165,14 @@ export function BaseTextInput({
     ? ({ tabIndex: 0, autoFocus: true, onKeyDown: handleKeyDown, onPaste } as const)
     : ({} as const);
 
+  // densable 2.1.218 #13: aria-preserve-whitespace on the input value so
+  // trailing spaces (including the cursor cell) are not trimEnd'd in SR mode.
   if (hasHighlights) {
     return (
       <Box ref={setBoxRef} {...focusProps}>
-        <HighlightedInput text={renderedValue} highlights={filteredHighlights} />
+        <Box accessibility={{ preserveWhitespace: true }}>
+          <HighlightedInput text={renderedValue} highlights={filteredHighlights} />
+        </Box>
         {showArgumentHint && (
           <Text dimColor>
             {props.value?.endsWith(' ') ? '' : ' '}
@@ -182,7 +186,7 @@ export function BaseTextInput({
 
   return (
     <Box ref={setBoxRef} {...focusProps}>
-      <Text wrap="truncate-end" dimColor={props.dimColor}>
+      <Text wrap="truncate-end" dimColor={props.dimColor} aria-preserve-whitespace>
         {showPlaceholder && props.placeholderElement ? (
           props.placeholderElement
         ) : showPlaceholder && renderedPlaceholder ? (

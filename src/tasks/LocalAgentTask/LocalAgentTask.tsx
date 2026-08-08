@@ -580,6 +580,11 @@ export type LocalAgentTaskState = TaskStateBase & {
    * Ignored by tryClaimAgentResume.
    */
   adoptResumePending?: boolean;
+  /**
+   * densable 2.1.218 wvo `forkedSkillName` — skill name that launched this
+   * background agent. Used to dedupe live forked-skill duplicates.
+   */
+  forkedSkillName?: string;
 };
 
 function initAgentTaskOutput(agentId: string): void {
@@ -1859,6 +1864,8 @@ export function registerAsyncAgent({
   spawnDepth,
   ownedFiles,
   isObserver,
+  forkedSkillName,
+  model,
   attachOwnerKeepalive = true,
 }: {
   agentId: string;
@@ -1877,6 +1884,9 @@ export function registerAsyncAgent({
   ownedFiles?: string[];
   /** Official Sot isObserver — observer-activity spawns. */
   isObserver?: boolean;
+  /** densable 2.1.218 wvo forkedSkillName for live-duplicate dedupe. */
+  forkedSkillName?: string;
+  model?: string;
   /**
    * densable: Gge is call-site only (nested spawn `if(!pn())Gge`), not inside Sot.
    * Resume Aye / observer Sot stamp ownerAgentId:mi() without Gge.
@@ -1903,6 +1913,7 @@ export function registerAsyncAgent({
     agentType: selectedAgent.agentType ?? 'general-purpose',
     // densable Sot: effort:a.effort from agent definition
     ...(selectedAgent.effort !== undefined ? { effort: selectedAgent.effort } : {}),
+    ...(model !== undefined ? { model } : {}),
     activeTaskExecutionContext,
     ownedFiles,
     notificationTargetAgentId,
@@ -1922,6 +1933,7 @@ export function registerAsyncAgent({
     retain: false,
     diskLoaded: false,
     ...(isObserver === true ? { isObserver: true } : {}),
+    ...(forkedSkillName !== undefined ? { forkedSkillName } : {}),
   };
 
   // Register cleanup handler

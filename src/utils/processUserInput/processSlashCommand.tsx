@@ -10,6 +10,7 @@ import {
   getCommand,
   getCommandName,
   hasCommand,
+  isCommandEnabled,
   type PromptCommand,
 } from 'src/commands.js';
 import { NO_CONTENT_MESSAGE } from 'src/constants/messages.js';
@@ -46,6 +47,11 @@ import { isEnvTruthy } from '../envUtils.js';
 import { AbortError, MalformedCommandError } from '../errors.js';
 import { getDisplayPath } from '../file.js';
 import { extractResultText, prepareForkedCommandContext } from '../forkedAgent.js';
+import {
+  formatForkedSkillLaunchMarker,
+  launchBackgroundForkedSkill,
+  shouldBackgroundForkedSkill,
+} from '../forkedSkillBackground.js';
 import { getFsImplementation } from '../fsOperations.js';
 import { isFullscreenEnvEnabled } from '../fullscreen.js';
 import { toArray } from '../generators.js';
@@ -142,6 +148,92 @@ async function executeForkedSlashCommand(
 
   logForDebugging(`Executing forked slash command /${command.name} with agent ${agentDefinition.agentType}`);
 
+  // densable 2.1.218 Cvo/wvo: context:fork skills default to background agents
+  // (task-notification on complete). Opt out with frontmatter `background: false`.
+  // KAIROS/assistant path below remains a separate fire-and-forget re-enqueue
+  // loop for scheduled tasks (meta prompt + autonomy finalize).
+  const appState = await context.getAppState();
+  const forceSyncFork =
+    // Non-interactive / disable-bg handled inside shouldBackgroundForkedSkill
+    false;
+  if (
+    shouldBackgroundForkedSkill(command, forceSyncFork) &&
+    // KAIROS path owns autonomy re-enqueue; skip double-bg when that wins.
+    !(appState.kairosEnabled && (feature('KAIROS') || context.options.allowBackgroundForkedSlashCommands === true))
+  ) {
+    const setAppState = context.setAppStateForTasks ?? context.setAppState;
+    try {
+      const launched = await launchBackgroundForkedSkill({
+        agentId,
+        agentDefinition,
+        command,
+        description: `/${getCommandName(command)} ${args}`.trim(),
+        prompt: skillContent,
+        promptMessages,
+        context,
+        canUseTool,
+        getAppState: context.getAppState,
+        setAppState,
+      });
+      if (launched) {
+        const stdout = `Running in the background as @${launched.name}`;
+        const marker = formatForkedSkillLaunchMarker({
+          agentId: launched.agentId,
+          skillName: command.name,
+          description: `/${getCommandName(command)} ${args}`.trim(),
+        });
+        return {
+          messages: [
+            createUserMessage({
+              content: prepareUserContent({
+                inputString: `/${getCommandName(command)} ${args}`.trim(),
+                precedingInputBlocks,
+              }),
+            }),
+            createUserMessage({
+              content: `<local-command-stdout>${stdout}</local-command-stdout>\n${marker}`,
+            }),
+          ],
+          shouldQuery: false,
+          command,
+          resultText: stdout,
+        };
+      }
+      // null = live-duplicate → fall through to sync path
+    } catch (err) {
+      if (context.abortController.signal.aborted) {
+        return {
+          messages: [
+            createUserMessage({
+              content: prepareUserContent({
+                inputString: `/${getCommandName(command)} ${args}`.trim(),
+                precedingInputBlocks,
+              }),
+            }),
+            createUserInterruptionMessage({ toolUse: false }),
+          ],
+          shouldQuery: false,
+          command,
+        };
+      }
+      return {
+        messages: [
+          createUserMessage({
+            content: prepareUserContent({
+              inputString: `/${getCommandName(command)} ${args}`.trim(),
+              precedingInputBlocks,
+            }),
+          }),
+          createUserMessage({
+            content: `<local-command-stderr>${err instanceof Error ? err.message : String(err)}</local-command-stderr>`,
+          }),
+        ],
+        shouldQuery: false,
+        command,
+      };
+    }
+  }
+
   // Assistant mode: fire-and-forget. Launch subagent in background, return
   // immediately, re-enqueue the result as an isMeta prompt when done.
   // Without this, N scheduled tasks on startup = N serial (subagent + main
@@ -152,9 +244,8 @@ async function executeForkedSlashCommand(
   // depends on assistant-mode invariants: scheduled_tasks.json exists,
   // the main agent knows to pipe results through SendUserMessage, and
   // isMeta prompts are hidden. Outside assistant mode, context:fork commands
-  // are user-invoked skills (/commit etc.) that should run synchronously
-  // with the progress UI.
-  const appState = await context.getAppState();
+  // are user-invoked skills that default to densable bg above; KAIROS keeps
+  // the scheduled-task re-enqueue path.
   const allowBackgroundForkedSlashCommands = context.options.allowBackgroundForkedSlashCommands === true;
   if (allowBackgroundForkedSlashCommands) {
     assertBackgroundForkedSlashCommandTestOverrideAllowed();
@@ -688,6 +779,25 @@ export async function processSlashCommand(
   };
 }
 
+/**
+ * densable sdr — resolve first-arg subcommand redirect
+ * (e.g. code-review `ultra` → ultrareview, remaining args preserved).
+ */
+export function resolveSlashSubcommand(
+  command: Command,
+  args: string,
+): { targetName: string; consumedToken: string; remainingArgs: string } | null {
+  if (!command.subcommands) return null;
+  const r = args.trimStart();
+  const n = r.search(/\s/);
+  const token = n === -1 ? r : r.slice(0, n);
+  if (!token) return null;
+  const targetName = command.subcommands[token.toLowerCase()];
+  if (targetName === undefined) return null;
+  const remainingArgs = (n === -1 ? '' : r.slice(n + 1).trimStart()).trim();
+  return { targetName, consumedToken: token, remainingArgs };
+}
+
 async function getMessagesForSlashCommand(
   commandName: string,
   args: string,
@@ -700,7 +810,25 @@ async function getMessagesForSlashCommand(
   uuid?: string,
   autonomy?: QueuedCommand['autonomy'],
 ): Promise<SlashCommandResult> {
-  const command = getCommand(commandName, context.options.commands);
+  let resolvedName = commandName;
+  let resolvedArgs = args;
+  let command = getCommand(commandName, context.options.commands);
+
+  // densable sdr: /code-review ultra → /ultrareview <remaining>
+  const sub = resolveSlashSubcommand(command, args);
+  if (sub) {
+    try {
+      const target = getCommand(sub.targetName, context.options.commands);
+      if (target && isCommandEnabled(target)) {
+        resolvedName = sub.targetName;
+        resolvedArgs = sub.remainingArgs;
+        command = target;
+      }
+    } catch {
+      // Target not registered / disabled — fall through to original command
+      // (getPrompt will surface ultraFallback local note).
+    }
+  }
 
   // Official IJ densable — skillOverrides "off" blocks slash invocation.
   try {
@@ -738,7 +866,7 @@ async function getMessagesForSlashCommand(
 
   // Track skill usage for ranking (only for prompt commands that are user-invocable)
   if (command.type === 'prompt' && command.userInvocable !== false) {
-    recordSkillUsage(commandName);
+    recordSkillUsage(resolvedName);
   }
 
   // Check if the command is user-invocable
@@ -748,18 +876,21 @@ async function getMessagesForSlashCommand(
       messages: [
         createUserMessage({
           content: prepareUserContent({
-            inputString: `/${commandName}`,
+            inputString: `/${resolvedName}`,
             precedingInputBlocks,
           }),
         }),
         createUserMessage({
-          content: `This skill can only be invoked by Claude, not directly by users. Ask Claude to use the "${commandName}" skill for you.`,
+          content: `This skill can only be invoked by Claude, not directly by users. Ask Claude to use the "${resolvedName}" skill for you.`,
         }),
       ],
       shouldQuery: false,
       command,
     };
   }
+
+  // densable sdr: use redirected args for dispatch
+  const argsForDispatch = resolvedArgs;
 
   try {
     switch (command.type) {
@@ -808,7 +939,7 @@ async function getMessagesForSlashCommand(
             const skipTranscript =
               isFullscreenEnvEnabled() && typeof result === 'string' && result.endsWith(' dismissed');
 
-            const breadcrumbArgs = options?.displayArgs ?? args;
+            const breadcrumbArgs = options?.displayArgs ?? argsForDispatch;
 
             void resolve({
               messages:
@@ -845,7 +976,7 @@ async function getMessagesForSlashCommand(
 
           void command
             .load()
-            .then(mod => mod.call(onDone, { ...context, canUseTool }, args))
+            .then(mod => mod.call(onDone, { ...context, canUseTool }, argsForDispatch))
             .then(jsx => {
               if (jsx == null) return;
               if (context.options.isNonInteractiveSession) {
@@ -889,7 +1020,7 @@ async function getMessagesForSlashCommand(
         });
       }
       case 'local': {
-        const displayArgs = command.isSensitive && args.trim() ? '***' : args;
+        const displayArgs = command.isSensitive && argsForDispatch.trim() ? '***' : argsForDispatch;
         const userMessage = createUserMessage({
           content: prepareUserContent({
             inputString: formatCommandInput(command, displayArgs),
@@ -900,7 +1031,7 @@ async function getMessagesForSlashCommand(
         try {
           const syntheticCaveatMessage = createSyntheticUserCaveatMessage();
           const mod = await command.load();
-          const result = await mod.call(args, context);
+          const result = await mod.call(argsForDispatch, context);
 
           if (result.type === 'skip') {
             return {
@@ -947,6 +1078,29 @@ async function getMessagesForSlashCommand(
             };
           }
 
+          // densable headless local → model turn (e.g. ultrareview non-interactive)
+          if (result.type === 'query') {
+            const stdout = result.value;
+            const promptText = result.prompt?.trim() ? result.prompt : undefined;
+            return {
+              messages: [
+                userMessage,
+                createCommandInputMessage(`<local-command-stdout>${stdout}</local-command-stdout>`),
+                ...(promptText
+                  ? [
+                      createUserMessage({
+                        content: promptText,
+                        isMeta: true,
+                      }),
+                    ]
+                  : []),
+              ],
+              shouldQuery: true,
+              command,
+              resultText: stdout,
+            };
+          }
+
           // Text result — use system message so it doesn't render as a user bubble
           return {
             messages: [
@@ -975,7 +1129,7 @@ async function getMessagesForSlashCommand(
           if (command.context === 'fork') {
             return await executeForkedSlashCommand(
               command,
-              args,
+              argsForDispatch,
               context,
               precedingInputBlocks,
               setToolJSX,
@@ -986,7 +1140,7 @@ async function getMessagesForSlashCommand(
 
           return await getMessagesForPromptSlashCommand(
             command,
-            args,
+            argsForDispatch,
             context,
             precedingInputBlocks,
             imageContentBlocks,
@@ -999,7 +1153,7 @@ async function getMessagesForSlashCommand(
               messages: [
                 createUserMessage({
                   content: prepareUserContent({
-                    inputString: formatCommandInput(command, args),
+                    inputString: formatCommandInput(command, argsForDispatch),
                     precedingInputBlocks,
                   }),
                 }),
@@ -1013,7 +1167,7 @@ async function getMessagesForSlashCommand(
             messages: [
               createUserMessage({
                 content: prepareUserContent({
-                  inputString: formatCommandInput(command, args),
+                  inputString: formatCommandInput(command, argsForDispatch),
                   precedingInputBlocks,
                 }),
               }),

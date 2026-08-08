@@ -89,6 +89,10 @@ export type UserMessage = Message & {
   type: 'user'
   message: NonNullable<Message['message']>
   imagePasteIds?: number[]
+  /** densable: API msg_* id Esc cancelled (interrupt markers only). */
+  interruptedMessageId?: string
+  /** densable: abort reason was shutdown (resume treats as interrupted_turn). */
+  interruptedByShutdown?: boolean
 }
 export type NormalizedUserMessage = UserMessage
 export type RequestStartEvent = { type: string; [key: string]: unknown }

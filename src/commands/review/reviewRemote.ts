@@ -173,6 +173,126 @@ export function normalizeUltrareviewPrArg(raw: string): {
 }
 
 /**
+ * densable uun — strip leading/trailing `--fix`/`--comment` flags from ultrareview args.
+ * Remaining text is the scope (PR# / base branch / prose instructions).
+ */
+export function parseUltrareviewArgs(raw: string): {
+  scopeArgs: string
+  applyFixes: boolean
+  comment: boolean
+} {
+  const leading = /^(--fix|--comment)(?:\s+|$)/
+  const trailing = /(?:^|\s+)(--fix|--comment)$/
+  const flags = new Set<string>()
+  let o = raw.trim()
+  for (;;) {
+    const m = o.match(leading)
+    if (!m) break
+    flags.add(m[1]!)
+    o = o.slice(m[0].length)
+  }
+  for (;;) {
+    const m = o.match(trailing)
+    if (!m) break
+    flags.add(m[1]!)
+    o = o.slice(0, o.length - m[0].length)
+  }
+  return {
+    scopeArgs: o.trim(),
+    applyFixes: flags.has('--fix'),
+    comment: flags.has('--comment'),
+  }
+}
+
+/**
+ * densable kgr — collapse whitespace and truncate for "Note for findings" display.
+ */
+export function previewInstructions(text: string, max = 80): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim()
+  if (collapsed.length <= max) return collapsed
+  return `${collapsed.slice(0, Math.max(0, max - 1))}…`
+}
+
+/**
+ * densable pNo prose path:
+ * - l = whitespace in arg
+ * - c = multi-word but still a valid ref (origin/arg or arg)
+ * - embedded PR hint when multi-word non-ref contains PR-style tokens
+ * - p = prose instructions: multi-word, not a valid ref, not starting with `-`
+ * - f = instructions, m = base branch arg (empty when prose)
+ */
+export async function resolveUltrareviewBranchArg(trimmed: string): Promise<
+  | {
+      kind: 'prose'
+      instructions: string
+      baseArg: string
+    }
+  | {
+      kind: 'embedded_pr'
+      display: string
+      prToken: string
+    }
+  | {
+      kind: 'branch'
+      baseArg: string
+    }
+> {
+  if (!trimmed) {
+    return { kind: 'branch', baseArg: '' }
+  }
+  const hasWhitespace = /\s/.test(trimmed)
+  if (!hasWhitespace) {
+    return { kind: 'branch', baseArg: trimmed }
+  }
+  // densable: multi-word still treated as branch if origin/n or n resolves
+  const multiWordIsRef =
+    (await revParseExists(`origin/${trimmed}`)) ||
+    (await revParseExists(trimmed))
+  if (multiWordIsRef) {
+    return { kind: 'branch', baseArg: trimmed }
+  }
+  // densable embedded PR hint before prose (pNo)
+  const urlHit = trimmed.match(/https:\/\/\S*\/pull\/\d+\b/)
+  const prHit =
+    trimmed.match(/(?<![\w/#-])(?:#|PR)[-\s#]*(\d+)\b/i) ??
+    trimmed.match(/(?<![\w/#-])pull[\s-]+request[-\s#]*(\d+)\b/i) ??
+    trimmed.match(/\/pull\/(\d+)\b/i) ??
+    trimmed.match(/^(\d+)\b/)
+  if (urlHit || prHit) {
+    const display = urlHit ? urlHit[0]! : `#${prHit![1]!}`
+    const prToken = urlHit ? urlHit[0]! : prHit![1]!
+    return { kind: 'embedded_pr', display, prToken }
+  }
+  // densable: p = l && !c && !n.startsWith("-")
+  if (!trimmed.startsWith('-')) {
+    return { kind: 'prose', instructions: trimmed, baseArg: '' }
+  }
+  // Leading `-` multi-word non-ref → still try as branch (will fail with correctable error)
+  return { kind: 'branch', baseArg: trimmed }
+}
+
+/**
+ * densable dun — model nudge after ultrareview launch (visible tool output already
+ * printed). Optionally append --fix / findings-note instructions.
+ */
+export function ultrareviewLaunchAcknowledgementNudge(
+  applyFixes = false,
+  instructions?: string,
+): string {
+  const fixNote = applyFixes
+    ? ' The user passed --fix: when the findings arrive, apply them to the local working tree.'
+    : ''
+  const instrNote = instructions
+    ? ` The user's argument was interpreted as a review note, not a base branch: "${previewInstructions(instructions, 200)}". The cloud review runs its standard pass over the branch diff and does not see the note; when the findings arrive, prioritize and relate them to the user's request.`
+    : ''
+  return (
+    'The output above is already visible to the user. Briefly acknowledge it without repeating the target, URL, or billing note. Findings will arrive via task-notification.' +
+    fixNote +
+    instrNote
+  )
+}
+
+/**
  * densable qqi — ultrareview diff size caps from tengu_review_bughunter_config.
  * Defaults: max_diff_files=500, max_diff_lines=8000.
  */
@@ -793,7 +913,8 @@ export async function checkOverageGate(options?: {
   }
 }
 
-const DEFAULT_INVOCATION = '/ultrareview'
+// densable mNo: default invocation is `/code-review ultra` (ultrareview is alias)
+const DEFAULT_INVOCATION = '/code-review ultra'
 
 /**
  * Launch a teleported review session. Returns ContentBlockParam[] describing
@@ -812,9 +933,20 @@ export async function launchRemoteReview(
   args: string,
   context: ToolUseContext,
   billingNote?: string,
-  options?: { invocation?: string },
+  options?: {
+    invocation?: string
+    /** densable: skip registerRemoteAgentTask (rare headless previews) */
+    skipTaskRegistration?: boolean
+    /** densable uun.applyFixes — apply findings locally when they arrive */
+    applyFixesOnComplete?: boolean
+  },
 ): Promise<ContentBlockParam[] | null> {
   const invocation = options?.invocation ?? DEFAULT_INVOCATION
+  // densable uun: strip --fix/--comment before scope resolution
+  const { scopeArgs, applyFixes: applyFixesFromArgs } =
+    parseUltrareviewArgs(args)
+  const applyFixesOnComplete =
+    options?.applyFixesOnComplete === true || applyFixesFromArgs
   const eligibility = await checkRemoteAgentEligibility()
   // Synthetic DEFAULT_CODE_REVIEW_ENVIRONMENT_ID works without per-org CCR
   // setup, so no_remote_environment isn't a blocker. Server-side quota
@@ -868,9 +1000,43 @@ export async function launchRemoteReview(
 
   const resolvedBillingNote = billingNote ?? ''
 
-  // densable YOo PR normalize
-  const { trimmed, prNumber, parsedUrl } = normalizeUltrareviewPrArg(args)
+  // densable YOo PR normalize (on scopeArgs after uun flag strip)
+  const { trimmed, prNumber, parsedUrl } = normalizeUltrareviewPrArg(scopeArgs)
   const isPrNumber = prNumber !== null
+  // densable pNo prose / embedded-PR path — only for non-PR-number branch mode
+  let reviewInstructions: string | undefined
+  let branchBaseArg = trimmed
+  let isProseInstructions = false
+  if (!isPrNumber && trimmed) {
+    const resolved = await resolveUltrareviewBranchArg(trimmed)
+    if (resolved.kind === 'embedded_pr') {
+      logEvent('tengu_review_remote_precondition_recovery', {
+        reason: meta('base_ref_not_found'),
+        method: meta('embedded_pr_hint'),
+        outcome: meta('offered'),
+      })
+      logEvent('tengu_review_remote_precondition_failed', {
+        reason: meta('base_ref_not_found'),
+        ...baseRefArgDiagnostics(trimmed),
+        has_pr_ref: true,
+        has_remote: !!(await detectCurrentRepositoryWithHost()),
+        cwd_is_home: isCwdHome(),
+      })
+      return [
+        {
+          type: 'text',
+          text: `Your request mentions what looks like a PR reference (${resolved.display}). To review that PR, run \`${invocation} ${resolved.prToken}\`. To review your current branch instead, rerun without the PR-style reference.`,
+        },
+      ]
+    }
+    if (resolved.kind === 'prose') {
+      reviewInstructions = resolved.instructions
+      branchBaseArg = ''
+      isProseInstructions = true
+    } else {
+      branchBaseArg = resolved.baseArg
+    }
+  }
 
   // Synthetic code_review env. Go taggedid.FromUUID(TagEnvironment,
   // UUID{...,0x02}) encodes with version prefix '01' — NOT Python's
@@ -1098,18 +1264,19 @@ export async function launchRemoteReview(
       ]
     }
 
-    // Branch mode: densable treats `n` as base branch (or default when empty).
-    // Fetch from origin when missing (YI_), suggest closest on typo (XI_).
+    // Branch mode: densable treats `m` (branchBaseArg) as base branch (or default
+    // when empty / prose). Fetch from origin when missing (YI_), suggest closest
+    // on typo (XI_). densable pNo: prose sets m="" so default base is used.
     let fetchedFromOrigin = false
-    if (trimmed) {
+    if (branchBaseArg) {
       const localOrRemote =
-        (await revParseExists(`origin/${trimmed}`)) ||
-        (await revParseExists(trimmed))
+        (await revParseExists(`origin/${branchBaseArg}`)) ||
+        (await revParseExists(branchBaseArg))
       if (!localOrRemote) {
-        const fetchResult = await tryFetchOriginBranch(trimmed)
+        const fetchResult = await tryFetchOriginBranch(branchBaseArg)
         if (
           fetchResult === 'recovered' &&
-          (await revParseExists(`origin/${trimmed}`))
+          (await revParseExists(`origin/${branchBaseArg}`))
         ) {
           fetchedFromOrigin = true
           // densable: recovery success is logged later via l("succeeded") after merge-base
@@ -1124,7 +1291,7 @@ export async function launchRemoteReview(
           }
           const hasRemote = !!(await detectCurrentRepositoryWithHost())
           const diag = {
-            ...baseRefArgDiagnostics(trimmed),
+            ...baseRefArgDiagnostics(branchBaseArg),
             has_remote: hasRemote,
             cwd_is_home: isCwdHome(),
           }
@@ -1136,11 +1303,11 @@ export async function launchRemoteReview(
             return [
               {
                 type: 'text',
-                text: `"${trimmed}" exists on origin but couldn't be fetched. Run \`git fetch origin ${trimmed}\` and try ${invocation} again.`,
+                text: `"${branchBaseArg}" exists on origin but couldn't be fetched. Run \`git fetch origin ${branchBaseArg}\` and try ${invocation} again.`,
               },
             ]
           }
-          const suggestion = await suggestClosestBranch(trimmed)
+          const suggestion = await suggestClosestBranch(branchBaseArg)
           if (suggestion) {
             logEvent('tengu_review_remote_precondition_recovery', {
               reason: meta('base_ref_not_found'),
@@ -1158,14 +1325,15 @@ export async function launchRemoteReview(
           return [
             {
               type: 'text',
-              text: `"${trimmed}" is not a branch in this repo.${didYouMean} ${invocation} takes a PR number, a branch name, or no argument (reviews your current branch). Try ${invocation} by itself.`,
+              text: `"${branchBaseArg}" is not a branch in this repo.${didYouMean} ${invocation} takes a PR number, a branch name, or no argument (reviews your current branch). Try ${invocation} by itself.`,
             },
           ]
         }
       }
     }
 
-    const baseBranch = trimmed || (await getDefaultBranch()) || 'main'
+    // densable: y = m || defaultBranch || "main"  (m empty when prose)
+    const baseBranch = branchBaseArg || (await getDefaultBranch()) || 'main'
     const headBranch = (await getBranch()) || 'HEAD'
     // Env-manager's `git remote remove origin` after bundle-clone
     // deletes refs/remotes/origin/* — the base branch name won't resolve
@@ -1189,14 +1357,23 @@ export async function launchRemoteReview(
       ))
     }
     const mergeBaseSha = mbOut.trim()
-    // densable l(outcome): only when branch was recovered via YI_ fetch
+    // densable _(outcome): fetch recovery + prose_instructions recovery
     const logFetchRecovery = (outcome: 'succeeded' | 'failed') => {
-      if (!fetchedFromOrigin) return
-      logEvent('tengu_review_remote_precondition_recovery', {
-        reason: meta('base_ref_not_found'),
-        method: meta('fetch_retry'),
-        outcome: meta(outcome),
-      })
+      if (fetchedFromOrigin) {
+        logEvent('tengu_review_remote_precondition_recovery', {
+          reason: meta('base_ref_not_found'),
+          method: meta('fetch_retry'),
+          outcome: meta(outcome),
+        })
+      }
+      // densable: if(p) log prose_instructions recovery (skip succeeded when suppressed)
+      if (isProseInstructions) {
+        logEvent('tengu_review_remote_precondition_recovery', {
+          reason: meta('base_ref_not_found'),
+          method: meta('prose_instructions'),
+          outcome: meta(outcome),
+        })
+      }
     }
     // densable noMergeBase tag for empty-tree fallback (tFo $)
     let noMergeBase: 'unrelated_history' | 'base_ref_missing' | undefined
@@ -1214,8 +1391,9 @@ export async function launchRemoteReview(
       const isShallow = shallowOut === 'true'
       if (headOk && shallowOut === 'false' && isEmptyTreeFallbackEnabled()) {
         // densable R: arg present OR base ref resolves → "unrelated_history"
+        // densable uses m (branchBaseArg), not prose instructions
         const baseExists =
-          trimmed.length > 0 ||
+          branchBaseArg.length > 0 ||
           (
             await git([
               'rev-parse',
@@ -1310,7 +1488,7 @@ export async function launchRemoteReview(
           cwd_is_home: isCwdHome(),
           is_shallow: isShallow,
           head_resolves: headOk,
-          arg_was_explicit: trimmed.length > 0,
+          arg_was_explicit: branchBaseArg.length > 0,
         })
         logFetchRecovery('failed')
         if (!headOk) {
@@ -1331,7 +1509,7 @@ export async function launchRemoteReview(
           return [
             {
               type: 'text',
-              text: trimmed
+              text: branchBaseArg
                 ? `Your clone is shallow and doesn't contain the point where your branch forked from ${baseBranch}. Run \`git fetch --deepen=100 origin ${baseBranch}\` (or \`git fetch --unshallow origin\`) and rerun ${invocation}.`
                 : `Your clone is shallow and doesn't contain the point where your branch forked from ${baseBranch}. Run \`git fetch --unshallow origin\` and rerun ${invocation}. If your base branch isn't ${baseBranch}, pass it explicitly (\`${invocation} <branch>\`).`,
             },
@@ -1339,7 +1517,7 @@ export async function launchRemoteReview(
         }
         const hint = fetchedFromOrigin
           ? `${baseBranch} was fetched from origin but shares no history with HEAD. Try \`git fetch --unshallow origin\` (or deepen the clone) and rerun.`
-          : trimmed
+          : branchBaseArg
             ? `Make sure ${baseBranch} exists locally or on origin (try \`git fetch origin ${baseBranch}\`).`
             : `Pass the base branch explicitly (e.g. \`${invocation} develop\`) or make sure you're in a git repo with a ${baseBranch} branch.`
         return [
@@ -1371,7 +1549,7 @@ export async function launchRemoteReview(
       if (diffCode === 0 && !diffStat.trim()) {
         // densable empty_diff (merge-base path): name ref + short sha + explicit base hint
         const usedOriginRef = mergeBaseAgainstRef.startsWith('origin/')
-        const hadExplicitBase = trimmed.length > 0
+        const hadExplicitBase = branchBaseArg.length > 0
         logEvent('tengu_review_remote_precondition_failed', {
           reason: meta('empty_diff'),
           used_origin_ref: usedOriginRef,
@@ -1547,17 +1725,26 @@ export async function launchRemoteReview(
     }
     return null
   }
-  registerRemoteAgentTask({
-    remoteTaskType: 'ultrareview',
-    session,
-    command,
-    context,
-    isRemoteReview: true,
-  })
-  // densable: tengu_review_remote_launched {mode, had_arg}
+  if (!options?.skipTaskRegistration) {
+    registerRemoteAgentTask({
+      remoteTaskType: 'ultrareview',
+      session,
+      command,
+      context,
+      isRemoteReview: true,
+      applyFixesOnComplete: applyFixesOnComplete || undefined,
+      reviewInstructions:
+        launchMode === 'branch' ? reviewInstructions : undefined,
+    })
+  }
+  // densable: tengu_review_remote_launched {mode, had_arg, had_instructions}
   logEvent('tengu_review_remote_launched', {
     mode: meta(launchMode),
-    had_arg: trimmed.length > 0,
+    had_arg:
+      launchMode === 'pr'
+        ? true
+        : branchBaseArg.length > 0 || isProseInstructions,
+    had_instructions: launchMode === 'branch' && !!reviewInstructions,
   })
   // densable tFo: empty-tree fallback recovery succeeded
   if (launchMode === 'branch' && noMergeBaseKind) {
@@ -1570,13 +1757,22 @@ export async function launchRemoteReview(
   const sessionUrl = getRemoteTaskSessionUrl(session.id)
   // densable JOo: optional Scope: ${diffStat} line for branch launches
   const scopeLine = scopeDiffStat ? `\nScope: ${scopeDiffStat}` : ''
-  // Concise — the tool-output block is visible to the user, so the model
-  // shouldn't echo the same info. Just enough for Claude to acknowledge the
-  // launch without restating the target/URL (both already printed above).
+  // densable mNo: prose note for user-visible launch output
+  const noteLine =
+    launchMode === 'branch' && reviewInstructions
+      ? options?.skipTaskRegistration
+        ? `\nYour text was read as a note, not a base branch — the standard review runs on the diff above.`
+        : `\nYour text was read as a note, not a base branch — the standard review runs on the diff above, and the findings will be related to your note when they arrive.`
+      : ''
+  const billingPrefix = resolvedBillingNote.trim()
+    ? `${resolvedBillingNote.trim()}\n`
+    : ''
+  // densable: visible tool output + model nudge (dun) in same text block when
+  // shouldQuery; ultrareviewCommand wraps via onDone. Keep launch body concise.
   return [
     {
       type: 'text',
-      text: `Ultrareview launched for ${target} (~10–20 min, runs in the cloud). Track: ${sessionUrl}${resolvedBillingNote}${scopeLine} Findings arrive via task-notification. Briefly acknowledge the launch to the user without repeating the target or URL — both are already visible in the tool output above.`,
+      text: `${billingPrefix}Ultrareview launched for ${target} (~10–20 min, runs in the cloud). Track: ${sessionUrl}${scopeLine}${noteLine}\n${ultrareviewLaunchAcknowledgementNudge(applyFixesOnComplete, reviewInstructions)}`,
     },
   ]
 }

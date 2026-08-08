@@ -24,6 +24,10 @@ export const TERMINAL_OUTPUT_TAGS = [
 
 export const TICK_TAG = 'tick'
 
+// densable 2.1.218 rAt — launch marker returned with local-command-stdout when a
+// context:fork skill is backgrounded. JSON body: {agentId, skillName, description}.
+export const FORKED_SKILL_LAUNCH_TAG = 'forked-skill-launch'
+
 // XML tag names for task notifications (background task completions)
 export const TASK_NOTIFICATION_TAG = 'task-notification'
 export const TASK_ID_TAG = 'task-id'

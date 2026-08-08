@@ -1,0 +1,7 @@
+150715: hook execution - workspace trust not accepted
+150821: hook execution - workspace trust not accepted
+150868:Skipping StatusLine command execution - workspace trust not accepted
+150879:Skipping FileSuggestion command execution - workspace trust not accepted
+169371:Status line command skipped: workspace trust not accepted
+170707:Skipping subagentStatusLine execution - workspace trust not accepted
+172327: - workspace trust not accepted

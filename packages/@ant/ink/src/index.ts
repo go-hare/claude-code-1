@@ -85,12 +85,28 @@ export {
   type ScreenReaderFramePlan,
 } from './core/screenReaderPark.js'
 export {
+  extractScreenReaderOutput,
   extractScreenReaderText,
   findScreenReaderNodeStartIndex,
   sanitizeScreenReaderText,
+  type PreserveRange,
   type ScreenReaderAccessibility,
   type ScreenReaderDOMNode,
+  type ScreenReaderExtract,
 } from './core/screenReaderTree.js'
+export {
+  announceDeletedText,
+  announceForScreenReader,
+  clearScreenReaderAnnouncements,
+  drainScreenReaderAnnouncements,
+  formatDeletedTextAnnouncement,
+  peekScreenReaderAnnouncements,
+} from './core/screenReaderAnnounce.js'
+export {
+  MAX_TREE_DEPTH,
+  resetTreeDepthWarningsForTests,
+  warnTreeDepthExceeded,
+} from './core/maxTreeDepth.js'
 export {
   AX_STARTUP_QUIET_ENV_KEY,
   endScreenReaderStartupQuiet,
@@ -105,6 +121,7 @@ export {
 // Core types
 // ============================================================
 export type {
+  DOMAccessibility,
   DOMElement,
   TextNode,
   ElementNames,

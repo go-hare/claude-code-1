@@ -1606,6 +1606,16 @@ export const SDKCompactBoundaryMessageSchema = lazySchema(() =>
     }),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
+    // densable 2.1.218 #23 — forkSession backpointer across compaction break
+    logical_parent_uuid: UUIDPlaceholder()
+      .nullable()
+      .optional()
+      .describe(
+        '@internal uuid of the last pre-compact message — the backpointer ' +
+          'forkSession follows across the compaction break. Distinct from the ' +
+          'session-file chain parent (which is the post-compact summary). ' +
+          'Absent from older producers.',
+      ),
   }),
 )
 
@@ -1872,12 +1882,18 @@ export const SDKCommandLifecycleMessageSchema = lazySchema(() =>
         .describe(
           'User-command uuid being acked (same id Host/CCR delivery tracks).',
         ),
-      state: z.enum(['started', 'completed']),
+      state: z.enum([
+        'queued',
+        'started',
+        'completed',
+        'cancelled',
+        'discarded',
+      ]),
       session_id: z.string().optional(),
       timestamp: z.string().optional(),
     })
     .describe(
-      'Emitted when a queued user command starts processing and when it completes. Not conversation content.',
+      'Emitted when a user command is queued, starts, completes, is cancelled mid-turn, or discarded after engine close. densable S8o host engine (2.1.218 #11). Not conversation content.',
     ),
 )
 

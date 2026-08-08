@@ -17,11 +17,11 @@ afterEach(() => {
 })
 
 describe('bundled deep-research workflow (2.1.207 IDd)', () => {
-  test('initBundledWorkflows registers deep-research once', () => {
+  test('initBundledWorkflows registers deep-research once (hidden, 218 #29)', () => {
     initBundledWorkflows()
     initBundledWorkflows()
-    // code-review is hidden — default list is public names only
-    expect(listBundledWorkflows()).toEqual(['deep-research'])
+    // densable 2.1.218: deep-research + code-review both hidden from model list
+    expect(listBundledWorkflows()).toEqual([])
     expect(listBundledWorkflows({ includeHidden: true })).toEqual([
       'code-review',
       'deep-research',

@@ -808,6 +808,17 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Path to a script that outputs OpenTelemetry headers'),
+      /**
+       * densable processWrapper (S3l) — shell wrapper for subprocesses.
+       * Also available as CLAUDE_CODE_PROCESS_WRAPPER env; settings form is
+       * dangerous shell surface for managed-settings approval.
+       */
+      processWrapper: z
+        .string()
+        .optional()
+        .describe(
+          'Shell command/path that wraps process spawns (managed settings; dangerous shell surface)',
+        ),
       outputStyle: z
         .string()
         .optional()
@@ -1396,6 +1407,18 @@ export const SettingsSchema = lazySchema(() =>
           'SSH connection configurations for remote environments. ' +
             'Typically set in managed settings by enterprise administrators ' +
             'to pre-configure SSH connections for team members.',
+        ),
+      /**
+       * densable claudeMd — org-managed CLAUDE.md-style instructions.
+       * Only honored from managed/policy settings; enters hFt dangerous projection
+       * for settings-approval (2.1.218 #32).
+       */
+      claudeMd: z
+        .string()
+        .optional()
+        .describe(
+          'CLAUDE.md-style instructions injected as organization-managed memory. ' +
+            'Only honored from managed/policy settings.',
         ),
       claudeMdExcludes: z
         .array(z.string())

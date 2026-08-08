@@ -637,18 +637,28 @@ export function checkPathSafetyForAutoEdit(
   precomputedPathsToCheck?: readonly string[],
 ):
   | { safe: true }
-  | { safe: false; message: string; classifierApprovable: boolean } {
+  | {
+      safe: false
+      message: string
+      classifierApprovable: boolean
+      circuitBreaker?:
+        | 'dangerousRemoval'
+        | 'backgroundOperator'
+        | 'suspiciousWindowsPath'
+    } {
   // Get all paths to check (original + symlink resolved paths)
   const pathsToCheck =
     precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
 
   // Check for suspicious Windows path patterns on all paths
+  // densable yat: circuitBreaker:"suspiciousWindowsPath" (2.1.218 #26)
   for (const pathToCheck of pathsToCheck) {
     if (hasSuspiciousWindowsPathPattern(pathToCheck)) {
       return {
         safe: false,
         message: `Claude requested permissions to write to ${path}, which contains a suspicious Windows path pattern that requires manual approval.`,
         classifierApprovable: false,
+        circuitBreaker: 'suspiciousWindowsPath',
       }
     }
   }
@@ -866,7 +876,12 @@ export function getFileReadIgnorePatterns(
   return result
 }
 
-function patternWithRoot(
+/**
+ * densable `$ep` / `xdn` — resolve a permission path pattern against its rule
+ * source root (// → fs root, ~/ → home, / → settings root, else cwd-relative).
+ * Exported for densable Cd `uCb` (path-glob match outside ignore engine).
+ */
+export function patternWithRoot(
   pattern: string,
   source: PermissionRuleSource,
 ): {
@@ -1456,6 +1471,10 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
       safe: false
       message: string
       classifierApprovable: boolean
+      circuitBreaker?:
+        | 'dangerousRemoval'
+        | 'backgroundOperator'
+        | 'suspiciousWindowsPath'
     }
     return {
       behavior: 'ask',
@@ -1465,6 +1484,9 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
         type: 'safetyCheck',
         reason: failedCheck.message,
         classifierApprovable: failedCheck.classifierApprovable,
+        ...(failedCheck.circuitBreaker
+          ? { circuitBreaker: failedCheck.circuitBreaker }
+          : {}),
       },
     }
   }

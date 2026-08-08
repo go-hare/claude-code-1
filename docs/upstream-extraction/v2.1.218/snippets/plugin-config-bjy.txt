@@ -1,0 +1,36 @@
+# densable 2.1.218 #35 — plugin install --config KEY=VALUE (BJy / $Jy)
+
+Source: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+
+## densable
+
+### BJy(e, t) — parse repeatable KEY=VALUE against userConfig schema
+- missing `=` → `--config expects KEY=VALUE, got "…". Use --config key=value (repeatable).`
+- unknown key → `--config key "…" isn't declared in this plugin's userConfig.` + optional `Known keys:`
+- empty value → `--config ${key}: value is empty. Omit the flag to leave "${key}" unset.`
+- number NaN → `--config ${key}: "…" is not a number`
+- boolean not Jt/nu → `--config ${key}: "…" is not a boolean (use true/false, 1/0, yes/no, on/off)`
+- Vst partial schema validate → `--config validation failed: …`
+
+### $Jy(pluginId, configEntries) — post-install
+- clear plugin cache; load enabled+disabled; resolve plugin
+- config given but load fail → throw failed to load after install
+- no userConfig but config given → throw declares no userConfig options
+- config given → BJy + Drr save
+- remaining unconfigured → `N userConfig option(s) not yet set … or pass --config KEY=VALUE.`
+
+### swp install tail
+- soft: `Installed, but --config not applied: …` when $Jy throws after install success
+
+## Local (2026-08-08)
+
+| Piece | Status |
+|-------|--------|
+| frontmatter bool Jt/nu | **HAVE** — `tryParseBooleanFrontmatter` / `formatFrontmatterBooleanError` |
+| BJy parser | **HAVE** — `parsePluginCliConfigFlags` in `parsePluginCliConfig.ts` |
+| $Jy apply + notice | **HAVE** — `applyPostInstallPluginUserConfig` + `formatPostInstallUserConfigNotice` |
+| CLI flag | **HAVE** — `main.tsx` `plugin install --config <key=value>` collect |
+| install wire | **HAVE** — `pluginInstallHandler` → `installPlugin(..., configEntries)` → $Jy after success |
+| tests | `parsePluginCliConfig.218.test.ts` |
+
+Helpers: `src/utils/plugins/parsePluginCliConfig.ts`

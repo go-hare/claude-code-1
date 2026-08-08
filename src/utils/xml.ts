@@ -8,6 +8,14 @@ export function escapeXml(s: string): string {
 }
 
 /**
+ * densable O8e — escape path/text for embedding inside system-reminder XML.
+ * Adds CR/LF escapes densable uses so multiline paths cannot break the tag.
+ */
+export function escapeXmlForSystemReminder(s: string): string {
+  return escapeXml(s).replace(/\r/g, '&#13;').replace(/\n/g, '&#10;')
+}
+
+/**
  * Escape for interpolation into a double- or single-quoted attribute value:
  * `<tag attr="${here}">`. Escapes quotes in addition to `& < >`.
  */

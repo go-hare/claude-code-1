@@ -1,6 +1,6 @@
 import React, { type PropsWithChildren, type Ref } from 'react';
 import Box from '../components/Box.js';
-import type { DOMElement } from '../core/dom.js';
+import type { DOMAccessibility, DOMElement } from '../core/dom.js';
 import type { ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
@@ -36,6 +36,10 @@ export type Props = BaseStylesWithoutColors &
     ref?: Ref<DOMElement>;
     tabIndex?: number;
     autoFocus?: boolean;
+    /** densable accessibility bag */
+    accessibility?: DOMAccessibility;
+    /** densable aria-preserve-whitespace shorthand */
+    'aria-preserve-whitespace'?: boolean;
     onClick?: (event: ClickEvent) => void;
     onFocus?: (event: FocusEvent) => void;
     onFocusCapture?: (event: FocusEvent) => void;

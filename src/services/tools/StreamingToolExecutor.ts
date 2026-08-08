@@ -12,6 +12,7 @@ import { createChildAbortController } from '../../utils/abortController.js'
 import { runToolUse } from './toolExecution.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 import type { LangfuseSpan } from '../langfuse/index.js'
+import { logEvent } from '../analytics/index.js'
 
 type MessageUpdate = {
   message?: Message
@@ -336,7 +337,13 @@ export class StreamingToolExecutor {
           content: blocks,
         },
       }))
-    } catch {
+    } catch (error) {
+      // densable 2.1.218 #10: M("tengu_auto_mode_sibling_context_error", {...Rx(t)})
+      // Local LogEventMetadata is numeric/boolean only — emit presence marker.
+      logEvent('tengu_auto_mode_sibling_context_error', {
+        is_error: true,
+        is_error_instance: error instanceof Error,
+      })
       return undefined
     }
   }

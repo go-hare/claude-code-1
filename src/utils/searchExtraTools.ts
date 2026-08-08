@@ -28,6 +28,7 @@ import {
   countToolDefinitionTokens,
   TOOL_TOKEN_COUNT_OVERHEAD,
 } from './analyzeContext.js'
+import { asStringArray } from './stringUtils.js'
 import { count } from './array.js'
 import { getMergedBetas } from './betas.js'
 import { getContextWindowForModel } from './context.js'
@@ -629,8 +630,17 @@ export function getDeferredToolsDelta(
     attachmentTypesSeen.add(msg.attachment!.type)
     if (msg.attachment!.type !== 'deferred_tools_delta') continue
     dtdCount++
-    for (const n of msg.attachment!.addedNames) announced.add(n)
-    for (const n of msg.attachment!.removedNames) announced.delete(n)
+    // densable A1s: pair addedNames only when addedLines is Array; always q0 removedNames
+    const att = msg.attachment! as {
+      addedLines?: unknown
+      addedNames?: unknown
+      removedNames?: unknown
+    }
+    const addedNames = Array.isArray(att.addedLines)
+      ? asStringArray(att.addedNames)
+      : []
+    for (const n of addedNames) announced.add(n)
+    for (const n of asStringArray(att.removedNames)) announced.delete(n)
   }
 
   const deferred: Tool[] = tools.filter(isDeferredTool)

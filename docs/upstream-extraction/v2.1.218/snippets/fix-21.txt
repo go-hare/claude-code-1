@@ -1,0 +1,249 @@
+# densable 2.1.218 AUDIT #21 — context-overflow retry + Ctrl+B shell caps
+
+Binary: `/tmp/official-218/plat/package/claude` (VERSION 2.1.218)
+Changelog: "Fixed a retry loop that re-sent identical doomed requests after a
+context-overflow error with a large thinking budget; Ctrl+B backgrounding now
+applies the same background-shell caps as other paths"
+
+## A) Context-overflow retry (doomed identical re-send)
+
+### densable symbols / needles
+- `tengu_max_tokens_context_overflow_adjustment`
+- `max_tokens overflow adjustment made no progress`
+- `availableContext … is less than FLOOR_OUTPUT_TOKENS`
+- `FLOOR_OUTPUT_TOKENS` / densable const `rrp=3000`
+- `parse` helper densable `drp` (regex on 400 body)
+- Retry loop densable `RFo` (local: `withRetry`)
+
+### densable control flow (minified, reconstructed)
+
+From densable body near overflow branch (offset ~236363803 / function `RFo`):
+
+```js
+// densable (RFo catch path) — 1:1 semantics
+if (S instanceof gi /* APIError */) {
+  let L = drp(S); // parseMaxTokensContextOverflowError
+  if (L) {
+    let { inputTokens: N, contextLimit: P } = L;
+    let q = 1000;
+    let U = Math.max(0, P - N - 1000); // availableContext
+    if (U < rrp /* FLOOR_OUTPUT_TOKENS=3000 */) {
+      throw ke(Error(`availableContext ${U} is less than FLOOR_OUTPUT_TOKENS ${rrp}`)), S;
+    }
+    let W = U; // adjustedMaxTokens = availableContext ONLY
+    // *** 2.1.218 fix: no-progress guard ***
+    if (o.maxTokensOverride !== void 0 && W >= o.maxTokensOverride) {
+      throw ke(Error("max_tokens overflow adjustment made no progress")), S;
+    }
+    o.maxTokensOverride = W;
+    M("tengu_max_tokens_context_overflow_adjustment", {
+      inputTokens: N,
+      contextLimit: P,
+      adjustedMaxTokens: W,
+      attempt: y,
+    });
+    continue;
+  }
+}
+```
+
+`drp` (parse):
+```js
+function drp(e) {
+  if (e.status !== 400 || !e.message) return;
+  if (!OOt(e)) return; // is max_tokens context overflow flavor
+  let t = /input length and `max_tokens` exceed context limit: (\d+) \+ (\d+) > (\d+)/;
+  let r = e.message.match(t);
+  if (!r || r.length !== 4) return;
+  // ... parseInt → {inputTokens, maxTokens, contextLimit}
+}
+```
+
+### Root cause of the "doomed with large thinking budget" loop
+
+Older local (pre-fix) logic effectively did:
+
+```ts
+const minRequired =
+  (thinkingConfig.type === 'enabled' ? thinkingConfig.budgetTokens : 0) + 1
+const adjustedMaxTokens = Math.max(FLOOR_OUTPUT_TOKENS, availableContext, minRequired)
+retryContext.maxTokensOverride = adjustedMaxTokens
+// always continue — no no-progress guard
+```
+
+When `budgetTokens` (large thinking) > `availableContext`, override becomes
+`budgetTokens+1` again → next attempt is **identical** to the doomed request →
+infinite retry until maxRetries (or worse under persistent mode).
+
+densable 2.1.218:
+1. Sets `maxTokensOverride = availableContext` only (NO minRequired/thinking inflate).
+2. If a previous override exists and new available is **not strictly smaller**,
+   throw `"max_tokens overflow adjustment made no progress"` (stop doomed loop).
+
+### Local status (A)
+
+File: `src/services/api/withRetry.ts` (~515–557)
+
+**GAP** relative to densable 2.1.218:
+
+Local still has:
+```ts
+const minRequired =
+  (retryContext.thinkingConfig.type === 'enabled'
+    ? retryContext.thinkingConfig.budgetTokens
+    : 0) + 1
+const adjustedMaxTokens = Math.max(
+  FLOOR_OUTPUT_TOKENS,
+  availableContext,
+  minRequired,
+)
+retryContext.maxTokensOverride = adjustedMaxTokens
+// continue with NO no-progress guard
+```
+
+**1:1 delta required:**
+1. Remove `minRequired` / thinking-budget inflation from overflow adjustment.
+2. `let W = availableContext` (after floor check).
+3. Add:
+   ```ts
+   if (
+     retryContext.maxTokensOverride !== undefined &&
+     W >= retryContext.maxTokensOverride
+   ) {
+     logError(new Error('max_tokens overflow adjustment made no progress'))
+     throw error
+   }
+   ```
+4. `retryContext.maxTokensOverride = W` then `continue`.
+5. Keep telemetry `tengu_max_tokens_context_overflow_adjustment` fields
+   `{inputTokens, contextLimit, adjustedMaxTokens: W, attempt}`.
+
+Do **not** invent alternate strategies (e.g. disabling thinking, shrinking
+budgetTokens in RetryContext) unless densable does so — densable only clamps
+max_tokens to availableContext and aborts when adjustment stalls.
+
+---
+
+## B) Ctrl+B background shell caps (same path as other bg)
+
+### densable symbols / needles
+- `CLAUDE_SUBAGENT_BG_SHELL_MAX_MS` (env)
+- `ZV_=3600000` (default 1h cap ms)
+- `function fkd(e)` — resolve cap for agent-scoped shells
+- `ShellCommand.background(e, t)` options: `{capMs?, skipSpill?}`
+- `function Tsn` — mid-flight background of a single foreground shell
+- `function a$e` — background ALL (`task_local_shell_background_all` / Ctrl+B)
+- `function Ppt` / `spawnShellTask` — spawn-as-background already passes cap
+- `function hkd` — keepalive + pressure reap (`releaseBgCap` bookend)
+- `backgroundedByUser` schema flag (user manual Ctrl+B)
+
+### densable control flow
+
+```js
+// densable fkd — only agent-scoped shells get a wall-clock cap
+function fkd(e /* agentId */) {
+  if (e === void 0) return; // main-thread FG→BG: no capMs
+  return Ld(process.env.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS) || ZV_; // 3600000
+}
+
+// densable ShellCommand.background
+background(e, t) {
+  if (this.#e === "running") {
+    this.#t = e;
+    this.#e = "backgrounded";
+    this.#C(); // clear FG timeout/listeners
+    if (this.taskOutput.stdoutToFile) this.#D(); // size watchdog
+    else if (!t?.skipSpill) this.taskOutput.spillToDisk();
+    if (t?.capMs) {
+      this.#l = setTimeout((r) => void r.#A() /* kill */, t.capMs, this);
+      this.#l.unref?.();
+    }
+    return true;
+  }
+  return false;
+}
+
+// densable Tsn — single shell mid-bg (Ctrl+B per-task / backgroundTask)
+function Tsn(e, t, r, n, o) {
+  let i = n.get(e);
+  let s = i && aD(i) ? i.agentId : void 0;
+  if (!t.background(e, { capMs: fkd(s) })) return false;
+  n.update(e, (c) => (c.isBackgrounded ? c : { ...c, isBackgrounded: true }));
+  let a = mkd(...); // stall watchdog
+  let l = hkd(...); // releaseBgCap / keepalive
+  return ykd({ shellCommand: t, taskId: e, ..., releaseBgCap: l }), true;
+}
+
+// densable a$e — Ctrl+B all
+function a$e(e) {
+  // for each FG local_bash with shellCommand → _kd → Tsn (hence fkd cap)
+  // for each FG agent → Zon
+  Te("task_local_shell_background_all");
+}
+
+// densable Ppt — spawn already-backgrounded
+o.background(u, { capMs: a !== "monitor" ? fkd(s) : void 0 });
+```
+
+Key product rule:
+- **Agent-scoped** background shells get wall-clock kill cap:
+  `CLAUDE_SUBAGENT_BG_SHELL_MAX_MS || 3_600_000`.
+- **Main-session** shells (`agentId === undefined`): `fkd` returns `undefined`
+  → no cap timer (same as densable).
+- **Monitor** kind: no cap on spawn path.
+- Ctrl+B / `Tsn` / `a$e` MUST pass the same `{capMs: fkd(agentId)}` as
+  spawn-as-background (`Ppt`), so agent shells cannot escape the cap via
+  manual background.
+
+### Local status (B)
+
+Files:
+- `src/utils/ShellCommand.ts` — `background(taskId: string): boolean`
+- `src/tasks/LocalShellTask/LocalShellTask.tsx`
+  - `spawnShellTask` → `shellCommand.background(taskId)` **no capMs**
+  - `backgroundTask` (Ctrl+B single) → `shellCommand.background(taskId)` **no capMs**
+  - `backgroundAll` → loops `backgroundTask` (inherits gap)
+
+**GAP** relative to densable 2.1.218:
+
+1. `ShellCommand.background` signature lacks options `{ capMs?: number; skipSpill?: boolean }`
+   and does not arm a kill timer.
+2. No `fkd` equivalent (`resolveSubagentBgShellMaxMs(agentId)` / env
+   `CLAUDE_SUBAGENT_BG_SHELL_MAX_MS` default `3600000`).
+3. Both spawn-bg and Ctrl+B paths must pass `capMs: fkd(agentId)`.
+
+**1:1 delta required:**
+1. `src/utils/ShellCommand.ts`:
+   - Extend type:
+     `background(taskId: string, options?: { capMs?: number; skipSpill?: boolean }): boolean`
+   - On success path: if `options?.capMs`, `setTimeout(() => this.#doKill(...), capMs).unref()`.
+   - Honor `skipSpill` like densable (pipe mode).
+2. `src/tasks/LocalShellTask/LocalShellTask.tsx` (or shared util):
+   - Add densable `fkd`:
+     ```ts
+     export function resolveSubagentBgShellCapMs(agentId?: string): number | undefined {
+       if (agentId === undefined) return undefined
+       const raw = process.env.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS
+       // densable Ld(env) || ZV_=3600000
+       ...
+       return DEFAULT_SUBAGENT_BG_SHELL_MAX_MS // 3_600_000
+     }
+     ```
+   - `spawnShellTask`: `shellCommand.background(taskId, { capMs: kind !== 'monitor' ? resolveSubagentBgShellCapMs(agentId) : undefined })`
+   - `backgroundTask` / densable `Tsn`: same `{ capMs: resolveSubagentBgShellCapMs(agentId) }`
+3. Tests: agent-scoped Ctrl+B arms kill after cap; main-thread no cap; no-progress
+   overflow throw; thinking-budget no longer inflates maxTokensOverride.
+
+---
+
+## Verdict
+
+| Half | densable | local | status |
+|------|----------|-------|--------|
+| Overflow retry no-progress + no thinking inflate | RFo + drp + rrp | withRetry still minRequired + no guard | **GAP** |
+| Ctrl+B shell capMs == spawn path | fkd + Tsn + a$e + background(, {capMs}) | background(taskId) only | **GAP** |
+
+Overall item #21: **GAP** (implementNow: true)
+
+## Confidence
+high — densable minified bodies extracted for both halves; local paths grepped 1:1.

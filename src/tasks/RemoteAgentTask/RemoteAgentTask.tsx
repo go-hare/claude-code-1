@@ -63,6 +63,16 @@ export type RemoteAgentTaskState = TaskStateBase & {
   pollStartedAt: number;
   /** True when this task was created by a teleported /ultrareview command. */
   isRemoteReview?: boolean;
+  /**
+   * densable 2.1.218: when findings arrive, apply them to the local working tree
+   * (from `/code-review ultra --fix` / `parseUltrareviewArgs` applyFixes).
+   */
+  applyFixesOnComplete?: boolean;
+  /**
+   * densable 2.1.218: prose findings-note from multi-word ultrareview args.
+   * Cloud review does not receive the note; local notification prioritizes it.
+   */
+  reviewInstructions?: string;
   /** Parsed from the orchestrator's <remote-review-progress> heartbeat echoes. */
   reviewProgress?: {
     stage?: 'finding' | 'verifying' | 'synthesizing';
@@ -499,9 +509,39 @@ function extractReviewTagFromLog(log: SDKMessage[]): string | null {
  * turn — no file indirection, no mode change. Session is kept alive so the
  * claude.ai URL stays a durable record the user can revisit; TTL handles cleanup.
  */
-function enqueueRemoteReviewNotification(taskId: string, reviewContent: string, setAppState: SetAppState): void {
+/**
+ * densable 2.1.218 `dun` — post-launch model nudge, also reused when findings
+ * arrive so --fix / prose-instructions are honored.
+ */
+function previewReviewInstructions(text: string, max = 200): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= max) return collapsed;
+  return `${collapsed.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function formatRemoteReviewFindingsNudge(applyFixesOnComplete?: boolean, reviewInstructions?: string): string {
+  const fixNote = applyFixesOnComplete
+    ? ' The user passed --fix: when the findings arrive, apply them to the local working tree.'
+    : '';
+  // densable dun + kgr: collapse/truncate prose note for model-facing nudge
+  const instrNote = reviewInstructions
+    ? ` The user's argument was interpreted as a review note, not a base branch: "${previewReviewInstructions(reviewInstructions, 200)}". The cloud review runs its standard pass over the branch diff and does not see the note; when the findings arrive, prioritize and relate them to the user's request.`
+    : '';
+  return fixNote + instrNote;
+}
+
+function enqueueRemoteReviewNotification(
+  taskId: string,
+  reviewContent: string,
+  setAppState: SetAppState,
+  options?: {
+    applyFixesOnComplete?: boolean;
+    reviewInstructions?: string;
+  },
+): void {
   if (!markTaskNotified(taskId, setAppState)) return;
 
+  const nudge = formatRemoteReviewFindingsNudge(options?.applyFixesOnComplete, options?.reviewInstructions);
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
@@ -510,13 +550,14 @@ function enqueueRemoteReviewNotification(taskId: string, reviewContent: string, 
 </${TASK_NOTIFICATION_TAG}>
 The remote review produced the following findings:
 
-${reviewContent}`;
+${reviewContent}${nudge}`;
 
   enqueuePendingNotification({ value: message, mode: 'task-notification' });
 }
 
 /**
  * Enqueue a remote-review failure notification.
+ * densable: retry /code-review ultra (ultrareview is deprecated alias).
  */
 function enqueueRemoteReviewFailureNotification(taskId: string, reason: string, setAppState: SetAppState): void {
   if (!markTaskNotified(taskId, setAppState)) return;
@@ -525,9 +566,9 @@ function enqueueRemoteReviewFailureNotification(taskId: string, reason: string, 
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
 <${STATUS_TAG}>failed</${STATUS_TAG}>
-<${SUMMARY_TAG}>Remote review failed: ${reason}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>Cloud review failed: ${reason}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
-Remote review did not produce output (${reason}). Tell the user to retry /ultrareview, or use /review for a local review instead.`;
+Cloud review did not produce output (${reason}). Tell the user to retry /code-review ultra, or use /review for a local review instead.`;
 
   enqueuePendingNotification({ value: message, mode: 'task-notification' });
 }
@@ -580,6 +621,10 @@ export function registerRemoteAgentTask(options: {
   context: TaskContext;
   toolUseId?: string;
   isRemoteReview?: boolean;
+  /** densable 2.1.218 — /code-review ultra --fix */
+  applyFixesOnComplete?: boolean;
+  /** densable 2.1.218 — prose findings note (not a base branch) */
+  reviewInstructions?: string;
   isUltraplan?: boolean;
   isLongRunning?: boolean;
   remoteTaskMetadata?: RemoteTaskMetadata;
@@ -595,6 +640,8 @@ export function registerRemoteAgentTask(options: {
     context,
     toolUseId,
     isRemoteReview,
+    applyFixesOnComplete,
+    reviewInstructions,
     isUltraplan,
     isLongRunning,
     remoteTaskMetadata,
@@ -617,6 +664,8 @@ export function registerRemoteAgentTask(options: {
     todoList: [],
     log: [],
     isRemoteReview,
+    applyFixesOnComplete,
+    reviewInstructions,
     isUltraplan,
     isLongRunning,
     pollStartedAt: Date.now(),
@@ -638,6 +687,8 @@ export function registerRemoteAgentTask(options: {
     toolUseId,
     isUltraplan,
     isRemoteReview,
+    applyFixesOnComplete,
+    reviewInstructions,
     isLongRunning,
     remoteTaskMetadata,
   });
@@ -713,6 +764,8 @@ async function restoreRemoteAgentTasksImpl(context: TaskContext): Promise<void> 
       todoList: [],
       log: [],
       isRemoteReview: meta.isRemoteReview,
+      applyFixesOnComplete: meta.applyFixesOnComplete,
+      reviewInstructions: meta.reviewInstructions,
       isUltraplan: meta.isUltraplan,
       isLongRunning: meta.isLongRunning,
       startTime: meta.spawnedAt,
@@ -984,7 +1037,10 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
           // tick but the delta scan wasn't wired yet (first poll after resume).
           const reviewContent = cachedReviewContent ?? extractReviewFromLog(accumulatedLog);
           if (reviewContent && finalStatus === 'completed') {
-            enqueueRemoteReviewNotification(taskId, reviewContent, context.setAppState);
+            enqueueRemoteReviewNotification(taskId, reviewContent, context.setAppState, {
+              applyFixesOnComplete: task.applyFixesOnComplete,
+              reviewInstructions: task.reviewInstructions,
+            });
             void evictTaskOutput(taskId);
             void removeRemoteAgentMetadata(taskId);
             runCompletionHook(taskId, task);

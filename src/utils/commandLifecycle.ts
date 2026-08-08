@@ -1,6 +1,17 @@
 import { enqueueSdkEvent } from './sdkEventQueue.js'
 
-type CommandLifecycleState = 'started' | 'completed'
+/**
+ * densable S8o / Host command_lifecycle states (2.1.218 #11).
+ * Pre-218 local only used started|completed; S8o also emits
+ * queued (enqueued turn), cancelled (in-flight teardown), discarded
+ * (still queued at close).
+ */
+export type CommandLifecycleState =
+  | 'queued'
+  | 'started'
+  | 'completed'
+  | 'cancelled'
+  | 'discarded'
 
 type CommandLifecycleListener = (
   uuid: string,

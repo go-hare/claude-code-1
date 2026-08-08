@@ -408,6 +408,17 @@ export type ContextCollapseSnapshotEntry = {
   lastSpawnTokens: number
 }
 
+/**
+ * densable tNt relocated stamp — written when the session transcript is rehomed
+ * after a cwd change (or when cwd changes without the jsonl path changing).
+ * Resume / tooling can read the last stamp to know which cwd the file lives under.
+ */
+export type RelocatedEntry = {
+  type: 'relocated'
+  sessionId: string
+  relocatedCwd: string
+}
+
 export type Entry =
   | TranscriptMessage
   | SummaryMessage
@@ -433,6 +444,7 @@ export type Entry =
   | GoalMetadataEntry
   | GoalClearedEntry
   | ObserverRefEntry
+  | RelocatedEntry
 
 export function sortLogs(logs: LogOption[]): LogOption[] {
   return logs.sort((a, b) => {

@@ -2264,8 +2264,9 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
       input: process.stdin,
       output: process.stdout,
     })
+    // densable 2.1.218 first-run spawn dialog (SEA strings exact)
     console.log(
-      `\nClaude Remote Control is launching in spawn mode which lets you create new sessions in this project from Claude Code on Web or your Mobile app. Learn more here: https://code.claude.com/docs/en/remote-control\n\n` +
+      `\nRemote Control is launching in spawn mode, which lets you start new sessions in this project from claude.ai/code or the Claude mobile app. Learn more: https://code.claude.com/docs/en/remote-control\n\n` +
         `Spawn mode for this project:\n` +
         `  [1] same-dir \u2014 sessions share the current directory (default)\n` +
         `  [2] worktree \u2014 each session gets an isolated git worktree\n\n` +

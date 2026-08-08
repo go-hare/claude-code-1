@@ -199,6 +199,10 @@ export function isPathAllowed(
         safe: false
         message: string
         classifierApprovable: boolean
+        circuitBreaker?:
+          | 'dangerousRemoval'
+          | 'backgroundOperator'
+          | 'suspiciousWindowsPath'
       }
       return {
         allowed: false,
@@ -206,6 +210,9 @@ export function isPathAllowed(
           type: 'safetyCheck',
           reason: failedCheck.message,
           classifierApprovable: failedCheck.classifierApprovable,
+          ...(failedCheck.circuitBreaker
+            ? { circuitBreaker: failedCheck.circuitBreaker }
+            : {}),
         },
       }
     }

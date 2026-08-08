@@ -1,0 +1,146 @@
+# densable 2.1.218 AUDIT #3 — Windows `\u` path CJK corruption (tool-input JSON unescape)
+
+Binary: `/tmp/official-218/plat/package/claude` (VERSION 2.1.218)
+Changelog: Fixed Windows paths with `\u`-prefixed segments (like `C:\Users\unicorn`) being corrupted into CJK characters in tool inputs.
+
+## densable symbols
+
+| densable | role |
+|----------|------|
+| `jYd` | entry: repair double-escaped unicode in tool input object; emit telemetry |
+| `L6s` | recursive walk; string-level `\uXXXX` / surrogate-pair decode with Windows-path skip |
+| `qYd` | non-global regex for `\u` sequences (surrogate pair OR BMP) |
+| `vky` | global `RegExp(qYd.source, "g")` used by replace |
+| `Cky` | Windows path detector — skip decode when matched |
+| `Uun` | `normalizeContentFromAPI` densable equivalent; pipeline calls `jYd` |
+| `qPy` | nested string JSON coerce by schema type (runs before `jYd`) |
+| `UYd` | tool-specific `normalizeToolInput` (runs after `jYd`) |
+| `Fur` | module init that defines `qYd`/`vky`/`Cky` |
+| telemetry | `tengu_repair_double_escaped_unicode` with `repaired_strings` / `windows_path_skips` |
+
+Related (not the #3 delta itself, but same tool-input parse path):
+- `ql` / `zUl` = `safeParseJSON` (`JSON.parse(stripBOM)`)
+- `O7t` = `"__unparsedToolInput"` sentinel when top-level tool input JSON fails
+- `dRt` / `WAe` = unparsed-input helpers
+
+## densable 1:1 bodies (extracted)
+
+### jYd — repair entry + telemetry
+
+```js
+function jYd(e) {
+  let t = { repairedStrings: 0, windowsPathSkips: 0 },
+    r = L6s(e, t);
+  if (t.repairedStrings > 0 || t.windowsPathSkips > 0)
+    M("tengu_repair_double_escaped_unicode", {
+      repaired_strings: t.repairedStrings,
+      windows_path_skips: t.windowsPathSkips,
+    });
+  return r;
+}
+```
+
+### L6s — recursive unescape with Windows path skip (THE FIX)
+
+```js
+function L6s(e, t) {
+  if (typeof e === "string") {
+    if (!e.includes("\\u")) return e;
+    if (!qYd.test(e)) return e;
+    // densable 2.1.218: leave \u-prefixed path segments literal (e.g. C:\Users\u4e2d)
+    if (Cky.test(e)) {
+      t.windowsPathSkips++;
+      return e;
+    }
+    let r = e.replace(vky, (n, o, i, s, a) => {
+      // odd number of preceding backslashes => already escaped; keep match
+      let l = a;
+      while (l > 0 && e[l - 1] === "\\") l--;
+      if ((a - l) & 1) return n;
+      // surrogate pair: \uD800-\uDBFF \uDC00-\uDFFF
+      if (o !== void 0)
+        return String.fromCharCode(parseInt(o, 16), parseInt(i, 16));
+      let c = parseInt(s, 16);
+      // lone surrogate: keep literal (do not emit invalid UTF-16)
+      if (c >= 55296 && c <= 57343) return n;
+      return String.fromCharCode(c);
+    });
+    if (r !== e) t.repairedStrings++;
+    return r;
+  }
+  if (Array.isArray(e)) return e.map((r) => L6s(r, t));
+  if (e !== null && typeof e === "object") {
+    let r = {};
+    for (let [n, o] of Object.entries(e)) r[n] = L6s(o, t);
+    return r;
+  }
+  return e;
+}
+```
+
+### Regexes (Fur module init)
+
+```js
+// qYd: non-global probe; vky: global replace
+qYd =
+  /\\u([dD][89aAbB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})/;
+vky = new RegExp(qYd.source, "g");
+// Cky: drive path (C:\ / C:/) OR UNC-ish \\server\ share start
+Cky =
+  /(?:^|[^A-Za-z])[A-Za-z]:[\\/]|(?:^|[\s"'=])\\\\[^\s\\/]+[\\/](?!\\)/;
+```
+
+### Call site in Uun (normalizeContentFromAPI densable)
+
+```js
+// tool_use branch after string|object input resolved to object i:
+let a = qPy(i, s.inputSchema, s.inputJSONSchema); // nested string JSON coerce
+let l = jYd(a); // << double-escaped unicode repair WITH windows path skip
+if (s.name === pk && typeof a.script === "string") l.script = a.script;
+i = l;
+i = UYd(s, l, r); // tool-specific normalizeToolInput
+```
+
+## Bug semantics
+
+After `JSON.parse` of tool_use.input, a Windows path like
+`C:\Users\u4e2d\file` is a JS string whose content still contains the two
+characters `\` + `u` + four hex digits. A naive double-escaped-unicode repair
+(`String.fromCharCode(parseInt(...))`) turns `\u4e2d` into CJK `中`, making the
+path inaccessible. densable `Cky` short-circuits the whole string when it looks
+like a Windows drive/UNC path so those `\u…` path segments stay literal.
+
+`C:\Users\unicorn` in the changelog is the illustrative `\u`-prefixed segment
+shape (not all four following chars need be hex for the product description).
+
+## Local status: GAP
+
+Local `normalizeContentFromAPI` (`src/utils/messages.ts` ~3221–3290):
+
+1. `safeParseJSON` on string tool input (or use object)
+2. on parse fail → `{}` (+ `tengu_tool_input_json_parse_fail`) — densable uses `__unparsedToolInput` sentinel (related, not this bullet’s core)
+3. `normalizeToolInput` only — **no `jYd`/`L6s` step**
+
+Local `normalizeToolInput` (`src/utils/api.ts` ~601–716) = densable `UYd` family only (Bash/FileEdit/FileWrite/TaskOutput/ExitPlanMode). No unicode repair.
+
+Needles absent in local product TS:
+- `tengu_repair_double_escaped_unicode`
+- `windowsPathSkips` / `windows_path_skips`
+- `repairedStrings` / `repaired_strings`
+- `qYd`/`vky`/`Cky` or equivalent
+
+## densable 1:1 delta to implement
+
+1. Add module (suggested: `src/utils/toolInputUnicodeRepair.ts` or colocate near `messages.ts`/`api.ts`) exporting densable `jYd`/`L6s` 1:1:
+   - same regexes `qYd`/`vky`/`Cky`
+   - same odd-backslash skip, surrogate-pair decode, lone-surrogate keep
+   - same counters + `logEvent('tengu_repair_double_escaped_unicode', { repaired_strings, windows_path_skips })`
+2. Wire into `normalizeContentFromAPI` tool_use branch **after** any nested-string coerce (densable `qPy`; local may still be partial) and **before** `normalizeToolInput` (`UYd`):
+   ```
+   parsed → (optional qPy) → repairDoubleEscapedUnicode(jYd) → normalizeToolInput(UYd)
+   ```
+3. Tests: path with drive + `\u` + 4 hex stays literal; non-path double-escaped `\uXXXX` still repaired; telemetry counters.
+
+## Confidence
+
+high — full densable function bodies + call site extracted from 2.1.218 binary; local pipeline confirmed missing the step.

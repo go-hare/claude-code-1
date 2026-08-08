@@ -32,11 +32,9 @@ import { CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG, hasNoHiddenControlChars } from 's
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { logError } from 'src/utils/log.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
-import { getPlatform } from 'src/utils/platform.js';
 import { maybeRecordPluginHint } from 'src/utils/plugins/hintRecommendation.js';
 import { exec } from 'src/utils/Shell.js';
 import type { ExecResult } from 'src/utils/ShellCommand.js';
-import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
 import { semanticBoolean } from 'src/utils/semanticBoolean.js';
 import { semanticNumber } from 'src/utils/semanticNumber.js';
 import { getCachedPowerShellPath } from 'src/utils/shell/powershellDetection.js';
@@ -51,7 +49,12 @@ import {
   getToolResultPath,
   PREVIEW_SIZE_BYTES,
 } from 'src/utils/toolResultStorage.js';
-import { shouldUseSandbox } from '../BashTool/shouldUseSandbox.js';
+import {
+  isWindowsSandboxPolicyViolation,
+  SandboxPolicyRefusalError,
+  shouldUseSandbox,
+  WINDOWS_SANDBOX_POLICY_REFUSAL,
+} from '../BashTool/shouldUseSandbox.js';
 import { BackgroundHint } from '../BashTool/UI.js';
 import {
   buildImageToolResult,
@@ -229,27 +232,7 @@ export function detectBlockedSleepPattern(command: string): string | null {
   return rest ? `Start-Sleep ${secs} followed by: ${rest}` : `standalone Start-Sleep ${secs}`;
 }
 
-/**
- * On Windows native, sandbox is unavailable (bwrap/sandbox-exec are
- * POSIX-only). If enterprise policy has sandbox.enabled AND forbids
- * unsandboxed commands, PowerShell cannot comply — refuse execution
- * rather than silently bypass the policy. On Linux/macOS/WSL2, pwsh
- * runs as a native binary under the sandbox same as bash, so this
- * gate does not apply.
- *
- * Checked in BOTH validateInput (clean tool-runner error) and call()
- * (covers direct callers like promptShellExecution.ts that skip
- * validateInput). The call() guard is the load-bearing one.
- */
-const WINDOWS_SANDBOX_POLICY_REFUSAL =
-  'Enterprise policy requires sandboxing, but sandboxing is not available on native Windows. Shell command execution is blocked on this platform by policy.';
-function isWindowsSandboxPolicyViolation(): boolean {
-  return (
-    getPlatform() === 'windows' &&
-    SandboxManager.isSandboxEnabledInSettings() &&
-    !SandboxManager.areUnsandboxedCommandsAllowed()
-  );
-}
+// densable I0d/x0d/H0d/SandboxPolicyRefusalError: shouldUseSandbox.ts (2.1.218 #27)
 
 // Check if background tasks are disabled at module load time
 // Official DISABLE_BACKGROUND_TASKS densable — captured once at module load
@@ -445,12 +428,20 @@ export const PowerShellTool = buildTool({
 
   async validateInput(input: PowerShellToolInput): Promise<ValidationResult> {
     // Defense-in-depth: also guarded in call() for direct callers.
-    if (isWindowsSandboxPolicyViolation()) {
-      return {
-        result: false,
-        message: WINDOWS_SANDBOX_POLICY_REFUSAL,
-        errorCode: 11,
-      };
+    // densable I0d(vxo(e), e.command)
+    {
+      const useSandbox = shouldUseSandbox({
+        command: input.command,
+        dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+        shellType: 'powershell',
+      });
+      if (isWindowsSandboxPolicyViolation(useSandbox, input.command)) {
+        return {
+          result: false,
+          message: WINDOWS_SANDBOX_POLICY_REFUSAL,
+          errorCode: 11,
+        };
+      }
     }
     if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
       const sleepPattern = detectBlockedSleepPattern(input.command);
@@ -548,12 +539,16 @@ export const PowerShellTool = buildTool({
     _parentMessage?: AssistantMessage,
     onProgress?: ToolCallProgress<PowerShellProgress>,
   ): Promise<{ data: Out }> {
-    // Load-bearing guard: promptShellExecution.ts and processBashCommand.tsx
-    // call PowerShellTool.call() directly, bypassing validateInput. This is
-    // the check that covers ALL callers. See isWindowsSandboxPolicyViolation
-    // comment for the policy rationale.
-    if (isWindowsSandboxPolicyViolation()) {
-      throw new Error(WINDOWS_SANDBOX_POLICY_REFUSAL);
+    // densable I0d — load-bearing for direct call() callers
+    {
+      const useSandbox = shouldUseSandbox({
+        command: input.command,
+        dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+        shellType: 'powershell',
+      });
+      if (isWindowsSandboxPolicyViolation(useSandbox, input.command)) {
+        throw new SandboxPolicyRefusalError(WINDOWS_SANDBOX_POLICY_REFUSAL);
+      }
     }
 
     const { abortController, getAppState, setAppState, setToolJSX } = toolUseContext;
@@ -873,13 +868,12 @@ async function* runPowerShellCommand({
         lastTotalBytes = isIncomplete ? totalBytes : 0;
       },
       preventCwdChanges,
-      // Sandbox works on Linux/macOS/WSL2 — pwsh there is a native binary and
-      // SandboxManager.wrapWithSandbox wraps it same as bash (Shell.ts uses
-      // /bin/sh for the outer spawn to parse the POSIX-quoted bwrap/sandbox-exec
-      // string). On Windows native, sandbox is unsupported; shouldUseSandbox()
-      // returns false via isSandboxingEnabled() → isSupportedPlatform() → false.
-      // The explicit platform check is redundant-but-obvious.
-      shouldUseSandbox: getPlatform() === 'windows' ? false : shouldUseSandbox({ command, dangerouslyDisableSandbox }),
+      // densable vxo/p3 — shellType powershell; Windows may sandbox when SRT active
+      shouldUseSandbox: shouldUseSandbox({
+        command,
+        dangerouslyDisableSandbox,
+        shellType: 'powershell',
+      }),
       shouldAutoBackground,
       // densable VRu — block shell when cwd is outside agent isolation worktree
       agentWorktree,

@@ -98,10 +98,12 @@ function handlePluginCommandError(
  * CLI command: Install a plugin non-interactively
  * @param plugin Plugin identifier (name or plugin@marketplace)
  * @param scope Installation scope: user, project, or local (defaults to 'user')
+ * @param configEntries densable --config KEY=VALUE (repeatable)
  */
 export async function installPlugin(
   plugin: string,
   scope: InstallableScope = 'user',
+  configEntries?: readonly string[],
 ): Promise<void> {
   try {
     console.log(`Installing plugin "${plugin}"...`)
@@ -113,6 +115,18 @@ export async function installPlugin(
     }
 
     console.log(`${figures.tick} ${result.message}`)
+
+    // densable $Jy — apply --config / report unset userConfig (soft on failure)
+    const { formatPostInstallUserConfigNotice } = await import(
+      '../../utils/plugins/parsePluginCliConfig.js'
+    )
+    const notice = await formatPostInstallUserConfigNotice(
+      result.pluginId || plugin,
+      configEntries,
+    )
+    if (notice) {
+      console.log(notice)
+    }
 
     // _PROTO_* routes to PII-tagged plugin_name/marketplace_name BQ columns.
     // Unredacted plugin_id was previously logged to general-access

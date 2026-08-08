@@ -8,6 +8,7 @@ import { nodeCache, pendingClears } from './node-cache.js'
 import type Output from './output.js'
 import renderBorder from './render-border.js'
 import type { Screen } from './screen.js'
+import { MAX_TREE_DEPTH, warnTreeDepthExceeded } from './maxTreeDepth.js'
 import {
   clampStoredScrollTop,
   clampVisualScrollTop,
@@ -400,6 +401,7 @@ function renderNodeToOutput(
     prevScreen,
     skipSelfBlit = false,
     inheritedBackgroundColor,
+    depth = 0,
   }: {
     offsetX?: number
     offsetY?: number
@@ -411,8 +413,16 @@ function renderNodeToOutput(
     // opaque descendants' narrower rects are safe to blit.
     skipSelfBlit?: boolean
     inheritedBackgroundColor?: Color
+    /** densable 2.1.218 `Zlt` walk depth */
+    depth?: number
   },
 ): void {
+  // densable: if (l>=Zlt) { yir("renderNodeToOutput", e.nodeName); return }
+  if (depth >= MAX_TREE_DEPTH) {
+    warnTreeDepthExceeded('renderNodeToOutput', node.nodeName)
+    return
+  }
+
   const { yogaNode } = node
 
   if (yogaNode) {
@@ -996,6 +1006,7 @@ function renderNodeToOutput(
               edgeBottom + 1 - contentY,
               boxBackgroundColor,
               true,
+              depth,
             )
             output.unclip()
 
@@ -1098,6 +1109,7 @@ function renderNodeToOutput(
                     offsetY: contentY,
                     prevScreen: undefined,
                     inheritedBackgroundColor: boxBackgroundColor,
+                    depth: depth + 1,
                   })
                   output.unclip()
                 }
@@ -1144,6 +1156,7 @@ function renderNodeToOutput(
                 shiftedBottom - contentY,
                 boxBackgroundColor,
                 true,
+                depth,
               )
               output.unclip()
             }
@@ -1186,6 +1199,8 @@ function renderNodeToOutput(
               scrollTop,
               scrollTop + innerHeight,
               boxBackgroundColor,
+              false,
+              depth,
             )
           }
           nodeCache.set(content, {
@@ -1237,6 +1252,7 @@ function renderNodeToOutput(
           // on re-render → /permissions body blanked on Down arrow, #25436).
           ownBackgroundColor || node.style.opaque ? undefined : prevScreen,
           boxBackgroundColor,
+          depth,
         )
       }
 
@@ -1257,6 +1273,7 @@ function renderNodeToOutput(
         hasRemovedChild,
         prevScreen,
         inheritedBackgroundColor,
+        depth,
       )
     }
 
@@ -1306,6 +1323,7 @@ function renderChildren(
   hasRemovedChild: boolean,
   prevScreen: Screen | undefined,
   inheritedBackgroundColor: Color | undefined,
+  depth = 0,
 ): void {
   let seenDirtyChild = false
   let seenDirtyClipped = false
@@ -1326,6 +1344,7 @@ function renderChildren(
         !childElem.style.opaque &&
         childElem.style.backgroundColor === undefined,
       inheritedBackgroundColor,
+      depth: depth + 1,
     })
     if (wasDirty && !seenDirtyChild) {
       if (!clipsBothAxes(childElem) || isAbsolute) {
@@ -1432,6 +1451,7 @@ function renderScrolledChildren(
   // the blit+shift put stable rows in next.screen so stale cache is
   // never read. Avoids walking O(total_children * subtree_depth) per frame.
   preserveCulledCache = false,
+  depth = 0,
 ): void {
   let seenDirtyChild = false
   // Track cumulative height shift of dirty children iterated so far. When
@@ -1484,6 +1504,7 @@ function renderScrolledChildren(
       offsetY,
       prevScreen: hasRemovedChild || seenDirtyChild ? undefined : prevScreen,
       inheritedBackgroundColor,
+      depth: depth + 1,
     })
     if (wasDirty) {
       seenDirtyChild = true
@@ -1491,11 +1512,17 @@ function renderScrolledChildren(
   }
 }
 
-function dropSubtreeCache(node: DOMElement): void {
+function dropSubtreeCache(node: DOMElement, depth = 0): void {
+  // densable #15: also cap cache-drop recursion so deep trees can't stack-overflow
+  // on hide/unhide (same Zlt as render/hitTest).
+  if (depth >= MAX_TREE_DEPTH) {
+    warnTreeDepthExceeded('dropSubtreeCache', node.nodeName)
+    return
+  }
   nodeCache.delete(node)
   for (const child of node.childNodes) {
     if (child.nodeName !== '#text') {
-      dropSubtreeCache(child as DOMElement)
+      dropSubtreeCache(child as DOMElement, depth + 1)
     }
   }
 }

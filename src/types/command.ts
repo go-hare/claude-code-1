@@ -21,6 +21,11 @@ export type LocalCommandResult =
       displayText?: string
     }
   | { type: 'skip' } // Skip messages
+  /**
+   * densable headless local command that seeds a follow-up model turn
+   * (e.g. /ultrareview non-interactive launch acknowledgement).
+   */
+  | { type: 'query'; value: string; prompt?: string }
 
 export type PromptCommand = {
   type: 'prompt'
@@ -52,6 +57,12 @@ export type PromptCommand = {
   // Agent type to use when forked (e.g., 'Bash', 'general-purpose')
   // Only applicable when context is 'fork'
   agent?: string
+  /**
+   * densable 2.1.218: for `context: fork` skills, default true — fork runs as a
+   * background agent and reports via task notification. Set frontmatter
+   * `background: false` to keep the caller waiting in-line.
+   */
+  background?: boolean
   effort?: EffortValue
   // Glob patterns for file paths this skill applies to
   // When set, the skill is only visible after the model touches matching files
@@ -202,6 +213,12 @@ export type CommandBase = {
   isHidden?: boolean
   name: string
   aliases?: string[]
+  /**
+   * densable 2.1.218 `sdr` / `eu(...).subcommands`: map first arg token → target
+   * command name (e.g. code-review `ultra` → `ultrareview`). Resolved before
+   * command dispatch so `/code-review ultra` launches the cloud path.
+   */
+  subcommands?: Record<string, string>
   isMcp?: boolean
   argumentHint?: string // Hint text for command arguments (displayed in gray after command)
   whenToUse?: string // From the "Skill" spec. Detailed usage scenarios for when to use this command

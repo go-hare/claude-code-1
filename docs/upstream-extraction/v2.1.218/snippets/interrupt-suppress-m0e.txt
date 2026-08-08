@@ -1,0 +1,42 @@
+# densable 2.1.218 #12 — spurious interrupt markers + unpaired tool_use
+
+Source: /tmp/official-218/plat/package/claude
+
+## Official changelog
+
+> Fixed spurious "[Request interrupted by user]" messages after interrupted
+> tool calls, and an unpaired `tool_use` block left in the transcript when a
+> tool aborted mid-response
+
+## densable
+
+```js
+// Cxg = reasons that suppress Tse interrupt markers (m0e)
+vxg=new Set(["user-cancel","remote-cancel","shutdown","interrupt"]);
+Cxg=new Set(["interrupt","refusal-fallback-edit"]);
+function m0e(e){return Cxg.has(P_(e))}
+function Ede(e){return P_(e.reason)==="shutdown"?!0:void 0}
+
+// Tse — create interrupt user message
+function Tse({toolUse:e=!1,interruptedMessageId:t,interruptedByShutdown:r,...}){
+  return jr({content:[{type:"text",text:e?GI:sG}],interruptedMessageId:t,interruptedByShutdown:r,...})
+}
+
+// All abort paths:
+if(!m0e(signal.reason)) yield Tse({toolUse:..., interruptedMessageId:Arn(...), interruptedByShutdown:Ede(...)})
+
+// refusal-fallback-edit abort (model refusal → edit prompt) must not show interrupt:
+V.abortController.abort(jR("refusal-fallback-edit"))
+
+// Unpaired tool_use: ensureToolResultPairing + streaming remaining results
+// (already present locally as yieldMissingToolResultBlocks / getRemainingResults)
+```
+
+## Local mapping
+
+| densable | local |
+|----------|--------|
+| m0e / Cxg | `shouldSuppressInterruptionMessage` |
+| Ede | `isShutdownAbortReason` |
+| Tse | `createUserInterruptionMessage` (+ interrupted* fields) |
+| yieldMissing / pairing | `yieldMissingToolResultBlocks` / `ensureToolResultPairing` (HAVE) |

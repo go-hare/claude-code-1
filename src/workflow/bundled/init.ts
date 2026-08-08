@@ -19,9 +19,14 @@ export function initBundledWorkflows(): void {
 
   const dir = import.meta.dir
 
+  // densable 2.1.218 #29: /deep-research is user-slash only. Keep the workflow
+  // resolvable by name (skill expands to Workflow({name:'deep-research'})),
+  // but hide it from the default model-facing list so the model does not
+  // proactively pick it the way it could a public named workflow.
   registerBundledWorkflow(
     'deep-research',
     readFileSync(join(dir, 'deep-research.js'), 'utf-8'),
+    { hidden: true },
   )
 
   // Official CDd: pyo(..., { hidden: true }) — skill-launched only.

@@ -415,7 +415,7 @@ export function ModelPicker({
             <Box marginBottom={1}>
               <Text dimColor>
                 Fast mode is <Text bold>ON</Text> and available with {FAST_MODE_MODEL_DISPLAY} only (/fast). Switching
-                to other models turn off fast mode.
+                to other models turns off fast mode.
               </Text>
             </Box>
           ) : isFastModeAvailable() && !isFastModeCooldown() ? (

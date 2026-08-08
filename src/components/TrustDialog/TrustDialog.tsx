@@ -11,9 +11,20 @@ import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolNa
 import { checkHasTrustDialogAccepted, saveCurrentProjectConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
 import { getFsImplementation } from '../../utils/fsOperations.js';
+import { findCanonicalGitRoot, findGitRoot } from '../../utils/git.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
 import { Select } from '../CustomSelect/index.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
+import {
+  ACCESSING_CANCEL_LABEL,
+  ACCESSING_CAPABILITY,
+  ACCESSING_CONFIRM_LABEL,
+  ACCESSING_QUICK_SAFETY_CHECK,
+  ACCESSING_WORKSPACE_TITLE,
+  CD_TRUST_REPO_PREFIX,
+  CD_TRUST_REPO_SUFFIX,
+  resolveTrustRootNote,
+} from './trustDialogCopy.js';
 import {
   getApiKeyHelperSources,
   getAwsCommandsSources,
@@ -194,15 +205,26 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
     return null;
   }
 
-  return (
-    <PermissionDialog color="warning" titleColor="warning" title="Accessing workspace:">
-      <Box flexDirection="column" gap={1} paddingTop={1}>
-        <Text bold>{getFsImplementation().cwd()}</Text>
+  // densable 2.1.218: Accessing workspace body is 1:1 with SEA (Quick safety
+  // check + Claude Code'll…). Repo-root sentence is densable CdTrustPrompt copy
+  // (#28); densable Accessing itself does not include it — we show it when cwd
+  // is under a git root so the grant names the repository root.
+  const cwdPath = getFsImplementation().cwd();
+  const { trustRoot, showRepoRootNote } = resolveTrustRootNote(cwdPath, findCanonicalGitRoot, findGitRoot);
 
-        <Text>
-          Is this a project you trust? (Your own code, a well-known open source project, or work from your team).
-        </Text>
-        <Text>Once trusted, Claude Code can read, edit, and run commands in this folder.</Text>
+  return (
+    <PermissionDialog color="warning" titleColor="warning" title={ACCESSING_WORKSPACE_TITLE}>
+      <Box flexDirection="column" gap={1} paddingTop={1}>
+        <Text bold>{cwdPath}</Text>
+        {showRepoRootNote ? (
+          <Text>
+            {CD_TRUST_REPO_PREFIX} <Text bold>{trustRoot}</Text>
+            {CD_TRUST_REPO_SUFFIX}
+          </Text>
+        ) : null}
+
+        <Text>{ACCESSING_QUICK_SAFETY_CHECK}</Text>
+        <Text>{ACCESSING_CAPABILITY}</Text>
 
         <Text dimColor>
           <Link url="https://code.claude.com/docs/en/security">Security guide</Link>
@@ -210,8 +232,8 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
 
         <Select
           options={[
-            { label: 'Yes, I trust this folder', value: 'enable_all' },
-            { label: 'No, exit', value: 'exit' },
+            { label: ACCESSING_CONFIRM_LABEL, value: 'enable_all' },
+            { label: ACCESSING_CANCEL_LABEL, value: 'exit' },
           ]}
           onChange={value => onChange(value as 'enable_all' | 'exit')}
           onCancel={() => onChange('exit')}

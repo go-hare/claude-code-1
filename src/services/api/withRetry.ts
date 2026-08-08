@@ -62,9 +62,33 @@ import { extractConnectionErrorDetails } from './errorUtils.js'
 const abortError = () => new APIUserAbortError()
 
 const DEFAULT_MAX_RETRIES = 10
-const FLOOR_OUTPUT_TOKENS = 3000
+/** densable rrp — minimum output tokens before overflow retry is viable */
+export const FLOOR_OUTPUT_TOKENS = 3000
 const MAX_529_RETRIES = 3
 export const BASE_DELAY_MS = 500
+
+/**
+ * densable 2.1.218 RFo overflow pure decision core.
+ * Sets max_tokens to availableContext only (no thinking-budget inflate) and
+ * rejects when a prior override would not strictly decrease.
+ */
+export function decideMaxTokensOverflowAdjustment(
+  availableContext: number,
+  previousOverride: number | undefined,
+  floorOutputTokens: number = FLOOR_OUTPUT_TOKENS,
+):
+  | { action: 'set'; maxTokens: number }
+  | { action: 'throw'; reason: 'below_floor' | 'no_progress' } {
+  if (availableContext < floorOutputTokens) {
+    return { action: 'throw', reason: 'below_floor' }
+  }
+  // densable: let W = availableContext (no minRequired / thinking inflate)
+  const W = availableContext
+  if (previousOverride !== undefined && W >= previousOverride) {
+    return { action: 'throw', reason: 'no_progress' }
+  }
+  return { action: 'set', maxTokens: W }
+}
 
 // densable 2.1.212 swh — FOREGROUND_529 set used by O6t(shouldRetry529).
 // Web tool side-queries (web_search_tool / web_fetch_apply) MUST be here so
@@ -516,6 +540,8 @@ export async function* withRetry<T>(
       // NOTE: With extended-context-window beta, this 400 error should not occur.
       // The API now returns 'model_context_window_exceeded' stop_reason instead.
       // Keeping for backward compatibility.
+      // densable 2.1.218 RFo: clamp to availableContext ONLY (no thinking inflate)
+      // and abort when the adjustment makes no progress (doomed identical re-send).
       if (error instanceof APIError) {
         const overflowData = parseMaxTokensContextOverflowError(error)
         if (overflowData) {
@@ -526,24 +552,25 @@ export async function* withRetry<T>(
             0,
             contextLimit - inputTokens - safetyBuffer,
           )
-          if (availableContext < FLOOR_OUTPUT_TOKENS) {
-            logError(
-              new Error(
-                `availableContext ${availableContext} is less than FLOOR_OUTPUT_TOKENS ${FLOOR_OUTPUT_TOKENS}`,
-              ),
-            )
+          const decision = decideMaxTokensOverflowAdjustment(
+            availableContext,
+            retryContext.maxTokensOverride,
+          )
+          if (decision.action === 'throw') {
+            if (decision.reason === 'below_floor') {
+              logError(
+                new Error(
+                  `availableContext ${availableContext} is less than FLOOR_OUTPUT_TOKENS ${FLOOR_OUTPUT_TOKENS}`,
+                ),
+              )
+            } else {
+              logError(
+                new Error('max_tokens overflow adjustment made no progress'),
+              )
+            }
             throw error
           }
-          // Ensure we have enough tokens for thinking + at least 1 output token
-          const minRequired =
-            (retryContext.thinkingConfig.type === 'enabled'
-              ? retryContext.thinkingConfig.budgetTokens
-              : 0) + 1
-          const adjustedMaxTokens = Math.max(
-            FLOOR_OUTPUT_TOKENS,
-            availableContext,
-            minRequired,
-          )
+          const adjustedMaxTokens = decision.maxTokens
           retryContext.maxTokensOverride = adjustedMaxTokens
 
           logEvent('tengu_max_tokens_context_overflow_adjustment', {

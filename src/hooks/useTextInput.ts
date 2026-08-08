@@ -9,6 +9,7 @@ import type {
   InlineGhostText,
   TextInputState,
 } from '../types/textInputTypes.js'
+import { announceDeletedText } from '@anthropic/ink'
 import {
   Cursor,
   getLastKill,
@@ -230,18 +231,24 @@ export function useTextInput({
   function killToLineEnd(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteToLineEnd()
     pushToKillRing(killed, 'append')
+    // densable Ozs: SR announce deleted text (word/line kills)
+    announceDeletedText(killed, mask)
     return newCursor
   }
 
   function killToLineStart(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteToLineStart()
     pushToKillRing(killed, 'prepend')
+    // densable Ozs
+    announceDeletedText(killed, mask)
     return newCursor
   }
 
   function killWordBefore(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteWordBefore()
     pushToKillRing(killed, 'prepend')
+    // densable Ozs
+    announceDeletedText(killed, mask)
     return newCursor
   }
 

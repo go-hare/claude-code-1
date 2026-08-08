@@ -491,27 +491,50 @@ export function configureGlobalAgents(): void {
   }
 }
 
-/**
- * Get AWS SDK client configuration with proxy support
- * Returns configuration object that can be spread into AWS service client constructors
- */
-export async function getAWSClientProxyConfig(): Promise<object> {
-  const proxyUrl = getProxyUrl()
+/** densable jxt — STS/FetchHttpHandler request timeout (30s) */
+export const AWS_SDK_REQUEST_TIMEOUT_MS = 30_000
 
-  if (!proxyUrl) {
+/**
+ * densable fYt({url, requestTimeoutMs}) — proxy-aware NodeHttpHandler.
+ * Returns null when no proxy is configured or url is NO_PROXY-bypassed.
+ * Fallback callers should use NodeHttpHandler({ requestTimeout }) when null.
+ */
+export async function getAwsSdkProxyRequestHandler(opts?: {
+  url?: string
+  requestTimeoutMs?: number
+}): Promise<InstanceType<
+  typeof import('@smithy/node-http-handler').NodeHttpHandler
+> | null> {
+  const proxyUrl = getProxyUrl()
+  if (!proxyUrl || (opts?.url && shouldBypassProxy(opts.url))) {
+    return null
+  }
+  const { NodeHttpHandler } = await import('@smithy/node-http-handler')
+  const agent = createHttpsProxyAgent(proxyUrl)
+  return new NodeHttpHandler({
+    httpAgent: agent,
+    httpsAgent: agent,
+    ...(opts?.requestTimeoutMs !== undefined && {
+      requestTimeout: opts.requestTimeoutMs,
+    }),
+  })
+}
+
+/**
+ * densable pYt({url}) — AWS client proxy config:
+ * requestHandler + defaultProvider(clientConfig.requestHandler).
+ * Returns {} when no proxy / NO_PROXY.
+ */
+export async function getAWSClientProxyConfig(opts?: {
+  url?: string
+  requestTimeoutMs?: number
+}): Promise<object> {
+  const requestHandler = await getAwsSdkProxyRequestHandler(opts)
+  if (!requestHandler) {
     return {}
   }
 
-  const [{ NodeHttpHandler }, { defaultProvider }] = await Promise.all([
-    import('@smithy/node-http-handler'),
-    import('@aws-sdk/credential-provider-node'),
-  ])
-
-  const agent = createHttpsProxyAgent(proxyUrl)
-  const requestHandler = new NodeHttpHandler({
-    httpAgent: agent,
-    httpsAgent: agent,
-  })
+  const { defaultProvider } = await import('@aws-sdk/credential-provider-node')
 
   return {
     requestHandler,

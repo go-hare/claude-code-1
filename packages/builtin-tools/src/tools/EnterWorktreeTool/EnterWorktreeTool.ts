@@ -11,7 +11,12 @@ import { findCanonicalGitRoot } from 'src/utils/git.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getPlanSlug, getPlansDirectory } from 'src/utils/plans.js'
 import { setCwd } from 'src/utils/Shell.js'
-import { saveWorktreeState } from 'src/utils/sessionStorage.js'
+import { logForDebugging } from 'src/utils/debug.js'
+import { logError } from 'src/utils/log.js'
+import {
+  relocateSessionTranscript,
+  saveWorktreeState,
+} from 'src/utils/sessionStorage.js'
 import {
   classifyManagedClaudeWorktree,
   createWorktreeForSession,
@@ -144,6 +149,15 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
       process.chdir(worktreeSession.worktreePath)
       setCwd(worktreeSession.worktreePath)
       setOriginalCwd(getCwd())
+      // densable tNt after chdir+mN — soft fail (Cin) so enter still succeeds
+      try {
+        await relocateSessionTranscript()
+      } catch (e) {
+        logForDebugging(`EnterWorktree: transcript relocation failed: ${e}`, {
+          level: 'error',
+        })
+        logError(e)
+      }
       saveWorktreeState(worktreeSession)
       clearSystemPromptSections()
       clearMemoryFileCaches()
@@ -188,6 +202,15 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
     process.chdir(worktreeSession.worktreePath)
     setCwd(worktreeSession.worktreePath)
     setOriginalCwd(getCwd())
+    // densable tNt after chdir+mN — soft fail (Cin)
+    try {
+      await relocateSessionTranscript()
+    } catch (e) {
+      logForDebugging(`EnterWorktree: transcript relocation failed: ${e}`, {
+        level: 'error',
+      })
+      logError(e)
+    }
     saveWorktreeState(worktreeSession)
     // Clear cached system prompt sections so env_info_simple recomputes with worktree context
     clearSystemPromptSections()

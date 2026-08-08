@@ -1,0 +1,117 @@
+# densable 2.1.218 AUDIT #4 — left-arrow confirm + AgentView Esc
+# Binary: /tmp/official-218/plat/package/claude (2.1.218)
+# Changelog: "Fixed the left arrow key discarding the conversation with no undo:
+#   presses right after editing now ask to confirm, and Esc in the agent view
+#   returns to the conversation it backgrounded"
+
+## densable symbols / strings
+
+### A) Empty-input left-arrow gesture (editing quiet confirm)
+- `odp()` — gesture state: `{editedEmptyAtMs, armedAtMs, lastLeftPressMs, attachConfirmArmedAtMs}`
+- `idp(e,t,r,n,o=xKr(t),i=Ske())` — decide fire|arm|absorb|reject|attach-arm|attach-absorb
+- `sdp(e,t,r)` — mutate gesture state after decision
+- constants: `Dzs=3000` (arm window / notification timeout), `ndp=1000` (double-tap absorb), `_3y=150` (attach fire min after arm)
+- GB: `Je("tengu_left_arrow_editing_guard", !0)` — when true, recent empty-after-edit requires second ←
+- telemetry: `tengu_left_arrow_blocked` reasons: `editing-quiet`, `attach-quiet-hint`, `attach-quiet`, `not-solo`
+- notification key: `left-arrow-again-for-agents`, text `s??"Press ← again"` (leftArrowConfirmHint)
+- stamp `editedEmptyAtMs=Date.now()` when:
+  - text goes non-empty → empty in key handler
+  - history-up empty path `Ce()`
+  - `noteKeystrokeEmptied()`
+
+### densable `idp` body (decompiled):
+```
+function odp(){return{editedEmptyAtMs:0,armedAtMs:0,lastLeftPressMs:0,attachConfirmArmedAtMs:0}}
+function idp(e,t,r,n,o=xKr(t),i=Ske()){
+  if(r!==!0)return"reject";
+  let s=(l)=>l!==0&&l>=i;
+  if(o){ // attach-quiet window (xKr currently always false in this build)
+    if(s(e.lastLeftPressMs)&&t-e.lastLeftPressMs<ndp)return"attach-absorb";
+    if(s(e.attachConfirmArmedAtMs)&&t-e.attachConfirmArmedAtMs<=3000)
+      return t-e.attachConfirmArmedAtMs>=_3y?"fire":"attach-absorb";
+    return"attach-arm";
+  }
+  if(!n)return"fire"; // n = tengu_left_arrow_editing_guard
+  if(s(e.lastLeftPressMs)&&t-e.lastLeftPressMs<ndp)return"absorb";
+  if(s(e.armedAtMs)&&t-e.armedAtMs<=3000)return"fire";
+  return s(e.editedEmptyAtMs)&&t-e.editedEmptyAtMs<2000?"arm":"fire";
+}
+function sdp(e,t,r){
+  switch(t){
+    case"fire":e.armedAtMs=0,e.attachConfirmArmedAtMs=0,e.lastLeftPressMs=r;return;
+    case"arm":e.armedAtMs=r,e.lastLeftPressMs=r;return;
+    case"absorb":e.lastLeftPressMs=r;return;
+    case"reject":return;
+    case"attach-arm":e.attachConfirmArmedAtMs=r;return;
+    case"attach-absorb":return;
+  }
+}
+// left key when onLeftArrowOnEmpty && empty text:
+// Ye=idp(j,Ke,Me.soloKeypress,Je("tengu_left_arrow_editing_guard",!0));
+// case fire → G(J); i();  // clear notif + open agents
+// case arm → notify "Press ← again", tengu_left_arrow_blocked editing-quiet
+// case absorb → no-op
+// case attach-arm → "Ambiguous ←, press again to detach"
+// case reject → left() cursor (not solo keypress)
+```
+
+### B) In-flight left-arrow confirm dialog (Background this session?)
+- UI overlay key `eE==="left-arrow-confirm"`
+- component props: `summary`, `carryOverCount`, `onConfirm`/`onCancel`
+- event `tengu_left_arrow_confirm` {accepted, count, kinds, carryover_count}
+- related strings: title `"Background this session?"`, `"Background anyway (... will be stopped)"`, cancel `"Stay"`
+- (same family as BackgroundAndExit task confirm; used when left-arrow would detach with inflight tasks)
+
+### C) Esc in AgentView/FleetView → return to backgrounded origin
+- `Gnm({originJobId, originRowPresent, originSpawn})`:
+```
+function Gnm(e){
+  if(e.originJobId===void 0)return{kind:"exit"};
+  if(e.originSpawn!==void 0&&!e.originSpawn.settled)return{kind:"wait-starting"};
+  if(e.originSpawn!==void 0&&!e.originSpawn.ok)return{kind:"exit-with-hint"};
+  return e.originRowPresent?{kind:"attach-origin"}:{kind:"exit-with-hint"};
+}
+```
+- Esc cascade (after clearing help/dispatch/bash/delete-arm):
+```
+switch(Gnm(...).kind){
+  case"attach-origin": cN(A?.find((zr)=>zr.id===r)); break; // attach/open origin job
+  case"wait-starting": ao(nsl); break; // toast still starting
+  case"exit-with-hint": if(n)n.resumeHintRequested=!0; xn(); break; // type:"done"
+  case"exit": xn(); break;
+}
+```
+- Parent after left-arrow mount (`entryChannel:"repl_back"`, `originJobId`):
+  - if `originSpawn.resumeHintRequested && transcriptMaterialized` → stderr:
+    `Your conversation was backgrounded — resume it with: claude --resume ${forkSessionId}.`
+  - then process.exit
+
+## Local paths
+
+### Left-arrow confirm (PARTIAL)
+- `/Users/apple/work-py/hare-code/claude-code-1/src/hooks/useTextInput.ts` — left on empty always calls `onLeftArrowOnEmptyMessage(true)` or fires immediately; **no** idp/sdp / editedEmptyAtMs / GB guard
+- `/Users/apple/work-py/hare-code/claude-code-1/src/components/PromptInput/PromptInput.tsx` — always double-press with `LEFT_ARROW_AGAIN_TIMEOUT=800` (densable arm window is 3000ms; edit gate is 2000ms after empty)
+- Footer hint `"← again for agents"` exists (PromptInputFooterLeftSide)
+- `/Users/apple/work-py/hare-code/claude-code-1/src/cli/bg/leftArrowAgents.ts` — handoff/open agents OK
+- In-flight `left-arrow-confirm` dialog / `tengu_left_arrow_confirm` — **not found** in local (BackgroundAndExit exists for Ctrl+B path)
+
+### AgentView Esc → origin (GAP)
+- `/Users/apple/work-py/hare-code/claude-code-1/src/screens/AgentView.tsx`
+  - Esc cascade ends in `forceExit()` → `onAction({type:'done'})` always
+  - **no** `Gnm` / attach-origin / wait-starting / exit-with-hint
+  - Right arrow attaches selected session; origin hint says Press → to return
+  - `enteredViaLeftArrow` only affects footer suffix text
+- `/Users/apple/work-py/hare-code/claude-code-1/src/main.tsx` left-arrow path: after `renderAgentView(...)` always `process.exit(0)` — no attach-origin resume into backgrounded REPL conversation
+
+## Status
+**HAVE** (2026-08-07)
+1. Confirm-after-edit: `src/utils/leftArrowGesture.ts` odp/idp/sdp 1:1; PromptInput stamps editedEmptyAtMs on non-empty→empty; GB `tengu_left_arrow_editing_guard` (default true); arm 3000 / quiet 2000 / absorb 1000; telemetry `tengu_left_arrow_blocked`. Always-on 800ms double-press removed.
+2. Esc return: AgentView `handleEscExit` → `decideOriginEscAction` (Gnm); attach-origin opens origin job; exit-with-hint sets resumeHintRequested; main prints densable resume stderr line.
+3. In-flight `left-arrow-confirm` dialog (Background this session?) still not ported — separate BackgroundAndExit path; not required for changelog bullet (confirm after edit + Esc return).
+
+## Tests
+- `src/utils/__tests__/leftArrowGesture.218.test.ts`
+- `src/screens/fleetView/__tests__/originEsc.218.test.ts`
+
+## implementNow
+done

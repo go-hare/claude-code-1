@@ -1,0 +1,252 @@
+# densable 2.1.218 AUDIT #17 — Bedrock setup wizard assume-role / partition / proxy
+
+Official: Fixed the Bedrock setup wizard failing profile verification for
+assume-role profiles in partitioned AWS regions and on proxy-only networks.
+
+Binary: /tmp/official-218/plat/package/claude (2.1.218)
+
+## densable symbols (extracted)
+
+| Symbol | Role |
+|--------|------|
+| `setup-bedrock` | slash command name (local-jsx) |
+| `bedrock_wizard` / `tengu_oauth_bedrock_wizard_launched` | wizard entry analytics |
+| `tengu_bedrock_setup_started` / `_cancelled` / `_complete` | setup lifecycle |
+| `QZs` | Verification UI step ("Verifying credentials") |
+| `rZs(wizardData)` | profile/accessKey/env verify: STS GetCallerIdentity + Bedrock ListInferenceProfiles |
+| `Nzy(wizardData)` | bearer-token verify path (test invoke) |
+| `iEp(wizardData)` | credential provider factory for wizard (profile/accessKey/environment) |
+| `Fzy(err, wizardData)` | error → user message map (CredentialsProviderError, UnknownEndpoint, …) |
+| `Lzy` / `IEe` / `Mzy` | AnthropicBedrock client + model probe helpers |
+| `fYt({url, requestTimeoutMs})` | proxy-aware NodeHttpHandler (null if no proxy / NO_PROXY) |
+| `pYt({url})` | AWS client proxy config: requestHandler + defaultProvider(clientConfig.requestHandler) |
+| `Iue(url)` | shouldBypassProxy (NO_PROXY) |
+| `wQ` | getProxyUrl |
+| `Ptc` | createHttpsProxyAgent |
+| `jxt = 30000` | requestTimeout for STS/FetchHttpHandler |
+| `$5` / default AWS chain | runtime `fromNodeProviderChain` with same STS probe + handlers |
+
+## densable 1:1 bodies (218)
+
+### fYt / pYt (proxy helpers used by wizard + runtime chain)
+
+```js
+async function pYt(e) {
+  let t = await fYt(e);
+  if (!t) return {};
+  let { defaultProvider: r } = await import('@aws-sdk/credential-provider-node');
+  return {
+    requestHandler: t,
+    credentials: r({ clientConfig: { requestHandler: t } }),
+  };
+}
+
+async function fYt(e) {
+  let t = wQ(); // getProxyUrl
+  if (!t || (e.url && Iue(e.url))) return null; // no proxy or NO_PROXY
+  let r = Ptc(t); // createHttpsProxyAgent
+  return new NodeHttpHandler({
+    httpAgent: r,
+    httpsAgent: r,
+    ...(e.requestTimeoutMs !== undefined && { requestTimeout: e.requestTimeoutMs }),
+  });
+}
+```
+
+### iEp — wizard credential provider (THE assume-role / partition / proxy fix)
+
+```js
+async function iEp(e) {
+  switch (e.authMethod) {
+    case 'profile': {
+      let [{ fromNodeProviderChain: t }, r] = await Promise.all([
+        import('@aws-sdk/credential-providers'),
+        fYt({
+          url: `https://sts.${e.region}.amazonaws.com`,
+          requestTimeoutMs: jxt, // 30000
+        }),
+      ]);
+      let n = r ?? new FetchHttpHandler({ requestTimeout: jxt });
+      return t({
+        profile: e.awsProfile,
+        ignoreCache: true,
+        // region on parentClientConfig → STS assume-role uses wizard region
+        // (not default us-east-1) — required for partitioned regions + role_arn
+        parentClientConfig: { region: e.region, requestHandler: n },
+        // requestHandler on clientConfig → assume-role STS traffic uses proxy
+        // (proxy-only networks) or FetchHttpHandler timeout fallback
+        clientConfig: { requestHandler: n },
+      });
+    }
+    case 'accessKey':
+      return async () => ({
+        accessKeyId: e.accessKeyId,
+        secretAccessKey: e.secretAccessKey,
+        ...(e.sessionToken && { sessionToken: e.sessionToken }),
+      });
+    case 'environment':
+      return;
+    default:
+      return;
+  }
+}
+```
+
+### rZs — verification runner that consumes iEp
+
+```js
+async function rZs(e) {
+  if (e.authMethod === 'bearer') return Nzy(e);
+  try {
+    let t = await iEp(e);
+    let n = {
+      ...await pYt({ url: `https://bedrock.${e.region}.amazonaws.com` }),
+      region: e.region,
+      ...(t && { credentials: t }),
+    };
+    let { STSClient: o, GetCallerIdentityCommand: i } =
+      await import('@aws-sdk/client-sts');
+    let s = await new o(n).send(new i({}));
+    let a = s.Arn ?? s.UserId ?? '(unknown)';
+    let { BedrockClient: l, ListInferenceProfilesCommand: c } =
+      await import('@aws-sdk/client-bedrock');
+    let u = new l(n);
+    let d = [], p;
+    do {
+      let f = await u.send(
+        new c({ ...(p && { nextToken: p }), typeEquals: 'SYSTEM_DEFINED' }),
+      );
+      for (let m of f.inferenceProfileSummaries ?? [])
+        if (m.inferenceProfileId?.includes('anthropic'))
+          d.push(m.inferenceProfileId);
+      p = f.nextToken;
+    } while (p);
+    return { status: 'ok', identity: a, profiles: d };
+  } catch (t) {
+    return { status: 'error', ...Fzy(t, e) };
+  }
+}
+```
+
+### Fzy — error mapping (user-facing strings present in binary)
+
+```js
+function Fzy(e, t) {
+  let n = e?.name ?? 'Error';
+  let o = e?.message ?? String(e);
+  let i =
+    t.authMethod === 'profile'
+      ? `aws sso login --profile ${t.awsProfile}`
+      : undefined;
+  switch (n) {
+    case 'CredentialsProviderError':
+      return t.authMethod === 'profile'
+        ? {
+            error: `Could not load credentials for profile "${t.awsProfile}". If this is an SSO profile, run:`,
+            command: i,
+          }
+        : { error: `No AWS credentials found. ${o}` };
+    case 'ExpiredTokenException':
+    case 'TokenRefreshRequired':
+      return t.authMethod === 'profile'
+        ? { error: 'SSO session expired. Run:', command: i }
+        : { error: `Credentials expired. ${o}` };
+    case 'ForbiddenException':
+      return t.authMethod === 'profile'
+        ? {
+            error: `SSO portal denied access to the role for profile "${t.awsProfile}". The permission set may have been revoked — check your AWS access portal.`,
+          }
+        : { error: `Forbidden. ${o}` };
+    case 'AccessDeniedException':
+      return {
+        error: `Access denied. Your IAM role needs bedrock:ListInferenceProfiles permission. ${o}`,
+      };
+    case 'UnrecognizedClientException':
+    case 'InvalidSignatureException':
+      return { error: `Invalid credentials. ${o}` };
+    case 'UnknownEndpoint':
+    case 'ENOTFOUND':
+      return {
+        error: `Cannot reach AWS in region "${t.region}". Check the region name and your network.`,
+      };
+    default:
+      return { error: `${n}: ${o}` };
+  }
+}
+```
+
+### Runtime default chain (same family; densable auth `$5`)
+
+```js
+// densable 2.1.218:
+let [{ fromNodeProviderChain: r }, n] = await Promise.all([
+  import('@aws-sdk/credential-providers'),
+  fYt({ url: `https://sts.${e}.amazonaws.com`, requestTimeoutMs: jxt }),
+]);
+let o = r({
+  ignoreCache: true,
+  parentClientConfig: {
+    region: e,
+    requestHandler: n ?? new FetchHttpHandler({ requestTimeout: jxt }),
+  },
+  clientConfig: {
+    requestHandler: n ?? new FetchHttpHandler({ requestTimeout: jxt }),
+  },
+});
+```
+
+Note vs densable 2.1.214 extract in BATCH_A_SYMBOLS.md: 214 had
+`parentClientConfig:{region:e}` only and `clientConfig.requestHandler` only;
+218 puts **requestHandler on both** parentClientConfig and clientConfig.
+
+## Why this fixes the changelog
+
+1. **assume-role / partitioned regions**
+   - `fromNodeProviderChain` with `role_arn` + `source_profile` spins an STS client.
+   - Without `parentClientConfig.region = wizard/runtime region`, STS defaults to
+     us-east-1 commercial endpoint → fails for gov/cn partitions / regional STS.
+   - `parentClientConfig.region` forces STS assume-role into the selected region.
+
+2. **proxy-only networks**
+   - `fYt` builds `NodeHttpHandler` with HTTPS proxy agent when HTTPS_PROXY set
+     and STS URL not NO_PROXY-bypassed.
+   - Handler is injected into **both** `parentClientConfig` and `clientConfig`
+     so STS assume-role and subsequent calls go through the proxy.
+   - Fallback `FetchHttpHandler({ requestTimeout: 30000 })` when no proxy.
+
+3. **wizard verification path**
+   - `rZs` uses `iEp` credentials + `pYt` Bedrock endpoint proxy config, then
+     GetCallerIdentity + ListInferenceProfiles — same region/proxy surface.
+
+## Local comparison (post-port 2026-08-07)
+
+| densable | local | match |
+|----------|-------|-------|
+| `/setup-bedrock` command + wizard UI (`QZs`, steps) | `src/commands/setup-bedrock/` local-jsx multi-step | HAVE |
+| `iEp` profile provider with parentClientConfig+proxy | `createWizardCredentialProvider` in `setupBedrockVerify.ts` | HAVE |
+| `rZs` / `Fzy` verification | `verifyBedrockWizardCredentials` / `mapBedrockVerifyError` | HAVE |
+| `Nzy` bearer probe | `verifyBedrockBearer` (AnthropicBedrock when present) | HAVE |
+| `fYt(url, requestTimeoutMs)` | `getAwsSdkProxyRequestHandler` | HAVE |
+| `pYt` | `getAWSClientProxyConfig(opts?)` | HAVE |
+| default AWS chain `$5` | `getDefaultAwsProviderChain` parentClientConfig.region+requestHandler both | HAVE |
+
+## Status: **HAVE** (2026-08-07)
+
+1. Runtime fYt/pYt + `$5` chain already 1:1 (prior pack slice).
+2. Wizard: `setup-bedrock` registered in `src/commands.ts`; verification module ports densable iEp/rZs/Fzy/Nzy.
+3. Profile path injects `parentClientConfig: { region, requestHandler }` + `clientConfig: { requestHandler }` (partition + proxy-only fix).
+4. Fallback handler is `NodeHttpHandler({ requestTimeout: jxt })` (same as local `$5` chain); densable uses `FetchHttpHandler` — equivalent timeout surface for Node CLI.
+
+## Tests
+
+- `src/utils/__tests__/awsProxyHandler.218.test.ts`
+- `src/utils/bedrock/__tests__/setupBedrockVerify.218.test.ts`
+
+## implementNow
+
+done
+
+## Confidence
+
+high — full minified bodies recovered from binary at offsets ~225896634 (pYt/fYt),
+~227450250 (runtime chain), ~237354606 (rZs/iEp/Fzy).

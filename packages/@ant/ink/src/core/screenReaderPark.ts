@@ -50,18 +50,51 @@ export function hardWrapScreenReaderLine(
 }
 
 /**
+ * densable 2.1.218: merge overlapping preserveRanges, sorted by start.
+ */
+export function mergePreserveRanges(
+  ranges: ReadonlyArray<readonly [number, number]>,
+): Array<[number, number]> {
+  if (ranges.length === 0) return []
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0])
+  const out: Array<[number, number]> = []
+  for (const [s, e] of sorted) {
+    const last = out.at(-1)
+    if (last !== undefined && s <= last[1]) {
+      last[1] = Math.max(last[1], e)
+    } else {
+      out.push([s, e])
+    }
+  }
+  return out
+}
+
+/**
  * Official onRenderScreenReader line materialization densable:
  * split fullText on newlines, hard-wrap each logical line (wrapAnsi hard),
  * track lineBaseRows.
+ *
+ * densable 2.1.218 #13: when a logical line's trailing whitespace falls inside
+ * a preserveRange, keep trailing spaces on the last hard-wrapped segment so
+ * VoiceOver does not treat the caret-as-space as a "new line".
  */
 export function materializeScreenReaderLines(
   fullText: string,
   columns: number,
+  preserveRanges: ReadonlyArray<readonly [number, number]> = [],
 ): { lines: string[]; lineBaseRows: number[] } {
+  const merged = mergePreserveRanges(preserveRanges)
   const logical = fullText === '' ? [] : fullText.split('\n')
   const lines: string[] = []
   const lineBaseRows: number[] = []
+  let charPos = 0
   for (const logicalLine of logical) {
+    const lineEnd = charPos + logicalLine.length
+    // densable L: trailing whitespace of this logical line is in a preserve range
+    const trimmedLen = logicalLine.trimEnd().length
+    const hasTrailing =
+      charPos + trimmedLen < lineEnd &&
+      merged.some(([s, e]) => s < lineEnd && lineEnd <= e)
     lineBaseRows.push(lines.length)
     if (logicalLine === '') {
       lines.push('')
@@ -69,14 +102,19 @@ export function materializeScreenReaderLines(
       lines.push(logicalLine)
     } else {
       // Official cq(v, t, {trim:false, hard:true}) then split + trimEnd
+      // (except last segment when trailing whitespace is preserved)
       const wrapped = wrapAnsi(logicalLine, columns, {
         trim: false,
         hard: true,
       })
-      for (const seg of wrapped.split('\n')) {
-        lines.push(seg.trimEnd())
+      const segs = wrapped.split('\n')
+      for (let p = 0; p < segs.length; p++) {
+        const seg = segs[p]!
+        lines.push(hasTrailing && p === segs.length - 1 ? seg : seg.trimEnd())
       }
     }
+    // densable: a = O + 1  (logical line length + newline separator)
+    charPos = lineEnd + 1
   }
   return { lines, lineBaseRows }
 }
@@ -161,10 +199,19 @@ export function planScreenReaderFrameUpdate(input: {
   terminalRows: number
   cursor: ScreenReaderCursorDeclaration | null
   stringWidth?: (s: string) => number
+  /** densable 2.1.218 preserveRanges from xYr */
+  preserveRanges?: ReadonlyArray<readonly [number, number]>
+  /**
+   * densable GJc announcements already appended to fullText before planning.
+   * When set, clamp rewriteFrom so announcements are always spoken (not skipped
+   * as common prefix). Index is the first announcement line in `lines`.
+   */
+  announcementStartLine?: number
 }): ScreenReaderFramePlan {
   const { lines, lineBaseRows } = materializeScreenReaderLines(
     input.fullText,
     input.columns,
+    input.preserveRanges,
   )
   const lastRow = Math.max(0, lines.length - 1)
   const park = computeScreenReaderPark(
@@ -184,8 +231,18 @@ export function planScreenReaderFrameUpdate(input: {
   while (common < maxCommon && input.prevLines[common] === lines[common]) {
     common++
   }
+  // densable: if(c!==-1&&f>c)f=c — announcements force rewrite from their line
+  if (
+    input.announcementStartLine !== undefined &&
+    input.announcementStartLine >= 0 &&
+    common > input.announcementStartLine
+  ) {
+    common = input.announcementStartLine
+  }
   const linesUnchanged =
-    common === input.prevLines.length && common === lines.length
+    common === input.prevLines.length &&
+    common === lines.length &&
+    input.announcementStartLine === undefined
   const parkChanged =
     park.row !== input.prevPark.row || park.col !== input.prevPark.col
   const prevLastRow = Math.max(0, input.prevLines.length - 1)

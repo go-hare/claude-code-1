@@ -1,0 +1,3 @@
+209029:Agent type to spawn when `context: fork`.
+209030:Only for `context: fork`. Forks run as background agents that report back as a task notification instead of blocking the turn; set `false` to keep the caller waiting for the result in-line.
+318159:- \`context\`: Only set \`context: fork\` for self-contained skills that don't need mid-process user input.

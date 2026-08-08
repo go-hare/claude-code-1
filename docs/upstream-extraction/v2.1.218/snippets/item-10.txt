@@ -1,0 +1,158 @@
+# densable 2.1.218 #10 — IDE selection mid-emoji mojibake + tool executor error drop
+# Binary: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+# Extracted: 2026-08-07 from main JS blob @ offset 223921752 (21MB)
+
+## Changelog
+Fixed mojibake when a long IDE selection was truncated mid-emoji, and a case
+where a tool executor error could be silently dropped.
+
+## densable symbols (selection / surrogate)
+
+| densable | role |
+|----------|------|
+| `Etp=2000` | max UTF-16 code units for IDE selection content |
+| `vtp(e)` | selection content truncator used by attachment→message |
+| `Pl(e,t)` | head code-unit slice; drop lone high surrogate at cut |
+| `s7(e,t)` | tail code-unit slice; drop lone low surrogate at start |
+| `FAl(e)` | `Buffer.from(e,"utf16le").toString("utf16le")` (identity normalize) |
+| `XX(e,t)` | `Pl` + `… [+N chars]` (generic) |
+| `CBn`/`D5e`/`$Al`/`Wwt`/`BFr` | well-formed / lone-surrogate walk + sanitize (API path; related) |
+| `Y9m`/`BAl` | lone surrogate regex; `vBn`/`NAl` = isWellFormed/toWellFormed binds |
+| `tengu_lone_surrogate_sanitized` | analytics when API payload sanitized (sideQuery/queryModel) |
+
+### densable 1:1 bodies (selection trunc)
+
+```js
+// Lr string helpers
+function Pl(e,t){
+  if(e.length<=t)return e;
+  let r=e.slice(0,t), n=r.charCodeAt(t-1);
+  return FAl(n>=55296&&n<=56319?r.slice(0,-1):r)
+}
+function s7(e,t){
+  if(e.length<=t)return e;
+  let r=e.slice(-t), n=r.charCodeAt(0);
+  return FAl(n>=56320&&n<=57343?r.slice(1):r)
+}
+function FAl(e){return Buffer.from(e,"utf16le").toString("utf16le")}
+
+// messages attachment map
+,Etp=2000
+function vtp(e){
+  return e.length>Etp ? Pl(e,Etp)+"\n... (truncated)" : e
+}
+
+// Ctp cases (attachment → meta user message)
+selected_lines_in_ide:(e)=>im([jr({content:
+  `The user selected the lines ${e.lineStart} to ${e.lineEnd} from ${e.filename}:\n${vtp(e.content)}\n\nThis may or may not be related to the current task.`,
+  isMeta:!0})]),
+selected_lines_in_diff:(e)=>im([jr({content:
+  `The user selected the following ${e.lineCount} ${e.lineCount===1?"line":"lines"} from the diff view${e.filePath?` (in ${e.filePath})`:""}:\n${vtp(e.content)}\n\nThis may or may not be related to the current task.`,
+  isMeta:!0})]),
+```
+
+### densable gIy — build attachment (no truncate here; truncate at message emit)
+
+```js
+async function gIy(e,t){
+  if(e?.source==="diff"&&e.text)
+    return[{type:"selected_lines_in_diff",lineCount:e.lineCount,content:e.text,filePath:e.filePath}];
+  let r=nyo(t.options.mcpClients);
+  if(!r||e?.lineStart===void 0||!e.text||!e.filePath)return[];
+  if(tte(e.filePath,bn(t)))return[];
+  return[{type:"selected_lines_in_ide",ideName:r,lineStart:e.lineStart,
+    lineEnd:e.lineStart+e.lineCount-1,filename:e.filePath,content:e.text,
+    displayPath:zx.relative(kt(),e.filePath)}];
+}
+```
+
+### densable lone-surrogate sanitize (API; secondary to #10)
+
+```js
+// Y9m=/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+// BAl=same /g; vBn=isWellFormed; NAl=toWellFormed
+function CBn(e){if(vBn)return vBn(e);return!Y9m.test(e)}
+function D5e(e){if(NAl)return NAl(e);return e.replace(BAl,"\uFFFD")}
+function Wwt(e){ /* walk object/array strings; replace non-wellformed via D5e */ }
+function BFr(e){ /* walk; return true if any string fails CBn */ }
+// call sites: if(BFr($)){try{$=SN($)}catch{}Wwt($);M("tengu_lone_surrogate_sanitized",{source:...})}
+```
+
+NOTE: string "mojibake" in binary is VS Code OSC52 clipboard warning (`_lo`/`h5g`) — NOT this fix.
+
+## densable symbols (tool executor silent error)
+
+| densable | role |
+|----------|------|
+| `buildSameTurnToolUses` (in StreamingToolExecutor) | sibling tool_use context; catch must not silent-drop |
+| `tengu_auto_mode_sibling_context_error` | analytics when buildSameTurnToolUses throws |
+| `Qtn` / `runToolUse` | outer catch yields `<tool_use_error>Error calling tool…` (not silent) |
+| `ensureToolResultPairing` | repairs missing tool_result (also #12; not invent for #10 alone) |
+
+### densable 1:1 buildSameTurnToolUses catch
+
+```js
+buildSameTurnToolUses(e){
+  try{
+    let t=new Map;
+    for(let r of this.tools){
+      if(r===e)break;
+      let n=t.get(r.assistantMessage)??[];
+      n.push(r.block); t.set(r.assistantMessage,n)
+    }
+    if(t.size===0)return;
+    return[...t.entries()].map(([r,n])=>({...r,message:{...r.message,content:n}}))
+  }catch(t){
+    M("tengu_auto_mode_sibling_context_error",{...Rx(t)});
+    return
+  }
+}
+```
+
+Local catch is empty (`return undefined`) — **silent drop of the error telemetry**.
+
+## Local status
+
+### IDE selection mid-emoji — **GAP**
+
+Path: `/Users/apple/work-py/hare-code/claude-code-1/src/utils/messages.ts`
+case `selected_lines_in_ide` (~4284):
+
+```ts
+const maxSelectionLength = 2000
+const content =
+  attachment.content.length > maxSelectionLength
+    ? attachment.content.substring(0, maxSelectionLength) + '\n... (truncated)'
+    : attachment.content
+```
+
+- Uses raw `substring` → can cut mid-surrogate pair → mojibake (exact densable bug).
+- densable uses `vtp` = `Pl(e, Etp)+"\n... (truncated)"`.
+- Local already has densable-equivalent `truncateCodeUnitsSafe` in
+  `/Users/apple/work-py/hare-code/claude-code-1/src/utils/stringUtils.ts`
+  (comment says densable `Jd`; same as densable `Pl` without `FAl` wrap).
+- Local **missing** `selected_lines_in_diff` message case (densable has it + same `vtp`).
+
+### Tool executor silent error — **PARTIAL**
+
+Path: `/Users/apple/work-py/hare-code/claude-code-1/src/services/tools/StreamingToolExecutor.ts`
+`buildSameTurnToolUses` catch returns `undefined` with no `tengu_auto_mode_sibling_context_error`.
+
+runToolUse outer error path already yields tool_result errors (HAVE-ish).
+ensureToolResultPairing family overlaps #12.
+
+## 1:1 delta to implement (not simplified)
+
+1. `messages.ts` selected_lines_in_ide:
+   - Replace `substring(0, maxSelectionLength)` with densable `vtp`:
+     `truncateCodeUnitsSafe(content, 2000) + '\n... (truncated)'` when length>2000
+     (optional: export helper `truncateIdeSelectionContent` = densable `vtp`).
+2. Add densable `selected_lines_in_diff` case with same `vtp` + copy template.
+3. `StreamingToolExecutor.buildSameTurnToolUses` catch:
+   - `logEvent('tengu_auto_mode_sibling_context_error', {...toAnalytics(error)})`
+     (match densable `M("tengu_auto_mode_sibling_context_error",{...Rx(t)})`).
+
+## Verdict
+status: GAP
+implementNow: true
+confidence: high (selection); medium (tool half telemetry-only unless paired with #12)

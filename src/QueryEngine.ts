@@ -623,12 +623,19 @@ export class QueryEngine {
 
         if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
           const compactMsg = msg as SystemCompactBoundaryMessage
+          // densable 2.1.218 #23: emit logical_parent_uuid for headless/SDK fork lineage
+          const logicalParentUuid = (
+            compactMsg as { logicalParentUuid?: string }
+          ).logicalParentUuid
           yield {
             type: 'system',
             subtype: 'compact_boundary' as const,
             session_id: getSessionId(),
             uuid: msg.uuid,
             compact_metadata: toSDKCompactMetadata(compactMsg.compactMetadata),
+            ...(logicalParentUuid !== undefined && {
+              logical_parent_uuid: logicalParentUuid,
+            }),
           } as unknown as SDKCompactBoundaryMessage
         }
       }
@@ -1008,6 +1015,10 @@ export class QueryEngine {
               messages.splice(0, localBoundaryIdx)
             }
 
+            // densable 2.1.218 #23: emit logical_parent_uuid on mid-turn compact_boundary
+            const logicalParentUuid = (
+              compactMsg as { logicalParentUuid?: string }
+            ).logicalParentUuid
             yield {
               type: 'system',
               subtype: 'compact_boundary' as const,
@@ -1016,6 +1027,9 @@ export class QueryEngine {
               compact_metadata: toSDKCompactMetadata(
                 compactMsg.compactMetadata,
               ),
+              ...(logicalParentUuid !== undefined && {
+                logical_parent_uuid: logicalParentUuid,
+              }),
             }
           }
           if (msg.subtype === 'api_error') {

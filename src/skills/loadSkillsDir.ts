@@ -203,6 +203,8 @@ export function parseSkillFrontmatterFields(
   userInvocable: boolean
   hooks: HooksSettings | undefined
   executionContext: 'fork' | undefined
+  /** densable 2.1.218: fork skills default background:true */
+  background: boolean | undefined
   agent: string | undefined
   effort: EffortValue | undefined
   shell: FrontmatterShell | undefined
@@ -263,6 +265,15 @@ export function parseSkillFrontmatterFields(
     userInvocable,
     hooks: parseHooksFromFrontmatter(frontmatter, resolvedName),
     executionContext: frontmatter.context === 'fork' ? 'fork' : undefined,
+    // densable 2.1.218 #34: context:fork runs background by default; opt out with background: false
+    background:
+      frontmatter.context === 'fork'
+        ? frontmatter.background === undefined
+          ? true
+          : parseBooleanFrontmatter(frontmatter.background)
+        : frontmatter.background === undefined
+          ? undefined
+          : parseBooleanFrontmatter(frontmatter.background),
     agent: frontmatter.agent as string | undefined,
     effort,
     shell: parseShellFrontmatter(frontmatter.shell, resolvedName),
@@ -292,6 +303,7 @@ export function createSkillCommand({
   loadedFrom,
   hooks,
   executionContext,
+  background,
   agent,
   paths,
   effort,
@@ -317,6 +329,7 @@ export function createSkillCommand({
   loadedFrom: LoadedFrom
   hooks: HooksSettings | undefined
   executionContext: 'inline' | 'fork' | undefined
+  background: boolean | undefined
   agent: string | undefined
   paths: string[] | undefined
   effort: EffortValue | undefined
@@ -336,6 +349,7 @@ export function createSkillCommand({
     disableModelInvocation,
     userInvocable,
     context: executionContext,
+    ...(background !== undefined ? { background } : {}),
     agent,
     effort,
     paths,

@@ -86,13 +86,18 @@ function checkDangerousRemovalPaths(
       : resolve(cwd, cleanPath)
 
     // Check if this is a dangerous path (using the non-symlink-resolved path)
+    // densable Ize: safetyCheck + circuitBreaker:"dangerousRemoval" so auto mode
+    // can send this to the classifier (2.1.218 #26) while still blocking
+    // acceptEdits / allow-rules auto-approve.
     if (isDangerousRemovalPath(absolutePath)) {
       return {
         behavior: 'ask',
         message: `Dangerous ${command} operation detected: '${absolutePath}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,
         decisionReason: {
-          type: 'other',
+          type: 'safetyCheck',
           reason: `Dangerous ${command} operation on critical path: ${absolutePath}`,
+          classifierApprovable: false,
+          circuitBreaker: 'dangerousRemoval',
         },
         // Don't provide suggestions - we don't want to encourage saving dangerous commands
         suggestions: [],

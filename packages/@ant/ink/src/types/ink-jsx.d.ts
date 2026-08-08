@@ -14,15 +14,19 @@ import type { FocusEvent } from '../core/events/focus-event.js'
 import type { KeyboardEvent } from '../core/events/keyboard-event.js'
 import type { PasteEvent } from '../core/events/paste-event.js'
 import type { Styles, TextStyles } from '../core/styles.js'
-import type { DOMElement } from '../core/dom.js'
+import type { DOMAccessibility, DOMElement } from '../core/dom.js'
 
 declare module 'react' {
+  // React 19: both React.JSX and global JSX are used depending on
+  // jsxImportSource / tsc resolution. Augment both.
   namespace JSX {
     interface IntrinsicElements {
       'ink-box': {
         ref?: Ref<DOMElement>
         tabIndex?: number
         autoFocus?: boolean
+        /** densable accessibility bag */
+        accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void
         onFocus?: (event: FocusEvent) => void
         onFocusCapture?: (event: FocusEvent) => void
@@ -43,6 +47,8 @@ declare module 'react' {
       'ink-text': {
         style?: Styles
         textStyles?: TextStyles
+        /** densable accessibility bag (preserveWhitespace etc.) */
+        accessibility?: DOMAccessibility
         children?: ReactNode
       }
       'ink-link': {
@@ -57,3 +63,8 @@ declare module 'react' {
     }
   }
 }
+
+// Ensure this ambient module is pulled into the root program even when
+// only .tsx sources are included (some TS versions exclude bare .d.ts
+// from **/*.ts globs).
+export {}

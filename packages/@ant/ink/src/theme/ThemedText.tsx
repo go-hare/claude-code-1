@@ -58,6 +58,12 @@ export type Props = {
    */
   readonly wrap?: Styles['textWrap'];
 
+  /**
+   * densable `aria-preserve-whitespace` — keep trailing spaces in screen-reader
+   * line materialize so VoiceOver does not announce "new line" for caret space.
+   */
+  readonly 'aria-preserve-whitespace'?: boolean;
+
   readonly children?: ReactNode;
 };
 
@@ -88,6 +94,7 @@ export default function ThemedText({
   strikethrough = false,
   inverse = false,
   wrap = 'wrap',
+  'aria-preserve-whitespace': ariaPreserveWhitespace,
   children,
 }: Props): React.ReactNode {
   const [themeName] = useTheme();
@@ -113,6 +120,7 @@ export default function ThemedText({
       strikethrough={strikethrough}
       inverse={inverse}
       wrap={wrap}
+      aria-preserve-whitespace={ariaPreserveWhitespace}
     >
       {children}
     </Text>

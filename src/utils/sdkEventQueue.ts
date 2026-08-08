@@ -79,7 +79,8 @@ type SessionStateChangedEvent = {
 type CommandLifecycleSdkEvent = {
   type: 'command_lifecycle'
   uuid: string
-  state: 'started' | 'completed'
+  /** densable S8o: queued|started|completed|cancelled|discarded */
+  state: 'queued' | 'started' | 'completed' | 'cancelled' | 'discarded'
 }
 
 /**

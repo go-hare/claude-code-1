@@ -59,9 +59,13 @@ export function toInternalMessages(
               : {}),
           } as unknown as Message,
         ]
-        // Handle compact boundary messages
+      case 'system':
+        // densable 2.1.218 #23: SDK→internal compact_boundary under system
+        // (was dead code under user case). Plumb logical_parent_uuid.
         if (message.subtype === 'compact_boundary') {
-          const compactMsg = message
+          const compactMsg = message as SDKCompactBoundaryMessage & {
+            logical_parent_uuid?: string | null
+          }
           return [
             {
               type: 'system',
@@ -73,6 +77,9 @@ export function toInternalMessages(
               ),
               uuid: message.uuid,
               timestamp: new Date().toISOString(),
+              ...(compactMsg.logical_parent_uuid !== undefined && {
+                logicalParentUuid: compactMsg.logical_parent_uuid,
+              }),
             } as Message,
           ]
         }
@@ -175,6 +182,9 @@ export function toSDKMessages(messages: Message[]): SDKMessage[] {
         ]
       case 'system':
         if (message.subtype === 'compact_boundary' && message.compactMetadata) {
+          // densable 2.1.218 #23: emit logical_parent_uuid when present
+          const logicalParentUuid = (message as { logicalParentUuid?: string })
+            .logicalParentUuid
           return [
             {
               type: 'system',
@@ -184,6 +194,9 @@ export function toSDKMessages(messages: Message[]): SDKMessage[] {
               compact_metadata: toSDKCompactMetadata(
                 message.compactMetadata as CompactMetadata,
               ),
+              ...(logicalParentUuid !== undefined && {
+                logical_parent_uuid: logicalParentUuid,
+              }),
             },
           ]
         }

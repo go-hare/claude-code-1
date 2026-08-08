@@ -9,6 +9,7 @@ import {
   setOriginalCwd,
   switchSession,
 } from '../bootstrap/state.js'
+import { applyMainThreadAgentHooks } from './hooks/applyMainThreadAgentHooks.js'
 import { clearSystemPromptSections } from '../constants/systemPromptSections.js'
 import { restoreCostStateForSession } from '../cost-tracker.js'
 import type { AppState } from '../state/AppState.js'
@@ -232,6 +233,7 @@ export function restoreAgentFromSession(
   // If session had no agent, clear any stale bootstrap state
   if (!agentSetting) {
     setMainThreadAgentType(undefined)
+    applyMainThreadAgentHooks(undefined)
     return { agentDefinition: undefined, agentType: undefined }
   }
 
@@ -243,10 +245,13 @@ export function restoreAgentFromSession(
       `Resumed session had agent "${agentSetting}" but it is no longer available. Using default behavior.`,
     )
     setMainThreadAgentType(undefined)
+    applyMainThreadAgentHooks(undefined)
     return { agentDefinition: undefined, agentType: undefined }
   }
 
   setMainThreadAgentType(resumedAgent.agentType)
+  // densable NQe → QEt: re-apply origin-trust gate on resume
+  applyMainThreadAgentHooks(resumedAgent)
 
   // Apply agent's model if user didn't specify one
   if (

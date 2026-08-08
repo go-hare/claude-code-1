@@ -7,10 +7,13 @@ import type { Dirent } from 'fs'
 import { closeSync, fstatSync, openSync, readSync } from 'fs'
 import {
   appendFile as fsAppendFile,
+  copyFile as fsCopyFile,
   open as fsOpen,
   mkdir,
   readdir,
   readFile,
+  rename as fsRename,
+  rm as fsRm,
   stat,
   unlink,
   writeFile,
@@ -52,6 +55,7 @@ import {
   type LastPromptMessage,
   type LogOption,
   type PersistedWorktreeSession,
+  type RelocatedEntry,
   type SerializedMessage,
   sortLogs,
   type TranscriptMessage,
@@ -76,10 +80,15 @@ import {
   isPrecompactSkipDisabled,
   shouldSkipPromptHistory,
 } from './residualFinalEnvGates.js'
-import { isNestedMarkerSuppressingPersistence } from './sessionPersistenceStatus.js'
+import {
+  getPersistenceSuppressCause,
+  isNestedMarkerSuppressingPersistence,
+} from './sessionPersistenceStatus.js'
+import { repointTaskOutputSymlinks } from './task/diskOutput.js'
 import {
   recordTranscriptWriteFailure,
   recordTranscriptWriteSuccess,
+  remapTranscriptWriterPaths,
 } from './transcriptWriterHealth.js'
 import { errorMessage, isFsInaccessible } from './errors.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
@@ -652,6 +661,10 @@ export type RemoteAgentMetadata = {
   isLongRunning?: boolean
   isUltraplan?: boolean
   isRemoteReview?: boolean
+  /** densable 2.1.218 — apply findings locally when review completes */
+  applyFixesOnComplete?: boolean
+  /** densable 2.1.218 — prose findings note (not a base branch) */
+  reviewInstructions?: string
   remoteTaskMetadata?: Record<string, unknown>
 }
 
@@ -834,7 +847,7 @@ export function resetProjectForTesting(): void {
 }
 
 export function setSessionFileForTesting(path: string): void {
-  getProject().sessionFile = path
+  getProject().setSessionFile(path)
 }
 
 type InternalEventWriter = (
@@ -905,9 +918,21 @@ class Project {
   currentSessionPrRepository: string | undefined
 
   sessionFile: string | null = null
+  /**
+   * densable `currentSessionRelocatedCwd` — last cwd stamped by tNt after a
+   * successful (or same-path) transcript rehome. Used to skip redundant
+   * relocated stamps when only originalCwd changed without a path move.
+   */
+  currentSessionRelocatedCwd: string | undefined
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
   // on the first user/assistant message — prevents metadata-only session files.
   private pendingEntries: Entry[] = []
+  /**
+   * densable `relocationBuffer` — while non-null, appendEntry enqueues here
+   * instead of writing, so mid-rehome writes land after setSessionFile.
+   */
+  private relocationBuffer: Array<{ entry: Entry; sessionId: UUID }> | null =
+    null
   private remoteIngressUrl: string | null = null
   private internalEventWriter: InternalEventWriter | null = null
   private internalEventReader: InternalEventReader | null = null
@@ -1061,8 +1086,32 @@ class Project {
   }
 
   resetSessionFile(): void {
-    this.sessionFile = null
+    this.setSessionFile(null)
     this.pendingEntries = []
+  }
+
+  /**
+   * densable `setSessionFile` — update pointer; remap writer-health keys for
+   * the old path (densable wZd).
+   */
+  setSessionFile(path: string | null): void {
+    remapTranscriptWriterPaths(this.sessionFile, path)
+    this.sessionFile = path
+  }
+
+  /** densable `beginTranscriptRelocation` */
+  beginTranscriptRelocation(): void {
+    this.relocationBuffer ??= []
+  }
+
+  /** densable `endTranscriptRelocation` — flush buffered entries to the new file. */
+  async endTranscriptRelocation(): Promise<void> {
+    const buffered = this.relocationBuffer
+    this.relocationBuffer = null
+    if (!buffered) return
+    for (const { entry, sessionId } of buffered) {
+      await this.appendEntry(entry, sessionId)
+    }
   }
 
   /**
@@ -1525,6 +1574,12 @@ class Project {
       return
     }
 
+    // densable: during tNt rehome, buffer until endTranscriptRelocation.
+    if (this.relocationBuffer) {
+      this.relocationBuffer.push({ entry, sessionId })
+      return
+    }
+
     const currentSessionId = getSessionId() as UUID
     const isCurrentSession = sessionId === currentSessionId
 
@@ -1611,6 +1666,9 @@ class Project {
     } else if (entry.type === 'marble-origami-snapshot') {
       // Always append. Last-wins on restore — later entries supersede.
       void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'relocated') {
+      // densable tNt stamp — always append (last-wins on resume scans)
+      void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'goal') {
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'goal-cleared') {
@@ -1675,10 +1733,10 @@ class Project {
    */
   private ensureCurrentSessionFile(): string {
     if (this.sessionFile === null) {
-      this.sessionFile = getTranscriptPath()
+      this.setSessionFile(getTranscriptPath())
     }
 
-    return this.sessionFile
+    return this.sessionFile!
   }
 
   /**
@@ -1922,6 +1980,206 @@ export async function resetSessionFilePointer() {
 }
 
 /**
+ * densable xZd — rename with EXDEV/EEXIST fallbacks (file or directory tree).
+ */
+async function renamePathWithCrossDeviceFallback(
+  from: string,
+  to: string,
+): Promise<void> {
+  try {
+    await fsRename(from, to)
+    return
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (
+      code === 'EEXIST' ||
+      code === 'EPERM' ||
+      code === 'EBUSY' ||
+      code === 'ENOTEMPTY'
+    ) {
+      await fsRm(to, { recursive: true, force: true }).catch(() => {})
+      await fsRename(from, to)
+      return
+    }
+    if (code === 'EXDEV') {
+      try {
+        await fsCopyFile(from, to)
+      } catch (copyErr) {
+        const copyCode = getErrnoCode(copyErr)
+        if (
+          copyCode === 'EISDIR' ||
+          copyCode === 'ENOTSUP' ||
+          copyCode === 'EPERM'
+        ) {
+          await copyDirRecursive(from, to)
+        } else {
+          throw copyErr
+        }
+      }
+      await fsRm(from, { recursive: true, force: true })
+      return
+    }
+    throw err
+  }
+}
+
+async function copyDirRecursive(from: string, to: string): Promise<void> {
+  await mkdir(to, { recursive: true, mode: 0o700 })
+  for (const ent of await readdir(from, { withFileTypes: true })) {
+    const src = join(from, ent.name)
+    const dst = join(to, ent.name)
+    if (ent.isDirectory()) {
+      await copyDirRecursive(src, dst)
+    } else {
+      await fsCopyFile(src, dst)
+    }
+  }
+}
+
+function getErrnoCode(err: unknown): string | undefined {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const c = (err as { code?: unknown }).code
+    if (typeof c === 'string') return c
+  }
+  return undefined
+}
+
+/**
+ * densable tryAppend (pdn) — append a string to a file; returns false on missing.
+ */
+async function tryAppendRaw(filePath: string, data: string): Promise<boolean> {
+  try {
+    await fsAppendFile(filePath, data, { mode: 0o600 })
+    recordTranscriptWriteSuccess(filePath)
+    return true
+  } catch (firstErr) {
+    if (isFsInaccessible(firstErr)) return false
+    try {
+      await mkdir(dirname(filePath), { recursive: true, mode: 0o700 })
+      await fsAppendFile(filePath, data, { mode: 0o600 })
+      recordTranscriptWriteSuccess(filePath)
+      return true
+    } catch (secondErr) {
+      if (isFsInaccessible(secondErr)) return false
+      throw secondErr
+    }
+  }
+}
+
+/**
+ * densable tNt — rehome the current session transcript under the project dir
+ * for the current originalCwd (after chdir / setOriginalCwd).
+ *
+ * Call sites: fVo (/cd, set_cwd), EnterWorktree, ExitWorktree.
+ * On failure densable rolls back cwd in fVo; callers must treat throw as fatal
+ * for the move when they need atomicity.
+ */
+export async function relocateSessionTranscript(): Promise<void> {
+  const sessionId = getSessionId()
+  const targetProjectDir = getProjectDir(getOriginalCwd())
+  const project = getProject()
+  const currentFile = project.sessionFile
+
+  // densable: no materialised file or persistence suppressed → just pin relocated cwd + project dir
+  if (currentFile === null || getPersistenceSuppressCause() !== null) {
+    project.currentSessionRelocatedCwd = getOriginalCwd()
+    switchSession(asSessionId(sessionId), targetProjectDir)
+    return
+  }
+
+  const targetFile = join(targetProjectDir, `${sessionId}.jsonl`)
+
+  // Same jsonl path — still may need a relocated stamp if cwd string changed
+  if (currentFile === targetFile) {
+    switchSession(asSessionId(sessionId), targetProjectDir)
+    const cwd = getOriginalCwd()
+    if (project.currentSessionRelocatedCwd !== cwd) {
+      project.currentSessionRelocatedCwd = cwd
+      const stamp: RelocatedEntry = {
+        type: 'relocated',
+        sessionId,
+        relocatedCwd: cwd,
+      }
+      project.beginTranscriptRelocation()
+      try {
+        await project.flush()
+        const line = jsonStringify(stamp) + '\n'
+        if (await tryAppendRaw(currentFile, line)) {
+          // best-effort stamp only
+        }
+      } catch (e) {
+        logForDebugging(
+          `relocateSessionTranscript: same-target relocated stamp failed: ${e}`,
+        )
+      } finally {
+        await project.endTranscriptRelocation()
+      }
+    }
+    return
+  }
+
+  // Real move: buffer mid-rehome writes, flush, rename jsonl + session sidecar dir
+  project.beginTranscriptRelocation()
+  try {
+    await project.flush()
+    await mkdir(targetProjectDir, { recursive: true, mode: 0o700 })
+
+    let jsonlMoved = true
+    try {
+      await renamePathWithCrossDeviceFallback(currentFile, targetFile)
+    } catch (e) {
+      if (isFsInaccessible(e)) {
+        logForDebugging(`relocateSessionTranscript: old file missing: ${e}`)
+        jsonlMoved = false
+      } else {
+        throw e
+      }
+    }
+
+    const oldSide = join(dirname(currentFile), sessionId)
+    const newSide = join(targetProjectDir, sessionId)
+    let sideMoved = true
+    try {
+      await renamePathWithCrossDeviceFallback(oldSide, newSide)
+    } catch (e) {
+      sideMoved = false
+      if (!isFsInaccessible(e)) {
+        logError(e)
+      }
+    }
+
+    project.setSessionFile(targetFile)
+    switchSession(asSessionId(sessionId), targetProjectDir)
+    project.currentSessionRelocatedCwd = getOriginalCwd()
+
+    if (jsonlMoved) {
+      try {
+        const stamp: RelocatedEntry = {
+          type: 'relocated',
+          sessionId,
+          relocatedCwd: project.currentSessionRelocatedCwd,
+        }
+        await tryAppendRaw(targetFile, jsonStringify(stamp) + '\n')
+      } catch (e) {
+        logForDebugging(
+          `relocateSessionTranscript: relocated stamp failed: ${e}`,
+        )
+      }
+    }
+
+    if (sideMoved) {
+      try {
+        await repointTaskOutputSymlinks(oldSide, newSide)
+      } catch (e) {
+        logError(e)
+      }
+    }
+  } finally {
+    await project.endTranscriptRelocation()
+  }
+}
+
+/**
  * Adopt the existing session file after --continue/--resume (non-fork).
  * Call after switchSession + resetSessionFilePointer + restoreSessionMetadata:
  * getTranscriptPath() now derives the resumed file's path from the switched
@@ -1944,7 +2202,7 @@ export async function resetSessionFilePointer() {
  */
 export function adoptResumedSessionFile(): void {
   const project = getProject()
-  project.sessionFile = getTranscriptPath()
+  project.setSessionFile(getTranscriptPath())
   project.reAppendSessionMetadata(true)
 }
 

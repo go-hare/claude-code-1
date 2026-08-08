@@ -1,0 +1,7 @@
+101647:[Request interrupted by user]
+101648:[Request interrupted by user for tool use]
+148084:[Request interrupted by user
+189101:^(?:\s*<[a-z][\w-]*[\s>]|\[Request interrupted by user[^\]]*\])
+288685:@internal For [Request interrupted by user] markers only: the API msg_* id that Esc cancelled.
+291556:`);return o>0&&n.slice(0,o+1).endsWith(QZc)}var sG="[Request interrupted by user]",GI="[Request interrupted by user for tool use]",hK="The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.",aG="API Error: Request was aborted.",per="Operation stopped by hook",XZc,QZc=` hook feedback:
+302466:   - User interrupts an action (e.g. \`[Request interrupted by user]\` appears after a command) \u2192 Agent immediately retries the same action or a close variant without explicit user approval \u2192 BLOCK

@@ -73,6 +73,12 @@ export type CronTask = {
    * REPL's. Never written to disk (teammate crons are always session-only).
    */
   agentId?: string
+  /**
+   * densable DaemonHub mGa toggle (IBt enabled flip).
+   * `false` → scheduler skips fire; omitted/true → enabled.
+   * Written to disk when explicitly set.
+   */
+  enabled?: boolean
 }
 
 type CronFile = { tasks: CronTask[] }
@@ -140,9 +146,16 @@ export async function readCronTasks(dir?: string): Promise<CronTask[]> {
         : {}),
       ...(t.recurring ? { recurring: true } : {}),
       ...(t.permanent ? { permanent: true } : {}),
+      // densable mGa: enabled defaults true when omitted
+      ...(t.enabled === false ? { enabled: false } : {}),
     })
   }
   return out
+}
+
+/** densable mGa status label — omitted/undefined treated as enabled. */
+export function isCronTaskEnabled(task: Pick<CronTask, 'enabled'>): boolean {
+  return task.enabled !== false
 }
 
 /**
@@ -295,6 +308,85 @@ export async function markCronTasksFired(
   }
   if (!changed) return
   await writeCronTasks(tasks, dir)
+}
+
+/**
+ * densable mGa Enable/Disable — flip `enabled` and persist.
+ * Returns the new enabled state, or null if id not found.
+ */
+export async function toggleCronTaskEnabled(
+  id: string,
+  dir?: string,
+): Promise<boolean | null> {
+  const tasks = await readCronTasks(dir)
+  const idx = tasks.findIndex(t => t.id === id)
+  if (idx < 0) return null
+  const current = isCronTaskEnabled(tasks[idx]!)
+  const next = !current
+  const prev = tasks[idx]!
+  if (next) {
+    // enabled: omit flag (default true on read)
+    const { enabled: _drop, ...rest } = prev
+    tasks[idx] = rest
+  } else {
+    tasks[idx] = { ...prev, enabled: false }
+  }
+  await writeCronTasks(tasks, dir)
+  return next
+}
+
+/**
+ * densable hGa save — upsert file-backed scheduled task by id.
+ * Preserves createdAt/lastFiredAt/permanent when updating.
+ */
+export async function upsertCronTask(
+  input: {
+    id: string
+    cron: string
+    prompt: string
+    recurring?: boolean
+    enabled?: boolean
+  },
+  dir?: string,
+): Promise<'created' | 'updated'> {
+  const tasks = await readCronTasks(dir)
+  const idx = tasks.findIndex(t => t.id === input.id)
+  if (idx >= 0) {
+    const prev = tasks[idx]!
+    tasks[idx] = {
+      ...prev,
+      cron: input.cron,
+      prompt: input.prompt,
+      ...(input.recurring !== undefined
+        ? input.recurring
+          ? { recurring: true }
+          : { recurring: undefined }
+        : {}),
+      ...(input.enabled === false
+        ? { enabled: false }
+        : input.enabled === true
+          ? { enabled: undefined }
+          : {}),
+    }
+    // clean optional flags
+    const cleaned = { ...tasks[idx]! }
+    if (cleaned.recurring !== true) delete cleaned.recurring
+    if (cleaned.enabled !== false) delete cleaned.enabled
+    tasks[idx] = cleaned
+    await writeCronTasks(tasks, dir)
+    return 'updated'
+  }
+  const task: CronTask = {
+    id: input.id,
+    cron: input.cron,
+    prompt: input.prompt,
+    createdAt: Date.now(),
+    ...(input.recurring ? { recurring: true } : {}),
+    ...(input.enabled === false ? { enabled: false } : {}),
+  }
+  tasks.push(task)
+  await writeCronTasks(tasks, dir)
+  return 'created'
 }
 
 /**

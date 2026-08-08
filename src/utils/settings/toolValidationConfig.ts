@@ -25,6 +25,7 @@ export type ToolValidationConfig = {
 
 export const TOOL_VALIDATION_CONFIG: ToolValidationConfig = {
   // File pattern tools (accept *.ts, src/**, etc.)
+  // densable 2.1.218 X9n.filePatternTools includes "Cd" for path-glob rules
   filePatternTools: [
     'Read',
     'Write',
@@ -32,6 +33,7 @@ export const TOOL_VALIDATION_CONFIG: ToolValidationConfig = {
     'Glob',
     'NotebookRead',
     'NotebookEdit',
+    'Cd',
   ],
 
   // Bash wildcard tools (accept * anywhere, and legacy command:* syntax)

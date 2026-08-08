@@ -3,11 +3,13 @@ import {
   type FileHandle,
   mkdir,
   open,
+  readdir,
+  readlink,
   stat,
   symlink,
   unlink,
 } from 'fs/promises'
-import { join } from 'path'
+import { join, sep } from 'path'
 import { getSessionId } from '../../bootstrap/state.js'
 import { getErrnoCode } from '../errors.js'
 import { readFileRange, tailFile } from '../fsOperations.js'
@@ -57,6 +59,52 @@ export function getTaskOutputDir(): string {
 /** Test helper — clears the memoized dir. */
 export function _resetTaskOutputDirForTest(): void {
   _taskOutputDir = undefined
+}
+
+/**
+ * densable hxg / repointTaskOutputSymlinks — after tNt renames the session
+ * sidecar dir (`…/<sessionId>/`), rewrite any `*.output` symlinks under the
+ * task-output dir that still point into the old sidecar prefix.
+ *
+ * No-op when the task-output dir has never been materialised (RIt === undefined).
+ */
+export async function repointTaskOutputSymlinks(
+  oldSideDir: string,
+  newSideDir: string,
+): Promise<void> {
+  if (_taskOutputDir === undefined) return
+  let entries: string[]
+  try {
+    entries = await readdir(_taskOutputDir)
+  } catch (e) {
+    const code = getErrnoCode(e)
+    if (code !== 'ENOENT') {
+      logError(e)
+    }
+    return
+  }
+  const oldPrefix = oldSideDir.endsWith(sep) ? oldSideDir : oldSideDir + sep
+  for (const name of entries) {
+    if (!name.endsWith('.output')) continue
+    const linkPath = join(_taskOutputDir, name)
+    let target: string
+    try {
+      target = await readlink(linkPath)
+    } catch {
+      continue
+    }
+    if (!target.startsWith(oldPrefix) && target !== oldSideDir) continue
+    const next =
+      target === oldSideDir
+        ? newSideDir
+        : newSideDir + target.slice(oldSideDir.length)
+    try {
+      await unlink(linkPath)
+      await symlink(next, linkPath)
+    } catch (e) {
+      logError(e)
+    }
+  }
 }
 
 /**

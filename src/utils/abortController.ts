@@ -49,6 +49,27 @@ export function isInterruptAbortReason(reason: unknown): boolean {
 }
 
 /**
+ * densable `m0e` / `Cxg` — abort reasons that must NOT yield
+ * `[Request interrupted by user]` (2.1.218 #12):
+ * - `interrupt`: submit-interrupt; the following user message is enough context
+ * - `refusal-fallback-edit`: model refusal → edit-prompt abort; not a user cancel
+ */
+const SUPPRESS_INTERRUPTION_MESSAGE_REASONS = new Set([
+  'interrupt',
+  'refusal-fallback-edit',
+])
+
+export function shouldSuppressInterruptionMessage(reason: unknown): boolean {
+  const msg = getAbortReasonMessage(reason)
+  return msg !== undefined && SUPPRESS_INTERRUPTION_MESSAGE_REASONS.has(msg)
+}
+
+/** densable `Ede` — shutdown abort → mark interrupt message for resume. */
+export function isShutdownAbortReason(reason: unknown): boolean {
+  return getAbortReasonMessage(reason) === 'shutdown'
+}
+
+/**
  * Creates an AbortController with proper event listener limits set.
  * This prevents MaxListenersExceededWarning when multiple listeners
  * are attached to the abort signal.

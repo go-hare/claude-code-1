@@ -205,6 +205,18 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
           <Text bold>{attachment.displayPath}</Text> in {attachment.ideName}
         </Line>
       );
+    case 'selected_lines_in_diff':
+      return (
+        <Line>
+          ⧉ Selected <Text bold>{attachment.lineCount}</Text> {attachment.lineCount === 1 ? 'line' : 'lines'} from diff
+          {attachment.filePath ? (
+            <>
+              {' '}
+              <Text bold>{attachment.filePath}</Text>
+            </>
+          ) : null}
+        </Line>
+      );
     case 'nested_memory':
       return (
         <Line>

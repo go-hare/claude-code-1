@@ -27,6 +27,11 @@ export type IDESelection = {
   lineStart?: number
   text?: string
   filePath?: string
+  /**
+   * densable 2.1.218: when `"diff"`, attachment path is `selected_lines_in_diff`
+   * (gIy short-circuit) rather than IDE file selection.
+   */
+  source?: 'diff' | string
 }
 
 // Define the selection changed notification schema

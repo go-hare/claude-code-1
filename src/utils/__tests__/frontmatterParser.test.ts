@@ -4,6 +4,9 @@ import {
   splitPathInFrontmatter,
   parsePositiveIntFromFrontmatter,
   parseBooleanFrontmatter,
+  tryParseBooleanFrontmatter,
+  formatFrontmatterBooleanError,
+  FRONTMATTER_BOOLEAN_HINT,
   parseShellFrontmatter,
 } from '../frontmatterParser'
 
@@ -145,6 +148,39 @@ describe('parseBooleanFrontmatter', () => {
   test('returns false for null/undefined', () => {
     expect(parseBooleanFrontmatter(null)).toBe(false)
     expect(parseBooleanFrontmatter(undefined)).toBe(false)
+  })
+
+  // densable 2.1.218: yes/no/on/off/1/0 (case-insensitive)
+  test('accepts yes/no/on/off/1/0 strings (218)', () => {
+    for (const t of ['yes', 'YES', 'on', 'On', '1']) {
+      expect(parseBooleanFrontmatter(t)).toBe(true)
+    }
+    for (const f of ['no', 'NO', 'off', 'Off', '0']) {
+      expect(parseBooleanFrontmatter(f)).toBe(false)
+    }
+  })
+
+  test('accepts numeric 1/0 (218)', () => {
+    expect(parseBooleanFrontmatter(1)).toBe(true)
+    expect(parseBooleanFrontmatter(0)).toBe(false)
+  })
+
+  test('trims whitespace around string literals (218)', () => {
+    expect(parseBooleanFrontmatter(' yes ')).toBe(true)
+    expect(parseBooleanFrontmatter(' off ')).toBe(false)
+  })
+
+  test('tryParseBooleanFrontmatter returns undefined for garbage (218)', () => {
+    expect(tryParseBooleanFrontmatter('maybe')).toBeUndefined()
+    expect(tryParseBooleanFrontmatter('')).toBeUndefined()
+    expect(tryParseBooleanFrontmatter(2)).toBeUndefined()
+  })
+
+  test('formatFrontmatterBooleanError matches densable SEA suffix (218)', () => {
+    expect(FRONTMATTER_BOOLEAN_HINT).toBe('true/false, 1/0, yes/no, on/off')
+    expect(formatFrontmatterBooleanError('maybe')).toBe(
+      '"maybe" is not a boolean (use true/false, 1/0, yes/no, on/off)',
+    )
   })
 })
 

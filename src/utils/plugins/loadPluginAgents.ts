@@ -18,6 +18,7 @@ import {
   parseFrontmatter,
   parsePositiveIntFromFrontmatter,
 } from '../frontmatterParser.js'
+import { validateAgentMarkdownName } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { getFsImplementation, isDuplicatePath } from '../fsOperations.js'
 import {
   parseAgentToolsFromFrontmatter,
@@ -84,6 +85,17 @@ async function loadAgentFromFile(
 
     const baseAgentName =
       (frontmatter.name as string) || basename(filePath).replace(/\.md$/, '')
+
+    // densable 2.1.218: bare agent name (before plugin namespacing) rejects ":" / leading "-"
+    if (typeof baseAgentName === 'string') {
+      const nameCheck = validateAgentMarkdownName(baseAgentName)
+      if (!nameCheck.ok) {
+        logForDebugging(
+          `Plugin agent file ${filePath} has invalid name '${baseAgentName}': ${nameCheck.error.replace(/^Invalid "name": /, '')}`,
+        )
+        return null
+      }
+    }
 
     // Apply namespace prefixing like we do for commands
     const nameParts = [pluginName, ...namespace, baseAgentName]

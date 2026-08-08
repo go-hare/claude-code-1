@@ -366,11 +366,42 @@ export function coerceDescriptionToString(
 }
 
 /**
- * Parse a boolean frontmatter value.
- * Only returns true for literal true or "true" string.
+ * densable 2.1.218 #35 — accepted skill/plugin frontmatter boolean literals.
+ * SEA error copy for invalid values: `" is not a boolean (use true/false, 1/0, yes/no, on/off)"`.
+ */
+export const FRONTMATTER_BOOLEAN_HINT =
+  'true/false, 1/0, yes/no, on/off' as const
+
+/** densable plugin/config invalid-boolean message suffix (includes leading quote). */
+export function formatFrontmatterBooleanError(raw: string): string {
+  return `"${raw}" is not a boolean (use ${FRONTMATTER_BOOLEAN_HINT})`
+}
+
+/**
+ * Parse a boolean frontmatter value (densable 2.1.218).
+ * Accepts true/false, 1/0, yes/no, on/off (case-insensitive strings),
+ * alongside boolean literals and numeric 1/0.
+ * Unrecognized values return false (callers that need strict validation use
+ * `tryParseBooleanFrontmatter` / `formatFrontmatterBooleanError`).
  */
 export function parseBooleanFrontmatter(value: unknown): boolean {
-  return value === true || value === 'true'
+  return tryParseBooleanFrontmatter(value) ?? false
+}
+
+/**
+ * Strict parse: recognized densable literals → boolean; else undefined.
+ */
+export function tryParseBooleanFrontmatter(
+  value: unknown,
+): boolean | undefined {
+  if (value === true || value === 1) return true
+  if (value === false || value === 0) return false
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === 'yes' || v === 'on' || v === '1') return true
+    if (v === 'false' || v === 'no' || v === 'off' || v === '0') return false
+  }
+  return undefined
 }
 
 /**

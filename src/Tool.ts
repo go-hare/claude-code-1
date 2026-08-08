@@ -327,6 +327,25 @@ export type ToolUseContext = {
    * so the auto-mode classifier can see concurrent siblings.
    */
   sameTurnToolUses?: Message[]
+  /**
+   * densable 2.1.218 #11 S8o sticky control plane → per-turn permission layers.
+   * Host engine Me appends model / permission_mode / max_thinking_tokens /
+   * flag_settings layers latched via setModel / setPermissionMode / etc.
+   * Consumers (bn/qO/_Kr/obs) walk last-wins; optional so non-Host paths ignore.
+   */
+  permissionLayers?: Array<
+    | { kind: 'model'; mainLoopModel: string }
+    | { kind: 'permission_mode'; mode: string }
+    | {
+        kind: 'max_thinking_tokens'
+        maxThinkingTokens: number | null | undefined
+      }
+    | { kind: 'flag_settings'; settings: Record<string, unknown> }
+    | { kind: 'effort'; effort: unknown }
+    | { kind: 'working_directory'; directory: string }
+    | { kind: 'allowed_tools'; allowedTools: unknown }
+    | { kind: string; [key: string]: unknown }
+  >
   fileReadingLimits?: {
     maxTokens?: number
     maxSizeBytes?: number

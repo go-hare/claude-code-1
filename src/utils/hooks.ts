@@ -159,6 +159,7 @@ import {
   type SessionDerivedHookMatcher,
   type FunctionHook,
 } from './hooks/sessionHooks.js'
+import { getMainThreadAgentHooks } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
 import { jsonStringify, jsonParse } from './slowOperations.js'
 import { isEnvTruthy } from './envUtils.js'
@@ -1791,6 +1792,17 @@ function getHooksConfig(
     }
   }
 
+  // densable fne(): main-thread agent frontmatter hooks (QEt already trust-gated).
+  // Only on main session path — subagents register via sessionHooks instead.
+  if (!managedOnly) {
+    const mainThreadHooks = getMainThreadAgentHooks()?.[hookEvent]
+    if (mainThreadHooks) {
+      for (const matcher of mainThreadHooks) {
+        hooks.push(matcher)
+      }
+    }
+  }
+
   // Merge session hooks for the current session only
   // Function hooks (like structured output enforcement) must be scoped to their session
   // to prevent hooks from one agent leaking to another (e.g., verification agent to main agent)
@@ -1851,6 +1863,9 @@ function hasHookForEvent(
   if (snap && snap.length > 0) return true
   const reg = getRegisteredHooks()?.[hookEvent]
   if (reg && reg.length > 0) return true
+  // densable fne — main-thread agent hooks
+  const mt = getMainThreadAgentHooks()?.[hookEvent]
+  if (mt && mt.length > 0) return true
   if (appState?.sessionHooks.get(sessionId)?.hooks[hookEvent]) return true
   return false
 }

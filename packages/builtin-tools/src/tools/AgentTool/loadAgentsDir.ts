@@ -415,6 +415,30 @@ export function clearAgentDefinitionsCache(): void {
 }
 
 /**
+ * densable 2.1.218: agent markdown `name` must not start with "-" or contain
+ * ":" (reserved for plugin namespacing). NFKC-normalize before checks.
+ */
+export function validateAgentMarkdownName(
+  name: string,
+): { ok: true; name: string } | { ok: false; error: string } {
+  const normalized = name.normalize('NFKC')
+  if (normalized.startsWith('-')) {
+    return {
+      ok: false,
+      error: 'Invalid "name": names must not start with "-"',
+    }
+  }
+  if (normalized.includes(':')) {
+    return {
+      ok: false,
+      error:
+        'Invalid "name": names must not contain ":" (reserved for plugin namespacing)',
+    }
+  }
+  return { ok: true, name: normalized }
+}
+
+/**
  * Helper to determine the specific parsing error for an agent file
  */
 function getParseError(frontmatter: Record<string, unknown>): string {
@@ -423,6 +447,11 @@ function getParseError(frontmatter: Record<string, unknown>): string {
 
   if (!agentType || typeof agentType !== 'string') {
     return 'Missing required "name" field in frontmatter'
+  }
+
+  const nameCheck = validateAgentMarkdownName(agentType)
+  if (!nameCheck.ok) {
+    return nameCheck.error
   }
 
   if (!description || typeof description !== 'string') {
@@ -575,6 +604,15 @@ export function parseAgentFromMarkdown(
     if (!agentType || typeof agentType !== 'string') {
       return null
     }
+    // densable 2.1.218: reject ":" (plugin namespacing) and leading "-"
+    const nameCheck = validateAgentMarkdownName(agentType)
+    if (!nameCheck.ok) {
+      logForDebugging(
+        `Agent file ${filePath} has invalid name '${agentType}': ${nameCheck.error.replace(/^Invalid "name": /, '')}`,
+      )
+      return null
+    }
+    const resolvedAgentType = nameCheck.name
     if (!whenToUse || typeof whenToUse !== 'string') {
       logForDebugging(
         `Agent file ${filePath} is missing required 'description' in frontmatter`,
@@ -729,7 +767,7 @@ export function parseAgentFromMarkdown(
     }
 
     // Parse hooks from frontmatter
-    const hooks = parseHooksFromFrontmatter(frontmatter, agentType)
+    const hooks = parseHooksFromFrontmatter(frontmatter, resolvedAgentType)
 
     // Official observer / observerMessage (experimental observer agents)
     const observerRaw = frontmatter['observer']
@@ -746,7 +784,7 @@ export function parseAgentFromMarkdown(
     const systemPrompt = content.trim()
     const agentDef: CustomAgentDefinition = {
       baseDir,
-      agentType: agentType,
+      agentType: resolvedAgentType,
       whenToUse: whenToUse,
       ...(tools !== undefined ? { tools } : {}),
       ...(disallowedTools !== undefined ? { disallowedTools } : {}),
@@ -758,7 +796,7 @@ export function parseAgentFromMarkdown(
       ...(hooks !== undefined ? { hooks } : {}),
       getSystemPrompt: () => {
         if (isAutoMemoryEnabled() && memory) {
-          const memoryPrompt = loadAgentMemoryPrompt(agentType, memory)
+          const memoryPrompt = loadAgentMemoryPrompt(resolvedAgentType, memory)
           return systemPrompt + '\n\n' + memoryPrompt
         }
         return systemPrompt

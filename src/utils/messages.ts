@@ -181,8 +181,13 @@ import {
   isPlanModeInterviewPhaseEnabled,
 } from './planModeV2.js'
 import { shouldShowSettingsHint } from './hideSettingsHint.js'
-import { escapeRegExp } from './stringUtils.js'
+import {
+  asStringArray,
+  escapeRegExp,
+  truncateIdeSelectionContent,
+} from './stringUtils.js'
 import { isTodoV2Enabled } from './tasks.js'
+import { repairDoubleEscapedUnicode } from './toolInputUnicodeRepair.js'
 
 // Lazy import to avoid circular dependency (teammateMailbox -> teammate -> ... -> messages)
 function getTeammateMailbox(): typeof import('./teammateMailbox.js') {
@@ -533,6 +538,8 @@ export function createUserMessage({
   sourceToolAssistantUUID,
   permissionMode,
   origin,
+  interruptedMessageId,
+  interruptedByShutdown,
 }: {
   content: string | ContentBlockParam[]
   isMeta?: true
@@ -559,6 +566,10 @@ export function createUserMessage({
   }
   // Provenance of this message. undefined = human (keyboard).
   origin?: MessageOrigin
+  /** densable Tse/jr — Esc-cancelled API msg_* id on interrupt markers */
+  interruptedMessageId?: string
+  /** densable Ede — shutdown abort path */
+  interruptedByShutdown?: boolean
 }): UserMessage {
   const m: UserMessage = {
     type: 'user',
@@ -579,6 +590,8 @@ export function createUserMessage({
     sourceToolAssistantUUID,
     permissionMode,
     origin,
+    interruptedMessageId,
+    interruptedByShutdown,
   }
   return m
 }
@@ -603,10 +616,19 @@ export function prepareUserContent({
   ]
 }
 
+/**
+ * densable `Tse` — synthetic `[Request interrupted by user]` marker.
+ * Callers must gate with `shouldSuppressInterruptionMessage` (densable `m0e`/`Cxg`)
+ * so submit-interrupt and refusal-fallback-edit do not inject a spurious line.
+ */
 export function createUserInterruptionMessage({
   toolUse = false,
+  interruptedMessageId,
+  interruptedByShutdown,
 }: {
   toolUse?: boolean
+  interruptedMessageId?: string
+  interruptedByShutdown?: boolean
 }): UserMessage {
   const content = toolUse ? INTERRUPT_MESSAGE_FOR_TOOL_USE : INTERRUPT_MESSAGE
 
@@ -617,6 +639,8 @@ export function createUserInterruptionMessage({
         text: content,
       },
     ],
+    interruptedMessageId,
+    interruptedByShutdown,
   })
 }
 
@@ -3247,8 +3271,14 @@ export function normalizeContentFromAPI(
           normalizedInput = contentBlock.input
         }
 
-        // Then apply tool-specific corrections
+        // densable 2.1.218 #3 jYd: double-escaped unicode repair with Windows
+        // path skip (Cky) BEFORE tool-specific normalizeToolInput (UYd).
         if (typeof normalizedInput === 'object' && normalizedInput !== null) {
+          try {
+            normalizedInput = repairDoubleEscapedUnicode(normalizedInput)
+          } catch (error) {
+            logError(new Error('Error repairing tool input unicode: ' + error))
+          }
           const tool = findToolByName(tools, contentBlock.name)
           if (tool) {
             try {
@@ -4263,16 +4293,24 @@ Read the team config to discover your teammates' names. Check the task list peri
       ])
     }
     case 'selected_lines_in_ide': {
-      const maxSelectionLength = 2000
-      const content =
-        attachment.content.length > maxSelectionLength
-          ? attachment.content.substring(0, maxSelectionLength) +
-            '\n... (truncated)'
-          : attachment.content
+      // densable 2.1.218 #10 vtp: Pl/truncateCodeUnitsSafe @ Etp=2000 (not raw substring)
+      const content = truncateIdeSelectionContent(attachment.content)
 
       return wrapMessagesInSystemReminder([
         createUserMessage({
           content: `The user selected the lines ${attachment.lineStart} to ${attachment.lineEnd} from ${attachment.filename}:\n${content}\n\nThis may or may not be related to the current task.`,
+          isMeta: true,
+        }),
+      ])
+    }
+    case 'selected_lines_in_diff': {
+      // densable Ctp selected_lines_in_diff + same vtp trunc
+      const content = truncateIdeSelectionContent(attachment.content)
+      const lineWord = attachment.lineCount === 1 ? 'line' : 'lines'
+      const inPath = attachment.filePath ? ` (in ${attachment.filePath})` : ''
+      return wrapMessagesInSystemReminder([
+        createUserMessage({
+          content: `The user selected the following ${attachment.lineCount} ${lineWord} from the diff view${inPath}:\n${content}\n\nThis may or may not be related to the current task.`,
           isMeta: true,
         }),
       ])
@@ -4873,32 +4911,40 @@ You have exited auto mode. The user may now want to interact more directly. You 
       ])
     }
     case 'deferred_tools_delta': {
+      // densable q0: coerce string[] fields before .length/.join (218 #24 resume safety)
+      const addedLines = asStringArray(attachment.addedLines)
+      const removedNames = asStringArray(attachment.removedNames)
       const parts: string[] = []
-      if (attachment.addedLines.length > 0) {
+      if (addedLines.length > 0) {
         parts.push(
-          `The following deferred tools are now available via SearchExtraTools:\n${attachment.addedLines.join('\n')}`,
+          `The following deferred tools are now available via SearchExtraTools:\n${addedLines.join('\n')}`,
         )
       }
-      if (attachment.removedNames.length > 0) {
+      if (removedNames.length > 0) {
         parts.push(
-          `The following deferred tools are no longer available (their MCP server disconnected). Do not search for them — SearchExtraTools will return no match:\n${attachment.removedNames.join('\n')}`,
+          `The following deferred tools are no longer available (their MCP server disconnected). Do not search for them — SearchExtraTools will return no match:\n${removedNames.join('\n')}`,
         )
       }
+      // densable: empty parts → return []
+      if (parts.length === 0) return []
       return wrapMessagesInSystemReminder([
         createUserMessage({ content: parts.join('\n\n'), isMeta: true }),
       ])
     }
     case 'agent_listing_delta': {
+      // densable q0 on addedLines/addedTypes/removedTypes
+      const addedLines = asStringArray(attachment.addedLines)
+      const removedTypes = asStringArray(attachment.removedTypes)
       const parts: string[] = []
-      if (attachment.addedLines.length > 0) {
+      if (addedLines.length > 0) {
         const header = attachment.isInitial
           ? 'Available agent types for the Agent tool:'
           : 'New agent types are now available for the Agent tool:'
-        parts.push(`${header}\n${attachment.addedLines.join('\n')}`)
+        parts.push(`${header}\n${addedLines.join('\n')}`)
       }
-      if (attachment.removedTypes.length > 0) {
+      if (removedTypes.length > 0) {
         parts.push(
-          `The following agent types are no longer available:\n${attachment.removedTypes.map(t => `- ${t}`).join('\n')}`,
+          `The following agent types are no longer available:\n${removedTypes.map(t => `- ${t}`).join('\n')}`,
         )
       }
       if (attachment.isInitial && attachment.showConcurrencyNote) {
@@ -4906,22 +4952,27 @@ You have exited auto mode. The user may now want to interact more directly. You 
           `Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses.`,
         )
       }
+      if (parts.length === 0) return []
       return wrapMessagesInSystemReminder([
         createUserMessage({ content: parts.join('\n\n'), isMeta: true }),
       ])
     }
     case 'mcp_instructions_delta': {
+      // densable q0 on addedBlocks/addedNames/removedNames
+      const addedBlocks = asStringArray(attachment.addedBlocks)
+      const removedNames = asStringArray(attachment.removedNames)
       const parts: string[] = []
-      if (attachment.addedBlocks.length > 0) {
+      if (addedBlocks.length > 0) {
         parts.push(
-          `# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n${attachment.addedBlocks.join('\n\n')}`,
+          `# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n${addedBlocks.join('\n\n')}`,
         )
       }
-      if (attachment.removedNames.length > 0) {
+      if (removedNames.length > 0) {
         parts.push(
-          `The following MCP servers have disconnected. Their instructions above no longer apply:\n${attachment.removedNames.join('\n')}`,
+          `The following MCP servers have disconnected. Their instructions above no longer apply:\n${removedNames.join('\n')}`,
         )
       }
+      if (parts.length === 0) return []
       return wrapMessagesInSystemReminder([
         createUserMessage({ content: parts.join('\n\n'), isMeta: true }),
       ])

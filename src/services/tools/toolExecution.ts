@@ -708,10 +708,13 @@ async function checkPermissionsAndCallTool(
     parsedInput.data &&
     'command' in parsedInput.data
   ) {
-    const appState = toolUseContext.getAppState()
+    // densable bn: sticky permission layers for speculative classifier mode
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getToolPermissionContextFromLayers } =
+      require('../../engine/permissionLayerReaders.js') as typeof import('../../engine/permissionLayerReaders.js')
     startSpeculativeClassifierCheck(
       (parsedInput.data as BashToolInput).command,
-      appState.toolPermissionContext,
+      getToolPermissionContextFromLayers(toolUseContext),
       toolUseContext.abortController.signal,
       toolUseContext.options.isNonInteractiveSession,
     )
@@ -925,7 +928,11 @@ async function checkPermissionsAndCallTool(
 
   // Check whether we have permission to use the tool,
   // and ask the user for permission if we don't
-  const permissionMode = toolUseContext.getAppState().toolPermissionContext.mode
+  // densable bn: sticky permission_mode layers
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getToolPermissionContextFromLayers: bnPermissionContext } =
+    require('../../engine/permissionLayerReaders.js') as typeof import('../../engine/permissionLayerReaders.js')
+  const permissionMode = bnPermissionContext(toolUseContext).mode
   const permissionStart = Date.now()
 
   const resolved = await resolveHookPermissionDecision(

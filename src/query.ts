@@ -47,6 +47,10 @@ import {
 } from './services/api/errors.js'
 import { logAntError, logForDebugging } from './utils/debug.js'
 import {
+  isShutdownAbortReason,
+  shouldSuppressInterruptionMessage,
+} from './utils/abortController.js'
+import {
   createUserMessage,
   createUserInterruptionMessage,
   normalizeMessagesForAPI,
@@ -991,10 +995,25 @@ async function* queryLoop(
       : null
 
     const appState = toolUseContext.getAppState()
-    const permissionMode = appState.toolPermissionContext.mode
+    // densable bn/qO: sticky permissionLayers last-wins over appState/options
+    const {
+      getToolPermissionContextFromLayers,
+      getMainLoopModelFromLayers,
+      getThinkingConfigFromLayers,
+      getEffortValueFromLayers,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./engine/permissionLayerReaders.js') as typeof import('./engine/permissionLayerReaders.js')
+    const layeredPermissionContext =
+      getToolPermissionContextFromLayers(toolUseContext)
+    const layeredMainLoopModel = getMainLoopModelFromLayers(toolUseContext)
+    const layeredThinkingConfig = getThinkingConfigFromLayers(toolUseContext)
+    // densable bb — last effort layer wins over appState.effortValue
+    const layeredEffortValue = getEffortValueFromLayers(toolUseContext)
+    const permissionMode = layeredPermissionContext.mode
     let currentModel = getRuntimeMainLoopModel({
       permissionMode,
-      mainLoopModel: toolUseContext.options.mainLoopModel,
+      mainLoopModel: layeredMainLoopModel,
       exceeds200kTokens:
         permissionMode === 'plan' &&
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
@@ -1149,7 +1168,7 @@ async function* queryLoop(
     ) {
       const { isAtBlockingLimit } = calculateTokenWarningState(
         tokenCountWithEstimation(messagesForQuery) - snipTokensFreed,
-        toolUseContext.options.mainLoopModel,
+        layeredMainLoopModel,
       )
       if (isAtBlockingLimit) {
         yield createAssistantAPIErrorMessage({
@@ -1165,7 +1184,7 @@ async function* queryLoop(
     // (without the autocompact buffer) to avoid double-reserving with
     // getAutoCompactThreshold which already subtracts buffer.
     if (!compactionResult && isAutoCompactEnabled()) {
-      const model = toolUseContext.options.mainLoopModel
+      const model = layeredMainLoopModel
       const currentTokens =
         tokenCountWithEstimation(messagesForQuery) - snipTokensFreed
       const estimatedGrowth = estimateMaxTurnGrowth(model)
@@ -1214,13 +1233,13 @@ async function* queryLoop(
           for await (const message of deps.callModel({
             messages: prependUserContext(messagesForQuery, userContext),
             systemPrompt: fullSystemPrompt,
-            thinkingConfig: toolUseContext.options.thinkingConfig,
+            thinkingConfig: layeredThinkingConfig,
             tools: toolUseContext.options.tools,
             signal: toolUseContext.abortController.signal,
             options: {
               async getToolPermissionContext() {
-                const appState = toolUseContext.getAppState()
-                return appState.toolPermissionContext
+                // densable bn — sticky layers on each permission re-read
+                return getToolPermissionContextFromLayers(toolUseContext)
               },
               model: currentModel,
               ...(config.gates.fastModeEnabled && {
@@ -1291,7 +1310,7 @@ async function* queryLoop(
                 c => c.type === 'pending',
               ),
               queryTracking,
-              effortValue: appState.effortValue,
+              effortValue: layeredEffortValue,
               advisorModel: appState.advisorModel,
               skipCacheWrite,
               agentId: toolUseContext.agentId,
@@ -1876,11 +1895,19 @@ async function* queryLoop(
         }
       }
 
-      // Skip the interruption message for submit-interrupts — the queued
-      // user message that follows provides sufficient context.
-      if (toolUseContext.abortController.signal.reason !== 'interrupt') {
+      // densable m0e/Cxg: skip interrupt + refusal-fallback-edit (2.1.218 #12)
+      if (
+        !shouldSuppressInterruptionMessage(
+          toolUseContext.abortController.signal.reason,
+        )
+      ) {
         yield createUserInterruptionMessage({
           toolUse: false,
+          interruptedByShutdown: isShutdownAbortReason(
+            toolUseContext.abortController.signal.reason,
+          )
+            ? true
+            : undefined,
         })
       }
       return { reason: 'aborted_streaming' }
@@ -2418,11 +2445,21 @@ async function* queryLoop(
           // Failures are silent — this is dogfooding cleanup, not critical path
         }
       }
-      // Skip the interruption message for submit-interrupts — the queued
-      // user message that follows provides sufficient context.
-      if (toolUseContext.abortController.signal.reason !== 'interrupt') {
+      // densable m0e/Cxg: skip interrupt + refusal-fallback-edit (2.1.218 #12).
+      // Unpaired tool_use is already closed via yieldMissingToolResultBlocks /
+      // streamingToolExecutor.getRemainingResults above (or ensureToolResultPairing).
+      if (
+        !shouldSuppressInterruptionMessage(
+          toolUseContext.abortController.signal.reason,
+        )
+      ) {
         yield createUserInterruptionMessage({
           toolUse: true,
+          interruptedByShutdown: isShutdownAbortReason(
+            toolUseContext.abortController.signal.reason,
+          )
+            ? true
+            : undefined,
         })
       }
       // Check maxTurns before returning when aborted

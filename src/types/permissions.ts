@@ -322,6 +322,17 @@ export type PermissionDecisionReason =
       // shell configs) — the classifier can see context and decide. False
       // for Windows path bypass attempts and cross-machine bridge messages.
       classifierApprovable: boolean
+      /**
+       * densable 2.1.218 circuitBreaker tag (Ize/Lon/yat).
+       * When set and auto mode is active, non-classifierApprovable safety
+       * checks are still sent to the auto-mode classifier instead of
+       * opening a permission dialog (`W9` + `ctn` exception).
+       * Values: dangerousRemoval | backgroundOperator | suspiciousWindowsPath
+       */
+      circuitBreaker?:
+        | 'dangerousRemoval'
+        | 'backgroundOperator'
+        | 'suspiciousWindowsPath'
     }
   | {
       type: 'other'

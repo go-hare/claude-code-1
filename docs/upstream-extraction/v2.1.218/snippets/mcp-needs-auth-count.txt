@@ -1,0 +1,72 @@
+# densable 2.1.218 #19 — MCP needs-auth startup count (Kka/DYo/fr)
+
+Source: /tmp/official-218/plat/package/claude
+
+## Official changelog
+
+> Fixed the "N MCP servers need authentication" startup notice over-counting
+> claude.ai connectors that aren't connected in claude.ai
+
+## densable helpers
+
+```js
+// fr — count true
+function fr(e,t){let r=0;for(let n of e)r+=+!!t(n);return r}
+
+// kee (MCP) — unconfigured failures
+function kee(e){return e.type==="failed"&&e.errorCode==="UNCONFIGURED"}
+
+// DYo — should count this client for needs-auth notice
+function DYo(e,t,r){
+  if(kee(e))return!1;
+  if(e.config.type==="claudeai-proxy"){
+    // ineligible in claude.ai and not session-connected → skip
+    if(e.config.eligible===!1&&!r(e.name))return!1;
+    // only count if ever-connected (Vsr)
+    return t(e.name)
+  }
+  return e.config.type!=="sse-ide"&&e.config.type!=="ws-ide"
+}
+
+// Kka — needs-auth count
+function Kka(e,t,r){return fr(e,(n)=>n.type==="needs-auth"&&DYo(n,t,r))}
+
+// AppState selector
+function _Ub(aFk){return Kka(aFk.mcp.clients,Vsr,Gsr)}
+
+// Vsr — persisted ever-connected
+function Vsr(e){return(xt().claudeAiMcpEverConnected??[]).includes(e)}
+
+// Gsr / Wsr / Pgs — session-connected set
+function Wsr(e){Pgs.add(e),pr((t)=>{...claudeAiMcpEverConnected...})}
+function Gsr(e){return Pgs.has(e)}
+function $9u(){Pgs.clear()}
+```
+
+## Logo warning
+
+```js
+id:"mcp-needs-auth",
+isActive:(e)=>e.mcpNeedsAuthCount>0,
+render:(e)=>... e.mcpNeedsAuthCount," MCP ",St(...)," authentication · run /mcp"
+// ZNk=Ty(_Ub)??0 → mcpNeedsAuthCount:ZNk
+```
+
+## Fetch plumbs eligible
+
+```js
+u[m]={type:"claudeai-proxy",...,eligible:p.eligible,ineligibleReason:p.eligibility_reason}
+```
+
+## Local mapping
+
+| densable | go-hare |
+| -------- | ------- |
+| `DYo` | `shouldCountMcpClientForAuthNotice` |
+| `Kka` / `_Ub` | `countMcpNeedsAuth` |
+| `Vsr` | `hasClaudeAiMcpEverConnected` |
+| `Gsr` / `Pgs` | `hasClaudeAiMcpSessionConnected` / session Set |
+| `Wsr` | `markClaudeAiMcpConnected` (also adds session) |
+| `eligible` | `McpClaudeAIProxyServerConfig.eligible` from API |
+
+Wired: `useMcpConnectivityStatus` filters needs-auth + failed with DYo.

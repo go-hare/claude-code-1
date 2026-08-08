@@ -515,11 +515,27 @@ export function useReplBridge(
               handleRemoteInterrupt(abortControllerRef.current);
             },
             onSetModel(model) {
+              // densable 2.1.218 #31 — Remote Control set_model applies uU/dU
+              // (remote branch: keep prev only if model still supports fast).
               const resolved = model === 'default' ? null : (model ?? null);
               setMainLoopModelOverride(resolved);
+              // Lazy import keeps bootstrap isolation for bridge hook module graph.
+              const { applyFastModeOnModelSwitch, clearFastModeCooldown, isFastModeEnabled } =
+                require('../utils/fastMode.js') as typeof import('../utils/fastMode.js');
+              if (isFastModeEnabled()) {
+                clearFastModeCooldown();
+              }
               setAppState(prev => {
-                if (prev.mainLoopModelForSession === resolved) return prev;
-                return { ...prev, mainLoopModelForSession: resolved };
+                const applied = applyFastModeOnModelSwitch(resolved, prev.fastMode, {
+                  remoteSession: true,
+                });
+                const modelSame = prev.mainLoopModelForSession === resolved;
+                if (modelSame && !applied.changed) return prev;
+                return {
+                  ...prev,
+                  mainLoopModelForSession: resolved,
+                  ...(applied.changed ? { fastMode: applied.nextFastMode } : null),
+                };
               });
             },
             onSetMaxThinkingTokens(maxTokens) {

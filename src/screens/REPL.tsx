@@ -280,6 +280,11 @@ import type {
   PartialCompactDirection,
 } from '../types/message.js';
 import { query } from '../query.js';
+import type { QueryParams } from '../query.js';
+import type { Terminal as QueryTerminal } from '../query/transitions.js';
+import { createHostEngine, type HostEngine } from '../engine/hostEngine.js';
+import { runHostEngineTurn } from '../engine/hostEngineTurn.js';
+import { Stream } from '../utils/stream.js';
 import { mergeClients, useMergedClients } from '../hooks/useMergedClients.js';
 import { getQuerySourceForREPL } from '../utils/promptCategory.js';
 import { useMergedTools } from '../hooks/useMergedTools.js';
@@ -337,7 +342,7 @@ import {
   reconstructContentReplacementState,
   type ContentReplacementRecord,
 } from '../utils/toolResultStorage.js';
-import { partialCompactConversation } from '../services/compact/compact.js';
+import { buildPartialPostCompactMessages, partialCompactConversation } from '../services/compact/compact.js';
 import type { LogOption } from '../types/logs.js';
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js';
 import {
@@ -901,6 +906,15 @@ export type Props = {
    * resume (compact/continue choices). Enqueued as priority next, meta.
    */
   initialAutoContinuePrompt?: string;
+  /**
+   * densable 2.1.218 LHr/Jul Host engine (S8o). When omitted, REPL self-creates
+   * via densable `P??S8o` and closes on unmount when self-owned.
+   */
+  engine?: HostEngine;
+  /** densable onCommandsChange — Host/CCR command list push. */
+  onCommandsChange?: (commands: Command[]) => void;
+  /** densable onQueryParamsChange — observe prepared turn params (ji). */
+  onQueryParamsChange?: (params: QueryParams) => void;
 };
 
 export type Screen = 'prompt' | 'transcript';
@@ -949,8 +963,102 @@ export function REPL({
   thinkingConfig,
   onOpenAgents,
   initialAutoContinuePrompt,
+  engine: externalHostEngine,
+  onCommandsChange,
+  onQueryParamsChange,
 }: Props): React.ReactNode {
   const isRemoteSession = !!remoteSessionConfig;
+
+  // densable Jul/LHr Host engine: P??S8o + unmount close when self-owned.
+  // Turn body (Sse) → query(); turn pump (HWf) → runHostEngineTurn.
+  const hostEngineOwned = externalHostEngine === undefined;
+  const hostInputRef = useRef<Stream<Record<string, unknown>> | null>(null);
+  const pendingQueryParamsRef = useRef<QueryParams[]>([]);
+  const onQueryParamsChangeRef = useRef(onQueryParamsChange);
+  onQueryParamsChangeRef.current = onQueryParamsChange;
+  const [hostEngine] = useState<HostEngine>(() => {
+    if (externalHostEngine) return externalHostEngine;
+    return createHostEngine<QueryParams>({
+      sessionId: getSessionId(),
+      prepareTurn: async () => {
+        const next = pendingQueryParamsRef.current.shift();
+        if (!next) {
+          throw new Error('[engine] prepareTurn: no pending query params');
+        }
+        onQueryParamsChangeRef.current?.(next);
+        return next;
+      },
+      runTurn: async function* (prepared, abortController) {
+        // densable Sse: engine AC is turn authority; link REPL AC if distinct.
+        const externalAc = prepared.toolUseContext.abortController;
+        if (externalAc && externalAc !== abortController) {
+          if (externalAc.signal.aborted) {
+            abortController.abort(externalAc.signal.reason);
+          } else {
+            externalAc.signal.addEventListener(
+              'abort',
+              () => {
+                if (!abortController.signal.aborted) {
+                  abortController.abort(externalAc.signal.reason);
+                }
+              },
+              { once: true },
+            );
+          }
+        }
+        const toolUseContext = {
+          ...prepared.toolUseContext,
+          abortController,
+        };
+        let terminal: QueryTerminal | undefined;
+        let thrown: unknown;
+        try {
+          terminal = yield* query({
+            ...prepared,
+            toolUseContext,
+          });
+        } catch (err) {
+          thrown = err;
+        }
+        // densable HWf breaks on type:"result" — always emit terminal envelope.
+        const reason = terminal?.reason ?? (thrown !== undefined ? 'api_error' : 'completed');
+        yield {
+          type: 'result',
+          subtype: reason === 'completed' ? 'success' : 'error',
+          is_error: reason !== 'completed',
+          result: reason,
+          ...(thrown !== undefined
+            ? {
+                errors: [thrown instanceof Error ? thrown.message : String(thrown)],
+              }
+            : {}),
+        };
+        if (thrown !== undefined) {
+          throw thrown;
+        }
+        return terminal;
+      },
+    });
+  });
+  useEffect(() => {
+    return () => {
+      if (!hostEngineOwned) return;
+      // Drop any unconsumed HWf turn params so a closed engine cannot
+      // leave stale prepareTurn state for a future remount/external host.
+      pendingQueryParamsRef.current = [];
+      try {
+        hostInputRef.current?.done();
+      } catch {
+        // stream may already be closed
+      }
+      hostInputRef.current = null;
+      try {
+        hostEngine.close();
+      } catch {
+        // closed-gate is idempotent; swallow unmount races
+      }
+    };
+  }, [hostEngine, hostEngineOwned]);
 
   // Env-var gates hoisted to mount-time — densable helpers + isEnvTruthy fall
   // back; these were on the render path (hot during PageUp spam).
@@ -1272,6 +1380,11 @@ export function REPL({
   // Filter out all commands if disableSlashCommands is true
   const commands = useMemo(() => (disableSlashCommands ? [] : mergedCommands), [disableSlashCommands, mergedCommands]);
 
+  // densable onCommandsChange — Host/CCR command list push when the set mutates.
+  useEffect(() => {
+    onCommandsChange?.(commands);
+  }, [commands, onCommandsChange]);
+
   useIdeLogging(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients);
   useIdeSelection(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients, setIDESelection);
 
@@ -1388,12 +1501,14 @@ export function REPL({
   const [userMessagePending, setUserMessagePending] = React.useState(false);
   const userMessagePendingRef = React.useRef(false);
 
-  // Wall-clock time tracking refs for accurate elapsed time calculation
+  // densable 2.1.218 #18: monotonic clock for turn duration (performance.now),
+  // not Date.now wall clock — NTP / clock adjustments must not yield negative
+  // or wildly incorrect "Done in Ns" lines.
   const loadingStartTimeRef = React.useRef<number>(0);
   const totalPausedMsRef = React.useRef(0);
   const pauseStartTimeRef = React.useRef<number | null>(null);
   const resetTimingRefs = React.useCallback(() => {
-    loadingStartTimeRef.current = Date.now();
+    loadingStartTimeRef.current = performance.now();
     totalPausedMsRef.current = 0;
     pauseStartTimeRef.current = null;
   }, []);
@@ -2470,7 +2585,8 @@ export function REPL({
   // Show deferred turn duration message once all swarm teammates finish
   useEffect(() => {
     if (!hasRunningTeammates && swarmStartTimeRef.current !== null) {
-      const totalMs = Date.now() - swarmStartTimeRef.current;
+      // densable #18: swarmStartTimeRef is set from loadingStartTimeRef (monotonic)
+      const totalMs = performance.now() - swarmStartTimeRef.current;
       const deferredBudget = swarmBudgetInfoRef.current;
       swarmStartTimeRef.current = null;
       swarmBudgetInfoRef.current = undefined;
@@ -3222,7 +3338,8 @@ export function REPL({
     if (!isLoading) return;
 
     const isPaused = focusedInputDialog === 'tool-permission';
-    const now = Date.now();
+    // densable #18: same monotonic clock as loadingStartTimeRef
+    const now = performance.now();
 
     if (isPaused && pauseStartTimeRef.current === null) {
       // Just entered pause state - record the exact moment
@@ -4292,7 +4409,8 @@ export function REPL({
       resetTurnToolDuration();
       resetTurnClassifierDuration();
 
-      for await (const event of query({
+      // densable HWf: push turn params → streamInput once → drain engine to result.
+      const turnInput: QueryParams = {
         messages: messagesIncludingNewMessages,
         systemPrompt,
         userContext,
@@ -4304,8 +4422,39 @@ export function REPL({
         // stop_hook_active=true when this turn was a stop-hook continuation
         // or concurrent re-queue of one.
         stopHookActive,
-      })) {
-        onQueryEvent(event);
+      };
+      const onAbort = () => {
+        void hostEngine.interrupt('user-cancel');
+      };
+      if (abortController.signal.aborted) {
+        onAbort();
+      } else {
+        abortController.signal.addEventListener('abort', onAbort, { once: true });
+      }
+      try {
+        await runHostEngineTurn({
+          engine: hostEngine,
+          inputRef: hostInputRef,
+          pendingQueryParamsRef,
+          turnInput,
+          newMessages,
+          onQueryEvent: event => {
+            onQueryEvent(event as Parameters<typeof onQueryEvent>[0]);
+          },
+          addNotification: n => {
+            addNotification({
+              key: n.key ?? 'engine-notification',
+              text: n.text,
+              priority:
+                n.priority === 'low' || n.priority === 'medium' || n.priority === 'high' || n.priority === 'immediate'
+                  ? n.priority
+                  : 'medium',
+              timeoutMs: n.timeoutMs,
+            });
+          },
+        });
+      } finally {
+        abortController.signal.removeEventListener('abort', onAbort);
       }
 
       if (buddyEnabled && typeof (globalThis as Record<string, unknown>).fireCompanionObserver === 'function') {
@@ -4356,7 +4505,7 @@ export function REPL({
         const toolCount = getTurnToolCount();
         const classifierMs = getTurnClassifierDurationMs();
         const classifierCount = getTurnClassifierCount();
-        const turnMs = Date.now() - loadingStartTimeRef.current;
+        const turnMs = performance.now() - loadingStartTimeRef.current;
         setMessages(prev => [
           ...prev,
           createApiMetricsMessage({
@@ -4397,6 +4546,8 @@ export function REPL({
       onQueryEvent,
       sessionTitle,
       titleDisabled,
+      hostEngine,
+      addNotification,
     ],
   );
 
@@ -4603,7 +4754,7 @@ export function REPL({
           // Add turn duration message for turns longer than 30s or with a budget
           // Skip if user aborted or if in loop mode (too noisy between ticks)
           // Defer if swarm teammates are still running (show when they finish)
-          const turnDurationMs = Date.now() - loadingStartTimeRef.current - totalPausedMsRef.current;
+          const turnDurationMs = performance.now() - loadingStartTimeRef.current - totalPausedMsRef.current;
           if (
             (turnDurationMs > 30000 || budgetInfo !== undefined) &&
             !abortController.signal.aborted &&
@@ -7724,17 +7875,10 @@ export function REPL({
                         direction,
                       );
 
-                      const kept = result.messagesToKeep ?? [];
-                      const ordered =
-                        direction === 'up_to'
-                          ? [...result.summaryMessages, ...kept]
-                          : [...kept, ...result.summaryMessages];
-                      const postCompact = [
-                        result.boundaryMarker,
-                        ...ordered,
-                        ...result.attachments,
-                        ...result.hookResults,
-                      ];
+                      // densable Pid: zero kept-assistant usage (Edt) so
+                      // /context + status line do not report stale pre-compact
+                      // API usage after message-picker compact (#6 / 2.1.218).
+                      const postCompact = buildPartialPostCompactMessages(result, direction);
                       // Fullscreen 'from' keeps scrollback; 'up_to' must not
                       // (old[0] unchanged + grown array means incremental
                       // useLogMessages path, so boundary never persisted).

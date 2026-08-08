@@ -619,6 +619,17 @@ export class CCRClient {
         this.consecutiveAuthFailures = 0
         return { ok: true, status: response.status, data: response.data }
       }
+      // densable 2.1.218 #36: once closed (worker replaced / shutdown), never
+      // re-enter epoch-mismatch / exit paths on in-flight heartbeat responses.
+      // Otherwise a late 409 keeps calling onEpochMismatch while the process
+      // is already tearing down and desktop/IDE clients retry forever.
+      if (this.closed) {
+        return {
+          ok: false,
+          status: response.status,
+          data: response.data,
+        }
+      }
       if (response.status === 409) {
         if (softFailOn409) {
           return { ok: false, status: 409, data: response.data }
@@ -756,9 +767,13 @@ export class CCRClient {
 
   /**
    * Handle epoch mismatch (409 Conflict). A newer CC instance has replaced
-   * this one — exit immediately.
+   * this one — stop heartbeats then exit immediately.
+   * densable 2.1.218 #36: always stopHeartbeat first so a late in-flight
+   * response cannot reschedule another POST after we're superseded.
    */
   private handleEpochMismatch(): never {
+    this.closed = true
+    this.stopHeartbeat()
     logForDebugging('CCRClient: Epoch mismatch (409), shutting down', {
       level: 'error',
     })
@@ -766,9 +781,10 @@ export class CCRClient {
     this.onEpochMismatch()
   }
 
-  /** Start periodic heartbeat. */
+  /** Start periodic heartbeat. densable: no-op if already closed. */
   private startHeartbeat(): void {
     this.stopHeartbeat()
+    if (this.closed) return
     const schedule = (): void => {
       const jitter =
         this.heartbeatIntervalMs *
@@ -794,8 +810,15 @@ export class CCRClient {
     }
   }
 
-  /** Send a heartbeat via POST /sessions/{id}/worker/heartbeat. */
+  /**
+   * densable sendHeartbeat — if closed, stop timer and return (no request).
+   * Prevents post-replace heartbeats that get 409 and retry forever (#36).
+   */
   private async sendHeartbeat(): Promise<void> {
+    if (this.closed) {
+      this.stopHeartbeat()
+      return
+    }
     if (this.heartbeatInFlight) return
     this.heartbeatInFlight = true
     try {

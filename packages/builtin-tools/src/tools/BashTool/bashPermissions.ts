@@ -23,7 +23,7 @@ import {
   getCommandSubcommandPrefix,
   splitCommand_DEPRECATED,
 } from 'src/utils/bash/commands.js'
-import { parseCommandRaw } from 'src/utils/bash/parser.js'
+import { PARSE_ABORTED, parseCommandRaw } from 'src/utils/bash/parser.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -1657,9 +1657,202 @@ export async function executeAsyncClassifierCheck(
 }
 
 /**
+ * densable e_d — true when the AST contains a bare `&` background operator
+ * (not the `&&` binary_expression form). Defers execution past approval-time
+ * safety checks, so auto-allow must not stick.
+ */
+function astHasDeferredBackgroundOperator(node: {
+  type: string
+  children: readonly { type: string; children: readonly unknown[] }[]
+}): boolean {
+  for (const child of node.children) {
+    if (!child) continue
+    if (child.type === 'ERROR') return true
+    if (child.type === '&') {
+      if (node.type !== 'binary_expression') return true
+      continue
+    }
+    if (
+      Array.isArray(child.children) &&
+      astHasDeferredBackgroundOperator(
+        child as {
+          type: string
+          children: readonly { type: string; children: readonly unknown[] }[]
+        },
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * densable f$_ / DDs — `$VAR/*` / `${VAR}/*` on rm/rmdir expands to `/*` when
+ * the variable is unset/empty. Always require approval (circuitBreaker).
+ */
+const POSSIBLY_EMPTY_VAR_RM_TARGET =
+  /^"?\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"?\/(?:\*|\$|\/|["']|$)/
+const RM_OR_RMDIR_PREFIX =
+  /^(?:[A-Za-z_][A-Za-z0-9_]*\+?=[^\s]*\s+)*\\?(?:[^\s=]*\/)?(rm|rmdir)(?:\s|$)/
+
+export function detectPossiblyEmptyVariableRm(
+  command: string,
+): { command: 'rm' | 'rmdir'; target: string } | null {
+  if (!command.includes('$') || !/\brm(?:dir)?\b/.test(command)) {
+    return null
+  }
+  // Lightweight segment split mirroring densable DDs (not a full shell parse).
+  const segments = command
+    .replace(/\\\r?\n/g, ' ')
+    .replace(/(?<![<>&])&(?![<>&])/g, ';')
+    .split(/[;|\n\r]|&&/)
+  for (const segment of segments) {
+    let text = segment.trimStart()
+    while (text.startsWith('(') || text.startsWith('{')) {
+      text = text.slice(1).trimStart()
+    }
+    const match = text.match(RM_OR_RMDIR_PREFIX)
+    if (match === null) continue
+    const cmd = match[1] === 'rmdir' ? 'rmdir' : 'rm'
+    const rest = text.slice(match[0].length).split(/\s+/)
+    for (let i = 0; i < rest.length; i++) {
+      let token = rest[i] ?? ''
+      token = token.replace(/[)\]}]+$/, '')
+      if (token === '' || token.startsWith('-') || token.startsWith("'")) {
+        continue
+      }
+      if (/^[\d&]*[<>]/.test(token)) {
+        if (/^(?:[0-9]+|&)?(?:>>?[|&]?|<<?<?|<>)$/.test(token)) i++
+        continue
+      }
+      if (POSSIBLY_EMPTY_VAR_RM_TARGET.test(token)) {
+        return { command: cmd, target: token }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * densable Ize helper for dangerous-rm family.
+ */
+function dangerousRemovalAsk(
+  command: 'rm' | 'rmdir',
+  message: string,
+  reasonSuffix: string,
+): PermissionResult {
+  return {
+    behavior: 'ask',
+    message,
+    decisionReason: {
+      type: 'safetyCheck',
+      reason: `Dangerous ${command} operation ${reasonSuffix}`,
+      classifierApprovable: false,
+      circuitBreaker: 'dangerousRemoval',
+    },
+    suggestions: [],
+  }
+}
+
+/**
+ * Heuristic bare-`&` detector used when AST parse is unavailable.
+ * Strips digraphs (`&&`, `||`, `&>`, `<&`, `>&`, `&>>`) then looks for leftover `&`.
+ */
+function hasBareBackgroundOperatorHeuristic(command: string): boolean {
+  const stripped = command
+    .replace(/&&/g, ' ')
+    .replace(/\|\|/g, ' ')
+    .replace(/&>>/g, ' ')
+    .replace(/&>/g, ' ')
+    .replace(/<&/g, ' ')
+    .replace(/>&/g, ' ')
+  return /&/.test(stripped)
+}
+
+/**
+ * densable Lon: when the inner permission check would allow, re-check for a
+ * bare `&` background operator and force a non-classifier-approvable
+ * safetyCheck (auto mode still classifies via circuitBreaker; dialog otherwise).
+ */
+async function applyBackgroundOperatorCircuitBreaker(
+  input: z.infer<typeof BashTool.inputSchema>,
+  result: PermissionResult,
+): Promise<PermissionResult> {
+  if (result.behavior !== 'allow' || !input.command.includes('&')) {
+    return result
+  }
+  // Parse AST independently of TREE_SITTER shadow mode — Lon always re-parses.
+  // densable: if (o && o !== G0e && !e_d(o)) return n  (G0e ≈ PARSE_ABORTED)
+  const root = await parseCommandRaw(input.command)
+  if (
+    root &&
+    root !== PARSE_ABORTED &&
+    typeof root === 'object' &&
+    'type' in root
+  ) {
+    if (
+      !astHasDeferredBackgroundOperator(
+        root as {
+          type: string
+          children: readonly { type: string; children: readonly unknown[] }[]
+        },
+      )
+    ) {
+      // Clean parse with no deferred `&` — keep the allow (covers `&&` digraphs).
+      return result
+    }
+  } else if (
+    root === null &&
+    !hasBareBackgroundOperatorHeuristic(input.command)
+  ) {
+    // Parser unavailable (feature off / load fail) and no bare `&` after digraph
+    // strip — keep allow. densable always has AST; we fail open only for digraphs.
+    return result
+  }
+  // PARSE_ABORTED / ERROR / bare `&` present → force ask.
+  const decisionReason: PermissionDecisionReason = {
+    type: 'safetyCheck',
+    reason:
+      'This command uses the `&` background operator, which defers execution past approval-time safety checks. Approve only if you trust it.',
+    classifierApprovable: false,
+    circuitBreaker: 'backgroundOperator',
+  }
+  return {
+    behavior: 'ask',
+    decisionReason,
+    message: createPermissionRequestMessage(BashTool.name, decisionReason),
+    suggestions: [],
+  }
+}
+
+/**
  * The main implementation to check if we need to ask for user permission to call BashTool with a given input
  */
 export async function bashToolHasPermission(
+  input: z.infer<typeof BashTool.inputSchema>,
+  context: ToolUseContext,
+  getCommandSubcommandPrefixFn = getCommandSubcommandPrefix,
+): Promise<PermissionResult> {
+  // densable DDs early gate — possibly-empty `$VAR/*` on rm/rmdir.
+  const emptyVarRm = detectPossiblyEmptyVariableRm(input.command)
+  if (emptyVarRm) {
+    return dangerousRemovalAsk(
+      emptyVarRm.command,
+      `Dangerous ${emptyVarRm.command} operation detected: '${emptyVarRm.target}'\n\nThis target is a shell variable expansion that points at the filesystem root (or a top-level directory) when the variable is unset or empty. e.g. \`rm -rf $UNSET/*\` becomes \`rm -rf /*\`. This requires explicit approval and cannot be auto-allowed by permission rules.`,
+      `on possibly-empty variable path: ${emptyVarRm.target}`,
+    )
+  }
+
+  const result = await bashToolHasPermissionInner(
+    input,
+    context,
+    getCommandSubcommandPrefixFn,
+  )
+  return applyBackgroundOperatorCircuitBreaker(input, result)
+}
+
+async function bashToolHasPermissionInner(
   input: z.infer<typeof BashTool.inputSchema>,
   context: ToolUseContext,
   getCommandSubcommandPrefixFn = getCommandSubcommandPrefix,

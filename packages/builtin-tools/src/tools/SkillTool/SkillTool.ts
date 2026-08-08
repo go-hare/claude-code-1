@@ -6,6 +6,7 @@ import { getProjectRoot } from 'src/bootstrap/state.js'
 import {
   builtInCommandNames,
   findCommand,
+  getCommandName,
   getCommands,
   type PromptCommand,
 } from 'src/commands.js'
@@ -56,8 +57,13 @@ import {
   extractResultText,
   prepareForkedCommandContext,
 } from 'src/utils/forkedAgent.js'
+import {
+  launchBackgroundForkedSkill,
+  shouldBackgroundForkedSkill,
+} from 'src/utils/forkedSkillBackground.js'
 import { parseFrontmatter } from 'src/utils/frontmatterParser.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { logError } from 'src/utils/log.js'
 import { createUserMessage, normalizeMessages } from 'src/utils/messages.js'
 import type { ModelAlias } from 'src/utils/model/aliases.js'
 import { resolveSkillModelOverride } from 'src/utils/model/model.js'
@@ -213,12 +219,52 @@ async function executeForkedSkill(
       ? { ...baseAgent, effort: command.effort }
       : baseAgent
 
-  // Collect messages from the forked agent
-  const agentMessages: Message[] = []
-
   logForDebugging(
     `SkillTool executing forked skill ${commandName} with agent ${agentDefinition.agentType}`,
   )
+
+  // densable 2.1.218: context:fork skills default to background (Cvo/wvo).
+  // Opt out with frontmatter `background: false`. Returns immediately with
+  // "Running in the background as @name"; findings arrive via task-notification.
+  if (shouldBackgroundForkedSkill(command)) {
+    const setAppState = context.setAppStateForTasks ?? context.setAppState
+    try {
+      const launched = await launchBackgroundForkedSkill({
+        agentId,
+        agentDefinition,
+        command,
+        description: `/${getCommandName(command)} ${args ?? ''}`.trim(),
+        prompt: skillContent,
+        promptMessages,
+        context: {
+          ...context,
+          getAppState: modifiedGetAppState,
+        },
+        canUseTool,
+        getAppState: modifiedGetAppState,
+        setAppState,
+      })
+      if (launched) {
+        return {
+          data: {
+            success: true,
+            commandName,
+            status: 'forked',
+            background: true,
+            agentId,
+            result: `Running in the background as @${launched.name}`,
+          },
+        }
+      }
+      // null = live-duplicate → fall through to sync path
+    } catch (err) {
+      logError(err)
+      // fall through to sync on unexpected launch failure
+    }
+  }
+
+  // Collect messages from the forked agent
+  const agentMessages: Message[] = []
 
   try {
     // Run the sub-agent
@@ -322,6 +368,11 @@ export const outputSchema = lazySchema(() => {
     success: z.boolean().describe('Whether the skill completed successfully'),
     commandName: z.string().describe('The name of the skill'),
     status: z.literal('forked').describe('Execution status'),
+    // densable 2.1.218: true when skill was launched as a background agent
+    background: z
+      .boolean()
+      .optional()
+      .describe('Whether the forked skill is running in the background'),
     agentId: z
       .string()
       .describe('The ID of the sub-agent that executed the skill'),

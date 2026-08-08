@@ -116,17 +116,50 @@ async function createFork(customTitle?: string): Promise<{
     throw new Error('No messages to branch')
   }
 
-  // Build forked entries with new sessionId and preserved metadata
-  let parentUuid: UUID | null = null
+  // densable 2.1.218 #23 forkSession: old→new uuid map; remap parentUuid by
+  // walking/skipping progress; remap logicalParentUuid via map (null stays null).
+  const uuidMap = new Map<UUID, UUID>()
+  for (const entry of mainConversationEntries) {
+    uuidMap.set(entry.uuid, randomUUID() as UUID)
+  }
+  const byUuid = new Map(mainConversationEntries.map(e => [e.uuid, e] as const))
+
   const lines: string[] = []
   const serializedMessages: SerializedMessage[] = []
 
   for (const entry of mainConversationEntries) {
+    // parentUuid: walk source parentUuid chain skipping progress, remap
+    let remappedParent: UUID | null = null
+    let walk: UUID | null | undefined = entry.parentUuid
+    while (walk) {
+      const w = byUuid.get(walk)
+      if (!w) break
+      if (w.type !== 'progress') {
+        remappedParent = uuidMap.get(walk) ?? null
+        break
+      }
+      walk = w.parentUuid
+    }
+    // logicalParentUuid: remap through same uuidMap (null stays null)
+    const srcLogical = (entry as { logicalParentUuid?: UUID | null })
+      .logicalParentUuid
+    const remappedLogical: UUID | null | undefined =
+      srcLogical === undefined
+        ? undefined
+        : srcLogical == null
+          ? srcLogical
+          : (uuidMap.get(srcLogical) ?? null)
+
+    const newUuid = uuidMap.get(entry.uuid)!
     // Create forked transcript entry preserving all original metadata
     const forkedEntry: TranscriptEntry = {
       ...entry,
+      uuid: newUuid,
       sessionId: forkSessionId,
-      parentUuid,
+      parentUuid: remappedParent,
+      ...(remappedLogical !== undefined && {
+        logicalParentUuid: remappedLogical,
+      }),
       isSidechain: false,
       forkedFrom: {
         sessionId: originalSessionId,
@@ -137,14 +170,16 @@ async function createFork(customTitle?: string): Promise<{
     // Build serialized message for LogOption
     const serialized: SerializedMessage = {
       ...entry,
+      uuid: newUuid,
       sessionId: forkSessionId,
+      parentUuid: remappedParent,
+      ...(remappedLogical !== undefined && {
+        logicalParentUuid: remappedLogical,
+      }),
     }
 
     serializedMessages.push(serialized)
     lines.push(jsonStringify(forkedEntry))
-    if (entry.type !== 'progress') {
-      parentUuid = entry.uuid
-    }
   }
 
   // Append content-replacement entry (if any) with the fork's sessionId.

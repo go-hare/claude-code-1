@@ -364,6 +364,96 @@ export const SDKControlSeedReadStateRequestSchema = lazySchema(() =>
     ),
 )
 
+/**
+ * densable 2.1.218 set_cwd — headless twin of /cd for SDK hosts.
+ * SEA: subtype literal set_cwd + trust_accepted + trusted_directory.
+ */
+export const SDKControlSetCwdRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('set_cwd'),
+      path: z
+        .string()
+        .describe(
+          'Target directory. Tilde-expanded and realpath-canonicalized by the CLI, exactly like an interactive /cd argument.',
+        ),
+      trust_accepted: z
+        .boolean()
+        .optional()
+        .describe(
+          "Host attestation that the user explicitly accepted a trust dialog for this directory. Only send true after showing one — the CLI records the directory as trusted (the same latch /cd's own prompt writes) before relocating. Requires trusted_directory.",
+        ),
+      trusted_directory: z
+        .string()
+        .optional()
+        .describe(
+          'Required whenever trust_accepted is true: the exact directory string from the needs_trust response being answered. This pins the attestation to the canonical path the user was shown — if the raw path canonicalizes differently by the time the re-send arrives (e.g. a symlink component changed during the dialog), nothing is latched and a fresh needs_trust carries the new canonical directory.',
+        ),
+    })
+    .describe(
+      '@internal Moves the session to a new working directory — the headless twin of /cd, for SDK hosts like Claude Desktop. Runs the same validation, Cd(...) permission rules, and relocation path as the interactive command, with the trust prompt delegated to the host via the needs_trust response arm. Rejected while a turn is in flight.',
+    ),
+)
+
+/**
+ * densable set_cwd response discriminated union (status ok | needs_trust | rejected).
+ */
+export const SDKControlSetCwdResponseSchema = lazySchema(() =>
+  z
+    .discriminatedUnion('status', [
+      z.object({
+        status: z.literal('ok'),
+        cwd: z
+          .string()
+          .describe(
+            'Canonical (realpath) working directory the session now runs in.',
+          ),
+        changed: z
+          .boolean()
+          .describe(
+            'False when the target already was the working directory — a successful no-op with no side effects.',
+          ),
+        transcript_relocated: z
+          .boolean()
+          .describe(
+            'True when the transcript lives in the project slot derived from cwd (the normal case, and the no-op case). False only on the documented edge where the move completed but the transcript move failed AND the rollback chdir failed — a cwd-derived resume lookup will then miss the session.',
+          ),
+      }),
+      z.object({
+        status: z.literal('needs_trust'),
+        trust_root: z
+          .string()
+          .optional()
+          .describe(
+            'Present when `directory` sits inside a git repository whose canonical root differs from it (a subdirectory or a linked worktree). Accepting trust grants that whole repository — every subdirectory and linked worktree of the root — so the trust dialog should name this root alongside `directory`. Informational only: the attestation echo still pins `trusted_directory` to `directory`.',
+          ),
+        directory: z
+          .string()
+          .describe(
+            'Canonical target directory. Nothing changed; show a trust dialog for exactly this string and, on accept, re-send with trust_accepted: true and trusted_directory echoing it verbatim.',
+          ),
+      }),
+      z.object({
+        status: z.literal('rejected'),
+        reason: z
+          .enum([
+            'not_found',
+            'not_a_directory',
+            'blocked_by_rule',
+            'busy',
+            'unsafe_path',
+          ])
+          .describe(
+            "unsafe_path: the target's canonical path contains characters that do not render as visible, space-distinguishable glyphs — control (Cc), format (Cf), default-ignorable, line/paragraph-separator (Zl/Zp), non-ASCII-space Zs, or braille-blank code points; rejected fail-closed before the trust round-trip, and the offending path is never echoed back.",
+          ),
+        message: z.string().describe('Human-readable, ANSI-free explanation.'),
+      }),
+    ])
+    .describe(
+      '@internal Result of a set_cwd request. Every non-ok outcome leaves the working directory unchanged — but trust may already have been durably recorded when the request carried a valid attestation (a busy rejection or relocation failure after the latch does not unlatch it; the consent was for the directory, not the attempt). Internal failures (e.g. the transcript move failed and was rolled back) arrive as a control_response error instead.',
+    ),
+)
+
 export const SDKHookCallbackRequestSchema = lazySchema(() =>
   z
     .object({
@@ -748,6 +838,7 @@ export const SDKControlRequestInnerSchema = lazySchema(() =>
     SDKControlRewindFilesRequestSchema(),
     SDKControlCancelAsyncMessageRequestSchema(),
     SDKControlSeedReadStateRequestSchema(),
+    SDKControlSetCwdRequestSchema(),
     SDKControlMcpSetServersRequestSchema(),
     SDKControlReloadPluginsRequestSchema(),
     SDKControlMcpReconnectRequestSchema(),

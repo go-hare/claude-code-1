@@ -4,8 +4,11 @@ import { feature } from 'bun:bundle'
 const daemon = {
   type: 'local-jsx',
   name: 'daemon',
-  description: 'Manage background sessions and daemon',
-  argumentHint: '[status|start|install|uninstall|stop|bg|attach|logs|kill]',
+  // densable SEA ~235628613: "Manage background services and routines"
+  description: 'Manage background services and routines',
+  // bare /daemon → DaemonHub; subcommands keep CLI surface
+  argumentHint: '[hub|status|start|install|uninstall|stop|bg|attach|logs|kill]',
+  immediate: true,
   isEnabled: () => {
     if (feature('DAEMON')) return true
     if (feature('BG_SESSIONS')) return true

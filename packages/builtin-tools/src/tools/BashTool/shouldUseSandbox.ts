@@ -1,7 +1,13 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
+import { getPlatform } from 'src/utils/platform.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
-import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import { isSettingSourceEnabled } from 'src/utils/settings/constants.js'
+import {
+  getSettings_DEPRECATED,
+  getSettingsForSource,
+} from 'src/utils/settings/settings.js'
+import { findGitBashPathOrNull } from 'src/utils/windowsPaths.js'
 import {
   BINARY_HIJACK_VARS,
   bashPermissionRule,
@@ -13,7 +19,14 @@ import {
 type SandboxInput = {
   command?: string
   dangerouslyDisableSandbox?: boolean
+  /** densable p3 shellType — default "bash"; "powershell" for PS tool */
+  shellType?: 'bash' | 'powershell'
 }
+
+/**
+ * densable gxy — shell metacharacters. H0d fails closed (never exclude) when present.
+ */
+export const SANDBOX_EXCLUSION_METACHAR_RE = /[;|&`$(){}<>#\n\r]/
 
 // NOTE: excludedCommands is a user-facing convenience feature, not a security boundary.
 // It is not a security bug to be able to bypass excludedCommands — the sandbox permission
@@ -127,9 +140,121 @@ function containsExcludedCommand(command: string): boolean {
   return false
 }
 
+/**
+ * densable frr — layered settings sources for H0d excludedCommands.
+ * policy (Jne) + flagSettings + optional userSettings.
+ */
+function getLayeredExcludedCommandsForPolicy(): string[] {
+  const layers = [
+    getSettingsForSource('policySettings'),
+    getSettingsForSource('flagSettings'),
+    isSettingSourceEnabled('userSettings')
+      ? getSettingsForSource('userSettings')
+      : null,
+  ]
+  return layers.flatMap(s => s?.sandbox?.excludedCommands ?? [])
+}
+
+/**
+ * densable qJd(QAo(pattern), command) — whole-command exclusion match (no split).
+ */
+function matchesExcludedCommandPattern(
+  pattern: string,
+  command: string,
+): boolean {
+  const rule = bashPermissionRule(pattern)
+  switch (rule.type) {
+    case 'prefix':
+      return command === rule.prefix || command.startsWith(rule.prefix + ' ')
+    case 'exact':
+      return command === rule.command
+    case 'wildcard':
+      return matchWildcardPattern(rule.pattern, command)
+    default:
+      return false
+  }
+}
+
+/**
+ * densable H0d core — pure matcher for tests and I0d.
+ * Metacharacters / compounds NEVER count as excluded (fail closed).
+ * Whole trimmed command only — no compound split (unlike hxy/containsExcludedCommand).
+ */
+export function isFullyExcludedCommandForPolicyWithPatterns(
+  command: string,
+  patterns: readonly string[],
+): boolean {
+  const trimmed = command.trim()
+  if (
+    patterns.length === 0 ||
+    !trimmed ||
+    SANDBOX_EXCLUSION_METACHAR_RE.test(trimmed)
+  ) {
+    return false
+  }
+  return patterns.some(p => matchesExcludedCommandPattern(p, trimmed))
+}
+
+/**
+ * densable H0d — STRICT policy exclusion matcher (PowerShell / Windows policy gate).
+ */
+export function isFullyExcludedCommandForPolicy(command: string): boolean {
+  return isFullyExcludedCommandForPolicyWithPatterns(
+    command,
+    getLayeredExcludedCommandsForPolicy(),
+  )
+}
+
+/**
+ * densable I0d — Windows enterprise policy refusal when command would not be sandboxed
+ * and is not a full simple excludedCommands match (H0d).
+ *
+ * @param useSandbox result of shouldUseSandbox / densable p3/vxo
+ * @param command raw command string
+ */
+export function isWindowsSandboxPolicyViolation(
+  useSandbox: boolean,
+  command: string,
+): boolean {
+  return (
+    getPlatform() === 'windows' &&
+    SandboxManager.isSandboxEnabledInSettings() &&
+    SandboxManager.isPlatformInEnabledList() &&
+    !SandboxManager.areUnsandboxedCommandsAllowed() &&
+    !useSandbox &&
+    !isFullyExcludedCommandForPolicy(command)
+  )
+}
+
+/** densable x0d — 2.1.218 Windows sandbox policy refusal message */
+export const WINDOWS_SANDBOX_POLICY_REFUSAL =
+  'Enterprise policy requires sandboxing, but this command would not be sandboxed on Windows: either the sandbox is unavailable, or the command matches a sandbox exclusion pattern only in part. Compound commands and commands with shell metacharacters must run sandboxed even when a statement matches an exclusion. Shell command execution is blocked by policy.'
+
+/**
+ * densable SandboxPolicyRefusalError (vao)
+ */
+export class SandboxPolicyRefusalError extends Error {
+  constructor(message: string = WINDOWS_SANDBOX_POLICY_REFUSAL) {
+    super(message)
+    this.name = 'SandboxPolicyRefusalError'
+  }
+}
+
+/**
+ * densable p3 — should this command run sandboxed?
+ */
 export function shouldUseSandbox(input: Partial<SandboxInput>): boolean {
   if (!SandboxManager.isSandboxingEnabled()) {
     return false
+  }
+
+  // densable: Windows bash without Git Bash cannot wrap sandboxed child
+  const shellType = input.shellType ?? 'bash'
+  // densable cQ() — null when Git Bash unavailable
+  if (shellType === 'bash' && getPlatform() === 'windows') {
+    if (findGitBashPathOrNull() === null) {
+      return false
+    }
   }
 
   // Don't sandbox if explicitly overridden AND unsandboxed commands are allowed by policy
@@ -144,7 +269,7 @@ export function shouldUseSandbox(input: Partial<SandboxInput>): boolean {
     return false
   }
 
-  // Don't sandbox if the command contains user-configured excluded commands
+  // Don't sandbox if the command contains user-configured excluded commands (hxy)
   if (containsExcludedCommand(input.command)) {
     return false
   }

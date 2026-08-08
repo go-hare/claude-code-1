@@ -43,6 +43,27 @@ import {
 /** Prefix that identifies a LocalShellTask summary to the UI collapse transform. */
 export const BACKGROUND_BASH_SUMMARY_PREFIX = 'Background command ';
 
+/**
+ * densable ZV_ — default wall-clock cap for agent-scoped background shells (1h).
+ * Main-session shells (agentId undefined) get no cap.
+ */
+export const DEFAULT_SUBAGENT_BG_SHELL_MAX_MS = 3_600_000;
+
+/**
+ * densable fkd(agentId) — resolve capMs for agent-scoped background shells.
+ * - agentId undefined (main-thread FG→BG / Ctrl+B on main): no cap
+ * - agent-scoped: CLAUDE_SUBAGENT_BG_SHELL_MAX_MS || 3600000
+ */
+export function resolveSubagentBgShellCapMs(agentId: AgentId | undefined): number | undefined {
+  if (agentId === undefined) return undefined;
+  const raw = process.env.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS;
+  if (raw !== undefined && raw !== '') {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_SUBAGENT_BG_SHELL_MAX_MS;
+}
+
 const STALL_CHECK_INTERVAL_MS = 5_000;
 const STALL_THRESHOLD_MS = 45_000;
 const STALL_TAIL_BYTES = 1024;
@@ -364,7 +385,10 @@ export async function spawnShellTask(
 
   // Data flows through TaskOutput automatically — no stream listeners needed.
   // Just transition to backgrounded state so the process keeps running.
-  shellCommand.background(taskId);
+  // densable Ppt: background(u, { capMs: kind !== 'monitor' ? fkd(agentId) : void 0 })
+  shellCommand.background(taskId, {
+    capMs: kind !== 'monitor' ? resolveSubagentBgShellCapMs(agentId) : undefined,
+  });
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
 
@@ -467,7 +491,12 @@ export function backgroundTask(taskId: string, getAppState: () => AppState, setA
   const { toolUseId, kind, agentId } = task;
 
   // Transition to backgrounded — TaskOutput continues receiving data automatically
-  if (!shellCommand.background(taskId)) {
+  // densable Tsn: background(e, { capMs: fkd(agentId) }) — Ctrl+B same cap as spawn
+  if (
+    !shellCommand.background(taskId, {
+      capMs: resolveSubagentBgShellCapMs(agentId),
+    })
+  ) {
     return false;
   }
 
@@ -641,11 +670,23 @@ export function backgroundExistingForegroundTask(
   toolUseId?: string,
   getAppState?: () => AppState,
 ): boolean {
-  if (!shellCommand.background(taskId)) {
+  // Peek agentId before background so densable fkd cap can arm on auto-bg too.
+  let agentId: AgentId | undefined;
+  if (getAppState) {
+    const peek = getAppState().tasks[taskId];
+    if (isLocalShellTask(peek)) {
+      agentId = peek.agentId;
+    }
+  }
+
+  if (
+    !shellCommand.background(taskId, {
+      capMs: resolveSubagentBgShellCapMs(agentId),
+    })
+  ) {
     return false;
   }
 
-  let agentId: AgentId | undefined;
   let didBackground = false;
   setAppState(prev => {
     const prevTask = prev.tasks[taskId];

@@ -52,6 +52,7 @@ import {
   sessionArtifactLabel,
   formatAttachError,
   isOriginSessionId,
+  decideOriginEscAction,
   normalizeFleetGroupName,
   partitionArchivedSessions,
   buildCwdBasenameMap,
@@ -478,7 +479,11 @@ function AgentViewApp({
   restoreSessionId?: string;
   /** Official initialError (J) — attach failure shown after remount. */
   initialError?: string | null;
-  onAction?: (action: { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }) => void;
+  onAction?: (
+    action:
+      | { type: 'open'; sessionId: string; short: string; logPath?: string }
+      | { type: 'done'; resumeHintRequested?: boolean },
+  ) => void;
 }): React.ReactElement {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -550,16 +555,23 @@ function AgentViewApp({
   const [helpOpen, setHelpOpen] = useState(false);
 
   // densable Tt — leave FleetView immediately (defined early: handleDispatch + useInput).
-  const forceExit = useCallback(() => {
-    if (exitArmTimerRef.current) {
-      clearTimeout(exitArmTimerRef.current);
-      exitArmTimerRef.current = null;
-    }
-    exitArmedRef.current = false;
-    setExitArmed(false);
-    if (onAction) onAction({ type: 'done' });
-    else process.exit(0);
-  }, [onAction]);
+  const forceExit = useCallback(
+    (opts?: { resumeHintRequested?: boolean }) => {
+      if (exitArmTimerRef.current) {
+        clearTimeout(exitArmTimerRef.current);
+        exitArmTimerRef.current = null;
+      }
+      exitArmedRef.current = false;
+      setExitArmed(false);
+      if (onAction)
+        onAction({
+          type: 'done',
+          resumeHintRequested: opts?.resumeHintRequested,
+        });
+      else process.exit(0);
+    },
+    [onAction],
+  );
 
   /**
    * densable CJ clear — only on second press (forceExit), timeout, or
@@ -1910,6 +1922,49 @@ function AgentViewApp({
     [],
   );
 
+  /**
+   * densable Esc terminal cascade after help/dispatch/bash/delete-arm cleared:
+   * Gnm → attach-origin | wait-starting | exit-with-hint | exit.
+   * Only when enteredViaLeftArrow (originJobId from left-arrow mount).
+   */
+  const handleEscExit = useCallback(() => {
+    const decision = decideOriginEscAction({
+      originJobId: enteredViaLeftArrow ? originSessionId : undefined,
+      originRowPresent: originSessionPresent,
+    });
+    switch (decision.kind) {
+      case 'attach-origin': {
+        const origin = sessions.find(isOriginSession);
+        if (origin) {
+          const short = origin.short ?? origin.sessionId?.slice(0, 8) ?? '';
+          void checkAndAttach(short, origin, onAction, setError);
+          return;
+        }
+        forceExit({ resumeHintRequested: true });
+        return;
+      }
+      case 'wait-starting':
+        setError(formatAttachError('still starting'));
+        return;
+      case 'exit-with-hint':
+        forceExit({ resumeHintRequested: true });
+        return;
+      case 'exit':
+      default:
+        forceExit();
+        return;
+    }
+  }, [
+    enteredViaLeftArrow,
+    originSessionId,
+    originSessionPresent,
+    sessions,
+    isOriginSession,
+    checkAndAttach,
+    onAction,
+    forceExit,
+  ]);
+
   const openJobBySlot = useCallback(
     (slot: number) => {
       // alt+1..9 — 1-based index into currently visible jobs
@@ -2191,7 +2246,7 @@ function AgentViewApp({
         }
         return;
       }
-      // densable escape cascade: clear dispatch/bash → pending delete → Tt().
+      // densable escape cascade: clear dispatch/bash → pending delete → Gnm/Tt.
       // Empty list does NOT fall back to list focus — exit immediately (not CJ arm).
       if (key.escape) {
         if (dispatchInput || dispatchMode === 'bash') {
@@ -2202,7 +2257,7 @@ function AgentViewApp({
           // densable MD.current → NO(null): cancel delete/ungroup arm first.
           clearPending();
         } else {
-          forceExit();
+          handleEscExit();
         }
         return;
       }
@@ -2435,7 +2490,7 @@ function AgentViewApp({
       // Collapsing done resets doneCap expand so re-open still folds.
       setDoneCapExpanded(false);
     } else if (key.escape) {
-      // densable list-focus Esc cascade: draft/bash → pending delete → Tt().
+      // densable list-focus Esc cascade: draft/bash → pending delete → Gnm/Tt.
       // Draft can remain after ↑ from dispatch without clearing.
       if (dispatchInput || dispatchMode === 'bash') {
         setDispatchInput('');
@@ -2444,7 +2499,7 @@ function AgentViewApp({
       } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
         clearPending();
       } else {
-        forceExit();
+        handleEscExit();
       }
     } else if (input === '!' && !key.ctrl && !key.meta) {
       // Official: "!" from list enters bash dispatch mode
@@ -3017,7 +3072,7 @@ export async function renderAgentView(options?: {
    * do not close any manager on exit.
    */
   daemonAlreadyEnsured?: boolean;
-}): Promise<void> {
+}): Promise<{ resumeHintRequested?: boolean; forkSessionId?: string }> {
   // Official: applyFleetViewHostWindowsEnv — force full repaint on Windows
   if (getPlatform() === 'windows') {
     process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
@@ -3040,7 +3095,7 @@ export async function renderAgentView(options?: {
         daemon.reason ??
         "No background daemon is running. Run 'claude daemon install' to set it up as a persistent service.";
       process.stderr.write(`${msg}\n`);
-      return;
+      return {};
     }
     inProcessManager = daemon.manager;
   }
@@ -3051,6 +3106,8 @@ export async function renderAgentView(options?: {
   const enteredViaLeftArrow = options?.enteredViaLeftArrow ?? !!(options?.restoreSessionId ?? envSelect);
   // Official J (initialError) — attach failure remounted into FleetView.
   let remountError: string | undefined;
+  /** densable resumeHintRequested after Gnm exit-with-hint */
+  let resumeHintRequested = false;
 
   // Create a Root instance (sync render, no race condition)
   // Official uses a persistent Root that survives across attach/detach cycles
@@ -3059,7 +3116,8 @@ export async function renderAgentView(options?: {
   // Loop: render FleetView → handle action → re-render
   for (;;) {
     const action = await new Promise<
-      { type: 'open'; sessionId: string; short: string; logPath?: string } | { type: 'done' }
+      | { type: 'open'; sessionId: string; short: string; logPath?: string }
+      | { type: 'done'; resumeHintRequested?: boolean }
     >(resolve => {
       // ThemeProvider required: without it useTheme() defaults to 'dark', so
       // selection userMessageBackground paints as rgb(55,55,55) on light terminals.
@@ -3097,7 +3155,10 @@ export async function renderAgentView(options?: {
 
     root.unmount();
 
-    if (action.type === 'done') break;
+    if (action.type === 'done') {
+      resumeHintRequested = !!action.resumeHintRequested;
+      break;
+    }
 
     if (action.type === 'open') {
       // Official (Windows only): re-enable raw mode + ref stdin after Ink unmount
@@ -3148,4 +3209,9 @@ export async function renderAgentView(options?: {
   } catch {
     // ignore
   }
+
+  return {
+    resumeHintRequested,
+    forkSessionId: options?.currentSessionId ?? options?.restoreSessionId ?? lastSelectedSessionId,
+  };
 }

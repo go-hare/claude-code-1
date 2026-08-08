@@ -560,6 +560,16 @@ export async function gracefulShutdown(
   // terminal is dead (SIGHUP, SSH disconnect), hooks and analytics may hang
   // on I/O to a dead TTY or unreachable network, eating into the
   // failsafe budget. Session persistence must complete before anything else.
+  // densable DZr: settle in-flight PR-link promises (2s cap) before other cleanup
+  // so immediate exit after gh pr create does not drop pr-link transcript rows.
+  try {
+    const { flushPendingPrLinks } = await import(
+      '@claude-code/builtin-tools/tools/shared/gitOperationTracking.js'
+    )
+    await flushPendingPrLinks()
+  } catch {
+    // best-effort — do not block shutdown on PR-link flush failures
+  }
   let cleanupTimeoutId: ReturnType<typeof setTimeout> | undefined
   try {
     const cleanupPromise = (async () => {

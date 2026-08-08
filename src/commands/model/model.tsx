@@ -14,10 +14,12 @@ import type { LocalJSXCommandCall } from '../../types/command.js';
 import type { EffortLevel } from '../../utils/effort.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import {
+  applyFastModeOnModelSwitch,
   clearFastModeCooldown,
   isFastModeAvailable,
   isFastModeEnabled,
   isFastModeSupportedByModel,
+  resolveFastModeAfterModelSwitch,
 } from '../../utils/fastMode.js';
 import { getOauthAccountInfo } from '../../utils/auth.js';
 import { getFableSessionFallbackConsented, setFableSessionFallbackConsented } from '../../bootstrap/state.js';
@@ -80,31 +82,26 @@ function ModelPickerWrapper({
       message += ` with ${chalk.bold(effort)} effort`;
     }
 
-    // Turn off fast mode if switching to unsupported model
-    let wasFastModeToggledOn;
+    // densable 2.1.218 #31 — Rft/uU/dU on /model picker confirm
     if (isFastModeEnabled()) {
       clearFastModeCooldown();
-      if (!isFastModeSupportedByModel(model) && isFastMode) {
-        setAppState(prev => ({
-          ...prev,
-          fastMode: false,
-        }));
-        wasFastModeToggledOn = false;
-        // Do not update fast mode in settings since this is an automatic downgrade
-      } else if (isFastModeSupportedByModel(model) && isFastModeAvailable() && isFastMode) {
-        message += ` · Fast mode ON`;
-        wasFastModeToggledOn = true;
-      }
     }
-
-    if (isBilledAsExtraUsage(model, wasFastModeToggledOn === true, isOpus1mMergeEnabled())) {
-      message += ` · Billed as extra usage`;
+    const nextFast = resolveFastModeAfterModelSwitch(model, isFastMode);
+    const billed = isBilledAsExtraUsage(model, nextFast, isOpus1mMergeEnabled());
+    const applied = applyFastModeOnModelSwitch(model, isFastMode, {
+      // densable hotkey path uses announceKeptOn only via Rft opts; /model
+      // matches densable: announce ON when next is on and (prev off OR kept)
+      // — default Rft is ON only when !prev||announceKeptOn; densable
+      // picker uses announceKeptOn undefined so ON only on restore.
+      billedAsExtraUsage: billed,
+    });
+    if (applied.changed) {
+      setAppState(prev => ({
+        ...prev,
+        fastMode: applied.nextFastMode,
+      }));
     }
-
-    if (wasFastModeToggledOn === false) {
-      // Fast mode was toggled off, show suffix after extra usage billing
-      message += ` · Fast mode OFF`;
-    }
+    message += applied.suffix;
 
     onDone(message);
   }
@@ -243,38 +240,23 @@ function SetModelAndClose({
     }
 
     function setModel(modelValue: string | null): void {
+      // densable 2.1.218 #31 — Rft/uU/dU on `/model <name>` non-interactive set
+      if (isFastModeEnabled()) {
+        clearFastModeCooldown();
+      }
+      const nextFast = resolveFastModeAfterModelSwitch(modelValue, isFastMode);
+      const billed = isBilledAsExtraUsage(modelValue, nextFast, isOpus1mMergeEnabled());
+      const applied = applyFastModeOnModelSwitch(modelValue, isFastMode, {
+        billedAsExtraUsage: billed,
+      });
       setAppState(prev => ({
         ...prev,
         mainLoopModel: modelValue,
         mainLoopModelForSession: null,
+        ...(applied.changed ? { fastMode: applied.nextFastMode } : null),
       }));
       let message = `Set model to ${chalk.bold(renderModelLabel(modelValue))}`;
-
-      let wasFastModeToggledOn;
-      if (isFastModeEnabled()) {
-        clearFastModeCooldown();
-        if (!isFastModeSupportedByModel(modelValue) && isFastMode) {
-          setAppState(prev => ({
-            ...prev,
-            fastMode: false,
-          }));
-          wasFastModeToggledOn = false;
-          // Do not update fast mode in settings since this is an automatic downgrade
-        } else if (isFastModeSupportedByModel(modelValue) && isFastMode) {
-          message += ` · Fast mode ON`;
-          wasFastModeToggledOn = true;
-        }
-      }
-
-      if (isBilledAsExtraUsage(modelValue, wasFastModeToggledOn === true, isOpus1mMergeEnabled())) {
-        message += ` · Billed as extra usage`;
-      }
-
-      if (wasFastModeToggledOn === false) {
-        // Fast mode was toggled off, show suffix after extra usage billing
-        message += ` · Fast mode OFF`;
-      }
-
+      message += applied.suffix;
       onDone(message);
     }
 

@@ -1,0 +1,67 @@
+# densable 2.1.218 #28 — trust dialogs name repository root
+
+Source: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+
+## Official changelog
+
+> Improved trust dialogs to name the repository root the grant covers
+
+## densable surfaces (extract)
+
+### 1. Accessing workspace (startup TrustDialog) — NO repo-root sentence
+
+Title: `Accessing workspace:`
+
+Body (SEA apostrophe split reconstructed):
+
+```
+Quick safety check: Is this a project you created or one you trust?
+(Like your own code, a well-known open source project, or work from your team).
+If not, take a moment to review what's in this folder first.
+
+Claude Code'll be able to read, edit, and execute files here.
+```
+
+Confirm: `Yes, I trust this folder` / `No, exit` (or continue without permissions when applicable).
+
+### 2. CdTrustPrompt — Moving to a new directory (HAS full repo sentence)
+
+```js
+wya != null &&
+  jsxs(h, {
+    children: [
+      "This directory is part of the repository at",
+      " ",
+      jsx(h, { bold: !0, children: wya }),
+      ". Trusting it trusts that whole repository, including its other worktrees and subdirectories.",
+    ],
+  })
+```
+
+### 3. Spawn / remote short form
+
+```js
+` It's part of the repository at ${jni} \u2014 trusting it trusts that whole repository.`
+```
+
+## Local mapping (2026-08-08, deep residual)
+
+| Surface | Status |
+|---------|--------|
+| Accessing body (Quick safety + Claude Code'll) | **HAVE** — `trustDialogCopy.ts` + TrustDialog |
+| CdTrustPrompt full repo sentence (string) | **HAVE** as shared copy; shown on Accessing when cwd under distinct git root |
+| `/cd` Moving-to UI | **HAVE** — `commands/cd` + `CdTrustPrompt` (trust root sentence + Yes move / No stay) |
+| densable dVo + E7p Cd rules + pVo + cVo unsafe_path | **HAVE** — `cdPermission.ts` + `resolveCdTarget(ctx)` + `filePatternTools` includes `Cd` |
+| densable QOy + Idn allow-side path rewrite | **HAVE** — realpath-gated private→public map in `getCdPathRewriteMap` / `rewriteCdAllowPath`; allowCandidates = unique([canonical, Idn(canonical)]) |
+| densable Srd bg job cwd rehome | **HAVE** — `rehomeBgJobCwd` via `CLAUDE_JOB_DIR` + `CLAUDE_CODE_SESSION_KIND=bg` + `patchBgJobState` |
+| densable fVo side-effects (g_e / $v / Fo / pCb / O8e+BC) | **HAVE** — `reanchorGitFileWatcher` + `getIsGit`/`getGitStatus` cache clear + `SandboxManager.refreshConfig` + `loadCdMemoryContext` + system-reminder wrap. **NC()?.refreshGitBranch** host UI callback **N/A-no-surface** |
+| densable fCb set_cwd control | **HAVE** — schema + `handleSetCwdControlRequest` + `print.ts` dispatch (busy/needs_trust/ok/rejected) + enqueueMoveNotice |
+| densable Omt / EUe trust key | **HAVE** — `projectTrustConfigKey` = densable Frn/aq (`aMe(pu(dir)??resolve(dir))`); Omt latch; EUe first probes aq key then ancestor walk (`isPathTrusted`) |
+| densable tNt transcript relocate | **HAVE** — `relocateSessionTranscript` (tNt) + Project `begin/endTranscriptRelocation`/`setSessionFile`/`currentSessionRelocatedCwd` + `RelocatedEntry` stamp + xZd rename/EXDEV + `repointTaskOutputSymlinks` (hxg) + fVo rollback; `transcript_relocated` true on success |
+| Spawn short form | **HAVE** helper `formatSpawnRepoTrustNote` |
+| densable RC multi-env “Trust this directory?” / Yes trust and add server | **N/A-no-surface** product (daemon `qpn`/`daemon_rc_add`); **HAVE** copy extract `formatRcAddServerTrustBody` + title/confirm constants (tests only — no fake UI mount). Standalone bridge trust gate remains densable fail-fast `checkHasTrustDialogAccepted` |
+| bridge first-run spawn-mode dialog copy | **HAVE** densable SEA 1:1 (`Remote Control is launching in spawn mode, which lets you start… claude.ai/code or the Claude mobile app`) |
+
+Helpers: `src/components/TrustDialog/trustDialogCopy.ts`, `src/commands/cd/cdPermission.ts`, `src/commands/cd/cdCommand.tsx`, `src/bridge/bridgeMain.ts`
+Tests: `trustDialogCopy.218.test.ts`, `cdCommand.218.test.ts`
+Deep residual matrix: `snippets/residual-four-honest.txt`

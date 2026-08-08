@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import React from 'react';
+import type { DOMAccessibility } from '../core/dom.js';
 import type { Color, Styles, TextStyles } from '../core/styles.js';
 
 type BaseProps = {
@@ -39,6 +40,15 @@ type BaseProps = {
    * If `truncate-*` is passed, Ink will truncate text instead, which will result in one line of text with the rest cut off.
    */
   readonly wrap?: Styles['textWrap'];
+
+  /**
+   * densable `aria-preserve-whitespace` — keep trailing spaces in screen-reader
+   * line materialize so VoiceOver does not announce "new line" for caret space.
+   */
+  readonly 'aria-preserve-whitespace'?: boolean;
+
+  /** densable accessibility bag (alternative to individual aria-* props). */
+  readonly accessibility?: DOMAccessibility;
 
   readonly children?: ReactNode;
 };
@@ -115,6 +125,8 @@ export default function Text({
   strikethrough = false,
   inverse = false,
   wrap = 'wrap',
+  'aria-preserve-whitespace': ariaPreserveWhitespace,
+  accessibility: accessibilityProp,
   children,
 }: Props): React.ReactNode {
   if (children === undefined || children === null) {
@@ -133,8 +145,12 @@ export default function Text({
     ...(inverse && { inverse }),
   };
 
+  // densable TYr: aria-preserve-whitespace → accessibility.preserveWhitespace
+  const accessibility: DOMAccessibility | undefined =
+    accessibilityProp ?? (ariaPreserveWhitespace ? { preserveWhitespace: true } : undefined);
+
   return (
-    <ink-text style={memoizedStylesForWrap[wrap]} textStyles={textStyles}>
+    <ink-text style={memoizedStylesForWrap[wrap]} textStyles={textStyles} accessibility={accessibility}>
       {children}
     </ink-text>
   );

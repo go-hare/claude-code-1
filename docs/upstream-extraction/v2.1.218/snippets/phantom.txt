@@ -1,0 +1,30 @@
+26135:          let teardown = deferredTeardown;
+26136:          deferredTeardown = null, teardown();
+26385:          function teardown() {
+26390:            deferredTeardown = teardown;
+26393:          teardown();
+31342:  let teardownNoise = self[kended] && self.writableFinished;
+31343:  if (_err && !self.destroyed && !teardownNoise && self.listenerCount("error") > 0) {
+91397:teardown
+91803:Must call teardown before calling setup again
+91808:Must call setup before calling teardown
+102976:setup/teardown asymmetry in tests; config defaults flipped.
+117142:turn_teardown
+117148:turn_teardown
+134463:teardown
+134622:Stop hook cancelled (abort or stream teardown)
+134673:Stop hook cancelled (abort or stream teardown)
+139048:Dialog teardown failed: 
+139076:pane teardown did not settle within 
+139081:[killInProcessTeammate] pane teardown for 
+139082:[killInProcessTeammate] pane teardown for 
+141315:bridge_repl_v2_teardown
+141316:tengu_bridge_repl_teardown
+141330:teardown_archive_timeout_ms
+169601:[bridge:repl] Hook: waiting for previous teardown to complete before re-init
+169602:[bridge:repl] Hook: previous teardown complete, proceeding with re-init
+169663:[bridge:repl] Hook cleanup: starting teardown for session=
+178399:teardown-now
+178402:team teardown park deadline
+178403:[print.ts] Team teardown park gave up after 
+178407:tengu_headless_team_teardown_park_timeout

@@ -29,7 +29,16 @@ type ClaudeAIMcpServer = {
   tools?: ClaudeAIMcpServerTool[]
   stateless?: boolean
   cached_init_response?: Record<string, unknown> | null
+  /** densable: whether the connector is connected/authorized in claude.ai */
+  eligible?: boolean
+  eligibility_reason?: string
 }
+
+/**
+ * densable `Pgs` — session-local set of claude.ai connectors that connected
+ * successfully this process (Gsr). Complements persisted ever-connected.
+ */
+const sessionClaudeAiMcpConnected = new Set<string>()
 
 /**
  * Official Kdg: map claude.ai connector tools → toolPermissions.
@@ -189,6 +198,13 @@ export const fetchClaudeAIMcpConfigsIfEligible = memoize(
           ...(server.cached_init_response !== undefined
             ? { cachedInitResponse: server.cached_init_response }
             : {}),
+          // densable: plumb eligible / eligibility_reason for DYo filter
+          ...(server.eligible !== undefined
+            ? { eligible: server.eligible }
+            : {}),
+          ...(server.eligibility_reason !== undefined
+            ? { ineligibleReason: server.eligibility_reason }
+            : {}),
         }
       }
 
@@ -218,7 +234,8 @@ export function clearClaudeAIMcpConfigsCache(): void {
 }
 
 /**
- * Record that a claude.ai connector successfully connected. Idempotent.
+ * densable `Wsr` — record that a claude.ai connector successfully connected.
+ * Idempotent. Updates densable `Pgs` (session) + persisted ever-connected.
  *
  * Gates the "N connectors unavailable/need auth" startup notifications: a
  * connector that was working yesterday and is now failed is a state change
@@ -226,6 +243,7 @@ export function clearClaudeAIMcpConfigsCache(): void {
  * it showed up is one the user has demonstrably ignored.
  */
 export function markClaudeAiMcpConnected(name: string): void {
+  sessionClaudeAiMcpConnected.add(name)
   saveGlobalConfig(current => {
     const seen = current.claudeAiMcpEverConnected ?? []
     if (seen.includes(name)) return current
@@ -233,6 +251,17 @@ export function markClaudeAiMcpConnected(name: string): void {
   })
 }
 
+/** densable `Vsr` — persisted ever-connected list. */
 export function hasClaudeAiMcpEverConnected(name: string): boolean {
   return (getGlobalConfig().claudeAiMcpEverConnected ?? []).includes(name)
+}
+
+/** densable `Gsr` — connected successfully this process. */
+export function hasClaudeAiMcpSessionConnected(name: string): boolean {
+  return sessionClaudeAiMcpConnected.has(name)
+}
+
+/** densable `$9u` — clear session set (tests / logout). */
+export function clearClaudeAiMcpSessionConnected(): void {
+  sessionClaudeAiMcpConnected.clear()
 }

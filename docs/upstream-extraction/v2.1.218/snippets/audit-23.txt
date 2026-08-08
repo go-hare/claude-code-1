@@ -1,0 +1,190 @@
+# densable 2.1.218 AUDIT #23 — fork-session lineage after compaction (headless/SDK)
+
+Binary: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+Changelog: Fixed fork-session lineage being lost after compaction in headless and SDK sessions
+
+## densable symbols / needles (HIT)
+
+| Needle | Hits | Role |
+|--------|------|------|
+| `logical_parent_uuid` | 7 | SDK wire field on compact_boundary |
+| `logicalParentUuid` | 14 | internal camelCase field |
+| `forkSession follows across the compaction break` | 2 | schema @internal describe text |
+| `preserved_messages` / `anchor_uuid` / `all_uuids` | schema | related compact relink (siblings on same message) |
+| compact_boundary yield with `logical_parent_uuid` | QueryEngine / SDK stream | headless emit path |
+| fork UUID-map remap of `logicalParentUuid` | forkSession body | lineage survive fork |
+
+## densable control flow (1:1 extract)
+
+### 1) Schema (SDKCompactBoundaryMessage)
+
+```js
+// densable (minified, cleaned)
+logical_parent_uuid: Ql().nullable().optional().describe(
+  "@internal uuid of the last pre-compact message — the backpointer " +
+  "forkSession follows across the compaction break. Distinct from the " +
+  "session-file chain parent (which is the post-compact summary). " +
+  "Absent from older producers."
+)
+```
+
+Also on compact_metadata (same object family):
+- `preserved_segment` (legacy)
+- `preserved_messages: { anchor_uuid, uuids[], all_uuids? }` supersedes preserved_segment —
+  "readers look up each UUID directly and relink uuids[i] to uuids[i-1]
+   (uuids[0] to anchor_uuid) instead of walking the parentUuid chain."
+
+### 2) Boundary producer
+
+```js
+function Atn(e, t, r, n, o) {
+  return {
+    type: "system",
+    subtype: "compact_boundary",
+    content: "Conversation compacted",
+    isMeta: false,
+    timestamp: new Date().toISOString(),
+    uuid: xV.randomUUID(),
+    level: "info",
+    compactMetadata: {
+      trigger: e,
+      preTokens: t,
+      userContext: n,
+      messagesSummarized: o,
+    },
+    ...r && { logicalParentUuid: r },
+  }
+}
+```
+
+### 3) Transcript write (session file chain break)
+
+```js
+// densable session append loop (p = isCompactBoundary)
+parentUuid: p ? null : f,
+logicalParentUuid: p ? i : void 0,  // i = sequential parent chain tip
+```
+
+`parentUuid` nullified at compact_boundary (session-file chain parent becomes post-compact summary).
+`logicalParentUuid` stores pre-compact backpointer for forkSession.
+
+### 4) Headless / SDK stream emit (THE 2.1.218 fix surface)
+
+```js
+// densable QueryEngine / SDK yield paths
+if (Xn.type === "system" && Xn.subtype === "compact_boundary")
+  yield {
+    type: "system",
+    subtype: "compact_boundary",
+    session_id: Rt(),
+    uuid: Xn.uuid,
+    compact_metadata: fSr(Xn.compactMetadata),
+    ...Xn.logicalParentUuid !== void 0 && {
+      logical_parent_uuid: Xn.logicalParentUuid,
+    },
+  }
+
+// densable internal→SDK (vt path)
+...vt.logicalParentUuid !== void 0 && {
+  logical_parent_uuid: vt.logicalParentUuid,
+}
+
+// densable SDK→internal ingest
+...l.logical_parent_uuid !== void 0 && {
+  logicalParentUuid: l.logical_parent_uuid,
+}
+```
+
+Without this emit, headless/SDK consumers never see the backpointer → fork-session
+lineage is lost after compaction (changelog #23).
+
+### 5) forkSession remapping (consumes logicalParentUuid)
+
+```js
+// densable fork body (cleaned)
+let uuidMap = new Map() // old uuid -> new uuid
+// ... build map for all messages ...
+for (let f of nonProgressMessages) {
+  // parentUuid: walk source parentUuid chain skipping progress, remap
+  let g = null, _ = f.parentUuid
+  while (_) {
+    let w = byUuid.get(_)
+    if (!w) break
+    if (w.type !== "progress") { g = uuidMap.get(_) ?? null; break }
+    _ = w.parentUuid
+  }
+  // logicalParentUuid: remap through same uuidMap (null stays null)
+  let E =
+    f.logicalParentUuid == null
+      ? f.logicalParentUuid
+      : uuidMap.get(f.logicalParentUuid) ?? null
+  entries.push({
+    ...f,
+    uuid: uuidMap.get(f.uuid),
+    parentUuid: g,
+    logicalParentUuid: E,
+    sessionId: forkedSessionId,
+    forkedFrom: { sessionId: sourceId, messageUuid: f.uuid },
+    // clears: isSidechain, teamName, agentName, sessionKind, slug, sourceToolAssistantUUID
+  })
+}
+```
+
+Comment in local compact.ts already names this: "Progress messages aren't loggable,
+so forkSessionImpl would null out a logicalParentUuid pointing at one."
+
+## Local equivalent paths
+
+| densable piece | local path | match? |
+|----------------|------------|--------|
+| createCompactBoundary + logicalParentUuid | `src/utils/messages.ts` `createCompactBoundaryMessage` | HAVE |
+| partial compact lastPreCompact skip progress | `src/services/compact/compact.ts` | HAVE |
+| transcript write parentUuid null + logicalParentUuid | `src/utils/sessionStorage.ts` recordTranscript loop | HAVE |
+| TranscriptMessage type field | `src/types/logs.ts` `logicalParentUuid?` | HAVE |
+| SDK schema `logical_parent_uuid` | `src/entrypoints/sdk/coreSchemas.ts` `SDKCompactBoundaryMessageSchema` | **GAP** — field absent |
+| QueryEngine yield logical_parent_uuid | `src/QueryEngine.ts` compact_boundary yields (~624, ~1011) | **GAP** — only compact_metadata |
+| toSDKMessages / fromSDK mappers | `src/utils/messages/mappers.ts` | **GAP** — no logical_parent_uuid |
+| SDK→internal ingest (remote/engine) | densable engine path; local remote adapters | **GAP / check** |
+| fork remap logicalParentUuid via uuidMap | densable forkSession; local `src/commands/branch/branch.ts` `createFork` | **GAP** — rewrites sequential parentUuid only, does not remap logicalParentUuid |
+
+## Verdict: PARTIAL
+
+Internal transcript + compact producer already store `logicalParentUuid`.
+Missing densable 2.1.218 headless/SDK emit + schema, and fork remap through uuid map
+(branch path is not 1:1 with densable forkSession).
+
+## implementNow delta (exact files, densable 1:1 — do not invent substitute)
+
+1. `src/entrypoints/sdk/coreSchemas.ts` (+ generated types if required)
+   - Add to `SDKCompactBoundaryMessageSchema`:
+     `logical_parent_uuid: UUIDPlaceholder().nullable().optional().describe("<densable text>")`
+   - Optionally add densable `preserved_messages` sibling (separate from #23 core; only if
+     local compact metadata already produces it — do not invent producers).
+
+2. `src/QueryEngine.ts`
+   - Both compact_boundary yield sites:
+     `...msg.logicalParentUuid !== undefined && { logical_parent_uuid: msg.logicalParentUuid }`
+
+3. `src/utils/messages/mappers.ts`
+   - `toSDKMessages` compact_boundary: emit `logical_parent_uuid` when present
+   - SDK→internal compact_boundary path: accept `logical_parent_uuid` → `logicalParentUuid`
+     (note: current dead-code `if (message.subtype === 'compact_boundary')` under user case
+     is unreachable — fix placement densable-style under system handling)
+
+4. `src/commands/branch/branch.ts` (and any SDK/headless `forkSession` path if separate)
+   - densable 1:1: build old→new uuid map; remap `parentUuid` by walking/skipping progress;
+     remap `logicalParentUuid` via map (`null` stays `null`, missing map → `null`);
+     do not drop logicalParentUuid on compact_boundary rows.
+
+5. Tests (suggested, not densable code):
+   - compact_boundary SDK yield includes logical_parent_uuid
+   - fork after compact remaps logicalParentUuid across boundary
+
+## status fields for workflow JSON
+
+- id: 23
+- status: PARTIAL
+- densableSymbols: logical_parent_uuid, logicalParentUuid, createCompactBoundaryMessage/Atn,
+  forkSession uuidMap remap, QueryEngine compact_boundary yield, preserved_messages (sibling)
+- implementNow: true
+- confidence: high

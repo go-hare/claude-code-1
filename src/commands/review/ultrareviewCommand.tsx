@@ -22,8 +22,9 @@ async function launchAndDone(
   billingNote: string,
   signal?: AbortSignal,
 ): Promise<void> {
+  // densable default invocation is `/code-review ultra`; /ultrareview is alias.
   const result = await launchRemoteReview(args, context, billingNote, {
-    invocation: '/ultrareview',
+    invocation: '/code-review ultra',
   });
   // User hit Escape during the ~5s launch — the dialog already showed
   // "cancelled" and unmounted, so skip onDone (would write to a dead

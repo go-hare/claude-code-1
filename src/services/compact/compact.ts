@@ -333,7 +333,8 @@ export type RecompactionInfo = {
 /**
  * Build the base post-compact messages array from a CompactionResult.
  * This ensures consistent ordering across all compaction paths.
- * Order: boundaryMarker, summaryMessages, messagesToKeep, attachments, hookResults
+ * densable `cze`: boundaryMarker, summaryMessages, messagesToKeep, attachments, hookResults
+ * (full compact; messagesToKeep usually empty — does NOT zero usage).
  */
 export function buildPostCompactMessages(result: CompactionResult): Message[] {
   return ([result.boundaryMarker] as Message[]).concat(
@@ -342,6 +343,53 @@ export function buildPostCompactMessages(result: CompactionResult): Message[] {
     result.attachments,
     result.hookResults,
   )
+}
+
+/**
+ * densable `Edt` — zero API usage on preserved assistant messages after
+ * partial compact (message picker). Kept assistants still carry pre-compact
+ * usage; without this, `/context` / status-line `getCurrentUsage`/`zfr` read
+ * the last kept assistant and report stale pre-compact token totals
+ * (official 2.1.218 #6).
+ */
+export function zeroKeptAssistantUsage(message: Message): Message {
+  if (message.type !== 'assistant') return message
+  const usage = message.message?.usage
+  return {
+    ...message,
+    message: {
+      ...message.message,
+      usage: {
+        ...(usage && typeof usage === 'object' ? usage : {}),
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    },
+  } as Message
+}
+
+/**
+ * densable `Pid` — assemble post-partial-compact transcript:
+ * zero kept-assistant usage, order summary vs keep by direction, then
+ * boundary + ordered + attachments + hookResults.
+ */
+export function buildPartialPostCompactMessages(
+  result: CompactionResult,
+  direction: PartialCompactDirection = 'from',
+): Message[] {
+  const kept = (result.messagesToKeep ?? []).map(zeroKeptAssistantUsage)
+  const ordered =
+    direction === 'up_to'
+      ? [...result.summaryMessages, ...kept]
+      : [...kept, ...result.summaryMessages]
+  return [
+    result.boundaryMarker,
+    ...ordered,
+    ...result.attachments,
+    ...result.hookResults,
+  ]
 }
 
 /** Release large tool result payloads from kept messages after compaction.

@@ -1,0 +1,175 @@
+# densable 2.1.218 AUDIT #32 — server-managed benign feature/cost toggles skip settings-approval
+
+Official: "Changed server-managed settings so benign feature and cost toggles no longer trigger the settings-approval prompt"
+
+Binary: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+
+## densable symbols (minified)
+
+| densable | local name / role |
+|----------|-------------------|
+| `hFt` | `extractDangerousSettings` — project dangerous surface from managed settings |
+| `sOo` | `hasDangerousSettings` — any dangerous keys present |
+| `FLd` | `hasDangerousSettingsChanged` — compare old vs new dangerous projection |
+| `KFs` | `formatDangerousSettingsList` — UI name list (shell keys + env keys + hooks + claudeMd) |
+| `ULd` | `checkManagedSettingsSecurity` — gate dialog; returns no_check_needed when benign-only |
+| `BLd` / `Fty` / `QFs` / `$Ld` | requester/wait bridge for interactive consent surface |
+| `qLd` | `handleSecurityCheckResult` (+ densable outcomes incl. deferred_*) |
+| `S3l` | `DANGEROUS_SHELL_SETTINGS` shell-helper keys |
+| `LEh` | unconditional SAFE env allowlist (benign feature/cost/model/UI/timeout toggles) |
+| `MEh` | privacy env allowlist only when value is truthy (`Jt`) |
+| `B7t(key,value)` | `isSafeManagedEnv` / SAFE check: `LEh.has(upper) \|\| (MEh.has(upper) && Jt(value))` |
+| `Jt` | `isEnvTruthy` (`1`/`true`/`yes`/`on`) |
+| `xe` | `jsonStringify` for dangerous projection equality |
+| UI strings | "Managed settings require approval" / "Settings requiring approval:" |
+
+## densable control flow (1:1 bodies, reconstructed)
+
+### S3l (dangerous shell helpers)
+```js
+S3l = [
+  "apiKeyHelper",
+  "awsAuthRefresh",
+  "awsCredentialExport",
+  "fileSuggestion",
+  "gcpAuthRefresh",
+  "otelHeadersHelper",
+  "processWrapper",
+  "proxyAuthHelper",
+  "statusLine",
+  "subagentStatusLine",
+]
+```
+
+### B7t / LEh / MEh (benign env — THE #32 mechanism)
+```js
+// MEh: privacy-only; safe ONLY when truthy (Jt)
+MEh = new Set([
+  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+  "DISABLE_ERROR_REPORTING",
+  "DISABLE_TELEMETRY",
+  "DO_NOT_TRACK",
+])
+
+// LEh: 180 unconditional benign env keys (feature / cost / model / compact /
+// effort / thinking / UI / timeout / OTEL protocol toggles, etc.)
+// Includes e.g. DISABLE_COST_WARNINGS, CLAUDE_CODE_DISABLE_FAST_MODE,
+// CLAUDE_CODE_EFFORT_LEVEL, MAX_THINKING_TOKENS, DISABLE_AUTO_COMPACT, ...
+
+function B7t(e, t) { // isSafeEnvForSecurityDialog
+  let r = e.toUpperCase()
+  return LEh.has(r) || (MEh.has(r) && Jt(t))
+}
+```
+
+### hFt (extractDangerousSettings)
+```js
+function hFt(e) {
+  if (!e) return { shellSettings: {}, envVars: {}, hasHooks: false, hasClaudeMd: false }
+  let t = {}
+  for (let i of S3l) {
+    let s = e[i], a
+    if (typeof s === "string") a = s
+    else if (s !== null && typeof s === "object" && "command" in s && typeof s.command === "string") a = s.command
+    if (a !== undefined && a.length > 0) t[i] = a
+  }
+  let r = {}
+  if (e.env && typeof e.env === "object")
+    for (let [i, s] of Object.entries(e.env)) {
+      if (s === undefined) continue
+      let a = String(s)
+      // benign feature/cost toggles excluded here via B7t → no approval
+      if (a.length > 0 && !B7t(i, a)) r[i] = a
+    }
+  let n = e.hooks !== undefined && e.hooks !== null && typeof e.hooks === "object" && Object.keys(e.hooks).length > 0
+  let o = typeof e.claudeMd === "string" && e.claudeMd.length > 0
+  return {
+    shellSettings: t,
+    envVars: r,
+    hasHooks: n,
+    hooks: n ? e.hooks : undefined,
+    hasClaudeMd: o,
+    claudeMd: o ? e.claudeMd : undefined,
+  }
+}
+```
+
+### sOo / FLd / ULd
+```js
+function sOo(e) {
+  return Object.keys(e.shellSettings).length > 0
+    || Object.keys(e.envVars).length > 0
+    || e.hasHooks
+    || e.hasClaudeMd
+}
+
+function FLd(e, t) { // hasDangerousSettingsChanged(old, new)
+  let r = hFt(e), n = hFt(t)
+  if (!sOo(n)) return false
+  if (!sOo(r)) return true
+  let o = xe({ shellSettings: r.shellSettings, envVars: r.envVars, hooks: r.hooks, claudeMd: r.claudeMd })
+  let i = xe({ shellSettings: n.shellSettings, envVars: n.envVars, hooks: n.hooks, claudeMd: n.claudeMd })
+  return o !== i
+}
+
+async function ULd(e, t, r) { // checkManagedSettingsSecurity(cached, new, showDialog?)
+  if (!t || !sOo(hFt(t))) return "no_check_needed"   // pure benign / empty
+  if (!FLd(e, t)) return "no_check_needed"            // dangerous surface unchanged
+  if (!_N()) return "deferred_non_interactive"        // getIsInteractive()
+  // ... show ManagedSettingsSecurityDialog / requester bridge ...
+}
+```
+
+**#32 meaning:** server-managed settings that only change `env` keys in `LEh` (or truthy `MEh`) never enter the dangerous projection, so `ULd` returns `no_check_needed` and never shows "Managed settings require approval". Top-level non-shell feature keys were already ignored by `hFt`; the changelog targets the expanded benign *env* allowlist (feature/cost toggles).
+
+## Local status
+
+### Paths
+- `/Users/apple/work-py/hare-code/claude-code-1/src/services/remoteManagedSettings/securityCheck.tsx` — `checkManagedSettingsSecurity` / `handleSecurityCheckResult`
+- `/Users/apple/work-py/hare-code/claude-code-1/src/components/ManagedSettingsSecurityDialog/utils.ts` — extract/has/changed/format
+- `/Users/apple/work-py/hare-code/claude-code-1/src/components/ManagedSettingsSecurityDialog/ManagedSettingsSecurityDialog.tsx` — dialog UI strings match densable
+- `/Users/apple/work-py/hare-code/claude-code-1/src/utils/managedEnvConstants.ts` — `SAFE_ENV_VARS`, `DANGEROUS_SHELL_SETTINGS`
+
+### Match
+- Gate shape matches densable `ULd`: no dangerous → `no_check_needed`; unchanged dangerous → `no_check_needed`; non-interactive → `deferred_non_interactive`.
+- Dialog copy matches densable.
+- Dangerous surface is shell helpers + non-safe env + hooks (local).
+
+### Gaps vs densable 2.1.218 (PARTIAL, not full 1:1)
+
+1. **SAFE_ENV_VARS lag densable `LEh` (primary #32 gap)**  
+   densable `LEh` has **180** keys; local `SAFE_ENV_VARS` has **135**.  
+   Missing densable benign keys include many feature/cost/effort/compact/thinking/UI/timeout toggles, e.g.:
+   - `DISABLE_COST_WARNINGS` is present, but many siblings are not:
+   - `CLAUDE_CODE_DISABLE_FAST_MODE`, `CLAUDE_CODE_ALWAYS_ENABLE_EFFORT`, `CLAUDE_CODE_DISABLE_THINKING`, `DISABLE_AUTO_COMPACT`, `DISABLE_COMPACT`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `DISABLE_PROMPT_CACHING*`, `ENABLE_PROMPT_CACHING_1H*`, `CLAUDE_CODE_ENABLE_AUTO_MODE`, `CLAUDE_CODE_ENABLE_TASKS`, `DISABLE_GROWTHBOOK`, `DISABLE_UPDATES`, `ENABLE_TOOL_SEARCH`, `API_TIMEOUT_MS`, fable/opus region model env keys, etc.  
+   → Server-managed changes to those env keys **still trigger** the approval prompt locally.
+
+2. **`MEh` truthy split missing**  
+   densable: privacy keys safe only when `Jt(value)`.  
+   Local folds `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` / `DISABLE_ERROR_REPORTING` / `DISABLE_TELEMETRY` into always-safe `SAFE_ENV_VARS` and lacks `DO_NOT_TRACK`.
+
+3. **`DANGEROUS_SHELL_SETTINGS` incomplete vs `S3l`**  
+   Missing: `fileSuggestion`, `processWrapper`, `proxyAuthHelper`, `subagentStatusLine`.  
+   densable also accepts `{ command: string }` object form; local only `typeof value === 'string'`.
+
+4. **`claudeMd` not in dangerous projection**  
+   densable `hFt`/`sOo`/`FLd`/`KFs` include `claudeMd`; local does not.
+
+5. Local has extra SAFE keys for OpenAI/Gemini/Grok (fork extensions) not in densable `LEh` — keep as supersets; do not remove for 1:1 product fork compatibility, but **must add missing densable LEh keys**.
+
+## Exact 1:1 delta to implement (when promoted from AUDIT)
+
+1. `src/utils/managedEnvConstants.ts`
+   - Expand `SAFE_ENV_VARS` to include all densable `LEh` keys missing locally (append; keep fork provider extras).
+   - Export densable `MEh` as `SAFE_WHEN_TRUTHY_ENV_VARS` (or equivalent) including `DO_NOT_TRACK`.
+   - Expand `DANGEROUS_SHELL_SETTINGS` to full `S3l` list.
+
+2. `src/components/ManagedSettingsSecurityDialog/utils.ts` (`hFt` 1:1)
+   - Shell: resolve string **or** `{command:string}`.
+   - Env: treat as safe if `SAFE_ENV_VARS.has(upper) || (SAFE_WHEN_TRUTHY.has(upper) && isEnvTruthy(value))`; do not put MEh keys as always-safe unless truthy.
+   - Add `hasClaudeMd` / `claudeMd` to `DangerousSettings`, `hasDangerousSettings`, `hasDangerousSettingsChanged`, `formatDangerousSettingsList`.
+
+3. Tests: add unit coverage that managed settings with only LEh feature/cost env (e.g. `DISABLE_COST_WARNINGS`, `CLAUDE_CODE_DISABLE_FAST_MODE`, `MAX_THINKING_TOKENS`) → `hasDangerousSettings === false` / `checkManagedSettingsSecurity → no_check_needed`; dangerous shell/env still prompts; truthy vs falsy MEh.
+
+## Verdict
+**PARTIAL** — control-flow skeleton HAVE; densable #32 benign allowlist + shell/claudeMd extraction **not 1:1**. implementNow=false (AUDIT extract only).

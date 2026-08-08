@@ -587,6 +587,16 @@ export function resetGitFileWatcher(): void {
 }
 
 /**
+ * densable g_e / yue.reanchor — after process.chdir (e.g. /cd, set_cwd, worktree
+ * enter), drop watchers + cache so the next get() re-resolves .git from the
+ * new cwd. Also clears resolveGitDir path cache (keyed by startPath).
+ */
+export function reanchorGitFileWatcher(): void {
+  clearResolveGitDirCache()
+  gitWatcher.reset()
+}
+
+/**
  * Read the HEAD SHA for an arbitrary directory (not using the watcher).
  * Used by plugins that need the HEAD of a specific repo, not the CWD repo.
  */

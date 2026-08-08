@@ -194,6 +194,11 @@ export const McpClaudeAIProxyServerConfigSchema = lazySchema(() =>
     toolPermissions: z.record(z.string(), McpToolPermissionSchema()).optional(),
     stateless: z.boolean().optional(),
     cachedInitResponse: z.record(z.string(), z.unknown()).nullish(),
+    // densable 2.1.218: org connector eligibility from claude.ai API.
+    // eligible===false means not connected/authorized in claude.ai — exclude
+    // from needs-auth startup count unless session-connected this process.
+    eligible: z.boolean().optional(),
+    ineligibleReason: z.string().optional(),
   }),
 )
 

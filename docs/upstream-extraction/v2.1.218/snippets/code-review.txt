@@ -1,0 +1,13 @@
+131627:). Tell the user to retry /code-review ultra, or use /review for a local review instead.
+135872:stacked slash command expansion threw
+140941:| `"main"` | The main conversation (background subagents only) |
+147009:/code-review ultra
+147192:/code-review ultra
+169067:Tip: run /code-review ultra (no number) to review your current branch instead.
+169068:Tip: run /code-review ultra <PR number> to fetch and review a specific GitHub PR instead.
+171009:Run /code-review ultra after Claude finishes to review these changes in the cloud
+230796:Structured team-protocol messages (shutdown/plan responses and requests) are acts of the session itself and cannot be sent by a background subagent. Send a plain text message instead.
+288662:Task id of the in-process background subagent that sent this message, stamped by the harness from the sending loop (never from tool input). Absent for cross-session peers.
+301158:| \`"main"\` | The main conversation (background subagents only) |${""}
+307874:`}let i=o.options?.commands?.some((s)=>s.name==="ultrareview"&&yk(s))??!1;if(t)return i?`(Claude can't launch the cloud review directly \u2014 type \`/code-review ultra --fix\` to review in the cloud and apply the findings locally when it completes. Running a local ${n}-effort review and applying its findings for now.)
+307876:`;return i?`(Claude can't launch the cloud review directly \u2014 type \`/code-review ultra\` to run it. Falling back to a local ${n}-effort review for now.)

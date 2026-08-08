@@ -160,6 +160,7 @@ import {
   setSessionPersistenceDisabled,
   setTeleportedSessionInfo,
 } from './bootstrap/state.js';
+import { applyMainThreadAgentHooks } from './utils/hooks/applyMainThreadAgentHooks.js';
 import { filterCommandsForRemoteMode, getCommands } from './commands.js';
 import type { StatsStore } from './context/stats.js';
 import {
@@ -2818,6 +2819,8 @@ async function run(): Promise<CommanderCommand> {
 
       // Store the main thread agent type in bootstrap state so hooks can access it
       setMainThreadAgentType(mainThreadAgentDefinition?.agentType);
+      // densable QEt: main-thread frontmatter hooks need origin trust (#22)
+      applyMainThreadAgentHooks(mainThreadAgentDefinition);
 
       // Log agent flag usage — only log agent name for built-in agents to avoid leaking custom agent names
       if (mainThreadAgentDefinition) {
@@ -4848,22 +4851,28 @@ async function run(): Promise<CommanderCommand> {
             abortAfterFlush: replResult.abortAfterFlush,
           });
           const { renderAgentView } = await import('./screens/AgentView.js');
+          const { formatLeftArrowResumeHint } = await import('./screens/fleetView/helpers.js');
+          let fleetResult: { resumeHintRequested?: boolean; forkSessionId?: string } = {};
           if (!handoff.ok) {
             process.stderr.write(`${handoff.error}\n`);
             // Still open fleet view without origin (matches empty-open fallback).
             // Daemon may not have been ensured (spawn fail path) — let AgentView ensure.
-            await renderAgentView({ enteredViaLeftArrow: true });
+            fleetResult = await renderAgentView({ enteredViaLeftArrow: true });
           } else {
             // Official CLAUDE_AGENTS_SELECT / initialJobId = short; isOrigin uses it.
             process.env.CLAUDE_AGENTS_SELECT = handoff.short;
             // openAgentsViaLeftArrow already ran ensureDaemonRunning.
             // Skip second ensure (densable agentsMain pattern; no dual KF).
-            await renderAgentView({
+            fleetResult = await renderAgentView({
               enteredViaLeftArrow: true,
               currentSessionId: handoff.sessionId,
               restoreSessionId: handoff.short,
               daemonAlreadyEnsured: true,
             });
+          }
+          // densable: originSpawn.resumeHintRequested + transcriptMaterialized → stderr resume line
+          if (fleetResult.resumeHintRequested && fleetResult.forkSessionId) {
+            process.stderr.write(`${formatLeftArrowResumeHint(fleetResult.forkSessionId)}\n`);
           }
           // Left-arrow REPL → Agents is a one-way handoff (REPL already unmounted).
           // Force exit so Ink refresh intervals / raw-mode handles cannot hang the TTY.
@@ -5446,14 +5455,20 @@ async function run(): Promise<CommanderCommand> {
       await marketplaceUpdateHandler(name, options);
     });
 
-  // Plugin install command
+  // Plugin install command (+ densable 2.1.218 --config KEY=VALUE / BJy)
   pluginCmd
     .command('install <plugin>')
     .alias('i')
     .description('Install a plugin from available marketplaces (use plugin@marketplace for specific marketplace)')
     .option('-s, --scope <scope>', 'Installation scope: user, project, or local', 'user')
+    .option(
+      '--config <key=value>',
+      'Set a plugin userConfig option (repeatable). Format: KEY=VALUE',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
     .addOption(coworkOption())
-    .action(async (plugin: string, options: { scope?: string; cowork?: boolean }) => {
+    .action(async (plugin: string, options: { scope?: string; cowork?: boolean; config?: string[] }) => {
       const { pluginInstallHandler } = await import('./cli/handlers/plugins.js');
       await pluginInstallHandler(plugin, options);
     });

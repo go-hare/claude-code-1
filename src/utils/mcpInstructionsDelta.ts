@@ -6,6 +6,7 @@ import type {
 } from '../services/mcp/types.js'
 import type { Message } from '../types/message.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import { asStringArray } from './stringUtils.js'
 
 export type McpInstructionsDelta = {
   /** Server names — for stateless-scan reconstruction. */
@@ -65,9 +66,17 @@ export function getMcpInstructionsDelta(
     attachmentCount++
     if (msg.attachment!.type !== 'mcp_instructions_delta') continue
     midCount++
-    const delta = msg.attachment! as unknown as McpInstructionsDelta
-    for (const n of delta.addedNames) announced.add(n)
-    for (const n of delta.removedNames) announced.delete(n)
+    // densable IXd: trust addedNames only when addedBlocks is Array; always q0 removed
+    const delta = msg.attachment! as {
+      addedBlocks?: unknown
+      addedNames?: unknown
+      removedNames?: unknown
+    }
+    const addedNames = Array.isArray(delta.addedBlocks)
+      ? asStringArray(delta.addedNames)
+      : []
+    for (const n of addedNames) announced.add(n)
+    for (const n of asStringArray(delta.removedNames)) announced.delete(n)
   }
 
   const connected = mcpClients.filter(

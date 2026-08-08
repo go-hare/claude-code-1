@@ -102,8 +102,19 @@ export type ExecResult = {
   preSpawnError?: string
 }
 
+/** densable ShellCommand.background options — capMs wall-clock kill + skipSpill */
+export type ShellBackgroundOptions = {
+  /** densable capMs — arm kill timer after background (agent-scoped shells) */
+  capMs?: number
+  /** densable skipSpill — skip pipe-mode spillToDisk */
+  skipSpill?: boolean
+}
+
 export type ShellCommand = {
-  background: (backgroundTaskId: string) => boolean
+  background: (
+    backgroundTaskId: string,
+    options?: ShellBackgroundOptions,
+  ) => boolean
   result: Promise<ExecResult>
   kill: () => void
   status: 'running' | 'backgrounded' | 'completed' | 'killed'
@@ -113,7 +124,12 @@ export type ShellCommand = {
    */
   cleanup: () => void
   onTimeout?: (
-    callback: (backgroundFn: (taskId: string) => boolean) => void,
+    callback: (
+      backgroundFn: (
+        taskId: string,
+        options?: ShellBackgroundOptions,
+      ) => boolean,
+    ) => void,
   ) => void
   /** The TaskOutput instance that owns all stdout/stderr data and progress. */
   taskOutput: TaskOutput
@@ -192,11 +208,18 @@ class ShellCommandImpl implements ShellCommand {
   #childProcess: ChildProcess
   #timeoutId: NodeJS.Timeout | null = null
   #sizeWatchdog: NodeJS.Timeout | null = null
+  /** densable #l — wall-clock cap timer after background({capMs}) */
+  #bgCapTimeout: NodeJS.Timeout | null = null
   #killedForSize = false
   #maxOutputBytes: number
   #abortSignal: AbortSignal
   #onTimeoutCallback:
-    | ((backgroundFn: (taskId: string) => boolean) => void)
+    | ((
+        backgroundFn: (
+          taskId: string,
+          options?: ShellBackgroundOptions,
+        ) => boolean,
+      ) => void)
     | undefined
   #timeout: number
   #shouldAutoBackground: boolean
@@ -215,7 +238,12 @@ class ShellCommandImpl implements ShellCommand {
 
   readonly result: Promise<ExecResult>
   readonly onTimeout?: (
-    callback: (backgroundFn: (taskId: string) => boolean) => void,
+    callback: (
+      backgroundFn: (
+        taskId: string,
+        options?: ShellBackgroundOptions,
+      ) => boolean,
+    ) => void,
   ) => void
 
   constructor(
@@ -290,6 +318,7 @@ class ShellCommandImpl implements ShellCommand {
   // the result promise to resolve. They clean up when the child process exits.
   #cleanupListeners(): void {
     this.#clearSizeWatchdog()
+    this.#clearBgCapTimeout()
     const timeoutId = this.#timeoutId
     if (timeoutId) {
       clearTimeout(timeoutId)
@@ -299,6 +328,13 @@ class ShellCommandImpl implements ShellCommand {
     if (boundAbortHandler) {
       this.#abortSignal.removeEventListener('abort', boundAbortHandler)
       this.#boundAbortHandler = null
+    }
+  }
+
+  #clearBgCapTimeout(): void {
+    if (this.#bgCapTimeout) {
+      clearTimeout(this.#bgCapTimeout)
+      this.#bgCapTimeout = null
     }
   }
 
@@ -425,19 +461,41 @@ class ShellCommandImpl implements ShellCommand {
     this.#doKill()
   }
 
-  background(taskId: string): boolean {
+  /**
+   * densable ShellCommand.background(e, t) — mid-flight FG→BG transition.
+   * Options: capMs arms densable #l kill timer; skipSpill skips pipe spill.
+   */
+  background(taskId: string, options?: ShellBackgroundOptions): boolean {
     if (this.#status === 'running') {
       this.#backgroundTaskId = taskId
       this.#status = 'backgrounded'
+      // Clear FG timeout/abort listeners; keep exit/error for result promise.
+      // Note: #cleanupListeners also clears any prior bg cap (none on first bg).
       this.#cleanupListeners()
       if (this.taskOutput.stdoutToFile) {
         // File mode: child writes directly to the fd with no JS involvement.
         // The foreground timeout is gone, so watch file size to prevent
         // a stuck append loop from filling the disk (768GB incident).
         this.#startSizeWatchdog()
-      } else {
+      } else if (!options?.skipSpill) {
         // Pipe mode: spill the in-memory buffer so readers can find it on disk.
+        // densable: else if (!t?.skipSpill) this.taskOutput.spillToDisk()
         this.taskOutput.spillToDisk()
+      }
+      // densable: if (t?.capMs) this.#l = setTimeout(kill, capMs).unref()
+      if (options?.capMs !== undefined && options.capMs > 0) {
+        this.#bgCapTimeout = setTimeout(
+          (self: ShellCommandImpl) => {
+            self.#bgCapTimeout = null
+            // densable #A — kill when wall-clock cap elapses
+            if (self.#status === 'backgrounded') {
+              self.#doKill(SIGKILL)
+            }
+          },
+          options.capMs,
+          this,
+        ) as NodeJS.Timeout
+        this.#bgCapTimeout.unref?.()
       }
       return true
     }
@@ -504,7 +562,10 @@ class AbortedShellCommand implements ShellCommand {
     })
   }
 
-  background(): boolean {
+  background(
+    _backgroundTaskId?: string,
+    _options?: ShellBackgroundOptions,
+  ): boolean {
     return false
   }
 
@@ -535,7 +596,10 @@ export function createFailedCommand(preSpawnError: string): ShellCommand {
       preSpawnError,
     }),
     taskOutput,
-    background(): boolean {
+    background(
+      _backgroundTaskId?: string,
+      _options?: ShellBackgroundOptions,
+    ): boolean {
       return false
     },
     kill(): void {},
@@ -645,7 +709,10 @@ class AdoptedShellCommand implements ShellCommand {
     return this.#status
   }
 
-  background(_backgroundTaskId: string): boolean {
+  background(
+    _backgroundTaskId: string,
+    _options?: ShellBackgroundOptions,
+  ): boolean {
     return true
   }
 

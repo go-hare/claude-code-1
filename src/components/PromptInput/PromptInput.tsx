@@ -78,14 +78,28 @@ import { logForDebugging } from '../../utils/debug.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
 import { type EffortLevel, isUltracodeModeActive } from '../../utils/effort.js';
 import { env } from '../../utils/env.js';
+import {
+  applyLeftArrowGestureDecision,
+  createLeftArrowGestureState,
+  decideLeftArrowEmptyGesture,
+  LEFT_ARROW_AGAIN_NOTIFICATION_KEY,
+  LEFT_ARROW_ARM_WINDOW_MS,
+  LEFT_ARROW_ATTACH_HINT,
+  LEFT_ARROW_CONFIRM_HINT,
+  noteLeftArrowInputEmptied,
+} from '../../utils/leftArrowGesture.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { errorMessage } from '../../utils/errors.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import {
+  applyFastModeOnModelSwitch,
+  clearFastModeCooldown,
   getFastModeUnavailableReason,
   isFastModeAvailable,
   isFastModeCooldown,
   isFastModeEnabled,
   isFastModeSupportedByModel,
+  resolveFastModeAfterModelSwitch,
 } from '../../utils/fastMode.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import type { PromptInputHelpers } from '../../utils/handlePromptSubmit.js';
@@ -260,8 +274,7 @@ function sendBgDetachRequest(): void {
   process.stdout.write(DETACH_MSG_PREFIX + msg + DETACH_ST + DETACH_SEQ);
 }
 
-/** Timeout for "← again for agents" double-press (ms) — official zM5 */
-const LEFT_ARROW_AGAIN_TIMEOUT = 800;
+// densable 2.1.218 #4: LEFT_ARROW_AGAIN_TIMEOUT removed — idp/sdp owns arm window (Dzs=3000)
 
 function PromptInput({
   debug,
@@ -322,7 +335,15 @@ function PromptInput({
   }>({ show: false });
   const [cursorOffset, setCursorOffset] = useState<number>(input.length);
   const [leftArrowHintShown, setLeftArrowHintShown] = useState(false);
-  const leftArrowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** densable odp/idp/sdp gesture state (2.1.218 editing-quiet confirm) */
+  const leftArrowGestureRef = useRef(createLeftArrowGestureState());
+  const leftArrowArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevInputForLeftArrowRef = useRef(input);
+  // densable: stamp editedEmptyAtMs when text goes non-empty → empty
+  if (prevInputForLeftArrowRef.current !== '' && input === '') {
+    noteLeftArrowInputEmptied(leftArrowGestureRef.current);
+  }
+  prevInputForLeftArrowRef.current = input;
   // Track the last input value set via internal handlers so we can detect
   // external input changes (e.g. speech-to-text injection) and move cursor to end.
   const lastInternalInputRef = React.useRef(input);
@@ -2406,26 +2427,27 @@ function PromptInput({
   // from visually "jumping" when notifications arrive.
   const handleModelSelect = useCallback(
     (model: string | null, _effort: EffortLevel | undefined) => {
-      let wasFastModeDisabled = false;
+      // densable 2.1.218 #31 — Rft/uU/dU on hotkey model picker
+      if (isFastModeEnabled()) {
+        clearFastModeCooldown();
+      }
+      let suffix = '';
       setAppState(prev => {
-        wasFastModeDisabled = isFastModeEnabled() && !isFastModeSupportedByModel(model) && !!prev.fastMode;
+        const nextFast = resolveFastModeAfterModelSwitch(model, prev.fastMode);
+        const billed = isBilledAsExtraUsage(model, nextFast, isOpus1mMergeEnabled());
+        const applied = applyFastModeOnModelSwitch(model, prev.fastMode, {
+          billedAsExtraUsage: billed,
+        });
+        suffix = applied.suffix;
         return {
           ...prev,
           mainLoopModel: model,
           mainLoopModelForSession: null,
-          // Turn off fast mode if switching to a model that doesn't support it
-          ...(wasFastModeDisabled && { fastMode: false }),
+          ...(applied.changed ? { fastMode: applied.nextFastMode } : null),
         };
       });
       setShowModelPicker(false);
-      const effectiveFastMode = (isFastMode ?? false) && !wasFastModeDisabled;
-      let message = `Model set to ${modelDisplayString(model)}`;
-      if (isBilledAsExtraUsage(model, effectiveFastMode, isOpus1mMergeEnabled())) {
-        message += ' · Billed as extra usage';
-      }
-      if (wasFastModeDisabled) {
-        message += ' · Fast mode OFF';
-      }
+      const message = `Model set to ${modelDisplayString(model)}${suffix}`;
       addNotification({
         key: 'model-switched',
         jsx: <Text>{message}</Text>,
@@ -2436,7 +2458,7 @@ function PromptInput({
         model: model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       });
     },
-    [setAppState, addNotification, isFastMode],
+    [setAppState, addNotification],
   );
 
   const handleModelCancel = useCallback(() => {
@@ -2659,29 +2681,87 @@ function PromptInput({
     onHistoryDown: handleHistoryDown,
     onHistoryReset: resetHistory,
     onLeftArrowOnEmpty: process.env.CLAUDE_BG_BACKEND === 'daemon' ? sendBgDetachRequest : onLeftArrowOnEmptyProp,
+    // densable 2.1.218 #4: idp/sdp editing-quiet confirm (not always-on 800ms double-press)
     onLeftArrowOnEmptyMessage:
       process.env.CLAUDE_BG_BACKEND === 'daemon'
         ? undefined
         : onLeftArrowOnEmptyProp
           ? (show: boolean) => {
-              if (show) {
-                if (leftArrowHintShown) {
-                  // Second press within timeout — trigger the action
-                  if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
-                  leftArrowTimerRef.current = null;
-                  setLeftArrowHintShown(false);
-                  onLeftArrowOnEmptyProp();
-                } else {
-                  // First press — show hint, start timer
-                  setLeftArrowHintShown(true);
-                  if (leftArrowTimerRef.current) clearTimeout(leftArrowTimerRef.current);
-                  leftArrowTimerRef.current = setTimeout(() => {
-                    setLeftArrowHintShown(false);
-                    leftArrowTimerRef.current = null;
-                  }, LEFT_ARROW_AGAIN_TIMEOUT);
-                }
-              } else {
+              if (!show) {
                 setLeftArrowHintShown(false);
+                removeNotification(LEFT_ARROW_AGAIN_NOTIFICATION_KEY);
+                if (leftArrowArmTimerRef.current) {
+                  clearTimeout(leftArrowArmTimerRef.current);
+                  leftArrowArmTimerRef.current = null;
+                }
+                return;
+              }
+              const now = Date.now();
+              const editingGuard = getFeatureValue_CACHED_MAY_BE_STALE('tengu_left_arrow_editing_guard', true);
+              const decision = decideLeftArrowEmptyGesture(
+                leftArrowGestureRef.current,
+                now,
+                true, // soloKeypress — empty + offset 0 path only reaches here
+                editingGuard,
+              );
+              applyLeftArrowGestureDecision(leftArrowGestureRef.current, decision, now);
+              switch (decision) {
+                case 'fire': {
+                  setLeftArrowHintShown(false);
+                  removeNotification(LEFT_ARROW_AGAIN_NOTIFICATION_KEY);
+                  if (leftArrowArmTimerRef.current) {
+                    clearTimeout(leftArrowArmTimerRef.current);
+                    leftArrowArmTimerRef.current = null;
+                  }
+                  onLeftArrowOnEmptyProp();
+                  break;
+                }
+                case 'arm': {
+                  setLeftArrowHintShown(true);
+                  addNotification({
+                    key: LEFT_ARROW_AGAIN_NOTIFICATION_KEY,
+                    text: LEFT_ARROW_CONFIRM_HINT,
+                    priority: 'immediate',
+                    timeoutMs: LEFT_ARROW_ARM_WINDOW_MS,
+                  });
+                  logEvent('tengu_left_arrow_blocked', {
+                    reason: 'editing-quiet' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  });
+                  if (leftArrowArmTimerRef.current) {
+                    clearTimeout(leftArrowArmTimerRef.current);
+                  }
+                  leftArrowArmTimerRef.current = setTimeout(() => {
+                    setLeftArrowHintShown(false);
+                    leftArrowArmTimerRef.current = null;
+                  }, LEFT_ARROW_ARM_WINDOW_MS);
+                  break;
+                }
+                case 'absorb':
+                  // densable: double-tap absorb — no-op
+                  break;
+                case 'attach-arm': {
+                  setLeftArrowHintShown(true);
+                  addNotification({
+                    key: LEFT_ARROW_AGAIN_NOTIFICATION_KEY,
+                    text: LEFT_ARROW_ATTACH_HINT,
+                    priority: 'immediate',
+                    timeoutMs: LEFT_ARROW_ARM_WINDOW_MS,
+                  });
+                  logEvent('tengu_left_arrow_blocked', {
+                    reason: 'attach-quiet-hint' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  });
+                  break;
+                }
+                case 'attach-absorb':
+                  logEvent('tengu_left_arrow_blocked', {
+                    reason: 'attach-quiet' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  });
+                  break;
+                case 'reject':
+                  logEvent('tengu_left_arrow_blocked', {
+                    reason: 'not-solo' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  });
+                  break;
               }
             }
           : undefined,

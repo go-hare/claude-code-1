@@ -1,0 +1,138 @@
+# densable 2.1.218 #12 — spurious [Request interrupted by user] + unpaired tool_use
+# Binary: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+# Extracted: 2026-08-07
+
+## Changelog
+Fixed spurious "[Request interrupted by user]" messages after interrupted tool
+calls, and an unpaired tool_use block left in the transcript when a tool aborted
+mid-response.
+
+## densable symbols / control flow
+
+### Constants (messages)
+```
+var sG="[Request interrupted by user]",
+    GI="[Request interrupted by user for tool use]",
+    hK="The user doesn't want to take this action right now. STOP ...",
+    aG="API Error: Request was aborted.",
+    EPy="[Tool result missing due to internal error]",
+    Ddt="The user doesn't want to proceed with this tool use. ...",  // REJECT_MESSAGE
+    ond="User rejected tool use"
+XZc=[sG,GI,hK]
+```
+
+### Tse = createUserInterruptionMessage
+```
+function Tse({toolUse:e=!1,interruptedMessageId:t,interruptedByShutdown:r,now:n,uuidFn:o}){
+  return jr({content:[{type:"text",text:e?GI:sG}],
+    interruptedMessageId:t,interruptedByShutdown:r,now:n,uuidFn:o})
+}
+```
+
+### m0e / Cxg — suppress spurious interrupt marker (core of #12 spurious half)
+```
+// abortController module
+function jR(e){ /* DOMException AbortError cache */ }
+function P_(e){ return e instanceof DOMException && e.name==="AbortError" ? e.message : e }
+function m0e(e){ return Cxg.has(P_(e)) }
+function Ede(e){ return P_(e.reason)==="shutdown" ? !0 : void 0 }
+Cxg = new Set(["interrupt","refusal-fallback-edit"])
+// interrupt = submit-interrupt (queued user message follows)
+// refusal-fallback-edit = refusal dialog "edit prompt" abort — not user cancel
+```
+
+### Arn — optional interruptedMessageId (Esc cancelled API msg_*)
+```
+function Arn(e){
+  if(e.agentId) return;
+  let t=P_(e.abortController.signal.reason);
+  if(t!=="user-cancel"&&t!=="remote-cancel") return;
+  return s5e()??void 0  // last streaming API message id
+}
+```
+
+### Query abort emit sites (gate with !m0e before Tse)
+- aborted_streaming: toolUse:!1 + interruptedMessageId:Arn + interruptedByShutdown:Ede
+- aborted_tools:     toolUse:!0 + same
+- stopHooks pre_stop cancelled: toolUse:!1
+- end-turn / PostToolBatch abort paths similarly
+
+### StreamingToolExecutor — unpaired tool_use mid-response (core of #12 pairing half)
+```
+createSyntheticErrorMessage(e,t,r){
+  if(t==="user_interrupted")
+    return jr({content:[{type:"tool_result",content:Idt(Ddt),is_error:!0,tool_use_id:e}],
+      toolUseResult:ond,toolDenialKind:"user-rejected",sourceToolAssistantUUID:r.uuid,...});
+  if(t==="conversation_ended") ... Cancelled: Claude ended the conversation ...
+  return ... Streaming fallback - tool execution discarded ...
+}
+getAbortReason(e){
+  if(this.discarded) return "streaming_fallback";
+  if(abort){
+    if(P_(reason)==="interrupt")
+      return getToolInterruptBehavior(e)==="cancel" ? "user_interrupted" : null;
+    if(P_(reason)==="end_conversation") return e.block.name===EndConversation?null:"conversation_ended";
+    return "user_interrupted";
+  }
+  return null;
+}
+// executeTool: if getAbortReason before/during run → push synthetic tool_result, no unpaired tool_use
+// getRemainingResults drains all tools so query abort path always pairs
+```
+
+### query abort_streaming drain
+```
+if(abortController.signal.aborted){
+  // drain streamingToolExecutor.getRemainingResults() → synthetic tool_results
+  // OR yield* Nx_ (yieldMissingToolResultBlocks) with is_error tool_results
+  if(!m0e(reason)) yield Tse({toolUse:!1,...});
+  return {reason:"aborted_streaming"}
+}
+// after tool execution:
+if(abort){
+  if(!m0e(reason)) yield Tse({toolUse:!0,...});
+  return {reason:"aborted_tools"}
+}
+```
+
+### OJd = ensureToolResultPairing (API safety net)
+```
+function OJd(e){
+  // strip orphan tool_result without preceding assistant
+  //   empty → "[Orphaned tool result removed due to conversation resume]" if first msg
+  // dedupe tool_use ids across messages; strip orphan server_tool_use/mcp_tool_use
+  //   if strip between thinking/redacted_thinking sandwich → [{type:"text",text:"[Tool use removed]"}]
+  //   if content empty → [{type:"text",text:"[Tool use interrupted]"}]
+  // missing tool_result → synthetic {type:"tool_result",content:EPy,is_error:!0}
+  // orphan/dup tool_result in following user → strip
+  // log tengu_tool_result_pairing_repaired / strict mode throws
+}
+```
+
+### psn = cancelled tool_result helper (pre-tool hooks)
+```
+function psn(e){ return {type:"tool_result",content:hK,is_error:!0,tool_use_id:e} }
+```
+
+## Local mapping (HAVE)
+
+| densable | local |
+|----------|--------|
+| m0e / Cxg | `shouldSuppressInterruptionMessage` in `src/utils/abortController.ts` — Set interrupt + refusal-fallback-edit |
+| Ede | `isShutdownAbortReason` |
+| Tse | `createUserInterruptionMessage` in `src/utils/messages.ts` |
+| sG / GI / hK / EPy / Ddt | INTERRUPT_MESSAGE*, CANCEL_MESSAGE, SYNTHETIC_TOOL_RESULT_PLACEHOLDER, REJECT_MESSAGE |
+| query !m0e gates | `src/query.ts` aborted_streaming + aborted_tools; `src/query/stopHooks.ts` |
+| StreamingToolExecutor synthetic | `src/services/tools/StreamingToolExecutor.ts` createSyntheticErrorMessage / getAbortReason |
+| getRemainingResults drain | `src/query.ts` abort_streaming path |
+| Nx_ | `yieldMissingToolResultBlocks` in `src/query.ts` |
+| OJd | `ensureToolResultPairing` in `src/utils/messages.ts` |
+| tests | `src/utils/__tests__/interruptSuppress.218.test.ts` |
+
+## Residual micro-deltas (not blocking HAVE)
+1. densable OJd thinking-sandwich → `[Tool use removed]` when stripping tool_use between thinking blocks; local filter-only (empty → `[Tool use interrupted]` only).
+2. densable Arn(interruptedMessageId) plumb on Tse call sites for user-cancel/remote-cancel; local fields exist on createUserInterruptionMessage but query paths only pass interruptedByShutdown.
+3. densable synthetic cancel may set toolDenialKind:"user-rejected"; local user_interrupted path uses REJECT_MESSAGE without that field on all paths.
+
+## Verdict
+HAVE — both changelog halves implemented 1:1 at control-flow level (suppress set + synthetic pairing on mid-response abort). implementNow=false.

@@ -602,6 +602,31 @@ export type GlobalConfig = {
   // undefined = use default (see getRemoteControlAtStartup() for precedence)
   remoteControlAtStartup?: boolean
 
+  /**
+   * densable multi-env Remote Control server list (OWs / qpn / jpn).
+   * Array of {dir, name?, spawnMode?, ...} or legacy single object with dir.
+   * Managed by addRemoteControlServer / removeRemoteControlServer.
+   */
+  remoteControl?:
+    | Array<{
+        dir: string
+        name?: string
+        spawnMode?: 'same-dir' | 'worktree'
+        capacity?: number
+        permissionMode?: string
+        sandbox?: boolean
+        createSessionOnStart?: boolean
+      }>
+    | {
+        dir: string
+        name?: string
+        spawnMode?: 'same-dir' | 'worktree'
+        capacity?: number
+        permissionMode?: string
+        sandbox?: boolean
+        createSessionOnStart?: boolean
+      }
+
   // Cached extra usage disabled reason from the last API response
   // undefined = no cache, null = extra usage enabled, string = disabled reason.
   cachedExtraUsageDisabledReason?: string | null

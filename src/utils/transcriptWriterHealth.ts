@@ -172,6 +172,47 @@ export function resetTranscriptWriterHealthForTest(): void {
   emit()
 }
 
+/**
+ * densable wZd — when setSessionFile moves the active jsonl path, remap
+ * writer-health stamps so consecutive-failure tracking follows the new file.
+ * Also remaps the session sidecar dir (`foo.jsonl` → `foo/`).
+ */
+export function remapTranscriptWriterPaths(
+  from: string | null,
+  to: string | null,
+): void {
+  if (from === null || from === to) return
+  const sideOf = (p: string): string | null =>
+    p.endsWith('.jsonl') ? `${p.slice(0, -6)}/` : null
+  const fromSide = sideOf(from)
+  const toSide = to === null ? null : sideOf(to)
+  const mapPath = (p: string): string | null => {
+    if (p === from) return to
+    if (fromSide !== null && p.startsWith(fromSide)) {
+      return toSide === null ? null : toSide + p.slice(fromSide.length)
+    }
+    return p
+  }
+  for (const [key, stamp] of Array.from(failureByPath.entries())) {
+    const next = mapPath(key)
+    if (next !== key) {
+      failureByPath.delete(key)
+      if (next !== null) failureByPath.set(next, stamp)
+    }
+  }
+  if (degraded !== null) {
+    const next = mapPath(degraded.filePath)
+    if (next !== degraded.filePath) {
+      if (next === null) {
+        degraded = null
+      } else {
+        degraded = { ...degraded, filePath: next }
+      }
+      emit()
+    }
+  }
+}
+
 /** densable woS human labels */
 export const TRANSCRIPT_ERRNO_LABELS: Record<string, string> = {
   ENOSPC: 'disk full',

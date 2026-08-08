@@ -7,7 +7,7 @@ import type { FocusEvent } from '../core/events/focus-event.js'
 import type { KeyboardEvent } from '../core/events/keyboard-event.js'
 import type { PasteEvent } from '../core/events/paste-event.js'
 import type { Styles, TextStyles } from '../core/styles.js'
-import type { DOMElement } from '../core/dom.js'
+import type { DOMAccessibility, DOMElement } from '../core/dom.js'
 
 declare global {
   namespace JSX {
@@ -16,6 +16,7 @@ declare global {
         ref?: Ref<DOMElement>
         tabIndex?: number
         autoFocus?: boolean
+        accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void
         onFocus?: (event: FocusEvent) => void
         onFocusCapture?: (event: FocusEvent) => void
@@ -36,6 +37,7 @@ declare global {
       'ink-text': {
         style?: Styles
         textStyles?: TextStyles
+        accessibility?: DOMAccessibility
         children?: ReactNode
       }
       'ink-link': {

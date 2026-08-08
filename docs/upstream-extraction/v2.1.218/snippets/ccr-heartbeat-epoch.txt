@@ -1,0 +1,47 @@
+# densable 2.1.218 #36 — stop heartbeat after worker replace
+
+Source: /tmp/official-218/plat/package/claude
+
+## Official changelog
+
+> Fixed remote sessions continuing to send heartbeats after their worker was
+> replaced, which left long-lived desktop and IDE processes retrying a
+> rejected request every few seconds forever
+
+## densable
+
+```js
+// request — after non-2xx, if already closed, do NOT handle 409/auth exit
+if(l.body?.cancel(),this.closed)return{ok:!1,status:l.status,reason:`http_${l.status}`};
+if(l.status===409)this.handleEpochMismatch();
+
+// startHeartbeat
+startHeartbeat(){if(this.stopHeartbeat(),this.closed)return; ...}
+
+// sendHeartbeat
+async sendHeartbeat(){
+  if(this.closed){this.stopHeartbeat();return}
+  if(this.heartbeatInFlight)return;
+  ...
+}
+
+// close
+closeExceptInternalEvents(){
+  if(this.closed=!0,this.stopHeartbeat(),...)
+}
+
+// epoch mismatch
+handleEpochMismatch(){
+  C("CCRClient: Epoch mismatch (409), shutting down",{level:"error"});
+  ...
+  this.onEpochMismatch()
+}
+```
+
+## Local mapping (ccrClient.ts)
+
+- `request`: early-return on `this.closed` before 409/auth exit paths
+- `startHeartbeat`: no-op when closed
+- `sendHeartbeat`: stop + return when closed
+- `handleEpochMismatch`: set `closed=true` + `stopHeartbeat()` before exit
+- `close()` already stopped heartbeat; now in-flight responses cannot re-exit

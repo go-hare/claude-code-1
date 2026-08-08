@@ -56,6 +56,10 @@ import {
   type CacheSafeParams,
   createSubagentContext,
 } from 'src/utils/forkedAgent.js'
+import {
+  isAgentHooksOriginTrusted,
+  logAgentHooksOriginUntrusted,
+} from 'src/utils/hooks/agentHooksOriginTrust.js'
 import { registerFrontmatterHooks } from 'src/utils/hooks/registerFrontmatterHooks.js'
 import { clearSessionHooks } from 'src/utils/hooks/sessionHooks.js'
 import { executeSubagentStartHooks } from 'src/utils/hooks.js'
@@ -657,14 +661,21 @@ export async function* runAgent({
   const hooksAllowedForThisAgent =
     !isRestrictedToPluginOnly('hooks') ||
     isSourceAdminTrusted(agentDefinition.source)
+  // densable 2.1.218 #22: frontmatter hooks also require origin-folder trust
+  // (mvo). Admin-trusted / userSettings / flagSettings pass; otherwise the
+  // definition's baseDir (or cwd) must have hasTrustDialogAccepted.
   if (agentDefinition.hooks && hooksAllowedForThisAgent) {
-    registerFrontmatterHooks(
-      rootSetAppState,
-      agentId,
-      agentDefinition.hooks,
-      `agent '${agentDefinition.agentType}'`,
-      true, // isAgent - converts Stop to SubagentStop
-    )
+    if (isAgentHooksOriginTrusted(agentDefinition)) {
+      registerFrontmatterHooks(
+        rootSetAppState,
+        agentId,
+        agentDefinition.hooks,
+        `agent '${agentDefinition.agentType}'`,
+        true, // isAgent - converts Stop to SubagentStop
+      )
+    } else {
+      logAgentHooksOriginUntrusted(agentDefinition, 'subagent')
+    }
   }
 
   // Preload skills from agent frontmatter

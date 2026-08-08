@@ -1,0 +1,52 @@
+# densable 2.1.218 #31 — model-switch fast mode announce (Rft/uU/dU)
+
+Source: /tmp/official-218/plat/package/claude
+
+## densable helpers
+
+```js
+// aE — isFastModeSupportedByModel (opus-4-7 / opus-4-8)
+function aE(e){if(!ml())return!1;let t=e??MN(),r=Si(t);if(F2(yo(r),"fast_mode"))return!0;let n=r.toLowerCase();return n.includes("opus-4-7")||n.includes("opus-4-8")}
+
+// d9r — settings auto-enable
+function d9r(e){if(!ml())return!1;if(!bH(e))return!1;if(!aE(e))return!1;return AUi(oo())}
+
+// uU — next fast after model switch
+function uU(e,t){if(qs()){if(e===null)return!!t;return!!t&&aE(e)}if(!aE(e))return!1;return!!t||d9r(e)}
+
+// dU — analytics
+function dU(e,t){if(!!e===t)return;M("tengu_fast_mode_toggled",{enabled:t,source:me(t?"model_switch_restore":"model_switch_downgrade"),remote:CT()})}
+
+// Rft — announcement suffixes (order: ON → billing → OFF)
+function Rft(e,t,r,n){let o=ml(),i=o&&t&&(!e||n?.announceKeptOn===!0),s=o&&!!e&&!t;return(i?" · Fast mode ON":"")+(aFs(r,t,NM())?" · Draws from usage credits":"")+(s?" · Fast mode OFF":"")}
+```
+
+## Config path (`tengu_config_model_changed`)
+
+```js
+async function O(U){M("tengu_config_model_changed",{from_model:c,to_model:U});...
+  w((K)=>(G=!!K.fastMode,j=ml()?uU(U,K.fastMode):G,{...K,mainLoopModel:U,mainLoopModelForSession:null,...j!==G&&{fastMode:j}})),dU(G,j);let J=Rft(G,j,U);x((K)=>{let Y=L8(U)+J+...
+```
+
+## Hotkey picker
+
+```js
+ht((Ef)=>(qo=!!Ef.fastMode,Ba=ml()?uU(jt,Ef.fastMode):qo,{...Ef,mainLoopModel:jt,mainLoopModelForSession:null,...Ba!==qo&&{fastMode:Ba}})),dU(qo,Ba),...
+$p+=Rft(qo,Ba,jt),jd({key:"model-switched",...
+```
+
+## Notice copy
+
+`(/fast). Switching to other models turns off fast mode.`
+
+## Local mapping
+
+| densable | go-hare |
+| -------- | ------- |
+| `uU` | `resolveFastModeAfterModelSwitch` |
+| `dU` | `logFastModeModelSwitchToggle` |
+| `Rft` | `formatModelSwitchFastModeSuffix` / `applyFastModeOnModelSwitch` |
+| `qs` | `isRemoteModelSwitchSession` (`getIsRemoteMode \|\| isReplBridgeActive`) |
+| billing | local keeps ` · Billed as extra usage` (existing product string) |
+
+Wired paths: Config `onChangeMainModelConfig`, PromptInput hotkey, `/model` picker + args, print `set_model`, useReplBridge `onSetModel`, print bridge `onSetModel`.

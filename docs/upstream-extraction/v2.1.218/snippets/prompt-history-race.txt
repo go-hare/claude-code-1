@@ -1,0 +1,100 @@
+# densable 2.1.218 #20 — prompt history race (drop/dup)
+
+Source: /tmp/official-218/plat/package/claude
+
+## Official changelog
+
+> Fixed prompt history entries being dropped or duplicated when history
+> writes raced or failed
+
+## densable flush (`gty`)
+
+```js
+async function gty(){
+  if(_Ie.length===0)return!0;
+  let e=_Ie.slice();           // SNAPSHOT pending
+  UFs=new Set(e);              // in-flight set for removeLast
+  let t;
+  try{
+    let r=qFs.join(cn(),"history.jsonl");
+    await ts().append(r,"",384);
+    t=await pb(r,{stale:1e4,retries:{retries:3,minTimeout:50},
+      onCompromised:(i)=>C(`History lock compromised: ${i}`,{level:"error"})});
+    let n=e.map((i)=>xe(i)+`\n`);
+    await ts().append(r,n.join(""),384);
+    let o=new Set(e);
+    return _Ie=_Ie.filter((i)=>!o.has(i)),  // drop ONLY snapshot after success
+           Te("history_save"),!0
+  }catch(r){
+    // pending kept for retry
+    if(C(`Failed to write prompt history: ${r}`),t)
+      Fe("history_save","history_save_write_failed");
+    else Fe("history_save","history_save_lock_failed");
+    return!1
+  }finally{
+    if(UFs=null,t)await t().catch(ke)
+  }
+}
+```
+
+## densable retry (`cLd`)
+
+```js
+async function cLd(e){
+  if(BFs||_Ie.length===0)return;
+  if(e>5)return;
+  BFs=!0; let t=!1;
+  try{t=await lLd()}  // lLd = mutex(gty)
+  finally{
+    if(BFs=!1,_Ie.length>0)await Tr(500),Rmr=cLd(t?0:e+1)
+    // success → reset retries; fail → increment
+  }
+}
+```
+
+## densable consecutive dedupe (`_ty`) + add (`yty`)
+
+```js
+function _ty({prev,next,project,sessionId}){
+  if(!prev||prev.display!==next.display)return!1;
+  if(prev.project!==project||prev.sessionId!==sessionId)return!1;
+  // both sides empty paste → suppress
+  ...
+}
+// on suppress: VDo=!0; return (no push)
+```
+
+## densable removeLast (`uLd`)
+
+```js
+function uLd(){
+  if(VDo){VDo=!1;return}
+  if(!jan)return;
+  let e=jan; jan=null;
+  let t=_Ie.lastIndexOf(e);
+  if(t!==-1){
+    _Ie.splice(t,1);
+    if(UFs?.has(e))$Fs.add(`${e.timestamp}\x00${e.sessionId??""}`)
+  }else $Fs.add(`${e.timestamp}\x00${e.sessionId??""}`)
+}
+```
+
+## Local gap (before fix)
+
+`immediateFlushHistory` did `pendingEntries = []` **before** `appendFile`.
+A concurrent `addToHistory` during the await could push an entry that was then
+discarded, or a failed append lost the snapshot permanently.
+
+## Local mapping
+
+| densable | go-hare |
+| -------- | ------- |
+| `_Ie` | `pendingEntries` |
+| `UFs` | `inFlightFlushEntries` |
+| `$Fs` | `skippedHistoryKeys` (`timestamp\0sessionId`) |
+| `VDo` | `lastAddWasDeduped` |
+| `jan` | `lastAddedEntry` |
+| `gty` | `immediateFlushHistory` (returns boolean) |
+| `cLd` | `flushPromptHistory` |
+| `_ty` | `isConsecutiveDuplicateHistory` |
+| `uLd` | `removeLastFromHistory` |

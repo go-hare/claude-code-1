@@ -28,12 +28,27 @@ export type ElementNames =
 
 export type NodeNames = ElementNames | TextName
 
+/**
+ * densable 2.1.218 screen-reader accessibility bag on DOM nodes
+ * (`TYr` / `aria-*` → `node.accessibility`).
+ */
+export type DOMAccessibility = {
+  hidden?: boolean
+  label?: string
+  role?: string
+  state?: Record<string, boolean | undefined>
+  /** densable `preserveWhitespace` — keep trailing spaces in SR line materialize */
+  preserveWhitespace?: boolean
+}
+
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export type DOMElement = {
   nodeName: ElementNames
   attributes: Record<string, DOMNodeAttribute>
   childNodes: DOMNode[]
   textStyles?: TextStyles
+  /** densable accessibility (not in attributes — separate field like event handlers) */
+  accessibility?: DOMAccessibility
 
   // Internal properties
   onComputeLayout?: () => void
@@ -273,6 +288,16 @@ export const setAttribute = (
     return
   }
   node.attributes[key] = value
+  markDirty(node)
+}
+
+/** densable `jus` — set accessibility bag without going through attributes. */
+export const setAccessibility = (
+  node: DOMElement,
+  accessibility: DOMAccessibility | undefined,
+): void => {
+  if (node.accessibility === accessibility) return
+  node.accessibility = accessibility
   markDirty(node)
 }
 

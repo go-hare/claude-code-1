@@ -29,6 +29,10 @@ import {
   getTeammateIdleHookMessage,
 } from '../utils/hooks.js'
 import {
+  isShutdownAbortReason,
+  shouldSuppressInterruptionMessage,
+} from '../utils/abortController.js'
+import {
   createStopHookSummaryMessage,
   createSystemMessage,
   createUserInterruptionMessage,
@@ -453,9 +457,21 @@ export async function* handleStopHooks(
 
           queryDepth: toolUseContext.queryTracking?.depth,
         })
-        yield createUserInterruptionMessage({
-          toolUse: false,
-        })
+        // densable m0e/Cxg — suppress spurious interrupt markers (2.1.218 #12)
+        if (
+          !shouldSuppressInterruptionMessage(
+            toolUseContext.abortController.signal.reason,
+          )
+        ) {
+          yield createUserInterruptionMessage({
+            toolUse: false,
+            interruptedByShutdown: isShutdownAbortReason(
+              toolUseContext.abortController.signal.reason,
+            )
+              ? true
+              : undefined,
+          })
+        }
         return { blockingErrors: [], preventContinuation: true }
       }
     }

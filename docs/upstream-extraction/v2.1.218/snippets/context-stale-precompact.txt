@@ -1,0 +1,52 @@
+# densable 2.1.218 #6 — /context stale pre-compact after message-picker compact
+
+Source: /tmp/official-218/plat/package/claude
+
+## Official changelog
+
+> Fixed `/context` reporting stale pre-compact token usage after compacting
+> from the message picker
+
+## densable
+
+```js
+// DS / GA / Z2o — slice from last compact_boundary
+function GA(e){return e?.type==="system"&&e.subtype==="compact_boundary"}
+function Z2o(e){for(let t=e.length-1;t>=0;t--){let r=e[t];if(r&&GA(r))return t}return-1}
+function DS(e,t){let r=Z2o(e);return r===-1?e:e.slice(r)}
+
+// /context jOb → qOb=DS, SIo(..., originalMessages:c)
+function qOb(e,t=[]){return DS(e)}
+// ... c=qOb(i,l); SIo(c,...,{originalMessages:c,...})
+
+// zfr = getCurrentUsage over originalMessages (last non-synthetic usage)
+// SIo: E=c??e; v=zfr(E); totalTokens prefers API usage when present
+
+// FIX: after partial compact from MessageSelector, zero kept assistants' usage
+function Edt(e){
+  if(e.type!=="assistant")return e;
+  return{...e,message:{...e.message,usage:{...e.message.usage,
+    input_tokens:0,output_tokens:0,
+    cache_creation_input_tokens:0,cache_read_input_tokens:0}}}
+}
+function Pid(e,t){
+  let r=e.messagesToKeep.map(Edt),
+      n=t==="up_to"?[...e.summaryMessages,...r]:[...r,...e.summaryMessages];
+  return[e.boundaryMarker,...n,...e.attachments,...e.hookResults]
+}
+// REPL: ig=Pid(tO,Dr); setMessages(ig)  (fullscreen 'from' splice variant)
+// Full compact cze does NOT map Edt (messagesToKeep usually empty).
+```
+
+## Local mapping
+
+| densable | local |
+|----------|--------|
+| DS / qOb | `getMessagesAfterCompactBoundary` |
+| zfr | `getCurrentUsage` |
+| SIo originalMessages | `analyzeContextUsage(..., originalMessages: apiView)` in context.tsx / collectContextData |
+| Edt | `zeroKeptAssistantUsage` |
+| Pid | `buildPartialPostCompactMessages` |
+| MessageSelector onSummarize | REPL.tsx uses Pid after `partialCompactConversation` |
+
+Root cause of stale report: partial compact keeps pre-pivot assistants with their **pre-compact** usage fields; `/context` prefers API usage over estimates → still shows old totals until next real turn.

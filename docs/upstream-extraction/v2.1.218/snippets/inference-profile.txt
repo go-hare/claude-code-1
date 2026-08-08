@@ -1,0 +1,27 @@
+# densable 2.1.218 #9 — application-inference-profile
+
+## Official changelog (gateway product)
+
+> Fixed gateway spend metering to price Bedrock application-inference-profile
+> ARNs and other config-mapped upstream model IDs at the configured model's rates
+
+SEA needles (gateway surface — **not** go-hare CLI path):
+- `x-gateway-spend-admin`
+- `spend meter has no exact rates for model '`
+
+## CLI cousin (HAVE in go-hare)
+
+```
+113400:application-inference-profile
+143427:application-inference-profile
+146409:application-inference-profile
+149324:application-inference-profile
+149643:. For Bedrock application-inference-profile ARNs with bearer-token auth, granting bedrock:GetInferenceProfile to the token avoids this round-trip.
+162048:application-inference-profile
+```
+
+Local: `getInferenceProfileBackingModel` + `extractModelIdFromArn` +
+`claude.ts` `resolvedModel` when `model.includes('application-inference-profile')`.
+Tests: `bedrockInferenceProfile.218.test.ts`.
+
+**Do not claim official #9 gateway metering as CLI HAVE.**

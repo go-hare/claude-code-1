@@ -1,0 +1,7 @@
+102978:deep-research
+125058:disableModelInvocation
+224487:disableModelInvocation
+224516:disableModelInvocation
+301819:// deep-research: Scope \u2192 pipeline(Search \u2192 URL-dedup \u2192 Fetch+Extract) \u2192 3-vote Verify \u2192 Synthesize
+301821:// Question is passed via Workflow({name: 'deep-research', args: '<question>'}).
+301888:  return { error: "No research question provided. Pass it as args: Workflow({name: 'deep-research', args: '<question>'})." }

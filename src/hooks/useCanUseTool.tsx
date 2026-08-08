@@ -105,9 +105,13 @@ function useCanUseTool(
             }
 
             const appState = toolUseContext.getAppState();
+            // densable bn: sticky layers for description-time permission context
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { getToolPermissionContextFromLayers } =
+              require('../engine/permissionLayerReaders.js') as typeof import('../engine/permissionLayerReaders.js');
             const description = await tool.description(input as never, {
               isNonInteractiveSession: toolUseContext.options.isNonInteractiveSession,
-              toolPermissionContext: appState.toolPermissionContext,
+              toolPermissionContext: getToolPermissionContextFromLayers(toolUseContext),
               tools: toolUseContext.options.tools,
             });
 

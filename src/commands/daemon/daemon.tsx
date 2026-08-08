@@ -4,10 +4,14 @@ import { DaemonInstallDialog, type DaemonInstallDialogChoice } from '../../compo
 import { setDaemonInstallPromptDismissed } from '../../daemon/installPrompt.js';
 
 /**
- * /daemon slash command — manages daemon and background sessions from the REPL.
+ * /daemon slash command — densable 2.1.218 DaemonHub + CLI subcommands.
  *
- * Subcommands: status | start | install | uninstall | stop | bg | attach | logs | kill
- * Default (no args): status
+ * densable SEA ~235628586 / ~240800295:
+ *   type local-jsx, name daemon, description "Manage background services and routines"
+ *   call d_T → HGa load → LGa hub (no args / hub)
+ *
+ * Subcommands: status | start | install | uninstall | stop | bg | attach | logs | kill | hub
+ * Default (no args): open densable DaemonHub (Scheduled + Remote Control tabs)
  *
  * `install` with no flags shows the official cold-start Dialog denser
  * (yes / once / never / no). `install --yes` skips the Dialog and installs.
@@ -17,12 +21,26 @@ export async function call(
   _context: LocalJSXCommandContext,
   args: string,
 ): Promise<React.ReactNode> {
-  const parts = args ? args.trim().split(/\s+/) : [];
-  const sub = parts[0] || 'status';
+  const parts = args ? args.trim().split(/\s+/).filter(Boolean) : [];
+  const sub = parts[0] || 'hub';
+
+  // densable d_T: bare /daemon or /daemon hub → interactive hub
+  if (sub === 'hub' || sub === '') {
+    const { DaemonHubDialog } = await import('../../components/DaemonHub/DaemonHubDialog.js');
+    return (
+      <DaemonHubDialog
+        onDone={(result, options) => {
+          onDone(result, options);
+        }}
+      />
+    );
+  }
 
   // attach is interactive/blocking — not available inside the REPL
   if (sub === 'attach') {
-    onDone('Use `claude daemon attach` from the CLI. Attach is not available inside the REPL.', { display: 'system' });
+    onDone('Use `claude daemon attach` from the CLI. Attach is not available inside the REPL.', {
+      display: 'system',
+    });
     return null;
   }
 

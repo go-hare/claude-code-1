@@ -179,12 +179,40 @@ export function getInitialFastModeSetting(model: ModelSetting): boolean {
   if (!isFastModeSupportedByModel(model)) {
     return false
   }
+  return settingsWantFastModeOn()
+}
+
+/**
+ * densable `AUi` — settings/policy want fast mode on (ignores model support).
+ */
+function settingsWantFastModeOn(): boolean {
   const settings = getInitialSettings()
-  // If per-session opt-in is required, fast mode starts off each session
-  if (settings.fastModePerSessionOptIn) {
+  if (settings.fastMode !== true) {
     return false
   }
-  return settings.fastMode === true
+  // Per-session opt-in: each session starts off unless flagSettings forces on.
+  if (settings.fastModePerSessionOptIn) {
+    if (
+      getSettingsForSource('policySettings')?.fastModePerSessionOptIn === true
+    ) {
+      return false
+    }
+    return getSettingsForSource('flagSettings')?.fastMode === true
+  }
+  return true
+}
+
+/**
+ * densable `d9r` — auto-enable fast on model switch when settings want it and
+ * the model supports + org allows fast mode.
+ */
+export function shouldAutoEnableFastModeForModel(
+  modelSetting: ModelSetting,
+): boolean {
+  if (!isFastModeEnabled()) return false
+  if (!isFastModeAvailable()) return false
+  if (!isFastModeSupportedByModel(modelSetting)) return false
+  return settingsWantFastModeOn()
 }
 
 export function isFastModeSupportedByModel(
@@ -195,10 +223,127 @@ export function isFastModeSupportedByModel(
   }
   const model = modelSetting ?? getDefaultMainLoopModelSetting()
   const parsedModel = parseUserSpecifiedModel(model)
+  const n = parsedModel.toLowerCase()
+  // densable `aE`: opus-4-7 / opus-4-8 (+ local opus-4-6 keep)
   return (
-    parsedModel.toLowerCase().includes('opus-4-7') ||
-    parsedModel.toLowerCase().includes('opus-4-6')
+    n.includes('opus-4-8') || n.includes('opus-4-7') || n.includes('opus-4-6')
   )
+}
+
+/**
+ * densable `qs` — remote session or live REPL Remote Control bridge.
+ * Remote model switches do not auto-enable fast from settings (`uU` branch).
+ */
+export function isRemoteModelSwitchSession(): boolean {
+  try {
+    const { getIsRemoteMode, isReplBridgeActive } =
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    return getIsRemoteMode() || isReplBridgeActive()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable `uU(model, prevFast)` — next fastMode after a model switch.
+ * - Remote: keep prev only if new model still supports; null model keeps prev.
+ * - Local: unsupported → off; supported → prev || settings auto-enable.
+ */
+export function resolveFastModeAfterModelSwitch(
+  model: ModelSetting,
+  prevFastMode: boolean | undefined,
+  opts?: { remoteSession?: boolean },
+): boolean {
+  if (!isFastModeEnabled()) {
+    return false
+  }
+  const prev = !!prevFastMode
+  const remote = opts?.remoteSession ?? isRemoteModelSwitchSession()
+  if (remote) {
+    if (model === null) return prev
+    return prev && isFastModeSupportedByModel(model)
+  }
+  if (!isFastModeSupportedByModel(model)) {
+    return false
+  }
+  return prev || shouldAutoEnableFastModeForModel(model)
+}
+
+/**
+ * densable `dU(prev, next)` — analytics when model switch flips fast mode.
+ */
+export function logFastModeModelSwitchToggle(
+  prevFastMode: boolean,
+  nextFastMode: boolean,
+): void {
+  if (!!prevFastMode === !!nextFastMode) return
+  logEvent('tengu_fast_mode_toggled', {
+    enabled: nextFastMode,
+    source: (nextFastMode
+      ? 'model_switch_restore'
+      : 'model_switch_downgrade') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    remote: isRemoteModelSwitchSession(),
+  })
+}
+
+export type FormatModelSwitchFastModeOptions = {
+  /** densable `announceKeptOn` — also emit ON when fast stayed on. */
+  announceKeptOn?: boolean
+  /**
+   * When provided, used for the billing suffix instead of computing.
+   * densable `aFs` maps to local `isBilledAsExtraUsage` at call sites.
+   */
+  billedAsExtraUsage?: boolean
+}
+
+/**
+ * densable `Rft(prevFast, nextFast, model, opts?)` — announcement suffixes for
+ * model-switch feedback (` · Fast mode ON/OFF` + optional billing).
+ *
+ * Order (densable): ON → billing → OFF.
+ */
+export function formatModelSwitchFastModeSuffix(
+  prevFastMode: boolean,
+  nextFastMode: boolean,
+  opts?: FormatModelSwitchFastModeOptions,
+): string {
+  if (!isFastModeEnabled()) {
+    // Still allow billing-only suffix when caller passes it.
+    return opts?.billedAsExtraUsage ? ' · Billed as extra usage' : ''
+  }
+  const announceOn =
+    !!nextFastMode && (!prevFastMode || opts?.announceKeptOn === true)
+  const announceOff = !!prevFastMode && !nextFastMode
+  let out = ''
+  if (announceOn) out += ' · Fast mode ON'
+  if (opts?.billedAsExtraUsage) out += ' · Billed as extra usage'
+  if (announceOff) out += ' · Fast mode OFF'
+  return out
+}
+
+/**
+ * Apply densable model-switch fast-mode transition to AppState fields.
+ * Returns `{ nextFastMode, suffix }` for the caller to append to UI text.
+ */
+export function applyFastModeOnModelSwitch(
+  model: ModelSetting,
+  prevFastMode: boolean | undefined,
+  opts?: {
+    remoteSession?: boolean
+    announceKeptOn?: boolean
+    billedAsExtraUsage?: boolean
+  },
+): { nextFastMode: boolean; suffix: string; changed: boolean } {
+  const prev = !!prevFastMode
+  const next = resolveFastModeAfterModelSwitch(model, prevFastMode, {
+    remoteSession: opts?.remoteSession,
+  })
+  logFastModeModelSwitchToggle(prev, next)
+  const suffix = formatModelSwitchFastModeSuffix(prev, next, {
+    announceKeptOn: opts?.announceKeptOn,
+    billedAsExtraUsage: opts?.billedAsExtraUsage,
+  })
+  return { nextFastMode: next, suffix, changed: prev !== next }
 }
 
 // --- Fast mode runtime state ---

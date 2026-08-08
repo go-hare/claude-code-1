@@ -8,11 +8,82 @@
  * external binaries with the same argv syntax).
  */
 
-import { getCommitCounter, getPrCounter } from 'src/bootstrap/state.js'
+import {
+  getCommitCounter,
+  getPendingPrLinks,
+  getPrCounter,
+  getSessionId,
+} from 'src/bootstrap/state.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+
+/** densable xv_ — max wait for pending PR-link flush on teardown */
+export const PENDING_PR_LINKS_FLUSH_MS = 2000
+
+/**
+ * densable NFr — race promise vs timeout; resolves void on timeout (never rejects).
+ */
+export function raceWithTimeout(
+  promise: Promise<unknown>,
+  ms: number,
+): Promise<void> {
+  return new Promise(resolve => {
+    let settled = false
+    const done = (): void => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    const t = setTimeout(done, ms)
+    t.unref?.()
+    void promise.then(done, done).finally(() => clearTimeout(t))
+  })
+}
+
+/**
+ * densable But — track a pending PR-link promise so teardown can await it.
+ * Swallows rejections; removes from set on settle.
+ */
+export function trackPendingPrLink(promise: Promise<unknown>): void {
+  const set = getPendingPrLinks()
+  const tracked = promise.catch(() => {})
+  set.add(tracked)
+  void tracked.finally(() => {
+    set.delete(tracked)
+  })
+}
+
+/**
+ * densable DZr — flush pending PR links with 2s cap (xv_).
+ * Call before process/session cleanup completes.
+ */
+export async function flushPendingPrLinks(): Promise<void> {
+  const set = getPendingPrLinks()
+  if (set.size === 0) return
+  await raceWithTimeout(Promise.allSettled([...set]), PENDING_PR_LINKS_FLUSH_MS)
+}
+
+/**
+ * densable IZr — emit optional code_change_published + await linkSessionToPR.
+ * Kept internal; callers schedule via trackPendingPrLink.
+ */
+async function linkSessionToPrInfo(prInfo: {
+  prNumber: number
+  prUrl: string
+  prRepository: string
+}): Promise<void> {
+  const { linkSessionToPR } = await import('src/utils/sessionStorage.js')
+  const sessionId = getSessionId()
+  if (!sessionId) return
+  await linkSessionToPR(
+    sessionId as `${string}-${string}-${string}-${string}-${string}`,
+    prInfo.prNumber,
+    prInfo.prUrl,
+    prInfo.prRepository,
+  )
+}
 
 /**
  * Build a regex that matches `git <subcmd>` while tolerating git's global
@@ -224,27 +295,18 @@ export function trackGitOperations(
   }
   if (prHit?.action === 'created') {
     getPrCounter()?.add(1)
-    // Auto-link session to PR if we can extract PR URL from stdout
+    // densable Ubo/But: track PR-link promise (not fire-and-forget) so DZr flush on exit
     if (stdout) {
       const prInfo = findPrInStdout(stdout)
       if (prInfo) {
-        // Import is done dynamically to avoid circular dependency
-        void import('src/utils/sessionStorage.js').then(
-          ({ linkSessionToPR }) => {
-            void import('src/bootstrap/state.js').then(({ getSessionId }) => {
-              const sessionId = getSessionId()
-              if (sessionId) {
-                void linkSessionToPR(
-                  sessionId as `${string}-${string}-${string}-${string}-${string}`,
-                  prInfo.prNumber,
-                  prInfo.prUrl,
-                  prInfo.prRepository,
-                )
-              }
-            })
-          },
-        )
+        trackPendingPrLink(linkSessionToPrInfo(prInfo))
       }
+    }
+  } else if (prHit && stdout) {
+    // densable: other PR actions with URL also IZr via But
+    const prInfo = findPrInStdout(stdout)
+    if (prInfo) {
+      trackPendingPrLink(linkSessionToPrInfo(prInfo))
     }
   }
   if (command.match(/\bglab\s+mr\s+create\b/)) {
@@ -253,6 +315,12 @@ export function trackGitOperations(
         'pr_create' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     getPrCounter()?.add(1)
+    if (stdout) {
+      const prInfo = findPrInStdout(stdout)
+      if (prInfo) {
+        trackPendingPrLink(linkSessionToPrInfo(prInfo))
+      }
+    }
   }
   // Detect PR creation via curl to REST APIs (Bitbucket, GitHub API, GitLab API)
   // Check for POST method and PR endpoint separately to handle any argument order
@@ -273,5 +341,11 @@ export function trackGitOperations(
         'pr_create' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     getPrCounter()?.add(1)
+    if (stdout) {
+      const prInfo = findPrInStdout(stdout)
+      if (prInfo) {
+        trackPendingPrLink(linkSessionToPrInfo(prInfo))
+      }
+    }
   }
 }

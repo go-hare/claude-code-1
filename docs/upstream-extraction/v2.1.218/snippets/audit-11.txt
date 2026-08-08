@@ -1,0 +1,136 @@
+# densable 2.1.218 #11 — engine teardown phantom turn + input after close rejected
+
+Binary: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+Changelog: Fixed an engine teardown race that could start and abandon a phantom turn, and made input pushed after close consistently rejected
+
+Status: **HAVE** (2026-08-08 Path A closed-gate control plane)
+Updated: 2026-08-08
+
+---
+
+## densable locus (1:1)
+
+Minified host/SDK **in-process** engine factory:
+
+```js
+function S8o({
+  run: e,
+  queryParams: t,
+  commands, models, agents, account, tools, skills, plugins,
+  onCommandLifecycle: x,
+  authDelegate: f,
+  mcpDelegate: u,
+  hostOwnsPermissionMode: D,
+  ...
+})
+```
+
+Island offset ~239135810 (`function S8o({run:`).
+Product surface: **shoji / Host embed** multi-turn engine (`shoji_engine` Te tag).
+
+Call sites (React Host REPL — not print.ts):
+- ~243994752 — REPL useState S8o({run:Sse, queryParams:...})
+- ~244083609 — Jul wrap REPL + `useEffect(()=>()=>f.close(),[f])`
+
+Separate densable surface (NOT this bug):
+- `[Query.streamInput] Starting to process input stream` (~208644064)
+  = SDK **client** feeding stdin to CLI process + `transport.endInput()`.
+
+---
+
+## densable closed-gate mechanics (extracted 1:1)
+
+### State
+
+| symbol | role |
+|--------|------|
+| `ae` | closed flag |
+| `H` | `new YZ` async intent queue |
+| `L` | mirror of pending turn intents (for lifecycle discard) |
+| `N` | current in-flight command uuid (or null) |
+| `q` | per-turn AbortController |
+| `he` | pending `command_lifecycle` frames to yield |
+| `x` / `onCommandLifecycle` | host callback |
+| `P` | turn count |
+
+### close (Ye)
+
+```js
+function Ye() { ae = !0; H.done() }
+```
+
+Wired on every teardown path:
+- `pt.return = (Ve) => (Ye(), st(Ve))`
+- `pt.throw  = (Ve) => (Ye(), De(Ve))`
+- `streamInput` finally Ye
+- public `close: Ye`
+- React unmount: `() => f.close()`
+
+### Intent dispatcher (Ke) — reject after close
+
+```js
+case "turn":
+  if (ae) {
+    C("[engine] dropped turn intent received after close()", { level: "warn" })
+    break // no L.push, no H.enqueue
+  }
+  L.push(Ve)
+  if (Ve.uuid !== void 0) he.push(Ae(Ve.uuid, "queued"))
+  H.enqueue(Ve)
+```
+
+### Teardown finally (Ne)
+
+```js
+async function* Ne() {
+  try { yield* Me() }
+  finally {
+    if (N !== null) Ie(N, "cancelled"), N = null
+    for (let Ve of L) if (Ve.uuid !== void 0) Ie(Ve.uuid, "discarded")
+    L.length = 0
+  }
+}
+```
+
+### Turn-end lifecycle (Y6o / WEo)
+
+```js
+function qdt(e){return e==="aborted_streaming"||e==="aborted_tools"}
+function fRs(e){/* error-class terminals true; max_turns/completed/… false */}
+function WEo(e){return qdt(e)||fRs(e)}
+function Y6o(e,t){return t||WEo(e)?"cancelled":"completed"}
+// Me end:
+ln=Ae(Ze.uuid, Er!==null?"cancelled":Y6o(qr,Ur)), N=null
+```
+
+### Race fixed (changelog meaning)
+
+Without `Ye()` **before** generator cleanup, late `Ke({type:"turn"})` can enqueue while Me winds down → started then abandoned (phantom turn). With closed-gate: late turns never enqueue; Ne finally marks cancelled/discarded.
+
+---
+
+## Local 1:1 map (Path A — HAVE)
+
+| densable | local | match |
+|----------|-------|-------|
+| `S8o` factory + H/L/ae | `src/engine/hostEngine.ts` `createHostEngine` | HAVE |
+| `Ye` close | `Ye()` + `close` / return / throw / streamInput finally | HAVE |
+| `Ke` drop after close | exact log `HOST_ENGINE_DROPPED_TURN_LOG` | HAVE |
+| `Me` + `Ne` finally cancelled/discarded | Me drain + Ne finally | HAVE |
+| `Y6o`/`WEo`/`qdt`/`fRs` | `resolveTurnLifecycleState` + taxonomy helpers | HAVE |
+| lifecycle states | `commandLifecycle.ts` + `coreSchemas` + `sdkEventQueue` | HAVE |
+| tests | `src/engine/__tests__/hostEngine.218.test.ts` (15) | HAVE |
+| React Host REPL `engine` prop wiring | not required for closed-gate HAVE; Host may wire later | residual product surface |
+| print.ts `inputClosed` | cousin only — not S8o | N/A for #11 claim |
+| QueryEngine one-shot | not S8o | N/A |
+
+### implementNow residual (non-blocking for #11 HAVE)
+
+- Optional: wire `createHostEngine` into a Host embed surface if/when local ships shoji-style React Host REPL with `engine` prop (densable Jul).
+- Optional: full Me yield-twin / result Kt envelope (product SDK stream shape) — orthogonal to closed-gate race.
+
+---
+
+## Verdict
+
+**HAVE** — densable S8o closed-gate control plane ported 1:1 under `src/engine/hostEngine.ts` with Y6o terminal lifecycle and pure tests covering drop-after-close, streamInput finally Ye, return→discard, interrupt still_queued, prepareTurn cancel, Y6o taxonomy.

@@ -8,6 +8,7 @@ import goodClaude from './commands/good-claude/index.js'
 import issue from './commands/issue/index.js'
 import feedback from './commands/feedback/index.js'
 import clear from './commands/clear/index.js'
+import cdCommand from './commands/cd/index.js'
 import color from './commands/color/index.js'
 import commit from './commands/commit.js'
 import copy from './commands/copy/index.js'
@@ -42,7 +43,10 @@ import pr_comments from './commands/pr_comments/index.js'
 import releaseNotes from './commands/release-notes/index.js'
 import rename from './commands/rename/index.js'
 import resume from './commands/resume/index.js'
-import review, { ultrareview } from './commands/review.js'
+import review, {
+  ultrareview,
+  ultrareviewNonInteractive,
+} from './commands/review.js'
 import session from './commands/session/index.js'
 import share from './commands/share/index.js'
 import skills from './commands/skills/index.js'
@@ -85,6 +89,16 @@ const bridge = feature('BRIDGE_MODE')
   : null
 const remoteControlServerCommand = feature('BRIDGE_MODE')
   ? require('./commands/remoteControlServer/index.js').default
+  : null
+const remoteControlAddServerCommand = feature('BRIDGE_MODE')
+  ? require('./commands/remoteControlAddServer/index.js').default
+  : null
+const remoteControlServersListCommand = feature('BRIDGE_MODE')
+  ? require('./commands/remoteControlServers/index.js').remoteControlServersList
+  : null
+const remoteControlServersRemoveCommand = feature('BRIDGE_MODE')
+  ? require('./commands/remoteControlServers/index.js')
+      .remoteControlServersRemove
   : null
 const voiceCommand = feature('VOICE_MODE')
   ? require('./commands/voice/index.js').default
@@ -255,6 +269,7 @@ import stickers from './commands/stickers/index.js'
 import advisor from './commands/advisor.js'
 import autonomy from './commands/autonomy.js'
 import provider from './commands/provider.js'
+import setupBedrock from './commands/setup-bedrock/index.js'
 import { logError } from './utils/log.js'
 import { toError } from './utils/errors.js'
 import { logForDebugging } from './utils/debug.js'
@@ -358,12 +373,14 @@ const COMMANDS = memoize((): Command[] => [
   localMemoryCommand,
   autonomy,
   provider,
+  setupBedrock,
   artifacts,
   agents,
   branch,
   btw,
   chrome,
   clear,
+  cdCommand,
   color,
   compact,
   config,
@@ -412,6 +429,7 @@ const COMMANDS = memoize((): Command[] => [
   feedback,
   review,
   ultrareview,
+  ultrareviewNonInteractive,
   rewind,
   securityReview,
   terminalSetup,
@@ -441,6 +459,11 @@ const COMMANDS = memoize((): Command[] => [
   ...(assistantCommand ? [assistantCommand] : []),
   ...(bridge ? [bridge] : []),
   ...(remoteControlServerCommand ? [remoteControlServerCommand] : []),
+  ...(remoteControlAddServerCommand ? [remoteControlAddServerCommand] : []),
+  ...(remoteControlServersListCommand ? [remoteControlServersListCommand] : []),
+  ...(remoteControlServersRemoveCommand
+    ? [remoteControlServersRemoveCommand]
+    : []),
   ...(voiceCommand ? [voiceCommand] : []),
   thinkback,
   thinkbackPlay,

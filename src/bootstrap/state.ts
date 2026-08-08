@@ -255,6 +255,13 @@ type State = {
   sdkDialogHostActive: boolean
   // Main thread agent type (from --agent flag or settings)
   mainThreadAgentType: string | undefined
+  /**
+   * densable mainThreadAgentHooks (b1r/fne) — frontmatter hooks from the
+   * session --agent definition, gated by origin trust (QEt/mvo).
+   */
+  mainThreadAgentHooks:
+    | import('../utils/settings/types.js').HooksSettings
+    | undefined
   // Remote mode (--remote flag)
   isRemoteMode: boolean
   /**
@@ -325,6 +332,12 @@ type State = {
   // logAPISuccess to tag the first post-compaction API call so we can
   // distinguish compaction-induced cache misses from TTL expiry.
   pendingPostCompaction: boolean
+  /**
+   * densable Lt.pendingPrLinks / eNn — in-flight PR-link promises flushed
+   * on process/session teardown (2.1.218 #16) so immediate exit does not
+   * drop pr-link transcript metadata.
+   */
+  pendingPrLinks: Set<Promise<unknown>>
 }
 
 // ALSO HERE - THINK THRICE BEFORE MODIFYING
@@ -470,6 +483,8 @@ function getInitialState(): State {
     sdkDialogHostActive: false,
     // Main thread agent type
     mainThreadAgentType: undefined,
+    // densable mainThreadAgentHooks
+    mainThreadAgentHooks: undefined,
     // Remote mode
     isRemoteMode: false,
     // densable FC — REPL Remote Control bridge live flag
@@ -502,6 +517,8 @@ function getInitialState(): State {
     lastMainRequestId: undefined,
     lastApiCompletionTimestamp: null,
     pendingPostCompaction: false,
+    // densable eNn — PR-link promise set flushed on teardown (2.1.218 #16)
+    pendingPrLinks: new Set<Promise<unknown>>(),
   }
 
   return state
@@ -512,6 +529,13 @@ const STATE: State = getInitialState()
 
 export function getSessionId(): SessionId {
   return STATE.sessionId
+}
+
+/**
+ * densable eNn() — process-global Set of in-flight PR-link promises.
+ */
+export function getPendingPrLinks(): Set<Promise<unknown>> {
+  return STATE.pendingPrLinks
 }
 
 /**
@@ -2001,6 +2025,20 @@ export function getMainThreadAgentType(): string | undefined {
 
 export function setMainThreadAgentType(agentType: string | undefined): void {
   STATE.mainThreadAgentType = agentType
+}
+
+/** densable fne — main-thread agent frontmatter hooks (after QEt trust gate). */
+export function getMainThreadAgentHooks():
+  | import('../utils/settings/types.js').HooksSettings
+  | undefined {
+  return STATE.mainThreadAgentHooks
+}
+
+/** densable b1r */
+export function setMainThreadAgentHooks(
+  hooks: import('../utils/settings/types.js').HooksSettings | undefined,
+): void {
+  STATE.mainThreadAgentHooks = hooks
 }
 
 export function getIsRemoteMode(): boolean {

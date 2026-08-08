@@ -7,7 +7,7 @@ import {
   isHostProxyEnvVar,
   isHostTransportSensitiveEnvVar,
   isProviderManagedEnvVar,
-  SAFE_ENV_VARS,
+  isSafeManagedEnv,
 } from './managedEnvConstants.js'
 import { clearMTLSCache } from './mtls.js'
 import { clearProxyCache, configureGlobalAgents } from './proxy.js'
@@ -424,7 +424,8 @@ export function applySafeConfigEnvironmentVariables(): void {
     'settings',
   )
   for (const [key, value] of Object.entries(settingsEnv)) {
-    if (SAFE_ENV_VARS.has(key.toUpperCase())) {
+    // densable B7t: LEh always-safe OR MEh when truthy
+    if (isSafeManagedEnv(key, value)) {
       process.env[key] = value
     }
   }

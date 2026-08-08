@@ -106,8 +106,8 @@ export function SpinnerAnimationRow({
   // densable Msn always animates countdown; keep the 50ms clock when status is set.
   const [viewportRef, time] = useAnimationFrame(reducedMotion && !retryStatus ? null : 50);
 
-  // === Elapsed time (wall-clock, derived from refs each frame) ===
-  const now = Date.now();
+  // densable #18: monotonic elapsed (performance.now) matching loadingStartTimeRef
+  const now = performance.now();
   const elapsedTimeMs =
     pauseStartTimeRef.current !== null
       ? pauseStartTimeRef.current - loadingStartTimeRef.current - totalPausedMsRef.current

@@ -13,10 +13,12 @@ import {
   insertBeforeNode,
   markDirty,
   removeChildNode,
+  setAccessibility,
   setAttribute,
   setStyle,
   setTextNodeValue,
   setTextStyles,
+  type DOMAccessibility,
   type TextNode,
 } from './dom.js'
 import { Dispatcher } from './events/dispatcher.js'
@@ -138,6 +140,12 @@ function applyProp(node: DOMElement, key: string, value: unknown): void {
 
   if (key === 'textStyles') {
     node.textStyles = value as TextStyles
+    return
+  }
+
+  // densable: accessibility is a separate DOM field (jus), not attributes
+  if (key === 'accessibility') {
+    setAccessibility(node, value as DOMAccessibility | undefined)
     return
   }
 
@@ -448,6 +456,11 @@ const reconciler = createReconciler<
 
         if (key === 'textStyles') {
           setTextStyles(node, value as TextStyles)
+          continue
+        }
+
+        if (key === 'accessibility') {
+          setAccessibility(node, value as DOMAccessibility | undefined)
           continue
         }
 

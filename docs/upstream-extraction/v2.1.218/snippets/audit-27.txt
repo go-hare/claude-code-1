@@ -1,0 +1,140 @@
+# densable 2.1.218 AUDIT #27 — sandbox IDE / shell command restrictions
+
+Changelog: "improved sandbox command restrictions for IDE interactions"
+Binary: /tmp/official-218/plat/package/claude (VERSION 2.1.218)
+
+## densable symbols (real bodies extracted)
+
+### p3 — unified shouldUseSandbox (module Opt @ ~235896451)
+```js
+function p3(e){
+  if(HH()&&PWe())return!0; // force sandbox under certain coordinator/enterprise path
+  if(!Fo.isSandboxingEnabled())return!1;
+  // Windows bash without Git Bash cannot wrap sandboxed child
+  if((e.shellType??"bash")==="bash"&&Ht()==="windows"&&cQ()===null)return!1;
+  if(e.dangerouslyDisableSandbox&&Fo.areUnsandboxedCommandsAllowed())return!1;
+  if(!e.command)return!1;
+  if(hxy(e.command))return!1; // full excludedCommands match after split/strip
+  return!0
+}
+var mxy=/^(LD_|DYLD_|PATH$)/;
+var gxy=/[;|&`$(){}<>#\n\r]/;
+```
+
+### hxy — bash/user excludedCommands matcher (compound-safe) @ ~235895726
+```js
+function hxy(e){
+  let r=ds().sandbox?.excludedCommands??[];
+  if(r.length===0)return!1;
+  let n; try{n=xS(e)}catch{n=[e]} // split compound
+  for(let o of n){
+    let s=[o.trim()], a=new Set(s), l=0;
+    while(l<s.length){ // fixed-point strip env + wrappers
+      let c=s.length;
+      for(let u=l;u<c;u++){
+        let d=s[u], p=ZAo(d,mxy); if(!a.has(p))s.push(p),a.add(p);
+        let f=xse(d); if(!a.has(f))s.push(f),a.add(f);
+      }
+      l=c
+    }
+    for(let c of r){ let u=QAo(c); for(let d of s) if(qJd(u,d)) return!0 }
+  }
+  return!1
+}
+```
+
+### H0d — STRICT policy exclusion matcher (PowerShell / policy gate) @ ~235896122
+Key 2.1.218 restriction: metacharacters / compounds NEVER count as excluded.
+```js
+function H0d(e){
+  let t=frr().flatMap((n)=>n?.sandbox?.excludedCommands??[]); // layered settings
+  let r=e.trim();
+  if(t.length===0||!r||gxy.test(r))return!1; // FAIL CLOSED on ;|&`$(){}<>#\n\r
+  return t.some((n)=>qJd(QAo(n),r)) // whole trimmed command only, no split
+}
+function qJd(e,t){
+  switch(e.type){
+    case"prefix": return t===e.prefix||t.startsWith(e.prefix+" ");
+    case"exact": return t===e.command;
+    case"wildcard": return B1t(e.pattern,t)
+  }
+}
+```
+
+### frr — layered settings sources for H0d @ ~228523369
+```js
+function frr(){
+  return[...Jne(), Pr("flagSettings"), Lg("userSettings")?Pr("userSettings"):null]
+}
+```
+
+### I0d — Windows policy refusal predicate @ ~233815134
+```js
+function I0d(e,t){
+  return Ht()==="windows"
+    && Fo.isSandboxEnabledInSettings()
+    && Fo.isPlatformInEnabledList()
+    && !Fo.areUnsandboxedCommandsAllowed()
+    && !e          // shouldUseSandbox === false (not actually sandboxed)
+    && !H0d(t)     // NOT a full simple excludedCommands match
+}
+```
+
+### PowerShellTool call sites (vxo + I0d)
+```js
+function vxo(e){
+  return p3({command:e.command, dangerouslyDisableSandbox:e.dangerouslyDisableSandbox, shellType:"powershell"})
+}
+// validateInput:
+if(I0d(vxo(e), e.command)){
+  Fe("sandbox_exec","windows_policy_refusal");
+  return {result:!1, message:x0d, errorCode:11}
+}
+// call:
+let i=vxo(e);
+if(I0d(i, e.command)){
+  Fe("sandbox_exec","windows_policy_refusal");
+  throw new vao(x0d) // SandboxPolicyRefusalError
+}
+```
+
+### x0d — policy message (UPDATED in 2.1.218)
+```
+Enterprise policy requires sandboxing, but this command would not be sandboxed on Windows: either the sandbox is unavailable, or the command matches a sandbox exclusion pattern only in part. Compound commands and commands with shell metacharacters must run sandboxed even when a statement matches an exclusion. Shell command execution is blocked by policy.
+```
+
+### SandboxPolicyRefusalError @ ~228559601
+```js
+vao=class vao extends Error{
+  constructor(e){ super(e); this.name="SandboxPolicyRefusalError" }
+}
+```
+
+### SandboxManager pieces used
+- areUnsandboxedCommandsAllowed → X4g: forbidUnsandboxedCommands policy OR allowUnsandboxedCommands
+- areUnsandboxedCommandsForbiddenByPolicy → Q4g
+- isSandboxEnabledInSettings → qDt
+- isPlatformInEnabledList → YVr (policySettings.sandbox.enabledPlatforms)
+- getExcludedCommands → n9g: ds()?.sandbox?.excludedCommands??[]
+
+## Local mapping
+
+| densable | local | match |
+|----------|-------|-------|
+| hxy + p3 bash half | packages/builtin-tools/src/tools/BashTool/shouldUseSandbox.ts containsExcludedCommand + shouldUseSandbox | PARTIAL: compound split + strip present; missing shellType, GitBash null gate, force-sandbox HH/PWe |
+| H0d | MISSING | GAP |
+| I0d / x0d | packages/builtin-tools/src/tools/PowerShellTool/PowerShellTool.tsx isWindowsSandboxPolicyViolation + WINDOWS_SANDBOX_POLICY_REFUSAL | PARTIAL: coarser blanket Windows block; old message; no useSandbox arg; no H0d; no isPlatformInEnabledList |
+| vao SandboxPolicyRefusalError | throw new Error(...) | GAP (name/class) |
+| Windows PS shouldUseSandbox hard false | PowerShellTool runPowerShellCommand: getPlatform()==='windows'?false:shouldUseSandbox(...) | GAP vs densable vxo/p3 which can sandbox when Windows SRT active |
+
+## Status: GAP (implementable 1:1)
+
+Exact delta (not invent):
+1. Add H0d-equivalent `isFullyExcludedCommandForPolicy(command)` using layered excludedCommands + gxy metachar fail-closed + whole-command qJd match.
+2. Replace isWindowsSandboxPolicyViolation with I0d(useSandbox, command) including isPlatformInEnabledList.
+3. Replace WINDOWS_SANDBOX_POLICY_REFUSAL string with densable x0d text.
+4. PowerShell validateInput/call: compute useSandbox via shouldUseSandbox({..., shellType:'powershell'}) then I0d; throw SandboxPolicyRefusalError.
+5. Align shouldUseSandbox with p3 (shellType, Git Bash null on windows bash, optional force path).
+6. Stop hardcoding shouldUseSandbox:false for all Windows PS when densable allows SRT sandbox.
+
+Note: "IDE interactions" in changelog has no separate IDE-only densable path; IDE terminal/shell tool calls share this sandbox exclusion policy gate (tengu_ext_ide_command is IDE picker, unrelated).

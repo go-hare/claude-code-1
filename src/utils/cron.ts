@@ -221,6 +221,62 @@ function formatUtcTimeAsLocal(minute: number, hour: number): string {
   })
 }
 
+/**
+ * densable eGe — schedule field parser for DaemonHub hGa form.
+ * Accepts:
+ *   - relative: `5m`, `2h`, `1d` (seconds rejected; min 1 minute)
+ *   - 5-field cron: e.g. star-slash-15 * * * *
+ * Returns `{cron, human}` or `{error}`.
+ */
+export function parseScheduleInput(
+  raw: string,
+): { cron: string; human: string } | { error: string } {
+  const t = raw.trim()
+  if (t === '') return { error: 'required' }
+  const rel = t.match(/^(\d+)\s*([smhd])$/i)
+  if (rel) {
+    const n = parseInt(rel[1]!, 10)
+    const unit = rel[2]!.toLowerCase()
+    if (n < 1) return { error: 'interval must be at least 1' }
+    let cron: string
+    switch (unit) {
+      case 's':
+        return { error: 'minimum interval is 1 minute' }
+      case 'm':
+        if (n > 59) {
+          return { error: 'minute interval must be 1–59 (use hours instead)' }
+        }
+        cron = n === 1 ? '* * * * *' : `*/${n} * * * *`
+        break
+      case 'h':
+        if (n > 23) {
+          return { error: 'hour interval must be 1–23 (use days instead)' }
+        }
+        cron = n === 1 ? '0 * * * *' : `0 */${n} * * *`
+        break
+      case 'd':
+        if (n === 1) {
+          cron = '0 0 * * *'
+          break
+        }
+        if (n > 28) {
+          return { error: 'day interval must be 1–28 (use a cron expression)' }
+        }
+        cron = `0 0 */${n} * *`
+        break
+      default:
+        return { error: 'unknown interval unit' }
+    }
+    return { cron, human: cronToHuman(cron) }
+  }
+  if (parseCronExpression(t) !== null) {
+    return { cron: t, human: cronToHuman(t) }
+  }
+  return {
+    error: 'use 5m/2h/1d or a 5-field cron (e.g. */15 * * * *)',
+  }
+}
+
 export function cronToHuman(cron: string, opts?: { utc?: boolean }): string {
   const utc = opts?.utc ?? false
   const parts = cron.trim().split(/\s+/)

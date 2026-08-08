@@ -80,6 +80,7 @@ import {
   peek,
   subscribeToCommandQueue,
   getCommandsByMaxPriority,
+  getMainThreadQueueLength,
 } from 'src/utils/messageQueueManager.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
@@ -215,6 +216,7 @@ import {
 import { settingsChangeDetector } from 'src/utils/settings/changeDetector.js'
 import { applySettingsChange } from 'src/utils/settings/applySettingsChange.js'
 import {
+  applyFastModeOnModelSwitch,
   isFastModeAvailable,
   isFastModeEnabled,
   isFastModeSupportedByModel,
@@ -3806,10 +3808,20 @@ function runHeadlessStreaming(
 
             activeUserSpecifiedModel = decision.model
             setMainLoopModelOverride(decision.model)
-            setAppState(prev => ({
-              ...prev,
-              mainLoopModelForSession: decision.model,
-            }))
+            // densable 2.1.218 #31 — print/SDK set_model also runs uU/dU
+            setAppState(prev => {
+              const applied = applyFastModeOnModelSwitch(
+                decision.model,
+                prev.fastMode,
+              )
+              return {
+                ...prev,
+                mainLoopModelForSession: decision.model,
+                ...(applied.changed
+                  ? { fastMode: applied.nextFastMode }
+                  : null),
+              }
+            })
             notifySessionMetadataChanged({ model: decision.model })
             if (decision.injectBreadcrumbs) {
               injectModelSwitchBreadcrumbs(
@@ -3907,6 +3919,65 @@ function runHeadlessStreaming(
             sendControlResponseSuccess(msg, {
               cancelled: removed.length > 0,
             })
+          } else if (msg.request.subtype === 'set_cwd') {
+            // densable 2.1.218 fCb — headless /cd twin for SDK hosts.
+            // Busy = running && runPhase !== waiting_for_agents || mainThreadQueue > 0
+            // (densable oSm). Trust delegated via needs_trust; move notice enqueued meta.
+            const setCwdReq = msg.request as {
+              subtype: 'set_cwd'
+              path: string
+              trust_accepted?: boolean
+              trusted_directory?: string
+            }
+            try {
+              const {
+                handleSetCwdControlRequest,
+                buildSetCwdMoveNoticeCommand,
+              } = await import('../commands/cd/cdCommand.js')
+              const result = await handleSetCwdControlRequest(setCwdReq, {
+                isBusy: () =>
+                  (running && runPhase !== 'waiting_for_agents') ||
+                  getMainThreadQueueLength() > 0,
+                toolPermissionContext: getAppState().toolPermissionContext,
+                enqueueMoveNotice: (modelMessage: string) => {
+                  enqueue(buildSetCwdMoveNoticeCommand(modelMessage))
+                  void run()
+                },
+              })
+              if (result.kind === 'response') {
+                sendControlResponseSuccess(msg, { ...result.response })
+              } else {
+                sendControlResponseError(msg, result.message)
+              }
+            } catch (err) {
+              let safeWire:
+                | ((path: string, fallback: string) => string)
+                | null = null
+              try {
+                const mod = await import('../commands/cd/cdPermission.js')
+                safeWire = mod.safeWireMessage
+              } catch {
+                safeWire = null
+              }
+              const detail = errorMessage(err)
+              const safeDetail = safeWire
+                ? safeWire(
+                    detail,
+                    '(error detail withheld: it contains control or invisible characters)',
+                  )
+                : '(error detail unavailable)'
+              const cwdNow = getCwd()
+              const stay = safeWire
+                ? safeWire(
+                    `The session's working directory is ${cwdNow}.`,
+                    'The session stayed in its previous working directory.',
+                  )
+                : 'The session stayed in its previous working directory.'
+              sendControlResponseError(
+                msg,
+                `set_cwd: relocation failed — ${safeDetail}. ${stay}`,
+              )
+            }
           } else if (msg.request.subtype === 'seed_read_state') {
             // Client observed a Read that was later removed from context (e.g.
             // by snip), so transcript-based seeding missed it. Queued into
@@ -5089,10 +5160,21 @@ function runHeadlessStreaming(
                       }
                       activeUserSpecifiedModel = decision.model
                       setMainLoopModelOverride(decision.model)
-                      setAppState(prev => ({
-                        ...prev,
-                        mainLoopModelForSession: decision.model,
-                      }))
+                      // densable 2.1.218 #31 — bridge onSetModel uU/dU (remote)
+                      setAppState(prev => {
+                        const applied = applyFastModeOnModelSwitch(
+                          decision.model,
+                          prev.fastMode,
+                          { remoteSession: true },
+                        )
+                        return {
+                          ...prev,
+                          mainLoopModelForSession: decision.model,
+                          ...(applied.changed
+                            ? { fastMode: applied.nextFastMode }
+                            : null),
+                        }
+                      })
                       notifySessionMetadataChanged({ model: decision.model })
                       if (decision.injectBreadcrumbs) {
                         injectModelSwitchBreadcrumbs(

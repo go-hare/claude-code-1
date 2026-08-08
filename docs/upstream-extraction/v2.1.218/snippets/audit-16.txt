@@ -1,0 +1,53 @@
+# densable 2.1.218 — AUDIT #16 PR events lost on immediate exit
+
+Official: Fixed pull request events occasionally being lost when a session exited immediately after creating or linking a PR.
+
+Binary: /tmp/official-218/plat/package/claude (2.1.218)
+
+## densable symbols
+
+| densable | meaning |
+|---|---|
+| `Lt.pendingPrLinks` / `eNn()` (`getPendingPrLinks`) | process-global `Set` of in-flight PR-link promises |
+| `But(promise)` | track a pending PR-link promise in the set; swallow rejections; remove on settle |
+| `DZr()` | flush pending PR links: `NFr(Promise.allSettled([...e]), xv_)` with `xv_=2000` ms |
+| `IZr(prInfo)` | emit optional `code_change_published` system event + `await linkSessionToPR(...)` |
+| `hOy` (`linkSessionToPR`) | `await Qee(...)` async append of `pr-link` transcript entry + analytics + cache |
+| `Hbo(pr, repo?)` | `gh pr view --json url` resolve then `IZr` |
+| `Ubo` | densable `trackGitOperations` equivalent (success-path git/PR tracking) |
+| `NFr(promise, ms)` | race promise vs timeout (resolve void on timeout) — does not reject |
+| call sites of `await DZr()` | engine teardown after turn drain; print.ts session cleanup before done |
+
+## densable control flow (1:1)
+
+1. On successful `gh pr create` / other PR actions / `gh pr checkout` / bare `git push` / glab/curl PR create, schedule link work via `But(...)` instead of fire-and-forget.
+2. `But(p)`: `t=eNn(); r=p.catch(()=>{}); t.add(r); r.finally(()=>t.delete(r))`
+3. Immediate exit previously raced dynamic import + async append before process teardown finished, dropping `pr-link` / linked-session metadata / contribute-link side effects.
+4. Fix: before process/session cleanup completes, `await DZr()` so in-flight PR link promises settle (cap 2000ms).
+5. `linkSessionToPR` itself is async (`await Qee` append) and records write failure via `V2t("pr_link", ...)`.
+
+## densable bodies (minified)
+
+function Ubo(e,t,r){if(t!==0)return{prResolved:!1};let o=!1;if(JJu.test(e)){if(M("tengu_git_operation",{operation:Se("commit")}),e.match(/--amend\b/))M("tengu_git_operation",{operation:Se("commit_amend")});j_i()?.add(1)}if(Lbo.test(e))M("tengu_git_operation",{operation:Se("push")}),ILt.emit();let i=QJu.find((c)=>c.re.test(e));if(i)M("tengu_git_operation",{operation:me(i.op)}),ILt.emit();if(i?.action==="merged"&&!/(?:--auto|--disable-auto)\b/.test(e)||i?.action==="closed")o=!0;if(i?.action==="created"){if(owt()?.add(1),r){let c=xZr(r);if(c)But(IZr(c))}}else if(i&&r){let c=xZr(r);if(c)But(IZr(c).then(()=>Te("pr_contribute_link")));else{let u=r.match(/^\u2713.*$/m)?.[0],d=u?eXu(u):void 0;if(d)But(Hbo(String(d.prNumber),d.prRepository).then((p)=>p?Te("pr_contribute_link"):pe("pr_contribute_link","gh_view_failed")))}}let s=e.match(Sv_);if(s?.[1])But(Hbo(s[1]));else if(Lbo.test(e)&&!i){let c=ZJu(e),u=c.match(/\S+/g)?.filter((f)=>!f.startsWith("-"))[1],d=u?u.indexOf(":"):-1,p=u&&d>0&&d<u.length-1?u.slice(d+1).replace(/^refs\/heads\//,""):void 0;if(p&&!p.startsWith("-")&&!/^\d+$/.test(p)&&!XJu.test(c))But(Hbo(p));But(Hbo())}if(e.match(/\bglab\s+mr\s+create\b/)){if(M("tengu_git_operation",{operation:Se("pr_create")}),owt()?.add(1),ILt.emit(),r){let c=xZr(r);if(c)But(IZr(c))}}let a=e.match(/\bcurl\b/)&&(e.match(/-X\s*POST\b/i)||e.match(/--request\s*=?\s*POST\b/i)||e.match(/\s-d\s/)),l=e.match(/https?:\/\/[^\s'"]*\/(pulls|pull-requests|merge[-_]requests)(?!\/\d)/i);if(a&&l){if(M("tengu_git_operation",{operation:Se("pr_create")}),owt()?.add(1),ILt.emit(),r){let c=xZr(r);if(c)But(IZr(c))}}return{prResolved:o}}function But(e){let t=eNn(),r=e.catch(()=>{return});t.add(r),r.finally(()=>t.delete(r))}async function DZr(){let e=eNn();if(e.size===0)return;await NFr(Promise.allSettled([...e]),xv_)}async function IZr(e){let[{linkSessionToPR:t},{getSessionId:r}]=await Promise.all([Promise.resolve().then(() => (nl(),WVe)),Promise.resolve().then(() => (ct(),OLe))]),n=r();if(!n)return;if(Av_(e.prUrl))uv({type:"system",subtype:"code_change_published",provider:e.provider,url:e.prUrl,repo:e.prRepository,identifier:String(e.prNumber)});await t(n,e.prNumber,e.prUrl,e.prRepository)}function tXu(e,t){if(!Iv_.test(e)||!Dv_.test(t)||Date.now()<YJu)return;return YJu=Date.now()+Ov_,"<system-reminder>GitHub API rate limit exceeded (5,000/hr shared across all tools and agents). Run `gh api rate_limit --jq .resources` and sleep until reset before further gh calls. If polling in a loop, use ScheduleWakeup instead of retrying.</system-reminder>"}async function Hbo(e,t){if(da())return!1;if(t!==void 0&&!Ev_.test(t))return!1;let r=e&&!e.startsWith("-")&&!/^[a-z][a-z0-9+.-]*:\/\//i.test(e)?e:void 0,n=["pr","view",...r?[r]:[],...t?["--repo",t]:[],"--json","url"],{code:o,stdout:i}=await Zr("gh",n,{timeout:5000,preserveOutputOnError:!1,useCwd:!0});if(o!==0)return!1;let s=Ut(i)?.url;if(!s)return!1;let a=Fbo(s);if(!a)return!1;return await IZr(a),!0}var JJu,Lbo,XJu,yv_,bv_,Tv_,Mbo,Sv_,Ev_,QJu,Nbo,Cv_,Pbo,wv_,Rv_=8192,xv_=2000,Iv_,Dv_,Ov_=60000,YJu=0;var $ut=T(()=>{zn();ct();_t();zt();ti();rt();Za();Wi();Rr();Fut();CA();qp();pE();Zt();JJu=Mlr("commit"),Lbo=Mlr("push"),XJu=/(?:^|\s)(?:-n|--dry-run)(?=\s|$)/,yv_=Mlr("cherry-pick"),bv_=Mlr("merge","(?!-)"),Tv_=Mlr("rebase"),Mbo=ye(()=>b.object({commit:b.object({sha:b.string(),kind:b.enum(["committed","amended","cherry-picked"])}).optional(),push:b.object({branch:b.string()}).optional(),branch:b.object({ref:b.string(),action:b.enum(["merged","rebased"])}).optional(),pr:b.object({number:b.number(),url:b.string().optional(),action:b.enum(["created","edited","merged","commented","closed","ready","draft","auto-merge-enabled","auto-merge-disabled"])}).optional()})),Sv_=/\bgh\s+pr\s+checkout\b[^&|;]*\s(\d+)(?=\s|$|[&|;])/,Ev_=/^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*
+
+## local status (2026-08-07)
+
+- GAP vs densable 1:1.
+- Local `packages/builtin-tools/src/tools/shared/gitOperationTracking.ts` `trackGitOperations` still fire-and-forgets:
+  `void import('src/utils/sessionStorage.js').then(... linkSessionToPR ...)`
+  with no `pendingPrLinks` set and no exit flush.
+- Local `src/bootstrap/state.ts` has no `pendingPrLinks` / `getPendingPrLinks`.
+- Local `src/utils/sessionStorage.ts` has `linkSessionToPR` but uses sync `appendEntryToFile` (not densable async `Qee` + `V2t("pr_link")` degraded path).
+- Local print/engine teardown does not `await flushPendingPrLinks()`.
+
+## 1:1 delta if implementing
+
+1. `src/bootstrap/state.ts`: add `pendingPrLinks: Set<Promise<unknown>>` + `getPendingPrLinks()`.
+2. `packages/builtin-tools/src/tools/shared/gitOperationTracking.ts` (or densable-aligned module):
+   - `trackPendingPrLink(p)` = densable `But`
+   - `flushPendingPrLinks()` = densable `DZr` with 2000ms `NFr` race
+   - PR create/link/push/checkout paths must `trackPendingPrLink(IZr(...))` not bare void.
+3. Call `await flushPendingPrLinks()` at densable call sites: print session cleanup + engine teardown after turns.
+4. Prefer densable async `linkSessionToPR` append (`appendEntryToFileAsync`/`Qee`) + `V2t("pr_link")` on failure for 1:1 durability.
+
+Do not invent alternate queue designs; mirror `But`/`DZr`/`IZr`/`eNn`.

@@ -19,7 +19,7 @@ import {
 import { FileTooLargeError, readFileInRange } from './readFileInRange.js'
 import { expandPath } from './path.js'
 import { mergePendingNestedMemoryTriggers } from './propagateNestedMemory.js'
-import { countCharInString } from './stringUtils.js'
+import { asStringArray, countCharInString } from './stringUtils.js'
 import { uniq } from './array.js'
 import { getFsImplementation } from './fsOperations.js'
 import { readdir, stat } from 'fs/promises'
@@ -506,6 +506,13 @@ export type Attachment =
       content: string
       /** Path relative to CWD at creation time, for stable display */
       displayPath: string
+    }
+  | {
+      /** densable 2.1.218 selected_lines_in_diff (gIy when source==="diff") */
+      type: 'selected_lines_in_diff'
+      lineCount: number
+      content: string
+      filePath?: string
     }
   | {
       type: 'opened_file_in_ide'
@@ -1862,9 +1869,16 @@ export function getAgentListingDeltaAttachment(
   for (const msg of messages ?? []) {
     if (msg.type !== 'attachment') continue
     if (msg.attachment!.type !== 'agent_listing_delta') continue
-    for (const t of msg.attachment!.addedTypes as string[]) announced.add(t)
-    for (const t of msg.attachment!.removedTypes as string[])
-      announced.delete(t)
+    // densable: if Array.isArray(addedLines) for (q0(addedTypes)); always q0(removedTypes)
+    const att = msg.attachment! as {
+      addedLines?: unknown
+      addedTypes?: unknown
+      removedTypes?: unknown
+    }
+    if (Array.isArray(att.addedLines)) {
+      for (const t of asStringArray(att.addedTypes)) announced.add(t)
+    }
+    for (const t of asStringArray(att.removedTypes)) announced.delete(t)
   }
 
   const currentTypes = new Set(filtered.map(a => a.agentType))
@@ -1952,6 +1966,18 @@ async function getSelectedLinesFromIDE(
   ideSelection: IDESelection | null,
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
+  // densable gIy: diff-view selection does not require IDE MCP connection
+  if (ideSelection?.source === 'diff' && ideSelection.text) {
+    return [
+      {
+        type: 'selected_lines_in_diff',
+        lineCount: ideSelection.lineCount,
+        content: ideSelection.text,
+        filePath: ideSelection.filePath,
+      },
+    ]
+  }
+
   const ideName = getConnectedIdeName(toolUseContext.options.mcpClients)
   if (
     !ideName ||

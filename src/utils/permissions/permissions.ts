@@ -75,6 +75,7 @@ import {
   getTotalInputTokens,
   getTotalOutputTokens,
 } from '../../bootstrap/state.js'
+import { getToolPermissionContextFromLayers } from '../../engine/permissionLayerReaders.js'
 import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -158,6 +159,62 @@ export function getAllowRules(
       ]
     }),
   )
+}
+
+/**
+ * densable W9 — walk decisionReason (including nested subcommandResults) for a
+ * safetyCheck matching the optional predicate.
+ */
+export function findSafetyCheckDecision(
+  decisionReason: PermissionDecisionReason | undefined,
+  predicate: (check: {
+    type: 'safetyCheck'
+    reason: string
+    classifierApprovable: boolean
+    circuitBreaker?:
+      | 'dangerousRemoval'
+      | 'backgroundOperator'
+      | 'suspiciousWindowsPath'
+  }) => boolean = () => true,
+):
+  | {
+      type: 'safetyCheck'
+      reason: string
+      classifierApprovable: boolean
+      circuitBreaker?:
+        | 'dangerousRemoval'
+        | 'backgroundOperator'
+        | 'suspiciousWindowsPath'
+    }
+  | undefined {
+  if (!decisionReason) return undefined
+  if (decisionReason.type === 'safetyCheck') {
+    return predicate(decisionReason) ? decisionReason : undefined
+  }
+  if (decisionReason.type === 'subcommandResults') {
+    for (const sub of decisionReason.reasons.values()) {
+      const nested = findSafetyCheckDecision(sub.decisionReason, predicate)
+      if (nested) return nested
+    }
+  }
+  return undefined
+}
+
+/**
+ * densable ctn — auto mode (or plan acting as auto without bypass) is active.
+ */
+export function isPermissionContextAutoMode(
+  context: ToolPermissionContext,
+): boolean {
+  if (context.mode === 'auto') return true
+  if (
+    context.mode === 'plan' &&
+    (autoModeStateModule?.isAutoModeActive() ?? false) &&
+    !context.isBypassPermissionsModeAvailable
+  ) {
+    return true
+  }
+  return false
 }
 
 /**
@@ -517,11 +574,13 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
   // breaks the consecutive denial streak.
   if (result.behavior === 'allow') {
     const appState = context.getAppState()
+    // densable bn: sticky permission_mode layers affect auto-mode bookkeeping
+    const layeredMode = getToolPermissionContextFromLayers(context).mode
     if (feature('TRANSCRIPT_CLASSIFIER')) {
       const currentDenialState =
         context.localDenialTracking ?? appState.denialTracking
       if (
-        appState.toolPermissionContext.mode === 'auto' &&
+        layeredMode === 'auto' &&
         currentDenialState &&
         currentDenialState.consecutiveDenials > 0
       ) {
@@ -536,8 +595,10 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
   // This is done at the end so it can't be bypassed by early returns
   if (result.behavior === 'ask') {
     const appState = context.getAppState()
+    // densable bn: sticky permission layers overlay mode/rules for this turn
+    const layeredPermissionContext = getToolPermissionContextFromLayers(context)
 
-    if (appState.toolPermissionContext.mode === 'dontAsk') {
+    if (layeredPermissionContext.mode === 'dontAsk') {
       return {
         behavior: 'deny',
         decisionReason: {
@@ -555,29 +616,34 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
     // tools the user explicitly pinned to ask.
     const effectiveModeForAuto = getEffectivePermissionMode(
       tool,
-      appState.toolPermissionContext,
+      layeredPermissionContext,
     )
     // Plan mode can act as auto when the auto-mode flag is active, but still
     // must not override a per-server effective demotion to `default`.
     const planActingAsAuto =
-      appState.toolPermissionContext.mode === 'plan' &&
+      layeredPermissionContext.mode === 'plan' &&
       (autoModeStateModule?.isAutoModeActive() ?? false) &&
       effectiveModeForAuto !== 'default'
     if (
       feature('TRANSCRIPT_CLASSIFIER') &&
       (effectiveModeForAuto === 'auto' || planActingAsAuto)
     ) {
-      // Non-classifier-approvable safetyCheck decisions stay immune to ALL
-      // auto-approve paths: the acceptEdits fast-path, the safe-tool allowlist,
-      // and the classifier. Step 1g only guards bypassPermissions; this guards
-      // auto. classifierApprovable safetyChecks (sensitive-file paths) fall
-      // through to the classifier — the fast-paths below naturally don't fire
-      // because the tool's own checkPermissions still returns 'ask'.
-      if (
-        result.decisionReason?.type === 'safetyCheck' &&
-        !result.decisionReason.classifierApprovable
-      ) {
-        if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+      // densable 2.1.218 W9 + ctn:
+      //   v = W9(decisionReason, V => !V.classifierApprovable &&
+      //         !(V.circuitBreaker !== undefined && ctn(context)))
+      // Non-classifier-approvable safetyChecks force a dialog UNLESS they carry
+      // a circuitBreaker tag (dangerousRemoval / backgroundOperator /
+      // suspiciousWindowsPath) while auto mode is active — those go to the
+      // classifier instead of opening a permission dialog (#26).
+      const autoContext = isPermissionContextAutoMode(layeredPermissionContext)
+      const forcedSafetyCheck = findSafetyCheckDecision(
+        result.decisionReason,
+        check =>
+          !check.classifierApprovable &&
+          !(check.circuitBreaker !== undefined && autoContext),
+      )
+      if (forcedSafetyCheck) {
+        if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
           return {
             behavior: 'deny',
             message: result.message,
@@ -588,35 +654,24 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             },
           }
         }
+        logEvent('tengu_auto_mode_fallback_to_ask', {
+          reason:
+            'safety_check' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+        })
         return result
       }
-      // Official 2.1.198/207/212 plan_mode_floor densable:
-      // k = (B8u(decisionReason) || u==="plan" && !isReadOnly) && !chromeRO
-      // Must not auto-approve via classifier OR allowlist while in plan for
-      // non-readonly tools (Bash touch/rm, Edit, Write, non-RO MCP).
-      let planModeFloorHit =
-        (result.decisionReason?.type === 'mode' &&
-          result.decisionReason.mode === 'plan') ||
-        appState.toolPermissionContext.mode === 'plan' ||
-        effectiveModeForAuto === 'plan'
-      if (planModeFloorHit) {
-        try {
-          const parsedForRo = tool.inputSchema.safeParse(input)
-          if (
-            parsedForRo.success &&
-            tool.isReadOnly?.(parsedForRo.data) === true
-          ) {
-            planModeFloorHit = false
-          }
-        } catch {
-          // keep floor
-        }
-      }
-      if (
-        planModeFloorHit &&
+      // densable 2.1.218 fXd plan_mode_floor:
+      //   x = decisionReason?.type === 'mode' && mode === 'plan' && !OFo(tool, input)
+      // Only when checkPermissions itself returned a plan-mode block — not for
+      // every Bash ask while the session is in plan mode. Plan+auto lets the
+      // classifier judge Bash the static analyzer cannot prove read-only (#30).
+      const planModeFloorHit =
+        result.decisionReason?.type === 'mode' &&
+        result.decisionReason.mode === 'plan' &&
         !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), input)
-      ) {
-        if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+      if (planModeFloorHit) {
+        if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
           return {
             behavior: 'deny',
             message: result.message,
@@ -637,7 +692,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       // Official org_ask_ceiling: MCP tools capped to ask by org policy cannot
       // be auto-approved by the classifier (mirrors plan_mode_floor handling).
       if (tool.mcpInfo?.effectiveMaxPermission === 'ask') {
-        if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+        if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
           return {
             behavior: 'deny',
             message: result.message,
@@ -682,7 +737,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         tool.name === POWERSHELL_TOOL_NAME &&
         !feature('POWERSHELL_AUTO_MODE')
       ) {
-        if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+        if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
           return {
             behavior: 'deny',
             message: 'PowerShell tool requires interactive approval',
@@ -716,7 +771,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       // effective/session mode is plan (incl. planActingAsAuto). Otherwise
       // Bash touch/rm/mkdir auto-run via modeValidation acceptEdits allow.
       const skipAcceptEditsFastPathForPlan =
-        appState.toolPermissionContext.mode === 'plan' ||
+        layeredPermissionContext.mode === 'plan' ||
         effectiveModeForAuto === 'plan'
       if (
         result.behavior === 'ask' &&
@@ -837,7 +892,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
           classifierMessages,
           action,
           context.options.tools,
-          appState.toolPermissionContext,
+          layeredPermissionContext,
           context.abortController.signal,
           context.langfuseRootTrace ?? context.langfuseTrace,
         )
@@ -967,7 +1022,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         // error, won't recover on retry. Skip iron_gate and fall back to
         // normal prompting so the user can approve/deny manually.
         if (classifierResult.transcriptTooLong) {
-          if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+          if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
             // Permanent condition (transcript only grows) — deny-retry-deny
             // wastes tokens without ever hitting the denial-limit abort.
             throw new AbortError(
@@ -997,7 +1052,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
               CLASSIFIER_FAIL_CLOSED_REFRESH_MS,
             )
           ) {
-            if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+            if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
               logForDebugging(
                 'Auto mode classifier unavailable, denying with retry guidance (fail closed)',
                 { level: 'warn' },
@@ -1098,13 +1153,13 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
     // When permission prompts should be avoided (e.g., background/headless agents),
     // run PermissionRequest hooks first to give them a chance to allow/deny.
     // Only auto-deny if no hook provides a decision.
-    if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
+    if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
       const hookDecision = await runPermissionRequestHooksForHeadlessAgent(
         tool,
         input,
         toolUseID,
         context,
-        appState.toolPermissionContext.mode,
+        layeredPermissionContext.mode,
         result.suggestions,
       )
       if (hookDecision) {
@@ -1242,10 +1297,11 @@ export async function checkRuleBasedPermissions(
   input: { [key: string]: unknown },
   context: ToolUseContext,
 ): Promise<PermissionAskDecision | PermissionDenyDecision | null> {
-  const appState = context.getAppState()
+  // densable bn: sticky layers overlay for rule-based checks
+  const toolPermissionContext = getToolPermissionContextFromLayers(context)
 
   // 1a. Entire tool is denied by rule
-  const denyRule = getDenyRuleForTool(appState.toolPermissionContext, tool)
+  const denyRule = getDenyRuleForTool(toolPermissionContext, tool)
   if (denyRule) {
     return {
       behavior: 'deny',
@@ -1258,7 +1314,7 @@ export async function checkRuleBasedPermissions(
   }
 
   // 1b. Entire tool has an ask rule
-  const askRule = getAskRuleForTool(appState.toolPermissionContext, tool)
+  const askRule = getAskRuleForTool(toolPermissionContext, tool)
   if (askRule) {
     const canSandboxAutoAllow =
       tool.name === BASH_TOOL_NAME &&
@@ -1355,10 +1411,13 @@ async function hasPermissionsToUseToolInner(
   }
 
   let appState = context.getAppState()
+  // densable bn / getToolPermissionContext — sticky layers last-wins overlay
+  // for mode / allow-deny rules / avoid_prompts / working_directory.
+  let toolPermissionContext = getToolPermissionContextFromLayers(context)
 
   // 1. Check if the tool is denied
   // 1a. Entire tool is denied
-  const denyRule = getDenyRuleForTool(appState.toolPermissionContext, tool)
+  const denyRule = getDenyRuleForTool(toolPermissionContext, tool)
   if (denyRule) {
     return {
       behavior: 'deny',
@@ -1371,7 +1430,7 @@ async function hasPermissionsToUseToolInner(
   }
 
   // 1b. Check if the entire tool should always ask for permission
-  const askRule = getAskRuleForTool(appState.toolPermissionContext, tool)
+  const askRule = getAskRuleForTool(toolPermissionContext, tool)
   if (askRule) {
     // When autoAllowBashIfSandboxed is on, sandboxed commands skip the ask rule and
     // auto-allow via Bash's checkPermissions. Commands that won't be sandboxed (excluded
@@ -1411,7 +1470,7 @@ async function hasPermissionsToUseToolInner(
       tool.mcpInfo &&
       !tool.isReadOnly(parsedInput) &&
       toolPermissionResult.behavior === 'passthrough' &&
-      appState.toolPermissionContext.mode === 'plan' &&
+      toolPermissionContext.mode === 'plan' &&
       !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), parsedInput)
     ) {
       toolPermissionResult = {
@@ -1489,19 +1548,18 @@ async function hasPermissionsToUseToolInner(
   // 2a. Check if mode allows the tool to run
   // IMPORTANT: Call getAppState() to get the latest value
   appState = context.getAppState()
+  // densable bn: re-materialize sticky layers after refresh
+  toolPermissionContext = getToolPermissionContextFromLayers(context)
   // Official snt(): effective mode for this MCP tool may demote bypass/auto
   // via per-server overrides or chrome classifier floor.
-  const effectiveMode = getEffectivePermissionMode(
-    tool,
-    appState.toolPermissionContext,
-  )
+  const effectiveMode = getEffectivePermissionMode(tool, toolPermissionContext)
   // Check if permissions should be bypassed:
   // - Direct bypassPermissions mode (after MCP effective-mode resolution)
   // - Plan mode when the user originally started with bypass mode
   const shouldBypassPermissions =
     effectiveMode === 'bypassPermissions' ||
     (effectiveMode === 'plan' &&
-      appState.toolPermissionContext.isBypassPermissionsModeAvailable)
+      toolPermissionContext.isBypassPermissionsModeAvailable)
   if (shouldBypassPermissions) {
     return {
       behavior: 'allow',
@@ -1514,10 +1572,7 @@ async function hasPermissionsToUseToolInner(
   }
 
   // 2b. Entire tool is allowed
-  const alwaysAllowedRule = toolAlwaysAllowedRule(
-    appState.toolPermissionContext,
-    tool,
-  )
+  const alwaysAllowedRule = toolAlwaysAllowedRule(toolPermissionContext, tool)
   if (alwaysAllowedRule) {
     return {
       behavior: 'allow',

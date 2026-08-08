@@ -955,3 +955,42 @@ export function isOriginSessionId(
     (!!session.short && originSessionId.startsWith(session.short))
   )
 }
+
+/**
+ * densable Gnm — Esc after clearing help/dispatch/bash/delete-arm:
+ * return to the left-arrow origin conversation when its row is present.
+ */
+export type OriginEscDecision =
+  | { kind: 'exit' }
+  | { kind: 'wait-starting' }
+  | { kind: 'exit-with-hint' }
+  | { kind: 'attach-origin' }
+
+export type OriginSpawnState = {
+  settled: boolean
+  ok: boolean
+  /** densable n.resumeHintRequested — set on exit-with-hint before done */
+  resumeHintRequested?: boolean
+}
+
+export function decideOriginEscAction(input: {
+  originJobId: string | undefined
+  originRowPresent: boolean
+  originSpawn?: OriginSpawnState
+}): OriginEscDecision {
+  if (input.originJobId === undefined) return { kind: 'exit' }
+  if (input.originSpawn !== undefined && !input.originSpawn.settled) {
+    return { kind: 'wait-starting' }
+  }
+  if (input.originSpawn !== undefined && !input.originSpawn.ok) {
+    return { kind: 'exit-with-hint' }
+  }
+  return input.originRowPresent
+    ? { kind: 'attach-origin' }
+    : { kind: 'exit-with-hint' }
+}
+
+/** densable stderr after FleetView done when resumeHintRequested */
+export function formatLeftArrowResumeHint(forkSessionId: string): string {
+  return `Your conversation was backgrounded — resume it with: claude --resume ${forkSessionId}.`
+}

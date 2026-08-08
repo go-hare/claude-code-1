@@ -2,13 +2,17 @@
  * /code-review — Thorough code review covering bugs, security, performance,
  * and maintainability. Supports effort levels and --comment/--fix flags.
  *
- * Upstream: kY_ function registers 'code-review' and 'simplify' commands.
- * /simplify is an alias for /code-review --fix.
+ * densable 2.1.218 WJf / HBT / xol / sdr:
+ * - context: fork by default (background subagent via shouldBackgroundForkedSkill)
+ * - subcommands: { ultra: "ultrareview" } → `/code-review ultra` redirects to cloud
+ * - disableModelInvocation: true (215)
+ * - /simplify is an alias for /code-review --fix
  */
 
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import type { Command } from '../types/command.js'
 import type { ToolUseContext } from '../Tool.js'
+import { isUltrareviewEnabled } from './review/ultrareviewEnabled.js'
 
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 type EffortLevel = (typeof EFFORT_LEVELS)[number]
@@ -30,37 +34,104 @@ confirmed finding to the working tree. For each fix:
 3. If a fix introduces new issues, revert it and note why
 Summarize what was fixed and what was skipped.`
 
-function parseArgs(args: string): {
+/**
+ * densable AJf — strip `--comment`/`--fix` tokens anywhere; keep raw first token
+ * (pre-strip) for ultra detection and return the residual scope string.
+ */
+export function parseCodeReviewFlagArgs(
+  args: string,
+  flagNames: readonly string[] = ['comment', 'fix'],
+): {
+  rawFirstToken: string
+  flags: Set<string>
+  rest: string
+} {
+  const trimmed = args.trim()
+  const rawFirstToken = trimmed.split(/\s+/, 1)[0] ?? ''
+  const flags = new Set<string>()
+  let rest = trimmed
+  for (const name of flagNames) {
+    const re = new RegExp(`(?:^|\\s)--${name}(?=\\s|$)`, 'g')
+    const next = rest.replace(re, '')
+    if (next !== rest) {
+      flags.add(name)
+      rest = next.trim()
+    }
+  }
+  return { rawFirstToken, flags, rest }
+}
+
+/** densable DBT — effort-like token that is not a known level. */
+const UNRECOGNIZED_EFFORT_RE = new RegExp(
+  `^(${EFFORT_LEVELS.map(l => l.slice(0, 3)).join('|')})[a-z]*$`,
+  'i',
+)
+
+/** densable okt — exact effort level (case-insensitive). */
+function parseEffortLevelToken(token: string): EffortLevel | undefined {
+  const lower = token.trim().toLowerCase()
+  return (EFFORT_LEVELS as readonly string[]).includes(lower)
+    ? (lower as EffortLevel)
+    : undefined
+}
+
+/**
+ * densable xol — parse effort / ultra / --comment / --fix / target.
+ * First token `ultra` → ultraFallback (subcommand redirect handles real launch;
+ * this is for getPrompt when ultra is not redirected).
+ */
+export function parseCodeReviewArgs(args: string): {
   level: EffortLevel
   target: string
   comment: boolean
   fix: boolean
+  ultraFallback: boolean
+  unrecognizedLevel?: string
+  /** densable xol.explicit — set only when user named a valid effort level. */
+  explicit?: EffortLevel
 } {
-  const parts = args.trim().split(/\s+/)
-  let level: EffortLevel = 'medium'
-  let comment = false
-  let fix = false
-  const remaining: string[] = []
+  const { rawFirstToken, flags, rest } = parseCodeReviewFlagArgs(args)
+  const comment = flags.has('comment')
+  const fix = flags.has('fix')
+  const tokens = rest.split(/\s+/).filter(Boolean)
+  const first = tokens[0] ?? ''
 
-  for (const part of parts) {
-    if (part === '--comment') {
-      comment = true
-      continue
+  // densable: ultra is detected on raw first token (before flag strip)
+  if (rawFirstToken.toLowerCase() === 'ultra') {
+    return {
+      level: 'max',
+      target: tokens.slice(1).join(' '),
+      comment,
+      fix,
+      ultraFallback: true,
     }
-    if (part === '--fix') {
-      fix = true
-      continue
-    }
-    const lower = part.toLowerCase()
-    const matched = EFFORT_LEVELS.find(l => l.startsWith(lower.slice(0, 3)))
-    if (matched && !remaining.length) {
-      level = matched
-      continue
-    }
-    remaining.push(part)
   }
 
-  return { level, target: remaining.join(' '), comment, fix }
+  const explicit =
+    first.toLowerCase() === 'ultra' ? undefined : parseEffortLevelToken(first)
+  if (explicit !== undefined) {
+    return {
+      level: explicit,
+      explicit,
+      target: tokens.slice(1).join(' '),
+      comment,
+      fix,
+      ultraFallback: false,
+    }
+  }
+
+  // densable: unrecognized effort-like token keeps full rest as target
+  const unrecognizedLevel = UNRECOGNIZED_EFFORT_RE.test(first)
+    ? first
+    : undefined
+  return {
+    level: 'medium',
+    target: rest,
+    comment,
+    fix,
+    ultraFallback: false,
+    unrecognizedLevel,
+  }
 }
 
 function buildPrompt(
@@ -68,6 +139,8 @@ function buildPrompt(
   target: string,
   comment: boolean,
   fix: boolean,
+  ultraFallbackNote = '',
+  unrecognizedNote = '',
 ): string {
   const header = `You are performing a thorough code review at **${level}** effort level.`
 
@@ -120,6 +193,8 @@ Cap at ${level === 'low' ? '5' : level === 'medium' ? '8' : '10'} findings. Prio
 If no issues found, say so clearly.`
 
   return [
+    ultraFallbackNote,
+    unrecognizedNote,
     header,
     targetInstr,
     phases,
@@ -130,24 +205,102 @@ If no issues found, say so clearly.`
     .join('\n\n')
 }
 
+/**
+ * densable FBT — ultraFallback note when cloud path is not available or not
+ * launched via subcommand redirect (e.g. model-invoked path / ultraFallback).
+ *
+ * densable branches:
+ * - !$Z() (ultraEnabled false): environment / account access copy
+ * - ultraEnabled + ultrareview command registered: tell user to type /code-review ultra
+ * - ultraEnabled + command not registered: terminal `claude ultrareview` / silent local --fix
+ */
+export function formatCodeReviewUltraFallbackNote(options: {
+  ultraEnabled: boolean
+  fix: boolean
+  level: EffortLevel
+  isNonInteractive?: boolean
+  /** densable: commands.some(name===ultrareview && enabled) */
+  ultraCommandAvailable?: boolean
+}): string {
+  const {
+    ultraEnabled,
+    fix,
+    level,
+    isNonInteractive,
+    ultraCommandAvailable = true,
+  } = options
+  if (!ultraEnabled) {
+    if (fix) {
+      return `(Running a local ${level}-effort review and applying its findings.)\n`
+    }
+    if (isNonInteractive) {
+      return `(ultra (cloud review) requires claude.ai account access this session doesn't have — see https://code.claude.com/docs/en/ultrareview. Falling back to a local ${level}-effort review.)\n`
+    }
+    return `(ultra (cloud review) isn't available in this environment — see https://code.claude.com/docs/en/ultrareview. Falling back to a local ${level}-effort review.)\n`
+  }
+  if (fix) {
+    return ultraCommandAvailable
+      ? `(Claude can't launch the cloud review directly — type \`/code-review ultra --fix\` to review in the cloud and apply the findings locally when it completes. Running a local ${level}-effort review and applying its findings for now.)\n`
+      : `(Running a local ${level}-effort review and applying its findings.)\n`
+  }
+  return ultraCommandAvailable
+    ? `(Claude can't launch the cloud review directly — type \`/code-review ultra\` to run it. Falling back to a local ${level}-effort review for now.)\n`
+    : `(Claude can't launch the cloud review directly — the user can run \`claude ultrareview\` from a terminal to start it. Falling back to a local ${level}-effort review for now.)\n`
+}
+
 const codeReview = {
   type: 'prompt',
   name: 'code-review',
+  // densable WJf menuDescription / OBT description
   description:
-    'Thorough code review covering bugs, security, performance, and maintainability',
-  argumentHint: '[low|medium|high|xhigh|max] [--comment] [--fix] [<target>]',
+    'Review the current diff for bugs and cleanups; use ultra for multi-agent cloud review',
+  argumentHint:
+    '[low|medium|high|xhigh|max|ultra] [--fix] [--comment] [<target>]',
   userInvocable: true,
   // densable 2.1.215: model must not auto-run /code-review; user slash only
   disableModelInvocation: true,
+  // densable 2.1.218: fork by default → background subagent + task-notification
+  context: 'fork' as const,
+  // densable Cvo: background defaults true for fork
+  background: true,
+  // densable sdr: first-arg redirect /code-review ultra → /ultrareview
+  subcommands: { ultra: 'ultrareview' },
   source: 'builtin' as const,
   progressMessage: 'Reviewing code...',
   contentLength: 2000,
   async getPromptForCommand(
     args: string,
-    _context: ToolUseContext,
+    context: ToolUseContext,
   ): Promise<ContentBlockParam[]> {
-    const { level, target, comment, fix } = parseArgs(args)
-    const prompt = buildPrompt(level, target, comment, fix)
+    const { level, target, comment, fix, ultraFallback, unrecognizedLevel } =
+      parseCodeReviewArgs(args)
+    const ultraEnabled = isUltrareviewEnabled()
+    const ultraCommandAvailable =
+      context.options?.commands?.some(
+        c => c.name === 'ultrareview' && c.isEnabled?.() !== false,
+      ) ?? false
+    const ultraNote = ultraFallback
+      ? formatCodeReviewUltraFallbackNote({
+          ultraEnabled,
+          fix,
+          level,
+          isNonInteractive: context.options?.isNonInteractiveSession,
+          ultraCommandAvailable: ultraEnabled && ultraCommandAvailable,
+        })
+      : ''
+    // densable FBT also emits unrecognized effort note when not ultraFallback
+    const unrecognizedNote =
+      !ultraFallback && unrecognizedLevel
+        ? `(Ignoring unrecognized effort "${unrecognizedLevel}"; valid: ${EFFORT_LEVELS.join(', ')}. Using ${level}.)\n`
+        : ''
+    const prompt = buildPrompt(
+      level,
+      target,
+      comment,
+      fix,
+      ultraNote,
+      unrecognizedNote,
+    )
     return [{ type: 'text', text: prompt }]
   },
 } satisfies Command
@@ -159,6 +312,9 @@ const simplify = {
     'Review the current diff and apply the fixes — equivalent to /code-review --fix',
   argumentHint: '[low|medium|high] [--comment] [<target>]',
   userInvocable: true,
+  // densable: simplify also forks like code-review local path
+  context: 'fork' as const,
+  background: true,
   source: 'builtin' as const,
   progressMessage: 'Reviewing and fixing...',
   contentLength: 2000,

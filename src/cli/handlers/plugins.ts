@@ -626,10 +626,10 @@ export async function marketplaceUpdateHandler(
   }
 }
 
-// plugin install (lines 5690–5721)
+// plugin install (lines 5690–5721) + densable --config KEY=VALUE (BJy/$Jy)
 export async function pluginInstallHandler(
   plugin: string,
-  options: { scope?: string; cowork?: boolean },
+  options: { scope?: string; cowork?: boolean; config?: string[] },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   const scope = options.scope || 'user'
@@ -659,7 +659,14 @@ export async function pluginInstallHandler(
     scope: scope as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 
-  await installPlugin(plugin, scope as 'user' | 'project' | 'local')
+  const configEntries = Array.isArray(options.config)
+    ? options.config
+    : undefined
+  await installPlugin(
+    plugin,
+    scope as 'user' | 'project' | 'local',
+    configEntries,
+  )
 }
 
 // plugin uninstall (lines 5738–5769)

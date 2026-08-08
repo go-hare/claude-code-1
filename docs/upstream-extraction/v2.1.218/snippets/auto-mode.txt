@@ -1,0 +1,7 @@
+138909:tengu_bash_dangerous_rm_too_complex
+143549:This goes through the permission gate (a user prompt, or the auto-mode classifier when auto mode is active)
+143552:This goes through the permission gate (a user prompt, or the auto-mode classifier when auto mode is active)
+149869:claudeInChrome/fileUpload: suspicious Windows path pattern rejected
+151498:, which contains a suspicious Windows path pattern that requires manual approval.
+151499:suspiciousWindowsPath
+151535:, which contains a suspicious Windows path pattern that requires manual approval.

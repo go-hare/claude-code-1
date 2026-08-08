@@ -18,6 +18,7 @@ import { registerCronDeleteSkill, registerCronListSkill } from './cronManage.js'
 import { registerLoopSkill } from './loop.js'
 import { registerDreamSkill } from './dream.js'
 import { registerUpdateConfigSkill } from './updateConfig.js'
+import { registerDeepResearchSkill } from './deepResearch.js'
 import { registerVerifySkill } from './verify.js'
 
 /**
@@ -63,6 +64,8 @@ export function initBundledSkills(): void {
   registerUpdateConfigSkill()
   registerKeybindingsSkill()
   registerVerifySkill()
+  // densable 2.1.218 #29: /deep-research user-slash only
+  registerDeepResearchSkill()
   registerDebugSkill()
   registerLoremIpsumSkill()
   registerSkillifySkill()

@@ -249,6 +249,8 @@ export function createCronScheduler(
       if (filter && !filter(t)) return
       seen.add(t.id)
       if (inFlight.has(t.id)) return
+      // densable mGa enabled flip — disabled tasks stay on disk but do not fire
+      if (t.enabled === false) return
 
       let next = nextFireAt.get(t.id)
       if (next === undefined) {

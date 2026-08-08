@@ -104,9 +104,15 @@ function deserializeLogEntry(line: string): LogEntry {
   return jsonParse(line) as LogEntry
 }
 
-async function* makeLogEntryReader(): AsyncGenerator<LogEntry> {
-  const currentSession = getSessionId()
+/** densable `$Fs` key: timestamp + sessionId (not timestamp alone). */
+function historySkipKey(entry: {
+  timestamp: number
+  sessionId?: string
+}): string {
+  return `${entry.timestamp}\0${entry.sessionId ?? ''}`
+}
 
+async function* makeLogEntryReader(): AsyncGenerator<LogEntry> {
   // Start with entries that have yet to be flushed to disk
   for (let i = pendingEntries.length - 1; i >= 0; i--) {
     yield pendingEntries[i]!
@@ -119,13 +125,10 @@ async function* makeLogEntryReader(): AsyncGenerator<LogEntry> {
     for await (const line of readLinesReverse(historyPath)) {
       try {
         const entry = deserializeLogEntry(line)
-        // removeLastFromHistory slow path: entry was flushed before removal,
-        // so filter here so both getHistory (Up-arrow) and makeHistoryReader
-        // (ctrl+r search) skip it consistently.
-        if (
-          entry.sessionId === currentSession &&
-          skippedTimestamps.has(entry.timestamp)
-        ) {
+        // removeLastFromHistory slow path: entry was flushed before removal
+        // (or removed while in-flight flush UFs), so filter here so both
+        // getHistory (Up-arrow) and makeHistoryReader (ctrl+r) skip it.
+        if (skippedHistoryKeys.has(historySkipKey(entry))) {
           continue
         }
         yield entry
@@ -284,18 +287,56 @@ let isWriting = false
 let currentFlushPromise: Promise<void> | null = null
 let cleanupRegistered = false
 let lastAddedEntry: LogEntry | null = null
-// Timestamps of entries already flushed to disk that should be skipped when
-// reading. Used by removeLastFromHistory when the entry has raced past the
-// pending buffer. Session-scoped (module state resets on process restart).
-const skippedTimestamps = new Set<number>()
+/**
+ * densable `VDo`: last addToHistory was a consecutive-duplicate suppress.
+ * removeLastFromHistory then only clears this flag (no entry to undo).
+ */
+let lastAddWasDeduped = false
+/**
+ * densable `$Fs` — skip keys for entries written then undone (or undone while
+ * in-flight flush). Key = `${timestamp}\0${sessionId}`.
+ */
+const skippedHistoryKeys = new Set<string>()
+/**
+ * densable `UFs` — snapshot currently being written; removeLast while in-flight
+ * still marks skip so the soon-to-land disk line is filtered.
+ */
+let inFlightFlushEntries: Set<LogEntry> | null = null
 
-// Core flush logic - writes pending entries to disk
-async function immediateFlushHistory(): Promise<void> {
+/**
+ * densable `_ty` — suppress consecutive identical prompts (same display /
+ * project / session, neither side has paste payloads). Prevents double
+ * history rows when submit races with restore/interrupt.
+ */
+function isConsecutiveDuplicateHistory(
+  prev: LogEntry | null,
+  next: { display: string; pastedContents?: Record<number, unknown> },
+  project: string,
+  sessionId: string,
+): boolean {
+  if (!prev || prev.display !== next.display) return false
+  if (prev.project !== project || prev.sessionId !== sessionId) return false
+  const prevHasPaste = Object.keys(prev.pastedContents).length > 0
+  const nextHasPaste =
+    !!next.pastedContents && Object.keys(next.pastedContents).length > 0
+  return !prevHasPaste && !nextHasPaste
+}
+
+/**
+ * densable `gty` — snapshot pending, write snapshot, then remove only those
+ * entries from the queue. Never clear the queue before append succeeds
+ * (densable 2.1.218 #20 race fix).
+ * @returns true on success
+ */
+async function immediateFlushHistory(): Promise<boolean> {
   if (pendingEntries.length === 0) {
-    return
+    return true
   }
 
-  let release
+  // Snapshot — concurrent adds may push to pendingEntries during the write.
+  const snapshot = pendingEntries.slice()
+  inFlightFlushEntries = new Set(snapshot)
+  let release: (() => Promise<void>) | undefined
   try {
     const historyPath = join(getClaudeConfigHomeDir(), 'history.jsonl')
 
@@ -312,21 +353,34 @@ async function immediateFlushHistory(): Promise<void> {
         retries: 3,
         minTimeout: 50,
       },
+      onCompromised: (err: unknown) => {
+        logForDebugging(`History lock compromised: ${err}`)
+      },
     })
 
-    const jsonLines = pendingEntries.map(entry => jsonStringify(entry) + '\n')
-    pendingEntries = []
-
+    const jsonLines = snapshot.map(entry => jsonStringify(entry) + '\n')
     await appendFile(historyPath, jsonLines.join(''), { mode: 0o600 })
+
+    // densable: only drop the snapshotted entries (identity), keep concurrent adds
+    const written = new Set(snapshot)
+    pendingEntries = pendingEntries.filter(e => !written.has(e))
+    return true
   } catch (error) {
     logForDebugging(`Failed to write prompt history: ${error}`)
+    // Keep pendingEntries intact so retry / cleanup can re-attempt.
+    return false
   } finally {
+    inFlightFlushEntries = null
     if (release) {
-      await release()
+      await release().catch(() => {})
     }
   }
 }
 
+/**
+ * densable `cLd` — serialize flushes; on success with more pending, reset
+ * retry counter so a successful write doesn't burn the retry budget.
+ */
 async function flushPromptHistory(retries: number): Promise<void> {
   if (isWriting || pendingEntries.length === 0) {
     return
@@ -338,17 +392,19 @@ async function flushPromptHistory(retries: number): Promise<void> {
   }
 
   isWriting = true
+  let ok = false
 
   try {
-    await immediateFlushHistory()
+    ok = await immediateFlushHistory()
   } finally {
     isWriting = false
 
     if (pendingEntries.length > 0) {
       // Avoid trying again in a hot loop
       await sleep(500)
-
-      void flushPromptHistory(retries + 1)
+      // densable: success → reset retries; failure → increment
+      currentFlushPromise = flushPromptHistory(ok ? 0 : retries + 1)
+      void currentFlushPromise
     }
   }
 }
@@ -360,6 +416,17 @@ async function addToPromptHistory(
     typeof command === 'string'
       ? { display: command, pastedContents: {} }
       : command
+
+  const project = getProjectRoot()
+  const sessionId = getSessionId()
+
+  // densable `_ty` / VDo — consecutive duplicate suppress
+  if (
+    isConsecutiveDuplicateHistory(lastAddedEntry, entry, project, sessionId)
+  ) {
+    lastAddWasDeduped = true
+    return
+  }
 
   const storedPastedContents: Record<number, StoredPastedContent> = {}
   if (entry.pastedContents) {
@@ -399,12 +466,13 @@ async function addToPromptHistory(
     ...entry,
     pastedContents: storedPastedContents,
     timestamp: Date.now(),
-    project: getProjectRoot(),
-    sessionId: getSessionId(),
+    project,
+    sessionId,
   }
 
   pendingEntries.push(logEntry)
   lastAddedEntry = logEntry
+  lastAddWasDeduped = false
   currentFlushPromise = flushPromptHistory(0)
   void currentFlushPromise
 }
@@ -420,11 +488,12 @@ export function addToHistory(command: HistoryEntry | string): void {
   if (!cleanupRegistered) {
     cleanupRegistered = true
     registerCleanup(async () => {
-      // If there's an in-progress flush, wait for it
-      if (currentFlushPromise) {
-        await currentFlushPromise
+      // densable `bty`: drain in-flight flush chain, then final flush
+      let seen: Promise<void> | null = null
+      while (currentFlushPromise && currentFlushPromise !== seen) {
+        seen = currentFlushPromise
+        await seen
       }
-      // If there are still pending entries after the flush completed, do one final flush
       if (pendingEntries.length > 0) {
         await immediateFlushHistory()
       }
@@ -437,21 +506,25 @@ export function addToHistory(command: HistoryEntry | string): void {
 export function clearPendingHistoryEntries(): void {
   pendingEntries = []
   lastAddedEntry = null
-  skippedTimestamps.clear()
+  lastAddWasDeduped = false
+  skippedHistoryKeys.clear()
+  inFlightFlushEntries = null
 }
 
 /**
- * Undo the most recent addToHistory call. Used by auto-restore-on-interrupt:
- * when Esc rewinds the conversation before any response arrives, the submit is
- * semantically undone — the history entry should be too, otherwise Up-arrow
- * shows the restored text twice (once from the input box, once from disk).
+ * densable `uLd` — undo the most recent addToHistory call.
+ * Used by auto-restore-on-interrupt: when Esc rewinds before any response,
+ * the submit is semantically undone — the history entry should be too.
  *
- * Fast path pops from the pending buffer. If the async flush already won the
- * race (TTFT is typically >> disk write latency), the entry's timestamp is
- * added to a skip-set consulted by getHistory. One-shot: clears the tracked
- * entry so a second call is a no-op.
+ * Fast path pops from the pending buffer. If the entry is mid-flush (UFs) or
+ * already on disk, mark skip key (`$Fs`). One-shot; second call is a no-op.
+ * If last add was consecutive-deduped (VDo), only clear that flag.
  */
 export function removeLastFromHistory(): void {
+  if (lastAddWasDeduped) {
+    lastAddWasDeduped = false
+    return
+  }
   if (!lastAddedEntry) return
   const entry = lastAddedEntry
   lastAddedEntry = null
@@ -459,7 +532,12 @@ export function removeLastFromHistory(): void {
   const idx = pendingEntries.lastIndexOf(entry)
   if (idx !== -1) {
     pendingEntries.splice(idx, 1)
+    // densable: if this entry is also in the in-flight write snapshot, the
+    // disk line will still land — mark skip.
+    if (inFlightFlushEntries?.has(entry)) {
+      skippedHistoryKeys.add(historySkipKey(entry))
+    }
   } else {
-    skippedTimestamps.add(entry.timestamp)
+    skippedHistoryKeys.add(historySkipKey(entry))
   }
 }

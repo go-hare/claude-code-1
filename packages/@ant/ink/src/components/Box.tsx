@@ -1,6 +1,6 @@
 import React, { type PropsWithChildren, type Ref } from 'react';
 import type { Except } from 'type-fest';
-import type { DOMElement } from '../core/dom.js';
+import type { DOMAccessibility, DOMElement } from '../core/dom.js';
 import type { ClickEvent } from '../core/events/click-event.js';
 import type { FocusEvent } from '../core/events/focus-event.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
@@ -21,6 +21,15 @@ export type Props = Except<Styles, 'textWrap'> & {
    * reconciler's `commitMount` phase.
    */
   autoFocus?: boolean;
+  /**
+   * densable accessibility bag (`TYr` / aria-* → node.accessibility).
+   */
+  accessibility?: DOMAccessibility;
+  /**
+   * densable `aria-preserve-whitespace` shorthand for
+   * `accessibility={{ preserveWhitespace: true }}`.
+   */
+  'aria-preserve-whitespace'?: boolean;
   /**
    * Fired on left-button click (press + release without drag). Only works
    * inside `<AlternateScreen>` where mouse tracking is enabled — no-op
@@ -63,6 +72,8 @@ function Box({
   ref,
   tabIndex,
   autoFocus,
+  accessibility: accessibilityProp,
+  'aria-preserve-whitespace': ariaPreserveWhitespace,
   onClick,
   onFocus,
   onFocusCapture,
@@ -95,11 +106,15 @@ function Box({
   warn.ifNotInteger(style.columnGap, 'columnGap');
   warn.ifNotInteger(style.rowGap, 'rowGap');
 
+  const accessibility: DOMAccessibility | undefined =
+    accessibilityProp ?? (ariaPreserveWhitespace ? { preserveWhitespace: true } : undefined);
+
   return (
     <ink-box
       ref={ref}
       tabIndex={tabIndex}
       autoFocus={autoFocus}
+      accessibility={accessibility}
       onClick={onClick}
       onFocus={onFocus as unknown as (event: React.FocusEvent<Element, Element>) => void}
       onFocusCapture={onFocusCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}

@@ -79,12 +79,14 @@ import { getHardcodedTeammateModelFallback } from '../../utils/swarm/teammateMod
 import { useSearchInput } from '../../hooks/useSearchInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import {
+  applyFastModeOnModelSwitch,
   clearFastModeCooldown,
   FAST_MODE_MODEL_DISPLAY,
   isFastModeAvailable,
   isFastModeEnabled,
   getFastModeModel,
   isFastModeSupportedByModel,
+  resolveFastModeAfterModelSwitch,
 } from '../../utils/fastMode.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { getPlatform } from '../../utils/platform.js';
@@ -285,15 +287,28 @@ export function Config({
       from_model: previousModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       to_model: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
-    setAppState(prev => ({
-      ...prev,
-      mainLoopModel: value,
-      mainLoopModelForSession: null,
-    }));
+    // densable 2.1.218 #31 — Rft/uU/dU on `/config model=` path
+    if (isFastModeEnabled()) {
+      clearFastModeCooldown();
+    }
+    let fastSuffix = '';
+    setAppState(prev => {
+      const prevFast = !!prev.fastMode;
+      const nextFast = resolveFastModeAfterModelSwitch(value, prev.fastMode);
+      const billed = isBilledAsExtraUsage(value, nextFast, isOpus1mMergeEnabled());
+      const { nextFastMode, suffix } = applyFastModeOnModelSwitch(value, prev.fastMode, {
+        billedAsExtraUsage: billed,
+      });
+      fastSuffix = suffix;
+      return {
+        ...prev,
+        mainLoopModel: value,
+        mainLoopModelForSession: null,
+        ...(nextFastMode !== prevFast ? { fastMode: nextFastMode } : null),
+      };
+    });
     setChanges(prev => {
-      const valStr =
-        modelDisplayString(value) +
-        (isBilledAsExtraUsage(value, false, isOpus1mMergeEnabled()) ? ' · Billed as extra usage' : '');
+      const valStr = modelDisplayString(value) + fastSuffix;
       if ('model' in prev) {
         const { model, ...rest } = prev;
         return { ...rest, model: valStr };

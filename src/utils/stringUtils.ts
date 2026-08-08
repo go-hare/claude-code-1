@@ -3,6 +3,18 @@
  */
 
 /**
+ * densable q0 — coerce unknown to string[] for delta attachment fields.
+ * Non-arrays → []; mixed arrays filter to strings only; all-string arrays pass through.
+ * Prevents resume crash when history holds malformed delta attachments (2.1.218 #24).
+ */
+export function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.every((t): t is string => typeof t === 'string')
+    ? value
+    : value.filter((t): t is string => typeof t === 'string')
+}
+
+/**
  * Escapes special regex characters in a string so it can be used as a literal
  * pattern in a RegExp constructor.
  */
@@ -254,4 +266,19 @@ export function truncateCodeUnitsSafe(
     return sliced.slice(0, -1)
   }
   return sliced
+}
+
+/** densable Etp — max UTF-16 code units for IDE selection content. */
+export const IDE_SELECTION_CONTENT_MAX_CODE_UNITS = 2000
+
+/**
+ * densable vtp(e) — IDE selection truncator used by attachment→message.
+ * `Pl(e, Etp) + "\n... (truncated)"` when length > Etp.
+ */
+export function truncateIdeSelectionContent(text: string): string {
+  if (text.length <= IDE_SELECTION_CONTENT_MAX_CODE_UNITS) return text
+  return (
+    truncateCodeUnitsSafe(text, IDE_SELECTION_CONTENT_MAX_CODE_UNITS) +
+    '\n... (truncated)'
+  )
 }

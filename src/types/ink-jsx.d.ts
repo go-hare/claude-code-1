@@ -11,21 +11,26 @@
 import type { ReactNode, Ref } from 'react'
 import type {
   ClickEvent,
+  DOMAccessibility,
+  DOMElement,
   FocusEvent,
   KeyboardEvent,
   PasteEvent,
   Styles,
   TextStyles,
-  DOMElement,
 } from '@anthropic/ink'
 
 declare module 'react' {
+  // React 19: both React.JSX and global JSX are used depending on
+  // jsxImportSource / tsc resolution. Augment both via this module.
   namespace JSX {
     interface IntrinsicElements {
       'ink-box': {
         ref?: Ref<DOMElement>
         tabIndex?: number
         autoFocus?: boolean
+        /** densable 2.1.218 accessibility bag (preserveWhitespace etc.) */
+        accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void
         onFocus?: (event: FocusEvent) => void
         onFocusCapture?: (event: FocusEvent) => void
@@ -46,6 +51,8 @@ declare module 'react' {
       'ink-text': {
         style?: Styles
         textStyles?: TextStyles
+        /** densable 2.1.218 accessibility bag */
+        accessibility?: DOMAccessibility
         children?: ReactNode
       }
       'ink-link': {
@@ -60,3 +67,6 @@ declare module 'react' {
     }
   }
 }
+
+// Ensure this ambient module is pulled into the root program.
+export {}

@@ -74,9 +74,12 @@ import {
   type ScreenReaderPark,
 } from './screenReaderPark.js';
 import { endScreenReaderStartupQuiet, getScreenReaderStartupQuietRemainingMs } from './screenReaderStartupQuiet.js';
+import { drainScreenReaderAnnouncements } from './screenReaderAnnounce.js';
 import {
+  extractScreenReaderOutput,
   extractScreenReaderText,
   findScreenReaderNodeStartIndex,
+  sanitizeScreenReaderText,
   type ScreenReaderDOMNode,
 } from './screenReaderTree.js';
 import { stringWidth } from './stringWidth.js';
@@ -1088,9 +1091,25 @@ export default class Ink {
       }
     }
 
-    const fullText = extractScreenReaderText(this.rootNode as ScreenReaderDOMNode);
+    // densable xYr: text + preserveRanges (aria-preserve-whitespace)
+    const extracted = extractScreenReaderOutput(this.rootNode as ScreenReaderDOMNode);
+    let fullText = extracted.text;
+    const preserveRanges = extracted.preserveRanges;
     const columns = this.options.stdout.columns || this.terminalColumns || 80;
     const terminalRows = this.options.stdout.rows || this.terminalRows || 24;
+
+    // densable GJc: append ephemeral kill announcements after frame text
+    const announcements = drainScreenReaderAnnouncements();
+    let announcementStartLine: number | undefined;
+    if (announcements.length > 0) {
+      const baseLines = materializeScreenReaderLines(fullText, columns, preserveRanges).lines;
+      announcementStartLine = baseLines.length;
+      for (const raw of announcements) {
+        const clean = sanitizeScreenReaderText(raw);
+        if (clean === '') continue;
+        fullText = fullText === '' ? clean : `${fullText}\n${clean}`;
+      }
+    }
 
     const decl = this.cursorDeclaration;
     let cursor: {
@@ -1120,6 +1139,8 @@ export default class Ink {
       terminalRows,
       cursor,
       stringWidth,
+      preserveRanges,
+      announcementStartLine,
     });
     if (plan.skip) return;
 
@@ -1129,7 +1150,7 @@ export default class Ink {
     }
 
     // Official: this.prevScreenReaderLines=n; this.prevScreenReaderPark=a
-    const { lines } = materializeScreenReaderLines(fullText, columns);
+    const { lines } = materializeScreenReaderLines(fullText, columns, preserveRanges);
     this.prevScreenReaderLines = lines;
     this.prevScreenReaderPark = plan.park;
   }

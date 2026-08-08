@@ -1,0 +1,49 @@
+# densable 2.1.218 — four honest residuals (updated 2026-08-08 deep align)
+
+User directive: 这几个要对齐的 → 补产品面 / 对齐对齐 不是偷懒.
+Rule: densable extract first → 1:1; 缺就补不要假. **Do not invent** #15 MAX_WATCH / #9 gateway.
+
+## Matrix
+
+| Residual | densable locus | Local | Verdict |
+|----------|----------------|-------|---------|
+| **#11 Host** | `S8o` + React `LHr`/`Jul` + Me sticky `permissionLayers` (U/W/$/G + se) + HWf | **Product HAVE:** closed-gate + HWf + REPL self-create/unmount; **sticky→layers:** `hostPermissionLayers.ts` + Me apply in `hostEngine` (model/permission_mode/max_thinking_tokens/flag_settings + seed_read_state merge; `hostOwnsPermissionMode` D). Tests: `hostEngine.218` + `hostEngineTurn.218` + `hostPermissionLayers.218`. | **HAVE (sticky layers 1:1)** |
+| **RC “Trust this directory?”** | Form `type:text` dir/name + select spawnMode; `!EUe` → Omt → qpn; list OWs / remove jpn | **Product HAVE:** free-text Directory/Name edit phases (densable text fields) + trust gate + qpn; slash add + **list/remove** (`/remote-control-servers` rc-list, `/remote-control-remove` rc-remove). Tests: remoteControl* + cmd.218. | **HAVE (form free-text + list/remove)** |
+| **#15 MAX_WATCH** | SEA `MAX_WATCH` count **0**. Real fix = Ink `Zlt=256` / `yir` | `MAX_TREE_DEPTH=256` HAVE | **Invent-ban** FS MAX_WATCH |
+| **#9 gateway** | Official = gateway spend metering | go-hare **no gateway**; CLI cousin inference-profile HAVE | **N/A** official |
+
+## Product files (this wire)
+
+- `src/engine/hostEngine.ts` — S8o closed-gate + Me sticky apply
+- `src/engine/hostPermissionLayers.ts` — densable permissionLayers build/merge/seed
+- `src/engine/hostEngineTurn.ts` — HWf turn pump
+- `src/screens/REPL.tsx` — P??S8o self-create + HWf in onQueryImpl + unmount close
+- `src/bridge/remoteControlServers.ts` — OWs/qpn/jpn
+- `src/components/RemoteControlAddServerDialog.tsx` — free-text Directory/Name + Trust
+- `src/commands/remoteControlAddServer/` — slash add
+- `src/commands/remoteControlServers/` — slash list/remove
+- `src/utils/config.ts` — `GlobalConfig.remoteControl`
+- `src/Tool.ts` — `ToolUseContext.permissionLayers` optional field
+
+## Weak-test pack (same day)
+
+- #5 paste: `ctrlJNewline.paste.218.test.ts` (binding + Ctrl+J → newline expand)
+- #25: `ultrareview.invalidArg.218.test.ts` (correctable error copy)
+- #14: `declareCursor.218.test.ts` (ListItem/SelectOption cursor)
+- #18: `monotonicTurn.218.test.ts` (performance.now turn clock)
+
+## Deep align (2026-08-08 follow-up — 对齐啊)
+
+| Residual | Work | Status |
+|----------|------|--------|
+| **#11 consumers** | densable `fdo` island `bn`/`qO`/`_Kr`/`YDu`/`bb`/`yor` → `permissionLayerReaders.ts`. **Live wire:** bn → permissions/query/toolExecution/useCanUseTool; qO+_Kr+bb → `query.ts` callModel; yor projection (model+thinking) in `applyHostStickyToPrepared`. Tests: `permissionLayerReaders.218` + sticky thinking project. | **HAVE (bn/qO/_Kr/bb/yor 1:1)** |
+| **#28 UI** | densable trust cancelFirst + **B8a single-server detail**: Restart ${zb()}/Remove/Back + `Remove server?` cancelFirst (`Yes, remove`/`No, cancel`) + Stop serving subtitle; manage list → detail via `/remote-control-servers`. Form free-text + jpn remove keep. | **HAVE (trust + B8a detail densable)** |
+| **#5 paste** | binding + `handleNewline` pure twin + multi-step Ctrl+J paste + `usePasteHandler` contract + **runtime twin E2E** (`usePasteHandler.e2e.218.test.ts`: handlePaste deliver, pkt>800 as-paste, return defer). No full Ink CSI mount (no densable product string). | **HAVE (runtime E2E twin)** |
+| **DaemonHub** | densable LGa/HGa/OGa/mGa/hGa/B8a shell: title "Claude daemon", tabs Scheduled + Remote Control, empty/add roi labels, mGa Enable/Disable/Edit/Remove/Back + Remove task? cancelFirst, service Uninstall/Stop; bare `/daemon` → hub. Local store: scheduled_tasks.json + remoteControl. | **HAVE (product shell 1:1 surface)** |
+
+## Explicit non-claims
+
+- Do **not** invent MAX_WATCH FS depth or gateway spend admin headers.
+- densable `flag_settings` layer is latched on Me and typed; no separate densable consumer beyond bn ignore-case — do not invent obs.
+- densable daemon.json path for scheduled tasks mapped to local `.claude/scheduled_tasks.json` (same manage surface; not a second fake storage product).
+- Full Ink CSI bracketed-paste terminal protocol mount still not claimed (harness only).

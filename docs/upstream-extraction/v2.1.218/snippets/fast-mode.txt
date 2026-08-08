@@ -1,0 +1,30 @@
+101952:- Processes the content with the prompt using a small, fast model
+111851:Model to use for this prompt hook (e.g., "claude-sonnet-5"). If not specified, uses the default small fast model.
+112113:When true, fast mode is enabled. When absent or false, fast mode is off.
+112114:When true, fast mode does not persist across sessions. Each session starts with fast mode off.
+113124:Fast mode requires a paid subscription
+113125:Fast mode unavailable during evaluation. Please purchase credits.
+113126:Fast mode has been disabled by your organization
+113127:Fast mode requires usage credits 
+113129:Fast mode unavailable due to network connectivity issues
+113130:Fast mode is currently unavailable
+113132:Fast mode is only available when using the Anthropic API directly
+113133:Fast mode is not available
+113135:Fast mode unavailable: 
+113138:Fast mode unavailable: Fast mode is not available in the Agent SDK
+113139:Fast mode is not available in the Agent SDK
+113140:Fast mode unavailable: Checking fast mode availability (org status pending)
+113141:Checking fast mode availability
+113159:Fast mode cooldown expired, re-enabling fast mode
+113161:Fast mode cooldown triggered (
+113181:Fast mode disabled 
+113183:Fast mode disabled 
+113185:Fast mode disabled 
+113187:Fast mode disabled 
+113189:Fast mode disabled 
+113191:Fast mode requires usage credits 
+113193:Fast mode disabled 
+113198:Fast mode overage rejection: 
+113207:Fast mode prefetch in progress, returning in-flight promise
+113210:Skipping fast mode prefetch, fetched recently
+113215:Org fast mode: 
