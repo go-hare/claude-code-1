@@ -137,6 +137,11 @@ type Props = {
   // fullscreen) re-enters alt-screen + mouse tracking. Idempotent on the
   // terminal side. Optional so testing.tsx doesn't need to stub it.
   readonly onStdinResume?: () => void;
+  /**
+   * densable onRawModeEnter — Ink.ensureInteractive. Called once when raw mode
+   * first enables (rawModeEnabledCount 0→1), before setRawMode(true).
+   */
+  readonly onRawModeEnter?: () => void;
   // Receives the declared native-cursor position from useDeclaredCursor
   // so ink.tsx can park the terminal cursor there after each frame.
   // Enables IME composition at the input caret and lets screen readers /
@@ -348,6 +353,10 @@ export default class App extends PureComponent<Props, State> {
         // coexist -- the early capture handler would drain stdin before ours
         // can see it. The buffered text is preserved for REPL.tsx via consumeEarlyInput().
         defaultCallbacks.stopCapturingEarlyInput();
+
+        // densable: this.props.onRawModeEnter?.() before ref/setRawMode —
+        // attaches resize/SIGCONT + hides cursor (Ink.ensureInteractive).
+        this.props.onRawModeEnter?.();
 
         // Safety net: remove any pre-existing readable listeners that aren't
         // ours. In builds where setAppCallbacks() was never called, the early
@@ -595,28 +604,20 @@ export default class App extends PureComponent<Props, State> {
   };
 
   handleTerminalFocus = (isFocused: boolean): void => {
-    // densable 2.1.217 handleTerminalFocus:
-    //   let prev = xbe() // getTerminalFocusState
-    //   pds(isFocused)   // setTerminalFocused
-    //   if (isFocused && prev === "blurred")
-    //     bd.get(stdout)?.proactiveAtlasResetOnFocus()
-    //   if (isFocused && prev !== "focused" && CLAUDE_BG_BACKEND===daemon && querier)
-    //     I4u(querier) // XTVERSION re-probe — daemon-only, skip here
-    //
-    // setTerminalFocused notifies TerminalFocusProvider + Clock — no setState.
+    // densable 2.1.217 handleTerminalFocus (sr-isScreenReader extract, 1:1):
+    //   handleTerminalFocus=(e)=>{let t=xbe();if(pds(e),e&&t==="blurred")
+    //     bd.get(this.props.stdout)?.proactiveAtlasResetOnFocus();
+    //     if(e&&t!=="focused"&&CLAUDE_BG_BACKEND==="daemon"&&this.querier)
+    //       I4u(this.querier)};
+    // densable does NOT forceRedraw on focus — that erases the alt buffer and
+    // can leave a black screen if paint is empty/delayed (WT/Windows Esc/focus
+    // thrash). External wipe recovery is probeExternalClear (iTerm/Apple only).
     const prev = getTerminalFocusState();
     setTerminalFocused(isFocused);
     if (isFocused && prev === 'blurred') {
-      const ink = instances.get(this.props.stdout);
-      ink?.proactiveAtlasResetOnFocus();
-      // densable external-wipe recovery: iTerm/Apple_Terminal use CPR probe
-      // (probeExternalClear → forceRedraw). App-switch on WT/Windows does not
-      // send SIGCONT and may blank the alt buffer while Ink's prev frame still
-      // matches virtual content — force full damage so the message area repaints.
-      if (ink?.isAltScreenActive) {
-        ink.forceRedraw();
-      }
+      instances.get(this.props.stdout)?.proactiveAtlasResetOnFocus();
     }
+    // densable I4u XTVERSION re-probe is daemon-only (CLAUDE_BG_BACKEND===daemon).
   };
 
   handleSuspend = (): void => {

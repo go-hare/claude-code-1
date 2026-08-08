@@ -40,9 +40,11 @@ import {
   CharPool,
   cellAt,
   createScreen,
+  fillFullRepaintSentinel,
   HyperlinkPool,
   isEmptyCellAt,
   migrateScreenPools,
+  type Screen,
   StylePool,
 } from './screen.js';
 import { applySearchHighlight } from './searchHighlight.js';
@@ -96,6 +98,7 @@ import {
   CURSOR_HOME,
   cursorMove,
   cursorPosition,
+  cursorTo,
   DISABLE_KITTY_KEYBOARD,
   DISABLE_MODIFY_OTHER_KEYS,
   ENABLE_KITTY_KEYBOARD,
@@ -121,6 +124,7 @@ import {
   enableMouseTracking,
   ENTER_ALT_SCREEN,
   exitAltScreenSequence,
+  HIDE_CURSOR,
   type MouseTrackingMode,
   SHOW_CURSOR,
 } from './termio/dec.js';
@@ -262,6 +266,12 @@ export default class Ink {
   // Ignore last render after unmounting a tree to prevent empty output before exit
   private isUnmounted = false;
   private isPaused = false;
+  /**
+   * densable renderCalled — set true on first render(). unmount only writes
+   * renderPreviousOutput when renderCalled && !isPaused (handoffAltScreen
+   * pauses so open→attach does not repaint/exit mid-handoff).
+   */
+  private renderCalled = false;
   private readonly container: FiberRoot;
   private rootNode: dom.DOMElement;
   readonly focusManager: FocusManager;
@@ -272,7 +282,16 @@ export default class Ink {
   private exitPromise?: Promise<void>;
   private restoreConsole?: () => void;
   private restoreStderr?: () => void;
-  private readonly unsubscribeTTYHandlers?: () => void;
+  /**
+   * densable unsubscribeTTYHandlers — set lazily by ensureInteractive (not
+   * constructor). Presence means resize/SIGCONT handlers are attached.
+   */
+  private unsubscribeTTYHandlers?: () => void;
+  /**
+   * densable hasRendered — first onRender sets true; subsequent frames call
+   * ensureInteractive so TTY handlers re-attach after detach races.
+   */
+  private hasRendered = false;
   private terminalColumns: number;
   private terminalRows: number;
   private currentNode: ReactNode = null;
@@ -364,6 +383,15 @@ export default class Ink {
   // render() takes; deferring into the atomic block means old content stays
   // visible until the new frame is fully ready.
   private needsEraseBeforePaint = false;
+  /**
+   * densable `altScreenFullRepaint` — CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT.
+   * AgentView / FleetView sets this on Windows so every alt-screen frame
+   * rewrites all cells (ConPTY incremental-diff corruption). See densable
+   * onRender: full damage + sentinel prev screen + conptyCursorPin.
+   */
+  private altScreenFullRepaint = false;
+  /** densable `fullRepaintSentinelScreen` — spacer-filled prev for full damage. */
+  private fullRepaintSentinelScreen: Screen | null = null;
   // Native cursor positioning: a component (via useDeclaredCursor) declares
   // where the terminal cursor should be parked after each frame. Terminal
   // emulators render IME preedit text at the physical cursor position, and
@@ -384,6 +412,8 @@ export default class Ink {
     this.liveCountsEnabled = isBenchLiveCountsEnvEnabled();
     // Official: this.accessibilityMode=be.CLAUDE_CODE_ACCESSIBILITY
     this.accessibilityMode = isEnvTruthyLike(process.env.CLAUDE_CODE_ACCESSIBILITY);
+    // densable: this.altScreenFullRepaint=xH(CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT)
+    this.altScreenFullRepaint = isEnvTruthyLike(process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT);
     // Official: e.isScreenReaderEnabled ?? (!!stdout.isTTY && ct(INK_SCREEN_READER))
     this.isScreenReaderEnabled =
       options.isScreenReaderEnabled ?? (!!options.stdout.isTTY && isEnvTruthyLike(process.env.INK_SCREEN_READER));
@@ -445,15 +475,9 @@ export default class Ink {
     // Unmount when process exits
     this.unsubscribeExit = onExit(this.unmount, { alwaysLast: false });
 
-    if (options.stdout.isTTY) {
-      options.stdout.on('resize', this.handleResize);
-      process.on('SIGCONT', this.handleResume);
-
-      this.unsubscribeTTYHandlers = () => {
-        options.stdout.off('resize', this.handleResize);
-        process.off('SIGCONT', this.handleResume);
-      };
-    }
+    // densable: TTY handlers are attached lazily via ensureInteractive()
+    // (onRawModeEnter / setAltScreenActive / subsequent onRender), not in
+    // the constructor — keeps non-interactive short paths free of listeners.
 
     this.rootNode = dom.createNode('ink-root');
     this.focusManager = new FocusManager((target, event) => dispatcher.dispatchDiscrete(target, event));
@@ -690,6 +714,12 @@ export default class Ink {
     if (this.isUnmounted || this.isPaused) {
       return;
     }
+    // densable: if(this.hasRendered&&!this.isExiting)this.ensureInteractive();
+    // this.hasRendered=!0
+    if (this.hasRendered && !this.isExiting) {
+      this.ensureInteractive();
+    }
+    this.hasRendered = true;
     // Entering a render cancels any pending drain tick — this render will
     // handle the drain (and re-schedule below if needed). Prevents a
     // wheel-event-triggered render AND a drain-timer render both firing.
@@ -841,7 +871,15 @@ export default class Ink {
     // cells at sibling boundaries that per-node damage tracking misses.
     // Selection/highlight overlays write via setCellStyleId which doesn't
     // track damage. prevFrameContaminated covers the cleanup frame.
-    if (didLayoutShift() || selActive || hlActive || this.prevFrameContaminated) {
+    // densable: also force full damage when altScreenFullRepaint (Windows
+    // AgentView / CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT).
+    if (
+      didLayoutShift() ||
+      selActive ||
+      hlActive ||
+      this.prevFrameContaminated ||
+      (this.altScreenFullRepaint && this.altScreenActive)
+    ) {
       frame.screen.damage = {
         x: 0,
         y: 0,
@@ -860,11 +898,31 @@ export default class Ink {
     // can't do this — cursor.y tracks scrollback rows CSI H can't reach.
     // The CSI H write is deferred until after the diff is computed so we
     // can skip it for empty diffs (no writes → physical cursor unused).
+    // densable altScreenFullRepaint: replace prev.screen with a spacer
+    // sentinel so every next cell differs and LogUpdate rewrites all
+    // glyphs (ConPTY incremental-diff corruption on Windows FleetView).
     let prevFrame = this.frontFrame;
     if (this.altScreenActive) {
       prevFrame = { ...this.frontFrame, cursor: ALT_SCREEN_ANCHOR_CURSOR };
+      if (this.altScreenFullRepaint) {
+        const { width, height } = this.frontFrame.screen;
+        if (this.fullRepaintSentinelScreen?.width !== width || this.fullRepaintSentinelScreen?.height !== height) {
+          this.fullRepaintSentinelScreen = createScreen(
+            width,
+            height,
+            this.stylePool,
+            this.charPool,
+            this.hyperlinkPool,
+          );
+          fillFullRepaintSentinel(this.fullRepaintSentinelScreen);
+        }
+        prevFrame = { ...prevFrame, screen: this.fullRepaintSentinelScreen };
+      }
     }
 
+    // densable: no height-0 / visually-empty early return here — LogUpdate
+    // still receives the frame. (Local empty-skips after external 2J remount
+    // left the physical alt buffer black until a later content frame.)
     const tDiff = performance.now();
     const diff = this.log.render(
       prevFrame,
@@ -874,7 +932,9 @@ export default class Ink {
       // renders the scrolled-but-not-yet-repainted intermediate state.
       // tmux is the main case (re-emits DECSTBM with its own timing and
       // doesn't implement DEC 2026, so SYNC_OUTPUT_SUPPORTED is false).
-      SYNC_OUTPUT_SUPPORTED,
+      // densable: qq6 && !this.altScreenFullRepaint — full-repaint mode
+      // disables DECSTBM scroll optimization (every frame is full damage).
+      SYNC_OUTPUT_SUPPORTED && !this.altScreenFullRepaint,
     );
     const diffMs = performance.now() - tDiff;
     // Swap buffers
@@ -983,6 +1043,11 @@ export default class Ink {
           const row = Math.min(Math.max(target.y + 1, 1), terminalRows);
           const col = Math.min(Math.max(target.x + 1, 1), terminalWidth);
           optimized.push({ type: 'stdout', content: cursorPosition(row, col) });
+          // densable conptyCursorPin: after CUP, re-emit the glyph left of
+          // the caret so ConPTY doesn't drop it under full-repaint mode.
+          if (this.altScreenFullRepaint) {
+            optimized.push(this.conptyCursorPin(frame.screen, target.x, target.y, col));
+          }
         } else {
           // After the diff (or preamble), cursor is at frame.cursor. If no
           // diff AND previously parked, it's still at the old park position
@@ -1020,7 +1085,8 @@ export default class Ink {
     }
 
     const tWrite = performance.now();
-    writeDiffToTerminal(this.terminal, optimized, this.altScreenActive && !SYNC_OUTPUT_SUPPORTED);
+    // densable: dj8(this.terminal, Z, this.skipSyncMarkers())
+    writeDiffToTerminal(this.terminal, optimized, this.skipSyncMarkers());
     const writeMs = performance.now() - tWrite;
 
     // Update blit safety for the NEXT frame. The frame just rendered
@@ -1271,6 +1337,9 @@ export default class Ink {
     // Clear displayCursor so the cursor preamble doesn't emit a stale
     // relative move from where we last parked it.
     this.displayCursor = null;
+    // densable: this.prevFrameContaminated=!0 — emptyFrame is 0×0; next
+    // paint must full-render, not blit from the discarded prev screen.
+    this.prevFrameContaminated = true;
     // Official repaint also resets screen-reader diff state
     this.resetScreenReaderDiffState();
   }
@@ -1421,6 +1490,40 @@ export default class Ink {
    * a full redraw with no stale diff state.
    */
   /**
+   * densable ensureInteractive — lazy-attach resize/SIGCONT, hide cursor when
+   * not in accessibilityMode. densable: if(this.unsubscribeTTYHandlers||!TTY)return;
+   * if(!accessibilityMode)stdout.write(op); attach; store unsubscribe.
+   * Also wired as App onRawModeEnter.
+   */
+  ensureInteractive = (): void => {
+    if (this.unsubscribeTTYHandlers || !this.options.stdout.isTTY) {
+      return;
+    }
+    if (!this.accessibilityMode) {
+      this.options.stdout.write(HIDE_CURSOR);
+    }
+    this.options.stdout.on('resize', this.handleResize);
+    process.on('SIGCONT', this.handleResume);
+    this.unsubscribeTTYHandlers = () => {
+      this.options.stdout.off('resize', this.handleResize);
+      process.off('SIGCONT', this.handleResume);
+    };
+  };
+
+  /**
+   * densable skipSyncMarkers() — when true, dj8/writeDiff skips BSU/ESU.
+   * densable: !TTY || !QQ() || !unsubscribeTTYHandlers → skip.
+   * Handlers attach lazily in ensureInteractive; before that, DEC 2026
+   * markers can desync (especially FleetView open→attach remount).
+   */
+  skipSyncMarkers(): boolean {
+    if (!this.options.stdout.isTTY) return true;
+    if (!SYNC_OUTPUT_SUPPORTED) return true;
+    if (!this.unsubscribeTTYHandlers) return true;
+    return false;
+  }
+
+  /**
    * Official densable setAltScreenActive(active, mode="off").
    * `mouseTracking` accepts boolean (legacy) or densable mode string.
    */
@@ -1435,7 +1538,9 @@ export default class Ink {
           ? 'off'
           : mouseTracking;
     this.altScreenMouseTracking = mode;
+    // densable: if(H)this.ensureInteractive(),this.resetFramesForAltScreen()
     if (active) {
+      this.ensureInteractive();
       this.resetFramesForAltScreen();
     } else {
       this.repaint();
@@ -2038,13 +2143,50 @@ export default class Ink {
     }
   }
 
-  // Stable identity for TerminalWriteContext. An inline arrow here would
-  // change on every render() call (initial mount + each resize), which
-  // cascades through useContext → <AlternateScreen>'s useLayoutEffect dep
-  // array → spurious exit+re-enter of the alt screen on every SIGWINCH.
-  private writeRaw(data: string): void {
-    this.options.stdout.write(data);
+  /**
+   * densable `conptyCursorPin(screen, x, y, parkCol)` — under
+   * CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT, after parking the caret with CUP,
+   * re-emit the glyph immediately left of the caret (or CHA to parkCol if
+   * that cell is wide / missing / hyperlinked). ConPTY can drop that cell
+   * when every frame rewrites the full buffer; pinning restores it.
+   */
+  private conptyCursorPin(screen: Screen, x: number, y: number, parkCol: number): { type: 'stdout'; content: string } {
+    // densable width===2||3 maps to our SpacerTail/SpacerHead (enum values 2/3).
+    // Step left once off a spacer so the pin targets the real glyph cell.
+    let col = x - 1;
+    let cell = col >= 0 ? cellAt(screen, col, y) : undefined;
+    if (cell !== undefined && (cell.width === CellWidth.SpacerTail || cell.width === CellWidth.SpacerHead)) {
+      col -= 1;
+      cell = col >= 0 ? cellAt(screen, col, y) : undefined;
+    }
+    if (
+      cell === undefined ||
+      cell.width === CellWidth.SpacerTail ||
+      cell.width === CellWidth.SpacerHead ||
+      cell.hyperlink !== undefined
+    ) {
+      return { type: 'stdout', content: cursorTo(parkCol) };
+    }
+    const styleOn = this.stylePool.transition(this.stylePool.none, cell.styleId);
+    const styleOff = this.stylePool.transition(cell.styleId, this.stylePool.none);
+    return {
+      type: 'stdout',
+      content: cursorPosition(y + 1, col + 1) + styleOn + cell.char + styleOff,
+    };
   }
+
+  // Stable identity for TerminalWriteContext. MUST be an instance arrow
+  // (not a prototype method): context consumers call `writeRaw(seq)` as a
+  // free function, so a method would lose `this` and throw before
+  // ENTER_ALT_SCREEN / setAltScreenActive ever land. That leaves Ink on
+  // main-screen while the UI still sizes to terminalRows — Esc/cancel then
+  // hits LogUpdate fullReset (Bj8 wipe) and paints blank for seconds.
+  // An inline arrow inside render() would also be wrong: new identity every
+  // render() → AlternateScreen useInsertionEffect re-fires → exit+re-enter
+  // (densable ME_ deps [writeRaw, mouseTracking]).
+  private writeRaw = (data: string): void => {
+    this.options.stdout.write(data);
+  };
 
   private setCursorDeclaration: CursorDeclarationSetter = (decl, clearIfNode) => {
     if (decl === null && clearIfNode !== undefined && this.cursorDeclaration?.node !== clearIfNode) {
@@ -2054,6 +2196,8 @@ export default class Ink {
   };
 
   render(node: ReactNode): void {
+    // densable: this.renderCalled=!0,this.currentNode=H
+    this.renderCalled = true;
     this.currentNode = node;
 
     const tree = (
@@ -2074,6 +2218,7 @@ export default class Ink {
         onMultiClick={this.handleMultiClick}
         onSelectionDrag={this.handleSelectionDrag}
         onStdinResume={this.reassertTerminalModes}
+        onRawModeEnter={this.ensureInteractive}
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
         dispatchPasteEvent={this.dispatchPasteEvent}
@@ -2110,10 +2255,16 @@ export default class Ink {
 
     this.unsubscribeTTYHandlers?.();
 
-    // Non-TTY environments don't handle erasing ansi escapes well, so it's better to
-    // only render last frame of non-static output
-    const diff = this.log.renderPreviousOutput_DEPRECATED(this.frontFrame);
-    writeDiffToTerminal(this.terminal, optimize(diff));
+    // densable: only when renderCalled && !isPaused — handoffAltScreen sets
+    // isPaused so open→attach does not write a main-buffer/previous frame
+    // over the handed-off alt screen before PTY attach.
+    if (this.renderCalled && !this.isPaused) {
+      // Non-TTY environments don't handle erasing ansi escapes well, so it's better to
+      // only render last frame of non-static output
+      const diff = this.log.renderPreviousOutput_DEPRECATED(this.frontFrame);
+      // densable: dj8(..., this.skipSyncMarkers())
+      writeDiffToTerminal(this.terminal, optimize(diff), this.skipSyncMarkers());
+    }
 
     // Clean up terminal modes synchronously before process exit.
     // React's componentWillUnmount won't run in time when process.exit() is called,

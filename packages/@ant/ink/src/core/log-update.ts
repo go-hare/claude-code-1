@@ -59,9 +59,12 @@ export class LogUpdate {
     return this.getRenderOpsForDone(prevFrame)
   }
 
-  // Called when process resumes from suspension (SIGCONT) to prevent clobbering terminal content
+  // densable: reset(){this.state.previousOutput="",this.forceReset=!1}
+  // Called on SIGCONT / resetFramesForAltScreen / repaint. Must clear
+  // forceReset so a stale forceFullReset cannot Sj_/pj8 after blank seed.
   reset(): void {
     this.state.previousOutput = ''
+    this.forceReset = false
   }
 
   forceFullReset(): void {
@@ -136,29 +139,61 @@ export class LogUpdate {
       return this.renderFullFrame(next)
     }
 
+    const startTime = performance.now()
+    const stylePool = this.options.stylePool
+
+    // densable LogUpdate.render has no height-0 / visually-empty early return.
+    // Keep only height===0 as a yoga-invalid guard (no cells to paint); do
+    // NOT skip full-height blank screens — after FleetView remount 2J the
+    // physical buffer is already black and skipping leaves it black.
+    if (next.screen.height === 0) {
+      this.forceReset = false
+      return []
+    }
+
+    // densable LogUpdate.render preamble (1:1):
+    //   $=prev.cursor.y>=prev.screen.height&&prev.screen.height>=prev.viewport.height
+    //   Y=$?prev.screen.height-Math.min(prev.viewport.height,next.viewport.height)+1:0
+    //   if(forceReset) Sj_(next,"clear",T,alt,Y)
+    //   if(viewport shrink || (viewport grow && $) || width change) Sj_(,"resize",...,Y)
+    const prevHadScrollback =
+      prev.cursor.y >= prev.screen.height &&
+      prev.screen.height >= prev.viewport.height
+    const scrollbackY = prevHadScrollback
+      ? prev.screen.height -
+        Math.min(prev.viewport.height, next.viewport.height) +
+        1
+      : 0
+
     if (this.forceReset) {
       this.forceReset = false
+      // densable: Sj_(next,"clear",stylePool,altScreen,scrollbackY)
       return fullResetSequence_CAUSES_FLICKER(
         next,
         'clear',
         this.options.stylePool,
+        altScreen,
+        undefined,
+        scrollbackY,
       )
     }
 
-    const startTime = performance.now()
-    const stylePool = this.options.stylePool
-
-    // Since we assume the cursor is at the bottom on the screen, we only need
-    // to clear when the viewport gets shorter (i.e. the cursor position drifts)
-    // or when it gets thinner (and text wraps). We _could_ figure out how to
-    // not reset here but that would involve predicting the current layout
-    // _after_ the viewport change which means calcuating text wrapping.
-    // Resizing is a rare enough event that it's not practically a big issue.
+    // densable: _.viewport.height<H.viewport.height
+    //   || (_.viewport.height>H.viewport.height&&$)
+    //   || (H.viewport.width!==0&&_.viewport.width!==H.viewport.width)
     if (
       next.viewport.height < prev.viewport.height ||
+      (next.viewport.height > prev.viewport.height && prevHadScrollback) ||
       (prev.viewport.width !== 0 && next.viewport.width !== prev.viewport.width)
     ) {
-      return fullResetSequence_CAUSES_FLICKER(next, 'resize', stylePool)
+      return fullResetSequence_CAUSES_FLICKER(
+        next,
+        'resize',
+        stylePool,
+        altScreen,
+        undefined,
+        scrollbackY,
+      )
     }
 
     // DECSTBM scroll optimization: when a ScrollBox's scrollTop changed,
@@ -213,11 +248,7 @@ export class LogUpdate {
     // catches unreachable scrollback rows in the diff loop instead.
     const cursorAtBottom = prev.cursor.y >= prev.screen.height
     const isGrowing = next.screen.height > prev.screen.height
-    // When content fills the viewport exactly (height == viewport) and the
-    // cursor is at the bottom, the cursor-restore LF at the end of the
-    // previous frame scrolled 1 row into scrollback. Use >= to catch this.
-    const prevHadScrollback =
-      cursorAtBottom && prev.screen.height >= prev.viewport.height
+    // prevHadScrollback / scrollbackY computed in densable preamble above.
     const isShrinking = next.screen.height < prev.screen.height
     const nextFitsViewport = next.screen.height <= prev.viewport.height
 
@@ -230,7 +261,14 @@ export class LogUpdate {
       logForDebugging(
         `Full reset (shrink->below): prevHeight=${prev.screen.height}, nextHeight=${next.screen.height}, viewport=${prev.viewport.height}`,
       )
-      return fullResetSequence_CAUSES_FLICKER(next, 'offscreen', stylePool)
+      return fullResetSequence_CAUSES_FLICKER(
+        next,
+        'offscreen',
+        stylePool,
+        altScreen,
+        undefined,
+        scrollbackY,
+      )
     }
 
     if (
@@ -254,11 +292,18 @@ export class LogUpdate {
       if (scrollbackChangeY >= 0) {
         const prevLine = readLine(prev.screen, scrollbackChangeY)
         const nextLine = readLine(next.screen, scrollbackChangeY)
-        return fullResetSequence_CAUSES_FLICKER(next, 'offscreen', stylePool, {
-          triggerY: scrollbackChangeY,
-          prevLine,
-          nextLine,
-        })
+        return fullResetSequence_CAUSES_FLICKER(
+          next,
+          'offscreen',
+          stylePool,
+          altScreen,
+          {
+            triggerY: scrollbackChangeY,
+            prevLine,
+            nextLine,
+          },
+          scrollbackY,
+        )
       }
     }
 
@@ -282,6 +327,9 @@ export class LogUpdate {
           next,
           'offscreen',
           this.options.stylePool,
+          altScreen,
+          undefined,
+          scrollbackY,
         )
       }
 
@@ -395,11 +443,18 @@ export class LogUpdate {
       }
     })
     if (needsFullReset) {
-      return fullResetSequence_CAUSES_FLICKER(next, 'offscreen', stylePool, {
-        triggerY: resetTriggerY,
-        prevLine: readLine(prev.screen, resetTriggerY),
-        nextLine: readLine(next.screen, resetTriggerY),
-      })
+      return fullResetSequence_CAUSES_FLICKER(
+        next,
+        'offscreen',
+        stylePool,
+        altScreen,
+        {
+          triggerY: resetTriggerY,
+          prevLine: readLine(prev.screen, resetTriggerY),
+          nextLine: readLine(next.screen, resetTriggerY),
+        },
+        scrollbackY,
+      )
     }
 
     // Reset styles before rendering new rows (they'll set their own styles)
@@ -515,16 +570,42 @@ function readLine(screen: Screen, y: number): string {
   return line.trimEnd()
 }
 
+/**
+ * densable Sj_(next, reason, stylePool, altScreen, scrollbackY?, debug?):
+ * clearTerminal patch carries altScreen + viewportRows so writeDiff can pick
+ * pj8 (alt: 2J+3J+H) vs Bj8 (main: erase-in-place, keep scrollback).
+ *
+ * densable startY = altScreen ? 0 : min(scrollbackY, max(0, height-viewport+1)).
+ * After clear the cursor is home; we still paint from startY for main-screen
+ * scrollback alignment (same as densable Mi9).
+ */
 function fullResetSequence_CAUSES_FLICKER(
   frame: Frame,
   reason: FlickerReason,
   stylePool: StylePool,
+  altScreen = false,
   debug?: { triggerY: number; prevLine: string; nextLine: string },
+  scrollbackY = 0,
 ): Diff {
-  // After clearTerminal, cursor is at (0, 0)
-  const screen = new VirtualScreen({ x: 0, y: 0 }, frame.viewport.width)
-  renderFrame(screen, frame, stylePool)
-  return [{ type: 'clearTerminal', reason, debug }, ...screen.diff]
+  const startY = altScreen
+    ? 0
+    : Math.min(
+        scrollbackY,
+        Math.max(0, frame.screen.height - frame.viewport.height + 1),
+      )
+  const screen = new VirtualScreen({ x: 0, y: startY }, frame.viewport.width)
+  renderFrameSlice(screen, frame, startY, frame.screen.height, stylePool)
+  return [
+    {
+      type: 'clearTerminal',
+      reason,
+      altScreen,
+      // densable: viewportRows:H.viewport.height (for Bj8 main-screen path)
+      viewportRows: frame.viewport.height,
+      debug,
+    },
+    ...screen.diff,
+  ]
 }
 
 function renderFrame(

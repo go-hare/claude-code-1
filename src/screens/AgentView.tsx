@@ -18,7 +18,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
-import { createRoot, Box, Text, useInput, AlternateScreen, ThemeProvider } from '@anthropic/ink';
+import {
+  createRoot,
+  Box,
+  Text,
+  useInput,
+  AlternateScreen,
+  ThemeProvider,
+  enterAltScreenSequence,
+  supportsExtendedKeys,
+} from '@anthropic/ink';
 import type { Root } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
@@ -1923,47 +1932,33 @@ function AgentViewApp({
   );
 
   /**
-   * densable Esc terminal cascade after help/dispatch/bash/delete-arm cleared:
-   * Gnm → attach-origin | wait-starting | exit-with-hint | exit.
-   * Only when enteredViaLeftArrow (originJobId from left-arrow mount).
+   * densable FleetView Esc terminal cascade after help/dispatch/bash/delete-arm:
+   * densable JH = () => onAction({ type: "done" }) — one-shot exit, never open/attach.
+   *
+   * densable 2.1.153 escape path ends in JH() only (no attach-origin remount).
+   * Gnm decideOriginEscAction remains for left-arrow resume-hint bookkeeping:
+   * exit-with-hint when origin was left-arrow and row missing/failed spawn.
+   * attach-origin must NOT run here — open→attach→2J remount blacks the list
+   * for seconds when origin is dead (e.g. "exit 1 before init").
    */
   const handleEscExit = useCallback(() => {
     const decision = decideOriginEscAction({
       originJobId: enteredViaLeftArrow ? originSessionId : undefined,
       originRowPresent: originSessionPresent,
     });
-    switch (decision.kind) {
-      case 'attach-origin': {
-        const origin = sessions.find(isOriginSession);
-        if (origin) {
-          const short = origin.short ?? origin.sessionId?.slice(0, 8) ?? '';
-          void checkAndAttach(short, origin, onAction, setError);
-          return;
-        }
-        forceExit({ resumeHintRequested: true });
-        return;
-      }
-      case 'wait-starting':
-        setError(formatAttachError('still starting'));
-        return;
-      case 'exit-with-hint':
-        forceExit({ resumeHintRequested: true });
-        return;
-      case 'exit':
-      default:
-        forceExit();
-        return;
+    // densable JH: always done. Only resume-hint differs for left-arrow exit paths.
+    if (decision.kind === 'exit-with-hint' || decision.kind === 'attach-origin') {
+      // Left-arrow origin: exit fleet; user resumes via claude --resume (densable).
+      // Do not attach-origin (would unmount + PTY attach + remount → multi-second black).
+      forceExit({ resumeHintRequested: true });
+      return;
     }
-  }, [
-    enteredViaLeftArrow,
-    originSessionId,
-    originSessionPresent,
-    sessions,
-    isOriginSession,
-    checkAndAttach,
-    onAction,
-    forceExit,
-  ]);
+    if (decision.kind === 'wait-starting') {
+      setError(formatAttachError('still starting'));
+      return;
+    }
+    forceExit();
+  }, [enteredViaLeftArrow, originSessionId, originSessionPresent, forceExit]);
 
   const openJobBySlot = useCallback(
     (slot: number) => {
@@ -2927,7 +2922,8 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
         forceRefusalRetry: forceFresh,
       });
       if (preflightErr) {
-        process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+        // densable remount restore: BwH (enterAlt + 2J + H [+ extended keys])
+        process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
         return { error: preflightErr };
       }
       // densable IAe/NPn/Xyr gate (client-side preflight + daemon re-check)
@@ -2946,7 +2942,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
       // densable tYo: refuse + arm when fork handoff never materialized
       if (!gate.allow) {
         forceFreshNextShort = short;
-        process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+        process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
         return { error: FLEET_FORCE_RESTART_MSG };
       }
 
@@ -2955,7 +2951,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
         const conflict = await findResumeSessionConflict(resumeId);
         const ownJob = conflict?.jobId !== undefined && (conflict.jobId === short || conflict.jobId === attachShort);
         if (conflict && !ownJob) {
-          process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+          process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
           return {
             error:
               'This conversation is already open in another running Claude session — use that one, or close it and try again',
@@ -3022,7 +3018,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           if (result.outcome !== 'error' || !result.msg?.includes('ENOJOB')) break;
         }
       } else {
-        process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+        process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
         const errMsg = (resp as { error?: string; errorCode?: string; code?: string }).error ?? 'respawn failed';
         const code = (resp as { errorCode?: string; code?: string }).errorCode ?? (resp as { code?: string }).code;
         if (
@@ -3038,8 +3034,9 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
     }
   }
 
-  // After detach/error: restore alt screen for FleetView re-render
-  process.stdout.write('\x1B[?1049h\x1B[2J\x1B[H\x1B[r');
+  // densable after detach: if(X) process.stdout.write(BwH()) then createRoot.
+  // Local always remounts FleetView in alt — restore via densable BwH (not 1049h+r).
+  process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
 
   // Clean detach / disconnect after successful attach — no remount error.
   if (result.outcome === 'detached' || result.outcome === 'disconnected') {
@@ -3169,6 +3166,8 @@ export async function renderAgentView(options?: {
 
       lastSelectedSessionId = action.sessionId;
       // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
+      // densable: after detach, if(X) process.stdout.write(BwH()) then cj_/createRoot.
+      // BwH is emitted at end of attachToPtySession (enterAltScreenSequence).
       const attachResult = await attachToPtySession(action.short);
       // Official: (J = k.msg) on attach_failed / still-starting settle.
       remountError = attachResult.error;

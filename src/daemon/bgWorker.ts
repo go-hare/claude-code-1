@@ -2606,8 +2606,11 @@ export class BgWorker {
       this.lastRvHeartbeat = Date.now()
     }
 
-    // If no PTY connection, check if PID is alive
-    if (!this.pty) {
+    // densable: if (!this.pty) process.kill(pid, 0) → settle on ESRCH/EPERM.
+    // LOCAL win32: always probe PID even when this.pty is set — named-pipe
+    // peers can leave a half-open socket after host death, so fleet rows stay
+    // stuck at starting/working forever while checkPid early-returns on pty.
+    if (!this.pty || process.platform === 'win32') {
       try {
         process.kill(this.record.pid, 0)
       } catch {
@@ -2633,7 +2636,8 @@ export class BgWorker {
       }
     }
 
-    // PID recycling check (only when no PTY, throttled)
+    // densable: if (this.pty) return before recycle throttle.
+    // win32 already did kill(0) above; still skip recycle thrash when pty set.
     if (this.pty) return
     if (fromPoll && this.pidPollTick++ % 12 !== 0) return
     if (await this.pidRecycledAsync()) {

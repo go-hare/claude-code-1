@@ -1,11 +1,13 @@
 /**
  * Cross-platform terminal clearing with scrollback support.
- * Detects modern terminals that support ESC[3J for clearing scrollback.
+ * densable clearTerminal.ts (pj8 / F35 / Bj8) 1:1.
  */
 
 import {
   CURSOR_HOME,
+  cursorDown,
   csi,
+  ERASE_LINE,
   ERASE_SCREEN,
   ERASE_SCROLLBACK,
 } from './termio/csi.js'
@@ -53,19 +55,41 @@ function isModernWindowsTerminal(): boolean {
 }
 
 /**
- * Returns the ANSI escape sequence to clear the terminal including scrollback.
- * Automatically detects terminal capabilities.
+ * densable pj8 / getClearTerminalSequence — CSI 2 J + CSI 3 J + CSI H.
+ * Alt-screen fullReset path uses this (densable writeDiff clearTerminal branch).
+ * Windows legacy console cannot clear scrollback (CSI 3 J no-op / HVP home).
  */
 export function getClearTerminalSequence(): string {
   if (process.platform === 'win32') {
     if (isModernWindowsTerminal()) {
       return ERASE_SCREEN + ERASE_SCROLLBACK + CURSOR_HOME
-    } else {
-      // Legacy Windows console - can't clear scrollback
-      return ERASE_SCREEN + CURSOR_HOME_WINDOWS
     }
+    // Legacy Windows console - can't clear scrollback
+    return ERASE_SCREEN + CURSOR_HOME_WINDOWS
   }
   return ERASE_SCREEN + ERASE_SCROLLBACK + CURSOR_HOME
+}
+
+/**
+ * densable F35 / getEraseScreenSequence — CSI 2 J + CSI H (no scrollback wipe).
+ */
+export function getEraseScreenSequence(): string {
+  return ERASE_SCREEN + CURSOR_HOME
+}
+
+/**
+ * densable Bj8 / eraseViewportInPlace — main-screen fullReset without wiping
+ * scrollback: home, erase each viewport line, home again.
+ * Sequence: CSI H + (CSI 2 K + CSI 1 B)×rows + CSI H
+ */
+export function eraseViewportInPlace(rows: number): string {
+  if (rows <= 0) return CURSOR_HOME
+  // densable: rM+(EwH+nw8(1)).repeat(H)+rM  — ERASE_LINE then CUD 1 per row
+  let body = ''
+  for (let i = 0; i < rows; i++) {
+    body += ERASE_LINE + cursorDown(1)
+  }
+  return CURSOR_HOME + body + CURSOR_HOME
 }
 
 /**

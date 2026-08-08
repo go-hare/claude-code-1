@@ -467,6 +467,20 @@ export function isEmptyCellAt(screen: Screen, x: number, y: number): boolean {
 }
 
 /**
+ * densable `$n9` — fill every cell's charId with SPACER_CHAR_INDEX (1).
+ * Used as the LogUpdate prev-screen sentinel under
+ * CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT so every non-spacer next cell diffs
+ * and ConPTY gets a full cell rewrite each frame (Windows AgentView /
+ * FleetView). word1 stays 0 (empty style / no link / narrow).
+ */
+export function fillFullRepaintSentinel(screen: Screen): void {
+  const cells = screen.cells
+  for (let i = 0; i < cells.length; i += 2) {
+    cells[i] = SPACER_CHAR_INDEX
+  }
+}
+
+/**
  * Check if a Cell (view object) represents an empty cell.
  */
 export function isCellEmpty(screen: Screen, cell: Cell): boolean {

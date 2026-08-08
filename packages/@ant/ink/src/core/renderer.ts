@@ -69,6 +69,10 @@ export default function createRenderer(
             `childNodes=${node.childNodes.length}, terminalWidth=${terminalWidth}, terminalRows=${terminalRows}`,
         )
       }
+      // densable returns height-0 screen. Keep alt-screen viewport at rows+1
+      // so a transient pre-layout frame does not trip log-update's
+      // viewport-shrink fullReset (alt steady-state uses rows+1). height-0
+      // is also skipped in LogUpdate.render so we never erase+paint blank.
       return {
         screen: createScreen(
           terminalWidth,
@@ -77,7 +81,10 @@ export default function createRenderer(
           charPool,
           hyperlinkPool,
         ),
-        viewport: { width: terminalWidth, height: terminalRows },
+        viewport: {
+          width: terminalWidth,
+          height: options.altScreen ? terminalRows + 1 : terminalRows,
+        },
         cursor: { x: 0, y: 0, visible: true },
       }
     }

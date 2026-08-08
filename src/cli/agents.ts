@@ -180,13 +180,26 @@ export async function agentsMain(args: string[]): Promise<void> {
       daemonAlreadyEnsured: true,
     })
   } finally {
-    // Cleanup bg manager on exit (only if we started one)
+    // densable agents path does not await a long manager teardown before O7.
+    // cap close so Esc→main-buffer is not held black for multi-second socket cleanup.
     if (bgManager) {
       try {
-        await bgManager.close()
+        await Promise.race([
+          bgManager.close(),
+          new Promise<void>(resolve => {
+            const t = setTimeout(resolve, 200)
+            t.unref?.()
+          }),
+        ])
       } catch {
         // ignore close errors on exit path
       }
     }
   }
+
+  // densable agents .action after mountFleetView: await O7(0,"other",{suppressResumeHint:!0})
+  // Without this the process can linger on an empty main buffer after unmount
+  // (Esc looks like multi-second black screen). Not bun-dev-only — same on build.
+  const { gracefulShutdown } = await import('../utils/gracefulShutdown.js')
+  await gracefulShutdown(0, 'other', { suppressResumeHint: true })
 }

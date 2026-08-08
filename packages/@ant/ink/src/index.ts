@@ -187,6 +187,7 @@ export {
   DISABLE_MOUSE_TRACKING,
   EXIT_ALT_SCREEN,
   exitAltScreenSequence,
+  enterAltScreenSequence,
   HIDE_CURSOR,
   ENTER_ALT_SCREEN,
   ENABLE_MOUSE_TRACKING,
@@ -204,6 +205,7 @@ export {
   isXtermJs,
   getXtversionName,
   hasCursorUpViewportYankBug,
+  supportsExtendedKeys,
   writeDiffToTerminal,
 } from './core/terminal.js'
 export {

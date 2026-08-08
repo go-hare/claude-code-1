@@ -1,6 +1,9 @@
 import { coerce, gte } from 'semver'
 import type { Writable } from 'stream'
-import { getClearTerminalSequence } from './clearTerminal.js'
+import {
+  eraseViewportInPlace,
+  getClearTerminalSequence,
+} from './clearTerminal.js'
 import type { Diff } from './frame.js'
 import { cursorMove, cursorTo, eraseLines } from './termio/csi.js'
 import { BSU, ESU, HIDE_CURSOR, SHOW_CURSOR } from './termio/dec.js'
@@ -244,7 +247,11 @@ export function writeDiffToTerminal(
         }
         break
       case 'clearTerminal':
-        buffer += getClearTerminalSequence()
+        // densable writeDiff: O+=T.altScreen?pj8():Bj8(T.viewportRows)
+        // alt → 2J+3J+H; main → erase-in-place (preserve scrollback)
+        buffer += patch.altScreen
+          ? getClearTerminalSequence()
+          : eraseViewportInPlace(patch.viewportRows ?? 0)
         break
       case 'cursorHide':
         buffer += HIDE_CURSOR
