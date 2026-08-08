@@ -1,0 +1,16 @@
+densable 2.1.219 #14 — Vim ← empty prompt NORMAL → agent view
+
+// densable useVimInput NORMAL path:
+if(j.command.type==="idle"&&!F.shift&&(F.name==="up"||F.name==="down"||F.name==="left"&&z.text==="")){
+  W.handleKeyDown(F);return
+}
+// non-empty left / right still map to h/l below
+
+// densable tjo left empty:
+case"left":
+  if(i&&!Le.shift&&G.text===""){ /* Ryp gesture → fire onLeftArrowOnEmpty */ }
+
+// local:
+//   src/hooks/useVimInput.ts     idle+!shift+(up|down|left&empty) → textInput.onInput
+//   src/components/VimTextInput.tsx  forward onLeftArrowOnEmpty*
+//   src/hooks/useTextInput.ts    left + offset0 + value'' → onLeftArrowOnEmpty

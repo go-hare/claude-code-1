@@ -1,0 +1,46 @@
+densable 2.1.219 #1 — Opus 5 fast pricing $10/$50 (GHt / Pji / Cig / u7n)
+
+// catalog pricing_tiers (NIc) — NOT guessed; extracted from official-219:
+//   tier_3_15  $3/$15   5m=3.75  1h=6    read=0.3   (all Sonnet)
+//   tier_5_25  $5/$25   5m=6.25  1h=10   read=0.5   (Opus 4.5+ list / vig)
+//   tier_15_75 $15/$75  5m=18.75 1h=30   read=1.5   (Opus 4/4.1)
+//   tier_10_50 $10/$50  5m=12.5  1h=20   read=1     (u7n / fable·mythos list)
+//   haiku_35   $0.8/$4  5m=1     1h=1.6  read=0.08
+//   haiku_45   $1/$5    5m=1.25  1h=2    read=0.1
+//
+// runtime hardcodes (also on ModelCosts):
+vig = tier_5_25
+LIc = $30/$150 write5m=37.5  write1h=60  read=3     // NOT in pricing_tiers
+u7n = tier_10_50
+
+// picker only (vl = isFastModeEnabled)
+function GHt(e){
+  if(!vl())return Uot[e]??d7n;
+  if(e==="claude-opus-4-8"||e==="claude-opus-5")return u7n;
+  return LIc
+}
+function bGr(e,t){ // e=fastMode row, t=model
+  if(!uWr())return"";
+  let r=QO(t),n=e?OVe(GHt(r)):OIc(r);
+  return ` ·${e?` (${CCe})`:""} ${n}`
+}
+
+// usage billing (NOT GHt)
+function Pji(e,t){let r=lo(e);if(t.speed==="fast"){
+  if(r==="claude-opus-4-8"||r==="claude-opus-5")return u7n;
+  if(r==="claude-opus-4-6"||r==="claude-opus-4-7")return LIc
+} /* then Uot... */}
+
+// 1h cache write split
+function Cig(e,t){ /* min(ephemeral_1h, total) @ 1h rate + remainder @ 5m */ }
+function Dji(e,t){ return input+output+cache_read+Cig+web_search }
+
+// local (post residual fix):
+//   getOpus46CostTier(fast, model?) = GHt
+//   getOpusPricingSuffix(fast, model?) = bGr
+//   getModelCosts = Pji (incl. opus-4-7 LIc)
+//   tokensToUSDCost / cacheCreationUSDCost = Dji/Cig
+//   MODEL_COSTS includes opus-4-7
+//   toCostCanonical = strip [1m] + getCanonicalName (densable QO; full ids only)
+//   getClaudeAiUserDefaultModelDescription = densable C7n
+//     Max/Team: marketing(defaultOpus) · Best for everyday, complex tasks (+ bGr if fast&pv)

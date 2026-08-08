@@ -1,0 +1,15 @@
+executeDirectoryAddedHooks
+---
+DirectoryAdded
+---
+DirectoryAdded
+---
+DirectoryAdded hook failed: 
+---
+ DirectoryAdded 
+---
+DirectoryAdded hook: 
+---
+DirectoryAdded hook execution failed: 
+---
+DirectoryAdded hook: 

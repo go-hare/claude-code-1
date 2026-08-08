@@ -1,0 +1,29 @@
+densable 2.1.219 #16 — RC only via api.anthropic.com names setting
+
+cbr="Remote Control is only available when using Claude via api.anthropic.com."
+zlp="unset it (or run in a shell without it) to use Remote Control."
+Klp="unset them (or run in a shell without them) to use Remote Control."
+
+function dWr(){let e=process.env.ANTHROPIC_BASE_URL;if(!e)return!0;return A1e(e)}
+function A1e(e){try{return["api.anthropic.com"].includes(new URL(e).host)}catch{return!1}}
+function L8e(){if(!Pc())return!1;return!!Z.ANTHROPIC_UNIX_SOCKET||dWr()} // Pc=firstParty
+async function YBo(){if(KBo())return null;if(!L8e())return x4_(); ...}
+
+function x4_(){
+  let e=kn(); // getAPIProvider
+  if(e!=="firstParty"){
+    if(e==="gateway") return enterprise ? ... : `${cbr} CLAUDE_CODE_USE_GATEWAY is set ... — ${Klp}`;
+    if(e==="bedrock"&&pHt()==="mantle") return `${cbr} ${lJt.bedrock} and ${lJt.mantle} ... — ${Klp}`;
+    return `${cbr} ${lJt[e]} is set, so this session is using ${nY[e]} — ${zlp}`;
+  }
+  if(!dWr()){
+    let t=Z._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL?" (_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL does not apply to Remote Control.)":"";
+    return `${cbr} ANTHROPIC_BASE_URL is set and does not point at api.anthropic.com, so this session is using a custom endpoint — ${zlp}${t}`;
+  }
+  return cbr;
+}
+
+nY={bedrock:"Amazon Bedrock",vertex:"Google Vertex AI",foundry:"Microsoft Foundry",...}
+lJt={bedrock:"CLAUDE_CODE_USE_BEDROCK",foundry:"CLAUDE_CODE_USE_FOUNDRY",...}
+
+// local: src/bridge/remoteControlEndpointReason.ts + getBridgeDisabledReason early x4_

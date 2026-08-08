@@ -1,0 +1,16 @@
+densable 2.1.219 #12 — RC stale fast-mode after model switch / reconnect / org check
+
+function mde(){qJt={status:"active"}}  // clearFastModeCooldown
+function Us(){return ba()||ru()!==null} // remote workspace OR live repl bridge
+function MB(e,t){ // resolveFastModeAfterModelSwitch
+  if(Us()){if(e===null)return!!t;return!!t&&pv(e)}
+  if(!pv(e))return!1;return!!t||aGr(e)
+}
+// Bcn / model command / bridge onSetModel:
+if(vl()){mde(); /* then MB + LB */}
+
+// local:
+//   src/utils/fastMode.ts          clearFastModeCooldown / resolveFastModeAfterModelSwitch / FAST_MODE_MODEL_DISPLAY=Opus 5
+//   src/cli/print.ts               set_model + bridge onSetModel → clearFastModeCooldown before applyFastModeOnModelSwitch
+//   src/hooks/useReplBridge.tsx    onSetModel clearFastModeCooldown + remoteSession:true
+//   src/commands/model/model.tsx   already mde before apply

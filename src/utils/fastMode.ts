@@ -26,6 +26,7 @@ import {
   type ModelSetting,
   parseUserSpecifiedModel,
 } from './model/model.js'
+import { modelHasCatalogCapability } from './model/modelCatalogCapabilities.js'
 import { getAPIProvider } from './model/providers.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
 import {
@@ -163,7 +164,8 @@ export function getFastModeUnavailableReason(): string | null {
 }
 
 // @[MODEL LAUNCH]: Update supported Fast Mode models.
-export const FAST_MODE_MODEL_DISPLAY = 'Opus 4.7'
+// densable 2.1.219 m5() — display name for /fast + model-switch copy.
+export const FAST_MODE_MODEL_DISPLAY = 'Opus 5'
 
 export function getFastModeModel(): string {
   return 'opus' + (isOpus1mMergeEnabled() ? '[1m]' : '')
@@ -215,6 +217,15 @@ export function shouldAutoEnableFastModeForModel(
   return settingsWantFastModeOn()
 }
 
+/**
+ * densable 2.1.219 pv(e) model matrix for fast mode.
+ * densable:
+ *   if (ON(lo(r),"fast_mode")) return true
+ *   string fallthrough: opus-4-7 | opus-4-8 | opus-5
+ * ON via full catalog table in modelCatalogCapabilities (true|undefined).
+ * Changelog "Removed Opus 4.7" conflicts binary — extract densable first.
+ * opus-4-6 is NOT in fallthrough; fable has no fast_mode in catalog.
+ */
 export function isFastModeSupportedByModel(
   modelSetting: ModelSetting,
 ): boolean {
@@ -223,10 +234,13 @@ export function isFastModeSupportedByModel(
   }
   const model = modelSetting ?? getDefaultMainLoopModelSetting()
   const parsedModel = parseUserSpecifiedModel(model)
+  // densable ON(lo(r), "fast_mode") short-circuit — only adds positives
+  if (modelHasCatalogCapability(parsedModel, 'fast_mode') === true) {
+    return true
+  }
   const n = parsedModel.toLowerCase()
-  // densable `aE`: opus-4-7 / opus-4-8 (+ local opus-4-6 keep)
   return (
-    n.includes('opus-4-8') || n.includes('opus-4-7') || n.includes('opus-4-6')
+    n.includes('opus-4-7') || n.includes('opus-4-8') || n.includes('opus-5')
   )
 }
 

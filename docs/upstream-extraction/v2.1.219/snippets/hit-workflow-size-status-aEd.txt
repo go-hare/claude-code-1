@@ -1,0 +1,14 @@
+densable 2.1.219 #21 — running-workflow status default size + /config
+
+function iEd(e){if(!(e in sHo))return e;return`${e} — keep workflows under ${sHo[e]} agents`}
+function sEd(){return"This is a guideline, not a hard limit — follow it unless the user's prompt calls for a different scale."}
+function aEd(e,t){
+  let r=t?"This session has the default workflow size guideline:":"A workflow size guideline is configured for this session:";
+  let n=t?' The user can raise or remove it with "Dynamic workflow size" in /config.':"";
+  return`${r} ${iEd(e)}. ${sEd()}${n}`
+}
+function dLs(e){let{size:t,isDefault:r}=qsn(e);if(t==="unrestricted")return"";return` ${aEd(t,r)}`}
+// WorkflowTool: prompt(){return lLs+dLs(xt().workflowSizeGuideline)}
+// sHo={small:5,medium:15,large:50}
+
+// local: workflowSizeGuideline.ts aEd/dLs + wiring.ts description/prompt append

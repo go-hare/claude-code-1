@@ -1,0 +1,47 @@
+densable 2.1.219 IQt / HQt / T5i (official-219 claude.exe)
+
+// T5i — modelSupportsThinking
+function T5i(e){
+  let t=Tde(e,"thinking"); if(t!==void 0)return t;
+  return !lo(e).includes("claude-3-");
+}
+
+// HQt — rejects disabled thinking (only fable has cap in EHl)
+function HQt(e){
+  let t=lo(e);
+  if(t.includes("claude-3-")||t==="claude-opus-4-0"||…||t==="claude-haiku-4-5")return!1;
+  if(ON(t,"rejects_disabled_thinking"))return!0;
+  return hj(ny(e));
+}
+// kQt: HQt → [undefined, 2048]; else [false, 0]
+
+// IQt — adaptive thinking
+function IQt(e){
+  let t=Tde(e,"adaptive_thinking"); if(t!==void 0)return t;
+  let r=lo(e);
+  if(r.includes("claude-3-")||r==="claude-opus-4-0"||r==="claude-opus-4-1"
+    ||r==="claude-opus-4-5"||r==="claude-sonnet-4-0"||r==="claude-sonnet-4-5"
+    ||r==="claude-haiku-4-5")return!1;
+  if(ON(r,"adaptive_thinking")||r==="claude-mythos-5")return!0;
+  return hj(ny(e));
+}
+
+// EHl adaptive_thinking on: sonnet-4-6/5, opus-4-6/4-7/4-8/5, fable-5
+// mythos hard true despite capabilities=[]
+// rejects_disabled_thinking: fable-5 only
+
+// local (adapted — not densable Bo symbol clone):
+//   thinking.ts modelSupportsAdaptiveThinking ≈ IQt
+//   modelRejectsDisabledThinking ≈ HQt
+//   densableThinkingForceParams ≈ kQt (classifier / side-query callers)
+//   maySendDisabledThinking — sideQuery gates thinking:false → {type:disabled}
+//   isThinkingActiveForToolChoice ≈ densable ur (tool_choice demotion)
+//   modelSupportsThinking ≈ T5i (non-claude-3)
+//   firstPartyNameToCanonical QO: opus/sonnet-4-0 exact + bare-4 regex
+//
+// Wire points (local differentiation):
+//   claude.ts: keep omit-when-off (no densable firstParty explicit disabled);
+//              demote tool_choice tool→auto when isThinkingActiveForToolChoice
+//   sideQuery: thinking===false + HQt → omit field (do not send disabled)
+//   yoloClassifier getClassifierThinkingConfig → densableThinkingForceParams
+//   residual env CLAUDE_CODE_DISABLE_THINKING still wins on main path

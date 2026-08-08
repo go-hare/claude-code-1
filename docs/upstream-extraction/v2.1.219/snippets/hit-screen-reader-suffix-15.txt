@@ -1,0 +1,21 @@
+densable 2.1.219 #15 — screen-reader every-key full line rewrite → suffix append
+
+function xuy(e,t){ // isGraphemeBoundary
+  if(t<=0)return!0;
+  for(let r of AE().segment(e)){if(r.index===t)return!0;if(r.index>t)return!1}
+  return t>=e.length
+}
+
+// onRenderScreenReader fast path (when anchor clean|lastRowAnchored):
+// same line count, first diff is pure prefix extension, grapheme boundary,
+// first codepoint display width >0, width(prev)+width(suffix)==width(next)
+// → write CHA(prevWidth+1)+suffix only (no s3n erase / full line rewrite)
+
+prevScreenReaderAnchor: "clean" | "lastRowAnchored" | "broken"
+resetScreenReaderDiffState → anchor="clean"
+
+// local:
+//   packages/@ant/ink/src/core/screenReaderPark.ts
+//     isGraphemeBoundary / planScreenReaderFrameUpdate.suffixAppend
+//     computeNextScreenReaderAnchor / materialize suffix path
+//   packages/@ant/ink/src/core/ink.tsx  prevScreenReaderAnchor field

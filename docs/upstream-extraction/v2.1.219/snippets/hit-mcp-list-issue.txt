@@ -1,0 +1,17 @@
+densable 2.1.219 #8 — mcp list / get issue formatting
+
+function fSp(e){let t=Number(e);return e==="23"?"request timed out":Number.isInteger(t)&&t>=100&&t<=599?`HTTP ${e}`:e}
+function mSp(e){let{errorCode:t,displayDetail:r}=e;if(t&&!pSp.has(t)){let i=fSp(t),s=e.error!==void 0?`${i}: ${e.error}`:i;return vEe(r?`${s} ${r}`:s)}let n=e.error??t??"",o=r?`${n} ${r}`.trim():n;return o===""?o:vEe(o)}
+pSp=new Set(["INVALID_CONFIG","UNCONFIGURED","AUTH_HEADER_REJECTED","CLI_OWNED_BEARER_REJECTED","FIRST_PARTY_AUTH_REJECTED","ENDPOINT_NOT_FOUND"])
+
+async function ivp(e,t){try{let r=await connectToServer(e,t);if(r.type==="connected"){...return{status:`✓ Connected`}}else if(r.type==="needs-auth")return{status:"! Needs authentication"};else if(unconfigured)return{status:"- Not configured"};else if(r.type==="failed"){let n=mSp(r);return{status:`✗ Failed to connect`,...n!==""&&{issue:n}}}else return{status:`✗ Failed to connect`}}catch{return{status:`✗ Connection error`}}}
+
+function evp({name,server,status,issue}){let o=issue?`${status} — ${issue}`:status;...}
+
+// get: Status + optional Issue:
+c=[`${t}:`,`  Scope: ...`,`  Status: ${a.status}`,...a.issue?[`  Issue: ${a.issue}`]:[]]
+
+// Failed return (Mvs / catch):
+{name,type:"failed",config,error,displayDetail?,errorCode}
+
+// local: src/services/mcp/mcpConnectionIssue.ts + FailedMCPServer fields + handlers/mcp.tsx + MCPListPanel

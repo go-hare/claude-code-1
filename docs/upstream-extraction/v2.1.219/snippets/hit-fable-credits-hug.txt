@@ -1,0 +1,14 @@
+densable 2.1.219 #9 — Fable Requires usage credits stale cache
+
+P5i=" · Requires usage credits"
+function BUc(){return !uZ() && Y1e() ? P5i : ""}
+function hug(e){
+  if(e.disabled===true||typeof e.value!=="string")return e;
+  if(!(e.value==="fable"||e.value==="fable[1m]"||isFableFamily(e.value)))return e;
+  let r=e.description.endsWith(P5i)?e.description.slice(0,-P5i.length):e.description;
+  return{...e,description:`${r}${BUc()}`}
+}
+// U1e additionalModelOptionsCache rows: for (c of U1e()) MQt(t, hug(c))
+// M5i also appends BUc() live when building Fable row
+
+// local: src/utils/model/fableCreditsLabel.ts + modelOptions getModelOptions additional cache merge

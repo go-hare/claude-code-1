@@ -1,0 +1,37 @@
+densable 2.1.219 — full EHl catalog SQ/Lqm/Aw/ON/Tig/AHl (extract official-219)
+
+// Bake: EHl={ schema_version, pricing_tiers, models[17], aliases, defaults,
+//            best, latest_per_family, alias_migration }
+// Extract: scripts/extract-ehl-219.py → snippets/ehl-2.1.219.json
+//          → src/utils/model/densableEhlCatalog.219.ts
+
+function ON(e,t){
+  let r=e.replace(/\[1m\]/gi,""), n=Aw(r);
+  if(n!==void 0)return n.capabilities.includes(t)?!0:void 0;
+  return Nqm?.(r,t)  // Nqm never assigned in 2.1.219 → always undefined
+}
+function Aw(e){return Lqm().get(e)}
+// Lqm = Map(SQ().models by id); Oqm = Map(providerId → catalog id)
+// SQ = safeParse(EHl)
+
+function Tig(){
+  let e={};
+  for(let t of SQ().models){
+    let r=$Ti(t); if(r===void 0) continue;
+    e[t.id]=NIc(t.id,r);
+  }
+  return e
+}
+// Uot={[QO(fable5)]:u7n,[QO(mythos5)]:u7n,...Tig()}
+
+// Model union fields present in bake:
+//   id family display_name knowledge_cutoff provider_ids eager_input_streaming
+//   vertex_region_env_var fallback_3p context max_output_tokens pricing
+//   capabilities default_effort image_limits advisor_rank
+// (schema also allows slogan/fallback_chain/picker/deprecation/min_cli — unused in 219 bake)
+
+// local:
+//   densableEhlCatalog.219.ts — full EHl as const
+//   modelCatalogCapabilities.ts — SQ/Lqm/Oqm/Aw/ON/$Ti/Tig/AHl/RFr
+//   modelCost.ts — DENSABLE_PRICING_TIERS + TIG_MODEL_COSTS from catalog
+//   isFastModeSupportedByModel — ON(fast_mode) + string fallthrough

@@ -1,0 +1,28 @@
+densable 2.1.219 — opusplan marketing (IGr / Tug / fY)
+extract-first: do NOT pin Opus 4.7 / Sonnet 5 (defaults move).
+
+// densable IGr — renderDefaultModelSetting
+function IGr(e){
+  if(e==="opusplan")return"Opus in plan mode, else Sonnet";
+  return rm(vi(e))
+}
+
+// densable fY — renderModelSetting
+function fY(e){
+  if(e==="opusplan")return"Opus Plan";
+  ...
+}
+
+// densable Tug — getOpusPlanOption
+function Tug(){
+  return{
+    value:"opusplan",
+    label:"Opus Plan Mode",
+    description:"Use Opus in plan mode, Sonnet otherwise"
+  }
+}
+
+// local:
+//   renderDefaultModelSetting('opusplan') = IGr
+//   renderModelSetting('opusplan') = fY "Opus Plan"
+//   getOpusPlanOption = Tug

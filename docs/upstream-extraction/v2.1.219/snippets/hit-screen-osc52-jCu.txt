@@ -1,0 +1,17 @@
+densable 2.1.219 #11 — GNU screen copy-on-select base64 dump fix
+
+jCu=76
+async function $T(e){
+  let t=Buffer.from(e,"utf8").toString("base64");
+  ...
+  if(r==="tmux"){let i=`${JY}]52;c;${t}${Oj}`;return i+LU(i)}
+  if(r==="screen"){
+    let i=[];for(let s=0;s<t.length;s+=jCu)i.push(t.slice(s,s+jCu));
+    return`${JY}P${JY}]52;c;${i.join(`${Nas}${JY}P`)}${Oj}${Nas}`
+  }
+  return j0(gv.CLIPBOARD,"c",t)
+}
+// JY=ESC, Nas=ST (\x1b\\), Oj=BEL
+// Uas(): TMUX→tmux, STY→screen
+
+// local: packages/@ant/ink/src/core/termio/osc.ts formatScreenOsc52Clipboard + setClipboard STY branch

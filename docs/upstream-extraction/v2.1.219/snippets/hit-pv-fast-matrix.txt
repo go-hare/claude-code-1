@@ -1,0 +1,33 @@
+densable 2.1.219 #22 — pv(e) fast matrix (extract from official-219 claude.exe)
+
+// Official changelog: "Removed Opus 4.7 from fast; /fast → Opus 5 + 4.8"
+// densable BINARY still:
+//   catalog ON(lo(r), "fast_mode") short-circuit → true
+//   else string: opus-4-7 || opus-4-8 || opus-5
+//   (does NOT include opus-4-6)
+// Standing rule: extract densable first beats changelog wording.
+
+function pv(e){
+  if(!vl())return!1;
+  let t=e??t$(), r=vi(t);
+  if(ON(lo(r),"fast_mode"))return!0;
+  let n=r.toLowerCase();
+  return n.includes("opus-4-7")||n.includes("opus-4-8")||n.includes("opus-5");
+}
+
+// densable ON(e,"fast_mode"): strip [1m] → Aw(catalog) → capabilities.includes
+// 2.1.219 baked catalog fast_mode only on: claude-opus-4-7 | 4-8 | 5
+// (same positive set as string fallthrough; ON only adds positives)
+
+// densable Uot list-price hardcode (before Tig catalog expand):
+//   Uot={[QO(kot.fable5)]:u7n,[QO(dbc.mythos5)]:u7n,...Tig()}
+// catalog pricing fable/mythos = tier_10_50 (=u7n numbers)
+
+// local:
+//   modelCatalogCapabilities.ts — full 17-model ON table (Aw/Lqm extract)
+//   isFastModeSupportedByModel =
+//     modelHasCatalogCapability(parsed, 'fast_mode') === true
+//     + string fallthrough opus-4-7|4-8|5
+//   MODEL_COSTS fable/mythos = COST_TIER_10_50
+//   firstPartyNameToCanonical QO-order fable/mythos before opus
+//   FAST_MODE_MODEL_DISPLAY = Opus 5 (m5)

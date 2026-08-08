@@ -211,6 +211,7 @@ import { isMcpInstructionsDeltaEnabled } from 'src/utils/mcpInstructionsDelta.js
 import { calculateUSDCost } from 'src/utils/modelCost.js'
 import { endQueryProfile, queryCheckpoint } from 'src/utils/queryProfiler.js'
 import {
+  isThinkingActiveForToolChoice,
   modelSupportsAdaptiveThinking,
   modelSupportsThinking,
   type ThinkingConfig,
@@ -271,12 +272,14 @@ import {
 } from '../langfuse/convert.js'
 import { withStreamingVCR, withVCR } from '../vcr.js'
 import { CLIENT_REQUEST_ID_HEADER, getAnthropicClient } from './client.js'
+import { NO_CONTENT_MESSAGE } from '../../constants/messages.js'
 import {
   API_ERROR_MESSAGE_PREFIX,
   CUSTOM_OFF_SWITCH_MESSAGE,
   getAssistantMessageFromError,
   getErrorMessageIfRefusal,
 } from './errors.js'
+import { extractConnectionErrorDetails } from './errorUtils.js'
 import {
   EMPTY_USAGE,
   type GlobalCacheStrategy,
@@ -285,6 +288,37 @@ import {
   logAPISuccessAndDuration,
   type NonNullableUsage,
 } from './logging.js'
+
+/**
+ * densable 2.1.219 zie — network-down codes (no route / refuse / DNS).
+ * Mid-stream: cause=network_down when finalizing partial content.
+ */
+const STREAM_NETWORK_DOWN_CODES = new Set([
+  'ECONNREFUSED',
+  'ConnectionRefused',
+  'ENOTFOUND',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'EHOSTUNREACH',
+  'EHOSTDOWN',
+  'EAI_AGAIN',
+  'FailedToOpenSocket',
+  'ERR_PROXY_TUNNEL',
+])
+
+/**
+ * densable 2.1.219 Kie — stale keep-alive / dead pooled socket codes.
+ * Mid-stream: cause=stale_connection when not in zie.
+ */
+const STREAM_STALE_CONNECTION_CODES = new Set([
+  'ECONNRESET',
+  'EPIPE',
+  'ConnectionClosed',
+  'ETIMEDOUT',
+  'ECONNABORTED',
+  'ERR_SOCKET_CLOSED',
+  'StreamSuspended',
+])
 import {
   checkResponseForCacheBreak,
   recordPromptState,
@@ -1868,12 +1902,21 @@ async function* queryModel(
     } catch {
       // residual helpers optional
     }
+    // densable Kn = r.type !== "disabled" && !bn
+    // Local residual env DISABLE_THINKING still wins (even on HQt models).
     const hasThinking = thinkingConfig.type !== 'disabled' && !thinkingDisabled
     let thinking: BetaMessageStreamParams['thinking'] | undefined
 
     // IMPORTANT: Do not change the adaptive-vs-budget thinking selection below
     // without notifying the model launch DRI and research. This is a sensitive
     // setting that can greatly affect model quality and bashing.
+    //
+    // densable HQt (rejects_disabled_thinking): when config is disabled, densable
+    // does NOT send {type:'disabled'} for those models (Bo stays undefined;
+    // server defaults adaptive). Local historically omits the field whenever
+    // hasThinking is false (no densable firstParty explicit-disabled branch) —
+    // keep that shape. HQt is enforced on sideQuery/classifier paths that
+    // would otherwise send disabled, and on tool_choice demotion below.
     if (hasThinking && modelSupportsThinking(options.model)) {
       if (
         !adaptiveThinkingDisabled &&
@@ -1900,6 +1943,19 @@ async function* queryModel(
           type: 'enabled',
         } satisfies BetaMessageStreamParams['thinking']
       }
+    }
+
+    // densable: tool_choice {type:'tool'} demoted to auto when thinking is
+    // active — including HQt models with omitted thinking (server-side on).
+    let toolChoice = options.toolChoice
+    if (
+      toolChoice?.type === 'tool' &&
+      isThinkingActiveForToolChoice(thinking, options.model)
+    ) {
+      logForDebugging(
+        `tool_choice {type:'tool', name:'${toolChoice.name}'} demoted to auto: extended thinking is active`,
+      )
+      toolChoice = { type: 'auto' }
     }
 
     // Get API context management strategies if enabled
@@ -2007,7 +2063,7 @@ async function* queryModel(
       ),
       system,
       tools: allTools,
-      tool_choice: options.toolChoice,
+      tool_choice: toolChoice,
       ...(sendBetas && { betas: filteredBetas }),
       metadata: getAPIMetadata(),
       max_tokens: maxOutputTokens,
@@ -3161,6 +3217,119 @@ async function* queryModel(
         }
       }
 
+      // densable 2.1.219 #7 — mid-stream partial finalize:
+      // When assistant content was already yielded and the stream dies via
+      // watchdog / stale-or-network connection / server api_error, keep the
+      // partial text and append an isApiErrorMessage banner instead of
+      // discarding it via non-streaming fallback (which would re-run tools).
+      {
+        const connDetails = extractConnectionErrorDetails(streamingError)
+        const connCode = connDetails?.code
+        const isStaleConn =
+          connCode !== undefined && STREAM_STALE_CONNECTION_CODES.has(connCode)
+        const isNetworkDown =
+          connCode !== undefined && STREAM_NETWORK_DOWN_CODES.has(connCode)
+        const isStaleOrNetwork = isStaleConn || isNetworkDown
+        const isServerApiErrorPartial =
+          streamingError instanceof APIError &&
+          (streamingError as { type?: string }).type === 'api_error' &&
+          newMessages.length > 0
+        const contentBlocks = (
+          msg: (typeof newMessages)[number],
+        ): Array<{ type: string; text?: string }> => {
+          const c = msg.message?.content
+          return Array.isArray(c)
+            ? (c as Array<{ type: string; text?: string }>)
+            : []
+        }
+        const hasYieldedContent = newMessages.some(msg =>
+          contentBlocks(msg).some(
+            block =>
+              block.type !== 'thinking' &&
+              block.type !== 'redacted_thinking' &&
+              !(
+                block.type === 'text' &&
+                (block.text === '' || block.text === NO_CONTENT_MESSAGE)
+              ),
+          ),
+        )
+        const hasAnyYieldedBlocks = newMessages.length > 0
+        if (
+          (hasAnyYieldedBlocks || hasYieldedContent) &&
+          (streamIdleAborted || isStaleOrNetwork || isServerApiErrorPartial)
+        ) {
+          const hasToolUse = newMessages.some(msg =>
+            contentBlocks(msg).some(b => b.type === 'tool_use'),
+          )
+          const hasNonThinkingOutput = newMessages.some(msg =>
+            contentBlocks(msg).some(
+              b =>
+                b.type !== 'thinking' &&
+                b.type !== 'redacted_thinking' &&
+                !(
+                  b.type === 'text' &&
+                  (b.text === '' || b.text === NO_CONTENT_MESSAGE)
+                ),
+            ),
+          )
+          const synthesizedStop = hasToolUse ? 'tool_use' : 'end_turn'
+          // densable: if stop_reason not already set on yielded messages, stamp it
+          for (const msg of newMessages) {
+            if (msg.message && msg.message.stop_reason == null) {
+              msg.message.stop_reason = synthesizedStop
+            }
+          }
+          const cause:
+            | 'watchdog'
+            | 'server_error'
+            | 'network_down'
+            | 'stale_connection' = streamIdleAborted
+            ? 'watchdog'
+            : isServerApiErrorPartial
+              ? 'server_error'
+              : isNetworkDown
+                ? 'network_down'
+                : 'stale_connection'
+          const hasOutput = hasNonThinkingOutput || hasYieldedContent
+          logForDebugging(
+            streamIdleAborted
+              ? `Stream idle timeout after ${newMessages.length} block(s) yielded — finalizing partial response`
+              : isServerApiErrorPartial
+                ? `Mid-stream server error after ${newMessages.length} block(s) yielded — finalizing partial response`
+                : `Stream connection closed (${connCode ?? 'unknown'}) after ${newMessages.length} block(s) yielded — finalizing partial response`,
+            { level: 'warn' },
+          )
+          logEvent('tengu_streaming_partial_finalized', {
+            model:
+              options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            blocks_yielded: newMessages.length,
+            has_output: hasOutput,
+            synthesized_stop_reason:
+              synthesizedStop as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            cause:
+              cause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            request_id: (streamRequestId ??
+              'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          const incompleteBanner = hasOutput
+            ? streamIdleAborted
+              ? `${API_ERROR_MESSAGE_PREFIX}: Response stalled mid-stream. The response above may be incomplete.`
+              : isServerApiErrorPartial
+                ? `${API_ERROR_MESSAGE_PREFIX}: Server error mid-response. The response above may be incomplete.`
+                : `${API_ERROR_MESSAGE_PREFIX}: Connection closed mid-response. The response above may be incomplete.`
+            : streamIdleAborted
+              ? `${API_ERROR_MESSAGE_PREFIX}: Response stalled while thinking, before producing a response. Try again.`
+              : `${API_ERROR_MESSAGE_PREFIX}: Connection closed while thinking, before producing a response. Try again.`
+          yield createAssistantAPIErrorMessage({
+            content: incompleteBanner,
+            apiError: 'server_error',
+            error: 'server_error',
+          })
+          // densable `break e` — exit streaming successfully with partial kept
+          return
+        }
+      }
+
       // When the flag is enabled, skip the non-streaming fallback and let the
       // error propagate to withRetry. The mid-stream fallback causes double tool
       // execution when streaming tool execution is active: the partial stream
@@ -3178,8 +3347,15 @@ async function* queryModel(
       } catch {
         // residual helpers optional
       }
+      // densable: also skip non-streaming when watchdog fired under GB flag
+      const watchdogSkipNonstreaming =
+        getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_watchdog_skip_nonstreaming_fallback',
+          true,
+        ) && streamIdleAborted
       const disableFallback =
         nonstreamingFallbackDisabled ||
+        watchdogSkipNonstreaming ||
         getFeatureValue_CACHED_MAY_BE_STALE(
           'tengu_disable_streaming_to_non_streaming_fallback',
           false,
@@ -3246,7 +3422,9 @@ async function* queryModel(
           'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         fallback_cause: (streamIdleAborted
           ? 'watchdog'
-          : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          : newMessages.length > 0
+            ? 'partial_yield'
+            : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
 
       // Fall back to non-streaming mode with retries.

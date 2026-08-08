@@ -37,6 +37,7 @@ import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
 import { getAPIProvider } from './model/providers.js'
 import { normalizeModelStringForAPI } from './model/model.js'
+import { maySendDisabledThinking } from './thinking.js'
 import { getOpenAIClient } from '../services/api/openai/client.js'
 import { getGrokClient } from '../services/api/grok/client.js'
 import { isChatGPTAuthEnabled } from '../services/api/openai/chatgptAuth.js'
@@ -259,9 +260,14 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
         : []),
   ].filter((block): block is TextBlockParam => block !== null)
 
+  // densable HQt: models with rejects_disabled_thinking 400 on {type:'disabled'}.
+  // Local main path omits the field; sideQuery historically sends disabled when
+  // thinking===false — gate that with maySendDisabledThinking (HQt → omit).
   let thinkingConfig: BetaThinkingConfigParam | undefined
   if (thinking === false) {
-    thinkingConfig = { type: 'disabled' }
+    if (maySendDisabledThinking(model)) {
+      thinkingConfig = { type: 'disabled' }
+    }
   } else if (thinking !== undefined) {
     thinkingConfig = {
       type: 'enabled',

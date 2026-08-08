@@ -37,6 +37,7 @@ import { getDefaultSonnetModel, getMainLoopModel } from '../model/model.js'
 import { isPoorModeActive } from '../../commands/poor/poorMode.js'
 import { getAutoModeConfig } from '../settings/settings.js'
 import { sideQuery } from '../sideQuery.js'
+import { densableThinkingForceParams } from '../thinking.js'
 import type { LangfuseSpan } from '../../services/langfuse/index.js'
 import { jsonStringify } from '../slowOperations.js'
 import { tokenCountWithEstimation } from '../tokens.js'
@@ -868,15 +869,12 @@ function replaceOutputFormatWithXml(systemPrompt: string): string {
  * Thinking config for classifier calls. The classifier wants short text-only
  * responses — API thinking blocks are ignored by extractTextContent() and waste tokens.
  *
- * For most models: send { type: 'disabled' } via sideQuery's `thinking: false`.
+ * densable kQt(e): HQt → [undefined, 2048]; else [false, 0].
+ * Local also keeps ant alwaysOnThinking override (tengu_ant_model_override).
  *
- * Models with alwaysOnThinking (declared in tengu_ant_model_override) default
- * to adaptive thinking server-side and reject `disabled` with a 400. For those:
- * don't pass `thinking: false`, instead pad max_tokens so adaptive thinking
- * (observed 0–1114 tokens replaying go/ccshare/shawnm-20260310-202833) doesn't
- * exhaust the budget before <block> is emitted. Without headroom,
- * stop_reason=max_tokens yields an empty text response → parseXmlBlock('')
- * → null → "unparseable" → safe commands blocked.
+ * For most models: send { type: 'disabled' } via sideQuery's `thinking: false`.
+ * HQt / alwaysOnThinking: omit disabled and pad max_tokens so server adaptive
+ * thinking doesn't exhaust the budget before <block> is emitted.
  *
  * Returns [disableThinking, headroom] — tuple instead of named object so
  * property-name strings don't survive minification into external builds.
@@ -890,7 +888,9 @@ function getClassifierThinkingConfig(
   ) {
     return [undefined, 2048]
   }
-  return [false, 0]
+  // densable kQt — fable rejects_disabled_thinking → force omit + 2048 headroom
+  const [override, headroom] = densableThinkingForceParams(model)
+  return [override === false ? false : undefined, headroom]
 }
 
 /**

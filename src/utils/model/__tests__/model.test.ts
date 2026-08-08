@@ -21,6 +21,14 @@ describe('firstPartyNameToCanonical', () => {
     )
   })
 
+  test('maps densable QO fable/mythos before opus fallthrough', () => {
+    expect(firstPartyNameToCanonical('claude-fable-5')).toBe('claude-fable-5')
+    expect(firstPartyNameToCanonical('claude-mythos-5')).toBe('claude-mythos-5')
+    expect(firstPartyNameToCanonical('us.anthropic.claude-fable-5')).toBe(
+      'claude-fable-5',
+    )
+  })
+
   test('maps haiku-4-5', () => {
     expect(firstPartyNameToCanonical('claude-haiku-4-5-20251001')).toBe(
       'claude-haiku-4-5',
@@ -67,9 +75,10 @@ describe('firstPartyNameToCanonical', () => {
     expect(firstPartyNameToCanonical('unknown-model')).toBe('unknown-model')
   })
 
-  test('differentiates opus-4 vs opus-4-5 vs opus-4-6', () => {
+  test('differentiates opus-4-0 vs opus-4-5 vs opus-4-6 (densable QO)', () => {
+    // densable QO: bare/dated opus-4 → claude-opus-4-0 (catalog id)
     expect(firstPartyNameToCanonical('claude-opus-4-20240101')).toBe(
-      'claude-opus-4',
+      'claude-opus-4-0',
     )
     expect(firstPartyNameToCanonical('claude-opus-4-5-20240101')).toBe(
       'claude-opus-4-5',
@@ -91,9 +100,9 @@ describe('firstPartyNameToCanonical', () => {
     )
   })
 
-  test('maps sonnet-4', () => {
+  test('maps sonnet-4-0 (densable QO)', () => {
     expect(firstPartyNameToCanonical('claude-sonnet-4-20240101')).toBe(
-      'claude-sonnet-4',
+      'claude-sonnet-4-0',
     )
   })
 })

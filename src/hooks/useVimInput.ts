@@ -45,6 +45,32 @@ type UseVimInputProps = Omit<UseTextInputProps, 'inputFilter'> & {
   inputFilter?: UseTextInputProps['inputFilter']
 }
 
+/**
+ * densable 2.1.219 #14 pure gate (before mapping arrows → h/j/k/l):
+ *   idle && !shift && (up || down || (left && text === ""))
+ * When true → delegate to textInput.handleKeyDown (history / agent view).
+ *
+ * densable `z.text` is the single input buffer. Local Prompt/Vim path is
+ * always React-controlled (`UseTextInputProps.value: string` required) —
+ * there is no separate uncontrolled live buffer; `props.value` IS densable
+ * z.text at the key handler (same as Cursor.fromText(props.value, ...)).
+ */
+export function shouldDelegateVimIdleArrowToTextInput(input: {
+  commandType: string
+  shift: boolean
+  upArrow: boolean
+  downArrow: boolean
+  leftArrow: boolean
+  /** densable z.text — controlled input value */
+  text: string
+}): boolean {
+  return (
+    input.commandType === 'idle' &&
+    !input.shift &&
+    (input.upArrow || input.downArrow || (input.leftArrow && input.text === ''))
+  )
+}
+
 export function useVimInput(props: UseVimInputProps): VimInputState {
   const vimStateRef = React.useRef<VimState>(createInitialVimState())
   const [mode, setMode] = useState<VimMode>('INSERT')
@@ -418,11 +444,22 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
       return
     }
 
-    // In idle state, delegate arrow keys to base handler for cursor movement
-    // and history fallback (upOrHistoryUp / downOrHistoryDown)
+    // densable 2.1.219 #14:
+    //   if(j.command.type==="idle"&&!F.shift&&(F.name==="up"||F.name==="down"||F.name==="left"&&z.text==="")){
+    //     W.handleKeyDown(F);return
+    //   }
+    // Empty NORMAL ← must hit textInput left-empty path (onLeftArrowOnEmpty →
+    // agent view). Non-empty left / right still map to h/l below. Shift+arrow
+    // stays with vim (selection / shift motions), matching densable !F.shift.
     if (
-      state.command.type === 'idle' &&
-      (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow)
+      shouldDelegateVimIdleArrowToTextInput({
+        commandType: state.command.type,
+        shift: !!key.shift,
+        upArrow: !!key.upArrow,
+        downArrow: !!key.downArrow,
+        leftArrow: !!key.leftArrow,
+        text: props.value,
+      })
     ) {
       textInput.onInput(input, key)
       return

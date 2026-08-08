@@ -62,7 +62,8 @@ export function isNonCustomOpusModel(model: ModelName): boolean {
     model === getModelStrings().opus45 ||
     model === getModelStrings().opus46 ||
     model === getModelStrings().opus47 ||
-    model === getModelStrings().opus48
+    model === getModelStrings().opus48 ||
+    model === getModelStrings().opus5
   )
 }
 
@@ -174,10 +175,13 @@ export function getDefaultOpusModel(): ModelName {
   // when the user configured a third-party provider.
   const primaryModel = getProviderPrimaryModel()
   if (primaryModel) return primaryModel
+  // densable 2.1.219 getDefaultOpusModel:
+  //   firstParty → zm().opus5 (claude-opus-5)
+  //   else (3P lag) → zm().opus47
   if (provider !== 'firstParty') {
     return getModelStrings().opus47
   }
-  return getModelStrings().opus47
+  return getModelStrings().opus5
 }
 
 // @[MODEL LAUNCH]: Update the default Sonnet model (3P providers may lag so keep defaults unchanged).
@@ -326,8 +330,19 @@ export function getDefaultMainLoopModel(): ModelName {
  */
 export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   name = name.toLowerCase()
+  // densable QO(e): fable/mythos before opus (explicit includes, not generic regex)
+  if (name.includes('claude-fable-5')) {
+    return 'claude-fable-5'
+  }
+  if (name.includes('claude-mythos-5')) {
+    return 'claude-mythos-5'
+  }
   // Special cases for Claude 4+ models to differentiate versions
   // Order matters: check more specific versions first (4-8 before 4-7 before 4)
+  // densable 2.1.219: claude-opus-5 before 4.x fallthrough
+  if (name.includes('claude-opus-5')) {
+    return 'claude-opus-5'
+  }
   // densable 2.1.217: claude-opus-4-8 must not fall through to 'claude-opus-4'
   // (Bedrock us.anthropic.claude-opus-4-8 includes "claude-opus-4").
   if (name.includes('claude-opus-4-8')) {
@@ -345,8 +360,14 @@ export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   if (name.includes('claude-opus-4-1')) {
     return 'claude-opus-4-1'
   }
-  if (name.includes('claude-opus-4')) {
-    return 'claude-opus-4'
+  // densable QO: exact catalog id claude-opus-4-0 before bare-4 regex
+  // (regex /claude-opus-4(?!-\d(?!\d))/ does NOT match "...-4-0")
+  if (name.includes('claude-opus-4-0')) {
+    return 'claude-opus-4-0'
+  }
+  // densable QO: bare/dated opus-4 → claude-opus-4-0
+  if (/claude-opus-4(?!-\d(?!\d))/.test(name)) {
+    return 'claude-opus-4-0'
   }
   if (name.includes('claude-sonnet-5')) {
     return 'claude-sonnet-5'
@@ -357,8 +378,12 @@ export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   if (name.includes('claude-sonnet-4-5')) {
     return 'claude-sonnet-4-5'
   }
-  if (name.includes('claude-sonnet-4')) {
-    return 'claude-sonnet-4'
+  if (name.includes('claude-sonnet-4-0')) {
+    return 'claude-sonnet-4-0'
+  }
+  // densable QO: bare/dated sonnet-4 → claude-sonnet-4-0
+  if (/claude-sonnet-4(?!-\d(?!\d))/.test(name)) {
+    return 'claude-sonnet-4-0'
   }
   if (name.includes('claude-haiku-4-5')) {
     return 'claude-haiku-4-5'
@@ -382,12 +407,8 @@ export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   if (name.includes('claude-3-haiku')) {
     return 'claude-3-haiku'
   }
-  const match = name.match(/(claude-(\d+-\d+-)?\w+)/)
-  if (match && match[1]) {
-    return match[1]
-  }
-  // Fall back to the original name if no pattern matches
-  return name
+  // densable QO final: strip trailing -YYYYMMDD date suffix, else identity
+  return name.replace(/-\d{8}$/, '')
 }
 
 /**
@@ -404,30 +425,62 @@ export function getCanonicalName(fullModelName: ModelName): ModelShortName {
 }
 
 // @[MODEL LAUNCH]: Update the default model description strings shown to users.
+/**
+ * densable C7n(e) — Default row marketing for Claude.ai tier users.
+ * Max/Team Premium: marketing(defaultOpus) + "Best for everyday, complex tasks"
+ * (+ optional bGr when e && pv(o) — fastMode and model supports fast).
+ * Org/enforced attribution is handled by getDefaultOptionForUser (badge arm).
+ */
 export function getClaudeAiUserDefaultModelDescription(
   fastMode = false,
 ): string {
   if (isMaxSubscriber() || isTeamPremiumSubscriber()) {
-    if (isOpus1mMergeEnabled()) {
-      return `Opus 4.7 with 1M context · Most capable for complex work${fastMode ? getOpusPricingSuffix(true) : ''}`
+    // densable o=bE() default opus; i=mb(Gu(o))??"Opus"; slogan always everyday.
+    const defaultOpus = getDefaultOpusModel()
+    const marketing =
+      getMarketingNameForModel(defaultOpus.replace(/\[1m\]/gi, '')) ?? 'Opus'
+    const slogan = 'Best for everyday, complex tasks'
+    const base = isOpus1mMergeEnabled()
+      ? `${marketing} with 1M context · ${slogan}`
+      : `${marketing} · ${slogan}`
+    // densable s=e&&pv(o): only append GHt pricing when fastMode AND model supports fast
+    if (fastMode) {
+      // Lazy require avoids model ↔ fastMode cycles at module load.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isFastModeSupportedByModel } =
+        require('../fastMode.js') as typeof import('../fastMode.js')
+      if (isFastModeSupportedByModel(defaultOpus)) {
+        return base + getOpusPricingSuffix(true, defaultOpus)
+      }
     }
-    return `Opus 4.7 · Most capable for complex work${fastMode ? getOpusPricingSuffix(true) : ''}`
+    return base
   }
-  return 'Sonnet 5 · Efficient for routine tasks'
+  // densable: marketing(defaultSonnet) · Efficient for routine tasks
+  const sonnet = getMarketingNameForModel(getDefaultSonnetModel()) ?? 'Sonnet'
+  return `${sonnet} · Efficient for routine tasks`
 }
 
 export function renderDefaultModelSetting(
   setting: ModelName | ModelAlias,
 ): string {
+  // densable IGr(e): version-agnostic (defaults move; do not pin 4.7/5)
   if (setting === 'opusplan') {
-    return 'Opus 4.7 in plan mode, else Sonnet 5'
+    return 'Opus in plan mode, else Sonnet'
   }
   return renderModelName(parseUserSpecifiedModel(setting))
 }
 
-export function getOpusPricingSuffix(fastMode: boolean): string {
+/**
+ * densable bGr(e,t) pricing suffix for Opus picker rows.
+ * @param fastMode densable e — show fast column / lightning
+ * @param model densable t — row model id for GHt(QO(t)); omit → Opus 5 (u7n when fast)
+ */
+export function getOpusPricingSuffix(
+  fastMode: boolean,
+  model?: string,
+): string {
   if (getAPIProvider() !== 'firstParty') return ''
-  const pricing = formatModelPricing(getOpus46CostTier(fastMode))
+  const pricing = formatModelPricing(getOpus46CostTier(fastMode, model))
   const fastModeIndicator = fastMode ? ` (${LIGHTNING_BOLT})` : ''
   return ` ·${fastModeIndicator} ${pricing}`
 }
@@ -470,6 +523,10 @@ export function renderModelSetting(setting: ModelName | ModelAlias): string {
  */
 export function getPublicModelDisplayName(model: ModelName): string | null {
   switch (model) {
+    case getModelStrings().opus5:
+      return 'Opus 5'
+    case getModelStrings().opus5 + '[1m]':
+      return 'Opus (1M context)'
     case getModelStrings().opus48:
       return 'Opus 4.8'
     case getModelStrings().opus48 + '[1m]':
@@ -711,6 +768,10 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   const has1m = modelId.toLowerCase().includes('[1m]')
   const canonical = getCanonicalName(modelId)
 
+  // densable 2.1.219: Opus 5 marketing; merged 1M row is "Opus (1M context)"
+  if (canonical.includes('claude-opus-5')) {
+    return has1m ? 'Opus (1M context)' : 'Opus 5'
+  }
   if (canonical.includes('claude-opus-4-8')) {
     return has1m ? 'Opus 4.8 (with 1M context)' : 'Opus 4.8'
   }

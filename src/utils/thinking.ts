@@ -2,11 +2,12 @@
 import type { Theme } from './theme.js'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { getCanonicalName } from './model/model.js'
+import { resolveAntModel } from './model/antModels.js'
+import { modelHasCatalogCapability } from './model/modelCatalogCapabilities.js'
+import { firstPartyNameToCanonical } from './model/model.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import { getAPIProvider } from './model/providers.js'
 import { getSettingsWithErrors } from './settings/settings.js'
-import { resolveAntModel } from './model/antModels.js'
 
 export type ThinkingConfig =
   | { type: 'adaptive' }
@@ -86,8 +87,32 @@ export function getRainbowColor(
   return colors[charIndex % colors.length]!
 }
 
+/**
+ * densable `lo`/QO short id for capability probes (IQt/HQt/T5i).
+ * Prefer firstPartyNameToCanonical so bare/dated ids match EHl catalog ids
+ * (e.g. claude-opus-4-… → claude-opus-4-0).
+ */
+function densableLoCanonical(model: string): string {
+  return firstPartyNameToCanonical(
+    model
+      .replace(/\[1m\]/gi, '')
+      .trim()
+      .toLowerCase(),
+  )
+}
+
+/**
+ * densable hj(e) — unknown-model capability default.
+ * densable: firstParty || anthropicAws || anthropicGoogleCloud || foundry || mantle.
+ * Local provider enum has firstParty/foundry (c5/mantle not separate API providers).
+ */
+function densableUnknownModelCapabilityDefault(): boolean {
+  const provider = getAPIProvider()
+  return provider === 'firstParty' || provider === 'foundry'
+}
+
 // TODO(inigo): add support for probing unknown models via API error detection
-// Provider-aware thinking support detection (aligns with modelSupportsISP in betas.ts)
+// densable T5i(e): Tde(e,"thinking") ?? !lo(e).includes("claude-3-")
 export function modelSupportsThinking(model: string): boolean {
   const supported3P = get3PModelCapabilityOverride(model, 'thinking')
   if (supported3P !== undefined) {
@@ -100,52 +125,119 @@ export function modelSupportsThinking(model: string): boolean {
   }
   // IMPORTANT: Do not change thinking support without notifying the model
   // launch DRI and research. This can greatly affect model quality and bashing.
-  const canonical = getCanonicalName(model)
-  const provider = getAPIProvider()
-  // 1P and Foundry: all Claude 4+ models (including Haiku 4.5)
-  if (provider === 'foundry' || provider === 'firstParty') {
-    return !canonical.includes('claude-3-')
-  }
-  // 3P (Bedrock/Vertex): only Opus 4+ and Sonnet 4+
-  return canonical.includes('sonnet-4') || canonical.includes('opus-4')
+  // densable T5i: any non-claude-3 model supports thinking (all providers).
+  return !densableLoCanonical(model).includes('claude-3-')
 }
 
-// @[MODEL LAUNCH]: Add the new model to the allowlist if it supports adaptive thinking.
+/**
+ * densable HQt(e) — model rejects disabled thinking (must send thinking).
+ * Known Claude catalog ids return false; ON(rejects_disabled_thinking) or
+ * unknown → provider default. Only fable-5 has the cap in 2.1.219 EHl.
+ */
+export function modelRejectsDisabledThinking(model: string): boolean {
+  const r = densableLoCanonical(model)
+  if (
+    r.includes('claude-3-') ||
+    r === 'claude-opus-4-0' ||
+    r === 'claude-opus-4-1' ||
+    r === 'claude-opus-4-5' ||
+    r === 'claude-opus-4-6' ||
+    r === 'claude-opus-4-7' ||
+    r === 'claude-opus-4-8' ||
+    r === 'claude-opus-5' ||
+    r === 'claude-sonnet-4-0' ||
+    r === 'claude-sonnet-4-5' ||
+    r === 'claude-sonnet-4-6' ||
+    r === 'claude-sonnet-5' ||
+    r === 'claude-haiku-4-5'
+  ) {
+    return false
+  }
+  if (modelHasCatalogCapability(r, 'rejects_disabled_thinking') === true) {
+    return true
+  }
+  return densableUnknownModelCapabilityDefault()
+}
+
+/**
+ * densable kQt(e) — [thinkingOverride, budgetHint].
+ * HQt → [undefined, 2048]; else [false, 0].
+ *
+ * Local shape: used by side-query classifiers (yolo auto_mode) that want to
+ * disable thinking. Main claude.ts path does not use this tuple — it builds
+ * ThinkingConfig → Beta thinking and historically omits the field when off
+ * rather than densable's explicit `{type:'disabled'}` firstParty branch.
+ */
+export function densableThinkingForceParams(
+  model: string,
+): [boolean | undefined, number] {
+  if (modelRejectsDisabledThinking(model)) {
+    return [undefined, 2048]
+  }
+  return [false, 0]
+}
+
+/**
+ * densable ur for tool_choice demotion:
+ *   Bo.type in {enabled,adaptive} || (Bo === undefined && HQt(model))
+ *
+ * Local: pass assembled wire `thinking` (or undefined). When HQt and the
+ * field is omitted, treat as thinking-active so tool_choice:{type:'tool'}
+ * is demoted to auto (API rejects tool forcing with thinking).
+ */
+export function isThinkingActiveForToolChoice(
+  thinking: { type?: string } | undefined,
+  model: string,
+): boolean {
+  if (thinking?.type === 'enabled' || thinking?.type === 'adaptive') {
+    return true
+  }
+  return thinking === undefined && modelRejectsDisabledThinking(model)
+}
+
+/**
+ * Whether callers may send `{ type: 'disabled' }` for this model.
+ * densable HQt models reject it (400). Local residual env DISABLE_THINKING
+ * is handled by callers separately — this is model capability only.
+ */
+export function maySendDisabledThinking(model: string): boolean {
+  return !modelRejectsDisabledThinking(model)
+}
+
+/**
+ * densable IQt(e) — adaptive thinking support.
+ *   Tde(e,"adaptive_thinking") 3P override
+ *   deny: claude-3-* | opus-4-0|4-1|4-5 | sonnet-4-0|4-5 | haiku-4-5
+ *   ON(adaptive_thinking) || mythos-5 → true
+ *   else hj(ny(e))
+ */
 export function modelSupportsAdaptiveThinking(model: string): boolean {
   const supported3P = get3PModelCapabilityOverride(model, 'adaptive_thinking')
   if (supported3P !== undefined) {
     return supported3P
   }
-  const canonical = getCanonicalName(model)
-  // Supported by a subset of Claude 4 models
+  const r = densableLoCanonical(model)
   if (
-    canonical.includes('opus-4-7') ||
-    canonical.includes('opus-4-6') ||
-    canonical.includes('sonnet-4-6')
-  ) {
-    return true
-  }
-  // Exclude any other known legacy models (allowlist above catches 4-6+ variants first)
-  if (
-    canonical.includes('opus') ||
-    canonical.includes('sonnet') ||
-    canonical.includes('haiku')
+    r.includes('claude-3-') ||
+    r === 'claude-opus-4-0' ||
+    r === 'claude-opus-4-1' ||
+    r === 'claude-opus-4-5' ||
+    r === 'claude-sonnet-4-0' ||
+    r === 'claude-sonnet-4-5' ||
+    r === 'claude-haiku-4-5'
   ) {
     return false
   }
+  // densable: ON(r,"adaptive_thinking") || r==="claude-mythos-5"
+  if (
+    modelHasCatalogCapability(r, 'adaptive_thinking') === true ||
+    r === 'claude-mythos-5'
+  ) {
+    return true
+  }
   // IMPORTANT: Do not change adaptive thinking support without notifying the
-  // model launch DRI and research. This can greatly affect model quality and
-  // bashing.
-
-  // Newer models (4.6+) are all trained on adaptive thinking and MUST have it
-  // enabled for model testing. DO NOT default to false for first party, otherwise
-  // we may silently degrade model quality.
-
-  // Default to true for unknown model strings on 1P and Foundry (because Foundry
-  // is a proxy). Do not default to true for other 3P as they have different formats
-  // for their model strings.
-  const provider = getAPIProvider()
-  return provider === 'firstParty' || provider === 'foundry'
+  // model launch DRI and research. densable falls through to hj(ny) for unknown.
+  return densableUnknownModelCapabilityDefault()
 }
 
 export function shouldEnableThinkingByDefault(): boolean {

@@ -1,0 +1,26 @@
+densable 2.1.219 #19 — managed MCP allow/deny ${VAR} from startup + managed env
+
+function ZGu(e){ /* * / %2a wildcard inject detect */ }
+function S7(e,t=process.env,r){
+  // ${IDENT} | ${IDENT:-default}; primary t then default then fallback r
+  // returns {expanded, missingVars, wildcardVars}
+}
+function VQr(){return gyo??=Object.freeze({...process.env}),gyo}
+function Y6u(){
+  let e={};for(let t of zQ())for(let[r,n]of Object.entries(SLt(t.env)))e[r]??=n;
+  return{...VQr(),...e}  // startup freeze + managed-settings env ONLY
+}
+function Hyy(){
+  // fallbackEnv = globalConfig + user + flag + policy settings.env (SLt)
+  return{env:Y6u(),fallbackEnv:e}
+}
+function X6u(e,t,r){let{expanded,missingVars}=S7(e,t,r); /* warn missing */; return{expanded}}
+function E_o(e){return S7(e).expanded}  // server side: live process.env
+
+// rdt deny: Hyy → X6u(policyCmd, env, fallback) vs server.map(E_o)
+// eUe allow: Y6u only → X6u(policyCmd, Y6u) ; J6u URL allow fail-closed on unsafe
+
+// local:
+//   src/services/mcp/envExpansion.ts  S7 + ZGu
+//   src/utils/managedEnv.ts           VQr/Y6u/Hyy freeze + primary/deny env
+//   src/services/mcp/config.ts        rdt/eUe expand before command/url match

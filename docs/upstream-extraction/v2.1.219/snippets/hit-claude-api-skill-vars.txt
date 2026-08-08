@@ -1,0 +1,12 @@
+densable 2.1.219 #23 — claude-api skill model vars
+
+OPUS_ID:"claude-opus-5",OPUS_NAME:"Claude Opus 5",
+PREV_OPUS_ID:"claude-opus-4-8",PREV_OPUS_NAME:"Claude Opus 4.8",
+SONNET_ID:"claude-sonnet-5",SONNET_NAME:"Claude Sonnet 5",
+SONNET_NEXT_ID:"claude-sonnet-5",SONNET_NEXT_NAME:"Claude Sonnet 5",
+HAIKU_ID:"claude-haiku-4-5",HAIKU_NAME:"Claude Haiku 4.5",
+PREV_SONNET_ID:"claude-sonnet-4-6"
+
+// local: src/skills/bundled/claudeApiContent.ts SKILL_MODEL_VARS
+// Note: claude-api/*.md content tree not vendored in this repo; vars still
+// substitute {{OPUS_ID}} etc. when content is present at build time.
