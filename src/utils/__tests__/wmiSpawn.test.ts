@@ -5,6 +5,7 @@ import {
   buildWmiPowerShellScript,
   quotePowerShellSingle,
   quoteWindowsArg,
+  spawnViaWmiSync,
 } from '../wmiSpawn.js'
 
 describe('quoteWindowsArg (official nAO)', () => {
@@ -84,6 +85,23 @@ describe('buildWmiPowerShellScript (official cAO)', () => {
     expect(script).toContain(
       "CommandLine = 'C:\\bin\\claude.exe daemon run --origin transient'",
     )
+    expect(script).not.toContain('Write-Output')
+  })
+
+  test('emitProcessId + custom cwd for worker nqq path', () => {
+    const script = buildWmiPowerShellScript(
+      'C:\\bin\\claude.exe --bg-pty-host sock 200 50 -- claude -p',
+      {
+        currentDirectory: 'D:\\job\\cwd',
+        emitProcessId: true,
+      },
+    )
+    expect(script).toContain("CurrentDirectory = 'D:\\job\\cwd'")
+    expect(script).toContain(
+      'if ($r.ReturnValue -eq 0 -and $r.ProcessId) { Write-Output $r.ProcessId }',
+    )
+    expect(script).toContain('ShowWindow = [uint16]0')
+    expect(script).toContain('CreateFlags = [uint32]8')
   })
 })
 
@@ -94,5 +112,29 @@ describe('buildDaemonSpawnEnv (official rAO)', () => {
       INVOCATION_ID: 'keep-me',
     })
     expect(env.INVOCATION_ID).toBe('')
+  })
+})
+
+describe('spawnViaWmiSync (Windows flash path)', () => {
+  test('spawns a short-lived process with pid when on win32', () => {
+    if (process.platform !== 'win32') {
+      // API still rejects empty argv everywhere
+      expect(spawnViaWmiSync([], process.env).ok).toBe(false)
+      return
+    }
+    const result = spawnViaWmiSync(
+      [process.execPath, '-e', 'setTimeout(()=>{}, 1500)'],
+      process.env,
+      { timeoutMs: 10_000 },
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.pid).toBeGreaterThan(0)
+      try {
+        process.kill(result.pid)
+      } catch {
+        /* already exited */
+      }
+    }
   })
 })

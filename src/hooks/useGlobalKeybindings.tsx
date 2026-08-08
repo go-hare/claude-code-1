@@ -5,8 +5,8 @@
  * This component renders nothing - it just registers the keybinding handlers.
  */
 import { feature } from 'bun:bundle';
-import { useCallback } from 'react';
-import { instances } from '@anthropic/ink';
+import { useCallback, useEffect } from 'react';
+import { bootstrapXtermAtlas, instances, useProbeExternalClear } from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import type { Screen } from '../screens/REPL.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
@@ -16,6 +16,7 @@ import {
 } from '../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { count } from '../utils/array.js';
+import { isFullscreenActive } from '../utils/fullscreen.js';
 import { getTerminalPanel } from '../utils/terminalPanel.js';
 
 type Props = {
@@ -223,6 +224,19 @@ export function GlobalKeybindingHandlers({
     instances.get(process.stdout)?.forceRedraw();
   }, []);
   useKeybinding('app:redraw', handleRedraw, { context: 'Global' });
+
+  // densable N1f — bootstrap xterm atlas tracking/reset from GrowthBook
+  // (tengu_xterm_atlas_reset default true, tengu_basalt_meadow default false).
+  useEffect(() => {
+    bootstrapXtermAtlas({
+      xtermAtlasReset: getFeatureValue_CACHED_MAY_BE_STALE('tengu_xterm_atlas_reset', true),
+      basaltMeadow: getFeatureValue_CACHED_MAY_BE_STALE('tengu_basalt_meadow', false),
+    });
+  }, []);
+
+  // densable QPf(handleRedraw) — iTerm.app / Apple_Terminal DECXCPR poll
+  // detects external alt-buffer wipe and forceRedraws (Cmd+K recovery).
+  useProbeExternalClear(handleRedraw, isFullscreenActive());
 
   // Transcript-specific bindings (only active when in transcript mode)
   const isInTranscript = screen === 'transcript';

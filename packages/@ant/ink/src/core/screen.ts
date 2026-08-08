@@ -11,6 +11,7 @@ import {
 } from './layout/geometry.js'
 import { BEL, ESC, SEP } from './termio/ansi.js'
 import * as warn from './warn.js'
+import { isAtlasTrackingEnabled, trackAtlasKey } from './xtermAtlas.js'
 
 // --- Shared Pools (interning for memory efficiency) ---
 
@@ -783,6 +784,12 @@ export function setCellAt(
     internHyperlink(screen, cell.hyperlink),
     cell.width,
   )
+
+  // densable gfo()+C2u: track unique (charId, styleId) for xterm.js atlas
+  // proactive reset (maybeProactiveAtlasReset when atlasKeys >= 2000).
+  if (isAtlasTrackingEnabled()) {
+    trackAtlasKey(cells[ci]!, cell.styleId)
+  }
 
   // Track damage - expand bounds in place instead of allocating new objects
   // Include the main cell position and any cleared orphan cells

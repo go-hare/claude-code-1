@@ -16,7 +16,7 @@ import * as dom from './dom.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
 import { PasteEvent } from './events/paste-event.js';
 import { FocusManager } from './focus.js';
-import { emptyFrame, type Frame, type FrameEvent } from './frame.js';
+import { emptyFrame, type Diff, type Frame, type FrameEvent } from './frame.js';
 import { dispatchClick, dispatchHover } from './hit-test.js';
 import instances from './instances.js';
 import { LogUpdate } from './log-update.js';
@@ -83,7 +83,15 @@ import {
   type ScreenReaderDOMNode,
 } from './screenReaderTree.js';
 import { stringWidth } from './stringWidth.js';
-import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
+import {
+  isXtermJs,
+  SYNC_OUTPUT_SUPPORTED,
+  supportsExtendedKeys,
+  type Terminal,
+  writeDiffToTerminal,
+} from './terminal.js';
+import type { TerminalQuerier } from './terminal-querier.js';
+import { cursorPosition as cursorPositionQuery } from './terminal-querier.js';
 import {
   CURSOR_HOME,
   cursorMove,
@@ -94,6 +102,17 @@ import {
   ENABLE_MODIFY_OTHER_KEYS,
   ERASE_SCREEN,
 } from './termio/csi.js';
+import {
+  ATLAS_KEY_THRESHOLD,
+  ATLAS_RESET_COOLDOWN_MS,
+  ATLAS_RESET_OSC,
+  clearAtlasKeys,
+  getAtlasKeyStats,
+  isAtlasResetEnabled,
+  isAtlasResetSuppressed,
+  isAtlasResetThrottleBypassed,
+  recordAtlasReset,
+} from './xtermAtlas.js';
 import {
   DBP,
   DFE,
@@ -260,6 +279,12 @@ export default class Ink {
   private frontFrame: Frame;
   private backFrame: Frame;
   private lastPoolResetTime = performance.now();
+  /**
+   * densable lastAtlasResetAt — throttle for maybeProactiveAtlasReset (xterm.js
+   * color atlas OSC 104). Focus path uses proactiveAtlasResetOnFocus without
+   * the throttle (densable 2.1.217).
+   */
+  private lastAtlasResetAt = 0;
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
   private lastYogaCounters: {
     ms: number;
@@ -989,6 +1014,11 @@ export default class Ink {
       }
     }
 
+    // densable: if (hasDiff) this.maybeProactiveAtlasReset(S) before efs write
+    if (hasDiff) {
+      this.maybeProactiveAtlasReset(optimized);
+    }
+
     const tWrite = performance.now();
     writeDiffToTerminal(this.terminal, optimized, this.altScreenActive && !SYNC_OUTPUT_SUPPORTED);
     const writeMs = performance.now() - tWrite;
@@ -1248,13 +1278,24 @@ export default class Ink {
   /**
    * Clear the physical terminal and force a full redraw.
    *
-   * The traditional readline ctrl+l — clears the visible screen and
-   * redraws the current content. Also the recovery path when the terminal
-   * was cleared externally (macOS Cmd+K) and Ink's diff engine thinks
-   * unchanged cells don't need repainting. Scrollback is preserved.
+   * densable forceRedraw(e?: {flushReact?: boolean}):
+   * - optional flushReact syncs reconciler before paint
+   * - xterm.js: emitAtlasReset (OSC 104) before repaint
+   * - alt: needsErase + resetFrames; main: forceFullReset + contaminated
+   * - always resetScreenReaderDiffState + onRender
+   *
+   * Recovery path when the terminal was cleared externally (Cmd+K, app-switch
+   * buffer wipe) and the diff engine thinks unchanged cells need no paint.
    */
-  forceRedraw(): boolean {
+  forceRedraw(opts?: { flushReact?: boolean }): boolean {
     if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) return false;
+    if (opts?.flushReact) {
+      reconciler.flushSyncWork();
+    }
+    // densable: if (zv()) this.emitAtlasReset()
+    if (isXtermJs()) {
+      this.emitAtlasReset();
+    }
     if (this.hasStaleTerminalSize()) {
       this.handleResize();
       return true;
@@ -1267,7 +1308,87 @@ export default class Ink {
       this.log.forceFullReset();
       this.prevFrameContaminated = true;
     }
+    this.resetScreenReaderDiffState();
     this.onRender();
+    return true;
+  }
+
+  /**
+   * densable emitAtlasReset — OSC 104;255 (reset color 255 / atlas).
+   * xterm.js hosts accumulate color atlas entries; resetting on focus/redraw
+   * prevents stale palette mapping after external buffer wipe.
+   * densable: write LWu (or unshift into patch list), Lor(), lastAtlasResetAt=now.
+   */
+  /**
+   * densable emitAtlasReset — write LWu (or unshift), Lor(), lastAtlasResetAt.
+   * densable does NOT call Wds here; callers that need telemetry call
+   * recordAtlasReset after (delta/focus only — forceRedraw does not).
+   */
+  emitAtlasReset(patches?: Diff): void {
+    const seq = ATLAS_RESET_OSC;
+    if (patches) {
+      patches.unshift({ type: 'stdout', content: seq });
+    } else {
+      this.options.stdout.write(seq);
+    }
+    clearAtlasKeys();
+    this.lastAtlasResetAt = performance.now();
+  }
+
+  /**
+   * densable maybeProactiveAtlasReset(S) — after a non-empty frame diff,
+   * if atlasKeys ≥ 2000 and cooldown elapsed (or throttle bypassed),
+   * prepend OSC 104 to the same patch list before write.
+   * Gates: Por && !Uds && atlasKeys≥tiy && (R2u || cooldown) && zv().
+   */
+  maybeProactiveAtlasReset(patches: Diff): void {
+    if (!isAtlasResetEnabled()) return;
+    if (isAtlasResetSuppressed()) return;
+    if (getAtlasKeyStats().atlasKeys < ATLAS_KEY_THRESHOLD) return;
+    if (!isAtlasResetThrottleBypassed() && performance.now() - this.lastAtlasResetAt < ATLAS_RESET_COOLDOWN_MS) {
+      return;
+    }
+    if (!isXtermJs()) return;
+    this.emitAtlasReset(patches);
+    recordAtlasReset('delta');
+  }
+
+  /**
+   * densable proactiveAtlasResetOnFocus — FOCUS_IN after blurred.
+   * densable: Por() && !Uds() && TTY && !unmounted && !paused && zv().
+   */
+  proactiveAtlasResetOnFocus(): void {
+    if (
+      !isAtlasResetEnabled() ||
+      isAtlasResetSuppressed() ||
+      !this.options.stdout.isTTY ||
+      this.isUnmounted ||
+      this.isPaused ||
+      !isXtermJs()
+    ) {
+      return;
+    }
+    this.emitAtlasReset();
+    recordAtlasReset('focus');
+  }
+
+  /**
+   * densable probeExternalClear(querier) — iTerm.app / Apple_Terminal only
+   * (caller gates). If displayCursor is parked at y≥1 but DECXCPR reports
+   * row=1, the host wiped the alt buffer (Cmd+K / external clear) without
+   * notifying us — forceRedraw.
+   */
+  async probeExternalClear(querier: TerminalQuerier): Promise<boolean> {
+    if (!this.altScreenActive || this.isPaused || this.isUnmounted) return false;
+    const parked = this.displayCursor;
+    if (!parked || parked.y < 1) return false;
+    const pos = await querier.send(cursorPositionQuery());
+    if (pos?.row !== 1) return false;
+    this.logger.debug(
+      `probeExternalClear: detected wipe (parked at y=${parked.y}, terminal reports row=1 col=${pos.col})`,
+      { level: 'warn' },
+    );
+    this.forceRedraw();
     return true;
   }
 
@@ -1426,12 +1547,17 @@ export default class Ink {
    * SIGCONT, resize, and stdin-gap/event-loop-stall (sleep/wake) — any of
    * which can leave the terminal in main-screen mode while altScreenActive
    * stays true. ENTER_ALT_SCREEN is a terminal-side no-op if already in alt.
+   *
+   * densable 2.1.217: always calls onRender() after resetFrames — without it
+   * the blank seeded frames sit until an unrelated state change, leaving a
+   * black message area after resume/focus recovery.
    */
   private reenterAltScreen(): void {
     this.options.stdout.write(
       ENTER_ALT_SCREEN + ERASE_SCREEN + CURSOR_HOME + enableMouseTracking(this.altScreenMouseTracking),
     );
     this.resetFramesForAltScreen();
+    this.onRender();
   }
 
   /**

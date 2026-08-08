@@ -1152,11 +1152,15 @@ export type SpawnPtyFn = (
 /**
  * Default spawnPty using Bun.spawn + PTY host — official nqq.
  *
- * LOCAL: on Windows we use node:child_process.spawn instead of Bun.spawn
- * because Bun's CREATE_NO_WINDOW/windowsHide is not honoured when
- * `detached: true` is also set, causing a console flash on every worker
- * spawn. Node's implementation correctly hides the window for detached
- * children. Non-Windows keeps Bun.spawn.
+ * densable nqq: Bun.spawn(argv, {cwd, env, detached:!0, windowsHide:!0,
+ *   stdio:['ignore','ignore', Bun.file(stderrBreadcrumb)]}) with ignore
+ * fallback. On Windows, Bun's CREATE_NO_WINDOW is not honoured with
+ * detached:true → multi console flash on BackgroundAndExit / cold spawn.
+ *
+ * LOCAL win32: densable dAO/cAO WMI path (ShowWindow=0 + DETACHED_PROCESS)
+ * via spawnViaWmiSync so neither powershell helper nor pty-host opens a
+ * console. Fall back to node:child_process spawn (windowsHide+detached)
+ * only when WMI fails. Non-Windows keeps densable Bun.spawn.
  */
 export function createDefaultSpawnPty(): SpawnPtyFn {
   return (cmd, args, opts) => {
@@ -1169,8 +1173,31 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
     })
 
     if (process.platform === 'win32') {
-      // LOCAL: Bun.spawn + detached ignores windowsHide → conhost flash.
-      // node:child_process.spawn correctly applies CREATE_NO_WINDOW.
+      // Prefer densable WMI hide (same CreateFlags as spawnDaemonCli) so
+      // exit handoff does not flash "Moving to background…" conhosts.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { spawnViaWmiSync, waitForPidExit } =
+        require('../utils/wmiSpawn.js') as typeof import('../utils/wmiSpawn.js')
+
+      const wmi = spawnViaWmiSync(spawnArgs, opts.env as NodeJS.ProcessEnv, {
+        cwd: opts.cwd,
+      })
+      if (wmi.ok) {
+        const handle = {
+          exited: waitForPidExit(wmi.pid),
+          signalCode: null as string | null,
+        }
+        return connectToPtyHost(
+          opts.ptySock,
+          wmi.pid,
+          undefined,
+          opts.short,
+          handle,
+        )
+      }
+
+      // Fallback: node CreateProcess with windowsHide+detached (still better
+      // than Bun.spawn on some hosts; may flash if hide is ignored).
       const child = nodeSpawn(spawnArgs[0]!, spawnArgs.slice(1), {
         cwd: opts.cwd,
         env: opts.env as NodeJS.ProcessEnv,
@@ -1181,7 +1208,9 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
       child.unref()
 
       if (child.pid == null) {
-        throw new Error('spawned bg pty host has no pid on Windows')
+        throw new Error(
+          `spawned bg pty host has no pid on Windows (WMI: ${wmi.reason})`,
+        )
       }
 
       // Adapter for connectToPtyHost's Bun-ish { exited, signalCode }.
@@ -1208,13 +1237,26 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
       )
     }
 
-    const child = Bun.spawn(spawnArgs, {
+    // densable nqq: stderr breadcrumb file when possible, else ignore.
+    let child: ReturnType<typeof Bun.spawn>
+    const spawnOptsBase = {
       cwd: opts.cwd,
       env: opts.env,
-      stdio: ['ignore', 'ignore', 'ignore'],
-      detached: true,
-      windowsHide: true,
-    })
+      detached: true as const,
+      windowsHide: true as const,
+    }
+    try {
+      const errPath = getPtyErrPath(opts.ptySock)
+      child = Bun.spawn(spawnArgs, {
+        ...spawnOptsBase,
+        stdio: ['ignore', 'ignore', Bun.file(errPath)],
+      })
+    } catch {
+      child = Bun.spawn(spawnArgs, {
+        ...spawnOptsBase,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
+    }
     child.unref()
     return connectToPtyHost(
       opts.ptySock,

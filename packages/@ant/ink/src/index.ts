@@ -280,6 +280,22 @@ export { useAnimationFrame } from './hooks/use-animation-frame.js'
 export { useAnimationTimer, useInterval } from './hooks/use-interval.js'
 export { useSelection, useHasSelection } from './hooks/use-selection.js'
 export { default as useStdin } from './hooks/use-stdin.js'
+export { useProbeExternalClear } from './hooks/use-probe-external-clear.js'
+export {
+  ATLAS_RESET_OSC,
+  ATLAS_KEY_THRESHOLD,
+  ATLAS_RESET_COOLDOWN_MS,
+  bootstrapXtermAtlas,
+  clearAtlasKeys,
+  getAtlasKeyStats,
+  getAtlasResetStats,
+  isAtlasResetEnabled,
+  isAtlasTrackingEnabled,
+  setAtlasResetEnabled,
+  setAtlasTrackingEnabled,
+  trackAtlasKey,
+  _resetXtermAtlasForTesting,
+} from './core/xtermAtlas.js'
 export { useTerminalSize } from './hooks/useTerminalSize.js'
 export { useTimeout } from './hooks/useTimeout.js'
 export { useMinDisplayTime } from './hooks/useMinDisplayTime.js'

@@ -50,7 +50,7 @@ import reconciler from '../core/reconciler.js';
 import instances from '../core/instances.js';
 import { finishSelection, hasSelection, type SelectionState, startSelection } from '../core/selection.js';
 import { isXtermJs, setXtversionName, supportsExtendedKeys } from '../core/terminal.js';
-import { getTerminalFocused, setTerminalFocused } from '../core/terminal-focus-state.js';
+import { getTerminalFocused, getTerminalFocusState, setTerminalFocused } from '../core/terminal-focus-state.js';
 import { TerminalQuerier, xtversion } from '../core/terminal-querier.js';
 import {
   DISABLE_KITTY_KEYBOARD,
@@ -595,9 +595,28 @@ export default class App extends PureComponent<Props, State> {
   };
 
   handleTerminalFocus = (isFocused: boolean): void => {
-    // setTerminalFocused notifies subscribers: TerminalFocusProvider (context)
-    // and Clock (interval speed) — no App setState needed.
+    // densable 2.1.217 handleTerminalFocus:
+    //   let prev = xbe() // getTerminalFocusState
+    //   pds(isFocused)   // setTerminalFocused
+    //   if (isFocused && prev === "blurred")
+    //     bd.get(stdout)?.proactiveAtlasResetOnFocus()
+    //   if (isFocused && prev !== "focused" && CLAUDE_BG_BACKEND===daemon && querier)
+    //     I4u(querier) // XTVERSION re-probe — daemon-only, skip here
+    //
+    // setTerminalFocused notifies TerminalFocusProvider + Clock — no setState.
+    const prev = getTerminalFocusState();
     setTerminalFocused(isFocused);
+    if (isFocused && prev === 'blurred') {
+      const ink = instances.get(this.props.stdout);
+      ink?.proactiveAtlasResetOnFocus();
+      // densable external-wipe recovery: iTerm/Apple_Terminal use CPR probe
+      // (probeExternalClear → forceRedraw). App-switch on WT/Windows does not
+      // send SIGCONT and may blank the alt buffer while Ink's prev frame still
+      // matches virtual content — force full damage so the message area repaints.
+      if (ink?.isAltScreenActive) {
+        ink.forceRedraw();
+      }
+    }
   };
 
   handleSuspend = (): void => {

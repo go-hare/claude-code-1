@@ -12,7 +12,7 @@
  * WMI details: dAO/cAO/lAO/nAO/iAO (Windows only).
  */
 
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import { logEvent } from '../services/analytics/index.js'
 import { buildCliLaunch } from './cliLaunch.js'
 
@@ -77,6 +77,20 @@ export function quotePowerShellSingle(value: string): string {
   return `'${value.replaceAll("'", "''")}'`
 }
 
+export type BuildWmiPowerShellScriptOptions = {
+  /**
+   * Official cAO default: $env:USERPROFILE.
+   * Worker/pty-host needs the job cwd instead of the user profile.
+   */
+  currentDirectory?: string
+  /**
+   * When true, Write-Output ProcessId on success so callers can track the
+   * child without a CreateProcess handle (needed for sync spawn sites).
+   * Official daemon dAO only checks ReturnValue; worker nqq needs the pid.
+   */
+  emitProcessId?: boolean
+}
+
 /**
  * Official cAO — PowerShell body for Win32_Process.Create with hidden
  * DETACHED_PROCESS startup info and parent env passthrough.
@@ -84,15 +98,132 @@ export function quotePowerShellSingle(value: string): string {
  * CreateFlags = 8 → DETACHED_PROCESS
  * ShowWindow = 0 → SW_HIDE
  * CurrentDirectory = $env:USERPROFILE (official; not the caller's cwd)
+ * unless {@link BuildWmiPowerShellScriptOptions.currentDirectory} is set.
  */
-export function buildWmiPowerShellScript(commandLine: string): string {
+export function buildWmiPowerShellScript(
+  commandLine: string,
+  opts?: BuildWmiPowerShellScriptOptions,
+): string {
+  const cwdExpr =
+    opts?.currentDirectory !== undefined
+      ? quotePowerShellSingle(opts.currentDirectory)
+      : '$env:USERPROFILE'
+  const emitPid =
+    opts?.emitProcessId === true
+      ? 'if ($r.ReturnValue -eq 0 -and $r.ProcessId) { Write-Output $r.ProcessId }'
+      : ''
   return [
     '$ErrorActionPreference = "Stop"',
     '$e = [string[]](Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" })',
     '$s = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ EnvironmentVariables = $e; ShowWindow = [uint16]0; CreateFlags = [uint32]8 }',
-    `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${quotePowerShellSingle(commandLine)}; CurrentDirectory = $env:USERPROFILE; ProcessStartupInformation = $s }`,
+    `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${quotePowerShellSingle(commandLine)}; CurrentDirectory = ${cwdExpr}; ProcessStartupInformation = $s }`,
+    ...(emitPid ? [emitPid] : []),
     'exit $r.ReturnValue',
   ].join('\n')
+}
+
+function windowsPowerShellPath(): string {
+  const systemRoot = process.env.SYSTEMROOT || 'C:\\Windows'
+  return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+}
+
+/**
+ * Sync WMI hidden spawn for sites that cannot await (createDefaultSpawnPty).
+ * Uses densable dAO/cAO flags (SW_HIDE + DETACHED_PROCESS) and returns pid.
+ *
+ * Bun's child_process.spawn ignores windowsHide when detached:true — that is
+ * the multi-console flash on exit BackgroundAndExit / cold worker spawn.
+ * WMI Create bypasses CreateProcess console inheritance entirely.
+ */
+export function spawnViaWmiSync(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv,
+  opts?: { cwd?: string; timeoutMs?: number },
+): { ok: true; pid: number } | { ok: false; reason: string; rc?: number } {
+  if (argv.length === 0) {
+    return { ok: false, reason: 'empty argv' }
+  }
+  let script: string
+  try {
+    script = buildWmiPowerShellScript(buildWindowsCommandLine(argv), {
+      currentDirectory: opts?.cwd,
+      emitProcessId: true,
+    })
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    }
+  }
+
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  const powershell = windowsPowerShellPath()
+  const timeoutMs = opts?.timeoutMs ?? 5000
+
+  try {
+    // spawnSync (not spawn): need pid before createDefaultSpawnPty returns.
+    // windowsHide without detached — powershell helper must not flash either.
+    const result = spawnSync(
+      powershell,
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+      {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+        env,
+        encoding: 'utf8',
+        timeout: timeoutMs,
+      },
+    )
+    if (result.error) {
+      const code = (result.error as NodeJS.ErrnoException).code
+      return {
+        ok: false,
+        reason: code === 'ENOENT' ? 'enoent' : result.error.message,
+      }
+    }
+    if (result.status !== 0) {
+      return {
+        ok: false,
+        reason: `Win32_Process.Create rc=${result.status}`,
+        rc: result.status ?? undefined,
+      }
+    }
+    const out = String(result.stdout ?? '')
+      .trim()
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(Boolean)
+    const pidLine = out[out.length - 1]
+    const pid = pidLine ? Number.parseInt(pidLine, 10) : Number.NaN
+    if (!Number.isFinite(pid) || pid <= 0) {
+      return { ok: false, reason: 'missing ProcessId' }
+    }
+    return { ok: true, pid }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+/**
+ * Poll until pid is gone (WMI-spawned children have no ChildProcess handle).
+ * densable Bun.spawn exposes .exited; we approximate for connectToPtyHost.
+ */
+export function waitForPidExit(pid: number): Promise<number> {
+  return new Promise(resolve => {
+    const tick = (): void => {
+      try {
+        process.kill(pid, 0)
+        const t = setTimeout(tick, 500)
+        t.unref?.()
+      } catch {
+        resolve(0)
+      }
+    }
+    tick()
+  })
 }
 
 /** Official rAO subset — scrub invocation id; drop short-lived OAuth token when refreshable. */
@@ -139,8 +270,7 @@ export function spawnViaWmi(
   }
 
   const encoded = Buffer.from(script, 'utf16le').toString('base64')
-  const systemRoot = process.env.SYSTEMROOT || 'C:\\Windows'
-  const powershell = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+  const powershell = windowsPowerShellPath()
 
   return new Promise(resolve => {
     let settled = false
@@ -163,6 +293,8 @@ export function spawnViaWmi(
 
     let proc: ChildProcess
     try {
+      // densable dAO: windowsHide without detached so the PS helper itself
+      // never opens a console (Bun honors hide when not detached).
       proc = spawn(
         powershell,
         ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
