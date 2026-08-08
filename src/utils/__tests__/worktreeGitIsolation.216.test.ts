@@ -7,7 +7,6 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkWorktreeSharedCheckoutGitRedirect,
   checkZRuGitRedirectCommand,
   extractGitRedirectsFromArgv,
   isGitBinaryName,
@@ -115,80 +114,8 @@ describe('extractGitRedirectsFromArgv', () => {
   })
 })
 
-describe('checkWorktreeSharedCheckoutGitRedirect', () => {
-  const isolation = {
-    worktreePath: '/repo/.claude/worktrees/agent-a1',
-    sharedCheckout: '/repo',
-  }
-
-  test('allows normal git status in worktree', () => {
-    expect(
-      checkWorktreeSharedCheckoutGitRedirect('git status', isolation),
-    ).toBeNull()
-  })
-
-  test('denies git -C shared checkout', () => {
-    const reason = checkWorktreeSharedCheckoutGitRedirect(
-      'git -C /repo status',
-      isolation,
-    )
-    expect(reason).toContain('redirects git to the shared checkout via -C')
-  })
-
-  test('denies --git-dir shared', () => {
-    const reason = checkWorktreeSharedCheckoutGitRedirect(
-      'git --git-dir=/repo/.git status',
-      isolation,
-    )
-    expect(reason).toContain(
-      'redirects git to the shared checkout via --git-dir',
-    )
-  })
-
-  test('denies --work-tree shared', () => {
-    const reason = checkWorktreeSharedCheckoutGitRedirect(
-      'git --work-tree /repo status',
-      isolation,
-    )
-    expect(reason).toContain(
-      'redirects git to the shared checkout via --work-tree',
-    )
-  })
-
-  test('denies GIT_DIR assignment to shared', () => {
-    const reason = checkWorktreeSharedCheckoutGitRedirect(
-      'GIT_DIR=/repo/.git git status',
-      isolation,
-    )
-    expect(reason).toContain('sets GIT_DIR to the shared checkout')
-  })
-
-  test('denies GIT_WORK_TREE assignment to shared', () => {
-    const reason = checkWorktreeSharedCheckoutGitRedirect(
-      'GIT_WORK_TREE=/repo git status',
-      isolation,
-    )
-    expect(reason).toContain('sets GIT_WORK_TREE to the shared checkout')
-  })
-
-  test('denies unverifiable runtime -C (tilde — densable KRu)', () => {
-    const reason = checkWorktreeSharedCheckoutGitRedirect(
-      'git -C ~/repo status',
-      isolation,
-    )
-    expect(reason).toContain("can't be verified before it runs")
-  })
-
-  test('allows git -C to worktree itself', () => {
-    expect(
-      checkWorktreeSharedCheckoutGitRedirect(
-        'git -C /repo/.claude/worktrees/agent-a1 status',
-        isolation,
-      ),
-    ).toBeNull()
-  })
-
-  test('resolveStaticPath rejects densable oKr opaque forms', () => {
+describe('resolveStaticPath densable oKr', () => {
+  test('rejects densable oKr opaque forms', () => {
     // densable am() — AST placeholders for expansions
     expect(resolveStaticPath('__TRACKED_VAR__/x', '/base')).toBeNull()
     expect(resolveStaticPath('__CMDSUB_OUTPUT__/x', '/base')).toBeNull()
@@ -413,6 +340,70 @@ describe('checkZRuGitRedirectCommand densable ZRu (AST)', () => {
       )
       expect(msg).not.toBeNull()
       expect(msg!).toMatch(/assigns GIT_DIR/i)
+    } finally {
+      cleanup()
+    }
+  })
+
+  test('blocks --git-dir shared checkout (AST JRu pins)', async () => {
+    const { sharedPosix, worktree, cleanup } = makeWorktreeFixture()
+    try {
+      const msg = await checkZRuGitRedirectCommand(
+        `git --git-dir=${sharedPosix}/.git status`,
+        worktree,
+        worktree,
+      )
+      expect(msg).not.toBeNull()
+      expect(msg!).toContain(
+        'redirects git to the shared checkout via --git-dir',
+      )
+    } finally {
+      cleanup()
+    }
+  })
+
+  test('blocks --work-tree shared checkout (AST JRu pins)', async () => {
+    const { sharedPosix, worktree, cleanup } = makeWorktreeFixture()
+    try {
+      const msg = await checkZRuGitRedirectCommand(
+        `git --work-tree ${sharedPosix} status`,
+        worktree,
+        worktree,
+      )
+      expect(msg).not.toBeNull()
+      expect(msg!).toContain(
+        'redirects git to the shared checkout via --work-tree',
+      )
+    } finally {
+      cleanup()
+    }
+  })
+
+  test('blocks GIT_WORK_TREE env-prefix to shared (AST XRu, not bare)', async () => {
+    const { sharedPosix, worktree, cleanup } = makeWorktreeFixture()
+    try {
+      const msg = await checkZRuGitRedirectCommand(
+        `GIT_WORK_TREE=${sharedPosix} git status`,
+        worktree,
+        worktree,
+      )
+      expect(msg).not.toBeNull()
+      expect(msg!).toMatch(/sets GIT_WORK_TREE to the shared checkout/i)
+    } finally {
+      cleanup()
+    }
+  })
+
+  test('blocks unverifiable runtime -C tilde (densable KRu)', async () => {
+    const { worktree, cleanup } = makeWorktreeFixture()
+    try {
+      const msg = await checkZRuGitRedirectCommand(
+        'git -C ~/repo status',
+        worktree,
+        worktree,
+      )
+      expect(msg).not.toBeNull()
+      expect(msg!).toContain("can't be verified before it runs")
     } finally {
       cleanup()
     }

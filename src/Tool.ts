@@ -190,6 +190,13 @@ export type ToolUseContext = {
     appendSubagentSystemPrompt?: string
     /** Override querySource for analytics tracking */
     querySource?: QuerySource
+    /**
+     * densable 2.1.219 #6 — `--forward-subagent-text`: forward subagent
+     * text/thinking (not only tool_use/tool_result) as agent_progress so
+     * stream-json consumers see nested depth-2+ assistant/user with
+     * parent_tool_use_id. Propagated into nested Task-tool agents.
+     */
+    forwardSubagentText?: boolean
     /** Optional callback to get the latest tools (e.g., after MCP servers connect mid-query) */
     refreshTools?: () => Tools
     /**
@@ -411,6 +418,12 @@ export type Progress = ToolProgressData | HookProgress
 export type ToolProgress<P extends ToolProgressData> = {
   toolUseID: string
   data: P
+  /**
+   * densable 2.1.219 #6 — when reforwarding nested agent_progress, preserve
+   * the nested parent's tool_use id so stream-json parent_tool_use_id chains
+   * correctly at depth 2+.
+   */
+  parentToolUseID?: string
 }
 
 export function filterToolProgressMessages(

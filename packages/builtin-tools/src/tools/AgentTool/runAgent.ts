@@ -63,8 +63,15 @@ import {
 import { registerFrontmatterHooks } from 'src/utils/hooks/registerFrontmatterHooks.js'
 import { clearSessionHooks } from 'src/utils/hooks/sessionHooks.js'
 import { executeSubagentStartHooks } from 'src/utils/hooks.js'
-import { createUserMessage } from 'src/utils/messages.js'
+import {
+  createProgressMessage,
+  createUserMessage,
+  normalizeMessages,
+} from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
+import { getStreamJsonStdoutWriter } from 'src/utils/streamJsonStdoutWriter.js'
+import { normalizeMessage } from 'src/utils/queryHelpers.js'
+import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js'
 import {
@@ -789,6 +796,9 @@ export async function* runAgent({
     thinkingConfig: useExactTools
       ? toolUseContext.options.thinkingConfig
       : { type: 'disabled' as const },
+    // densable 2.1.219 #6: nest forwardSubagentText into child agents so
+    // depth-2+ AgentTool also reforward text when the flag is set.
+    forwardSubagentText: toolUseContext.options.forwardSubagentText,
     mcpClients: mergedMcpClients,
     mcpResources: toolUseContext.options.mcpResources,
     agentDefinitions: toolUseContext.options.agentDefinitions,
@@ -956,6 +966,64 @@ export async function* runAgent({
         if (message.type !== 'progress') {
           lastRecordedUuid = message.uuid
         }
+
+        // densable 2.1.219 #6 — async bg agents write stream-json frames via
+        // Yud() (process-global stdout writer). Sync agents use parent onProgress.
+        //   if (isAsync && toolUseId) {
+        //     writer = Yud()
+        //     if writer && (assistant|user): createProgress → sKe → write
+        //     else if writer && agent_progress && forwardSubagentText: sKe → write
+        //   }
+        if (isAsync && toolUseId) {
+          const writer = getStreamJsonStdoutWriter()
+          if (writer) {
+            const forwardSubagentText =
+              toolUseContext.options.forwardSubagentText === true
+            if (message.type === 'assistant' || message.type === 'user') {
+              for (const normalized of normalizeMessages([message])) {
+                const progressMsg = createProgressMessage({
+                  toolUseID: `agent_${agentId}`,
+                  parentToolUseID: toolUseId,
+                  data: {
+                    message: normalized,
+                    type: 'agent_progress' as const,
+                    prompt: '',
+                    agentId,
+                    agentType: agentDefinition.agentType,
+                    resolvedModel: resolvedAgentModel,
+                    ...(description ? { description } : {}),
+                  },
+                })
+                for (const sdkMsg of normalizeMessage(progressMsg)) {
+                  void writer
+                    .write(sdkMsg as StdoutMessage)
+                    .catch(err =>
+                      logForDebugging(
+                        `bg-subagent progress write failed: ${err}`,
+                        { level: 'warn' },
+                      ),
+                    )
+                }
+              }
+            } else if (
+              message.type === 'progress' &&
+              (message.data as { type?: string })?.type === 'agent_progress' &&
+              forwardSubagentText
+            ) {
+              for (const sdkMsg of normalizeMessage(message)) {
+                void writer
+                  .write(sdkMsg as StdoutMessage)
+                  .catch(err =>
+                    logForDebugging(
+                      `bg-subagent nested progress write failed: ${err}`,
+                      { level: 'warn' },
+                    ),
+                  )
+              }
+            }
+          }
+        }
+
         yield message
       }
     }

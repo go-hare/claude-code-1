@@ -429,6 +429,8 @@ export const HOOK_EVENTS = [
   'InstructionsLoaded',
   'CwdChanged',
   'FileChanged',
+  // densable 2.1.219 #3 — after FileChanged
+  'DirectoryAdded',
   'MessageDisplay',
 ] as const
 
@@ -795,6 +797,23 @@ export const FileChangedHookInputSchema = lazySchema(() =>
   ),
 )
 
+/** densable 2.1.219 s2t / DirectoryAdded — /add-dir or SDK register_repo_root */
+export const DirectoryAddedHookInputSchema = lazySchema(() =>
+  BaseHookInputSchema().and(
+    z.object({
+      hook_event_name: z.literal('DirectoryAdded'),
+      directory: z
+        .string()
+        .describe('Absolute path of the directory that was added.'),
+      source: z
+        .enum(['slash_command', 'register_repo_root'])
+        .describe(
+          'How the directory was added: "slash_command" for /add-dir, "register_repo_root" for the SDK control_request.',
+        ),
+    }),
+  ),
+)
+
 export const EXIT_REASONS = [
   'clear',
   'resume',
@@ -844,6 +863,7 @@ export const HookInputSchema = lazySchema(() =>
     WorktreeRemoveHookInputSchema(),
     CwdChangedHookInputSchema(),
     FileChangedHookInputSchema(),
+    DirectoryAddedHookInputSchema(),
   ]),
 )
 
@@ -1566,6 +1586,29 @@ export const SDKSystemMessageSchema = lazySchema(() =>
           ),
       }),
     ),
+    // densable 2.1.219 #4 — plugin / MCP config validation errors on init
+    plugin_errors: z
+      .array(z.record(z.string(), z.unknown()))
+      .optional()
+      .describe(
+        'Plugin load/validation errors surfaced on headless stream-json init.',
+      ),
+    plugin_warnings: z
+      .array(z.record(z.string(), z.unknown()))
+      .optional()
+      .describe('Plugin load warnings surfaced on headless stream-json init.'),
+    mcp_server_errors: z
+      .array(
+        z.object({
+          name: z.string(),
+          type: z.string(),
+          message: z.string(),
+        }),
+      )
+      .optional()
+      .describe(
+        '@internal MCP server config entries from --mcp-config that failed validation and were skipped (e.g. a `url` entry with no `type`). Affected servers are absent from `mcp_servers[]`. `type` is a stable category, currently one of: unknown_type, url_missing_type, invalid_config, or reserved_name. Open set — treat values you do not recognize as a generic skip. The key is omitted when there are no errors; CI can fail on `(mcp_server_errors?.length ?? 0) > 0`.',
+      ),
     fast_mode_state: FastModeStateSchema().optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),

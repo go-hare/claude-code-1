@@ -114,6 +114,21 @@ export async function getBridgeDisabledReason(): Promise<string | null> {
     if (isSelfHostedBridge()) {
       return null
     }
+    // densable 2.1.219 YBo: if (!L8e()) return x4_() — name the specific
+    // provider env / ANTHROPIC_BASE_URL before subscription messaging.
+    try {
+      const {
+        isRemoteControlBlockedByEndpoint,
+        getRemoteControlEndpointDisabledReason,
+      } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./remoteControlEndpointReason.js') as typeof import('./remoteControlEndpointReason.js')
+      if (isRemoteControlBlockedByEndpoint()) {
+        return getRemoteControlEndpointDisabledReason()
+      }
+    } catch {
+      // keep prior diagnostic chain if module fails to load
+    }
     if (!isClaudeAISubscriber()) {
       return 'Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.'
     }

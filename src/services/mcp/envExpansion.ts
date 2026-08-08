@@ -1,38 +1,90 @@
 /**
- * Shared utilities for expanding environment variables in MCP server configurations
+ * Shared utilities for expanding environment variables in MCP server configurations.
+ * densable 2.1.219 S7 — optional primary env + fallbackEnv for managed policy predicates.
  */
+
+export type EnvLookup = NodeJS.Dict<string> | Record<string, string | undefined>
 
 /**
- * Expand environment variables in a string value
- * Handles ${VAR} and ${VAR:-default} syntax
- * @returns Object with expanded string and list of missing variables
+ * densable ZGu — env values that inject wildcard semantics into policy predicates.
  */
-export function expandEnvVarsInString(value: string): {
+export function envValueContainsWildcard(value: string): boolean {
+  try {
+    if (value.normalize('NFKC').includes('*') || /%2a/i.test(value)) {
+      return true
+    }
+    if (value.includes('%')) {
+      try {
+        return decodeURIComponent(value).normalize('NFKC').includes('*')
+      } catch {
+        return false
+      }
+    }
+  } catch {
+    return false
+  }
+  return false
+}
+
+/**
+ * Expand environment variables in a string value.
+ * Handles ${VAR} and ${VAR:-default} syntax (densable S7).
+ *
+ * @param value String that may contain ${VAR} placeholders
+ * @param env Primary lookup (default: process.env). Policy predicates use
+ *   startup freeze + managed-settings env (Y6u), not live settings-file env.
+ * @param fallbackEnv Optional secondary lookup (deny path Hyy fallbackEnv:
+ *   globalConfig / user / flag / policy settings.env)
+ * @returns expanded string, missing var names, and vars whose values inject *
+ */
+export function expandEnvVarsInString(
+  value: string,
+  env: EnvLookup = process.env,
+  fallbackEnv?: EnvLookup,
+): {
   expanded: string
   missingVars: string[]
+  wildcardVars: string[]
 } {
   const missingVars: string[] = []
+  const wildcardVars: string[] = []
 
-  const expanded = value.replace(/\$\{([^}]+)\}/g, (match, varContent) => {
-    // Split on :- to support default values (limit to 2 parts to preserve :- in defaults)
-    const [varName, defaultValue] = varContent.split(':-', 2)
-    const envValue = process.env[varName]
+  // densable S7 regex: only valid shell-ish identifiers (+ optional :-default)
+  const expanded = value.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?)\}/g,
+    (match, varContent: string) => {
+      const sep = varContent.indexOf(':-')
+      const varName = sep === -1 ? varContent : varContent.slice(0, sep)
+      const defaultValue = sep === -1 ? undefined : varContent.slice(sep + 2)
 
-    if (envValue !== undefined) {
-      return envValue
-    }
-    if (defaultValue !== undefined) {
-      return defaultValue
-    }
+      const primary = env[varName]
+      if (typeof primary === 'string') {
+        if (envValueContainsWildcard(primary)) {
+          wildcardVars.push(varName)
+        }
+        return primary
+      }
 
-    // Track missing variable for error reporting
-    missingVars.push(varName)
-    // Return original if not found (allows debugging but will be reported as error)
-    return match
-  })
+      if (defaultValue !== undefined) {
+        return defaultValue
+      }
+
+      const fallback = fallbackEnv?.[varName]
+      if (typeof fallback === 'string') {
+        if (envValueContainsWildcard(fallback)) {
+          wildcardVars.push(varName)
+        }
+        return fallback
+      }
+
+      missingVars.push(varName)
+      return match
+    },
+  )
 
   return {
     expanded,
     missingVars,
+    wildcardVars,
   }
 }

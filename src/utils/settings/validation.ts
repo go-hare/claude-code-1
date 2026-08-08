@@ -68,6 +68,12 @@ export type ValidationError = {
     serverName?: string
     /** Severity of the error */
     severity?: 'fatal' | 'warning'
+    /**
+     * densable 2.1.219 #4 — per-entry soft-skip category from --mcp-config.
+     * Stable set: unknown_type | url_missing_type | invalid_config | reserved_name.
+     * Open set — treat unrecognized values as a generic skip.
+     */
+    skipReason?: string
   }
 }
 

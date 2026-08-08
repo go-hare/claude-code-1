@@ -37,6 +37,7 @@ import {
   renderDefaultModelSetting,
   type ModelSetting,
 } from './model.js'
+import { applyFableCreditsLabel } from './fableCreditsLabel.js'
 import { has1mContext } from '../context.js'
 import { getGlobalConfig } from '../config.js'
 import {
@@ -202,13 +203,36 @@ function getCustomOpusOption(): ModelOption | undefined {
   }
 }
 
-function getOpus47Option(fastMode = false): ModelOption {
+/** densable 2.1.219 jUc — default Opus row (Opus 5). */
+function getOpus5Option(fastMode = false): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
+  const model = getModelStrings().opus5
   return {
-    value: is3P ? getModelStrings().opus47 : 'opus',
+    value: is3P ? model : 'opus',
+    label: 'Opus',
+    description: `Opus 5 · Best for everyday, complex tasks${getOpusPricingSuffix(fastMode, model)}`,
+    descriptionForModel: 'Opus 5 - best for everyday, complex tasks',
+  }
+}
+
+function getOpus47Option(fastMode = false): ModelOption {
+  const model = getModelStrings().opus47
+  return {
+    value: model,
     label: 'Opus 4.7',
-    description: `Opus 4.7 · Most capable for complex work${getOpusPricingSuffix(fastMode)}`,
-    descriptionForModel: 'Opus 4.7 - most capable for complex work',
+    description: `Opus 4.7 · Legacy${getOpusPricingSuffix(fastMode, model)}`,
+    descriptionForModel: 'Opus 4.7 - legacy Opus version',
+  }
+}
+
+/** densable previous Opus version row. */
+function getOpus48Option(fastMode = false): ModelOption {
+  const model = getModelStrings().opus48
+  return {
+    value: model,
+    label: 'Opus 4.8',
+    description: `Opus 4.8 · Previous Opus version${getOpusPricingSuffix(fastMode, model)}`,
+    descriptionForModel: 'Opus 4.8 - previous Opus version',
   }
 }
 
@@ -218,10 +242,11 @@ export function getOpus46Option(fastMode = false): ModelOption {
   // selecting "Opus 4.6" must get 4.6 actually dispatched, not alias-routed
   // to 4.7. The same string is correct for 3P (getModelStrings maps per
   // provider).
+  const model = getModelStrings().opus46
   return {
-    value: getModelStrings().opus46,
+    value: model,
     label: 'Opus 4.6',
-    description: `Opus 4.6 · Previous generation Opus${getOpusPricingSuffix(fastMode)}`,
+    description: `Opus 4.6 · Previous generation Opus${getOpusPricingSuffix(fastMode, model)}`,
     descriptionForModel: 'Opus 4.6 - previous generation Opus model',
   }
 }
@@ -252,20 +277,23 @@ export function getSonnet46_1MOption(): ModelOption {
 
 export function getOpus47_1MOption(fastMode = false): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
+  const model = getModelStrings().opus5
   return {
-    value: is3P ? getModelStrings().opus47 + '[1m]' : 'opus[1m]',
-    label: 'Opus 4.7 (1M context)',
-    description: `Opus 4.7 with 1M context${getOpusPricingSuffix(fastMode)}`,
+    value: is3P ? model + '[1m]' : 'opus[1m]',
+    // densable 2.1.219 #10
+    label: 'Opus (1M context)',
+    description: `Opus 5 for long sessions${getOpusPricingSuffix(fastMode, model)}`,
     descriptionForModel:
-      'Opus 4.7 with 1M context window - for long sessions with large codebases',
+      'Opus 5 with 1M context window - for long sessions with large codebases',
   }
 }
 
 export function getOpus46_1MOption(fastMode = false): ModelOption {
+  const model = getModelStrings().opus46
   return {
-    value: getModelStrings().opus46 + '[1m]',
+    value: model + '[1m]',
     label: 'Opus 4.6 (1M context)',
-    description: `Opus 4.6 with 1M context${getOpusPricingSuffix(fastMode)}`,
+    description: `Opus 4.6 with 1M context${getOpusPricingSuffix(fastMode, model)}`,
     descriptionForModel:
       'Opus 4.6 with 1M context window - for long sessions with large codebases',
   }
@@ -336,10 +364,12 @@ function getHaikuOption(): ModelOption {
 }
 
 function getMaxOpusOption(fastMode = false): ModelOption {
+  // densable 2.1.219: alias "opus" → Opus 5
+  const model = getModelStrings().opus5
   return {
     value: 'opus',
-    label: 'Opus 4.7',
-    description: `Opus 4.7 · Most capable for complex work${fastMode ? getOpusPricingSuffix(true) : ''}`,
+    label: 'Opus',
+    description: `Opus 5 · Best for everyday, complex tasks${fastMode ? getOpusPricingSuffix(true, model) : ''}`,
   }
 }
 
@@ -360,21 +390,25 @@ export function getMaxSonnet46_1MOption(): ModelOption {
 
 export function getMaxOpus47_1MOption(fastMode = false): ModelOption {
   const billingInfo = isClaudeAISubscriber() ? ' · Billed as extra usage' : ''
+  const model = getModelStrings().opus5
   return {
     value: 'opus[1m]',
-    label: 'Opus 4.7 (1M context)',
-    description: `Opus 4.7 with 1M context${billingInfo}${getOpusPricingSuffix(fastMode)}`,
+    // densable 2.1.219 #10 — merged Opus row label
+    label: 'Opus (1M context)',
+    description: `Opus 5 with 1M context${billingInfo}${getOpusPricingSuffix(fastMode, model)}`,
   }
 }
 
 function getMergedOpus1MOption(fastMode = false): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
+  const model = getModelStrings().opus5
   return {
-    value: is3P ? getModelStrings().opus47 + '[1m]' : 'opus[1m]',
-    label: 'Opus 4.7 (1M context)',
-    description: `Opus 4.7 with 1M context · Most capable for complex work${!is3P && fastMode ? getOpusPricingSuffix(fastMode) : ''}`,
+    // densable 2.1.219: merged default Opus 1M = opus5[1m] / opus[1m]
+    value: is3P ? model + '[1m]' : 'opus[1m]',
+    label: 'Opus (1M context)',
+    description: `Opus 5 for long sessions${!is3P && fastMode ? getOpusPricingSuffix(fastMode, model) : ''}`,
     descriptionForModel:
-      'Opus 4.7 with 1M context - most capable for complex work',
+      'Opus 5 with 1M context window - for long sessions with large codebases',
   }
 }
 
@@ -391,10 +425,11 @@ const MaxHaiku45Option: ModelOption = {
 }
 
 function getOpusPlanOption(): ModelOption {
+  // densable Tug(): label/desc version-agnostic (not pinned to 4.7/5)
   return {
     value: 'opusplan',
     label: 'Opus Plan Mode',
-    description: 'Use Opus 4.7 in plan mode, Sonnet 5 otherwise',
+    description: 'Use Opus in plan mode, Sonnet otherwise',
   }
 }
 
@@ -477,17 +512,18 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return standardOptions
   }
 
-  // PAYG 1P API: Default (Sonnet 5) + Opus 4.7 1M + Opus 4.6 1M + Sonnet 5 1M + Haiku
+  // PAYG 1P API densable 2.1.219: Default + Opus 5 / Opus (1M) + Opus 4.8 + Opus 4.6 1M + Sonnet 5 1M + Haiku
   if (getAPIProvider() === 'firstParty') {
     const payg1POptions = [getDefaultOptionForUser(fastMode)]
     if (isOpus1mMergeEnabled()) {
       payg1POptions.push(getMergedOpus1MOption(fastMode))
     } else {
-      payg1POptions.push(getOpus47Option(fastMode))
+      payg1POptions.push(getOpus5Option(fastMode))
       if (checkOpus1mAccess()) {
         payg1POptions.push(getOpus47_1MOption(fastMode))
       }
     }
+    payg1POptions.push(getOpus48Option(fastMode))
     payg1POptions.push(getOpus46_1MOption(fastMode))
     if (checkSonnet1mAccess()) {
       payg1POptions.push(getSonnet5_1MOption())
@@ -639,10 +675,12 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     }
   }
 
-  // Append additional model options fetched during bootstrap
+  // densable 2.1.219 #9: U1e additional options pass through hug() strip/reapply
+  // of " · Requires usage credits" so stale bootstrap cache cannot bake the label.
   for (const opt of getGlobalConfig().additionalModelOptionsCache ?? []) {
-    if (!options.some(existing => existing.value === opt.value)) {
-      options.push(opt)
+    const refreshed = applyFableCreditsLabel(opt)
+    if (!options.some(existing => existing.value === refreshed.value)) {
+      options.push(refreshed)
     }
   }
 

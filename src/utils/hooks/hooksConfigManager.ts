@@ -262,6 +262,12 @@ export const getHookEventMetadata = memoize(
         description:
           'Input to command is JSON with file_path and event (change, add, unlink).\nCLAUDE_ENV_FILE is set — write bash exports there to apply env to subsequent BashTool commands.\nThe matcher field specifies filenames to watch in the current directory (e.g. ".envrc|.env").\nHook output can include hookSpecificOutput.watchPaths (array of absolute paths) to dynamically update the watch list.\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
       },
+      // densable 2.1.219 #3
+      DirectoryAdded: {
+        summary: 'After a working directory is added mid-session',
+        description:
+          'Input to command is JSON with directory (absolute path) and source ("slash_command" for /add-dir, "register_repo_root" for the SDK control_request).\nThe matcher field matches against source.\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
+      },
       MessageDisplay: {
         summary: 'When an assistant message is about to be displayed',
         description:
@@ -305,6 +311,7 @@ export function groupHooksByEventAndMatcher(
     InstructionsLoaded: {},
     CwdChanged: {},
     FileChanged: {},
+    DirectoryAdded: {},
     MessageDisplay: {},
   }
 

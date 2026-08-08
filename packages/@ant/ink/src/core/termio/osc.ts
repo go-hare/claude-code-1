@@ -161,6 +161,29 @@ export async function tmuxLoadBuffer(text: string): Promise<boolean> {
  * Returns the sequence for the caller to write to stdout (raw OSC 52
  * outside tmux, DCS-wrapped inside).
  */
+/**
+ * densable `jCu=76` — GNU screen DCS passthrough chunk size for OSC 52 base64.
+ * A single long OSC 52 inside one DCS is mis-parsed by screen and prints the
+ * base64 payload into the terminal (2.1.219 #11). Chunk at 76 chars and
+ * re-open DCS between segments.
+ */
+export const SCREEN_OSC52_B64_CHUNK = 76
+
+/**
+ * densable `$T` screen branch:
+ *   `\x1bP` + `\x1b]52;c;` + chunks joined by `\x1b\\\x1bP` + BEL + `\x1b\\`
+ * Each chunk is raw base64 (no ESC inside), so screen forwards cleanly.
+ */
+export function formatScreenOsc52Clipboard(b64: string): string {
+  const chunks: string[] = []
+  for (let i = 0; i < b64.length; i += SCREEN_OSC52_B64_CHUNK) {
+    chunks.push(b64.slice(i, i + SCREEN_OSC52_B64_CHUNK))
+  }
+  // densable: `${JY}P${JY}]52;c;${i.join(`${Nas}${JY}P`)}${Oj}${Nas}`
+  // JY=ESC, Nas=ST (\x1b\\), Oj=BEL
+  return `${ESC}P${ESC}]52;c;${chunks.join(`${ST}${ESC}P`)}${BEL}${ST}`
+}
+
 export async function setClipboard(text: string): Promise<string> {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
   const raw = osc(OSC.CLIPBOARD, 'c', b64)
@@ -179,7 +202,19 @@ export async function setClipboard(text: string): Promise<string> {
 
   // Inner OSC uses BEL directly (not osc()) — ST's ESC would need doubling
   // too, and BEL works everywhere for OSC 52.
-  if (tmuxBufferLoaded) return tmuxPassthrough(`${ESC}]52;c;${b64}${BEL}`)
+  if (tmuxBufferLoaded) {
+    // densable tmux: raw OSC + DCS-passthrough of the same OSC
+    const inner = `${ESC}]52;c;${b64}${BEL}`
+    return inner + tmuxPassthrough(inner)
+  }
+
+  // densable 2.1.219 #11: GNU screen ($STY) — chunked DCS, not wrapForMultiplexer.
+  // wrapForMultiplexer doubles ESC inside a single DCS; screen still dumps
+  // long base64. densable `$T` uses jCu=76 chunked re-open instead.
+  if (process.env['STY'] && !process.env['TMUX']) {
+    return formatScreenOsc52Clipboard(b64)
+  }
+
   return raw
 }
 

@@ -24,6 +24,11 @@ export default function VimTextInput(props: Props): React.ReactNode {
     onSubmit: props.onSubmit,
     onExit: props.onExit,
     onExitMessage: props.onExitMessage,
+    // densable 2.1.219 #14: NORMAL idle empty ← must reach onLeftArrowOnEmpty
+    // (agent view). VimTextInput previously omitted these props so ← only
+    // mapped to vim `h` / cursor.left and never opened agents.
+    onLeftArrowOnEmpty: props.onLeftArrowOnEmpty,
+    onLeftArrowOnEmptyMessage: props.onLeftArrowOnEmptyMessage,
     onHistoryReset: props.onHistoryReset,
     onHistoryUp: props.onHistoryUp,
     onHistoryDown: props.onHistoryDown,

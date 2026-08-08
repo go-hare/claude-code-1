@@ -1767,6 +1767,12 @@ export const AgentTool = buildTool({
                   }
                 }
 
+                // densable 2.1.219 #6: Tr = options.forwardSubagentText
+                // When set, reforward nested agent_progress (depth-2+) preserving
+                // parentToolUseID, and forward full assistant/user content (not
+                // only tool_use/tool_result) so stream-json gets nested text.
+                const forwardSubagentText = toolUseContext.options.forwardSubagentText === true;
+
                 // Forward bash_progress events from sub-agent to parent so the SDK
                 // receives tool_progress events just as it does for the main agent.
                 if (
@@ -1779,6 +1785,19 @@ export const AgentTool = buildTool({
                     toolUseID: message.toolUseID as string,
                     data: message.data,
                   });
+                }
+
+                // densable: if(ut.type==="progress"&&ut.data.type==="agent_progress"){
+                //   if(Tr)d({...,parentToolUseID:ut.parentToolUseID,data:ut.data}); return}
+                if (message.type === 'progress' && (message.data as { type?: string })?.type === 'agent_progress') {
+                  if (forwardSubagentText && onProgress) {
+                    onProgress({
+                      toolUseID: message.toolUseID as string,
+                      parentToolUseID: message.parentToolUseID as string | undefined,
+                      data: message.data as Progress,
+                    });
+                  }
+                  continue;
                 }
 
                 if (message.type !== 'assistant' && message.type !== 'user') {
@@ -1797,25 +1816,64 @@ export const AgentTool = buildTool({
 
                 const normalizedNew = normalizeMessages([message]);
                 for (const m of normalizedNew) {
-                  for (const content of (m.message?.content ?? []) as readonly { readonly type: string }[]) {
-                    if (content.type !== 'tool_use' && content.type !== 'tool_result') {
-                      continue;
+                  // densable: for each normalized message, first content block gate:
+                  // if (!Tr && it.type !== "tool_use" && it.type !== "tool_result") continue
+                  const firstContent = (m.message?.content as readonly { readonly type: string }[] | undefined)?.[0];
+                  if (
+                    !forwardSubagentText &&
+                    firstContent &&
+                    firstContent.type !== 'tool_use' &&
+                    firstContent.type !== 'tool_result'
+                  ) {
+                    continue;
+                  }
+                  if (!firstContent) {
+                    continue;
+                  }
+                  if (!forwardSubagentText) {
+                    // Default path: only forward tool_use / tool_result blocks
+                    // (one progress per matching content, matching prior behavior)
+                    for (const content of (m.message?.content ?? []) as readonly {
+                      readonly type: string;
+                    }[]) {
+                      if (content.type !== 'tool_use' && content.type !== 'tool_result') {
+                        continue;
+                      }
+                      if (onProgress) {
+                        onProgress({
+                          toolUseID: `agent_${assistantMessage.message.id}`,
+                          data: {
+                            message: m,
+                            type: 'agent_progress',
+                            prompt: '',
+                            agentId: syncAgentId,
+                            agentType: selectedAgent.agentType,
+                            description,
+                            resolvedModel: resolvedAgentModel,
+                          },
+                        });
+                      }
                     }
+                    continue;
+                  }
 
-                    // Forward progress updates
-                    if (onProgress) {
-                      onProgress({
-                        toolUseID: `agent_${assistantMessage.message.id}`,
-                        data: {
-                          message: m,
-                          type: 'agent_progress',
-                          // prompt only needed on first progress message (UI.tsx:624
-                          // reads progressMessages[0]). Omit here to avoid duplication.
-                          prompt: '',
-                          agentId: syncAgentId,
-                        },
-                      });
-                    }
+                  // forwardSubagentText: densable forwards the whole normalized
+                  // message once (text/thinking included) with agent metadata.
+                  if (onProgress) {
+                    onProgress({
+                      toolUseID: `agent_${assistantMessage.message.id}`,
+                      data: {
+                        message: m,
+                        type: 'agent_progress',
+                        // prompt only needed on first progress message (UI.tsx:624
+                        // reads progressMessages[0]). Omit here to avoid duplication.
+                        prompt: '',
+                        agentId: syncAgentId,
+                        agentType: selectedAgent.agentType,
+                        description,
+                        resolvedModel: resolvedAgentModel,
+                      },
+                    });
                   }
                 }
               }

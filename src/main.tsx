@@ -279,12 +279,12 @@ import {
   getClaudeCodeMcpConfigs,
   parseMcpConfig,
   parseMcpConfigFromFilePath,
+  storeMcpConfigServerErrors,
 } from 'src/services/mcp/config.js';
 import { filterMcpServersForHermeticMode, formatMcpHermeticDropWarn } from './utils/mcpHermeticFilter.js';
 import { isXaaEnabled } from 'src/services/mcp/xaaIdpLogin.js';
 import { getRelevantTips } from 'src/services/tips/tipRegistry.js';
 import { logContextMetrics } from 'src/utils/api.js';
-import { CLAUDE_IN_CHROME_MCP_SERVER_NAME, isClaudeInChromeMCPServer } from 'src/utils/claudeInChrome/common.js';
 import { registerCleanup } from 'src/utils/cleanupRegistry.js';
 import { eagerParseCliFlag } from 'src/utils/cliArgs.js';
 import { createEmptyAttributionState } from 'src/utils/commitAttribution.js';
@@ -1331,6 +1331,11 @@ async function run(): Promise<CommanderCommand> {
       'Include partial message chunks as they arrive (only works with --print and --output-format=stream-json)',
       () => true,
     )
+    .option(
+      '--forward-subagent-text',
+      'Forward subagent text and thinking blocks as assistant/user messages with parent_tool_use_id set (only works with --print and --output-format=stream-json)',
+      () => true,
+    )
     .addOption(
       new Option(
         '--input-format <format>',
@@ -1681,6 +1686,7 @@ async function run(): Promise<CommanderCommand> {
         sessionId,
         includeHookEvents,
         includePartialMessages,
+        forwardSubagentText,
       } = options;
 
       if (options.prefill) {
@@ -2130,10 +2136,13 @@ async function run(): Promise<CommanderCommand> {
 
       if (mcpConfig && mcpConfig.length > 0) {
         // Process mcpConfig array
+        // densable 2.1.219 #4 — per-entry soft-skip (skipReason) keeps valid
+        // siblings; only top-level fatal parse errors hard-exit.
         const processedConfigs = mcpConfig.map(config => config.trim()).filter(config => config.length > 0);
 
         let allConfigs: Record<string, McpServerConfig> = {};
-        const allErrors: ValidationError[] = [];
+        const fatalErrors: ValidationError[] = [];
+        const skipEntries: Array<{ name: string; type: string; message: string }> = [];
 
         for (const configItem of processedConfigs) {
           let configs: Record<string, McpServerConfig> | null = null;
@@ -2150,9 +2159,8 @@ async function run(): Promise<CommanderCommand> {
             });
             if (result.config) {
               configs = result.config.mcpServers;
-            } else {
-              errors = result.errors;
             }
+            errors = result.errors;
           } else {
             // Try as file path
             const configPath = resolve(configItem);
@@ -2163,52 +2171,74 @@ async function run(): Promise<CommanderCommand> {
             });
             if (result.config) {
               configs = result.config.mcpServers;
-            } else {
-              errors = result.errors;
             }
+            errors = result.errors;
           }
 
-          if (errors.length > 0) {
-            allErrors.push(...errors);
-          } else if (configs) {
-            // Merge configs, later ones override earlier ones
+          // densable: when config parsed, soft-warnings stay with valid servers;
+          // when config is null, all errors are fatal for this source.
+          if (configs) {
             allConfigs = { ...allConfigs, ...configs };
+            if (errors.length > 0) {
+              logForDebugging(
+                `--mcp-config: ${errors.length} entry warning(s): ${errors
+                  .map(e => `${e.path ? e.path + ': ' : ''}${e.message}`)
+                  .join('; ')}`,
+                { level: 'warn' },
+              );
+              for (const err of errors) {
+                const meta = err.mcpErrorMetadata;
+                if (meta?.skipReason && meta.serverName != null) {
+                  skipEntries.push({
+                    name: meta.serverName,
+                    type: meta.skipReason,
+                    message: err.message,
+                  });
+                }
+              }
+            }
+          } else {
+            fatalErrors.push(...errors);
           }
         }
 
-        if (allErrors.length > 0) {
-          const formattedErrors = allErrors.map(err => `${err.path ? err.path + ': ' : ''}${err.message}`).join('\n');
-          logForDebugging(`--mcp-config validation failed (${allErrors.length} errors): ${formattedErrors}`, {
+        if (fatalErrors.length > 0) {
+          const formattedErrors = fatalErrors.map(err => `${err.path ? err.path + ': ' : ''}${err.message}`).join('\n');
+          logForDebugging(`--mcp-config validation failed (${fatalErrors.length} errors): ${formattedErrors}`, {
             level: 'error',
           });
           process.stderr.write(`Error: Invalid MCP configuration:\n${formattedErrors}\n`);
           process.exit(1);
         }
 
-        if (Object.keys(allConfigs).length > 0) {
-          // SDK hosts (Nest/Desktop) own their server naming and may reuse
-          // built-in names — skip reserved-name checks for type:'sdk'.
-          const nonSdkConfigNames = Object.entries(allConfigs)
-            .filter(([, config]) => config.type !== 'sdk')
-            .map(([name]) => name);
-
-          let reservedNameError: string | null = null;
-          if (nonSdkConfigNames.some(isClaudeInChromeMCPServer)) {
-            reservedNameError = `Invalid MCP configuration: "${CLAUDE_IN_CHROME_MCP_SERVER_NAME}" is a reserved MCP name.`;
-          } else if (feature('CHICAGO_MCP')) {
-            const { isComputerUseMCPServer, COMPUTER_USE_MCP_SERVER_NAME } = await import(
-              'src/utils/computerUse/common.js'
+        // densable: only surface skips for names that did not load into allConfigs
+        const uniqueSkips = new Map<string, { name: string; type: string; message: string }>();
+        for (const skip of skipEntries) {
+          if (!Object.hasOwn(allConfigs, skip.name)) {
+            uniqueSkips.set(skip.name, skip);
+          }
+        }
+        if (uniqueSkips.size > 0) {
+          const skips = Array.from(uniqueSkips.values());
+          storeMcpConfigServerErrors(skips);
+          if (process.stderr.isTTY) {
+            // densable TTY warn: strip C0/C1 controls so multi-line MCP errors don't break the banner.
+            // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional C0/C1 sanitize
+            const sanitize = (msg: string): string => msg.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ').trim();
+            const { plural } = await import('./utils/stringUtils.js');
+            process.stderr.write(
+              chalk.yellow(
+                `Warning: ${skips.length} ${plural(skips.length, 'MCP server')} skipped due to invalid config:\n${skips
+                  .map(s => `  - ${sanitize(s.message)}`)
+                  .join('\n')}\n`,
+              ),
             );
-            if (nonSdkConfigNames.some(isComputerUseMCPServer)) {
-              reservedNameError = `Invalid MCP configuration: "${COMPUTER_USE_MCP_SERVER_NAME}" is a reserved MCP name.`;
-            }
           }
-          if (reservedNameError) {
-            // stderr+exit(1) — a throw here becomes a silent unhandled
-            // rejection in stream-json mode (void main() in cli.tsx).
-            process.stderr.write(`Error: ${reservedNameError}\n`);
-            process.exit(1);
-          }
+        }
+
+        if (Object.keys(allConfigs).length > 0) {
+          // densable 2.1.219: reserved names are soft-skipped inside parseMcpConfig
+          // (skipReason reserved_name). No hard-exit here.
 
           // Add dynamic scope to all configs. type:'sdk' entries pass through
           // unchanged — they're extracted into sdkMcpConfigs downstream and
@@ -2590,6 +2620,18 @@ async function run(): Promise<CommanderCommand> {
       if (effectiveIncludePartialMessages) {
         if (!isNonInteractiveSession || outputFormat !== 'stream-json') {
           writeToStderr(`Error: --include-partial-messages requires --print and --output-format=stream-json.`);
+          process.exit(1);
+        }
+      }
+
+      // densable 2.1.219 #6: --forward-subagent-text requires print + stream-json
+      // (same gate as include-partial-messages). If flag was not explicitly set
+      // but somehow true without stream-json, soft-disable; if user set it wrong,
+      // hard-error when non-interactive path is intentional.
+      let effectiveForwardSubagentText = Boolean(forwardSubagentText);
+      if (effectiveForwardSubagentText) {
+        if (!isNonInteractiveSession || outputFormat !== 'stream-json') {
+          writeToStderr(`Error: --forward-subagent-text requires --print and --output-format=stream-json.`);
           process.exit(1);
         }
       }
@@ -3678,6 +3720,7 @@ async function run(): Promise<CommanderCommand> {
             sdkUrl,
             replayUserMessages: effectiveReplayUserMessages,
             includePartialMessages: effectiveIncludePartialMessages,
+            forwardSubagentText: effectiveForwardSubagentText,
             forkSession: options.forkSession || false,
             replyOnResume: options.replyOnResume || false,
             resumeSessionAt: options.resumeSessionAt || undefined,

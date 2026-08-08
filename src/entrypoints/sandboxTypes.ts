@@ -15,6 +15,23 @@ export const SandboxNetworkConfigSchema = lazySchema(() =>
   z
     .object({
       allowedDomains: z.array(z.string()).optional(),
+      // densable 2.1.219: always-blocked domains (all sources; survives allowManagedDomainsOnly).
+      deniedDomains: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Domains that are always blocked, even if matched by allowedDomains. Supports the same wildcard syntax as allowedDomains. Merged from all settings sources regardless of allowManagedDomainsOnly.',
+        ),
+      // densable 2.1.219 #2 — user/managed/CLI only; project settings ignored.
+      strictAllowlist: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, the sandbox runtime deterministically denies hosts not in allowedDomains instead of prompting. ' +
+            'Enforced for sandboxed commands only — in-process tools such as WebFetch are not gated by this setting. ' +
+            'Only honored from user, managed/policy, or CLI (--settings) settings — ' +
+            'project settings (.claude/settings.json and .claude/settings.local.json) are ignored.',
+        ),
       allowManagedDomainsOnly: z
         .boolean()
         .optional()

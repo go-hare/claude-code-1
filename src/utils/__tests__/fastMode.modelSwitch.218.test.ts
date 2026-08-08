@@ -79,8 +79,11 @@ describe('densable 2.1.218 #31 Rft/uU', () => {
   })
 
   test('uU: supported model keeps prev on', () => {
-    expect(resolveFastModeAfterModelSwitch('claude-opus-4-7', true)).toBe(true)
+    // densable 2.1.219 pv: opus-4-7 | opus-4-8 | opus-5 (not 4.6)
+    expect(resolveFastModeAfterModelSwitch('claude-opus-5', true)).toBe(true)
     expect(resolveFastModeAfterModelSwitch('claude-opus-4-8', true)).toBe(true)
+    expect(resolveFastModeAfterModelSwitch('claude-opus-4-7', true)).toBe(true)
+    expect(resolveFastModeAfterModelSwitch('claude-opus-4-6', true)).toBe(false)
   })
 
   test('uU: remote keeps prev only when model supports', () => {
@@ -88,7 +91,7 @@ describe('densable 2.1.218 #31 Rft/uU', () => {
       resolveFastModeAfterModelSwitch('sonnet', true, { remoteSession: true }),
     ).toBe(false)
     expect(
-      resolveFastModeAfterModelSwitch('claude-opus-4-7', true, {
+      resolveFastModeAfterModelSwitch('claude-opus-5', true, {
         remoteSession: true,
       }),
     ).toBe(true)

@@ -32,6 +32,7 @@ import {
   isMcpServerDisabled,
   removeMcpConfig,
 } from '../../services/mcp/config.js';
+import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
 import type {
   ConfigScope,
   McpHTTPServerConfig,
@@ -58,39 +59,56 @@ import { createInterface } from 'readline';
 const PENDING_APPROVAL_STATUS = '⏸ Pending approval (run `claude` to approve)';
 const REJECTED_STATUS = '✗ Rejected (see disabledMcpjsonServers in settings)';
 
+/** densable 2.1.219 `ivp` result — status line + optional issue (HTTP/error). */
+type McpHealthResult = { status: string; issue?: string };
+
+/**
+ * densable `evp` — list row body: `status — issue` when issue present.
+ */
+function formatMcpListStatus(health: McpHealthResult): string {
+  return health.issue ? `${health.status} — ${health.issue}` : health.status;
+}
+
 async function checkMcpServerHealth(
   name: string,
   server: ScopedMcpServerConfig,
   options?: { skipConnect?: boolean; projectStatus?: 'pending' | 'rejected' },
-): Promise<string> {
+): Promise<McpHealthResult> {
   if (options?.projectStatus === 'pending' || options?.skipConnect) {
-    return PENDING_APPROVAL_STATUS;
+    return { status: PENDING_APPROVAL_STATUS };
   }
   if (options?.projectStatus === 'rejected') {
-    return REJECTED_STATUS;
+    return { status: REJECTED_STATUS };
   }
   // Defense in depth: project-scope servers that are not settings-approved
   // must not be connected from CLI list/get (RCE via self-approved .mcp.json).
   if (server.scope === 'project') {
     const projectStatus = getProjectMcpServerStatusStrict(name);
     if (projectStatus === 'pending') {
-      return PENDING_APPROVAL_STATUS;
+      return { status: PENDING_APPROVAL_STATUS };
     }
     if (projectStatus === 'rejected') {
-      return REJECTED_STATUS;
+      return { status: REJECTED_STATUS };
     }
   }
   try {
     const result = await connectToServer(name, server);
     if (result.type === 'connected') {
-      return '✓ Connected';
+      return { status: '✓ Connected' };
     } else if (result.type === 'needs-auth') {
-      return '! Needs authentication';
+      return { status: '! Needs authentication' };
+    } else if (result.type === 'failed') {
+      // densable `ivp` + `mSp`
+      const issue = formatFailedMcpIssue(result);
+      return {
+        status: '✗ Failed to connect',
+        ...(issue !== '' ? { issue } : {}),
+      };
     } else {
-      return '✗ Failed to connect';
+      return { status: '✗ Failed to connect' };
     }
   } catch (_error) {
-    return '✗ Connection error';
+    return { status: '✗ Connection error' };
   }
 }
 
@@ -244,13 +262,15 @@ export async function mcpListHandler(): Promise<void> {
         return {
           name,
           server,
-          status: await checkMcpServerHealth(name, server, { projectStatus }),
+          health: await checkMcpServerHealth(name, server, { projectStatus }),
         };
       },
       { concurrency: getMcpServerConnectionBatchSize() },
     );
 
-    for (const { name, server, status } of results) {
+    for (const { name, server, health } of results) {
+      // densable `evp`: status — issue
+      const status = formatMcpListStatus(health);
       // Intentionally excluding sse-ide servers here since they're internal
       if (server.type === 'sse') {
         console.log(`${name}: ${server.url} (SSE) - ${status}`);
@@ -297,8 +317,12 @@ export async function mcpGetHandler(name: string): Promise<void> {
   console.log(`  Scope: ${getScopeLabel(server.scope)}`);
 
   // Check server health (pending/rejected never spawn)
-  const status = await checkMcpServerHealth(name, server, { projectStatus });
-  console.log(`  Status: ${status}`);
+  // densable `oX_`: Status + optional Issue: line
+  const health = await checkMcpServerHealth(name, server, { projectStatus });
+  console.log(`  Status: ${health.status}`);
+  if (health.issue) {
+    console.log(`  Issue: ${health.issue}`);
+  }
 
   // Intentionally excluding sse-ide servers here since they're internal
   if (server.type === 'sse') {

@@ -50,6 +50,8 @@ export const HOOK_EVENTS = [
   'InstructionsLoaded',
   'CwdChanged',
   'FileChanged',
+  // densable 2.1.219 #3
+  'DirectoryAdded',
   'MessageDisplay',
 ] as const
 

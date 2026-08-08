@@ -7,6 +7,8 @@ import { MessageResponse } from '../../components/MessageResponse.js';
 import { AddWorkspaceDirectory } from '../../components/permissions/rules/AddWorkspaceDirectory.js';
 import { Box, Text } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
+import { logForDebugging } from '../../utils/debug.js';
+import { executeDirectoryAddedHooks } from '../../utils/hooks.js';
 import { applyPermissionUpdate, persistPermissionUpdate } from '../../utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdateDestination } from '../../utils/permissions/PermissionUpdateSchema.js';
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
@@ -76,6 +78,18 @@ export async function call(
       setAdditionalDirectoriesForClaudeMd([...currentDirs, path]);
     }
     SandboxManager.refreshConfig();
+
+    // densable 2.1.219 #3 s2t — DirectoryAdded after /add-dir (slash_command)
+    try {
+      const { systemMessages } = await executeDirectoryAddedHooks(path, 'slash_command');
+      for (const sm of systemMessages) {
+        logForDebugging(`DirectoryAdded hook: ${sm}`);
+      }
+    } catch (error) {
+      logForDebugging(`DirectoryAdded hook failed: ${error instanceof Error ? error.message : String(error)}`, {
+        level: 'warn',
+      });
+    }
 
     let message: string;
 

@@ -22,6 +22,10 @@ const ModelCapabilitySchema = lazySchema(() =>
       id: z.string(),
       max_input_tokens: z.number().optional(),
       max_tokens: z.number().optional(),
+      // densable EHl model.capabilities field may appear on /v1/models someday.
+      // densable ON(e,t) Nqm is never assigned in 2.1.219 binary — local ON
+      // does not use this for capability probes (see modelCatalogCapabilities).
+      capabilities: z.array(z.string()).optional(),
     })
     .strip(),
 )

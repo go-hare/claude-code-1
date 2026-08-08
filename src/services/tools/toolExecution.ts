@@ -502,7 +502,11 @@ function streamedCheckPermissionsAndCallTool(
       stream.enqueue({
         message: createProgressMessage({
           toolUseID: progress.toolUseID as string,
-          parentToolUseID: toolUseID,
+          // densable 2.1.219 #6: nested agent_progress may carry its own
+          // parentToolUseID (depth-2+). Prefer that over the current tool_use id.
+          parentToolUseID:
+            (progress as { parentToolUseID?: string }).parentToolUseID ??
+            toolUseID,
           data: progress.data,
         }),
       })

@@ -91,6 +91,12 @@ import {
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { getPlatform } from '../../utils/platform.js';
 import { configLabelColumnWidth, configMaxVisibleRows } from '../../utils/transcriptFooterHints.js';
+import {
+  isWorkflowSizeGuidelineProvidedBySettings,
+  parseWorkflowSizeGuidelineEnum,
+  resolveSessionWorkflowSizeGuideline,
+  WORKFLOW_SIZE_GUIDELINE_ENUM_OPTIONS,
+} from '../../utils/workflowSizeGuideline.js';
 
 type Props = {
   onClose: (result?: string, options?: { display?: CommandResultDisplay }) => void;
@@ -493,6 +499,38 @@ export function Config({
         setSettingsData(getInitialSettings());
       },
     },
+    // densable 2.1.219 #5 — Dynamic workflow size (/config).
+    // densable: E && (_ || L0()) where E = !YNt() (settings key absent).
+    // Hidden when a settings file provides workflowSizeGuideline.
+    // Build flag WORKFLOW_SCRIPTS stands in for densable workflows surface;
+    // L0-equivalent: isWorkflowFeatureEnabled (or always when flag on so
+    // users can set a default before enabling workflows).
+    ...(feature('WORKFLOW_SCRIPTS') && !isWorkflowSizeGuidelineProvidedBySettings()
+      ? [
+          {
+            id: 'workflowSizeGuideline',
+            label: 'Dynamic workflow size',
+            value: resolveSessionWorkflowSizeGuideline(globalConfig.workflowSizeGuideline).size,
+            options: [...WORKFLOW_SIZE_GUIDELINE_ENUM_OPTIONS],
+            type: 'enum' as const,
+            onChange(next: string) {
+              const parsed = parseWorkflowSizeGuidelineEnum(next) ?? 'unrestricted';
+              saveGlobalConfig(current => {
+                if (current.workflowSizeGuideline === parsed) return current;
+                return { ...current, workflowSizeGuideline: parsed };
+              });
+              setGlobalConfig({
+                ...getGlobalConfig(),
+                workflowSizeGuideline: parsed,
+              });
+              logEvent('tengu_config_changed', {
+                setting: 'workflowSizeGuideline' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                value: parsed as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              });
+            },
+          },
+        ]
+      : []),
     ...(feature('POOR')
       ? [
           {

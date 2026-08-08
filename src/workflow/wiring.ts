@@ -6,7 +6,23 @@ import {
 } from '@claude-code/workflow-engine'
 import { buildTool, type Tool } from '../Tool.js'
 import { isWorkflowsDisabled } from '../utils/workflowDisableGate.js'
+import { formatWorkflowSizeGuidelineToolSuffix } from '../utils/workflowSizeGuideline.js'
+import { getGlobalConfig } from '../utils/config.js'
 import { getWorkflowService } from './service.js'
+
+/**
+ * densable dLs(xt().workflowSizeGuideline) — session /config value with
+ * settings-file precedence inside resolveSessionWorkflowSizeGuideline.
+ */
+function getWorkflowSizeGuidelineToolSuffix(): string {
+  try {
+    return formatWorkflowSizeGuidelineToolSuffix(
+      getGlobalConfig().workflowSizeGuideline,
+    )
+  } catch {
+    return formatWorkflowSizeGuidelineToolSuffix(undefined)
+  }
+}
 
 /**
  * Adapts the engine's self-contained descriptor into a buildTool-compatible Tool.
@@ -60,10 +76,14 @@ function buildWorkflowTool(): Tool {
     isReadOnly: input => descriptor().isReadOnly(input),
     isConcurrencySafe: () => true,
     async description() {
-      return descriptor().description()
+      // densable 2.1.219 #21: lLs + dLs(workflowSizeGuideline)
+      const base = await descriptor().description()
+      return base + getWorkflowSizeGuidelineToolSuffix()
     },
     async prompt() {
-      return descriptor().prompt()
+      // densable 2.1.219 #21: lLs + dLs(workflowSizeGuideline)
+      const base = await descriptor().prompt()
+      return base + getWorkflowSizeGuidelineToolSuffix()
     },
     async call(input, context, canUseTool, parentMessage, onProgress) {
       const result = await descriptor().call(

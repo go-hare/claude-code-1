@@ -217,6 +217,7 @@ import { settingsChangeDetector } from 'src/utils/settings/changeDetector.js'
 import { applySettingsChange } from 'src/utils/settings/applySettingsChange.js'
 import {
   applyFastModeOnModelSwitch,
+  clearFastModeCooldown,
   isFastModeAvailable,
   isFastModeEnabled,
   isFastModeSupportedByModel,
@@ -249,6 +250,8 @@ import {
   setInitJsonSchema,
   getInitJsonSchema,
   setSdkAgentProgressSummariesEnabled,
+  getAdditionalDirectoriesForClaudeMd,
+  setAdditionalDirectoriesForClaudeMd,
 } from 'src/bootstrap/state.js'
 import { createSyntheticOutputTool } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import { parseSessionIdentifier } from 'src/utils/sessionUrl.js'
@@ -287,7 +290,13 @@ import {
   runElicitationHooks,
   runElicitationResultHooks,
 } from 'src/services/mcp/elicitationHandler.js'
-import { executeNotificationHooks } from 'src/utils/hooks.js'
+import {
+  executeDirectoryAddedHooks,
+  executeNotificationHooks,
+} from 'src/utils/hooks.js'
+import { clearMemoryFileCaches } from 'src/utils/claudemd.js'
+import { applyPermissionUpdate } from 'src/utils/permissions/PermissionUpdate.js'
+import { handleRegisterRepoRoot } from 'src/commands/add-dir/registerRepoRoot.js'
 import {
   ElicitRequestSchema,
   ElicitationCompleteNotificationSchema,
@@ -574,6 +583,8 @@ export async function runHeadless(
     sdkUrl: string | undefined
     replayUserMessages: boolean | undefined
     includePartialMessages: boolean | undefined
+    /** densable 2.1.219 #6 — nested subagent text/thinking on stream-json */
+    forwardSubagentText?: boolean | undefined
     forkSession: boolean | undefined
     /**
      * Official --reply-on-resume: when resuming a transcript that ends in a
@@ -737,6 +748,16 @@ export async function runHeadless(
   }
 
   const structuredIO = getStructuredIO(inputPrompt, options)
+
+  // densable 2.1.219 `_Is(_)`: register stream-json/SDK writer so async bg
+  // agents (runAgent isAsync) can emit agent_progress via Yud() without the
+  // parent onProgress path.
+  if (options.sdkUrl || options.outputFormat === 'stream-json') {
+    const { setStreamJsonStdoutWriter } = await import(
+      '../utils/streamJsonStdoutWriter.js'
+    )
+    setStreamJsonStdoutWriter(structuredIO)
+  }
 
   // Official working-sync densable: sdkUrl + REMOTE_SESSION_ID + !ENVIRONMENT_KIND
   // + !DISABLE_WORKING_SYNC → fire-and-forget startSyncedFileSyncer.
@@ -1309,6 +1330,8 @@ function runHeadlessStreaming(
     fallbackModel: string | undefined
     replayUserMessages?: boolean | undefined
     includePartialMessages?: boolean | undefined
+    /** densable 2.1.219 #6 — nested subagent text/thinking on stream-json */
+    forwardSubagentText?: boolean | undefined
     enableAuthStatus?: boolean | undefined
     agent?: string | undefined
     setSDKStatus?: (status: SDKStatus) => void
@@ -2674,6 +2697,7 @@ function runHeadlessStreaming(
                   abortController,
                   replayUserMessages: options.replayUserMessages,
                   includePartialMessages: options.includePartialMessages,
+                  forwardSubagentText: options.forwardSubagentText,
                   handleElicitation: (serverName, params, elicitSignal) =>
                     structuredIO.handleElicitation(
                       serverName,
@@ -3808,7 +3832,12 @@ function runHeadlessStreaming(
 
             activeUserSpecifiedModel = decision.model
             setMainLoopModelOverride(decision.model)
-            // densable 2.1.218 #31 — print/SDK set_model also runs uU/dU
+            // densable 2.1.219 #12 / Bcn: mde() on every model switch when fast
+            // is enabled so RC clients drop stale cooldown after set_model.
+            if (isFastModeEnabled()) {
+              clearFastModeCooldown()
+            }
+            // densable 2.1.218 #31 — print/SDK set_model also runs uU/dU (MB)
             setAppState(prev => {
               const applied = applyFastModeOnModelSwitch(
                 decision.model,
@@ -3978,6 +4007,99 @@ function runHeadlessStreaming(
                 `set_cwd: relocation failed — ${safeDetail}. ${stay}`,
               )
             }
+          } else if (
+            (msg.request as { subtype?: string }).subtype ===
+            'register_repo_root'
+          ) {
+            // densable 2.1.219 He / register_repo_root — SDK twin of /add-dir
+            // for strict subdirs of cwd or launch --add-dir roots.
+            const regReq = msg.request as {
+              subtype: 'register_repo_root'
+              directory: string
+              reload_claude_md?: boolean
+              reload_plugins?: boolean
+              reload_skills?: boolean
+            }
+            deferControlLifecycleUntilDone(async () => {
+              try {
+                const result = await handleRegisterRepoRoot(
+                  {
+                    directory: expandPath(regReq.directory),
+                    reload_claude_md: regReq.reload_claude_md,
+                    reload_plugins: regReq.reload_plugins,
+                    reload_skills: regReq.reload_skills,
+                  },
+                  {
+                    getCwd,
+                    getToolPermissionContext: () =>
+                      getAppState().toolPermissionContext,
+                    applyAddDirectory: (canonicalPath: string) => {
+                      setAppState(prev => ({
+                        ...prev,
+                        toolPermissionContext: applyPermissionUpdate(
+                          prev.toolPermissionContext,
+                          {
+                            type: 'addDirectories',
+                            directories: [canonicalPath],
+                            destination: 'session',
+                          },
+                        ),
+                      }))
+                    },
+                    getBootstrapAdditionalDirs:
+                      getAdditionalDirectoriesForClaudeMd,
+                    setBootstrapAdditionalDirs:
+                      setAdditionalDirectoriesForClaudeMd,
+                    refreshSandbox: () => {
+                      SandboxManager.refreshConfig()
+                    },
+                    clearMemoryFileCaches,
+                    clearCommandsCache,
+                    reloadPlugins: async () => {
+                      await refreshActivePlugins(setAppState)
+                    },
+                    logDebug: (m, opts) => {
+                      logForDebugging(
+                        m,
+                        opts as
+                          | {
+                              level:
+                                | 'verbose'
+                                | 'debug'
+                                | 'info'
+                                | 'warn'
+                                | 'error'
+                            }
+                          | undefined,
+                      )
+                    },
+                    startKeepAlive: () => {
+                      // densable bs() — keep_alive while DirectoryAdded hooks run
+                      const timer = setInterval(() => {
+                        try {
+                          output.enqueue({ type: 'keep_alive' })
+                        } catch {
+                          // stream may be closed
+                        }
+                      }, 30_000)
+                      timer.unref?.()
+                      return () => clearInterval(timer)
+                    },
+                    executeDirectoryAddedHooks: (directory, source) =>
+                      executeDirectoryAddedHooks(directory, source),
+                  },
+                )
+                if (result.ok) {
+                  sendControlResponseSuccess(msg, {
+                    directory: result.directory,
+                  })
+                } else {
+                  sendControlResponseError(msg, result.error)
+                }
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            })
           } else if (msg.request.subtype === 'seed_read_state') {
             // Client observed a Read that was later removed from context (e.g.
             // by snip), so transcript-based seeding missed it. Queued into
@@ -5160,6 +5282,10 @@ function runHeadlessStreaming(
                       }
                       activeUserSpecifiedModel = decision.model
                       setMainLoopModelOverride(decision.model)
+                      // densable 2.1.219 #12 — mde() + remote MB on bridge set_model
+                      if (isFastModeEnabled()) {
+                        clearFastModeCooldown()
+                      }
                       // densable 2.1.218 #31 — bridge onSetModel uU/dU (remote)
                       setAppState(prev => {
                         const applied = applyFastModeOnModelSwitch(

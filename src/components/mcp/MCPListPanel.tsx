@@ -3,6 +3,7 @@ import React, { useCallback, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { Box, color, Link, Text, useTheme } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
+import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
 import type { ConfigScope } from '../../services/mcp/types.js';
 import { describeMcpConfigFilePath } from '../../services/mcp/utils.js';
 import { isDebugMode } from '../../utils/debug.js';
@@ -183,8 +184,10 @@ export function MCPListPanel({
       statusIcon = color('warning', theme)(figures.triangleUpOutline);
       statusText = 'needs authentication';
     } else {
+      // densable 2.1.219: failed rows show HTTP status / error issue text.
       statusIcon = color('error', theme)(figures.cross);
-      statusText = 'failed';
+      const issue = server.client.type === 'failed' ? formatFailedMcpIssue(server.client) : '';
+      statusText = issue ? `failed — ${issue}` : 'failed';
     }
 
     return (

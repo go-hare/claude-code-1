@@ -166,6 +166,90 @@ function withoutHostManagedProviderVars(
 let ccdSpawnEnvKeys: Set<string> | null | undefined
 
 /**
+ * densable VQr / gyo — freeze process.env before settings.env is applied.
+ * Managed MCP allow/deny `${VAR}` expansion (2.1.219 #19) reads this snapshot
+ * plus managed-settings env (Y6u), not live settings-file env on process.env.
+ */
+let frozenStartupEnv: Readonly<Record<string, string>> | undefined
+
+/**
+ * densable VQr — capture and freeze process.env on first call.
+ * Safe to call repeatedly; subsequent calls return the same snapshot.
+ */
+export function getFrozenStartupEnv(): Readonly<Record<string, string>> {
+  if (frozenStartupEnv === undefined) {
+    frozenStartupEnv = Object.freeze({ ...process.env }) as Readonly<
+      Record<string, string>
+    >
+  }
+  return frozenStartupEnv
+}
+
+/** Test helper densable Qmy/q_s — clear VQr freeze so tests can re-capture. */
+export function clearFrozenStartupEnvForTests(): void {
+  frozenStartupEnv = undefined
+}
+
+/**
+ * densable SLt-filtered settings.env for a source (strips host-managed /
+ * SSH tunnel / CCD spawn keys). Used by MCP policy predicate expansion.
+ */
+export function getFilteredSettingsEnv(
+  env: Record<string, string> | undefined,
+  source = 'settings',
+): Record<string, string> {
+  return filterSettingsEnv(env, source)
+}
+
+/**
+ * densable Y6u — primary env for MCP policy `${VAR}` expansion:
+ * frozen startup process.env overlaid with managed/policy settings.env.
+ * Project/user settings-file env is intentionally NOT included.
+ */
+export function getMcpPolicyPrimaryEnv(): Record<string, string> {
+  const managed: Record<string, string> = {}
+  // densable zQ managed tiers → first-wins into e, then {...VQr(), ...e}.
+  // Local policySettings is the merged managed settings object.
+  const policyEnv = filterSettingsEnv(
+    getSettingsForSource('policySettings')?.env,
+    'policySettings',
+  )
+  for (const [key, value] of Object.entries(policyEnv)) {
+    managed[key] ??= value
+  }
+  return { ...getFrozenStartupEnv(), ...managed }
+}
+
+/**
+ * densable Hyy — deny-path expansion env + fallbackEnv chain
+ * (globalConfig / user / flag / policy settings.env after SLt filters).
+ * Allow path uses only getMcpPolicyPrimaryEnv() (Y6u), no fallback.
+ */
+export function getMcpPolicyDenyExpansionEnv(): {
+  env: Record<string, string>
+  fallbackEnv: Record<string, string>
+} {
+  const fallbackEnv: Record<string, string> = {
+    ...filterSettingsEnv(getGlobalConfig().env, 'globalConfig'),
+    ...(isSettingSourceEnabled('userSettings')
+      ? filterSettingsEnv(
+          getSettingsForSource('userSettings')?.env,
+          'userSettings',
+        )
+      : {}),
+    ...filterSettingsEnv(
+      getSettingsForSource('flagSettings')?.env,
+      'flagSettings',
+    ),
+    ...filterSettingsEnv(
+      getSettingsForSource('policySettings')?.env,
+      'policySettings',
+    ),
+  }
+  return { env: getMcpPolicyPrimaryEnv(), fallbackEnv }
+}
+
+/**
  * densable 2.1.217 #9 — managed OTEL supremacy (`dTd` / `tdr`).
  *
  * When policySettings sets `OTEL_EXPORTER_OTLP_ENDPOINT` (or signal-specific
@@ -360,6 +444,9 @@ const TRUSTED_SETTING_SOURCES = [
  * fully established via applyConfigEnvironmentVariables().
  */
 export function applySafeConfigEnvironmentVariables(): void {
+  // densable Put/VQr — freeze process.env before any settings.env Object.assign.
+  getFrozenStartupEnv()
+
   // Capture CCD spawn-env keys before any settings.env is applied (once).
   if (ccdSpawnEnvKeys === undefined) {
     ccdSpawnEnvKeys =
@@ -439,6 +526,9 @@ export function applySafeConfigEnvironmentVariables(): void {
  * dangerous environment variables such as LD_PRELOAD, PATH, etc.
  */
 export function applyConfigEnvironmentVariables(): void {
+  // densable pz/Put — ensure VQr freeze even if safe-path was skipped.
+  getFrozenStartupEnv()
+
   Object.assign(
     process.env,
     filterSettingsEnv(getGlobalConfig().env, 'globalConfig'),

@@ -133,11 +133,18 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
         message: Message
         elapsedTimeSeconds: number
         taskId: string
+        /** densable sKe — from AgentTool progress data */
+        agentType?: string
+        description?: string
       }
       if (
         progressData.type === 'agent_progress' ||
         progressData.type === 'skill_progress'
       ) {
+        // densable sKe: surface subagent_type / task_description on nested
+        // stream-json assistant/user messages (forward-subagent-text path).
+        const subagentType = progressData.agentType
+        const taskDescription = progressData.description
         for (const _ of normalizeMessages([progressData.message])) {
           switch (_.type) {
             case 'assistant':
@@ -152,6 +159,15 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
                 session_id: getSessionId(),
                 uuid: _.uuid,
                 error: _.error,
+                ...(subagentType !== undefined && {
+                  subagent_type: subagentType,
+                }),
+                ...(taskDescription !== undefined && {
+                  task_description: taskDescription,
+                }),
+                ...((_.isApiErrorMessage === true && {
+                  is_api_error_message: true,
+                }) as Record<string, unknown>),
               }
               break
             case 'user':
@@ -169,6 +185,12 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
                       ...(_.mcpMeta as Record<string, unknown>),
                     }
                   : _.toolUseResult,
+                ...(subagentType !== undefined && {
+                  subagent_type: subagentType,
+                }),
+                ...(taskDescription !== undefined && {
+                  task_description: taskDescription,
+                }),
               }
               break
           }

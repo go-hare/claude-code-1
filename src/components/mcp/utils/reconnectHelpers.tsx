@@ -1,4 +1,5 @@
 import type { Command } from '../../../commands.js';
+import { formatFailedMcpReconnectIssue } from '../../../services/mcp/mcpConnectionIssue.js';
 import type { MCPServerConnection, ServerResource } from '../../../services/mcp/types.js';
 import type { Tool } from '../../../Tool.js';
 
@@ -32,11 +33,14 @@ export function handleReconnectResult(
         success: false,
       };
 
-    case 'failed':
+    case 'failed': {
+      // densable 2.1.219 `Ujo` / Bjo failed arm — include HTTP/error detail.
+      const detail = formatFailedMcpReconnectIssue(result.client);
       return {
-        message: `Failed to reconnect to ${serverName}.`,
+        message: detail ? `Failed to reconnect to ${serverName}: ${detail}` : `Failed to reconnect to ${serverName}.`,
         success: false,
       };
+    }
 
     default:
       return {

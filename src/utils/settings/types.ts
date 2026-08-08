@@ -556,6 +556,14 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'When set, opt into/out of dynamic workflows. Unset uses the product default.',
         ),
+      // densable 2.1.219 #5/#18 — settings key; /config row hidden while set.
+      // "medium" (the default) aims for fewer than 15 agents; large < 50.
+      workflowSizeGuideline: z
+        .enum(['unrestricted', 'small', 'medium', 'large'])
+        .optional()
+        .describe(
+          'Advisory size guideline for the dynamic workflows Claude writes: "small" aims for fewer than 5 agents, "medium" (the default) fewer than 15, "large" fewer than 50, and "unrestricted" sends no guideline. A value here — including from managed settings — takes precedence over the "Dynamic workflow size" choice in /config, and that /config row is hidden while a settings file provides the key. This is a guideline, not an enforced limit.',
+        ),
       // Official residual — ultracode/workflow keyword trigger.
       workflowKeywordTriggerEnabled: z
         .boolean()

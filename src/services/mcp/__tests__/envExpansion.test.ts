@@ -1,5 +1,8 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
-import { expandEnvVarsInString } from '../envExpansion'
+import {
+  expandEnvVarsInString,
+  envValueContainsWildcard,
+} from '../envExpansion'
 
 const ENV_OPEN = '$' + '{'
 const ENV_CLOSE = '}'
@@ -17,6 +20,7 @@ describe('expandEnvVarsInString', () => {
     'TEST_X',
     'VAR',
     'TEST_FOUND',
+    'FALLBACK_ONLY',
   ]
 
   beforeEach(() => {
@@ -40,6 +44,7 @@ describe('expandEnvVarsInString', () => {
     const result = expandEnvVarsInString(envExpr('TEST_HOME'))
     expect(result.expanded).toBe('/home/user')
     expect(result.missingVars).toEqual([])
+    expect(result.wildcardVars).toEqual([])
   })
 
   test('returns original placeholder and tracks missing var when not found', () => {
@@ -96,26 +101,20 @@ describe('expandEnvVarsInString', () => {
     expect(result.missingVars).toEqual([])
   })
 
-  test('handles default value containing colons', () => {
-    // split(':-', 2) means only the first :- is the delimiter
+  test('handles default value containing colons (densable S7 indexOf)', () => {
+    // densable: indexOf(':-') then slice keeps full default including later :-
     delete process.env.TEST_X
     const result = expandEnvVarsInString(envExpr('TEST_X:-value:-with:-colons'))
-    // The default is "value" because split(':-', 2) gives ["TEST_X", "value"]
-    // Wait -- actually split(':-', 2) on "TEST_X:-value:-with:-colons" gives:
-    //   ["TEST_X", "value"] because limit=2 stops at 2 pieces
-    expect(result.expanded).toBe('value')
+    expect(result.expanded).toBe('value:-with:-colons')
     expect(result.missingVars).toEqual([])
   })
 
-  test('handles nested-looking syntax as literal (not supported)', () => {
-    // ${${VAR}} - the regex [^}]+ matches "${VAR" (up to first })
-    // so varName would be "${VAR" which won't be found in env
+  test('nested-looking env expr expands only the valid inner identifier (densable S7)', () => {
+    // Outer `${` + `$` is not a valid IDENT start; inner ${VAR} still matches.
     delete process.env.VAR
     const nestedExpr = `${ENV_OPEN}${envExpr('VAR')}${ENV_CLOSE}`
     const result = expandEnvVarsInString(nestedExpr)
-    // The regex \$\{([^}]+)\} matches "${${VAR}" with capture "${VAR"
-    // That env var won't exist, so it stays as "${${VAR}" + remaining "}"
-    expect(result.missingVars).toEqual([`${ENV_OPEN}VAR`])
+    expect(result.missingVars).toEqual(['VAR'])
     expect(result.expanded).toBe(nestedExpr)
   })
 
@@ -144,5 +143,57 @@ describe('expandEnvVarsInString', () => {
     const result = expandEnvVarsInString('$TEST_A')
     expect(result.expanded).toBe('$TEST_A')
     expect(result.missingVars).toEqual([])
+  })
+
+  test('densable 2.1.219 S7: primary env map over process.env', () => {
+    delete process.env.TEST_HOME
+    const result = expandEnvVarsInString(envExpr('TEST_HOME'), {
+      TEST_HOME: '/managed/home',
+    })
+    expect(result.expanded).toBe('/managed/home')
+    expect(result.missingVars).toEqual([])
+  })
+
+  test('densable 2.1.219 S7: fallbackEnv when primary misses', () => {
+    delete process.env.FALLBACK_ONLY
+    const result = expandEnvVarsInString(
+      envExpr('FALLBACK_ONLY'),
+      {},
+      { FALLBACK_ONLY: 'from-fallback' },
+    )
+    expect(result.expanded).toBe('from-fallback')
+    expect(result.missingVars).toEqual([])
+  })
+
+  test('densable 2.1.219 S7: primary wins over fallbackEnv', () => {
+    const result = expandEnvVarsInString(
+      envExpr('TEST_A'),
+      { TEST_A: 'primary' },
+      { TEST_A: 'fallback' },
+    )
+    expect(result.expanded).toBe('primary')
+  })
+
+  test('densable 2.1.219 S7: default skips fallbackEnv', () => {
+    const result = expandEnvVarsInString(
+      envExpr('MISSING:-def'),
+      {},
+      { MISSING: 'fb' },
+    )
+    expect(result.expanded).toBe('def')
+  })
+
+  test('densable ZGu: tracks wildcard-injecting values', () => {
+    const result = expandEnvVarsInString(envExpr('TEST_A'), {
+      TEST_A: 'https://*.evil.example/',
+    })
+    expect(result.expanded).toBe('https://*.evil.example/')
+    expect(result.wildcardVars).toEqual(['TEST_A'])
+  })
+
+  test('envValueContainsWildcard detects * and %2a', () => {
+    expect(envValueContainsWildcard('a*b')).toBe(true)
+    expect(envValueContainsWildcard('a%2Ab')).toBe(true)
+    expect(envValueContainsWildcard('plain')).toBe(false)
   })
 })

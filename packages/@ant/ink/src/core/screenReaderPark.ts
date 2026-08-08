@@ -5,13 +5,41 @@
  * Maps a declared cursor (node start index in the full screen-reader text +
  * relativeX/Y) onto a {row, col} in the rendered screen-reader line list,
  * accounting for soft-wrap at `columns`.
+ *
+ * densable 2.1.219 #15: prevScreenReaderAnchor + xuy grapheme-boundary suffix
+ * append so typing only echoes the new character(s) instead of rewriting the
+ * whole input line (erase + rewrite from common prefix).
  */
 
+import { getGraphemeSegmenter } from './utils/grapheme.js'
 import { wrapAnsi } from './wrapAnsi.js'
 
 export type ScreenReaderPark = {
   row: number
   col: number
+}
+
+/**
+ * densable prevScreenReaderAnchor — tracks whether the physical SR cursor is
+ * known to sit at a stable line boundary so suffix-append is safe.
+ * - clean: full frame rewrite covered the viewport
+ * - lastRowAnchored: partial rewrite left us parked on the last row
+ * - broken: unknown / scrolled / mid-frame — force full rewrite
+ */
+export type ScreenReaderAnchor = 'clean' | 'lastRowAnchored' | 'broken'
+
+/**
+ * densable xuy(e, t) — true when `offset` is a grapheme cluster boundary in
+ * `text` (or ≤0 / past end). Used so we never split a multi-codepoint
+ * grapheme when appending a typed suffix.
+ */
+export function isGraphemeBoundary(text: string, offset: number): boolean {
+  if (offset <= 0) return true
+  for (const r of getGraphemeSegmenter().segment(text)) {
+    if (r.index === offset) return true
+    if (r.index > offset) return false
+  }
+  return offset >= text.length
 }
 
 export type ScreenReaderCursorDeclaration = {
@@ -185,6 +213,25 @@ export type ScreenReaderFramePlan = {
   parkChanged: boolean
   /** Whether lines are identical to previous. */
   linesUnchanged: boolean
+  /**
+   * densable 2.1.219 #15 suffix-append fast path: only write the new chars on
+   * the first differing line (no erase / full-line rewrite). When set,
+   * materialize writes move-to-suffix + suffix + park, and callers should
+   * keep the previous anchor (suffix path does not re-evaluate it).
+   */
+  suffixAppend?: {
+    /** Line index of the append (official `f` / common). */
+    lineIndex: number
+    /** Display width of the previous line content (CHA target base). */
+    prevWidth: number
+    /** New text after prev line prefix (official `L`). */
+    suffix: string
+  }
+  /**
+   * densable prevScreenReaderAnchor after this plan is applied.
+   * Undefined when skip or suffixAppend (keep previous).
+   */
+  nextAnchor?: ScreenReaderAnchor
 }
 
 /**
@@ -207,7 +254,13 @@ export function planScreenReaderFrameUpdate(input: {
    * as common prefix). Index is the first announcement line in `lines`.
    */
   announcementStartLine?: number
+  /**
+   * densable prevScreenReaderAnchor (default clean). Required for #15
+   * suffix-append fast path safety.
+   */
+  prevAnchor?: ScreenReaderAnchor
 }): ScreenReaderFramePlan {
+  const sw = input.stringWidth ?? ((s: string) => s.length)
   const { lines, lineBaseRows } = materializeScreenReaderLines(
     input.fullText,
     input.columns,
@@ -220,10 +273,10 @@ export function planScreenReaderFrameUpdate(input: {
     lines.length,
     input.columns,
     input.cursor,
-    input.stringWidth,
+    sw,
   ) ?? {
     row: lastRow,
-    col: (input.stringWidth ?? (s => s.length))(lines[lastRow] ?? ''),
+    col: sw(lines[lastRow] ?? ''),
   }
 
   let common = 0
@@ -261,12 +314,90 @@ export function planScreenReaderFrameUpdate(input: {
     }
   }
 
+  const prevAnchor = input.prevAnchor ?? 'clean'
+  const prevPark = input.prevPark
+
+  // densable 2.1.219 #15 suffix-append fast path (before viewport clamp):
+  // same line count, no announcements, anchor clean|lastRowAnchored, first
+  // diff line is a pure string prefix extension at a grapheme boundary, and
+  // the first codepoint of the suffix has positive display width.
+  if (
+    !linesUnchanged &&
+    input.announcementStartLine === undefined &&
+    (prevAnchor === 'clean' ||
+      (prevAnchor === 'lastRowAnchored' &&
+        common === input.prevLines.length - 1 &&
+        prevPark.row === common &&
+        park.row === common)) &&
+    input.prevLines.length === lines.length &&
+    common >= input.prevLines.length - input.terminalRows &&
+    prevPark.row >= input.prevLines.length - input.terminalRows
+  ) {
+    const prevLine = input.prevLines[common] ?? ''
+    const nextLine = lines[common] ?? ''
+    if (nextLine.startsWith(prevLine) && !nextLine.includes('\t')) {
+      let restSame = true
+      for (let b = common + 1; b < input.prevLines.length; b++) {
+        if (input.prevLines[b] !== lines[b]) {
+          restSame = false
+          break
+        }
+      }
+      const suffix = restSame ? nextLine.slice(prevLine.length) : ''
+      const prevWidth = suffix === '' ? 0 : sw(prevLine)
+      if (
+        suffix !== '' &&
+        sw(String.fromCodePoint(suffix.codePointAt(0)!)) > 0 &&
+        prevWidth + sw(suffix) === sw(nextLine) &&
+        isGraphemeBoundary(nextLine, prevLine.length)
+      ) {
+        return {
+          skip: false,
+          park,
+          rewriteFrom: common,
+          rewriteLines: lines.slice(common),
+          prevLastRow,
+          prevPark: input.prevPark,
+          prevLineCount: input.prevLines.length,
+          lastRow,
+          parkChanged,
+          linesUnchanged: false,
+          suffixAppend: {
+            lineIndex: common,
+            prevWidth,
+            suffix,
+          },
+          // densable suffix path does not reassign prevScreenReaderAnchor
+        }
+      }
+    }
+  }
+
   // Official: if scrolled viewport starts after common prefix, clamp rewriteFrom.
   let rewriteFrom = common
   const scrolledAway = input.prevLines.length - input.terminalRows
+  // densable C: b>f&&b>=i.length || T&&b===f  (T = pure shrink at end)
+  const pureShrinkAtEnd = rewriteFrom === lines.length && rewriteFrom > 0
+  const brokenByScroll =
+    (scrolledAway > rewriteFrom && scrolledAway >= lines.length) ||
+    (pureShrinkAtEnd && scrolledAway === rewriteFrom)
   if (scrolledAway > rewriteFrom && scrolledAway < lines.length) {
     rewriteFrom = scrolledAway
   }
+
+  const nextAnchor = computeNextScreenReaderAnchor({
+    prevAnchor,
+    rewriteFrom,
+    newLineCount: lines.length,
+    prevLineCount: input.prevLines.length,
+    park,
+    lastRow,
+    prevPark,
+    prevLastRow,
+    brokenByScroll,
+    terminalRows: input.terminalRows,
+    linesUnchanged,
+  })
 
   return {
     skip: false,
@@ -279,7 +410,79 @@ export function planScreenReaderFrameUpdate(input: {
     lastRow,
     parkChanged,
     linesUnchanged,
+    nextAnchor,
   }
+}
+
+/**
+ * densable post-write prevScreenReaderAnchor update.
+ *
+ * Full rewrite path (`!g`): C / M>=viewport / M>0 cascade.
+ * Park-only path (`g`): lastRowAnchored breaks if park left prev last row.
+ * Suffix-append path does not call this (anchor unchanged).
+ */
+export function computeNextScreenReaderAnchor(input: {
+  prevAnchor: ScreenReaderAnchor
+  rewriteFrom: number
+  newLineCount: number
+  prevLineCount: number
+  park: ScreenReaderPark
+  lastRow: number
+  prevPark: ScreenReaderPark
+  prevLastRow: number
+  brokenByScroll: boolean
+  terminalRows: number
+  /** densable `g` — lines identical; only park may have moved. */
+  linesUnchanged?: boolean
+}): ScreenReaderAnchor {
+  // densable else if(g): lastRowAnchored && (y.row!==prevLast || p.row!==d)
+  if (input.linesUnchanged) {
+    if (
+      input.prevAnchor === 'lastRowAnchored' &&
+      (input.prevPark.row !== Math.max(0, input.prevLineCount - 1) ||
+        input.park.row !== input.lastRow)
+    ) {
+      return 'broken'
+    }
+    return input.prevAnchor
+  }
+
+  // densable: if(C) broken
+  if (input.brokenByScroll) return 'broken'
+
+  // M = i.length - f
+  const rewritten = input.newLineCount - input.rewriteFrom
+  const parkOnLast = input.park.row === input.newLineCount - 1
+  const shrunk = input.newLineCount < input.prevLineCount
+  const prevFitInViewport = input.prevLineCount <= input.terminalRows
+
+  // else if(M>=Math.min(i.length,this.terminalRows)) clean
+  if (rewritten >= Math.min(input.newLineCount, input.terminalRows)) {
+    return 'clean'
+  }
+
+  if (rewritten > 0) {
+    if (input.prevAnchor === 'broken') {
+      return parkOnLast ? 'lastRowAnchored' : 'broken'
+    }
+    if (input.prevAnchor === 'lastRowAnchored') {
+      return parkOnLast ? 'lastRowAnchored' : 'broken'
+    }
+    // clean (or unknown): only shrink+overflow flips to lastRowAnchored/broken
+    if (shrunk && !prevFitInViewport) {
+      return parkOnLast ? 'lastRowAnchored' : 'broken'
+    }
+    return input.prevAnchor
+  }
+
+  // M===0 densable:
+  //   else if(lastRowAnchored) broken
+  //   else if(N&&clean&&!P) L?lastRowAnchored:broken
+  if (input.prevAnchor === 'lastRowAnchored') return 'broken'
+  if (shrunk && input.prevAnchor === 'clean' && !prevFitInViewport) {
+    return parkOnLast ? 'lastRowAnchored' : 'broken'
+  }
+  return input.prevAnchor
 }
 
 /** CSI helpers matching official _S / AEc / aki / i3n / OEe / TCh. */
@@ -333,6 +536,24 @@ export function materializeScreenReaderFrameAnsi(
   plan: ScreenReaderFramePlan,
 ): string {
   if (plan.skip) return ''
+
+  // densable 2.1.219 #15: B+L+G — move to end of prev line content, write
+  // suffix only, then park. No erase / full-line rewrite.
+  if (plan.suffixAppend) {
+    const { lineIndex, prevWidth, suffix } = plan.suffixAppend
+    const toLine =
+      lineIndex !== plan.prevPark.row
+        ? cursorMoveRel(0, lineIndex - plan.prevPark.row)
+        : ''
+    const toCol = cha(prevWidth + 1)
+    const parkCol = Math.max(0, plan.park.col) + 1
+    const parkSeq =
+      cha(parkCol) +
+      (plan.park.row !== lineIndex
+        ? cursorMoveRel(0, plan.park.row - lineIndex)
+        : '')
+    return toLine + toCol + suffix + parkSeq
+  }
 
   // m: home from previous park to previous last row (vertical only).
   const home =

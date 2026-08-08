@@ -106,6 +106,7 @@ import {
   buildSystemInitMessage,
   sdkCompatToolName,
 } from './utils/messages/systemInit.js'
+import { getMcpConfigServerErrors } from './services/mcp/config.js'
 import {
   getScratchpadDir,
   isScratchpadEnabled,
@@ -169,6 +170,8 @@ export type QueryEngineConfig = {
    */
   requestDialog?: ToolUseContext['requestDialog']
   includePartialMessages?: boolean
+  /** densable 2.1.219 #6 — nested subagent text/thinking on stream-json */
+  forwardSubagentText?: boolean
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
   orphanedPermission?: OrphanedPermission
@@ -249,6 +252,7 @@ export class QueryEngine {
       setAppState,
       replayUserMessages = false,
       includePartialMessages = false,
+      forwardSubagentText = false,
       agents = [],
       setSDKStatus,
       orphanedPermission,
@@ -387,6 +391,8 @@ export class QueryEngine {
         agentDefinitions: { activeAgents: agents, allAgents: [] },
         theme: resolveThemeSetting(getGlobalConfig().theme),
         maxBudgetUsd,
+        // densable 2.1.219 #6 — plumb into ToolUseContext for AgentTool
+        forwardSubagentText,
       },
       getAppState,
       setAppState,
@@ -536,6 +542,8 @@ export class QueryEngine {
         theme: resolveThemeSetting(getGlobalConfig().theme),
         agentDefinitions: { activeAgents: agents, allAgents: [] },
         maxBudgetUsd,
+        // densable 2.1.219 #6
+        forwardSubagentText,
       },
       getAppState,
       setAppState,
@@ -575,6 +583,8 @@ export class QueryEngine {
       skills,
       plugins: enabledPlugins,
       fastMode: initialAppState.fastMode,
+      // densable 2.1.219 #4 — yEm() soft-skip store → mcp_server_errors
+      mcpServerErrors: getMcpConfigServerErrors(),
     })
 
     // Record when system message is yielded for headless latency tracking
@@ -1253,17 +1263,41 @@ export class QueryEngine {
     let isApiError = false
 
     if (result.type === 'assistant') {
-      const lastContent = last(
-        result.message!
-          .content as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlock[],
-      )
-      if (
-        lastContent?.type === 'text' &&
-        !SYNTHETIC_MESSAGES.has(lastContent.text)
-      ) {
-        textResult = lastContent.text
-      }
       isApiError = Boolean(result.isApiErrorMessage)
+      // densable 2.1.219 #7: when the terminal assistant is a mid-stream
+      // API-error salvage banner, prefer the last real (non-error) assistant
+      // text so `claude -p` / result.result keeps the partial response.
+      if (isApiError) {
+        const prior = messages.findLast(
+          m =>
+            m.type === 'assistant' &&
+            !m.isApiErrorMessage &&
+            Array.isArray(m.message?.content),
+        )
+        if (prior && prior.type === 'assistant') {
+          const blocks = prior.message!
+            .content as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlock[]
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const b = blocks[i]
+            if (b?.type === 'text' && !SYNTHETIC_MESSAGES.has(b.text)) {
+              textResult = b.text
+              break
+            }
+          }
+        }
+      }
+      if (!textResult) {
+        const lastContent = last(
+          result.message!
+            .content as import('@anthropic-ai/sdk/resources/beta/messages/messages.js').BetaContentBlock[],
+        )
+        if (
+          lastContent?.type === 'text' &&
+          !SYNTHETIC_MESSAGES.has(lastContent.text)
+        ) {
+          textResult = lastContent.text
+        }
+      }
     }
 
     yield {
@@ -1356,6 +1390,7 @@ export async function* ask({
   abortController,
   replayUserMessages = false,
   includePartialMessages = false,
+  forwardSubagentText = false,
   handleElicitation,
   requestDialog,
   agents = [],
@@ -1389,6 +1424,7 @@ export async function* ask({
   abortController?: AbortController
   replayUserMessages?: boolean
   includePartialMessages?: boolean
+  forwardSubagentText?: boolean
   handleElicitation?: ToolUseContext['handleElicitation']
   requestDialog?: ToolUseContext['requestDialog']
   agents?: AgentDefinition[]
@@ -1421,6 +1457,7 @@ export async function* ask({
     requestDialog,
     replayUserMessages,
     includePartialMessages,
+    forwardSubagentText,
     setSDKStatus,
     abortController,
     orphanedPermission,

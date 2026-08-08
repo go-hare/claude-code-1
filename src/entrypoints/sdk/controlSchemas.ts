@@ -365,6 +365,34 @@ export const SDKControlSeedReadStateRequestSchema = lazySchema(() =>
 )
 
 /**
+ * densable 2.1.219 register_repo_root (G0m / He) — SDK twin of /add-dir
+ * for registering a strict subdirectory of cwd or launch --add-dir roots.
+ */
+export const SDKControlRegisterRepoRootRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('register_repo_root'),
+      directory: z.string(),
+      reload_claude_md: z.boolean().optional(),
+      reload_plugins: z.boolean().optional(),
+      reload_skills: z.boolean().optional(),
+    })
+    .describe(
+      'Add a directory as a working-directory root and optionally reload CLAUDE.md, skills, and plugins. The directory must resolve to a strict subdirectory of cwd, or of a directory passed at launch via --add-dir / the SDK additionalDirectories option. A directory that is already a registered working directory (including a duplicate of an earlier request) is denied with an error; the registration pipeline and DirectoryAdded hooks do not re-run.',
+    ),
+)
+
+export const SDKControlRegisterRepoRootResponseSchema = lazySchema(() =>
+  z
+    .object({
+      directory: z
+        .string()
+        .describe('Canonical (realpath) directory that was registered.'),
+    })
+    .describe('Result of a successful register_repo_root request.'),
+)
+
+/**
  * densable 2.1.218 set_cwd — headless twin of /cd for SDK hosts.
  * SEA: subtype literal set_cwd + trust_accepted + trusted_directory.
  */
@@ -838,6 +866,7 @@ export const SDKControlRequestInnerSchema = lazySchema(() =>
     SDKControlRewindFilesRequestSchema(),
     SDKControlCancelAsyncMessageRequestSchema(),
     SDKControlSeedReadStateRequestSchema(),
+    SDKControlRegisterRepoRootRequestSchema(),
     SDKControlSetCwdRequestSchema(),
     SDKControlMcpSetServersRequestSchema(),
     SDKControlReloadPluginsRequestSchema(),

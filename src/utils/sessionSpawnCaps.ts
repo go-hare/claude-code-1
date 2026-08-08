@@ -2,7 +2,8 @@
  * densable taskRegistry counter subset — session runaway guards.
  *
  * densable 2.1.212: Etu/vtu + TotalAgentSpawns / WebSearchCalls (qpg/zpg=200)
- * densable 2.1.217: concurrent live slots ($vu/vBg=20) + nest depth (Bue/Evu=1)
+ * densable 2.1.217: concurrent live slots ($vu/vBg=20)
+ * densable 2.1.219: nest depth (Bue/_ee/qPu=3; was Evu=1 in 217)
  *
  * Local product: session-scoped module counters (single CLI process = session).
  * /clear calls reset*; WebSearchTool + AgentTool call get/increment.
@@ -21,8 +22,8 @@ export const DEFAULT_MAX_SUBAGENTS_PER_SESSION = 200
 export const DEFAULT_MAX_WEB_SEARCHES_PER_SESSION = 200
 /** densable vBg */
 export const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 20
-/** densable Evu — main depth 0; default max 1 ⇒ no nested spawn */
-export const DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH = 1
+/** densable qPu/Evu (2.1.219) — main depth 0; default max 3 ⇒ nested spawn allowed */
+export const DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH = 3
 /** densable pBg */
 export const HAZEL_TRELLIS_FEATURE = 'tengu_hazel_trellis'
 /** densable tengu_amber_kestrel — concurrent cap kill-switch */

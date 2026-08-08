@@ -296,6 +296,14 @@ export type FailedMCPServer = {
   type: 'failed'
   config: ScopedMcpServerConfig
   error?: string
+  /**
+   * densable 2.1.219 `Mvs` / connect catch: HTTP status string, Node errno,
+   * or named code (INVALID_CONFIG, ENDPOINT_NOT_FOUND, …). Used by `mcp list`
+   * / `/mcp` issue text (`fSp`/`mSp`).
+   */
+  errorCode?: string
+  /** densable `displayDetail` — secondary detail appended after error. */
+  displayDetail?: string
 }
 
 export type NeedsAuthMCPServer = {

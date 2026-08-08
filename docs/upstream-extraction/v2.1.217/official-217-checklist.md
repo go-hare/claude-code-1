@@ -125,6 +125,7 @@
 |----|----------|------|------|
 | U5e 解析失败 | `null → {kind:"simple", commands:[], bare:[]}` | `parse-unavailable`（ZRu fail-closed deny） | **保留更严**（用户确认） |
 | permission ZRu | 仅 Shell.exec | 已去掉 BashTool early-deny | 已对齐 |
-| bareAssignmentNames / YPg / FJi·tLg / eq | 全量 | 全量 native | 已对齐 |
+| bareAssignmentNames / YPg / FJi·tLg / eq | 全量 | 全量 native（`parseForSecurityFromAst`） | 已对齐 |
+| sync rough-token ZRu | 无 | 已删 `checkWorktreeSharedCheckoutGitRedirect` / `roughShellTokens` / `denyWorktreeGitRedirectIfNeeded` | 已对齐（仅 AST U5e） |
 
-ZRu 只在 Shell.exec；N6g 仅 `surfaceDotDotTargets`；`surfaceNetworkRaw` 暴露给其它 surface。
+ZRu 只在 Shell.exec（`checkZRuGitRedirectCommand`）；N6g 仅 `surfaceDotDotTargets`；`surfaceNetworkRaw` 暴露给其它 surface。

@@ -37,6 +37,7 @@ import {
   type ResourceLink,
 } from '@modelcontextprotocol/sdk/types.js'
 import { listAllWithCursorPagination } from './listPagination.js'
+import { extractMcpConnectionErrorCode } from './mcpConnectionIssue.js'
 import mapValues from 'lodash-es/mapValues.js'
 import memoize from 'lodash-es/memoize.js'
 import zipObject from 'lodash-es/zipObject.js'
@@ -1744,11 +1745,26 @@ export const connectToServer = memoize(
       if (inProcessServer) {
         inProcessServer.close().catch(() => {})
       }
+      // densable 2.1.219: surface errorCode (HTTP / errno / ENDPOINT_NOT_FOUND)
+      // so mcp list / /mcp can show status — issue (fSp/mSp).
+      let errorText = errorMessage(error)
+      const errorCode = extractMcpConnectionErrorCode(error, {
+        transportType: serverRef.type,
+        hasSessionId: false,
+      })
+      if (errorCode === 'ENDPOINT_NOT_FOUND' && 'url' in serverRef) {
+        const url =
+          typeof serverRef.url === 'string'
+            ? serverRef.url
+            : '(unparseable url)'
+        errorText = `MCP endpoint not found at ${url}. Check the URL in your MCP config.`
+      }
       return {
         name,
         type: 'failed' as const,
         config: serverRef,
-        error: errorMessage(error),
+        error: errorText,
+        ...(errorCode !== undefined ? { errorCode } : {}),
       }
     }
   },

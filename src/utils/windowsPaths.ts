@@ -217,9 +217,20 @@ export function findGitBashPathOrNullWithDeps(
   }
   const envOverride = gitBashPathEnv
 
-  // 1. Honor explicit CLAUDE_CODE_GIT_BASH_PATH override
+  // 1. densable 2.1.219 #13 NQ: honor CLAUDE_CODE_GIT_BASH_PATH only when
+  // basename is bash/sh (+ .exe). Otherwise warn and fall through to auto-detect.
   if (envOverride) {
-    return deps.checkExists(envOverride) ? envOverride : null
+    const base = pathWin32.basename(envOverride).toLowerCase()
+    const isBashSh = ['bash.exe', 'sh.exe', 'bash', 'sh'].includes(base)
+    if (isBashSh && deps.checkExists(envOverride)) {
+      return envOverride
+    }
+    logForDebugging(
+      `CLAUDE_CODE_GIT_BASH_PATH "${envOverride}" ${
+        isBashSh ? 'not found' : 'is not a bash/sh binary'
+      }; falling back to auto-detection`,
+      { level: 'warn' },
+    )
   }
 
   // 2. Look up bash.exe directly via PATH. Ignore Windows' WSL launchers;

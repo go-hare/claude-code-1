@@ -97,6 +97,7 @@ import type {
   ConfigChangeHookInput,
   CwdChangedHookInput,
   FileChangedHookInput,
+  DirectoryAddedHookInput,
   InstructionsLoadedHookInput,
   UserPromptSubmitHookInput,
   PermissionRequestHookInput,
@@ -1942,6 +1943,12 @@ export async function getMatchingHooks(
         break
       case 'FileChanged':
         matchQuery = basename(hookInput.file_path as string)
+        break
+      // densable 2.1.219 DirectoryAdded — matcher matches source
+      // (slash_command | register_repo_root). Outside-REPL path also
+      // passes matchQuery: source explicitly.
+      case 'DirectoryAdded':
+        matchQuery = (hookInput as { source?: string }).source
         break
       default:
         break
@@ -4643,6 +4650,40 @@ export function executeFileChangedHooks(
     event,
   } as unknown as FileChangedHookInput
   return executeEnvHooks(hookInput, timeoutMs)
+}
+
+/**
+ * densable 2.1.219 s2t / executeDirectoryAddedHooks:
+ *   n = { ...Kf(void 0), hook_event_name: "DirectoryAdded", directory: e, source: t }
+ *   o = await wL({ hookInput: n, matchQuery: t, timeoutMs: r })
+ *   return { results: o, systemMessages: o.map(systemMessage).filter(Boolean) }
+ *
+ * @param directory Absolute path of the directory that was added
+ * @param source "slash_command" for /add-dir, "register_repo_root" for SDK control_request
+ */
+export async function executeDirectoryAddedHooks(
+  directory: string,
+  source: 'slash_command' | 'register_repo_root',
+  timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+): Promise<{
+  results: HookOutsideReplResult[]
+  systemMessages: string[]
+}> {
+  const hookInput: DirectoryAddedHookInput = {
+    ...createBaseHookInput(undefined),
+    hook_event_name: 'DirectoryAdded',
+    directory,
+    source,
+  }
+  const results = await executeHooksOutsideREPL({
+    hookInput,
+    matchQuery: source,
+    timeoutMs,
+  })
+  const systemMessages = results
+    .map(r => r.systemMessage)
+    .filter((m): m is string => !!m)
+  return { results, systemMessages }
 }
 
 export type InstructionsLoadReason =

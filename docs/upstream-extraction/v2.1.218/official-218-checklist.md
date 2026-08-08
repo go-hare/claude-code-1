@@ -2,10 +2,10 @@
 
 > 来源：官方 2.1.218 release notes（`changelog-2.1.218.md`，**36 条**）。  
 > densable 二进制：`/tmp/official-218/plat/package/claude`（VERSION **2.1.218** HIT）。  
-> 基线：产品 **2.7.32** / densable **2.1.217** 已收口（`e5e83e50` / `5dcf1180`）。  
+> 基线：产品 **2.7.33** / densable **2.1.218** 已收口（`ec2617a4` + Esc/alt-screen `6d146432`）。  
 > 状态：**GAP** · **PARTIAL** · **AUDIT** · **HAVE** · **N/A**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。  
-> 更新：2026-08-08 — 补产品面：#11 Host REPL HWf 接线 HAVE；#28 RC multi-env Add-server trust UI HAVE；#15/#9 仍 invent-ban/N/A。
+> 更新：2026-08-08 — 补产品面：#11 Host REPL HWf 接线 HAVE；#28 RC multi-env Add-server trust UI HAVE；#15/#9 仍 invent-ban/N/A。发版线 **2.7.33**。
 
 ## 邻版关系
 
@@ -13,7 +13,7 @@
 | 版            | 性质                                                              | go-hare         |
 | ------------ | --------------------------------------------------------------- | --------------- |
 | **2.1.217**  | emoji / caps / brace / hyperlink / tips / bg 可靠性                | **已收口**（2.7.32） |
-| **2.1.218**  | code-review bg / a11y / auto-mode / deep-research / frontmatter | **本清单**         |
+| **2.1.218**  | code-review bg / a11y / auto-mode / deep-research / frontmatter | **已收口**（2.7.33） |
 | **2.1.219+** | Opus 5 等                                                        | **另开 pack**     |
 
 

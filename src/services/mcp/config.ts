@@ -6,15 +6,26 @@ import { dirname, join, parse } from 'path'
 import { getPlatform } from 'src/utils/platform.js'
 import type { PluginError } from '../../types/plugin.js'
 import { getPluginErrorMessage } from '../../types/plugin.js'
-import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.js'
+import {
+  CLAUDE_IN_CHROME_MCP_SERVER_NAME,
+  isClaudeInChromeMCPServer,
+} from '../../utils/claudeInChrome/common.js'
 import {
   getCurrentProjectConfig,
   getGlobalConfig,
   saveCurrentProjectConfig,
   saveGlobalConfig,
 } from '../../utils/config.js'
+import {
+  COMPUTER_USE_MCP_SERVER_NAME,
+  isComputerUseMCPServer,
+} from '../../utils/computerUse/common.js'
 import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
+import {
+  getMcpPolicyDenyExpansionEnv,
+  getMcpPolicyPrimaryEnv,
+} from '../../utils/managedEnv.js'
 import { getErrnoCode } from '../../utils/errors.js'
 import { getFsImplementation } from '../../utils/fsOperations.js'
 import { safeParseJSON } from '../../utils/json.js'
@@ -45,15 +56,23 @@ import {
 } from '../analytics/index.js'
 import { fetchClaudeAIMcpConfigsIfEligible } from './claudeai.js'
 import { expandEnvVarsInString } from './envExpansion.js'
+import { z } from 'zod/v4'
 import {
   type ConfigScope,
   type McpHTTPServerConfig,
   type McpJsonConfig,
-  McpJsonConfigSchema,
+  McpClaudeAIProxyServerConfigSchema,
+  McpHTTPServerConfigSchema,
   type McpServerConfig,
   McpServerConfigSchema,
+  McpSdkServerConfigSchema,
+  McpSSEIDEServerConfigSchema,
+  McpSSEServerConfigSchema,
   type McpSSEServerConfig,
+  McpStdioServerConfigSchema,
   type McpStdioServerConfig,
+  McpWebSocketIDEServerConfigSchema,
+  McpWebSocketServerConfigSchema,
   type McpWebSocketServerConfig,
   type ScopedMcpServerConfig,
 } from './types.js'
@@ -358,8 +377,40 @@ function getMcpDenylistSettings(): SettingsJson {
 }
 
 /**
+ * densable X6u — expand a policy predicate string against the policy expansion
+ * env (and optional deny fallback). Logs missing vars; returns expanded text.
+ */
+function expandMcpPolicyPredicate(
+  value: string,
+  env: NodeJS.Dict<string> | Record<string, string | undefined>,
+  fallbackEnv?: NodeJS.Dict<string> | Record<string, string | undefined>,
+): { expanded: string; wildcardVars: string[] } {
+  const { expanded, missingVars, wildcardVars } = expandEnvVarsInString(
+    value,
+    env,
+    fallbackEnv,
+  )
+  if (missingVars.length > 0) {
+    logForDebugging(
+      `MCP policy predicate references environment variable(s) not present in the policy expansion env: ${missingVars.join(', ')}`,
+    )
+  }
+  return { expanded, wildcardVars }
+}
+
+/**
+ * densable E_o — expand server-side command/url tokens from live process.env
+ * (after settings.env has been applied), not the policy primary env.
+ */
+function expandMcpServerSideString(value: string): string {
+  return expandEnvVarsInString(value).expanded
+}
+
+/**
  * Check if an MCP server is denied by enterprise policy
  * Checks name-based, command-based, and URL-based restrictions
+ * densable rdt — policy command/url entries expand ${VAR} via Hyy (startup +
+ * managed env, with settings-file env only as deny fallback).
  * @param serverName The name of the server to check
  * @param config Optional server config for command/URL-based matching
  * @returns true if denied, false if not on denylist
@@ -382,13 +433,18 @@ function isMcpServerDenied(
 
   // Check command-based denial (stdio servers only) and URL-based denial (remote servers only)
   if (config) {
+    // densable Hyy for deny path (env + fallbackEnv)
+    const { env, fallbackEnv } = getMcpPolicyDenyExpansionEnv()
     const serverCommand = getServerCommandArray(config)
     if (serverCommand) {
+      // densable: server side E_o(process.env); policy side X6u(cmd, env, fallback)
+      const expandedServerCommand = serverCommand.map(expandMcpServerSideString)
       for (const entry of settings.deniedMcpServers) {
-        if (
-          isMcpServerCommandEntry(entry) &&
-          commandArraysMatch(entry.serverCommand, serverCommand)
-        ) {
+        if (!isMcpServerCommandEntry(entry)) continue
+        const expandedPolicyCommand = entry.serverCommand.map(
+          part => expandMcpPolicyPredicate(part, env, fallbackEnv).expanded,
+        )
+        if (commandArraysMatch(expandedPolicyCommand, expandedServerCommand)) {
           return true
         }
       }
@@ -396,11 +452,16 @@ function isMcpServerDenied(
 
     const serverUrl = getServerUrl(config)
     if (serverUrl) {
+      const expandedServerUrl = expandMcpServerSideString(serverUrl)
       for (const entry of settings.deniedMcpServers) {
-        if (
-          isMcpServerUrlEntry(entry) &&
-          urlMatchesPattern(serverUrl, entry.serverUrl)
-        ) {
+        if (!isMcpServerUrlEntry(entry)) continue
+        // densable: denylist URL expansion is unaffected by J6u unsafe fail-closed
+        const { expanded: expandedPattern } = expandMcpPolicyPredicate(
+          entry.serverUrl,
+          env,
+          fallbackEnv,
+        )
+        if (urlMatchesPattern(expandedServerUrl, expandedPattern)) {
           return true
         }
       }
@@ -413,6 +474,8 @@ function isMcpServerDenied(
 /**
  * Check if an MCP server is allowed by enterprise policy
  * Checks name-based, command-based, and URL-based restrictions
+ * densable eUe — policy command/url entries expand ${VAR} via Y6u only
+ * (startup freeze + managed-settings env; no settings-file fallback).
  * @param serverName The name of the server to check
  * @param config Optional server config for command/URL-based matching
  * @returns true if allowed, false if blocked by policy
@@ -443,6 +506,8 @@ function isMcpServerAllowedByPolicy(
   const hasUrlEntries = settings.allowedMcpServers.some(isMcpServerUrlEntry)
 
   if (config) {
+    // densable Y6u for allow path (no fallbackEnv)
+    const policyEnv = getMcpPolicyPrimaryEnv()
     const serverCommand = getServerCommandArray(config)
     const serverUrl = getServerUrl(config)
 
@@ -450,10 +515,16 @@ function isMcpServerAllowedByPolicy(
       // This is a stdio server
       if (hasCommandEntries) {
         // If ANY serverCommand entries exist, stdio servers MUST match one of them
+        const expandedServerCommand = serverCommand.map(
+          expandMcpServerSideString,
+        )
         for (const entry of settings.allowedMcpServers) {
+          if (!isMcpServerCommandEntry(entry)) continue
+          const expandedPolicyCommand = entry.serverCommand.map(
+            part => expandMcpPolicyPredicate(part, policyEnv).expanded,
+          )
           if (
-            isMcpServerCommandEntry(entry) &&
-            commandArraysMatch(entry.serverCommand, serverCommand)
+            commandArraysMatch(expandedPolicyCommand, expandedServerCommand)
           ) {
             return true
           }
@@ -472,11 +543,19 @@ function isMcpServerAllowedByPolicy(
       // This is a remote server (sse, http, ws, etc.)
       if (hasUrlEntries) {
         // If ANY serverUrl entries exist, remote servers MUST match one of them
+        const expandedServerUrl = expandMcpServerSideString(serverUrl)
         for (const entry of settings.allowedMcpServers) {
-          if (
-            isMcpServerUrlEntry(entry) &&
-            urlMatchesPattern(serverUrl, entry.serverUrl)
-          ) {
+          if (!isMcpServerUrlEntry(entry)) continue
+          // densable J6u: allowlist fail-closed on wildcard-injecting values
+          const { expanded: expandedPattern, wildcardVars } =
+            expandMcpPolicyPredicate(entry.serverUrl, policyEnv)
+          if (wildcardVars.length > 0) {
+            logForDebugging(
+              `MCP policy URL predicate expansion was unsafe — a value injected wildcard semantics (variables: ${wildcardVars.join(', ')}) — allowlist URL entries using it fail closed; denylist entries are unaffected`,
+            )
+            continue
+          }
+          if (urlMatchesPattern(expandedServerUrl, expandedPattern)) {
             return true
           }
         }
@@ -1296,9 +1375,111 @@ export async function getAllMcpConfigs(): Promise<{
 }
 
 /**
- * Parse and validate an MCP configuration object
- * @param params Parsing parameters
- * @returns Validated configuration with any errors
+ * densable 2.1.219 #4 — per-type schema map (densable `uSs`).
+ * Unknown type strings soft-skip with skipReason `unknown_type`.
+ * `streamable-http` is an alias of `http`.
+ */
+const MCP_SERVER_TYPE_SCHEMA_MAP: Record<
+  string,
+  () => z.ZodType<McpServerConfig>
+> = {
+  stdio: () => McpStdioServerConfigSchema() as z.ZodType<McpServerConfig>,
+  sse: () => McpSSEServerConfigSchema() as z.ZodType<McpServerConfig>,
+  http: () => McpHTTPServerConfigSchema() as z.ZodType<McpServerConfig>,
+  'streamable-http': () =>
+    McpHTTPServerConfigSchema() as z.ZodType<McpServerConfig>,
+  ws: () => McpWebSocketServerConfigSchema() as z.ZodType<McpServerConfig>,
+  sdk: () => McpSdkServerConfigSchema() as z.ZodType<McpServerConfig>,
+  'claudeai-proxy': () =>
+    McpClaudeAIProxyServerConfigSchema() as z.ZodType<McpServerConfig>,
+  // Local extras (IDE transports) — densable uSs omits these; keep for non-CLI sources.
+  'sse-ide': () => McpSSEIDEServerConfigSchema() as z.ZodType<McpServerConfig>,
+  'ws-ide': () =>
+    McpWebSocketIDEServerConfigSchema() as z.ZodType<McpServerConfig>,
+}
+
+/** densable `jyy` — collect leading/trailing whitespace field paths. */
+function collectMcpConfigWhitespacePaths(config: McpServerConfig): string[] {
+  const paths: string[] = []
+  const check = (path: string, value: string): void => {
+    if (value !== value.trim()) paths.push(path)
+  }
+  if ('command' in config && typeof config.command === 'string') {
+    check('command', config.command)
+  }
+  if ('url' in config && typeof config.url === 'string') {
+    check('url', config.url)
+  }
+  if ('args' in config && Array.isArray(config.args)) {
+    config.args.forEach((arg, i) => {
+      if (typeof arg === 'string') check(`args[${i}]`, arg)
+    })
+  }
+  if ('env' in config && config.env && typeof config.env === 'object') {
+    for (const [k, v] of Object.entries(config.env)) {
+      if (k !== k.trim()) paths.push(`env name ${JSON.stringify(k)}`)
+      if (typeof v === 'string') check(`env.${k}`, v)
+    }
+  }
+  if (
+    'headers' in config &&
+    config.headers &&
+    typeof config.headers === 'object'
+  ) {
+    for (const [k, v] of Object.entries(config.headers)) {
+      if (k !== k.trim()) paths.push(`header name ${JSON.stringify(k)}`)
+      if (typeof v === 'string') check(`headers.${k}`, v)
+    }
+  }
+  return paths
+}
+
+/**
+ * densable `$It` subset — reserved built-in MCP server names (non-sdk).
+ * Soft-skipped with skipReason `reserved_name` rather than hard-fail.
+ */
+function isReservedMcpServerName(name: string): boolean {
+  return isClaudeInChromeMCPServer(name) || isComputerUseMCPServer(name)
+}
+
+/**
+ * densable 2.1.219 #4 — store for `--mcp-config` soft-skip entries
+ * (densable `gEm` / `yEm` / `hEm`). Surfaced on stream-json init as
+ * `mcp_server_errors` and as a TTY startup warning.
+ */
+export type McpConfigServerError = {
+  name: string
+  type: string
+  message: string
+}
+
+let mcpConfigServerErrorsStore: McpConfigServerError[] = []
+
+/** densable `gEm` */
+export function storeMcpConfigServerErrors(
+  errors: ReadonlyArray<McpConfigServerError>,
+): void {
+  mcpConfigServerErrorsStore.push(...errors)
+}
+
+/** densable `yEm` */
+export function getMcpConfigServerErrors(): McpConfigServerError[] {
+  return mcpConfigServerErrorsStore
+}
+
+/** Test / process-reset helper. */
+export function resetMcpConfigServerErrors(): void {
+  mcpConfigServerErrorsStore = []
+}
+
+/**
+ * Parse and validate an MCP configuration object.
+ *
+ * densable 2.1.219 #4 (`Tlr`): top-level shape is only
+ * `{ mcpServers: Record<string, unknown> }`. Each entry is validated
+ * independently — invalid entries are soft-skipped with
+ * `mcpErrorMetadata.skipReason` and do NOT null the whole config.
+ * Fatal only when the top-level shape itself is invalid.
  */
 export function parseMcpConfig(params: {
   configObject: unknown
@@ -1310,67 +1491,174 @@ export function parseMcpConfig(params: {
   errors: ValidationError[]
 } {
   const { configObject, expandVars, scope, filePath } = params
-  const schemaResult = McpJsonConfigSchema().safeParse(configObject)
-  if (!schemaResult.success) {
-    // Official 2.1.202: when a server entry has `url` but no `type`, Zod
-    // rejects the union (stdio expects `command`). Surface a clearer hint.
-    const servers =
-      configObject &&
+  // densable: v.object({mcpServers:v.record(v.string(),v.unknown())})
+  const topLevel = z
+    .object({ mcpServers: z.record(z.string(), z.unknown()) })
+    .safeParse(configObject)
+  if (!topLevel.success) {
+    const usedServersKey =
+      configObject !== null &&
       typeof configObject === 'object' &&
-      'mcpServers' in configObject &&
-      (configObject as { mcpServers?: unknown }).mcpServers &&
-      typeof (configObject as { mcpServers: unknown }).mcpServers === 'object'
-        ? ((configObject as { mcpServers: Record<string, unknown> })
-            .mcpServers as Record<string, unknown>)
-        : null
-
+      'servers' in configObject &&
+      !('mcpServers' in configObject)
     return {
       config: null,
-      errors: schemaResult.error.issues.map(issue => {
-        const path = issue.path.join('.')
-        let message = 'Does not adhere to MCP server configuration schema'
-        let suggestion: string | undefined
-        // path like mcpServers.<name> or mcpServers.<name>.command
-        const nameMatch = path.match(/^mcpServers\.([^.]+)/)
-        if (nameMatch && servers) {
-          const entry = servers[nameMatch[1]!]
-          if (
-            entry &&
-            typeof entry === 'object' &&
-            entry !== null &&
-            'url' in entry &&
-            !('type' in entry)
-          ) {
-            message = `MCP server "${nameMatch[1]}" has "url" but no "type"`
-            suggestion =
-              'Add "type": "http" (or "sse" / "ws") for remote servers. Example: { "type": "http", "url": "..." }'
-          }
-        }
-        return {
-          ...(filePath && { file: filePath }),
-          path,
-          message,
-          ...(suggestion && { suggestion }),
-          mcpErrorMetadata: {
-            scope,
-            severity: 'fatal' as const,
-            ...(nameMatch && { serverName: nameMatch[1]! }),
-          },
-        }
-      }),
+      errors: topLevel.error.issues.map(issue => ({
+        ...(filePath && { file: filePath }),
+        path: issue.path.join('.'),
+        message: usedServersKey
+          ? 'Missing "mcpServers" — found "servers" instead. Claude Code reads MCP servers from the "mcpServers" key.'
+          : issue.message,
+        ...(usedServersKey && {
+          suggestion: `Rename the top-level "servers" key to "mcpServers" in ${filePath ?? 'your MCP config'}.`,
+        }),
+        mcpErrorMetadata: {
+          scope,
+          severity: 'fatal' as const,
+        },
+      })),
     }
   }
 
-  // Validate each server and expand variables if requested
   const errors: ValidationError[] = []
   const validatedServers: Record<string, McpServerConfig> = {}
 
-  for (const [name, config] of Object.entries(schemaResult.data.mcpServers)) {
-    let configToCheck = config
+  const pushSkip = (
+    name: string,
+    message: string,
+    suggestion: string | undefined,
+    skipReason: string,
+  ): void => {
+    errors.push({
+      ...(filePath && { file: filePath }),
+      path: `mcpServers.${name}`,
+      message,
+      ...(suggestion && { suggestion }),
+      mcpErrorMetadata: {
+        scope,
+        serverName: name,
+        severity: 'warning',
+        skipReason,
+      },
+    })
+  }
+
+  // densable: raw input may carry "__proto__" that Zod stripped
+  const rawServers =
+    configObject &&
+    typeof configObject === 'object' &&
+    'mcpServers' in configObject &&
+    (configObject as { mcpServers?: unknown }).mcpServers &&
+    typeof (configObject as { mcpServers: unknown }).mcpServers === 'object'
+      ? ((configObject as { mcpServers: Record<string, unknown> })
+          .mcpServers as Record<string, unknown>)
+      : null
+  if (
+    rawServers &&
+    Object.hasOwn(rawServers, '__proto__') &&
+    !Object.hasOwn(topLevel.data.mcpServers, '__proto__')
+  ) {
+    pushSkip(
+      '__proto__',
+      '"__proto__" is a reserved MCP server name and was not loaded',
+      'Rename this server in your MCP config — "__proto__" cannot be used as a server name',
+      'reserved_name',
+    )
+  }
+
+  for (const [name, entry] of Object.entries(topLevel.data.mcpServers)) {
+    const declaredType =
+      entry &&
+      typeof entry === 'object' &&
+      'type' in entry &&
+      typeof (entry as { type: unknown }).type === 'string'
+        ? (entry as { type: string }).type
+        : 'stdio'
+    const schemaFn = MCP_SERVER_TYPE_SCHEMA_MAP[declaredType]
+    if (!schemaFn) {
+      pushSkip(
+        name,
+        `Skipped — unknown MCP server type "${declaredType}" for server "${name}"`,
+        'Valid types are: stdio, sse, http (or streamable-http), ws, sdk',
+        'unknown_type',
+      )
+      continue
+    }
+
+    // densable uSs maps streamable-http → same schema as http; rewrite
+    // type so the http literal schema accepts the entry.
+    const entryForParse =
+      declaredType === 'streamable-http' && entry && typeof entry === 'object'
+        ? { ...(entry as Record<string, unknown>), type: 'http' }
+        : entry
+    const parsed = schemaFn().safeParse(entryForParse)
+    if (!parsed.success) {
+      if (
+        entry !== null &&
+        typeof entry === 'object' &&
+        !('type' in entry) &&
+        'url' in entry &&
+        !('command' in entry)
+      ) {
+        pushSkip(
+          name,
+          `Skipped — MCP server "${name}" has a "url" but no "type"; add "type": "http" (or "sse" / "ws") to this entry`,
+          undefined,
+          'url_missing_type',
+        )
+        continue
+      }
+      const detail = parsed.error.issues
+        .map(issue => {
+          const path = issue.path.join('.') || '(root)'
+          const msg = issue.message.replace(/^Invalid input: /, '')
+          return `${path}: ${msg}`
+        })
+        .join('; ')
+      pushSkip(
+        name,
+        `Skipped — invalid MCP server config for "${name}": ${detail}`,
+        undefined,
+        'invalid_config',
+      )
+      continue
+    }
+
+    let configToCheck = parsed.data as McpServerConfig
+
+    // densable `$It` — reserved names soft-skip (sdk exempt)
+    if (isReservedMcpServerName(name) && configToCheck.type !== 'sdk') {
+      const reserved = isClaudeInChromeMCPServer(name)
+        ? CLAUDE_IN_CHROME_MCP_SERVER_NAME
+        : isComputerUseMCPServer(name)
+          ? COMPUTER_USE_MCP_SERVER_NAME
+          : name
+      pushSkip(
+        name,
+        `"${name}" is a reserved MCP server name and was not loaded`,
+        `Rename this server in your MCP config — "${reserved}" is reserved for internal use`,
+        'reserved_name',
+      )
+      continue
+    }
+
+    const whitespacePaths = collectMcpConfigWhitespacePaths(configToCheck)
+    if (whitespacePaths.length > 0) {
+      errors.push({
+        ...(filePath && { file: filePath }),
+        path: `mcpServers.${name}`,
+        message: `Leading or trailing whitespace in: ${whitespacePaths.join(', ')}`,
+        suggestion: `Remove the whitespace from these values in the "${name}" entry — they are used exactly as written`,
+        mcpErrorMetadata: {
+          scope,
+          serverName: name,
+          severity: 'warning',
+        },
+      })
+    }
 
     if (expandVars) {
-      const { expanded, missingVars } = expandEnvVars(config)
-
+      const { expanded, missingVars } = expandEnvVars(configToCheck)
       if (missingVars.length > 0) {
         errors.push({
           ...(filePath && { file: filePath }),
@@ -1384,7 +1672,6 @@ export function parseMcpConfig(params: {
           },
         })
       }
-
       configToCheck = expanded
     }
 
@@ -1412,6 +1699,7 @@ export function parseMcpConfig(params: {
 
     validatedServers[name] = configToCheck
   }
+
   return {
     config: { mcpServers: validatedServers },
     errors,

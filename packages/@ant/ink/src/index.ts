@@ -80,9 +80,12 @@ export {
   materializeScreenReaderLines,
   planAndMaterializeScreenReaderFrame,
   planScreenReaderFrameUpdate,
+  isGraphemeBoundary,
+  computeNextScreenReaderAnchor,
   type ScreenReaderPark,
   type ScreenReaderCursorDeclaration,
   type ScreenReaderFramePlan,
+  type ScreenReaderAnchor,
 } from './core/screenReaderPark.js'
 export {
   extractScreenReaderOutput,

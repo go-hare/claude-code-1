@@ -283,6 +283,11 @@ export type HookInput =
       file_path: string
       event: 'change' | 'add' | 'unlink'
     })
+  | (HookInputBase & {
+      hook_event_name: 'DirectoryAdded'
+      directory: string
+      source: 'slash_command' | 'register_repo_root'
+    })
 
 export type AsyncHookJSONOutput = {
   async: true
@@ -377,6 +382,12 @@ export type ConfigChangeHookInput = HookInput
 export type InstructionsLoadedHookInput = HookInput
 export type CwdChangedHookInput = HookInput & { cwd: string }
 export type FileChangedHookInput = HookInput & { path: string }
+/** densable 2.1.219 DirectoryAdded — /add-dir or register_repo_root */
+export type DirectoryAddedHookInput = HookInput & {
+  hook_event_name: 'DirectoryAdded'
+  directory: string
+  source: 'slash_command' | 'register_repo_root'
+}
 
 // SDK Message types
 export type SDKMessage = { type: string; [key: string]: unknown }

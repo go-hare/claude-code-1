@@ -76,19 +76,28 @@ describe('resolveMaxConcurrentSubagents (densable 2.1.217 #18)', () => {
   })
 })
 
-describe('resolveMaxSubagentSpawnDepth (densable 2.1.217 #19)', () => {
-  test('default 1', () => {
+describe('resolveMaxSubagentSpawnDepth (densable 2.1.219 #24)', () => {
+  test('default 3 (densable qPu)', () => {
     expect(resolveMaxSubagentSpawnDepth({})).toBe(
       DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH,
     )
+    expect(DEFAULT_MAX_SUBAGENT_SPAWN_DEPTH).toBe(3)
   })
 
-  test('env CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH', () => {
+  test('env CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 disables nesting', () => {
     expect(
       resolveMaxSubagentSpawnDepth({
-        CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '3',
+        CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1',
       }),
-    ).toBe(3)
+    ).toBe(1)
+  })
+
+  test('env CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH override', () => {
+    expect(
+      resolveMaxSubagentSpawnDepth({
+        CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '5',
+      }),
+    ).toBe(5)
   })
 })
 
@@ -138,7 +147,7 @@ describe('takeConcurrencySlot', () => {
 })
 
 describe('assertSubagentDepthAllowed', () => {
-  test('main (undefined context) depth 0 allowed under default max 1', () => {
+  test('main (undefined context) depth 0 allowed under default max 3', () => {
     expect(assertSubagentDepthAllowed({ env: {} })).toBe(0)
   })
 

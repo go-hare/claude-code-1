@@ -515,6 +515,11 @@ export function convertToSandboxRuntimeConfig(
     }
   }
 
+  // densable 2.1.219: sandbox.network.deniedDomains from settings, then
+  // WebFetch(domain:...) deny rules. Survives allowManagedDomainsOnly.
+  for (const domain of settings.sandbox?.network?.deniedDomains || []) {
+    deniedDomains.push(domain)
+  }
   for (const ruleString of permissions.deny || []) {
     const rule = permissionRuleValueFromString(ruleString)
     if (
@@ -846,9 +851,16 @@ export function convertToSandboxRuntimeConfig(
 
   // densable FQt tlsTerminate: policy → flag → enabled userSettings only
   // (project/local ignored). Windows without CA paths: warn + skip ephemeral.
-  const network: SandboxRuntimeConfig['network'] = {
+  // densable 2.1.219: strictAllowlist via GDt() sources (policy/flag/user only).
+  // Package @anthropic-ai/sandbox-runtime@0.0.70 does not yet read the field;
+  // host still stamps it for forward-compat and enforces via ask-callback.
+  const strictAllowlist = resolveSandboxStrictAllowlist() || undefined
+  const network: SandboxRuntimeConfig['network'] & {
+    strictAllowlist?: boolean
+  } = {
     allowedDomains,
     deniedDomains,
+    ...(strictAllowlist ? { strictAllowlist: true } : {}),
     allowUnixSockets: settings.sandbox?.network?.allowUnixSockets,
     allowAllUnixSockets: settings.sandbox?.network?.allowAllUnixSockets,
     allowLocalBinding: settings.sandbox?.network?.allowLocalBinding,
@@ -892,22 +904,42 @@ export function convertToSandboxRuntimeConfig(
 }
 
 /**
- * densable FQt slice for network.tlsTerminate — managed/policy, flag, then
- * userSettings only when that source is enabled. Project/local ignored.
+ * densable FQt / GDt sources for network fields honored only from
+ * managed/policy, flag (`--settings`), and enabled userSettings.
+ * Project/local ignored.
  */
-export function resolveSandboxTlsTerminate():
-  | NonNullable<SandboxRuntimeConfig['network']['tlsTerminate']>
-  | undefined {
-  const sources: Array<SettingsJson | null | undefined> = [
+function trustedSandboxNetworkSources(): Array<
+  SettingsJson | null | undefined
+> {
+  return [
     getSettingsForSource('policySettings'),
     getSettingsForSource('flagSettings'),
     isSettingSourceEnabled('userSettings')
       ? getSettingsForSource('userSettings')
       : null,
   ]
-  return sources
+}
+
+/**
+ * densable FQt slice for network.tlsTerminate — managed/policy, flag, then
+ * userSettings only when that source is enabled. Project/local ignored.
+ */
+export function resolveSandboxTlsTerminate():
+  | NonNullable<SandboxRuntimeConfig['network']['tlsTerminate']>
+  | undefined {
+  return trustedSandboxNetworkSources()
     .map(s => s?.sandbox?.network?.tlsTerminate)
     .find(v => v !== undefined)
+}
+
+/**
+ * densable 2.1.219 GDt().some(K => K?.sandbox?.network?.strictAllowlist === true)
+ * — user / managed / CLI only; project settings ignored.
+ */
+export function resolveSandboxStrictAllowlist(): boolean {
+  return trustedSandboxNetworkSources().some(
+    s => s?.sandbox?.network?.strictAllowlist === true,
+  )
 }
 
 /**
@@ -1337,13 +1369,21 @@ async function initialize(
     return
   }
 
-  // Wrap the callback to enforce allowManagedDomainsOnly policy.
-  // This ensures all code paths (REPL, print/SDK) are covered.
+  // Wrap the callback to enforce allowManagedDomainsOnly + densable 2.1.219
+  // strictAllowlist (deny without prompt). Package 0.0.70 lacks the field check
+  // densable dSu has (`!r||kl.network.strictAllowlist`); host enforces here so
+  // all code paths (REPL, print/SDK) are covered even when the field is stripped.
   const wrappedCallback: SandboxAskCallback | undefined = sandboxAskCallback
     ? async (hostPattern: NetworkHostPattern) => {
         if (shouldAllowManagedSandboxDomainsOnly()) {
           logForDebugging(
             `[sandbox] Blocked network request to ${hostPattern.host} (allowManagedDomainsOnly)`,
+          )
+          return false
+        }
+        if (resolveSandboxStrictAllowlist()) {
+          logForDebugging(
+            `[sandbox] Blocked network request to ${hostPattern.host} (strictAllowlist)`,
           )
           return false
         }

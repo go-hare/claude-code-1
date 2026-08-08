@@ -73,6 +73,7 @@ import {
   materializeScreenReaderFrameAnsi,
   materializeScreenReaderLines,
   planScreenReaderFrameUpdate,
+  type ScreenReaderAnchor,
   type ScreenReaderPark,
 } from './screenReaderPark.js';
 import { endScreenReaderStartupQuiet, getScreenReaderStartupQuietRemainingMs } from './screenReaderStartupQuiet.js';
@@ -335,6 +336,11 @@ export default class Ink {
   private prevScreenReaderLines: string[] = [];
   /** Official prevScreenReaderPark — last parked SR cursor. */
   private prevScreenReaderPark: ScreenReaderPark = { row: 0, col: 0 };
+  /**
+   * densable prevScreenReaderAnchor — tracks whether suffix-append is safe
+   * (2.1.219 #15: avoid rewriting entire input line on each keystroke).
+   */
+  private prevScreenReaderAnchor: ScreenReaderAnchor = 'clean';
   private altScreenParkPatch: Readonly<{ type: 'stdout'; content: string }>;
   // Text selection state (alt-screen only). Owned here so the overlay
   // pass in onRender can read it and App.tsx can update it from mouse
@@ -566,10 +572,11 @@ export default class Ink {
     this.resetScreenReaderDiffState();
   };
 
-  /** Official resetScreenReaderDiffState — clear prev SR frame + park. */
+  /** Official resetScreenReaderDiffState — clear prev SR frame + park + anchor. */
   resetScreenReaderDiffState(): void {
     this.prevScreenReaderLines = [];
     this.prevScreenReaderPark = { row: 0, col: 0 };
+    this.prevScreenReaderAnchor = 'clean';
   }
 
   // NOT debounced. A debounce opens a window where stdout.columns is NEW
@@ -1237,6 +1244,7 @@ export default class Ink {
       stringWidth,
       preserveRanges,
       announcementStartLine,
+      prevAnchor: this.prevScreenReaderAnchor,
     });
     if (plan.skip) return;
 
@@ -1246,9 +1254,13 @@ export default class Ink {
     }
 
     // Official: this.prevScreenReaderLines=n; this.prevScreenReaderPark=a
+    // densable 2.1.219: nextAnchor only on full rewrite; suffix keeps anchor
     const { lines } = materializeScreenReaderLines(fullText, columns, preserveRanges);
     this.prevScreenReaderLines = lines;
     this.prevScreenReaderPark = plan.park;
+    if (plan.nextAnchor !== undefined) {
+      this.prevScreenReaderAnchor = plan.nextAnchor;
+    }
   }
 
   /**

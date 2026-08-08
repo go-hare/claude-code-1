@@ -36,6 +36,15 @@ export type SystemInitInputs = {
   skills: ReadonlyArray<CommandLike>
   plugins: ReadonlyArray<{ name: string; path: string; source: string }>
   fastMode: boolean | undefined
+  /**
+   * densable 2.1.219 #4 — MCP --mcp-config entries skipped by config validation.
+   * Surfaced on headless stream-json init as `mcp_server_errors`.
+   */
+  mcpServerErrors?: ReadonlyArray<Record<string, unknown>>
+  /** densable plugin_errors on init (optional). */
+  pluginErrors?: ReadonlyArray<Record<string, unknown>>
+  /** densable plugin_warnings on init (optional). */
+  pluginWarnings?: ReadonlyArray<Record<string, unknown>>
 }
 
 /**
@@ -83,6 +92,24 @@ export function buildSystemInitMessage(inputs: SystemInitInputs): SDKMessage {
       source: plugin.source,
     })),
     uuid: randomUUID(),
+  }
+  // densable 2.1.219 #4 — only emit error arrays when non-empty
+  if (inputs.pluginErrors && inputs.pluginErrors.length > 0) {
+    initMessage.plugin_errors = inputs.pluginErrors.map(e => ({ ...e }))
+  }
+  if (inputs.pluginWarnings && inputs.pluginWarnings.length > 0) {
+    initMessage.plugin_warnings = inputs.pluginWarnings.map(e => ({ ...e }))
+  }
+  // densable Jvr: drop skips for servers that later connected under the same name
+  if (inputs.mcpServerErrors && inputs.mcpServerErrors.length > 0) {
+    const connected = new Set(inputs.mcpClients.map(c => c.name))
+    const filtered = inputs.mcpServerErrors.filter(e => {
+      const name = typeof e.name === 'string' ? e.name : undefined
+      return name === undefined || !connected.has(name)
+    })
+    if (filtered.length > 0) {
+      initMessage.mcp_server_errors = filtered.map(e => ({ ...e }))
+    }
   }
   // Hidden from public SDK types — ant-only UDS messaging socket path
   if (feature('UDS_INBOX')) {

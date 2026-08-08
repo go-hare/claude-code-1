@@ -38,9 +38,15 @@ describe('COST_TIER constant values', () => {
     )
   })
 
-  test('COST_TIER_30_150: $30/$150 (Fast Opus 4.6)', () => {
+  test('COST_TIER_30_150: $30/$150 (legacy fast non-5/4.8)', () => {
     expect(formatModelPricing({ inputTokens: 30, outputTokens: 150 })).toBe(
       '$30/$150 per Mtok',
+    )
+  })
+
+  test('COST_TIER_10_50: $10/$50 (densable 2.1.219 Opus 5/4.8 fast)', () => {
+    expect(formatModelPricing({ inputTokens: 10, outputTokens: 50 })).toBe(
+      '$10/$50 per Mtok',
     )
   })
 
