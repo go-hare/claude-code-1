@@ -163,6 +163,20 @@ export const CLAUDE_OPUS_4_8_CONFIG = {
   grok: 'claude-opus-4-8',
 } as const satisfies ModelConfig
 
+// densable 2.1.219 #1: Claude Opus 5 (default Opus; native 1M; fast mode)
+export const CLAUDE_OPUS_5_CONFIG = {
+  firstParty: 'claude-opus-5',
+  bedrock: 'us.anthropic.claude-opus-5',
+  vertex: 'claude-opus-5',
+  foundry: 'claude-opus-5',
+  anthropicAws: 'claude-opus-5',
+  mantle: 'anthropic.claude-opus-5',
+  gateway: 'claude-opus-5',
+  openai: 'claude-opus-5',
+  gemini: 'claude-opus-5',
+  grok: 'claude-opus-5',
+} as const satisfies ModelConfig
+
 export const CLAUDE_SONNET_4_6_CONFIG = {
   firstParty: 'claude-sonnet-4-6',
   bedrock: 'us.anthropic.claude-sonnet-4-6',
@@ -206,6 +220,8 @@ export const ALL_MODEL_CONFIGS = {
   opus46: CLAUDE_OPUS_4_6_CONFIG,
   opus47: CLAUDE_OPUS_4_7_CONFIG,
   opus48: CLAUDE_OPUS_4_8_CONFIG,
+  // densable 2.1.219 #1
+  opus5: CLAUDE_OPUS_5_CONFIG,
 } as const satisfies Record<string, ModelConfig>
 
 export type ModelKey = keyof typeof ALL_MODEL_CONFIGS
