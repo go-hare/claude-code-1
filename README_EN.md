@@ -43,9 +43,9 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.221 → 2.1.222** product alignment (221 sandbox mask / PS quote-path / bareAssignmentNames + **222 every-session worktree isolation / streaming salvage / RC auto-start source limits / ULTRAPLAN product-off**, 21 rows). **Published npm version is whatever `package.json` says** (currently **2.7.34**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.221 → 2.1.222** product alignment (221 sandbox mask / PS quote-path / bareAssignmentNames + **222 every-session worktree isolation / streaming salvage / RC auto-start source limits / ULTRAPLAN product-off**, 21 rows). **Published npm version is whatever `package.json` says** (currently **2.7.35**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.222 alignment (2.7.34)
+#### densable 2.1.222 alignment (2.7.35)
 
 Source of truth: `docs/upstream-extraction/v2.1.222/official-222-checklist.md` (**HAVE 21 / GAP 0**), `changelog-2.1.222.md`. Stacked on **2.1.221**.
 
@@ -57,7 +57,7 @@ Source of truth: `docs/upstream-extraction/v2.1.222/official-222-checklist.md` (
 | **tools / cost / git** | MCP usage only when tools truly consumed; SendMessage summary truncate; tool-gone still rendered; post-push PR link; raw git diff `--no-textconv`/`--no-ext-diff`; agent family alias step-down | — |
 | **Feature defaults** | **ULTRAPLAN** product default OFF (`FEATURE_ULTRAPLAN=1` revives residual) | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF; no further KAIROS product surface |
 
-#### densable 2.1.219–2.1.221 alignment (2.7.34, included)
+#### densable 2.1.219–2.1.221 alignment (2.7.35, included)
 
 Sources of truth:
 - `docs/upstream-extraction/v2.1.219/official-219-checklist.md` (**HAVE 24 / GAP 0**)
@@ -152,11 +152,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF |
 
-### Recent updates (2.7.5 → 2.7.34)
+### Recent updates (2.7.5 → 2.7.35)
 
 | Version | Highlights |
 | ------- | ---------- |
-| **2.7.34** | **densable 2.1.222 full 1:1 (21/21 HAVE)** + 219–221 included: every-session worktree isolation; streaming UNf/WNf/Qci + salvage clear contract; RC `remoteControlAtStartup` source limits (flag/aliases); host model overlay; ULTRAPLAN product OFF; preflight proxy timeout; MCP usage attribution; SendMessage classifier/truncate; tool-gone display; post-push PR link; raw git diff; agent family step-down; SR EOL delete; file watcher teardown; etc. Includes 219 **24/24** / 220 residual / 221 **HAVE 35 / GAP 2 / N/A 2** (#10 constructor / #12 large-upload TLS still GAP). UDS/LAN/TEAMMEM default OFF. |
+| **2.7.35** | **densable 2.1.222 full 1:1 (21/21 HAVE)** + 219–221 included: every-session worktree isolation; streaming UNf/WNf/Qci + salvage clear contract; RC `remoteControlAtStartup` source limits (flag/aliases); host model overlay; ULTRAPLAN product OFF; preflight proxy timeout; MCP usage attribution; SendMessage classifier/truncate; tool-gone display; post-push PR link; raw git diff; agent family step-down; SR EOL delete; file watcher teardown; etc. Includes 219 **24/24** / 220 residual / 221 **HAVE 35 / GAP 2 / N/A 2** (#10 constructor / #12 large-upload TLS still GAP). UDS/LAN/TEAMMEM default OFF. |
 | **2.7.33** | **densable 2.1.218 full 1:1 (35 HAVE / 1 N/A / 0 GAP)**: code-review bg + ultra cloud; ultrareview descriptive/invalid args; SR a11y / Ctrl+J / left-arrow confirm / AgentView Esc; Host teardown + permissionLayers; auto-mode/sandbox IDE; fork lineage; Bedrock wizard; CCR heartbeat; frontmatter bool/`--config`/ban `:`; `/deep-research` manual-only; RC multi-env trust. **#9 gateway metering N/A**. Ship hardening: Ink skipSyncMarkers/unmount/alt-screen; Agent Views Esc no attach-origin black screen + O7 exit. UDS/LAN/TEAMMEM default OFF. |
 | **2.7.32** | **densable 2.1.217 full 1:1 (20/20 HAVE)**: concurrent subagents 20 / nest depth 1; brace budget; `FORCE_HYPERLINK`; emoji shortcode typeahead; tip lifetime 3; login 3d; transcript ENOSPC; MCP truncate; Opus 4.8 Bedrock 1M; SR startup quiet; managed OTEL; malformed attachment; attach footer gap; Win taskkill; bg isolation `eq`/`N6g`/`ZRu` bare+YPg (ZRu Shell.exec-only). **Intentionally stricter**: parse-unavailable fail-closed. UDS/LAN/TEAMMEM default OFF. |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 closeout**: 215 `/verify`·`/code-review` no model auto-invoke (HAVE 2); 216 **HAVE 38 / N/A 1 / GAP 0** (`sandbox.filesystem.disabled`, long-session normalize, auto-mode 401, worktree git isolation, daemon stop --any, bg/agents UX, Win network paths, fullscreen UI, skill menu hot refresh, `/rewind` symlink safety, etc.). Intentionally off: UDS/LAN/TEAMMEM; VSCode RTL N/A. |

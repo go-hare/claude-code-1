@@ -43,9 +43,9 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.221 → 2.1.222** 产品对齐（221 sandbox mask / PS 引号路径 / bareAssignmentNames 等 + **222 全会话 worktree 隔离 / streaming salvage / RC auto-start 源限制 / ULTRAPLAN 产品拆除** 等 21 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.34**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.221 → 2.1.222** 产品对齐（221 sandbox mask / PS 引号路径 / bareAssignmentNames 等 + **222 全会话 worktree 隔离 / streaming salvage / RC auto-start 源限制 / ULTRAPLAN 产品拆除** 等 21 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.35**），与 git tag 可能不同步。
 
-#### densable 2.1.222 对齐说明（2.7.34）
+#### densable 2.1.222 对齐说明（2.7.35）
 
 对照文档：`docs/upstream-extraction/v2.1.222/official-222-checklist.md`（**HAVE 21 / GAP 0**）、`changelog-2.1.222.md`。叠在 **2.1.221** 之上。
 
@@ -57,7 +57,7 @@
 | **工具 / 成本 / git** | MCP 份额仅计真消费；SendMessage summary 截断；tool-gone 仍展示；post-push PR link；raw git diff `--no-textconv`/`--no-ext-diff`；agent 族别名 step-down | — |
 | **Feature 默认** | **ULTRAPLAN** 产品默认 OFF（`FEATURE_ULTRAPLAN=1` 可复活 residual） | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF；不扩 KAIROS 产品面 |
 
-#### densable 2.1.219–2.1.221 对齐说明（2.7.34，已并入）
+#### densable 2.1.219–2.1.221 对齐说明（2.7.35，已并入）
 
 对照文档：
 - `docs/upstream-extraction/v2.1.219/official-219-checklist.md`（**HAVE 24 / GAP 0**）
@@ -152,11 +152,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF |
 
-### 近期更新（2.7.5 → 2.7.34）
+### 近期更新（2.7.5 → 2.7.35）
 
 | 版本 | 要点 |
 | ---- | ---- |
-| **2.7.34** | **densable 2.1.222 全量 1:1（21/21 HAVE）** + 已并入 219–221：全会话 worktree isolation；streaming UNf/WNf/Qci + salvage clear 契约；RC `remoteControlAtStartup` 源限制（flag/aliases）；host model overlay；ULTRAPLAN 产品 OFF；preflight proxy 超时；MCP 份额归因；SendMessage classifier/截断；tool-gone 展示；post-push PR link；raw git diff；agent 族 step-down；SR EOL 删除；file watcher teardown 等。并入 219 **24/24** / 220 residual / 221 **HAVE 35 / GAP 2 / N/A 2**（#10 constructor / #12 large-upload TLS 仍 GAP）。UDS/LAN/TEAMMEM 默认 OFF。 |
+| **2.7.35** | **densable 2.1.222 全量 1:1（21/21 HAVE）** + 已并入 219–221：全会话 worktree isolation；streaming UNf/WNf/Qci + salvage clear 契约；RC `remoteControlAtStartup` 源限制（flag/aliases）；host model overlay；ULTRAPLAN 产品 OFF；preflight proxy 超时；MCP 份额归因；SendMessage classifier/截断；tool-gone 展示；post-push PR link；raw git diff；agent 族 step-down；SR EOL 删除；file watcher teardown 等。并入 219 **24/24** / 220 residual / 221 **HAVE 35 / GAP 2 / N/A 2**（#10 constructor / #12 large-upload TLS 仍 GAP）。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.33** | **densable 2.1.218 全量 1:1（35 HAVE / 1 N/A / 0 GAP）**：code-review bg + ultra cloud；ultrareview 描述/无效参数；SR a11y / Ctrl+J / ←确认 / AgentView Esc；Host teardown + permissionLayers；auto-mode/sandbox IDE；fork lineage；Bedrock wizard；CCR heartbeat；frontmatter 布尔/`--config`/禁 `:`；`/deep-research` 仅手动；RC multi-env trust。**#9 gateway metering N/A**。发版加固：Ink skipSyncMarkers/unmount/alt-screen；Agent Views Esc 不 attach-origin 黑屏 + O7 退出。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.32** | **densable 2.1.217 全量 1:1（20/20 HAVE）**：subagent concurrent 20 / nest depth 1；brace budget；`FORCE_HYPERLINK`；emoji shortcode typeahead；tip lifetime 3；login 3d；transcript ENOSPC；MCP truncate；Opus 4.8 Bedrock 1M；SR startup quiet；managed OTEL；malformed attachment；attach footer gap；Win taskkill；bg isolation `eq`/`N6g`/`ZRu` bare+YPg（ZRu 仅 Shell.exec）。**故意更严**：parse-unavailable fail-closed。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 收口**：215 `/verify`·`/code-review` 禁止模型自启（HAVE 2）；216 **HAVE 38 / N/A 1 / GAP 0**（sandbox.filesystem.disabled、长会话 normalize、auto-mode 401、worktree git 隔离、daemon stop --any、bg/agents UX、Win 网络路径、fullscreen UI、skill 菜单热刷新、`/rewind` symlink 安全等）。故意不扩 UDS/LAN/TEAMMEM；VSCode RTL N/A。 |
