@@ -1,0 +1,47 @@
+# densable 2.1.221 #6 — PowerShell paths containing quote characters
+
+Official: Fixed PowerShell permission checks mishandling paths containing quote
+characters on Windows; such paths now prompt for approval.
+
+## SEA gold (2.1.221 win32-x64)
+
+validatePath ≈ `pWo(e,t,r,n)`:
+
+```
+function B3(e){return e.replace(e9_,"")}  // strip ALL quotes (ASCII + U+2018–201F)
+function SQ(e){return e.replace(t9_,"")}  // strip surrounding quote runs only
+function jce(e){ /* PS-style unquote walk */ }
+e9_ = /['"\u2018-\u201F]+/g
+t9_ = /^['"\u2018-\u201F]+|['"\u2018-\u201F]+$/g
+
+function pWo(e,t,r,n){
+  let o=B3(e), i=o!==e;
+  if(i){ /* deny-check variants: raw / SQ / jce (+ backtick / :: guesses) */ }
+  let s=(m)=>({allowed:!1, resolvedPath:m, decisionReason:{
+    type:"other",
+    reason:"Paths containing quote characters cannot be statically validated and require manual approval"
+  }});
+  let l=cSn(o).replaceAll("\\","/");
+  // … ~user / backtick / :: / drive-relative / UNC / $% / provider / glob …
+  // final:
+  // if(i&&f.allowed) return s(d);
+  // if(i&&!f.allowed&&safetyCheck) rewrite reason + classifierApprovable:!1
+}
+```
+
+Exact reason string:
+`Paths containing quote characters cannot be statically validated and require manual approval`
+
+## Local wire
+
+- `packages/builtin-tools/.../PowerShellTool/pathValidation.ts`
+  - `stripAllPathQuotes` ≈ B3
+  - `stripSurroundingPathQuotes` ≈ SQ
+  - `unquotePowerShellPathStyle` ≈ jce
+  - `validatePath` ≈ pWo quote branch
+- tests: `pathQuoteChars.221.test.ts`
+
+## Note
+
+219 SEA already has backtick/`$`/`%`/UNC ask strings; the **quote-characters**
+reason string is densable **2.1.221** product surface (count 2 in 221 binary).

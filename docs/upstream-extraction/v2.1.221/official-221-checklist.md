@@ -54,7 +54,7 @@
 | 3   | `claude plugin validate` marketplace/plugin name warn   | **HAVE**    | `claude plugin validate` / ValidatePlugin + `validatePlugin.ts`：plugin.json name 非 strict kebab-case 告警（Claude.ai marketplace sync 拒非 kebab；空格 schema 已拒）。marketplace manifest 亦校验（重名/空 plugins/版本/描述）。无 Desktop-only managed-marketplace-only 专用串；核心 marketplace-name 警告面在。见 `validatePlugin.ts`、`ValidatePlugin.tsx`、`schemas.ts`。                                                                                                                                              |
 | 4   | `claude-api` skill `prompt-audit` subcommand            | **HAVE**    | densable 2.1.221：`X5T=["migrate","managed-agents-onboard","prompt-audit"]`；`matchSubcommand`/`gPl`；无语言时 `prompt-audit` 不 ask；SKILL.md Subcommands 表 + Language Detection 非交互 exception + Before You Start exception；`shared/prompt-audit.md` 内联。见 `claudeApi.ts`、`claudeApiContent.ts`、`claude-api/**`、`claudeApi.promptAudit.221.test.ts`。                                                                                                                                                                                                  |
 | 5   | Bash zsh `[[ ]]` permission bypass                      | **HAVE**    | 既有 `[[ ]]` expansion/cmdsub/`$name[expr]` fail-closed + densable 2.1.221：`extglob_pattern` unquoted `&` → too-complex `[[ ]] pattern contains unquoted & (zsh splits the word at & at any depth)`（`differential: true`）。见 `ast.ts`、`batchA214.residual.test.ts`、`hit-zsh-double-bracket-permission.txt`。                                                         |
-| 6   | PowerShell paths with quote chars → prompt              | **HAVE**    | PowerShellTool prompt：含空格路径必须双引号；native exe 空格亦 call-operator 引用。与 densable 路径引号/审批引导同类（同 BashTool class）。**注**：官方 bullet 是 permission mishandle quote chars；本地证据偏 prompt 引导面，若 dig 更深可再降 PARTIAL。见 `PowerShellTool/prompt.ts`。                                                                                                                                                                                                                                                   |
+| 6   | PowerShell paths with quote chars → prompt              | **HAVE**    | densable 2.1.221 SEA `pWo`/`B3`/`SQ`/`jce`：`B3` 全量剥 ASCII+smart quotes（`e9_`）；原路径含引号时先多变体 deny-guess（raw/SQ/jce + backtick/`::`）；静态校验跑 B3 后路径；若 B3 后会 auto-allow → 强制 ask，reason **`Paths containing quote characters cannot be statically validated and require manual approval`**；safetyCheck 改写 + `classifierApprovable:false`。本地 `pathValidation.ts` 1:1；`pathQuoteChars.221.test.ts`；snippet `hit-powershell-quote-path.txt`。**非** prompt 文案顶替。 |
 | 7   | thinking toggle session-sticky；MCP disable 不 revert     | **HAVE**    | ThinkingToggle 写 `AppState.thinkingEnabled`（会话内）；Config `alwaysThinkingEnabled` 另路径。host sticky `max_thinking_tokens` + print/bridge `set_max_thinking_tokens` 持久 thinkingConfig。`mcp_set_servers` / `applyMcpServerChanges` 只动 MCP client/tool，不 clear thinking*。见 `ThinkingToggle.tsx`、`PromptInput.tsx`、`AppStateStore.ts`、`hostPermissionLayers.ts`、`print.ts`、`useReplBridge.tsx`。                                                                                           |
 | 8   | `--mcp-config` 在 `-p` 首 turn 前 connect                  | **HAVE**    | print/headless 在首 turn 前 await MCP connect；`--mcp-config` 一等 option；`connectMcpBatch` 注释：print 常单 turn，晚 connect 不够。`dynamicMcpConfig` 经 bare/strict skip 存活。见 `main.tsx`、`print.ts`、`mcp/client.ts`、`mcp/config.ts`。                                                                                                                                                                                                                                                             |
 | 9   | Esc retract + resubmit 保留 @-mention files               | **HAVE**    | Esc cancel → `restoreMessageSync` + `textForResubmit` 保留 `@path`；resubmit 重跑 attachment；`Eio/H1e` already_read 仅 full-enough cache+mtime 命中，partial/contentNotInModelContext 重读。**勿 invent** 假 attachment API。见 `REPL.tsx`、`messages.ts`、`attachments.ts`、`fileStateCache.ts`。                                                                                                                                                                                                    |
@@ -135,6 +135,7 @@ N/A: #1 #38
 - `snippets/hit-entitlement_blind.txt` / `hit-isEntitlementOverlayUnavailable.txt`（220 carry only）
 - `snippets/hit-help-feedback-noninteractive.txt` / `hit-background-session-shipping.txt` / `hit-prompt-audit-subcommand.txt`
 - `snippets/hit-constructor-mcp-map.txt` / `hit-large-upload-tls.txt`（residual GAP dig）
+- `snippets/hit-powershell-quote-path.txt`（#6 pWo/B3/SQ/jce → HAVE 1:1）
 - `snippets/hit-GetProcessTimes.txt`（#27 win32 densable gold → HAVE）
 - `snippets/hit-modelScheduledOrigin-wakeupSource.txt`（cron/loop fire stamp 1:1）
 - `snippets/anchors.json`
@@ -152,8 +153,9 @@ N/A: #1 #38
 9. **#30 已 1:1**：`activatePluginsAfterInstall`（swn cache_impact 门控 + refreshActivePlugins + UI 后缀）；changelog “activate immediately” 串 ABSENT 但产品金标在 SEA。
 10. **#22 已 1:1（gate + native wire）**：Vertex Jve/Xve + ToolSearch `tool_reference`/`defer_loading`/`Jvu`/`dBp` 协议恢复；`Lwe` 主路径 + 旧 text 兼容。
 11. **scheduled fire stamp 已 1:1（densable 221 SEA）**：`skipSlashCommands:!0` + `modelScheduledOrigin:!0` + `wakeupSource`（REPL + headless）；processUserInput 对 model-invocable 重开 slash；`/loop` 跳过 `tengu_loop_command`。见 `hit-modelScheduledOrigin-wakeupSource.txt`。
-12. **剩余 GAP**（勿 invent）：#10 constructor map；#12 large upload TLS（srt@0.0.70）。
-13. **PARTIAL 已清**（0）。
-14. **N/A 保持**：#1 VSCode Focus；#38 Gateway model 400。
-15. **勿** commit/push/bump 除非用户点名；SEA bins 保持 dirty；勿混 220 residual / 222。
+12. **#6 已 1:1（permission，非 prompt）**：`pWo` quote chars → ask；B3/SQ/jce + exact reason；`pathQuoteChars.221.test.ts`。
+13. **剩余 GAP**（勿 invent）：#10 constructor map；#12 large upload TLS（srt@0.0.70）。
+14. **PARTIAL 已清**（0）。
+15. **N/A 保持**：#1 VSCode Focus；#38 Gateway model 400。
+16. **勿** commit/push/bump 除非用户点名；SEA bins 保持 dirty；勿混 220 residual / 222。
 

@@ -1,0 +1,36 @@
+densable 2.1.221 cle residual alignment (for danger + declaration flags + Pws/uVu)
+
+SEA cle for_statement:
+  if (o==="PS4"||o==="IFS"||Pws(o)||qws.has(o)||vws.has(o)||oVu.has(o))
+    → too-complex "${o} as loop variable bypasses assignment validation"
+  select child → "select statement reads stdin into $REPLY; cannot statically model"
+  tracked non-placeholder overwrite → post-loop value unknowable
+
+SEA sets:
+  vws = SAFE_ENV_VARS (20: HOME PWD PATH … IFS)
+  oVu = 52 specials (REPLY PS1 PS4 PIPESTATUS …)
+  qws/eQi = 35 (RANDOM SECONDS … status) — already local DENSABLE_YPG_EQI
+  Pws/FJi = KMy + ld_/dyld_/bash_func_ — already densableFJi
+
+SEA declaration_command word flags:
+  /^[+-].*m/          zsh pattern-assign (all)
+  /^[+-].*[niaAEF]/  declare|typeset|local (nameref/int/float/array)
+  -f + -u/-U          declare|typeset|local|readonly → zsh autoload
+  /^[+-].*[iEF]/     export|readonly → zsh bin_typeset arith
+  /^[+-].*T/          zsh tied pair
+  positional `[`      declare|typeset|local|export
+  variable_name `[`   same + export
+  adjacent startIndex===prevEndIndex → joined quoted segments
+
+SEA statement variable_assignment:
+  Pws(name) → alters command lookup
+  uVu(name,value) → integer-attr special arith-evals RHS
+
+Local:
+  isDangerousForLoopVar / densableUVu / densableFJi
+  declaration_command 1:1 flag gates
+  statement-level Pws + uVu before bare push
+
+Tests:
+  src/utils/bash/__tests__/cleForDeclaration.221.test.ts
+  src/utils/bash/__tests__/bareAssignmentNames.221.test.ts

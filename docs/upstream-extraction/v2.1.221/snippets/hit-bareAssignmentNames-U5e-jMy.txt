@@ -1,0 +1,37 @@
+densable 2.1.221 SEA — bareAssignmentNames pipeline (U5e ≈ dYe/GNt/FMy/cle + jMy)
+
+Symbols (win32-x64 SEA):
+  dYe(e)     — async parse entry; empty → {simple,[],bare:[]}
+  GNt(e,t)   — prechecks + FMy(root)
+  FMy(e)     — thr: commands=[], scope=Map, bare=n=[]; cle(...); return {simple,commands,bare}
+  cle(e,t,r,n) — collector; bare push sites:
+    declaration_command word NAME=val / NAME+=val → n.push(g)
+    declaration_command variable_assignment → n.push(p.name)
+    statement variable_assignment → n.push(i.name)
+    for_statement variable_name → n.push(o)
+  WMy(...)   — command walker; env-prefix → envVars only (NOT n.push)
+               ends with jMy(argv, envVars, scope, bare)
+  jMy(e,t,r,n) — YPg post-pass (local densableYPg):
+    wrappers: command/builtin/noglob/nocorrect/time + !
+    argv-level NAME= assignment words
+    tVu declare/typeset/local/export/readonly NAME= words
+    read / printf -v / getopts / wait -p / print -v / set -A / mapfile|readarray
+    no-cmd left: envVars → bare
+    rVu omu builtins + envVars → bare
+    unset/unsetenv: scope only (not bare); unsetenv/ -f: placeholder fail-closed
+    returns n.push(...i) bareFromCmd only
+
+ZRu final bare loop (when any git present):
+  count bareAssignmentNames ∩ git-redirect env names
+  if count > exported-on-git-cmd count → deny
+  "assigns ${m}, which redirects git to a repository this guard cannot verify"
+
+Local:
+  parseForSecurity / parseForSecurityFromAst → bareAssignmentNames
+  parseForZRu → parseForSecurityFromAst (no rough-token approx)
+  checkZRuGitRedirect reads parsed.bareAssignmentNames only
+  densableYPg ≈ jMy (unsetenv branch 1:1 with SEA)
+
+Tests:
+  src/utils/bash/__tests__/bareAssignmentNames.221.test.ts
+  src/utils/__tests__/worktreeGitIsolation.216.test.ts (bare + YPg GIT_DIR paths)

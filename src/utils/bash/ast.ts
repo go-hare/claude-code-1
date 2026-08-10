@@ -155,6 +155,71 @@ const SAFE_ENV_VARS = new Set([
 ])
 
 /**
+ * densable `vws` — same membership as SAFE_ENV_VARS (20). Loop-var / for
+ * danger check uses this set by name in SEA; we share SAFE_ENV_VARS.
+ */
+const DENSABLE_VWS = SAFE_ENV_VARS
+
+/**
+ * densable `oVu` — special/readonly shell vars that must not be for-loop
+ * targets (bypasses assignment validation / overwrites shell state).
+ */
+const DENSABLE_OVU = new Set([
+  '_',
+  'RANDOM',
+  'SECONDS',
+  'LINENO',
+  'BASH_COMMAND',
+  'FUNCNAME',
+  'EPOCHSECONDS',
+  'EPOCHREALTIME',
+  'SRANDOM',
+  'BASHPID',
+  'REPLY',
+  'reply',
+  'PIPESTATUS',
+  'pipestatus',
+  'BASH_SOURCE',
+  'DIRSTACK',
+  'GROUPS',
+  'BASH_ARGV',
+  'BASH_ARGC',
+  'BASH_SUBSHELL',
+  'BASH_LINENO',
+  'BASH_REMATCH',
+  'MATCH',
+  'match',
+  'MBEGIN',
+  'MEND',
+  'mbegin',
+  'mend',
+  'OPTARG',
+  'OPTIND',
+  'argv',
+  'FIGNORE',
+  'fignore',
+  'PSVAR',
+  'psvar',
+  'WATCH',
+  'watch',
+  'HISTCHARS',
+  'histchars',
+  'PS1',
+  'PROMPT',
+  'prompt',
+  'PS2',
+  'PROMPT2',
+  'PS3',
+  'PROMPT3',
+  'PS4',
+  'PROMPT4',
+  'RPS1',
+  'RPROMPT',
+  'RPS2',
+  'RPROMPT2',
+])
+
+/**
  * Special shell variables ($?, $$, $!, $#, $0-$9). tree-sitter uses
  * `special_variable_name` for these (not `variable_name`). Values are
  * shell-controlled: exit status, PIDs, positional args. Safe to resolve
@@ -600,16 +665,19 @@ function collectCommands(
   }
 
   if (node.type === 'declaration_command') {
-    // `export`/`local`/`readonly`/`declare`/`typeset`. tree-sitter emits
-    // these as declaration_command, not command, so they previously fell
-    // through to tooComplex. Values are validated via walkVariableAssignment:
-    // `$()` in the value is recursively extracted (inner command pushed to
-    // commands[], outer argv gets CMDSUB_PLACEHOLDER); other disallowed
-    // expansions still reject via walkArgument. argv[0] is the builtin name so
-    // `Bash(export:*)` rules match.
+    // densable cle declaration_command — export/local/readonly/declare/typeset.
+    // Flag gates + bare push sites 1:1 with SEA (zsh -m/+m, -T, -iEF, -f/-u
+    // autoload, array subscript positionals, adjacent quoted-segment join).
     const argv: string[] = []
+    // densable: s/a track -f and -u/-U across flags (zsh autoload synonym).
+    let sawFuncFlag = false
+    let sawAutoloadU = false
+    // densable c: previous child endIndex — adjacent quoted segments join.
+    let prevEndIndex = -1
     for (const child of node.children) {
       if (!child) continue
+      const adjacent = child.startIndex === prevEndIndex
+      prevEndIndex = child.endIndex
       switch (child.type) {
         case 'export':
         case 'local':
@@ -623,10 +691,13 @@ function collectCommands(
         case 'raw_string':
         case 'string':
         case 'concatenation': {
-          // Flags (`declare -r`), quoted names (`export "FOO=bar"`), numbers
-          // (`declare -i 42`). Mirrors walkCommand's argv handling — before
-          // this, `export "FOO=bar"` hit tooComplex on the `string` child.
-          // walkArgument validates each (expansions still reject).
+          if (adjacent) {
+            return {
+              kind: 'too-complex',
+              reason: `${argv[0] ?? 'declaration'} operand is split across adjacent quoted segments — the shell joins them into one word the analyzer cannot verify`,
+              nodeType: 'declaration_command',
+            }
+          }
           const arg = walkArgument(
             child,
             commands,
@@ -634,59 +705,85 @@ function collectCommands(
             bareAssignmentNames,
           )
           if (typeof arg !== 'string') return arg
-          // SECURITY: declare/typeset/local flags that change assignment
-          // semantics break our static model. -n (nameref): `declare -n X=Y`
-          // then `$X` dereferences to $Y's VALUE — varScope stores 'Y'
-          // (target NAME), argv[0] shows 'Y' while bash runs whatever $Y
-          // holds. -i (integer): `declare -i X='a[$(cmd)]'` arithmetically
-          // evaluates the RHS at assignment time, running $(cmd) even from
-          // a single-quoted raw_string (same primitive walkArithmetic
-          // guards in $((…))). -a/-A (array): subscript arithmetic on
-          // assignment. -r/-x/-g/-p/-f/-F are inert. Check the resolved
-          // arg (not child.text) so `\-n` and quoted `-n` are caught.
-          // Scope to declare/typeset/local only: `export -n` means "remove
-          // export attribute" (not nameref), and export/readonly don't
-          // accept -i; readonly -a/-A rejects subscripted args as invalid
-          // identifiers so subscript-arith doesn't fire.
-          if (
-            (argv[0] === 'declare' ||
-              argv[0] === 'typeset' ||
-              argv[0] === 'local') &&
-            /^-[a-zA-Z]*[niaA]/.test(arg)
-          ) {
+          // densable: /^[+-].*m/ — zsh -m/+m pattern-assign (all builtins)
+          if (/^[+-].*m/.test(arg)) {
             return {
               kind: 'too-complex',
-              reason: `declare flag ${arg} changes assignment semantics (nameref/integer/array)`,
+              reason: `${argv[0]} flag ${arg} — zsh -m/+m pattern-assigns every matching variable; cannot statically model target set`,
               nodeType: 'declaration_command',
             }
           }
-          // SECURITY: bare positional assignment with a subscript also
-          // evaluates — no -a/-i flag needed. `declare 'x[$(id)]=val'`
-          // implicitly creates an array element, arithmetically evaluating
-          // the subscript and running $(id). tree-sitter delivers the
-          // single-quoted form as a raw_string leaf so walkArgument sees
-          // only the literal text. Scoped to declare/typeset/local:
-          // export/readonly reject `[` in identifiers before eval.
+          // densable: declare|typeset|local + /^[+-].*[niaAEF]/
+          // (nameref/integer/float/array). Note `+` forms and E/F.
           if (
             (argv[0] === 'declare' ||
               argv[0] === 'typeset' ||
               argv[0] === 'local') &&
+            /^[+-].*[niaAEF]/.test(arg)
+          ) {
+            return {
+              kind: 'too-complex',
+              reason: `declare flag ${arg} changes assignment semantics (nameref/integer/float/array)`,
+              nodeType: 'declaration_command',
+            }
+          }
+          // densable: declare|typeset|local|readonly track -f and -u/-U
+          if (
+            argv[0] === 'declare' ||
+            argv[0] === 'typeset' ||
+            argv[0] === 'local' ||
+            argv[0] === 'readonly'
+          ) {
+            if (/^[+-].*f/.test(arg)) sawFuncFlag = true
+            if (/^[+-].*[uU]/.test(arg)) sawAutoloadU = true
+            if (sawFuncFlag && sawAutoloadU) {
+              return {
+                kind: 'too-complex',
+                reason: `${argv[0]} with both -f and -u/-U flags — zsh marks a function for autoload (synonym of 'autoload'), creating a function from file contents at call time`,
+                nodeType: 'declaration_command',
+              }
+            }
+          }
+          // densable: export|readonly + /^[+-].*[iEF]/ (zsh bin_typeset arith)
+          if (
+            (argv[0] === 'export' || argv[0] === 'readonly') &&
+            /^[+-].*[iEF]/.test(arg)
+          ) {
+            return {
+              kind: 'too-complex',
+              reason: `${argv[0]} flag ${arg} — zsh bin_typeset accepts -i/-E/-F and arithmetically evaluates the RHS`,
+              nodeType: 'declaration_command',
+            }
+          }
+          // densable: /^[+-].*T/ — zsh tied pair
+          if (/^[+-].*T/.test(arg)) {
+            return {
+              kind: 'too-complex',
+              reason: `${argv[0]} -T creates a user-defined zsh tied pair — tracked literals for its operands are unreliable`,
+              nodeType: 'declaration_command',
+            }
+          }
+          // densable: declare|typeset|local|export positional with `[`
+          // (export included — densable evaluates subscripts in zsh/bash)
+          if (
+            (argv[0] === 'declare' ||
+              argv[0] === 'typeset' ||
+              argv[0] === 'local' ||
+              argv[0] === 'export') &&
             arg[0] !== '-' &&
             /^[^=]*\[/.test(arg)
           ) {
             return {
               kind: 'too-complex',
-              reason: `declare positional '${arg}' contains array subscript — bash evaluates $(cmd) in subscripts`,
+              reason: `${argv[0]} positional '${arg}' contains array subscript — zsh/bash evaluate $(cmd) in subscripts`,
               nodeType: 'declaration_command',
             }
           }
-          // densable U5e/toe: declaration word `NAME=val` / `NAME+=val` → bare name
-          // (quoted forms like export "FOO=bar" resolve via walkArgument).
+          // densable U5e: declaration word `NAME=val` / `NAME+=val` → bare
           if (arg[0] !== '-') {
             const eq = arg.indexOf('=')
             if (eq > 0) {
               const lhs = arg.slice(0, eq)
-              // densable: /^[A-Za-z_][A-Za-z0-9_]*\+?$/ then strip trailing +
               if (/^[A-Za-z_][A-Za-z0-9_]*\+?$/.test(lhs)) {
                 const bareName = lhs.endsWith('+') ? lhs.slice(0, -1) : lhs
                 bareAssignmentNames.push(bareName)
@@ -704,17 +801,32 @@ function collectCommands(
             bareAssignmentNames,
           )
           if ('kind' in ev) return ev
-          // export/declare assignments populate the scope so later $VAR refs resolve.
           applyVarToScope(varScope, ev)
-          // densable U5e/qPg: declaration_command assignment → bareAssignmentNames
+          // densable U5e/qPg: declaration_command assignment → bare
           bareAssignmentNames.push(ev.name)
           argv.push(`${ev.name}=${ev.value}`)
           break
         }
-        case 'variable_name':
-          // `export FOO` — bare name, no assignment.
-          argv.push(child.text)
+        case 'variable_name': {
+          // densable: export/declare/typeset/local variable_name with `[`
+          const p = child.text
+          if (
+            (argv[0] === 'declare' ||
+              argv[0] === 'typeset' ||
+              argv[0] === 'local' ||
+              argv[0] === 'export') &&
+            p[0] !== '-' &&
+            /^[^=]*\[/.test(p)
+          ) {
+            return {
+              kind: 'too-complex',
+              reason: `${argv[0]} positional '${p}' contains array subscript — backslash-escaped form de-escapes to [$(cmd)] at runtime`,
+              nodeType: 'declaration_command',
+            }
+          }
+          argv.push(p)
           break
+        }
         default:
           return tooComplex(child)
       }
@@ -725,12 +837,8 @@ function collectCommands(
 
   if (node.type === 'variable_assignment') {
     // Bare `VAR=value` at statement level (not a command env prefix).
-    // Sets a shell variable — no code execution, no filesystem I/O.
-    // The value is validated via walkVariableAssignment → walkArgument,
-    // so `VAR=$(evil)` still recursively extracts/rejects based on the
-    // inner command. Does NOT push to commands — a bare assignment needs
-    // no permission rule (it's inert). Common pattern: `VAR=x && cmd`
-    // where cmd references $VAR. ~35% of too-complex in top-5k ant cmds.
+    // densable cle: Pws (command-lookup env) + uVu (integer-attr specials)
+    // reject before bare push / scope apply.
     const ev = walkVariableAssignment(
       node,
       commands,
@@ -738,9 +846,24 @@ function collectCommands(
       bareAssignmentNames,
     )
     if ('kind' in ev) return ev
-    // Populate scope so later `$VAR` references resolve.
+    // densable Pws — PATH/HOME/… assignment alters subsequent command lookup
+    if (densableFJi(ev.name)) {
+      return {
+        kind: 'too-complex',
+        reason: `${ev.name} assignment alters command lookup/execution for subsequent commands`,
+        nodeType: 'variable_assignment',
+      }
+    }
+    // densable uVu — qws special with arith-evalable RHS
+    if (densableUVu(ev.name, ev.value)) {
+      return {
+        kind: 'too-complex',
+        reason: `${ev.name} has integer attribute — assignment arith-evals RHS, executing subscript command substitution`,
+        nodeType: 'variable_assignment',
+      }
+    }
     applyVarToScope(varScope, ev)
-    // densable U5e/qPg: statement-level variable_assignment → bareAssignmentNames
+    // densable U5e/qPg: statement-level variable_assignment → bare
     bareAssignmentNames.push(ev.name)
     return null
   }
@@ -769,10 +892,17 @@ function collectCommands(
         loopVar = child.text
       } else if (child.type === 'do_group') {
         doGroup = child
+      } else if (child.type === 'select') {
+        // densable cle: select → stdin into $REPLY; cannot statically model
+        return {
+          kind: 'too-complex',
+          reason:
+            'select statement reads stdin into $REPLY; cannot statically model',
+          nodeType: 'for_statement',
+        }
       } else if (
         child.type === 'for' ||
         child.type === 'in' ||
-        child.type === 'select' ||
         child.type === ';'
       ) {
       } else if (child.type === 'command_substitution') {
@@ -795,13 +925,22 @@ function collectCommands(
       }
     }
     if (loopVar === null || doGroup === null) return tooComplex(node)
-    // SECURITY: `for PS4 in '$(id)'; do set -x; :; done` sets PS4 directly
-    // via varScope.set below — walkVariableAssignment's PS4/IFS checks never
-    // fire. Trace-time RCE (PS4) or word-split bypass (IFS). No legit use.
-    if (loopVar === 'PS4' || loopVar === 'IFS') {
+    // densable cle: PS4|IFS|Pws|qws|vws|oVu — loop var bypasses assignment
+    // validation (PATH/HOME/REPLY/PS1/… reassignment via for is fail-closed).
+    if (isDangerousForLoopVar(loopVar)) {
       return {
         kind: 'too-complex',
         reason: `${loopVar} as loop variable bypasses assignment validation`,
+        nodeType: 'for_statement',
+      }
+    }
+    // densable: overwriting a tracked non-placeholder literal via for-loop
+    // leaves post-loop value unknowable.
+    const prior = varScope.get(loopVar)
+    if (prior !== undefined && !containsAnyPlaceholder(prior)) {
+      return {
+        kind: 'too-complex',
+        reason: `for-loop variable '${loopVar}' would overwrite tracked literal ${JSON.stringify(prior.slice(0, 40))}; post-loop value cannot be statically determined`,
         nodeType: 'for_statement',
       }
     }
@@ -810,7 +949,10 @@ function collectCommands(
     // SECURITY: Body uses a scope COPY — vars assigned inside the loop
     // body don't leak to commands after `done`. The loop var itself is
     // set in the REAL scope (bash semantics: $i still set after loop)
-    // and copied into the body scope. ALWAYS VAR_PLACEHOLDER — see above.
+    // and copied into the body scope as VAR_PLACEHOLDER so `"$i"` resolves
+    // while bare `$i` stays fail-closed. densable deletes the name from the
+    // body map and relies on a different expansion path; local needs the
+    // placeholder for walkArgument simple_expansion.
     varScope.set(loopVar, VAR_PLACEHOLDER)
     const bodyScope = new Map(varScope)
     for (const c of doGroup.children) {
@@ -2088,7 +2230,7 @@ const DENSABLE_TLG = new Set([
   'textdomaindir',
 ])
 
-/** densable FJi — env names that alter command lookup / loader. */
+/** densable FJi / Pws — env names that alter command lookup / loader. */
 function densableFJi(name: string): boolean {
   const t = name.toLowerCase()
   return (
@@ -2099,7 +2241,7 @@ function densableFJi(name: string): boolean {
   )
 }
 
-/** densable _it — dangerous shell vars that cannot be statically verified. */
+/** densable _it / fft — dangerous shell vars that cannot be statically verified. */
 function densableYPgIsDangerousVar(name: string): boolean {
   // densable: FJi(e) || e==="IFS" || e==="PS4" || e==="PROMPT4" || eQi.has(e)
   return (
@@ -2109,6 +2251,36 @@ function densableYPgIsDangerousVar(name: string): boolean {
     name === 'PROMPT4' ||
     DENSABLE_YPG_EQI.has(name)
   )
+}
+
+/**
+ * densable cle for_statement danger:
+ * `PS4||IFS||Pws||qws||vws||oVu` — loop var bypasses assignment validation.
+ * densableYPgIsDangerousVar covers Pws+IFS+PS4+PROMPT4+qws; add vws+oVu.
+ */
+function isDangerousForLoopVar(name: string): boolean {
+  if (densableYPgIsDangerousVar(name)) return true
+  if (DENSABLE_VWS.has(name)) return true
+  if (DENSABLE_OVU.has(name)) return true
+  return false
+}
+
+/**
+ * densable `uVu` — integer-attr specials (qws/eQi): RHS with `[` / `` ` `` /
+ * `$(` / placeholder / letter is arith-evalable → too-complex.
+ */
+function densableUVu(name: string, value: string): boolean {
+  if (!DENSABLE_YPG_EQI.has(name)) return false
+  if (
+    value.includes('[') ||
+    value.includes('`') ||
+    /\$\(/.test(value) ||
+    containsAnyPlaceholder(value)
+  ) {
+    return true
+  }
+  if (/[A-Za-z_]/.test(value)) return true
+  return false
 }
 
 function densableYPg(
@@ -2268,6 +2440,10 @@ function densableYPg(
       }
     }
   } else if (!wrapperOnly && (u === 'unset' || u === 'unsetenv')) {
+    // densable jMy: `unset -f` / `unsetenv` do NOT clear scope to "" (they
+    // only fail-closed when the tracked value still contains a placeholder).
+    // Plain `unset NAME` clears to "" after fft/dangerous check. Neither form
+    // pushes bareAssignmentNames.
     let isFunc = false
     let sawName = false
     for (let f = 1; f < a.length; f++) {
@@ -2298,7 +2474,17 @@ function densableYPg(
           nodeType: 'command',
         }
       }
-      if (isFunc) continue
+      if (isFunc || u === 'unsetenv') {
+        const tracked = varScope.get(m)
+        if (tracked !== undefined && containsAnyPlaceholder(tracked)) {
+          return {
+            kind: 'too-complex',
+            reason: `'${m}' no longer has a statically known value at this unset (wrapped form) — cannot verify what the command leaves behind`,
+            nodeType: 'command',
+          }
+        }
+        continue
+      }
       if (densableYPgIsDangerousVar(m)) {
         return {
           kind: 'too-complex',

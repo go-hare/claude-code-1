@@ -46,6 +46,97 @@ const MAX_DIRS_TO_LIST = 5
 // through glob-base truncation instead of full-path symlink resolution.
 const GLOB_PATTERN_REGEX = /[*?[\]]/
 
+/**
+ * densable 2.1.221 `e9_` / `t9_` quote class — ASCII + smart quotes U+2018–U+201F.
+ * Used by B3 (strip-all) and SQ (strip-surrounding) in validatePath (`pWo`).
+ */
+const PS_PATH_QUOTE_CLASS = `['"\u2018-\u201F]`
+/** densable `e9_` — strip every quote run anywhere in the path. */
+const STRIP_ALL_PATH_QUOTES_RE = new RegExp(`${PS_PATH_QUOTE_CLASS}+`, 'g')
+/** densable `t9_` — strip leading/trailing quote runs only. */
+const STRIP_SURROUNDING_PATH_QUOTES_RE = new RegExp(
+  `^${PS_PATH_QUOTE_CLASS}+|${PS_PATH_QUOTE_CLASS}+$`,
+  'g',
+)
+
+/**
+ * densable 2.1.221 reason when a path still carries quote characters after
+ * parsing — permission checks cannot statically validate the true target, so
+ * the command must prompt for approval (changelog #6).
+ */
+export const PATHS_CONTAINING_QUOTE_REASON =
+  'Paths containing quote characters cannot be statically validated and require manual approval'
+
+/**
+ * densable `B3` — remove every quote character (ASCII + smart quotes).
+ * The cleaned form is what subsequent static path checks run against.
+ */
+export function stripAllPathQuotes(path: string): string {
+  return path.replace(STRIP_ALL_PATH_QUOTES_RE, '')
+}
+
+/**
+ * densable `SQ` — strip only surrounding quote runs (ends). Used as a deny-guess
+ * variant when the original path contained quotes.
+ */
+export function stripSurroundingPathQuotes(path: string): string {
+  return path.replace(STRIP_SURROUNDING_PATH_QUOTES_RE, '')
+}
+
+/**
+ * densable `Vup` — classify a single character as PowerShell single/double quote
+ * (including smart-quote ranges).
+ */
+export function classifyPathQuoteChar(ch: string): 'single' | 'double' | null {
+  if (ch === "'" || (ch >= '\u2018' && ch <= '\u201B')) return 'single'
+  if (ch === '"' || (ch >= '\u201C' && ch <= '\u201E')) return 'double'
+  return null
+}
+
+/**
+ * densable `jce` — PowerShell-style unquote walk for deny-guess variants.
+ * Opens/closes matching quotes (ASCII + smart), treats doubled quotes as an
+ * escaped literal, and preserves backtick escapes (inside single quotes the
+ * backtick is literal in PS, so `` is emitted as ``).
+ */
+export function unquotePowerShellPathStyle(path: string): string {
+  let out = ''
+  let open: 'single' | 'double' | null = null
+  for (let i = 0; i < path.length; i++) {
+    const ch = path[i]!
+    if (ch === '`') {
+      if (open === 'single') {
+        out += '``'
+      } else if (i + 1 < path.length) {
+        out += ch + path[i + 1]!
+        i++
+      } else {
+        out += ch
+      }
+      continue
+    }
+    const kind = classifyPathQuoteChar(ch)
+    if (open === null) {
+      if (kind !== null) {
+        open = kind
+        continue
+      }
+      out += ch
+    } else if (kind === open) {
+      // Doubled quote → one literal of that quote char.
+      if (i + 1 < path.length && classifyPathQuoteChar(path[i + 1]!) === kind) {
+        out += path[i + 1]!
+        i++
+        continue
+      }
+      open = null
+    } else {
+      out += ch
+    }
+  }
+  return out
+}
+
 type FileOperationType = 'read' | 'write' | 'create'
 
 type PathCheckResult = {
@@ -835,10 +926,8 @@ function expandTilde(filePath: string): string {
  * as the user typed them.
  */
 export function isDangerousRemovalRawPath(filePath: string): boolean {
-  const expanded = expandTilde(filePath.replace(/^['"]|['"]$/g, '')).replace(
-    /\\/g,
-    '/',
-  )
+  // densable B3: strip all quote chars before dangerous-path shape checks.
+  const expanded = expandTilde(stripAllPathQuotes(filePath)).replace(/\\/g, '/')
   return isDangerousRemovalPath(expanded)
 }
 
@@ -1017,22 +1106,112 @@ function checkDenyRuleForGuessedPath(
 }
 
 /**
- * Validates a file system path, handling tilde expansion.
+ * densable `pWo` pre-pass: when the original path contained quote characters,
+ * deny-check multiple strip/unquote variants of the ORIGINAL so deny rules
+ * still win over the eventual quote→ask outcome.
+ *
+ * Variants (densable): raw / SQ(surrounding) / jce(PS-style unquote), each
+ * slash-normalized, plus backtick-stripped and post-`::` guesses.
  */
-function validatePath(
+function checkDenyOnQuotedPathVariants(
+  filePath: string,
+  cwd: string,
+  toolPermissionContext: ToolPermissionContext,
+  operationType: FileOperationType,
+): { resolvedPath: string; rule: PermissionRule } | null {
+  const variants = new Set<string>()
+  for (const h of [
+    filePath.replace(/\\/g, '/'),
+    stripSurroundingPathQuotes(filePath).replace(/\\/g, '/'),
+    unquotePowerShellPathStyle(filePath).replace(/\\/g, '/'),
+  ]) {
+    variants.add(h)
+    if (h.includes('`')) {
+      // Match local backtick deny-guess: strip backticks (densable A$ expands
+      // escapes; simple strip is fail-safe — wrong guess → no deny → ask).
+      variants.add(h.replace(/`/g, ''))
+    }
+    if (h.includes('::')) {
+      const after = h.slice(h.indexOf('::') + 2)
+      variants.add(after)
+      if (after.includes('`')) {
+        variants.add(after.replace(/`/g, ''))
+      }
+    }
+  }
+  for (const h of variants) {
+    const hit = checkDenyRuleForGuessedPath(
+      h,
+      cwd,
+      toolPermissionContext,
+      operationType,
+    )
+    if (hit) return hit
+  }
+  return null
+}
+
+function quotePathAskResult(resolvedPath: string): ResolvedPathCheckResult {
+  return {
+    allowed: false,
+    resolvedPath,
+    decisionReason: {
+      type: 'other',
+      reason: PATHS_CONTAINING_QUOTE_REASON,
+    },
+  }
+}
+
+/**
+ * densable `pWo` — validates a file system path with tilde expansion and
+ * 2.1.221 quote-character handling (changelog #6).
+ *
+ * When the input contains quote characters (ASCII or smart quotes):
+ * 1. Deny-check multi-variant guesses of the original (deny still wins)
+ * 2. Continue static checks on B3(all-quotes-stripped) form
+ * 3. If the stripped form would auto-allow → force ask (quote reason)
+ * 4. If stripped form hits safetyCheck → rewrite reason + classifierApprovable:false
+ *
+ * Exported for densable 2.1.221 focused tests.
+ */
+export function validatePath(
   filePath: string,
   cwd: string,
   toolPermissionContext: ToolPermissionContext,
   operationType: FileOperationType,
 ): ResolvedPathCheckResult {
-  // Remove surrounding quotes if present
-  const cleanPath = expandTilde(filePath.replace(/^['"]|['"]$/g, ''))
+  // densable B3: strip ALL quote characters (not just surrounding ends).
+  const strippedAll = stripAllPathQuotes(filePath)
+  const hadQuotes = strippedAll !== filePath
+
+  // densable: when quotes present, deny still wins — probe strip/unquote variants.
+  if (hadQuotes) {
+    const denyHit = checkDenyOnQuotedPathVariants(
+      filePath,
+      cwd,
+      toolPermissionContext,
+      operationType,
+    )
+    if (denyHit) {
+      return {
+        allowed: false,
+        resolvedPath: denyHit.resolvedPath,
+        decisionReason: { type: 'rule', rule: denyHit.rule },
+      }
+    }
+  }
+
+  // densable: expandTilde on fully-stripped path (cSn(B3(e))).
+  const cleanPath = expandTilde(strippedAll)
 
   // SECURITY: PowerShell Core normalizes backslashes to forward slashes on all
   // platforms, but path.resolve on Linux/Mac treats them as literal characters.
   // Normalize before resolution so traversal patterns like dir\..\..\etc\shadow
   // are correctly detected.
   const normalizedPath = cleanPath.replace(/\\/g, '/')
+
+  // densable display path: original when quotes were stripped, else normalized.
+  const displayPath = hadQuotes ? filePath : normalizedPath
 
   // SECURITY: Backtick (`) is PowerShell's escape character. It is a no-op in
   // many positions (e.g., `/ === /) but defeats Node.js path checks like
@@ -1162,7 +1341,7 @@ function validatePath(
       resolvedPath: normalizedPath,
       decisionReason: {
         type: 'other',
-        reason: `Path '${normalizedPath}' uses a non-filesystem provider and requires manual approval`,
+        reason: `Path '${displayPath}' uses a non-filesystem provider and requires manual approval`,
       },
     }
   }
@@ -1198,6 +1377,25 @@ function validatePath(
         operationType,
         isCanonical ? [resolvedPath] : undefined,
       )
+      // densable: if(i) return quote-ask when stripped form would allow.
+      if (hadQuotes && result.allowed) {
+        return quotePathAskResult(resolvedPath)
+      }
+      if (
+        hadQuotes &&
+        !result.allowed &&
+        result.decisionReason?.type === 'safetyCheck'
+      ) {
+        return {
+          allowed: false,
+          resolvedPath,
+          decisionReason: {
+            type: 'safetyCheck',
+            reason: `Path '${filePath}' resolves near a sensitive file under quote-stripping and cannot be statically validated; requires manual approval`,
+            classifierApprovable: false,
+          },
+        }
+      }
       return {
         allowed: result.allowed,
         resolvedPath,
@@ -1239,6 +1437,11 @@ function validatePath(
         decisionReason: { type: 'rule', rule: denyRule },
       }
     }
+    // densable yHe/non-traversal glob: quotes force the dedicated quote reason
+    // when present (still after deny). Non-quote keeps the glob reason.
+    if (hadQuotes) {
+      return quotePathAskResult(resolvedPath)
+    }
     return {
       allowed: false,
       resolvedPath,
@@ -1265,6 +1468,28 @@ function validatePath(
     operationType,
     isCanonical ? [resolvedPath] : undefined,
   )
+
+  // densable 2.1.221 #6: if(i&&f.allowed)return s(d) — quote chars → ask, never auto-allow.
+  if (hadQuotes && result.allowed) {
+    return quotePathAskResult(resolvedPath)
+  }
+  // densable: if(i&&!f.allowed&&safetyCheck) rewrite reason + classifierApprovable:!1
+  if (
+    hadQuotes &&
+    !result.allowed &&
+    result.decisionReason?.type === 'safetyCheck'
+  ) {
+    return {
+      allowed: false,
+      resolvedPath,
+      decisionReason: {
+        type: 'safetyCheck',
+        reason: `Path '${filePath}' resolves near a sensitive file under quote-stripping and cannot be statically validated; requires manual approval`,
+        classifierApprovable: false,
+      },
+    }
+  }
+
   return {
     allowed: result.allowed,
     resolvedPath,
