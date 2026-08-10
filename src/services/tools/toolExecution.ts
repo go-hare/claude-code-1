@@ -569,8 +569,28 @@ async function checkPermissionsAndCallTool(
     progress: ToolProgress<ToolProgressData> | ProgressMessage<HookProgress>,
   ) => void,
 ): Promise<MessageUpdateLazy[]> {
-  // Validate input types with zod (surprisingly, the model is not great at generating valid input)
-  const parsedInput = tool.inputSchema.safeParse(input)
+  // densable: coerceInput (legacy aliases / soft truncates) then safeParse.
+  // SendMessage Cpr=200 summary truncate lands here via shapeClass truncate_summary.
+  let parseTarget: unknown = input
+  let coerceMeta: { shapeClass: string } | null = null
+  if (tool.coerceInput) {
+    const coerced = tool.coerceInput(input)
+    if (coerced !== null) {
+      parseTarget = coerced.input
+      coerceMeta = { shapeClass: coerced.shapeClass }
+    }
+  }
+  const parsedInput = tool.inputSchema.safeParse(parseTarget)
+  if (coerceMeta) {
+    logEvent('tengu_tool_input_coerced', {
+      toolName: sanitizeToolNameForAnalytics(tool.name),
+      shapeClass:
+        coerceMeta.shapeClass as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome: (parsedInput.success
+        ? 'coerced_valid'
+        : 'coerced_still_invalid') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
   if (!parsedInput.success) {
     let errorContent = formatZodValidationError(tool.name, parsedInput.error)
 

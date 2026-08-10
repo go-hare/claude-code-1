@@ -890,6 +890,63 @@ export function shouldShowEffortUI(
 }
 
 /**
+ * densable Spinner effort source: `But(h??Zi(), m??F)`.
+ *
+ * - `F` = session `appState.effortValue`
+ * - `m` = turnEffort (densable per-agent spinner store / LocalAgentTask.effort)
+ * - `h` = turnModel (agent model stamp)
+ * - `Zi` = main-loop model
+ *
+ * 2.1.222 #13: subagent transcript spinner must show the agent's own
+ * `effort:` setting, not the parent session effort.
+ */
+export function resolveSpinnerEffortSource(args: {
+  sessionEffort: EffortValue | undefined
+  sessionModel: string
+  viewingAgentTaskId?: string | null
+  tasks?: Record<string, unknown> | null
+}): { model: string; effortValue: EffortValue | undefined } {
+  const { sessionEffort, sessionModel, viewingAgentTaskId, tasks } = args
+  if (!viewingAgentTaskId || !tasks) {
+    return { model: sessionModel, effortValue: sessionEffort }
+  }
+  const raw = tasks[viewingAgentTaskId]
+  if (!raw || typeof raw !== 'object') {
+    return { model: sessionModel, effortValue: sessionEffort }
+  }
+  const task = raw as {
+    type?: string
+    effort?: EffortValue
+    model?: string
+    selectedAgent?: { effort?: EffortValue; model?: string }
+  }
+  // densable UCa(agentId) is for agent surfaces; local_agent stamps effort at register.
+  // In-process teammates do not carry frontmatter effort — keep session F.
+  if (task.type !== 'local_agent') {
+    return { model: sessionModel, effortValue: sessionEffort }
+  }
+  const turnEffort =
+    task.effort !== undefined
+      ? task.effort
+      : task.selectedAgent?.effort !== undefined
+        ? task.selectedAgent.effort
+        : undefined
+  const agentModel =
+    typeof task.model === 'string' && task.model !== ''
+      ? task.model
+      : typeof task.selectedAgent?.model === 'string' &&
+          task.selectedAgent.model !== ''
+        ? task.selectedAgent.model
+        : undefined
+  return {
+    // densable h??Zi()
+    model: agentModel ?? sessionModel,
+    // densable m??F
+    effortValue: turnEffort !== undefined ? turnEffort : sessionEffort,
+  }
+}
+
+/**
  * Build the ` with {level} effort` suffix shown in Logo/Spinner.
  *
  * densable OQe(model, appStateEffort):

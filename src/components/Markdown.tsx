@@ -18,6 +18,20 @@ type Props = {
    * Markdown without polluting the immutable history token cache.
    */
   skipTokenCache?: boolean;
+  /**
+   * densable Sh tailWrap — Text wrap mode for the last non-table flush
+   * (e.g. wrap-stream for incomplete streaming line).
+   */
+  tailWrap?:
+    | 'wrap'
+    | 'wrap-trim'
+    | 'wrap-stream'
+    | 'end'
+    | 'middle'
+    | 'truncate-end'
+    | 'truncate'
+    | 'truncate-middle'
+    | 'truncate-start';
 };
 
 // Module-level token cache — marked.lexer is the hot cost on virtual-scroll
@@ -87,6 +101,7 @@ function MarkdownBody({
   children,
   dimColor,
   skipTokenCache,
+  tailWrap,
   highlight,
 }: Props & { highlight: CliHighlight | null }): React.ReactNode {
   const [theme] = useTheme();
@@ -97,10 +112,11 @@ function MarkdownBody({
     const elements: React.ReactNode[] = [];
     let nonTableContent = '';
 
-    function flushNonTableContent(): void {
+    // densable Sh: only the final non-table flush gets tailWrap
+    function flushNonTableContent(wrap?: Props['tailWrap']): void {
       if (nonTableContent) {
         elements.push(
-          <Ansi key={elements.length} dimColor={dimColor}>
+          <Ansi key={elements.length} dimColor={dimColor} wrap={wrap}>
             {nonTableContent.trim()}
           </Ansi>,
         );
@@ -117,9 +133,9 @@ function MarkdownBody({
       }
     }
 
-    flushNonTableContent();
+    flushNonTableContent(tailWrap);
     return elements;
-  }, [children, dimColor, highlight, theme, skipTokenCache]);
+  }, [children, dimColor, highlight, theme, skipTokenCache, tailWrap]);
 
   return (
     <Box flexDirection="column" gap={1}>
@@ -214,17 +230,25 @@ export function softSplitIndex(source: string): number {
 
 type StreamingProps = {
   children: string;
+  /**
+   * densable aPa hideTrailingLine: when true and the unstable tail does not
+   * end with a newline, mark the live markdown tail as wrap-stream (Ink
+   * soft-wrap for in-progress source line). Only applies when transformed
+   * display is absent (raw path).
+   */
+  hideTrailingLine?: boolean;
 };
 
 /**
- * Official 2.1.207 StreamingMarkdown (`ths`):
+ * Official 2.1.207 StreamingMarkdown (`ths` / densable `aPa`):
  * - Advance a stablePrefix at completed marked block boundaries.
  * - Freeze stable source into immutable React chunks once it exceeds 4KiB
  *   (or soft-split oversize open fences / live tails).
  * - Track open code fences so mid-fence freezes re-open the fence on the
  *   next chunk and closing fences flush cleanly.
+ * - densable: hideTrailingLine → tailWrap wrap-stream on incomplete live line.
  */
-export function StreamingMarkdown({ children }: StreamingProps): React.ReactNode {
+export function StreamingMarkdown({ children, hideTrailingLine = false }: StreamingProps): React.ReactNode {
   // Mutates stream state during render (monotonic freeze). Opt out of React
   // Compiler memoization — same contract as the pre-2.1.207 stablePrefix path.
   'use no memo';
@@ -295,7 +319,14 @@ export function StreamingMarkdown({ children }: StreamingProps): React.ReactNode
   const hasStable = stablePrefix.trim() !== '';
   const unstableForRender =
     unstableSuffix && state.openFence !== null ? `${state.openFence}\n${unstableSuffix}` : unstableSuffix;
-  const unstableEl = unstableSuffix ? <Markdown skipTokenCache>{unstableForRender}</Markdown> : null;
+  // densable aPa: hideTrailingLine && !suffix.endsWith('\n') → tailWrap wrap-stream
+  const incompleteLiveLine = !unstableSuffix.endsWith('\n');
+  const tailWrap = hideTrailingLine && incompleteLiveLine ? ('wrap-stream' as const) : undefined;
+  const unstableEl = unstableSuffix ? (
+    <Markdown skipTokenCache tailWrap={tailWrap}>
+      {unstableForRender}
+    </Markdown>
+  ) : null;
 
   if (state.chunks.length === 0) {
     return (

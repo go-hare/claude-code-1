@@ -1,0 +1,100 @@
+# densable 2.1.222 #7 — post-push PR session link
+# SEA: RPo (trackGitOperations) + ndn/jwd/Pc_/Ic_/Rc_/K$s + Lzr pendingBranchLinks
+# Product: Fixed sessions not linking to PRs created after the branch was pushed,
+# including through the GitHub REST API.
+
+## 221 → 222 delta
+- `function RPo` absent in 221 → present in 222
+- `J$s(` 0→4
+- `attempts>=kc_` 0→1
+- push path `else if(TPo.test(e)&&!i)` NEW
+
+## Constants
+```
+xc_=8   // max pending branch entries
+kc_=5   // max gh pr view retries per branch
+Dc_=2000 // pending PR-link flush ms (same as 218 #16)
+Hc_=/\b(?:git|gh|glab|curl)\b/
+Ywd=(e,t)=>`${e}\x00${t}`
+Xwd=(e)=>e!=="HEAD"&&!e.startsWith("-")&&!/^#?\d+$/.test(e)
+gc_=/\bgh\s+pr\s+checkout\b[^&|;]*\s(\d+)(?=\s|$|[&|;])/
+zwd=/(?:^|\s)(?:-n|--dry-run)(?=\s|$)/
+```
+
+## Lzr / Ic_ / Rc_ / jwd / Pc_ / K$s
+```
+function Lzr(){return MI()?.pendingBranchLinks??Bt.pendingBranchLinks}
+
+function Ic_(e,t,r){if(xa())return;let n=Ywd(t,r);if(e.delete(n),e.size>=xc_)e.delete(e.keys().next().value);e.set(n,{cwd:t,branch:r,attempts:0})}
+
+function Rc_(e,t){for(let[r,n]of e)if(n.cwd===t)e.delete(r)}
+
+async function jwd(e,t,r,n){let o=await n,i=await r;if(i===void 0||!Xwd(i))return;if(o)e.delete(Ywd(t,i));else Ic_(e,t,i)}
+
+function K$s(e){let t=e?Y$s(e):null;if(!t)return;BBt(J$s(t)),Rc_(Lzr(),Lt())}
+
+function Pc_(e){let t=Lzr();if(t.size===0||!Hc_.test(e))return;let r=Lt();for(let[n,o]of t){if(o.cwd!==r)continue;if(o.attempts>=kc_){t.delete(n);continue}o.attempts++,BBt(ndn(o.branch).then((i)=>{if(i)t.delete(n)}))}}
+```
+
+## ndn = gh pr view → linkSessionToPR
+```
+async function ndn(e,t){
+  if(xa())return!1;
+  if(t!==void 0&&!yc_.test(t))return!1;
+  let r=e&&!e.startsWith("-")&&!/^[a-z][a-z0-9+.-]*:\/\//i.test(e)?e:void 0;
+  let n=["pr","view",...r?[r]:[],...t?["--repo",t]:[],"--json","url"];
+  let {code:o,stdout:i}=await dn("gh",n,{timeout:5000,preserveOutputOnError:!1,useCwd:!0});
+  if(o!==0)return!1;
+  let s=Wt(i)?.url; if(!s)return!1;
+  let a=kPo(s); if(!a)return!1;
+  return await J$s(a),!0
+}
+```
+
+## RPo push discovery (core #7 path)
+```
+// after create/other PR handling...
+let a=e.match(gc_);
+if(a?.[1]) BBt(ndn(a[1]));
+else if(TPo.test(e)&&!i){
+  let u=qwd(e),
+      d=u.match(/\S+/g)?.filter((b)=>!b.startsWith("-"))[1],
+      p=d?d.indexOf(":"):-1,
+      f=d&&p>0&&p<d.length-1?d.slice(p+1).replace(/^refs\/heads\//,""):void 0,
+      m=Lt(), h=Lzr(),
+      g=zwd.test(u),
+      _=g||xa()?void 0:dT(m);
+  if(f&&Xwd(f)&&!g) BBt(jwd(h,m,f,ndn(f)));
+  BBt(jwd(h,m,_,ndn()));
+}
+// glab mr create / curl REST create → K$s(r)
+// always: Pc_(e)
+```
+
+## Product flow
+1. Successful `git push` (not dry-run, no concurrent gh pr action):
+   - optional explicit colon-refspec branch → `gh pr view <branch>`
+   - always current branch → `gh pr view` (no selector)
+   - if view fails → register pendingBranchLinks{cwd,branch,attempts:0}
+2. Later successful git/gh/glab/curl → Pc_ retries ndn up to kc_=5
+3. `gh pr create` / `glab mr create` / curl REST create with PR URL in stdout → K$s link + clear pending for cwd
+4. REST create without immediate URL still links via step 2 once PR exists
+
+## go-hare mapping
+| densable | go-hare |
+| --- | --- |
+| RPo | trackGitOperations |
+| ndn | resolvePrViaGhView |
+| jwd | schedulePostPushPrDiscovery |
+| Pc_ | retryPendingBranchLinks |
+| Ic_ | registerPendingBranchLink |
+| Rc_ | clearPendingBranchLinksForCwd |
+| K$s | linkPrFromCreateStdout |
+| Lzr | getPendingBranchLinks (bootstrap) |
+| BBt/odn | trackPendingPrLink / flushPendingPrLinks (218 #16) |
+| J$s | linkSessionToPR (sessionStorage) |
+| kPo/Y$s | parsePrUrl / findPrInStdout |
+| qwd | pushArgsSegment |
+| Xwd | isValidPendingBranchName |
+| xa | isEssentialTrafficOnly |
+| dT | getCachedBranch |

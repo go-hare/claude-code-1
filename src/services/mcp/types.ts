@@ -289,6 +289,23 @@ export type ConnectedMCPServer = {
   cleanup: () => Promise<void>
   /** Official transportErrorState — mid-call drop detection. */
   transportErrorState?: McpTransportErrorState
+  /**
+   * densable discoveryBearerRejected — claude.ai proxy rejected the session
+   * token after connect (tools/list or skills/list). Client stays `connected`
+   * but UI shows /login Issue; reconnectHelpers reports bearer-rejected.
+   */
+  discoveryBearerRejected?: boolean
+  /**
+   * densable toolsListError — last tools/list failure message on a still-
+   * connected client (degraded discovery). Cleared on successful list.
+   */
+  toolsListError?: string
+  /**
+   * densable discoveryAuthFailure — tools/list 401/403 on claude.ai proxy
+   * that should surface as needs-auth on reconnect paths (distinct from
+   * CLAUDEAI_BEARER_REJECTED which stays connected + /login hint).
+   */
+  discoveryAuthFailure?: boolean
 }
 
 export type FailedMCPServer = {

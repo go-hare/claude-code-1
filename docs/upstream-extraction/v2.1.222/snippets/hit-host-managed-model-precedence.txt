@@ -1,0 +1,68 @@
+# densable 2.1.222 #16 — host model-selection beats stale managed-settings.json
+# Product: Fixed host model-selection keys not taking precedence over a stale
+# on-disk managed-settings.json when CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST is set.
+# SEA 221→222: hostModelOverlay 0→4, function Gfg 0→1, function b6i 0→1, Wfg=new Set 0→1
+
+## densable Gfg (hostModelOverlay)
+```
+function Gfg(e,t){
+  if(!t||!e)return null;
+  let r={};
+  if(e.model!==void 0)r.model=e.model;
+  if(e.availableModels!==void 0)r.availableModels=e.availableModels;
+  if(e.enforceAvailableModels!==void 0)r.enforceAvailableModels=e.enforceAvailableModels;
+  if(e.fallbackModel!==void 0)r.fallbackModel=e.fallbackModel;
+  return Object.keys(r).length>0?r:null
+}
+```
+
+## densable b6i (strip admin/disk policy model keys)
+```
+function b6i(e){
+  delete e.model; delete e.fallbackModel; delete e.modelOverrides;
+  if(e.env){
+    let t={};
+    for(let[r,n]of Object.entries(e.env))
+      if(!Wfg.has(r.toUpperCase())) t[r]=n;
+    e.env=t
+  }
+}
+```
+
+## densable Wfg
+```
+Wfg = new Set([
+  ...[...p9r].filter(e => e !== "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION"),
+  ...f9r,
+  "CLAUDE_CODE_AUTO_MODE_MODEL",
+  "CLAUDE_CODE_BG_CLASSIFIER_MODEL",
+  "CLAUDE_CONTEXT_COLLAPSE_MODEL",
+])
+// p9r = ANTHROPIC_MODEL + DEFAULT_* + SMALL_FAST + SUBAGENT + 3P_PROBE_*
+// f9r = ANTHROPIC_CUSTOM_MODEL_OPTION*
+```
+
+## densable nfc (policy load finish)
+```
+// helper path: clone + b6i when hostManagedProvider
+// admin merge path:
+if(e.hostManagedProvider){
+  b6i(a);
+  if(i) Object.assign(a, i);  // i = hostModelOverlay from Gfg(parentManaged)
+}
+// no admin: hkcu clone + b6i + overlay; or overlay-only {settings:{...i}}
+```
+
+## densable P4 / parentManaged
+```
+P4(): parentManaged:tNi(), hostManagedProvider:te.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+// tNi/rNi = Bt.parentManagedSettings from --managed-settings (Slv) / SDK
+// KZn(parentManaged) → parent settings; Gfg(parent, hostFlag) → overlay
+// YZn origin: parentSlice||hostModelOverlay → "parent"
+```
+
+## go-hare
+- src/utils/settings/hostModelOverlay.ts — Gfg/b6i/Wfg pure helpers
+- settings.ts policy load: finishPolicySettingsForHost
+- bootstrap parentManagedSettings + main --managed-settings
+- types: fallbackModel[], enforceAvailableModels

@@ -143,6 +143,12 @@ export async function initialize(): Promise<void> {
   watcher.on('change', handleChange)
   watcher.on('unlink', handleDelete)
   watcher.on('add', handleAdd)
+  // densable #14: unhandled chokidar 'error' can crash process during FS errors
+  watcher.on('error', (err: unknown) => {
+    logForDebugging(`[settings] watcher error: ${errorMessage(err)}`, {
+      level: 'warn',
+    })
+  })
 }
 
 /**

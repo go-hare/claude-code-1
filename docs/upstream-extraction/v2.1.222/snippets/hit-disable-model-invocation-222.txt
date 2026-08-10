@@ -1,0 +1,37 @@
+# densable 2.1.222 #18 — disable-model-invocation refusal (ask user; don't replicate)
+# Product: Improved the refusal when Claude tries to invoke a skill with
+# disable-model-invocation: Claude is now told to ask you to run the skill
+# instead of replicating its workflow.
+# SEA: koa (NEW 222) + mvn message extension
+
+## 221 → 222
+- `Do not replicate this skill` 0 → 1
+- `replicate this skill's workflow` 0 → 1
+- 221 message ended at `due to disable-model-invocation` (no ask-user / no replicate)
+- 222 appends koa(r) + Do not replicate …
+
+## koa (ask user / coordinator)
+```
+function koa(e){
+  return Wb()
+    ? `It cannot be invoked via the ${dg} tool. Report to the coordinator that this command is not available to workers.`
+    : `Ask the user to run /${e} themselves — it cannot be invoked via the ${dg} tool.`;
+}
+// dg="Skill"
+// Wb = isCoordinatorMode (CLAUDE_CODE_COORDINATOR_MODE + gates)
+```
+
+## mvn disable_model_invocation branch
+```
+if(e.disableModelInvocation && !userTypedThisTurn)
+  return {
+    reason: "disable_model_invocation",
+    message: `Skill ${r} cannot be used with ${dg} tool due to disable-model-invocation. ${koa(r)} Do not replicate this skill's workflow by other means — it is reserved for explicit user invocation.`,
+    errorCode: 4
+  };
+```
+
+## go-hare
+- `formatDisableModelInvocationMessage(skillName)` in SkillTool.ts
+- validateInput when `foundCommand.disableModelInvocation`
+- `isCoordinatorMode()` for worker path

@@ -1,0 +1,67 @@
+# densable 2.1.222 #11 — tool errors still displayed when tool no longer available locally
+# Product: Fixed tool errors not being displayed for tools no longer available locally,
+# for example after an MCP server is removed.
+# SEA: Wli (useGetToolFromMessages) 221→222 change
+
+## 221 Wli (returns null when tool def gone)
+```
+let A6t = toolUseByToolUseID.get(id);
+if(!A6t){ return null }
+let B_S = du(liveTools, A6t.name);
+if(B_S){ return {tool:B_S, toolUse:A6t} }
+if(!oPf.has(A6t.name)){ return null }          // ← hid UI for MCP/etc
+let V1a = du(Rft()??[], A6t.name);
+if(!V1a){ return null }
+return {tool:V1a, toolUse:A6t}
+```
+
+## 222 Wli (always return toolUse when block exists)
+```
+function Wli(id, liveTools, lookups){
+  let f8t = lookups.toolUseByToolUseID.get(id);
+  if(!f8t){ return null }                      // only missing block → null
+  let pwS = du(liveTools, f8t.name);
+  if(pwS){ return {tool:pwS, toolUse:f8t} }
+  // ULf = new Set([xB]) where xB="SendUserMessage"
+  const FLf = (ULf.has(f8t.name) ? du(rft()??[], f8t.name) : void 0) ?? void 0;
+  return {tool: FLf, toolUse: f8t}             // tool may be undefined
+}
+```
+
+## zli = UserToolResultMessage
+```
+let t7 = Wli(...);
+if(!t7) return null;                           // only when tool_use block gone
+// ... cancel / reject ...
+else if(Wze.is_error){
+  return UserToolErrorMessage({ tool: t7.tool, ... })  // tool may be undefined
+}
+else {
+  return UserToolSuccessMessage({ tool: t7.tool, ... })
+}
+```
+
+## UserToolErrorMessage
+```
+return tool?.renderToolUseErrorMessage?.(content, opts)
+  ?? FallbackToolUseErrorMessage({ result: content, verbose })
+```
+→ with tool undefined, Fallback shows `<tool_use_error>Error: No such tool available: …`
+
+## Base registry
+```
+function tPu(e){ ePu=e }   // set base tools
+function rft(){ return ePu?.() }
+```
+go-hare: `getAllBaseTools()` (includes BriefTool / SendUserMessage).
+
+## go-hare mapping
+| densable | go-hare |
+| --- | --- |
+| Wli | resolveToolFromMessages / useGetToolFromMessages |
+| zli | UserToolResultMessage |
+| o8t | UserToolErrorMessage |
+| Fallback error UI | FallbackToolUseErrorMessage |
+| xB / ULf | SendUserMessage only base recovery |
+| rft / ePu | getAllBaseTools |
+| Eyt / StreamingToolExecutor | already emit is_error tool_result with No such tool available |

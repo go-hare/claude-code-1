@@ -205,12 +205,12 @@ export function doesMostRecentAssistantMessageExceed200k(
  * This is used when subagent streaming events are filtered out and we
  * need to count content from completed messages instead.
  *
- * Counts the same content that handleMessageFromStream would count via deltas:
+ * Streaming OTPS path (densable qQs onUpdateLength) only counts:
  * - text (text_delta)
- * - thinking (thinking_delta)
- * - redacted_thinking data
  * - tool_use input (input_json_delta)
- * Note: signature_delta is excluded from streaming counts (not model output).
+ * thinking_delta / signature_delta go through thinking_progress metrics, not length.
+ * This helper still includes thinking/redacted_thinking for completed-message
+ * subagent estimates when stream events are filtered out.
  */
 export function getAssistantMessageContentLength(
   message: AssistantMessage,

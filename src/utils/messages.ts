@@ -186,6 +186,11 @@ import {
   escapeRegExp,
   truncateIdeSelectionContent,
 } from './stringUtils.js'
+import { appendStreamingTextDelta } from './streamingTextStore.js'
+import {
+  clearStreamingToolJsonPreview,
+  updateStreamingToolJsonPreview,
+} from './streamingToolJsonPreview.js'
 import { isTodoV2Enabled } from './tasks.js'
 import { repairDoubleEscapedUnicode } from './toolInputUnicodeRepair.js'
 
@@ -3530,17 +3535,112 @@ export type StreamingThinking = {
 }
 
 /**
+ * densable qQs onApiMetrics lifecycle (start / thinking_progress / end).
+ * Legacy `{ ttftMs }` still accepted for call sites that only track TTFT.
+ */
+export type StreamApiMetricsEvent =
+  | { type: 'start'; ttftMs: number; messageId?: string }
+  | { type: 'content_block_start' }
+  | { type: 'thinking_progress'; estimatedTokensDelta: number }
+  | { type: 'thinking_signature'; chars: number }
+  | { type: 'end'; outputTokens: number }
+  | { ttftMs: number; messageId?: string }
+
+/**
  * Handles messages from a stream, updating response length for deltas and appending completed messages
  */
+export type StreamMessageDisplayTransform = {
+  begin: (apiMessageId: string) => void
+  delta: (text: string) => void
+  entryLanded: (message: AssistantMessage) => void
+  finalize: () => void
+}
+
+/** densable QueryEvent refusal_continuation (yEt onRefusalContinuation) */
+export type RefusalContinuationStreamEvent = {
+  type: 'refusal_continuation'
+  phase: 'begin' | 'end'
+  salvageText?: string
+  join?: 'exact' | 'soft'
+  replacesUuids?: string[]
+}
+
+/**
+ * densable yEt control-bus handlers (non-stream_event fan-out).
+ * Callbacks are optional; unhandled control types are dropped (not onMessage).
+ */
+export type StreamYEtHandlers = {
+  onNotification?: (notification: unknown) => void
+  onExpandedView?: (expandedView: unknown) => void
+  onPostTurnSummary?: (value: unknown) => void
+  onActiveGoal?: (value: unknown) => void
+  onInProgressToolUseIDs?: (op: {
+    action?: string
+    ids?: string[]
+    [k: string]: unknown
+  }) => void
+  onConversationReset?: (newConversationId: string) => void
+  onHintClears?: (event: unknown) => void
+  onInterruptibleToolInProgress?: (inProgress: boolean) => void
+  onOSNotification?: (event: unknown) => void
+  onCommandLifecycle?: (uuid: string, state: string) => void
+}
+
+/** densable Ula — estimate tokens from thinking text when API omits estimated_tokens */
+export function estimateThinkingTokensFromText(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+/** densable gmn — signature char weight for thinking_signature metrics */
+export function thinkingSignatureMetricChars(length: number): number {
+  return Math.round(length * 0.75)
+}
+
+/** densable ATb — output_tokens from message_delta event */
+export function extractMessageDeltaOutputTokens(event: unknown): number | null {
+  if (typeof event !== 'object' || event === null) return null
+  const usage = (event as { usage?: { output_tokens?: unknown } }).usage
+  const n = usage?.output_tokens
+  return typeof n === 'number' && Number.isFinite(n) ? n : null
+}
+
+/**
+ * densable yEt control types that must not fall through to onMessage.
+ * (refusal_continuation / tombstone / tool_use_summary handled separately.)
+ */
+const YET_CONTROL_TYPES = new Set([
+  'notification',
+  'set_expanded_view',
+  'post_turn_summary',
+  'active_goal',
+  'set_in_progress_tool_use_ids',
+  'conversation_reset',
+  'hint_clears',
+  'query_model_change',
+  'interruptible_tool_in_progress',
+  'api_metrics',
+  'os_notification',
+  'open_message_selector',
+  'apply_flag_settings',
+  'command_lifecycle',
+  // densable query-level control events that may reach the consumer
+  'server_fallback',
+  'refusal_no_fallback',
+  'fallback_request',
+])
+
 export function handleMessageFromStream(
   message:
     | Message
     | TombstoneMessage
     | StreamEvent
     | RequestStartEvent
-    | ToolUseSummaryMessage,
+    | ToolUseSummaryMessage
+    | RefusalContinuationStreamEvent
+    | { type: string; [k: string]: unknown },
   onMessage: (message: Message) => void,
-  onUpdateLength: (newContent: string) => void,
+  /** densable onUpdateLength — char count delta (not the string itself) */
+  onUpdateLength: (deltaChars: number) => void,
   onSetStreamMode: (mode: SpinnerMode) => void,
   onStreamingToolUses: (
     f: (streamingToolUse: StreamingToolUse[]) => StreamingToolUse[],
@@ -3549,21 +3649,100 @@ export function handleMessageFromStream(
   onStreamingThinking?: (
     f: (current: StreamingThinking | null) => StreamingThinking | null,
   ) => void,
-  onApiMetrics?: (metrics: { ttftMs: number }) => void,
+  onApiMetrics?: (metrics: StreamApiMetricsEvent) => void,
   onStreamingText?: (f: (current: string | null) => string | null) => void,
+  /** densable displayTransform (wth) — MessageDisplay hook pipeline */
+  displayTransform?: StreamMessageDisplayTransform,
+  /** densable yEt onRefusalContinuation → setSalvage + hG */
+  onRefusalContinuation?: (event: RefusalContinuationStreamEvent) => void,
+  /** densable r — subagent flag for message_delta usage-missing telemetry */
+  streamContext?: { isSubagent?: boolean },
+  /** densable yEt remaining control-surface callbacks */
+  yEtHandlers?: StreamYEtHandlers,
 ): void {
   if (
     message.type !== 'stream_event' &&
     message.type !== 'stream_request_start'
   ) {
+    // densable yEt: refusal_continuation is control-only (not added to messages)
+    if (message.type === 'refusal_continuation') {
+      onRefusalContinuation?.(message as RefusalContinuationStreamEvent)
+      return
+    }
     // Handle tombstone messages - remove the targeted message instead of adding
     if (message.type === 'tombstone') {
-      onTombstone?.(message.message as unknown as Message)
+      onTombstone?.((message as TombstoneMessage).message as unknown as Message)
       return
     }
     // Tool use summary messages are SDK-only, ignore them in stream handling
     if (message.type === 'tool_use_summary') {
       return
+    }
+    // densable yEt control bus (before assistant / onMessage fallthrough)
+    if (YET_CONTROL_TYPES.has(message.type)) {
+      const m = message as { type: string; [k: string]: unknown }
+      switch (m.type) {
+        case 'notification':
+          yEtHandlers?.onNotification?.(m.notification)
+          return
+        case 'set_expanded_view':
+          yEtHandlers?.onExpandedView?.(m.expandedView)
+          return
+        case 'post_turn_summary':
+          yEtHandlers?.onPostTurnSummary?.(m.value)
+          return
+        case 'active_goal':
+          yEtHandlers?.onActiveGoal?.(m.value)
+          return
+        case 'set_in_progress_tool_use_ids':
+          yEtHandlers?.onInProgressToolUseIDs?.(
+            (m.op ?? {}) as {
+              action?: string
+              ids?: string[]
+              [k: string]: unknown
+            },
+          )
+          return
+        case 'conversation_reset':
+          if (typeof m.newConversationId === 'string') {
+            yEtHandlers?.onConversationReset?.(m.newConversationId)
+          }
+          return
+        case 'hint_clears':
+          yEtHandlers?.onHintClears?.(m)
+          return
+        case 'query_model_change':
+          // densable: return without fan-out
+          return
+        case 'interruptible_tool_in_progress':
+          yEtHandlers?.onInterruptibleToolInProgress?.(m.inProgress === true)
+          return
+        case 'api_metrics':
+          // densable yEt: i?.(e.event) — reuse onApiMetrics
+          if (m.event !== undefined) {
+            onApiMetrics?.(m.event as StreamApiMetricsEvent)
+          }
+          return
+        case 'os_notification':
+          yEtHandlers?.onOSNotification?.(m)
+          return
+        case 'open_message_selector':
+        case 'apply_flag_settings':
+          return
+        case 'command_lifecycle':
+          if (typeof m.uuid === 'string' && typeof m.state === 'string') {
+            yEtHandlers?.onCommandLifecycle?.(m.uuid, m.state)
+          }
+          return
+        case 'server_fallback':
+        case 'refusal_no_fallback':
+        case 'fallback_request':
+          // query-level events normally consumed before handleMessageFromStream;
+          // if they leak, drop (do not onMessage)
+          return
+        default:
+          return
+      }
     }
     // Capture complete thinking blocks for real-time display in transcript mode
     if (message.type === 'assistant') {
@@ -3586,6 +3765,8 @@ export function handleMessageFromStream(
           streamingEndedAt: Date.now(),
         }))
       }
+      // densable yEt: displayTransform.entryLanded before clear + onMessage
+      displayTransform?.entryLanded(message as AssistantMessage)
     }
     // Clear streaming text NOW so the render can switch displayedMessages
     // from deferredMessages to messages in the same batch, making the
@@ -3626,11 +3807,36 @@ export function handleMessageFromStream(
 
   if (streamMsg.event.type === 'message_start') {
     if (streamMsg.ttftMs != null) {
-      onApiMetrics?.({ ttftMs: streamMsg.ttftMs })
+      const msgId = (
+        streamMsg.event as {
+          message?: { id?: string }
+        }
+      ).message?.id
+      // densable qQs: onApiMetrics({type:"start", ttftMs, messageId})
+      onApiMetrics?.({
+        type: 'start',
+        ttftMs: streamMsg.ttftMs,
+        ...(msgId ? { messageId: msgId } : {}),
+      })
     }
+    // densable qQs: clear tool list only when non-empty
+    onStreamingToolUses(d => (d.length > 0 ? [] : d))
+    // densable CLp — clear REPL partial-json preview buffers
+    clearStreamingToolJsonPreview()
+    // densable qQs: clear streaming text only when non-null (avoid no-op churn)
+    onStreamingText?.(d => (d !== null ? null : d))
+    // densable qQs: displayTransform.begin(message.id)
+    const msgId = (
+      streamMsg.event as {
+        message?: { id?: string }
+      }
+    ).message?.id
+    if (msgId) displayTransform?.begin(msgId)
   }
 
   if (streamMsg.event.type === 'message_stop') {
+    // densable qQs: finalize before mode flip
+    displayTransform?.finalize()
     onSetStreamMode('tool-use')
     onStreamingToolUses(() => [])
     return
@@ -3638,6 +3844,8 @@ export function handleMessageFromStream(
 
   switch (streamMsg.event.type) {
     case 'content_block_start':
+      // densable qQs: content_block_start metrics + clear streaming text
+      onApiMetrics?.({ type: 'content_block_start' })
       onStreamingText?.(() => null)
       if (
         feature('CONNECTOR_TEXT') &&
@@ -3655,17 +3863,31 @@ export function handleMessageFromStream(
           onSetStreamMode('responding')
           return
         case 'tool_use': {
+          // densable qQs: CTb=32768 size gate, TTb=256 cap, same-index replace
           onSetStreamMode('tool-input')
           const contentBlock = streamMsg.event.content_block as BetaToolUseBlock
           const index = streamMsg.event.index
-          onStreamingToolUses(_ => [
-            ..._,
-            {
+          try {
+            if (JSON.stringify(contentBlock).length > 32768) return
+          } catch {
+            return
+          }
+          onStreamingToolUses(_ => {
+            const existing = _.findIndex(t => t.index === index)
+            const next = {
               index,
               contentBlock,
-              unparsedToolInput: '',
-            },
-          ])
+              unparsedToolInput:
+                existing !== -1 ? (_[existing]!.unparsedToolInput ?? '') : '',
+            }
+            if (existing !== -1) {
+              const copy = _.slice()
+              copy[existing] = next
+              return copy
+            }
+            if (_.length >= 256) return _
+            return [..._, next]
+          })
           return
         }
         case 'server_tool_use':
@@ -3687,45 +3909,92 @@ export function handleMessageFromStream(
       switch (streamMsg.event.delta.type) {
         case 'text_delta': {
           const deltaText = streamMsg.event.delta.text
-          onUpdateLength(deltaText)
-          onStreamingText?.(text => (text ?? '') + deltaText)
+          // densable qQs: onUpdateLength(d.length) — char count, not string
+          onUpdateLength(deltaText.length)
+          // densable MLp=1e6 — appendStreamingTextDelta
+          onStreamingText?.(text => appendStreamingTextDelta(text, deltaText))
+          // densable qQs: displayTransform.delta
+          displayTransform?.delta(deltaText)
           return
         }
         case 'input_json_delta': {
           const delta = streamMsg.event.delta.partial_json
           const index = streamMsg.event.index
-          onUpdateLength(delta)
+          onUpdateLength(delta.length)
           onStreamingToolUses(_ => {
-            const element = _.find(_ => _.index === index)
+            const element = _.find(t => t.index === index)
             if (!element) {
               return _
             }
             return [
-              ..._.filter(_ => _ !== element),
+              ..._.filter(t => t !== element),
               {
                 ...element,
                 unparsedToolInput: element.unparsedToolInput + delta,
               },
             ]
           })
+          // densable xLp — REPL verbose code preview from partial JSON
+          updateStreamingToolJsonPreview(index, delta, onStreamingToolUses)
           return
         }
-        case 'thinking_delta':
-          onUpdateLength(streamMsg.event.delta.thinking)
+        case 'thinking_delta': {
+          // densable qQs: never onUpdateLength; thinking_progress via onApiMetrics
+          const d = streamMsg.event.delta as {
+            type: string
+            estimated_tokens?: unknown
+            thinking?: unknown
+          }
+          if (
+            'estimated_tokens' in d &&
+            typeof d.estimated_tokens === 'number'
+          ) {
+            onApiMetrics?.({
+              type: 'thinking_progress',
+              estimatedTokensDelta: d.estimated_tokens,
+            })
+          } else if (
+            'thinking' in d &&
+            typeof d.thinking === 'string' &&
+            d.thinking.length > 0
+          ) {
+            onApiMetrics?.({
+              type: 'thinking_progress',
+              estimatedTokensDelta: estimateThinkingTokensFromText(d.thinking),
+            })
+          }
           return
-        case 'signature_delta':
-          // Signatures are cryptographic authentication strings, not model
-          // output. Excluding them from onUpdateLength prevents them from
-          // inflating the OTPS metric and the animated token counter.
+        }
+        case 'signature_delta': {
+          // densable: thinking_signature metrics only; never onUpdateLength
+          const sig = (streamMsg.event.delta as { signature?: string })
+            .signature
+          if (typeof sig === 'string') {
+            onApiMetrics?.({
+              type: 'thinking_signature',
+              chars: thinkingSignatureMetricChars(sig.length),
+            })
+          }
           return
+        }
         default:
           return
       }
     case 'content_block_stop':
       return
-    case 'message_delta':
+    case 'message_delta': {
       onSetStreamMode('responding')
+      // densable ATb → onApiMetrics({type:"end", outputTokens})
+      const outputTokens = extractMessageDeltaOutputTokens(streamMsg.event)
+      if (outputTokens != null) {
+        onApiMetrics?.({ type: 'end', outputTokens })
+      } else {
+        logEvent('tengu_message_delta_usage_missing', {
+          is_subagent: streamContext?.isSubagent === true,
+        })
+      }
       return
+    }
     default:
       onSetStreamMode('responding')
       return

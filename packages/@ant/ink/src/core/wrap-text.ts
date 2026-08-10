@@ -42,7 +42,8 @@ export default function wrapText(
   maxWidth: number,
   wrapType: Styles['textWrap'],
 ): string {
-  if (wrapType === 'wrap') {
+  // densable C3: wrap and wrap-stream share the same hard wrap path
+  if (wrapType === 'wrap' || wrapType === 'wrap-stream') {
     return wrapAnsi(text, maxWidth, {
       trim: false,
       hard: true,

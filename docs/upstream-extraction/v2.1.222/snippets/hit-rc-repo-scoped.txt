@@ -1,0 +1,1 @@
+up: true in ${t===!0&&r===!0?"project and local":t===!0?"project":"local"} settings ignored \u2014 repo-scoped settings cannot enable Remote Control; set it at user scope (/config)`);return n}function rMe(){let e=X_t();if(e!==void 0)return e;return(UH(),Gr(ppr)).getCcrAutoConnectDefault()}function CQo(){let e=process.e

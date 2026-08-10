@@ -382,6 +382,15 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Override the default model used by Claude Code'),
+      // densable fallbackModel: array of model names/aliases tried in order
+      fallbackModel: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Fallback model(s) tried in order when the primary model is overloaded or unavailable. ' +
+            'Each element accepts a model name or alias; "default" expands to the default model. ' +
+            'CLI --fallback-model takes precedence when set.',
+        ),
       // Enterprise allowlist of models
       availableModels: z
         .array(z.string())
@@ -393,6 +402,14 @@ export const SettingsSchema = lazySchema(() =>
             'and full model IDs. ' +
             'If undefined, all models are available. If empty array, only the default model is available. ' +
             'Typically set in managed settings by enterprise administrators.',
+        ),
+      // densable enforceAvailableModels — constrain Default selection to allowlist
+      enforceAvailableModels: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true and availableModels is a non-empty array, the Default model selection is also constrained: ' +
+            'if the default model for the user tier is not in availableModels, Default resolves to the first allowlisted model.',
         ),
       modelOverrides: z
         .record(z.string(), z.string())
@@ -975,6 +992,20 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'When false, thinking is disabled. When absent or true, thinking is ' +
             'enabled automatically for supported models.',
+        ),
+      /**
+       * densable remoteControlAtStartup — auto-start Remote Control for sessions.
+       * Repo-scoped project/local settings may only *disable* (false); enabling
+       * must be user/security-sensitive scope (/config or user settings). See
+       * getRemoteControlAtStartup X_t.
+       */
+      remoteControlAtStartup: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, auto-start Remote Control for sessions. Only user-scope ' +
+            'settings can enable this; project/local true is ignored. false from ' +
+            'any scope disables.',
         ),
       effortLevel: z
         .enum(

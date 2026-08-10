@@ -1,0 +1,27 @@
+# densable 2.1.222 #13 — Spinner subagent effort (But / UCa)
+
+## Changelog
+Fixed the spinner's effort label in a subagent's transcript view showing the
+session's effort level instead of the subagent's own `effort:` setting.
+
+## densable Spinner
+```
+// per-agent spinner store
+UCa(agentId) → { turnEffort, turnModel, ... }
+setTurnEffort(o)
+
+// Spinner surface
+V = But(h ?? Zi(), m ?? F)
+// F = appState.effortValue
+// m = turnEffort
+// h = turnModel
+// Zi = main loop model
+// But ≈ getEffortSuffix
+```
+
+## go-hare mapping
+- `resolveSpinnerEffortSource({ sessionEffort, sessionModel, viewingAgentTaskId, tasks })`
+  - local_agent: m = task.effort ?? selectedAgent.effort; h = task.model ?? selectedAgent.model
+  - else: F + Zi
+- Spinner.tsx: effortSuffix = getEffortSuffix(...resolveSpinnerEffortSource(...))
+- LocalAgentTask already stamps effort at register (Sot/OSu from agent definition)

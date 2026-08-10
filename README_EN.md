@@ -43,9 +43,41 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216 → 2.1.217** product alignment (214 safety-valve pack + 215 no model auto `/verify`/`/code-review` + 216 long-session/sandbox/worktree/bg/UI reliability + 217 emoji/caps/brace/hyperlink/tips/bg isolation, 20 rows). **Published npm version is whatever `package.json` says** (currently **2.7.32**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.218 → 2.1.219 → 2.1.220 → 2.1.221** product alignment (218 code-review bg / a11y / auto-mode + 219 Opus 5 / nest depth / workflow size, 24 rows + 220 entitlement_blind residual + 221 sandbox mask / PowerShell quote-path / bareAssignmentNames U5e·cle, 39 rows). **Published npm version is whatever `package.json` says** (currently **2.7.34**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.217 alignment (2.7.32)
+#### densable 2.1.219–2.1.221 alignment (2.7.34)
+
+Sources of truth:
+- `docs/upstream-extraction/v2.1.219/official-219-checklist.md` (**HAVE 24 / GAP 0**)
+- `docs/upstream-extraction/v2.1.220/official-220-checklist.md` (public 1-liner N/A + SEA residual **HAVE**)
+- `docs/upstream-extraction/v2.1.221/official-221-checklist.md` (**HAVE 35 / GAP 2 / N/A 2**)
+
+Stacked on **2.1.218**. **Do not invent GAPs**: #10 SDK MCP `constructor` name crash, #12 sandboxed large-upload TLS; #1 VSCode Focus view / #38 gateway model 400 are **N/A**.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **2.1.219 models / caps** | Opus 5 catalog (EHl/ON) + 1M picker “Opus (1M context)”; nest depth default 3 (hazel_trellis); `workflowSizeGuideline`; stream-json nested `--forward-subagent-text`; Fable credits stale cache | — |
+| **2.1.219 permissions / hooks / UX** | `sandbox.network.strictAllowlist`; `DirectoryAdded` hook; init `mcp_server_errors`; GIT_BASH basename validate; Vim left-on-empty → agent view; SR suffix append; RC endpoint naming; MCP policy `${VAR}` | — |
+| **2.1.220 residual** | `isEntitlementOverlayUnavailable` / entitlement deny-set; `entitlement_blind` telemetry; blind opus-5 → opus-4-8 substitute | Official public has no per-bullet product list (N/A) |
+| **2.1.221 security / permissions** | sandbox credential `mode:"mask"`; zsh `[[ ]]` unquoted `&`; **PowerShell quote-path pWo fail-closed ask**; Bash U5e/cle full `bareAssignmentNames` (for danger set / declaration flags / Pws·uVu) + ZRu reads bare only | **#10 constructor** GAP; **#12 large-upload TLS** GAP |
+| **2.1.221 session / plugins / UI** | prompt-audit; session title sanitize; Vim yank share / undo-to-empty; plugin install catalog refresh + reload clears notice; `/status` session kind; Stats cache breakdown; ultrareview no-branches; bg commit/draft-PR policy; Vertex ToolSearch native wire | **#1 VSCode Focus** N/A; **#38 gateway** N/A |
+| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF; no further KAIROS product surface |
+
+#### densable 2.1.218 alignment (2.7.33, included)
+
+Source of truth: `docs/upstream-extraction/v2.1.218/official-218-checklist.md` (**HAVE 35 / N/A 1 / GAP 0**), `changelog-2.1.218.md`. Stacked on **2.1.217**. Do **not** claim “36/36 solid HAVE” — official **#9 gateway spend metering** is **N/A** (go-hare does not ship a gateway); CLI cousin `application-inference-profile` cost resolve is a separate HAVE.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **code-review / ultrareview** | `/code-review` bg subagent + stacked slash; `/code-review ultra` non-interactive cloud; `/ultrareview` descriptive args + invalid-arg feedback | — |
+| **a11y / input** | SR delete announce; VoiceOver trailing space; plugin/settings `declareCursor`; multi-line paste Ctrl+J→newline; left-arrow confirm + AgentView Esc return | — |
+| **Permissions / auto-mode / sandbox** | dangerous-rm/`&`/Win path circuitBreaker; plan+auto RO Bash→classifier; sandbox IDE commands fail-closed; agent frontmatter hooks need workspace trust | — |
+| **Session / engine** | Host teardown phantom turn + sticky permissionLayers; suppress false interrupt; fork `logical_parent_uuid`; prompt history race; overflow retry + Ctrl+B shell caps | — |
+| **Cloud / remote / IDE** | Bedrock setup assume-role/partition/proxy; CCR closed-gate stops heartbeat; IDE selection mid-emoji + sibling_context_error; PR link flush 2s | — |
+| **Frontmatter / skills / trust** | agent name ban `:`; fork skill default background; bool yes/no/on/off/1/0; plugin `--config KEY=VALUE`; `/deep-research` manual-only; trust shows repository root + RC multi-env Add-server | **#9 gateway metering** N/A |
+| **Ink / Agent Views (ship hardening)** | skipSyncMarkers; unmount skips paused previous-output; no empty-frame skip; Esc = densable JH done + O7 `suppressResumeHint` (no attach-origin black screen) | UDS/LAN/TEAMMEM default OFF |
+
+#### densable 2.1.217 alignment (2.7.32, included)
 
 Source of truth: `docs/upstream-extraction/v2.1.217/official-217-checklist.md` (**HAVE 20 / GAP 0**), `changelog-2.1.217.md`. Stacked on **2.1.216**.
 
@@ -108,10 +140,12 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF |
 
-### Recent updates (2.7.5 → 2.7.32)
+### Recent updates (2.7.5 → 2.7.34)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.34** | **densable 2.1.219–2.1.221**: 219 **24/24 HAVE** (Opus 5 catalog/1M, nest depth 3, workflowSizeGuideline, DirectoryAdded, strictAllowlist, stream nested forward, Vim/SR, etc.); 220 entitlement overlay residual (`isEntitlementOverlayUnavailable` / `entitlement_blind`); 221 **HAVE 35 / GAP 2 / N/A 2** (sandbox mask, prompt-audit, PS quote-path pWo, U5e/cle bareAssignmentNames+ZRu, session title sanitize, Vim yank, plugin refresh, ToolSearch native wire, bg draft-PR, etc.). **GAP**: #10 constructor / #12 large-upload TLS. UDS/LAN/TEAMMEM default OFF. |
+| **2.7.33** | **densable 2.1.218 full 1:1 (35 HAVE / 1 N/A / 0 GAP)**: code-review bg + ultra cloud; ultrareview descriptive/invalid args; SR a11y / Ctrl+J / left-arrow confirm / AgentView Esc; Host teardown + permissionLayers; auto-mode/sandbox IDE; fork lineage; Bedrock wizard; CCR heartbeat; frontmatter bool/`--config`/ban `:`; `/deep-research` manual-only; RC multi-env trust. **#9 gateway metering N/A**. Ship hardening: Ink skipSyncMarkers/unmount/alt-screen; Agent Views Esc no attach-origin black screen + O7 exit. UDS/LAN/TEAMMEM default OFF. |
 | **2.7.32** | **densable 2.1.217 full 1:1 (20/20 HAVE)**: concurrent subagents 20 / nest depth 1; brace budget; `FORCE_HYPERLINK`; emoji shortcode typeahead; tip lifetime 3; login 3d; transcript ENOSPC; MCP truncate; Opus 4.8 Bedrock 1M; SR startup quiet; managed OTEL; malformed attachment; attach footer gap; Win taskkill; bg isolation `eq`/`N6g`/`ZRu` bare+YPg (ZRu Shell.exec-only). **Intentionally stricter**: parse-unavailable fail-closed. UDS/LAN/TEAMMEM default OFF. |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 closeout**: 215 `/verify`·`/code-review` no model auto-invoke (HAVE 2); 216 **HAVE 38 / N/A 1 / GAP 0** (`sandbox.filesystem.disabled`, long-session normalize, auto-mode 401, worktree git isolation, daemon stop --any, bg/agents UX, Win network paths, fullscreen UI, skill menu hot refresh, `/rewind` symlink safety, etc.). Intentionally off: UDS/LAN/TEAMMEM; VSCode RTL N/A. |
 | **2.7.30** | **densable 2.1.214 full 1:1 (47/47 HAVE)**: permission/Bash/PS safety valves; EndConversation; tool heartbeat; GrowthBook null payload + OAuth flag refresh; bg daemon control-socket/retire/deleteJob; RC session-ready push gate; stream cost / advisor stall / hooks exit2 / OTel / MCP list_changed; etc. Intentionally off: UDS/LAN/TEAMMEM. |

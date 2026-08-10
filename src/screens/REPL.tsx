@@ -47,6 +47,7 @@ import {
   useCallback,
   useDeferredValue,
   useLayoutEffect,
+  useSyncExternalStore,
   type RefObject,
 } from 'react';
 import { useNotifications } from '../context/notifications.js';
@@ -178,6 +179,16 @@ import { useSwarmInitialization } from '../hooks/useSwarmInitialization.js';
 import { useTeammateViewAutoExit } from '../hooks/useTeammateViewAutoExit.js';
 import { errorMessage, toError } from '../utils/errors.js';
 import { isHumanTurn } from '../utils/messagePredicates.js';
+import {
+  STREAM_FLAG_DISPLAYED,
+  STREAM_FLAG_HIDE_TRAILING,
+  STREAM_FLAG_SALVAGE,
+  createStreamingDisplayStore,
+  createStreamingTextFlushBuffer,
+  mergeSalvagePrefix,
+} from '../utils/streamingTextStore.js';
+import { createMessageDisplayTransform, pruneDisplayedMessageContent } from '../utils/messageDisplayTransform.js';
+import { StreamingTextPreview } from '../components/StreamingTextPreview.js';
 import { logError } from '../utils/log.js';
 import { getCwd } from '../utils/cwd.js';
 // Dead code elimination: conditional imports
@@ -2416,37 +2427,120 @@ export function REPL({
     }
   }, []);
 
-  // Streaming text display: set state directly per delta (Ink's 16ms render
-  // throttle batches rapid updates). Cleared on message arrival (messages.ts)
-  // so displayedMessages switches from deferredMessages to messages atomically.
-  const [streamingText, setStreamingText] = useState<string | null>(null);
+  // densable 2.1.222 streaming path: UNf flush buffer (pH) → WNf display store
+  // (ck) → XEl StreamingTextPreview. Atomic clear on assistant land
+  // (messages.ts: onStreamingText(()=>null) then onMessage) prevents dual-●.
+  // l5 = !prefersReducedMotion && !hasCursorUpViewportYankBug (densable UZu).
   const reducedMotion = useAppState(s => s.settings.prefersReducedMotion) ?? false;
   const showStreamingText = !reducedMotion && !hasCursorUpViewportYankBug();
+  const showStreamingTextRef = useRef(showStreamingText);
+  showStreamingTextRef.current = showStreamingText;
+  // densable ck / WNf
+  const streamingDisplayStore = useMemo(() => createStreamingDisplayStore(), []);
+  // densable pH / BNf — 100ms throttle into setRaw
+  const streamingFlushBuffer = useMemo(
+    () =>
+      createStreamingTextFlushBuffer({
+        scheduleTimeout: (fn, ms) => {
+          const id = setTimeout(fn, ms);
+          return () => clearTimeout(id);
+        },
+        onFlush: raw => {
+          streamingDisplayStore.setRaw(raw);
+        },
+      }),
+    [streamingDisplayStore],
+  );
+  useEffect(() => () => streamingFlushBuffer.dispose(), [streamingFlushBuffer]);
+  // densable iP — onStreamingText
   const onStreamingText = useCallback(
     (f: (current: string | null) => string | null) => {
-      // Always apply clears (null/empty) even when preview is disabled, so a
-      // content_block_stop that races with reducedMotion / viewport-bug toggles
-      // cannot leave stale streamingText that paints a second ● while tools run
-      // (isLoading stays true through the whole tool phase).
-      setStreamingText(current => {
-        const next = f(current);
-        if (next == null || next === '') return null;
-        if (!showStreamingText) return current;
-        return next;
-      });
+      // densable: when preview disabled, still honor clear (null) so residual
+      // cannot reappear when toggled; drop non-null growth.
+      if (!showStreamingTextRef.current) {
+        if (f(streamingFlushBuffer.peek()) === null) {
+          streamingFlushBuffer.clear();
+        }
+        return;
+      }
+      streamingFlushBuffer.apply(f);
     },
-    [showStreamingText],
+    [streamingFlushBuffer],
   );
+  // densable Jbe = l5 && (flags & U2a)
+  const streamingFlags = useSyncExternalStore(streamingDisplayStore.subscribe, streamingDisplayStore.getFlags);
+  const hasStreamingText = showStreamingText && (streamingFlags & STREAM_FLAG_DISPLAYED) !== 0;
+  // densable d5 = <XEl store={ck} />
+  const streamingPreviewEl = useMemo(
+    () => <StreamingTextPreview store={streamingDisplayStore} />,
+    [streamingDisplayStore],
+  );
+  // densable cX / stream clear: pH.clear only → setRaw(null).
+  // Intentionally does NOT setSalvage(null): refusal_continuation keeps
+  // salvage painted across message_start/content_block_start clears (Qci
+  // salvage-only displayed). Salvage is dropped only by densable sites:
+  // land (setSalvage null + Jpe), esc, refusal end, and !Ln && j2a effect.
+  // Local hardening vs densable cX: also setTransformed(null) to kill dual-●
+  // residuals when turn ends without a transform finalize race.
+  const clearStreamingText = useCallback(() => {
+    streamingFlushBuffer.clear();
+    streamingDisplayStore.setTransformed(null);
+  }, [streamingFlushBuffer, streamingDisplayStore]);
 
-  // Hide the in-progress source line so text streams line-by-line, not
-  // char-by-char. lastIndexOf returns -1 when no newline, giving '' → null.
-  // Guard on showStreamingText so toggling reducedMotion mid-stream
-  // immediately hides the streaming preview.
-  // densable: no text-overlap hide — stream → final is atomic clear+onMessage.
-  const visibleStreamingText = useMemo(() => {
-    if (!streamingText || !showStreamingText) return null;
-    return streamingText.substring(0, streamingText.lastIndexOf('\n') + 1) || null;
-  }, [streamingText, showStreamingText]);
+  // densable mG / wth — MessageDisplay transform controller
+  // Jpe = salvage ref (apiMessageId + salvageText + exact) for r7o merge on land
+  const salvageRef = useRef<{
+    apiMessageId: string;
+    salvageText: string;
+    exact: boolean;
+  } | null>(null);
+  // densable hG — replacesUuids from refusal_continuation begin (remove-by-uuid on land)
+  const refusalReplacesUuidsRef = useRef<string[] | null>(null);
+  const showStreamingTextForTransformRef = useRef(showStreamingText);
+  showStreamingTextForTransformRef.current = showStreamingText;
+  const displayTransform = useMemo(
+    () =>
+      createMessageDisplayTransform({
+        getAppState: () => store.getState(),
+        onStreamingDisplay: content => {
+          // densable: if (!z8.current) return — skip paint when reduced motion / yank bug
+          if (!showStreamingTextForTransformRef.current) return;
+          streamingDisplayStore.setTransformed(content);
+        },
+        onMessageDisplay: (apiMessageId, content) => {
+          const salvage = salvageRef.current;
+          const merged =
+            salvage !== null && salvage.apiMessageId === apiMessageId
+              ? mergeSalvagePrefix(salvage.salvageText, content, salvage.exact)
+              : content;
+          // densable r7o: consume Jpe salvage once for this apiMessageId
+          if (salvage !== null && salvage.apiMessageId === apiMessageId) {
+            salvageRef.current = null;
+          }
+          setAppState(prev => {
+            const map = prev.displayedMessageContent ?? {};
+            if (map[apiMessageId] === merged) return prev;
+            return {
+              ...prev,
+              displayedMessageContent: {
+                ...map,
+                [apiMessageId]: merged,
+              },
+            };
+          });
+        },
+      }),
+    [store, setAppState, streamingDisplayStore],
+  );
+  // densable: if (!Ln && (p4 & j2a) !== 0) ck.setSalvage(null)
+  useEffect(() => {
+    if (!isLoading && (streamingFlags & STREAM_FLAG_SALVAGE) !== 0) {
+      streamingDisplayStore.setSalvage(null);
+    }
+  }, [isLoading, streamingFlags, streamingDisplayStore]);
+
+  // Snapshot raw for mid-turn partial / bg checkpoint (not painted path)
+  const getStreamingTextRaw = useCallback(() => streamingDisplayStore.getState().raw, [streamingDisplayStore]);
 
   const [lastQueryCompletionTime, setLastQueryCompletionTime] = useState(0);
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
@@ -2561,7 +2655,7 @@ export function REPL({
     setUserInputOnProcessing(undefined);
     responseLengthRef.current = 0;
     apiMetricsRef.current = [];
-    setStreamingText(null);
+    clearStreamingText();
     setStreamingToolUses([]);
     setSpinnerMessage(null);
     setSpinnerColor(null);
@@ -2573,7 +2667,7 @@ export function REPL({
     // turn's commands — clear after each turn to avoid accumulating
     // Promise chains for unconsumed checks (denied/aborted paths).
     clearSpeculativeChecks();
-  }, [pickNewSpinnerTip]);
+  }, [pickNewSpinnerTip, clearStreamingText]);
 
   // Session backgrounding — hook is below, after getToolUseContext
 
@@ -2708,9 +2802,11 @@ export function REPL({
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&
-    // Hide spinner when streaming text is visible (the text IS the feedback),
-    // but keep it when isBriefOnly suppresses the streaming text display
-    (!visibleStreamingText || isBriefOnly);
+    // densable zm: (!Jbe || (p4&B2a)!==0 || Je)
+    // Hide spinner when streaming preview is up, unless raw single-line
+    // stream (B2a = hideTrailing && !newline) — then spinner+● coexist.
+    // isBriefOnly (Je) suppresses preview paint so spinner stays.
+    (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly);
 
   // Check if any permission or ask question prompt is currently visible
   // This is used to prevent the survey from opening while prompts are active
@@ -3479,6 +3575,26 @@ export function REPL({
       abortController?.abort('user-cancel');
     }
 
+    // densable esc: if salvage active and not remote, clear + keep originals
+    // (tengu_rotunda_pennant_esc action kept_originals)
+    {
+      const st = streamingDisplayStore.getState();
+      const replaces = refusalReplacesUuidsRef.current;
+      if (!activeRemote.isRemoteMode && st.salvage !== null) {
+        const streamedChars = st.raw?.length ?? 0;
+        streamingDisplayStore.setSalvage(null);
+        if (replaces !== null) {
+          refusalReplacesUuidsRef.current = null;
+          logEvent('tengu_rotunda_pennant_esc', {
+            action: 'kept_originals' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            retained_count: replaces.length,
+            streamed_chars: streamedChars,
+          });
+        }
+        salvageRef.current = null;
+      }
+    }
+
     // Clear the controller so subsequent Escape presses don't see a stale
     // aborted signal. Without this, canCancelRunningTask is false (signal
     // defined but .aborted === true), so isActive becomes false if no other
@@ -4076,6 +4192,8 @@ export function REPL({
             // Bump conversationId so Messages.tsx row keys change and
             // stale memoized rows remount with post-compact content.
             setConversationId(randomUUID());
+            // densable z$l after compact boundary replace — prune displayedMessageContent
+            setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
             // Compaction succeeded — clear the context-blocked flag so ticks resume
             if (feature('PROACTIVE') || feature('KAIROS')) {
               proactiveModule?.setContextBlocked(false);
@@ -4119,7 +4237,43 @@ export function REPL({
             // trailing-newline short reply cannot keep painting streaming ●
             // while isLoading stays true through tools.
             if (newMessage.type === 'assistant') {
-              setStreamingText(null);
+              // densable land: if salvage active, stash Jpe for r7o + hG remove-by-uuid + setSalvage(null)
+              const st = streamingDisplayStore.getState();
+              if (
+                st.salvage !== null &&
+                !('isVirtual' in newMessage && newMessage.isVirtual) &&
+                !('isApiErrorMessage' in newMessage && newMessage.isApiErrorMessage)
+              ) {
+                const content = newMessage.message?.content;
+                const hasText =
+                  Array.isArray(content) &&
+                  content.some(
+                    b =>
+                      typeof b !== 'string' &&
+                      b.type === 'text' &&
+                      typeof b.text === 'string' &&
+                      b.text.trim().length > 0,
+                  );
+                if (hasText && newMessage.message?.id) {
+                  salvageRef.current = {
+                    apiMessageId: newMessage.message.id,
+                    salvageText: st.salvage,
+                    exact: st.exact,
+                  };
+                  const replaces = refusalReplacesUuidsRef.current;
+                  if (replaces !== null) {
+                    refusalReplacesUuidsRef.current = null;
+                    const drop = new Set(replaces);
+                    setMessages(old => old.filter(m => !drop.has(m.uuid)));
+                    for (const uuid of replaces) {
+                      void removeTranscriptMessage(uuid as `${string}-${string}-${string}-${string}-${string}`);
+                    }
+                  }
+                  // densable: ck.setSalvage(null) immediately on land
+                  streamingDisplayStore.setSalvage(null);
+                }
+              }
+              clearStreamingText();
             }
           }
           // Block ticks on API errors to prevent tick → error → tick
@@ -4198,11 +4352,12 @@ export function REPL({
             }
           }
         },
-        newContent => {
+        // densable qQs onUpdateLength(d.length) — delta is already a char count
+        deltaChars => {
           // setResponseLength handles updating both responseLengthRef (for
           // spinner animation) and apiMetricsRef (endResponseLength/lastTokenTime
           // for OTPS). No separate metrics update needed here.
-          setResponseLength(length => length + newContent.length);
+          setResponseLength(length => length + deltaChars);
         },
         setStreamMode,
         setStreamingToolUses,
@@ -4212,10 +4367,18 @@ export function REPL({
         },
         setStreamingThinking,
         metrics => {
+          // densable: start → TTFT lifecycle; thinking_progress/end ignored for spinner OTPS
+          let ttftMs: number | undefined;
+          if ('type' in metrics && metrics.type === 'start') {
+            ttftMs = metrics.ttftMs;
+          } else if ('ttftMs' in metrics && typeof (metrics as { ttftMs?: unknown }).ttftMs === 'number') {
+            ttftMs = (metrics as { ttftMs: number }).ttftMs;
+          }
+          if (ttftMs === undefined) return;
           const now = Date.now();
           const baseline = responseLengthRef.current;
           apiMetricsRef.current.push({
-            ...metrics,
+            ttftMs,
             firstTokenTime: now,
             lastTokenTime: now,
             responseLengthBaseline: baseline,
@@ -4223,9 +4386,106 @@ export function REPL({
           });
         },
         onStreamingText,
+        displayTransform,
+        // densable yEt onRefusalContinuation
+        event => {
+          if (event.phase === 'begin') {
+            salvageRef.current = null;
+            refusalReplacesUuidsRef.current =
+              event.replacesUuids !== undefined && event.replacesUuids.length > 0 ? event.replacesUuids : null;
+            streamingDisplayStore.setSalvage(event.salvageText ?? null, event.join === 'exact');
+          } else {
+            refusalReplacesUuidsRef.current = null;
+            streamingDisplayStore.setSalvage(null);
+          }
+        },
+        undefined, // streamContext (main thread)
+        // densable yEt remaining control surfaces
+        {
+          onConversationReset: newConversationId => {
+            setConversationId(newConversationId as `${string}-${string}-${string}-${string}-${string}`);
+          },
+          onInProgressToolUseIDs: op => {
+            const ids = Array.isArray(op.ids) ? op.ids : [];
+            const action = op.action ?? 'set';
+            setInProgressToolUseIDs(prev => {
+              if (action === 'remove') {
+                if (ids.length === 0) return prev;
+                const next = new Set(prev);
+                for (const id of ids) next.delete(id);
+                return next;
+              }
+              if (action === 'add') {
+                if (ids.length === 0) return prev;
+                const next = new Set(prev);
+                for (const id of ids) next.add(id);
+                return next;
+              }
+              // set / default
+              return new Set(ids);
+            });
+          },
+          onNotification: notification => {
+            if (notification && typeof notification === 'object' && 'text' in (notification as object)) {
+              const n = notification as {
+                key?: string;
+                text?: string;
+                priority?: 'immediate' | 'high' | 'medium' | 'low';
+              };
+              if (typeof n.text === 'string' && n.text.length > 0) {
+                addNotification({
+                  key: n.key ?? `stream-notification-${Date.now()}`,
+                  text: n.text,
+                  priority: n.priority ?? 'medium',
+                });
+              }
+            }
+          },
+          onExpandedView: expandedView => {
+            if (typeof expandedView === 'string' || expandedView === null) {
+              setAppState(prev => ({
+                ...prev,
+                expandedView: expandedView as typeof prev.expandedView,
+              }));
+            }
+          },
+          onActiveGoal: value => {
+            // Goal state is owned by goal services; control event is advisory.
+            void value;
+          },
+          onPostTurnSummary: value => {
+            void value;
+          },
+          onHintClears: () => {
+            // Hint clear is optional UI; no-op when no hint store is wired.
+          },
+          onInterruptibleToolInProgress: () => {
+            // Spinner / interruptible tool UI optional.
+          },
+          onOSNotification: () => {
+            // OS notification path optional for local REPL.
+          },
+          onCommandLifecycle: () => {
+            // Host/engine owns command_lifecycle; REPL ignores.
+          },
+        },
       );
     },
-    [setMessages, setResponseLength, setStreamMode, setStreamingToolUses, setStreamingThinking, onStreamingText],
+    [
+      setMessages,
+      setResponseLength,
+      setStreamMode,
+      setStreamingToolUses,
+      setStreamingThinking,
+      onStreamingText,
+      displayTransform,
+      clearStreamingText,
+      streamingDisplayStore,
+      setAppState,
+      setConversationId,
+      setInProgressToolUseIDs,
+      addNotification,
+    ],
   );
 
   const onQueryImpl = useCallback(
@@ -4332,6 +4592,8 @@ export function REPL({
           // Bump conversationId so Messages.tsx row keys change and
           // stale memoized rows remount with post-compact content.
           setConversationId(randomUUID());
+          // densable z$l after manual /compact (shouldQuery=false path)
+          setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
           if (feature('PROACTIVE') || feature('KAIROS')) {
             proactiveModule?.setContextBlocked(false);
           }
@@ -4651,7 +4913,9 @@ export function REPL({
         }
         apiMetricsRef.current = [];
         setStreamingToolUses([]);
-        setStreamingText(null);
+        clearStreamingText();
+        // densable: mG.newTurn() after pH.clear / setTransformed null
+        displayTransform.newTurn();
 
         // messagesRef is updated synchronously by the setMessages wrapper
         // above, so it already includes newMessages from the append at the
@@ -4822,7 +5086,16 @@ export function REPL({
       }
       return true;
     },
-    [onQueryImpl, setAppState, resetLoadingState, queryGuard, mrOnBeforeQuery, mrOnTurnComplete],
+    [
+      onQueryImpl,
+      setAppState,
+      resetLoadingState,
+      queryGuard,
+      mrOnBeforeQuery,
+      mrOnTurnComplete,
+      clearStreamingText,
+      displayTransform,
+    ],
   );
 
   // Handle initial message (from CLI args or plan mode exit with context clear)
@@ -7063,7 +7336,8 @@ export function REPL({
                 agentDefinitions={agentDefinitions}
                 onOpenRateLimitOptions={handleOpenRateLimitOptions}
                 isLoading={isLoading}
-                streamingText={isLoading && !viewedAgentTask ? visibleStreamingText : null}
+                hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText}
+                streamingPreview={isLoading && !viewedAgentTask && showStreamingText ? streamingPreviewEl : null}
                 isBriefOnly={viewedAgentTask ? false : isBriefOnly}
                 unseenDivider={viewedAgentTask ? undefined : unseenDivider}
                 scrollRef={isFullscreenEnvEnabled() ? scrollRef : undefined}
@@ -7706,7 +7980,10 @@ export function REPL({
                               // eslint-disable-next-line @typescript-eslint/no-require-imports
                               const { getSessionCronTasks } =
                                 require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
-                              const partialFromMsgs = buildInFlightPartialText(snap, isLoading ? streamingText : null);
+                              const partialFromMsgs = buildInFlightPartialText(
+                                snap,
+                                isLoading ? getStreamingTextRaw() : null,
+                              );
                               const boundaryUuid = findForkBoundaryUuid(snap);
                               // Official CAo/fDs: detach shells + snapshot; disown after handoff.
                               const collected = collectPortableCheckpoint({
@@ -7768,7 +8045,7 @@ export function REPL({
                                 messages: snap,
                                 // Mid-turn: abort-then-fork + partial (Fco) + MVr boundary.
                                 via,
-                                partialText: isLoading ? partialFromMsgs || streamingText : null,
+                                partialText: isLoading ? partialFromMsgs || getStreamingTextRaw() : null,
                                 boundaryUuid,
                                 agentsCount: checkpoint?.agents?.length ?? 0,
                                 checkpoint: checkpoint
@@ -7898,6 +8175,8 @@ export function REPL({
                         proactiveModule?.setContextBlocked(false);
                       }
                       setConversationId(randomUUID());
+                      // densable z$l after message-picker summarize (Sd.current)
+                      setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
                       runPostCompactCleanup(context.options.querySource);
 
                       if (direction === 'from') {

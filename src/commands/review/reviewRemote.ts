@@ -42,6 +42,7 @@ import {
   getDefaultBranch,
   getIsGit,
   gitExe,
+  RAW_GIT_DIFF_FLAGS,
 } from '../../utils/git.js'
 import { getPlatform } from '../../utils/platform.js'
 import { teleportToRemote } from '../../utils/teleport.js'
@@ -1415,13 +1416,7 @@ export async function launchRemoteReview(
             0
         const { stdout: emptyStat, code: emptyCode } = await execFileNoThrow(
           gitExe(),
-          [
-            'diff',
-            '--no-ext-diff',
-            '--no-textconv',
-            '--shortstat',
-            EMPTY_TREE_SHA,
-          ],
+          ['diff', ...RAW_GIT_DIFF_FLAGS, '--shortstat', EMPTY_TREE_SHA],
           {
             preserveOutputOnError: false,
             env: { ...process.env, LC_ALL: 'C' },
@@ -1557,13 +1552,7 @@ export async function launchRemoteReview(
       // will just echo "no changes".
       const { stdout: diffStat, code: diffCode } = await execFileNoThrow(
         gitExe(),
-        [
-          'diff',
-          '--no-ext-diff',
-          '--no-textconv',
-          '--shortstat',
-          effectiveMergeBase,
-        ],
+        ['diff', ...RAW_GIT_DIFF_FLAGS, '--shortstat', effectiveMergeBase],
         {
           preserveOutputOnError: false,
           env: { ...process.env, LC_ALL: 'C' },
@@ -1616,8 +1605,7 @@ export async function launchRemoteReview(
                 '-c',
                 'core.quotepath=false',
                 'diff',
-                '--no-ext-diff',
-                '--no-textconv',
+                ...RAW_GIT_DIFF_FLAGS,
                 '--numstat',
                 effectiveMergeBase,
               ],

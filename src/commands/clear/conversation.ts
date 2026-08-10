@@ -219,6 +219,8 @@ export async function clearConversation({
         ultrareviewOverageConfirmed: false,
         // densable 2.1.214: /clear resets EndConversation session lock
         endedByModel: false,
+        // densable session reset: clear MessageDisplay salvage map
+        displayedMessageContent: {},
         // Clear standalone agent context (name/color set by /rename, /color)
         // so the new session doesn't display the old session's identity badge
         standaloneAgentContext: undefined,

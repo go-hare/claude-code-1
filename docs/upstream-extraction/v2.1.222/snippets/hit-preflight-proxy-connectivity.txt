@@ -1,0 +1,27 @@
+# densable 2.1.222 #4 — proxy-aware preflight connectivity (Coh)
+
+## Changelog
+Fixed the startup connectivity check hanging and then failing behind an HTTPS
+proxy; it now uses the same proxy-aware transport as API requests and times out
+with a clear message.
+
+## densable Coh
+```
+Toh = 1e4  // 10s
+await sir()  // configure proxy agents
+urls = [BASE_API_URL/api/hello, TOKEN_URL.origin + /v1/oauth/hello]
+for each url:
+  opts = Wh({url})  // proxy-aware fetch options
+  fetch(url, { User-Agent, signal: AbortSignal.timeout(Toh), ...opts })
+  status!==200 → Failed to connect to {host}: Status N
+  TimeoutError → Connection to {host} timed out after 10 seconds
+  else → Failed to connect + sslHint(wft)
+first failure wins; analytics tengu_preflight_check_failed
+```
+
+## go-hare
+- `checkEndpoints` / `getPreflightFetchOptions` / `PREFLIGHT_CONNECTIVITY_TIMEOUT_MS=10000`
+- Wh → `getProxyFetchOptions` + NO_PROXY via `shouldBypassProxy`
+- wft → `getSSLErrorHint`
+- sir → `configureGlobalAgents` + proxyAuthHelper warm
+- PreflightStep failure UI: sslHint / usedProxy / network-config links

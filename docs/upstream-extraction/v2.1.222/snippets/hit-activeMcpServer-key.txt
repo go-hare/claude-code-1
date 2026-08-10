@@ -1,0 +1,15 @@
+==== offset 257376408 ====
+d_to_user",{reason:Ae("blocking_limit"),querySource:FE(a),wasGatedByPriorAttempt:!1,reactiveUnsupported:!wwe()});let mi=Ju({content:Pq,error:"invalid_request",now:f.now,uuid:f.uuid});return yield mi,q4e(U,a,mi),{reason:"blocking_limit"}}}if(bJe&&wP()&&a.startsWith("repl_main_thread")&&!U.agentId){let sr=pe.findLast((oo)=>oo.type==="user"&&!oo.isMeta&&typeof oo.message.content==="string");bJe().markTurnActive(p_t(),$A(),sr?.type==="user"&&typeof sr.message.content==="string"&&!ZAe(sr.message.content)?sr.message.content:void 0)}let Jt=!0,Gt,or=!1,wr,kr,Te,He,rt,Ye,yt,dt,Zt=U2s,Rt,Br=V?U.options.activeMcpServer:void 0,To=V?U.options.activeMcpTool:void 0;ARd(U.options,V),_y("query_api_loop_start");try{while(Jt){if(Jt=!1,ye&&(wr!==void 0||!De(Ct)))ye=!1;let sr=Ky_(Ct,It)||!Ze.advisorModel||FSd(Ct,Ze.advisorModel)?Ze.advisorModel:void 0;if(Ze.advisorModel&&sr===void 0)T(`[AdvisorTool] Skipping advisor - ${Ze.advisorModel} cannot advise non-configured attempt model ${Ct} (configured: ${It})`)
+
+==== offset 257379947 ====
+fusalFallback:hd,fallbackCreditCode:og,fallbackCreditMintModel:vu,fallbackCreditMintRequestId:ii,fallbackStampFromModel:to,fallbackStampCategory:So,fallbackStampTrigger:di,fallbackStampOriginalRequestId:to!==void 0?dt:void 0,fallbackCreditLaneArmed:oc.visibleModel!==void 0,onStreamingFallback:()=>{fs=!0},onHintCleared:(ke,at)=>{oo.push({type:"hint_clears",ids:[...ke],contentById:Object.fromEntries(at)});for(let Ht of ECd(pe,ke))U.readFileState.delete(Qi(Ht));pe=Ydn(pe,ke,at)},querySource:a,keepPartialMessageOnAbort:e.keepPartialMessageOnAbort,spawnedBySkill:l,activeSkill:U.options.activeSkill,activeMcpServer:Br,activeMcpTool:To,messageClientPlatform:U.options.messageClientPlatform,agents:U.options.agentDefinitions.activeAgents,allowedAgentTypes:U.options.agentDefinitions.allowedAgentTypes,hasAppendSystemPrompt:!!U.options.appendSystemPrompt,userSystemPrompt:!U.agentId&&FO()?Vy_(U.options.customSystemPrompt,U.options.appendSystemPrompt):void 0,maxOutputTokensOverride:ae,resumeIncomplete
+
+==== offset 262422918 ====
+history if needed.
+
+Use the available tools to inspect the codebase and verify the condition.
+Use as few steps as possible - be efficient and direct.
+
+When done, return your result using the ${py} tool with:
+- ok: true if the condition is met
+- ok: false with reason if the condition is not met`]),D=e.model??kO(),L=50,O=Au(`${BKo}${oca.randomUUID()}`),M={...i,agentId:O,abortController:_,readFileState:CDe(i.readFileState,{stripSeededFromContext:!0}),options:{...i.options,tools:x,mainLoopModel:D,isNonInteractiveSession:!0,requiresStructuredOutput:!0,thinkingConfig:{type:"disabled",mechanical:!0},activeMcpServer:void 0,activeMcpTool:void 0,refreshTools:void 0,refreshMcpClients:void 0},getAppState(){let j=i.getAppState(),B=j.toolPermissionContext.alwaysAllowRules.session??[];return{...j,toolPermissionContext:{...j.toolPermissionContext,mode:"dontAsk",alwaysAllowRules:{...j.toolPermissionContext.alwaysAllowRules,session:[...B,`Read(/${u})`]}}}}},W=null,q=0,K=!1;for await(let j of Cce({messag

@@ -410,8 +410,38 @@ function handleRemoteAuthFailure(
 }
 
 /**
+ * densable LOs / ClaudeAiProxyBearerRejectedError — session token rejected by
+ * claude.ai proxy after refresh attempt. Distinct from generic 401 so tools/list
+ * can set discoveryBearerRejected and UI can prompt `/login` without flipping
+ * the client to needs-auth.
+ */
+export class ClaudeAiProxyBearerRejectedError extends Error {
+  code = 'CLAUDEAI_BEARER_REJECTED' as const
+  reasonCode = 'claudeai_bearer_rejected' as const
+  constructor() {
+    super(
+      'claude.ai rejected the session token — it may lack connector scopes or be invalid. Run /login.',
+    )
+    this.name = 'ClaudeAiProxyBearerRejectedError'
+  }
+}
+
+/** densable kXe — Error with code CLAUDEAI_BEARER_REJECTED. */
+export function isClaudeAiBearerRejectedError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'CLAUDEAI_BEARER_REJECTED'
+  )
+}
+
+/**
  * Fetch wrapper for claude.ai proxy connections. Attaches the OAuth bearer
  * token and retries once on 401 via handleOAuth401Error (force-refresh).
+ *
+ * densable Xmd: after 401 + !tokenChanged + token still same → throw
+ * ClaudeAiProxyBearerRejectedError (not return 401). That surfaces
+ * discoveryBearerRejected on tools/list while keeping the client connected.
  *
  * The Anthropic API path has this retry (withRetry.ts, grove.ts) to handle
  * memoize-cache staleness and clock drift. Without the same here, a single
@@ -443,6 +473,17 @@ export function createClaudeAiProxyFetch(innerFetch: FetchLike): FetchLike {
     if (response.status !== 401) {
       return response
     }
+    // densable: proxy-classified error code → return 401 (not bearer-reject throw)
+    const proxyErrorCode = response.headers.get('X-Mcp-Error-Code') ?? undefined
+    if (proxyErrorCode) {
+      logEvent('tengu_mcp_claudeai_proxy_401', {
+        tokenChanged:
+          false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        proxyErrorCode:
+          proxyErrorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return response
+    }
     // handleOAuth401Error returns true only if the token actually changed
     // (keychain had a newer one, or force-refresh succeeded). Gate retry on
     // that — otherwise we double round-trip time for every connector whose
@@ -454,15 +495,17 @@ export function createClaudeAiProxyFetch(innerFetch: FetchLike): FetchLike {
         tokenChanged as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     if (!tokenChanged) {
-      // ELOCKED contention: another connector may have won the lockfile and refreshed — check if token changed underneath us
+      // densable: ELOCKED contention check — if token still same, throw LOs
       const now = getClaudeAIOAuthTokens()?.accessToken
       if (!now || now === sentToken) {
-        return response
+        throw new ClaudeAiProxyBearerRejectedError()
       }
     }
     try {
       return (await doRequest()).response
-    } catch {
+    } catch (error) {
+      // densable: retry itself failed — rethrow bearer reject; else return 401
+      if (isClaudeAiBearerRejectedError(error)) throw error
       // Retry itself failed (network error). Return the original 401 so the
       // outer handler can classify it.
       return response
@@ -1234,11 +1277,20 @@ export const connectToServer = memoize(
             name,
             `claude.ai proxy connection failed after ${elapsed}ms: ${error.message}`,
           )
-          logMCPError(name, error)
+          // densable: CLAUDEAI_BEARER_REJECTED on connect is session-token scope
+          // (/login), not connector OAuth needs-auth cache.
+          if (isClaudeAiBearerRejectedError(error)) {
+            logMCPDebug(
+              name,
+              'claude.ai session token rejected during connect — run /login',
+            )
+          } else {
+            logMCPError(name, error)
+          }
 
           // StreamableHTTPError has a `code` property with the HTTP status
           const errorCode = (error as Error & { code?: number }).code
-          if (errorCode === 401) {
+          if (errorCode === 401 && !isClaudeAiBearerRejectedError(error)) {
             return handleRemoteAuthFailure(name, serverRef, 'claudeai-proxy')
           }
         } else if (
@@ -1917,6 +1969,11 @@ export const fetchToolsForClient = memoizeWithLRU(
         },
       )
 
+      // densable: successful tools/list clears discovery degradation flags
+      client.toolsListError = undefined
+      client.discoveryAuthFailure = undefined
+      // Note: discoveryBearerRejected is sticky until reconnect with a good token
+
       // Sanitize tool data from MCP server
       const toolsToProcess = recursivelySanitizeUnicode(listedTools)
 
@@ -2025,6 +2082,11 @@ export const fetchToolsForClient = memoizeWithLRU(
               parentMessage,
               onProgress?: ToolCallProgress<MCPProgress>,
             ) {
+              // densable 2.1.222 #6 — stamp active MCP for next API cost share
+              // (cleared after one attributed main/subagent request).
+              context.options.activeMcpServer = client.name
+              context.options.activeMcpTool = tool.name
+
               const toolUseId = extractToolUseId(parentMessage)
               const meta = toolUseId
                 ? { 'claudecode/toolUseId': toolUseId }
@@ -2397,13 +2459,63 @@ export const fetchToolsForClient = memoizeWithLRU(
         })
         .filter(isIncludedMcpTool)
     } catch (error) {
-      logMCPError(client.name, `Failed to fetch tools: ${errorMessage(error)}`)
+      const msg = errorMessage(error)
+      // densable n4e catch: claudeai-proxy bearer reject → discoveryBearerRejected
+      // (stay connected + /login); generic 401/403 list auth → discoveryAuthFailure.
+      const isProxy = client.config.type === 'claudeai-proxy'
+      const bearerRejected = isProxy && isClaudeAiBearerRejectedError(error)
+      if (isProxy && !bearerRejected && isClaudeAiProxyListAuthError(error)) {
+        logEvent('tengu_mcp_server_needs_auth', {
+          transportType:
+            'claudeai-proxy' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          cause:
+            'discovery_tools_list' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        client.discoveryAuthFailure = true
+        logMCPDebug(
+          client.name,
+          'tools/list 401/403 on claude.ai proxy — flagging needs-auth',
+        )
+        fetchToolsForClient.cache.delete(client.name)
+        return []
+      }
+      client.toolsListError = msg
+      if (bearerRejected) {
+        client.discoveryBearerRejected = true
+        logMCPDebug(client.name, `Failed to fetch tools: ${msg}`)
+      } else {
+        logMCPError(client.name, `Failed to fetch tools: ${msg}`)
+      }
+      fetchToolsForClient.cache.delete(client.name)
       return []
     }
   },
   (client: MCPServerConnection) => client.name,
   MCP_FETCH_CACHE_SIZE,
 )
+
+/**
+ * densable fcn / isListAuthError — 401/403 on list that is *not* a
+ * CLAUDEAI_BEARER_REJECTED throw (those stay connected + /login).
+ */
+function isClaudeAiProxyListAuthError(error: unknown): boolean {
+  if (isClaudeAiBearerRejectedError(error)) return false
+  if (error instanceof UnauthorizedError) return true
+  if (error instanceof Error) {
+    const status =
+      'status' in error &&
+      typeof (error as { status?: unknown }).status === 'number'
+        ? (error as { status: number }).status
+        : 'code' in error &&
+            typeof (error as { code?: unknown }).code === 'number'
+          ? (error as { code: number }).code
+          : undefined
+    if (status === 401 || status === 403) return true
+    // StreamableHTTPError / message-embedded status
+    if (/\b40[13]\b/.test(error.message)) return true
+  }
+  return false
+}
 
 export const fetchResourcesForClient = memoizeWithLRU(
   async (client: MCPServerConnection): Promise<ServerResource[]> => {
@@ -2611,10 +2723,8 @@ export async function reconnectMcpServerImpl(
       }
     }
 
-    if (config.type === 'claudeai-proxy') {
-      markClaudeAiMcpConnected(name)
-    }
-
+    // densable: discoveryAuthFailure from tools/list → surface needs-auth
+    // (distinct from discoveryBearerRejected which stays connected + /login).
     const supportsResources = !!client.capabilities?.resources
 
     // densable #42: fetchCommands/Resources throw on error (list_changed keep-
@@ -2637,6 +2747,19 @@ export async function reconnectMcpServerImpl(
         ? settleEmpty(fetchResourcesForClient(client), [])
         : Promise.resolve([]),
     ])
+
+    if (client.discoveryAuthFailure) {
+      return {
+        client: { name, type: 'needs-auth' as const, config },
+        tools: [],
+        commands: [],
+      }
+    }
+
+    if (config.type === 'claudeai-proxy' && !client.discoveryBearerRejected) {
+      markClaudeAiMcpConnected(name)
+    }
+
     const commands = [...mcpCommands, ...mcpSkills]
 
     // Check if we need to add resource tools

@@ -715,6 +715,22 @@ export function MCPRemoteServerMenu({
               <Text dimColor>{serverToolsCount} tools</Text>
             </Box>
           )}
+
+          {/* densable: connected + discoveryBearerRejected → /login Issue (not needs-auth) */}
+          {server.client.type === 'connected' && server.client.discoveryBearerRejected && (
+            <Box>
+              <Text bold>Issue: </Text>
+              <Text color="error">claude.ai rejected the session token. Run /login, then reconnect.</Text>
+            </Box>
+          )}
+          {server.client.type === 'connected' &&
+            !server.client.discoveryBearerRejected &&
+            server.client.toolsListError && (
+              <Box>
+                <Text bold>Issue: </Text>
+                <Text color="error">{server.client.toolsListError}</Text>
+              </Box>
+            )}
         </Box>
 
         {error && (
@@ -754,7 +770,12 @@ export function MCPRemoteServerMenu({
                           success: result.client.type === 'connected',
                         });
                       }
-                      const { message } = handleReconnectResult(result, server.name);
+                      const { message } = handleReconnectResult(result, server.name, {
+                        hasHeadersHelper: Boolean(
+                          'headersHelper' in server.config &&
+                            (server.config as { headersHelper?: string }).headersHelper,
+                        ),
+                      });
                       onComplete?.(message);
                     } catch (err) {
                       if (server.config.type === 'claudeai-proxy') {

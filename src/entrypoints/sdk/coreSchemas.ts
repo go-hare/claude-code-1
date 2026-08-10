@@ -814,6 +814,20 @@ export const DirectoryAddedHookInputSchema = lazySchema(() =>
   ),
 )
 
+// densable 2.1.222 MessageDisplay (wth/GCr) — streaming display transform hooks
+export const MessageDisplayHookInputSchema = lazySchema(() =>
+  BaseHookInputSchema().and(
+    z.object({
+      hook_event_name: z.literal('MessageDisplay'),
+      turn_id: z.string(),
+      message_id: z.string(),
+      index: z.number(),
+      final: z.boolean(),
+      delta: z.string(),
+    }),
+  ),
+)
+
 export const EXIT_REASONS = [
   'clear',
   'resume',
@@ -864,6 +878,7 @@ export const HookInputSchema = lazySchema(() =>
     CwdChangedHookInputSchema(),
     FileChangedHookInputSchema(),
     DirectoryAddedHookInputSchema(),
+    MessageDisplayHookInputSchema(),
   ]),
 )
 
@@ -975,6 +990,14 @@ export const FileChangedHookSpecificOutputSchema = lazySchema(() =>
   }),
 )
 
+// densable 2.1.222 MessageDisplay hookSpecificOutput.displayContent
+export const MessageDisplayHookSpecificOutputSchema = lazySchema(() =>
+  z.object({
+    hookEventName: z.literal('MessageDisplay'),
+    displayContent: z.string().optional(),
+  }),
+)
+
 export const SyncHookJSONOutputSchema = lazySchema(() =>
   z.object({
     continue: z.boolean().optional(),
@@ -1000,6 +1023,7 @@ export const SyncHookJSONOutputSchema = lazySchema(() =>
         CwdChangedHookSpecificOutputSchema(),
         FileChangedHookSpecificOutputSchema(),
         WorktreeCreateHookSpecificOutputSchema(),
+        MessageDisplayHookSpecificOutputSchema(),
       ])
       .optional(),
   }),

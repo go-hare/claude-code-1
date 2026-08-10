@@ -1,6 +1,7 @@
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { isModelAlias, isModelFamilyAlias } from './aliases.js'
-import { parseUserSpecifiedModel } from './model.js'
+import { ALL_MODEL_CONFIGS, type ModelKey } from './configs.js'
+import { getCanonicalName, parseUserSpecifiedModel } from './model.js'
 import { resolveOverriddenModel } from './modelStrings.js'
 
 /**
@@ -167,4 +168,78 @@ export function isModelAllowed(model: string): boolean {
   }
 
   return false
+}
+
+/**
+ * densable Lts — family token match at non-alnum boundaries
+ * (avoids "opus" matching inside "opusplan").
+ */
+export function familyTokenAtBoundary(
+  haystack: string,
+  family: string,
+): boolean {
+  const h = haystack.toLowerCase()
+  const f = family.toLowerCase()
+  let from = 0
+  while (from <= h.length) {
+    const idx = h.indexOf(f, from)
+    if (idx === -1) return false
+    const beforeOk = idx === 0 || !/[a-z0-9]/i.test(h[idx - 1] ?? '')
+    const after = idx + f.length
+    const afterOk = after === h.length || !/[a-z0-9]/i.test(h[after] ?? '')
+    if (beforeOk && afterOk) return true
+    from = idx + 1
+  }
+  return false
+}
+
+/**
+ * densable K7r — newest firstParty catalog model in family that passes isAllowed.
+ * Walks ALL_MODEL_CONFIGS keys reverse (newest registered last).
+ */
+export function newestAllowedModelInFamily(
+  family: string,
+  isAllowed: (model: string) => boolean = isModelAllowed,
+): string | null {
+  const keys = Object.keys(ALL_MODEL_CONFIGS) as ModelKey[]
+  for (let i = keys.length - 1; i >= 0; i--) {
+    const key = keys[i]
+    if (key === undefined) continue
+    const firstParty = ALL_MODEL_CONFIGS[key].firstParty
+    if (
+      familyTokenAtBoundary(getCanonicalName(firstParty), family) &&
+      isAllowed(firstParty)
+    ) {
+      return firstParty
+    }
+  }
+  return null
+}
+
+/**
+ * densable a$ / stepDownRestrictedFamilyAliasPick.
+ * When org availableModels restricts models, bare family aliases step down to
+ * the newest allowlisted model in that family (not parent inherit).
+ * Returns null when no restriction applies or no family member is allowed.
+ */
+export function stepDownRestrictedFamilyAliasPick(
+  alias: string,
+  isAllowed: (model: string) => boolean = isModelAllowed,
+): string | null {
+  const trimmed = alias.trim().toLowerCase()
+  const bare = trimmed.replace(/\[1m\]$/i, '').trim()
+  if (!isModelFamilyAlias(bare)) return null
+
+  const settings = getSettings_DEPRECATED() || {}
+  // densable: if no availableModels and empty entitlement deny set → null
+  if (!settings.availableModels) return null
+
+  const newest = newestAllowedModelInFamily(bare, isAllowed)
+  if (newest === null || !isAllowed(newest)) return null
+
+  // densable: bare alias (no [1m]) returns model as-is
+  if (bare === trimmed) return newest
+  // With [1m] tag: keep suffix on eligible families (opus/sonnet)
+  if (bare === 'haiku') return newest
+  return `${newest}[1m]`
 }

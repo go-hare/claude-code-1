@@ -223,6 +223,13 @@ export type ToolUseContext = {
      * skip as modelScheduledOrigin for `/loop`.
      */
     isSkillPreload?: boolean
+    /**
+     * densable 2.1.222 #6 — sticky MCP attribution stamps set by MCP tool
+     * `call` wrap. Captured + cleared at next main/subagent API request so
+     * only requests that consumed that server's tool results attribute cost.
+     */
+    activeMcpServer?: string
+    activeMcpTool?: string
   }
   abortController: AbortController
   activeTaskExecutionContext?: ActiveTaskExecutionContext
@@ -334,8 +341,12 @@ export type ToolUseContext = {
    * queries set this; foreground sync subagents leave it false/undefined.
    */
   isBackgroundAgent?: boolean
-  /** When true, canUseTool must always be called even when hooks auto-approve.
-   *  Used by speculation for overlay file path rewriting. */
+  /**
+   * densable 2.1.222 #2 / O3 — when true, canUseTool must always be called even
+   * when PreToolUse hooks auto-approve. runForkedAgent defaults true so bg
+   * agent task restrictions (summaries, compaction, renames) cannot be bypassed;
+   * speculation also sets it for overlay file path rewriting.
+   */
   requireCanUseTool?: boolean
   messages: Message[]
   /**
@@ -676,6 +687,18 @@ export type Tool<
    * hook/permission returns a fresh updatedInput — those own their shape.
    */
   backfillObservableInput?(input: Record<string, unknown>): void
+
+  /**
+   * densable coerceInput — pure reshape of raw tool_use input *before*
+   * `inputSchema.safeParse`. Return null when no reshape is needed.
+   * Used for legacy alias remaps and soft truncations (e.g. SendMessage
+   * summary Cpr=200) so schema validation does not reject recoverable shapes.
+   * Telemetry: tengu_tool_input_coerced with shapeClass.
+   */
+  coerceInput?(input: unknown): {
+    input: z.infer<Input>
+    shapeClass: string
+  } | null
 
   /**
    * Determines if this tool is allowed to run with this input in the current context.

@@ -1,0 +1,28 @@
+# densable 2.1.222 #6 — MCP usage attribution (sticky stamp fix)
+# SEA win32-x64 2.1.222 — symbols: ARd, Br/To, V, sge/IJ/qur, activeMcpServer/Tool
+
+## ARd clear (one-shot after capture)
+function ARd(e,t){try{if(!t)return;e.activeMcpServer=void 0,e.activeMcpTool=void 0}catch(r){xe(r)}}
+
+## Query API loop — capture then clear before callModel
+Br=V?U.options.activeMcpServer:void 0,To=V?U.options.activeMcpTool:void 0;ARd(U.options,V)
+// ...
+activeMcpServer:Br,activeMcpTool:To
+
+## V gate (main|subagent only)
+V=F==="main"||F==="subagent"  // F = bB(querySource) ≡ getQuerySourceFamily
+
+## Streaming tool executor onReset also ARd
+onReset:()=>ARd(U.options,V)
+
+## MCP tool call wrap stamps
+F.options.activeMcpServer=e.name,F.options.activeMcpTool=P.name
+
+## Cost credit attrs (sge → IJ → qur)
+// only when family main|subagent and n (server) set:
+attributionMcpServer=n, optional attributionMcpTool
+// OTEL: mcp_server.name / mcp_tool.name
+
+## Product rule
+A server's /usage share only counts requests that consumed that server's tool
+results (stamped on the prior tool call), not every subsequent turn.

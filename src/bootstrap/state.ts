@@ -123,6 +123,12 @@ type State = {
   questionPreviewFormat: 'markdown' | 'html' | undefined
   flagSettingsPath: string | undefined
   flagSettingsInline: Record<string, unknown> | null
+  /**
+   * densable Bt.parentManagedSettings (tNi/rNi) — SDK parent tier /
+   * `--managed-settings` JSON. Used by densable 2.1.222 #16 host model
+   * overlay (Gfg) when CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST.
+   */
+  parentManagedSettings: Record<string, unknown> | null
   allowedSettingSources: SettingSource[]
   sessionIngressToken: string | null | undefined
   oauthTokenFromFd: string | null | undefined
@@ -359,6 +365,15 @@ type State = {
    * drop pr-link transcript metadata.
    */
   pendingPrLinks: Set<Promise<unknown>>
+  /**
+   * densable Lt.pendingBranchLinks / Lzr — branches pushed before a PR exists
+   * (2.1.222 #7). Later gh/git/curl success retries `gh pr view` up to 5 times
+   * so sessions still link when the PR is created after push (incl. REST).
+   */
+  pendingBranchLinks: Map<
+    string,
+    { cwd: string; branch: string; attempts: number }
+  >
 }
 
 // ALSO HERE - THINK THRICE BEFORE MODIFYING
@@ -421,6 +436,7 @@ function getInitialState(): State {
     apiKeyFromFd: undefined,
     flagSettingsPath: undefined,
     flagSettingsInline: null,
+    parentManagedSettings: null,
     allowedSettingSources: [
       'userSettings',
       'projectSettings',
@@ -547,6 +563,8 @@ function getInitialState(): State {
     pendingPostCompaction: false,
     // densable eNn — PR-link promise set flushed on teardown (2.1.218 #16)
     pendingPrLinks: new Set<Promise<unknown>>(),
+    // densable Lzr — post-push PR discovery retries (2.1.222 #7)
+    pendingBranchLinks: new Map(),
   }
 
   return state
@@ -564,6 +582,16 @@ export function getSessionId(): SessionId {
  */
 export function getPendingPrLinks(): Set<Promise<unknown>> {
   return STATE.pendingPrLinks
+}
+
+/**
+ * densable Lzr() — process-global Map of branches awaiting PR discovery after push.
+ */
+export function getPendingBranchLinks(): Map<
+  string,
+  { cwd: string; branch: string; attempts: number }
+> {
+  return STATE.pendingBranchLinks
 }
 
 /**
@@ -1553,6 +1581,22 @@ export function setFlagSettingsInline(
   STATE.flagSettingsInline = settings
 }
 
+/** densable tNi — parent managed settings (SDK / --managed-settings). */
+export function getParentManagedSettings(): Record<string, unknown> | null {
+  return STATE.parentManagedSettings
+}
+
+/**
+ * densable rNi — set parent managed settings and invalidate settings cache
+ * so next policy load re-merges host model overlay.
+ */
+export function setParentManagedSettings(
+  settings: Record<string, unknown> | null,
+): void {
+  STATE.parentManagedSettings = settings
+  resetSettingsCache()
+}
+
 export function getSessionIngressToken(): string | null | undefined {
   return STATE.sessionIngressToken
 }
@@ -2293,6 +2337,25 @@ export function stickyRejectBeta(beta: string): void {
 /** densable Iz — has beta been sticky-rejected? */
 export function isStickyBetaRejected(beta: string): boolean {
   return STATE.stickyBetas.rejected.has(beta)
+}
+
+/**
+ * densable tHe — mark beta as sent (if not already rejected).
+ * Used by ekd/rkd when arming server-side-fallback / fallback-credit.
+ */
+export function stickySendBeta(beta: string): void {
+  if (!STATE.stickyBetas.rejected.has(beta)) {
+    STATE.stickyBetas.sent.add(beta)
+  }
+}
+
+/**
+ * densable uFe — beta was sent and is still active (not rejected).
+ */
+export function isStickyBetaSentActive(beta: string): boolean {
+  return (
+    STATE.stickyBetas.sent.has(beta) && !STATE.stickyBetas.rejected.has(beta)
+  )
 }
 
 /** densable Gri */

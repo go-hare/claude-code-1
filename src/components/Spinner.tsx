@@ -26,7 +26,7 @@ import { isInProcessTeammateTask } from '../tasks/InProcessTeammateTask/types.js
 import { isLocalAgentTask } from '../tasks/LocalAgentTask/LocalAgentTask.js';
 import { isBackgroundTask } from '../tasks/types.js';
 import { getAllInProcessTeammateTasks } from '../tasks/InProcessTeammateTask/InProcessTeammateTask.js';
-import { getEffortSuffix } from '../utils/effort.js';
+import { getEffortSuffix, resolveSpinnerEffortSource } from '../utils/effort.js';
 import { getMainLoopModel } from '../utils/model/model.js';
 import { getViewedTeammateTask } from '../state/selectors.js';
 import { TEARDROP_ASTERISK } from '../constants/figures.js';
@@ -213,7 +213,15 @@ function SpinnerWithVerbInner({
 
   const effortValue = useAppState(s => s.effortValue);
   const ultracode = useAppState(s => s.ultracode);
-  const effortSuffix = getEffortSuffix(getMainLoopModel(), effortValue, ultracode);
+  // densable 2.1.222 #13: But(h??Zi(), m??F) — subagent transcript view uses
+  // LocalAgentTask.effort (m) / model (h), not session effort alone.
+  const spinnerEffortSource = resolveSpinnerEffortSource({
+    sessionEffort: effortValue,
+    sessionModel: getMainLoopModel(),
+    viewingAgentTaskId,
+    tasks,
+  });
+  const effortSuffix = getEffortSuffix(spinnerEffortSource.model, spinnerEffortSource.effortValue, ultracode);
 
   // Check if any running in-process teammates exist (needed for both modes)
   const runningTeammates = getAllInProcessTeammateTasks(tasks).filter(t => t.status === 'running');

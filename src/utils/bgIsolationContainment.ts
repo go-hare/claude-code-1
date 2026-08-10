@@ -1,6 +1,6 @@
 /**
- * densable 2.1.217 #5 — background session isolation containment
- * (`hsr` / `a9u` / `XNe` / `N6g` / `T_s` / `VRu` / `qRu`).
+ * densable 2.1.217 #5 + 2.1.222 #1 — worktree isolation containment
+ * (`hsr` / `a9u` / `XNe` / `N6g` / `T_s` / `VRu` / `qRu` / `Qgt` / `dun`).
  *
  * Canonicalizes (realpath + lexical forms, 8-hop, device-ns, trailing
  * dot/space, Windows 8.3 short-name secondary containment) so a symlinked
@@ -8,10 +8,16 @@
  * the shared checkout (or escape the worktree) by spelling a path that only
  * matches on the unresolved side.
  *
+ * densable 2.1.222 #1: isolation covers file edits + Bash in **every session
+ * type** — not only isolation:"worktree" agents. Shell uses
+ * `isolationRoot = Qgt(ctx) = agentWorktree || session.worktreePath` for
+ * VRu/ZRu; write path (hsr/Vyr) uses the same Qgt root + dun noun.
+ *
  * Call sites densable:
  * - FileWrite / FileEdit / NotebookEdit `validateInput` before content checks
- *   (`errorCode` 7 / 12) via `hsr`
- * - Shell exec with `agentWorktree` via `VRu` (cwd) + `ZRu` (git redirect)
+ *   (`errorCode` 7 / 12) via `hsr` / `Vyr`
+ * - Shell exec: VRu/ZRu on isolationRoot (f??p); context_lost/worktree_gone
+ *   still keyed on agentWorktree (p) only
  */
 
 import { lstatSync, readFileSync, readlinkSync, realpathSync } from 'fs'
@@ -1004,15 +1010,17 @@ export function pathInsideWorktree(
 }
 
 /**
- * densable l9u — when file touches shared root but is not inside worktree,
+ * densable gSd / l9u — when file touches shared root but is not inside worktree,
  * classify as contained (block) / unresolvable / network.
+ * densable 2.1.222 accepts root or roots[] (bRo.roots).
  */
 export function classifySharedContainment(
   file: CanonicalPath,
-  shared: CanonicalPath,
+  shared: CanonicalPath | CanonicalPath[],
 ): 'contained' | 'unresolvable' | 'network' {
   if (isUnresolvable(file)) return 'unresolvable'
-  if (file.skipped && !shared.skipped && !isUnresolvable(shared)) {
+  const roots = Array.isArray(shared) ? shared : [shared]
+  if (file.skipped && !roots.some(n => n.skipped || isUnresolvable(n))) {
     return 'network'
   }
   return 'contained'
@@ -1050,30 +1058,31 @@ function networkMessage(worktreePath?: string): string {
  * densable a9u — when writing under shared root but outside worktree → block.
  * Returns block message or null (allow).
  */
+/**
+ * densable Vyr write fence when isolation root is set (via Qgt).
+ * densable uses bRo(path, isolationRoot).escaped — same as qRu for cwd —
+ * then dun(noun) + shared edit-the-worktree-copy message.
+ */
 export function checkWorktreeIsolationWrite(
   filePath: string,
-  sharedCheckout: string,
   worktreePath: string,
-  kind: 'agent' | 'session',
 ): string | null {
-  const file = canonicalizeForBgContainment(filePath)
-  const shared = canonicalizeForBgContainment(sharedCheckout)
-  if (!pathTouchesRoot(file, shared)) {
-    return null
-  }
-  const wt = canonicalizeForBgContainment(worktreePath)
-  if (pathInsideWorktree(file, wt)) {
-    return null
-  }
-  const cls = classifySharedContainment(file, shared)
+  // densable bRo(e, r) — roots from session-aware qRu; escaped if touches
+  // shared root and not inside worktree.
+  const escape = qRu(filePath, worktreePath)
+  if (!escape.escaped) return null
+  const cls = classifySharedContainment(escape.dir, escape.roots)
   if (cls === 'unresolvable') return unresolvableMessage(worktreePath)
   if (cls === 'network') return networkMessage(worktreePath)
 
-  const hint = caseMismatchHint(file.canonical, wt.canonical, worktreePath)
-  if (kind === 'agent') {
-    return `This agent is isolated in the worktree ${worktreePath}. Edit the worktree copy of this file instead of the shared-checkout path.${hint}`
-  }
-  return `This session is now isolated in ${worktreePath}. Edit the worktree copy of this file instead of the shared-checkout path.${hint}`
+  const hint = caseMismatchHint(
+    escape.dir.canonical,
+    escape.worktree.canonical,
+    worktreePath,
+  )
+  // densable: `${noun} is isolated in the worktree ${r}. Edit the worktree copy...`
+  const { noun } = isolationSubject(worktreePath)
+  return `${noun} is isolated in the worktree ${worktreePath}. Edit the worktree copy of this file instead of the shared-checkout path.${hint}`
 }
 
 /**
@@ -1113,31 +1122,61 @@ export type BgIsolationWriteContext = {
 }
 
 /**
- * densable hsr — block writes that escape bg / worktree isolation.
+ * densable Qgt — isolation root for shell VRu/ZRu and hsr write fences.
+ * Prefer tool `agentWorktree`; else EnterWorktree session `worktreePath`.
+ * densable 2.1.222: every session type (session EnterWorktree + agent).
+ */
+export function resolveIsolationRoot(
+  ctx: { agentWorktree?: string } = {},
+): string | undefined {
+  const t = ctx.agentWorktree
+  if (t !== undefined && t !== '') return t
+  // densable ALS override under .claude/worktrees (agent without explicit field)
+  const ov = getCwdOverride()
+  if (ov && isClaudeWorktreesPath(ov)) return ov
+  const session = getCurrentWorktreeSession()
+  const r = session?.worktreePath
+  if (r !== undefined && r !== '') return r
+  return undefined
+}
+
+/**
+ * densable dun — session vs agent noun/possessive for isolation deny copy.
+ * session when Fg()?.worktreePath === isolationRoot.
+ */
+export function isolationSubject(isolationRoot: string): {
+  noun: string
+  possessive: string
+} {
+  const session = getCurrentWorktreeSession()
+  if (session?.worktreePath === isolationRoot) {
+    return {
+      noun: 'This session',
+      possessive: "a worktree-isolated session's",
+    }
+  }
+  return {
+    noun: 'This agent',
+    possessive: "a worktree-isolated agent's",
+  }
+}
+
+/**
+ * densable hsr / Vyr — block writes that escape bg / worktree isolation.
  * Returns deny message or null.
+ *
+ * densable 2.1.222: Qgt first — agentWorktree || session.worktreePath — so
+ * EnterWorktree sessions fence file edits the same as isolation:"worktree"
+ * agents (every session type).
  */
 export function checkBgIsolationWriteBlock(
   filePath: string,
   ctx: BgIsolationWriteContext = {},
 ): string | null {
-  // densable: agent worktree first (subagent isolation: "worktree")
-  // densable: t.agentWorktree first; local fallback: cwd ALS under .claude/worktrees
-  const agentWt =
-    ctx.agentWorktree ??
-    (() => {
-      const ov = getCwdOverride()
-      return ov && isClaudeWorktreesPath(ov) ? ov : undefined
-    })()
-
-  if (agentWt) {
-    // densable a9u(e, sn(), agentWorktree) — shared root is originalCwd, not
-    // the agent override cwd (which may already be the worktree).
-    return checkWorktreeIsolationWrite(
-      filePath,
-      getOriginalCwd(),
-      agentWt,
-      'agent',
-    )
+  // densable Vyr: r = Qgt(t); if (r) { bRo escape → dun noun message }
+  const isolationRoot = resolveIsolationRoot(ctx)
+  if (isolationRoot) {
+    return checkWorktreeIsolationWrite(filePath, isolationRoot)
   }
 
   // densable: SESSION_KIND!=="bg" && !zge() → null.
@@ -1145,20 +1184,8 @@ export function checkBgIsolationWriteBlock(
   // job handle (Jtt fallback) so daemon workers with job dir still gate.
   const isBg = isBgSession()
   const hasJob = Boolean(process.env.CLAUDE_JOB_DIR)
-  // densable also gates on jy() (EnterWorktree session) after the bg/zge check;
-  // local: treat active EnterWorktree session even outside bg (stricter, safe).
-  const session = getCurrentWorktreeSession()
-  if (!isBg && !hasJob && !session) {
+  if (!isBg && !hasJob) {
     return null
-  }
-
-  if (session) {
-    return checkWorktreeIsolationWrite(
-      filePath,
-      session.originalCwd,
-      session.worktreePath,
-      'session',
-    )
   }
 
   // Pre-isolation bg: must EnterWorktree before writing shared checkout
@@ -1224,61 +1251,90 @@ export type CwdEscapeCheck = {
 }
 
 /**
- * densable qRu — cwd escapes worktree isolation if it touches any shared root
- * and is not inside the worktree.
- * roots: [Ic(sn)??sn, Zu(sn), (B6g(Ic(wt), wt.lexical) && dge(wt) ? Zu(wt) : null)]
+ * densable bRo / qRu — path escapes worktree isolation if it touches any
+ * shared root and is not inside the worktree.
+ *
+ * densable 2.1.222 session-aware roots:
+ * - when Fg()?.worktreePath === isolationRoot → roots from [session.originalCwd]
+ * - else → [pn(), session?.originalCwd]
+ * plus git/canonical expansions; worktree pin when linked.
  */
-export function qRu(cwd: string, agentWorktree: string): CwdEscapeCheck {
+export function qRu(cwd: string, isolationRoot: string): CwdEscapeCheck {
   const dir = canonicalizeForBgContainment(cwd)
-  const worktree = canonicalizeForBgContainment(agentWorktree)
-  const sn = getOriginalCwd()
+  const worktree = canonicalizeForBgContainment(isolationRoot)
+  const session = getCurrentWorktreeSession()
   const platform = pathPlatform()
-  const gitOfSn = findGitRoot(sn)
-  const canonicalOfSn = findCanonicalGitRoot(sn) ?? sn
-  const gitOfWt = findGitRoot(agentWorktree)
+
+  // densable: n!==null&&n.worktreePath===t ? [n.originalCwd] : [pn(), n?.originalCwd]
+  const seedRoots: string[] =
+    session !== null && session.worktreePath === isolationRoot
+      ? [session.originalCwd]
+      : [getOriginalCwd(), session?.originalCwd].filter(
+          (m): m is string => m !== undefined && m !== '',
+        )
+
+  const expanded: Array<string | null> = []
+  for (const m of seedRoots) {
+    const c = canonicalizeForBgContainment(m)
+    if (c.skipped || isUnresolvable(c)) {
+      expanded.push(m)
+    } else {
+      expanded.push(findGitRoot(m) ?? m)
+      expanded.push(findCanonicalGitRoot(m))
+    }
+  }
+
+  // densable Hi_ pin: worktree linked → include Zu(worktree)
+  const gitOfWt = findGitRoot(isolationRoot)
   const includeWtCanonical =
     B6g(gitOfWt, worktree.lexical, platform) &&
-    isGitWorktreeCheckout(agentWorktree)
-  const rawRoots: Array<string | null> = [
-    gitOfSn ?? sn,
-    canonicalOfSn,
-    includeWtCanonical ? findCanonicalGitRoot(agentWorktree) : null,
+    isGitWorktreeCheckout(isolationRoot)
+  if (includeWtCanonical) {
+    expanded.push(findCanonicalGitRoot(isolationRoot))
+  }
+
+  const uniq = [
+    ...new Set(expanded.filter((l): l is string => l !== null && l !== '')),
   ]
-  const uniq = [...new Set(rawRoots.filter((l): l is string => l !== null))]
   const roots = uniq.map(l => canonicalizeForBgContainment(l))
-  const escaped =
-    roots.some(l => pathTouchesRoot(dir, l)) &&
-    !pathInsideWorktree(dir, worktree)
-  return { dir, worktree, roots, escaped }
+  if (!roots.some(l => pathTouchesRoot(dir, l))) {
+    return { dir, worktree, roots, escaped: false }
+  }
+  if (pathInsideWorktree(dir, worktree)) {
+    return { dir, worktree, roots, escaped: false }
+  }
+  return { dir, worktree, roots, escaped: true }
 }
 
-/** densable nKr — qRu.escaped */
+/** densable nKr / pun — qRu.escaped */
 export function nKr(cwd: string, agentWorktree: string): boolean {
   return qRu(cwd, agentWorktree).escaped
 }
 
 /**
- * densable VRu — shell cwd gate for worktree-isolated agents.
- * Returns densable deny message or null.
+ * densable hSd / VRu — shell cwd gate for isolation root (agent or session).
+ * densable 2.1.222 dun: session vs agent noun/possessive.
  */
 export function checkAgentWorktreeCwdEscape(
   cwd: string,
-  agentWorktree: string,
+  isolationRoot: string,
 ): string | null {
-  const r = qRu(cwd, agentWorktree)
+  const r = qRu(cwd, isolationRoot)
   if (!r.escaped) return null
   if (isUnresolvable(r.dir)) {
-    return `This command was blocked because its working directory is spelled in a form that cannot be safely resolved (for example through a symlink storing a raw dot segment, a network-share or device-namespace shape, or an unreadable ancestor directory). If the directory is inside the worktree ${agentWorktree}, re-run the command from its direct symlink-free path.`
+    return `This command was blocked because its working directory is spelled in a form that cannot be safely resolved (for example through a symlink storing a raw dot segment, a network-share or device-namespace shape, or an unreadable ancestor directory). If the directory is inside the worktree ${isolationRoot}, re-run the command from its direct symlink-free path.`
   }
   if (r.dir.skipped && !r.roots.some(n => n.skipped || isUnresolvable(n))) {
-    return `This command was blocked because its working directory is network-shaped (a UNC share or /net automount spelling) while the protected checkout is local. If the directory is genuinely inside the worktree ${agentWorktree}, re-run the command from its local, plainly-spelled path.`
+    return `This command was blocked because its working directory is network-shaped (a UNC share or /net automount spelling) while the protected checkout is local. If the directory is genuinely inside the worktree ${isolationRoot}, re-run the command from its local, plainly-spelled path.`
   }
   const hint = caseMismatchHint(
     r.dir.canonical,
     r.worktree.canonical,
-    agentWorktree,
+    isolationRoot,
   )
-  return `This agent is isolated in the worktree ${agentWorktree}, but this command's working directory resolved to the shared checkout (${cwd}). Refusing to run it there — commands from a worktree-isolated agent must run inside its worktree. Re-run the command from ${agentWorktree}.${hint}`
+  const { noun, possessive } = isolationSubject(isolationRoot)
+  // densable: `${n} is isolated… Refusing… — ${o} commands must run inside its worktree`
+  return `${noun} is isolated in the worktree ${isolationRoot}, but this command's working directory resolved to the shared checkout (${cwd}). Refusing to run it there — ${possessive} commands must run inside its worktree. Re-run the command from ${isolationRoot}.${hint}`
 }
 
 /**

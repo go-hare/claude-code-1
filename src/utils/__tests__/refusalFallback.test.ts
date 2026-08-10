@@ -3,13 +3,28 @@ import {
   applyRefusalFallbackAppStateRebind,
   buildFallbackRequestEvent,
   buildModelRefusalFallbackSystemMessage,
+  buildRefusalContinuationSalvage,
   buildRefusalFallbackChoiceLabels,
   buildRefusalFallbackDialogPayload,
   applyRefusalFallbackLatchArm,
   applyRefusalFallbackLatchRestore,
   buildRefusalFallbackLatchArm,
+  buildRefusalContinuationBeginEvent,
+  buildRefusalNoFallbackEvent,
+  buildRefusalRetainedText,
+  buildQueryModelChangeEvent,
+  buildServerFallbackEvent,
   buildServerFallbackMessageShape,
   extractFallbackCreditToken,
+  planFallbackCreditBeta,
+  planFallbackCreditMint,
+  planFallbackCreditStamp,
+  planServerRefusalFallbackBetas,
+  buildPartialResponseSalvageMetaContent,
+  planRefusalContinuationBeginWithSilentStitchGate,
+  planServerFallbackSeamMerge,
+  resolveConvoluteArcadesRetryOutcome,
+  SERVER_FALLBACK_SILENT_STITCH_SKIP_WARN,
   extractModelFieldFromPayload,
   getProviderRefusalFallbackGuidanceText,
   isCyberOrBioRefusalCategory,
@@ -314,8 +329,48 @@ describe('silent-arm densables (m1u / w_i / g_i)', () => {
     expect(plan.serverLane).toEqual({
       forModel: 'fable',
       model: 'opus-fallback',
+      mode: 'explicit',
     })
     expect(plan.shouldLogSuppression).toBe(false)
+
+    // densable: same-model epr blocks serverLane
+    const same = planRefusalFallbackArm({
+      currentModel: 'opus-fallback',
+      isMainThread: true,
+      requestDialog: () => {},
+      switchModelsOnFlag: true,
+      resolveArmedFallbackModel: () => 'opus-fallback',
+      refusalFallbackEnabled: true,
+      serverLaneEnabled: true,
+    })
+    expect(same.visibleModel).toBe('opus-fallback')
+    expect(same.serverLane).toBeUndefined()
+
+    // densable: inCascadeEpisode blocks serverLane
+    const cascade = planRefusalFallbackArm({
+      currentModel: 'fable',
+      isMainThread: true,
+      requestDialog: () => {},
+      resolveArmedFallbackModel: resolve,
+      refusalFallbackEnabled: true,
+      serverLaneEnabled: true,
+      inCascadeEpisode: true,
+    })
+    expect(cascade.visibleModel).toBe('opus-fallback')
+    expect(cascade.serverLane).toBeUndefined()
+
+    // densable dkd default when serverLaneEnabled omitted + firstParty inject
+    const auto = planRefusalFallbackArm({
+      currentModel: 'fable',
+      isMainThread: true,
+      requestDialog: () => {},
+      resolveArmedFallbackModel: resolve,
+      refusalFallbackEnabled: true,
+      // serverLaneEnabled omitted → isServerRefusalFallbackLaneEnabled
+    })
+    // may or may not arm server depending on provider env in test process;
+    // visible still arms
+    expect(auto.visibleModel).toBe('opus-fallback')
 
     const stuck = planRefusalFallbackArm({
       currentModel: 'fable',
@@ -707,5 +762,563 @@ describe('silent-arm densables (m1u / w_i / g_i)', () => {
     expect(banner.subtype).toBe('model_refusal_fallback')
     expect(banner.level).toBe('warning')
     expect(banner.fallbackModel).toBe('b')
+  })
+
+  test('retainedText join "" + Yt continuation salvage (densable)', () => {
+    const msgs = [
+      {
+        uuid: 'u1',
+        message: {
+          content: [
+            { type: 'text', text: 'Hello' },
+            { type: 'text', text: 'World' },
+          ],
+        },
+      },
+      {
+        uuid: 'u2',
+        message: { content: [{ type: 'text', text: '!' }] },
+      },
+      {
+        uuid: 'err',
+        isApiErrorMessage: true,
+        message: { content: [{ type: 'text', text: 'ignore' }] },
+      },
+    ]
+    // densable retainedText: no inter-message newline
+    expect(buildRefusalRetainedText(msgs)).toBe('HelloWorld!')
+
+    const yt = buildRefusalContinuationSalvage({ messages: msgs })
+    expect(yt).not.toBeNull()
+    expect(yt!.salvageText).toBe('HelloWorld!')
+    expect(yt!.replacesUuids).toEqual(['u1', 'u2'])
+
+    // empty retained → null (no IXl min-char gate on emit)
+    expect(
+      buildRefusalContinuationSalvage({
+        messages: [{ uuid: 'x', message: { content: [] } }],
+      }),
+    ).toBeNull()
+
+    // IXl salvageText uses raw retainedText when gates pass
+    const salvaged = salvageRefusalPartialText({
+      messages: [
+        {
+          uuid: 'a',
+          message: {
+            content: [
+              {
+                type: 'text',
+                text: 'This is a sufficiently long partial assistant reply.',
+              },
+            ],
+          },
+        },
+      ],
+    })
+    expect(salvaged.replacesUuids).toEqual(['a'])
+    expect(salvaged.salvageText).toBe(
+      'This is a sufficiently long partial assistant reply.',
+    )
+  })
+
+  test('server_fallback seam merge vs Gt silent stitch (densable)', () => {
+    const retained = [
+      {
+        uuid: 'r1',
+        message: { content: [{ type: 'text', text: 'partial' }] },
+      },
+    ]
+    // midStream + retained + Gt free → merge Yt
+    const merge = planServerFallbackSeamMerge({
+      midStream: true,
+      retainedText: 'partial',
+      retainedMessages: retained,
+      silentStitchPending: false,
+    })
+    expect(merge.action).toBe('merge')
+    if (merge.action === 'merge') {
+      expect(merge.yt.text).toBe('partial')
+      expect(merge.yt.originals).toEqual(retained)
+      const begin = buildRefusalContinuationBeginEvent(merge.yt)
+      expect(begin.phase).toBe('begin')
+      expect(begin.salvageText).toBe('partial')
+      expect(begin.replacesUuids).toEqual(['r1'])
+      expect(begin.join).toBe('exact')
+    }
+    // Gt pending → skip
+    expect(
+      planServerFallbackSeamMerge({
+        midStream: true,
+        retainedText: 'partial',
+        silentStitchPending: true,
+      }).action,
+    ).toBe('skip_silent_stitch_pending')
+    expect(SERVER_FALLBACK_SILENT_STITCH_SKIP_WARN).toContain('silent stitch')
+    // not midStream
+    expect(
+      planServerFallbackSeamMerge({
+        midStream: false,
+        retainedText: 'x',
+        silentStitchPending: false,
+      }).action,
+    ).toBe('not_mid_stream')
+    // empty retained
+    expect(
+      planServerFallbackSeamMerge({
+        midStream: true,
+        retainedText: '',
+        silentStitchPending: false,
+      }).action,
+    ).toBe('no_retained')
+  })
+
+  test('client begin gate with silent stitch + event builders', () => {
+    const msgs = [
+      {
+        uuid: 'c1',
+        message: { content: [{ type: 'text', text: 'Hello salvage' }] },
+      },
+    ]
+    const begin = planRefusalContinuationBeginWithSilentStitchGate({
+      messages: msgs,
+      silentStitchPending: false,
+    })
+    expect(begin.action).toBe('begin')
+    expect(
+      planRefusalContinuationBeginWithSilentStitchGate({
+        messages: msgs,
+        silentStitchPending: true,
+      }).action,
+    ).toBe('skip_silent_stitch_pending')
+
+    const sf = buildServerFallbackEvent({
+      fromModel: 'a',
+      toModel: 'b',
+      midStream: true,
+      retainedText: 't',
+      retainedMessages: msgs,
+    })
+    expect(sf.type).toBe('server_fallback')
+    expect(sf.retainedText).toBe('t')
+    expect(buildRefusalNoFallbackEvent('route_declined').type).toBe(
+      'refusal_no_fallback',
+    )
+    expect(buildQueryModelChangeEvent('m').toModel).toBe('m')
+  })
+
+  test('convolute_arcades_retry_outcome matrix', () => {
+    expect(
+      resolveConvoluteArcadesRetryOutcome({
+        path: 'success',
+        silentStitchPending: false,
+      }),
+    ).toBe('merged')
+    expect(
+      resolveConvoluteArcadesRetryOutcome({
+        path: 'success',
+        silentStitchPending: true,
+      }),
+    ).toBe('no_text')
+    expect(
+      resolveConvoluteArcadesRetryOutcome({
+        path: 'error',
+        silentStitchPending: true,
+      }),
+    ).toBe('error')
+  })
+
+  test('server_fallback production: parse hop + midStream partition + Xs flush', () => {
+    const {
+      parseServerFallbackContentBlockStart,
+      isMalformedServerFallbackBlockStart,
+      buildMidStreamServerFallbackEvent,
+      buildNonMidStreamServerFallbackEvent,
+      planDeferredServerFallbackFlush,
+      planSilentStitchFillOnFallbackRequest,
+      messageHasNonTextContent,
+      partitionServerFallbackStreamMessages,
+    } =
+      require('../refusalFallback.js') as typeof import('../refusalFallback.js')
+
+    const hopEvt = {
+      type: 'content_block_start',
+      index: 2,
+      content_block: {
+        type: 'fallback',
+        from: { model: 'opus' },
+        to: { model: 'sonnet' },
+        trigger: { type: 'refusal', category: 'cyber' },
+      },
+    }
+    const hop = parseServerFallbackContentBlockStart(hopEvt)
+    expect(hop).toEqual({
+      index: 2,
+      fromModel: 'opus',
+      model: 'sonnet',
+      reason: 'refusal',
+      category: 'cyber',
+    })
+    expect(
+      isMalformedServerFallbackBlockStart({
+        type: 'content_block_start',
+        index: 1,
+        content_block: { type: 'fallback', from: {}, to: {} },
+      }),
+    ).toBe(true)
+    expect(parseServerFallbackContentBlockStart({ type: 'text' })).toBe(
+      undefined,
+    )
+
+    const msgs = [
+      {
+        uuid: 't1',
+        message: {
+          content: [
+            { type: 'text', text: 'hello' },
+            { type: 'tool_use', id: 'x', name: 'Bash', input: {} },
+          ],
+        },
+      },
+      {
+        uuid: 'r1',
+        message: { content: [{ type: 'text', text: 'keep' }] },
+      },
+    ]
+    expect(messageHasNonTextContent(msgs[0]!)).toBe(true)
+    expect(messageHasNonTextContent(msgs[1]!)).toBe(false)
+    const part = partitionServerFallbackStreamMessages(msgs)
+    expect(part.discardedMessages.map(m => m.uuid)).toEqual(['t1'])
+    expect(part.retainedMessages.map(m => m.uuid)).toEqual(['r1'])
+    expect(part.retainedText).toBe('keep')
+
+    const mid = buildMidStreamServerFallbackEvent({
+      hop: hop!,
+      messages: msgs,
+      requestId: 'req-1',
+    })
+    expect(mid.type).toBe('server_fallback')
+    expect(mid.midStream).toBe(true)
+    expect(mid.retainedText).toBe('keep')
+    expect(mid.discardedMessages).toHaveLength(1)
+    expect(mid.retainedMessages).toHaveLength(1)
+
+    const nonMid = buildNonMidStreamServerFallbackEvent({
+      fromModel: 'a',
+      toModel: 'b',
+      reason: 'sticky',
+      finalStopReason: 'end_turn',
+    })
+    expect(nonMid.midStream).toBe(false)
+    expect(nonMid.retainedText).toBe('')
+    expect(nonMid.reason).toBe('sticky')
+
+    const deferred = planDeferredServerFallbackFlush({
+      deferredHop: hop!,
+      alreadyEmitted: false,
+      requestId: 'r',
+    })
+    expect(deferred?.midStream).toBe(false)
+    expect(deferred?.toModel).toBe('sonnet')
+    expect(
+      planDeferredServerFallbackFlush({
+        deferredHop: hop!,
+        alreadyEmitted: true,
+      }),
+    ).toBeUndefined()
+
+    expect(
+      planSilentStitchFillOnFallbackRequest({
+        silentArmAtTrigger: true,
+        salvageText: 'partial',
+      }),
+    ).toEqual({ fillSilentStitch: true, fillConvolute: true })
+    expect(
+      planSilentStitchFillOnFallbackRequest({
+        silentArmAtTrigger: true,
+        salvageText: '',
+      }),
+    ).toEqual({ fillSilentStitch: false, fillConvolute: false })
+    expect(
+      planSilentStitchFillOnFallbackRequest({
+        silentArmAtTrigger: false,
+        salvageText: 'x',
+      }),
+    ).toEqual({ fillSilentStitch: false, fillConvolute: false })
+  })
+
+  test('land join exact/soft + non-streaming fa/wa (densable)', () => {
+    const {
+      planRefusalLandJoin,
+      materializeNonStreamingServerFallbackContent,
+      planNonStreamingServerFallbackEvent,
+      isServerRefusalFallbackLaneEnabled,
+      isSameRefusalFallbackModel,
+      isFirstPartyAnthropicApiCapable,
+    } =
+      require('../refusalFallback.js') as typeof import('../refusalFallback.js')
+
+    // densable exact Yt land
+    const exact = planRefusalLandJoin({
+      content: [
+        { type: 'thinking', thinking: 'x' },
+        { type: 'text', text: ' world' },
+      ],
+      exactSalvage: {
+        text: 'hello',
+        originals: [{ uuid: 'u1' }, { uuid: 'u2' }],
+      },
+      isMainThread: true,
+    })
+    expect(exact.joined).toBe(true)
+    if (exact.joined) {
+      expect((exact.content[1] as { text: string }).text).toBe('hello world')
+      expect(exact.lane).toBe('server_stitch')
+      expect(exact.supersedesUuids).toEqual(['u1', 'u2'])
+      expect(exact.clearExact).toBe(true)
+    }
+
+    // densable soft Gt land (Cjs)
+    const soft = planRefusalLandJoin({
+      content: [{ type: 'text', text: 'continuation' }],
+      softSalvageText: 'partial prefix.',
+      isMainThread: true,
+    })
+    expect(soft.joined).toBe(true)
+    if (soft.joined) {
+      expect((soft.content[0] as { text: string }).text).toContain(
+        'partial prefix',
+      )
+      expect((soft.content[0] as { text: string }).text).toContain(
+        'continuation',
+      )
+      expect(soft.lane).toBe('client_soft')
+      expect(soft.clearSoft).toBe(true)
+      expect(soft.supersedesUuids).toBeUndefined()
+    }
+
+    // no text → no join
+    expect(
+      planRefusalLandJoin({
+        content: [{ type: 'tool_use', id: 't' }],
+        softSalvageText: 'x',
+      }).joined,
+    ).toBe(false)
+
+    // densable fa materialize
+    const fa = materializeNonStreamingServerFallbackContent({
+      content: [
+        { type: 'tool_use', id: 'drop' },
+        {
+          type: 'fallback',
+          from: { model: 'opus' },
+          to: { model: 'sonnet' },
+          trigger: { type: 'refusal', category: 'cyber' },
+        },
+        { type: 'text', text: 'after' },
+      ],
+      stopReason: 'end_turn',
+      armed: true,
+    })
+    expect(fa.lastHop).toEqual({
+      fromModel: 'opus',
+      model: 'sonnet',
+      reason: 'refusal',
+      category: 'cyber',
+    })
+    expect(fa.droppedCount).toBe(1)
+    expect(fa.droppedHadToolUse).toBe(true)
+    expect(fa.content[0]).toEqual({
+      type: 'fallback',
+      from: { model: 'opus' },
+      to: { model: 'sonnet' },
+    })
+    expect(fa.content[1]).toEqual({ type: 'text', text: 'after' })
+
+    // densable wa non-mid event
+    const wa = planNonStreamingServerFallbackEvent({
+      lastHop: fa.lastHop,
+      currentModel: 'opus',
+      requestId: 'r1',
+      finalStopReason: 'end_turn',
+    })
+    expect(wa?.type).toBe('server_fallback')
+    expect(wa?.midStream).toBe(false)
+    expect(wa?.toModel).toBe('sonnet')
+    expect(wa?.reason).toBe('refusal')
+    expect(
+      planNonStreamingServerFallbackEvent({
+        lastHop: undefined,
+        currentModel: 'opus',
+      }),
+    ).toBeUndefined()
+
+    // dkd / epr helpers
+    expect(
+      isServerRefusalFallbackLaneEnabled({
+        refusalFallbackEnabled: true,
+        switchModelsOnFlag: true,
+        firstPartyCapable: true,
+      }),
+    ).toBe(true)
+    expect(
+      isServerRefusalFallbackLaneEnabled({
+        refusalFallbackEnabled: true,
+        switchModelsOnFlag: true,
+        firstPartyCapable: false,
+      }),
+    ).toBe(false)
+    expect(isSameRefusalFallbackModel('a[1m]', 'a')).toBe(true)
+    expect(isSameRefusalFallbackModel('a', 'b')).toBe(false)
+    expect(
+      isFirstPartyAnthropicApiCapable({
+        provider: 'firstParty',
+        env: {},
+      }),
+    ).toBe(true)
+    expect(
+      isFirstPartyAnthropicApiCapable({
+        provider: 'openai',
+        env: {},
+      }),
+    ).toBe(false)
+  })
+
+  test('ekd beta plan default/explicit + sticky (densable B)', () => {
+    const sticky = { sent: new Set<string>(), rejected: new Set<string>() }
+    const explicit = planServerRefusalFallbackBetas({
+      serverRefusalFallback: {
+        forModel: 'opus',
+        model: 'sonnet[1m]',
+        mode: 'explicit',
+      },
+      requestModel: 'opus',
+      sticky,
+      firstPartyCapable: true,
+    })
+    expect(explicit.armed).toBe(true)
+    expect(explicit.mode).toBe('explicit')
+    expect(explicit.body).toEqual({
+      fallbacks: [{ model: 'sonnet' }],
+    })
+    expect(explicit.betas).toContain('server-side-fallback-2026-06-01')
+    expect(sticky.sent.has('server-side-fallback-2026-06-01')).toBe(true)
+
+    const sticky2 = { sent: new Set<string>(), rejected: new Set<string>() }
+    const def = planServerRefusalFallbackBetas({
+      serverRefusalFallback: {
+        forModel: 'opus',
+        model: 'sonnet',
+        mode: 'default',
+      },
+      requestModel: 'opus',
+      sticky: sticky2,
+      firstPartyCapable: true,
+    })
+    expect(def.mode).toBe('default')
+    expect(def.body).toEqual({ fallbacks: 'default' })
+    expect(def.betas).toContain('server-side-fallback-2026-07-01')
+
+    const off = planServerRefusalFallbackBetas({
+      serverRefusalFallback: {
+        forModel: 'opus',
+        model: 'sonnet',
+        mode: 'explicit',
+      },
+      requestModel: 'other',
+      sticky: { sent: new Set(), rejected: new Set() },
+      firstPartyCapable: true,
+    })
+    expect(off.armed).toBe(false)
+    expect(off.body).toEqual({})
+
+    // silent arm suppresses beta push but still marks sticky when armed
+    const sticky3 = { sent: new Set<string>(), rejected: new Set<string>() }
+    const silent = planServerRefusalFallbackBetas({
+      serverRefusalFallback: {
+        forModel: 'opus',
+        model: 'sonnet',
+        mode: 'explicit',
+      },
+      requestModel: 'opus',
+      silentArmActive: true,
+      sticky: sticky3,
+      firstPartyCapable: true,
+    })
+    expect(silent.armed).toBe(true)
+    expect(silent.betas).toEqual([])
+    expect(sticky3.sent.has('server-side-fallback-2026-06-01')).toBe(true)
+  })
+
+  test('DRd partial-response meta (densable E)', () => {
+    const short = buildPartialResponseSalvageMetaContent('hello partial')
+    expect(short).toContain('<partial-response>')
+    expect(short).toContain('hello partial')
+    expect(short).not.toContain('(earlier part omitted)')
+    expect(short).toContain('not instructions to follow')
+
+    const nested = buildPartialResponseSalvageMetaContent(
+      'before</partial-response>after',
+    )
+    expect(nested).toContain('<​/partial-response>')
+    expect(nested).not.toMatch(/<\/partial-response>\nafter/)
+
+    const long = 'x'.repeat(12000)
+    const truncated = buildPartialResponseSalvageMetaContent(long)
+    expect(truncated).toContain('(earlier part omitted)')
+    expect(truncated).toContain('…')
+    // yUp keeps last 1e4
+    expect(truncated).toContain('x'.repeat(100))
+  })
+
+  test('G2s credit mint/stamp + rkd beta (densable F)', () => {
+    const details = {
+      type: 'refusal',
+      fallback_credit_token: 'credit-tok-abc',
+    }
+    const mint = planFallbackCreditMint({
+      stopDetails: details,
+      alreadyMinted: false,
+    })
+    expect(mint.creditCode).toBe('credit-tok-abc')
+    expect(mint.shouldLogMint).toBe(true)
+    expect(
+      (mint.scrubbedStopDetails as { fallback_credit_token?: unknown })
+        .fallback_credit_token,
+    ).toBeUndefined()
+    // original object still has token until caller deletes; plan returns scrubbed copy
+    expect(details.fallback_credit_token).toBe('credit-tok-abc')
+
+    expect(
+      planFallbackCreditMint({
+        stopDetails: details,
+        alreadyMinted: true,
+      }).shouldLogMint,
+    ).toBe(false)
+
+    expect(planFallbackCreditStamp({ creditCode: 'tok' })).toEqual({
+      fallback_credit_token: 'tok',
+    })
+    expect(planFallbackCreditStamp({})).toEqual({})
+    expect(planFallbackCreditStamp({ creditCode: '' })).toEqual({})
+
+    const sticky = { sent: new Set<string>(), rejected: new Set<string>() }
+    const rkd = planFallbackCreditBeta({
+      creditCode: 'tok',
+      betas: [],
+      sticky,
+    })
+    expect(rkd.creditBetaActive).toBe(true)
+    expect(rkd.betas).toContain('fallback-credit-2026-06-01')
+    expect(sticky.sent.has('fallback-credit-2026-06-01')).toBe(true)
+
+    const silent = planFallbackCreditBeta({
+      creditLaneArmed: true,
+      silentArmActive: true,
+      betas: [],
+      sticky: { sent: new Set(), rejected: new Set() },
+    })
+    expect(silent.creditBetaActive).toBe(false)
+    expect(silent.betas).toEqual([])
   })
 })

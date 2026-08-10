@@ -383,6 +383,7 @@ export async function initializeKeybindingWatcher(): Promise<void> {
 
   logForDebugging(`[keybindings] Watching for changes to ${userPath}`)
 
+  // densable: usePolling + interval:2000 (keybinding watcher always polls)
   watcher = chokidar.watch(userPath, {
     persistent: true,
     ignoreInitial: true,
@@ -391,13 +392,20 @@ export async function initializeKeybindingWatcher(): Promise<void> {
       pollInterval: FILE_STABILITY_POLL_INTERVAL_MS,
     },
     ignorePermissionErrors: true,
-    usePolling: false,
+    usePolling: true,
+    interval: 2000,
     atomic: true,
   })
 
   watcher.on('add', handleChange)
   watcher.on('change', handleChange)
   watcher.on('unlink', handleDelete)
+  // densable #14: unhandled chokidar 'error' can crash process
+  watcher.on('error', (err: unknown) => {
+    logForDebugging(`[keybindings] watcher error: ${errorMessage(err)}`, {
+      level: 'warn',
+    })
+  })
 
   // Register cleanup
   registerCleanup(async () => disposeKeybindingWatcher())
@@ -405,12 +413,14 @@ export async function initializeKeybindingWatcher(): Promise<void> {
 
 /**
  * Clean up the file watcher.
+ * densable teardown: null ref before close to avoid race on concurrent error.
  */
 export function disposeKeybindingWatcher(): void {
   disposed = true
-  if (watcher) {
-    void watcher.close()
-    watcher = null
+  const previous = watcher
+  watcher = null
+  if (previous) {
+    void previous.close()
   }
   keybindingsChanged.clear()
 }

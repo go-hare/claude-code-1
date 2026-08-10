@@ -367,9 +367,51 @@ export function useRemoteSession({
               message => setMessages(prev => [...prev, message]),
               () => {
                 // No-op for response length - remote sessions don't track this
+                // densable onUpdateLength(deltaChars) ignored in remote viewer
               },
               setStreamMode,
               setStreamingToolUses,
+              // densable tombstone — drop from remote viewer transcript
+              tombstonedMessage => {
+                setMessages(prev =>
+                  prev.filter(
+                    m =>
+                      m !== tombstonedMessage &&
+                      m.uuid !== tombstonedMessage.uuid,
+                  ),
+                )
+              },
+              undefined, // onStreamingThinking
+              undefined, // onApiMetrics
+              undefined, // onStreamingText
+              undefined, // displayTransform
+              // densable yEt onRefusalContinuation — remote viewer has no
+              // local MessageDisplay salvage store; drop begin/end safely
+              () => {},
+              undefined, // streamContext
+              // densable yEt control bus — wire in-progress tools when available
+              {
+                onInProgressToolUseIDs: op => {
+                  if (!setInProgressToolUseIDs) return
+                  const ids = Array.isArray(op.ids) ? op.ids : []
+                  const action = op.action ?? 'set'
+                  setInProgressToolUseIDs(prev => {
+                    if (action === 'remove') {
+                      if (ids.length === 0) return prev
+                      const next = new Set(prev)
+                      for (const id of ids) next.delete(id)
+                      return next
+                    }
+                    if (action === 'add') {
+                      if (ids.length === 0) return prev
+                      const next = new Set(prev)
+                      for (const id of ids) next.add(id)
+                      return next
+                    }
+                    return new Set(ids)
+                  })
+                },
+              },
             )
           } else {
             logForDebugging(

@@ -313,8 +313,12 @@ export type SubagentContextOverrides = {
   shareAbortController?: boolean
   /** Critical system reminder to re-inject at every user turn */
   criticalSystemReminder_EXPERIMENTAL?: string
-  /** When true, canUseTool must always be called even when hooks auto-approve.
-   *  Used by speculation for overlay file path rewriting. */
+  /**
+   * densable 2.1.222 #2 — when true, canUseTool must always run even if a
+   * PreToolUse hook returns allow (so bg canUseTool restrictions still apply:
+   * summaries / compaction / renames). runForkedAgent defaults this to true
+   * (`i?.requireCanUseTool ?? !0`); speculation also sets it for overlay rewrite.
+   */
   requireCanUseTool?: boolean
   /** Override replacement state — used by resumeAgentBackground to thread
    * state reconstructed from the resumed sidechain so the same results
@@ -568,11 +572,14 @@ export async function runForkedAgent({
     forkContextMessages,
   } = cacheSafeParams
 
-  // Create isolated context to prevent mutation of parent state
-  const isolatedToolUseContext = createSubagentContext(
-    toolUseContext,
-    overrides,
-  )
+  // Create isolated context to prevent mutation of parent state.
+  // densable O3 (2.1.222 #2): requireCanUseTool:i?.requireCanUseTool??!0 —
+  // bg forked agents (summaries/compaction/session memory/etc.) must not let
+  // PreToolUse auto-allow skip their canUseTool tool restrictions.
+  const isolatedToolUseContext = createSubagentContext(toolUseContext, {
+    ...overrides,
+    requireCanUseTool: overrides?.requireCanUseTool ?? true,
+  })
 
   // Do NOT filterIncompleteToolCalls here — it drops the whole assistant on
   // partial tool batches, orphaning the paired results (API 400). Dangling

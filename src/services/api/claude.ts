@@ -78,6 +78,11 @@ import {
   shouldCacheControlOnApiSystem,
 } from '../../utils/midConversationSystem.js'
 import { isStickyBetaRejected } from '../../bootstrap/state.js'
+import {
+  isStreamPingEvent,
+  planStreamCloseAfterComplete,
+  withStreamKeepAlivePings,
+} from '../../utils/streamKeepAlive.js'
 import { getOrCreateUserID } from '../../utils/config.js'
 import {
   CAPPED_DEFAULT_MAX_TOKENS,
@@ -790,6 +795,12 @@ export type Options = {
   queryTracking?: QueryChainTracking
   agentId?: AgentId // Only set for subagents
   /**
+   * densable 2.1.222 #6 — one-shot MCP attribution for this API request
+   * (captured from tool-use stamps when querySource family is main/subagent).
+   */
+  activeMcpServer?: string
+  activeMcpTool?: string
+  /**
    * Official isBackgroundAgent — when true with agentId, session activity
    * does not bump mainLoopRefcount ($Qn second arg via HOn fallback).
    */
@@ -825,6 +836,30 @@ export type Options = {
    * visible/server lane (pi densable).
    */
   refusalFallbackSilentArmActive?: boolean
+  /**
+   * densable serverRefusalFallback — server-lane arm `{forModel, model}`.
+   * When set, stream materializes content_block_start type "fallback" into
+   * QueryEvent `server_fallback` (midStream salvage / non-mid end hop).
+   * mode drives ekd default vs explicit fallbacks body.
+   */
+  serverRefusalFallback?: {
+    forModel: string
+    model: string
+    mode?: 'default' | 'explicit'
+  }
+  /**
+   * densable fallbackCreditCode — stamp fallback_credit_token on next request
+   * after mint from stop_details (G2s).
+   */
+  fallbackCreditCode?: string
+  /**
+   * densable fallbackCreditMintModel — model that minted the credit (optional).
+   */
+  fallbackCreditMintModel?: string
+  /**
+   * densable fallbackCreditLaneArmed — visibleModel armed → rkd credit beta.
+   */
+  fallbackCreditLaneArmed?: boolean
   outputFormat?: BetaJSONOutputFormat
   fastMode?: boolean
   advisorModel?: string
@@ -2079,6 +2114,46 @@ async function* queryModel(
     // Capture wire string effort for transcript stamping on assistant msgs.
     effortLevelForTranscript = transcriptEffortFromOutputConfig(outputConfig)
 
+    // densable ekd/rkd — server-lane fallbacks body + credit beta/token stamp
+    let serverFallbackBody: Record<string, unknown> = {}
+    let creditStamp: { fallback_credit_token?: string } = {}
+    let requestBetas = filteredBetas
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const {
+        planServerRefusalFallbackBetas,
+        planFallbackCreditBeta,
+        planFallbackCreditStamp,
+      } =
+        require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+      const ekd = planServerRefusalFallbackBetas({
+        serverRefusalFallback: options.serverRefusalFallback,
+        requestModel: options.model,
+        silentArmActive: options.refusalFallbackSilentArmActive === true,
+      })
+      serverFallbackBody = ekd.body as Record<string, unknown>
+      let betasWithEk = [...requestBetas]
+      for (const h of ekd.betas) {
+        if (!betasWithEk.includes(h)) betasWithEk.push(h)
+      }
+      const rkd = planFallbackCreditBeta({
+        creditLaneArmed: options.fallbackCreditLaneArmed === true,
+        creditCode: options.fallbackCreditCode,
+        silentArmActive: options.refusalFallbackSilentArmActive === true,
+        betas: betasWithEk,
+      })
+      requestBetas = rkd.betas
+      creditStamp = planFallbackCreditStamp({
+        creditCode: options.fallbackCreditCode,
+      })
+      // refresh lastRequestBetas / sendBetas with ekd+rkd headers
+      lastRequestBetas = requestBetas
+    } catch {
+      // densable optional when helpers unavailable
+    }
+    const sendBetasWithFallback =
+      useBetas && (!simulateProxy || requestBetas.length > 0)
+
     return {
       model: normalizeModelStringForAPI(options.model),
       messages: addCacheBreakpoints(
@@ -2093,14 +2168,14 @@ async function* queryModel(
       system,
       tools: allTools,
       tool_choice: toolChoice,
-      ...(sendBetas && { betas: filteredBetas }),
+      ...(sendBetasWithFallback && { betas: requestBetas }),
       metadata: getAPIMetadata(),
       max_tokens: maxOutputTokens,
       thinking,
       ...(temperature !== undefined && { temperature }),
       ...(contextManagement &&
-        sendBetas &&
-        filteredBetas.includes(CONTEXT_MANAGEMENT_BETA_HEADER) && {
+        sendBetasWithFallback &&
+        requestBetas.includes(CONTEXT_MANAGEMENT_BETA_HEADER) && {
           context_management: contextManagement,
         }),
       // Official: skip extra body overlays that depend on stripped betas when simulating proxy.
@@ -2109,6 +2184,9 @@ async function* queryModel(
         output_config: outputConfig,
       }),
       ...(speed !== undefined && { speed }),
+      // densable Ht.fallbacks + fallback_credit_token stamp
+      ...serverFallbackBody,
+      ...creditStamp,
     }
   }
 
@@ -2166,6 +2244,28 @@ async function* queryModel(
   let research: unknown
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
+  // densable server_fallback production state (ui / hd / lastHop)
+  let serverFallbackEmitted = false
+  // densable Gt credit mint once-per-stream (G2s → tengu_fallback_credit_minted)
+  let fallbackCreditMinted = false
+  let mintedFallbackCreditCode: string | undefined
+  let deferredServerFallbackHop:
+    | {
+        fromModel: string
+        model: string
+        reason: string
+        category: string | null
+      }
+    | undefined
+  let lastServerFallbackHop:
+    | {
+        fromModel: string
+        model: string
+        reason: string
+        category: string | null
+      }
+    | undefined
+  const malformedFallbackBlockIndexes = new Set<number>()
   // Official $Qn/$BQn second arg (HOn) — declared outside try so finally can stop.
   const sessionActivityAgentId = resolveSessionActivityAgentId({
     agentContext: getAgentContext(),
@@ -2332,6 +2432,9 @@ async function* queryModel(
     textDeltas.clear()
     usage = EMPTY_USAGE
     stopReason = null
+    // densable To / at — #5 close-after-complete (Br=stopReason)
+    let messageDeltaCompleted = false
+    let openContentBlockIndex: number | null = null
     streamCostCredit = 'none'
     isAdvisorInProgress = false
 
@@ -2509,8 +2612,22 @@ async function* queryModel(
       let totalStallTime = 0
       let stallCount = 0
 
-      for await (const part of stream) {
+      // densable Tfb(Ne, So) — synthetic keep-alive pings when body bytes advance
+      // without SSE events (custom gateway / ANTHROPIC_BASE_URL proxies).
+      for await (const partOrPing of withStreamKeepAlivePings(
+        stream,
+        chunkTimes,
+      )) {
+        // densable Gi() then _0r(us) → yield stream_event + continue
         resetStreamIdleTimer()
+        if (isStreamPingEvent(partOrPing)) {
+          yield {
+            type: 'stream_event',
+            event: partOrPing,
+          } as StreamEvent
+          continue
+        }
+        const part = partOrPing
         const now = Date.now()
 
         // Detect and log streaming stalls (only after first event to avoid counting TTFB)
@@ -2548,6 +2665,110 @@ async function* queryModel(
           isFirstChunk = false
         }
 
+        // densable V2s/ikd: materialize server-lane fallback content_block_start
+        // into QueryEvent server_fallback (midStream salvage / deferred hd).
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const {
+            parseServerFallbackContentBlockStart,
+            isMalformedServerFallbackBlockStart,
+            buildMidStreamServerFallbackEvent,
+            isServerFallbackHopReason,
+          } =
+            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+          const hop = parseServerFallbackContentBlockStart(part)
+          const malformed = !hop && isMalformedServerFallbackBlockStart(part)
+          if (hop || malformed) {
+            isAdvisorInProgress = false
+          }
+          if (hop) {
+            logEvent('tengu_rotunda_pennant_materialized', {
+              armed: options.serverRefusalFallback !== undefined,
+              block_index: hop.index ?? -1,
+              non_streaming: false,
+            })
+            // densable: if not armed, ignore hop (continue without yield)
+            if (options.serverRefusalFallback === undefined) {
+              continue
+            }
+            if (isServerFallbackHopReason(hop.reason)) {
+              // hi — server hop served on refusal/sticky
+            }
+            lastServerFallbackHop = hop
+            // densable: rewrite partial + yielded models to hop.model
+            if (partialMessage !== undefined) {
+              partialMessage = {
+                ...(partialMessage as object),
+                model: hop.model,
+              } as typeof partialMessage
+            }
+            for (const msg of newMessages) {
+              if (msg.message) {
+                msg.message.model = hop.model as typeof msg.message.model
+              }
+            }
+            if (newMessages.length === 0) {
+              // densable hd — defer until Xs flush (no partials yet)
+              deferredServerFallbackHop = hop
+            } else if (!isServerFallbackHopReason(hop.reason)) {
+              serverFallbackEmitted = true
+              deferredServerFallbackHop = undefined
+              yield buildMidStreamServerFallbackEvent({
+                hop,
+                messages: [],
+                requestId: streamRequestId ?? null,
+              }) as unknown as StreamEvent
+            } else {
+              serverFallbackEmitted = true
+              deferredServerFallbackHop = undefined
+              const sf = buildMidStreamServerFallbackEvent({
+                hop,
+                messages: newMessages as unknown as Array<{
+                  uuid?: string
+                  isApiErrorMessage?: boolean
+                  message?: { content?: unknown; model?: string }
+                }>,
+                requestId: streamRequestId ?? null,
+              })
+              // densable: drop discarded (tool-bearing) from Al / He
+              if (sf.discardedMessages.length > 0) {
+                const drop = new Set(
+                  sf.discardedMessages.map(m => (m as { uuid?: string }).uuid),
+                )
+                for (let i = newMessages.length - 1; i >= 0; i--) {
+                  if (drop.has(newMessages[i]!.uuid)) {
+                    newMessages.splice(i, 1)
+                  }
+                }
+              }
+              yield sf as unknown as StreamEvent
+            }
+            continue
+          }
+          if (malformed) {
+            const idx =
+              typeof (part as { index?: unknown }).index === 'number'
+                ? (part as { index: number }).index
+                : -1
+            if (idx >= 0) malformedFallbackBlockIndexes.add(idx)
+            logForDebugging('cli_malformed_fallback_block', { level: 'warn' })
+            logEvent('tengu_rotunda_pennant_malformed', {
+              block_index: idx,
+              non_streaming: false,
+            })
+            continue
+          }
+          // densable: skip content_block_stop for malformed fallback indexes
+          if (
+            part.type === 'content_block_stop' &&
+            malformedFallbackBlockIndexes.has(part.index)
+          ) {
+            continue
+          }
+        } catch {
+          // densable optional — production path must not break stream
+        }
+
         switch (part.type) {
           case 'message_start': {
             partialMessage = part.message
@@ -2565,6 +2786,9 @@ async function* queryModel(
             break
           }
           case 'content_block_start':
+            // densable: switch(To=!1, us.content_block.type); at=us.index
+            messageDeltaCompleted = false
+            openContentBlockIndex = part.index
             switch (part.content_block.type) {
               case 'tool_use':
                 contentBlocks[part.index] = {
@@ -2744,6 +2968,9 @@ async function* queryModel(
             break
           }
           case 'content_block_stop': {
+            // densable: To=!1, at=null
+            messageDeltaCompleted = false
+            openContentBlockIndex = null
             const contentBlock = contentBlocks[part.index]
             if (!contentBlock) {
               logEvent('tengu_streaming_error', {
@@ -2828,10 +3055,103 @@ async function* queryModel(
             // the queued reference; direct mutation ensures the transcript
             // captures the final values.
             stopReason = part.delta.stop_reason
+            // densable: if(Br=us.delta.stop_reason, Br!==null) To=!0
+            if (stopReason != null) {
+              messageDeltaCompleted = true
+            }
 
             for (const msg of newMessages) {
               msg.message.usage = usage
               msg.message.stop_reason = stopReason
+            }
+
+            // densable G2s — mint fallback_credit_token from stop_details once
+            try {
+              const delta = part.delta as {
+                stop_details?: unknown & {
+                  fallback_credit_token?: unknown
+                }
+              }
+              if (delta.stop_details !== undefined) {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const { planFallbackCreditMint } =
+                  require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                const mint = planFallbackCreditMint({
+                  stopDetails: delta.stop_details,
+                  alreadyMinted: fallbackCreditMinted,
+                })
+                // scrub token from live delta (privacy; densable deletes in place)
+                if (
+                  typeof delta.stop_details === 'object' &&
+                  delta.stop_details !== null &&
+                  'fallback_credit_token' in delta.stop_details
+                ) {
+                  delete (
+                    delta.stop_details as { fallback_credit_token?: unknown }
+                  ).fallback_credit_token
+                }
+                if (mint.creditCode !== undefined) {
+                  mintedFallbackCreditCode = mint.creditCode
+                  if (mint.shouldLogMint) {
+                    fallbackCreditMinted = true
+                    logEvent('tengu_fallback_credit_minted', {
+                      request_id: (streamRequestId ??
+                        'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      model:
+                        options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      fallback_target_model: (options.refusalFallbackModel ??
+                        options.serverRefusalFallback?.model ??
+                        'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      token_length: mint.creditCode.length,
+                      query_source:
+                        options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    })
+                  }
+                }
+              }
+            } catch {
+              // densable optional
+            }
+
+            // densable non-mid end hop: !ui && di (lastHop / deferred)
+            if (
+              options.serverRefusalFallback !== undefined &&
+              !serverFallbackEmitted
+            ) {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const {
+                  buildNonMidStreamServerFallbackEvent,
+                  planDeferredServerFallbackFlush,
+                } =
+                  require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                const hop = lastServerFallbackHop ?? deferredServerFallbackHop
+                if (hop !== undefined) {
+                  serverFallbackEmitted = true
+                  deferredServerFallbackHop = undefined
+                  yield buildNonMidStreamServerFallbackEvent({
+                    fromModel: hop.fromModel,
+                    toModel: hop.model,
+                    reason: hop.reason,
+                    apiRefusalCategory: hop.category,
+                    requestId: streamRequestId ?? null,
+                    finalStopReason: stopReason,
+                  }) as unknown as StreamEvent
+                } else {
+                  const deferred = planDeferredServerFallbackFlush({
+                    deferredHop: deferredServerFallbackHop,
+                    alreadyEmitted: serverFallbackEmitted,
+                    requestId: streamRequestId ?? null,
+                  })
+                  if (deferred) {
+                    serverFallbackEmitted = true
+                    deferredServerFallbackHop = undefined
+                    yield deferred as unknown as StreamEvent
+                  }
+                }
+              } catch {
+                // densable optional
+              }
             }
 
             // densable #38 cost credit gate (gr) — pure transition in streamCostCredit.ts
@@ -2850,6 +3170,10 @@ async function* queryModel(
                   costUSDForPart,
                   usage as unknown as BetaUsage,
                   options.model,
+                  {
+                    activeMcpServer: options.activeMcpServer,
+                    activeMcpTool: options.activeMcpTool,
+                  },
                 )
               }
             }
@@ -2915,7 +3239,19 @@ async function* queryModel(
                       targetModel = routed.fallbackModel ?? armedFallback
                     }
                   }
-                  if (targetModel !== undefined) {
+                  if (targetModel === undefined) {
+                    // densable: route declined / not armed → refusal_no_fallback
+                    try {
+                      const { buildRefusalNoFallbackEvent } =
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
+                        require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                      yield buildRefusalNoFallbackEvent(
+                        'route_declined',
+                      ) as unknown as StreamEvent
+                    } catch {
+                      // densable optional
+                    }
+                  } else {
                     const flow = await runRefusalFallbackDialogFlow({
                       decision: {
                         isMainThread,
@@ -2974,6 +3310,7 @@ async function* queryModel(
                           apiRefusalCategory,
                           apiRefusalExplanation:
                             stopDetails?.explanation ?? null,
+                          creditCode: mintedFallbackCreditCode ?? null,
                           silentArmAtTrigger: silentAttempt,
                           routeMatched,
                         }) as unknown as StreamEvent
@@ -3010,7 +3347,43 @@ async function* queryModel(
                         targetModel,
                       )
                     }
-                    void flow
+                    // densable: dialog declined / cancelled → refusal_no_fallback
+                    if (
+                      !flow.shouldSwitchToFallback &&
+                      flow.choice !== 'retry_fallback'
+                    ) {
+                      try {
+                        const { buildRefusalNoFallbackEvent } =
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                        const reason =
+                          flow.suppressReason === 'no_consumer_capability'
+                            ? 'no_consumer_capability'
+                            : flow.choice === 'edit_prompt'
+                              ? 'dialog_declined'
+                              : 'dialog_declined'
+                        yield buildRefusalNoFallbackEvent(
+                          reason,
+                        ) as unknown as StreamEvent
+                      } catch {
+                        // densable optional
+                      }
+                    }
+                  }
+                } else if (
+                  isRefusalFallbackEnabled() &&
+                  (!armedFallback || armedFallback === options.model)
+                ) {
+                  // densable: not_armed / client_chain_exhausted
+                  try {
+                    const { buildRefusalNoFallbackEvent } =
+                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                      require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                    yield buildRefusalNoFallbackEvent(
+                      'not_armed',
+                    ) as unknown as StreamEvent
+                  } catch {
+                    // densable optional
                   }
                 }
               } catch (e) {
@@ -3065,6 +3438,10 @@ async function* queryModel(
                   costUSDForStop,
                   usage as unknown as BetaUsage,
                   options.model,
+                  {
+                    activeMcpServer: options.activeMcpServer,
+                    activeMcpTool: options.activeMcpTool,
+                  },
                 )
               }
             }
@@ -3075,6 +3452,31 @@ async function* queryModel(
           type: 'stream_event',
           event: part,
           ...(part.type === 'message_start' ? { ttftMs } : undefined),
+        }
+      }
+      // densable Xs() — flush deferred server_fallback hop when stream ends
+      // without midStream emission (no assistant partials at hop time).
+      if (
+        options.serverRefusalFallback !== undefined &&
+        !serverFallbackEmitted &&
+        deferredServerFallbackHop !== undefined
+      ) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { planDeferredServerFallbackFlush } =
+            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+          const deferred = planDeferredServerFallbackFlush({
+            deferredHop: deferredServerFallbackHop,
+            alreadyEmitted: serverFallbackEmitted,
+            requestId: streamRequestId ?? null,
+          })
+          if (deferred) {
+            serverFallbackEmitted = true
+            deferredServerFallbackHop = undefined
+            yield deferred as unknown as StreamEvent
+          }
+        } catch {
+          // densable optional
         }
       }
       // Clear the idle timeout watchdog now that the stream loop has exited
@@ -3301,13 +3703,6 @@ async function* queryModel(
                 ),
             ),
           )
-          const synthesizedStop = hasToolUse ? 'tool_use' : 'end_turn'
-          // densable: if stop_reason not already set on yielded messages, stamp it
-          for (const msg of newMessages) {
-            if (msg.message && msg.message.stop_reason == null) {
-              msg.message.stop_reason = synthesizedStop
-            }
-          }
           const cause:
             | 'watchdog'
             | 'server_error'
@@ -3319,6 +3714,46 @@ async function* queryModel(
               : isNetworkDown
                 ? 'network_down'
                 : 'stale_connection'
+
+          // densable 2.1.222 #5: La&&To&&at===null → already complete, no truncation
+          // if(La&&To&&at===null){ T(...response already complete...);
+          //   N("tengu_streaming_close_after_complete",...); break e }
+          const closePlan = planStreamCloseAfterComplete({
+            stopReason,
+            messageDeltaCompleted,
+            openContentBlockIndex,
+          })
+          if (closePlan.alreadyComplete) {
+            logForDebugging(
+              `Stream ${
+                streamIdleAborted
+                  ? 'stalled'
+                  : `connection closed (${connCode ?? 'unknown'})`
+              } after message_delta (stop_reason=${stopReason}) — response already complete, no truncation`,
+              { level: 'info' },
+            )
+            logEvent('tengu_streaming_close_after_complete', {
+              model:
+                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              blocks_yielded: newMessages.length,
+              cause:
+                cause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              error_code: (connCode ??
+                'none') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              request_id: (streamRequestId ??
+                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            // densable break e — success exit, no mid-response banner
+            return
+          }
+
+          const synthesizedStop = hasToolUse ? 'tool_use' : 'end_turn'
+          // densable: if stop_reason not already set on yielded messages, stamp it
+          for (const msg of newMessages) {
+            if (msg.message && msg.message.stop_reason == null) {
+              msg.message.stop_reason = synthesizedStop
+            }
+          }
           const hasOutput = hasNonThinkingOutput || hasYieldedContent
           logForDebugging(
             streamIdleAborted
@@ -3493,11 +3928,100 @@ async function* queryModel(
         streamRequestId,
       )
 
+      // densable fa — materialize non-streaming fallback content blocks
+      // then yield assistant, then wa() server_fallback (order matches densable)
+      let nonStreamContent: unknown[] = Array.isArray(result.content)
+        ? [...result.content]
+        : []
+      let nonStreamLastHop:
+        | {
+            fromModel: string
+            model: string
+            reason: string
+            category: string | null
+          }
+        | undefined
+      // densable G2s non-stream: mint from stop_details before fa/wa
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { planFallbackCreditMint } =
+          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+        const stopDetails = (result as { stop_details?: unknown }).stop_details
+        if (stopDetails !== undefined) {
+          const mint = planFallbackCreditMint({
+            stopDetails,
+            alreadyMinted: fallbackCreditMinted,
+          })
+          if (
+            typeof stopDetails === 'object' &&
+            stopDetails !== null &&
+            'fallback_credit_token' in stopDetails
+          ) {
+            delete (stopDetails as { fallback_credit_token?: unknown })
+              .fallback_credit_token
+          }
+          if (mint.creditCode !== undefined) {
+            mintedFallbackCreditCode = mint.creditCode
+            if (mint.shouldLogMint) {
+              fallbackCreditMinted = true
+              logEvent('tengu_fallback_credit_minted', {
+                request_id: (streamRequestId ??
+                  'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                model:
+                  options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                fallback_target_model: (options.refusalFallbackModel ??
+                  options.serverRefusalFallback?.model ??
+                  'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                token_length: mint.creditCode.length,
+                query_source:
+                  options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+            }
+          }
+        }
+      } catch {
+        // densable optional
+      }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { materializeNonStreamingServerFallbackContent } =
+          require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+        const fa = materializeNonStreamingServerFallbackContent({
+          content: nonStreamContent,
+          stopReason: result.stop_reason ?? null,
+          armed: options.serverRefusalFallback !== undefined,
+        })
+        nonStreamContent = fa.content
+        nonStreamLastHop = fa.lastHop
+        for (const idx of fa.malformedIndexes) {
+          logEvent('tengu_rotunda_pennant_malformed', {
+            block_index: idx,
+            non_streaming: true,
+          })
+        }
+        if (fa.lastHop !== undefined) {
+          logEvent('tengu_rotunda_pennant_materialized', {
+            armed: options.serverRefusalFallback !== undefined,
+            block_index: -1,
+            non_streaming: true,
+          })
+        }
+        if (fa.droppedCount > 0) {
+          logEvent('tengu_rotunda_pennant_sync_dropped', {
+            dropped_count: fa.droppedCount,
+            had_tool_use: fa.droppedHadToolUse,
+            chain_exhausted: result.stop_reason === 'refusal',
+          })
+        }
+      } catch {
+        // densable optional
+      }
+
       const m: AssistantMessage = {
         message: {
           ...result,
           content: normalizeContentFromAPI(
-            result.content,
+            nonStreamContent as typeof result.content,
             tools,
             options.agentId,
           ) as MessageContent,
@@ -3520,6 +4044,31 @@ async function* queryModel(
       newMessages.push(m)
       fallbackMessage = m
       yield m
+      // densable wa: yield po then yield*wa → server_fallback midStream:!1
+      if (
+        options.serverRefusalFallback !== undefined &&
+        !serverFallbackEmitted
+      ) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { planNonStreamingServerFallbackEvent } =
+            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+          const sfEv = planNonStreamingServerFallbackEvent({
+            lastHop: nonStreamLastHop,
+            currentModel: options.model,
+            requestId: streamRequestId,
+            finalStopReason: result.stop_reason ?? null,
+            alreadyEmitted: serverFallbackEmitted,
+          })
+          if (sfEv) {
+            serverFallbackEmitted = true
+            lastServerFallbackHop = nonStreamLastHop
+            yield sfEv as unknown as StreamEvent
+          }
+        } catch {
+          // densable optional
+        }
+      }
     } finally {
       clearStreamIdleTimers()
     }
@@ -3596,11 +4145,93 @@ async function* queryModel(
           failedRequestId,
         )
 
+        // densable fa + wa on 404 non-streaming path (same as idle fallback)
+        let nonStreamContent404: unknown[] = Array.isArray(result.content)
+          ? [...result.content]
+          : []
+        let nonStreamLastHop404:
+          | {
+              fromModel: string
+              model: string
+              reason: string
+              category: string | null
+            }
+          | undefined
+        // densable G2s on 404 non-stream path
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { planFallbackCreditMint } =
+            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+          const stopDetails404 = (result as { stop_details?: unknown })
+            .stop_details
+          if (stopDetails404 !== undefined) {
+            const mint = planFallbackCreditMint({
+              stopDetails: stopDetails404,
+              alreadyMinted: fallbackCreditMinted,
+            })
+            if (
+              typeof stopDetails404 === 'object' &&
+              stopDetails404 !== null &&
+              'fallback_credit_token' in stopDetails404
+            ) {
+              delete (stopDetails404 as { fallback_credit_token?: unknown })
+                .fallback_credit_token
+            }
+            if (mint.creditCode !== undefined) {
+              mintedFallbackCreditCode = mint.creditCode
+              if (mint.shouldLogMint) {
+                fallbackCreditMinted = true
+                logEvent('tengu_fallback_credit_minted', {
+                  request_id: (streamRequestId ??
+                    failedRequestId) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  model:
+                    options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  fallback_target_model: (options.refusalFallbackModel ??
+                    options.serverRefusalFallback?.model ??
+                    'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  token_length: mint.creditCode.length,
+                  query_source:
+                    options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+              }
+            }
+          }
+        } catch {
+          // densable optional
+        }
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { materializeNonStreamingServerFallbackContent } =
+            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+          const fa = materializeNonStreamingServerFallbackContent({
+            content: nonStreamContent404,
+            stopReason: result.stop_reason ?? null,
+            armed: options.serverRefusalFallback !== undefined,
+          })
+          nonStreamContent404 = fa.content
+          nonStreamLastHop404 = fa.lastHop
+          for (const idx of fa.malformedIndexes) {
+            logEvent('tengu_rotunda_pennant_malformed', {
+              block_index: idx,
+              non_streaming: true,
+            })
+          }
+          if (fa.lastHop !== undefined) {
+            logEvent('tengu_rotunda_pennant_materialized', {
+              armed: options.serverRefusalFallback !== undefined,
+              block_index: -1,
+              non_streaming: true,
+            })
+          }
+        } catch {
+          // densable optional
+        }
+
         const m: AssistantMessage = {
           message: {
             ...result,
             content: normalizeContentFromAPI(
-              result.content,
+              nonStreamContent404 as typeof result.content,
               tools,
               options.agentId,
             ) as MessageContent,
@@ -3619,6 +4250,30 @@ async function* queryModel(
         newMessages.push(m)
         fallbackMessage = m
         yield m
+        if (
+          options.serverRefusalFallback !== undefined &&
+          !serverFallbackEmitted
+        ) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { planNonStreamingServerFallbackEvent } =
+              require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+            const sfEv = planNonStreamingServerFallbackEvent({
+              lastHop: nonStreamLastHop404,
+              currentModel: options.model,
+              requestId: streamRequestId ?? failedRequestId,
+              finalStopReason: result.stop_reason ?? null,
+              alreadyEmitted: serverFallbackEmitted,
+            })
+            if (sfEv) {
+              serverFallbackEmitted = true
+              lastServerFallbackHop = nonStreamLastHop404
+              yield sfEv as unknown as StreamEvent
+            }
+          } catch {
+            // densable optional
+          }
+        }
 
         // Continue to success logging below
       } catch (fallbackError) {
@@ -3764,6 +4419,10 @@ async function* queryModel(
         fallbackCost,
         fallbackUsage as unknown as BetaUsage,
         options.model,
+        {
+          activeMcpServer: options.activeMcpServer,
+          activeMcpTool: options.activeMcpTool,
+        },
       )
     }
   }

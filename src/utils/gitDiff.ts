@@ -11,6 +11,7 @@ import {
   getGitDir,
   getIsGit,
   gitExe,
+  RAW_GIT_DIFF_FLAGS,
 } from './git.js'
 
 export type GitDiffStats = {
@@ -59,6 +60,8 @@ export async function fetchGitDiff(): Promise<GitDiffResult | null> {
   // Quick probe: use --shortstat to get totals without loading all content.
   // This is O(1) memory and lets us detect massive diffs (e.g., jj workspaces)
   // before committing to expensive operations.
+  // densable URo shortstat probe: ["--no-optional-locks","diff",t,"--shortstat"]
+  // (no gnr — size probe only; full content path below uses RAW_GIT_DIFF_FLAGS)
   const { stdout: shortstatOut, code: shortstatCode } = await execFileNoThrow(
     gitExe(),
     ['--no-optional-locks', 'diff', 'HEAD', '--shortstat'],
@@ -81,7 +84,7 @@ export async function fetchGitDiff(): Promise<GitDiffResult | null> {
   // Get stats via --numstat (all uncommitted changes vs HEAD)
   const { stdout: numstatOut, code: numstatCode } = await execFileNoThrow(
     gitExe(),
-    ['--no-optional-locks', 'diff', 'HEAD', '--numstat'],
+    ['--no-optional-locks', 'diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD', '--numstat'],
     { timeout: GIT_TIMEOUT_MS, preserveOutputOnError: false },
   )
 
@@ -121,9 +124,10 @@ export async function fetchGitDiffHunks(): Promise<
     return new Map()
   }
 
+  // densable URo: ["--no-optional-locks","diff",...gnr,t]
   const { stdout: diffOut, code: diffCode } = await execFileNoThrow(
     gitExe(),
-    ['--no-optional-locks', 'diff', 'HEAD'],
+    ['--no-optional-locks', 'diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD'],
     { timeout: GIT_TIMEOUT_MS, preserveOutputOnError: false },
   )
 
@@ -420,10 +424,18 @@ export async function fetchSingleFileGitDiff(
 
   if (lsFilesCode === 0) {
     // File is tracked - diff against merge base for PR-like view
+    // densable jRo: ["--no-optional-locks","diff",...gnr,s,"--",r]
     const diffRef = await getDiffRef(gitRoot)
     const { stdout, code } = await execFileNoThrowWithCwd(
       gitExe(),
-      ['--no-optional-locks', 'diff', diffRef, '--', gitPath],
+      [
+        '--no-optional-locks',
+        'diff',
+        ...RAW_GIT_DIFF_FLAGS,
+        diffRef,
+        '--',
+        gitPath,
+      ],
       { cwd: gitRoot, timeout: SINGLE_FILE_DIFF_TIMEOUT_MS },
     )
     if (code !== 0) return null

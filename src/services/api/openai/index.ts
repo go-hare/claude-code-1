@@ -458,6 +458,10 @@ export async function* queryModelOpenAI(
               costUSD,
               usage as unknown as BetaUsage,
               options.model,
+              {
+                activeMcpServer: options.activeMcpServer,
+                activeMcpTool: options.activeMcpTool,
+              },
             )
           }
           break

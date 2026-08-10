@@ -11,6 +11,7 @@ import * as React from 'react';
 import type { Command } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Box } from '@anthropic/ink';
+import { useAppState } from '../state/AppState.js';
 import type { Tools } from '../Tool.js';
 import { type ConnectorTextBlock, isConnectorTextBlock } from '../types/connectorText.js';
 import type {
@@ -107,10 +108,16 @@ function MessageImpl({
           isTranscriptMode={isTranscriptMode}
         />
       );
-    case 'assistant':
+    case 'assistant': {
+      // densable SFa — prefer MessageDisplay transformed first *text* when !verbose
+      // (Tth writes displayContent onto the first text block; thinking/tool may
+      // precede it, so index===0 is wrong.)
+      const apiMessageId = (message.message as { id?: string }).id;
+      const contentBlocks = message.message.content as BetaContentBlock[];
+      const firstTextBlockIndex = contentBlocks.findIndex(b => b.type === 'text');
       return (
         <Box flexDirection="column" width={containerWidth ?? '100%'}>
-          {(message.message.content as BetaContentBlock[]).map((_, index) => (
+          {contentBlocks.map((_, index) => (
             <AssistantMessageBlock
               key={index}
               param={_}
@@ -130,10 +137,13 @@ function MessageImpl({
               thinkingBlockId={`${message.uuid}:${index}`}
               lastThinkingBlockId={lastThinkingBlockId}
               advisorModel={message.advisorModel as string | undefined}
+              apiMessageId={apiMessageId}
+              isFirstTextBlock={index === firstTextBlockIndex}
             />
           ))}
         </Box>
       );
+    }
     case 'user': {
       if (message.isCompactSummary) {
         return <CompactSummary message={message} screen={isTranscriptMode ? 'transcript' : 'prompt'} />;
@@ -352,6 +362,8 @@ function AssistantMessageBlock({
   thinkingBlockId,
   lastThinkingBlockId,
   advisorModel,
+  apiMessageId,
+  isFirstTextBlock,
 }: {
   param:
     | BetaContentBlock
@@ -380,7 +392,16 @@ function AssistantMessageBlock({
   /** ID of the last thinking block to show, null means show all */
   lastThinkingBlockId?: string | null;
   advisorModel?: string;
+  /** densable bFa — API message id for displayedMessageContent lookup */
+  apiMessageId?: string;
+  /** First text block only receives SFa transformed text (aligns densable Tth) */
+  isFirstTextBlock?: boolean;
 }): React.ReactNode {
+  // densable SFa = Uy(phH => text && bFa ? phH.displayedMessageContent[bFa] : void 0)
+  // Guard: restored/partial AppState may omit displayedMessageContent.
+  const displayedOverride = useAppState(s =>
+    param.type === 'text' && apiMessageId !== undefined ? s.displayedMessageContent?.[apiMessageId] : undefined,
+  );
   if (feature('CONNECTOR_TEXT')) {
     if (isConnectorTextBlock(param)) {
       return (
@@ -413,10 +434,16 @@ function AssistantMessageBlock({
           isTranscriptMode={isTranscriptMode}
         />
       );
-    case 'text':
+    case 'text': {
+      // densable: if (SFa !== void 0 && !lie) use transformed; empty SFa hides
+      let textParam = param as TextBlockParam;
+      if (displayedOverride !== undefined && !verbose && isFirstTextBlock) {
+        if (displayedOverride === '') return null;
+        textParam = { type: 'text', text: displayedOverride };
+      }
       return (
         <AssistantTextMessage
-          param={param as TextBlockParam}
+          param={textParam}
           addMargin={addMargin}
           shouldShowDot={shouldShowDot}
           verbose={verbose}
@@ -424,6 +451,7 @@ function AssistantMessageBlock({
           onOpenRateLimitOptions={onOpenRateLimitOptions}
         />
       );
+    }
     case 'redacted_thinking':
       if (!isTranscriptMode && !verbose) {
         return null;

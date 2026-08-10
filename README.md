@@ -43,9 +43,41 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → 2.1.212 → 2.1.214 → 2.1.215 → 2.1.216 → 2.1.217** 产品对齐（214 安全阀大包 + 215 禁止模型自启 verify/code-review + 216 长会话/sandbox/worktree/bg/UI 可靠性 + 217 emoji/caps/brace/hyperlink/tips/bg 隔离 20 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.32**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.218 → 2.1.219 → 2.1.220 → 2.1.221** 产品对齐（218 code-review bg / a11y / auto-mode 等 + 219 Opus 5 / nest depth / workflow size 24 条 + 220 entitlement_blind residual + 221 sandbox mask / PowerShell 引号路径 / bareAssignmentNames U5e·cle 等 39 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.34**），与 git tag 可能不同步。
 
-#### densable 2.1.217 对齐说明（2.7.32）
+#### densable 2.1.219–2.1.221 对齐说明（2.7.34）
+
+对照文档：
+- `docs/upstream-extraction/v2.1.219/official-219-checklist.md`（**HAVE 24 / GAP 0**）
+- `docs/upstream-extraction/v2.1.220/official-220-checklist.md`（public 1 行 N/A + SEA residual **HAVE**）
+- `docs/upstream-extraction/v2.1.221/official-221-checklist.md`（**HAVE 35 / GAP 2 / N/A 2**）
+
+叠在 **2.1.218** 之上。**GAP 不 invent**：#10 SDK MCP `constructor` 名 crash、#12 sandboxed large upload TLS；#1 VSCode Focus view / #38 gateway model 400 为 **N/A**。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **2.1.219 模型 / caps** | Opus 5 catalog（EHl/ON）+ 1M picker「Opus (1M context)」；nest depth 默认 3（hazel_trellis）；`workflowSizeGuideline`；stream-json nested `--forward-subagent-text`；Fable credits stale cache | — |
+| **2.1.219 权限 / hooks / UX** | `sandbox.network.strictAllowlist`；`DirectoryAdded` hook；init `mcp_server_errors`；GIT_BASH basename 校验；Vim ← empty→agent view；SR 后缀 append；RC endpoint 点名；MCP policy `${VAR}` | — |
+| **2.1.220 residual** | `isEntitlementOverlayUnavailable` / entitlement deny-set；`entitlement_blind` 遥测；blind opus-5 → opus-4-8 替身 | 官方 public 无逐条 product list（N/A） |
+| **2.1.221 安全 / 权限** | sandbox credential `mode:"mask"`；zsh `[[ ]]` unquoted `&`；**PowerShell 引号路径 pWo fail-closed ask**；Bash U5e/cle `bareAssignmentNames` 全量（for 危险集 / declaration 旗标 / Pws·uVu）+ ZRu 只读 bare 字段 | **#10 constructor** GAP；**#12 large-upload TLS** GAP |
+| **2.1.221 会话 / 插件 / UI** | prompt-audit；session title sanitize；Vim yank 共享 / undo-to-empty；plugin install catalog refresh + reload 清 notice；`/status` session kind；Stats cache 分解；ultrareview no-branches；bg commit/draft-PR policy；Vertex ToolSearch native wire | **#1 VSCode Focus** N/A；**#38 gateway** N/A |
+| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF；不扩 KAIROS 产品面 |
+
+#### densable 2.1.218 对齐说明（2.7.33，已并入）
+
+对照文档：`docs/upstream-extraction/v2.1.218/official-218-checklist.md`（**HAVE 35 / N/A 1 / GAP 0**）、`changelog-2.1.218.md`。叠在 **2.1.217** 之上。**禁止**写「36/36 solid HAVE」— #9 官方 gateway spend metering 为 **N/A**（go-hare 不发 gateway）；CLI cousin `application-inference-profile` 另计 HAVE。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **code-review / ultrareview** | `/code-review` bg subagent + stacked slash；`/code-review ultra` 非交互 cloud；`/ultrareview` 描述性参数 + 无效参数反馈 | — |
+| **a11y / 输入** | SR 删除播报；VoiceOver 末尾空格；plugin/settings `declareCursor`；多行粘贴 Ctrl+J→换行；← 确认 + AgentView Esc 回原会话 | — |
+| **权限 / auto-mode / sandbox** | dangerous-rm/`&`/Win path circuitBreaker；plan+auto RO Bash→classifier；sandbox IDE 命令 fail-closed；agent frontmatter hooks 需 workspace trust | — |
+| **会话 / 引擎** | Host teardown phantom turn + sticky permissionLayers；假 interrupt 抑制；fork `logical_parent_uuid`；prompt history race；overflow 重试 + Ctrl+B shell caps | — |
+| **云 / 远程 / IDE** | Bedrock setup assume-role/partition/proxy；CCR closed-gate 停 heartbeat；IDE selection mid-emoji + sibling_context_error；PR link flush 2s | — |
+| **frontmatter / 技能 / 信任** | agent 名禁 `:`；fork skill 默认 background；布尔 yes/no/on/off/1/0；plugin `--config KEY=VALUE`；`/deep-research` 仅手动；trust 标 repository root + RC multi-env Add-server | **#9 gateway metering** N/A |
+| **Ink / Agent Views（发版加固）** | skipSyncMarkers；unmount 不写 paused previous-output；无 empty-frame skip；Esc= densable JH done + O7 `suppressResumeHint`（不 attach-origin 黑屏） | UDS/LAN/TEAMMEM 默认 OFF |
+
+#### densable 2.1.217 对齐说明（2.7.32，已并入）
 
 对照文档：`docs/upstream-extraction/v2.1.217/official-217-checklist.md`（**HAVE 20 / GAP 0**）、`changelog-2.1.217.md`。叠在 **2.1.216** 之上。
 
@@ -108,10 +140,12 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF |
 
-### 近期更新（2.7.5 → 2.7.32）
+### 近期更新（2.7.5 → 2.7.34）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.34** | **densable 2.1.219–2.1.221**：219 **24/24 HAVE**（Opus 5 catalog/1M、nest depth 3、workflowSizeGuideline、DirectoryAdded、strictAllowlist、stream nested forward、Vim/SR 等）；220 entitlement overlay residual（`isEntitlementOverlayUnavailable` / `entitlement_blind`）；221 **HAVE 35 / GAP 2 / N/A 2**（sandbox mask、prompt-audit、PS 引号路径 pWo、U5e/cle bareAssignmentNames+ZRu、session title sanitize、Vim yank、plugin refresh、ToolSearch native wire、bg draft-PR 等）。**GAP**：#10 constructor / #12 large-upload TLS。UDS/LAN/TEAMMEM 默认 OFF。 |
+| **2.7.33** | **densable 2.1.218 全量 1:1（35 HAVE / 1 N/A / 0 GAP）**：code-review bg + ultra cloud；ultrareview 描述/无效参数；SR a11y / Ctrl+J / ←确认 / AgentView Esc；Host teardown + permissionLayers；auto-mode/sandbox IDE；fork lineage；Bedrock wizard；CCR heartbeat；frontmatter 布尔/`--config`/禁 `:`；`/deep-research` 仅手动；RC multi-env trust。**#9 gateway metering N/A**。发版加固：Ink skipSyncMarkers/unmount/alt-screen；Agent Views Esc 不 attach-origin 黑屏 + O7 退出。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.32** | **densable 2.1.217 全量 1:1（20/20 HAVE）**：subagent concurrent 20 / nest depth 1；brace budget；`FORCE_HYPERLINK`；emoji shortcode typeahead；tip lifetime 3；login 3d；transcript ENOSPC；MCP truncate；Opus 4.8 Bedrock 1M；SR startup quiet；managed OTEL；malformed attachment；attach footer gap；Win taskkill；bg isolation `eq`/`N6g`/`ZRu` bare+YPg（ZRu 仅 Shell.exec）。**故意更严**：parse-unavailable fail-closed。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 收口**：215 `/verify`·`/code-review` 禁止模型自启（HAVE 2）；216 **HAVE 38 / N/A 1 / GAP 0**（sandbox.filesystem.disabled、长会话 normalize、auto-mode 401、worktree git 隔离、daemon stop --any、bg/agents UX、Win 网络路径、fullscreen UI、skill 菜单热刷新、`/rewind` symlink 安全等）。故意不扩 UDS/LAN/TEAMMEM；VSCode RTL N/A。 |
 | **2.7.30** | **densable 2.1.214 全量 1:1（47/47 HAVE）**：权限/Bash/PS 安全阀；EndConversation；tool heartbeat；GrowthBook null payload + OAuth flag refresh；bg daemon control-socket/retire/deleteJob；RC session-ready push 门闩；stream cost / advisor stall / hooks exit2 / OTel / MCP list_changed 等。故意不扩 UDS/LAN/TEAMMEM。 |

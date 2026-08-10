@@ -654,8 +654,15 @@ export function checkZRuGitRedirect(
   cwd: string,
   agentWorktree: string,
 ): string | null {
+  // densable QEd + dun: session vs agent noun/possessive (2.1.222 every session type)
+  // Lazy require avoids cycle with bgIsolationContainment ↔ this module (nKr).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isolationSubject } = require('./bgIsolationContainment.js') as {
+    isolationSubject: (root: string) => { noun: string; possessive: string }
+  }
+  const { noun, possessive } = isolationSubject(agentWorktree)
   const n = (f: string): string =>
-    `This agent is isolated in the worktree ${agentWorktree}, but this command ${f}. Refusing to run it — a worktree-isolated agent's git operations must target its own worktree. Run the equivalent from ${agentWorktree} without the redirect.`
+    `${noun} is isolated in the worktree ${agentWorktree}, but this command ${f}. Refusing to run it — ${possessive} git operations must target its own worktree. Run the equivalent from ${agentWorktree} without the redirect.`
 
   if (parsed.kind !== 'simple') {
     return n(

@@ -19,17 +19,34 @@ export function handleReconnectResult(
     resources?: ServerResource[];
   },
   serverName: string,
+  options?: { hasHeadersHelper?: boolean },
 ): ReconnectResult {
   switch (result.client.type) {
     case 'connected':
+      // densable ati: discoveryBearerRejected / toolsListError on connected
+      if (result.client.discoveryBearerRejected) {
+        return {
+          message: `Reconnected to ${serverName}, but your claude.ai session token was rejected. Run /login, then reconnect.`,
+          success: false,
+        };
+      }
+      if (result.client.toolsListError) {
+        return {
+          message: `Reconnected to ${serverName}, but fetching tools failed: ${result.client.toolsListError}`,
+          success: false,
+        };
+      }
       return {
         message: `Reconnected to ${serverName}.`,
         success: true,
       };
 
     case 'needs-auth':
+      // densable ati needs-auth arm — headersHelper-aware copy
       return {
-        message: `${serverName} requires authentication. Use the 'Authenticate' option.`,
+        message: options?.hasHeadersHelper
+          ? `${serverName} requires authentication. Use 'Authenticate' if the upstream server uses OAuth, or check the headersHelper script and use 'Reconnect'.`
+          : `${serverName} requires authentication. Use the 'Authenticate' option.`,
         success: false,
       };
 

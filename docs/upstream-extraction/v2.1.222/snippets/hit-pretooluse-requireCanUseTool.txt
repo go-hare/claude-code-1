@@ -1,0 +1,68 @@
+# densable 2.1.222 #2 — PreToolUse auto-allow must not bypass bg agent tool restrictions
+# SEA: O3 (runForkedAgent) + pdn (resolveHookPermissionDecision) + iMo (createSubagentContext)
+
+## Product rule
+PreToolUse hooks that return `allow` must not skip canUseTool for background
+agent tasks (summaries, compaction, renames). Those tasks enforce tool
+restrictions in canUseTool; auto-allow was short-circuiting them.
+
+## 221 → 222 delta
+221: `requireCanUseTool:i?.requireCanUseTool??!0` count = 0
+222: count = 1 (only in O3)
+
+## O3 = runForkedAgent
+```
+C=iMo(S,{
+  ...i,
+  isBackgroundAgent:i?.isBackgroundAgent??!0,
+  options: d ? {...i?.options??S.options, tools:[]} : i?.options??(p!==void 0?{...S.options}:void 0),
+  isolationLatch: i?.isolationLatch??{current:S.isolationLatch?.current??null,exemptServers:S.isolationLatch?.exemptServers},
+  precomputeSourceKey: i?.precomputeSourceKey??S.agentId??"main",
+  requireCanUseTool: i?.requireCanUseTool??!0   // NEW 222 — default true
+})
+```
+
+## iMo = createSubagentContext (pass-through only)
+```
+requireCanUseTool:t?.requireCanUseTool
+```
+Default true is applied by O3 when building overrides, not inside iMo.
+
+## pdn = resolveHookPermissionDecision
+```
+async function pdn(e,t,r,n,o,i,s){
+  if(nJe(t))return{decision:{behavior:"allow",updatedInput:r},input:r};
+  let a=n.requireCanUseTool;
+  if(e?.behavior==="deny") return {decision:e,input:r};
+  if(e?.behavior!=="allow"&&e?.behavior!=="ask") return {decision:await o(t,r,n,i,s),input:r};
+  let l=e.behavior, c=e.updatedInput??r;
+  // yyt = rule/safety check always runs on allow|ask
+  let u=await yyt(t,c,{...n,toolUseId:s},{hookUpdatedInput:e.updatedInput});
+  if(u?.behavior==="deny") return {decision:u,input:c};
+  if(u?.behavior==="ask"){
+    let d=l==="ask";
+    // hookAskFloor when hook was ask and rules ask
+    return {decision:await o(t,c,d?{...n,hookAskFloor:!0}:n,i,s),input:c};
+  }
+  if(l==="allow"){
+    if(a) return (
+      T(`Hook approved tool use for ${t.name}, but canUseTool is required`),
+      {decision:await o(t,c,n,i,s),input:c}
+    );
+    return {decision:e,input:c}; // bypass permission prompt
+  }
+  return {decision:await o(t,c,n,i,s,e),input:c};
+}
+```
+
+## Gold strings
+- `Hook approved tool use for ${t.name}, but canUseTool is required`
+- `Hook approved tool use for ${t.name}, bypassing permission prompt`
+
+## nJe (unrelated special-case)
+`nJe(e)=!e.mcpInfo&&Omb.has(e.name)` — Omb = EndConversation only; skip hooks.
+
+## go-hare mapping
+- O3 → `runForkedAgent` defaults `requireCanUseTool: overrides?.requireCanUseTool ?? true`
+- pdn → `resolveHookPermissionDecision` already gates on `toolUseContext.requireCanUseTool`
+- iMo → `createSubagentContext` pass-through `overrides?.requireCanUseTool`

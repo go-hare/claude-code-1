@@ -1,13 +1,18 @@
 import React from 'react';
 import Link from '../components/Link.js';
 import Text from '../components/Text.js';
-import type { Color } from './styles.js';
+import type { Color, Styles } from './styles.js';
 import { type NamedColor, Parser, type Color as TermioColor, type TextStyle } from './termio.js';
 
 type Props = {
   children: string;
   /** When true, force all text to be rendered with dim styling */
   dimColor?: boolean;
+  /**
+   * densable Sh tailWrap → Text wrap. Used by StreamingMarkdown for
+   * hideTrailingLine (wrap-stream on incomplete live line).
+   */
+  wrap?: Styles['textWrap'];
 };
 
 type SpanProps = {
@@ -30,9 +35,15 @@ type SpanProps = {
  *
  * Memoized to prevent re-renders when parent changes but children string is the same.
  */
-export const Ansi = React.memo(function Ansi({ children, dimColor }: Props): React.ReactNode {
+export const Ansi = React.memo(function Ansi({ children, dimColor, wrap }: Props): React.ReactNode {
   if (typeof children !== 'string') {
-    return dimColor ? <Text dim>{String(children)}</Text> : <Text>{String(children)}</Text>;
+    return dimColor ? (
+      <Text dim wrap={wrap}>
+        {String(children)}
+      </Text>
+    ) : (
+      <Text wrap={wrap}>{String(children)}</Text>
+    );
   }
 
   if (children === '') {
@@ -46,7 +57,13 @@ export const Ansi = React.memo(function Ansi({ children, dimColor }: Props): Rea
   }
 
   if (spans.length === 1 && !hasAnyProps(spans[0]!.props)) {
-    return dimColor ? <Text dim>{spans[0]!.text}</Text> : <Text>{spans[0]!.text}</Text>;
+    return dimColor ? (
+      <Text dim wrap={wrap}>
+        {spans[0]!.text}
+      </Text>
+    ) : (
+      <Text wrap={wrap}>{spans[0]!.text}</Text>
+    );
   }
 
   const content = spans.map((span, i) => {
@@ -99,7 +116,13 @@ export const Ansi = React.memo(function Ansi({ children, dimColor }: Props): Rea
     );
   });
 
-  return dimColor ? <Text dim>{content}</Text> : <Text>{content}</Text>;
+  return dimColor ? (
+    <Text dim wrap={wrap}>
+      {content}
+    </Text>
+  ) : (
+    <Text wrap={wrap}>{content}</Text>
+  );
 });
 
 type Span = {

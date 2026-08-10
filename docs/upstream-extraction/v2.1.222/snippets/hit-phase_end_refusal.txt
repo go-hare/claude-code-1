@@ -1,0 +1,17 @@
+y:!0};if(Yt!==void 0)En=!0,yield{type:"refusal_continuation",phase:"begin",salvageText:Yt.text,join:"exact",replacesUuids:Yt.originals.map((on)=>on.uuid)};if(vn.showBanner&&!Aa)Po=ukd({...X,fromModel:Wo,toModel:Ki},{timestamp:f.now(),uuid:f.uuid()},vn.bannerScope)}}continue}if(X.type==="refusal_no_fallback"){if(Po!==void 0){let vn=yield*Bn();if(En)En=!1,Yt=void 0,yield{type:"refusal_continuation",phase:"end"};N("tengu_rotunda_pennant_chain_exhausted",{swept_dangling_count:vn,queryChainId:Ie,queryDepth:Ce.depth,querySource:qre(a)}),yield*ui()}if(yield*hi(),j)yield{type:"system",subtype:"model_r
+
+====HIT====
+
+eamingToolExecutor.addTool(li,vn)}if(Sr!==void 0){let vn=Sr;Sr=void 0;for(let Wo of vn)yield{type:"tombstone",message:Wo,displayOnly:!0}}yield*ot()}if(_y("query_api_streaming_end"),or&&!Jt){or=!1;let X=Gt===void 0;Gt=void 0,wr=void 0,N("tengu_convolute_arcades_retry_outcome",{outcome:ge(X?"merged":"no_text"),queryChainId:Ie,queryDepth:Ce.depth,querySource:FE(a)}),yield{type:"refusal_continuation",phase:"end"}}if(oo.length>0)yield*oo,oo.length=0;if(uo!==void 0&&(ut.at(-1)?.message.stop_reason??$e)==="refusal")yield*Bn();if(En)En=!1,Yt=void 0,yield{type:"refusal_continuation",phase:"end"};yield*
+
+====HIT====
+
+or&&!Jt){or=!1;let X=Gt===void 0;Gt=void 0,wr=void 0,N("tengu_convolute_arcades_retry_outcome",{outcome:ge(X?"merged":"no_text"),queryChainId:Ie,queryDepth:Ce.depth,querySource:FE(a)}),yield{type:"refusal_continuation",phase:"end"}}if(oo.length>0)yield*oo,oo.length=0;if(uo!==void 0&&(ut.at(-1)?.message.stop_reason??$e)==="refusal")yield*Bn();if(En)En=!1,Yt=void 0,yield{type:"refusal_continuation",phase:"end"};yield*ui();{let X=ut.at(-1),ke=X?zDe(X):void 0;if(ke){let at=VDe(ke);if(JUs({autocompactRan:tt,hasAttemptedReactiveCompact:ie,lastTransitionReason:h.transition?.reason,isPreFirstCompactFo
+
+====HIT====
+
++(ke.cache_read_input_tokens??0),Sr=kx(pe,sC(U.options.mainLoopModel))-Ne;QUs({querySource:a,messages:[...pe,...ut],cacheSafeParams:{systemPrompt:r,userContext:n,systemContext:o,toolUseContext:U,forkContextMessages:pe,stickyBetas:Z},armTrigger:"api_response",estimateGapTokens:Ht-Sr,...a==="sdk"&&{promptScan:bjs([...pe,...ut])}})}}}}catch(fs){if(En)En=!1,Yt=void 0,yield{type:"refusal_continuation",phase:"end"};if(yield*ui(),yield*hi(),oo.length>0)yield*oo,oo.length=0;if(or)or=!1,Gt=void 0,wr=void 0,N("tengu_convolute_arcades_retry_outcome",{outcome:Ae("error"),queryChainId:Ie,queryDepth:Ce.dept
+
+====HIT====
+
+e",estimateGapTokens:Ht-Sr,...a==="sdk"&&{promptScan:bjs([...pe,...ut])}})}}}}catch(fs){if(En)En=!1,Yt=void 0,yield{type:"refusal_continuation",phase:"end"};if(yield*ui(),yield*hi(),oo.length>0)yield*oo,oo.length=0;if(or)or=!1,Gt=void 0,wr=void 0,N("tengu_convolute_arcades_retry_outcome",{outcome:Ae("error"),queryChainId:Ie,queryDepth:Ce.depth,querySource:FE(a)}),yield{type:"refusal_continuation",phase:"end"};let $s=L[O+1];if(fs instanceof wK&&$s!==void 0){if(SIe())aXr();O++,M=void 0,Zt=Qxd(),W=void 0;let Kr=null,Vn=!1,As=!1,yi=!1;while(O<L.length){let wa=L[O],Rs=Xpr(wa,U.requestDialog);if(Rs)

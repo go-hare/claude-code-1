@@ -1,5 +1,9 @@
 import chokidar, { type FSWatcher } from 'chokidar'
 import { isAbsolute, join } from 'path'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
@@ -23,6 +27,65 @@ export function setEnvHookNotifier(
   cb: ((text: string, isError: boolean) => void) | null,
 ): void {
   notifyCallback = cb
+}
+
+/**
+ * densable J6n — strip Windows long-path / UNC long-path prefixes.
+ * Exported for pure unit tests (densable #14).
+ */
+export function stripWindowsLongPathPrefix(path: string): string {
+  if (path.startsWith('\\\\?\\UNC\\')) return `\\\\${path.slice(8)}`
+  if (path.startsWith('\\\\?\\') && path.length >= 7 && path[5] === ':') {
+    return path.slice(4)
+  }
+  return path
+}
+
+/**
+ * densable Hm — WSL UNC (`\\wsl$\\…` / `\\wsl.localhost\\…`) is local-ish; keep.
+ */
+export function isWslUncPath(path: string): boolean {
+  return /^[\\/]{2}wsl(\$|\.localhost)[\\/]/i.test(path)
+}
+
+/**
+ * densable ku — path begins with `//` or `\\`.
+ */
+export function isUncPath(path: string): boolean {
+  return /^[\\/]{2}/.test(path)
+}
+
+/**
+ * densable aHe — remote UNC / unsafe volume watch path to drop.
+ * densable FileChanged filters with `!aHe` before chokidar.watch.
+ */
+export function isRemoteUncWatchPath(path: string): boolean {
+  // densable D5l: volume device paths with `..` segments or mixed `/` are unsafe
+  const hasDotDotOrSlash = (p: string): boolean =>
+    /(^|[\\/])\.{1,2}([\\/]|$)/.test(p) || p.includes('/')
+
+  if (/^\\\\\?\\volume\{/i.test(path)) {
+    return hasDotDotOrSlash(path)
+  }
+  const stripped = stripWindowsLongPathPrefix(path)
+  if (stripped !== path && hasDotDotOrSlash(stripped)) {
+    return true
+  }
+  // densable: ku(t) && !Hm(t) — UNC that is not WSL
+  return isUncPath(stripped) && !isWslUncPath(stripped)
+}
+
+/**
+ * densable resolveWatchPaths filter — drop remote UNC, log once if any dropped.
+ */
+export function filterWatchableFileChangedPaths(paths: string[]): string[] {
+  const filtered = paths.filter(p => !isRemoteUncWatchPath(p))
+  if (filtered.length !== paths.length) {
+    logForDebugging('FileChanged: dropped remote UNC watch path(s)', {
+      level: 'warn',
+    })
+  }
+  return filtered
 }
 
 export function initializeFileChangedWatcher(cwd: string): void {
@@ -60,8 +123,10 @@ function resolveWatchPaths(
     }
   }
 
-  // Combine static matcher paths with dynamic paths from hook output
-  return [...new Set([...staticPaths, ...dynamicWatchPaths])]
+  // densable: unique + drop remote UNC (aHe)
+  return filterWatchableFileChangedPaths([
+    ...new Set([...staticPaths, ...dynamicWatchPaths]),
+  ])
 }
 
 function startWatching(paths: string[]): void {
@@ -75,6 +140,32 @@ function startWatching(paths: string[]): void {
   watcher.on('change', p => handleFileEvent(p, 'change'))
   watcher.on('add', p => handleFileEvent(p, 'add'))
   watcher.on('unlink', p => handleFileEvent(p, 'unlink'))
+  // densable #14: unhandled chokidar 'error' crashes process; first event only
+  // logs tengu_feature_bad / ok so FS errors during start don't double-count.
+  let startOutcomeLogged = false
+  watcher.on('error', (err: unknown) => {
+    if (!startOutcomeLogged) {
+      startOutcomeLogged = true
+      logEvent('tengu_feature_bad', {
+        feature_name:
+          'file_watcher_start' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'fs_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+    logForDebugging(`FileChanged: watcher error: ${errorMessage(err)}`, {
+      level: 'warn',
+    })
+  })
+  watcher.on('ready', () => {
+    if (!startOutcomeLogged) {
+      startOutcomeLogged = true
+      logEvent('tengu_feature_ok', {
+        feature_name:
+          'file_watcher_start' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+  })
 }
 
 function handleFileEvent(
@@ -84,6 +175,10 @@ function handleFileEvent(
   logForDebugging(`FileChanged: ${event} ${path}`)
   void executeFileChangedHooks(path, event)
     .then(({ results, watchPaths, systemMessages }) => {
+      logEvent('tengu_feature_ok', {
+        feature_name:
+          'file_watcher_change_detected' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
       if (watchPaths.length > 0) {
         updateWatchPaths(watchPaths)
       }
@@ -97,6 +192,12 @@ function handleFileEvent(
       }
     })
     .catch(e => {
+      logEvent('tengu_feature_bad', {
+        feature_name:
+          'file_watcher_change_detected' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'hook_exec_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
       const msg = errorMessage(e)
       logForDebugging(`FileChanged hook failed: ${msg}`, {
         level: 'error',
@@ -107,6 +208,7 @@ function handleFileEvent(
 
 export function updateWatchPaths(paths: string[]): void {
   if (!initialized) return
+  // densable: store pre-filter dynamic list; resolveWatchPaths re-filters
   const sorted = paths.slice().sort()
   if (
     sorted.length === dynamicWatchPathsSorted.length &&
@@ -120,9 +222,12 @@ export function updateWatchPaths(paths: string[]): void {
 }
 
 function restartWatching(): void {
-  if (watcher) {
-    void watcher.close()
-    watcher = null
+  // densable teardown: null watcher ref before close so concurrent error/close
+  // cannot double-close or race a fresh watcher.
+  const previous = watcher
+  watcher = null
+  if (previous) {
+    void previous.close()
   }
   const paths = resolveWatchPaths()
   if (paths.length > 0) {
@@ -175,9 +280,10 @@ export async function onCwdChangedForHooks(
 }
 
 function dispose(): void {
-  if (watcher) {
-    void watcher.close()
-    watcher = null
+  const previous = watcher
+  watcher = null
+  if (previous) {
+    void previous.close()
   }
   dynamicWatchPaths = []
   dynamicWatchPathsSorted = []

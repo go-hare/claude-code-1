@@ -288,6 +288,15 @@ export type HookInput =
       directory: string
       source: 'slash_command' | 'register_repo_root'
     })
+  // densable 2.1.222 MessageDisplay (wth/GCr)
+  | (HookInputBase & {
+      hook_event_name: 'MessageDisplay'
+      turn_id: string
+      message_id: string
+      index: number
+      final: boolean
+      delta: string
+    })
 
 export type AsyncHookJSONOutput = {
   async: true
@@ -353,6 +362,8 @@ export type SyncHookJSONOutput = {
     | { hookEventName: 'CwdChanged'; watchPaths?: string[] }
     | { hookEventName: 'FileChanged'; watchPaths?: string[] }
     | { hookEventName: 'WorktreeCreate'; worktreePath: string }
+    // densable 2.1.222 MessageDisplay
+    | { hookEventName: 'MessageDisplay'; displayContent?: string }
 }
 
 export type HookJSONOutput = AsyncHookJSONOutput | SyncHookJSONOutput
@@ -387,6 +398,15 @@ export type DirectoryAddedHookInput = HookInput & {
   hook_event_name: 'DirectoryAdded'
   directory: string
   source: 'slash_command' | 'register_repo_root'
+}
+/** densable 2.1.222 MessageDisplay */
+export type MessageDisplayHookInput = HookInput & {
+  hook_event_name: 'MessageDisplay'
+  turn_id: string
+  message_id: string
+  index: number
+  final: boolean
+  delta: string
 }
 
 // SDK Message types

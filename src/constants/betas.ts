@@ -29,6 +29,23 @@ export const ADVISOR_BETA_HEADER = 'advisor-tool-2026-03-01'
 /** Official mid-conversation-system-2026-04-07 — mid_conversation_system beta. */
 export const MID_CONVERSATION_SYSTEM_BETA_HEADER =
   'mid-conversation-system-2026-04-07'
+/**
+ * densable F4 / server_side_fallback — server-lane refusal fallbacks body field.
+ * Header: server-side-fallback-2026-06-01
+ */
+export const SERVER_SIDE_FALLBACK_BETA_HEADER =
+  'server-side-fallback-2026-06-01'
+/**
+ * densable hT / server_side_fallback_category — default-mode category fallbacks.
+ * Header: server-side-fallback-2026-07-01
+ */
+export const SERVER_SIDE_FALLBACK_CATEGORY_BETA_HEADER =
+  'server-side-fallback-2026-07-01'
+/**
+ * densable Z5 / fallback_credit — credit token stamp beta.
+ * Header: fallback-credit-2026-06-01
+ */
+export const FALLBACK_CREDIT_BETA_HEADER = 'fallback-credit-2026-06-01'
 
 /**
  * Bedrock only supports a limited number of beta headers and only through

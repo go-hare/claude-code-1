@@ -233,6 +233,10 @@ export async function* queryModelGrok(
               costUSD,
               usage as unknown as BetaUsage,
               options.model,
+              {
+                activeMcpServer: options.activeMcpServer,
+                activeMcpTool: options.activeMcpTool,
+              },
             )
           }
           break

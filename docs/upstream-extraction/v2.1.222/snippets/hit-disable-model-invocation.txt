@@ -1,0 +1,1 @@
+odel_invocation................Skill ..................r....................... cannot be used with ...............'... tool due to disable-model-invocation. .............e... .D.o. .n.o.t. .r.e.p.l.i.c.a.t.e. .t.h.i.s. .s.k.i.l.l.'.s. .w.o.r.k.f.l.o.w. .b.y. .o.t.h.e.r. .m.e.a.n.s. ..  .i.t. .i.s. .r.e.s.e.r.v.e.d. .f

@@ -42,10 +42,12 @@ import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import type { APIError } from '@anthropic-ai/sdk'
 import type {
+  AssistantMessage,
   Message,
   MessageOrigin,
   SystemCompactBoundaryMessage,
 } from './types/message.js'
+import { transformCompletedAssistantMessage } from './utils/messageDisplayTransform.js'
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
 import type { AttributionState } from './utils/commitAttribution.js'
@@ -746,6 +748,8 @@ export class QueryEngine {
     // Official 2.1: cumulative thinking_delta.estimated_tokens per message
     let thinkingTokenEstimate = 0
     let turnCount = 1
+    // densable Yo — per-ask turn id for Tth MessageDisplay hooks
+    const messageDisplayTurnId = randomUUID()
     let hasAcknowledgedInitialMessages = false
     // Track structured output from StructuredOutput tool calls
     let structuredOutputFromTool: unknown
@@ -862,7 +866,23 @@ export class QueryEngine {
             lastStopReason = stopReason
           }
           this.mutableMessages.push(msg)
-          yield* normalizeMessage(msg)
+          // densable Tth — SDK completed-message MessageDisplay (Ath→ilr→GCr)
+          // after mutableMessages.push, yield transformed when different.
+          let yieldMsg = msg
+          try {
+            const transformed = await transformCompletedAssistantMessage(
+              msg as AssistantMessage,
+              messageDisplayTurnId,
+              getAppState,
+              this.abortController.signal,
+            )
+            if (transformed !== msg) {
+              yieldMsg = transformed as Message
+            }
+          } catch {
+            // densable Tth optional on failure — emit original
+          }
+          yield* normalizeMessage(yieldMsg)
           break
         }
         case 'progress': {

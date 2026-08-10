@@ -459,6 +459,12 @@ export function createCronScheduler(
         nextFireAt.clear()
       }
     })
+    // densable #14: unhandled chokidar 'error' can crash process
+    watcher.on('error', (err: unknown) => {
+      logForDebugging(`[ScheduledTasks] watcher error: ${err}`, {
+        level: 'warn',
+      })
+    })
 
     checkTimer = setInterval(check, CHECK_INTERVAL_MS)
     // Don't keep the process alive for the scheduler alone — in -p text mode

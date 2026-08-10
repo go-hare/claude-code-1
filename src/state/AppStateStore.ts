@@ -190,6 +190,11 @@ export type AppState = DeepImmutable<{
    * alone does not re-render when async storeImage finishes; AppState does.
    */
   storedImagePaths: Map<number, string>
+  /**
+   * densable displayedMessageContent — api message id → MessageDisplay
+   * transformed text for first text block (SFa when !verbose).
+   */
+  displayedMessageContent: { [apiMessageId: string]: string }
   // Task ID that has been foregrounded - its messages are shown in main view
   foregroundedTaskId?: string
   // Task ID of in-process teammate whose transcript is being viewed (undefined = leader's view)
@@ -535,6 +540,7 @@ export function getDefaultAppState(): AppState {
     taskDecorations: {},
     agentNameRegistry: new Map(),
     storedImagePaths: new Map(),
+    displayedMessageContent: {},
     verbose: false,
     mainLoopModel: null, // alias, full name (as with --model or env var), or null (default)
     mainLoopModelForSession: null,

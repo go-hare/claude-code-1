@@ -56,6 +56,8 @@ export type Styles = {
   readonly textWrap?:
     | 'wrap'
     | 'wrap-trim'
+    /** densable wrap-stream: soft-wrap like wrap but hide the incomplete last visual line */
+    | 'wrap-stream'
     | 'end'
     | 'middle'
     | 'truncate-end'

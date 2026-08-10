@@ -19,6 +19,11 @@ export type ExtraUsage = {
   monthly_limit: number | null
   used_credits: number | null
   utilization: number | null
+  /**
+   * densable BTr switch arm — when set, /usage-credits surfaces early message
+   * instead of admin-request confirm (2.1.222).
+   */
+  disabled_reason?: string | null
 }
 
 export type Utilization = {

@@ -1,0 +1,70 @@
+# densable 2.1.222 #1 — Qgt / dun / VRu / ZRu session-aware isolation
+
+## Qgt (isolationRoot)
+```
+function Qgt(e){
+  let t=e.agentWorktree;
+  if(t!==void 0&&t!=="")return t;
+  let r=Fg()?.worktreePath;
+  return r!==void 0&&r!==""?r:void 0
+}
+```
+
+## dun (session vs agent noun)
+```
+function dun(e){
+  return Fg()?.worktreePath===e
+    ? {noun:"This session", possessive:"a worktree-isolated session's"}
+    : {noun:"This agent", possessive:"a worktree-isolated agent's"}
+}
+```
+
+## VRu / hSd (cwd escape)
+```
+let{noun:n,possessive:o}=dun(t);
+return `${n} is isolated in the worktree ${t}, but this command's working directory resolved to the shared checkout (${e}). Refusing to run it there — ${o} commands must run inside its worktree. Re-run the command from ${t}.…`
+```
+
+## ZRu / QEd (git redirect)
+```
+function QEd(e,t,r){
+  let{noun:n,possessive:o}=dun(r),
+  i=(h)=>`${n} is isolated in the worktree ${r}, but this command ${h}. Refusing to run it — ${o} git operations must target its own worktree. Run the equivalent from ${r} without the redirect.`;
+  …
+}
+```
+
+## Shell p4e gate
+```
+let k=f??p;  // isolationRoot ?? agentWorktree
+if(k){
+  let ne=hSd(C,k); // VRu
+  …
+  let le=r==="bash"?QEd(R=await VKe(e),C,k):null; // ZRu bash only
+}
+// context_lost / worktree_gone still require p (agentWorktree)
+```
+
+## hsr / Vyr write fence
+```
+function Vyr(e,t){
+  let r=Qgt(t);
+  if(r){
+    let a=bRo(e,r);
+    if(!a.escaped)return null;
+    …
+    let{noun:c}=dun(r);
+    return `${c} is isolated in the worktree ${r}. Edit the worktree copy of this file instead of the shared-checkout path.…`
+  }
+  // pre-isolation bg path …
+}
+```
+
+## go-hare mapping
+- Qgt → `resolveIsolationRoot`
+- dun → `isolationSubject`
+- bRo/qRu → `qRu` (session-aware seed roots)
+- hSd → `checkAgentWorktreeCwdEscape`
+- QEd → `checkZRuGitRedirect` + `isolationSubject`
+- Vyr/hsr → `checkBgIsolationWriteBlock` / `checkWorktreeIsolationWrite`
+- Shell k=f??p → `isolationRoot = isolationRootOpt ?? agentWorktree ?? resolveIsolationRoot(...)`

@@ -345,21 +345,34 @@ function wrapWithSoftWrap(
   maxWidth: number,
   textWrap: Parameters<typeof wrapText>[2],
 ): { wrapped: string; softWrap: boolean[] | undefined } {
-  if (textWrap !== 'wrap' && textWrap !== 'wrap-trim') {
+  // densable dtd: wrap-stream uses wrap path then drops the incomplete last visual line
+  const isStream = textWrap === 'wrap-stream'
+  if (textWrap !== 'wrap' && textWrap !== 'wrap-trim' && !isStream) {
     return {
       wrapped: wrapText(plainText, maxWidth, textWrap),
       softWrap: undefined,
     }
   }
-  const origLines = plainText.split('\n')
+  const wrapMode = isStream ? 'wrap' : textWrap
+  const origLines = plainText.replace(/\r\n?/g, '\n').split('\n')
   const outLines: string[] = []
   const softWrap: boolean[] = []
   for (const orig of origLines) {
-    const pieces = wrapText(orig, maxWidth, textWrap).split('\n')
+    const pieces = wrapText(orig, maxWidth, wrapMode).split('\n')
     for (let i = 0; i < pieces.length; i++) {
-      outLines.push(pieces[i]!)
+      let piece = pieces[i]!
+      // densable: soft-wrap continuations may elide a leading space
+      if (i > 0 && piece.startsWith(' ')) {
+        const without = piece.slice(1)
+        piece = without.length > 0 ? without : piece
+      }
+      outLines.push(piece)
       softWrap.push(i > 0)
     }
+  }
+  if (isStream) {
+    outLines.pop()
+    softWrap.pop()
   }
   return { wrapped: outLines.join('\n'), softWrap }
 }
@@ -585,8 +598,9 @@ function renderNodeToOutput(
         const maxWidth = Math.min(getMaxWidth(yogaNode), output.width - x)
         const textWrap = node.style.textWrap ?? 'wrap'
 
-        // Check if wrapping is needed
-        const needsWrapping = widestLine(plainText) > maxWidth
+        // densable: wrap-stream always runs the wrap path (hide incomplete last line)
+        const needsWrapping =
+          textWrap === 'wrap-stream' || widestLine(plainText) > maxWidth
 
         let text: string
         let softWrap: boolean[] | undefined

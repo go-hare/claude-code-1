@@ -103,6 +103,7 @@ import type {
   PermissionRequestHookInput,
   ElicitationHookInput,
   ElicitationResultHookInput,
+  MessageDisplayHookInput,
   PermissionUpdate,
   ExitReason,
   SyncHookJSONOutput,
@@ -360,6 +361,8 @@ export interface HookResult {
   watchPaths?: string[]
   elicitationResultResponse?: ElicitationResponse
   retry?: boolean
+  /** densable 2.1.222 MessageDisplay */
+  displayContent?: string
   hook: HookCommand | HookCallback | FunctionHook
 }
 
@@ -383,6 +386,8 @@ export type AggregatedHookResult = {
   elicitationResponse?: ElicitationResponse // Elicitation 钩子的交互/采集结果（MCP elicit 流程）
   elicitationResultResponse?: ElicitationResponse // ElicitationResult 钩子对上一轮引导的后续响应数据
   retry?: boolean // PermissionDenied 等场景是否建议用户重试当前操作
+  /** densable 2.1.222 MessageDisplay — hookSpecificOutput.displayContent */
+  displayContent?: string
 }
 
 /**
@@ -576,6 +581,10 @@ interface TypedSyncHookOutput {
     | {
         hookEventName: 'WorktreeCreate'
         worktreePath: string
+      }
+    | {
+        hookEventName: 'MessageDisplay'
+        displayContent?: string
       }
 }
 
@@ -803,6 +812,12 @@ function processHookJSONOutput({
               command,
             }
           }
+        }
+        break
+      // densable 2.1.222 MessageDisplay — displayContent replaces streaming chunk
+      case 'MessageDisplay':
+        if (json.hookSpecificOutput.displayContent !== undefined) {
+          result.displayContent = json.hookSpecificOutput.displayContent
         }
         break
     }
@@ -1855,7 +1870,11 @@ function getHooksConfig(
  * and getMatchingHooks on hot paths where hooks are typically unconfigured.
  * See hasInstructionsLoadedHook / hasWorktreeCreateHook for the same pattern.
  */
-function hasHookForEvent(
+/**
+ * densable s3 — cheap presence check before hot-path createBaseHookInput.
+ * Exported for MessageDisplay transform (wth) begin() gate.
+ */
+export function hasHookForEvent(
   hookEvent: HookEvent,
   appState: AppState | undefined,
   sessionId: string,
@@ -2248,6 +2267,7 @@ async function* executeHooks({
   toolUseContext,
   messages,
   forceSyncExecution,
+  suppressPerInvocationTelemetry,
   requestPrompt,
   toolInputSummary,
 }: {
@@ -2259,6 +2279,11 @@ async function* executeHooks({
   toolUseContext?: ToolUseContext
   messages?: Message[]
   forceSyncExecution?: boolean
+  /**
+   * densable suppressPerInvocationTelemetry — when true, skip tengu_run_hook
+   * per-invocation telemetry (MessageDisplay streaming hot path).
+   */
+  suppressPerInvocationTelemetry?: boolean
   requestPrompt?: (
     sourceName: string,
     toolInputSummary?: string | null,
@@ -2308,21 +2333,24 @@ async function* executeHooks({
 
   const userHooks = matchingHooks.filter(h => !isInternalHook(h))
   if (userHooks.length > 0) {
-    const pluginHookCounts = getPluginHookCounts(userHooks)
-    const hookTypeCounts = getHookTypeCounts(userHooks)
-    logEvent(`tengu_run_hook`, {
-      hookName:
-        hookName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      numCommands: userHooks.length,
-      hookTypeCounts: jsonStringify(
-        hookTypeCounts,
-      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      ...(pluginHookCounts && {
-        pluginHookCounts: jsonStringify(
-          pluginHookCounts,
+    // densable: if (!suppressPerInvocationTelemetry) N("tengu_run_hook", ...)
+    if (!suppressPerInvocationTelemetry) {
+      const pluginHookCounts = getPluginHookCounts(userHooks)
+      const hookTypeCounts = getHookTypeCounts(userHooks)
+      logEvent(`tengu_run_hook`, {
+        hookName:
+          hookName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        numCommands: userHooks.length,
+        hookTypeCounts: jsonStringify(
+          hookTypeCounts,
         ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      }),
-    })
+        ...(pluginHookCounts && {
+          pluginHookCounts: jsonStringify(
+            pluginHookCounts,
+          ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+      })
+    }
   } else {
     // Fast-path: all hooks are internal callbacks (sessionFileAccessHooks,
     // attributionHooks). These return {} and don't use the abort signal, so we
@@ -3092,6 +3120,13 @@ async function* executeHooks({
       )
       yield {
         additionalContexts: [result.additionalContext],
+      }
+    }
+
+    // densable 2.1.222 MessageDisplay — yield displayContent for wth transform
+    if (result.displayContent !== undefined) {
+      yield {
+        displayContent: result.displayContent,
       }
     }
 
@@ -4684,6 +4719,45 @@ export async function executeDirectoryAddedHooks(
     .map(r => r.systemMessage)
     .filter((m): m is string => !!m)
   return { results, systemMessages }
+}
+
+/**
+ * densable GCr — MessageDisplay hook flush generator.
+ * forceSyncExecution + suppressPerInvocationTelemetry for streaming hot path.
+ */
+export async function* executeMessageDisplayHooks(
+  params: {
+    turnId: string
+    messageId: string
+    index: number
+    final: boolean
+    delta: string
+  },
+  getAppState: () => AppState,
+  signal?: AbortSignal,
+  timeoutMs: number = 10_000,
+): AsyncGenerator<AggregatedHookResult> {
+  const hookInput: MessageDisplayHookInput = {
+    ...createBaseHookInput(undefined),
+    hook_event_name: 'MessageDisplay',
+    turn_id: params.turnId,
+    message_id: params.messageId,
+    index: params.index,
+    final: params.final,
+    delta: params.delta,
+  }
+  yield* executeHooks({
+    hookInput,
+    toolUseID: `${params.messageId}-${params.index}`,
+    signal,
+    timeoutMs,
+    forceSyncExecution: true,
+    // densable suppressPerInvocationTelemetry — keep stream path quiet
+    suppressPerInvocationTelemetry: true,
+    toolUseContext: {
+      getAppState,
+    } as ToolUseContext,
+  })
 }
 
 export type InstructionsLoadReason =

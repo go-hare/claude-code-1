@@ -1,0 +1,64 @@
+# densable 2.1.222 #8 — org-restricted model:opus family step-down
+# SEA: coe / a$ / K7r / Idp / $eb / Rdp
+
+## Product rule
+Org-restricted `model: opus`-style subagent/teammate family aliases must step
+down to the newest org-allowed model in the family, NOT drop to the parent model.
+
+## coe (getAgentModel core)
+function Neb(){return"inherit"}
+function coe(e,t,r,n,o){
+  let i=()=>HO({permissionMode:n??"default",mainLoopModel:t,exceeds200kTokens:!1}),
+  s=(p,f,m=p)=>{
+    let h=a$(p);           // stepDownRestrictedFamilyAliasPick
+    $eb(p,h!==null);       // warn
+    let g=h!==null?f?ZJs(SP(h)):h:i();  // family step-down or parent inherit
+    ...
+    return g
+  };
+  // env CLAUDE_CODE_SUBAGENT_MODEL
+  // toolSpecifiedModel r → Idp match parent? return t : resolve + uc check
+  // agentModel e → same
+  if(Idp(r,t))return t;  // only when resolved path is allowlisted (caller guards)
+  let p=c(ZJs($i(r)),r);if(!uc(p))return s(r,!0,p);return p
+}
+
+## a$ = stepDownRestrictedFamilyAliasPick
+function a$(e){
+  let t=e.trim().toLowerCase(),r=ba(t).trim();
+  if(!NG(r)||!Vm())return null;  // NG = isModelFamilyAlias
+  if(!(Ls()||{}).availableModels&&n.size===0)return null;
+  let o=K7r(r);
+  if(o===null||!(j4(o)??uc(o))||O9(o,n))return null;
+  if(r===t)return o;
+  return ... `${o}[1m]` : o
+}
+
+## K7r = newestAllowedModelInFamily
+function K7r(e){
+  let t=Object.keys(yc);  // ALL_MODEL_CONFIGS
+  for(let r=t.length-1;r>=0;r--){
+    let n=yc[t[r]].firstParty;
+    if(Lts(ao(n),e)&&uc(n)&&!xsr(n)&&!XKc(n))return n
+  }
+  return null
+}
+
+## Idp = aliasMatchesParentTier (+ fable)
+function Idp(e,t){
+  let r=ao(t);
+  switch(e.toLowerCase()){
+    case"fable":return r.includes("fable");
+    case"opus":return r.includes("opus");
+    case"sonnet":return r.includes("sonnet");
+    case"haiku":return r.includes("haiku");
+    default:return!1
+  }
+}
+
+## $eb warn
+Subagent model "${e}" is not in the availableModels allowlist;
+  ${t?"using the newest allowed model in its family":"inheriting the parent model"} instead
+
+## Telemetry
+family_step_down / family_alias_stepped_down / parent_inherit / override_dropped

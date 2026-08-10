@@ -330,6 +330,7 @@ import {
   setIsInteractive,
   setKairosActive,
   setOriginalCwd,
+  setParentManagedSettings,
   setQuestionPreviewFormat,
   setSessionBypassPermissionsMode,
   setSessionSource,
@@ -728,6 +729,21 @@ function loadSettingSourcesFromFlag(settingSourcesArg: string): void {
 }
 
 /**
+ * densable Slv / rNi — `--managed-settings <json>` parent tier for SDK hosts.
+ * Invalid JSON is warned and ignored (does not exit).
+ */
+function loadManagedSettingsFromFlag(managedSettingsArg: string): void {
+  const parsed = safeParseJSON(managedSettingsArg.trim());
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    logForDebugging('--managed-settings ignored: invalid JSON object', {
+      level: 'warn',
+    });
+    return;
+  }
+  setParentManagedSettings(parsed as Record<string, unknown>);
+}
+
+/**
  * Parse and load settings flags early, before init()
  * This ensures settings are filtered from the start of initialization
  */
@@ -737,6 +753,12 @@ function eagerLoadSettings(): void {
   const settingsFile = eagerParseCliFlag('--settings');
   if (settingsFile) {
     loadSettingsFromFlag(settingsFile);
+  }
+
+  // densable --managed-settings (parent managed settings / host model overlay)
+  const managedSettingsArg = eagerParseCliFlag('--managed-settings');
+  if (managedSettingsArg !== undefined) {
+    loadManagedSettingsFromFlag(managedSettingsArg);
   }
 
   // Parse --setting-sources flag early to control which sources are loaded
@@ -1547,6 +1569,7 @@ async function run(): Promise<CommanderCommand> {
       '--settings <file-or-json>',
       'Path to a settings JSON file or a JSON string to load additional settings from',
     )
+    .option('--managed-settings <json>', 'Policy-tier settings JSON from a spawning parent process (SDK use only)')
     .option('--add-dir <directories...>', 'Additional directories to allow tool access to')
     .option('--ide', 'Automatically connect to IDE on startup if exactly one valid IDE is available', () => true)
     .option(
@@ -3811,6 +3834,8 @@ async function run(): Promise<CommanderCommand> {
         agentNameRegistry: new Map(),
         // densable storedImagePaths — [Image #N] click-to-open file paths
         storedImagePaths: new Map(),
+        // densable displayedMessageContent — MessageDisplay SFa map (SFa when !verbose)
+        displayedMessageContent: {},
         verbose: verbose ?? getGlobalConfig().verbose ?? false,
         mainLoopModel: initialMainLoopModel,
         mainLoopModelForSession: null,

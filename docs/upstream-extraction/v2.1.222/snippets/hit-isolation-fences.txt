@@ -1,0 +1,1 @@
+ this agent right now: its worktree ......................., and the fallback directory is not covered by the session's isolation fences. Re-run from a session whose fences cover the agent's directory...............+...This agent cannot be resumed: its worktree .................N..., and the fallback directory is not c

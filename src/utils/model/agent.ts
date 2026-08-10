@@ -1,4 +1,5 @@
 import type { PermissionMode } from '../permissions/PermissionMode.js'
+import { logForDebugging } from '../debug.js'
 import { capitalize } from '../stringUtils.js'
 import { MODEL_ALIASES, type ModelAlias } from './aliases.js'
 import { applyBedrockRegionPrefix, getBedrockRegionPrefix } from './bedrock.js'
@@ -7,6 +8,10 @@ import {
   getRuntimeMainLoopModel,
   parseUserSpecifiedModel,
 } from './model.js'
+import {
+  isModelAllowed,
+  stepDownRestrictedFamilyAliasPick,
+} from './modelAllowlist.js'
 import { getAPIProvider } from './providers.js'
 
 export const AGENT_MODEL_OPTIONS = [...MODEL_ALIASES, 'inherit'] as const
@@ -27,12 +32,85 @@ export function getDefaultSubagentModel(): string {
 }
 
 /**
+ * densable Idp — bare family alias matches parent model tier.
+ * When true and the resolved model is allowlisted, subagent keeps parent exact
+ * string (no surprising downgrade). densable 2.1.222 #8: when the resolved
+ * family default is NOT allowlisted, step down to newest org-allowed in family
+ * instead of dropping to parent.
+ */
+export function aliasMatchesParentTier(
+  alias: string,
+  parentModel: string,
+): boolean {
+  const canonical = getCanonicalName(parentModel)
+  switch (alias.toLowerCase()) {
+    case 'fable':
+      return canonical.includes('fable')
+    case 'opus':
+      return canonical.includes('opus')
+    case 'sonnet':
+      return canonical.includes('sonnet')
+    case 'haiku':
+      return canonical.includes('haiku')
+    default:
+      return false
+  }
+}
+
+/**
+ * densable $eb — warn when subagent model is not on availableModels.
+ */
+function warnSubagentModelNotAllowed(
+  requested: string,
+  usedFamilyStepDown: boolean,
+): void {
+  logForDebugging(
+    `Subagent model "${requested}" is not in the availableModels allowlist; ${
+      usedFamilyStepDown
+        ? 'using the newest allowed model in its family'
+        : 'inheriting the parent model'
+    } instead`,
+    { level: 'warn' },
+  )
+}
+
+/**
+ * densable s() inside coe — when resolved model fails isModelAllowed:
+ * try a$(family step-down); else inherit parent (runtime).
+ */
+function resolveWhenNotAllowed(
+  requestedSpec: string,
+  parentModel: string,
+  permissionMode: PermissionMode | undefined,
+): string {
+  const stepped = stepDownRestrictedFamilyAliasPick(requestedSpec)
+  const usedFamily = stepped !== null
+  warnSubagentModelNotAllowed(requestedSpec, usedFamily)
+
+  if (usedFamily && stepped !== null) {
+    return stepped
+  }
+
+  // densable: h!==null ? … : i() — no step-down → parent inherit
+  return getRuntimeMainLoopModel({
+    permissionMode: permissionMode ?? 'default',
+    mainLoopModel: parentModel,
+    exceeds200kTokens: false,
+  })
+}
+
+/**
  * Get the effective model string for an agent.
+ *
+ * densable coe/Rdp (2.1.222 #8):
+ * - CLAUDE_CODE_SUBAGENT_MODEL env (if set and not inherit)
+ * - tool-specified model
+ * - agent frontmatter model (default inherit)
+ * - bare family alias matching parent → parent exact IF allowlisted
+ * - else resolve alias; if not allowlisted → newest in family (a$) else parent
  *
  * For Bedrock, if the parent model uses a cross-region inference prefix (e.g., "eu.", "us."),
  * that prefix is inherited by subagents using alias models (e.g., "sonnet", "haiku", "opus").
- * This ensures subagents use the same region as the parent, which is necessary when
- * IAM permissions are scoped to specific cross-region inference profiles.
  */
 export function getAgentModel(
   agentModel: string | undefined,
@@ -41,20 +119,19 @@ export function getAgentModel(
   permissionMode?: PermissionMode,
 ): string {
   if (process.env.CLAUDE_CODE_SUBAGENT_MODEL) {
-    return parseUserSpecifiedModel(process.env.CLAUDE_CODE_SUBAGENT_MODEL)
+    const envSpec = process.env.CLAUDE_CODE_SUBAGENT_MODEL
+    if (envSpec !== 'inherit') {
+      const resolved = parseUserSpecifiedModel(envSpec)
+      if (!isModelAllowed(resolved)) {
+        return resolveWhenNotAllowed(envSpec, parentModel, permissionMode)
+      }
+      return resolved
+    }
   }
 
   // Extract Bedrock region prefix from parent model to inherit for subagents.
-  // This ensures subagents use the same cross-region inference profile (e.g., "eu.", "us.")
-  // as the parent, which is required when IAM permissions only allow specific regions.
   const parentRegionPrefix = getBedrockRegionPrefix(parentModel)
 
-  // Helper to apply parent region prefix for Bedrock models.
-  // `originalSpec` is the raw model string before resolution (alias or full ID).
-  // If the user explicitly specified a full model ID that already carries its own
-  // region prefix (e.g., "eu.anthropic.…"), we preserve it instead of overwriting
-  // with the parent's prefix. This prevents silent data-residency violations when
-  // an agent config intentionally pins to a different region than the parent.
   const applyParentRegionPrefix = (
     resolvedModel: string,
     originalSpec: string,
@@ -66,59 +143,47 @@ export function getAgentModel(
     return resolvedModel
   }
 
+  const resolveSpec = (spec: string): string => {
+    if (spec === 'inherit') {
+      return getRuntimeMainLoopModel({
+        permissionMode: permissionMode ?? 'default',
+        mainLoopModel: parentModel,
+        exceeds200kTokens: false,
+      })
+    }
+
+    // densable Idp: family matches parent → return parent only when allowed
+    // (222 #8: if resolved default not allowed, step down in family)
+    if (aliasMatchesParentTier(spec, parentModel)) {
+      const resolvedAsDefault = parseUserSpecifiedModel(spec)
+      if (isModelAllowed(resolvedAsDefault)) {
+        return parentModel
+      }
+      // Parent tier match but org blocks default → family step-down
+      return applyParentRegionPrefix(
+        resolveWhenNotAllowed(spec, parentModel, permissionMode),
+        spec,
+      )
+    }
+
+    const model = parseUserSpecifiedModel(spec)
+    const withRegion = applyParentRegionPrefix(model, spec)
+    if (!isModelAllowed(withRegion)) {
+      return applyParentRegionPrefix(
+        resolveWhenNotAllowed(spec, parentModel, permissionMode),
+        spec,
+      )
+    }
+    return withRegion
+  }
+
   // Prioritize tool-specified model if provided
   if (toolSpecifiedModel) {
-    if (aliasMatchesParentTier(toolSpecifiedModel, parentModel)) {
-      return parentModel
-    }
-    const model = parseUserSpecifiedModel(toolSpecifiedModel)
-    return applyParentRegionPrefix(model, toolSpecifiedModel)
+    return resolveSpec(toolSpecifiedModel)
   }
 
   const agentModelWithExp = agentModel ?? getDefaultSubagentModel()
-
-  if (agentModelWithExp === 'inherit') {
-    // Apply runtime model resolution for inherit to get the effective model
-    // This ensures agents using 'inherit' get opusplan→Opus resolution in plan mode
-    return getRuntimeMainLoopModel({
-      permissionMode: permissionMode ?? 'default',
-      mainLoopModel: parentModel,
-      exceeds200kTokens: false,
-    })
-  }
-
-  if (aliasMatchesParentTier(agentModelWithExp, parentModel)) {
-    return parentModel
-  }
-  const model = parseUserSpecifiedModel(agentModelWithExp)
-  return applyParentRegionPrefix(model, agentModelWithExp)
-}
-
-/**
- * Check if a bare family alias (opus/sonnet/haiku) matches the parent model's
- * tier. When it does, the subagent inherits the parent's exact model string
- * instead of resolving the alias to a provider default.
- *
- * Prevents surprising downgrades: a Vertex user on Opus 4.6 (via /model) who
- * spawns a subagent with `model: opus` should get Opus 4.6, not whatever
- * getDefaultOpusModel() returns for 3P.
- * See https://github.com/anthropics/claude-code/issues/30815.
- *
- * Only bare family aliases match. `opus[1m]`, `best`, `opusplan` fall through
- * since they carry semantics beyond "same tier as parent".
- */
-function aliasMatchesParentTier(alias: string, parentModel: string): boolean {
-  const canonical = getCanonicalName(parentModel)
-  switch (alias.toLowerCase()) {
-    case 'opus':
-      return canonical.includes('opus')
-    case 'sonnet':
-      return canonical.includes('sonnet')
-    case 'haiku':
-      return canonical.includes('haiku')
-    default:
-      return false
-  }
+  return resolveSpec(agentModelWithExp)
 }
 
 export function getAgentModelDisplay(model: string | undefined): string {

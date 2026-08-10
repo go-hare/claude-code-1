@@ -200,12 +200,21 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
         handleMessageFromStream(
           message,
           () => {}, // onMessage - we handle messages below
-          newContent =>
-            toolUseContext.setResponseLength(
-              length => length + newContent.length,
-            ),
+          // densable qQs: onUpdateLength is char-count delta
+          deltaChars =>
+            toolUseContext.setResponseLength(length => length + deltaChars),
           toolUseContext.setStreamMode ?? (() => {}),
           () => {}, // onStreamingToolUses - not needed for hooks
+          undefined, // onTombstone
+          undefined, // onStreamingThinking
+          undefined, // onApiMetrics
+          undefined, // onStreamingText
+          undefined, // displayTransform
+          // densable yEt onRefusalContinuation — hook agent has no UI salvage
+          () => {},
+          undefined, // streamContext
+          // densable yEt control bus — drop control events safely (not onMessage)
+          {},
         )
 
         // Skip streaming events for further processing

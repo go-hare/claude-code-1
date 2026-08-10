@@ -1222,6 +1222,50 @@ async function* queryLoop(
     }
 
     let attemptWithFallback = true
+    // densable En — refusal_continuation begin active until end / land
+    let refusalContinuationActive = false
+    // densable Gt — silent stitch buffer pending (blocks server_fallback seam Yt)
+    let silentStitchPending = false
+    // densable Gt text — soft-join prefix for Cjs land
+    let silentStitchText: string | undefined
+    // densable Yt — exact-join salvage package (server_fallback midStream seam)
+    let exactSalvagePackage:
+      | {
+          text: string
+          originals: readonly { uuid?: string }[]
+        }
+      | undefined
+    // densable R — client_retry supersedes uuids applied on next assistant yield
+    let clientRetrySupersedesUuids: string[] | undefined
+    // densable or — convolute_arcades silent-retry arm for multi-exit telemetry
+    let convoluteArcadesRetryActive = false
+    // densable wr — DRd meta user message for silent-stitch salvage
+    let partialResponseMetaMessage: Message | undefined
+    // densable kr/og — fallback credit token for next request stamp
+    let pendingFallbackCreditCode: string | undefined
+    // densable vu — model that minted the credit (original refusing model)
+    let pendingFallbackCreditMintModel: string | undefined
+
+    // densable 2.1.222 #6 — Br/To capture + ARd clear once per query API loop
+    // (main/subagent only). Stamps set by MCP tool call; cost attrs only for
+    // this request, then cleared so later turns don't sticky-overattribute.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {
+      captureAndClearActiveMcpAttribution,
+      clearActiveMcpStamps,
+      shouldAttributeMcpUsage,
+    } =
+      require('./utils/mcpUsageAttribution.js') as typeof import('./utils/mcpUsageAttribution.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getQuerySourceFamily: getQuerySourceFamilyForMcp } =
+      require('./utils/observerAgents.js') as typeof import('./utils/observerAgents.js')
+    const attributeMcpUsage = shouldAttributeMcpUsage(
+      getQuerySourceFamilyForMcp(querySource),
+    )
+    const capturedMcpAttribution = captureAndClearActiveMcpAttribution(
+      toolUseContext.options,
+      attributeMcpUsage,
+    )
 
     queryCheckpoint('query_api_loop_start')
     try {
@@ -1230,8 +1274,19 @@ async function* queryLoop(
         try {
           let streamingFallbackOccured = false
           queryCheckpoint('query_api_streaming_start')
+          // densable: messages = kRd(wr!==void 0 ? [...pe,wr] : pe, n)
+          const callMessages =
+            partialResponseMetaMessage !== undefined
+              ? [...messagesForQuery, partialResponseMetaMessage]
+              : messagesForQuery
+          // consume credit stamp for this attempt only (re-arm on next hop)
+          const creditCodeForAttempt = pendingFallbackCreditCode
+          const creditMintModelForAttempt = pendingFallbackCreditMintModel
+          // densable clears kr after pass; re-set if hop yields new token
+          pendingFallbackCreditCode = undefined
+          pendingFallbackCreditMintModel = undefined
           for await (const message of deps.callModel({
-            messages: prependUserContext(messagesForQuery, userContext),
+            messages: prependUserContext(callMessages, userContext),
             systemPrompt: fullSystemPrompt,
             thinkingConfig: layeredThinkingConfig,
             tools: toolUseContext.options.tools,
@@ -1262,12 +1317,16 @@ async function* queryLoop(
                     require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
                   if (!isRefusalFallbackEnabled()) return {}
                   const isMainThread = toolUseContext.agentId === undefined
+                  // densable lkd: serverLane via dkd() (vK && switchModelsOnFlag && Cae)
+                  // when serverLaneEnabled omitted. Do not hardcode true —
+                  // firstParty + official base required (Cae).
                   const arm = planRefusalFallbackArm({
                     currentModel,
                     alreadyUsed: false,
                     declined: false,
                     requestDialog: toolUseContext.requestDialog,
                     isMainThread,
+                    switchModelsOnFlag: true,
                     resolveArmedFallbackModel: () => {
                       // densable y$c arm → _$c: when entitlement overlay is
                       // unavailable and target is opus-5, substitute opus-4-8.
@@ -1296,12 +1355,36 @@ async function* queryLoop(
                     silentRearmModel: silentRearm,
                     serverLane: arm.serverLane,
                   })
-                  if (!resolved.refusalFallbackModel) return {}
+                  // densable: pass serverRefusalFallback even when visible
+                  // client model is deferred (Ks = la===void 0 ? visible : void 0)
+                  if (
+                    !resolved.refusalFallbackModel &&
+                    !resolved.serverRefusalFallback &&
+                    creditCodeForAttempt === undefined
+                  ) {
+                    return {}
+                  }
                   return {
-                    refusalFallbackModel: resolved.refusalFallbackModel,
-                    refusalFallbackModelLane: resolved.refusalFallbackModelLane,
-                    refusalFallbackSilentArmActive:
-                      resolved.refusalFallbackSilentArmActive,
+                    ...(resolved.refusalFallbackModel !== undefined && {
+                      refusalFallbackModel: resolved.refusalFallbackModel,
+                      refusalFallbackModelLane:
+                        resolved.refusalFallbackModelLane,
+                      refusalFallbackSilentArmActive:
+                        resolved.refusalFallbackSilentArmActive,
+                    }),
+                    ...(resolved.serverRefusalFallback !== undefined && {
+                      serverRefusalFallback: resolved.serverRefusalFallback,
+                    }),
+                    // densable fallbackCreditCode/Mint + laneArmed
+                    ...(creditCodeForAttempt !== undefined && {
+                      fallbackCreditCode: creditCodeForAttempt,
+                      ...(creditMintModelForAttempt !== undefined && {
+                        fallbackCreditMintModel: creditMintModelForAttempt,
+                      }),
+                    }),
+                    ...(arm.visibleModel !== undefined && {
+                      fallbackCreditLaneArmed: true,
+                    }),
                   }
                 } catch {
                   return {}
@@ -1322,6 +1405,9 @@ async function* queryLoop(
               hasPendingMcpServers: appState.mcp.clients.some(
                 c => c.type === 'pending',
               ),
+              // densable activeMcpServer/Tool (Br/To) — one-shot for this request
+              activeMcpServer: capturedMcpAttribution.activeMcpServer,
+              activeMcpTool: capturedMcpAttribution.activeMcpTool,
               queryTracking,
               effortValue: layeredEffortValue,
               advisorModel: appState.advisorModel,
@@ -1343,6 +1429,153 @@ async function* queryLoop(
               langfuseTrace: toolUseContext.langfuseTrace,
             },
           })) {
+            // densable server_fallback consumer — retainedText/Messages + Gt seam gate
+            if (
+              message &&
+              typeof message === 'object' &&
+              (message as { type?: string }).type === 'server_fallback'
+            ) {
+              const sf = message as {
+                type: 'server_fallback'
+                fromModel: string
+                toModel: string
+                reason?: string
+                apiRefusalCategory?: string | null
+                midStream: boolean
+                requestId?: string | null
+                discardedMessages?: readonly {
+                  uuid?: string
+                  isApiErrorMessage?: boolean
+                  message?: { content?: unknown }
+                }[]
+                retainedMessages?: readonly {
+                  uuid?: string
+                  isApiErrorMessage?: boolean
+                  message?: { content?: unknown }
+                }[]
+                retainedText?: string
+                finalStopReason?: string | null
+              }
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const {
+                  planServerFallbackSeamMerge,
+                  buildRefusalContinuationBeginEvent,
+                  buildQueryModelChangeEvent,
+                  planRefusalFallbackPresentation,
+                  buildModelRefusalFallbackSystemMessage,
+                  SERVER_FALLBACK_SILENT_STITCH_SKIP_WARN,
+                } =
+                  require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                const discarded = sf.discardedMessages ?? []
+                const isMainThread = toolUseContext.agentId === undefined
+                const presentation = planRefusalFallbackPresentation({
+                  reason: sf.reason ?? 'refusal',
+                  midStream: sf.midStream === true,
+                  discardedMessages: discarded as readonly {
+                    message?: { content?: readonly { type?: string }[] }
+                  }[],
+                  requestId: sf.requestId,
+                  fromModel: sf.fromModel,
+                  finalStopReason: sf.finalStopReason,
+                  apiRefusalCategory: sf.apiRefusalCategory,
+                  isMainThread,
+                  originalModelScope: querySource,
+                })
+                logEvent('tengu_server_fallback', {
+                  from_model:
+                    sf.fromModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  to_model:
+                    sf.toModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  reason: (sf.reason ??
+                    'refusal') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  mid_stream: sf.midStream === true,
+                  discarded_count: discarded.length,
+                  retained_chars:
+                    typeof sf.retainedText === 'string'
+                      ? sf.retainedText.length
+                      : 0,
+                  queryChainId: queryChainIdForAnalytics,
+                  queryDepth: queryTracking.depth,
+                  entitlement_blind: presentation.telemetry.entitlementBlind,
+                })
+                // densable: yield query_model_change then tombstones
+                yield buildQueryModelChangeEvent(
+                  sf.toModel,
+                ) as unknown as Message
+                for (const m of discarded) {
+                  yield {
+                    type: 'tombstone' as const,
+                    message: m,
+                    displayOnly: true,
+                  } as unknown as Message
+                }
+                const seam = planServerFallbackSeamMerge({
+                  midStream: sf.midStream === true,
+                  retainedText: sf.retainedText,
+                  retainedMessages: sf.retainedMessages,
+                  silentStitchPending,
+                })
+                if (seam.action === 'skip_silent_stitch_pending') {
+                  logForDebugging(SERVER_FALLBACK_SILENT_STITCH_SKIP_WARN, {
+                    level: 'warn',
+                  })
+                } else if (seam.action === 'merge') {
+                  refusalContinuationActive = true
+                  // densable Yt = seam package for exact land + supersedes
+                  exactSalvagePackage = {
+                    text: seam.yt.text,
+                    originals: seam.yt.originals,
+                  }
+                  yield buildRefusalContinuationBeginEvent(
+                    seam.yt,
+                  ) as unknown as Message
+                }
+                if (presentation.showBanner) {
+                  const banner = buildModelRefusalFallbackSystemMessage({
+                    content: `Switched to ${renderModelName(sf.toModel)} after a model refusal on ${renderModelName(sf.fromModel)}`,
+                    fromModel: sf.fromModel,
+                    toModel: sf.toModel,
+                    requestId: sf.requestId,
+                    apiRefusalCategory: sf.apiRefusalCategory,
+                    timestamp: new Date().toISOString(),
+                    uuid: crypto.randomUUID(),
+                    reason: sf.reason ?? 'refusal',
+                  })
+                  yield banner as unknown as Message
+                }
+              } catch {
+                // densable optional
+              }
+              continue
+            }
+            // densable refusal_no_fallback — chain exhausted multi-exit
+            if (
+              message &&
+              typeof message === 'object' &&
+              (message as { type?: string }).type === 'refusal_no_fallback'
+            ) {
+              const rnf = message as {
+                type: 'refusal_no_fallback'
+                reason?: string
+              }
+              if (refusalContinuationActive) {
+                refusalContinuationActive = false
+                yield {
+                  type: 'refusal_continuation' as const,
+                  phase: 'end' as const,
+                } as unknown as Message
+              }
+              logEvent('tengu_rotunda_pennant_chain_exhausted', {
+                reason: (rnf.reason ??
+                  'client_chain_exhausted') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                queryChainId: queryChainIdForAnalytics,
+                queryDepth: queryTracking.depth,
+                querySource:
+                  querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+              continue
+            }
             // Official stream fallback_request densable consumer (query path).
             // Stream also throws FallbackTriggeredError; this branch yields the
             // model_refusal_fallback banner / salvage telemetry before retry.
@@ -1360,6 +1593,15 @@ async function* queryLoop(
                 apiRefusalCategory?: string | null
                 silentArmAtTrigger?: boolean
                 routeMatched?: 'category' | 'catch_all' | null
+                creditCode?: string | null
+              }
+              // densable kr = X.creditCode — hold for next request stamp
+              if (
+                typeof fb.creditCode === 'string' &&
+                fb.creditCode.length > 0
+              ) {
+                pendingFallbackCreditCode = fb.creditCode
+                pendingFallbackCreditMintModel = fb.originalModel
               }
               try {
                 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1367,6 +1609,8 @@ async function* queryLoop(
                   salvageRefusalPartialText,
                   planRefusalFallbackPresentation,
                   buildModelRefusalFallbackSystemMessage,
+                  planRefusalContinuationBeginWithSilentStitchGate,
+                  SERVER_FALLBACK_SILENT_STITCH_SKIP_WARN,
                 } =
                   require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
                 const salvage = salvageRefusalPartialText({
@@ -1420,7 +1664,64 @@ async function* queryLoop(
                   })
                   yield banner as unknown as Message
                 }
-                void salvage
+                // densable Yt begin with Gt silent-stitch gate
+                const beginPlan =
+                  planRefusalContinuationBeginWithSilentStitchGate({
+                    messages: assistantMessages,
+                    silentStitchPending,
+                  })
+                if (beginPlan.action === 'skip_silent_stitch_pending') {
+                  logForDebugging(SERVER_FALLBACK_SILENT_STITCH_SKIP_WARN, {
+                    level: 'warn',
+                  })
+                } else if (beginPlan.action === 'begin') {
+                  refusalContinuationActive = true
+                  // densable silent arm fill: Gt=Gi, or=!0 only when salvage
+                  // text is present (Gi!==void 0)
+                  try {
+                    const { planSilentStitchFillOnFallbackRequest } =
+                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                      require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                    const fill = planSilentStitchFillOnFallbackRequest({
+                      silentArmAtTrigger: fb.silentArmAtTrigger === true,
+                      salvageText: beginPlan.event.salvageText,
+                    })
+                    if (fill.fillSilentStitch) {
+                      silentStitchPending = true
+                      // densable Gt=Gi — soft-join prefix for Cjs land
+                      if (typeof beginPlan.event.salvageText === 'string') {
+                        silentStitchText = beginPlan.event.salvageText
+                        // densable DRd: wr = zr({content:DRd(Gi), isMeta:!0})
+                        try {
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          const { buildPartialResponseSalvageMetaContent } =
+                            require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                          // eslint-disable-next-line @typescript-eslint/no-require-imports
+                          const { createUserMessage } =
+                            require('./utils/messages.js') as typeof import('./utils/messages.js')
+                          partialResponseMetaMessage = createUserMessage({
+                            content: buildPartialResponseSalvageMetaContent(
+                              beginPlan.event.salvageText,
+                            ),
+                            isMeta: true,
+                          })
+                        } catch {
+                          // densable optional
+                        }
+                      }
+                    }
+                    if (fill.fillConvolute) {
+                      convoluteArcadesRetryActive = true
+                    }
+                  } catch {
+                    if (fb.silentArmAtTrigger === true) {
+                      convoluteArcadesRetryActive = true
+                    }
+                  }
+                  // densable client begin: display salvage only (Yt is
+                  // server_fallback midStream seam; Gt is silent arm fill)
+                  yield beginPlan.event as unknown as Message
+                }
               } catch {
                 // densable optional
               }
@@ -1454,6 +1755,8 @@ async function* queryLoop(
               // from being yielded after the fallback response arrives.
               if (streamingToolExecutor) {
                 streamingToolExecutor.discard()
+                // densable XId onReset → ARd(U.options,V) — drop mid-stream stamps
+                clearActiveMcpStamps(toolUseContext.options, attributeMcpUsage)
                 streamingToolExecutor = new StreamingToolExecutor(
                   toolUseContext.options.tools,
                   canUseTool,
@@ -1554,11 +1857,96 @@ async function* queryLoop(
             if (isWithheldMaxOutputTokens(message)) {
               withheld = true
             }
+            // densable: (Gt||Yt) soft/exact land BEFORE yield so consumers
+            // see joined text + supersedesUuids on first delivery.
+            // Yt → exact Yt.text+Ki.text + supersedes lane server_stitch
+            // Gt → Cjs(Gt, Ki.text); clear so convolute → "merged"
+            // Use yieldMessage (mutable) — for-await `message` is const.
+            let landedAssistant: AssistantMessage | undefined
+            if (
+              message.type === 'assistant' &&
+              !(message as AssistantMessage).isApiErrorMessage &&
+              (exactSalvagePackage !== undefined ||
+                silentStitchPending ||
+                clientRetrySupersedesUuids !== undefined)
+            ) {
+              const assistantForLand = yieldMessage as AssistantMessage
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const { planRefusalLandJoin } =
+                  require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                const content = assistantForLand.message?.content
+                if (
+                  Array.isArray(content) &&
+                  (exactSalvagePackage !== undefined || silentStitchPending)
+                ) {
+                  const land = planRefusalLandJoin({
+                    content,
+                    exactSalvage: exactSalvagePackage,
+                    softSalvageText: silentStitchText,
+                    isMainThread: toolUseContext.agentId === undefined,
+                  })
+                  if (land.joined) {
+                    landedAssistant = {
+                      ...assistantForLand,
+                      message: {
+                        ...assistantForLand.message,
+                        content: land.content,
+                      },
+                      ...(land.supersedesUuids !== undefined &&
+                      land.supersedesUuids.length > 0
+                        ? { supersedesUuids: land.supersedesUuids }
+                        : {}),
+                    } as AssistantMessage
+                    yieldMessage = landedAssistant
+                    if (
+                      land.supersedesUuids !== undefined &&
+                      land.supersedesUuids.length > 0
+                    ) {
+                      logEvent('tengu_refusal_fallback_supersedes', {
+                        lane: 'server_stitch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        count: land.supersedesUuids.length,
+                        queryChainId: queryChainIdForAnalytics,
+                        queryDepth: queryTracking.depth,
+                      })
+                    }
+                    if (land.clearExact) {
+                      exactSalvagePackage = undefined
+                    }
+                    if (land.clearSoft) {
+                      silentStitchPending = false
+                      silentStitchText = undefined
+                      // densable: clear wr after soft land (salvage joined)
+                      partialResponseMetaMessage = undefined
+                    }
+                  }
+                }
+              } catch {
+                // densable optional
+              }
+              // densable R client_retry supersedes on next assistant
+              if (clientRetrySupersedesUuids !== undefined) {
+                const uuids = clientRetrySupersedesUuids
+                clientRetrySupersedesUuids = undefined
+                landedAssistant = {
+                  ...((landedAssistant ?? yieldMessage) as AssistantMessage),
+                  supersedesUuids: uuids,
+                } as AssistantMessage
+                yieldMessage = landedAssistant
+                logEvent('tengu_refusal_fallback_supersedes', {
+                  lane: 'client_retry' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  count: uuids.length,
+                  queryChainId: queryChainIdForAnalytics,
+                  queryDepth: queryTracking.depth,
+                })
+              }
+            }
             if (!withheld) {
               yield yieldMessage
             }
             if (message.type === 'assistant') {
-              const assistantMessage = message as AssistantMessage
+              const assistantMessage =
+                landedAssistant ?? (message as AssistantMessage)
               assistantMessages.push(assistantMessage)
 
               const msgToolUseBlocks = (
@@ -1713,6 +2101,8 @@ async function* queryLoop(
             // tool_use_ids) from leaking into the retry.
             if (streamingToolExecutor) {
               streamingToolExecutor.discard()
+              // densable XId onReset → ARd(U.options,V)
+              clearActiveMcpStamps(toolUseContext.options, attributeMcpUsage)
               streamingToolExecutor = new StreamingToolExecutor(
                 toolUseContext.options.tools,
                 canUseTool,
@@ -1790,10 +2180,136 @@ async function* queryLoop(
 
             continue
           }
+          // densable multi-exit: En end + convolute_arcades error outcome
+          if (convoluteArcadesRetryActive) {
+            convoluteArcadesRetryActive = false
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { resolveConvoluteArcadesRetryOutcome } =
+                require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+              const outcome = resolveConvoluteArcadesRetryOutcome({
+                path: 'error',
+                silentStitchPending,
+              })
+              silentStitchPending = false
+              silentStitchText = undefined
+              partialResponseMetaMessage = undefined
+              exactSalvagePackage = undefined
+              logEvent('tengu_convolute_arcades_retry_outcome', {
+                outcome:
+                  outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                queryChainId: queryChainIdForAnalytics,
+                queryDepth: queryTracking.depth,
+                querySource:
+                  querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+            } catch {
+              silentStitchPending = false
+              silentStitchText = undefined
+              partialResponseMetaMessage = undefined
+              exactSalvagePackage = undefined
+            }
+            yield {
+              type: 'refusal_continuation' as const,
+              phase: 'end' as const,
+            } as unknown as Message
+            refusalContinuationActive = false
+          } else if (refusalContinuationActive) {
+            // densable refusal_no_fallback / chain exhausted → phase end
+            refusalContinuationActive = false
+            exactSalvagePackage = undefined
+            yield {
+              type: 'refusal_continuation' as const,
+              phase: 'end' as const,
+            } as unknown as Message
+          }
           throw innerError
         }
       }
+      // densable: successful serve after refusal_continuation begin → phase end
+      // densable or&&!Jt: convolute outcome merged (Gt consumed) / no_text
+      if (convoluteArcadesRetryActive) {
+        convoluteArcadesRetryActive = false
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { resolveConvoluteArcadesRetryOutcome } =
+            require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+          const outcome = resolveConvoluteArcadesRetryOutcome({
+            path: 'success',
+            silentStitchPending,
+          })
+          silentStitchPending = false
+          silentStitchText = undefined
+          partialResponseMetaMessage = undefined
+          exactSalvagePackage = undefined
+          logEvent('tengu_convolute_arcades_retry_outcome', {
+            outcome:
+              outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            queryChainId: queryChainIdForAnalytics,
+            queryDepth: queryTracking.depth,
+            querySource:
+              querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        } catch {
+          silentStitchPending = false
+          silentStitchText = undefined
+          partialResponseMetaMessage = undefined
+          exactSalvagePackage = undefined
+        }
+        yield {
+          type: 'refusal_continuation' as const,
+          phase: 'end' as const,
+        } as unknown as Message
+        refusalContinuationActive = false
+      } else if (refusalContinuationActive) {
+        refusalContinuationActive = false
+        exactSalvagePackage = undefined
+        yield {
+          type: 'refusal_continuation' as const,
+          phase: 'end' as const,
+        } as unknown as Message
+      }
     } catch (error) {
+      if (convoluteArcadesRetryActive) {
+        convoluteArcadesRetryActive = false
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { resolveConvoluteArcadesRetryOutcome } =
+            require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+          const outcome = resolveConvoluteArcadesRetryOutcome({
+            path: 'error',
+            silentStitchPending,
+          })
+          silentStitchPending = false
+          silentStitchText = undefined
+          partialResponseMetaMessage = undefined
+          exactSalvagePackage = undefined
+          logEvent('tengu_convolute_arcades_retry_outcome', {
+            outcome:
+              outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            queryChainId: queryChainIdForAnalytics,
+            queryDepth: queryTracking.depth,
+            querySource:
+              querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        } catch {
+          silentStitchPending = false
+          silentStitchText = undefined
+          partialResponseMetaMessage = undefined
+          exactSalvagePackage = undefined
+        }
+        yield {
+          type: 'refusal_continuation' as const,
+          phase: 'end' as const,
+        } as unknown as Message
+        refusalContinuationActive = false
+      } else if (refusalContinuationActive) {
+        refusalContinuationActive = false
+        yield {
+          type: 'refusal_continuation' as const,
+          phase: 'end' as const,
+        } as unknown as Message
+      }
       logError(error)
       const errorMessage =
         error instanceof Error ? error.message : String(error)

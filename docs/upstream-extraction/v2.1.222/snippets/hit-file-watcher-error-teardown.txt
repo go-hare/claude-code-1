@@ -1,0 +1,53 @@
+# densable 2.1.222 #14 — file watcher FS error / teardown rare crash
+# Product: Fixed rare crashes when a file watcher hit a filesystem error
+# or during file-watcher teardown.
+# SEA: FileChanged / settings / keybindings / skills / ScheduledTasks error handlers
+
+## 221 → 222
+- Product changelog NEW; core strings already present in 221 SEA (hardening was
+  incomplete locally: missing error listeners + UNC drop + null-first close).
+- `FileChanged: watcher error:` SAME
+- `[settings] watcher error:` SAME
+- `watcherUnusable` / EPERM open-close (fs.watchFile pool) SAME
+
+## densable FileChanged (startWatching)
+```
+e=pK.watch(_,{persistent:!0,ignoreInitial:!0,awaitWriteFinish:{stabilityThreshold:500,pollInterval:200},ignorePermissionErrors:!0})
+e.on("change",(E)=>p(E,"change"))
+e.on("add",(E)=>p(E,"add"))
+e.on("unlink",(E)=>p(E,"unlink"))
+let b=!1
+e.on("error",(E)=>{if(!b)b=!0,me("file_watcher_start","fs_error");T(`FileChanged: watcher error: ${ue(E)}`,{level:"warn"})})
+e.on("ready",()=>{if(!b)b=!0,Se("file_watcher_start")})
+// me → tengu_feature_bad; Se → tengu_feature_ok
+```
+
+## densable UNC filter (aHe) before watch
+```
+x=C.filter((R)=>!aHe(R))
+if(x.length!==C.length)T("FileChanged: dropped remote UNC watch path(s)",{level:"warn"})
+// aHe: remote UNC (not WSL) or unsafe volume long-path
+```
+
+## densable other watchers (error log only)
+```
+[settings] watcher error:
+[keybindings] watcher error:  (+ usePolling:!0,interval:2000)
+[skills] watcher error:
+[theme] watcher error:
+[ScheduledTasks] watcher error:
+memory-watcher: watcher error:
+```
+
+## densable teardown pattern (settings dispose)
+```
+let k=a;return a=null,k?k.close():Promise.resolve()
+// null ref before close — avoids race on concurrent error during teardown
+```
+
+## go-hare
+- fileChangedWatcher: aHe filter + error/ready + tengu_feature_* + null-first close
+- settings/changeDetector: on('error')
+- keybindings: on('error') + usePolling true interval 2000 + null-first dispose
+- cronScheduler: on('error')
+- skillChangeDetector: already had on('error')

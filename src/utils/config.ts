@@ -1211,14 +1211,54 @@ export function getGlobalConfig(): GlobalConfig {
 }
 
 /**
- * Returns the effective value of remoteControlAtStartup. Precedence:
- *   1. User's explicit config value (always wins — honors opt-out)
- *   2. CCR auto-connect default (ant-only build, GrowthBook-gated)
- *   3. false (Remote Control must be explicitly opted into)
+ * densable X_t + rMe — effective remoteControlAtStartup.
+ *
+ * Precedence (X_t):
+ *   1. projectSettingsAliasesUserSettings → treat project as undefined (same path as user)
+ *   2. projectSettings / localSettings === false → hard disable (repo may opt out)
+ *   3. security-sensitive (policy > flagSettings > userSettings) ?? GlobalConfig
+ *   4. if user-scope is not true but project/local is true → log ignore (repo cannot enable)
+ *   5. undefined → rMe falls through to CCR auto-connect default, else false
  */
 export function getRemoteControlAtStartup(): boolean {
-  const explicit = getGlobalConfig().remoteControlAtStartup
-  if (explicit !== undefined) return explicit
+  // Lazy import avoids settings↔config cycles at module init.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const {
+    getSettingsForSource,
+    getSecuritySensitiveSetting,
+    projectSettingsAliasesUserSettings,
+  } =
+    require('./settings/settings.js') as typeof import('./settings/settings.js')
+
+  // densable: t = projectSettingsAliasesUserSettings() ? void 0 : project?.remoteControlAtStartup
+  const project = projectSettingsAliasesUserSettings()
+    ? undefined
+    : getSettingsForSource('projectSettings')?.remoteControlAtStartup
+  const local = getSettingsForSource('localSettings')?.remoteControlAtStartup
+  // densable: if (t===!1||r===!1) return !1
+  if (project === false || local === false) return false
+
+  // densable getSecuritySensitiveSetting("remoteControlAtStartup")[0] ?? Ot().remoteControlAtStartup
+  // Security-sensitive: policy > flagSettings > userSettings > GlobalConfig
+  const n =
+    getSecuritySensitiveSetting('remoteControlAtStartup')[0] ??
+    getGlobalConfig().remoteControlAtStartup
+
+  if (n !== true && (project === true || local === true)) {
+    const scope =
+      project === true && local === true
+        ? 'project and local'
+        : project === true
+          ? 'project'
+          : 'local'
+    logForDebugging(
+      `remoteControlAtStartup: true in ${scope} settings ignored — repo-scoped settings cannot enable Remote Control; set it at user scope (/config)`,
+    )
+  }
+
+  if (n !== undefined) return n
+
+  // densable rMe: X_t undefined → CCR auto-connect default
   if (feature('CCR_AUTO_CONNECT')) {
     if (ccrAutoConnect?.getCcrAutoConnectDefault()) return true
   }

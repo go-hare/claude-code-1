@@ -341,6 +341,11 @@ export default class Ink {
    * (2.1.219 #15: avoid rewriting entire input line on each keystroke).
    */
   private prevScreenReaderAnchor: ScreenReaderAnchor = 'clean';
+  /**
+   * densable prevScreenReaderParkDeclared — previous frame had a declared
+   * cursor (l!==null). Required for 2.1.222 #15 EOL delete fast path.
+   */
+  private prevScreenReaderParkDeclared = false;
   private altScreenParkPatch: Readonly<{ type: 'stdout'; content: string }>;
   // Text selection state (alt-screen only). Owned here so the overlay
   // pass in onRender can read it and App.tsx can update it from mouse
@@ -576,6 +581,7 @@ export default class Ink {
   resetScreenReaderDiffState(): void {
     this.prevScreenReaderLines = [];
     this.prevScreenReaderPark = { row: 0, col: 0 };
+    this.prevScreenReaderParkDeclared = false;
     this.prevScreenReaderAnchor = 'clean';
   }
 
@@ -1245,8 +1251,13 @@ export default class Ink {
       preserveRanges,
       announcementStartLine,
       prevAnchor: this.prevScreenReaderAnchor,
+      prevParkDeclared: this.prevScreenReaderParkDeclared,
     });
-    if (plan.skip) return;
+    // densable: even on skip, update parkDeclared = l!==null
+    if (plan.skip) {
+      this.prevScreenReaderParkDeclared = cursor !== null;
+      return;
+    }
 
     const ansi = materializeScreenReaderFrameAnsi(plan);
     if (ansi.length > 0) {
@@ -1255,9 +1266,11 @@ export default class Ink {
 
     // Official: this.prevScreenReaderLines=n; this.prevScreenReaderPark=a
     // densable 2.1.219: nextAnchor only on full rewrite; suffix keeps anchor
+    // densable 2.1.222: parkDeclared = l!==null after every write path
     const { lines } = materializeScreenReaderLines(fullText, columns, preserveRanges);
     this.prevScreenReaderLines = lines;
     this.prevScreenReaderPark = plan.park;
+    this.prevScreenReaderParkDeclared = cursor !== null;
     if (plan.nextAnchor !== undefined) {
       this.prevScreenReaderAnchor = plan.nextAnchor;
     }

@@ -1,0 +1,53 @@
+hed conversation${h}. Resume with: /resume ${i}`);return!0}catch(i){let s=i instanceof Error?i.message:"Unknown error occurred";return t(`Failed to branch conversation: ${s}`),!1}}async function Ieb(e,t,r){return await Cdp(t,e,{customTitle:r?.trim()||void 0}),null}var Edp,YJs,mzo,hzo,vdp,wdp;var JJs=v(()=>{mt();$y();kt();st();h8r();Ir();Vv();bl();nr();Hr();Edp=require("crypto"),YJs=require("events"),mzo=require("fs"),hzo=require("fs/promises"),vdp=require("readline"),wdp=require("stream/promises")});var Reb,xdp;var kdp=v(()=>{Reb={type:"local-jsx",name:"branch",description:"Create a branch of the current conversation at this point",argumentHint:"[name]",load:()=>Promise.resolve().then(() => (JJs(),XJs))},xdp=Reb});function iSt(e){if(!clt())return null;return(e.some((r)=>rl(r,Hdp))?Peb:e.some((r)=>rl(r,wYe))?Deb:e.some((r)=>rl(r,bwe))?Meb:Leb)+Oeb}var Hdp="save_skill",Peb,Deb,Meb,Leb=`# Saving skills
+
+You cannot create or modify skills in this session. Skill files on disk \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them, or writing a new skill file, does not create or change a skill in the user's account, and this session's filesystem is discarded when the session ends. If asked to create or change a skill, say you can't do that here and point the user to their claude.ai settings.`,Oeb;var jbn=v(()=>{Ws();pb();Peb=`# Saving skills
+
+Skill files on disk in this session \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them does not change the user's saved skill. To create a skill, or update one the user asks to change, use the \`${Hdp}\` tool.`,Deb=`# Saving skills
+
+You cannot create or modify skills in this session directly. Skill files on disk \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them, or writing a new skill file, does not create or change a skill in the user's account, and this session's filesystem is discarded when the session ends. If the user wants a skill created or changed, propose it with the \`${wYe}\` tool.`,Meb=`# Saving skills
+
+You cannot create or modify skills in this session directly. Skill files on disk \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them, or writing a new skill file, does not create or change a skill in the user's account, and this session's filesystem is discarded when the session ends. If the user wants a skill created or changed, write it as a \`.skill\` file (a zip archive) or a single \`SKILL.md\`, and send it to them with the \`${bwe}\` tool \u2014 a skill file delivered this way may give them an option to save it, depending on their organization's settings. You get no signal whether they saved it: report the skill as delivered, never as saved.`,Oeb=` Skills that are part of an installed plugin are the exception: if this session includes the \`${nMo}\` skill, customize those through it \u2014 it edits the plugin and repackages it.`});function QAr(e,t){let r=ba(e).toLowerCase(),n=pYr.find((i)=>i===r);if(n)return n;if(r==="best"||r==="opusplan")return"other";let o=ba(t).toLowerCase();return pYr.find((i)=>o.includes(i))??"other"}var QJs=v(()=>{L_()});function Neb(){return"inherit"}function coe(e,t,r,n,o){let i=()=>HO({permissionMode:n??"default",mainLoopModel:t,exceeds200kTokens:!1}),s=(p,f,m=p)=>{let h=a$(p);$eb(p,h!==null);let g=h!==null?f?ZJs(SP(h)):h:i();if(ba($i(m)).toLowerCase()!==ba($i(g)).toLowerCase())o?.(p,g,h!==null?"family_step_down":"parent_inherit");return g},a=te.CLAUDE_CODE_SUBAGENT_MODEL;if(a&&a!=="inherit"){let p=$i(a);if(!uc(p))return s(a,!1);return p}let l=lso(t),c=(p,f)=>{if(l&&i_(p)==="bedrock"){if(lso(f))return p;return aut(p,l)}return p};if(r){if(r==="inherit")return i();if(Idp(r,t))return t;let p=c(ZJs($i(r)),r);if(!uc(p))return s(r,!0,p);return p}let u=e??Neb();if(u==="inherit")return i();if(Idp(u,t))return t;let d=c(ZJs($i(u)),u);if(!uc(d))return s(u,!0,d);return d}function Rdp(e,t,r,n,o,i){if(i===void 0)return coe(e,t,r,n,o);let s,a=coe(e,t,r,n,(m,h,g)=>{s=g,o?.(m,h)}),l=te.CLAUDE_CODE_SUBAGENT_MODEL,[c,u]=l&&l!=="inherit"?[l,"env"]:r?r==="inherit"?[t,"inherit"]:[r,"tool"]:e&&e!=="inherit"?[e,"frontmatter"]:[t,"inherit"],d=QAr(c,ao(c)),p=QAr(a,ao(a)),f={source:ge(i),precedence:ge(u),requested_family:ge(d),resolved_family:ge(p),requested_model:Ou(c)??Ae("none"),resolved_model:Ou(a)??Ae("none")};if(s==="family_step_down")Pe("subagent_model_resolve","family_alias_stepped_down",f);else if(s==="parent_inherit")Pe("subagent_model_resolve","override_dropped",f);else if(d!=="other"&&p!=="other"&&d!==p)if(u==="inherit")Pe("subagent_model_resolve","inherit_family_mismatch",f);else Pe("subagent_model_resolve","family_mismatch",f);else Se("subagent_model_resolve",f);return a}function $eb(e,t){T(`Subagent model "${e}" is not in the availableModels allowlist; ${t?"using the newest allowed model in its family":"inheriting the parent model"} instead`,{level:"warn"})}function ZJs(e){let r=ao(e).includes("opus")&&$9(e);if(i$()&&!ZS(e)&&r)return SP(e+"[1m]");return e}function Idp(e,t){let r=ao(t);switch(e.toLowerCase()){case"fable":return r.includes("fable");case"opus":return r.includes("opus");case"sonnet":return r.includes("sonnet");case"haiku":return r.includes("haiku");default:return!1}}var sSt=v(()=>{Xt();VG();wk();ze();Cr();Hr();L_();HUe();Si();rq();QJs();Cs()});var uoe=4096;function aSt(e,t){if(t!=null)return{timeout:t};return{timeout:e}}function QWt(e){BTe.runInContext(`(() => {
+    Object.defineProperty(Error, 'prepareStackTrace', {
+      value: (err, sites) => String(err.stack ?? err),
+      writable: false, configurable: false,
+    });
+    // Delete globals with no REPL use case that either run callbacks on the
+    // host event loop outside any try/catch (FinalizationRegistry \u2014 same
+    // DoS shape as a throwing setTimeout callback) or expose shared-memory
+    // primitives (Atomics/SharedArrayBuffer \u2014 no cross-realm use, pure
+    // attack-surface reduction).
+    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',
+                     'WeakRef', 'Atomics', 'SharedArrayBuffer',
+                     'queueMicrotask',
+                     // eval is NOT deleted here \u2014 hardenVMIntrinsics is
+                     // shared with REPLTool (codeGeneration:{strings:true}).
+                     // WorkflowTool blocks eval via codeGeneration:false.
+                     // JSC debug/shell globals \u2014 present only if
+                     // JSC_useDollarVM=1 or similar, but $vm is a full
+                     // escape (createGlobalObject, addressOf, runScript).
+                     '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile',
+                     'Loader']) {
+      delete globalThis[g];
+    }
+    // SES-style enable-property-override: convert common shadowed data props
+    // to accessors whose setter defineProperty's onto the receiver. Otherwise
+    // freezing makes them non-writable, and [[Set]] on an instance (e.g.
+    // "this.name='X'" in an Error subclass ctor) throws in strict / no-ops in
+    // sloppy \u2014 the TC39 "override mistake".
+    function enableOverride(proto, key) {
+      const d = Object.getOwnPropertyDescriptor(proto, key);
+      if (!d || 'get' in d) return;
+      const v = d.value;
+      Object.defineProperty(proto, key, {
+        get() { return v },
+        set(nv) {
+          if (this === proto) return;
+          Object.defineProperty(this, key, { value: nv, writable: true, enumerable: true, configurable: true });
+        },
+        enumerable: d.enumerable, configurable: true,
+      });
+    }
+    const errorCtors = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, globalThis.SuppressedError].filter(Boolean);
+    const errorProtos = errorCtors.map(C => C.prototype);
+    for (const [proto, keys] of [
+      // All Object.prototype data props \u2014 Object.assign({}, {propertyIsEnu

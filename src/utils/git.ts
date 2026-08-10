@@ -215,6 +215,13 @@ export const gitExe = memoize((): string => {
   return whichSync('git') || 'git'
 })
 
+/**
+ * densable 2.1.222 #19 `gnr` — force raw git blob diffs (ignore textconv /
+ * external diff drivers). Shared by `/diff`, RC/issue preserve patch,
+ * web file-edit single-file diff, and ultrareview size probes.
+ */
+export const RAW_GIT_DIFF_FLAGS = ['--no-ext-diff', '--no-textconv'] as const
+
 export const getIsGit = memoize(async (): Promise<boolean> => {
   const startTime = Date.now()
   logForDiagnosticsNoPII('info', 'is_git_check_started')
@@ -732,7 +739,8 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
     if (await isShallowClone()) {
       logForDebugging('Shallow clone detected, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
-        execFileNoThrow(gitExe(), ['diff', 'HEAD']),
+        // densable rqi: diff ...gnr HEAD
+        execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
         captureUntrackedFiles(),
       ])
       return {
@@ -753,7 +761,8 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       // No remote found - use HEAD-only mode
       logForDebugging('No remote found, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
-        execFileNoThrow(gitExe(), ['diff', 'HEAD']),
+        // densable rqi: diff ...gnr HEAD
+        execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
         captureUntrackedFiles(),
       ])
       return {
@@ -778,7 +787,8 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       // Merge-base failed - fall back to HEAD-only
       logForDebugging('Merge-base failed, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
-        execFileNoThrow(gitExe(), ['diff', 'HEAD']),
+        // densable rqi: diff ...gnr HEAD
+        execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
         captureUntrackedFiles(),
       ])
       return {
@@ -803,16 +813,17 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       { stdout: headSha },
       { stdout: branchName },
     ] = await Promise.all([
-      // Patch from merge-base to current state (including staged changes)
-      execFileNoThrow(gitExe(), ['diff', remoteBaseSha]),
+      // densable: diff ...gnr mergeBaseSha
+      execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, remoteBaseSha]),
       // Untracked files captured separately
       captureUntrackedFiles(),
-      // format-patch for committed changes between merge-base and HEAD.
+      // densable format-patch --no-ext-diff --no-textconv (inline, same as gnr)
       // Preserves the actual commit chain (author, date, message) so replay
       // containers can reconstruct the branch with real commits instead of a
       // squashed diff. Uses --stdout to emit all patches as a single text stream.
       execFileNoThrow(gitExe(), [
         'format-patch',
+        ...RAW_GIT_DIFF_FLAGS,
         `${remoteBaseSha}..HEAD`,
         '--stdout',
       ]),

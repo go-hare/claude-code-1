@@ -1,0 +1,32 @@
+# densable 2.1.222 #3 — /usage-credits dismissed re-request
+
+## Changelog
+Fixed `/usage-credits` on Team and Enterprise showing "you've already sent a
+usage credit request" for members whose earlier request was dismissed, blocking
+them from sending a new one.
+
+## densable BTr (SEA)
+```
+// ONLY pending — not dismissed
+let s = await cyp("limit_increase", ["pending"]);
+if (s && s.length > 0)
+  return { type: "message",
+    value: "You've already sent a usage credit request to your admin." };
+
+// else confirm surface (do not auto-create)
+return { type: "confirm-admin-request", extraUsage: i };
+```
+
+## densable $$n confirm → iea create
+- Interactive: ConfirmAdminUsageRequest (Send request / Cancel)
+- Noninteractive cob: UTr hint (run /usage-credits interactively)
+- iea create messages:
+  - null extraUsage → "Request sent to your admin for usage credits."
+  - is_enabled → increase limit
+  - else → turn on usage credits
+
+## go-hare
+- `hasBlockingPendingAdminRequest` pure gate
+- `runExtraUsage` BTr: statuses `['pending']` only
+- `submitAdminUsageCreditRequest` = iea
+- `ConfirmAdminUsageRequest.tsx` = $$n

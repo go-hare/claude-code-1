@@ -1,0 +1,41 @@
+# densable 2.1.222 #15 — --ax-screen-reader EOL backspace
+# Product: Fixed screen readers re-reading the whole input line on every
+# backspace in --ax-screen-reader mode — end-of-line deletions now echo just
+# the deleted characters.
+# SEA: NEW prevScreenReaderParkDeclared + Htd + tAo (CSI K) delete branch
+
+## 221 → 222
+- `prevScreenReaderParkDeclared` 0 → 4
+- `Htd(` 0 → 2 (grapheme boundary helper; 219 had xuy/isGraphemeBoundary for append)
+- `tAo()` 0 → 3 (= PA("K") CSI K erase-to-EOL)
+
+## densable EOL delete branch (after suffix-append)
+```
+if(!h&&c===-1&&(anchor clean||lastRowAnchored...)&&u.length===i.length
+   &&f>=u.length-this.terminalRows   // common in viewport
+   &&u[f].startsWith(i[f])&&!u[f].includes("\t")){
+  // NO g.row>=terminalRows gate (unlike append)
+  let L = restSame ? u[f].slice(i[f].length) : ""  // deleted suffix
+  let O = L===""?0:Ft(i[f])  // keep width
+  if(L!==""&&Ft(firstCP(L))>0&&O+Ft(L)===Ft(u[f])&&Htd(u[f],i[f].length)
+     &&(!/\s/.test(L)||/^\s+$/.test(L))
+     &&l!==null&&this.prevScreenReaderParkDeclared
+     &&g.row===f&&g.col===Ft(u[f])){
+    write(Bmt(O+1)+tAo()+Bmt(p.col+1)+...)  // CHA + CSI K + park
+    parkDeclared=l!==null; return
+  }
+}
+// tAo = PA("K") → CSI K
+// Htd = isGraphemeBoundary
+```
+
+## parkDeclared lifecycle
+```
+// skip path: this.prevScreenReaderParkDeclared=l!==null; return
+// write paths: ...ParkDeclared=l!==null
+// reset: ParkDeclared=!1
+```
+
+## go-hare
+- screenReaderPark.ts: suffixDelete plan + materialize CHA+CSI K
+- ink.tsx: prevScreenReaderParkDeclared field + plan input + skip/write updates

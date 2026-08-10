@@ -228,8 +228,20 @@ export type ScreenReaderFramePlan = {
     suffix: string
   }
   /**
+   * densable 2.1.222 #15 suffix-delete (EOL backspace) fast path: park was at
+   * EOL, deleted a pure suffix (no mid-line edit). Materialize CHA + CSI K
+   * (erase to end of line) so screen readers only hear the deleted region
+   * clear — not a full-line rewrite.
+   */
+  suffixDelete?: {
+    /** Line index of the delete (official `f` / common). */
+    lineIndex: number
+    /** Display width of the remaining (new) line content (CHA before EL). */
+    keepWidth: number
+  }
+  /**
    * densable prevScreenReaderAnchor after this plan is applied.
-   * Undefined when skip or suffixAppend (keep previous).
+   * Undefined when skip or suffixAppend/suffixDelete (keep previous).
    */
   nextAnchor?: ScreenReaderAnchor
 }
@@ -256,9 +268,14 @@ export function planScreenReaderFrameUpdate(input: {
   announcementStartLine?: number
   /**
    * densable prevScreenReaderAnchor (default clean). Required for #15
-   * suffix-append fast path safety.
+   * suffix-append / #222 suffix-delete fast path safety.
    */
   prevAnchor?: ScreenReaderAnchor
+  /**
+   * densable prevScreenReaderParkDeclared — previous frame had a declared
+   * cursor. Required for 2.1.222 #15 EOL delete fast path.
+   */
+  prevParkDeclared?: boolean
 }): ScreenReaderFramePlan {
   const sw = input.stringWidth ?? ((s: string) => s.length)
   const { lines, lineBaseRows } = materializeScreenReaderLines(
@@ -317,11 +334,9 @@ export function planScreenReaderFrameUpdate(input: {
   const prevAnchor = input.prevAnchor ?? 'clean'
   const prevPark = input.prevPark
 
-  // densable 2.1.219 #15 suffix-append fast path (before viewport clamp):
-  // same line count, no announcements, anchor clean|lastRowAnchored, first
-  // diff line is a pure string prefix extension at a grapheme boundary, and
-  // the first codepoint of the suffix has positive display width.
-  if (
+  // Shared gate for densable suffix-append / suffix-delete (no announcements,
+  // same line count, anchor clean|lastRowAnchored, common in viewport).
+  const suffixFastPathGate =
     !linesUnchanged &&
     input.announcementStartLine === undefined &&
     (prevAnchor === 'clean' ||
@@ -330,7 +345,11 @@ export function planScreenReaderFrameUpdate(input: {
         prevPark.row === common &&
         park.row === common)) &&
     input.prevLines.length === lines.length &&
-    common >= input.prevLines.length - input.terminalRows &&
+    common >= input.prevLines.length - input.terminalRows
+
+  // densable 2.1.219 #15 suffix-append: also requires prevPark.row in viewport.
+  if (
+    suffixFastPathGate &&
     prevPark.row >= input.prevLines.length - input.terminalRows
   ) {
     const prevLine = input.prevLines[common] ?? ''
@@ -368,6 +387,54 @@ export function planScreenReaderFrameUpdate(input: {
             suffix,
           },
           // densable suffix path does not reassign prevScreenReaderAnchor
+        }
+      }
+    }
+  }
+
+  // densable 2.1.222 #15 EOL delete: separate if — NO prevPark.row viewport gate.
+  // prevLine.startsWith(nextLine), park was at EOL, declared cursor both frames.
+  if (suffixFastPathGate) {
+    const prevLine = input.prevLines[common] ?? ''
+    const nextLine = lines[common] ?? ''
+    if (prevLine.startsWith(nextLine) && !prevLine.includes('\t')) {
+      let restSame = true
+      for (let b = common + 1; b < input.prevLines.length; b++) {
+        if (input.prevLines[b] !== lines[b]) {
+          restSame = false
+          break
+        }
+      }
+      const deleted = restSame ? prevLine.slice(nextLine.length) : ''
+      const keepWidth = deleted === '' ? 0 : sw(nextLine)
+      const prevParkDeclared = input.prevParkDeclared === true
+      if (
+        deleted !== '' &&
+        sw(String.fromCodePoint(deleted.codePointAt(0)!)) > 0 &&
+        keepWidth + sw(deleted) === sw(prevLine) &&
+        isGraphemeBoundary(prevLine, nextLine.length) &&
+        // densable: (!/\s/.test(L)||/^\s+$/.test(L)) — non-space or all-space
+        (!/\s/.test(deleted) || /^\s+$/.test(deleted)) &&
+        input.cursor !== null &&
+        prevParkDeclared &&
+        prevPark.row === common &&
+        prevPark.col === sw(prevLine)
+      ) {
+        return {
+          skip: false,
+          park,
+          rewriteFrom: common,
+          rewriteLines: lines.slice(common),
+          prevLastRow,
+          prevPark: input.prevPark,
+          prevLineCount: input.prevLines.length,
+          lastRow,
+          parkChanged,
+          linesUnchanged: false,
+          suffixDelete: {
+            lineIndex: common,
+            keepWidth,
+          },
         }
       }
     }
@@ -553,6 +620,22 @@ export function materializeScreenReaderFrameAnsi(
         ? cursorMoveRel(0, plan.park.row - lineIndex)
         : '')
     return toLine + toCol + suffix + parkSeq
+  }
+
+  // densable 2.1.222 #15: CHA(keepWidth+1) + CSI K (EL) + park.
+  // Park was required at EOL of the same line, so no vertical move to line.
+  if (plan.suffixDelete) {
+    const { lineIndex, keepWidth } = plan.suffixDelete
+    const toCol = cha(keepWidth + 1)
+    // densable tAo = PA("K") → CSI K (erase from cursor to end of line)
+    const eraseToEol = csi('K')
+    const parkCol = Math.max(0, plan.park.col) + 1
+    const parkSeq =
+      cha(parkCol) +
+      (plan.park.row !== lineIndex
+        ? cursorMoveRel(0, plan.park.row - lineIndex)
+        : '')
+    return toCol + eraseToEol + parkSeq
   }
 
   // m: home from previous park to previous last row (vertical only).

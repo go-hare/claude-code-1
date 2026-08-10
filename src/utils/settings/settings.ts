@@ -6,6 +6,7 @@ import {
   getFlagSettingsInline,
   getFlagSettingsPath,
   getOriginalCwd,
+  getParentManagedSettings,
   getUseCoworkPlugins,
 } from '../../bootstrap/state.js'
 import { getRemoteManagedSettingsSyncFromCache } from '../../services/remoteManagedSettings/syncCacheState.js'
@@ -46,11 +47,78 @@ import {
 } from './settingsCache.js'
 import { type SettingsJson, SettingsSchema } from './types.js'
 import {
+  applyHostManagedPolicyModelPrecedence,
+  buildHostModelOverlay,
+} from './hostModelOverlay.js'
+import {
   filterInvalidPermissionRules,
   formatZodError,
   type SettingsWithErrors,
   type ValidationError,
 } from './validation.js'
+
+/**
+ * densable hostManagedProvider / P4 hostManagedProvider:te.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+ * — truthy gate via residualFinalEnvGates (falls back to isEnvTruthy).
+ */
+function isHostManagedProviderFlag(): boolean {
+  let hostManaged = isEnvTruthy(
+    process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
+  )
+  try {
+    const { isProviderManagedByHostEnvEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
+    hostManaged = isProviderManagedByHostEnvEnabled()
+  } catch {
+    // keep raw env fallback
+  }
+  return hostManaged
+}
+
+/**
+ * densable KZn + Gfg — parse parent managed settings and build host model overlay.
+ */
+function loadParentManagedAndHostOverlay(): {
+  parentSettings: SettingsJson | null
+  hostModelOverlay: ReturnType<typeof buildHostModelOverlay>
+  hostManagedProvider: boolean
+} {
+  const hostManagedProvider = isHostManagedProviderFlag()
+  const raw = getParentManagedSettings()
+  let parentSettings: SettingsJson | null = null
+  if (raw && typeof raw === 'object' && Object.keys(raw).length > 0) {
+    const parsed = SettingsSchema().safeParse(raw)
+    if (parsed.success) {
+      parentSettings = parsed.data
+    } else {
+      logForDebugging(
+        `parent managed settings invalid: ${parsed.error.message}`,
+        { level: 'warn' },
+      )
+    }
+  }
+  const hostModelOverlay = buildHostModelOverlay(
+    parentSettings,
+    hostManagedProvider,
+  )
+  return { parentSettings, hostModelOverlay, hostManagedProvider }
+}
+
+/**
+ * densable nfc host finish: b6i + Object.assign(hostModelOverlay).
+ */
+function finishPolicySettingsForHost(
+  policySettings: SettingsJson | null,
+): SettingsJson | null {
+  const { hostModelOverlay, hostManagedProvider } =
+    loadParentManagedAndHostOverlay()
+  return applyHostManagedPolicyModelPrecedence(
+    policySettings,
+    hostModelOverlay,
+    hostManagedProvider,
+  )
+}
 
 /**
  * Get the path to the managed settings file based on the current platform
@@ -302,6 +370,43 @@ export function getSettingsFilePathForSource(
   }
 }
 
+/**
+ * densable `set` / `projectSettingsAliasesUserSettings`.
+ * True when project + user settings resolve to the same absolute path
+ * (e.g. cwd is the user config home). Callers then must not treat
+ * projectSettings as a separate repo-scoped layer.
+ */
+export function projectSettingsAliasesUserSettings(): boolean {
+  const projectPath = getSettingsFilePathForSource('projectSettings')
+  const userPath = getSettingsFilePathForSource('userSettings')
+  return (
+    !!projectPath && !!userPath && resolve(projectPath) === resolve(userPath)
+  )
+}
+
+/**
+ * densable security-sensitive sources only (not project/local):
+ * policySettings → flagSettings → userSettings.
+ * Returns defined values in that priority order (first element wins).
+ */
+export function getSecuritySensitiveSetting<K extends keyof SettingsJson>(
+  key: K,
+): Array<NonNullable<SettingsJson[K]>> {
+  const sources = [
+    'policySettings',
+    'flagSettings',
+    'userSettings',
+  ] as const satisfies readonly SettingSource[]
+  const out: Array<NonNullable<SettingsJson[K]>> = []
+  for (const source of sources) {
+    const value = getSettingsForSource(source)?.[key]
+    if (value !== undefined && value !== null) {
+      out.push(value as NonNullable<SettingsJson[K]>)
+    }
+  }
+  return out
+}
+
 export function getRelativeSettingsFilePathForSource(
   source: 'projectSettings' | 'localSettings',
 ): string {
@@ -327,28 +432,30 @@ function getSettingsForSourceUncached(
   source: SettingSource,
 ): SettingsJson | null {
   // For policySettings: first source wins (remote > HKLM/plist > file > HKCU)
+  // densable nfc: under hostManagedProvider, b6i strip + Gfg hostModelOverlay.
   if (source === 'policySettings') {
     const remoteSettings = getRemoteManagedSettingsSyncFromCache()
     if (remoteSettings && Object.keys(remoteSettings).length > 0) {
-      return remoteSettings
+      return finishPolicySettingsForHost(remoteSettings)
     }
 
     const mdmResult = getMdmSettings()
     if (Object.keys(mdmResult.settings).length > 0) {
-      return mdmResult.settings
+      return finishPolicySettingsForHost(mdmResult.settings)
     }
 
     const { settings: fileSettings } = loadManagedFileSettings()
     if (fileSettings) {
-      return fileSettings
+      return finishPolicySettingsForHost(fileSettings)
     }
 
     const hkcu = getHkcuSettings()
     if (Object.keys(hkcu.settings).length > 0) {
-      return hkcu.settings
+      return finishPolicySettingsForHost(hkcu.settings)
     }
 
-    return null
+    // densable nfc: no admin/hkcu but hostModelOverlay alone still wins
+    return finishPolicySettingsForHost(null)
   }
 
   const settingsFilePath = getSettingsFilePathForSource(source)
@@ -385,7 +492,9 @@ export function getPolicySettingsOrigin():
   | 'hklm'
   | 'file'
   | 'hkcu'
+  | 'parent'
   | null {
+  // densable YZn: helper > remote > plist/hklm > file > parent (slice/overlay) > hkcu
   // 1. Remote (highest)
   const remoteSettings = getRemoteManagedSettingsSyncFromCache()
   if (remoteSettings && Object.keys(remoteSettings).length > 0) {
@@ -402,6 +511,15 @@ export function getPolicySettingsOrigin():
   const { settings: fileSettings } = loadManagedFileSettings()
   if (fileSettings) {
     return 'file'
+  }
+
+  // densable: parentSlice || hostModelOverlay → "parent" (before hkcu)
+  const { parentSettings, hostModelOverlay } = loadParentManagedAndHostOverlay()
+  if (
+    (parentSettings && Object.keys(parentSettings).length > 0) ||
+    hostModelOverlay
+  ) {
+    return 'parent'
   }
 
   // 4. HKCU (lowest — user-writable)
@@ -540,13 +658,19 @@ function mergeArrays<T>(targetArray: T[], sourceArray: T[]): T[] {
 /**
  * Custom merge function for lodash mergeWith when merging settings.
  * Arrays are concatenated and deduplicated; other values use default lodash merge behavior.
+ * densable `_ae`: for key `fallbackModel`, later array **replaces** (not concat).
  * Exported for testing.
  */
 export function settingsMergeCustomizer(
   objValue: unknown,
   srcValue: unknown,
+  key?: string | number | symbol,
 ): unknown {
   if (Array.isArray(objValue) && Array.isArray(srcValue)) {
+    // densable _ae: if(r==="fallbackModel")return t
+    if (key === 'fallbackModel') {
+      return srcValue
+    }
     return mergeArrays(objValue, srcValue)
   }
   // Return undefined to let lodash handle default merge behavior
@@ -726,6 +850,10 @@ function loadSettingsFromDisk(): SettingsWithErrors {
           policyErrors.push(...hkcu.errors)
         }
 
+        // densable nfc hostManagedProvider: b6i + hostModelOverlay (Gfg)
+        // even when only overlay exists (no admin/hkcu).
+        policySettings = finishPolicySettingsForHost(policySettings)
+
         // Merge the winning policy source into the settings chain
         if (policySettings) {
           mergedSettings = mergeWith(
@@ -733,6 +861,15 @@ function loadSettingsFromDisk(): SettingsWithErrors {
             policySettings,
             settingsMergeCustomizer,
           )
+          // densable w6i: policy availableModels / enforceAvailableModels
+          // re-applied as replace (not concat) after full merge.
+          if (policySettings.availableModels !== undefined) {
+            mergedSettings.availableModels = [...policySettings.availableModels]
+          }
+          if (policySettings.enforceAvailableModels !== undefined) {
+            mergedSettings.enforceAvailableModels =
+              policySettings.enforceAvailableModels
+          }
         }
         for (const error of policyErrors) {
           const errorKey = `${error.file}:${error.path}:${error.message}`

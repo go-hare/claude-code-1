@@ -15,6 +15,7 @@ import {
   type LocalAgentTaskState,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { sanitizeInheritedPermissionMode } from 'src/utils/permissions/permissionSetup.js'
+import { isAutoModeActive } from 'src/utils/permissions/autoModeState.js'
 import type { PermissionMode } from 'src/types/permissions.js'
 import { isInProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/types.js'
 import { isMainSessionTask } from 'src/tasks/LocalMainSessionTask.js'
@@ -54,12 +55,56 @@ import {
   writeToMailbox,
 } from 'src/utils/teammateMailbox.js'
 import { resumeAgentBackground } from '../AgentTool/resumeAgent.js'
-import { SEND_MESSAGE_TOOL_NAME } from './constants.js'
+import {
+  SEND_MESSAGE_SUMMARY_MAX_CHARS,
+  SEND_MESSAGE_TOOL_NAME,
+} from './constants.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 /** densable D6 — reserved recipient routed to the main conversation queue. */
 export const MAIN_RECIPIENT = MAIN_RECIPIENT_NAME
+
+/**
+ * densable `na` — character truncate with high-surrogate safety (not display width).
+ * Used by SendMessage summary coerce: `na(t, Cpr-1)+"…"`.
+ */
+function truncateSummaryChars(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  let slice = text.slice(0, maxChars)
+  const last = slice.charCodeAt(maxChars - 1)
+  // Drop lone high surrogate so we never cut mid-pair.
+  if (last >= 0xd800 && last <= 0xdbff) {
+    slice = slice.slice(0, -1)
+  }
+  return slice
+}
+
+/**
+ * densable OIp — coerceInput: when summary exceeds Cpr, soft-truncate + ellipsis
+ * rather than rejecting schema max(Cpr).
+ */
+export function coerceSendMessageInput(
+  raw: unknown,
+): { input: Input; shapeClass: 'truncate_summary' } | null {
+  if (raw === null || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  const summary = record.summary
+  if (
+    typeof summary !== 'string' ||
+    summary.length <= SEND_MESSAGE_SUMMARY_MAX_CHARS
+  ) {
+    return null
+  }
+  return {
+    input: {
+      ...(record as Input),
+      summary:
+        truncateSummaryChars(summary, SEND_MESSAGE_SUMMARY_MAX_CHARS - 1) + '…',
+    },
+    shapeClass: 'truncate_summary',
+  }
+}
 
 const StructuredMessage = lazySchema(() =>
   z.discriminatedUnion('type', [
@@ -91,11 +136,13 @@ const inputSchema = lazySchema(() =>
           ? `Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer${feature('LAN_PIPES') ? ', or "tcp:<host>:<port>" for a LAN peer' : ''} (use ListPeers to discover)`
           : 'Recipient: teammate name, or "*" for broadcast to all teammates',
       ),
+    // densable SRp: summary.max(Cpr) + soft-truncate describe (Cpr=200).
     summary: z
       .string()
+      .max(SEND_MESSAGE_SUMMARY_MAX_CHARS)
       .optional()
       .describe(
-        'A 5-10 word summary shown as a preview in the UI (required when message is a string)',
+        `A 5-10 word summary shown as a one-line preview in the UI (required when message is a string). Longer summaries are truncated to ${SEND_MESSAGE_SUMMARY_MAX_CHARS} characters rather than rejected, and only the first line is shown.`,
       ),
     message: z.union([
       z.string().describe('Plain text message content'),
@@ -918,6 +965,9 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       return typeof input.message === 'string'
     },
 
+    // densable OIp — soft-truncate summary > Cpr before schema max(Cpr) rejects.
+    coerceInput: coerceSendMessageInput,
+
     // densable xKg.backfillObservableInput: content/reason/feedback via Bs(…, 50)
     // so telemetry / observable clones never carry the full message body.
     backfillObservableInput(input) {
@@ -967,7 +1017,9 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
       }
     },
 
-    async checkPermissions(input, _context) {
+    async checkPermissions(input, context) {
+      // Local safety (feature-gated OFF by default): bridge/LAN still ask.
+      // densable SEA core for SendMessage is only Pjs passthrough — no bridge/LAN.
       if (feature('UDS_INBOX') && parseAddress(input.to).scheme === 'bridge') {
         return {
           behavior: 'ask' as const,
@@ -989,6 +1041,14 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             reason: 'Cross-machine LAN message requires explicit user consent',
             classifierApprovable: false,
           },
+        }
+      }
+      // densable Pjs(mode): auto || (plan && isAutoModeActive) → classifier passthrough
+      const mode = context.getAppState().toolPermissionContext.mode
+      if (mode === 'auto' || (mode === 'plan' && isAutoModeActive())) {
+        return {
+          behavior: 'passthrough' as const,
+          message: 'Message to another agent requires classifier review.',
         }
       }
       return { behavior: 'allow' as const, updatedInput: input }

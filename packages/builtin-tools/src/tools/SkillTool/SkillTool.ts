@@ -74,8 +74,22 @@ import {
   getToolUseIDFromParentMessage,
   tagMessagesWithToolUseID,
 } from '../utils.js'
+import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
 import { SKILL_TOOL_NAME } from './constants.js'
 import { getPrompt } from './prompt.js'
+
+/**
+ * densable 2.1.222 #18 — koa + mvn disable_model_invocation message.
+ * Tell Claude to ask the user to run /skill (or report to coordinator), and
+ * never replicate the skill workflow by other means.
+ */
+export function formatDisableModelInvocationMessage(skillName: string): string {
+  // densable koa(e)
+  const askOrCoordinator = isCoordinatorMode()
+    ? `It cannot be invoked via the ${SKILL_TOOL_NAME} tool. Report to the coordinator that this command is not available to workers.`
+    : `Ask the user to run /${skillName} themselves — it cannot be invoked via the ${SKILL_TOOL_NAME} tool.`
+  return `Skill ${skillName} cannot be used with ${SKILL_TOOL_NAME} tool due to disable-model-invocation. ${askOrCoordinator} Do not replicate this skill's workflow by other means — it is reserved for explicit user invocation.`
+}
 import {
   renderToolResultMessage,
   renderToolUseErrorMessage,
@@ -529,11 +543,12 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       }
     }
 
-    // Check if command has model invocation disabled
+    // densable mvn: disableModelInvocation && !userTypedThisTurn
+    // Skill tool validateInput is model-invoked (userTypedThisTurn=false).
     if (foundCommand.disableModelInvocation) {
       return {
         result: false,
-        message: `Skill ${normalizedCommandName} cannot be used with ${SKILL_TOOL_NAME} tool due to disable-model-invocation`,
+        message: formatDisableModelInvocationMessage(normalizedCommandName),
         errorCode: 4,
       }
     }

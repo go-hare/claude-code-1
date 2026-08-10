@@ -276,10 +276,17 @@ function addToTotalModelUsage(
   return modelUsage
 }
 
+export type SessionCostAttribution = {
+  /** densable 2.1.222 #6 — only set when this request consumed MCP tool results */
+  activeMcpServer?: string
+  activeMcpTool?: string
+}
+
 export function addToTotalSessionCost(
   cost: number,
   usage: Usage,
   model: string,
+  attribution?: SessionCostAttribution,
 ): number {
   const modelUsage = addToTotalModelUsage(cost, usage, model)
   addToTotalCostState(cost, modelUsage, model)
@@ -302,10 +309,21 @@ export function addToTotalSessionCost(
     }
   }
 
+  // densable sge/qur: mcp_server.name only when this request attributed MCP
+  const mcpAttrs =
+    attribution?.activeMcpServer !== undefined
+      ? {
+          'mcp_server.name': attribution.activeMcpServer,
+          ...(attribution.activeMcpTool !== undefined
+            ? { 'mcp_tool.name': attribution.activeMcpTool }
+            : {}),
+        }
+      : {}
+
   const attrs =
     isFastModeEnabled() && usage.speed === 'fast'
-      ? { model, speed: 'fast' }
-      : { model }
+      ? { model, speed: 'fast', ...mcpAttrs }
+      : { model, ...mcpAttrs }
 
   getCostCounter()?.add(cost, attrs)
   getTokenCounter()?.add(usage.input_tokens, { ...attrs, type: 'input' })
@@ -332,10 +350,12 @@ export function addToTotalSessionCost(
         advisorUsage.cache_creation_input_tokens ?? 0,
       cost_usd_micros: Math.round(advisorCost * 1_000_000),
     })
+    // densable: advisor recursion keeps same skill/mcp attribution bag
     totalCost += addToTotalSessionCost(
       advisorCost,
       advisorUsage,
       advisorUsage.model,
+      attribution,
     )
   }
   return totalCost

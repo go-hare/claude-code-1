@@ -406,6 +406,12 @@ const measureTextNode = function (
   }
 
   const textWrap = node.style?.textWrap ?? 'wrap'
+  // densable lWy: wrap-stream measures as wrap then drops the incomplete last row
+  if (textWrap === 'wrap-stream') {
+    const fullyWrapped = wrapText(text, width, 'wrap')
+    const dims = measureText(fullyWrapped, width)
+    return { width: dims.width, height: Math.max(0, dims.height - 1) }
+  }
   const wrappedText = wrapText(text, width, textWrap)
 
   return measureText(wrappedText, width)

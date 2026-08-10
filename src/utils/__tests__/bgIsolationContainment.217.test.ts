@@ -330,6 +330,8 @@ describe('checkAgentWorktreeCwdEscape densable VRu/qRu', () => {
     )
     expect(shellSrc).toContain('checkAgentWorktreeCwdEscape')
     expect(shellSrc).toContain('agentWorktree')
+    expect(shellSrc).toContain('resolveIsolationRoot')
+    expect(shellSrc).toContain('isolationRoot')
     // densable shell stack: context_lost (p && !GZe) → VRu → bash-only ZRu
     expect(shellSrc).toContain('getCwdOverride')
     expect(shellSrc).toContain('context_lost')
@@ -343,15 +345,11 @@ describe('checkAgentWorktreeCwdEscape densable VRu/qRu', () => {
   })
 })
 
-describe('checkWorktreeIsolationWrite densable a9u', () => {
+describe('checkWorktreeIsolationWrite densable a9u / Vyr', () => {
   test('blocks write to shared checkout when isolated in worktree', () => {
-    const { shared, worktree, sharedFile } = makeFixture()
-    const msg = checkWorktreeIsolationWrite(
-      sharedFile,
-      shared,
-      worktree,
-      'session',
-    )
+    const { worktree, sharedFile } = makeFixture()
+    // densable 2.1.222: checkWorktreeIsolationWrite(path, isolationRoot)
+    const msg = checkWorktreeIsolationWrite(sharedFile, worktree)
     expect(msg).not.toBeNull()
     expect(msg!).toContain('isolated in')
     expect(msg!).toContain('worktree copy')
@@ -359,44 +357,34 @@ describe('checkWorktreeIsolationWrite densable a9u', () => {
   })
 
   test('allows write inside the worktree', () => {
-    const { shared, worktree, worktreeFile } = makeFixture()
-    const msg = checkWorktreeIsolationWrite(
-      worktreeFile,
-      shared,
-      worktree,
-      'agent',
-    )
+    const { worktree, worktreeFile } = makeFixture()
+    const msg = checkWorktreeIsolationWrite(worktreeFile, worktree)
     expect(msg).toBeNull()
   })
 
-  test('agent message vs session message', () => {
+  test('agent message vs session message (densable dun)', () => {
     const { shared, worktree, sharedFile } = makeFixture()
-    const agent = checkWorktreeIsolationWrite(
-      sharedFile,
-      shared,
-      worktree,
-      'agent',
-    )
-    const session = checkWorktreeIsolationWrite(
-      sharedFile,
-      shared,
-      worktree,
-      'session',
-    )
+    mockGetCurrentWorktreeSession.mockReturnValue(null)
+    const agent = checkWorktreeIsolationWrite(sharedFile, worktree)
     expect(agent!).toContain('This agent is isolated')
-    expect(session!).toContain('This session is now isolated')
+
+    mockGetCurrentWorktreeSession.mockReturnValue({
+      originalCwd: shared,
+      worktreePath: worktree,
+      worktreeName: 'wt-session',
+      sessionId: 'sess-dun',
+    })
+    // densable 2.1.222 dun: "This session is isolated in the worktree …"
+    const session = checkWorktreeIsolationWrite(sharedFile, worktree)
+    expect(session!).toContain('This session is isolated')
+    expect(session!).toContain('worktree')
   })
 
   test('symlink spelling of shared checkout still blocks (canonical compare)', () => {
-    const { shared, worktree, linkToShared } = makeFixture()
+    const { worktree, linkToShared } = makeFixture()
     if (!linkToShared) return
     const viaLink = join(linkToShared, 'secret.ts')
-    const msg = checkWorktreeIsolationWrite(
-      viaLink,
-      shared,
-      worktree,
-      'session',
-    )
+    const msg = checkWorktreeIsolationWrite(viaLink, worktree)
     expect(msg).not.toBeNull()
     expect(msg!).toContain('worktree copy')
   })
@@ -421,7 +409,8 @@ describe('checkBgIsolationWriteBlock densable hsr', () => {
     })
     const msg = checkBgIsolationWriteBlock(sharedFile)
     expect(msg).not.toBeNull()
-    expect(msg!).toContain('This session is now isolated')
+    // densable 2.1.222 dun noun (session)
+    expect(msg!).toContain('This session is isolated')
   })
 
   test('agentWorktree isolation blocks shared checkout writes', () => {

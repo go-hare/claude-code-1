@@ -60,3 +60,34 @@ describe('areMessageRowPropsEqual densable bT_ briefHiddenCount', () => {
     expect(areMessageRowPropsEqual(baseProps(msg), baseProps(msg))).toBe(true)
   })
 })
+
+describe('areMessageRowPropsEqual densable message ref equality', () => {
+  function assistantText(uuid: string, text: string) {
+    return {
+      type: 'assistant',
+      uuid,
+      message: {
+        content: [{ type: 'text', text }],
+      },
+    } as unknown as Props['message']
+  }
+
+  // densable has no uuid+text stable bail-out — different refs always re-render
+  test('re-renders when message object refs differ even if uuid+text match', () => {
+    const a = assistantText('u1', '按优先序开始 2.1.222 对齐')
+    const b = assistantText('u1', '按优先序开始 2.1.222 对齐')
+    expect(a).not.toBe(b)
+    expect(areMessageRowPropsEqual(baseProps(a), baseProps(b))).toBe(false)
+  })
+
+  test('re-renders when text body changes under same uuid', () => {
+    const a = assistantText('u1', 'first')
+    const b = assistantText('u1', 'second')
+    expect(areMessageRowPropsEqual(baseProps(a), baseProps(b))).toBe(false)
+  })
+
+  test('bails out when same message reference and static', () => {
+    const msg = assistantText('u1', 'same')
+    expect(areMessageRowPropsEqual(baseProps(msg), baseProps(msg))).toBe(true)
+  })
+})

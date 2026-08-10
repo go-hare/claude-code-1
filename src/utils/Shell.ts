@@ -15,6 +15,7 @@ import { generateTaskId } from '../Task.js'
 import {
   checkAgentWorktreeCwdEscape,
   checkAgentWorktreeGoneRecovery,
+  resolveIsolationRoot,
 } from './bgIsolationContainment.js'
 import { getCwdOverride, pwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
@@ -183,10 +184,17 @@ export type ExecOptions = {
   /** When provided, stdout is piped (not sent to file) and this callback fires on each data chunk. */
   onStdout?: (data: string) => void
   /**
-   * densable 2.1.217 `agentWorktree` — isolation worktree path for VRu/qRu
-   * (cwd must stay inside worktree) and ZRu (git redirect) shell gates.
+   * densable 2.1.217 `agentWorktree` — agent isolation worktree path.
+   * densable 2.1.222: VRu/ZRu also run when Qgt falls back to session
+   * EnterWorktree path (`resolveIsolationRoot` = agentWorktree || session).
+   * context_lost / worktree_gone still require agentWorktree (p) only.
    */
   agentWorktree?: string
+  /**
+   * densable `isolationRoot` (f) — optional explicit Qgt override. When
+   * omitted, Shell computes `f ?? p` via resolveIsolationRoot.
+   */
+  isolationRoot?: string
 }
 
 /**
@@ -207,6 +215,7 @@ export async function exec(
     shouldAutoBackground,
     onStdout,
     agentWorktree,
+    isolationRoot: isolationRootOpt,
   } = options ?? {}
   const commandTimeout = timeout || DEFAULT_TIMEOUT
 
@@ -234,11 +243,12 @@ export async function exec(
 
   let cwd = pwd()
 
-  // densable shell isolation stack when agentWorktree (p) is set:
+  // densable shell isolation stack (2.1.222):
+  // p = agentWorktree; f = isolationRoot opt; k = f ?? p ?? Qgt(session)
   // 1) context_lost — p && !GZe() (cwd ALS override missing) — before recovery
-  // 2) worktree_gone — cwd missing and recovery only hits sn() (index 0)
-  // 3) VRu/qRu — cwd touches shared roots && !inside worktree
-  // 4) ZRu — bash only, full AST git-redirect guard
+  // 2) worktree_gone — p && cwd missing and recovery only hits sn() (index 0)
+  // 3) VRu/qRu — k set: cwd touches shared roots && !inside worktree
+  // 4) ZRu — k set && bash only, full AST git-redirect guard
   if (agentWorktree && !getCwdOverride()) {
     // densable GZe() ≈ getCwdOverride() (ALS store present)
     logForDebugging(
@@ -310,12 +320,15 @@ export async function exec(
     return createAbortedCommand()
   }
 
-  if (agentWorktree) {
-    // densable VRu — agentWorktree cwd must not resolve to shared checkout
-    const cwdBlock = checkAgentWorktreeCwdEscape(cwd, agentWorktree)
+  // densable: let k = f ?? p (then Qgt falls back to session worktreePath)
+  const isolationRoot =
+    isolationRootOpt ?? agentWorktree ?? resolveIsolationRoot({ agentWorktree })
+  if (isolationRoot) {
+    // densable hSd/VRu — isolationRoot cwd must not resolve to shared checkout
+    const cwdBlock = checkAgentWorktreeCwdEscape(cwd, isolationRoot)
     if (cwdBlock) {
       logForDebugging(
-        `[worktree] blocked shell exec outside isolation worktree: cwd=${cwd} agentWorktree=${agentWorktree}`,
+        `[worktree] blocked shell exec outside isolation worktree: cwd=${cwd} isolationRoot=${isolationRoot}`,
         { level: 'warn' },
       )
       // densable: O("tengu_agent_worktree_cwd_escape_blocked", {reason: shared_checkout})
@@ -325,16 +338,16 @@ export async function exec(
       return createFailedCommand(cwdBlock)
     }
 
-    // densable: r==="bash"?ZRu(...):null — PowerShell gets VRu only
+    // densable: r==="bash"?QEd/ZRu(...):null — PowerShell gets VRu only
     if (shellType === 'bash') {
       const gitRedirectBlock = await checkZRuGitRedirectCommand(
         command,
         cwd,
-        agentWorktree,
+        isolationRoot,
       )
       if (gitRedirectBlock) {
         logForDebugging(
-          `[worktree] blocked shell exec git redirect: agentWorktree=${agentWorktree}`,
+          `[worktree] blocked shell exec: command redirects git into the shared checkout: cwd=${cwd} isolationRoot=${isolationRoot}`,
           { level: 'warn' },
         )
         // densable: O("tengu_agent_worktree_cwd_escape_blocked", {reason: command_redirect})

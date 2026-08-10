@@ -1,0 +1,166 @@
+tengu-off-switch
+tengu_off_switch_query
+tengu-model-error-overrides block check failed: 
+per_model_block
+fallback
+model_blocked
+rate_limit
+application-inference-profile
+query_tool_schema_build_start
+repl_main_thread
+hook_agent
+Iterator result interface is not an object.
+Tool search disabled: no deferred tools available to search
+system_prompt
+Dynamic tool loading: 
+ deferred tools included
+query_tool_schema_build_end
+tengu_api_before_normalize
+query_message_normalization_start
+tengu_fallback_credit_strip_as_mint_model
+Cannot destructure property 'messagesPreNormalize' from null or undefined value
+tengu_rotunda_pennant_replay
+tengu_api_after_normalize
+advisor_20260301
+tengu_fallback_credit_skipped
+backend_unknown_or_mismatch
+disabled
+api_call
+query_client_creation_start
+controller
+invalid_request
+stream_event
+Streaming stall detected: 
+s gap between events (stall #
+tengu_streaming_stall
+Stream started - received first chunk
+[API:timing] first byte after 
+query_first_chunk_received
+first_chunk
+tengu_rotunda_pennant_materialized
+server_fallback
+cli_malformed_fallback_block
+tengu_rotunda_pennant_malformed
+refusal_fallback
+malformed_fallback_block
+content_block_stop
+[AdvisorTool] Advisor tool called
+tengu_advisor_tool_call
+advisor_tool_result
+[AdvisorTool] Advisor tool result received
+[AdvisorTool] Advisor tool result error: 
+tengu_advisor_tool_error
+thinking
+redacted_thinking
+tengu_streaming_error
+content_block_not_found_delta
+Content block not found
+tool_use
+server_tool_use
+content_block_type_mismatch_input_json
+Content block is not a input_json block
+content_block_input_not_string
+Content block input is not a string
+content_block_type_mismatch_text
+Content block is not a text block
+content_block_type_mismatch_thinking_signature
+Content block is not a thinking block
+content_block_type_mismatch_thinking_delta
+content_block_not_found_stop
+partial_message_not_found
+Message not found
+assistant
+fallback_credit_token
+tengu_fallback_credit_minted
+credited
+fallback_requestE
+route_declined
+server_chain_exhausted
+client_chain_exhausted
+disabled_by_config
+not_armed
+refusal_no_fallback
+max_tokens
+tengu_max_tokens_reached
+: Claude's response exceeded the 
+ output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.
+max_output_tokens
+model_context_window_exceeded
+tengu_context_window_exceeded
+: The model has reached its context window limit.
+stream_completed
+message_start
+tengu_advisor_tool_interrupted
+cli_stream_loop_exited_after_watchdog_clean
+tengu_stream_loop_exited_after_watchdog
+Stream idle timeout - no chunks received
+Stream completed without receiving message_start event - triggering non-streaming fallback
+Stream completed with message_start but no content blocks completed - triggering non-streaming fallback
+tengu_stream_no_events
+Stream ended without receiving any events
+api_stream_text_delivery
+text_block_unyielded
+Streaming completed with 
+ stall(s), total stall time: 
+tengu_streaming_stall_summary
+Streaming idle timeout (byte-level): 
+, aborting stream
+cli_streaming_idle_timeout
+tengu_streaming_idle_timeout
+cli_stream_loop_exited_after_watchdog_error
+Streaming aborted by user: 
+Streaming timeout (SDK abort): 
+Request timed out
+tengu_watchdog_skip_nonstreaming_fallback
+tengu_disable_streaming_to_non_streaming_fallback
+Stream idle timeout - partial response received
+api_error
+tengu_streaming_watchdog_retry
+Stream connection closed (
+tengu_streaming_stale_connection_retry
+attempt_errored
+message_stop
+watchdog
+server_error
+network_down
+stale_connection
+connection closed (
+ after message_delta (stop_reason=
+tengu_streaming_close_after_complete
+end_turn
+Stream idle timeout after 
+Mid-stream server error after 
+) after 
+tengu_streaming_partial_finalized
+: Response stalled mid-stream. The response above may be incomplete.
+: Server error mid-response. The response above may be incomplete.
+: Connection closed mid-response. The response above may be incomplete.
+: Response stalled while thinking, before producing a response. Try again.
+: Connection closed while thinking, before producing a response. Try again.
+tengu_streaming_fallback_to_non_streaming
+partial_yield
+[dispatch] Stream connection error (
+) with anthropic-dispatch-id before first event; retrying without it
+tengu_dispatch_header_fallback
+body_phase
+Stream connection error (
+retrying
+connection_retry
+tengu_streaming_529_retry
+tengu_api_opus_fallback_triggered
+mid_stream
+api_request
+api_request_fallback_triggered
+overloaded
+Error streaming (non-streaming fallback disabled): 
+Error streaming, falling back to non-streaming mode: 
+cli_nonstreaming_fallback_started
+tengu_nonstreaming_fallback_started
+streaming_fallback_began
+The iterator, to which yield* delegated iteration, does not have a 'throw' method.
+Cannot destructure property 'message' from null or undefined value
+tengu_nonstreaming_fallback_success
+Streaming endpoint returned 404, falling back to non-streaming mode
+404_stream_creation
+Non-streaming fallback also failed: 
+Error in API request: 

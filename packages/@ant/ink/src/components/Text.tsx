@@ -74,6 +74,13 @@ const memoizedStylesForWrap: Record<NonNullable<Styles['textWrap']>, Styles> = {
     flexDirection: 'row',
     textWrap: 'wrap-trim',
   },
+  // densable wrap-stream — incomplete streaming line is measured/rendered without the last visual row
+  'wrap-stream': {
+    flexGrow: 0,
+    flexShrink: 1,
+    flexDirection: 'row',
+    textWrap: 'wrap-stream',
+  },
   end: {
     flexGrow: 0,
     flexShrink: 1,

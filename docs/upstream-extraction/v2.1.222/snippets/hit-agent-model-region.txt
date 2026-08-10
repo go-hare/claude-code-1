@@ -1,0 +1,91 @@
+ssion)"),udp(),null;if(n-r.timestamp>ddp){T("Passes: Cache stale, returning cached data and refreshing in background"),udp();let{timestamp:s,...a}=r;return a}T("Passes: Using fresh cached eligibility data");let{timestamp:o,...i}=r;return i}async function mdp(){if(xa())return;VJs()}var ddp=86400000,Bbn=null,web,zJs;var JWt=v(()=>{ko();_n();OQe();ze();st();kf();Xt();l_();web={"no-auth":"no_auth","data-residency":"data_residency","essential-traffic-only":"essential_traffic_only"};zJs=class zJs extends Error{errorCode;constructor(e,t){super(e);this.name="ReferralEligibilityUnavailableError",this.errorCode=t}}});var qJs;var hdp=v(()=>{JWt();qJs={type:"local-jsx",name:"passes",get description(){if(XWt())return"Share a free week of Claude Code with friends and earn usage credits";return"Share a free week of Claude Code with friends"},get isHidden(){let{eligible:e,hasCache:t}=JAr();return!e||!t},requires:{ink:!0}}});var Ceb,KJs;var gdp=v(()=>{ko();Ceb={type:"local-jsx",name:"privacy-settings",description:"View and update your privacy settings",isEnabled:()=>QJe(),requires:{ink:!0}},KJs=Ceb});var xeb,ydp;var _dp=v(()=>{xeb={type:"local-jsx",name:"hooks",description:"View hook configurations for tool events",immediate:!0},ydp=xeb});var keb,bdp;var Sdp=v(()=>{fhe();keb={type:"local-jsx",name:"loops",description:"List, create, and delete loops",immediate:!0,isEnabled:()=>!1},bdp=keb});var XJs={};it(XJs,{deriveFirstPrompt:()=>Adp,createFork:()=>Tdp,call:()=>Ieb,branchAndResume:()=>Cdp});function Adp(e){let t={commandFallback:""},r;for(let n of e)if(r=IDt(n,t),r!==void 0)break;return r??=t.commandFallback,r.replace(/\s+/g," ").trim().slice(0,100).trimEnd()||"Branched conversation"}async function Tdp(e,t,r){let n=Edp.randomUUID(),o=Pt(),i=lE(pn()),s=zM(n),a=g1()??Eb();await hzo.mkdir(i,{recursive:!0,mode:448});let l;try{l=mzo.createReadStream(a,{encoding:"utf8"}),await YJs.once(l,"open")}catch(A){if(Qt(A))throw Error("No conversation to branch");throw xe(A),A}let c=mzo.createWriteStream(s,{encoding:"utf8",mode:384}),u=null;c.on("error",(A)=>{u=wn(A)});let d=vdp.createInterface({input:l,crlfDelay:1/0}),p=new Set(e.map((A)=>A.uuid)),f=new Map,m=[],h,g=async()=>{c.destroy(),await hzo.unlink(s).catch(()=>{})},_=async(A)=>{if(u)throw await g(),u;if(!c.write(A))await YJs.once(c,"drain").catch(()=>{})};try{for await(let A of d){if(A.length===0)continue;let C;try{C=Wt(A)}catch{continue}if(C.type==="content-replacement"&&C.sessionId===o){m.push(...C.replacements);continue}if(C.type==="relocated"&&C.sessionId===o&&C.relocatedCwd){h=C.relocatedCwd;continue}if(!lue(C)||C.isSidechain||!p.has(C.uuid))continue;f.set(C.uuid,C)}}catch(A){throw await g(),A}finally{d.close(),l.destroy()}let b=null,E=null,S=[];try{for(let A of e){let C=f.get(A.uuid);if(!C)continue;let x=C.type==="system"&&C.subtype==="model_refusal_fallback"?{neutralizedByFork:!0}:void 0,R={...C,...x,sessionId:n,parentUuid:b,isSidechain:!1,sessionKind:void 0,forkedFrom:{sessionId:o,messageUuid:C.uuid}},k={...C,...x,sessionId:n};if(S.push(k),E=C,await _(Re(R)+`
+`),C.type!=="progress")b=C.uuid}}catch(A){throw await g(),A}if(E===null)throw await g(),Error("No messages to branch");if(r?.length)for(let A of r){let C={...A,cwd:E.cwd,userType:E.userType,entrypoint:E.entrypoint,version:E.version,gitBranch:E.gitBranch,sessionId:n,timestamp:new Date().toISOString()},x={...C,parentUuid:b,isSidechain:!1};if(S.push(C),await _(Re(x)+`
+`),A.type!=="progress")b=A.uuid}if(m.length>0)await _(Re({type:"content-replacement",sessionId:n,replacements:m})+`
+`);if(h)await _(Re({type:"relocated",sessionId:n,relocatedCwd:h})+`
+`);if(c.end(),await wdp.finished(c).catch(()=>{}),u)throw await g(),u;return{sessionId:n,title:t,forkPath:s,serializedMessages:S,contentReplacementRecords:m}}async function Heb(e){let t=`${e} (Branch)`;if((await UTe(t,{exact:!0})).length===0)return t;let n=await UTe(`${e} (Branch`),o=new Set([1]),i=new RegExp(`^${VF(e)} \\(Branch(?: (\\d+))?\\)$`);for(let a of n){let l=a.customTitle?.match(i);if(l)if(l[1])o.add(parseInt(l[1],10));else o.add(1)}let s=2;while(o.has(s))s++;return`${e} (Branch ${s})`}async function Cdp(e,t,r={}){let n=Pt(),o=UA(n);try{let{sessionId:i,title:s,forkPath:a,serializedMessages:l,contentReplacementRecords:c}=await Tdp(e.messages,r.customTitle,r.extraMessages),u=new Date,d=Adp(l),p=s?.replace(/\s+/g," ").trim()??await Heb(d),f=s?"user":"auto";await Pce(i,p,a,f),await jjt(i,p,a,f),N("tengu_conversation_forked",{message_count:l.length,has_custom_title:!!s});let m={date:ys(u.toISOString(),"T"),messages:l,fullPath:a,value:u.getTime(),created:u,modified:u,firstPrompt:d,messageCount:l.length,isSidechain:!1,sessionId:i,customTitle:p,agentName:p,contentReplacements:c},h=s?` "${p}"`:"",g=o?` ("${o}")`:"",_=`Branched conversation${h}. You are now in the new branch (session ${i}). Use /resume ${n}${g} to return to the original, or run \`claude -r ${n}\` in a new terminal.`;if(e.resume)await e.resume(i,m,"fork"),L4e($A(),p,"user"),t(_,{display:"system"});else t(`Branched conversation${h}. Resume with: /resume ${i}`);return!0}catch(i){let s=i instanceof Error?i.message:"Unknown error occurred";return t(`Failed to branch conversation: ${s}`),!1}}async function Ieb(e,t,r){return await Cdp(t,e,{customTitle:r?.trim()||void 0}),null}var Edp,YJs,mzo,hzo,vdp,wdp;var JJs=v(()=>{mt();$y();kt();st();h8r();Ir();Vv();bl();nr();Hr();Edp=require("crypto"),YJs=require("events"),mzo=require("fs"),hzo=require("fs/promises"),vdp=require("readline"),wdp=require("stream/promises")});var Reb,xdp;var kdp=v(()=>{Reb={type:"local-jsx",name:"branch",description:"Create a branch of the current conversation at this point",argumentHint:"[name]",load:()=>Promise.resolve().then(() => (JJs(),XJs))},xdp=Reb});function iSt(e){if(!clt())return null;return(e.some((r)=>rl(r,Hdp))?Peb:e.some((r)=>rl(r,wYe))?Deb:e.some((r)=>rl(r,bwe))?Meb:Leb)+Oeb}var Hdp="save_skill",Peb,Deb,Meb,Leb=`# Saving skills
+
+You cannot create or modify skills in this session. Skill files on disk \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them, or writing a new skill file, does not create or change a skill in the user's account, and this session's filesystem is discarded when the session ends. If asked to create or change a skill, say you can't do that here and point the user to their claude.ai settings.`,Oeb;var jbn=v(()=>{Ws();pb();Peb=`# Saving skills
+
+Skill files on disk in this session \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them does not change the user's saved skill. To create a skill, or update one the user asks to change, use the \`${Hdp}\` tool.`,Deb=`# Saving skills
+
+You cannot create or modify skills in this session directly. Skill files on disk \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them, or writing a new skill file, does not create or change a skill in the user's account, and this session's filesystem is discarded when the session ends. If the user wants a skill created or changed, propose it with the \`${wYe}\` tool.`,Meb=`# Saving skills
+
+You cannot create or modify skills in this session directly. Skill files on disk \u2014 including synced copies of the user's account skills \u2014 are a read-only cache: editing them, or writing a new skill file, does not create or change a skill in the user's account, and this session's filesystem is discarded when the session ends. If the user wants a skill created or changed, write it as a \`.skill\` file (a zip archive) or a single \`SKILL.md\`, and send it to them with the \`${bwe}\` tool \u2014 a skill file delivered this way may give them an option to save it, depending on their organization's settings. You get no signal whether they saved it: report the skill as delivered, never as saved.`,Oeb=` Skills that are part of an installed plugin are the exception: if this session includes the \`${nMo}\` skill, customize those through it \u2014 it edits the plugin and repackages it.`});function QAr(e,t){let r=ba(e).toLowerCase(),n=pYr.find((i)=>i===r);if(n)return n;if(r==="best"||r==="opusplan")return"other";let o=ba(t).toLowerCase();return pYr.find((i)=>o.includes(i))??"other"}var QJs=v(()=>{L_()});function Neb(){return"inherit"}function coe(e,t,r,n,o){let i=()=>HO({permissionMode:n??"default",mainLoopModel:t,exceeds200kTokens:!1}),s=(p,f,m=p)=>{let h=a$(p);$eb(p,h!==null);let g=h!==null?f?ZJs(SP(h)):h:i();if(ba($i(m)).toLowerCase()!==ba($i(g)).toLowerCase())o?.(p,g,h!==null?"family_step_down":"parent_inherit");return g},a=te.CLAUDE_CODE_SUBAGENT_MODEL;if(a&&a!=="inherit"){let p=$i(a);if(!uc(p))return s(a,!1);return p}let l=lso(t),c=(p,f)=>{if(l&&i_(p)==="bedrock"){if(lso(f))return p;return aut(p,l)}return p};if(r){if(r==="inherit")return i();if(Idp(r,t))return t;let p=c(ZJs($i(r)),r);if(!uc(p))return s(r,!0,p);return p}let u=e??Neb();if(u==="inherit")return i();if(Idp(u,t))return t;let d=c(ZJs($i(u)),u);if(!uc(d))return s(u,!0,d);return d}function Rdp(e,t,r,n,o,i){if(i===void 0)return coe(e,t,r,n,o);let s,a=coe(e,t,r,n,(m,h,g)=>{s=g,o?.(m,h)}),l=te.CLAUDE_CODE_SUBAGENT_MODEL,[c,u]=l&&l!=="inherit"?[l,"env"]:r?r==="inherit"?[t,"inherit"]:[r,"tool"]:e&&e!=="inherit"?[e,"frontmatter"]:[t,"inherit"],d=QAr(c,ao(c)),p=QAr(a,ao(a)),f={source:ge(i),precedence:ge(u),requested_family:ge(d),resolved_family:ge(p),requested_model:Ou(c)??Ae("none"),resolved_model:Ou(a)??Ae("none")};if(s==="family_step_down")Pe("subagent_model_resolve","family_alias_stepped_down",f);else if(s==="parent_inherit")Pe("subagent_model_resolve","override_dropped",f);else if(d!=="other"&&p!=="other"&&d!==p)if(u==="inherit")Pe("subagent_model_resolve","inherit_family_mismatch",f);else Pe("subagent_model_resolve","family_mismatch",f);else Se("subagent_model_resolve",f);return a}function $eb(e,t){T(`Subagent model "${e}" is not in the availableModels allowlist; ${t?"using the newest allowed model in its family":"inheriting the parent model"} instead`,{level:"warn"})}function ZJs(e){let r=ao(e).includes("opus")&&$9(e);if(i$()&&!ZS(e)&&r)return SP(e+"[1m]");return e}function Idp(e,t){let r=ao(t);switch(e.toLowerCase()){case"fable":return r.includes("fable");case"opus":return r.includes("opus");case"sonnet":return r.includes("sonnet");case"haiku":return r.includes("haiku");default:return!1}}var sSt=v(()=>{Xt();VG();wk();ze();Cr();Hr();L_();HUe();Si();rq();QJs();Cs()});var uoe=4096;function aSt(e,t){if(t!=null)return{timeout:t};return{timeout:e}}function QWt(e){BTe.runInContext(`(() => {
+    Object.defineProperty(Error, 'prepareStackTrace', {
+      value: (err, sites) => String(err.stack ?? err),
+      writable: false, configurable: false,
+    });
+    // Delete globals with no REPL use case that either run callbacks on the
+    // host event loop outside any try/catch (FinalizationRegistry \u2014 same
+    // DoS shape as a throwing setTimeout callback) or expose shared-memory
+    // primitives (Atomics/SharedArrayBuffer \u2014 no cross-realm use, pure
+    // attack-surface reduction).
+    for (const g of ['ShadowRealm', 'WebAssembly', 'FinalizationRegistry',
+                     'WeakRef', 'Atomics', 'SharedArrayBuffer',
+                     'queueMicrotask',
+                     // eval is NOT deleted here \u2014 hardenVMIntrinsics is
+                     // shared with REPLTool (codeGeneration:{strings:true}).
+                     // WorkflowTool blocks eval via codeGeneration:false.
+                     // JSC debug/shell globals \u2014 present only if
+                     // JSC_useDollarVM=1 or similar, but $vm is a full
+                     // escape (createGlobalObject, addressOf, runScript).
+                     '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile',
+                     'Loader']) {
+      delete globalThis[g];
+    }
+    // SES-style enable-property-override: convert common shadowed data props
+    // to accessors whose setter defineProperty's onto the receiver. Otherwise
+    // freezing makes them non-writable, and [[Set]] on an instance (e.g.
+    // "this.name='X'" in an Error subclass ctor) throws in strict / no-ops in
+    // sloppy \u2014 the TC39 "override mistake".
+    function enableOverride(proto, key) {
+      const d = Object.getOwnPropertyDescriptor(proto, key);
+      if (!d || 'get' in d) return;
+      const v = d.value;
+      Object.defineProperty(proto, key, {
+        get() { return v },
+        set(nv) {
+          if (this === proto) return;
+          Object.defineProperty(this, key, { value: nv, writable: true, enumerable: true, configurable: true });
+        },
+        enumerable: d.enumerable, configurable: true,
+      });
+    }
+    const errorCtors = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, globalThis.SuppressedError].filter(Boolean);
+    const errorProtos = errorCtors.map(C => C.prototype);
+    for (const [proto, keys] of [
+      // All Object.prototype data props \u2014 Object.assign({}, {propertyIsEnumerable:x})
+      // and friends would otherwise throw post-freeze. Accessor props (__proto__,
+      // __define/lookupGetter__) are skipped by the 'get' in d guard above.
+      [Object.prototype, Object.getOwnPropertyNames(Object.prototype)],
+      [Function.prototype, ['toString', 'constructor', 'name', 'length']],
+      [Array.prototype, ['toString', 'constructor']],
+      [Date.prototype, ['toString', 'toLocaleString', 'valueOf', 'constructor']],
+      ...errorProtos.map(p => [p, ['name', 'message', 'toString', 'constructor']]),
+    ]) for (const k of keys) enableOverride(proto, k);
+    // Error subclasses each have their own .prototype; freezing only Error
+    // leaves TypeError.prototype.then etc. writable. SuppressedError is
+    // from the explicit-resource-management proposal (bun/JSC ship it).
+    for (const C of [Promise, Object, Array, Function, globalThis.Iterator,
+                     Map, Set, WeakMap, WeakSet,
+                     String, Number, Boolean, Symbol, BigInt,
+                     Date, RegExp, ArrayBuffer, DataView,
+                     ...errorCtors,
+                     typeof URL !== 'undefined' ? URL : undefined,
+                    ].filter(Boolean)) {
+      Object.freeze(C);
+      Object.freeze(C.prototype);
+    }
+    // %TypedArray% (shared prototype of all typed arrays) + each concrete.
+    for (const C of [Object.getPrototypeOf(Int8Array),
+                     Int8Array, Uint8Array, Uint8ClampedArray,
+                     Int16Array, Uint16Array, Int32Array, Uint32Array,
+                     globalThis.Float16Array, Float32Array, Float64Array,
+                     BigInt64Array, BigUint64Array].filter(Boolean)) {
+      Object.freeze(C);
+      Object.freeze(C.prototype);
+    }
+    // %AsyncFunction%, %GeneratorFunction%, %AsyncGeneratorFunction% and
+    // their .prototype are not reachable as globals \u2014 walk from instances.
+    for (const f of [async()=>{}, function*(){}, async function*(){}]) {
+      Object.freeze(f.constru

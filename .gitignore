@@ -58,4 +58,6 @@ credentials.json
 .test-progress.md
 .squash-tmp/
 .git.*-backup
-packages/@go-hare/claude-code-win32-x64/claude.exe
+# Platform-native CLI binaries (built by scripts/publish.ts; never commit)
+packages/@go-hare/claude-code-*/claude
+packages/@go-hare/claude-code-*/claude.exe

@@ -1,0 +1,44 @@
+# densable 2.1.222 #19 — raw git blob diffs (--no-ext-diff / --no-textconv)
+# Product: /diff, RC workspace preserve, web file-edit, ultrareview probes
+# use raw blobs (ignore textconv / external diff drivers).
+# SEA: gnr=["--no-ext-diff","--no-textconv"] shared constant
+
+## densable gnr
+```
+gnr=["--no-ext-diff","--no-textconv"]
+```
+
+## densable preserveGitStateForIssue (rqi + merge-base path)
+```
+// HEAD-only fallback (shallow / no remote / merge-base fail):
+dn(lo(),[...xs,"diff",...gnr,"HEAD"],{useCwd:!0,maxBuffer:t})
+
+// merge-base success:
+dn(lo(),[...xs,"diff",...gnr,s],{useCwd:!0,maxBuffer:t})
+dn(lo(),[...xs,"format-patch","--no-ext-diff","--no-textconv",`${s}..HEAD`,"--stdout"],...)
+```
+
+## densable URo (/diff content)
+```
+// shortstat probe WITHOUT gnr:
+["--no-optional-locks","diff",t,"--shortstat"]
+// full content WITH gnr:
+["--no-optional-locks","diff",...gnr,t]
+```
+
+## densable jRo (web / single-file tool-use diff)
+```
+["--no-optional-locks","diff",...gnr,s,"--",r]
+```
+
+## densable ultrareview (reviewRemote) shortstat/numstat
+```
+["diff","--no-ext-diff","--no-textconv","--shortstat", mergeBase]
+["-c","core.quotepath=false","diff","--no-ext-diff","--no-textconv","--numstat", mergeBase]
+```
+
+## go-hare
+- src/utils/git.ts — export RAW_GIT_DIFF_FLAGS (= gnr); preserveGitStateForIssue
+- src/utils/gitDiff.ts — fetchGitDiffHunks + fetchSingleFileGitDiff (+ numstat)
+- src/commands/review/reviewRemote.ts — reuse RAW_GIT_DIFF_FLAGS
+- tests: src/utils/__tests__/rawGitDiffFlags.222.test.ts

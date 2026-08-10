@@ -282,11 +282,16 @@ export function allToolsResolved(msg: RenderableMessage, resolvedToolUseIDs: Set
  * Conservative memo comparator that only bails out when we're CERTAIN
  * the message won't change. Fails safe by re-rendering when uncertain.
  *
+ * densable has no uuid+text content-stable bail-out — different message
+ * object refs always re-render (streaming dual-● is handled by store path).
+ *
  * Exported for testing.
  */
 export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
   // Different message reference = content may have changed, must re-render
-  if (prev.message !== next.message) return false;
+  if (prev.message !== next.message) {
+    return false;
+  }
 
   // Screen mode change = re-render
   if (prev.screen !== next.screen) return false;
