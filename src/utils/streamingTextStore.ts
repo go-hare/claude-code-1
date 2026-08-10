@@ -104,10 +104,16 @@ export function resolveStreamingDisplay(
   if (cached) return cached
   const { raw, transformed, salvage, exact } = state
   const base = transformed ?? (raw || null)
-  const displayed =
+  // densable: (salvage?r7o:base)||null — falsy only. Whitespace-only still
+  // truthy there and would paint a lone ●; treat trim-empty as null so
+  // STREAM_FLAG_DISPLAYED / hasStreamingText match visible content.
+  // (XML strip-only empty is handled in StreamingTextPreview via
+  // isEmptyMessageText — cannot import messages.ts here: circular.)
+  const merged =
     (salvage !== null
       ? mergeSalvagePrefix(salvage, base ?? '', exact)
       : base) || null
+  const displayed = merged !== null && merged.trim() !== '' ? merged : null
   const resolved: StreamingDisplayResolved = {
     displayed,
     hideTrailingLine: transformed === null && !!raw,

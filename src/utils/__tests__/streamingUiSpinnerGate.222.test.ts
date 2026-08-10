@@ -24,6 +24,34 @@ describe('densable zm streaming spinner gate', () => {
     expect(src).toContain('isBriefOnly);')
   })
 
+  test('Messages hasContentAfter is densable y||aem only (no streamingPreview invent)', () => {
+    // densable SEA: Tt=collapsed_read_search&&(y||aem(...)); y=hasStreamingText
+    // f786a46d invent ||streamingPreview made collapsed groups past-tense for
+    // the whole isLoading window (empty ● + "Ran N" while Cooking).
+    const src = readFileSync(
+      join(ROOT, 'src/components/Messages.tsx'),
+      'utf8',
+    ).replace(/\r\n/g, '\n')
+    expect(src).toContain('!!hasStreamingText ||')
+    expect(src).toContain(
+      'hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs)',
+    )
+    expect(src).not.toContain('!!streamingPreview')
+    // legacy streamingText must not gate collapse either
+    expect(src).not.toMatch(/hasContentAfter\s*=\s*[\s\S]*?!!streamingText/)
+  })
+
+  test('StreamingTextPreview hides empty-after-strip (no lone ●)', () => {
+    const src = readFileSync(
+      join(ROOT, 'src/components/StreamingTextPreview.tsx'),
+      'utf8',
+    ).replace(/\r\n/g, '\n')
+    expect(src).toContain('isEmptyMessageText')
+    expect(src).toContain(
+      'if (!displayed || isEmptyMessageText(displayed)) return null',
+    )
+  })
+
   test('clearStreamingText is densable cX-shaped (no setSalvage in clear body)', () => {
     const src = readFileSync(
       join(ROOT, 'src/screens/REPL.tsx'),

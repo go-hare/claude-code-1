@@ -298,10 +298,15 @@ type Props = {
   streamingText?: string | null;
   /**
    * densable streamingPreview (XEl element). When set, rendered instead of the
-   * inline streamingText row. hasStreamingText gates collapsed-group scans.
+   * inline streamingText row. Mounted for the whole isLoading window; XEl
+   * itself returns null when the store has no displayed text. Do not use
+   * truthiness of this prop for collapsed-group past-tense (use hasStreamingText).
    */
   streamingPreview?: React.ReactNode;
-  /** densable hasStreamingText — true when preview store has displayed content */
+  /**
+   * densable hasStreamingText (y / Jbe) — true when preview store has
+   * STREAM_FLAG_DISPLAYED. Gates collapsed_read_search hasContentAfter.
+   */
   hasStreamingText?: boolean;
   /** When true, only show Brief tool output (hide everything else) */
   isBriefOnly?: boolean;
@@ -861,17 +866,14 @@ const MessagesImpl = ({
   const renderMessageRow = (msg: RenderableMessage, index: number) => {
     const prevType = index > 0 ? renderableMessages[index - 1]?.type : undefined;
     const isUserContinuation = msg.type === 'user' && prevType === 'user';
-    // hasContentAfter is only consumed for collapsed_read_search groups;
-    // skip the scan for everything else. streaming preview is rendered as a
-    // sibling after this map, so it's never in renderableMessages — OR it
-    // in explicitly so the group flips to past tense as soon as text starts
-    // streaming instead of waiting for the block to finalize.
+    // densable: Tt = collapsed_read_search && (y || aem(...))
+    // y = hasStreamingText only (U2a / STREAM_FLAG_DISPLAYED). Do NOT OR
+    // streamingPreview — preview element is mounted for the whole isLoading
+    // window while XEl may still return null, which falsely past-tenses
+    // "Ran N bash commands" and leaves a lone ● before Cooking.
     const hasContentAfter =
       msg.type === 'collapsed_read_search' &&
-      (!!streamingText ||
-        !!hasStreamingText ||
-        !!streamingPreview ||
-        hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs));
+      (!!hasStreamingText || hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs));
 
     // Official densable 2.1.210: no message-distance diff collapse prop.
     // Condensed style is only for subagent/grouped tool views; scratchpad

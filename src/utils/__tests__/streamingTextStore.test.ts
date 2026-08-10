@@ -51,6 +51,21 @@ describe('resolveStreamingDisplay densable Qci', () => {
     expect(r.displayed).toBe('xform')
     expect(r.hideTrailingLine).toBe(false)
   })
+
+  test('whitespace-only displayed collapses to null (no lone ● / DISPLAYED)', () => {
+    const r = resolveStreamingDisplay({
+      raw: '   \n  ',
+      transformed: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe(null)
+    const store = createStreamingDisplayStore()
+    store.setRaw('  \n')
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
+    // raw still present for hideTrailing bookkeeping
+    expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
+  })
 })
 
 describe('StreamingTextFlushBuffer densable UNf', () => {
