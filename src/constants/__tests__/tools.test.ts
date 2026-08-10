@@ -1,35 +1,54 @@
-import { describe, test, expect, beforeEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
+import { growthbookMock } from '../../../tests/mocks/growthbook'
 import { mock } from 'bun:test'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 // Mock growthbook to cut analytics dependency
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
-  getFeatureValue_DEPRECATED: async () => undefined,
-  getFeatureValue_CACHED_WITH_REFRESH: async () => undefined,
-  hasGrowthBookEnvOverride: () => false,
-  getAllGrowthBookFeatures: () => ({}),
-  getGrowthBookConfigOverrides: () => ({}),
-  setGrowthBookConfigOverride: () => {},
-  clearGrowthBookConfigOverrides: () => {},
-  getApiBaseUrlHost: () => undefined,
-  onGrowthBookRefresh: () => {},
-  initializeGrowthBook: async () => {},
-  checkSecurityRestrictionGate: async () => false,
-  checkGate_CACHED_OR_BLOCKING: async () => false,
-  refreshGrowthBookAfterAuthChange: () => {},
-  resetGrowthBook: () => {},
-  refreshGrowthBookFeatures: async () => {},
-  setupPeriodicGrowthBookRefresh: () => {},
-  stopPeriodicGrowthBookRefresh: () => {},
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+
+// densable TX special cases — hermetic mocks for settings / fork gate.
+// mock.module is process-global: keep settings exports complete enough that
+// sibling tests don't crash on missing named exports.
+const settingsNonDeferrable: string[] = []
+const settingsStub = {
+  non_deferrable_builtins: settingsNonDeferrable as string[] | undefined,
+}
+mock.module('src/utils/settings/settings.js', () => ({
+  getInitialSettings: () => settingsStub,
+  getSettings_DEPRECATED: () => settingsStub,
+  getSettingsForSource: () => settingsStub,
+  getSettingsWithSources: () => ({ effective: settingsStub, sources: {} }),
+  getSettingsWithErrors: () => ({ settings: settingsStub, errors: [] }),
+  getSettingsFilePathForSource: () => undefined,
+  getSettingsRootPathForSource: () => '/',
+  getRelativeSettingsFilePathForSource: () => undefined,
+  updateSettingsForSource: () => {},
+  loadManagedFileSettings: () => ({ settings: null, errors: [] }),
+  getManagedFileSettingsPresence: () => ({ exists: false }),
+  parseSettingsFile: () => ({ settings: null, errors: [] }),
+  getPolicySettingsOrigin: () => null,
+  settingsMergeCustomizer: () => undefined,
+  getManagedSettingsKeysForLogging: () => [],
+  hasSkipDangerousModePermissionPrompt: () => false,
+  hasAutoModeOptIn: () => false,
+  getUseAutoModeDuringPlan: () => false,
+  getAskUserQuestionTimeout: () => 'never',
+  askUserQuestionTimeoutToMs: () => null,
+  getAutoModeConfig: () => null,
+  rawSettingsContainsKey: () => false,
+}))
+
+let forkEnabled = false
+mock.module('src/utils/forkSubagentGate.js', () => ({
+  isForkSubagentEnabled: () => forkEnabled,
+  resolveForkSubagentSource: () => (forkEnabled ? 'env' : 'disabled'),
 }))
 
 const { CORE_TOOLS } = await import('../tools.js')
-const { isDeferredTool } = await import(
+const { isDeferredTool, getNonDeferrableBuiltins } = await import(
   '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
 )
 
@@ -66,7 +85,7 @@ describe('CORE_TOOLS', () => {
       'Grep',
       'Agent',
       'AskUserQuestion',
-      'SearchExtraTools',
+      'ToolSearch',
       'WebSearch',
       'WebFetch',
       'Sleep',
@@ -100,54 +119,128 @@ describe('CORE_TOOLS', () => {
   })
 })
 
-describe('isDeferredTool', () => {
-  test('returns false for core tools', () => {
-    const coreNames = ['Read', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent']
-    for (const name of coreNames) {
-      const tool = makeTool({ name })
+describe('isDeferredTool (densable TX)', () => {
+  const prevEntrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  const prevSessionKind = process.env.CLAUDE_CODE_SESSION_KIND
+
+  beforeEach(() => {
+    settingsNonDeferrable.length = 0
+    forkEnabled = false
+    delete process.env.CLAUDE_CODE_ENTRYPOINT
+    delete process.env.CLAUDE_CODE_SESSION_KIND
+  })
+
+  afterEach(() => {
+    if (prevEntrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT
+    else process.env.CLAUDE_CODE_ENTRYPOINT = prevEntrypoint
+    if (prevSessionKind === undefined)
+      delete process.env.CLAUDE_CODE_SESSION_KIND
+    else process.env.CLAUDE_CODE_SESSION_KIND = prevSessionKind
+  })
+
+  test('alwaysLoad: true never defers (even MCP)', () => {
+    expect(
+      isDeferredTool(
+        makeTool({
+          name: 'mcp__server__action',
+          isMcp: true,
+          alwaysLoad: true,
+        }) as never,
+      ),
+    ).toBe(false)
+  })
+
+  test('eGu non_deferrable list never defers', () => {
+    settingsNonDeferrable.push('Config')
+    expect(getNonDeferrableBuiltins()).toContain('Config')
+    expect(
+      isDeferredTool(makeTool({ name: 'Config', shouldDefer: true }) as never),
+    ).toBe(false)
+  })
+
+  test('MCP tools always defer unless alwaysLoad', () => {
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'mcp__server__action', isMcp: true }) as never,
+      ),
+    ).toBe(true)
+  })
+
+  test('ToolSearch never defers', () => {
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'ToolSearch', shouldDefer: true }) as never,
+      ),
+    ).toBe(false)
+  })
+
+  test('Agent defers only when shouldDefer and fork off; never when fork on', () => {
+    // Agent has no shouldDefer in product → not deferred by default
+    expect(isDeferredTool(makeTool({ name: 'Agent' }) as never)).toBe(false)
+    expect(
+      isDeferredTool(makeTool({ name: 'Agent', shouldDefer: true }) as never),
+    ).toBe(true)
+    forkEnabled = true
+    expect(
+      isDeferredTool(makeTool({ name: 'Agent', shouldDefer: true }) as never),
+    ).toBe(false)
+  })
+
+  test('Brief/SendUserMessage and SendUserFile never defer', () => {
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'SendUserMessage', shouldDefer: true }) as never,
+      ),
+    ).toBe(false)
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'SendUserFile', shouldDefer: true }) as never,
+      ),
+    ).toBe(false)
+  })
+
+  test('PushNotification never defers on remote_trigger entrypoint', () => {
+    process.env.CLAUDE_CODE_ENTRYPOINT = 'remote_trigger'
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'PushNotification', shouldDefer: true }) as never,
+      ),
+    ).toBe(false)
+  })
+
+  test('EnterWorktree never defers when SESSION_KIND=bg', () => {
+    process.env.CLAUDE_CODE_SESSION_KIND = 'bg'
+    expect(
+      isDeferredTool(
+        makeTool({ name: 'EnterWorktree', shouldDefer: true }) as never,
+      ),
+    ).toBe(false)
+  })
+
+  test('opt-in: shouldDefer true defers; undefined does not', () => {
+    expect(isDeferredTool(makeTool({ name: 'Config' }) as never)).toBe(false)
+    expect(
+      isDeferredTool(makeTool({ name: 'Config', shouldDefer: true }) as never),
+    ).toBe(true)
+    // Built-ins without shouldDefer (Read/Bash/…) stay non-deferred
+    for (const name of ['Read', 'Edit', 'Bash', 'Glob', 'Grep']) {
       expect(
-        isDeferredTool(tool as never),
-        `${name} should not be deferred`,
+        isDeferredTool(makeTool({ name }) as never),
+        `${name} should not be deferred without shouldDefer`,
       ).toBe(false)
     }
   })
 
-  test('returns false for tools with alwaysLoad: true even if not in CORE_TOOLS', () => {
-    const tool = makeTool({ name: 'CustomTool', alwaysLoad: true })
-    expect(isDeferredTool(tool as never)).toBe(false)
-  })
-
-  test('returns true for non-core built-in tools', () => {
-    const tool = makeTool({ name: 'ConfigTool' })
-    expect(isDeferredTool(tool as never)).toBe(true)
-  })
-
-  test('returns true for agent/team tools (TeamCreate, TeamDelete, SendMessage)', () => {
+  test('team tools defer only with shouldDefer true', () => {
     for (const name of ['TeamCreate', 'TeamDelete', 'SendMessage']) {
-      const tool = makeTool({ name })
-      expect(isDeferredTool(tool as never), `${name} should be deferred`).toBe(
-        true,
-      )
+      expect(
+        isDeferredTool(makeTool({ name, shouldDefer: true }) as never),
+        `${name} should be deferred when shouldDefer`,
+      ).toBe(true)
+      expect(
+        isDeferredTool(makeTool({ name }) as never),
+        `${name} should not defer without shouldDefer`,
+      ).toBe(false)
     }
-  })
-
-  test('returns true for MCP tools', () => {
-    const tool = makeTool({ name: 'mcp__server__action', isMcp: true })
-    expect(isDeferredTool(tool as never)).toBe(true)
-  })
-
-  test('returns false for MCP tools with alwaysLoad: true', () => {
-    const tool = makeTool({
-      name: 'mcp__server__action',
-      isMcp: true,
-      alwaysLoad: true,
-    })
-    expect(isDeferredTool(tool as never)).toBe(false)
-  })
-
-  test('alwaysLoad takes precedence over CORE_TOOLS membership', () => {
-    // A tool in CORE_TOOLS with alwaysLoad: false should still not be deferred
-    const tool = makeTool({ name: 'Read', alwaysLoad: true })
-    expect(isDeferredTool(tool as never)).toBe(false)
   })
 })

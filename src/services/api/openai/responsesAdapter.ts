@@ -41,6 +41,13 @@ function textFromContent(content: unknown): string {
       if (!part || typeof part !== 'object') return ''
       const record = part as Record<string, unknown>
       if (typeof record.text === 'string') return record.text
+      // densable tool_reference → portable text for OpenAI (no beta expansion)
+      if (
+        record.type === 'tool_reference' &&
+        typeof record.tool_name === 'string'
+      ) {
+        return `Loaded tool schema: ${record.tool_name} (now callable directly).`
+      }
       return ''
     })
     .filter(Boolean)

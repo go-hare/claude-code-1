@@ -1,0 +1,9 @@
+needle: prompt-audit + Subcommands + Language Detection exception
+SEA densable 2.1.221
+---
+X5T=["migrate","managed-agents-onboard","prompt-audit"]
+gPl(e): first bare word of args against X5T
+J5T: if gPl(t)!=="prompt-audit" then ask language when lang null
+SKILL.md ## Subcommands table includes migrate (cross-ref prompt-audit.md) + prompt-audit
+Language Detection exception for prompt-audit non-interactive
+shared/prompt-audit.md present (v5m)

@@ -389,10 +389,11 @@ export function getDisabledFsDiagnosticLists(): DisabledFsDiagnosticLists | null
 /**
  * densable host credentials merge for SandboxRuntimeConfig.credentials.
  *
- * - files: path-resolved via resolveSandboxFilesystemPath; settings schema only
- *   accepts mode "deny" (package may still run file mask if ever fed that shape).
+ * - files: path-resolved via resolveSandboxFilesystemPath; densable 2.1.221
+ *   accepts mode "deny"|"mask" + extract/onExtractNoMatch/maskDuplicates/injectHosts.
  * - envVars: later sources win, but mode "deny" is sticky (not overwritten).
- * - mask from projectSettings/localSettings is skipped (untrusted repo).
+ * - mask (files + envVars) from projectSettings/localSettings is skipped
+ *   (untrusted repo).
  * - mask from userSettings is skipped when userSettings source is disabled
  *   (densable `ug("userSettings")` / isSettingSourceEnabled).
  * - allowPlaintextInject only from trusted sources (not project/local, not
@@ -423,10 +424,29 @@ export function mergeSandboxCredentialsForRuntime():
       if (!entry?.path) {
         continue
       }
-      files.push({
+      // densable 2.1.221: skip file mask from untrusted project/local or disabled user
+      if (entry.mode === 'mask' && (isProjectLocal || isUntrustedUser)) {
+        continue
+      }
+      const resolved: NonNullable<Cred['files']>[number] = {
         path: resolveSandboxFilesystemPath(entry.path, source),
         mode: entry.mode,
-      })
+      }
+      if (entry.mode === 'mask') {
+        if (entry.extract !== undefined) {
+          resolved.extract = entry.extract
+        }
+        if (entry.onExtractNoMatch !== undefined) {
+          resolved.onExtractNoMatch = entry.onExtractNoMatch
+        }
+        if (entry.maskDuplicates !== undefined) {
+          resolved.maskDuplicates = entry.maskDuplicates
+        }
+        if (entry.injectHosts !== undefined) {
+          resolved.injectHosts = [...entry.injectHosts]
+        }
+      }
+      files.push(resolved)
     }
 
     for (const entry of cred.envVars ?? []) {

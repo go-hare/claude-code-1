@@ -74,8 +74,8 @@ claude --effort ultracode -p "…"
 **推荐 Host 写法：**
 
 ```jsonc
-// 设普通 effort（并应关掉 ultracode 语义时：改 effortLevel 即可；
-// 明确关 flag 用 ultracode: false）
+// 设普通 effort：CLI 会同时 ultracode:false + N9（densable 211 Host 对齐）
+// 明确关 flag 仍可用 ultracode: false
 { "effortLevel": "high" }
 
 // 开 ultracode（推荐显式 flag）
@@ -98,6 +98,78 @@ await client.applyFlagSettings({ effortLevel: 'high' })
 await client.applyFlagSettings({ ultracode: true })
 await client.applyFlagSettings({ ultracode: false })
 ```
+
+### 3.1.1 同包 `effortLevel` + `ultracode` 冲突语义（固定序）
+
+**应用顺序固定：`effortLevel` 先，`ultracode` 后。**  
+不依赖 JSON key 书写顺序。后写的 `ultracode` 对 **flag** 有最终决定权；开 ultra 时还可 **覆盖** `effortValue` 到 catalog 顶档 wire。
+
+| 同包字段 | 结果 | notes（若有） |
+|----------|------|----------------|
+| 仅 `effortLevel: "medium"` 等普通档 | wire=该档，`ultracode=false`，N9 | — |
+| 仅 `effortLevel: null` | 清 session effort，`ultracode=false`，N9 | — |
+| 仅 `effortLevel: "ultracode"` | **有 wire** → 顶档 + flag + N9；**无 wire** → **整段 no-op**（不抬空 flag） | `ultracode_alias_no_wire` |
+| 仅 `effortLevel` 非法值（非 null/alias/档） | **忽略**该字段（不改 effort/flag） | `effort_level_ignored` |
+| 仅 `ultracode: true` | **有 wire** → 顶档 + flag + N9；**无 wire** → **强制 `ultracode=false`** | `ultracode_true_no_wire` |
+| 仅 `ultracode: false` | 只清 flag，不动 `effortValue` | — |
+| `effortLevel` 普通档 + `ultracode: false` | wire=该档 + flag false（幂等） | — |
+| `effortLevel` 普通档 + `ultracode: true` | **ultra 覆盖** → 顶档 wire + flag true | `same_packet_ultracode_overrode_effort`（当 wire≠原档时） |
+| `effortLevel: "ultracode"` + `ultracode: false` | 别名先开顶档+flag，再被 false 清 flag；**wire 顶档可保留** | `same_packet_ultracode_false_after_alias` |
+| `effortLevel: "ultracode"` + `ultracode: true` | 等同开 ultra | — |
+| `effortLevel: null` + `ultracode: true` | 先 clear，再开 ultra → 有 wire 则顶档+flag | — |
+
+**Host 推荐：** 避免同包塞互相打架的值。UI 滑条应：
+
+- 切普通档 → 只发 `{ "effortLevel": "high" }`（CLI 会清 ultra）
+- 切 Ultracode 末档 → 只发 `{ "ultracode": true }`
+- 从 Ultra 拖回某档 → 推荐 `{ "ultracode": false, "effortLevel": "medium" }`（顺序无关，语义清晰）
+
+### 3.1.2 无 wire 时是否给 Host 显式失败？
+
+**结论：不 hard-fail（不发 `control_response` error），发 soft success + 可选 `effortNotes`。**
+
+| 方式 | 是否采用 | 原因 |
+|------|----------|------|
+| `control_response` subtype=`error` | **否** | 同包可能已合并 `model` 等其它 flag；hard error 会让 Host 以为整包失败，但状态已部分生效 |
+| 静默 success、无反馈 | **否**（相对 211 P0 已补） | Host 无法区分「用户开了 ultra」vs「模型无 wire 被拒」 |
+| **success + `response.effortNotes[]`** | **是** | 与 bootstrap/settings 软拒绝空 flag 一致；权威 UI 仍以随后的 `get_settings.applied` 为准 |
+
+成功响应示例（无 wire 开 ultra）：
+
+```jsonc
+{
+  "type": "control_response",
+  "response": {
+    "subtype": "success",
+    "request_id": "<id>",
+    "response": {
+      "effortNotes": [
+        {
+          "code": "ultracode_true_no_wire",
+          "message": "ultracode:true refused: model claude-haiku-4-5-… has no effort catalog wire; forced ultracode=false (soft success, not control error)."
+        }
+      ]
+    }
+  }
+}
+```
+
+`effortNotes[].code` 枚举：
+
+| code | 含义 |
+|------|------|
+| `ultracode_alias_no_wire` | `effortLevel:"ultracode"` 但模型无 catalog wire → 未改 AppState |
+| `ultracode_true_no_wire` | `ultracode:true` 无 wire → 强制 flag false |
+| `same_packet_ultracode_overrode_effort` | 同包普通 effort 被 `ultracode:true` 覆盖到顶档 |
+| `same_packet_ultracode_false_after_alias` | 同包别名开 ultra 后被 `ultracode:false` 清 flag |
+| `effort_level_ignored` | `effortLevel` 既非 null / 非 `"ultracode"` / 也非可解析 EffortLevel → 忽略该字段 |
+
+Host 验收：
+
+1. 发 `apply_flag_settings` 后 **必须** 再 `get_settings`，以 `applied.ultracode` / `applied.effort` 为准。
+2. 若 `effortNotes` 非空，可 toast / 日志；**不要** 因 notes 重试 hard-fail。
+3. 无 wire 模型：看 `applied.ultracodeOfferable === false`，UI **隐藏** Ultracode 档，不要发 `ultracode:true`。
+4. 同包改 `model` 与 effort/ultracode 时，CLI 先应用 model override 再解析 wire；Host 仍应以随后的 `get_settings.applied` 为准。
 
 ### 3.2 查询 — `get_settings`
 

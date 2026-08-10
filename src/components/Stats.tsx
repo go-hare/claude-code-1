@@ -354,6 +354,12 @@ function OverviewTab({
           </Text>
         </Box>
       </Box>
+      {/* densable 2.1.221 D5a — Input · Output · Cache read · Cache write */}
+      <Box marginBottom={1}>
+        <Text color="subtle" wrap="truncate">
+          {formatTokenBreakdownLine(modelEntries.map(([, usage]) => usage))}
+        </Text>
+      </Box>
 
       {/* Section 2: Activity - Row 1: Sessions | Longest session */}
       <Box flexDirection="row" gap={4}>
@@ -669,13 +675,47 @@ type ModelEntryProps = {
     inputTokens: number;
     outputTokens: number;
     cacheReadInputTokens: number;
+    cacheCreationInputTokens?: number;
   };
   totalTokens: number;
 };
 
+/** densable 2.1.221 `D5a` — aggregate Input · Output · Cache read · Cache write. */
+function formatTokenBreakdownLine(
+  usages: Iterable<{
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  }>,
+): string {
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  for (const u of usages) {
+    input += u.inputTokens || 0;
+    output += u.outputTokens || 0;
+    cacheRead += u.cacheReadInputTokens || 0;
+    cacheWrite += u.cacheCreationInputTokens || 0;
+  }
+  return (
+    `Input ${formatNumber(input)} · Output ${formatNumber(output)} · ` +
+    `Cache read ${formatNumber(cacheRead)} · Cache write ${formatNumber(cacheWrite)}`
+  );
+}
+
+/** densable 2.1.221 `M5a` — per-model cache line. */
+function formatModelCacheLine(usage: { cacheReadInputTokens?: number; cacheCreationInputTokens?: number }): string {
+  return (
+    `Cache: ${formatNumber(usage.cacheReadInputTokens || 0)} read · ` +
+    `${formatNumber(usage.cacheCreationInputTokens || 0)} write`
+  );
+}
+
 function ModelEntry({ model, usage, totalTokens }: ModelEntryProps): React.ReactNode {
   const modelTokens = usage.inputTokens + usage.outputTokens;
-  const percentage = ((modelTokens / totalTokens) * 100).toFixed(1);
+  const percentage = totalTokens > 0 ? ((modelTokens / totalTokens) * 100).toFixed(1) : '0.0';
 
   return (
     <Box flexDirection="column">
@@ -683,7 +723,12 @@ function ModelEntry({ model, usage, totalTokens }: ModelEntryProps): React.React
         {figures.bullet} <Text bold>{renderModelName(model)}</Text> <Text color="subtle">({percentage}%)</Text>
       </Text>
       <Text color="subtle">
-        {'  '}In: {formatNumber(usage.inputTokens)} · Out: {formatNumber(usage.outputTokens)}
+        {'  '}
+        {formatTokenBreakdownLine([usage])}
+      </Text>
+      <Text color="subtle">
+        {'  '}
+        {formatModelCacheLine(usage)}
       </Text>
     </Box>
   );
@@ -1020,7 +1065,8 @@ function renderModelsToAnsi(stats: ClaudeCodeStats): string[] {
     const modelTokens = usage.inputTokens + usage.outputTokens;
     const percentage = ((modelTokens / totalTokens) * 100).toFixed(1);
     lines.push(`${figures.bullet} ${chalk.bold(renderModelName(model))} ${chalk.gray(`(${percentage}%)`)}`);
-    lines.push(chalk.dim(`  In: ${formatNumber(usage.inputTokens)} · Out: ${formatNumber(usage.outputTokens)}`));
+    lines.push(chalk.dim(`  ${formatTokenBreakdownLine([usage])}`));
+    lines.push(chalk.dim(`  ${formatModelCacheLine(usage)}`));
   }
 
   return lines;

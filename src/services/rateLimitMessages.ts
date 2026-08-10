@@ -140,6 +140,19 @@ export function getRateLimitWarning(
   return null
 }
 
+/**
+ * densable 2.1.221 KCs — spend-cap reasons that need individual vs org monthly
+ * copy (not a generic "limit"). org_spend_cap_reached → individual spend limit
+ * for team/enterprise; org_level_disabled_until → org's monthly spend limit.
+ */
+const SPEND_CAP_DISABLED_REASONS = new Set([
+  'org_level_disabled_until',
+  'org_spend_cap_reached',
+] as const)
+
+const CONSUMER_USAGE_SETTINGS_URL =
+  'claude.ai/settings/usage?from=cc_cli_limit_message'
+
 function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
   const resetsAt = limits.resetsAt
   const resetTime = resetsAt ? formatResetTime(resetsAt, true) : undefined
@@ -147,6 +160,38 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     ? formatResetTime(limits.overageResetsAt, true)
     : undefined
   const resetMessage = resetTime ? ` · resets ${resetTime}` : ''
+
+  // densable 2.1.221: before generic overage-rejected copy, re-blame spend caps.
+  // Team/Enterprise org_spend_cap_reached → "individual spend limit" (not org monthly).
+  const disabledReason = limits.overageDisabledReason
+  if (
+    disabledReason &&
+    (SPEND_CAP_DISABLED_REASONS as Set<string>).has(disabledReason)
+  ) {
+    const isIndividualSpendCap = disabledReason === 'org_spend_cap_reached'
+    const subscriptionType = getSubscriptionType()
+    const hasBillingAccess = hasClaudeAiBillingAccess()
+    if (subscriptionType === 'team' || subscriptionType === 'enterprise') {
+      const limit = isIndividualSpendCap
+        ? 'individual spend limit'
+        : "org's monthly spend limit"
+      const suffix = hasBillingAccess
+        ? ' · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage'
+        : ' · run /usage-credits to ask your admin for a higher limit'
+      return formatLimitReachedText(limit, suffix, model)
+    }
+    // Consumer / other: billing access → monthly spend limit + settings URL;
+    // otherwise individual (spend cap) vs org monthly (disabled_until).
+    const limit = hasBillingAccess
+      ? 'monthly spend limit'
+      : isIndividualSpendCap
+        ? 'individual spend limit'
+        : "org's monthly spend limit"
+    const suffix = hasBillingAccess
+      ? ` · raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
+      : ` · ask your admin to raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
+    return formatLimitReachedText(limit, suffix, model)
+  }
 
   // if BOTH subscription (checked before this method) and overage are exhausted
   if (limits.overageStatus === 'rejected') {

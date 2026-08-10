@@ -30,6 +30,7 @@ import { collapseBackgroundBashNotifications } from '../utils/collapseBackground
 import { collapseHookSummaries } from '../utils/collapseHookSummaries.js';
 import { collapseReadSearchGroups } from '../utils/collapseReadSearch.js';
 import { collapseTeammateShutdowns } from '../utils/collapseTeammateShutdowns.js';
+import { filterFoldedLoopNoopMessages } from '../utils/loopNoopFold.js';
 import { getGlobalConfig } from '../utils/config.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { type BriefToolStats, collapseFocusTranscript, type FocusTranscriptMessage } from '../utils/focusTranscript.js';
@@ -627,9 +628,12 @@ const MessagesImpl = ({
 
     const { messages: groupedMessages } = applyGrouping(messagesToShow as MessageType[], tools, verbose);
 
-    const collapsedBase = collapseBackgroundBashNotifications(
-      collapseHookSummaries(collapseTeammateShutdowns(collapseReadSearchGroups(groupedMessages, tools))),
-      verbose,
+    // densable sGf — hide messages folded by UXm loop noop-fold fire lines.
+    const collapsedBase = filterFoldedLoopNoopMessages(
+      collapseBackgroundBashNotifications(
+        collapseHookSummaries(collapseTeammateShutdowns(collapseReadSearchGroups(groupedMessages, tools))),
+        verbose,
+      ),
     );
     // Focus transcript re-collapse + toolStats + pendingText + briefHiddenCount.
     const getAgentToolStats = (agentId: string): BriefToolStats | undefined => {

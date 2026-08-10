@@ -66,6 +66,7 @@ import {
   getBedrockExtraBodyParamsBetas,
   getMergedBetas,
   getModelBetas,
+  getSearchExtraToolsBetaHeader,
 } from '../../utils/betas.js'
 import {
   type ApiSystemMessage,
@@ -217,9 +218,12 @@ import {
   type ThinkingConfig,
 } from 'src/utils/thinking.js'
 import {
+  extractDiscoveredToolNames,
+  getDeferredToolPlaceholderSchema,
   isDeferredToolsDeltaEnabled,
   isSearchExtraToolsEnabled,
 } from 'src/utils/searchExtraTools.js'
+import { stripFoundryUnsupportedToolFields } from 'src/utils/foundryCapabilities.js'
 import { API_MAX_MEDIA_PER_REQUEST } from '../../constants/apiLimits.js'
 import {
   ADVISOR_BETA_HEADER,
@@ -1358,24 +1362,19 @@ async function* queryModel(
     useSearchExtraTools = false
   }
 
-  // Dynamic tool loading: filter deferred tools that haven't been discovered yet
+  // densable query path: when S (tool search on), keep non-deferred + ToolSearch
+  // + tools discovered via Lwe(messages) tool_reference; drop other deferred.
+  // When off, exclude ToolSearch from the tools array entirely.
   let filteredTools: Tools
-
-  // Deferred tools that haven't been discovered are filtered out from the API
-  // request — their schemas are only included after SearchExtraTools discovers them.
+  const discoveredToolNames = useSearchExtraTools
+    ? extractDiscoveredToolNames(messages)
+    : new Set<string>()
 
   if (useSearchExtraTools) {
-    // Never include deferred tools in the API tools array — they are invoked
-    // via ExecuteExtraTool which looks them up from the global tool registry
-    // at runtime. Keeping the tools array stable preserves the prompt cache
-    // across turns (discovered tools no longer bloat the tools JSON).
     filteredTools = tools.filter(tool => {
-      // Always include non-deferred tools (core tools)
       if (!deferredToolNames.has(tool.name)) return true
-      // Always include SearchExtraToolsTool (so it can discover more tools)
       if (toolMatchesName(tool, SEARCH_EXTRA_TOOLS_TOOL_NAME)) return true
-      // All other deferred tools are excluded — use ExecuteExtraTool instead
-      return false
+      return discoveredToolNames.has(tool.name)
     })
   } else {
     filteredTools = tools.filter(
@@ -1383,9 +1382,14 @@ async function* queryModel(
     )
   }
 
-  // Tool search beta header and defer_loading removed — unified self-built
-  // tool search via SearchExtraToolsTool + ExecuteExtraTool for all providers.
-  // No longer relies on API-side tool_reference or defer_loading features.
+  // densable: A = S ? Jvu() : null; if A && provider !== bedrock → betas.push(A)
+  // Bedrock carries the tool-search beta via extra body params instead.
+  if (useSearchExtraTools) {
+    const toolSearchBeta = getSearchExtraToolsBetaHeader()
+    if (getAPIProvider() !== 'bedrock' && !betas.includes(toolSearchBeta)) {
+      betas.push(toolSearchBeta)
+    }
+  }
 
   // Determine if cached microcompact is enabled for this model.
   // Computed once here (in async context) and captured by paramsFromContext.
@@ -1435,10 +1439,12 @@ async function* queryModel(
       : 'system_prompt'
     : 'none'
 
-  // Build tool schemas — no defer_loading since we use self-built tool search
-  // Note: We pass the full `tools` list (not filteredTools) to toolToAPISchema so that
-  // SearchExtraToolsTool's prompt can list ALL available MCP tools. The filtering only affects
-  // which tools are actually sent to the API, not what the model sees in tool descriptions.
+  // densable mqo: deferLoading = S && (deferred || WIb LSP-pending)
+  // Pass full `tools` into toolToAPISchema so ToolSearch prompt sees all MCP tools.
+  const shouldDeferForToolSearch = (tool: Tool): boolean =>
+    useSearchExtraTools &&
+    (deferredToolNames.has(tool.name) || shouldDeferLspTool(tool))
+
   const toolSchemas = await Promise.all(
     filteredTools.map(tool =>
       toolToAPISchema(tool, {
@@ -1447,15 +1453,38 @@ async function* queryModel(
         agents: options.agents,
         allowedAgentTypes: options.allowedAgentTypes,
         model: options.model,
+        deferLoading: shouldDeferForToolSearch(tool),
       }),
     ),
   )
 
+  // densable dBp: inject DeferredToolPlaceholder when tool search is on
   if (useSearchExtraTools) {
+    const placeholder = getDeferredToolPlaceholderSchema()
+    if (
+      placeholder &&
+      !toolSchemas.some(t => 'name' in t && t.name === placeholder.name)
+    ) {
+      // Insert before last tool (densable: splice(max(len-1,0), 0, To))
+      toolSchemas.splice(Math.max(toolSchemas.length - 1, 0), 0, placeholder)
+    }
+    const deferredIncluded = filteredTools.filter(t =>
+      deferredToolNames.has(t.name),
+    ).length
     logForDebugging(
-      `Dynamic tool loading: 0/${deferredToolNames.size} deferred tools in API tools array (all via ExecuteExtraTool)`,
+      `Dynamic tool loading: ${deferredIncluded}/${deferredToolNames.size} deferred tools included` +
+        (discoveredToolNames.size > 0
+          ? ` (${discoveredToolNames.size} discovered)`
+          : ''),
     )
   }
+
+  // densable cnu — strip defer_loading / strict when Foundry deployment learned
+  // those features are unsupported (from prior 400s via uns/dns).
+  const toolSchemasForApi = stripFoundryUnsupportedToolFields(
+    toolSchemas,
+    options.model,
+  )
 
   queryCheckpoint('query_tool_schema_build_end')
 
@@ -1619,7 +1648,7 @@ async function* queryModel(
         messagesForAPI = [
           ...messagesForAPI,
           createUserMessage({
-            content: `<system-reminder>\n<available-deferred-tools>\n${deferredToolList}\n</available-deferred-tools>\nIMPORTANT: The tools listed above are deferred-loading — they are NOT in your tool list. To use them, you MUST first discover a tool via SearchExtraTools, then invoke it with ExecuteExtraTool.\n\nSearchExtraTools and ExecuteExtraTool are core tools already in your tool list right now — call them directly, do NOT use Bash/Glob to find them.\n\nSteps:\n1. SearchExtraTools({"query": "select:<tool_name>"}) — discover the tool and its schema\n2. ExecuteExtraTool({"tool_name": "<name>", "params": {...}}) — invoke it with correct parameters\n</system-reminder>`,
+            content: `<system-reminder>\n<available-deferred-tools>\n${deferredToolList}\n</available-deferred-tools>\nDeferred tools appear by name above. Their schemas are NOT loaded — calling them directly will fail with InputValidationError. Use ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:<name>[,<name>...]" to load tool schemas, then call each tool directly (do not wrap through ExecuteExtraTool).\n</system-reminder>`,
             isMeta: true,
           }),
         ]
@@ -1701,7 +1730,7 @@ async function* queryModel(
       model: advisorModel,
     } as unknown as BetaToolUnion)
   }
-  const allTools = [...toolSchemas, ...extraToolSchemas]
+  const allTools = [...toolSchemasForApi, ...extraToolSchemas]
 
   const isFastMode =
     isFastModeEnabled() &&

@@ -47,6 +47,40 @@ export function isEnvDefinedFalsy(
 }
 
 /**
+ * densable 2.1.211 integer env parse — accepts scientific notation and digit
+ * separators (`1e6`, `64_000`). Invalid/missing → fallback.
+ *
+ * Prefer this over `parseInt` for timeouts, token budgets, and retry counts.
+ * `Number.parseInt('1e6', 10)` is `1` (wrong); `Number('64_000')` is NaN.
+ */
+export function parseEnvInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback
+  const cleaned = raw.trim().replace(/_/g, '')
+  if (cleaned === '') return fallback
+  const n = Number(cleaned)
+  if (!Number.isFinite(n)) return fallback
+  return Math.trunc(n)
+}
+
+/**
+ * Positive-integer ms env (or any positive int). Invalid/missing → undefined.
+ * Same scientific / underscore rules as parseEnvInt.
+ * Truncate first, then require t > 0 — so `1e-1` / `0.9` do not become 0.
+ */
+export function parsePositiveEnvInt(
+  raw: string | undefined,
+): number | undefined {
+  if (raw === undefined || raw === '') return undefined
+  const cleaned = raw.trim().replace(/_/g, '')
+  if (cleaned === '') return undefined
+  const n = Number(cleaned)
+  if (!Number.isFinite(n)) return undefined
+  const t = Math.trunc(n)
+  if (t <= 0) return undefined
+  return t
+}
+
+/**
  * --bare / CLAUDE_CODE_SIMPLE — skip hooks, LSP, plugin sync, skill dir-walk,
  * attribution, background prefetches, and ALL keychain/credential reads.
  * Auth is strictly ANTHROPIC_API_KEY env or apiKeyHelper from --settings.

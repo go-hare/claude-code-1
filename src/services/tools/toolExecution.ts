@@ -537,9 +537,8 @@ export function buildSchemaNotSentHint(
   messages: Message[],
   tools: readonly { name: string }[],
 ): string | null {
-  // Optimistic gating — reconstructing claude.ts's full useSearchExtraTools
-  // computation is fragile. These two gates prevent pointing at a SearchExtraTools
-  // that isn't callable; occasional misfires (Haiku, tst-auto below threshold)
+  // densable Nzy optimistic gating — prevent pointing at ToolSearch that
+  // isn't callable; occasional misfires (Haiku, tst-auto below threshold)
   // cost one extra round-trip on an already-failing path.
   if (!isSearchExtraToolsEnabledOptimistic()) return null
   if (!isSearchExtraToolsToolAvailable(tools)) return null
@@ -547,22 +546,11 @@ export function buildSchemaNotSentHint(
   const discovered = extractDiscoveredToolNames(messages)
   if (discovered.has(tool.name)) return null
 
-  const toolDisplayName = tool.userFacingName
-    ? tool.userFacingName(undefined)
-    : tool.name
-
+  // densable: load via ToolSearch select, then call the tool directly.
   return (
-    `\n\nTool "${toolDisplayName}" is deferred-loading and needs to be discovered before use.\n` +
-    `When using OpenAI-compatible models (DeepSeek, Ollama, etc.), follow these steps:\n` +
-    `1. First discover the tool with SearchExtraTools: ${SEARCH_EXTRA_TOOLS_TOOL_NAME}("select:${tool.name}")\n` +
-    `2. Then call ${toolDisplayName} tool\n` +
-    `\nExample:\n` +
-    `${SEARCH_EXTRA_TOOLS_TOOL_NAME}("select:${tool.name}") → ${toolDisplayName}({ ... })\n` +
-    `\nImportant notes:\n` +
-    `• Use camelCase parameter names (e.g., taskId), not snake_case (task_id)\n` +
-    `• All task tools (TaskGet, TaskCreate, TaskUpdate, TaskList) need to be discovered first\n` +
-    `• You can discover them all at once: ${SEARCH_EXTRA_TOOLS_TOOL_NAME}("select:TaskGet,TaskCreate,TaskUpdate,TaskList")\n` +
-    `\nSee docs/openai-task-tools.md for detailed guide.`
+    ` This tool's schema was not sent to the API — it was not in the discovered-tool set derived from message history. ` +
+    `Without the schema in your prompt, typed parameters (arrays, numbers, booleans) get emitted as strings and the client-side parser rejects them. ` +
+    `Load the tool first: call ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:${tool.name}", then retry this call.`
   )
 }
 

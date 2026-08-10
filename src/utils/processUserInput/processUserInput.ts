@@ -87,6 +87,23 @@ export type ProcessUserInputBaseResult = {
   deferAutonomyCompletion?: boolean
 }
 
+/**
+ * densable 2.1.214 EndConversation product UI allows `/clear` to continue.
+ * clear command aliases: clear | reset | new (src/commands/clear/index.ts).
+ * Only these escape the endedByModel input gate — not a general slash allowlist.
+ */
+export function isEndedByModelClearEscape(
+  input: string | null | undefined,
+): boolean {
+  if (typeof input !== 'string') return false
+  const t = input.trim()
+  if (!t.startsWith('/')) return false
+  // First token is the command (strip leading /); ignore args.
+  const first = t.slice(1).split(/\s+/, 1)[0]?.toLowerCase() ?? ''
+  // Optional trailing punctuation like /clear! is not accepted.
+  return first === 'clear' || first === 'reset' || first === 'new'
+}
+
 export async function processUserInput({
   input,
   preExpansionInput,
@@ -103,6 +120,8 @@ export async function processUserInput({
   canUseTool,
   skipSlashCommands,
   bridgeOrigin,
+  modelScheduledOrigin,
+  wakeupSource,
   isMeta,
   skipAttachments,
   autonomy,
@@ -139,6 +158,17 @@ export async function processUserInput({
    */
   bridgeOrigin?: boolean
   /**
+   * densable modelScheduledOrigin — cron/loop fire. Re-opens slash for
+   * model-invocable commands when skipSlashCommands is also set.
+   */
+  modelScheduledOrigin?: boolean
+  /**
+   * densable wakeupSource — loop_wakeup | schedule_wakeup | c2o-derived.
+   * Threaded into processUserInputBase as intentional dead param (densable Qjt
+   * UserPromptSubmit source still `...!1`). Slash re-open does not read this.
+   */
+  wakeupSource?: string
+  /**
    * When true, the resulting UserMessage gets `isMeta: true` (user-hidden,
    * model-visible). Propagated from `QueuedCommand.isMeta` for queued
    * system-generated prompts.
@@ -169,7 +199,11 @@ export async function processUserInput({
 
   // densable 2.1.214: after EndConversation sets endedByModel, refuse further
   // queries until /clear or a new session (fnr / processUserInput gate).
-  if (appState.endedByModel) {
+  // Product UI: "Start a new session (or /clear) to continue." — typed /clear
+  // (and clear aliases /reset /new) must reach processSlashCommand so
+  // clearConversation can set endedByModel:false. Do not invent a broader
+  // slash allowlist.
+  if (appState.endedByModel && !isEndedByModelClearEscape(inputString)) {
     const { END_CONVERSATION_SESSION_ENDED_MESSAGE } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
@@ -197,12 +231,14 @@ export async function processUserInput({
     appState.toolPermissionContext.mode,
     skipSlashCommands,
     bridgeOrigin,
+    modelScheduledOrigin,
     isMeta,
     skipAttachments,
     preExpansionInput,
     autonomy,
     origin,
     suppressWorkflowKeyword,
+    wakeupSource,
   )
   queryCheckpoint('query_process_user_input_base_end')
 
@@ -339,12 +375,19 @@ async function processUserInputBase(
   permissionMode?: PermissionMode,
   skipSlashCommands?: boolean,
   bridgeOrigin?: boolean,
+  modelScheduledOrigin?: boolean,
   isMeta?: boolean,
   skipAttachments?: boolean,
   preExpansionInput?: string,
   autonomy?: QueuedCommand['autonomy'],
   origin?: QueuedCommand['origin'],
   suppressWorkflowKeyword?: boolean,
+  /**
+   * densable 2.1.221: fire stamps wakeupSource through the stack, but Qjt
+   * UserPromptSubmit does not yet expose `source` (`...!1`). Keep the arg so
+   * call-sites stay 1:1; do not invent hook wiring from this param.
+   */
+  _wakeupSource?: string,
 ): Promise<ProcessUserInputBaseResult> {
   let inputString: string | null = null
   let precedingInputBlocks: ContentBlockParam[] = []
@@ -514,6 +557,43 @@ async function processUserInputBase(
     // pre-#19134. A mobile user typing "/shrug" shouldn't see "Unknown skill".
   }
 
+  // densable 2.1.221: modelScheduledOrigin + skipSlashCommands + leading `/`
+  // re-opens slash when the resolved command is model-invocable
+  // (`!disableModelInvocation`). Fire stamps both flags so scheduled
+  // `/loop …` re-enters the skill path while plain-text scheduled
+  // prompts stay non-slash.
+  // Local prepare may wrap RZn / autonomy_authority around the bare fire
+  // body — extract the slash candidate without requiring value overwrite.
+  let slashInputForProcess = inputString
+  if (modelScheduledOrigin && skipSlashCommands && inputString !== null) {
+    const { extractModelScheduledSlashInput } = await import(
+      '../scheduledTaskDisclaimer.js'
+    )
+    const slashCandidate =
+      extractModelScheduledSlashInput(inputString) ??
+      (inputString.startsWith('/') ? inputString : null)
+    if (slashCandidate) {
+      const parsed = parseSlashCommand(slashCandidate)
+      let cmd = parsed
+        ? findCommand(parsed.commandName, context.options.commands)
+        : undefined
+      // densable: try `name:firstArg` subcommand form when bare name misses
+      if (!cmd && parsed?.commandName && parsed.args.trim()) {
+        const rest = parsed.args.trimStart()
+        const sp = rest.search(/\s/)
+        const first = sp === -1 ? rest : rest.slice(0, sp)
+        cmd = findCommand(
+          `${parsed.commandName}:${first}`,
+          context.options.commands,
+        )
+      }
+      if (cmd && !cmd.disableModelInvocation) {
+        effectiveSkipSlash = false
+        slashInputForProcess = slashCandidate
+      }
+    }
+  }
+
   // Ultraplan keyword — route through /ultraplan. Detect on the
   // pre-expansion input so pasted content containing the word cannot
   // trigger a CCR session; replace with "plan" in the expanded input so
@@ -551,15 +631,21 @@ async function processUserInputBase(
       isAlreadyProcessing,
       canUseTool,
       autonomy,
+      modelScheduledOrigin,
     )
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
 
-  // For slash commands, attachments will be extracted within getMessagesForSlashCommand
+  // For slash commands, attachments will be extracted within getMessagesForSlashCommand.
+  // Use slashInputForProcess so prepared RZn/authority wrappers that re-open
+  // `/loop…` still skip attachment extraction (same as bare leading `/`).
+  const slashLooksLikeCommand =
+    (slashInputForProcess?.startsWith('/') ?? false) ||
+    (inputString?.startsWith('/') ?? false)
   const shouldExtractAttachments =
     !skipAttachments &&
     inputString !== null &&
-    (mode !== 'prompt' || effectiveSkipSlash || !inputString.startsWith('/'))
+    (mode !== 'prompt' || effectiveSkipSlash || !slashLooksLikeCommand)
 
   // densable: isRegularUserPrompt = !isMeta && prompt mode; isHumanTyped = regular && Wzn(origin).
   const isRegularUserPrompt = mode === 'prompt' && !isMeta
@@ -602,14 +688,16 @@ async function processUserInputBase(
 
   // Slash commands
   // Skip for remote bridge messages — input from CCR clients is plain text
-  if (
-    inputString !== null &&
-    !effectiveSkipSlash &&
-    inputString.startsWith('/')
-  ) {
+  const slashBody =
+    slashInputForProcess !== null && slashInputForProcess.startsWith('/')
+      ? slashInputForProcess
+      : inputString !== null && inputString.startsWith('/')
+        ? inputString
+        : null
+  if (slashBody !== null && !effectiveSkipSlash) {
     const { processSlashCommand } = await import('./processSlashCommand.js')
     const slashResult = await processSlashCommand(
-      inputString,
+      slashBody,
       precedingInputBlocks,
       imageContentBlocks,
       attachmentMessages,
@@ -619,6 +707,7 @@ async function processUserInputBase(
       isAlreadyProcessing,
       canUseTool,
       autonomy,
+      modelScheduledOrigin,
     )
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }

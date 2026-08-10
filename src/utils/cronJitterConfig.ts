@@ -48,6 +48,13 @@ const cronJitterConfigSchema = lazySchema(() =>
         .min(0)
         .max(THIRTY_DAYS_MS)
         .default(DEFAULT_CRON_JITTER_CONFIG.recurringMaxAgeMs),
+      // densable she.cacheLeadMs — optional so older GB configs still parse
+      cacheLeadMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(60_000)
+        .default(DEFAULT_CRON_JITTER_CONFIG.cacheLeadMs ?? 15_000),
     })
     .refine(c => c.oneShotFloorMs <= c.oneShotMaxMs),
 )

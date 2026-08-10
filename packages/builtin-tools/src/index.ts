@@ -54,6 +54,7 @@ export { ObserverReportTool } from './tools/ObserverReportTool/ObserverReportToo
 export { CronCreateTool } from './tools/ScheduleCronTool/CronCreateTool.js'
 export { CronDeleteTool } from './tools/ScheduleCronTool/CronDeleteTool.js'
 export { CronListTool } from './tools/ScheduleCronTool/CronListTool.js'
+export { ScheduleWakeupTool } from './tools/ScheduleWakeupTool/ScheduleWakeupTool.js'
 export { SendMessageTool } from './tools/SendMessageTool/SendMessageTool.js'
 export { SendUserFileTool } from './tools/SendUserFileTool/SendUserFileTool.js'
 export { SleepTool } from './tools/SleepTool/SleepTool.js'

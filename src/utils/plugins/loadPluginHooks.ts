@@ -56,6 +56,7 @@ function convertPluginHooksToMatchers(
     InstructionsLoaded: [],
     CwdChanged: [],
     FileChanged: [],
+    DirectoryAdded: [],
     MessageDisplay: [],
   }
 
@@ -119,6 +120,7 @@ export const loadPluginHooks = memoize(async (): Promise<void> => {
     InstructionsLoaded: [],
     CwdChanged: [],
     FileChanged: [],
+    DirectoryAdded: [],
     MessageDisplay: [],
   }
 

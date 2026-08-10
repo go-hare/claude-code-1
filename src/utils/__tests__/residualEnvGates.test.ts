@@ -2923,6 +2923,18 @@ describe('DISABLE_CRON + BRIEF_UPLOAD densables', () => {
         CLAUDE_CODE_RESUME_INTERRUPTED_TURN: '1',
       }),
     ).toBe(true)
+    // densable 2.1.221 #15 — falsy values disable (pre-221 Boolean("0") was true)
+    expect(
+      isResumeInterruptedTurnEnabled({
+        CLAUDE_CODE_RESUME_INTERRUPTED_TURN: '0',
+      }),
+    ).toBe(false)
+    expect(
+      isResumeInterruptedTurnEnabled({
+        CLAUDE_CODE_RESUME_INTERRUPTED_TURN: 'false',
+      }),
+    ).toBe(false)
+    expect(isResumeInterruptedTurnEnabled({})).toBe(false)
     expect(resolveAttributionHeaderEnvOverride({})).toBeNull()
     expect(
       resolveAttributionHeaderEnvOverride({

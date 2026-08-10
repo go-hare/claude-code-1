@@ -1,0 +1,144 @@
+# densable 2.1.221 — TX / isDeferredTool (SEA gold)
+# Binary: /tmp/official-221/plat/package/claude
+# Primary offset: function TX @ 243133608
+# Module export d0s: isDeferredTool=>TX, getPrompt=>tCo, formatDeferredToolLine=>u0s, TOOL_SEARCH_TOOL_NAME=>dw
+
+## Verbatim (minified)
+
+```js
+var d0s={};et(d0s,{isDeferredTool:()=>TX,getPrompt:()=>tCo,formatDeferredToolLine:()=>u0s,TOOL_SEARCH_TOOL_NAME:()=>dw});
+function TX(e){
+  if(e.alwaysLoad===!0)return!1;
+  if(eGu().includes(e.name))return!1;
+  if(e.isMcp===!0)return!0;
+  if(e.name===dw)return!1;
+  if(e.name===Qo){if((amt(),Qr(xYu)).isForkSubagentEnabled())return!1}
+  if(e.name===b3_)return!1;
+  if(e.name===S3_)return!1;
+  if(e.name===Mre&&nrr())return!1;
+  if(e.name===k_&&jKe())return!1;
+  if(e.name===Lre&&process.env.CLAUDE_CODE_SESSION_KIND==="bg")return!1;
+  return e.shouldDefer===!0
+}
+// KPe lazy init:
+// b3_=(WW(),Qr(fdt)).BRIEF_TOOL_NAME
+// S3_=Qr(Omo).SEND_USER_FILE_TOOL_NAME
+```
+
+## Resolved symbol bindings (same binary)
+
+| densable | value / meaning | offset |
+|----------|-----------------|--------|
+| dw | `"ToolSearch"` | ~240488097 prologue |
+| Qo | `"Agent"` | 241502197 |
+| b3_ / BRIEF_TOOL_NAME | `"SendUserMessage"` (uU); LEGACY_BRIEF_TOOL_NAME oZr=`"Brief"` | fdt @241221814 / 241221927 |
+| S3_ / SEND_USER_FILE_TOOL_NAME | `"SendUserFile"` (jTe) | Omo @241225241 |
+| Mre | `"PushNotification"` | 243067257 |
+| k_ | `"ScheduleWakeup"` | 243081147 |
+| Lre | `"EnterWorktree"` | 243092257 |
+| nrr() | `re.CLAUDE_CODE_ENTRYPOINT==="remote_trigger"` | 238850845 |
+| jKe() | `Xe("tengu_kairos_loop_dynamic", !1)` | 243088527 |
+| eGu() | non_deferrable builtins list | 242732372 |
+| vL_ | `[]` empty default | 242733653 |
+| amt | lazy module init `v(()=>{...})` before Qr(xYu) | 243133092 |
+| xYu.isForkSubagentEnabled | `cEe` | 243130126 |
+
+## Ordered policy (reconstructible TypeScript)
+
+```ts
+// isDeferredTool(tool): boolean  — densable TX order, exact
+
+function isDeferredTool(tool: {
+  name: string
+  alwaysLoad?: boolean
+  isMcp?: boolean
+  shouldDefer?: boolean
+}): boolean {
+  // 1) alwaysLoad forces non-deferred
+  if (tool.alwaysLoad === true) return false
+
+  // 2) non_deferrable builtins (GrowthBook + settings); default empty list
+  if (getNonDeferrableBuiltins().includes(tool.name)) return false
+
+  // 3) all MCP tools are deferred
+  if (tool.isMcp === true) return true
+
+  // 4) ToolSearch itself never deferred
+  if (tool.name === "ToolSearch") return false
+
+  // 5) Agent + fork-subagent enabled => never deferred
+  if (tool.name === "Agent") {
+    // (amt(), Qr(xYu)).isForkSubagentEnabled()
+    if (isForkSubagentEnabled()) return false
+    // NOTE: if fork disabled, fall through — Agent may still defer via shouldDefer
+  }
+
+  // 6) Brief / SendUserMessage (BRIEF_TOOL_NAME === "SendUserMessage") never deferred
+  if (tool.name === "SendUserMessage") return false
+
+  // 7) SendUserFile never deferred
+  if (tool.name === "SendUserFile") return false
+
+  // 8) PushNotification non-deferred only under remote_trigger entrypoint
+  if (tool.name === "PushNotification" && isRemoteTriggerEntrypoint()) return false
+
+  // 9) ScheduleWakeup non-deferred only when kairos loop dynamic GB is on
+  if (tool.name === "ScheduleWakeup" && isKairosLoopDynamic()) return false
+
+  // 10) EnterWorktree non-deferred only in bg session kind
+  if (tool.name === "EnterWorktree" && process.env.CLAUDE_CODE_SESSION_KIND === "bg") return false
+
+  // 11) default: shouldDefer === true
+  return tool.shouldDefer === true
+}
+
+function getNonDeferrableBuiltins(): string[] {
+  // eGu
+  const set = new Set<string>()
+  try {
+    const fromGb = pickSurfaceValue(getFeatureValue("tengu_non_deferrable_builtins", null))
+    if (Array.isArray(fromGb)) for (const x of fromGb) if (typeof x === "string") set.add(x)
+  } catch {}
+  try {
+    const fromSettings = getSettings()?.non_deferrable_builtins
+    if (Array.isArray(fromSettings)) for (const x of fromSettings) if (typeof x === "string") set.add(x)
+  } catch {}
+  if (set.size === 0) return [] // vL_ = []
+  return [...set]
+}
+
+function isRemoteTriggerEntrypoint(): boolean {
+  // nrr
+  return process.env.CLAUDE_CODE_ENTRYPOINT === "remote_trigger"
+}
+
+function isKairosLoopDynamic(): boolean {
+  // jKe
+  return getFeatureValue("tengu_kairos_loop_dynamic", false)
+}
+
+// isForkSubagentEnabled (cEe) — see fork module xYu @243130126:
+// source g3_: disabled if Ale()/CCR; env CLAUDE_CODE_FORK_SUBAGENT true=>env / false=>disabled;
+// non-interactive Tn()=>disabled; GB m3_ => gb_rollout; else disabled.
+// enabled iff source !== "disabled"
+```
+
+## eGu verbatim
+
+```js
+function eGu(){
+  let e=new Set;
+  try{
+    let t=EL_(Xe("tengu_non_deferrable_builtins",null));
+    if(Array.isArray(t)){for(let r of t)if(typeof r==="string")e.add(r)}
+  }catch{}
+  try{
+    let t=Sx()?.non_deferrable_builtins;
+    if(Array.isArray(t)){for(let r of t)if(typeof r==="string")e.add(r)}
+  }catch{}
+  if(e.size===0)return vL_; // vL_=[]
+  return[...e]
+}
+// EL_: if value is object (not array/null), pick first key (≠"*") whose lowercase is
+// included in surface string (qC()??FY()).toLowerCase(); else value["*"].
+```

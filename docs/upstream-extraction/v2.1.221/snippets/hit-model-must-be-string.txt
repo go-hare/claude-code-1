@@ -1,0 +1,4 @@
+needle: set_model: model must be a string
+count: 4
+---
+0&&{pending_user_dialog_requests:O}}};break}case"set_model":{let P=e.request.model;if(P!=null&&typeof P!=="string"){fe("model_switch","invalid_model_type"),A={type:"control_response",response:{subtype:"error",request_id:e.request_id,error:"set_model: model must be a string"}};break}let k=c?.(e.request.model??void 0);if(k&&!k.ok)A={type:"control_response",response:{subtype:"error",request_id:e.request_id,error:k.error}};else A={type:"control_response",response:{subtype:"success",request_id:e.request_id}};brea

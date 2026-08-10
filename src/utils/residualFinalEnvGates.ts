@@ -2200,11 +2200,15 @@ export function isStreamlinedOutputEnabled(
   return isEnvTruthy(env.CLAUDE_CODE_STREAMLINED_OUTPUT)
 }
 
-/** Official RESUME_INTERRUPTED_TURN densable (any set value enables). */
+/**
+ * densable 2.1.221 — RESUME_INTERRUPTED_TURN.
+ * Honor falsy values (`0`/`false`/`no`/`off`); only truthy enables.
+ * Pre-221 used Boolean(env) which treated `"0"` as enabled.
+ */
 export function isResumeInterruptedTurnEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return Boolean(env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN)
+  return isEnvTruthy(env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN)
 }
 
 /**

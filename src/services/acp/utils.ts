@@ -4,6 +4,7 @@
  */
 import { Writable } from 'node:stream'
 import type { PermissionMode } from '../../entrypoints/sdk/coreTypes.generated.js'
+import { sanitizeSessionTitle } from '../../utils/sessionTitleSanitize.js'
 
 // ── Pushable ──────────────────────────────────────────────────────
 
@@ -160,10 +161,11 @@ export function computeSessionFingerprint(params: {
 const MAX_TITLE_LENGTH = 256
 
 export function sanitizeTitle(text: string): string {
-  const sanitized = text
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  // densable 2.1.221: shared uge (ly/vhn) before ACP display cap.
+  const stripped = sanitizeSessionTitle(text)
+  // uge already maps Cc/Cf/LS/PS → space and caps at 200 code points.
+  // Collapse residual whitespace runs for ACP display titles.
+  const sanitized = stripped.replace(/\s+/g, ' ').trim()
   if (sanitized.length <= MAX_TITLE_LENGTH) {
     return sanitized
   }

@@ -1,0 +1,37 @@
+# densable 2.1.220 — zkt dependency map (SEA → go-hare)
+
+SEA: /tmp/official-220/plat/package/claude
+
+## zkt body
+```
+function zkt(){
+  return xn()==="firstParty"&&zv()&&!Sx()&&nZ()===null&&QXt().length===0
+}
+```
+
+## Deps
+| densable | body | go-hare |
+| --- | --- | --- |
+| `xn()` | getAPIProvider | `getAPIProvider()` |
+| `zv()` | `ms()?.accessToken!=null` | `getClaudeAIOAuthTokens()?.accessToken != null` |
+| `Sx()` | `scopes.includes(KAe)` / `KAe="user:profile"` / export `hasProfileScope` | `hasProfileScope()` |
+| `nZ()` | `try{return Noe()}catch{return null}` / `Noe=getAnthropicApiKey` | `getAnthropicApiKey()` try/catch |
+| `QXt()` | filter `Rt().modelAccessCache` apiName+entitled | `getModelAccessCache()` |
+
+## Sibling exports (same module)
+| densable | go-hare |
+| --- | --- |
+| `fq` / `getModelEntitlementDenySet` | `getModelEntitlementDenySet` |
+| `XW` / `isModelDenied` | `isModelDenied` |
+| `zig` | `buildModelEntitlementDenySet` |
+| `g$c` / `_$c` | `isEntitlementBlindOpus5Target` / `applyEntitlementBlindFallbackTarget` (opus-5 → opus-4-8) |
+
+## Telemetry
+- `entitlement_blind:zkt()` on `tengu_rotunda_pennant_applied` (server_fallback path)
+- same field on refusal-fallback `bn` payload (`tengu_refusal_fallback_dialog_suppressed` etc.)
+- go-hare: `planRefusalFallbackPresentation.telemetry.entitlementBlind` +
+  `logEvent('tengu_refusal_fallback_request', { entitlement_blind })`
+
+## Non-claims
+- Do not invent full `y$c` EXl arm rewrite; only `_$c` substitute on existing arm inject.
+- Do not invent UserPromptSubmit / GAP #10/#12.

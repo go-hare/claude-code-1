@@ -493,7 +493,12 @@ export async function installResolvedPlugin({
  * Result of a plugin installation operation
  */
 export type InstallPluginResult =
-  | { success: true; message: string }
+  | {
+      success: true
+      message: string
+      /** densable: full install closure (root + deps) for activate VQS. */
+      closure: string[]
+    }
   | { success: false; error: string }
 
 /**
@@ -593,9 +598,15 @@ export async function installPluginFromMarketplace({
       }),
     })
 
+    // densable 2.1.221 #30: base install message — UI appends activate suffix
+    // (Plugin is now active. / Run /reload-plugins to activate.) after
+    // activatePluginsAfterInstall. Keep bare success text here.
+    // Pass full dependency closure so VQS can attribute load errors on deps.
+    const ok = result as Extract<InstallCoreResult, { ok: true }>
     return {
       success: true,
-      message: `✓ Installed ${entry.name}${(result as Extract<InstallCoreResult, { ok: true }>).depNote}. Run /reload-plugins to activate.`,
+      message: `✓ Installed ${entry.name}${ok.depNote}.`,
+      closure: ok.closure,
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)

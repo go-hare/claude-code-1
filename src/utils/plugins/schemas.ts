@@ -162,6 +162,20 @@ export function validateOfficialNameSource(
 const RelativePath = lazySchema(() => z.string().startsWith('./'))
 
 /**
+ * densable 2.1.221: plugins may set `skills: "."` to treat the plugin root as
+ * a skill directory (SKILL.md at plugin root). Other relative paths still use
+ * RelativePath (`./…`).
+ */
+const PluginSkillPath = lazySchema(() =>
+  z.union([
+    z.literal('.').describe('Plugin root (SKILL.md at plugin root)'),
+    RelativePath().describe(
+      'Path to additional skill directory relative to the plugin root',
+    ),
+  ]),
+)
+
+/**
  * Schema for relative paths to JSON files
  */
 const RelativeJSONPath = lazySchema(() => RelativePath().endsWith('.json'))
@@ -484,13 +498,13 @@ const PluginManifestAgentsSchema = lazySchema(() =>
 const PluginManifestSkillsSchema = lazySchema(() =>
   z.object({
     skills: z.union([
-      RelativePath().describe(
-        'Path to additional skill directory (in addition to those in the skills/ directory, if it exists), relative to the plugin root',
+      PluginSkillPath().describe(
+        'Path to additional skill directory (in addition to those in the skills/ directory, if it exists), relative to the plugin root. Use "." for the plugin root.',
       ),
       z
         .array(
-          RelativePath().describe(
-            'Path to additional skill directory (in addition to those in the skills/ directory, if it exists), relative to the plugin root',
+          PluginSkillPath().describe(
+            'Path to additional skill directory (in addition to those in the skills/ directory, if it exists), relative to the plugin root. Use "." for the plugin root.',
           ),
         )
         .describe('List of paths to additional skill directories'),

@@ -273,6 +273,7 @@ import setupBedrock from './commands/setup-bedrock/index.js'
 import { logError } from './utils/log.js'
 import { toError } from './utils/errors.js'
 import { logForDebugging } from './utils/debug.js'
+import { getIsNonInteractiveSession } from './bootstrap/state.js'
 import {
   getSkillDirCommands,
   clearSkillCaches,
@@ -522,6 +523,76 @@ export const builtInCommandNames = memoize(
     new Set(COMMANDS().flatMap(_ => [_.name, ...(_.aliases ?? [])])),
 )
 
+/**
+ * densable 2.1.221 `Vua` / `HEADLESS_YIELDABLE_NAMES`.
+ * Terminal-only built-ins (local-jsx) that headless sessions cannot run.
+ * Plugin/org skills may reuse these names as aliases; when the built-in is
+ * unavailable in non-interactive mode, those aliases must not be stripped.
+ */
+export const HEADLESS_YIELDABLE_NAMES: ReadonlySet<string> = new Set([
+  'help',
+  'feedback',
+])
+
+/**
+ * densable `zFp` — command is invocable in non-interactive / headless sessions.
+ * Matches main.tsx headless filter and densable `filterCommandsForHeadless`.
+ */
+export function isCommandAvailableInHeadless(cmd: Command): boolean {
+  return (
+    (cmd.type === 'prompt' && !cmd.disableNonInteractive) ||
+    (cmd.type === 'local' && cmd.supportsNonInteractive)
+  )
+}
+
+/**
+ * densable `U6e` / `filterCommandsForHeadless`.
+ */
+export function filterCommandsForHeadless(commands: Command[]): Command[] {
+  return commands.filter(isCommandAvailableInHeadless)
+}
+
+/**
+ * densable 2.1.221 `Hxb` — strip plugin skill aliases that collide with other
+ * commands' claimed names, EXCEPT when the claimer is a headless-unavailable
+ * terminal built-in in {@link HEADLESS_YIELDABLE_NAMES} (e.g. /help, /feedback).
+ *
+ * Without this, plugin skills that expose `aliases: ["help"]` lose the alias
+ * to the local-jsx built-in and become un-invocable under `-p` / headless.
+ */
+export function stripCollidingPluginAliases(
+  commands: Command[],
+  isNonInteractiveSession: boolean = getIsNonInteractiveSession(),
+): Command[] {
+  const isPluginPrompt = (cmd: Command): boolean =>
+    cmd.type === 'prompt' && cmd.source === 'plugin'
+
+  const claimed = new Set<string>()
+  for (const cmd of commands) {
+    const unavailableInHeadless =
+      isNonInteractiveSession && !isCommandAvailableInHeadless(cmd)
+    // Yield help/feedback claims when the built-in cannot run headless.
+    if (!unavailableInHeadless || !HEADLESS_YIELDABLE_NAMES.has(cmd.name)) {
+      claimed.add(cmd.name)
+    }
+    if (!isPluginPrompt(cmd)) {
+      for (const alias of cmd.aliases ?? []) {
+        if (!unavailableInHeadless || !HEADLESS_YIELDABLE_NAMES.has(alias)) {
+          claimed.add(alias)
+        }
+      }
+    }
+  }
+
+  return commands.map(cmd => {
+    if (!isPluginPrompt(cmd)) return cmd
+    const aliases = cmd.aliases
+    if (!aliases?.some(a => claimed.has(a))) return cmd
+    const kept = aliases.filter(a => !claimed.has(a))
+    return { ...cmd, aliases: kept.length ? kept : undefined }
+  })
+}
+
 async function getSkills(cwd: string): Promise<{
   skillDirCommands: Command[]
   pluginSkills: Command[]
@@ -629,7 +700,8 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
     getWorkflowCommands ? getWorkflowCommands(cwd) : Promise.resolve([]),
   ])
 
-  return [
+  // densable Hxb after assemble (skills/plugins/… then builtins).
+  return stripCollidingPluginAliases([
     ...bundledSkills,
     ...builtinPluginSkills,
     ...skillDirCommands,
@@ -637,7 +709,7 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
     ...(pluginCommands as Command[]),
     ...pluginSkills,
     ...COMMANDS(),
-  ]
+  ])
 })
 
 /**
@@ -670,7 +742,9 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   )
 
   if (uniqueDynamicSkills.length === 0) {
-    return baseCommands
+    // Re-run Hxb so session interactivity changes after load still yield
+    // help/feedback claims for plugin aliases (loadAllCommands is memoized).
+    return stripCollidingPluginAliases(baseCommands)
   }
 
   // Insert dynamic skills after plugin skills but before built-in commands
@@ -678,14 +752,17 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   const insertIndex = baseCommands.findIndex(c => builtInNames.has(c.name))
 
   if (insertIndex === -1) {
-    return [...baseCommands, ...uniqueDynamicSkills]
+    return stripCollidingPluginAliases([
+      ...baseCommands,
+      ...uniqueDynamicSkills,
+    ])
   }
 
-  return [
+  return stripCollidingPluginAliases([
     ...baseCommands.slice(0, insertIndex),
     ...uniqueDynamicSkills,
     ...baseCommands.slice(insertIndex),
-  ]
+  ])
 }
 
 /**

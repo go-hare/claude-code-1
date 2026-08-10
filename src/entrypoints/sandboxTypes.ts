@@ -140,21 +140,61 @@ export const SandboxFilesystemConfigSchema = lazySchema(() =>
 )
 
 /**
- * densable QTi — sandbox.credentials.files[] entry.
- * Settings schema only accepts mode "deny" (runtime mask path is package-side).
+ * densable 2.1.221 QTi — sandbox.credentials.files[] entry.
+ * `mode: "mask"` (Linux/WSL): sentinel copy inside sandbox; host proxy swaps
+ * sentinel→real on egress. On macOS/Windows mask degrades to deny (package).
+ * Optional `extract` regex masks only capture-group-1 spans.
  */
 export const SandboxCredentialFileSchema = lazySchema(() =>
-  z.object({
-    path: z
-      .string()
-      .min(1)
-      .describe(
-        'Path to a credential file or directory. Same resolution as sandbox.filesystem.* paths: absolute, ~ expanded, or relative to the settings file root (project root for project settings, ~/.claude for user settings).',
-      ),
-    mode: z
-      .literal('deny')
-      .describe('Access mode for this path. Only `deny` is supported.'),
-  }),
+  z
+    .object({
+      path: z
+        .string()
+        .min(1)
+        .describe(
+          'Path to a credential file or directory. Same resolution as sandbox.filesystem.* paths: absolute, ~ expanded, or relative to the settings file root (project root for project settings, ~/.claude for user settings).',
+        ),
+      mode: z
+        .enum(['deny', 'mask'])
+        .describe(
+          'Access mode for this path. `deny` blocks reads inside the sandbox; `mask` shows sandboxed commands a sentinel-substituted copy (whole-file, or only the spans captured by `extract`) and the host proxy swaps sentinel→real on egress to `injectHosts`. On macOS and Windows `mask` currently degrades to `deny`.',
+        ),
+      extract: z
+        .string()
+        .optional()
+        .describe(
+          'Optional regex for structured masking when mode is `mask`. Applied globally to the file; capture group 1 of each match is a credential value, and only those captured spans are replaced with sentinels — the rest of the file is preserved so a tool that parses it (.netrc, JSON, YAML) still succeeds. Without `extract`, the entire file content is replaced with one sentinel (whole-file masking, suited to single-secret files). If the regex matches nothing, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`.',
+        ),
+      onExtractNoMatch: z
+        .enum(['warn', 'deny', 'error'])
+        .optional()
+        .describe(
+          'What to do when `extract` matches nothing in the file. `warn` (default) emits a stderr warning and leaves the file readable as-is inside the sandbox (fail-open, for credentials that may be legitimately absent); `deny` degrades the entry to mode `deny` so the file is unreadable (fail-closed) — under `sandbox.filesystem.disabled` it is treated as `error`, since read-denies are dropped in that mode; `error` aborts at sandbox setup so nothing runs until the config is fixed. Only meaningful when mode is `mask` and `extract` is set; accepted but ignored otherwise.',
+        ),
+      maskDuplicates: z
+        .boolean()
+        .optional()
+        .describe(
+          'If true, verbatim occurrences of each captured credential value outside the regex-matched spans are also replaced with the corresponding sentinel — for a secret repeated where the regex does not reach (e.g. pasted into a comment). Matches raw substrings, so short or common values may corrupt unrelated content; intended for long, high-entropy secrets. Defaults to false. Only meaningful when mode is `mask` and `extract` is set; accepted but ignored otherwise.',
+        ),
+      injectHosts: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Optional narrowing of where the proxy substitutes this credential. Only meaningful when mode is `mask`; accepted but ignored for `deny`. If unset, defaults to `network.allowedDomains` — the credential is injected at every reachable host. Each entry must be reachable via `network.allowedDomains` (sandbox-runtime validates this).',
+        ),
+    })
+    .superRefine((entry, ctx) => {
+      // densable: mask + directory path trailing `/` is invalid (whole-file bind only).
+      if (entry.mode === 'mask' && entry.path.endsWith('/')) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['path'],
+          message:
+            'sandbox.credentials.files mode "mask" requires a file path, not a directory (trailing "/")',
+        })
+      }
+    }),
 )
 
 /**
@@ -196,7 +236,7 @@ export const SandboxCredentialsConfigSchema = lazySchema(() =>
         .array(SandboxCredentialFileSchema())
         .optional()
         .describe(
-          'Credential files or directories to protect. `deny` blocks reads inside the sandbox.',
+          'Credential files or directories to protect. `deny` blocks reads inside the sandbox; `mask` substitutes a sentinel inside the sandbox (whole-file, or per-`extract` capture) and injects the real value at the proxy. On macOS and Windows `mask` degrades to `deny`.',
         ),
       envVars: z
         .array(SandboxCredentialEnvVarSchema())

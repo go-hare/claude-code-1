@@ -1,0 +1,4 @@
+needle: thumbsdown:"-1",thumbsup:"+1"
+count: 1
+---
+var I0m,gUn=15,D0T=60;var P0m=v(()=>{Hbi();oCr();o9t();mx();AU();ze();lt();Yi();Mr();I0m=require("path")});var O0m;var D0m=v(()=>{O0m={celebrate:"tada",hundred:"100",love:"heart",minus_one:"-1",plus_one:"+1",thumbs_down:"-1",thumbs_up:"+1",thumbsdown:"-1",thumbsup:"+1"}});var _wi;var H0m=v(()=>{_wi={"-1":"\uD83D\uDC4E","+1":"\uD83D\uDC4D","100":"\uD83D\uDCAF","1234":"\uD83D\uDD22","1st_place_medal":"\uD83E\uDD47","2nd_place_medal":"\uD83E\uDD48","3rd_place_medal":"\uD83E\uDD49","8ball":"\uD83C\uDFB1",a:"

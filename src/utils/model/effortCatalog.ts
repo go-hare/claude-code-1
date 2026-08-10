@@ -81,6 +81,17 @@ const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
       xhighEffort: true,
     },
   },
+  // densable EHl 2.1.219: claude-opus-5 default_effort high + effort/max/xhigh
+  // (Ave launch pin remains 4-7 / 4-8 / fable-5 only — not opus-5)
+  {
+    match: 'claude-opus-5',
+    entry: {
+      defaultEffort: 'high',
+      effort: true,
+      maxEffort: true,
+      xhighEffort: true,
+    },
+  },
   {
     match: 'claude-fable-5',
     entry: {

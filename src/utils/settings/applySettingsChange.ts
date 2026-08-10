@@ -92,10 +92,10 @@ export function applySettingsChange(
 
     let effortPatch: Partial<AppState> = {}
     if (ultraChanged && newUltra) {
-      const model =
-        typeof prev.mainLoopModel === 'string' && prev.mainLoopModel.length > 0
-          ? prev.mainLoopModel
-          : getMainLoopModel()
+      // Prefer getMainLoopModel() (includes apply_flag model override applied
+      // before notifyChange) over stale prev.mainLoopModel so same-packet
+      // { model, ultracode:true } resolves wire on the post-switch model.
+      const model = getMainLoopModel()
       const wire = getUltracodeEffortForModel(model)
       if (wire === undefined) {
         // No catalog ultracode wire (e.g. haiku) — do not invent xhigh or

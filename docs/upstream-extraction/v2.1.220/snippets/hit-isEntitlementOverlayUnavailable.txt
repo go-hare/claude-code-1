@@ -1,0 +1,1 @@
+isFableAvailable................isExemptDefaultResolvingPick....................isEntitlementOverlayUnavailable.................isDefaultModelEnforced..........................hasDedicatedSmallFastModel......................getUserSpecifiedModelSetting....................getSmallFastModel...............................getRuntimeMainLoopModel.........................get

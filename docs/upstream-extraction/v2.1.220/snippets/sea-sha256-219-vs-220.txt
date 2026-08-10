@@ -1,0 +1,7 @@
+darwin-arm64 SEA size both: 256908272 bytes
+219 sha256: a8e806faaefac53c7a0f26523d8a45c60dbef3407b14ef990c75765d08febc82
+220 sha256: 8addc857f3fe64d5a0368af9ee50321b50afb4a6918ba3ef018ab84f5dbbe081
+cmp: DIFFER (not byte-identical)
+VERSION string: // Version: 2.1.220 (count 6)
+entitlement_blind: 219=0 220=3
+isEntitlementOverlayUnavailable: 219=0 220=2

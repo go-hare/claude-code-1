@@ -337,11 +337,9 @@ import {
   EFFORT_LEVELS,
   resolveAppliedEffort,
   isUltracodeModeActive,
-  isUltracodeEffortAlias,
   isUltracodeOfferable,
   getSupportedEffortLevels,
-  parseEffortValue,
-  getUltracodeEffortForModel,
+  resolveHostEffortFlagPatch,
   unpinAllEffortLaunchPins,
 } from 'src/utils/effort.js'
 import { resolveAppliedAdvisorModel } from 'src/utils/advisor.js'
@@ -1370,15 +1368,32 @@ function runHeadlessStreaming(
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
   let abortController: AbortController | undefined
+  // Declared early so run() finally can settle aPt/XKu + checkNow (assigned
+  // when kairos cron starts below; null when cron gate is off).
+  let cronScheduler: import('../utils/cronScheduler.js').CronScheduler | null =
+    null
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
 
   // densable print/SDK signal ownership (uxs / Vwo):
-  // SIGINT → abort turn (user-cancel) + gracefulShutdown(0)
-  // SIGTERM → abort turn (remote-cancel) + kill Bash trees via abort + exit 143
+  // SIGINT → Vwo user_abort + abort turn + gracefulShutdown(0)
+  // SIGTERM → Vwo remote_cancel + abort turn + kill Bash trees + exit 143
   // Global setupGracefulShutdown no-ops once markPrintModeSignalHandlersRegistered.
+  // Vwo before exit so loopEnded/analytics mirror REPL Esc even when process dies.
+  const cancelLoopWakeupsOnSignal = (
+    reason: 'user_abort' | 'remote_cancel',
+  ) => {
+    try {
+      const { cancelLoopWakeupsOnUserAbort } =
+        require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js')
+      cancelLoopWakeupsOnUserAbort(reason)
+    } catch {
+      // loopDynamic may be unavailable in partial test mocks
+    }
+  }
   const sigintHandler = () => {
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGINT' })
+    cancelLoopWakeupsOnSignal('user_abort')
     if (abortController && !abortController.signal.aborted) {
       abortController.abort(createAbortErrorReason('user-cancel'))
     }
@@ -1389,8 +1404,11 @@ function runHeadlessStreaming(
   // densable se: B.abort(nC("remote-cancel")); V.abort(); Ts(143)
   // Aborting the query AbortController propagates into BashTool ShellCommand
   // abort → killProcessTree, so SIGTERM no longer orphans the process tree.
+  // Also Vwo: remote-cancel should not leave dynamic /loop wakeups armed if
+  // shutdown is slow or cleanup hooks re-enter the scheduler.
   const sigtermHandler = () => {
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGTERM' })
+    cancelLoopWakeupsOnSignal('remote_cancel')
     if (abortController && !abortController.signal.aborted) {
       abortController.abort(createAbortErrorReason('remote-cancel'))
     }
@@ -2659,6 +2677,12 @@ function runHeadlessStreaming(
                   prompt: input,
                   promptUuid: cmd.uuid,
                   isMeta: cmd.isMeta,
+                  // densable 2.1.221: cron fire stamps (skipSlash + modelScheduled + wakeup)
+                  skipSlashCommands: cmd.skipSlashCommands,
+                  bridgeOrigin: cmd.bridgeOrigin,
+                  modelScheduledOrigin: cmd.modelScheduledOrigin,
+                  wakeupSource: cmd.wakeupSource,
+                  origin: cmd.origin,
                   cwd: cwd(),
                   tools: allTools,
                   verbose: options.verbose,
@@ -3153,6 +3177,22 @@ function runHeadlessStreaming(
         }
       }
       running = false
+      // densable post-tick (REPL isLoading→false): clear aPt; YKu && !rmt() → XKu.
+      // Headless previously stamped aPt on kind:loop fire but never settled —
+      // model-forgot-ScheduleWakeup left the dynamic loop dead in long -p/SDK sessions.
+      // When input is closed or process is shutting down, only clear aPt —
+      // arming keepalive would never fire (isLoading stays true / process exits).
+      try {
+        const { settleLoopTickAfterIdle } =
+          require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js')
+        const mayArmKeepalive = !inputClosed && !isShuttingDown()
+        settleLoopTickAfterIdle({ armKeepalive: mayArmKeepalive })
+        if (mayArmKeepalive) {
+          cronScheduler?.checkNow()
+        }
+      } catch {
+        // loopDynamic may be unavailable in partial test mocks
+      }
       // Start idle timer when we finish processing and are waiting for input
       idleTimeout.start()
     }
@@ -3428,8 +3468,7 @@ function runHeadlessStreaming(
   // that drains on enqueue while idle. The run() mutex makes this safe
   // during an active turn: the call no-ops and the post-run recheck at
   // the end of run() picks up the queued command.
-  let cronScheduler: import('../utils/cronScheduler.js').CronScheduler | null =
-    null
+  // (cronScheduler binding declared near `running` so run() finally can see it.)
   if (cronGate.isKairosCronEnabled()) {
     // Shared dedup-claim → input-close-recheck → onSuccess pipeline for the
     // three cron entry points (legacy onFire, onFireTask agent, onFireTask
@@ -3443,11 +3482,19 @@ function runHeadlessStreaming(
       sourceLabel: string
       logSuffix: string
       onSuccess: (command: QueuedCommand) => void | Promise<void>
+      /** densable kind:"loop" — stamp in-flight for keepalive after turn. */
+      isLoop?: boolean
+      /** densable wakeupSource: loop_wakeup | schedule_wakeup */
+      wakeupSource?: 'loop_wakeup' | 'schedule_wakeup'
     }): void => {
       if (inputClosed) return
       void (async () => {
+        // densable Xav.resolveLoopDefaultFire(Cn)
+        const { resolveLoopDefaultFire } =
+          require('../utils/loopFire.js') as typeof import('../utils/loopFire.js')
+        const expanded = resolveLoopDefaultFire(params.basePrompt)
         const command = await createAutonomyQueuedPromptIfNoActiveSource({
-          basePrompt: params.basePrompt,
+          basePrompt: expanded,
           trigger: 'scheduled-task',
           currentDir: cwd(),
           sourceId: params.sourceId,
@@ -3455,12 +3502,30 @@ function runHeadlessStreaming(
           workload: WORKLOAD_CRON,
           shouldCreate: () => !inputClosed,
         })
+        // densable aPt only after a real enqueue claim — skip storm-dedup / closed.
         if (!command) return
         if (inputClosed) {
           await cancelQueuedAutonomyCommands({ commands: [command] })
           return
         }
-        await params.onSuccess(command)
+        if (params.isLoop) {
+          const { setLoopTickInFlightPrompt } =
+            require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+          setLoopTickInFlightPrompt(params.basePrompt)
+        }
+        // densable 2.1.221 fire stamp 1:1:
+        // skipSlashCommands:!0, modelScheduledOrigin:!0, wakeupSource
+        // Keep prepared command.value (RZn + optional autonomy_authority).
+        // basePrompt was already resolveLoopDefaultFire'd above — do not
+        // overwrite value with bare expanded (strips #20 RZn on headless).
+        await params.onSuccess({
+          ...command,
+          isMeta: true,
+          priority: 'later',
+          skipSlashCommands: true,
+          modelScheduledOrigin: true,
+          wakeupSource: params.wakeupSource ?? 'schedule_wakeup',
+        })
       })().catch(error => {
         logError(error)
         logForDebugging(
@@ -3482,22 +3547,27 @@ function runHeadlessStreaming(
       onFire: prompt => {
         // Legacy KAIROS-style entries: the prompt text is what uniquely
         // identifies the cron entry, so it doubles as both source id and
-        // source label for dedup.
+        // source label for dedup. densable: onFire → schedule_wakeup.
         dispatchHeadlessCronCommand({
           basePrompt: prompt,
           sourceId: prompt,
           sourceLabel: prompt,
           logSuffix: '',
+          wakeupSource: 'schedule_wakeup',
           onSuccess: enqueueAndRun,
         })
       },
       onFireTask: task => {
+        const { wakeupSourceForCronTask } =
+          require('../utils/loopFire.js') as typeof import('../utils/loopFire.js')
+        const wakeupSource = wakeupSourceForCronTask(task.kind)
         if (task.agentId) {
           dispatchHeadlessCronCommand({
             basePrompt: task.prompt,
             sourceId: task.id,
             sourceLabel: task.prompt,
             logSuffix: ` ${task.id}`,
+            wakeupSource,
             onSuccess: async command => {
               await markAutonomyRunFailed(
                 command.autonomy!.runId,
@@ -3513,6 +3583,8 @@ function runHeadlessStreaming(
           sourceId: task.id,
           sourceLabel: task.prompt,
           logSuffix: ` ${task.id}`,
+          isLoop: task.kind === 'loop',
+          wakeupSource,
           onSuccess: enqueueAndRun,
         })
       },
@@ -4925,6 +4997,22 @@ function runHeadlessStreaming(
               }
             }
             setFlagSettingsInline(merged)
+
+            // densable 211 review: apply model override BEFORE notifyChange so
+            // applySettingsChange (settings → AppState effort/ultracode sync)
+            // resolves ultracode wire against the post-switch model via
+            // getMainLoopModel(), not the pre-packet model. Direct
+            // resolveHostEffortFlagPatch below still finalizes AppState.
+            // Override has higher priority than the settings cascade in
+            // getUserSpecifiedModelSetting() (matching set_model).
+            if ('model' in incoming) {
+              if (incoming.model != null) {
+                setMainLoopModelOverride(String(incoming.model))
+              } else {
+                setMainLoopModelOverride(undefined)
+              }
+            }
+
             // Route through notifyChange so fanOut() resets the settings cache
             // before listeners run. The subscriber at :392 calls
             // applySettingsChange for us. Pre-#20625 this was a direct
@@ -4935,20 +5023,6 @@ function runHeadlessStreaming(
             // (loadPluginHooks, sandbox-adapter) about the change, which the
             // previous direct call skipped.
             settingsChangeDetector.notifyChange('flagSettings')
-
-            // If the incoming settings include a model change, update the
-            // override so getMainLoopModel() reflects it. The override has
-            // higher priority than the settings cascade in
-            // getUserSpecifiedModelSetting(), so without this update,
-            // getMainLoopModel() returns the stale override and the model
-            // change is silently ignored (matching set_model at :2811).
-            if ('model' in incoming) {
-              if (incoming.model != null) {
-                setMainLoopModelOverride(String(incoming.model))
-              } else {
-                setMainLoopModelOverride(undefined)
-              }
-            }
 
             // If the model changed, inject breadcrumbs so the model sees the
             // mid-conversation switch, and notify metadata listeners (CCR).
@@ -4966,68 +5040,69 @@ function runHeadlessStreaming(
             // (M9/UBn + XLr ultracode + N9), not only via settings disk sync.
             // settings.effortLevel enum rejects "ultracode", so flag-only alias
             // must be handled here. Model for wire resolution is post-override.
+            // densable 211: non-ultracode / null clears ultracode; no wire
+            // refuses empty ultracode flag (matches bootstrap/applySettingsChange).
+            // Product: no hard control_response error on no-wire — soft success
+            // + effortNotes so multi-key merges are not partially rolled back.
             const effortModel = newModel
-            if ('effortLevel' in incoming) {
-              const raw = incoming.effortLevel
-              if (raw == null) {
-                setAppState(prev =>
-                  prev.effortValue === undefined
-                    ? prev
-                    : { ...prev, effortValue: undefined },
-                )
-                unpinAllEffortLaunchPins()
-              } else {
-                // densable: M9(effortLevel) ?? UBn(effortLevel)
-                const wire =
-                  parseEffortValue(raw) ??
-                  (isUltracodeEffortAlias(raw)
-                    ? getUltracodeEffortForModel(effortModel)
-                    : undefined)
-                if (wire !== undefined || isUltracodeEffortAlias(raw)) {
-                  // densable still N9 when clearing known null path only; here
-                  // N9 on any accepted effortLevel write (including ultracode).
-                  if (wire !== undefined) {
-                    setAppState(prev =>
-                      prev.effortValue === wire
-                        ? prev
-                        : { ...prev, effortValue: wire },
-                    )
-                    unpinAllEffortLaunchPins()
-                  }
-                  if (isUltracodeEffortAlias(raw)) {
-                    setAppState(prev =>
-                      prev.ultracode ? prev : { ...prev, ultracode: true },
-                    )
-                  }
-                }
-              }
-            }
-            if ('ultracode' in incoming) {
-              const on = incoming.ultracode === true
-              setAppState(prev => {
-                if (
-                  prev.ultracode === on &&
-                  (!on ||
-                    prev.effortValue ===
-                      getUltracodeEffortForModel(effortModel))
-                ) {
-                  return prev
-                }
-                // densable: force catalog ultracode wire when enabling (xhigh).
-                const wire = getUltracodeEffortForModel(effortModel)
-                return {
-                  ...prev,
-                  ultracode: on,
-                  effortValue:
-                    on && wire !== undefined ? wire : prev.effortValue,
-                }
+            let effortNotes: ReturnType<
+              typeof resolveHostEffortFlagPatch
+            >['notes']
+            if ('effortLevel' in incoming || 'ultracode' in incoming) {
+              const patch = resolveHostEffortFlagPatch({
+                model: effortModel,
+                effortLevel: incoming.effortLevel,
+                hasEffortLevel: 'effortLevel' in incoming,
+                ultracode: incoming.ultracode,
+                hasUltracode: 'ultracode' in incoming,
               })
-              if (on) {
+              effortNotes = patch.notes
+              if (
+                patch.clearEffort ||
+                patch.effortValue !== undefined ||
+                patch.ultracode !== undefined
+              ) {
+                setAppState(prev => {
+                  let next = prev
+                  if (patch.clearEffort) {
+                    if (
+                      next.effortValue !== undefined ||
+                      next.ultracode === true
+                    ) {
+                      next = {
+                        ...next,
+                        effortValue: undefined,
+                        ultracode: false,
+                      }
+                    }
+                  }
+                  if (patch.effortValue !== undefined) {
+                    if (next.effortValue !== patch.effortValue) {
+                      next = { ...next, effortValue: patch.effortValue }
+                    }
+                  }
+                  if (patch.ultracode !== undefined) {
+                    if (next.ultracode !== patch.ultracode) {
+                      next = { ...next, ultracode: patch.ultracode }
+                    }
+                  }
+                  return next
+                })
+              }
+              if (patch.unpin) {
                 unpinAllEffortLaunchPins()
               }
             }
 
-            sendControlResponseSuccess(msg)
+            // Always success for apply_flag_settings (incl. soft ultracode
+            // refusals). Hosts that need explicit no-wire feedback read
+            // response.effortNotes and/or re-query get_settings.applied.
+            sendControlResponseSuccess(
+              msg,
+              effortNotes && effortNotes.length > 0
+                ? { effortNotes }
+                : undefined,
+            )
           } else if (msg.request.subtype === 'get_settings') {
             const currentAppState = getAppState()
             const model = getMainLoopModel()

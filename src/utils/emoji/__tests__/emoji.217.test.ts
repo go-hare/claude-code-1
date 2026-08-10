@@ -15,6 +15,23 @@ describe('emoji shortcode (densable 2.1.217 #1)', () => {
     expect(getEmoji('smile')).toBeTruthy()
   })
 
+  test('densable 2.1.221 alternate shortcodes resolve to base glyphs', () => {
+    expect(getEmoji('thumbsup')).toBe(getEmoji('+1'))
+    expect(getEmoji('thumbsdown')).toBe(getEmoji('-1'))
+    expect(getEmoji('thumbs_up')).toBe(getEmoji('+1'))
+    expect(getEmoji('thumbs_down')).toBe(getEmoji('-1'))
+    expect(getEmoji('love')).toBe(getEmoji('heart'))
+    expect(getEmoji('plus_one')).toBe(getEmoji('+1'))
+    expect(getEmoji('minus_one')).toBe(getEmoji('-1'))
+    expect(getEmoji('celebrate')).toBe(getEmoji('tada'))
+    expect(getEmoji('hundred')).toBe(getEmoji('100'))
+    // typeahead includes aliases
+    const love = getEmojiSuggestions('love')
+    expect(love.some(s => s.description === ':love:')).toBe(true)
+    const thumb = getEmojiSuggestions('thumbsup')
+    expect(thumb.some(s => s.description === ':thumbsup:')).toBe(true)
+  })
+
   test('getEmojiSuggestions sorts startsWith then length, limit 20', () => {
     const s = getEmojiSuggestions('sm')
     expect(s.length).toBeGreaterThan(0)

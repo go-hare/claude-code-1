@@ -1268,10 +1268,23 @@ async function* queryLoop(
                     declined: false,
                     requestDialog: toolUseContext.requestDialog,
                     isMainThread,
-                    resolveArmedFallbackModel: () =>
-                      fallbackModel && fallbackModel !== currentModel
-                        ? fallbackModel
-                        : undefined,
+                    resolveArmedFallbackModel: () => {
+                      // densable y$c arm → _$c: when entitlement overlay is
+                      // unavailable and target is opus-5, substitute opus-4-8.
+                      const raw =
+                        fallbackModel && fallbackModel !== currentModel
+                          ? fallbackModel
+                          : undefined
+                      if (raw === undefined) return undefined
+                      try {
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
+                        const { applyEntitlementBlindFallbackTarget } =
+                          require('./utils/model/entitlementOverlay.js') as typeof import('./utils/model/entitlementOverlay.js')
+                        return applyEntitlementBlindFallbackTarget(raw)
+                      } catch {
+                        return raw
+                      }
+                    },
                   })
                   const silentRearm = resolveSilentRearmModel({
                     currentModel,
@@ -1372,6 +1385,8 @@ async function* queryLoop(
                   isMainThread,
                   originalModelScope: querySource,
                 })
+                // densable 2.1.220: entitlement_blind:zkt() on refusal-fallback
+                // telemetry (SEA: tengu_rotunda_pennant_applied + bn payload).
                 logEvent('tengu_refusal_fallback_request', {
                   original_model:
                     fb.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1384,6 +1399,7 @@ async function* queryLoop(
                   partial_text_chars: salvage.partialTextChars,
                   salvaged_tool_use_count: salvage.toolUseCount,
                   silent_arm: fb.silentArmAtTrigger === true,
+                  entitlement_blind: presentation.telemetry.entitlementBlind,
                   ...(fb.routeMatched != null
                     ? {
                         route_matched:

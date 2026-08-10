@@ -1,0 +1,4 @@
+needle: Session kind
+count: 2
+---
+claude-code/issues",BUILD_TIME:"2026-08-03T03:19:26Z",GIT_SHA:"6efaf12e8b43dc7dbe50e0955c76dc4174a15876",DD_SOURCEMAP_GROUP:"darwin"}.VERSION}${dse()}`},...[],{label:"Session name",value:n},{label:"Session ID",value:e},{label:"Session kind",value:!ps()?"interactive":_L()?"background job \xB7 unattended":"background job \xB7 attached"},...t?[{label:"tmux session",value:t}]:[],...i?[{label:"Channels",value:i}]:[],...[],...e4()?[{label:"Memory",value:"Paused 

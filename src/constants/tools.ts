@@ -132,10 +132,10 @@ export const COORDINATOR_MODE_ALLOWED_TOOLS = new Set([
 ])
 
 /**
- * Core tools that are always loaded with full schema at initialization.
- * These tools are never deferred — they appear in the initial prompt.
- * All other tools (non-core built-in + all MCP tools) are deferred
- * and must be discovered via SearchExtraToolsTool / ExecuteExtraTool.
+ * Named core tool set (docs / analysis / inventory). densable 2.1.221 defer
+ * policy is **not** “everything outside CORE_TOOLS”: `isDeferredTool` (TX) is
+ * opt-in via `shouldDefer` / MCP / special cases. Tools listed here typically
+ * omit `shouldDefer` and stay always-loaded; do not re-wire TX to this set.
  */
 export const CORE_TOOLS = new Set([
   // File operations
@@ -176,7 +176,7 @@ export const CORE_TOOLS = new Set([
   // Scheduling & monitoring
   SLEEP_TOOL_NAME, // 'Sleep'
   // Tool discovery (always loaded)
-  SEARCH_EXTRA_TOOLS_TOOL_NAME, // 'SearchExtraTools'
+  SEARCH_EXTRA_TOOLS_TOOL_NAME, // 'ToolSearch' (densable dw)
   EXECUTE_TOOL_NAME, // 'ExecuteExtraTool'
   SYNTHETIC_OUTPUT_TOOL_NAME, // 'SyntheticOutput'
 ]) as ReadonlySet<string>

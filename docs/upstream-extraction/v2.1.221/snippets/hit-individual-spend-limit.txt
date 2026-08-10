@@ -1,0 +1,4 @@
+needle: individual spend limit
+count: 2
+---
+et s=r&&!o?` \xB7 Your ${n} resets ${r}`:"";return`You're now using ${i}${s}`}function g7u(){let e=Va();return e==="pro"||e==="enterprise"?x$t.seven_day:x$t.seven_day_sonnet}function NKe(e,t,r){return`You've hit your ${e}${t}`}var KCs,m7u="individual spend limit",iB_="individual usage limit",sB_,x$t;var afr=v(()=>{Ao();nV();xm();kr();Yi();vTe();ui();wsr();nn();LKe();Cqi();KCs=new Set(["org_level_disabled_until","org_spend_cap_reached"]),sB_=[...b8r,...T8r,...v8r,...S8r];x$t={five_hour:"session lim

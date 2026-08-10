@@ -1381,6 +1381,8 @@ export async function launchRemoteReview(
 
     if (mbCode !== 0 || !mergeBaseSha) {
       // densable Z$o: HEAD + non-shallow + Wau() → empty-tree shortstat path
+      // densable 2.1.221: V = headOk && !shallow && emptyTreeFallback; K = any ref exists
+      // if (V && !K) refuse detached HEAD with no branches (don't suggest unshallow)
       const git = async (args: string[]) =>
         execFileNoThrow(gitExe(), args, { preserveOutputOnError: false })
       const headOk =
@@ -1389,7 +1391,14 @@ export async function launchRemoteReview(
         await git(['rev-parse', '--is-shallow-repository'])
       ).stdout.trim()
       const isShallow = shallowOut === 'true'
-      if (headOk && shallowOut === 'false' && isEmptyTreeFallbackEnabled()) {
+      const isNonShallow = shallowOut === 'false'
+      const emptyTreeEligible =
+        headOk && isNonShallow && isEmptyTreeFallbackEnabled()
+      // densable K: for-each-ref --count=1 refs/ non-empty (any local ref exists)
+      const hasAnyRef =
+        emptyTreeEligible &&
+        (await git(['for-each-ref', '--count=1', 'refs/'])).stdout.trim() !== ''
+      if (emptyTreeEligible && hasAnyRef) {
         // densable R: arg present OR base ref resolves → "unrelated_history"
         // densable uses m (branchBaseArg), not prose instructions
         const baseExists =
@@ -1515,8 +1524,22 @@ export async function launchRemoteReview(
             },
           ]
         }
+        // densable 2.1.221: V && !K — non-shallow empty-tree eligible but no refs
+        // (detached HEAD only). Refuse; do not suggest unshallow on a complete clone.
+        if (emptyTreeEligible && !hasAnyRef) {
+          return [
+            {
+              type: 'text',
+              text: `Your checkout has no branches (detached HEAD only), which cloud review can't bundle. Create one first — \`git checkout -b <name>\` — then rerun ${invocation}.`,
+            },
+          ]
+        }
+        // densable j=h?q? explicit-base : unshallow — h=fetchedFromOrigin, q=non-shallow.
+        // On a complete clone never suggest unshallow after the shallow early-return.
         const hint = fetchedFromOrigin
-          ? `${baseBranch} was fetched from origin but shares no history with HEAD. Try \`git fetch --unshallow origin\` (or deepen the clone) and rerun.`
+          ? isNonShallow
+            ? `${baseBranch} was fetched from origin but shares no history with HEAD. If another branch is your real base, pass it explicitly (\`${invocation} <branch>\`).`
+            : `${baseBranch} was fetched from origin but shares no history with HEAD. Try \`git fetch --unshallow origin\` (or deepen the clone) and rerun.`
           : branchBaseArg
             ? `Make sure ${baseBranch} exists locally or on origin (try \`git fetch origin ${baseBranch}\`).`
             : `Pass the base branch explicitly (e.g. \`${invocation} develop\`) or make sure you're in a git repo with a ${baseBranch} branch.`

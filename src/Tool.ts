@@ -212,6 +212,17 @@ export type ToolUseContext = {
      * outside `NODE_ENV=test`.
      */
     allowBackgroundForkedSlashCommands?: boolean
+    /**
+     * densable 2.1.221 `modelScheduledOrigin` — set when expanding a prompt
+     * skill from a scheduled/cron/loop fire. Skills (e.g. `/loop`) skip
+     * tengu_loop_command analytics and clearLoopEnded when this is true.
+     */
+    modelScheduledOrigin?: boolean
+    /**
+     * densable `isSkillPreload` — skill content preload path; same analytics
+     * skip as modelScheduledOrigin for `/loop`.
+     */
+    isSkillPreload?: boolean
   }
   abortController: AbortController
   activeTaskExecutionContext?: ActiveTaskExecutionContext

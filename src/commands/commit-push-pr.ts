@@ -18,7 +18,7 @@ const ALLOWED_TOOLS = [
   'Bash(gh pr edit:*)',
   'Bash(gh pr view:*)',
   'Bash(gh pr merge:*)',
-  'SearchExtraTools',
+  'ToolSearch',
   'mcp__slack__send_message',
   'mcp__claude_ai_Slack__slack_send_message',
 ]

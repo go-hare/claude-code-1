@@ -2,8 +2,11 @@
  * densable 2.1.219 IQt / HQt / T5i — adaptive_thinking + rejects_disabled_thinking.
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { growthbookMock } from '../../../tests/mocks/growthbook'
 
+// Spread shared mock — incomplete growthbook mocks poison co-running suites.
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookMock(),
   getFeatureValue_CACHED_MAY_BE_STALE: () => true,
 }))
 

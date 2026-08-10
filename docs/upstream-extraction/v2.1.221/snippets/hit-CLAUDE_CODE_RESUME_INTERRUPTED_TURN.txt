@@ -1,0 +1,4 @@
+needle: CLAUDE_CODE_RESUME_INTERRUPTED_TURN
+count: 32
+---
+0,p=W3n(e.agentName,e.agentColor),f=r.initialState.standaloneAgentContext?{...p,...r.initialState.standaloneAgentContext}:p;gTe(f?.name);let m=await u1T(!!n,r.currentCwd,r.cliAgents,r.agentDefinitions),h=r.initialState.initialMessage;if(re.CLAUDE_CODE_RESUME_INTERRUPTED_TURN&&e.turnInterruptionState?.kind==="interrupted_prompt"&&vre(e.turnInterruptionState.message.origin))C("[sessionRestore] Auto-resuming interrupted turn for bg crash-respawn"),Mfn("repl_restore",e.turnInterruptionState.message),Hbr(e.messages

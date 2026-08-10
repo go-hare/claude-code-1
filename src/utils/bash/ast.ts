@@ -41,7 +41,13 @@ export type SimpleCommand = {
 
 export type ParseForSecurityResult =
   | { kind: 'simple'; commands: SimpleCommand[]; bareAssignmentNames: string[] }
-  | { kind: 'too-complex'; reason: string; nodeType?: string }
+  | {
+      kind: 'too-complex'
+      reason: string
+      nodeType?: string
+      /** densable differential shell semantics (e.g. zsh-only `[[ ]]` & split). */
+      differential?: boolean
+    }
   | { kind: 'parse-unavailable' }
 
 /**
@@ -1247,6 +1253,27 @@ function walkTestExpr(
           kind: 'too-complex',
           reason: `[[ ]] ${node.type} contains expansion / command / process substitution`,
           nodeType: node.type,
+        }
+      }
+      // densable 2.1.221: zsh splits the word at unquoted `&` at any depth
+      // inside [[ ]] patterns — fail-closed so the command prompts.
+      if (node.type === 'extglob_pattern') {
+        const text = node.text
+        let i = 0
+        while (i < text.length) {
+          if (text[i] === '\\' && i + 1 < text.length) {
+            i += 2
+            continue
+          }
+          if (text[i] === '&') {
+            return {
+              kind: 'too-complex',
+              reason:
+                '[[ ]] pattern contains unquoted & (zsh splits the word at & at any depth)',
+              differential: true,
+            }
+          }
+          i++
         }
       }
       argv.push(node.text)

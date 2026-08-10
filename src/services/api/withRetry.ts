@@ -44,6 +44,7 @@ import {
   isFastModeEnabled,
   triggerFastModeCooldown,
 } from '../../utils/fastMode.js'
+import { handleFoundryCapabilityError } from '../../utils/foundryCapabilities.js'
 import { isNonCustomOpusModel } from '../../utils/model/model.js'
 import { disableKeepAlive } from '../../utils/proxy.js'
 import { sleep } from '../../utils/sleep.js'
@@ -391,6 +392,17 @@ export async function* withRetry<T>(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
         { level: 'error' },
       )
+
+      // densable xco/uns — learn Foundry unsupported capabilities from 400s and
+      // retry after strip (tool_search / structured_outputs). Empty map → no-op.
+      const foundryCapRetry = handleFoundryCapabilityError(error, options.model)
+      if (foundryCapRetry?.startsWith('retry:foundry-capability-strip:')) {
+        logForDebugging(
+          `Foundry capability strip retry (${foundryCapRetry}) attempt ${attempt}/${maxRetries + 1}`,
+          { level: 'warn' },
+        )
+        continue
+      }
 
       // Official densable: permanent model_not_found → FallbackTriggeredError
       // with reason (before capacity/529 retry path). Host gets system/model_fallback.

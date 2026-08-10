@@ -48,6 +48,10 @@ const cronTools = [
   require('@claude-code/builtin-tools/tools/ScheduleCronTool/CronListTool.js')
     .CronListTool,
 ]
+// densable `otp` ScheduleWakeup — always in base pool; call-time jKe gate
+const ScheduleWakeupTool =
+  require('@claude-code/builtin-tools/tools/ScheduleWakeupTool/ScheduleWakeupTool.js')
+    .ScheduleWakeupTool as typeof import('@claude-code/builtin-tools/tools/ScheduleWakeupTool/ScheduleWakeupTool.js').ScheduleWakeupTool
 const RemoteTriggerTool = feature('AGENT_TRIGGERS_REMOTE')
   ? require('@claude-code/builtin-tools/tools/RemoteTriggerTool/RemoteTriggerTool.js')
       .RemoteTriggerTool
@@ -274,6 +278,7 @@ export function getAllBaseTools(): Tools {
     ...(SleepTool ? [SleepTool] : []),
     EndConversationTool,
     ...cronTools,
+    ScheduleWakeupTool,
     ...(RemoteTriggerTool ? [RemoteTriggerTool] : []),
     ...(MonitorTool ? [MonitorTool] : []),
     BriefTool,

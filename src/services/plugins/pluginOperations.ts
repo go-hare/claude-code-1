@@ -32,10 +32,12 @@ import {
   removePluginInstallation,
   updateInstallationPathOnDisk,
 } from '../../utils/plugins/installedPluginsManager.js'
+import { isSourceAllowedByPolicy } from '../../utils/plugins/marketplaceHelpers.js'
 import {
   getMarketplace,
   getPluginById,
   loadKnownMarketplacesConfig,
+  tryRefreshMarketplaceOnCatalogMiss,
 } from '../../utils/plugins/marketplaceManager.js'
 import { deletePluginDataDir } from '../../utils/plugins/pluginDirectories.js'
 import {
@@ -334,12 +336,13 @@ export function getPluginInstallationFromV2(pluginId: string): {
  *
  * Order of operations:
  *   1. Search materialized marketplaces for the plugin
- *   2. Write settings (THE ACTION — declares intent)
- *   3. Cache plugin + record version hint (materialization)
+ *   2. densable 2.1.221 #29: on scoped miss, tryRefreshMarketplaceOnCatalogMiss → retry
+ *   3. Write settings (THE ACTION — declares intent)
+ *   4. Cache plugin + record version hint (materialization)
  *
  * Marketplace reconciliation is NOT this function's responsibility — startup
  * reconcile handles declared-but-not-materialized marketplaces. If the
- * marketplace isn't found, "not found" is the correct error.
+ * marketplace isn't found after refresh-retry, "not found" is the correct error.
  *
  * @param plugin Plugin identifier (name or plugin@marketplace)
  * @param scope Installation scope: user, project, or local (defaults to 'user')
@@ -358,9 +361,25 @@ export async function installPluginOp(
   let foundPlugin: PluginMarketplaceEntry | undefined
   let foundMarketplace: string | undefined
   let marketplaceInstallLocation: string | undefined
+  // densable: catalog-miss refresh outcome for scoped stale-hint branching
+  let catalogMissOutcome: 'refreshed' | 'refresh-failed' | 'ineligible' | null =
+    null
 
   if (marketplaceName) {
-    const pluginInfo = await getPluginById(plugin)
+    // densable scoped path: getPluginById → on miss zIr → retry getPluginById
+    let pluginInfo = await getPluginById(plugin)
+    if (!pluginInfo) {
+      const marketplaces = await loadKnownMarketplacesConfig()
+      const mktEntry = marketplaces[marketplaceName]
+      const outcome = await tryRefreshMarketplaceOnCatalogMiss(
+        marketplaceName,
+        mktEntry,
+      )
+      catalogMissOutcome = outcome
+      if (outcome === 'refreshed') {
+        pluginInfo = await getPluginById(plugin)
+      }
+    }
     if (pluginInfo) {
       foundPlugin = pluginInfo.entry
       foundMarketplace = marketplaceName
@@ -369,6 +388,10 @@ export async function installPluginOp(
   } else {
     const marketplaces = await loadKnownMarketplacesConfig()
     for (const [mktName, mktConfig] of Object.entries(marketplaces)) {
+      // densable l0: require source + policy allowlist
+      if (!mktConfig.source || !isSourceAllowedByPolicy(mktConfig.source)) {
+        continue
+      }
       try {
         const marketplace = await getMarketplace(mktName)
         const pluginEntry = marketplace.plugins.find(p => p.name === pluginName)
@@ -388,9 +411,22 @@ export async function installPluginOp(
     const location = marketplaceName
       ? `marketplace "${marketplaceName}"`
       : 'any configured marketplace'
+    // densable: stale-local-copy hint only when we actually tried a refresh
+    // and it failed (or refreshed but plugin still missing). Do not claim
+    // "out of date" for ineligible (autoUpdate off / policy / offline) or
+    // missing marketplace entry.
+    let staleHint = ''
+    if (marketplaceName && catalogMissOutcome === 'refresh-failed') {
+      staleHint =
+        '. Your local copy may be out of date — update it from /plugin > Marketplaces'
+    } else if (marketplaceName && catalogMissOutcome === 'refreshed') {
+      // refreshed but still miss — optional CLI update nudge (not "failed")
+      staleHint =
+        '. Your local copy may be out of date — try `claude plugin marketplace update` or update it from /plugin > Marketplaces'
+    }
     return {
       success: false,
-      message: `Plugin "${pluginName}" not found in ${location}`,
+      message: `Plugin "${pluginName}" not found in ${location}${staleHint}`,
     }
   }
 

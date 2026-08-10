@@ -1,10 +1,42 @@
-import { describe, expect, test } from 'bun:test'
-import {
+import { describe, expect, mock, test } from 'bun:test'
+import * as realMessageQueue from 'src/utils/messageQueueManager.js'
+import { debugMock } from '../../../tests/mocks/debug'
+import { growthbookMock } from '../../../tests/mocks/growthbook'
+import { createMessageQueueManagerMock } from '../../../tests/mocks/messageQueueManager'
+
+// Side-effect deps used only on auto-bg timeout path — mock before import.
+// Mock debug (not bootstrap/state): incomplete state mock is process-global and
+// poisons other files' named imports (addSlowOperation / setLastAPIRequestMessages).
+// debugMock cuts debug → slowOperations → state chain per project test rules.
+// growthbookMock must be complete — Bun mock.module is process-global and an
+// incomplete growthbook mock breaks later files that import other GB exports.
+// messageQueueManager: spread real module — incomplete stubs drop getCommandQueue
+// and poison co-running suites (modelScheduledOrigin.221 etc.).
+mock.module('src/utils/debug.ts', debugMock)
+mock.module('src/utils/debug.js', debugMock)
+mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
+  registerMonitorMcpTask: () => 'task-bg-1',
+  completeMonitorMcpTask: () => {},
+  failMonitorMcpTask: () => {},
+}))
+mock.module('src/services/analytics/index.js', () => ({
+  logEvent: () => {},
+}))
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
+mock.module(
+  'src/utils/messageQueueManager.js',
+  createMessageQueueManagerMock(realMessageQueue, {
+    enqueuePendingNotification: () => {},
+  }),
+)
+
+const {
   DEFAULT_MCP_AUTO_BACKGROUND_MS,
+  callMcpToolWithAutoBackground,
   formatMcpAutoBackgroundMovedMessage,
   isMcpAutoBackgroundEnabled,
   resolveMcpAutoBackgroundMs,
-} from '../mcpAutoBackground.js'
+} = await import('../mcpAutoBackground.js')
 
 describe('resolveMcpAutoBackgroundMs (densable Ncy)', () => {
   test('default 120s when env unset and gb default true', () => {
@@ -89,6 +121,29 @@ describe('resolveMcpAutoBackgroundMs (densable Ncy)', () => {
       ),
     ).toBe(DEFAULT_MCP_AUTO_BACKGROUND_MS)
   })
+
+  test('densable pv: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS forces 0', () => {
+    expect(
+      resolveMcpAutoBackgroundMs(
+        {
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+          CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: '5000',
+          CLAUDE_AUTO_BACKGROUND_TASKS: '1',
+        },
+        {
+          gbEnabled: true,
+          isNonInteractiveSession: false,
+          transportType: 'stdio',
+        },
+      ),
+    ).toBe(0)
+    expect(
+      resolveMcpAutoBackgroundMs(
+        { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: 'true' },
+        { gbEnabled: true, isNonInteractiveSession: false },
+      ),
+    ).toBe(0)
+  })
 })
 
 describe('isMcpAutoBackgroundEnabled', () => {
@@ -115,5 +170,65 @@ describe('formatMcpAutoBackgroundMovedMessage', () => {
     expect(msg).toContain('moved to the background as task m1')
     expect(msg).toContain('TaskStop with task_id "m1"')
     expect(msg).toContain('does not survive exiting this session')
+  })
+})
+
+describe('callMcpToolWithAutoBackground autoBackgrounded stamp', () => {
+  test('timeout path returns autoBackgrounded:true (not a real completion)', async () => {
+    const parent = new AbortController()
+    let resolveRun!: (v: {
+      content: Array<{ type: 'text'; text: string }>
+    }) => void
+    const run = () =>
+      new Promise<{ content: Array<{ type: 'text'; text: string }> }>(
+        resolve => {
+          resolveRun = resolve
+        },
+      )
+
+    const result = await callMcpToolWithAutoBackground({
+      run,
+      serverName: 'srv',
+      toolName: 'slow',
+      parentAbortController: parent,
+      setAppState: () => {},
+      autoBackgroundMs: 20,
+      toolLabel: 'mcp__srv__slow',
+    })
+
+    expect(result).toMatchObject({ autoBackgrounded: true })
+    expect(
+      Array.isArray(result.content) &&
+        result.content.some(
+          b =>
+            typeof b === 'object' &&
+            b &&
+            'text' in b &&
+            String((b as { text: string }).text).includes(
+              'moved to the background',
+            ),
+        ),
+    ).toBe(true)
+
+    // let background promise settle to avoid unhandled rejection noise
+    resolveRun({ content: [{ type: 'text', text: 'late' }] })
+  })
+
+  test('fast settle does not stamp autoBackgrounded', async () => {
+    const parent = new AbortController()
+    const result = await callMcpToolWithAutoBackground({
+      run: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+      serverName: 'srv',
+      toolName: 'fast',
+      parentAbortController: parent,
+      setAppState: () => {},
+      autoBackgroundMs: 5_000,
+    })
+    expect(
+      result &&
+        typeof result === 'object' &&
+        'autoBackgrounded' in result &&
+        (result as { autoBackgrounded?: boolean }).autoBackgrounded,
+    ).toBeFalsy()
   })
 })

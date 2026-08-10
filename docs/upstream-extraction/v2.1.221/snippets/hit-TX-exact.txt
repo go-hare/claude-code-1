@@ -1,0 +1,3 @@
+# off=243133608 cont_len=572
+
+function TX(e){if(e.alwaysLoad===!0)return!1;if(eGu().includes(e.name))return!1;if(e.isMcp===!0)return!0;if(e.name===dw)return!1;if(e.name===Qo){if((amt(),Qr(xYu)).isForkSubagentEnabled())return!1}if(e.name===b3_)return!1;if(e.name===S3_)return!1;if(e.name===Mre&&nrr())return!1;if(e.name===k_&&jKe())return!1;if(e.name===Lre&&process.env.CLAUDE_CODE_SESSION_KIND==="bg")return!1;return e.shouldDefer===!0}function u0s(e){return e.name}function tCo(){return T3_+($Cu()?E3_:v3_)+w3_}var b3_,S3_,T3_=`Fetches full schema definitions for deferred tools so they can be called.

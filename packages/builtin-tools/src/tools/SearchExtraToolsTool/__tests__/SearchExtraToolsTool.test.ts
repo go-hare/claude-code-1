@@ -2,31 +2,12 @@ import { describe, test, expect } from 'bun:test'
 import { mock } from 'bun:test'
 import { logMock } from '../../../../../../tests/mocks/log'
 import { debugMock } from '../../../../../../tests/mocks/debug'
+import { growthbookMock } from '../../../../../../tests/mocks/growthbook'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
-  getFeatureValue_DEPRECATED: async () => undefined,
-  getFeatureValue_CACHED_WITH_REFRESH: async () => undefined,
-  hasGrowthBookEnvOverride: () => false,
-  getAllGrowthBookFeatures: () => ({}),
-  getGrowthBookConfigOverrides: () => ({}),
-  setGrowthBookConfigOverride: () => {},
-  clearGrowthBookConfigOverrides: () => {},
-  getApiBaseUrlHost: () => undefined,
-  onGrowthBookRefresh: () => {},
-  initializeGrowthBook: async () => {},
-  checkSecurityRestrictionGate: async () => false,
-  checkGate_CACHED_OR_BLOCKING: async () => false,
-  refreshGrowthBookAfterAuthChange: () => {},
-  resetGrowthBook: () => {},
-  refreshGrowthBookFeatures: async () => {},
-  setupPeriodicGrowthBookRefresh: () => {},
-  stopPeriodicGrowthBookRefresh: () => {},
-}))
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
 mock.module('src/utils/searchExtraTools.js', () => ({
   isSearchExtraToolsEnabledOptimistic: () => true,
@@ -41,7 +22,7 @@ mock.module('src/utils/searchExtraTools.js', () => ({
 }))
 
 mock.module('src/constants/tools.js', () => ({
-  CORE_TOOLS: new Set(['Read', 'Edit', 'SearchExtraTools', 'ExecuteExtraTool']),
+  CORE_TOOLS: new Set(['Read', 'Edit', 'ToolSearch', 'ExecuteExtraTool']),
 }))
 
 // Mock toolIndex module
@@ -76,11 +57,12 @@ mock.module('src/services/analytics/index.js', () => ({
 const { SearchExtraToolsTool } = await import('../SearchExtraToolsTool.js')
 
 function makeDeferredTool(name: string, desc: string = 'A tool') {
+  // densable TX: opt-in shouldDefer (not CORE_TOOLS whitelist inversion)
   return {
     name,
     isMcp: false,
     alwaysLoad: undefined,
-    shouldDefer: undefined,
+    shouldDefer: true,
     searchHint: '',
     prompt: async () => desc,
     description: async () => desc,
@@ -171,57 +153,52 @@ describe('SearchExtraToolsTool search enhancements', () => {
     expect(result.data.matches).toContain('ToolB')
   })
 
-  test('text mode output for all models (unified self-built search)', async () => {
-    const tool = makeDeferredTool('TestTool', 'A test tool')
-    mockGetToolIndex.mockResolvedValueOnce([])
-    mockSearchTools.mockReturnValueOnce([])
-
-    // First call: search returns matches
-    mockSearchTools.mockReturnValueOnce([
+  test('mapResult emits densable tool_reference blocks for matches', () => {
+    const blockParam = SearchExtraToolsTool.mapToolResultToToolResultBlockParam(
       {
-        name: 'TestTool',
-        description: 'A test',
-        searchHint: undefined,
-        score: 0.9,
-        isMcp: false,
-        isDeferred: true,
-        inputSchema: undefined,
+        matches: ['TestTool', 'CronCreate'],
+        query: 'test',
+        total_deferred_tools: 2,
       },
-    ])
+      'tool-use-123',
+      { mainLoopModel: 'claude-sonnet-4-5' },
+    )
 
-    // mapToolResultToToolResultBlockParam always returns text, not tool_reference
+    expect(Array.isArray(blockParam.content)).toBe(true)
+    const content = blockParam.content as Array<{
+      type: string
+      tool_name: string
+    }>
+    expect(content).toEqual([
+      { type: 'tool_reference', tool_name: 'TestTool' },
+      { type: 'tool_reference', tool_name: 'CronCreate' },
+    ])
+  })
+
+  test('mapResult tool_reference independent of model', () => {
     const blockParam = SearchExtraToolsTool.mapToolResultToToolResultBlockParam(
       { matches: ['TestTool'], query: 'test', total_deferred_tools: 1 },
       'tool-use-123',
       { mainLoopModel: 'claude-3-haiku-20240307' },
     )
 
-    expect(typeof blockParam.content).toBe('string')
-    expect(blockParam.content as string).toContain('TestTool')
-    expect(blockParam.content as string).toContain('ExecuteExtraTool')
+    expect(Array.isArray(blockParam.content)).toBe(true)
+    expect(
+      (blockParam.content as Array<{ type: string; tool_name: string }>)[0],
+    ).toEqual({ type: 'tool_reference', tool_name: 'TestTool' })
   })
 
-  test('text output works for any model without distinction', async () => {
-    const blockParam = SearchExtraToolsTool.mapToolResultToToolResultBlockParam(
-      { matches: ['TestTool'], query: 'test', total_deferred_tools: 1 },
-      'tool-use-123',
-      { mainLoopModel: 'claude-sonnet-4-20250514' },
-    )
-
-    expect(typeof blockParam.content).toBe('string')
-    expect(blockParam.content as string).toContain('TestTool')
-    expect(blockParam.content as string).toContain('ExecuteExtraTool')
-  })
-
-  test('backwards compatible without context parameter', async () => {
+  test('mapResult works without context parameter', () => {
     const blockParam = SearchExtraToolsTool.mapToolResultToToolResultBlockParam(
       { matches: ['TestTool'], query: 'test', total_deferred_tools: 1 },
       'tool-use-123',
     )
 
-    expect(typeof blockParam.content).toBe('string')
-    expect(blockParam.content as string).toContain('TestTool')
-    expect(blockParam.content as string).toContain('ExecuteExtraTool')
+    expect(Array.isArray(blockParam.content)).toBe(true)
+    expect(
+      (blockParam.content as Array<{ type: string; tool_name: string }>)[0]
+        ?.tool_name,
+    ).toBe('TestTool')
   })
 
   test('empty results return helpful message', async () => {
@@ -231,5 +208,9 @@ describe('SearchExtraToolsTool search enhancements', () => {
     )
 
     expect(blockParam.content).toContain('No matching deferred tools found')
+  })
+
+  test('wire tool name is densable ToolSearch', () => {
+    expect(SearchExtraToolsTool.name).toBe('ToolSearch')
   })
 })

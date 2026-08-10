@@ -1,13 +1,13 @@
 /**
  * Official residual positive-integer ms env gates (portable parsers).
  * Invalid/missing → undefined (caller keeps default).
+ * densable 2.1.211: scientific notation + digit separators via parsePositiveEnvInt.
  */
 
+import { parseEnvInt, parsePositiveEnvInt } from './envUtils.js'
+
 function parsePositiveMs(raw: string | undefined): number | undefined {
-  if (!raw) return undefined
-  const n = Number(raw)
-  if (!Number.isFinite(n) || n <= 0) return undefined
-  return Math.floor(n)
+  return parsePositiveEnvInt(raw)
 }
 
 /** Official cjt default: 10 minutes. */
@@ -36,8 +36,8 @@ export function resolveAuthFailExitMsOrDefault(
 ): number {
   const raw = env.CLAUDE_CODE_AUTH_FAIL_EXIT_MS
   if (raw === undefined || raw === '') return DEFAULT_AUTH_FAIL_EXIT_MS
-  const n = Number(raw)
-  return Number.isFinite(n) ? Math.floor(n) : DEFAULT_AUTH_FAIL_EXIT_MS
+  // densable: raw 0 disables the zombie-exit kill switch (allow non-positive).
+  return parseEnvInt(raw, DEFAULT_AUTH_FAIL_EXIT_MS)
 }
 
 export function resolveUserDialogTimeoutMs(
@@ -52,8 +52,7 @@ export function resolveUserDialogTimeoutMsOrDefault(
 ): number {
   const raw = env.CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS
   if (raw === undefined || raw === '') return DEFAULT_USER_DIALOG_TIMEOUT_MS
-  const n = Number(raw)
-  return Number.isFinite(n) ? Math.floor(n) : DEFAULT_USER_DIALOG_TIMEOUT_MS
+  return parseEnvInt(raw, DEFAULT_USER_DIALOG_TIMEOUT_MS)
 }
 
 export function resolveParkedPermissionWaitMs(
@@ -68,8 +67,7 @@ export function resolveParkedPermissionWaitMsOrDefault(
 ): number {
   const raw = env.CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS
   if (raw === undefined || raw === '') return DEFAULT_PARKED_PERMISSION_WAIT_MS
-  const n = Number(raw)
-  return Number.isFinite(n) ? Math.floor(n) : DEFAULT_PARKED_PERMISSION_WAIT_MS
+  return parseEnvInt(raw, DEFAULT_PARKED_PERMISSION_WAIT_MS)
 }
 
 export function resolveOauth401WaitMs(
@@ -87,8 +85,8 @@ export function resolveOauth401WaitMsOrDefault(
 ): number {
   const raw = env.CLAUDE_CODE_OAUTH_401_WAIT_MS
   if (raw !== undefined) {
-    const n = Number(raw)
-    return Number.isFinite(n) ? n : 0
+    // densable: raw present including 0 / scientific / underscore
+    return parseEnvInt(raw, 0)
   }
   return env.CLAUDE_CODE_REMOTE_SESSION_ID
     ? DEFAULT_OAUTH_401_WAIT_REMOTE_MS
@@ -109,10 +107,7 @@ export function resolveTeamTeardownParkTimeoutMsOrDefault(
   if (raw === undefined || raw === '') {
     return DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS
   }
-  const n = Number(raw)
-  return Number.isFinite(n)
-    ? Math.floor(n)
-    : DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS
+  return parseEnvInt(raw, DEFAULT_TEAM_TEARDOWN_PARK_TIMEOUT_MS)
 }
 
 export type AuthFailExitDecision = 'continue' | 'exit'

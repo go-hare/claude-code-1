@@ -25,12 +25,25 @@ import {
   formatMarketplaceLoadingErrors,
   loadMarketplacesWithGracefulDegradation,
 } from '../../utils/plugins/marketplaceHelpers.js';
-import { loadKnownMarketplacesConfig } from '../../utils/plugins/marketplaceManager.js';
+import {
+  getMarketplace,
+  loadKnownMarketplacesConfig,
+  tryRefreshMarketplaceOnCatalogMiss,
+} from '../../utils/plugins/marketplaceManager.js';
 import { OFFICIAL_MARKETPLACE_NAME } from '../../utils/plugins/officialMarketplace.js';
+import {
+  activatePluginsAfterInstall,
+  formatBatchInstallActivateSuffix,
+  formatPartialBatchInstallActivateSuffix,
+  formatSingleInstallActivateSuffix,
+  type PluginInstallAutoActivateOutcome,
+} from '../../utils/plugins/activateAfterInstall.js';
 import { installPluginFromMarketplace } from '../../utils/plugins/pluginInstallationHelpers.js';
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js';
 import { plural } from '../../utils/stringUtils.js';
 import { truncateToWidth } from '../../utils/truncate.js';
+import { useAppStateStore, useSetAppState } from '../../state/AppState.js';
+import { getMainLoopModel } from '../../utils/model/model.js';
 import { findPluginOptionsTarget, PluginOptionsFlow } from './PluginOptionsFlow.js';
 import { PluginTrustWarning } from './PluginTrustWarning.js';
 import { buildPluginDetailsMenuOptions, extractGitHubRepo, type InstallablePlugin } from './pluginDetailsHelpers.js';
@@ -48,7 +61,16 @@ type Props = {
   targetPlugin?: string;
 };
 
-type ViewState = 'plugin-list' | 'plugin-details' | { type: 'plugin-options'; plugin: LoadedPlugin; pluginId: string };
+type ViewState =
+  | 'plugin-list'
+  | 'plugin-details'
+  | {
+      type: 'plugin-options';
+      plugin: LoadedPlugin;
+      pluginId: string;
+      /** install closure (root + deps) for activate VQS */
+      closure: string[];
+    };
 
 export function DiscoverPlugins({
   error,
@@ -60,6 +82,26 @@ export function DiscoverPlugins({
   onSearchModeChange,
   targetPlugin,
 }: Props): React.ReactNode {
+  const setAppState = useSetAppState();
+  const store = useAppStateStore();
+
+  const tryActivateInstalled = useCallback(
+    async (pluginIds: string[]): Promise<PluginInstallAutoActivateOutcome> => {
+      return activatePluginsAfterInstall(
+        () => {
+          const s = store.getState();
+          return {
+            model: getMainLoopModel(),
+            mcpClients: s.mcp.clients,
+          };
+        },
+        setAppState,
+        pluginIds,
+      );
+    },
+    [setAppState, store],
+  );
+
   // View state
   const [viewState, setViewState] = useState<ViewState>('plugin-list');
   const [selectedPlugin, setSelectedPlugin] = useState<InstallablePlugin | null>(null);
@@ -211,7 +253,40 @@ export function DiscoverPlugins({
         // Handle targetPlugin - navigate directly to plugin details
         // Search in allPlugins (before filtering) to handle installed plugins gracefully
         if (targetPlugin) {
-          const foundPlugin = allPlugins.find(p => p.entry.name === targetPlugin);
+          let foundPlugin = allPlugins.find(p => p.entry.name === targetPlugin);
+
+          // densable 2.1.221 #29: unscoped catalog miss → refresh each marketplace → retry
+          if (!foundPlugin) {
+            for (const [name, entry] of Object.entries(config)) {
+              logForDebugging(`Checking ${name} for new plugins…`);
+              const outcome = await tryRefreshMarketplaceOnCatalogMiss(name, entry);
+              if (outcome !== 'refreshed') continue;
+              try {
+                const marketplace = await getMarketplace(name);
+                const plugin = marketplace?.plugins.find(p => p.name === targetPlugin);
+                if (plugin) {
+                  const pluginId = createPluginId(plugin.name, name);
+                  foundPlugin = {
+                    entry: plugin,
+                    marketplaceName: name,
+                    pluginId,
+                    isInstalled: isPluginGloballyInstalled(pluginId),
+                  };
+                  // Surface newly found plugin in the list when not installed
+                  if (!foundPlugin.isInstalled) {
+                    setAvailablePlugins(prev =>
+                      prev.some(p => p.pluginId === pluginId) ? prev : [...prev, foundPlugin!],
+                    );
+                  }
+                  break;
+                }
+              } catch (error) {
+                logForDebugging(`Post-refresh reload of marketplace '${name}' failed: ${errorMessage(error)}`, {
+                  level: 'warn',
+                });
+              }
+            }
+          }
 
           if (foundPlugin) {
             if (foundPlugin.isInstalled) {
@@ -246,6 +321,7 @@ export function DiscoverPlugins({
     let successCount = 0;
     let failureCount = 0;
     const newFailedPlugins: Array<{ name: string; reason: string }> = [];
+    const installedIds: string[] = [];
 
     for (const plugin of pluginsToInstall) {
       const result = await installPluginFromMarketplace({
@@ -257,6 +333,8 @@ export function DiscoverPlugins({
 
       if (result.success) {
         successCount++;
+        // densable: VQS needs full install closure (root + deps)
+        installedIds.push(...result.closure);
       } else {
         failureCount++;
         newFailedPlugins.push({
@@ -270,22 +348,27 @@ export function DiscoverPlugins({
     setSelectedForInstall(new Set());
     clearAllCaches();
 
-    // Handle installation results
+    // densable 2.1.221 #30: try activate when safe
+    let activateOutcome: PluginInstallAutoActivateOutcome = 'reload-required';
+    if (successCount > 0) {
+      activateOutcome = await tryActivateInstalled([...new Set(installedIds)]);
+    }
+
     if (failureCount === 0) {
-      const message =
-        `✓ Installed ${successCount} ${plural(successCount, 'plugin')}. ` + `Run /reload-plugins to activate.`;
-      setResult(message);
+      const suffix = formatBatchInstallActivateSuffix(activateOutcome, successCount);
+      setResult(`✓ Installed ${successCount} ${plural(successCount, 'plugin')}.${suffix}`);
     } else if (successCount === 0) {
       setError(`Failed to install: ${formatFailureDetails(newFailedPlugins, true)}`);
     } else {
-      const message =
+      const suffix = formatPartialBatchInstallActivateSuffix(activateOutcome, successCount);
+      setResult(
         `✓ Installed ${successCount} of ${successCount + failureCount} plugins. ` +
-        `Failed: ${formatFailureDetails(newFailedPlugins, false)}. ` +
-        `Run /reload-plugins to activate successfully installed plugins.`;
-      setResult(message);
+          `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
+      );
     }
 
-    if (successCount > 0) {
+    // densable: only mark needsRefresh when activate requires reload
+    if (successCount > 0 && activateOutcome === 'reload-required') {
       if (onInstallComplete) {
         await onInstallComplete();
       }
@@ -314,11 +397,13 @@ export function DiscoverPlugins({
           type: 'plugin-options',
           plugin: loaded,
           pluginId: plugin.pluginId,
+          closure: result.closure,
         });
         return;
       }
-      setResult(result.message);
-      if (onInstallComplete) {
+      const outcome = await tryActivateInstalled(result.closure);
+      setResult(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`);
+      if (outcome === 'reload-required' && onInstallComplete) {
         await onInstallComplete();
       }
       setParentViewState({ type: 'menu' });
@@ -505,10 +590,11 @@ export function DiscoverPlugins({
   );
 
   if (typeof viewState === 'object' && viewState.type === 'plugin-options') {
-    const { plugin, pluginId } = viewState;
-    function finish(msg: string): void {
-      setResult(msg);
-      if (onInstallComplete) {
+    const { plugin, pluginId, closure } = viewState;
+    async function finish(baseMsg: string): Promise<void> {
+      const outcome = await tryActivateInstalled(closure.length > 0 ? closure : [pluginId]);
+      setResult(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`);
+      if (outcome === 'reload-required' && onInstallComplete) {
         void onInstallComplete();
       }
       setParentViewState({ type: 'menu' });
@@ -520,13 +606,13 @@ export function DiscoverPlugins({
         onDone={(outcome, detail) => {
           switch (outcome) {
             case 'configured':
-              finish(`✓ Installed and configured ${plugin.name}. Run /reload-plugins to apply.`);
+              void finish(`✓ Installed and configured ${plugin.name}.`);
               break;
             case 'skipped':
-              finish(`✓ Installed ${plugin.name}. Run /reload-plugins to apply.`);
+              void finish(`✓ Installed ${plugin.name}.`);
               break;
             case 'error':
-              finish(`Installed but failed to save config: ${detail}`);
+              void finish(`Installed but failed to save config: ${detail}`);
               break;
           }
         }}

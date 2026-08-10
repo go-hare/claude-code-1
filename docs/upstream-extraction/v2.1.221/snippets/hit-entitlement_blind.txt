@@ -1,0 +1,4 @@
+needle: entitlement_blind
+count: 3
+---
+(cr.type==="tool_drain_tick"){yield*je();continue}if(rn.length>0)yield*rn,rn.length=0;if(cr.type==="server_fallback"){{let Qe=T6d(cr,{isMainThread:j});if(N("tengu_rotunda_pennant_applied",{reason:he(Qe.telemetry.reason),entitlement_blind:NHt(),armed_mode:he(Aa?.mode??"none"),mid_stream:Qe.telemetry.midStream,discarded_block_count:Qe.telemetry.discardedBlockCount,tombstoned_had_tool_use:Qe.telemetry.tombstonedHadToolUse,request_id_sha12:Qe.telemetry.requestId!

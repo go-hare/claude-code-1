@@ -45,7 +45,8 @@ Never reuse tab IDs from a previous/other session. Follow these guidelines:
 3. Otherwise, create a new tab with mcp__claude-in-chrome__tabs_create_mcp (after step 1)
 4. Navigate / computer / read_page always need a tabId from context or create
 5. If a tool returns an error indicating the tab doesn't exist or is invalid, call tabs_context_mcp again (createIfEmpty true) for fresh tab IDs
-6. When a tab is closed by the user or a navigation error occurs, call tabs_context_mcp to see what tabs are available`
+6. When a tab is closed by the user or a navigation error occurs, call tabs_context_mcp to see what tabs are available
+7. densable 2.1.221: Tabs you create are yours to clean up — close each one with tabs_close_mcp as soon as you no longer need it, and close any that remain before finishing your task. Leave a tab open only if the user asked to see it or wants it kept open`
 
 /**
  * Additional instructions for chrome tools when tool search is enabled.

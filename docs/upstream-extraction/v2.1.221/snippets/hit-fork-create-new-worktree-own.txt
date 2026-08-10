@@ -1,0 +1,4 @@
+needle: create a new worktree of your own
+count: 4
+---
+} rather than checking that branch out (it stays checked out in the original's worktree)`:""}`}.`:O==="own-worktree"?`This conversation was forked from a session that is still working in this checkout (${_n()}). Before making code changes, create a new worktree of your own with ${Lre} so your edits don't land where the original session is editing.`:void 0,K=[...q.appendSystemPrompt?[q.appendSystemPrompt]:[],...V!==void 0&&!(q.appendSystemPrompt??"").includes(V)?[V]:[]],j=[...M!==null?["--resume",M,"--fork-se

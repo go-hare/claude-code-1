@@ -1,0 +1,4 @@
+needle: git fetch --unshallow origin
+count: 6
+---
+,method:Re("deepen_hint"),outcome:Re("offered"),is_shallow:!0}),{ok:!1,reason:"no_merge_base",error:m?`Your clone is shallow and doesn't contain the point where your branch forked from ${y}. Run \`git fetch --deepen=100 origin ${y}\` (or \`git fetch --unshallow origin\`) and rerun ${t}.`:`Your clone is shallow and doesn't contain the point where your branch forked from ${y}. Run \`git fetch --unshallow origin\` and rerun ${t}. If your base branch isn't ${y}, pass it explicitly (\`${t} <branch>\`).`};if(

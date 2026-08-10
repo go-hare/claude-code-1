@@ -1,9 +1,9 @@
 /**
  * Tool Search utilities for dynamically discovering deferred tools.
  *
- * When enabled, deferred tools (all non-core tools) are sent with
- * defer_loading: true and discovered via SearchExtraToolsTool rather than being
- * loaded upfront. Core tools are defined in CORE_TOOLS (src/constants/tools.ts).
+ * When enabled, deferred tools (densable TX opt-in: shouldDefer / MCP / special
+ * cases) are sent with defer_loading: true and discovered via ToolSearch
+ * (SearchExtraToolsTool) rather than being loaded upfront.
  */
 
 import memoize from 'lodash-es/memoize.js'
@@ -11,6 +11,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import type { Tool } from '../Tool.js'
 import {
   type ToolPermissionContext,
@@ -34,18 +35,142 @@ import { getMergedBetas } from './betas.js'
 import { getContextWindowForModel } from './context.js'
 import { logForDebugging } from './debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import { isFoundryCapabilitySupported } from './foundryCapabilities.js'
+import { getCanonicalName } from './model/model.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from './model/providers.js'
 import { jsonStringify } from './slowOperations.js'
 import { zodToJsonSchema } from './zodToJsonSchema.js'
 
 /**
+ * densable `bL_` — default model substrings that lack tool_reference support.
+ * Overridable via GrowthBook `tengu_tool_search_unsupported_models`.
+ */
+const DEFAULT_TOOL_SEARCH_UNSUPPORTED_MODELS = [
+  'claude-3-5-haiku',
+  'claude-3-haiku',
+] as const
+
+/**
+ * densable `SL_` — Vertex serving stack only accepts tool-search beta on
+ * Claude 4.5-generation and newer (changelog 2.1.221 #22).
+ */
+export const VERTEX_TOOL_SEARCH_MIN_VERSION = [
+  ['opus', [4, 5]],
+  ['sonnet', [4, 5]],
+  ['haiku', [4, 5]],
+] as const satisfies ReadonlyArray<readonly [string, readonly number[]]>
+
+/**
+ * densable `aEo` — whether model id meets min family version.
+ * Model shape: `claude-{family}-{major}[-minor…]` (date suffixes already stripped).
+ */
+export function meetsMinClaudeVersion(
+  modelId: string,
+  minByFamily: ReadonlyArray<readonly [string, readonly number[]]>,
+): boolean {
+  const match = /^claude-([a-z]+)-(\d+(?:-\d+)*)$/.exec(modelId)
+  const family = match?.[1]
+  const versionPart = match?.[2]
+  if (!family || !versionPart) return false
+  const min = minByFamily.find(([name]) => name === family)?.[1]
+  if (!min) return false
+  const parts = versionPart.split('-').map(Number)
+  for (let i = 0; i < Math.max(parts.length, min.length); i++) {
+    const delta = (parts[i] ?? 0) - (min[i] ?? 0)
+    if (delta !== 0) return delta > 0
+  }
+  return true
+}
+
+/**
+ * densable `TL_` — unsupported-model denylist (GB override or `bL_`).
+ */
+export function getToolSearchUnsupportedModels(): string[] {
+  try {
+    const fromGb = getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_tool_search_unsupported_models',
+      null as string[] | null,
+    )
+    if (Array.isArray(fromGb)) {
+      return fromGb.filter((x): x is string => typeof x === 'string')
+    }
+  } catch {
+    // fall through to default
+  }
+  return [...DEFAULT_TOOL_SEARCH_UNSUPPORTED_MODELS]
+}
+
+/**
+ * densable `Xve` — model allows tool search (not on unsupported denylist).
+ * SEA reason when false: `model_unsupported`.
+ */
+export function modelSupportsToolSearch(model: string): boolean {
+  const lower = model.toLowerCase()
+  for (const needle of getToolSearchUnsupportedModels()) {
+    if (lower.includes(needle.toLowerCase())) return false
+  }
+  return true
+}
+
+/**
+ * densable `Jve` — Vertex pre-4.5 generation rejects the tool-search beta header.
+ * SEA reason when true: `vertex_model_unsupported`.
+ *
+ * ```
+ * if (provider !== "vertex") return false
+ * t = canonical(model).replace(/[@-]\d{8}$/, "")
+ * if (/^claude-3(-|$)/.test(t)) return true
+ * return /^claude-(opus|sonnet|haiku)-\d/.test(t) && !aEo(t, SL_)
+ * ```
+ */
+export function isVertexToolSearchRejected(model: string): boolean {
+  if (getAPIProvider() !== 'vertex') return false
+  const t = getCanonicalName(model).replace(/[@-]\d{8}$/, '')
+  if (/^claude-3(-|$)/.test(t)) return true
+  return (
+    /^claude-(opus|sonnet|haiku)-\d/.test(t) &&
+    !meetsMinClaudeVersion(t, VERTEX_TOOL_SEARCH_MIN_VERSION)
+  )
+}
+
+/**
+ * densable `Y4() && Xve(model) && !Jve(model)` — optimistic + model gates used
+ * by plugin activate/reload cache-impact (`swn`) and deferred-tool paths.
+ */
+export function isToolSearchEnabledForModel(model: string): boolean {
+  return (
+    isSearchExtraToolsEnabledOptimistic() &&
+    modelSupportsToolSearch(model) &&
+    !isVertexToolSearchRejected(model)
+  )
+}
+
+/**
  * Default percentage of context window at which to auto-enable tool search.
  * When MCP tool descriptions exceed this percentage (in tokens), tool search is enabled.
- * Can be overridden via ENABLE_SEARCH_EXTRA_TOOLS=auto:N where N is 0-100.
+ * Can be overridden via ENABLE_SEARCH_EXTRA_TOOLS / ENABLE_TOOL_SEARCH=auto:N (0-100).
  */
 const DEFAULT_AUTO_SEARCH_EXTRA_TOOLS_PERCENTAGE = 10 // 10%
 
 /**
- * Parse auto:N syntax from ENABLE_SEARCH_EXTRA_TOOLS env var.
+ * densable Ion/Y4 read `ENABLE_TOOL_SEARCH`; local rename is
+ * `ENABLE_SEARCH_EXTRA_TOOLS`. Prefer local name when defined (including empty);
+ * else fall back to official densable name so managed env / changelog docs work.
+ */
+export function resolveToolSearchEnvValue(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (env.ENABLE_SEARCH_EXTRA_TOOLS !== undefined) {
+    return env.ENABLE_SEARCH_EXTRA_TOOLS
+  }
+  return env.ENABLE_TOOL_SEARCH
+}
+
+/**
+ * Parse auto:N syntax from tool-search env var.
  * Returns the percentage clamped to 0-100, or null if not auto:N format or not a number.
  */
 function parseAutoPercentage(value: string): number | null {
@@ -56,7 +181,7 @@ function parseAutoPercentage(value: string): number | null {
 
   if (isNaN(percent)) {
     logForDebugging(
-      `Invalid ENABLE_SEARCH_EXTRA_TOOLS value "${value}": expected auto:N where N is a number.`,
+      `Invalid tool-search env value "${value}": expected auto:N where N is a number.`,
     )
     return null
   }
@@ -66,7 +191,7 @@ function parseAutoPercentage(value: string): number | null {
 }
 
 /**
- * Check if ENABLE_SEARCH_EXTRA_TOOLS is set to auto mode (auto or auto:N).
+ * Check if tool-search env is set to auto mode (auto or auto:N).
  */
 function isAutoSearchExtraToolsMode(value: string | undefined): boolean {
   if (!value) return false
@@ -77,7 +202,7 @@ function isAutoSearchExtraToolsMode(value: string | undefined): boolean {
  * Get the auto-enable percentage from env var or default.
  */
 function getAutoSearchExtraToolsPercentage(): number {
-  const value = process.env.ENABLE_SEARCH_EXTRA_TOOLS
+  const value = resolveToolSearchEnvValue()
   if (!value) return DEFAULT_AUTO_SEARCH_EXTRA_TOOLS_PERCENTAGE
 
   if (value === 'auto') return DEFAULT_AUTO_SEARCH_EXTRA_TOOLS_PERCENTAGE
@@ -150,22 +275,22 @@ const getDeferredToolTokenCount = memoize(
 )
 
 /**
- * Tool search mode. Determines how deferred tools (all non-core tools)
- * are surfaced:
- *   - 'tst': Tool Search Tool — deferred tools discovered via SearchExtraToolsTool (always enabled)
+ * Tool search mode. Determines how densable-TX deferred tools are surfaced:
+ *   - 'tst': Tool Search Tool — deferred tools discovered via ToolSearch (always on when gates pass)
  *   - 'tst-auto': auto — tools deferred only when they exceed threshold
  *   - 'standard': tool search disabled — all tools exposed inline
  */
 export type SearchExtraToolsMode = 'tst' | 'tst-auto' | 'standard'
 
 /**
- * Determines the tool search mode from ENABLE_SEARCH_EXTRA_TOOLS.
+ * Determines the tool search mode from ENABLE_SEARCH_EXTRA_TOOLS or
+ * densable ENABLE_TOOL_SEARCH (alias).
  *
- *   ENABLE_SEARCH_EXTRA_TOOLS    Mode
+ *   ENABLE_*_SEARCH    Mode
  *   auto / auto:1-99      tst-auto
  *   true / auto:0         tst
  *   false / auto:100      standard
- *   (unset)               tst (default: always defer non-core tools)
+ *   (unset)               tst (default: enable ToolSearch when other gates pass)
  */
 export function getSearchExtraToolsMode(): SearchExtraToolsMode {
   // Official DISABLE_EXPERIMENTAL_BETAS densable still acts as a kill switch
@@ -186,7 +311,8 @@ export function getSearchExtraToolsMode(): SearchExtraToolsMode {
     return 'standard'
   }
 
-  const value = process.env.ENABLE_SEARCH_EXTRA_TOOLS
+  // densable Ion: process.env.ENABLE_TOOL_SEARCH; local + alias via resolve
+  const value = resolveToolSearchEnvValue()
 
   // Handle auto:N syntax - check edge cases first
   const autoPercent = value ? parseAutoPercentage(value) : null
@@ -197,9 +323,8 @@ export function getSearchExtraToolsMode(): SearchExtraToolsMode {
   }
 
   if (isEnvTruthy(value)) return 'tst'
-  if (isEnvDefinedFalsy(process.env.ENABLE_SEARCH_EXTRA_TOOLS))
-    return 'standard'
-  return 'tst' // default: always defer non-core tools
+  if (isEnvDefinedFalsy(value)) return 'standard'
+  return 'tst' // default: enable ToolSearch when other gates pass
 }
 
 /**
@@ -218,24 +343,39 @@ let loggedOptimistic = false
 
 export function isSearchExtraToolsEnabledOptimistic(): boolean {
   const mode = getSearchExtraToolsMode()
+  const envValue = resolveToolSearchEnvValue()
   if (mode === 'standard') {
     if (!loggedOptimistic) {
       loggedOptimistic = true
       logForDebugging(
-        `[SearchExtraTools:optimistic] mode=${mode}, ENABLE_SEARCH_EXTRA_TOOLS=${process.env.ENABLE_SEARCH_EXTRA_TOOLS}, result=false`,
+        `[SearchExtraTools:optimistic] mode=${mode}, toolSearchEnv=${envValue}, result=false`,
       )
     }
     return false
   }
 
-  // All providers use the unified self-built tool search (TF-IDF + keyword).
-  // No first-party / tool_reference / defer_loading distinction.
-  // Users can still disable via ENABLE_SEARCH_EXTRA_TOOLS=false.
+  // densable Y4: default-on only on real first-party Anthropic hosts. Custom
+  // ANTHROPIC_BASE_URL proxies must opt in via ENABLE_TOOL_SEARCH /
+  // ENABLE_SEARCH_EXTRA_TOOLS=true (or auto / auto:N) — they may not forward
+  // tool_reference / tool-search.
+  if (
+    !envValue &&
+    getAPIProvider() === 'firstParty' &&
+    !isFirstPartyAnthropicBaseUrl()
+  ) {
+    if (!loggedOptimistic) {
+      loggedOptimistic = true
+      logForDebugging(
+        `[SearchExtraTools:optimistic] disabled: ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL} is not a first-party Anthropic host. Set ENABLE_TOOL_SEARCH=true or ENABLE_SEARCH_EXTRA_TOOLS=true (or auto / auto:N) if your proxy forwards tool_reference blocks.`,
+      )
+    }
+    return false
+  }
 
   if (!loggedOptimistic) {
     loggedOptimistic = true
     logForDebugging(
-      `[SearchExtraTools:optimistic] mode=${mode}, ENABLE_SEARCH_EXTRA_TOOLS=${process.env.ENABLE_SEARCH_EXTRA_TOOLS}, result=true`,
+      `[SearchExtraTools:optimistic] mode=${mode}, toolSearchEnv=${envValue}, result=true`,
     )
   }
   return true
@@ -337,8 +477,50 @@ export async function isSearchExtraToolsEnabled(
     })
   }
 
-  // Tool search is enabled uniformly regardless of provider or model.
-  // All providers use self-built TF-IDF + keyword search via SearchExtraToolsTool + ExecuteExtraTool.
+  // densable Y4 first: optimistic/mode + first-party base-URL opt-in must hold
+  // before DSn model/Vertex/Foundry gates. Otherwise proxy hosts without
+  // ENABLE_SEARCH_EXTRA_TOOLS still enable tool_reference on the real path.
+  if (!isSearchExtraToolsEnabledOptimistic()) {
+    logForDebugging(
+      `Tool search disabled${source ? ` (${source})` : ''}: optimistic/Y4 gate (mode=standard or non-first-party base URL without opt-in).`,
+    )
+    logModeDecision(false, getSearchExtraToolsMode(), 'optimistic_y4')
+    return false
+  }
+
+  // densable DSn order: Xve → Jve → $Fe(tool_search_server|tool_search) →
+  // Zbt(ToolSearch) → Ion mode.
+
+  // densable Xve — model denylist (default claude-3-haiku family substrings).
+  if (!modelSupportsToolSearch(model)) {
+    logForDebugging(
+      `Tool search disabled for model '${model}': model does not support tool_reference blocks. This feature is available on Claude Sonnet 4+, Opus 4+, Haiku 4.5+, and newer models.`,
+    )
+    logModeDecision(false, 'standard', 'model_unsupported')
+    return false
+  }
+
+  // densable Jve — Vertex pre-4.5 serving stack rejects tool-search beta header.
+  if (isVertexToolSearchRejected(model)) {
+    logForDebugging(
+      `Tool search disabled for model '${model}' on Vertex: this model's Vertex serving stack rejects the tool-search beta header (pre-4.5 generation).`,
+    )
+    logModeDecision(false, 'standard', 'vertex_model_unsupported')
+    return false
+  }
+
+  // densable $Fe — Foundry deployment must support tool_search_server AND tool_search.
+  // Empty capability map → default allow (no 400s learned yet).
+  if (
+    !isFoundryCapabilitySupported(model, 'tool_search_server') ||
+    !isFoundryCapabilitySupported(model, 'tool_search')
+  ) {
+    logForDebugging(
+      `Tool search disabled: Foundry deployment for '${model}' does not support tool search.`,
+    )
+    logModeDecision(false, 'standard', 'foundry_deployment_unsupported')
+    return false
+  }
 
   // Check if SearchExtraToolsTool is available (respects disallowedTools)
   if (!isSearchExtraToolsToolAvailable(tools)) {
@@ -384,6 +566,53 @@ export async function isSearchExtraToolsEnabled(
     case 'standard':
       logModeDecision(false, mode, 'standard_mode')
       return false
+  }
+}
+
+/**
+ * densable `Osr` / `kco` — reserved stub so the API keeps deferred-tool
+ * loading active when tool search is on. Never meant to be called by the model.
+ */
+export const DEFERRED_TOOL_PLACEHOLDER_NAME = 'DeferredToolPlaceholder'
+const DEFERRED_TOOL_PLACEHOLDER_DESCRIPTION =
+  'Reserved placeholder that keeps deferred tool loading active; never call this tool.'
+
+/**
+ * densable `dBp` — inject into tools array when tool search is enabled.
+ * Gated by GrowthBook `tengu_deferred_stub_tool` (default true) and the
+ * experimental-betas kill switch.
+ */
+export function getDeferredToolPlaceholderSchema(): {
+  name: string
+  description: string
+  input_schema: { type: 'object'; properties: Record<string, never> }
+  defer_loading: true
+} | null {
+  try {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)) {
+      return null
+    }
+    try {
+      const { isExperimentalBetasDisabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+      if (isExperimentalBetasDisabled()) return null
+    } catch {
+      // residual helpers optional
+    }
+    const fromGb = getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_deferred_stub_tool',
+      true,
+    )
+    if (!fromGb) return null
+    return {
+      name: DEFERRED_TOOL_PLACEHOLDER_NAME,
+      description: DEFERRED_TOOL_PLACEHOLDER_DESCRIPTION,
+      input_schema: { type: 'object', properties: {} },
+      defer_loading: true,
+    }
+  } catch {
+    return null
   }
 }
 
@@ -482,20 +711,15 @@ function extractToolNamesFromText(text: string): string[] {
 }
 
 /**
- * Extract tool names from SearchExtraToolsTool results in message history.
+ * densable `Lwe` — extract discovered deferred tool names from history.
  *
- * Supports two formats:
- * 1. Legacy tool_reference blocks (backward compat with old sessions)
- * 2. Text output from unified self-built tool search
+ * Primary (native): tool_reference blocks in tool_result content.
+ * Also: compact boundary preCompactDiscoveredTools, and legacy text
+ * "Found N deferred tool(s): …" for pre-native sessions.
+ * Not: deferred_tools_delta (names announced ≠ schemas loaded).
  *
- * Discovered tool names are used to include deferred tools in subsequent
- * API requests so the model can call them directly.
- *
- * Compaction snapshots the discovered set onto
- * compactMetadata.preCompactDiscoveredTools on the boundary marker.
- *
- * @param messages Array of messages that may contain tool_result blocks
- * @returns Set of tool names that have been discovered
+ * Discovered names are re-included in the API tools array (with defer_loading)
+ * so the model can call them directly after ToolSearch.
  */
 export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
   const discoveredTools = new Set<string>()
@@ -516,17 +740,9 @@ export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
       continue
     }
 
-    // Deferred-tools-delta attachments announce tools that the model should
-    // see as available. Include their addedNames so the filter in claude.ts
-    // keeps the corresponding tool schemas in the API request.
-    if (
-      msg.type === 'attachment' &&
-      (msg as any).attachment?.type === 'deferred_tools_delta'
-    ) {
-      const added: string[] = (msg as any).attachment.addedNames ?? []
-      for (const name of added) discoveredTools.add(name)
-      continue
-    }
+    // densable Lwe does NOT treat deferred_tools_delta as discovered —
+    // announcement ≠ schema loaded. Only tool_reference / compact carry
+    // actually-fetched tools into the API tools array.
 
     // Only user messages contain tool_result blocks (responses to tool_use)
     if (msg.type !== 'user') continue
@@ -535,7 +751,7 @@ export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
     if (!Array.isArray(content)) continue
 
     for (const block of content) {
-      // Legacy: tool_reference blocks from old sessions (backward compat)
+      // densable Lwe primary: tool_reference blocks
       if (isToolResultBlockWithContent(block)) {
         for (const item of block.content) {
           if (isToolReferenceWithName(item)) {
@@ -544,7 +760,7 @@ export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
         }
       }
 
-      // Unified self-built search: text output from SearchExtraToolsTool
+      // Legacy self-built text path (pre-native sessions)
       if (isToolResultBlockWithStringContent(block)) {
         const names = extractToolNamesFromText(block.content)
         for (const name of names) {

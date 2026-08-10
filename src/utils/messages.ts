@@ -199,6 +199,7 @@ import {
   isToolReferenceBlock,
   isSearchExtraToolsEnabledOptimistic,
 } from './searchExtraTools.js'
+import { SEARCH_EXTRA_TOOLS_TOOL_NAME } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/constants.js'
 
 const MEMORY_CORRECTION_HINT =
   "\n\nNote: The user's next message may contain a correction or preference. Pay close attention — if they explain what went wrong or how they'd prefer you to work, consider saving that to memory for future sessions."
@@ -4193,9 +4194,11 @@ Read the team config to discover your teammates' names. Check the task list peri
       const lines = attachment.tools.map(
         t => `- ${t.name}: ${t.description.slice(0, 100)}`,
       )
+      // densable native path: ToolSearch select → call tool directly (tool_reference)
+      const names = attachment.tools.map(t => t.name).join(',')
       return wrapMessagesInSystemReminder([
         createUserMessage({
-          content: `The following tools were discovered as relevant to your task. To invoke them, you MUST use ExecuteExtraTool — this is the only way to call these tools. Do not read source code or reason about whether they are callable; just call ExecuteExtraTool({"tool_name": "<name>", "params": {...}}) directly.\n\n${lines.join('\n')}`,
+          content: `The following tools were discovered as relevant to your task. Their schemas are NOT loaded yet — calling them directly will fail with InputValidationError. Use ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:${names}" to load schemas, then call each tool directly.\n\n${lines.join('\n')}`,
           isMeta: true,
         }),
       ])
@@ -4912,17 +4915,36 @@ You have exited auto mode. The user may now want to interact more directly. You 
     }
     case 'deferred_tools_delta': {
       // densable q0: coerce string[] fields before .length/.join (218 #24 resume safety)
+      // densable gold text: ToolSearch (dw) + select + call-directly (no ExecuteExtraTool)
       const addedLines = asStringArray(attachment.addedLines)
+      const addedNames = asStringArray(
+        (attachment as { addedNames?: unknown }).addedNames,
+      )
       const removedNames = asStringArray(attachment.removedNames)
+      const readdedNames = asStringArray(
+        (attachment as { readdedNames?: unknown }).readdedNames,
+      )
       const parts: string[] = []
-      if (addedLines.length > 0) {
+      if (addedLines.length > 0 && addedNames.length > 0) {
         parts.push(
-          `The following deferred tools are now available via SearchExtraTools:\n${addedLines.join('\n')}`,
+          `The following deferred tools are now available via ${SEARCH_EXTRA_TOOLS_TOOL_NAME}. Their schemas are NOT loaded — calling them directly will fail with InputValidationError. Use ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:<name>[,<name>...]" to load tool schemas before calling them:\n${addedLines.join('\n')}`,
+        )
+      }
+      if (readdedNames.length > 0) {
+        const list = readdedNames.join(', ')
+        parts.push(
+          `${readdedNames.length} deferred tool${readdedNames.length === 1 ? ' is' : 's are'} available again (MCP server reconnected — names announced earlier in this conversation): ${list}. Load via ${SEARCH_EXTRA_TOOLS_TOOL_NAME} as before.`,
         )
       }
       if (removedNames.length > 0) {
         parts.push(
-          `The following deferred tools are no longer available (their MCP server disconnected). Do not search for them — SearchExtraTools will return no match:\n${removedNames.join('\n')}`,
+          `The following deferred tools are no longer available (their MCP server disconnected). Do not search for them — ${SEARCH_EXTRA_TOOLS_TOOL_NAME} will return no match:\n${removedNames.join('\n')}`,
+        )
+      }
+      // densable ambient footer when any part present
+      if (parts.length > 0) {
+        parts.push(
+          'This is ambient context — do not narrate it to the user unless they ask or it is directly relevant to their request.',
         )
       }
       // densable: empty parts → return []

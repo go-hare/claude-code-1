@@ -512,6 +512,15 @@ export function useReplBridge(
             onInboundMessage: handleInboundMessage,
             onPermissionResponse: handlePermissionResponse,
             onInterrupt() {
+              // densable Vwo — remote interrupt cancels pending dynamic /loop wakeups
+              // (same cancel path as Esc, but reason=remote_cancel like SIGTERM).
+              try {
+                const { cancelLoopWakeupsOnUserAbort } =
+                  require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js');
+                cancelLoopWakeupsOnUserAbort('remote_cancel');
+              } catch {
+                // loopDynamic may be unavailable in partial test mocks
+              }
               handleRemoteInterrupt(abortControllerRef.current);
             },
             onSetModel(model) {

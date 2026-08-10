@@ -615,7 +615,7 @@ describe('queryModelOpenAI — deferred MCP tool visibility', () => {
       const { queryModelOpenAI } = await import('../index.js')
       const tools: any[] = [
         {
-          name: 'SearchExtraTools',
+          name: 'ToolSearch',
           isMcp: false,
           input_schema: { type: 'object', properties: {} },
           prompt: async () => 'Search deferred tools',

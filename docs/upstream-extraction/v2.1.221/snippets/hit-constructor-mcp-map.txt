@@ -1,0 +1,26 @@
+# densable 2.1.221 #10 — SDK MCP tools named constructor crash
+
+Official: Fixed a crash when preparing API requests for SDK MCP tools named
+after built-in object properties such as `constructor`.
+
+## SEA dig (2.1.221 darwin-arm64) — densable FIX still ABSENT
+
+Crash-site gold (bug still present in densable binary):
+
+```
+class I_a{constructor(...){ this._registeredTools={} ...}}
+registerTool(e,t,r){ if(this._registeredTools[e]) throw Error(`Tool ${e} is already registered`) }
+function fVp(e){ /* createSdkMcpServer */ let t=new I_a(...); e.tools.forEach(r=> t.registerTool(r.name,...)) }
+```
+
+- Membership is truthy on plain `{}` → name `"constructor"` hits `Object.prototype.constructor`
+- `Object.hasOwn(this._registeredTools, …)` count **0**
+- `_registeredTools=Object.create` / `_registeredTools=new Map` count **0**
+- Nearby `Object.create(null)`: managed-mcp `ane()`, plugin override `I_r` — not tool registry
+- `toolPermissions` builders ZK_/Mlh still `let t={}; t[r.name]=…`
+- Public `@modelcontextprotocol/sdk@1.29.0` same plain `{}` pattern
+- go-hare has no local `createSdkMcpServer` product surface (agent-sdk export / densable fVp only)
+
+## Verdict
+
+**GAP** — densable 2.1.221 binary still ships the crash site. Official changelog claims a fix, but SEA does not contain a null-proto/Map/hasOwn registry change. **Do not invent** go-hare-only patch beyond densable (would break 1:1 contract). Prefer residual over false HAVE. If a later densable pack shows real gold, re-open then.

@@ -636,20 +636,20 @@ async function runSupervisor(
   }
 
   // densable: R9d exclusive create; R0o only when peer pid is dead (never clobber live).
-  // Stamp procStart so cI/iPs can refuse PID reuse on takeover paths.
-  let procStart: unknown
+  // Stamp procStart / procStartFt (UHt/jMt) so cI/iPs can refuse PID reuse.
+  let identityFields: { procStart?: unknown; procStartFt?: unknown } = {}
   try {
-    const { readProcessStartIdentity } = await import('./daemonLock.js')
-    procStart = await readProcessStartIdentity(lockOwner.pid)
+    const { readProcessStartIdentityFields } = await import('./daemonLock.js')
+    identityFields = await readProcessStartIdentityFields(lockOwner.pid)
   } catch {
-    procStart = undefined
+    identityFields = {}
   }
   const lockWritten = await installDaemonLock({
     pid: lockOwner.pid,
     version: MACRO.VERSION,
     startedAt: lockOwner.startedAt,
     origin,
-    ...(procStart !== undefined ? { procStart } : {}),
+    ...identityFields,
     ...(lockOpts?.spawnedBy ? { spawnedBy: lockOpts.spawnedBy } : {}),
   })
   if (!lockWritten) {
@@ -949,19 +949,22 @@ async function runBgManagerStandalone(opts?: {
   }
 
   // densable R9d→R0o: exclusive install; never rename-over a live peer lock.
-  let procStart: unknown
+  // Same stamp as main daemon path: UHt/jMt → procStartFt under FFI, else procStart.
+  // Do NOT write raw readProcessStartIdentity into procStart only — pickProcessStartIdentity
+  // voids legacy procStart when win32 FFI is active.
+  let identityFields: { procStart?: unknown; procStartFt?: unknown } = {}
   try {
-    const { readProcessStartIdentity } = await import('./daemonLock.js')
-    procStart = await readProcessStartIdentity(lockOwner.pid)
+    const { readProcessStartIdentityFields } = await import('./daemonLock.js')
+    identityFields = await readProcessStartIdentityFields(lockOwner.pid)
   } catch {
-    procStart = undefined
+    identityFields = {}
   }
   const lockWritten = await installDaemonLock({
     pid: lockOwner.pid,
     version: MACRO.VERSION,
     startedAt: lockOwner.startedAt,
     origin,
-    ...(procStart !== undefined ? { procStart } : {}),
+    ...identityFields,
     ...(opts?.spawnedBy ? { spawnedBy: opts.spawnedBy } : {}),
   })
   if (!lockWritten) {

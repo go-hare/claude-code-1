@@ -442,8 +442,9 @@ export const BROWSER_TOOLS = [
   {
     name: 'tabs_create_mcp',
     title: 'Tabs Create',
+    // densable 2.1.221 #35: create description embeds close-when-done cleanup
     description:
-      'Creates a new empty tab in the existing MCP tab group. Does NOT create the group itself — if you get "No MCP tab group exists", call tabs_context_mcp with createIfEmpty: true first, then retry. Prefer that bootstrap before any other browser tools.',
+      'Creates a new empty tab in the MCP tab group. CRITICAL: You must get the context using tabs_context_mcp at least once before using other browser automation tools so you know what tabs exist. Tabs you create are yours to clean up: close each one with tabs_close_mcp as soon as you no longer need it, and close any that remain before finishing your task. Leave a tab open only if the user asked to see it or wants it kept open.',
     inputSchema: {
       type: 'object',
       properties: {},

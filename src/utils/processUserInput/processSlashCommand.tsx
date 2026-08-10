@@ -526,6 +526,8 @@ export async function processSlashCommand(
   isAlreadyProcessing?: boolean,
   canUseTool?: CanUseToolFn,
   autonomy?: QueuedCommand['autonomy'],
+  /** densable modelScheduledOrigin — threaded into prompt skill context. */
+  modelScheduledOrigin?: boolean,
 ): Promise<ProcessUserInputBaseResult> {
   const parsed = parseSlashCommand(inputString);
   if (!parsed) {
@@ -632,6 +634,7 @@ export async function processSlashCommand(
     canUseTool,
     uuid,
     autonomy,
+    modelScheduledOrigin,
   );
 
   // Local slash commands that skip messages
@@ -809,6 +812,8 @@ async function getMessagesForSlashCommand(
   canUseTool?: CanUseToolFn,
   uuid?: string,
   autonomy?: QueuedCommand['autonomy'],
+  /** densable modelScheduledOrigin — threaded into prompt skill context. */
+  modelScheduledOrigin?: boolean,
 ): Promise<SlashCommandResult> {
   let resolvedName = commandName;
   let resolvedArgs = args;
@@ -1145,6 +1150,7 @@ async function getMessagesForSlashCommand(
             precedingInputBlocks,
             imageContentBlocks,
             uuid,
+            modelScheduledOrigin,
           );
         } catch (e) {
           // Handle abort errors specially to show proper "Interrupted" message
@@ -1276,6 +1282,8 @@ async function getMessagesForPromptSlashCommand(
   precedingInputBlocks: ContentBlockParam[] = [],
   imageContentBlocks: ContentBlockParam[] = [],
   uuid?: string,
+  /** densable: stamp options.modelScheduledOrigin for getPromptForCommand. */
+  modelScheduledOrigin?: boolean,
 ): Promise<SlashCommandResult> {
   // In coordinator mode (main thread only), skip loading the full skill content
   // and permissions. The coordinator only has Agent + TaskStop tools, so the
@@ -1315,7 +1323,17 @@ async function getMessagesForPromptSlashCommand(
     };
   }
 
-  const result = await command.getPromptForCommand(args, context);
+  // densable: getPromptForCommand(t, a?{...r,options:{...r.options,modelScheduledOrigin:!0}}:r)
+  const promptContext = modelScheduledOrigin
+    ? {
+        ...context,
+        options: {
+          ...context.options,
+          modelScheduledOrigin: true as const,
+        },
+      }
+    : context;
+  const result = await command.getPromptForCommand(args, promptContext);
 
   // Register skill hooks if defined. Under ["hooks"]-only (skills not locked),
   // user skills still load and reach this point — block hook REGISTRATION here

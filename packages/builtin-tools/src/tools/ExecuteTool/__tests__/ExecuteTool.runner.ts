@@ -3,32 +3,13 @@ import { mock } from 'bun:test'
 import { z } from 'zod/v4'
 import { logMock } from '../../../../../../tests/mocks/log'
 import { debugMock } from '../../../../../../tests/mocks/debug'
+import { growthbookMock } from '../../../../../../tests/mocks/growthbook'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 // Mock all heavy dependencies before importing ExecuteTool
-mock.module('src/services/analytics/growthbook.js', () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-  checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
-  getFeatureValue_DEPRECATED: async () => undefined,
-  getFeatureValue_CACHED_WITH_REFRESH: async () => undefined,
-  hasGrowthBookEnvOverride: () => false,
-  getAllGrowthBookFeatures: () => ({}),
-  getGrowthBookConfigOverrides: () => ({}),
-  setGrowthBookConfigOverride: () => {},
-  clearGrowthBookConfigOverrides: () => {},
-  getApiBaseUrlHost: () => undefined,
-  onGrowthBookRefresh: () => {},
-  initializeGrowthBook: async () => {},
-  checkSecurityRestrictionGate: async () => false,
-  checkGate_CACHED_OR_BLOCKING: async () => false,
-  refreshGrowthBookAfterAuthChange: () => {},
-  resetGrowthBook: () => {},
-  refreshGrowthBookFeatures: async () => {},
-  setupPeriodicGrowthBookRefresh: () => {},
-  stopPeriodicGrowthBookRefresh: () => {},
-}))
+mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
 mock.module('src/utils/searchExtraTools.js', () => ({
   isSearchExtraToolsEnabledOptimistic: () => true,
@@ -52,7 +33,7 @@ mock.module('src/utils/searchExtraTools.js', () => ({
 }))
 
 mock.module('src/constants/tools.js', () => ({
-  CORE_TOOLS: new Set(['ExecuteExtraTool', 'SearchExtraTools']),
+  CORE_TOOLS: new Set(['ExecuteExtraTool', 'ToolSearch']),
 }))
 
 // Mock messages module
@@ -208,7 +189,12 @@ describe('ExecuteTool', () => {
   })
 
   test('returns error when deferred tool has not been discovered via SearchExtraTools', async () => {
-    const mockTarget = makeMockTool('UndiscoveredTool', 'result')
+    // densable TX: only tools with shouldDefer===true are deferred; without it
+    // discovery gate does not apply.
+    const mockTarget = {
+      ...makeMockTool('UndiscoveredTool', 'result'),
+      shouldDefer: true,
+    }
     const ctx = makeContext([mockTarget])
 
     const result = await ExecuteTool.call(

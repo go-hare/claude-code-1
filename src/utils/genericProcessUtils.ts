@@ -2,11 +2,193 @@ import {
   execFileNoThrowWithCwd,
   execSyncWithDefaults_DEPRECATED,
 } from './execFileNoThrow.js'
+import { logForDebugging } from './debug.js'
 
 // This file contains platform-agnostic implementations of common `ps` type commands.
 // When adding new code to this file, make sure to handle:
 // - Win32, as `ps` within cygwin and WSL may not behave as expected, particularly when attempting to access processes on the host.
 // - Unix vs BSD-style `ps` have different options.
+
+// ---------------------------------------------------------------------------
+// densable 2.1.221 win32-proc-times (B8c / Aao / j8c / BMt / JWg / ies)
+// kernel32 GetProcessTimes via bun:ffi; PowerShell only as fallback.
+// ---------------------------------------------------------------------------
+
+/** densable `zWg` — PROCESS_QUERY_INFORMATION */
+const PROCESS_QUERY_INFORMATION = 4096
+/** densable `VWg` — FILETIME (100ns since 1601) → Unix epoch offset */
+const FILETIME_UNIX_EPOCH_DIFF = 116444736000000000n
+
+type Kernel32ProcTimes = {
+  OpenProcess: (
+    desiredAccess: number,
+    inheritHandle: number,
+    processId: number,
+  ) => unknown
+  GetProcessTimes: (
+    handle: unknown,
+    creationTime: Uint8Array,
+    exitTime: Uint8Array,
+    kernelTime: Uint8Array,
+    userTime: Uint8Array,
+  ) => number
+  CloseHandle: (handle: unknown) => number
+}
+
+/** densable `p7r` — undefined not tried, null failed, else symbols */
+let kernel32Symbols: Kernel32ProcTimes | null | undefined
+/** densable `GWg` — force-disable FFI path (tests) */
+let win32ProcTimesFfiDisabled = false
+
+/**
+ * densable `B8c` — lazy-load kernel32 OpenProcess/GetProcessTimes/CloseHandle.
+ * Returns null when not win32 or bun:ffi unavailable.
+ */
+function loadKernel32ProcTimes(): Kernel32ProcTimes | null {
+  if (kernel32Symbols !== undefined) return kernel32Symbols
+  if (process.platform !== 'win32' || win32ProcTimesFfiDisabled) {
+    kernel32Symbols = null
+    return null
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ffi = require('bun:ffi') as typeof import('bun:ffi')
+    kernel32Symbols = ffi.dlopen('kernel32.dll', {
+      OpenProcess: { args: ['u32', 'i32', 'u32'], returns: 'ptr' },
+      GetProcessTimes: {
+        args: ['ptr', 'ptr', 'ptr', 'ptr', 'ptr'],
+        returns: 'i32',
+      },
+      CloseHandle: { args: ['ptr'], returns: 'i32' },
+    }).symbols as Kernel32ProcTimes
+    logForDebugging('[win32-proc-times] bun:ffi loaded, using procStartFt')
+  } catch (e) {
+    logForDebugging(
+      `[win32-proc-times] bun:ffi unavailable, falling back to spawn: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    )
+    kernel32Symbols = null
+  }
+  return kernel32Symbols
+}
+
+/** densable `BMt` — FFI path usable? */
+export function isWin32ProcTimesFfiAvailable(): boolean {
+  return !win32ProcTimesFfiDisabled && loadKernel32ProcTimes() !== null
+}
+
+/**
+ * densable `Aao` — raw creation FILETIME as BigUint64 (100ns ticks since 1601).
+ * Undefined on non-win32 / bad pid / OpenProcess/GetProcessTimes fail.
+ */
+export function getWin32CreationFileTime(pid: number): bigint | undefined {
+  if (!Number.isInteger(pid) || pid <= 0) return undefined
+  const t = loadKernel32ProcTimes()
+  if (t == null) return undefined
+  const handle = t.OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid)
+  if (!handle) return undefined
+  try {
+    const creation = new Uint8Array(8)
+    const exit = new Uint8Array(8)
+    const kernel = new Uint8Array(8)
+    const user = new Uint8Array(8)
+    // densable: GetProcessTimes returns 0 on failure
+    if (t.GetProcessTimes(handle, creation, exit, kernel, user) === 0) {
+      return undefined
+    }
+    return new DataView(creation.buffer).getBigUint64(0, true)
+  } catch {
+    return undefined
+  } finally {
+    t.CloseHandle(handle)
+  }
+}
+
+/** densable `j8c` — FILETIME → Unix epoch ms */
+export function fileTimeToUnixMs(fileTime: bigint): number {
+  return Number((fileTime - FILETIME_UNIX_EPOCH_DIFF) / 10000n)
+}
+
+/**
+ * densable `X6g`/`qWg` threshold — separates FILETIME (~1e17) from
+ * .NET DateTime.Ticks (~6e17) so cross-format identity can match.
+ */
+const PROC_START_FORMAT_THRESHOLD = 300000000000000000
+
+export type ProcessStartIdentityFields = {
+  procStart?: string
+  procStartFt?: string
+}
+
+/**
+ * densable `UHt`/`jMt` — place identity into procStart vs procStartFt
+ * based on whether kernel32 FFI is active (BMt).
+ */
+export function buildProcessStartIdentityFields(
+  identity: string | undefined,
+): ProcessStartIdentityFields {
+  if (identity === undefined) return {}
+  if (isWin32ProcTimesFfiAvailable()) {
+    return { procStartFt: identity }
+  }
+  return { procStart: identity }
+}
+
+/**
+ * densable `AFe`/`kUe` — pick the live identity field from a lock/record.
+ * When FFI is on: only `procStartFt` is valid; a defined `procStart` yields void
+ * (legacy PowerShell stamp while BMt is true → no identity).
+ */
+export function pickProcessStartIdentity(fields: {
+  procStart?: unknown
+  procStartFt?: unknown
+}): unknown {
+  if (isWin32ProcTimesFfiAvailable()) {
+    return fields.procStart !== undefined ? undefined : fields.procStartFt
+  }
+  return fields.procStart
+}
+
+/**
+ * densable `X6g`/`qWg` — cross-format numeric identity (FILETIME ↔ Ticks).
+ */
+export function isCrossFormatProcessStartMatch(
+  a: unknown,
+  b: unknown,
+): boolean {
+  if (!isWin32ProcTimesFfiAvailable()) return false
+  const r = Number(a)
+  const n = Number(b)
+  return (
+    Number.isFinite(r) &&
+    Number.isFinite(n) &&
+    r > PROC_START_FORMAT_THRESHOLD !== n > PROC_START_FORMAT_THRESHOLD
+  )
+}
+
+/**
+ * densable `Yzc`/`z8c` — identity still matches when current is undefined
+ * (ps race), equal, or cross-format FILETIME/Ticks pair on win32 FFI.
+ */
+export function processStartIdentityEquals(
+  expected: unknown,
+  current: unknown,
+): boolean {
+  return (
+    current === undefined ||
+    current === expected ||
+    isCrossFormatProcessStartMatch(expected, current)
+  )
+}
+
+/** Test seam: reset lazy FFI + optional force-disable (densable GWg). */
+export function _resetWin32ProcTimesForTesting(opts?: {
+  disableFfi?: boolean
+}): void {
+  kernel32Symbols = undefined
+  win32ProcTimesFfiDisabled = opts?.disableFfi === true
+}
 
 /**
  * Check if a process with the given PID is running (signal 0 probe).
@@ -28,13 +210,38 @@ export function isProcessRunning(pid: number): boolean {
 }
 
 /**
- * Official Ex/phh — raw `ps -o lstart=` string (LC_ALL=C TZ=UTC).
- * Used as adopt.json `procStart` identity token. Undefined on Windows / fail.
+ * densable `JWg` / Ex — process start identity token.
+ * - win32 + kernel32 FFI: FILETIME creation ticks as decimal string (`procStartFt`)
+ * - win32 fallback: PowerShell `Win32_Process.CreationDate.Ticks`
+ * - unix: raw `ps -o lstart=` (LC_ALL=C TZ=UTC)
  */
 export async function getProcessLstartString(
   pid: number,
 ): Promise<string | undefined> {
-  if (pid <= 1 || process.platform === 'win32') return undefined
+  if (pid <= 1) return undefined
+  if (process.platform === 'win32') {
+    try {
+      if (isWin32ProcTimesFfiAvailable()) {
+        const ft = getWin32CreationFileTime(pid)
+        return ft === undefined ? undefined : ft.toString()
+      }
+      const result = await execFileNoThrowWithCwd(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate.Ticks`,
+        ],
+        { timeout: 1000 },
+      )
+      if (result.code === 0 && result.stdout?.trim()) {
+        return result.stdout.trim()
+      }
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
   try {
     const result = await execFileNoThrowWithCwd(
       'ps',
@@ -56,12 +263,35 @@ export async function getProcessLstartString(
 }
 
 /**
- * Official Dmi / WEi — process start time as epoch ms via `ps -o lstart=` (UTC).
- * Returns null on Windows or when ps fails. Used by host-creds procStart drift.
+ * densable `ies` / Dmi — process creation time as Unix epoch ms.
+ * win32: kernel32 FILETIME (preferred) or PowerShell DateTimeOffset ms.
+ * unix: parse `ps -o lstart=` as UTC.
  */
 export async function getProcessStartTimeMs(
   pid: number,
 ): Promise<number | null> {
+  if (pid <= 1) return null
+  if (process.platform === 'win32') {
+    try {
+      if (isWin32ProcTimesFfiAvailable()) {
+        const ft = getWin32CreationFileTime(pid)
+        return ft === undefined ? null : fileTimeToUnixMs(ft)
+      }
+      const result = await execFileNoThrowWithCwd(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          `[DateTimeOffset]::new((Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate).ToUnixTimeMilliseconds()`,
+        ],
+        { timeout: 1000 },
+      )
+      const ms = Number(result.stdout?.trim())
+      return result.code === 0 && Number.isFinite(ms) ? ms : null
+    } catch {
+      return null
+    }
+  }
   const lstart = await getProcessLstartString(pid)
   if (lstart === undefined) return null
   const ms = Date.parse(`${lstart} UTC`)
@@ -69,8 +299,8 @@ export async function getProcessStartTimeMs(
 }
 
 /**
- * Official zU — identity still matches when expectedLstart is undefined, or
- * when current lstart is undefined (ps race), or when equal.
+ * densable zU / nU / iB — identity still matches when expected is undefined,
+ * current is undefined (ps race), equal, or win32 cross-format (Yzc).
  */
 export async function processLstartMatches(
   pid: number,
@@ -78,7 +308,7 @@ export async function processLstartMatches(
 ): Promise<boolean> {
   if (expectedLstart === undefined) return true
   const current = await getProcessLstartString(pid)
-  return current === undefined || current === expectedLstart
+  return processStartIdentityEquals(expectedLstart, current)
 }
 
 /**
@@ -103,9 +333,16 @@ export async function killPidIfIdentityMatches(
   const startTimeTicks = opts?.startTimeTicks
   if (procStart !== undefined) {
     const current = await getProcessLstartString(pid)
-    // Official: if await Ex(e,{skipCache:!0}) !== r return
-    // If current is undefined (ps fail), Ex returns undefined ≠ procStart → no kill.
-    if (current !== procStart) return false
+    // densable: if await Ex(e,{skipCache:!0}) !== r return (no kill).
+    // undefined current (ps fail) !== expected → no kill.
+    // Cross-format FILETIME/Ticks still counts as match (qWg/X6g).
+    if (current === undefined) return false
+    if (
+      current !== procStart &&
+      !isCrossFormatProcessStartMatch(procStart, current)
+    ) {
+      return false
+    }
   } else if (startTimeTicks !== undefined) {
     // Official xen returns null; null !== ticks → no kill.
     return false

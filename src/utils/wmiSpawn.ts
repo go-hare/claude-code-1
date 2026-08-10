@@ -210,17 +210,93 @@ export function spawnViaWmiSync(
 /**
  * Poll until pid is gone (WMI-spawned children have no ChildProcess handle).
  * densable Bun.spawn exposes .exited; we approximate for connectToPtyHost.
+ *
+ * PID-reuse safe: when `expectedStart` is provided, a live pid whose process
+ * start identity no longer matches is treated as exited (recycled PID).
+ * Without identity, fall back to kill(0) only and cap wait at maxWaitMs.
  */
-export function waitForPidExit(pid: number): Promise<number> {
+export function waitForPidExit(
+  pid: number,
+  opts?: {
+    /** Process start identity, or a Promise that resolves to it (sync spawn paths). */
+    expectedStart?: unknown | Promise<unknown>
+    pollMs?: number
+    maxWaitMs?: number
+  },
+): Promise<number> {
+  const pollMs = opts?.pollMs ?? 500
+  const maxWaitMs = opts?.maxWaitMs ?? 24 * 60 * 60 * 1000
+  const expectedStartOpt = opts?.expectedStart
+  const startedAt = Date.now()
+  let resolvedExpected: unknown
+  let expectedReady = expectedStartOpt === undefined
+
+  if (
+    expectedStartOpt !== undefined &&
+    expectedStartOpt !== null &&
+    typeof (expectedStartOpt as Promise<unknown>)?.then === 'function'
+  ) {
+    void Promise.resolve(expectedStartOpt).then(
+      v => {
+        resolvedExpected = v
+        expectedReady = true
+      },
+      () => {
+        resolvedExpected = undefined
+        expectedReady = true
+      },
+    )
+  } else if (expectedStartOpt !== undefined) {
+    resolvedExpected = expectedStartOpt
+    expectedReady = true
+  }
+
   return new Promise(resolve => {
+    const finish = (): void => resolve(0)
+
     const tick = (): void => {
+      if (Date.now() - startedAt >= maxWaitMs) {
+        finish()
+        return
+      }
       try {
         process.kill(pid, 0)
-        const t = setTimeout(tick, 500)
-        t.unref?.()
       } catch {
-        resolve(0)
+        finish()
+        return
       }
+
+      if (
+        expectedReady &&
+        resolvedExpected !== undefined &&
+        resolvedExpected !== null
+      ) {
+        void (async () => {
+          try {
+            // Prefer genericProcessUtils only (avoid daemonLock cycle).
+            const { getProcessLstartString, processStartIdentityEquals } =
+              await import('./genericProcessUtils.js')
+            const live = await getProcessLstartString(pid)
+            // Live unreadable → densable Yzc still matches; keep waiting.
+            // Live mismatch → PID recycled; treat as exit.
+            if (
+              live !== undefined &&
+              !processStartIdentityEquals(resolvedExpected, live)
+            ) {
+              finish()
+              return
+            }
+          } catch {
+            // identity probe failed — keep kill(0) loop
+          }
+          const t = setTimeout(tick, pollMs)
+          t.unref?.()
+        })()
+        return
+      }
+
+      const t = setTimeout(tick, pollMs)
+      t.unref?.()
     }
     tick()
   })

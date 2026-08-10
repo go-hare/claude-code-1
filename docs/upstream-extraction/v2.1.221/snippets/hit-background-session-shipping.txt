@@ -1,0 +1,8 @@
+needle: # Background Session / commit before finishing / Open a draft PR
+SEA densable 2.1.221 hIb
+---
+if CLAUDE_CODE_SESSION_KIND!=="bg" return null
+if !CLAUDE_JOB_DIR return null
+isolation none: work-in-place; skip shipping paragraph
+else: commit before finishing + push if remote + EGu Never push to main/master, force-push, or merge. + Open a draft PR when the task calls for one.
+job tmp: $CLAUDE_JOB_DIR/tmp

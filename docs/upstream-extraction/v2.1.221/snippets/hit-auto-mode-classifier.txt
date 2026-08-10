@@ -1,0 +1,4 @@
+needle: auto-mode classifier
+count: 8
+---
+plain what sandbox restriction likely caused the failure. Be sure to mention that the user can use the `/sandbox` command to manage restrictions..................k...This goes through the permission gate (a user prompt, or the auto-mode classifier when auto mode is active).....................0............................... ...........................P...Immediately retry with `dangerouslyDisableSandbox: true` (don't ask, just do it)................Briefly explain what sandbox restricti

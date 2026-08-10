@@ -74,6 +74,12 @@ export type CronTask = {
    */
   agentId?: string
   /**
+   * densable `kind:"loop"` — ScheduleWakeup dynamic-loop one-shot wakeups.
+   * Session-only (never written to disk). Present on CronTask so onFireTask
+   * receives the same shape as SessionCronTask.
+   */
+  kind?: 'loop'
+  /**
    * densable DaemonHub mGa toggle (IBt enabled flip).
    * `false` → scheduler skips fire; omitted/true → enabled.
    * Written to disk when explicitly set.
@@ -455,6 +461,11 @@ export type CronJitterConfig = {
    * `0` = unlimited (tasks never auto-expire).
    */
   recurringMaxAgeMs: number
+  /**
+   * densable `she.cacheLeadMs` — ScheduleWakeup NU_ snaps fire times earlier
+   * by this many ms when delay ≤ 5m prompt-cache TTL. Default 15000.
+   */
+  cacheLeadMs?: number
 }
 
 export const DEFAULT_CRON_JITTER_CONFIG: CronJitterConfig = {
@@ -464,6 +475,8 @@ export const DEFAULT_CRON_JITTER_CONFIG: CronJitterConfig = {
   oneShotFloorMs: 0,
   oneShotMinuteMod: 30,
   recurringMaxAgeMs: 7 * 24 * 60 * 60 * 1000,
+  // densable she.cacheLeadMs
+  cacheLeadMs: 15_000,
 }
 
 /**

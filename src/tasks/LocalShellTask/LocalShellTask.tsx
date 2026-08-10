@@ -20,7 +20,7 @@ import { tailFile } from '../../utils/fsOperations.js';
 import { logError } from '../../utils/log.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import type { ShellCommand } from '../../utils/ShellCommand.js';
-import { evictTaskOutput, getTaskOutputPath } from '../../utils/task/diskOutput.js';
+import { evictTaskOutput, getTaskOutputPath, getTaskOutputSize } from '../../utils/task/diskOutput.js';
 import {
   addKeepaliveReason,
   bashKeepaliveReason,
@@ -226,7 +226,16 @@ function installShellPressureReap(
     }
     logEvent('task_local_shell_pressure_reap', {});
     // Official F9r then t5e — notify first, then kill.
-    enqueueShellNotification(taskId, description, 'killed', undefined, setAppState, toolUseId, kind ?? 'bash', agentId);
+    void enqueueShellNotification(
+      taskId,
+      description,
+      'killed',
+      undefined,
+      setAppState,
+      toolUseId,
+      kind ?? 'bash',
+      agentId,
+    );
     killTask(taskId, setAppState);
   };
 
@@ -236,7 +245,7 @@ function installShellPressureReap(
   };
 }
 
-function enqueueShellNotification(
+async function enqueueShellNotification(
   taskId: string,
   description: string,
   status: 'completed' | 'failed' | 'killed',
@@ -245,7 +254,7 @@ function enqueueShellNotification(
   toolUseId?: string,
   kind: BashTaskKind = 'bash',
   agentId?: AgentId,
-): void {
+): Promise<void> {
   // Atomically check and set notified flag to prevent duplicate notifications.
   // If the task was already marked as notified (e.g., by TaskStopTool), skip
   // enqueueing to avoid sending redundant messages to the model.
@@ -273,12 +282,19 @@ function enqueueShellNotification(
     // the stream ended, not "condition met". Distinct from the bash prefix
     // so Monitor completions don't fold into the "N background commands
     // completed" collapse.
+    // densable 2.1.221 zZs: completed + output bytes === 0 → empty copy.
+    const exitSuffix = exitCode !== undefined ? ` (exit ${exitCode})` : '';
     switch (status) {
-      case 'completed':
-        summary = `Monitor "${description}" stream ended`;
+      case 'completed': {
+        const outputBytes = await getTaskOutputSize(taskId);
+        summary =
+          outputBytes === 0
+            ? `Monitor "${description}" ended without producing output${exitSuffix}`
+            : `Monitor "${description}" stream ended`;
         break;
+      }
       case 'failed':
-        summary = `Monitor "${description}" script failed${exitCode !== undefined ? ` (exit ${exitCode})` : ''}`;
+        summary = `Monitor "${description}" script failed${exitSuffix}`;
         break;
       case 'killed':
         summary = `Monitor "${description}" stopped`;
@@ -414,7 +430,7 @@ export async function spawnShellTask(
       };
     });
 
-    enqueueShellNotification(
+    await enqueueShellNotification(
       taskId,
       description,
       wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed',
@@ -563,10 +579,19 @@ export function backgroundTask(taskId: string, getAppState: () => AppState, setA
     cleanupFn?.();
 
     if (wasKilled) {
-      enqueueShellNotification(taskId, description, 'killed', result.code, setAppState, toolUseId, kind, agentId);
+      await enqueueShellNotification(taskId, description, 'killed', result.code, setAppState, toolUseId, kind, agentId);
     } else {
       const finalStatus = result.code === 0 ? 'completed' : 'failed';
-      enqueueShellNotification(taskId, description, finalStatus, result.code, setAppState, toolUseId, kind, agentId);
+      await enqueueShellNotification(
+        taskId,
+        description,
+        finalStatus,
+        result.code,
+        setAppState,
+        toolUseId,
+        kind,
+        agentId,
+      );
     }
 
     releaseShellKeepalive();
@@ -753,7 +778,16 @@ export function backgroundExistingForegroundTask(
     cleanupFn?.();
 
     const finalStatus = wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed';
-    enqueueShellNotification(taskId, description, finalStatus, result.code, setAppState, toolUseId, undefined, agentId);
+    await enqueueShellNotification(
+      taskId,
+      description,
+      finalStatus,
+      result.code,
+      setAppState,
+      toolUseId,
+      undefined,
+      agentId,
+    );
 
     releaseShellKeepalive();
     void evictTaskOutput(taskId);

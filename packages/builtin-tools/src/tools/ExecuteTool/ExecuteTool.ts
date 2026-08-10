@@ -13,7 +13,7 @@ import { createUserMessage } from 'src/utils/messages.js'
 import { formatZodValidationError } from 'src/utils/toolErrors.js'
 import {
   extractDiscoveredToolNames,
-  isSearchExtraToolsEnabledOptimistic,
+  isSearchExtraToolsEnabled,
   isSearchExtraToolsToolAvailable,
 } from 'src/utils/searchExtraTools.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
@@ -75,21 +75,30 @@ export const ExecuteTool = buildTool({
         },
         newMessages: [
           createUserMessage({
-            content: `Tool "${input.tool_name}" not found. Use SearchExtraTools to discover available tools.`,
+            content: `Tool "${input.tool_name}" not found. Use ToolSearch to discover available tools.`,
           }),
         ],
       }
     }
 
     // Guard: block execution of undiscovered deferred tools.
+    // densable: use definitive DSn (isSearchExtraToolsEnabled), not optimistic Y4 —
+    // model/Vertex/$Fe/threshold gates can still force standard mode.
     // When tool search is active, deferred tools must be discovered via
-    // SearchExtraTools first so the model has seen their schemas and knows
+    // ToolSearch first so the model has seen their schemas and knows
     // the correct parameters.  Executing an undiscovered tool almost always
     // fails with parameter validation errors.
     if (
-      isSearchExtraToolsEnabledOptimistic() &&
       isSearchExtraToolsToolAvailable(tools) &&
-      isDeferredTool(targetTool)
+      isDeferredTool(targetTool) &&
+      (await isSearchExtraToolsEnabled(
+        context.options.mainLoopModel,
+        tools,
+        async () =>
+          context.getAppState?.()?.toolPermissionContext ?? ({} as never),
+        context.options.agentDefinitions?.activeAgents ?? [],
+        'ExecuteTool',
+      ))
     ) {
       const discovered = extractDiscoveredToolNames(context.messages)
       if (!discovered.has(input.tool_name)) {
@@ -100,7 +109,7 @@ export const ExecuteTool = buildTool({
           },
           newMessages: [
             createUserMessage({
-              content: `Tool "${input.tool_name}" has not been discovered yet. You must first use SearchExtraTools to discover this tool before executing it.\n\nUsage: SearchExtraTools("select:${input.tool_name}")`,
+              content: `Tool "${input.tool_name}" has not been discovered yet. You must first use ToolSearch to discover this tool before executing it.\n\nUsage: ToolSearch("select:${input.tool_name}")`,
             }),
           ],
         }

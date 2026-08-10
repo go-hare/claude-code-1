@@ -1,0 +1,88 @@
+# densable 2.1.221 — modelScheduledOrigin / wakeupSource / fire stamp
+
+SEA: /tmp/official-221/plat/package/claude
+sha256: 7a181f36ed0fc4fbac6cee4ecf2b615eff93d8b434221fff5d7c878dc5ebf380
+
+## Counts
+- modelScheduledOrigin: 16
+- wakeupSource: 16
+- skipSlashCommands:!0: 11
+- resolveLoopDefaultFire: 4
+
+## Fire stamp gold (REPL useScheduledTasks)
+```
+let l=(d,p)=>yd({
+  value:gQT.resolveLoopDefaultFire(d),
+  mode:"prompt",
+  agentId:Ei(),
+  priority:"later",
+  isMeta:!0,
+  skipSlashCommands:!0,
+  modelScheduledOrigin:!0,
+  wakeupSource:p,
+  workload:Air
+})
+onFire:(d)=>l(d,"schedule_wakeup")
+onFireTask:(d)=>{ ... l(d.prompt,l2o(d)) }
+function l2o(e){return e.kind==="loop"?"loop_wakeup":"schedule_wakeup"}
+```
+
+## Fire stamp gold (headless print)
+```
+let Nr=(Cn,bt)=>{
+  if(O)return;
+  let go=Xav.resolveLoopDefaultFire(Cn);
+  Pv({
+    mode:"prompt",agentId:Ei(),value:go,uuid:LM.randomUUID(),
+    priority:"later",isMeta:!0,
+    skipSlashCommands:!0,modelScheduledOrigin:!0,
+    wakeupSource:bt,workload:Air
+  }),To("cron_fire"),cf()
+};
+onFire:(Cn)=>Nr(Cn,"schedule_wakeup")
+onFireTask:(Cn)=>Nr(Cn.prompt,l2o(Cn))
+```
+
+## processUserInput consumption
+```
+// params include skipSlashCommands:m, bridgeOrigin:h,
+// modelScheduledOrigin:g, wakeupSource:y, isMeta:S
+// modelScheduled re-open (approx densable):
+// if(h&&!m&&w.startsWith("/")) { resolve command; if model-invocable V=!1 }
+// skill expand:
+// e.getPromptForCommand(t, a?{...r,options:{...r.options,modelScheduledOrigin:!0}}:r)
+```
+
+## /loop analytics gate
+```
+if(!t.options?.isSkillPreload&&!t.options?.modelScheduledOrigin)
+  N("tengu_loop_command", ...)
+if(!t.options?.isSkillPreload&&!t.options?.modelScheduledOrigin)
+  GAs() // clearLoopEndedOnLoopStart
+```
+
+## wakeupSource helpers
+```
+function l2o(e){return e.kind==="loop"?"loop_wakeup":"schedule_wakeup"}
+function c2o({promptSource:e,wakeupSource:t}){
+  if(t)return t;
+  switch(e){
+    case"sdk":return"sdk";
+    case"system":return"system";
+    case"typed":case"queued":case"suggestion_accepted":return"user"
+  }
+}
+// densable Qjt UserPromptSubmit currently has `...!1` — source field
+// NOT wired into hook input in 221 SEA (dead param until product enables).
+```
+
+## GAP #10 / #12 reconfirm (dig-only)
+- #10: `_registeredTools={}` + truthy membership — no null-proto invent
+- #12: large upload TLS fix external srt@0.0.70, not CLI product locus
+
+## go-hare alignment
+- QueuedCommand + processUserInput + processSlashCommand + handlePromptSubmit
+- QueryEngine.ask/submitMessage + print headless ask() path
+- useScheduledTasks + print dispatchHeadlessCronCommand fire stamps
+- `resolveWakeupSource` = densable `c2o` in `src/utils/loopFire.ts` (helper only;
+  UserPromptSubmit hook source still intentionally unwired per Qjt `...!1`)

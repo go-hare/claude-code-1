@@ -224,13 +224,18 @@ export function modelSupportsAutoMode(
 }
 
 /**
- * Get the correct tool search beta header for the current API provider.
- * - Vertex AI / Bedrock: tool-search-tool-2025-10-19
- * - All other providers: advanced-tool-use-2025-11-20
+ * densable `Jvu` — tool search beta header by provider.
+ * - Vertex / Bedrock / Mantle / Gateway: tool-search-tool-2025-10-19 (3P)
+ * - All other providers: advanced-tool-use-2025-11-20 (1P)
  */
 export function getSearchExtraToolsBetaHeader(): string {
   const provider = getAPIProvider()
-  if (provider === 'vertex' || provider === 'bedrock') {
+  if (
+    provider === 'vertex' ||
+    provider === 'bedrock' ||
+    provider === 'mantle' ||
+    provider === 'gateway'
+  ) {
     return SEARCH_EXTRA_TOOLS_BETA_HEADER_3P
   }
   return SEARCH_EXTRA_TOOLS_BETA_HEADER_1P

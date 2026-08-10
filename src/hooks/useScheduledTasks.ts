@@ -18,8 +18,21 @@ import {
   markAutonomyRunFailed,
 } from '../utils/autonomyRuns.js'
 import { logForDebugging } from '../utils/debug.js'
+import {
+  isLoopNoopFoldEnabled,
+  settleLoopTickAfterIdle,
+} from '../utils/loopDynamic.js'
+import {
+  resolveLoopDefaultFire,
+  wakeupSourceForCronTask,
+} from '../utils/loopFire.js'
+import {
+  appendLoopWakeupMessages,
+  createLoopScheduledTaskFireMessage,
+} from '../utils/loopNoopFold.js'
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import { createScheduledTaskFireMessage } from '../utils/messages.js'
+import { setLoopTickInFlightPrompt } from '../bootstrap/state.js'
 import { WORKLOAD_CRON } from '../utils/workloadContext.js'
 import type { QueuedCommand } from '../types/textInputTypes.js'
 
@@ -43,10 +56,12 @@ export async function createScheduledTaskQueuedCommand(
     rootDir?: string
     currentDir?: string
     shouldCreate?: () => boolean
+    /** densable L$t — expand autonomous/loop.md sentinels at fire time. */
+    basePrompt?: string
   },
 ): Promise<QueuedCommand | null> {
   const command = await createAutonomyQueuedPromptIfNoActiveSource({
-    basePrompt: task.prompt,
+    basePrompt: options?.basePrompt ?? task.prompt,
     trigger: 'scheduled-task',
     rootDir: options?.rootDir,
     currentDir: options?.currentDir ?? getCwd(),
@@ -68,6 +83,11 @@ export async function createScheduledTaskQueuedCommand(
  * it down on unmount. Fired prompts go into the command queue as 'later'
  * priority, which the REPL drains via useCommandQueue between turns.
  *
+ * densable `_QT` extras:
+ *   - resolveLoopDefaultFire on fire (PU_)
+ *   - kind==="loop" → setLoopTickInFlightPrompt (aPt) + loop wakeup message
+ *   - after isLoading false: keepalive XKu if YKu && !rmt()
+ *
  * Scheduler core (timer, file watcher, fire logic) lives in cronScheduler.ts
  * so SDK/-p mode can share it — see print.ts for the headless wiring.
  */
@@ -80,6 +100,11 @@ export function useScheduledTasks({
   // a stale closure. The effect mounts once; isLoading changes every turn.
   const isLoadingRef = useRef(isLoading)
   isLoadingRef.current = isLoading
+
+  // densable o.current — scheduler handle for checkNow after keepalive arm.
+  const schedulerRef = useRef<ReturnType<typeof createCronScheduler> | null>(
+    null,
+  )
 
   const store = useAppStateStore()
   const setAppState = useSetAppState()
@@ -103,9 +128,22 @@ export function useScheduledTasks({
     // transcript. This is acceptable since normal mode is not the
     // primary use case for scheduled tasks.
     let disposed = false
-    const enqueueForLead = async (prompt: string) => {
+    /**
+     * densable 2.1.221 fire stamp (SEA `yd` / `Pv`):
+     *   value: resolveLoopDefaultFire(d), mode:"prompt", priority:"later",
+     *   isMeta:!0, skipSlashCommands:!0, modelScheduledOrigin:!0,
+     *   wakeupSource, workload
+     * skipSlash + modelScheduledOrigin together: processUserInput re-opens
+     * slash for model-invocable commands (`/loop` re-entry) while still
+     * blocking exit-word / accidental slash on plain scheduled text.
+     */
+    const enqueueForLead = async (
+      prompt: string,
+      wakeupSource: 'loop_wakeup' | 'schedule_wakeup',
+    ) => {
+      const expanded = resolveLoopDefaultFire(prompt)
       const command = await createAutonomyQueuedPrompt({
-        basePrompt: prompt,
+        basePrompt: expanded,
         trigger: 'scheduled-task',
         currentDir: getCwd(),
         workload: WORKLOAD_CRON,
@@ -121,7 +159,18 @@ export function useScheduledTasks({
         )
         return
       }
-      enqueuePendingNotification(command)
+      // Keep prepared command.value (RZn + optional AGENTS/HEARTBEAT authority).
+      // densable stamps flags only — do NOT overwrite value with bare expanded
+      // (that strips #20 RZn and local autonomy_authority; slash re-open reads
+      // the body via extractModelScheduledSlashInput).
+      enqueuePendingNotification({
+        ...command,
+        isMeta: true,
+        priority: 'later',
+        skipSlashCommands: true,
+        modelScheduledOrigin: true,
+        wakeupSource,
+      })
     }
 
     const scheduler = createCronScheduler({
@@ -130,7 +179,8 @@ export function useScheduledTasks({
       // which is populated from disk at scheduler startup — this path only
       // handles team-lead durable crons.
       onFire: prompt => {
-        void enqueueForLead(prompt).catch(error =>
+        // densable: onFire → schedule_wakeup (legacy/missed list has no kind)
+        void enqueueForLead(prompt, 'schedule_wakeup').catch(error =>
           logForDebugging(
             `[ScheduledTasks] failed to enqueue missed task prompt: ${error}`,
             { level: 'error' },
@@ -146,6 +196,8 @@ export function useScheduledTasks({
               store.getState().tasks,
             )
             if (teammate && !isTerminalTaskStatus(teammate.status)) {
+              // densable dyn(p.id, d.prompt, …): inject RAW prompt — no
+              // resolveLoopDefaultFire (lead path only expands sentinels).
               const command = await createScheduledTaskQueuedCommand(task, {
                 shouldCreate: () => !disposed,
               })
@@ -161,7 +213,9 @@ export function useScheduledTasks({
               }
               const injected = injectUserMessageToTeammate(
                 teammate.id,
-                command.value as string,
+                // densable dyn(p.id, d.prompt): always raw task.prompt — never
+                // resolveLoopDefaultFire / autonomy-prepared value.
+                task.prompt,
                 {
                   autonomyRunId: command.autonomy?.runId,
                   autonomyRootDir: command.autonomy?.rootDir,
@@ -188,10 +242,14 @@ export function useScheduledTasks({
             return
           }
 
+          // Resolve once — autonomous preamble is sticky (Ain/wfr).
+          const expanded = resolveLoopDefaultFire(task.prompt)
           const command = await createScheduledTaskQueuedCommand(task, {
             shouldCreate: () => !disposed,
+            basePrompt: expanded,
           })
           if (!command) {
+            // Do not aPt / keepalive on storm-deduped or disposed skips.
             return
           }
           if (disposed) {
@@ -202,11 +260,43 @@ export function useScheduledTasks({
             return
           }
 
-          const msg = createScheduledTaskFireMessage(
-            `Running scheduled task (${formatCronFireTime(new Date())})`,
-          )
-          setMessages(prev => [...prev, msg])
-          enqueuePendingNotification(command)
+          // densable: kind==="loop" → aPt only after a real enqueue claim.
+          if (task.kind === 'loop') {
+            setLoopTickInFlightPrompt(task.prompt)
+          }
+
+          // densable UXm / Cfr: kind:loop + noop-fold → fold prior noop span when idle.
+          // Always stamp cronKind:'loop' so later Cfr sessions keep fold anchors.
+          if (task.kind === 'loop') {
+            if (isLoopNoopFoldEnabled()) {
+              setMessages(prev =>
+                appendLoopWakeupMessages(prev, !isLoadingRef.current),
+              )
+            } else {
+              setMessages(prev => [
+                ...prev,
+                createLoopScheduledTaskFireMessage(
+                  `Claude resuming /loop wakeup (${formatCronFireTime(new Date())})`,
+                  { cronKind: 'loop' },
+                ),
+              ])
+            }
+          } else {
+            const msg = createScheduledTaskFireMessage(
+              `Running scheduled task (${formatCronFireTime(new Date())})`,
+            )
+            setMessages(prev => [...prev, msg])
+          }
+          // densable 2.1.221 fire stamp 1:1 — flags only; keep prepared value
+          // (basePrompt already expanded via resolveLoopDefaultFire above).
+          enqueuePendingNotification({
+            ...command,
+            isMeta: true,
+            priority: 'later',
+            skipSlashCommands: true,
+            modelScheduledOrigin: true,
+            wakeupSource: wakeupSourceForCronTask(task.kind),
+          })
         })().catch(error =>
           logForDebugging(
             `[ScheduledTasks] failed to enqueue task ${task.id}: ${error}`,
@@ -220,14 +310,23 @@ export function useScheduledTasks({
       isKilled: () => !isKairosCronEnabled(),
     })
     scheduler.start()
+    schedulerRef.current = scheduler
     return () => {
       disposed = true
+      schedulerRef.current = null
       scheduler.stop()
     }
     // assistantMode is stable for the session lifetime; store/setAppState are
     // stable refs from useSyncExternalStore; setMessages is a stable useCallback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantMode])
+
+  // densable: after isLoading false → clear aPt; if YKu && !rmt() → XKu; checkNow
+  useEffect(() => {
+    if (isLoading) return
+    settleLoopTickAfterIdle()
+    schedulerRef.current?.checkNow()
+  }, [isLoading])
 }
 
 function formatCronFireTime(d: Date): string {

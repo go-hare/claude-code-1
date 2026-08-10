@@ -1,0 +1,4 @@
+needle: CreateProcessW limit is 32 767
+count: 2
+---
+s(s))if(d!==void 0)i.push("--env",`${u}=${d}`);i.push("--");let a=e.binShell??DSs(void 0);i.push(a.exe,...a.args,e.command);let l=i.reduce((u,d)=>u+d.length+3,0);if(l>30000)throw new Nb("argv_too_long",`Windows sandbox argv is ~${l} chars (CreateProcessW limit is 32 767).`);let c={...process.env,...n};return{argv:i,env:c}}function Lk_(e){let t={};for(let r of e){let n=r.indexOf("=");if(n===-1)continue;t[r.slice(0,n)]=r.slice(n+1)}return t}function MBu(e){let t=e?` --sublayer-guid ${e}`:"";return`Windows s

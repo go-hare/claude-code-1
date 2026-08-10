@@ -2,7 +2,7 @@ import { readdir } from 'fs/promises'
 import { getCwd } from '../../utils/cwd.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 
-// claudeApiContent.js bundles 247KB of .md strings. Lazy-load inside
+// claudeApiContent.js bundles .md strings. Lazy-load inside
 // getPromptForCommand so they only enter memory when /claude-api is invoked.
 type SkillContent = typeof import('./claudeApiContent.js')
 
@@ -26,6 +26,17 @@ const LANGUAGE_INDICATORS: Record<DetectedLanguage, string[]> = {
   php: ['.php', 'composer.json'],
   curl: [],
 }
+
+/**
+ * densable V5m — skill description (TRIGGER/SKIP join).
+ * Keep trigger description eval-pinned shape; do not invent prompt-audit into
+ * the trigger line (densable TODO leaves that eval-pinned).
+ */
+const CLAUDE_API_SKILL_DESCRIPTION = [
+  'Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.',
+  'TRIGGER — read BEFORE opening the target file; don\'t skip because it "looks like a one-liner" — whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) — never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).',
+  "SKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named — don't Read the file).",
+].join('\n')
 
 async function detectLanguage(): Promise<DetectedLanguage | null> {
   const cwd = getCwd()
@@ -61,7 +72,10 @@ function getFilesForLanguage(
   )
 }
 
-function processContent(md: string, content: SkillContent): string {
+export function processSkillMarkdown(
+  md: string,
+  modelVars: Record<string, string>,
+): string {
   // Strip HTML comments. Loop to handle nested comments.
   let out = md
   let prev
@@ -72,10 +86,13 @@ function processContent(md: string, content: SkillContent): string {
 
   out = out.replace(
     /\{\{(\w+)\}\}/g,
-    (match, key: string) =>
-      (content.SKILL_MODEL_VARS as Record<string, string>)[key] ?? match,
+    (match, key: string) => modelVars[key] ?? match,
   )
   return out
+}
+
+function processContent(md: string, content: SkillContent): string {
+  return processSkillMarkdown(md, content.SKILL_MODEL_VARS)
 }
 
 function buildInlineReference(
@@ -93,11 +110,29 @@ function buildInlineReference(
   return sections.join('\n\n')
 }
 
+/**
+ * densable gPl / X5T — first bare word of args if it is a known subcommand.
+ */
+export function matchSubcommand(
+  args: string,
+  subcommands: readonly string[] = [
+    'migrate',
+    'managed-agents-onboard',
+    'prompt-audit',
+  ],
+): string {
+  const first = args.trim().toLowerCase().split(/\s+/)[0] ?? ''
+  return subcommands.find(s => s === first) ?? 'none'
+}
+
+// densable Y5T — Quick Task Reference (includes prompt-audit + model-migration).
 const INLINE_READING_GUIDE = `## Reference Documentation
 
 The relevant documentation for your detected language is included below in \`<doc>\` tags. Each tag has a \`path\` attribute showing its original file path. Use this to find the right section:
 
 ### Quick Task Reference
+
+> All SDK languages use the same per-language \`claude-api/\` directory layout (cURL: \`curl/examples.md\`). Not every language has every file — if a file is absent, that feature's example is not yet documented for that language; fall back to the cURL shape or WebFetch the SDK repo.
 
 **Single text classification/summarization/extraction/Q&A:**
 → Refer to \`{lang}/claude-api/README.md\`
@@ -108,8 +143,17 @@ The relevant documentation for your detected language is included below in \`<do
 **Long-running conversations (may exceed context window):**
 → Refer to \`{lang}/claude-api/README.md\` — see Compaction section
 
+**Migrating to a newer model or replacing a retired model:**
+→ Refer to \`shared/model-migration.md\`
+
 **Prompt caching / optimize caching / "why is my cache hit rate low":**
 → Refer to \`shared/prompt-caching.md\` + \`{lang}/claude-api/README.md\` (Prompt Caching section)
+
+**Audit / clean up prompts, skills, or tool descriptions for outdated patterns ("cruft"):**
+→ Refer to \`shared/prompt-audit.md\`
+
+**Count tokens in a file / prompt / diff ("how many tokens is X"):**
+→ Refer to \`shared/token-counting.md\` — use \`messages.count_tokens\`, never \`tiktoken\`
 
 **Function calling / tool use / agents:**
 → Refer to \`{lang}/claude-api/README.md\` + \`shared/tool-use-concepts.md\` + \`{lang}/claude-api/tool-use.md\`
@@ -120,8 +164,8 @@ The relevant documentation for your detected language is included below in \`<do
 **File uploads across multiple requests:**
 → Refer to \`{lang}/claude-api/README.md\` + \`{lang}/claude-api/files-api.md\`
 
-**Agent with built-in tools (file/web/terminal) (Python & TypeScript only):**
-→ Refer to \`{lang}/agent-sdk/README.md\` + \`{lang}/agent-sdk/patterns.md\`
+**Agent design (tool surface, context management, caching strategy):**
+→ Refer to \`shared/agent-design.md\`
 
 **Error handling:**
 → Refer to \`shared/error-codes.md\`
@@ -143,21 +187,28 @@ function buildPrompt(
       : cleanPrompt
 
   const parts: string[] = [basePrompt]
+  const sub = matchSubcommand(args)
+  const readingGuide = INLINE_READING_GUIDE.replace(
+    /\{lang\}/g,
+    lang ?? 'unknown',
+  )
 
   if (lang) {
     const filePaths = getFilesForLanguage(lang, content)
-    const readingGuide = INLINE_READING_GUIDE.replace(/\{lang\}/g, lang)
     parts.push(readingGuide)
     parts.push(
       '---\n\n## Included Documentation\n\n' +
         buildInlineReference(filePaths, content),
     )
   } else {
-    // No language detected — include all docs and let the model ask
-    parts.push(INLINE_READING_GUIDE.replace(/\{lang\}/g, 'unknown'))
-    parts.push(
-      'No project language was auto-detected. Ask the user which language they are using, then refer to the matching docs below.',
-    )
+    // No language detected — include all docs.
+    // densable 2.1.221 #4: prompt-audit is non-interactive — do not ask for language.
+    parts.push(readingGuide)
+    if (sub !== 'prompt-audit') {
+      parts.push(
+        'No project language was auto-detected. Ask the user which language they are using, then refer to the matching docs below.',
+      )
+    }
     parts.push(
       '---\n\n## Included Documentation\n\n' +
         buildInlineReference(Object.keys(content.SKILL_FILES), content),
@@ -180,10 +231,7 @@ function buildPrompt(
 export function registerClaudeApiSkill(): void {
   registerBundledSkill({
     name: 'claude-api',
-    description:
-      'Build apps with the Claude API or Anthropic SDK.\n' +
-      'TRIGGER when: code imports `anthropic`/`@anthropic-ai/sdk`/`claude_agent_sdk`, or user asks to use Claude API, Anthropic SDKs, or Agent SDK.\n' +
-      'DO NOT TRIGGER when: code imports `openai`/other AI SDK, general programming, or ML/data-science tasks.',
+    description: CLAUDE_API_SKILL_DESCRIPTION,
     allowedTools: ['Read', 'Grep', 'Glob', 'WebFetch'],
     userInvocable: true,
     // Official CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL

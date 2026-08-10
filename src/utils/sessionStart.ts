@@ -15,6 +15,7 @@ import { executeSessionStartHooks, executeSetupHooks } from './hooks.js'
 import { logError } from './log.js'
 import { loadPluginHooks } from './plugins/loadPluginHooks.js'
 import { cacheSessionTitle, getCurrentSessionTitle } from './sessionStorage.js'
+import { sanitizeSessionTitle } from './sessionTitleSanitize.js'
 
 type SessionStartHooksOptions = {
   sessionId?: string
@@ -49,17 +50,21 @@ export function takeSessionStartTitle(): string | undefined {
 
 /**
  * Apply a SessionStart/UserPromptSubmit sessionTitle to the current session.
+ * densable 2.1.221: hook titles go through uge (same FXe funnel as /rename).
  * No-ops when empty, unchanged, or title already matches.
  */
 export function applyHookSessionTitle(title: string | undefined): void {
   if (!title) return
-  const trimmed = title.trim()
-  if (!trimmed) return
+  // densable U3t/FXe: sanitize before cache (Cc/Cf → space, C0/C1 strip, OMb=200)
+  const sanitized = sanitizeSessionTitle(title)
+  if (!sanitized) return
   const sessionId = getSessionId()
   const existing = getCurrentSessionTitle(sessionId)
-  if (existing === trimmed) return
-  logForDebugging(`Hook sessionTitle applied (${[...trimmed].length} chars)`)
-  cacheSessionTitle(trimmed)
+  if (existing === sanitized) return
+  // densable also re-vhn(existing) for equality; uge is a strict superset for
+  // already-clean titles, so direct compare is enough once both paths sanitize.
+  logForDebugging(`Hook sessionTitle applied (${[...sanitized].length} chars)`)
+  cacheSessionTitle(sanitized)
 }
 
 function reloadSkillsFromSessionStartHook(): void {

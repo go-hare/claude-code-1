@@ -50,8 +50,11 @@ afterAll(() => {
 })
 
 // Mock analytics (GrowthBook) — required for isEnabled()
+// Spread shared mock — incomplete growthbook mocks poison co-running suites.
+import { growthbookMock } from '../../../../tests/mocks/growthbook'
 let gbValue = true
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookMock(),
   getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, defaultVal: unknown) =>
     gbValue ?? defaultVal,
 }))

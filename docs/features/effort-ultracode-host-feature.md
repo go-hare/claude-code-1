@@ -64,14 +64,29 @@
 // 滑条拖到末档 Ultracode
 { "subtype": "apply_flag_settings", "settings": { "ultracode": true } }
 
-// 从 Ultracode 拖回 medium
+// 从 Ultracode 拖回 medium（推荐双字段；仅 effortLevel:"medium" 也会清 ultracode flag）
 { "subtype": "apply_flag_settings", "settings": { "ultracode": false, "effortLevel": "medium" } }
+
+// 仅 effortLevel 普通档 / null：CLI 会清 session ultracode flag（densable 211 对齐）
+// { "effortLevel": "medium" }  → effort=medium, ultracode=false
+// { "effortLevel": null }      → clear session effort + ultracode=false
+// 无 catalog wire 时 effortLevel:"ultracode" / ultracode:true 不会抬空 flag
+//   → soft success + response.effortNotes（不 hard-fail 整包 apply）
 
 // 查询（渲染 footer / 滑条位置）
 { "subtype": "get_settings" }
 ```
 
 SDK 侧等价：`client.applyFlagSettings({...})` / `client.getSettings()`。
+
+### 4.1 同包冲突序 + 无 wire 反馈（契约摘要）
+
+- **固定序**：`effortLevel` 先、`ultracode` 后（与 JSON key 书写顺序无关）。
+- **后写 wins**：`ultracode:true` 可覆盖同包普通 `effortLevel` 到 catalog 顶档；`ultracode:false` 在别名开 ultra 之后会清 flag（wire 顶档可保留）。
+- **无 wire 不 hard-fail**：`apply_flag_settings` 仍 `subtype: success`；软拒绝写在 `response.effortNotes[]`（`code` + `message`）。权威状态永远再查 `get_settings.applied`。
+- **非法 `effortLevel`**：同样 soft success + `effort_level_ignored` note，不 hard-fail。
+- **同包 `model` + effort/ultracode**：CLI 先应用 model override，再同步 settings / 解析 wire（避免用旧模型判 no-wire）。
+- 完整表与 code 枚举见 `desktop-host-effort-ultracode.md` §3.1.1–3.1.2。
 
 ---
 
@@ -81,6 +96,7 @@ SDK 侧等价：`client.applyFlagSettings({...})` / `client.getSettings()`。
 2. **没有独立 control** `set_effort` / `set_ultracode`——官方没有，我们不加。
 3. 3p / 自定义模型：effort/ultracode 按 catalog 解析；不支持时 `applied.effort` 为 `null`、ultracode 不会伪激活。
 4. 会话内改已有 session 必须用 control；再 spawn 一次是新进程。
+5. **无 wire 开 ultracode 是 soft success + notes，不是 control error**——不要当失败重试；以 `applied` 为准。
 
 ---
 

@@ -1,0 +1,4 @@
+needle: usage credits exhausted
+count: 2
+---
+d",reason:"preference",source:"server"},xi("userSettings",{fastMode:void 0}),vr((e)=>e.penguinModeOrgEnabled===!1?e:{...e,penguinModeOrgEnabled:!1}),Gso.emit(!1)}function _6g(e){switch(e){case"out_of_credits":return"Fast mode disabled \xB7 usage credits exhausted";case"org_level_disabled":case"org_service_level_disabled":return"Fast mode disabled \xB7 usage credits turned off by your organization";case"org_level_disabled_until":case"org_spend_cap_reached":return"Fast mode disabled \xB7 usage credit

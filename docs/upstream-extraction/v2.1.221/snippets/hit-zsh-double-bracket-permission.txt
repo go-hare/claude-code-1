@@ -1,0 +1,4 @@
+needle: [[ ]] pattern contains unquoted &
+count: 2
+---
+ains expansion / command / process substitution`,nodeType:e.type,differential:!0};if(e.type==="extglob_pattern"){let i=e.text,s=0;while(s<i.length){if(i[s]==="\\"&&s+1<i.length){s+=2;continue}if(i[s]==="&")return{kind:"too-complex",reason:"[[ ]] pattern contains unquoted & (zsh splits the word at & at any depth)",differential:!0};s++}}if(e.type==="regex"){let i=e.text,s=0,a=0;while(a<i.length){let l=i[a];if(l==="\\"&&a+1<i.length){a+=2;continue}if(s===0&&l==="|"&&i[a+1]===l)return{kind:"too-complex",reason:"

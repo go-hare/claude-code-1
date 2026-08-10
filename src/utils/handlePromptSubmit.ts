@@ -527,6 +527,9 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             ideSelection: isFirst ? ideSelection : undefined,
             skipSlashCommands: cmd.skipSlashCommands,
             bridgeOrigin: cmd.bridgeOrigin,
+            // densable 2.1.221 fire stamp: re-open model-invocable slash + /loop analytics gate
+            modelScheduledOrigin: cmd.modelScheduledOrigin,
+            wakeupSource: cmd.wakeupSource,
             isMeta: cmd.isMeta,
             skipAttachments: !isFirst,
             autonomy: cmd.autonomy,

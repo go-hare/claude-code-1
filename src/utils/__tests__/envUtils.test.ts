@@ -3,6 +3,8 @@ import {
   isEnvTruthy,
   isEnvDefinedFalsy,
   parseEnvVars,
+  parseEnvInt,
+  parsePositiveEnvInt,
   hasNodeOption,
   getAWSRegion,
   getDefaultVertexRegion,
@@ -61,6 +63,41 @@ describe('isEnvTruthy', () => {
 
   test("returns true for ' true ' (trimmed)", () => {
     expect(isEnvTruthy(' true ')).toBe(true)
+  })
+})
+
+// ─── parseEnvInt (densable 2.1.211) ────────────────────────────────────
+
+describe('parseEnvInt / parsePositiveEnvInt', () => {
+  test('falls back on missing/invalid', () => {
+    expect(parseEnvInt(undefined, 70)).toBe(70)
+    expect(parseEnvInt('', 70)).toBe(70)
+    expect(parseEnvInt('abc', 70)).toBe(70)
+    expect(parsePositiveEnvInt(undefined)).toBeUndefined()
+    expect(parsePositiveEnvInt('0')).toBeUndefined()
+    expect(parsePositiveEnvInt('-3')).toBeUndefined()
+  })
+
+  test('accepts scientific notation and underscore separators', () => {
+    expect(parseEnvInt('1e6', 0)).toBe(1_000_000)
+    expect(parseEnvInt('64_000', 0)).toBe(64_000)
+    expect(parseEnvInt('1.5e3', 0)).toBe(1500)
+    expect(parsePositiveEnvInt('1e6')).toBe(1_000_000)
+    expect(parsePositiveEnvInt('64_000')).toBe(64_000)
+  })
+
+  test('truncates floats toward zero', () => {
+    expect(parseEnvInt('12.9', 0)).toBe(12)
+    expect(parseEnvInt('-3.7', 0)).toBe(-3)
+  })
+
+  test('sub-1 positives do not collapse to 0 for parsePositiveEnvInt', () => {
+    // Math.trunc(0.9)===0 must not be returned as a "positive" int.
+    expect(parsePositiveEnvInt('0.1')).toBeUndefined()
+    expect(parsePositiveEnvInt('0.9')).toBeUndefined()
+    expect(parsePositiveEnvInt('1e-1')).toBeUndefined()
+    expect(parsePositiveEnvInt('1e-6')).toBeUndefined()
+    expect(parsePositiveEnvInt('1.9')).toBe(1)
   })
 })
 

@@ -1,7 +1,7 @@
 import figures from 'figures';
 import * as React from 'react';
 import { Suspense, use } from 'react';
-import { getSessionId } from '../../bootstrap/state.js';
+import { getAttacherCaps, getIsInteractive, getSessionId } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
 import { Box, Text, useTheme } from '@anthropic/ink';
@@ -31,6 +31,22 @@ type Props = {
   diagnosticsPromise: Promise<Diagnostic[]>;
 };
 
+/**
+ * densable 2.1.221 `/status` Session kind:
+ * `!ps()?"interactive":_L()?"background job · unattended":"background job · attached"`
+ * Local: interactive → interactive; bg without attacher → unattended; else attached.
+ */
+function resolveSessionKindLabel(): string {
+  if (getIsInteractive()) {
+    return 'interactive';
+  }
+  // densable `_L()`: unattended when no terminal is attached.
+  if (!getAttacherCaps()) {
+    return 'background job · unattended';
+  }
+  return 'background job · attached';
+}
+
 function buildPrimarySection(): Property[] {
   const sessionId = getSessionId();
   const customTitle = getCurrentSessionTitle(sessionId);
@@ -40,6 +56,8 @@ function buildPrimarySection(): Property[] {
     { label: 'Version', value: MACRO.VERSION },
     { label: 'Session name', value: nameValue },
     { label: 'Session ID', value: sessionId },
+    // densable 2.1.221 — Session kind after Session ID
+    { label: 'Session kind', value: resolveSessionKindLabel() },
     { label: 'cwd', value: getCwd() },
     ...buildAccountProperties(),
     ...buildAPIProviderProperties(),

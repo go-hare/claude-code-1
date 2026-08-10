@@ -156,6 +156,13 @@ type State = {
   // Agent color state
   agentColorMap: Map<string, AgentColorName>
   agentColorIndex: number
+  /**
+   * densable `Ft.foundryDeploymentCapabilities` — Map keyed by
+   * `${foundryBaseUrl|resource}::canonicalModel` → Set of unsupported
+   * capability names learned from Foundry 400s (`tool_search_server`,
+   * `tool_search`, `structured_outputs`, …). Empty map → `$Fe` default-true.
+   */
+  foundryDeploymentCapabilities: Map<string, Set<string>>
   // Last API request for bug reports
   lastAPIRequest: Omit<BetaMessageStreamParams, 'messages'> | null
   // Messages from the last API request (ant-only; reference, not clone).
@@ -192,6 +199,20 @@ type State = {
   // SessionCronTask below (not importing from cronTasks.ts keeps
   // bootstrap a leaf of the import DAG).
   sessionCronTasks: SessionCronTask[]
+  /**
+   * densable `Ft.loopChainStartedAt` — per-prompt dynamic /loop chain
+   * `{startedAt, lastScheduledFor, agedOut?}` for ScheduleWakeup max-age.
+   */
+  loopChainStartedAt: Record<
+    string,
+    { startedAt: number; lastScheduledFor: number; agedOut?: boolean }
+  >
+  /** densable `Ft.loopEnded` — ScheduleWakeup stop has ended the dynamic loop. */
+  loopEnded: boolean
+  /** densable `Ft.loopTickInFlightPrompt` — tick currently being delivered. */
+  loopTickInFlightPrompt: string | null
+  /** densable `Ft.loopConsecutiveKeepalives` — keepalive budget counter. */
+  loopConsecutiveKeepalives: number
   // Teams created this session via TeamCreate. cleanupSessionTeams()
   // removes these on gracefulShutdown so subagent-created teams don't
   // persist on disk forever (gh-32730). TeamDelete removes entries to
@@ -430,6 +451,8 @@ function getInitialState(): State {
     // Agent color state
     agentColorMap: new Map(),
     agentColorIndex: 0,
+    // densable Ft.foundryDeploymentCapabilities
+    foundryDeploymentCapabilities: new Map(),
     // Last API request for bug reports
     lastAPIRequest: null,
     lastAPIRequestMessages: null,
@@ -452,6 +475,11 @@ function getInitialState(): State {
     // Scheduled tasks disabled until flag or dialog enables them
     scheduledTasksEnabled: false,
     sessionCronTasks: [],
+    // densable loop/ScheduleWakeup session fields
+    loopChainStartedAt: {},
+    loopEnded: false,
+    loopTickInFlightPrompt: null,
+    loopConsecutiveKeepalives: 0,
     sessionCreatedTeams: new Set(),
     // Session-only trust flag (not persisted to disk)
     sessionTrustAccepted: false,
@@ -1390,6 +1418,13 @@ export function setTracerProvider(provider: BasicTracerProvider | null): void {
   STATE.tracerProvider = provider
 }
 
+/**
+ * densable `vqr` — Foundry deployment capability map (unsupported features).
+ */
+export function getFoundryDeploymentCapabilities(): Map<string, Set<string>> {
+  return STATE.foundryDeploymentCapabilities
+}
+
 export function getIsNonInteractiveSession(): boolean {
   return !STATE.isInteractive
 }
@@ -1673,11 +1708,22 @@ export type SessionCronTask = {
   createdAt: number
   recurring?: boolean
   /**
+   * densable `kind:"loop"` — ScheduleWakeup dynamic-loop one-shot wakeups.
+   * Session-only; never written to disk.
+   */
+  kind?: 'loop'
+  /**
    * When set, the task was created by an in-process teammate (not the team lead).
    * The scheduler routes fires to that teammate's pendingUserMessages queue
    * instead of the main REPL command queue. Session-only — never written to disk.
    */
   agentId?: string
+}
+
+export type LoopChainState = {
+  startedAt: number
+  lastScheduledFor: number
+  agedOut?: boolean
 }
 
 export function getSessionCronTasks(): SessionCronTask[] {
@@ -1701,6 +1747,53 @@ export function removeSessionCronTasks(ids: readonly string[]): number {
   if (removed === 0) return 0
   STATE.sessionCronTasks = remaining
   return removed
+}
+
+/** densable `kLi` */
+export function getLoopChainStartedAt(
+  prompt: string,
+): LoopChainState | undefined {
+  return STATE.loopChainStartedAt[prompt]
+}
+
+/** densable `$Wn` */
+export function setLoopChainStartedAt(
+  prompt: string,
+  state: LoopChainState,
+): void {
+  STATE.loopChainStartedAt[prompt] = state
+}
+
+/** densable `CZt` */
+export function clearLoopChainStartedAt(prompt: string): void {
+  delete STATE.loopChainStartedAt[prompt]
+}
+
+/** densable `AZt` / `aPt` */
+export function getLoopTickInFlightPrompt(): string | null {
+  return STATE.loopTickInFlightPrompt
+}
+
+export function setLoopTickInFlightPrompt(prompt: string | null): void {
+  STATE.loopTickInFlightPrompt = prompt
+}
+
+/** densable `FWn` / `RZt` */
+export function getLoopConsecutiveKeepalives(): number {
+  return STATE.loopConsecutiveKeepalives
+}
+
+export function setLoopConsecutiveKeepalives(n: number): void {
+  STATE.loopConsecutiveKeepalives = n
+}
+
+/** densable `xLi` / `Dqr` */
+export function getLoopEnded(): boolean {
+  return STATE.loopEnded
+}
+
+export function setLoopEnded(ended: boolean): void {
+  STATE.loopEnded = ended
 }
 
 export function setSessionTrustAccepted(accepted: boolean): void {

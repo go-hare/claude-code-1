@@ -1,0 +1,5 @@
+SEA path: /tmp/official-221/plat/package/claude
+sizeBytes: 270518240
+sha256: 7a181f36ed0fc4fbac6cee4ecf2b615eff93d8b434221fff5d7c878dc5ebf380
+// Version: 2.1.221 count: 6
+platform note: darwin package binary at /tmp/official-221/plat/package/claude

@@ -82,6 +82,7 @@ import { parsePluginIdentifier } from './pluginIdentifier.js'
 import { deletePluginOptions } from './pluginOptionsStorage.js'
 import {
   isLocalMarketplaceSource,
+  isMarketplaceAutoUpdate,
   type KnownMarketplace,
   type KnownMarketplacesFile,
   KnownMarketplacesFileSchema,
@@ -91,6 +92,7 @@ import {
   PluginMarketplaceSchema,
   validateOfficialNameSource,
 } from './schemas.js'
+import { isEssentialTrafficOnly } from '../privacyLevel.js'
 
 /**
  * Result of loading and caching a marketplace
@@ -2406,6 +2408,58 @@ export async function refreshAllMarketplaces(): Promise<void> {
 }
 
 /**
+ * densable 2.1.221 zIr outcome for catalog-miss refresh.
+ * - refreshed: pull succeeded (or skipIfRecent short-circuit)
+ * - refresh-failed: pull threw
+ * - ineligible: offline / blocked source / autoUpdate off / missing entry
+ */
+export type CatalogMissRefreshOutcome =
+  | 'refreshed'
+  | 'refresh-failed'
+  | 'ineligible'
+
+/**
+ * densable 2.1.221 `zIr` — refresh a marketplace on catalog miss when eligible.
+ * Eligibility: not essential-traffic-only (unless FORCE_AUTOUPDATE_PLUGINS),
+ * source allowed by policy, and autoUpdate enabled (declared or official default).
+ */
+export async function tryRefreshMarketplaceOnCatalogMiss(
+  name: string,
+  entry: KnownMarketplace | undefined,
+): Promise<CatalogMissRefreshOutcome> {
+  if (
+    isEssentialTrafficOnly() &&
+    !isEnvTruthy(process.env.FORCE_AUTOUPDATE_PLUGINS)
+  ) {
+    return 'ineligible'
+  }
+  if (!entry?.source || !isSourceAllowedByPolicy(entry.source)) {
+    return 'ineligible'
+  }
+  // densable V8e: settings-declared autoUpdate overrides entry default
+  const declared = getDeclaredMarketplaces()[name]
+  const declaredAuto = declared?.autoUpdate
+  const autoEnabled =
+    declaredAuto !== undefined
+      ? declaredAuto
+      : isMarketplaceAutoUpdate(name, entry)
+  if (!autoEnabled) {
+    return 'ineligible'
+  }
+  try {
+    await refreshMarketplace(name, undefined, { skipIfRecent: true })
+    getMarketplace.cache?.delete?.(name)
+    return 'refreshed'
+  } catch (error) {
+    logForDebugging(
+      `Failed to refresh marketplace '${name}' on catalog miss; using cached data: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
+    return 'refresh-failed'
+  }
+}
+
+/**
  * Refresh a single marketplace cache
  *
  * Updates a specific marketplace from its source by doing an in-place update.
@@ -2420,7 +2474,11 @@ export async function refreshAllMarketplaces(): Promise<void> {
 export async function refreshMarketplace(
   name: string,
   onProgress?: MarketplaceProgressCallback,
-  options?: { disableCredentialHelper?: boolean },
+  options?: {
+    disableCredentialHelper?: boolean
+    /** densable skipIfRecent — skip pull if lastUpdated within 30s */
+    skipIfRecent?: boolean
+  },
 ): Promise<void> {
   const config = await loadKnownMarketplacesConfig()
   const entry = config[name]
@@ -2433,6 +2491,17 @@ export async function refreshMarketplace(
 
   // Clear the memoization cache for this specific marketplace
   getMarketplace.cache?.delete?.(name)
+
+  // densable 2.1.221: skipIfRecent short-circuit (catalog-miss / update paths)
+  if (options?.skipIfRecent && entry.lastUpdated) {
+    const ageMs = Date.now() - new Date(entry.lastUpdated).getTime()
+    if (ageMs >= 0 && ageMs < 30_000) {
+      logForDebugging(
+        `Skipping refresh for marketplace '${name}' — refreshed ${Math.round(ageMs / 1000)}s ago`,
+      )
+      return
+    }
+  }
 
   // settings-sourced marketplaces have no upstream to pull. Edits to the
   // inline plugins array surface as sourceChanged in the reconciler, which

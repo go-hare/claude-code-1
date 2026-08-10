@@ -679,11 +679,23 @@ describe('silent-arm densables (m1u / w_i / g_i)', () => {
       fromModel: 'a',
       isMainThread: true,
       apiRefusalCategory: 'cyber',
+      entitlementBlind: true,
     })
     expect(plan.userVisible).toBe(true)
     expect(plan.showBanner).toBe(true)
     expect(plan.tombstonedToolUse).toBe(true)
     expect(plan.telemetry.apiRefusalCategory).toBe('cyber')
+    // densable 2.1.220 entitlement_blind:zkt()
+    expect(plan.telemetry.entitlementBlind).toBe(true)
+    expect(
+      planRefusalFallbackPresentation({
+        reason: 'refusal',
+        midStream: false,
+        discardedMessages: [],
+        fromModel: 'a',
+        entitlementBlind: false,
+      }).telemetry.entitlementBlind,
+    ).toBe(false)
 
     const banner = buildModelRefusalFallbackSystemMessage({
       content: 'Switched',

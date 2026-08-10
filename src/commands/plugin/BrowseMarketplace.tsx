@@ -19,12 +19,25 @@ import {
   getMarketplaceSourceDisplay,
   loadMarketplacesWithGracefulDegradation,
 } from '../../utils/plugins/marketplaceHelpers.js';
-import { getMarketplace, loadKnownMarketplacesConfig } from '../../utils/plugins/marketplaceManager.js';
+import {
+  getMarketplace,
+  loadKnownMarketplacesConfig,
+  tryRefreshMarketplaceOnCatalogMiss,
+} from '../../utils/plugins/marketplaceManager.js';
 import { OFFICIAL_MARKETPLACE_NAME } from '../../utils/plugins/officialMarketplace.js';
+import {
+  activatePluginsAfterInstall,
+  formatBatchInstallActivateSuffix,
+  formatPartialBatchInstallActivateSuffix,
+  formatSingleInstallActivateSuffix,
+  type PluginInstallAutoActivateOutcome,
+} from '../../utils/plugins/activateAfterInstall.js';
 import { installPluginFromMarketplace } from '../../utils/plugins/pluginInstallationHelpers.js';
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js';
 import { plural } from '../../utils/stringUtils.js';
 import { truncateToWidth } from '../../utils/truncate.js';
+import { useAppStateStore, useSetAppState } from '../../state/AppState.js';
+import { getMainLoopModel } from '../../utils/model/model.js';
 import { findPluginOptionsTarget, PluginOptionsFlow } from './PluginOptionsFlow.js';
 import { PluginTrustWarning } from './PluginTrustWarning.js';
 import {
@@ -42,6 +55,10 @@ type Props = {
   result: string | null;
   setResult: (result: string | null) => void;
   setViewState: (state: ParentViewState) => void;
+  /**
+   * densable 2.1.221: when auto-activate fails (cache_impact / load error),
+   * fall back to needsRefresh notice. When auto-activate succeeds, skip.
+   */
   onInstallComplete?: () => void | Promise<void>;
   targetMarketplace?: string;
   targetPlugin?: string;
@@ -51,7 +68,13 @@ type ViewState =
   | 'marketplace-list'
   | 'plugin-list'
   | 'plugin-details'
-  | { type: 'plugin-options'; plugin: LoadedPlugin; pluginId: string };
+  | {
+      type: 'plugin-options';
+      plugin: LoadedPlugin;
+      pluginId: string;
+      /** install closure (root + deps) for activate VQS */
+      closure: string[];
+    };
 
 type MarketplaceInfo = {
   name: string;
@@ -70,6 +93,26 @@ export function BrowseMarketplace({
   targetMarketplace,
   targetPlugin,
 }: Props): React.ReactNode {
+  const setAppState = useSetAppState();
+  const store = useAppStateStore();
+
+  const tryActivateInstalled = React.useCallback(
+    async (pluginIds: string[]): Promise<PluginInstallAutoActivateOutcome> => {
+      return activatePluginsAfterInstall(
+        () => {
+          const s = store.getState();
+          return {
+            model: getMainLoopModel(),
+            mcpClients: s.mcp.clients,
+          };
+        },
+        setAppState,
+        pluginIds,
+      );
+    },
+    [setAppState, store],
+  );
+
   // View state
   const [viewState, setViewState] = useState<ViewState>('marketplace-list');
   const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
@@ -191,19 +234,49 @@ export function BrowseMarketplace({
           let foundPlugin: InstallablePlugin | null = null;
           let foundMarketplace: string | null = null;
 
-          for (const [name] of Object.entries(config)) {
-            const marketplace = await getMarketplace(name);
-            if (marketplace) {
-              const plugin = marketplace.plugins.find(p => p.name === targetPlugin);
+          const searchConfig = async (names: string[]): Promise<void> => {
+            for (const name of names) {
+              if (targetMarketplace && name !== targetMarketplace) continue;
+              const marketplace = await getMarketplace(name);
+              if (marketplace) {
+                const plugin = marketplace.plugins.find(p => p.name === targetPlugin);
+                if (plugin) {
+                  const pluginId = createPluginId(plugin.name, name);
+                  foundPlugin = {
+                    entry: plugin,
+                    marketplaceName: name,
+                    pluginId,
+                    // isPluginGloballyInstalled: only block when user/managed scope
+                    // exists (nothing to add). Project/local-scope installs don't
+                    // block — user may want to promote to user scope (gh-29997).
+                    isInstalled: isPluginGloballyInstalled(pluginId),
+                  };
+                  foundMarketplace = name;
+                  return;
+                }
+              }
+            }
+          };
+
+          await searchConfig(Object.keys(config));
+
+          // densable 2.1.221 #29: catalog miss → refresh eligible marketplaces → retry
+          if (!foundPlugin) {
+            const namesToRefresh = targetMarketplace ? [targetMarketplace] : Object.keys(config);
+            for (const name of namesToRefresh) {
+              const entry = config[name];
+              if (!entry) continue;
+              logForDebugging(`Checking ${name} for new plugins…`);
+              const outcome = await tryRefreshMarketplaceOnCatalogMiss(name, entry);
+              if (outcome !== 'refreshed') continue;
+              const marketplace = await getMarketplace(name);
+              const plugin = marketplace?.plugins.find(p => p.name === targetPlugin);
               if (plugin) {
                 const pluginId = createPluginId(plugin.name, name);
                 foundPlugin = {
                   entry: plugin,
                   marketplaceName: name,
                   pluginId,
-                  // isPluginGloballyInstalled: only block when user/managed scope
-                  // exists (nothing to add). Project/local-scope installs don't
-                  // block — user may want to promote to user scope (gh-29997).
                   isInstalled: isPluginGloballyInstalled(pluginId),
                 };
                 foundMarketplace = name;
@@ -231,7 +304,8 @@ export function BrowseMarketplace({
               setViewState('plugin-details');
             }
           } else {
-            setError(`Plugin "${targetPlugin}" not found in any marketplace`);
+            const location = targetMarketplace ? `marketplace "${targetMarketplace}"` : 'any marketplace';
+            setError(`Plugin "${targetPlugin}" not found in ${location}`);
           }
         } else if (targetMarketplace) {
           // Navigate directly to the specified marketplace
@@ -336,6 +410,7 @@ export function BrowseMarketplace({
     let successCount = 0;
     let failureCount = 0;
     const newFailedPlugins: Array<{ name: string; reason: string }> = [];
+    const installedIds: string[] = [];
 
     for (const plugin of pluginsToInstall) {
       const result = await installPluginFromMarketplace({
@@ -347,6 +422,8 @@ export function BrowseMarketplace({
 
       if (result.success) {
         successCount++;
+        // densable: VQS needs full install closure (root + deps)
+        installedIds.push(...result.closure);
       } else {
         failureCount++;
         newFailedPlugins.push({
@@ -360,28 +437,30 @@ export function BrowseMarketplace({
     setSelectedForInstall(new Set());
     clearAllCaches();
 
+    // densable 2.1.221 #30: try activate when safe (not always /reload-plugins)
+    let activateOutcome: PluginInstallAutoActivateOutcome = 'reload-required';
+    if (successCount > 0) {
+      activateOutcome = await tryActivateInstalled([...new Set(installedIds)]);
+    }
+
     // Handle installation results
     if (failureCount === 0) {
-      // All succeeded
-      const message =
-        `✓ Installed ${successCount} ${plural(successCount, 'plugin')}. ` + `Run /reload-plugins to activate.`;
-
-      setResult(message);
+      const suffix = formatBatchInstallActivateSuffix(activateOutcome, successCount);
+      setResult(`✓ Installed ${successCount} ${plural(successCount, 'plugin')}.${suffix}`);
     } else if (successCount === 0) {
       // All failed - show error with reasons
       setError(`Failed to install: ${formatFailureDetails(newFailedPlugins, true)}`);
     } else {
-      // Mixed results - show partial success
-      const message =
+      const suffix = formatPartialBatchInstallActivateSuffix(activateOutcome, successCount);
+      setResult(
         `✓ Installed ${successCount} of ${successCount + failureCount} plugins. ` +
-        `Failed: ${formatFailureDetails(newFailedPlugins, false)}. ` +
-        `Run /reload-plugins to activate successfully installed plugins.`;
-
-      setResult(message);
+          `Failed: ${formatFailureDetails(newFailedPlugins, false)}.${suffix}`,
+      );
     }
 
-    // Handle completion callback and navigation
-    if (successCount > 0) {
+    // densable: only mark needsRefresh when activate requires reload
+    // (load-failed already refreshed Layer-3; do not sticky reload notice)
+    if (successCount > 0 && activateOutcome === 'reload-required') {
       if (onInstallComplete) {
         await onInstallComplete();
       }
@@ -405,16 +484,19 @@ export function BrowseMarketplace({
     if (result.success) {
       const loaded = await findPluginOptionsTarget(plugin.pluginId);
       if (loaded) {
+        // densable: options flow may still need activate after configure
         setIsInstalling(false);
         setViewState({
           type: 'plugin-options',
           plugin: loaded,
           pluginId: plugin.pluginId,
+          closure: result.closure,
         });
         return;
       }
-      setResult(result.message);
-      if (onInstallComplete) {
+      const outcome = await tryActivateInstalled(result.closure);
+      setResult(`${result.message}${formatSingleInstallActivateSuffix(outcome)}`);
+      if (outcome === 'reload-required' && onInstallComplete) {
         await onInstallComplete();
       }
       setParentViewState({ type: 'menu' });
@@ -566,10 +648,11 @@ export function BrowseMarketplace({
   );
 
   if (typeof viewState === 'object' && viewState.type === 'plugin-options') {
-    const { plugin, pluginId } = viewState;
-    function finish(msg: string): void {
-      setResult(msg);
-      if (onInstallComplete) {
+    const { plugin, pluginId, closure } = viewState;
+    async function finish(baseMsg: string): Promise<void> {
+      const outcome = await tryActivateInstalled(closure.length > 0 ? closure : [pluginId]);
+      setResult(`${baseMsg}${formatSingleInstallActivateSuffix(outcome)}`);
+      if (outcome === 'reload-required' && onInstallComplete) {
         void onInstallComplete();
       }
       setParentViewState({ type: 'menu' });
@@ -581,13 +664,13 @@ export function BrowseMarketplace({
         onDone={(outcome, detail) => {
           switch (outcome) {
             case 'configured':
-              finish(`✓ Installed and configured ${plugin.name}. Run /reload-plugins to apply.`);
+              void finish(`✓ Installed and configured ${plugin.name}.`);
               break;
             case 'skipped':
-              finish(`✓ Installed ${plugin.name}. Run /reload-plugins to apply.`);
+              void finish(`✓ Installed ${plugin.name}.`);
               break;
             case 'error':
-              finish(`Installed but failed to save config: ${detail}`);
+              void finish(`Installed but failed to save config: ${detail}`);
               break;
           }
         }}

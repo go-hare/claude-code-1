@@ -94,6 +94,16 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
         streamMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     }
 
+    // densable Vwo — cancel pending dynamic /loop wakeups on user abort.
+    // Official: if(Vwo()>0) bump cancel-count; still proceed with tengu_cancel.
+    try {
+      const { cancelLoopWakeupsOnUserAbort } =
+        require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js')
+      cancelLoopWakeupsOnUserAbort()
+    } catch {
+      // loopDynamic may be unavailable in partial test mocks
+    }
+
     // Priority 1: If there's an active task running, cancel it first
     // This takes precedence over queue management so users can always interrupt Claude
     if (abortSignal !== undefined && !abortSignal.aborted) {

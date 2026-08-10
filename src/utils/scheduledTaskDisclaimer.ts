@@ -59,3 +59,39 @@ export function isScheduledTaskOrigin(
   }
   return false
 }
+
+/**
+ * Recover a leading-`/` fire body after local prepare wrappers.
+ *
+ * densable fire value is bare `resolveLoopDefaultFire` (starts with `/` for
+ * skill re-entry). Local autonomy prepare may wrap RZn and/or
+ * `<autonomy_authority>` around that body — re-open must still see the
+ * slash candidate without discarding the prepared `value` (RZn/authority).
+ */
+export function extractModelScheduledSlashInput(input: string): string | null {
+  if (input.startsWith('/')) return input
+
+  let body = input
+  if (body.startsWith(SCHEDULED_TASK_DISCLAIMER_PREFIX)) {
+    body = body.slice(SCHEDULED_TASK_DISCLAIMER_PREFIX.length)
+  } else if (body.startsWith(SCHEDULED_TASK_HEADER)) {
+    // Header-only / partial prefix: skip through first blank line after header.
+    const blank = body.indexOf('\n\n')
+    if (blank === -1) return null
+    body = body.slice(blank + 2)
+  } else if (body.startsWith(TASK_NOTIFICATION_DISCLAIMER_HEADER)) {
+    const blank = body.indexOf('\n\n')
+    if (blank === -1) return null
+    body = body.slice(blank + 2)
+  }
+
+  if (body.startsWith('/')) return body
+
+  const authEnd = '</autonomy_authority>'
+  const i = body.lastIndexOf(authEnd)
+  if (i >= 0) {
+    const after = body.slice(i + authEnd.length).replace(/^\s+/, '')
+    if (after.startsWith('/')) return after
+  }
+  return null
+}

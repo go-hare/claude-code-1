@@ -1,0 +1,1 @@
+Thread:B});if(M("tengu_rotunda_pennant_applied",{reason:fe(Xe.telemetry.reason),entitlement_blind:zkt(),armed_mode:fe(pu?.mode??"none"),mid_stream:Xe.telemetry.midStream,discarded_block_count:Xe.telemetry.discardedBlockCount,tombstoned_had_tool_use:Xe.telemetry.tombstonedHadToolUse,request_id_sha12:Xe.telemetry.requestId!==null?Kc(Xe.telemetry.requestId):void 0

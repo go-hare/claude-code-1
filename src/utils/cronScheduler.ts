@@ -131,6 +131,11 @@ export type CronScheduler = {
   start: () => void
   stop: () => void
   /**
+   * densable `checkNow` — run a check tick immediately (e.g. after a turn
+   * ends so a just-armed keepalive can fire without waiting for the 1s poll).
+   */
+  checkNow: () => void
+  /**
    * Epoch ms of the soonest scheduled fire across all loaded tasks, or null
    * if nothing is scheduled (no tasks, or all tasks already in-flight).
    * Daemon callers use this to decide whether to tear down an idle agent
@@ -518,6 +523,10 @@ export function createCronScheduler(
         isOwner = false
         void releaseSchedulerLock(lockOpts)
       }
+    },
+    checkNow() {
+      if (stopped) return
+      check()
     },
     getNextFireTime() {
       // nextFireAt uses Infinity for "never" (in-flight one-shots, bad cron

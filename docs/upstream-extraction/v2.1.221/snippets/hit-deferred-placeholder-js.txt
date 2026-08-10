@@ -1,0 +1,3 @@
+# offset=69200848 span_start=69204064 slice_rel=[0,267) len=267
+
+Specifying a `clientId` or `resourceId` is not supported by the Service Fabric managed identity environment. The managed identity configuration is determined by the Service Fabric cluster resource configuration. See https://aka.ms/servicefabricmi for more information

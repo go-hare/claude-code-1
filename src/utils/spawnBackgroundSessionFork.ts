@@ -622,17 +622,23 @@ async function spawnBackgroundSessionForkImpl(
       : 'default',
   )
 
-  // densable isolation append-system-prompt when relocated out of worktree.
-  // densable: isolate with ${Lle} where Lle = "EnterWorktree" (tool name token).
+  // densable 2.1.221 isolation append-system-prompt (Lre = EnterWorktree):
+  // - keepParent && relocated (R): forked-out-of linked worktree guidance
+  // - keepParent && editsIn==="own-worktree": create own worktree guidance
+  // - this-tree / non-git: no isolation append
   let isolationPrompt: string | undefined
   if (relocatedTo && wt) {
     const branchNote = wt.worktreeBranch ? ` (branch ${wt.worktreeBranch})` : ''
-    const startBranch = wt.worktreeBranch
-      ? `, and start from branch ${wt.worktreeBranch} if the task depends on its work`
+    const ownBranchClause = wt.worktreeBranch
+      ? `, and if the task builds on the original's work, base your new branch on ${wt.worktreeBranch} rather than checking that branch out (it stays checked out in the original's worktree)`
       : ''
     isolationPrompt =
-      `This conversation was forked out of ${wt.worktreePath}${branchNote}, a linked worktree another live session is still using — never edit files or run commands in that directory. ` +
-      `You are in ${relocatedTo}; isolate with EnterWorktree before making code changes${startBranch}.`
+      `This conversation was forked out of ${wt.worktreePath}${branchNote}, a linked worktree the original session is still working in — never edit files, run commands, or enter that worktree with EnterWorktree. ` +
+      `You are in ${relocatedTo}; before making code changes, create a new worktree of your own with EnterWorktree instead of reusing the original's${ownBranchClause}.`
+  } else if (editsIn === 'own-worktree') {
+    isolationPrompt =
+      `This conversation was forked from a session that is still working in this checkout (${childCwd}). ` +
+      `Before making code changes, create a new worktree of your own with EnterWorktree so your edits don't land where the original session is editing.`
   }
 
   // densable kei() merge: keepParent?kei():{} → --agent / --agents /

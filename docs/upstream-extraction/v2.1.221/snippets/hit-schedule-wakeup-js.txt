@@ -1,0 +1,3 @@
+# offset=69310624 span_start=69310752 slice_rel=[0,202) len=202
+
+Schedule when to resume work in /loop dynamic mode (always pass the `prompt` arg unless stopping). Call before ending the turn to keep the loop alive; call with `stop: true` to end the loop immediately.

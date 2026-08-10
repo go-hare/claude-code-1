@@ -23,14 +23,35 @@ export type DaemonLockData = {
   origin?: DaemonLockOrigin
   spawnedBy?: string
   launchTarget?: string
+  /** densable: PowerShell/ps identity when FFI off. */
   procStart?: unknown
+  /** densable 2.1.221: kernel32 FILETIME string when BMt/FFI on. */
+  procStartFt?: unknown
 }
 
-/** densable DSr — only locks with procStart are signalable as the daemon. */
+/**
+ * densable DSr — signalable when identity field is present.
+ * Prefer AFe-picked identity (procStartFt under FFI, else procStart).
+ */
 export function isDaemonLockSignalable(
-  lock: Pick<DaemonLockData, 'procStart'> | null | undefined,
+  lock: Pick<DaemonLockData, 'procStart' | 'procStartFt'> | null | undefined,
 ): boolean {
-  return lock != null && lock.procStart !== undefined
+  if (lock == null) return false
+  return pickDaemonProcessStartIdentity(lock) !== undefined
+}
+
+/** densable AFe/kUe — live identity token from lock fields (BMt-aware). */
+export function pickDaemonProcessStartIdentity(
+  lock: Pick<DaemonLockData, 'procStart' | 'procStartFt'>,
+): unknown {
+  // densable 1:1 with genericProcessUtils.pickProcessStartIdentity (AFe):
+  // FFI on → only procStartFt; defined procStart while BMt → void (legacy).
+  // FFI off → procStart only.
+  // Lazy import avoids circular deps with genericProcessUtils consumers.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { pickProcessStartIdentity } =
+    require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+  return pickProcessStartIdentity(lock)
 }
 
 /**
@@ -130,8 +151,12 @@ export async function isDaemonCmdline(pid: number): Promise<boolean> {
 }
 
 /**
- * densable iPs / Ex — compare process start identity when lock.procStart set.
- * When procStart is missing (older writers), accept pid-only.
+ * densable `nU` / `Yzc` — compare process start identity when lock identity set.
+ * When expected is missing (older writers), accept pid-only.
+ * densable:
+ *   async function nU(e,t){ if(t===void 0) return !0; return Yzc(t, await zI(e)) }
+ *   function Yzc(e,t){ return t===void 0 || t===e || X6g(e,t) }
+ * So a transient live-identity miss matches (true), not rejects.
  */
 export async function matchesDaemonProcStart(
   pid: number,
@@ -139,17 +164,24 @@ export async function matchesDaemonProcStart(
   attempts: number = 1,
 ): Promise<boolean> {
   if (expected === undefined || expected === null) return true
+  const { processStartIdentityEquals } = await import(
+    '../utils/genericProcessUtils.js'
+  )
+  let live: unknown | undefined
   for (let n = 0; n < attempts; n++) {
     if (n > 0) {
       await new Promise(r => setTimeout(r, 50))
     }
-    const live = await readProcessStartIdentity(pid)
+    live = await readProcessStartIdentity(pid)
     if (live !== undefined) {
-      return live === expected || deepEqualProcStart(live, expected)
+      return (
+        processStartIdentityEquals(expected, live) ||
+        deepEqualProcStart(live, expected)
+      )
     }
   }
-  // Could not read live identity — densable iPs returns false after retries.
-  return false
+  // densable nU → Yzc(expected, undefined) === true when zI cannot read.
+  return processStartIdentityEquals(expected, undefined)
 }
 
 function deepEqualProcStart(a: unknown, b: unknown): boolean {
@@ -162,8 +194,10 @@ function deepEqualProcStart(a: unknown, b: unknown): boolean {
 }
 
 /**
- * densable Ex/phh — process start identity for PID reuse detection.
- * Linux: /proc/<pid>/stat starttime; others: ps -o lstart= (best-effort).
+ * densable Ex / zI / JWg — process start identity for PID reuse detection.
+ * Linux: /proc/<pid>/stat starttime.
+ * win32: kernel32 GetProcessTimes FILETIME (or PowerShell fallback).
+ * others: ps -o lstart= (best-effort).
  */
 export async function readProcessStartIdentity(
   pid: number,
@@ -185,23 +219,33 @@ export async function readProcessStartIdentity(
       return undefined
     }
   }
+  // densable JWg: win32 + non-linux go through getProcessLstartString
+  // (FFI FILETIME string or PowerShell / ps).
   try {
-    const { execFile } = await import('child_process')
-    const { promisify } = await import('util')
-    const execFileAsync = promisify(execFile)
-    const { stdout } = await execFileAsync(
-      'ps',
-      ['-o', 'lstart=', '-p', String(pid)],
-      {
-        timeout: 1000,
-        env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
-      },
+    const { getProcessLstartString } = await import(
+      '../utils/genericProcessUtils.js'
     )
-    const s = stdout.trim()
-    return s.length > 0 ? s : undefined
+    return await getProcessLstartString(pid)
   } catch {
     return undefined
   }
+}
+
+/**
+ * densable UHt/jMt + Ex — identity fields for writing daemon.lock.
+ * win32 FFI → { procStartFt }; else { procStart }.
+ */
+export async function readProcessStartIdentityFields(
+  pid: number,
+): Promise<{ procStart?: unknown; procStartFt?: unknown }> {
+  const identity = await readProcessStartIdentity(pid)
+  if (identity === undefined) return {}
+  const { buildProcessStartIdentityFields } = await import(
+    '../utils/genericProcessUtils.js'
+  )
+  return buildProcessStartIdentityFields(
+    typeof identity === 'string' ? identity : String(identity),
+  )
 }
 
 /**
@@ -224,9 +268,14 @@ export async function readAliveDaemonLock(
   if (!isDaemonPidRaceLive(lock.pid)) return null
   // densable jen / vhn: refuse PID reuse of non-daemon process.
   if (!(await isDaemonCmdline(lock.pid))) return null
-  // densable iPs / vla: refuse when procStart diverges (PID recycled).
+  // densable iPs / vla: refuse when identity diverges (PID recycled).
+  // densable AFe(lock) → procStartFt under FFI else procStart.
   if (
-    !(await matchesDaemonProcStart(lock.pid, lock.procStart, procStartAttempts))
+    !(await matchesDaemonProcStart(
+      lock.pid,
+      pickDaemonProcessStartIdentity(lock),
+      procStartAttempts,
+    ))
   ) {
     return null
   }
@@ -249,12 +298,26 @@ export async function classifyDaemonLockHolder(
   const liveStart = cmdlineOk
     ? await readProcessStartIdentity(raw.pid)
     : undefined
-  const bothHaveStart = raw.procStart !== undefined && liveStart !== undefined
+  const expectedStart = pickDaemonProcessStartIdentity(raw)
+  const bothHaveStart = expectedStart !== undefined && liveStart !== undefined
   if (
     !cmdlineOk ||
-    (bothHaveStart && !deepEqualProcStart(liveStart, raw.procStart))
+    (bothHaveStart &&
+      !deepEqualProcStart(liveStart, expectedStart) &&
+      liveStart !== expectedStart)
   ) {
-    return 'stale'
+    // Cross-format FILETIME/Ticks still counts as verified (densable Yzc).
+    if (bothHaveStart) {
+      const { processStartIdentityEquals } = await import(
+        '../utils/genericProcessUtils.js'
+      )
+      if (processStartIdentityEquals(expectedStart, liveStart)) {
+        return 'verified'
+      }
+    }
+    if (!cmdlineOk || bothHaveStart) {
+      return 'stale'
+    }
   }
   if (bothHaveStart) {
     return 'verified'
@@ -350,13 +413,17 @@ export function isDaemonPidInstallLive(pid: number): boolean {
  * (EPERM) still blocks steal.
  */
 export async function isDaemonPeerBlockingInstall(
-  lock: Pick<DaemonLockData, 'pid' | 'procStart'>,
+  lock: Pick<DaemonLockData, 'pid' | 'procStart' | 'procStartFt'>,
 ): Promise<boolean> {
   try {
     process.kill(lock.pid, 0)
     return (
       (await isDaemonCmdline(lock.pid)) &&
-      (await matchesDaemonProcStart(lock.pid, lock.procStart, 1))
+      (await matchesDaemonProcStart(
+        lock.pid,
+        pickDaemonProcessStartIdentity(lock),
+        1,
+      ))
     )
   } catch (err) {
     return errnoCode(err) !== 'ESRCH'

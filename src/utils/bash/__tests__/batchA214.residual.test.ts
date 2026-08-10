@@ -156,6 +156,40 @@ describe('densable #5 zsh [[ ]] fnu/mnu', () => {
     expect(r?.kind).toBe('too-complex')
     expect(r && r.kind === 'too-complex' ? r.reason : '').toMatch(/\$name:mod/)
   })
+
+  test('densable 2.1.221: extglob_pattern unquoted & → too-complex', () => {
+    // walkTestExpr path: [[ ]] with extglob_pattern containing unquoted &
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('extglob_pattern', 'foo&bar', 3, 10)
+    const close = node(']]', ']]', 11, 13)
+    const parent = node('test_command', '[[ foo&bar ]]', 0, 13, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo&bar ]]', parent)
+    expect(r.kind).toBe('too-complex')
+    if (r.kind === 'too-complex') {
+      expect(r.reason).toBe(
+        '[[ ]] pattern contains unquoted & (zsh splits the word at & at any depth)',
+      )
+      expect(r.differential).toBe(true)
+    }
+  })
+
+  test('densable 2.1.221: escaped & in extglob_pattern is allowed', () => {
+    const open = node('[[', '[[', 0, 2)
+    const pattern = node('extglob_pattern', 'foo\\&bar', 3, 11)
+    const close = node(']]', ']]', 12, 14)
+    const parent = node('test_command', '[[ foo\\&bar ]]', 0, 14, [
+      open,
+      pattern,
+      close,
+    ])
+    const r = parseForSecurityFromAst('[[ foo\\&bar ]]', parent)
+    // no expansion / no unquoted & → simple (or may still be simple with [[ argv)
+    expect(r.kind).not.toBe('too-complex')
+  })
 })
 
 describe('densable #4 secondary K0e sites', () => {

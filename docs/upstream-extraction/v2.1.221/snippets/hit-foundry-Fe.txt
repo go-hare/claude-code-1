@@ -1,0 +1,250 @@
+# densable 2.1.221 — Foundry $Fe / foundryDeploymentCapabilities (SEA gold)
+# Binary: /tmp/official-221/plat/package/claude
+# Offsets: map init ~237825304, vqr ~237838825, lns..cnu ~240488097-240489800
+
+## Map storage
+
+```js
+// session singleton Ft (bootstrap state):
+foundryDeploymentCapabilities: new Map  // Map<string /*cns key*/, Set<string /*capability*/>>
+
+function vqr(){ return Ft.foundryDeploymentCapabilities }
+```
+
+## Verbatim family
+
+```js
+var dw="ToolSearch",
+    Osr="DeferredToolPlaceholder",
+    kco="Reserved placeholder that keeps deferred tool loading active; never call this tool.";
+
+function lns(){
+  return re.ANTHROPIC_FOUNDRY_BASE_URL
+    || (re.ANTHROPIC_FOUNDRY_RESOURCE
+        ? `https://${re.ANTHROPIC_FOUNDRY_RESOURCE}.services.ai.azure.com`
+        : void 0)
+}
+
+function cns(e){
+  let t=rd(e); // normalize model id
+  return `${lns()??"unknown-foundry-resource"}::${t}`
+}
+
+function lnu(e){
+  let t=e.match(QGg)?.[1];
+  if(t){
+    let n=t.split(",").map((o)=>o.trim());
+    if(n.every((o)=>anu.test(o))) return n
+  }
+  let r=e.match(ZGg)?.[1];
+  if(r){
+    let n=r.split(/[,\s]+/).filter((o)=>o!=="and"&&anu.test(o));
+    return n.length>0?n:null
+  }
+  if(e8g.test(e)) return ["web_search"];
+  return null
+}
+
+function uns(e,t){
+  if(t.length===0)return;
+  let r=cns(e), n=vqr(), o=n.get(r);
+  if(o&&t.every((s)=>o.has(s)))return;
+  let i=o?new Set(o):new Set;
+  for(let s of t)i.add(s);
+  n.set(r,i);
+  C(`[foundry-capabilities] deployment ${r} does not support: ${[...i].join(", ")}`,{level:"warn"})
+}
+
+function $Fe(e,t){
+  let r=vqr();
+  if(r.size===0)return!0;              // empty map => allow all
+  return!r.get(cns(e))?.has(t)         // allow if capability not recorded as unsupported
+}
+
+function dns(e){
+  if(Ln()!=="foundry")return null;
+  if(!(e instanceof Ci)||e.status!==400)return null;
+  let t=e.error;
+  if(t&&typeof t==="object"&&"error"in t){
+    let r=t.error;
+    if(r&&typeof r==="object"&&"message"in r&&typeof r.message==="string")
+      return lnu(r.message)
+  }
+  return lnu(e.message??"")
+}
+
+function xco(e,t,r){
+  let n=dns(e);
+  if(!n)return null;
+  uns(t,n);                            // learn unsupported caps for deployment key
+  if(r==="web_search_tool")return oJr; // "fail:foundry-purpose-request"
+  if(n.some((o)=>t8g.has(o)))
+    return`retry:foundry-capability-strip:${n.join(",")}`;
+  return null
+}
+
+function cnu(e,t){
+  if(Ln()!=="foundry")return e;
+  let r=vqr();
+  if(r.size===0)return e;
+  let n=r.get(cns(t));
+  if(!n||n.size===0)return e;
+  let o=n.has("tool_search_server")||n.has("tool_search");
+  let i=n.has("structured_outputs");
+  if(!o&&!i)return e;
+  let s=!1, a=[];
+  for(let l of e){
+    let c=o&&l.defer_loading;
+    if(c&&l.name===Osr&&l.description===kco){ s=!0; continue } // drop placeholder
+    let u=i&&l.strict;
+    if(!c&&!u){ a.push(l); continue }
+    s=!0;
+    let d={...l};
+    if(c) delete d.defer_loading;
+    if(u) delete d.strict;
+    a.push(d)
+  }
+  return s?a:e
+}
+
+// Dsr init:
+QGg=/([a-z0-9_, ]+?)\s+not supported in your workspace/i
+ZGg=/features are not available for Azure AI Foundry workspaces?:\s*([a-z0-9_, ]+)/i
+e8g=/server-side web search is not available in this environment/i
+anu=/^[a-z][a-z0-9_]*$/
+t8g=new Set(["tool_search_server","tool_search","structured_outputs"])
+oJr="fail:foundry-purpose-request"
+```
+
+## Reconstructible TypeScript (1:1 order)
+
+```ts
+type CapSet = Set<string>
+// key cns = `${foundryBaseURL ?? "unknown-foundry-resource"}::${normalizeModel(model)}`
+
+function getFoundryBaseURL(): string | undefined {
+  return process.env.ANTHROPIC_FOUNDRY_BASE_URL
+    || (process.env.ANTHROPIC_FOUNDRY_RESOURCE
+        ? `https://${process.env.ANTHROPIC_FOUNDRY_RESOURCE}.services.ai.azure.com`
+        : undefined)
+}
+
+function foundryDeploymentKey(model: string): string {
+  return `${getFoundryBaseURL() ?? "unknown-foundry-resource"}::${normalizeModel(model)}`
+}
+
+/** $Fe — capability allowed? Empty map defaults true. */
+function foundrySupportsCapability(model: string, capability: string): boolean {
+  const map = getFoundryDeploymentCapabilities() // Map
+  if (map.size === 0) return true
+  return !map.get(foundryDeploymentKey(model))?.has(capability)
+}
+
+function parseFoundryUnsupportedFeatures(message: string): string[] | null {
+  // lnu — three patterns, first match wins
+  const m1 = message.match(/([a-z0-9_, ]+?)\s+not supported in your workspace/i)?.[1]
+  if (m1) {
+    const parts = m1.split(",").map(s => s.trim())
+    if (parts.every(p => /^[a-z][a-z0-9_]*$/.test(p))) return parts
+  }
+  const m2 = message.match(/features are not available for Azure AI Foundry workspaces?:\s*([a-z0-9_, ]+)/i)?.[1]
+  if (m2) {
+    const parts = m2.split(/[,\s]+/).filter(s => s !== "and" && /^[a-z][a-z0-9_]*$/.test(s))
+    return parts.length > 0 ? parts : null
+  }
+  if (/server-side web search is not available in this environment/i.test(message)) return ["web_search"]
+  return null
+}
+
+function learnFoundryUnsupported(model: string, caps: string[]): void {
+  // uns — union into Map under cns(model)
+  if (caps.length === 0) return
+  const key = foundryDeploymentKey(model)
+  const map = getFoundryDeploymentCapabilities()
+  const existing = map.get(key)
+  if (existing && caps.every(c => existing.has(c))) return
+  const next = existing ? new Set(existing) : new Set<string>()
+  for (const c of caps) next.add(c)
+  map.set(key, next)
+  logWarn(`[foundry-capabilities] deployment ${key} does not support: ${[...next].join(", ")}`)
+}
+
+function extractFoundry400Caps(err: unknown): string[] | null {
+  // dns — provider must be foundry; APIError status 400
+  if (getProvider() !== "foundry") return null
+  if (!(err instanceof APIError) || err.status !== 400) return null
+  const body = err.error
+  if (body && typeof body === "object" && "error" in body) {
+    const inner = (body as { error?: unknown }).error
+    if (inner && typeof inner === "object" && "message" in inner
+        && typeof (inner as { message: unknown }).message === "string") {
+      return parseFoundryUnsupportedFeatures((inner as { message: string }).message)
+    }
+  }
+  return parseFoundryUnsupportedFeatures(err.message ?? "")
+}
+
+function handleFoundryCapabilityError(
+  err: unknown,
+  model: string,
+  purpose: string,
+): "fail:foundry-purpose-request" | `retry:foundry-capability-strip:${string}` | null {
+  // xco
+  const caps = extractFoundry400Caps(err)
+  if (!caps) return null
+  learnFoundryUnsupported(model, caps)
+  if (purpose === "web_search_tool") return "fail:foundry-purpose-request"
+  const STRIP = new Set(["tool_search_server", "tool_search", "structured_outputs"])
+  if (caps.some(c => STRIP.has(c))) return `retry:foundry-capability-strip:${caps.join(",")}`
+  return null
+}
+
+function stripFoundryUnsupportedToolFields<T extends {
+  name?: string
+  description?: string
+  defer_loading?: boolean
+  strict?: boolean
+}>(tools: T[], model: string): T[] {
+  // cnu
+  if (getProvider() !== "foundry") return tools
+  const map = getFoundryDeploymentCapabilities()
+  if (map.size === 0) return tools
+  const unsupported = map.get(foundryDeploymentKey(model))
+  if (!unsupported || unsupported.size === 0) return tools
+  const stripDefer = unsupported.has("tool_search_server") || unsupported.has("tool_search")
+  const stripStrict = unsupported.has("structured_outputs")
+  if (!stripDefer && !stripStrict) return tools
+  let changed = false
+  const out: T[] = []
+  for (const tool of tools) {
+    const hasDefer = stripDefer && tool.defer_loading
+    if (
+      hasDefer
+      && tool.name === "DeferredToolPlaceholder"
+      && tool.description === "Reserved placeholder that keeps deferred tool loading active; never call this tool."
+    ) {
+      changed = true
+      continue // drop placeholder entirely
+    }
+    const hasStrict = stripStrict && tool.strict
+    if (!hasDefer && !hasStrict) {
+      out.push(tool)
+      continue
+    }
+    changed = true
+    const copy = { ...tool }
+    if (hasDefer) delete (copy as { defer_loading?: boolean }).defer_loading
+    if (hasStrict) delete (copy as { strict?: boolean }).strict
+    out.push(copy)
+  }
+  return changed ? out : tools
+}
+```
+
+## Learning loop summary
+
+1. Request fails with Foundry 400 → `dns` parses message via `lnu`
+2. `uns` records unsupported feature names under `cns(model)` in the Map
+3. Subsequent `$Fe(model, cap)` returns false for recorded caps (empty Map still true)
+4. `xco` triggers fail (web_search_tool purpose) or retry strip for tool_search*/structured_outputs
+5. On retry, `cnu` strips `defer_loading` / `strict` (and drops DeferredToolPlaceholder)

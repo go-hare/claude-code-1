@@ -1,0 +1,1 @@
+greements outlined here: https://code.claude.com/docs/en/legal-and-compliance...// Version: 2.1.220.var wNm=Object.create;var{getPrototypeOf:CNm,defineProperty:UCt,getOwnPropertyNames:tbi,getOwnPropertyDescriptor:ANm}=Object,LNn=Object.prototype.hasOwnProperty;function MNn(e){return this[e]}var Fi=(e,t,r)=>{var n=t&&typeof t==="object"||typeof t==="function

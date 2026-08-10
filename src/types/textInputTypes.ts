@@ -350,6 +350,21 @@ export type QueuedCommand = {
    */
   bridgeOrigin?: boolean
   /**
+   * densable 2.1.221 `modelScheduledOrigin` — scheduled/cron/loop fire stamp.
+   * Fire paths set this with `skipSlashCommands:true`; processUserInput then
+   * re-opens slash dispatch for model-invocable commands and threads the flag
+   * into skill `getPromptForCommand` (skip `tengu_loop_command` analytics).
+   */
+  modelScheduledOrigin?: boolean
+  /**
+   * densable 2.1.221 `wakeupSource` — `loop_wakeup` | `schedule_wakeup` (and
+   * c2o-derived user/sdk/system). Stamped on cron/loop fire and threaded through
+   * processUserInput / QueryEngine. densable Qjt UserPromptSubmit still has the
+   * hook `source` field gated off (`...!1`) — plumbing only until product enables.
+   * Re-open slash uses modelScheduledOrigin + skipSlash, not this field.
+   */
+  wakeupSource?: string
+  /**
    * When true, the resulting UserMessage gets `isMeta: true` — hidden in the
    * transcript UI but visible to the model. Used by system-generated prompts
    * (proactive ticks, teammate messages, resource updates) that route through

@@ -257,9 +257,271 @@ export type AwsSdkIdentity = {
 export type AwsProviderChain = (init?: unknown) => Promise<AwsSdkIdentity>
 
 /**
+ * densable 2.1.221 `ic_` — SSO region token (portal.sso.<region>.amazonaws.com).
+ */
+const HOST_PINNED_SSO_REGION_RE = /^[a-z0-9-]{1,32}$/
+
+/** densable `Twu` pure-SSO profile resolution result. */
+export type HostPinnedSsoProfile = {
+  cacheId: string
+  accountId: string
+  roleName: string
+  region: string
+}
+
+/**
+ * Minimal AWS shared-config INI parse (densable loadSharedConfigFiles shape).
+ * Config sections: `[default]`, `[profile name]`, `[sso-session name]`.
+ * Credentials sections: `[name]` (no `profile ` prefix).
+ */
+export function parseAwsIniSections(
+  content: string,
+  kind: 'config' | 'credentials',
+): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {}
+  let current: string | null = null
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue
+    const section = line.match(/^\[([^\]]+)\]$/)
+    if (section) {
+      let name = section[1]!.trim()
+      if (kind === 'config') {
+        if (name === 'default') {
+          current = 'default'
+        } else if (name.startsWith('profile ')) {
+          current = name.slice('profile '.length).trim()
+        } else if (name.startsWith('sso-session ')) {
+          current = `sso-session.${name.slice('sso-session '.length).trim()}`
+        } else {
+          // bare [name] in config is treated as profile name by AWS tools
+          current = name
+        }
+      } else {
+        current = name
+      }
+      if (current && !out[current]) out[current] = {}
+      continue
+    }
+    if (!current) continue
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    const key = line.slice(0, eq).trim()
+    const value = line.slice(eq + 1).trim()
+    out[current]![key] = value
+  }
+  return out
+}
+
+/**
+ * densable `Twu` / `fAu` — pure SSO named profile only.
+ * Rejects static keys / credential_process / role_arn / source_profile /
+ * credential_source / web_identity_token_file. Resolves sso_session →
+ * sso_start_url / sso_region. Returns null when not pure SSO.
+ */
+export async function parseHostPinnedSsoProfile(
+  configFile: string,
+  credsFile?: string | null,
+  profile?: string | null,
+): Promise<HostPinnedSsoProfile | null> {
+  const { readFile } = await import('fs/promises')
+  let configRaw: string
+  try {
+    configRaw = await readFile(configFile, 'utf-8')
+  } catch {
+    return null
+  }
+  const config = parseAwsIniSections(configRaw, 'config')
+  let creds: Record<string, Record<string, string>> = {}
+  if (credsFile) {
+    try {
+      creds = parseAwsIniSections(
+        await readFile(credsFile, 'utf-8'),
+        'credentials',
+      )
+    } catch {
+      creds = {}
+    }
+  }
+  const profileName = profile ?? 'default'
+  const section = config[profileName]
+  const credSection = creds[profileName]
+  if (!section) return null
+  const merged: Record<string, string> = { ...section, ...credSection }
+  const accountId = merged.sso_account_id
+  const roleName = merged.sso_role_name
+  if (!accountId || !roleName) return null
+  if (
+    (merged.aws_access_key_id && merged.aws_secret_access_key) ||
+    merged.credential_process ||
+    merged.role_arn ||
+    merged.source_profile ||
+    merged.credential_source ||
+    merged.web_identity_token_file
+  ) {
+    return null
+  }
+  const sessionBlock = merged.sso_session
+    ? config[`sso-session.${merged.sso_session}`]
+    : merged
+  const startUrl = sessionBlock?.sso_start_url
+  const region = sessionBlock?.sso_region
+  if (!startUrl || !region || !HOST_PINNED_SSO_REGION_RE.test(region)) {
+    return null
+  }
+  if (
+    merged.sso_session &&
+    ((merged.sso_start_url && merged.sso_start_url !== startUrl) ||
+      (merged.sso_region && merged.sso_region !== region))
+  ) {
+    return null
+  }
+  return {
+    cacheId: merged.sso_session ?? startUrl,
+    accountId,
+    roleName,
+    region,
+  }
+}
+
+/** densable `oc_` — SSO cache JSON shape. */
+type HostPinnedSsoCacheToken = {
+  accessToken: string
+  expiresAt: string
+}
+
+function parseHostPinnedSsoCacheToken(
+  raw: unknown,
+): HostPinnedSsoCacheToken | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.accessToken !== 'string' || o.accessToken.length < 1) return null
+  if (typeof o.expiresAt !== 'string') return null
+  return { accessToken: o.accessToken, expiresAt: o.expiresAt }
+}
+
+/**
+ * densable `Ewu` / `hAu` — read token from host-pinned cache path and exchange
+ * via portal.sso GetRoleCredentials. Cache path is NOT getHomeDir()/.aws/sso/cache.
+ */
+export async function exchangeHostPinnedSsoRoleCredentials(
+  cachePath: string,
+  accountId: string,
+  roleName: string,
+  region: string,
+  fetchImpl: (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => Promise<Response> = globalThis.fetch,
+): Promise<AwsSdkIdentity | null> {
+  const { readFile } = await import('fs/promises')
+  let raw: unknown
+  try {
+    raw = JSON.parse(await readFile(cachePath, 'utf-8')) as unknown
+  } catch {
+    return null
+  }
+  const token = parseHostPinnedSsoCacheToken(raw)
+  if (!token) return null
+  const expiresAt = Date.parse(token.expiresAt)
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null
+
+  const url = new URL(
+    `https://portal.sso.${region}.amazonaws.com/federation/credentials`,
+  )
+  url.searchParams.set('account_id', accountId)
+  url.searchParams.set('role_name', roleName)
+  let response: Response
+  try {
+    response = await fetchImpl(url, {
+      method: 'GET',
+      headers: {
+        'x-amz-sso_bearer_token': token.accessToken,
+      },
+    })
+  } catch {
+    return null
+  }
+  if (!response.ok) return null
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    return null
+  }
+  const roleCredentials = (
+    body as { roleCredentials?: Record<string, unknown> }
+  )?.roleCredentials
+  if (!roleCredentials) return null
+  const accessKeyId = roleCredentials.accessKeyId
+  const secretAccessKey = roleCredentials.secretAccessKey
+  const sessionToken = roleCredentials.sessionToken
+  if (
+    typeof accessKeyId !== 'string' ||
+    typeof secretAccessKey !== 'string' ||
+    typeof sessionToken !== 'string' ||
+    !accessKeyId ||
+    !secretAccessKey ||
+    !sessionToken
+  ) {
+    return null
+  }
+  return { accessKeyId, secretAccessKey, sessionToken }
+}
+
+/**
+ * densable `sc_` / `ncy` — host-pinned SSO leg: parse pure SSO profile, resolve
+ * cache under dirname(AWS_CONFIG_FILE)/sso/cache/<sha1(cacheId)>.json, exchange.
+ * On any failure: log and return null (caller falls back to fromIni).
+ */
+export async function resolveHostPinnedSsoCredentials(
+  configFile: string,
+  credsFile?: string | null,
+  profile?: string | null,
+  opts?: {
+    fetchImpl?: (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>
+  },
+): Promise<AwsSdkIdentity | null> {
+  try {
+    const parsed = await parseHostPinnedSsoProfile(
+      configFile,
+      credsFile,
+      profile,
+    )
+    if (!parsed) return null
+    const { createHash } = await import('crypto')
+    const { dirname, join } = await import('path')
+    const cachePath = join(
+      dirname(configFile),
+      'sso',
+      'cache',
+      `${createHash('sha1').update(parsed.cacheId).digest('hex')}.json`,
+    )
+    return await exchangeHostPinnedSsoRoleCredentials(
+      cachePath,
+      parsed.accountId,
+      parsed.roleName,
+      parsed.region,
+      opts?.fetchImpl ?? fetch,
+    )
+  } catch (err) {
+    const name = err instanceof Error ? err.name : 'unknown'
+    logForDebugging(
+      `[API:auth] host-pinned SSO leg failed (${name}) — falling back to fromIni`,
+    )
+    return null
+  }
+}
+
+/**
  * Official Q_c / hostManagedAwsProviderChain — build a provider chain from
- * host-injected env (static keys or fromIni with ignoreCache). Does not run
- * settings awsAuthRefresh / awsCredentialExport.
+ * host-injected env (static keys or fromIni with ignoreCache). densable 2.1.221:
+ * when AWS_CONFIG_FILE is set, try host-pinned SSO (dirname(config)/sso/cache)
+ * before fromIni so Windows stray HOME cannot poison SSO token lookup.
+ * Does not run settings awsAuthRefresh / awsCredentialExport.
  */
 export function hostManagedAwsProviderChain(
   providerLabel: string,
@@ -283,6 +545,17 @@ export function hostManagedAwsProviderChain(
     }
 
     if (configFile || credsFile) {
+      // densable ywu: if configFile present, await host-pinned SSO leg first.
+      if (configFile) {
+        const ssoCreds = await resolveHostPinnedSsoCredentials(
+          configFile,
+          credsFile,
+          profile,
+        )
+        if (ssoCreds) {
+          return async () => ssoCreds
+        }
+      }
       const { fromIni } = await import('@aws-sdk/credential-providers')
       const pathA = configFile ?? credsFile
       const pathB = credsFile ?? configFile

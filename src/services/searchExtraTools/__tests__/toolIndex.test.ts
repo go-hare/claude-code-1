@@ -83,22 +83,25 @@ describe('parseToolName', () => {
 
 describe('buildToolIndex', () => {
   test('builds index from deferred tools only', async () => {
+    // densable TX: opt-in shouldDefer / MCP; not CORE_TOOLS whitelist
     const tools = [
       makeMockTool({ name: 'CoreRead', alwaysLoad: true }),
       makeMockTool({
         name: 'ConfigTool',
+        shouldDefer: true,
         searchHint: 'configure settings options',
         prompt: async () => 'Manage configuration settings.',
       }),
       makeMockTool({
         name: 'CronCreateTool',
+        shouldDefer: true,
         searchHint: 'schedule recurring prompt',
         prompt: async () => 'Create cron jobs for scheduling.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
 
     const index = await buildToolIndex(tools)
-    // Only non-core, non-alwaysLoad tools should be indexed
+    // Only tools with densable TX defer (shouldDefer/MCP) are indexed
     expect(index.length).toBe(2)
     for (const entry of index) {
       expect(entry.tokens.length).toBeGreaterThan(0)
@@ -106,9 +109,9 @@ describe('buildToolIndex', () => {
     }
   })
 
-  test('returns empty array when all tools are core', async () => {
+  test('returns empty array when no tools are deferred', async () => {
     const tools = [
-      makeMockTool({ name: 'Read', alwaysLoad: true }),
+      makeMockTool({ name: 'Read' }),
       makeMockTool({ name: 'Edit', alwaysLoad: true }),
     ] as unknown as import('../../../Tool.js').Tool[]
 
@@ -122,11 +125,13 @@ describe('searchTools', () => {
     const tools = [
       makeMockTool({
         name: 'CronCreateTool',
+        shouldDefer: true,
         searchHint: 'schedule a recurring or one-shot prompt',
         prompt: async () => 'Create cron jobs for scheduling tasks.',
       }),
       makeMockTool({
         name: 'ConfigTool',
+        shouldDefer: true,
         searchHint: 'configure settings options',
         prompt: async () => 'Manage configuration settings.',
       }),
@@ -144,6 +149,7 @@ describe('searchTools', () => {
     const tools = [
       makeMockTool({
         name: 'ConfigTool',
+        shouldDefer: true,
         prompt: async () => 'Manage configuration.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
@@ -156,6 +162,7 @@ describe('searchTools', () => {
     const tools = [
       makeMockTool({
         name: 'ConfigTool',
+        shouldDefer: true,
         prompt: async () => 'Manage configuration settings.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
@@ -183,6 +190,7 @@ describe('getToolIndex caching', () => {
     const tools = [
       makeMockTool({
         name: 'ConfigTool',
+        shouldDefer: true,
         prompt: async () => 'Manage configuration.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]
@@ -196,6 +204,7 @@ describe('getToolIndex caching', () => {
     const tools = [
       makeMockTool({
         name: 'ConfigTool',
+        shouldDefer: true,
         prompt: async () => 'Manage configuration.',
       }),
     ] as unknown as import('../../../Tool.js').Tool[]

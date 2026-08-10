@@ -9,6 +9,7 @@
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getGlobalConfig } from './config.js'
+import { parseEnvInt as parseEnvIntShared } from './envUtils.js'
 
 /** Official default: 70 minutes of idle age before offering. */
 export const RESUME_THRESHOLD_MINUTES_DEFAULT = 70
@@ -34,11 +35,12 @@ export type ResumeReturnMessage = {
   timestamp?: string
 }
 
-/** Official vde — parseInt env with default; NaN → default. */
+/**
+ * Official vde + densable 2.1.211: integer env parse accepting `1e6` / `64_000`.
+ * Re-export of shared `envUtils.parseEnvInt` so resume callers keep one import.
+ */
 export function parseEnvInt(raw: string | undefined, fallback: number): number {
-  if (raw === undefined) return fallback
-  const n = Number.parseInt(raw, 10)
-  return Number.isNaN(n) ? fallback : n
+  return parseEnvIntShared(raw, fallback)
 }
 
 /** Official kdo — CLAUDE_CODE_RESUME_PROMPT or default. */

@@ -1,6 +1,9 @@
 import { mock, describe, expect, test } from 'bun:test'
+import { growthbookMock } from '../../../../tests/mocks/growthbook'
 
+// Spread shared mock — incomplete growthbook mocks poison co-running suites.
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookMock(),
   getFeatureValue_CACHED_MAY_BE_STALE: () => false,
 }))
 
@@ -79,6 +82,21 @@ describe('truncateForPreview', () => {
     const result = truncateForPreview(undefined)
     // JSON.stringify(undefined) returns undefined, then .length throws → catch returns '(unserializable)'
     expect(result).toBe('(unserializable)')
+  })
+
+  test('densable 211: strips bidi override / zero-width / look-alike quotes', () => {
+    const bidi = '\u202E' // RLO
+    const zw = '\u200B' // ZWSP
+    const curly = '\u201Cevil\u201D' // “evil”
+    const result = truncateForPreview({
+      cmd: `echo ${bidi}safe${zw} ${curly}`,
+    })
+    expect(result).not.toContain('\u202E')
+    expect(result).not.toContain('\u200B')
+    expect(result).not.toContain('\u201C')
+    expect(result).not.toContain('\u201D')
+    expect(result).toContain('safe')
+    expect(result).toContain('evil')
   })
 })
 

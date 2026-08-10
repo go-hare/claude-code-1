@@ -23,6 +23,7 @@
  * See PR discussion 2956440848.
  */
 
+import { neutralizeChannelPreviewText } from '../../utils/channelPreviewSanitize.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 
@@ -156,10 +157,13 @@ export function shortRequestId(toolUseID: string): string {
  * roughly 3 lines on a narrow phone screen. Full input is in the local
  * terminal dialog; the channel gets a summary so Write(5KB-file) doesn't
  * flood your texts. Server decides whether/how to show it.
+ *
+ * densable 2.1.211: neutralize bidi / zero-width / look-alike quotes so
+ * tool inputs cannot visually alter the channel approval message.
  */
 export function truncateForPreview(input: unknown): string {
   try {
-    const s = jsonStringify(input)
+    const s = neutralizeChannelPreviewText(jsonStringify(input))
     return s.length > 200 ? s.slice(0, 200) + '…' : s
   } catch {
     return '(unserializable)'

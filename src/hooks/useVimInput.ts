@@ -176,7 +176,9 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
       setOffset: (offset: number) => textInput.setOffset(offset),
       enterInsert: (offset: number) => switchToInsertMode(offset),
       getRegister: () => persistentRef.current.register,
+      getRegisterIsLinewise: () => persistentRef.current.registerIsLinewise,
       setRegister: (content: string, linewise: boolean) => {
+        // densable 2.1.221 #20: writes go to vimSharedState via accessors
         persistentRef.current.register = content
         persistentRef.current.registerIsLinewise = linewise
       },

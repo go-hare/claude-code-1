@@ -15,6 +15,10 @@ import {
   saveAgentName,
   saveCustomTitle,
 } from '../../utils/sessionStorage.js'
+import {
+  RENAME_EMPTY_AFTER_SANITIZE_MESSAGE,
+  sanitizeSessionTitle,
+} from '../../utils/sessionTitleSanitize.js'
 import { isTeammate } from '../../utils/teammate.js'
 import { generateSessionName } from './generateSessionName.js'
 
@@ -47,7 +51,12 @@ export async function call(
     }
     newName = generated
   } else {
-    newName = args.trim()
+    // densable 2.1.221: shared uge (ly/vhn) before persist — FXe funnel.
+    newName = sanitizeSessionTitle(args)
+    if (!newName) {
+      onDone(RENAME_EMPTY_AFTER_SANITIZE_MESSAGE, { display: 'system' })
+      return null
+    }
   }
 
   const sessionId = getSessionId() as UUID

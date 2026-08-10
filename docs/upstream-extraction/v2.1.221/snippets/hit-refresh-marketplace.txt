@@ -1,0 +1,4 @@
+needle: Failed to refresh marketplace
+count: 10
+---
+e("plugin_official_marketplace_fetch","gcs_failed_git_fallback");C(`Successfully refreshed marketplace: ${e}`)}catch(s){if(i)fe("plugin_official_marketplace_fetch","gcs_and_git_failed");let a=s instanceof Error?s.message:String(s);throw C(`Failed to refresh marketplace ${e}: ${a}`,{level:"error"}),Error(`Failed to refresh marketplace '${e}': ${a}`)}}async function qdd(e,t){let r=await uy(),n=r[e];if(!n)throw Error(`Marketplace '${e}' not found. Available marketplaces: ${Object.keys(r).join(", ")}`);let o

@@ -1,0 +1,1 @@
+{let e=xn();if(e!=="firstParty"&&e!=="gateway")return new Set;return zig(QXt())}function zkt(){return xn()==="firstParty"&&zv()&&!Sx()&&nZ()===null&&QXt().length===0}function Kkt(){if(xn()!=="firstParty")return null;return $9i()}function f5r(e){let t=Object.keys(Ul);for(let r=t.length-1;r>=0;r--){let n=Ul[t[r]].firstParty;if(B9i(lo(n),e)&&Hl(n)&&!XXt(n)&&!rDc(n))return n}return 

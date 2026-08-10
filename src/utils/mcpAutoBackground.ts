@@ -19,6 +19,7 @@ import {
 import type { AppState } from '../state/AppState.js'
 import { logForDebugging } from './debug.js'
 import { enqueuePendingNotification } from './messageQueueManager.js'
+import { isBackgroundTasksDisabled } from './residualFinalEnvGates.js'
 import { sleep } from './sleep.js'
 
 /** densable Lcy */
@@ -37,7 +38,10 @@ export function resolveMcpAutoBackgroundMs(
   },
 ): number {
   const transport = opts?.transportType ?? ''
+  // densable Ncy: Ocy transport gate first
   if (MCP_AUTO_BG_DISABLED_TRANSPORTS.has(transport)) return 0
+  // densable Ncy: pv() — CLAUDE_CODE_DISABLE_BACKGROUND_TASKS kills auto-bg
+  if (isBackgroundTasksDisabled(env)) return 0
 
   const nonInteractive =
     opts?.isNonInteractiveSession ?? getIsNonInteractiveSession()
@@ -112,7 +116,9 @@ export async function callMcpToolWithAutoBackground<
   autoBackgroundMs: number
   hasPendingElicitation?: () => boolean
   toolLabel?: string
-}): Promise<T | { content: Array<{ type: 'text'; text: string }> }> {
+}): Promise<
+  T | { content: Array<{ type: 'text'; text: string }>; autoBackgrounded: true }
+> {
   const ms = input.autoBackgroundMs
   if (ms <= 0) {
     return input.run(input.parentAbortController.signal)
@@ -214,8 +220,12 @@ export async function callMcpToolWithAutoBackground<
       })
     })
 
+  // densable $cy: tool result is "moved to background" — NOT a successful
+  // completion. Callers must not emit mcp_progress status:completed here;
+  // completion arrives later via task-notification / MonitorMcpTask.
   return {
     content: [{ type: 'text', text: movedText }],
+    autoBackgrounded: true,
   }
 }
 

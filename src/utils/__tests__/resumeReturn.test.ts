@@ -27,6 +27,22 @@ describe('parseEnvInt / thresholds', () => {
       getResumeTokenThreshold({ CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '5000' }),
     ).toBe(5000)
   })
+
+  test('densable 211: scientific notation and digit separators', () => {
+    expect(parseEnvInt('1e6', 0)).toBe(1_000_000)
+    expect(parseEnvInt('64_000', 0)).toBe(64_000)
+    expect(parseEnvInt('1.5e3', 0)).toBe(1500)
+    expect(
+      getResumeTokenThreshold({
+        CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '1e5',
+      }),
+    ).toBe(100_000)
+    expect(
+      getResumeTokenThreshold({
+        CLAUDE_CODE_RESUME_TOKEN_THRESHOLD: '100_000',
+      }),
+    ).toBe(100_000)
+  })
 })
 
 describe('getResumePrompt (kdo)', () => {

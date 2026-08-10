@@ -1121,6 +1121,7 @@ export function normalizeRefusalFallbackTelemetryReason(
 
 /**
  * Official h1u densable — plan post-fallback UI/telemetry flags.
+ * densable 2.1.220: entitlement_blind:zkt() on rotunda/refusal telemetry.
  */
 export function planRefusalFallbackPresentation(input: {
   reason: string
@@ -1134,6 +1135,11 @@ export function planRefusalFallbackPresentation(input: {
   apiRefusalCategory?: string | null
   isMainThread?: boolean
   originalModelScope?: string
+  /**
+   * densable `zkt` / entitlement_blind. When omitted, evaluated live via
+   * isEntitlementOverlayUnavailable(). Injectable for tests.
+   */
+  entitlementBlind?: boolean
 }): {
   telemetry: {
     reason: 'refusal' | 'sticky' | 'other'
@@ -1144,6 +1150,8 @@ export function planRefusalFallbackPresentation(input: {
     originalModelScope?: string
     finalStopReason?: string | null
     apiRefusalCategory?: string
+    /** densable 2.1.220 entitlement_blind:zkt() */
+    entitlementBlind: boolean
   }
   userVisible: boolean
   tombstonedToolUse: boolean
@@ -1155,6 +1163,17 @@ export function planRefusalFallbackPresentation(input: {
   )
   const userVisible = isUserVisibleRefusalFallbackReason(input.reason)
   const swapSession = userVisible && input.isMainThread === true
+  let entitlementBlind = input.entitlementBlind
+  if (entitlementBlind === undefined) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isEntitlementOverlayUnavailable } =
+        require('./model/entitlementOverlay.js') as typeof import('./model/entitlementOverlay.js')
+      entitlementBlind = isEntitlementOverlayUnavailable()
+    } catch {
+      entitlementBlind = false
+    }
+  }
   return {
     telemetry: {
       reason: normalizeRefusalFallbackTelemetryReason(input.reason),
@@ -1164,6 +1183,7 @@ export function planRefusalFallbackPresentation(input: {
       requestId: input.requestId,
       originalModelScope: input.originalModelScope,
       finalStopReason: input.finalStopReason,
+      entitlementBlind,
       ...(input.apiRefusalCategory != null
         ? {
             apiRefusalCategory: normalizeApiRefusalCategory(

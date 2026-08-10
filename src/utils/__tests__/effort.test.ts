@@ -73,6 +73,7 @@ const {
   isUltracodeEffortAlias,
   resolveBootstrapEffortValue,
   resolveBootstrapUltracodeFlag,
+  resolveHostEffortFlagPatch,
   resolveAppliedEffort,
   clampEffortForModel,
   unpinAllEffortLaunchPins,
@@ -582,6 +583,24 @@ describe('densable effort catalog matrix', () => {
     ])
   })
 
+  // densable EHl 2.1.219: claude-opus-5 default_effort high + full ladder
+  test('opus-5: effort yes, default high, max+xhigh yes', () => {
+    const m = 'claude-opus-5'
+    expect(modelSupportsEffort(m)).toBe(true)
+    expect(modelSupportsMaxEffort(m)).toBe(true)
+    expect(modelSupportsXhighEffort(m)).toBe(true)
+    expect(getDefaultEffortForModel(m)).toBe('high')
+    expect(getSupportedEffortLevels(m)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    // Longer match: bare claude-opus-5 must not fall through to unknown high-only defaults
+    expect(getDefaultEffortForModel('us.anthropic.claude-opus-5')).toBe('high')
+  })
+
   test('opus-4-6: default high, xhigh capability no (denylist)', () => {
     const m = 'claude-opus-4-6-20250514'
     expect(modelSupportsEffort(m)).toBe(true)
@@ -1038,5 +1057,239 @@ describe('clampEffortToOrgLimit (densable S8t/wve)', () => {
     expect(
       formatOrgEffortExceedMessage(undefined, 'claude-opus-4-7'),
     ).toBeNull()
+  })
+})
+
+describe('resolveHostEffortFlagPatch (densable 211 Host apply_flag)', () => {
+  const model = 'claude-opus-4-7'
+  const noWireModel = 'claude-haiku-4-5-20251001'
+
+  test('normal effortLevel clears ultracode and unpins', () => {
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: 'medium',
+      hasEffortLevel: true,
+    })
+    expect(p).toMatchObject({
+      effortValue: 'medium',
+      ultracode: false,
+      unpin: true,
+    })
+    expect(p.clearEffort).toBeUndefined()
+    expect(p.notes).toBeUndefined()
+  })
+
+  test('null effortLevel clears effort + ultracode + unpins', () => {
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: null,
+      hasEffortLevel: true,
+    })
+    expect(p).toEqual({
+      clearEffort: true,
+      ultracode: false,
+      unpin: true,
+    })
+  })
+
+  test('effortLevel ultracode with wire sets flag + top tier', () => {
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: 'ultracode',
+      hasEffortLevel: true,
+    })
+    expect(p.ultracode).toBe(true)
+    expect(p.effortValue).toBe(getUltracodeEffortForModel(model))
+    expect(p.unpin).toBe(true)
+    expect(p.notes).toBeUndefined()
+  })
+
+  test('effortLevel ultracode without wire is no-op + note (soft, not hard fail)', () => {
+    expect(getUltracodeEffortForModel(noWireModel)).toBeUndefined()
+    const p = resolveHostEffortFlagPatch({
+      model: noWireModel,
+      effortLevel: 'ultracode',
+      hasEffortLevel: true,
+    })
+    expect(p.ultracode).toBeUndefined()
+    expect(p.effortValue).toBeUndefined()
+    expect(p.unpin).toBeUndefined()
+    expect(p.notes).toEqual([
+      expect.objectContaining({ code: 'ultracode_alias_no_wire' }),
+    ])
+  })
+
+  test('ultracode true without wire forces ultracode false + note', () => {
+    expect(getUltracodeEffortForModel(noWireModel)).toBeUndefined()
+    const p = resolveHostEffortFlagPatch({
+      model: noWireModel,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    expect(p.ultracode).toBe(false)
+    expect(p.effortValue).toBeUndefined()
+    expect(p.notes).toEqual([
+      expect.objectContaining({ code: 'ultracode_true_no_wire' }),
+    ])
+  })
+
+  test('ultracode true with wire sets wire + flag + unpin', () => {
+    const p = resolveHostEffortFlagPatch({
+      model,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    expect(p.ultracode).toBe(true)
+    expect(p.effortValue).toBe(getUltracodeEffortForModel(model))
+    expect(p.unpin).toBe(true)
+  })
+
+  test('ultracode false only clears flag', () => {
+    const p = resolveHostEffortFlagPatch({
+      model,
+      ultracode: false,
+      hasUltracode: true,
+    })
+    expect(p).toEqual({ ultracode: false })
+  })
+
+  test('combined ultracode false + effortLevel medium', () => {
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: 'medium',
+      hasEffortLevel: true,
+      ultracode: false,
+      hasUltracode: true,
+    })
+    expect(p.effortValue).toBe('medium')
+    expect(p.ultracode).toBe(false)
+    expect(p.unpin).toBe(true)
+  })
+
+  // ── Same-packet conflict order: effort first, ultracode second ──
+
+  test('same packet: medium + ultracode true → ultracode overwrites wire + note', () => {
+    const wire = getUltracodeEffortForModel(model)
+    expect(wire).toBeDefined()
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: 'medium',
+      hasEffortLevel: true,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    expect(p.effortValue).toBe(wire)
+    expect(p.ultracode).toBe(true)
+    expect(p.unpin).toBe(true)
+    expect(p.notes).toEqual([
+      expect.objectContaining({
+        code: 'same_packet_ultracode_overrode_effort',
+      }),
+    ])
+  })
+
+  test('same packet: ultracode alias + ultracode false → flag off, wire may remain', () => {
+    const wire = getUltracodeEffortForModel(model)
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: 'ultracode',
+      hasEffortLevel: true,
+      ultracode: false,
+      hasUltracode: true,
+    })
+    expect(p.effortValue).toBe(wire)
+    expect(p.ultracode).toBe(false)
+    expect(p.unpin).toBe(true)
+    expect(p.notes).toEqual([
+      expect.objectContaining({
+        code: 'same_packet_ultracode_false_after_alias',
+      }),
+    ])
+  })
+
+  test('same packet: null effort + ultracode true with wire → open ultra', () => {
+    const wire = getUltracodeEffortForModel(model)
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: null,
+      hasEffortLevel: true,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    // clearEffort runs first, then ultra overwrites effortValue + flag
+    expect(p.clearEffort).toBe(true)
+    expect(p.effortValue).toBe(wire)
+    expect(p.ultracode).toBe(true)
+    expect(p.unpin).toBe(true)
+  })
+
+  test('same packet: medium + ultracode true without wire → medium then force false + note', () => {
+    expect(getUltracodeEffortForModel(noWireModel)).toBeUndefined()
+    const p = resolveHostEffortFlagPatch({
+      model: noWireModel,
+      effortLevel: 'medium',
+      hasEffortLevel: true,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    // haiku denies effort — parseEffortValue may still accept "medium" string
+    // as EffortLevel, but model has no wire for ultra. ultracode forced false.
+    expect(p.ultracode).toBe(false)
+    expect(p.notes?.some(n => n.code === 'ultracode_true_no_wire')).toBe(true)
+  })
+
+  test('unparseable effortLevel is soft-ignored with effort_level_ignored note', () => {
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: 'not-a-level',
+      hasEffortLevel: true,
+    })
+    expect(p.effortValue).toBeUndefined()
+    expect(p.ultracode).toBeUndefined()
+    expect(p.clearEffort).toBeUndefined()
+    expect(p.unpin).toBeUndefined()
+    expect(p.notes).toEqual([
+      expect.objectContaining({ code: 'effort_level_ignored' }),
+    ])
+  })
+
+  test('same packet: ignored effortLevel + ultracode true still opens ultra', () => {
+    const wire = getUltracodeEffortForModel(model)
+    const p = resolveHostEffortFlagPatch({
+      model,
+      effortLevel: 'garbage',
+      hasEffortLevel: true,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    expect(p.effortValue).toBe(wire)
+    expect(p.ultracode).toBe(true)
+    expect(p.unpin).toBe(true)
+    expect(p.notes?.some(n => n.code === 'effort_level_ignored')).toBe(true)
+    // No same_packet override note — effort never set a normal level
+    expect(
+      p.notes?.some(n => n.code === 'same_packet_ultracode_overrode_effort'),
+    ).toBe(false)
+  })
+
+  test('same-packet model switch contract: wire uses the model argument only', () => {
+    // print.ts must pass post-override getMainLoopModel() here; pure patch
+    // itself has no global model state. Document the two outcomes Hosts see.
+    const onWire = resolveHostEffortFlagPatch({
+      model,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    const onNoWire = resolveHostEffortFlagPatch({
+      model: noWireModel,
+      ultracode: true,
+      hasUltracode: true,
+    })
+    expect(onWire.ultracode).toBe(true)
+    expect(onWire.effortValue).toBe(getUltracodeEffortForModel(model))
+    expect(onNoWire.ultracode).toBe(false)
+    expect(onNoWire.notes?.some(n => n.code === 'ultracode_true_no_wire')).toBe(
+      true,
+    )
   })
 })

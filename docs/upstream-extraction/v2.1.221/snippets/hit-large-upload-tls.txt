@@ -1,0 +1,27 @@
+# densable 2.1.221 #12 — sandboxed large upload TLS via proxy
+
+Official: Fixed sandboxed large uploads failing with TLS errors through the
+sandbox proxy.
+
+## SEA dig (CLI)
+
+- `large upload` / `large body` product phrases: 0 in densable CLI SEA
+- CLI wires `network.tlsTerminate` (densable FQt) via sandbox-adapter — already HAVE path
+
+## External package (the real fix locus)
+
+`@anthropic-ai/sandbox-runtime@0.0.70` (local lock resolved; 0.0.44 had NO tls-terminate):
+- `dist/sandbox/tls-terminate-proxy.js`:
+  - pull-mode relay (avoid `pipe()` pause/resume mid multi-megabyte upload TLS reset)
+  - `MAX_SIGV4_RESIGN_BODY_BYTES = 64 MiB` + `BodyTooLargeError`
+  - body-substitution streaming (chunk boundary hold-back)
+- 0.0.44: only http-proxy; no tls-terminate-proxy / body-substitution
+
+Local already depends on **0.0.70** + FQt tlsTerminate pass-through + Windows
+ephemeral CA warn. No additional CLI product code for "large upload" beyond dep.
+
+## Verdict
+
+GAP (CLI product) — fix lives in external sandbox-runtime@0.0.70 which we already
+consume. Do not invent CLI-side large-body handlers; do not mark HAVE from
+tlsTerminate wiring alone without a distinct 221 CLI locus.

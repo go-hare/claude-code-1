@@ -1033,6 +1033,13 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'When true, poor mode is active — extract_memories and prompt_suggestion are disabled to save tokens.',
         ),
+      // densable `non_deferrable_builtins` / eGu — opt-out list for TX defer policy
+      non_deferrable_builtins: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Built-in tool names that must never be deferred (always sent with full schema). Merged with GrowthBook tengu_non_deferrable_builtins.',
+        ),
       showClearContextOnPlanAccept: z
         .boolean()
         .optional()

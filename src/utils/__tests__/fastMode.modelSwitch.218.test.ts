@@ -9,7 +9,11 @@ mock.module('src/services/analytics/index.js', () => ({
   logEvent: logEventMock,
 }))
 
+import { growthbookMock } from '../../../tests/mocks/growthbook'
+
+// Spread shared mock — incomplete growthbook mocks poison co-running suites.
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookMock(),
   getFeatureValue_CACHED_MAY_BE_STALE: () => null,
 }))
 

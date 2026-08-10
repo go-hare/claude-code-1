@@ -533,11 +533,12 @@ export const SearchExtraToolsTool = buildTool({
     return `"${input.query}"`
   },
   userFacingName() {
-    return 'SearchExtraTools'
+    // densable returns "" for transcript chrome; keep ToolSearch for local UI.
+    return 'ToolSearch'
   },
   /**
-   * Returns a tool_result with text output guiding the model to use ExecuteExtraTool.
-   * No longer uses tool_reference blocks — unified self-built tool search for all providers.
+   * densable mapToolResult — emit tool_reference blocks so the API expands
+   * full schemas and the model can call discovered tools directly.
    */
   mapToolResultToToolResultBlockParam(
     content: Output,
@@ -550,7 +551,7 @@ export const SearchExtraToolsTool = buildTool({
         content.pending_mcp_servers &&
         content.pending_mcp_servers.length > 0
       ) {
-        text += `. Some MCP servers are still connecting: ${content.pending_mcp_servers.join(', ')}. Their tools will become available shortly — try searching again.`
+        text += `. Some MCP servers are still connecting: ${content.pending_mcp_servers.join(', ')}. Their tools will become available shortly — try searching again. If you're looking for a capability rather than a specific tool name, try keywords that might match the server's purpose (e.g., 'slack message', 'calendar event'). Once you find a matching tool, call it directly — do not stop after searching.`
       }
       return {
         type: 'tool_result',
@@ -559,44 +560,17 @@ export const SearchExtraToolsTool = buildTool({
       }
     }
 
-    // Separate already-loaded (core) tools from truly deferred tools
-    const alreadyLoadedNames = content.already_loaded ?? []
-    const deferredNames = content.matches.filter(
-      n => !alreadyLoadedNames.includes(n),
-    )
-
-    // If ALL results are already-loaded core tools, there's nothing to discover
-    if (deferredNames.length === 0 && alreadyLoadedNames.length > 0) {
-      return {
-        type: 'tool_result',
-        tool_use_id: toolUseID,
-        content: `No deferred tools found. ${alreadyLoadedNames.join(', ')} ${alreadyLoadedNames.length === 1 ? 'is' : 'are'} already loaded as core tool(s) — call directly, do NOT search for or wrap in ExecuteExtraTool. SearchExtraTools is only for discovering tools NOT already in your tool list.`,
-      }
-    }
-
-    const parts: string[] = []
-
-    // Core tools: clear "call directly" message, NO ExecuteExtraTool hint
-    if (alreadyLoadedNames.length > 0) {
-      parts.push(
-        `Already loaded as core tool(s): ${alreadyLoadedNames.join(', ')}. Call these directly using your normal tool interface — do NOT use ExecuteExtraTool for them.`,
-      )
-    }
-
-    // Deferred tools: guide to ExecuteExtraTool
-    if (deferredNames.length > 0) {
-      parts.push(
-        `Found ${deferredNames.length} deferred tool(s): ${deferredNames.join(', ')}.` +
-          `\nUse ExecuteExtraTool with {"tool_name": "<name>", "params": {...}} to invoke any of these deferred tools.`,
-      )
-    }
-
-    const text = parts.join('\n')
-
+    // densable: content: matches.map(r => ({type:"tool_reference", tool_name:r}))
+    // Already-loaded core tools are still returned as tool_reference no-ops;
+    // the model can call them directly either way.
     return {
       type: 'tool_result',
       tool_use_id: toolUseID,
-      content: text,
+      // tool_reference is a beta content shape not in the public SDK union yet
+      content: content.matches.map(toolName => ({
+        type: 'tool_reference' as const,
+        tool_name: toolName,
+      })) as unknown as ToolResultBlockParam['content'],
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

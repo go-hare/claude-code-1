@@ -30,6 +30,8 @@ export type OperatorContext = {
   setOffset: (offset: number) => void
   enterInsert: (offset: number) => void
   getRegister: () => string
+  /** densable #20: explicit linewise flag (not inferred from trailing \\n). */
+  getRegisterIsLinewise: () => boolean
   setRegister: (content: string, linewise: boolean) => void
   getLastFind: () => { type: FindType; char: string } | null
   setLastFind: (type: FindType, char: string) => void
@@ -302,8 +304,11 @@ export function executePaste(
   // densable Hmn: record paste for dot-repeat before mutating buffer
   ctx.recordChange({ type: 'paste', after, count })
 
-  const isLinewise = register.endsWith('\n')
-  const content = isLinewise ? register.slice(0, -1) : register
+  // densable 2.1.221 #20: prefer shared registerIsLinewise; trailing \\n
+  // remains a content convention for linewise yanks (slice it off when set).
+  const isLinewise = ctx.getRegisterIsLinewise() || register.endsWith('\n')
+  const content =
+    isLinewise && register.endsWith('\n') ? register.slice(0, -1) : register
 
   if (isLinewise) {
     const text = ctx.text

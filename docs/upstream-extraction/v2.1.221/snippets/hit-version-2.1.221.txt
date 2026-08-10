@@ -1,0 +1,4 @@
+needle: // Version: 2.1.221
+count: 6
+---
+training models..// You are responsible for reviewing any code suggestions before use...// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance...// Version: 2.1.221.var n=Object.create;var{getPrototypeOf:c,defineProperty:i,getOwnPropertyNames:C,getOwnPropertyDescriptor:H}=Object,B=Object.prototype.hasOwnProperty;function a(T){return this[T]}var y=(T,R,_)=>{var A=R&&typeof R==="object"||typeof R==="fun

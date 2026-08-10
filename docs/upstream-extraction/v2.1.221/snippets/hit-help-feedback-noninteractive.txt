@@ -1,0 +1,58 @@
+# densable 2.1.221 #18 — plugin skills named /help /feedback non-interactive
+
+Official: Fixed plugin- and org-delivered skills named after terminal-only
+built-ins (e.g. /help, /feedback) being un-invocable in non-interactive sessions.
+
+## Gold symbols (SEA 2.1.221)
+
+### HEADLESS_YIELDABLE_NAMES = Vua
+Vua=new Set(["help","feedback"])
+HEADLESS_YIELDABLE_NAMES:()=>Vua
+
+### zFp / U6e (headless filter)
+function U6e(e){if(nq())return[];return e.filter(zFp)}
+function zFp(e){return e.type==="prompt"&&!e.disableNonInteractive||e.type==="local"&&e.supportsNonInteractive}
+// export: filterCommandsForHeadless:()=>U6e
+
+### Hxb — strip colliding plugin aliases with yield
+function Hxb(e){
+  let t=(o)=>o.type==="prompt"&&o.source==="plugin",
+      r=Tn(),  // getIsNonInteractiveSession
+      n=new Set;
+  for(let o of e){
+    let i=r&&!zFp(o);
+    if(!i||!Vua.has(o.name)) n.add(o.name);
+    if(!t(o)){
+      for(let s of o.aliases??[]) if(!i||!Vua.has(s)) n.add(s)
+    }
+  }
+  return e.map((o)=>{
+    if(!t(o)) return o;
+    if(!o.aliases?.some((s)=>n.has(s))) return o;
+    let i=o.aliases.filter((s)=>!n.has(s));
+    return {...o, aliases:i.length?i:void 0}
+  })
+}
+
+### Assembly (loadAllCommands)
+l=Hxb(aQ([...r,...a,...s,...n,...o,...i,...B0r()]))
+
+## Semantics
+
+When non-interactive (Tn() / getIsNonInteractiveSession):
+- Built-ins help/feedback are local-jsx → zFp false → unavailable.
+- Hxb does NOT claim "help"/"feedback" into the occupied-name set for those
+  unavailable yieldable names.
+- Plugin skill aliases help/feedback are therefore kept, so findCommand
+  can resolve the plugin skill under -p.
+
+Interactive: help/feedback remain claimed by built-ins; plugin aliases stripped
+as before (first-match still prefers earlier list order for primary names).
+
+## Local mapping (go-hare)
+
+- HEADLESS_YIELDABLE_NAMES
+- isCommandAvailableInHeadless ≈ zFp
+- filterCommandsForHeadless ≈ U6e
+- stripCollidingPluginAliases ≈ Hxb
+- wired in loadAllCommands + getCommands re-run (memoized load + live interactivity)

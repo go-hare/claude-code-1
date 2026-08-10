@@ -1,0 +1,35 @@
+# densable 2.1.221 #27 — Windows kernel32 process creation times
+
+Official: process creation times via native kernel32 instead of PowerShell.
+
+## SEA dig
+
+### darwin-arm64 SEA
+- GetProcessTimes / kernel32 product FFI: ABSENT (platform-stripped)
+
+### win32-x64 densable 2.1.221 (`claude.exe` 278279328)
+Gold module win32-proc-times:
+
+```
+function B8c(){ /* lazy bun:ffi dlopen kernel32.dll
+  OpenProcess(u32,i32,u32)->ptr
+  GetProcessTimes(ptr×5)->i32
+  CloseHandle(ptr)->i32
+  log "[win32-proc-times] bun:ffi loaded, using procStartFt"
+  catch → fallback spawn */
+}
+function BMt(){ return !GWg && B8c()!==null }
+function Aao(pid){ OpenProcess(4096,0,pid); GetProcessTimes → BigUint64 LE creation }
+function j8c(ft){ return Number((ft - 116444736000000000n) / 10000n) }
+// JWg: if BMt() return Aao(pid)?.toString(); else PowerShell CreationDate.Ticks
+// ies: if BMt() j8c(Aao); else PowerShell DateTimeOffset ms
+// kUe/jMt: BMt → procStartFt field; else procStart
+```
+
+## Local (wave5)
+- `src/utils/genericProcessUtils.ts`: loadKernel32ProcTimes / getWin32CreationFileTime / fileTimeToUnixMs
+- getProcessLstartString / getProcessStartTimeMs win32 branch = densable JWg / ies
+- PowerShell fallback preserved when bun:ffi unavailable
+
+## Verdict
+HAVE — win32 densable SEA gold 1:1 in genericProcessUtils.

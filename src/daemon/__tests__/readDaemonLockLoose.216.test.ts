@@ -56,6 +56,16 @@ describe('readDaemonLockLoose (densable UTe)', () => {
   test('DSr false when procStart missing', async () => {
     expect(isDaemonLockSignalable({ procStart: undefined })).toBe(false)
     expect(isDaemonLockSignalable({ procStart: 123 })).toBe(true)
+    // densable AFe: procStartFt alone is signalable only when BMt/FFI is on.
+    // On darwin/linux CI (FFI off), pick returns undefined for Ft-only locks.
+    const { isWin32ProcTimesFfiAvailable } = await import(
+      '../../utils/genericProcessUtils.js'
+    )
+    if (isWin32ProcTimesFfiAvailable()) {
+      expect(isDaemonLockSignalable({ procStartFt: '1337' })).toBe(true)
+    } else {
+      expect(isDaemonLockSignalable({ procStartFt: '1337' })).toBe(false)
+    }
     expect(isDaemonLockSignalable(null)).toBe(false)
   })
 

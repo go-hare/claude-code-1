@@ -1,0 +1,4 @@
+needle: Monitor "${t}" stream ended
+count: 1
+---
+")},()=>{})},()=>{})},_Ky);return c.unref(),()=>{l=!0,clearInterval(c)}}function zZs(e,t,r,n,o){let i=n!==void 0?` (exit ${n})`:"";if(e==="monitor")switch(r){case"completed":return o===0?`Monitor "${t}" ended without producing output${i}`:`Monitor "${t}" stream ended`;case"failed":return`Monitor "${t}" script failed${i}`;case"killed":return`Monitor "${t}" stopped`}switch(r){case"completed":return`${Zst}"${t}" completed${n!==void 0?` (exit code ${n})`:""}`;case"failed":return`${Zst}"${t}" failed${n!==vo

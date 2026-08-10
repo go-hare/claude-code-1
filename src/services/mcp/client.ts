@@ -2137,16 +2137,22 @@ export const fetchToolsForClient = memoizeWithLRU(
                             context.setAppStateForTasks ?? context.setAppState,
                           autoBackgroundMs: autoBgMs,
                           toolLabel: fullyQualifiedName,
-                          // densable $cy: defer auto-bg while URL elicitation open
+                          // densable $cy: defer auto-bg while URL elicitation open.
+                          // Gold: process counter (begin/end around elicitation) OR
+                          // AppState elicitation.queue length (REPL dialog). Prefer
+                          // true on either signal — only return false when both
+                          // probes say clear (or throw).
                           hasPendingElicitation: () => {
+                            let processPending = false
                             try {
                               // eslint-disable-next-line @typescript-eslint/no-require-imports
                               const { hasPendingMcpElicitation } =
                                 require('./transportErrorState.js') as typeof import('./transportErrorState.js')
-                              if (hasPendingMcpElicitation()) return true
+                              processPending = hasPendingMcpElicitation()
                             } catch {
                               /* optional */
                             }
+                            if (processPending) return true
                             try {
                               const q = context.getAppState().elicitation?.queue
                               return Array.isArray(q) && q.length > 0
@@ -2157,8 +2163,17 @@ export const fetchToolsForClient = memoizeWithLRU(
                         })
                       : await runMcp(context.abortController.signal)
 
+                  // densable: auto-bg returns moved-to-background tool result while
+                  // the call still runs — do not emit false "completed" progress.
+                  const autoBackgrounded =
+                    !!mcpResult &&
+                    typeof mcpResult === 'object' &&
+                    'autoBackgrounded' in mcpResult &&
+                    (mcpResult as { autoBackgrounded?: boolean })
+                      .autoBackgrounded === true
+
                   // Emit progress when tool completes successfully
-                  if (onProgress && toolUseId) {
+                  if (onProgress && toolUseId && !autoBackgrounded) {
                     onProgress({
                       toolUseID: toolUseId,
                       data: {

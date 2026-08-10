@@ -144,7 +144,17 @@ function convertToolResult(
     content = block.content
       .map(c => {
         if (typeof c === 'string') return c
-        if ('text' in c) return c.text
+        if (c && typeof c === 'object') {
+          const rec = c as unknown as Record<string, unknown>
+          // densable tool_reference → portable text for OpenAI Chat Completions
+          if (
+            rec.type === 'tool_reference' &&
+            typeof rec.tool_name === 'string'
+          ) {
+            return `Loaded tool schema: ${rec.tool_name} (now callable directly).`
+          }
+          if (typeof rec.text === 'string') return rec.text
+        }
         return ''
       })
       .filter(Boolean)

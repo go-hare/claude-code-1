@@ -87,5 +87,20 @@ export function stateMock() {
     getIsNonInteractiveSession: () => false,
     getSdkAgentProgressSummariesEnabled: () => false,
     addSlowOperation: noop,
+
+    // Scroll idle (gitFilesystem / plugin marketplace import this)
+    getIsScrollDraining: () => false,
+    waitForScrollIdle: async () => {},
+
+    // densable 2.1.221 Foundry capability map
+    getFoundryDeploymentCapabilities: () => new Map(),
+
+    // densable loop tick in-flight (aPt / XKu)
+    setLoopTickInFlightPrompt: noop,
+    getLoopTickInFlightPrompt: () => null,
+    clearLoopTickInFlightPrompt: noop,
+
+    // Session reset (many tests)
+    resetStateForTests: noop,
   }
 }

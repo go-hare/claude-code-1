@@ -14,6 +14,7 @@ import {
   matchesDaemonProcStart,
   readAliveDaemonLock,
   readDaemonLock,
+  readProcessStartIdentity,
   tryCreateDaemonLockExclusive,
   writeDaemonLock,
 } from '../daemonLock.js'
@@ -477,6 +478,24 @@ describe('isDaemonCmdline / matchesDaemonProcStart densable cI helpers', () => {
   test('matchesDaemonProcStart accepts missing expected', async () => {
     expect(await matchesDaemonProcStart(process.pid, undefined)).toBe(true)
     expect(await matchesDaemonProcStart(process.pid, null)).toBe(true)
+  })
+
+  test('matchesDaemonProcStart: live unreadable → densable Yzc true', async () => {
+    // densable nU → Yzc(expected, await zI(pid)): when zI returns undefined,
+    // identity still matches (do not treat as stale / stealable).
+    // Use a pid that cannot yield a start identity on any platform.
+    const deadPid = 2_147_483_646
+    expect(await matchesDaemonProcStart(deadPid, 'some-lock-identity')).toBe(
+      true,
+    )
+  })
+
+  test('matchesDaemonProcStart: live mismatch rejects', async () => {
+    const live = await readProcessStartIdentity(process.pid)
+    if (live === undefined) return // platform cannot read — skip
+    expect(
+      await matchesDaemonProcStart(process.pid, `__not__${String(live)}`),
+    ).toBe(false)
   })
 
   test('isDaemonCmdline is boolean for self pid', async () => {

@@ -223,11 +223,61 @@ export function createInitialVimState(): VimState {
   return { mode: 'INSERT', insertedText: '' }
 }
 
-export function createInitialPersistentState(): PersistentState {
-  return {
-    lastChange: null,
+/**
+ * densable 2.1.221 #20 gold (`jLf` / `vES` / `Ft.vimSharedState`):
+ * Shared across PromptInput unmount/remount when dialogs take focus.
+ * Fields: lastFind + register + registerIsLinewise. lastChange stays per-mount.
+ */
+export type VimSharedState = {
+  lastFind: PersistentState['lastFind']
+  register: string
+  registerIsLinewise: boolean
+}
+
+let vimSharedState: VimSharedState | null = null
+
+/** densable `vES` — lazy singleton; subsequent mounts reuse the same object. */
+export function getOrCreateVimSharedState(): VimSharedState {
+  if (vimSharedState) return vimSharedState
+  // densable jLf()
+  vimSharedState = {
     lastFind: null,
     register: '',
     registerIsLinewise: false,
   }
+  return vimSharedState
+}
+
+/**
+ * Per-mount PersistentState: lastChange is fresh; register/lastFind alias the
+ * session singleton so setRegister/setLastFind survive dialog remounts.
+ */
+export function createInitialPersistentState(): PersistentState {
+  const shared = getOrCreateVimSharedState()
+  return {
+    lastChange: null,
+    get lastFind() {
+      return shared.lastFind
+    },
+    set lastFind(v) {
+      shared.lastFind = v
+    },
+    get register() {
+      return shared.register
+    },
+    set register(v) {
+      shared.register = v
+    },
+    get registerIsLinewise() {
+      return shared.registerIsLinewise
+    },
+    set registerIsLinewise(v) {
+      shared.registerIsLinewise = v
+    },
+  }
+}
+
+/** Test / reset helper — not a product API. */
+export function resetSessionYankRegisterForTests(): void {
+  vimSharedState = null
 }

@@ -121,6 +121,32 @@ describe('anthropicMessagesToOpenAI', () => {
     ])
   })
 
+  test('converts tool_reference blocks in tool_result to portable text', () => {
+    const result = anthropicMessagesToOpenAI(
+      [
+        makeUserMsg([
+          {
+            type: 'tool_result' as const,
+            tool_use_id: 'toolu_ts',
+            content: [
+              { type: 'tool_reference', tool_name: 'CronCreate' },
+              { type: 'tool_reference', tool_name: 'Config' },
+            ],
+          },
+        ]),
+      ],
+      [] as any,
+    )
+    expect(result).toEqual([
+      {
+        role: 'tool',
+        tool_call_id: 'toolu_ts',
+        content:
+          'Loaded tool schema: CronCreate (now callable directly).\nLoaded tool schema: Config (now callable directly).',
+      },
+    ])
+  })
+
   test('preserves thinking blocks as reasoning_content', () => {
     const result = anthropicMessagesToOpenAI(
       [

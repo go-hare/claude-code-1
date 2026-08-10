@@ -68,6 +68,7 @@ import type { SDKAssistantMessageError } from '../../../entrypoints/agentSdkType
 import {
   isSearchExtraToolsEnabled,
   isDeferredToolsDeltaEnabled,
+  extractDiscoveredToolNames,
 } from '../../../utils/searchExtraTools.js'
 import {
   formatDeferredToolLine,
@@ -188,20 +189,24 @@ export async function* queryModelOpenAI(
       }
     }
 
-    // 5. Filter tools (similar to Anthropic path)
-    // Never include deferred tools in the API tools array — they are invoked
-    // via ExecuteExtraTool which looks them up from the global tool registry
-    // at runtime. Keeping the tools array stable preserves the prompt cache.
-    let filteredTools = tools
-    if (useSearchExtraTools && deferredToolNames.size > 0) {
+    // 5. densable Lwe re-include: non-deferred + ToolSearch + discovered
+    // (tool_reference history). OpenAI cannot expand tool_reference natively,
+    // so re-including full schemas in the tools array is the portability path.
+    // When S off, exclude ToolSearch entirely.
+    let filteredTools: Tools
+    const discoveredToolNames = useSearchExtraTools
+      ? extractDiscoveredToolNames(messages)
+      : new Set<string>()
+    if (useSearchExtraTools) {
       filteredTools = tools.filter(tool => {
-        // Always include non-deferred tools
         if (!deferredToolNames.has(tool.name)) return true
-        // Always include SearchExtraToolsTool (so it can discover more tools)
         if (toolMatchesName(tool, SEARCH_EXTRA_TOOLS_TOOL_NAME)) return true
-        // All other deferred tools are excluded — use ExecuteExtraTool instead
-        return false
+        return discoveredToolNames.has(tool.name)
       })
+    } else {
+      filteredTools = tools.filter(
+        t => !toolMatchesName(t, SEARCH_EXTRA_TOOLS_TOOL_NAME),
+      )
     }
 
     // 6. Build tool schemas with deferLoading flag

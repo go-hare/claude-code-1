@@ -1,0 +1,4 @@
+needle: /reload-plugins to load it now
+count: 2
+---
+ng plugin.`);else if(T){let w=eT("plugin enable",m);n.push(`  ${Be.warning} A disabled setting for ${m} exists, so it won't load until you re-enable it${w?`: ${w}`:" in /plugin"}`)}else n.push(`  It will auto-load next session as ${m}. Run /reload-plugins to load it now.`);let b=eT("plugin disable",m);n.push(`  ${b?`Disable: ${b}. `:"Disable: in /plugin. "}Remove: delete the directory.`),TAe(e,n,0)}async function atS(e,t){if(t.cowork)Dee(!0);N("tengu_plugin_list_command",{});let r=mR(),{getPluginEditableS

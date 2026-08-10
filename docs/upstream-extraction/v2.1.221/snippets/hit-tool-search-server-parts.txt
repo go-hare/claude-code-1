@@ -1,0 +1,82 @@
+# offset=179105680
+
+crypto
+MW)
+)W)
+MW)
+:X)
+Xn]
+x@Z
+8X)
+@@<
+@P<
+1`)
+1`)
+([a-z0-9_, ]+?)\s+not supported in your workspace
+features are not available for Azure AI Foundry workspaces?:\s*([a-z0-9_, ]+)
+server-side web search is not available in this environment
+tool_search_server
+tool_search
+structured_outputs
+tool_search_server
+tool_search
+structured_outputs
+H.j
+PJf
+/c)
+Dc)
+ c)
+Dc)
+The superclass is not a constructor.
+constructor
+prototype
+ec)
+pc)
+Mc)
+Cannot call a class constructor Hsr without |new|
+Pco
+mnu
+Rnu
+Cnu
+_nu
+Ico
+Inu
+fns
+ynu
+wnu
+knu
+Tnu
+gnu
+bnu
+Snu
+Enu
+dnu
+hnu
+xnu
+pnu
+vnu
+Z8E
+Anu
+fnu
+Msr
+li)
+object
+function
+tslib
+exports
+exports
+A5!
+@Pe
+@ d
+@ d
+@ L
+@ d
+@ d
+ki)
+function
+__esModule
+@@L
+@ >
+Fi)
+Ni)
+ji)

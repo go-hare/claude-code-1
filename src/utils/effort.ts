@@ -47,6 +47,197 @@ export const EFFORT_LEVELS = [
 export type EffortValue = EffortLevel | number
 
 /**
+ * densable Host `apply_flag_settings` pure patch for effortLevel / ultracode.
+ * print.ts applies this via setAppState; tests cover without the full CLI.
+ *
+ * ## Same-packet conflict order (fixed)
+ *
+ * Keys are applied **effortLevel first, then ultracode** (later key wins for
+ * the flag field; ultracode may also overwrite effortValue to catalog wire).
+ * This is intentional and stable — Hosts must not rely on JSON key order.
+ *
+ * | Same-packet keys | Result |
+ * |------------------|--------|
+ * | only effortLevel normal | wire=that level, ultracode=false, N9 |
+ * | only effortLevel null | clear effort, ultracode=false, N9 |
+ * | only effortLevel "ultracode" | if wire: top+flag+N9; else **no-op** + note |
+ * | only effortLevel unparseable | **no-op** + `effort_level_ignored` note |
+ * | only ultracode:true | if wire: top+flag+N9; else force false + note |
+ * | only ultracode:false | flag=false (effortValue untouched) |
+ * | effortLevel normal + ultracode:false | wire + flag false (idempotent) |
+ * | effortLevel normal + ultracode:true | ultracode block **overwrites** → top wire + flag |
+ * | effortLevel "ultracode" + ultracode:false | alias opens then false **wins** → wire top kept, flag false |
+ * | effortLevel "ultracode" + ultracode:true | same as open (wire+flag) |
+ * | effortLevel null + ultracode:true | clear then ultra open → top+flag if wire |
+ * | effortLevel garbage + ultracode:true | ignore effort + open ultra if wire |
+ *
+ * ## No-wire Host feedback (product decision)
+ *
+ * **Do not hard-fail** `apply_flag_settings` (`control_response` error).
+ * Reasons:
+ * 1. Multi-key merge: model / other flags may already be applied in the same
+ *    request before effort resolution — a hard error would leave partial state
+ *    with a failed request_id (worse for Host reconcilers).
+ * 2. densable bootstrap / settings path also soft-refuses empty ultracode flag
+ *    rather than aborting the whole settings apply.
+ * 3. Authoritative UI state is always `get_settings.applied` after apply.
+ *
+ * Instead: still return **success**, and surface soft refusals in
+ * `response.effortNotes` (see HostEffortFlagNote). Hosts that care about
+ * "user asked ultracode but model has no wire" should read notes and/or
+ * re-query `applied.ultracode` / `applied.ultracodeOfferable`.
+ *
+ * Rules (align bootstrap + applySettingsChange):
+ * - null effortLevel → clear effortValue + ultracode flag + N9
+ * - normal effortLevel → set wire + clear ultracode + N9
+ * - effortLevel "ultracode" → only if model has wire; else no-op (no empty flag) + note
+ * - ultracode true → only if wire; else force ultracode false + note
+ * - ultracode false → clear flag (keep effortValue)
+ */
+export type HostEffortFlagNoteCode =
+  /** effortLevel:"ultracode" but model has no catalog wire — patch left empty */
+  | 'ultracode_alias_no_wire'
+  /** ultracode:true but model has no catalog wire — forced flag false */
+  | 'ultracode_true_no_wire'
+  /**
+   * Same packet had both effortLevel (non-alias) and ultracode:true with wire:
+   * ultracode overwrote effortValue to catalog top tier.
+   */
+  | 'same_packet_ultracode_overrode_effort'
+  /**
+   * Same packet: effortLevel "ultracode" opened flag+wire, then ultracode:false
+   * cleared flag (wire top effort may remain).
+   */
+  | 'same_packet_ultracode_false_after_alias'
+  /**
+   * effortLevel present but not null/alias/parseable EffortValue — ignored
+   * (soft success; same as no-wire refusals, not control error).
+   */
+  | 'effort_level_ignored'
+
+export type HostEffortFlagNote = {
+  code: HostEffortFlagNoteCode
+  message: string
+}
+
+export type HostEffortFlagPatch = {
+  effortValue?: EffortValue | undefined
+  ultracode?: boolean
+  clearEffort?: boolean
+  unpin?: boolean
+  /** Soft refusals / conflict resolutions for Host (never hard-fail). */
+  notes?: HostEffortFlagNote[]
+}
+
+function pushNote(
+  patch: HostEffortFlagPatch,
+  code: HostEffortFlagNoteCode,
+  message: string,
+): void {
+  if (!patch.notes) patch.notes = []
+  patch.notes.push({ code, message })
+}
+
+export function resolveHostEffortFlagPatch(args: {
+  model: string
+  effortLevel?: unknown
+  hasEffortLevel?: boolean
+  ultracode?: unknown
+  hasUltracode?: boolean
+}): HostEffortFlagPatch {
+  const patch: HostEffortFlagPatch = {}
+  const hasEffort = args.hasEffortLevel === true
+  const hasUltra = args.hasUltracode === true
+
+  // Snapshot pre-ultra effort intent for conflict notes (effort applied first).
+  let effortOpenedUltraAlias = false
+  let effortSetNormalLevel = false
+
+  if (hasEffort) {
+    const raw = args.effortLevel
+    if (raw == null) {
+      patch.clearEffort = true
+      patch.ultracode = false
+      patch.unpin = true
+    } else if (isUltracodeEffortAlias(raw)) {
+      const wire = getUltracodeEffortForModel(args.model)
+      if (wire !== undefined) {
+        patch.effortValue = wire
+        patch.ultracode = true
+        patch.unpin = true
+        effortOpenedUltraAlias = true
+      } else {
+        // no wire → refuse empty ultracode flag (matches bootstrap/settings)
+        pushNote(
+          patch,
+          'ultracode_alias_no_wire',
+          `effortLevel "ultracode" ignored: model ${args.model} has no effort catalog wire (no empty ultracode flag).`,
+        )
+      }
+    } else {
+      const wire = parseEffortValue(raw)
+      if (wire !== undefined) {
+        patch.effortValue = wire
+        patch.ultracode = false
+        patch.unpin = true
+        effortSetNormalLevel = true
+      } else {
+        // Unparseable effortLevel (not null / not ultracode alias) — soft ignore.
+        // Hosts should re-query get_settings.applied; do not hard-fail the packet.
+        pushNote(
+          patch,
+          'effort_level_ignored',
+          `effortLevel ${JSON.stringify(raw)} ignored: not a known EffortLevel or ultracode alias.`,
+        )
+      }
+    }
+  }
+
+  // ultracode key always runs second — later key wins for the flag; may
+  // overwrite effortValue when turning on with wire.
+  if (hasUltra) {
+    const on = args.ultracode === true
+    if (on) {
+      const wire = getUltracodeEffortForModel(args.model)
+      if (wire !== undefined) {
+        if (
+          effortSetNormalLevel &&
+          patch.effortValue !== undefined &&
+          patch.effortValue !== wire
+        ) {
+          pushNote(
+            patch,
+            'same_packet_ultracode_overrode_effort',
+            `Same packet: ultracode:true overrode effortLevel to catalog wire "${wire}" (effortLevel applied first, ultracode second).`,
+          )
+        }
+        patch.effortValue = wire
+        patch.ultracode = true
+        patch.unpin = true
+      } else {
+        patch.ultracode = false
+        pushNote(
+          patch,
+          'ultracode_true_no_wire',
+          `ultracode:true refused: model ${args.model} has no effort catalog wire; forced ultracode=false (soft success, not control error).`,
+        )
+      }
+    } else {
+      patch.ultracode = false
+      if (effortOpenedUltraAlias) {
+        pushNote(
+          patch,
+          'same_packet_ultracode_false_after_alias',
+          'Same packet: effortLevel "ultracode" opened wire+flag, then ultracode:false cleared the flag (wire effort may remain at catalog top).',
+        )
+      }
+    }
+  }
+
+  return patch
+}
+
+/**
  * densable kk — whether the model accepts output_config.effort.
  */
 export function modelSupportsEffort(model: string): boolean {

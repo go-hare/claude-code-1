@@ -32,6 +32,7 @@ import {
   isCustomTitleEnabled,
   saveCustomTitle,
 } from '../utils/sessionStorage.js';
+import { sanitizeSessionTitle } from '../utils/sessionTitleSanitize.js';
 import { getTheme } from '../utils/theme.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/select.js';
@@ -567,9 +568,11 @@ export function LogSelector({
       return;
     }
 
-    if (renameValue.trim()) {
+    // densable 2.1.221: same uge sanitize as /rename (ly/vhn).
+    const sanitized = sanitizeSessionTitle(renameValue);
+    if (sanitized) {
       // Pass fullPath for cross-project sessions (different worktrees)
-      await saveCustomTitle(sessionId, renameValue.trim(), focusedLog.fullPath);
+      await saveCustomTitle(sessionId, sanitized, focusedLog.fullPath);
       if (isResumeWithRenameEnabled && onLogsChanged) {
         onLogsChanged();
       }

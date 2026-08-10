@@ -1,0 +1,4 @@
+needle: isEntitlementOverlayUnavailable
+count: 2
+---
+)=>mTe,isLegacyOpusFirstParty:()=>TFe,isLegacyModelRemapEnabled:()=>LHt,isKnownNon1mTarget:()=>zZi,isFableModelValue:()=>Fze,isFableFamilyOrPinnedModel:()=>KA,isFableAvailable:()=>FHt,isExemptDefaultResolvingPick:()=>pk,isEntitlementOverlayUnavailable:()=>NHt,isDefaultModelEnforced:()=>KZi,hasDedicatedSmallFastModel:()=>Wir,getUserSpecifiedModelSetting:()=>Cq,getSmallFastModel:()=>hL,getRuntimeMainLoopModel:()=>gL,getResolvedOrgDefaultModel:()=>Uze,getPublicModelName:()=>

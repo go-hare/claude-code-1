@@ -1,0 +1,302 @@
+{
+  "versionHits": 6,
+  "sizeBytes": 270518240,
+  "sha256": "7a181f36ed0fc4fbac6cee4ecf2b615eff93d8b434221fff5d7c878dc5ebf380",
+  "anchors": [
+    {
+      "needle": "// Version: 2.1.221",
+      "count": 6,
+      "note": "version marker"
+    },
+    {
+      "needle": "mode:\"mask\"",
+      "count": 5,
+      "note": "sandbox credential mask mode; mode: \"mask\"=0"
+    },
+    {
+      "needle": "[sandbox] credential file mask",
+      "count": 18,
+      "note": "sandbox credential mask log + sentinel bind path"
+    },
+    {
+      "needle": "sentinel",
+      "count": 182,
+      "note": "broad; co-occurs with credential mask whole-file sentinel"
+    },
+    {
+      "needle": "prompt-audit",
+      "count": 18,
+      "note": "skill/docs + non-interactive subcommand"
+    },
+    {
+      "needle": "Focus view",
+      "count": 12,
+      "note": "Focus view enabled/disabled + fullscreen requirement"
+    },
+    {
+      "needle": "Toggle Focus view",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "Ctrl+Alt+F",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "CLAUDE_CODE_RESUME_INTERRUPTED_TURN",
+      "count": 32,
+      "note": "env/flag; also *_MAX_AGE_MS present"
+    },
+    {
+      "needle": "thumbsup",
+      "count": 2,
+      "note": "reaction alias map with thumbsdown"
+    },
+    {
+      "needle": "thumbsdown",
+      "count": 2,
+      "note": "reaction alias map with thumbsup"
+    },
+    {
+      "needle": ":love:",
+      "count": 0,
+      "note": "ABSENT (love maps to heart, no :love: literal)"
+    },
+    {
+      "needle": "Permission mode changed while the auto-mode classifier",
+      "count": 0,
+      "note": "ABSENT exact phrase"
+    },
+    {
+      "needle": "auto-mode classifier",
+      "count": 8,
+      "note": "permission gate / auto-deny"
+    },
+    {
+      "needle": "skills: \".\"",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "skills:\".\"",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "Session kind",
+      "count": 2,
+      "note": "status label; values interactive / background job · unattended|attached"
+    },
+    {
+      "needle": "background job · unattended",
+      "count": 1,
+      "note": "literal middle-dot 0xB7 form count"
+    },
+    {
+      "needle": "unattended",
+      "count": 14,
+      "note": "session kind / bg"
+    },
+    {
+      "needle": "ultrareview",
+      "count": 154,
+      "note": "feature mass"
+    },
+    {
+      "needle": "no branches",
+      "count": 1,
+      "note": "detached HEAD cloud review error"
+    },
+    {
+      "needle": "unshallow",
+      "count": 18,
+      "note": "shallow clone recovery"
+    },
+    {
+      "needle": "--unshallow",
+      "count": 10,
+      "note": "git fetch --unshallow guidance"
+    },
+    {
+      "needle": "GetProcessTimes",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "kernel32",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "CreateProcessW",
+      "count": 4,
+      "note": "Windows sandbox argv/process creation limit only"
+    },
+    {
+      "needle": "constructor MCP tool",
+      "count": 0,
+      "note": "ABSENT exact"
+    },
+    {
+      "needle": "[[ ]]",
+      "count": 13,
+      "note": "zsh [[ ]] permission/parser warnings"
+    },
+    {
+      "needle": "individual spend limit",
+      "count": 2,
+      "note": "spend/usage limit label"
+    },
+    {
+      "needle": "spend limit",
+      "count": 52,
+      "note": "monthly/org spend limit copy"
+    },
+    {
+      "needle": "usage credits run out mid-session",
+      "count": 0,
+      "note": "ABSENT exact"
+    },
+    {
+      "needle": "fast mode credits",
+      "count": 0,
+      "note": "ABSENT exact contiguous"
+    },
+    {
+      "needle": "Fast mode disabled",
+      "count": 12,
+      "note": "fast mode credit exhaustion family"
+    },
+    {
+      "needle": "usage credits exhausted",
+      "count": 2,
+      "note": "out_of_credits fast-mode copy"
+    },
+    {
+      "needle": "stream ended (Monitor)",
+      "count": 0,
+      "note": "ABSENT parenthetical form"
+    },
+    {
+      "needle": "Monitor \"",
+      "count": 7,
+      "note": "Monitor completion templates"
+    },
+    {
+      "needle": "stream ended",
+      "count": 23,
+      "note": "includes Monitor \"...\" stream ended"
+    },
+    {
+      "needle": "Gateway model field non-string 400",
+      "count": 0,
+      "note": "ABSENT exact"
+    },
+    {
+      "needle": "model must be a string",
+      "count": 6,
+      "note": "set_model/request validation; not Gateway-400 phrase"
+    },
+    {
+      "needle": "refresh marketplace",
+      "count": 14,
+      "note": "plugin marketplace refresh"
+    },
+    {
+      "needle": "activate immediately",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "/reload-plugins",
+      "count": 44,
+      "note": "load/activate plugins now"
+    },
+    {
+      "needle": "fork new worktree",
+      "count": 0,
+      "note": "ABSENT exact"
+    },
+    {
+      "needle": "create a new worktree of your own",
+      "count": 4,
+      "note": "forked session guidance"
+    },
+    {
+      "needle": "new worktree",
+      "count": 13,
+      "note": "worktree creation UX"
+    },
+    {
+      "needle": "yank register survives",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "yank register",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "press left again",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "press ← again",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "cache tokens Stats",
+      "count": 0,
+      "note": "ABSENT exact"
+    },
+    {
+      "needle": "cache tokens",
+      "count": 0,
+      "note": "ABSENT"
+    },
+    {
+      "needle": "cached tokens",
+      "count": 2,
+      "note": "prompt-caching docs only"
+    },
+    {
+      "needle": "entitlement_blind",
+      "count": 3,
+      "note": "carry from 220 telemetry"
+    },
+    {
+      "needle": "isEntitlementOverlayUnavailable",
+      "count": 2,
+      "note": "carry from 220 export"
+    }
+  ],
+  "snippetFiles": [
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/sea-version.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-version-2.1.221.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-sandbox-credential-mask-mode.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-sandbox-credential-file-mask-log.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-prompt-audit.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-focus-view.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-CLAUDE_CODE_RESUME_INTERRUPTED_TURN.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-thumbsup-thumbsdown-map.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-auto-mode-classifier.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-session-kind-attached-unattended-interactive.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-ultrareview-no-branches.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-ultrareview-unshallow.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-CreateProcessW-windows-sandbox.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-zsh-double-bracket-permission.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-individual-spend-limit.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-fast-mode-usage-credits-exhausted.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-monitor-stream-ended.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-model-must-be-string.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-refresh-marketplace.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-reload-plugins.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-fork-create-new-worktree-own.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-entitlement_blind.txt",
+    "/Users/apple/work-py/hare-code/claude-code-1/docs/upstream-extraction/v2.1.221/snippets/hit-isEntitlementOverlayUnavailable.txt"
+  ]
+}

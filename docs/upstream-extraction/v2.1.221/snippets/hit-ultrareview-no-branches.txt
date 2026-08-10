@@ -1,0 +1,4 @@
+needle: no branches
+count: 1
+---
+ point where your branch forked from ${y}. Run \`git fetch --unshallow origin\` and rerun ${t}. If your base branch isn't ${y}, pass it explicitly (\`${t} <branch>\`).`};if(V&&!K)return{ok:!1,reason:"no_merge_base",error:`Your checkout has no branches (detached HEAD only), which cloud review can't bundle. Create one first \u2014 \`git checkout -b <name>\` \u2014 then rerun ${t}.`};let j=h?q?`${y} was fetched from origin but shares no history with HEAD. If another branch is your real bas

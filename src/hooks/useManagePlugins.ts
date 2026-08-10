@@ -44,7 +44,7 @@ export function useManagePlugins({
 } = {}) {
   const setAppState = useSetAppState()
   const needsRefresh = useAppState(s => s.plugins.needsRefresh)
-  const { addNotification } = useNotifications()
+  const { addNotification, removeNotification } = useNotifications()
 
   // Initial plugin load. Runs once on mount. NOT used for refresh — all
   // post-mount refresh goes through /reload-plugins → refreshActivePlugins().
@@ -300,8 +300,14 @@ export function useManagePlugins({
   // external settings edit). Default: notify user to run /reload-plugins.
   // Official CLAUDE_CODE_ENABLE_BACKGROUND_PLUGIN_REFRESH: auto-call
   // refreshActivePlugins (same complete Layer-3 path as /reload-plugins).
+  // densable 2.1.221: when needsRefresh clears (e.g. after /reload-plugins),
+  // remove the pending notice immediately — do not wait for the ~8s timeout.
   useEffect(() => {
-    if (!enabled || !needsRefresh) return
+    if (!enabled) return
+    if (!needsRefresh) {
+      removeNotification('plugin-reload-pending')
+      return
+    }
     if (isBackgroundPluginRefreshEnabled()) {
       void refreshActivePlugins(setAppState).catch(err => {
         logError(toError(err))
@@ -318,5 +324,5 @@ export function useManagePlugins({
       color: 'suggestion',
       priority: 'low',
     })
-  }, [enabled, needsRefresh, addNotification, setAppState])
+  }, [enabled, needsRefresh, addNotification, removeNotification, setAppState])
 }

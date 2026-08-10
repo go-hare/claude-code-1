@@ -945,14 +945,13 @@ export async function getProcessStartTime(
 async function getProcessStartTimeRaw(
   pid: number,
 ): Promise<string | undefined> {
+  // densable JWg/Ex — win32 uses kernel32 GetProcessTimes / PowerShell ticks;
+  // unix uses ps -o lstart=. Never hardcode Unix-only ps on win32.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getProcessLstartString } =
+    require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
   try {
-    const { execSync } =
-      require('child_process') as typeof import('child_process')
-    const out = execSync(`LC_ALL=C TZ=UTC ps -o lstart= -p ${pid}`, {
-      timeout: 1000,
-      encoding: 'utf8',
-    })
-    return out?.trim() || undefined
+    return await getProcessLstartString(pid)
   } catch {
     return undefined
   }
@@ -960,7 +959,22 @@ async function getProcessStartTimeRaw(
 
 /** Synchronous process start time — official VKH */
 export function getProcessStartTimeSync(pid: number): string | undefined {
+  // densable: prefer sync win32 FILETIME when FFI available; else best-effort
+  // getProcessLstartString is async-only — on win32 without blocking PS, use
+  // getWin32CreationFileTime; on unix keep ps -o lstart=.
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isWin32ProcTimesFfiAvailable, getWin32CreationFileTime } =
+      require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+    if (process.platform === 'win32') {
+      if (isWin32ProcTimesFfiAvailable()) {
+        const ft = getWin32CreationFileTime(pid)
+        return ft !== undefined ? ft.toString() : undefined
+      }
+      // PowerShell path is async-only; skip identity on sync poll until FFI
+      // (avoid spawning powershell.exe on the hot pidPoll path).
+      return undefined
+    }
     const { execSync } =
       require('child_process') as typeof import('child_process')
     const out = execSync(`LC_ALL=C TZ=UTC ps -o lstart= -p ${pid}`, {
@@ -1183,8 +1197,16 @@ export function createDefaultSpawnPty(): SpawnPtyFn {
         cwd: opts.cwd,
       })
       if (wmi.ok) {
+        // Stamp start identity for PID-reuse-safe exit wait (WMI has no handle).
+        // spawnPty is sync — pass a Promise; waitForPidExit resolves it.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getProcessLstartString } =
+          require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+        const expectedStart = getProcessLstartString(wmi.pid).catch(
+          () => undefined,
+        )
         const handle = {
-          exited: waitForPidExit(wmi.pid),
+          exited: waitForPidExit(wmi.pid, { expectedStart }),
           signalCode: null as string | null,
         }
         return connectToPtyHost(
@@ -1552,10 +1574,16 @@ export class BgWorker {
       if (code === 'ESRCH' || code === 'EPERM') return null
     }
 
-    // Verify process hasn't been recycled
+    // Verify process hasn't been recycled (densable Yzc/X6g cross-format)
     const currentStart = await getProcessStartTime(entry.pid)
-    if (currentStart && entry.procStart && currentStart !== entry.procStart)
-      return null
+    if (entry.procStart) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { processStartIdentityEquals } =
+        require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+      if (!processStartIdentityEquals(entry.procStart, currentStart)) {
+        return null
+      }
+    }
 
     const w = new BgWorker(
       entry.dispatch,
@@ -2585,13 +2613,20 @@ export class BgWorker {
   private pidRecycled(): boolean {
     if (!this.procStart || !this.record.pid) return false
     const current = getProcessStartTimeSync(this.record.pid)
-    return current !== undefined && current !== this.procStart
+    // densable Yzc: undefined current (race) = still match; cross-format OK
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { processStartIdentityEquals } =
+      require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+    return !processStartIdentityEquals(this.procStart, current)
   }
 
   private async pidRecycledAsync(): Promise<boolean> {
     if (!this.procStart || !this.record.pid) return false
     const current = await getProcessStartTime(this.record.pid)
-    return current !== undefined && current !== this.procStart
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { processStartIdentityEquals } =
+      require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+    return !processStartIdentityEquals(this.procStart, current)
   }
 
   private async checkPid(fromPoll = false): Promise<void> {

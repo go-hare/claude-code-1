@@ -41,7 +41,11 @@ import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import type { APIError } from '@anthropic-ai/sdk'
-import type { Message, SystemCompactBoundaryMessage } from './types/message.js'
+import type {
+  Message,
+  MessageOrigin,
+  SystemCompactBoundaryMessage,
+} from './types/message.js'
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
 import type { AttributionState } from './utils/commitAttribution.js'
@@ -62,7 +66,11 @@ import {
 import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
 import { registerStructuredOutputEnforcement } from './utils/hooks/hookHelpers.js'
 import { getInMemoryErrors } from './utils/log.js'
-import { countToolCalls, SYNTHETIC_MESSAGES } from './utils/messages.js'
+import {
+  applyTurnStartOriginFraming,
+  countToolCalls,
+  SYNTHETIC_MESSAGES,
+} from './utils/messages.js'
 import {
   getMainLoopModel,
   parseUserSpecifiedModel,
@@ -229,7 +237,18 @@ export class QueryEngine {
 
   async *submitMessage(
     prompt: string | ContentBlockParam[],
-    options?: { uuid?: string; isMeta?: boolean },
+    options?: {
+      uuid?: string
+      isMeta?: boolean
+      skipSlashCommands?: boolean
+      bridgeOrigin?: boolean
+      /** densable 2.1.221 modelScheduledOrigin fire stamp */
+      modelScheduledOrigin?: boolean
+      /** densable 2.1.221 wakeupSource fire stamp */
+      wakeupSource?: string
+      origin?: MessageOrigin
+      shouldQuery?: boolean
+    },
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
       cwd,
@@ -456,8 +475,33 @@ export class QueryEngine {
       messages: this.mutableMessages,
       uuid: options?.uuid,
       isMeta: options?.isMeta,
+      // densable 2.1.221: headless cron fire stamps thread through ask → submitMessage
+      skipSlashCommands: options?.skipSlashCommands,
+      bridgeOrigin: options?.bridgeOrigin,
+      modelScheduledOrigin: options?.modelScheduledOrigin,
+      wakeupSource: options?.wakeupSource,
+      origin: options?.origin,
       querySource: 'sdk',
     })
+
+    // Mirror handlePromptSubmit: stamp origin + Fws (RZn for scheduled-task)
+    // so headless/SDK fires keep densable #20 assigned-task banner even when
+    // processTextPrompt produced bare content (e.g. slash re-open body).
+    if (options?.origin) {
+      for (const m of messagesFromUserInput) {
+        if (m.type === 'user') {
+          m.origin = options.origin as typeof m.origin
+          applyTurnStartOriginFraming(
+            m,
+            options.origin as {
+              kind?: string
+              from?: string
+              trigger?: string
+            },
+          )
+        }
+      }
+    }
 
     // Push new messages, including user input and any attachments
     this.mutableMessages.push(...messagesFromUserInput)
@@ -1367,6 +1411,11 @@ export async function* ask({
   prompt,
   promptUuid,
   isMeta,
+  skipSlashCommands,
+  bridgeOrigin,
+  modelScheduledOrigin,
+  wakeupSource,
+  origin,
   cwd,
   tools,
   mcpClients,
@@ -1401,6 +1450,12 @@ export async function* ask({
   prompt: string | Array<ContentBlockParam>
   promptUuid?: string
   isMeta?: boolean
+  /** densable 2.1.221 QueuedCommand fire stamps for headless processUserInput */
+  skipSlashCommands?: boolean
+  bridgeOrigin?: boolean
+  modelScheduledOrigin?: boolean
+  wakeupSource?: string
+  origin?: MessageOrigin
   cwd: string
   tools: Tools
   verbose?: boolean
@@ -1476,6 +1531,11 @@ export async function* ask({
     yield* engine.submitMessage(prompt, {
       uuid: promptUuid,
       isMeta,
+      skipSlashCommands,
+      bridgeOrigin,
+      modelScheduledOrigin,
+      wakeupSource,
+      origin,
     })
   } finally {
     setReadFileCache(engine.getReadFileState())
