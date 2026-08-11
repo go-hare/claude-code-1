@@ -5,6 +5,7 @@ import { env } from '../../../utils/env.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
 import { truncateToLines } from '../../../utils/stringUtils.js';
 import { logUnaryEvent } from '../../../utils/unaryLogging.js';
+import { replaceHiddenControlChars } from '../../../utils/controlChars.js';
 import { PermissionDialog } from '../PermissionDialog.js';
 import { PermissionPrompt, type PermissionPromptOption } from '../PermissionPrompt.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
@@ -138,7 +139,8 @@ export function MonitorPermissionRequest({
           <Text bold color={theme.permission as any}>
             {input.description}
           </Text>
-          <Text dimColor>{truncateToLines(input.command, 5)}</Text>
+          {/* densable 2.1.223 #5 — Jg display so TAB/invisibles cannot hide the command */}
+          <Text dimColor>{truncateToLines(replaceHiddenControlChars(input.command), 5)}</Text>
         </Box>
         <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="command" />
         <PermissionPrompt<OptionValue> options={options} onSelect={handleSelect} onCancel={handleCancel} />

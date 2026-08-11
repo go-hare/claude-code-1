@@ -1,0 +1,12 @@
+# densable 2.1.223 #15 — rare hang parsing unusual git push output
+
+SEA gold regex (string table):
+```
+^\s*[+\-*!= ]?\s*(?:\[new branch\]|[0-9a-f]+\.\.+[0-9a-f]+)\s+\S+\s*->\s*(\S+)
+```
+with `/m` flag (function site: `e.match(/…/m)?.[1]`).
+
+Key change vs hang-prone form: range side is **hex-only** `[0-9a-f]+\.\.+[0-9a-f]+`
+instead of `\S+\.\.+\S+` (catastrophic backtracking on long non-hex runs).
+
+Local: `parseGitPushBranch` in `packages/builtin-tools/src/tools/shared/gitOperationTracking.ts`

@@ -48,9 +48,10 @@ describe('controlChars densable XAu/r0e (2.1.216 #22)', () => {
     expect(hasNoHiddenControlChars('echo 中文 café')).toBe(true)
   })
 
-  test('K_ replaces hidden controls with U+FFFD', () => {
+  test('K_ replaces hidden controls with U+FFFD; 223 #5 TAB display', () => {
     expect(replaceHiddenControlChars('a\x00b\rc')).toBe('a\uFFFDb\uFFFDc')
-    expect(replaceHiddenControlChars('ok\tline\n')).toBe('ok\tline\n')
+    // densable 2.1.223 #5 — TAB visible so padding cannot hide command parts
+    expect(replaceHiddenControlChars('ok\tline\n')).toBe('ok\u21E5line\n')
   })
 
   test('Wjg message string is densable gold', () => {

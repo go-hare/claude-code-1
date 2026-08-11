@@ -1,6 +1,7 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { CONTEXT_1M_BETA_HEADER } from '../constants/betas.js'
 import { getGlobalConfig } from './config.js'
+import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { resolveAntModel } from './model/antModels.js'
@@ -45,6 +46,22 @@ export function is1mContextDisabled(): boolean {
   }
 }
 
+/**
+ * densable 2.1.223 #17 — CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT.
+ */
+export function isUnknownModelWindowEnforcementDisabled(): boolean {
+  try {
+    const { isUnknownModelWindowEnforcementDisabled: gate } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    return gate()
+  } catch {
+    return isEnvTruthy(
+      process.env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT,
+    )
+  }
+}
+
 export function has1mContext(model: string): boolean {
   if (is1mContextDisabled()) {
     return false
@@ -54,6 +71,8 @@ export function has1mContext(model: string): boolean {
 
 // @[MODEL LAUNCH]: Update this pattern if the new model supports 1M context
 // densable $q / supports_1m_beta catalog: opus-4-6/4-7/4-8 + sonnet 4/5 family
+// densable 2.1.223 #16: not only this list — capability / [1m] / ant windows
+// also clamp under DISABLE_1M via getContextWindowForModel final clamp.
 export function modelSupports1M(model: string): boolean {
   if (is1mContextDisabled()) {
     return false
@@ -64,8 +83,117 @@ export function modelSupports1M(model: string): boolean {
     canonical.includes('claude-sonnet-4') ||
     canonical.includes('opus-4-6') ||
     canonical.includes('opus-4-7') ||
-    canonical.includes('opus-4-8')
+    canonical.includes('opus-4-8') ||
+    // densable 2.1.223 #16 — newer native 1M Claude families beyond fixed 4.x list
+    canonical.includes('opus-5') ||
+    canonical.includes('fable')
   )
+}
+
+/**
+ * densable 2.1.223 #17 — model id recognized for local window assumptions.
+ * Provider-prefixed Claude/Anthropic ids count (gateway discovery parity).
+ */
+export function isRecognizedModelForWindowEnforcement(model: string): boolean {
+  const raw = model.trim()
+  if (!raw) return false
+  // Explicit [1m] opt-in is always recognized as a Claude window request
+  if (/\[1m\]/i.test(raw)) return true
+  // ChatGPT/Codex family has its own window table
+  if (getChatGPTModelContextWindow(raw) !== undefined) return true
+  // Capability cache hit = /v1/models recognized this id
+  if (getModelCapability(raw)) return true
+  // densable gateway filter + Anthropic family markers
+  if (/(claude|anthropic)/i.test(raw)) return true
+  // Alias / marketing short names
+  const lower = raw.toLowerCase()
+  if (
+    lower === 'opus' ||
+    lower === 'sonnet' ||
+    lower === 'haiku' ||
+    lower === 'fable' ||
+    lower === 'best' ||
+    lower === 'opusplan' ||
+    lower.endsWith('[1m]')
+  ) {
+    return true
+  }
+  if (process.env.USER_TYPE === 'ant') {
+    const antModel = resolveAntModel(raw)
+    if (antModel) return true
+  }
+  return false
+}
+
+/**
+ * densable 2.1.223 #16 gold — warn when DISABLE_1M is set but resolved window > 200K.
+ * Call once at session start with the main-loop model.
+ */
+export function getDisable1mContextNotEnforcedWarning(
+  model: string,
+): string | null {
+  if (!is1mContextDisabled()) return null
+  // Resolve WITHOUT the disable env so we can detect native >200K windows
+  // that would escape auto-compact if not clamped. Use resolved window after
+  // clamp: if still > 200K, clamp path failed (e.g. ant override).
+  const window = getContextWindowForModel(model)
+  if (window <= MODEL_CONTEXT_WINDOW_DEFAULT) return null
+  try {
+    const { formatDisable1mContextNotEnforcedWarning } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    return formatDisable1mContextNotEnforcedWarning(
+      model,
+      MODEL_CONTEXT_WINDOW_DEFAULT,
+    )
+  } catch {
+    const k = MODEL_CONTEXT_WINDOW_DEFAULT / 1000
+    return `CLAUDE_CODE_DISABLE_1M_CONTEXT is set, but the ${k}K limit isn't enforced for ${model}, so this session can grow past it. To enforce it, set CLAUDE_CODE_AUTO_COMPACT_WINDOW=${MODEL_CONTEXT_WINDOW_DEFAULT} (or the autoCompactWindow setting)`
+  }
+}
+
+/**
+ * densable 2.1.223 #17 gold — notice when unknown id is held to assumed window.
+ */
+export function getUnknownModelWindowEnforcementNotice(
+  model: string,
+): string | null {
+  if (isUnknownModelWindowEnforcementDisabled()) return null
+  if (isRecognizedModelForWindowEnforcement(model)) return null
+  try {
+    const { formatUnknownModelWindowEnforcementNotice } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+    return formatUnknownModelWindowEnforcementNotice(
+      model,
+      MODEL_CONTEXT_WINDOW_DEFAULT,
+    )
+  } catch {
+    return `"${model}" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within ${MODEL_CONTEXT_WINDOW_DEFAULT} tokens (the context window it assumes). map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.`
+  }
+}
+
+/**
+ * densable 2.1.223 #16/#17 — log startup notices once per process for the session model.
+ */
+let contextWindowEnforcementNoticesLogged = false
+
+export function logContextWindowEnforcementStartupNotices(model: string): void {
+  if (contextWindowEnforcementNoticesLogged) return
+  contextWindowEnforcementNoticesLogged = true
+  const disable1m = getDisable1mContextNotEnforcedWarning(model)
+  if (disable1m) {
+    logForDebugging(disable1m, { level: 'warn' })
+  }
+  const unknown = getUnknownModelWindowEnforcementNotice(model)
+  if (unknown) {
+    logForDebugging(unknown, { level: 'warn' })
+  }
+}
+
+/** Test helper — reset one-shot startup notice latch. */
+export function clearContextWindowEnforcementNoticesLatchForTests(): void {
+  contextWindowEnforcementNoticesLogged = false
 }
 
 export function getContextWindowForModel(
@@ -95,9 +223,25 @@ export function getContextWindowForModel(
     }
   }
 
+  // densable 2.1.223 #17 — unrecognized model IDs: enforce assumed 200K unless
+  // CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT restores wait-for-API.
+  if (!isRecognizedModelForWindowEnforcement(model)) {
+    if (isUnknownModelWindowEnforcementDisabled()) {
+      try {
+        const { UNKNOWN_MODEL_WAIT_FOR_API_WINDOW } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
+        return UNKNOWN_MODEL_WAIT_FOR_API_WINDOW
+      } catch {
+        return 100_000_000
+      }
+    }
+    return MODEL_CONTEXT_WINDOW_DEFAULT
+  }
+
   // [1m] suffix — explicit client-side opt-in, respected over all detection
   if (has1mContext(model)) {
-    return 1_000_000
+    return applyDisable1mClamp(1_000_000)
   }
 
   // GPT-5.6 family: OAuth/Codex ≈ 272k; API key path ≈ 1.05M (model card).
@@ -105,39 +249,52 @@ export function getContextWindowForModel(
   // as a request field (Codex Responses does not take max_input_tokens).
   const chatgptContextWindow = getChatGPTModelContextWindow(model)
   if (chatgptContextWindow !== undefined) {
-    if (
-      is1mContextDisabled() &&
-      chatgptContextWindow > MODEL_CONTEXT_WINDOW_DEFAULT
-    ) {
-      return MODEL_CONTEXT_WINDOW_DEFAULT
-    }
-    return chatgptContextWindow
+    return applyDisable1mClamp(chatgptContextWindow)
   }
 
   const cap = getModelCapability(model)
   if (cap?.max_input_tokens && cap.max_input_tokens >= 100_000) {
-    if (
-      cap.max_input_tokens > MODEL_CONTEXT_WINDOW_DEFAULT &&
-      is1mContextDisabled()
-    ) {
-      return MODEL_CONTEXT_WINDOW_DEFAULT
-    }
-    return cap.max_input_tokens
+    return applyDisable1mClamp(cap.max_input_tokens)
   }
 
+  // densable 2.1.223 #16 — native 1M via beta: modelSupports1M OR capability
+  // already handled; also honor [1m]-less models that still carry the beta
+  // when DISABLE_1M is off (catalog + any claude id with beta is not enough —
+  // keep catalog for beta path, but final clamp covers all >200K).
   if (betas?.includes(CONTEXT_1M_BETA_HEADER) && modelSupports1M(model)) {
+    return applyDisable1mClamp(1_000_000)
+  }
+  // Beta present on any recognized Claude model under densable "every native 1M":
+  // if capability said so we'd have returned; for fixed-list miss with beta,
+  // still treat as 1M when DISABLE_1M is off and id looks Claude-family.
+  if (
+    betas?.includes(CONTEXT_1M_BETA_HEADER) &&
+    !is1mContextDisabled() &&
+    /(claude|anthropic)/i.test(model)
+  ) {
     return 1_000_000
   }
   if (getSonnet1mExpTreatmentEnabled(model)) {
-    return 1_000_000
+    return applyDisable1mClamp(1_000_000)
   }
   if (process.env.USER_TYPE === 'ant') {
     const antModel = resolveAntModel(model)
     if (antModel?.contextWindow) {
-      return antModel.contextWindow
+      return applyDisable1mClamp(antModel.contextWindow)
     }
   }
   return MODEL_CONTEXT_WINDOW_DEFAULT
+}
+
+/**
+ * densable 2.1.223 #16 — hold every native >200K window to 200K when
+ * CLAUDE_CODE_DISABLE_1M_CONTEXT is set (not just the fixed modelSupports1M list).
+ */
+function applyDisable1mClamp(window: number): number {
+  if (is1mContextDisabled() && window > MODEL_CONTEXT_WINDOW_DEFAULT) {
+    return MODEL_CONTEXT_WINDOW_DEFAULT
+  }
+  return window
 }
 
 export function getSonnet1mExpTreatmentEnabled(model: string): boolean {

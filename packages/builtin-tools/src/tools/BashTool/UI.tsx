@@ -15,6 +15,7 @@ import { env } from 'src/utils/env.js';
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { isFullscreenEnvEnabled } from 'src/utils/fullscreen.js';
+import { replaceHiddenControlChars } from 'src/utils/controlChars.js';
 import type { ThemeName } from 'src/utils/theme.js';
 import type { BashProgress, BashToolInput, Out } from './BashTool.js';
 import BashToolResultMessage from './BashToolResultMessage.js';
@@ -71,27 +72,36 @@ export function renderToolUseMessage(
     return null;
   }
 
+  // densable 2.1.223 #5 — approval dialog / transcript must not hide TAB or
+  // invisible format chars (ZW/bidi/BOM). Schema still allows TAB/LF; display
+  // maps TAB→⇥ and other approval-hiding units→�.
+  const displayCommand = replaceHiddenControlChars(command);
+
   // Render sed in-place edits like file edits (show file path only)
+  // Use raw command for parser (TAB-as-space semantics), display path as-is.
   const sedInfo = parseSedEditCommand(command);
   if (sedInfo) {
     return verbose ? sedInfo.filePath : getDisplayPath(sedInfo.filePath);
   }
 
   if (!verbose) {
-    const lines = command.split('\n');
+    const lines = displayCommand.split('\n');
 
     if (isFullscreenEnvEnabled()) {
       const label = extractBashCommentLabel(command);
       if (label) {
-        return label.length > MAX_COMMAND_DISPLAY_CHARS ? label.slice(0, MAX_COMMAND_DISPLAY_CHARS) + '…' : label;
+        const safeLabel = replaceHiddenControlChars(label);
+        return safeLabel.length > MAX_COMMAND_DISPLAY_CHARS
+          ? safeLabel.slice(0, MAX_COMMAND_DISPLAY_CHARS) + '…'
+          : safeLabel;
       }
     }
 
     const needsLineTruncation = lines.length > MAX_COMMAND_DISPLAY_LINES;
-    const needsCharTruncation = command.length > MAX_COMMAND_DISPLAY_CHARS;
+    const needsCharTruncation = displayCommand.length > MAX_COMMAND_DISPLAY_CHARS;
 
     if (needsLineTruncation || needsCharTruncation) {
-      let truncated = command;
+      let truncated = displayCommand;
 
       // First truncate by lines if needed
       if (needsLineTruncation) {
@@ -107,7 +117,7 @@ export function renderToolUseMessage(
     }
   }
 
-  return command;
+  return displayCommand;
 }
 
 export function renderToolUseProgressMessage(

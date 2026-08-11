@@ -1,0 +1,5 @@
+329234:CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT
+446494:CLAUDE_CODE_DISABLE_1M_CONTEXT is set, but the 
+446495:K limit isn't enforced for 
+446512:" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within 
+446514:map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.

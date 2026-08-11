@@ -110,6 +110,43 @@ export function extractLastJsonStringField(
   return lastValue
 }
 
+/**
+ * densable 2.1.223 #8 `cHt` — last JSONL line with `"type":"<entryType>"` that
+ * also carries string field `field`. Walks the chunk backward line-by-line
+ * (tail-window safe). Used for `relocated`/`relocatedCwd` after mid-session /cd.
+ */
+export function extractTypedJsonlField(
+  text: string,
+  entryType: string,
+  field: string,
+): string | undefined {
+  const typeNeedle = `"type":"${entryType}"`
+  const fieldNeedle = `"${field}":`
+  let end = text.length
+  while (end > 0) {
+    const prevNl = text.lastIndexOf('\n', end - 1)
+    const line = text.slice(prevNl + 1, end)
+    end = prevNl
+    if (line.includes(typeNeedle) && line.includes(fieldNeedle)) {
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          parsed.type === entryType
+        ) {
+          const v = parsed[field]
+          if (typeof v === 'string') return v
+        }
+      } catch {
+        // truncated / non-JSON line — keep scanning
+      }
+    }
+    if (prevNl < 0) break
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // First prompt extraction from head chunk
 // ---------------------------------------------------------------------------

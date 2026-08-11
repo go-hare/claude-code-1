@@ -1,0 +1,16 @@
+# densable 2.1.223 #8 — resume after mid-session /cd empty
+
+SEA:
+- Lite list cwd: `cHt(tail,"relocated","relocatedCwd") || Bte(head,"cwd") || projectPath`
+- `cHt` walks tail backward for last JSONL line with matching type + field
+- `reAppendSessionMetadata` re-stamps relocated when `currentSessionRelocatedCwd` set
+- `restoreSessionMetadata` / clear hydrate `currentSessionRelocatedCwd`
+- Full load: last `type:"relocated"` wins for session cwd / projectPath
+
+Local:
+- `extractTypedJsonlField` = cHt (`sessionStoragePortable.ts`)
+- `parseSessionInfoFromLite` / `readLiteMetadata` / `loadFullLog` / `loadAllLogsFromSessionFile`
+- `reAppendSessionMetadata` + `restoreSessionMetadata` + `clearSessionMetadata`
+- Prior: `relocateSessionTranscript` (tNt) already writes relocated stamps on /cd
+
+Tests: `src/utils/__tests__/resumeAfterCd.223.test.ts`

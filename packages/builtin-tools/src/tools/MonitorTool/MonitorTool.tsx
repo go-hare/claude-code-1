@@ -12,13 +12,17 @@ import { truncate } from 'src/utils/format.js';
 import { exec } from 'src/utils/Shell.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
 import { logEvent } from 'src/services/analytics/index.js';
+import { CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG, hasNoHiddenControlChars } from 'src/utils/controlChars.js';
 
 const MONITOR_TOOL_NAME = 'Monitor';
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
+    // densable 2.1.223 #5 — same eHe/xRd schema gate as Bash/PowerShell so
+    // hidden C0/C1 cannot slip into the Monitor permission dialog.
     command: z
       .string()
+      .refine(hasNoHiddenControlChars, CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG)
       .describe(
         'The shell command to run as a long-running monitor. Should produce streaming output (e.g., tail -f, watch, polling loops).',
       ),

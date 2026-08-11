@@ -6,6 +6,7 @@ import {
 } from '../services/analytics/index.js'
 import type { HookResultMessage } from '../types/message.js'
 import { createAttachmentMessage, resetSentSkillNames } from './attachments.js'
+import { logContextWindowEnforcementStartupNotices } from './context.js'
 import { logForDebugging } from './debug.js'
 import { withDiagnosticsTiming } from './diagLogs.js'
 import { isBareMode } from './envUtils.js'
@@ -95,6 +96,10 @@ export async function processSessionStartHooks(
   // no point loading plugin hooks that'll never run.
   if (isBareMode()) {
     return []
+  }
+  // densable 2.1.223 #16/#17 — startup notices for DISABLE_1M / unknown model window
+  if (model) {
+    logContextWindowEnforcementStartupNotices(model)
   }
   const hookMessages: HookResultMessage[] = []
   const additionalContexts: string[] = []

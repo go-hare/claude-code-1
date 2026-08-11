@@ -1,0 +1,8 @@
+382860:). Tell the user to retry /code-review ultra, or use plain /code-review for a local review instead.
+383624:/code-review ultra
+390955:If the user asks about "ultrareview" or how to run it, explain that /code-review ultra launches a multi-agent cloud review of the current branch (or /code-review ultra <PR#> for a GitHub PR); /ultrareview is a deprecated alias for the same command. It is user-triggered and billed; you cannot launch it yourself, so do not attempt to via Bash or otherwise. It needs a git repository (offer to "git init" if not in one); the no-arg form bundles the local branch and does not need a GitHub remote.
+433674:Tip: run /code-review ultra (no number) to review your current branch instead.
+433675:Tip: run /code-review ultra <PR number> to fetch and review a specific GitHub PR instead.
+437209:Run /code-review ultra after Claude finishes to review these changes in the cloud
+646173:`}let c=s.options?.commands?.some((u)=>u.name==="ultrareview"&&NR(u))??!1;if(t)return c?`(Claude can't launch the cloud review directly \u2014 type \`/code-review ultra --fix\` to review in the cloud and apply the findings locally when it completes. Running a local ${o}-effort review and applying its findings for now.)
+646175:`;return c?`(Claude can't launch the cloud review directly \u2014 type \`/code-review ultra\` to run it. Falling back to a local ${o}-effort review for now.)

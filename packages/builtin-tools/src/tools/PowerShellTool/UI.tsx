@@ -10,6 +10,7 @@ import { Box, Text } from '@anthropic/ink';
 import type { Tool } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import type { PowerShellProgress } from 'src/types/tools.js';
+import { replaceHiddenControlChars } from 'src/utils/controlChars.js';
 import type { ThemeName } from 'src/utils/theme.js';
 import type { Out, PowerShellToolInput } from './PowerShellTool.js';
 
@@ -26,7 +27,9 @@ export function renderToolUseMessage(
     return null;
   }
 
-  const displayCommand = command;
+  // densable 2.1.223 #5 — permission prompt / transcript must not hide TAB or
+  // invisible Unicode (ZW/bidi/BOM). TAB→⇥, other approval-hiding →�.
+  const displayCommand = replaceHiddenControlChars(command);
 
   if (!verbose) {
     const lines = displayCommand.split('\n');

@@ -1,0 +1,40 @@
+617278:- SHARED INFRA BIAS: When the action targets cluster, cloud, or shared resources (Kubernetes, cloud provider CLIs, managed services, shared databases, CI/CD systems), apply extra scrutiny even if the operation looks routine. Unlike local operations, mistakes propagate to other users and running systems, the agent's view of resource ownership may be wrong, and "it worked when I tested it locally" does not transfer. A command pattern that is safe against a local file or dev database can be harmful against a shared equivalent. Resolve ambiguity about whether a target is shared or agent-owned toward "shared".
+630233:- Hard-to-reverse operations: force-pushing (can also overwrite upstream), git reset --hard, amending published commits, removing or downgrading packages/dependencies, modifying CI/CD pipelines
+622793:     Do not edit this block: refresh the vendored file from @ant/cds and re-embed. */
+634809:       the regenerated source of truth (packages/cds/tokens/ \u2192 src/generated/tokens.css).
+645350:  /* The board's own vars resolve through the vendored @ant/cds token sheet (the static
+634807:       packages/cds/src/generated/tokens.css in anthropics/apps, fetched
+611170:Target directory. Tilde-expanded and realpath-canonicalized by the CLI, exactly like an interactive /cd argument.
+531639:   - Good for: CI/CD integration, batch code fixes, automated reviews
+622791:  /* ===== BEGIN vendored @ant/cds tokens (src/frame/cdsTokens.vanilla.generated.css) =====
+645544:    && tokenCss.indexOf('===== END vendored @ant/cds tokens =====') !== -1;
+622794: * VENDORED \u2014 verbatim copy of @ant/cds tokens.vanilla.css (the CDS team's
+622813: * GENERATED \u2014 do not edit. Run \`yarn workspace @ant/cds gen:tokens\`.
+622818: * Source: \`packages/cds/tokens/\`. For the full React/Tailwind build
+623567:  /* ===== END vendored @ant/cds tokens ===== */
+623703:     runtime (hljsHighlight.ts) emits. Colors are @ant/cds base-palette
+531637:4. **Headless Mode**: Run Claude non-interactively from scripts and CI/CD.
+617724:  **Default / protected branches**, **CI/CD deploy targets**,
+622756:style: tokens come from @ant/cds's own vanilla export, embedded verbatim
+625456:style: tokens come from @ant/cds's vanilla export, embedded verbatim (drift
+363317:Cannot destructure property 'getOriginalCwd' from null or undefined value
+396927:Cannot destructure property 'setOriginalCwd' from null or undefined value
+414352:Cannot destructure property 'originalCwd' from null or undefined value
+654089:All paths are under docker_eval/resources/cdp-skill/public-docs/.
+318358:- Look for: repository links, CI/CD mentions
+349185:assemblePluginLoadResult: originalCwd changed mid-scan; skipping side-effects (stale early-kick)
+617317:- **CI/CD deploy targets**: None configured
+622796: * (packages/cds/src/generated/tokens.vanilla.css).
+391144:/resume: loading sessions for cwd=
+409765:/cd relocate failed: 
+370742:/clear: originalCwd "
+409756:Usage: /cd <path>
+262638:B5+ctMlSbdsHyo+1W/CD80/HLaXIrcuVIKQxKFdYWuSNG5qrng0M8gozOSI5Cpcu81N3uURF
+327653:https://cdn.growthbook.io
+436932:deeplink: originalCwd changed
+318772:setProjectRoot
+318776:setOriginalCwd
+318878:onOriginalCwdChange
+318985:getProjectRoot
+318995:getOriginalCwd
+325047:originalCwd

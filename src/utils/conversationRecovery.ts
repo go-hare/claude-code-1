@@ -115,6 +115,9 @@ export function isValidAttachmentPayload(attachment: unknown): boolean {
         Array.isArray(e.content) &&
         e.content.every((t: unknown) => typeof t === 'string')
       )
+    // densable 2.1.223: malformed diagnostics attachment must not crash resume
+    case 'diagnostics':
+      return !('files' in e) || e.files === undefined || Array.isArray(e.files)
     default:
       return true
   }
@@ -572,8 +575,14 @@ export function restoreSkillStateFromMessages(messages: Message[]): void {
 export async function loadMessagesFromJsonlPath(path: string): Promise<{
   messages: SerializedMessage[]
   sessionId: UUID | undefined
+  /** densable 2.1.223 #8 — last relocatedCwd stamp for this session (if any). */
+  relocatedCwd?: string
 }> {
-  const { messages: byUuid, leafUuids } = await loadTranscriptFile(path)
+  const {
+    messages: byUuid,
+    leafUuids,
+    relocatedCwds,
+  } = await loadTranscriptFile(path)
   let tip: (typeof byUuid extends Map<UUID, infer T> ? T : never) | null = null
   let tipTs = 0
   for (const m of byUuid.values()) {
@@ -586,12 +595,14 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
   }
   if (!tip) return { messages: [], sessionId: undefined }
   const chain = buildConversationChain(byUuid, tip)
+  // Leaf's sessionId — forked sessions copy chain[0] from the source
+  // transcript, so the root retains the source session's ID. Matches
+  // loadFullLog's mostRecentLeaf.sessionId.
+  const sessionId = tip.sessionId as UUID | undefined
   return {
     messages: removeExtraFields(chain),
-    // Leaf's sessionId — forked sessions copy chain[0] from the source
-    // transcript, so the root retains the source session's ID. Matches
-    // loadFullLog's mostRecentLeaf.sessionId.
-    sessionId: tip.sessionId as UUID | undefined,
+    sessionId,
+    relocatedCwd: sessionId ? relocatedCwds.get(sessionId) : undefined,
   }
 }
 
@@ -644,11 +655,18 @@ export async function loadConversationForResume(
   goal?: import('../types/logs.js').GoalState
   /** densable 2.1.214 EndConversation marker → AppState.endedByModel */
   endedByModel?: boolean
+  /**
+   * densable 2.1.223 #8 — last mid-session /cd relocated stamp. Passed through
+   * to restoreSessionMetadata so reAppend can re-pin after resume.
+   */
+  relocatedCwd?: string
 } | null> {
   try {
     let log: LogOption | null = null
     let messages: Message[] | null = null
     let sessionId: UUID | undefined
+    /** densable 2.1.223 #8 — from jsonl path branch when no LogOption. */
+    let relocatedFromJsonl: string | undefined
 
     if (source === undefined) {
       // --continue: most recent session, skipping live --bg/daemon sessions
@@ -683,6 +701,7 @@ export async function loadConversationForResume(
       const loaded = await loadMessagesFromJsonlPath(sourceJsonlFile)
       messages = loaded.messages
       sessionId = loaded.sessionId
+      relocatedFromJsonl = loaded.relocatedCwd
     } else if (typeof source === 'string') {
       // Load specific session by ID
       log = await getLastSessionLog(source as UUID)
@@ -766,6 +785,8 @@ export async function loadConversationForResume(
       goal: log?.goal,
       // densable 2.1.214: hydrate ended-by-model into AppState
       endedByModel: log?.endedByModel,
+      // densable 2.1.223 #8 — hydrate relocate for restoreSessionMetadata
+      relocatedCwd: log?.relocatedCwd ?? relocatedFromJsonl,
     }
   } catch (error) {
     logError(error as Error)

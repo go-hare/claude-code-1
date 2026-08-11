@@ -1,0 +1,4 @@
+340524:bypassPermissions mode is disabled by settings
+384499:using the newest allowed model in its family
+384500:inheriting the parent model
+386047:Subagent declared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled); keeping parent mode '

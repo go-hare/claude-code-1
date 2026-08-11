@@ -1,0 +1,21 @@
+# densable 2.1.223 #5 — permission prompt TAB / invisible Unicode
+
+SEA functions (offsets near 246974952):
+```
+function xRd(e){if(e===9||e===10)return!1;return e<32||e>=127&&e<=159}
+function IRd(e){return e===1564||e>=8234&&e<=8238||e>=8294&&e<=8297}
+function eHe(e){for(let t=0;t<e.length;t++)if(xRd(e.charCodeAt(t)))return!1;return!0}
+function Jg(e){return DRd(e,!0)}
+function DRd(e,t){let r="";for(let o of e){let i=o.codePointAt(0);if(egy(i))continue;r+=xRd(i)||IRd(i)||tgy(i)?"\uFFFD":o}...}
+```
+Schema: PowerShell/Bash `command: E.string().refine(eHe, <gold msg>)`
+Display: permission/Monitor paths call `Jg(input.command)` / `Jg(renderedToolUseMessage)`.
+
+Gold message:
+`command contains control characters that would be hidden in the approval dialog`
+
+Local port:
+- xRd → isHiddenControlCode / eHe → hasNoHiddenControlChars
+- IRd → isBidiControlCode; zero-width → isInvisibleFormatCode
+- Jg display → replaceHiddenControlChars (TAB→U+21E5 extra for tab padding visibility)
+- BashTool/UI.tsx + PowerShellTool/UI.tsx renderToolUseMessage

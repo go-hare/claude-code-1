@@ -1,4 +1,5 @@
 import figures from 'figures'
+import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
 import { callIdeRpc } from '../services/mcp/client.js'
 import type { MCPServerConnection } from '../services/mcp/types.js'
@@ -11,9 +12,29 @@ class DiagnosticsTrackingError extends ClaudeError {}
 
 const MAX_DIAGNOSTICS_SUMMARY_CHARS = 4000
 
+/** densable fvd — lowercase severity → LSP-style label. */
+const DIAGNOSTIC_SEVERITY_BY_LOWER: Record<string, DiagnosticSeverity> = {
+  error: 'Error',
+  warning: 'Warning',
+  info: 'Info',
+  information: 'Info',
+  hint: 'Hint',
+}
+
+/**
+ * densable OOo / pvd — dedupe drop logs for the same replayed payload.
+ * WeakSet for object payloads (incl. the files array when counting drops);
+ * Set for non-array kind tags ("missing" | "non-array").
+ */
+const sanitizedDiagnosticObjectPayloads = new WeakSet<object>()
+const nonArrayDiagnosticsPayloadKinds = new Set<string>()
+
+export type DiagnosticSeverity = 'Error' | 'Warning' | 'Info' | 'Hint'
+
 export interface Diagnostic {
   message: string
-  severity: 'Error' | 'Warning' | 'Info' | 'Hint'
+  /** Optional after densable sanitize — unmapped/missing severity is omitted. */
+  severity?: DiagnosticSeverity
   range: {
     start: { line: number; character: number }
     end: { line: number; character: number }
@@ -25,6 +46,26 @@ export interface Diagnostic {
 export interface DiagnosticFile {
   uri: string
   diagnostics: Diagnostic[]
+}
+
+/**
+ * densable Ruy — map free-form severity strings to DiagnosticSeverity.
+ * Non-strings / unknown labels → undefined (field omitted on sanitized diag).
+ */
+export function mapDiagnosticSeverity(
+  value: unknown,
+): DiagnosticSeverity | undefined {
+  if (typeof value !== 'string') return undefined
+  const key = value.toLowerCase()
+  return Object.hasOwn(DIAGNOSTIC_SEVERITY_BY_LOWER, key)
+    ? DIAGNOSTIC_SEVERITY_BY_LOWER[key]
+    : undefined
+}
+
+/** Test helper — reset densable OOo/pvd drop-log latches. */
+export function clearDiagnosticSanitizeLatchesForTests(): void {
+  nonArrayDiagnosticsPayloadKinds.clear()
+  // WeakSet cannot be cleared; tests that need re-log should use fresh objects.
 }
 
 export class DiagnosticTrackingService {
@@ -343,6 +384,121 @@ export class DiagnosticTrackingService {
   }
 
   /**
+   * densable 2.1.223 #14 — `sanitizeDiagnosticFiles` 1:1.
+   *
+   * Resume/history may hold malformed diagnostics attachments (null entries,
+   * missing uri/diagnostics, non-number range.start, non-array payload).
+   * Sanitize before format so we never TypeError on destructure / .map.
+   *
+   * Gold drop strings:
+   * - `Dropped a ${missing|non-array} diagnostics files payload from a replayed attachment`
+   * - `Dropped N malformed file(s) and M malformed diagnostic(s) from a replayed diagnostics attachment`
+   */
+  static sanitizeDiagnosticFiles(files: unknown): DiagnosticFile[] {
+    if (!Array.isArray(files)) {
+      const kind = files === undefined ? 'missing' : 'non-array'
+      const isObjectPayload = typeof files === 'object' && files !== null
+      if (
+        !(isObjectPayload
+          ? sanitizedDiagnosticObjectPayloads.has(files)
+          : nonArrayDiagnosticsPayloadKinds.has(kind))
+      ) {
+        if (isObjectPayload) {
+          sanitizedDiagnosticObjectPayloads.add(files)
+        } else {
+          nonArrayDiagnosticsPayloadKinds.add(kind)
+        }
+        logForDebugging(
+          `Dropped a ${kind} diagnostics files payload from a replayed attachment`,
+          { level: 'error' },
+        )
+      }
+      return []
+    }
+
+    const out: DiagnosticFile[] = []
+    let droppedFiles = 0
+    let droppedDiagnostics = 0
+
+    for (const file of files) {
+      if (
+        typeof file !== 'object' ||
+        file === null ||
+        typeof (file as { uri?: unknown }).uri !== 'string' ||
+        !Array.isArray((file as { diagnostics?: unknown }).diagnostics)
+      ) {
+        droppedFiles += 1
+        continue
+      }
+
+      const uri = (file as { uri: string }).uri
+      const rawDiags = (file as { diagnostics: unknown[] }).diagnostics
+      const diagnostics = rawDiags.flatMap((d): Diagnostic[] => {
+        if (typeof d !== 'object' || d === null) return []
+        const raw = d as {
+          message?: unknown
+          severity?: unknown
+          range?: {
+            start?: { line?: unknown; character?: unknown }
+            end?: { line?: unknown; character?: unknown }
+          }
+          source?: unknown
+          code?: unknown
+        }
+        const message = raw.message
+        const start = raw.range?.start
+        if (
+          typeof message !== 'string' ||
+          typeof start?.line !== 'number' ||
+          typeof start?.character !== 'number'
+        ) {
+          return []
+        }
+        const severity = mapDiagnosticSeverity(raw.severity)
+        const end = raw.range?.end
+        const endLine = end?.line
+        const endCharacter = end?.character
+        const rangeEnd =
+          typeof endLine === 'number' && typeof endCharacter === 'number'
+            ? { line: endLine, character: endCharacter }
+            : { line: start.line, character: start.character }
+
+        const cleaned: Diagnostic = {
+          message,
+          ...(severity !== undefined ? { severity } : {}),
+          range: {
+            start: { line: start.line, character: start.character },
+            end: rangeEnd,
+          },
+          ...(typeof raw.code === 'string' ? { code: raw.code } : {}),
+          ...(typeof raw.source === 'string' ? { source: raw.source } : {}),
+        }
+        return [cleaned]
+      })
+
+      droppedDiagnostics += rawDiags.length - diagnostics.length
+      if (diagnostics.length === 0) {
+        droppedFiles += 1
+        continue
+      }
+      out.push({ uri, diagnostics })
+    }
+
+    if (
+      (droppedFiles > 0 || droppedDiagnostics > 0) &&
+      !sanitizedDiagnosticObjectPayloads.has(files)
+    ) {
+      sanitizedDiagnosticObjectPayloads.add(files)
+      logForDebugging(
+        `Dropped ${droppedFiles} malformed file(s) and ${droppedDiagnostics} malformed diagnostic(s) from a replayed diagnostics attachment`,
+        { level: 'error' },
+      )
+    }
+
+    return out
+  }
+
+  /**
    * Format diagnostics into a human-readable summary string.
    * This is useful for displaying diagnostics in messages or logs.
    *
@@ -380,17 +536,21 @@ export class DiagnosticTrackingService {
   }
 
   /**
-   * Get the severity symbol for a diagnostic
+   * densable getSeveritySymbol — non-string / unknown → bullet.
    */
-  static getSeveritySymbol(severity: Diagnostic['severity']): string {
-    return (
-      {
-        Error: figures.cross,
-        Warning: figures.warning,
-        Info: figures.info,
-        Hint: figures.star,
-      }[severity] || figures.bullet
-    )
+  static getSeveritySymbol(
+    severity: DiagnosticSeverity | string | undefined,
+  ): string {
+    if (typeof severity !== 'string') return figures.bullet
+    const symbols: Record<DiagnosticSeverity, string> = {
+      Error: figures.cross,
+      Warning: figures.warning,
+      Info: figures.info,
+      Hint: figures.star,
+    }
+    return Object.hasOwn(symbols, severity)
+      ? symbols[severity as DiagnosticSeverity]
+      : figures.bullet
   }
 }
 

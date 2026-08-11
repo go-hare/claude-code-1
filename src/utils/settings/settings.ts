@@ -121,6 +121,116 @@ function finishPolicySettingsForHost(
 }
 
 /**
+ * densable 2.1.223 #11 — server-delivered settings no longer disable the env
+ * block of machine-local managed-settings.json / MDM; admin env merges per key.
+ * Higher-priority sources win on the same key; lower sources fill missing keys.
+ * Other fields still use first-source-wins (remote > MDM > file > hkcu).
+ */
+export function mergeManagedEnvPerKey(
+  winner: SettingsJson | null,
+  lowerSources: Array<SettingsJson | null | undefined>,
+): SettingsJson | null {
+  if (!winner && lowerSources.every(s => !s?.env)) {
+    return winner
+  }
+  const env: Record<string, string> = {}
+  // Lower priority first, then winner last so winner keys override.
+  for (const src of lowerSources) {
+    if (!src?.env) continue
+    for (const [k, v] of Object.entries(src.env)) {
+      if (typeof v === 'string') env[k] = v
+    }
+  }
+  if (winner?.env) {
+    for (const [k, v] of Object.entries(winner.env)) {
+      if (typeof v === 'string') env[k] = v
+    }
+  }
+  if (!winner) {
+    return Object.keys(env).length > 0 ? ({ env } as SettingsJson) : null
+  }
+  if (Object.keys(env).length === 0) {
+    return winner
+  }
+  return { ...winner, env }
+}
+
+/**
+ * densable 2.1.223 #11 — collect machine-local managed env sources under remote.
+ * Order: hkcu (lowest) → file → MDM (higher among local), then remote wins keys.
+ */
+function collectMachineLocalManagedSettings(): {
+  mdm: SettingsJson | null
+  file: SettingsJson | null
+  hkcu: SettingsJson | null
+} {
+  const mdmResult = getMdmSettings()
+  const mdm =
+    Object.keys(mdmResult.settings).length > 0 ? mdmResult.settings : null
+  const { settings: fileSettings } = loadManagedFileSettings()
+  const hkcuResult = getHkcuSettings()
+  const hkcu =
+    Object.keys(hkcuResult.settings).length > 0 ? hkcuResult.settings : null
+  return { mdm, file: fileSettings, hkcu }
+}
+
+/**
+ * densable 2.1.223 #11 — first-source-wins for policy fields, but env always
+ * merges per-key across remote + machine-local admin sources.
+ */
+function resolvePolicySettingsWithEnvMerge(): {
+  policySettings: SettingsJson | null
+  policyErrors: ValidationError[]
+} {
+  const policyErrors: ValidationError[] = []
+  let winner: SettingsJson | null = null
+  let winnerKind: 'remote' | 'mdm' | 'file' | 'hkcu' | null = null
+
+  const remoteSettings = getRemoteManagedSettingsSyncFromCache()
+  if (remoteSettings && Object.keys(remoteSettings).length > 0) {
+    const result = SettingsSchema().safeParse(remoteSettings)
+    if (result.success) {
+      winner = result.data
+      winnerKind = 'remote'
+    } else {
+      policyErrors.push(
+        ...formatZodError(result.error, 'remote managed settings'),
+      )
+    }
+  }
+
+  const local = collectMachineLocalManagedSettings()
+  if (!winner && local.mdm) {
+    winner = local.mdm
+    winnerKind = 'mdm'
+  } else if (local.mdm) {
+    // MDM errors only matter when we fall through; still surface parse path later
+  }
+
+  if (!winner && local.file) {
+    winner = local.file
+    winnerKind = 'file'
+  }
+
+  if (!winner && local.hkcu) {
+    winner = local.hkcu
+    winnerKind = 'hkcu'
+  }
+
+  // Always merge env from machine-local under remote (or among locals).
+  // densable: server-delivered must not wipe local managed env.
+  if (winnerKind === 'remote') {
+    winner = mergeManagedEnvPerKey(winner, [local.hkcu, local.file, local.mdm])
+  } else if (winnerKind === 'mdm') {
+    winner = mergeManagedEnvPerKey(winner, [local.hkcu, local.file])
+  } else if (winnerKind === 'file') {
+    winner = mergeManagedEnvPerKey(winner, [local.hkcu])
+  }
+
+  return { policySettings: winner, policyErrors }
+}
+
+/**
  * Get the path to the managed settings file based on the current platform
  */
 function getManagedSettingsFilePath(): string {
@@ -432,30 +542,11 @@ function getSettingsForSourceUncached(
   source: SettingSource,
 ): SettingsJson | null {
   // For policySettings: first source wins (remote > HKLM/plist > file > HKCU)
+  // densable 2.1.223 #11: env merges per-key with machine-local under remote.
   // densable nfc: under hostManagedProvider, b6i strip + Gfg hostModelOverlay.
   if (source === 'policySettings') {
-    const remoteSettings = getRemoteManagedSettingsSyncFromCache()
-    if (remoteSettings && Object.keys(remoteSettings).length > 0) {
-      return finishPolicySettingsForHost(remoteSettings)
-    }
-
-    const mdmResult = getMdmSettings()
-    if (Object.keys(mdmResult.settings).length > 0) {
-      return finishPolicySettingsForHost(mdmResult.settings)
-    }
-
-    const { settings: fileSettings } = loadManagedFileSettings()
-    if (fileSettings) {
-      return finishPolicySettingsForHost(fileSettings)
-    }
-
-    const hkcu = getHkcuSettings()
-    if (Object.keys(hkcu.settings).length > 0) {
-      return finishPolicySettingsForHost(hkcu.settings)
-    }
-
-    // densable nfc: no admin/hkcu but hostModelOverlay alone still wins
-    return finishPolicySettingsForHost(null)
+    const { policySettings } = resolvePolicySettingsWithEnvMerge()
+    return finishPolicySettingsForHost(policySettings)
   }
 
   const settingsFilePath = getSettingsFilePathForSource(source)
@@ -803,56 +894,22 @@ function loadSettingsFromDisk(): SettingsWithErrors {
 
     // Merge settings from each source in priority order with deep merging
     for (const source of getEnabledSettingSources()) {
-      // policySettings: "first source wins" — use the highest-priority source
-      // that has content. Priority: remote > HKLM/plist > managed-settings.json > HKCU
+      // policySettings: "first source wins" for fields; densable 2.1.223 #11
+      // env merges per-key so server-delivered does not wipe machine-local env.
+      // Priority: remote > HKLM/plist > managed-settings.json > HKCU
       if (source === 'policySettings') {
-        let policySettings: SettingsJson | null = null
-        const policyErrors: ValidationError[] = []
-
-        // 1. Remote (highest priority)
-        const remoteSettings = getRemoteManagedSettingsSyncFromCache()
-        if (remoteSettings && Object.keys(remoteSettings).length > 0) {
-          const result = SettingsSchema().safeParse(remoteSettings)
-          if (result.success) {
-            policySettings = result.data
-          } else {
-            // Remote exists but is invalid — surface errors even as we fall through
-            policyErrors.push(
-              ...formatZodError(result.error, 'remote managed settings'),
-            )
-          }
-        }
-
-        // 2. Admin-only MDM (HKLM / macOS plist)
-        if (!policySettings) {
-          const mdmResult = getMdmSettings()
-          if (Object.keys(mdmResult.settings).length > 0) {
-            policySettings = mdmResult.settings
-          }
-          policyErrors.push(...mdmResult.errors)
-        }
-
-        // 3. managed-settings.json + managed-settings.d/ (file-based, requires admin)
-        if (!policySettings) {
-          const { settings, errors } = loadManagedFileSettings()
-          if (settings) {
-            policySettings = settings
-          }
-          policyErrors.push(...errors)
-        }
-
-        // 4. HKCU (lowest — user-writable, only if nothing above exists)
-        if (!policySettings) {
-          const hkcu = getHkcuSettings()
-          if (Object.keys(hkcu.settings).length > 0) {
-            policySettings = hkcu.settings
-          }
-          policyErrors.push(...hkcu.errors)
-        }
+        const { policySettings: resolved, policyErrors } =
+          resolvePolicySettingsWithEnvMerge()
+        // Surface MDM / file / hkcu validation errors even when remote wins fields.
+        const mdmResult = getMdmSettings()
+        policyErrors.push(...mdmResult.errors)
+        const { errors: fileErrors } = loadManagedFileSettings()
+        policyErrors.push(...fileErrors)
+        policyErrors.push(...getHkcuSettings().errors)
 
         // densable nfc hostManagedProvider: b6i + hostModelOverlay (Gfg)
         // even when only overlay exists (no admin/hkcu).
-        policySettings = finishPolicySettingsForHost(policySettings)
+        let policySettings = finishPolicySettingsForHost(resolved)
 
         // Merge the winning policy source into the settings chain
         if (policySettings) {

@@ -791,9 +791,12 @@ export const SettingsSchema = lazySchema(() =>
         .array(MarketplaceSourceSchema())
         .optional()
         .describe(
+          // densable 2.1.223 owner/* — policy github entries may use "owner/*"
           'Enterprise strict list of allowed marketplace sources. When set in managed settings, ' +
-            'ONLY these exact sources can be added as marketplaces. The check happens BEFORE ' +
-            'downloading, so blocked sources never touch the filesystem. ' +
+            'ONLY these sources can be added as marketplaces. Entries match exactly, except that ' +
+            'a github entry may use the owner-wildcard form {"source":"github","repo":"owner/*"} ' +
+            'to allow every repository under that owner. The check happens BEFORE downloading, so ' +
+            'blocked sources never touch the filesystem. ' +
             'Note: this is a policy gate only — it does NOT register marketplaces. ' +
             'To pre-register allowed marketplaces for users, also set extraKnownMarketplaces.',
         ),
@@ -803,9 +806,12 @@ export const SettingsSchema = lazySchema(() =>
         .array(MarketplaceSourceSchema())
         .optional()
         .describe(
+          // densable 2.1.223 owner/* — policy github entries may use "owner/*"
           'Enterprise blocklist of marketplace sources. When set in managed settings, ' +
-            'these exact sources are blocked from being added as marketplaces. The check happens BEFORE ' +
-            'downloading, so blocked sources never touch the filesystem.',
+            'these sources are blocked from being added as marketplaces. Entries match exactly, ' +
+            'except that a github entry may use the owner-wildcard form {"source":"github","repo":"owner/*"} ' +
+            'to block every repository under that owner. The check happens BEFORE downloading, so ' +
+            'blocked sources never touch the filesystem.',
         ),
       // densable 2.1.212: claudeai | console | gateway (Cloud gateway OIDC device flow)
       forceLoginMethod: z

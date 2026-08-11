@@ -1,0 +1,15 @@
+653580:> **SDK typings lag these blocks.** Pass them as plain dicts in Python (the SDK forwards unknown keys unchanged) or add a \`@ts-expect-error\` in TypeScript until the types catch up. \`extra_body\` / \`extra_headers\` work on \`.stream()\` exactly as on \`.create()\`.
+653853:| \`fallback: {model, on_partial}\` single object | \`fallbacks: [{model, ...}]\` array (1\u20133); \`on_partial\` no longer exists \u2014 partial-output behavior is fixed (streams keep the partial; non-streaming omits it). Unknown keys in an entry are a 400 |
+609961:Canonical model id used for the pricing lookup (e.g. 'claude-opus-4-7'). May differ from the raw model string this entry is keyed by (provider-specific ids, aliases).
+436653:map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.
+639978:    errors.push(\`unknown key "\${k}"\${near ? \` \u2014 did you mean "\${near}"?\` : ''}\`);
+331128:enforceAvailableModels: the managed modelOverrides target "
+293349:Unknown key for Intl.supportedValuesOf
+387105:: unknown keys 
+540221:Unknown key type "
+265351:Unknown key type
+387106:: unknown keys
+453334:unknown keyword: "
+320753:getPairedPolicyModelOverrides
+329438:modelOverrides
+331006:ignoreModelOverrides

@@ -377,15 +377,20 @@ export function parseGitCommitId(stdout: string): string | undefined {
 }
 
 /**
- * Parse branch name from git push output. Push writes progress to stderr but
- * the ref update line ("abc..def  branch -> branch", "* [new branch]
- * branch -> branch", or " + abc...def  branch -> branch (forced update)") is
- * the signal. Works on either stdout or stderr. Git prefixes each ref line
- * with a status flag (space, +, -, *, !, =); the char class tolerates any.
+ * densable 2.1.223 #15 — parse branch name from git push output.
+ * Push writes progress to stderr but the ref update line
+ * ("abc..def  branch -> branch", "* [new branch] branch -> branch", or
+ * " + abc...def  branch -> branch (forced update)") is the signal.
+ * Works on either stdout or stderr. Git prefixes each ref line with a status
+ * flag (space, +, -, *, !, =); the char class tolerates any.
+ *
+ * SEA gold (no catastrophic backtrack on long non-hex `\S+..\S+` runs):
+ * `/^\s*[+\-*!= ]?\s*(?:\[new branch\]|[0-9a-f]+\.\.+[0-9a-f]+)\s+\S+\s*->\s*(\S+)/m`
+ * Local previously used `\S+\.\.+\S+` which can hang on pathological output.
  */
-function parseGitPushBranch(output: string): string | undefined {
+export function parseGitPushBranch(output: string): string | undefined {
   const match = output.match(
-    /^\s*[+\-*!= ]?\s*(?:\[new branch\]|\S+\.\.+\S+)\s+\S+\s*->\s*(\S+)/m,
+    /^\s*[+\-*!= ]?\s*(?:\[new branch\]|[0-9a-f]+\.\.+[0-9a-f]+)\s+\S+\s*->\s*(\S+)/m,
   )
   return match?.[1]
 }

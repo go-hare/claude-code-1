@@ -7,11 +7,16 @@
  * - subcommands: { ultra: "ultrareview" } → `/code-review ultra` redirects to cloud
  * - disableModelInvocation: true (215)
  * - /simplify is an alias for /code-review --fix
+ *
+ * densable 2.1.223:
+ * - aliases: ['review'] — `/review` is `/code-review`
+ * - codeReviewLastEffort — no-level reuses last typed effort
  */
 
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import type { Command } from '../types/command.js'
 import type { ToolUseContext } from '../Tool.js'
+import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { isUltrareviewEnabled } from './review/ultrareviewEnabled.js'
 
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -79,8 +84,14 @@ function parseEffortLevelToken(token: string): EffortLevel | undefined {
  * densable xol — parse effort / ultra / --comment / --fix / target.
  * First token `ultra` → ultraFallback (subcommand redirect handles real launch;
  * this is for getPrompt when ultra is not redirected).
+ *
+ * densable 2.1.223: when no explicit level, prefer `lastEffort` (codeReviewLastEffort)
+ * over hard-coded medium.
  */
-export function parseCodeReviewArgs(args: string): {
+export function parseCodeReviewArgs(
+  args: string,
+  lastEffort?: EffortLevel,
+): {
   level: EffortLevel
   target: string
   comment: boolean
@@ -89,6 +100,8 @@ export function parseCodeReviewArgs(args: string): {
   unrecognizedLevel?: string
   /** densable xol.explicit — set only when user named a valid effort level. */
   explicit?: EffortLevel
+  /** densable: last stored effort reused when user typed no level. */
+  reusedLastEffort?: EffortLevel
 } {
   const { rawFirstToken, flags, rest } = parseCodeReviewFlagArgs(args)
   const comment = flags.has('comment')
@@ -124,14 +137,48 @@ export function parseCodeReviewArgs(args: string): {
   const unrecognizedLevel = UNRECOGNIZED_EFFORT_RE.test(first)
     ? first
     : undefined
+  const fallback = lastEffort ?? 'medium'
   return {
-    level: 'medium',
+    level: fallback,
     target: rest,
     comment,
     fix,
     ultraFallback: false,
     unrecognizedLevel,
+    reusedLastEffort: lastEffort,
   }
+}
+
+/**
+ * densable 2.1.223 — persist last typed effort (only when user named a valid level).
+ */
+export function rememberCodeReviewEffort(level: EffortLevel): void {
+  saveGlobalConfig(current => {
+    if (current.codeReviewLastEffort === level) return current
+    return { ...current, codeReviewLastEffort: level }
+  })
+}
+
+/**
+ * densable notice when reusing last effort / ignoring unrecognized level.
+ */
+export function formatCodeReviewEffortNotice(options: {
+  level: EffortLevel
+  reusedLastEffort?: EffortLevel
+  unrecognizedLevel?: string
+}): string {
+  const { level, reusedLastEffort, unrecognizedLevel } = options
+  if (unrecognizedLevel) {
+    const reuseHint =
+      reusedLastEffort !== undefined && reusedLastEffort === level
+        ? ', the level the user typed last time'
+        : ''
+    return `(Ignoring unrecognized effort "${unrecognizedLevel}"; valid: ${EFFORT_LEVELS.join(', ')}. Using ${level}${reuseHint}.)\n`
+  }
+  if (reusedLastEffort !== undefined) {
+    return `(No effort level given — reusing ${reusedLastEffort}, the level the user typed last time. Type a level like \`/code-review high\` to change it.)\n`
+  }
+  return ''
 }
 
 function buildPrompt(
@@ -251,6 +298,8 @@ export function formatCodeReviewUltraFallbackNote(options: {
 const codeReview = {
   type: 'prompt',
   name: 'code-review',
+  // densable 2.1.223: /review is an alias of /code-review
+  aliases: ['review'],
   // densable WJf menuDescription / OBT description
   description:
     'Review the current diff for bugs and cleanups; use ultra for multi-agent cloud review',
@@ -272,8 +321,25 @@ const codeReview = {
     args: string,
     context: ToolUseContext,
   ): Promise<ContentBlockParam[]> {
-    const { level, target, comment, fix, ultraFallback, unrecognizedLevel } =
-      parseCodeReviewArgs(args)
+    const storedLast = getGlobalConfig().codeReviewLastEffort
+    const lastEffort =
+      storedLast && (EFFORT_LEVELS as readonly string[]).includes(storedLast)
+        ? (storedLast as EffortLevel)
+        : undefined
+    const {
+      level,
+      target,
+      comment,
+      fix,
+      ultraFallback,
+      unrecognizedLevel,
+      explicit,
+      reusedLastEffort,
+    } = parseCodeReviewArgs(args, lastEffort)
+    // densable onUserTypedArgs / uYT — only persist when user named a valid level
+    if (explicit !== undefined) {
+      rememberCodeReviewEffort(explicit)
+    }
     const ultraEnabled = isUltrareviewEnabled()
     const ultraCommandAvailable =
       context.options?.commands?.some(
@@ -288,18 +354,21 @@ const codeReview = {
           ultraCommandAvailable: ultraEnabled && ultraCommandAvailable,
         })
       : ''
-    // densable FBT also emits unrecognized effort note when not ultraFallback
-    const unrecognizedNote =
-      !ultraFallback && unrecognizedLevel
-        ? `(Ignoring unrecognized effort "${unrecognizedLevel}"; valid: ${EFFORT_LEVELS.join(', ')}. Using ${level}.)\n`
-        : ''
+    // densable 2.1.223 effort notice (reuse last / ignore unrecognized)
+    const effortNote = !ultraFallback
+      ? formatCodeReviewEffortNotice({
+          level,
+          reusedLastEffort,
+          unrecognizedLevel,
+        })
+      : ''
     const prompt = buildPrompt(
       level,
       target,
       comment,
       fix,
       ultraNote,
-      unrecognizedNote,
+      effortNote,
     )
     return [{ type: 'text', text: prompt }]
   },

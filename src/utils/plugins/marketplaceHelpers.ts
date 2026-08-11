@@ -1,4 +1,5 @@
 import isEqual from 'lodash-es/isEqual.js'
+import { logForDebugging } from '../debug.js'
 import { toError } from '../errors.js'
 import { logError } from '../log.js'
 import { getSettingsForSource } from '../settings/settings.js'
@@ -6,6 +7,95 @@ import { plural } from '../stringUtils.js'
 import { checkGitAvailable } from './gitAvailability.js'
 import { getMarketplace } from './marketplaceManager.js'
 import type { KnownMarketplace, MarketplaceSource } from './schemas.js'
+
+/**
+ * densable F4u — GitHub owner/repo name segment (policy owner/* + concrete repo).
+ */
+const GITHUB_NAME_SEGMENT = /^[A-Za-z0-9._-]+$/
+
+/**
+ * densable MEo — valid single path segment for owner/repo names.
+ */
+export function isValidGithubNameSegment(name: string): boolean {
+  return (
+    GITHUB_NAME_SEGMENT.test(name) &&
+    !name.startsWith('-') &&
+    name !== '.' &&
+    name !== '..'
+  )
+}
+
+/**
+ * densable B4u — parse policy `owner/*` → owner, or null if not a valid wildcard.
+ */
+export function parseOwnerWildcardRepo(repo: string): string | null {
+  if (!repo.endsWith('/*')) return null
+  const owner = repo.slice(0, -2)
+  return isValidGithubNameSegment(owner) ? owner : null
+}
+
+/**
+ * densable U4u — normalize a github-form repo path (decode, collapse . / .., strip .git).
+ */
+export function normalizeGithubRepoPath(repo: string): string {
+  let decoded = repo
+  try {
+    decoded = decodeURIComponent(repo)
+  } catch {
+    // keep raw
+  }
+  const parts: string[] = []
+  for (const seg of decoded.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(seg)
+  }
+  const joined = parts.join('/')
+  return joined.endsWith('.git') ? joined.slice(0, -4) : joined
+}
+
+/**
+ * densable DEo — does a policy github `repo` field match a concrete source repo?
+ * Supports managed-settings-only owner wildcard `"owner/*"` (case-insensitive owner).
+ * Invalid wildcards (e.g. star-slash-star, foo*) log and fall back to literal equality.
+ *
+ * @param policyRepo - entry from strictKnownMarketplaces / blockedMarketplaces
+ * @param sourceRepo - concrete owner/repo from the marketplace being added
+ */
+export function githubRepoPolicyMatches(
+  policyRepo: string,
+  sourceRepo: string,
+  listLabel:
+    | 'strictKnownMarketplaces'
+    | 'blockedMarketplaces' = 'blockedMarketplaces',
+): boolean {
+  const normalizedSource = normalizeGithubRepoPath(sourceRepo)
+  const owner = parseOwnerWildcardRepo(policyRepo)
+  if (owner === null) {
+    if (policyRepo.includes('*')) {
+      logForDebugging(
+        `Invalid owner-wildcard repo in policy settings ${listLabel}: ${policyRepo} (only "<owner>/*" is supported); entry only matches a literally identical repo string`,
+        { level: 'error' },
+      )
+    }
+    return normalizedSource === policyRepo || sourceRepo === policyRepo
+  }
+  const segs = normalizedSource.split('/')
+  if (segs.length !== 2) return false
+  const [srcOwner, srcName] = segs
+  if (
+    srcOwner === undefined ||
+    srcName === undefined ||
+    !isValidGithubNameSegment(srcOwner) ||
+    !GITHUB_NAME_SEGMENT.test(srcName)
+  ) {
+    return false
+  }
+  return srcOwner.toLowerCase() === owner.toLowerCase()
+}
 
 /**
  * Format plugin failure details for user display
@@ -250,18 +340,41 @@ function areSourcesEqual(a: MarketplaceSource, b: MarketplaceSource): boolean {
   switch (a.source) {
     case 'url':
       return a.url === (b as typeof a).url
-    case 'github':
+    case 'github': {
+      // densable x1_/DEo: (source=a, policy=b) — policy may be owner/*
+      const policy = b as typeof a
       return (
-        a.repo === (b as typeof a).repo &&
-        (a.ref || undefined) === ((b as typeof a).ref || undefined) &&
-        (a.path || undefined) === ((b as typeof a).path || undefined)
+        githubRepoPolicyMatches(
+          policy.repo,
+          a.repo,
+          'strictKnownMarketplaces',
+        ) &&
+        (a.ref || undefined) === (policy.ref || undefined) &&
+        (a.path || undefined) === (policy.path || undefined)
       )
-    case 'git':
+    }
+    case 'git': {
+      // Prefer owner/* against extracted github owner/repo when both sides are GH URLs
+      const policy = b as typeof a
+      const policyRepo = extractGitHubRepoFromGitUrl(policy.url)
+      const sourceRepo = extractGitHubRepoFromGitUrl(a.url)
+      if (policyRepo !== null && sourceRepo !== null) {
+        return (
+          githubRepoPolicyMatches(
+            policyRepo,
+            sourceRepo,
+            'strictKnownMarketplaces',
+          ) &&
+          (a.ref || undefined) === (policy.ref || undefined) &&
+          (a.path || undefined) === (policy.path || undefined)
+        )
+      }
       return (
-        a.url === (b as typeof a).url &&
-        (a.ref || undefined) === ((b as typeof a).ref || undefined) &&
-        (a.path || undefined) === ((b as typeof a).path || undefined)
+        a.url === policy.url &&
+        (a.ref || undefined) === (policy.ref || undefined) &&
+        (a.path || undefined) === (policy.path || undefined)
       )
+    }
     case 'npm':
       return a.package === (b as typeof a).package
     case 'file':
@@ -453,7 +566,12 @@ function areSourcesEquivalentForBlocklist(
     switch (source.source) {
       case 'github': {
         const b = blocked as typeof source
-        if (source.repo !== b.repo) return false
+        // densable DEo(policy.repo, source.repo) — owner/* on blocked entry
+        if (
+          !githubRepoPolicyMatches(b.repo, source.repo, 'blockedMarketplaces')
+        ) {
+          return false
+        }
         return (
           blockedConstraintMatches(b.ref, source.ref) &&
           blockedConstraintMatches(b.path, source.path)
@@ -461,7 +579,21 @@ function areSourcesEquivalentForBlocklist(
       }
       case 'git': {
         const b = blocked as typeof source
-        if (source.url !== b.url) return false
+        const blockedRepo = extractGitHubRepoFromGitUrl(b.url)
+        const sourceRepo = extractGitHubRepoFromGitUrl(source.url)
+        if (blockedRepo !== null && sourceRepo !== null) {
+          if (
+            !githubRepoPolicyMatches(
+              blockedRepo,
+              sourceRepo,
+              'blockedMarketplaces',
+            )
+          ) {
+            return false
+          }
+        } else if (source.url !== b.url) {
+          return false
+        }
         return (
           blockedConstraintMatches(b.ref, source.ref) &&
           blockedConstraintMatches(b.path, source.path)
@@ -482,10 +614,17 @@ function areSourcesEquivalentForBlocklist(
     }
   }
 
-  // Check if a git source matches a github blocklist entry
+  // Check if a git source matches a github blocklist entry (incl. owner/*)
   if (source.source === 'git' && blocked.source === 'github') {
     const extractedRepo = extractGitHubRepoFromGitUrl(source.url)
-    if (extractedRepo === blocked.repo) {
+    if (
+      extractedRepo !== null &&
+      githubRepoPolicyMatches(
+        blocked.repo,
+        extractedRepo,
+        'blockedMarketplaces',
+      )
+    ) {
       return (
         blockedConstraintMatches(blocked.ref, source.ref) &&
         blockedConstraintMatches(blocked.path, source.path)
@@ -493,10 +632,13 @@ function areSourcesEquivalentForBlocklist(
     }
   }
 
-  // Check if a github source matches a git blocklist entry (GitHub URL)
+  // Check if a github source matches a git blocklist entry (GitHub URL / owner/*)
   if (source.source === 'github' && blocked.source === 'git') {
     const extractedRepo = extractGitHubRepoFromGitUrl(blocked.url)
-    if (extractedRepo === source.repo) {
+    if (
+      extractedRepo !== null &&
+      githubRepoPolicyMatches(extractedRepo, source.repo, 'blockedMarketplaces')
+    ) {
       return (
         blockedConstraintMatches(blocked.ref, source.ref) &&
         blockedConstraintMatches(blocked.path, source.path)

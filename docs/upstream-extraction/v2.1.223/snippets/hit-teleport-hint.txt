@@ -1,0 +1,40 @@
+634562:> ship it`]}),oa.jsxs(_,{children:["Started a session on the web and want to move it here? Run"," ",oa.jsx($M,{children:"/teleport"})," to pull it into this terminal with full history."]}),oa.jsx(_,{dimColor:!0,children:"Kick off a long task, close your laptop, check progress from your phone."})]})},{id:"model-dial",title:"Dial the model",tagline:"/model, /effort",body:oa.jsxs(x,{flexDirection:"column",gap:1,children:[oa.jsxs(_,{children:["Run ",oa.jsx($M,{children:"/model"})," to switch models. Fable for the hardest problems, Opus for complex work, Sonnet for most tasks, Haiku for quick questions. Each trades speed for depth."]}),oa.jsx(FNe,{frames:[`> [suggestion:/effort] high
+618384:`));await tib(e)}async function I5o(){let{stdout:e}=await sn(so(),[...ks,"branch","--show-current"]);return e.trim()}function CSn(e,t,r){let o=[...kSn(e),Xob(),Job(t)];if(r==="bridge")o.push(Sl("This terminal now has its own copy of the session: new work here stays local and will not appear in the Claude app. To continue on your phone later, run /remote-control in this session.","warning"));return o}async function ASn(e){try{let t=await I5o();if(C(`Current branch before teleport: '${t}'`),e){if(!Mfe(e))throw new pw(`Invalid branch name from cloud session: ${e}`,kt.red(`Invalid branch name from cloud session
+618586:- If it's rejected with feedback: if the feedback contains "__ULTRAPLAN_TELEPORT_LOCAL__", DO NOT revise \u2014 the plan has been teleported to the user's local terminal. Respond only with "Plan teleported. Return to your terminal to continue." Otherwise, revise the plan based on the feedback and call ExitPlanMode again.
+618618:   - On rejection: if the feedback contains "__ULTRAPLAN_TELEPORT_LOCAL__", DO NOT implement \u2014 the plan has been teleported to the user's local terminal. Respond only with "Plan teleported. Return to your terminal to continue." Otherwise, revise the plan based on the feedback and call ExitPlanMode again.
+657739:${P}`:B}catch(G){N("tengu_claude_in_chrome_setup_failed",{platform:Due($t())}),Re(G),C(`[Claude in Chrome] Error (startup offer): ${G}`)}try{w=qv([...w,...await UC(g)],"name")}catch(G){C(`[Claude in Chrome] command refresh after accept failed: ${G}`)}}if(b!==void 0){let G;if(Ia())G="Remote Control is not available inside a cloud session.";else if(r)G="--teleport sessions start without Remote Control. Use /remote-control to enable it.";else{let{getBridgeDisabledReason:B}=await Promise.resolve().then(() => (Qx(),tfr));G=await B()}if(k=G===null,G)pB(`${G}
+528780:/teleport pulls a cloud session into a terminal on your own machine, so it can't run from inside this session. To continue this session locally, run claude --teleport 
+618386:Couldn't parse your git remote: ${s.rawRemoteUrl}`:"";throw new pw(`You must run claude --teleport ${e} from a checkout of ${a}.${l}`,kt.red(`You must run claude --teleport ${e} from a checkout of ${kt.bold(a)}.${l}
+657747:Couldn't parse your git remote: ${Tt.rawRemoteUrl}`}throw new pw(`You must run claude --teleport ${Ce} from a checkout of ${an}.${yr}`,kt.red(`You must run claude --teleport ${Ce} from a checkout of ${kt.bold(an)}.${yr}
+618391:`));default:{let a=s.status;throw Error(`Unhandled repo validation status: ${a}`)}}return await Bfp(e,o,n,t,i)}catch(n){if(n instanceof pw)throw n;let o=En(n);throw C(`Failed to resume teleport session ${e}: ${o.message}`,{level:"error"}),N("tengu_teleport_resume_error",{error_type:we("resume_session_id_catch")}),new pw(o.message,kt.red(`Error: ${o.message}
+374126:Error: Git working directory is not clean. Please commit or stash your changes before using --teleport.
+374125:Git working directory is not clean. Please commit or stash your changes before using --teleport.
+618388:This repo is ${l}.`,kt.red(`You must run claude --teleport ${e} from a checkout of ${kt.bold(a)}.
+374431:[teleportToRemote] reuse-outcome-branch collision guard: default branch unknown (no preflight answer, origin/HEAD 
+618387:`))}case"mismatch":{N("tengu_teleport_error_repo_mismatch_sessions_api",{sessionId:Pr(e),stage:we("resume_validate")});let{sessionDisplay:a,currentDisplay:l}=O5o(s);throw new pw(`You must run claude --teleport ${e} from a checkout of ${a}.
+443969:--teleport sessions start without Remote Control. Use /remote-control to enable it.
+423563:Would you like to stash these changes and continue with teleport?
+528783:. To continue it in your terminal, run claude --teleport 
+423560:Teleport will switch git branches. The following changes were found:
+436952:Cannot destructure property 'teleport' from null or undefined value
+437955:Cannot destructure property 'TeleportResumeWrapper' from null or undefined value
+437957:Cannot destructure property 'TeleportRepoMismatchDialog' from null or undefined value
+437958:Cannot destructure property 'TeleportHostUnverifiedDialog' from null or undefined value
+440261:Cannot destructure property 'checkOutTeleportedSessionBranch' from null or undefined value
+440288:Cannot destructure property 'teleportFromSessionsAPI' from null or undefined value
+444042:Cannot destructure property 'showTeleportErrorsImpl' from null or undefined value
+444075:Cannot destructure property 'teleportWithProgress' from null or undefined value
+333505:Teleport events invalid response shape (data is 
+437844:Run claude --teleport from a checkout of 
+440693:Resume a teleport session, optionally specify session ID
+374284:[teleport] v2 endpoint returned null, trying session-ingress
+374438:[teleportToRemote] reuse-outcome-branch collision guard (pool arm): '
+332554:teleport: failed to fetch session 
+333509:Teleport events hit page cap (
+374210:You must run claude --teleport 
+374218:Failed to resume teleport session 
+374281:[teleport] Starting fetch for session: 
+374285:[teleport] Session logs fetched in 
+374441:[teleportToRemote] reuse-outcome-branch collision guard (observe): '
+374482:Repo is too large to teleport
+440260:No session ID provided for teleport

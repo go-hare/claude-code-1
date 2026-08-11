@@ -70,7 +70,11 @@ export function formatPreflightStatusError(hostname: string, status: number): st
 
 export function formatPreflightConnectError(hostname: string, err: unknown): string {
   if (err instanceof Error) {
-    return `Failed to connect to ${hostname}: ${err.code ?? err.message}`;
+    const code =
+      'code' in err && typeof (err as { code?: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : undefined;
+    return `Failed to connect to ${hostname}: ${code ?? err.message}`;
   }
   return `Failed to connect to ${hostname}: ${String(err)}`;
 }
@@ -139,7 +143,13 @@ export async function checkEndpoints(): Promise<PreflightCheckResult> {
     logError(e as Error);
     return {
       success: false,
-      error: `Connectivity check error: ${e instanceof Error ? e.code || e.message : String(e)}`,
+      error: `Connectivity check error: ${
+        e instanceof Error
+          ? 'code' in e && typeof (e as { code?: unknown }).code === 'string'
+            ? (e as { code: string }).code
+            : e.message
+          : String(e)
+      }`,
     };
   }
 }

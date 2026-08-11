@@ -104,6 +104,7 @@ import { sanitizePath } from './path.js'
 import {
   extractJsonStringField,
   extractLastJsonStringField,
+  extractTypedJsonlField,
   LITE_READ_BUF_SIZE,
   readHeadAndTail,
   readTranscriptForLoad,
@@ -1184,6 +1185,15 @@ class Project {
         this.currentSessionTag = tailTag || undefined
       }
     }
+    // densable planReAppend: cHt(e,"relocated","relocatedCwd") → ??=
+    const relocatedFromTail = extractTypedJsonlField(
+      tail,
+      'relocated',
+      'relocatedCwd',
+    )
+    if (relocatedFromTail) {
+      this.currentSessionRelocatedCwd ??= relocatedFromTail
+    }
 
     // lastPrompt is re-appended so readLiteMetadata can show what the
     // user was most recently doing. Written first so customTitle/tag/etc
@@ -1208,6 +1218,15 @@ class Project {
       appendEntryToFile(this.sessionFile, {
         type: 'tag',
         tag: this.currentSessionTag,
+        sessionId,
+      })
+    }
+    // densable 2.1.223 #8 — keep relocated stamp in tail window after compaction
+    // so resume lite reads still see the post-/cd cwd (SEA: e !== "").
+    if (this.currentSessionRelocatedCwd && this.sessionFile !== '') {
+      appendEntryToFile(this.sessionFile, {
+        type: 'relocated',
+        relocatedCwd: this.currentSessionRelocatedCwd,
         sessionId,
       })
     }
@@ -2983,6 +3002,7 @@ export async function loadTranscriptFromFile(
       contentReplacements,
       worktreeStates,
       endedByModelSessions,
+      relocatedCwds,
     } = await loadTranscriptFile(filePath)
 
     if (messages.size === 0) {
@@ -3005,7 +3025,7 @@ export async function loadTranscriptFromFile(
     const customTitle = customTitles.get(leafMessage.sessionId as UUID)
     const tag = tags.get(leafMessage.sessionId as UUID)
     const sessionId = leafMessage.sessionId as UUID
-    return {
+    const log = {
       ...convertToLogOption(
         transcript,
         0,
@@ -3031,6 +3051,13 @@ export async function loadTranscriptFromFile(
       // densable OGe({}, sessionId ? endedSet.has(sessionId) : false)
       endedByModel: endedByModelSessions.has(sessionId),
     }
+    // densable 2.1.223 #8 — prefer last relocated stamp for projectPath
+    const relocated = relocatedCwds.get(sessionId)
+    if (relocated) {
+      log.projectPath = relocated
+      log.relocatedCwd = relocated
+    }
+    return log
   }
 
   // json log files
@@ -3561,6 +3588,8 @@ export function restoreSessionMetadata(meta: {
   /** densable JCe aiTitle → currentSessionAiTitle for v$e/M9e. */
   aiTitle?: string
   tag?: string
+  /** densable 2.1.223 #8 — last mid-session /cd relocated stamp. */
+  relocatedCwd?: string
   agentName?: string
   agentColor?: string
   agentSetting?: string
@@ -3579,6 +3608,9 @@ export function restoreSessionMetadata(meta: {
   // densable JCe: e.aiTitle → currentSessionAiTitle ??=
   if (meta.aiTitle) project.currentSessionAiTitle ??= meta.aiTitle
   if (meta.tag !== undefined) project.currentSessionTag = meta.tag || undefined
+  // densable MMe: e.relocatedCwd → currentSessionRelocatedCwd ??=
+  if (meta.relocatedCwd)
+    project.currentSessionRelocatedCwd ??= meta.relocatedCwd
   if (meta.agentName) project.currentSessionAgentName = meta.agentName
   if (meta.agentColor) project.currentSessionAgentColor = meta.agentColor
   if (meta.agentSetting) project.currentSessionAgentSetting = meta.agentSetting
@@ -3603,6 +3635,7 @@ export function clearSessionMetadata(): void {
   project.currentSessionTitle = undefined
   project.currentSessionAiTitle = undefined
   project.currentSessionTag = undefined
+  project.currentSessionRelocatedCwd = undefined
   project.currentSessionAgentName = undefined
   project.currentSessionAgentColor = undefined
   project.currentSessionLastPrompt = undefined
@@ -3814,13 +3847,25 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       contextCollapseSnapshot,
       leafUuids,
       endedByModelSessions,
+      relocatedCwds,
     } = await loadTranscriptFile(sessionFile)
 
     if (messages.size === 0) {
       const fallbackGoal = log.sessionId
         ? goals.get(log.sessionId as UUID)
         : undefined
-      return fallbackGoal ? { ...log, goal: fallbackGoal } : log
+      const relocated =
+        log.sessionId != null
+          ? relocatedCwds.get(log.sessionId as UUID)
+          : undefined
+      if (!fallbackGoal && !relocated) return log
+      return {
+        ...log,
+        ...(fallbackGoal ? { goal: fallbackGoal } : {}),
+        ...(relocated
+          ? { relocatedCwd: relocated, projectPath: relocated }
+          : {}),
+      }
     }
 
     // Find the most recent user/assistant leaf message from the transcript
@@ -3831,10 +3876,23 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
         (msg.type === 'user' || msg.type === 'assistant'),
     )
     if (!mostRecentLeaf) {
+      // densable 2.1.223 #8 — no-leaf still hydrates relocated stamp (same as
+      // empty-messages early return) so resume restore can reAppend.
       const fallbackGoal = log.sessionId
         ? goals.get(log.sessionId as UUID)
         : undefined
-      return fallbackGoal ? { ...log, goal: fallbackGoal } : log
+      const relocated =
+        log.sessionId != null
+          ? relocatedCwds.get(log.sessionId as UUID)
+          : undefined
+      if (!fallbackGoal && !relocated) return log
+      return {
+        ...log,
+        ...(fallbackGoal ? { goal: fallbackGoal } : {}),
+        ...(relocated
+          ? { relocatedCwd: relocated, projectPath: relocated }
+          : {}),
+      }
     }
 
     // Build the conversation chain from this leaf
@@ -3873,6 +3931,13 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       isSidechain: transcript[0]?.isSidechain ?? log.isSidechain,
       teamName: transcript[0]?.teamName ?? log.teamName,
       leafUuid: mostRecentLeaf?.uuid ?? log.leafUuid,
+      // densable 2.1.223 #8 — prefer relocated stamp for resume projectPath
+      projectPath: sessionId
+        ? (relocatedCwds.get(sessionId) ?? log.projectPath)
+        : log.projectPath,
+      relocatedCwd: sessionId
+        ? (relocatedCwds.get(sessionId) ?? log.relocatedCwd)
+        : log.relocatedCwd,
       fileHistorySnapshots: buildFileHistorySnapshotChain(
         fileHistorySnapshots,
         transcript,
@@ -4348,6 +4413,8 @@ export async function loadTranscriptFile(
    * (unless hard-disable stub eKn() is true — always false in 214).
    */
   endedByModelSessions: Set<UUID>
+  /** densable 2.1.223 #8 — last relocatedCwd per sessionId (mid-session /cd). */
+  relocatedCwds: Map<UUID, string>
 }> {
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
@@ -4371,6 +4438,8 @@ export async function loadTranscriptFile(
   >()
   // densable: sessions with ended-by-model marker (i.add when !eKn())
   const endedByModelSessions = new Set<UUID>()
+  /** densable 2.1.223 #8 — last relocatedCwd per sessionId (mid-session /cd). */
+  const relocatedCwds = new Map<UUID, string>()
   // Array, not Map — commit order matters (nested collapses).
   const contextCollapseCommits: ContextCollapseCommitEntry[] = []
   // Last-wins — later entries supersede.
@@ -4475,6 +4544,12 @@ export async function loadTranscriptFile(
           prNumbers.set(entry.sessionId, entry.prNumber)
           prUrls.set(entry.sessionId, entry.prUrl)
           prRepositories.set(entry.sessionId, entry.prRepository)
+        } else if (
+          entry.type === 'relocated' &&
+          entry.sessionId &&
+          entry.relocatedCwd
+        ) {
+          relocatedCwds.set(entry.sessionId as UUID, entry.relocatedCwd)
         }
       }
     }
@@ -4570,6 +4645,13 @@ export async function loadTranscriptFile(
         contextCollapseCommits.push(entry)
       } else if (entry.type === 'marble-origami-snapshot') {
         contextCollapseSnapshot = entry
+      } else if (
+        entry.type === 'relocated' &&
+        entry.sessionId &&
+        entry.relocatedCwd
+      ) {
+        // densable 2.1.223 #8 — last-wins per sessionId
+        relocatedCwds.set(entry.sessionId as UUID, entry.relocatedCwd)
       }
     }
   } catch {
@@ -4686,6 +4768,7 @@ export async function loadTranscriptFile(
     contextCollapseSnapshot,
     leafUuids,
     endedByModelSessions,
+    relocatedCwds,
   }
 }
 
@@ -5509,6 +5592,8 @@ type LiteMetadata = {
   gitBranch?: string
   isSidechain: boolean
   projectPath?: string
+  /** densable 2.1.223 #8 — last relocated stamp (if any). */
+  relocatedCwd?: string
   teamName?: string
   customTitle?: string
   summary?: string
@@ -5545,6 +5630,7 @@ export async function loadAllLogsFromSessionFile(
     contentReplacements,
     leafUuids,
     endedByModelSessions,
+    relocatedCwds,
   } = await loadTranscriptFile(sessionFile, { keepAllLeaves: true })
 
   if (messages.size === 0) return []
@@ -5607,7 +5693,10 @@ export async function loadAllLogsFromSessionFile(
       prUrl: prUrls.get(sessionId),
       prRepository: prRepositories.get(sessionId),
       gitBranch: leafMessage.gitBranch,
-      projectPath: projectPathOverride ?? firstMessage.cwd,
+      // densable 2.1.223 #8 — prefer relocated stamp over first-message cwd
+      projectPath:
+        projectPathOverride ?? relocatedCwds.get(sessionId) ?? firstMessage.cwd,
+      relocatedCwd: relocatedCwds.get(sessionId),
       fileHistorySnapshots: buildFileHistorySnapshotChain(
         fileHistorySnapshots,
         chain,
@@ -5679,7 +5768,9 @@ async function readLiteMetadata(
   // Works even when the first line is truncated (>64KB message).
   const isSidechain =
     head.includes('"isSidechain":true') || head.includes('"isSidechain": true')
-  const projectPath = extractJsonStringField(head, 'cwd')
+  // densable 2.1.223 #8 — lite projectPath prefers last relocated stamp
+  const relocatedCwd = extractTypedJsonlField(tail, 'relocated', 'relocatedCwd')
+  const projectPath = relocatedCwd || extractJsonStringField(head, 'cwd')
   const teamName = extractJsonStringField(head, 'teamName')
   const agentSetting = extractJsonStringField(head, 'agentSetting')
 
@@ -5732,6 +5823,7 @@ async function readLiteMetadata(
     gitBranch,
     isSidechain,
     projectPath,
+    relocatedCwd,
     teamName,
     customTitle,
     summary,
@@ -5973,6 +6065,8 @@ async function enrichLog(
     prUrl: meta.prUrl,
     prRepository: meta.prRepository,
     projectPath: meta.projectPath ?? log.projectPath,
+    // densable 2.1.223 #8 — surface stamp for restoreSessionMetadata
+    relocatedCwd: meta.relocatedCwd ?? log.relocatedCwd,
     sessionKind: meta.sessionKind,
   }
 

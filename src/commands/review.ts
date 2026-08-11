@@ -31,13 +31,20 @@ const LOCAL_REVIEW_PROMPT = (args: string) => `
       PR number: ${args}
     `
 
+/**
+ * densable 2.1.223: `/review` is an alias of `/code-review` (see codeReview.ts).
+ * Keep this legacy prompt command hidden so name resolution prefers the alias
+ * on code-review; residual for any direct import/tests that still load it.
+ */
 const review: Command = {
   type: 'prompt',
   name: 'review',
-  description: 'Review a pull request',
+  description: 'Review a pull request (deprecated — use /code-review)',
   progressMessage: 'reviewing pull request',
   contentLength: 0,
   source: 'builtin',
+  // Prefer code-review's aliases:['review'] for dispatch/menu.
+  isHidden: true,
   async getPromptForCommand(args): Promise<ContentBlockParam[]> {
     return [{ type: 'text', text: LOCAL_REVIEW_PROMPT(args) }]
   },

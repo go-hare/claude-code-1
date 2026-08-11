@@ -1,0 +1,21 @@
+# densable 2.1.223 #4 — Bash permission bypass (hide parts of itself)
+
+SEA ENt pre-checks (reason strings in binary):
+- Contains lone surrogate          (A_s)
+- Contains control characters      (C_s)
+- Contains Unicode whitespace      (cC_)
+- Contains backslash-escaped whitespace  (R_s)
+- Contains zsh ~[ dynamic directory syntax
+- Contains zsh =cmd equals expansion
+- Contains zsh <N-M> numeric-range glob  (I_s)
+- Contains brace with quote character (expansion obfuscation)
+
+All return `{ kind: 'too-complex', differential: true }`.
+
+Regex (string table):
+- A_s: `/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/`
+- I_s: `/<\d*-\d*>/`
+- R_s: `/\\[ \t]|(?:^|[^ \t\\])(?:\\\\)*\\\n|[ \t](?:\\\\)+\\\n/`
+
+Local: `src/utils/bash/ast.ts` `parseForSecurityFromAst`
+Tests: `src/utils/bash/__tests__/bashHide.223.test.ts`

@@ -4771,11 +4771,15 @@ Read the team config to discover your teammates' names. Check the task list peri
       ])
     }
     case 'diagnostics': {
-      if (attachment.files.length === 0) return []
+      // densable 2.1.223 #14 — full sanitizeDiagnosticFiles (range.start number
+      // gate, severity map, end default, dual gold drop strings).
+      const files = DiagnosticTrackingService.sanitizeDiagnosticFiles(
+        attachment.files,
+      )
+      if (files.length === 0) return []
 
-      // Use the centralized diagnostic formatting
       const diagnosticSummary =
-        DiagnosticTrackingService.formatDiagnosticsSummary(attachment.files)
+        DiagnosticTrackingService.formatDiagnosticsSummary(files)
 
       return wrapMessagesInSystemReminder([
         createUserMessage({

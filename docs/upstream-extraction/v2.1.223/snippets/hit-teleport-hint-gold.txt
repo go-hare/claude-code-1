@@ -1,0 +1,2 @@
+538899:/teleport pulls a cloud session into a terminal on your own machine, so it can't run from inside this session. To continue this session locally, run claude --teleport 
+538902:. To continue it in your terminal, run claude --teleport 

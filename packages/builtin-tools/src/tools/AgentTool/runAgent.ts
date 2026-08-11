@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import { logForDebugging } from 'src/utils/debug.js'
+import { isBypassPermissionsModeDisabled } from 'src/utils/permissions/permissionSetup.js'
 import { getProjectRoot, getSessionId } from 'src/bootstrap/state.js'
 import { getCommand, getSkillToolCommands, hasCommand } from 'src/commands.js'
 import {
@@ -501,8 +502,22 @@ export async function* runAgent({
       liveTask && typeof liveTask === 'object' && 'selectedAgent' in liveTask
         ? (liveTask as { selectedAgent?: AgentDefinition }).selectedAgent
         : undefined
-    const agentPermissionMode =
+    let agentPermissionMode =
       liveSelectedAgent?.permissionMode ?? agentDefinition.permissionMode
+
+    // densable 2.1.223: agent definition bypassPermissions must honor org disable
+    // policy and the contained no-internet availability flag — keep parent mode.
+    if (
+      agentPermissionMode === 'bypassPermissions' &&
+      (isBypassPermissionsModeDisabled() ||
+        !state.toolPermissionContext.isBypassPermissionsModeAvailable)
+    ) {
+      logForDebugging(
+        `Subagent declared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled); keeping parent mode '${state.toolPermissionContext.mode}'.`,
+        { level: 'warn' },
+      )
+      agentPermissionMode = undefined
+    }
 
     // Override permission mode if agent defines one (unless parent is bypassPermissions, acceptEdits, or auto)
     if (

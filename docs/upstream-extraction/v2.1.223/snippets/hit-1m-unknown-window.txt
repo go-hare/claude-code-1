@@ -1,0 +1,5 @@
+408940:This command configures when auto-compaction happens. The actual threshold is the minimum of this setting and your model's maximum context window.
+436653:map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.
+436633:CLAUDE_CODE_DISABLE_1M_CONTEXT is set, but the 
+320413:CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT
+320417:CLAUDE_CODE_DISABLE_1M_CONTEXT

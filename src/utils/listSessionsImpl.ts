@@ -17,6 +17,7 @@ import {
   extractFirstPromptFromHead,
   extractJsonStringField,
   extractLastJsonStringField,
+  extractTypedJsonlField,
   findProjectDir,
   getProjectsDir,
   MAX_SANITIZED_LENGTH,
@@ -124,8 +125,13 @@ export function parseSessionInfoFromLite(
     extractLastJsonStringField(tail, 'gitBranch') ||
     extractJsonStringField(head, 'gitBranch') ||
     undefined
+  // densable 2.1.223 #8 — prefer last `relocated` stamp (after mid-session /cd)
+  // over the first-message cwd so resume listing binds to the rehomed cwd.
   const sessionCwd =
-    extractJsonStringField(head, 'cwd') || projectPath || undefined
+    extractTypedJsonlField(tail, 'relocated', 'relocatedCwd') ||
+    extractJsonStringField(head, 'cwd') ||
+    projectPath ||
+    undefined
   // Type-scope tag extraction to the {"type":"tag"} JSONL line to avoid
   // collision with tool_use inputs containing a `tag` parameter (git tag,
   // Docker tags, cloud resource tags). Mirrors sessionStorage.ts:608.

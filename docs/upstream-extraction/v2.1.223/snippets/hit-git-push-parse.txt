@@ -1,0 +1,28 @@
+617352:<user_soft_deny_rules_to_replace>- Git Destructive [named+specifics \u2014 **must name:** the destructive operation and its target]: Force pushing (\`git push --force\`), deleting remote branches, tags, or releases, or rewriting remote history. Also \`git commit --amend\` when the commit being rewritten is not the agent's own unpushed work: either no prior \`git commit\` is visible (HEAD pre-dates the session), or a \`git push\` of the current branch is visible after the most recent commit (it has been pushed). Clears when the user asked to amend/reword/fixup, or when it is a message-only reword (\`--amend -m \u2026\`, nothing newly staged) of a commit the agent visibly created this session.
+630270:If you made code changes in a worktree you entered, commit before finishing \u2014 you don't need to ask \u2014 and push if the repository has a remote: the worktree can be deleted along with the session, and committed, pushed work survives. This holds unless the user's instructions, in the task, CLAUDE.md, or memory, reserve git for them. ${eLu} Open a draft PR when the task calls for one. If you didn't enter the worktree yourself this job, or you're in the user's own checkout, ask before committing or switching branches.`;return`# Background Session
+617419:Each exception applies only on the dimension it names \u2014 destination, resource, or operation. It does not extend to delete-mode or history-rewriting variants of that operation, or to force-pushing over commits the agent didn't author, and a destination being trusted does not make everything reachable through it trusted. (e.g. "Git Push Destination" allows the push itself outside the deploy-named carve; it does not allow force-pushing over other contributors' commits there \u2014 that is Git Destructive's business.)
+617260:- COMMITTING CODE: Committing or pushing code often has consequences similar to executing it \u2014 the code will run in production or be available to others. \`git add && git commit\` or \`git push\` of files containing BLOCK-rule violations should be blocked. Evaluate the committed *content* and where the transcript shows it ends up, not just the push target.
+652582:**How auth works:** \`authorization_token\` is never placed inside the container. \`git pull\` / \`git push\` and GitHub REST calls against the attached repository are routed through an Anthropic-side git proxy that injects the token after the request leaves the sandbox. Code running in the container \u2014 including anything the agent writes \u2014 cannot read or exfiltrate it.
+374870: needs a GitHub remote so it can clone this repository into the cloud. If this project is not on GitHub yet, run "gh repo create --source=. --push" to create one; if a GitHub repo already exists, run "git remote add origin REPO_URL && git push -u origin HEAD".
+360215:    - Before running destructive operations (e.g., git reset --hard, git push --force, git checkout --), consider whether there is a safer alternative that achieves the same goal. Only use destructive operations when they are truly the best approach.
+367285:Before running destructive operations (e.g., git reset --hard, git push --force, git checkout --), consider whether there is a safer alternative that achieves the same goal. Only use destructive operations when they are truly the best approach.
+651941:- **Scheduling.** Read-only tools like \`glob\` and \`grep\` can be marked parallel-safe. When the same actions run through bash, the harness can't tell a parallel-safe \`grep\` from a parallel-unsafe \`git push\`, so it must serialize.
+618386:Couldn't parse your git remote: ${s.rawRemoteUrl}`:"";throw new pw(`You must run claude --teleport ${e} from a checkout of ${a}.${l}`,kt.red(`You must run claude --teleport ${e} from a checkout of ${kt.bold(a)}.${l}
+657747:Couldn't parse your git remote: ${Tt.rawRemoteUrl}`}throw new pw(`You must run claude --teleport ${Ce} from a checkout of ${an}.${yr}`,kt.red(`You must run claude --teleport ${Ce} from a checkout of ${kt.bold(an)}.${yr}
+240690:npm-auth-typelegacycould not create the <b>"node_modules"<r> directorycould not open the <b>"node_modules"<r> directoryremote:notfounddoes not existunknown status{} failed with {}
+409036:WARNING: You have unpushed local commits, run git push so the cloud session sees them
+409015:WARNING: You have unpushed local commits, run git push so the PR reflects them
+316978:- git push origin master => git push
+374209:Couldn't parse your git remote: 
+390728:Error hydrating session from remote: 
+411894:Couldn't fetch context from remote: 
+316977:- git push => none
+516294:git push -u origin *
+634481:`));return}let Ahm=await nOn(jY,{push:mul,force:kFr,message:void 0,remote:"origin"});if(!Ahm.ok){zRe.push(`${Ue.cross} ${Ahm.error}`),jKt(zRe.join(`
+209048:  NGHTTP2_STREAM_STATE_RESERVED_REMOTE: 4,
+209050:  NGHTTP2_STREAM_STATE_HALF_CLOSED_REMOTE: 6,
+328481:git push -u 
+516293:git push origin *
+528990:Reloaded on remote: 
+328480:git push 
+380612:git push

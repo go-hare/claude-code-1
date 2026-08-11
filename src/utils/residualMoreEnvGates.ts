@@ -98,6 +98,17 @@ export function getGatewayModelsCachePath(configHome: string): string {
 }
 
 /**
+ * densable 2.1.223 #9 — gateway discovery keeps Claude models even when the
+ * id is provider-prefixed (`vertex_ai/claude-*`, `bedrock/anthropic.claude-*`).
+ * SEA: `a.data.data.filter((d)=>/(claude|anthropic)/i.test(d.id))`
+ */
+export const GATEWAY_USABLE_MODEL_ID_RE = /(claude|anthropic)/i
+
+export function isGatewayUsableModelId(id: string): boolean {
+  return GATEWAY_USABLE_MODEL_ID_RE.test(id)
+}
+
+/**
  * Official mkr densable pure parse — map cached gateway models to picker options
  * when $5l is on and cache baseUrl matches current ANTHROPIC_BASE_URL.
  * Does not touch the filesystem; pass raw JSON via `raw`.
@@ -120,7 +131,9 @@ export function parseGatewayModelOptionsFromCache(input: {
     return parsed.models
       .filter(
         (m): m is { id: string; display_name?: string } =>
-          typeof m?.id === 'string' && m.id.length > 0,
+          typeof m?.id === 'string' &&
+          m.id.length > 0 &&
+          isGatewayUsableModelId(m.id),
       )
       .map(m => ({
         value: m.id,
@@ -155,6 +168,8 @@ export function planGatewayModelsCacheWrite(input: {
       if (!row || typeof row !== 'object') return null
       const r = row as { id?: unknown; display_name?: unknown; name?: unknown }
       if (typeof r.id !== 'string' || !r.id) return null
+      // densable 2.1.223 #9 — keep provider-prefixed Claude ids
+      if (!isGatewayUsableModelId(r.id)) return null
       const display =
         typeof r.display_name === 'string'
           ? r.display_name

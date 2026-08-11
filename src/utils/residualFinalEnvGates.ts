@@ -1947,6 +1947,49 @@ export function is1mContextEnvDisabled(
   return isEnvTruthy(env.CLAUDE_CODE_DISABLE_1M_CONTEXT)
 }
 
+/**
+ * densable 2.1.223 #17 — opt out of assumed-window auto-compact for
+ * unrecognized model IDs (restores wait-for-the-API behavior).
+ */
+export function isUnknownModelWindowEnforcementDisabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT)
+}
+
+/**
+ * densable wait-for-API window when unknown-model enforcement is disabled —
+ * large enough that auto-compact does not fire on the assumed 200K.
+ */
+export const UNKNOWN_MODEL_WAIT_FOR_API_WINDOW = 100_000_000
+
+/**
+ * densable 2.1.223 #16 gold — DISABLE_1M set but session window still above 200K.
+ */
+export function formatDisable1mContextNotEnforcedWarning(
+  model: string,
+  limitTokens: number = 200_000,
+): string {
+  const k = Math.round(limitTokens / 1000)
+  return (
+    `CLAUDE_CODE_DISABLE_1M_CONTEXT is set, but the ${k}K limit isn't enforced for ${model}, so this session can grow past it. ` +
+    `To enforce it, set CLAUDE_CODE_AUTO_COMPACT_WINDOW=${limitTokens} (or the autoCompactWindow setting)`
+  )
+}
+
+/**
+ * densable 2.1.223 #17 gold — unrecognized model id auto-compact assumes window.
+ */
+export function formatUnknownModelWindowEnforcementNotice(
+  model: string,
+  assumedTokens: number = 200_000,
+): string {
+  return (
+    `"${model}" is not a model this version of Claude Code recognizes, so auto-compact will keep this session within ${assumedTokens} tokens (the context window it assumes). ` +
+    `map it in the modelOverrides setting or update Claude Code; CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.`
+  )
+}
+
 /** Official DISABLE_THINKING densable. */
 export function isThinkingDisabled(
   env: NodeJS.ProcessEnv = process.env,

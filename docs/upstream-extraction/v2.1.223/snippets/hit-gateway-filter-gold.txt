@@ -1,0 +1,14 @@
+SEA densable 2.1.223 gateway discovery filter (decompiled):
+
+let l=a.data.data.filter((d)=>/(claude|anthropic)/i.test(d.id));
+if(l.length===0){C("[gatewayDiscovery] 0 usable models after filter");return}
+
+Keeps provider-prefixed Claude IDs such as:
+- vertex_ai/claude-*
+- bedrock/anthropic.claude-*
+
+Local land:
+- src/utils/residualMoreEnvGates.ts
+  - GATEWAY_USABLE_MODEL_ID_RE = /(claude|anthropic)/i
+  - isGatewayUsableModelId
+  - planGatewayModelsCacheWrite + parseGatewayModelOptionsFromCache

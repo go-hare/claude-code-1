@@ -326,6 +326,13 @@ const BRACE_EXPANSION_RE = /\{[^{}\s]*(,|\.\.)[^{}\s]*\}/
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B-\x1F\x7F]/
 
 /**
+ * densable 2.1.223 #4 `A_s` — lone UTF-16 surrogates (unpaired high/low).
+ * tree-sitter and bash disagree on these; reject as too-complex (differential).
+ */
+const LONE_SURROGATE_RE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+/**
  * Unicode whitespace beyond ASCII. These render invisibly (or as regular
  * spaces) in terminals so a user reviewing the command can't see them, but
  * bash treats them as literal word characters. Blocks NBSP, zero-width
@@ -335,20 +342,16 @@ const UNICODE_WHITESPACE_RE =
   /[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]/
 
 /**
- * Backslash immediately before whitespace. bash treats `\ ` as a literal
- * space inside the current word, but tree-sitter returns the raw text with
- * the backslash still present. argv[0] from tree-sitter is `cat\ test`
- * while bash runs `cat test` (with a literal space). Rather than
- * reimplement bash's unescaping rules, we reject these — they're rare in
- * practice and trivial to rewrite with quotes.
+ * densable 2.1.223 #4 `R_s` — backslash-whitespace / line-continuation
+ * differentials vs tree-sitter tokenization.
  *
- * Also matches `\` before newline (line continuation) when adjacent to a
- * non-whitespace char. `tr\<NL>aceroute` — bash joins to `traceroute`, but
- * tree-sitter splits into two words (differential). When `\<NL>` is preceded
- * by whitespace (e.g. `foo && \<NL>bar`), there's no word to join — both
- * parsers agree, so we allow it.
+ * bash treats `\ ` as a literal space inside the current word, but
+ * tree-sitter returns the raw text with the backslash still present.
+ * Also covers densable multi-backslash + newline forms:
+ * SEA: /\\[ \t]|(?:^|[^ \t\\])(?:\\\\)*\\\n|[ \t](?:\\\\)+\\\n/
  */
-const BACKSLASH_WHITESPACE_RE = /\\[ \t]|[^ \t\n\\]\\\n/
+const BACKSLASH_WHITESPACE_RE =
+  /\\[ \t]|(?:^|[^ \t\\])(?:\\\\)*\\\n|[ \t](?:\\\\)+\\\n/
 
 /**
  * Zsh dynamic named directory expansion: ~[name]. In zsh this invokes the
@@ -367,6 +370,13 @@ const ZSH_TILDE_BRACKET_RE = /~\[/
  * and `--flag=val` have `=` mid-word and are not expanded by zsh.
  */
 const ZSH_EQUALS_EXPANSION_RE = /(?:^|[\s;&|])=[a-zA-Z_]/
+
+/**
+ * densable 2.1.223 #4 `I_s` — zsh numeric-range glob `<N-M>` / `<->`.
+ * bash treats as redirection-ish or literal; zsh expands as filename range.
+ * SEA reason: "Contains zsh <N-M> numeric-range glob"
+ */
+const ZSH_NUMERIC_RANGE_GLOB_RE = /<\d*-\d*>/
 
 /**
  * Brace character combined with quote characters. Constructions like
@@ -478,34 +488,62 @@ export function parseForSecurityFromAst(
   // word boundaries. These run before tree-sitter because they're the known
   // tree-sitter/bash differentials. Everything after this point trusts
   // tree-sitter's tokenization.
+  // densable 2.1.223 #4 ENt pre-checks — all differential:!0 (zsh/bash or
+  // tree-sitter/bash disagreement). Fail closed → permission prompt.
+  if (LONE_SURROGATE_RE.test(cmd)) {
+    return {
+      kind: 'too-complex',
+      reason: 'Contains lone surrogate',
+      differential: true,
+    }
+  }
   if (CONTROL_CHAR_RE.test(cmd)) {
-    return { kind: 'too-complex', reason: 'Contains control characters' }
+    return {
+      kind: 'too-complex',
+      reason: 'Contains control characters',
+      differential: true,
+    }
   }
   if (UNICODE_WHITESPACE_RE.test(cmd)) {
-    return { kind: 'too-complex', reason: 'Contains Unicode whitespace' }
+    return {
+      kind: 'too-complex',
+      reason: 'Contains Unicode whitespace',
+      differential: true,
+    }
   }
   if (BACKSLASH_WHITESPACE_RE.test(cmd)) {
     return {
       kind: 'too-complex',
       reason: 'Contains backslash-escaped whitespace',
+      differential: true,
     }
   }
   if (ZSH_TILDE_BRACKET_RE.test(cmd)) {
     return {
       kind: 'too-complex',
       reason: 'Contains zsh ~[ dynamic directory syntax',
+      differential: true,
     }
   }
   if (ZSH_EQUALS_EXPANSION_RE.test(cmd)) {
     return {
       kind: 'too-complex',
       reason: 'Contains zsh =cmd equals expansion',
+      differential: true,
+    }
+  }
+  if (ZSH_NUMERIC_RANGE_GLOB_RE.test(cmd)) {
+    return {
+      kind: 'too-complex',
+      reason: 'Contains zsh <N-M> numeric-range glob',
+      differential: true,
     }
   }
   if (BRACE_WITH_QUOTE_RE.test(maskBracesInQuotedContexts(cmd))) {
     return {
       kind: 'too-complex',
       reason: 'Contains brace with quote character (expansion obfuscation)',
+      differential: true,
     }
   }
 

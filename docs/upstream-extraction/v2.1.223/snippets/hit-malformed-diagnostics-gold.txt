@@ -1,0 +1,15 @@
+# densable 2.1.223 #14 — sanitizeDiagnosticFiles gold
+
+SEA (d8.sanitizeDiagnosticFiles):
+- non-array: Dropped a ${missing|non-array} diagnostics files payload from a replayed attachment
+- per-diag gate: message string + range.start.line/character number
+- Ruy/fvd severity: error/warning/info/information/hint → Error/Warning/Info/Hint
+- end default → start when end not both numbers
+- empty sanitized diags → count as malformed file
+- Dropped N malformed file(s) and M malformed diagnostic(s) from a replayed diagnostics attachment
+- OOo WeakSet + pvd Set dedupe drop logs
+
+Local:
+- DiagnosticTrackingService.sanitizeDiagnosticFiles + mapDiagnosticSeverity
+- messages.ts case diagnostics → sanitize + formatDiagnosticsSummary
+- tests: src/utils/__tests__/malformedDiagnostics.223.test.ts

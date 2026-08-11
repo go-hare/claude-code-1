@@ -535,6 +535,11 @@ export type GlobalConfig = {
 
   // Skill usage tracking for autocomplete ranking
   skillUsage?: Record<string, { usageCount: number; lastUsedAt: number }>
+  /**
+   * densable 2.1.223 `codeReviewLastEffort` — last effort level the user typed
+   * on `/code-review` (or alias `/review`). Reused when no level is given.
+   */
+  codeReviewLastEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   // Official marketplace auto-install tracking
   officialMarketplaceAutoInstallAttempted?: boolean // Whether auto-install was attempted
   officialMarketplaceAutoInstalled?: boolean // Whether auto-install succeeded

@@ -1,0 +1,40 @@
+318339:Browser tools were not enabled: the session switched to a mode that auto-allows tool calls without prompts (bypass permissions) while setup was in progress, and Claude in Chrome is not wired into that configuration. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the session leaves that mode, /chrome completes the connection.
+610091:Permission mode for controlling how tool executions are handled. 'default' - Standard behavior, prompts for dangerous operations. 'acceptEdits' - Auto-accept file edit operations. 'bypassPermissions' - Bypass all permission checks (requires allowDangerouslySkipPermissions). 'plan' - Planning mode, no actual tool execution. 'dontAsk' - Don't prompt for permissions, deny if not pre-approved. 'auto' - Use a model classifier to approve/deny permission prompts.
+655652:- The \`Shift+Tab\` permission-mode cycle is \`default \u2192 acceptEdits \u2192 plan \u2192 bypassPermissions \u2192 auto \u2192 default\`, where \`bypassPermissions\` and \`auto\` appear only when available in that session. \`dontAsk\` is never in the cycle.
+397331:canUseTool will not be invoked: permissionMode 'bypassPermissions' auto-approves every tool call (except explicit deny rules) before the callback is consulted. To gate every tool call, use a PreToolUse hook instead.
+376965:Subagent declared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled); keeping parent mode '
+645098:- The setting is \`permissions.defaultMode\`; valid modes are \`acceptEdits\`, \`auto\`, \`bypassPermissions\`, \`default\`, \`dontAsk\`, \`plan\` (\`manual\` is an accepted alias for \`default\`).
+400267:[externalMetadataToAppState] Refusing restored mode 'bypassPermissions' (disabled by settings/policy or session not launched with --dangerously-skip-permissions); falling back to 'default'
+437550:In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+458531:Valid modes: "acceptEdits" (ask before file changes), "plan" (analysis only), "bypassPermissions" (auto-accept all), or "default" (standard behavior)
+437552:By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+388262:Cannot set permission mode to bypassPermissions because it is disabled by settings or configuration
+388263:Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions
+414192:--bg with bypassPermissions requires accepting the disclaimer first. Run `claude --dangerously-skip-permissions` once interactively.
+443840:Make bypass-permissions mode available to dispatched sessions without defaulting to it
+329350:Whether the user has accepted the bypass permissions mode dialog
+388405:bypassPermissions mode is being disabled by feature gate (async check)
+331673:Bypass permissions mode was disabled by your organization policy
+359765:setMode:'bypassPermissions' is session-scoped; not persisting as defaultMode to 
+437701:Cannot destructure property 'BypassPermissionsModeDialog' from null or undefined value
+438087:Cannot destructure property 'bypassPermissionsModeAccepted' from null or undefined value
+437554:WARNING: Claude Code running in Bypass Permissions mode
+331672:bypassPermissions mode is disabled by feature gate
+331675:Bypass permissions mode was disabled by settings
+438083:Failed to migrate bypass permissions accepted: 
+331674:bypassPermissions mode is disabled by settings
+428829: and bypass permissions
+428835:Yes, and bypass permissions
+443838:Alias for --permission-mode bypassPermissions
+457981:Bypass Permissions
+457983:bypass permissions
+318757:setSessionBypassPermissionsMode
+318966:getSessionBypassPermissionsMode
+323120:shouldDisableBypassPermissions
+323135:isBypassPermissionsModeDisabled
+323147:createDisabledBypassPermissionsContext
+323148:checkAndDisableBypassPermissions
+324618:BypassPermissionsModeDialog
+325147:sessionBypassPermissionsMode
+328906:bypassPermissions
+329128:disableBypassPermissionsMode
