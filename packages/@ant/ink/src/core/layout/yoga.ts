@@ -103,6 +103,14 @@ export class YogaLayoutNode implements LayoutNode {
     this.yoga.markDirty()
   }
 
+  /** densable clearLayoutCacheRecursive — delegate to pure-JS yoga Node. */
+  clearLayoutCacheRecursive(): void {
+    const yoga = this.yoga as {
+      clearLayoutCacheRecursive?: () => void
+    }
+    yoga.clearLayoutCacheRecursive?.()
+  }
+
   // Computed layout
 
   getComputedLeft(): number {

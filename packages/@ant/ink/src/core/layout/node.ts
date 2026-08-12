@@ -102,6 +102,11 @@ export type LayoutNode = {
   setMeasureFunc(fn: LayoutMeasureFunc): void
   unsetMeasureFunc(): void
   markDirty(): void
+  /**
+   * densable clearLayoutCacheRecursive — optional on LayoutNode; pure-JS yoga
+   * implements it for layout-fault recovery (ink 2.1.228 #1).
+   */
+  clearLayoutCacheRecursive?(): void
 
   // Layout reading (post-layout)
   getComputedLeft(): number

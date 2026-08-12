@@ -575,6 +575,42 @@ export class Node {
 
   // -- Dirty tracking
 
+  /**
+   * densable clearLayoutCacheRecursive — walk subtree, clear layout caches and
+   * mark dirty so a subsequent calculateLayout starts from a clean slate after
+   * a layout fault. Cap iterations with live-node heuristic to avoid runaway.
+   */
+  clearLayoutCacheRecursive(): void {
+    const visited = new Set<Node>()
+    const stack: Node[] = [this]
+    // densable: (this.config.liveNodes|0)*4+1024 — we use global live count.
+    let remaining = (_yogaLiveNodes | 0) * 4 + 1024
+    while (stack.length > 0 && --remaining >= 0) {
+      const n = stack.pop()!
+      if (!(n instanceof Node) || visited.has(n)) continue
+      visited.add(n)
+      n.isDirty_ = true
+      n._hasL = false
+      n._hasM = false
+      n._cN = 0
+      n._cWr = 0
+      n._cGen = -1
+      n._fbCrossMode = 0 as MeasureMode
+      n._fbGen = -1
+      const kids = n.children
+      if (Array.isArray(kids)) {
+        for (let i = 0, s = kids.length; i < s && i < remaining; i++) {
+          stack.push(kids[i]!)
+        }
+      }
+    }
+    try {
+      this.markDirty()
+    } catch {
+      // ignore
+    }
+  }
+
   markDirty(): void {
     this.isDirty_ = true
     if (this.parent && !this.parent.isDirty_) this.parent.markDirty()

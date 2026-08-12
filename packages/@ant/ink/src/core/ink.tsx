@@ -313,6 +313,18 @@ export default class Ink {
     cacheHits: number;
     live: number;
   } = { ms: 0, visited: 0, measured: 0, cacheHits: 0, live: 0 };
+  /**
+   * densable 2.1.228 #1 layout fault recovery:
+   * layoutFailed / consecutiveLayoutFailures / report-once sets.
+   * fL_=16, Fwd=5, mL_=50
+   */
+  private layoutFailed = false;
+  private consecutiveLayoutFailures = 0;
+  private readonly reportedLayoutFaultMessages = new Set<string>();
+  private reportedLayoutFaultRecovered = false;
+  private reportedLayoutFaultDropped = false;
+  private reportedLayoutFaultPersisting = false;
+  private layoutFaultDebugLines = 0;
   /** Official liveCountsEnabled from CLAUDE_CODE_BENCH_LIVE_COUNTS. */
   private readonly liveCountsEnabled: boolean;
   private lastLiveCountSampleAt = 0;
@@ -497,21 +509,14 @@ export default class Ink {
     this.rootNode.onRender = this.scheduleRender;
     this.rootNode.onImmediateRender = this.onRender;
     this.rootNode.onComputeLayout = () => {
-      // Calculate layout during React's commit phase so useLayoutEffect hooks
-      // have access to fresh layout data
-      // Guard against accessing freed Yoga nodes after unmount
+      // densable 2.1.228 #1: runLayoutPass with try/recover instead of bare
+      // calculateLayout — yoga faults clear caches and re-layout once.
       if (this.isUnmounted) {
         return;
       }
-
-      if (this.rootNode.yogaNode) {
-        const t0 = performance.now();
-        this.rootNode.yogaNode.setWidth(this.terminalColumns);
-        this.rootNode.yogaNode.calculateLayout(this.terminalColumns);
-        const ms = performance.now() - t0;
-        recordYogaMs(ms);
-        const c = getYogaCounters();
-        this.lastYogaCounters = { ms, ...c };
+      const yoga = this.rootNode.yogaNode;
+      if (yoga) {
+        this.runLayoutPass(yoga);
       }
     };
 
@@ -723,6 +728,161 @@ export default class Ink {
     );
   }
 
+  /**
+   * densable runLayoutPass — try calculateYogaLayout; on throw, relayoutFromScratch.
+   */
+  private runLayoutPass(yogaNode: NonNullable<typeof this.rootNode.yogaNode>): void {
+    try {
+      this.calculateYogaLayout(yogaNode);
+      this.layoutFailed = false;
+      this.consecutiveLayoutFailures = 0;
+    } catch (err) {
+      const result = this.relayoutFromScratch(yogaNode);
+      this.layoutFailed = !result.recovered;
+      this.consecutiveLayoutFailures = result.recovered ? 0 : this.consecutiveLayoutFailures + 1;
+      const fault = Ink.describeLayoutFault(err);
+      const retryFault =
+        result.recovered || result.retryFault === undefined ? undefined : Ink.describeLayoutFault(result.retryFault);
+      this.reportLayoutFaultToErrorTracking(fault, retryFault);
+      this.logLayoutFaultForDebugging(fault, retryFault);
+    }
+  }
+
+  /** densable calculateYogaLayout — set width + calculateLayout + counters. */
+  private calculateYogaLayout(yogaNode: NonNullable<typeof this.rootNode.yogaNode>): void {
+    const t0 = performance.now();
+    // densable: if TTY or columns known, set fixed width; else auto then cap.
+    if (this.options.stdout.isTTY || this.options.stdout.columns) {
+      yogaNode.setWidth(this.terminalColumns);
+      yogaNode.calculateLayout(this.terminalColumns);
+    } else {
+      yogaNode.setWidthAuto();
+      yogaNode.calculateLayout();
+      if (yogaNode.getComputedWidth() > 8192) {
+        yogaNode.setWidth(8192);
+        yogaNode.calculateLayout(8192);
+      }
+    }
+    const ms = performance.now() - t0;
+    recordYogaMs(ms);
+    const c = getYogaCounters();
+    this.lastYogaCounters = { ms, ...c };
+  }
+
+  /**
+   * densable relayoutFromScratch — clearLayoutCacheRecursive then re-layout.
+   */
+  private relayoutFromScratch(
+    yogaNode: NonNullable<typeof this.rootNode.yogaNode>,
+  ): { recovered: true } | { recovered: false; retryFault: unknown } {
+    try {
+      yogaNode.clearLayoutCacheRecursive?.();
+      this.calculateYogaLayout(yogaNode);
+      return { recovered: true };
+    } catch (retryFault) {
+      try {
+        yogaNode.clearLayoutCacheRecursive?.();
+      } catch {
+        // ignore secondary clear failures
+      }
+      return { recovered: false, retryFault };
+    }
+  }
+
+  /** densable retryFailedLayout — one more recover attempt before paint. */
+  private retryFailedLayout(): boolean {
+    const yoga = this.rootNode.yogaNode;
+    if (!yoga || !this.relayoutFromScratch(yoga).recovered) {
+      return false;
+    }
+    this.layoutFailed = false;
+    this.consecutiveLayoutFailures = 0;
+    return true;
+  }
+
+  /** densable describeLayoutFault — normalize thrown value to Error. */
+  private static describeLayoutFault(value: unknown): Error {
+    try {
+      if (value instanceof Error && typeof value.message === 'string') {
+        return value;
+      }
+      if (
+        value &&
+        typeof value === 'object' &&
+        typeof (value as { message?: unknown }).message === 'string' &&
+        typeof (value as { name?: unknown }).name === 'string'
+      ) {
+        return value as Error;
+      }
+    } catch {
+      // fall through
+    }
+    return new Error('ink layout pass threw a value that cannot be described');
+  }
+
+  private reportLayoutFaultToErrorTracking(fault: Error, retryFault: Error | undefined): void {
+    try {
+      this.reportLayoutFaultErrorOnce(fault);
+      if (retryFault === undefined) {
+        if (!this.reportedLayoutFaultRecovered) {
+          this.reportedLayoutFaultRecovered = true;
+          this.reportLayoutFaultRecovered();
+        }
+        return;
+      }
+      this.reportLayoutFaultErrorOnce(retryFault);
+      if (!this.reportedLayoutFaultDropped) {
+        this.reportedLayoutFaultDropped = true;
+        this.reportLayoutFaultDropped();
+      }
+      // densable mL_=50
+      if (!this.reportedLayoutFaultPersisting && this.consecutiveLayoutFailures >= 50) {
+        this.reportedLayoutFaultPersisting = true;
+        this.reportLayoutFaultPersisting();
+      }
+    } catch {
+      // never throw from reporting
+    }
+  }
+
+  /** densable fL_=16 message cap */
+  private reportLayoutFaultErrorOnce(error: Error): void {
+    const messages = this.reportedLayoutFaultMessages;
+    if (messages.has(error.message) || messages.size >= 16) return;
+    messages.add(error.message);
+    this.logger.error(error);
+  }
+
+  private reportLayoutFaultRecovered(): void {
+    this.logger.error(new Error('ink layout pass threw; recovered by immediate re-layout'));
+  }
+
+  private reportLayoutFaultDropped(): void {
+    this.logger.error(new Error('ink layout pass threw; immediate re-layout also threw, frame dropped'));
+  }
+
+  private reportLayoutFaultPersisting(): void {
+    this.logger.error(new Error('ink layout pass still throwing after many consecutive commits, frames dropped'));
+  }
+
+  /** densable Fwd=5 debug log cap */
+  private logLayoutFaultForDebugging(fault: Error, retryFault: Error | undefined): void {
+    try {
+      if (this.layoutFaultDebugLines >= 5) return;
+      this.layoutFaultDebugLines++;
+      const outcome =
+        retryFault === undefined
+          ? 'recovered by immediate re-layout'
+          : `immediate re-layout also threw (${retryFault.name}: ${retryFault.message}); frame dropped`;
+      const capNote = this.layoutFaultDebugLines >= 5 ? ' — further layout faults in this session are not logged' : '';
+      this.logger.debug(`ink layout pass threw (${fault.name}: ${fault.message}); ${outcome}${capNote}`, {
+        level: 'error',
+      });
+    } catch {
+      // ignore
+    }
+  }
+
   onRender() {
     if (this.isUnmounted || this.isPaused) {
       return;
@@ -750,6 +910,11 @@ export default class Ink {
     // Official: if (this.isScreenReaderEnabled) { this.onRenderScreenReader(); return }
     if (this.isScreenReaderEnabled) {
       this.onRenderScreenReader();
+      return;
+    }
+
+    // densable 2.1.228 #1: if(layoutFailed&&!retryFailedLayout())return
+    if (this.layoutFailed && !this.retryFailedLayout()) {
       return;
     }
 
