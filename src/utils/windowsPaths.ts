@@ -109,9 +109,117 @@ function isWindowsBashLauncher(filePath: string): boolean {
 }
 
 /**
+ * densable `xmg` — virtualenv / package-manager dir names that make a
+ * candidate under cwd look like a project-local shadow of a real tool.
+ */
+const CWD_SHADOW_DIR_NAMES = new Set([
+  'node_modules',
+  '.venv',
+  'venv',
+  'env',
+  '.env',
+  'virtualenv',
+  '.tox',
+  '.nox',
+  '.direnv',
+  '__pypackages__',
+])
+
+function stripTrailingSepWin(p: string): string {
+  return p.endsWith(pathWin32.sep) ? p.slice(0, -1) : p
+}
+
+/**
+ * densable `Lmc` — true when `candidateDir` is under `cwd` AND some path
+ * segment is a known project-local shadow dir (node_modules / venv / …).
+ * Pure lexical (lowercased win32 paths).
+ */
+function isUnderCwdViaShadowDir(candidateDir: string, cwd: string): boolean {
+  const prefix = stripTrailingSepWin(cwd) + pathWin32.sep
+  if (!candidateDir.startsWith(prefix)) return false
+  return candidateDir
+    .split(pathWin32.sep)
+    .some(seg => CWD_SHADOW_DIR_NAMES.has(seg))
+}
+
+/**
+ * densable `Fmc` + `mVi` — WindowsApps alias dirs under USERPROFILE / LOCALAPPDATA.
+ * Reject candidates that live under those alias roots when cwd is also there
+ * (store-app shim shadowing).
+ */
+function isUnderSharedWindowsAppsAlias(
+  candidateDir: string,
+  cwd: string,
+): boolean {
+  const home = (process.env.USERPROFILE ?? '').trim()
+  const localAppData = (process.env.LOCALAPPDATA ?? '').trim()
+  const aliasDirs: string[] = []
+  if (home) {
+    aliasDirs.push(
+      stripTrailingSepWin(pathWin32.resolve(home).toLowerCase()) +
+        pathWin32.sep +
+        ['appdata', 'local', 'microsoft', 'windowsapps'].join(pathWin32.sep),
+    )
+  }
+  if (localAppData) {
+    const o =
+      stripTrailingSepWin(pathWin32.resolve(localAppData).toLowerCase()) +
+      pathWin32.sep +
+      ['microsoft', 'windowsapps'].join(pathWin32.sep)
+    if (!aliasDirs.includes(o)) aliasDirs.push(o)
+  }
+  const cwdNorm = stripTrailingSepWin(cwd)
+  for (const alias of aliasDirs) {
+    const aliasNorm = stripTrailingSepWin(alias)
+    if (
+      !(cwdNorm === aliasNorm || cwdNorm.startsWith(aliasNorm + pathWin32.sep))
+    ) {
+      continue
+    }
+    if (
+      candidateDir === aliasNorm ||
+      candidateDir.startsWith(aliasNorm + pathWin32.sep)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * densable `uio(candidate, cwd)` — reject `where.exe` hits that are
+ * cwd-shadowed malicious copies, while **allowing** genuine installs whose
+ * parent is an ancestor of cwd (e.g. launched from parent of Git install:
+ * cwd=`C:\\Program Files\\Git`, exe=`C:\\Program Files\\Git\\cmd\\git.exe`).
+ *
+ * densable returns true → skip candidate.
+ *
+ * Exported for unit tests.
+ */
+export function shouldSkipWhereCandidateAsCwdShadow(
+  candidatePath: string,
+  cwd: string,
+): boolean {
+  const cwdResolved = pathWin32.resolve(cwd).toLowerCase()
+  const candidateDir = pathWin32
+    .dirname(pathWin32.resolve(candidatePath))
+    .toLowerCase()
+
+  // densable: if(n===r||Lmc(n,r)||Nmc(n,r,"lexical")) return true
+  if (candidateDir === cwdResolved) return true
+  if (isUnderCwdViaShadowDir(candidateDir, cwdResolved)) return true
+  if (isUnderSharedWindowsAppsAlias(candidateDir, cwdResolved)) return true
+
+  // densable realpath branch: when realpath unavailable we conservatively
+  // allow (return false). Local has no realpathSync.native deps in this
+  // pure helper — lexical path is the security gate densable always runs.
+  return false
+}
+
+/**
  * Look up an executable on Windows. Tries common install locations first
- * (for `git`), then falls back to `where.exe`. Filters out entries in the
- * current working directory to avoid executing malicious copies.
+ * (for `git`), then falls back to `where.exe`. Filters out entries that are
+ * cwd-shadowed (densable `uio`) while allowing parent-of-install layouts.
  *
  * Pure variant — takes its dependencies as parameters so it can be unit-tested
  * without process-global mocks.
@@ -140,44 +248,28 @@ function findExecutableWithDeps(
   // Fall back to where.exe
   try {
     const result = deps.execCommand(`where.exe ${executable}`)
-    // SECURITY: Filter out any results from the current directory
-    // to prevent executing malicious git.bat/cmd/exe files
+    // SECURITY: densable `uio` — skip cwd-shadowed copies (exact cwd dir,
+    // under cwd via node_modules/venv, WindowsApps alias collision) but do
+    // NOT reject genuine installs merely because cwd is a parent of the
+    // install (parent-of-Git layout, densable 2.1.228 #2).
     //
-    // Use path.win32.* here so that `where.exe`'s Windows-style backslash
-    // paths are evaluated with Windows semantics regardless of the host
-    // OS. On POSIX, `path.resolve('C:\\foo')` treats the backslashes as
-    // literal characters and produces a wrong (relative) result, which
-    // would let cwd shadowing slip past this check. pathWin32 is
-    // already imported for the bash derivation below.
+    // Use path.win32.* so `where.exe` backslash paths keep Windows semantics
+    // on any host OS.
     const paths = result
       .split(/\r?\n/)
       .map(p => p.trim())
       .filter(Boolean)
-    const cwd = pathWin32.resolve(deps.cwdFn()).toLowerCase()
+    const cwd = deps.cwdFn()
 
     for (const candidatePath of paths) {
-      // Normalize and compare paths to ensure we're not in current directory
-      const normalizedPath = pathWin32.resolve(candidatePath).toLowerCase()
-      const pathDir = pathWin32.dirname(normalizedPath).toLowerCase()
-      // path.win32.relative(cwd, pathDir) returns:
-      //   ''               → pathDir === cwd
-      //   '..' / '../...'   → pathDir is outside cwd (or above it)
-      //   'subdir/...'     → pathDir is inside cwd
-      // We reject entries whose dir is cwd itself or anywhere inside cwd.
-      const relativePathDir = pathWin32.relative(cwd, pathDir)
-
-      if (
-        relativePathDir === '' ||
-        (!relativePathDir.startsWith('..') &&
-          !pathWin32.isAbsolute(relativePathDir))
-      ) {
+      if (shouldSkipWhereCandidateAsCwdShadow(candidatePath, cwd)) {
         logForDebugging(
           `Skipping potentially malicious executable in current directory: ${candidatePath}`,
         )
         continue
       }
 
-      // Return the first valid path that's not in the current directory
+      // Return the first valid path that's not a cwd shadow
       return candidatePath
     }
 
