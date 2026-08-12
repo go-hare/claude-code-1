@@ -40,10 +40,13 @@ describe('densable 2.1.224 #7 ListAgents wire', () => {
     expect(ListAgentsTool.maxResultSizeChars).toBe(10_000)
   })
 
-  test('prompt gold (IRs / K5_)', async () => {
+  test('prompt gold (IRs / K5_ 2.1.225)', async () => {
     const p = getListAgentsPrompt()
     expect(p).toContain('Lists agents you can SendMessage to')
-    expect(p).toContain('only in reply, after it messages you first')
+    expect(p).toContain(
+      'when Remote Control is connected here) your Remote Control sessions on other machines',
+    )
+    expect(p).not.toContain('only in reply, after it messages you first')
     expect(p).toContain('SendMessage({to: "<name>", message: "..."})')
     expect(p).toContain('[ref]')
     expect(await ListAgentsTool.prompt()).toBe(p)

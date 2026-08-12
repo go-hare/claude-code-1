@@ -7,6 +7,7 @@ import { getModelBetas } from '../utils/betas.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { logError } from '../utils/log.js'
 import { getSmallFastModel } from '../utils/model/model.js'
+import { getAPIProvider } from '../utils/model/providers.js'
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './analytics/index.js'
 import { logEvent } from './analytics/index.js'
@@ -427,8 +428,13 @@ function computeNewLimitsFromHeaders(
 
 /**
  * Cache the extra usage disabled reason from API headers.
+ * densable b7u: skip caching on gateway — gateway spend headers are not
+ * Claude.ai extra-usage state and must not pollute /usage-credits UI cache.
  */
 function cacheExtraUsageDisabledReason(headers: globalThis.Headers): void {
+  if (getAPIProvider() === 'gateway') {
+    return
+  }
   // A null reason means extra usage is enabled (no disabled reason header)
   const reason =
     headers.get('anthropic-ratelimit-unified-overage-disabled-reason') ?? null
@@ -483,6 +489,15 @@ export function extractQuotaStatusFromError(error: APIError): void {
   if (
     !shouldProcessRateLimits(isClaudeAISubscriber()) ||
     error.status !== 429
+  ) {
+    return
+  }
+
+  // densable fxo: gateway 429 without unified-status is not a quota event
+  // (e.g. plain infra throttle). Spend precheck always sets the status header.
+  if (
+    getAPIProvider() === 'gateway' &&
+    !error.headers?.get?.('anthropic-ratelimit-unified-status')
   ) {
     return
   }

@@ -4,6 +4,7 @@
  */
 
 import { APIError } from '@anthropic-ai/sdk'
+import { getAPIProvider } from '../utils/model/providers.js'
 import {
   applyMockHeaders,
   checkMockFastModeRateLimit,
@@ -27,10 +28,17 @@ export function processRateLimitHeaders(
 }
 
 /**
- * Check if we should process rate limits (either real subscriber or /mock-limits command)
+ * densable D_r — process rate-limit headers for Claude.ai subscribers,
+ * Cloud gateway sessions (spend-cap / usage warning), or /mock-limits.
+ *
+ * Gateway injects anthropic-ratelimit-unified-* headers on spend precheck
+ * (including org_spend_cap_reached + reset) so the client can surface the
+ * operator spend-limit usage warning from 2.1.225.
  */
 export function shouldProcessRateLimits(isSubscriber: boolean): boolean {
-  return isSubscriber || shouldProcessMockLimits()
+  return (
+    isSubscriber || getAPIProvider() === 'gateway' || shouldProcessMockLimits()
+  )
 }
 
 /**

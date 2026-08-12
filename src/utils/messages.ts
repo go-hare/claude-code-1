@@ -310,12 +310,25 @@ export function isClassifierDenial(content: string): boolean {
 }
 
 /**
- * Build a rejection message for auto mode classifier denials.
- * Encourages continuing with other tasks and suggests permission rules.
- *
- * @param reason - The classifier's reason for denying the action
+ * densable `HSa` — auto mode classifier denial message.
+ * When `refused` (stop_reason=refusal), use the no-retry / no-rewrite copy;
+ * otherwise the transient retry guidance + settings hint path.
  */
-export function buildYoloRejectionMessage(reason: string): string {
+export function buildYoloRejectionMessage(
+  reason: string,
+  opts?: { refused?: boolean },
+): string {
+  if (opts?.refused) {
+    // densable HSa(e,{refused:!0}) — no AUTO_MODE_REJECTION_PREFIX (distinct copy)
+    return (
+      `${reason}. This is not a judgment that the action is unsafe. ` +
+      `Retrying it will hit the same refusal, so don't rewrite or rework the action to get around this — ` +
+      `it reacts to earlier conversation content, not to the action itself, and it will keep firing for the rest of this conversation. ` +
+      `Continue with other tasks that don't require this action. If it is essential, stop and tell the user that auto mode could not evaluate it, ` +
+      `and suggest running this action outside auto mode (switch back to the default permission mode) or starting a fresh session.`
+    )
+  }
+
   const prefix = AUTO_MODE_REJECTION_PREFIX
 
   // Official CXa — suppress settings/config permission-rule hint for remote

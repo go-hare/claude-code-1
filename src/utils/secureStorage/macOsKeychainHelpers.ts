@@ -68,6 +68,16 @@ export function getUsername(): string {
 // and macOsKeychainStorage.ts need to mutate all three fields.
 export const KEYCHAIN_CACHE_TTL_MS = 30_000
 
+/** densable `Qgs` — cooldown after a hard keychain read failure (ms). */
+export const KEYCHAIN_READ_FAILURE_COOLDOWN_MS = 1000
+
+/**
+ * densable `MQ` — sentinel from doReadAsync when security returned a hard error
+ * (not success/not-found/locked). Distinct from null (empty / item missing).
+ */
+export const KEYCHAIN_READ_FAILED = Symbol('secureStorage.READ_FAILED')
+export type KeychainReadFailed = typeof KEYCHAIN_READ_FAILED
+
 export const keychainCacheState: {
   cache: { data: SecureStorageData | null; cachedAt: number } // cachedAt 0 = invalid
   // Incremented on every cache invalidation. readAsync() captures this before
@@ -78,16 +88,24 @@ export const keychainCacheState: {
   // one subprocess, not N. Cleared on invalidation so fresh reads don't join
   // a stale in-flight promise.
   readInFlight: Promise<SecureStorageData | null> | null
+  /**
+   * densable `S0.lastReadFailure` — timestamp of last hard readAsync failure.
+   * Within Qgs, read() serves previous cache; readAsync short-circuits to null
+   * without re-spawning security.
+   */
+  lastReadFailure: number | null
 } = {
   cache: { data: null, cachedAt: 0 },
   generation: 0,
   readInFlight: null,
+  lastReadFailure: null,
 }
 
 export function clearKeychainCache(): void {
   keychainCacheState.cache = { data: null, cachedAt: 0 }
   keychainCacheState.generation++
   keychainCacheState.readInFlight = null
+  keychainCacheState.lastReadFailure = null
 }
 
 /**

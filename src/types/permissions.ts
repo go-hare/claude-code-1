@@ -309,6 +309,11 @@ export type PermissionDecisionReason =
       type: 'classifier'
       classifier: string
       reason: string
+      /**
+       * densable 2.1.225 — safety-safeguard refusal has no classifier verdict;
+       * distinct from a real auto-mode block.
+       */
+      noVerdict?: boolean
     }
   | {
       type: 'workingDir'
@@ -370,6 +375,13 @@ export type YoloClassifierResult = {
   shouldBlock: boolean
   reason: string
   unavailable?: boolean
+  /**
+   * densable 2.1.225 — API stop_reason==="refusal" (safety safeguard) on an
+   * unparseable / parse_failure classifier response. Distinct from a real
+   * "blocked" verdict: do not count toward consecutive denials; use HSa
+   * refused message; headless aborts.
+   */
+  refusedBySafeguard?: boolean
   /**
    * densable 2.1.216 — APIError.status when the classifier call failed
    * (includes 401 after unrecovered OAuth). Used by hUd/f6d message builders

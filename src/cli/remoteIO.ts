@@ -19,9 +19,12 @@ import {
   setSessionStateChangedListener,
 } from '../utils/sessionState.js'
 import {
+  getValidatedCCRTip,
   setInternalEventReader,
   setInternalEventWriter,
+  updateCCRTipFromAckedBatch,
 } from '../utils/sessionStorage.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { ndjsonSafeStringify } from './ndjsonSafeStringify.js'
 import { StructuredIO } from './structuredIO.js'
 import { CCRClient, CCRInitError } from './transports/ccrClient.js'
@@ -41,6 +44,18 @@ export class RemoteIO extends StructuredIO {
   private readonly isDebug: boolean = false
   private ccrClient: CCRClient | null = null
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null
+  /**
+   * densable hydratePrefetch — started when argv has --resume/-r so print.ts
+   * can await a pre-fetched internal-events page + tip validation.
+   */
+  hydratePrefetch: Promise<
+    | [
+        Awaited<ReturnType<CCRClient['readInternalEvents']>>,
+        Awaited<ReturnType<CCRClient['readSubagentInternalEvents']>>,
+        { eventId?: string; fallbackReason?: string } | undefined,
+      ]
+    | null
+  > | null = null
 
   constructor(
     streamUrl: string,
@@ -176,13 +191,52 @@ export class RemoteIO extends StructuredIO {
         this.ccrClient!.writeInternalEvent(eventType, payload, options),
       )
 
-      // Register internal event readers for session resume.
-      // When set, hydrateFromCCRv2InternalEvents() can fetch foreground
-      // and subagent internal events to reconstruct conversation state.
+      // densable RPn: reader(after_event_id?) for delta rehydrate (#10).
       setInternalEventReader(
-        () => this.ccrClient!.readInternalEvents(),
+        afterEventId => this.ccrClient!.readInternalEvents(afterEventId),
         () => this.ccrClient!.readSubagentInternalEvents(),
       )
+
+      // densable J0a — advance .ccr-tip.json after successful internal batch ack
+      this.ccrClient.onInternalBatchAcked = batch =>
+        updateCCRTipFromAckedBatch(batch)
+
+      // densable hydratePrefetch when argv has --resume / -r
+      if (argvHasResumeFlag(process.argv)) {
+        const client = this.ccrClient
+        this.hydratePrefetch = (async () => {
+          // densable w3i / C3i
+          const enableDelta = getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_ccr_delta_rehydrate',
+            false,
+          )
+          const skipSubagentOnDelta = getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_ccr_subagent_skip_on_delta',
+            false,
+          )
+          // densable _Kr — CLAUDE_CODE_REMOTE_SESSION_ID
+          const remoteSessionId =
+            process.env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim()
+          const tip = remoteSessionId
+            ? await getValidatedCCRTip(remoteSessionId, enableDelta)
+            : undefined
+          // densable: b&&S ? void 0 : readSubagentInternalEvents()
+          const [fg, sub] = await Promise.all([
+            client.readInternalEvents(tip?.eventId),
+            skipSubagentOnDelta && enableDelta
+              ? Promise.resolve(undefined)
+              : client.readSubagentInternalEvents(),
+          ])
+          return [fg, sub ?? undefined, tip] as [
+            Awaited<ReturnType<CCRClient['readInternalEvents']>>,
+            Awaited<ReturnType<CCRClient['readSubagentInternalEvents']>>,
+            { eventId?: string; fallbackReason?: string } | undefined,
+          ]
+        })().catch(err => {
+          logError(err instanceof Error ? err : new Error(String(err)))
+          return null
+        })
+      }
 
       // densable RemoteIO: {started:"processing",completed:"processed",cancelled:"processed"}
       // queued/discarded intentionally omitted (Object.hasOwn gate — no CCR delivery).
@@ -325,4 +379,15 @@ export class RemoteIO extends StructuredIO {
     this.transport.close()
     this.inputStream.end()
   }
+}
+
+/** densable zGv — argv has --resume / -r (before bare `--`). */
+function argvHasResumeFlag(argv: readonly string[]): boolean {
+  for (const arg of argv) {
+    if (arg === '--') return false
+    if (arg === '--resume' || arg === '-r' || arg.startsWith('--resume=')) {
+      return true
+    }
+  }
+  return false
 }

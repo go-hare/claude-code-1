@@ -1,0 +1,80 @@
+// const defaultPageExpiryTime = 1000 * 60 * 5; // 5 minutes
+headless: false is not yet implemented
+chrome-headless-shell-
+/chrome-headless-shell
+static void WTF::LockAlgorithm<unsigned char, '\x01', '\x02'>::lockSlow(Atomic<LockType> &) [LockType = unsigned char, isHeldBit = '\x01', hasParkedBit = '\x02', Hooks = WTF::EmptyLockHooks<unsigned char>]
+static void WTF::LockAlgorithm<unsigned int, 1, 2, WTF::CountingLock::LockHooks>::lockSlow(Atomic<LockType> &) [LockType = unsigned int, isHeldBit = 1, hasParkedBit = 2, Hooks = WTF::CountingLock::LockHooks]
+static void WTF::LockAlgorithm<unsigned char, '@', '\x80'>::lockSlow(Atomic<LockType> &) [LockType = unsigned char, isHeldBit = '@', hasParkedBit = '\x80', Hooks = WTF::EmptyLockHooks<unsigned char>]
+setOnStreamClosedWithParkedQuestion
+CLAUDE_CODE_PARKED_PERMISSION_WAIT_MS
+HOOK_REWRITE_HEADLESS_DENY_REASON
+HOOK_ALLOW_FLAGGED_HEADLESS_DENY_REASON
+surfaceManagedSettingsErrorsHeadless
+isHeadlessLeadDisplayableMessage
+runUltrareviewHeadless
+filterCommandsForHeadless
+HEADLESS_YIELDABLE_NAMESI
+BridgeHeadlessPermanentError
+runHeadlessBashCommand
+headlessMcpPrewaitPolicy
+deriveParkedPermission
+deriveAnswerableParkedRequestIds
+_runHeadlessStreamingForTesting
+PARKED_PERMISSION_ANSWER_WAIT_MS
+Max time a permission/user dialog forwarded to a remote client stays parked awaiting an answer, and how long a HELD cross-session message awaits approval, before either resolves to its safe no-action default (cancelled / dropped-with-denial). Defaults to 5m to match the long-standing remote-dialog deadline; "never" disables the deadline. Local-only permission prompts (no remote client) are unaffec…
+:token] Could not decode JWT expiry for sessionId=
+tengu_org_memory_decision_parked
+expiry_policy_months
+possible 1h TTL expiry (prompt unchanged)
+possible 5min TTL expiry (prompt unchanged)
+[headlessProfiler] Started turn 
+[headlessProfiler] Checkpoint: 
+before_runHeadlessStreaming
+tengu_headless_latency
+[headlessProfiler] Turn 
+refresh response missing refresh_token or expiry
+push_parked_terminal
+cmd_unavailable_headless
+cmd_local_jsx_headless
+PermissionRequest hook failed for headless agent: 
+Agent aborted: too many classifier denials in headless mode
+Server approval observed but parked: session is in plan mode
+crossSessionInbound=refuse: 
+[worktree] refusing to resume parked agent into 
+[worktree] could not verify parked agent worktree 
+Cannot destructure property 'runUltrareviewHeadless' from null or undefined value
+oauth_expiry_warning
+extra_usage_expiry_notice
+Your "crossSessionInbound" setting is "hold".
+Your organization's managed settings set "crossSessionInbound" to "hold".
+This repository's settings set "crossSessionInbound" to "hold" (your own "accept" cannot override a repo tightening).
+crossSessionInbound now accepts
+Your "crossSessionInbound" setting is "hold"; set it to "accept" to deliver held messages.
+Your organization's managed settings set "crossSessionInbound" to "hold" (your own "accept" cannot override managed policy); ask your admin to change it.
+This repository's settings set "crossSessionInbound" to "hold" (a repo may only tighten, so your own "accept" cannot override it); remove the repo setting or exclude it with --setting-sources.
+The sending session's permission mode class doesn't match this session's. Review it below, or set "crossSessionInbound" to "accept".
+The sender did not attest its permission mode and this session bypasses prompts. Review it below, or set "crossSessionInbound" to "accept".
+ not approved before expiry
+CCR auth refresh: delivered token expiry does not match the advertised lifetime, keeping current credentials
+CCR auth refresh: delivered token does not extend expiry, keeping current credentials
+seconds_until_expiry
+[resumeStalePromptCancel] cancelling stale parked prompt 
+installPluginsForHeadless: starting
+headlessPluginInstall: seed marketplaces registered
+installPluginsForHeadless: no marketplaces declared
+headless_marketplace_reconcile
+installPluginsForHeadless: skipped 
+headlessPluginInstall: marketplaces reconciled
+headlessPluginInstall: plugins changed
+installPluginsForHeadless: failed: 
+tengu_headless_plugin_install
+installPluginsForHeadless: installed marketplace 
+installPluginsForHeadless: failed to install marketplace 
+[print.ts] deferring stale parked prompt cancel for 
+[print.ts] stale parked prompt cancel failed: 
+runHeadless: no result message returned from query
+[print.ts] Deferring interrupted-turn rescue for parked permission toolUseID=
+headless_managed_settings_wait
+Headless plugin install / MCP reconcile failed: 
+Headless MCP refresh: added=
+[headless] cross-session hold-receipt: status=

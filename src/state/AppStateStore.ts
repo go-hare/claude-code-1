@@ -187,6 +187,15 @@ export type AppState = DeepImmutable<{
   // Latest-wins on collision. Used by SendMessage to route by name.
   agentNameRegistry: Map<string, AgentId>
   /**
+   * densable 2.1.225 sendMessagePins — name → confirmed SendMessage recipient.
+   * Pins a prior successful send so a same-named local session cannot swap a
+   * confirmed Remote Control / local peer identity mid-conversation.
+   * Key is densable M3(name) (NFKC + lower + whitespace→hyphen).
+   */
+  sendMessagePins: {
+    [normalizedName: string]: { id: string; name: string; ref: string }
+  }
+  /**
    * densable storedImagePaths — imageId → absolute file path for [Image #N]
    * click-to-open (ClickableImageRef / UserImageMessage). Module-level Map
    * alone does not re-render when async storeImage finishes; AppState does.
@@ -541,6 +550,7 @@ export function getDefaultAppState(): AppState {
     tasks: {},
     taskDecorations: {},
     agentNameRegistry: new Map(),
+    sendMessagePins: {},
     storedImagePaths: new Map(),
     displayedMessageContent: {},
     verbose: false,

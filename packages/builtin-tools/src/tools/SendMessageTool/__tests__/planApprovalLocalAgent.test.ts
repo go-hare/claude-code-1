@@ -12,7 +12,7 @@ mock.module('src/utils/sessionStorage.js', () => ({
   readAgentMetadata: async () => null,
 }))
 
-const writeToMailboxMock = mock(async () => {})
+const writeToMailboxMock = mock(async () => 'msg-mock-1')
 mock.module('src/utils/teammateMailbox.js', () => ({
   writeToMailbox: writeToMailboxMock,
   createShutdownApprovedMessage: () => ({}),

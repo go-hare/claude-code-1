@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import {
+  BASE_DIR_CHECK_TIMEOUT_MS,
   DEFAULT_API_URL,
   DEFAULT_BASE_DIR,
   DEFAULT_CAPACITY,
@@ -14,6 +15,7 @@ import {
   TRUST_WORKSPACE_DEFAULT,
   computeShutdownBudgetSec,
   derivePollInterval,
+  ensureBaseDirWritable,
   formatRootHelp,
   parseConfineRepoSettingsEnv,
   parseHealthPortEnv,
@@ -280,6 +282,11 @@ describe('densable 2.1.224 #1 rootRunner help + main register', () => {
 
   test('selfHostedRunnerMain registers then skips poll when enterPollLoop=false', async () => {
     setEnv('SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET', 'test-secret')
+    // densable 2.1.225 izh: baseDir must be writable; default /workspace is often EROFS.
+    const baseDir = join(
+      tmpdir(),
+      `shr-base-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    )
     const registerRunner = mock(async () => ({
       runner_id: 'r_test',
       runner_token: 'rtok',
@@ -295,17 +302,42 @@ describe('densable 2.1.224 #1 rootRunner help + main register', () => {
       deregisterRunner,
       refreshToken: mock(async () => ({ token: 'x' })),
     }
-    await selfHostedRunnerMain(['--capacity', '1', '--health-port', '0'], {
-      enterPollLoop: false,
-      apiFactory: () => api as never,
-      hostname: () => 'test-host',
-    })
+    await selfHostedRunnerMain(
+      ['--capacity', '1', '--health-port', '0', '--base-dir', baseDir],
+      {
+        enterPollLoop: false,
+        apiFactory: () => api as never,
+        hostname: () => 'test-host',
+      },
+    )
     expect(registerRunner).toHaveBeenCalledTimes(1)
     expect(registerRunner.mock.calls[0] as unknown[]).toEqual([
       'test-host',
       undefined,
     ])
     expect(pollWork).not.toHaveBeenCalled()
+  })
+
+  test('densable 2.1.225 ensureBaseDirWritable creates + accepts writable dir', async () => {
+    const baseDir = join(
+      tmpdir(),
+      `shr-izh-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    )
+    await ensureBaseDirWritable(baseDir)
+    // idempotent
+    await ensureBaseDirWritable(baseDir)
+  })
+
+  test('densable 2.1.225 ensureBaseDirWritable throws on unwritable path', async () => {
+    // Prefer a path that cannot exist as a creatable dir (file path as baseDir).
+    const filePath = join(
+      tmpdir(),
+      `shr-izh-file-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    )
+    writeFileSync(filePath, 'not-a-dir')
+    await expect(ensureBaseDirWritable(filePath)).rejects.toThrow(
+      /cannot create or write to base directory/,
+    )
   })
 })
 
@@ -320,5 +352,10 @@ describe('densable 2.1.224 #1 rootRunner source gold', () => {
     expect(src).toContain("DEFAULT_BASE_DIR = '/workspace'")
     expect(src).toContain('--environment-secret-file')
     expect(src).toContain('SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET')
+    // densable 2.1.225 #9
+    expect(src).toContain('export async function ensureBaseDirWritable')
+    expect(src).toContain('BASE_DIR_CHECK_TIMEOUT_MS')
+    expect(src).toContain('10_000')
+    expect(BASE_DIR_CHECK_TIMEOUT_MS).toBe(10_000)
   })
 })

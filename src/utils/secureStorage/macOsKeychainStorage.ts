@@ -9,9 +9,16 @@ import {
   getMacOsKeychainStorageServiceName,
   getUsername,
   KEYCHAIN_CACHE_TTL_MS,
+  KEYCHAIN_READ_FAILED,
+  KEYCHAIN_READ_FAILURE_COOLDOWN_MS,
   keychainCacheState,
+  type KeychainReadFailed,
 } from './macOsKeychainHelpers.js'
 import type { SecureStorage, SecureStorageData } from './types.js'
+
+/** densable CE_ / AE_ — security exit codes treated as "no item" (null, not MQ). */
+const SECURITY_ERR_SEC_ITEM_NOT_FOUND = 44
+const SECURITY_ERR_SEC_INTERACTION_NOT_ALLOWED = 36
 
 // `security -i` reads stdin with a 4096-byte fgets() buffer (BUFSIZ on darwin).
 // A command line longer than this is truncated mid-argument: the first 4096
@@ -28,6 +35,14 @@ export const macOsKeychainStorage = {
   read(): SecureStorageData | null {
     const prev = keychainCacheState.cache
     if (Date.now() - prev.cachedAt < KEYCHAIN_CACHE_TTL_MS) {
+      return prev.data
+    }
+    // densable 2.1.225: within Qgs after hard failure, serve prev cache (not re-spawn).
+    const lastFail = keychainCacheState.lastReadFailure
+    if (
+      lastFail !== null &&
+      Date.now() - lastFail < KEYCHAIN_READ_FAILURE_COOLDOWN_MS
+    ) {
       return prev.data
     }
 
@@ -72,24 +87,41 @@ export const macOsKeychainStorage = {
     if (keychainCacheState.readInFlight) {
       return keychainCacheState.readInFlight
     }
+    // densable 2.1.225: within Qgs after MQ, return null (do not re-spawn).
+    const lastFail = keychainCacheState.lastReadFailure
+    if (
+      lastFail !== null &&
+      Date.now() - lastFail < KEYCHAIN_READ_FAILURE_COOLDOWN_MS
+    ) {
+      return null
+    }
 
     const gen = keychainCacheState.generation
     const promise = doReadAsync().then(data => {
       // If the cache was invalidated or updated while we were reading,
       // our subprocess result is stale — don't overwrite the newer entry.
-      if (gen === keychainCacheState.generation) {
-        // Stale-while-error — mirror read() above.
-        if (data === null && prev.data !== null) {
-          logForDebugging('[keychain] readAsync failed; serving stale cache', {
-            level: 'warn',
-          })
-        }
-        const next = data ?? prev.data
-        keychainCacheState.cache = { data: next, cachedAt: Date.now() }
-        keychainCacheState.readInFlight = null
-        return next
+      if (gen !== keychainCacheState.generation) {
+        return data === KEYCHAIN_READ_FAILED ? null : data
       }
-      return data
+      keychainCacheState.readInFlight = null
+      // densable: MQ → log "not caching a null", set lastReadFailure, keep prev.data
+      if (data === KEYCHAIN_READ_FAILED) {
+        logForDebugging('[keychain] readAsync failed; not caching a null', {
+          level: 'warn',
+        })
+        keychainCacheState.lastReadFailure = Date.now()
+        if (prev.data !== null) {
+          keychainCacheState.cache = {
+            data: prev.data,
+            cachedAt: Date.now(),
+          }
+        }
+        return prev.data
+      }
+      const next = data ?? prev.data
+      keychainCacheState.cache = { data: next, cachedAt: Date.now() }
+      keychainCacheState.lastReadFailure = null
+      return next
     })
     keychainCacheState.readInFlight = promise
     return promise
@@ -175,7 +207,13 @@ export const macOsKeychainStorage = {
   },
 } satisfies SecureStorage
 
-async function doReadAsync(): Promise<SecureStorageData | null> {
+/**
+ * densable `QTu` — spawn security find-generic-password.
+ * Returns parsed data, null (empty / not found / locked), or KEYCHAIN_READ_FAILED (MQ).
+ */
+async function doReadAsync(): Promise<
+  SecureStorageData | null | KeychainReadFailed
+> {
   try {
     const storageServiceName = getMacOsKeychainStorageServiceName(
       CREDENTIALS_SERVICE_SUFFIX,
@@ -189,10 +227,20 @@ async function doReadAsync(): Promise<SecureStorageData | null> {
     if (code === 0 && stdout) {
       return jsonParse(stdout.trim())
     }
+    // densable: n===0 || n===44 || n===36 → null; else MQ
+    if (
+      code === 0 ||
+      code === SECURITY_ERR_SEC_ITEM_NOT_FOUND ||
+      code === SECURITY_ERR_SEC_INTERACTION_NOT_ALLOWED
+    ) {
+      return null
+    }
+    return KEYCHAIN_READ_FAILED
   } catch (_e) {
-    // fall through
+    // densable MQ: spawn/timeout/unexpected throw is a hard failure — enter
+    // cooldown so we do not re-spawn security in a tight loop.
+    return KEYCHAIN_READ_FAILED
   }
-  return null
 }
 
 let keychainLockedCache: boolean | undefined

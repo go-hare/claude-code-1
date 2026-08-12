@@ -1,11 +1,9 @@
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 
 /**
- * densable IRs / K5_ (2.1.224) — ListAgents description + prompt.
- * `_f` = SendMessage; `_Bt` = reply-only bridge clause.
+ * densable 2.1.225 IRs / K5_ — ListAgents description + prompt.
+ * Proactive RC-by-name (no reply-only clause).
  */
-const REPLY_ONLY = 'only in reply, after it messages you first'
-
 export function getListAgentsPrompt(): string {
-  return `Lists agents you can ${SEND_MESSAGE_TOOL_NAME} to — in-process subagents you spawned, other local Claude sessions on this machine, your Claude sessions running in the cloud (when this session has cloud access), and (when Remote Control is connected) remote bridge sessions, which are reply-only — you can message one ${REPLY_ONLY}, and no connector reaches it by name either. Names are the address: send with \`${SEND_MESSAGE_TOOL_NAME}({to: "<name>", message: "..."})\`, copying the name exactly as a row prints it. Append a row's \` [ref]\` only when the bare name is not enough — two rows share it, or an error asks you to disambiguate.`
+  return `Lists agents you can ${SEND_MESSAGE_TOOL_NAME} to — in-process subagents you spawned, other local Claude sessions on this machine, your Claude sessions running in the cloud (when this session has cloud access), and (when Remote Control is connected here) your Remote Control sessions on other machines. Names are the address: send with \`${SEND_MESSAGE_TOOL_NAME}({to: "<name>", message: "..."})\`, copying the name exactly as a row prints it. Append a row's \` [ref]\` only when the bare name is not enough — two rows share it, or an error asks you to disambiguate.`
 }

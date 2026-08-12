@@ -19,6 +19,8 @@ export type PersistedBridgeSession = {
   seq: number
   groupingId?: string
   declaredDialogKinds?: string[]
+  /** densable noHistoryBackfill — mint-after-gone / history-backfill suppression. */
+  noHistoryBackfill?: boolean
 }
 
 /** densable Hd().currentSessionBridge* for the live REPL session only. */
@@ -28,6 +30,7 @@ let current: {
   seq: number
   groupingId?: string
   declaredDialogKinds?: string[]
+  noHistoryBackfill?: boolean
 } | null = null
 
 /**
@@ -41,6 +44,7 @@ export function saveBridgeSessionMeta(
     sessionId?: string
     groupingId?: string
     declaredDialogKinds?: string[]
+    noHistoryBackfill?: boolean
   },
 ): void {
   const sessionId = opts?.sessionId ?? getSessionId()
@@ -55,9 +59,10 @@ export function saveBridgeSessionMeta(
       declaredDialogKinds: opts?.declaredDialogKinds?.length
         ? [...opts.declaredDialogKinds]
         : undefined,
+      noHistoryBackfill: opts?.noHistoryBackfill ? true : undefined,
     }
     logForDebugging(
-      `[bridge:meta] CXr session=${sessionId} bridge=${bridgeSessionId} seq=${lastSequenceNum}${opts?.groupingId ? ` grouping=${opts.groupingId}` : ''}`,
+      `[bridge:meta] CXr session=${sessionId} bridge=${bridgeSessionId} seq=${lastSequenceNum}${opts?.groupingId ? ` grouping=${opts.groupingId}` : ''}${opts?.noHistoryBackfill ? ' noHistoryBackfill' : ''}`,
     )
   }
 }
@@ -74,6 +79,7 @@ export function getPersistedBridgeSession():
     seq: current.seq ?? 0,
     groupingId: current.groupingId,
     declaredDialogKinds: current.declaredDialogKinds,
+    noHistoryBackfill: current.noHistoryBackfill,
   }
 }
 

@@ -1016,6 +1016,8 @@ export async function initEnvLessBridgeCore(
     isReattaching ? (reattachSequenceNum ?? 0) : 0,
     {
       groupingId: effectiveGrouping,
+      // densable 2.1.225 #7 — mint-after-gone carries history-backfill suppression.
+      ...(skipInitialHistoryFlush ? { noHistoryBackfill: true } : {}),
     },
   )
 
@@ -1023,6 +1025,7 @@ export async function initEnvLessBridgeCore(
   // getLastSequenceNum, flush for left-arrow rit CLAUDE_BRIDGE_REATTACH_SEQ.
   // outboundOnly must be a boolean on the handle so left-arrow rit() sees
   // false (omit env) when unset — not undefined (local rit treated as true).
+  // densable noHistoryBackfill:a||tr — mint-after-gone sets Ge / skipInitialHistoryFlush.
   return {
     bridgeSessionId: sessionId,
     environmentId: '',
@@ -1030,6 +1033,8 @@ export async function initEnvLessBridgeCore(
     outboundOnly: outboundOnly ?? false,
     // densable He — pass-through from params / reattach bootstrap when present.
     sessionGroupingId: effectiveGrouping,
+    // densable 2.1.225 #7 — suppress compact-pair remote re-upload on mint-after-gone.
+    noHistoryBackfill: skipInitialHistoryFlush || undefined,
     getLastSequenceNum() {
       return transport.getLastSequenceNum()
     },

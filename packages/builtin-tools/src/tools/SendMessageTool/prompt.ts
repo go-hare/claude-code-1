@@ -10,14 +10,16 @@ export function getPrompt(): string {
   const udsSection = feature('UDS_INBOX')
     ? `\n\n## Cross-session
 
-Use \`ListAgents\` to discover targets, then:
+Use \`ListAgents\` to discover targets. Every row leads with the agent's \`name [ref]\` — the name IS the address; there is no separate address syntax.
 
 \`\`\`json
-{"to": "uds:/tmp/cc-socks/1234.sock", "message": "check if tests pass over there"}
-{"to": "bridge:session_01AbCd...", "message": "what branch are you on?"}
+{"to": "worker", "message": "check if tests pass over there"}
+{"to": "worker [3fa9c1]", "message": "you, specifically"}
+{"to": "uds:/tmp/cc-socks/1234.sock", "message": "legacy socket path still works"}
+{"to": "bridge:session_01AbCd...", "message": "explicit Remote Control id still works"}
 \`\`\`
 
-A listed peer is alive and will process your message — no "busy" state; messages enqueue and drain at the receiver's next tool round. Your message arrives wrapped as \`<cross-session-message from="...">\`. **To reply to an incoming message, copy its \`from\` attribute as your \`to\`.**`
+Send the bare name. Append the \` [ref]\` only when the bare name is not enough — \`ListAgents\` shows two rows with it, or an error asks you to disambiguate. A listed peer is alive and will process your message — no "busy" state; messages enqueue and drain at the receiver's next tool round. Your message arrives wrapped as \`<cross-session-message from="...">\`. **To reply to an incoming message, you can use its \`from\` attribute or the peer's bare name.**`
     : ''
   return `
 # SendMessage

@@ -59,6 +59,13 @@ import {
   SEND_MESSAGE_SUMMARY_MAX_CHARS,
   SEND_MESSAGE_TOOL_NAME,
 } from './constants.js'
+import {
+  buildPeerCandidates,
+  formatAmbiguousMessage,
+  localClaimedRemoteBodies,
+  resolvePeerByName,
+  setSendMessagePinOnAppState,
+} from './nameResolve.js'
 import { DESCRIPTION, getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
@@ -1332,6 +1339,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
 
       if (feature('UDS_INBOX') && typeof input.message === 'string') {
         const addr = parseAddress(input.to)
+        // Explicit uds:/bridge:/tcp: schemes only here.
+        // densable gIn bare-name / name [ref] peer resolve runs AFTER local_agent.
         if (addr.scheme === 'bridge') {
           // Re-check handle — checkPermissions blocks on user approval (can be
           // minutes). validateInput's check is stale if the bridge dropped
@@ -1354,6 +1363,10 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             input.message,
           )) as { ok: boolean; error?: string }
           const preview = input.summary || truncate(input.message, 50)
+          // densable NKp only fires on bare-name / name [ref] resolve success
+          // (displayName). Explicit bridge:/uds: scheme paths do NOT pin —
+          // address-string keys would pollute sendMessagePins and never match
+          // ListAgents names (SEA: only two NKp call sites, both p.displayName).
           return {
             data: {
               success: result.ok,
@@ -1385,6 +1398,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               ...(fromMode !== undefined ? { fromMode } : {}),
             })
             const preview = input.summary || truncate(input.message, 50)
+            // densable: no NKp on explicit uds: scheme (see bridge branch above).
             return {
               data: {
                 success: true,
@@ -1506,6 +1520,136 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           )
           if (local) return local
         }
+      }
+
+      // densable 2.1.225 gIn/rKp — after in-process agents, resolve bare name /
+      // name [ref] against local UDS + RC peers with pin guard.
+      if (
+        feature('UDS_INBOX') &&
+        typeof input.message === 'string' &&
+        input.to !== '*' &&
+        input.to !== MAIN_RECIPIENT &&
+        parseAddress(input.to).scheme === 'other'
+      ) {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const udsClient =
+          require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
+        const bridgePeers =
+          require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        const [udsPeers, bridgeList, allLive] = await Promise.all([
+          udsClient.listPeers(),
+          bridgePeers.listBridgePeers(),
+          udsClient.listAllLiveSessions(),
+        ])
+        const candidates = buildPeerCandidates({
+          udsPeers,
+          bridgePeers: bridgeList,
+        })
+        const pins = context.getAppState().sendMessagePins ?? {}
+        const resolved = resolvePeerByName({
+          to: input.to,
+          pins,
+          candidates,
+          localClaimed: localClaimedRemoteBodies(allLive),
+        })
+        if (resolved.kind === 'refused') {
+          return { data: { success: false, message: resolved.message } }
+        }
+        if (resolved.kind === 'ambiguous') {
+          return {
+            data: {
+              success: false,
+              message: formatAmbiguousMessage(input.to, resolved.candidates, {
+                pinnedIdentityClaimedLocally:
+                  resolved.pinnedIdentityClaimedLocally,
+              }),
+            },
+          }
+        }
+        if (resolved.kind === 'ok') {
+          const cand = resolved.candidate
+          const preview = input.summary || truncate(input.message, 50)
+          if (cand.kind === 'bridge-session') {
+            if (!getReplBridgeHandle() || !isReplBridgeActive()) {
+              return {
+                data: {
+                  success: false,
+                  message: `Remote Control disconnected before send — cannot deliver to ${cand.name}`,
+                },
+              }
+            }
+            const result = (await bridgePeers.postInterClaudeMessage(
+              cand.id,
+              input.message,
+            )) as { ok: boolean; error?: string }
+            if (!result.ok) {
+              return {
+                data: {
+                  success: false,
+                  message: `Failed to send to ${cand.name}: ${result.error ?? 'unknown'}`,
+                },
+              }
+            }
+            setSendMessagePinOnAppState(
+              context.setAppState as unknown as Parameters<
+                typeof setSendMessagePinOnAppState
+              >[0],
+              cand.name,
+              { kind: 'bridge-session', id: cand.id },
+            )
+            const siblingNote =
+              resolved.sameNamedSiblings && resolved.sameNamedSiblings > 0
+                ? `\nNote: ${resolved.sameNamedSiblings} other agent${resolved.sameNamedSiblings === 1 ? ' is' : 's are'} also named '${cand.name}'. This went to the one this conversation confirmed; to switch, re-send with that agent's 'name [ref]' (ListAgents lists them).`
+                : ''
+            return {
+              data: {
+                success: true,
+                message: `“${preview}” → ${cand.name} (a Claude session on another machine, over Remote Control)${siblingNote}`,
+              },
+            }
+          }
+          const { permissionModeClassOf, shouldHonorPeerFromMode } =
+            require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
+          try {
+            const perm = context.getAppState().toolPermissionContext
+            const fromMode = shouldHonorPeerFromMode()
+              ? permissionModeClassOf({
+                  mode: perm.mode,
+                  isBypassPermissionsModeAvailable:
+                    perm.isBypassPermissionsModeAvailable,
+                })
+              : undefined
+            await udsClient.sendToUdsSocket(cand.id, input.message, {
+              ...(fromMode !== undefined ? { fromMode } : {}),
+            })
+            setSendMessagePinOnAppState(
+              context.setAppState as unknown as Parameters<
+                typeof setSendMessagePinOnAppState
+              >[0],
+              cand.name,
+              { kind: 'session', id: cand.id },
+            )
+            const siblingNote =
+              resolved.sameNamedSiblings && resolved.sameNamedSiblings > 0
+                ? `\nNote: ${resolved.sameNamedSiblings} other live session${resolved.sameNamedSiblings === 1 ? ' is' : 's are'} also named '${cand.name}'. This went to the one this conversation confirmed; to switch, re-send with that session's 'name [ref]' (ListAgents lists them).`
+                : ''
+            return {
+              data: {
+                success: true,
+                message: `“${preview}” → ${cand.name} (another Claude session on this machine)${siblingNote}`,
+              },
+            }
+          } catch (e) {
+            return {
+              data: {
+                success: false,
+                message: `Failed to send to ${cand.name}: ${errorMessage(e)}`,
+              },
+            }
+          }
+        }
+        // not-found among peers → mailbox fallthrough
       }
 
       if (typeof input.message === 'string') {

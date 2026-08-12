@@ -9,6 +9,7 @@ import {
   switchSession,
 } from '../../bootstrap/state.js'
 import { asSessionId } from '../../types/ids.js'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import {
   cleanupTempDir,
   createTempDir,
@@ -79,6 +80,8 @@ describe('assistant mode', () => {
     previousClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
     configHomeDir = await createTempDir('assistant-config-')
     process.env.CLAUDE_CONFIG_DIR = configHomeDir
+    // Bust lodash memoize so CLAUDE_CONFIG_DIR changes are visible across suites.
+    getClaudeConfigHomeDir.cache?.clear?.()
     mockSettings = {}
     teammateModeOverrides.length = 0
     writeTeamFileCalls.length = 0
@@ -94,6 +97,7 @@ describe('assistant mode', () => {
     } else {
       process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir
     }
+    getClaudeConfigHomeDir.cache?.clear?.()
     if (configHomeDir) {
       await cleanupTempDir(configHomeDir)
     }
@@ -144,8 +148,12 @@ describe('assistant mode', () => {
 
   test('getAssistantSystemPromptAddendum includes assistant name and optional custom prompt', async () => {
     mockSettings = { assistantName: 'KAIROS' }
+    // Write under the NFC-normalized home getClaudeConfigHomeDir returns, so the
+    // production read path matches even when the temp dir string is NFD on macOS.
+    getClaudeConfigHomeDir.cache?.clear?.()
+    const home = getClaudeConfigHomeDir()
     await writeTempFile(
-      configHomeDir,
+      home,
       'agents/assistant.md',
       'Custom assistant override',
     )

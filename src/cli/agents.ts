@@ -168,6 +168,25 @@ export async function agentsMain(args: string[]): Promise<void> {
   const enteredViaLeftArrow = !!restoreSessionId
   delete process.env.CLAUDE_AGENTS_SELECT
 
+  // densable 2.1.225 FXv: await ensureAgentsWorkspaceTrust(root, agentsTrustDecision())
+  // before mountFleetView. Short-lived Ink root for TrustDialog only.
+  {
+    const { createRoot } = await import('@anthropic/ink')
+    const { ensureAgentsWorkspaceTrust, agentsTrustDecision } = await import(
+      './agentsTrust.js'
+    )
+    const trustRoot = await createRoot({ exitOnCtrlC: false })
+    try {
+      await ensureAgentsWorkspaceTrust(trustRoot, agentsTrustDecision())
+    } finally {
+      try {
+        trustRoot.unmount()
+      } catch {
+        // ignore unmount races on exit path
+      }
+    }
+  }
+
   // Interactive dashboard
   const { renderAgentView } = await import('../screens/AgentView.js')
   try {

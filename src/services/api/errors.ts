@@ -491,7 +491,10 @@ export function getAssistantMessageFromError(
     error.status === 429 &&
     shouldProcessRateLimits(isClaudeAISubscriber())
   ) {
-    // Check if this is the new API with multiple rate limit headers
+    // densable p7u: only treat as structured quota when claim OR overage-status
+    // is present. Gateway spend-cap 429s set unified-status + overage-disabled-
+    // reason (org_spend_cap_reached) but not claim/overage-status — those fall
+    // through to the body message (cap/period/reset + operator blocked_message).
     const rateLimitType = error.headers?.get?.(
       'anthropic-ratelimit-unified-representative-claim',
     ) as 'five_hour' | 'seven_day' | 'seven_day_opus' | null
@@ -573,8 +576,41 @@ export function getAssistantMessageFromError(
     // SDK's APIError.makeMessage prepends "429 " and JSON-stringifies the body
     // when there's no top-level .message — extract the inner error.message.
     const stripped = error.message.replace(/^429\s+/, '')
-    const innerMessage = stripped.match(/"message"\s*:\s*"([^"]*)"/)?.[1]
-    const detail = innerMessage || stripped
+    let detail: string | undefined
+    try {
+      const parsed = JSON.parse(stripped) as {
+        error?: { message?: string }
+        message?: string
+      }
+      const nested = parsed?.error?.message ?? parsed?.message
+      if (typeof nested === 'string') detail = nested
+    } catch {
+      const m = stripped.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1]
+      if (m) {
+        try {
+          detail = JSON.parse(`"${m}"`) as string
+        } catch {
+          detail = m
+        }
+      }
+    }
+    if (!detail) detail = stripped
+
+    // densable 2.1.225 gateway spend precheck: body already carries
+    // `spend limit reached (period; resets … UTC) — {operator message}` and
+    // headers set overage-disabled-reason=org_spend_cap_reached without claim/
+    // overage-status. Prefer the raw body so cap/reset/operator text is shown.
+    if (
+      error.headers?.get?.(
+        'anthropic-ratelimit-unified-overage-disabled-reason',
+      )
+    ) {
+      return createAssistantAPIErrorMessage({
+        content: detail,
+        error: 'rate_limit',
+      })
+    }
+
     return createAssistantAPIErrorMessage({
       content: `${API_ERROR_MESSAGE_PREFIX}: Request rejected (429) · ${detail || 'this may be a temporary capacity issue — check status.anthropic.com'}`,
       error: 'rate_limit',

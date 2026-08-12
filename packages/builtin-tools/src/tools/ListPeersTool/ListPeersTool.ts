@@ -46,16 +46,18 @@ type PeerInfo = {
 /** densable m5b — model-facing listing string. */
 type ListAgentsOutput = { listing: string }
 
+/**
+ * densable 2.1.225 listing — every row leads with `name [ref]`.
+ * Local peers still use address as the ref token when distinct from name.
+ */
 function formatPeersListing(peers: PeerInfo[]): string {
   if (peers.length === 0) {
     return 'No agents found.'
   }
   const lines = peers.map(p => {
-    const label = p.name?.trim() || p.address
-    const bits = [label]
-    if (p.name && p.name !== p.address) {
-      bits.push(`[${p.address}]`)
-    }
+    const name = p.name?.trim() || p.address
+    const ref = p.address
+    const bits = [`${name} [${ref}]`]
     if (p.cwd) bits.push(`@ ${p.cwd}`)
     if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
     return bits.join(' ')

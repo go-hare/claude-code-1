@@ -1,0 +1,80 @@
+[0mupdate-snapshotsreporter-outfile--parallel-delay--react-compiler--sql-preconnect--prefer-offline--heap-prof-name--no-deprecation--use-openssl-ca--use-bundled-caJSVALUE_TO_BOOL(invalid ABI typeallowPositionals207 Multi-Status304 Not Modified306 Switch Proxy401 Unauthorized414 URI Too Long418 I'm a Teapot510 Not ExtendedmaxPayloadLengthsetSocketOptionsapplication/wasm</RestoreStatus>Blob is detac…
+  401: "Unauthorized",
+  HTTP_STATUS_UNAUTHORIZED: 401,
+            return abortHandshake(response, code || 401, message, headers);
+        return abortHandshake(response, 401);
+`);if(_>-1){let u=i.substring(_+1).trim();if(i=i.substring(0,_).trim(),u.length)return l("div",{className:"BunError-JSException",children:[l("div",{className:"BunError-error-header",children:[l("div",{className:"BunError-error-code",children:a}),Le[n]]}),l("div",{className:"BunError-error-message",children:i}),l("div",{className:"BunError-error-subtitle",children:u}),e.stack&&l(Te,{frames:e.stack.…
+sec-websocket-extensionERR_HTTP2_TOO_MANY_INVALID_FRAMESErrorTarballHTTP400TarballHTTP401TarballHTTP402TarballHTTP403TarballHTTP404TarballHTTP4xxTarballHTTP5xxTarballFailedToDownload
+TODO: onRouterSyntaxError for EntryPointMap (src/runtime/bake/production.rs:1426)'fill' or 'inside'Node(interp)dhParamsFilekeyFilecaFileTag should exist at this pointTag token should exist at this point(no calls)-uIs not possible to unlink a file descriptorWatcher crashedFailedToParseMultipartDataBoundaryIsTooLongMissingFinalBoundaryIsMissingHeaderEndIsMissingHeaderLineEndIsMissingHeaderColonSepar…
+bun.lockbVec<u8> JSON writer is infallibleparseLockfilebitbucketgitlabsourcehutdomainprojectsshurlsshhttpsdefaultUnsupportedTargetBufferTooSmallSysAllocDecodingErrorWriteFailedPartialWriteMaxPathExceededUnexpectedMissingGeneratedColumnValueInvalidGeneratedColumnValueInvalidSourceIndexDeltaInvalidSourceIndexValueMissingOriginalLineInvalidOriginalLineValueMissingOriginalColumnValueInvalidOriginalCol…
+AbortSignal.timeout(ms) overflows i64Couldn't convert a JavaScript exception to an Error instance.TODOErrornameerrnoobjectInvalid scrypt paramsexception value must be an Exception cellPackageManifestHTTP400PackageManifestHTTP401PackageManifestHTTP402PackageManifestHTTP403PackageManifestHTTP404PackageManifestHTTP4xxPackageManifestHTTP5xxDistTagNotFound
+NoMatchingVersionVersion not foundNo match foundNo matching version foundPackageResolveErrorPackageNotFoundPackageTagNotFoundPackageVersionNotFoundurlpkgspecifiersourceURLcolumnTarballHTTP400TarballHTTP401TarballHTTP402TarballHTTP403TarballHTTP404TarballHTTP4xxTarballHTTP5xxTarballDownloadErrorTarballNotFoundErrorTarballForbiddenErrorPackageExtractionErrorsource_code_printer not initializedinterna…
+nativeDependenciesignoreScriptsNotDirFileTooBigSymLinkLoopProcessFdQuotaExceededSystemFdQuotaExceededSystemResourcesReadOnlyFileSystemFileSystemDeviceBusyInvalidUtf8InvalidWtf8TarballHTTP400TarballHTTP401TarballHTTP402TarballHTTP403TarballHTTP404TarballHTTP4xxTarballHTTP5xxTarballFailedToExtractTarballFailedToDownloadBadRequestTooManyRequestsHTTPInternalServerErrorUnexpectedNotModifiedPackageFaile…
+Keychain access denied. In CI environments, use {allowUnrestrictedAccess: true} option.
+lsquic_pacer_disable_burst_tokens
+%s: sc_flags: 0x%X, b_out: %u = (%u + %u); b_retx: %u; cwnd: %llu; ccfc: %llu/%llu; n_scheduled: %d, n_in_flight_all: %d; pa_burst: %d; pa_next: %llu; pa_now: %llu
+"HTTP 401 while resolving package '
+HTTP 401 downloading package '
+could not be found in the keychain
+CLAUDE_CODE_OAUTH_401_WAIT_MS
+startKeychainPrefetch
+ensureKeychainPrefetchCompleted
+getApiKeyFromConfigOrMacOSKeychainAsync
+getApiKeyFromConfigOrMacOSKeychain
+keychain_unavailable
+errsecnodefaultkeychain
+No OAuth token in keychain
+403|401|authentication|permission denied
+host_auth_401_recovery
+tengu_oauth_401_sidequery_recovered
+MCP OAuth server cleaned up
+This is the Claude Code MCP OAuth callback listener. It only handles /callback. If your OAuth provider redirected here, the registered redirect_uri must be 
+tengu_mcp_claudeai_proxy_401
+Tool call returned 401 Unauthorized - token may have expired
+Server returned 401 after successful authentication
+Remote Control is rejecting a burst of unsigned remote activity; further warnings for this burst are suppressed.
+\b(not logged in|please run \/login|authentication failed|invalid api key|oauth token (?:expired|revoked)|credit balance (?:is )?too low|usage limit reached|mcp (?:server )?(?:authentication|auth|authorization|unauthorized)|mcp (?:server )?(?:credential|token) (?:missing|expired|invalid)|401 unauthorized|403 forbidden|token (?:has )?expired|bad credentials|gh auth login|gcloud auth login|aws (?:sso )?login)\b
+Failed to delete keychain entry: 
+Failed to delete keychain entry
+tengu_remote_settings_401_force_refresh_retry
+auth token expired (code 401)
+[remote-bridge] Teardown 401 retry threw: 
+[remote-bridge] Dropping control_request during 401 recovery: 
+[remote-bridge] Dropping control_response during 401 recovery
+[remote-bridge] Dropping control_cancel_request during 401 recovery: 
+[remote-bridge] Dropping result during 401 recovery
+bridge_repl_v2_init_401_refresh
+Claude Design authentication failed (HTTP 401): the credential was rejected and an automatic refresh did not produce a new one.
+tengu_api_key_keychain_error
+Failed to save API key to macOS Keychain
+. Run `claude doctor` to diagnose keychain access.
+tengu_api_key_saved_to_keychain
+Failed to remove API key from macOS keychain: 
+tengu_oauth_401_sdk_callback_refreshed
+oauth_401_sdk_callback_failed
+OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login.
+tengu_oauth_401_recovered_from_disk
+oauth_401_disk_read_failed
+OAuth 401 recovery: waiting up to 
+tengu_oauth_401_recovered_from_rotation
+oauth_401_skipped_user_env_token
+oauth_401_no_refresh_token_bg_worker
+oauth_401_no_refresh_token_interactive
+tengu_oauth_401_zombie_exit
+tengu_oauth_401_recovered_from_keychain
+auth: no token found, will re-check keychain every 30s
+auth: token found via keychain re-check
+auth: token refreshed via keychain re-check retry
+auth: keychain re-check error: 
+auth: 401 ignored (3P provider active, no OAuth)
+auth: 401 recovery succeeded
+auth: 401 recovery failed, signalling re-auth required
+auth: 401 handler error: 
+macOS Keychain is not writable
+Cannot destructure property 'probeKeychain' from null or undefined value
+: 401 received, no refresh handler
+: 401 received, attempting token refresh
+: Retry after refresh also got 401
+: Authentication failed (401)
+Cannot destructure property 'handleOAuth401Error' from null or undefined value
+Error: settings written but keychain save failed

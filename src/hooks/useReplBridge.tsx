@@ -10,8 +10,12 @@ import {
 import { handleRemoteInterrupt } from '../bridge/remoteInterruptHandling.js';
 import { isTranscriptResetResultReady, shouldDeferBridgeResult } from '../bridge/bridgeResultScheduling.js';
 import { buildBridgeConnectUrl } from '../bridge/bridgeStatusUtil.js';
-import { clearBridgeSessionMeta, saveBridgeSessionMeta } from '../bridge/bridgeSessionMeta.js';
-import { clearBridgeSession, saveBridgeSession } from '../utils/sessionStorage.js';
+import {
+  clearBridgeSessionMeta,
+  getPersistedBridgeSession,
+  saveBridgeSessionMeta,
+} from '../bridge/bridgeSessionMeta.js';
+import { clearBridgeSession, registerLiveSuppressionProbe, saveBridgeSession } from '../utils/sessionStorage.js';
 import { extractInboundMessageFields } from '../bridge/inboundMessages.js';
 import type { BridgeState, ReplBridgeHandle } from '../bridge/replBridge.js';
 import { setReplBridgeHandle } from '../bridge/replBridgeHandle.js';
@@ -807,10 +811,14 @@ export function useReplBridge(
 
           // densable CXr + Bkn on connect — process-local meta + transcript pointer
           // so --resume / mid-session resume can force RC on (2.1.224 #30).
+          // densable qCt(()=>sE()?.noHistoryBackfill===!0) — live probe for
+          // compact-pair withhold (2.1.225 #7).
           if (!outboundOnly) {
             const seq = handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0;
+            const noHistoryBackfill = handle.noHistoryBackfill === true;
             saveBridgeSessionMeta(handle.bridgeSessionId, seq, {
               groupingId: handle.sessionGroupingId,
+              ...(noHistoryBackfill ? { noHistoryBackfill: true } : {}),
             });
             saveBridgeSession(
               getSessionId() as import('crypto').UUID,
@@ -819,6 +827,12 @@ export function useReplBridge(
               undefined,
               undefined,
               handle.sessionGroupingId,
+              noHistoryBackfill || undefined,
+            );
+            registerLiveSuppressionProbe(
+              () =>
+                handleRef.current?.noHistoryBackfill === true ||
+                getPersistedBridgeSession()?.noHistoryBackfill === true,
             );
           }
 
@@ -957,13 +971,17 @@ export function useReplBridge(
             if (isDisable) {
               // densable FCs / kEo + EGt — drop process meta and write
               // bridgeSessionId:"" tombstone so resume does not force RC on.
+              // densable qCt(void 0) on disconnect.
               clearBridgeSessionMeta();
               clearBridgeSession(getSessionId() as import('crypto').UUID);
+              registerLiveSuppressionProbe(undefined);
             } else {
               // densable CXr + Bkn: keep seq/grouping for re-init + resume.
               const seq = handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0;
+              const noHistoryBackfill = handle.noHistoryBackfill === true;
               saveBridgeSessionMeta(handle.bridgeSessionId, seq, {
                 groupingId: handle.sessionGroupingId,
+                ...(noHistoryBackfill ? { noHistoryBackfill: true } : {}),
               });
               saveBridgeSession(
                 getSessionId() as import('crypto').UUID,
@@ -972,7 +990,11 @@ export function useReplBridge(
                 undefined,
                 undefined,
                 handle.sessionGroupingId,
+                noHistoryBackfill || undefined,
               );
+              // densable qCt(void 0) when handle is about to be null — probe
+              // falls back to process meta / transcript noHistoryBackfill.
+              registerLiveSuppressionProbe(undefined);
             }
           }
           // densable: ur = Rt||Be||Et ? void 0 : Tt?"remote_control_disabled":"host_exit"

@@ -3832,6 +3832,8 @@ async function run(): Promise<CommanderCommand> {
         // densable taskDecorations — filled by useSubagentStatusLine.
         taskDecorations: {},
         agentNameRegistry: new Map(),
+        // densable 2.1.225 sendMessagePins — confirmed SendMessage peer by name
+        sendMessagePins: {},
         // densable storedImagePaths — [Image #N] click-to-open file paths
         storedImagePaths: new Map(),
         // densable displayedMessageContent — MessageDisplay SFa map (SFa when !verbose)

@@ -1,0 +1,80 @@
+    compact: ctx.compact,
+    compact: inspectDefaultOptions.compact,
+        if (ctx.compact !== !0)
+    let averageBias = MathSqrt(actualMax - totalLength / output.length), biasedMax = MathMax(actualMax - 3 - averageBias, 1), columns = @min(MathRound(MathSqrt(2.5 * biasedMax * outputLength) / biasedMax), MathFloor((breakLength - indentationLvl) / actualMax), ctx.compact * 4, 15);
+    if (ctx.compact !== !0 && valueLength > kMinLineLength && valueLength > ctx.breakLength - indentationLvl - 4)
+    let diff = ctx.compact !== !0 || type !== kObjectType ? 2 : 3;
+  let compact = ctx.compact;
+  if (compact !== !0) {
+    if (typeof compact === "number" && compact >= 1) {
+      if (ctx.currentDepth - recurseTimes < compact && entries === (outputLength = output.length)) {
+                  compact: 3,
+evidentbe usedkeyCodesixteenIslamic#000000entire widely active (typeofone cancolor =speakerextendsPhysicsterrain<tbody>funeralviewingmiddle cricketprophetshifteddoctorsRussell targetcompactalgebrasocial-bulk ofman and</td>
+<div id Official worldwide.aria-labelthe planetand it wasd" value="looking atbeneficialare in themonitoringreportedlythe modernworking onallowed towhere the innovative</a></div>soundtracksearchFormtend to beinput id="opening ofrestrictedadopted byaddressingtheologianmethods ofvariant ofChristian very largeautomotiveby far therange frompursuit offollow thebrought toin Englandagree thataccused ofcom…
+// This is a bug in Bun's bundler and should be reported with a reproduction.",""],"names":[],"mappings":"AAAA"}(async(g,w)=>{var S=new Map,i=new Map;function JZ(Z){if(Z.active){let{sheet:$,link:X}=Z;if(Z.active=!1,$)$.disabled=!0;else if(X){let G=X.sheet;if(G)G.disabled=!0}}}function NZ(Z){if(!Z.active){if(Z.active=!0,Z.sheet)Z.sheet.disabled=!1;else if(Z.link){let $=Z.link.sheet;if($)$.disabled=…
+streamBuildMessagestringinfallible: in-memory writenamespacelengthoffsetpositionlevelResolveMessageentry-point-runentry-point-buildimport-statementrequire-calldynamic-importrequire-resolveimport-ruleurl-tokencomposeshtml_manifestinternalbun:mainimportKindMODULE_NOT_FOUNDERR_UNKNOWN_BUILTIN_MODULEERR_MODULE_NOT_FOUNDRESOLVE_ERRORBUN_GC_TIMER_INTERVALBUN_GC_RUNS_UNTIL_SKIP_RELEASE_ACCESSBUN_GC_TIMER…
+No dev server attached in asynchronous bundle jobThe rewriter has been stopped.Assertion failed: HTML import file not found in pathToSourceIndexMapparseprintUnhandled out of memory error in breakOutputIntoPieces()(async(g,w)=>{var S=new Map,i=new Map;function JZ(Z){if(Z.active){let{sheet:$,link:X}=Z;if(Z.active=!1,$)$.disabled=!0;else if(X){let G=X.sheet;if(G)G.disabled=!0}}}function NZ(Z){if(!Z.a…
+dirclearcheckedscopealignhttp-equivnowrapdirectionalinkreltargetrevvlinkshapevaluetypemethodcoloraccept-charsetvaligndeclareenctypenoshadecompactdefermediarulesscrollingacceptcharsetbgcolorframenohref
+application/alto-endpointcost+jsonapplication/alto-endpointcostparams+jsonapplication/alto-endpointprop+jsonapplication/alto-endpointpropparams+jsonapplication/alto-error+jsonapplication/alto-networkmap+jsonapplication/alto-networkmapfilter+jsonapplication/alto-propmap+jsonapplication/alto-propmapparams+jsonapplication/alto-updatestreamcontrol+jsonapplication/alto-updatestreamparams+jsonapplicatio…
+# much more compact and reusable.
+changed on very large regex inputs where the (slower) fallback regex engine may
+void WTF::RobinHoodHashTable<WTF::RefPtr<WTF::UniquedStringImpl>, WTF::KeyValuePair<WTF::RefPtr<WTF::UniquedStringImpl>, JSC::BytecodeIntrinsicRegistry::Entry>, WTF::KeyValuePairKeyExtractor<WTF::KeyValuePair<WTF::RefPtr<WTF::UniquedStringImpl>, JSC::BytecodeIntrinsicRegistry::Entry>>, JSC::IdentifierRepHash, WTF::HashMap<WTF::RefPtr<WTF::UniquedStringImpl>, JSC::BytecodeIntrinsicRegistry::Entry, …
+void JSC::LinkBuffer::copyCompactAndLinkCode(MacroAssembler &, JITCompilationEffort) [InstructionType = unsigned int]
+Bad array mode for ArraySortCompact
+std::span<const char> WTF::enumNameImpl() [V = JSC::DFG::ArraySortCompact]
+JSC::CompactTDZEnvironmentMap::Handle::~Handle()
+JSC::CompactTDZEnvironmentMap::Handle::Handle(const CompactTDZEnvironmentMap::Handle &)
+CompactTDZEnvironment &JSC::CompactTDZEnvironmentKey::environment()
+CompactTDZEnvironmentMap::Handle JSC::Decoder::handleForTDZEnvironment(CompactTDZEnvironment *) const
+void JSC::Decoder::setHandleForTDZEnvironment(CompactTDZEnvironment *, const CompactTDZEnvironmentMap::Handle &)
+notation must be either "standard", "scientific", "engineering", or "compact"
+compactDisplay must be either "short" or "long"
+bool WTF::Vector<char16_t, 1024, WTF::CrashOnOverflow, 16, WTF::FastCompactMalloc>::growImpl(size_t) [T = char16_t, inlineCapacity = 1024, OverflowHandler = WTF::CrashOnOverflow, minCapacity = 16, Malloc = WTF::FastCompactMalloc]
+bool WTF::Vector<unsigned char, 1024, WTF::CrashOnOverflow, 16, WTF::FastCompactMalloc>::growImpl(size_t) [T = unsigned char, inlineCapacity = 1024, OverflowHandler = WTF::CrashOnOverflow, minCapacity = 16, Malloc = WTF::FastCompactMalloc]
+  - Results may be summarized if the content is very large
+Remote Control is only available when using Claude via api.anthropic.com.
+unset it (or run in a shell without it) to use Remote Control.
+unset them (or run in a shell without them) to use Remote Control.
+Send a notification to the user via their terminal and, when Remote Control is connected, also push to their mobile device
+Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.
+You have access to an `advisor` tool backed by a stronger reviewer model. It takes NO parameters -- when you call advisor(), your entire conversation history is automatically forwarded. They see the task, every tool call you've made, every result you've seen.
+This session is outbound-only. Enable Remote Control locally to allow inbound control.
+[... skill content truncated for compaction; use Read on the skill path if you need the full text]
+Not enough messages to compact.
+[earlier conversation truncated for compaction retry]
+Compaction blocked by PreCompact hook
+Your organization requires Trusted Devices for Remote Control, but enrollment is temporarily disabled. Please try again later, or contact your administrator.
+Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account.
+Error: You must be logged in to use Remote Control.
+Remote Control disconnected.
+/api/oauth/organizations/:orgUUID/plugins/list-plugins?enabled_only=true&compact=true
+performCompactTranscriptI
+| Stop | - | Run when Claude stops (including clear, resume, compact) |
+| PreCompact | "manual"/"auto" | Before compaction |
+| PostCompact | "manual"/"auto" | After compaction (receives summary) |
+tengu_post_compact_surveyw#
+consumePostCompaction
+DISABLE_AUTO_COMPACT
+CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP
+CLAUDE_CODE_COLD_COMPACT
+CLAUDE_CODE_AUTO_COMPACT_WINDOW
+CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+CLAUDE_AFTER_LAST_COMPACT
+SKIP_PRECOMPACT_THRESHOLD
+applyAutoCompactWindow
+executePreCompactHooks
+executePostCompactHooks
+isCompactPairWithheldFromRemote
+compactTranscriptForTesting
+pendingPostCompaction
+"isCompactSummary":true
+"isCompactSummary": true
+Whether to append the claude.ai session link to commits and PRs created from web or Remote Control sessions (default: true). Set to false to omit the Claude-Session trailer and PR-body link.
+Disable Remote Control (claude.ai/code, `claude remote-control`, `--remote-control`/`--rc`, auto-start, and the in-session toggle). Typically set in managed settings.
+Auto-compact window size
+Automatically compact conversation when context fills
+Precompute the compaction summary in the background before it is needed. Only applies when auto-compact is on.
+Start Remote Control bridge automatically each session
+Require explicit approval before SendMessage can reach a peer session on another machine via Remote Control
+Mirror local sessions to claude.ai as view-only (no remote control)
+precomputeCompactionEnabled

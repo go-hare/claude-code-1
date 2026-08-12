@@ -1,0 +1,80 @@
+data is requiredMissing argumentno-exit-on-errorfetch-preconnectdns-result-orderredis-preconnectexpose-internalsjsx-side-effects"
+[0mupdate-snapshotsreporter-outfile--parallel-delay--react-compiler--sql-preconnect--prefer-offline--heap-prof-name--no-deprecation--use-openssl-ca--use-bundled-caJSVALUE_TO_BOOL(invalid ABI typeallowPositionals207 Multi-Status304 Not Modified306 Switch Proxy401 Unauthorized414 URI Too Long418 I'm a Teapot510 Not ExtendedmaxPayloadLengthsetSocketOptionsapplication/wasm</RestoreStatus>Blob is detac…
+  tlsSocket._securePending = !1, tlsSocket.secureConnecting = !1, tlsSocket._secureEstablished = !0, tlsSocket.alpnProtocol = nativeHandle?.alpnProtocol ?? null;
+    this.emit("secureConnection", socket);
+      if (socket = options.createConnection(url, options), this[bunHTTP2Socket] = socket, socket.connecting || socket.secureConnecting) {
+        let connectEvent = socket instanceof tls.TLSSocket ? "secureConnect" : "connect";
+  if (!this._hadError && this.secureConnecting) {
+    self._securePending = !1, self.secureConnecting = !1, self._secureEstablished = !0, self.emit("secure", self), self.alpnProtocol = socket.alpnProtocol;
+    self.emit("secureConnect", verifyError), self.removeListener("end", onConnectEnd);
+    if (self._securePending = !1, self.secureConnecting = !1, self._secureEstablished = !!success, self.servername = socket.getServername(), self.alpnProtocol = socket.alpnProtocol, self._requestCert)
+        server.prependOnceListener("secureConnection", connectionListener);
+      server.emit("secureConnection", self);
+    if (self.emit("secure", self), self.emit("secureConnect", verifyError), server?.pauseOnConnect)
+      this.authorized = !1, this.secureConnecting = !0, this._secureEstablished = !1, this._securePending = !0, this[kConnectOptions] = options2, this.prependListener("end", onConnectEnd);
+        this.once("secureConnect", connectListener);
+    this.once("secureConnect", cb);
+    self.authorized = !1, self.secureConnecting = !0, self._secureEstablished = !1, self._securePending = !0, self[kConnectOptions] = options, self.prependListener("end", onConnectEnd);
+    self.authorized = !1, self.secureConnecting = !0, self._secureEstablished = !1, self._securePending = !0, self[kConnectOptions] = context.options, self.prependListener("end", onConnectEnd);
+    case "secureConnection":
+  this[ksecureContext] = @undefined, this.ALPNProtocols = @undefined, this[kcheckServerIdentity] = @undefined, this[ksession] = @undefined, this.alpnProtocol = null, this._secureEstablished = !1, this._rejectUnauthorized = rejectUnauthorizedDefault(), this._securePending = !0, this._newSessionPending = @undefined, this._controlReleased = @undefined, this.secureConnecting = !1, this._SNICallback = …
+  this[ksecureContext] = options.secureContext || new InternalSecureContext(options), this.authorized = !1, this.secureConnecting = !0, this._secureEstablished = !1, this._securePending = !0;
+  this.secureConnecting = !1, this._secureEstablished = !1;
+  if (this.secureConnecting)
+    return this.once("secureConnect", NetSocket.prototype._final.bind(this, callback));
+function Server(options, secureConnectionListener) {
+    return new Server(options, secureConnectionListener);
+  NetServer.@apply(this, [options, secureConnectionListener]), this.key = @undefined, this.cert = @undefined, this.ca = @undefined, this.passphrase = @undefined, this.secureOptions = @undefined, this._rejectUnauthorized = rejectUnauthorizedDefault(), this._requestCert = @undefined, this.servername = @undefined, this.ALPNProtocols = @undefined;
+wrapperalreadycertainrealitystorageanotherdesktopofferedpatternunusualDigitalcapitalWebsitefailureconnectreducedAndroiddecadesregular &amp; animalsreleaseAutomatgettingmethodsnothingPopularcaptionletterscapturesciencelicensechangesEngland=1&amp;History = new CentralupdatedSpecialNetworkrequirecommentwarningCollegetoolbarremainsbecauseelectedDeutschfinanceworkersquicklybetweenexactlysettingdiseaseS…
+elide-linesPrint version and exitPrint version with revision and exitRun a script in all workspace packages matching the patternSTRfilterForce a script or package to use Bun's runtime instead of Node.js (via symlinking node)Exit when the parent process dies, and on exit kill every descendant.no-orphansControl the shell used for package.json scripts. Supports either 'bun' or 'system'shellRun a scri…
+`))]);_.appendChild(q("div",{class:"code"},[H,q("div",{class:"view"},[...j.map((D)=>_Z(D)),q("div",{class:"highlight-wrap log-error"},[O("span",{class:"space"},"_".repeat(W-1)),O("span",{class:"line"},"_".repeat(V))]),...z.map((D)=>_Z(D))])])),_.appendChild(TZ(Q,"trace-frame")),$.appendChild(_)}$.appendChild(q("div",{class:"r-error-trace"},Y.map((J)=>TZ(J,"trace-frame")))),c.appendChild($)}functio…
+CRL has expiredformat error in certificate's notBefore fieldformat error in certificate's notAfter fieldformat error in CRL's lastUpdate fieldformat error in CRL's nextUpdate fieldout of memoryself signed certificateself signed certificate in certificate chainunable to get local issuer certificateunable to verify the first certificatecertificate chain too longcertificate revokedinvalid CA certific…
+SELECT command failed with non-OK responseReceived non-SELECT response while in the SELECT state.Authentication failed (unexpected response)Server does not support RESP3Authentication failed with unexpected responsePush message is not a subscription message.Connection is closed and offline queue is disabledConnection has failedParser consumed 0 bytes unexpectedly (stack path)Failed to read data (s…
+`))]);O.appendChild(G("div",{class:"code"},[W,G("div",{class:"view"},[...Q.map((U)=>C(U)),G("div",{class:"highlight-wrap log-error"},[I("span",{class:"space"},"_".repeat(X-1)),I("span",{class:"line"},"_".repeat(F))]),...j.map((U)=>C(U))])])),O.appendChild(p(S,"trace-frame")),J.appendChild(O)}J.appendChild(G("div",{class:"r-error-trace"},Z.map(($)=>p($,"trace-frame")))),M.appendChild(J)}function g(…
+--no-orphans--workspaces--if-present--sequential--no-exit-on-error--elide-lines--drop--feature--tsconfig-override--main-fields--env-file--extension-order--no-env-file--preserve-symlinks--preserve-symlinks-main--conditions--preload--require--hot--redis-preconnect--unhandled-rejectionsInvalid value for --unhandled-rejections: "{}". Must be one of "strict", "throw", "warn", "none", "warn-with-error-code"
+--print--eval--smol--fetch-preconnect--experimental-http2-fetch--experimental-http3-fetch--expose-gc--expose-internals--console-depthInvalid value for --console-depth: "{}". Must be a positive integer
+[32m...args-f-H-L-P--mode-m BrowserServerComponentsSsrCompressionFailedAbortedHTTP2RefusedStreamHTTP2ContentLengthMismatchHTTP2FrameSizeErrorHTTP2ProtocolErrorHTTP2FlowControlErrorHTTP2EnhanceYourCalmHTTP2HeaderListTooLargeHTTP2GoAwayHTTP2CompressionErrorTimeoutAbortedBeforeConnectingClientAbortedResponseHeadersTooLargeUnrequestedUpgradeUnexpectedDataInvalidHTTPResponseInvalidContentLengthUnsuppor…
+bun.lockbVec<u8> JSON writer is infallibleparseLockfilebitbucketgitlabsourcehutdomainprojectsshurlsshhttpsdefaultUnsupportedTargetBufferTooSmallSysAllocDecodingErrorWriteFailedPartialWriteMaxPathExceededUnexpectedMissingGeneratedColumnValueInvalidGeneratedColumnValueInvalidSourceIndexDeltaInvalidSourceIndexValueMissingOriginalLineInvalidOriginalLineValueMissingOriginalColumnValueInvalidOriginalCol…
+Expected a date or numberMySQLConnection cannot be constructed directlyAuthentication failedusername must not contain null bytespassword must not contain null bytesdatabase must not contain null bytespath must not contain null bytesfailed to connect to mysql (during authentication)PostgresSQLQuery cannot be constructed directlyfailed to prepare and queryfailed to write queryfailed to flushstatemen…
+[0mMissingResolveDirInvalidResolveDirVersionSpecifierNotAllowedHereParseErrorAlreadyLoggedSpawnNoSourceMapsOrBytecodeInvalidZstdDataDecompressionFailedZstdFailedToCreateInstanceZstdDecompressionErrorUrlPathsCompressionFailedAbortedHTTP2RefusedStreamHTTP2ContentLengthMismatchHTTP2FrameSizeErrorHTTP2ProtocolErrorHTTP2FlowControlErrorHTTP2EnhanceYourCalmHTTP2HeaderListTooLargeHTTP2GoAwayHTTP2Compress…
+FdInvalidZstdDataDecompressionFailedZstdFailedToCreateInstanceZstdDecompressionErrorssh++CompressionFailedAbortedHTTP2RefusedStreamHTTP2ContentLengthMismatchHTTP2FrameSizeErrorHTTP2ProtocolErrorHTTP2FlowControlErrorHTTP2EnhanceYourCalmHTTP2HeaderListTooLargeHTTP2GoAwayHTTP2CompressionErrorTimeoutAbortedBeforeConnectingERR_TLS_CERT_ALTNAME_INVALIDClientAbortedConnectionRefusedResponseHeadersTooLarg…
+http/1.1CompressionFailedAbortedWriteFailedHTTP2RefusedStreamHTTP2ContentLengthMismatchHTTP2FrameSizeErrorHTTP2ProtocolErrorHTTP2FlowControlErrorHTTP2EnhanceYourCalmHTTP2HeaderListTooLargeHTTP2GoAwayHTTP2CompressionErrorTimeoutAbortedBeforeConnectingInvalidURLERR_TLS_CERT_ALTNAME_INVALIDClientAbortedConnectionRefusedResponseHeadersTooLargeUnrequestedUpgradeUnexpectedDataInvalidHTTPResponseInvalidC…
+secureConnectionStart
+max window could use an increase, but we're stuck at %u
+,error: preconnect URL must have a hostname: 
+[0m preconnect URL must have a hostname: 
+.error: preconnect URL must have a valid port: 
+[0m preconnect URL must have a valid port: 
+-error: preconnect URL must be HTTP or HTTPS: 
+[0m preconnect URL must be HTTP or HTTPS: 
+MediaCaptureRequiresSecureConnection
+When returnEarlyFromInfiniteLoopsForFuzzing is true, this determines the number of executions a loop can run for before just returning. This is helpful for the fuzzer so it doesn't get stuck in infinite loops.
+Artifacts need a claude.ai login, and this remote session authenticates through the machine that launched it, which is not signed in to claude.ai. Sign in to claude.ai on that machine (/login, "Claude account with subscription"), then reconnect this session.
+_getNextReconnectionDelay
+_scheduleReconnection
+- When stuck -- errors recurring, approach not converging, results that don't fit.
+stuck on a startup dialog
+Usage: /mcp [reconnect|enable|disable [<server>|all]]. With no server name, applies to all.
+https://clau.de/chrome/reconnect
+Can't open MCP settings while no terminal is attached to this background session. Attach to it and run /mcp again, or use `/mcp enable|disable|reconnect <server>` to steer without the panel.
+The Claude in Chrome extension was installed, but the browser connection could not be established in this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish the connection with /chrome (Reconnect extension), and the next Claude Code session will detect the extension automatically.
+Claude in Chrome is enabled for this session, but the browser connection is not working (it failed or was disabled), so mcp__claude-in-chrome__* tools are not available. Do not attempt them. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can retry the connection with /chrome (Reconnect extension).
+getReconnectAttempts
+setEnsureConnectedClient
+getEnsureConnectedClient
+reconnectMcpServerImpl
+ensureConnectedClient
+CHROME_EXTENSION_RECONNECT_URL
+" tool call failed because the Chrome extension disconnected mid-operation. This is usually transient (Chrome service worker restart, tab closed, network blip) and the extension often reconnects automatically. Retry the same tool call in a few seconds. If it keeps failing, ask the user to switch to Chrome (which wakes the extension) or check that the extension is still logged in.
+org-memory-discovery: reconnect run failed: 
+ expanded to an empty string. Set the referenced environment variable, or update the server's config and reconnect.
+OAuth completed after an identity change; discarding without reconnecting
+OAuth completed but the server is now disabled or policy-blocked; not reconnecting
+OAuth completed after an identity change; discarding the stale reconnect
+OAuth complete, reconnected with 
+Failed to reconnect SSE stream
+Reconnect returned 'needs-auth'; retrying once after cache clear
+mcp_reconnect_not_connected
+mcp_reconnect_needs_auth_discovery
+mcp_reconnect_bearer_rejected
+mcp_reconnect_tools_list_failed

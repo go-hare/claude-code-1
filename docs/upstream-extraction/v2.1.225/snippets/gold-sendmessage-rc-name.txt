@@ -1,0 +1,80 @@
+Remote Control is only available when using Claude via api.anthropic.com.
+unset it (or run in a shell without it) to use Remote Control.
+unset them (or run in a shell without them) to use Remote Control.
+Send a notification to the user via their terminal and, when Remote Control is connected, also push to their mobile device
+This session is outbound-only. Enable Remote Control locally to allow inbound control.
+Your organization requires Trusted Devices for Remote Control, but enrollment is temporarily disabled. Please try again later, or contact your administrator.
+Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account.
+Error: You must be logged in to use Remote Control.
+Remote Control disconnected.
+Whether to append the claude.ai session link to commits and PRs created from web or Remote Control sessions (default: true). Set to false to omit the Claude-Session trailer and PR-body link.
+Disable Remote Control (claude.ai/code, `claude remote-control`, `--remote-control`/`--rc`, auto-start, and the in-session toggle). Typically set in managed settings.
+Start Remote Control bridge automatically each session
+Require explicit approval before SendMessage can reach a peer session on another machine via Remote Control
+Mirror local sessions to claude.ai as view-only (no remote control)
+Remote Control is not available inside a cloud session.
+Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).
+Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.
+Remote Control requires claude.ai subscription auth.
+to use Remote Control.
+Remote Control requires a full-scope login token. Long-lived tokens (from `claude setup-token` or CLAUDE_CODE_OAUTH_TOKEN) are limited to inference-only for security reasons. Run `claude auth login` to use Remote Control.
+Unable to determine your organization for Remote Control eligibility. Run `claude auth login` to refresh your account information.
+Couldn't verify your organization's Remote Control policy. Retry, or run `claude doctor` for details.
+Remote Control isn't available for your organization due to its compliance policy (
+Remote Control is disabled by your organization's policy. Contact your organization admin for access.
+Remote Control requires feature-flag evaluation, which is disabled because 
+ is set. Unset it (or run in a shell without it) to use Remote Control.
+Remote Control requires feature-flag evaluation, which is disabled because DISABLE_GROWTHBOOK is set. Unset it (or run in a shell without it) to use Remote Control.
+Remote Control requires feature-flag evaluation, which is unavailable in this environment.
+Remote Control is not yet enabled for your account. If you recently changed plans, run `claude auth logout` then `claude auth login` to refresh your entitlements, or `claude doctor` for details.
+[debug] Remote Control auth state:
+Org policy allows Remote Control (allow_remote_control)
+Org policy does not allow Remote Control (allow_remote_control)
+Remote Control rollout enabled for this account
+Remote Control rollout not enabled for this account
+Remote Control rollout could not be verified for this account
+ This session is connected through an enterprise cloud gateway (set up via /login), which does not support Remote Control.
+ (_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL does not apply to Remote Control.)
+) is too old for Remote Control.
+Remote Control is rejecting a burst of unsigned remote activity; further warnings for this burst are suppressed.
+Remote Control received a 
+Enable Remote Control for all sessions
+Your organization requires Trusted Devices for Remote Control, but this device is not enrolled. Please run `/login` in Claude Code to enroll this device.
+on another machine (Remote Control)
+Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume.
+Remote Control server rejected the request (HTTP 
+": Remote Control population not ready within 
+": Remote Control walk 
+ Remote Control rows, 
+', so a bare re-send could reach someone you did not choose: pick again explicitly with a fresh 'name [ref]', or message the lead.
+' was confirmed earlier as a session that is NOT on this machine; a session record on this machine now claims that identity, so nothing was assumed. A same-named session on this machine your user did not start is suspicious: ask the user before confirming anyone.
+ is for OTHER Claude Code sessions (a peer session on this machine, or a Remote Control / cloud session).
+Remote Control session expired.
+: Not found (404). Remote Control may not be available for this organization.
+ reachable from this session's livepreview URL while Remote Control is running.
+Remote Control Failed
+Remote Control - Control local sessions from claude.ai/code or the Claude mobile app
+  Remote Control allows you to control sessions on your local device from
+  Remote Control runs as a persistent server that accepts multiple concurrent
+Error: Remote Control base URL uses HTTP. Only HTTPS or localhost HTTP is allowed.
+Remote Control is launching in spawn mode, which lets you start new sessions in this project from claude.ai/code or the Claude mobile app. Learn more: https://code.claude.com/docs/en/remote-control
+Remote Control environments are not available for your account.
+Enable Remote Control? (y/n) 
+Remote Control denied: policy cache miss (transient)
+Remote Control worker refused: corporate launcher unresolvable (transient)
+Remote Control base URL uses HTTP. Only HTTPS or localhost HTTP is allowed.
+ isn't available over Remote Control.
+Reset Remote Control to default
+ Remote Control for all sessions
+The session keeps running on this machine. Use your other devices as a remote control. Disconnect anytime with /remote-control.
+Enable Remote Control
+Sign in to enroll this device for Remote Control.
+This will disable Remote Control for this session.
+Disable remote control and launch in Claude Code on the web
+New Remote Control server
+Remote Control disconnected
+Remote Control: unsigned activity burst rejected
+Remote Control: unsigned 
+. This flag is reserved for Remote Control worker processes connecting to Anthropic's backend.
+Error: Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`).
+Remote Control initialization failed

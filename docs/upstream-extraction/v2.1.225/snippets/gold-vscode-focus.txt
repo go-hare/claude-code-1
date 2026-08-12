@@ -1,0 +1,7 @@
+Toggle focus view: just your prompt, summary, and response
+Focus view needs the fullscreen renderer. Run /tui fullscreen to switch (this restarts and resumes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.
+Focus view disabled.
+ Focus view needs the fullscreen renderer. Run /tui fullscreen to switch (this restarts and resumes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.
+Then tell the user that you'll be introducing a few more suggestions for optimizing their codebase and Claude Code setup based on what you found. Present these as a single, well-formatted to-do list where every item is relevant to this repo. Put the most impactful items first.
+`:"")+"- auto: Use the default effort level for your model"}function MZo(e){let t=a3e(e),r=roe(e)?", ultracode":"";return`${t.join(", ")}${r}, auto`}function Jha(e,t){let r=e.toLowerCase();if(r==="auto"||r==="unset")return{value:void 0};if(r==="ultracode"&&roe(t))return{value:"xhigh"};let n=vFt(e);return n?{value:n}:null}function Xha(e,t=!1){if(!du())return null;if(!Hv())return" (applied locally \…
+`,T.offset=(A=b.offset)!=null?A:0,T.width=(k=b.width)!=null?k:0,T.dontPrettyTextNodes=(R=(P=b.dontPrettyTextNodes)!=null?P:b.dontprettytextnodes)!=null?R:0,T.spaceBeforeSlash=(O=(H=b.spaceBeforeSlash)!=null?H:b.spacebeforeslash)!=null?O:"",T.spaceBeforeSlash===!0)T.spaceBeforeSlash=" ";return T.suppressPrettyCount=0,T.user={},T.state=t.None,T}indent(b,T,w){var C;if(!T.pretty||T.suppressPrettyCount…

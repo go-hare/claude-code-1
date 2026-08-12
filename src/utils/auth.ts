@@ -1642,51 +1642,82 @@ async function handleOAuth401ErrorImpl(
       }
     }
 
-    // Official QTh densable: when not host-managed, env/FD-pinned token may
-    // be rotated by the host, or disk keychain may already hold a fresh token.
-    if (
-      !isHostManagedProviderAuth() &&
-      (process.env.CLAUDE_CODE_OAUTH_TOKEN || getOAuthTokenFromFileDescriptor())
-    ) {
-      try {
-        const secureStorage = getSecureStorage()
-        const storageData = await secureStorage.readAsync()
-        const oauthData = storageData?.claudeAiOauth
-        if (
-          oauthData?.accessToken &&
-          oauthData.accessToken !== failedAccessToken
-        ) {
-          if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-            process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthData.accessToken
+    // densable 2.1.225 QTh: long-lived user-supplied CLAUDE_CODE_OAUTH_TOKEN
+    // must NOT be overwritten by a short-lived disk credential on 401.
+    // SEA: n = Boolean(env token) && !REMOTE_SESSION_ID && !ANTHROPIC_UNIX_SOCKET
+    // → keep env, log, skip disk adopt; still allow wait-for-rotation / zombie exit.
+    if (!isHostManagedProviderAuth()) {
+      const hasEnvToken = Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)
+      const hasFdToken = Boolean(getOAuthTokenFromFileDescriptor())
+      // densable oDa = CLAUDE_CODE_REMOTE_SESSION_ID (remote child may adopt disk)
+      const isRemoteSession = Boolean(process.env.CLAUDE_CODE_REMOTE_SESSION_ID)
+      const keepUserSuppliedEnvToken =
+        hasEnvToken && !isRemoteSession && !process.env.ANTHROPIC_UNIX_SOCKET
+
+      if (keepUserSuppliedEnvToken) {
+        logForDebugging(
+          'OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login.',
+          { level: 'error' },
+        )
+      } else if (hasEnvToken || hasFdToken) {
+        // densable: disk recover only when not keeping user-supplied env token.
+        // Also refuse expired stored tokens (Sbe / isOAuthTokenExpired).
+        try {
+          const secureStorage = getSecureStorage()
+          const storageData = await secureStorage.readAsync()
+          const oauthData = storageData?.claudeAiOauth
+          if (
+            oauthData?.accessToken &&
+            oauthData.accessToken !== failedAccessToken &&
+            !isOAuthTokenExpired(oauthData.expiresAt ?? null)
+          ) {
+            if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+              process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthData.accessToken
+            }
+            clearOAuthTokenCache()
+            logEvent('tengu_oauth_401_recovered_from_disk', {})
+            recordRemoteAuthFailExit(true)
+            return true
           }
-          clearOAuthTokenCache()
-          logEvent('tengu_oauth_401_recovered_from_disk', {})
-          recordRemoteAuthFailExit(true)
-          return true
+        } catch {
+          // densable fe("oauth_401_recovery","oauth_401_disk_read_failed")
+          logEvent('oauth_401_disk_read_failed', {})
         }
-      } catch {
-        // ignore disk recovery errors; fall through to wait/zombie path
       }
 
-      const waitMs = resolveOauth401WaitMsOrDefault()
-      if (waitMs > 0) {
-        logForDebugging(
-          `OAuth 401 recovery: waiting up to ${waitMs}ms for a rotated env token`,
-        )
-        const rotated = await waitForRotatedOauthToken({
-          failedAccessToken,
-          timeoutMs: waitMs,
-          readToken: () =>
-            process.env.CLAUDE_CODE_OAUTH_TOKEN ||
-            getOAuthTokenFromFileDescriptor() ||
-            undefined,
-        })
-        if (rotated) {
-          clearOAuthTokenCache()
-          logEvent('tengu_oauth_401_recovered_from_rotation', {})
-          recordRemoteAuthFailExit(true)
-          return true
+      if (hasEnvToken || hasFdToken) {
+        const waitMs = resolveOauth401WaitMsOrDefault()
+        if (waitMs > 0) {
+          logForDebugging(
+            `OAuth 401 recovery: waiting up to ${waitMs}ms for a rotated env token`,
+          )
+          const rotated = await waitForRotatedOauthToken({
+            failedAccessToken,
+            timeoutMs: waitMs,
+            readToken: () =>
+              process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+              getOAuthTokenFromFileDescriptor() ||
+              undefined,
+          })
+          if (rotated) {
+            clearOAuthTokenCache()
+            logEvent('tengu_oauth_401_recovered_from_rotation', {})
+            recordRemoteAuthFailExit(true)
+            return true
+          }
         }
+      }
+
+      // densable fe("oauth_401_recovery", n?"oauth_401_skipped_user_env_token":…)
+      if (keepUserSuppliedEnvToken) {
+        logEvent('oauth_401_skipped_user_env_token', {})
+      } else if (hasEnvToken || hasFdToken) {
+        logEvent(
+          isRemoteSession
+            ? 'oauth_401_no_refresh_token_bg_worker'
+            : 'oauth_401_no_refresh_token_interactive',
+          {},
+        )
       }
     }
     if (recordRemoteAuthFailExit(false) === 'exit') {

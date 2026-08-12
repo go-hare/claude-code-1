@@ -915,11 +915,20 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       }
 
       // Log classifier decision for metrics (including overhead telemetry)
+      // densable 2.1.225: refusedBySafeguard is distinct from blocked (no denial counter).
       const yoloDecision = classifierResult.unavailable
         ? 'unavailable'
-        : classifierResult.shouldBlock
-          ? 'blocked'
-          : 'allowed'
+        : classifierResult.refusedBySafeguard
+          ? 'refused'
+          : classifierResult.shouldBlock
+            ? 'blocked'
+            : 'allowed'
+      // densable: only real blocks (not unavailable / transcriptTooLong / refused) count.
+      const countsAsDenial =
+        classifierResult.shouldBlock &&
+        !classifierResult.unavailable &&
+        !classifierResult.transcriptTooLong &&
+        !classifierResult.refusedBySafeguard
 
       // Compute classifier cost in USD for overhead analysis
       const classifierCostUSD =
@@ -943,10 +952,10 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         sameTurnSiblings: sameTurnSiblings.length,
         classifierModel:
           classifierResult.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        consecutiveDenials: classifierResult.shouldBlock
+        consecutiveDenials: countsAsDenial
           ? denialState.consecutiveDenials + 1
           : 0,
-        totalDenials: classifierResult.shouldBlock
+        totalDenials: countsAsDenial
           ? denialState.totalDenials + 1
           : denialState.totalDenials,
         // Overhead telemetry: token usage and latency for the classifier API call
@@ -1097,6 +1106,31 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             { level: 'warn' },
           )
           return result
+        }
+
+        // densable 2.1.225: stop_reason==="refusal" → refuse without denial counter.
+        if (classifierResult.refusedBySafeguard) {
+          if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
+            throw new AbortError(
+              'Agent aborted: auto mode classifier request refused by the safety safeguard in headless mode',
+            )
+          }
+          logForDebugging(
+            'Auto mode classifier request refused by the safety safeguard, denying (exempt from the denial counter)',
+            { level: 'warn' },
+          )
+          return {
+            behavior: 'deny',
+            decisionReason: {
+              type: 'classifier',
+              classifier: 'auto-mode',
+              reason: classifierResult.reason,
+              noVerdict: true,
+            },
+            message: buildYoloRejectionMessage(classifierResult.reason, {
+              refused: true,
+            }),
+          }
         }
 
         // Update denial tracking and check limits

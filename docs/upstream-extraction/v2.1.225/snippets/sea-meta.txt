@@ -1,0 +1,5 @@
+version: 2.1.225
+size: 279661952
+sha256: 08d6e85dd2b80883bb8da93cbeae3dc79b4704d6b84a05d614bf1ff4a5155b69  package/claude
+version_hits: 6
+path: /tmp/official-225/plat/package/claude

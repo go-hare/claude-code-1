@@ -857,8 +857,83 @@ export function setSessionFileForTesting(path: string): void {
 type InternalEventWriter = (
   eventType: string,
   payload: Record<string, unknown>,
-  options?: { isCompaction?: boolean; agentId?: string },
+  options?: {
+    isCompaction?: boolean
+    agentId?: string
+    /** densable preservedEventIds on compact_boundary uploads */
+    preservedEventIds?: string[]
+  },
 ) => Promise<void>
+
+/**
+ * densable Otf / qCt / Dtf — live probe that the active bridge session is under
+ * history-backfill suppression (mint-after-reattach-gone / noHistoryBackfill).
+ * Registered by useReplBridge while RC is connected; used by
+ * isCompactPairWithheldFromRemote so mid-session compact pairs are not
+ * re-uploaded to CCR when the remote session was minted without prior history.
+ */
+let liveBridgeSuppressionProbe: (() => boolean) | undefined
+
+/** densable qCt — register (or clear with undefined) the live suppression probe. */
+export function registerLiveSuppressionProbe(
+  probe: (() => boolean) | undefined,
+): void {
+  liveBridgeSuppressionProbe = probe
+}
+
+/** densable Dtf — true when the live probe reports history-backfill suppression. */
+export function isLiveBridgeSuppressed(): boolean {
+  return liveBridgeSuppressionProbe?.() === true
+}
+
+/**
+ * densable zCt — live bridge pointer for the current session (id/seq/flags).
+ * Returns undefined when RC is not live on this process.
+ */
+export function getCurrentSessionBridge():
+  | {
+      id: string
+      seq: number
+      declaredDialogKinds?: string[]
+      groupingId?: string
+      noHistoryBackfill?: boolean
+    }
+  | undefined {
+  const project = getProject()
+  if (!project.currentSessionBridgeId) return undefined
+  return {
+    id: project.currentSessionBridgeId,
+    seq: project.currentSessionBridgeSeq ?? 0,
+    declaredDialogKinds: project.currentSessionBridgeDialogKinds,
+    groupingId: project.currentSessionBridgeGroupingId,
+    noHistoryBackfill: project.currentSessionBridgeNoBackfill,
+  }
+}
+
+/**
+ * densable oHr — compact_boundary system message OR user compact summary.
+ * These are the "compact pair" entries that must not be re-uploaded under
+ * history-backfill suppression (2.1.225 #7).
+ */
+export function isCompactPairEntry(entry: {
+  type?: string
+  subtype?: string
+  isCompactSummary?: boolean
+}): boolean {
+  if (isCompactBoundaryMessage(entry as Message)) return true
+  return entry.type === 'user' && entry.isCompactSummary === true
+}
+
+/**
+ * densable jCt — withhold compact-pair remote upload when the session carries
+ * noHistoryBackfill (mint-after-gone) or the live probe says so.
+ */
+export function isCompactPairWithheldFromRemote(): boolean {
+  return (
+    getCurrentSessionBridge()?.noHistoryBackfill === true ||
+    isLiveBridgeSuppressed()
+  )
+}
 
 /**
  * Register a CCR v2 internal event writer for transcript persistence.
@@ -869,14 +944,57 @@ export function setInternalEventWriter(writer: InternalEventWriter): void {
   getProject().setInternalEventWriter(writer)
 }
 
-type InternalEventReader = () => Promise<
-  { payload: Record<string, unknown>; agent_id?: string }[] | null
+/**
+ * densable internal-event read result (Q0a reader).
+ * `events` may be a bare array for legacy readers; prefer the object form
+ * with optional stats/anchorFallback for delta rehydrate.
+ */
+export type InternalEventReadResult = {
+  events: Array<{
+    payload: Record<string, unknown>
+    agent_id?: string
+    /** densable session_agent_id on subagent stream */
+    session_agent_id?: string
+    event_id?: string
+  }>
+  stats?: {
+    pageCount?: number
+    bytesReceived?: number | null
+    contentEncoding?: string
+  }
+  /**
+   * densable paginatedGet anchorFallback — after_event_id was rejected or
+   * not found; result is a full refetch without the anchor.
+   */
+  anchorFallback?: 'rejected' | 'not-found'
+}
+
+type InternalEventReader = (afterEventId?: string) => Promise<
+  | InternalEventReadResult
+  | Array<{
+      payload: Record<string, unknown>
+      agent_id?: string
+      session_agent_id?: string
+      event_id?: string
+    }>
+  | null
 >
+
+/**
+ * Prefetch triple from densable RemoteIO hydratePrefetch:
+ * [foregroundRead, subagentRead, tipValidation]
+ */
+export type CCRHydratePrefetch = [
+  InternalEventReadResult | null | undefined,
+  InternalEventReadResult | null | undefined,
+  { eventId?: string; fallbackReason?: string } | undefined,
+]
 
 /**
  * Register a CCR v2 internal event reader for session resume.
  * When set, hydrateFromCCRv2InternalEvents() can fetch foreground and
  * subagent internal events to reconstruct conversation state on reconnection.
+ * densable RPn: reader may accept after_event_id for delta rehydrate.
  */
 export function setInternalEventReader(
   reader: InternalEventReader,
@@ -884,6 +1002,316 @@ export function setInternalEventReader(
 ): void {
   getProject().setInternalEventReader(reader)
   getProject().setInternalSubagentEventReader(subagentReader)
+}
+
+/** densable Etf — sibling path of session jsonl: `….ccr-tip.json`. */
+export function getCCRTipPathForSession(sessionId: string): string {
+  const transcript = getTranscriptPathForSession(sessionId)
+  return transcript.endsWith('.jsonl')
+    ? `${transcript.slice(0, -6)}.ccr-tip.json`
+    : `${transcript}.ccr-tip.json`
+}
+
+/** densable fHr — transcript entry with uuid (user/assistant/attachment/system). */
+function isTranscriptUuidPayload(
+  entry: unknown,
+): entry is { type: string; uuid: string } {
+  return (
+    typeof entry === 'object' &&
+    entry !== null &&
+    'type' in entry &&
+    'uuid' in entry &&
+    typeof (entry as { uuid: unknown }).uuid === 'string' &&
+    isTranscriptMessage(entry as Entry)
+  )
+}
+
+/** densable wtf */
+export async function readCCRTip(
+  sessionId: string,
+): Promise<{ eventId: string; updatedAt?: string } | null> {
+  try {
+    const raw = await readFile(getCCRTipPathForSession(sessionId), 'utf-8')
+    const parsed = jsonParse(raw) as { eventId?: unknown; updatedAt?: unknown }
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof parsed.eventId === 'string'
+    ) {
+      return {
+        eventId: parsed.eventId,
+        ...(typeof parsed.updatedAt === 'string'
+          ? { updatedAt: parsed.updatedAt }
+          : {}),
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** densable Ctf */
+export async function writeCCRTip(
+  sessionId: string,
+  eventId: string,
+): Promise<void> {
+  const body = {
+    eventId,
+    updatedAt: new Date().toISOString(),
+  }
+  try {
+    const tipPath = getCCRTipPathForSession(sessionId)
+    await mkdir(dirname(tipPath), { recursive: true, mode: 0o700 })
+    await writeFile(tipPath, jsonStringify(body), {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
+  } catch (err) {
+    logForDebugging(`Failed to write CCR tip sidecar: ${errorMessage(err)}`)
+  }
+}
+
+/**
+ * densable J0a / updateCCRTipFromAckedBatch — last acked non-subagent
+ * foreground transcript payload advances the tip.
+ */
+export async function updateCCRTipFromAckedBatch(
+  batch: Array<{
+    payload?: unknown
+    session_agent_id?: string
+    agent_id?: string
+  }>,
+): Promise<void> {
+  for (let i = batch.length - 1; i >= 0; i--) {
+    const row = batch[i]
+    // densable J0a: only skip subagent stream rows (session_agent_id).
+    // Foreground events may still carry agent_id; do not treat that as subagent.
+    if (!row || row.session_agent_id) continue
+    if (isTranscriptUuidPayload(row.payload)) {
+      await writeCCRTip(getSessionId(), row.payload.uuid)
+      return
+    }
+  }
+}
+
+/** densable X0a — uuid set from jsonl tail content. */
+function collectUuidsFromJsonlContent(content: string): Set<string> {
+  const out = new Set<string>()
+  for (const line of content.split('\n')) {
+    if (!line) continue
+    try {
+      const parsed = jsonParse(line) as unknown
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        typeof (parsed as { uuid?: unknown }).uuid === 'string'
+      ) {
+        out.add((parsed as { uuid: string }).uuid)
+      }
+    } catch {
+      // skip bad lines
+    }
+  }
+  return out
+}
+
+/** densable Rtf — reverse walk of transcript uuids in a tail. */
+function* iterateTranscriptUuidsFromTail(content: string): Generator<string> {
+  const lines = content.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (!line) continue
+    let parsed: unknown
+    try {
+      parsed = jsonParse(line)
+    } catch {
+      continue
+    }
+    if (isTranscriptUuidPayload(parsed)) {
+      yield parsed.uuid
+    }
+  }
+}
+
+/** densable Atf — last transcript uuid in tail. */
+function lastTranscriptUuidInTail(content: string): string | undefined {
+  for (const uuid of iterateTranscriptUuidsFromTail(content)) {
+    return uuid
+  }
+  return undefined
+}
+
+/** densable ktf — first local uuid that intersects the server set, with walkback. */
+function findIntersectingUuid(
+  content: string,
+  serverUuids: Map<string, number>,
+): { uuid: string; walkback: number } | undefined {
+  let walkback = 0
+  for (const uuid of iterateTranscriptUuidsFromTail(content)) {
+    if (serverUuids.has(uuid)) {
+      return { uuid, walkback }
+    }
+    walkback++
+  }
+  return undefined
+}
+
+type FileTailWindow = {
+  content: string
+  bytesRead: number
+  bytesTotal: number
+}
+
+/** densable II — async last-N-bytes read. */
+async function readFileTailAsync(
+  fullPath: string,
+  maxBytes: number = LITE_READ_BUF_SIZE,
+): Promise<FileTailWindow | null> {
+  try {
+    const st = await stat(fullPath)
+    if (st.size === 0) {
+      return { content: '', bytesRead: 0, bytesTotal: 0 }
+    }
+    const offset = Math.max(0, st.size - maxBytes)
+    const len = st.size - offset
+    const fh = await fsOpen(fullPath, 'r')
+    try {
+      const buf = Buffer.allocUnsafe(len)
+      let filled = 0
+      while (filled < len) {
+        const { bytesRead } = await fh.read(
+          buf,
+          filled,
+          len - filled,
+          offset + filled,
+        )
+        if (bytesRead === 0) break
+        filled += bytesRead
+      }
+      return {
+        content: buf.toString('utf8', 0, filled),
+        bytesRead: filled,
+        bytesTotal: st.size,
+      }
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable Dsi / getValidatedCCRTip — only return tip when feature on and tip
+ * uuid is present in the local transcript tail (else fallback reasons).
+ */
+export async function getValidatedCCRTip(
+  sessionId: string,
+  enableDelta: boolean,
+  preloadedTail?: FileTailWindow | null,
+): Promise<{ eventId?: string; fallbackReason?: string }> {
+  if (!enableDelta) {
+    return { fallbackReason: 'client-gated' }
+  }
+  const [tip, tail] = await Promise.all([
+    readCCRTip(sessionId),
+    preloadedTail !== undefined
+      ? Promise.resolve(preloadedTail)
+      : readFileTailAsync(
+          getTranscriptPathForSession(sessionId),
+          LITE_READ_BUF_SIZE,
+        ).catch(() => null),
+  ])
+  if (!tip) {
+    return { fallbackReason: 'no-sidecar' }
+  }
+  if (!tail || !collectUuidsFromJsonlContent(tail.content).has(tip.eventId)) {
+    return { fallbackReason: 'tip-not-in-tail' }
+  }
+  return { eventId: tip.eventId }
+}
+
+/** densable Rsi — content-bearing user/assistant payload. */
+function isContentBearingPayload(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false
+  const t = (payload as { type?: unknown }).type
+  return t === 'user' || t === 'assistant'
+}
+
+/** densable M0a — local transcript already has user/assistant. */
+async function localTranscriptHasContentBearing(
+  fullPath: string,
+): Promise<boolean> {
+  try {
+    const fh = await fsOpen(fullPath, 'r')
+    try {
+      const buf = Buffer.allocUnsafe(LITE_READ_BUF_SIZE)
+      let carry = ''
+      for (;;) {
+        const { bytesRead } = await fh.read(buf, 0, LITE_READ_BUF_SIZE, null)
+        if (bytesRead <= 0) break
+        const chunk = carry + buf.toString('utf8', 0, bytesRead)
+        const lines = chunk.split('\n')
+        carry = lines.pop() ?? ''
+        for (const line of lines) {
+          if (
+            line.includes('"type":"user"') ||
+            line.includes('"type": "user"') ||
+            line.includes('"type":"assistant"') ||
+            line.includes('"type": "assistant"')
+          ) {
+            return true
+          }
+        }
+      }
+      return (
+        carry.includes('"type":"user"') ||
+        carry.includes('"type": "user"') ||
+        carry.includes('"type":"assistant"') ||
+        carry.includes('"type": "assistant"')
+      )
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return false
+  }
+}
+
+/** densable e4e / ves — write or append payload lines as jsonl. */
+async function writeTranscriptPayloads(
+  fullPath: string,
+  payloads: Record<string, unknown>[],
+  mode: 'w' | 'a',
+): Promise<void> {
+  if (mode === 'w') {
+    const body = payloads.map(p => jsonStringify(p) + '\n').join('')
+    await writeFile(fullPath, body, { encoding: 'utf8', mode: 0o600 })
+    return
+  }
+  if (payloads.length === 0) return
+  const body = payloads.map(p => jsonStringify(p) + '\n').join('')
+  await fsAppendFile(fullPath, body, { encoding: 'utf8', mode: 0o600 })
+}
+
+function normalizeInternalEventRead(
+  raw:
+    | InternalEventReadResult
+    | Array<{
+        payload: Record<string, unknown>
+        agent_id?: string
+        session_agent_id?: string
+        event_id?: string
+      }>
+    | null
+    | undefined,
+): InternalEventReadResult | null {
+  if (!raw) return null
+  if (Array.isArray(raw)) {
+    return { events: raw }
+  }
+  return raw
 }
 
 /**
@@ -1824,18 +2252,46 @@ class Project {
   }
 
   private async persistToRemote(sessionId: UUID, entry: TranscriptMessage) {
-    if (isShuttingDown()) {
+    // densable nE(): during shutdown skip remote persist unless a CCR writer
+    // is still registered (writer drains final turns). Local isShuttingDown
+    // alone matches the common case; writer path still runs when set.
+    if (isShuttingDown() && !this.internalEventWriter) {
+      return
+    }
+
+    // densable 2.1.225 #7 — oHr(t)&&jCt(): do not re-upload compact_boundary /
+    // isCompactSummary pairs when the remote session was minted without
+    // history backfill (reattach-gone → fresh cse_*). Re-uploading the pair
+    // after a local compact left remote history inconsistent on RC resume.
+    if (isCompactPairEntry(entry) && isCompactPairWithheldFromRemote()) {
+      logForDebugging(
+        '[persist-remote] Skipping compact-pair upload: session carries history-backfill suppression',
+      )
       return
     }
 
     // CCR v2 path: write as internal worker event
     if (this.internalEventWriter) {
       try {
+        const isBoundary = isCompactBoundaryMessage(entry)
+        const preservedRaw =
+          isBoundary && entry.compactMetadata
+            ? (
+                entry.compactMetadata as {
+                  preservedMessages?: { uuids?: string[] }
+                }
+              ).preservedMessages?.uuids
+            : undefined
         await this.internalEventWriter(
           'transcript',
           entry as unknown as Record<string, unknown>,
           {
-            ...(isCompactBoundaryMessage(entry) && { isCompaction: true }),
+            ...(isBoundary && {
+              isCompaction: true,
+              ...(Array.isArray(preservedRaw) && preservedRaw.length > 0
+                ? { preservedEventIds: preservedRaw }
+                : {}),
+            }),
             ...(entry.agentId && { agentId: entry.agentId }),
           },
         )
@@ -2346,15 +2802,25 @@ export async function hydrateRemoteSession(
 }
 
 /**
- * Hydrate session state from CCR v2 internal events.
- * Fetches foreground and subagent events via the registered readers,
- * extracts transcript entries from payloads, and writes them to the
- * local transcript files (main + per-agent).
- * The server handles compaction filtering — it returns events starting
- * from the latest compaction boundary.
+ * densable Q0a — hydrate session state from CCR v2 internal events.
+ *
+ * With `tengu_ccr_delta_rehydrate` + validated `.ccr-tip.json` sidecar, fetch
+ * only after_event_id and append the delta instead of rewriting the full
+ * transcript (fixes 2.1.225 #10 growing backlog / false stuck on reconnect).
+ *
+ * Prefetch form: hydratePrefetch = [fgRead, subagentRead, tipValidation].
  */
 export async function hydrateFromCCRv2InternalEvents(
   sessionId: string,
+  prefetch?: CCRHydratePrefetch | null,
+  enableDelta: boolean = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_ccr_delta_rehydrate',
+    false,
+  ),
+  skipSubagentOnDelta: boolean = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_ccr_subagent_skip_on_delta',
+    false,
+  ),
 ): Promise<boolean> {
   const startMs = Date.now()
   switchSession(asSessionId(sessionId))
@@ -2367,37 +2833,200 @@ export async function hydrateFromCCRv2InternalEvents(
   }
 
   try {
-    // Fetch foreground events
-    const events = await reader()
-    if (!events) {
+    const sessionFile = getTranscriptPathForSession(sessionId)
+    const tailPromise = readFileTailAsync(
+      sessionFile,
+      LITE_READ_BUF_SIZE,
+    ).catch(() => null)
+
+    let fgRead: InternalEventReadResult | null
+    let tipEventId: string | undefined
+    let fallbackReason: string | undefined
+
+    if (prefetch) {
+      fgRead = normalizeInternalEventRead(prefetch[0] ?? null)
+      tipEventId = prefetch[2]?.eventId
+      fallbackReason = prefetch[2]?.fallbackReason
+    } else {
+      const tip = await getValidatedCCRTip(
+        sessionId,
+        enableDelta,
+        await tailPromise,
+      )
+      tipEventId = tip.eventId
+      fallbackReason = tip.fallbackReason
+      const raw = await reader(tipEventId)
+      fgRead = normalizeInternalEventRead(raw)
+    }
+
+    if (!fgRead) {
       logForDebugging('Failed to read internal events for resume')
       logForDiagnosticsNoPII('error', 'hydrate_ccr_v2_read_fail')
       return false
     }
 
+    let events = fgRead.events
+    const stats = fgRead.stats
     const projectDir = getProjectDir(getOriginalCwd())
     await mkdir(projectDir, { recursive: true, mode: 0o700 })
 
-    // Write foreground transcript
-    const sessionFile = getTranscriptPathForSession(sessionId)
-    const fgContent = events.map(e => jsonStringify(e.payload) + '\n').join('')
-    await writeFile(sessionFile, fgContent, { encoding: 'utf8', mode: 0o600 })
+    const onDisk = await tailPromise
+    const onDiskBytes = onDisk?.bytesTotal ?? 0
+    const onDiskLastUuid = onDisk
+      ? lastTranscriptUuidInTail(onDisk.content)
+      : undefined
 
-    logForDebugging(
-      `Hydrated ${events.length} foreground entries from CCR v2 internal events`,
-    )
+    let intersect: { uuid: string; walkback: number } | undefined
+    let anchorIndex: number | undefined
+    if (onDisk) {
+      if (tipEventId === undefined) {
+        const serverMap = new Map<string, number>()
+        for (let j = 0; j < events.length; j++) {
+          const u = events[j]?.payload?.uuid
+          if (typeof u === 'string') serverMap.set(u, j)
+        }
+        intersect = findIntersectingUuid(onDisk.content, serverMap)
+        if (intersect) {
+          anchorIndex = serverMap.get(intersect.uuid)
+        }
+      }
+    }
 
-    // Fetch and write subagent events
+    const deltaEvents =
+      anchorIndex === undefined
+        ? events.length
+        : events.length - 1 - anchorIndex
+
+    const anchorFallback = fgRead.anchorFallback !== undefined
+    const tipInResponse =
+      tipEventId !== undefined &&
+      !anchorFallback &&
+      events.some(ev =>
+        ev.event_id !== undefined
+          ? ev.event_id === tipEventId
+          : ev.payload?.uuid === tipEventId,
+      )
+    const localUuidSet =
+      tipEventId !== undefined && onDisk
+        ? collectUuidsFromJsonlContent(onDisk.content)
+        : null
+    const tipInLocalTailAndEndsCleanly =
+      tipEventId !== undefined &&
+      onDisk !== null &&
+      localUuidSet !== null &&
+      localUuidSet.has(tipEventId) &&
+      onDisk.content.endsWith('\n')
+
+    let appliedDelta = false
+    let wroteForeground = false
+    let workingEvents = events
+
+    if (tipEventId && !anchorFallback && !tipInResponse) {
+      if (!tipInLocalTailAndEndsCleanly) {
+        fallbackReason = 'tail-incoherent'
+        const full = normalizeInternalEventRead(await reader())
+        if (!full) {
+          logForDebugging(
+            'Failed to refetch full read after incoherent local tail',
+          )
+          logForDiagnosticsNoPII('error', 'hydrate_ccr_v2_read_fail')
+          return false
+        }
+        workingEvents = full.events
+      }
+    }
+
+    if (
+      tipEventId &&
+      !anchorFallback &&
+      !tipInResponse &&
+      tipInLocalTailAndEndsCleanly
+    ) {
+      const newPayloads = events
+        .map(e => e.payload)
+        .filter(p => {
+          const u = p.uuid
+          return typeof u !== 'string' || !localUuidSet!.has(u)
+        })
+      if (newPayloads.length > 0) {
+        await writeTranscriptPayloads(sessionFile, newPayloads, 'a')
+      }
+      appliedDelta = true
+      wroteForeground = true
+      logForDebugging(
+        `Hydrated delta: appended ${newPayloads.length}/${events.length} foreground entries from CCR v2 internal events`,
+      )
+    } else {
+      if (tipEventId && fallbackReason !== 'tail-incoherent') {
+        fallbackReason =
+          fgRead.anchorFallback === 'rejected'
+            ? 'anchor-rejected'
+            : fgRead.anchorFallback === 'not-found'
+              ? 'anchor-not-found'
+              : 'anchor-in-response'
+      }
+      if (
+        !workingEvents.some(e => isContentBearingPayload(e.payload)) &&
+        (await localTranscriptHasContentBearing(sessionFile))
+      ) {
+        logForDebugging(
+          `Skipping CCR v2 foreground hydration: fetched set of ${workingEvents.length} events has no content-bearing entries but the local transcript does`,
+        )
+        logForDiagnosticsNoPII('info', 'hydrate_skip_zero_content_replace', {
+          path: 'v2_foreground',
+          server_entry_count: workingEvents.length,
+        })
+      } else {
+        await writeTranscriptPayloads(
+          sessionFile,
+          workingEvents.map(e => e.payload),
+          'w',
+        )
+        wroteForeground = true
+        logForDebugging(
+          `Hydrated ${workingEvents.length} foreground entries from CCR v2 internal events`,
+        )
+      }
+    }
+
+    // densable: after successful write, tip = last foreground transcript event
+    const tipSource = appliedDelta ? events : workingEvents
+    // densable Ctf(e, j.event_id ?? j.payload.uuid) — prefer server event_id
+    // when present (matches after_event_id), else transcript payload uuid.
+    if (wroteForeground) {
+      for (let k = tipSource.length - 1; k >= 0; k--) {
+        const row = tipSource[k]
+        if (row && isTranscriptUuidPayload(row.payload)) {
+          const tipId =
+            typeof row.event_id === 'string' && row.event_id.length > 0
+              ? row.event_id
+              : row.payload.uuid
+          await writeCCRTip(sessionId, tipId)
+          break
+        }
+      }
+    }
+
     let subagentEventCount = 0
+    let subagentStats: InternalEventReadResult['stats'] | undefined
+    const skipSubagent =
+      skipSubagentOnDelta &&
+      appliedDelta &&
+      (!prefetch || prefetch[1] === undefined)
     const subagentReader = project.getInternalSubagentEventReader()
-    if (subagentReader) {
-      const subagentEvents = await subagentReader()
-      if (subagentEvents && subagentEvents.length > 0) {
-        subagentEventCount = subagentEvents.length
-        // Group by agent_id
+    if (subagentReader && !skipSubagent) {
+      const subRaw =
+        prefetch && prefetch[1] !== undefined
+          ? prefetch[1]
+          : await subagentReader()
+      const subRead = normalizeInternalEventRead(subRaw ?? null)
+      subagentStats = subRead?.stats
+      const subEvents = subRead?.events
+      if (subEvents && subEvents.length > 0) {
+        subagentEventCount = subEvents.length
         const byAgent = new Map<string, Record<string, unknown>[]>()
-        for (const e of subagentEvents) {
-          const agentId = e.agent_id || ''
+        for (const e of subEvents) {
+          const agentId = e.session_agent_id || e.agent_id || ''
           if (!agentId) continue
           let list = byAgent.get(agentId)
           if (!list) {
@@ -2406,32 +3035,58 @@ export async function hydrateFromCCRv2InternalEvents(
           }
           list.push(e.payload)
         }
-
-        // Write each agent's transcript to its own file
         for (const [agentId, entries] of byAgent) {
           const agentFile = getAgentTranscriptPath(asAgentId(agentId))
+          if (
+            !entries.some(isContentBearingPayload) &&
+            (await localTranscriptHasContentBearing(agentFile))
+          ) {
+            logForDiagnosticsNoPII(
+              'info',
+              'hydrate_skip_zero_content_replace',
+              {
+                path: 'v2_subagent',
+                server_entry_count: entries.length,
+              },
+            )
+            continue
+          }
           await mkdir(dirname(agentFile), { recursive: true, mode: 0o700 })
-          const agentContent = entries
-            .map(p => jsonStringify(p) + '\n')
-            .join('')
-          await writeFile(agentFile, agentContent, {
-            encoding: 'utf8',
-            mode: 0o600,
-          })
+          await writeTranscriptPayloads(agentFile, entries, 'w')
         }
-
         logForDebugging(
-          `Hydrated ${subagentEvents.length} subagent entries across ${byAgent.size} agents`,
+          `Hydrated ${subEvents.length} subagent entries across ${byAgent.size} agents`,
         )
       }
     }
 
+    const completedEvents = appliedDelta ? events : workingEvents
     logForDiagnosticsNoPII('info', 'hydrate_ccr_v2_completed', {
       duration_ms: Date.now() - startMs,
-      event_count: events.length,
+      event_count: completedEvents.length,
       subagent_event_count: subagentEventCount,
+      page_count: stats?.pageCount,
+      bytes_received: stats?.bytesReceived,
+      content_encoding: stats?.contentEncoding,
+      subagent_page_count: subagentStats?.pageCount,
+      subagent_bytes_received: subagentStats?.bytesReceived,
+      prefetched: prefetch?.[0] != null,
+      on_disk_bytes: onDiskBytes,
+      delta_events: deltaEvents,
+      delta_fetch_attempted: tipEventId !== undefined,
+      delta_fetch_applied: appliedDelta,
+      subagent_skipped_local_reuse: skipSubagent,
+      ...(fallbackReason ? { delta_fallback_reason: fallbackReason } : {}),
+      delta_anchor:
+        intersect !== undefined && intersect.walkback > 0
+          ? 'intersected'
+          : 'synced',
+      on_disk_last_uuid: onDiskLastUuid,
+      anchor_uuid: intersect?.uuid,
+      anchor_walkback: intersect?.walkback,
+      ccr_last_uuid: completedEvents.at(-1)?.payload?.uuid,
     })
-    return events.length > 0
+    return completedEvents.length > 0
   } catch (error) {
     // Re-throw epoch mismatch so the worker doesn't race against gracefulShutdown
     if (

@@ -246,11 +246,29 @@ export type InternalEvent = {
   is_compaction: boolean
   created_at: string
   agent_id?: string
+  /** densable subagent stream field */
+  session_agent_id?: string
+}
+
+/** densable paginatedGet return for internal-events (Q0a / hydrate). */
+export type InternalEventsPage = {
+  events: InternalEvent[]
+  stats: {
+    pageCount: number
+    bytesReceived: number | null
+    contentEncoding: string
+  }
+  /**
+   * densable: after_event_id was rejected (gate off) or not-found (stale tip);
+   * events are a full refetch without the anchor.
+   */
+  anchorFallback?: 'rejected' | 'not-found'
 }
 
 type ListInternalEventsResponse = {
   data: InternalEvent[]
   next_cursor?: string
+  error?: { type?: string }
 }
 
 type WorkerStateResponse = {
@@ -298,6 +316,13 @@ export class CCRClient {
     eventId: string
     status: 'received' | 'processing' | 'processed'
   }>
+
+  /**
+   * densable onInternalBatchAcked — called after a successful internal-events
+   * POST so the tip sidecar can advance (updateCCRTipFromAckedBatch / J0a).
+   * Fire-and-forget; never blocks the uploader.
+   */
+  onInternalBatchAcked?: (batch: WorkerEvent[]) => void | Promise<void>
 
   /**
    * Called when the server returns 409 (a newer worker epoch superseded ours).
@@ -403,12 +428,18 @@ export class CCRClient {
           { worker_epoch: this.workerEpoch, events: batch },
           'internal events',
         )
-        if (!result.ok) {
-          throw new RetryableError(
-            'internal event POST failed',
-            result.retryAfterMs,
-          )
+        if (result.ok) {
+          // densable: Promise.resolve().then(()=>this.onInternalBatchAcked?.(s))
+          void Promise.resolve()
+            .then(() => this.onInternalBatchAcked?.(batch))
+            .catch(() => {})
+          return
         }
+        // densable sCt 4xx drop path not fully ported — still retry non-ok.
+        throw new RetryableError(
+          'internal event POST failed',
+          result.retryAfterMs,
+        )
       },
       baseDelayMs: 500,
       maxDelayMs: 30_000,
@@ -956,43 +987,50 @@ export class CCRClient {
   }
 
   /**
-   * Read foreground agent internal events from
-   * GET /sessions/{id}/worker/internal-events.
-   * Returns transcript entries from the last compaction boundary, or null on failure.
-   * Used for session resume.
+   * densable readInternalEvents(e) — GET /worker/internal-events with optional
+   * after_event_id for delta rehydrate (2.1.225 #10).
    */
-  async readInternalEvents(): Promise<InternalEvent[] | null> {
-    return this.paginatedGet('/worker/internal-events', {}, 'internal_events')
+  async readInternalEvents(
+    afterEventId?: string,
+  ): Promise<InternalEventsPage | null> {
+    return this.paginatedGet(
+      '/worker/internal-events',
+      {
+        limit: '1000',
+        ...(afterEventId ? { after_event_id: afterEventId } : {}),
+      },
+      'internal_events',
+    )
   }
 
   /**
-   * Read all subagent internal events from
-   * GET /sessions/{id}/worker/internal-events?subagents=true.
-   * Returns a merged stream across all non-foreground agents, each from its
-   * compaction point. Used for session resume.
+   * densable readSubagentInternalEvents — subagents=true, limit=1000.
    */
-  async readSubagentInternalEvents(): Promise<InternalEvent[] | null> {
+  async readSubagentInternalEvents(): Promise<InternalEventsPage | null> {
     return this.paginatedGet(
       '/worker/internal-events',
-      { subagents: 'true' },
+      { subagents: 'true', limit: '1000' },
       'subagent_events',
     )
   }
 
   /**
-   * Paginated GET with retry. Fetches all pages from a list endpoint,
-   * retrying each page on failure with exponential backoff + jitter.
+   * densable paginatedGet — multi-page fetch with after_event_id fallback.
+   * Returns {events, stats, anchorFallback?} or null on hard failure.
    */
   private async paginatedGet(
     path: string,
     params: Record<string, string>,
     context: string,
-  ): Promise<InternalEvent[] | null> {
+  ): Promise<InternalEventsPage | null> {
     const authHeaders = this.getAuthHeaders()
     if (Object.keys(authHeaders).length === 0) return null
 
     const allEvents: InternalEvent[] = []
     let cursor: string | undefined
+    let pageCount = 0
+    let bytesReceived: number | null = 0
+    let contentEncoding: string | null = null
 
     do {
       const url = new URL(`${this.sessionBaseUrl}${path}`)
@@ -1001,14 +1039,67 @@ export class CCRClient {
       }
       if (cursor) {
         url.searchParams.set('cursor', cursor)
+        // densable: after first page, drop after_event_id (cursor takes over)
+        url.searchParams.delete('after_event_id')
       }
+
+      const isAnchorProbe = !cursor && params.after_event_id !== undefined
+      let anchorFail: 'rejected' | 'not-found' | undefined
 
       const page = await this.getWithRetry<ListInternalEventsResponse>(
         url.toString(),
         authHeaders,
         context,
+        headers => {
+          pageCount++
+          contentEncoding ??= headers['content-encoding'] ?? null
+          const cl = headers['content-length']
+          if (cl != null && bytesReceived !== null) {
+            bytesReceived += Number(cl)
+          } else {
+            bytesReceived = null
+          }
+        },
+        // densable: only the after_event_id anchor probe early-exits on 400 /
+        // after_event_id_not_found so paginatedGet can full-refetch. Cursor
+        // pages and unanchored reads must keep the normal retry loop.
+        (status, errType) => {
+          if (!isAnchorProbe) return
+          if (status === 400) {
+            anchorFail = 'rejected'
+            return 'early-exit'
+          }
+          if (errType === 'after_event_id_not_found') {
+            anchorFail = 'not-found'
+            return 'early-exit'
+          }
+        },
       )
-      if (!page) return null
+
+      if (!page) {
+        if (anchorFail) {
+          logForDebugging(
+            `CCRClient: after_event_id ${
+              anchorFail === 'rejected'
+                ? 'rejected by server (gate off)'
+                : 'not found (stale anchor)'
+            } — refetching without anchor`,
+            { level: 'warn' },
+          )
+          logForDiagnosticsNoPII(
+            'warn',
+            anchorFail === 'rejected'
+              ? 'cli_worker_after_event_id_rejected'
+              : 'cli_worker_after_event_id_not_found',
+            { context },
+          )
+          const { after_event_id: _drop, ...rest } = params
+          const full = await this.paginatedGet(path, rest, context)
+          if (!full) return null
+          return { ...full, anchorFallback: anchorFail }
+        }
+        return null
+      }
 
       allEvents.push(...(page.data ?? []))
       cursor = page.next_cursor
@@ -1017,17 +1108,33 @@ export class CCRClient {
     logForDebugging(
       `CCRClient: Read ${allEvents.length} internal events from ${path}${params.subagents ? ' (subagents)' : ''}`,
     )
-    return allEvents
+    return {
+      events: allEvents,
+      stats: {
+        pageCount,
+        bytesReceived,
+        contentEncoding: contentEncoding ?? 'none',
+      },
+    }
   }
 
   /**
-   * Single GET request with retry. Returns the parsed response body
-   * on success, null if all retries are exhausted.
+   * Single GET with retry. Optional onOkHeaders / onErrorStatus for densable
+   * after_event_id anchor handling.
+   *
+   * onErrorStatus may return `'early-exit'` to stop retrying immediately
+   * (anchor probe 400 / after_event_id_not_found → paginatedGet full refetch).
+   * Presence of the callback alone must NOT suppress retries for other pages.
    */
   private async getWithRetry<T>(
     url: string,
     authHeaders: Record<string, string>,
     context: string,
+    onOkHeaders?: (headers: Record<string, string | undefined>) => void,
+    onErrorStatus?: (
+      status: number,
+      errType?: string,
+    ) => 'early-exit' | undefined,
   ): Promise<T | null> {
     for (let attempt = 1; attempt <= 10; attempt++) {
       let response
@@ -1055,11 +1162,32 @@ export class CCRClient {
       }
 
       if (response.status >= 200 && response.status < 300) {
+        onOkHeaders?.(
+          response.headers as unknown as Record<string, string | undefined>,
+        )
         return response.data
       }
       if (response.status === 409) {
         this.handleEpochMismatch()
       }
+
+      let errType: string | undefined
+      try {
+        const body = response.data as { error?: { type?: string } } | undefined
+        if (typeof body?.error?.type === 'string') {
+          errType = body.error.type
+        }
+      } catch {
+        // ignore
+      }
+      const errorAction = onErrorStatus?.(response.status, errType)
+
+      // densable: only when callback opts in (anchor probe) — do not gate on
+      // callback presence alone (every paginated page passes onErrorStatus).
+      if (errorAction === 'early-exit') {
+        return null
+      }
+
       logForDebugging(
         `CCRClient: GET ${url} returned ${response.status} (attempt ${attempt}/10)`,
         { level: 'warn' },

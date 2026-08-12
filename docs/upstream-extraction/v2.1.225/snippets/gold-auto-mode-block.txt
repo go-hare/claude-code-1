@@ -1,0 +1,80 @@
+Continentaleliminatingwill not bepractice ofin front ofsite of theensure thatto create amississippipotentiallyoutstandingbetter thanwhat is nowsituated inmeta name="TraditionalsuggestionsTranslationthe form ofatmosphericideologicalenterprisescalculatingeast of theremnants ofpluginspage/index.php?remained intransformedHe was alsowas alreadystatisticalin favor ofMinistry ofmovement offormulationis r…
+BuiltInMixedReadonlyreactreact-domInvalid type configuration for moduledefaultExpected traversed block fallthrough to match top-most active scopeExpected unique scope blocks and fallthroughsUnknown node in post-dominator tree[hoisting] EnterSSA: Expected identifier to be defined before being usedmust be in a blockwe need to be in a block to access state!state not found for current blockscope_stack…
+Auto mode could not evaluate this action and is blocking it for safety
+#### permissions.allow entries auto mode ignores (classifier-bypassing, in your user settings)
+denied by the Claude Code auto mode classifier
+Permission for this action was denied by the Claude Code auto mode classifier. Reason: 
+, so auto mode cannot determine the safety of 
+Auto mode is now Claude Code's default permission mode.
+Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.
+Yes, and switch to auto mode
+You are an expert reviewer of auto mode classifier rules for Claude Code.
+Claude Code has an "auto mode" that uses an AI classifier to decide whether tool calls should be auto-approved or require user confirmation. Users can write custom rules in four categories:
+getConsecutiveSlotContention
+getConsecutivePongTimeouts
+setLoopConsecutiveKeepalives
+getLoopConsecutiveKeepalives
+loopConsecutiveKeepalivesD.
+ consecutive failures
+Auto mode is unavailable for your plan
+initialConsecutive529Errors
+consecutiveRapidRefills
+consecutiveRefreshFailures9
+ times consecutively. Last error: 
+Cannot destructure property 'consecutiveRapidRefills' from null or undefined value
+Compound commands with cd and git require permission checks for enhanced security
+Compound commands that create git internal files and run git require permission checks for enhanced security
+Git commands outside the original working directory require permission checks when sandbox is enabled
+Command is not read-only, requires further permission checks
+consecutivePermanentFailures
+consecutive_failures
+This goes through the permission gate (a user prompt, or the auto-mode classifier when auto mode is active)
+Shell command permission check failed for command in 
+Shell command permission check failed for pattern "
+ consecutive refills within <
+Dumped auto mode classifier error prompts to 
+Auto mode classifier (XML): aborted by user
+Auto mode classifier (XML) error: 
+Auto mode classifier: 
+Got error trying Sonnet 5 as auto mode classifier, using 
+Auto mode classifier: Sonnet 5 probe demotion errorKind=
+Auto mode classifier: primary 
+Auto mode classifier: skipping server-configured classifier model 
+Auto mode classifier blocked sandbox network access to 
+Use auto mode during plan
+ consecutive actions were blocked. Please review the transcript before continuing.
+ permission check failed and its fail-closed posture could not be determined. The call is denied.
+permission check crashed; tool declares a fail-closed posture
+coordinator automated permission check failed
+Automated permission check failed: 
+coordinator automated permission check failed (non-Error throw)
+consecutivePipelineDenials
+maxConsecutiveFailures
+Cannot transition to auto mode: gate is not enabled
+auto mode disabled by settings
+auto mode is unavailable for your plan
+auto mode requires CLAUDE_CODE_ENABLE_AUTO_MODE=1
+auto mode unavailable for this model
+auto mode is unavailable right now
+auto mode disabled: disableAutoMode in settings
+auto mode disabled: tengu_auto_mode_config.enabled === "disabled" (circuit breaker)
+auto mode disabled: provider 
+auto mode disabled: model 
+ does not support auto mode
+Continue with other tasks that don't require this action. If it is essential, stop and tell the user that auto mode could not evaluate it, and suggest running this action outside auto mode (switch back to the default permission mode) or starting a fresh session.
+While auto mode is active:
+Path contains suspicious Windows-specific patterns (alternate data streams, short names, long path prefixes, or three or more consecutive dots) that require manual verification
+ consecutive empty polls)
+skill name with consecutive backslashes rejected
+Denied by auto mode classifier
+Allowed by auto mode classifier
+These permissions.allow entries in your user settings are broad enough that auto mode either ignores them at runtime, or auto-approves destructive commands with no check. Removing one means matching commands prompt again outside auto mode too.
+--bg with auto mode requires opting in first. Run `claude --permission-mode auto` once interactively.
+No recent denials. Commands denied by the auto mode classifier will appear here.
+Commands recently denied by the auto mode classifier.
+Set up auto mode for your environment?
+ consecutive init failures, not retrying this session
+[bridge:repl] Init returned null (precondition or session creation failed); consecutive failures: 
+; consecutive failures: 
+consecutiveExeLockFailures
+ denied by auto mode

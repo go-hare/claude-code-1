@@ -18,8 +18,14 @@
  * Built-in aWd/Fjy + bjv + outcome + D trust + rBh residual
  * (B2h/Bjv/Fjv/Ijv/W2h/xjv/z2h/CKn) wired via handleSession.
  */
-import { createWriteStream, fchmod, type WriteStream } from 'node:fs'
-import { lstat, mkdir, readFile, rm } from 'node:fs/promises'
+import {
+  constants as fsConstants,
+  createWriteStream,
+  fchmod,
+  type WriteStream,
+} from 'node:fs'
+import { access, lstat, mkdir, readFile, rm } from 'node:fs/promises'
+import { getErrnoCode } from 'src/utils/errors.js'
 import { homedir, hostname } from 'node:os'
 import { dirname, join, resolve as pathResolve } from 'node:path'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
@@ -327,6 +333,37 @@ export async function withTimeoutMs<T>(
     if (timer !== undefined) clearTimeout(timer)
     // densable: e.catch(()=>{}) — swallow late rejection of original
     promise.catch(() => {})
+  }
+}
+
+/** densable `EtE` — baseDir writability check timeout (ms). */
+export const BASE_DIR_CHECK_TIMEOUT_MS = 10_000
+
+/**
+ * densable `izh` — ensure runner baseDir is creatable + writable.
+ * Timeout → fatal exit(1) (NFS/CSI). Other errors throw (caller → exit 2).
+ */
+export async function ensureBaseDirWritable(
+  baseDir: string,
+  timeoutMs: number = BASE_DIR_CHECK_TIMEOUT_MS,
+): Promise<void> {
+  try {
+    await withTimeoutMs(
+      mkdir(baseDir, { recursive: true }).then(() =>
+        access(baseDir, fsConstants.W_OK | fsConstants.X_OK),
+      ),
+      timeoutMs,
+      `base directory check for ${baseDir}`,
+    )
+  } catch (err) {
+    const msg = errMsg(err)
+    if (msg.includes('timed out after')) {
+      console.error(`[runner:fatal] ${msg} — check NFS/CSI mount health`)
+      process.exit(1)
+    }
+    throw new Error(
+      `cannot create or write to base directory ${baseDir} (${getErrnoCode(err) ?? msg}); pass --base-dir <writable path> or set SELF_HOSTED_RUNNER_BASE_DIR`,
+    )
   }
 }
 
@@ -1911,6 +1948,8 @@ export async function selfHostedRunnerMain(
   try {
     args = parseRootArgs(argv)
     secret = await (deps.resolveSecret ?? resolveEnvironmentSecret)(args)
+    // densable 2.1.225 izh — fail early if baseDir is not writable (NFS/CSI)
+    await ensureBaseDirWritable(args.baseDir)
   } catch (q) {
     console.error(
       `error: ${errMsg(q)}\n\nRun 'claude self-hosted-runner --help' for usage.`,

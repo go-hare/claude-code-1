@@ -1032,6 +1032,8 @@ async function classifyYoloActionXml(
           return {
             shouldBlock: true,
             reason: 'Classifier stage 1 unparseable - blocking for safety',
+            // densable 2.1.225: stop_reason==="refusal" → refusedBySafeguard
+            refusedBySafeguard: stage1Raw.stop_reason === 'refusal',
             model,
             usage: stage1Usage,
             durationMs: stage1DurationMs,
@@ -1104,6 +1106,8 @@ async function classifyYoloActionXml(
       return {
         shouldBlock: true,
         reason: 'Classifier stage 2 unparseable - blocking for safety',
+        // densable 2.1.225: stop_reason==="refusal" → refusedBySafeguard
+        refusedBySafeguard: stage2Raw.stop_reason === 'refusal',
         model,
         usage: totalUsage,
         durationMs: totalDurationMs,
@@ -1492,6 +1496,7 @@ export async function classifyYoloAction(
         return {
           shouldBlock: true,
           reason: 'Classifier returned no tool use block - blocking for safety',
+          refusedBySafeguard: result.stop_reason === 'refusal',
           model,
           usage,
           durationMs,
@@ -1516,6 +1521,7 @@ export async function classifyYoloAction(
         return {
           shouldBlock: true,
           reason: 'Invalid classifier response - blocking for safety',
+          refusedBySafeguard: result.stop_reason === 'refusal',
           model,
           usage,
           durationMs,

@@ -129,6 +129,12 @@ export type ReplBridgeHandle = {
   outboundOnly?: boolean
   /** Official sessionGroupingId → CLAUDE_BRIDGE_REATTACH_GROUPING */
   sessionGroupingId?: string
+  /**
+   * densable noHistoryBackfill (a||tr) — true when the live remote session was
+   * minted after reattach-gone (or otherwise carries history-backfill
+   * suppression). Compact-pair uploads must be withheld (2.1.225 #7).
+   */
+  noHistoryBackfill?: boolean
   teardown(opts?: ReplBridgeTeardownOpts): Promise<void>
 }
 
@@ -1866,6 +1872,9 @@ export async function initBridgeCore(
     outboundOnly,
     // densable He — pass-through (may be undefined when no Project grouping)
     sessionGroupingId,
+    // densable 2.1.225 #7 — classic env-worker path never mints after gone
+    // into noHistoryBackfill (v2 remoteBridgeCore sets it on Ge).
+    noHistoryBackfill: undefined,
     sessionIngressUrl,
     writeMessages(messages) {
       // Filter to user/assistant messages that haven't already been sent.

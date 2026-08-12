@@ -980,6 +980,11 @@ export async function runHeadless(
     sdkUrl: options.sdkUrl,
     sessionStartHooksPromise: options.sessionStartHooksPromise,
     restoredWorkerState: structuredIO.restoredWorkerState,
+    // densable hydratePrefetch from RemoteIO when --resume CCR v2
+    hydratePrefetch:
+      structuredIO instanceof RemoteIO
+        ? (structuredIO as RemoteIO).hydratePrefetch
+        : null,
   })
 
   // SessionStart hooks can emit initialUserMessage — the first user turn for
@@ -3438,17 +3443,68 @@ function runHeadlessStreaming(
       setPeerInboundHoldListeners,
       releaseHeldPeerInboundMessages,
       shouldHonorPeerFromMode,
+      resolveHeldPeerInboundMessage,
     } =
       require('../utils/crossSessionInbound.js') as typeof import('../utils/crossSessionInbound.js')
     type PermissionModeClass =
       import('../utils/crossSessionInbound.js').PermissionModeClass
+    type PeerInboundHoldCause =
+      import('../utils/crossSessionInbound.js').PeerInboundHoldCause
+    const { resolvePeerInboundDialogTimeoutMs } =
+      require('../utils/peerInboundHoldUi.js') as typeof import('../utils/peerInboundHoldUi.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
 
     // densable aya / qqp — released held messages re-enter the prompt queue.
     // Register listeners BEFORE xRn so a mode-changed release can deliver.
+    // densable 2.1.225 headless: onHeld dialogExpiry expire + onState hold-receipt.
+    const headlessHoldTimers = new Map<object, ReturnType<typeof setTimeout>>()
+    const clearHeadlessHoldTimer = (entry: object): void => {
+      const t = headlessHoldTimers.get(entry)
+      if (t !== undefined) {
+        clearTimeout(t)
+        headlessHoldTimers.delete(entry)
+      }
+    }
     setPeerInboundHoldListeners({
+      onHeld: (entry, _size, cause: PeerInboundHoldCause) => {
+        // densable bIn: only mode-mismatch / no-mode-asserted get dialogExpiry expire.
+        if (cause !== 'mode-mismatch' && cause !== 'no-mode-asserted') return
+        const ms = resolvePeerInboundDialogTimeoutMs()
+        if (ms <= 0) return
+        clearHeadlessHoldTimer(entry)
+        const timer = setTimeout(() => {
+          headlessHoldTimers.delete(entry)
+          if (resolveHeldPeerInboundMessage(entry, 'expire') === 'dropped') {
+            logForDebugging(
+              '[cross-session-inbound] headless: held peer message expired (no approval surface) — dropped with an expired receipt',
+            )
+          }
+        }, ms)
+        timer.unref?.()
+        headlessHoldTimers.set(entry, timer)
+      },
+      onState: (entry, status) => {
+        if (
+          status === 'delivered' ||
+          status === 'denied' ||
+          status === 'expired'
+        ) {
+          clearHeadlessHoldTimer(entry)
+        }
+        const cmd = entry.message as
+          | { origin?: { from?: string }; from?: string }
+          | undefined
+        const from =
+          (typeof cmd?.origin?.from === 'string' && cmd.origin.from) ||
+          (typeof cmd?.from === 'string' && cmd.from) ||
+          '(unknown)'
+        logForDebugging(
+          `[headless] cross-session hold-receipt: status=${status} from=${from}`,
+        )
+      },
       onReleased: entries => {
         for (const entry of entries) {
+          clearHeadlessHoldTimer(entry)
           const cmd = entry.message as {
             mode?: 'prompt'
             value?: string | unknown
@@ -6623,6 +6679,15 @@ async function loadInitialMessages(
     sdkUrl?: string | undefined
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
     restoredWorkerState: Promise<SessionExternalMetadata | null>
+    /** densable hydratePrefetch — [fg, sub, tip] from RemoteIO */
+    hydratePrefetch?: Promise<
+      | [
+          unknown,
+          unknown,
+          { eventId?: string; fallbackReason?: string } | undefined,
+        ]
+      | null
+    > | null
   },
 ): Promise<LoadInitialMessagesResult> {
   const persistSession = !isSessionPersistenceDisabled()
@@ -6796,10 +6861,28 @@ async function loadInitialMessages(
         // keep raw env fallback
       }
       if (useCcrV2) {
+        // densable Q0a(sessionId, prefetch, w3i(), C3i()) — tip-validated
+        // delta rehydrate when tengu_ccr_delta_rehydrate is on (#10).
+        const { getFeatureValue_CACHED_MAY_BE_STALE: gb } = await import(
+          '../services/analytics/growthbook.js'
+        )
+        const enableDelta = gb('tengu_ccr_delta_rehydrate', false)
+        const skipSubagentOnDelta = gb(
+          'tengu_ccr_subagent_skip_on_delta',
+          false,
+        )
+        const prefetch = options.hydratePrefetch
+          ? await options.hydratePrefetch
+          : null
         // Await restore alongside hydration so SSE catchup lands on
         // restored state, not a fresh default.
         const [, metadata] = await Promise.all([
-          hydrateFromCCRv2InternalEvents(parsedSessionId.sessionId),
+          hydrateFromCCRv2InternalEvents(
+            parsedSessionId.sessionId,
+            prefetch as Parameters<typeof hydrateFromCCRv2InternalEvents>[1],
+            enableDelta,
+            skipSubagentOnDelta,
+          ),
           options.restoredWorkerState,
         ])
         if (metadata) {
