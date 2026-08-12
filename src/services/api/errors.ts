@@ -54,10 +54,27 @@ import { extractConnectionErrorDetails, formatAPIError } from './errorUtils.js'
 
 export const API_ERROR_MESSAGE_PREFIX = 'API Error'
 
+/** densable GKd / VKd / KKd / YKd — cloud provider auth fail prefixes */
+export const AWS_CREDENTIALS_EXPIRED_MESSAGE =
+  'AWS credentials expired or invalid'
+export const AWS_AUTHENTICATION_FAILED_MESSAGE = 'AWS authentication failed'
+export const GOOGLE_CLOUD_CREDENTIALS_EXPIRED_MESSAGE =
+  'Google Cloud credentials expired or invalid'
+export const GOOGLE_CLOUD_AUTHENTICATION_FAILED_MESSAGE =
+  'Google Cloud authentication failed'
+
+/**
+ * densable Cre — permanent auth-failure prefixes that should not be long-retried
+ * by compact / reactive paths (startsWith KKd/YKd/GKd/VKd or API Error).
+ */
 export function startsWithApiErrorPrefix(text: string): boolean {
   return (
     text.startsWith(API_ERROR_MESSAGE_PREFIX) ||
-    text.startsWith(`Please run /login · ${API_ERROR_MESSAGE_PREFIX}`)
+    text.startsWith(`Please run /login · ${API_ERROR_MESSAGE_PREFIX}`) ||
+    text.startsWith(AWS_CREDENTIALS_EXPIRED_MESSAGE) ||
+    text.startsWith(AWS_AUTHENTICATION_FAILED_MESSAGE) ||
+    text.startsWith(GOOGLE_CLOUD_CREDENTIALS_EXPIRED_MESSAGE) ||
+    text.startsWith(GOOGLE_CLOUD_AUTHENTICATION_FAILED_MESSAGE)
   )
 }
 export const PROMPT_TOO_LONG_ERROR_MESSAGE = 'Prompt is too long'
@@ -226,6 +243,197 @@ function isCCRMode(): boolean {
   } catch {
     return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
   }
+}
+
+/**
+ * densable 2.1.228 #14 Vertex auth message (KKd / YKd + gcloud hint).
+ * 401 → "Google Cloud credentials expired or invalid"; other → authentication failed.
+ */
+function formatVertexAuthErrorMessage(error: APIError): string {
+  const skipAuth =
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH)
+
+  let refreshCmd: string | undefined
+  if (!skipAuth && !getIsNonInteractiveSession()) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const settingsMod = require('../../utils/settings/settings.js') as {
+        getInitialSettings?: () => { gcpAuthRefresh?: string } | null
+        getSettings_DEPRECATED?: () => { gcpAuthRefresh?: string } | null
+      }
+      const settings =
+        settingsMod.getInitialSettings?.() ??
+        settingsMod.getSettings_DEPRECATED?.() ??
+        null
+      const configured = settings?.gcpAuthRefresh
+      if (configured) {
+        // densable wwn||J1e: project/local-sourced refresh needs trust
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const authMod = require('../../utils/auth.js') as {
+          isGcpAuthRefreshFromProjectSettings?: () => boolean
+        }
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const trustMod = require('../../utils/config.js') as {
+          checkHasTrustDialogAccepted?: () => boolean
+        }
+        const fromProject =
+          authMod.isGcpAuthRefreshFromProjectSettings?.() ?? false
+        const trusted = trustMod.checkHasTrustDialogAccepted?.() ?? true
+        if (!fromProject || trusted) {
+          refreshCmd = configured
+        }
+      }
+      refreshCmd ??= 'gcloud auth application-default login'
+    } catch {
+      refreshCmd = 'gcloud auth application-default login'
+    }
+  }
+
+  const isExpired = error.status === 401
+  const prefix = isExpired
+    ? GOOGLE_CLOUD_CREDENTIALS_EXPIRED_MESSAGE
+    : GOOGLE_CLOUD_AUTHENTICATION_FAILED_MESSAGE
+
+  let hint: string
+  if (refreshCmd) {
+    hint = ` · run \`${refreshCmd}\` and retry`
+  } else if (skipAuth) {
+    hint =
+      ' · refresh the gateway token provided via ANTHROPIC_AUTH_TOKEN/ANTHROPIC_CUSTOM_HEADERS and retry'
+  } else {
+    hint =
+      ' · credentials are managed by this environment — retry, or contact your administrator'
+  }
+
+  const iamHint = isExpired
+    ? ''
+    : ' · if credentials are current, check GCP IAM permissions and workspace access'
+
+  return `${prefix}${hint}${iamHint} · ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`
+}
+
+/**
+ * densable GKd / VKd — AWS / Bedrock / anthropicAws / mantle auth fail copy.
+ * Mirrors formatVertexAuthErrorMessage; constants already exported for Cre().
+ *
+ * Expired (GKd):
+ * - CredentialsProviderError (SDK rejects before HTTP when .aws holds past Expiration)
+ * - APIError 401
+ * - APIError 403 whose message is the densable Bedrock expired-token shape
+ *   ("security token" / "expired") — withRetry isBedrockAuthError comments this
+ *
+ * Other auth failures → VKd + IAM/Bedrock model-access hint.
+ * Refresh: settings awsAuthRefresh only (no invent default `aws sso login`).
+ */
+function formatBedrockAuthErrorMessage(error: Error): string {
+  const skipAuth =
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_MANTLE_AUTH)
+
+  let refreshCmd: string | undefined
+  if (!skipAuth && !getIsNonInteractiveSession()) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const settingsMod = require('../../utils/settings/settings.js') as {
+        getInitialSettings?: () => { awsAuthRefresh?: string } | null
+        getSettings_DEPRECATED?: () => { awsAuthRefresh?: string } | null
+      }
+      const settings =
+        settingsMod.getInitialSettings?.() ??
+        settingsMod.getSettings_DEPRECATED?.() ??
+        null
+      const configured = settings?.awsAuthRefresh
+      if (configured) {
+        // densable: project/local-sourced awsAuthRefresh needs trust (same as GCP)
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const authMod = require('../../utils/auth.js') as {
+          isAwsAuthRefreshFromProjectSettings?: () => boolean
+        }
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const trustMod = require('../../utils/config.js') as {
+          checkHasTrustDialogAccepted?: () => boolean
+        }
+        const fromProject =
+          authMod.isAwsAuthRefreshFromProjectSettings?.() ?? false
+        const trusted = trustMod.checkHasTrustDialogAccepted?.() ?? true
+        if (!fromProject || trusted) {
+          refreshCmd = configured
+        }
+      }
+      // No default `aws sso login` without profile — densable uses configured only.
+    } catch {
+      // leave refreshCmd unset → managed-env hint
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isAwsCredentialsProviderError } = require('../../utils/aws.js') as {
+    isAwsCredentialsProviderError: (err: unknown) => boolean
+  }
+  const msg = error.message ?? ''
+  const isExpired =
+    isAwsCredentialsProviderError(error) ||
+    (error instanceof APIError && error.status === 401) ||
+    (error instanceof APIError &&
+      error.status === 403 &&
+      (/expired/i.test(msg) || /security token/i.test(msg)))
+
+  const prefix = isExpired
+    ? AWS_CREDENTIALS_EXPIRED_MESSAGE
+    : AWS_AUTHENTICATION_FAILED_MESSAGE
+
+  let hint: string
+  if (refreshCmd) {
+    hint = ` · run \`${refreshCmd}\` and retry`
+  } else if (skipAuth) {
+    hint =
+      ' · refresh the gateway token provided via ANTHROPIC_AUTH_TOKEN/ANTHROPIC_CUSTOM_HEADERS and retry'
+  } else {
+    hint =
+      ' · credentials are managed by this environment — retry, or contact your administrator'
+  }
+
+  const iamHint = isExpired
+    ? ''
+    : ' · if credentials are current, check AWS IAM permissions and Bedrock model access'
+
+  return `${prefix}${hint}${iamHint} · ${API_ERROR_MESSAGE_PREFIX}: ${msg}`
+}
+
+/**
+ * densable isBedrockAuthError provider gate (USE_BEDROCK / anthropicAws / mantle).
+ * Used only for GKd/VKd copy routing in getAssistantMessageFromError.
+ */
+function isBedrockishAuthProvider(): boolean {
+  if (getAPIProvider() === 'bedrock') return true
+  let useBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  try {
+    const {
+      isUseBedrockEnvEnabled,
+      isAnthropicAwsProviderEnabled,
+      isMantleProviderEnabled,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as {
+        isUseBedrockEnvEnabled?: () => boolean
+        isAnthropicAwsProviderEnabled?: () => boolean
+        isMantleProviderEnabled?: () => boolean
+      }
+    if (isUseBedrockEnvEnabled) useBedrock = isUseBedrockEnvEnabled()
+    if (useBedrock) return true
+    if (isAnthropicAwsProviderEnabled?.()) return true
+    if (isMantleProviderEnabled?.()) return true
+  } catch {
+    if (useBedrock) return true
+    if (isEnvTruthy(process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS)) return true
+    if (isEnvTruthy(process.env.CLAUDE_CODE_USE_MANTLE)) return true
+  }
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_MANTLE)
+  )
 }
 
 // Temp helper to log tool_use/tool_result mismatch errors
@@ -942,11 +1150,54 @@ export function getAssistantMessageFromError(
       })
     }
 
+    // densable 2.1.228 #14 GCP auth copy (KKd/YKd):
+    // - densable `Vn()==="anthropicGoogleCloud"` (USE_ANTHROPIC_GOOGLE_CLOUD) → KKd/YKd
+    // - densable pure `vertex` falls through to /login; local also stamps KKd for
+    //   provider==='vertex' so Cre() short-circuits after the auth cap (ugi).
+    // Gate must cover both paths that isVertexAuthError (ugi) treats as GCP.
+    const provider = getAPIProvider()
+    const vertexish =
+      provider === 'vertex' ||
+      isEnvTruthy(process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD)
+    if (vertexish) {
+      return createAssistantAPIErrorMessage({
+        error: 'authentication_failed',
+        content: formatVertexAuthErrorMessage(error),
+      })
+    }
+
+    // densable GKd/VKd — Bedrock / AWS / mantle (constants were Cre-only until wired).
+    // Align gate with withRetry isBedrockAuthError provider set.
+    if (isBedrockishAuthProvider()) {
+      return createAssistantAPIErrorMessage({
+        error: 'authentication_failed',
+        content: formatBedrockAuthErrorMessage(error),
+      })
+    }
+
     return createAssistantAPIErrorMessage({
       error: 'authentication_failed',
       content: getIsNonInteractiveSession()
         ? `Failed to authenticate. ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`
         : `Please run /login · ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`,
+    })
+  }
+
+  // densable GKd: CredentialsProviderError is not APIError — still auth-fail
+  // for Bedrockish providers (SDK rejects before HTTP when .aws Expiration past).
+  if (
+    error instanceof Error &&
+    isBedrockishAuthProvider() &&
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    (
+      require('../../utils/aws.js') as {
+        isAwsCredentialsProviderError: (err: unknown) => boolean
+      }
+    ).isAwsCredentialsProviderError(error)
+  ) {
+    return createAssistantAPIErrorMessage({
+      error: 'authentication_failed',
+      content: formatBedrockAuthErrorMessage(error),
     })
   }
 

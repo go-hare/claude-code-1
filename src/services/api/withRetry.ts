@@ -67,6 +67,13 @@ const DEFAULT_MAX_RETRIES = 10
 export const FLOOR_OUTPUT_TOKENS = 3000
 const MAX_529_RETRIES = 3
 export const BASE_DELAY_MS = 500
+/**
+ * densable 2.1.228 #14 — `x6S=2` / `k6S=2` auth-refresh caps.
+ * Without a hard cap, Vertex/GCP (and AWS) credential failures can retry
+ * through the full maxRetries budget (seconds→minutes). densable exhausts
+ * after 2 cloud-auth attempts and throws CannotRetryError.
+ */
+export const MAX_CLOUD_AUTH_RETRIES = 2
 
 /**
  * densable 2.1.218 RFo overflow pure decision core.
@@ -309,6 +316,9 @@ export async function* withRetry<T>(
   let consecutive529Errors = options.initialConsecutive529Errors ?? 0
   let lastError: unknown
   let persistentAttempt = 0
+  // densable 2.1.228 #14: cap GCP/AWS auth refresh retries (x6S/k6S = 2)
+  let awsAuthRetryCount = 0
+  let gcpAuthRetryCount = 0
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (options.signal?.aborted) {
       throw new APIUserAbortError()
@@ -536,6 +546,24 @@ export async function* withRetry<T>(
         isPersistentRetryEnabled() && isTransientCapacityError(error)
       if (attempt > maxRetries && !persistent) {
         throw new CannotRetryError(error, retryContext)
+      }
+
+      // densable 2.1.228 #14: fail-fast on repeated cloud auth failures.
+      // Host-managed auth (`m2r`) can keep refreshing; skip the hard cap then.
+      const hostManagedAuth = isHostAuthTokenRefreshAvailable()
+      if (!hostManagedAuth && isBedrockAuthError(error)) {
+        if (awsAuthRetryCount >= MAX_CLOUD_AUTH_RETRIES) {
+          logEvent('api_request_aws_auth_exhausted', {})
+          throw new CannotRetryError(error, retryContext)
+        }
+        awsAuthRetryCount++
+      }
+      if (!hostManagedAuth && isVertexAuthError(error)) {
+        if (gcpAuthRetryCount >= MAX_CLOUD_AUTH_RETRIES) {
+          logEvent('api_request_gcp_auth_exhausted', {})
+          throw new CannotRetryError(error, retryContext)
+        }
+        gcpAuthRetryCount++
       }
 
       // AWS/GCP errors aren't always APIError, but can be retried
@@ -866,8 +894,11 @@ function isGoogleAuthLibraryCredentialError(error: unknown): boolean {
 }
 
 function isVertexAuthError(error: unknown): boolean {
-  // Official USE_VERTEX densable.
+  // densable ugi: CLAUDE_CODE_USE_VERTEX || CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD
   let useVertex = isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  const useAnthropicGoogleCloud = isEnvTruthy(
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD,
+  )
   try {
     const { isUseVertexEnvEnabled } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -876,7 +907,7 @@ function isVertexAuthError(error: unknown): boolean {
   } catch {
     // keep raw env fallback
   }
-  if (useVertex) {
+  if (useVertex || useAnthropicGoogleCloud) {
     // SDK-level: google-auth-library fails in prepareOptions() before the HTTP call
     if (isGoogleAuthLibraryCredentialError(error)) {
       return true
