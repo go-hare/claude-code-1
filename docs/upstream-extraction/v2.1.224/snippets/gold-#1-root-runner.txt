@@ -1,0 +1,90 @@
+# densable 2.1.224 #1 — root runner (selfHostedRunnerMain / PBh)
+
+## densable exports (PBh)
+- selfHostedRunnerMain → azv
+- runPollLoop → xBh
+- resolvePoolSecret → ABh (environment secret)
+- resolveExec → RBh
+- readRetireAtEnvMs → bBh
+- parseArgs → wBh
+- derivePollInterval → IBh
+- sessionBoundCapacityWarning → CBh
+- L2h → extractSpawnSessionId (`ccr:spawn_session_id` after `/^sk-ant-[a-z]+-/` strip)
+- TRUST_WORKSPACE_DEFAULT → tXl
+- hFh → startHealthServer
+- uBh/ZJl → openWorkHintsStream / PollWakeQueue
+- qUi → createRunnerTokenRefreshScheduler
+- Q2h/eBh → snapshotHostConfig / captureGovernedGitConfigSeed
+- qqv/$qv → configureAnthropicGitProxy / configureGitSigning
+
+## Constants
+- hBh = https://api.anthropic.com
+- gBh = 1 (capacity)
+- SBh = /workspace
+- TBh = 8080
+- tXl = true
+- VUi = 20000 (poll error retry)
+- _Bh = 900000 (startup timeout default 15m)
+- pBh = 5000 / Xjv = 30000 (poll interval min/max)
+- tzv = 10000 (secret file read timeout)
+- xKn = 5000 session-stop grace
+- yGr = 60000 post-session hook timeout
+- GUi = 15000 shutdown budget pad
+- kIe = 10080 max minutes flags
+- eXl = 604800 max drain-grace sec
+- vBh = 1e9 / EBh = 1e11 retire-at range (unix seconds)
+- rzv = 15000 retire release retry / nzv = 60000 retire deferred grace
+- Qjv = 20000 shutdown lease heartbeat / Zjv=1000 ezv=5000 poll 404 backoff
+- SSE: Wjv=1000 Gjv=30000 Vjv=45000 cBh=200
+- METRICS_PREFIX pFh = claude_code_self_hosted_runner
+- Zo_ = 300000 / ei_ = 3 / ti_ = 60000 / jas = 1800000 (token refresh)
+
+## parseArgs flags (wBh)
+--api-url, --environment-secret-file|--pool-secret-file (deprecated),
+--capacity, --base-dir, --exec-path, --hooks-dir,
+--git-ssh-rewrite, --git-host-rewrite, --use-anthropic-git-proxy,
+--configure-git, --push-outcome-on-release, --trust-workspace,
+--confine-repo-settings, --log-level, --log-file, --health-port,
+--kill-session-after-min, --exit-if-unused-min, --session-stop-grace-sec,
+--sigkill-timeout-sec (error rename), --post-session-hook-timeout-sec,
+--drain-wait-sec|--drain-wait-bg-tasks-sec (deprecated), --drain-grace-sec,
+--release-idle-session-min, --startup-timeout-min, --retire-at,
+--lock-to-account, --debug-token-dir
+
+## Secret resolve (ABh)
+1. --environment-secret-file / --pool-secret-file (file, timeout 10s)
+2. SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET
+3. SELF_HOSTED_RUNNER_POOL_SECRET (deprecated warn)
+else throw "No environment secret provided..."
+
+## Main flow (azv) recovered
+help → parseArgs → resolveSecret → logging → shutdown budget log →
+resolveExec → configureGitProxy/Signing → LUi API → RegisterRunner (Krr retry 5×) →
+qUi runner token refresh schedule → Q2h host snapshot + eBh git seed →
+health state + hFh(port) → runPollLoop (xBh) with healthState + optional SSE →
+finally cancelAll refresh + deregister (xBh) + close health
+
+## Poll loop (xBh) HAVE
+- pollWork → lastPollAt / activeSessions / pollErrors (yKn)
+- assignment → handleSession (rBh) with onChildLifecycle / onInitPhase / hooks / activity
+- CCR_SHR_SSE_HINTS → ZJl wake + uBh stream; atCapacity gates SSE wake
+- idle shutdown / retire-at release / deassign abort / releaseSession idle clock
+- drain-wait bg+turn / drain grace / force exit / deregister finally
+- failure report + stuck set; health log every 10 polls
+
+## go-hare land
+- src/self-hosted-runner/rootRunner.ts — full xBh + azv wire
+- src/self-hosted-runner/healthMetrics.ts — hFh/tqv/rqv/fFh
+- src/self-hosted-runner/workHintsSse.ts — uBh/Yjv/ZJl
+- src/self-hosted-runner/sessionHandler.ts — rBh + failureKind + FD3 activity
+- src/self-hosted-runner/sessionHooks.ts — H2h/M2h/vKn/D2h + pjv legacy
+- src/self-hosted-runner/sessionChild.ts — sjv argv/env
+- src/self-hosted-runner/sessionActivity.ts — He NDJSON
+- src/self-hosted-runner/gitConfigure.ts — qqv/$qv/h2h/eBh/$2h
+- src/self-hosted-runner/tokenRefresh.ts — tur/qUi/q2h/j2h
+- src/self-hosted-runner/hostConfig.ts — Q2h/Z2h/ejv
+- gold: 15 files under __tests__/ — 137 pass
+
+## residual invent-ban
+built-in git clone (no checkout hook), fjv/mjv governed mount + host seed write,
+WJl multi-write fence, Y2h post-exit diagnosis, kFh SCM tunnel, orch JFh extras

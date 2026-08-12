@@ -1,0 +1,14 @@
+# densable 2.1.224 #10 — deny trailing slash (Mmr)
+
+## SEA
+function Mmr(e,{evenAfterGlob:t=!1}={}){
+  if(windows||!e.endsWith("/")) return e;
+  if(!t && kA(e)) return e;  // kA = includes * ? [ ]
+  return e.replace(/\/+$/,"")||"/";
+}
+swo/ZEo (permission patterns) and awo/c2t (filesystem settings) apply Mmr
+after expand/resolve.
+
+## Local land
+- stripTrailingSlashForSandbox (export)
+- resolvePathPatternForSandbox + resolveSandboxFilesystemPath call it

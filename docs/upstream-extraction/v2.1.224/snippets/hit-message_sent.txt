@@ -1,0 +1,6 @@
+# needle: Message sent
+# hits: 2
+
+Message sent to 
+---
+ad.`},errorClass:"mailbox_write_failed"};hga(n.getAppState().tasks,l,a);let p=kqb(s,l);return{data:{success:!0,message:`Message sent to ${e}'s inbox`,msg_id:d,routing:{sender:c,senderColor:u,target:`@${e}`,targetColor:p,summary:r,content:Ua(t,50)}}}}async function ljp(e,t,r,n,o,i){let s=await dO(e.identity.agentName,{from:Sya(n),t

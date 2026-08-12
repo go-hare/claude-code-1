@@ -1,0 +1,52 @@
+# needle: awsPairs
+# hits: 25
+
+awsPairs
+---
+sandbox.credentials.awsPairs[]
+---
+sandbox.credentials.awsPairs
+---
+. "awsPairs" must be an array; its lone pair-shaped entry claimed no conventional AWS name and was ignored. SigV4 re-signing stays unconfigured until it is fixed.
+---
+. "awsPairs" was degraded to non-functional suppressor pair(s); implicit AWS auto-pairing stays suppressed but nothing re-signs until it is fixed.
+---
+[sandbox] credentials.awsPairs: ignoring same-or-lower-precedence inert suppressor pair for '
+---
+[sandbox] credentials.awsPairs: ignoring entry for '
+---
+[sandbox] credentials.awsPairs entry for '
+---
+[sandbox] credentials.awsPairs: '
+---
+[sandbox] credentials.awsPairs: the higher-precedence inert '
+---
+[sandbox] credentials.awsPairs entry '
+---
+[sandbox] dropping credentials.awsPairs entry '
+---
+credentials.awsPairs entry '
+---
+[sandbox] credentials.awsPairs: the ignored suppressor pair for '
+---
+[sandbox] credentials.awsPairs: the ignored pair for '
+---
+[sandbox] credentials.awsPairs: replacing the '
+---
+credentials.awsPairs
+---
+[sandbox] credentials.awsPairs entry '
+---
+[sandbox] dropping credentials.awsPairs entry '
+---
+awsPairs
+---
+) are ignored."),awsPairs:dt(Kno()).optional().describe("Explicit groupings of masked env vars into AWS credential pairs for SigV4 re-signing, for non-standard variable names. The conventional AWS_ACCESS_KEY_ID / AWS_SECRET_A
+---
+/settings.json and "+".claude/settings.local.json) are ignored.")}).superRefine((e,t)=>{let r=new Set;for(let[n,o]of(e?.awsPairs??[]).entries()){let i=[["accessKeyIdVar",o.accessKeyIdVar],["secretAccessKeyVar",o.secretAccessKe
+---
+r",o.sessionTokenVar]],s=new Set;for(let[a,l]of i){if(l===void 0)continue;if(r.has(l))t.addIssue({code:cX.custom,path:["awsPairs",n,a],message:`"${l}" appears in more than one awsPairs slot (within or across pairs) \u2014 each variable can fill exactly one slot.`});s.add(l)}for(let a of s)r.add(a)}}).optional()),TJr=ve(()=>Te(
+---
+se; plaintext credential injection stays disabled (lower-precedence values cannot enable it) until it is fixed.`}),!1)),awsPairs:dt(Kno().catch((f)=>
+---
+{let m=c(f.value,f.issues);if(m!==void 0)return e({path:"sandbox.credentials.awsPairs[]",message:`Invalid pair was degraded to a non-functional suppressor: ${f.issues[0]?.message??"failed validation"}. It keeps implicit AWS auto-pairing suppressed but re-signs nothing until it is fixe

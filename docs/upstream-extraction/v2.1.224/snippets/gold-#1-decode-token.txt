@@ -1,0 +1,31 @@
+# densable 2.1.224 #1 slice — decode-token (Yqv)
+
+## densable SEA exports (x2h module)
+- parseDecodeTokenArgs = E2h
+- splitJwt = w2h  (strip /^sk-ant-[a-z0-9]+-/i then 3 segments)
+- decodeSegment = NJl
+- checkTokenTime = C2h  (exp required; nbf optional; skew 60s)
+- verifyAgainstJwks = A2h  (ES256→EC ieee-p1363, RS256→RSA; JWKS GET 30s)
+- readStdin = R2h  (v2h=16384 max; TTY→"")
+- resolveToken = k2h  (arg > CLAUDE_CODE_SESSION_ACCESS_TOKEN > stdin, Vqv=5000)
+- selfHostedRunnerDecodeTokenMain = Yqv
+- JWt = ANTHROPIC_BASE_URL stripped || sa().BASE_API_URL
+
+## CLI dispatch (no feature gate)
+```
+if (t[0]==="self-hosted-runner") {
+  r("cli_self_hosted_runner_path");
+  m=t[1];
+  orchestrator|setup|doctor|code-sign|decode-token → *Main(slice(2))
+  else → selfHostedRunnerMain(slice(1))
+}
+```
+
+## go-hare land (this slice)
+- src/self-hosted-runner/decodeToken.ts
+- src/self-hosted-runner/main.ts (router; other subs stub)
+- src/entrypoints/cli.tsx fast-path
+- gold: src/self-hosted-runner/__tests__/decodeToken.224.test.ts
+
+## NOT landed (extract-only / invent-ban)
+root runner poll loop, orchestrator, setup, doctor, code-sign

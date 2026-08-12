@@ -1,0 +1,19 @@
+# densable 2.1.224 #11 — sandbox violations in Bash tool result
+
+## SEA
+function $M_(e,t){
+  if(!Xl)return t;
+  let r=UFt.getViolationsForCommand(e);
+  if(r.length===0)return t;
+  let n=t;
+  n+=EOL+"<sandbox_violations>"+EOL;
+  for(let o of r)n+=o.line+EOL;
+  return n+="</sandbox_violations>",n
+}
+export annotateStdoutWithSandboxFailures:$M_
+
+## Local
+- BaseSandboxManager.annotateStdoutWithSandboxFailures re-exported on SandboxManager
+- BashTool.tsx calls annotateStdoutWithSandboxFailures(command, result.stdout||'')
+  (stderr merged into stdout) — matches densable $M_ second arg as output string
+- HAVE: no code change

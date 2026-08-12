@@ -1,0 +1,21 @@
+# densable 2.1.224 #31 — [VSCode] remoteControlAtStartup explicit true not honored
+
+## Changelog
+> [VSCode] Fixed sessions not honoring `remoteControlAtStartup` when explicitly enabled
+
+## densable SEA / CLI
+- CLI symbols HIT: `remoteControlAtStartup`, `getRemoteControlAtStartup`, `getExplicitRemoteControlAtStartup`, `resolveExplicitRemoteControlAtStartup`
+- go-hare CLI: densable 2.1.222 **X_t / rMe** precedence already landed (`config.ts` + `remoteControlAtStartup.222.test.ts`)
+- Related #30 resume-off tombstone is CLI **HAVE**
+
+## Local VSCode surface
+- No VSCode extension package in this monorepo product tree (`packages/` has no vscode extension host for RC startup).
+- IDE bridge remnants (if any) are not the official VS Code extension.
+
+## Verdict
+**N/A (invent-ban)** / checklist **PARTIAL** only if counting CLI half:
+- CLI config resolution **HAVE** (222).
+- VS Code extension host fix is **out of scope** — do not invent extension code.
+
+## Next
+Skip unless a real VS Code extension tree is in-repo. Pair with #29 N/A.

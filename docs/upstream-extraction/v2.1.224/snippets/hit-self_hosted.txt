@@ -1,0 +1,52 @@
+# needle: self-hosted-runner
+# hits: 25
+
+self-hosted-runner
+---
+x-self-hosted-runner-version
+---
+ [self-hosted-runner] [runner:fatal] 
+---
+Usage: claude self-hosted-runner orchestrator [options]
+---
+Run 'claude self-hosted-runner orchestrator --help' for usage.
+---
+ [self-hosted-runner] 
+---
+Usage: claude self-hosted-runner setup [args...]
+---
+[self-hosted-runner:setup] spawning:
+---
+[self-hosted-runner:setup] failed to spawn child: 
+---
+[self-hosted-runner:setup] child exited with status 
+---
+Usage: claude self-hosted-runner doctor [args...]
+---
+[self-hosted-runner:doctor] spawning:
+---
+[self-hosted-runner:doctor] failed to spawn child: 
+---
+[self-hosted-runner:doctor] child exited with status 
+---
+exec "$BIN" self-hosted-runner code-sign "$@"
+---
+self-hosted-runner-session
+---
+[runner:session] Stripped self-hosted-runner operator tool names from the server-supplied tools arg
+---
+[runner:warn] server-supplied tools arg contained ONLY self-hosted-runner operator tool names; dropping --tools and using the default pool
+---
+docs/self-hosted-runners-guide.md 
+---
+Usage: claude self-hosted-runner [options]
+---
+Run 'claude self-hosted-runner --help' for usage.
+---
+self-hosted-runner
+---
+ [self-hosted-runner] 
+---
+self-hosted-runner
+---
+a,RQo,kQo,xQo,IQo,PQo="Spawn a self-hosted runner as a detached background process on THIS machine using this binary's `self-hosted-runner` subcommand. Always passes `--base-dir` (the runner's default of /workspace is unwritable on operator laptops) and uses space-separated flags only. Returns {pid, log_path

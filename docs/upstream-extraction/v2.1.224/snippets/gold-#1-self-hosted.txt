@@ -1,0 +1,11 @@
+# SEA self-hosted-runner surface (2.1.224)
+Usage: claude self-hosted-runner [options]
+Usage: claude self-hosted-runner orchestrator [options]
+Usage: claude self-hosted-runner setup [args...]
+Usage: claude self-hosted-runner doctor [args...]
+Usage: claude self-hosted-runner decode-token [token] [options]
+  --environment-secret-file <path>
+No environment secret provided. Use --environment-secret-file or set SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET.
+[runner:warn] --pool-secret-file is deprecated; use --environment-secret-file
+x-self-hosted-runner-version / x-environment-runner-version
+docs/self-hosted-runners-guide.md

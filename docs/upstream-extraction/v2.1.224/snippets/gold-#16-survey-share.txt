@@ -1,0 +1,42 @@
+# densable 2.1.224 #16 — feedback survey transcript share fail UX (long sessions)
+
+## Changelog
+> Fixed the feedback survey's transcript share silently failing on long sessions; a failed share now shows an error instead of a success message
+
+## densable SEA anchors (near `/api/claude_code_shared_session_transcripts`)
+Failure/kind taxonomy:
+- `payload_too_large_precheck`
+- `payload_range_error`
+- `payload_stripped`
+- `http_413`
+- `timeout` / `no_response` / `exception` / `auth_unavailable` / `blocked` / `essential_traffic_only` / `data_residency`
+- analytics: `transcript_share_failed`
+Survey state machine tokens:
+- `submittingShare` · `submitted` · **`share_failed`** · `thanks` · `closed` · `followup`
+- UI success still: `Thanks for sharing your transcript!`
+
+## densable intent
+1. Long-session payload may fail (size / 413 / strip) — classify kind.
+2. UI must enter **`share_failed`** (error), not the share-success or silent-thanks path that looks like success.
+
+## Local (go-hare)
+- `src/components/FeedbackSurvey/submitTranscriptShare.ts` — returns `{success:false}` on any error; skips raw JSONL if `MAX_TRANSCRIPT_READ_BYTES` but still POSTs remainder; **no** precheck/strip/413 taxonomy.
+- `useSurveyState.tsx`: fail → `showThanksThenClose()` (generic thanks), **not** error state.
+- `FeedbackSurvey.tsx` states: `closed|open|thanks|transcript_prompt|submitting|submitted` — **no `share_failed`**.
+- Analytics does log `transcript_share_failed` (event only).
+
+## Verdict
+**GAP** — missing `share_failed` UI state + densable payload failure kinds (esp. long-session precheck/413).
+Do not invent UI copy until densable error string recovered (SEA only had state token `share_failed` so far).
+
+## Next
+1. Add `share_failed` to survey state machine (mirror densable transitions).
+2. Extract payload_too_large_precheck / strip / 413 mapping from SEA into submitTranscriptShare.
+
+
+## Land status (2026-08-11)
+**HAVE** — product 1:1 densable landed; targeted unit tests pass. Uncommitted until bare 提交.
+
+### densable success telemetry (SEA `lql`)
+- Ladder step `S>0`: `Oe("feedback_transcript_share","payload_stripped")` then `{success:true, transcriptId}` — **not** `errorCode: "payload_stripped"` on success.
+- Local: debug log only on strip; success return has no errorCode.

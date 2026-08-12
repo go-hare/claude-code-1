@@ -1,0 +1,29 @@
+# densable 2.1.224 polish residuals (post HAVE 29)
+
+## Landed 2026-08-11 (SEA 1:1)
+1. share_failed UI periods: "Couldn't share the transcript." + "You can share details with /feedback instead."
+2. OSC 52 toast: Gsn() hold key + char/chars — ScrollKeybindingHandler.getNativeSelectionHoldKey
+3. YXd showSecurityDialog optional → deferred_no_consent_surface; load/refresh pass dialog; poll omits
+4. submitTranscriptShare early gates: essential_traffic_only + policy_blocked(allow_product_feedback)
+5. success never carries errorCode (tests assert undefined); axios via setupAxiosMock
+
+## Second 对齐 wave 2026-08-11 (SEA 1:1, was invent-ban until algorithm recovered)
+6. **commitSha**: densable FNi/lql `commitSha:a||null` where `a` = headSha from Iar≡jJr≡getHead; skip when Is() remote → local `getIsRemoteMode()` + `getHead()` → payload `commitSha`
+7. **3p markers (JHS)**: exact SEA list `msg_bdrk_`,`msg_vrtx_`,`bolt-inf-` (hyphen),`toolu_bdrk_`,`toolu_vrtx_`,`srvtoolu_bdrk_`,`srvtoolu_vrtx_`,`req_bdrk_`,`req_vrtx_`
+   - densable oot / _1r → `hasThirdPartyTranscriptMarkers` / `subagentTranscriptHasThirdPartyMarkers`
+   - post path only: strip dirty subagent entries + drop rawTranscriptJsonl (log contains_3p_transcript_markers)
+8. **linux hasImageInClipboard**: densable SUb linux.checkImage pipeline (xclip TARGETS || wl-paste -l) — no longer short-circuit false
+
+## Bundle path (landed 2026-08-11, was residual)
+9. **m0t / Y7t / hBa** — `shareBundle.ts`:
+   - `resolveTranscriptShareMode`: firstParty+creds→post; else provider|no_creds→bundle
+   - `encodeShareRequestBody` ≡ Y7t (content string + streamed transcript/subagentTranscripts + extraOuterFields)
+   - `writeFeedbackBundleZip` ≡ hBa (`~/.claude/feedback-bundles/cc-*.zip`, entry `transcript.json`, fflate Zip/ZipDeflate, 0o700/0o600)
+   - lql: 3p strip **post only**; bundle returns `{success, bundlePath}` or `bundle_write_failed`
+
+## Intentionally residual (invent-ban / incomplete local stack)
+- **imagePaste WSL host**: densable SUb process.platform table + powershell.exe probe string incomplete — do not invent Wt() for image path.
+- densable raw line-level QVe/Gt/Ie per-line redact before Y7t on post — local still whole-JSON `redactSensitiveInfo` on post ladder (pre-existing).
+
+## Tests
+shareBundle.224 + submitTranscriptShare.224 (JHS + commitSha + remote + 3p + bundle + gates + ladder) / securityCheckDeferred / getNativeSelectionHoldKey / shareFailed / orgConsent / waylandCopy

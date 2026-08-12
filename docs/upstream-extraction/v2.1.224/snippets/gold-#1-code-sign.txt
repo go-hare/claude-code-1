@@ -1,0 +1,17 @@
+# densable 2.1.224 #1 slice — code-sign (Wqv)
+
+## densable
+- S2h = parseCodeSignArgs: only `-Y sign`; optional `-n`/`-f`; positional buffer file
+- T2h = signCommitFile: env CLAUDE_CODE_REMOTE_SESSION_ID (Nqv charset), CLAUDE_CODE_SESSION_ACCESS_TOKEN, ANTHROPIC_BASE_URL|SESSION_INGRESS_URL
+  POST `${base}/v1/code/sessions/${id}/sign-commit`
+  body: {contents, source:{type:"git_repository"}, git_object_format: jqv()}
+  headers: content-type, anthropic-version 2023-06-01, x-environment-runner-version `shr-${VERSION}`, Bearer token
+  write `${bufferFile}.sig` with response.signature
+- jqv = git rev-parse --show-object-format → sha256|sha1
+- zqv = truncate error body 200
+- Wqv = main: S2h → T2h → exit 0/1
+
+## go-hare
+- src/self-hosted-runner/codeSign.ts
+- main.ts routes code-sign
+- gold: codeSign.224.test.ts

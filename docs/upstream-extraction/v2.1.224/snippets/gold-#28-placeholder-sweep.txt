@@ -1,0 +1,54 @@
+# densable 2.1.224 #28 — replBridgePlaceholders + ULp archive stale on mint
+
+## densable SEA (darwin-arm64 2.1.224)
+
+### Module (minified)
+- FLp = registerBridgePlaceholder(sessionId)
+- BLp = removeBridgePlaceholder(sessionId)
+- ULp = sweepBridgePlaceholders({baseUrl,getAccessToken,skipSessionId,archive,startDelayMs?})
+- RLb = process one entry (orphan → GET → untouched archive)
+- ALb = orphan owner: !running || (running && !lstart match)
+- NLp = !Ca() && getFeatureValue_CACHED_MAY_BE_STALE("tengu_bridge_placeholder_sweep", true)
+- MLp = strip session_|cse_ prefix
+- Npa = status==="invalid" || (number && <500 && !==401 && !==408 && !==429)
+- $Lp = serial write queue on GlobalConfig
+- LLp = once-per-process sweep gate
+
+### Constants
+- vLb=300000 (5min min age)
+- ELb=2592000000 (30d max age drop)
+- HLp=20 cap
+- wLb=15000 start delay
+- CLb=/^(session|cse)_[A-Za-z0-9_-]+$/
+
+### Call site (remote-bridge after mint/reattach settle, before fetchRemoteCredentials)
+```
+if(!G)FLp(rt);
+ULp({baseUrl:t,getAccessToken:we,skipSessionId:rt,archive:(Dn)=>Zxr(Dn,t,we(),r,ge.http_timeout_ms)});
+```
+G = outboundOnly (destructure: outboundOnly:G)
+
+### Zxr archive wrapper
+```
+async function Zxr(e,t,r,n,o){
+  if(!r)return"no_token";
+  ...
+  s=await uGs(...);
+  if(Npa(s))BLp(e);
+  return s
+}
+```
+
+### RLb algorithm
+1. if !ALb(entry) → keep
+2. XBo GET session; notFound → remove; no session → keep
+3. missing created_at/updated_at → keep
+4. updated_at !== created_at → remove (touched, no archive)
+5. archive; Npa success → remove; else keep
+
+## go-hare land
+- src/bridge/bridgePlaceholders.ts
+- GlobalConfig.replBridgePlaceholders
+- remoteBridgeCore: if (!outboundOnly) register; always sweep; archiveSession Npa→remove
+- createSession getBridgeSessionWithNotFound (+ timestamps)
+- gold: src/bridge/__tests__/bridgePlaceholders.224.test.ts

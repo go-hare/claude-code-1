@@ -1,0 +1,58 @@
+# densable 2.1.224 #12 — mid-turn MCP deferred tools announce
+# SEA: /tmp/official-224/plat/package/claude
+# Symbols: NVs=getDeferredToolsDelta, iCr=getDeferredToolsDeltaAttachment,
+#          L3o=summarizeByServerPrefix, CM=DEFERRED_DELTA_LIST_CAP=30, mln blacklist
+
+## NVs signature
+function NVs(e,t,r,n,o,i)
+  e=tools, t=messages, r=scanContext,
+  n=pendingMcpServers?, o=needsAuthMcpServers?, i=failedMcpServers?
+
+## Sets reconstructed from prior deferred_tools_delta
+- s (announced): addedNames (when addedLines is Array) − removedNames
+- a (listed): addedNames not in that attachment's readdedNames
+- mln blacklist skipped on add: Frame, FrameRead, TeamCreate, TeamDelete, SuggestBackgroundPR, AutofixPr
+
+## Diff
+- _ = deferred not in s          → newly announced
+- b = deferred not in a          → need full addedLines
+- S = _.filter in a              → readdedNames
+- T = s − deferred, not in pool  → removedNames (undefer silent)
+- pending/needsAuth/failed only compared when arg !== undefined
+
+## Return
+{
+  addedNames: unique([_..., b...]).sort(),
+  addedLines: b.map(format).sort(),   // NOT full _ — readded skip lines
+  removedNames, readdedNames,
+  pendingMcpServers?, needsAuthMcpServers?, failedMcpServers?
+}
+
+## iCr (attachment wrapper)
+gates: o1/UEe/BEe/eSt (delta enabled + tool search available)
+NVs(...) → [{type:'deferred_tools_delta', ...}]
+
+## getAttachments call (densable)
+iCr(tools, model, messages, scanCtx,
+  mcpClients.filter pending .map name,
+  Cn()? needs-auth names : void 0,   // Cn = non-interactive
+  drn()? wdn(mcpClients) : void 0)   // drn = tengu_surface_failed_mcp_servers
+
+## Subagent mid-loop
+After skill preload + agent MCP merge:
+  if (!T) for (att of iCr(qt, Y, de, {callSite:'attachments_subagent', querySource}))
+T = useExactTools / fork child skip
+
+## Render gold (messages deferred_tools_delta)
+- readded: `${n} deferred tool(s) are available again ... ${L3o(s)}. Load via ${IT} as before.`
+- removed long (>CM): `${n} deferred tools are no longer available (MCP server disconnected): ${L3o}. Do not search...`
+- removed short: multiline list
+- needsAuth / failed transport / failed policy / pending: densable full copy
+- ambient footer after tool parts only (before MCP status in densable)
+
+## Local land
+- src/utils/searchExtraTools.ts — NVs 1:1 + L3o + CM + wdn/LPo/Abr
+- src/utils/attachments.ts — Attachment type + iCr args + getAttachments wiring
+- src/utils/messages.ts — full render
+- packages/builtin-tools/.../AgentTool/runAgent.ts — post-skill iCr inject
+- gold: src/utils/__tests__/deferredToolsDelta.224.test.ts

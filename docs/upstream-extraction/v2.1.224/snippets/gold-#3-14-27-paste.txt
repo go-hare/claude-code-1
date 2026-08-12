@@ -1,0 +1,54 @@
+# densable 2.1.224 paste cluster #3 / #14 / #27
+# SEA: /tmp/official-224/plat/package/claude
+# Symbols: BA parseReferences, d6e expand, mLd/hLd/vPy strip, gLd message,
+#          Jqs history identity, A$o expand-latest (optional), f6e/Zqs/zG renumber
+
+## BA (parseReferences)
+/\[(Pasted text|Image|Audio|\.\.\.Truncated text) #(\d+)(?: \+\d+ lines)?(\.)*\]/g
+empty input → []
+
+## d6e (expandPastedTextRefs)
+skip when type!=="text" OR unavailable
+
+## mLd / hLd / vPy
+for each ref reverse:
+  if !match.startsWith("[Image") && content.unavailable===true:
+    strip from stripped+expanded; removed.unshift({id,label})
+    label = match.startsWith("[...Truncated text") ? "Truncated text" : "Pasted text"
+  else if type==="text" && !unavailable: expand into expanded only
+return {stripped, expanded, removed}
+vPy = {input:stripped, removed}
+
+## gLd
+unique labels So(map `${label} #${id}`)
+1 → "... is no longer available and was removed from the prompt"
+N → "... are no longer available and were removed from the prompt"
+
+## submit (ALi / handlePromptSubmit)
+{stripped,expanded,removed}=hLd(R,M)
+if removed.length:
+  notification key "pasted-text-unavailable" text gLd(K) priority immediate
+  if stripped empty OR mode==bash OR R starts with "/": cancel (return; no clear)
+continue with expanded as value (preExpansionValue stays R)
+
+## w$o (logEntryToHistoryEntry)
+resolve miss → keep {id,type,content:"",unavailable:true} (text miss → paste_store_content_lost)
+
+## Jqs (historyPasteIdentityKey)
+mask #id→#_; identity dead|hash:|inline:|literal:id; join \0 + \x01
+
+## f6e (#27 renumber on accept)
+for each paste entry id not minted this session:
+  newId = zG (mintPasteId); Zqs rewrite #old→#new for matching type (HPy)
+  keep[newId]={...content,id:newId}
+call sites: arrow history, ctrl+r accept/execute, history picker onSelect
+
+## Hvr / A$o (optional, not required for #3/#14/#27 HAVE)
+Hvr=1e5 — expand highest available text paste if content.length<=Hvr
+
+## Local land
+- src/utils/config.ts — PastedContent.unavailable?
+- src/history.ts — BA/d6e/mLd/gLd/Jqs/f6e + w$o unavailable
+- src/utils/handlePromptSubmit.ts — strip+notify+cancel
+- useArrowKeyHistory / useHistorySearch / PromptInput HistorySearchDialog — f6e
+- gold: src/utils/__tests__/pasteUnavailable.224.test.ts

@@ -1,0 +1,204 @@
+=== Remote credentials fetch failed @ 255784038 (hit 1) ===
+n=qe?AWt(qe):le?"Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume.":"Remote credentials fetch failed \u2014 see debug log",_o=qe===null?"terminal":Kpa(qe);if(E(`[remote-bridge] Creds failed; onStateChange ${U?"set":"UNSET"}, msg="${Dn}"`),U?.("failed",Dn,_o),Vue(qe?`v2_remote_cre
+
+=== archiveSession @ 115111490 (hit 1) ===
+......................info........................!...bridge_repl_v2_session_reattached...............................unarchiveSession................l...............................gone............................[remote-bridge] Reattach ....................... gone (unarchive ...............................); m
+
+=== archiveSession @ 126176560 (hit 2) ===
+........acknowledgeWork.................stopWork........................deregisterEnvironment...........................archiveSession..................reconnectSession............
+...heartbeatWork...................sendPermissionResponseEvent..... ...............P............................Y...................Y
+
+=== archiveSession @ 255782516 (hit 3) ===
+{rt}`),Or("info","bridge_repl_v2_session_reattached");let Dn=await Vpa((_o,hs)=>ZLb(rt,t,_o,r,ge.http_timeout_ms,hs),"unarchiveSession",ge,{getAccessToken:we,onAuth401:l,recoveryAttemptedTokens:De});if(Dn?.outcome==="gone"){E(`[remote-bridge] Reattach ${rt} gone (unarchive ${Dn.status}); minting fresh session`),G
+
+=== ArchiveSession @ 126229312 (hit 1) ===
+......../archive....................
+.../v1/sessions/...................[bridge:api] POST ..............................ArchiveSession.................................................. -> 409 (already archived)...................... -> ................................&.............................0..@ ......@p-.T
+
+=== ArchiveSession @ 258309797 (hit 2) ===
+l}`);let c=await s(async(u)=>Io.post(`${e.baseUrl}${l}`,{},{headers:await o(u),timeout:1e4,validateStatus:(d)=>d<500}),"ArchiveSession");if(c.status===409){t(`[bridge:api] POST ${l} -> 409 (already archived)`);return}int(c.status,c.data,"ArchiveSession"),t(`[bridge:api] POST ${l} -> ${c.status}`)},async reconnect
+
+=== ArchiveSession @ 258309915 (hit 3) ===
+,"ArchiveSession");if(c.status===409){t(`[bridge:api] POST ${l} -> 409 (already archived)`);return}int(c.status,c.data,"ArchiveSession"),t(`[bridge:api] POST ${l} -> ${c.status}`)},async reconnectSession(a,l){return Iu("bridge_session_reconnect",async()=>{PI(a,"environmentId"),PI(l,"sessionId"),t(`[bridge:api] PO
+
+=== session_archived @ 160354112 (hit 1) ===
+nown....................................Ultrareview failed: ........................
+...
+Session: ......................session_archived................orchestrator_error..............................
+...............................cli_ultrareview_remote_error....
+...............................................Revi
+
+=== session_archived @ 267203715 (hit 2) ===
+e(f.reason):Ce("poll_unknown")}),Rm(`Ultrareview failed: ${ue(f)}
+Session: ${a.sessionUrl}`)}let c=X4v(l),u=c===ONh?Ce("session_archived"):Ce("orchestrator_error"),d=Jsa(l),p=d!==void 0?{findings_count:d}:void 0;if(t.json){if(await mee(l+`
+`),c)await xu("cli_ultrareview","cli_ultrareview_remote_error",{reason:u});e
+
+=== stale session @ 97526704 (hit 1) ===
+........Connection closed...........................&...MCP session expired during tool call (......................
+...stale session...................connection closed...........................2...), clearing connection cache for re-initialization..............................tengu_mcp_session_expired........
+
+=== stale session @ 98361968 (hit 2) ===
+........Connection closed...........................&...MCP session expired during tool call (......................
+...stale session...................connection closed...........................2...), clearing connection cache for re-initialization..............................tengu_mcp_session_expired........
+
+=== stale session @ 148820862 (hit 3) ===
+..........................................................pe..........................-...[voice] ignoring onError from stale session: ...
+...............................O...........................8...[voice] ignoring stale onError from superseded attempt: ........................B..............................
+
+=== Session expired @ 81498256 (hit 1) ===
+.:......................................................Session not found: .........................................4...Session expired. Please run /login to sign in again.............................................invalid session ID..............................Failed to fetch session: ....................... ..
+
+=== Session expired @ 246700739 (hit 2) ===
+ta?.error?.message;if(o.status===404){let a=`Session not found: ${e}`;throw new Hw(a,a)}if(o.status===401)throw new Hw("Session expired. Please run /login to sign in again.","Session expired. Please run /login to sign in again.");if(o.status===400&&s?.startsWith("invalid session ID"))throw new Hw(s,s);throw Error(
+
+=== Session expired @ 246700794 (hit 3) ===
+t found: ${e}`;throw new Hw(a,a)}if(o.status===401)throw new Hw("Session expired. Please run /login to sign in again.","Session expired. Please run /login to sign in again.");if(o.status===400&&s?.startsWith("invalid session ID"))throw new Hw(s,s);throw Error(s||`Failed to fetch session: ${o.status} ${o.statusText
+
+=== session expired @ 87868526 (hit 1) ===
+..........................gateway.........................apiKeyHelper................H...Failed to authenticate: OAuth session expired and could not be refreshed....................C...OAuth authentication is currently not allowed for this organization.............................oauth_org_not_allowed............
+
+=== session expired @ 97526644 (hit 2) ===
++..." requires re-authorization (token expired).....................Connection closed...........................&...MCP session expired during tool call (......................
+...stale session...................connection closed...........................2...), clearing connection cache for re-initialization.....
+
+=== session expired @ 98361908 (hit 3) ===
+e-authorization (token expired).....................................Connection closed...........................&...MCP session expired during tool call (......................
+...stale session...................connection closed...........................2...), clearing connection cache for re-initialization.....
+
+=== archiveRemote @ 75166160 (hit 1) ===
+sionsAPI..........#.....ccrSessionToResource.....p#...............#.....axiosGetWithRetry...............................archiveRemoteSession............................CodeSessionSchema.Y.....`.-.................
+...CCR_BYOC_BETA...................wasLastMintSelectionDegraded..............%.....negotiateOrgMemor
+
+=== archiveRemote @ 81541345 (hit 2) ===
+...............i...............................................).......................
+...............................[archiveRemoteSession] ....................."... skipped: non-first-party provider............................................../v1/code/sessions/............................../archive..........
+
+=== archiveRemote @ 81541585 (hit 3) ===
+......./v1/code/sessions/............................../archive.................................................... ...[archiveRemoteSession] archived ................................ failed ........................: .............................. failed: .......................error.............................
+
+=== pre-compact @ 266486624 (hit 1) ===
+mpaction summarizes everything.")}),logical_parent_uuid:Nc().nullable().optional().describe("@internal uuid of the last pre-compact message \u2014 the backpointer "+"forkSession follows across the compaction break. Distinct from the session-file chain parent (which is the post-compact summary). Absent from old
+
+=== compact_boundary @ 78377200 (hit 1) ===
+........`...............p...............h...............................................system..........................compact_boundary........
+.........................................................!%.....@.4.....@.<.E.....3.@@%.H.....2`......T.@ ..P...R.M.@Pu.P...S.MK......X........8...:..._...b...v...y.......
+
+=== compact_boundary @ 78395857 (hit 2) ===
+........e......................)........e..............pL......I........e..............
+..............................."compact_boundary"..........................................................................B...Cannot destructure property 'backend' from null or undefined value..............................l....
+
+=== compact_boundary @ 102699712 (hit 3) ===
+........assistant.......................................system......................
+...local_command...................compact_boundary.................................................@...E...@.U.E...@pU.J...@.].E...@.m.E...@`m.E...@@m.H...@.m.H....0n.B!......................... ...7...~.........................l.
+
+=== Remote Control disconnected @ 69544448 (hit 1) ===
+nly available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account..................Remote Control disconnected.............IK....../login...
+
+..............m......ingest..................I.......__ULTRAPLAN_TELEPORT_LOCAL__....................simple_plan.................
+...save_skill.....
+
+=== Remote Control disconnected @ 145748912 (hit 2) ===
+control.................restart.........................policy..........................update..........................Remote Control disconnected..................... ..  .......................................#... ..  .r.u.n. ./.r.e.m.o.t.e.-.c.o.n.t.r.o.l. .t.o. .r.e.c.o.n.n.e.c.t..........................................
+
+=== Remote Control disconnected @ 254513105 (hit 3) ===
+ntrol is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account.",T0e="Remote Control disconnected.",I5t="/login";var P5t;var b7o=v(()=>{Dt();er();Ke();kT();Dl();tx();GP();P5t={name:"RemoteAgentTask",type:"remote_agent",async kill(e,t,r){let n,o,i,s=!1,a=!1,l=0,c=!1;if(t.update
+
+=== remoteControlAtStartup @ 79333264 (hit 1) ===
+ProgressBarEnabled......................todoFeatureEnabled..............................teammateMode....................remoteControlAtStartup..........................isolatePeerMachines.............................daemonColdStart.................crossSessionInbound.............................autoUploadSessions........
+
+=== remoteControlAtStartup @ 108910432 (hit 2) ===
+(.......................................................................................default.........................remoteControlAtStartup..........
+...............................k.......................(...................
+...................`...............................true............................C.........
+
+=== remoteControlAtStartup @ 125212928 (hit 3) ===
+ettings.............
+...localSettings...................................project_or_local_false..........................remoteControlAtStartup..........................................legacy_global_config............................none........................ ...remoteControlAtStartup: true in ................project an
+
+=== Couldn't reconnect to your Remote Control session @ 115112592 (hit 1) ===
+narchive; surfacing retry prompt...................."...v2_remote_creds_reattach_transient..........................d...Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume........................./...R.e.m.o.t.e. .c.r.e.d.e.n.t.i.a.l.s. .f.e.t.c.h. .f.a.i.l.e.d. ..  .s.e.e. .d.e.b.u.g. .l.o.g........
+
+=== Couldn't reconnect to your Remote Control session @ 255783935 (hit 2) ===
+rchive; surfacing retry prompt`),Or("info","v2_remote_creds_reattach_transient");if(!qe||_qt(qe)){let Dn=qe?AWt(qe):le?"Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume.":"Remote credentials fetch failed \u2014 see debug log",_o=qe===null?"terminal":Kpa(qe);if(E(`[remote-bridge] Creds failed; onSt
+
+=== v2_remote_creds_reattach_transient @ 115112528 (hit 1) ===
+....................................8...: /bridge failed after unarchive; surfacing retry prompt...................."...v2_remote_creds_reattach_transient..........................d...Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume........................./...R.e.m.o.t.e. .c.r.e.d.
+
+=== v2_remote_creds_reattach_transient @ 255783859 (hit 2) ===
+if(le&&qe===null)E(`[remote-bridge] Reattach ${rt}: /bridge failed after unarchive; surfacing retry prompt`),Or("info","v2_remote_creds_reattach_transient");if(!qe||_qt(qe)){let Dn=qe?AWt(qe):le?"Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume.":"Remote credentials fetch failed \u2
+
+=== v2_remote_creds_reattach_transient @ 255784270 (hit 3) ===
+s failed; onStateChange ${U?"set":"UNSET"}, msg="${Dn}"`),U?.("failed",Dn,_o),Vue(qe?`v2_remote_creds_${qe.reason}`:le?"v2_remote_creds_reattach_transient":"v2_remote_creds_failed",void 0,!0),me("bridge_connect","bridge_connect_creds_failed"),!le)Zxr(rt,t,we(),r,ge.http_timeout_ms);return null}E(`[remote-bridge] Fetched bridge crede
+
+=== MISS upload prior ===
+
+=== MISS uploading prior ===
+
+=== MISS prior local ===
+
+=== fresh session @ 115111691 (hit 1) ===
+.............[remote-bridge] Reattach ....................... gone (unarchive ...............................); minting fresh session........................................i...............................s...............................-........................... ...bridge_repl_v2_reattach_fallback............
+
+=== fresh session @ 115112661 (hit 2) ===
+ds_reattach_transient..........................d...Couldn't reconnect to your Remote Control session. Retry, or start a fresh session without --resume........................./...R.e.m.o.t.e. .c.r.e.d.e.n.t.i.a.l.s. .f.e.t.c.h. .f.a.i.l.e.d. ..  .s.e.e. .d.e.b.u.g. .l.o.g...................terminal..............
+
+=== fresh session @ 115200256 (hit 3) ===
+e.-.a.u.t.h.e.n.t.i.c.a.t.e.............................recovery_reauth_required....................5...could not fetch fresh session credentials after code ...........................terminal....................!...recovery_credentials_fetch_failed...............................recovery_credentials_rejected....
+
+=== minted @ 83605068 (hit 1) ===
+orityKeyIdentifier..........................cRLDistributionPoints....................................... ...[mitm-leaf] minted RSA leaf for ....................`............................@...J.....4.@`4.....@.<.@............A4...M...<.....B%5.@@<.@...J...V@3.@.5.........S.:...5.....@`<.I...@P5..B..@.4.I
+
+=== minted @ 100014128 (hit 2) ===
+....................................
+...imagePasteIds...................stackedOriginalInput............................minted..........................flooredSessionId............d.q.1.......K.q.....o.q.$.q......H..P........................Z!......................Z!.....x.................................
+
+=== minted @ 104335159 (hit 3) ===
+.................hadEmptyInputToolUse............................had_empty_input_tool_use....................
+...credit_minted...................armed_at_trigger................prompt_skipped_reason...........................orphanedMessageCount............................dst.............................s
+
+=== MISS mint session ===
+
+=== MISS server session expired ===
+
+=== connection failure @ 105688552 (hit 1) ===
+k operations................;...Access denied to specific paths outside allowed directories.................4...Network connection failures to non-whitelisted hosts............................Unix socket connection errors...................@...........................................................................<.
+
+=== connection failure @ 105688920 (hit 2) ===
+k operations................;...Access denied to specific paths outside allowed directories.................4...Network connection failures to non-whitelisted hosts............................Unix socket connection errors...............P...Immediately retry with `dangerouslyDisableSandbox: true` (don't ask, just do i
+
+=== connection failure @ 120679913 (hit 3) ===
+.i.l.a.b.l.e. .f.o.r. .t.h.i.s. .s.e.s.s.i.o.n.:.
+.............................
+
+This is an administrative block, not a connection failure: retrying will not help. If the user's request depends on one of these servers, tell them it is disabled by policy and that an administrator manages this setting..................
+
+=== MISS persistent failure ===
+
+=== MISS reconnect shortcut ===
+
+=== MISS compaction progress ===
+
+=== post-compaction @ 241313185 (hit 1) ===
+ompaction is running (hook phase, compact start, compact end). Distinct from system/compact_boundary, which reports the post-compaction transcript boundary after completion. From internal QueryEvent 'compact_progress' (CompactEvent Delta-track arm)...................................,.............................`.
+
+=== post-compaction @ 266524640 (hit 2) ===
+ompaction is running (hook phase, compact start, compact end). Distinct from system/compact_boundary, which reports the post-compaction transcript boundary after completion. From internal QueryEvent 'compact_progress' (CompactEvent Delta-track arm).")),YUD=ve(()=>Te({type:wt("stream_mode"),mode:xr(["tool-input","t
+
+=== MISS silently reconnecting ===
+
+=== MISS turned it off ===
+
+=== MISS remoteControlEnabled ===
+
+=== MISS userDisabledRemote ===
+
+=== disableRemoteControl @ 79328480 (hit 1) ===
+ion.....................worktree........................disableAllHooks.................disableAgentView................disableRemoteControl............................disableWorkflows................disableArtifact.................enableArtifact..................enableWorkflows.................workflowSizeGuideline...
+
+=== disableRemoteControl @ 88085019 (hit 2) ===
+ide a cloud session......................b...Remote Control is disabled by your organization's policy (managed setting `disableRemoteControl`)...........................q...Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account............................4...Rem
+
+=== disableRemoteControl @ 88102044 (hit 3) ===
+........6...Not connected to the Anthropic API (api.anthropic.com)......................1...Not disabled by org policy (disableRemoteControl)...........................-...Disabled by org policy (disableRemoteControl)...................Signed in to claude.ai..........................Not signed in to claude.ai..........
+
+=== MISS remote control off ===

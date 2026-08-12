@@ -1,0 +1,17 @@
+# densable 2.1.224 #8 — long path shared sanitized prefix (mar / p$ / TJi)
+
+## SEA
+- sanitizePath zE: fJi then if len>AX=200 → slice(0,AX)+"-"+hash
+- dirBelongsToProject mar(e,t,r): readdir project dir jsonl; far lite;
+  cwd = ndt(tail,"relocated","relocatedCwd") ?? soo(head,"cwd");
+  compare fJi(bp(cwd)) to fJi(projectPath) (caseInsensitive on win)
+- findProjectDirs p$(e): exact SW(e) if exists; if sanitize len<=AX return;
+  else readdir projects, prefix o.slice(0,AX)+"-" and mar(candidate,e) → push
+- findProjectDir TJi = p$[0]
+- getStatOnlyLogs / worktree scan must not bare startsWith(prefix+"-") without mar
+
+## Local land
+- sessionStoragePortable: sanitizePathRaw/fJi, dirBelongsToProject/mar,
+  findProjectDirs/p$, findProjectDir=TJi
+- listSessionsImpl gatherProjectCandidates + sessionStorage getStatOnlyLogsForWorktrees
+  longPrefixMatch → dirBelongsToProject gate

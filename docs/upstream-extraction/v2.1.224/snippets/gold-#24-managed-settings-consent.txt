@@ -1,0 +1,44 @@
+# densable 2.1.224 #24 — managed settings approval does not re-prompt on re-login when org settings unchanged
+
+## Changelog
+> Changed managed settings: the approval prompt no longer re-appears after re-login or org switching when the organization's settings are unchanged
+
+## densable SEA anchors
+Security check results / events:
+- `no_check_needed` · `deferred_non_interactive` · `deferred_no_consent_surface` · `approved`
+- `tengu_managed_settings_security_dialog_{shown,accepted,rejected}`
+- `remote_managed_settings_security_check`
+Cache / consent model (224-critical):
+- **`org_record`**
+- **`consented_payload`**
+- `applied_consent_deferred`
+- `Remote settings: No consent surface in this interactive session; keeping the consented baseline`
+- `Remote settings: Refresh superseded by a login/logout reset; not notifying`
+- `Remote settings: Saved empty sentinel (404 response)`
+- `Remote settings: Refreshed after auth change`
+- `Remote settings: User rejected new settings, using cached settings`
+- `Remote settings: Cache still valid (304 Not Modified)`
+
+## densable intent (recoverable shape)
+Consent is stored as **org-scoped consented dangerous payload** (`org_record` + `consented_payload`).
+Re-login / org switch that yields the **same** dangerous projection must **not** re-show the dialog.
+Refresh after auth has a supersede race guard ("Refresh superseded by a login/logout reset; not notifying").
+
+## Local (go-hare)
+- `checkManagedSettingsSecurity` + `hasDangerousSettingsChanged` — content compare of dangerous projection only.
+- `refreshRemoteManagedSettings()` (**login path** `login.tsx` / `main.tsx`):
+  1. **`clearRemoteManagedSettingsCache()` first** (wipes disk + session)
+  2. re-fetch
+  3. `checkManagedSettingsSecurity(null, newSettings)` → if dangerous present, `hasDangerousSettingsChanged(null, new)` is **true** → **dialog every re-login**
+- No `org_record` / `consented_payload` / consented baseline retention across clear.
+
+## Verdict
+**GAP** — local wipe-then-compare on re-login re-prompts even when org settings unchanged.
+densable 1:1 needs org-scoped consented baseline, not invent of ad-hoc “skip once” flags.
+
+## Next
+Extract densable org_record/consented_payload persistence + compare path from SEA; land before changing clear-on-login.
+
+
+## Land status (2026-08-11)
+**HAVE** — product 1:1 densable landed; targeted unit tests pass. Uncommitted until bare 提交.

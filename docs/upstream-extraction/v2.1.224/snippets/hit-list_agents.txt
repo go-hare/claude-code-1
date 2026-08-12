@@ -1,0 +1,20 @@
+# needle: ListAgents
+# hits: 9
+
+ListAgents
+---
+ListAgentsTool
+---
+ListAgents
+---
+ListAgents
+---
+p",AgentOutputTool:"TaskOutput",BashOutputTool:"TaskOutput",AgentOutput:"TaskOutput",BashOutput:"TaskOutput",ListPeers:"ListAgents",Brief:"SendUserMessage",ListMcpResources:"ListMcpResourcesTool",ReadMcpResource:"ReadMcpResourceTool",ReadMcpResourceDir:"ReadMcpResourceDirTool"};ilr=`mcp__${zio}__bash`,uCc=`mcp__${zio}__web_fetch
+---
+chPlugins","SearchSkills","ListPlugins","ListSkills"]});function V5_(){return""}function IRs(){return K5_+V5_()}var cy="ListAgents",qWu="ListPeers",_Bt="only in reply, after it messages you first",K5_;var N4e=v(()=>{k3();K5_=`Lists agents you can ${_f} to \u2014 in-process subagents you spawned, other local Claude sessions on th
+---
+ultSizeChars:yWp,toAutoClassifierInput(){return"list agents"},async description(){return IRs()},userFacingName(){return"ListAgents"},isEnabled(){return iw()},get inputSchema(){return f5b()},get outputSchema(){return m5b()},isConcurrencySafe(){return!0},isReadOnly(){return!0},async validateInput(){return{result:!0}},async prompt(
+---
+(),Gr(_Wp)).ArtifactTool;mGp=(iz(),Gr(_oe)),_Gp=(SWp(),Gr(bWp)).ListAgentsTool,yGp=(vWp(),Gr(TWp)).ShareOnboardingGuideTool,zPr=(()=>((rGp(),Gr(tGp)).initBundledWorkflows(),(oga(),Gr(nga)).WorkflowTool))(),bGp=["default"];d4u(GG)});function jti(e){if(!/^[A-Za-z]:[\\/]/.test
+---
+----------------------------- | ---------------- | ---------------------------------------- |\n| `GET` | `/v1/agents` | ListAgents | List agents |\n| `POST` | `/v1/agents` | CreateAgent | Create a saved agent configuration |\n| `GET` | `/v1/agents/{agent_id}` | GetAgent | Get agent details |\n| `POST` | `/v1/agents/{agent_id}` |

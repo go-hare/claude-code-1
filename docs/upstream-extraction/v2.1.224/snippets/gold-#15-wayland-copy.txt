@@ -1,0 +1,42 @@
+# densable 2.1.224 #15 — Wayland copy-on-select dual selection write race
+
+## Changelog
+> Fixed copy-on-select on Wayland sometimes not reaching the clipboard; the two selection writes no longer race
+
+## densable SEA anchors
+- `setClipboard` + debug: `clipboard: setClipboard mux=` / `native=` / `predicted=` / `emit=`
+- Linux native chain tokens (in order in binary):
+  - `wl-copy` then `xclip` `-selection` `clipboard` / `primary` then `xsel` `--clipboard` / `--primary`
+  - second site: `wl-copy` `--primary` (explicit primary write)
+- Probe order still Wayland-first (`wl-copy` before xclip/xsel)
+- OSC 52 remains `]52;c;` (CLIPBOARD param `c`, not primary `p`)
+
+## densable intent (recoverable)
+Native path dual-writes **clipboard + primary** selection so Wayland middle-click / selection paste gets the text.
+224 fix: the two writes must be **sequential** (no fire-and-forget race that drops the first write).
+
+## Local (go-hare)
+- `packages/@ant/ink/src/core/termio/osc.ts` `setClipboard` + `copyNative`
+- Only single CLIPBOARD write: `wl-copy` / `xclip -selection clipboard` / `xsel --clipboard`
+- **No** `--primary` / `-selection primary` second write
+- Has earlier race fix vs tmux await (native fires first before `tmux load-buffer`) — different race (focus-switch paste), not #15 dual-selection race
+
+## Verdict
+**GAP** — missing densable dual sequential clipboard+primary native write.
+Recoverable 1:1 from SEA token order; do not invent alternate Wayland IPC.
+
+## Next
+Extract densable `copyNative` dual-write await order → land sequential clipboard then primary (or densable order) under linux only; gold test probe args.
+
+
+## Land status (2026-08-11)
+**HAVE** — product 1:1 densable landed; targeted unit tests pass. Uncommitted until bare 提交.
+
+### Residual closed from SEA `L3u` + `Ksn` + `Wt`
+- **windows write**: densable `powershell … O3u` Set-Clipboard — not `clip.exe`.
+- **WSL write**: densable `powershell.exe` + O3u.
+- **read `Ksn`**: `readNativeClipboard(selection?)` — SSH empty; macos pbpaste; windows/wsl Get-Clipboard -Raw; linux wl-paste→xclip→xsel (primary args for middle-click).
+- **mouse wire**: App right-click paste (win/wsl/linux, !isXtermJs) + linux middle primary — densable `sC` ≡ `isXtermJs`.
+- **Local Wt**: `getClipboardHostPlatform()` in osc = `platform.ts` getPlatform. Test: `__CLAUDE_INK_PLATFORM_TEST__`.
+- **getClipboardPath toast**: native when `!SSH && Wt∈{macos,windows,wsl,linux}` (not darwin-only); keeps L3u/setClipboard honesty for ScrollKeybindingHandler toast.
+- **OSC 52 toast copy (polish)**: densable `sent N char(s) via OSC 52 · if paste fails, hold ${Gsn()} while selecting for native copy` — local `getNativeSelectionHoldKey` ≡ Gsn (xB_/kB_/vPe sets).

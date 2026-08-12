@@ -1,0 +1,52 @@
+# needle: decode
+# hits: 25
+
+    return decodeURIComponent(href.substring(7));
+---
+  options = copyObject(getStreamOptions(options)), options.decodeStrings = !0;
+---
+  options = copyObject(getStreamOptions(options)), options.decodeStrings = !0;
+---
+      let auth = `${decodeURIComponent(username)}:${decodeURIComponent(password)}`;
+---
+function decodeIfValid(value) {
+---
+    return decodeURIComponent(value);
+---
+| options.hostname || url.hostname, port ||= options.port || url.port, username ||= options.user || options.username || decodeIfValid(url.username), password ||= options.pass || options.password || decodeIfValid(url.password), path ||= options.path || url.pathname;
+---
+      database ||= options.database || options.db || env.PG_DATABASE || env.PGDATABASE || decodeIfValid((url?.pathname ?? "").slice(1)) || username;
+---
+      database ||= options.database || options.db || env.MYSQL_DATABASE || env.MYSQLDATABASE || decodeIfValid((url?.pathname ?? "").slice(1)) || "mysql";
+---
+      database ||= options.database || options.db || env.MARIADB_DATABASE || env.MARIADBDATABASE || decodeIfValid((url?.pathname ?? "").slice(1)) || "mariadb";
+---
+  }).decode(data);
+---
+  }).decode(data);
+---
+    return Transform.@call(this, this._options), this._writableState.decodeStrings = !1, this[name];
+---
+    this.decoder = new StringDecoder(options.encoding), this.encoding = options.encoding;
+---
+  decoder: {
+---
+  let state = this._readableState, decoder = new StringDecoder(enc);
+---
+  state.decoder = decoder, state.encoding = state.decoder.encoding;
+---
+    content += decoder.write(data);
+---
+  let decoder = (state[kState] & kDecoder) !== 0 ? state[kDecoderValue] : null;
+---
+  if (decoder) {
+---
+    let chunk = decoder.end();
+---
+  decodeStrings: makeBitMapDescriptor(kDecodeStrings),
+---
+? getHighWaterMark(this, options, "writableHighWaterMark", isDuplex) : getDefaultHighWaterMark(!1), !options || options.decodeStrings !== !1)
+---
+    options.auth = `${decodeURIComponent(username)}:${decodeURIComponent(password ?? url.password)}`;
+---
+  let { highWaterMark, decodeStrings = !0, objectMode = !1, signal } = options;

@@ -1,0 +1,32 @@
+# densable 2.1.224 #21 — RC compact progress + compact_boundary + /clear
+# SEA: /tmp/official-224/plat/package/claude
+# Changelog: attached clients see compaction progress + post-compaction boundary;
+#            /clear resets propagate to attached clients
+
+## densable
+### compact progress
+- onCompactEvent({type:"sdk_status",status:"compacting"}) during compact
+- $Oi → WS({type:"system",subtype:"status",status, compact_result?, compact_error?})
+- fDl(status): status!=="requesting" && GB flag
+- finally: status null / compact_end
+
+### compact_boundary
+- toSDKMessages maps system/compact_boundary
+- writeMessages filter densable PSt includes:
+  user|assistant|system(local_command|compact_boundary)
+
+### /clear
+- regenerateSessionId then WS({type:"conversation_reset",new_conversation_id})
+- yBo includes conversation_reset for drain → writeSdkMessages
+- bridge:repl markTranscriptReset / repoint
+
+## Local land
+1. useReplBridge writeMessages filter: + compact_boundary
+2. sdkEventQueue: SdkStatusEvent + ConversationResetSdkEvent
+3. drainTaskEventsToBridge: forward subtype status + conversation_reset
+4. REPL setSDKStatus → enqueueSdkEvent system/status (BRIDGE_MODE)
+5. clear/conversation: conversation_reset after regenerateSessionId
+   (was type:'status' conversation_cleared)
+
+## Gold
+src/hooks/__tests__/replBridgeCompactClear.224.test.ts

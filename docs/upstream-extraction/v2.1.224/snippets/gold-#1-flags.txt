@@ -1,0 +1,5 @@
+# SEA flags (string hits)
+--environment-secret-file <path>
+SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET
+--pool-secret-file (deprecated alias)
+--capacity (SEA hit family with environment-secret-file contexts)

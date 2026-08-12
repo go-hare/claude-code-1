@@ -1,0 +1,39 @@
+# densable 2.1.224 #22 — RC connection failures: persistent indicator + reconnect
+# SEA: /tmp/official-224/plat/package/claude
+# Changelog: "persistent failure indicator with details and a reconnect shortcut,
+#            instead of only an 8-second toast"
+
+## densable
+AppState:
+  replBridgeError
+  replBridgeErrorKind   // default "terminal" on fail
+
+surface helpers (minified names):
+  rt(detail, wasConnected)  // notification: "Remote Control failed|disconnected · detail"
+  qe(detail)                // system warning:
+                            //   `Remote Control disconnected${detail?} — run /remote-control to reconnect`
+                            //   (omit reconnect clause if detail already has /login|/remote-control|restart|policy|update)
+  nt(detail, kind="terminal") // rt + qe + set error/kind + nr()
+  nr()                      // GKT=1e4 setTimeout → replBridgeEnabled:!1, KEEP error
+                            // (does NOT clear replBridgeError)
+
+case "failed":
+  rt(at, handle!==null); set error+kind; qe(at); nr()
+
+fuse (C.current>=KKT=3):
+  error=PCt ("disabled after repeated failures · restart to retry")
+  kind="terminal", enabled:!1  // immediate, no timer clear of error
+
+footer fail copy: exa="Run /remote-control to retry"
+
+## Local land
+src/hooks/useReplBridge.tsx
+  BRIDGE_FAILURE_DISMISS_MS = 10_000 (= densable GKT)
+  BRIDGE_FUSE_HINT
+  notifyBridgeFailed / appendBridgeDisconnectMessage / scheduleBridgeAutoDisable / surfaceBridgeFailure
+  scheduleBridgeAutoDisable: enable false ONLY — keep replBridgeError + ErrorKind
+  AppState.replBridgeErrorKind
+  bridgeStatusUtil.FAILED_FOOTER_TEXT = "Run /remote-control to retry"
+
+## Gold
+src/hooks/__tests__/replBridgePersistentFail.224.test.ts

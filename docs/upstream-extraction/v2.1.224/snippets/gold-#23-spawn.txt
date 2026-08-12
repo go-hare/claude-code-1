@@ -1,0 +1,4 @@
+SEA: CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION still present (env override)
+SEA: "Subagent spawn limit" string HIT count = 0 (removed hard-cap message)
+SEA: "agents spawned" HIT count = 0
+changelog: Removed the 200-subagent-per-session spawn cap

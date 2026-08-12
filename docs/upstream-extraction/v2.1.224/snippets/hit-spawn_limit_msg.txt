@@ -1,0 +1,4 @@
+# needle: Subagent spawn limit reached
+# hits: 0
+
+

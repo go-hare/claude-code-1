@@ -1,0 +1,40 @@
+# densable 2.1.224 #25 — feedback survey share includes last request model settings (with consent)
+
+## Changelog
+> Changed the feedback-survey transcript share: with your consent it now also uploads the last request's model settings — the system prompt (which includes your CLAUDE.md instructions), tool definitions, and model parameters. Secrets are redacted as before, and these fields are dropped first if the share is too large
+
+## densable SEA anchors
+- Endpoint: `/api/claude_code_shared_session_transcripts`
+- Survey: `onShareConsent` (consent step beyond yes/no share)
+- Payload taxonomy near share: `payload_too_large_precheck` · `payload_stripped` · `http_413` · `payload_range_error`
+- Existing share fields still present: `rawTranscriptJsonl`, `appearance_id`, `transcript_id`
+- Related symbols elsewhere (not proven in payload object yet): `toolDefinitions`, `system_prompt*` family
+- Redaction still via existing redact path (local: `redactSensitiveInfo`)
+
+## densable intent
+After user consents to share:
+1. Attach **last API request** model settings: system prompt (+ CLAUDE.md), tool definitions, model parameters.
+2. Secrets redacted as before.
+3. If oversize: **drop these model-settings fields first** (`payload_stripped` / precheck), keep core transcript if possible.
+
+## Local (go-hare)
+`submitTranscriptShare.ts` payload only:
+```
+{ trigger, version, platform, transcript, subagentTranscripts?, rawTranscriptJsonl? }
+```
+- No system prompt / tool definitions / model parameters.
+- No "drop model settings first" size ladder.
+- No `onShareConsent` surface in survey state machine (only yes/no/dont_ask_again).
+
+## Verdict
+**GAP** — missing last-request model settings attachment + strip-first size policy.
+Do not invent field names/shapes; extract densable payload schema from SEA next.
+
+## Next
+1. SEA extract exact JSON keys for model settings bundle.
+2. Wire last-request capture site (API layer already has systemPrompt/tools context) → share payload under consent.
+3. Size ladder: strip model settings before transcript when too large.
+
+
+## Land status (2026-08-11)
+**HAVE** — product 1:1 densable landed; targeted unit tests pass. Uncommitted until bare 提交.

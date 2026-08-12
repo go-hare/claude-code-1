@@ -1,0 +1,46 @@
+# needle: maskClaims
+# hits: 22
+
+maskClaims
+---
+maskClaims
+---
+maskClaims
+---
+maskClaims
+---
+maskClaims
+---
+" that matched no verified JWT with maskable claims (maskClaims: 
+---
+: verified JWT candidate has none of maskClaims 
+---
+: maskClaims 
+---
+" has maskClaims 
+---
+": maskClaims 
+---
+s yW extends Error{}});function jbc(e,t,r){if(e.length===0||e.some((n)=>n.length===0))r.addIssue({code:cX.custom,path:["maskClaims"],message:"maskClaims must name at least one non-empty claim \u2014 omit maskClaims for whole-token masking."});if(t===void 0
+---
+)r.addIssue({code:cX.custom,path:["maskClaims"],message:"maskClaims requires decode \u2014 without a decode format there is no token to read claims from. Set decode, or omit maskClaims."})}function zbc(e,t){let r;try{r=new RegExp(e)}catch(o){t.a
+---
+!=="deny"&&r.onExtractNoMatch!=="error")delete r.onExtractNoMatch;if("decode"in r&&r.decode!=="jwt")delete r.decode;if("maskClaims"in r&&!(Array.isArray(r.maskClaims)&&r.maskClaims.every((n)=>typeof n==="string")))delete r.maskClaims;if("maskDuplicates"in r&&typeof r.maskDuplicates!=="boolean")delete r.maskDuplicates;if("injectH
+---
+."),maskClaims:dt(N()).optional().describe("Names of top-level payload claims to mask inside each decoded value, instead of replacing the whole token. Each named claim present with a string value gets its own senti
+---
+e(s), or use "deny" for the directory.'});if(e.mode==="mask"&&e.extract!==void 0)zbc(e.extract,t);if(e.mode==="mask"&&e.maskClaims!==void 0)jbc(e.maskClaims,e.decode,t)}))),Wno=ve(()=>ST(Wbc,Te({name:sar().describe("Environment variable name."),mode:xr(["deny","mask"]).describe("Access mode for 
+---
+pen). Cannot be combined with `extract` \u2014 the decode "+"path never consults it. Accepted but ignored for `deny`."),maskClaims:dt(N()).optional().describe("Names of top-level payload claims to mask inside the decoded value, instead of replacing the whole token. Each named claim present with a string value gets 
+---
+ask"&&e.maskClaims!==void 0)jbc(e.maskClaims,e.decode,t);if(e.mode==="mask"&&e.decode!==void 0&&e.extract!==void 0)t.addIssue({code:cX.custom,path:["extract"],message:"extract cannot be combined with decode on an env e
+---
+t f=s.extract??zHu,m=0,h=yvo(l,f,(g,_)=>{if(s.decode==="jwt"&&!bvo(g))return g;let b=`${u}#${_}`;if(s.decode==="jwt"&&s.maskClaims?.length){let S=Tvo(g,s.maskClaims,(w,C)=>r.register(`${u}#jwt${_}.${w}`,C,c));if(S===null)return fo(`[credential-mask] ${s.path}: verified JWT candidate has none of maskClaims ${JSON.stringify(s.mask
+---
+} as `+"string claims \u2014 left unmasked."),g;let T=s.maskClaims.filter((w)=>!S.claimSentinels.has(w));if(T.length>0)fo(`[credential-mask] ${s.path}: maskClaims ${JSON.stringify(T)} absent or non-string in a `+"verified JWT \u2014 skipped.");return m++,r.registerW
+---
+kDuplicates:s.maskDuplicates??!1});if(h===null||m===0){let g=s.decode==="jwt"?s.maskClaims?.length?`decode "jwt" with pattern "${f}" that matched no verified JWT with maskable claims (maskClaims: ${JSON.stringify(s.maskClaims)})`:`decode "jwt" with pattern "${f}" that matched no verified J
+---
+ or remove the entry.`;console.warn(u),fo(u,{level:"warn"});continue}if(s.maskClaims?.length){let u=Tvo(a,s.maskClaims,(p,f)=>r.register(`${vvo}${s.name}#${p}`,f,l));if(u===null){let p=`[sandbox-runtime] WARNING: credentials.envVars entry "${s.name}" has maskClaims ${JSON.stringify(s
+---
+e as-is inside the sandbox). Fix the config or remove the entry.`;console.warn(p),fo(p,{level:"warn"});continue}let d=s.maskClaims.filter((p)=>!u.claimSentinels.has(p));if(d.length>0)fo(`[credential-mask] env var "${s.name}": maskClaims ${JSON.stringify(d)} absent or non-string in the `+"JWT \u2014 skipped.");o[s.name]=r.registe

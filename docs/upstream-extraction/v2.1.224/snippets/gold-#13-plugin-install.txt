@@ -1,0 +1,29 @@
+# densable 2.1.224 #13 — multi-project plugin install records
+# SEA: Gry migrateFromEnabledPlugins + jHs addInstallation
+# Bug: overwriting installations[0].projectPath when same plugin is enabled
+# in another project corrupts peer records in shared installed_plugins.json
+
+## jHs addInstallation (already local HAVE)
+findIndex scope===r && projectPath===n
+if found: replace that slot; else push
+preserves other project entries
+
+## Gry existing-entry branch (was local GAP)
+if installations.length>0:
+  if scope===managed:
+    force [0] managed, delete projectPath
+    collapse length>1 → slice(0,1)
+  else:
+    match = find(scope+projectPath)
+    if !match: PUSH clone installPath from donor
+      donor = same projectPath || user || newest by lastUpdated
+    then filter: drop managed; dedupe `${scope}|${projectPath??""}`
+
+## Gry skip gate
+managed: length===1 && [0].scope==managed
+else: some(scope+projectPath)  — NOT merely length>0
+
+## Local land
+- src/utils/plugins/syncPluginInstallations.ts — pure Gry helpers
+- installedPluginsManager.migrateFromEnabledPlugins — use helpers
+- gold: syncPluginInstallations.224.test.ts

@@ -1,0 +1,1 @@
+function Upt(e){let t=e??"";if(t.startsWith("us-gov-"))return"us-gov";if(t.startsWith("us-"))return"us";if(t.startsWith("eu-"))return"eu";if(t.startsWith("ap-"))return"apac";return"global"}function Qcr(e){if(e?.startsWith("us-gov-"))return"us-gov";return ee.ANTHROPIC_BEDROCK_REGION_PREFIX??Upt(e)}async function V7c(){let e=await Pro

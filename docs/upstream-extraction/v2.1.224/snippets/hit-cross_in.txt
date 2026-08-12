@@ -1,0 +1,34 @@
+# needle: crossSessionInbound
+# hits: 16
+
+crossSessionInbound
+---
+crossSessionInbound=refuse: 
+---
+Your "crossSessionInbound" setting is "hold".
+---
+crossSessionInbound now accepts
+---
+Your "crossSessionInbound" setting is "hold"; set it to "accept" to deliver held messages.
+---
+The sending session's permission mode class doesn't match this session's. Review it below, or set "crossSessionInbound" to "accept".
+---
+The sender did not attest its permission mode and this session bypasses prompts. Review it below, or set "crossSessionInbound" to "accept".
+---
+background service is running: 'transient' spawns one for this login session; 'ask' offers to install it persistently"),crossSessionInbound:xr(["accept","hold","refuse"]).optional().describe("Inbound cross-session peer messages (SendMessage from your other sessions): 'accept'
+---
+(!ag(t))continue;let r=Vr(t)?.crossSessionInbound;if(r!==void 0){e=r;break}}for(let t of["localSettings","projectSettings"]){if(!ag(t))continue;let r=Vr(t)?.crossSessionInbound;if(r!==void 0&&$qp[r]>$qp[e??"accept"])e=r}return e}function Vei(){retur
+---
+Cause:r}){switch(t){case"accept":return zqp("policy-accepts"),Se("peer_inbound_gate"),"accept";case"refuse":return nwt(`crossSessionInbound=refuse: ${nya(e)}`),"refused";case"hold":if(q0e.length>=hqb){let n=q0e.shift();if(n)E(`[cross-session-inbound] hold buffer full \u2014 evicted oldest as expired: ${nya(n)}`),rwt?.(n,"expired
+---
+ did not attest its permission mode, and this session bypasses permission prompts.";case"explicit-setting":return'Your "crossSessionInbound" setting is "hold".';case"bypass-default":return"This session is not prompting for permissions.";case"mode-unknown":return"This session's permission mode could not be determined."}}function aUl(POO){
+---
+({mode:i.current,isBypassPermissionsModeAvailable:s.current})),()=>{xRn(null),sya(null),IRn(null)}),[r,n,o]);let a=Ng().crossSessionInbound;trr.useEffect(()=>{vPr("policy-accepts")},[a]),trr.useEffect(()=>{vPr("mode-changed")},[e,t])}function T5l(e){return F5s(xi(e)).replace(/[\p{Ps}\
+---
+:p||g}}function lxv(e){switch(e){case"mode-changed":return"permissions are prompting again";case"policy-accepts":return"crossSessionInbound now accepts";case"approved":return"you approved it"}}function cxv(e){switch(e){ca
+---
+se"bypass-default":return"It is being reviewed before delivery.";case"explicit-setting":return'Your "crossSessionInbound" setting is "hold"; set it to "accept" to deliver held messages.';case"mode-unknown":return"It will be delivered once the session finishes starting up.";case"mode-mismatch":return`The sending session
+---
+crossSessionInbound" to "accept".`;case"no-mode-asserted":return'The sender did not attest its permission mode and this session bypasses prompts. Review it below, or set "crossSessionInbound" to "accept".'}}var trr;var 
+---
+shable so the receive-side crossSessionInbound setting can apply to it). The harness frames a scheduled-trigger delivery as the session's assigned task instead of the generic background-notification frame. Absent on webhook, PR-steward, plugin, a

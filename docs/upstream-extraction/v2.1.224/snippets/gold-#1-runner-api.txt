@@ -1,0 +1,28 @@
+# densable 2.1.224 #1 — LUi runner API client
+
+## densable
+- LUi(e) factory: baseUrl, poolSecret, onDebug
+- aHt = VERSION strip v/prerelease
+- Z6v = /^[a-zA-Z0-9_-]+$/
+- OJl/dGr = Bearer + content-type + anthropic-version + x-self-hosted-runner-version
+- pGr = same without runner version header
+- Oae status mapper (401/403/404/409 epoch|session_not_active/429)
+- G3 error detail from message | error.message
+- Methods: registerRunner, pollSpawnHints, nackSpawnHint, pollWork, issueSessionToken,
+  reportSessionFailure, releaseSession, deregisterRunner, refreshToken,
+  getSessionRemoteConfig, registerWorker, postWorkerEvents, updateSessionWorkerState,
+  heartbeat, forwardDiagnostics
+
+## Paths
+- POST /v1/code/runners/self-hosted/runners/register
+- POST /v1/code/runners/self-hosted/spawn-hints/poll|nack
+- POST /v1/code/runners/self-hosted/runners/{id}/poll
+- POST /v1/code/runners/self-hosted/sessions/{id}/token|release|report-failure
+- POST /v1/code/runners/self-hosted/deregister
+- POST /v1/code/auth/refresh
+- GET  /v1/code/sessions/{id}/remote
+- worker/* under /v1/code/sessions/{id}/worker/...
+
+## go-hare
+- src/self-hosted-runner/runnerApi.ts
+- gold: runnerApi.224.test.ts

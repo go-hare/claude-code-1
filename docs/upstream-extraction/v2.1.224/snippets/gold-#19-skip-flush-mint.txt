@@ -1,0 +1,41 @@
+# densable 2.1.224 #19 — do not upload prior local history into minted session
+# SEA: /tmp/official-224/plat/package/claude
+# Bug: RC session recreated after server session expired uploaded prior local
+#      conversation history into the new session.
+
+## densable (remote-bridge mint path)
+on unarchive outcome==="gone":
+  Ge=!0                          // skip-history flag
+  mint fresh session via Ue()
+  isReattaching le=!1
+  sessionId = new id
+
+on transport connect:
+  if (!ur && f && f.length>0 && !Ge) {  // densable gate
+    ur=!0
+    Oa(f) // flushHistory(initialMessages)
+    ...
+  } else if (...) connected
+
+## Local land
+src/bridge/remoteBridgeCore.ts
+  let skipInitialHistoryFlush = false  // densable Ge
+  unarchive gone → skipInitialHistoryFlush = true (before mint)
+  connect: flushHistory only when !skipInitialHistoryFlush
+  flushGate.start() only when !skipInitialHistoryFlush
+
+## densable defense-in-depth (workflow dig; residual, not HAVE blockers)
+- `noHistoryBackfill: o||Ge` on handle return
+- hook `suppressHistoryBackfill` + `onHistoryBackfillSuppressed` →
+  `initialMessages: B ? void 0 : T` and "Persistence backfill suppressed"
+- `onReattachGoneBounce` called with Ge=!0 on mint-from-gone
+Local HAVE is the connect flush gate (the upload bug). Hook-level omit of
+initialMessages + session-persistence backfill suppress are residual if we
+ever land densable persistence writer.
+
+## Related #28 (archive stale when mint after compact/resume)
+densable ULp({skipSessionId, archive}) sweeps replBridgePlaceholders —
+not the same as #19 flush gate; track separately.
+
+## Gold
+src/bridge/__tests__/flushHistorySkipAfterMint.224.test.ts

@@ -1,0 +1,52 @@
+# needle: archive
+# hits: 25
+
+[0mlibarchive errorunresolved indexUNSIGNED-PAYLOADcontent-encodingdev_dependenciesInvalidCharacterctx tag mismatchJSX element nameInvalid encodingwww-authenticateGOAWAY too short{"Ampersand":{}}{"Semicolon":{}}{"
+---
+soptionsworkingversionmillionchannelwindow.addressvisitedweathercorrectproductedirectforwardyou canremovedsubjectcontrolarchivec
+---
+electricscotlandcreationquantity. ISBN 0did not instance-search-" lang="speakersComputercontainsarchivesministerreactiondiscountItalianocriteriastrongly: 'http:'script'coveringofferingappearedBritish identifyFacebooknumerousvehiclesconcernsAmericanhandlingdiv id="William provider_contentaccuracysection
+---
+Fatal Internal Error in libarchive: 
+---
+package.json: {}bundledDependenciesbundleDependenciesfilesexpected `files` to be an array of string valuesfailed to set archive format: {}failed to set archive compression to gzip: {}9compression level must be between 0 and 9, received {}failed to set os to `Unknown`: {}failed to unset gzip timestamp option: {}f
+---
+ailed to open tarball file destination: "{}"failed to open file: "{}"failed to close archive: {}failed to free archive: {}failed to read tarball: "{}"failed to open tarball at: "{}"OOMfailed to open root directory: {}
+---
+    </array>archive_write_new returned nullarchive_entry_new returned nullFailed to create tarball: ArchiveFinishEntryErrorFailed to create tarball: ArchiveWriteErrorFailed to create tarball: ArchiveHeaderErrorFailed to
+---
+failed to write tarball header: {}failed to read file: "{}"archive destination name too long: "{}/{}"archive filename too long: "{}"cannot use both filename and destination at the same time with tarball: filename "{}" and destination "{}"failed to open "node_modules
+---
+st-modified/archive.tar.gz\ UnsupportedTarget
+---
+ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/..archive_read_new returned NULL (OOM)failed to enable tar format support
+---
+led to enable gnutar format supportfailed to enable support for gzip compressionfailed to set option `read_concatenated_archives`failed to read tarballopaque_deref: null FFI handlefailed to read archive headerfailed to close archive readfailed to free archive readfailed to read archive datainvalid archive entry sizeTryFromInt
+---
+xapplication/ippapplication/its+xmlapplication/java-archiveapplication/java-serialized-objectapplication/java-vmapplication/javascript; charset=utf8application/javascript;charset=utf-8application/javascript;charset=utf8application/jf2feed+jsonapplication/jose
+---
+accapplication/vnd.amiga.amiapplication/vnd.amundsen.maze+xmlapplication/vnd.android.otaapplication/vnd.android.package-archiveapplication/vnd.ankiapplication/vnd.anser-web-certificate-issue-initiationapplication/vnd.anser-web-funds-transfer-initiationapplication/vnd.antix.game-componentapplication/vnd
+---
+ion/vnd.japannet-verification-wakeupapplication/vnd.jcp.javame.midlet-rmsapplication/vnd.jispapplication/vnd.joost.joda-archiveapplication/vnd.jsk.isdn-ngnapplication/vnd.kahootzapplication/vnd.kde.karbonapplication/vnd.kde.kchartapplication/vnd.kde.kformulaapplication/vnd.kde.kivi
+---
+xmlapplication/vnd.marlin.drm.license+xmlapplication/vnd.marlin.drm.mdcfapplication/vnd.mason+jsonapplication/vnd.maxar.archive.3tz+zipapplication/vnd.maxmind.maxmind-dbapplication/vnd.mcdapplication/vnd.medcalcdataapplication/vnd.mediastation.cdkeyapplication/vnd.meridian-slingshotapplication/
+---
+yncml.dmtnds+xmlapplication/vnd.syncml.ds.notificationapplication/vnd.tableschema+jsonapplication/vnd.tao.intent-module-archiveapplication
+---
+ion/x-java-archive-diffapplication/x-java-jnlp-fileapplication/x-javascriptapplication/x-keepass2application/x-latexapplication/x-lua-bytecodeapplication/x-lzh-compressedapplication/x-makeselfapplication/x-mieapplicati
+---
+Note that this flag does not make ripgrep search archive formats as directory
+---
+*.vcxproj*.proj*.props*.targets*.slnnim*.nim*.nimf*.nimble*.nimsnix*.nixobjcobjcpp*.mmocaml*.mli*.mll*.mlyorg*.org*.org_archivepantspascal*.pas*.dpr*.lpr*.pppdf*.pdfperl*.perl*.pl*.PL*.plh*.plx*.pm*.tphp*.php*.php3*.php4*.php5*.php7*.php8*.pht*.phtmlpo*.p
+---
+reentrant initInvalid archive member sizeInvalid archive extended name offsetInvalid archive extended name lengthInvalid archive terminatorInvalid archive member headerassertion failed: match track_edge_idx {
+---
+            non-matching files, archives and compressed files.  Significant
+---
+            Search compressed files and archives.  Archives (.cpio, .pax, .tar)
+---
+            and compressed archives (e.g. .zip, .7z, .taz, .tgz, .tpz, .tbz,
+---
+            pathnames of files in archives are output in braces.  When used
+---
+            and archives stored within archives up to NUM levels.  When -g, -O,

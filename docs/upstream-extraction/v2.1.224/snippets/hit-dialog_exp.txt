@@ -1,0 +1,8 @@
+# needle: dialogExpiry
+# hits: 3
+
+dialogExpiry
+---
+dialogExpiry
+---
+ettings")?.useAutoModeDuringPlan!==!1}function YPe(){return H7e("askUserQuestionTimeout")[0]}function IZi(){return H7e("dialogExpiry")[0]}function JPe(){let e=S1t();if(!iAc)for(let s of["projectSettings","localSettings"]){if(s==="projectSettings"&&Idt())continue;let a=Vr(s)?.autoMode;if(a&&e.safeParse(a).success)iAc=!0,E(`settings

@@ -1,0 +1,30 @@
+# densable 2.1.224 #30 — resume must not silently reconnect RC after user off
+# SEA: /tmp/official-224/plat/package/claude
+# Changelog: resume after user turned Remote Control off does not force-on
+
+## densable
+### gate (aln / resume initialState)
+- !t.forkSession && e.bridgeSessionId && !(_.replBridgeEnabled && !_.replBridgeOutboundOnly)
+  → {replBridgeEnabled:!0, replBridgeOutboundOnly:!1}
+- No force-on when bridgeSessionId falsy (never connected OR tombstone)
+
+### transcript pointer
+- Bkn saveBridgeSession: append {type:"bridge-session", bridgeSessionId, lastSequenceNum, ...}
+- EGt clearBridgeSession: append {bridgeSessionId:"", lastSequenceNum:0} tombstone + clear cache
+- load: if(e.bridgeSessionId) hydrate; empty string → delete map → no force-on
+- zri clearBridgeSessionCache: process-local only, no tombstone write
+
+### disconnect
+- BridgeDialog: WH("remoteControlAtStartup", false) when explicit+connected+no error
+- useReplBridge disable: kEo meta + EGt tombstone
+
+## Local land
+1. types/logs: BridgeSessionEntry + LogOption.bridgeSessionId*
+2. sessionStorage: Project cache, reAppend, Bkn/EGt/zri, load maps + applyBridgeSessionEntry
+3. hydrate LogOption at loadTranscriptFromFile / loadFullLog / getLastSessionLog / loadAllLogsFromSessionFile
+4. conversationRecovery + sessionRestore force-on
+5. ResumeConversation + REPL mid-session force-on
+6. useReplBridge: saveBridgeSession on connect/host_exit; clearBridgeSession on disable
+
+## Gold
+src/hooks/__tests__/replBridgeResumeOff.224.test.ts

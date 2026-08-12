@@ -1,0 +1,10 @@
+# needle: ListPeers
+# hits: 4
+
+ListPeers
+---
+ListPeers
+---
+sh:"TaskStop",AgentOutputTool:"TaskOutput",BashOutputTool:"TaskOutput",AgentOutput:"TaskOutput",BashOutput:"TaskOutput",ListPeers:"ListAgents",Brief:"SendUserMessage",ListMcpResources:"ListMcpResourcesTool",ReadMcpResource:"ReadMcpResourceTool",ReadMcpResourceDir:"ReadMcpResourceDirTool"};ilr=`mcp__${zio}__bash`,uCc=`mcp__${zio
+---
+hSkills","ListPlugins","ListSkills"]});function V5_(){return""}function IRs(){return K5_+V5_()}var cy="ListAgents",qWu="ListPeers",_Bt="only in reply, after it messages you first",K5_;var N4e=v(()=>{k3();K5_=`Lists agents you can ${_f} to \u2014 in-process subagents you spawned, other local Claude sessions on this machine, your

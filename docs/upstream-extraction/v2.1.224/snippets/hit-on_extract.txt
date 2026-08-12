@@ -1,0 +1,52 @@
+# needle: onExtractNoMatch
+# hits: 25
+
+onExtractNoMatch
+---
+onExtractNoMatch
+---
+ (onExtractNoMatch: "error"). Fix the config, change to "warn"/"deny", or remove the entry.
+---
+ in the file. The file is left UNPROTECTED (readable as-is inside the sandbox). Fix the config, set onExtractNoMatch to "deny" or "error", or remove the entry.
+---
+" matched nothing (onExtractNoMatch: "error"). Fix the regex, change to "warn"/"deny", or remove the entry.
+---
+othing in the variable's value. The variable is left UNPROTECTED (visible as-is inside the sandbox). Fix the regex, set onExtractNoMatch to "deny" or "error", or remove the entry.
+---
+ne sentinel (whole-file masking, suited to single-secret files). If the regex matches nothing, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`.
+---
+e JWT so client-side token parsing inside the sandbox keeps working. If no candidate verifies, behavior is governed by `onExtractNoMatch` (default `warn`). Acce
+---
+en, behavior is governed by `onExtractNoMatch` (default `warn`). Only meaningful when mode is `mask`; accepted but ignored for `deny`.
+---
+ with one sentinel (whole-value masking, suited to bare tokens). If the regex matches nothing, behavior is governed by `onExtractNoMatch` (default `warn`). Cannot be combined with `decode` (the decode path never consults it).
+---
+onExtractNoMatch
+---
+onExtractNoMatch
+---
+n e;let t=e;if(t.mode!=="deny")return e;let r={...t};if("extract"in r&&typeof r.extract!=="string")delete r.extract;if("onExtractNoMatch"in r&&r.onExtractNoMa
+---
+tch!=="warn"&&r.onExtractNoMatch!=="deny"&&r.onExtractNoMatch!=="error")delete r.onExtractNoMatch;if("decode"in r&&r.decode!=="jwt")delete r.decode;if("maskClaims"in r&&!(Array.isArray(r.maskClaims)&&r.maskClaims.every((n)=>typeof n
+---
+ne sentinel (whole-file masking, suited to single-secret files). If the regex matches nothing, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `d
+---
+eny`."),onExtractNoMatch:xr(["warn","deny","error"]).optional().describe("What to do when `extract` matches nothing in the file \u2014 or, "+"with `decode`, when no candidate survives verification. `warn` (default) emits a s
+---
+e JWT so client-side token parsing inside the sandbox keeps working. If no candidate verifies, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`
+---
+f no named claim matches in any verified token, behavior is governed by `onExtractNoMatch` (default `warn`). Only meaningful when mode is `mask`; accepted but ignored for `deny`."),maskDuplicates:Lt().optional().describe("If true, verbatim occurrences of each captured credential value out
+---
+ with one sentinel (whole-value masking, suited to bare tokens). If the regex matches nothing, behavior is governed by `onExtractNoMatch` (
+---
+fault `warn`). Cannot be combined with `decode` (the decode path never consults it). Accepted but ignored for `deny`."),onExtractNoMatch:xr(["warn","deny","error"]).optional().describe("What to do when `extract` matches nothing in the value. `warn` (default) emits a stderr warning and lets the variable pass through unmasked (fail-open
+---
+e==="mask"&&e.decode!==void 0&&(e.onExtractNoMatch==="deny"||e.onExtractNoMatch==="error"))t.addIssue({code:cX.custom,path:["onExtractNoMatch"],message:"onExtractNoMatch cannot be honored on an env entry with decode \u2014 the runtime takes the decod
+---
+s)})`:`decode "jwt" with pattern "${f}" that matched no verified JWT`:`extract pattern "${f}" that matched nothing`,_=s.onExtractNoMatch??"warn";if(_==="error")throw Error(`cre
+---
+dentials.files entry "${s.path}": ${g} (onExtractNoMatch: "error"). Fix the config, change to "warn"/"deny", or remove the entry.`);if(_==="deny"){fo(`[credential-mask] ${s.path} has ${g} \u2014 degrading to `+'mode "deny".',{level:"warn"}),i.push(a);conti
+---
+ide the sandbox). Fix the config, set onExtractNoMatch to "deny" or "error", or remove the entry.`;console.warn(b),fo(b,{level:"warn"});continue}d=h.fakeContent}let p=n.write(u,d);o.push({realPath:a,fakePath:p})}return{binds:o,degradeToDenyPaths:i}}var G
+---
+register(s.name,a,l);continue}let c=yvo(a,s.extract,(u,d)=>r.register(`${vvo}${s.name}#${d}`,u,l));if(c===null){let u=s.onExtractNoMatch??"warn";if(u==="error")throw Error(`credentials.envVars entry "${s.name}": extract pattern "${s.extract}" matched nothing (onExtractNoMatch: "error"

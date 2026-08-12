@@ -1,0 +1,6 @@
+# needle: Command output is displayed to you
+# hits: 2
+
+- Command output is displayed to you, not reliably to the user.
+---
+ from what it prints."]:[],u=Xqd();return["Executes a bash command and returns its output.",...u?["",u]:[],"",a,...s,"- Command output is displayed to you, not reliably to the user.",...c,`- \`timeout\` is in milliseconds: default ${Kyn()}, max ${Ywr()}.`,...l,...n?[n]:[],...r?["",r]:[]
