@@ -218,13 +218,59 @@ function permissionRuleExtractPrefix(permissionRule: string): string | null {
  * @param pattern The path pattern from a permission rule
  * @param source The settings source this pattern came from (needed to resolve `/path` patterns)
  */
+/**
+ * densable `kA` — simple glob-char probe used by trailing-slash strip (Mmr).
+ * Glob paths keep their trailing slash (directory-glob semantics); non-glob
+ * deny/allow paths strip it so `~/.aws/` matches the directory itself.
+ */
+function pathHasGlobChars(path: string): boolean {
+  return (
+    path.includes('*') ||
+    path.includes('?') ||
+    path.includes('[') ||
+    path.includes(']')
+  )
+}
+
+/**
+ * densable `Mmr` (2.1.224 #10) — strip trailing `/` on non-Windows, non-glob
+ * paths so deny entries written as `~/.aws/` are not silently bypassable.
+ * Root `/` stays `/`. Windows keeps trailing separators (drive roots / UNC).
+ */
+export function stripTrailingSlashForSandbox(
+  path: string,
+  opts: { evenAfterGlob?: boolean } = {},
+): string {
+  if (getPlatform() === 'windows' || !path.endsWith('/')) return path
+  if (!opts.evenAfterGlob && pathHasGlobChars(path)) return path
+  return path.replace(/\/+$/, '') || '/'
+}
+
+/**
+ * Resolve Claude Code-specific path patterns for sandbox-runtime.
+ *
+ * Claude Code uses special path prefixes in permission rules:
+ * - `//path` → absolute from filesystem root (becomes `/path`)
+ * - `/path` → relative to settings file directory (becomes `$SETTINGS_DIR/path`)
+ * - `~/path` → passed through (sandbox-runtime handles this)
+ * - `./path` or `path` → passed through (sandbox-runtime handles this)
+ *
+ * This function only handles CC-specific conventions (`//` and `/`).
+ * Standard path patterns like `~/` and relative paths are passed through
+ * for sandbox-runtime's normalizePathForSandbox to handle.
+ *
+ * densable `swo`/`ZEo`: after resolve, apply Mmr trailing-slash strip.
+ *
+ * @param pattern The path pattern from a permission rule
+ * @param source The settings source this pattern came from (needed to resolve `/path` patterns)
+ */
 export function resolvePathPatternForSandbox(
   pattern: string,
   source: SettingSource,
 ): string {
   // Handle // prefix - absolute from root (CC-specific convention)
   if (pattern.startsWith('//')) {
-    return pattern.slice(1) // "//.aws/**" → "/.aws/**"
+    return stripTrailingSlashForSandbox(pattern.slice(1)) // "//.aws/**" → "/.aws/**"
   }
 
   // Handle / prefix - relative to settings file directory (CC-specific convention)
@@ -232,12 +278,12 @@ export function resolvePathPatternForSandbox(
   if (pattern.startsWith('/') && !pattern.startsWith('//')) {
     const root = getSettingsRootPathForSource(source)
     // Pattern like "/foo/**" becomes "${root}/foo/**"
-    return resolve(root, pattern.slice(1))
+    return stripTrailingSlashForSandbox(resolve(root, pattern.slice(1)))
   }
 
   // Other patterns (~/path, ./path, path) pass through as-is
   // sandbox-runtime's normalizePathForSandbox will handle them
-  return pattern
+  return stripTrailingSlashForSandbox(pattern)
 }
 
 /**
@@ -256,6 +302,9 @@ export function resolvePathPatternForSandbox(
  * Also expands `~` here rather than relying on sandbox-runtime, because
  * sandbox-runtime's getFsWriteConfig() does not call normalizePathForSandbox
  * on allowWrite paths (it only strips trailing glob suffixes).
+ *
+ * densable `awo`/`c2t` (2.1.224 #10): expand then Mmr strip trailing slash so
+ * `denyRead: "~/.aws/"` is not silently bypassable on Linux/macOS.
  */
 export function resolveSandboxFilesystemPath(
   pattern: string,
@@ -263,8 +312,12 @@ export function resolveSandboxFilesystemPath(
 ): string {
   // Legacy permission-rule escape: //path → /path. Kept for compat with
   // users who worked around #30067 by writing //Users/foo/.cargo in config.
-  if (pattern.startsWith('//')) return pattern.slice(1)
-  return expandPath(pattern, getSettingsRootPathForSource(source))
+  if (pattern.startsWith('//')) {
+    return stripTrailingSlashForSandbox(pattern.slice(1))
+  }
+  return stripTrailingSlashForSandbox(
+    expandPath(pattern, getSettingsRootPathForSource(source)),
+  )
 }
 
 /**
@@ -406,8 +459,10 @@ export function mergeSandboxCredentialsForRuntime():
   type Cred = NonNullable<SandboxRuntimeConfig['credentials']>
   const files: NonNullable<Cred['files']> = []
   const envByName = new Map<string, NonNullable<Cred['envVars']>[number]>()
+  const awsPairs: NonNullable<Cred['awsPairs']> = []
   let seen = false
   let allowPlaintextInject: boolean | undefined
+  let sigv4: Cred['sigv4'] | undefined
 
   for (const source of SETTING_SOURCES) {
     const cred = getSettingsForSource(source)?.sandbox?.credentials
@@ -419,6 +474,7 @@ export function mergeSandboxCredentialsForRuntime():
       source === 'projectSettings' || source === 'localSettings'
     const isUntrustedUser =
       source === 'userSettings' && !isSettingSourceEnabled('userSettings')
+    const isTrustedSource = !isProjectLocal && !isUntrustedUser
 
     for (const entry of cred.files ?? []) {
       if (!entry?.path) {
@@ -438,6 +494,13 @@ export function mergeSandboxCredentialsForRuntime():
         }
         if (entry.onExtractNoMatch !== undefined) {
           resolved.onExtractNoMatch = entry.onExtractNoMatch
+        }
+        // densable 2.1.224 #6 — jwt decode + claim-level mask
+        if (entry.decode !== undefined) {
+          resolved.decode = entry.decode
+        }
+        if (entry.maskClaims !== undefined) {
+          resolved.maskClaims = [...entry.maskClaims]
         }
         if (entry.maskDuplicates !== undefined) {
           resolved.maskDuplicates = entry.maskDuplicates
@@ -461,21 +524,62 @@ export function mergeSandboxCredentialsForRuntime():
       if (envByName.get(entry.name)?.mode === 'deny') {
         continue
       }
-      envByName.set(entry.name, {
+      const envResolved: NonNullable<Cred['envVars']>[number] = {
         name: entry.name,
         mode: entry.mode,
-        ...(entry.injectHosts !== undefined
-          ? { injectHosts: [...entry.injectHosts] }
-          : {}),
-      })
+      }
+      if (entry.mode === 'mask') {
+        // densable 2.1.224 #6 — structured env masking (extract/decode/maskClaims)
+        if (entry.extract !== undefined) {
+          envResolved.extract = entry.extract
+        }
+        if (entry.onExtractNoMatch !== undefined) {
+          envResolved.onExtractNoMatch = entry.onExtractNoMatch
+        }
+        if (entry.decode !== undefined) {
+          envResolved.decode = entry.decode
+        }
+        if (entry.maskClaims !== undefined) {
+          envResolved.maskClaims = [...entry.maskClaims]
+        }
+        if (entry.injectHosts !== undefined) {
+          envResolved.injectHosts = [...entry.injectHosts]
+        }
+      }
+      envByName.set(entry.name, envResolved)
     }
 
-    if (
-      !isProjectLocal &&
-      !isUntrustedUser &&
-      cred.allowPlaintextInject !== undefined
-    ) {
+    if (isTrustedSource && cred.allowPlaintextInject !== undefined) {
       allowPlaintextInject = cred.allowPlaintextInject
+    }
+
+    // densable 2.1.224 #6 — awsPairs/sigv4: user/managed/CLI only
+    if (isTrustedSource) {
+      for (const pair of cred.awsPairs ?? []) {
+        if (!pair?.accessKeyIdVar || !pair?.secretAccessKeyVar) {
+          continue
+        }
+        awsPairs.push({
+          accessKeyIdVar: pair.accessKeyIdVar,
+          secretAccessKeyVar: pair.secretAccessKeyVar,
+          ...(pair.sessionTokenVar !== undefined
+            ? { sessionTokenVar: pair.sessionTokenVar }
+            : {}),
+        })
+      }
+      if (cred.sigv4 !== undefined) {
+        sigv4 = {
+          ...(cred.sigv4.streaming !== undefined
+            ? { streaming: cred.sigv4.streaming }
+            : {}),
+          ...(cred.sigv4.presigned !== undefined
+            ? { presigned: cred.sigv4.presigned }
+            : {}),
+          ...(cred.sigv4.sigv4a !== undefined
+            ? { sigv4a: cred.sigv4.sigv4a }
+            : {}),
+        }
+      }
     }
   }
 
@@ -486,6 +590,8 @@ export function mergeSandboxCredentialsForRuntime():
     files,
     envVars: [...envByName.values()],
     ...(allowPlaintextInject !== undefined ? { allowPlaintextInject } : {}),
+    ...(awsPairs.length > 0 ? { awsPairs } : {}),
+    ...(sigv4 !== undefined ? { sigv4 } : {}),
   }
 }
 

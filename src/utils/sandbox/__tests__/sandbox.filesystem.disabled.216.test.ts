@@ -297,12 +297,12 @@ describe('credentials.files via runtime credentials (densable WZn/Dou package-si
     })
     expect(cred?.files?.[0]?.mode).toBe('deny')
     expect(cred?.envVars?.[1]?.mode).toBe('mask')
-    // files mode must be literal deny — mask rejected at settings schema
-    expect(() =>
-      SandboxCredentialsConfigSchema().parse({
-        files: [{ path: '/x', mode: 'mask' }],
-      }),
-    ).toThrow()
+    // densable 2.1.224 #6 — files mode "mask" is settings-valid (jwt decode path)
+    const masked = SandboxCredentialsConfigSchema().parse({
+      files: [{ path: '/x', mode: 'mask', decode: 'jwt' }],
+    })
+    expect(masked?.files?.[0]?.mode).toBe('mask')
+    expect(masked?.files?.[0]?.decode).toBe('jwt')
     // settings root accepts credentials first-class
     const settings = SandboxSettingsSchema().parse({
       credentials: {

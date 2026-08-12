@@ -140,10 +140,11 @@ export const SandboxFilesystemConfigSchema = lazySchema(() =>
 )
 
 /**
- * densable 2.1.221 QTi — sandbox.credentials.files[] entry.
+ * densable 2.1.221 QTi + 2.1.224 #6 — sandbox.credentials.files[] entry.
  * `mode: "mask"` (Linux/WSL): sentinel copy inside sandbox; host proxy swaps
  * sentinel→real on egress. On macOS/Windows mask degrades to deny (package).
  * Optional `extract` regex masks only capture-group-1 spans.
+ * densable 2.1.224: `decode:"jwt"` + `maskClaims` for claim-level JWT masking.
  */
 export const SandboxCredentialFileSchema = lazySchema(() =>
   z
@@ -157,25 +158,39 @@ export const SandboxCredentialFileSchema = lazySchema(() =>
       mode: z
         .enum(['deny', 'mask'])
         .describe(
-          'Access mode for this path. `deny` blocks reads inside the sandbox; `mask` shows sandboxed commands a sentinel-substituted copy (whole-file, or only the spans captured by `extract`) and the host proxy swaps sentinel→real on egress to `injectHosts`. On macOS and Windows `mask` currently degrades to `deny`.',
+          'Access mode for this path. `deny` blocks reads inside the sandbox; `mask` shows sandboxed commands a sentinel-substituted copy (whole-file, or only the spans captured by `extract`/`decode`) and the host proxy swaps sentinel→real on egress to `injectHosts`. On macOS and Windows `mask` currently degrades to `deny`.',
         ),
       extract: z
         .string()
         .optional()
         .describe(
-          'Optional regex for structured masking when mode is `mask`. Applied globally to the file; capture group 1 of each match is a credential value, and only those captured spans are replaced with sentinels — the rest of the file is preserved so a tool that parses it (.netrc, JSON, YAML) still succeeds. Without `extract`, the entire file content is replaced with one sentinel (whole-file masking, suited to single-secret files). If the regex matches nothing, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`.',
+          'Optional regex for structured masking when mode is `mask`. Applied globally to the file; capture group 1 of each match is a credential value, and only those captured spans are replaced with sentinels — the rest of the file is preserved so a tool that parses it (.netrc, JSON, YAML) still succeeds. Without `extract`, the entire file content is replaced with one sentinel (whole-file masking, suited to single-secret files), unless `decode` supplies a default pattern. If the regex matches nothing, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`.',
         ),
       onExtractNoMatch: z
         .enum(['warn', 'deny', 'error'])
         .optional()
         .describe(
-          'What to do when `extract` matches nothing in the file. `warn` (default) emits a stderr warning and leaves the file readable as-is inside the sandbox (fail-open, for credentials that may be legitimately absent); `deny` degrades the entry to mode `deny` so the file is unreadable (fail-closed) — under `sandbox.filesystem.disabled` it is treated as `error`, since read-denies are dropped in that mode; `error` aborts at sandbox setup so nothing runs until the config is fixed. Only meaningful when mode is `mask` and `extract` is set; accepted but ignored otherwise.',
+          'What to do when `extract` matches nothing in the file — or, with `decode`, when no candidate verifies / no named claim matches. `warn` (default) emits a stderr warning and leaves the file readable as-is inside the sandbox (fail-open, for credentials that may be legitimately absent); `deny` degrades the entry to mode `deny` so the file is unreadable (fail-closed) — under `sandbox.filesystem.disabled` it is treated as `error`, since read-denies are dropped in that mode; `error` aborts at sandbox setup so nothing runs until the config is fixed. Only meaningful when mode is `mask` and `extract` or `decode` is set; accepted but ignored otherwise.',
+        ),
+      // densable 2.1.224 #6 — package CredentialFileConfigSchema.decode
+      decode: z
+        .enum(['jwt'])
+        .optional()
+        .describe(
+          'Optional encoded-credential format for `mask` mode. `jwt`: candidates are located with a built-in JWT regex (or the explicit `extract` pattern, if set), verified to actually be JWTs before masking, and replaced with a structurally valid fake JWT so client-side token parsing inside the sandbox keeps working. If no candidate verifies, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`.',
+        ),
+      // densable 2.1.224 #6 — claim-level masking inside decoded JWT payload
+      maskClaims: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          'Names of top-level payload claims to mask inside each decoded value, instead of replacing the whole token. Each named claim present with a string value gets its own sentinel and the token is rebuilt around the modified payload; all other claims are preserved so a tool that decodes the token and reads a non-secret claim keeps working. Requires `decode`. If no named claim matches in any verified token, behavior is governed by `onExtractNoMatch`. Accepted but ignored for `deny`.',
         ),
       maskDuplicates: z
         .boolean()
         .optional()
         .describe(
-          'If true, verbatim occurrences of each captured credential value outside the regex-matched spans are also replaced with the corresponding sentinel — for a secret repeated where the regex does not reach (e.g. pasted into a comment). Matches raw substrings, so short or common values may corrupt unrelated content; intended for long, high-entropy secrets. Defaults to false. Only meaningful when mode is `mask` and `extract` is set; accepted but ignored otherwise.',
+          'If true, verbatim occurrences of each captured credential value outside the regex-matched spans are also replaced with the corresponding sentinel — for a secret repeated where the regex does not reach (e.g. pasted into a comment). Matches raw substrings, so short or common values may corrupt unrelated content; intended for long, high-entropy secrets. Defaults to false. Only meaningful when mode is `mask` and `extract` or `decode` is set; accepted but ignored otherwise.',
         ),
       injectHosts: z
         .array(z.string())
@@ -194,40 +209,173 @@ export const SandboxCredentialFileSchema = lazySchema(() =>
             'sandbox.credentials.files mode "mask" requires a file path, not a directory (trailing "/")',
         })
       }
+      // densable / sandbox-runtime: maskClaims requires decode
+      if (entry.maskClaims !== undefined && entry.decode === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['maskClaims'],
+          message:
+            'maskClaims requires decode — it names claims inside the decoded payload. Set decode (e.g. "jwt"), or remove maskClaims to mask the extracted value whole.',
+        })
+      }
+      if (entry.maskClaims !== undefined && entry.maskClaims.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['maskClaims'],
+          message:
+            'maskClaims is explicitly empty — no claim would ever be masked. Omit maskClaims to mask the whole token, or list the claims to protect.',
+        })
+      }
     }),
 )
 
 /**
- * densable ZTi — sandbox.credentials.envVars[] entry.
+ * densable ZTi + 2.1.224 #6 — sandbox.credentials.envVars[] entry.
  * `mask` + injectHosts is settings-valid; package Anu builds setEnvVars and
  * the host proxy swaps sentinel→real on injectHosts (sandbox-runtime≥0.0.70).
  * Host adapter merges credentials via mergeSandboxCredentialsForRuntime.
+ * densable 2.1.224: extract/onExtractNoMatch/decode/maskClaims mirror files.
  */
 export const SandboxCredentialEnvVarSchema = lazySchema(() =>
-  z.object({
-    name: z
-      .string()
-      .regex(
-        /^[A-Za-z_][A-Za-z0-9_]*$/,
-        'Environment variable name must start with a letter or underscore and contain only letters, digits, and underscores',
-      )
-      .describe('Environment variable name.'),
-    mode: z
-      .enum(['deny', 'mask'])
-      .describe(
-        'Access mode for this environment variable. `deny` unsets the variable for sandboxed commands; `mask` shows sandboxed commands a sentinel value and the host proxy swaps sentinel→real on egress to `injectHosts`.',
-      ),
-    injectHosts: z
-      .array(z.string())
-      .optional()
-      .describe(
-        'Optional narrowing of where the proxy substitutes this credential. Only meaningful when mode is `mask`; accepted but ignored for `deny`. If unset, defaults to `network.allowedDomains` — the credential is injected at every reachable host. Each entry must be reachable via `network.allowedDomains` (sandbox-runtime validates this).',
-      ),
-  }),
+  z
+    .object({
+      name: z
+        .string()
+        .regex(
+          /^[A-Za-z_][A-Za-z0-9_]*$/,
+          'Environment variable name must start with a letter or underscore and contain only letters, digits, and underscores',
+        )
+        .describe('Environment variable name.'),
+      mode: z
+        .enum(['deny', 'mask'])
+        .describe(
+          'Access mode for this environment variable. `deny` unsets the variable for sandboxed commands; `mask` shows sandboxed commands a sentinel value and the host proxy swaps sentinel→real on egress to `injectHosts`.',
+        ),
+      extract: z
+        .string()
+        .optional()
+        .describe(
+          'Optional regex for structured masking when mode is `mask`. Applied globally; capture group 1 of each match is masked, the rest of the value is preserved. If the pattern matches nothing, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`.',
+        ),
+      onExtractNoMatch: z
+        .enum(['warn', 'deny', 'error'])
+        .optional()
+        .describe(
+          'What to do when `extract` matches nothing — or, with `decode`, when the value does not verify / no named claim matches. `warn` (default) emits a stderr warning and leaves the variable unmasked (fail-open); `deny` unsets the variable inside the sandbox (fail-closed); `error` aborts at wrap time. Only meaningful when mode is `mask` and `extract` or `decode` is set; accepted but ignored otherwise.',
+        ),
+      decode: z
+        .enum(['jwt'])
+        .optional()
+        .describe(
+          "Optional encoded-credential format for `mask` mode. `jwt`: the variable's whole value is verified to actually be a JWT and replaced with a structurally valid fake JWT so client-side token parsing keeps working; the proxy swaps the whole fake token on egress. With `maskClaims`, only named payload claims are masked and the token is rebuilt. If the value does not verify, behavior is governed by `onExtractNoMatch` (default `warn`). Accepted but ignored for `deny`.",
+        ),
+      maskClaims: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          'Names of top-level payload claims to mask inside the decoded value, instead of replacing the whole token. Each named claim present with a string value gets its own sentinel and the token is rebuilt around the modified payload; all other claims are preserved. Requires `decode`. If no named claim matches, behavior is governed by `onExtractNoMatch`. Accepted but ignored for `deny`.',
+        ),
+      injectHosts: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Optional narrowing of where the proxy substitutes this credential. Only meaningful when mode is `mask`; accepted but ignored for `deny`. If unset, defaults to `network.allowedDomains` — the credential is injected at every reachable host. Each entry must be reachable via `network.allowedDomains` (sandbox-runtime validates this).',
+        ),
+    })
+    .superRefine((entry, ctx) => {
+      if (entry.maskClaims !== undefined && entry.decode === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['maskClaims'],
+          message:
+            'maskClaims requires decode — it names claims inside the decoded payload. Set decode (e.g. "jwt"), or remove maskClaims to mask the whole value.',
+        })
+      }
+      if (entry.maskClaims !== undefined && entry.maskClaims.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['maskClaims'],
+          message:
+            'maskClaims is explicitly empty — no claim would ever be masked. Omit maskClaims to mask the whole token, or list the claims to protect.',
+        })
+      }
+    }),
 )
 
 /**
- * densable oeh — sandbox.credentials block.
+ * densable 2.1.224 #6 — credentials.awsPairs[] entry (sandbox-runtime AwsPairConfig).
+ * Groups masked env vars into AWS credential pairs for SigV4 re-signing when
+ * names are non-standard. Conventional AWS_ACCESS_KEY_ID / SECRET / SESSION
+ * trio is paired automatically when masked whole-value.
+ * User/managed/CLI only (project settings ignored at merge).
+ */
+export const SandboxCredentialAwsPairSchema = lazySchema(() =>
+  z
+    .object({
+      accessKeyIdVar: z
+        .string()
+        .regex(
+          /^[A-Za-z_][A-Za-z0-9_]*$/,
+          'Environment variable name must start with a letter or underscore and contain only letters, digits, and underscores',
+        )
+        .describe(
+          'Env var name holding the access key id (must be a mode:"mask" whole-value envVars entry).',
+        ),
+      secretAccessKeyVar: z
+        .string()
+        .regex(
+          /^[A-Za-z_][A-Za-z0-9_]*$/,
+          'Environment variable name must start with a letter or underscore and contain only letters, digits, and underscores',
+        )
+        .describe(
+          'Env var name holding the secret access key (must be a mode:"mask" whole-value envVars entry).',
+        ),
+      sessionTokenVar: z
+        .string()
+        .regex(
+          /^[A-Za-z_][A-Za-z0-9_]*$/,
+          'Environment variable name must start with a letter or underscore and contain only letters, digits, and underscores',
+        )
+        .optional()
+        .describe(
+          'Optional env var name holding the session token (must be a mode:"mask" whole-value envVars entry when set).',
+        ),
+    })
+    .strict(),
+)
+
+/**
+ * densable 2.1.224 #6 — credentials.sigv4 policies (sandbox-runtime Sigv4Config).
+ * Per-shape policy for SigV4 forms the proxy cannot re-sign.
+ * User/managed/CLI only (project settings ignored at merge).
+ */
+export const SandboxSigv4ConfigSchema = lazySchema(() =>
+  z
+    .object({
+      streaming: z
+        .enum(['deny', 'passthrough'])
+        .optional()
+        .describe(
+          'Policy for aws-chunked streaming uploads (x-amz-content-sha256: STREAMING-*). Default "deny".',
+        ),
+      presigned: z
+        .enum(['deny', 'passthrough'])
+        .optional()
+        .describe(
+          'Policy for presigned URLs (X-Amz-Algorithm/X-Amz-Signature in the query). Default "deny".',
+        ),
+      sigv4a: z
+        .enum(['deny', 'passthrough'])
+        .optional()
+        .describe(
+          'Policy for SigV4A (AWS4-ECDSA-P256-SHA256) asymmetric signatures. Default "deny".',
+        ),
+    })
+    .strict(),
+)
+
+/**
+ * densable oeh + 2.1.224 #6 — sandbox.credentials block.
  */
 export const SandboxCredentialsConfigSchema = lazySchema(() =>
   z
@@ -236,13 +384,13 @@ export const SandboxCredentialsConfigSchema = lazySchema(() =>
         .array(SandboxCredentialFileSchema())
         .optional()
         .describe(
-          'Credential files or directories to protect. `deny` blocks reads inside the sandbox; `mask` substitutes a sentinel inside the sandbox (whole-file, or per-`extract` capture) and injects the real value at the proxy. On macOS and Windows `mask` degrades to `deny`.',
+          'Credential files or directories to protect. `deny` blocks reads inside the sandbox; `mask` substitutes a sentinel inside the sandbox (whole-file, or per-`extract`/`decode` capture) and injects the real value at the proxy. On macOS and Windows `mask` degrades to `deny`.',
         ),
       envVars: z
         .array(SandboxCredentialEnvVarSchema())
         .optional()
         .describe(
-          'Environment variables to protect. `deny` unsets the variable for sandboxed commands; `mask` substitutes a sentinel inside the sandbox and injects the real value at the proxy.',
+          'Environment variables to protect. `deny` unsets the variable for sandboxed commands; `mask` substitutes a sentinel inside the sandbox and injects the real value at the proxy. Supports `extract`/`decode`/`maskClaims` structured masking (sandbox-runtime≥0.0.70).',
         ),
       allowPlaintextInject: z
         .boolean()
@@ -252,6 +400,18 @@ export const SandboxCredentialsConfigSchema = lazySchema(() =>
             'Defaults to false: without TLS termination the upstream identity is unverified and the credential travels in cleartext. Set only for trusted-network test fixtures. Only honored from user, managed/policy, or CLI (`--settings`) ' +
             'settings — project settings (.claude/settings.json and ' +
             '.claude/settings.local.json) are ignored.',
+        ),
+      // densable 2.1.224 #6
+      awsPairs: z
+        .array(SandboxCredentialAwsPairSchema())
+        .optional()
+        .describe(
+          'Explicit groupings of masked env vars into AWS credential pairs for SigV4 re-signing, for non-standard variable names. The conventional AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN trio is paired automatically when masked. Only honored from user, managed/policy, or CLI (`--settings`) settings — project settings (.claude/settings.json and .claude/settings.local.json) are ignored. A member is only usable when its env var is forwarded as a whole-value mask (no extract/decode).',
+        ),
+      sigv4: SandboxSigv4ConfigSchema()
+        .optional()
+        .describe(
+          'Policies for AWS SigV4 request shapes the proxy cannot re-sign (streaming, presigned, sigv4a) when they reference a masked credential pair: "deny" (default) or "passthrough". Only honored from user, managed/policy, or CLI (`--settings`) settings — project settings are ignored. Requires network.tlsTerminate for re-signing.',
         ),
     })
     .optional(),
@@ -333,6 +493,12 @@ export type SandboxCredentialFile = z.infer<
 >
 export type SandboxCredentialEnvVar = z.infer<
   ReturnType<typeof SandboxCredentialEnvVarSchema>
+>
+export type SandboxCredentialAwsPair = z.infer<
+  ReturnType<typeof SandboxCredentialAwsPairSchema>
+>
+export type SandboxSigv4Config = z.infer<
+  ReturnType<typeof SandboxSigv4ConfigSchema>
 >
 export type SandboxIgnoreViolations = NonNullable<
   SandboxSettings['ignoreViolations']
