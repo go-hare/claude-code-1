@@ -24,6 +24,7 @@ export type PluginFetchSource =
   | 'marketplace_pull'
   | 'marketplace_url'
   | 'plugin_clone'
+  | 'plugin_archive'
   | 'mcpb'
 
 export type PluginFetchOutcome = 'success' | 'failure' | 'cache_hit'

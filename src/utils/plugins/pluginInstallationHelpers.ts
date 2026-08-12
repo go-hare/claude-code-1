@@ -34,7 +34,11 @@ import {
   getGitCommitSha,
 } from './installedPluginsManager.js'
 import { getManagedPluginNames } from './managedPlugins.js'
-import { getMarketplaceCacheOnly, getPluginById } from './marketplaceManager.js'
+import {
+  getMarketplaceCacheOnly,
+  getPluginById,
+  loadKnownMarketplacesConfigSafe,
+} from './marketplaceManager.js'
 import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
@@ -108,6 +112,42 @@ export function validatePathWithinBase(
 }
 
 /**
+ * densable archive auth for install/update: when pluginId is `name@marketplace`
+ * and known_marketplaces records a url-source, forward that source's headers
+ * (and origin URL) into cachePlugin → installFromArchive (same-origin only).
+ * Headers live on known_marketplaces.json, not the catalog JSON.
+ */
+export async function resolveMarketplaceArchiveAuth(pluginId: string): Promise<{
+  marketplaceHeaders?: Record<string, string>
+  marketplaceUrl?: string
+}> {
+  if (!pluginId.includes('@')) {
+    return {}
+  }
+  const marketplaceName = pluginId.split('@').slice(1).join('@')
+  try {
+    const known = await loadKnownMarketplacesConfigSafe()
+    const src = known[marketplaceName]?.source
+    if (
+      src &&
+      typeof src === 'object' &&
+      src.source === 'url' &&
+      typeof src.url === 'string'
+    ) {
+      return {
+        marketplaceUrl: src.url,
+        ...(src.headers && Object.keys(src.headers).length > 0
+          ? { marketplaceHeaders: src.headers }
+          : {}),
+      }
+    }
+  } catch {
+    // config miss — proceed without marketplace auth
+  }
+  return {}
+}
+
+/**
  * Cache a plugin (local or external) and add it to installed_plugins.json
  *
  * This function combines the common pattern of:
@@ -140,8 +180,14 @@ export async function cacheAndRegisterPlugin(
       ? (localSourcePath as PluginSource)
       : entry.source
 
+  // densable archive auth: same-origin url-source headers (install + update).
+  const { marketplaceHeaders, marketplaceUrl } =
+    await resolveMarketplaceArchiveAuth(pluginId)
+
   const cacheResult = await cachePlugin(source, {
     manifest: entry as PluginMarketplaceEntry,
+    marketplaceHeaders,
+    marketplaceUrl,
   })
 
   // For local plugins, use the original source path for Git SHA calculation

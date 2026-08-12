@@ -93,7 +93,10 @@ import { getAddDirEnabledPlugins } from './addDirPluginSettings.js'
 import { verifyAndDemote } from './dependencyResolver.js'
 import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
 import { checkGitAvailable } from './gitAvailability.js'
-import { getInMemoryInstalledPlugins } from './installedPluginsManager.js'
+import {
+  getInMemoryInstalledPlugins,
+  isInstallationRelevantToCurrentProject,
+} from './installedPluginsManager.js'
 import { getManagedPluginNames } from './managedPlugins.js'
 import {
   formatSourceForDisplay,
@@ -119,6 +122,7 @@ import {
   type PluginMarketplaceEntry,
   type PluginSource,
 } from './schemas.js'
+import { installFromArchive } from './pluginArchive.js'
 import {
   convertDirectoryToZipInPlace,
   extractZipToDirectory,
@@ -900,6 +904,9 @@ export function generateTemporaryCacheNameForPlugin(
       case 'git-subdir':
         prefix = 'subdir'
         break
+      case 'archive':
+        prefix = 'archive'
+        break
       default:
         prefix = 'unknown'
     }
@@ -915,6 +922,12 @@ export async function cachePlugin(
   source: PluginSource,
   options?: {
     manifest?: PluginManifest
+    /**
+     * densable archive auth: marketplace url-source headers forwarded when
+     * archive URL shares the marketplace origin (installFromArchive policy).
+     */
+    marketplaceHeaders?: Record<string, string>
+    marketplaceUrl?: string
   },
 ): Promise<{ path: string; manifest: PluginManifest; gitCommitSha?: string }> {
   const cachePath = getPluginCachePath()
@@ -957,6 +970,18 @@ export async function cachePlugin(
             source.path,
             source.ref,
             source.sha,
+          )
+          break
+        case 'archive':
+          // densable Sny — contentSha256 occupies the gitCommitSha slot so
+          // calculatePluginVersion can form the 12-char archive version id.
+          // Same-origin marketplace headers (schemas: url-source auth) are
+          // forwarded by installFromArchive when marketplaceUrl matches.
+          gitCommitSha = await installFromArchive(
+            { url: source.url, sha256: source.sha256 },
+            tempPath,
+            options?.marketplaceHeaders,
+            options?.marketplaceUrl,
           )
           break
         case 'pip':
@@ -2052,8 +2077,29 @@ async function loadPluginsFromMarketplaces({
 
       // installed_plugins.json records what's actually cached on disk
       // (version for the full loader's first-pass probe, installPath for
-      // the cache-only loader's direct read).
-      const installEntry = installedPluginsData.plugins[pluginId]?.[0]
+      // the cache-only loader's direct read). Prefer the installation
+      // relevant to this project — [0] is wrong under multi-project records.
+      const installations = installedPluginsData.plugins[pluginId] ?? []
+      const installEntry =
+        installations.find(isInstallationRelevantToCurrentProject) ??
+        installations[0]
+      // densable archive auth: url marketplace source headers + origin URL
+      const mktSource = marketplaceConfig?.source
+      const marketplaceHeaders =
+        mktSource &&
+        typeof mktSource === 'object' &&
+        mktSource.source === 'url' &&
+        mktSource.headers &&
+        Object.keys(mktSource.headers).length > 0
+          ? mktSource.headers
+          : undefined
+      const marketplaceUrl =
+        mktSource &&
+        typeof mktSource === 'object' &&
+        mktSource.source === 'url' &&
+        typeof mktSource.url === 'string'
+          ? mktSource.url
+          : undefined
       return cacheOnly
         ? loadPluginFromMarketplaceEntryCacheOnly(
             result.entry,
@@ -2070,6 +2116,8 @@ async function loadPluginsFromMarketplaces({
             enabledValue === true,
             errors,
             installEntry?.version,
+            marketplaceHeaders,
+            marketplaceUrl,
           )
     }),
   )
@@ -2200,6 +2248,8 @@ async function loadPluginFromMarketplaceEntry(
   enabled: boolean,
   errorsOut: PluginError[],
   installedVersion?: string,
+  marketplaceHeaders?: Record<string, string>,
+  marketplaceUrl?: string,
 ): Promise<LoadedPlugin | null> {
   logForDebugging(
     `Loading plugin ${entry.name} from source: ${jsonStringify(entry.source)}`,
@@ -2284,16 +2334,21 @@ async function loadPluginFromMarketplaceEntry(
     try {
       // Calculate version with fallback order:
       // 1. No manifest yet, 2. installed_plugins.json version,
-      //    3. Marketplace entry version, 4. source.sha (pinned commits — the
-      //    exact value the post-clone call at cached.gitCommitSha would see),
+      //    3. Marketplace entry version, 4. source.sha / archive.sha256 pin,
       //    5. 'unknown' → ref-tracked, falls through to clone by design.
+      const preResolvedSha =
+        typeof entry.source === 'object' && entry.source.source === 'archive'
+          ? entry.source.sha256
+          : 'sha' in entry.source
+            ? entry.source.sha
+            : undefined
       const version = await calculatePluginVersion(
         pluginId,
         entry.source,
         undefined,
         undefined,
         installedVersion ?? entry.version,
-        'sha' in entry.source ? entry.source.sha : undefined,
+        preResolvedSha,
       )
 
       const versionedPath = getVersionedCachePath(pluginId, version)
@@ -2328,9 +2383,12 @@ async function loadPluginFromMarketplaceEntry(
             `Using seed cache for external plugin ${entry.name} at ${seedPath}`,
           )
         } else {
-          // Download to temp location, then copy to versioned cache
+          // Download to temp location, then copy to versioned cache.
+          // densable archive: forward same-origin marketplace headers.
           const cached = await cachePlugin(entry.source, {
             manifest: { name: entry.name },
+            marketplaceHeaders,
+            marketplaceUrl,
           })
 
           // If the pre-clone version was deterministic (source.sha /

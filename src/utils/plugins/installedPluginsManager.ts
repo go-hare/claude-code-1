@@ -58,6 +58,10 @@ import {
   getPluginCachePath,
   getVersionedCachePath,
 } from './pluginLoader.js'
+import {
+  hasMatchingInstallRecord,
+  syncExistingInstallationsForScope,
+} from './syncPluginInstallations.js'
 
 // Migration state to prevent running migration multiple times per session
 let migrationCompleted = false
@@ -1097,12 +1101,16 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
 
     if (existingData?.success) {
       const plugins = existingData.data.plugins
-      // densable: every key in r must have install record; managed needs
-      // single managed entry. We require presence for all resolved scopes.
-      const allPluginsExist = [...pluginScopeFromSettings.keys()].every(id => {
-        const installations = plugins[id]
-        return installations && installations.length > 0
-      })
+      // densable Gry skip: managed → single managed entry; else matching
+      // scope+projectPath must already exist (length>0 alone corrupts multi-project).
+      const allPluginsExist = [...pluginScopeFromSettings.entries()].every(
+        ([id, scopeInfo]) =>
+          hasMatchingInstallRecord(
+            plugins[id],
+            scopeInfo,
+            scopeInfo.scope === 'managed',
+          ),
+      )
 
       if (allPluginsExist) {
         logForDebugging('All plugins already exist, skipping migration')
@@ -1134,23 +1142,24 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
     const existingInstallations = v2Plugins[pluginId]
 
     if (existingInstallations && existingInstallations.length > 0) {
-      // Plugin exists in V2 - update scope if different (settings is source of truth)
-      const existingEntry = existingInstallations[0]
-      if (
-        existingEntry &&
-        (existingEntry.scope !== scopeInfo.scope ||
-          existingEntry.projectPath !== scopeInfo.projectPath)
-      ) {
-        existingEntry.scope = scopeInfo.scope
-        if (scopeInfo.projectPath) {
-          existingEntry.projectPath = scopeInfo.projectPath
+      // densable 2.1.224 #13 / Gry: never overwrite installations[0] when another
+      // project already has a record — find/push by scope+projectPath instead.
+      const { next, changed } = syncExistingInstallationsForScope(
+        existingInstallations,
+        scopeInfo,
+        now,
+      )
+      if (changed) {
+        if (next.length === 0) {
+          delete v2Plugins[pluginId]
         } else {
-          delete existingEntry.projectPath
+          v2Plugins[pluginId] = next
         }
-        existingEntry.lastUpdated = now
         updatedCount++
         logForDebugging(
-          `Updated ${pluginId} scope to ${scopeInfo.scope} (settings.json is source of truth)`,
+          `Synced ${pluginId} install records for scope ${scopeInfo.scope}${
+            scopeInfo.projectPath ? ` (${scopeInfo.projectPath})` : ''
+          }`,
         )
       }
     } else {

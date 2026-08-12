@@ -2,6 +2,12 @@ import { z } from 'zod/v4'
 import { HooksSchema } from '../../schemas/hooks.js'
 import { McpServerConfigSchema } from '../../services/mcp/types.js'
 import { lazySchema } from '../lazySchema.js'
+import {
+  ARCHIVE_URL_POLICY_MESSAGE,
+  isAllowedArchiveUrl as isAllowedArchiveUrlForSchema,
+} from './pluginArchive.js'
+
+export { ARCHIVE_URL_POLICY_MESSAGE }
 
 /**
  * First-layer defense against official marketplace impersonation.
@@ -1081,10 +1087,26 @@ export const gitSha = lazySchema(() =>
 )
 
 /**
+ * densable 2.1.224 DHg — full SHA-256 hex digest for archive pin / version id.
+ */
+export const sha256Digest = lazySchema(() =>
+  z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'Must be a 64-character hex SHA-256 digest'),
+)
+
+/**
+ * densable 2.1.224 Mio / Lio — ARCHIVE_URL_POLICY_MESSAGE + isAllowedArchiveUrlForSchema
+ * re-exported/aliased from pluginArchive at module top (single policy: IPv4 +
+ * mapped IPv6 + fe80 + Alibaba metadata). RFC1918 intentionally not blocked.
+ */
+
+/**
  * Schema for plugin source locations
  *
  * Defines various ways to reference and install plugins including
- * local paths, npm packages, Python packages, git URLs, and GitHub repos.
+ * local paths, npm packages, Python packages, git URLs, GitHub repos,
+ * and densable 2.1.224 HTTPS zip archives.
  */
 export const PluginSourceSchema = lazySchema(() =>
   z.union([
@@ -1182,6 +1204,32 @@ export const PluginSourceSchema = lazySchema(() =>
         'Plugin located in a subdirectory of a larger repository (monorepo). ' +
           'Only the specified subdirectory is materialized; the rest of the repo is not downloaded.',
       ),
+    // densable 2.1.224 HHg — HTTPS zip archive plugin source
+    z
+      .object({
+        source: z.literal('archive'),
+        url: z
+          .string()
+          .url()
+          .refine(isAllowedArchiveUrlForSchema, {
+            message: ARCHIVE_URL_POLICY_MESSAGE,
+          })
+          .describe(
+            'HTTPS URL of a zip archive containing the plugin. The plugin root (the directory holding .claude-plugin/) may be at the top of the archive ' +
+              'or nested one directory deep — a single wrapping directory is stripped.',
+          ),
+        sha256: sha256Digest()
+          .optional()
+          .describe(
+            'SHA-256 digest of the archive. When set, every download is verified against it and the install is refused on mismatch. It also serves as the version identity when neither plugin.json nor the marketplace entry declares a `version`. Recommended. Note the update signal is the version string (plugin.json ' +
+              'version, else the entry version, else this digest) — changing only the digest ' +
+              'while a version is declared does not trigger an update.',
+          ),
+      })
+      .describe(
+        'Plugin distributed as a zip archive fetched over HTTPS — for hosting on any ' +
+          "static file server or artifact repository (S3, GitLab, nginx) with no git or npm on the client. Authentication comes from the enclosing marketplace: when the archive URL shares the marketplace url-source's origin, that source's headers are sent with the download.",
+      ),
     // TODO (future work) gist
     // TODO (future work) single file?
   ]),
@@ -1228,7 +1276,7 @@ const SettingsMarketplacePluginSchema = lazySchema(() =>
     .refine(p => typeof p.source !== 'string', {
       message:
         'Plugins in a settings-sourced marketplace must use remote sources ' +
-        '(github, git-subdir, npm, url, pip). Relative-path sources like "./foo" ' +
+        '(github, git-subdir, npm, url, archive). Relative-path sources like "./foo" ' +
         'have no marketplace repository to resolve against.',
     }),
 )

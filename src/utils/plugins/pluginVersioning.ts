@@ -86,8 +86,29 @@ export async function calculatePluginVersion(
       )
       return v
     }
+    // densable: archive contentSha256 reuses this slot — first 12 hex of digest
+    if (typeof source === 'object' && source.source === 'archive') {
+      const pinned = Boolean(source.sha256)
+      logForDebugging(
+        `Using archive sha256 version for ${pluginId}: ${shortSha}${pinned ? ' (pinned)' : ' (downloaded)'}`,
+      )
+      return shortSha
+    }
     logForDebugging(`Using pre-resolved git SHA for ${pluginId}: ${shortSha}`)
     return shortSha
+  }
+
+  // 3b. densable archive pin without download yet — use declared sha256
+  if (
+    typeof source === 'object' &&
+    source.source === 'archive' &&
+    source.sha256
+  ) {
+    const short = source.sha256.toLowerCase().substring(0, 12)
+    logForDebugging(
+      `Using archive sha256 version for ${pluginId}: ${short} (pinned)`,
+    )
+    return short
   }
 
   // 4. Try to get git SHA from install path

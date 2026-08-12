@@ -49,6 +49,7 @@ import {
 import {
   formatResolutionError,
   installResolvedPlugin,
+  resolveMarketplaceArchiveAuth,
 } from '../../utils/plugins/pluginInstallationHelpers.js'
 import {
   cachePlugin,
@@ -1051,9 +1052,15 @@ async function performPluginUpdate({
 
   // Handle remote vs local plugins
   if (typeof entry.source !== 'string') {
-    // Remote plugin: download to temp directory first
+    // Remote plugin: download to temp directory first.
+    // densable archive auth: same-origin url-source headers as install path
+    // (cacheAndRegisterPlugin / loadPluginFromMarketplaceEntry).
+    const { marketplaceHeaders, marketplaceUrl } =
+      await resolveMarketplaceArchiveAuth(pluginId)
     const cacheResult = await cachePlugin(entry.source, {
       manifest: { name: entry.name },
+      marketplaceHeaders,
+      marketplaceUrl,
     })
     sourcePath = cacheResult.path
     shouldCleanupSource = true
