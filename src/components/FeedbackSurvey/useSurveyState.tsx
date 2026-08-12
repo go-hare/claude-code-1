@@ -3,7 +3,15 @@ import { useCallback, useRef, useState } from 'react';
 import type { TranscriptShareResponse } from './TranscriptSharePrompt.js';
 import type { FeedbackSurveyResponse } from './utils.js';
 
-type SurveyState = 'closed' | 'open' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
+/** densable survey states including 2.1.224 #16 share_failed */
+export type SurveyState =
+  | 'closed'
+  | 'open'
+  | 'thanks'
+  | 'transcript_prompt'
+  | 'submitting'
+  | 'submitted'
+  | 'share_failed';
 
 type UseSurveyStateOptions = {
   hideThanksAfterMs: number;
@@ -55,6 +63,12 @@ export function useSurveyState({
     setTimeout(setState, hideThanksAfterMs, 'closed');
   }, [hideThanksAfterMs]);
 
+  // densable B: share_failed then auto-close — never success/thanks path
+  const showShareFailedThenClose = useCallback(() => {
+    setState('share_failed');
+    setTimeout(setState, hideThanksAfterMs, 'closed');
+  }, [hideThanksAfterMs]);
+
   const open = useCallback(() => {
     if (state !== 'closed') {
       return;
@@ -97,10 +111,11 @@ export function useSurveyState({
               if (success) {
                 showSubmittedThenClose();
               } else {
-                showThanksThenClose();
+                // densable 2.1.224 #16 — fail shows error, not thanks
+                showShareFailedThenClose();
               }
             } catch {
-              showThanksThenClose();
+              showShareFailedThenClose();
             }
           })();
           break;
@@ -111,7 +126,7 @@ export function useSurveyState({
           break;
       }
     },
-    [showThanksThenClose, showSubmittedThenClose, onTranscriptSelect],
+    [showThanksThenClose, showSubmittedThenClose, showShareFailedThenClose, onTranscriptSelect],
   );
 
   return { state, lastResponse, open, handleSelect, handleTranscriptSelect };

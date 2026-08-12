@@ -11,7 +11,7 @@ import { useDebouncedDigitInput } from './useDebouncedDigitInput.js';
 import type { FeedbackSurveyResponse } from './utils.js';
 
 type Props = {
-  state: 'closed' | 'open' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted';
+  state: 'closed' | 'open' | 'thanks' | 'transcript_prompt' | 'submitting' | 'submitted' | 'share_failed';
   lastResponse: FeedbackSurveyResponse | null;
   handleSelect: (selected: FeedbackSurveyResponse) => void;
   handleTranscriptSelect?: (selected: TranscriptShareResponse) => void;
@@ -50,6 +50,17 @@ export function FeedbackSurvey({
     return (
       <Box marginTop={1}>
         <Text color="success">{'\u2713'} Thanks for sharing your transcript!</Text>
+      </Box>
+    );
+  }
+
+  // densable 2.1.224 #16 — failed share must not look like success
+  // SEA copy includes trailing periods on both lines.
+  if (state === 'share_failed') {
+    return (
+      <Box marginTop={1} flexDirection="column">
+        <Text color="error">Couldn't share the transcript.</Text>
+        <Text dimColor>You can share details with /feedback instead.</Text>
       </Box>
     );
   }
