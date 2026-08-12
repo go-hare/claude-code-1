@@ -13,10 +13,24 @@ Pipes 系统提供 Claude Code CLI 实例之间的通讯能力，分两层：
 
 | Flag | 控制范围 | 默认 |
 |------|----------|------|
-| `UDS_INBOX` | 本机 Pipe IPC 全部功能 | dev/build 启用 |
-| `LAN_PIPES` | 局域网 TCP + beacon 扩展 | dev/build 启用 |
+| `UDS_INBOX` | 本机 Pipe IPC 全部功能 | **DEFAULT_BUILD_FEATURES ON**（densable 228 1:1） |
+| `LAN_PIPES` | 局域网 TCP + beacon 扩展 | **DEFAULT_BUILD_FEATURES ON**（依赖 UDS） |
 
-手动启用：`FEATURE_UDS_INBOX=1 FEATURE_LAN_PIPES=1 bun run dev`
+`bun run dev` / `bun run build` 默认已注入上述 flag。仅当需要在未列入默认的环境强制打开时：`FEATURE_UDS_INBOX=1 FEATURE_LAN_PIPES=1`。
+
+### 安全边界（功能，非文案）
+
+| 通道 | 鉴权 |
+|------|------|
+| 本机 UDS / Named Pipe | capability file 内 shared-secret + densable fail-closed（`key_publish_failed` / unvouched / non-local IPC）；OS 路径权限仍适用 |
+| LAN TCP（`0.0.0.0` 随机端口） | **必选** shared-secret：服务端 `PipeServer.authToken`，客户端首帧 `{"type":"auth","data":"<token>"}`，成功后 `auth_ok` |
+| UDP beacon `224.0.71.67:7101` | **明文**广播 `ip/tcpPort/authToken`（链路本地 TTL=1） |
+
+**威胁模型（写死）：** TCP 握手 **不能**当作机密性。token 在组播里明文；同网段嗅探者可完成握手。能挡的是「不读 beacon 的盲扫」。**仅可信专用 LAN**；公共 Wi‑Fi / 不可信 L2 请关 `LAN_PIPES` 或断 beacon。这是 go-hare 防误连补强，非 densable UDS 机密边界。
+
+无 token 的旧 beacon 对端会被跳过（无法完成 TCP 握手）。SendMessage `tcp:host:port` 用 `resolveLanPeerAuthToken`（`localhost`↔`127.0.0.1`、hostname 字段、大小写）匹配 peer，失败则 fail-closed。
+
+**UDS token 环境变量（densable 对齐，安全取舍）**：`startUdsMessaging` 在 capability 发布成功后设置 `CLAUDE_CODE_MESSAGING_SOCKET` + `CLAUDE_CODE_MESSAGING_TOKEN`，供 inject/socat/子进程发现本机 inbox。**子进程会继承该 env**（与 densable SEA 一致）。token 也写在本机 capability 文件；勿把会话 env dump 发到不可信日志。`stopUdsMessaging` 会删除这两项 env。
 
 ## 快速上手
 
@@ -193,8 +207,9 @@ attach 后，对方变为 slave，你变为 master。可以向它发送 prompt�
 
 ```
 /send cli-04d67950 请帮我检查一下日志
-/send tcp:192.168.50.27:58853 hello    — 直接通过 TCP 地址发送
 ```
+
+> `/send` 只打**已 attach** 的 slave。裸 `tcp:host:port` 不走 slash 命令——用 `/attach` 后 `/send <name>`，或由 AI 的 `SendMessage`（`tcp:` 从 LanBeacon 取 `authToken`）。
 
 ### /claim-main
 

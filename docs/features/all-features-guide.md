@@ -538,8 +538,8 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 | `PROMPT_CACHE_BREAK_DETECTION` | ✅ dev+build | 缓存检测 |
 | `ULTRAPLAN` | ✅ dev+build | 高级规划 |
 | `DAEMON` | ✅ dev+build | 后台守护 |
-| `UDS_INBOX` | ✅ dev only | Pipe IPC |
-| `LAN_PIPES` | ✅ dev only | LAN 群控 |
+| `UDS_INBOX` | ✅ dev+build | Pipe IPC / peers / inbox（densable 228 默认 ON） |
+| `LAN_PIPES` | ✅ dev+build | LAN 群控 TCP + beacon（依赖 UDS；默认 ON） |
 | `MONITOR_TOOL` | ✅ dev+build | 后台监控 |
 | `WORKFLOW_SCRIPTS` | ✅ dev+build | 工作流脚本 |
 | `FORK_SUBAGENT` | ❌ 默认 build 关；dev/env 可开 | 隐式 fork + `/fork`（与 AgentTool 统一门控） |

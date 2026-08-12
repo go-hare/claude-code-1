@@ -15,7 +15,7 @@ KAIROS 把 Claude Code 从「一问一答 REPL」扩展成**可常驻的助手�
 | **Proactive 心跳** | `Sleep` + `<tick>` 循环；代码门控几乎全是 `feature('PROACTIVE') \|\| feature('KAIROS')` |
 | **Brief** | 工具对外名 **`SendUserMessage`**（BriefTool）：对用户可见的短结构化更新 |
 | **隐式 in-process team** | `initializeAssistantTeam()`：预建 team，便于 `Agent(name)` 不先 TeamCreate |
-| **可选外围** | Channels / 推送 / PR webhook / SendUserFile（子 flag，默认 build 不全开） |
+| **可选外围** | Channels / 推送 / PR webhook / SendUserFile（子 flag；**2026-08-12 起默认 build ON**） |
 | **Bridge / daemon 路径** | `claude assistant` 安装/附着 CCR 会话、`--assistant` 强开 daemon 子路径 |
 
 **不是**「多一个 cron 命令」。Cron 工具用 `tengu_kairos_cron*` 命名与 GB 门控，但 **`isKairosCronEnabled()` 不依赖 `feature('KAIROS')`**（见 `ScheduleCronTool/prompt.ts`）。
@@ -26,9 +26,9 @@ KAIROS 把 Claude Code 从「一问一答 REPL」扩展成**可常驻的助手�
 KAIROS (主开关；build 默认 ON)
 ├── 自动带 proactive 语义          ← 代码 OR：PROACTIVE || KAIROS
 ├── KAIROS_BRIEF (SendUserMessage) ← build 默认 ON；也可单独开 BRIEF
-├── KAIROS_CHANNELS                ← 默认 build 未列入
-├── KAIROS_PUSH_NOTIFICATION       ← 默认 build 未列入
-└── KAIROS_GITHUB_WEBHOOKS         ← 默认 build 未列入
+├── KAIROS_CHANNELS                ← 默认 build ON（2026-08-12）
+├── KAIROS_PUSH_NOTIFICATION       ← 默认 build ON（2026-08-12）
+└── KAIROS_GITHUB_WEBHOOKS         ← 默认 build ON（2026-08-12）
 
 PROACTIVE (独立 flag；默认 build 未列入)
 └── 单独开也能拿到 Sleep / tick；开 KAIROS 时不必再开 PROACTIVE
@@ -44,9 +44,9 @@ PROACTIVE (独立 flag；默认 build 未列入)
 | `KAIROS` | ✅ | 主开关 |
 | `KAIROS_BRIEF` | ✅ | Brief / SendUserMessage 编译进产物 |
 | `PROACTIVE` | ❌ | 未列入；本地靠 KAIROS OR 门拿到同等 proactive 能力 |
-| `KAIROS_CHANNELS` | ❌ | 代码有，需 `FEATURE_KAIROS_CHANNELS=1` 等 |
-| `KAIROS_PUSH_NOTIFICATION` | ❌ | 同上 |
-| `KAIROS_GITHUB_WEBHOOKS` | ❌ | 同上 |
+| `KAIROS_CHANNELS` | ✅ | MCP channels / permission channel 回调 |
+| `KAIROS_PUSH_NOTIFICATION` | ✅ | PushNotification 独立臂（亦 OR `KAIROS`） |
+| `KAIROS_GITHUB_WEBHOOKS` | ✅ | SubscribePR + webhook sanitizer |
 
 Dev（`bun run dev`）通常注入更全的 feature 集；以 `scripts/dev.ts` / 当前环境 `FEATURE_*` 为准。
 

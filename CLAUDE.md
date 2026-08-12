@@ -223,11 +223,14 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 - P1 API 依赖: `EXTRACT_MEMORIES`, `VERIFICATION_AGENT`, `KAIROS_BRIEF`, `AWAY_SUMMARY`
 - P2: `DAEMON`, `ACP`
 - 工作流: `WORKFLOW_SCRIPTS`, `HISTORY_SNIP`, `MONITOR_TOOL`, `KAIROS`
+- KAIROS 外围（默认 ON）: `KAIROS_CHANNELS`, `KAIROS_PUSH_NOTIFICATION`, `KAIROS_GITHUB_WEBHOOKS`
 - 多 worker: `COORDINATOR_MODE`, `BG_SESSIONS`, `TEMPLATES`
+- 本机/LAN 协作: `UDS_INBOX`（inbox/peers/pipes）、`LAN_PIPES`（TCP + UDP beacon；依赖 UDS）— densable 产品面默认 ON（1:1）
+- 团队记忆: `TEAMMEM`（`memory/team` 同步；需 OAuth + GitHub remote 运行时门）— 默认 ON
 - 连接器: `CONNECTOR_TEXT`, `COMMIT_ATTRIBUTION`, `DIRECT_CONNECT`
 - 实验性: `EXPERIMENTAL_SKILL_SEARCH`, `EXPERIMENTAL_SEARCH_EXTRA_TOOLS`
 - 模式: `POOR`, `SSH_REMOTE`
-- 已禁用: `CONTEXT_COLLAPSE`, `FORK_SUBAGENT`, `UDS_INBOX`, `LAN_PIPES`, `REVIEW_ARTIFACT`, `TEAMMEM`, `SKILL_LEARNING`, `ULTRAPLAN`（densable 2.1.222 产品拆除；`FEATURE_ULTRAPLAN=1` 可复活 residual）
+- 已禁用: `CONTEXT_COLLAPSE`, `FORK_SUBAGENT`, `REVIEW_ARTIFACT`, `SKILL_LEARNING`, `ULTRAPLAN`（densable 2.1.222 产品拆除；`FEATURE_ULTRAPLAN=1` 可复活 residual）
 
 **Dev mode 默认**: 全部启用（见 `scripts/dev.ts`）。
 
@@ -403,7 +406,7 @@ bun run precheck
 ## Working with This Codebase
 
 - **precheck must pass** — `bun run precheck`（typecheck + lint fix + test）必须零错误，任何修改都不能引入新的类型/lint/测试错误。
-- **Feature flags** — 默认全部关闭（`feature()` 返回 `false`）。Dev/build 各有自己的默认启用列表。不要在 `cli.tsx` 中重定义 `feature` 函数。
+- **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（65+ 默认 ON，含 `UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`）。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数。
 - **React Compiler output** — Components have decompiled memoization boilerplate (`const $ = _c(N)`). This is normal.
 - **`bun:bundle` import** — `import { feature } from 'bun:bundle'` 是 Bun 内置模块，由运行时/构建器解析。不要用自定义函数替代它。**`feature()` 只能直接用在 `if` 语句或三元表达式的条件位置**（Bun 编译器限制），不能赋值给变量、不能放在箭头函数体里、不能作为 `&&` 链的一部分。正确：`if (feature('X')) {}` 或 `feature('X') ? a : b`。
 - **`src/` path alias** — tsconfig maps `src/*` to `./src/*`. Imports like `import { ... } from 'src/utils/...'` are valid.

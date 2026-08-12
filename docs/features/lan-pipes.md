@@ -13,6 +13,17 @@ LAN Pipes 让多台机器上的 Claude Code 实例通过局域网自动发现并
 - Feature flag `LAN_PIPES`（dev/build 默认开启）
 - 防火墙允许 UDP 7101 + TCP 动态端口（见下方配置）
 
+## 威胁模型（必读）
+
+LAN TCP 握手用 shared-secret（`PipeServer.authToken`），但该 secret **同时以明文**写在 UDP 组播 beacon（`224.0.71.67:7101`，TTL=1）里，供同网段 peer 自动 attach。
+
+| 能挡 | 不能挡 |
+| --- | --- |
+| 不会读 beacon 的盲扫 / 乱连随机 TCP 端口 | 同 L2 网段嗅探组播拿到 token 后完成握手 |
+| 无 token 的旧版 peer | 公共 Wi‑Fi / 不可信访客网 / 恶意邻居 |
+
+**结论：** 仅在**可信专用 LAN**使用；公共 Wi‑Fi 请关 `LAN_PIPES` 或不启 beacon。这是 go-hare 产品补强（防误连），**不是** densable UDS 机密边界。本机 UDS 仍靠 capability 文件 + OS 路径权限。
+
 ## 快速开始
 
 ### 第一步：配置防火墙
@@ -104,8 +115,7 @@ LAN Peers:
 | `/pipes none` | 取消全选 |
 | `/attach <name>` | 手动 attach（自动识别 LAN peer 并通过 TCP 连接） |
 | `/detach <name>` | 断开连接 |
-| `/send <name> <msg>` | 向指定 pipe 发送消息 |
-| `/send tcp:host:port <msg>` | 直接通过 TCP 地址发送 |
+| `/send <name> <msg>` | 向**已 attach** 的 pipe 发送消息（不支持裸 `tcp:host:port`） |
 | `/claim-main` | 强制声明为 main |
 | `/pipe-status` | 显示详细状态 |
 | `/peers` | 列出所有已发现的 peer |
@@ -179,7 +189,8 @@ LAN Peers:
 
 1. 检查 TCP 入站防火墙规则
 2. 确认没有 VPN 劫持流量
-3. 尝试 `/send tcp:ip:port hello` 直接测试
+3. 用 `/pipes` 确认 peer 带 authToken，再 `/attach <name>` 后用 `/send <name> hello` 测
+4. AI/`SendMessage` 的 `tcp:host:port` 会从 LanBeacon 按 `ip:port` 解析 `authToken`；无 beacon 匹配则失败（不发明 `#token` 语法）
 
 ### beacon 绑到了错误网卡
 
@@ -187,7 +198,7 @@ Windows 上 WSL/Docker 虚拟网卡可能劫持 multicast。beacon 会自动选�
 
 ## 安全说明
 
-- TCP 连接当前**无认证**——同 LAN 内知道端口号即可连接
-- Multicast TTL=1，不跨路由器
-- AI 通过 `SendMessageTool` 发送 `tcp:` 消息时需**用户显式确认**
+- LAN TCP **必选** shared-secret 握手：客户端首帧 `{"type":"auth","data":"<token>"}`，服务端 `auth_ok` / `auth_error`（3s 超时）
+- UDP beacon（TTL=1）明文广播 `ip/tcpPort/authToken`——**仅可信 LAN**；公共 Wi‑Fi 请关 `LAN_PIPES`
+- `SendMessage` `tcp:host:port` 从 beacon 解析 token；无 peer 广告则拒绝连接
 - 建议仅在信任的局域网中使用

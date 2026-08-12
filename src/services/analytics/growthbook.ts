@@ -456,6 +456,10 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_kairos_brief_config: { enable_slash_command: true }, // Brief /slash command visibility
   tengu_sedge_lantern: true, // Away summary
   tengu_onyx_plover: { enabled: true }, // Auto dream (memory consolidation)
+  // Team memory product surface + sync watcher (requires TEAMMEM compile flag +
+  // auto-memory + OAuth + GitHub remote). Without this local default, densable
+  // GB key defaults false and TEAMMEM build ON is a no-op on self-hosted forks.
+  tengu_herring_clock: true,
   // Idle-return: default dialog (blocking Continue / new conversation).
   // densable 2.1.211 is hint-only; fork keeps dialog as product choice.
   // Paste-safe: dialog path snapshots pastedContents (see REPL onSubmit).
@@ -471,6 +475,14 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_compact_cache_prefix: true, // Reuse prompt cache during compaction
   tengu_kairos_assistant: true, // KAIROS assistant mode activation
   tengu_kairos_cron_durable: true, // Persistent cron tasks
+  // KAIROS periphery: RC "session ready" push (remoteControlReadyPush nZp).
+  // Without local defaults, KAIROS_PUSH_NOTIFICATION compile ON still leaves
+  // ready-nudge dead when remote GB is absent (self-hosted fork).
+  // densable: I0e = tengu_kairos_push_notifications; ready_nudge true → full nudge.
+  // Do NOT default tengu_ccr_bridge — PushNotification/SendUserFile isEnabled
+  // stays RC/self-host bound (isBridgeEnabled), not forced on Anthropic-hosted path.
+  tengu_kairos_push_notifications: true,
+  tengu_kairos_ready_nudge: true,
   tengu_attribution_header: true, // API request attribution header
   tengu_slate_prism: true, // Agent progress summaries
 

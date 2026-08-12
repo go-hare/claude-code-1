@@ -54,38 +54,12 @@
 
 这层是真正的“主从 REPL 协调平面”。
 
-## 关于“局域网通信”的事实
+## 本机 vs 局域网
 
-当前实现**不是**真正的局域网传输。
+- **仅 `UDS_INBOX`**：本机 Unix socket / named pipe（`udsMessaging` peer + `pipeTransport` 本机 path）。
+- **再开 `LAN_PIPES`**（现与 UDS 同为 build 默认 ON）：`pipeTransport` TCP server + `lanBeacon` UDP multicast 发现；`/attach` / SendMessage `tcp:host:port` 走真 TCP。详见 `lan-pipes.md` / `pipes-and-lan.md`。
 
-代码里虽然保存了这些字段：
-
-- `localIp`
-- `hostname`
-- `machineId`
-- `mac`
-
-但这些字段当前只用于：
-
-1. 注册表展示
-2. main/sub 身份判定
-3. `claim-main` 的机器级归属切换
-4. 状态输出与排障信息
-
-它们**没有**被用于创建 TCP/WebSocket 连接。真正的传输仍然是 `getPipePath(name)` 返回的本机 socket 路径。
-
-所以目前更准确的描述应该是：
-
-- `pipes` 支持 **本机多实例协作**
-- `registry` 带有 **机器身份元数据**
-- 但 **尚未实现跨机器局域网 transport**
-
-如果未来要做真局域网版本，至少还需要：
-
-1. TCP/WebSocket transport
-2. 认证与会话授权
-3. 发现与地址交换
-4. 超时、重连和安全边界
+本机 registry 仍带 `localIp` / `hostname` / `machineId` 等元数据（展示、claim-main、排障）。LAN 层另有安全边界（当前 TCP 弱鉴权等）见 `pipes-and-lan.md` 安全节。
 
 ## 当前 REPL 行为
 

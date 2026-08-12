@@ -55,7 +55,7 @@
 | **流式 UI / 可靠性** | UNf/BNf/WNf/Qci streaming store；salvage 在 pH.clear 保留；close-after-complete 不误报 mid-response；gateway keep-alive ping；preflight proxy + 10s 超时；file watcher error teardown；SR EOL 删除；**2.7.36：空 streaming `●` / 假 past-tense “Ran N…”** | — |
 | **RC / 设置 / host** | `remoteControlAtStartup`：project/local 不能开、可关；`flagSettings` + `projectSettingsAliasesUserSettings`；host model overlay 优先于 stale managed-settings | — |
 | **工具 / 成本 / git** | MCP 份额仅计真消费；SendMessage summary 截断；tool-gone 仍展示；post-push PR link；raw git diff `--no-textconv`/`--no-ext-diff`；agent 族别名 step-down | — |
-| **Feature 默认** | **ULTRAPLAN** 产品默认 OFF（`FEATURE_ULTRAPLAN=1` 可复活 residual） | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF；不扩 KAIROS 产品面 |
+| **Feature 默认** | **ULTRAPLAN** 产品默认 OFF（`FEATURE_ULTRAPLAN=1` 可复活 residual） | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 ON（2026-08-12）；**KAIROS 外围** channels/push/webhook 默认 ON；**ULTRAPLAN** 仍 OFF |
 
 #### densable 2.1.219–2.1.221 对齐说明（2.7.36，已并入）
 
@@ -64,16 +64,16 @@
 - `docs/upstream-extraction/v2.1.220/official-220-checklist.md`（public 1 行 N/A + SEA residual **HAVE**）
 - `docs/upstream-extraction/v2.1.221/official-221-checklist.md`（**HAVE 35 / GAP 2 / N/A 2**）
 
-叠在 **2.1.218** 之上。**GAP 不 invent**：#10 SDK MCP `constructor` 名 crash、#12 sandboxed large upload TLS；#1 VSCode Focus view / #38 gateway model 400 为 **N/A**。
+叠在 **2.1.218** 之上。**历史 snapshot 叙述（见下表「故意不扩」列）**：旧文曾写 #10 constructor / #12 large-upload TLS 为 GAP。**现状**见 `docs/upstream-extraction/v2.1.221/official-221-checklist.md` 与 `cross-pack-residuals.md`：**#10 HAVE**（API-request null-proto/hasOwn；registry plain densable 1:1）；**#12 DEP-HAVE**（sandbox-runtime，非 CLI invent）。#1 VSCode Focus view / #38 gateway model 400 仍为 **N/A**。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
 | **2.1.219 模型 / caps** | Opus 5 catalog（EHl/ON）+ 1M picker「Opus (1M context)」；nest depth 默认 3（hazel_trellis）；`workflowSizeGuideline`；stream-json nested `--forward-subagent-text`；Fable credits stale cache | — |
 | **2.1.219 权限 / hooks / UX** | `sandbox.network.strictAllowlist`；`DirectoryAdded` hook；init `mcp_server_errors`；GIT_BASH basename 校验；Vim ← empty→agent view；SR 后缀 append；RC endpoint 点名；MCP policy `${VAR}` | — |
 | **2.1.220 residual** | `isEntitlementOverlayUnavailable` / entitlement deny-set；`entitlement_blind` 遥测；blind opus-5 → opus-4-8 替身 | 官方 public 无逐条 product list（N/A） |
-| **2.1.221 安全 / 权限** | sandbox credential `mode:"mask"`；zsh `[[ ]]` unquoted `&`；**PowerShell 引号路径 pWo fail-closed ask**；Bash U5e/cle `bareAssignmentNames` 全量（for 危险集 / declaration 旗标 / Pws·uVu）+ ZRu 只读 bare 字段 | **#10 constructor** GAP；**#12 large-upload TLS** GAP |
+| **2.1.221 安全 / 权限** | sandbox credential `mode:"mask"`；zsh `[[ ]]` unquoted `&`；**PowerShell 引号路径 pWo fail-closed ask**；Bash U5e/cle `bareAssignmentNames` 全量（for 危险集 / declaration 旗标 / Pws·uVu）+ ZRu 只读 bare 字段；**#10 constructor API-request HAVE**（null-proto/hasOwn） | **#12 large-upload TLS** = **DEP-HAVE**（srt，非 CLI locus）；勿当 open GAP invent CLI handler |
 | **2.1.221 会话 / 插件 / UI** | prompt-audit；session title sanitize；Vim yank 共享 / undo-to-empty；plugin install catalog refresh + reload 清 notice；`/status` session kind；Stats cache 分解；ultrareview no-branches；bg commit/draft-PR policy；Vertex ToolSearch native wire | **#1 VSCode Focus** N/A；**#38 gateway** N/A |
-| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF；不扩 KAIROS 产品面 |
+| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 ON（2026-08-12）；**KAIROS 外围** channels/push/webhook 默认 ON；**ULTRAPLAN** 仍 OFF |
 
 #### densable 2.1.218 对齐说明（2.7.33，已并入）
 
@@ -136,7 +136,7 @@
 | **bg daemon** | yield 不删继任 control socket；idle retire；`claude rm`/AgentView deleteJob；非 git force 删；transcript 目录伪命中 | — |
 | **RC ready-push** | 仅显式 RC + GB nudge；拒绝 outbound/reattach/bg/agentId；impression 计数；`onInteraction` 活动闩 | 不扩 KAIROS 其它产品面 |
 | **OTel / MCP / 其它** | message.uuid / client_request_id / tool_source；OTEL content max；out-of-context trace；MCP list_changed 保留；flag settings plugins；ultrareview empty-tree；SessionStart `source:"fork"` 等 | — |
-| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF |
+| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
 #### densable 2.1.212 对齐说明（2.7.29，已并入）
 
@@ -150,14 +150,14 @@
 | **`claude auto-mode reset`** | 确认提示 + `--yes` | — |
 | **可靠性 / UX 批次** | plan bash 写权限、worktree 符号链接、hook `continue:false`、print SIGTERM 143、Win PS7 bg、shell `!` 路径、btw 重开、SendMessage 预览、Web 529、mid-conv cache 等（见 checklist） | 不补 **2.1.210** collapsed-tool 实时 elapsed（邻版） |
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
-| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 OFF |
+| **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
 ### 近期更新（2.7.5 → 2.7.36）
 
 | 版本 | 要点 |
 | ---- | ---- |
 | **2.7.36** | **streaming 空 `●` hotfix（densable 222 residual）**：`hasContentAfter` 对齐 densable `y\|\|aem`（去掉 invent `\|\|streamingPreview`）；whitespace / strip-empty 不画 XEl；`Qci` trim-empty 清 `STREAM_FLAG_DISPLAYED`。避免 collapsed 工具组后假 past-tense「Ran N…」+ Cooking 前 lone bullet。 |
-| **2.7.35** | **densable 2.1.222 全量 1:1（21/21 HAVE）** + 已并入 219–221：全会话 worktree isolation；streaming UNf/WNf/Qci + salvage clear 契约；RC `remoteControlAtStartup` 源限制（flag/aliases）；host model overlay；ULTRAPLAN 产品 OFF；preflight proxy 超时；MCP 份额归因；SendMessage classifier/截断；tool-gone 展示；post-push PR link；raw git diff；agent 族 step-down；SR EOL 删除；file watcher teardown 等。并入 219 **24/24** / 220 residual / 221 **HAVE 35 / GAP 2 / N/A 2**（#10 constructor / #12 large-upload TLS 仍 GAP）。UDS/LAN/TEAMMEM 默认 OFF。 |
+| **2.7.35** | **densable 2.1.222 全量 1:1（21/21 HAVE）** + 已并入 219–221：全会话 worktree isolation；streaming UNf/WNf/Qci + salvage clear 契约；RC `remoteControlAtStartup` 源限制（flag/aliases）；host model overlay；ULTRAPLAN 产品 OFF；preflight proxy 超时；MCP 份额归因；SendMessage classifier/截断；tool-gone 展示；post-push PR link；raw git diff；agent 族 step-down；SR EOL 删除；file watcher teardown 等。并入 219 **24/24** / 220 residual / 221（发版时 snapshot **HAVE 35 / GAP 2 / N/A 2**；**之后** #10→HAVE、#12→DEP-HAVE，见 checklist / cross-pack-residuals，**勿当现状 GAP**）。UDS/LAN/TEAMMEM 发版时默认 OFF（后翻 ON）。 |
 | **2.7.33** | **densable 2.1.218 全量 1:1（35 HAVE / 1 N/A / 0 GAP）**：code-review bg + ultra cloud；ultrareview 描述/无效参数；SR a11y / Ctrl+J / ←确认 / AgentView Esc；Host teardown + permissionLayers；auto-mode/sandbox IDE；fork lineage；Bedrock wizard；CCR heartbeat；frontmatter 布尔/`--config`/禁 `:`；`/deep-research` 仅手动；RC multi-env trust。**#9 gateway metering N/A**。发版加固：Ink skipSyncMarkers/unmount/alt-screen；Agent Views Esc 不 attach-origin 黑屏 + O7 退出。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.32** | **densable 2.1.217 全量 1:1（20/20 HAVE）**：subagent concurrent 20 / nest depth 1；brace budget；`FORCE_HYPERLINK`；emoji shortcode typeahead；tip lifetime 3；login 3d；transcript ENOSPC；MCP truncate；Opus 4.8 Bedrock 1M；SR startup quiet；managed OTEL；malformed attachment；attach footer gap；Win taskkill；bg isolation `eq`/`N6g`/`ZRu` bare+YPg（ZRu 仅 Shell.exec）。**故意更严**：parse-unavailable fail-closed。UDS/LAN/TEAMMEM 默认 OFF。 |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 收口**：215 `/verify`·`/code-review` 禁止模型自启（HAVE 2）；216 **HAVE 38 / N/A 1 / GAP 0**（sandbox.filesystem.disabled、长会话 normalize、auto-mode 401、worktree git 隔离、daemon stop --any、bg/agents UX、Win 网络路径、fullscreen UI、skill 菜单热刷新、`/rewind` symlink 安全等）。故意不扩 UDS/LAN/TEAMMEM；VSCode RTL N/A。 |
@@ -268,7 +268,7 @@ Tab / Shift+Tab 切字段，Enter 确认。
 FEATURE_BUDDY=1 bun run dev
 ```
 
-构建默认会打开一批 flag（见 `build.ts` / `scripts/defines.ts`）；**默认关闭**的包括 `LAN_PIPES`、`UDS_INBOX`、`FORK_SUBAGENT` 等。群控 / Pipe 相关能力需对应 flag，不要默认当成全开。
+构建默认会打开一批 flag（见 `build.ts` / `scripts/defines.ts`）。**现默认 ON**：`UDS_INBOX` / `LAN_PIPES` / `TEAMMEM` / `KAIROS`+外围（channels/push/webhook）。仍默认关闭：`FORK_SUBAGENT`、`ULTRAPLAN` 等。
 
 ### VS Code 调试
 

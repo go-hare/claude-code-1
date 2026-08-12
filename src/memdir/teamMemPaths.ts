@@ -69,6 +69,11 @@ function sanitizePathKey(key: string): string {
  * to be enabled. This keeps all team-memory consumers (prompt, content
  * injection, sync watcher, file detection) consistent when auto memory is
  * disabled via env var or settings.
+ *
+ * Runtime GB gate: `tengu_herring_clock`. On self-hosted / no-GB, LOCAL_GATE_DEFAULTS
+ * sets it true (see growthbook.ts) so TEAMMEM compile-on is not a silent no-op.
+ * Override with CLAUDE_CODE_DISABLE_LOCAL_GATES=1 or env/config feature overrides.
+ * Sync still requires OAuth + github.com remote (isTeamMemorySyncAvailable + watcher).
  */
 export function isTeamMemoryEnabled(): boolean {
   if (!isAutoMemoryEnabled()) {

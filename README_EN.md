@@ -55,7 +55,7 @@ Source of truth: `docs/upstream-extraction/v2.1.222/official-222-checklist.md` (
 | **streaming UI / reliability** | UNf/BNf/WNf/Qci streaming store; salvage survives pH.clear; close-after-complete no false mid-response; gateway keep-alive ping; preflight proxy + 10s timeout; file watcher error teardown; SR EOL delete; **2.7.36: empty streaming `●` / false past-tense “Ran N…”** | — |
 | **RC / settings / host** | `remoteControlAtStartup`: project/local cannot enable (can disable); `flagSettings` + `projectSettingsAliasesUserSettings`; host model overlay beats stale managed-settings | — |
 | **tools / cost / git** | MCP usage only when tools truly consumed; SendMessage summary truncate; tool-gone still rendered; post-push PR link; raw git diff `--no-textconv`/`--no-ext-diff`; agent family alias step-down | — |
-| **Feature defaults** | **ULTRAPLAN** product default OFF (`FEATURE_ULTRAPLAN=1` revives residual) | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF; no further KAIROS product surface |
+| **Feature defaults** | **ULTRAPLAN** product default OFF (`FEATURE_ULTRAPLAN=1` revives residual) | **UDS_INBOX / LAN_PIPES / TEAMMEM** ON since 2026-08-12; **KAIROS periphery** channels/push/webhook ON; **ULTRAPLAN** still OFF |
 
 #### densable 2.1.219–2.1.221 alignment (2.7.36, included)
 
@@ -73,7 +73,7 @@ Stacked on **2.1.218**. **Do not invent GAPs**: #10 SDK MCP `constructor` name c
 | **2.1.220 residual** | `isEntitlementOverlayUnavailable` / entitlement deny-set; `entitlement_blind` telemetry; blind opus-5 → opus-4-8 substitute | Official public has no per-bullet product list (N/A) |
 | **2.1.221 security / permissions** | sandbox credential `mode:"mask"`; zsh `[[ ]]` unquoted `&`; **PowerShell quote-path pWo fail-closed ask**; Bash U5e/cle full `bareAssignmentNames` (for danger set / declaration flags / Pws·uVu) + ZRu reads bare only | **#10 constructor** GAP; **#12 large-upload TLS** GAP |
 | **2.1.221 session / plugins / UI** | prompt-audit; session title sanitize; Vim yank share / undo-to-empty; plugin install catalog refresh + reload clears notice; `/status` session kind; Stats cache breakdown; ultrareview no-branches; bg commit/draft-PR policy; Vertex ToolSearch native wire | **#1 VSCode Focus** N/A; **#38 gateway** N/A |
-| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF; no further KAIROS product surface |
+| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** ON since 2026-08-12; **KAIROS periphery** channels/push/webhook ON; **ULTRAPLAN** still OFF |
 
 #### densable 2.1.218 alignment (2.7.33, included)
 
@@ -136,7 +136,7 @@ Source of truth: `docs/upstream-extraction/v2.1.214/official-214-checklist.md` (
 | **bg daemon** | yield keeps successor control socket; idle retire; `claude rm`/AgentView deleteJob; non-git force delete; transcript directory false hits | — |
 | **RC ready-push** | explicit RC + GB nudge only; reject outbound/reattach/bg/agentId; impression counters; `onInteraction` activity latch | No further KAIROS product surface |
 | **OTel / MCP / other** | message.uuid / client_request_id / tool_source; OTEL content max; out-of-context trace; MCP list_changed keep-previous; flag settings plugins; ultrareview empty-tree; SessionStart `source:"fork"`; etc. | — |
-| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF |
+| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
 #### densable 2.1.212 alignment (2.7.29, included)
 
@@ -150,7 +150,7 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **`claude auto-mode reset`** | confirm prompt + `--yes` | — |
 | **Reliability / UX batch** | plan bash writes, worktree symlink guard, hook `continue:false`, print SIGTERM 143, Win PS7 bg, shell `!` paths, bare `/btw`, SendMessage preview, Web 529, mid-conv cache, etc. (see checklist) | No **2.1.210** collapsed-tool live elapsed (adjacent) |
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
-| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** default OFF |
+| **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
 ### Recent updates (2.7.5 → 2.7.36)
 
@@ -268,7 +268,7 @@ Tab / Shift+Tab moves fields; Enter confirms.
 FEATURE_BUDDY=1 bun run dev
 ```
 
-The build enables a default set of flags (see `build.ts` / `scripts/defines.ts`). **Off by default** includes `LAN_PIPES`, `UDS_INBOX`, `FORK_SUBAGENT`, and others. Multi-instance / pipe features need the matching flags — they are not always on.
+The build enables a default set of flags (see `build.ts` / `scripts/defines.ts`). **ON by default**: `UDS_INBOX` / `LAN_PIPES` / `TEAMMEM` / `KAIROS`+periphery (channels/push/webhook). Still off: `FORK_SUBAGENT`, `ULTRAPLAN`, and others.
 
 ### VS Code debugging
 

@@ -102,9 +102,21 @@ export const DEFAULT_BUILD_FEATURES = [
   'MONITOR_TOOL', // Monitor 工具，流式监控后台进程输出
   // 'FORK_SUBAGENT',            // 已禁用：通过 Agent tool 的特殊方式实现了等效功能，无需再开
   'KAIROS', // Kairos 定时任务系统核心
+  // KAIROS 外围（densable SEA 有 SendUserFile/PushNotification/channel 产品串；
+  // 本地实现已 feature 门控。2026-08-12 默认 ON 对齐 densable 产品面）。
+  // SendUserFile 已挂 KAIROS；PushNotification = KAIROS || KAIROS_PUSH；
+  // Channels / SubscribePR 需下列子 flag。
+  'KAIROS_CHANNELS', // MCP channels 通知 / Logo notice / permission channel 回调
+  'KAIROS_PUSH_NOTIFICATION', // PushNotification 独立臂（与 KAIROS OR）
+  'KAIROS_GITHUB_WEBHOOKS', // SubscribePR + bridge webhook sanitizer
   'COORDINATOR_MODE', // 多 worker 编排模式（AgentSummary 泄露已在 52b61c2c 修复）
-  // 'UDS_INBOX', // 进程间通信管道（inbox/pipe/peers 等命令）构建后 nodejs 环境卡住
-  // 'LAN_PIPES', // 局域网管道，依赖 UDS_INBOX  构建后 nodejs 环境卡住
+  // densable 2.1.228 ships full UDS inbox product (key_publish_failed /
+  // CLAUDE_CODE_MESSAGING_TOKEN / cross-session from-name). Default ON for
+  // 1:1 alignment. Historical "build 后 node hang" comment was a go-hare
+  // engineering deferral — not densable product OFF. Re-verify with
+  // `bun run build` + `node dist/cli.js --version` if regressions reappear.
+  'UDS_INBOX', // 本机 UDS inbox / peers / pipes control plane
+  'LAN_PIPES', // 局域网 TCP + UDP beacon；依赖 UDS_INBOX 编译面
   'BG_SESSIONS', // 后台会话管理（ps/logs/attach/kill）
   'TEMPLATES', // 模板任务（new/list/reply 子命令）
   // 'REVIEW_ARTIFACT',          // 代码审查产物（API 请求无响应，待排查 schema 兼容性）
@@ -127,8 +139,10 @@ export const DEFAULT_BUILD_FEATURES = [
   // 'SKILL_LEARNING',
   // P3: poor mode
   'POOR', // 穷鬼模式，跳过 extract_memories/prompt_suggestion 减少消耗
-  // Team Memory
-  // 'TEAMMEM',                  // 已禁用：依赖 COORDINATOR_MODE，邮箱文件无限增长
+  // Team Memory — densable SEA 有完整 team memory 产品串；本地 teamMemorySync
+  // 已实现（OAuth + GitHub remote 运行时门）。旧注释「邮箱无限增长」过时：
+  // teammateMailbox 已有 MAX_* + compact（与 TEAMMEM 同步面独立）。
+  'TEAMMEM', // memory/team 双向同步 + extractMemories team 路径
   // SSH Remote
   'SSH_REMOTE', // SSH 远程连接，本地 REPL + 远端工具执行
   // Autofix PR

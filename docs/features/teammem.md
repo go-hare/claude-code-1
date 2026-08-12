@@ -1,7 +1,8 @@
 # TEAMMEM — 团队共享记忆
 
-> Feature Flag: `FEATURE_TEAMMEM=1`
-> 实现状态：完整可用（需要 Anthropic OAuth + GitHub remote）
+> Feature Flag: `TEAMMEM`（**2026-08-12 起** `DEFAULT_BUILD_FEATURES` 默认 ON；亦可 `FEATURE_TEAMMEM=1`）
+> 实现状态：完整可用
+> 运行时门：`isAutoMemoryEnabled()` + GB/`LOCAL_GATE_DEFAULTS` `tengu_herring_clock`（fork 本地默认 true）+ Anthropic OAuth + GitHub remote
 > 引用数：51
 
 ## 一、功能概述
@@ -138,13 +139,16 @@ batchDeltaByBytes(delta)
 ## 五、使用方式
 
 ```bash
-# 启用 feature
+# 编译默认已含 TEAMMEM；强制打开时：
 FEATURE_TEAMMEM=1 bun run dev
 
-# 前提条件：
-# 1. 已通过 Anthropic OAuth 登录
-# 2. 项目有 GitHub remote（git remote -v 显示 origin）
-# 3. memory/team/ 目录自动创建
+# 实际 sync 前提：
+# 1. auto-memory 开启（未关 CLAUDE_CODE_DISABLE_AUTO_MEMORY 等）
+# 2. tengu_herring_clock 为 true（fork：LOCAL_GATE_DEFAULTS 默认 true；
+#    CLAUDE_CODE_DISABLE_LOCAL_GATES=1 时退回 false 除非远程 GB 打开）
+# 3. Anthropic OAuth 登录
+# 4. 项目有 github.com remote
+# 5. memory/team/ 由 sync 创建
 ```
 
 ## 六、外部依赖
