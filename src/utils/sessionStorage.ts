@@ -4254,18 +4254,24 @@ export function getCurrentSessionAgentColor(): string | undefined {
 }
 
 /**
- * densable `D6e(leafUuid)` — write last-prompt leaf before keepParent fork flush.
+ * densable `D6e(leafUuid)` / `Q_a(e,t)` — write last-prompt leaf before
+ * keepParent fork flush or rewind persist.
  *
  * densable:
  *   r.currentSessionLeafUuid = e
  *   r.currentSessionLeafTs = now
- *   await r.appendEntry({ type:"last-prompt", lastPrompt?, leafUuid, explicit:true, sessionId })
+ *   await r.appendEntry({
+ *     type:"last-prompt", lastPrompt?, leafUuid, explicit:true,
+ *     ...t?.rewound&&{rewound:!0}, sessionId
+ *   })
  *
  * Local: append last-prompt with leafUuid/explicit so the snapshot resume
- * path has a hard boundary marker at the fork point.
+ * path has a hard boundary marker at the fork point. Optional `rewound`
+ * matches densable 2.1.227 rewind-before-first-message anchor.
  */
 export async function recordForkBoundaryLeaf(
   leafUuid: string | null | undefined,
+  options?: { rewound?: boolean },
 ): Promise<void> {
   const project = getProject()
   const entry: LastPromptMessage = {
@@ -4276,9 +4282,30 @@ export async function recordForkBoundaryLeaf(
       : {}),
     leafUuid: leafUuid ?? null,
     explicit: true,
+    ...(options?.rewound ? { rewound: true } : {}),
     timestamp: new Date().toISOString(),
   }
   await project.appendEntry(entry)
+}
+
+/**
+ * densable 2.1.227 `d2p` / `transcriptHasBytes` — true when the session
+ * transcript file has size > 0 (local path). Used by `/tui` relaunch
+ * (`freshIfNoTranscript`) so rewound-empty / never-started sessions do not
+ * `--resume` a hollow conversation.
+ *
+ * densable also checks remote backend meta when present; local only has the
+ * filesystem path (no cloud transcript backend).
+ */
+export async function transcriptHasBytes(
+  transcriptPath: string = getTranscriptPath(),
+): Promise<boolean> {
+  try {
+    const st = await stat(transcriptPath)
+    return st.size > 0
+  } catch {
+    return false
+  }
 }
 
 /**

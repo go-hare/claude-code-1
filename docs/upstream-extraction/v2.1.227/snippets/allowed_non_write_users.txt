@@ -1,0 +1,43 @@
+===== offset 81302705 =====
+Cannot destructure property 'cli' from null or undefined value
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+tengu_disable_bypass_permissions_mode
+bypassPermissions
+settings defaultMode "
+tengu_ccr_unsupported_default_mode_ignored
+settings defaultMode "bypassPermissions" ignored for a VS Code-owned session without the allow-bypas
+
+===== offset 122908657 =====
+Cannot destructure property 'permissionModeCli' from null or undefined value
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+�@ ����3���<��
+��@���@0L�@04�
+�� ��@pş@�5�@ N���M��
+X7�������������
+�7�������������
+��������������
+蠼������������
+�_,������������
+x$*������������
+�f9������������
+hY?������������
+�DO������������
+x��������������
+N������������
+h\�������������
+�6�������������
+���������������
+���������������
+��(������������
+�������������
+�a/������������
+p5�������������
+H��������������
+�5�������������
+permissionModeCli
+agentPermissionMode
+�_�������������
+�=/������������
+
+===== offset 253310638 =====
+"ANTHROPIC_CUSTOM_MODEL_OPTION",capabilitiesEnvVar:"ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"}]});function Zmr(e,t=process.argv){return _hs(e,t).at(-1)}function _hs(e,t=process.argv){let r=[];for(let n=0;n<t.length;n++){let o=t[n];if(o==="--")break;if(o?.startsWith(`${e}=`)){r.push(o.slice(e.length+1));continue}if(o===e&&n+1<t.length){r.push(t[++n]);continue}if(o!==void 0&&XSu.has(o))n++}return r}function QSu(e,t=process.argv){for(let r=0;r<t.length;r++){let n=t[r];if(n==="--")break;if(n===e)return!0;if(n!==void 0&&XSu.has(n))r++}return!1}var XSu;var Min=v(()=>{XSu=new Set(["--prefill","--prefill-b64","--deep-link-repo","--deep-link-last-fetch","--deep-link-cwd-b64","--handle-uri","--settings","--managed-settings","--setting-sources","--team-name","--agent-id","--agent-name","--agent-color","--parent-session-id","--agent-type","--model","--agent","--routine","--effort","--permission-mode","--session-id"])});function bhs(e){let t=q8(e.cli.effort)??mbo(e.cli.effort);if(t!==void 0)return t;if(e.settings.ultracode===!0)return"xhigh";return SQe(e.settings.effortLevel)}function Gky(){let e=rt("tengu_auto_mode_config",ZSu);return e!==ZSu&&e?.enabled==="disabled"}function iTu(e){let{cli:t,env:r,settings:n,agentFrontmatter:o}=e,i=DH(t.permissionMode),s=t.dangerouslySkipPermissions,a=o?.permissionMode;if(br(r.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)){let g=s||i&&i!=="default"||a&&a!=="default",y="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.";return{mode:"default",notification:g?y:void 0,fromAutoFallback:!1}}let l=rt("tengu_disable_bypass_permissions_mode",!1),c=n.permissions?.disableBypassPermissionsMode==="disable",u=l||c,d=Gky(),p=[],f;if(s)if(oTu("bypassPermissions"))f=nTu,p.push("default");else p.push("bypassPermissions");if(i){let g=u5(i);if(oTu(g))f=nTu,p.push("default");else if(g==="auto"&&d)E("auto mode circuit breaker active (cached) \u2014 falling back to default",{level:"warn"});else p.push(g)}if(a)if(a==="auto"&&d)E("agent frontmatter requested auto mode but circuit breaker active \u2014 falling through",{level:"warn"});else p.push(a);if(k$t()){let g=!eTu()?void 0:tTu.map((y)=>DH(tn(y)?.permissions?.defaultMode)).find((y)=>y!=null);if(g!=null&&br(r.CLAUDE_CODE_REMOTE)&&!rTu.includes(g)){if(E(`settings defaultMode "${g}" is not supported in CLAUDE_CODE_REMOTE \u2014 only acceptEdits, plan, default, and auto are allowed`,{level:"warn"}),p.length===0)L("tengu_ccr_unsupported_default_mode_ignored",{mode_hash:gu(g)}),p.push("default")}else if(g==="bypassPermissions"){if(s||t.allowDangerouslySkipPermissions)p.push(g);else if(p.length===0)f='Permission mode bypassPermissions from settings was ignored \u2014 enable the "Claude Code: Allow Dangerously Skip Permissions" setting in VS Code to consent to it',E('settings defaultMode "bypassPermissions" ignored for a VS Code-owned session without the allow-bypass se

@@ -3505,10 +3505,10 @@ export async function generateFileAttachment(
   // Check file size before attempting to read (skip for PDFs — they have their own size/page handling below)
   if (
     mode === 'at-mention' &&
-    !isFileWithinReadSizeLimit(
+    !(await isFileWithinReadSizeLimit(
       filename,
       getDefaultFileReadingLimits().maxSizeBytes,
-    )
+    ))
   ) {
     const ext = parse(filename).ext.toLowerCase()
     if (!isPDFExtension(ext)) {

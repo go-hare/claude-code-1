@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
   decideGrowthBookAuthRefresh,
+  formatGrowthBookAuthHeaderResolutionFailure,
+  formatGrowthBookPreInitOAuthFailure,
   isSameGrowthBookAuthAccount,
 } from '../growthbookAuthRefresh.js'
 
@@ -136,5 +138,26 @@ describe('decideGrowthBookAuthRefresh', () => {
       sameAccount: false,
       preserveLoggedExposures: false,
     })
+  })
+})
+
+describe('densable 2.1.227 GrowthBook pre-init log labels', () => {
+  test('timeout message maps to timeout kind', () => {
+    expect(formatGrowthBookPreInitOAuthFailure(new Error('timeout'))).toBe(
+      'GrowthBook: pre-init OAuth refresh failed (timeout)',
+    )
+  })
+
+  test('other errors use Error.name', () => {
+    const err = new TypeError('boom')
+    expect(formatGrowthBookPreInitOAuthFailure(err)).toBe(
+      'GrowthBook: pre-init OAuth refresh failed (TypeError)',
+    )
+  })
+
+  test('auth header resolution failure string', () => {
+    expect(formatGrowthBookAuthHeaderResolutionFailure(new Error('nope'))).toBe(
+      'GrowthBook: auth header resolution failed (Error), continuing without auth',
+    )
   })
 })

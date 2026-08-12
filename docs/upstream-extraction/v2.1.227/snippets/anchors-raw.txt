@@ -1,0 +1,4248 @@
+=== ANCHOR allowed_non_write_users hits=4 ===
+-- offset 81302705 --
+Cannot destructure property 'cli' from null or undefined value
+---
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+---
+tengu_disable_bypass_permissions_mode
+---
+bypassPermissions
+---
+settings defaultMode "
+---
+tengu_ccr_unsupported_default_mode_ignored
+
+-- offset 122908657 --
+Cannot destructure property 'permissionModeCli' from null or undefined value
+---
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+---
+permissi
+
+-- offset 253310638 --
+ce(e.length+1));continue}if(o===e&&n+1<t.length){r.push(t[++n]);continue}if(o!==void 0&&XSu.has(o))n++}return r}function QSu(e,t=process.argv){for(let r=0;r<t.length;r++){let n=t[r];if(n==="--")break;if(n===e)return!0;if(n!==void 0&&XSu.has(n))r++}return!1}var XSu;var Min=v(()=>{XSu=new Set(["--prefill","--prefill-b64","--deep-link-repo","--deep-link-last-fetch","--deep-link-cwd-b64","--handle-uri","--settings","--managed-settings","--setting-sources","--team-name","--agent-id","--agent-name","--agent-color","--parent-session-id","--agent-type","--model","--agent","--routine","--effort","--permission-mode","--session-id"])});function bhs(e){let t=q8(e.cli.effort)??mbo(e.cli.effort);if(t!==void 0)return t;if(e.settings.ultracode===!0)return"xhigh";return SQe(e.settings.effortLevel)}function Gky(){let e=rt("tengu_auto_mode_config",ZSu);return e!==ZSu&&e?.enabled==="disabled"}function iTu(e){let{cli:t,env:r,settings:n,agentFrontmatter:o}=e,i=DH(t.permissionMode),s=t.dangerouslySkipPermissions,a=o?.permissionMode;if(br(r.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)){let g=s||i&&i!=="default"||a&&a!=="default",y="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.";return{mode:"default",notification:g?y:void 0,fromAutoFallback:!1}}let l=rt("tengu_disable_bypass_permissions_mode",!1),c=n.permissions?.disableBypassPermissionsMode==="disable",u=l||c,d=Gky(),p=[],f;if(s)if(oTu("bypassPermissions"))f=nTu,p.push("default");else p.push("bypassPermissions");if(i){let g=u5(i);if(oTu(g))f=nTu,p.push("default");else if(g==="auto"&&d)E("auto mode circuit breaker active (cached) \u2014 falling back to default",{level:"warn"});else p.push(g)}if(a)if(a==="auto"&&d)E("agent frontmatter requested auto mode but circuit breaker active \u2014 falling through",{level:"warn"});else p.push(a);if(k$t()){let g=!eTu()?void 0:tTu.map((y)=>DH(tn(y)?.permissions?.defaultMode)).find((y)=>y!=null);if(g!=null&&br(r.CLAUDE_CODE_REMOTE)&&!rTu.includes(g)){if(E(`settings defaultMode "${g}" is not supported in CLAUDE_CODE_REMOTE \u2014 only acceptEdits, plan, default, and auto are allowed`,{level:"warn"}),p.length===0)L("tengu_ccr_unsupported_default_mode_ignored",{mode_hash:gu(g)}),p.push("default")}else if(g==="bypassPermissions"){if(s||t.allowDangerouslySkipPermissions)p.push
+
+-- offset 264547339 --
+,error:gje};if(e=o,e==="bypassPermissions"){if(oF())return{ok:!1,error:"Cannot set permission mode to bypassPermissions because it is disabled by settings or configuration"};if(!t.isBypassPermissionsModeAvailable)return{ok:!1,error:"Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions"}}if(e==="auto"&&!sB()){let i=xxe();return{ok:!1,error:i?`Cannot set permission mode to auto: ${f$e(i)}`:"Cannot set permission mode to auto"}}return r((i)=>{if(i.mode===e)return i;return{...JGe(i.mode,e,i,n),mode:e}}),setImmediate(()=>{Syt.emit()}),{ok:!0,mode:e}}function Hrf(e){let t=e.join(" ").trim();if(Lii(t))return Nii();let n=g1(e);if(n.includes("preset:default"))return eK().map((o)=>o.name).concat(n.filter((o)=>o!=="preset:default"));return n}function GfS({processPwd:e,originalCwd:t}){let{resolvedPath:r,isSymlink:n}=yh(gr(),e);return n?r===$ii.resolve(t):!1}function LEa({permissionModeCli:e,dangerouslySkipPermissions:t,allowDangerouslySkipPermissions:r,agentPermissionMode:n}){let o=DH(e);if(zH()){let s=t||o&&o!=="default"||n&&n!=="default",a="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.";if(s)process.stderr.write(`\u26A0 ${a}
+`);return{mode:"default",notification:s?a:void 0}}let i=iTu({cli:{permissionMode:o,dangerouslySkipPermissions:t,allowDangerouslySkipPermissions:r,isNonInteractiveSession:Pn()},env:{...process.env,CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:void 0},settings:na()||{},agentFrontmatter:n?{permissionMode:n}:void 0});if(gWs(i.fromAutoFallback),i.mode==="auto")JV(!0);return{mode:i.mode,notification:i.notification}}function g1(e){if(e.length===0)return[];let t=[];for(let r of e){if(!r)continue;let n="",o=!1;for(let i of r)switch(i){case"(":o=!0,n+=i;break;case")":o=!1,n+=i;break;case",":if(o)n+=i;else{if(n.trim())t.push(n.trim());n=""}break;case" ":if(o)n+=i;else if(n.trim())t.push(n.trim()),n="";break;default:n+=i}if(n.trim())t.push(n.trim())}return t}async function NEa({allowedToolsCli:e,disallowedToolsCli:t,baseToolsCli:r,permissionMode:n,allowDangerouslySkipPermissions:o,addDirs:i,bgSessionPermissionRules:s}){let a=[],l=g1(e).map((z)=>$f(Kh(z))).filter((z)=>{let B=Tlo(Kh(z).toolName);if(B)return a.push(`Ignoring --allowedTools rule "${z}": ${B.error}. ${B.sug
+
+=== ANCHOR CLAUDE_CODE_SUBPROCESS_ENV_SCRUB hits=6 ===
+-- offset 75262400 --
+CLAUDE_CODE_TMUX_PREFIX_CONFLICTS
+---
+CLAUDE_CODE_TMUX_PREFIX
+---
+CLAUDE_CODE_TMPDIR
+---
+CLAUDE_CODE_TEST_NO_PWSHI
+---
+CLAUDE_CODE_TEST_NO_GIT_BASH
+---
+CLAUDE_CODE_TEST_FORCE_DENY
+---
+CLAUDE_CODE_TEST_FIXTURES_ROOT
+---
+CLAUDE_CODE_TERMINAL_MCP_TOOLS
+---
+CLAUDE_CODE_TEAM_TEARDOWN_PARK_TIMEOUT_MS
+---
+CLAUDE_CODE_TASK_LIST_IDIr,
+---
+CLAUDE_CODE_TAGS
+---
+CLAUDE_CODE_SYSTEM_PROMPT_GB_FEATURE
+---
+CLAUDE_CODE_SYNTAX_HIGHLIGHT
+---
+CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS
+---
+CLAUDE_CODE_SYNC_SKILLS_INSTALL_TIMEOUT_MS
+---
+CLAUDE_CODE_SYNC_SESSION_REFS
+---
+CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS,
+---
+CLAUDE_CODE_SYNC_PLUGINS_MCP_TIMEOUT_MS
+---
+CLAUDE_CODE_SYNC_PLUGINS_INSTALL_TIMEOUT_MS
+---
+CLAUDE_CODE_SYNC_PLUGINS_DOWNLOAD_STALL_MS,
+---
+CLAUDE_CODE_SYNC_PLUGINS_BUFFERED_DOWNLOAD
+---
+CLAUDE_CODE_SUPERVISED
+---
+CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+---
+CLAUDE_CODE_STOP_HOOK_BLOCK_CAP
+---
+CLAUDE_CODE_STALL_TIMEOUT_MS_FOR_TESTING
+---
+CLAUDE_CODE_SSE_PORT
+---
+CLAUDE_CODE_SPAWN_TIMESTAMP_MS
+---
+CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT
+---
+CLAUDE_CODE_SIMPLE
+---
+CLAUDE_CODE_SHELL_PREFIX	},
+---
+CLAUDE_CODE_SHELL
+---
+CLAUDE_CODE_SESSION_NAMEI~,
+---
+CLAUDE_CODE_SESSION_KIND
+---
+CLAUDE_CODE_SESSION_ID
+---
+CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS
+---
+CLAUDE_CODE_SCROLL_SPEEDId
+---
+CLAUDE_CODE_SCRIPT_CAPS
+---
+CLAUDE_CODE_SANDBOXED
+---
+CLAUDE_CODE_SAFE_MODE
+---
+CLAUDE_CODE_RESUME_TOKEN_THRESHOLD
+---
+CLAUDE_CODE_RESUME_THRESHOLD_MINUTES
+---
+CLAUDE_CODE_RESUME_SOURCE_ALIVE
+---
+CLAUDE_CODE_RESUME_PROMPT
+---
+CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS
+---
+CLAUDE_CODE_RESUME_INTERRUPTED_TURN
+---
+CLAUDE_CODE_RESUME_FROM_SESSION
+
+-- offset 81302781 --
+Cannot destructure property 'cli' from null or undefined value
+---
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+---
+tengu_disable_bypass_permissions_mode
+---
+bypassPermissions
+---
+settings defaultMode "
+---
+tengu_ccr_unsupported_default_mode_ignored
+
+-- offset 122908733 --
+Cannot destructure property 'permissionModeCli' from null or undefined value
+---
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+---
+permissionModeCli
+---
+agentPermissionMode
+
+-- offset 251290535 --
+WARD_INTERIMS_TYPED:()=>jTg,CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS:()=>Avg,CLAUDE_CODE_ULTRAREVIEW_QUOTA_FIXTURE:()=>dSg,CLAUDE_CODE_ULTRAREVIEW_PREFLIGHT_FIXTURE:()=>uSg,CLAUDE_CODE_TUI_JUST_SWITCHED:()=>UTg,CLAUDE_CODE_TRIGGER_ID:()=>cSg,CLAUDE_CODE_TMUX_TRUECOLOR:()=>BTg,CLAUDE_CODE_TMUX_SESSION:()=>lSg,CLAUDE_CODE_TMUX_PREFIX_CONFLICTS:()=>$Tg,CLAUDE_CODE_TMUX_PREFIX:()=>aSg,CLAUDE_CODE_TMPDIR:()=>sSg,CLAUDE_CODE_TEST_NO_PWSH:()=>FTg,CLAUDE_CODE_TEST_NO_GIT_BASH:()=>NTg,CLAUDE_CODE_TEST_FORCE_DENY:()=>LTg,CLAUDE_CODE_TEST_FIXTURES_ROOT:()=>iSg,CLAUDE_CODE_TERMINAL_MCP_TOOLS:()=>nSg,CLAUDE_CODE_TEAM_TEARDOWN_PARK_TIMEOUT_MS:()=>Cvg,CLAUDE_CODE_TASK_LIST_ID:()=>oSg,CLAUDE_CODE_TAGS:()=>rSg,CLAUDE_CODE_SYSTEM_PROMPT_GB_FEATURE:()=>tSg,CLAUDE_CODE_SYNTAX_HIGHLIGHT:()=>MTg,CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS:()=>wvg,CLAUDE_CODE_SYNC_SKILLS_INSTALL_TIMEOUT_MS:()=>Evg,CLAUDE_CODE_SYNC_SESSION_REFS:()=>HTg,CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS:()=>Svg,CLAUDE_CODE_SYNC_PLUGINS_MCP_TIMEOUT_MS:()=>vvg,CLAUDE_CODE_SYNC_PLUGINS_INSTALL_TIMEOUT_MS:()=>Tvg,CLAUDE_CODE_SYNC_PLUGINS_DOWNLOAD_STALL_MS:()=>OTg,CLAUDE_CODE_SYNC_PLUGINS_BUFFERED_DOWNLOAD:()=>PTg,CLAUDE_CODE_SUPERVISED:()=>ITg,CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:()=>xTg,CLAUDE_CODE_STOP_HOOK_BLOCK_CAP:()=>bvg,CLAUDE_CODE_STALL_TIMEOUT_MS_FOR_TESTING:()=>eSg,CLAUDE_CODE_SSE_PORT:()=>_vg,CLAUDE_CODE_SPAWN_TIMESTAMP_MS:()=>yvg,CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT:()=>Zbg,CLAUDE_CODE_SIMPLE:()=>kTg,CLAUDE_CODE_SHELL_PREFIX:()=>Qbg,CLAUDE_CODE_SHELL:()=>Xbg,CLAUDE_CODE_SESSION_NAME:()=>Jbg,CLAUDE_CODE_SESSION_KIND:()=>Ybg,CLAUDE_CODE_SESSION_ID:()=>Kbg,CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS:()=>gvg,CLAUDE_CODE_SCROLL_SPEED:()=>Vbg,CLAUDE_CODE_SCRIPT_CAPS:()=>hvg,CLAUDE_CODE_SANDBOXED:()=>RTg,CLAUDE_CODE_SAFE_MODE:()=>ATg,CLAUDE_CODE_RESUME_TOKEN_THRESHOLD:()=>mvg,CLAUDE_CODE_RESUME_THRESHOLD_MINUTES:()=>fvg,CLAUDE_CODE_RESUME_SOURCE_ALIVE:()=>wTg,CLAUDE_CODE_RESUME_PROMPT:()=>Gbg,CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS:()=>CTg,CLAUDE_CODE_RESUME_INTERRUPTED_TURN:()=>ETg,CLAUDE_CODE_RESUME_FROM_SESSION:()=>Wbg,CLAUDE_CODE_REPO_CHECKOUTS:()=>zbg,CLAUDE_CODE_REPL:()=>vTg,CLAUDE_CODE_REMOTE_SETTINGS_POLL_MS:()=>pvg,CLAUDE_CODE_REMOTE_SETTINGS_PATH:()=>qbg,CLAUDE_CODE_REMOTE_SESSION_ORIGIN:()=>jbg,CLAUDE_CODE_REMOTE_SESSION_ID:()=>Ubg,CLAUDE_CODE_REMOTE_SEND_KEEPALIVES:()=>TTg,CLAUDE_CODE_REMOTE_RAW_EVENTS_FILE:()=>Bbg,CLAUDE_CODE_REMOTE_MEMORY
+
+-- offset 253310471 --
+s.argv){return _hs(e,t).at(-1)}function _hs(e,t=process.argv){let r=[];for(let n=0;n<t.length;n++){let o=t[n];if(o==="--")break;if(o?.startsWith(`${e}=`)){r.push(o.slice(e.length+1));continue}if(o===e&&n+1<t.length){r.push(t[++n]);continue}if(o!==void 0&&XSu.has(o))n++}return r}function QSu(e,t=process.argv){for(let r=0;r<t.length;r++){let n=t[r];if(n==="--")break;if(n===e)return!0;if(n!==void 0&&XSu.has(n))r++}return!1}var XSu;var Min=v(()=>{XSu=new Set(["--prefill","--prefill-b64","--deep-link-repo","--deep-link-last-fetch","--deep-link-cwd-b64","--handle-uri","--settings","--managed-settings","--setting-sources","--team-name","--agent-id","--agent-name","--agent-color","--parent-session-id","--agent-type","--model","--agent","--routine","--effort","--permission-mode","--session-id"])});function bhs(e){let t=q8(e.cli.effort)??mbo(e.cli.effort);if(t!==void 0)return t;if(e.settings.ultracode===!0)return"xhigh";return SQe(e.settings.effortLevel)}function Gky(){let e=rt("tengu_auto_mode_config",ZSu);return e!==ZSu&&e?.enabled==="disabled"}function iTu(e){let{cli:t,env:r,settings:n,agentFrontmatter:o}=e,i=DH(t.permissionMode),s=t.dangerouslySkipPermissions,a=o?.permissionMode;if(br(r.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)){let g=s||i&&i!=="default"||a&&a!=="default",y="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.";return{mode:"default",notification:g?y:void 0,fromAutoFallback:!1}}let l=rt("tengu_disable_bypass_permissions_mode",!1),c=n.permissions?.disableBypassPermissionsMode==="disable",u=l||c,d=Gky(),p=[],f;if(s)if(oTu("bypassPermissions"))f=nTu,p.push("default");else p.push("bypassPermissions");if(i){let g=u5(i);if(oTu(g))f=nTu,p.push("default");else if(g==="auto"&&d)E("auto mode circuit breaker active (cached) \u2014 falling back to default",{level:"warn"});else p.push(g)}if(a)if(a==="auto"&&d)E("agent frontmatter requested auto mode but circuit breaker active \u2014 falling through",{level:"warn"});else p.push(a);if(k$t()){let g=!eTu()?void 0:tTu.map((y)=>DH(tn(y)?.permissions?.defaultMode)).find((y)=>y!=null);if(g!=null&&br(r.CLAUDE_CODE_REMOTE)&&!rTu.includes(g)){if(E(`settings defaultMode "${g}" is not supported in CLAUDE_CODE_REMOTE \u2014 only acceptEdits, plan, default, and auto are allowed`,{level:"warn"}),p.length===0)L("te
+
+-- offset 253310594 --
+reak;if(o?.startsWith(`${e}=`)){r.push(o.slice(e.length+1));continue}if(o===e&&n+1<t.length){r.push(t[++n]);continue}if(o!==void 0&&XSu.has(o))n++}return r}function QSu(e,t=process.argv){for(let r=0;r<t.length;r++){let n=t[r];if(n==="--")break;if(n===e)return!0;if(n!==void 0&&XSu.has(n))r++}return!1}var XSu;var Min=v(()=>{XSu=new Set(["--prefill","--prefill-b64","--deep-link-repo","--deep-link-last-fetch","--deep-link-cwd-b64","--handle-uri","--settings","--managed-settings","--setting-sources","--team-name","--agent-id","--agent-name","--agent-color","--parent-session-id","--agent-type","--model","--agent","--routine","--effort","--permission-mode","--session-id"])});function bhs(e){let t=q8(e.cli.effort)??mbo(e.cli.effort);if(t!==void 0)return t;if(e.settings.ultracode===!0)return"xhigh";return SQe(e.settings.effortLevel)}function Gky(){let e=rt("tengu_auto_mode_config",ZSu);return e!==ZSu&&e?.enabled==="disabled"}function iTu(e){let{cli:t,env:r,settings:n,agentFrontmatter:o}=e,i=DH(t.permissionMode),s=t.dangerouslySkipPermissions,a=o?.permissionMode;if(br(r.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)){let g=s||i&&i!=="default"||a&&a!=="default",y="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.";return{mode:"default",notification:g?y:void 0,fromAutoFallback:!1}}let l=rt("tengu_disable_bypass_permissions_mode",!1),c=n.permissions?.disableBypassPermissionsMode==="disable",u=l||c,d=Gky(),p=[],f;if(s)if(oTu("bypassPermissions"))f=nTu,p.push("default");else p.push("bypassPermissions");if(i){let g=u5(i);if(oTu(g))f=nTu,p.push("default");else if(g==="auto"&&d)E("auto mode circuit breaker active (cached) \u2014 falling back to default",{level:"warn"});else p.push(g)}if(a)if(a==="auto"&&d)E("agent frontmatter requested auto mode but circuit breaker active \u2014 falling through",{level:"warn"});else p.push(a);if(k$t()){let g=!eTu()?void 0:tTu.map((y)=>DH(tn(y)?.permissions?.defaultMode)).find((y)=>y!=null);if(g!=null&&br(r.CLAUDE_CODE_REMOTE)&&!rTu.includes(g)){if(E(`settings defaultMode "${g}" is not supported in CLAUDE_CODE_REMOTE \u2014 only acceptEdits, plan, default, and auto are allowed`,{level:"warn"}),p.length===0)L("tengu_ccr_unsupported_default_mode_ignored",{mode_hash:gu(g)}),p.push("default")}else if(g==="bypassPermissions"){if(s||t.all
+
+=== ANCHOR refreshGrowthBook hits=4 ===
+-- offset 75448032 --
+getAccountInformation
+---
+describeHowToDisableAuthTokenSource
+---
+clearWIFAuthDebugOnceCacheForTesting
+---
+clearOtelHeadersCache
+---
+clearOAuthTokenCache
+---
+clearGcpCredentialsCacheI
+---
+clearAwsHelperCredentialsCache
+---
+clearAwsCredentialsCache
+---
+clearApiKeyHelperCache
+---
+checkGcpCredentialsValid
+---
+checkAndRefreshOAuthTokenIfNeededWithOutcome
+---
+checkAndRefreshOAuthTokenIfNeeded
+---
+canAuthenticateChromeBridge
+---
+calculateApiKeyHelperTTL	
+---
+acquireOAuthRefreshLock
+---
+__resetKnownDeadRefreshTokensForTest
+---
+SDK_OAUTH_REFRESH_ENTRYPOINTS
+---
+OAuthRefreshLockContendedError
+---
+AWS_CHAIN_RESOLVE_REQUEST_TIMEOUT_MS
+---
+stopPeriodicGrowthBookRefresh
+---
+setupPeriodicGrowthBookRefresh
+---
+setGrowthBookConfigOverride
+---
+resetGrowthBook
+---
+refreshGrowthBookFeatures
+---
+refreshGrowthBookAfterAuthChange
+---
+onGrowthBookRefresh
+---
+isGrowthBookEnabled
+---
+isFeatureFromExperiment
+---
+initializeGrowthBook
+---
+hasGrowthBookOverride
+---
+hasGrowthBookEnvOverride
+---
+hasFreshGrowthBookFeatures
+---
+getUserAttributes
+---
+getRefreshConfig
+---
+getNonDefaultFeatureKeys	4
+---
+getGrowthBookConfigOverrides
+---
+getFeatureValue_DEPRECATED2
+---
+getFeatureValue_CACHED_WITH_REFRESH
+---
+getFeatureValue_CACHED_MAY_BE_STALE
+---
+getFeatureValueWithSource_CACHED_MAY_BE_STALE
+---
+getDynamicConfig_CACHED_MAY_BE_STALE
+---
+getDynamicConfig_BLOCKS_ON_INIT
+---
+getClientDataAtis
+---
+getApiBaseUrlHost
+---
+getAllGrowthBookFeatures	
+---
+clearGrowthBookConfigOverrides
+---
+checkSecurityRestrictionGate
+---
+checkGate_CACHED_
+
+-- offset 75448080 --
+describeHowToDisableAuthTokenSource
+---
+clearWIFAuthDebugOnceCacheForTesting
+---
+clearOtelHeadersCache
+---
+clearOAuthTokenCache
+---
+clearGcpCredentialsCacheI
+---
+clearAwsHelperCredentialsCache
+---
+clearAwsCredentialsCache
+---
+clearApiKeyHelperCache
+---
+checkGcpCredentialsValid
+---
+checkAndRefreshOAuthTokenIfNeededWithOutcome
+---
+checkAndRefreshOAuthTokenIfNeeded
+---
+canAuthenticateChromeBridge
+---
+calculateApiKeyHelperTTL	
+---
+acquireOAuthRefreshLock
+---
+__resetKnownDeadRefreshTokensForTest
+---
+SDK_OAUTH_REFRESH_ENTRYPOINTS
+---
+OAuthRefreshLockContendedError
+---
+AWS_CHAIN_RESOLVE_REQUEST_TIMEOUT_MS
+---
+stopPeriodicGrowthBookRefresh
+---
+setupPeriodicGrowthBookRefresh
+---
+setGrowthBookConfigOverride
+---
+resetGrowthBook
+---
+refreshGrowthBookFeatures
+---
+refreshGrowthBookAfterAuthChange
+---
+onGrowthBookRefresh
+---
+isGrowthBookEnabled
+---
+isFeatureFromExperiment
+---
+initializeGrowthBook
+---
+hasGrowthBookOverride
+---
+hasGrowthBookEnvOverride
+---
+hasFreshGrowthBookFeatures
+---
+getUserAttributes
+---
+getRefreshConfig
+---
+getNonDefaultFeatureKeys	4
+---
+getGrowthBookConfigOverrides
+---
+getFeatureValue_DEPRECATED2
+---
+getFeatureValue_CACHED_WITH_REFRESH
+---
+getFeatureValue_CACHED_MAY_BE_STALE
+---
+getFeatureValueWithSource_CACHED_MAY_BE_STALE
+---
+getDynamicConfig_CACHED_MAY_BE_STALE
+---
+getDynamicConfig_BLOCKS_ON_INIT
+---
+getClientDataAtis
+---
+getApiBaseUrlHost
+---
+getAllGrowthBookFeatures	
+---
+clearGrowthBookConfigOverrides
+---
+checkSecurityRestrictionGate
+---
+checkGate_CACHED_OR_BLOCKING
+---
+ATIS_REQUEST_HEAD
+
+-- offset 265499488 --
+process.once("beforeExit",this.refreshLoopBeforeExitListener)}async periodicRefreshLoop(e){while(!e.aborted&&!this.disposed)try{let{intervalMs:t,flagged:r}=this.deps.getRefreshCadence();if(await this.deps.sleep(t,e,{unref:!0}),e.aborted)return;let n=this.remoteEvalFetchOkCount;if(await this.refreshFeatures(),r&&this.remoteEvalFetchOkCount===n&&!e.aborted){if(await this.deps.sleep(Math.round(Math.random()*OPS),e,{unref:!0}),e.aborted)return;await this.refreshFeatures()}}catch(t){De(_n(t)),await this.deps.sleep(PPS,e,{unref:!0})}}stopPeriodicRefresh(){if(this.refreshLoopController)this.refreshLoopController.abort(),this.refreshLoopController=null;if(this.refreshLoopBeforeExitListener)process.removeListener("beforeExit",this.refreshLoopBeforeExitListener),this.refreshLoopBeforeExitListener=null}}function oPa(e,t){return e===null?t:e}function Tbf(e){try{Promise.resolve(e()).catch((t)=>{De(t)})}catch(t){De(t)}}var PPS=60000,OPS=5000,DPS=5000,Sbf="GrowthBook pre-init OAuth refresh";var vbf=v(()=>{IXi();y5();Ke();ut();qr();Wy();hr()});var ojt={};dt(ojt,{stopPeriodicGrowthBookRefresh:()=>qPS,setupPeriodicGrowthBookRefresh:()=>jPS,setGrowthBookConfigOverride:()=>$PS,resetGrowthBook:()=>Gci,refreshGrowthBookFeatures:()=>aPa,refreshGrowthBookAfterAuthChange:()=>O9e,onGrowthBookRefresh:()=>jxe,isGrowthBookEnabled:()=>Mbr,isFeatureFromExperiment:()=>NPS,initializeGrowthBook:()=>RW,hasGrowthBookOverride:()=>l3s,hasGrowthBookEnvOverride:()=>LPS,hasFreshGrowthBookFeatures:()=>yqe,getUserAttributes:()=>sPa,getRefreshConfig:()=>wbf,getNonDefaultFeatureKeys:()=>Yys,getGrowthBookConfigOverrides:()=>FPS,getFeatureValue_DEPRECATED:()=>oti,getFeatureValue_CACHED_WITH_REFRESH:()=>Rpe,getFeatureValue_CACHED_MAY_BE_STALE:()=>rt,getFeatureValueWithSource_CACHED_MAY_BE_STALE:()=>adn,getDynamicConfig_CACHED_MAY_BE_STALE:()=>eF,getDynamicConfig_BLOCKS_ON_INIT:()=>_Ae,getClientDataAtis:()=>fIa,getApiBaseUrlHost:()=>Ebf,getAllGrowthBookFeatures:()=>Fsn,clearGrowthBookConfigOverrides:()=>BPS,checkSecurityRestrictionGate:()=>WEa,checkGate_CACHED_OR_BLOCKING:()=>nj,ATIS_REQUEST_HEADER:()=>pIa});function xK(){if(Z0t===null)Z0t=new iPa({isEnabled:()=>Mbr(),isDiskCacheReadableWhileDisabled:()=>UPS(),hasWorkspaceTrust:()=>MPS(),getAuthHeaders:()=>xBt(),refreshOAuthTokenIfNeeded:()=>i_(),getUserAttributes:()=>sPa(),rereadUserAttributes:()=>(jds(),Yje(),Cgo(),sPa()),readGlobalConfig:()=>Xt(),saveGlobalConfig:(e)=>{
+
+-- offset 265499522 --
+reshLoopBeforeExitListener)}async periodicRefreshLoop(e){while(!e.aborted&&!this.disposed)try{let{intervalMs:t,flagged:r}=this.deps.getRefreshCadence();if(await this.deps.sleep(t,e,{unref:!0}),e.aborted)return;let n=this.remoteEvalFetchOkCount;if(await this.refreshFeatures(),r&&this.remoteEvalFetchOkCount===n&&!e.aborted){if(await this.deps.sleep(Math.round(Math.random()*OPS),e,{unref:!0}),e.aborted)return;await this.refreshFeatures()}}catch(t){De(_n(t)),await this.deps.sleep(PPS,e,{unref:!0})}}stopPeriodicRefresh(){if(this.refreshLoopController)this.refreshLoopController.abort(),this.refreshLoopController=null;if(this.refreshLoopBeforeExitListener)process.removeListener("beforeExit",this.refreshLoopBeforeExitListener),this.refreshLoopBeforeExitListener=null}}function oPa(e,t){return e===null?t:e}function Tbf(e){try{Promise.resolve(e()).catch((t)=>{De(t)})}catch(t){De(t)}}var PPS=60000,OPS=5000,DPS=5000,Sbf="GrowthBook pre-init OAuth refresh";var vbf=v(()=>{IXi();y5();Ke();ut();qr();Wy();hr()});var ojt={};dt(ojt,{stopPeriodicGrowthBookRefresh:()=>qPS,setupPeriodicGrowthBookRefresh:()=>jPS,setGrowthBookConfigOverride:()=>$PS,resetGrowthBook:()=>Gci,refreshGrowthBookFeatures:()=>aPa,refreshGrowthBookAfterAuthChange:()=>O9e,onGrowthBookRefresh:()=>jxe,isGrowthBookEnabled:()=>Mbr,isFeatureFromExperiment:()=>NPS,initializeGrowthBook:()=>RW,hasGrowthBookOverride:()=>l3s,hasGrowthBookEnvOverride:()=>LPS,hasFreshGrowthBookFeatures:()=>yqe,getUserAttributes:()=>sPa,getRefreshConfig:()=>wbf,getNonDefaultFeatureKeys:()=>Yys,getGrowthBookConfigOverrides:()=>FPS,getFeatureValue_DEPRECATED:()=>oti,getFeatureValue_CACHED_WITH_REFRESH:()=>Rpe,getFeatureValue_CACHED_MAY_BE_STALE:()=>rt,getFeatureValueWithSource_CACHED_MAY_BE_STALE:()=>adn,getDynamicConfig_CACHED_MAY_BE_STALE:()=>eF,getDynamicConfig_BLOCKS_ON_INIT:()=>_Ae,getClientDataAtis:()=>fIa,getApiBaseUrlHost:()=>Ebf,getAllGrowthBookFeatures:()=>Fsn,clearGrowthBookConfigOverrides:()=>BPS,checkSecurityRestrictionGate:()=>WEa,checkGate_CACHED_OR_BLOCKING:()=>nj,ATIS_REQUEST_HEADER:()=>pIa});function xK(){if(Z0t===null)Z0t=new iPa({isEnabled:()=>Mbr(),isDiskCacheReadableWhileDisabled:()=>UPS(),hasWorkspaceTrust:()=>MPS(),getAuthHeaders:()=>xBt(),refreshOAuthTokenIfNeeded:()=>i_(),getUserAttributes:()=>sPa(),rereadUserAttributes:()=>(jds(),Yje(),Cgo(),sPa()),readGlobalConfig:()=>Xt(),saveGlobalConfig:(e)=>{Fr(e)},readEnvironmentOverrides:()
+
+=== ANCHOR preserveLoggedExposures hits=6 ===
+-- offset 233439600 --
+preserveLoggedExposures
+
+-- offset 265495631 --
+o!==void 0)return{value:oPa(o,t),source:"payload"};try{let i=this.deps.readGlobalConfig(),s=i.cachedGrowthBookFeatures?.[e];if(s!==void 0)return this.recordDeferredExposure(e,i),{value:oPa(s,t),source:"disk"}}catch{}return{value:t,source:"fallback"}}async checkSecurityRestrictionGate(e){let t=this.getEnvironmentOverrides();if(t&&e in t)return Boolean(t[e]);let r=this.readConfigOverrides();if(r&&e in r)return Boolean(r[e]);if(!this.deps.isEnabled())return!1;if(this.reinitializingPromise)await this.reinitializingPromise;let n=this.deps.readGlobalConfig().cachedGrowthBookFeatures?.[e];if(n!==void 0)return Boolean(n);return!1}async checkGateCachedOrBlocking(e){let t=this.getEnvironmentOverrides();if(t&&e in t)return Boolean(t[e]);let r=this.readConfigOverrides();if(r&&e in r)return Boolean(r[e]);if(!this.deps.isEnabled())return!1;if(this.remoteEvalFeatureValues.get(e)===!0)return this.logExposureForFeature(e),!0;let n=this.deps.readGlobalConfig();if(n.cachedGrowthBookFeatures?.[e]===!0)return this.recordDeferredExposure(e,n),!0;return this.getFeatureValueBlocking(e,!1)}refreshAfterAuthChange(e){if(this.disposed||!this.deps.isEnabled())return;try{this.reset({preservePendingExposures:!0,preserveLoggedExposures:e?.preserveLoggedExposures}),this.refreshed.emit();let t=this.initialize().catch((r)=>(De(_n(r)),null)).finally(()=>{if(this.reinitializingPromise===t)this.reinitializingPromise=null});this.reinitializingPromise=t}catch(t){De(_n(t))}}reset(e){if(this.stopPeriodicRefresh(),this.currentBeforeExitHandler)process.off("beforeExit",this.currentBeforeExitHandler),this.currentBeforeExitHandler=null;if(this.currentExitHandler)process.off("exit",this.currentExitHandler),this.currentExitHandler=null;if(this.client?.destroy(),this.client=null,this.generation++,this.clientCreatedWithAuth=!1,this.clientAuthResolutionTransientlyFailed=!1,this.clientAuthBearer=void 0,this.clientAccountUuid=void 0,this.clientOrganizationUuid=void 0,!e?.preserveLoggedExposures)this.loggedNonObjectFeatureOnce=!1,this.loggedMalformedExperimentOnce=!1,this.loggedValuelessPayloadOnce=!1;if(this.reinitializingPromise=null,this.experimentDataByFeature.clear(),this.nonDefaultFeatureKeys.clear(),!e?.preservePendingExposures)this.pendingExposures.clear();if(!e?.preserveLoggedExposures)this.loggedExposures.clear();this.remoteEvalFeatureValues.clear(),this.clientPromise=null,this.initializePromise=null,this.environmentOverrid
+
+-- offset 265495658 --
+(o,t),source:"payload"};try{let i=this.deps.readGlobalConfig(),s=i.cachedGrowthBookFeatures?.[e];if(s!==void 0)return this.recordDeferredExposure(e,i),{value:oPa(s,t),source:"disk"}}catch{}return{value:t,source:"fallback"}}async checkSecurityRestrictionGate(e){let t=this.getEnvironmentOverrides();if(t&&e in t)return Boolean(t[e]);let r=this.readConfigOverrides();if(r&&e in r)return Boolean(r[e]);if(!this.deps.isEnabled())return!1;if(this.reinitializingPromise)await this.reinitializingPromise;let n=this.deps.readGlobalConfig().cachedGrowthBookFeatures?.[e];if(n!==void 0)return Boolean(n);return!1}async checkGateCachedOrBlocking(e){let t=this.getEnvironmentOverrides();if(t&&e in t)return Boolean(t[e]);let r=this.readConfigOverrides();if(r&&e in r)return Boolean(r[e]);if(!this.deps.isEnabled())return!1;if(this.remoteEvalFeatureValues.get(e)===!0)return this.logExposureForFeature(e),!0;let n=this.deps.readGlobalConfig();if(n.cachedGrowthBookFeatures?.[e]===!0)return this.recordDeferredExposure(e,n),!0;return this.getFeatureValueBlocking(e,!1)}refreshAfterAuthChange(e){if(this.disposed||!this.deps.isEnabled())return;try{this.reset({preservePendingExposures:!0,preserveLoggedExposures:e?.preserveLoggedExposures}),this.refreshed.emit();let t=this.initialize().catch((r)=>(De(_n(r)),null)).finally(()=>{if(this.reinitializingPromise===t)this.reinitializingPromise=null});this.reinitializingPromise=t}catch(t){De(_n(t))}}reset(e){if(this.stopPeriodicRefresh(),this.currentBeforeExitHandler)process.off("beforeExit",this.currentBeforeExitHandler),this.currentBeforeExitHandler=null;if(this.currentExitHandler)process.off("exit",this.currentExitHandler),this.currentExitHandler=null;if(this.client?.destroy(),this.client=null,this.generation++,this.clientCreatedWithAuth=!1,this.clientAuthResolutionTransientlyFailed=!1,this.clientAuthBearer=void 0,this.clientAccountUuid=void 0,this.clientOrganizationUuid=void 0,!e?.preserveLoggedExposures)this.loggedNonObjectFeatureOnce=!1,this.loggedMalformedExperimentOnce=!1,this.loggedValuelessPayloadOnce=!1;if(this.reinitializingPromise=null,this.experimentDataByFeature.clear(),this.nonDefaultFeatureKeys.clear(),!e?.preservePendingExposures)this.pendingExposures.clear();if(!e?.preserveLoggedExposures)this.loggedExposures.clear();this.remoteEvalFeatureValues.clear(),this.clientPromise=null,this.initializePromise=null,this.environmentOverrides=null,this.environmentOve
+
+-- offset 265496384 --
+nfigOverrides();if(r&&e in r)return Boolean(r[e]);if(!this.deps.isEnabled())return!1;if(this.remoteEvalFeatureValues.get(e)===!0)return this.logExposureForFeature(e),!0;let n=this.deps.readGlobalConfig();if(n.cachedGrowthBookFeatures?.[e]===!0)return this.recordDeferredExposure(e,n),!0;return this.getFeatureValueBlocking(e,!1)}refreshAfterAuthChange(e){if(this.disposed||!this.deps.isEnabled())return;try{this.reset({preservePendingExposures:!0,preserveLoggedExposures:e?.preserveLoggedExposures}),this.refreshed.emit();let t=this.initialize().catch((r)=>(De(_n(r)),null)).finally(()=>{if(this.reinitializingPromise===t)this.reinitializingPromise=null});this.reinitializingPromise=t}catch(t){De(_n(t))}}reset(e){if(this.stopPeriodicRefresh(),this.currentBeforeExitHandler)process.off("beforeExit",this.currentBeforeExitHandler),this.currentBeforeExitHandler=null;if(this.currentExitHandler)process.off("exit",this.currentExitHandler),this.currentExitHandler=null;if(this.client?.destroy(),this.client=null,this.generation++,this.clientCreatedWithAuth=!1,this.clientAuthResolutionTransientlyFailed=!1,this.clientAuthBearer=void 0,this.clientAccountUuid=void 0,this.clientOrganizationUuid=void 0,!e?.preserveLoggedExposures)this.loggedNonObjectFeatureOnce=!1,this.loggedMalformedExperimentOnce=!1,this.loggedValuelessPayloadOnce=!1;if(this.reinitializingPromise=null,this.experimentDataByFeature.clear(),this.nonDefaultFeatureKeys.clear(),!e?.preservePendingExposures)this.pendingExposures.clear();if(!e?.preserveLoggedExposures)this.loggedExposures.clear();this.remoteEvalFeatureValues.clear(),this.clientPromise=null,this.initializePromise=null,this.environmentOverrides=null,this.environmentOverridesParsed=!1}dispose(){if(this.disposed=!0,this.reset(),y_e.fetchRemoteEvalCall===this.routeSdkRemoteEvalHere)y_e.fetchRemoteEvalCall=this.deps.fetchRemoteEvalFromSdk}async refreshFeatures(){if(this.disposed||!this.deps.isEnabled())return;try{if(this.clientCreatedWithAuth){await this.deps.refreshOAuthTokenIfNeeded().catch((o)=>{});let r=await this.deps.getAuthHeaders();if(this.disposed)return;let n=r.error?void 0:r.headers.Authorization;if(n!==void 0&&n!==this.clientAuthBearer){let o=this.deps.rereadUserAttributes(),i=o.accountUUID===this.clientAccountUuid&&o.organizationUUID===this.clientOrganizationUuid;this.refreshAfterAuthChange({preserveLoggedExposures:i});return}}else if(this.clientAuthResolutionTransientlyF
+
+-- offset 265496689 --
+tureValueBlocking(e,!1)}refreshAfterAuthChange(e){if(this.disposed||!this.deps.isEnabled())return;try{this.reset({preservePendingExposures:!0,preserveLoggedExposures:e?.preserveLoggedExposures}),this.refreshed.emit();let t=this.initialize().catch((r)=>(De(_n(r)),null)).finally(()=>{if(this.reinitializingPromise===t)this.reinitializingPromise=null});this.reinitializingPromise=t}catch(t){De(_n(t))}}reset(e){if(this.stopPeriodicRefresh(),this.currentBeforeExitHandler)process.off("beforeExit",this.currentBeforeExitHandler),this.currentBeforeExitHandler=null;if(this.currentExitHandler)process.off("exit",this.currentExitHandler),this.currentExitHandler=null;if(this.client?.destroy(),this.client=null,this.generation++,this.clientCreatedWithAuth=!1,this.clientAuthResolutionTransientlyFailed=!1,this.clientAuthBearer=void 0,this.clientAccountUuid=void 0,this.clientOrganizationUuid=void 0,!e?.preserveLoggedExposures)this.loggedNonObjectFeatureOnce=!1,this.loggedMalformedExperimentOnce=!1,this.loggedValuelessPayloadOnce=!1;if(this.reinitializingPromise=null,this.experimentDataByFeature.clear(),this.nonDefaultFeatureKeys.clear(),!e?.preservePendingExposures)this.pendingExposures.clear();if(!e?.preserveLoggedExposures)this.loggedExposures.clear();this.remoteEvalFeatureValues.clear(),this.clientPromise=null,this.initializePromise=null,this.environmentOverrides=null,this.environmentOverridesParsed=!1}dispose(){if(this.disposed=!0,this.reset(),y_e.fetchRemoteEvalCall===this.routeSdkRemoteEvalHere)y_e.fetchRemoteEvalCall=this.deps.fetchRemoteEvalFromSdk}async refreshFeatures(){if(this.disposed||!this.deps.isEnabled())return;try{if(this.clientCreatedWithAuth){await this.deps.refreshOAuthTokenIfNeeded().catch((o)=>{});let r=await this.deps.getAuthHeaders();if(this.disposed)return;let n=r.error?void 0:r.headers.Authorization;if(n!==void 0&&n!==this.clientAuthBearer){let o=this.deps.rereadUserAttributes(),i=o.accountUUID===this.clientAccountUuid&&o.organizationUUID===this.clientOrganizationUuid;this.refreshAfterAuthChange({preserveLoggedExposures:i});return}}else if(this.clientAuthResolutionTransientlyFailed){let r=await this.deps.getAuthHeaders().catch(()=>null);if(r&&!r.error&&r.headers.Authorization){this.refreshAfterAuthChange();return}}let e=await this.initialize();if(!e)return;if(await e.refreshFeatures({skipCache:!0}),e!==this.client)return;let t=await this.processRemoteEvalPayload(e);if(e!==thi
+
+-- offset 265497526 --
+AccountUuid=void 0,this.clientOrganizationUuid=void 0,!e?.preserveLoggedExposures)this.loggedNonObjectFeatureOnce=!1,this.loggedMalformedExperimentOnce=!1,this.loggedValuelessPayloadOnce=!1;if(this.reinitializingPromise=null,this.experimentDataByFeature.clear(),this.nonDefaultFeatureKeys.clear(),!e?.preservePendingExposures)this.pendingExposures.clear();if(!e?.preserveLoggedExposures)this.loggedExposures.clear();this.remoteEvalFeatureValues.clear(),this.clientPromise=null,this.initializePromise=null,this.environmentOverrides=null,this.environmentOverridesParsed=!1}dispose(){if(this.disposed=!0,this.reset(),y_e.fetchRemoteEvalCall===this.routeSdkRemoteEvalHere)y_e.fetchRemoteEvalCall=this.deps.fetchRemoteEvalFromSdk}async refreshFeatures(){if(this.disposed||!this.deps.isEnabled())return;try{if(this.clientCreatedWithAuth){await this.deps.refreshOAuthTokenIfNeeded().catch((o)=>{});let r=await this.deps.getAuthHeaders();if(this.disposed)return;let n=r.error?void 0:r.headers.Authorization;if(n!==void 0&&n!==this.clientAuthBearer){let o=this.deps.rereadUserAttributes(),i=o.accountUUID===this.clientAccountUuid&&o.organizationUUID===this.clientOrganizationUuid;this.refreshAfterAuthChange({preserveLoggedExposures:i});return}}else if(this.clientAuthResolutionTransientlyFailed){let r=await this.deps.getAuthHeaders().catch(()=>null);if(r&&!r.error&&r.headers.Authorization){this.refreshAfterAuthChange();return}}let e=await this.initialize();if(!e)return;if(await e.refreshFeatures({skipCache:!0}),e!==this.client)return;let t=await this.processRemoteEvalPayload(e);if(e!==this.client)return;if(t)this.drainPendingExposures(),this.syncRemoteEvalToDisk(),this.refreshed.emit()}catch(e){De(_n(e))}}startPeriodicRefresh(){if(this.disposed||!this.deps.isEnabled())return;this.stopPeriodicRefresh();let e=new AbortController;this.refreshLoopController=e,this.periodicRefreshLoop(e.signal),this.refreshLoopBeforeExitListener=()=>{this.stopPeriodicRefresh()},process.once("beforeExit",this.refreshLoopBeforeExitListener)}async periodicRefreshLoop(e){while(!e.aborted&&!this.disposed)try{let{intervalMs:t,flagged:r}=this.deps.getRefreshCadence();if(await this.deps.sleep(t,e,{unref:!0}),e.aborted)return;let n=this.remoteEvalFetchOkCount;if(await this.refreshFeatures(),r&&this.remoteEvalFetchOkCount===n&&!e.aborted){if(await this.deps.sleep(Math.round(Math.random()*OPS),e,{unref:!0}),e.aborted)return;await this.refres
+
+=== ANCHOR rateLimitTier hits=6 ===
+-- offset 80311888 --
+rateLimitTier
+---
+subscriptionType
+
+-- offset 252884599 --
+available for refresh, sessionId=${w} (failure ${R}${Number.isFinite(i)?`/${i}`:""})`,{level:"error"}),wr("error","bridge_token_refresh_no_oauth"),R<i){let P=setTimeout(T,yfy,w,C);u.set(w,P);return}E(`[${n}:token] Refresh chain exhausted for sessionId=${w} after ${R} consecutive failures`,{level:"error"}),wr("error","bridge_token_refresh_exhausted"),r?.(w,"no_oauth_token");return}if(d.delete(w),E(`[${n}:token] Refreshing token for sessionId=${w}: new token prefix=${A.slice(0,15)}\u2026`),L("tengu_bridge_token_refreshed",{}),t(w,A),a&&l(A)){m(w,A);return}let k=setTimeout(T,ous,w,C);u.set(w,k),E(a?`[${n}:token] Non-JWT token \u2014 scheduled fallback refresh for sessionId=${w} in ${c(ous)}`:`[${n}:token] Scheduled follow-up refresh for sessionId=${w} in ${c(ous)}`)}function S(w){f(w);let C=u.get(w);if(C)clearTimeout(C),u.delete(w);d.delete(w)}function b(){for(let w of p.keys())f(w);for(let w of u.values())clearTimeout(w);u.clear(),d.clear()}return{schedule:m,scheduleFromExpiresIn:y,cancel:S,cancelAll:b}}var hfy=300000,ous=1800000,gfy=3,yfy=60000;var zXe=v(()=>{Lt();Ke();Vh();ut();hr()});class VXc{enabled=!1;headers={};exceededLimits=[];headerless429Message=null;subscriptionType=null;rateLimitTier=null;fastModeRateLimitDurationMs=null;fastModeRateLimitExpiresAt=null;overages=null;trial=null;billingAccessOverride=null;reset(){this.enabled=!1,this.headers={},this.exceededLimits=[],this.headerless429Message=null,this.subscriptionType=null,this.rateLimitTier=null,this.fastModeRateLimitDurationMs=null,this.fastModeRateLimitExpiresAt=null,this.overages=null,this.trial=null,this.billingAccessOverride=null}setHeader(e,t){this.enabled=!0;let r=e==="retry-after"?"retry-after":`anthropic-ratelimit-unified-${e}`;if(t===void 0||t==="clear"){if(delete this.headers[r],e==="claim")this.exceededLimits=[];if(e==="status"||e==="overage-status")this.updateRetryAfter();return}if(e==="reset"||e==="overage-reset"){let o=Number(t);if(!isNaN(o))t=String(Math.floor(Date.now()/1000)+o*3600)}if(e==="claim"){if(["five_hour","seven_day","seven_day_opus","seven_day_sonnet"].includes(t)){let i;if(t==="five_hour")i=Math.floor(Date.now()/1000)+18000;else if(t==="seven_day"||t==="seven_day_opus"||t==="seven_day_sonnet")i=Math.floor(Date.now()/1000)+604800;else i=Math.floor(Date.now()/1000)+3600;this.exceededLimits=this.exceededLimits.filter((s)=>s.type!==t),this.exceededLimits.push({type:t,resetsAt:i}),this.
+
+-- offset 252884861 --
+ ${R} consecutive failures`,{level:"error"}),wr("error","bridge_token_refresh_exhausted"),r?.(w,"no_oauth_token");return}if(d.delete(w),E(`[${n}:token] Refreshing token for sessionId=${w}: new token prefix=${A.slice(0,15)}\u2026`),L("tengu_bridge_token_refreshed",{}),t(w,A),a&&l(A)){m(w,A);return}let k=setTimeout(T,ous,w,C);u.set(w,k),E(a?`[${n}:token] Non-JWT token \u2014 scheduled fallback refresh for sessionId=${w} in ${c(ous)}`:`[${n}:token] Scheduled follow-up refresh for sessionId=${w} in ${c(ous)}`)}function S(w){f(w);let C=u.get(w);if(C)clearTimeout(C),u.delete(w);d.delete(w)}function b(){for(let w of p.keys())f(w);for(let w of u.values())clearTimeout(w);u.clear(),d.clear()}return{schedule:m,scheduleFromExpiresIn:y,cancel:S,cancelAll:b}}var hfy=300000,ous=1800000,gfy=3,yfy=60000;var zXe=v(()=>{Lt();Ke();Vh();ut();hr()});class VXc{enabled=!1;headers={};exceededLimits=[];headerless429Message=null;subscriptionType=null;rateLimitTier=null;fastModeRateLimitDurationMs=null;fastModeRateLimitExpiresAt=null;overages=null;trial=null;billingAccessOverride=null;reset(){this.enabled=!1,this.headers={},this.exceededLimits=[],this.headerless429Message=null,this.subscriptionType=null,this.rateLimitTier=null,this.fastModeRateLimitDurationMs=null,this.fastModeRateLimitExpiresAt=null,this.overages=null,this.trial=null,this.billingAccessOverride=null}setHeader(e,t){this.enabled=!0;let r=e==="retry-after"?"retry-after":`anthropic-ratelimit-unified-${e}`;if(t===void 0||t==="clear"){if(delete this.headers[r],e==="claim")this.exceededLimits=[];if(e==="status"||e==="overage-status")this.updateRetryAfter();return}if(e==="reset"||e==="overage-reset"){let o=Number(t);if(!isNaN(o))t=String(Math.floor(Date.now()/1000)+o*3600)}if(e==="claim"){if(["five_hour","seven_day","seven_day_opus","seven_day_sonnet"].includes(t)){let i;if(t==="five_hour")i=Math.floor(Date.now()/1000)+18000;else if(t==="seven_day"||t==="seven_day_opus"||t==="seven_day_sonnet")i=Math.floor(Date.now()/1000)+604800;else i=Math.floor(Date.now()/1000)+3600;this.exceededLimits=this.exceededLimits.filter((s)=>s.type!==t),this.exceededLimits.push({type:t,resetsAt:i}),this.updateRepresentativeClaim();return}}let n=this.headers;if(n[r]=t,e==="status"||e==="overage-status")this.updateRetryAfter()}updateRetryAfter(){let e=this.headers["anthropic-ratelimit-unified-status"],t=this.headers["anthropic-ratelimit-unified-overage-status"],r
+
+-- offset 252891991 --
+.headers={"anthropic-ratelimit-unified-status":"allowed_warning","anthropic-ratelimit-unified-reset":String(r),"anthropic-ratelimit-unified-representative-claim":"seven_day_sonnet"};break}case"fast-mode-limit":{this.updateRepresentativeClaim(),this.headers["anthropic-ratelimit-unified-status"]="rejected",this.fastModeRateLimitDurationMs=600000;break}case"fast-mode-short-limit":{this.updateRepresentativeClaim(),this.headers["anthropic-ratelimit-unified-status"]="rejected",this.fastModeRateLimitDurationMs=1e4;break}case"extra-usage-required":{this.headerless429Message="Usage credits are required for long context requests.";break}default:break}}setOverageScenarioHeaders(e,t,r){if(this.exceededLimits.length===0)this.exceededLimits=[{type:"five_hour",resetsAt:e}];if(this.updateRepresentativeClaim(),this.headers["anthropic-ratelimit-unified-status"]="rejected",this.headers["anthropic-ratelimit-unified-overage-status"]=t,r)this.headers["anthropic-ratelimit-unified-overage-disabled-reason"]=r;let n=new Date;n.setMonth(n.getMonth()+1,1),n.setHours(0,0,0,0),this.headers["anthropic-ratelimit-unified-overage-reset"]=String(Math.floor(n.getTime()/1000))}setRateLimitTier(e){this.enabled=!0,this.rateLimitTier=e}setSubscriptionType(e){this.enabled=!0,this.subscriptionType=e}setBillingAccess(e){this.enabled=!0,this.billingAccessOverride=e}setTrial(e){if(e===null){this.trial=null;return}this.enabled=!0,this.trial=e}setOverages(e){if(e===null){this.overages=null;return}this.overages={isEnabled:!1,balanceCents:0,spendLimitCents:15000,usedCents:0,currency:"USD",paymentMethod:{type:"card",brand:"visa",last4:"4242"},autoReload:!1,purchaseOutcome:"success",pollCount:0,...this.overages,...e}}checkFastModeRateLimit(e){if(this.fastModeRateLimitDurationMs===null)return null;if(!e)return null;if(this.fastModeRateLimitExpiresAt!==null&&Date.now()>=this.fastModeRateLimitExpiresAt)return this.reset(),null;if(this.fastModeRateLimitExpiresAt===null)this.fastModeRateLimitExpiresAt=Date.now()+this.fastModeRateLimitDurationMs;let t=this.fastModeRateLimitExpiresAt-Date.now(),r={...this.headers};return r["retry-after"]=String(Math.max(1,Math.ceil(t/1000))),r}}function KXc(){return Tde.enabled,null;return Tde.headers}function YXc(e){let t=KXc();if(!t)return e;let r=new globalThis.Headers(e);return Object.entries(t).forEach(([n,o])=>{if(o!==void 0)r.set(n,o)}),r}function tBt(){return!1}function ius(){return Tde
+
+-- offset 252893229 --
+{this.enabled=!0,this.subscriptionType=e}setBillingAccess(e){this.enabled=!0,this.billingAccessOverride=e}setTrial(e){if(e===null){this.trial=null;return}this.enabled=!0,this.trial=e}setOverages(e){if(e===null){this.overages=null;return}this.overages={isEnabled:!1,balanceCents:0,spendLimitCents:15000,usedCents:0,currency:"USD",paymentMethod:{type:"card",brand:"visa",last4:"4242"},autoReload:!1,purchaseOutcome:"success",pollCount:0,...this.overages,...e}}checkFastModeRateLimit(e){if(this.fastModeRateLimitDurationMs===null)return null;if(!e)return null;if(this.fastModeRateLimitExpiresAt!==null&&Date.now()>=this.fastModeRateLimitExpiresAt)return this.reset(),null;if(this.fastModeRateLimitExpiresAt===null)this.fastModeRateLimitExpiresAt=Date.now()+this.fastModeRateLimitDurationMs;let t=this.fastModeRateLimitExpiresAt-Date.now(),r={...this.headers};return r["retry-after"]=String(Math.max(1,Math.ceil(t/1000))),r}}function KXc(){return Tde.enabled,null;return Tde.headers}function YXc(e){let t=KXc();if(!t)return e;let r=new globalThis.Headers(e);return Object.entries(t).forEach(([n,o])=>{if(o!==void 0)r.set(n,o)}),r}function tBt(){return!1}function ius(){return Tde.enabled,null;return Tde.rateLimitTier}function sus(){return Tde.enabled,null;return Tde.subscriptionType||"max"}function aus(){return Tde.enabled&&Tde.subscriptionType!==null&&!1}function JXc(){return null}function HU(){return null}function lus(){return null;switch(e){case"not-started":return{endsAt:null};case"expired":return{endsAt:new Date(Date.now()-t).toISOString()};default:{let r=Number(e);return Number.isFinite(r)&&r>0?{endsAt:new Date(Date.now()+r*t).toISOString()}:null}}}function XXc(e){return}var Tde;var ZHe=v(()=>{Tde=new VXc});var QXc=ee(function(Umo){Object.defineProperty(Umo,"__esModule",{value:!0});Umo._globalThis=void 0;Umo._globalThis=typeof globalThis==="object"?globalThis:global});var ZXc=ee(function(rBt){var _fy=rBt&&rBt.__createBinding||(Object.create?function(e,t,r,n){if(n===void 0)n=r;Object.defineProperty(e,n,{enumerable:!0,get:function(){return t[r]}})}:function(e,t,r,n){if(n===void 0)n=r;e[n]=t[r]}),bfy=rBt&&rBt.__exportStar||function(e,t){for(var r in e)if(r!=="default"&&!Object.prototype.hasOwnProperty.call(t,r))_fy(t,e,r)};Object.defineProperty(rBt,"__esModule",{value:!0});bfy(QXc(),rBt)});var eQc=ee(function(nBt){var Sfy=nBt&&nBt.__createBinding||(Object.create?function(e,t,r,n){if(n===voi
+
+-- offset 253037288 --
+();rcu();wgo();QJe()});async function Cgo(){if(pon===null&&!don)don=awy(),pon=await don,don=null,cmr.cache.clear?.()}function Yje(){pon=null,don=null,cmr.cache.clear?.(),Jje.cache.clear?.()}function pcu(){return cmr(!0)}function swy(){return}async function awy(){return}function dcu(e){return typeof e==="string"&&e.length>=lwy?e:void 0}var pon=null,don=null,cmr,Jje,fcu,lwy=8;var rAe=v(()=>{cE();Tt();Wo();On();Br();bn();qa();cmr=Ga((e)=>{let t=wde(),r=Xt(),n,o,i;if(e){if(n=Hl()??void 0,o=xY()??void 0,n&&r.claudeCodeFirstTokenDate){let c=new Date(r.claudeCodeFirstTokenDate).getTime();if(!isNaN(c))i=c}}let s=Hc(),a=dcu(s?.organizationUuid),l=dcu(s?.accountUuid);return{deviceId:t,sessionId:Mt(),email:swy(),appVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.227",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-10T18:40:15Z",GIT_SHA:"5ecc7d5389d8b682652d0ea32eadd3e0eb537ee8",DD_SOURCEMAP_GROUP:"darwin"}.VERSION,platform:NQr(),organizationUuid:a,accountUuid:l,userType:"external",subscriptionType:n,rateLimitTier:o,firstTokenTime:i,...br(re.GITHUB_ACTIONS)&&{githubActionsMetadata:{actor:re.GITHUB_ACTOR,actorId:re.GITHUB_ACTOR_ID,repository:re.GITHUB_REPOSITORY,repositoryId:re.GITHUB_REPOSITORY_ID,repositoryOwner:re.GITHUB_REPOSITORY_OWNER,repositoryOwnerId:re.GITHUB_REPOSITORY_OWNER_ID}}}});Jje=Ga(async()=>await jen("user.email")??void 0),fcu=Ga(async()=>await jen("user.name")??void 0)});function cwy(){if(br(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST))return!1;return!Nu()}function mcu(){return process.env.CLAUDE_CODE_ENVIRONMENT_KIND==="byoc"&&!br(process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG)}function aee(){return cwy()||GS()!==null||sHe()}function $_e(){return br(process.env.CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL)}function IY(){if($_e())return!1;return sHe()}var PY=v(()=>{Tt();bn();bs();wf()});function uwy(){return{seconds:0,nanos:0}}function hcu(e){return e!==null&&e!==void 0}var fon;var Nds=v(()=>{fon={fromJSON(e){return{seconds:hcu(e.seconds)?globalThis.Number(e.seconds):0,nanos:hcu(e.nanos)?globalThis.Number(e.nanos):0}},toJSON(e){let t={};if(e.seconds!==void 0)t.seconds=Math.round(e.seconds);if(e.nanos!==void 0)t.nanos=Math.round(e.nanos);return t},create(e){return fon.from
+
+=== ANCHOR organizationUuid hits=6 ===
+-- offset 81454960 --
+organizationUuid
+---
+accountUuid
+
+-- offset 82751213 --
+OTEL_METRICS_INCLUDE_RESOURCE_ATTRIBUTES
+---
+Iterator result interface is not an object.
+---
+identity.
+---
+OTEL_METRICS_INCLUDE_SESSION_ID
+---
+session.id
+---
+ccr.session.id
+---
+OTEL_METRICS_INCLUDE_VERSION
+---
+app.version
+---
+report the issue at https://github.com/anthropics/claude-code/issues
+---
+@anthropic-ai/claude-code
+---
+https://code.claude.com/docs/en/overview
+---
+https://github.com/anthropics/claude-code/issues
+---
+2026-08-10T18:40:15Z
+---
+5ecc7d5389d8b682652d0ea32eadd3e0eb537ee8
+---
+OTEL_METRICS_INCLUDE_ENTRYPOINT
+---
+app.entrypoint
+---
+Cannot destructure property 'organizationUuid' from null or undefined value
+---
+organization.id
+---
+user.email
+---
+OTEL_METRICS_INCLUDE_ACCOUNT_UUID
+---
+user.account_uuid
+---
+user.account_id
+---
+terminal.type
+
+-- offset 87111215 --
+[debug] Remote Control auth state:
+---
+  isBareMode=
+---
+  hasOAuthAccessToken=
+---
+  oauthScopes=
+---
+  hasClaudeAIInferenceScope=
+---
+  isClaudeAISubscriber=
+---
+  hasProfileScope=
+---
+  oauthAccount.organizationUuid=
+---
+  ANTHROPIC_API_KEY=
+---
+  ANTHROPIC_AUTH_TOKEN=
+---
+  apiKeyHelper=
+---
+  CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=
+---
+  CLAUDE_CODE_OAUTH_TOKEN=
+---
+  ANTHROPIC_UNIX_SOCKET=
+---
+  3P env=
+---
+
+[debug] failed to collect auth state: 
+
+-- offset 126964240 --
+oauthAccount
+---
+accountUuid
+---
+organizationUuid
+
+-- offset 253036714 --
+,s=Object(r);while(t?i--:++i<o)if(n(s[i],i,s)===!1)break;return r}}var icu;var scu=v(()=>{War();icu=u_y});var d_y,Ego;var Lds=v(()=>{Dds();scu();d_y=icu(vgo),Ego=d_y});function p_y(e,t,r,n){return Ego(e,function(o,i,s){t(n,o,r(o),s)}),n}var acu;var lcu=v(()=>{Lds();acu=p_y});function f_y(e,t){return function(r,n){var o=cx(r)?ncu:acu,i=t?t():{};return o(r,e,Iue(n,2),i)}}var ccu;var ucu=v(()=>{ocu();lcu();Ypt();qoe();ccu=f_y});var m_y,_Bt;var wgo=v(()=>{ucu();m_y=ccu(function(e,t,r){e[r?0:1].push(t)},function(){return[[],[]]}),_Bt=m_y});var y5=v(()=>{TZ();F_e();cE();fje();rcu();wgo();QJe()});async function Cgo(){if(pon===null&&!don)don=awy(),pon=await don,don=null,cmr.cache.clear?.()}function Yje(){pon=null,don=null,cmr.cache.clear?.(),Jje.cache.clear?.()}function pcu(){return cmr(!0)}function swy(){return}async function awy(){return}function dcu(e){return typeof e==="string"&&e.length>=lwy?e:void 0}var pon=null,don=null,cmr,Jje,fcu,lwy=8;var rAe=v(()=>{cE();Tt();Wo();On();Br();bn();qa();cmr=Ga((e)=>{let t=wde(),r=Xt(),n,o,i;if(e){if(n=Hl()??void 0,o=xY()??void 0,n&&r.claudeCodeFirstTokenDate){let c=new Date(r.claudeCodeFirstTokenDate).getTime();if(!isNaN(c))i=c}}let s=Hc(),a=dcu(s?.organizationUuid),l=dcu(s?.accountUuid);return{deviceId:t,sessionId:Mt(),email:swy(),appVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.227",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-10T18:40:15Z",GIT_SHA:"5ecc7d5389d8b682652d0ea32eadd3e0eb537ee8",DD_SOURCEMAP_GROUP:"darwin"}.VERSION,platform:NQr(),organizationUuid:a,accountUuid:l,userType:"external",subscriptionType:n,rateLimitTier:o,firstTokenTime:i,...br(re.GITHUB_ACTIONS)&&{githubActionsMetadata:{actor:re.GITHUB_ACTOR,actorId:re.GITHUB_ACTOR_ID,repository:re.GITHUB_REPOSITORY,repositoryId:re.GITHUB_REPOSITORY_ID,repositoryOwner:re.GITHUB_REPOSITORY_OWNER,repositoryOwnerId:re.GITHUB_REPOSITORY_OWNER_ID}}}});Jje=Ga(async()=>await jen("user.email")??void 0),fcu=Ga(async()=>await jen("user.name")??void 0)});function cwy(){if(br(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST))return!1;return!Nu()}function mcu(){return process.env.CLAUDE_CODE_ENVIRONMENT_KIND==="byoc"&&!br(process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG)}function aee(){return cwy()||GS(
+
+-- offset 253037216 --
+},function(){return[[],[]]}),_Bt=m_y});var y5=v(()=>{TZ();F_e();cE();fje();rcu();wgo();QJe()});async function Cgo(){if(pon===null&&!don)don=awy(),pon=await don,don=null,cmr.cache.clear?.()}function Yje(){pon=null,don=null,cmr.cache.clear?.(),Jje.cache.clear?.()}function pcu(){return cmr(!0)}function swy(){return}async function awy(){return}function dcu(e){return typeof e==="string"&&e.length>=lwy?e:void 0}var pon=null,don=null,cmr,Jje,fcu,lwy=8;var rAe=v(()=>{cE();Tt();Wo();On();Br();bn();qa();cmr=Ga((e)=>{let t=wde(),r=Xt(),n,o,i;if(e){if(n=Hl()??void 0,o=xY()??void 0,n&&r.claudeCodeFirstTokenDate){let c=new Date(r.claudeCodeFirstTokenDate).getTime();if(!isNaN(c))i=c}}let s=Hc(),a=dcu(s?.organizationUuid),l=dcu(s?.accountUuid);return{deviceId:t,sessionId:Mt(),email:swy(),appVersion:{ISSUES_EXPLAINER:"report the issue at https://github.com/anthropics/claude-code/issues",PACKAGE_URL:"@anthropic-ai/claude-code",README_URL:"https://code.claude.com/docs/en/overview",VERSION:"2.1.227",FEEDBACK_CHANNEL:"https://github.com/anthropics/claude-code/issues",BUILD_TIME:"2026-08-10T18:40:15Z",GIT_SHA:"5ecc7d5389d8b682652d0ea32eadd3e0eb537ee8",DD_SOURCEMAP_GROUP:"darwin"}.VERSION,platform:NQr(),organizationUuid:a,accountUuid:l,userType:"external",subscriptionType:n,rateLimitTier:o,firstTokenTime:i,...br(re.GITHUB_ACTIONS)&&{githubActionsMetadata:{actor:re.GITHUB_ACTOR,actorId:re.GITHUB_ACTOR_ID,repository:re.GITHUB_REPOSITORY,repositoryId:re.GITHUB_REPOSITORY_ID,repositoryOwner:re.GITHUB_REPOSITORY_OWNER,repositoryOwnerId:re.GITHUB_REPOSITORY_OWNER_ID}}}});Jje=Ga(async()=>await jen("user.email")??void 0),fcu=Ga(async()=>await jen("user.name")??void 0)});function cwy(){if(br(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST))return!1;return!Nu()}function mcu(){return process.env.CLAUDE_CODE_ENVIRONMENT_KIND==="byoc"&&!br(process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG)}function aee(){return cwy()||GS()!==null||sHe()}function $_e(){return br(process.env.CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL)}function IY(){if($_e())return!1;return sHe()}var PY=v(()=>{Tt();bn();bs();wf()});function uwy(){return{seconds:0,nanos:0}}function hcu(e){return e!==null&&e!==void 0}var fon;var Nds=v(()=>{fon={fromJSON(e){return{seconds:hcu(e.seconds)?globalThis.Number(e.seconds):0,nanos:hcu(e.nanos)?globalThis.Number(e.nanos):0}},toJSON(e){let t={};if(e.seconds!==void 0)t.seconds=Math.round(e.seconds);if(e.nanos!==v
+
+=== ANCHOR subscription tier hits=0 ===
+=== ANCHOR usage credits hits=6 ===
+-- offset 69437900 --
+tengu_gorse_plover
+---
+tengu_amber_astrolabe
+---
+tengu_bison_cairn
+---
+tengu_larch_cistern
+---
+tengu_parchment_fern
+---
+tengu_fennel_godwit
+---
+replaceNotice
+---
+policy-limits.json
+---
+Fable 5, Opus 4.7+, Sonnet 5
+---
+Fable 5, Opus 4.6+, Sonnet 4.6+
+---
+May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks.
+---
+tengu-model-error-overrides
+---
+Efficient for routine tasks
+---
+Best for everyday, complex tasks
+---
+Fastest for quick answersn
+---
+Most capable for your hardest and longest-running tasks
+---
+ Requires usage creditsz
+
+---
+unlimited
+---
+mount must match /^[A-Za-z0-9_-]+$/
+---
+MEMORY.mdL
+---
+Memory is paused. Run /pause-memory to resume automemory.
+---
+hasTeamStore
+---
+/mnt/user-data/uploads
+
+-- offset 69676363 --
+workflow_launch_result
+---
+/.workflow/
+---
+Requesting usage credits notifies your organization admins. To review and send the request, run /usage-credits in an interactive Claude Code session.
+---
+/extra-usage is now /usage-credits
+---
+The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.
+
+-- offset 80520371 --
+network_error
+---
+preference
+---
+extra_usage_disabled
+---
+Fast mode requires a paid subscription
+---
+Fast mode unavailable during evaluation. Please purchase credits.
+---
+Fast mode has been disabled by your organization
+---
+Fast mode requires usage credits 
+---
+ /usage-credits to turn them on
+---
+Fast mode unavailable due to network connectivity issues
+---
+Fast mode is currently unavailable
+
+-- offset 80547765 --
+org_level_disabled_until
+---
+seat_tier_zero_credit_limit
+---
+member_level_disabled
+---
+member_zero_credit_limit
+---
+org_level_disabled
+---
+org_service_level_disabled
+---
+seat_tier_level_disabled
+---
+org_spend_cap_reached
+---
+out_of_credits
+---
+overage_not_provisioned
+---
+no_limits_configured
+---
+Fast mode disabled 
+---
+ usage credits exhausted
+---
+Fast mode disabled 
+---
+ usage credits turned off by your organization
+---
+Fast mode disabled 
+---
+ usage credit limit reached
+---
+Fast mode disabled 
+---
+ usage credits turned off for your account
+---
+Fast mode disabled 
+---
+ usage credits not available for your plan
+---
+Fast mode requires usage credits 
+---
+ /usage-credits to turn them on
+---
+Fast mode disabled 
+---
+ usage credits not available
+
+
+-- offset 80547829 --
+org_level_disabled_until
+---
+seat_tier_zero_credit_limit
+---
+member_level_disabled
+---
+member_zero_credit_limit
+---
+org_level_disabled
+---
+org_service_level_disabled
+---
+seat_tier_level_disabled
+---
+org_spend_cap_reached
+---
+out_of_credits
+---
+overage_not_provisioned
+---
+no_limits_configured
+---
+Fast mode disabled 
+---
+ usage credits exhausted
+---
+Fast mode disabled 
+---
+ usage credits turned off by your organization
+---
+Fast mode disabled 
+---
+ usage credit limit reached
+---
+Fast mode disabled 
+---
+ usage credits turned off for your account
+---
+Fast mode disabled 
+---
+ usage credits not available for your plan
+---
+Fast mode requires usage credits 
+---
+ /usage-credits to turn them on
+---
+Fast mode disabled 
+---
+ usage credits not available
+
+
+-- offset 80547989 --
+org_level_disabled_until
+---
+seat_tier_zero_credit_limit
+---
+member_level_disabled
+---
+member_zero_credit_limit
+---
+org_level_disabled
+---
+org_service_level_disabled
+---
+seat_tier_level_disabled
+---
+org_spend_cap_reached
+---
+out_of_credits
+---
+overage_not_provisioned
+---
+no_limits_configured
+---
+Fast mode disabled 
+---
+ usage credits exhausted
+---
+Fast mode disabled 
+---
+ usage credits turned off by your organization
+---
+Fast mode disabled 
+---
+ usage credit limit reached
+---
+Fast mode disabled 
+---
+ usage credits turned off for your account
+---
+Fast mode disabled 
+---
+ usage credits not available for your plan
+---
+Fast mode requires usage credits 
+---
+ /usage-credits to turn them on
+---
+Fast mode disabled 
+---
+ usage credits not available
+
+---
+org_level_disabled_until
+
+=== ANCHOR enable usage credits hits=0 ===
+=== ANCHOR Fable hits=6 ===
+-- offset 69437360 --
+us-east-1
+---
+readBytes_
+---
+atomicWrite
+---
+writeExclusive
+---
+writeBytes
+---
+listEntries
+---
+readRangeb
+---
+readTail	
+---
+-credentials
+---
+tengu_loggia_roster
+---
+tengu_gault_kestrel
+---
+tengu_gorse_plover
+---
+tengu_amber_astrolabe
+---
+tengu_bison_cairn
+---
+tengu_larch_cistern
+---
+tengu_parchment_fern
+---
+tengu_fennel_godwit
+---
+replaceNotice
+---
+policy-limits.json
+---
+Fable 5, Opus 4.7+, Sonnet 5
+---
+Fable 5, Opus 4.6+, Sonnet 4.6+
+---
+May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks.
+---
+tengu-model-error-overrides
+---
+Efficient for routine tasks
+---
+Best for everyday, complex tasks
+---
+Fastest for quick answersn
+---
+Most capable for your hardest and longest-running tasks
+---
+ Requires usage creditsz
+
+---
+unlimited
+---
+mount must match /^[A-Za-z0-9_-]+$/
+---
+MEMORY.mdL
+---
+Memory is paused. Run /pause-memory to resume automemory.
+
+-- offset 69437408 --
+readBytes_
+---
+atomicWrite
+---
+writeExclusive
+---
+writeBytes
+---
+listEntries
+---
+readRangeb
+---
+readTail	
+---
+-credentials
+---
+tengu_loggia_roster
+---
+tengu_gault_kestrel
+---
+tengu_gorse_plover
+---
+tengu_amber_astrolabe
+---
+tengu_bison_cairn
+---
+tengu_larch_cistern
+---
+tengu_parchment_fern
+---
+tengu_fennel_godwit
+---
+replaceNotice
+---
+policy-limits.json
+---
+Fable 5, Opus 4.7+, Sonnet 5
+---
+Fable 5, Opus 4.6+, Sonnet 4.6+
+---
+May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks.
+---
+tengu-model-error-overrides
+---
+Efficient for routine tasks
+---
+Best for everyday, complex tasks
+---
+Fastest for quick answersn
+---
+Most capable for your hardest and longest-running tasks
+---
+ Requires usage creditsz
+
+---
+unlimited
+---
+mount must match /^[A-Za-z0-9_-]+$/
+---
+MEMORY.mdL
+---
+Memory is paused. Run /pause-memory to resume automemory.
+
+-- offset 69479680 --
+our claude.ai account
+---
+Your organization has disabled API key authentication 
+---
+ Unset the apiKeyHelper setting and run /login to sign in with your claude.ai account
+---
+Your organization has disabled API key authentication 
+---
+ Run /login to sign in with your claude.ai account
+---
+OAuth token revoked 
+---
+ Please run /login
+---
+Login expired 
+---
+ Please run /login
+---
+Authentication error 
+---
+ This may be a temporary network issue, please try again
+---
+Your apiKeyHelper script is failing 
+---
+ This usually means you need to re-authenticate with your provider 
+---
+ Run /status to see the script's error output
+---
+https://status.claude.com
+---
+Repeated 529 Overloaded errors
+---
+Opus is experiencing high load, please use /model to switch to Sonnet
+---
+Fable is experiencing high load, please use /model to switch to Sonnet
+---
+Server is temporarily limiting requests (not your usage limit)
+---
+Request timed out
+---
+Your organization has disabled Claude subscription access for Claude Code 
+---
+ Use an Anthropic API key instead, or ask your admin to enable access
+---
+cannot be used as an advisor when the request model is
+---
+EnterPlanMode
+---
+ExitPlanMode
+---
+AskUserQuestion
+---
+Asks the user multiple choice questions to gather information, clarify ambiguity, understand preferences, make decisions or offer them choices.
+
+-- offset 70657139 --
+Claude has ended this chat.
+---
+This iteration of Claude is Claude Fable 5, the first model in Anthropic's new Claude 5 family and part of a new Mythos-class model tier that sits above Claude Opus in capability. Claude Fable 5 and Claude Mythos 5 share the same underlying model. Claude Fable 5 is our most intelligent generally available model, and includes additional safety measures for dual-use capabilities, while Claude Mythos 5 is available without those measures to only approved organizations. Fable 5 is the most advanced generally available Claude model. If the person asks about the differences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.
+
+-- offset 70657291 --
+This iteration of Claude is Claude Fable 5, the first model in Anthropic's new Claude 5 family and part of a new Mythos-class model tier that sits above Claude Opus in capability. Claude Fable 5 and Claude Mythos 5 share the same underlying model. Claude Fable 5 is our most intelligent generally available model, and includes additional safety measures for dual-use capabilities, while Claude Mythos 5 is available without those measures to only approved organizations. Fable 5 is the most advanced generally available Claude model. If the person asks about the differences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.
+
+-- offset 70657359 --
+This iteration of Claude is Claude Fable 5, the first model in Anthropic's new Claude 5 family and part of a new Mythos-class model tier that sits above Claude Opus in capability. Claude Fable 5 and Claude Mythos 5 share the same underlying model. Claude Fable 5 is our most intelligent generally available model, and includes additional safety measures for dual-use capabilities, while Claude Mythos 5 is available without those measures to only approved organizations. Fable 5 is the most advanced generally available Claude model. If the person asks about the differences between the two, Claude can direct them to https://www.anthropic.com/news/claude-fable-5-mythos-5 for more information.
+
+=== ANCHOR /tui hits=6 ===
+-- offset 141213423 --
+fullscreen
+---
+Using flicker-free rendering
+---
+ if you want to go back, use /tui default
+---
+ Click to move your cursor in the text input
+---
+ Click to move your cursor in the text input
+---
+ Click to expand collapsed tool results
+---
+ Click to expand collapsed tool results
+---
+ By default, text auto-copies when you select it (/config to change)
+---
+ By default, text auto-copies when you select it (/config to change)
+---
+ while selecting to use your terminal's native copy instead
+---
+Switched back to the classic renderer
+
+-- offset 141408162 --
+autoAccept
+---
+ Using flicker-free rendering
+---
+ Scroll with your trackpad, scroll wheel, or PageUp/PageDown
+---
+ Scroll with your trackpad, scroll wheel, or PageUp/PageDown
+---
+ Click to move your cursor or expand collapsed results
+---
+ Click to move your cursor or expand collapsed results
+---
+ /tui default to go back (saved to your preferences)
+---
+ /tui default to go back (saved to your preferences)
+
+-- offset 141408322 --
+autoAccept
+---
+ Using flicker-free rendering
+---
+ Scroll with your trackpad, scroll wheel, or PageUp/PageDown
+---
+ Scroll with your trackpad, scroll wheel, or PageUp/PageDown
+---
+ Click to move your cursor or expand collapsed results
+---
+ Click to move your cursor or expand collapsed results
+---
+ /tui default to go back (saved to your preferences)
+---
+ /tui default to go back (saved to your preferences)
+
+-- offset 224410910 --
+Focus view needs the fullscreen renderer. Run /tui fullscreen to switch (this restarts and resumes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.
+---
+apply_flag_settings
+---
+Focus view disabled.
+---
+ Focus view needs the fullscreen renderer. Run /tui fullscreen to switch (this restarts and resumes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.
+---
+Focus view enabled
+---
+Focus view disabled
+
+-- offset 224411263 --
+Focus view needs the fullscreen renderer. Run /tui fullscreen to switch (this restarts and resumes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.
+---
+apply_flag_settings
+---
+Focus view disabled.
+---
+ Focus view needs the fullscreen renderer. Run /tui fullscreen to switch (this restarts and resumes your session), or set CLAUDE_CODE_NO_FLICKER=1 and restart.
+---
+Focus view enabled
+---
+Focus view disabled
+
+-- offset 244369849 --
+fullscreen
+---
+Current renderer: 
+---
+. Usage: /tui <
+---
+Unknown renderer "
+---
+". Usage: /tui <
+---
+userSettings
+---
+Cannot destructure property 'error' from null or undefined value
+---
+Failed to save setting: 
+---
+tengu_tui_command
+---
+Saved. Background sessions always use the fullscreen renderer while attached; the 
+---
+ renderer will apply to sessions started directly with `claude`.
+---
+Screen-reader mode always uses the classic renderer, so the tui setting has no effect while it is active.
+---
+Already using the 
+---
+ renderer.
+---
+tengu_tui_refused
+
+=== ANCHOR rewound hits=6 ===
+-- offset 118783200 --
+last-prompt
+---
+currentSessionLeafUuid
+---
+currentSessionLeafTs
+---
+appendEntry
+---
+leafUuid
+---
+explicit
+
+-- offset 160680022 --
+sandbox_init
+---
+before_loadInitialMessages
+---
+Cannot destructure property 'messages' from null or undefined value
+---
+Cannot destructure property 'agentDefinition' from null or undefined value
+---
+Error: --rewind-files requires a user message UUID, but 
+---
+ is not a user message in this session
+
+---
+Unexpected error
+---
+Warning: 
+---
+ tracked 
+---
+path was
+---
+paths were
+---
+ skipped: 
+---
+. Run with --debug for the paths.
+
+---
+Files rewound to state at message 
+---
+Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the marker is stale (tool already ran), or it exceeds the tail-scan window. Provide a prompt to continue the conversation.
+
+---
+Error: Input must be provided either through stdin or as a prompt argument when using --print
+
+---
+Error: When using --print, --output-format=stream-json requires --verbose
+
+---
+Iterator result interface is not an object.
+---
+[print.ts] 
+---
+ orphaned background task(s) after restart
+---
+Stopped by a worker restart: 
+---
+[print.ts] orphaned-task notification flush failed; keeping orphans pending for re-emit: 
+---
+[print.ts] orphaned-task notification delivery unconfirmed; keeping orphans pending for re-emit
+---
+[print.ts] deferring stale parked prompt cancel for 
+
+-- offset 263449476 --
+CCR v2 internal event writer registered for transcript persistence"),this.FLUSH_INTERVAL_MS=W5p}clearInternalEventWriter(){if(!this.internalEventWriter)return;this.internalEventWriter=null,E("CCR v2 internal event writer cleared")}setInternalEventReader(e){this.internalEventReader=e,E("CCR v2 internal event reader registered for session resume")}setInternalSubagentEventReader(e){this.internalSubagentEventReader=e,E("CCR v2 subagent event reader registered for session resume")}getInternalEventReader(){return this.internalEventReader}getInternalSubagentEventReader(){return this.internalSubagentEventReader}}async function Mme(e,t,r,n){let o=YWt(e,n),i=Mt(),s=await Ow.sessionMessages(i),a=[],l=r;if(l&&!LF()&&!s.has(l))L("tengu_phantom_parent_hint",{});let c=!1;for(let d of o)if(s.has(d.uuid)){if(!c&&DRt(d))l=d.uuid}else a.push(d),c=!0;if(a.length>0)await Pu().insertMessageChain(a,!1,void 0,l,t);return a.findLast(DRt)?.uuid??l??null}async function BDr(e,t){let r=Pu();r.currentSessionLeafUuid=e??void 0,r.currentSessionLeafTs=new Date().toISOString(),await r.appendEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function Q_a(e,t){let r=Pu();await r.mirrorInternalEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function MNe(e,t,r){await Pu().insertMessageChain(YWt(e),!0,t,r)}async function wfa(e){await Pu().appendEntry({type:"fork-context-ref",...e})}async function Z_a(e){await Pu().appendEntry({type:"observer-ref",...e,timestamp:new Date().toISOString()})}async function eba(e,t){if(t!==void 0)try{let r=tba(mR(e));if(r!==void 0&&(await t.stat(r)).ok)return!0}catch{}try{return await Iu.stat(mR(e)),!0}catch{return!1}}function tba(e){let t=$p.relative(kw(),e);if(t===""||t===".."||t.startsWith(`..${$p.sep}`)||$p.isAbsolute(t))return;let r=t.split($p.sep),[n,o]=r,i=r.at(-1);if(n===void 0||o===void 0||i===void 0)return;if(e!==$p.join(kw(),...r))return;if(r.length===2){let c=/^(.+)\.jsonl$/.exec(i);if(c===null)return;let u=c[1];return oc(n)&&oc(u)?G5p(zn.transcript(n,u)):void 0}if(r.length<4||r[2]!=="subagents")return;let s=/^agent-(.+)\.jsonl$/.exec(i);if(s===null)return;let a=s[1],l=r.slice(3,-1);if(![n,o,a,...l].every(oc))return;return G
+
+-- offset 263449486 --
+ernal event writer registered for transcript persistence"),this.FLUSH_INTERVAL_MS=W5p}clearInternalEventWriter(){if(!this.internalEventWriter)return;this.internalEventWriter=null,E("CCR v2 internal event writer cleared")}setInternalEventReader(e){this.internalEventReader=e,E("CCR v2 internal event reader registered for session resume")}setInternalSubagentEventReader(e){this.internalSubagentEventReader=e,E("CCR v2 subagent event reader registered for session resume")}getInternalEventReader(){return this.internalEventReader}getInternalSubagentEventReader(){return this.internalSubagentEventReader}}async function Mme(e,t,r,n){let o=YWt(e,n),i=Mt(),s=await Ow.sessionMessages(i),a=[],l=r;if(l&&!LF()&&!s.has(l))L("tengu_phantom_parent_hint",{});let c=!1;for(let d of o)if(s.has(d.uuid)){if(!c&&DRt(d))l=d.uuid}else a.push(d),c=!0;if(a.length>0)await Pu().insertMessageChain(a,!1,void 0,l,t);return a.findLast(DRt)?.uuid??l??null}async function BDr(e,t){let r=Pu();r.currentSessionLeafUuid=e??void 0,r.currentSessionLeafTs=new Date().toISOString(),await r.appendEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function Q_a(e,t){let r=Pu();await r.mirrorInternalEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function MNe(e,t,r){await Pu().insertMessageChain(YWt(e),!0,t,r)}async function wfa(e){await Pu().appendEntry({type:"fork-context-ref",...e})}async function Z_a(e){await Pu().appendEntry({type:"observer-ref",...e,timestamp:new Date().toISOString()})}async function eba(e,t){if(t!==void 0)try{let r=tba(mR(e));if(r!==void 0&&(await t.stat(r)).ok)return!0}catch{}try{return await Iu.stat(mR(e)),!0}catch{return!1}}function tba(e){let t=$p.relative(kw(),e);if(t===""||t===".."||t.startsWith(`..${$p.sep}`)||$p.isAbsolute(t))return;let r=t.split($p.sep),[n,o]=r,i=r.at(-1);if(n===void 0||o===void 0||i===void 0)return;if(e!==$p.join(kw(),...r))return;if(r.length===2){let c=/^(.+)\.jsonl$/.exec(i);if(c===null)return;let u=c[1];return oc(n)&&oc(u)?G5p(zn.transcript(n,u)):void 0}if(r.length<4||r[2]!=="subagents")return;let s=/^agent-(.+)\.jsonl$/.exec(i);if(s===null)return;let a=s[1],l=r.slice(3,-1);if(![n,o,a,...l].every(oc))return;return G5p(zn.tran
+
+-- offset 263449698 --
+leared")}setInternalEventReader(e){this.internalEventReader=e,E("CCR v2 internal event reader registered for session resume")}setInternalSubagentEventReader(e){this.internalSubagentEventReader=e,E("CCR v2 subagent event reader registered for session resume")}getInternalEventReader(){return this.internalEventReader}getInternalSubagentEventReader(){return this.internalSubagentEventReader}}async function Mme(e,t,r,n){let o=YWt(e,n),i=Mt(),s=await Ow.sessionMessages(i),a=[],l=r;if(l&&!LF()&&!s.has(l))L("tengu_phantom_parent_hint",{});let c=!1;for(let d of o)if(s.has(d.uuid)){if(!c&&DRt(d))l=d.uuid}else a.push(d),c=!0;if(a.length>0)await Pu().insertMessageChain(a,!1,void 0,l,t);return a.findLast(DRt)?.uuid??l??null}async function BDr(e,t){let r=Pu();r.currentSessionLeafUuid=e??void 0,r.currentSessionLeafTs=new Date().toISOString(),await r.appendEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function Q_a(e,t){let r=Pu();await r.mirrorInternalEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function MNe(e,t,r){await Pu().insertMessageChain(YWt(e),!0,t,r)}async function wfa(e){await Pu().appendEntry({type:"fork-context-ref",...e})}async function Z_a(e){await Pu().appendEntry({type:"observer-ref",...e,timestamp:new Date().toISOString()})}async function eba(e,t){if(t!==void 0)try{let r=tba(mR(e));if(r!==void 0&&(await t.stat(r)).ok)return!0}catch{}try{return await Iu.stat(mR(e)),!0}catch{return!1}}function tba(e){let t=$p.relative(kw(),e);if(t===""||t===".."||t.startsWith(`..${$p.sep}`)||$p.isAbsolute(t))return;let r=t.split($p.sep),[n,o]=r,i=r.at(-1);if(n===void 0||o===void 0||i===void 0)return;if(e!==$p.join(kw(),...r))return;if(r.length===2){let c=/^(.+)\.jsonl$/.exec(i);if(c===null)return;let u=c[1];return oc(n)&&oc(u)?G5p(zn.transcript(n,u)):void 0}if(r.length<4||r[2]!=="subagents")return;let s=/^agent-(.+)\.jsonl$/.exec(i);if(s===null)return;let a=s[1],l=r.slice(3,-1);if(![n,o,a,...l].every(oc))return;return G5p(zn.transcript(n,o,a,l.length>0?l:void 0))}function G5p(e){return iF(e)===void 0?e:void 0}async function rba(e,t,r){let n=tba(e);if(n===void 0)return;let o=await r.read([{key:n,tail:t}]);if(!o.ok)return;let[i]=o.value.it
+
+-- offset 263449708 --
+etInternalEventReader(e){this.internalEventReader=e,E("CCR v2 internal event reader registered for session resume")}setInternalSubagentEventReader(e){this.internalSubagentEventReader=e,E("CCR v2 subagent event reader registered for session resume")}getInternalEventReader(){return this.internalEventReader}getInternalSubagentEventReader(){return this.internalSubagentEventReader}}async function Mme(e,t,r,n){let o=YWt(e,n),i=Mt(),s=await Ow.sessionMessages(i),a=[],l=r;if(l&&!LF()&&!s.has(l))L("tengu_phantom_parent_hint",{});let c=!1;for(let d of o)if(s.has(d.uuid)){if(!c&&DRt(d))l=d.uuid}else a.push(d),c=!0;if(a.length>0)await Pu().insertMessageChain(a,!1,void 0,l,t);return a.findLast(DRt)?.uuid??l??null}async function BDr(e,t){let r=Pu();r.currentSessionLeafUuid=e??void 0,r.currentSessionLeafTs=new Date().toISOString(),await r.appendEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function Q_a(e,t){let r=Pu();await r.mirrorInternalEntry({type:"last-prompt",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...t?.rewound&&{rewound:!0},sessionId:Mt()})}async function MNe(e,t,r){await Pu().insertMessageChain(YWt(e),!0,t,r)}async function wfa(e){await Pu().appendEntry({type:"fork-context-ref",...e})}async function Z_a(e){await Pu().appendEntry({type:"observer-ref",...e,timestamp:new Date().toISOString()})}async function eba(e,t){if(t!==void 0)try{let r=tba(mR(e));if(r!==void 0&&(await t.stat(r)).ok)return!0}catch{}try{return await Iu.stat(mR(e)),!0}catch{return!1}}function tba(e){let t=$p.relative(kw(),e);if(t===""||t===".."||t.startsWith(`..${$p.sep}`)||$p.isAbsolute(t))return;let r=t.split($p.sep),[n,o]=r,i=r.at(-1);if(n===void 0||o===void 0||i===void 0)return;if(e!==$p.join(kw(),...r))return;if(r.length===2){let c=/^(.+)\.jsonl$/.exec(i);if(c===null)return;let u=c[1];return oc(n)&&oc(u)?G5p(zn.transcript(n,u)):void 0}if(r.length<4||r[2]!=="subagents")return;let s=/^agent-(.+)\.jsonl$/.exec(i);if(s===null)return;let a=s[1],l=r.slice(3,-1);if(![n,o,a,...l].every(oc))return;return G5p(zn.transcript(n,o,a,l.length>0?l:void 0))}function G5p(e){return iF(e)===void 0?e:void 0}async function rba(e,t,r){let n=tba(e);if(n===void 0)return;let o=await r.read([{key:n,tail:t}]);if(!o.ok)return;let[i]=o.value.items;if(!i.
+
+=== ANCHOR rewind hits=6 ===
+-- offset 79526256 --
+ our internal marketplace are vetted and approved.").
+---
+Color theme for the UI
+---
+Key binding mode for the prompt input
+---
+Vim INSERT-mode key-sequence remaps, e.g. {"jj": "<Esc>"}. Each key is exactly two printable characters typed in sequence; "<Esc>" (return to NORMAL mode) is the only supported target. Applies when editorMode is "vim".
+---
+Show full tool output instead of truncated summaries
+---
+Preferred OS notification channel
+---
+Automatically compact conversation when context fills
+---
+Precompute the compaction summary in the background before it is needed. Only applies when auto-compact is on.
+---
+When safeguards flag a message, automatically switch to a different model to keep chatting. When off, your session will pause instead.
+---
+Auto-scroll the conversation view to bottom (fullscreen mode only)
+---
+Ramp mouse-wheel scroll speed during fast scrolls (fullscreen mode only)
+---
+Snapshot files before edits so /rewind can restore them
+---
+Show "Cooked for Nm Ns" after each assistant turn
+---
+Stamp each message with its arrival time
+---
+Emit OSC 9;4 progress sequences during long operations
+---
+Enable the todo / task tracking panel
+---
+How spawned teammates execute (tmux, iterm2, in-process, auto)
+---
+Start Remote Control bridge automatically each session
+---
+Require explicit approval before SendMessage can reach a peer session on another machine via Remote Control
+---
+transient
+---
+transient
+---
+When no background service is running: 'transient' spawns one for this login session; 'ask' offers to install it persistently
+
+-- offset 87562582 --
+image dimensions exceed
+---
+many-image
+---
+An image in the conversation exceeds the dimension limit for many-image requests (2000px). Start a new session with fewer images.
+---
+An image in the conversation exceeds the dimension limit for many-image requests (2000px). Run /compact to remove old images from context, or start a new session.
+---
+change or unset the advisorModel setting (or the --advisor flag)
+---
+run /advisor to change or disable the advisor
+---
+Auto mode is unavailable for your plan
+---
+context window
+---
+request_too_large: 
+---
+`tool_use` ids were found without `tool_result` blocks immediately after
+---
+toolu_[A-Za-z0-9_]+
+---
+ Run /rewind to recover the conversation.
+---
+API Error: 400 due to tool use concurrency issues.
+---
+unexpected `tool_use_id` found in `tool_result`
+---
+tengu_unexpected_tool_result
+---
+`tool_use` ids must be unique
+---
+tengu_duplicate_tool_use_id
+---
+API Error: 400 duplicate tool_use ID in conversation history.
+---
+invalid model name
+---
+Claude Opus is not available with the Claude Pro plan. If you have updated your subscription plan recently, run /logout and /login for the plan to take effect.
+---
+billing_error
+---
+Cannot destructure property 'source' from null or undefined value
+---
+ANTHROPIC_API_KEY
+---
+firstParty
+---
+/login managed key
+---
+claude.ai
+---
+authentication_failed
+---
+ANTHROPIC_CUSTOM_HEADERS
+---
+X-Api-Key
+---
+x-api-key
+
+-- offset 99299251 --
+FileHistory: Snapshot for 
+---
+ not found
+---
+tengu_file_history_rewind_failed
+---
+The selected snapshot was not found
+---
+FileHistory: [Rewind] Rewinding to snapshot for 
+---
+Cannot destructure property 'filesChanged' from null or undefined value
+---
+FileHistory: [Rewind] Finished rewinding to 
+---
+tengu_file_history_rewind_success
+
+-- offset 99299567 --
+FileHistory: Snapshot for 
+---
+ not found
+---
+tengu_file_history_rewind_failed
+---
+The selected snapshot was not found
+---
+FileHistory: [Rewind] Rewinding to snapshot for 
+---
+Cannot destructure property 'filesChanged' from null or undefined value
+---
+FileHistory: [Rewind] Finished rewinding to 
+---
+tengu_file_history_rewind_success
+---
+snapshotFound
+---
+filesChanged
+---
+skippedLinks
+---
+filesChangedCount
+---
+skippedLinksCount
+
+-- offset 99299619 --
+FileHistory: Snapshot for 
+---
+ not found
+---
+tengu_file_history_rewind_failed
+---
+The selected snapshot was not found
+---
+FileHistory: [Rewind] Rewinding to snapshot for 
+---
+Cannot destructure property 'filesChanged' from null or undefined value
+---
+FileHistory: [Rewind] Finished rewinding to 
+---
+tengu_file_history_rewind_success
+---
+snapshotFound
+---
+filesChanged
+---
+skippedLinks
+---
+filesChangedCount
+---
+skippedLinksCount
+
+-- offset 99311923 --
+FileHistory: Error finding the backup file to apply
+---
+tengu_file_history_rewind_restore_file_failed
+
+=== ANCHOR suggestSimilar hits=4 ===
+-- offset 235436192 --
+dualOptions
+---
+negativeOptions
+---
+suggestSimilar
+
+-- offset 235449997 --
+child_process
+---
+Cannot destructure property 'Argument' from null or undefined value
+---
+Cannot destructure property 'CommanderError' from null or undefined value
+---
+Cannot destructure property 'Help' from null or undefined value
+---
+Cannot destructure property 'Option' from null or undefined value
+---
+Cannot destructure property 'suggestSimilar' from null or undefined value
+---
+The superclass is not a constructor.
+---
+constructor
+---
+prototype
+---
+copyInheritedSettings
+---
+_getCommandAndAncestors
+---
+createCommand
+---
+createHelp
+---
+configureHelp
+---
+configureOutput
+---
+showHelpAfterError
+---
+showSuggestionAfterError
+---
+addCommand
+---
+createArgument
+---
+argument
+---
+arguments
+---
+addArgument
+---
+helpCommand
+---
+addHelpCommand
+---
+_getHelpCommand
+---
+exitOverride
+---
+createOption
+---
+_callParseArg
+---
+_registerOption
+---
+_registerCommand
+---
+addOption
+
+-- offset 265992827 --
+e((t,r)=>t+r[0].toUpperCase()+r.slice(1))}function bFS(e){let t,r,n=e.split(/[ |,]+/);if(n.length>1&&!/^[[<]/.test(n[1]))t=n.shift();if(r=n.shift(),!t&&/^-[^-]$/.test(r))t=r,r=void 0;return{shortFlag:t,longFlag:r}}lHa.Option=JAf;lHa.DualOptions=XAf});var ZAf=ee(function(QAf){function SFS(e,t){if(Math.abs(e.length-t.length)>3)return Math.max(e.length,t.length);let r=[];for(let n=0;n<=e.length;n++)r[n]=[n];for(let n=0;n<=t.length;n++)r[0][n]=n;for(let n=1;n<=t.length;n++)for(let o=1;o<=e.length;o++){let i=1;if(e[o-1]===t[n-1])i=0;else i=1;if(r[o][n]=Math.min(r[o-1][n]+1,r[o][n-1]+1,r[o-1][n-1]+i),o>1&&n>1&&e[o-1]===t[n-2]&&e[o-2]===t[n-1])r[o][n]=Math.min(r[o][n],r[o-2][n-2]+1)}return r[e.length][t.length]}function TFS(e,t){if(!t||t.length===0)return"";t=Array.from(new Set(t));let r=e.startsWith("--");if(r)e=e.slice(2),t=t.map((s)=>s.slice(2));let n=[],o=3,i=0.4;if(t.forEach((s)=>{if(s.length<=1)return;let a=SFS(e,s),l=Math.max(e.length,s.length);if((l-a)/l>i){if(a<o)o=a,n=[s];else if(a===o)n.push(s)}}),n.sort((s,a)=>s.localeCompare(a)),r)n=n.map((s)=>`--${s}`);if(n.length>1)return`
+(Did you mean one of ${n.join(", ")}?)`;if(n.length===1)return`
+(Did you mean ${n[0]}?)`;return""}QAf.suggestSimilar=TFS});var oRf=ee(function(nRf){var vFS=require("events").EventEmitter,uHa=require("child_process"),Lst=require("path"),dHa=require("fs"),$3=require("process"),{Argument:EFS,humanReadableArgName:wFS}=ydi(),{CommanderError:pHa}=t1n(),{Help:CFS}=aHa(),{Option:eRf,DualOptions:AFS}=cHa(),{suggestSimilar:tRf}=ZAf();class fHa extends vFS{constructor(e){super();this.commands=[],this.options=[],this.parent=null,this._allowUnknownOption=!1,this._allowExcessArguments=!0,this.registeredArguments=[],this._args=this.registeredArguments,this.args=[],this.rawArgs=[],this.processedArgs=[],this._scriptPath=null,this._name=e||"",this._optionValues={},this._optionValueSources={},this._storeOptionsAsProperties=!1,this._actionHandler=null,this._executableHandler=!1,this._executableFile=null,this._executableDir=null,this._defaultCommandName=null,this._exitCallback=null,this._aliases=[],this._combineFlagAndOptionalValue=!0,this._description="",this._summary="",this._argsDescription=void 0,this._enablePositionalOptions=!1,this._passThroughOptions=!1,this._lifeCycleHooks={},this._showHelpAfterError=!1,this._showSuggestionAfterError=!0,this._outputConfiguration={writeOut:(t)=>$3.stdout.write(t),writeErr:(t)
+
+-- offset 265993127 --
+h.abs(e.length-t.length)>3)return Math.max(e.length,t.length);let r=[];for(let n=0;n<=e.length;n++)r[n]=[n];for(let n=0;n<=t.length;n++)r[0][n]=n;for(let n=1;n<=t.length;n++)for(let o=1;o<=e.length;o++){let i=1;if(e[o-1]===t[n-1])i=0;else i=1;if(r[o][n]=Math.min(r[o-1][n]+1,r[o][n-1]+1,r[o-1][n-1]+i),o>1&&n>1&&e[o-1]===t[n-2]&&e[o-2]===t[n-1])r[o][n]=Math.min(r[o][n],r[o-2][n-2]+1)}return r[e.length][t.length]}function TFS(e,t){if(!t||t.length===0)return"";t=Array.from(new Set(t));let r=e.startsWith("--");if(r)e=e.slice(2),t=t.map((s)=>s.slice(2));let n=[],o=3,i=0.4;if(t.forEach((s)=>{if(s.length<=1)return;let a=SFS(e,s),l=Math.max(e.length,s.length);if((l-a)/l>i){if(a<o)o=a,n=[s];else if(a===o)n.push(s)}}),n.sort((s,a)=>s.localeCompare(a)),r)n=n.map((s)=>`--${s}`);if(n.length>1)return`
+(Did you mean one of ${n.join(", ")}?)`;if(n.length===1)return`
+(Did you mean ${n[0]}?)`;return""}QAf.suggestSimilar=TFS});var oRf=ee(function(nRf){var vFS=require("events").EventEmitter,uHa=require("child_process"),Lst=require("path"),dHa=require("fs"),$3=require("process"),{Argument:EFS,humanReadableArgName:wFS}=ydi(),{CommanderError:pHa}=t1n(),{Help:CFS}=aHa(),{Option:eRf,DualOptions:AFS}=cHa(),{suggestSimilar:tRf}=ZAf();class fHa extends vFS{constructor(e){super();this.commands=[],this.options=[],this.parent=null,this._allowUnknownOption=!1,this._allowExcessArguments=!0,this.registeredArguments=[],this._args=this.registeredArguments,this.args=[],this.rawArgs=[],this.processedArgs=[],this._scriptPath=null,this._name=e||"",this._optionValues={},this._optionValueSources={},this._storeOptionsAsProperties=!1,this._actionHandler=null,this._executableHandler=!1,this._executableFile=null,this._executableDir=null,this._defaultCommandName=null,this._exitCallback=null,this._aliases=[],this._combineFlagAndOptionalValue=!0,this._description="",this._summary="",this._argsDescription=void 0,this._enablePositionalOptions=!1,this._passThroughOptions=!1,this._lifeCycleHooks={},this._showHelpAfterError=!1,this._showSuggestionAfterError=!0,this._outputConfiguration={writeOut:(t)=>$3.stdout.write(t),writeErr:(t)=>$3.stderr.write(t),getOutHelpWidth:()=>$3.stdout.isTTY?$3.stdout.columns:void 0,getErrHelpWidth:()=>$3.stderr.isTTY?$3.stderr.columns:void 0,outputError:(t,r)=>r(t)},this._hidden=!1,this._helpOption=void 0,this._addImplicitHelpCommand=void 0,this._helpCommand=void 0,this._helpConfiguration={}}copy
+
+=== ANCHOR file not found hits=6 ===
+-- offset 58873516 --
+uildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+console.log("Hello via Bun!");{
+  "compilerOptions": {
+    // Environment setup & latest features
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "types": ["bun"],
+
+    // Bundler mode
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false
+  }
+}
+ (for editor autocomplete)bunVersionentryPoint# {[name]s}
+
+To install dependencies:
+
+```bash
+bun install
+```
+
+To run:
+
+```bash
+bun run {[entryPoint]s}
+```
+
+This project was created using `bun init` in bun v{[bunVersion]s}. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+
+To get started, run:
+
+     "'
+---
+1.4.0 (eb835313a)
+---
+Lockfile not found. Run 'bun install' first to generate a lockfile.Error loading lockfile: {s}No advisories found
+
+---
+[32mNo advisories found
+---
+[0m
+Could not perform security scan (<d>{s}<r>)
+To use 'bun pm scan', configure a security scanner in bunfig.toml:
+  [install.security]
+  scanner = "package_name"
+
+Security scanners can be npm packages that export a scanner object.
+
+To use 'bun pm scan', configure a security scanner in bunfig.toml:
+  [install.security]
+  scanner = "
+---
+[36mpackage_name
+---
+[0m"
+
+Security scanners can be npm packages that export a scanner object.
+
+---
+process.archprocess.versions.bunroot/
+---
+error: cannot use --compile with an output file named 'bun' because bun won't realize it's a standalone executable. Please choose a different name for --outfile
+---
+[31merror
+---
+[0m cannot use --compile with an output file named 'bun' because bun won't realize it's a standalone executable. Please choose a different name for --outfile
+---
+developmentreact-servercould not write metafile-md {}could not open metafile-md {}could not write metafile {}could not open metafile {}failed to write file '{}'<magenta><blue>entry pointsource mapmodule infometafile jsonmetafile markdownNo entry point found 
+
+-- offset 59117163 --
+<r> <cyan>set<r> <d>key=value ...<r>
+<d>
+---
+<r> <cyan>delete<r> <d>key ...<r>
+<d>
+---
+<r> <cyan>fix<r>                       auto-correct common package.json errors
+<b><green>bun pm<r> <blue>hash<r>                 generate & print the hash of the current lockfile
+<b><green>bun pm<r> <blue>hash-string<r>          print the string used to hash the lockfile
+<b><green>bun pm<r> <blue>hash-print<r>           print the hash stored in the current lockfile
+<b><green>bun pm<r> <blue>cache<r>                print the path to the cache folder
+<b><green>bun pm<r> <blue>cache rm<r>             clear the cache
+<b><green>bun pm<r> <blue>migrate<r>              migrate another package manager's lockfile without installing anything
+<b><green>bun pm<r> <blue>untrusted<r>            print current untrusted dependencies with scripts
+<b><green>bun pm<r> <blue>trust<r> <d>names ...<r>      run scripts for untrusted dependencies and add to `trustedDependencies`
+<d>
+---
+<r>  <cyan>--all<r>                    trust all untrusted dependencies
+<b><green>bun pm<r> <blue>default-trusted<r>      print the default trusted dependencies list
+
+Learn more about these at <magenta>https://bun.com/docs/cli/pm<r>.
+pmLockfile not foundinternal error: entered unreachable code: LoadResult::ok_mut on non-Ok variant--trusted-ACould not delete {s}Could not read {s}Could not open {s}failed to authenticate with registry '{f}'
+---
+bundlerOptionsserverclientssrframeworkappwhile querying current working directorynetworkBlockList.onStructuredCloneDeserialize failedmust come before end$`...`.cwd(): expected a string argumentalgorithmTime cost must be greater than 0memoryCostMemory cost must be at least 8Rounds must be between 4 and 31unknown algorithm, expected one of: "bcrypt", "argon2id", "argon2d", "argon2i" (default is "argon2id")options.algorithmiterationspassword is too longSupport serving files from a file descriptor. Please pass a path instead.TODO: support Bun.file(path) in static routesResponse body has already been usedBody must be fully buffered before it can be used in a static route. Consider calling new Response(await response.blob()) to buffer the body.Cannot construct ServerWebSocketsendBinarysendBinary requires an ArrayBufferViewsendBinary requires at least 1 argumentpublishTextpublishText requires a non-empty messagepublishText requires a topic stringpublish requires at leas
+
+-- offset 59320952 --
+d not query current working directory./bun.appFailed to write {} to output directoryprerendergetParams
+---
+catch-all routes are not supported in static site generationRuntime file not found. This is an unexpected bug in Bun. Please file a bug report on GitHub._bun/[dir]/[name].[hash].[ext]_bun/[dir]/[name].[hash].chunk.[ext]_bun/[dir]/[name].[hash].asset.[ext]Your config file's default export must contain an "app" property.
+
+Example:
+  export default {
+    app: {
+      framework: "react",
+    }
+  }
+
+Learn more at https://bun.com/docs/ssgYour config file's default export must be an object.
+
+Example:
+  export default {
+    app: {
+      framework: "react",
+    }
+  }
+
+Learn more at https://bun.com/docs/ssg'bun build --app' cannot find your application's config file
+
+The default location for this is `bun.app.ts`
+
+TODO: insert a link to `bun.com/docs`could not resolve application config file '{}'
+---
+warn: Be advised that Bun Bake is highly experimental, and its API
+will have breaking changes. Join the #bake Discord
+channel to help us find bugs: https://bun.com/discord
+
+
+---
+[33mwarn
+---
+[0m Be advised that Bun Bake is highly experimental, and its API
+will have breaking changes. Join the 
+---
+[35m#bake
+---
+[0m Discord
+channel to help us find bugs: 
+---
+[34mhttps://bun.com/discord
+---
+Diffing these two values would create a string that is too large. If this was intentional, plea
+
+-- offset 59637109 --
+der":"","isEntry":false
+---
+,"headers":{"files":[
+---
+, slottedAfirst-childlast-childonly-childemptyscopefirst-of-typelast-of-typeonly-of-typenth-childnth-of-typenth-last-childiswherehasnot
+---
+internal error: entered unreachable code: Should not be returned with in_attr_selector = false
+---
+internal error: entered unreachable code: Not returned with in_attr_selector = true 	
+
+---
+nth-colnth-last-colinternal error: entered unreachable code: Found combinator in simple selectors vector?resolver set in load()cannot write multiple output files without an output directory//# sourceMappingURL=data:application/json;base64,Failed to allocate memory for external source map//# sourceMappingURL=.module-infoFailed to allocate memory for inline source mapoomMultiple files share the same output path
+entrychunkassetExpr Store must be init'dStmt Store must be init'dassertion failed: value <= MAX_10BIT << 20 | MAX_10BIT << 10 | MAX_10BIT)importantcharsethttp-equivcontentprocess.env.NODE_ENVInternal error: expected func to have a name ref
+---
+No dev server attached in asynchronous bundle jobThe rewriter has been stopped.Assertion failed: HTML import file not found in pathToSourceIndexMapparseprintUnhandled out of memory error in breakOutputIntoPieces()(async(g,w)=>{var S=new Map,i=new Map;function JZ(Z){if(Z.active){let{sheet:$,link:X}=Z;if(Z.active=!1,$)$.disabled=!0;else if(X){let G=X.sheet;if(G)G.disabled=!0}}}function NZ(Z){if(!Z.active){if(Z.active=!0,Z.sheet)Z.sheet.disabled=!1;else if(Z.link){let $=Z.link.sheet;if($)$.disabled=!1}}}var aZ=new MutationObserver((Z)=>{for(let $ of Z)if($.type==="childList"){let X=0,G=$.removedNodes.length;while(X<G){let Y=$.removedNodes[X],J=i.get(Y);if(J){let W=S.get(J);if(W)JZ(W);i.delete(Y)}X++}X=0,G=$.addedNodes.length;while(X<G){let Y=$.addedNodes[X];if(Y instanceof HTMLLinkElement)EZ(Y);X++}}else if($.type==="attributes"){let X=$.target;if(X.tagName==="LINK"&&X.rel==="stylesheet"){let G=i.get(X);if(G){let Y=S.get(G);if(Y)if(X.disabled)JZ(Y);else NZ(Y)}}}});function EZ(Z){let $=new URL(Z.href).pathname;if($.startsWith("/_bun/asset/")){let X=$.slice(12).slice(0,16);if(!/^[a-f0-9]{16}$/.test(X))return;let G=S.get(X);if(G){let{sheet:Y}=G;if(Y){Y.disabled=!1;let J=Z.sheet;if(J)J.disabled=!0}G.link=Z}else S.set(X,{sheet:null,link:Z,active:!0});i.set(Z,X)}}aZ.observe(document.head,{childList:!0,subtree:!
+
+-- offset 62686244 --
+- matching the same route pattern is ambiguous
+---
+8warn: Could not decode sourcemap in dev server runtime: 
+---
+[33mwarn
+---
+[0m Could not decode sourcemap in dev server runtime: 
+---
+bun: invalid arguments: 
+---
+bun: TODO: 
+---
+ must be a string or TypedArray
+---
+Failed to read process output: 
+---
+FormData parse error 
+---
+NAPI FATAL ERROR: 
+---
+Invalid SemVer: 
+---
+AEGetParamPtr
+---
+AVMediaTypeAudio
+---
+AVCaptureDevice
+---
+authorizationStatusForMediaType:
+---
+AudioQueueNewInput
+---
+AudioQueueNewOutput
+---
+AudioQueueAllocateBuffer
+---
+AudioQueueEnqueueBuffer
+---
+AudioQueueStart
+---
+AudioQueueStop
+---
+AudioQueueDispose
+---
+CGEventSourceFlagsState
+---
+AEInstallEventHandler
+---
+finishLaunching
+---
+dateWithTimeIntervalSinceNow:
+---
+NSDefaultRunLoopMode
+---
+nextEventMatchingMask:untilDate:inMode:dequeue:
+---
+sendEvent:
+---
+parsing failed: 
+---
+: expected 
+---
+ to be a string
+---
+: expected 
+---
+ arguments, got 
+---
+invalid flag: 
+---
+color() internal error: 
+---
+failed to make diff: 
+---
+	"catalog:
+---
+Invalid Git URL: 
+---
+	{"name":"
+---
+","versions":[
+---
+failed to load manifest file: 
+---
+failed to open manifest file "
+---
+lockfile not found: '
+---
+failed to load lockfile: 
+---
+failed to open: 
+---
+" error in macro
+---
+cannot coerce 
+---
+,) to Bun's AST. Please return a simpler type
+---
+cannot coerce 
+---
++ to Bun's AST. Please return a simpler type
+---
+" not found
+---
+ resolving macro "
+---
+{"VarArgv":
+---
+Unexpected token: `
+---
+"Conditional expression operation: 
+---
+^, is not supported right now. Please open a GitHub issue if you would like it to be supported.
+---
+Expected a word, but got: 
+---
+Expected "]]" but got: 
+---
+*Unknown conditional expression operation: 
+---
+4Expected a conditional expression operand, but got: 
+---
+5Expected a conditional expression operator, but got: 
+---
+Expected "then" but got: 
+---
+*Expected "else", "elif", or "fi" but got: 
+---
+Expected "fi" but got: 
+---
++expected a command or assignment but got: "
+---
+
+Expected: 
+---
+5Expected a command, assignment, or subshell but got: 
+---
+{"open":{"idx":
+---
+loader "
+---
+$" is not supported in Bun.Transpiler
+---
+2Expected compile target to start with 'bun-', got 
+---
+Unsupported compile target: 
+---
+Unknown compile target: 
+---
+)The value is out of range. It must be >= 
+---
+ and <= 
+---
+	n,,n=*,r=
+---
+
+,c=biws,r=
+---
+	c=biws,r=
+
+-- offset 62723232 --
+[2mFrom: 
+---
+[2m  To: 
+---
+,[SecurityProvider] Completed with exit code 
+---
+[2m[SecurityProvider]
+---
+[0m Completed with exit code 
+---
+)[SecurityProvider] Failed with exit code 
+---
+[2m[SecurityProvider]
+---
+[0m Failed with exit code 
+---
+([SecurityProvider] Terminated by signal 
+---
+[2m[SecurityProvider]
+---
+[0m Terminated by signal 
+---
+2[SecurityProvider] Completed with unknown status [
+---
+[2m[SecurityProvider]
+---
+[0m Completed with unknown status [
+---
+] Scanning 1 package took 
+---
+] Scanning 1 package took 
+---
+] Scanning 
+---
+ packages took 
+---
+] Scanning 
+---
+ packages took 
+---
+--no-install
+---
+Failed to join registry 
+---
+ and package 
+---
+4Registry URL must be http:// or https://
+Received: "
+---
+Invalid package name 
+---
+: manifest URL 
+---
+ is not on registry 
+---
+npm error: 
+---
+'warn: Package name mismatch. Expected "
+---
+" but received "
+---
+[33mwarn
+---
+[0m Package name mismatch. Expected 
+---
+[0m but received 
+---
+Failed to parse dependency 
+---
+/node_modules/
+---
+<Expected tarball URL to start with https:// or http://, got 
+---
+ while fetching package 
+---
+lockfile not found: 
+---
+[31mlockfile not found:
+---
+error opening lockfile: 
+---
+[31merror
+---
+[0m opening lockfile:
+---
+error reading lockfile: 
+---
+[31merror
+---
+[0m reading lockfile:
+---
+error parsing lockfile: 
+---
+[31merror
+---
+[0m parsing lockfile:
+---
+ error while migrating lockfile: 
+---
+[31merror
+---
+[0m while migrating lockfile:
+---
+$Overrides changed since last install
+---
+Workspace package "
+---
+" has added 
+---
+ dependencies, removed 
+---
+ dependencies, and updated 
+---
+ dependencies
+---
+Workspace package "
+---
+" has added 
+---
+[0m dependencies, removed 
+---
+[0m dependencies, and updated 
+---
+[0m dependencies
+---
+/bin/bash
+---
+/usr/bin/bash
+---
+/usr/local/bin/bash
+---
+/usr/bin/sh
+---
+/usr/bin/zsh
+---
+/usr/local/bin/zsh
+---
+/system/bin/sh
+---
+pwarn: Extracting nameless packages is not supported yet. Please open an issue on GitHub with reproduction steps.
+---
+ decompressing "
+---
+
+] Extract 
+---
+ (decompressed 
+---
+ tgz file in 
+---
+
+] Extract 
+---
+[0m (decompressed 
+---
+ tgz file in 
+---
+] Extracted to 
+---
+] Extracted to 
+---
+( when create temporary directory named "
+---
+" (while extracting "
+---
+ unrecognised dependency format: 
+---
+' postinstall cost you 
+
+=== ANCHOR at-mention hits=6 ===
+-- offset 124746544 --
+Cannot destructure property 'filename' from null or undefined value
+---
+input_file_at_mention
+---
+ more entries
+---
+tengu_at_mention_extracting_directory_success
+---
+input_dir_at_mention
+---
+directory
+---
+tengu_at_mention_extracting_directory_error
+---
+readdir_failed
+---
+tengu_at_mention_extracting_filename_success
+---
+tengu_at_mention_extracting_filename_error
+---
+at-mention
+
+-- offset 124902384 --
+Cannot destructure property 'offset' from null or undefined value
+---
+at-mention
+---
+tengu_attachment_file_too_large
+---
+already_read_file
+---
+file_unchanged
+
+-- offset 124909024 --
+compact_file_reference
+---
+at-mention
+
+-- offset 163711344 --
+tengu_import_attachment_success
+---
+tengu_import_attachment_error
+---
+at-mention
+---
+import attachment enrichment failed: 
+
+-- offset 244049680 --
+at-mentions
+---
+Talk to your codebase
+---
+@ files, line refs
+---
+> what does [suggestion:@src/auth.ts] do?
+Exports validateToken() which
+checks JWT expiry and signature.
+---
+Reference specific lines with 
+---
+ and Claude jumps straight there. Works in both directions: Claude cites files the same wa
+
+-- offset 248004649 --
+attachment
+---
+Internal Attachment discriminated union (at-mentioned files, IDE selections, pasted images, structured output, deferred tool-use). Wire shape pending a dedicated SDKAttachment schema.
+---
+@internal Emitted when the engine yields an AttachmentMessage into the turn stream. Carries user-attached content (at-mentioned files, IDE selections, pasted media) and loop-attached data (structured output, deferred tool-use payloads). SDKResultMessage.structured_output and .deferred_tool_use are derived from these frames. From internal QueryEvent 'attachment'.
+
+=== ANCHOR at_mention hits=6 ===
+-- offset 70816816 --
+_searchStringList
+---
+_searchLogical
+---
+_searchObjectList
+---
+_findMatches
+---
+Incorrect 'index' type
+---
+CLAUDE_CODE_SCROLL_SPEEDI
+---
+Use a different name or overwrite.
+---
+egcouldntcopytext
+---
+setSpawnDisabledForTests	
+---
+forceStop
+---
+getSpawnArgs
+---
+startRestartInterval
+---
+stopRestartInterval
+---
+spawnInhibitor
+---
+killInhibitor
+---
+cancelReservation
+---
+tryStart
+---
+forceEnd	
+---
+slack_human
+---
+claude-in-teams
+---
+teams_human
+---
+mcp_send_message
+---
+receiver_grouping_id
+---
+baseline-pending
+---
+(9(8(<(4(&('(
+---
+at_mentioned
+---
+https://github.com/anthropics/claude-code/issues/
+---
+command-arg-
+---
+slack_search_channels
+---
+idle-teammate-summary
+---
+launch-prompt-warning
+---
+persistence-suppressed
+---
+transcript-writer-degraded
+---
+setFocused
+---
+recordOpenViaLeft
+
+-- offset 82779424 --
+error_name
+---
+at_mention
+---
+mentionType
+---
+mention_type
+
+-- offset 124573888 --
+at_mentioned_files
+---
+mcp_resources
+---
+agent_mentions
+---
+nested_memory
+---
+queued_commands
+---
+date_change
+---
+ultrathink_effort
+---
+deferred_tools_delta
+---
+agent_listing_delta
+---
+mcp_instructions_delta
+---
+mcp_dropped_tools_delta
+---
+changed_files
+---
+dynamic_skill
+---
+skill_listing
+---
+plan_mode
+---
+plan_mode_exit
+---
+auto_mode
+---
+auto_mode_exit
+---
+todo_reminders
+---
+tool_search_usage_reminder
+---
+teammate_mailbox
+---
+team_context
+---
+agent_pending_messages
+---
+critical_system_reminder
+---
+total_tokens_reminder
+---
+budget_usd
+---
+workflow_keyword_request
+---
+ultra_effort_enter
+---
+workflow_size_guideline_change
+---
+ide_selection
+
+-- offset 124745963 --
+Cannot destructure property 'filename' from null or undefined value
+---
+input_file_at_mention
+---
+ more entries
+---
+tengu_at_mention_extracting_directory_success
+---
+input_dir_at_mention
+---
+directory
+---
+tengu_at_mention_extracting_directory_error
+---
+readdir_failed
+---
+tengu_at_mention_extracting_filename_success
+---
+tengu_at_mention_extracting_filename_error
+---
+at-mention
+
+-- offset 124746182 --
+Cannot destructure property 'filename' from null or undefined value
+---
+input_file_at_mention
+---
+ more entries
+---
+tengu_at_mention_extracting_directory_success
+---
+input_dir_at_mention
+---
+directory
+---
+tengu_at_mention_extracting_directory_error
+---
+readdir_failed
+---
+tengu_at_mention_extracting_filename_success
+---
+tengu_at_mention_extracting_filename_error
+---
+at-mention
+
+-- offset 124746250 --
+Cannot destructure property 'filename' from null or undefined value
+---
+input_file_at_mention
+---
+ more entries
+---
+tengu_at_mention_extracting_directory_success
+---
+input_dir_at_mention
+---
+directory
+---
+tengu_at_mention_extracting_directory_error
+---
+readdir_failed
+---
+tengu_at_mention_extracting_filename_success
+---
+tengu_at_mention_extracting_filename_error
+---
+at-mention
+
+=== ANCHOR matched characters hits=0 ===
+=== ANCHOR slash-command hits=6 ===
+-- offset 157406535 --
+immediate-
+---
+tengu_paste_text
+---
+tengu_immediate_command_executed
+---
+remote-bash-mode-unavailable
+---
+'!' commands aren't available in cloud sessions yet
+---
+stash-restored
+---
+Draft restored
+---
+post-text
+---
+unavailable
+---
+remote_unavailable
+---
+remote-slash-command-unavailable-
+---
+ isn't available while viewing read-only
+---
+ isn't available in cloud sessions yet
+---
+image/png
+---
+Iterator result interface is not an object.
+
+-- offset 158525306 --
+[Claude in Chrome] Skipping chrome wiring: blocked by enterprise MCP config or managed deniedMcpServers policy
+---
+[Claude in Chrome] Skipping chrome wiring: --safe-mode disables MCP
+---
+[Claude in Chrome] MCP server blocked by enterprise policy: 
+---
+Warning: MCP server blocked by enterprise policy: 
+---
+tengu_claude_in_chrome_setup
+---
+Cannot destructure property 'mcpConfig' from null or undefined value
+---
+tengu_claude_in_chrome_setup_failed
+---
+[Claude in Chrome] Error: 
+---
+Error: Failed to run with Claude in Chrome.
+---
+--fallback-model
+---
+--allow-dangerously-skip-permissions
+---
+--allow-dangerously-skip-permissions
+---
+--disable-slash-commands
+---
+--disable-slash-commands
+---
+You cannot use --strict-mcp-config when an enterprise MCP config is present
+---
+You cannot dynamically configure MCP servers when an enterprise MCP config is present
+---
+Cannot destructure property 'setupComputerUseMCP' from null or undefined value
+---
+[Computer Use MCP] Setup failed: 
+---
+--channels
+---
+--dangerously-load-development-channels
+---
+tengu_mcp_channel_flags
+---
+Cannot destructure property 'shouldToolsListOptInToBrief' from null or undefined value
+---
+Cannot destructure property 'warnings' from null or undefined value
+---
+permission_context_ms
+---
+[STARTUP] Loading MCP configs...
+---
+Error: Invalid input fo
+
+-- offset 158525386 --
+[Claude in Chrome] Skipping chrome wiring: blocked by enterprise MCP config or managed deniedMcpServers policy
+---
+[Claude in Chrome] Skipping chrome wiring: --safe-mode disables MCP
+---
+[Claude in Chrome] MCP server blocked by enterprise policy: 
+---
+Warning: MCP server blocked by enterprise policy: 
+---
+tengu_claude_in_chrome_setup
+---
+Cannot destructure property 'mcpConfig' from null or undefined value
+---
+tengu_claude_in_chrome_setup_failed
+---
+[Claude in Chrome] Error: 
+---
+Error: Failed to run with Claude in Chrome.
+---
+--fallback-model
+---
+--allow-dangerously-skip-permissions
+---
+--allow-dangerously-skip-permissions
+---
+--disable-slash-commands
+---
+--disable-slash-commands
+---
+You cannot use --strict-mcp-config when an enterprise MCP config is present
+---
+You cannot dynamically configure MCP servers when an enterprise MCP config is present
+---
+Cannot destructure property 'setupComputerUseMCP' from null or undefined value
+---
+[Computer Use MCP] Setup failed: 
+---
+--channels
+---
+--dangerously-load-development-channels
+---
+tengu_mcp_channel_flags
+---
+Cannot destructure property 'shouldToolsListOptInToBrief' from null or undefined value
+---
+Cannot destructure property 'warnings' from null or undefined value
+---
+permission_context_ms
+---
+[STARTUP] Loading MCP configs...
+---
+Error: Invalid input format "
+---
+Error: --input-format=s
+
+-- offset 161955482 --
+ MCP configurations
+---
+--session-id <uuid>
+---
+Use a specific session ID for the conversation (must be a valid UUID)
+---
+-n, --name <name>
+---
+Set a display name for this session (shown in the prompt box, /resume picker, and terminal title)
+---
+--agents <json>
+---
+JSON object defining custom agents (e.g. '{"reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}}')
+---
+--setting-sources <sources>
+---
+Comma-separated list of setting sources to load (user, project, local).
+---
+--plugin-dir <path>
+---
+Load a plugin from a directory or .zip for this session only (repeatable: --plugin-dir A --plugin-dir B.zip)
+---
+--plugin-dir-no-mcp <path>
+---
+Like --plugin-dir but the engine will not read this plugin's .mcp.json (caller owns its MCP connections)
+---
+--plugin-url <url>
+---
+Fetch a plugin .zip from a URL for this session only (repeatable: --plugin-url A --plugin-url B)
+---
+--disable-slash-commands
+---
+Disable all skills
+---
+--chrome
+---
+Enable Claude in Chrome integration
+---
+--no-chrome
+---
+Disable Claude in Chrome integration
+---
+--file <specs...>
+---
+File resources to download at startup. Format: file_id:relative_path (e.g., --file file_abc:doc.txt file_def:img.png)
+---
+report the issue at https://github.com/anthropics/claude-code/issues
+---
+@anthropic-ai/claude-code
+---
+https://code.claude.com/docs/en/overview
+---
+https://github.com/anthropics/claude-code/issues
+---
+2026-08-10T18:40:15Z
+---
+5ecc7d5389d8b682652d0ea32eadd3e0eb537ee8
+---
+ (Claude Code)
+---
+-v, --version
+---
+Output the version number
+---
+-w, --worktree [name]
+---
+Create a new git worktree for this session (optionally specify a name)
+
+-- offset 187372170 --
+workflows
+---
+channels
+---
+monitors
+---
+settings
+---
+experimental
+---
+commands
+---
+dependencies
+---
+userConfig
+---
+metadata
+---
+displayName
+---
+defaultEnabled
+---
+fallback
+---
+homepage
+---
+repository
+---
+keywords
+---
+compatibility
+---
+disallowedTools
+---
+permissionMode
+---
+maxTurns
+---
+initialPrompt
+---
+background
+---
+isolation
+---
+observer
+---
+observerMessage
+---
+observeSubagents
+---
+keep-coding-instructions
+---
+force-for-plugin
+---
+originSessionId
+---
+hide-from-slash-command-tool
+---
+description
+---
+allowed-tools
+---
+argument-hint
+---
+arguments
+
+-- offset 187375114 --
+workflows
+---
+channels
+---
+monitors
+---
+settings
+---
+experimental
+---
+commands
+---
+dependencies
+---
+userConfig
+---
+metadata
+---
+displayName
+---
+defaultEnabled
+---
+fallback
+---
+homepage
+---
+repository
+---
+keywords
+---
+compatibility
+---
+disallowedTools
+---
+permissionMode
+---
+maxTurns
+---
+initialPrompt
+---
+background
+---
+isolation
+---
+observer
+---
+observerMessage
+---
+observeSubagents
+---
+keep-coding-instructions
+---
+force-for-plugin
+---
+originSessionId
+---
+hide-from-slash-command-tool
+---
+argument-hint
+---
+arguments
+---
+disable-model-invocation
+---
+user-invocable
+---
+settings
+
+
+=== ANCHOR SlashCommand hits=6 ===
+-- offset 69402263 --
+replaceRendererMode
+---
+strictToolResultPairing
+---
+replaceStrictToolResultPairing
+---
+clientType%
+---
+replaceClientTypeP|
+---
+sessionStartType
+---
+replaceSessionStartType
+---
+questionPreviewFormat
+---
+replaceQuestionPreviewFormat
+---
+replConfigArgv
+---
+replaceReplConfigArgv
+---
+settingsEffortAtStartup
+---
+replaceSettingsEffortAtStartup
+---
+userMsgOptIn
+---
+replaceUserMsgOptIn
+---
+searchToolsOptIn
+---
+replaceSearchToolsOptIn
+---
+wizardOperatorToolsEnabled/
+---
+replaceWizardOperatorToolsEnabledT
+---
+sdkAgentProgressSummariesEnabled
+---
+replaceSdkAgentProgressSummariesEnabled
+---
+sessionPersistenceDisabled
+---
+replaceSessionPersistenceDisabled
+---
+sessionBypassPermissionsMode
+---
+replaceSessionBypassPermissionsMode
+---
+disableSlashCommands
+---
+replaceDisableSlashCommands
+---
+scheduledTasksEnabled
+---
+replaceScheduledTasksEnabled
+---
+initJsonSchema
+---
+replaceInitJsonSchema
+---
+cliSessionConfigCarried
+---
+replaceCliSessionConfigCarried
+---
+forkRestrictedLaunchConfig*
+---
+replaceForkRestrictedLaunchConfigP
+---
+forkReplayLaunchConfig
+---
+replaceForkReplayLaunchConfig
+---
+isGranted
+---
+remember
+---
+(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))
+---
+indented
+
+-- offset 69402318 --
+strictToolResultPairing
+---
+replaceStrictToolResultPairing
+---
+clientType%
+---
+replaceClientTypeP|
+---
+sessionStartType
+---
+replaceSessionStartType
+---
+questionPreviewFormat
+---
+replaceQuestionPreviewFormat
+---
+replConfigArgv
+---
+replaceReplConfigArgv
+---
+settingsEffortAtStartup
+---
+replaceSettingsEffortAtStartup
+---
+userMsgOptIn
+---
+replaceUserMsgOptIn
+---
+searchToolsOptIn
+---
+replaceSearchToolsOptIn
+---
+wizardOperatorToolsEnabled/
+---
+replaceWizardOperatorToolsEnabledT
+---
+sdkAgentProgressSummariesEnabled
+---
+replaceSdkAgentProgressSummariesEnabled
+---
+sessionPersistenceDisabled
+---
+replaceSessionPersistenceDisabled
+---
+sessionBypassPermissionsMode
+---
+replaceSessionBypassPermissionsMode
+---
+disableSlashCommands
+---
+replaceDisableSlashCommands
+---
+scheduledTasksEnabled
+---
+replaceScheduledTasksEnabled
+---
+initJsonSchema
+---
+replaceInitJsonSchema
+---
+cliSessionConfigCarried
+---
+replaceCliSessionConfigCarried
+---
+forkRestrictedLaunchConfig*
+---
+replaceForkRestrictedLaunchConfigP
+---
+forkReplayLaunchConfig
+---
+replaceForkReplayLaunchConfig
+---
+isGranted
+---
+remember
+---
+(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))
+---
+indented
+
+-- offset 75213306 --
+luginsNoMcp
+---
+setInlinePlugins
+---
+setInlinePluginUrls
+---
+setInitialMainLoopModel
+---
+setInitJsonSchema
+---
+setInheritedTeamName
+---
+setInferenceProfileBackingModel
+---
+setHostAuthTokenRefreshCallback
+---
+setHasUnknownModelCost
+---
+setHasStreamingInput
+---
+setHasExitedPlanMode
+---
+setHasDevChannels
+---
+setGatewayServerProcess
+---
+setGatewayRefreshInFlight
+---
+setGatewayAuth
+---
+setForkRestrictedLaunchConfig
+---
+setForkReplayLaunchConfig
+---
+setFlagSettingsPath
+---
+setFlagSettingsInline
+---
+setFlagSettingsExpectedContent
+---
+setFableCreditsRequired
+---
+setFableConsentSessionFallback
+---
+setFableConsentDialogInteracted
+---
+setFableBridgeDialogTimedOut
+---
+setEventLogger
+---
+setEnsureConnectedClientI
+---
+setDisableSlashCommands
+---
+setDirectConnectServerUrl
+---
+setDeferredToolStubGateLatch
+---
+setCwdState
+---
+setCostStateForRestore
+---
+setConnectedClientWiring	
+---
+setClientType
+---
+setCliSessionConfigCarried
+---
+setChromeFlagOverride
+---
+setCachedTelemetryResource
+---
+setCachedOtlpHttpAgentFactory
+---
+setCachedClaudeMdContent
+---
+setBackgroundAutoModeSetupInFlight
+---
+setAttacherCaps
+---
+setApiKeyFromFd
+---
+setAllowedSettingSources	i
+---
+setAllowedChannels
+---
+setAdmin3PSteeringSnapshot(
+---
+setAdditionalDirectoriesForClaudeMd
+---
+setActiveRoutine
+---
+saveSessionCostsForTransition
+---
+rewriteRefusalFallbackPreviousOverride
+---
+resetTotalDurationStateAndCost_FOR_TESTS_ONLY
+---
+resetStateForTests
+---
+resetStartTime
+---
+resetModelStringsForTe
+
+-- offset 75223658 --
+getIsNonInteractiveSession(
+---
+getIsInteractive
+---
+getInvokedSkillsForAgent	
+---
+getInvokedSkills
+---
+getInlinePluginsNoMcp
+---
+getInlinePlugins
+---
+getInlinePluginUrls
+---
+getInitialMainLoopModel
+---
+getInitJsonSchema
+---
+getInheritedTeamName
+---
+getInferenceProfileBackingModelCached
+---
+getHostOtelState
+---
+getHostAuthTokenRefreshCallback
+---
+getHasStreamingInput
+---
+getHasDevChannels
+---
+getGatewayRefreshInFlight
+---
+getGatewayAuth
+---
+getFoundryDeploymentCapabilities
+---
+getForkRestrictedLaunchConfig
+---
+getForkReplayLaunchConfig%+
+---
+getFlagSettingsPath
+---
+getFlagSettingsInline
+---
+getFlagSettingsExpectedContent
+---
+getEventLoggerOwner
+---
+getEventLogger
+---
+getEnsureConnectedClient
+---
+getDisableSlashCommands
+---
+getDirectConnectServerUrl(+
+---
+getDeferredToolStubGateLatch
+---
+getCwdState
+---
+getCurrentTurnTokenBudget)+
+---
+getCostCounter
+---
+getConnectedClientWiring
+---
+getCommitCounter
+---
+getCodeEditToolDecisionCounter
+---
+getClientType
+---
+getCliSessionConfigCarried
+---
+getChromeFlagOverride
+---
+getCachedTelemetryResource
+---
+getCachedOtlpHttpAgentFactory
+---
+getCachedClaudeMdContent
+---
+getBudgetContinuationCount
+---
+getBareMcpServerMatchersWarned
+---
+getBackgroundAutoModeSetupInFlight
+---
+getAttacherCaps
+---
+getApiKeyFromFd
+---
+getAllowedSettingSources
+---
+getAllowedChannels
+---
+getAgentColorMap
+---
+getAdmin3PSteeringSnapshot+
+---
+getAdditionalDirectoriesForClaudeMd
+---
+getActiveTimeCounter
+---
+getActiveRoutine
+
+-- offset 75385575 --
+collectUsageData
+---
+MIN_BEHAVIOR_PCT
+---
+formatRateLimits
+---
+formatBehaviors
+---
+deriveFirstPrompt
+---
+createFork
+---
+branchAndResume
+---
+unlinkPath
+---
+shareAudienceSentence
+---
+shareAudienceParenthetical0
+---
+shareAudienceMark
+---
+shareAudience
+---
+setShareEntry
+---
+setEffectiveCapabilities
+---
+ownershipTag
+---
+ownershipClassifierMark
+---
+ownershipAskNote
+---
+ownedByUser
+---
+markAutoReactNoticePending
+---
+linkPathToSlug
+---
+isSomeoneElses
+---
+hasAutoReactNoticePending
+---
+getShareEntryForPath
+---
+getShareEntry
+---
+deriveShareStatus
+---
+deriveShareRole
+---
+dbReadConsentMessage
+---
+clearAutoReactNoticePending
+---
+audienceViewNote
+---
+runUserPromptExpansionHook0
+---
+processSlashCommand
+---
+processPromptSlashCommand
+---
+peelStackedPromptCommands
+---
+looksLikeCommand
+---
+isSlashCommandBlockedByEndedByModel
+---
+formatSkillLoadingMetadata0
+---
+withScratchpadSection
+---
+runAgent
+---
+isDisposableSubagentCache
+---
+initializeAgentMcpServers
+---
+filterIncompleteToolCalls
+---
+clearWorktreeFromAgentMetadata
+---
+SIBLING_ROSTER_REMINDER_PREFIX
+---
+spawnForkFromDirective
+---
+deriveForkName
+---
+settingSourceToScope
+---
+installSelectedPlugins
+---
+getPluginEditableScopes
+---
+checkEnabledPlugins
+---
+getPluginArgumentCompletions
+---
+performHeapDump
+---
+captureMemoryDiagnosticsI
+---
+resolveLauncher
+---
+updateWorkflowProgressBatch
+---
+skipWorkflowAgent
+---
+retryWorkflowAgent
+---
+registerWorkflowTask
+
+-- offset 75385629 --
+MIN_BEHAVIOR_PCT
+---
+formatRateLimits
+---
+formatBehaviors
+---
+deriveFirstPrompt
+---
+createFork
+---
+branchAndResume
+---
+unlinkPath
+---
+shareAudienceSentence
+---
+shareAudienceParenthetical0
+---
+shareAudienceMark
+---
+shareAudience
+---
+setShareEntry
+---
+setEffectiveCapabilities
+---
+ownershipTag
+---
+ownershipClassifierMark
+---
+ownershipAskNote
+---
+ownedByUser
+---
+markAutoReactNoticePending
+---
+linkPathToSlug
+---
+isSomeoneElses
+---
+hasAutoReactNoticePending
+---
+getShareEntryForPath
+---
+getShareEntry
+---
+deriveShareStatus
+---
+deriveShareRole
+---
+dbReadConsentMessage
+---
+clearAutoReactNoticePending
+---
+audienceViewNote
+---
+runUserPromptExpansionHook0
+---
+processSlashCommand
+---
+processPromptSlashCommand
+---
+peelStackedPromptCommands
+---
+looksLikeCommand
+---
+isSlashCommandBlockedByEndedByModel
+---
+formatSkillLoadingMetadata0
+---
+withScratchpadSection
+---
+runAgent
+---
+isDisposableSubagentCache
+---
+initializeAgentMcpServers
+---
+filterIncompleteToolCalls
+---
+clearWorktreeFromAgentMetadata
+---
+SIBLING_ROSTER_REMINDER_PREFIX
+---
+spawnForkFromDirective
+---
+deriveForkName
+---
+settingSourceToScope
+---
+installSelectedPlugins
+---
+getPluginEditableScopes
+---
+checkEnabledPlugins
+---
+getPluginArgumentCompletions
+---
+performHeapDump
+---
+captureMemoryDiagnosticsI
+---
+resolveLauncher
+---
+updateWorkflowProgressBatch
+---
+skipWorkflowAgent
+---
+retryWorkflowAgent
+---
+registerWorkflowTask
+---
+registerAdoptedWorkflowTask
+
+=== ANCHOR non_write hits=4 ===
+-- offset 81302713 --
+Cannot destructure property 'cli' from null or undefined value
+---
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+---
+tengu_disable_bypass_permissions_mode
+---
+bypassPermissions
+---
+settings defaultMode "
+---
+tengu_ccr_unsupported_default_mode_ignored
+
+-- offset 122908665 --
+Cannot destructure property 'permissionModeCli' from null or undefined value
+---
+(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.
+
+-- offset 253310646 --
+gth+1));continue}if(o===e&&n+1<t.length){r.push(t[++n]);continue}if(o!==void 0&&XSu.has(o))n++}return r}function QSu(e,t=process.argv){for(let r=0;r<t.length;r++){let n=t[r];if(n==="--")break;if(n===e)return!0;if(n!==void 0&&XSu.has(n))r++}return!1}var XSu;var Min=v(()=>{XSu=new Set(["--prefill","--prefill-b64","--deep-link-repo","--deep-link-last-fetch","--deep-link-cwd-b64","--handle-uri","--settings","--managed-settings","--setting-sources","--team-name","--agent-id","--agent-name","--agent-color","--parent-session-id","--agent-type","--model","--agent","--routine","--effort","--permission-mode","--session-id"])});function bhs(e){let t=q8(e.cli.effort)??mbo(e.cli.effort);if(t!==void 0)return t;if(e.settings.ultracode===!0)return"xhigh";return SQe(e.settings.effortLevel)}function Gky(){let e=rt("tengu_auto_mode_config",ZSu);return e!==ZSu&&e?.enabled==="disabled"}function iTu(e){let{cli:t,env:r,settings:n,agentFrontmatter:o}=e,i=DH(t.permissionMode),s=t.dangerouslySkipPermissions,a=o?.permissionMode;if(br(r.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)){let g=s||i&&i!=="default"||a&&a!=="default",y="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.";return{mode:"default",notification:g?y:void 0,fromAutoFallback:!1}}let l=rt("tengu_disable_bypass_permissions_mode",!1),c=n.permissions?.disableBypassPermissionsMode==="disable",u=l||c,d=Gky(),p=[],f;if(s)if(oTu("bypassPermissions"))f=nTu,p.push("default");else p.push("bypassPermissions");if(i){let g=u5(i);if(oTu(g))f=nTu,p.push("default");else if(g==="auto"&&d)E("auto mode circuit breaker active (cached) \u2014 falling back to default",{level:"warn"});else p.push(g)}if(a)if(a==="auto"&&d)E("agent frontmatter requested auto mode but circuit breaker active \u2014 falling through",{level:"warn"});else p.push(a);if(k$t()){let g=!eTu()?void 0:tTu.map((y)=>DH(tn(y)?.permissions?.defaultMode)).find((y)=>y!=null);if(g!=null&&br(r.CLAUDE_CODE_REMOTE)&&!rTu.includes(g)){if(E(`settings defaultMode "${g}" is not supported in CLAUDE_CODE_REMOTE \u2014 only acceptEdits, plan, default, and auto are allowed`,{level:"warn"}),p.length===0)L("tengu_ccr_unsupported_default_mode_ignored",{mode_hash:gu(g)}),p.push("default")}else if(g==="bypassPermissions"){if(s||t.allowDangerouslySkipPermissions)
+
+-- offset 264547347 --
+je};if(e=o,e==="bypassPermissions"){if(oF())return{ok:!1,error:"Cannot set permission mode to bypassPermissions because it is disabled by settings or configuration"};if(!t.isBypassPermissionsModeAvailable)return{ok:!1,error:"Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions"}}if(e==="auto"&&!sB()){let i=xxe();return{ok:!1,error:i?`Cannot set permission mode to auto: ${f$e(i)}`:"Cannot set permission mode to auto"}}return r((i)=>{if(i.mode===e)return i;return{...JGe(i.mode,e,i,n),mode:e}}),setImmediate(()=>{Syt.emit()}),{ok:!0,mode:e}}function Hrf(e){let t=e.join(" ").trim();if(Lii(t))return Nii();let n=g1(e);if(n.includes("preset:default"))return eK().map((o)=>o.name).concat(n.filter((o)=>o!=="preset:default"));return n}function GfS({processPwd:e,originalCwd:t}){let{resolvedPath:r,isSymlink:n}=yh(gr(),e);return n?r===$ii.resolve(t):!1}function LEa({permissionModeCli:e,dangerouslySkipPermissions:t,allowDangerouslySkipPermissions:r,agentPermissionMode:n}){let o=DH(e);if(zH()){let s=t||o&&o!=="default"||n&&n!=="default",a="Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set "+"(allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.";if(s)process.stderr.write(`\u26A0 ${a}
+`);return{mode:"default",notification:s?a:void 0}}let i=iTu({cli:{permissionMode:o,dangerouslySkipPermissions:t,allowDangerouslySkipPermissions:r,isNonInteractiveSession:Pn()},env:{...process.env,CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:void 0},settings:na()||{},agentFrontmatter:n?{permissionMode:n}:void 0});if(gWs(i.fromAutoFallback),i.mode==="auto")JV(!0);return{mode:i.mode,notification:i.notification}}function g1(e){if(e.length===0)return[];let t=[];for(let r of e){if(!r)continue;let n="",o=!1;for(let i of r)switch(i){case"(":o=!0,n+=i;break;case")":o=!1,n+=i;break;case",":if(o)n+=i;else{if(n.trim())t.push(n.trim());n=""}break;case" ":if(o)n+=i;else if(n.trim())t.push(n.trim()),n="";break;default:n+=i}if(n.trim())t.push(n.trim())}return t}async function NEa({allowedToolsCli:e,disallowedToolsCli:t,baseToolsCli:r,permissionMode:n,allowDangerouslySkipPermissions:o,addDirs:i,bgSessionPermissionRules:s}){let a=[],l=g1(e).map((z)=>$f(Kh(z))).filter((z)=>{let B=Tlo(Kh(z).toolName);if(B)return a.push(`Ignoring --allowedTools rule "${z}": ${B.error}. $
+
+=== ANCHOR GITHUB_ACTIONS hits=6 ===
+-- offset 56560745 --
+        emitEvent("b", kThreadpoolSyncCat, traceName), emitEvent("e", kThreadpoolSyncCat, traceName);
+      if (asyncEnabled)
+        emitEvent("e", kThreadpoolAsyncCat, traceName);
+      return callback.@apply(this, callbackArgs);
+    };
+    try {
+      return original.@apply(this, args);
+    } catch (err) {
+      if (asyncEnabled)
+        emitEvent("e", kThreadpoolAsyncCat, traceName);
+      throw err;
+    }
+  };
+}
+$ = {
+  enableCategories,
+  disableCategories,
+  getEnabledCategories,
+  getCategoryEnabledBuffer,
+  isTraceCategoryEnabled,
+  isCategoryGroupEnabled,
+  emitEvent,
+  emitEventWithArgs,
+  trace,
+  initFromCli,
+  setFilePattern,
+  setTid,
+  emitWorkerThreadName,
+  inspectorStart,
+  inspectorStop,
+  rawWriteSync,
+  rawReadFileSync
+};
+return $})
+
+
+---
+(function (){"use strict";// build/release/tmp_modules/internal/tty.ts
+var $;
+var TERM_ENVS = {
+  eterm: 4,
+  cons25: 4,
+  console: 4,
+  cygwin: 4,
+  dtterm: 4,
+  gnome: 4,
+  hurd: 4,
+  jfbterm: 4,
+  konsole: 4,
+  kterm: 4,
+  mlterm: 4,
+  mosh: 24,
+  putty: 4,
+  st: 4,
+  "rxvt-unicode-24bit": 24,
+  terminator: 24,
+  "xterm-kitty": 24
+}, CI_ENVS = {
+  APPVEYOR: 8,
+  BUILDKITE: 8,
+  CIRCLECI: 24,
+  DRONE: 8,
+  GITEA_ACTIONS: 24,
+  GITHUB_ACTIONS: 24,
+  GITLAB_CI: 8,
+  TRAVIS: 8
+}, TERM_ENVS_REG_EXP = [
+  /ansi/,
+  /color/,
+  /linux/,
+  /direct/,
+  /^con[0-9]*x[0-9]/,
+  /^rxvt/,
+  /^screen/,
+  /^xterm/,
+  /^vt100/,
+  /^vt220/
+], warned = !1;
+function warnOnDeactivatedColors(env) {
+  if (warned)
+    return;
+  let name = "";
+  if (env.NODE_DISABLE_COLORS !== @undefined && env.NODE_DISABLE_COLORS !== "")
+    name = "NODE_DISABLE_COLORS";
+  if (env.NO_COLOR !== @undefined && env.NO_COLOR !== "") {
+    if (name !== "")
+      name += "' and '";
+    name += "NO_COLOR";
+  }
+  if (name !== "")
+    process.emitWarning(`The '${name}' env is ignored due to the 'FORCE_COLOR' env being set.`, "Warning"), warned = !0;
+}
+function getColorDepth(env) {
+  let FORCE_COLOR = env.FORCE_COLOR;
+  if (FORCE_COLOR !== @undefined)
+    switch (FORCE_COLOR) {
+      case "":
+      case "1":
+      case "true":
+        return warnOnDeactivatedColors(env), 4;
+      case "2":
+        return warnOnDeactivatedColors(env), 8;
+      case "3":
+        return warnOnDeactivatedColors(env), 24;
+      default:
+        return 1;
+    }
+  if (env.NODE_DISABLE_COLORS !== @undefined && env.NODE_DISABLE_COLORS !== "" || env.NO_COLOR !== @undefined && env.NO_COLOR !== "" 
+
+-- offset 60128931 --
+a formatting trait implementation returned an error when the underlying stream did not|\{}()[]^$+*?.-Expected a stringExpected a string or an array of strings
+---
+																
+---
+internal error: entered unreachable code
+Hash table capacity overflow
+
+---
+]:BUN_ENVNODE_ENV  
+---
+[2m.env.development.local.env.production.local.env.test.local.env.local.env.production.env.testnpm_node_execpathproductionhttps_proxyHTTPS_PROXYhttp_proxyHTTP_PROXYAWS_ACCESS_KEY_IDS3_SECRET_ACCESS_KEYAWS_SECRET_ACCESS_KEYS3_REGIONAWS_REGIONS3_ENDPOINTAWS_ENDPOINTS3_BUCKETAWS_BUCKETAWS_SESSION_TOKENccacheCMAKE_CXX_COMPILER_LAUNCHERCMAKE_C_COMPILER_LAUNCHERNODE_TLS_REJECT_UNAUTHORIZEDBUN_CONFIG_NO_CLEAR_TERMINAL_ON_RELOADCITDDIUMGITHUB_ACTIONSJENKINS_URLbamboo.buildKeytestOutOfMemory
+---
+																
+---
+PEI>S`MnBA
+
+-- offset 62659366 --
+
+keywords: 
+---
+[2mkeywords:
+---
+
+dependencies (
+---
+[1mdependencies
+---
+ .tarball: 
+---
+[0mtarball
+---
+
+ .shasum: 
+---
+[0mshasum
+---
+ .integrity: 
+---
+[0mintegrity
+---
+ .unpackedSize: 
+---
+[0munpackedSize
+---
+
+dist-tags:
+---
+[1mdist-tags
+---
+
+maintainers:
+---
+
+maintainers
+---
+
+Published: 
+---
+[1mPublished
+---
+
+Recent versions:
+---
+
+Recent versions:
+---
+
+  ... and 
+---
+[2m... and 
+---
+3{ "error": "No matching version found", "version": 
+---
+BUILD_ID
+---
+BUILD_NUMBER
+---
+CI_APP_ID
+---
+CI_BUILD_ID
+---
+CI_BUILD_NUMBER
+---
+CONTINUOUS_INTEGRATION
+---
+AGOLA_GIT_REF
+---
+AC_APPCIRCLE
+---
+APPVEYOR
+---
+CODEBUILD_BUILD_ARN
+---
+TF_BUILD
+---
+bamboo_planKey
+---
+BITBUCKET_COMMIT
+---
+BITRISE_IO
+---
+BUDDY_WORKSPACE_ID
+---
+BUILDKITE
+---
+CIRCLECI
+---
+CIRRUS_CI
+---
+CF_PAGES
+---
+WORKERS_CI
+---
+CF_BUILD_ID
+---
+CM_BUILD_ID
+---
+EARTHLY_CI
+---
+EAS_BUILD
+---
+GERRIT_PROJECT
+---
+GITEA_ACTIONS
+---
+GITHUB_ACTIONS
+---
+GITLAB_CI
+---
+GO_PIPELINE_LABEL
+---
+BUILDER_OUTPUT
+---
+HARNESS_BUILD_ID
+---
+HUDSON_URL
+---
+JENKINS_URL
+---
+NEVERCODE
+---
+PROW_JOB_ID
+---
+RELEASE_BUILD_ID
+---
+SCREWDRIVER
+---
+SEMAPHORE
+---
+TEAMCITY_VERSION
+---
+NOW_BUILDER
+---
+APPCENTER_BUILD_ID
+---
+CI_XCODE_PROJECT
+---
+ node_modules
+---
+node_modules
+---
+The "react" template has been deprecated.
+It is recommended to use "react-app" or "vite" instead.
+
+To create a project using Create React App, run
+
+bun create react-app
+
+To create a React project using Vite, run
+
+bun create vite
+
+Then select "React" from the list of frameworks.
+
+---
+The "react" template has been deprecated.
+It is recommended to use "react-app" or "vite" instead.
+
+To create a project using Create React App, run
+
+
+---
+[2mbun create react-app
+---
+[0m
+
+To create a React project using Vite, run
+
+
+---
+[2mbun create vite
+---
+[0m
+
+Then select "React" from the list of frameworks.
+
+---
+Usage: bunx [flags] <package><@version> [flags and arguments for the package]
+Execute an npm package executable (CLI), automatically installing into a global shared cache if not installed in node_modules.
+
+Flags:
+  --bun        
+
+-- offset 75256864 --
+_REWORKED>,
+---
+INTELLIJ_TERMINAL_COMMAND_BLOCKS
+---
+HISTFILEI
+---
+GOOGLE_CLOUD_WORKSTATIONS@,
+---
+GOOGLE_CLOUD_PROJECT
+---
+GOOGLE_APPLICATION_CREDENTIALS
+---
+GNOME_TERMINAL_SERVICE
+---
+GIT_TERMINAL_PROMPT
+---
+GIT_SSH_COMMAND
+---
+GIT_CONFIG_GLOBAL
+---
+GIT_CONFIG_COUNT
+---
+GIT_ASKPASS
+---
+GITPOD_WORKSPACE_ID
+---
+GITLAB_CIC,
+---
+GITHUB_WORKSPACE
+---
+GITHUB_TOKEN
+---
+GITHUB_REPOSITORY_OWNER_ID
+---
+GITHUB_REPOSITORY_OWNER
+---
+GITHUB_REPOSITORY_ID
+---
+GITHUB_REPOSITORY
+---
+GITHUB_EVENT_PATH
+---
+GITHUB_EVENT_NAME
+---
+GITHUB_ENV,
+---
+GITHUB_ENTERPRISE_TOKEN
+---
+GITHUB_ACTOR_ID
+---
+GITHUB_ACTOR
+---
+GITHUB_ACTION_PATH
+---
+GITHUB_ACTION_INPUTS
+---
+GITHUB_ACTIONS
+---
+GH_TOKEN	I,
+---
+GH_ENTERPRISE_TOKEN
+---
+GCM_INTERACTIVE
+---
+GCLOUD_PROJECT
+---
+FORCE_COLOR
+---
+DO_NOT_TRACK
+---
+DENO_DEPLOYMENT_ID
+---
+DEMO_VERSION
+---
+DAYTONA_WS_ID
+---
+ConEmuTask
+---
+ConEmuPID
+---
+ConEmuANSI
+---
+CURSOR_TRACE_ID
+---
+COLORTERMN,
+---
+COLORFGBGN,
+---
+CODESPACES,
+---
+CODER_WORKSPACE_NAME
+---
+CLOUDSDK_CONFIG
+---
+CIRCLECI	P
+
+---
+CF_PAGES	=
+---
+BUN_INSTALL
+---
+BUN_CHROME_PATH
+---
+BUILDKITE
+---
+BAT_THEME
+---
+AZURE_FUNCTIONS_ENVIRONMENT
+---
+AWS_LAMBDA_FUNCTION_NAME
+---
+AWS_EXECUTION_
+
+-- offset 78108352 --
+Cannot destructure property 'streamIsTTY' from null or undefined value
+---
+color=16m
+---
+color=full
+---
+color=truecolor
+---
+color=256
+---
+TF_BUILD
+---
+AGENT_NAME
+---
+GITHUB_ACTIONS
+---
+GITEA_ACTIONS
+---
+CIRCLECI
+---
+GITHUB_ACTIONS
+---
+GITEA_ACTIONS
+---
+CIRCLECI
+---
+APPVEYOR
+---
+GITLAB_CI
+---
+BUILDKITE
+---
+APPVEYOR
+---
+GITLAB_CI
+---
+BUILDKITE
+---
+codeship
+---
+TEAMCITY_VERSION
+---
+^(9\.(0*[1-9]\d*)\.|\d{2,}\.)
+---
+truecolor
+---
+xterm-kitty
+---
+xterm-ghostty
+---
+TERM_PROGRAM
+---
+iTerm.app
+---
+Apple_Terminal
+---
+-256(color)?$
+---
+^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux
+
+-- offset 78108512 --
+Cannot destructure property 'streamIsTTY' from null or undefined value
+---
+color=16m
+---
+color=full
+---
+color=truecolor
+---
+color=256
+---
+TF_BUILD
+---
+AGENT_NAME
+---
+GITHUB_ACTIONS
+---
+GITEA_ACTIONS
+---
+CIRCLECI
+---
+GITHUB_ACTIONS
+---
+GITEA_ACTIONS
+---
+CIRCLECI
+---
+APPVEYOR
+---
+GITLAB_CI
+---
+BUILDKITE
+---
+APPVEYOR
+---
+GITLAB_CI
+---
+BUILDKITE
+---
+codeship
+---
+TEAMCITY_VERSION
+---
+^(9\.(0*[1-9]\d*)\.|\d{2,}\.)
+---
+truecolor
+---
+xterm-kitty
+---
+xterm-ghostty
+---
+TERM_PROGRAM
+---
+iTerm.app
+---
+Apple_Terminal
+---
+-256(color)?$
+---
+^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux
+---
+COLORTERM
+
+=== ANCHOR claude-code-action hits=6 ===
+-- offset 70805118 --
+n quae procedimus quoniam quidem non eadem hic quae in ceteris peregrinationibus condicio est in illis comprensus aliquis limes et interrogati incolae non patiuntur errare at hic tritissima quaeque via et celeberrima maxime decipit nihil ergo magis praestandum est quam ne pecorum ritu sequamur antecedentium gregem pergentes non quo eundum est sed quo itur atqui nulla res nos maioribus malis implicat quam quod ad rumorem componimur optima rati ea quae magno adsensu recepta sunt quodque exempla nobis pro bonis multa sunt nec ad rationem sed ad similitudinem vivimus Ir"
+---
+claimBypassPermissionsCheck
+---
+rearmBypassPermissionsCheck
+---
+claimAutoModeCheck
+---
+rearmAutoModeCheck
+---
+https://www.anthropic.com/legal/consumer-terms
+---
+import:fallback-skill
+---
+Add Claude Code GitHub Workflow
+---
+https://github.com/anthropics/claude-code-action/blob/main/docs/setup.md
+---
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHRO
+
+-- offset 70806253 --
+de GitHub Workflow
+---
+https://github.com/anthropics/claude-code-action/blob/main/docs/setup.md
+---
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+
+          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
+          # prompt: 'Update the pull request description to include a summary of changes.'
+
+          # Optional: Add claude_args to customize behavior and configuration
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+          # claude_args: '--allowed-tools Bash(gh pr *)'
+
+
+
+-- offset 70806874 --
+ontains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+
+          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
+          # prompt: 'Update the pull request description to include a summary of changes.'
+
+          # Optional: Add claude_args to customize behavior and configuration
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+          # claude_args: '--allowed-tools Bash(gh pr *)'
+
+
+
+-- offset 70811495 --
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
+
+jobs:
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+
+
+---
+Can't authenticate MCP servers while no terminal is attached to this background session. Attach to it and try again.
+---
+flagged-plugins.json
+---
+Usage: /plugin tag [path] [--push] [--dry-run] [-f|--force]
+
+Create a {name}--v{version} git tag for the plugin at <path> (default: .).
+Validates plugin.json and any enclosing marketplace entry agree on the version.
+
+For -m/--message and --remote, use the CLI: claude plugin tag --help
+---
+open this session to manage MCP servers
+---
+Can't open MCP settings while no terminal is attached to this background session. Attach to it and run /m
+
+-- offset 70811886 --
+w, reopened]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
+
+jobs:
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+
+
+---
+Can't authenticate MCP servers while no terminal is attached to this background session. Attach to it and try again.
+---
+flagged-plugins.json
+---
+Usage: /plugin tag [path] [--push] [--dry-run] [-f|--force]
+
+Create a {name}--v{version} git tag for the plugin at <path> (default: .).
+Validates plugin.json and any enclosing marketplace entry agree on the version.
+
+For -m/--message and --remote, use the CLI: claude plugin tag --help
+---
+open this session to manage MCP servers
+---
+Can't open MCP settings while no terminal is attached to this background session. Attach to it and run /mcp again, or use `/mcp enable|disable|reconnect <server>` to steer without the panel.
+
+-- offset 142545694 --
+Cannot destructure property 'onSubmit' from null or undefined value
+---
+Iterator result interface is not an object.
+---
+More workflow examples (issue triage, CI fixes, etc.) at:
+---
+https://github.com/anthropics/claude-code-action/blob/main/examples/
+---
+You must select at least one workflow to continue
+---
+Select GitHub workflows to install
+---
+We'll create a workflow file in your repository for each one you select.
+
+=== ANCHOR first message hits=5 ===
+-- offset 70739778 --
+{"version"
+---
+.bm25-index.json
+---
+releaseIfCurrent
+---
+You are selecting memories that will be useful to Claude Code as it processes a user's query. The first message lists the available memory files with their filenames and descriptions; subsequent messages each contain one user query.
+
+Return a list of filenames for the memories that will clearly be useful to Claude Code as it processes the user's query (up to 5). Only include memories that you are certain will be helpful based on their name and description.
+- If you are unsure if a memory will be useful in processing the user's query, then do not include it in your list. Be selective and discerning.
+- If there are no memories in the list that would clearly be useful, feel free to return an empty list.
+- Be especially conservative with user-profile and project-overview memories ([user], [project]). These describe the user's ongoing focus, not what every question is about. A profile saying "works on DB performance" is NOT relevant to a question that merely contains the word "performance" unless the question is actually about that DB work. Match on what the question IS ABOUT, not on surface keyword overlap with who the user is.
+- Do not re-select memories you already returned for an earlier query in this conversation.
+
+---
+claude-opus-5
+---
+https://support
+
+-- offset 187361039 --
+Model override for this agent. Use `inherit` to match the spawning conversation.
+---
+Tools available to this agent. Replaces the default set.
+---
+Tools removed from the default set. Ignored if `tools` is set.
+---
+Thinking effort: `low`, `medium`, `high`, `max`, or an integer.
+---
+Permission mode the agent runs in.
+---
+MCP servers to connect when this agent runs.
+---
+Hooks registered while this agent runs.
+---
+Maximum conversation turns before the agent stops.
+---
+Skills preloaded for this agent.
+---
+Auto-submitted first message when this agent runs as the main session (via `--agent` or settings). Not read when spawned as a subagent.
+---
+Memory scope: `user`, `project`, or `local`.
+---
+If true, the agent runs in the background by default.
+---
+Filesystem isolation: `worktree` runs in a temporary git worktree.
+---
+Agent type auto-spawned as a background observer whenever this agent runs.
+---
+Supplemental postamble appended (after the harness-owned default) to each activity digest sent to the observer.
+---
+If false, subagents this agent spawns do not inherit its observer. Defaults to true.
+
+-- offset 253432186 --
+nal")})),HPy=Ee(()=>Te({name:rF().describe("Agent identifier. Required \u2014 this is how the Agent tool and `--agent` flag address it."),description:rF().describe("When to use this agent. Required \u2014 shown in the Agent tool listing."),model:rF().optional().describe("Model override for this agent. Use `inherit` to match the spawning conversation."),tools:yyt().optional().describe("Tools available to this agent. Replaces the default set."),disallowedTools:yyt().optional().describe("Tools removed from the default set. Ignored if `tools` is set."),color:rF().optional().describe("@internal \u2014 display color in the agents UI"),effort:rF().optional().describe("Thinking effort: `low`, `medium`, `high`, `max`, or an integer."),permissionMode:rF().optional().describe("Permission mode the agent runs in."),mcpServers:oo().optional().describe("MCP servers to connect when this agent runs."),hooks:oo().optional().describe("Hooks registered while this agent runs."),maxTurns:ps([it(),N(),zDe()]).optional().describe("Maximum conversation turns before the agent stops."),skills:yyt().optional().describe("Skills preloaded for this agent."),initialPrompt:rF().optional().describe("Auto-submitted first message when this agent runs as the main session (via `--agent` or settings). Not read when spawned as a subagent."),memory:rF().optional().describe("Memory scope: `user`, `project`, or `local`."),background:_yt().optional().describe("If true, the agent runs in the background by default."),isolation:rF().optional().describe("Filesystem isolation: `worktree` runs in a temporary git worktree."),observer:rF().optional().describe("Agent type auto-spawned as a background observer whenever this agent runs."),observerMessage:rF().optional().describe("Supplemental postamble appended (after the harness-owned default) to each activity digest sent to the observer."),observeSubagents:_yt().optional().describe("If false, subagents this agent spawns do not inherit its observer. Defaults to true.")})),MPy=Ee(()=>Te({name:rF().optional().describe("Style name used in the Output style picker in `/config` and in settings. Defaults to the filename."),description:rF().optional().describe("Shown in the Output style picker in `/config`."),"keep-coding-instructions":_yt().optional().describe("If true, the default coding instructions stay in the system prompt alongside this style."),"force-for-plugin":_yt().optio
+
+-- offset 262944872 --
+rray \u2014 each entry describes one session via its title, any linked code reviews (\`prNumbers\`), and first user message. Classify each session into one of these task types:
+
+   - **build_feature** \u2014 new functionality, scripts, tools, config/CI/env setup
+   - **debug_fix** \u2014 investigating and fixing bugs
+   - **improve_quality** \u2014 refactoring, tests, cleanup, code review
+   - **analyze_data** \u2014 queries, metrics, number crunching
+   - **plan_design** \u2014 architecture, approach, strategy, understanding unfamiliar code, design review
+   - **prototype** \u2014 spikes, POCs, throwaway exploration
+   - **write_docs** \u2014 PRDs, RFCs, READMEs, design docs, copy/doc review
+
+   Categories describe the *type of task*, not the project or domain \u2014 a teammate on any project should recognize them. Review sessions belong with whatever's being reviewed: code review is improve_quality, doc review is write_docs, design review is plan_design. Most sessions fit the list; only invent a new category if it's genuinely a different type of task. Pick the top 3-5 with rough percentages. First messages alone are usually enough; titles and code-review links are enrichment. If first messages are uninformative, use tool and MCP counts as a weak hint. If there are ~0 sessions, leave the breakdown as a TODO.
+
+   In the rendered guide, display categories with spaces and title case (e.g. "Build Feature" not "build_feature").
+
+3. **Gather the remaining pieces.** For repos, start with \`currentRepo\` and check the workspace for sibling repo directories. For MCP server setup, use each entry's \`name\` (and \`urlOrigin\` where present) to infer what the server does and how a teammate would get access. Leave the Team Tips and Get Started sections as TODO placeholders \u2014 you'll ask for these in Review and fill them in after.
+
+4. **Write the guide to \`ONBOARDING.md\`** following this template:
+
+\`\`\`
+{{GUIDE_TEMPLATE}}
+\`\`\`
+
+   Fill in real numbers from the usage data (not placeholders). Use \`generatedBy\` for the name; if it's missing, omit the name. Ascii bar charts: \`\u2588\` for filled, \`\u2591\` for empty, 20 chars wide. Keep the HTML comment instruction at the bottom exactly as shown.
+
+5. **Render the guide in a code block, then close out the first turn.** You're co-authoring this guide with the guide creator \u2014 frame the follow-up as collaboration, not corr
+
+-- offset 264865568 --
+tput_format:{type:"json_schema",schema:{type:"object",properties:{selected_memories:{type:"array",items:{type:"string"}}},required:["selected_memories"],additionalProperties:!1}},signal:a,querySource:BIo});if(p.stop_reason==="max_tokens")return Pe("memory_recall_select","output_truncated"),E("[memdir] selectRelevantMemories truncated at max_tokens",{level:"warn"}),[];let f=p.content.find((h)=>h.type==="text");if(!f||f.type!=="text")return Pe("memory_recall_select","no_text_block"),E("[memdir] selectRelevantMemories returned no text block",{level:"warn"}),[];let m=zt(jZ(f.text));return SZu(n,r,l,f.text),n.lastUsage={cacheReadInputTokens:p.usage.cache_read_input_tokens??0,cacheCreationInputTokens:p.usage.cache_creation_input_tokens??0,turnCount:(o.length+1)/2},ve("memory_recall_select"),m.selected_memories.map((h)=>typeof h!=="string"||i.has(h)?h:h.replace(g_S,"")).filter((h)=>i.has(h))}catch(p){if(n.lastUsage=null,a.aborted)return[];return Pe("memory_recall_select","memory_recall_select_query_failed"),E(`[memdir] selectRelevantMemories failed: ${ue(p)}`,{level:"warn"}),[]}}var $sf,m_S=`You are selecting memories that will be useful to Claude Code as it processes a user's query. The first message lists the available memory files with their filenames and descriptions; subsequent messages each contain one user query.
+
+Return a list of filenames for the memories that will clearly be useful to Claude Code as it processes the user's query (up to 5). Only include memories that you are certain will be helpful based on their name and description.
+- If you are unsure if a memory will be useful in processing the user's query, then do not include it in your list. Be selective and discerning.
+- If there are no memories in the list that would clearly be useful, feel free to return an empty list.
+- Be especially conservative with user-profile and project-overview memories ([user], [project]). These describe the user's ongoing focus, not what every question is about. A profile saying "works on DB performance" is NOT relevant to a question that merely contains the word "performance" unless the question is actually about that DB work. Match on what the question IS ABOUT, not on surface keyword overlap with who the user is.
+- Do not re-select memories you already returned for an earlier query in this conversation.
+`,h_S=512,g_S;var Usf=v(()=>{or();jpe();r6e();Rjt();Ke();ut();Ff();Ri();TE();
+
+=== ANCHOR before its first hits=3 ===
+-- offset 246807380 --
+fs/promises
+---
+transcript (stopped before its first response; any conversation it was backgrounded from is untouched).
+---
+Ready for review
+---
+Needs input
+---
+Completed
+---
+Sessions that have a question or need your decision land here
+---
+Finished sessions wait here for you to review
+---
+ (reserved name)
+---
+ECONNRESET
+---
+ECONNREFUSED
+---
+ENOTCONN
+
+-- offset 268978614 --
+&&!ae.confirmed)return L("tengu_bg_respawn_unconfirmed_bail",{}),Pe("job_respawn","job_respawn_kill_unconfirmed"),{ok:!1,alive:c,short:d,state:o,error:ae.error??"Couldn't stop the previous worker \u2014 supervisor may be starting, retry in a moment"};let K=Date.now(),oe=K+3000;while(Date.now()<oe){if(!await tEm(d))break;await Er(100)}h=Date.now()-K}let S=Date.now(),b=await(y??AHe(p,u.cwd,u.linkScanPath)),w=Date.now()-S;if(g){let ae=Date.now(),K=await g;if(m=Date.now()-ae,K.anyMatch)b=await AHe(p,u.cwd,u.linkScanPath)}let C=b.hasMessages;if(b.via==="projectsScan")L("tengu_bg_respawn_probe_rescue",{via:he(b.via)});if(!C){if(o.bgIsolation==="none"&&p===o.sessionId&&!t?.force&&!t?.forceRefusalRetry){E(`bg: respawn of ${e} refused \u2014 fork handoff whose own transcript never materialized`,{level:"warn"}),L("tengu_bg_respawn_no_transcript",{via:he(b.via),had_link_scan_path:u.linkScanPath!==void 0,quarantined:!1,refused:!0}),Pe("job_respawn","fork_transcript_never_materialized");let K=!!t?.initialPrompt&&await Lqn(n,u,t.initialPrompt,r);return{ok:!1,alive:!1,state:u,queued:K,errorCode:"fork_transcript_never_materialized",error:`This session has no saved transcript \u2014 it was stopped before its first response finished. If it was backgrounded from another conversation, that one is still intact; \`claude respawn ${e}\` starts this one fresh.`}}let ae=await Cmt(b.path);L("tengu_bg_respawn_no_transcript",{via:he(b.via),had_link_scan_path:u.linkScanPath!==void 0,quarantined:ae,refused:!1})}let A=o.template==="exec"&&o.respawnFlags.length===0?o.intent:void 0,k=u.name&&u.nameSource==="user"?NAi(u.respawnFlags,"--name","-n",u.name):void 0,R=C&&!A;if(R){let ae=await OBe(p),K=ae?.jobId!==void 0&&(ae.jobId===e||ae.jobId===d);if(ae&&!K)return L("tengu_bg_respawn_resume_conflict",{}),Pe("job_respawn","resume_session_live_elsewhere"),{ok:!1,alive:!1,state:u,queued:!!t?.initialPrompt&&await Lqn(n,u,t.initialPrompt,r),error:"This conversation is already open in another running Claude session \u2014 use that one, or close it and try again"}}let P=vJt(k??u.respawnFlags),O=A?[]:P.length>0?P:o.routine?["--routine",o.routine]:o.template!=="bg"?["--agent",o.template]:[],M=O.indexOf("--agent");if(!C&&M!==-1&&O[M+1]){let ae=O[M+1];ofe();let K=await $qn(u.cwd,r).catch(()=>{return}),oe=nqr({agent:ae},K).name;if(oe!==ae)O=O.with(M+1,oe)}let H=u.resumeSessionId!==void 0&&p!==o.sessionId,D=A?void 0:t?.ini
+
+-- offset 273278975 --
+0000,ACh=21600000,Tzl="CLAUDE_AGENTS_AUTO_RELAUNCHED_AT",J$i,n1t,$jv,V$i,ICh=3,wzl=3,Bjv=60000,Ujv=8,I$i=4,jjv=2,qjv=120000,zjv=5000,Wjv=30000,Gjv,r2i,gCh,yCh=8,_Ch=5,MCh=500,Xjv,bCh,nqv,SCh,oqv,TCh,bzl;var Q8r=v(()=>{Wo();Jp();dl();fdr();Tt();$D();iqr();Bx();LQo();sma();eg();b1l();zhh();E1l();ll();Fat();$vt();Us();r_i();g9n();Wbi();B3n();jLi();eBe();N8e();Zc();Rh();Vst();pBe();dV();ERe();Zsl();Mwr();dLi();HMa();Q2e();Ghh();Tl();Ydi();M8n();iUl();sgn();clt();iLo();sgn();Pgn();F$e();W6t();NLo();vgn();nM();Jf();gC();tNe();y6t();OE();Rt();WNe();Nqn();ael();x9l();vAi();tqr();O9l();u_();Hle();wTi();D9l();Dll();$Ai();or();hn();AV();Lt();Ep();bj();Od();Z9l();zf();zre();yi();KEh();g3();tP();FE();pm();Qu();On();Ai();Ke();Br();ut();fs();oh();HEt();qa();Eit();JP();qr();m9n();WV();Ri();bqe();bs();Cf();sLe();Ni();Znt();WR();rIe();GVt();Y$e();xd();nvt();lj();Ev();hr();$r();VEt();MD();LI();ITe();l3();JEh();w$i();dwh();gwh();bwh();Ewh();Awh();Cir();Fwh();qwh();fVr=require("crypto"),wCh=require("fs/promises"),eDe=require("path"),u2i=x(St(),1),no=x(St(),1),CCh=require("url"),kr=x(ge(),1),Iir=x(xe(),1);G$i="Press enter again to restart this session fresh \u2014 it has no saved "+"transcript (stopped before its first response; any conversation it was backgrounded from is untouched).";J$i=["review","blocked","working","done"],n1t={review:"Ready for review",blocked:"Needs input",working:"Working",done:"Completed"},$jv={review:"",blocked:"Sessions that have a question or need your decision land here",working:"Sessions Claude is actively working on \u2014 they keep running even if you close the terminal",done:"Finished sessions wait here for you to review"};V$i=rr(" (reserved name)"),Gjv=new Set(["EPIPE","ECONNRESET","ECONNREFUSED","ENOTCONN"]);r2i=class r2i extends Error{constructor(e){super(e);this.name="FleetActionUnconfirmedError"}};gCh={error:2,warning:1};Xjv={error:3,warning:2,success:1};bCh=/https?:\/\/[^\s"'<>\\\u2026\x00-\x1f]+/;nqv={agent:"background",repo:"repo",worktree:"worktree",skill:"skill",command:"command",workflow:"workflow",routine:"routine",model:"model"},SCh={agent:"@",repo:"@",worktree:"@",routine:"@",skill:"/",command:"/",workflow:"/",model:"/"},oqv={kind:"model",name:"model",description:"Set model for this FleetView session (not persisted)"};TCh=[],bzl=[]});var lYn={};dt(lYn,{mountFleetViewWithComposerBack:()=>fqv});async function fqv(e,t){let r={...t,host:t?.host??J8r()};
+
+=== ANCHOR before first hits=6 ===
+-- offset 104042595 --
+ Every connected store is read-only in this session: 
+---
+ calls are refused and nothing written to a shared store will persist.
+---
+ with no arguments to re-check this set whenever you are unsure which store to use:
+---
+If the memory tools are deferred, load them with 
+---
+("select:
+---
+") before first use. 
+---
+Read shared memory whenever earlier project context would help, and persist new learnings to your personal memory directory with the file tools.
+---
+Check each user reply for content worth persisting, and when you notice some, save it with 
+---
+ in that same reply; read memory whenever earlier project context would help.
+---
+## How to save personal memories
+---
+personal memory to its own file in `
+---
+` in that same directory
+---
+# Memory
+---
+Save every memory type in your personal memory directory at `
+---
+` with the file tools; the shared stores are read-only this session. 
+
+-- offset 117653837 --
+Stream idle timeout after 
+---
+Mid-stream server error after 
+---
+) after 
+---
+tengu_streaming_partial_finalized
+---
+: The response stopped arriving. The response above may be incomplete.
+---
+: Server error mid-response. The response above may be incomplete.
+---
+: Your computer went to sleep mid-response. The response above may be incomplete.
+---
+: Connection lost mid-response. The response above may be incomplete.
+---
+: The response stalled before a response was produced. Try again.
+---
+: Your computer went to sleep before a response was produced. Try again.
+---
+: Connection lost before a response was produced. Try again.
+---
+tengu_streaming_fallback_to_non_streaming
+---
+partial_yield
+---
+[dispatch] Stream connection error (
+---
+) with anthropic-dispatch-id before first event; retrying without it
+---
+tengu_dispatch_header_fallback
+---
+body_phase
+---
+Stream connection error (
+---
+retrying
+---
+connection_retry
+---
+tengu_streaming_529_retry
+---
+tengu_api_opus_fallback_triggered
+---
+mid_stream
+---
+api_request
+---
+api_request_fallback_triggered
+---
+overloaded
+---
+Error streaming (non-streaming fallback disabled): 
+---
+Error streaming, falling back to non-streaming mode: 
+---
+cli_nonstreaming_fallback_started
+---
+tengu_non
+
+-- offset 157841371 --
+pooled ws unresponsive
+---
+agent_proxy_request
+---
+agent_proxy_request_ws_error
+---
+Bad Gateway
+---
+the pooled tunnel to the CCR agent-proxy became unresponsive before a response was received
+---
+ws_error
+---
+pooled tunnel unresponsive before first response
+
+-- offset 258902752 --
+ectDir}\`, index \`${e.indexPath}\``}function kGd(e,t){let{personalMemoryDir:r,personalSkipIndex:n,indexLoaded:o,lean:i,extraGuidelines:s}=t,a=`these shared memories are not mirrored to local files in this session (your personal memory directory at \`${r}\` is separate and is still read and written with the file tools)`,l=`${Sk}, ${c0}, and ${ob}`,[c]=e,u=e.filter((C)=>!C.readOnly),d=u.find((C)=>C===c)??u[0],p=d===void 0,f=`You have persistent, shared memory reached through the ${l} tools \u2014 ${a}. It is shared with the other people and Claude sessions working in this organization's projects. The shared memories come from those sessions \u2014 read them as your teammates' notes on each project's environment, conventions, and ongoing work.`,m=p?`${f} Every connected store is read-only in this session: ${ob} calls are refused and nothing written to a shared store will persist.`:f,h=[`Connected memory stores \u2014 pass an id as the tools' store argument, and call ${Sk} with no arguments to re-check this set whenever you are unsure which store to use:`,...e.map(I7s)],g=p?`${Sk},${c0}`:`${Sk},${c0},${ob}`,y=tF()?`If the memory tools are deferred, load them with ${Ov}("select:${g}") before first use. `:"",T=p?`${y}Read shared memory whenever earlier project context would help, and persist new learnings to your personal memory directory with the file tools.`:`${y}Check each user reply for content worth persisting, and when you notice some, save it with ${ob} in that same reply; read memory whenever earlier project context would help.`,S=fIo({skipIndex:n,heading:"## How to save personal memories",file:`personal memory to its own file in \`${r}\``,index:`the \`${Zy}\` in that same directory`}),b="Your personal memory directory already exists \u2014 write to it directly with the Write tool (do not run mkdir or check for its existence).";if(i)return["# Memory","",m,"",T,"",...h,"",p?`Save every memory type in your personal memory directory at \`${r}\` with the file tools; the shared stores are read-only this session. ${"Your personal memory directory already exists \u2014 write to it directly with the Write tool (do not run mkdir or check for its existence)."}`:`Private memories belong in your personal memory directory at \`${r}\`, written with the file tools; the shared stores are for what teammates should also see. Never save secrets, credentials or other sensitive data to t
+
+-- offset 263282928 --
+thesized_stop_reason:he(ix),cause:PT,request_id:Gr(ze)}),yield md({content:Kp?el?`${BT}: The response stopped arriving. The response above may be incomplete.`:Is?`${BT}: Server error mid-response. The response above may be incomplete.`:Vf?`${BT}: Your computer went to sleep mid-response. The response above may be incomplete.`:`${BT}: Connection lost mid-response. The response above may be incomplete.`:el?`${BT}: The response stalled before a response was produced. Try again.`:Vf?`${BT}: Your computer went to sleep before a response was produced. Try again.`:`${BT}: Connection lost before a response was produced. Try again.`,error:"server_error"}),Xn!=="credited")Xn="credited",Xr+=wSe(Rde(d,Gt),Gt,i.model,i.querySource,J,i.spawnedBySkill,i.activeSkill,i.activeMcpServer,i.activeMcpTool);break e}throw L("tengu_streaming_fallback_to_non_streaming",{model:i.model,error:No instanceof Error?No.name:Xie(String(No)),attemptNumber:Be,maxOutputTokens:yr,thinkingType:he(r.type),fallback_disabled:Fn,request_id:NW(ze),fallback_cause:we("partial_yield"),any_stream_event_yielded:Le}),No}if(mo&&!Po&&lc!==null&&!Le){Po=!0,E(`[dispatch] Stream connection error (${lc.code}) with anthropic-dispatch-id before first event; retrying without it`,{level:"warn"}),L("tengu_dispatch_header_fallback",{model:wd(i.model),reason:we("body_phase"),status:we("none"),error_code:Edn(lc.code),request_id:Gr(ze)}),wt(),It("attempt_errored",ze??null,null),ze=null;continue e}let is=r_a();if(Gi&&un===null&&_r<is){if(_r++,E(`Stream connection error (${lc.code}) \u2014 retrying streaming (${_r}/${is})`,{level:"warn"}),L("tengu_streaming_stale_connection_retry",{model:i.model,error_code:Edn(lc.code),retry_attempt:_r,request_id:NW(ze)}),wt(),It("attempt_errored",ze??null,null),zr&&Xn!=="credited"){if(Xn="credited",Xr+=wSe(Rde(d,Gt),Gt,i.model,i.querySource,J,i.spawnedBySkill,i.activeSkill,i.activeMcpServer,i.activeMcpTool),Kt!==null)yield{type:"stream_event",event:{type:"content_block_stop",index:Kt}};yield{type:"stream_event",event:{type:"message_stop"}}}ze=null;let Is=K5e(_r),el=jko(new X$({cause:qi instanceof Error?qi:void 0}));fn=!0,i.onRetryStatus?.({kind:"retrying",error:el,attempt:_r,maxRetries:is,retryInMs:Is,deadline:Date.now()+Is}),yield aIn(el,Is,_r,is,"connection_retry"),await Er(Is,o);continue e}if(Ys&&!Le&&ti<co){ti++,E(`Stream idle timeout before first event \u2014 retrying streaming (${ti}/${co})`,{le
+
+-- offset 263284077 --
+tion error (${lc.code}) with anthropic-dispatch-id before first event; retrying without it`,{level:"warn"}),L("tengu_dispatch_header_fallback",{model:wd(i.model),reason:we("body_phase"),status:we("none"),error_code:Edn(lc.code),request_id:Gr(ze)}),wt(),It("attempt_errored",ze??null,null),ze=null;continue e}let is=r_a();if(Gi&&un===null&&_r<is){if(_r++,E(`Stream connection error (${lc.code}) \u2014 retrying streaming (${_r}/${is})`,{level:"warn"}),L("tengu_streaming_stale_connection_retry",{model:i.model,error_code:Edn(lc.code),retry_attempt:_r,request_id:NW(ze)}),wt(),It("attempt_errored",ze??null,null),zr&&Xn!=="credited"){if(Xn="credited",Xr+=wSe(Rde(d,Gt),Gt,i.model,i.querySource,J,i.spawnedBySkill,i.activeSkill,i.activeMcpServer,i.activeMcpTool),Kt!==null)yield{type:"stream_event",event:{type:"content_block_stop",index:Kt}};yield{type:"stream_event",event:{type:"message_stop"}}}ze=null;let Is=K5e(_r),el=jko(new X$({cause:qi instanceof Error?qi:void 0}));fn=!0,i.onRetryStatus?.({kind:"retrying",error:el,attempt:_r,maxRetries:is,retryInMs:Is,deadline:Date.now()+Is}),yield aIn(el,Is,_r,is,"connection_retry"),await Er(Is,o);continue e}if(Ys&&!Le&&ti<co){ti++,E(`Stream idle timeout before first event \u2014 retrying streaming (${ti}/${co})`,{level:"warn"}),L("tengu_streaming_watchdog_retry",{model:i.model,retry_attempt:ti,request_id:NW(ze)}),wt(),It("attempt_errored",ze??null,null),ze=null;continue e}if(PRe(qi)){if(so++,!qt){if(zr&&Xn!=="credited")Xn="credited",Xr+=wSe(Rde(d,Gt),Gt,i.model,i.querySource,J,i.spawnedBySkill,i.activeSkill,i.activeMcpServer,i.activeMcpTool);if(so<jti&&(Emr(i.querySource)||vGe())){if(E(`Mid-stream 529 before content \u2014 retrying streaming (${so}/${jti})`,{level:"warn"}),L("tengu_streaming_529_retry",{model:wd(i.model),retry_attempt:so,request_id:Gr(ze)}),wt(),It("attempt_errored",ze??null,null),zr){if(Kt!==null)yield{type:"stream_event",event:{type:"content_block_stop",index:Kt}};yield{type:"stream_event",event:{type:"message_stop"}}}ze=null,await Er(K5e(so),o);continue e}if(i.fallbackModel)throw L("tengu_api_opus_fallback_triggered",{original_model:wd(i.model),fallback_model:wd(i.fallbackModel),provider:Iie(),source:we("mid_stream")}),Pe("api_request","api_request_fallback_triggered"),new pX(i.model,i.fallbackModel,"overloaded",qi)}}if(Fn)throw E(`Error streaming (non-streaming fallback disabled): ${ue(No)}`,{level:"error"}),L("tengu_stre

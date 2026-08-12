@@ -1,0 +1,230 @@
+===== offset 56069277 =====
+ts[gs + 3];
+            if (next !== "..")
+              continue;
+            if (!p || p === "." || p === ".." || !p2 || p2 === "." || p2 === "..")
+              continue;
+            didSomething = !0, parts.splice(gs, 1);
+            let other = parts.slice(0);
+            other[gs] = "**", globParts.push(other), gs--;
+          }
+          if (!this.preserveMultipleSlashes) {
+            for (let i = 1;i < parts.length - 1; i++) {
+              let p = parts[i];
+              if (i === 1 && p === "" && parts[0] === "")
+                continue;
+              if (p === "." || p === "")
+                didSomething = !0, parts.splice(i, 1), i--;
+            }
+            if (parts[0] === "." && parts.length === 2 && (parts[1] === "." || parts[1] === ""))
+              didSomething = !0, parts.pop();
+          }
+          let dd = 0;
+          while ((dd = parts.indexOf("..", dd + 1)) !== -1) {
+            let p = parts[dd - 1];
+            if (p && p !== "." && p !== ".." && p !== "**") {
+              didSomething = !0;
+              let splin = dd === 1 && parts[dd + 1] === "**" ? ["."] : [];
+              if (parts.splice(dd - 1, 2, ...splin), parts.length === 0)
+                parts.push("");
+              dd -= 2;
+            }
+          }
+        }
+      } while (didSomething);
+      return globParts;
+    }
+    secondPhasePreProcess(globParts) {
+      for (let i = 0;i < globParts.length - 1; i++)
+        for (let j = i + 1;j < globParts.length; j++) {
+          let matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);
+          if (matched) {
+            globParts[i] = [], globParts[j] = matched;
+            break;
+          }
+        }
+      return globParts.filter((gs) => gs.length);
+    }
+    partsMatch(a, b, emptyGSMatch = !1) {
+      let ai = 0, bi = 0, result = [], which = "";
+      while (ai < a.length && bi < b.length)
+        if (a[ai] === b[bi])
+          result.push(which === "b" ? b[bi] : a[ai]), ai++, bi++;
+        else if (emptyGSMatch && a[ai] === "**" && b[bi] === a[ai + 1])
+          result.push(a[ai]), ai++;
+        else if (emptyGSMatch && b[bi] === "**" && a[ai] === b[bi + 1])
+          result.push(b[bi]), bi++;
+        else if (a[ai] === "*" && b[bi] && (this.options.dot || !b[bi].startsWith(".")) && b[bi] !== "**") {
+          if (which === "b")
+            return !1;
+          which = "a", result.push(a[ai]), ai++, bi++;
+        } else if (b[bi] === "*" && a[ai] && (this.options.dot || !a[ai].startsWith(".")) && a[ai] !== "**") {
+          if (which === "a")
+            return !1;
+          which = "b", result.push(b[bi]), ai++, bi++;
+        } else
+          return !1;
+      return a.length === b.length && result;
+    }
+    parseNegate() {
+      if (this.nonegate)
+        return;
+      let pattern = this.pattern, negate = !1, negateOffset = 0;
+      for (let i = 0;i < pattern.length && pattern.charAt(i) === "!"; i++)
+        negate = !negate, negateOffset++;
+      if (negateOffset)
+      
+
+===== offset 56069377 =====
+| p === ".." || !p2 || p2 === "." || p2 === "..")
+              continue;
+            didSomething = !0, parts.splice(gs, 1);
+            let other = parts.slice(0);
+            other[gs] = "**", globParts.push(other), gs--;
+          }
+          if (!this.preserveMultipleSlashes) {
+            for (let i = 1;i < parts.length - 1; i++) {
+              let p = parts[i];
+              if (i === 1 && p === "" && parts[0] === "")
+                continue;
+              if (p === "." || p === "")
+                didSomething = !0, parts.splice(i, 1), i--;
+            }
+            if (parts[0] === "." && parts.length === 2 && (parts[1] === "." || parts[1] === ""))
+              didSomething = !0, parts.pop();
+          }
+          let dd = 0;
+          while ((dd = parts.indexOf("..", dd + 1)) !== -1) {
+            let p = parts[dd - 1];
+            if (p && p !== "." && p !== ".." && p !== "**") {
+              didSomething = !0;
+              let splin = dd === 1 && parts[dd + 1] === "**" ? ["."] : [];
+              if (parts.splice(dd - 1, 2, ...splin), parts.length === 0)
+                parts.push("");
+              dd -= 2;
+            }
+          }
+        }
+      } while (didSomething);
+      return globParts;
+    }
+    secondPhasePreProcess(globParts) {
+      for (let i = 0;i < globParts.length - 1; i++)
+        for (let j = i + 1;j < globParts.length; j++) {
+          let matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);
+          if (matched) {
+            globParts[i] = [], globParts[j] = matched;
+            break;
+          }
+        }
+      return globParts.filter((gs) => gs.length);
+    }
+    partsMatch(a, b, emptyGSMatch = !1) {
+      let ai = 0, bi = 0, result = [], which = "";
+      while (ai < a.length && bi < b.length)
+        if (a[ai] === b[bi])
+          result.push(which === "b" ? b[bi] : a[ai]), ai++, bi++;
+        else if (emptyGSMatch && a[ai] === "**" && b[bi] === a[ai + 1])
+          result.push(a[ai]), ai++;
+        else if (emptyGSMatch && b[bi] === "**" && a[ai] === b[bi + 1])
+          result.push(b[bi]), bi++;
+        else if (a[ai] === "*" && b[bi] && (this.options.dot || !b[bi].startsWith(".")) && b[bi] !== "**") {
+          if (which === "b")
+            return !1;
+          which = "a", result.push(a[ai]), ai++, bi++;
+        } else if (b[bi] === "*" && a[ai] && (this.options.dot || !a[ai].startsWith(".")) && a[ai] !== "**") {
+          if (which === "a")
+            return !1;
+          which = "b", result.push(b[bi]), ai++, bi++;
+        } else
+          return !1;
+      return a.length === b.length && result;
+    }
+    parseNegate() {
+      if (this.nonegate)
+        return;
+      let pattern = this.pattern, negate = !1, negateOffset = 0;
+      for (let i = 0;i < pattern.length && pattern.charAt(i) === "!"; i++)
+        negate = !negate, negateOffset++;
+      if (negateOffset)
+        this.pattern = pattern.slice(negateOffset);
+      this.negate = negate;
+    }
+    matchOne(file, p
+
+===== offset 56069434 =====
+       continue;
+            didSomething = !0, parts.splice(gs, 1);
+            let other = parts.slice(0);
+            other[gs] = "**", globParts.push(other), gs--;
+          }
+          if (!this.preserveMultipleSlashes) {
+            for (let i = 1;i < parts.length - 1; i++) {
+              let p = parts[i];
+              if (i === 1 && p === "" && parts[0] === "")
+                continue;
+              if (p === "." || p === "")
+                didSomething = !0, parts.splice(i, 1), i--;
+            }
+            if (parts[0] === "." && parts.length === 2 && (parts[1] === "." || parts[1] === ""))
+              didSomething = !0, parts.pop();
+          }
+          let dd = 0;
+          while ((dd = parts.indexOf("..", dd + 1)) !== -1) {
+            let p = parts[dd - 1];
+            if (p && p !== "." && p !== ".." && p !== "**") {
+              didSomething = !0;
+              let splin = dd === 1 && parts[dd + 1] === "**" ? ["."] : [];
+              if (parts.splice(dd - 1, 2, ...splin), parts.length === 0)
+                parts.push("");
+              dd -= 2;
+            }
+          }
+        }
+      } while (didSomething);
+      return globParts;
+    }
+    secondPhasePreProcess(globParts) {
+      for (let i = 0;i < globParts.length - 1; i++)
+        for (let j = i + 1;j < globParts.length; j++) {
+          let matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);
+          if (matched) {
+            globParts[i] = [], globParts[j] = matched;
+            break;
+          }
+        }
+      return globParts.filter((gs) => gs.length);
+    }
+    partsMatch(a, b, emptyGSMatch = !1) {
+      let ai = 0, bi = 0, result = [], which = "";
+      while (ai < a.length && bi < b.length)
+        if (a[ai] === b[bi])
+          result.push(which === "b" ? b[bi] : a[ai]), ai++, bi++;
+        else if (emptyGSMatch && a[ai] === "**" && b[bi] === a[ai + 1])
+          result.push(a[ai]), ai++;
+        else if (emptyGSMatch && b[bi] === "**" && a[ai] === b[bi + 1])
+          result.push(b[bi]), bi++;
+        else if (a[ai] === "*" && b[bi] && (this.options.dot || !b[bi].startsWith(".")) && b[bi] !== "**") {
+          if (which === "b")
+            return !1;
+          which = "a", result.push(a[ai]), ai++, bi++;
+        } else if (b[bi] === "*" && a[ai] && (this.options.dot || !a[ai].startsWith(".")) && a[ai] !== "**") {
+          if (which === "a")
+            return !1;
+          which = "b", result.push(b[bi]), ai++, bi++;
+        } else
+          return !1;
+      return a.length === b.length && result;
+    }
+    parseNegate() {
+      if (this.nonegate)
+        return;
+      let pattern = this.pattern, negate = !1, negateOffset = 0;
+      for (let i = 0;i < pattern.length && pattern.charAt(i) === "!"; i++)
+        negate = !negate, negateOffset++;
+      if (negateOffset)
+        this.pattern = pattern.slice(negateOffset);
+      this.negate = negate;
+    }
+    matchOne(file, pattern, partial = !1) {
+      let fileStartIndex = 0, pat

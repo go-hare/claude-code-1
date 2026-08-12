@@ -1,0 +1,1 @@
+UgT=/[^\u0020-\u02ff]/});function dyT(){

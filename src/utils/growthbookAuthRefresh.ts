@@ -53,6 +53,40 @@ export function isSameGrowthBookAuthAccount(
 }
 
 /**
+ * densable 2.1.227 createClient pre-init OAuth failure label.
+ * `Al(refresh, DPS=5000, Sbf="timeout")` → catch → message===Sbf ? "timeout" : name
+ */
+export function formatGrowthBookPreInitOAuthFailure(error: unknown): string {
+  const err =
+    error instanceof Error
+      ? error
+      : new Error(typeof error === 'string' ? error : String(error))
+  const kind = err.message === 'timeout' ? 'timeout' : err.name || 'Error'
+  return `GrowthBook: pre-init OAuth refresh failed (${kind})`
+}
+
+/**
+ * densable 2.1.227 createClient auth-header catch label.
+ * `E(\`GrowthBook: auth header resolution failed (${_n(c).name}), continuing without auth\`)`
+ */
+export function formatGrowthBookAuthHeaderResolutionFailure(
+  error: unknown,
+): string {
+  const err =
+    error instanceof Error
+      ? error
+      : new Error(typeof error === 'string' ? error : String(error))
+  const name = err.name || 'Error'
+  return `GrowthBook: auth header resolution failed (${name}), continuing without auth`
+}
+
+/** densable createClient pre-init OAuth timeout budget (DPS). */
+export const GROWTHBOOK_PRE_INIT_OAUTH_TIMEOUT_MS = 5000
+
+/** densable Al(..., Sbf) timeout reject message. */
+export const GROWTHBOOK_PRE_INIT_OAUTH_TIMEOUT_MESSAGE = 'timeout'
+
+/**
  * densable X8n Authorization branch:
  *   if (o !== undefined && o !== oji) → hard recreate
  */

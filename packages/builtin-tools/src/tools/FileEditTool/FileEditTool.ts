@@ -272,7 +272,7 @@ export const FileEditTool = buildTool({
         })
       }
       // Try to find a similar file with a different extension
-      const similarFilename = findSimilarFile(fullFilePath)
+      const similarFilename = await findSimilarFile(fullFilePath)
       const cwdSuggestion = await suggestPathUnderCwd(fullFilePath)
       let message = `File does not exist. ${FILE_NOT_FOUND_CWD_NOTE} ${getCwd()}.`
 

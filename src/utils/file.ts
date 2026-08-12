@@ -170,19 +170,25 @@ export function getDisplayPath(filePath: string): string {
 }
 
 /**
- * Find files with the same name but different extensions in the same directory
+ * Find files with the same name but different extensions in the same directory.
+ *
+ * densable 2.1.227 `kmt` — async `readdir` so file-not-found suggestions do not
+ * stall the event loop on large directories (official changelog perf bullet).
+ *
  * @param filePath The path to the file that doesn't exist
  * @returns The found file with a different extension, or undefined if none found
  */
 
-export function findSimilarFile(filePath: string): string | undefined {
+export async function findSimilarFile(
+  filePath: string,
+): Promise<string | undefined> {
   const fs = getFsImplementation()
   try {
     const dir = dirname(filePath)
     const fileBaseName = basename(filePath, extname(filePath))
 
-    // Get all files in the directory
-    const files = fs.readdirSync(dir)
+    // densable: await gr().readdir(r) — async, withFileTypes Dirent list
+    const files = await fs.readdir(dir)
 
     // Find files with the same base name but different extension
     const similarFiles = files.filter(
@@ -198,9 +204,13 @@ export function findSimilarFile(filePath: string): string | undefined {
     }
     return undefined
   } catch (error) {
+    // densable: if (!nr(r)) E(`findSimilarFile failed for ${e}: ${r}`)
     // Missing dir (ENOENT) is expected; for other errors log and return undefined
     if (!isENOENT(error)) {
-      logError(error)
+      logForDebugging(
+        `findSimilarFile failed for ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+        { level: 'error' },
+      )
     }
     return undefined
   }
@@ -538,18 +548,19 @@ export function getDesktopPath(): string {
 
 /**
  * Validates that a file size is within the specified limit.
- * Returns true if the file is within the limit, false otherwise.
+ * densable 2.1.227 perf: async `stat` so at-mention size checks do not stall
+ * the event loop on slow FS (pairs with async findSimilarFile).
  *
  * @param filePath The path to the file to validate
  * @param maxSizeBytes The maximum allowed file size in bytes
  * @returns true if file size is within limit, false otherwise
  */
-export function isFileWithinReadSizeLimit(
+export async function isFileWithinReadSizeLimit(
   filePath: string,
   maxSizeBytes: number = MAX_OUTPUT_SIZE,
-): boolean {
+): Promise<boolean> {
   try {
-    const stats = getFsImplementation().statSync(filePath)
+    const stats = await getFsImplementation().stat(filePath)
     return stats.size <= maxSizeBytes
   } catch {
     // If we can't stat the file, return false to indicate validation failure

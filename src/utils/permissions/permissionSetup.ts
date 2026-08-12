@@ -705,6 +705,26 @@ export function initialPermissionModeFromCLI({
   notification?: string
   fromAutoFallback?: boolean
 } {
+  // densable 2.1.227 iTu: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB (allowed_non_write_users
+  // hardening under claude-code-action) forces permission mode default so Bash
+  // is not run under bypass/auto without explicit allowedTools. Notify only when
+  // a non-default mode was requested (CLI flag, permission-mode, or agent frontmatter).
+  if (isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
+    const requestedMode = permissionModeCli
+      ? permissionModeFromString(permissionModeCli)
+      : undefined
+    const nonDefaultRequested =
+      Boolean(dangerouslySkipPermissions) ||
+      (requestedMode !== undefined && requestedMode !== 'default')
+    const notification = nonDefaultRequested
+      ? 'Permission mode forced to default — CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set (allowed_non_write_users hardening). Declare allowedTools explicitly, or set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 to opt out.'
+      : undefined
+    if (feature('TRANSCRIPT_CLASSIFIER')) {
+      autoModeStateModule?.setAutoModeFromFallback(false)
+    }
+    return { mode: 'default', notification, fromAutoFallback: false }
+  }
+
   const settings = getSettings_DEPRECATED() || {}
 
   // Check GrowthBook gate first - highest precedence

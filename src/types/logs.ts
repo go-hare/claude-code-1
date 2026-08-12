@@ -113,6 +113,13 @@ export type LastPromptMessage = {
   leafUuid?: string | null
   /** densable D6e explicit:true — fork/rewind boundary, not a soft re-append. */
   explicit?: boolean
+  /**
+   * densable 2.1.227 / rewind path — last-prompt stamped with `rewound:!0` when
+   * the conversation was rewound (including before the first message under
+   * tengu_rewind_first_message). Resume / /tui relaunch use this + empty leaf
+   * to avoid restoring a pre-first-message conversation.
+   */
+  rewound?: boolean
   timestamp?: string
 }
 

@@ -518,7 +518,9 @@ async function generateSyntheticDiff(
   absoluteFilePath: string,
 ): Promise<Omit<ToolUseDiff, 'repository'> | null> {
   try {
-    if (!isFileWithinReadSizeLimit(absoluteFilePath, MAX_DIFF_SIZE_BYTES)) {
+    if (
+      !(await isFileWithinReadSizeLimit(absoluteFilePath, MAX_DIFF_SIZE_BYTES))
+    ) {
       return null
     }
     const content = await readFile(absoluteFilePath, 'utf-8')

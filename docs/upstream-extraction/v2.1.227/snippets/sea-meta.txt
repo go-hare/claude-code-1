@@ -1,0 +1,9 @@
+# densable 2.1.227 SEA meta
+platform: darwin-arm64
+path: /tmp/official-227/plat/package/claude
+size: 285046400
+sha256: 7432511ba3be818e01f23f6eef8630d214a8b618451e188c3c7d61a987eef6c7
+version_hits: 6
+BUILD_TIME: 2026-08-10T18:40:15Z
+GIT_SHA: 5ecc7d5389d8b682652d0ea32eadd3e0eb537ee8
+source: npm pack @anthropic-ai/claude-code-darwin-arm64@2.1.227

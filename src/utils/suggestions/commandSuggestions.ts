@@ -303,6 +303,7 @@ function createCommandSuggestionItem(
       ? ` (arguments: ${cmd.argNames.join(', ')})`
       : '')
 
+  // densable hNl / x_a: attach query for footer match-range bold (wZt)
   const item: SuggestionItem = {
     id: getCommandId(cmd),
     displayText: `/${commandName}${aliasText}`,
@@ -313,9 +314,7 @@ function createCommandSuggestionItem(
       : scopeTag,
     description: fullDescription,
     metadata: cmd,
-  }
-  if (query !== undefined) {
-    // reserved for future query highlight parity with official x_a
+    ...(query !== undefined && query !== '' ? { query } : {}),
   }
   if (lanesEnabled) {
     item.kind = resolveCommandKindLane(cmd)

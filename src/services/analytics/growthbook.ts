@@ -12,7 +12,14 @@ import {
 } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { toError } from '../../utils/errors.js'
-import { decideGrowthBookAuthRefresh } from '../../utils/growthbookAuthRefresh.js'
+import { checkAndRefreshOAuthTokenIfNeeded } from '../../utils/auth.js'
+import {
+  decideGrowthBookAuthRefresh,
+  formatGrowthBookAuthHeaderResolutionFailure,
+  formatGrowthBookPreInitOAuthFailure,
+  GROWTHBOOK_PRE_INIT_OAUTH_TIMEOUT_MESSAGE,
+  GROWTHBOOK_PRE_INIT_OAUTH_TIMEOUT_MS,
+} from '../../utils/growthbookAuthRefresh.js'
 import {
   coalesceNullFeatureValue,
   processRemoteEvalFeatures,
@@ -21,6 +28,7 @@ import { getAuthHeaders } from '../../utils/http.js'
 import { logError } from '../../utils/log.js'
 import { resolveGbRefreshIntervalMsOrDefault } from '../../utils/residualFinalEnvGates.js'
 import { createSignal } from '../../utils/signal.js'
+import { withTimeout } from '../../utils/sleep.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   type GitHubActionsMetadata,
@@ -595,9 +603,20 @@ const getGrowthBookClient = memoize(
       checkHasTrustDialogAccepted() ||
       getSessionTrustAccepted() ||
       getIsNonInteractiveSession()
-    const authHeaders = hasTrust
-      ? getAuthHeaders()
-      : { headers: {}, error: 'trust not established' }
+    // densable createClient: try getAuthHeaders after pre-init refresh; on throw
+    // continue without auth and stamp error:"auth resolution failed".
+    let authHeaders: { headers: Record<string, string>; error?: string } =
+      hasTrust
+        ? { headers: {}, error: 'trust not established' }
+        : { headers: {}, error: 'trust not established' }
+    if (hasTrust) {
+      try {
+        authHeaders = getAuthHeaders()
+      } catch (e) {
+        logForDebugging(formatGrowthBookAuthHeaderResolutionFailure(e))
+        authHeaders = { headers: {}, error: 'auth resolution failed' }
+      }
+    }
     // 适配器模式下不需要 auth，GrowthBook Cloud 用 clientKey 即可
     const hasAuth = isAdapterMode || !authHeaders.error
     clientCreatedWithAuth = hasAuth
@@ -691,9 +710,58 @@ const getGrowthBookClient = memoize(
 
 /**
  * Initialize GrowthBook client (blocks until ready)
+ *
+ * densable 2.1.227 createClient: when workspace trust is established, await
+ * `Al(refreshOAuthTokenIfNeeded(), DPS=5000, Sbf="timeout")` BEFORE stamping
+ * attributes / auth headers so subscriptionType + rateLimitTier land for
+ * feature-flag targeting (expired login token → wrong Max/Fable credits prompt).
  */
 export const initializeGrowthBook = memoize(
   async (): Promise<GrowthBook | null> => {
+    const hasTrust =
+      checkHasTrustDialogAccepted() ||
+      getSessionTrustAccepted() ||
+      getIsNonInteractiveSession()
+
+    // densable createClient pre-init OAuth refresh (only when trust established)
+    if (hasTrust) {
+      let refreshed = false
+      try {
+        refreshed = await withTimeout(
+          checkAndRefreshOAuthTokenIfNeeded(),
+          GROWTHBOOK_PRE_INIT_OAUTH_TIMEOUT_MS,
+          GROWTHBOOK_PRE_INIT_OAUTH_TIMEOUT_MESSAGE,
+        )
+      } catch (e) {
+        logForDebugging(formatGrowthBookPreInitOAuthFailure(e))
+      }
+      if (refreshed) {
+        // Re-read user attributes so subscription tier / rateLimitTier are fresh
+        resetUserCache()
+      }
+      // densable always creates the client *after* pre-init refresh. Drop any
+      // premature memoized client so getUserAttributes + Authorization stamp
+      // post-refresh values (without clearing this initializeGrowthBook memo).
+      if (client !== null) {
+        stopPeriodicGrowthBookRefresh()
+        if (currentBeforeExitHandler) {
+          process.off('beforeExit', currentBeforeExitHandler)
+          currentBeforeExitHandler = null
+        }
+        if (currentExitHandler) {
+          process.off('exit', currentExitHandler)
+          currentExitHandler = null
+        }
+        client?.destroy()
+        client = null
+        clientCreatedWithAuth = false
+        clientAuthAuthorization = undefined
+        clientAuthAccountUuid = undefined
+        clientAuthOrganizationUuid = undefined
+        getGrowthBookClient.cache?.clear?.()
+      }
+    }
+
     let clientWrapper = getGrowthBookClient()
     if (!clientWrapper) {
       return null
@@ -702,21 +770,21 @@ export const initializeGrowthBook = memoize(
     // Check if auth has become available since the client was created
     // If so, we need to recreate the client with fresh auth headers
     // Only check if trust is established to avoid triggering apiKeyHelper before trust dialog
-    if (!clientCreatedWithAuth) {
-      const hasTrust =
-        checkHasTrustDialogAccepted() ||
-        getSessionTrustAccepted() ||
-        getIsNonInteractiveSession()
-      if (hasTrust) {
-        const currentAuth = getAuthHeaders()
-        if (!currentAuth.error) {
-          // Use resetGrowthBook to properly destroy old client and stop periodic refresh
-          // This prevents double-init where old client's init promise continues running
-          resetGrowthBook()
-          clientWrapper = getGrowthBookClient()
-          if (!clientWrapper) {
-            return null
-          }
+    if (!clientCreatedWithAuth && hasTrust) {
+      let currentAuth: { headers: Record<string, string>; error?: string }
+      try {
+        currentAuth = getAuthHeaders()
+      } catch (e) {
+        logForDebugging(formatGrowthBookAuthHeaderResolutionFailure(e))
+        currentAuth = { headers: {}, error: 'auth resolution failed' }
+      }
+      if (!currentAuth.error) {
+        // Use resetGrowthBook to properly destroy old client and stop periodic refresh
+        // This prevents double-init where old client's init promise continues running
+        resetGrowthBook()
+        clientWrapper = getGrowthBookClient()
+        if (!clientWrapper) {
+          return null
         }
       }
     }

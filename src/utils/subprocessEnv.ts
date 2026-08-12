@@ -15,12 +15,16 @@ import { getScreenReaderChildEnv } from './screenReaderGate.js'
  */
 const GHA_SUBPROCESS_SCRUB = [
   // Anthropic auth — claude re-reads these per-request, subprocesses don't need them
+  // densable R_s (2.1.227): includes ARTIFACTS + MEMORY tokens and FOUNDRY_AUTH_TOKEN
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AWS_API_KEY',
   'ANTHROPIC_BEDROCK_MANTLE_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_ARTIFACTS_API_TOKEN',
+  'CLAUDE_CODE_MEMORY_API_TOKEN',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_FOUNDRY_API_KEY',
+  'ANTHROPIC_FOUNDRY_AUTH_TOKEN',
   'ANTHROPIC_CUSTOM_HEADERS',
 
   // OTLP exporter headers — documented to carry Authorization=Bearer tokens

@@ -1,0 +1,49 @@
+===== offset 235436192 =====
+0��������������
+������������
+������������
+H`�������������
+negativeOptions
+8>z������������
+P��������������
+suggestSimilar
+���������������
+�9z������������
+W��'\z���������"��
+�!Q��Z&���"
+*
+�S��������
+
+===== offset 235449997 =====
+child_process
+Cannot destructure property 'Argument' from null or undefined value
+Cannot destructure property 'CommanderError' from null or undefined value
+Cannot destructure property 'Help' from null or undefined value
+Cannot destructure property 'Option' from null or undefined value
+Cannot destructure property 'suggestSimilar' from null or undefined value
+The superclass is not a constructor.
+copyInheritedSettings
+_getCommandAndAncestors
+createCommand
+configureHelp
+configureOutput
+showHelpAfterError
+showSuggestionAfterError
+createArgument
+addHelpCommand
+_getHelpCommand
+exitOverride
+createOption
+_callParseArg
+_registerOption
+_registerCommand
+requiredOption
+combineFlagAndOptionalValue
+allowUnknownOption
+allowExcessArguments
+enablePositionalOptions
+
+===== offset 265992827 =====
+egativeOptions.forEach((t,r)=>{if(this.positiveOptions.has(r))this.dualOptions.add(r)})}valueFromOption(e,t){let r=t.attributeName();if(!this.dualOptions.has(r))return!0;let n=this.negativeOptions.get(r).presetArg,o=n!==void 0?n:!1;return t.negate===(o===e)}}function _FS(e){return e.split("-").reduce((t,r)=>t+r[0].toUpperCase()+r.slice(1))}function bFS(e){let t,r,n=e.split(/[ |,]+/);if(n.length>1&&!/^[[<]/.test(n[1]))t=n.shift();if(r=n.shift(),!t&&/^-[^-]$/.test(r))t=r,r=void 0;return{shortFlag:t,longFlag:r}}lHa.Option=JAf;lHa.DualOptions=XAf});var ZAf=ee(function(QAf){function SFS(e,t){if(Math.abs(e.length-t.length)>3)return Math.max(e.length,t.length);let r=[];for(let n=0;n<=e.length;n++)r[n]=[n];for(let n=0;n<=t.length;n++)r[0][n]=n;for(let n=1;n<=t.length;n++)for(let o=1;o<=e.length;o++){let i=1;if(e[o-1]===t[n-1])i=0;else i=1;if(r[o][n]=Math.min(r[o-1][n]+1,r[o][n-1]+1,r[o-1][n-1]+i),o>1&&n>1&&e[o-1]===t[n-2]&&e[o-2]===t[n-1])r[o][n]=Math.min(r[o][n],r[o-2][n-2]+1)}return r[e.length][t.length]}function TFS(e,t){if(!t||t.length===0)return"";t=Array.from(new Set(t));let r=e.startsWith("--");if(r)e=e.slice(2),t=t.map((s)=>s.slice(2));let n=[],o=3,i=0.4;if(t.forEach((s)=>{if(s.length<=1)return;let a=SFS(e,s),l=Math.max(e.length,s.length);if((l-a)/l>i){if(a<o)o=a,n=[s];else if(a===o)n.push(s)}}),n.sort((s,a)=>s.localeCompare(a)),r)n=n.map((s)=>`--${s}`);if(n.length>1)return`
+(Did you mean one of ${n.join(", ")}?)`;if(n.length===1)return`
+(Did you mean ${n[0]}?)`;return""}QAf.suggestSimilar=TFS});var oRf=ee(function(nRf){var vFS=require("events").EventEmitter,uHa=require("child_process"),Lst=require("path"),dHa=require("fs"),$3=require("process"),{Argument:EFS,humanReadableArgName:wFS}=ydi(),{CommanderError:pHa}=t1n(),{Help:CFS}=aHa(),{Option:eRf,DualOptions:AFS}=cHa(),{suggestSimilar:tRf}=ZAf();class fHa extends vFS{constructor(e){super();this.commands=[],this.options=[],this.parent=null,this._allowUnknownOption=!1,this._allowExcessArguments=!0,this.registeredArguments=[],this._args=this.registeredArguments,this.args=[],this.rawArgs=[],this.processedArgs=[],this._scriptPath=null,this._name=e||"",this._optionValues={},this._optionValueSources={},this._storeOptionsAsProperties=!1,this._actionHandler=null,this._executableHandler=!1,this._executableFile=null,this._executableDir=null,this._defaultCommandName=null,this._exitCallback=null,this._aliases=[],this._combineFlagAndOptionalValue=!0,this._description="",this._summary="",this._argsDescription=void 0,this._enablePositionalOptions=!1,this._passThroughOptions=!1,this._lifeCycleHooks={},this._showHelpAfterError=!1,this._showSuggestionAfterError=!0,this._outputConfiguration={writeOut:(t)=>$3.stdout.write(t),writeErr:(t)=>$3.stderr.write(t),getOutHelpWidth:()=>$3.stdout.isTTY?$3.stdout.columns:void 0,getErrHelpWidth:()=>$3.stderr.isTTY?$3.stderr.columns:void 0,outputError:(t,r)=>r(t)},this._hidden=!1,this._helpOption=void 0,this._addImplicitHelpCommand=void 0,this._helpCommand=void 0,this._helpConfiguration={}}copy

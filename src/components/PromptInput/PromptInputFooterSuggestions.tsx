@@ -3,6 +3,7 @@ import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text, stringWidth } from '@anthropic/ink';
 import { truncatePathMiddle, truncateToWidth } from '../../utils/format.js';
 import type { Theme } from '../../utils/theme.js';
+import { QueryHighlightedText } from './QueryHighlightedText.js';
 
 export type SuggestionItem = {
   id: string;
@@ -11,6 +12,11 @@ export type SuggestionItem = {
   description?: string;
   metadata?: unknown;
   color?: keyof Theme;
+  /**
+   * densable 2.1.227 — lowercase query for match-range bold highlight in
+   * slash / typeahead menus (`kh.query` → `wZt`).
+   */
+  query?: string;
   /** Official menu kind lanes (tengu_mint_lanes / ENABLE_MENU_KIND_LANES). */
   kind?: 'skill' | 'action';
   sourceTag?: 'project' | 'org';
@@ -109,20 +115,29 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
     );
   }
 
-  // For non-unified suggestions (commands, shell, etc.), use improved layout from main
+  // densable footer (non-unified): selected row blue only; match chars bold via wZt.
   // Cap the command name column at 40% of terminal width to ensure description has space
   const maxNameWidth = Math.floor(columns * 0.4);
   const displayTextWidth = Math.min(maxColumnWidth ?? stringWidth(item.displayText) + 5, maxNameWidth);
 
   const textColor = item.color || (isSelected ? 'suggestion' : undefined);
   const shouldDim = !isSelected;
+  // densable: emoji: id rows get pointer + bold when selected
+  const isEmoji = item.id.startsWith('emoji:');
+  // densable Ge.pointer = '❯' (❯) when selected, two spaces when not
+  const emojiPointer = isEmoji ? (isSelected ? '❯ ' : '  ') : '';
+  const emojiPointerWidth = stringWidth(emojiPointer);
+  const nameBold = isEmoji && isSelected;
 
   // Truncate and pad the display text to fixed width
   let displayText = item.displayText;
   if (stringWidth(displayText) > displayTextWidth - 2) {
-    displayText = truncateToWidth(displayText, displayTextWidth - 2);
+    displayText =
+      displayText.includes('/') || displayText.includes('\\')
+        ? truncatePathMiddle(displayText, displayTextWidth - 2)
+        : truncateToWidth(displayText, displayTextWidth - 2);
   }
-  const paddedDisplayText = displayText + ' '.repeat(Math.max(0, displayTextWidth - stringWidth(displayText)));
+  const padSpaces = ' '.repeat(Math.max(0, displayTextWidth - stringWidth(displayText) - emojiPointerWidth));
 
   const tagText = item.tag ? `[${item.tag}] ` : '';
   const tagWidth = stringWidth(tagText);
@@ -134,20 +149,42 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
   const truncatedDescription = item.description
     ? truncateToWidth(item.description.replace(/\s+/g, ' '), descriptionWidth)
     : '';
+  const descriptionColor = isSelected ? 'suggestion' : undefined;
 
   return (
     <Text wrap="truncate">
-      <Text color={textColor} dimColor={shouldDim}>
-        {paddedDisplayText}
+      {emojiPointer ? (
+        <Text color={textColor} dimColor={shouldDim} bold={nameBold}>
+          {emojiPointer}
+        </Text>
+      ) : null}
+      {/* densable wZt — name column: match bold, not recolor */}
+      <QueryHighlightedText
+        text={displayText}
+        query={item.query}
+        color={textColor}
+        isSelected={isSelected}
+        bold={nameBold}
+      />
+      <Text color={textColor} dimColor={shouldDim} bold={nameBold}>
+        {padSpaces}
       </Text>
       {tagText ? (
         <Text color={item.tag === 'local' ? 'ansi:yellow' : undefined} dimColor={item.tag !== 'local'}>
           {tagText}
         </Text>
       ) : null}
-      <Text color={isSelected ? 'suggestion' : undefined} dimColor={!isSelected}>
-        {truncatedDescription}
-      </Text>
+      {/* densable wZt description: contiguousOnly */}
+      {truncatedDescription ? (
+        <QueryHighlightedText
+          text={truncatedDescription}
+          query={item.query}
+          color={descriptionColor}
+          isSelected={isSelected}
+          bold={nameBold}
+          contiguousOnly
+        />
+      ) : null}
     </Text>
   );
 });

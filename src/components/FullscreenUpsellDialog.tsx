@@ -26,25 +26,33 @@ export function FullscreenUpsellDialog({ onDone }: FullscreenUpsellDialogProps):
       }));
       // Official OLt densable accept: inject env; optional spawnSync when
       // CLAUDE_CODE_SPAWN_TUI_RELAUNCH=1 (process replacement densable).
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { acceptTuiRelaunch } = require('../utils/cliRelaunch.js') as typeof import('../utils/cliRelaunch.js');
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { getSessionId } = require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
-        const result = acceptTuiRelaunch({
-          target: 'fullscreen',
-          sessionId: getSessionId(),
-          hasNonEmptyTranscript: true,
-          screenReaderEnv: {},
-        });
-        if (result.mode === 'spawned' && result.spawn.ok) {
-          // Child inherited session; parent exits like official PNe consumer.
-          process.exit(result.spawn.status ?? 0);
+      // densable 2.1.227: freshIfNoTranscript via d2p/transcriptHasBytes — do not
+      // hardcode hasNonEmptyTranscript:true (rewound-before-first-message resume bug).
+      void (async () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { acceptTuiRelaunch } = require('../utils/cliRelaunch.js') as typeof import('../utils/cliRelaunch.js');
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { getSessionId } = require('../bootstrap/state.js') as typeof import('../bootstrap/state.js');
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { transcriptHasBytes } =
+            require('../utils/sessionStorage.js') as typeof import('../utils/sessionStorage.js');
+          const hasNonEmptyTranscript = await transcriptHasBytes();
+          const result = acceptTuiRelaunch({
+            target: 'fullscreen',
+            sessionId: getSessionId(),
+            hasNonEmptyTranscript,
+            screenReaderEnv: {},
+          });
+          if (result.mode === 'spawned' && result.spawn.ok) {
+            // Child inherited session; parent exits like official PNe consumer.
+            process.exit(result.spawn.status ?? 0);
+          }
+        } catch {
+          // densable optional
         }
-      } catch {
-        // densable optional
-      }
-      onDone('accepted');
+        onDone('accepted');
+      })();
       return;
     }
     saveGlobalConfig(prev => ({

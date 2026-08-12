@@ -1,0 +1,64 @@
+===== offset 75448080 =====
+getAnthropicApiKeySafe
+getAnthropicApiKeyAsync
+getAnthropicApiKey
+getAdditionalModelOptionsCache
+getAccountInformationAsync2
+getAccountInformation
+describeHowToDisableAuthTokenSource
+clearWIFAuthDebugOnceCacheForTesting
+clearOtelHeadersCache
+clearOAuthTokenCache
+clearGcpCredentialsCacheI�2
+clearAwsHelperCredentialsCache
+clearAwsCredentialsCache��
+clearApiKeyHelperCache
+checkGcpCredentialsValid��
+checkAndRefreshOAuthTokenIfNeededWithOutcome
+checkAndRefreshOAuthTokenIfNeeded
+canAuthenticateChromeBridge
+calculateApiKeyHelperTTL	�2
+acquireOAuthRefreshLock
+__resetKnownDeadRefreshTokensForTest
+SDK_OAUTH_REFRESH_ENTRYPOINTS
+OAuthRefreshLockContendedError
+AWS_CHAIN_RESOLVE_REQUEST_TIMEOUT_MS
+stopPeriodicGrowthBookRefresh
+setupPeriodicGrowthBookRefresh
+setGrowthBookConfigOverride
+resetGrowthBook
+refreshGrowthBookFeatures�
+refreshGrowthBookAfterAuthChange
+onGrowthBookRefresh
+isGrowthBookEnabled
+isFeatureFromExperiment
+initializeGrowthBook
+hasGrowthBookOverride
+hasGrowthBookEnvOverride��
+hasFreshGrowthBookFeatures
+getUserAttributes
+getRefreshConfig
+getNonDefaultFeatureKeys	4
+getGrowthBookConfigOverrides
+getFeatureValue_DEPRECATED2
+getFeatureValue_CACHED_WITH_REFRESH
+getFeatureValue_CACHED_MAY_BE_STALE
+getFeatureValueWithSource_CACHED_MAY_BE_STALE
+getDynamicConfig_CACHED_MAY_BE_STALE
+getDynamicConfig_BLOCKS_ON_INIT
+getClientDataAtis
+getApiBaseUrlHost
+getAllGrowthBookFeatures	�2
+clearGrowthBookConfigOverrides
+checkSecurityRestrictionGate
+checkGate_CACHED_OR_BLOCKING
+ATIS_REQUEST_HEADER
+isWorkspacePersistedTrusted
+isStoreMountedRecall
+isSessionLogEnabled
+isMemoryRecallEnabled
+isIndexRecallEnabled
+isExtractModeActive
+
+===== offset 265499522 =====
+e(_n(e))}}startPeriodicRefresh(){if(this.disposed||!this.deps.isEnabled())return;this.stopPeriodicRefresh();let e=new AbortController;this.refreshLoopController=e,this.periodicRefreshLoop(e.signal),this.refreshLoopBeforeExitListener=()=>{this.stopPeriodicRefresh()},process.once("beforeExit",this.refreshLoopBeforeExitListener)}async periodicRefreshLoop(e){while(!e.aborted&&!this.disposed)try{let{intervalMs:t,flagged:r}=this.deps.getRefreshCadence();if(await this.deps.sleep(t,e,{unref:!0}),e.aborted)return;let n=this.remoteEvalFetchOkCount;if(await this.refreshFeatures(),r&&this.remoteEvalFetchOkCount===n&&!e.aborted){if(await this.deps.sleep(Math.round(Math.random()*OPS),e,{unref:!0}),e.aborted)return;await this.refreshFeatures()}}catch(t){De(_n(t)),await this.deps.sleep(PPS,e,{unref:!0})}}stopPeriodicRefresh(){if(this.refreshLoopController)this.refreshLoopController.abort(),this.refreshLoopController=null;if(this.refreshLoopBeforeExitListener)process.removeListener("beforeExit",this.refreshLoopBeforeExitListener),this.refreshLoopBeforeExitListener=null}}function oPa(e,t){return e===null?t:e}function Tbf(e){try{Promise.resolve(e()).catch((t)=>{De(t)})}catch(t){De(t)}}var PPS=60000,OPS=5000,DPS=5000,Sbf="GrowthBook pre-init OAuth refresh";var vbf=v(()=>{IXi();y5();Ke();ut();qr();Wy();hr()});var ojt={};dt(ojt,{stopPeriodicGrowthBookRefresh:()=>qPS,setupPeriodicGrowthBookRefresh:()=>jPS,setGrowthBookConfigOverride:()=>$PS,resetGrowthBook:()=>Gci,refreshGrowthBookFeatures:()=>aPa,refreshGrowthBookAfterAuthChange:()=>O9e,onGrowthBookRefresh:()=>jxe,isGrowthBookEnabled:()=>Mbr,isFeatureFromExperiment:()=>NPS,initializeGrowthBook:()=>RW,hasGrowthBookOverride:()=>l3s,hasGrowthBookEnvOverride:()=>LPS,hasFreshGrowthBookFeatures:()=>yqe,getUserAttributes:()=>sPa,getRefreshConfig:()=>wbf,getNonDefaultFeatureKeys:()=>Yys,getGrowthBookConfigOverrides:()=>FPS,getFeatureValue_DEPRECATED:()=>oti,getFeatureValue_CACHED_WITH_REFRESH:()=>Rpe,getFeatureValue_CACHED_MAY_BE_STALE:()=>rt,getFeatureValueWithSource_CACHED_MAY_BE_STALE:()=>adn,getDynamicConfig_CACHED_MAY_BE_STALE:()=>eF,getDynamicConfig_BLOCKS_ON_INIT:()=>_Ae,getClientDataAtis:()=>fIa,getApiBaseUrlHost:()=>Ebf,getAllGrowthBookFeatures:()=>Fsn,clearGrowthBookConfigOverrides:()=>BPS,checkSecurityRestrictionGate:()=>WEa,checkGate_CACHED_OR_BLOCKING:()=>nj,ATIS_REQUEST_HEADER:()=>pIa});function xK(){if(Z0t===null)Z0t=new iPa({isEnabled:()=>Mbr(),isDiskCacheReadableWhileDisabled:()=>UPS(),hasWorkspaceTrust:()=>MPS(),getAuthHeaders:()=>xBt(),refreshOAuthTokenIfNeeded:()=>i_(),getUserAttributes:()=>sPa(),rereadUserAttributes:()=>(jds(),Yje(),Cgo(),sPa()),readGlobalConfig:()=>Xt(),saveGlobalConfig:(e)=>{Fr(e)},readEnvironmentOverrides:()=>process.env.CLAUDE_INTERNAL_FC_OVERRIDES,logExposure:(e)=>RIa(e),fetchRemoteEvalFromSdk:HPS,getRefreshCadence:()=>wbf(),sleep:(e,t,r)=>Er(e,t,r)});return Z0t}function MPS(){return up()||v4e()||Pn()}function jxe(e){return xK().onRefresh(e)}function LPS(e){return xK().hasEnvironmentOverride(e)}function l3s(e){retu
