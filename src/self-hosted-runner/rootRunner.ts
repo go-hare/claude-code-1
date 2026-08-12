@@ -1628,6 +1628,24 @@ export async function runPollSkeleton(
                   if (slot) slot.liveBgTasks = n
                   drainNotify?.()
                 },
+                // densable 2.1.228 #7 `C` — bg-result follow-up hold keeps
+                // deferredHold so retire/idle release does not fire mid-gap.
+                // Release when follow-up is no longer busy, or childExited
+                // (densable br). Do NOT require liveBgTasks===0 for busy=false:
+                // a stale ledger after grace would stick deferredHold forever
+                // while the follow-up is already idle. liveBgTasks still gates
+                // retire via maybeReleaseAfterRetireWithBg separately.
+                onBgResultFollowUpBusy: (busy, childExited) => {
+                  if (busy) {
+                    deferredHold = true
+                    return
+                  }
+                  if (!deferredHold) return
+                  // busy=false or childExited → clear; ignore stale ledger.
+                  if (childExited === true || busy === false) {
+                    deferredHold = false
+                  }
+                },
                 onSessionTokenIssued: token => {
                   if (health && health.lockedAccountEmail === null) {
                     const email = extractSessionActorEmail(token)

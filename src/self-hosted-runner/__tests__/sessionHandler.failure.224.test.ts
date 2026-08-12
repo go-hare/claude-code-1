@@ -42,6 +42,23 @@ describe('densable 2.1.224 #1 sessionHandler failure helpers', () => {
     expect(isSourceRefNotFoundMessage('pathspec foo did not match')).toBe(true)
     expect(isSourceRefNotFoundMessage('random checkout error')).toBe(false)
   })
+
+  test('densable 2.1.228 #6 non-work checkout hook fail skip gold', () => {
+    expect(sessionHandlerSrc).toContain(
+      '[runner:warn] checkout hook failed for context source',
+    )
+    expect(sessionHandlerSrc).toContain(
+      'not a work repo (no push_targets entry), skipping it:',
+    )
+    expect(sessionHandlerSrc).toContain(
+      'its checkout hook failed; continuing without this context repo',
+    )
+    expect(sessionHandlerSrc).toContain('context_source_checkout_hook_failed')
+    // skip only when checkoutHookPath && !isWorkRepo && !signal.aborted
+    expect(sessionHandlerSrc).toContain(
+      'if (checkoutHookPath && !isWorkRepo && !signal.aborted)',
+    )
+  })
 })
 
 describe('densable 2.1.224 #1 sessionHandler auth remote re-fetch gold', () => {

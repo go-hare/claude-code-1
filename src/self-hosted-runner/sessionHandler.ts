@@ -157,6 +157,11 @@ export type HandleSessionOpts = {
   onSessionActivity?: SessionActivityHandler
   /** densable onBgTaskLedger — non-monitor live task count */
   onBgTaskLedger?: (liveNonMonitor: number) => void
+  /**
+   * densable 2.1.228 #7 `C` — bg-result → follow-up hold keeps session busy
+   * (rootRunner deferredHold) so retire/idle does not release mid-gap.
+   */
+  onBgResultFollowUpBusy?: (busy: boolean, childExited?: boolean) => void
   hooksDir?: string
   gitSshRewriteHosts?: string[]
   gitHostRewrites?: Array<[string, string]>
@@ -307,6 +312,8 @@ export type SpawnSessionChildOpts = {
   pushOutcomeOnRelease?: boolean
   onSessionActivity?: SessionActivityHandler
   onBgTaskLedger?: (liveNonMonitor: number) => void
+  /** densable 2.1.228 #7 follow-up hold busy latch */
+  onBgResultFollowUpBusy?: (busy: boolean, childExited?: boolean) => void
   onSessionStartHookError?: () => void
   /** densable `onChildInit` — system/init or SDKStartup marker latches */
   onInitObserved?: () => void
@@ -407,6 +414,9 @@ export async function spawnSessionChild(
       onSessionStartHookError: opts.onSessionStartHookError,
       onInitObserved: opts.onInitObserved,
       onDebug: opts.onDebug,
+      onStatus: opts.onStatus,
+      sessionId: opts.sessionId,
+      onBgResultFollowUpBusy: opts.onBgResultFollowUpBusy,
     })
   }
 
@@ -489,7 +499,18 @@ export async function spawnSessionChild(
       settled = true
       opts.signal.removeEventListener('abort', onAbort)
       if (lifetimeTimer) clearTimeout(lifetimeTimer)
-      disposeActivityPipeState(activityState)
+      // densable at("child exited", !1, !0) — drop follow-up hold on child exit
+      // via dispose so onBgResultFollowUpBusy(false, true) always fires once.
+      disposeActivityPipeState(
+        activityState,
+        {
+          onDebug: opts.onDebug,
+          onBgResultFollowUpBusy: opts.onBgResultFollowUpBusy,
+          sessionId: opts.sessionId,
+        },
+        'child exited',
+        true,
+      )
       resolve(result)
     }
 
@@ -1222,6 +1243,20 @@ export async function handleSession(
             exitBeforeInit(true)
             throw e
           }
+          // densable 2.1.228 #6 — checkout hook fail on non-work context repo
+          // (no push_targets): warn + skip instead of aborting the session.
+          if (checkoutHookPath && !isWorkRepo && !signal.aborted) {
+            onDebug(
+              `[runner:warn] checkout hook failed for context source ${src.repo} (context_source_checkout_hook_failed); not a work repo (no push_targets entry), skipping it: ${msg}`,
+            )
+            await postStep(
+              'clone',
+              'completed',
+              `Skipped ${src.repo} — its checkout hook failed; continuing without this context repo`,
+              { step_detail: src.repo },
+            )
+            continue
+          }
           if (checkoutHookPath) opts.onSessionStartHookError?.()
           exitBeforeInit(true)
           throw err
@@ -1776,6 +1811,7 @@ export async function handleSession(
         pushOutcomeOnRelease: opts.pushOutcomeOnRelease,
         onSessionActivity: opts.onSessionActivity,
         onBgTaskLedger: opts.onBgTaskLedger,
+        onBgResultFollowUpBusy: opts.onBgResultFollowUpBusy,
         onSessionStartHookError: opts.onSessionStartHookError,
         // densable onChildInit: Q=!0, _.({kind:"end", durationSec})
         onInitObserved: () => {
