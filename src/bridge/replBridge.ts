@@ -1771,6 +1771,8 @@ export async function initBridgeCore(
       // transport only; leave server session alive.
       if (skipNow) {
         // densable Kr: leave CXr so child/re-init can wXr (kEo only on full archive).
+        // Partial CXr (seq + grouping only) — bridgeSessionMeta merges prior
+        // noHistoryBackfill / owner* so same-process wXr keeps #5 suppress (C1).
         saveBridgeSessionMeta(currentSessionId, lastTransportSequenceNum, {
           groupingId: sessionGroupingId,
         })

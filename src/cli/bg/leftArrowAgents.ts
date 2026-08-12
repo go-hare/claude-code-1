@@ -33,8 +33,15 @@ import {
 } from '../../utils/sessionStorage.js'
 import { asSessionId } from '../../types/ids.js'
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
-import { clearBridgeSessionMeta } from '../../bridge/bridgeSessionMeta.js'
-import { getReplBridgeHandle } from '../../bridge/replBridgeHandle.js'
+import {
+  clearBridgeSessionMeta,
+  getPersistedBridgeSession,
+  type PersistedBridgeSession,
+} from '../../bridge/bridgeSessionMeta.js'
+import {
+  getReplBridgeHandle,
+  takeLeftArrowBridgeHandle,
+} from '../../bridge/replBridgeHandle.js'
 import {
   abandonCheckpointShells,
   buildAdoptWritePayload,
@@ -106,7 +113,125 @@ export type LeftArrowOpenOptions = {
 }
 
 /**
- * Official rit(session, seq, outboundOnly, grouping) → CLAUDE_BRIDGE_REATTACH_*.
+ * densable q5o(handle, ownerMeta) — owner identity + noHistoryBackfill for rit.
+ *
+ * When owner meta exists but its bridge id ≠ handle.bridgeSessionId, force
+ * noHistoryBackfill so a non-owner reattach cannot flush title/history into
+ * the connected RC session (2.1.228 #5). Owner uuids only pass through when
+ * the owner pointer matches the handle's bridge session.
+ */
+export type BridgeReattachOwnerMeta = {
+  ownerAccountUuid?: string
+  ownerOrganizationUuid?: string
+  noHistoryBackfill?: boolean
+}
+
+export type BridgeSessionOwnerPointer = {
+  id?: string
+  ownerAccountUuid?: string
+  ownerOrganizationUuid?: string
+  noHistoryBackfill?: boolean
+}
+
+export function resolveBridgeReattachOwnerMeta(
+  handle:
+    | {
+        bridgeSessionId?: string | null
+        noHistoryBackfill?: boolean
+      }
+    | null
+    | undefined,
+  owner: BridgeSessionOwnerPointer | null | undefined,
+): BridgeReattachOwnerMeta {
+  const ownerMatches =
+    owner !== undefined &&
+    owner !== null &&
+    owner.id !== undefined &&
+    owner.id === handle?.bridgeSessionId
+  return {
+    ownerAccountUuid: ownerMatches ? owner.ownerAccountUuid : undefined,
+    ownerOrganizationUuid: ownerMatches
+      ? owner.ownerOrganizationUuid
+      : undefined,
+    noHistoryBackfill:
+      handle?.noHistoryBackfill === true ||
+      (owner !== undefined && owner !== null && !ownerMatches
+        ? true
+        : owner?.noHistoryBackfill === true),
+  }
+}
+
+/**
+ * densable left-arrow reattach capture after REPL unmount.
+ *
+ * Live handle is preferred; when cleanup already nulled the global pointer,
+ * use the pre-unmount stashed handle (caller) and/or process meta from
+ * `getPersistedBridgeSession()` (host_exit cleanup stamps CXr before teardown).
+ * Never invent a bridge id when both are absent.
+ */
+export function resolveLeftArrowBridgeReattachCapture(
+  bridge:
+    | {
+        bridgeSessionId?: string | null
+        noHistoryBackfill?: boolean
+        outboundOnly?: boolean
+        sessionGroupingId?: string
+        getLastSequenceNum?: () => number
+        getSSESequenceNum?: () => number
+      }
+    | null
+    | undefined,
+  owner: PersistedBridgeSession | BridgeSessionOwnerPointer | null | undefined,
+): {
+  bridgeSessionId: string | undefined
+  seq: number | undefined
+  grouping: string | undefined
+  outboundOnly: boolean | undefined
+  ownerMeta: BridgeReattachOwnerMeta
+} {
+  const bridgeSessionId =
+    (bridge?.bridgeSessionId ? bridge.bridgeSessionId : undefined) ??
+    (owner && 'id' in owner && owner.id ? owner.id : undefined)
+  const seqFromBridge =
+    bridge?.getLastSequenceNum?.() ?? bridge?.getSSESequenceNum?.()
+  const seq =
+    typeof seqFromBridge === 'number'
+      ? seqFromBridge
+      : owner && 'seq' in owner && typeof owner.seq === 'number'
+        ? owner.seq
+        : undefined
+  const grouping =
+    bridge?.sessionGroupingId ??
+    (owner && 'groupingId' in owner ? owner.groupingId : undefined)
+  // Synthetic handle when live/stashed missing but process meta has id —
+  // so q5o ownerMatches can still pass OWNER_* (not force NO_BACKFILL).
+  const handleLike =
+    bridge != null && bridge.bridgeSessionId
+      ? {
+          bridgeSessionId: bridge.bridgeSessionId,
+          noHistoryBackfill: bridge.noHistoryBackfill,
+        }
+      : bridgeSessionId
+        ? {
+            bridgeSessionId,
+            noHistoryBackfill:
+              owner && 'noHistoryBackfill' in owner
+                ? owner.noHistoryBackfill
+                : undefined,
+          }
+        : null
+  return {
+    bridgeSessionId,
+    seq,
+    grouping,
+    outboundOnly: bridge?.outboundOnly,
+    ownerMeta: resolveBridgeReattachOwnerMeta(handleLike, owner),
+  }
+}
+
+/**
+ * densable EAt / official rit(session, seq, outboundOnly, grouping, ownerMeta)
+ * → CLAUDE_BRIDGE_REATTACH_*.
  */
 export function buildBridgeReattachEnv(
   bridgeSessionId: string | undefined | null,
@@ -114,6 +239,9 @@ export function buildBridgeReattachEnv(
     seq?: number
     outboundOnly?: boolean
     grouping?: string
+    ownerAccountUuid?: string
+    ownerOrganizationUuid?: string
+    noHistoryBackfill?: boolean
   },
 ): Record<string, string> | undefined {
   if (!bridgeSessionId) return undefined
@@ -125,6 +253,15 @@ export function buildBridgeReattachEnv(
   }
   if (opts?.grouping) {
     env.CLAUDE_BRIDGE_REATTACH_GROUPING = opts.grouping
+  }
+  if (opts?.ownerAccountUuid) {
+    env.CLAUDE_BRIDGE_REATTACH_OWNER_ACCT = opts.ownerAccountUuid
+  }
+  if (opts?.ownerOrganizationUuid) {
+    env.CLAUDE_BRIDGE_REATTACH_OWNER_ORG = opts.ownerOrganizationUuid
+  }
+  if (opts?.noHistoryBackfill) {
+    env.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL = '1'
   }
   // Official: outboundOnly defaults true when r !== false
   if (opts?.outboundOnly !== false) {
@@ -468,15 +605,19 @@ export async function openAgentsViaLeftArrow(
       }
     : undefined
 
-  // Capture bridge handle BEFORE teardown clears the global pointer.
-  const bridge = getReplBridgeHandle()
-  const bridgeSessionId = bridge?.bridgeSessionId
-  const seq =
-    bridge?.getLastSequenceNum?.() ?? bridge?.getSSESequenceNum?.() ?? undefined
+  // Live global may already be null (REPL unmount → useReplBridge host_exit).
+  // Prefer live, then pre-unmount stash, then process meta (CXr) for rit env.
+  const bridge = getReplBridgeHandle() ?? takeLeftArrowBridgeHandle()
+  const persisted = getPersistedBridgeSession()
+  const { bridgeSessionId, seq, grouping, outboundOnly, ownerMeta } =
+    resolveLeftArrowBridgeReattachCapture(bridge, persisted)
+  // densable q5o(S, sEe()) — owner mismatch forces NO_BACKFILL so child
+  // reattach cannot leak title/history into the connected RC session (#5).
   const reattachEnv = buildBridgeReattachEnv(bridgeSessionId, {
     seq,
-    outboundOnly: bridge?.outboundOnly,
-    grouping: bridge?.sessionGroupingId,
+    outboundOnly,
+    grouping,
+    ...ownerMeta,
   })
 
   let short: string
@@ -498,7 +639,10 @@ export async function openAgentsViaLeftArrow(
         : undefined,
       bridgeSessionSeq: seq,
       // densable hcn bridgeSessionGroupingId for rit n on worker respawn
-      bridgeSessionGroupingId: bridge?.sessionGroupingId,
+      bridgeSessionGroupingId: grouping,
+      bridgeOwnerAccountUuid: ownerMeta.ownerAccountUuid,
+      bridgeOwnerOrganizationUuid: ownerMeta.ownerOrganizationUuid,
+      bridgeNoHistoryBackfill: ownerMeta.noHistoryBackfill,
       sessionPermissionRules: options?.sessionPermissionRules,
       memoryToggledOff: options?.memoryToggledOff,
     }))
@@ -540,7 +684,9 @@ export async function openAgentsViaLeftArrow(
       via: options?.via,
       partialText: options?.partialText,
       boundaryUuid: options?.boundaryUuid,
-      bridgeActive: Boolean(bridge),
+      // Handle may be null after unmount; process-meta / stashed id still means
+      // RC is live and mid-turn prefill must stay off (same as densable bridge gate).
+      bridgeActive: Boolean(bridgeSessionId),
       agentsCount: options?.agentsCount ?? options?.checkpoint?.agents?.length,
     })
     const base = emptyCheckpointPayload()
@@ -617,8 +763,11 @@ export async function openAgentsViaLeftArrow(
     } catch {
       // ignore
     }
-    // densable useReplBridge Rt&&!Be → kEo: left-arrow child has rit env;
-    // drop process-local wXr so parent re-init cannot reattach the same Se.
+  }
+  // densable useReplBridge Rt&&!Be → kEo: left-arrow child has rit env;
+  // drop process-local wXr so parent re-init cannot reattach the same Se.
+  // Clear even when only process meta supplied the id (handle already null).
+  if (bridgeSessionId) {
     clearBridgeSessionMeta()
   }
 

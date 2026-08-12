@@ -816,9 +816,22 @@ export function useReplBridge(
           if (!outboundOnly) {
             const seq = handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0;
             const noHistoryBackfill = handle.noHistoryBackfill === true;
+            // densable CXr owner stamp for q5o OWNER_ACCT/ORG on handoff (#5).
+            let ownerAccountUuid: string | undefined;
+            let ownerOrganizationUuid: string | undefined;
+            try {
+              const { getOauthAccountInfo } = require('../utils/auth.js') as typeof import('../utils/auth.js');
+              const acct = getOauthAccountInfo();
+              ownerAccountUuid = acct?.accountUuid || undefined;
+              ownerOrganizationUuid = acct?.organizationUuid || undefined;
+            } catch {
+              /* optional */
+            }
             saveBridgeSessionMeta(handle.bridgeSessionId, seq, {
               groupingId: handle.sessionGroupingId,
               ...(noHistoryBackfill ? { noHistoryBackfill: true } : {}),
+              ...(ownerAccountUuid ? { ownerAccountUuid } : {}),
+              ...(ownerOrganizationUuid ? { ownerOrganizationUuid } : {}),
             });
             saveBridgeSession(
               getSessionId() as import('crypto').UUID,
@@ -976,12 +989,24 @@ export function useReplBridge(
               clearBridgeSession(getSessionId() as import('crypto').UUID);
               registerLiveSuppressionProbe(undefined);
             } else {
-              // densable CXr + Bkn: keep seq/grouping for re-init + resume.
+              // densable CXr + Bkn: keep seq/grouping/owner for re-init + resume.
               const seq = handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0;
               const noHistoryBackfill = handle.noHistoryBackfill === true;
+              let ownerAccountUuid: string | undefined;
+              let ownerOrganizationUuid: string | undefined;
+              try {
+                const { getOauthAccountInfo } = require('../utils/auth.js') as typeof import('../utils/auth.js');
+                const acct = getOauthAccountInfo();
+                ownerAccountUuid = acct?.accountUuid || undefined;
+                ownerOrganizationUuid = acct?.organizationUuid || undefined;
+              } catch {
+                /* optional */
+              }
               saveBridgeSessionMeta(handle.bridgeSessionId, seq, {
                 groupingId: handle.sessionGroupingId,
                 ...(noHistoryBackfill ? { noHistoryBackfill: true } : {}),
+                ...(ownerAccountUuid ? { ownerAccountUuid } : {}),
+                ...(ownerOrganizationUuid ? { ownerOrganizationUuid } : {}),
               });
               saveBridgeSession(
                 getSessionId() as import('crypto').UUID,

@@ -2507,7 +2507,7 @@ export class BgWorker {
   private async buildBridgeReattachEnvFromState(): Promise<
     Record<string, string> | undefined
   > {
-    // densable: rit(bridgeSessionId, bridgeSessionSeq, bridgeOutboundOnly, bridgeSessionGroupingId)
+    // densable EAt from job state — includes owner + noHistoryBackfill (q5o fields).
     const state = readBgJobState(this.dispatch.short)
     if (!state) return undefined
     return buildBridgeReattachEnv(
@@ -2515,6 +2515,11 @@ export class BgWorker {
       state.bridgeSessionSeq,
       state.bridgeOutboundOnly,
       state.bridgeSessionGroupingId,
+      {
+        ownerAccountUuid: state.bridgeOwnerAccountUuid,
+        ownerOrganizationUuid: state.bridgeOwnerOrganizationUuid,
+        noHistoryBackfill: state.bridgeNoHistoryBackfill,
+      },
     )
   }
 
@@ -2851,8 +2856,8 @@ export function buildWorkerEnv(
 // ---------------------------------------------------------------------------
 
 /**
- * densable rit(session, seq, outboundOnly, grouping) → CLAUDE_BRIDGE_REATTACH_*.
- * Must stay aligned with leftArrowAgents.buildBridgeReattachEnv.
+ * densable EAt(session, seq, outboundOnly, grouping, ownerMeta)
+ * → CLAUDE_BRIDGE_REATTACH_*. Must stay aligned with leftArrowAgents.
  * Exported for unit tests (worker respawn path).
  */
 export function buildBridgeReattachEnv(
@@ -2860,6 +2865,11 @@ export function buildBridgeReattachEnv(
   seq?: number,
   outboundOnly?: boolean,
   grouping?: string,
+  ownerMeta?: {
+    ownerAccountUuid?: string
+    ownerOrganizationUuid?: string
+    noHistoryBackfill?: boolean
+  },
 ): Record<string, string> | undefined {
   if (!sessionId) return undefined
   const env: Record<string, string> = {
@@ -2867,6 +2877,15 @@ export function buildBridgeReattachEnv(
   }
   if (seq !== undefined && seq > 0) env.CLAUDE_BRIDGE_REATTACH_SEQ = String(seq)
   if (grouping) env.CLAUDE_BRIDGE_REATTACH_GROUPING = grouping
+  if (ownerMeta?.ownerAccountUuid) {
+    env.CLAUDE_BRIDGE_REATTACH_OWNER_ACCT = ownerMeta.ownerAccountUuid
+  }
+  if (ownerMeta?.ownerOrganizationUuid) {
+    env.CLAUDE_BRIDGE_REATTACH_OWNER_ORG = ownerMeta.ownerOrganizationUuid
+  }
+  if (ownerMeta?.noHistoryBackfill) {
+    env.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL = '1'
+  }
   // densable: if (r !== !1) OUTBOUND_ONLY=1
   if (outboundOnly !== false) env.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY = '1'
   return env

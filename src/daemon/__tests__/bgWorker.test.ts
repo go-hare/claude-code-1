@@ -132,6 +132,21 @@ describe('buildBridgeReattachEnv densable rit()', () => {
       CLAUDE_BRIDGE_REATTACH_GROUPING: 'g',
       CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY: '1',
     })
+    expect(
+      buildBridgeReattachEnv('sid', 3, true, 'g', {
+        ownerAccountUuid: 'a',
+        ownerOrganizationUuid: 'o',
+        noHistoryBackfill: true,
+      }),
+    ).toEqual({
+      CLAUDE_BRIDGE_REATTACH_SESSION: 'sid',
+      CLAUDE_BRIDGE_REATTACH_SEQ: '3',
+      CLAUDE_BRIDGE_REATTACH_GROUPING: 'g',
+      CLAUDE_BRIDGE_REATTACH_OWNER_ACCT: 'a',
+      CLAUDE_BRIDGE_REATTACH_OWNER_ORG: 'o',
+      CLAUDE_BRIDGE_REATTACH_NO_BACKFILL: '1',
+      CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY: '1',
+    })
   })
 })
 

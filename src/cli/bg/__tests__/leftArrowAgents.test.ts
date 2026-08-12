@@ -216,6 +216,9 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
       getReplBridgeHandle: () => null,
+      takeLeftArrowBridgeHandle: () => null,
+      stashLeftArrowBridgeHandle: () => {},
+      resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
       ...realInstallPrompt,
@@ -266,6 +269,9 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
       getReplBridgeHandle: () => null,
+      takeLeftArrowBridgeHandle: () => null,
+      stashLeftArrowBridgeHandle: () => {},
+      resetLeftArrowBridgeHandleForTests: () => {},
     }))
     // If handoff proceeded it would call ensureDaemonRunning / write job —
     // these must not be reached without a session id.
@@ -308,6 +314,9 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
       getReplBridgeHandle: () => null,
+      takeLeftArrowBridgeHandle: () => null,
+      stashLeftArrowBridgeHandle: () => {},
+      resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
       ...realInstallPrompt,
@@ -387,6 +396,9 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
       getReplBridgeHandle: () => null,
+      takeLeftArrowBridgeHandle: () => null,
+      stashLeftArrowBridgeHandle: () => {},
+      resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
       ...realInstallPrompt,
@@ -508,6 +520,9 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
       getReplBridgeHandle: () => null,
+      takeLeftArrowBridgeHandle: () => null,
+      stashLeftArrowBridgeHandle: () => {},
+      resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
       ...realInstallPrompt,

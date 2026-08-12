@@ -15,6 +15,15 @@ import { toCompatSessionId } from './sessionIdCompat.js'
 
 let handle: ReplBridgeHandle | null = null
 
+/**
+ * densable left-arrow handoff: REPL unmount clears the global pointer via
+ * useReplBridge cleanup (`setReplBridgeHandle(null)` + host_exit teardown)
+ * *before* main runs `openAgentsViaLeftArrow`. Stash the live handle object
+ * so openAgents can still flush + `teardown({skipArchive:true})` and build
+ * `CLAUDE_BRIDGE_REATTACH_*` even when the global is already null.
+ */
+let leftArrowStashedHandle: ReplBridgeHandle | null = null
+
 export function setReplBridgeHandle(h: ReplBridgeHandle | null): void {
   handle = h
   // Publish (or clear) our bridge session ID in the session record so other
@@ -24,6 +33,25 @@ export function setReplBridgeHandle(h: ReplBridgeHandle | null): void {
 
 export function getReplBridgeHandle(): ReplBridgeHandle | null {
   return handle
+}
+
+/** Stash active handle before left-arrow unmount (take-once by openAgents). */
+export function stashLeftArrowBridgeHandle(
+  h: ReplBridgeHandle | null | undefined,
+): void {
+  leftArrowStashedHandle = h ?? null
+}
+
+/** Take-and-clear left-arrow stashed handle. */
+export function takeLeftArrowBridgeHandle(): ReplBridgeHandle | null {
+  const h = leftArrowStashedHandle
+  leftArrowStashedHandle = null
+  return h
+}
+
+/** Test helper. */
+export function resetLeftArrowBridgeHandleForTests(): void {
+  leftArrowStashedHandle = null
 }
 
 /**

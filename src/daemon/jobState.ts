@@ -79,6 +79,18 @@ export interface BgJobState {
    * Pattern in gold: /^sgrp_[A-Za-z0-9_]{1,128}$/
    */
   bridgeSessionGroupingId?: string
+  /**
+   * densable bridgeOwnerAccountUuid → CLAUDE_BRIDGE_REATTACH_OWNER_ACCT (EAt o).
+   */
+  bridgeOwnerAccountUuid?: string
+  /**
+   * densable bridgeOwnerOrganizationUuid → CLAUDE_BRIDGE_REATTACH_OWNER_ORG.
+   */
+  bridgeOwnerOrganizationUuid?: string
+  /**
+   * densable bridgeNoHistoryBackfill → CLAUDE_BRIDGE_REATTACH_NO_BACKFILL (2.1.228 #5).
+   */
+  bridgeNoHistoryBackfill?: boolean
   /** Backend that manages this job */
   backend?: 'daemon' | 'peer'
   /** PTY socket path */
@@ -431,6 +443,9 @@ export function createInitialJobState(opts: {
   bridgeOutboundOnly?: boolean
   bridgeSessionSeq?: number
   bridgeSessionGroupingId?: string
+  bridgeOwnerAccountUuid?: string
+  bridgeOwnerOrganizationUuid?: string
+  bridgeNoHistoryBackfill?: boolean
   /** Official hcn/aAf session permission allow/deny rules. */
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official hcn memoryToggledOff when auto-memory is off. */
@@ -477,6 +492,9 @@ export function createInitialJobState(opts: {
     bridgeOutboundOnly: opts.bridgeOutboundOnly,
     bridgeSessionSeq: opts.bridgeSessionSeq,
     bridgeSessionGroupingId: opts.bridgeSessionGroupingId,
+    bridgeOwnerAccountUuid: opts.bridgeOwnerAccountUuid,
+    bridgeOwnerOrganizationUuid: opts.bridgeOwnerOrganizationUuid,
+    bridgeNoHistoryBackfill: opts.bridgeNoHistoryBackfill,
     sessionPermissionRules: opts.sessionPermissionRules,
     memoryToggledOff: opts.memoryToggledOff,
     forkSourceAlive: opts.forkSourceAlive,
@@ -516,6 +534,11 @@ export function writeA8qJobState(opts: {
   bridgeSessionSeq?: number
   /** densable bridgeSessionGroupingId for rit GROUPING on respawn. */
   bridgeSessionGroupingId?: string
+  /** densable bridgeOwnerAccountUuid for EAt OWNER_ACCT on respawn. */
+  bridgeOwnerAccountUuid?: string
+  bridgeOwnerOrganizationUuid?: string
+  /** densable bridgeNoHistoryBackfill for EAt NO_BACKFILL (2.1.228 #5). */
+  bridgeNoHistoryBackfill?: boolean
   /** Official aAf → hcn sessionPermissionRules. */
   sessionPermissionRules?: { allow: string[]; deny: string[] }
   /** Official aAf → hcn memoryToggledOff. */
@@ -549,6 +572,9 @@ export function writeA8qJobState(opts: {
     bridgeOutboundOnly: opts.bridgeOutboundOnly,
     bridgeSessionSeq: opts.bridgeSessionSeq,
     bridgeSessionGroupingId: opts.bridgeSessionGroupingId,
+    bridgeOwnerAccountUuid: opts.bridgeOwnerAccountUuid,
+    bridgeOwnerOrganizationUuid: opts.bridgeOwnerOrganizationUuid,
+    bridgeNoHistoryBackfill: opts.bridgeNoHistoryBackfill,
     sessionPermissionRules: opts.sessionPermissionRules,
     memoryToggledOff: opts.memoryToggledOff,
     forkSourceAlive: opts.forkSourceAlive,

@@ -75,6 +75,26 @@ export async function postInterClaudeMessage(
     const from = toCompatSessionId(handle.bridgeSessionId)
     const baseUrl = handle.sessionIngressUrl
 
+    // densable 2.1.228 #13 — fbr(bridge:from, Soa()??name, body): wrap content so
+    // other-machine receivers show RC session name (selfTitle) as sender.
+    let fromName: string | undefined
+    try {
+      const { getSessionId } = await import('../bootstrap/state.js')
+      const { getCurrentSessionTitle } = await import(
+        '../utils/sessionStorage.js'
+      )
+      fromName = getCurrentSessionTitle(getSessionId())
+    } catch {
+      // optional
+    }
+    const { wrapCrossSessionMessage } = await import(
+      '../utils/crossSessionMessage.js'
+    )
+    const content = wrapCrossSessionMessage(message, {
+      from: `bridge:${from}`,
+      ...(fromName !== undefined ? { fromName } : {}),
+    })
+
     const url = `${baseUrl}/v1/sessions/${encodeURIComponent(compatTarget)}/messages`
 
     const response = await axios.post(
@@ -82,7 +102,7 @@ export async function postInterClaudeMessage(
       {
         type: 'peer_message',
         from,
-        content: message,
+        content,
       },
       {
         headers: {

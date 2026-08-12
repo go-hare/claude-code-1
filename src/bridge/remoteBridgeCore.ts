@@ -89,6 +89,7 @@ import type {
 import type { StdoutMessage } from '../entrypoints/sdk/controlTypes.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
 import { setSessionMetadataChangedListener } from '../utils/sessionState.js'
+import { generateShortWordSlug } from '../utils/words.js'
 
 /**
  * StdoutMessage with optional session_id. The transport layer accepts
@@ -178,6 +179,20 @@ export type EnvLessBridgeParams = {
    * so SSE resumes from the parent high-water mark (CLAUDE_BRIDGE_REATTACH_SEQ).
    */
   reattachSequenceNum?: number
+  /**
+   * densable noHistoryBackfill (ie from q5o / NO_BACKFILL env) — force skip of
+   * initial history flush + stamp handle/meta so title/history cannot leak into
+   * a connected RC session on non-owner / suppressed reattach (2.1.228 #5).
+   */
+  noHistoryBackfill?: boolean
+  /**
+   * densable mOp `neutralFallbackTitle:c` — when unarchive is `gone` and we mint
+   * a fresh server session, createCodeSession title is reset to this (or a new
+   * slug) so the resumed conversation title is not stamped onto the new remote
+   * session. densable: `Pe=c??\`${xAt()}-${Aet()}\``. Owner-mismatch mint in
+   * init keeps the caller-supplied title (same as densable).
+   */
+  neutralFallbackTitle?: string
 }
 
 /**
@@ -213,6 +228,8 @@ export async function initEnvLessBridgeCore(
     sessionGroupingId,
     reattachSessionId,
     reattachSequenceNum,
+    noHistoryBackfill: noHistoryBackfillOpt,
+    neutralFallbackTitle,
   } = params
 
   const cfg = await getEnvLessBridgeConfig()
@@ -233,7 +250,10 @@ export async function initEnvLessBridgeCore(
   // densable Ge: set when unarchive is gone and we mint a *new* server session.
   // flushHistory of local prior conversation into that fresh session is the
   // 2.1.224 #19 bug (old history appears on a newly minted remote session).
-  let skipInitialHistoryFlush = false
+  // densable 2.1.228 #5: q5o/NO_BACKFILL also forces Ge before connect.
+  let skipInitialHistoryFlush = noHistoryBackfillOpt === true
+  // densable Pe=n — createCodeSession title; reset to neutral on mint-after-gone.
+  let sessionTitle = title
   let sessionId: string
 
   async function mintFreshSession(): Promise<string | null> {
@@ -243,7 +263,7 @@ export async function initEnvLessBridgeCore(
           baseUrl,
           // Prefer a fresh token if the caller refreshed mid-flight.
           getAccessToken() ?? fallbackAccessToken,
-          title,
+          sessionTitle,
           cfg.http_timeout_ms,
           tags,
           sessionGroupingId,
@@ -286,6 +306,10 @@ export async function initEnvLessBridgeCore(
       // densable Ge=!0 *before* mint: new server session must not receive
       // prior local history via initialMessages flush (#19).
       skipInitialHistoryFlush = true
+      // densable Pe=c??`${xAt()}-${Aet()}` — drop resumed-derived title when
+      // the remote session is gone and we mint a new cse_* (#5 title path).
+      sessionTitle =
+        neutralFallbackTitle ?? `remote-control-${generateShortWordSlug()}`
       const minted = await mintFreshSession()
       if (!minted) {
         onStateChange?.('failed', 'Session creation failed — see debug log')
@@ -886,6 +910,8 @@ export async function initEnvLessBridgeCore(
     if (skipArchiveLatch) {
       try {
         const seq = transport.getLastSequenceNum()
+        // Partial CXr (seq + grouping) — merge retains noHistoryBackfill / owner
+        // stamped at connect so same-process wXr reattach keeps #5 suppress (C1).
         saveBridgeSessionMeta(sessionId, seq, {
           groupingId: sessionGroupingId,
         })
@@ -1011,13 +1037,26 @@ export async function initEnvLessBridgeCore(
   // densable CXr: seed process meta so re-init / wXr can reattach without
   // REATTACH env (same-process disable→enable). skipArchive leaves this set.
   const effectiveGrouping = sessionGroupingId
+  // densable CXr stamps owner uuids from live OAuth when available (sEe owner fields).
+  let ownerAccountUuid: string | undefined
+  let ownerOrganizationUuid: string | undefined
+  try {
+    const { getOauthAccountInfo } = await import('../utils/auth.js')
+    const acct = getOauthAccountInfo()
+    ownerAccountUuid = acct?.accountUuid || undefined
+    ownerOrganizationUuid = acct?.organizationUuid || undefined
+  } catch {
+    // optional
+  }
   saveBridgeSessionMeta(
     sessionId,
     isReattaching ? (reattachSequenceNum ?? 0) : 0,
     {
       groupingId: effectiveGrouping,
-      // densable 2.1.225 #7 — mint-after-gone carries history-backfill suppression.
+      // densable 2.1.225 #7 / 2.1.228 #5 — mint-after-gone + NO_BACKFILL.
       ...(skipInitialHistoryFlush ? { noHistoryBackfill: true } : {}),
+      ...(ownerAccountUuid ? { ownerAccountUuid } : {}),
+      ...(ownerOrganizationUuid ? { ownerOrganizationUuid } : {}),
     },
   )
 
@@ -1025,7 +1064,7 @@ export async function initEnvLessBridgeCore(
   // getLastSequenceNum, flush for left-arrow rit CLAUDE_BRIDGE_REATTACH_SEQ.
   // outboundOnly must be a boolean on the handle so left-arrow rit() sees
   // false (omit env) when unset — not undefined (local rit treated as true).
-  // densable noHistoryBackfill:a||tr — mint-after-gone sets Ge / skipInitialHistoryFlush.
+  // densable noHistoryBackfill:a||tr — mint-after-gone / q5o sets Ge.
   return {
     bridgeSessionId: sessionId,
     environmentId: '',
@@ -1033,7 +1072,7 @@ export async function initEnvLessBridgeCore(
     outboundOnly: outboundOnly ?? false,
     // densable He — pass-through from params / reattach bootstrap when present.
     sessionGroupingId: effectiveGrouping,
-    // densable 2.1.225 #7 — suppress compact-pair remote re-upload on mint-after-gone.
+    // densable 2.1.225 #7 / 2.1.228 #5 — suppress history flush + compact re-upload.
     noHistoryBackfill: skipInitialHistoryFlush || undefined,
     getLastSequenceNum() {
       return transport.getLastSequenceNum()

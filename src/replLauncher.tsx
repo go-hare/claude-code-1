@@ -75,6 +75,26 @@ export async function launchRepl(
             replyOnResume: payload?.replyOnResume,
             abortAfterFlush: payload?.abortAfterFlush,
           };
+          // densable left-arrow RC handoff: unmount runs useReplBridge cleanup
+          // which nulls the global handle and starts host_exit teardown *before*
+          // main → openAgentsViaLeftArrow. Stash the live handle and latch
+          // skipArchive so (1) openAgents can still build REATTACH_* / flush and
+          // (2) concurrent host_exit join does not archive the session the
+          // forked worker must reattach (2.1.228 #5 / densable To/Ks).
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { getReplBridgeHandle, stashLeftArrowBridgeHandle } =
+              require('./bridge/replBridgeHandle.js') as typeof import('./bridge/replBridgeHandle.js');
+            const bridge = getReplBridgeHandle();
+            if (bridge) {
+              stashLeftArrowBridgeHandle(bridge);
+              void bridge.teardown({ skipArchive: true }).catch(() => {
+                /* join/latch best-effort — openAgents will retry teardown */
+              });
+            }
+          } catch {
+            /* bridge module optional at this edge */
+          }
           // In normal mode: hand off alt screen / raw mode so unmount does NOT
           // write EXIT_ALT_SCREEN (or drop raw on Windows). Without this, ←
           // opens AgentsView via main-buffer flash then re-enter alt — broken paint.

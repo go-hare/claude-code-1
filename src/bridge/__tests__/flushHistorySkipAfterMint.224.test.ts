@@ -14,7 +14,10 @@ const core = readFileSync(corePath, 'utf8')
 
 describe('densable 2.1.224 #19 skipInitialHistoryFlush (Ge)', () => {
   test('declares skipInitialHistoryFlush and sets it on unarchive gone', () => {
-    expect(core).toContain('let skipInitialHistoryFlush = false')
+    // densable 2.1.228 #5: may seed from noHistoryBackfill opt (not only false)
+    expect(core).toMatch(
+      /let skipInitialHistoryFlush = (false|noHistoryBackfillOpt === true)/,
+    )
     expect(core).toContain('skipInitialHistoryFlush = true')
     // set before mint, not after
     const setIdx = core.indexOf('skipInitialHistoryFlush = true')
@@ -56,5 +59,19 @@ describe('densable 2.1.224 #19 skipInitialHistoryFlush (Ge)', () => {
     expect(core).toContain(
       'no initial\n  // history flush after mint-from-gone',
     )
+  })
+
+  test('mint-after-gone resets createCodeSession title to neutralFallback (densable Pe=c)', () => {
+    // densable: Pe=c??`${xAt()}-${Aet()}` before mint on unarchive gone
+    expect(core).toContain('neutralFallbackTitle')
+    expect(core).toContain('let sessionTitle = title')
+    const goneSlice = core.slice(
+      core.indexOf("outcome === 'gone'") - 40,
+      core.indexOf("outcome === 'gone'") + 1200,
+    )
+    expect(goneSlice).toContain('sessionTitle =')
+    expect(goneSlice).toContain('neutralFallbackTitle')
+    // createCodeSession must use sessionTitle (mutable), not raw title param
+    expect(core).toMatch(/createCodeSession\(\s*[\s\S]*?sessionTitle/)
   })
 })

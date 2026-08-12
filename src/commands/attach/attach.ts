@@ -38,8 +38,9 @@ export const call: LocalCommandCall = async (args, context) => {
     }
   }
 
-  // Resolve TCP endpoint for LAN peers
+  // Resolve TCP endpoint + shared secret for LAN peers
   let tcpEndpoint: TcpEndpoint | undefined
+  let authToken: string | undefined
   if (feature('LAN_PIPES')) {
     const pipeState = getPipeIpc(currentState)
     const discoveredPeer = pipeState.discoveredPipes.find(
@@ -51,9 +52,24 @@ export const call: LocalCommandCall = async (args, context) => {
         require('../../utils/lanBeacon.js') as typeof import('../../utils/lanBeacon.js')
       const beaconRef = getLanBeacon()
       if (beaconRef) {
+        const { resolveLanPeerAuthToken } =
+          require('../../utils/lanBeacon.js') as typeof import('../../utils/lanBeacon.js')
         const lanPeers = beaconRef.getPeers()
         const lanPeer = lanPeers.get(targetName)
         if (lanPeer) {
+          // Prefer pipeName (exact map hit); normalize host helpers used by
+          // SendMessage tcp: path share the same resolveLanPeerAuthToken.
+          authToken = resolveLanPeerAuthToken(lanPeers.values(), {
+            host: lanPeer.ip,
+            port: lanPeer.tcpPort,
+            pipeName: targetName,
+          })
+          if (!authToken) {
+            return {
+              type: 'text',
+              value: `Cannot attach to LAN peer "${targetName}": peer did not advertise an auth token (upgrade peer or use local UDS).`,
+            }
+          }
           tcpEndpoint = { host: lanPeer.ip, port: lanPeer.tcpPort }
         }
       }
@@ -65,7 +81,13 @@ export const call: LocalCommandCall = async (args, context) => {
   try {
     const myName =
       getPipeIpc(currentState).serverName ?? `master-${process.pid}`
-    client = await connectToPipe(targetName, myName, undefined, tcpEndpoint)
+    client = await connectToPipe(
+      targetName,
+      myName,
+      undefined,
+      tcpEndpoint,
+      authToken,
+    )
   } catch (err) {
     return {
       type: 'text',

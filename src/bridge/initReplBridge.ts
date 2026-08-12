@@ -155,17 +155,24 @@ export async function initReplBridge(
   } = options ?? {}
 
   // densable initReplBridge: consume CLAUDE_BRIDGE_REATTACH_* once at entry
-  // (W/q/j/B/V) so left-arrow child reattach cannot loop on re-init.
-  // Then densable wXr: if no explicit reattach, resume process-local CXr meta.
+  // (W/q/j/B/V + OWNER_ACCT/ORG/NO_BACKFILL) so left-arrow child reattach
+  // cannot loop on re-init. Then densable wXr: if no explicit reattach,
+  // resume process-local CXr meta.
   const envReattachSession = process.env.CLAUDE_BRIDGE_REATTACH_SESSION
   const envReattachSeq = process.env.CLAUDE_BRIDGE_REATTACH_SEQ
   const envReattachGrouping = process.env.CLAUDE_BRIDGE_REATTACH_GROUPING
   const envOutboundOnly = process.env.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY
+  const envOwnerAcct = process.env.CLAUDE_BRIDGE_REATTACH_OWNER_ACCT
+  const envOwnerOrg = process.env.CLAUDE_BRIDGE_REATTACH_OWNER_ORG
+  const envNoBackfill = process.env.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL
   if (envReattachSession) {
     delete process.env.CLAUDE_BRIDGE_REATTACH_SESSION
     delete process.env.CLAUDE_BRIDGE_REATTACH_SEQ
     delete process.env.CLAUDE_BRIDGE_REATTACH_OUTBOUND_ONLY
     delete process.env.CLAUDE_BRIDGE_REATTACH_GROUPING
+    delete process.env.CLAUDE_BRIDGE_REATTACH_OWNER_ACCT
+    delete process.env.CLAUDE_BRIDGE_REATTACH_OWNER_ORG
+    delete process.env.CLAUDE_BRIDGE_REATTACH_NO_BACKFILL
   }
   let reattachSessionId = envReattachSession ?? reattachSessionIdOpt
   let reattachSequenceNum = envReattachSession
@@ -173,15 +180,69 @@ export async function initReplBridge(
       ? Number.parseInt(envReattachSeq, 10) || undefined
       : undefined
     : reattachSequenceNumOpt
+  // densable ie — force skipInitialHistoryFlush (noHistoryBackfill) when env
+  // NO_BACKFILL or restored pointer carries the flag (2.1.228 #5).
+  let forceNoHistoryBackfill = false
   // densable: if (!q) { let Me=wXr(); if(Me) q=Me.id, V=Me.seq }
   if (!reattachSessionId) {
     const persisted = getPersistedBridgeSession()
     if (persisted) {
       reattachSessionId = persisted.id
       reattachSequenceNum = persisted.seq
+      if (persisted.noHistoryBackfill) forceNoHistoryBackfill = true
       logForDebugging(
         `[bridge:repl] Reattaching to persisted bridge session ${persisted.id} at seq ${persisted.seq}`,
       )
+    }
+  }
+  // densable env-handoff: NO_BACKFILL → force history suppression before
+  // unarchive/reuse (prevents title/history leak into connected RC session).
+  if (envReattachSession && isEnvTruthy(envNoBackfill)) {
+    forceNoHistoryBackfill = true
+  }
+  // densable env-handoff owner check (dBe): when OWNER_ACCT is present and the
+  // live OAuth account differs, drop reattach id and mint fresh with
+  // suppression. densable dBe also requires (live.org||undefined)===(handoff.org||undefined),
+  // which falsely vetoes when handoff only stamped OWNER_ACCT (no ORG) but live
+  // has an org. Product fix: if OWNER_ORG was recorded, both must match; if
+  // handoff omitted ORG, compare account only (missing org ≠ "must be empty").
+  if (envReattachSession && reattachSessionId && envOwnerAcct) {
+    try {
+      const { getOauthAccountInfo } = await import('../utils/auth.js')
+      const live = getOauthAccountInfo()
+      if (live?.accountUuid) {
+        const sameAcct = live.accountUuid === envOwnerAcct
+        const sameOrg =
+          envOwnerOrg === undefined || envOwnerOrg === ''
+            ? true
+            : (live.organizationUuid || undefined) === envOwnerOrg
+        if (!(sameAcct && sameOrg)) {
+          logForDebugging(
+            '[bridge:repl] Env-handoff reattach vetoed: the credential store account changed since the handoff was recorded — minting fresh, history channels suppressed',
+            { level: 'warn' },
+          )
+          reattachSessionId = undefined
+          reattachSequenceNum = undefined
+          forceNoHistoryBackfill = true
+        }
+      } else {
+        // densable: owner identity unavailable → reattach-or-fail (keep id)
+        logForDebugging(
+          '[bridge:repl] Env-handoff reattach: owner identity unavailable — reattach-or-fail',
+        )
+      }
+    } catch {
+      // best-effort — keep reattach id
+    }
+  }
+  // densable: if ae === sEe()?.id && sEe()?.noHistoryBackfill → ie
+  if (reattachSessionId) {
+    const liveMeta = getPersistedBridgeSession()
+    if (
+      liveMeta?.id === reattachSessionId &&
+      liveMeta.noHistoryBackfill === true
+    ) {
+      forceNoHistoryBackfill = true
     }
   }
   // densable Q: if (q) Q=W?B:wXr()?.groupingId; else Q=k
@@ -525,6 +586,7 @@ export async function initReplBridge(
       // Fresh sessions mint a new cse_* id (no previouslyFlushedUUIDs — the set
       // would block history across enable→disable→re-enable). Reattach skips
       // initial history flush the same way (server already has events).
+      // densable noHistoryBackfill:ie — q5o/NO_BACKFILL forces Ge skip (#5).
       onInboundMessage,
       onUserMessage,
       onPermissionResponse,
@@ -539,6 +601,11 @@ export async function initReplBridge(
       sessionGroupingId,
       reattachSessionId,
       reattachSequenceNum,
+      noHistoryBackfill: forceNoHistoryBackfill || undefined,
+      // densable mOp neutralFallbackTitle:jt — mint-after-gone drops derived
+      // title (Pe=c??slug). Precompute a neutral slug so resumed conversation
+      // title is not stamped onto the fresh remote session (#5).
+      neutralFallbackTitle: `remote-control-${generateShortWordSlug()}`,
     })
   }
 
