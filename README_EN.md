@@ -43,9 +43,22 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.221 → 2.1.222** product alignment (221 sandbox mask / PS quote-path / bareAssignmentNames + **222 every-session worktree isolation / streaming salvage / RC auto-start source limits / ULTRAPLAN product-off**, 21 rows). **Published npm version is whatever `package.json` says** (currently **2.7.36**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.222 → 2.1.228** product alignment (222 worktree/streaming/RC + **228 layout / Windows git / SHR / UDS / skills / Vertex / Write gate**, 18 rows). **Published npm version is whatever `package.json` says** (currently **2.7.37**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.222 alignment (2.7.36)
+#### densable 2.1.228 alignment (2.7.37)
+
+Source of truth: `docs/upstream-extraction/v2.1.228/official-228-checklist.md` (**HAVE 18 / GAP 0**), `changelog-2.1.228.md`, `cross-pack-residuals.md`. Stacked on **2.1.227** (223–227 already on git; this npm line closes through 228).
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **Ink / input** | layout fault immediate re-layout + reportLayoutFault*; **kTd** text whole-token SGR/X10 re-ESC only; incomplete CSI in tokenizer buffer / NORMAL_TIMEOUT flush | no pendingSgr/absorbMm/2-param KE empty invent; KE progressive sinks = local delta |
+| **Windows / SHR** | `uio` parent-of-Git where filter; checkout hook skip on non-push + warn; follow-up hold + `countNonMonitorTasks`; emit→clear densable order | no clear-first / re-arm idle invent |
+| **UDS / LAN / RC** | `key_publish_failed` hard-fail start + `CLAUDE_CODE_MESSAGING_TOKEN`; LAN TCP pre-auth + timing-safe compare; RC reattach owner meta / noHistoryBackfill; left-arrow stash bridge | no dual UDS token / pairing invent |
+| **skills / tools / cloud** | syncedSkills harden core (shadow/sanitize/no `!`/`@`); Write/Edit Jqy/MCt + l8t `errorCode:13` (validateInput+call); Vertex fail-fast + Bedrock GKd wiring; St mid-turn attachments | #12 **core only** (no full claude.ai ingest); #3 `/tui` Bxa `--model` pin only |
+| **other** | cleanup keeps memory; plugin symlink not orphaned; marketplace ssn whole-entry; title ◐/◑; auto-mode drop expensive sentence; cross-session from-name; local PR subscription store | **223 #3 teleport** invent-ban; **221 #12** DEP-HAVE (srt) |
+| **Feature defaults** | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** DEFAULT_BUILD **ON** | **ULTRAPLAN** still OFF; `tengu_ccr_bridge` not default true |
+
+#### densable 2.1.222 alignment (2.7.36, included)
 
 Source of truth: `docs/upstream-extraction/v2.1.222/official-222-checklist.md` (**HAVE 21 / GAP 0**), `changelog-2.1.222.md`. Stacked on **2.1.221**. **2.7.36** is a 222-line hotfix for the empty streaming `●` after collapsed tool groups (`hasContentAfter` drops invent `||streamingPreview`; whitespace / strip-empty does not paint XEl).
 
@@ -57,21 +70,21 @@ Source of truth: `docs/upstream-extraction/v2.1.222/official-222-checklist.md` (
 | **tools / cost / git** | MCP usage only when tools truly consumed; SendMessage summary truncate; tool-gone still rendered; post-push PR link; raw git diff `--no-textconv`/`--no-ext-diff`; agent family alias step-down | — |
 | **Feature defaults** | **ULTRAPLAN** product default OFF (`FEATURE_ULTRAPLAN=1` revives residual) | **UDS_INBOX / LAN_PIPES / TEAMMEM** ON since 2026-08-12; **KAIROS periphery** channels/push/webhook ON; **ULTRAPLAN** still OFF |
 
-#### densable 2.1.219–2.1.221 alignment (2.7.36, included)
+#### densable 2.1.219–2.1.221 alignment (2.7.37, included)
 
 Sources of truth:
 - `docs/upstream-extraction/v2.1.219/official-219-checklist.md` (**HAVE 24 / GAP 0**)
 - `docs/upstream-extraction/v2.1.220/official-220-checklist.md` (public 1-liner N/A + SEA residual **HAVE**)
 - `docs/upstream-extraction/v2.1.221/official-221-checklist.md` (**HAVE 35 / GAP 2 / N/A 2**)
 
-Stacked on **2.1.218**. **Do not invent GAPs**: #10 SDK MCP `constructor` name crash, #12 sandboxed large-upload TLS; #1 VSCode Focus view / #38 gateway model 400 are **N/A**.
+Stacked on **2.1.218**. **Historical snapshot** in older tables may still say GAP for #10/#12 — **current** status in checklist / `cross-pack-residuals.md`: **#10 HAVE** (API-request null-proto/hasOwn); **#12 DEP-HAVE** (sandbox-runtime, not CLI invent). #1 VSCode Focus / #38 gateway model 400 remain **N/A**.
 
 | Surface | Landed 1:1 | Intentionally out of scope |
 | ------- | ---------- | -------------------------- |
 | **2.1.219 models / caps** | Opus 5 catalog (EHl/ON) + 1M picker “Opus (1M context)”; nest depth default 3 (hazel_trellis); `workflowSizeGuideline`; stream-json nested `--forward-subagent-text`; Fable credits stale cache | — |
 | **2.1.219 permissions / hooks / UX** | `sandbox.network.strictAllowlist`; `DirectoryAdded` hook; init `mcp_server_errors`; GIT_BASH basename validate; Vim left-on-empty → agent view; SR suffix append; RC endpoint naming; MCP policy `${VAR}` | — |
 | **2.1.220 residual** | `isEntitlementOverlayUnavailable` / entitlement deny-set; `entitlement_blind` telemetry; blind opus-5 → opus-4-8 substitute | Official public has no per-bullet product list (N/A) |
-| **2.1.221 security / permissions** | sandbox credential `mode:"mask"`; zsh `[[ ]]` unquoted `&`; **PowerShell quote-path pWo fail-closed ask**; Bash U5e/cle full `bareAssignmentNames` (for danger set / declaration flags / Pws·uVu) + ZRu reads bare only | **#10 constructor** GAP; **#12 large-upload TLS** GAP |
+| **2.1.221 security / permissions** | sandbox credential `mode:"mask"`; zsh `[[ ]]` unquoted `&`; **PowerShell quote-path pWo fail-closed ask**; Bash U5e/cle full `bareAssignmentNames` (for danger set / declaration flags / Pws·uVu) + ZRu reads bare only; **#10 constructor API-request HAVE** | **#12 large-upload TLS** = **DEP-HAVE** (srt); do not invent CLI handler |
 | **2.1.221 session / plugins / UI** | prompt-audit; session title sanitize; Vim yank share / undo-to-empty; plugin install catalog refresh + reload clears notice; `/status` session kind; Stats cache breakdown; ultrareview no-branches; bg commit/draft-PR policy; Vertex ToolSearch native wire | **#1 VSCode Focus** N/A; **#38 gateway** N/A |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM** ON since 2026-08-12; **KAIROS periphery** channels/push/webhook ON; **ULTRAPLAN** still OFF |
 
@@ -152,12 +165,13 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.36)
+### Recent updates (2.7.5 → 2.7.37)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.37** | **densable 2.1.228 full 1:1 (18/18 HAVE)** + 223–227 included: Ink layout recover; kTd whole-token re-ESC + incomplete buffer; Windows `uio`; SHR checkout skip + follow-up hold; UDS `key_publish` fail-closed + LAN TCP auth; RC reattach owner / left-arrow; syncedSkills harden core; Write/Edit Jqy/MCt+l8t; Vertex fail-fast + Bedrock GKd; St mid-turn; cross-session from-name; cleanup memory / plugin symlink / marketplace ssn; `/tui` model pin; title ◐/◑; auto-mode drop expensive; DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS periphery ON**; 221 #10 null-proto + createSdkMcpServer. Residuals: `cross-pack-residuals.md` (teleport invent-ban). |
 | **2.7.36** | **Empty streaming `●` hotfix (densable 222 residual)**: `hasContentAfter` matches densable `y\|\|aem` (drop invent `\|\|streamingPreview`); whitespace / strip-empty does not paint XEl; `Qci` trim-empty clears `STREAM_FLAG_DISPLAYED`. Stops false past-tense “Ran N…” after collapsed tools + lone bullet before Cooking. |
-| **2.7.35** | **densable 2.1.222 full 1:1 (21/21 HAVE)** + 219–221 included: every-session worktree isolation; streaming UNf/WNf/Qci + salvage clear contract; RC `remoteControlAtStartup` source limits (flag/aliases); host model overlay; ULTRAPLAN product OFF; preflight proxy timeout; MCP usage attribution; SendMessage classifier/truncate; tool-gone display; post-push PR link; raw git diff; agent family step-down; SR EOL delete; file watcher teardown; etc. Includes 219 **24/24** / 220 residual / 221 **HAVE 35 / GAP 2 / N/A 2** (#10 constructor / #12 large-upload TLS still GAP). UDS/LAN/TEAMMEM default OFF. |
+| **2.7.35** | **densable 2.1.222 full 1:1 (21/21 HAVE)** + 219–221 included: every-session worktree isolation; streaming UNf/WNf/Qci + salvage clear contract; RC `remoteControlAtStartup` source limits (flag/aliases); host model overlay; ULTRAPLAN product OFF; preflight proxy timeout; MCP usage attribution; SendMessage classifier/truncate; tool-gone display; post-push PR link; raw git diff; agent family step-down; SR EOL delete; file watcher teardown; etc. Includes 219 **24/24** / 220 residual / 221 (ship-time snapshot **HAVE 35 / GAP 2 / N/A 2**; **later** #10→HAVE, #12→DEP-HAVE — see checklist / cross-pack-residuals). UDS/LAN/TEAMMEM were OFF at ship (later ON). |
 | **2.7.33** | **densable 2.1.218 full 1:1 (35 HAVE / 1 N/A / 0 GAP)**: code-review bg + ultra cloud; ultrareview descriptive/invalid args; SR a11y / Ctrl+J / left-arrow confirm / AgentView Esc; Host teardown + permissionLayers; auto-mode/sandbox IDE; fork lineage; Bedrock wizard; CCR heartbeat; frontmatter bool/`--config`/ban `:`; `/deep-research` manual-only; RC multi-env trust. **#9 gateway metering N/A**. Ship hardening: Ink skipSyncMarkers/unmount/alt-screen; Agent Views Esc no attach-origin black screen + O7 exit. UDS/LAN/TEAMMEM default OFF. |
 | **2.7.32** | **densable 2.1.217 full 1:1 (20/20 HAVE)**: concurrent subagents 20 / nest depth 1; brace budget; `FORCE_HYPERLINK`; emoji shortcode typeahead; tip lifetime 3; login 3d; transcript ENOSPC; MCP truncate; Opus 4.8 Bedrock 1M; SR startup quiet; managed OTEL; malformed attachment; attach footer gap; Win taskkill; bg isolation `eq`/`N6g`/`ZRu` bare+YPg (ZRu Shell.exec-only). **Intentionally stricter**: parse-unavailable fail-closed. UDS/LAN/TEAMMEM default OFF. |
 | **2.7.31** | **densable 2.1.215 + 2.1.216 closeout**: 215 `/verify`·`/code-review` no model auto-invoke (HAVE 2); 216 **HAVE 38 / N/A 1 / GAP 0** (`sandbox.filesystem.disabled`, long-session normalize, auto-mode 401, worktree git isolation, daemon stop --any, bg/agents UX, Win network paths, fullscreen UI, skill menu hot refresh, `/rewind` symlink safety, etc.). Intentionally off: UDS/LAN/TEAMMEM; VSCode RTL N/A. |

@@ -43,9 +43,22 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.221 → 2.1.222** 产品对齐（221 sandbox mask / PS 引号路径 / bareAssignmentNames 等 + **222 全会话 worktree 隔离 / streaming salvage / RC auto-start 源限制 / ULTRAPLAN 产品拆除** 等 21 条）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.36**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.222 → 2.1.228** 产品对齐（222 worktree/streaming/RC + **228 layout/Windows git/SHR/UDS/skills/Vertex/Write gate 等 18 条**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.37**），与 git tag 可能不同步。
 
-#### densable 2.1.222 对齐说明（2.7.36）
+#### densable 2.1.228 对齐说明（2.7.37）
+
+对照文档：`docs/upstream-extraction/v2.1.228/official-228-checklist.md`（**HAVE 18 / GAP 0**）、`changelog-2.1.228.md`、`cross-pack-residuals.md`。叠在 **2.1.227** 之上（中间 223–227 已并入 git；本 npm 线一次收口到 228）。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **Ink / 输入** | layout fault 立即 re-layout + reportLayoutFault*；**kTd** text 仅 whole-token SGR/X10 re-ESC；incomplete CSI 在 tokenizer buffer / NORMAL_TIMEOUT flush | 不 invent pendingSgr/absorbMm/2-param KE empty；KE progressive sinks = local delta |
+| **Windows / SHR** | `uio` parent-of-Git where 过滤；checkout hook 非 push 跳过 + warn；follow-up hold + `countNonMonitorTasks`；emit→clear densable 序 | 不 invent clear-first / re-arm idle |
+| **UDS / LAN / RC** | `key_publish_failed` 启动硬失败 + `CLAUDE_CODE_MESSAGING_TOKEN`；LAN TCP pre-auth + timing-safe；RC reattach owner meta / noHistoryBackfill；left-arrow stash bridge | 不 invent dual UDS token / pairing code |
+| **技能 / 工具 / 云** | syncedSkills harden core（shadow/sanitize/no `!`/`@`）；Write/Edit Jqy/MCt + l8t `errorCode:13`（validateInput+call）；Vertex fail-fast + Bedrock GKd 接线；St mid-turn attachments | #12 **core only**（无完整 claude.ai ingest）；#3 `/tui` 仅 Bxa `--model` pin |
+| **其它** | cleanup 保 memory；plugin symlink 不 orphan；marketplace ssn whole-entry；title ◐/◑；auto-mode 去掉 expensive 句；cross-session from-name；PR 本地订阅 store | **223 #3 teleport** invent-ban；**221 #12** DEP-HAVE（srt） |
+| **Feature 默认** | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** DEFAULT_BUILD **ON** | **ULTRAPLAN** 仍 OFF；`tengu_ccr_bridge` 不默认 true |
+
+#### densable 2.1.222 对齐说明（2.7.36，已并入）
 
 对照文档：`docs/upstream-extraction/v2.1.222/official-222-checklist.md`（**HAVE 21 / GAP 0**）、`changelog-2.1.222.md`。叠在 **2.1.221** 之上。**2.7.36** 在 222 发布线上修了 streaming residual：collapsed 工具组后的空 `●`（`hasContentAfter` 去掉 invent 的 `||streamingPreview`；whitespace / strip-empty 不画 XEl）。
 
@@ -57,7 +70,7 @@
 | **工具 / 成本 / git** | MCP 份额仅计真消费；SendMessage summary 截断；tool-gone 仍展示；post-push PR link；raw git diff `--no-textconv`/`--no-ext-diff`；agent 族别名 step-down | — |
 | **Feature 默认** | **ULTRAPLAN** 产品默认 OFF（`FEATURE_ULTRAPLAN=1` 可复活 residual） | **UDS_INBOX / LAN_PIPES / TEAMMEM** 默认 ON（2026-08-12）；**KAIROS 外围** channels/push/webhook 默认 ON；**ULTRAPLAN** 仍 OFF |
 
-#### densable 2.1.219–2.1.221 对齐说明（2.7.36，已并入）
+#### densable 2.1.219–2.1.221 对齐说明（2.7.37，已并入）
 
 对照文档：
 - `docs/upstream-extraction/v2.1.219/official-219-checklist.md`（**HAVE 24 / GAP 0**）
@@ -152,10 +165,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.36）
+### 近期更新（2.7.5 → 2.7.37）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.37** | **densable 2.1.228 全量 1:1（18/18 HAVE）** + 已并入 223–227：Ink layout recover；kTd whole-token re-ESC + incomplete buffer；Windows `uio`；SHR checkout skip + follow-up hold；UDS `key_publish` fail-closed + LAN TCP auth；RC reattach owner / left-arrow；syncedSkills harden core；Write/Edit Jqy/MCt+l8t；Vertex fail-fast + Bedrock GKd；St mid-turn；cross-session from-name；cleanup memory / plugin symlink / marketplace ssn；`/tui` model pin；title ◐/◑；auto-mode 去 expensive；DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS 外围 ON**；221 #10 null-proto + createSdkMcpServer。跨 pack 残差见 `cross-pack-residuals.md`（teleport invent-ban）。 |
 | **2.7.36** | **streaming 空 `●` hotfix（densable 222 residual）**：`hasContentAfter` 对齐 densable `y\|\|aem`（去掉 invent `\|\|streamingPreview`）；whitespace / strip-empty 不画 XEl；`Qci` trim-empty 清 `STREAM_FLAG_DISPLAYED`。避免 collapsed 工具组后假 past-tense「Ran N…」+ Cooking 前 lone bullet。 |
 | **2.7.35** | **densable 2.1.222 全量 1:1（21/21 HAVE）** + 已并入 219–221：全会话 worktree isolation；streaming UNf/WNf/Qci + salvage clear 契约；RC `remoteControlAtStartup` 源限制（flag/aliases）；host model overlay；ULTRAPLAN 产品 OFF；preflight proxy 超时；MCP 份额归因；SendMessage classifier/截断；tool-gone 展示；post-push PR link；raw git diff；agent 族 step-down；SR EOL 删除；file watcher teardown 等。并入 219 **24/24** / 220 residual / 221（发版时 snapshot **HAVE 35 / GAP 2 / N/A 2**；**之后** #10→HAVE、#12→DEP-HAVE，见 checklist / cross-pack-residuals，**勿当现状 GAP**）。UDS/LAN/TEAMMEM 发版时默认 OFF（后翻 ON）。 |
 | **2.7.33** | **densable 2.1.218 全量 1:1（35 HAVE / 1 N/A / 0 GAP）**：code-review bg + ultra cloud；ultrareview 描述/无效参数；SR a11y / Ctrl+J / ←确认 / AgentView Esc；Host teardown + permissionLayers；auto-mode/sandbox IDE；fork lineage；Bedrock wizard；CCR heartbeat；frontmatter 布尔/`--config`/禁 `:`；`/deep-research` 仅手动；RC multi-env trust。**#9 gateway metering N/A**。发版加固：Ink skipSyncMarkers/unmount/alt-screen；Agent Views Esc 不 attach-origin 黑屏 + O7 退出。UDS/LAN/TEAMMEM 默认 OFF。 |
