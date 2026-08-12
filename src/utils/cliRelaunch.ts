@@ -5,6 +5,7 @@
  * Densifies:
  * - env inject/drop for TUI switch (OLt)
  * - argv resolve: fresh vs `--resume <sessionId>` (PNe)
+ * - densable 2.1.228 Bxa model pin (`--model` from mainLoopModelOverride)
  * - optional spawnSync relaunch consumer
  * - multi-flush pre-exit densable (stdout/stderr best-effort)
  */
@@ -12,6 +13,113 @@
 import { spawnSync } from 'node:child_process'
 import { buildCliLaunch } from './cliLaunch.js'
 import { getScreenReaderChildEnv } from './screenReaderGate.js'
+
+/**
+ * densable Bxa — resolve live mainLoopModelOverride for /tui relaunch argv.
+ *
+ * Gold:
+ * ```
+ * function Bxa(){
+ *   let e=ZC(); // mainLoopModelOverride
+ *   if(e===void 0||Vn()==="mantle")return;
+ *   if(e===null)return"default";
+ *   if(!e)return;
+ *   if(N_t(as(e)))return; // deprecated remap / past retirement
+ *   if(Jje()?.fallbackModel===e)return; // refusal fallback latch
+ *   return e
+ * }
+ * ```
+ * cui then appends `...s!==void 0?["--model",s]:[]`.
+ */
+export type ResolveRelaunchModelArgDeps = {
+  getOverride?: () => string | null | undefined
+  getProvider?: () => string
+  getLatchFallbackModel?: () => string | undefined
+  /** densable N_t(as(e)) — true means skip pin. */
+  isDeprecatedResolved?: (resolvedModel: string) => boolean
+  /** densable as() — parse user-specified model before deprecation check. */
+  parseModel?: (raw: string) => string
+}
+
+export function resolveRelaunchModelArg(
+  deps: ResolveRelaunchModelArgDeps = {},
+): string | undefined {
+  const getOverride =
+    deps.getOverride ??
+    (() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getMainLoopModelOverride } =
+        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      return getMainLoopModelOverride() as string | null | undefined
+    })
+  const getProvider =
+    deps.getProvider ??
+    (() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getAPIProvider } =
+        require('./model/providers.js') as typeof import('./model/providers.js')
+      return getAPIProvider()
+    })
+  const getLatchFallbackModel =
+    deps.getLatchFallbackModel ??
+    (() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getRefusalFallbackModelLatch } =
+        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      return getRefusalFallbackModelLatch()?.fallbackModel
+    })
+  const parseModel =
+    deps.parseModel ??
+    ((raw: string) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { parseUserSpecifiedModel } =
+          require('./model/model.js') as typeof import('./model/model.js')
+        return parseUserSpecifiedModel(raw)
+      } catch {
+        return raw
+      }
+    })
+  const isDeprecatedResolved =
+    deps.isDeprecatedResolved ??
+    ((resolved: string) => {
+      try {
+        // Local deprecation table is retirement-oriented; non-null warning ≈
+        // densable N_t skip for remap / known-deprecated models.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getModelDeprecationWarning } =
+          require('./model/deprecation.js') as typeof import('./model/deprecation.js')
+        return getModelDeprecationWarning(resolved) !== null
+      } catch {
+        return false
+      }
+    })
+
+  const override = getOverride()
+  if (override === undefined || getProvider() === 'mantle') return undefined
+  if (override === null) return 'default'
+  if (!override) return undefined
+  const resolved = parseModel(override)
+  if (isDeprecatedResolved(resolved)) return undefined
+  if (getLatchFallbackModel() === override) return undefined
+  return override
+}
+
+/**
+ * densable cui fragment: append `--model <Bxa>` when resolved and not already
+ * present in extraArgs (caller may pass a fuller cui-like list later).
+ */
+export function mergeRelaunchModelArgs(
+  extraArgs?: readonly string[],
+  modelArg: string | undefined = resolveRelaunchModelArg(),
+): string[] {
+  const out = extraArgs ? [...extraArgs] : []
+  if (modelArg === undefined) return out
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] === '--model') return out
+  }
+  return [...out, '--model', modelArg]
+}
 
 /** Official dropEnv for TUI relaunchInto (OLt). */
 export const TUI_RELAUNCH_DROP_ENV = [
@@ -123,8 +231,11 @@ export function buildTuiRelaunchPlan(input: {
     // densable optional
   }
   const dropEnv = TUI_RELAUNCH_DROP_ENV
+  // densable 2.1.228 Bxa: pin live mainLoopModelOverride as --model so /tui
+  // relaunch does not revert to an earlier model after /model.
+  const extraArgs = mergeRelaunchModelArgs(input.extraArgs)
   const args = resolveRelaunchCliArgs({
-    extraArgs: input.extraArgs,
+    extraArgs,
     sessionId: input.sessionId,
     freshIfNoTranscript: true,
     hasNonEmptyTranscript: input.hasNonEmptyTranscript,

@@ -4047,9 +4047,11 @@ export async function saveCustomTitle(
     customTitle,
     sessionId,
   })
-  // Cache for current session only (for immediate visibility)
+  // Cache for current session only (for immediate visibility).
+  // densable: empty string clears (h||void 0 on tail); never leave "" so
+  // title chain `??` cannot produce "prefix + blank" in the terminal tab.
   if (sessionId === getSessionId()) {
-    getProject().currentSessionTitle = customTitle
+    getProject().currentSessionTitle = customTitle || undefined
   }
   logEvent('tengu_session_renamed', {
     source:
@@ -4563,7 +4565,8 @@ export function saveAgentSetting(agentSetting: string): void {
  * orphan metadata-only file is created before the session ID is finalized.
  */
 export function cacheSessionTitle(customTitle: string): void {
-  getProject().currentSessionTitle = customTitle
+  // densable SQt: empty clears so REPL title falls through to AI/product name.
+  getProject().currentSessionTitle = customTitle || undefined
 }
 
 /**

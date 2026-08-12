@@ -7,8 +7,10 @@ import {
   buildTuiRelaunchPlan,
   flushStreamsBeforeRelaunchExit,
   isTuiRelaunchSpawnEnabled,
+  mergeRelaunchModelArgs,
   RELAUNCH_ALWAYS_DROP_ENV,
   resolveRelaunchCliArgs,
+  resolveRelaunchModelArg,
   TUI_RELAUNCH_DROP_ENV,
 } from '../cliRelaunch.js'
 
@@ -74,14 +76,86 @@ describe('cliRelaunch densables', () => {
       sessionId: 'sid',
       hasNonEmptyTranscript: true,
       screenReaderEnv: {},
-      extraArgs: [],
+      // Pre-seed --model so Bxa merge is a no-op (stable vs process override).
+      extraArgs: ['--model', 'claude-sonnet-4-6'],
       terminalSize: { columns: 120, rows: 40 },
     })
-    expect(plan.args).toEqual(['--resume', 'sid'])
+    expect(plan.args).toEqual([
+      '--resume',
+      'sid',
+      '--model',
+      'claude-sonnet-4-6',
+    ])
     expect(plan.injectEnv.CLAUDE_CODE_TUI_JUST_SWITCHED).toBe('fullscreen')
     expect(plan.injectEnv.CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE).toBe('120x40')
     expect(plan.env.CLAUDE_CODE_NO_FLICKER).toBeUndefined()
     expect(plan.env.CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL).toBeUndefined()
+  })
+
+  test('resolveRelaunchModelArg densable Bxa cases', () => {
+    expect(
+      resolveRelaunchModelArg({
+        getOverride: () => undefined,
+        getProvider: () => 'firstParty',
+      }),
+    ).toBeUndefined()
+    expect(
+      resolveRelaunchModelArg({
+        getOverride: () => 'claude-opus-4-7',
+        getProvider: () => 'mantle',
+      }),
+    ).toBeUndefined()
+    expect(
+      resolveRelaunchModelArg({
+        getOverride: () => null,
+        getProvider: () => 'firstParty',
+      }),
+    ).toBe('default')
+    expect(
+      resolveRelaunchModelArg({
+        getOverride: () => '',
+        getProvider: () => 'firstParty',
+      }),
+    ).toBeUndefined()
+    expect(
+      resolveRelaunchModelArg({
+        getOverride: () => 'claude-opus-4-7',
+        getProvider: () => 'firstParty',
+        parseModel: m => m,
+        isDeprecatedResolved: () => true,
+      }),
+    ).toBeUndefined()
+    expect(
+      resolveRelaunchModelArg({
+        getOverride: () => 'fallback-model',
+        getProvider: () => 'firstParty',
+        parseModel: m => m,
+        isDeprecatedResolved: () => false,
+        getLatchFallbackModel: () => 'fallback-model',
+      }),
+    ).toBeUndefined()
+    expect(
+      resolveRelaunchModelArg({
+        getOverride: () => 'claude-opus-4-7',
+        getProvider: () => 'firstParty',
+        parseModel: m => m,
+        isDeprecatedResolved: () => false,
+        getLatchFallbackModel: () => undefined,
+      }),
+    ).toBe('claude-opus-4-7')
+  })
+
+  test('mergeRelaunchModelArgs appends --model when absent', () => {
+    expect(mergeRelaunchModelArgs([], 'claude-opus-4-7')).toEqual([
+      '--model',
+      'claude-opus-4-7',
+    ])
+    expect(
+      mergeRelaunchModelArgs(['--verbose', '--model', 'keep'], 'new'),
+    ).toEqual(['--verbose', '--model', 'keep'])
+    expect(mergeRelaunchModelArgs(['--verbose'], undefined)).toEqual([
+      '--verbose',
+    ])
   })
 
   test('acceptTuiRelaunch inject_only densable', () => {

@@ -334,6 +334,7 @@ import {
   removeTranscriptMessage,
   restoreSessionMetadata,
   getCurrentSessionTitle,
+  getCurrentSessionAiTitle,
   isEphemeralToolProgress,
   isLoggableMessage,
   saveWorktreeState,
@@ -481,7 +482,7 @@ import { SandboxPermissionRequest } from 'src/components/permissions/SandboxPerm
 import { SandboxViolationExpandedView } from 'src/components/SandboxViolationExpandedView.js';
 import { useSettingsErrors } from 'src/hooks/notifs/useSettingsErrors.js';
 import { useMcpConnectivityStatus } from 'src/hooks/notifs/useMcpConnectivityStatus.js';
-import { AUTO_MODE_DESCRIPTION } from 'src/components/AutoModeOptInDialog.js';
+import { getAutoModeDescription } from 'src/components/AutoModeOptInDialog.js';
 import { useLspInitializationNotification } from 'src/hooks/notifs/useLspInitializationNotification.js';
 import { useLspPluginRecommendation } from 'src/hooks/useLspPluginRecommendation.js';
 import { LspRecommendationMenu } from 'src/components/LspRecommendation/LspRecommendationMenu.js';
@@ -794,7 +795,9 @@ function TranscriptSearchBar({
   );
 }
 
-const TITLE_ANIMATION_FRAMES = ['⠂', '⠐'];
+// densable 2.1.228 #16: szi=["◐","◑"] (was 227 nUi=["⠂","⠐"]).
+// Circle half-blocks reduce tab-bar glyph width jitter vs braille dots on some terminals.
+const TITLE_ANIMATION_FRAMES = ['◐', '◑'];
 const TITLE_STATIC_PREFIX = '✳';
 const TITLE_ANIMATION_INTERVAL_MS = 960;
 
@@ -1719,18 +1722,22 @@ export function REPL({
   const sandboxBridgeCleanupRef = useRef<Map<string, Array<() => void>>>(new Map());
 
   // -- Terminal title management
-  // Session title (set via /rename or restored on resume) wins over
-  // the agent name, which wins over the Haiku-extracted topic;
-  // all fall back to the product name.
+  // densable gu=yy??Ol??ui??sc??"Claude Code":
+  // user custom title → AI title cache → agent name → Haiku one-shot → product.
+  // Empty string must not win over fallbacks (?? only skips null/undefined) —
+  // otherwise title becomes "◐ " / "✳ " (prefix + blank), the "小黑点+后面空白".
   const terminalTitleFromRename = useAppState(s => s.settings.terminalTitleFromRename) !== false;
-  const sessionTitle = terminalTitleFromRename ? getCurrentSessionTitle(getSessionId()) : undefined;
+  const sessionTitleRaw = terminalTitleFromRename ? getCurrentSessionTitle(getSessionId()) : undefined;
+  const sessionTitle = sessionTitleRaw && sessionTitleRaw.trim() !== '' ? sessionTitleRaw : undefined;
+  const sessionAiTitleRaw = getCurrentSessionAiTitle(getSessionId());
+  const sessionAiTitle = sessionAiTitleRaw && sessionAiTitleRaw.trim() !== '' ? sessionAiTitleRaw : undefined;
   const [haikuTitle, setHaikuTitle] = useState<string>();
   // Gates the one-shot Haiku call that generates the tab title. Seeded true
   // on resume (initialMessages present) so we don't re-title a resumed
   // session from mid-conversation context.
   const haikuTitleAttemptedRef = useRef((initialMessages?.length ?? 0) > 0);
   const agentTitle = mainThreadAgentDefinition?.agentType;
-  const terminalTitle = sessionTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
+  const terminalTitle = sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
   const isWaitingForApproval =
     toolUseConfirmQueue.length > 0 || promptQueue.length > 0 || pendingWorkerRequest || pendingSandboxRequest;
   // Local-jsx commands (like /plugin, /config) show user-facing dialogs that
@@ -2739,7 +2746,7 @@ export function REPL({
               autoPermissionsNotificationCount: prevCount + 1,
             };
           });
-          setMessages(prev => [...prev, createSystemMessage(AUTO_MODE_DESCRIPTION, 'warning')]);
+          setMessages(prev => [...prev, createSystemMessage(getAutoModeDescription(), 'warning')]);
         },
         800,
         safeYoloMessageShownRef,

@@ -133,13 +133,47 @@ export function isTuiBounceToDefault(
   return target === 'default' && isTuiJustSwitchedFromFullscreen()
 }
 
-function enableTui(): LocalCommandResult {
+/**
+ * densable bsr/OVe residual after /tui setting save — inject TUI_JUST_SWITCHED
+ * and (when SPAWN_TUI_RELAUNCH) process-relaunch with Bxa `--model` pin so a
+ * prior /model override is not lost.
+ */
+async function applyTuiRelaunchAfterSwitch(
+  target: 'fullscreen' | 'default',
+): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { acceptTuiRelaunch } =
+      require('../../utils/cliRelaunch.js') as typeof import('../../utils/cliRelaunch.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSessionId } =
+      require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { transcriptHasBytes } =
+      require('../../utils/sessionStorage.js') as typeof import('../../utils/sessionStorage.js')
+    const hasNonEmptyTranscript = await transcriptHasBytes()
+    const result = acceptTuiRelaunch({
+      target,
+      sessionId: getSessionId(),
+      hasNonEmptyTranscript,
+      screenReaderEnv: {},
+    })
+    if (result.mode === 'spawned' && result.spawn.ok) {
+      process.exit(result.spawn.status ?? 0)
+    }
+  } catch {
+    // densable optional — marker/settings already persisted
+  }
+}
+
+async function enableTui(): Promise<LocalCommandResult> {
   const markerPath = getTuiMarkerPath()
   mkdirSync(getClaudeConfigHomeDir(), { recursive: true })
   writeFileSync(markerPath, new Date().toISOString(), 'utf8')
   const settingsResult = persistTuiSettings('fullscreen')
   // Densable residual: mark intended renderer for next process (official injects on relaunch).
   Object.assign(process.env, buildTuiJustSwitchedEnv('fullscreen'))
+  await applyTuiRelaunchAfterSwitch('fullscreen')
   return {
     type: 'text',
     value: [
@@ -163,7 +197,7 @@ function enableTui(): LocalCommandResult {
   }
 }
 
-function disableTui(): LocalCommandResult {
+async function disableTui(): Promise<LocalCommandResult> {
   const markerPath = getTuiMarkerPath()
   const hadMarker = existsSync(markerPath)
   const hadOptOut = isTuiOptedOut()
@@ -182,6 +216,7 @@ function disableTui(): LocalCommandResult {
   // Official bounce: env was fullscreen and target is default.
   const bounce = isTuiBounceToDefault('default')
   Object.assign(process.env, buildTuiJustSwitchedEnv('default'))
+  await applyTuiRelaunchAfterSwitch('default')
   return {
     type: 'text',
     value: [
@@ -251,12 +286,12 @@ export async function callTui(args: string): Promise<LocalCommandResult> {
 
   // ── on ───────────────────────────────────────────────────────────────
   if (sub === 'on') {
-    return enableTui()
+    return await enableTui()
   }
 
   // ── off ──────────────────────────────────────────────────────────────
   if (sub === 'off') {
-    return disableTui()
+    return await disableTui()
   }
 
   // ── toggle ───────────────────────────────────────────────────────────
@@ -264,13 +299,13 @@ export async function callTui(args: string): Promise<LocalCommandResult> {
   // user has opted in; toggle on when settings.tui=default.
   if (sub === '' || sub === 'toggle') {
     if (isTuiOptedOut()) {
-      return enableTui()
+      return await enableTui()
     }
     // Opted in via marker/settings, or default-on with no preference → off.
     if (isTuiOptedIn() || isFullscreenEnvEnabled()) {
-      return disableTui()
+      return await disableTui()
     }
-    return enableTui()
+    return await enableTui()
   }
 
   // ── unknown subcommand ───────────────────────────────────────────────
