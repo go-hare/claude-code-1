@@ -3,7 +3,7 @@ import { getModeFromInput } from 'src/components/PromptInput/inputModes.js';
 import { useNotifications } from 'src/context/notifications.js';
 import { ConfigurableShortcutHint } from '../components/ConfigurableShortcutHint.js';
 import { FOOTER_TEMPORARY_STATUS_TIMEOUT } from '../components/PromptInput/Notifications.js';
-import { getHistory } from '../history.js';
+import { getHistory, renumberHistoryEntryPastes } from '../history.js';
 import { Text } from '@anthropic/ink';
 import type { PromptInputMode } from '../types/textInputTypes.js';
 import type { HistoryEntry, PastedContent } from '../utils/config.js';
@@ -121,10 +121,15 @@ export function useArrowKeyHistory(
     (input: HistoryEntry | undefined, cursorToStart = false): void => {
       if (!input || !input.display) return;
 
-      const mode = getModeFromInput(input.display);
-      const value = mode === 'bash' ? input.display.slice(1) : input.display;
+      // densable f6e (#27): renumber recalled paste ids before accepting into input
+      const renumbered = renumberHistoryEntryPastes({
+        display: input.display,
+        pastedContents: input.pastedContents ?? {},
+      });
+      const mode = getModeFromInput(renumbered.display);
+      const value = mode === 'bash' ? renumbered.display.slice(1) : renumbered.display;
 
-      setInputWithCursor(value, mode, input.pastedContents ?? {}, cursorToStart);
+      setInputWithCursor(value, mode, renumbered.pastedContents, cursorToStart);
     },
     [setInputWithCursor],
   );

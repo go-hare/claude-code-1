@@ -4,7 +4,11 @@ import {
   getModeFromInput,
   getValueFromInput,
 } from '../components/PromptInput/inputModes.js'
-import { makeHistoryReader } from '../history.js'
+import {
+  historyPasteIdentityKey,
+  makeHistoryReader,
+  renumberHistoryEntryPastes,
+} from '../history.js'
 import type { KeyboardEvent } from '@anthropic/ink'
 import { useKeybinding, useKeybindings } from '../keybindings/useKeybinding.js'
 import type { PromptInputMode } from '../types/textInputTypes.js'
@@ -109,10 +113,15 @@ export function useHistorySearch(
         }
 
         const display = item.value.display
+        // densable Jqs: dedup by paste identity (dead/hash/inline), not display alone
+        const identity = historyPasteIdentityKey(
+          display,
+          item.value.pastedContents,
+        )
 
         const matchPosition = display.lastIndexOf(historyQuery)
-        if (matchPosition !== -1 && !seenPrompts.current.has(display)) {
-          seenPrompts.current.add(display)
+        if (matchPosition !== -1 && !seenPrompts.current.has(identity)) {
+          seenPrompts.current.add(identity)
           setHistoryMatch(item.value)
           setHistoryFailedMatch(false)
           const mode = getModeFromInput(display)
@@ -170,11 +179,16 @@ export function useHistorySearch(
   // Handler: Accept current match and exit search
   const handleAccept = useCallback(() => {
     if (historyMatch) {
-      const mode = getModeFromInput(historyMatch.display)
-      const value = getValueFromInput(historyMatch.display)
+      // densable f6e (#27): renumber on accept into live input
+      const renumbered = renumberHistoryEntryPastes({
+        display: historyMatch.display,
+        pastedContents: historyMatch.pastedContents,
+      })
+      const mode = getModeFromInput(renumbered.display)
+      const value = getValueFromInput(renumbered.display)
       onInputChange(value)
       onModeChange(mode)
-      setPastedContents(historyMatch.pastedContents)
+      setPastedContents(renumbered.pastedContents)
     } else {
       // No match - restore original pasted contents
       setPastedContents(originalPastedContents)
@@ -213,12 +227,17 @@ export function useHistorySearch(
         pastedContents: originalPastedContents,
       })
     } else if (historyMatch) {
-      const mode = getModeFromInput(historyMatch.display)
-      const value = getValueFromInput(historyMatch.display)
+      // densable f6e (#27): renumber before submit-accept path
+      const renumbered = renumberHistoryEntryPastes({
+        display: historyMatch.display,
+        pastedContents: historyMatch.pastedContents,
+      })
+      const mode = getModeFromInput(renumbered.display)
+      const value = getValueFromInput(renumbered.display)
       onModeChange(mode)
       onAcceptHistory({
         display: value,
-        pastedContents: historyMatch.pastedContents,
+        pastedContents: renumbered.pastedContents,
       })
     }
     reset()

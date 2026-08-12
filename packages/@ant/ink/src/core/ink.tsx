@@ -1508,6 +1508,33 @@ export default class Ink {
   }
 
   /**
+   * Full-damage repaint without erasing the alt buffer.
+   *
+   * Hosts may wipe the alt buffer while we are backgrounded without
+   * DECXCPR row=1 (probe only on iTerm/Apple). densable still avoids
+   * forceRedraw on focus (erase → black screen risk); this only dirties
+   * the prev frame and paints immediately.
+   *
+   * Throttled: FOCUS_IN thrash / double-delivery must not spin full paints.
+   * Callers: every FOCUS_IN, and stdin-gap reassert (focus events often drop).
+   */
+  private lastSoftRepaintAt = 0;
+  repaintAfterFocus(): void {
+    if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) {
+      return;
+    }
+    const now = performance.now();
+    // 80ms ≈ one frame budget; coalesces burst FOCUS_IN without delaying recovery
+    if (now - this.lastSoftRepaintAt < 80) {
+      this.prevFrameContaminated = true;
+      return;
+    }
+    this.lastSoftRepaintAt = now;
+    this.prevFrameContaminated = true;
+    this.onRender();
+  }
+
+  /**
    * Called by the <AlternateScreen> component on mount/unmount.
    * Controls cursor.y clamping in the renderer and gates alt-screen-aware
    * behavior in SIGCONT/resize/unmount handlers. Repaints on change so
@@ -1626,7 +1653,13 @@ export default class Ink {
     // have a strong signal the terminal actually dropped mode 1049.
     if (includeAltScreen) {
       this.reenterAltScreen();
+      return;
     }
+    // Soft recover wiped alt buffer after long stdin silence (app-switch /
+    // tmux attach without FOCUS_IN). Full-damage only — no erase. Footer
+    // timers alone would otherwise repaint only dirty footer cells while
+    // main stays blank (diff thinks main cells are already painted).
+    this.repaintAfterFocus();
   };
 
   /**

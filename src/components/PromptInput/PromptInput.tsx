@@ -24,7 +24,14 @@ import { getNativeCSIuTerminalDisplayName } from '../../commands/terminalSetup/t
 import { type Command, hasCommand } from '../../commands.js';
 import { useIsModalOverlayActive } from '../../context/overlayContext.js';
 import { useSetPromptOverlayDialog } from '../../context/promptOverlayContext.js';
-import { formatImageRef, formatPastedTextRef, getPastedTextRefNumLines, parseReferences } from '../../history.js';
+import {
+  formatImageRef,
+  formatPastedTextRef,
+  getPastedTextRefNumLines,
+  parseReferences,
+  renumberHistoryEntryPastes,
+  seedPasteIdCounter,
+} from '../../history.js';
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
 import { type HistoryMode, useArrowKeyHistory } from '../../hooks/useArrowKeyHistory.js';
 import { useBackgroundAgentTasks } from '../../hooks/useBackgroundAgentTasks.js';
@@ -482,6 +489,7 @@ function PromptInput({
     handleKeyDown: historyKeyDown,
   } = useHistorySearch(
     entry => {
+      // densable f6e (#27) already applied by useHistorySearch accept/execute;
       // Dual-write before same-tick onSubmit — parent prop has not re-rendered yet.
       setPastedContents(entry.pastedContents);
       pastedContentsRef.current = entry.pastedContents;
@@ -506,6 +514,9 @@ function PromptInput({
   const nextPasteIdRef = useRef(-1);
   if (nextPasteIdRef.current === -1) {
     nextPasteIdRef.current = getInitialPasteId(messages);
+    // densable p6e/zG: keep session allocator above resume max so f6e renumbers
+    // do not collide with live nextPasteIdRef minting.
+    seedPasteIdCounter(nextPasteIdRef.current);
   }
   // Armed by onImagePaste; if the very next keystroke is a non-space
   // printable, inputFilter prepends a space before it. Any other input
@@ -1372,7 +1383,15 @@ function PromptInput({
             clearBuffer();
             resetHistory();
             return;
-          } else if (!result.success && (result as { error: string }).error === 'no_team_context') {
+          } else if (!result.success && result.error === 'mailbox_write_failed') {
+            addNotification({
+              key: 'direct-message-failed',
+              text: `Failed to write to @${result.recipientName}'s inbox`,
+              priority: 'immediate',
+              timeoutMs: 4000,
+            });
+            return;
+          } else if (!result.success && result.error === 'no_team_context') {
             // No team context - fall through to normal prompt submission
           } else {
             // Unknown recipient - fall through to normal prompt submission
@@ -2622,12 +2641,17 @@ function PromptInput({
       <HistorySearchDialog
         initialQuery={input}
         onSelect={entry => {
-          const entryMode = getModeFromInput(entry.display);
-          const value = getValueFromInput(entry.display);
+          // densable f6e (#27): renumber recalled paste placeholders on accept
+          const renumbered = renumberHistoryEntryPastes({
+            display: entry.display,
+            pastedContents: entry.pastedContents,
+          });
+          const entryMode = getModeFromInput(renumbered.display);
+          const value = getValueFromInput(renumbered.display);
           onModeChange(entryMode);
           trackAndSetInput(value);
-          setPastedContents(entry.pastedContents);
-          pastedContentsRef.current = entry.pastedContents;
+          setPastedContents(renumbered.pastedContents);
+          pastedContentsRef.current = renumbered.pastedContents;
           setCursorOffset(value.length);
           setShowHistoryPicker(false);
         }}

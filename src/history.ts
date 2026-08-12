@@ -22,6 +22,7 @@ const MAX_PASTED_CONTENT_LENGTH = 1024
 
 /**
  * Stored paste content - either inline content or a hash reference to paste store.
+ * densable: contentHash used by Jqs history identity when inline content is absent.
  */
 type StoredPastedContent = {
   id: number
@@ -37,6 +38,7 @@ type StoredPastedContent = {
  * pasted content. The references look like:
  *   Text: [Pasted text #1 +10 lines]
  *   Image: [Image #2]
+ *   Audio: [Audio #3]  (densable BA; reserved)
  * The numbers are expected to be unique within a single prompt but not across
  * prompts. We choose numeric, auto-incrementing IDs as they are more
  * user-friendly than other ID options.
@@ -60,11 +62,15 @@ export function formatImageRef(id: number): string {
   return `[Image #${id}]`
 }
 
+/**
+ * densable BA — parse paste placeholders including Audio (reserved) + Truncated.
+ */
 export function parseReferences(
   input: string,
 ): Array<{ id: number; match: string; index: number }> {
+  if (!input) return []
   const referencePattern =
-    /\[(Pasted text|Image|\.\.\.Truncated text) #(\d+)(?: \+\d+ lines)?(\.)*\]/g
+    /\[(Pasted text|Image|Audio|\.\.\.Truncated text) #(\d+)(?: \+\d+ lines)?(\.)*\]/g
   const matches = [...input.matchAll(referencePattern)]
   return matches
     .map(match => ({
@@ -76,7 +82,7 @@ export function parseReferences(
 }
 
 /**
- * Replace [Pasted text #N] placeholders in input with their actual content.
+ * densable d6e — expand text paste placeholders; skip unavailable / non-text.
  * Image refs are left alone — they become content blocks, not inlined text.
  */
 export function expandPastedTextRefs(
@@ -91,13 +97,261 @@ export function expandPastedTextRefs(
   for (let i = refs.length - 1; i >= 0; i--) {
     const ref = refs[i]!
     const content = pastedContents[ref.id]
-    if (content?.type !== 'text') continue
+    if (content?.type !== 'text' || content.unavailable) continue
     expanded =
       expanded.slice(0, ref.index) +
       content.content +
       expanded.slice(ref.index + ref.match.length)
   }
   return expanded
+}
+
+/** densable mLd removed entry — label is "Pasted text" | "Truncated text". */
+export type UnavailablePastedRef = {
+  id: number
+  label: 'Pasted text' | 'Truncated text'
+}
+
+/**
+ * densable mLd — strip unavailable non-image paste refs; expand available text.
+ * Returns stripped (placeholders removed), expanded (text inlined), and removed.
+ */
+export function processPastedRefs(
+  input: string,
+  pastedContents: Record<number, PastedContent>,
+): {
+  stripped: string
+  expanded: string
+  removed: UnavailablePastedRef[]
+} {
+  const refs = parseReferences(input)
+  const removed: UnavailablePastedRef[] = []
+  let stripped = input
+  let expanded = input
+  const splice = (s: string, index: number, matchLen: number, insert: string) =>
+    s.slice(0, index) + insert + s.slice(index + matchLen)
+
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i]!
+    const content = pastedContents[ref.id]
+    if (!ref.match.startsWith('[Image') && content?.unavailable === true) {
+      stripped = splice(stripped, ref.index, ref.match.length, '')
+      expanded = splice(expanded, ref.index, ref.match.length, '')
+      removed.unshift({
+        id: ref.id,
+        label: ref.match.startsWith('[...Truncated text')
+          ? 'Truncated text'
+          : 'Pasted text',
+      })
+    } else if (content?.type === 'text' && !content.unavailable) {
+      expanded = splice(expanded, ref.index, ref.match.length, content.content)
+    }
+  }
+  return { stripped, expanded, removed }
+}
+
+/** densable vPy / hLd — submit-facing strip of unavailable paste refs. */
+export function stripUnavailablePastedRefs(
+  input: string,
+  pastedContents: Record<number, PastedContent>,
+): { input: string; removed: UnavailablePastedRef[] } {
+  const { stripped, removed } = processPastedRefs(input, pastedContents)
+  return { input: stripped, removed }
+}
+
+/**
+ * densable gLd — user-facing notification when unavailable pastes are stripped.
+ * Unique labels via Set (densable So).
+ */
+export function formatUnavailablePastedRefsMessage(
+  removed: UnavailablePastedRef[],
+): string {
+  const labels = [...new Set(removed.map(r => `${r.label} #${r.id}`))]
+  const joined = labels.join(', ')
+  return labels.length === 1
+    ? `${joined} is no longer available and was removed from the prompt`
+    : `${joined} are no longer available and were removed from the prompt`
+}
+
+/**
+ * densable Jqs — history dedup key: mask #id → #_ + content identity
+ * (dead / hash:… / inline:… / literal:id).
+ */
+export function historyPasteIdentityKey(
+  display: string,
+  pastedContents?: Record<
+    number,
+    { unavailable?: boolean; contentHash?: string; content?: string }
+  >,
+): string {
+  const refs = parseReferences(display)
+  if (refs.length === 0) return display
+  let masked = display
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i]!
+    masked =
+      masked.slice(0, ref.index) +
+      ref.match.replace(`#${ref.id}`, '#_') +
+      masked.slice(ref.index + ref.match.length)
+  }
+  const identities = refs.map(ref => {
+    const entry = pastedContents?.[ref.id]
+    if (!entry) return `literal:${ref.id}`
+    if (entry.unavailable) return 'dead'
+    if (entry.contentHash !== undefined) return `hash:${entry.contentHash}`
+    return `inline:${entry.content ?? ''}`
+  })
+  return `${masked}\0${identities.join('\x01')}`
+}
+
+// --- densable p6e / zG / f6e paste-id allocator + renumber (#27) ---
+
+/** densable vLd — floor for next when counter overflows valid range. */
+const PASTE_ID_EPOCH_FLOOR = 2147483648
+
+/** densable Dvr — valid paste id: integer in (0, 2^32). */
+export function isValidPasteId(id: number): boolean {
+  return Number.isInteger(id) && id > 0 && id < 4294967296
+}
+
+const pasteIdState = {
+  next: 1,
+  minted: new Set<number>(),
+}
+
+/** densable I$o — bump next past a seen id (session-floor ids only). */
+export function notePasteId(id: number): void {
+  if (
+    isValidPasteId(id) &&
+    id < PASTE_ID_EPOCH_FLOOR &&
+    id >= pasteIdState.next
+  ) {
+    pasteIdState.next = id + 1
+  }
+}
+
+/** densable f6t — note all paste ref ids in text. */
+export function notePasteIdsFromText(text: string): void {
+  for (const ref of parseReferences(text)) {
+    notePasteId(ref.id)
+  }
+}
+
+/**
+ * densable zG — mint a fresh paste id, optionally noting display + contents first.
+ */
+export function mintPasteId(
+  display?: string,
+  pastedContents?: Record<number, unknown>,
+): number {
+  if (display) notePasteIdsFromText(display)
+  if (pastedContents) {
+    for (const key of Object.keys(pastedContents)) {
+      notePasteId(Number(key))
+    }
+  }
+  if (!isValidPasteId(pasteIdState.next)) {
+    pasteIdState.next = PASTE_ID_EPOCH_FLOOR
+  }
+  const id = pasteIdState.next++
+  pasteIdState.minted.add(id)
+  return id
+}
+
+/** Seed allocator from resume max (local getInitialPasteId). */
+export function seedPasteIdCounter(nextId: number): void {
+  if (isValidPasteId(nextId) && nextId > pasteIdState.next) {
+    pasteIdState.next = nextId
+  }
+}
+
+/** Test / session reset helper. */
+export function resetPasteIdAllocatorForTests(): void {
+  pasteIdState.next = 1
+  pasteIdState.minted.clear()
+}
+
+/** densable HPy — match placeholder kind to content type. */
+function pasteRefMatchesType(
+  match: string,
+  type: PastedContent['type'] | string,
+): boolean {
+  switch (type) {
+    case 'text':
+      return (
+        match.startsWith('[Pasted text') ||
+        match.startsWith('[...Truncated text')
+      )
+    case 'image':
+      return match.startsWith('[Image')
+    case 'audio':
+      return match.startsWith('[Audio')
+    default:
+      return false
+  }
+}
+
+/**
+ * densable Zqs — rewrite `#oldId` → `#newId` for matching type refs only.
+ */
+export function renumberPasteRefInDisplay(
+  display: string,
+  oldId: number,
+  newId: number,
+  type: PastedContent['type'] | string,
+): string {
+  const refs = parseReferences(display).filter(
+    r => r.id === oldId && pasteRefMatchesType(r.match, type),
+  )
+  let out = display
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i]!
+    out =
+      out.slice(0, ref.index) +
+      ref.match.replace(`#${oldId}`, `#${newId}`) +
+      out.slice(ref.index + ref.match.length)
+  }
+  return out
+}
+
+/**
+ * densable f6e — renumber recalled history paste ids to avoid collisions
+ * with live input / session-minted ids (#27).
+ */
+export function renumberHistoryEntryPastes(entry: {
+  display: string
+  pastedContents?: Record<number, PastedContent>
+}): {
+  display: string
+  pastedContents: Record<number, PastedContent>
+} {
+  const contents = entry.pastedContents ?? {}
+  const entries = Object.entries(contents)
+  const keep: Record<number, PastedContent> = {}
+  const toRenumber: Array<[number, PastedContent]> = []
+
+  for (const [key, content] of entries) {
+    const id = Number(key)
+    // densable: invalid ids or session-minted keep as-is
+    if (!isValidPasteId(id) || pasteIdState.minted.has(id)) {
+      keep[id] = content
+      continue
+    }
+    toRenumber.push([id, content])
+  }
+
+  if (toRenumber.length === 0) {
+    return { display: entry.display, pastedContents: contents }
+  }
+
+  let display = entry.display
+  toRenumber.sort((a, b) => a[0] - b[0])
+  for (const [oldId, content] of toRenumber) {
+    const newId = mintPasteId(display, contents)
+    display = renumberPasteRefInDisplay(display, oldId, newId, content.type)
+    keep[newId] = { ...content, id: newId }
+  }
+  return { display, pastedContents: keep }
 }
 
 function deserializeLogEntry(line: string): LogEntry {
@@ -165,13 +419,18 @@ export type TimestampedHistoryEntry = {
  */
 export async function* getTimestampedHistory(): AsyncGenerator<TimestampedHistoryEntry> {
   const currentProject = getProjectRoot()
+  // densable: Jqs identity so dead/hash/inline pastes don't false-dedup
   const seen = new Set<string>()
 
   for await (const entry of makeLogEntryReader()) {
     if (!entry || typeof entry.project !== 'string') continue
     if (entry.project !== currentProject) continue
-    if (seen.has(entry.display)) continue
-    seen.add(entry.display)
+    const identity = historyPasteIdentityKey(
+      entry.display,
+      entry.pastedContents,
+    )
+    if (seen.has(identity)) continue
+    seen.add(identity)
 
     yield {
       display: entry.display,
@@ -230,6 +489,7 @@ type LogEntry = {
 
 /**
  * Resolve stored paste content to full PastedContent by fetching from paste store if needed.
+ * densable APy — null when content is gone (caller marks unavailable).
  */
 async function resolveStoredPastedContent(
   stored: StoredPastedContent,
@@ -264,7 +524,9 @@ async function resolveStoredPastedContent(
 }
 
 /**
- * Convert LogEntry to HistoryEntry by resolving paste store references.
+ * densable w$o — convert LogEntry → HistoryEntry.
+ * Missing paste store content is kept as unavailable (not dropped) so #3/#14
+ * can strip/notify instead of silently losing placeholders.
  */
 async function logEntryToHistoryEntry(entry: LogEntry): Promise<HistoryEntry> {
   const pastedContents: Record<number, PastedContent> = {}
@@ -273,6 +535,21 @@ async function logEntryToHistoryEntry(entry: LogEntry): Promise<HistoryEntry> {
     const resolved = await resolveStoredPastedContent(stored)
     if (resolved) {
       pastedContents[Number(id)] = resolved
+    } else {
+      // densable: always keep slot; RPy telemetry only for text miss
+      if (stored.type === 'text') {
+        logForDebugging(
+          `paste_store_content_lost hash=${stored.contentHash ?? 'missing-hash'}`,
+        )
+      }
+      pastedContents[Number(id)] = {
+        id: stored.id,
+        type: stored.type,
+        content: '',
+        unavailable: true,
+        mediaType: stored.mediaType,
+        filename: stored.filename,
+      }
     }
   }
 

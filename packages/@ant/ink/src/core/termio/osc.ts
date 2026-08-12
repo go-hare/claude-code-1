@@ -3,34 +3,175 @@
  */
 
 import { Buffer } from 'buffer'
-import { execFile as nodeExecFile } from 'child_process'
+import { spawn } from 'child_process'
+import { readFileSync } from 'fs'
 import { BEL, ESC, ESC_TYPE, SEP } from './ansi.js'
 
-/** Promise-based wrapper around child_process.execFile */
+/**
+ * densable yn / lo — fire-and-capture subprocess without throwing.
+ *
+ * Uses spawn (not execFile) so stdout/stderr:'ignore' is real (Node execFile
+ * has no effective stdio option; densable yn→execa passes stdout/stderr).
+ * Timeout via SIGKILL when exceeded.
+ */
 function execFileNoThrow(
   command: string,
   args: string[],
-  options: { input?: string; useCwd?: boolean; timeout?: number } = {},
+  options: {
+    input?: string
+    useCwd?: boolean
+    timeout?: number
+    /** densable yn opts for wl-copy dual-write — discard child stdio */
+    stdout?: 'ignore' | 'pipe'
+    stderr?: 'ignore' | 'pipe'
+  } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise(resolve => {
-    const { input, timeout } = options
-    const proc = nodeExecFile(
-      command,
-      args,
-      { timeout },
-      (error, stdout, stderr) => {
-        resolve({
-          code: error ? 1 : 0,
-          stdout: stdout ?? '',
-          stderr: stderr ?? '',
-        })
-      },
-    )
-    if (input && proc.stdin) {
+    const {
+      input,
+      timeout = 2000,
+      stdout = 'pipe',
+      stderr = 'pipe',
+      useCwd,
+    } = options
+    const proc = spawn(command, args, {
+      stdio: [
+        input !== undefined ? 'pipe' : 'ignore',
+        stdout === 'ignore' ? 'ignore' : 'pipe',
+        stderr === 'ignore' ? 'ignore' : 'pipe',
+      ],
+      // densable yn useCwd — only pin cwd when callers opt in
+      ...(useCwd ? { cwd: process.cwd() } : {}),
+    })
+    let out = ''
+    let err = ''
+    let settled = false
+    const finish = (code: number) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ code, stdout: out, stderr: err })
+    }
+    const timer = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL')
+      } catch {
+        // ignore
+      }
+      finish(1)
+    }, timeout)
+    if (proc.stdout) {
+      proc.stdout.on('data', (chunk: Buffer | string) => {
+        out += typeof chunk === 'string' ? chunk : chunk.toString()
+      })
+    }
+    if (proc.stderr) {
+      proc.stderr.on('data', (chunk: Buffer | string) => {
+        err += typeof chunk === 'string' ? chunk : chunk.toString()
+      })
+    }
+    proc.on('error', () => finish(1))
+    proc.on('close', code => finish(code ?? 1))
+    if (input !== undefined && proc.stdin) {
       proc.stdin.write(input)
       proc.stdin.end()
     }
   })
+}
+
+/**
+ * densable `xsc` / `Ob` — truthy if binary is on PATH.
+ * Prefer Bun.which when present; fall back to `which` for Node.
+ */
+async function commandOnPath(bin: string): Promise<boolean> {
+  const bunWhich = (
+    globalThis as { Bun?: { which?: (c: string) => string | null } }
+  ).Bun?.which
+  if (typeof bunWhich === 'function') {
+    return Boolean(bunWhich(bin))
+  }
+  const { code } = await execFileNoThrow('which', [bin], { timeout: 2000 })
+  return code === 0
+}
+
+/**
+ * densable `Wt` / local `src/utils/platform.ts` `getPlatform` — clipboard
+ * dispatch platform. Ink cannot import `src/*`; keep the densable algorithm
+ * here (darwin→macos, win32→windows, linux+/proc/version microsoft|wsl→wsl).
+ * Test override: `process.env.__CLAUDE_INK_PLATFORM_TEST__`.
+ */
+type ClipboardHostPlatform = 'macos' | 'windows' | 'wsl' | 'linux' | 'unknown'
+
+let clipboardHostPlatformCache: ClipboardHostPlatform | undefined
+
+function getClipboardHostPlatform(): ClipboardHostPlatform {
+  const testOverride = process.env['__CLAUDE_INK_PLATFORM_TEST__']
+  if (
+    testOverride === 'macos' ||
+    testOverride === 'windows' ||
+    testOverride === 'wsl' ||
+    testOverride === 'linux' ||
+    testOverride === 'unknown'
+  ) {
+    return testOverride
+  }
+  if (clipboardHostPlatformCache !== undefined) {
+    return clipboardHostPlatformCache
+  }
+  try {
+    if (process.platform === 'darwin') {
+      clipboardHostPlatformCache = 'macos'
+      return clipboardHostPlatformCache
+    }
+    if (process.platform === 'win32') {
+      clipboardHostPlatformCache = 'windows'
+      return clipboardHostPlatformCache
+    }
+    if (process.platform === 'linux') {
+      try {
+        // densable Esc + local getPlatform: /proc/version microsoft|wsl → wsl
+        const procVersion = readFileSync('/proc/version', {
+          encoding: 'utf8',
+        }).toLowerCase()
+        if (procVersion.includes('microsoft') || procVersion.includes('wsl')) {
+          clipboardHostPlatformCache = 'wsl'
+          return clipboardHostPlatformCache
+        }
+      } catch {
+        // not WSL / unreadable — fall through to linux
+      }
+      clipboardHostPlatformCache = 'linux'
+      return clipboardHostPlatformCache
+    }
+    clipboardHostPlatformCache = 'unknown'
+    return clipboardHostPlatformCache
+  } catch {
+    clipboardHostPlatformCache = 'unknown'
+    return clipboardHostPlatformCache
+  }
+}
+
+/** densable O3u — UTF-8 stdin → Set-Clipboard (windows + wsl) */
+const POWERSHELL_SET_CLIPBOARD =
+  '[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())'
+
+/** densable OB_ — UTF-8 stdout ← Get-Clipboard -Raw (windows + wsl) */
+const POWERSHELL_GET_CLIPBOARD =
+  '[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipboard -Raw'
+
+/** densable Wsn — SSH session: skip native clipboard (OSC 52 only) */
+function isSshSession(): boolean {
+  return Boolean(process.env['SSH_CONNECTION'])
+}
+
+/** @internal test-only — clear densable Wt cache for clipboard host */
+export function _resetClipboardHostPlatformCache(): void {
+  clipboardHostPlatformCache = undefined
+}
+
+/** @internal test-only densable Wt snapshot for clipboard */
+export function _getClipboardHostPlatform(): ClipboardHostPlatform {
+  return getClipboardHostPlatform()
 }
 import type { Action, Color, TabStatusAction } from './types.js'
 
@@ -73,7 +214,8 @@ export function wrapForMultiplexer(sequence: string): string {
  * Which path setClipboard() will take, based on env state. Synchronous so
  * callers can show an honest toast without awaiting the copy itself.
  *
- * - 'native': pbcopy (or equivalent) will run — high-confidence system
+ * - 'native': densable L3u native utility will run (pbcopy / powershell /
+ *   powershell.exe / wl-copy|xclip|xsel dual-write) — high-confidence system
  *   clipboard write. tmux buffer may also be loaded as a bonus.
  * - 'tmux-buffer': tmux load-buffer will run, but no native tool — paste
  *   with prefix+] works. System clipboard depends on tmux's set-clipboard
@@ -81,16 +223,26 @@ export function wrapForMultiplexer(sequence: string): string {
  * - 'osc52': only the raw OSC 52 sequence will be written to stdout.
  *   Best-effort; iTerm2 disables OSC 52 by default.
  *
- * pbcopy gating uses SSH_CONNECTION specifically, not SSH_TTY — tmux panes
- * inherit SSH_TTY forever even after local reattach, but SSH_CONNECTION is
- * in tmux's default update-environment set and gets cleared.
+ * Native gating uses densable Wt() host (not darwin-only) and SSH_CONNECTION
+ * specifically, not SSH_TTY — tmux panes inherit SSH_TTY forever even after
+ * local reattach, but SSH_CONNECTION is in tmux's default update-environment
+ * set and gets cleared. Must stay in sync with copyNative / setClipboard.
  */
 export type ClipboardPath = 'native' | 'tmux-buffer' | 'osc52'
 
 export function getClipboardPath(): ClipboardPath {
-  const nativeAvailable =
-    process.platform === 'darwin' && !process.env['SSH_CONNECTION']
-  if (nativeAvailable) return 'native'
+  // densable L3u runs when !SSH and Wt() ∈ {macos,windows,wsl,linux}
+  if (!process.env['SSH_CONNECTION']) {
+    const host = getClipboardHostPlatform()
+    if (
+      host === 'macos' ||
+      host === 'windows' ||
+      host === 'wsl' ||
+      host === 'linux'
+    ) {
+      return 'native'
+    }
+  }
   if (process.env['TMUX']) return 'tmux-buffer'
   return 'osc52'
 }
@@ -218,70 +370,186 @@ export async function setClipboard(text: string): Promise<string> {
   return raw
 }
 
-// Linux clipboard tool: undefined = not yet probed, null = none available.
-// Probe order: wl-copy (Wayland) → xclip (X11) → xsel (X11 fallback).
-// Cached after first attempt so repeated mouse-ups skip the probe chain.
+// densable kDe — Linux clipboard tool: undefined = not yet probed, null = none.
+// densable Xws probe: WAYLAND_DISPLAY→wl-copy else DISPLAY→xclip/xsel.
 let linuxCopy: 'wl-copy' | 'xclip' | 'xsel' | null | undefined
+// densable D3u — generation counter so a newer copy aborts a stale primary write
+let waylandCopyGen = 0
 
 /**
- * Shell out to a native clipboard utility as a safety net for OSC 52.
+ * densable Xws — probe once which Linux native clipboard tool is available.
+ * Env-gated (not fire-and-write probe): WAYLAND_DISPLAY first, then DISPLAY.
+ */
+async function probeLinuxClipboardTool(): Promise<void> {
+  // densable Xws: only on Wt()==="linux" (not wsl)
+  if (getClipboardHostPlatform() !== 'linux' || typeof linuxCopy === 'string') {
+    return
+  }
+  if (process.env['WAYLAND_DISPLAY'] && (await commandOnPath('wl-copy'))) {
+    linuxCopy = 'wl-copy'
+    return
+  }
+  if (process.env['DISPLAY']) {
+    if (await commandOnPath('xclip')) {
+      linuxCopy = 'xclip'
+      return
+    }
+    if (await commandOnPath('xsel')) {
+      linuxCopy = 'xsel'
+      return
+    }
+  }
+  linuxCopy = null
+}
+
+/**
+ * densable DB_ — sequential wl-copy clipboard then --primary.
+ * Generation counter aborts primary write if a newer copy started.
+ */
+async function copyWaylandClipboardAndPrimary(text: string): Promise<void> {
+  const gen = ++waylandCopyGen
+  const opts = {
+    input: text,
+    useCwd: false,
+    timeout: 2000,
+    stdout: 'ignore' as const,
+    stderr: 'ignore' as const,
+  }
+  await execFileNoThrow('wl-copy', [], opts)
+  if (gen !== waylandCopyGen) return
+  await execFileNoThrow('wl-copy', ['--primary'], opts)
+}
+
+/**
+ * densable L3u — shell out to a native clipboard utility as OSC 52 safety net.
  * Only called when not in an SSH session (over SSH, these would write to
  * the remote machine's clipboard — OSC 52 is the right path there).
- * Fire-and-forget: failures are silent since OSC 52 may have succeeded.
+ * Fire-and-forget at call site; densable 2.1.224 #15: Linux dual-writes
+ * CLIPBOARD then PRIMARY so Wayland selection paste works without race.
  */
 function copyNative(text: string): void {
   const opts = { input: text, useCwd: false, timeout: 2000 }
-  switch (process.platform) {
-    case 'darwin':
+  // densable L3u: switch(Wt()) — not process.platform
+  switch (getClipboardHostPlatform()) {
+    case 'macos':
       void execFileNoThrow('pbcopy', [], opts)
       return
     case 'linux': {
       if (linuxCopy === null) return
+      if (typeof linuxCopy !== 'string') {
+        // densable: if(typeof kDe!=="string")Xws().then(()=>{if(typeof kDe==="string")L3u(e)})
+        void probeLinuxClipboardTool().then(() => {
+          if (typeof linuxCopy === 'string') copyNative(text)
+        })
+        return
+      }
       if (linuxCopy === 'wl-copy') {
-        void execFileNoThrow('wl-copy', [], opts)
+        void copyWaylandClipboardAndPrimary(text)
         return
       }
       if (linuxCopy === 'xclip') {
+        // densable: dual fire clipboard + primary (xclip does not need await race fix)
         void execFileNoThrow('xclip', ['-selection', 'clipboard'], opts)
+        void execFileNoThrow('xclip', ['-selection', 'primary'], opts)
         return
       }
       if (linuxCopy === 'xsel') {
         void execFileNoThrow('xsel', ['--clipboard', '--input'], opts)
+        void execFileNoThrow('xsel', ['--primary', '--input'], opts)
         return
       }
-      // First call: probe wl-copy (Wayland) then xclip/xsel (X11), cache winner.
-      void execFileNoThrow('wl-copy', [], opts).then(r => {
-        if (r.code === 0) {
-          linuxCopy = 'wl-copy'
-          return
-        }
-        void execFileNoThrow('xclip', ['-selection', 'clipboard'], opts).then(
-          r2 => {
-            if (r2.code === 0) {
-              linuxCopy = 'xclip'
-              return
-            }
-            void execFileNoThrow('xsel', ['--clipboard', '--input'], opts).then(
-              r3 => {
-                linuxCopy = r3.code === 0 ? 'xsel' : null
-              },
-            )
-          },
-        )
-      })
       return
     }
-    case 'win32':
-      // clip.exe is always available on Windows. Unicode handling is
-      // imperfect (system locale encoding) but good enough for a fallback.
-      void execFileNoThrow('clip', [], opts)
+    case 'wsl': {
+      // densable L3u wsl: powershell.exe + O3u → Windows host clipboard
+      void execFileNoThrow(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_SET_CLIPBOARD],
+        opts,
+      )
       return
+    }
+    case 'windows': {
+      // densable L3u windows: powershell + O3u (SEA has no clip.exe)
+      void execFileNoThrow(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_SET_CLIPBOARD],
+        opts,
+      )
+      return
+    }
+  }
+}
+
+/**
+ * densable `Ksn` — read native clipboard/primary selection text.
+ * Used by middle-click (linux primary) and right-click paste (linux/wsl/windows).
+ * SSH returns "" (OSC 52 path owns remote sessions).
+ *
+ * @param selection densable default "clipboard"; "primary" for linux middle-click
+ */
+export async function readNativeClipboard(
+  selection: 'clipboard' | 'primary' = 'clipboard',
+): Promise<string> {
+  // densable: if(Wsn())return""
+  if (isSshSession()) return ''
+  const opts = { useCwd: false, timeout: 2000 }
+  switch (getClipboardHostPlatform()) {
+    case 'macos': {
+      const r = await execFileNoThrow('pbpaste', [], opts)
+      return r.code === 0 ? r.stdout : ''
+    }
+    case 'windows':
+    case 'wsl': {
+      // densable: powershell.exe on wsl, powershell on windows + OB_
+      const bin =
+        getClipboardHostPlatform() === 'wsl' ? 'powershell.exe' : 'powershell'
+      const r = await execFileNoThrow(
+        bin,
+        ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_GET_CLIPBOARD],
+        opts,
+      )
+      if (r.code !== 0) return ''
+      // densable: replace \r\n → \n, strip one trailing \n
+      return r.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '')
+    }
+    case 'linux': {
+      // densable: try wl-paste → xclip → xsel (primary vs clipboard args)
+      const primary = selection === 'primary'
+      const candidates: Array<[string, string[]]> = [
+        [
+          'wl-paste',
+          primary ? ['--primary', '--no-newline'] : ['--no-newline'],
+        ],
+        ['xclip', ['-selection', primary ? 'primary' : 'clipboard', '-o']],
+        ['xsel', [primary ? '--primary' : '--clipboard', '--output']],
+      ]
+      for (const [cmd, args] of candidates) {
+        const r = await execFileNoThrow(cmd, args, opts)
+        if (r.code === 0) return r.stdout
+      }
+      return ''
+    }
+    default:
+      return ''
   }
 }
 
 /** @internal test-only */
 export function _resetLinuxCopyCache(): void {
   linuxCopy = undefined
+  waylandCopyGen = 0
+  _resetClipboardHostPlatformCache()
+}
+
+/** @internal test-only densable kDe snapshot */
+export function _getLinuxCopyTool(): typeof linuxCopy {
+  return linuxCopy
+}
+
+/** @internal test-only densable D3u snapshot */
+export function _getWaylandCopyGen(): number {
+  return waylandCopyGen
 }
 
 /**

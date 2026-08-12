@@ -16,6 +16,7 @@ import {
 } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logForDebugging } from '../utils/debug.js';
+import { getPlatform } from '../utils/platform.js';
 import { resolveScrollSpeedBase } from '../utils/residualUiEnvGates.js';
 import {
   recordPageJump,
@@ -23,6 +24,62 @@ import {
   recordScroll,
   recordStickyState,
 } from '../utils/scrollTelemetry.js';
+
+/**
+ * densable Gsn() — hold-key hint when OSC 52 copy may not reach the system clipboard.
+ * Terminal sets from densable xB_ / kB_ / vPe (SEA 2.1.224).
+ */
+const OSC52_HOLD_VSCODE_TERMS = new Set(['vscode', 'cursor', 'windsurf', 'antigravity', 'codium']);
+const OSC52_HOLD_SHIFT_TERMS = new Set([
+  'ghostty',
+  'kitty',
+  'WezTerm',
+  'alacritty',
+  'xterm',
+  'gnome-terminal',
+  'vte-based',
+  'konsole',
+  'windows-terminal',
+  'mintty',
+  // densable vPe jetbrains family
+  'pycharm',
+  'intellij',
+  'webstorm',
+  'phpstorm',
+  'rubymine',
+  'clion',
+  'goland',
+  'rider',
+  'datagrip',
+  'appcode',
+  'dataspell',
+  'aqua',
+  'gateway',
+  'fleet',
+  'jetbrains',
+  'androidstudio',
+]);
+
+/** densable Gsn — native-selection modifier label for OSC 52 toast */
+export function getNativeSelectionHoldKey(): string {
+  // densable M3u: lv()?.terminal ?? ee.terminal ≈ TERM_PROGRAM
+  const term = process.env.TERM_PROGRAM;
+  if (term === 'Apple_Terminal') return 'Fn';
+  if (term === 'iTerm.app') return 'Option';
+  // densable: lv()?.isVscodeTerm || xB_.has(term)
+  if (isXtermJs() || (term !== undefined && OSC52_HOLD_VSCODE_TERMS.has(term))) {
+    return getPlatform() === 'macos' ? 'Option' : 'Shift';
+  }
+  if (term !== undefined && OSC52_HOLD_SHIFT_TERMS.has(term)) return 'Shift';
+  if (process.env.LC_TERMINAL === 'iTerm2') return 'Option';
+  // densable: Wsn()||Jws()!==null||Wt()==="macos"
+  const ssh = Boolean(process.env.SSH_CONNECTION);
+  const mux = Boolean(process.env.TMUX || process.env.STY);
+  if (ssh || mux || getPlatform() === 'macos') {
+    return 'Shift (Option in iTerm2, Fn in Terminal.app)';
+  }
+  return 'Shift';
+}
 
 type Props = {
   scrollRef: RefObject<ScrollBoxHandle | null>;
@@ -541,18 +598,20 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
     // getClipboardPath reads env synchronously — predicts what setClipboard
     // did (native pbcopy / tmux load-buffer / raw OSC 52) so we can tell
     // the user whether paste will Just Work or needs prefix+].
+    // densable toast: char/chars plural + Gsn() hold key on osc52.
     const path = getClipboardPath();
     const n = text.length;
+    const unit = n === 1 ? 'char' : 'chars';
     let msg: string;
     switch (path) {
       case 'native':
-        msg = `copied ${n} chars to clipboard`;
+        msg = `copied ${n} ${unit} to clipboard`;
         break;
       case 'tmux-buffer':
-        msg = `copied ${n} chars to tmux buffer · paste with prefix + ]`;
+        msg = `copied ${n} ${unit} to tmux buffer · paste with prefix + ]`;
         break;
       case 'osc52':
-        msg = `sent ${n} chars via OSC 52 · check terminal clipboard settings if paste fails`;
+        msg = `sent ${n} ${unit} via OSC 52 · if paste fails, hold ${getNativeSelectionHoldKey()} while selecting for native copy`;
         break;
     }
     addNotification({

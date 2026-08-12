@@ -48,8 +48,15 @@ import {
 } from '../core/parse-keypress.js';
 import reconciler from '../core/reconciler.js';
 import instances from '../core/instances.js';
-import { finishSelection, hasSelection, type SelectionState, startSelection } from '../core/selection.js';
+import {
+  clearSelection,
+  finishSelection,
+  hasSelection,
+  type SelectionState,
+  startSelection,
+} from '../core/selection.js';
 import { isXtermJs, setXtversionName, supportsExtendedKeys } from '../core/terminal.js';
+import { _getClipboardHostPlatform, readNativeClipboard } from '../core/termio/osc.js';
 import { getTerminalFocused, getTerminalFocusState, setTerminalFocused } from '../core/terminal-focus-state.js';
 import { TerminalQuerier, xtversion } from '../core/terminal-querier.js';
 import {
@@ -612,10 +619,23 @@ export default class App extends PureComponent<Props, State> {
     // densable does NOT forceRedraw on focus — that erases the alt buffer and
     // can leave a black screen if paint is empty/delayed (WT/Windows Esc/focus
     // thrash). External wipe recovery is probeExternalClear (iTerm/Apple only).
+    //
+    // Local residual (intermittent white main, live footer):
+    // 1) Hosts wipe alt buffer without DECXCPR → need soft full-damage repaint.
+    // 2) FOCUS_OUT often drops (macOS app-switch) so prev stays 'focused' and
+    //    densable-only blur→focus gate never fires — repaint on every FOCUS_IN.
+    // 3) Still never forceRedraw here (no erase / black flash).
     const prev = getTerminalFocusState();
     setTerminalFocused(isFocused);
-    if (isFocused && prev === 'blurred') {
-      instances.get(this.props.stdout)?.proactiveAtlasResetOnFocus();
+    if (isFocused) {
+      const ink = instances.get(this.props.stdout);
+      // densable atlas reset only on true blur→focus (xterm.js color atlas)
+      if (prev === 'blurred') {
+        ink?.proactiveAtlasResetOnFocus();
+      }
+      // Soft repaint on every FOCUS_IN (unknown→focused, blur→focus, and
+      // re-FOCUS_IN while already focused when FOCUS_OUT was dropped).
+      ink?.repaintAfterFocus();
     }
     // densable I4u XTVERSION re-probe is daemon-only (CLAUDE_BG_BACKEND===daemon).
   };
@@ -831,6 +851,29 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     if (baseButton !== 0) {
       // Non-left press breaks the multi-click chain.
       app.clickCount = 0;
+      // densable mouse paste on press (not motion bit 0x20):
+      // right(2) windows|wsl|linux: clear selection OR Ksn("clipboard") paste
+      // middle(1) linux only: Ksn("primary") paste
+      // densable SEA 2.1.224: sC()≡isXtermJs() guards **right-click clipboard only**
+      // (`else if(!sC())Ksn("clipboard")`). Middle primary has **no** sC gate —
+      // invent-ban: do not add isXtermJs() on middle.
+      if ((m.button & 0x20) === 0) {
+        const platform = _getClipboardHostPlatform();
+        if (baseButton === 2 && (platform === 'windows' || platform === 'wsl' || platform === 'linux')) {
+          if (hasSelection(sel)) {
+            clearSelection(sel);
+            app.props.onSelectionChange();
+          } else if (!isXtermJs()) {
+            void readNativeClipboard('clipboard').then(text => {
+              if (text) app.props.dispatchPasteEvent(text);
+            });
+          }
+        } else if (baseButton === 1 && platform === 'linux') {
+          void readNativeClipboard('primary').then(text => {
+            if (text) app.props.dispatchPasteEvent(text);
+          });
+        }
+      }
       return;
     }
     if ((m.button & 0x20) !== 0) {

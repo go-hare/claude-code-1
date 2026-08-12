@@ -228,10 +228,25 @@ async function hasClipboardImageWin32(): Promise<boolean> {
 
 /**
  * Check if clipboard contains an image without retrieving it.
+ *
+ * densable SUb platform table: darwin osascript/native · linux xclip TARGETS
+ * then wl-paste -l · win32 Forms ContainsImage. Local win32 already uses
+ * powershell.exe Forms; linux must not short-circuit false (SEA has checkImage).
+ * WSL-as-linux powershell.exe host path remains residual (SUb returns
+ * commands for process.platform table keys only — no Wt() switch in SUb).
  */
 export async function hasImageInClipboard(): Promise<boolean> {
   if (process.platform === 'win32') {
     return hasClipboardImageWin32()
+  }
+  if (process.platform === 'linux') {
+    // densable SUb linux.checkImage — exact SEA pipeline (xclip TARGETS then
+    // wl-paste -l). No Wt/WSL host invent: SUb keys on process.platform only.
+    const result = await execFileNoThrowWithCwd('/bin/sh', [
+      '-c',
+      'xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -E "image/(png|jpeg|jpg|gif|webp|bmp)" || wl-paste -l 2>/dev/null | grep -E "image/(png|jpeg|jpg|gif|webp|bmp)"',
+    ])
+    return result.code === 0
   }
   if (process.platform !== 'darwin') {
     return false
