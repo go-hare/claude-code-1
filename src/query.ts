@@ -121,6 +121,7 @@ import { handleStopHooks } from './query/stopHooks.js'
 import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
+import { accumulateToolResultForMidTurn } from './query/accumulateToolResultForMidTurn.js'
 import { feature } from 'bun:bundle'
 import {
   getCurrentTurnTokenBudget,
@@ -1978,11 +1979,14 @@ async function* queryLoop(
               for (const result of streamingToolExecutor.getCompletedResults()) {
                 if (result.message) {
                   yield result.message
-                  toolResults.push(
-                    ...normalizeMessagesForAPI(
-                      [result.message],
+                  // densable 2.1.228 St: keep tool attachments (e.g. skill
+                  // deferred_tools_delta) in toolResults for mid-turn scan.
+                  accumulateToolResultForMidTurn(
+                    result.message,
+                    toolResults,
+                    toolUseContext.options.refreshTools?.() ??
                       toolUseContext.options.tools,
-                    ).filter(_ => _.type === 'user'),
+                    toolUseContext.options.mainLoopModel,
                   )
                 }
               }
@@ -2868,11 +2872,15 @@ async function* queryLoop(
           shouldPreventContinuation = true
         }
 
-        toolResults.push(
-          ...normalizeMessagesForAPI(
-            [update.message],
-            toolUseContext.options.tools,
-          ).filter(_ => _.type === 'user'),
+        // densable 2.1.228 St (vs 227 only read_truncation_notice): push all
+        // tool attachments raw so skill deferred_tools_delta is visible to
+        // mid-turn getAttachmentMessages history scan (#11 double-send fix).
+        accumulateToolResultForMidTurn(
+          update.message,
+          toolResults,
+          updatedToolUseContext.options.refreshTools?.() ??
+            updatedToolUseContext.options.tools,
+          updatedToolUseContext.options.mainLoopModel,
         )
       }
       if (update.newContext) {
