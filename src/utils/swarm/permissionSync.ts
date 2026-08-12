@@ -696,8 +696,8 @@ export async function sendPermissionRequestViaMailbox(
       permission_suggestions: request.permissionSuggestions,
     })
 
-    // Send to leader's mailbox (routes to in-process or file-based based on recipient)
-    await writeToMailbox(
+    // densable BQo: dO returns msg_id | undefined — treat undefined as fail.
+    const msgId = await writeToMailbox(
       leaderName,
       {
         from: request.workerName,
@@ -707,6 +707,13 @@ export async function sendPermissionRequestViaMailbox(
       },
       request.teamName,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[PermissionSync] FAILED to deliver permission request ${request.id} to leader ${leaderName} via mailbox`,
+      )
+      return false
+    }
 
     logForDebugging(
       `[PermissionSync] Sent permission request ${request.id} to leader ${leaderName} via mailbox`,
@@ -758,8 +765,8 @@ export async function sendPermissionResponseViaMailbox(
     // Get the sender name (leader's name)
     const senderName = getAgentName() || 'team-lead'
 
-    // Send to worker's mailbox (routes to in-process or file-based based on recipient)
-    await writeToMailbox(
+    // densable BQo: soft-fail when dO returns undefined.
+    const msgId = await writeToMailbox(
       workerName,
       {
         from: senderName,
@@ -768,6 +775,13 @@ export async function sendPermissionResponseViaMailbox(
       },
       team,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[PermissionSync] FAILED to deliver permission response for ${requestId} to worker ${workerName} via mailbox`,
+      )
+      return false
+    }
 
     logForDebugging(
       `[PermissionSync] Sent permission response for ${requestId} to worker ${workerName} via mailbox`,
@@ -843,8 +857,8 @@ export async function sendSandboxPermissionRequestViaMailbox(
       host,
     })
 
-    // Send to leader's mailbox (routes to in-process or file-based based on recipient)
-    await writeToMailbox(
+    // densable BQo / mailbox_write_failed telemetry path.
+    const msgId = await writeToMailbox(
       leaderName,
       {
         from: workerName,
@@ -854,6 +868,13 @@ export async function sendSandboxPermissionRequestViaMailbox(
       },
       team,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[PermissionSync] FAILED to deliver sandbox permission request ${requestId} for host ${host} to leader ${leaderName} via mailbox`,
+      )
+      return false
+    }
 
     logForDebugging(
       `[PermissionSync] Sent sandbox permission request ${requestId} for host ${host} to leader ${leaderName} via mailbox`,
@@ -903,8 +924,7 @@ export async function sendSandboxPermissionResponseViaMailbox(
 
     const senderName = getAgentName() || 'team-lead'
 
-    // Send to worker's mailbox (routes to in-process or file-based based on recipient)
-    await writeToMailbox(
+    const msgId = await writeToMailbox(
       workerName,
       {
         from: senderName,
@@ -913,6 +933,13 @@ export async function sendSandboxPermissionResponseViaMailbox(
       },
       team,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[PermissionSync] FAILED to deliver sandbox permission response for ${requestId} (host: ${host}) to worker ${workerName} via mailbox`,
+      )
+      return false
+    }
 
     logForDebugging(
       `[PermissionSync] Sent sandbox permission response for ${requestId} (host: ${host}, allow: ${allow}) to worker ${workerName} via mailbox`,

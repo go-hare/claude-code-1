@@ -368,6 +368,21 @@ function createInProcessCanUseTool(
         teamName: identity.teamName,
       })
 
+      let settled = false
+      let pollInterval: ReturnType<typeof setInterval> | undefined
+      const onAbortListener = () => {
+        cleanup()
+        if (settled) return
+        settled = true
+        resolve({ behavior: 'ask', message: SUBAGENT_REJECT_MESSAGE })
+      }
+
+      function cleanup() {
+        if (pollInterval !== undefined) clearInterval(pollInterval)
+        unregisterPermissionCallback(request.id)
+        abortController.signal.removeEventListener('abort', onAbortListener)
+      }
+
       // Register callback to be invoked when the leader responds
       registerPermissionCallback({
         requestId: request.id,
@@ -379,6 +394,8 @@ function createInProcessCanUseTool(
           contentBlocks?: ContentBlockParam[],
         ) {
           cleanup()
+          if (settled) return
+          settled = true
           persistPermissionUpdates(permissionUpdates)
           const finalInput =
             updatedInput && Object.keys(updatedInput).length > 0
@@ -393,6 +410,8 @@ function createInProcessCanUseTool(
         },
         onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
           cleanup()
+          if (settled) return
+          settled = true
           const message = feedback
             ? `${SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX}${feedback}`
             : SUBAGENT_REJECT_MESSAGE
@@ -400,14 +419,31 @@ function createInProcessCanUseTool(
         },
       })
 
-      // Send request to leader's mailbox
-      void sendPermissionRequestViaMailbox(request)
+      abortController.signal.addEventListener('abort', onAbortListener, {
+        once: true,
+      })
 
-      // Poll teammate's mailbox for the response
-      const pollInterval = setInterval(
-        async (abortController, cleanup, resolve, identity, request) => {
+      // densable BQo: await mailbox soft-fail before arming poll / hang.
+      void (async () => {
+        const delivered = await sendPermissionRequestViaMailbox(request)
+        if (!delivered) {
+          cleanup()
+          if (settled) return
+          settled = true
+          resolve({
+            behavior: 'ask',
+            message:
+              'Failed to deliver permission request to team lead via mailbox',
+          })
+          return
+        }
+        if (settled) return
+        // Poll teammate's mailbox for the response only after delivery
+        pollInterval = setInterval(async () => {
           if (abortController.signal.aborted) {
             cleanup()
+            if (settled) return
+            settled = true
             resolve({ behavior: 'ask', message: SUBAGENT_REJECT_MESSAGE })
             return
           }
@@ -444,29 +480,8 @@ function createInProcessCanUseTool(
               }
             }
           }
-        },
-        PERMISSION_POLL_INTERVAL_MS,
-        abortController,
-        cleanup,
-        resolve,
-        identity,
-        request,
-      )
-
-      const onAbortListener = () => {
-        cleanup()
-        resolve({ behavior: 'ask', message: SUBAGENT_REJECT_MESSAGE })
-      }
-
-      abortController.signal.addEventListener('abort', onAbortListener, {
-        once: true,
-      })
-
-      function cleanup() {
-        clearInterval(pollInterval)
-        unregisterPermissionCallback(request.id)
-        abortController.signal.removeEventListener('abort', onAbortListener)
-      }
+        }, PERMISSION_POLL_INTERVAL_MS)
+      })()
     })
   }
 }
@@ -569,7 +584,8 @@ async function sendMessageToLeader(
   color: string | undefined,
   teamName: string,
 ): Promise<void> {
-  await writeToMailbox(
+  // densable dO soft-fail — log when leader notify does not land
+  const msgId = await writeToMailbox(
     TEAM_LEAD_NAME,
     {
       from,
@@ -579,6 +595,11 @@ async function sendMessageToLeader(
     },
     teamName,
   )
+  if (msgId === undefined) {
+    logForDebugging(
+      `[InProcessRunner] FAILED mailbox write to team-lead from ${from}`,
+    )
+  }
 }
 
 /**

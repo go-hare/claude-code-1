@@ -11,7 +11,10 @@ import {
   isSwarmWorker,
   sendPermissionRequestViaMailbox,
 } from '../../../utils/swarm/permissionSync.js'
-import { registerPermissionCallback } from '../../useSwarmPermissionPoller.js'
+import {
+  registerPermissionCallback,
+  unregisterPermissionCallback,
+} from '../../useSwarmPermissionPoller.js'
 import type { PermissionContext } from '../PermissionContext.js'
 import { createResolveOnce } from '../PermissionContext.js'
 
@@ -64,87 +67,103 @@ async function handleSwarmWorkerPermission(
         pendingWorkerRequest: null,
       }))
 
-    const decision = await new Promise<PermissionDecision>(resolve => {
-      const { resolve: resolveOnce, claim } = createResolveOnce(resolve)
-
-      // Create the permission request
-      const request = createPermissionRequest({
-        toolName: ctx.tool.name,
-        toolUseId: ctx.toolUseID,
-        input: ctx.input,
-        description,
-        permissionSuggestions: suggestions,
-      })
-
-      // Register callback BEFORE sending the request to avoid race condition
-      // where leader responds before callback is registered
-      registerPermissionCallback({
-        requestId: request.id,
-        toolUseId: ctx.toolUseID,
-        async onAllow(
-          allowedInput: Record<string, unknown> | undefined,
-          permissionUpdates: PermissionUpdate[],
-          feedback?: string,
-          contentBlocks?: ContentBlockParam[],
-        ) {
-          if (!claim()) return // atomic check-and-mark before await
-          clearPendingRequest()
-
-          // Merge the updated input with the original input
-          const finalInput =
-            allowedInput && Object.keys(allowedInput).length > 0
-              ? allowedInput
-              : ctx.input
-
-          resolveOnce(
-            await ctx.handleUserAllow(
-              finalInput,
-              permissionUpdates,
-              feedback,
-              undefined,
-              contentBlocks,
-            ),
-          )
-        },
-        onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
-          if (!claim()) return
-          clearPendingRequest()
-
-          ctx.logDecision({
-            decision: 'reject',
-            source: { type: 'user_reject', hasFeedback: !!feedback },
-          })
-
-          resolveOnce(ctx.cancelAndAbort(feedback, undefined, contentBlocks))
-        },
-      })
-
-      // Now that callback is registered, send the request to the leader
-      void sendPermissionRequestViaMailbox(request)
-
-      // Show visual indicator that we're waiting for leader approval
-      ctx.toolUseContext.setAppState(prev => ({
-        ...prev,
-        pendingWorkerRequest: {
-          toolName: ctx.tool.name,
-          toolUseId: ctx.toolUseID,
-          description,
-        },
-      }))
-
-      // If the abort signal fires while waiting for the leader response,
-      // resolve the promise with a cancel decision so it does not hang.
-      ctx.toolUseContext.abortController.signal.addEventListener(
-        'abort',
-        () => {
-          if (!claim()) return
-          clearPendingRequest()
-          ctx.logCancelled()
-          resolveOnce(ctx.cancelAndAbort(undefined, true))
-        },
-        { once: true },
-      )
+    // Create the permission request
+    const request = createPermissionRequest({
+      toolName: ctx.tool.name,
+      toolUseId: ctx.toolUseID,
+      input: ctx.input,
+      description,
+      permissionSuggestions: suggestions,
     })
+
+    // Register callback BEFORE sending the request to avoid race condition
+    // where leader responds before callback is registered
+    const decision = await new Promise<PermissionDecision>(
+      (resolve, reject) => {
+        const { resolve: resolveOnce, claim } = createResolveOnce(resolve)
+
+        registerPermissionCallback({
+          requestId: request.id,
+          toolUseId: ctx.toolUseID,
+          async onAllow(
+            allowedInput: Record<string, unknown> | undefined,
+            permissionUpdates: PermissionUpdate[],
+            feedback?: string,
+            contentBlocks?: ContentBlockParam[],
+          ) {
+            if (!claim()) return // atomic check-and-mark before await
+            clearPendingRequest()
+
+            // Merge the updated input with the original input
+            const finalInput =
+              allowedInput && Object.keys(allowedInput).length > 0
+                ? allowedInput
+                : ctx.input
+
+            resolveOnce(
+              await ctx.handleUserAllow(
+                finalInput,
+                permissionUpdates,
+                feedback,
+                undefined,
+                contentBlocks,
+              ),
+            )
+          },
+          onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
+            if (!claim()) return
+            clearPendingRequest()
+
+            ctx.logDecision({
+              decision: 'reject',
+              source: { type: 'user_reject', hasFeedback: !!feedback },
+            })
+
+            resolveOnce(ctx.cancelAndAbort(feedback, undefined, contentBlocks))
+          },
+        })
+
+        // densable BQo: await mailbox soft-fail — do not arm pending UI / hang
+        // when dO returns undefined. Reject so outer catch returns null (local UI).
+        void (async () => {
+          const delivered = await sendPermissionRequestViaMailbox(request)
+          if (!delivered) {
+            if (!claim()) return
+            unregisterPermissionCallback(request.id)
+            clearPendingRequest()
+            reject(
+              new Error(
+                'Failed to deliver permission request to team lead via mailbox',
+              ),
+            )
+            return
+          }
+
+          // Show visual indicator that we're waiting for leader approval
+          ctx.toolUseContext.setAppState(prev => ({
+            ...prev,
+            pendingWorkerRequest: {
+              toolName: ctx.tool.name,
+              toolUseId: ctx.toolUseID,
+              description,
+            },
+          }))
+        })()
+
+        // If the abort signal fires while waiting for the leader response,
+        // resolve the promise with a cancel decision so it does not hang.
+        ctx.toolUseContext.abortController.signal.addEventListener(
+          'abort',
+          () => {
+            if (!claim()) return
+            clearPendingRequest()
+            ctx.logCancelled()
+            resolveOnce(ctx.cancelAndAbort(undefined, true))
+          },
+          { once: true },
+        )
+      },
+    )
 
     return decision
   } catch (error) {

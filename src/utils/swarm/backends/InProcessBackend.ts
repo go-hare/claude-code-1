@@ -170,8 +170,8 @@ export class InProcessBackend implements TeammateExecutor {
 
     const { agentName, teamName } = parsed
 
-    // Write to file-based mailbox
-    await writeToMailbox(
+    // densable dO: soft-fail → msg_id | undefined (do not claim delivery)
+    const msgId = await writeToMailbox(
       agentName,
       {
         text: message.text,
@@ -181,6 +181,13 @@ export class InProcessBackend implements TeammateExecutor {
       },
       teamName,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[InProcessBackend] sendMessage() FAILED mailbox write to ${agentId}`,
+      )
+      return
+    }
 
     logForDebugging(`[InProcessBackend] sendMessage() completed for ${agentId}`)
   }
@@ -236,9 +243,9 @@ export class InProcessBackend implements TeammateExecutor {
       reason,
     })
 
-    // Send to teammate's mailbox
+    // densable dO: soft-fail → only mark shutdownRequested on successful write
     const teammateAgentName = task.identity.agentName
-    await writeToMailbox(
+    const msgId = await writeToMailbox(
       teammateAgentName,
       {
         from: 'team-lead',
@@ -247,6 +254,13 @@ export class InProcessBackend implements TeammateExecutor {
       },
       task.identity.teamName,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[InProcessBackend] terminate() FAILED mailbox write to ${agentId}`,
+      )
+      return false
+    }
 
     // Mark the task as shutdown requested
     requestTeammateShutdown(task.id, this.context.setAppState)

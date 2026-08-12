@@ -91,6 +91,7 @@ describe('sendDirectMemberMessage', () => {
       teamContext as any,
       async (recipient, msg, team) => {
         mailboxArgs = { recipient, msg, team }
+        return 'msg-1'
       },
     )
     expect(result).toEqual({ success: true, recipientName: 'alice' })
@@ -109,11 +110,29 @@ describe('sendDirectMemberMessage', () => {
       'bob',
       'test message',
       teamContext as any,
-      async () => {},
+      async () => 'msg-ok',
     )
     expect(result.success).toBe(true)
     if (result.success) {
       expect(result.recipientName).toBe('bob')
     }
+  })
+
+  test('mailbox write undefined → mailbox_write_failed', async () => {
+    const teamContext = {
+      teamName: 'team1',
+      teammates: { bob: { name: 'bob' } },
+    }
+    const result = await sendDirectMemberMessage(
+      'bob',
+      'test message',
+      teamContext as any,
+      async () => undefined,
+    )
+    expect(result).toEqual({
+      success: false,
+      error: 'mailbox_write_failed',
+      recipientName: 'bob',
+    })
   })
 })

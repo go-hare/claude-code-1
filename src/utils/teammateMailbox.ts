@@ -7,7 +7,7 @@
  * Note: Inboxes are keyed by agent name within a team.
  */
 
-import { randomBytes } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { z } from 'zod/v4'
@@ -56,6 +56,18 @@ export type TeammateMessage = {
   read: boolean
   color?: string // Sender's assigned color (e.g., 'red', 'blue', 'green')
   summary?: string // 5-10 word summary shown as preview in the UI
+  /** densable rjt — frame version stamped on successful writes. */
+  msgV?: number
+  /** densable aqy — UUID assigned on successful writeToMailbox. */
+  msg_id?: string
+}
+
+/** densable sqy — mailbox message frame version. */
+const MAILBOX_MSG_V = 1
+
+/** densable rjt — stamp msg_id + msgV on a successful write. */
+function newMailboxMessageIds(): { msgV: number; msg_id: string } {
+  return { msgV: MAILBOX_MSG_V, msg_id: randomUUID() }
 }
 
 function isJsonLikeMessage(text: string): boolean {
@@ -119,6 +131,8 @@ function toMailboxMessage(value: unknown): TeammateMessage {
     read: record.read,
     ...(typeof record.color === 'string' ? { color: record.color } : {}),
     ...(typeof record.summary === 'string' ? { summary: record.summary } : {}),
+    ...(typeof record.msgV === 'number' ? { msgV: record.msgV } : {}),
+    ...(typeof record.msg_id === 'string' ? { msg_id: record.msg_id } : {}),
   }
   assertMailboxMessageSize(message)
   return message
@@ -350,54 +364,70 @@ export async function readUnreadMessages(
 }
 
 /**
- * Write a message to a teammate's inbox
- * Uses file locking to prevent race conditions when multiple agents write concurrently
+ * densable dO / writeToMailbox (2.1.224 #9).
+ *
+ * Soft-fail: returns `msg_id` on success, `undefined` on any refusal/IO failure
+ * (does **not** throw). Callers must check the return before reporting success —
+ * densable SendMessage only emits `Message sent to … inbox` when dO returns a
+ * msg_id; otherwise `{success:false, errorClass:"mailbox_write_failed"}`.
+ *
+ * Uses file locking to prevent race conditions when multiple agents write concurrently.
  * @param recipientName - The recipient's agent name (not UUID)
  * @param message - The message to write
  * @param teamName - Optional team name
+ * @returns msg_id string on success; undefined when nothing was written
  */
 export async function writeToMailbox(
   recipientName: string,
   message: Omit<TeammateMessage, 'read'>,
   teamName?: string,
-): Promise<void> {
-  // Official: refuse non-string text / schema-invalid payloads before any I/O.
-  // Prevents crash loops from corrupt concurrent writers or bad callers.
+): Promise<string | undefined> {
+  // densable: refuse non-string text / schema-invalid payloads before any I/O;
+  // log + return undefined (no throw) so tool paths can surface mailbox_write_failed.
   if (typeof message.text !== 'string') {
     const err = new Error(
       'TeammateMailbox: refused mailbox write with non-string text',
     )
     logForDebugging(
-      `[TeammateMailbox] refused mailbox write (${recipientName}): non-string text`,
+      `[TeammateMailbox] writeToMailbox: refusing schema-invalid message for ${recipientName} (non-string text)`,
     )
     logError(err)
-    throw err
+    return undefined
   }
   try {
     toMailboxMessage({ ...message, read: false })
   } catch (validationError) {
-    // Preserve size-limit errors (assertMailboxMessageSize); wrap shape errors.
+    const detail =
+      validationError instanceof Error
+        ? validationError.message
+        : String(validationError)
+    logForDebugging(
+      `[TeammateMailbox] writeToMailbox: refusing schema-invalid message for ${recipientName} (${detail})`,
+    )
+    // densable wraps as refused…; size-limit keeps original message for logs.
     if (
       validationError instanceof Error &&
       validationError.message.includes('exceeds')
     ) {
-      logForDebugging(
-        `[TeammateMailbox] writeToMailbox: refusing schema-invalid message for ${recipientName} (${validationError.message})`,
-      )
       logError(validationError)
-      throw validationError
+    } else {
+      logError(
+        new Error(
+          'TeammateMailbox: refused mailbox write failing schema validation',
+        ),
+      )
     }
-    const err = new Error(
-      'TeammateMailbox: refused mailbox write failing schema validation',
-    )
-    logForDebugging(
-      `[TeammateMailbox] writeToMailbox: refusing schema-invalid message for ${recipientName} (${validationError instanceof Error ? validationError.message : String(validationError)})`,
-    )
-    logError(err)
-    throw err
+    return undefined
   }
 
-  await ensureInboxDir(teamName)
+  try {
+    await ensureInboxDir(teamName)
+  } catch (error) {
+    logForDebugging(
+      `[TeammateMailbox] writeToMailbox: failed to ensure inbox dir: ${error}`,
+    )
+    return undefined
+  }
 
   const inboxPath = getInboxPath(recipientName, teamName)
   const lockFilePath = `${inboxPath}.lock`
@@ -416,8 +446,9 @@ export async function writeToMailbox(
       logForDebugging(
         `[TeammateMailbox] writeToMailbox: failed to create inbox file: ${error}`,
       )
+      // densable: only logError when not a "known" soft fs condition; still soft-fail.
       logError(error)
-      throw error
+      return undefined
     }
   }
 
@@ -431,8 +462,10 @@ export async function writeToMailbox(
     // Re-read messages after acquiring lock to get the latest state
     const messages = await readMailboxForMutation(recipientName, teamName)
 
+    const ids = newMailboxMessageIds()
     const newMessage = toMailboxMessage({
       ...message,
+      ...ids,
       read: false,
     })
 
@@ -442,10 +475,11 @@ export async function writeToMailbox(
     logForDebugging(
       `[TeammateMailbox] Wrote message to ${recipientName}'s inbox from ${message.from}`,
     )
+    return ids.msg_id
   } catch (error) {
     logForDebugging(`Failed to write to inbox for ${recipientName}: ${error}`)
     logError(error)
-    throw error
+    return undefined
   } finally {
     if (release) {
       await release()
@@ -1176,7 +1210,9 @@ export async function sendShutdownRequestToMailbox(
     reason,
   })
 
-  await writeToMailbox(
+  // densable dO soft-fail — still return requestId for UI correlation; caller
+  // may not observe write failure. Prefer SendMessageTool which checks msg_id.
+  const msgId = await writeToMailbox(
     targetName,
     {
       from: senderName,
@@ -1186,6 +1222,11 @@ export async function sendShutdownRequestToMailbox(
     },
     resolvedTeamName,
   )
+  if (msgId === undefined) {
+    logForDebugging(
+      `[TeammateMailbox] sendShutdownRequestToMailbox FAILED for ${targetName} requestId=${requestId}`,
+    )
+  }
 
   return { requestId, target: targetName }
 }

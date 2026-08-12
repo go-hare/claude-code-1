@@ -224,8 +224,8 @@ export class PaneBackendExecutor implements TeammateExecutor {
         })
       }
 
-      // Send initial instructions to teammate via mailbox
-      await writeToMailbox(
+      // densable dO: soft-fail on initial prompt — pane still spawned
+      const promptMsgId = await writeToMailbox(
         config.name,
         {
           from: 'team-lead',
@@ -234,6 +234,11 @@ export class PaneBackendExecutor implements TeammateExecutor {
         },
         config.teamName,
       )
+      if (promptMsgId === undefined) {
+        logForDebugging(
+          `[PaneBackendExecutor] Spawned ${agentId} but FAILED initial prompt mailbox write`,
+        )
+      }
 
       logForDebugging(
         `[PaneBackendExecutor] Spawned teammate ${agentId} in pane ${paneId}`,
@@ -285,7 +290,8 @@ export class PaneBackendExecutor implements TeammateExecutor {
 
     const { agentName, teamName } = parsed
 
-    await writeToMailbox(
+    // densable dO: soft-fail → msg_id | undefined (do not claim delivery)
+    const msgId = await writeToMailbox(
       agentName,
       {
         text: message.text,
@@ -295,6 +301,13 @@ export class PaneBackendExecutor implements TeammateExecutor {
       },
       teamName,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[PaneBackendExecutor] sendMessage() FAILED mailbox write to ${agentId}`,
+      )
+      return
+    }
 
     logForDebugging(
       `[PaneBackendExecutor] sendMessage() completed for ${agentId}`,
@@ -330,7 +343,8 @@ export class PaneBackendExecutor implements TeammateExecutor {
       reason,
     }
 
-    await writeToMailbox(
+    // densable dO: soft-fail → return false so caller knows shutdown was not delivered
+    const msgId = await writeToMailbox(
       agentName,
       {
         from: 'team-lead',
@@ -339,6 +353,13 @@ export class PaneBackendExecutor implements TeammateExecutor {
       },
       teamName,
     )
+
+    if (msgId === undefined) {
+      logForDebugging(
+        `[PaneBackendExecutor] terminate() FAILED mailbox write to ${agentId}`,
+      )
+      return false
+    }
 
     logForDebugging(
       `[PaneBackendExecutor] terminate() sent shutdown request to ${agentId}`,

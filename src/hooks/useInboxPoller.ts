@@ -288,12 +288,19 @@ export function useInboxPoller({
               // No-op for tmux workers (no classifier auto-approval)
             },
             onAbort() {
+              // densable BQo: await soft-fail — log if worker never gets response
               void sendPermissionResponseViaMailbox(
                 parsed.agent_id,
                 { decision: 'rejected', resolvedBy: 'leader' },
                 parsed.request_id,
                 teamName,
-              )
+              ).then(ok => {
+                if (!ok) {
+                  logForDebugging(
+                    `[InboxPoller] FAILED to deliver abort/reject for ${parsed.request_id} to ${parsed.agent_id}`,
+                  )
+                }
+              })
             },
             onAllow(
               updatedInput: Record<string, unknown>,
@@ -309,7 +316,13 @@ export function useInboxPoller({
                 },
                 parsed.request_id,
                 teamName,
-              )
+              ).then(ok => {
+                if (!ok) {
+                  logForDebugging(
+                    `[InboxPoller] FAILED to deliver allow for ${parsed.request_id} to ${parsed.agent_id} — worker may hang`,
+                  )
+                }
+              })
             },
             onReject(feedback?: string) {
               void sendPermissionResponseViaMailbox(
@@ -321,7 +334,13 @@ export function useInboxPoller({
                 },
                 parsed.request_id,
                 teamName,
-              )
+              ).then(ok => {
+                if (!ok) {
+                  logForDebugging(
+                    `[InboxPoller] FAILED to deliver reject for ${parsed.request_id} to ${parsed.agent_id}`,
+                  )
+                }
+              })
             },
             async recheckPermission() {
               // No-op for tmux workers — permission state is on the worker side
@@ -574,14 +593,20 @@ export function useInboxPoller({
             timestamp: new Date().toISOString(),
           },
           teamName,
-        )
+        ).then(msgId => {
+          if (msgId === undefined) {
+            logForDebugging(
+              `[InboxPoller] FAILED auto-approve plan mailbox write to ${m.from} (request ${parsed.requestId})`,
+            )
+          } else {
+            logForDebugging(
+              `[InboxPoller] Auto-approved plan from ${m.from} (request ${parsed.requestId})`,
+            )
+          }
+        })
 
         // densable: leader auto-approve only writes mailbox; in-process mFu
         // applies mode when the teammate drains the response (awaiting gate).
-
-        logForDebugging(
-          `[InboxPoller] Auto-approved plan from ${m.from} (request ${parsed.requestId})`,
-        )
 
         // Still pass through as a regular message so the model has context
         // about what the teammate is doing, but the approval is already sent

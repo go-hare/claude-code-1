@@ -4,7 +4,6 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Message } from 'src/types/message.js'
-import { getErrnoCode } from 'src/utils/errors.js'
 import {
   compactMailboxMessages,
   formatTeammateMessages,
@@ -204,7 +203,8 @@ describe('teammate mailbox retention', () => {
     tempHome = ''
   })
 
-  test('writeToMailbox refuses non-string text before I/O', async () => {
+  test('writeToMailbox refuses non-string text before I/O (soft-fail)', async () => {
+    // densable dO: invalid payload → undefined, no throw, nothing written.
     await expect(
       writeToMailbox(
         'worker',
@@ -216,12 +216,12 @@ describe('teammate mailbox retention', () => {
         },
         'alpha',
       ),
-    ).rejects.toThrow('non-string text')
+    ).resolves.toBeUndefined()
 
     await expect(readMailbox('worker', 'alpha')).resolves.toEqual([])
   })
 
-  test('writeToMailbox refuses schema-invalid messages', async () => {
+  test('writeToMailbox refuses schema-invalid messages (soft-fail)', async () => {
     await expect(
       writeToMailbox(
         'worker',
@@ -233,7 +233,7 @@ describe('teammate mailbox retention', () => {
         },
         'alpha',
       ),
-    ).rejects.toThrow('schema validation')
+    ).resolves.toBeUndefined()
 
     await expect(readMailbox('worker', 'alpha')).resolves.toEqual([])
   })
@@ -343,7 +343,8 @@ describe('teammate mailbox retention', () => {
     expect(after.at(-1)?.text).toBe(`msg-${existing.length - 2}`)
   })
 
-  test('writeToMailbox rejects oversized message text instead of storing it', async () => {
+  test('writeToMailbox soft-fails oversized message text instead of storing it', async () => {
+    // densable dO: soft-fail (undefined), no throw.
     await expect(
       writeToMailbox(
         'worker',
@@ -354,13 +355,13 @@ describe('teammate mailbox retention', () => {
         },
         'alpha',
       ),
-    ).rejects.toThrow('Mailbox message text exceeds')
+    ).resolves.toBeUndefined()
 
     // Pre-I/O validation refuses before creating the inbox file.
     await expect(readMailbox('worker', 'alpha')).resolves.toEqual([])
   })
 
-  test('writeToMailbox fails closed when an existing mailbox is corrupt', async () => {
+  test('writeToMailbox soft-fails when an existing mailbox is corrupt', async () => {
     const inboxPath = getInboxPath('worker', 'alpha')
     await mkdir(dirname(inboxPath), { recursive: true })
     await writeFile(inboxPath, '{not-json', 'utf-8')
@@ -375,37 +376,47 @@ describe('teammate mailbox retention', () => {
         },
         'alpha',
       ),
-    ).rejects.toThrow()
+    ).resolves.toBeUndefined()
 
     expect(await readFile(inboxPath, 'utf-8')).toBe('{not-json')
   })
 
-  test('writeToMailbox rejects when the inbox path is already a directory', async () => {
+  test('writeToMailbox soft-fails when the inbox path is already a directory', async () => {
     const inboxPath = getInboxPath('worker', 'alpha')
     await mkdir(inboxPath, { recursive: true })
 
-    const error = await writeToMailbox(
+    await expect(
+      writeToMailbox(
+        'worker',
+        {
+          from: 'team-lead',
+          text: 'new',
+          timestamp: new Date(5).toISOString(),
+        },
+        'alpha',
+      ),
+    ).resolves.toBeUndefined()
+
+    expect((await stat(inboxPath)).isDirectory()).toBe(true)
+  })
+
+  test('writeToMailbox returns msg_id and stamps msgV on success (densable rjt)', async () => {
+    const msgId = await writeToMailbox(
       'worker',
       {
         from: 'team-lead',
-        text: 'new',
-        timestamp: new Date(5).toISOString(),
+        text: 'hello',
+        timestamp: new Date(6).toISOString(),
       },
       'alpha',
-    ).then(
-      () => undefined,
-      err => err,
     )
-
-    const code = getErrnoCode(error)
-    expect(code).toBeDefined()
-    if (code === undefined) {
-      throw new Error('Expected filesystem errno code')
-    }
-    const expectedCodes =
-      process.platform === 'win32' ? ['EISDIR', 'EPERM', 'EACCES'] : ['EISDIR']
-    expect(expectedCodes).toContain(code)
-    expect((await stat(inboxPath)).isDirectory()).toBe(true)
+    expect(typeof msgId).toBe('string')
+    expect(msgId!.length).toBeGreaterThan(0)
+    const after = await readMailbox('worker', 'alpha')
+    expect(after).toHaveLength(1)
+    expect(after[0]?.msg_id).toBe(msgId)
+    expect(after[0]?.msgV).toBe(1)
+    expect(after[0]?.text).toBe('hello')
   })
 
   test('readMailbox fails closed on corrupt mailbox content', async () => {

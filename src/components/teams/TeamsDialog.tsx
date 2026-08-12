@@ -583,8 +583,13 @@ function sendModeChangeToTeammate(teammateName: string, teamName: string, target
       timestamp: new Date().toISOString(),
     },
     teamName,
-  );
-  logForDebugging(`[TeamsDialog] Sent mode change to ${teammateName}: ${targetMode}`);
+  ).then(msgId => {
+    if (msgId === undefined) {
+      logForDebugging(`[TeamsDialog] FAILED mode change mailbox write to ${teammateName}: ${targetMode}`);
+    } else {
+      logForDebugging(`[TeamsDialog] Sent mode change to ${teammateName}: ${targetMode}`);
+    }
+  });
 }
 
 /**
@@ -629,7 +634,7 @@ function cycleAllTeammateModes(teammates: TeammateStatus[], teamName: string, is
   }));
   setMultipleMemberModes(teamName, modeUpdates);
 
-  // Send mailbox messages to each teammate
+  // Send mailbox messages to each teammate (densable dO soft-fail — log only)
   for (const teammate of teammates) {
     const message = createModeSetRequestMessage({
       mode: targetMode,
@@ -643,7 +648,11 @@ function cycleAllTeammateModes(teammates: TeammateStatus[], teamName: string, is
         timestamp: new Date().toISOString(),
       },
       teamName,
-    );
+    ).then(msgId => {
+      if (msgId === undefined) {
+        logForDebugging(`[TeamsDialog] FAILED mode change mailbox write to ${teammate.name}: ${targetMode}`);
+      }
+    });
   }
   logForDebugging(`[TeamsDialog] Sent mode change to all ${teammates.length} teammates: ${targetMode}`);
 }

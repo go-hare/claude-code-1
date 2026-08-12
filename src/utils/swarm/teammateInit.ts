@@ -112,15 +112,21 @@ export function initializeTeammateHooks(
         idleReason: 'available',
         summary: getLastPeerDmSummary(messages),
       })
-      await writeToMailbox(leadAgentName, {
+      const idleMsgId = await writeToMailbox(leadAgentName, {
         from: agentName,
         text: jsonStringify(notification),
         timestamp: new Date().toISOString(),
         color: getTeammateColor(),
       })
-      logForDebugging(
-        `[TeammateInit] Sent idle notification to leader ${leadAgentName}`,
-      )
+      if (idleMsgId === undefined) {
+        logForDebugging(
+          `[TeammateInit] FAILED idle notification mailbox write to leader ${leadAgentName}`,
+        )
+      } else {
+        logForDebugging(
+          `[TeammateInit] Sent idle notification to leader ${leadAgentName}`,
+        )
+      }
       return true // Don't block the Stop
     },
     'Failed to send idle notification to team leader',

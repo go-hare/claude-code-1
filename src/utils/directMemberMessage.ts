@@ -23,18 +23,19 @@ export type DirectMessageResult =
   | { success: true; recipientName: string }
   | {
       success: false
-      error: 'no_team_context' | 'unknown_recipient'
+      error: 'no_team_context' | 'unknown_recipient' | 'mailbox_write_failed'
       recipientName?: string
     }
 
 type WriteToMailboxFn = (
   recipientName: string,
   message: { from: string; text: string; timestamp: string },
-  teamName: string,
-) => Promise<void>
+  teamName?: string,
+) => Promise<string | undefined>
 
 /**
  * Send a direct message to a team member, bypassing the model.
+ * densable dO: only success when writeToMailbox returns msg_id.
  */
 export async function sendDirectMemberMessage(
   recipientName: string,
@@ -55,7 +56,7 @@ export async function sendDirectMemberMessage(
     return { success: false, error: 'unknown_recipient', recipientName }
   }
 
-  await writeToMailbox(
+  const msgId = await writeToMailbox(
     recipientName,
     {
       from: 'user',
@@ -64,6 +65,10 @@ export async function sendDirectMemberMessage(
     },
     teamContext.teamName,
   )
+
+  if (msgId === undefined) {
+    return { success: false, error: 'mailbox_write_failed', recipientName }
+  }
 
   return { success: true, recipientName }
 }
