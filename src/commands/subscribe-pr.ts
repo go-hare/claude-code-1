@@ -1,40 +1,11 @@
-import * as fs from 'node:fs'
-import * as path from 'node:path'
 import type { Command, LocalCommandCall } from '../types/command.js'
 import { detectCurrentRepositoryWithHost } from '../utils/detectRepository.js'
-import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
-
-/**
- * File-backed store for PR webhook subscriptions.
- * Each subscription tracks the repo + PR number so the bridge layer
- * (useReplBridge / webhookSanitizer) can filter inbound events.
- */
-interface PRSubscription {
-  repo: string // "owner/repo"
-  prNumber: number
-  subscribedAt: string // ISO 8601
-}
-
-function getSubscriptionsFilePath(): string {
-  return path.join(getClaudeConfigHomeDir(), 'pr-subscriptions.json')
-}
-
-function readSubscriptions(): PRSubscription[] {
-  const filePath = getSubscriptionsFilePath()
-  try {
-    const raw = fs.readFileSync(filePath, 'utf-8')
-    return JSON.parse(raw) as PRSubscription[]
-  } catch {
-    return []
-  }
-}
-
-function writeSubscriptions(subs: PRSubscription[]): void {
-  const filePath = getSubscriptionsFilePath()
-  const dir = path.dirname(filePath)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(filePath, JSON.stringify(subs, null, 2), 'utf-8')
-}
+import {
+  findPRSubscription,
+  readPRSubscriptions,
+  removePRSubscription,
+  upsertPRSubscription,
+} from '../utils/prSubscriptions.js'
 
 /**
  * Parse a PR URL or number into { repo, prNumber }.
@@ -88,7 +59,7 @@ const call: LocalCommandCall = async (args, _context) => {
 
   // List current subscriptions
   if (!trimmed || trimmed === '--list' || trimmed === 'list') {
-    const subs = readSubscriptions()
+    const subs = readPRSubscriptions()
     if (subs.length === 0) {
       return {
         type: 'text',
@@ -112,18 +83,13 @@ const call: LocalCommandCall = async (args, _context) => {
     if ('error' in parsed) {
       return { type: 'text', value: parsed.error }
     }
-    const subs = readSubscriptions()
-    const before = subs.length
-    const after = subs.filter(
-      s => !(s.repo === parsed.repo && s.prNumber === parsed.prNumber),
-    )
-    if (after.length === before) {
+    const removed = removePRSubscription(parsed.repo, parsed.prNumber)
+    if (!removed) {
       return {
         type: 'text',
         value: `No subscription found for ${parsed.repo}#${parsed.prNumber}.`,
       }
     }
-    writeSubscriptions(after)
     return {
       type: 'text',
       value: `Unsubscribed from ${parsed.repo}#${parsed.prNumber}.`,
@@ -136,10 +102,7 @@ const call: LocalCommandCall = async (args, _context) => {
     return { type: 'text', value: parsed.error }
   }
 
-  const subs = readSubscriptions()
-  const existing = subs.find(
-    s => s.repo === parsed.repo && s.prNumber === parsed.prNumber,
-  )
+  const existing = findPRSubscription(parsed.repo, parsed.prNumber)
   if (existing) {
     return {
       type: 'text',
@@ -147,12 +110,10 @@ const call: LocalCommandCall = async (args, _context) => {
     }
   }
 
-  subs.push({
+  upsertPRSubscription({
     repo: parsed.repo,
     prNumber: parsed.prNumber,
-    subscribedAt: new Date().toISOString(),
   })
-  writeSubscriptions(subs)
 
   return {
     type: 'text',
