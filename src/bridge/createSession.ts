@@ -160,10 +160,30 @@ export async function createBridgeSession(params: {
   return sessionData.id
 }
 
+export type BridgeSessionInfo = {
+  environment_id?: string
+  title?: string
+  /** densable XBo / #28 placeholder sweep — untouched iff equal to updated_at. */
+  created_at?: string
+  updated_at?: string
+}
+
 export async function getBridgeSession(
   sessionId: string,
   opts?: { baseUrl?: string; getAccessToken?: () => string | undefined },
-): Promise<{ environment_id?: string; title?: string } | null> {
+): Promise<BridgeSessionInfo | null> {
+  const result = await getBridgeSessionWithNotFound(sessionId, opts)
+  return result.session
+}
+
+/**
+ * densable XBo — GET /v1/sessions/{id} with notFound for 404.
+ * Used by #28 placeholder sweep (RLb) to decide archive vs drop-map-only.
+ */
+export async function getBridgeSessionWithNotFound(
+  sessionId: string,
+  opts?: { baseUrl?: string; getAccessToken?: () => string | undefined },
+): Promise<{ session: BridgeSessionInfo | null; notFound: boolean }> {
   const { getClaudeAIOAuthTokens } = await import('../utils/auth.js')
   const { getOrganizationUUID } = await import('../services/oauth/client.js')
   const { getOauthConfig } = await import('../constants/oauth.js')
@@ -175,7 +195,7 @@ export async function getBridgeSession(
     opts?.getAccessToken?.() ?? getClaudeAIOAuthTokens()?.accessToken
   if (!accessToken) {
     logForDebugging('[bridge] No access token for session fetch')
-    return null
+    return { session: null, notFound: false }
   }
 
   const orgUUID = isSelfHostedBridge()
@@ -183,7 +203,7 @@ export async function getBridgeSession(
     : await getOrganizationUUID()
   if (!orgUUID) {
     logForDebugging('[bridge] No org UUID for session fetch')
-    return null
+    return { session: null, notFound: false }
   }
 
   const headers = {
@@ -192,20 +212,27 @@ export async function getBridgeSession(
     'x-organization-uuid': orgUUID,
   }
 
-  const url = `${opts?.baseUrl ?? getOauthConfig().BASE_API_URL}/v1/sessions/${sessionId}`
-  logForDebugging(`[bridge] Fetching session ${sessionId}`)
+  // densable uses getCodeSession with useV2 gate; compat path matches archive.
+  const compatId = toCompatSessionId(sessionId) || sessionId
+  const url = `${opts?.baseUrl ?? getOauthConfig().BASE_API_URL}/v1/sessions/${compatId}`
+  logForDebugging(`[bridge] Fetching session ${compatId}`)
 
   let response
   try {
-    response = await axios.get<{ environment_id?: string; title?: string }>(
-      url,
-      { headers, timeout: 10_000, validateStatus: s => s < 500 },
-    )
+    response = await axios.get<BridgeSessionInfo>(url, {
+      headers,
+      timeout: 10_000,
+      validateStatus: () => true,
+    })
   } catch (err: unknown) {
     logForDebugging(
       `[bridge] Session fetch request failed: ${errorMessage(err)}`,
     )
-    return null
+    return { session: null, notFound: false }
+  }
+
+  if (response.status === 404) {
+    return { session: null, notFound: true }
   }
 
   if (response.status !== 200) {
@@ -213,10 +240,10 @@ export async function getBridgeSession(
     logForDebugging(
       `[bridge] Session fetch failed with status ${response.status}${detail ? `: ${detail}` : ''}`,
     )
-    return null
+    return { session: null, notFound: false }
   }
 
-  return response.data
+  return { session: response.data, notFound: false }
 }
 
 export async function archiveBridgeSession(

@@ -1,14 +1,14 @@
 /**
  * densable CXr / wXr / kEo — process-local bridge session metadata.
  *
- * Official also appends a `bridge-session` transcript entry (Hd sessionFile).
- * Local keeps the in-memory path densable-same for re-init / left-arrow rit:
+ * densable also appends a `bridge-session` transcript entry (Bkn/EGt in
+ * sessionStorage). Local mirrors both:
  * - CXr: save bridge id + seq + optional grouping after connect / on cleanup
  * - wXr: read for init reattach when REATTACH env is absent
- * - kEo: clear on full teardown (not skipArchive)
+ * - kEo: clear on full teardown / user disable (paired with clearBridgeSession)
  *
- * Transcript append is best-effort optional later; left-arrow child gets rit env
- * from parent handle before exit, so in-memory is enough for same-process re-init.
+ * Transcript Bkn/EGt (2.1.224 #30) lives in sessionStorage — process meta alone
+ * is not enough for --resume across processes.
  */
 
 import { getSessionId } from '../bootstrap/state.js'

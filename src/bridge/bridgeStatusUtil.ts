@@ -150,8 +150,11 @@ export function buildActiveFooterText(url: string): string {
   return `Continue coding in the Claude app or ${url}`
 }
 
-/** Footer text shown when the bridge has failed. */
-export const FAILED_FOOTER_TEXT = 'Something went wrong, please try again'
+/**
+ * densable 2.1.224 #22 — persistent fail reconnect shortcut (was toast-only).
+ * densable `exa="Run /remote-control to retry"`.
+ */
+export const FAILED_FOOTER_TEXT = 'Run /remote-control to retry'
 
 /**
  * Wrap text in an OSC 8 terminal hyperlink. Zero visual width for layout purposes.

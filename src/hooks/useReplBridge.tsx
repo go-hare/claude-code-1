@@ -11,6 +11,7 @@ import { handleRemoteInterrupt } from '../bridge/remoteInterruptHandling.js';
 import { isTranscriptResetResultReady, shouldDeferBridgeResult } from '../bridge/bridgeResultScheduling.js';
 import { buildBridgeConnectUrl } from '../bridge/bridgeStatusUtil.js';
 import { clearBridgeSessionMeta, saveBridgeSessionMeta } from '../bridge/bridgeSessionMeta.js';
+import { clearBridgeSession, saveBridgeSession } from '../utils/sessionStorage.js';
 import { extractInboundMessageFields } from '../bridge/inboundMessages.js';
 import type { BridgeState, ReplBridgeHandle } from '../bridge/replBridge.js';
 import { setReplBridgeHandle } from '../bridge/replBridgeHandle.js';
@@ -57,8 +58,15 @@ import { ContentBlockParam } from '@anthropic-ai/sdk/resources';
 const TASK_STATE_DEBOUNCE_MS = 50;
 const TASK_STATE_POLL_MS = 5000;
 
-/** How long after a failure before replBridgeEnabled is auto-cleared (stops retries). */
+/**
+ * densable 2.1.224 #22 / GKT=1e4 — after failure, auto-clear replBridgeEnabled
+ * (stop retries) but KEEP replBridgeError as the persistent failure indicator.
+ * Changelog: was "only an 8-second toast"; densable keeps error + reconnect copy.
+ */
 export const BRIDGE_FAILURE_DISMISS_MS = 10_000;
+
+/** densable fuse / terminal fail copy (PCt). */
+export const BRIDGE_FUSE_HINT = 'disabled after repeated failures · restart to retry';
 
 /**
  * Max consecutive initReplBridge failures before the hook stops re-attempting
@@ -160,17 +168,102 @@ export function useReplBridge(
       readyPushSentRef.current = false;
 
       const outboundOnly = replBridgeOutboundOnly;
-      function notifyBridgeFailed(detail?: string): void {
+
+      /**
+       * densable rt — toast/notification. wasConnected → "disconnected" vs "failed".
+       */
+      function notifyBridgeFailed(detail?: string, wasConnected = false): void {
         if (outboundOnly) return;
         addNotification({
           key: 'bridge-failed',
           jsx: (
             <>
-              <Text color="error">Remote Control failed</Text>
-              {detail && <Text dimColor> · {detail}</Text>}
+              <Text color="error">{wasConnected ? 'Remote Control disconnected' : 'Remote Control failed'}</Text>
+              <Text dimColor> · {detail || '/remote-control'}</Text>
             </>
           ),
           priority: 'immediate',
+        });
+      }
+
+      /**
+       * densable qe — system warning with reconnect shortcut unless detail already
+       * embeds an action (/login, /remote-control, restart, policy, update).
+       */
+      function appendBridgeDisconnectMessage(detail?: string): void {
+        if (outboundOnly) return;
+        const hasAction =
+          !!detail &&
+          (detail.includes('/login') ||
+            detail.includes('/remote-control') ||
+            detail.includes('restart') ||
+            detail.includes('policy') ||
+            detail.includes('update'));
+        const content = `Remote Control disconnected${detail ? ` — ${detail}` : ''}${
+          hasAction ? '' : ' — run /remote-control to reconnect'
+        }`;
+        setMessages(prev => {
+          const last = prev.at(-1);
+          if (last?.type === 'system' && last.subtype === 'informational' && last.content === content) {
+            return prev;
+          }
+          return [...prev, createSystemMessage(content, 'warning')];
+        });
+      }
+
+      /**
+       * densable nr — after GKT, disable bridge but KEEP replBridgeError (persistent
+       * indicator). Local pre-224 cleared the error on the same timer (= toast-only).
+       */
+      function scheduleBridgeAutoDisable(): void {
+        clearTimeout(failureTimeoutRef.current);
+        failureTimeoutRef.current = setTimeout(() => {
+          if (cancelled) return;
+          failureTimeoutRef.current = undefined;
+          setAppState(prev => {
+            if (!prev.replBridgeError || !prev.replBridgeEnabled) return prev;
+            return {
+              ...prev,
+              replBridgeEnabled: false,
+              // densable: do NOT clear replBridgeError / ErrorKind here
+            };
+          });
+        }, BRIDGE_FAILURE_DISMISS_MS);
+      }
+
+      /**
+       * densable nt — notify + transcript + set error/kind + schedule auto-disable.
+       */
+      function surfaceBridgeFailure(
+        detail: string | undefined,
+        opts?: { kind?: string; wasConnected?: boolean },
+      ): void {
+        const kind = opts?.kind ?? 'terminal';
+        const wasConnected = opts?.wasConnected ?? false;
+        notifyBridgeFailed(detail, wasConnected);
+        appendBridgeDisconnectMessage(detail);
+        setAppState(prev => ({
+          ...prev,
+          replBridgeError: detail,
+          replBridgeErrorKind: kind,
+          replBridgeReconnecting: false,
+          replBridgeSessionActive: false,
+          replBridgeConnected: false,
+        }));
+        scheduleBridgeAutoDisable();
+      }
+
+      // densable: clear prior failure indicator when a new connect cycle starts
+      if (!outboundOnly) {
+        setAppState(prev => {
+          if (prev.replBridgeError === undefined && prev.replBridgeErrorKind === undefined) {
+            return prev;
+          }
+          return {
+            ...prev,
+            replBridgeError: undefined,
+            replBridgeErrorKind: undefined,
+          };
         });
       }
 
@@ -180,13 +273,20 @@ export function useReplBridge(
         );
         // Clear replBridgeEnabled so /remote-control doesn't mistakenly show
         // BridgeDisconnectDialog for a bridge that never connected.
-        const fuseHint = 'disabled after repeated failures · restart to retry';
-        notifyBridgeFailed(fuseHint);
+        notifyBridgeFailed(BRIDGE_FUSE_HINT);
+        appendBridgeDisconnectMessage(BRIDGE_FUSE_HINT);
         setAppState(prev => {
-          if (prev.replBridgeError === fuseHint && !prev.replBridgeEnabled) return prev;
+          if (
+            prev.replBridgeError === BRIDGE_FUSE_HINT &&
+            prev.replBridgeErrorKind === 'terminal' &&
+            !prev.replBridgeEnabled
+          ) {
+            return prev;
+          }
           return {
             ...prev,
-            replBridgeError: fuseHint,
+            replBridgeError: BRIDGE_FUSE_HINT,
+            replBridgeErrorKind: 'terminal',
             replBridgeEnabled: false,
           };
         });
@@ -347,6 +447,7 @@ export function useReplBridge(
                     replBridgeEnvironmentId: envId,
                     replBridgeSessionId: sessionId,
                     replBridgeError: undefined,
+                    replBridgeErrorKind: undefined,
                   };
                 });
                 break;
@@ -360,6 +461,7 @@ export function useReplBridge(
                     replBridgeSessionActive: true,
                     replBridgeReconnecting: false,
                     replBridgeError: undefined,
+                    replBridgeErrorKind: undefined,
                   };
                 });
                 // Notify model about newly available bridge-dependent tools
@@ -457,29 +559,12 @@ export function useReplBridge(
                 });
                 break;
               case 'failed':
-                // Clear any previous failure dismiss timer
+                // densable case"failed": rt + set error/kind + qe + nr (keep error after disable)
                 clearTimeout(failureTimeoutRef.current);
-                notifyBridgeFailed(detail);
-                setAppState(prev => ({
-                  ...prev,
-                  replBridgeError: detail,
-                  replBridgeReconnecting: false,
-                  replBridgeSessionActive: false,
-                  replBridgeConnected: false,
-                }));
-                // Auto-disable after timeout so the hook stops retrying.
-                failureTimeoutRef.current = setTimeout(() => {
-                  if (cancelled) return;
-                  failureTimeoutRef.current = undefined;
-                  setAppState(prev => {
-                    if (!prev.replBridgeError) return prev;
-                    return {
-                      ...prev,
-                      replBridgeEnabled: false,
-                      replBridgeError: undefined,
-                    };
-                  });
-                }, BRIDGE_FAILURE_DISMISS_MS);
+                surfaceBridgeFailure(detail, {
+                  kind: 'terminal',
+                  wasConnected: handleRef.current !== null,
+                });
                 break;
             }
           }
@@ -692,29 +777,22 @@ export function useReplBridge(
           if (!handle) {
             // initReplBridge returned null — a precondition failed. For most
             // cases (no_oauth, policy_denied, etc.) onStateChange('failed')
-            // already fired with a specific hint. The GrowthBook-gate-off case
-            // is intentionally silent — not a failure, just not rolled out.
+            // already fired with a specific hint (surfaceBridgeFailure). If not,
+            // keep a fallback error + densable-persistent auto-disable.
             consecutiveFailuresRef.current++;
             logForDebugging(
               `[bridge:repl] Init returned null (precondition or session creation failed); consecutive failures: ${consecutiveFailuresRef.current}`,
             );
             clearTimeout(failureTimeoutRef.current);
-            setAppState(prev => ({
-              ...prev,
-              replBridgeError: prev.replBridgeError ?? 'check debug logs for details',
-            }));
-            failureTimeoutRef.current = setTimeout(() => {
-              if (cancelled) return;
-              failureTimeoutRef.current = undefined;
-              setAppState(prev => {
-                if (!prev.replBridgeError) return prev;
-                return {
-                  ...prev,
-                  replBridgeEnabled: false,
-                  replBridgeError: undefined,
-                };
-              });
-            }, BRIDGE_FAILURE_DISMISS_MS);
+            setAppState(prev => {
+              if (prev.replBridgeError) return prev;
+              return {
+                ...prev,
+                replBridgeError: 'check debug logs for details',
+                replBridgeErrorKind: prev.replBridgeErrorKind ?? 'terminal',
+              };
+            });
+            scheduleBridgeAutoDisable();
             return;
           }
           handleRef.current = handle;
@@ -727,13 +805,20 @@ export function useReplBridge(
           // already loaded as session events during creation.
           lastWrittenIndexRef.current = initialMessageCount;
 
-          // densable CXr on connect — process-local meta for wXr re-init
-          // (same-process disable→enable / left-arrow without REATTACH env).
+          // densable CXr + Bkn on connect — process-local meta + transcript pointer
+          // so --resume / mid-session resume can force RC on (2.1.224 #30).
           if (!outboundOnly) {
-            saveBridgeSessionMeta(
+            const seq = handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0;
+            saveBridgeSessionMeta(handle.bridgeSessionId, seq, {
+              groupingId: handle.sessionGroupingId,
+            });
+            saveBridgeSession(
+              getSessionId() as import('crypto').UUID,
               handle.bridgeSessionId,
-              handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0,
-              { groupingId: handle.sessionGroupingId },
+              seq,
+              undefined,
+              undefined,
+              handle.sessionGroupingId,
             );
           }
 
@@ -747,6 +832,7 @@ export function useReplBridge(
                 replBridgeSessionUrl: undefined,
                 replBridgeConnectUrl: undefined,
                 replBridgeError: undefined,
+                replBridgeErrorKind: undefined,
               };
             });
             logForDebugging(`[bridge:repl] Mirror initialized, session=${handle.bridgeSessionId}`);
@@ -813,6 +899,7 @@ export function useReplBridge(
                 replBridgeEnvironmentId: handle.environmentId,
                 replBridgeSessionId: handle.bridgeSessionId,
                 replBridgeError: undefined,
+                replBridgeErrorKind: undefined,
               };
             });
 
@@ -848,29 +935,8 @@ export function useReplBridge(
             `[bridge:repl] Init failed: ${errMsg}; consecutive failures: ${consecutiveFailuresRef.current}`,
           );
           clearTimeout(failureTimeoutRef.current);
-          notifyBridgeFailed(errMsg);
-          setAppState(prev => ({
-            ...prev,
-            replBridgeError: errMsg,
-          }));
-          failureTimeoutRef.current = setTimeout(() => {
-            if (cancelled) return;
-            failureTimeoutRef.current = undefined;
-            setAppState(prev => {
-              if (!prev.replBridgeError) return prev;
-              return {
-                ...prev,
-                replBridgeEnabled: false,
-                replBridgeError: undefined,
-              };
-            });
-          }, BRIDGE_FAILURE_DISMISS_MS);
-          if (!outboundOnly) {
-            setMessages(prev => [
-              ...prev,
-              createSystemMessage(`Remote Control failed to connect: ${errMsg}`, 'warning'),
-            ]);
-          }
+          // densable nt — persistent error + reconnect transcript (not toast-only)
+          surfaceBridgeFailure(errMsg, { kind: 'terminal', wasConnected: false });
         }
       })();
 
@@ -889,14 +955,23 @@ export function useReplBridge(
           const isDisable = !stillEnabled;
           if (!outboundOnly) {
             if (isDisable) {
-              // densable FCs / kEo on full disable — drop wXr reattach target.
+              // densable FCs / kEo + EGt — drop process meta and write
+              // bridgeSessionId:"" tombstone so resume does not force RC on.
               clearBridgeSessionMeta();
+              clearBridgeSession(getSessionId() as import('crypto').UUID);
             } else {
-              // densable CXr: keep seq/grouping for same-process re-init.
-              saveBridgeSessionMeta(
+              // densable CXr + Bkn: keep seq/grouping for re-init + resume.
+              const seq = handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0;
+              saveBridgeSessionMeta(handle.bridgeSessionId, seq, {
+                groupingId: handle.sessionGroupingId,
+              });
+              saveBridgeSession(
+                getSessionId() as import('crypto').UUID,
                 handle.bridgeSessionId,
-                handle.getLastSequenceNum?.() ?? handle.getSSESequenceNum?.() ?? 0,
-                { groupingId: handle.sessionGroupingId },
+                seq,
+                undefined,
+                undefined,
+                handle.sessionGroupingId,
               );
             }
           }
@@ -926,6 +1001,7 @@ export function useReplBridge(
             replBridgeEnvironmentId: undefined,
             replBridgeSessionId: undefined,
             replBridgeError: undefined,
+            replBridgeErrorKind: undefined,
             replBridgePermissionCallbacks: undefined,
           };
         });
@@ -957,7 +1033,9 @@ export function useReplBridge(
       }
       const startIndex = Math.min(lastWrittenIndexRef.current, messages.length);
 
-      // Collect new messages since last write
+      // densable PSt — user/assistant + system local_command|compact_boundary.
+      // compact_boundary is the post-compaction wire marker (#21); without it
+      // RC clients only see a silent pause until the next user/assistant row.
       const newMessages: Message[] = [];
       for (let i = startIndex; i < messages.length; i++) {
         const msg = messages[i];
@@ -965,7 +1043,7 @@ export function useReplBridge(
           msg &&
           (msg.type === 'user' ||
             msg.type === 'assistant' ||
-            (msg.type === 'system' && msg.subtype === 'local_command'))
+            (msg.type === 'system' && (msg.subtype === 'local_command' || msg.subtype === 'compact_boundary')))
         ) {
           newMessages.push(msg);
         }
@@ -1005,16 +1083,21 @@ export function useReplBridge(
       const handle = handleRef.current;
       if (!handle) return;
       const drained = drainSdkEvents();
-      const taskEvents = drained.filter(
-        e =>
-          e.type === 'system' &&
-          (e.subtype === 'task_started' ||
-            e.subtype === 'task_progress' ||
-            e.subtype === 'task_updated' ||
-            e.subtype === 'task_notification' ||
-            e.subtype === 'background_tasks_changed' ||
-            e.subtype === 'thinking_tokens'),
-      );
+      // densable yBo (+ status): task_* / thinking_tokens / system status
+      // (compacting). conversation_reset is written directly from /clear.
+      const taskEvents = drained.filter(e => {
+        if (e.type === 'conversation_reset') return true;
+        if (e.type !== 'system') return false;
+        return (
+          e.subtype === 'task_started' ||
+          e.subtype === 'task_progress' ||
+          e.subtype === 'task_updated' ||
+          e.subtype === 'task_notification' ||
+          e.subtype === 'background_tasks_changed' ||
+          e.subtype === 'thinking_tokens' ||
+          e.subtype === 'status'
+        );
+      });
       if (taskEvents.length === 0) return;
       try {
         // SDKMessage shape is a superset of drained events; bridge transport

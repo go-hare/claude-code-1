@@ -58,6 +58,12 @@ import {
   clearBridgeSessionMeta,
   saveBridgeSessionMeta,
 } from './bridgeSessionMeta.js'
+import {
+  isArchiveSuccessStatus,
+  registerBridgePlaceholder,
+  removeBridgePlaceholder,
+  sweepBridgePlaceholders,
+} from './bridgePlaceholders.js'
 import { logBridgeSkip } from './debugUtils.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
@@ -224,6 +230,10 @@ export async function initEnvLessBridgeCore(
   // `isReattaching` tracks whether the final sessionId is the reattached one
   // (affects archive-on-creds-fail: densable skips archive when reattaching).
   let isReattaching = Boolean(reattachSessionId)
+  // densable Ge: set when unarchive is gone and we mint a *new* server session.
+  // flushHistory of local prior conversation into that fresh session is the
+  // 2.1.224 #19 bug (old history appears on a newly minted remote session).
+  let skipInitialHistoryFlush = false
   let sessionId: string
 
   async function mintFreshSession(): Promise<string | null> {
@@ -273,6 +283,9 @@ export async function initEnvLessBridgeCore(
         v2: true,
         via: 'unarchive' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
+      // densable Ge=!0 *before* mint: new server session must not receive
+      // prior local history via initialMessages flush (#19).
+      skipInitialHistoryFlush = true
       const minted = await mintFreshSession()
       if (!minted) {
         onStateChange?.('failed', 'Session creation failed — see debug log')
@@ -293,6 +306,26 @@ export async function initEnvLessBridgeCore(
     }
     sessionId = minted
   }
+
+  // densable 2.1.224 #28: if(!G)FLp(rt); ULp({skipSessionId:rt, archive:Zxr})
+  // G = outboundOnly — mirror path does not claim placeholder ownership.
+  // Register + sweep after session id is final, before /bridge credentials.
+  if (!outboundOnly) {
+    void registerBridgePlaceholder(sessionId)
+  }
+  void sweepBridgePlaceholders({
+    baseUrl,
+    getAccessToken: () => getAccessToken() ?? fallbackAccessToken,
+    skipSessionId: sessionId,
+    archive: id =>
+      archiveSession(
+        id,
+        baseUrl,
+        getAccessToken() ?? fallbackAccessToken,
+        orgUUID,
+        cfg.http_timeout_ms,
+      ),
+  })
 
   // ── 2. Fetch bridge credentials (POST /bridge → worker_jwt, expires_in, api_base_url) ──
   const credentials = await withRetry(
@@ -529,7 +562,13 @@ export async function initEnvLessBridgeCore(
           connectCause as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
 
-      if (!initialFlushDone && initialMessages && initialMessages.length > 0) {
+      // densable: !ur && f.length > 0 && !Ge — skip flush when Ge (mint-after-gone).
+      if (
+        !initialFlushDone &&
+        initialMessages &&
+        initialMessages.length > 0 &&
+        !skipInitialHistoryFlush
+      ) {
         initialFlushDone = true
         // Capture current transport — if 401/teardown happens mid-flush,
         // the stale .finally() must not drain the gate or signal connected.
@@ -734,8 +773,14 @@ export async function initEnvLessBridgeCore(
   wireTransportCallbacks()
 
   // Start flushGate BEFORE connect so writeMessages() during handshake
-  // queues instead of racing the history POST.
-  if (initialMessages && initialMessages.length > 0) {
+  // queues instead of racing the history POST. densable Ge: no initial
+  // history flush after mint-from-gone — leave gate inactive so connect
+  // can signal connected without waiting on a flush that will not run.
+  if (
+    initialMessages &&
+    initialMessages.length > 0 &&
+    !skipInitialHistoryFlush
+  ) {
     flushGate.start()
   }
   transport.connect()
@@ -1278,6 +1323,7 @@ async function archiveSession(
   // validates: if the gate is OFF, the server has been updated to accept
   // cse_* and we correctly send it.
   const compatId = toCompatSessionId(sessionId)
+  let status: ArchiveStatus
   try {
     const response = await axios.post(
       `${baseUrl}/v1/sessions/${compatId}/archive`,
@@ -1295,12 +1341,18 @@ async function archiveSession(
     logForDebugging(
       `[remote-bridge] Archive ${compatId} status=${response.status}`,
     )
-    return response.status
+    status = response.status
   } catch (err) {
     const msg = errorMessage(err)
     logForDebugging(`[remote-bridge] Archive failed: ${msg}`)
-    return axios.isAxiosError(err) && err.code === 'ECONNABORTED'
-      ? 'timeout'
-      : 'error'
+    status =
+      axios.isAxiosError(err) && err.code === 'ECONNABORTED'
+        ? 'timeout'
+        : 'error'
   }
+  // densable Zxr: if(Npa(s))BLp(e) — drop placeholder map entry on success.
+  if (isArchiveSuccessStatus(status)) {
+    void removeBridgePlaceholder(sessionId)
+  }
+  return status
 }
