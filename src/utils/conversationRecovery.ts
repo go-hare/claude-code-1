@@ -577,11 +577,14 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
   sessionId: UUID | undefined
   /** densable 2.1.223 #8 — last relocatedCwd stamp for this session (if any). */
   relocatedCwd?: string
+  /** densable 2.1.224 #30 — non-empty bridge-session pointer (tombstone → absent). */
+  bridgeSessionId?: string
 }> {
   const {
     messages: byUuid,
     leafUuids,
     relocatedCwds,
+    bridgeSessionIds,
   } = await loadTranscriptFile(path)
   let tip: (typeof byUuid extends Map<UUID, infer T> ? T : never) | null = null
   let tipTs = 0
@@ -603,6 +606,7 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
     messages: removeExtraFields(chain),
     sessionId,
     relocatedCwd: sessionId ? relocatedCwds.get(sessionId) : undefined,
+    bridgeSessionId: sessionId ? bridgeSessionIds.get(sessionId) : undefined,
   }
 }
 
@@ -660,6 +664,11 @@ export async function loadConversationForResume(
    * to restoreSessionMetadata so reAppend can re-pin after resume.
    */
   relocatedCwd?: string
+  /**
+   * densable 2.1.224 #30 — non-empty bridge-session id. Resume force-on only
+   * when present; clearBridgeSession tombstone leaves this undefined.
+   */
+  bridgeSessionId?: string
 } | null> {
   try {
     let log: LogOption | null = null
@@ -667,6 +676,8 @@ export async function loadConversationForResume(
     let sessionId: UUID | undefined
     /** densable 2.1.223 #8 — from jsonl path branch when no LogOption. */
     let relocatedFromJsonl: string | undefined
+    /** densable 2.1.224 #30 — from jsonl path branch when no LogOption. */
+    let bridgeFromJsonl: string | undefined
 
     if (source === undefined) {
       // --continue: most recent session, skipping live --bg/daemon sessions
@@ -702,6 +713,7 @@ export async function loadConversationForResume(
       messages = loaded.messages
       sessionId = loaded.sessionId
       relocatedFromJsonl = loaded.relocatedCwd
+      bridgeFromJsonl = loaded.bridgeSessionId
     } else if (typeof source === 'string') {
       // Load specific session by ID
       log = await getLastSessionLog(source as UUID)
@@ -787,6 +799,8 @@ export async function loadConversationForResume(
       endedByModel: log?.endedByModel,
       // densable 2.1.223 #8 — hydrate relocate for restoreSessionMetadata
       relocatedCwd: log?.relocatedCwd ?? relocatedFromJsonl,
+      // densable 2.1.224 #30 — non-empty bridge pointer for resume force-on
+      bridgeSessionId: log?.bridgeSessionId ?? bridgeFromJsonl,
     }
   } catch (error) {
     logError(error as Error)

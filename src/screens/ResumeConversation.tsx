@@ -350,6 +350,22 @@ export function ResumeConversation({
         }
       }
 
+      // densable 2.1.224 #30 — force RC on when transcript has non-empty
+      // bridgeSessionId and not already full RC; tombstone → no force-on.
+      // feature() must stay in if condition position (not &&-chained).
+      if (feature('BRIDGE_MODE')) {
+        if (!forkSession && result.bridgeSessionId) {
+          setAppState(prev => {
+            if (prev.replBridgeEnabled && !prev.replBridgeOutboundOnly) return prev;
+            return {
+              ...prev,
+              replBridgeEnabled: true,
+              replBridgeOutboundOnly: false,
+            };
+          });
+        }
+      }
+
       if (feature('GOAL') && result.goal && result.sessionId) {
         const { hydrateGoalFromTranscript } =
           require('src/services/goal/goalStorage.js') as typeof import('src/services/goal/goalStorage.js');

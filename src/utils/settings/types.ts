@@ -623,6 +623,21 @@ export const SettingsSchema = lazySchema(() =>
             'selected so far. Defaults to never — auto-continue only runs ' +
             'when explicitly set to 60s/5m/10m.',
         ),
+      // densable 2.1.224 #5 — remote dialog + HELD cross-session message deadline
+      dialogExpiry: z
+        .enum(['60s', '5m', '10m', 'never'])
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Max time a permission/user dialog forwarded to a remote client stays parked awaiting an answer, and how long a HELD cross-session message awaits approval, before either resolves to its safe no-action default (cancelled / dropped-with-denial). Defaults to 5m to match the long-standing remote-dialog deadline; "never" disables the deadline. Local-only permission prompts (no remote client) are unaffected. The CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS env var, when set, overrides this. Read from trusted sources only (never a checked-in repo settings file).',
+        ),
+      // densable 2.1.224 #5 — inbound cross-session peer messages (SendMessage)
+      crossSessionInbound: z
+        .enum(['accept', 'hold', 'refuse'])
+        .optional()
+        .describe(
+          "Inbound cross-session peer messages (SendMessage from your other sessions): 'accept' delivers them, 'hold' parks them for your review without letting Claude act, 'refuse' opts this session out. An explicit value always wins. Unset (mode parity): a message auto-delivers only when the sending session's permission-mode class matches yours (bypass↔bypass or prompting↔prompting); a mismatched sender's message is held for your approval; a sender that asserts no class is held only while this session bypasses permission prompts.",
+        ),
       // Only run hooks defined in managed settings (managed-settings.json)
       allowManagedHooksOnly: z
         .boolean()

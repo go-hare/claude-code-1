@@ -148,6 +148,30 @@ type BackgroundTasksChangedSdkEvent = {
   tasks: BackgroundTasksChangedTask[]
 }
 
+/**
+ * densable 2.1.224 #21 — compact progress / idle status for RC clients.
+ * Wire shape matches print.ts / densable $Oi: system/status + status field.
+ */
+type SdkStatusEvent = {
+  type: 'system'
+  subtype: 'status'
+  /** densable $Oi / SDKStatusSchema — only compacting is a known status value */
+  status: 'compacting' | null
+  uuid?: string
+  session_id?: string
+}
+
+/**
+ * densable conversation_reset — /clear propagates to attached RC clients.
+ * Distinct from system/status; densable yBo + WS bookend.
+ */
+type ConversationResetSdkEvent = {
+  type: 'conversation_reset'
+  new_conversation_id: string
+  uuid?: string
+  session_id?: string
+}
+
 export type SdkEvent =
   | TaskStartedEvent
   | TaskProgressEvent
@@ -159,6 +183,8 @@ export type SdkEvent =
   | TaskSummarySdkEvent
   | ModelFallbackSdkEvent
   | BackgroundTasksChangedSdkEvent
+  | SdkStatusEvent
+  | ConversationResetSdkEvent
 
 const MAX_QUEUE_SIZE = 1000
 const queue: SdkEvent[] = []

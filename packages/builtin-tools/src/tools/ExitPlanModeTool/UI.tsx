@@ -25,6 +25,7 @@ export function renderToolResultMessage(
   const isEmpty = !plan || plan.trim() === '';
   const displayPath = filePath ? getDisplayPath(filePath) : '';
   const awaitingLeaderApproval = output.awaitingLeaderApproval;
+  const mailboxWriteFailed = output.mailboxWriteFailed;
 
   // Simplified message for empty plans
   if (isEmpty) {
@@ -34,6 +35,24 @@ export function renderToolResultMessage(
           <Text color={getModeColor('plan')}>{BLACK_CIRCLE}</Text>
           <Text> Exited plan mode</Text>
         </Box>
+      </Box>
+    );
+  }
+
+  // densable dO soft-fail — plan approval never reached team-lead inbox
+  if (mailboxWriteFailed) {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="row">
+          <Text color="error">{BLACK_CIRCLE}</Text>
+          <Text> Plan approval request failed (mailbox write)</Text>
+        </Box>
+        <MessageResponse>
+          <Box flexDirection="column">
+            {filePath && <Text dimColor>Plan file: {displayPath}</Text>}
+            <Text dimColor>Retry ExitPlanMode or message the team lead directly.</Text>
+          </Box>
+        </MessageResponse>
       </Box>
     );
   }

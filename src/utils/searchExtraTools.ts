@@ -782,11 +782,47 @@ export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
   return discoveredTools
 }
 
+/**
+ * densable `CM` / `DEFERRED_DELTA_LIST_CAP` — long removed / MCP status lists
+ * collapse past this many names in model-facing copy.
+ */
+export const DEFERRED_DELTA_LIST_CAP = 30
+
+/**
+ * densable `mln` — tool names that must never enter the announced/listed sets
+ * when reconstructing prior deferred_tools_delta attachments (product-internal).
+ */
+const DEFERRED_DELTA_ANNOUNCE_BLACKLIST = new Set([
+  'Frame',
+  'FrameRead',
+  'TeamCreate',
+  'TeamDelete',
+  'SuggestBackgroundPR',
+  'AutofixPr',
+])
+
+export type DeferredFailedMcpServer = {
+  name: string
+  errorCode?: string
+  error?: string
+}
+
 export type DeferredToolsDelta = {
   addedNames: string[]
-  /** Rendered lines for addedNames; the scan reconstructs from names. */
+  /**
+   * Full description lines only for tools never listed before (densable `b`).
+   * Re-announced tools after reconnect use readdedNames instead.
+   */
   addedLines: string[]
   removedNames: string[]
+  /** densable readdedNames — previously listed, removed, now deferred again. */
+  readdedNames?: string[]
+  /** densable pendingMcpServers — still-connecting server names (sorted). */
+  pendingMcpServers?: string[]
+  /** densable needsAuthMcpServers — needs-auth names (non-interactive only). */
+  needsAuthMcpServers?: string[]
+  /** densable failedMcpServers — failed connections for model surface. */
+  failedMcpServers?: DeferredFailedMcpServer[]
 }
 
 /**
@@ -822,48 +858,110 @@ export function isDeferredToolsDeltaEnabled(): boolean {
 }
 
 /**
- * Diff the current deferred-tool pool against what's already been
- * announced in this conversation (reconstructed by scanning for prior
- * deferred_tools_delta attachments). Returns null if nothing changed.
+ * densable `L3o` / `summarizeByServerPrefix` — group mcp__server__* names for
+ * long readded/removed lists: `mcp__foo__* (3), otherTool`.
+ */
+export function summarizeByServerPrefix(names: string[]): string {
+  const counts = new Map<string, number>()
+  for (const name of names) {
+    const key = name.startsWith('mcp__')
+      ? `${name.split('__', 2).join('__')}__*`
+      : name
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, n]) => (n > 1 ? `${key} (${n})` : key))
+    .join(', ')
+}
+
+/**
+ * densable `NVs` — diff deferred-tool pool + MCP status vs prior DTD attachments.
  *
- * A name that was announced but has since stopped being deferred — yet
- * is still in the base pool — is NOT reported as removed. It's now
- * loaded directly, so telling the model "no longer available" would be
- * wrong.
+ * Tracks two sets from history:
+ * - announced (`s`): currently announced names (added − removed)
+ * - listed (`a`): names that received a full addedLines listing (not readded-only)
+ *
+ * Mid-turn MCP reconnect: tool reappears in deferred pool after remove →
+ * `readdedNames` (no full schema lines). First-time mid-turn connect →
+ * `addedNames` + `addedLines`. Pending / needs-auth / failed MCP lists are
+ * optional args; only compared when the caller passes them (densable iCr).
+ *
+ * A name that was announced but has since stopped being deferred — yet is
+ * still in the base pool — is NOT reported as removed (undefer silent).
  */
 export function getDeferredToolsDelta(
   tools: Tools,
   messages: Message[],
   scanContext?: DeferredToolsDeltaScanContext,
+  pendingMcpServers?: string[],
+  needsAuthMcpServers?: string[],
+  failedMcpServers?: DeferredFailedMcpServer[],
 ): DeferredToolsDelta | null {
+  // densable s / a
   const announced = new Set<string>()
+  const listed = new Set<string>()
+  // last MCP status snapshots from most recent DTD that carried each field
+  let lastPending: string[] = []
+  let lastNeedsAuth: string[] = []
+  let lastFailed: DeferredFailedMcpServer[] = []
   let attachmentCount = 0
   let dtdCount = 0
   const attachmentTypesSeen = new Set<string>()
+
   for (const msg of messages) {
     if (msg.type !== 'attachment') continue
     attachmentCount++
     attachmentTypesSeen.add(msg.attachment!.type)
     if (msg.attachment!.type !== 'deferred_tools_delta') continue
     dtdCount++
-    // densable A1s: pair addedNames only when addedLines is Array; always q0 removedNames
     const att = msg.attachment! as {
       addedLines?: unknown
       addedNames?: unknown
       removedNames?: unknown
+      readdedNames?: unknown
+      pendingMcpServers?: unknown
+      needsAuthMcpServers?: unknown
+      failedMcpServers?: unknown
     }
+    // densable: readdedNames of this attachment — those names were announced
+    // without a full listing, so they must not enter `listed` (a).
+    const readdedInAtt = new Set(asStringArray(att.readdedNames))
+    // densable A1s: pair addedNames only when addedLines is Array
     const addedNames = Array.isArray(att.addedLines)
       ? asStringArray(att.addedNames)
       : []
-    for (const n of addedNames) announced.add(n)
+    for (const n of addedNames) {
+      if (DEFERRED_DELTA_ANNOUNCE_BLACKLIST.has(n)) continue
+      announced.add(n)
+      if (!readdedInAtt.has(n)) listed.add(n)
+    }
     for (const n of asStringArray(att.removedNames)) announced.delete(n)
+    // densable does not drop from `listed` on remove — listed is permanent
+    // for readded detection after reconnect.
+    if (Array.isArray(att.pendingMcpServers)) {
+      lastPending = asStringArray(att.pendingMcpServers)
+    }
+    if (Array.isArray(att.needsAuthMcpServers)) {
+      lastNeedsAuth = asStringArray(att.needsAuthMcpServers)
+    }
+    if (Array.isArray(att.failedMcpServers)) {
+      lastFailed = normalizeFailedMcpServers(att.failedMcpServers)
+    }
   }
 
   const deferred: Tool[] = tools.filter(isDeferredTool)
   const deferredNames = new Set(deferred.map(t => t.name))
   const poolNames = new Set(tools.map(t => t.name))
 
-  const added = deferred.filter(t => !announced.has(t.name))
+  // densable _: deferred tools not currently announced
+  const newlyAnnounced = deferred.filter(t => !announced.has(t.name))
+  // densable b: deferred tools never fully listed (need addedLines)
+  const unlisted = deferred.filter(t => !listed.has(t.name))
+  // densable S: re-announced after prior full listing (in newlyAnnounced ∩ listed)
+  const readdedNames = newlyAnnounced
+    .filter(t => listed.has(t.name))
+    .map(t => t.name)
   const removed: string[] = []
   for (const n of announced) {
     if (deferredNames.has(n)) continue
@@ -871,17 +969,67 @@ export function getDeferredToolsDelta(
     // else: undeferred — silent
   }
 
-  if (added.length === 0 && removed.length === 0) return null
+  const pendingSorted =
+    pendingMcpServers !== undefined ? [...pendingMcpServers].sort() : undefined
+  const pendingChanged =
+    pendingSorted !== undefined &&
+    (pendingSorted.length !== lastPending.length ||
+      pendingSorted.some((n, i) => n !== lastPending[i]))
 
-  // Diagnostic for the inc-4747 scan-finds-nothing bug. Round-1 fields
-  // (messagesLength/attachmentCount/dtdCount from #23167) showed 45.6% of
-  // events have attachments-but-no-DTD, but those numbers are confounded:
-  // subagent first-fires and compact-path scans have EXPECTED prior=0 and
-  // dominate the stat. callSite/querySource/attachmentTypesSeen split the
-  // buckets so the real main-thread cross-turn failure is isolable in BQ.
+  const needsAuthSorted =
+    needsAuthMcpServers !== undefined
+      ? [...needsAuthMcpServers].sort()
+      : undefined
+  const needsAuthChanged =
+    needsAuthSorted !== undefined &&
+    (needsAuthSorted.length !== lastNeedsAuth.length ||
+      needsAuthSorted.some((n, i) => n !== lastNeedsAuth[i]))
+
+  const failedSorted =
+    failedMcpServers !== undefined
+      ? [...failedMcpServers].sort((a, b) => a.name.localeCompare(b.name))
+      : undefined
+  const failedChanged =
+    failedSorted !== undefined &&
+    (failedSorted.length !== lastFailed.length ||
+      failedSorted.some(
+        (f, i) =>
+          f.name !== lastFailed[i]?.name ||
+          f.errorCode !== lastFailed[i]?.errorCode ||
+          f.error !== lastFailed[i]?.error,
+      ))
+
+  if (
+    newlyAnnounced.length === 0 &&
+    removed.length === 0 &&
+    unlisted.length === 0 &&
+    !pendingChanged &&
+    !needsAuthChanged &&
+    !failedChanged
+  ) {
+    return null
+  }
+
+  // densable So([..._, ...b].map name) — unique addedNames for announce
+  const addedNameSet = new Set<string>()
+  for (const t of newlyAnnounced) addedNameSet.add(t.name)
+  for (const t of unlisted) addedNameSet.add(t.name)
+  const addedNames = [...addedNameSet].sort()
+
   logEvent('tengu_deferred_tools_pool_change', {
-    addedCount: added.length,
+    addedCount: newlyAnnounced.length,
+    readdedCount: readdedNames.length,
+    unlistedCount: unlisted.length,
     removedCount: removed.length,
+    pendingChanged: pendingChanged,
+    pendingCount: pendingSorted?.length ?? 0,
+    lastPendingCount: lastPending.length,
+    needsAuthChanged: needsAuthChanged,
+    needsAuthCount: needsAuthSorted?.length ?? 0,
+    lastNeedsAuthCount: lastNeedsAuth.length,
+    failedChanged: failedChanged,
+    failedCount: failedSorted?.length ?? 0,
+    lastFailedCount: lastFailed.length,
     priorAnnouncedCount: announced.size,
     messagesLength: messages.length,
     attachmentCount,
@@ -896,10 +1044,98 @@ export function getDeferredToolsDelta(
   })
 
   return {
-    addedNames: added.map(t => t.name).sort(),
-    addedLines: added.map(formatDeferredToolLine).sort(),
+    addedNames,
+    // densable: only unlisted (b) get full lines — readded skip schemas
+    addedLines: unlisted.map(formatDeferredToolLine).sort(),
     removedNames: removed.sort(),
+    readdedNames: readdedNames.sort(),
+    ...(pendingSorted !== undefined && { pendingMcpServers: pendingSorted }),
+    ...(needsAuthSorted !== undefined && {
+      needsAuthMcpServers: needsAuthSorted,
+    }),
+    ...(failedSorted !== undefined && { failedMcpServers: failedSorted }),
   }
+}
+
+function normalizeFailedMcpServers(raw: unknown): DeferredFailedMcpServer[] {
+  if (!Array.isArray(raw)) return []
+  const out: DeferredFailedMcpServer[] = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue
+    const rec = item as Record<string, unknown>
+    if (typeof rec.name !== 'string') continue
+    const entry: DeferredFailedMcpServer = { name: rec.name }
+    if (typeof rec.errorCode === 'string') entry.errorCode = rec.errorCode
+    if (typeof rec.error === 'string') entry.error = rec.error
+    out.push(entry)
+  }
+  return out
+}
+
+/**
+ * densable `wdn` — map failed MCP clients to model-facing failedMcpServers,
+ * dropping UNCONFIGURED and sanitizing name/error text.
+ */
+export function mapFailedMcpServersForDelta(
+  mcpClients: ReadonlyArray<{
+    type: string
+    name: string
+    error?: string
+    errorCode?: string
+    displayDetail?: string
+  }>,
+): DeferredFailedMcpServer[] {
+  return mcpClients
+    .filter(c => c.type === 'failed')
+    .filter(c => c.errorCode !== 'UNCONFIGURED')
+    .map(c => {
+      const errorParts = [c.error, c.displayDetail].filter(
+        (x): x is string => typeof x === 'string' && Boolean(x),
+      )
+      const entry: DeferredFailedMcpServer = {
+        name: sanitizeDeferredMcpText(c.name),
+      }
+      if (c.errorCode !== undefined) {
+        entry.errorCode = sanitizeDeferredMcpText(c.errorCode)
+      }
+      if (errorParts.length > 0) {
+        entry.error = sanitizeDeferredMcpText(errorParts.join(' '))
+      }
+      return entry
+    })
+}
+
+/** densable `d6` subset — strip quote/bracket chars, collapse space, cap. */
+function sanitizeDeferredMcpText(raw: string): string {
+  let t = raw
+    .normalize('NFKC')
+    .replaceAll(/[<>";‘’‚“”„«»‹›〈〉⟨⟩⟪⟫〈〉《》]/g, ' ')
+    .replaceAll(/\s+/g, ' ')
+    .trim()
+  if (t.length > 200) t = `${t.slice(0, 200)}…`
+  return t
+}
+
+/**
+ * densable policy-block errors (`zoy` / `Abr`) — failed MCP rows whose error
+ * text is an admin block rather than a transport failure.
+ */
+export const MCP_POLICY_BLOCK_ERRORS = new Set([
+  'Blocked by enterprise managed policy',
+  'Disabled by disableClaudeAiConnectors setting',
+])
+
+export function isMcpPolicyBlockError(error: string | undefined): boolean {
+  return error !== undefined && MCP_POLICY_BLOCK_ERRORS.has(error)
+}
+
+/** densable `LPo` — `name (code): "error"` for failed MCP list lines. */
+export function formatFailedMcpServerLine(
+  server: DeferredFailedMcpServer,
+): string {
+  const code = server.errorCode ? ` (${server.errorCode})` : ''
+  const err = server.error ? `: "${server.error}"` : ''
+  return `${server.name}${code}${err}`
 }
 
 /**

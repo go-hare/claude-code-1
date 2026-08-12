@@ -12,6 +12,8 @@
  * - setSalvage(null) only at land / esc / refusal end / !isLoading+j2a.
  */
 
+import { isEmptyMessageText } from './emptyMessageText.js'
+
 /** densable MLp — max streaming preview chars */
 export const STREAMING_TEXT_MAX_CHARS = 1e6
 
@@ -104,16 +106,16 @@ export function resolveStreamingDisplay(
   if (cached) return cached
   const { raw, transformed, salvage, exact } = state
   const base = transformed ?? (raw || null)
-  // densable: (salvage?r7o:base)||null — falsy only. Whitespace-only still
-  // truthy there and would paint a lone ●; treat trim-empty as null so
-  // STREAM_FLAG_DISPLAYED / hasStreamingText match visible content.
-  // (XML strip-only empty is handled in StreamingTextPreview via
-  // isEmptyMessageText — cannot import messages.ts here: circular.)
+  // densable: (salvage?r7o:base)||null — falsy only. Whitespace / strip-only
+  // XML / "(no content)" still truthy there and would paint a lone ● + set
+  // STREAM_FLAG_DISPLAYED (hiding Cooking). Use the same isEmptyMessageText
+  // gate as AssistantTextMessage / StreamingTextPreview.
   const merged =
     (salvage !== null
       ? mergeSalvagePrefix(salvage, base ?? '', exact)
       : base) || null
-  const displayed = merged !== null && merged.trim() !== '' ? merged : null
+  const displayed =
+    merged !== null && !isEmptyMessageText(merged) ? merged : null
   const resolved: StreamingDisplayResolved = {
     displayed,
     hideTrailingLine: transformed === null && !!raw,

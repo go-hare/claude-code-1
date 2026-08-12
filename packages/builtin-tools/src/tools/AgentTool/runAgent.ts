@@ -45,7 +45,10 @@ import type {
   ToolUseSummaryMessage,
   UserMessage,
 } from 'src/types/message.js'
-import { createAttachmentMessage } from 'src/utils/attachments.js'
+import {
+  createAttachmentMessage,
+  getDeferredToolsDeltaAttachment,
+} from 'src/utils/attachments.js'
 import { AbortError } from 'src/utils/errors.js'
 import { getDisplayPath } from 'src/utils/file.js'
 import {
@@ -788,6 +791,22 @@ export async function* runAgent({
     agentMcpTools.length > 0
       ? dedupeToolsByName([...resolvedTools, ...agentMcpTools])
       : resolvedTools
+
+  // densable 2.1.224 #12: after skill preload + agent MCP merge, inject
+  // deferred_tools_delta so mid-spawn deferred MCP tools are named to the
+  // model before the first turn (iCr at attachments_subagent). Skip for
+  // fork children (useExactTools / densable `T`) — parent context already
+  // carries DTD and must keep the cache prefix.
+  if (!useExactTools) {
+    for (const att of getDeferredToolsDeltaAttachment(
+      allTools,
+      resolvedAgentModel,
+      initialMessages,
+      { callSite: 'attachments_subagent', querySource },
+    )) {
+      initialMessages.push(createAttachmentMessage(att))
+    }
+  }
 
   // Build agent-specific options
   const agentOptions: ToolUseContext['options'] = {

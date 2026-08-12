@@ -53,18 +53,21 @@ import { getCurrentWorktreeSession } from '../../utils/worktree.js'
 import { clearSessionCaches } from './caches.js'
 
 function notifyRemoteConversationCleared(): void {
+  // densable 2.1.224 #21 — /clear → conversation_reset to attached RC clients
+  // (WS({type:"conversation_reset",new_conversation_id}) when bridge/CCR live).
+  // Local pre-224 used a non-wire `type:'status'` conversation_cleared shape.
   const handle = getReplBridgeHandle()
   if (!handle) return
   handle.markTranscriptReset?.()
 
-  const message: SDKStatusMessage = {
-    type: 'status',
-    subtype: 'status',
-    status: 'conversation_cleared',
-    message: 'conversation_cleared',
+  const newConversationId = getSessionId()
+  const message = {
+    type: 'conversation_reset' as const,
+    new_conversation_id: newConversationId,
     uuid: randomUUID(),
+    session_id: newConversationId,
   }
-  handle.writeSdkMessages([message])
+  handle.writeSdkMessages([message as unknown as SDKStatusMessage])
 }
 
 export async function clearConversation({
@@ -130,7 +133,8 @@ export async function clearConversation({
   }
 
   setMessages(() => [])
-  notifyRemoteConversationCleared()
+  // densable emits conversation_reset with the *new* conversation id —
+  // defer until after regenerateSessionId() below.
 
   // Clear context-blocked flag so proactive ticks resume after /clear
   if (feature('PROACTIVE') || feature('KAIROS')) {
@@ -255,6 +259,8 @@ export async function clearConversation({
   // Generate new session ID to provide fresh state
   // Set the old session as parent for analytics lineage tracking
   regenerateSessionId({ setCurrentAsParent: true })
+  // densable #21 — after new id is live, notify RC clients of conversation_reset
+  notifyRemoteConversationCleared()
   // Update the environment variable so subprocesses use the new session ID
   if (process.env.USER_TYPE === 'ant' && process.env.CLAUDE_CODE_SESSION_ID) {
     process.env.CLAUDE_CODE_SESSION_ID = getSessionId()

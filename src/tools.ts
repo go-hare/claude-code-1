@@ -165,9 +165,10 @@ const ReviewArtifactTool = feature('REVIEW_ARTIFACT')
   ? require('@claude-code/builtin-tools/tools/ReviewArtifactTool/ReviewArtifactTool.js')
       .ReviewArtifactTool
   : null
+// densable 2.1.224 #7: wire ListAgents (alias ListPeers). Path stays ListPeersTool/.
 const ListPeersTool = feature('UDS_INBOX')
   ? require('@claude-code/builtin-tools/tools/ListPeersTool/ListPeersTool.js')
-      .ListPeersTool
+      .ListAgentsTool
   : null
 const WorkflowTool = feature('WORKFLOW_SCRIPTS')
   ? require('./workflow/wiring.js').createWorkflowToolCore()

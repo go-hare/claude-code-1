@@ -80,6 +80,8 @@ const outputSchema = lazySchema(() =>
       })
       .optional(),
     verificationNudgeNeeded: z.boolean().optional(),
+    /** densable dO: owner mailbox notify soft-failed after task update */
+    ownerNotifyFailed: z.boolean().optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -322,6 +324,8 @@ export const TaskUpdateTool = buildTool({
     }
 
     // Notify new owner via mailbox when ownership changes
+    // densable dO: soft-fail — task update still succeeds; surface notify miss
+    let ownerNotifyFailed = false
     if (updates.owner && isAgentSwarmsEnabled()) {
       const senderName = getAgentName() || 'team-lead'
       const senderColor = getTeammateColor()
@@ -333,7 +337,7 @@ export const TaskUpdateTool = buildTool({
         assignedBy: senderName,
         timestamp: new Date().toISOString(),
       })
-      await writeToMailbox(
+      const assignMsgId = await writeToMailbox(
         updates.owner,
         {
           from: senderName,
@@ -343,6 +347,9 @@ export const TaskUpdateTool = buildTool({
         },
         taskListId,
       )
+      if (assignMsgId === undefined) {
+        ownerNotifyFailed = true
+      }
     }
 
     // Add blocks if provided and not already present
@@ -406,6 +413,7 @@ export const TaskUpdateTool = buildTool({
             ? { from: existingTask.status, to: updates.status }
             : undefined,
         verificationNudgeNeeded,
+        ownerNotifyFailed: ownerNotifyFailed || undefined,
       },
       contextModifier: updateActiveTaskExecutionContext,
     }
@@ -418,6 +426,7 @@ export const TaskUpdateTool = buildTool({
       error,
       statusChange,
       verificationNudgeNeeded,
+      ownerNotifyFailed,
     } = content as Output
     if (!success) {
       // Return as non-error so it doesn't trigger sibling tool cancellation
@@ -431,6 +440,10 @@ export const TaskUpdateTool = buildTool({
     }
 
     let resultContent = `Updated task #${taskId} ${updatedFields.join(', ')}`
+    if (ownerNotifyFailed) {
+      resultContent +=
+        ' (owner assignment notification could not be written to mailbox — mailbox_write_failed)'
+    }
 
     // Add reminder for teammates when they complete a task (supports in-process teammates)
     if (

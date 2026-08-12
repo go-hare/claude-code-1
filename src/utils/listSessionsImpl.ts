@@ -14,6 +14,7 @@ import { getWorktreePathsPortable } from './getWorktreePathsPortable.js'
 import type { LiteSessionFile } from './sessionStoragePortable.js'
 import {
   canonicalizePath,
+  dirBelongsToProject,
   extractFirstPromptFromHead,
   extractJsonStringField,
   extractLastJsonStringField,
@@ -23,6 +24,7 @@ import {
   MAX_SANITIZED_LENGTH,
   readSessionLite,
   sanitizePath,
+  sanitizePathRaw,
   validateUuid,
 } from './sessionStoragePortable.js'
 
@@ -346,16 +348,21 @@ async function gatherProjectCandidates(
   const projectsDir = getProjectsDir()
   const caseInsensitive = process.platform === 'win32'
 
-  // Sort worktree paths by sanitized prefix length (longest first) so
-  // more specific matches take priority over shorter ones
+  // densable p$/mar (2.1.224 #8): long-path prefix is sanitizePathRaw first
+  // MAX_SANITIZED_LENGTH chars + '-', NOT full sanitizePath (which includes
+  // the hash suffix and would never match a foreign long dir name).
+  // Sort by long-prefix length (longest first) so more specific matches win.
   const indexed = worktreePaths.map(wt => {
-    const sanitized = sanitizePath(wt)
+    const exact = sanitizePath(wt)
+    const longPrefix = sanitizePathRaw(wt).slice(0, MAX_SANITIZED_LENGTH) + '-'
     return {
       path: wt,
-      prefix: caseInsensitive ? sanitized.toLowerCase() : sanitized,
+      exact: caseInsensitive ? exact.toLowerCase() : exact,
+      longPrefix: caseInsensitive ? longPrefix.toLowerCase() : longPrefix,
+      isLong: sanitizePathRaw(wt).length > MAX_SANITIZED_LENGTH,
     }
   })
-  indexed.sort((a, b) => b.prefix.length - a.prefix.length)
+  indexed.sort((a, b) => b.longPrefix.length - a.longPrefix.length)
 
   let allDirents: Dirent[]
   try {
@@ -386,25 +393,25 @@ async function gatherProjectCandidates(
     const dirName = caseInsensitive ? dirent.name.toLowerCase() : dirent.name
     if (seenDirs.has(dirName)) continue
 
-    for (const { path: wtPath, prefix } of indexed) {
-      // Only use startsWith for truncated paths (>MAX_SANITIZED_LENGTH) where
-      // a hash suffix follows. For short paths, require exact match to avoid
-      // /root/project matching /root/project-foo.
-      const isMatch =
-        dirName === prefix ||
-        (prefix.length >= MAX_SANITIZED_LENGTH &&
-          dirName.startsWith(prefix + '-'))
-      if (isMatch) {
-        seenDirs.add(dirName)
-        all.push(
-          ...(await listCandidates(
-            join(projectsDir, dirent.name),
-            doStat,
-            wtPath,
-          )),
-        )
-        break
+    for (const { path: wtPath, exact, longPrefix, isLong } of indexed) {
+      // densable p$/mar (2.1.224 #8): exact match always; long-path prefix
+      // only when dirBelongsToProject confirms sessions for this worktree
+      // (shared 200-char sanitized prefix must not steal another project).
+      const exactMatch = dirName === exact
+      const longPrefixMatch = isLong && dirName.startsWith(longPrefix)
+      if (!exactMatch && !longPrefixMatch) continue
+
+      const candidateDir = join(projectsDir, dirent.name)
+      if (
+        longPrefixMatch &&
+        !(await dirBelongsToProject(candidateDir, wtPath, caseInsensitive))
+      ) {
+        continue
       }
+
+      seenDirs.add(dirName)
+      all.push(...(await listCandidates(candidateDir, doStat, wtPath)))
+      break
     }
   }
 

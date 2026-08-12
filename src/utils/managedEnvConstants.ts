@@ -199,6 +199,8 @@ export const SAFE_WHEN_TRUTHY_ENV_VARS = new Set([
  */
 export const SAFE_ENV_VARS = new Set([
   // --- densable LEh (180 keys) ---
+  // densable 2.1.224 #4 — prefer cross-region inference profile prefix over AWS_REGION-derived
+  'ANTHROPIC_BEDROCK_REGION_PREFIX',
   'ANTHROPIC_BEDROCK_SERVICE_TIER',
   'ANTHROPIC_CUSTOM_HEADERS',
   'ANTHROPIC_CUSTOM_MODEL_OPTION',

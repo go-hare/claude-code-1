@@ -66,6 +66,66 @@ describe('resolveStreamingDisplay densable Qci', () => {
     // raw still present for hideTrailing bookkeeping
     expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
   })
+
+  test('strip-only prompt XML collapses to null (no DISPLAYED / Cooking hide)', () => {
+    // Without store-level isEmptyMessageText, raw strip-only XML is truthy →
+    // STREAM_FLAG_DISPLAYED hides Cooking while StreamingTextPreview returns
+    // null → lone ● or empty ● window.
+    const xmlOnly =
+      '<context>hidden prompt wrapper</context>\n' +
+      '<commit_analysis>x</commit_analysis>\n'
+    const r = resolveStreamingDisplay({
+      raw: xmlOnly,
+      transformed: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe(null)
+    const store = createStreamingDisplayStore()
+    store.setRaw(xmlOnly)
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
+    expect(store.getFlags() & STREAM_FLAG_RAW).toBe(STREAM_FLAG_RAW)
+  })
+
+  test('official (no content) sentinel collapses to null', () => {
+    const r = resolveStreamingDisplay({
+      raw: '(no content)',
+      transformed: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe(null)
+    const store = createStreamingDisplayStore()
+    store.setRaw('(no content)')
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
+  })
+
+  test('tags + (no content) after strip collapses to null', () => {
+    const raw = '<context>h</context>\n(no content)'
+    const r = resolveStreamingDisplay({
+      raw,
+      transformed: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe(null)
+    const store = createStreamingDisplayStore()
+    store.setRaw(raw)
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
+  })
+
+  test('real content after strip stays displayed', () => {
+    const r = resolveStreamingDisplay({
+      raw: '<context>meta</context>\nvisible body',
+      transformed: null,
+      salvage: null,
+      exact: false,
+    })
+    expect(r.displayed).toBe('<context>meta</context>\nvisible body')
+    const store = createStreamingDisplayStore()
+    store.setRaw('<context>meta</context>\nvisible body')
+    expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(STREAM_FLAG_DISPLAYED)
+  })
 })
 
 describe('StreamingTextFlushBuffer densable UNf', () => {

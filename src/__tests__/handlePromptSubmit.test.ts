@@ -83,6 +83,71 @@ describe('handlePromptSubmit', () => {
     expect(params.onInputChange).toHaveBeenCalledWith('')
   })
 
+  test('densable #3: cancels submit when unavailable paste strip empties prompt', async () => {
+    const params = createBaseParams()
+    const addNotification = mock((_n: unknown) => {})
+    // queryGuard not reserved → would execute; cancel must early-return first
+    const queryGuard = new QueryGuard()
+
+    await handlePromptSubmit({
+      ...params,
+      queryGuard,
+      input: '[Pasted text #1]',
+      mode: 'prompt',
+      pastedContents: {
+        1: {
+          id: 1,
+          type: 'text',
+          content: '',
+          unavailable: true,
+        },
+      },
+      addNotification,
+      streamMode: 'normal' as any,
+      isExternalLoading: false,
+    })
+
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'pasted-text-unavailable',
+        text: 'Pasted text #1 is no longer available and was removed from the prompt',
+        priority: 'immediate',
+      }),
+    )
+    expect(getCommandQueue()).toHaveLength(0)
+    expect(params.onInputChange).not.toHaveBeenCalled()
+  })
+
+  test('densable #3: continues after strip when remaining text is non-empty', async () => {
+    const params = createBaseParams()
+    const addNotification = mock((_n: unknown) => {})
+
+    await handlePromptSubmit({
+      ...params,
+      input: 'keep [Pasted text #1] me',
+      mode: 'prompt',
+      pastedContents: {
+        1: {
+          id: 1,
+          type: 'text',
+          content: '',
+          unavailable: true,
+        },
+      },
+      addNotification,
+      streamMode: 'normal' as any,
+      hasInterruptibleToolInProgress: false,
+      isExternalLoading: false,
+    })
+
+    expect(addNotification).toHaveBeenCalled()
+    expect(getCommandQueue()).toHaveLength(1)
+    expect(getCommandQueue()[0]).toMatchObject({
+      value: 'keep  me',
+      preExpansionValue: 'keep [Pasted text #1] me',
+    })
+  })
+
   test('queues the input without aborting when a blocking tool is running', async () => {
     const params = createBaseParams()
     const abortController = createAbortController()

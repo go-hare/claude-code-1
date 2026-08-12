@@ -2,10 +2,22 @@ import {
   getModelStrings as getModelStringsState,
   setModelStrings as setModelStringsState,
 } from 'src/bootstrap/state.js'
+import { logForDebugging } from '../debug.js'
+import { getAWSRegion } from '../envUtils.js'
 import { logError } from '../log.js'
 import { sequential } from '../sequential.js'
 import { getInitialSettings } from '../settings/settings.js'
-import { findFirstMatch, getBedrockInferenceProfiles } from './bedrock.js'
+import {
+  applyBedrockRegionPrefix,
+  deriveBedrockRegionPrefixFromAwsRegion,
+  findFirstMatch,
+  formatBedrockRegionPrefixMismatchWarn,
+  formatBedrockRegionPrefixNoDiscoveryWarn,
+  getBedrockInferenceProfiles,
+  getBedrockRegionPrefix,
+  resolveBedrockRegionPrefix,
+  type BedrockRegionPrefix,
+} from './bedrock.js'
 import {
   ALL_MODEL_CONFIGS,
   CANONICAL_ID_TO_KEY,
@@ -30,26 +42,72 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
   return out
 }
 
+/** densable Bpt — rewrite/add preferred cross-region prefix on a bedrock model id. */
+function applyPreferredBedrockPrefix(
+  modelId: string,
+  preferred: BedrockRegionPrefix,
+): string {
+  return applyBedrockRegionPrefix(modelId, preferred)
+}
+
+/**
+ * densable Xo_ / getBedrockModelStrings (2.1.224 #4):
+ *   preferred = Qcr(AWS_REGION)  // env ANTHROPIC_BEDROCK_REGION_PREFIX ?? Upt
+ *   derived   = Upt(AWS_REGION)
+ *   discovery fail/empty → warn if preferred≠derived; builtins with preferred applied
+ *   discovery ok → prefer profile under preferred prefix + needle; warn mismatches
+ */
 async function getBedrockModelStrings(): Promise<ModelStrings> {
-  const fallback = getBuiltinModelStrings('bedrock')
+  const awsRegion = getAWSRegion()
+  const preferred = resolveBedrockRegionPrefix(awsRegion)
+  const derived = deriveBedrockRegionPrefixFromAwsRegion(awsRegion)
+  const builtin = getBuiltinModelStrings('bedrock')
+  const fallback = {} as ModelStrings
+  for (const key of MODEL_KEYS) {
+    fallback[key] = applyPreferredBedrockPrefix(builtin[key], preferred)
+  }
+
+  const warnNoDiscovery = (): void => {
+    if (preferred !== derived) {
+      logForDebugging(
+        formatBedrockRegionPrefixNoDiscoveryWarn(preferred, derived),
+      )
+    }
+  }
+
   let profiles: string[] | undefined
   try {
     profiles = await getBedrockInferenceProfiles()
   } catch (error) {
     logError(error as Error)
+    warnNoDiscovery()
     return fallback
   }
   if (!profiles?.length) {
+    warnNoDiscovery()
     return fallback
   }
-  // Each config's firstParty ID is the canonical substring we search for in the
-  // user's inference profile list (e.g. "claude-opus-4-6" matches
-  // "eu.anthropic.claude-opus-4-6-v1"). Fall back to the hardcoded bedrock ID
-  // when no matching profile is found.
+
+  // Prefer a profile under the preferred prefix that includes the first-party
+  // needle; else any match; else hardcoded bedrock id with preferred applied.
   const out = {} as ModelStrings
+  const mismatched: string[] = []
   for (const key of MODEL_KEYS) {
     const needle = ALL_MODEL_CONFIGS[key].firstParty
-    out[key] = findFirstMatch(profiles, needle) || fallback[key]
+    const preferredHit = profiles.find(
+      p => p.startsWith(`${preferred}.`) && p.includes(needle),
+    )
+    const anyHit = findFirstMatch(profiles, needle)
+    const chosen = preferredHit || anyHit || fallback[key]
+    out[key] = chosen
+    if (preferred !== derived && getBedrockRegionPrefix(chosen) !== preferred) {
+      mismatched.push(needle)
+    }
+  }
+  if (mismatched.length > 0) {
+    logForDebugging(
+      formatBedrockRegionPrefixMismatchWarn(preferred, mismatched),
+    )
   }
   return out
 }

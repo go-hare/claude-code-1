@@ -102,12 +102,15 @@ import { logError } from './log.js'
 import { extractTag, isCompactBoundaryMessage } from './messages.js'
 import { sanitizePath } from './path.js'
 import {
+  dirBelongsToProject,
   extractJsonStringField,
   extractLastJsonStringField,
   extractTypedJsonlField,
   LITE_READ_BUF_SIZE,
+  MAX_SANITIZED_LENGTH,
   readHeadAndTail,
   readTranscriptForLoad,
+  sanitizePathRaw,
   SKIP_PRECOMPACT_THRESHOLD,
 } from './sessionStoragePortable.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
@@ -917,6 +920,12 @@ class Project {
   currentSessionPrNumber: number | undefined
   currentSessionPrUrl: string | undefined
   currentSessionPrRepository: string | undefined
+  /** densable currentSessionBridgeId — non-empty only while RC is live / last saved. */
+  currentSessionBridgeId: string | undefined
+  currentSessionBridgeSeq: number | undefined
+  currentSessionBridgeDialogKinds: string[] | undefined
+  currentSessionBridgeGroupingId: string | undefined
+  currentSessionBridgeNoBackfill: boolean | undefined
 
   sessionFile: string | null = null
   /**
@@ -1294,6 +1303,26 @@ class Project {
         timestamp: new Date().toISOString(),
       })
     }
+    // densable: re-append live bridge-session so compaction doesn't drop it.
+    // Tombstones (empty id) are not re-appended — clearBridgeSession already
+    // wrote the empty marker and cleared cache.
+    if (this.currentSessionBridgeId) {
+      appendEntryToFile(this.sessionFile, {
+        type: 'bridge-session',
+        sessionId,
+        bridgeSessionId: this.currentSessionBridgeId,
+        lastSequenceNum: this.currentSessionBridgeSeq ?? 0,
+        ...(this.currentSessionBridgeDialogKinds?.length
+          ? { declaredDialogKinds: this.currentSessionBridgeDialogKinds }
+          : {}),
+        ...(this.currentSessionBridgeGroupingId
+          ? { sessionGroupingId: this.currentSessionBridgeGroupingId }
+          : {}),
+        ...(this.currentSessionBridgeNoBackfill
+          ? { noHistoryBackfill: true }
+          : {}),
+      })
+    }
   }
 
   async flush(): Promise<void> {
@@ -1668,6 +1697,9 @@ class Project {
       // Mode entries can always be appended
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'worktree-state') {
+      void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'bridge-session') {
+      // densable Bkn/EGt — always append (last-wins; empty id = clear tombstone)
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'content-replacement') {
       // Content replacement records can always be appended. Subagent records
@@ -3003,6 +3035,11 @@ export async function loadTranscriptFromFile(
       worktreeStates,
       endedByModelSessions,
       relocatedCwds,
+      bridgeSessionIds,
+      bridgeLastSeqs,
+      bridgeDialogKindsBySession,
+      bridgeSessionGroupingIds,
+      bridgeNoBackfill,
     } = await loadTranscriptFile(filePath)
 
     if (messages.size === 0) {
@@ -3025,6 +3062,7 @@ export async function loadTranscriptFromFile(
     const customTitle = customTitles.get(leafMessage.sessionId as UUID)
     const tag = tags.get(leafMessage.sessionId as UUID)
     const sessionId = leafMessage.sessionId as UUID
+    const bridgeSessionId = bridgeSessionIds.get(sessionId)
     const log = {
       ...convertToLogOption(
         transcript,
@@ -3050,6 +3088,16 @@ export async function loadTranscriptFromFile(
         : undefined,
       // densable OGe({}, sessionId ? endedSet.has(sessionId) : false)
       endedByModel: endedByModelSessions.has(sessionId),
+      // densable 2.1.224 #30 — non-empty bridge-session only (tombstone deleted map)
+      ...(bridgeSessionId
+        ? {
+            bridgeSessionId,
+            bridgeLastSeq: bridgeLastSeqs.get(sessionId),
+            bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
+            bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
+            bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+          }
+        : {}),
     }
     // densable 2.1.223 #8 — prefer last relocated stamp for projectPath
     const relocated = relocatedCwds.get(sessionId)
@@ -3600,6 +3648,12 @@ export function restoreSessionMetadata(meta: {
   prUrl?: string
   prRepository?: string
   goal?: GoalState
+  /** densable Xye: only hydrate when bridgeSessionId is truthy (not tombstone). */
+  bridgeSessionId?: string
+  bridgeLastSeq?: number
+  bridgeDialogKinds?: string[]
+  bridgeSessionGroupingId?: string
+  bridgeNoHistoryBackfill?: boolean
 }): void {
   const project = getProject()
   // ??= so --name (cacheSessionTitle) wins over the resumed
@@ -3623,6 +3677,19 @@ export function restoreSessionMetadata(meta: {
   if (meta.prUrl) project.currentSessionPrUrl = meta.prUrl
   if (meta.prRepository) project.currentSessionPrRepository = meta.prRepository
   if (meta.goal) project.currentSessionGoal = meta.goal
+  // densable: if(e.bridgeSessionId) hydrate — empty string / missing is a no-op
+  // (user-off tombstone must not re-seed force-on).
+  if (meta.bridgeSessionId) {
+    project.currentSessionBridgeId = meta.bridgeSessionId
+    project.currentSessionBridgeSeq = meta.bridgeLastSeq
+    project.currentSessionBridgeDialogKinds = meta.bridgeDialogKinds?.length
+      ? meta.bridgeDialogKinds
+      : undefined
+    project.currentSessionBridgeGroupingId = meta.bridgeSessionGroupingId
+    project.currentSessionBridgeNoBackfill = meta.bridgeNoHistoryBackfill
+      ? true
+      : undefined
+  }
 }
 
 /**
@@ -3647,6 +3714,107 @@ export function clearSessionMetadata(): void {
   project.currentSessionPrNumber = undefined
   project.currentSessionPrUrl = undefined
   project.currentSessionPrRepository = undefined
+  project.currentSessionBridgeId = undefined
+  project.currentSessionBridgeSeq = undefined
+  project.currentSessionBridgeDialogKinds = undefined
+  project.currentSessionBridgeGroupingId = undefined
+  project.currentSessionBridgeNoBackfill = undefined
+}
+
+/**
+ * densable Bkn — persist live bridge session onto the transcript + process cache.
+ * Called on host_exit cleanup and after connect so --resume can force RC on.
+ */
+export function saveBridgeSession(
+  sessionId: UUID,
+  bridgeSessionId: string,
+  lastSequenceNum: number,
+  fullPath?: string,
+  declaredDialogKinds?: string[],
+  sessionGroupingId?: string,
+  noHistoryBackfill?: boolean,
+): void {
+  if (!bridgeSessionId) return
+  const project = getProject()
+  const resolvedPath = fullPath ?? getTranscriptPathForSession(sessionId)
+  if (project.sessionFile || fullPath) {
+    try {
+      appendEntryToFile(resolvedPath, {
+        type: 'bridge-session',
+        sessionId,
+        bridgeSessionId,
+        lastSequenceNum,
+        ...(declaredDialogKinds?.length ? { declaredDialogKinds } : {}),
+        ...(sessionGroupingId ? { sessionGroupingId } : {}),
+        ...(noHistoryBackfill ? { noHistoryBackfill: true } : {}),
+      })
+    } catch (err) {
+      logForDebugging(
+        `saveBridgeSession: transcript append failed: ${errorMessage(err)}`,
+      )
+    }
+  }
+  if (sessionId === getSessionId()) {
+    project.currentSessionBridgeId = bridgeSessionId
+    project.currentSessionBridgeSeq = lastSequenceNum
+    project.currentSessionBridgeDialogKinds = declaredDialogKinds?.length
+      ? [...declaredDialogKinds]
+      : undefined
+    project.currentSessionBridgeGroupingId = sessionGroupingId
+    project.currentSessionBridgeNoBackfill = noHistoryBackfill
+      ? true
+      : undefined
+  }
+  logForDebugging(
+    `[bridge:session] Bkn session=${sessionId} bridge=${bridgeSessionId} seq=${lastSequenceNum}`,
+  )
+}
+
+/**
+ * densable EGt / clearBridgeSession — user turned RC off.
+ * Appends tombstone `bridgeSessionId:""` so loadTranscriptFile drops the pointer
+ * (truthy check), preventing resume force-on (2.1.224 #30).
+ */
+export function clearBridgeSession(
+  sessionId?: UUID,
+  fullPath?: string,
+  opts?: { targetExists?: boolean },
+): void {
+  const n = sessionId ?? (getSessionId() as UUID)
+  const project = getProject()
+  const resolvedPath = fullPath ?? getTranscriptPathForSession(n)
+  if (project.sessionFile || (opts?.targetExists && fullPath !== undefined)) {
+    try {
+      appendEntryToFile(resolvedPath, {
+        type: 'bridge-session',
+        sessionId: n,
+        bridgeSessionId: '',
+        lastSequenceNum: 0,
+      })
+    } catch (err) {
+      logForDebugging(
+        `clearBridgeSession: transcript append failed: ${errorMessage(err)}`,
+      )
+    }
+  }
+  if (n === getSessionId()) {
+    project.currentSessionBridgeId = undefined
+    project.currentSessionBridgeSeq = undefined
+    project.currentSessionBridgeDialogKinds = undefined
+    project.currentSessionBridgeGroupingId = undefined
+    project.currentSessionBridgeNoBackfill = undefined
+  }
+  logForDebugging(`[bridge:session] EGt cleared session=${n}`)
+}
+
+/** densable zri — drop process-local bridge cache without writing a tombstone. */
+export function clearBridgeSessionCache(): void {
+  const project = getProject()
+  project.currentSessionBridgeId = undefined
+  project.currentSessionBridgeSeq = undefined
+  project.currentSessionBridgeDialogKinds = undefined
+  project.currentSessionBridgeGroupingId = undefined
+  project.currentSessionBridgeNoBackfill = undefined
 }
 
 /**
@@ -3848,6 +4016,11 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       leafUuids,
       endedByModelSessions,
       relocatedCwds,
+      bridgeSessionIds,
+      bridgeLastSeqs,
+      bridgeDialogKindsBySession,
+      bridgeSessionGroupingIds,
+      bridgeNoBackfill,
     } = await loadTranscriptFile(sessionFile)
 
     if (messages.size === 0) {
@@ -3959,6 +4132,16 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
         sessionId && contextCollapseSnapshot?.sessionId === sessionId
           ? contextCollapseSnapshot
           : undefined,
+      // densable 2.1.224 #30 — hydrate non-empty bridge-session for resume force-on
+      ...(sessionId && bridgeSessionIds.get(sessionId)
+        ? {
+            bridgeSessionId: bridgeSessionIds.get(sessionId),
+            bridgeLastSeq: bridgeLastSeqs.get(sessionId),
+            bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
+            bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
+            bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+          }
+        : { bridgeSessionId: undefined }),
     }
   } catch {
     // If loading fails, return the original log
@@ -4032,6 +4215,7 @@ const METADATA_TYPE_MARKERS = [
   '"type":"agent-setting"',
   '"type":"mode"',
   '"type":"worktree-state"',
+  '"type":"bridge-session"',
   '"type":"goal"',
   '"type":"goal-cleared"',
   '"type":"pr-link"',
@@ -4381,6 +4565,58 @@ function walkChainBeforeParse(buf: Buffer): Buffer {
 }
 
 /**
+ * densable bridge-session last-wins: non-empty id sets maps; empty tombstone
+ * deletes (user turned RC off — 2.1.224 #30).
+ */
+function applyBridgeSessionEntry(
+  entry: {
+    sessionId?: UUID
+    bridgeSessionId?: string
+    lastSequenceNum?: number
+    declaredDialogKinds?: string[]
+    sessionGroupingId?: string
+    noHistoryBackfill?: boolean
+  },
+  bridgeSessionIds: Map<UUID, string>,
+  bridgeLastSeqs: Map<UUID, number>,
+  bridgeDialogKindsBySession: Map<UUID, string[]>,
+  bridgeSessionGroupingIds: Map<UUID, string>,
+  bridgeNoBackfill: Map<UUID, boolean>,
+): void {
+  if (!entry.sessionId) return
+  const sid = entry.sessionId
+  const id = entry.bridgeSessionId
+  if (id) {
+    bridgeSessionIds.set(sid, id)
+    if (typeof entry.lastSequenceNum === 'number') {
+      bridgeLastSeqs.set(sid, entry.lastSequenceNum)
+    }
+    if (entry.declaredDialogKinds?.length) {
+      bridgeDialogKindsBySession.set(sid, entry.declaredDialogKinds)
+    } else {
+      bridgeDialogKindsBySession.delete(sid)
+    }
+    if (entry.sessionGroupingId) {
+      bridgeSessionGroupingIds.set(sid, entry.sessionGroupingId)
+    } else {
+      bridgeSessionGroupingIds.delete(sid)
+    }
+    if (entry.noHistoryBackfill) {
+      bridgeNoBackfill.set(sid, true)
+    } else {
+      bridgeNoBackfill.delete(sid)
+    }
+  } else {
+    // Empty-string tombstone (clearBridgeSession) — drop pointer
+    bridgeSessionIds.delete(sid)
+    bridgeLastSeqs.delete(sid)
+    bridgeDialogKindsBySession.delete(sid)
+    bridgeSessionGroupingIds.delete(sid)
+    bridgeNoBackfill.delete(sid)
+  }
+}
+
+/**
  * Loads all messages, summaries, and file history snapshots from a transcript file.
  * Returns the messages, summaries, custom titles, tags, file history snapshots, and attribution snapshots.
  */
@@ -4415,6 +4651,15 @@ export async function loadTranscriptFile(
   endedByModelSessions: Set<UUID>
   /** densable 2.1.223 #8 — last relocatedCwd per sessionId (mid-session /cd). */
   relocatedCwds: Map<UUID, string>
+  /**
+   * densable bridgeSessionIds — last-wins non-empty bridge-session pointer.
+   * Empty-string tombstone deletes the map entry (user-off, 2.1.224 #30).
+   */
+  bridgeSessionIds: Map<UUID, string>
+  bridgeLastSeqs: Map<UUID, number>
+  bridgeDialogKindsBySession: Map<UUID, string[]>
+  bridgeSessionGroupingIds: Map<UUID, string>
+  bridgeNoBackfill: Map<UUID, boolean>
 }> {
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
@@ -4429,6 +4674,11 @@ export async function loadTranscriptFile(
   const modes = new Map<UUID, string>()
   const worktreeStates = new Map<UUID, PersistedWorktreeSession | null>()
   const goals = new Map<UUID, GoalState>()
+  const bridgeSessionIds = new Map<UUID, string>()
+  const bridgeLastSeqs = new Map<UUID, number>()
+  const bridgeDialogKindsBySession = new Map<UUID, string[]>()
+  const bridgeSessionGroupingIds = new Map<UUID, string>()
+  const bridgeNoBackfill = new Map<UUID, boolean>()
   const fileHistorySnapshots = new Map<UUID, FileHistorySnapshotMessage>()
   const attributionSnapshots = new Map<UUID, AttributionSnapshotMessage>()
   const contentReplacements = new Map<UUID, ContentReplacementRecord[]>()
@@ -4550,6 +4800,15 @@ export async function loadTranscriptFile(
           entry.relocatedCwd
         ) {
           relocatedCwds.set(entry.sessionId as UUID, entry.relocatedCwd)
+        } else if (entry.type === 'bridge-session') {
+          applyBridgeSessionEntry(
+            entry,
+            bridgeSessionIds,
+            bridgeLastSeqs,
+            bridgeDialogKindsBySession,
+            bridgeSessionGroupingIds,
+            bridgeNoBackfill,
+          )
         }
       }
     }
@@ -4652,6 +4911,15 @@ export async function loadTranscriptFile(
       ) {
         // densable 2.1.223 #8 — last-wins per sessionId
         relocatedCwds.set(entry.sessionId as UUID, entry.relocatedCwd)
+      } else if (entry.type === 'bridge-session') {
+        applyBridgeSessionEntry(
+          entry,
+          bridgeSessionIds,
+          bridgeLastSeqs,
+          bridgeDialogKindsBySession,
+          bridgeSessionGroupingIds,
+          bridgeNoBackfill,
+        )
       }
     }
   } catch {
@@ -4769,26 +5037,21 @@ export async function loadTranscriptFile(
     leafUuids,
     endedByModelSessions,
     relocatedCwds,
+    bridgeSessionIds,
+    bridgeLastSeqs,
+    bridgeDialogKindsBySession,
+    bridgeSessionGroupingIds,
+    bridgeNoBackfill,
   }
 }
 
 /**
  * Loads all messages, summaries, file history snapshots, and attribution snapshots from a specific session file.
+ * Return type follows loadTranscriptFile (incl. densable bridge-session maps).
  */
-async function loadSessionFile(sessionId: UUID): Promise<{
-  messages: Map<UUID, TranscriptMessage>
-  summaries: Map<UUID, string>
-  customTitles: Map<UUID, string>
-  tags: Map<UUID, string>
-  agentSettings: Map<UUID, string>
-  worktreeStates: Map<UUID, PersistedWorktreeSession | null>
-  goals: Map<UUID, GoalState>
-  fileHistorySnapshots: Map<UUID, FileHistorySnapshotMessage>
-  attributionSnapshots: Map<UUID, AttributionSnapshotMessage>
-  contentReplacements: Map<UUID, ContentReplacementRecord[]>
-  contextCollapseCommits: ContextCollapseCommitEntry[]
-  contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
-}> {
+async function loadSessionFile(
+  sessionId: UUID,
+): Promise<Awaited<ReturnType<typeof loadTranscriptFile>>> {
   const sessionFile = join(
     getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
     `${sessionId}.jsonl`,
@@ -4875,6 +5138,11 @@ export async function getLastSessionLog(
     goals,
     contextCollapseCommits,
     contextCollapseSnapshot,
+    bridgeSessionIds,
+    bridgeLastSeqs,
+    bridgeDialogKindsBySession,
+    bridgeSessionGroupingIds,
+    bridgeNoBackfill,
   } = await loadSessionFile(sessionId)
   if (messages.size === 0) return null
   // Prime getSessionMessages cache so recordTranscript (called after REPL
@@ -4898,6 +5166,7 @@ export async function getLastSessionLog(
   const customTitle = customTitles.get(lastMessage.sessionId as UUID)
   const tag = tags.get(lastMessage.sessionId as UUID)
   const agentSetting = agentSettings.get(sessionId)
+  const bridgeSessionId = bridgeSessionIds.get(sessionId)
   return {
     ...convertToLogOption(
       transcript,
@@ -4920,6 +5189,16 @@ export async function getLastSessionLog(
       contextCollapseSnapshot?.sessionId === sessionId
         ? contextCollapseSnapshot
         : undefined,
+    // densable 2.1.224 #30
+    ...(bridgeSessionId
+      ? {
+          bridgeSessionId,
+          bridgeLastSeq: bridgeLastSeqs.get(sessionId),
+          bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
+          bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
+          bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+        }
+      : {}),
   }
 }
 
@@ -5119,18 +5398,22 @@ async function getStatOnlyLogsForWorktrees(
   // directories (e.g. c:/Users/...). Use case-insensitive comparison.
   const caseInsensitive = process.platform === 'win32'
 
-  // Sort worktree paths by sanitized prefix length (longest first) so
-  // more specific matches take priority over shorter ones. Without this,
-  // a short prefix like -code-myrepo could match -code-myrepo-worktree1
-  // before the longer, more specific prefix gets a chance.
+  // densable p$/mar (2.1.224 #8): long-path prefix is sanitizePathRaw first
+  // MAX_SANITIZED_LENGTH chars + '-', NOT full sanitizePath (hash suffix).
+  // Sort by long-prefix length (longest first) so more specific matches win.
+  // Without this, a short prefix like -code-myrepo could match
+  // -code-myrepo-worktree1 before the longer, more specific prefix.
   const indexed = worktreePaths.map(wt => {
-    const sanitized = sanitizePath(wt)
+    const exact = sanitizePath(wt)
+    const longPrefix = sanitizePathRaw(wt).slice(0, MAX_SANITIZED_LENGTH) + '-'
     return {
       path: wt,
-      prefix: caseInsensitive ? sanitized.toLowerCase() : sanitized,
+      exact: caseInsensitive ? exact.toLowerCase() : exact,
+      longPrefix: caseInsensitive ? longPrefix.toLowerCase() : longPrefix,
+      isLong: sanitizePathRaw(wt).length > MAX_SANITIZED_LENGTH,
     }
   })
-  indexed.sort((a, b) => b.prefix.length - a.prefix.length)
+  indexed.sort((a, b) => b.longPrefix.length - a.longPrefix.length)
 
   const allLogs: LogOption[] = []
   const seenDirs = new Set<string>()
@@ -5152,18 +5435,26 @@ async function getStatOnlyLogsForWorktrees(
     const dirName = caseInsensitive ? dirent.name.toLowerCase() : dirent.name
     if (seenDirs.has(dirName)) continue
 
-    for (const { path: wtPath, prefix } of indexed) {
-      if (dirName === prefix || dirName.startsWith(prefix + '-')) {
-        seenDirs.add(dirName)
-        allLogs.push(
-          ...(await getSessionFilesLite(
-            join(projectsDir, dirent.name),
-            undefined,
-            wtPath,
-          )),
-        )
-        break
+    for (const { path: wtPath, exact, longPrefix, isLong } of indexed) {
+      // densable p$/mar (2.1.224 #8): exact always; long-path prefix only
+      // after dirBelongsToProject content verification — never bare startsWith.
+      const exactMatch = dirName === exact
+      const longPrefixMatch = isLong && dirName.startsWith(longPrefix)
+      if (!exactMatch && !longPrefixMatch) continue
+
+      const candidateDir = join(projectsDir, dirent.name)
+      if (
+        longPrefixMatch &&
+        !(await dirBelongsToProject(candidateDir, wtPath, caseInsensitive))
+      ) {
+        continue
       }
+
+      seenDirs.add(dirName)
+      allLogs.push(
+        ...(await getSessionFilesLite(candidateDir, undefined, wtPath)),
+      )
+      break
     }
   }
 
@@ -5631,6 +5922,11 @@ export async function loadAllLogsFromSessionFile(
     leafUuids,
     endedByModelSessions,
     relocatedCwds,
+    bridgeSessionIds,
+    bridgeLastSeqs,
+    bridgeDialogKindsBySession,
+    bridgeSessionGroupingIds,
+    bridgeNoBackfill,
   } = await loadTranscriptFile(sessionFile, { keepAllLeaves: true })
 
   if (messages.size === 0) return []
@@ -5669,6 +5965,7 @@ export async function loadAllLogsFromSessionFile(
 
     const firstMessage = chain[0]!
     const sessionId = leafMessage.sessionId as UUID
+    const bridgeSessionId = bridgeSessionIds.get(sessionId)
 
     logs.push({
       date: leafMessage.timestamp,
@@ -5707,6 +6004,16 @@ export async function loadAllLogsFromSessionFile(
       ),
       contentReplacements: contentReplacements.get(sessionId) ?? [],
       endedByModel: endedByModelSessions.has(sessionId),
+      // densable 2.1.224 #30
+      ...(bridgeSessionId
+        ? {
+            bridgeSessionId,
+            bridgeLastSeq: bridgeLastSeqs.get(sessionId),
+            bridgeDialogKinds: bridgeDialogKindsBySession.get(sessionId),
+            bridgeSessionGroupingId: bridgeSessionGroupingIds.get(sessionId),
+            bridgeNoHistoryBackfill: bridgeNoBackfill.get(sessionId),
+          }
+        : {}),
     })
   }
 

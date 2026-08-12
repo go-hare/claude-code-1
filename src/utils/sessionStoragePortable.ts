@@ -7,6 +7,7 @@
  */
 
 import type { UUID } from 'crypto'
+import type { Dirent } from 'fs'
 import { open as fsOpen, readdir, realpath, stat } from 'fs/promises'
 import { join } from 'path'
 import { getClaudeConfigHomeDir } from './envUtils.js'
@@ -332,6 +333,14 @@ function simpleHash(str: string): string {
 }
 
 /**
+ * densable `fJi` — raw path component sanitization without length truncation.
+ * Used for content-level project ownership checks (mar compares full fJi forms).
+ */
+export function sanitizePathRaw(name: string): string {
+  return name.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+/**
  * Makes a string safe for use as a directory or file name.
  * Replaces all non-alphanumeric characters with hyphens.
  * This ensures compatibility across all platforms, including Windows
@@ -340,11 +349,13 @@ function simpleHash(str: string): string {
  * For deeply nested paths that would exceed filesystem limits (255 bytes),
  * truncates and appends a hash suffix for uniqueness.
  *
+ * densable `zE` / `MAX_SANITIZED_LENGTH` (`AX=200`).
+ *
  * @param name - The string to make safe (e.g., '/Users/foo/my-project' or 'plugin:name:server')
  * @returns A safe name (e.g., '-Users-foo-my-project' or 'plugin-name-server')
  */
 export function sanitizePath(name: string): string {
-  const sanitized = name.replace(/[^a-zA-Z0-9]/g, '-')
+  const sanitized = sanitizePathRaw(name)
   if (sanitized.length <= MAX_SANITIZED_LENGTH) {
     return sanitized
   }
@@ -380,38 +391,95 @@ export async function canonicalizePath(dir: string): Promise<string> {
 }
 
 /**
- * Finds the project directory for a given path, tolerating hash mismatches
- * for long paths (>200 chars). The CLI uses Bun.hash while the SDK under
- * Node.js uses simpleHash — for paths that exceed MAX_SANITIZED_LENGTH,
- * these produce different directory suffixes. This function falls back to
- * prefix-based scanning when the exact match doesn't exist.
+ * densable `mar` / `dirBelongsToProject` — verify a projects/* dir actually
+ * contains sessions for `projectPath` by scanning jsonl head/tail for
+ * `cwd` or `relocated.relocatedCwd` whose sanitized form matches.
+ *
+ * Prevents long paths that share the same 200-char sanitized prefix from
+ * stealing each other's session directories (densable 2.1.224 #8).
+ */
+export async function dirBelongsToProject(
+  projectDir: string,
+  projectPath: string,
+  caseInsensitive = false,
+): Promise<boolean> {
+  const want = sanitizePathRaw(projectPath)
+  let dirents: Dirent[]
+  try {
+    dirents = await readdir(projectDir, { withFileTypes: true })
+  } catch {
+    return false
+  }
+  for (const dirent of dirents) {
+    if (!dirent.isFile() || !dirent.name.endsWith('.jsonl')) continue
+    const lite = await readSessionLite(join(projectDir, dirent.name))
+    if (lite === null) continue
+    const sessionCwd =
+      extractTypedJsonlField(lite.tail, 'relocated', 'relocatedCwd') ??
+      extractJsonStringField(lite.head, 'cwd')
+    if (sessionCwd === undefined) continue
+    const got = sanitizePathRaw(sessionCwd.normalize('NFC'))
+    if (caseInsensitive) {
+      if (got.toLowerCase() === want.toLowerCase()) return true
+    } else if (got === want) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * densable `p$` / `findProjectDirs` — exact project dir plus (for long paths)
+ * other dirs sharing the sanitized prefix that pass `dirBelongsToProject`.
+ * Short paths never prefix-match (would steal sibling project-foo).
+ */
+export async function findProjectDirs(projectPath: string): Promise<string[]> {
+  const exact = getProjectDir(projectPath)
+  const found: string[] = []
+  try {
+    await readdir(exact)
+    found.push(exact)
+  } catch {
+    // exact may be absent when only a hash-mismatched sibling exists
+  }
+
+  const sanitized = sanitizePath(projectPath)
+  if (sanitized.length <= MAX_SANITIZED_LENGTH) {
+    return found
+  }
+
+  const projectsDir = getProjectsDir()
+  const caseInsensitive = process.platform === 'win32'
+  const norm = (s: string) => (caseInsensitive ? s.toLowerCase() : s)
+  const prefix = norm(sanitized.slice(0, MAX_SANITIZED_LENGTH) + '-')
+  const exactNorm = norm(exact)
+
+  try {
+    const dirents = await readdir(projectsDir, { withFileTypes: true })
+    for (const dirent of dirents) {
+      if (!dirent.isDirectory()) continue
+      if (!norm(dirent.name).startsWith(prefix)) continue
+      const candidate = join(projectsDir, dirent.name)
+      if (norm(candidate) === exactNorm) continue
+      if (await dirBelongsToProject(candidate, projectPath, caseInsensitive)) {
+        found.push(candidate)
+      }
+    }
+  } catch {
+    // projects dir missing — return whatever exact we had
+  }
+  return found
+}
+
+/**
+ * densable `TJi` — first of `findProjectDirs`.
+ * Long-path hash mismatch falls back only when a candidate dir's sessions
+ * actually belong to this project path (mar), never the first prefix hit.
  */
 export async function findProjectDir(
   projectPath: string,
 ): Promise<string | undefined> {
-  const exact = getProjectDir(projectPath)
-  try {
-    await readdir(exact)
-    return exact
-  } catch {
-    // Exact match failed — for short paths this means no sessions exist.
-    // For long paths, try prefix matching to handle hash mismatches.
-    const sanitized = sanitizePath(projectPath)
-    if (sanitized.length <= MAX_SANITIZED_LENGTH) {
-      return undefined
-    }
-    const prefix = sanitized.slice(0, MAX_SANITIZED_LENGTH)
-    const projectsDir = getProjectsDir()
-    try {
-      const dirents = await readdir(projectsDir, { withFileTypes: true })
-      const match = dirents.find(
-        d => d.isDirectory() && d.name.startsWith(prefix + '-'),
-      )
-      return match ? join(projectsDir, match.name) : undefined
-    } catch {
-      return undefined
-    }
-  }
+  return (await findProjectDirs(projectPath))[0]
 }
 
 /**

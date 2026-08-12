@@ -138,6 +138,13 @@ export const outputSchema = lazySchema(() =>
       .string()
       .optional()
       .describe('Unique identifier for the plan approval request'),
+    /** densable dO soft-fail: mailbox write did not land */
+    mailboxWriteFailed: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, the plan approval request could not be written to the team-lead mailbox',
+      ),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -284,7 +291,8 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
         requestId,
       }
 
-      await writeToMailbox(
+      // densable dO: only report awaiting approval when mailbox write lands.
+      const planMsgId = await writeToMailbox(
         'team-lead',
         {
           from: agentName,
@@ -293,6 +301,19 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
         },
         teamName,
       )
+
+      if (planMsgId === undefined) {
+        return {
+          data: {
+            plan,
+            isAgent: true,
+            filePath,
+            awaitingLeaderApproval: false,
+            requestId,
+            mailboxWriteFailed: true,
+          },
+        }
+      }
 
       // Update task state to show awaiting approval (for in-process teammates)
       const appState = context.getAppState()
@@ -425,9 +446,24 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
       planWasEdited,
       awaitingLeaderApproval,
       requestId,
+      mailboxWriteFailed,
     },
     toolUseID,
   ) {
+    // densable dO soft-fail — do not claim submission when mailbox write failed
+    if (mailboxWriteFailed) {
+      return {
+        type: 'tool_result',
+        content: `Failed to write the plan approval request to the team-lead mailbox (mailbox_write_failed). Nothing was sent.
+
+Plan file: ${filePath}
+
+Retry ExitPlanMode, or message the team lead directly. Request ID (not delivered): ${requestId}`,
+        tool_use_id: toolUseID,
+        is_error: true,
+      }
+    }
+
     // Handle teammate awaiting leader approval
     if (awaitingLeaderApproval) {
       return {

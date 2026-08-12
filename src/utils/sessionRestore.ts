@@ -339,6 +339,11 @@ type ResumeLoadResult = {
   goal?: import('../types/logs.js').GoalState
   /** densable 2.1.214 EndConversation marker → AppState.endedByModel */
   endedByModel?: boolean
+  /**
+   * densable 2.1.224 #30 — non-empty bridge-session pointer. Force RC on
+   * resume only when set; tombstone (user-off) leaves this undefined.
+   */
+  bridgeSessionId?: string
 }
 
 /**
@@ -581,6 +586,18 @@ export async function processResumedConversation(
     context.initialState.initialMessage ??
     (opts.replyOnResume ? ({ replay: true as const } as const) : null)
 
+  // densable 2.1.224 #30:
+  // !forkSession && e.bridgeSessionId && !(already full RC) → force RC on.
+  // User-off wrote clearBridgeSession tombstone → bridgeSessionId absent → no force-on.
+  // feature() must stay in if/ternary condition position (bun:bundle).
+  let forceRcOn = false
+  if (feature('BRIDGE_MODE')) {
+    const alreadyFullRc =
+      context.initialState.replBridgeEnabled &&
+      !context.initialState.replBridgeOutboundOnly
+    forceRcOn = !opts.forkSession && !!result.bridgeSessionId && !alreadyFullRc
+  }
+
   return {
     messages: result.messages,
     fileHistorySnapshots: result.fileHistorySnapshots,
@@ -599,6 +616,9 @@ export async function processResumedConversation(
       ...(restoredAttribution && { attribution: restoredAttribution }),
       ...(standaloneAgentContext && { standaloneAgentContext }),
       agentDefinitions: refreshedAgentDefs,
+      ...(forceRcOn
+        ? { replBridgeEnabled: true, replBridgeOutboundOnly: false }
+        : {}),
     },
   }
 }

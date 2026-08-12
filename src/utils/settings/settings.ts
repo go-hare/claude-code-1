@@ -27,6 +27,7 @@ import { profileCheckpoint } from '../startupProfiler.js'
 import {
   type EditableSettingSource,
   getEnabledSettingSources,
+  isSettingSourceEnabled,
   type SettingSource,
 } from './constants.js'
 import { markInternalWrite } from './internalWrites.js'
@@ -1158,6 +1159,114 @@ export function askUserQuestionTimeoutToMs(
     case undefined:
       return null
   }
+}
+
+/** densable 2.1.224 #5 — same enum as askUserQuestionTimeout. */
+export type DialogExpiry = '60s' | '5m' | '10m' | 'never'
+
+/**
+ * densable IZi / H7e("dialogExpiry")[0] — default `5m` when unset.
+ * Trusted sources only for the deadline (see resolveDialogExpiryFromSources).
+ */
+export function getDialogExpiry(): DialogExpiry {
+  return resolveDialogExpiryFromSources() ?? '5m'
+}
+
+/**
+ * densable: dialogExpiry is not taken from a checked-in project settings file.
+ * Prefer policy → flag → user; project/local only if stricter/present after
+ * trusted sources left it unset (we simply ignore project/local entirely to
+ * match "never a checked-in repo settings file").
+ */
+export function resolveDialogExpiryFromSources(
+  getSource: typeof getSettingsForSource = getSettingsForSource,
+  isEnabled: typeof isSettingSourceEnabled = isSettingSourceEnabled,
+): DialogExpiry | undefined {
+  for (const source of [
+    'policySettings',
+    'flagSettings',
+    'userSettings',
+  ] as const) {
+    if (!isEnabled(source)) continue
+    const v = getSource(source)?.dialogExpiry
+    if (v === '60s' || v === '5m' || v === '10m' || v === 'never') {
+      return v
+    }
+  }
+  return undefined
+}
+
+/**
+ * densable dialogExpiry → ms; null when "never".
+ * CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS overrides when set (positive int).
+ */
+export function dialogExpiryToMs(
+  value: DialogExpiry | undefined = getDialogExpiry(),
+): number | null {
+  const envMs = process.env.CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS
+  if (envMs !== undefined && envMs !== '') {
+    const parsed = parseInt(envMs, 10)
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return parsed
+    }
+  }
+  switch (value) {
+    case '60s':
+      return 60_000
+    case '5m':
+      return 300_000
+    case '10m':
+      return 600_000
+    case 'never':
+    case undefined:
+      return null
+  }
+}
+
+/** densable 2.1.224 #5 — inbound cross-session policy. */
+export type CrossSessionInbound = 'accept' | 'hold' | 'refuse'
+
+/**
+ * densable TPr() — resolve crossSessionInbound across settings sources.
+ * Trusted first (policy → flag → user): first explicit wins.
+ * Project/local may only *tighten* (accept < hold < refuse) over the current value.
+ */
+export function resolveCrossSessionInbound(
+  getSource: typeof getSettingsForSource = getSettingsForSource,
+  isEnabled: typeof isSettingSourceEnabled = isSettingSourceEnabled,
+): CrossSessionInbound | undefined {
+  const rank: Record<CrossSessionInbound, number> = {
+    accept: 0,
+    hold: 1,
+    refuse: 2,
+  }
+  let resolved: CrossSessionInbound | undefined
+  for (const source of [
+    'policySettings',
+    'flagSettings',
+    'userSettings',
+  ] as const) {
+    if (!isEnabled(source)) continue
+    const v = getSource(source)?.crossSessionInbound
+    if (v === 'accept' || v === 'hold' || v === 'refuse') {
+      resolved = v
+      break
+    }
+  }
+  for (const source of ['localSettings', 'projectSettings'] as const) {
+    if (!isEnabled(source)) continue
+    const v = getSource(source)?.crossSessionInbound
+    if (v === 'accept' || v === 'hold' || v === 'refuse') {
+      if (rank[v] > rank[resolved ?? 'accept']) {
+        resolved = v
+      }
+    }
+  }
+  return resolved
+}
+
+export function getCrossSessionInbound(): CrossSessionInbound | undefined {
+  return resolveCrossSessionInbound()
 }
 
 /**

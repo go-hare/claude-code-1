@@ -17,8 +17,13 @@ import { getAbortReasonMessage } from 'src/utils/abortController.js'
 import type { AgentContext } from 'src/utils/agentContext.js'
 import { type EffortValue, isUltracodeModeActive } from 'src/utils/effort.js'
 
-/** densable qpg / zpg */
-export const DEFAULT_MAX_SUBAGENTS_PER_SESSION = 200
+/**
+ * densable 2.1.212 qpg=200 default hard cap.
+ * densable 2.1.224 #23: session subagent spawn hard cap removed — no default
+ * ceiling. Env CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION still optional override.
+ * Concurrent + depth limits unchanged.
+ */
+export const DEFAULT_MAX_SUBAGENTS_PER_SESSION = Number.POSITIVE_INFINITY
 export const DEFAULT_MAX_WEB_SEARCHES_PER_SESSION = 200
 /** densable vBg */
 export const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 20
@@ -36,7 +41,10 @@ let concurrentSubagents = 0
 /** densable Hts — cache GB hazel once resolved */
 let hazelTrellisCache: number | null = null
 
-/** densable Fvu / Etu — CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION ?? 200 */
+/**
+ * densable 2.1.224 #23 — CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION when set;
+ * else no session spawn ceiling (Infinity). Concurrent/depth still apply.
+ */
 export function resolveMaxSubagentsPerSession(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
@@ -294,9 +302,11 @@ export function assertCanSpawnSubagent(options?: {
       )
     }
   }
+  // densable 2.1.224 #23: no default session spawn ceiling. Only enforce when
+  // CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION sets a finite max.
   const max = resolveMaxSubagentsPerSession(options?.env)
   const used = getTotalAgentSpawns()
-  if (used >= max) {
+  if (Number.isFinite(max) && used >= max) {
     throw new Error(
       `Subagent spawn limit reached (${used} of ${max} agents spawned). Complete the remaining work directly with your tools instead of spawning more agents. If more agents are genuinely needed, ask the user to raise CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION.`,
     )

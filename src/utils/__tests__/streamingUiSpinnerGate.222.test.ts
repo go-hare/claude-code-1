@@ -52,6 +52,77 @@ describe('densable zm streaming spinner gate', () => {
     )
   })
 
+  test('streamingTextStore resolve uses isEmptyMessageText (DISPLAYED matches visible)', () => {
+    // A: store-level gate so STREAM_FLAG_DISPLAYED is not set for strip-only
+    // / (no content) — otherwise zm hides Cooking while XEl paints nothing.
+    const src = readFileSync(
+      join(ROOT, 'src/utils/streamingTextStore.ts'),
+      'utf8',
+    ).replace(/\r\n/g, '\n')
+    expect(src).toContain("from './emptyMessageText.js'")
+    expect(src).toContain('!isEmptyMessageText(merged)')
+    expect(src).toContain(
+      'merged !== null && !isEmptyMessageText(merged) ? merged : null',
+    )
+  })
+
+  test('focus recovery repaintAfterFocus (no forceRedraw erase)', () => {
+    // C: every FOCUS_IN soft full-damage (FOCUS_OUT often drops); atlas only
+    // on blur→focus; never forceRedraw erase.
+    const app = readFileSync(
+      join(ROOT, 'packages/@ant/ink/src/components/App.tsx'),
+      'utf8',
+    ).replace(/\r\n/g, '\n')
+    // densable atlas only when prev was blurred
+    expect(app).toContain("if (prev === 'blurred')")
+    expect(app).toContain('ink?.proactiveAtlasResetOnFocus()')
+    expect(app).toContain('ink?.repaintAfterFocus()')
+    // executable focus path: if (isFocused) { ... repaint ... } no forceRedraw
+    const focusHandler = app.match(
+      /handleTerminalFocus = \(isFocused: boolean\): void => \{([\s\S]*?)\n {2}\};/,
+    )
+    expect(focusHandler).not.toBeNull()
+    const focusCode = focusHandler![1]!
+      .split('\n')
+      .filter(l => !/^\s*\/\//.test(l))
+      .join('\n')
+    expect(focusCode).toMatch(/if \(isFocused\) \{/)
+    expect(focusCode).toContain('repaintAfterFocus()')
+    expect(focusCode).not.toContain('forceRedraw')
+    // must NOT gate repaint solely on prev === 'blurred' (intermittent miss)
+    expect(focusCode).not.toMatch(
+      /if \(isFocused && prev === 'blurred'\)[\s\S]*repaintAfterFocus/,
+    )
+
+    const ink = readFileSync(
+      join(ROOT, 'packages/@ant/ink/src/core/ink.tsx'),
+      'utf8',
+    ).replace(/\r\n/g, '\n')
+    expect(ink).toContain('repaintAfterFocus(): void')
+    // body must call onRender, must not set needsEraseBeforePaint / forceRedraw
+    const m = ink.match(/repaintAfterFocus\(\): void \{([\s\S]*?)\n {2}\}/)
+    expect(m).not.toBeNull()
+    const body = m![1]!
+    expect(body).toContain('this.prevFrameContaminated = true')
+    expect(body).toContain('this.onRender()')
+    expect(body).not.toContain('forceRedraw')
+    expect(body).not.toContain('needsEraseBeforePaint')
+
+    // stdin-gap soft recover (FOCUS_IN often missing after app-switch)
+    const reassert = ink.match(
+      /reassertTerminalModes = \(includeAltScreen = false\): void => \{([\s\S]*?)\n {2}\};/,
+    )
+    expect(reassert).not.toBeNull()
+    const reassertBody = reassert![1]!
+    // hard path returns after reenterAltScreen; soft path is after that branch
+    expect(reassertBody).toContain(
+      'if (includeAltScreen) {\n      this.reenterAltScreen();\n      return;\n    }',
+    )
+    const soft = reassertBody.split('if (includeAltScreen)')[1] ?? ''
+    const afterHard = soft.split('return;')[1] ?? ''
+    expect(afterHard).toContain('this.repaintAfterFocus()')
+  })
+
   test('clearStreamingText is densable cX-shaped (no setSalvage in clear body)', () => {
     const src = readFileSync(
       join(ROOT, 'src/screens/REPL.tsx'),

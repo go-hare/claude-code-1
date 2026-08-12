@@ -18,11 +18,13 @@ const BRIEF_TOOL_NAME: string | null =
 // Maps legacy tool names to their current canonical names.
 // When a tool is renamed, add old → new here so permission rules,
 // hooks, and persisted wire names resolve to the canonical name.
+// densable 2.1.224 #7: ListPeers → ListAgents (SEA compat table).
 const LEGACY_TOOL_NAME_ALIASES: Record<string, string> = {
   Task: AGENT_TOOL_NAME,
   KillShell: TASK_STOP_TOOL_NAME,
   AgentOutputTool: TASK_OUTPUT_TOOL_NAME,
   BashOutputTool: TASK_OUTPUT_TOOL_NAME,
+  ListPeers: 'ListAgents',
   ...((feature('KAIROS') || feature('KAIROS_BRIEF')) && BRIEF_TOOL_NAME
     ? { Brief: BRIEF_TOOL_NAME }
     : {}),

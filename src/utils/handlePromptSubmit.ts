@@ -5,7 +5,12 @@ import { type Command, getCommandName, isCommandEnabled } from '../commands.js'
 import { selectableUserMessagesFilter } from '../components/MessageSelector.js'
 import type { SpinnerMode } from '../components/Spinner/types.js'
 import type { QuerySource } from '../constants/querySource.js'
-import { expandPastedTextRefs, parseReferences } from '../history.js'
+import {
+  expandPastedTextRefs,
+  formatUnavailablePastedRefsMessage,
+  parseReferences,
+  processPastedRefs,
+} from '../history.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import type { IDESelection } from '../hooks/useIdeSelection.js'
 import type { AppState } from '../state/AppState.js'
@@ -192,6 +197,7 @@ export async function handlePromptSubmit(
 
   // Images are only sent if their [Image #N] placeholder is still in the text.
   // Deleting the inline pill drops the image; orphaned entries are filtered here.
+  // densable Fk: keep non-image/non-audio always; keep image/audio only if referenced.
   const referencedIds = new Set(parseReferences(input).map(r => r.id))
   const pastedContents = Object.fromEntries(
     Object.entries(rawPastedContents).filter(
@@ -225,12 +231,38 @@ export async function handlePromptSubmit(
     return
   }
 
-  // Parse references and replace with actual content early, before queueing
-  // or immediate-command dispatch, so queued commands and immediate commands
-  // both receive the expanded text from when it was submitted.
-  const finalInput = expandPastedTextRefs(input, pastedContents)
+  // densable hLd/mLd/gLd (#3/#14): strip unavailable non-image paste refs.
+  // Cancel-and-confirm (do not submit) when strip leaves empty / bash / slash.
+  // Otherwise continue with stripped input so expanded text omits dead pastes.
+  const { stripped, expanded, removed } = processPastedRefs(
+    input,
+    pastedContents,
+  )
+  if (removed.length > 0) {
+    params.addNotification?.({
+      key: 'pasted-text-unavailable',
+      text: formatUnavailablePastedRefsMessage(removed),
+      priority: 'immediate',
+    })
+    if (
+      stripped.trim() === '' ||
+      mode === 'bash' ||
+      input.trimStart().startsWith('/')
+    ) {
+      // densable: cancel submit; input box still holds original R (not cleared yet).
+      return
+    }
+  }
+
+  // Prefer densable expanded path (mLd.expanded) so unavailable skips match d6e.
+  // Fall back to expandPastedTextRefs for empty-removed case (identical).
+  const finalInput =
+    removed.length > 0 ? expanded : expandPastedTextRefs(input, pastedContents)
+  // densable: only count available text pastes for tengu_paste_text.
   const pastedTextRefs = parseReferences(input).filter(
-    r => pastedContents[r.id]?.type === 'text',
+    r =>
+      pastedContents[r.id]?.type === 'text' &&
+      !pastedContents[r.id]?.unavailable,
   )
   const pastedTextCount = pastedTextRefs.length
   const pastedTextBytes = pastedTextRefs.reduce(

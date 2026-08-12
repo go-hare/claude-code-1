@@ -166,6 +166,8 @@ export type AppState = DeepImmutable<{
   replBridgeSessionId: string | undefined
   // Always-on bridge: error message when connection fails (shown in BridgeDialog)
   replBridgeError: string | undefined
+  // densable 2.1.224 #22 — failure kind ("terminal" default); kept with error after auto-disable
+  replBridgeErrorKind: string | undefined
   // Always-on bridge: session name set via `/remote-control <name>` (used as session title)
   replBridgeInitialName: string | undefined
   // Always-on bridge: first-time remote dialog pending (set by /remote-control command)
@@ -578,6 +580,7 @@ export function getDefaultAppState(): AppState {
     replBridgeEnvironmentId: undefined,
     replBridgeSessionId: undefined,
     replBridgeError: undefined,
+    replBridgeErrorKind: undefined,
     replBridgeInitialName: undefined,
     showRemoteCallout: false,
     toolPermissionContext: {

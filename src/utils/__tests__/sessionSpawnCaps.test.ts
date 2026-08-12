@@ -29,13 +29,14 @@ afterEach(() => {
 })
 
 describe('resolveMax*PerSession', () => {
-  test('defaults 200', () => {
-    expect(resolveMaxSubagentsPerSession({})).toBe(
-      DEFAULT_MAX_SUBAGENTS_PER_SESSION,
-    )
+  test('densable 2.1.224 #23: default subagent session cap is unlimited', () => {
+    expect(resolveMaxSubagentsPerSession({})).toBe(Number.POSITIVE_INFINITY)
+    expect(DEFAULT_MAX_SUBAGENTS_PER_SESSION).toBe(Number.POSITIVE_INFINITY)
+    // WebSearch soft budget still defaults to 200
     expect(resolveMaxWebSearchesPerSession({})).toBe(
       DEFAULT_MAX_WEB_SEARCHES_PER_SESSION,
     )
+    expect(DEFAULT_MAX_WEB_SEARCHES_PER_SESSION).toBe(200)
   })
 
   test('env override', () => {
@@ -51,12 +52,12 @@ describe('resolveMax*PerSession', () => {
     ).toBe(7)
   })
 
-  test('invalid env falls back', () => {
+  test('invalid env falls back to unlimited (224)', () => {
     expect(
       resolveMaxSubagentsPerSession({
         CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION: 'nope',
       }),
-    ).toBe(200)
+    ).toBe(Number.POSITIVE_INFINITY)
   })
 })
 
@@ -179,13 +180,20 @@ describe('assertSubagentDepthAllowed', () => {
 })
 
 describe('assertCanSpawnSubagent', () => {
-  test('allows then blocks at cap', () => {
+  test('allows then blocks at env cap', () => {
     const env = { CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION: '2' }
     assertCanSpawnSubagent({ env })
     assertCanSpawnSubagent({ env })
     expect(() => assertCanSpawnSubagent({ env })).toThrow(
       /Subagent spawn limit reached \(2 of 2/,
     )
+  })
+
+  test('densable 2.1.224 #23: no default hard cap (200+ spawns ok)', () => {
+    for (let i = 0; i < 210; i++) {
+      assertCanSpawnSubagent({ env: {} })
+    }
+    expect(getTotalAgentSpawns()).toBe(210)
   })
 
   test('aborted throws AbortError', () => {

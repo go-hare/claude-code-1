@@ -169,6 +169,7 @@ import {
   getLastEmittedDate,
   setLastEmittedDate,
   getKairosActive,
+  getIsNonInteractiveSession,
 } from '../bootstrap/state.js'
 import type { QuerySource } from '../constants/querySource.js'
 import {
@@ -176,6 +177,7 @@ import {
   isDeferredToolsDeltaEnabled,
   isSearchExtraToolsEnabledOptimistic,
   isSearchExtraToolsToolAvailable,
+  mapFailedMcpServersForDelta,
   type DeferredToolsDeltaScanContext,
 } from './searchExtraTools.js'
 import {
@@ -774,6 +776,18 @@ export type Attachment =
       addedNames: string[]
       addedLines: string[]
       removedNames: string[]
+      /** densable readdedNames — reconnect after prior full listing */
+      readdedNames?: string[]
+      /** densable pendingMcpServers */
+      pendingMcpServers?: string[]
+      /** densable needsAuthMcpServers (non-interactive) */
+      needsAuthMcpServers?: string[]
+      /** densable failedMcpServers */
+      failedMcpServers?: Array<{
+        name: string
+        errorCode?: string
+        error?: string
+      }>
     }
   | {
       type: 'agent_listing_delta'
@@ -999,6 +1013,24 @@ export async function getAttachments(
               : 'attachments_subagent',
             querySource,
           },
+          // densable iCr: pass MCP status so mid-turn connect/auth/fail is announced
+          (toolUseContext.options.mcpClients ?? [])
+            .filter(c => c.type === 'pending')
+            .map(c => c.name),
+          getIsNonInteractiveSession()
+            ? (toolUseContext.options.mcpClients ?? [])
+                .filter(c => c.type === 'needs-auth')
+                .map(c => c.name)
+            : undefined,
+          // densable drn / tengu_surface_failed_mcp_servers (default false)
+          getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_surface_failed_mcp_servers',
+            false,
+          )
+            ? mapFailedMcpServersForDelta(
+                toolUseContext.options.mcpClients ?? [],
+              )
+            : undefined,
         ),
       ),
     ),
@@ -1797,11 +1829,19 @@ function getUltrathinkEffortAttachment(input: string | null): Attachment[] {
 }
 
 // Exported for compact.ts — the gate must be identical at both call sites.
+// densable `iCr` — optional MCP status args for mid-turn announce (224 #12).
 export function getDeferredToolsDeltaAttachment(
   tools: Tools,
   model: string,
   messages: Message[] | undefined,
   scanContext?: DeferredToolsDeltaScanContext,
+  pendingMcpServers?: string[],
+  needsAuthMcpServers?: string[],
+  failedMcpServers?: Array<{
+    name: string
+    errorCode?: string
+    error?: string
+  }>,
 ): Attachment[] {
   if (!isDeferredToolsDeltaEnabled()) return []
   // These three checks mirror the sync parts of isSearchExtraToolsEnabled —
@@ -1813,7 +1853,16 @@ export function getDeferredToolsDeltaAttachment(
   // are directly callable anyway.
   if (!isSearchExtraToolsEnabledOptimistic()) return []
   if (!isSearchExtraToolsToolAvailable(tools)) return []
-  const delta = getDeferredToolsDelta(tools, messages ?? [], scanContext)
+  // model is densable parity (iCr second arg); gates above already cover enablement.
+  void model
+  const delta = getDeferredToolsDelta(
+    tools,
+    messages ?? [],
+    scanContext,
+    pendingMcpServers,
+    needsAuthMcpServers,
+    failedMcpServers,
+  )
   if (!delta) return []
   return [{ type: 'deferred_tools_delta', ...delta }]
 }

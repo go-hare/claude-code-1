@@ -206,9 +206,16 @@ export function isFoundationModel(modelId: string): boolean {
 
 /**
  * Cross-region inference profile prefixes for Bedrock.
- * These prefixes allow routing requests to models in specific regions.
+ * densable 2.1.224: `us-gov` is a valid env override via
+ * ANTHROPIC_BEDROCK_REGION_PREFIX (Qgg/ldc); AWS_REGION us-gov-* also maps here.
  */
-const BEDROCK_REGION_PREFIXES = ['us', 'eu', 'apac', 'global'] as const
+const BEDROCK_REGION_PREFIXES = [
+  'us',
+  'eu',
+  'apac',
+  'global',
+  'us-gov',
+] as const
 
 /**
  * Extract the model/inference profile ID from a Bedrock ARN.
@@ -232,6 +239,72 @@ export function extractModelIdFromArn(modelId: string): string {
 export type BedrockRegionPrefix = (typeof BEDROCK_REGION_PREFIXES)[number]
 
 /**
+ * densable Upt(e) — map AWS region string → cross-region inference profile prefix.
+ *   us-gov-* → us-gov
+ *   us-*     → us
+ *   eu-*     → eu
+ *   ap-*     → apac
+ *   else     → global
+ */
+export function deriveBedrockRegionPrefixFromAwsRegion(
+  awsRegion: string | undefined | null,
+): BedrockRegionPrefix {
+  const t = awsRegion ?? ''
+  if (t.startsWith('us-gov-')) return 'us-gov'
+  if (t.startsWith('us-')) return 'us'
+  if (t.startsWith('eu-')) return 'eu'
+  if (t.startsWith('ap-')) return 'apac'
+  return 'global'
+}
+
+/**
+ * densable Qcr(e):
+ *   if AWS region is us-gov-* → always "us-gov" (env cannot override residency)
+ *   else ANTHROPIC_BEDROCK_REGION_PREFIX ?? Upt(e)
+ *
+ * Changelog 2.1.224 #4: prefer a specific cross-region inference profile over
+ * the AWS_REGION-derived one when the env is set.
+ */
+export function resolveBedrockRegionPrefix(
+  awsRegion: string | undefined | null = getAWSRegion(),
+  env: NodeJS.ProcessEnv = process.env,
+): BedrockRegionPrefix {
+  if (awsRegion?.startsWith('us-gov-')) return 'us-gov'
+  const raw = env.ANTHROPIC_BEDROCK_REGION_PREFIX
+  if (raw !== undefined && raw !== '') {
+    // densable Ne.enum(ldc) — accept known prefixes; unknown falls through to Upt
+    if ((BEDROCK_REGION_PREFIXES as readonly string[]).includes(raw)) {
+      return raw as BedrockRegionPrefix
+    }
+  }
+  return deriveBedrockRegionPrefixFromAwsRegion(awsRegion)
+}
+
+/** densable warn when env override differs from AWS_REGION-derived prefix and discovery unavailable. */
+export function formatBedrockRegionPrefixNoDiscoveryWarn(
+  preferred: string,
+  derived: string,
+): string {
+  return (
+    `ANTHROPIC_BEDROCK_REGION_PREFIX=${preferred} is being applied without an availability check ` +
+    `(inference-profile discovery is unavailable). If requests 400, ensure ${preferred}.* ` +
+    `cross-region inference profiles are enabled in this account, or unset the variable to fall back to ${derived}.*.`
+  )
+}
+
+/** densable warn when some models resolved without the preferred prefix. */
+export function formatBedrockRegionPrefixMismatchWarn(
+  preferred: string,
+  modelLabels: string[],
+): string {
+  return (
+    `ANTHROPIC_BEDROCK_REGION_PREFIX=${preferred}: ${modelLabels.length} model(s) resolved to a different prefix ` +
+    `(no ${preferred}.* profile in this account): ${modelLabels.join(', ')}. ` +
+    `This is a preference, not a residency guarantee.`
+  )
+}
+
+/**
  * Extract the region prefix from a Bedrock cross-region inference model ID.
  * Handles both plain model IDs and full ARN format.
  * For example:
@@ -248,7 +321,11 @@ export function getBedrockRegionPrefix(
   // ARN format: arn:aws:bedrock:<region>:<account>:inference-profile/<profile-id>
   const effectiveModelId = extractModelIdFromArn(modelId)
 
-  for (const prefix of BEDROCK_REGION_PREFIXES) {
+  // Longer prefixes first so `us-gov` wins over `us`.
+  const ordered = [...BEDROCK_REGION_PREFIXES].sort(
+    (a, b) => b.length - a.length,
+  )
+  for (const prefix of ordered) {
     if (effectiveModelId.startsWith(`${prefix}.anthropic.`)) {
       return prefix
     }

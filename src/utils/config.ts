@@ -59,6 +59,11 @@ export type PastedContent = {
   filename?: string // Display name for images in attachment slot
   dimensions?: ImageDimensions
   sourcePath?: string // Original file path for images dragged onto the terminal
+  /**
+   * densable 2.1.224: paste store / history resolve miss — content aged out.
+   * Placeholder stays in display; expand skips; submit strips non-image refs.
+   */
+  unavailable?: boolean
 }
 
 export interface SerializedStructuredHistoryEntry {
@@ -682,6 +687,21 @@ export type GlobalConfig = {
   unpinOpus47LaunchEffort?: boolean
   unpinOpus48LaunchEffort?: boolean
   unpinFable5LaunchEffort?: boolean
+
+  /**
+   * densable 2.1.224 #28 `replBridgePlaceholders` — server session ids minted
+   * by this machine that may still be live on the server after the owner
+   * process died. Swept (ULp) after each RC mint to archive untouched orphans.
+   * Key: cse_* / session_* id; value: owner pid + procStart + createdAt.
+   */
+  replBridgePlaceholders?: Record<
+    string,
+    {
+      pid: number
+      procStart?: string
+      createdAt: number
+    }
+  >
 
   /** Last-seen org_model_default.updated_at (suppresses repeat clear/notice). */
   lastSeenOrgDefaultUpdatedAt?: string

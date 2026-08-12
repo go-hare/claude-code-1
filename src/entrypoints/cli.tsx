@@ -433,6 +433,15 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // densable 2.1.224 #1: `claude self-hosted-runner` — no feature gate in SEA dispatch.
+  // Order matches densable: orchestrator|setup|doctor|code-sign|decode-token|root.
+  if (args[0] === 'self-hosted-runner') {
+    profileCheckpoint('cli_self_hosted_runner_path');
+    const { selfHostedRunnerCliMain } = await import('../self-hosted-runner/main.js');
+    await selfHostedRunnerCliMain(args.slice(1));
+    return;
+  }
+
   // Fast-path for --worktree --tmux: exec into tmux before loading full CLI
   const hasTmuxFlag = args.includes('--tmux') || args.includes('--tmux=classic');
   if (

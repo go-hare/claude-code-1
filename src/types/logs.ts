@@ -63,6 +63,16 @@ export type LogOption = {
    * (EndConversation succeeded). Hydrated into AppState.endedByModel on resume.
    */
   endedByModel?: boolean
+  /**
+   * densable 2.1.224 #30 — last non-empty `bridge-session` pointer. Absent when
+   * never connected or after clearBridgeSession tombstone (`bridgeSessionId:""`).
+   * Resume force-on only when this is a non-empty string.
+   */
+  bridgeSessionId?: string
+  bridgeLastSeq?: number
+  bridgeDialogKinds?: string[]
+  bridgeSessionGroupingId?: string
+  bridgeNoHistoryBackfill?: boolean
 }
 
 export type SummaryMessage = {
@@ -274,6 +284,23 @@ export type WorktreeStateEntry = {
 }
 
 /**
+ * densable `bridge-session` (Bkn / EGt) — last-wins Remote Control server session
+ * pointer for --resume / mid-session resume. `bridgeSessionId:""` is a tombstone
+ * written by clearBridgeSession when the user turns RC off so resume does not
+ * silently force-on (2.1.224 #30).
+ */
+export type BridgeSessionEntry = {
+  type: 'bridge-session'
+  sessionId: UUID
+  /** Empty string = cleared / user-off tombstone. */
+  bridgeSessionId: string
+  lastSequenceNum: number
+  declaredDialogKinds?: string[]
+  sessionGroupingId?: string
+  noHistoryBackfill?: boolean
+}
+
+/**
  * Records content blocks whose in-context representation was replaced with a
  * smaller stub (the full content was persisted elsewhere). Replayed on resume
  * for prompt cache stability. Written once per enforcement pass that replaces
@@ -444,6 +471,7 @@ export type Entry =
   | SpeculationAcceptMessage
   | ModeEntry
   | WorktreeStateEntry
+  | BridgeSessionEntry
   | ContentReplacementEntry
   | ContextCollapseCommitEntry
   | ContextCollapseSnapshotEntry

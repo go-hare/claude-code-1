@@ -41,7 +41,15 @@ export { TestingPermissionTool } from './tools/testing/TestingPermissionTool.js'
 // Feature-gated tools
 export { OVERFLOW_TEST_TOOL_NAME } from './tools/OverflowTestTool/OverflowTestTool.js'
 export { CtxInspectTool } from './tools/CtxInspectTool/CtxInspectTool.js'
-export { ListPeersTool } from './tools/ListPeersTool/ListPeersTool.js'
+// densable 2.1.224 #7: primary export ListAgentsTool; ListPeersTool kept as alias.
+export {
+  ListAgentsTool,
+  ListPeersTool,
+} from './tools/ListPeersTool/ListPeersTool.js'
+export {
+  LIST_AGENTS_TOOL_NAME,
+  LIST_PEERS_LEGACY_TOOL_NAME,
+} from './tools/ListPeersTool/constants.js'
 export { MonitorTool } from './tools/MonitorTool/MonitorTool.js'
 export { PowerShellTool } from './tools/PowerShellTool/PowerShellTool.js'
 export { PushNotificationTool } from './tools/PushNotificationTool/PushNotificationTool.js'
