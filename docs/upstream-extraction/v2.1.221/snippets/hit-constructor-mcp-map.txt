@@ -3,9 +3,41 @@
 Official: Fixed a crash when preparing API requests for SDK MCP tools named
 after built-in object properties such as `constructor`.
 
-## SEA dig (2.1.221 darwin-arm64) — densable FIX still ABSENT
+## Confirmed local crash locus (go-hare, 2026-08-12)
 
-Crash-site gold (bug still present in densable binary):
+`src/utils/api.ts` `filterSwarmFieldsFromSchema` → `toolToAPISchema`:
+
+```ts
+// BEFORE: plain Record
+const fieldsToRemove = SWARM_FIELDS_BY_TOOL[toolName]
+// SWARM_FIELDS_BY_TOOL['constructor'] === Object.prototype.constructor (Function)
+// for (const field of fieldsToRemove) → TypeError: X is not iterable
+```
+
+Repro (Bun):
+
+```
+SWARM_FIELDS_BY_TOOL['constructor'] → [class Object] function, length 1
+for…of → CRASH: {} is not iterable
+```
+
+This matches the official wording **preparing API requests** (tool schema assembly), not only MCP SDK registerTool.
+
+## Local fix (go-hare product harden — 2026-08-12 「修」)
+
+| Site | Change |
+| --- | --- |
+| `SWARM_FIELDS_BY_TOOL` | `Object.create(null)` + `Object.hasOwn` membership |
+| `toolPermissionsFromClaudeAiTools` / `toolPermissionsFromSetServersTools` | null-proto maps |
+| `client.ts` toolPermissions lookup | `Object.hasOwn` (no Function leak as permission) |
+| tests | `toolToApiSchema.constructor.221.test.ts` + permission builder cases |
+
+**Not patched (still densable/MCP-SDK residual):**
+
+- Public `@modelcontextprotocol/sdk@1.29.0` `_registeredTools = {}` + truthy membership
+- densable SEA `I_a` / `fVp` createSdkMcpServer registry (go-hare has no local twin)
+
+## SEA dig (2.1.221 darwin-arm64) — densable registry gold still ABSENT
 
 ```
 class I_a{constructor(...){ this._registeredTools={} ...}}
@@ -17,10 +49,18 @@ function fVp(e){ /* createSdkMcpServer */ let t=new I_a(...); e.tools.forEach(r=
 - `Object.hasOwn(this._registeredTools, …)` count **0**
 - `_registeredTools=Object.create` / `_registeredTools=new Map` count **0**
 - Nearby `Object.create(null)`: managed-mcp `ane()`, plugin override `I_r` — not tool registry
-- `toolPermissions` builders ZK_/Mlh still `let t={}; t[r.name]=…`
-- Public `@modelcontextprotocol/sdk@1.29.0` same plain `{}` pattern
-- go-hare has no local `createSdkMcpServer` product surface (agent-sdk export / densable fVp only)
+
+## go-hare product surface (densable 1:1)
+
+| Surface | Status |
+| --- | --- |
+| Local `createSdkMcpServer` / densable `fVp` product export | **HAVE / 对齐** — `src/entrypoints/sdk/createSdkMcpServer.ts` (`tool` + `createSdkMcpServer`), re-export `agentSdkTypes.ts`. Gold: agent-sdk `gl`/`hl` + SEA `fVp`. |
+| `_registeredTools` | **对齐 densable** — leave MCP SDK plain `{}` + truthy membership; **no** local null-proto invent. Tool name `constructor` → already registered (same as densable/SEA). |
+| In-process SDK MCP client path | `setupSdkMcpClients` (control-channel) — consumes configs. |
+| patch-package on `@modelcontextprotocol/sdk` | **None** |
 
 ## Verdict
 
-**GAP** — densable 2.1.221 binary still ships the crash site. Official changelog claims a fix, but SEA does not contain a null-proto/Map/hasOwn registry change. **Do not invent** go-hare-only patch beyond densable (would break 1:1 contract). Prefer residual over false HAVE. If a later densable pack shows real gold, re-open then.
+- **Local API-request path (#10):** **HAVE / 对齐** (null-proto + hasOwn on SWARM/toolPermissions — preparing API requests).
+- **createSdkMcpServer product twin:** **HAVE / 对齐** densable `fVp` shape + plain registry 1:1.
+- Registry residual closed as “same plain as densable” — not a local product delta.

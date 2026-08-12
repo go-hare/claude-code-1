@@ -89,13 +89,13 @@
 | 31  | [VSCode] `remoteControlAtStartup` 显式 true 未生效       | **N/A**          | CLI X_t/rMe HAVE（222）；VSCode 宿主 invent-ban。金：`gold-#31-vscode-rc-startup.txt` |
 
 
-### 粗计数（UNKNOWN 深挖后，非全 pack 收口）
+### 粗计数（与文首一致 · 2026-08-11 #15/#16/#24/#25 已收口）
 
 
 | 状态          | 条数  | #                                                                                             |
 | ----------- | --- | --------------------------------------------------------------------------------------------- |
-| **HAVE**    | 25  | 23, 26, 4, 6, 2, 5, 7, 9, 8, 10, 11, 12, 3, 14, 27, 13, 17, 18, 19, 20, 22, 21, 30, 28, **1** |
-| **GAP**     | 4   | **15, 16, 24, 25**                                                                            |
+| **HAVE**    | **29**  | 1–28, 30（含 **#15/#16/#24/#25**；原粗表误写 GAP 4 已更正） |
+| **GAP**     | **0**   | —                                                                                             |
 | **PARTIAL** | 0   | —                                                                                             |
 | **UNKNOWN** | 0   | —                                                                                             |
 | **N/A**     | 2   | **29, 31**（VSCode 扩展面）                                                                       |
@@ -109,7 +109,7 @@
 | invent cloud-only / VSCode-only 无本地面 | **N/A 或 invent-ban**                                                                                                        |
 | 223 #3 teleport                      | 仍 invent-ban，不折入 224                                                                                                        |
 | #1 self-hosted-runner 整树             | **HAVE**（含 aWd/Fjy/bjv/outcome + full Ane + kjv confine + D trust seed + rBh MISS runtime B2h…z2h）；无 #1 residual invent-ban |
-| UDS_INBOX / LAN_PIPES 默认 OFF         | 跨会话若依赖 UDS/LAN 需 feature 评估，不硬开                                                                                             |
+| UDS_INBOX / LAN_PIPES（历史 OFF）     | 本 pack 时 go-hare 默认 OFF。**2026-08-12 起** `DEFAULT_BUILD_FEATURES` 已 ON（densable 228 #4/#13 产品 1:1）                                                                 |
 
 
 ## 优先落地顺序（建议 · 可 1:1 小步）

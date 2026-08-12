@@ -1,0 +1,7 @@
+version: 2.1.228
+path: /tmp/official-228/plat/package/claude
+size: 289298144
+sha256: 43484b1352cef03a08346f36ef0437755b1aad646ab9313ce187857b794b7247
+version_string_hits: 368
+comment_version_hits: 6
+vs_227_size_delta: 4251744

@@ -69,7 +69,7 @@
 | -- | ---- |
 | invent N9 remote effort | 无协议不硬塞 |
 | #3 teleport cloud hint | 无 cloud session 产品面不假造 |
-| UDS_INBOX / LAN_PIPES / TEAMMEM | 默认 OFF |
+| UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围 | 历史：本 pack 时 go-hare 默认 OFF。**2026-08-12 起** `DEFAULT_BUILD_FEATURES` 已 ON（见 228 checklist Feature 默认节） |
 
 ## 优先落地顺序（剩余）
 

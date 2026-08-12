@@ -20,8 +20,16 @@ sandbox proxy.
 Local already depends on **0.0.70** + FQt tlsTerminate pass-through + Windows
 ephemeral CA warn. No additional CLI product code for "large upload" beyond dep.
 
+## Dep verify (2026-08-12)
+
+| 层 | 证据 |
+|---|---|
+| `package.json` | `"@anthropic-ai/sandbox-runtime": "^0.0.70"` |
+| `bun.lock` | `@anthropic-ai/sandbox-runtime@0.0.70` 精确解析 |
+| `node_modules/.../package.json` | `"version": "0.0.70"` |
+| `dist/sandbox/tls-terminate-proxy.js` | `MAX_SIGV4_RESIGN_BODY_BYTES = 64 * 1024 * 1024`、`BodyTooLargeError`、`body-substitution` import HIT |
+
 ## Verdict
 
-GAP (CLI product) — fix lives in external sandbox-runtime@0.0.70 which we already
-consume. Do not invent CLI-side large-body handlers; do not mark HAVE from
-tlsTerminate wiring alone without a distinct 221 CLI locus.
+**DEP-HAVE / CLI residual** — 产品修复在 srt@0.0.70（已 pin 且符号命中）；CLI 无独立 large-upload 代码可 1:1。
+勿 invent CLI-side large-body handlers；勿仅用 tlsTerminate 接线勾 CLI HAVE。

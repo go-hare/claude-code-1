@@ -6,7 +6,7 @@
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。  
 > 更新：2026-08-09 — pack + wave1–7 + #14 + #30 + **#22 gate + native ToolSearch wire + prompt 直调 scrub**。
-> 计数：**HAVE 35 · PARTIAL 0 · GAP 2 · N/A 2 · UNKNOWN 0**（39）。
+> 计数：**HAVE 36 · DEP-HAVE 1 · PARTIAL 0 · GAP 0 · N/A 2 · UNKNOWN 0**（39）。
 
 ## 邻版关系
 
@@ -58,9 +58,9 @@
 | 7   | thinking toggle session-sticky；MCP disable 不 revert     | **HAVE**    | ThinkingToggle 写 `AppState.thinkingEnabled`（会话内）；Config `alwaysThinkingEnabled` 另路径。host sticky `max_thinking_tokens` + print/bridge `set_max_thinking_tokens` 持久 thinkingConfig。`mcp_set_servers` / `applyMcpServerChanges` 只动 MCP client/tool，不 clear thinking*。见 `ThinkingToggle.tsx`、`PromptInput.tsx`、`AppStateStore.ts`、`hostPermissionLayers.ts`、`print.ts`、`useReplBridge.tsx`。                                                                                           |
 | 8   | `--mcp-config` 在 `-p` 首 turn 前 connect                  | **HAVE**    | print/headless 在首 turn 前 await MCP connect；`--mcp-config` 一等 option；`connectMcpBatch` 注释：print 常单 turn，晚 connect 不够。`dynamicMcpConfig` 经 bare/strict skip 存活。见 `main.tsx`、`print.ts`、`mcp/client.ts`、`mcp/config.ts`。                                                                                                                                                                                                                                                             |
 | 9   | Esc retract + resubmit 保留 @-mention files               | **HAVE**    | Esc cancel → `restoreMessageSync` + `textForResubmit` 保留 `@path`；resubmit 重跑 attachment；`Eio/H1e` already_read 仅 full-enough cache+mtime 命中，partial/contentNotInModelContext 重读。**勿 invent** 假 attachment API。见 `REPL.tsx`、`messages.ts`、`attachments.ts`、`fileStateCache.ts`。                                                                                                                                                                                                    |
-| 10  | SDK MCP tools named `constructor` crash                 | **GAP**     | Official：preparing API for SDK MCP tools named after built-in object properties (`constructor`) crash。SEA：`_registeredTools={}` + `if(this._registeredTools[e])` **仍 plain object**（无 Object.create(null)/hasOwn）；`toolPermissionsFrom*` 仍 `{}`；无 `named "constructor"` 产品串。`Object.create(null)` 命中多为 runtime/Ews/I_r（plugin overrides）非 SDK tool registry。**勿 invent** 全仓 null-proto。见 SEA registerTool、`claudeai.ts`、`print.ts`。                                                                                                                                                                                                                             |
+| 10  | SDK MCP tools named `constructor` crash                 | **HAVE**    | Official：preparing API for SDK MCP tools named after built-in object properties (`constructor`) crash。**本地 crash 金标**：`filterSwarmFieldsFromSchema`/`toolToAPISchema` 对 plain `SWARM_FIELDS_BY_TOOL['constructor']` → Function → `for…of` 抛 “not iterable”。已修：`SWARM_FIELDS_BY_TOOL` null-proto + `Object.hasOwn`；`toolPermissionsFromClaudeAiTools`/`toolPermissionsFromSetServersTools` null-proto；`client.ts` permission membership `hasOwn`。测：`toolToApiSchema.constructor.221.test.ts` + permission builder。**本条 HAVE = 官方 API-request 组装路径（对齐）**。registry：densable SEA / MCP SDK / 本地 `createSdkMcpServer` 均为 plain `_registeredTools={}`（densable 1:1；#10 不靠改 registry）。产品 twin：`createSdkMcpServer`/`tool` 已有（`entrypoints/sdk/createSdkMcpServer.ts`）。见 `api.ts`、`claudeai.ts`、`print.ts`、`client.ts`、`hit-constructor-mcp-map.txt`。 |
 | 11  | WebSearch 400 @ effort xhigh/max + thinking off         | **HAVE**    | WebSearch secondary adapter 固定 `effortValue: undefined`（避开 session xhigh/max）；Haiku：thinking disabled + forced `tool_choice` web_search；non-Haiku 本地 thinking budget。densable-shaped 400 修复。见 `WebSearchTool/adapters/apiAdapter.ts`、`WebSearchTool.ts`、`claude.ts`、`effort.ts`。                                                                                                                                                                                                  |
-| 12  | sandboxed large upload TLS via proxy                    | **GAP**     | 有 tlsTerminate / credential-mask proxy 接线与警告，**无** large-body/chunked/upload TLS 修复证据。sandbox-runtime 外部包；勿因 tlsTerminate alone 勾 HAVE。见 `sandbox-adapter.ts`、`sandboxTypes.ts`。                                                                                                                                                                                                                                                                                                  |
+| 12  | sandboxed large upload TLS via proxy                    | **DEP-HAVE** | 修在 `@anthropic-ai/sandbox-runtime@0.0.70`（`package.json`/`bun.lock`/node_modules 均 0.0.70）；`tls-terminate-proxy.js` 含 `MAX_SIGV4_RESIGN_BODY_BYTES=64MiB` + `BodyTooLargeError` + body-substitution。CLI 仅 tlsTerminate 接线，**无**独立 large-upload locus → **不**勾 CLI 产品 HAVE；**不 invent** CLI handler。见 `hit-large-upload-tls.txt`、`sandbox-adapter.ts`。 |
 | 13  | spend-limit 文案 individual 非 org monthly                 | **HAVE**    | densable 2.1.221 KCs：`org_spend_cap_reached` \| `org_level_disabled_until`。team/enterprise：`org_spend_cap_reached` → **individual spend limit**（非 org monthly）；`org_level_disabled_until` → org's monthly；billing access 决定 raise vs ask admin。consumer → monthly spend limit + settings URL。类型补 `org_spend_cap_reached`。见 `rateLimitMessages.ts`、`claudeAiLimits.ts`、`rateLimitMessages.individualSpend.221.test.ts`。                                                                 |
 | 14  | Bedrock AWS SSO + Windows stray `HOME`                  | **HAVE**    | densable 2.1.221 `ywu`/`sc_`/`Twu`/`Ewu`：host-managed 链在 `AWS_CONFIG_FILE` 时先 host-pinned SSO — pure-SSO profile 解析（拒 static keys/credential_process/role_arn/…）；cache = `join(dirname(config),'sso','cache',sha1(cacheId)+'.json')`（**不** `getHomeDir()/.aws/sso/cache`）；token → `portal.sso.<region>` GetRoleCredentials；失败 log `host-pinned SSO leg failed (…) — falling back to fromIni`。本地 `aws.ts`：`parseHostPinnedSsoProfile`/`resolveHostPinnedSsoCredentials` + `hostManagedAwsProviderChain` 接线。**未** invent 全局 delete HOME。见 `aws.ts`、`awsHostPinnedSso.221.test.ts`。                                                                                                                                             |
 | 15  | `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=0` falsy           | **HAVE**    | densable 2.1.221：`isResumeInterruptedTurnEnabled` → `isEnvTruthy`（`0`/`false`/`no`/`off` 禁用）。测试覆盖 `'1'`/`'0'`/`'false'`/unset。**INVENT-BAN**：本条 ≠ 历史 #15 MAX_WATCH。见 `residualFinalEnvGates.ts`、`residualEnvGates.test.ts`。                                                                                                                                            |
@@ -95,17 +95,19 @@
 
 | 状态          | 数量     |
 | ----------- | ------ |
-| **HAVE**    | **35** |
+| **HAVE**    | **36** |
+| **DEP-HAVE** | **1**  |
 | **PARTIAL** | **0**  |
-| **GAP**     | **2**  |
+| **GAP**     | **0**  |
 | **N/A**     | **2**  |
 | **UNKNOWN** | **0**  |
 | **合计**      | **39** |
 
 
-HAVE: #2 #3 #4 #5 #6 #7 #8 #9 #11 #13 #14 #15 #16 #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 #32 #33 #34 #35 #36 #37 #39  
+HAVE: #2 #3 #4 #5 #6 #7 #8 #9 #10 #11 #13 #14 #15 #16 #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 #32 #33 #34 #35 #36 #37 #39  
+DEP-HAVE: #12（srt@0.0.70 依赖侧；CLI 无产品 locus）  
 PARTIAL: —  
-GAP: #10 #12  
+GAP: —  
 N/A: #1 #38  
 
 ## Explicit non-claims / invent-ban
@@ -154,7 +156,7 @@ N/A: #1 #38
 10. **#22 已 1:1（gate + native wire）**：Vertex Jve/Xve + ToolSearch `tool_reference`/`defer_loading`/`Jvu`/`dBp` 协议恢复；`Lwe` 主路径 + 旧 text 兼容。
 11. **scheduled fire stamp 已 1:1（densable 221 SEA）**：`skipSlashCommands:!0` + `modelScheduledOrigin:!0` + `wakeupSource`（REPL + headless）；processUserInput 对 model-invocable 重开 slash；`/loop` 跳过 `tengu_loop_command`。见 `hit-modelScheduledOrigin-wakeupSource.txt`。
 12. **#6 已 1:1（permission，非 prompt）**：`pWo` quote chars → ask；B3/SQ/jce + exact reason；`pathQuoteChars.221.test.ts`。
-13. **剩余 GAP**（勿 invent）：#10 constructor map；#12 large upload TLS（srt@0.0.70）。
+13. **剩余 GAP**：无（#10 已 HAVE / 对齐 API-request）。**#12** → **DEP-HAVE**（srt@0.0.70 已 pin + tls-terminate 符号 HIT；CLI 无产品 locus）。
 14. **PARTIAL 已清**（0）。
 15. **N/A 保持**：#1 VSCode Focus；#38 Gateway model 400。
 16. **勿** commit/push/bump 除非用户点名；SEA bins 保持 dirty；勿混 220 residual / 222。
