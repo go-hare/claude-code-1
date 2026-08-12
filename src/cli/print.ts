@@ -2607,7 +2607,7 @@ function runHeadlessStreaming(
                 })
               }
               for (const event of drainSdkEvents()) {
-                output.enqueue(event)
+                output.enqueue(event as StdoutMessage)
               }
             }
             // No continue -- fall through to ask() so the model processes the result
@@ -2758,7 +2758,7 @@ function runHeadlessStreaming(
                       .is_error
                     // Flush pending SDK events so they appear before result on the stream.
                     for (const event of drainSdkEvents()) {
-                      output.enqueue(event)
+                      output.enqueue(event as StdoutMessage)
                     }
 
                     // Hold-back: don't emit result while background agents are running
@@ -2780,7 +2780,7 @@ function runHeadlessStreaming(
                     // Flush SDK events (task_started, task_progress) so background
                     // agent progress is streamed in real-time, not batched until result.
                     for (const event of drainSdkEvents()) {
-                      output.enqueue(event)
+                      output.enqueue(event as StdoutMessage)
                     }
                     output.enqueue(message as StdoutMessage)
                   }
@@ -2967,7 +2967,7 @@ function runHeadlessStreaming(
         // Drain SDK events (task_started, task_progress) before command queue
         // so progress events precede task_notification on the stream.
         for (const event of drainSdkEvents()) {
-          output.enqueue(event)
+          output.enqueue(event as StdoutMessage)
         }
 
         runPhase = 'draining_commands'
@@ -3173,7 +3173,7 @@ function runHeadlessStreaming(
         // waitingForAgents; once we're here the next drain would be the
         // top of the next run(), which won't come if input is idle.
         for (const event of drainSdkEvents()) {
-          output.enqueue(event)
+          output.enqueue(event as StdoutMessage)
         }
       }
       running = false
@@ -3427,26 +3427,171 @@ function runHeadlessStreaming(
 
   // Set up UDS inbox callback so the query loop is kicked off
   // when a message arrives via the UDS socket in headless mode.
+  // densable 2.1.224 #5: peer origin + PRn gate (Bqp/jqp) before hb().
   if (feature('UDS_INBOX')) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { drainInbox, setOnEnqueue } =
       require('../utils/udsMessaging.js') as typeof import('../utils/udsMessaging.js')
+    const {
+      gatePeerInboundQueuedCommand,
+      setPeerInboundModeGetter,
+      setPeerInboundHoldListeners,
+      releaseHeldPeerInboundMessages,
+      shouldHonorPeerFromMode,
+    } =
+      require('../utils/crossSessionInbound.js') as typeof import('../utils/crossSessionInbound.js')
+    type PermissionModeClass =
+      import('../utils/crossSessionInbound.js').PermissionModeClass
     /* eslint-enable @typescript-eslint/no-require-imports */
+
+    // densable aya / qqp — released held messages re-enter the prompt queue.
+    // Register listeners BEFORE xRn so a mode-changed release can deliver.
+    setPeerInboundHoldListeners({
+      onReleased: entries => {
+        for (const entry of entries) {
+          const cmd = entry.message as {
+            mode?: 'prompt'
+            value?: string | unknown
+            uuid?: string
+            origin?: unknown
+          }
+          if (
+            cmd &&
+            typeof cmd === 'object' &&
+            typeof cmd.value === 'string' &&
+            cmd.mode === 'prompt'
+          ) {
+            enqueue({
+              mode: 'prompt',
+              value: cmd.value,
+              uuid:
+                typeof cmd.uuid === 'string'
+                  ? (cmd.uuid as never)
+                  : randomUUID(),
+              origin: (cmd.origin as never) ?? { kind: 'peer' },
+              skipSlashCommands: true,
+              isMeta: true,
+            })
+          }
+        }
+        if (entries.length > 0 && !inputClosed) {
+          void run()
+        }
+      },
+    })
+
+    // densable xRn / dya — permission-mode getter for Bqp fail-closed path.
+    setPeerInboundModeGetter(() => {
+      const ctx = getAppState().toolPermissionContext
+      return {
+        mode: ctx.mode,
+        isBypassPermissionsModeAvailable: ctx.isBypassPermissionsModeAvailable,
+      }
+    })
+
+    // densable vPr("mode-changed") — replace the earlier status-only listener so
+    // mode flips both emit SDK status and release held peer messages (zqp).
+    setPermissionModeChangedListener(newMode => {
+      if (
+        newMode === 'default' ||
+        newMode === 'acceptEdits' ||
+        newMode === 'bypassPermissions' ||
+        newMode === 'plan' ||
+        newMode === (feature('TRANSCRIPT_CLASSIFIER') && 'auto') ||
+        newMode === 'dontAsk'
+      ) {
+        output.enqueue({
+          type: 'system',
+          subtype: 'status',
+          status: null,
+          permissionMode: newMode as PermissionMode,
+          uuid: randomUUID(),
+          session_id: getSessionId(),
+        })
+      }
+      if (releaseHeldPeerInboundMessages('mode-changed') > 0 && !inputClosed) {
+        void run()
+      }
+    })
+
+    // densable rSh: useEffect vPr("policy-accepts") on Ng().crossSessionInbound.
+    // Headless has no React tree — re-evaluate hold buffer when settings change
+    // (settingsChangeDetector already applies AppState via the earlier subscriber).
+    let lastCrossSessionInbound = getAppState().settings?.crossSessionInbound
+    settingsChangeDetector.subscribe(() => {
+      const next = getAppState().settings?.crossSessionInbound
+      if (next === lastCrossSessionInbound) return
+      lastCrossSessionInbound = next
+      if (
+        releaseHeldPeerInboundMessages('policy-accepts') > 0 &&
+        !inputClosed
+      ) {
+        void run()
+      }
+    })
 
     const enqueueUdsInboxMessages = (): boolean => {
       const entries = drainInbox()
+      let accepted = 0
       for (const entry of entries) {
+        // Only text/user-like payloads become prompts; skip control frames.
+        if (
+          entry.message.type !== 'text' &&
+          entry.message.type !== 'notification'
+        ) {
+          continue
+        }
         const value =
           typeof entry.message.data === 'string'
             ? entry.message.data
-            : jsonStringify(entry.message.data)
-        enqueue({
-          mode: 'prompt',
+            : entry.message.data !== undefined
+              ? jsonStringify(entry.message.data)
+              : ''
+        if (!value) continue
+
+        const meta = entry.message.meta
+        const rawFromMode = meta?.fromMode
+        const fromMode: PermissionModeClass | undefined =
+          rawFromMode === 'bypass' || rawFromMode === 'prompting'
+            ? rawFromMode
+            : undefined
+        // densable UTf + zTf/jTf: selfSent only from kernel peer ancestry
+        // (SO_PEERCRED / LOCAL_PEERPID). Never trust wire meta.selfSent; never
+        // key on forgeable message.from (reply routing only). Without peer-cred
+        // (Bun.ant.getPeerPid not available here) leave selfSent unset — fail-closed.
+        const from =
+          typeof entry.message.from === 'string'
+            ? entry.message.from
+            : 'unknown'
+
+        const command = {
+          mode: 'prompt' as const,
           value,
           uuid: randomUUID(),
-        })
+          origin: {
+            kind: 'peer' as const,
+            from,
+            ...(fromMode !== undefined ? { fromMode } : {}),
+            ...(typeof meta?.msg_id === 'string'
+              ? { msg_id: meta.msg_id }
+              : {}),
+          },
+          skipSlashCommands: true,
+          isMeta: true,
+        }
+
+        // densable PRn(c) — only hb when accept
+        if (
+          gatePeerInboundQueuedCommand(command, {
+            honorFromMode: shouldHonorPeerFromMode(),
+          }) !== 'accept'
+        ) {
+          continue
+        }
+        enqueue(command)
+        accepted += 1
       }
-      return entries.length > 0
+      return accepted > 0
     }
 
     setOnEnqueue(() => {

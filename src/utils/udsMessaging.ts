@@ -145,7 +145,7 @@ export function parseUdsTarget(target: string): {
 } {
   if (target.includes('#token=')) {
     throw new Error(
-      'UDS target must not include an inline auth token; use the ListPeers address',
+      'UDS target must not include an inline auth token; use the ListAgents address',
     )
   }
   return { socketPath: target }

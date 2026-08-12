@@ -409,6 +409,9 @@ const usePipeMuteSync = feature('UDS_INBOX') ? require('../hooks/usePipeMuteSync
 const usePipeRouter = feature('UDS_INBOX')
   ? require('../hooks/usePipeRouter.js').usePipeRouter
   : () => ({ routeToSelectedPipes: () => false });
+const usePeerInboundUdsDrain = feature('UDS_INBOX')
+  ? require('../hooks/usePeerInboundUdsDrain.js').usePeerInboundUdsDrain
+  : (): null => null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { isAgentSwarmsEnabled } from '../utils/agentSwarmsEnabled.js';
 import { useTaskListWatcher } from '../hooks/useTaskListWatcher.js';
@@ -1130,6 +1133,10 @@ export function REPL({
   // Agent definition is state so /resume can update it mid-session
   const [mainThreadAgentDefinition, setMainThreadAgentDefinition] = useState(initialMainThreadAgentDefinition);
 
+  // densable 2.1.224 #5 — interactive UDS peer drain + rSh hold UI (print.ts parity).
+  // Dialog node returned for FullscreenLayout modal slot (not promptOverlay —
+  // Provider lives inside FullscreenLayout; PromptInput writes null to that channel).
+  // Declared before toolJSX state so isDialogSlotFree can read toolJSX after both exist.
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const verbose = useAppState(s => s.verbose);
   const mcp = useAppState(s => s.mcp);
@@ -1731,6 +1738,12 @@ export function REPL({
   // is null, treat as not-showing so TextInput focus and queue processor
   // aren't deadlocked by a phantom overlay.
   const isShowingLocalJSXCommand = toolJSX?.isLocalJSXCommand === true && toolJSX?.jsx != null;
+  // densable 2.1.224 #5 rSh — UDS peer drain + hold approval (gGn queueBehind).
+  // Rendered into FullscreenLayout modal (not promptOverlay). Slot free when no
+  // local-jsx command dialog is occupying the modal.
+  const peerInboundApprovalDialog = usePeerInboundUdsDrain({
+    isDialogSlotFree: () => !isShowingLocalJSXCommand,
+  });
   const titleIsAnimating = isLoading && !isWaitingForApproval && !isShowingLocalJSXCommand;
   // Title animation state lives in <AnimatedTerminalTitle> so the 960ms tick
   // doesn't re-render REPL. titleDisabled/terminalTitle are still computed
@@ -3090,6 +3103,22 @@ export function REPL({
           setInputValue('');
           setPastedContents({});
         }
+        // densable 2.1.224 #30 — !fork && log.bridgeSessionId && !already full RC
+        // → force RC on. User-off wrote clearBridgeSession tombstone so
+        // bridgeSessionId is absent and resume must not silently reconnect.
+        // feature() must stay in if condition position (not &&-chained).
+        if (feature('BRIDGE_MODE')) {
+          if (entrypoint !== 'fork' && log.bridgeSessionId) {
+            setAppState(prev => {
+              if (prev.replBridgeEnabled && !prev.replBridgeOutboundOnly) return prev;
+              return {
+                ...prev,
+                replBridgeEnabled: true,
+                replBridgeOutboundOnly: false,
+              };
+            });
+          }
+        }
         // Restart idle clock after in-session /resume. Stale lastQueryCompletionTime
         // from the previous conversation would trip willow dialog on the first
         // submit (user reports full message swallow after /resume). densable has
@@ -3995,6 +4024,27 @@ export function REPL({
               setSpinnerShimmerColor(null);
               compactProgressActiveRef.current = false;
               break;
+          }
+        },
+        // densable 2.1.224 #21 — compact progress to RC via system/status
+        // (setSDKStatus('compacting'|null) → enqueueSdkEvent → bridge write).
+        setSDKStatus: (status: string | null | undefined) => {
+          if (!feature('BRIDGE_MODE')) return;
+          // densable fDl: skip "requesting"; only emit when bridge can drain.
+          if (status === 'requesting') return;
+          try {
+            // Lazy require avoids circular import weight at REPL module init.
+            const { enqueueSdkEvent } =
+              require('../utils/sdkEventQueue.js') as typeof import('../utils/sdkEventQueue.js');
+            // densable $Oi / SDKStatusSchema: only 'compacting' | null on the wire
+            const wireStatus: 'compacting' | null = status === 'compacting' ? 'compacting' : null;
+            enqueueSdkEvent({
+              type: 'system',
+              subtype: 'status',
+              status: wireStatus,
+            });
+          } catch {
+            // optional path
           }
         },
         setInProgressToolUseIDs,
@@ -7255,7 +7305,13 @@ export function REPL({
   // (immediate: /model, /mcp, /btw, ...) and scrollable (non-immediate:
   // /config, /theme, /diff, ...) both go here now.
   const toolJsxCentered = isFullscreenEnvEnabled() && toolJSX?.isLocalJSXCommand === true;
-  const centeredModal: React.ReactNode = toolJsxCentered ? toolJSX!.jsx : null;
+  // densable rSh gGn: peer approval uses the same modal host as local-jsx when
+  // fullscreen; otherwise falls through to inline bottom render with toolJSX path.
+  const centeredModal: React.ReactNode = toolJsxCentered
+    ? toolJSX!.jsx
+    : isFullscreenEnvEnabled()
+      ? peerInboundApprovalDialog
+      : null;
   // <AlternateScreen> at the root: everything below is inside its
   // <Box height={rows}>. Handlers/contexts are zero-height so ScrollBox's
   // flexGrow in FullscreenLayout resolves against this Box. The transcript
@@ -7415,6 +7471,12 @@ export function REPL({
                 {toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !toolJsxCentered && (
                   <Box flexDirection="column" width="100%">
                     {toolJSX.jsx}
+                  </Box>
+                )}
+                {/* densable rSh gGn — non-fullscreen host (fullscreen uses modal slot). */}
+                {!isFullscreenEnvEnabled() && peerInboundApprovalDialog != null && !isShowingLocalJSXCommand && (
+                  <Box flexDirection="column" width="100%">
+                    {peerInboundApprovalDialog}
                   </Box>
                 )}
                 {!showSpinner && !toolJSX?.isLocalJSXCommand && showExpandedTodos && tasksV2 && tasksV2.length > 0 && (

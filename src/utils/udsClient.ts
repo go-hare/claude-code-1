@@ -199,6 +199,20 @@ export async function isPeerAlive(
   })
 }
 
+export type SendToUdsSocketOptions = {
+  timeoutMs?: number
+  /**
+   * densable Wei / tengu_harbor_kite_mode_emit — when set, stamped on meta.fromMode
+   * so the receiver's Bqp gate can apply mode-parity (bypass↔bypass / prompting↔prompting).
+   */
+  fromMode?: 'bypass' | 'prompting'
+  /**
+   * densable selfSent — wire hint only. Receivers ignore this field and stamp
+   * selfSent only via kernel peer-cred ancestry (UTf/zTf), never forgeable `from`.
+   */
+  selfSent?: boolean
+}
+
 /**
  * Send a text message to a peer's UDS socket. This is the high-level helper
  * used by SendMessageTool for `uds:<path>` addresses.
@@ -206,8 +220,14 @@ export async function isPeerAlive(
 export async function sendToUdsSocket(
   targetSocketPath: string,
   message: string | Record<string, unknown>,
-  timeoutMs = 5000,
+  timeoutMsOrOpts: number | SendToUdsSocketOptions = 5000,
 ): Promise<void> {
+  const opts: SendToUdsSocketOptions =
+    typeof timeoutMsOrOpts === 'number'
+      ? { timeoutMs: timeoutMsOrOpts }
+      : timeoutMsOrOpts
+  const timeoutMs = opts.timeoutMs ?? 5000
+
   const { parseUdsTarget } = await import('./udsMessaging.js')
   const target = parseUdsTarget(targetSocketPath)
   const authToken = await findAuthTokenForSocketPath(target.socketPath)
@@ -242,7 +262,12 @@ export async function sendToUdsSocket(
     }
 
     conn = createConnection(target.socketPath, () => {
-      udsMsg.meta = { ...udsMsg.meta, authToken }
+      udsMsg.meta = {
+        ...udsMsg.meta,
+        authToken,
+        ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
+        ...(opts.selfSent === true ? { selfSent: true } : {}),
+      }
       conn.write(jsonStringify(udsMsg) + '\n', err => {
         if (err) finish(err)
       })

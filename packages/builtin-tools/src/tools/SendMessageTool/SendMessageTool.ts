@@ -133,7 +133,7 @@ const inputSchema = lazySchema(() =>
       .string()
       .describe(
         feature('UDS_INBOX')
-          ? `Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer${feature('LAN_PIPES') ? ', or "tcp:<host>:<port>" for a LAN peer' : ''} (use ListPeers to discover)`
+          ? `Recipient: teammate name, "*" for broadcast, "uds:<socket-path>" for a local peer, "bridge:<session-id>" for a Remote Control peer${feature('LAN_PIPES') ? ', or "tcp:<host>:<port>" for a LAN peer' : ''} (use ListAgents to discover)`
           : 'Recipient: teammate name, or "*" for broadcast to all teammates',
       ),
     // densable SRp: summary.max(Cpr) + soft-truncate describe (Cpr=200).
@@ -167,6 +167,10 @@ export type MessageOutput = {
   success: boolean
   message: string
   routing?: MessageRouting
+  /** densable aqy — present only when mailbox write succeeded. */
+  msg_id?: string
+  /** densable errorClass — e.g. mailbox_write_failed / not_reachable. */
+  errorClass?: string
 }
 
 export type BroadcastOutput = {
@@ -174,6 +178,7 @@ export type BroadcastOutput = {
   message: string
   recipients: string[]
   routing?: MessageRouting
+  errorClass?: string
 }
 
 export type RequestOutput = {
@@ -181,12 +186,16 @@ export type RequestOutput = {
   message: string
   request_id: string
   target: string
+  errorClass?: string
 }
 
 export type ResponseOutput = {
   success: boolean
   message: string
   request_id?: string
+  /** densable: shutdown-approval continues exit even if mailbox write failed. */
+  degradedClass?: string
+  errorClass?: string
 }
 
 export type SendMessageToolOutput =
@@ -404,7 +413,8 @@ async function handleMessage(
     getAgentName() || (isTeammate() ? 'teammate' : TEAM_LEAD_NAME)
   const senderColor = getTeammateColor()
 
-  await writeToMailbox(
+  // densable dO → msg_id | undefined; only success when write lands.
+  const msgId = await writeToMailbox(
     recipientName,
     {
       from: senderName,
@@ -416,6 +426,16 @@ async function handleMessage(
     teamName,
   )
 
+  if (msgId === undefined) {
+    return {
+      data: {
+        success: false,
+        message: `Failed to write to ${recipientName}'s inbox — nothing was sent. Try again, or message the lead.`,
+        errorClass: 'mailbox_write_failed',
+      },
+    }
+  }
+
   const recipientColor = findTeammateColor(appState, recipientName)
 
   // densable vKg: routing.content = Bs(t, 50) — full body lives only in the
@@ -424,6 +444,7 @@ async function handleMessage(
     data: {
       success: true,
       message: `Message sent to ${recipientName}'s inbox`,
+      msg_id: msgId,
       routing: {
         sender: senderName,
         senderColor,
@@ -483,8 +504,10 @@ async function handleBroadcast(
     }
   }
 
+  const delivered: string[] = []
+  const failed: string[] = []
   for (const recipientName of recipients) {
-    await writeToMailbox(
+    const msgId = await writeToMailbox(
       recipientName,
       {
         from: senderName,
@@ -495,15 +518,33 @@ async function handleBroadcast(
       },
       teamName,
     )
+    if (msgId === undefined) {
+      failed.push(recipientName)
+    } else {
+      delivered.push(recipientName)
+    }
+  }
+
+  if (delivered.length === 0) {
+    return {
+      data: {
+        success: false,
+        message: `Failed to write broadcast to any teammate inbox — nothing was sent. Try again.`,
+        recipients: [],
+        errorClass: 'mailbox_write_failed',
+      },
+    }
   }
 
   // densable: same Bs(…, 50) preview on routing as unicast (token savings in
-  // tool_result / replayed history).
+  // tool_result / replayed history). Partial deliver still reports who got it.
+  const partialNote =
+    failed.length > 0 ? ` (${failed.length} failed: ${failed.join(', ')})` : ''
   return {
     data: {
       success: true,
-      message: `Message broadcast to ${recipients.length} teammate(s): ${recipients.join(', ')}`,
-      recipients,
+      message: `Message broadcast to ${delivered.length} teammate(s): ${delivered.join(', ')}${partialNote}`,
+      recipients: delivered,
       routing: {
         sender: senderName,
         senderColor,
@@ -511,6 +552,7 @@ async function handleBroadcast(
         summary,
         content: truncate(content, 50),
       },
+      ...(failed.length > 0 ? { errorClass: 'mailbox_write_failed' } : {}),
     },
   }
 }
@@ -531,7 +573,7 @@ async function handleShutdownRequest(
     reason,
   })
 
-  await writeToMailbox(
+  const msgId = await writeToMailbox(
     targetName,
     {
       from: senderName,
@@ -541,6 +583,18 @@ async function handleShutdownRequest(
     },
     teamName,
   )
+
+  if (msgId === undefined) {
+    return {
+      data: {
+        success: false,
+        message: `Failed to write the shutdown request to ${targetName}'s inbox — nothing was sent.`,
+        request_id: requestId,
+        target: targetName,
+        errorClass: 'mailbox_write_failed',
+      },
+    }
+  }
 
   return {
     data: {
@@ -584,7 +638,8 @@ async function handleShutdownApproval(
     backendType: ownBackendType,
   })
 
-  await writeToMailbox(
+  // densable Pqb: still exit on approval; degrade message if mailbox write fails.
+  const confirmMsgId = await writeToMailbox(
     TEAM_LEAD_NAME,
     {
       from: agentName,
@@ -594,6 +649,14 @@ async function handleShutdownApproval(
     },
     teamName,
   )
+  const confirmationNote =
+    confirmMsgId === undefined
+      ? "The confirmation could not be written to team-lead's inbox."
+      : 'Sent confirmation to team-lead.'
+  const degraded =
+    confirmMsgId === undefined
+      ? ({ degradedClass: 'mailbox_write_failed' } as const)
+      : undefined
 
   if (ownBackendType === 'in-process') {
     logForDebugging(
@@ -629,6 +692,7 @@ async function handleShutdownApproval(
             success: true,
             message: `Shutdown approved (fallback path). Agent ${agentName} is now exiting.`,
             request_id: requestId,
+            ...degraded,
           },
         }
       }
@@ -642,8 +706,9 @@ async function handleShutdownApproval(
   return {
     data: {
       success: true,
-      message: `Shutdown approved. Sent confirmation to team-lead. Agent ${agentName} is now exiting.`,
+      message: `Shutdown approved. ${confirmationNote} Agent ${agentName} is now exiting.`,
       request_id: requestId,
+      ...degraded,
     },
   }
 }
@@ -661,7 +726,7 @@ async function handleShutdownRejection(
     reason,
   })
 
-  await writeToMailbox(
+  const msgId = await writeToMailbox(
     TEAM_LEAD_NAME,
     {
       from: agentName,
@@ -672,10 +737,22 @@ async function handleShutdownRejection(
     teamName,
   )
 
+  if (msgId === undefined) {
+    return {
+      data: {
+        success: false,
+        message:
+          "Failed to write the shutdown rejection to team-lead's inbox — nothing was sent. Try again.",
+        request_id: requestId,
+        errorClass: 'mailbox_write_failed',
+      },
+    }
+  }
+
   return {
     data: {
       success: true,
-      message: `Shutdown rejected. Reason: "${reason}". Continuing to work.`,
+      message: `Shutdown rejected. Reason: "${truncate(reason, 50)}". Continuing to work.`,
       request_id: requestId,
     },
   }
@@ -879,7 +956,7 @@ async function handlePlanApproval(
     permissionMode: modeToInherit,
   }
 
-  await writeToMailbox(
+  const msgId = await writeToMailbox(
     recipientName,
     {
       from: TEAM_LEAD_NAME,
@@ -888,6 +965,17 @@ async function handlePlanApproval(
     },
     teamName,
   )
+
+  if (msgId === undefined) {
+    return {
+      data: {
+        success: false,
+        message: `Failed to write the plan approval to ${recipientName}'s inbox — nothing was sent. Try again.`,
+        request_id: requestId,
+        errorClass: 'mailbox_write_failed',
+      },
+    }
+  }
 
   return {
     data: {
@@ -921,7 +1009,7 @@ async function handlePlanRejection(
     timestamp: new Date().toISOString(),
   }
 
-  await writeToMailbox(
+  const msgId = await writeToMailbox(
     recipientName,
     {
       from: TEAM_LEAD_NAME,
@@ -930,6 +1018,17 @@ async function handlePlanRejection(
     },
     teamName,
   )
+
+  if (msgId === undefined) {
+    return {
+      data: {
+        success: false,
+        message: `Failed to write the plan rejection to ${recipientName}'s inbox — nothing was sent. Try again.`,
+        request_id: requestId,
+        errorClass: 'mailbox_write_failed',
+      },
+    }
+  }
 
   return {
     data: {
@@ -1079,7 +1178,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
         return {
           result: false,
           message:
-            'uds addresses must not include inline auth tokens; use the ListPeers address',
+            'uds addresses must not include inline auth tokens; use the ListAgents address',
           errorCode: 9,
         }
       }
@@ -1225,7 +1324,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             data: {
               success: false,
               message:
-                'uds addresses must not include inline auth tokens; use the ListPeers address',
+                'uds addresses must not include inline auth tokens; use the ListAgents address',
             },
           }
         }
@@ -1269,9 +1368,22 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           /* eslint-disable @typescript-eslint/no-require-imports */
           const { sendToUdsSocket } =
             require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
+          const { permissionModeClassOf, shouldHonorPeerFromMode } =
+            require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
           try {
-            await sendToUdsSocket(addr.target, input.message)
+            // densable Wei: stamp fromMode only when harbor_kite_mode_emit is on.
+            const perm = context.getAppState().toolPermissionContext
+            const fromMode = shouldHonorPeerFromMode()
+              ? permissionModeClassOf({
+                  mode: perm.mode,
+                  isBypassPermissionsModeAvailable:
+                    perm.isBypassPermissionsModeAvailable,
+                })
+              : undefined
+            await sendToUdsSocket(addr.target, input.message, {
+              ...(fromMode !== undefined ? { fromMode } : {}),
+            })
             const preview = input.summary || truncate(input.message, 50)
             return {
               data: {

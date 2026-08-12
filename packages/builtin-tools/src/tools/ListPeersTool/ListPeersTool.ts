@@ -1,22 +1,40 @@
+/**
+ * densable 2.1.224 #7 — ListAgentsTool (wire name ListAgents; alias ListPeers).
+ *
+ * SEA: cy / qWu / IRs / f5b / m5b / yWp=10000 / toAutoClassifierInput "list agents"
+ * Local discovery still uses UDS peer registry + bridge peers (listPeers path);
+ * densable listAllPeers/formatForModel extras remain a future deepen if needed.
+ */
 import { z } from 'zod/v4'
 import type { ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import {
+  LIST_AGENTS_TOOL_NAME,
+  LIST_PEERS_LEGACY_TOOL_NAME,
+} from './constants.js'
+import { getListAgentsPrompt } from './prompt.js'
 
-const LIST_PEERS_TOOL_NAME = 'ListPeers'
+/** densable yWp */
+const LIST_AGENTS_MAX_RESULT_CHARS = 10_000
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
-    include_self: z
-      .boolean()
+    // densable f5b — reserved / not available in this build
+    channel: z
+      .string()
+      .max(256)
       .optional()
-      .describe(
-        'Whether to include the current session in the list. Defaults to false.',
-      ),
+      .describe('Not available in this build; leave unset.'),
+    q: z
+      .string()
+      .max(256)
+      .optional()
+      .describe('Not available in this build; leave unset.'),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
-type ListPeersInput = z.infer<InputSchema>
+type ListAgentsInput = z.infer<InputSchema>
 
 type PeerInfo = {
   address: string
@@ -24,29 +42,48 @@ type PeerInfo = {
   cwd?: string
   pid?: number
 }
-type ListPeersOutput = { peers: PeerInfo[] }
 
-export const ListPeersTool = buildTool({
-  name: LIST_PEERS_TOOL_NAME,
-  searchHint: 'list peers sessions discover uds socket messaging',
-  maxResultSizeChars: 50_000,
+/** densable m5b — model-facing listing string. */
+type ListAgentsOutput = { listing: string }
+
+function formatPeersListing(peers: PeerInfo[]): string {
+  if (peers.length === 0) {
+    return 'No agents found.'
+  }
+  const lines = peers.map(p => {
+    const label = p.name?.trim() || p.address
+    const bits = [label]
+    if (p.name && p.name !== p.address) {
+      bits.push(`[${p.address}]`)
+    }
+    if (p.cwd) bits.push(`@ ${p.cwd}`)
+    if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
+    return bits.join(' ')
+  })
+  return `Found ${lines.length} agent(s):\n${lines.join('\n')}`
+}
+
+export const ListAgentsTool = buildTool({
+  name: LIST_AGENTS_TOOL_NAME,
+  // densable aliases:[qWu]
+  aliases: [LIST_PEERS_LEGACY_TOOL_NAME],
+  searchHint: 'list agents you can SendMessage to',
+  maxResultSizeChars: LIST_AGENTS_MAX_RESULT_CHARS,
   strict: true,
 
   get inputSchema(): InputSchema {
     return inputSchema()
   },
 
+  toAutoClassifierInput(_input: ListAgentsInput) {
+    return 'list agents'
+  },
+
   async description() {
-    return 'Discover other Claude Code sessions for cross-session messaging'
+    return getListAgentsPrompt()
   },
   async prompt() {
-    return `List active Claude Code sessions that can receive messages via SendMessage.
-
-Returns an array of peers with their addresses. Use these addresses as the \`to\` field in SendMessage:
-- \`"uds:/path/to.sock"\` — local sessions on the same machine (Unix Domain Socket)
-- \`"bridge:session_..."\` — remote sessions via Remote Control
-
-Use this tool to discover messaging targets before sending cross-session messages. Only running sessions with active messaging sockets are returned.`
+    return getListAgentsPrompt()
   },
 
   isConcurrencySafe() {
@@ -57,35 +94,26 @@ Use this tool to discover messaging targets before sending cross-session message
   },
 
   userFacingName() {
-    return LIST_PEERS_TOOL_NAME
+    return LIST_AGENTS_TOOL_NAME
   },
 
+  // densable renderToolUseMessage(){return null}
   renderToolUseMessage() {
-    return 'ListPeers'
+    return null
   },
 
   mapToolResultToToolResultBlockParam(
-    content: ListPeersOutput,
+    content: ListAgentsOutput,
     toolUseID: string,
   ): ToolResultBlockParam {
-    const lines = content.peers.map(
-      p =>
-        `${p.address}${p.name ? ` (${p.name})` : ''}${p.cwd ? ` @ ${p.cwd}` : ''}`,
-    )
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content:
-        lines.length > 0
-          ? `Found ${lines.length} peer(s):\n${lines.join('\n')}`
-          : 'No peers found.',
+      content: content.listing,
     }
   },
 
-  async call(_input: ListPeersInput, context) {
-    // Peer discovery uses the concurrent sessions PID registry and
-    // UDS socket directory. The implementation scans for live sockets
-    // and optionally includes Remote Control bridge peers.
+  async call(_input: ListAgentsInput) {
     const peers: PeerInfo[] = []
     const seen = new Set<string>()
     const addPeer = (peer: PeerInfo): void => {
@@ -103,18 +131,6 @@ Use this tool to discover messaging targets before sending cross-session message
       require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
 
-    const messagingSocketPath = udsMessaging.getUdsMessagingSocketPath()
-    if (messagingSocketPath) {
-      // Self entry for reference
-      if (_input.include_self) {
-        addPeer({
-          address: udsMessaging.formatUdsAddress(messagingSocketPath),
-          name: 'self',
-          pid: process.pid,
-        })
-      }
-    }
-
     for (const peer of await udsClient.listPeers()) {
       if (!peer.messagingSocketPath) continue
       addPeer({
@@ -130,7 +146,10 @@ Use this tool to discover messaging targets before sending cross-session message
     }
 
     return {
-      data: { peers },
+      data: { listing: formatPeersListing(peers) },
     }
   },
 })
+
+/** @deprecated densable export name is ListAgentsTool; keep ListPeersTool for import path stability. */
+export const ListPeersTool = ListAgentsTool

@@ -149,7 +149,7 @@ export async function registerSession(): Promise<boolean> {
 }
 
 /**
- * Update this session's name in its PID registry file so ListPeers
+ * Update this session's name in its PID registry file so ListAgents
  * can surface it. Best-effort: silently no-op if name is falsy, the
  * file doesn't exist (session not registered), or read/write fails.
  */

@@ -4,13 +4,13 @@ export const DESCRIPTION = 'Send a message to another agent'
 
 export function getPrompt(): string {
   const udsRow = feature('UDS_INBOX')
-    ? `\n| \`"uds:/path/to.sock"\` | Local Claude session's socket (same machine; use \`ListPeers\`) |
-| \`"bridge:session_..."\` | Remote Control peer session (cross-machine; use \`ListPeers\`) |`
+    ? `\n| \`"uds:/path/to.sock"\` | Local Claude session's socket (same machine; use \`ListAgents\`) |
+| \`"bridge:session_..."\` | Remote Control peer session (cross-machine; use \`ListAgents\`) |`
     : ''
   const udsSection = feature('UDS_INBOX')
     ? `\n\n## Cross-session
 
-Use \`ListPeers\` to discover targets, then:
+Use \`ListAgents\` to discover targets, then:
 
 \`\`\`json
 {"to": "uds:/tmp/cc-socks/1234.sock", "message": "check if tests pass over there"}
