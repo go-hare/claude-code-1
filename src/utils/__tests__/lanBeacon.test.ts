@@ -49,7 +49,9 @@ afterAll(() => {
   useLanBeaconDgramStubs = false
 })
 
-const { LanBeacon } = await import('../lanBeacon.js')
+const { LanBeacon, normalizeLanHost, resolveLanPeerAuthToken } = await import(
+  '../lanBeacon.js'
+)
 
 type MockCall = [string, ...unknown[]]
 
@@ -200,5 +202,82 @@ describe('LanBeacon', () => {
       const payload = JSON.parse(sendCall[0].toString())
       expect(payload.role).toBe('sub')
     }
+  })
+})
+
+describe('normalizeLanHost / resolveLanPeerAuthToken', () => {
+  const peer = {
+    proto: 'claude-pipe-v1' as const,
+    pipeName: 'cli-lan-peer',
+    machineId: 'm1',
+    hostname: 'vmwin11',
+    ip: '192.168.50.27',
+    tcpPort: 58853,
+    role: 'main' as const,
+    ts: Date.now(),
+    authToken: 'secret-token-xyz',
+  }
+
+  test('normalizeLanHost maps loopback aliases', () => {
+    expect(normalizeLanHost('localhost')).toBe('127.0.0.1')
+    expect(normalizeLanHost('LOCALHOST')).toBe('127.0.0.1')
+    expect(normalizeLanHost('::1')).toBe('127.0.0.1')
+    expect(normalizeLanHost('[::1]')).toBe('127.0.0.1')
+    expect(normalizeLanHost('192.168.1.10')).toBe('192.168.1.10')
+  })
+
+  test('resolve by exact pipeName prefers name over host', () => {
+    const other = {
+      ...peer,
+      pipeName: 'cli-other',
+      ip: '10.0.0.1',
+      authToken: 'other-token',
+    }
+    expect(
+      resolveLanPeerAuthToken([peer, other], {
+        host: '10.0.0.1',
+        port: 58853,
+        pipeName: 'cli-lan-peer',
+      }),
+    ).toBe('secret-token-xyz')
+  })
+
+  test('resolve by host:port with hostname field', () => {
+    expect(
+      resolveLanPeerAuthToken([peer], {
+        host: 'vmwin11',
+        port: 58853,
+      }),
+    ).toBe('secret-token-xyz')
+  })
+
+  test('resolve localhost against 127.0.0.1 peer', () => {
+    const local = {
+      ...peer,
+      ip: '127.0.0.1',
+      hostname: 'localhost',
+      authToken: 'local-tok',
+    }
+    expect(
+      resolveLanPeerAuthToken([local], {
+        host: 'localhost',
+        port: 58853,
+      }),
+    ).toBe('local-tok')
+  })
+
+  test('missing token or port mismatch → undefined', () => {
+    expect(
+      resolveLanPeerAuthToken([{ ...peer, authToken: undefined }], {
+        host: peer.ip,
+        port: peer.tcpPort,
+      }),
+    ).toBeUndefined()
+    expect(
+      resolveLanPeerAuthToken([peer], {
+        host: peer.ip,
+        port: 1,
+      }),
+    ).toBeUndefined()
   })
 })

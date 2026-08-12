@@ -151,6 +151,25 @@ export function parseUdsTarget(target: string): {
   return { socketPath: target }
 }
 
+/**
+ * densable TSe — only refuse Windows-style UNC paths that are NOT named pipes.
+ * Absolute Unix paths (`/tmp/...`) and `\\.\pipe\...` / `//./pipe/...` are local IPC.
+ * UNC shares like `\\server\share` are rejected by callers via
+ * `Refusing to connect to non-local IPC path:`.
+ */
+export function isLocalIpcPath(path: string): boolean {
+  // densable: if (!/^[\\/]{2}/.test(e)) return true; else named-pipe only
+  if (!/^[\\/]{2}/.test(path)) return true
+  return parseWindowsNamedPipeName(path) !== undefined
+}
+
+/** densable hbr — extract named-pipe leaf from `\\.\pipe\name` / `//?/pipe/name`. */
+export function parseWindowsNamedPipeName(path: string): string | undefined {
+  const match = /^[\\/]{2}[.?][\\/]pipe[\\/]([^\\/]+)$/i.exec(path)
+  if (match === null || match[1] === '.' || match[1] === '..') return undefined
+  return match[1]
+}
+
 function getCapabilityDir(): string {
   return join(getClaudeConfigHomeDir(), 'messaging-capabilities')
 }
@@ -226,18 +245,29 @@ async function writePrivateFileExclusive(
 async function ensureSocketParent(path: string): Promise<void> {
   const dir = dirname(path)
   try {
-    const stat = await lstat(dir)
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new Error(`[udsMessaging] socket parent is not a directory: ${dir}`)
+    try {
+      const stat = await lstat(dir)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new Error(
+          `[udsMessaging] socket parent is not a directory: ${dir}`,
+        )
+      }
+      assertPrivateDirectory(stat, dir, 'socket parent')
+      return
+    } catch (error) {
+      if (!isNotFound(error)) throw error
     }
-    assertPrivateDirectory(stat, dir, 'socket parent')
-    return
-  } catch (error) {
-    if (!isNotFound(error)) throw error
-  }
 
-  await mkdir(dir, { recursive: true, mode: 0o700 })
-  await chmod(dir, 0o700)
+    await mkdir(dir, { recursive: true, mode: 0o700 })
+    await chmod(dir, 0o700)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    // densable SEA: sockets-dir setup failure uses this exact prefix.
+    throw new Error(
+      `[uds-messaging] Failed to set up sockets directory (refusing to bind): ${detail}`,
+      { cause: error instanceof Error ? error : undefined },
+    )
+  }
 }
 
 async function writeCapabilityFile(
@@ -561,7 +591,13 @@ export async function startUdsMessaging(
       })
 
       const rejectBeforeListen = (error: Error): void => {
-        reject(error)
+        // densable SEA listen/bind failure prefix
+        reject(
+          new Error(
+            `[uds-messaging] Failed to create server: ${errorMessage(error)}`,
+            { cause: error },
+          ),
+        )
       }
       const logRuntimeError = (error: Error): void => {
         logForDebugging(
@@ -622,14 +658,33 @@ export async function startUdsMessaging(
       })
     })
 
-    await writeCapabilityFile(path, token)
+    // densable 2.1.228 #4 — publish inbox auth key after listen; failure is
+    // hard (`key_publish_failed`) so we never run an inbox peers cannot auth.
+    try {
+      await writeCapabilityFile(path, token)
+    } catch (publishErr) {
+      const detail =
+        publishErr instanceof Error ? publishErr.message : String(publishErr)
+      logForDebugging(
+        `[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authenticate to): ${detail}`,
+      )
+      const err = new Error(
+        `[uds-messaging] Failed to publish the inbox auth key (refusing to run an inbox no peer can authenticate to): ${detail}`,
+      )
+      ;(err as Error & { code?: string }).code = 'key_publish_failed'
+      throw err
+    }
     socketPath = path
     // Export so child processes can discover the socket only after the
     // capability file exists and the listener is ready.
     process.env.CLAUDE_CODE_MESSAGING_SOCKET = path
     exportedSocketEnv = true
+    // densable also exports CLAUDE_CODE_MESSAGING_TOKEN for inject/socat.
+    // Tradeoff (SEA-aligned): child processes inherit this env; token is also
+    // on-disk in the capability file. Do not invent a non-env soft-auth path.
+    process.env.CLAUDE_CODE_MESSAGING_TOKEN = token
     logForDebugging(
-      `[udsMessaging] server listening on ${path}${opts?.isExplicit ? ' (explicit)' : ''}`,
+      `[udsMessaging] Listening: ${path}${opts?.isExplicit ? ' (explicit)' : ''}`,
     )
   } catch (error) {
     if (capabilityFilePath) {
@@ -649,6 +704,7 @@ export async function startUdsMessaging(
     await removeSocketPath(path)
     if (exportedSocketEnv) {
       delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
+      delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
     }
     socketPath = null
     defaultSocketPath = null
@@ -687,6 +743,7 @@ export async function stopUdsMessaging(): Promise<void> {
   if (socketPath) {
     await removeSocketPath(socketPath)
     delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
+    delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
     logForDebugging(
       `[udsMessaging] server stopped, socket removed: ${socketPath}`,
     )

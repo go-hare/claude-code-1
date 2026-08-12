@@ -10,8 +10,16 @@
  *   ~/.claude/pipes/{session-short-id}.sock
  *
  * Protocol: newline-delimited JSON (NDJSON), one message per line.
+ *
+ * LAN TCP (enableTcp): requires shared-secret auth handshake before any
+ * application message. Token is generated per PipeServer and advertised via
+ * LanBeacon (`authToken`) — also in **plaintext** on the UDP beacon (TTL=1).
+ * That only stops blind scanners; it is NOT a confidentiality boundary.
+ * Trusted LAN only. Local UDS remains filesystem-permission gated and does
+ * not require the handshake.
  */
 
+import { randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, createConnection, type Server, type Socket } from 'net'
 import { mkdir, unlink, readdir, writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -21,7 +29,11 @@ import type { PermissionDecision } from '../types/permissions.js'
 import type { PermissionUpdate } from './permissions/PermissionUpdateSchema.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { logError } from './log.js'
+import { logForDebugging } from './debug.js'
 import { attachNdjsonFramer } from './ndjsonFramer.js'
+
+/** TCP clients must complete auth within this window or are dropped. */
+const PIPE_TCP_AUTH_TIMEOUT_MS = 3_000
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +57,10 @@ export type PipeMessageType =
   // Basic
   | 'ping'
   | 'pong'
+  // LAN TCP shared-secret handshake (required before other msgs on TCP)
+  | 'auth'
+  | 'auth_ok'
+  | 'auth_error'
   // Control flow (master-slave bridge)
   | 'attach_request'
   | 'attach_accept'
@@ -118,7 +134,21 @@ export type PipePermissionCancelPayload = {
 export type PipeMessageHandler = (
   msg: PipeMessage,
   reply: (msg: PipeMessage) => void,
+  /** Source socket — use for attach relay / directed replies (never clients[last]). */
+  socket: Socket,
 ) => void
+
+/** Constant-time token compare (length mismatch fails closed without timingSafeEqual throw). */
+export function pipeAuthTokensEqual(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, 'utf8')
+    const bb = Buffer.from(b, 'utf8')
+    if (ba.length !== bb.length) return false
+    return timingSafeEqual(ba, bb)
+  } catch {
+    return false
+  }
+}
 
 // ---------------------------------------------------------------------------
 // TCP transport types
@@ -131,6 +161,11 @@ export type TcpEndpoint = { host: string; port: number }
 export type PipeServerOptions = {
   enableTcp?: boolean
   tcpPort?: number // 0 = random port
+  /**
+   * Shared secret for TCP clients. When omitted and enableTcp is true, a
+   * random 32-byte hex token is generated. UDS listeners ignore this.
+   */
+  authToken?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -160,9 +195,13 @@ async function ensurePipesDir(): Promise<void> {
 export class PipeServer extends EventEmitter {
   private server: Server | null = null
   private tcpServer: Server | null = null
+  /** Fully trusted sockets only (UDS or post-auth TCP). Used by broadcast/sendTo/count. */
   private clients: Set<Socket> = new Set()
+  /** TCP sockets waiting for auth — never broadcast to these. */
+  private pendingAuthClients: Set<Socket> = new Set()
   private handlers: PipeMessageHandler[] = []
   private _tcpAddress: TcpEndpoint | null = null
+  private _authToken: string | null = null
   readonly name: string
   readonly socketPath: string
 
@@ -178,32 +217,132 @@ export class PipeServer extends EventEmitter {
   }
 
   /**
-   * Shared handler for both UDS and TCP sockets.
+   * Shared secret required by TCP clients (null when TCP is off).
+   * Advertised via LanBeacon so legitimate peers can connect.
    */
-  private setupSocket(socket: Socket): void {
-    this.clients.add(socket)
-    this.emit('connection', socket)
+  get authToken(): string | null {
+    return this._authToken
+  }
+
+  /**
+   * Wire a socket. UDS/named-pipe sockets are trusted via filesystem perms.
+   * TCP sockets must complete an `auth` handshake first — they are NOT added
+   * to `clients` (broadcast/connectionCount) until auth succeeds.
+   */
+  private setupSocket(socket: Socket, requireAuth: boolean): void {
+    let authenticated = !requireAuth
+    let authTimer: ReturnType<typeof setTimeout> | null = null
+
+    if (requireAuth) {
+      this.pendingAuthClients.add(socket)
+      authTimer = setTimeout(() => {
+        if (authenticated || socket.destroyed) return
+        logForDebugging(
+          `[pipeTransport] closing unauthenticated TCP client for ${this.name}`,
+        )
+        if (!socket.destroyed) {
+          try {
+            socket.write(
+              JSON.stringify({
+                type: 'auth_error',
+                data: 'authentication timeout',
+                from: this.name,
+                ts: new Date().toISOString(),
+              }) + '\n',
+            )
+          } catch {
+            // ignore write failures on teardown
+          }
+          socket.destroy()
+        }
+      }, PIPE_TCP_AUTH_TIMEOUT_MS)
+      if (typeof authTimer.unref === 'function') authTimer.unref()
+    } else {
+      // UDS / named pipe: trusted via filesystem ACLs
+      this.clients.add(socket)
+      this.emit('connection', socket)
+    }
+
+    const clearAuthTimer = (): void => {
+      if (authTimer) {
+        clearTimeout(authTimer)
+        authTimer = null
+      }
+    }
+
+    const admitAuthenticated = (): void => {
+      if (this.clients.has(socket)) return
+      this.pendingAuthClients.delete(socket)
+      this.clients.add(socket)
+      this.emit('connection', socket)
+    }
+
+    const reply = (replyMsg: PipeMessage): void => {
+      replyMsg.from = replyMsg.from ?? this.name
+      replyMsg.ts = replyMsg.ts ?? new Date().toISOString()
+      if (!socket.destroyed) {
+        socket.write(JSON.stringify(replyMsg) + '\n')
+      }
+    }
 
     attachNdjsonFramer<PipeMessage>(socket, msg => {
-      this.emit('message', msg)
-      const reply = (replyMsg: PipeMessage) => {
-        replyMsg.from = replyMsg.from ?? this.name
-        replyMsg.ts = replyMsg.ts ?? new Date().toISOString()
-        if (!socket.destroyed) {
-          socket.write(JSON.stringify(replyMsg) + '\n')
+      if (requireAuth && !authenticated) {
+        if (msg.type === 'auth') {
+          const offered =
+            typeof msg.data === 'string'
+              ? msg.data
+              : typeof msg.meta?.token === 'string'
+                ? msg.meta.token
+                : ''
+          if (
+            this._authToken &&
+            pipeAuthTokensEqual(offered, this._authToken)
+          ) {
+            authenticated = true
+            clearAuthTimer()
+            admitAuthenticated()
+            reply({ type: 'auth_ok', data: 'ok' })
+            return
+          }
+          logForDebugging(`[pipeTransport] TCP auth rejected for ${this.name}`)
+          reply({ type: 'auth_error', data: 'unauthorized' })
+          socket.destroy()
+          return
         }
+        logForDebugging(
+          `[pipeTransport] rejected pre-auth message type=${msg.type} for ${this.name}`,
+        )
+        reply({ type: 'auth_error', data: 'auth required' })
+        socket.destroy()
+        return
       }
+
+      // Post-auth: ignore stray auth frames (idempotent ok)
+      if (msg.type === 'auth') {
+        if (requireAuth) {
+          reply({ type: 'auth_ok', data: 'ok' })
+        }
+        return
+      }
+
+      this.emit('message', msg)
       for (const handler of this.handlers) {
-        handler(msg, reply)
+        handler(msg, reply, socket)
       }
     })
 
     socket.on('close', () => {
-      this.clients.delete(socket)
-      this.emit('disconnect', socket)
+      clearAuthTimer()
+      this.pendingAuthClients.delete(socket)
+      const wasClient = this.clients.delete(socket)
+      if (wasClient || !requireAuth) {
+        this.emit('disconnect', socket)
+      }
     })
 
     socket.on('error', err => {
+      clearAuthTimer()
+      this.pendingAuthClients.delete(socket)
       this.clients.delete(socket)
       logError(err)
     })
@@ -225,9 +364,9 @@ export class PipeServer extends EventEmitter {
       }
     }
 
-    // Start UDS/Named Pipe server
+    // Start UDS/Named Pipe server (no NDJSON auth — OS filesystem ACLs)
     await new Promise<void>((resolve, reject) => {
-      this.server = createServer(socket => this.setupSocket(socket))
+      this.server = createServer(socket => this.setupSocket(socket, false))
 
       this.server.on('error', reject)
 
@@ -253,16 +392,20 @@ export class PipeServer extends EventEmitter {
 
     // Optionally start TCP server for LAN connectivity
     if (options?.enableTcp) {
+      this._authToken =
+        options.authToken && options.authToken.length > 0
+          ? options.authToken
+          : randomBytes(32).toString('hex')
       await this.startTcpServer(options.tcpPort ?? 0)
     }
   }
 
   /**
-   * Start TCP listener for LAN peers.
+   * Start TCP listener for LAN peers (auth required on each socket).
    */
   private async startTcpServer(port: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      this.tcpServer = createServer(socket => this.setupSocket(socket))
+      this.tcpServer = createServer(socket => this.setupSocket(socket, true))
       this.tcpServer.on('error', reject)
       this.tcpServer.listen(port, '0.0.0.0', () => {
         const addr = this.tcpServer!.address()
@@ -315,6 +458,10 @@ export class PipeServer extends EventEmitter {
       client.destroy()
     }
     this.clients.clear()
+    for (const pending of this.pendingAuthClients) {
+      pending.destroy()
+    }
+    this.pendingAuthClients.clear()
 
     // Close TCP server if running
     if (this.tcpServer) {
@@ -358,22 +505,26 @@ export class PipeClient extends EventEmitter {
   readonly senderName: string
   readonly socketPath: string
   private tcpEndpoint: TcpEndpoint | null
+  private authToken: string | null
 
   constructor(
     targetName: string,
     senderName?: string,
     tcpEndpoint?: TcpEndpoint,
+    authToken?: string,
   ) {
     super()
     this.targetName = targetName
     this.senderName = senderName ?? `client-${process.pid}`
     this.socketPath = getPipePath(targetName)
     this.tcpEndpoint = tcpEndpoint ?? null
+    this.authToken = authToken ?? null
   }
 
   /**
    * Connect to a pipe server (UDS or TCP).
-   * When tcpEndpoint was provided in constructor, connects over TCP.
+   * When tcpEndpoint was provided in constructor, connects over TCP and
+   * completes the shared-secret auth handshake before resolving.
    * Otherwise uses UDS with retry for socket file existence.
    */
   async connect(timeoutMs: number = 5000): Promise<void> {
@@ -385,8 +536,19 @@ export class PipeClient extends EventEmitter {
 
   private async connectTcp(timeoutMs: number): Promise<void> {
     const { host, port } = this.tcpEndpoint!
+    if (!this.authToken) {
+      throw new Error(
+        `TCP connection to "${this.targetName}" requires authToken (LAN shared secret)`,
+      )
+    }
+    const token = this.authToken
+
     return new Promise((resolve, reject) => {
+      let settled = false
       const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        socket.destroy()
         reject(
           new Error(
             `TCP connection to "${this.targetName}" at ${host}:${port} timed out after ${timeoutMs}ms`,
@@ -394,18 +556,69 @@ export class PipeClient extends EventEmitter {
         )
       }, timeoutMs)
 
-      const socket = createConnection({ host, port }, () => {
-        clearTimeout(timer)
-        this.socket = socket
-        this.setupSocketListeners(socket)
-        this.emit('connected')
-        resolve()
-      })
-
-      socket.on('error', err => {
+      const fail = (err: Error): void => {
+        if (settled) return
+        settled = true
         clearTimeout(timer)
         socket.destroy()
         reject(err)
+      }
+
+      const socket = createConnection({ host, port }, () => {
+        // First frame must be auth; wait for auth_ok before exposing the client.
+        let buffer = ''
+        const onData = (chunk: Buffer): void => {
+          buffer += chunk.toString('utf8')
+          const nl = buffer.indexOf('\n')
+          if (nl === -1) return
+          const line = buffer.slice(0, nl)
+          buffer = buffer.slice(nl + 1)
+          socket.off('data', onData)
+          let msg: PipeMessage
+          try {
+            msg = JSON.parse(line) as PipeMessage
+          } catch {
+            fail(
+              new Error(
+                `TCP auth to "${this.targetName}" failed: invalid server response`,
+              ),
+            )
+            return
+          }
+          if (msg.type === 'auth_ok') {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            this.socket = socket
+            // Replay any leftover bytes after auth_ok into the framer path
+            // by re-emitting them as a synthetic data event after listeners attach.
+            this.setupSocketListeners(socket)
+            if (buffer.length > 0) {
+              socket.emit('data', Buffer.from(buffer, 'utf8'))
+            }
+            this.emit('connected')
+            resolve()
+            return
+          }
+          fail(
+            new Error(
+              `TCP auth to "${this.targetName}" rejected: ${msg.data ?? msg.type}`,
+            ),
+          )
+        }
+        socket.on('data', onData)
+        socket.write(
+          JSON.stringify({
+            type: 'auth',
+            data: token,
+            from: this.senderName,
+            ts: new Date().toISOString(),
+          }) + '\n',
+        )
+      })
+
+      socket.on('error', err => {
+        fail(err instanceof Error ? err : new Error(String(err)))
       })
     })
   }
@@ -465,7 +678,7 @@ export class PipeClient extends EventEmitter {
       this.emit('message', msg)
       const reply = (replyMsg: PipeMessage) => this.send(replyMsg)
       for (const handler of this.handlers) {
-        handler(msg, reply)
+        handler(msg, reply, socket)
       }
     })
 
@@ -521,8 +734,9 @@ export async function connectToPipe(
   senderName?: string,
   timeoutMs?: number,
   tcpEndpoint?: TcpEndpoint,
+  authToken?: string,
 ): Promise<PipeClient> {
-  const client = new PipeClient(targetName, senderName, tcpEndpoint)
+  const client = new PipeClient(targetName, senderName, tcpEndpoint, authToken)
   await client.connect(timeoutMs)
   return client
 }

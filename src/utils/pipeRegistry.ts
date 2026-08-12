@@ -450,6 +450,8 @@ export type MergedPipeEntry = {
   alive: boolean
   source: 'local' | 'lan'
   tcpEndpoint?: TcpEndpoint
+  /** LAN TCP shared secret when advertised on beacon (list→connect must not drop). */
+  authToken?: string
 }
 
 /**
@@ -513,6 +515,7 @@ export function mergeWithLanPeers(
       alive: true,
       source: 'lan',
       tcpEndpoint: { host: peer.ip, port: peer.tcpPort },
+      ...(peer.authToken ? { authToken: peer.authToken } : {}),
     })
   }
 

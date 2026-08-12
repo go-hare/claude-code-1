@@ -117,7 +117,10 @@ describe('UDS inbox retention', () => {
   test('drainInbox returns each pending socket message once', async () => {
     const path = socketPath('drain')
     await startUdsMessaging(path, { isExplicit: true })
-    expect(process.env.CLAUDE_CODE_MESSAGING_TOKEN).toBeUndefined()
+    // densable 2.1.228 #4 — export CLAUDE_CODE_MESSAGING_TOKEN after
+    // capability/auth key publish so peers can authenticate.
+    expect(typeof process.env.CLAUDE_CODE_MESSAGING_TOKEN).toBe('string')
+    expect(process.env.CLAUDE_CODE_MESSAGING_TOKEN!.length).toBeGreaterThan(0)
 
     await waitForEnqueues(2, async () => {
       await sendUdsMessage(path, { type: 'text', data: 'one' })
@@ -194,7 +197,14 @@ describe('UDS inbox retention', () => {
 
     const drained = drainInbox()
     expect(drained).toHaveLength(1)
-    expect(drained[0]?.message.data).toBe('hello from client')
+    // densable 2.1.228 #13 — sendToUdsSocket wraps body in
+    // <cross-session-message from="uds:…"> so receivers can show sender.
+    const data = drained[0]?.message.data
+    expect(typeof data).toBe('string')
+    expect(data).toContain('hello from client')
+    expect(data).toMatch(
+      /^<cross-session-message\b[^>]*from="uds:[^"]+"[^>]*>\nhello from client\n<\/cross-session-message>$/,
+    )
     expect(drained[0]?.message.meta).toBeUndefined()
   })
 
@@ -229,7 +239,7 @@ describe('UDS inbox retention', () => {
     const { sendToUdsSocket } = await import('../udsClient.js')
 
     await expect(sendToUdsSocket(path, 'hello')).rejects.toThrow(
-      'No auth token found',
+      /No running session has registered an inbox|unvouched pipe|no live inbox/,
     )
   })
 
@@ -653,11 +663,14 @@ describe('UDS inbox retention', () => {
       mode: 0o700,
     })
 
-    await expect(
-      startUdsMessaging(path, { isExplicit: true }),
-    ).rejects.toThrow()
-
+    const err = await startUdsMessaging(path, { isExplicit: true }).then(
+      () => null,
+      e => e as Error & { code?: string },
+    )
+    expect(err).toBeTruthy()
+    expect(err!.code).toBe('key_publish_failed')
     expect(process.env.CLAUDE_CODE_MESSAGING_SOCKET).toBeUndefined()
+    expect(process.env.CLAUDE_CODE_MESSAGING_TOKEN).toBeUndefined()
     expect(await readdir(capabilityDir)).toEqual([capabilityName])
   })
 

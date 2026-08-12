@@ -1428,8 +1428,41 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               },
             }
           }
+          // LAN TCP requires shared-secret handshake (pipeTransport auth).
+          // Resolve token from LanBeacon via normalizeLanHost + pipeName when
+          // known — same discovery surface as /attach / usePipeIpc. Do not
+          // invent ad-hoc tcp:host:port#token syntax (not densable gold).
+          // Threat model: token is also on the UDP beacon (plaintext); see
+          // docs/features/pipes-and-lan.md — trusted LAN only.
+          let authToken: string | undefined
           try {
-            const client = new PipeClient(input.to, `send-${process.pid}`, ep)
+            const { getLanBeacon, resolveLanPeerAuthToken } =
+              require('src/utils/lanBeacon.js') as typeof import('src/utils/lanBeacon.js')
+            const beacon = getLanBeacon()
+            if (beacon) {
+              authToken = resolveLanPeerAuthToken(beacon.getPeers().values(), {
+                host: ep.host,
+                port: ep.port,
+              })
+            }
+          } catch {
+            // beacon optional at tool-load; resolve fails closed below
+          }
+          if (!authToken) {
+            return {
+              data: {
+                success: false,
+                message: `Cannot send via TCP to ${ep.host}:${ep.port}: no LAN peer advertised an auth token for this endpoint (discover via /pipes or wait for beacon, then /attach). Host is matched case-insensitively with localhost↔127.0.0.1; hostname field also accepted.`,
+              },
+            }
+          }
+          try {
+            const client = new PipeClient(
+              input.to,
+              `send-${process.pid}`,
+              ep,
+              authToken,
+            )
             await client.connect(5000)
             client.send({ type: 'chat', data: input.message })
             client.disconnect()

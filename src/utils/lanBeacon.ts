@@ -33,6 +33,69 @@ export type LanAnnounce = {
   tcpPort: number
   role: 'main' | 'sub'
   ts: number
+  /**
+   * Shared secret for TCP pipe auth handshake.
+   * Optional for backward compatibility with older beacons (those peers will
+   * fail TCP attach until upgraded).
+   *
+   * Threat model: the token is also broadcast in plaintext on the UDP
+   * multicast beacon (TTL=1). TCP auth only stops blind scanners that never
+   * read the beacon — it is NOT a confidentiality boundary. Trusted LAN only.
+   */
+  authToken?: string
+}
+
+/**
+ * Normalize a host for LAN peer matching (loopback aliases, IPv6 brackets,
+ * case). Does not resolve DNS — lexical only so tool paths stay sync/cheap.
+ */
+export function normalizeLanHost(host: string): string {
+  let h = host.trim().toLowerCase()
+  if (h.startsWith('[') && h.endsWith(']')) {
+    h = h.slice(1, -1)
+  }
+  if (
+    h === 'localhost' ||
+    h === '::1' ||
+    h === '0:0:0:0:0:0:0:1' ||
+    h === '0000:0000:0000:0000:0000:0000:0000:0001'
+  ) {
+    return '127.0.0.1'
+  }
+  return h
+}
+
+/**
+ * Resolve TCP handshake token from discovered LAN peers.
+ * Prefer exact `pipeName` (same path as `/attach`); else match host:port with
+ * normalized host (localhost↔127.0.0.1, hostname field, case).
+ */
+export function resolveLanPeerAuthToken(
+  peers: Iterable<LanAnnounce>,
+  opts: {
+    host: string
+    port: number
+    /** When known (e.g. /attach target name), preferred over host:port. */
+    pipeName?: string
+  },
+): string | undefined {
+  const { host, port, pipeName } = opts
+  if (pipeName) {
+    for (const peer of peers) {
+      if (peer.pipeName === pipeName && peer.authToken) {
+        return peer.authToken
+      }
+    }
+  }
+  const wantHost = normalizeLanHost(host)
+  for (const peer of peers) {
+    if (peer.tcpPort !== port || !peer.authToken) continue
+    if (normalizeLanHost(peer.ip) === wantHost) return peer.authToken
+    if (peer.hostname && normalizeLanHost(peer.hostname) === wantHost) {
+      return peer.authToken
+    }
+  }
+  return undefined
 }
 
 // ---------------------------------------------------------------------------

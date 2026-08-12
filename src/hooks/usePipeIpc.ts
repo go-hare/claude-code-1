@@ -160,8 +160,8 @@ function registerMessageHandlers(
     if (msg.type === 'ping') reply({ type: 'pong' })
   })
 
-  // Handle attach requests
-  server.onMessage((msg: PipeMessage, reply) => {
+  // Handle attach requests — third arg is source socket (never clients[last])
+  server.onMessage((msg: PipeMessage, reply, sourceSocket) => {
     if (msg.type !== 'attach_request') return
     const state = store.getState()
     const currentPipeState = pt.getPipeIpc(state)
@@ -180,8 +180,9 @@ function registerMessageHandlers(
     }
     reply({ type: 'attach_accept' })
 
-    const clients = Array.from((server as any).clients as Set<any>)
-    const masterSocket = clients[clients.length - 1]
+    // densable attach: relay to the socket that sent attach_request — never
+    // clients[last] (racy under concurrent UDS+TCP / multi-peer).
+    const masterSocket = sourceSocket
     pp.setPipeRelay((relayMsg: any) => {
       if (masterSocket && !masterSocket.destroyed) {
         relayMsg.from = relayMsg.from ?? pipeName
@@ -288,12 +289,13 @@ function runMainHeartbeat(
       type AttachTarget = {
         pipeName: string
         tcpEndpoint?: { host: string; port: number }
+        authToken?: string
       }
       const attachTargets: AttachTarget[] = aliveSubs.map(sub => ({
         pipeName: sub.pipeName,
       }))
 
-      // Add LAN peers as attach targets
+      // Add LAN peers as attach targets (require authToken for TCP)
       if (feature('LAN_PIPES')) {
         const beacon = lb.getLanBeacon()
         if (beacon) {
@@ -301,9 +303,14 @@ function runMainHeartbeat(
           localNames.add(pipeName)
           for (const [pName, peer] of beacon.getPeers()) {
             if (!localNames.has(pName)) {
+              if (!peer.authToken) {
+                // Pre-auth beacon peers cannot complete TCP handshake.
+                continue
+              }
               attachTargets.push({
                 pipeName: pName,
                 tcpEndpoint: { host: peer.ip, port: peer.tcpPort },
+                authToken: peer.authToken,
               })
               aliveSubNames.add(pName)
             }
@@ -324,6 +331,7 @@ function runMainHeartbeat(
             myName,
             3000,
             target.tcpEndpoint,
+            target.authToken,
           )
 
           const attached = await new Promise<boolean>(resolve => {
@@ -504,7 +512,8 @@ export function usePipeIpc({
         }
 
         // --- Phase 3: LAN beacon ---
-        if (feature('LAN_PIPES') && server.tcpAddress) {
+        // authToken is required for TCP attach after pipeTransport LAN auth.
+        if (feature('LAN_PIPES') && server.tcpAddress && server.authToken) {
           const beacon = new lb.LanBeacon({
             pipeName,
             machineId: machId,
@@ -512,6 +521,7 @@ export function usePipeIpc({
             ip: localIp,
             tcpPort: server.tcpAddress.port,
             role: initialRole,
+            authToken: server.authToken,
           })
           beacon.start()
           lb.setLanBeacon(beacon)

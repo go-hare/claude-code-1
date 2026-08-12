@@ -49,6 +49,26 @@ export class UdsPeerConnectionError extends Error {
   }
 }
 
+/**
+ * densable Bt-style fail-closed when the target has no live capability voucher.
+ * `code` is the short classifier (e.g. `no live inbox registered for the target pipe`).
+ */
+export class UdsUnvouchedPipeError extends Error {
+  readonly code: string
+  readonly socketPath: string
+  readonly kind: string
+
+  constructor(socketPath: string, kind: string) {
+    super(
+      `No running session has registered an inbox at ${socketPath} (ENOINBOX: ${kind}) — refusing to send to an unvouched pipe`,
+    )
+    this.name = 'UdsUnvouchedPipeError'
+    this.code = 'no live inbox registered for the target pipe'
+    this.socketPath = socketPath
+    this.kind = kind
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Session directory
 // ---------------------------------------------------------------------------
@@ -126,6 +146,22 @@ async function findAuthTokenForSocketPath(
 ): Promise<string | undefined> {
   const { readUdsCapabilityToken } = await import('./udsMessaging.js')
   return readUdsCapabilityToken(socketPath)
+}
+
+/**
+ * densable ULu-lite for go-hare's messaging-capabilities store.
+ * Full densable uses per-PID `.${hash}.key` under sessions/ with dead-owner
+ * ranking; we map missing capability → no-key for the same fail-closed surface
+ * without inventing that key layout.
+ */
+async function resolveCapabilityForSocket(
+  socketPath: string,
+): Promise<{ kind: 'token'; token: string } | { kind: 'no-key' }> {
+  const token = await findAuthTokenForSocketPath(socketPath)
+  if (typeof token === 'string' && token.length > 0) {
+    return { kind: 'token', token }
+  }
+  return { kind: 'no-key' }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,23 +264,51 @@ export async function sendToUdsSocket(
       : timeoutMsOrOpts
   const timeoutMs = opts.timeoutMs ?? 5000
 
-  const { parseUdsTarget } = await import('./udsMessaging.js')
+  const { parseUdsTarget, isLocalIpcPath } = await import('./udsMessaging.js')
   const target = parseUdsTarget(targetSocketPath)
-  const authToken = await findAuthTokenForSocketPath(target.socketPath)
-  if (!authToken) {
-    throw new Error(`No auth token found for peer at ${target.socketPath}`)
+  // densable TSe / WOd: refuse non-local IPC paths before any connect.
+  if (!isLocalIpcPath(target.socketPath)) {
+    throw new Error(
+      `Refusing to connect to non-local IPC path: ${target.socketPath}`,
+    )
   }
+  const cap = await resolveCapabilityForSocket(target.socketPath)
+  if (cap.kind !== 'token') {
+    // densable: No running session has registered an inbox at … (ENOINBOX: kind)
+    // — refusing to send to an unvouched pipe / code "no live inbox…"
+    throw new UdsUnvouchedPipeError(target.socketPath, cap.kind)
+  }
+  const authToken = cap.token
 
-  const data = typeof message === 'string' ? message : jsonStringify(message)
+  const rawBody = typeof message === 'string' ? message : jsonStringify(message)
+
+  // Lazily import to avoid circular dep at module-load time
+  const { getUdsMessagingSocketPath } = await import('./udsMessaging.js')
+  const ownSocket = getUdsMessagingSocketPath()
+  // densable n5s/fbr: wrap body with from= own uds address + optional from-name
+  // (session title) so the receiver UI can show sender name inline.
+  let fromName: string | undefined
+  try {
+    const { getSessionId } = await import('../bootstrap/state.js')
+    const { getCurrentSessionTitle } = await import('./sessionStorage.js')
+    fromName = getCurrentSessionTitle(getSessionId())
+  } catch {
+    // title optional
+  }
+  const { wrapCrossSessionMessage } = await import('./crossSessionMessage.js')
+  const fromAddr = ownSocket ? `uds:${ownSocket}` : undefined
+  const data = wrapCrossSessionMessage(rawBody, {
+    ...(fromAddr !== undefined ? { from: fromAddr } : {}),
+    ...(fromName !== undefined ? { fromName } : {}),
+    ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
+  })
+
   const udsMsg: UdsMessage = {
     type: 'text',
     data,
     ts: new Date().toISOString(),
   }
-
-  // Lazily import to avoid circular dep at module-load time
-  const { getUdsMessagingSocketPath } = await import('./udsMessaging.js')
-  udsMsg.from = getUdsMessagingSocketPath()
+  udsMsg.from = ownSocket
 
   return new Promise<void>((resolve, reject) => {
     let settled = false
