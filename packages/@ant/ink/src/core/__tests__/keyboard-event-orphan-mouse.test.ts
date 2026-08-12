@@ -127,6 +127,15 @@ describe('KeyboardEvent SGR mouse fragment suppress (fag + residue)', () => {
     expect(new KeyboardEvent(nameless('1;2;3')).key).toBe('1;2;3')
   })
 
+  test('densable xM_ does not empty glued 2-param mouse burst (invent-ban)', () => {
+    // densable 228 xM_: only ESC + /^(\[<\d[\d;]*[Mm]?)+$/
+    // Live screenshot residue 3;60M143;60M… is densable-shared if it reaches key().
+    const live = '3;60M143;60M3;60M3;60M0;38M0;38M8M110;38M'
+    expect(new KeyboardEvent(nameless(live)).key).toBe(live)
+    expect(new KeyboardEvent(nameless('3;60M143;60M')).key).toBe('3;60M143;60M')
+    expect(new KeyboardEvent(nameless('3;60M')).key).toBe('3;60M')
+  })
+
   test('mixed finalizer digit noise without < is kept; leading-< still emptied', () => {
     // Without `<` marker, multi-finalizer digit runs are not residue (review).
     expect(new KeyboardEvent(nameless('MMM8MMMM')).key).toBe('MMM8MMMM')
@@ -158,9 +167,8 @@ describe('KeyboardEvent SGR mouse fragment suppress (fag + residue)', () => {
   })
 
   test('lone M is kept at KeyboardEvent layer (no multi-key post-wheel absorb)', () => {
-    // densable Q_g returns "M"; review residual forbids App/parse multi-key
-    // absorb windows that silently drop later legitimate M after scroll.
-    // Incomplete body + M completes via parse-keypress pendingSgrPrefix only.
+    // densable xM_/Q_g returns "M"; densable parse has no absorb window /
+    // pendingSgr that would complete incomplete body + late M.
     expect(new KeyboardEvent(nameless('M')).key).toBe('M')
   })
 })

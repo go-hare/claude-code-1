@@ -798,10 +798,10 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
     // Official: wheel/mouse never enter KeyboardEvent / insert path.
     // Fork has no dispatchWheelEvent prop — scroll:lineUp/lineDown keybindings
     // listen on the InputEvent emitter, so emit only that for wheel/mouse.
-    // No post-wheel multi-key absorb of lone M/m here (review residual:
-    // persistent absorb silently dropped legitimate M after scroll).
-    // Incomplete SGR hold/complete lives in parse-keypress pendingSgrPrefix;
-    // progressive desync empties in KeyboardEvent isSgrMouseResidue (under-strip).
+    // densable: no post-wheel multi-key absorb of lone M/m.
+    // parse-keypress kTd = whole-token re-ESC only; incomplete CSI lives in
+    // tokenizer.buffer() until NORMAL_TIMEOUT flush. Progressive desync residue
+    // empties in KeyboardEvent xM_ / isSgrMouseResidue (fork under-strip).
     if (item.name === 'wheelup' || item.name === 'wheeldown' || item.name === 'mouse') {
       const event = new InputEvent(item);
       app.internal_eventEmitter.emit('input', event);

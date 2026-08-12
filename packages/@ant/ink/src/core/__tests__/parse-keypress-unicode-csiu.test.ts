@@ -184,22 +184,23 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     expect(key.sequence).toBe(`${FULLWIDTH_COLON}hello`)
   })
 
-  test('orphan CSI u tail after ESC flush inserts fullwidth colon', () => {
-    // App 50ms timer flushes incomplete ESC as Escape; continuation arrives
-    // as text token `[65306u` without leading ESC.
+  test('orphan CSI u tail after ESC flush is NOT re-prefixed (densable kTd)', () => {
+    // densable 228 kTd only re-ESC whole-token SGR/X10 mouse — not CSI u.
+    // App 50ms flush of lone ESC + later `[65306u` stays text (sji multi-char empty).
     const [items] = parseMultipleKeypresses(INITIAL_STATE, '[65306u')
     expect(items).toHaveLength(1)
     const key = asKey(items[0])
+    expect(key.sequence).toBe('[65306u')
     const event = new InputEvent(key)
-    expect(event.input).toBe(FULLWIDTH_COLON)
-    expect(event.key.ctrl).toBe(false)
-    expect(event.key.meta).toBe(false)
+    // multi-codepoint → sji empty on InputEvent; main prompt uses KeyboardEvent
+    expect(event.input).toBe('')
   })
 
-  test('orphan progressive CSI u tail inserts fullwidth colon', () => {
+  test('orphan progressive CSI u tail is NOT re-prefixed (densable kTd)', () => {
     const [items] = parseMultipleKeypresses(INITIAL_STATE, '[58:65306;2u')
-    const event = new InputEvent(asKey(items[0]))
-    expect(event.input).toBe(FULLWIDTH_COLON)
+    const key = asKey(items[0])
+    expect(key.sequence).toBe('[58:65306;2u')
+    expect(new InputEvent(key).input).toBe('')
   })
 
   test('AltGr CSI u (ctrl+meta) fullwidth colon clears modifiers for insert', () => {

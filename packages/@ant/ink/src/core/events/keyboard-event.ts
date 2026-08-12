@@ -77,8 +77,12 @@ function isSgrResidueCharset(seq: string): boolean {
  */
 export function isSgrMouseResidue(seq: string): boolean {
   if (!seq) return false
-  // Official densable fag: pure orphan SGR with leading `[` (complete/incomplete).
+  // densable 228 xM_ (KeyboardEvent.key): pure orphan SGR with leading `[`
+  //   if (/^(\[<\d[\d;]*[Mm]?)+$/.test(t)) return ""
+  // densable does NOT empty 2-param bursts (3;60M143;60M…) — invent-ban.
   if (/^(\[<\d[\d;]*[Mm]?)+$/.test(seq)) return true
+  // Fork extras below (pre-existing local delta vs densable xM_): progressive
+  // desync when ESC and/or `[` lost. Documented; not densable 1:1.
   // ESC lost AND often `[` lost: leading-`<` SGR forms only.
   if (isSgrResidueCharset(seq) && /<\d/.test(seq) && /[Mm]/.test(seq)) {
     return true
@@ -121,7 +125,7 @@ export function stripSgrMouseFragments(text: string): string {
   // Pure progressive peel tail only (do not strip middle of "17;19M" / "32;19M").
   if (/^;\d+[Mm]$/.test(out)) return ''
   // Do NOT strip pure "MMMM" / "MMM8MMMM" / short "4M" — under-strip policy.
-  // Incomplete hold + same-token peel lives in parse-keypress pendingSgrPrefix.
+  // densable parse-keypress has no pendingSgr / peel — incomplete CSI flushes.
   // Leading-`<` progressive desync without `[`
   out = out.replace(/<\d[\d;]*[Mm]/g, '')
   return out
@@ -130,15 +134,16 @@ export function stripSgrMouseFragments(text: string): string {
 /**
  * Convert a ParsedKey into the browser-like `KeyboardEvent.key` string.
  *
- * Official densable 2.1.211 `Q_g` / fag:
+ * densable 2.1.228 `xM_` (KeyboardEvent.key; was Q_g/fag):
  *   space → " "; ctrl → name; single printable → seq; named → name;
  *   ESC-prefixed nameless → ""; pure `/^(\[<\d[\d;]*[Mm]?)+$/` → "";
- *   else → seq.
+ *   else → seq.  **No** 2-param / leading-`<` / 3-param-without-`[` in densable.
  *
- * Fork extra: `isSgrMouseResidue` + `stripSgrMouseFragments` empty progressive
- * desync and scrub embedded SGR from mixed tokens. Official main insert is
- * `B.key.length>=1 && !OC_.has(B.name)` with no sji — without these sinks,
- * Terminal.app scroll desync types residual SGR into the prompt.
+ * Fork extras (pre-existing local delta, not densable 1:1): `isSgrMouseResidue`
+ * progressive sinks + `stripSgrMouseFragments` mixed scrub. Main insert remains
+ * densable `J1T`/`OC_`: `B.key.length>=1 && !J1T.has(B.name)` (no sji).
+ * densable InputEvent adapter still uses `[...e.key].length===1` (sji) — main
+ * prompt does not.
  */
 function keyFromParsed(parsed: ParsedKey): string {
   const seq = parsed.sequence ?? ''

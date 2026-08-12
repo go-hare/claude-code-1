@@ -28,11 +28,6 @@ const FN_KEY_RE =
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const CSI_U_RE = /^\x1b\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
 
-// Orphan CSI u / progressive tail after a lone ESC was flushed (App 50ms
-// NORMAL_TIMEOUT). Same shape as CSI_U_RE without the leading ESC so the text
-// token `[65306u` / `[58:65306;2u` can be re-prefixed and parsed.
-const ORPHAN_CSI_U_RE = /^\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
-
 // xterm modifyOtherKeys: ESC [ 27 ; modifier ; keycode ~
 // Example: ESC[27;2;13~ = Shift+Enter. Emitted by Ghostty/tmux/xterm when
 // modifyOtherKeys=2 is active or via user keybinds, typically over SSH where
@@ -40,9 +35,6 @@ const ORPHAN_CSI_U_RE = /^\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
 // Note param order is reversed vs CSI u (modifier first, keycode second).
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const MODIFY_OTHER_KEYS_RE = /^\x1b\[27;(\d+);(\d+)~/
-
-// Orphan modifyOtherKeys tail (ESC flushed alone): `[27;1;65306~`
-const ORPHAN_MODIFY_OTHER_KEYS_RE = /^\[27;(\d+);(\d+)~/
 
 // -- Terminal response patterns (inbound sequences from the terminal itself) --
 // DECRPM: CSI ? Ps ; Pm $ y  — response to DECRQM (request mode)
@@ -77,35 +69,14 @@ const XTVERSION_RE = /^\x1bP>\|(.*?)(?:\x07|\x1b\\)$/s
 // Button 32=left-drag (0x20 | motion-bit). Plain 0/1/2 = left/mid/right click.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/
-// Official densable ZXc (2.1.210) text-branch orphan mouse recovery:
-// whole-token only (not prefix peel, not multi-event burst, not embedded).
+// densable 2.1.228 kTd text-branch orphan mouse recovery (was ZXc):
+// whole-token only — not prefix peel, not multi-event burst, not embedded.
 //   /^\[<\d+;\d+;\d+[Mm]$/   SGR
 //   /^\[M[\x60-\x7f][\x20-\uffff]{2}$/  X10 wheel payload
-// Anything else (bursts, incomplete, param residue) stays as text; InputEvent
-// sji (`[...input].length === 1`) and fag pure-burst empty multi-char inserts.
+// Bursts / incomplete / param residue stay one text key. densable has no
+// pendingSgr / absorbMm / CSI-u orphan peel (SEA confirmed 228).
 const ORPHAN_SGR_WHOLE_TOKEN_RE = /^\[<\d+;\d+;\d+[Mm]$/
 const ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE = /^\[M[\u0060-\u007f][\u0020-\uffff]{2}$/
-
-/**
- * Peel orphaned CSI u / modifyOtherKeys tails (ESC was flushed alone as Escape).
- * Re-prefixes ESC so parseKeypress / AltGr / fullwidth recovery run normally.
- * Only peels at the start of the remaining text (one event per peel call site
- * is enough — callers loop or re-invoke via rest handling).
- */
-function peelOrphanedExtendedKeyTail(text: string): {
-  event: string | null
-  rest: string
-} {
-  const csi = ORPHAN_CSI_U_RE.exec(text)
-  if (csi) {
-    return { event: '\x1b' + csi[0], rest: text.slice(csi[0].length) }
-  }
-  const mok = ORPHAN_MODIFY_OTHER_KEYS_RE.exec(text)
-  if (mok) {
-    return { event: '\x1b' + mok[0], rest: text.slice(mok[0].length) }
-  }
-  return { event: null, rest: text }
-}
 
 /**
  * Official Uog/Bog densable: CLAUDE_CODE_ALTGR_AS_TEXT / WT_SESSION.
@@ -317,22 +288,8 @@ export type KeyParseState = {
    * or swallowed. See highByteFromExtendedKeySequence + reassemble below.
    */
   pendingByteEvents: PendingByteEvent[]
-  /**
-   * Incomplete SGR mouse body held across a NORMAL_TIMEOUT flush so a late
-   * finalizer `M`/`m` can still complete the event. Without this, official
-   * flush of `\x1b[<65;11;10` + late `M` becomes a typed printable `M`
-   * (live "MMMMMMMMMMMM" walls when many wheels desync). Extra vs densable
-   * ZXc (which flushes and loses the body) — needed because fork main path
-   * still uses useInput/sji and types single-codepoint residue.
-   */
-  pendingSgrPrefix?: string
-  /**
-   * After completing a held SGR (or flushing incomplete CSI mouse start),
-   * absorb a short run of pure M/m finalizers that arrive as separate keys
-   * from burst desync. Counts remaining single-key absorbs.
-   */
-  absorbMmFinalizers?: number
-  // Internal tokenizer instance
+  // Internal tokenizer instance — incomplete CSI stays in tokenizer.buffer()
+  // until App NORMAL_TIMEOUT flush (densable mbt/FDu + kTd incomplete field).
   _tokenizer?: Tokenizer
 }
 
@@ -342,13 +299,6 @@ export const INITIAL_STATE: KeyParseState = {
   pasteBuffer: '',
   pendingByteEvents: [],
 }
-
-/** Incomplete SGR body without Mm finalizer (with or without ESC). */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: incomplete SGR hold
-const INCOMPLETE_SGR_BODY_RE = /^(?:\x1b)?\[<\d[\d;]*$/
-/** Incomplete CSI that is only the mouse/SGR start (ESC[ or ESC[< or [<). */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: incomplete CSI mouse start
-const INCOMPLETE_CSI_MOUSE_START_RE = /^(?:\x1b)?\[<?$/
 
 function inputToString(input: Buffer | string): string {
   if (Buffer.isBuffer(input)) {
@@ -408,13 +358,10 @@ export function parseMultipleKeypresses(
   const isFlush = input === null
   const inputString = isFlush ? '' : inputToString(input)
 
-  // Get or create tokenizer
+  // densable kTd: mbt({x10Mouse:!0})
   const tokenizer = prevState._tokenizer ?? createTokenizer({ x10Mouse: true })
-
-  // Tokenize the input
   const tokens = isFlush ? tokenizer.flush() : tokenizer.feed(inputString)
 
-  // Convert tokens to parsed keys, handling paste mode
   const keys: ParsedInput[] = []
   let inPaste = prevState.mode === 'IN_PASTE'
   let pasteBuffer = prevState.pasteBuffer
@@ -422,90 +369,7 @@ export function parseMultipleKeypresses(
   let pendingByteEvents: PendingByteEvent[] = [
     ...(prevState.pendingByteEvents ?? []),
   ]
-  let pendingSgrPrefix = prevState.pendingSgrPrefix
-  let absorbMmFinalizers = prevState.absorbMmFinalizers ?? 0
 
-  const pushCompletedSgr = (prefix: string, finalizer: 'M' | 'm'): void => {
-    const body = prefix.startsWith('\x1b') ? prefix : '\x1b' + prefix
-    const seq = body + finalizer
-    const mouse = parseMouseEvent(seq)
-    if (mouse) {
-      keys.push(mouse)
-    } else {
-      const pk = parseKeypress(seq)
-      // Only emit if it became a real wheel/mouse name. Partial bodies like
-      // `[<64;19;` + M are not valid SGR — absorb the finalizer silently.
-      if (
-        pk.name === 'wheelup' ||
-        pk.name === 'wheeldown' ||
-        pk.name === 'mouse'
-      ) {
-        keys.push(pk)
-      }
-    }
-    // Burst desync: absorb only the immediate trailing finalizers in THIS
-    // token (tryAbsorbMmText already peels pure M/m run). Do NOT open a
-    // persistent multi-key absorb window — review: scroll then later "M"
-    // was silently dropped when absorbMmFinalizers stayed at 12.
-    absorbMmFinalizers = 0
-  }
-
-  const tryAbsorbMmText = (text: string): string | null => {
-    // Returns remainder after absorbing / completing; null if fully consumed.
-    let rest = text
-    if (pendingSgrPrefix && rest.length > 0) {
-      const fin = rest[0]!
-      if (fin === 'M' || fin === 'm') {
-        pushCompletedSgr(pendingSgrPrefix, fin)
-        pendingSgrPrefix = undefined
-        rest = rest.slice(1)
-        // Absorb trailing pure M/m run from the same token
-        while (rest.length > 0 && (rest[0] === 'M' || rest[0] === 'm')) {
-          rest = rest.slice(1)
-        }
-      } else {
-        // Non-finalizer after hold — drop stale prefix (don't type ESC junk).
-        pendingSgrPrefix = undefined
-      }
-    }
-    if (absorbMmFinalizers > 0 && rest.length > 0) {
-      // Absorb pure M/m runs while the window is open.
-      if (/^[Mm]+$/.test(rest)) {
-        absorbMmFinalizers = Math.max(0, absorbMmFinalizers - rest.length)
-        return null
-      }
-      // Mixed text cancels absorb window.
-      absorbMmFinalizers = 0
-    }
-    return rest
-  }
-
-  const tryAbsorbMmKey = (seq: string): boolean => {
-    // Single-key pure M/m after hold/desync — swallow or complete.
-    if (seq === 'M' || seq === 'm') {
-      if (pendingSgrPrefix) {
-        pushCompletedSgr(pendingSgrPrefix, seq)
-        pendingSgrPrefix = undefined
-        return true
-      }
-      if (absorbMmFinalizers > 0) {
-        absorbMmFinalizers--
-        return true
-      }
-    }
-    if (
-      pendingSgrPrefix &&
-      seq.length > 0 &&
-      seq[0] !== 'M' &&
-      seq[0] !== 'm'
-    ) {
-      pendingSgrPrefix = undefined
-    }
-    if (absorbMmFinalizers > 0 && seq.length > 0 && !/^[Mm]+$/.test(seq)) {
-      absorbMmFinalizers = 0
-    }
-    return false
-  }
   /** Emit a single pending high-byte event as a normal key/paste char. */
   const emitPendingByte = (ev: PendingByteEvent): void => {
     if (inPaste) {
@@ -515,7 +379,7 @@ export function parseMultipleKeypresses(
     }
   }
 
-  /** Flush any incomplete multi-byte assembly (official d()). */
+  /** Flush any incomplete multi-byte assembly (densable d()). */
   const flushPendingBytes = (): void => {
     for (const ev of pendingByteEvents) {
       emitPendingByte(ev)
@@ -524,14 +388,12 @@ export function parseMultipleKeypresses(
   }
 
   /**
-   * Official p() — accumulate high-byte CSI u events into one UTF-8 char.
+   * densable p() — accumulate high-byte CSI u events into one UTF-8 char.
    * Lead bytes 0xC2–0xF4 start a multi-byte sequence; continuation 0x80–0xBF
    * extend it; anything else flushes and retries.
    */
   const reassembleHighByte = (seq: string, byte: number): void => {
     if (pendingByteEvents.length === 0) {
-      // UTF-8 lead for 2/3/4-byte sequences (C2–F4). C0/C1 leads are
-      // invalid/overlong and are emitted as lone high-byte keys.
       if (byte >= 0xc2 && byte <= 0xf4) {
         pendingByteEvents = [{ seq, byte }]
         return
@@ -548,7 +410,6 @@ export function parseMultipleKeypresses(
       pendingByteEvents = []
       const buf = Buffer.from(assembled.map(e => e.byte))
       const text = buf.toString('utf8')
-      // Must decode to exactly one Unicode scalar matching the byte length.
       if (
         [...text].length !== 1 ||
         Buffer.byteLength(text, 'utf8') !== assembled.length
@@ -565,7 +426,6 @@ export function parseMultipleKeypresses(
       }
       return
     }
-    // Not a continuation — flush prior fragment and reprocess this byte.
     flushPendingBytes()
     reassembleHighByte(seq, byte)
   }
@@ -578,25 +438,18 @@ export function parseMultipleKeypresses(
         pasteBuffer = ''
       } else if (token.value === PASTE_END) {
         flushPendingBytes()
-        // Always emit a paste key, even for empty pastes. This allows
-        // downstream handlers to detect empty pastes (e.g., for clipboard
-        // image handling on macOS). The paste content may be empty string.
+        // Always emit a paste key, even for empty pastes (clipboard image path).
         keys.push(createPasteKey(pasteBuffer))
         inPaste = false
         pasteBuffer = ''
       } else if (inPaste) {
-        // High-byte CSI u fragments under Kitty → reassemble to real UTF-8
-        // (official zXc + p). Full Unicode CSI u still converts via MO5.
+        // High-byte CSI u fragments under Kitty → reassemble to real UTF-8.
         const highByte = highByteFromExtendedKeySequence(token.value)
         if (highByte !== undefined) {
           reassembleHighByte(token.value, highByte)
           continue
         }
-        // Sequences inside paste are usually literal, but Kitty CSI u /
-        // modifyOtherKeys can encode a single Unicode codepoint (official
-        // densable MO5 / sig). Convert those to the real character so CJK
-        // paste does not land raw "\x1b[65306u" in the buffer. Mouse /
-        // focus sequences are skipped (official YXc).
+        // densable YXc: skip focus / mouse inside paste; else MO5 unicode convert.
         if (
           token.value === FOCUS_IN ||
           token.value === FOCUS_OUT ||
@@ -605,20 +458,17 @@ export function parseMultipleKeypresses(
         ) {
           continue
         }
-        // Non-fragment sequence: drop any half-assembled UTF-8 first.
         if (
           !parseTerminalResponse(token.value) &&
           !SGR_MOUSE_RE.test(token.value)
         ) {
-          // Keep pending only if this were a fragment (handled above).
+          // Keep pending only for fragments (handled above).
         }
         flushPendingBytes()
         pasteBuffer +=
           unicodeFromExtendedKeySequence(token.value) ?? token.value
       } else {
-        // Real ESC-prefixed sequence.
-        // High-byte UTF-8 fragments (official zXc) — reassemble before any
-        // key/response/mouse routing so ESC[239u ESC[188u ESC[154u → `：`.
+        // densable kTd sequence branch (no pendingSgr / absorbMm invent).
         const highByte = highByteFromExtendedKeySequence(token.value)
         if (highByte !== undefined) {
           reassembleHighByte(token.value, highByte)
@@ -627,161 +477,69 @@ export function parseMultipleKeypresses(
         const response = parseTerminalResponse(token.value)
         if (response) {
           keys.push({ kind: 'response', sequence: token.value, response })
-        } else {
-          const mouse = parseMouseEvent(token.value)
-          if (mouse) {
-            keys.push(mouse)
-            // Completed SGR mouse — do not open persistent absorb for later M.
-            absorbMmFinalizers = 0
-          } else {
-            // Flush incomplete UTF-8 assembly before unrelated keys
-            // (official: d() before ZUr for non-mouse sequences).
-            if (
-              token.value === FOCUS_OUT ||
-              (!SGR_MOUSE_RE.test(token.value) &&
-                !(token.value.length === 6 && token.value.startsWith('\x1b[M')))
-            ) {
-              flushPendingBytes()
-            }
-            // Incomplete SGR body flushed as a "sequence" on timeout
-            // (tokenizer flush of held ESC[<digits). Hold it so a late M
-            // can complete; do NOT emit a typed key for the body.
-            if (INCOMPLETE_SGR_BODY_RE.test(token.value)) {
-              pendingSgrPrefix = token.value
-              continue
-            }
-            if (INCOMPLETE_CSI_MOUSE_START_RE.test(token.value)) {
-              // Bare ESC[ / ESC[< — hold for incomplete body; no persistent
-              // absorb window for later typed M/m (review silent drop).
-              continue
-            }
-            const pk = parseKeypress(token.value)
-            if (
-              pk.name === 'wheelup' ||
-              pk.name === 'wheeldown' ||
-              pk.name === 'mouse'
-            ) {
-              // Complete wheel/mouse: clear any leftover absorb (same-token
-              // trailing M/m already handled by pushCompletedSgr / text peel).
-              absorbMmFinalizers = 0
-              keys.push(pk)
-            } else if (!tryAbsorbMmKey(pk.sequence ?? token.value)) {
-              keys.push(pk)
-            }
-          }
+          continue
         }
+        const mouse = parseMouseEvent(token.value)
+        if (mouse) {
+          keys.push(mouse)
+          continue
+        }
+        // densable: d() before ZUr for non-mouse / non-FOCUS_OUT-gated sequences.
+        if (
+          token.value === FOCUS_OUT ||
+          (!SGR_MOUSE_RE.test(token.value) &&
+            !(token.value.length === 6 && token.value.startsWith('\x1b[M')))
+        ) {
+          flushPendingBytes()
+        }
+        // densable: incomplete CSI flush becomes a sequence → U_n (parseKeypress).
+        // Do NOT invent pendingSgrPrefix hold — SEA has none.
+        keys.push(parseKeypress(token.value))
       }
     } else if (token.type === 'text') {
-      // Text breaks multi-byte assembly (official d() before text).
+      // densable: d() before text.
       flushPendingBytes()
       if (inPaste) {
         pasteBuffer += token.value
+      } else if (
+        ORPHAN_SGR_WHOLE_TOKEN_RE.test(token.value) ||
+        ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE.test(token.value)
+      ) {
+        // densable kTd: whole-token only re-ESC + CTd/U_n. No prefix peel.
+        const seq = '\x1b' + token.value
+        const mouse = parseMouseEvent(seq)
+        keys.push(mouse ?? parseKeypress(seq))
       } else {
-        // Official densable ZXc text branch (2.1.210): whole-token orphan
-        // SGR/X10 re-prefix ESC and reparse. We ALSO peel successive COMPLETE
-        // orphan mouse events from the front of a text token (burst scroll
-        // when ESC was flushed alone). Official only matches ^whole-token$;
-        // without the peel, ESC-lost wheel bursts become nameless multi-char
-        // text → sji empties → no wheelup/wheeldown → scroll stuck + if the
-        // fork recover path is too loose, residue like "MMM8MMMM" types into
-        // the prompt. Incomplete / param residue stays one text key; sji
-        // empties multi-codepoint non-paste. Incomplete CSI that still has
-        // ESC stays in the tokenizer buffer until NORMAL_TIMEOUT flush —
-        // then we hold the SGR body in pendingSgrPrefix (extra vs densable).
-        {
-          const ORPHAN_SGR_PREFIX_RE = /^\[<\d+;\d+;\d+[Mm]/
-          const ORPHAN_X10_WHEEL_PREFIX_RE =
-            /^\[M[\u0060-\u007f][\u0020-\uffff]{2}/
-          // Complete held incomplete SGR with a leading M/m, or absorb pure
-          // finalizer runs after desync.
-          let rest = tryAbsorbMmText(token.value)
-          if (rest === null) {
-            continue
-          }
-          while (rest) {
-            const sgr = ORPHAN_SGR_PREFIX_RE.exec(rest)
-            const x10 = ORPHAN_X10_WHEEL_PREFIX_RE.exec(rest)
-            const m = sgr ?? x10
-            if (!m) break
-            const seq = '\x1b' + m[0]!
-            const mouse = parseMouseEvent(seq)
-            keys.push(mouse ?? parseKeypress(seq))
-            absorbMmFinalizers = 0
-            rest = rest.slice(m[0]!.length)
-          }
-          if (!rest) {
-            // fully peeled into mouse events
-          } else if (
-            ORPHAN_SGR_WHOLE_TOKEN_RE.test(rest) ||
-            ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE.test(rest)
-          ) {
-            // single whole-token leftover (also covered by prefix peel above)
-            const seq = '\x1b' + rest
-            const mouse = parseMouseEvent(seq)
-            keys.push(mouse ?? parseKeypress(seq))
-          } else {
-            // ESC-flush race for CSI u / modifyOtherKeys (fullwidth `：` →
-            // `[65306u`). Official does not recover these; we keep a
-            // prefix peel for IME usability (extra vs densable).
-            while (rest) {
-              const peeled = peelOrphanedExtendedKeyTail(rest)
-              if (peeled.event) {
-                keys.push(parseKeypress(peeled.event))
-                rest = peeled.rest
-                continue
+        // densable: whole text token → one ZUr key.
+        // Extra (local enter safety, not densable invent for mouse): if a large
+        // batch still embeds CR/LF (buffer ≥64 / no peel), split + collapse
+        // consecutive terminators so Enter is not lost / double-submit.
+        if ([...token.value].length > 1 && /[\r\n]/.test(token.value)) {
+          const chars = [...token.value]
+          for (let i = 0; i < chars.length; ) {
+            const ch = chars[i]!
+            if (ch === '\r' || ch === '\n') {
+              keys.push(parseKeypress(ch))
+              i++
+              while (
+                i < chars.length &&
+                (chars[i] === '\r' || chars[i] === '\n')
+              ) {
+                i++
               }
-              // Hold incomplete SGR body / CSI mouse start instead of typing it.
-              if (INCOMPLETE_SGR_BODY_RE.test(rest)) {
-                pendingSgrPrefix = rest
-                break
-              }
-              if (INCOMPLETE_CSI_MOUSE_START_RE.test(rest)) {
-                // Incomplete CSI mouse start — hold for completion, no absorb.
-                break
-              }
-              // Official densable ZXc (2.1.210): whole text token → one ZUr key.
-              // Tokenizer ground already peels short-buffer C0 (CR/LF) into
-              // separate tokens. If a large batch still embeds CR/LF (buffer
-              // ≥64 / no peel), split + collapse consecutive terminators so
-              // Enter is not lost and CRLF does not double-submit. Typed
-              // multi-char batches stay ONE key — insert recovers via fag
-              // sequence in useTextInput (official KeyboardEvent path), but
-              // only for non-mouse printable sequences.
-              if ([...rest].length > 1 && /[\r\n]/.test(rest)) {
-                const chars = [...rest]
-                for (let i = 0; i < chars.length; ) {
-                  const ch = chars[i]!
-                  if (ch === '\r' || ch === '\n') {
-                    keys.push(parseKeypress(ch))
-                    i++
-                    while (
-                      i < chars.length &&
-                      (chars[i] === '\r' || chars[i] === '\n')
-                    ) {
-                      i++
-                    }
-                    continue
-                  }
-                  // Per-char path: absorb pure M/m under desync window.
-                  if (tryAbsorbMmKey(ch)) {
-                    i++
-                    continue
-                  }
-                  keys.push(parseKeypress(ch))
-                  i++
-                }
-              } else if (!tryAbsorbMmKey(rest)) {
-                keys.push(parseKeypress(rest))
-              }
-              break
+              continue
             }
+            keys.push(parseKeypress(ch))
+            i++
           }
+        } else {
+          keys.push(parseKeypress(token.value))
         }
       }
     }
   }
 
-  // Flush incomplete assembly and open paste on stream end (input=null).
+  // densable: if(r) d(); if(r&&a) emit paste.
   if (isFlush) {
     flushPendingBytes()
     if (inPaste && pasteBuffer) {
@@ -791,14 +549,11 @@ export function parseMultipleKeypresses(
     }
   }
 
-  // Build new state
   const newState: KeyParseState = {
     mode: inPaste ? 'IN_PASTE' : 'NORMAL',
     incomplete: tokenizer.buffer(),
     pasteBuffer,
     pendingByteEvents,
-    pendingSgrPrefix,
-    absorbMmFinalizers: absorbMmFinalizers > 0 ? absorbMmFinalizers : undefined,
     _tokenizer: tokenizer,
   }
 
