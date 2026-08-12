@@ -36,7 +36,14 @@ import { getRetryDelay } from '../api/withRetry.js'
 import {
   checkManagedSettingsSecurity,
   handleSecurityCheckResult,
-} from './securityCheck.jsx'
+  showManagedSettingsSecurityDialog,
+  type ShowSecurityDialog,
+} from './securityCheck.js'
+import {
+  buildConsentBaseline,
+  getConsentIdentity,
+  recordOrgConsent,
+} from './orgConsent.js'
 import { isRemoteManagedSettingsEligible, resetSyncCache } from './syncCache.js'
 import {
   getRemoteManagedSettingsSyncFromCache,
@@ -448,12 +455,23 @@ export async function clearRemoteManagedSettingsCache(): Promise<void> {
   }
 }
 
+type FetchAndLoadOptions = {
+  /**
+   * densable e.showSecurityDialog — when omitted, interactive dangerous
+   * changes return deferred_no_consent_surface (background poll / no UI).
+   * Startup load must pass showManagedSettingsSecurityDialog.
+   */
+  showSecurityDialog?: ShowSecurityDialog
+}
+
 /**
  * Fetch and load remote settings with file caching
  * Internal function that handles the full load/fetch logic
  * Fails open - returns null if fetch fails and no cache exists
  */
-async function fetchAndLoadRemoteManagedSettings(): Promise<SettingsJson | null> {
+async function fetchAndLoadRemoteManagedSettings(
+  options?: FetchAndLoadOptions,
+): Promise<SettingsJson | null> {
   if (!isRemoteManagedSettingsEligible()) {
     return null
   }
@@ -495,16 +513,25 @@ async function fetchAndLoadRemoteManagedSettings(): Promise<SettingsJson | null>
     const hasContent = Object.keys(newSettings).length > 0
 
     if (hasContent) {
-      // Check for dangerous settings changes before applying
+      // densable 2.1.224 #24: org_record baseline survives cache wipe on re-login
+      const consentBaseline = await buildConsentBaseline(cachedSettings)
+      // densable YXd(..., e.showSecurityDialog)
       const securityResult = await checkManagedSettingsSecurity(
         cachedSettings,
         newSettings,
+        consentBaseline,
+        options?.showSecurityDialog,
       )
       if (!handleSecurityCheckResult(securityResult)) {
-        // User rejected - don't apply settings, return cached or null
-        logForDebugging(
-          'Remote settings: User rejected new settings, using cached settings',
-        )
+        if (securityResult === 'deferred_no_consent_surface') {
+          logForDebugging(
+            'Remote settings: No consent surface in this interactive session; keeping the consented baseline',
+          )
+        } else {
+          logForDebugging(
+            'Remote settings: User rejected new settings, using cached settings',
+          )
+        }
         return cachedSettings
       }
 
@@ -518,6 +545,14 @@ async function fetchAndLoadRemoteManagedSettings(): Promise<SettingsJson | null>
           'Remote settings: Applied for this non-interactive run; consent deferred — not persisting the disk cache as consented',
         )
         return newSettings
+      }
+
+      // densable WXd: record org consent on approved / no_check_needed apply
+      if (
+        securityResult === 'approved' ||
+        securityResult === 'no_check_needed'
+      ) {
+        await recordOrgConsent(getConsentIdentity(), newSettings)
       }
 
       await saveSettings(newSettings)
@@ -584,7 +619,10 @@ export async function loadRemoteManagedSettings(): Promise<void> {
   }
 
   try {
-    const settings = await fetchAndLoadRemoteManagedSettings()
+    // densable startup path: pass dialog surface so first interactive run prompts
+    const settings = await fetchAndLoadRemoteManagedSettings({
+      showSecurityDialog: showManagedSettingsSecurityDialog,
+    })
 
     // Start background polling to pick up settings changes mid-session
     if (isRemoteManagedSettingsEligible()) {
@@ -612,7 +650,9 @@ export async function loadRemoteManagedSettings(): Promise<void> {
  * Fails open - if fetch fails, continues without remote settings
  */
 export async function refreshRemoteManagedSettings(): Promise<void> {
-  // Clear caches first
+  // densable gzt: stop polling + clear settings cache, but KEEP
+  // remote-settings-consent.json (org_record) so re-login without org
+  // settings change does not re-prompt (224 #24).
   await clearRemoteManagedSettingsCache()
 
   // If not enabled, notify that policy settings changed (to empty)
@@ -621,8 +661,12 @@ export async function refreshRemoteManagedSettings(): Promise<void> {
     return
   }
 
-  // Try to load new settings (fails open if fetch fails)
-  await fetchAndLoadRemoteManagedSettings()
+  // Try to load new settings (fails open if fetch fails).
+  // buildConsentBaseline inside fetch uses org_record when cache is null.
+  // densable re-login still has a dialog surface when interactive.
+  await fetchAndLoadRemoteManagedSettings({
+    showSecurityDialog: showManagedSettingsSecurityDialog,
+  })
   logForDebugging('Remote settings: Refreshed after auth change')
 
   // Notify listeners. notifyChange resets the settings cache internally;
@@ -643,6 +687,8 @@ async function pollRemoteSettings(): Promise<void> {
   const previousSettings = prevCache ? jsonStringify(prevCache) : null
 
   try {
+    // densable background poll: no showSecurityDialog → YXd deferred_no_consent_surface
+    // when dangerous settings change mid-session without a consent surface.
     await fetchAndLoadRemoteManagedSettings()
 
     // Check if settings actually changed
