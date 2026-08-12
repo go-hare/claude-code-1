@@ -83,21 +83,34 @@ export type SystemPromptBlock = {
   cacheScope: CacheScope | null
 }
 
-// Fields to filter from tool schemas when swarms are not enabled
-const SWARM_FIELDS_BY_TOOL: Record<string, string[]> = {
-  [EXIT_PLAN_MODE_V2_TOOL_NAME]: ['launchSwarm', 'teammateCount'],
-  [AGENT_TOOL_NAME]: ['name', 'team_name', 'mode'],
-}
+// Fields to filter from tool schemas when swarms are not enabled.
+// Null-prototype map: SDK/MCP tools may be named after Object.prototype keys
+// (e.g. `constructor`, `toString`). A plain `{}` lookup returns the prototype
+// Function, and `for…of fieldsToRemove` then throws during toolToAPISchema —
+// official 2.1.221 #10 ("preparing API requests for SDK MCP tools named after
+// built-in object properties").
+const SWARM_FIELDS_BY_TOOL: Record<string, string[]> = Object.assign(
+  Object.create(null),
+  {
+    [EXIT_PLAN_MODE_V2_TOOL_NAME]: ['launchSwarm', 'teammateCount'],
+    [AGENT_TOOL_NAME]: ['name', 'team_name', 'mode'],
+  },
+)
 
 /**
  * Filter swarm-related fields from a tool's input schema.
  * Called at runtime when isAgentSwarmsEnabled() returns false.
+ * Exported for 2.1.221 #10 regression tests (builtin-property tool names).
  */
-function filterSwarmFieldsFromSchema(
+export function filterSwarmFieldsFromSchema(
   toolName: string,
   schema: Anthropic.Tool.InputSchema,
 ): Anthropic.Tool.InputSchema {
-  const fieldsToRemove = SWARM_FIELDS_BY_TOOL[toolName]
+  // hasOwn: belt-and-suspenders if SWARM_FIELDS_BY_TOOL is ever reassigned
+  // to a prototype-bearing object.
+  const fieldsToRemove = Object.hasOwn(SWARM_FIELDS_BY_TOOL, toolName)
+    ? SWARM_FIELDS_BY_TOOL[toolName]
+    : undefined
   if (!fieldsToRemove || fieldsToRemove.length === 0) {
     return schema
   }

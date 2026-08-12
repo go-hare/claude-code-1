@@ -48,7 +48,8 @@ export function toolPermissionsFromClaudeAiTools(
   tools: ClaudeAIMcpServerTool[] | undefined,
 ): Record<string, 'allow' | 'ask' | 'blocked'> | undefined {
   if (!tools?.length) return undefined
-  const out: Record<string, 'allow' | 'ask' | 'blocked'> = {}
+  // Null-proto: tool names may be Object.prototype keys (`constructor`).
+  const out = Object.create(null) as Record<string, 'allow' | 'ask' | 'blocked'>
   for (const t of tools) {
     if (t.effective_max_permission === undefined) continue
     if (

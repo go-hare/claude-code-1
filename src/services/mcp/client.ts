@@ -1993,7 +1993,8 @@ export const fetchToolsForClient = memoizeWithLRU(
         const entries = Object.keys(toolPermissions).length
         if (
           entries > 0 &&
-          !toolsToProcess.some(t => toolPermissions[t.name] !== undefined)
+          // hasOwn: avoid prototype hits for tool names like `constructor`
+          !toolsToProcess.some(t => Object.hasOwn(toolPermissions, t.name))
         ) {
           logForDebugging(
             `[claudeai-mcp] ${client.name}: toolPermissions has ${entries} entries but none matched upstream tool names — backend name drift?`,
@@ -2015,7 +2016,12 @@ export const fetchToolsForClient = memoizeWithLRU(
               serverName: client.name,
               toolName: tool.name,
               // Official org/admin ceiling from server config toolPermissions.
-              effectiveMaxPermission: toolPermissions?.[tool.name],
+              // hasOwn: plain maps + prototype-key tool names must not leak
+              // Object.prototype.constructor (Function) as a permission value.
+              effectiveMaxPermission:
+                toolPermissions && Object.hasOwn(toolPermissions, tool.name)
+                  ? toolPermissions[tool.name]
+                  : undefined,
             },
             isMcp: true,
             // Collapse whitespace: _meta is open to external MCP servers, and

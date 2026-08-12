@@ -1,7 +1,16 @@
 /**
  * Stub: SDK Runtime Types (not yet published in open-source).
  * Non-serializable types: callbacks, interfaces with methods.
+ *
+ * `tool` / `createSdkMcpServer` live in `createSdkMcpServer.ts` and are
+ * re-exported from `agentSdkTypes.ts` (densable fVp / agent-sdk hl product).
  */
+
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type {
+  CallToolResult,
+  ToolAnnotations,
+} from '@modelcontextprotocol/sdk/types.js'
 
 export type AnyZodRawShape = Record<string, unknown>
 export type InferShape<T extends AnyZodRawShape> = { [K in keyof T]: unknown }
@@ -44,18 +53,28 @@ export type SDKSessionOptions = {
   [key: string]: unknown
 }
 
+/** densable/agent-sdk SdkMcpToolDefinition — output of `tool()`. */
 export interface SdkMcpToolDefinition<
-  T extends AnyZodRawShape = AnyZodRawShape,
+  // biome-ignore lint/suspicious/noExplicitAny: agent-sdk uses any for schema variance
+  T extends AnyZodRawShape = any,
 > {
   name: string
   description: string
   inputSchema: T
-  handler: (args: InferShape<T>, extra: unknown) => Promise<unknown>
+  handler: (args: InferShape<T>, extra: unknown) => Promise<CallToolResult>
+  annotations?: ToolAnnotations
+  _meta?: Record<string, unknown>
   [key: string]: unknown
 }
 
+/**
+ * densable/agent-sdk return of `createSdkMcpServer`.
+ * Wire shape: `{ type: 'sdk', name, instance }` where instance is McpServer.
+ */
 export type McpSdkServerConfigWithInstance = {
+  type: 'sdk'
   name: string
+  instance: McpServer
   version?: string
   tools?: SdkMcpToolDefinition[]
   [key: string]: unknown

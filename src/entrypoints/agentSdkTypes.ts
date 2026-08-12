@@ -108,3 +108,18 @@ export type HookEvent = (typeof HOOK_EVENTS)[number] // 与 `coreSchemas.HOOK_EV
 
 /** `SessionEnd` 钩子等使用的进程退出原因枚举。 */
 export type ExitReason = (typeof EXIT_REASONS)[number] // 与 `coreSchemas.EXIT_REASONS` 逐项对应
+
+// ============================================================================
+// SDK MCP product surface (densable fVp / agent-sdk hl + gl)
+// ============================================================================
+
+export {
+  createSdkMcpServer,
+  tool,
+  type CreateSdkMcpServerOptions,
+} from './sdk/createSdkMcpServer.js'
+
+export type {
+  CallToolResult,
+  ToolAnnotations,
+} from '@modelcontextprotocol/sdk/types.js'

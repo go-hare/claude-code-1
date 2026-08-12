@@ -16,7 +16,8 @@ function toolPermissionsFromSetServersTools(
     | undefined,
 ): Record<string, 'allow' | 'ask' | 'blocked'> | undefined {
   if (!tools?.length) return undefined
-  const out: Record<string, 'allow' | 'ask' | 'blocked'> = {}
+  // Mirror print.ts: null-proto so `constructor` is an own string key.
+  const out = Object.create(null) as Record<string, 'allow' | 'ask' | 'blocked'>
   for (const t of tools) {
     if (!t.org_max_permission || t.org_max_permission === 'allow') continue
     if (t.org_max_permission === 'ask' || t.org_max_permission === 'blocked') {
@@ -43,6 +44,19 @@ describe('densable a$f toolPermissionsFromSetServersTools', () => {
         { name: 'a', org_max_permission: 'allow' },
       ]),
     ).toBeUndefined()
+  })
+
+  test('prototype-key tool names are own keys (221 #10)', () => {
+    const map = toolPermissionsFromSetServersTools([
+      { name: 'constructor', org_max_permission: 'blocked' },
+      { name: 'toString', org_max_permission: 'ask' },
+    ])
+    expect(map).toBeDefined()
+    expect(Object.getPrototypeOf(map)).toBe(null)
+    expect(Object.hasOwn(map!, 'constructor')).toBe(true)
+    expect(map!['constructor']).toBe('blocked')
+    expect(map!['toString']).toBe('ask')
+    expect(typeof map!['constructor']).toBe('string')
   })
 })
 

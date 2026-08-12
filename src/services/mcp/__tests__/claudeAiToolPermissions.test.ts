@@ -32,4 +32,19 @@ describe('toolPermissionsFromClaudeAiTools (Kdg)', () => {
       toolPermissionsFromClaudeAiTools([{ name: 'a' }, { name: 'b' }]),
     ).toBeUndefined()
   })
+
+  test('prototype-key tool names are own keys (221 #10)', () => {
+    const map = toolPermissionsFromClaudeAiTools([
+      { name: 'constructor', effective_max_permission: 'ask' },
+      { name: 'toString', effective_max_permission: 'blocked' },
+    ])
+    expect(map).toBeDefined()
+    expect(Object.getPrototypeOf(map)).toBe(null)
+    expect(Object.hasOwn(map!, 'constructor')).toBe(true)
+    expect(Object.hasOwn(map!, 'toString')).toBe(true)
+    expect(map!['constructor']).toBe('ask')
+    expect(map!['toString']).toBe('blocked')
+    // Must not surface Function from Object.prototype
+    expect(typeof map!['constructor']).toBe('string')
+  })
 })

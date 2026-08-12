@@ -7258,7 +7258,8 @@ function toolPermissionsFromSetServersTools(
     | undefined,
 ): Record<string, 'allow' | 'ask' | 'blocked'> | undefined {
   if (!tools?.length) return undefined
-  const out: Record<string, 'allow' | 'ask' | 'blocked'> = {}
+  // Null-proto: tool names may be Object.prototype keys (`constructor`).
+  const out = Object.create(null) as Record<string, 'allow' | 'ask' | 'blocked'>
   for (const t of tools) {
     if (!t.org_max_permission || t.org_max_permission === 'allow') continue
     if (t.org_max_permission === 'ask' || t.org_max_permission === 'blocked') {
