@@ -55,6 +55,12 @@ import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.
 import { validateInputForSettingsFileEdit } from 'src/utils/settings/validateEditTool.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.js'
 import {
+  FILE_READ_DENY_CANNOT_EDIT,
+  isPathCoveredByReadDenyRule,
+  shouldAllowCallDespiteMissingOrPartialRead,
+  shouldSkipEditUnreadGate,
+} from '../shared/fileEditReadGate.js'
+import {
   FILE_EDIT_TOOL_NAME,
   FILE_UNEXPECTEDLY_MODIFIED_ERROR,
 } from './constants.js'
@@ -203,6 +209,19 @@ export const FileEditTool = buildTool({
       }
     }
 
+    // densable l8t — Read deny covers this path/tool → dedicated edit copy
+    // (errorCode 13), not the generic "has not been read yet" unread message.
+    if (
+      isPathCoveredByReadDenyRule(fullFilePath, appState.toolPermissionContext)
+    ) {
+      return {
+        result: false,
+        behavior: 'ask',
+        message: FILE_READ_DENY_CANNOT_EDIT,
+        errorCode: 13,
+      }
+    }
+
     // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
     // On Windows, fs.existsSync() on UNC paths triggers SMB authentication which could
     // leak credentials to malicious servers. Let the permission check handle UNC paths.
@@ -318,41 +337,52 @@ export const FileEditTool = buildTool({
       }
     }
 
-    // densable: !p || p.isPartialView → "File has not been read yet" (errorCode 6)
+    // densable 2.1.228 #17 Edit: !p || p.isPartialView → not-read (errorCode 6)
+    // unless guardSkipped = !J4t(model) && MCt(Edit, path, ...)
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
     if (!readTimestamp || readTimestamp.isPartialView) {
+      const guardSkipped = shouldSkipEditUnreadGate(
+        fullFilePath,
+        toolUseContext,
+      )
       logEvent('tengu_edit_tool_not_read_hypothetical', {
         isPartialView: readTimestamp?.isPartialView === true,
         isFilePathAbsolute: isAbsolute(file_path),
+        guardSkipped,
       })
-      return {
-        result: false,
-        behavior: 'ask',
-        message:
-          'File has not been read yet. Read it first before writing to it.',
-        meta: {
-          isFilePathAbsolute: String(isAbsolute(file_path)),
-        },
-        errorCode: 6,
-      }
-    }
-
-    // densable: mtime > timestamp → HOe (full-enough) && xOe (content) bypass, else stale errorCode 7
-    const lastWriteTime = getFileModificationTime(fullFilePath)
-    if (lastWriteTime > readTimestamp.timestamp) {
-      if (
-        !(
-          isFullEnoughFileRead(readTimestamp) &&
-          fileStateContentMatches(readTimestamp, fileContent)
-        )
-      ) {
-        logEvent('tengu_edit_tool_stale_read', {})
+      if (!guardSkipped) {
         return {
           result: false,
           behavior: 'ask',
           message:
-            'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
-          errorCode: 7,
+            'File has not been read yet. Read it first before writing to it.',
+          meta: {
+            isFilePathAbsolute: String(isAbsolute(file_path)),
+          },
+          errorCode: 6,
+        }
+      }
+    }
+
+    // densable: if (p) { mtime > timestamp → HOe && xOe bypass, else stale errorCode 7 }
+    // When guardSkipped with no read state, skip mtime gate (same as densable).
+    if (readTimestamp) {
+      const lastWriteTime = getFileModificationTime(fullFilePath)
+      if (lastWriteTime > readTimestamp.timestamp) {
+        if (
+          !(
+            isFullEnoughFileRead(readTimestamp) &&
+            fileStateContentMatches(readTimestamp, fileContent)
+          )
+        ) {
+          logEvent('tengu_edit_tool_stale_read', {})
+          return {
+            result: false,
+            behavior: 'ask',
+            message:
+              'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+            errorCode: 7,
+          }
         }
       }
     }
@@ -441,15 +471,16 @@ export const FileEditTool = buildTool({
   },
   async call(
     input: FileEditInput,
-    {
+    toolUseContext: ToolUseContext,
+    _,
+    parentMessage,
+  ) {
+    const {
       readFileState,
       userModified,
       updateFileHistoryState,
       dynamicSkillDirTriggers,
-    },
-    _,
-    parentMessage,
-  ) {
+    } = toolUseContext
     const { file_path, old_string, new_string, replace_all = false } = input
 
     // 1. Get current state
@@ -506,15 +537,25 @@ export const FileEditTool = buildTool({
     if (fileExists) {
       const lastWriteTime = getFileModificationTime(absoluteFilePath)
       const lastRead = readFileState.get(absoluteFilePath)
-      // densable call-path: missing/partial read or stale mtime without HOe+xOe
-      if (
-        !lastRead ||
-        lastRead.isPartialView ||
-        (lastWriteTime > lastRead.timestamp &&
-          !(
-            isFullEnoughFileRead(lastRead) &&
-            fileStateContentMatches(lastRead, originalFileContents)
-          ))
+      // densable 2.1.228 #17 call-path: missing/partial may pass when the same
+      // guardSkipped as validateInput would; true staleness still throws.
+      if (!lastRead || lastRead.isPartialView) {
+        if (
+          !shouldAllowCallDespiteMissingOrPartialRead(
+            'edit',
+            absoluteFilePath,
+            toolUseContext,
+            lastRead,
+          )
+        ) {
+          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+        }
+      } else if (
+        lastWriteTime > lastRead.timestamp &&
+        !(
+          isFullEnoughFileRead(lastRead) &&
+          fileStateContentMatches(lastRead, originalFileContents)
+        )
       ) {
         throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
       }

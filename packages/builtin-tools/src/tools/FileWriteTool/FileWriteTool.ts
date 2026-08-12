@@ -1,8 +1,8 @@
 import { dirname, isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
-import { z } from 'zod/v4'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { z } from 'zod/v4'
 import { diagnosticTracker } from 'src/services/diagnosticTracking.js'
 import { clearDeliveredDiagnosticsForFile } from 'src/services/lsp/LSPDiagnosticRegistry.js'
 import { getLspServerManager } from 'src/services/lsp/manager.js'
@@ -46,6 +46,12 @@ import {
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { FILE_UNEXPECTEDLY_MODIFIED_ERROR } from '../FileEditTool/constants.js'
 import { gitDiffSchema, hunkSchema } from '../FileEditTool/types.js'
+import {
+  FILE_READ_DENY_CANNOT_WRITE,
+  isPathCoveredByReadDenyRule,
+  shouldAllowCallDespiteMissingOrPartialRead,
+  shouldSkipWriteUnreadGate,
+} from '../shared/fileEditReadGate.js'
 import { FILE_WRITE_TOOL_NAME, getWriteToolDescription } from './prompt.js'
 import {
   getToolUseSummary,
@@ -190,6 +196,18 @@ export const FileWriteTool = buildTool({
       }
     }
 
+    // densable l8t — Read deny covers this path/tool → dedicated write copy
+    // (errorCode 13), not the generic "has not been read yet" unread message.
+    if (
+      isPathCoveredByReadDenyRule(fullFilePath, appState.toolPermissionContext)
+    ) {
+      return {
+        result: false,
+        message: FILE_READ_DENY_CANNOT_WRITE,
+        errorCode: 13,
+      }
+    }
+
     // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
     // On Windows, fs.existsSync() on UNC paths triggers SMB authentication which could
     // leak credentials to malicious servers. Let the permission check handle UNC paths.
@@ -223,20 +241,26 @@ export const FileWriteTool = buildTool({
       throw e
     }
 
-    // densable Write: existing file requires prior non-partial read (errorCode 2);
+    // densable 2.1.228 #17 Write: existing file requires prior non-partial read
+    // (errorCode 2) unless guardSkipped (non-legacy model + Read auto-allow).
     // stale mtime uses HOe+xOe content equality bypass (errorCode 3).
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
     if (!readTimestamp || readTimestamp.isPartialView) {
+      // densable:
+      //   f=!c&&!ZYd(n)&&!J4t(d)&&MCt(nu,n,r,yn(r))
+      //   if(!f) return not-read errorCode 2; return ok
+      const guardSkipped = shouldSkipWriteUnreadGate(
+        fullFilePath,
+        toolUseContext,
+        Boolean(readTimestamp),
+        readTimestamp?.isPartialView === true,
+      )
       logEvent('tengu_write_tool_not_read_hypothetical', {
         isPartialView: readTimestamp?.isPartialView === true,
         isFilePathAbsolute: isAbsolute(fullFilePath),
+        guardSkipped,
       })
-      // densable velvet_mallet: only skip when completely unread (not partial)
-      // and GB flag is on. Default false → enforce not-read gate.
-      const velvetMallet =
-        !readTimestamp &&
-        getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvet_mallet', false)
-      if (!velvetMallet) {
+      if (!guardSkipped) {
         return {
           result: false,
           message:
@@ -283,10 +307,12 @@ export const FileWriteTool = buildTool({
   },
   async call(
     { file_path, content },
-    { readFileState, updateFileHistoryState, dynamicSkillDirTriggers },
+    toolUseContext: ToolUseContext,
     _,
     parentMessage,
   ) {
+    const { readFileState, updateFileHistoryState, dynamicSkillDirTriggers } =
+      toolUseContext
     const fullFilePath = expandPath(file_path)
     const dir = dirname(fullFilePath)
 
@@ -340,15 +366,25 @@ export const FileWriteTool = buildTool({
     if (meta !== null) {
       const lastWriteTime = getFileModificationTime(fullFilePath)
       const lastRead = readFileState.get(fullFilePath)
-      // densable call-path: missing/partial or stale without HOe+xOe
-      if (
-        !lastRead ||
-        lastRead.isPartialView ||
-        (lastWriteTime > lastRead.timestamp &&
-          !(
-            isFullEnoughFileRead(lastRead) &&
-            fileStateContentMatches(lastRead, meta.content)
-          ))
+      // densable 2.1.228 #17 call-path: missing/partial may pass when the same
+      // guardSkipped as validateInput would; true staleness still throws.
+      if (!lastRead || lastRead.isPartialView) {
+        if (
+          !shouldAllowCallDespiteMissingOrPartialRead(
+            'write',
+            fullFilePath,
+            toolUseContext,
+            lastRead,
+          )
+        ) {
+          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+        }
+      } else if (
+        lastWriteTime > lastRead.timestamp &&
+        !(
+          isFullEnoughFileRead(lastRead) &&
+          fileStateContentMatches(lastRead, meta.content)
+        )
       ) {
         throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
       }
