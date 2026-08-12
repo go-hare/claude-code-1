@@ -22,6 +22,32 @@ import { cleanupStaleAgentWorktrees } from './worktree.js'
 
 const DEFAULT_CLEANUP_PERIOD_DAYS = 30
 
+/**
+ * densable `WMu` — project-level reserved entry names that are NOT session
+ * directories. Session cleanup must not walk / rmdir these (2.1.228 #8 —
+ * project memory folder wiped when treated as a session).
+ */
+export const PROJECT_LEVEL_RESERVED_ENTRIES = new Set([
+  'memory',
+  'tiny_memory',
+  'bagel',
+  'bridge-pointer.json',
+  '.session-aliases',
+])
+
+/** densable `KMu` / part of `U0m` — reserved project-level name. */
+export function isProjectLevelReservedEntry(name: string): boolean {
+  const lower = name.toLowerCase()
+  if (PROJECT_LEVEL_RESERVED_ENTRIES.has(lower)) return true
+  // densable kUt also checks prefix before ':' for drive-like forms
+  const colon = lower.indexOf(':')
+  if (colon !== -1) {
+    const head = lower.slice(0, colon)
+    if (PROJECT_LEVEL_RESERVED_ENTRIES.has(head)) return true
+  }
+  return false
+}
+
 function getCutoffDate(): Date {
   const settings = getSettings_DEPRECATED() || {}
   const cleanupPeriodDays =
@@ -183,6 +209,12 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
         if (!entry.name.endsWith('.jsonl') && !entry.name.endsWith('.cast')) {
           continue
         }
+        // densable U0m: companion cleanup only for real session ids — never
+        // treat reserved project-level names as session transcripts.
+        const base = entry.name.replace(/\.(jsonl|cast)$/i, '')
+        if (isProjectLevelReservedEntry(base)) {
+          continue
+        }
         try {
           if (
             await unlinkIfOld(join(projectDir, entry.name), cutoffDate, fsImpl)
@@ -193,6 +225,11 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
           result.errors++
         }
       } else if (entry.isDirectory()) {
+        // densable 2.1.228 #8 / U0m+YMu+WMu: skip project-level reserved
+        // dirs (especially `memory/`) — never walk as session tool-results.
+        if (isProjectLevelReservedEntry(entry.name)) {
+          continue
+        }
         // Session directory — clean up tool-results/<toolDir>/* beneath it
         const sessionDir = join(projectDir, entry.name)
         const toolResultsDir = join(sessionDir, TOOL_RESULTS_SUBDIR)

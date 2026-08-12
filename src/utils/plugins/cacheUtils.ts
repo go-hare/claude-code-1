@@ -1,4 +1,4 @@
-import { readdir, rm, stat, unlink, writeFile } from 'fs/promises'
+import { lstat, readdir, rm, stat, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { clearCommandsCache } from '../../commands.js'
 import { clearAllOutputStylesCache } from '../../constants/outputStyles.js'
@@ -50,12 +50,30 @@ export function clearAllCaches(): void {
 }
 
 /**
+ * densable YEt — true when path is a symlink (or lstat fails → not treated as
+ * symlink only on success; failures return false so normal mark path runs).
+ */
+async function isSymlinkedPluginVersion(versionPath: string): Promise<boolean> {
+  try {
+    return (await lstat(versionPath)).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/**
  * Mark a plugin version as orphaned.
  * Called when a plugin is uninstalled or updated to a new version.
+ * densable Mst: never mark a symlinked plugin version (dev/link installs).
  */
 export async function markPluginVersionOrphaned(
   versionPath: string,
 ): Promise<void> {
+  // densable: if (await YEt(e)) { w(`Not marking a symlinked plugin version: ${e}`); return }
+  if (await isSymlinkedPluginVersion(versionPath)) {
+    logForDebugging(`Not marking a symlinked plugin version: ${versionPath}`)
+    return
+  }
   try {
     await writeFile(getOrphanedAtPath(versionPath), `${Date.now()}`, 'utf-8')
   } catch (error) {
@@ -120,6 +138,8 @@ function getOrphanedAtPath(versionPath: string): string {
 }
 
 async function removeOrphanedAtMarker(versionPath: string): Promise<void> {
+  // densable o5b: if (await YEt(e)) return
+  if (await isSymlinkedPluginVersion(versionPath)) return
   const orphanedAtPath = getOrphanedAtPath(versionPath)
   try {
     await unlink(orphanedAtPath)
@@ -150,6 +170,9 @@ async function processOrphanedPluginVersion(
   versionPath: string,
   now: number,
 ): Promise<void> {
+  // densable s5b: if (await YEt(e)) return — never orphan/delete symlink installs
+  if (await isSymlinkedPluginVersion(versionPath)) return
+
   const orphanedAtPath = getOrphanedAtPath(versionPath)
 
   let orphanedAt: number
@@ -177,7 +200,7 @@ async function processOrphanedPluginVersion(
 }
 
 async function removeIfEmpty(dirPath: string): Promise<void> {
-  if ((await readSubdirs(dirPath)).length === 0) {
+  if ((await listPluginCacheSubdirs(dirPath)).length === 0) {
     try {
       await rm(dirPath, { recursive: true, force: true })
     } catch (error) {
@@ -186,11 +209,28 @@ async function removeIfEmpty(dirPath: string): Promise<void> {
   }
 }
 
-async function readSubdirs(dirPath: string): Promise<string[]> {
+/**
+ * Enumerate plugin-cache children that count as installs.
+ * Include directory entries AND symlinks (dev/link installs are often
+ * symlink-to-dir). `Dirent.isDirectory()` is false for the symlink entry
+ * itself — filtering directories-only made sole-symlink installs look empty
+ * so `removeIfEmpty` deleted the parent marketplace/plugin folder.
+ * Exported for regression tests.
+ */
+export async function listPluginCacheSubdirs(
+  dirPath: string,
+): Promise<string[]> {
   try {
     const entries = await readdir(dirPath, { withFileTypes: true })
-    return entries.filter(d => d.isDirectory()).map(d => d.name)
+    return entries
+      .filter(d => d.isDirectory() || d.isSymbolicLink())
+      .map(d => d.name)
   } catch {
     return []
   }
+}
+
+/** @deprecated internal alias — prefer listPluginCacheSubdirs */
+async function readSubdirs(dirPath: string): Promise<string[]> {
+  return listPluginCacheSubdirs(dirPath)
 }

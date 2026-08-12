@@ -748,9 +748,33 @@ function mergeArrays<T>(targetArray: T[], sourceArray: T[]): T[] {
 }
 
 /**
+ * densable `ssn` — whole-entry shallow merge for record maps.
+ * Higher-tier keys fully replace lower-tier entries (no deep-merge of nested
+ * fields like marketplace `headers`).
+ */
+function shallowMergeRecordEntries(
+  lower: Record<string, unknown>,
+  higher: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...lower, ...higher }
+}
+
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.prototype.toString.call(value) === '[object Object]'
+  )
+}
+
+/**
  * Custom merge function for lodash mergeWith when merging settings.
  * Arrays are concatenated and deduplicated; other values use default lodash merge behavior.
- * densable `_ae`: for key `fallbackModel`, later array **replaces** (not concat).
+ * densable `tRe` / `_ae`:
+ * - key `fallbackModel`: later array **replaces** (not concat)
+ * - key `extraKnownMarketplaces`: whole-entry shallow merge (`ssn`) so higher
+ *   tier marketplace entries fully replace lower (headers not inherited)
  * Exported for testing.
  */
 export function settingsMergeCustomizer(
@@ -759,11 +783,19 @@ export function settingsMergeCustomizer(
   key?: string | number | symbol,
 ): unknown {
   if (Array.isArray(objValue) && Array.isArray(srcValue)) {
-    // densable _ae: if(r==="fallbackModel")return t
+    // densable tRe: if(r==="fallbackModel")return t
     if (key === 'fallbackModel') {
       return srcValue
     }
     return mergeArrays(objValue, srcValue)
+  }
+  // densable 2.1.228 #10 tRe: extraKnownMarketplaces → ssn(e,t) whole-entry
+  if (
+    key === 'extraKnownMarketplaces' &&
+    isPlainObjectRecord(objValue) &&
+    isPlainObjectRecord(srcValue)
+  ) {
+    return shallowMergeRecordEntries(objValue, srcValue)
   }
   // Return undefined to let lodash handle default merge behavior
   return undefined
