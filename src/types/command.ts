@@ -231,7 +231,8 @@ export type CommandBase = {
     | 'plugin'
     | 'managed'
     | 'bundled'
-    | 'mcp' // Where the command was loaded from
+    | 'mcp'
+    | 'syncedSkills' // densable 2.1.228 #12 — claude.ai synced skills
   kind?: 'workflow' // Distinguishes workflow-backed commands (badged in autocomplete)
   immediate?: boolean // If true, command executes immediately without waiting for a stop point (bypasses queue)
   isSensitive?: boolean // If true, args are redacted from the conversation history
@@ -242,13 +243,22 @@ export type CommandBase = {
 export type Command = CommandBase &
   (PromptCommand | LocalCommand | LocalJSXCommand)
 
-/** Resolves the user-visible name, falling back to `cmd.name` when not overridden. */
-export function getCommandName(cmd: CommandBase): string {
+/**
+ * Resolves the user-visible name, falling back to `cmd.name` when not overridden.
+ * Accepts a structural pick (name + optional userFacingName) so callers like
+ * syncedSkillsHarden can pass narrow Pick<Command, …> without full CommandBase.
+ */
+export function getCommandName(
+  cmd: Pick<CommandBase, 'name'> & Partial<Pick<CommandBase, 'userFacingName'>>,
+): string {
   const name = cmd.userFacingName?.() ?? cmd.name
   return name || ''
 }
 
 /** Resolves whether the command is enabled, defaulting to true. */
-export function isCommandEnabled(cmd: CommandBase): boolean {
+export function isCommandEnabled(
+  cmd: Pick<CommandBase, 'name'> &
+    Partial<Pick<CommandBase, 'isEnabled' | 'userFacingName'>>,
+): boolean {
   return cmd.isEnabled?.() ?? true
 }

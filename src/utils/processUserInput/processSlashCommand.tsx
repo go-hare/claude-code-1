@@ -1375,6 +1375,18 @@ async function getMessagesForPromptSlashCommand(
   // content itself from triggering discovery — it's meta-content, not user
   // intent, and a large SKILL.md (e.g. 110KB) would fire chunked AKI queries
   // adding seconds of latency to every skill invocation.
+  // densable 2.1.228 #12 xTt: hardened synced/MCP skill bodies must not expand @.
+  let skipAtMentions = command.loadedFrom === 'mcp';
+  if (command.loadedFrom === 'syncedSkills' || command.loadedFrom === 'mcp') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const harden =
+        require('../../skills/syncedSkillsHarden.js') as typeof import('../../skills/syncedSkillsHarden.js');
+      skipAtMentions = harden.shouldHardenSkillBody(command.loadedFrom);
+    } catch {
+      skipAtMentions = true;
+    }
+  }
   const attachmentMessages = await toArray(
     getAttachmentMessages(
       result
@@ -1386,7 +1398,7 @@ async function getMessagesForPromptSlashCommand(
       [], // queuedCommands - handled by query.ts for mid-turn attachments
       context.messages,
       'repl_main_thread',
-      { skipSkillDiscovery: true },
+      { skipSkillDiscovery: true, skipAtMentions },
     ),
   );
 

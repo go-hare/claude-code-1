@@ -72,6 +72,7 @@ export type LoadedFrom =
   | 'managed'
   | 'bundled'
   | 'mcp'
+  | 'syncedSkills' // densable 2.1.228 #12 — claude.ai sync
 
 /**
  * Returns a claude config directory path for a given source.
@@ -335,24 +336,87 @@ export function createSkillCommand({
   effort: EffortValue | undefined
   shell: FrontmatterShell | undefined
 }): Command {
+  // densable 2.1.228 #12 — $vr/$Phn label+sanitize for claude.ai synced skills;
+  // bDo capability wipe when xTt says body is untrusted (syncedSkills on local
+  // machine; mcp always). Lazy-require keeps the harden module out of cold paths
+  // that never load synced skills.
+  let finalDescription = description
+  let finalWhenToUse = whenToUse
+  let finalArgumentHint = argumentHint
+  let finalAllowedTools = allowedTools
+  let finalDisallowedTools: string[] | undefined
+  let finalHooks = hooks
+  let finalExecutionContext = executionContext
+  let finalBackground = background
+  let finalAgent = agent
+  let finalModel = model
+  let finalEffort = effort
+  let finalShell = shell
+  let finalPaths = paths
+  let hardenBody = loadedFrom === 'mcp'
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const harden =
+      require('./syncedSkillsHarden.js') as typeof import('./syncedSkillsHarden.js')
+    if (loadedFrom === 'syncedSkills') {
+      finalDescription = harden.sanitizeSyncedSkillDescription(description)
+      if (whenToUse) {
+        finalWhenToUse = harden.sanitizeSyncedSkillText(whenToUse)
+      }
+      if (argumentHint) {
+        finalArgumentHint = harden.sanitizeSyncedSkillText(argumentHint)
+      }
+    }
+    hardenBody = harden.shouldHardenSkillBody(loadedFrom)
+    if (hardenBody) {
+      const wiped = harden.emptyHardenedSkillCapabilities()
+      finalAllowedTools = wiped.allowedTools
+      finalDisallowedTools = wiped.disallowedTools
+      finalHooks = wiped.hooks
+      finalExecutionContext = wiped.executionContext
+      finalBackground = wiped.background
+      finalAgent = wiped.agent
+      finalModel = wiped.model
+      finalEffort = wiped.effort
+      finalShell = wiped.shell
+      finalPaths = wiped.paths
+    }
+  } catch {
+    if (loadedFrom === 'syncedSkills') {
+      hardenBody = true
+      finalAllowedTools = []
+      finalHooks = undefined
+      finalExecutionContext = undefined
+      finalBackground = undefined
+      finalAgent = undefined
+      finalModel = undefined
+      finalEffort = undefined
+      finalShell = undefined
+      finalPaths = undefined
+    }
+  }
+
   return {
     type: 'prompt',
     name: skillName,
-    description,
+    description: finalDescription,
     hasUserSpecifiedDescription,
-    allowedTools,
-    argumentHint,
+    allowedTools: finalAllowedTools,
+    ...(finalDisallowedTools !== undefined
+      ? { disallowedTools: finalDisallowedTools }
+      : {}),
+    argumentHint: finalArgumentHint,
     argNames: argumentNames.length > 0 ? argumentNames : undefined,
-    whenToUse,
+    whenToUse: finalWhenToUse,
     version,
-    model,
+    model: finalModel,
     disableModelInvocation,
     userInvocable,
-    context: executionContext,
-    ...(background !== undefined ? { background } : {}),
-    agent,
-    effort,
-    paths,
+    context: finalExecutionContext,
+    ...(finalBackground !== undefined ? { background: finalBackground } : {}),
+    agent: finalAgent,
+    effort: finalEffort,
+    paths: finalPaths,
     contentLength: markdownContent.length,
     // densable Xen: contentHash:i??Bun.hash(o).toString(36)
     contentHash: contentHash ?? Bun.hash(markdownContent).toString(36),
@@ -363,7 +427,7 @@ export function createSkillCommand({
     },
     source,
     loadedFrom,
-    hooks,
+    hooks: finalHooks,
     skillRoot: baseDir,
     async getPromptForCommand(args, toolUseContext) {
       let finalContent = baseDir
@@ -380,7 +444,8 @@ export function createSkillCommand({
       // Replace ${CLAUDE_SKILL_DIR} with the skill's own directory so bash
       // injection (!`...`) can reference bundled scripts. Normalize backslashes
       // to forward slashes on Windows so shell commands don't treat them as escapes.
-      if (baseDir) {
+      // densable xTt: do not expand skill-dir paths for hardened remote sources.
+      if (baseDir && !hardenBody) {
         const skillDir =
           process.platform === 'win32' ? baseDir.replace(/\\/g, '/') : baseDir
         finalContent = finalContent.replace(/\$\{CLAUDE_SKILL_DIR\}/g, skillDir)
@@ -392,10 +457,10 @@ export function createSkillCommand({
         getSessionId(),
       )
 
-      // Security: MCP skills are remote and untrusted — never execute inline
-      // shell commands (!`…` / ```! … ```) from their markdown body.
-      // ${CLAUDE_SKILL_DIR} is meaningless for MCP skills anyway.
-      if (loadedFrom !== 'mcp') {
+      // Security: MCP / densable 2.1.228 #12 syncedSkills (on the user's machine)
+      // are untrusted — never execute inline shell (!`…` / ```! … ```).
+      // densable xTt/Mzb: shell only when !xTt(loadedFrom).
+      if (!hardenBody) {
         finalContent = await executeShellCommandsInPrompt(
           finalContent,
           {
@@ -408,15 +473,25 @@ export function createSkillCommand({
                   ...appState.toolPermissionContext,
                   alwaysAllowRules: {
                     ...appState.toolPermissionContext.alwaysAllowRules,
-                    command: allowedTools,
+                    command: finalAllowedTools,
                   },
                 },
               }
             },
           },
           `/${skillName}`,
-          shell,
+          finalShell,
         )
+      } else {
+        // densable: strip shell patterns rather than leaving raw !` in the prompt
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const gates =
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+          finalContent = gates.stripSkillShellCommands(finalContent)
+        } catch {
+          // leave content if gate module unavailable
+        }
       }
 
       return [{ type: 'text', text: finalContent }]

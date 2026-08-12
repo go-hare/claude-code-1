@@ -701,15 +701,21 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
   ])
 
   // densable Hxb after assemble (skills/plugins/… then builtins).
-  return stripCollidingPluginAliases([
-    ...bundledSkills,
-    ...builtinPluginSkills,
-    ...skillDirCommands,
-    ...(workflowCommands as Command[]),
-    ...(pluginCommands as Command[]),
-    ...pluginSkills,
-    ...COMMANDS(),
-  ])
+  // densable 2.1.228 #12 Vyn/ULo: drop syncedSkills that shadow local/plugin/MCP/builtins.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { applySyncedSkillShadowFilter } =
+    require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
+  return applySyncedSkillShadowFilter(
+    stripCollidingPluginAliases([
+      ...bundledSkills,
+      ...builtinPluginSkills,
+      ...skillDirCommands,
+      ...(workflowCommands as Command[]),
+      ...(pluginCommands as Command[]),
+      ...pluginSkills,
+      ...COMMANDS(),
+    ]),
+  )
 })
 
 /**
@@ -728,8 +734,14 @@ export async function getCommands(cwd: string): Promise<Command[]> {
     _ => meetsAvailabilityRequirement(_) && isCommandEnabled(_),
   )
 
+  // densable 2.1.228 #12 — re-apply Vyn after dynamic skill merge so a late
+  // synced skill still cannot shadow local/plugin names.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { applySyncedSkillShadowFilter } =
+    require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
+
   if (dynamicSkills.length === 0) {
-    return baseCommands
+    return applySyncedSkillShadowFilter(baseCommands)
   }
 
   // Dedupe dynamic skills - only add if not already present
@@ -744,7 +756,9 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   if (uniqueDynamicSkills.length === 0) {
     // Re-run Hxb so session interactivity changes after load still yield
     // help/feedback claims for plugin aliases (loadAllCommands is memoized).
-    return stripCollidingPluginAliases(baseCommands)
+    return applySyncedSkillShadowFilter(
+      stripCollidingPluginAliases(baseCommands),
+    )
   }
 
   // Insert dynamic skills after plugin skills but before built-in commands
@@ -752,17 +766,18 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   const insertIndex = baseCommands.findIndex(c => builtInNames.has(c.name))
 
   if (insertIndex === -1) {
-    return stripCollidingPluginAliases([
-      ...baseCommands,
-      ...uniqueDynamicSkills,
-    ])
+    return applySyncedSkillShadowFilter(
+      stripCollidingPluginAliases([...baseCommands, ...uniqueDynamicSkills]),
+    )
   }
 
-  return stripCollidingPluginAliases([
-    ...baseCommands.slice(0, insertIndex),
-    ...uniqueDynamicSkills,
-    ...baseCommands.slice(insertIndex),
-  ])
+  return applySyncedSkillShadowFilter(
+    stripCollidingPluginAliases([
+      ...baseCommands.slice(0, insertIndex),
+      ...uniqueDynamicSkills,
+      ...baseCommands.slice(insertIndex),
+    ]),
+  )
 }
 
 /**
@@ -1014,6 +1029,11 @@ export function formatDescriptionWithSource(cmd: Command): string {
 
   if (cmd.kind === 'workflow') {
     return `${cmd.description} (workflow)`
+  }
+
+  // densable 2.1.228 #12 — description already carries `[claude.ai sync]` via $vr
+  if (cmd.loadedFrom === 'syncedSkills') {
+    return cmd.description
   }
 
   if (cmd.source === 'plugin') {

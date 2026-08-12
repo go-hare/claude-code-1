@@ -857,6 +857,11 @@ export type TeamContextAttachment = {
 export type GetAttachmentsOptions = {
   skipSkillDiscovery?: boolean
   /**
+   * densable 2.1.228 #12 xTt — skip @-file / MCP resource / agent mention
+   * expansion for hardened skill bodies (syncedSkills on local machine, mcp).
+   */
+  skipAtMentions?: boolean
+  /**
    * densable isRegularUserPrompt — non-meta prompt turns (ultra_effort path).
    * densable only ran f2y on this gate; we still run ultra_effort more broadly
    * but keyword p2y requires isHumanTypedPrompt.
@@ -913,22 +918,28 @@ export async function getAttachments(
   const isMainThread = !toolUseContext.agentId
 
   // Attachments which are added in response to on user input
+  // densable 2.1.228 #12 xTt: hardened skill bodies must not expand @ mentions.
+  const skipAtMentions = options?.skipAtMentions === true
   const userInputAttachments = input
     ? [
-        maybe('at_mentioned_files', () =>
-          processAtMentionedFiles(input, context),
-        ),
-        maybe('mcp_resources', () =>
-          processMcpResourceAttachments(input, context),
-        ),
-        maybe('agent_mentions', () =>
-          Promise.resolve(
-            processAgentMentions(
-              input,
-              toolUseContext.options.agentDefinitions.activeAgents,
-            ),
-          ),
-        ),
+        ...(skipAtMentions
+          ? []
+          : [
+              maybe('at_mentioned_files', () =>
+                processAtMentionedFiles(input, context),
+              ),
+              maybe('mcp_resources', () =>
+                processMcpResourceAttachments(input, context),
+              ),
+              maybe('agent_mentions', () =>
+                Promise.resolve(
+                  processAgentMentions(
+                    input,
+                    toolUseContext.options.agentDefinitions.activeAgents,
+                  ),
+                ),
+              ),
+            ]),
         // Skill discovery on turn 0 (user input as signal). Inter-turn
         // discovery runs via startSkillDiscoveryPrefetch in query.ts,
         // gated on write-pivot detection — see skillSearch/prefetch.ts.
