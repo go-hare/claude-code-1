@@ -1,6 +1,6 @@
 # Cross-pack residual inventory (go-hare vs densable)
 
-> 更新：**2026-08-12** — 修正 Feature/UDS·LAN·TEAMMEM OFF 神话；GKd 已接线；224 GAP0；**221 #12 → DEP-HAVE**；**221 #10 → HAVE**（API-request 路径 null-proto/hasOwn）；**createSdkMcpServer / `_registeredTools` 两边 plain 对齐**（非 residual）；**Ink kTd whole-token re-ESC + incomplete buffer → HAVE**（见 §2）。  
+> 更新：**2026-08-13** — 228 #12 计 **PARTIAL**（core-only）；清「脏树/未 commit」；Grok `reasoning_effort` + `grok-4.20-*` catalog 为本地产品补丁（非官方 GAP）。  
 > 原则：densable-first 1:1；**不 invent** VSCode/cloud-only；**不 auto commit/push/bump**。
 
 ---
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | **221 #12** large-upload TLS | **DEP-HAVE** | 修在 `@anthropic-ai/sandbox-runtime@0.0.70`（`MAX_SIGV4_RESIGN_BODY_BYTES` / BodyTooLarge）；CLI 仅 tlsTerminate 接线、**无**独立 large-upload locus → **不**勾 CLI HAVE，也**不** invent CLI handler。见 `official-221-checklist.md` |
 | **224** 产品 | HAVE 29 · GAP 0 · N/A 2 | #15/#16/#24/#25 HAVE；#29/#31 VSCode N/A |
-| **228** 产品 | checklist **18/18 HAVE**（#12 = **core-only**） | 含 l8t errorCode 13。**未 commit** 直至用户点名。**#12 宜按 PARTIAL/core-only 理解**，勿当完整云同步对等 |
+| **228** 产品 | HAVE **17** · PARTIAL **1**（#12 core-only） | 含 l8t errorCode 13。228 pack **已在 main**（`e1bfe7e5`…`3d43480c`）。#12 无 ingest host（invent-ban） |
 
 ---
 
@@ -36,7 +36,7 @@
 | 项 | 说明 |
 | --- | --- |
 | **228 #2 uio** | densable 只拒 exact-cwd / shadow 段 / WindowsApps；允许 `cwd\tools\git.exe` 等。相对 pre-228「拒全部 under-cwd」更松；对齐官方 #2 parent-of-Git。测试锁 ALLOWS non-shadow subdir。 |
-| **228 #12 synced skills** | 只 harden core（shadow / sanitize / no `!`/`@`）；**不 invent** 完整 claude.ai 下载/ingest host；生产几乎不写 `loadedFrom:'syncedSkills'`（单测构造）。checklist 计 **HAVE** 时须自认 **core only**——相对「完整官方对等」宜 **PARTIAL** 理解。 |
+| **228 #12 synced skills** | **PARTIAL**（2026-08-13）：只 harden core（shadow / sanitize / no `!`/`@`）；**不 invent** 完整 claude.ai 下载/ingest host；生产几乎不写 `loadedFrom:'syncedSkills'`（单测构造）。 |
 | **228 #3 `/tui`** | 只 Bxa `--model` pin；**不 invent** 完整 densable `cui`（add-dir / effort / permission-mode）。 |
 | **OWNER_ORG handoff (dBe)** | densable 常 `(live.org\|\|undef)===(handoff.org\|\|undef)`：handoff **无 ORG** 而 live **有 org** 会误 veto。本地：**仅 handoff 带了 OWNER_ORG 才比 org**；缺省 ORG 只比 account（有意产品修正，有注释 + 测）。 |
 | **228 #14 ugi** | Vertex/GCP auth **仅 401** 进 cloud-auth cap；**403 不进 cap**（densable 金标，有测）。 |
@@ -45,6 +45,7 @@
 | **228 #17 + l8t** | unread gate（Jqy/MCt）+ **l8t** Read-deny early gate（`errorCode:13`，`cannot be written/edited` ≠ generic unread）。**validateInput + call()** 同 skip（`shouldAllowCallDespiteMissingOrPartialRead`）；测：`fileEditReadGate.228` + `fileEditReadGate.call.228`（**subprocess 隔离**：wrapper 调 `.runner.ts`，避免 `mock.module` 污染全量 suite）。路径检查与现有 edit-deny 同粒度（densable `fT` 多路径为可接受细差）。 |
 | **UDS `CLAUDE_CODE_MESSAGING_TOKEN`** | densable `$Y.set` → `process.env`（子进程继承）；capability 发布成功后才 export；stop/fail 清除。**不 invent** 非 env soft-auth；无 SEA 平台谓词不造 degraded unauth。细差：densable dual peer/child token，本地单 token。 |
 | **Multi-API** | OpenAI / Gemini / Grok 兼容层（本地产品）。 |
+| **Grok `reasoning_effort`** | 本地产品补丁（非 densable）：`queryModelGrok` 对**映射后** id `resolveAppliedEffort` 后发 Chat Completions `reasoning_effort`。catalog：`grok-4.5`/`4.20-reasoning` 三档；`grok-4.6`/`4.20-multi-agent` 含 xhigh（4.6=depth，multi-agent=agent count）。**禁止**裸 `grok-4` / `grok-4.20` 行。 |
 | **`/poor`** | 降 token（跳 extract_memories / suggestion / verification 等）。 |
 | **Feature flags** | **runtime** `feature()` 无 env → `false`。**build/dev** 注入 `DEFAULT_BUILD_FEATURES`（65+ ON，见 `scripts/defines.ts` / CLAUDE.md）。densable SEA 更接近全开；本地用 DEFAULT 表 + `FEATURE_*=1`。**禁止**再写「本地默认全 OFF」。 |
 | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS_CHANNELS\|PUSH\|WEBHOOKS** | **`DEFAULT_BUILD` ON**（2026-08-12 densable 228 产品面对齐）。非 build/dev 注入环境仍关。TEAMMEM 另有 OAuth + GitHub remote **运行时门**。历史「默认 OFF」是旧 deferral，**不是** densable 产品关。 |
@@ -67,10 +68,10 @@
 | 策略 | uio 比 densable 更严 | under-cwd 全拒 + 仅 parent-of-Git / Program Files 白名单 → **偏离 densable 1:1**，勿当「对齐」做 |
 | 产品 | synced skill 真 loader | 接上 ingest 后 harden 才有生产路径；属产品，不是小补丁 |
 | 安全文档 | LAN TCP auth + UDP 明文 token | **已文档化威胁模型**（`pipes-and-lan.md` / `lan-pipes.md`）：握手防盲扫，非机密；不 invent 配对码/challenge 除非产品明确要 |
-| 流程 | commit 228 pack | 脏树含 #10 + review criticals 未提交；用户点名再 Conventional Commit，**勿 auto bump/push** |
+| 流程 | 228 pack | **已 commit**（`3d43480c` 对齐）。后续改动点名再 Conventional Commit，**勿 auto bump/push** |
 | 验证 | 全量 `bun run precheck` | typecheck 0；#17 定向 33（runner）+ 2 wrapper pass。全量 suite **~310 fail / 35 errors** 为**预存** mock 污染 / path 解析 / 顺序敏感（排除 #17 后同基线；#17 已 subprocess 隔离不再贡献）。**不**因 310 宣称 ship-green |
 
-**已落地（脏树，未 commit）— 228 code-review criticals：**
+**已落地（main，228 pack）— 原 review criticals：**
 
 | 项 | 修法 |
 | --- | --- |

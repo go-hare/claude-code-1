@@ -4,7 +4,7 @@
 > densable 二进制：`/tmp/official-216/plat/package/claude`（`npm pack @anthropic-ai/claude-code-darwin-arm64@2.1.216`，**249 225 584** bytes；VERSION **2.1.216**）。  
 > 基线：产品 **2.7.30** / densable **2.1.215** 已落地（`1eb81339`，`/verify`+`/code-review` disableModelInvocation）。  
 > 状态图例：**GAP** 未对齐 · **PARTIAL** 有半截 · **AUDIT** 需再判 · **HAVE** 已有 · **N/A** 不适用 · **LOW** 可选  
-> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码；UDS/LAN/TEAMMEM 默认 OFF。  
+> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码。UDS/LAN/TEAMMEM pack 当时写默认 OFF — **2026-08-12 起 `DEFAULT_BUILD` ON**。  
 > 详包：`pack-report.md` · FS disable 专文：`sandbox-filesystem-disabled.extract.md`
 
 ## 邻版关系
@@ -142,7 +142,7 @@
 
 - 2.1.217+  
 - 重开 215 skill 策略  
-- UDS/LAN/TEAMMEM/KAIROS 加码  
+- UDS/LAN/TEAMMEM/KAIROS 加码（pack 当时；当前 DEFAULT_BUILD 已 ON，勿再当产品关）  
 
 ---
 

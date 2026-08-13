@@ -12,10 +12,7 @@ import type {
   UserMessage,
 } from '../../../types/message.js'
 import type { Tools } from '../../../Tool.js'
-import type {
-  ChatCompletionChunk,
-  ChatCompletionCreateParamsStreaming,
-} from 'openai/resources/chat/completions/completions.mjs'
+import type { ChatCompletionChunk } from 'openai/resources/chat/completions/completions.mjs'
 import { getGrokClient } from './client.js'
 import {
   assembleFinalAssistantOutputs,
@@ -44,6 +41,8 @@ import {
 } from '../../../services/langfuse/convert.js'
 import type { Options } from '../claude.js'
 import { createAssistantAPIErrorMessage } from '../../../utils/messages.js'
+import { resolveAppliedEffort } from '../../../utils/effort.js'
+import { buildGrokChatCompletionsBody } from './requestBody.js'
 
 /**
  * Grok (xAI) query path. Grok uses an OpenAI-compatible API, so we reuse
@@ -105,20 +104,18 @@ export async function* queryModelGrok(
       `[Grok] Calling model=${grokModel}, messages=${openaiMessages.length}, tools=${openaiTools.length}`,
     )
 
+    // Clamp against the *mapped* Grok id so a Claude alias (opus →
+    // grok-4.20-reasoning) does not send xhigh/max that xAI rejects.
+    const appliedEffort = resolveAppliedEffort(grokModel, options.effortValue)
     const stream = await client.chat.completions.create(
-      {
+      buildGrokChatCompletionsBody({
         model: grokModel,
         messages: openaiMessages,
-        ...(openaiTools.length > 0 && {
-          tools: openaiTools,
-          ...(openaiToolChoice && { tool_choice: openaiToolChoice }),
-        }),
-        stream: true,
-        stream_options: { include_usage: true },
-        ...(options.temperatureOverride !== undefined && {
-          temperature: options.temperatureOverride,
-        }),
-      } as ChatCompletionCreateParamsStreaming,
+        tools: openaiTools,
+        toolChoice: openaiToolChoice,
+        temperatureOverride: options.temperatureOverride,
+        effortValue: appliedEffort,
+      }),
       {
         signal,
       },

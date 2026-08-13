@@ -4,7 +4,7 @@
 > densable 二进制：`/tmp/official-214/package/claude.exe`（`npm pack @anthropic-ai/claude-code-win32-x64@2.1.214`）。  
 > 基线：产品 **2.7.29** / densable **2.1.212 收口**（`official-212-checklist` 0 GAP）。  
 > 状态图例：**GAP** 未对齐 · **PARTIAL** 有半截 · **AUDIT** 需对照 densable 再判 · **HAVE** 已有 · **N/A** 不适用 · **LOW** 可选  
-> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码；UDS/LAN/TEAMMEM 默认 OFF。
+> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码。UDS/LAN/TEAMMEM pack 当时写默认 OFF — **2026-08-12 起 `DEFAULT_BUILD` ON**（见 residuals）。
 
 ## 邻版关系
 
@@ -169,8 +169,8 @@
 
 ### 故意后置 / 不动
 
-- **UDS_INBOX / LAN_PIPES / TEAMMEM**：默认 OFF  
-- **KAIROS**：不再加码  
+- **UDS_INBOX / LAN_PIPES / TEAMMEM**：pack 当时 deferral；**当前 `DEFAULT_BUILD` ON**  
+- **KAIROS**：不再加码（外围 `CHANNELS/PUSH/WEBHOOKS` 已随 228 DEFAULT ON）  
 - **2.1.213**：无独立 changelog，不单开对齐  
 - **GrowthBook #15/#34**：均已 HAVE（null/malformed + OAuth 轮换）
 

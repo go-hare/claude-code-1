@@ -6,7 +6,7 @@
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。不 invent cloud/VSCode-only。  
 > 更新：2026-08-11 — **#15/#16/#24/#25 HAVE 1:1** + paste 簇 + RC + **#1** SHR + **#31 N/A**。  
-> **未宣称全 pack 收口**；HAVE **29** · PARTIAL **0** · GAP **0** · UNKNOWN **0** · N/A **2**（#29/#31 VSCode）· **#15/#16/#24/#25 已 1:1 落地**（产品+定向测；全量 suite 仍有 packages 路径解析/脏树遗留失败，未宣称 ship）。
+> **未宣称全 pack 收口**；HAVE **29** · PARTIAL **0** · GAP **0** · UNKNOWN **0** · N/A **2**（#29/#31 VSCode）· **#15/#16/#24/#25 已 1:1 落地并提交**。全量 suite 仍有 packages 路径解析/预存失败，未宣称 ship。
 
 ## 邻版关系
 
@@ -129,7 +129,7 @@
 13. ~~**#30**~~ **HAVE**（bridge-session tombstone + resume force-on gate）
 14. ~~**#28**~~ **HAVE**（replBridgePlaceholders + ULp sweep on mint）
 15. ~~**#1**~~ **HAVE**（self-hosted-runner：aWd/bjv/outcome + Ane + confine + D trust/mcp_config + B2h/Bjv/Fjv/Ijv/W2h/xjv/z2h/CKn 已接线）
-16. **#15 / #16 / #24 / #25** → **HAVE**（2026-08-11 1:1 落地；定向测通过；未 commit）  
+16. **#15 / #16 / #24 / #25** → **HAVE**（2026-08-11 1:1 落地；已随 `09c0be2b` / `8349d7bc` / `6ec40f7f` 提交）  
 17. ~~**#31**~~ **N/A**（VSCode invent-ban；CLI remoteControlAtStartup 已有）
 
 ## densable rBh residual 符号表（MISS→HAVE）

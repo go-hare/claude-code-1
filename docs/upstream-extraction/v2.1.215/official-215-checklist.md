@@ -4,7 +4,7 @@
 > densable 二进制：`/tmp/official-215/plat/package/claude`（`npm pack @anthropic-ai/claude-code-darwin-arm64@2.1.215`，247 124 336 bytes）。  
 > 基线：产品 **2.7.30** / densable **2.1.214 收口**（`official-214-checklist` 47/47 HAVE，git `fbe81e77`）。  
 > 状态图例：**GAP** 未对齐 · **PARTIAL** 有半截 · **AUDIT** 需再判 · **HAVE** 已有 · **N/A** 不适用 · **LOW** 可选  
-> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码；UDS/LAN/TEAMMEM 默认 OFF。  
+> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码。UDS/LAN/TEAMMEM pack 当时写默认 OFF — **2026-08-12 起 `DEFAULT_BUILD` ON**。  
 > 本版 **仅 1 条**产品 changelog；勿把 216+ 混进本清单。
 
 ## 邻版关系

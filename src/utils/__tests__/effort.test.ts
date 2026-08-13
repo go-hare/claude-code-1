@@ -85,6 +85,7 @@ const {
   clampEffortToOrgLimit,
   getOrgMaxEffortLevel,
   filterEffortLevelsByOrgLimit,
+  lookupEffortCatalog,
 } = await import('src/utils/model/effortCatalog.js')
 
 // densable S8t positive path needs injectable modelAccessCache + firstParty.
@@ -739,16 +740,23 @@ describe('densable effort catalog matrix', () => {
     expect(clampEffortForModel('xhigh', m)).toBe('high')
   })
 
-  test('grok-4.6: same 3-tier as 4.5 (does not inherit grok-4.5 match)', () => {
+  test('grok-4.6: 4-tier with xhigh (does not inherit grok-4.5 3-tier)', () => {
     const m = 'grok-4.6'
     expect(modelSupportsEffort(m)).toBe(true)
     expect(getDefaultEffortForModel(m)).toBe('high')
-    expect(getSupportedEffortLevels(m)).toEqual(['low', 'medium', 'high'])
+    expect(getSupportedEffortLevels(m)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
     expect(modelSupportsMaxEffort(m)).toBe(false)
-    expect(modelSupportsXhighEffort(m)).toBe(false)
+    expect(modelSupportsXhighEffort(m)).toBe(true)
     expect(clampEffortForModel('max', m)).toBe('high')
-    expect(clampEffortForModel('xhigh', m)).toBe('high')
+    expect(clampEffortForModel('xhigh', m)).toBe('xhigh')
     expect(clampEffortForModel('low', m)).toBe('low')
+    expect(resolveAppliedEffort(m, 'xhigh')).toBe('xhigh')
+    expect(resolveAppliedEffort(m, 'max')).toBe('high')
   })
 
   test('kimi-k3: low/high/max, default max; medium clamps to high', () => {
@@ -794,8 +802,56 @@ describe('densable effort catalog matrix', () => {
     expect(getUltracodeEffortForModel('grok-4.5')).toBe('high')
   })
 
-  test('getUltracodeEffortForModel: grok-4.6 tops at high (no xhigh)', () => {
-    expect(getUltracodeEffortForModel('grok-4.6')).toBe('high')
+  test('getUltracodeEffortForModel: grok-4.6 tops at xhigh', () => {
+    expect(getUltracodeEffortForModel('grok-4.6')).toBe('xhigh')
+  })
+
+  test('grok-4.20-reasoning: 3-tier, does not inherit multi-agent xhigh', () => {
+    const m = 'grok-4.20-reasoning'
+    expect(modelSupportsEffort(m)).toBe(true)
+    expect(getDefaultEffortForModel(m)).toBe('high')
+    expect(getSupportedEffortLevels(m)).toEqual(['low', 'medium', 'high'])
+    expect(modelSupportsXhighEffort(m)).toBe(false)
+    expect(clampEffortForModel('xhigh', m)).toBe('high')
+    expect(clampEffortForModel('max', m)).toBe('high')
+    expect(getUltracodeEffortForModel(m)).toBe('high')
+  })
+
+  test('resolveAppliedEffort on grok-4.20-reasoning clamps opus-style xhigh', () => {
+    expect(resolveAppliedEffort('grok-4.20-reasoning', 'xhigh')).toBe('high')
+    expect(resolveAppliedEffort('grok-4.20-reasoning', 'max')).toBe('high')
+    expect(resolveAppliedEffort('grok-4.20-reasoning', 'low')).toBe('low')
+  })
+
+  test('grok-4.20-multi-agent: longer match beats grok-4.20-reasoning', () => {
+    const m = 'grok-4.20-multi-agent'
+    expect(modelSupportsEffort(m)).toBe(true)
+    expect(getDefaultEffortForModel(m)).toBe('high')
+    expect(getSupportedEffortLevels(m)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
+    expect(modelSupportsXhighEffort(m)).toBe(true)
+    expect(clampEffortForModel('xhigh', m)).toBe('xhigh')
+    expect(clampEffortForModel('max', m)).toBe('high')
+    expect(getUltracodeEffortForModel(m)).toBe('xhigh')
+  })
+
+  test('bare grok-4.20 has no catalog row (do not invent vendor default)', () => {
+    expect(lookupEffortCatalog('grok-4.20')).toBeUndefined()
+    expect(lookupEffortCatalog('grok-4.20-reasoning')?.levels).toEqual([
+      'low',
+      'medium',
+      'high',
+    ])
+    expect(lookupEffortCatalog('grok-4.20-multi-agent')?.levels).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
   })
 
   test('getUltracodeEffortForModel: deepseek-v4-pro tops at max', () => {

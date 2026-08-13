@@ -78,8 +78,8 @@
 ### Batch 4 — 可靠性 cherry-pick（#7–12 #20–23 #33–36 #38 #42–45）
 按痛点选做；每项先 binary extract，禁止“简化版”替代。
 
-### 暂不默认开
-UDS_INBOX / LAN_PIPES / TEAMMEM；KAIROS 不再动；不把 214 EndConversation 混进 212。
+### 暂不默认开（pack 当时；已过时）
+UDS_INBOX / LAN_PIPES / TEAMMEM 当时 deferral。**2026-08-12 起 `DEFAULT_BUILD` ON**（见 `cross-pack-residuals.md`）。KAIROS 外围亦 ON。不把 214 EndConversation 混进 212。
 
 ---
 

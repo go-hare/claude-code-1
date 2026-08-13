@@ -47,7 +47,7 @@
 
 #### densable 2.1.228 对齐说明（2.7.37）
 
-对照文档：`docs/upstream-extraction/v2.1.228/official-228-checklist.md`（**HAVE 18 / GAP 0**）、`changelog-2.1.228.md`、`cross-pack-residuals.md`。叠在 **2.1.227** 之上（中间 223–227 已并入 git；本 npm 线一次收口到 228）。
+对照文档：`docs/upstream-extraction/v2.1.228/official-228-checklist.md`（**HAVE 17 + PARTIAL 1 / GAP 0**；#12 core-only）、`changelog-2.1.228.md`、`cross-pack-residuals.md`。叠在 **2.1.227** 之上（中间 223–227 已并入 git；本 npm 线一次收口到 228）。
 
 | 面 | 已 1:1 落地 | 故意不扩 / 不动 |
 | -- | ----------- | --------------- |
@@ -169,8 +169,8 @@
 
 | 版本 | 要点 |
 | ---- | ---- |
-| **2.7.38** | **Grok 4.6 推理档 catalog**：按模型 ID 最长匹配加 `grok-4.6` 行（不按厂商启发式）；档位与 4.5 相同 `low \| medium \| high`，默认 `high`，无 max/xhigh；`/effort max`/`xhigh` clamp 到 `high`。官方 4.6 reasoning 页尚未发布，沿用 [xAI 4.5 reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning) 三档。不改 opus→`grok-4.20-reasoning` 映射，不加裸 `grok-4` 行（避免误伤 `grok-4.20-multi-agent` 的 xhigh）。 |
-| **2.7.37** | **densable 2.1.228 全量 1:1（18/18 HAVE）** + 已并入 223–227：Ink layout recover；kTd whole-token re-ESC + incomplete buffer；Windows `uio`；SHR checkout skip + follow-up hold；UDS `key_publish` fail-closed + LAN TCP auth；RC reattach owner / left-arrow；syncedSkills harden core；Write/Edit Jqy/MCt+l8t；Vertex fail-fast + Bedrock GKd；St mid-turn；cross-session from-name；cleanup memory / plugin symlink / marketplace ssn；`/tui` model pin；title ◐/◑；auto-mode 去 expensive；DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS 外围 ON**；221 #10 null-proto + createSdkMcpServer。跨 pack 残差见 `cross-pack-residuals.md`（teleport invent-ban）。 |
+| **2.7.38** | **Grok 4.6 推理档 catalog**：按模型 ID 最长匹配加 `grok-4.6` 行（不按厂商启发式）。官方 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)（2026-08-12）：`grok-4.6` 为 `low \| medium \| high \| xhigh`（默认 `high`）；`grok-4.5` 仍三档（xhigh 当 high）。另有 `grok-4.20-reasoning` 三档、`grok-4.20-multi-agent` 含 xhigh（agent count）。`queryModelGrok` 对**映射后** id 发 Chat Completions `reasoning_effort`。不加裸 `grok-4` / `grok-4.20` 行。 |
+| **2.7.37** | **densable 2.1.228（HAVE 17 + PARTIAL 1 / GAP 0；#12 core-only）** + 已并入 223–227：Ink layout recover；kTd whole-token re-ESC + incomplete buffer；Windows `uio`；SHR checkout skip + follow-up hold；UDS `key_publish` fail-closed + LAN TCP auth；RC reattach owner / left-arrow；syncedSkills harden core；Write/Edit Jqy/MCt+l8t；Vertex fail-fast + Bedrock GKd；St mid-turn；cross-session from-name；cleanup memory / plugin symlink / marketplace ssn；`/tui` model pin；title ◐/◑；auto-mode 去 expensive；DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS 外围 ON**；221 #10 null-proto + createSdkMcpServer。跨 pack 残差见 `cross-pack-residuals.md`（teleport invent-ban）。 |
 | **2.7.36** | **streaming 空 `●` hotfix（densable 222 residual）**：`hasContentAfter` 对齐 densable `y\|\|aem`（去掉 invent `\|\|streamingPreview`）；whitespace / strip-empty 不画 XEl；`Qci` trim-empty 清 `STREAM_FLAG_DISPLAYED`。避免 collapsed 工具组后假 past-tense「Ran N…」+ Cooking 前 lone bullet。 |
 | **2.7.35** | **densable 2.1.222 全量 1:1（21/21 HAVE）** + 已并入 219–221：全会话 worktree isolation；streaming UNf/WNf/Qci + salvage clear 契约；RC `remoteControlAtStartup` 源限制（flag/aliases）；host model overlay；ULTRAPLAN 产品 OFF；preflight proxy 超时；MCP 份额归因；SendMessage classifier/截断；tool-gone 展示；post-push PR link；raw git diff；agent 族 step-down；SR EOL 删除；file watcher teardown 等。并入 219 **24/24** / 220 residual / 221（发版时 snapshot **HAVE 35 / GAP 2 / N/A 2**；**之后** #10→HAVE、#12→DEP-HAVE，见 checklist / cross-pack-residuals，**勿当现状 GAP**）。UDS/LAN/TEAMMEM 发版时默认 OFF（后翻 ON）。 |
 | **2.7.33** | **densable 2.1.218 全量 1:1（35 HAVE / 1 N/A / 0 GAP）**：code-review bg + ultra cloud；ultrareview 描述/无效参数；SR a11y / Ctrl+J / ←确认 / AgentView Esc；Host teardown + permissionLayers；auto-mode/sandbox IDE；fork lineage；Bedrock wizard；CCR heartbeat；frontmatter 布尔/`--config`/禁 `:`；`/deep-research` 仅手动；RC multi-env trust。**#9 gateway metering N/A**。发版加固：Ink skipSyncMarkers/unmount/alt-screen；Agent Views Esc 不 attach-origin 黑屏 + O7 退出。UDS/LAN/TEAMMEM 默认 OFF。 |

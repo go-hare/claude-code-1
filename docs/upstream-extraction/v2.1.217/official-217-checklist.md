@@ -4,7 +4,7 @@
 > densable 二进制：`%TEMP%/official-217/package/claude.exe`（`npm pack @anthropic-ai/claude-code-win32-x64@2.1.217`，**259 460 768** bytes；VERSION **2.1.217**）。  
 > 基线：产品 **2.7.31** / densable **2.1.216** 已收口（`ffdb9806`，HAVE 38 / N/A 1）。  
 > 状态图例：**GAP** 未对齐 · **PARTIAL** 有半截 · **AUDIT** 需再判 · **HAVE** 已有 · **N/A** 不适用 · **LOW** 可选  
-> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码；UDS/LAN/TEAMMEM 默认 OFF。
+> 约定：**extract densable first → 1:1**，禁止简化版替代。KAIROS 不再加码。UDS/LAN/TEAMMEM pack 当时写默认 OFF — **2026-08-12 起 `DEFAULT_BUILD` ON**。
 
 ## 邻版关系
 

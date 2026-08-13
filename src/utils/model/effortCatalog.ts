@@ -237,17 +237,38 @@ const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
   // https://docs.x.ai/developers/model-capabilities/text/reasoning
   // Per-model rows (longest-substring on id). grok-4.6 does not contain
   // "grok-4.5" — add a row, do not invent a vendor heuristic.
-  // Official 4.5 ladder (4.6 page not published): low | medium | high;
-  // default high; cannot disable. Do not add a bare `grok-4` row:
-  // grok-4.20-multi-agent has xhigh.
+  // Official 2026-08-12: grok-4.6 low|medium|high|xhigh (default high);
+  // grok-4.5 stays 3-tier (xhigh treated as high by xAI). Cannot disable.
+  // Do not add a bare `grok-4` or `grok-4.20` row: `grok-4.20-multi-agent`
+  // has xhigh (agent-count, not depth).
   {
-    match: 'grok-4.6',
+    match: 'grok-4.20-multi-agent',
+    entry: {
+      defaultEffort: 'high',
+      effort: true,
+      maxEffort: false,
+      xhighEffort: true,
+      levels: ['low', 'medium', 'high', 'xhigh'],
+    },
+  },
+  {
+    match: 'grok-4.20-reasoning',
     entry: {
       defaultEffort: 'high',
       effort: true,
       maxEffort: false,
       xhighEffort: false,
       levels: ['low', 'medium', 'high'],
+    },
+  },
+  {
+    match: 'grok-4.6',
+    entry: {
+      defaultEffort: 'high',
+      effort: true,
+      maxEffort: false,
+      xhighEffort: true,
+      levels: ['low', 'medium', 'high', 'xhigh'],
     },
   },
   {

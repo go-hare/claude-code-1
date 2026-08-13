@@ -65,7 +65,7 @@
 
 | 项 | 策略 |
 | -- | ---- |
-| UDS_INBOX / LAN_PIPES / TEAMMEM | 默认 OFF |
+| UDS_INBOX / LAN_PIPES / TEAMMEM | **DEFAULT_BUILD ON**（2026-08-12；本 pack 当时 deferral 已过时） |
 | KAIROS | 不扩产品面 |
 | #21 ultraplan | extract densable 拆除面再 1:1；**禁止**假「已 remove」 |
 | invent N9 remote effort | 无协议不硬塞 |
@@ -112,4 +112,4 @@ npm pack @anthropic-ai/claude-code-win32-x64@2.1.222
 
 - **不要**把 221 已 HAVE 条目重算进 222 完成度。  
 - **不要**因 SEA 仍有 `ultraplan` 字符串就声称官方未 remove（changelog 是产品契约；二进制 residual 需另表）。  
-- #2/#6/#7/#8/#11/#18 已 extract densable 后 1:1 落地；其余 PARTIAL 仍需 extract 再改。
+- #2/#6/#7/#8/#11/#18 已 extract densable 后 1:1 落地；表头 **21/21 HAVE**，无剩余 PARTIAL。

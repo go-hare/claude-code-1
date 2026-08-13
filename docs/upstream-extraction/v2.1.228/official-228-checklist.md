@@ -5,7 +5,7 @@
 > 基线：本地 tip densable **2.1.227**（`1a88f3cc`，HAVE 5/5）。**本 pack 只对齐 2.1.228**。  
 > 状态：**HAVE** · **PARTIAL** · **GAP** · **N/A** · **UNKNOWN** · **NOOP**  
 > 约定：**extract densable first → 1:1**。不自动 commit/push/bump。不 invent cloud/VSCode-only。  
-> 更新：2026-08-12 — #16 title frames ◐/◑ HAVE（#1–#18 HAVE 18/18）。
+> 更新：2026-08-13 — #12 计 **PARTIAL**（core-only harden，无 ingest）；其余 #1–#11/#13–#18 HAVE。**已 commit**（`3d43480c` 起 228 对齐）。
 
 ## 邻版关系
 
@@ -34,7 +34,7 @@
 | `Retrying in` + Spinner compact 分支 | compaction 期间 retry/stall UI | **HAVE**（#15） |
 | `ssn` / `tRe` marketplace whole-entry | higher tier 不继承 lower `headers` | **HAVE** `settingsMergeCustomizer` |
 | `KKd`/`YKd` + `x6S=2` GCP auth cap | Vertex fail-fast | **HAVE** `errors.ts` / `withRetry.ts` |
-| `Vyn`/`ULo`/`xTt`/`$vr`/`bDo` | synced skill harden | **HAVE** `syncedSkillsHarden.ts` |
+| `Vyn`/`ULo`/`xTt`/`$vr`/`bDo` | synced skill harden | **PARTIAL** `syncedSkillsHarden.ts`（core only） |
 | `Bxa`/`cui` + `--model` pin | `/tui` relaunch 保留 model override | **HAVE** `cliRelaunch.ts` `resolveRelaunchModelArg` |
 | `I6y`/`fbr`/`Tte`/`lhm` + `from-name` | cross-session sender = RC session name | **HAVE** `crossSessionMessage.ts` |
 | `q5o`/`EAt` + `NO_BACKFILL`/`OWNER_*` | RC reattach owner mismatch forces history suppress | **HAVE** `resolveBridgeReattachOwnerMeta` + `buildBridgeReattachEnv` + init consume |
@@ -56,7 +56,7 @@
 | 9 | Plugin-cache cleanup deletes sole symlinked dev checkout version | **HAVE** | `cacheUtils.ts` `Not marking a symlinked plugin version` + `lstat` (YEt/Mst/o5b/s5b) | `pluginSymlinkOrphan.228.test.ts` |
 | 10 | Marketplace entry higher tier inherits other tier custom headers | **HAVE** | `settings.ts` `settingsMergeCustomizer` → `ssn` whole-entry for `extraKnownMarketplaces` | `settingsMergeCustomizer.228.test.ts` |
 | 11 | Deferred-tools reminder sent twice after skill invocation | **HAVE** | densable `St`：tool update 后 **全部 attachment** 原样进 `toolResults`（227 仅 `read_truncation_notice`）；skill `newMessages` 的 `deferred_tools_delta` 进入 mid-turn `getAttachmentMessages` history → 不再二次 announce | `accumulateToolResultForMidTurn` + `.228.test.ts`；`query.stWiring.228.test.ts`（query 双接线） |
-| 12 | Harden claude.ai synced skills (no shadow local/MCP；sanitize；no `!`/`@` on machine) | **HAVE** | `syncedSkillsHarden.ts` Vyn/ULo/xTt/$vr/bDo；`createSkillCommand` wipe+strip shell；`getCommands` shadow filter；`skipAtMentions` | **core only, no ingest**：产品路径尚无 loader 写入 `loadedFrom:'syncedSkills'`（仅单测构造）；full remote sync host denser；doctor “loaded but never invoked” 文案 **非** HAVE 产品面 |
+| 12 | Harden claude.ai synced skills (no shadow local/MCP；sanitize；no `!`/`@` on machine) | **PARTIAL** | `syncedSkillsHarden.ts` Vyn/ULo/xTt/$vr/bDo；`createSkillCommand` wipe+strip shell；`getCommands` shadow filter；`skipAtMentions` | **core only, no ingest**：生产不写 `loadedFrom:'syncedSkills'`（仅单测构造）；full remote sync host **invent-ban**；doctor “loaded but never invoked” 文案 **非** 本条产品面 |
 | 13 | Cross-session: sender+body inline；RC other-machine shows RC session name as sender | **HAVE** | densable `I6y`/`fbr`/`Tte`/`lhm`：UI `from-name` 优先；UDS/bridge send 包 envelope + `getCurrentSessionTitle` as from-name；`UserCrossSessionMessage` inline | `crossSessionMessage.228.test.ts` |
 | 14 | Vertex: expired/missing GCP creds fail within seconds not minutes | **HAVE** | `KKd`/`YKd` + Cre；cap=2；文案门：`provider==='vertex'` **或** `USE_ANTHROPIC_GOOGLE_CLOUD`；**ugi 仍只 401**。**cousin GKd/VKd**：Bedrock/AWS/mantle 401·403·CredentialsProviderError → `formatBedrockAuthErrorMessage`（常量此前仅 Cre；现接线 `getAssistantMessageFromError`） | `vertexAuthFailFast` + `vertexWithRetryCap` + `bedrockAuthFailFast.228.test.ts` |
 | 15 | Compaction progress: retry countdown + stall hint during compact | **HAVE** | `Spinner` / `SpinnerAnimationRow`: `retryStatus` **先于** compact progress bar（early-return 替换整行，含 progress）。**证据**：既有 Spinner 结构对齐 changelog；**非** 228 本 pack 独有 diff（2.1.214+ 能力延续） | `SpinnerAnimationRow.228.test.ts`（顺序锁） |
@@ -68,14 +68,14 @@
 
 | 状态 | 条数 | 条目 |
 | ---- | ---- | ---- |
-| **HAVE** | **18** | **#1–#18** |
-| **PARTIAL** | **0** | — |
+| **HAVE** | **17** | **#1–#11、#13–#18** |
+| **PARTIAL** | **1** | **#12** core-only harden |
 | **GAP** | **0** | — |
 | **UNKNOWN** | **0** | — |
 | **N/A** | **0** | — |
 | **NOOP** | **0** | — |
 
-**合计 18 = 18 + 0。**
+**合计 18 = 17 HAVE + 1 PARTIAL。**
 
 ## 验证（本轮）
 
@@ -84,7 +84,7 @@
 - 本续：#10 / #14 / #12 + #3 Bxa + #13 from-name + #5 q5o/EAt + #11 St + **#16 szi ◐/◑** + **#17 call-path**
 - 测试：`cliRelaunch.test.ts`；`crossSessionMessage.228.test.ts`；`bridgeReattach.test.ts`；`bgWorker.test.ts`；`accumulateToolResultForMidTurn.228.test.ts`；`fileEditReadGate.228` + `fileEditReadGate.call.228`（subprocess）
 - precheck：typecheck 0；#17 定向 pass；全量 suite ~310 fail 为预存基线（#17 已隔离、不贡献）
-- **未** commit（除非用户明确要求）
+- 228 产品已在 main（`e1bfe7e5`…`3d43480c`）；工作树干净。后续 grok-4.6 catalog 为独立提交。
 
 ## Feature 默认（对齐 densable 产品面）
 
@@ -102,11 +102,11 @@
 - 不 invent skill-path `inputMentionsOnly` / mid-turn dedupe 以外的 #11 补丁——金标是 **`St` attachment → toolResults**
 - 不 invent #16 其它帧（金标仅 `szi` ◐/◑；static ✳ + 960ms 不变）
 - 不把 **2.1.229+** 折入本 pack
-- 不 commit / bump / push，除非用户明确要求
+- 不 auto commit / bump / push，除非用户明确要求
 
 ## 剩余 PARTIAL
 
-无 — 2.1.228 **18/18 HAVE**。
+**#12 PARTIAL** — harden core 已落地，无 claude.ai ingest host（invent-ban）。
 
 ## 跨 pack 残差（权威表）
 
@@ -115,4 +115,4 @@
 - 官方 invent-ban：**223 #3 teleport**（云端面）。**221 #10 HAVE** / **#12 DEP-HAVE**（勿再当 open GAP）  
 - **禁止**再写 UDS/LAN/TEAMMEM「默认 OFF」——`DEFAULT_BUILD` **ON**  
 - AWS GKd/VKd **已接线**（非 open polish）；224 粗计数 **GAP 0**  
-- 流程：脏树未 commit，点名再 Conventional Commit
+- 流程：228 pack 已在 main；勿再写「脏树未 commit」
