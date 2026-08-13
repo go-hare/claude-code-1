@@ -739,6 +739,18 @@ describe('densable effort catalog matrix', () => {
     expect(clampEffortForModel('xhigh', m)).toBe('high')
   })
 
+  test('grok-4.6: same 3-tier as 4.5 (does not inherit grok-4.5 match)', () => {
+    const m = 'grok-4.6'
+    expect(modelSupportsEffort(m)).toBe(true)
+    expect(getDefaultEffortForModel(m)).toBe('high')
+    expect(getSupportedEffortLevels(m)).toEqual(['low', 'medium', 'high'])
+    expect(modelSupportsMaxEffort(m)).toBe(false)
+    expect(modelSupportsXhighEffort(m)).toBe(false)
+    expect(clampEffortForModel('max', m)).toBe('high')
+    expect(clampEffortForModel('xhigh', m)).toBe('high')
+    expect(clampEffortForModel('low', m)).toBe('low')
+  })
+
   test('kimi-k3: low/high/max, default max; medium clamps to high', () => {
     const m = 'kimi-k3'
     expect(modelSupportsEffort(m)).toBe(true)
@@ -780,6 +792,10 @@ describe('densable effort catalog matrix', () => {
 
   test('getUltracodeEffortForModel: grok-4.5 tops at high (no xhigh)', () => {
     expect(getUltracodeEffortForModel('grok-4.5')).toBe('high')
+  })
+
+  test('getUltracodeEffortForModel: grok-4.6 tops at high (no xhigh)', () => {
+    expect(getUltracodeEffortForModel('grok-4.6')).toBe('high')
   })
 
   test('getUltracodeEffortForModel: deepseek-v4-pro tops at max', () => {
