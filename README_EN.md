@@ -43,7 +43,7 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.222 → 2.1.228** product alignment (222 worktree/streaming/RC + **228 layout / Windows git / SHR / UDS / skills / Vertex / Write gate**, 18 rows). **Published npm version is whatever `package.json` says** (currently **2.7.37**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.222 → 2.1.228** product alignment (222 worktree/streaming/RC + **228 layout / Windows git / SHR / UDS / skills / Vertex / Write gate**, 18 rows). **Published npm version is whatever `package.json` says** (currently **2.7.38**; trust `package.json` / npm) and may not match git tags.
 
 #### densable 2.1.228 alignment (2.7.37)
 
@@ -165,10 +165,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.37)
+### Recent updates (2.7.5 → 2.7.38)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.38** | **Grok 4.6 effort catalog**: add a `grok-4.6` row via longest-substring model-id match (not a vendor heuristic); same 3-tier ladder as 4.5 (`low \| medium \| high`, default `high`, no max/xhigh); `/effort max`/`xhigh` clamp to `high`. Official 4.6 reasoning page is unpublished — inherit [xAI 4.5 reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning). Do not remap opus→`grok-4.20-reasoning`; no bare `grok-4` row (would swallow `grok-4.20-multi-agent` xhigh). |
 | **2.7.37** | **densable 2.1.228 full 1:1 (18/18 HAVE)** + 223–227 included: Ink layout recover; kTd whole-token re-ESC + incomplete buffer; Windows `uio`; SHR checkout skip + follow-up hold; UDS `key_publish` fail-closed + LAN TCP auth; RC reattach owner / left-arrow; syncedSkills harden core; Write/Edit Jqy/MCt+l8t; Vertex fail-fast + Bedrock GKd; St mid-turn; cross-session from-name; cleanup memory / plugin symlink / marketplace ssn; `/tui` model pin; title ◐/◑; auto-mode drop expensive; DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS periphery ON**; 221 #10 null-proto + createSdkMcpServer. Residuals: `cross-pack-residuals.md` (teleport invent-ban). |
 | **2.7.36** | **Empty streaming `●` hotfix (densable 222 residual)**: `hasContentAfter` matches densable `y\|\|aem` (drop invent `\|\|streamingPreview`); whitespace / strip-empty does not paint XEl; `Qci` trim-empty clears `STREAM_FLAG_DISPLAYED`. Stops false past-tense “Ran N…” after collapsed tools + lone bullet before Cooking. |
 | **2.7.35** | **densable 2.1.222 full 1:1 (21/21 HAVE)** + 219–221 included: every-session worktree isolation; streaming UNf/WNf/Qci + salvage clear contract; RC `remoteControlAtStartup` source limits (flag/aliases); host model overlay; ULTRAPLAN product OFF; preflight proxy timeout; MCP usage attribution; SendMessage classifier/truncate; tool-gone display; post-push PR link; raw git diff; agent family step-down; SR EOL delete; file watcher teardown; etc. Includes 219 **24/24** / 220 residual / 221 (ship-time snapshot **HAVE 35 / GAP 2 / N/A 2**; **later** #10→HAVE, #12→DEP-HAVE — see checklist / cross-pack-residuals). UDS/LAN/TEAMMEM were OFF at ship (later ON). |

@@ -43,7 +43,7 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.222 → 2.1.228** 产品对齐（222 worktree/streaming/RC + **228 layout/Windows git/SHR/UDS/skills/Vertex/Write gate 等 18 条**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.37**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.222 → 2.1.228** 产品对齐（222 worktree/streaming/RC + **228 layout/Windows git/SHR/UDS/skills/Vertex/Write gate 等 18 条**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.38**），与 git tag 可能不同步。
 
 #### densable 2.1.228 对齐说明（2.7.37）
 
@@ -165,10 +165,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.37）
+### 近期更新（2.7.5 → 2.7.38）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.38** | **Grok 4.6 推理档 catalog**：按模型 ID 最长匹配加 `grok-4.6` 行（不按厂商启发式）；档位与 4.5 相同 `low \| medium \| high`，默认 `high`，无 max/xhigh；`/effort max`/`xhigh` clamp 到 `high`。官方 4.6 reasoning 页尚未发布，沿用 [xAI 4.5 reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning) 三档。不改 opus→`grok-4.20-reasoning` 映射，不加裸 `grok-4` 行（避免误伤 `grok-4.20-multi-agent` 的 xhigh）。 |
 | **2.7.37** | **densable 2.1.228 全量 1:1（18/18 HAVE）** + 已并入 223–227：Ink layout recover；kTd whole-token re-ESC + incomplete buffer；Windows `uio`；SHR checkout skip + follow-up hold；UDS `key_publish` fail-closed + LAN TCP auth；RC reattach owner / left-arrow；syncedSkills harden core；Write/Edit Jqy/MCt+l8t；Vertex fail-fast + Bedrock GKd；St mid-turn；cross-session from-name；cleanup memory / plugin symlink / marketplace ssn；`/tui` model pin；title ◐/◑；auto-mode 去 expensive；DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS 外围 ON**；221 #10 null-proto + createSdkMcpServer。跨 pack 残差见 `cross-pack-residuals.md`（teleport invent-ban）。 |
 | **2.7.36** | **streaming 空 `●` hotfix（densable 222 residual）**：`hasContentAfter` 对齐 densable `y\|\|aem`（去掉 invent `\|\|streamingPreview`）；whitespace / strip-empty 不画 XEl；`Qci` trim-empty 清 `STREAM_FLAG_DISPLAYED`。避免 collapsed 工具组后假 past-tense「Ran N…」+ Cooking 前 lone bullet。 |
 | **2.7.35** | **densable 2.1.222 全量 1:1（21/21 HAVE）** + 已并入 219–221：全会话 worktree isolation；streaming UNf/WNf/Qci + salvage clear 契约；RC `remoteControlAtStartup` 源限制（flag/aliases）；host model overlay；ULTRAPLAN 产品 OFF；preflight proxy 超时；MCP 份额归因；SendMessage classifier/截断；tool-gone 展示；post-push PR link；raw git diff；agent 族 step-down；SR EOL 删除；file watcher teardown 等。并入 219 **24/24** / 220 residual / 221（发版时 snapshot **HAVE 35 / GAP 2 / N/A 2**；**之后** #10→HAVE、#12→DEP-HAVE，见 checklist / cross-pack-residuals，**勿当现状 GAP**）。UDS/LAN/TEAMMEM 发版时默认 OFF（后翻 ON）。 |
