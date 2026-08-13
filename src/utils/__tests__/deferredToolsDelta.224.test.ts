@@ -2,14 +2,29 @@
  * densable 2.1.224 #12 — mid-turn MCP deferred tools must be announced.
  * Gold: NVs (listed vs announced, readdedNames), L3o, CM, MCP status fields.
  */
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
+// Incomplete growthbook strip returns null for every flag — poisons fullscreen
+// feature gate (expects boolean false, gets null) under process-global mock.module.
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: () => null,
 }))
+afterAll(() => {
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 import {
   DEFERRED_DELTA_LIST_CAP,

@@ -1200,16 +1200,25 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
         provider: 'firstParty',
         raw: JSON.stringify({
           baseUrl: 'https://gateway.example.com',
-          models: [{ id: 'gw-1', display_name: 'Gateway One' }, { id: 'gw-2' }],
+          // densable GATEWAY_USABLE_MODEL_ID_RE requires claude|anthropic in id
+          models: [
+            { id: 'claude-sonnet-4', display_name: 'Gateway One' },
+            { id: 'anthropic.claude-opus-4' },
+            { id: 'gpt-4o' }, // filtered out
+          ],
         }),
       }),
     ).toEqual([
       {
-        value: 'gw-1',
+        value: 'claude-sonnet-4',
         label: 'Gateway One',
         description: 'From gateway',
       },
-      { value: 'gw-2', label: 'gw-2', description: 'From gateway' },
+      {
+        value: 'anthropic.claude-opus-4',
+        label: 'anthropic.claude-opus-4',
+        description: 'From gateway',
+      },
     ])
     expect(
       parseGatewayModelOptionsFromCache({
@@ -1233,15 +1242,19 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
         baseUrl: 'https://gateway.example.com/',
         responseBody: {
           data: [
-            { id: 'gw-a', display_name: 'A' },
-            { id: 'gw-b' },
+            { id: 'claude-a', display_name: 'A' },
+            { id: 'anthropic.claude-b' },
+            { id: 'gpt-4o' }, // filtered by isGatewayUsableModelId
             { not: 'a-model' },
           ],
         },
       }),
     ).toEqual({
       baseUrl: 'https://gateway.example.com',
-      models: [{ id: 'gw-a', display_name: 'A' }, { id: 'gw-b' }],
+      models: [
+        { id: 'claude-a', display_name: 'A' },
+        { id: 'anthropic.claude-b' },
+      ],
     })
     expect(
       planGatewayModelsCacheWrite({
@@ -1261,7 +1274,7 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
         resolveAuthHeaders: () => ({ 'x-api-key': 'k' }),
         getJson: async url => {
           expect(url).toBe('https://gateway.example.com/v1/models')
-          return { data: [{ id: 'gw-x', display_name: 'X' }] }
+          return { data: [{ id: 'claude-x', display_name: 'X' }] }
         },
         writeFile: (path, body) => {
           written = { path, body }
@@ -1277,7 +1290,7 @@ describe('remoteRecap / morningBrief / perforce / scriptCaps / coordinator', () 
       )
       expect(JSON.parse(written?.body ?? '{}')).toEqual({
         baseUrl: 'https://gateway.example.com',
-        models: [{ id: 'gw-x', display_name: 'X' }],
+        models: [{ id: 'claude-x', display_name: 'X' }],
       })
       expect(
         await fetchAndCacheGatewayModels({

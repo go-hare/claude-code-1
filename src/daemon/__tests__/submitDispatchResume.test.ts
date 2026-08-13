@@ -334,10 +334,12 @@ describe('ghost-job guards (#2 claimSpare / awaitWorkerAck)', () => {
     const src = await Bun.file(
       new URL('../bgManager.ts', import.meta.url).pathname,
     ).text()
-    // Client/server must share budget > sendClaim 5s (was 5_000 → race)
+    // Client/server must share budget > sendClaim 5s (was 5_000 → race).
+    // Product uses DEFAULT_WORKER_ACK_TIMEOUT_MS directly (no DISPATCH_ACK alias).
     expect(src).toMatch(/DEFAULT_WORKER_ACK_TIMEOUT_MS\s*=\s*12_000/)
+    expect(src).toMatch(/ackTimeoutMs:\s*DEFAULT_WORKER_ACK_TIMEOUT_MS/)
     expect(src).toMatch(
-      /const DISPATCH_ACK_TIMEOUT_MS\s*=\s*DEFAULT_WORKER_ACK_TIMEOUT_MS/,
+      /timeout\s*=\s*timeoutMs\s*\?\?\s*DEFAULT_WORKER_ACK_TIMEOUT_MS/,
     )
   })
 

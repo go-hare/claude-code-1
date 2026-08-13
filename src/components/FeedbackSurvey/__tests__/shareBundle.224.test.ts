@@ -1,13 +1,14 @@
 /**
  * densable Y7t / hBa / m0t — share bundle helpers.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { unzipSync } from 'fflate'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/log.js', logMock)
@@ -15,29 +16,35 @@ mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/debug.js', debugMock)
 
 let authError: string | undefined
-mock.module('src/utils/http.ts', () => ({
+const realHttp = await import('../../../utils/http.js')
+const httpSnap = snapshotModuleExports(realHttp)
+const httpOverlay = () => ({
+  ...httpSnap,
   getAuthHeaders: () =>
     authError
       ? { headers: {}, error: authError }
       : { headers: { Authorization: 'Bearer t' } },
   getUserAgent: () => 'test-agent',
-}))
-mock.module('src/utils/http.js', () => ({
-  getAuthHeaders: () =>
-    authError
-      ? { headers: {}, error: authError }
-      : { headers: { Authorization: 'Bearer t' } },
-  getUserAgent: () => 'test-agent',
-}))
+})
+mock.module('src/utils/http.ts', httpOverlay)
+mock.module('src/utils/http.js', httpOverlay)
 
 let mockProvider: string = 'firstParty'
 const realProviders = await import('../../../utils/model/providers.js')
+const providersSnap = snapshotModuleExports(realProviders)
 const providersOverlay = () => ({
-  ...realProviders,
+  ...providersSnap,
   getAPIProvider: () => mockProvider,
 })
 mock.module('src/utils/model/providers.ts', providersOverlay)
 mock.module('src/utils/model/providers.js', providersOverlay)
+
+afterAll(() => {
+  mock.module('src/utils/http.ts', () => ({ ...httpSnap }))
+  mock.module('src/utils/http.js', () => ({ ...httpSnap }))
+  mock.module('src/utils/model/providers.ts', () => ({ ...providersSnap }))
+  mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
+})
 
 const {
   encodeShareRequestBody,

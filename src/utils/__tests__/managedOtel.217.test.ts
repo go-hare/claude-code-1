@@ -5,17 +5,47 @@
  * lower-trust signal-specific endpoints must be deleted so the OTEL SDK cannot
  * prefer them over the managed endpoint.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import * as realSettings from '../settings/settings.js'
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
+
+const settingsSnap = snapshotModuleExports(realSettings)
 
 const mockGetSettingsForSource = mock(
   (_source: string) => null as Record<string, unknown> | null,
 )
 
 mock.module('../settings/settings.js', () => ({
+  ...settingsSnap,
   getSettingsForSource: (s: string) => mockGetSettingsForSource(s),
   getSettings_DEPRECATED: () => ({}),
   getInitialSettings: () => ({}),
 }))
+// Alias paths used by co-suites — restore all so getInitialSettings is real again.
+mock.module('src/utils/settings/settings.js', () => ({
+  ...settingsSnap,
+  getSettingsForSource: (s: string) => mockGetSettingsForSource(s),
+  getSettings_DEPRECATED: () => ({}),
+  getInitialSettings: () => ({}),
+}))
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    '../settings/settings.js',
+    'src/utils/settings/settings.js',
+    'src/utils/settings/settings.ts',
+  ])
+})
 
 const { applyManagedOtelEndpointSupremacy, clearManagedOtelDropWarnsForTests } =
   await import('../managedEnv.js')

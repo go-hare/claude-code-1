@@ -1,8 +1,26 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
 import { growthbookMock } from '../../../tests/mocks/growthbook'
-import { mock } from 'bun:test'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
+import * as realSettings from 'src/utils/settings/settings.js'
+import * as realForkSubagentGate from '../../utils/forkSubagentGate.js'
+
+// Snapshot BEFORE mock.module — live namespace rebinds under Bun.
+const settingsSnap = snapshotModuleExports(realSettings)
+const forkGateSnap = snapshotModuleExports(realForkSubagentGate)
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -10,42 +28,34 @@ mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/services/analytics/growthbook.js', growthbookMock)
 
 // densable TX special cases — hermetic mocks for settings / fork gate.
-// mock.module is process-global: keep settings exports complete enough that
-// sibling tests don't crash on missing named exports.
+// Incomplete settings stubs break /tui persist path
+// (updateSettingsForSource must return { error } shape).
 const settingsNonDeferrable: string[] = []
 const settingsStub = {
   non_deferrable_builtins: settingsNonDeferrable as string[] | undefined,
 }
-mock.module('src/utils/settings/settings.js', () => ({
-  getInitialSettings: () => settingsStub,
-  getSettings_DEPRECATED: () => settingsStub,
-  getSettingsForSource: () => settingsStub,
-  getSettingsWithSources: () => ({ effective: settingsStub, sources: {} }),
-  getSettingsWithErrors: () => ({ settings: settingsStub, errors: [] }),
-  getSettingsFilePathForSource: () => undefined,
-  getSettingsRootPathForSource: () => '/',
-  getRelativeSettingsFilePathForSource: () => undefined,
-  updateSettingsForSource: () => {},
-  loadManagedFileSettings: () => ({ settings: null, errors: [] }),
-  getManagedFileSettingsPresence: () => ({ exists: false }),
-  parseSettingsFile: () => ({ settings: null, errors: [] }),
-  getPolicySettingsOrigin: () => null,
-  settingsMergeCustomizer: () => undefined,
-  getManagedSettingsKeysForLogging: () => [],
-  hasSkipDangerousModePermissionPrompt: () => false,
-  hasAutoModeOptIn: () => false,
-  getUseAutoModeDuringPlan: () => false,
-  getAskUserQuestionTimeout: () => 'never',
-  askUserQuestionTimeoutToMs: () => null,
-  getAutoModeConfig: () => null,
-  rawSettingsContainsKey: () => false,
-}))
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getInitialSettings: () => settingsStub as never,
+    getSettings_DEPRECATED: () => settingsStub as never,
+    getSettingsForSource: () => settingsStub as never,
+    updateSettingsForSource: (() => ({
+      error: null,
+    })) as unknown as typeof realSettings.updateSettingsForSource,
+  }),
+)
 
 let forkEnabled = false
 mock.module('src/utils/forkSubagentGate.js', () => ({
+  ...forkGateSnap,
   isForkSubagentEnabled: () => forkEnabled,
   resolveForkSubagentSource: () => (forkEnabled ? 'env' : 'disabled'),
 }))
+afterAll(() => {
+  mock.module('src/utils/forkSubagentGate.js', () => ({ ...forkGateSnap }))
+  restoreSettingsMockWith(mock.module, settingsSnap)
+})
 
 const { CORE_TOOLS } = await import('../tools.js')
 const { isDeferredTool, getNonDeferrableBuiltins } = await import(

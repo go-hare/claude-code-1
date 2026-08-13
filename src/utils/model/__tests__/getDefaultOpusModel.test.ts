@@ -31,6 +31,9 @@ const savedEnv: Record<string, string | undefined> = {}
 
 function resetProviderState(): void {
   resetSettingsCache()
+  // Empty settings (no modelType) so provider env flags are honored.
+  // modelType:'anthropic' would short-circuit getAPIProvider to firstParty
+  // and ignore CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY.
   setSessionSettingsCache({ settings: {}, errors: [] })
   resetModelStringsForTestingOnly()
 }
@@ -41,6 +44,11 @@ describe('getDefaultOpusModel', () => {
       savedEnv[key] = process.env[key]
       delete process.env[key]
     }
+    // Also clear gateway/OpenAI leftovers that can pin provider.
+    delete process.env.CLAUDE_CODE_USE_GATEWAY
+    delete process.env.CLAUDE_CODE_USE_OPENAI
+    delete process.env.CLAUDE_CODE_USE_GEMINI
+    delete process.env.CLAUDE_CODE_USE_GROK
     resetProviderState()
   })
 

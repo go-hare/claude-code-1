@@ -12,6 +12,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { debugMock } from '../../../tests/mocks/debug.js'
 import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import { setupAxiosMock } from '../../../tests/mocks/axios.js'
 
 const axiosGetMock = mock(
   async (
@@ -23,11 +24,10 @@ const axiosGetMock = mock(
   }),
 )
 
-mock.module('axios', () => ({
-  default: {
-    get: axiosGetMock,
-  },
-}))
+const axiosHandle = setupAxiosMock()
+axiosHandle.useStubs = true
+axiosHandle.stubs.get = (...args: unknown[]) =>
+  axiosGetMock(...(args as [string, unknown?]))
 
 mock.module('src/utils/debug.js', debugMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -64,7 +64,26 @@ const stateMock = () => ({
 mock.module('src/bootstrap/state.ts', stateMock)
 mock.module('src/bootstrap/state.js', stateMock)
 
+const bridgeConfigSnap = snapshotModuleExports(
+  await import('../bridgeConfig.js'),
+)
+const bridgeConfigMock = () => ({
+  ...bridgeConfigSnap,
+  getBridgeAccessToken: () => process.env.__TEST_BRIDGE_TOKEN ?? 'test-token',
+  getBridgeBaseUrl: () =>
+    process.env.CLAUDE_BRIDGE_BASE_URL || 'https://bridge.test',
+  getBridgeBaseUrlOverride: () => process.env.CLAUDE_BRIDGE_BASE_URL || undefined,
+  getBridgeTokenOverride: () =>
+    process.env.CLAUDE_BRIDGE_OAUTH_TOKEN ||
+    process.env.__TEST_BRIDGE_TOKEN ||
+    undefined,
+})
+mock.module('src/bridge/bridgeConfig.js', bridgeConfigMock)
+mock.module('../bridgeConfig.js', bridgeConfigMock)
+
 afterAll(() => {
+  axiosHandle.useStubs = false
+  setupAxiosMock()
   mock.module('src/bootstrap/state.ts', () => ({ ...bootstrapSnap }))
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
@@ -75,12 +94,9 @@ afterAll(() => {
   mock.module('src/utils/claudeInChrome/fileUpload.ts', () => ({
     ...fileUploadSnap,
   }))
+  mock.module('src/bridge/bridgeConfig.js', () => ({ ...bridgeConfigSnap }))
+  mock.module('../bridgeConfig.js', () => ({ ...bridgeConfigSnap }))
 })
-
-mock.module('src/bridge/bridgeConfig.js', () => ({
-  getBridgeAccessToken: () => process.env.__TEST_BRIDGE_TOKEN ?? 'test-token',
-  getBridgeBaseUrl: () => 'https://bridge.test',
-}))
 
 const PNG_1X1 = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',

@@ -2,8 +2,17 @@
  * densable #8: unarchiveCodeSession + rit env shape + post-adopt cron disown.
  * Uses shared debugMock to avoid incomplete mock.module pollution.
  */
-import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { debugMock } from '../../../tests/mocks/debug.js'
+import { setupAxiosMock } from '../../../tests/mocks/axios.js'
 
 beforeAll(() => {
   ;(globalThis as { MACRO?: { VERSION: string } }).MACRO = {
@@ -19,15 +28,19 @@ const axiosPost = mock(
   ) => ({ status: 200, data: {} }),
 )
 
-mock.module('axios', () => ({
-  default: {
-    post: axiosPost,
-    isAxiosError: (e: unknown) =>
-      Boolean(e && typeof e === 'object' && 'isAxiosError' in e),
-  },
-}))
+const axiosHandle = setupAxiosMock()
+axiosHandle.useStubs = true
+axiosHandle.stubs.post = (...args: unknown[]) =>
+  axiosPost(...(args as [string, unknown?, unknown?]))
+axiosHandle.stubs.isAxiosError = (e: unknown) =>
+  Boolean(e && typeof e === 'object' && 'isAxiosError' in e)
 
 mock.module('src/utils/debug.ts', debugMock)
+
+afterAll(() => {
+  axiosHandle.useStubs = false
+  setupAxiosMock()
+})
 
 describe('unarchiveCodeSession (densable Nls)', () => {
   afterEach(() => {

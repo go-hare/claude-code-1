@@ -1,8 +1,9 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import * as realMessageQueue from 'src/utils/messageQueueManager.js'
 import { debugMock } from '../../../tests/mocks/debug'
 import { growthbookMock } from '../../../tests/mocks/growthbook'
 import { createMessageQueueManagerMock } from '../../../tests/mocks/messageQueueManager'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 // Side-effect deps used only on auto-bg timeout path — mock before import.
 // Mock debug (not bootstrap/state): incomplete state mock is process-global and
@@ -12,23 +13,49 @@ import { createMessageQueueManagerMock } from '../../../tests/mocks/messageQueue
 // incomplete growthbook mock breaks later files that import other GB exports.
 // messageQueueManager: spread real module — incomplete stubs drop getCommandQueue
 // and poison co-running suites (modelScheduledOrigin.221 etc.).
+// Snapshot BEFORE mock — live namespace rebinds under Bun.
+const mqmSnap = snapshotModuleExports(realMessageQueue)
+
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/debug.js', debugMock)
+// Incomplete MonitorMcp strip drops killMonitorMcp and poisons shellKeepalive co-suites.
+const realMonitorMcp = await import('src/tasks/MonitorMcpTask/MonitorMcpTask.js')
+const monitorMcpSnap = snapshotModuleExports(realMonitorMcp)
 mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
+  ...monitorMcpSnap,
   registerMonitorMcpTask: () => 'task-bg-1',
   completeMonitorMcpTask: () => {},
   failMonitorMcpTask: () => {},
 }))
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
-mock.module('src/services/analytics/growthbook.js', growthbookMock)
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
+  ...growthbookMock(),
+}))
 mock.module(
   'src/utils/messageQueueManager.js',
   createMessageQueueManagerMock(realMessageQueue, {
     enqueuePendingNotification: () => {},
   }),
 )
+afterAll(() => {
+  // Restore real queue / monitor / analytics surface for co-suites.
+  mock.module('src/utils/messageQueueManager.js', () => ({ ...mqmSnap }))
+  mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
+    ...monitorMcpSnap,
+  }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 const {
   DEFAULT_MCP_AUTO_BACKGROUND_MS,

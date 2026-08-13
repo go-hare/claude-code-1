@@ -5,21 +5,27 @@
  * densable surfaces correctable copy via formatLocalDiffTooLargeError /
  * formatEmptyDiffAgainstBaseError / pluralizeCount (shared with #7 path).
  */
-import { describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
-import { mock } from 'bun:test'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   logEventAsync: async () => {},
   stripProtoFields: <V>(v: V) => v,
   attachAnalyticsSink: () => {},
   _resetForTesting: () => {},
 }))
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: () => null,
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
   getFeatureValue_DEPRECATED: async () => undefined,
@@ -42,6 +48,12 @@ mock.module('src/services/analytics/growthbook.js', () => ({
   getDynamicConfig_BLOCKS_ON_INIT: async () => undefined,
   getDynamicConfig_CACHED_MAY_BE_STALE: () => undefined,
 }))
+afterAll(() => {
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 mock.module('src/utils/execFileNoThrow.js', () => ({
   execFileNoThrow: async () => ({ code: 1, stdout: '', stderr: '' }),
   execFileNoThrowWithCwd: async () => ({ code: 1, stdout: '', stderr: '' }),

@@ -8,7 +8,7 @@
  * - hasPermissionsToUseTool: skip acceptEdits fast-path when mode==="plan"
  * - plan_mode_floor: non-RO tools stay ask under plan (no classifier auto)
  */
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { FileEditTool } from '@claude-code/builtin-tools/tools/FileEditTool/FileEditTool.js'
 import {
   checkWritePermissionForTool,
@@ -16,6 +16,20 @@ import {
 } from '../filesystem.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import { _resetForTesting } from '../autoModeState.js'
+import {
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+} from '../../../bootstrap/state.js'
+
+// getPlansDirectory / write gates use getCwd + settings; seed bootstrap so
+// co-suite pollution (undefined STATE.cwd) cannot TypeError path.relative.
+const suiteCwd = process.cwd()
+beforeEach(() => {
+  setCwdState(suiteCwd)
+  setOriginalCwd(suiteCwd)
+  setProjectRoot(suiteCwd)
+})
 
 function baseCtx(
   overrides: Partial<ToolPermissionContext> = {},

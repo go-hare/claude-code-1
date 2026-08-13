@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import {
   existsSync,
   mkdirSync,
@@ -9,12 +9,16 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 mock.module('bun:bundle', () => ({
   feature: (_name: string) => true,
 }))
 
+const realAnalytics = await import('../../../services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   stripProtoFields: (v: unknown) => v,
 }))
@@ -22,23 +26,24 @@ mock.module('src/services/analytics/index.js', () => ({
 let tmpDir: string
 let claudeDir: string
 
+// Snapshot BEFORE mock — incomplete envUtils strip poisons gateway/cd/pathQuote.
+const realEnvUtils = await import('../../../utils/envUtils.js')
+const envUtilsSnap = snapshotModuleExports(realEnvUtils)
 // Dynamic envUtils mock — reads CLAUDE_CONFIG_DIR from process.env at call
 // time so it stays compatible across the full suite when other test files
 // also drive their own dirs via process.env.
 mock.module('src/utils/envUtils.js', () => ({
+  ...envUtilsSnap,
   getClaudeConfigHomeDir: () =>
     process.env.CLAUDE_CONFIG_DIR ?? `${tmpdir()}/dummy-claude`,
-  isEnvTruthy: (v: unknown) => Boolean(v),
   getTeamsDir: () =>
     join(process.env.CLAUDE_CONFIG_DIR ?? `${tmpdir()}/dummy-claude`, 'teams'),
-  hasNodeOption: () => false,
-  isEnvDefinedFalsy: () => false,
-  isBareMode: () => false,
-  parseEnvVars: (s: string) => s,
-  getAWSRegion: () => 'us-east-1',
-  getDefaultVertexRegion: () => 'us-central1',
-  shouldMaintainProjectWorkingDir: () => false,
 }))
+
+afterAll(() => {
+  mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+})
 
 async function invokeBreakCache(
   args: string,

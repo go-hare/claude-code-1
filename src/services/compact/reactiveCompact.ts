@@ -6,14 +6,27 @@ import {
 } from '../api/errors.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import { type CompactionResult, compactConversation } from './compact.js'
+import { isAutoCompactEnabled } from './autoCompact.js'
 import { logError } from '../../utils/log.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
 import { createAssistantAPIErrorMessage } from '../../utils/messages.js'
 import { stringWidth } from '@anthropic/ink'
 import { truncateToWidth } from '../../utils/truncate.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 
 export const isReactiveOnlyMode: () => boolean = () => false
+
+/**
+ * densable yAt / Plb — side-channel querySources that must not run reactive
+ * compact unless a precomputed swap is already available (we do not ship
+ * precompute, so these always skip try).
+ */
+export const REACTIVE_COMPACT_SKIP_QUERY_SOURCES = new Set([
+  'prompt_suggestion',
+  'away_summary',
+  'agent_summary',
+])
 
 /**
  * densable m0b — max display width of compact-failure detail in Ysa.
@@ -133,8 +146,85 @@ export const reactiveCompactOnPromptTooLong: (
     }
   }
 
+/**
+ * densable $Ir — reactive must not re-enter from the compact agent itself.
+ */
+export function isReactiveCompactBlockedQuerySource(
+  querySource: string | undefined,
+): boolean {
+  return querySource === 'compact'
+}
+
+/**
+ * densable ex() — shared master gate with proactive auto-compact:
+ * DISABLE_COMPACT | DISABLE_AUTO_COMPACT | autoCompactEnabled:false → false.
+ * QGo/Jsa requires ex(); stream withhold (gup/XGo) does NOT.
+ */
+export function isReactiveCompactExEnabled(): boolean {
+  return isAutoCompactEnabled()
+}
+
+/**
+ * Legacy name: DISABLE_COMPACT only (not full densable ex).
+ * Prefer isReactiveCompactExEnabled / canAttemptReactiveCompact for recovery.
+ * Kept so call sites that only need "compact fully disabled" stay narrow.
+ */
 export const isReactiveCompactEnabled: () => boolean = () => {
   if (isEnvTruthy(process.env.DISABLE_COMPACT)) return false
+  return true
+}
+
+/**
+ * densable Rhe() — under CLAUDE_CODE_REMOTE, require GB
+ * tengu_reactive_compact_remote (latched in densable lGd; we read GB each call).
+ * Local / non-remote always true.
+ */
+export function isReactiveCompactRemoteAllowed(): boolean {
+  if (!isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    return true
+  }
+  return (
+    getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_reactive_compact_remote',
+      false,
+    ) === true
+  )
+}
+
+/**
+ * densable Jsa (without precomputed swap — we do not ship precompute).
+ * Gates whether tryReactiveCompact may call summarize.
+ *
+ * densable:
+ *   !hasAttempted && !$Ir(querySource)
+ *   && (hasPrecomputedSwap || !yAt(querySource))
+ *   && ex() && Rhe() && !aborted
+ */
+export function canAttemptReactiveCompact(params: {
+  hasAttempted: boolean
+  querySource: string
+  aborted: boolean
+  /** densable hasPrecomputedSwap — always false until precompute lands */
+  hasPrecomputedSwap?: boolean
+}): boolean {
+  if (params.hasAttempted || params.aborted) {
+    return false
+  }
+  if (isReactiveCompactBlockedQuerySource(params.querySource)) {
+    return false
+  }
+  if (
+    !params.hasPrecomputedSwap &&
+    REACTIVE_COMPACT_SKIP_QUERY_SOURCES.has(params.querySource)
+  ) {
+    return false
+  }
+  if (!isReactiveCompactExEnabled()) {
+    return false
+  }
+  if (!isReactiveCompactRemoteAllowed()) {
+    return false
+  }
   return true
 }
 
@@ -164,11 +254,20 @@ export const tryReactiveCompact: (params: {
   cacheSafeParams: Record<string, unknown>
 }) => Promise<TryReactiveCompactOutcome> = async ({
   hasAttempted,
+  querySource,
   aborted,
   messages,
   cacheSafeParams,
 }) => {
-  if (hasAttempted || aborted) {
+  // densable Jsa: withhold may already have happened; do not summarize when
+  // ex()/Rhe()/source gates fail (return null → surface bare/Ysa PTL).
+  if (
+    !canAttemptReactiveCompact({
+      hasAttempted,
+      querySource,
+      aborted,
+    })
+  ) {
     return { result: null }
   }
   const params = cacheSafeParams as unknown as CacheSafeParams

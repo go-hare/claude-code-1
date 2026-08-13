@@ -1,14 +1,11 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
-// Each test below calls `mock.module('axios', ...)` per-test. Re-register a
-// spread-real axios mock at end-of-file so the per-test stubs do not leak
-// into subsequent test files (mock.module is process-global, last-write-wins).
-afterAll(() => {
-  setupAxiosMock()
-})
-
+const realErrors = await import('src/utils/errors.js')
+const errorsSnap = snapshotModuleExports(realErrors)
 const _abortMock = () => ({
+  ...errorsSnap,
   AbortError: class AbortError extends Error {
     constructor(message?: string) {
       super(message)
@@ -20,6 +17,14 @@ const _abortMock = () => ({
 })
 mock.module('src/utils/errors.js', _abortMock)
 mock.module('src/utils/errors', _abortMock)
+
+// Each test below calls `mock.module('axios', ...)` per-test. Re-register a
+// spread-real axios mock at end-of-file so the per-test stubs do not leak.
+afterAll(() => {
+  setupAxiosMock()
+  mock.module('src/utils/errors.js', () => ({ ...errorsSnap }))
+  mock.module('src/utils/errors', () => ({ ...errorsSnap }))
+})
 
 describe('ExaSearchAdapter.search', () => {
   const createAdapter = async () => {

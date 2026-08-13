@@ -1,38 +1,69 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
 const logEventMock = mock(() => {})
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: logEventMock,
 }))
 
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: () => true,
 }))
 
+const realModel = await import('src/utils/model/model.js')
+const modelSnap = snapshotModuleExports(realModel)
 mock.module('src/utils/model/model.js', () => ({
+  ...modelSnap,
   getMainLoopModel: () => 'claude-opus-4-8',
 }))
 
+const realBootstrap = await import('src/bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 mock.module('src/bootstrap/state.js', () => ({
+  ...bootstrapSnap,
   getSessionId: () => '00000000-0000-4000-8000-000000000001',
 }))
 
 const markMock = mock(async () => {})
+const realSessionStorage = await import('src/utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 mock.module('src/utils/sessionStorage.js', () => ({
+  ...sessionStorageSnap,
   markSessionEndedByModel: markMock,
 }))
 
 const gracefulMock = mock(async () => {})
+const realGraceful = await import('src/utils/gracefulShutdown.js')
+const gracefulSnap = snapshotModuleExports(realGraceful)
 mock.module('src/utils/gracefulShutdown.js', () => ({
+  ...gracefulSnap,
   gracefulShutdown: gracefulMock,
 }))
 
-import { EndConversationTool } from '../EndConversationTool.js'
-import {
+afterAll(() => {
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+  mock.module('src/utils/model/model.js', () => ({ ...modelSnap }))
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+  mock.module('src/utils/gracefulShutdown.js', () => ({ ...gracefulSnap }))
+})
+
+// Dynamic import AFTER mocks — static import can TDZ against mock.module order.
+const { EndConversationTool } = await import('../EndConversationTool.js')
+const {
   END_CONVERSATION_FORK_REFLECTION_PROMPT,
   END_CONVERSATION_TOOL_RESULT,
   getEndConversationReflectionPrompt,
-} from '../prompt.js'
+} = await import('../prompt.js')
 
 function makeContext(opts: {
   agentId?: string

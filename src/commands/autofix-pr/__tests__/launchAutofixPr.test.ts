@@ -1,4 +1,5 @@
 import {
+  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -10,6 +11,7 @@ import {
 import type { LocalJSXCommandCall } from '../../../types/command.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 // ── Mock module-level side effects before any imports ──
 mock.module('src/utils/log.ts', logMock)
@@ -24,12 +26,13 @@ const teleportMock = mock(
   (): Promise<TeleportResult> =>
     Promise.resolve({ id: 'session-123', title: 'Autofix PR: acme/myrepo#42' }),
 )
+// Snapshot BEFORE mock — incomplete teleport strip drops named exports
+// (pollRemoteSessionEvents, archiveRemoteSession, …) loaded by real RemoteAgentTask.
+const realTeleport = await import('../../../utils/teleport.js')
+const teleportSnap = snapshotModuleExports(realTeleport)
 mock.module('src/utils/teleport.js', () => ({
+  ...teleportSnap,
   teleportToRemote: teleportMock,
-  // Stubs for other exports — Bun mock-module is process-level, so when
-  // run combined with teleport-command tests these would otherwise leak as
-  // undefined and crash. Keep here in sync with utils/teleport.tsx exports
-  // that any other test in this process might import transitively.
   teleportResumeCodeSession: mock(() =>
     Promise.resolve({ branch: null, messages: [], error: null }),
   ),
@@ -69,7 +72,14 @@ const registerContentExtractorMock = mock<
   (taskType: string, extractor: (log: unknown[]) => string | null) => void
 >(() => {})
 
+// Snapshot BEFORE mock — incomplete RemoteAgentTask strip drops named exports
+// (e.g. RemoteAgentTask Task object) and breaks co-suites that import them.
+const realRemoteAgentTask = await import(
+  '../../../tasks/RemoteAgentTask/RemoteAgentTask.js'
+)
+const remoteAgentTaskSnap = snapshotModuleExports(realRemoteAgentTask)
 mock.module('src/tasks/RemoteAgentTask/RemoteAgentTask.js', () => ({
+  ...remoteAgentTaskSnap,
   checkRemoteAgentEligibility: checkEligibilityMock,
   registerRemoteAgentTask: registerMock,
   registerCompletionHook: registerCompletionHookMock,
@@ -94,12 +104,20 @@ mock.module('src/commands/autofix-pr/prFetch.js', () => ({
 const detectRepoMock = mock(() =>
   Promise.resolve({ host: 'github.com', owner: 'acme', name: 'myrepo' }),
 )
+// Snapshot BEFORE mock — incomplete detectRepository strip breaks co-suites
+// that import getCachedRepository / other exports (process-global mock.module).
+const realDetectRepo = await import('../../../utils/detectRepository.js')
+const detectRepoSnap = snapshotModuleExports(realDetectRepo)
 mock.module('src/utils/detectRepository.js', () => ({
+  ...detectRepoSnap,
   detectCurrentRepositoryWithHost: detectRepoMock,
 }))
 
 const logEventMock = mock(() => {})
+const realAnalytics = await import('../../../services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: logEventMock,
   logEventAsync: mock(() => Promise.resolve()),
   _resetForTesting: mock(() => {}),
@@ -108,20 +126,33 @@ mock.module('src/services/analytics/index.js', () => ({
 }))
 
 const noop = () => {}
+// Snapshot BEFORE mock — incomplete bootstrap strip poisons pathQuote/cd/gateway.
+// Keep real setCwdState/setOriginalCwd/setProjectRoot so co-suites can pin cwd.
+const realBootstrap = await import('../../../bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 mock.module('src/bootstrap/state.js', () => ({
+  ...bootstrapSnap,
   getSessionId: () => 'parent-session-id',
   getParentSessionId: () => undefined,
-  // Additional exports needed by transitive imports (e.g. cwd.ts, sandbox-adapter.ts)
   getCwdState: () => '/mock/cwd',
   getOriginalCwd: () => '/mock/cwd',
   getSessionProjectDir: () => null,
   getProjectRoot: () => '/mock/project',
-  setCwdState: noop,
-  setOriginalCwd: noop,
+  // Intentionally do NOT noop set* cwd APIs — pathQuote/cd rely on them.
   setLastAPIRequestMessages: noop,
   getIsNonInteractiveSession: () => false,
   addSlowOperation: noop,
 }))
+
+afterAll(() => {
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/utils/detectRepository.js', () => ({ ...detectRepoSnap }))
+  mock.module('src/utils/teleport.js', () => ({ ...teleportSnap }))
+  mock.module('src/tasks/RemoteAgentTask/RemoteAgentTask.js', () => ({
+    ...remoteAgentTaskSnap,
+  }))
+})
 
 // Mock skillDetect so initialMessage is deterministic across CI environments
 // (real existsSync would depend on .claude/skills/* in the working dir).

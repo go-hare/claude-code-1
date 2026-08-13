@@ -1,11 +1,19 @@
-import { mock, describe, expect, test } from 'bun:test'
+import { afterAll, mock, describe, expect, test } from 'bun:test'
+import * as realCwd from 'src/utils/cwd.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
 // Mock dependencies before import
 const mockCwd = '/Users/test/project'
+// Snapshot BEFORE mock — incomplete cwd stub poisons pathGlob/cd co-suites.
+const cwdSnap = snapshotModuleExports(realCwd)
 
 mock.module('src/utils/cwd.js', () => ({
+  ...cwdSnap,
   getCwd: () => mockCwd,
 }))
+afterAll(() => {
+  mock.module('src/utils/cwd.js', () => ({ ...cwdSnap }))
+})
 
 // Defensive: agent.test.ts can corrupt Bun's src/* path alias at runtime.
 mock.module('src/utils/powershell/parser.js', () => ({

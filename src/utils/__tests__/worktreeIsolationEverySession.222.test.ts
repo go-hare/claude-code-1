@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { execFileSync } from 'child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -11,11 +19,22 @@ import {
   setOriginalCwd,
   setProjectRoot,
 } from '../../bootstrap/state.js'
+import { debugMock } from '../../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realConcurrentSessions from '../concurrentSessions.js'
+import * as realWorktree from '../worktree.js'
+import * as realSettings from '../settings/settings.js'
+import * as realCwd from '../cwd.js'
 
 /**
  * densable 2.1.222 #1 — worktree isolation every session type:
  * Qgt / dun / VRu / ZRu / hsr session noun + isolationRoot shell fallback.
  */
+
+const concurrentSnap = snapshotModuleExports(realConcurrentSessions)
+const worktreeSnap = snapshotModuleExports(realWorktree)
+const settingsSnap = snapshotModuleExports(realSettings)
+const cwdSnap = snapshotModuleExports(realCwd)
 
 const mockIsBgSession = mock(() => false)
 const mockGetCurrentWorktreeSession = mock(
@@ -28,25 +47,30 @@ const mockGetCurrentWorktreeSession = mock(
 )
 const mockGetCwdOverride = mock((): string | undefined => undefined)
 
-mock.module('../debug.js', () => ({
-  logForDebugging: () => {},
-}))
+// Complete debug surface — incomplete stubs drop isDebugToStdErr for co-suites.
+mock.module('../debug.js', debugMock)
+mock.module('src/utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
 
 mock.module('../concurrentSessions.js', () => ({
+  ...concurrentSnap,
   isBgSession: () => mockIsBgSession(),
 }))
 
 mock.module('../worktree.js', () => ({
+  ...worktreeSnap,
   getCurrentWorktreeSession: () => mockGetCurrentWorktreeSession(),
 }))
 
 mock.module('../settings/settings.js', () => ({
+  ...settingsSnap,
   getSettings_DEPRECATED: () => ({}),
   getSettingsForSource: () => null,
   getInitialSettings: () => ({}),
 }))
 
 mock.module('../cwd.js', () => ({
+  ...cwdSnap,
   getCwd: () => {
     const ov = mockGetCwdOverride()
     if (ov) return ov
@@ -71,6 +95,16 @@ mock.module('../cwd.js', () => ({
     }
   },
 }))
+
+afterAll(() => {
+  mock.module('../concurrentSessions.js', () => ({ ...concurrentSnap }))
+  mock.module('../worktree.js', () => ({ ...worktreeSnap }))
+  mock.module('../settings/settings.js', () => ({ ...settingsSnap }))
+  mock.module('../cwd.js', () => ({ ...cwdSnap }))
+  mock.module('../debug.js', debugMock)
+  mock.module('src/utils/debug.js', debugMock)
+  mock.module('src/utils/debug.ts', debugMock)
+})
 
 const {
   checkAgentWorktreeCwdEscape,

@@ -41,20 +41,23 @@ test('createSharedResources initializes budget and counts', () => {
 })
 
 test('createSharedResources: maxConcurrency controls semaphore permits', async () => {
-  // default permits = DEFAULT_MAX_CONCURRENCY = 3: after 4 acquires the 4th is pending
+  // default permits = host-derived DEFAULT_MAX_CONCURRENCY (densable __S), not 3
+  const { DEFAULT_MAX_CONCURRENCY } = await import('../constants.js')
   const r1 = createSharedResources(null)
   const releases1: Array<() => void> = []
-  for (let i = 0; i < 3; i++) releases1.push(await r1.semaphore.acquire())
-  let fourthResolved = false
+  for (let i = 0; i < DEFAULT_MAX_CONCURRENCY; i++) {
+    releases1.push(await r1.semaphore.acquire())
+  }
+  let overflowResolved = false
   const pending = r1.semaphore.acquire().then(r => {
-    fourthResolved = true
+    overflowResolved = true
     return r
   })
   await new Promise(res => {
     setTimeout(res, 5)
   })
-  expect(fourthResolved).toBe(false)
-  releases1[0]!() // release one, the fourth should be woken up
+  expect(overflowResolved).toBe(false)
+  releases1[0]!() // release one, the overflow acquire should be woken up
   releases1.push(await pending)
   for (const rel of releases1) rel()
 

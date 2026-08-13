@@ -92,27 +92,38 @@ describe('filterToolsByDenyRules', () => {
 
 describe('assembleToolPool', () => {
   test('throws when an MCP tool collides with a built-in primary name', () => {
-    const conflictingMcpTool = buildTool({
-      name: 'Bash',
-      inputSchema: { type: 'object' as const } as any,
-      maxResultSizeChars: 10_000,
-      call: async () => ({ data: 'ok' }),
-      description: async () => 'Bash description',
-      prompt: async () => 'Bash prompt',
-      mapToolResultToToolResultBlockParam: (
-        content: unknown,
-        toolUseID: string,
-      ) => ({
-        type: 'tool_result' as const,
-        tool_use_id: toolUseID,
-        content: String(content),
-      }),
-      renderToolUseMessage: () => null,
-      mcpInfo: { serverName: 'docs', toolName: 'search' },
-    })
+    // getTools → tool.isEnabled() may walk model/auth; keep suite hermetic.
+    const prevKey = process.env.ANTHROPIC_API_KEY
+    const prevOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN
+    process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-key'
+    try {
+      const conflictingMcpTool = buildTool({
+        name: 'Bash',
+        inputSchema: { type: 'object' as const } as any,
+        maxResultSizeChars: 10_000,
+        call: async () => ({ data: 'ok' }),
+        description: async () => 'Bash description',
+        prompt: async () => 'Bash prompt',
+        mapToolResultToToolResultBlockParam: (
+          content: unknown,
+          toolUseID: string,
+        ) => ({
+          type: 'tool_result' as const,
+          tool_use_id: toolUseID,
+          content: String(content),
+        }),
+        renderToolUseMessage: () => null,
+        mcpInfo: { serverName: 'docs', toolName: 'search' },
+      })
 
-    expect(() =>
-      assembleToolPool(getEmptyToolPermissionContext(), [conflictingMcpTool]),
-    ).toThrow('Conflicting tools share primary name "Bash"')
+      expect(() =>
+        assembleToolPool(getEmptyToolPermissionContext(), [conflictingMcpTool]),
+      ).toThrow('Conflicting tools share primary name "Bash"')
+    } finally {
+      if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = prevKey
+      if (prevOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevOauth
+    }
   })
 })

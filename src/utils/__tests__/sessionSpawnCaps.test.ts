@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 import {
   assertAndTakeConcurrencySlot,
   assertCanSpawnSubagent,
@@ -24,6 +25,23 @@ import {
   takeConcurrencySlot,
 } from '../sessionSpawnCaps.js'
 
+// Pin growthbook to defaults for this file — co-suites that leave
+// getFeatureValue_CACHED_MAY_BE_STALE always-true bypass amber_kestrel throw path.
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
+  getFeatureValue_CACHED_MAY_BE_STALE: (_n: string, d: unknown) => d,
+}))
+afterAll(() => {
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
+
+beforeEach(() => {
+  resetSessionSpawnCaps()
+})
 afterEach(() => {
   resetSessionSpawnCaps()
 })

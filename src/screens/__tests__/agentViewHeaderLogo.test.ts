@@ -90,9 +90,11 @@ describe('AgentView header logo / path layout', () => {
     expect(agentViewSrc).not.toMatch(/\$\{pinned\.length\} pinned/)
     expect(agentViewSrc).not.toMatch(/ready for review/)
     expect(agentViewSrc).toMatch(/<Text bold>Claude Code<\/Text>/)
-    // densable: Esc cascade ends forceExit/Tt; Ctrl+C uses handleCtrlCDoublePress
+    // densable: Esc cascade → handleEscExit (JH/Tt) → forceExit; Ctrl+C uses handleCtrlCDoublePress.
+    // forceExit is not inlined next to key.escape (cascade clears dispatch/delete first).
     expect(agentViewSrc).toContain('handleCtrlCDoublePress')
-    expect(agentViewSrc).toMatch(/key\.escape[\s\S]{0,400}forceExit\(\)/)
+    expect(agentViewSrc).toMatch(/key\.escape[\s\S]{0,800}handleEscExit\(\)/)
+    expect(agentViewSrc).toMatch(/handleEscExit[\s\S]{0,400}forceExit\(/)
     expect(agentViewSrc).not.toContain('requestExit')
     // densable CJ fSg=800 — not 2000; no any-key disarm (only timeout / 2nd / forceExit)
     expect(agentViewSrc).toContain('FLEET_EXIT_ARM_MS')

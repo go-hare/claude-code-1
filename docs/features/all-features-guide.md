@@ -542,11 +542,12 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 | `LAN_PIPES` | ✅ dev+build | LAN 群控 TCP + beacon（依赖 UDS；默认 ON） |
 | `MONITOR_TOOL` | ✅ dev+build | 后台监控 |
 | `WORKFLOW_SCRIPTS` | ✅ dev+build | 工作流脚本 |
+| `REACTIVE_COMPACT` | ✅ dev+build | 413/PTL withhold + reactive compact（densable SEA 对齐） |
 | `FORK_SUBAGENT` | ❌ 默认 build 关；dev/env 可开 | 隐式 fork + `/fork`（与 AgentTool 统一门控） |
 | `KAIROS` | ✅ dev+build | 常驻助手（tick/Sleep/assistant；见 kairos.md） |
 | `COORDINATOR_MODE` | ✅ dev+build | 多 Worker |
-| `HISTORY_SNIP` | ✅ dev+build | 历史管理 |
-| `CONTEXT_COLLAPSE` | ✅ dev+build | 上下文折叠 |
+| `HISTORY_SNIP` | ❌ 默认 build 关；dev/env 可开 | 历史 snip（暂关） |
+| `CONTEXT_COLLAPSE` | ❌ 默认 build 关；dev/env 可开 | 上下文折叠（stub 风险；勿与 REACTIVE 混开） |
 | `ULTRATHINK` | ✅ dev+build | 扩展思考 |
 | `EXTRACT_MEMORIES` | ✅ dev+build | 自动记忆提取 |
 | `VERIFICATION_AGENT` | ✅ dev+build | 验证 Agent |

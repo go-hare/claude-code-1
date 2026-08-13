@@ -2,15 +2,21 @@
  * densable 2.1.219 #6 — normalizeMessage surfaces subagent_type /
  * task_description / parent_tool_use_id on agent_progress frames.
  */
-import { describe, expect, test } from 'bun:test'
-import { mock } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
-// Avoid bootstrap/state side effects from getSessionId
+// Avoid bootstrap/state side effects from getSessionId — snap+restore for co-suites.
+const realBootstrap = await import('../../bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 mock.module('src/bootstrap/state.js', () => ({
+  ...bootstrapSnap,
   getSessionId: () => 'test-session-id',
   getIsNonInteractiveSession: () => true,
   isReplBridgeActive: () => false,
 }))
+afterAll(() => {
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+})
 
 import { normalizeMessage } from '../queryHelpers.js'
 import type { Message } from 'src/types/message.js'

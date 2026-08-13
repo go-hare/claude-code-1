@@ -1,8 +1,17 @@
-import { beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import type { LogOption } from '../../../types/logs.js'
 import type { LocalJSXCommandCall } from '../../../types/command.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 // ── Mock module-level side effects BEFORE any imports ──
 mock.module('src/utils/log.ts', logMock)
@@ -11,14 +20,17 @@ mock.module('bun:bundle', () => ({
   feature: (_name: string) => false,
 }))
 
-// ── Teleport utilities ──
+// ── Teleport utilities (spread real + restore — incomplete strip poisons co-suites) ──
 const validateGitStateMock = mock(() => Promise.resolve())
 const teleportResumeMock = mock(
   (_id: string, _onProgress?: (stage: string) => void) =>
     Promise.resolve({ log: [], branch: 'main' }),
 )
 
+const realTeleport = await import('src/utils/teleport.js')
+const teleportSnap = snapshotModuleExports(realTeleport)
 mock.module('src/utils/teleport.js', () => ({
+  ...teleportSnap,
   validateGitState: validateGitStateMock,
   teleportResumeCodeSession: teleportResumeMock,
   processMessagesForTeleportResume: mock(
@@ -48,11 +60,14 @@ const fetchSessionsMock = mock(() =>
     },
   ]),
 )
+const realTeleportApi = await import('src/utils/teleport/api.js')
+const teleportApiSnap = snapshotModuleExports(realTeleportApi)
 mock.module('src/utils/teleport/api.js', () => ({
+  ...teleportApiSnap,
   fetchCodeSessionsFromSessionsAPI: fetchSessionsMock,
 }))
 
-// ── Session storage ──
+// ── Session storage (spread real — resume co-suites need full export surface) ──
 const mockLog: LogOption = {
   date: '2026-04-29',
   messages: [],
@@ -64,13 +79,19 @@ const mockLog: LogOption = {
   isSidechain: false,
 }
 const getLastSessionLogMock = mock(() => Promise.resolve(mockLog))
+const realSessionStorage = await import('src/utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 mock.module('src/utils/sessionStorage.js', () => ({
+  ...sessionStorageSnap,
   getLastSessionLog: getLastSessionLogMock,
 }))
 
 // ── Analytics ──
 const logEventMock = mock(() => {})
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: logEventMock,
   logEventAsync: mock(() => Promise.resolve()),
   _resetForTesting: mock(() => {}),
@@ -84,6 +105,13 @@ let callTeleport: LocalJSXCommandCall
 beforeAll(async () => {
   const sut = await import('../launchTeleport.js')
   callTeleport = sut.callTeleport
+})
+
+afterAll(() => {
+  mock.module('src/utils/teleport.js', () => ({ ...teleportSnap }))
+  mock.module('src/utils/teleport/api.js', () => ({ ...teleportApiSnap }))
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
 })
 
 // ── Test helpers ──

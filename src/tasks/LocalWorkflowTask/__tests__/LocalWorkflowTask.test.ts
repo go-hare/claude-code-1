@@ -1,7 +1,8 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 // ─── Mocks（仅 mock 有副作用的依赖链）───
 
@@ -24,13 +25,17 @@ mock.module('src/constants/xml.js', () => ({
 
 // Do not mock messageQueueManager — process-global stubs break SleepTool.
 
+const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 mock.module('src/utils/sdkEventQueue.js', () => ({
+  ...sdkEventQueueSnap,
   enqueueSdkEvent: noop,
 }))
 
+const diskOutputSnap = snapshotModuleExports(realDiskOutput)
 function diskOutputMock() {
   return {
-    ...realDiskOutput,
+    ...diskOutputSnap,
     getTaskOutputDelta: async () => null,
     getTaskOutputPath: (id: string) => `/tmp/${id}`,
     evictTaskOutput: noop,
@@ -39,6 +44,10 @@ function diskOutputMock() {
   }
 }
 mock.module('src/utils/task/diskOutput.js', diskOutputMock)
+afterAll(() => {
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+})
 
 // ─── Import after mocks ───
 

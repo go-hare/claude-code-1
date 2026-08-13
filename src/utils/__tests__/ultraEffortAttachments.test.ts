@@ -1,16 +1,30 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { Message } from 'src/types/message.js'
 import type { ToolUseContext } from '../../Tool.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
-// Keep analytics quiet in unit tests
+// Keep analytics quiet in unit tests — snap+restore so co-suites keep GB/config.
+const realAnalytics = await import('../../services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
 
+const realGrowthbook = await import('../../services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, defaultValue: unknown) =>
     defaultValue ?? {},
 }))
+
+afterAll(() => {
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 const {
   getUltraEffortAttachments,

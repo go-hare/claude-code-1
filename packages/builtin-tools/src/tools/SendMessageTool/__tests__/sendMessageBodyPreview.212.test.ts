@@ -6,15 +6,23 @@
  * Covers pure backfill + local_agent queue path + truncate contract used by
  * handleMessage routing.content.
  */
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import type { AppState } from 'src/state/AppState.js'
 import { asAgentId } from 'src/types/ids.js'
 import { truncate } from 'src/utils/format.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 import { SendMessageTool } from '../SendMessageTool.js'
 
+// Spread real + afterAll restore — incomplete strip poisons resume/metadata co-suites.
+const realSessionStorage = await import('src/utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 mock.module('src/utils/sessionStorage.js', () => ({
+  ...sessionStorageSnap,
   readAgentMetadata: async () => null,
 }))
+afterAll(() => {
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+})
 
 type TaskSlice = {
   type: 'local_agent'

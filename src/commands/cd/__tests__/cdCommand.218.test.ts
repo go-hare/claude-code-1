@@ -40,7 +40,18 @@ const {
 const { formatCdRepoTrustNote } = await import(
   '../../../components/TrustDialog/trustDialogCopy.js'
 )
-const { setCwdState } = await import('../../../bootstrap/state.js')
+const {
+  getSessionId,
+  getSessionProjectDir,
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+  switchSession,
+} = await import('../../../bootstrap/state.js')
+// Snapshot session identity once — relocateSessionCwd/switchSession leave
+// sessionProjectDir on temp paths and poison share/debug-tool-call co-suites.
+const suiteSessionId = getSessionId()
+const suiteSessionProjectDir = getSessionProjectDir()
 const { writeBgJobState, readBgJobState } = await import(
   '../../../daemon/jobState.js'
 )
@@ -50,6 +61,8 @@ const { isFilePatternTool } = await import(
 const { isPathTrusted } = await import('../../../utils/config.js')
 
 const temps: string[] = []
+/** Repo root at load time — chdir tests must restore or `src/*` alias breaks. */
+const suiteCwd = process.cwd()
 const envKeys = [
   'CLAUDE_JOB_DIR',
   'CLAUDE_CODE_SESSION_KIND',
@@ -60,6 +73,23 @@ const envSnap: Partial<Record<(typeof envKeys)[number], string | undefined>> =
   {}
 
 afterEach(() => {
+  // Always rehome to suite root first so temp cleanup + later files keep
+  // resolving `src/*` (Bun path alias is cwd-relative).
+  try {
+    process.chdir(suiteCwd)
+  } catch {
+    // ignore
+  }
+  // Also restore bootstrap cwd singletons — process.chdir alone does not.
+  try {
+    setCwdState(suiteCwd)
+    setOriginalCwd(suiteCwd)
+    setProjectRoot(suiteCwd)
+    // densable: sessionProjectDir is only cleared via switchSession (no setter).
+    switchSession(suiteSessionId, suiteSessionProjectDir)
+  } catch {
+    // ignore
+  }
   for (const t of temps.splice(0)) {
     try {
       rmSync(t, { recursive: true, force: true })
@@ -101,7 +131,11 @@ describe('resolveCdTarget (densable dVo)', () => {
     temps.push(dir)
     const { realpath } = await import('fs/promises')
     const canonical = await realpath(dir)
+    // resolveCdTarget compares against getCwd() (cwd.ts), which reads
+    // bootstrap STATE.cwd — set both process cwd and singleton.
     setCwdState(canonical)
+    setOriginalCwd(canonical)
+    process.chdir(canonical)
     const r = await resolveCdTarget(canonical)
     expect(r.result).toBe('same')
   })
@@ -229,6 +263,8 @@ describe('cdPermission helpers (densable E7p/dCb/cVo)', () => {
     const secret = join(base, 'secret')
     mkdirSync(secret)
     setCwdState(base)
+    setOriginalCwd(base)
+    setProjectRoot(base)
     const ctx = {
       ...getEmptyToolPermissionContext(),
       alwaysDenyRules: {

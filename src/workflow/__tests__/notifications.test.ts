@@ -1,6 +1,27 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 import type { RunProgress } from '../progress/store.js'
 import type { WorkflowService } from '../service.js'
+
+// Pin live bootstrap + real sdkEventQueue for this suite — co-suites may leave
+// getIsNonInteractiveSession:()=>false or enqueueSdkEvent:noop registered
+// (process-global mock.module). SDK bookend only enqueues when noninteractive.
+const realBootstrap = await import('../../bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
+const realSdkEventQueue = await import('../../utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
+
+beforeEach(() => {
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('../../utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  realBootstrap.setIsInteractive(false)
+})
+
+afterEach(() => {
+  realBootstrap.setIsInteractive(true)
+})
 
 function makeMockService(runs: RunProgress[]): {
   service: WorkflowService
@@ -55,11 +76,15 @@ function makeRun(
 
 describe('installWorkflowNotifications', () => {
   test('running → completed triggers notification (incl. workflow name)', async () => {
-    const { setIsInteractive } = await import('../../bootstrap/state.js')
+    const {
+      setIsInteractive,
+      getIsNonInteractiveSession,
+    } = await import('../../bootstrap/state.js')
     const { clearTaskTerminatedSdkGate, drainSdkEvents } = await import(
       '../../utils/sdkEventQueue.js'
     )
     setIsInteractive(false)
+    expect(getIsNonInteractiveSession()).toBe(true)
     clearTaskTerminatedSdkGate('r1')
     drainSdkEvents()
 

@@ -1,9 +1,26 @@
 /**
  * densable 2.1.224 #28 — replBridgePlaceholders + ULp sweep after mint.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+
+// Snapshot real modules once so mid-test mock.module can be restored for co-suites.
+const realConfig = await import('../../utils/config.js')
+const configSnap = snapshotModuleExports(realConfig)
+const realPrivacy = await import('../../utils/privacyLevel.js')
+const privacySnap = snapshotModuleExports(realPrivacy)
+const realGrowthbook = await import('../../services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+
+afterAll(() => {
+  mock.module('../../utils/config.js', () => ({ ...configSnap }))
+  mock.module('../../utils/privacyLevel.js', () => ({ ...privacySnap }))
+  mock.module('../../services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 import {
   isArchiveSuccessStatus,
   PLACEHOLDER_CAP,
@@ -117,7 +134,13 @@ describe('densable 2.1.224 #28 source gold (FLp/BLp/ULp/Zxr wiring)', () => {
 describe('densable 2.1.224 #28 sweep decisions (injectable fetch/archive)', () => {
   afterEach(() => {
     resetBridgePlaceholdersForTests()
-    mock.restore()
+    // Prefer snap restore over mock.restore() — latter does not rebind process-global
+    // mock.module factories to real exports for subsequent files.
+    mock.module('../../utils/config.js', () => ({ ...configSnap }))
+    mock.module('../../utils/privacyLevel.js', () => ({ ...privacySnap }))
+    mock.module('../../services/analytics/growthbook.js', () => ({
+      ...growthbookSnap,
+    }))
   })
 
   test('sweep archives untouched orphan and skips live skipSessionId', async () => {
@@ -142,6 +165,7 @@ describe('densable 2.1.224 #28 sweep decisions (injectable fetch/archive)', () =
     }
 
     mock.module('../../utils/config.js', () => ({
+      ...configSnap,
       getGlobalConfig: () => ({ replBridgePlaceholders: map }),
       saveGlobalConfig: (
         updater: (c: { replBridgePlaceholders?: typeof map }) => {
@@ -156,10 +180,12 @@ describe('densable 2.1.224 #28 sweep decisions (injectable fetch/archive)', () =
     }))
 
     mock.module('../../utils/privacyLevel.js', () => ({
+      ...privacySnap,
       isEssentialTrafficOnly: () => false,
     }))
 
     mock.module('../../services/analytics/growthbook.js', () => ({
+      ...growthbookSnap,
       getFeatureValue_CACHED_MAY_BE_STALE: () => true,
     }))
 

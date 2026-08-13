@@ -1,10 +1,19 @@
 /**
  * densable 2.1.211 JNe/Zlr/Kw — background_tasks_changed on tasks membership.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { getEmptyToolPermissionContext } from '../../Tool.js'
 import type { AppState } from '../AppStateStore.js'
 import { getDefaultAppState } from '../AppStateStore.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 const emitted: Array<
   {
@@ -14,7 +23,11 @@ const emitted: Array<
   }[]
 > = []
 
+// Incomplete strip drops emitTaskTerminatedSdk / drainSdkEvents — restore after.
+const realSdkEventQueue = await import('../../utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 mock.module('../../utils/sdkEventQueue.js', () => ({
+  ...sdkEventQueueSnap,
   emitBackgroundTasksChangedSdk: (
     tasks: Array<{
       task_id: string
@@ -25,6 +38,22 @@ mock.module('../../utils/sdkEventQueue.js', () => ({
     emitted.push(tasks)
   },
 }))
+mock.module('src/utils/sdkEventQueue.js', () => ({
+  ...sdkEventQueueSnap,
+  emitBackgroundTasksChangedSdk: (
+    tasks: Array<{
+      task_id: string
+      task_type: string
+      description: string
+    }>,
+  ) => {
+    emitted.push(tasks)
+  },
+}))
+afterAll(() => {
+  mock.module('../../utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+})
 
 const { onChangeAppState } = await import('../onChangeAppState.js')
 

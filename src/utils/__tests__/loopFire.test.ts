@@ -1,25 +1,45 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { debugMock } from '../../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
 const gb = new Map<string, unknown>()
 
+const realGrowthbook = await import('../../services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: (key: string, defaultValue: unknown) =>
     gb.has(key) ? gb.get(key) : defaultValue,
   getFeatureValue_CACHED_WITH_REFRESH: (key: string, defaultValue: unknown) =>
     gb.has(key) ? gb.get(key) : defaultValue,
 }))
 
+const realAnalytics = await import('../../services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
 
-mock.module('src/utils/debug.js', () => ({
-  logForDebugging: () => {},
+mock.module('src/utils/debug.js', debugMock)
+
+const realConfig = await import('../config.js')
+const configSnap = snapshotModuleExports(realConfig)
+mock.module('src/utils/config.js', () => ({
+  ...configSnap,
+  getGlobalConfig: () => ({
+    ...((configSnap.getGlobalConfig as () => object)() ?? {}),
+    agentPushNotifEnabled: false,
+  }),
 }))
 
-mock.module('src/utils/config.js', () => ({
-  getGlobalConfig: () => ({ agentPushNotifEnabled: false }),
-}))
+afterAll(() => {
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/utils/config.js', () => ({ ...configSnap }))
+})
 
 import {
   AUTONOMOUS_LOOP_DYNAMIC_SENTINEL,

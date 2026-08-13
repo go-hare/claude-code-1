@@ -14,11 +14,18 @@ const noop = () => {}
 // Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
 const bootstrapSnap = snapshotModuleExports(realBootstrapState)
 const diskOutputSnap = snapshotModuleExports(realDiskOutput)
+// Snapshot BEFORE mock — live namespace rebinds under Bun; afterAll must restore
+// the pre-mock plain object, not the live rebinding.
+const mqmSnap = snapshotModuleExports(realMessageQueue)
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 
+// Snapshot BEFORE mock — incomplete sessionStorage strip breaks resume/metadata co-suites.
+const realSessionStorage = await import('src/utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 mock.module('src/utils/sessionStorage.js', () => ({
+  ...sessionStorageSnap,
   getAgentTranscriptPath: (id: string) => `/tmp/transcripts/${id}.jsonl`,
   isTranscriptPersistenceDisabled: () => false,
   recordSidechainTranscript: async () => {},
@@ -90,6 +97,10 @@ afterAll(() => {
   mock.module('../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
   mock.module('../../utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+  // Restore real messageQueueManager for co-suites (process-global mock.module).
+  mock.module('src/utils/messageQueueManager.js', () => ({ ...mqmSnap }))
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
 })
 
 mock.module('src/services/PromptSuggestion/speculation.js', () => ({
@@ -114,7 +125,12 @@ mock.module('src/utils/task/sdkProgress.js', () => ({
   emitTaskProgress: noop,
 }))
 
+// Spread real sdkEventQueue + restore in afterAll — incomplete strip empties
+// workflow notifications co-suite under process-global mock.module.
+const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 mock.module('src/utils/sdkEventQueue.js', () => ({
+  ...sdkEventQueueSnap,
   enqueueSdkEvent: noop,
 }))
 

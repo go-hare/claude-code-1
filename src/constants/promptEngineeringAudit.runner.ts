@@ -523,7 +523,9 @@ describe('Opus 4.7 Prompt Engineering Audit', () => {
 
     test('core tools are listed as always available', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain('call them directly')
+      // densable 2.1.221: system bullets dropped ExecuteExtra two-step copy;
+      // Using-your-tools section uses "can be called directly as needed".
+      expect(prompt).toContain('can be called directly as needed')
     })
   })
 
@@ -652,8 +654,12 @@ describe('Opus 4.7 Prompt Engineering Audit', () => {
 
     test('tool_discovery: search before saying unavailable', async () => {
       const prompt = await getFullPrompt()
-      expect(prompt).toContain('search for it')
-      expect(prompt).toContain(
+      // densable 2.1.221: deferred-tool discovery lives in ToolSearch (tCo)
+      // prompt, not system bullets. System-side residual is search-before-unknown
+      // + core tools callable-directly (no ExecuteExtra two-step narrative).
+      expect(prompt).toContain('Search before saying unknown')
+      expect(prompt).toContain('can be called directly as needed')
+      expect(prompt).not.toContain(
         'Only state something is unavailable after SearchExtraTools returns no match',
       )
     })

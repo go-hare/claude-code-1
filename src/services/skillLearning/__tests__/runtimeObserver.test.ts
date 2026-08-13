@@ -13,12 +13,12 @@ import {
 } from '../runtimeObserver.js'
 
 let root: string
-let previousCwd: string
+/** Fixed suite root — do not capture process.cwd() (may already be a leak). */
+const suiteCwd = process.cwd()
 const originalEnv = { ...process.env }
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-learning-runtime-'))
-  previousCwd = process.cwd()
   process.chdir(root)
   process.env = { ...originalEnv }
   process.env.CLAUDE_SKILL_LEARNING_HOME = join(root, 'learning-home')
@@ -30,7 +30,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  process.chdir(previousCwd)
+  process.chdir(suiteCwd)
   process.env = { ...originalEnv }
   resetSkillLearningConfig()
   rmSync(root, { recursive: true, force: true })

@@ -118,27 +118,41 @@ mock.module('bun:bundle', () => ({
   feature: (_name: string) => true,
 }))
 
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   stripProtoFields: (v: unknown) => v,
 }))
 
 // Re-mock bootstrap/state.js so getOriginalCwd points at the real process
-// cwd regardless of any prior test file's static state mock (e.g.
-// launchAutofixPr.test.ts pinning '/mock/cwd'). Without this override, in
-// the full suite detectIssueTemplate would see '/mock/cwd' and skip the
-// template loading body (lines 114-129).
-import { stateMock as _baseStateMockT } from '../../../../tests/mocks/state'
+// cwd. Snapshot real exports; afterAll restores them (do not leave incomplete
+// stateMock that noops setCwdState for pathQuote/cd co-suites).
+const realBootstrap = await import('src/bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 let _dynamicCwdT: string = process.cwd()
-mock.module('src/bootstrap/state.js', () => ({
-  ..._baseStateMockT(),
+const bootstrapOverlay = () => ({
+  ...bootstrapSnap,
   getSessionId: () => 'issue-tpl-session-id',
   getSessionProjectDir: () => null,
   getOriginalCwd: () => _dynamicCwdT,
+  getCwdState: () => _dynamicCwdT,
+  getProjectRoot: () => _dynamicCwdT,
   setOriginalCwd: (c: string) => {
     _dynamicCwdT = c
   },
-}))
+  setCwdState: (c: string) => {
+    _dynamicCwdT = c
+  },
+  setProjectRoot: (c: string) => {
+    _dynamicCwdT = c
+  },
+})
+mock.module('src/bootstrap/state.js', bootstrapOverlay)
+mock.module('../../../bootstrap/state.js', bootstrapOverlay)
 
 // ── State ──
 let tmpDir: string
@@ -214,6 +228,9 @@ beforeAll(() => {
 })
 afterAll(() => {
   useIssueTemplateCpStubs = false
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
 })
 
 describe('issue command — detectIssueTemplate template paths', () => {

@@ -40,8 +40,12 @@ mock.module('src/utils/log.ts', logMock)
 mock.module('../../../bootstrap/state.js', bootstrapStateMock)
 mock.module('src/bootstrap/state.js', bootstrapStateMock)
 
+// Spread real + afterAll restore — incomplete strip poisons workflow notifications.
+const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 function sdkEventQueueMock() {
   return {
+    ...sdkEventQueueSnap,
     enqueueSdkEvent: (event: Record<string, unknown>) => sdkEvents.push(event),
     emitTaskUpdatedSdk: (taskId: string, patch: Record<string, unknown>) => {
       sdkEvents.push({
@@ -224,6 +228,10 @@ afterEach(() => {
 afterAll(() => {
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('../../../utils/sdkEventQueue.js', () => ({
+    ...sdkEventQueueSnap,
+  }))
 })
 
 describe('hasForegroundTasks / backgroundAll', () => {

@@ -1,6 +1,7 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import * as realMessageQueue from 'src/utils/messageQueueManager.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 
@@ -9,7 +10,10 @@ mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
 
 const metaStore = new Map<string, Record<string, unknown>>()
+const realSessionStorage = await import('src/utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 mock.module('src/utils/sessionStorage.js', () => ({
+  ...sessionStorageSnap,
   getAgentTranscriptPath: (id: string) => `/tmp/t/${id}`,
   isTranscriptPersistenceDisabled: () => true,
   recordSidechainTranscript: async () => {},
@@ -66,10 +70,21 @@ function messageQueueMock() {
     },
   }
 }
+const mqmSnap = snapshotModuleExports(realMessageQueue)
 mock.module('src/utils/messageQueueManager.js', messageQueueMock)
 mock.module('../../../utils/messageQueueManager.js', messageQueueMock)
+afterAll(() => {
+  mock.module('src/utils/messageQueueManager.js', () => ({ ...mqmSnap }))
+  mock.module('../../../utils/messageQueueManager.js', () => ({ ...mqmSnap }))
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+})
 
+const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 mock.module('src/utils/sdkEventQueue.js', () => ({
+  ...sdkEventQueueSnap,
   enqueueSdkEvent: () => {},
   emitTaskTerminatedSdk: () => {},
 }))
@@ -84,7 +99,10 @@ mock.module('src/services/PromptSuggestion/speculation.js', () => ({
 
 // LocalAgentTask pull path may load analytics; keep export surface complete
 // under process-global mock pollution from sibling suites.
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: noop,
   stripProtoFields: (x: unknown) => x,
 }))

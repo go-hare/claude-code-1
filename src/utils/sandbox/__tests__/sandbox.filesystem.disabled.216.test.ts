@@ -39,8 +39,12 @@ mock.module('src/utils/settings/settings.ts', settingsMock)
 mock.module('src/utils/settings/settings.js', settingsMock)
 mock.module('../settings/settings.js', settingsMock)
 
-// Mock bootstrap/state used by convertToSandboxRuntimeConfig non-disabled path
+// Mock bootstrap/state used by convertToSandboxRuntimeConfig non-disabled path.
+// Snapshot BEFORE mock — live namespace rebinds under Bun; afterAll must restore.
+const realBootstrap = await import('src/bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 mock.module('src/bootstrap/state.js', () => ({
+  ...bootstrapSnap,
   getAdditionalDirectoriesForClaudeMd: () => [],
   getCwdState: () => process.cwd(),
   getOriginalCwd: () => process.cwd(),
@@ -49,29 +53,36 @@ mock.module('src/bootstrap/state.js', () => ({
 // Light stubs for convert deps. Process-global mock.module — always spread
 // the real module so sibling suites (resumeAgent etc.) keep full export surface.
 const realRipgrep = await import('src/utils/ripgrep.js')
+const ripgrepSnap = snapshotModuleExports(realRipgrep)
 mock.module('src/utils/ripgrep.js', () => ({
-  ...realRipgrep,
+  ...ripgrepSnap,
   ripgrepCommand: () => ({ rgPath: 'rg', rgArgs: [], argv0: undefined }),
 }))
 const realHostProxy = await import('src/utils/hostProxyPorts.js')
+const hostProxySnap = snapshotModuleExports(realHostProxy)
 mock.module('src/utils/hostProxyPorts.js', () => ({
-  ...realHostProxy,
+  ...hostProxySnap,
   readHostProxyPorts: () => ({}),
 }))
 // Do NOT mock permissions/filesystem — real getClaudeTempDir is fine.
+// Snapshot envUtils BEFORE mock — getClaudeConfigHomeDir → /tmp/claude-home
+// must not stick for co-suites (/tui, autoModeReset, etc.).
 const realEnvUtils = await import('src/utils/envUtils.js')
+const envUtilsSnap = snapshotModuleExports(realEnvUtils)
 mock.module('src/utils/envUtils.js', () => ({
-  ...realEnvUtils,
+  ...envUtilsSnap,
   getClaudeConfigHomeDir: () => '/tmp/claude-home',
 }))
 const realManagedPath = await import('src/utils/settings/managedPath.js')
+const managedPathSnap = snapshotModuleExports(realManagedPath)
 mock.module('src/utils/settings/managedPath.js', () => ({
-  ...realManagedPath,
+  ...managedPathSnap,
   getManagedSettingsDropInDir: () => '/tmp/managed-dropin',
 }))
 const realChangeDetector = await import('src/utils/settings/changeDetector.js')
+const changeDetectorSnap = snapshotModuleExports(realChangeDetector)
 mock.module('src/utils/settings/changeDetector.js', () => ({
-  ...realChangeDetector,
+  ...changeDetectorSnap,
   settingsChangeDetector: { subscribe: () => () => {} },
 }))
 
@@ -98,6 +109,16 @@ afterAll(() => {
     'src/utils/settings/settings.ts',
     '../settings/settings.js',
   ])
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
+  mock.module('src/utils/ripgrep.js', () => ({ ...ripgrepSnap }))
+  mock.module('src/utils/hostProxyPorts.js', () => ({ ...hostProxySnap }))
+  mock.module('src/utils/settings/managedPath.js', () => ({
+    ...managedPathSnap,
+  }))
+  mock.module('src/utils/settings/changeDetector.js', () => ({
+    ...changeDetectorSnap,
+  }))
 })
 
 function bySource(

@@ -1,13 +1,17 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 mock.module('bun:bundle', () => ({
   feature: (_name: string) => true,
 }))
 
+const realAnalytics = await import('../../../services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   stripProtoFields: (v: unknown) => v,
 }))
@@ -15,36 +19,97 @@ mock.module('src/services/analytics/index.js', () => ({
 let tmpDir: string
 let claudeDir: string
 
+// Snapshot BEFORE mock — incomplete envUtils strip poisons cd/gateway/pathQuote.
+const realEnvUtils = await import('../../../utils/envUtils.js')
+const envUtilsSnap = snapshotModuleExports(realEnvUtils)
 // Mock envUtils to read CLAUDE_CONFIG_DIR from process.env dynamically.
-// Other test files (cacheStats, SessionMemory/prompts, MagicDocs/prompts)
-// mock envUtils with static paths — by reading process.env at call time,
-// our mock stays compatible with the full suite where other tests also
-// drive the real CLAUDE_CONFIG_DIR.
-mock.module('src/utils/envUtils.js', () => ({
+// Register every specifier the SUT may resolve (src/* alias + relative).
+const envUtilsOverlay = () => ({
+  ...envUtilsSnap,
   getClaudeConfigHomeDir: () =>
     process.env.CLAUDE_CONFIG_DIR ?? `${tmpdir()}/dummy-claude`,
-  isEnvTruthy: (v: unknown) => Boolean(v),
   getTeamsDir: () =>
     join(process.env.CLAUDE_CONFIG_DIR ?? `${tmpdir()}/dummy-claude`, 'teams'),
-  hasNodeOption: () => false,
-  isEnvDefinedFalsy: () => false,
-  isBareMode: () => false,
-  parseEnvVars: (s: string) => s,
-  getAWSRegion: () => 'us-east-1',
-  getDefaultVertexRegion: () => 'us-central1',
-  shouldMaintainProjectWorkingDir: () => false,
-}))
+})
+for (const id of [
+  'src/utils/envUtils.js',
+  'src/utils/envUtils.ts',
+  '../../../utils/envUtils.js',
+  '../../utils/envUtils.js',
+]) {
+  mock.module(id, envUtilsOverlay)
+}
+
+// Pin live bootstrap STATE (do NOT mock bootstrap getters/setters — noop
+// setCwdState poisons cd/pathQuote co-suites). switchSession clears projectDir.
+const {
+  getSessionId,
+  getOriginalCwd,
+  getCwdState,
+  getProjectRoot,
+  getSessionProjectDir,
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+  switchSession,
+} = await import('../../../bootstrap/state.js')
+const FIXED_SESSION =
+  '11111111-2222-4333-8444-555555555555' as import('src/types/ids.js').SessionId
+const FIXED_CWD = '/tmp/debug-tool-call-suite'
+
+let savedSession: import('src/types/ids.js').SessionId
+let savedProjectDir: string | null
+let savedOriginalCwd: string
+let savedCwd: string
+let savedProjectRoot: string
+
+afterAll(() => {
+  for (const id of [
+    'src/utils/envUtils.js',
+    'src/utils/envUtils.ts',
+    '../../../utils/envUtils.js',
+    '../../utils/envUtils.js',
+  ]) {
+    mock.module(id, () => ({ ...envUtilsSnap }))
+  }
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+})
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), 'dtc-test-'))
   claudeDir = join(tmpDir, '.claude')
   mkdirSync(claudeDir, { recursive: true })
   process.env.CLAUDE_CONFIG_DIR = claudeDir
+  // Clear lodash memoize on real snap if any co-suite called through it.
+  ;(
+    envUtilsSnap.getClaudeConfigHomeDir as {
+      cache?: { clear?: () => void }
+    }
+  ).cache?.clear?.()
+
+  savedSession = getSessionId()
+  savedProjectDir = getSessionProjectDir()
+  savedOriginalCwd = getOriginalCwd()
+  savedCwd = getCwdState()
+  savedProjectRoot = getProjectRoot()
+  switchSession(FIXED_SESSION, null)
+  setOriginalCwd(FIXED_CWD)
+  setCwdState(FIXED_CWD)
+  setProjectRoot(FIXED_CWD)
 })
 
 afterEach(() => {
+  switchSession(savedSession, savedProjectDir)
+  setOriginalCwd(savedOriginalCwd)
+  setCwdState(savedCwd)
+  setProjectRoot(savedProjectRoot)
   rmSync(tmpDir, { recursive: true, force: true })
   delete process.env.CLAUDE_CONFIG_DIR
+  ;(
+    envUtilsSnap.getClaudeConfigHomeDir as {
+      cache?: { clear?: () => void }
+    }
+  ).cache?.clear?.()
 })
 
 async function makeLogWithToolCalls(

@@ -27,7 +27,7 @@ import {
 import type { StoredSkillObservation } from '../observationStore.js'
 
 let root: string
-let previousCwd: string
+const suiteCwd = process.cwd()
 const originalEnv = { ...process.env }
 const originalBackendName = getActiveObserverBackend().name
 
@@ -70,7 +70,6 @@ function makeObs(count: number): StoredSkillObservation[] {
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-throttle-test-'))
-  previousCwd = process.cwd()
   process.chdir(root)
   process.env = { ...originalEnv }
   process.env.CLAUDE_SKILL_LEARNING_HOME = join(root, 'learning-home')
@@ -83,7 +82,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  process.chdir(previousCwd)
+  process.chdir(suiteCwd)
   process.env = { ...originalEnv }
   resetSkillLearningConfig()
   rmSync(root, { recursive: true, force: true })

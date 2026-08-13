@@ -26,7 +26,12 @@ mock.module('bun:bundle', () => ({
   feature: (_name: string) => true,
 }))
 
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   logEventAsync: () => Promise.resolve(),
   stripProtoFields: (v: unknown) => v,
@@ -35,28 +40,23 @@ mock.module('src/services/analytics/index.js', () => ({
 }))
 
 // Re-mock bootstrap/state.js with a dynamic getOriginalCwd / setOriginalCwd
-// pair so this suite can drive cwd values regardless of any earlier test
-// file's static mock (e.g. launchAutofixPr.test.ts which sets a fixed
-// '/mock/cwd'). We start from the shared stateMock helper, then override
-// the four exports issue/index.ts cares about with closure-driven impls.
-//
-// Bun's mock.module is global / last-write-wins. After this suite finishes
-// we set `useIssueDynamicState=false` so launchAutofixPr's tests (which run
-// in the same process) see the values their suite originally expected.
-import { stateMock } from '../../../../tests/mocks/state'
+// pair. Snapshot real exports first — afterAll must restore the real module
+// (not leave static '/mock/cwd' + gated setCwd) or pathQuote/cd co-suites break.
+const realBootstrap = await import('src/bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 let _dynamicCwd = process.cwd()
 let _dynamicSessionId = `issue-test-${randomUUID()}`
 // Default OFF — autofix-pr/__tests__/launchAutofixPr.test.ts runs FIRST in
 // the combined suite (alphabetical: 'autofix-pr' < 'issue') and expects
-// '/mock/cwd'. Issue's beforeAll switches this on, afterAll switches off.
+// '/mock/cwd'. Issue's beforeAll switches this on, afterAll restores real.
 let useIssueDynamicState = false
 // Default OFF — the long-body draft-save test below flips this on for its
 // body (so execFile/execFileSync return ENOENT + a fake GitHub remote URL)
 // then flips off in finally. Without the flag the child_process stub leaked
 // process-globally into every later test file via Bun's mock.module cache.
 let useIssueLongBodyCpStubs = false
-mock.module('src/bootstrap/state.js', () => ({
-  ...stateMock(),
+const bootstrapOverlay = () => ({
+  ...bootstrapSnap,
   getSessionId: () =>
     useIssueDynamicState ? _dynamicSessionId : 'parent-session-id',
   getParentSessionId: () => undefined,
@@ -70,10 +70,15 @@ mock.module('src/bootstrap/state.js', () => ({
   setOriginalCwd: (c: string) => {
     if (useIssueDynamicState) _dynamicCwd = c
   },
+  setProjectRoot: (c: string) => {
+    if (useIssueDynamicState) _dynamicCwd = c
+  },
   setLastAPIRequestMessages: () => {},
   getIsNonInteractiveSession: () => false,
   addSlowOperation: () => {},
-}))
+})
+mock.module('src/bootstrap/state.js', bootstrapOverlay)
+mock.module('../../../bootstrap/state.js', bootstrapOverlay)
 
 // ── State ──
 let tmpDir: string
@@ -85,24 +90,19 @@ let claudeDir: string
 // substitutes the current process.env.HOME.
 const _originalHomeForIssueSuite = process.env.HOME
 
-// Mock envUtils to read CLAUDE_CONFIG_DIR from process.env dynamically so
-// other test files (cacheStats, SessionMemory/prompts) that mock with static
-// paths don't pollute this test in the full suite. Reading process.env at
-// call time lets each test drive its own dir.
-mock.module('src/utils/envUtils.js', () => ({
+// Mock envUtils to read CLAUDE_CONFIG_DIR from process.env dynamically.
+// Snapshot real first — incomplete strip poisons co-suites.
+const realEnvUtils = await import('src/utils/envUtils.js')
+const envUtilsSnap = snapshotModuleExports(realEnvUtils)
+const envUtilsOverlay = () => ({
+  ...envUtilsSnap,
   getClaudeConfigHomeDir: () =>
     process.env.CLAUDE_CONFIG_DIR ?? `${tmpdir()}/dummy-claude`,
-  isEnvTruthy: (v: unknown) => Boolean(v),
   getTeamsDir: () =>
     join(process.env.CLAUDE_CONFIG_DIR ?? `${tmpdir()}/dummy-claude`, 'teams'),
-  hasNodeOption: () => false,
-  isEnvDefinedFalsy: () => false,
-  isBareMode: () => false,
-  parseEnvVars: (s: string) => s,
-  getAWSRegion: () => 'us-east-1',
-  getDefaultVertexRegion: () => 'us-central1',
-  shouldMaintainProjectWorkingDir: () => false,
-}))
+})
+mock.module('src/utils/envUtils.js', envUtilsOverlay)
+mock.module('../../../utils/envUtils.js', envUtilsOverlay)
 
 // Activate dynamic state mode for this suite only.
 beforeAll(() => {
@@ -118,6 +118,11 @@ beforeEach(() => {
   // Tests that need a different cwd call the mocked setOriginalCwd.
   _dynamicCwd = tmpDir
   _dynamicSessionId = `issue-test-${randomUUID()}`
+  ;(
+    envUtilsSnap.getClaudeConfigHomeDir as {
+      cache?: { clear?: () => void }
+    }
+  ).cache?.clear?.()
 })
 
 afterEach(() => {
@@ -129,14 +134,21 @@ afterEach(() => {
   } else {
     process.env.HOME = _originalHomeForIssueSuite
   }
+  ;(
+    envUtilsSnap.getClaudeConfigHomeDir as {
+      cache?: { clear?: () => void }
+    }
+  ).cache?.clear?.()
 })
 
-// After this suite finishes, switch off our dynamic mode so any subsequent
-// test file (e.g. launchAutofixPr.test.ts) that imports bootstrap/state.js
-// gets the static values its suite expects. Bun's mock.module is global and
-// our mock won the registration race; this flag flips behavior post-suite.
+// Restore real bootstrap/envUtils/analytics — do not leave gated setCwd mocks.
 afterAll(() => {
   useIssueDynamicState = false
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
+  mock.module('../../../utils/envUtils.js', () => ({ ...envUtilsSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
 })
 
 // ── Helpers ──

@@ -222,7 +222,8 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 - P0 本地: `AGENT_TRIGGERS`, `ULTRATHINK`, `BUILTIN_EXPLORE_PLAN_AGENTS`, `LODESTONE`
 - P1 API 依赖: `EXTRACT_MEMORIES`, `VERIFICATION_AGENT`, `KAIROS_BRIEF`, `AWAY_SUMMARY`
 - P2: `DAEMON`, `ACP`
-- 工作流: `WORKFLOW_SCRIPTS`, `HISTORY_SNIP`, `MONITOR_TOOL`, `KAIROS`
+- 工作流: `WORKFLOW_SCRIPTS`, `MONITOR_TOOL`, `KAIROS`
+- 上下文恢复: `REACTIVE_COMPACT`（413/PTL withhold + tryReactiveCompact；对齐 densable SEA；**不含** collapse/snip）
 - KAIROS 外围（默认 ON）: `KAIROS_CHANNELS`, `KAIROS_PUSH_NOTIFICATION`, `KAIROS_GITHUB_WEBHOOKS`
 - 多 worker: `COORDINATOR_MODE`, `BG_SESSIONS`, `TEMPLATES`
 - 本机/LAN 协作: `UDS_INBOX`（inbox/peers/pipes）、`LAN_PIPES`（TCP + UDP beacon；依赖 UDS）— densable 产品面默认 ON（1:1）
@@ -230,7 +231,7 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 - 连接器: `CONNECTOR_TEXT`, `COMMIT_ATTRIBUTION`, `DIRECT_CONNECT`
 - 实验性: `EXPERIMENTAL_SKILL_SEARCH`, `EXPERIMENTAL_SEARCH_EXTRA_TOOLS`
 - 模式: `POOR`, `SSH_REMOTE`
-- 已禁用: `CONTEXT_COLLAPSE`, `FORK_SUBAGENT`, `REVIEW_ARTIFACT`, `SKILL_LEARNING`, `ULTRAPLAN`（densable 2.1.222 产品拆除；`FEATURE_ULTRAPLAN=1` 可复活 residual）
+- 已禁用: `HISTORY_SNIP`, `CONTEXT_COLLAPSE`（stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`, `REVIEW_ARTIFACT`, `SKILL_LEARNING`, `ULTRAPLAN`（densable 2.1.222 产品拆除；`FEATURE_ULTRAPLAN=1` 可复活 residual）
 
 **Dev mode 默认**: 全部启用（见 `scripts/dev.ts`）。
 

@@ -1,14 +1,43 @@
-import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
 import * as realInstallPrompt from '../../../daemon/installPrompt.js'
+import * as realBootstrap from '../../../bootstrap/state.js'
+import * as realSessionStorage from '../../../utils/sessionStorage.js'
+import * as realWorktree from '../../../utils/worktree.js'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 // jobState.createInitialJobState reads MACRO.VERSION (build define).
 beforeAll(() => {
   ;(globalThis as { MACRO?: { VERSION: string } }).MACRO = {
     VERSION: '2.6.33-test',
   }
+})
+
+// Snapshot BEFORE any incomplete per-test mock.module — mock.restore() does not
+// rebind process-global registry to real exports for subsequent files.
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
+const worktreeSnap = snapshotModuleExports(realWorktree)
+const installPromptSnap = snapshotModuleExports(realInstallPrompt)
+
+function restoreLeftArrowModuleMocks(): void {
+  mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../../utils/sessionStorage.js', () => ({
+    ...sessionStorageSnap,
+  }))
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+  mock.module('../../../utils/worktree.js', () => ({ ...worktreeSnap }))
+  mock.module('src/utils/worktree.js', () => ({ ...worktreeSnap }))
+  mock.module('../../../daemon/installPrompt.js', () => ({
+    ...installPromptSnap,
+  }))
+}
+
+afterAll(() => {
+  restoreLeftArrowModuleMocks()
 })
 
 describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
@@ -19,7 +48,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     if (prevHome === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = prevHome
     if (dir) rmSync(dir, { recursive: true, force: true })
-    mock.restore()
+    restoreLeftArrowModuleMocks()
   })
 
   test('seedForLeftArrow empty → intent ""', async () => {
@@ -201,17 +230,20 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     process.env.CLAUDE_CONFIG_DIR = dir
 
     mock.module('../../../bootstrap/state.js', () => ({
+      ...bootstrapSnap,
       getOriginalCwd: () => '/tmp/proj',
       getSessionId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       isSessionPersistenceDisabled: () => false,
     }))
     mock.module('../../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
+      ...worktreeSnap,
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
@@ -221,7 +253,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installPromptSnap,
       ensureDaemonRunning: async () => ({ ok: false }),
     }))
 
@@ -252,6 +284,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     process.env.CLAUDE_CONFIG_DIR = dir
 
     mock.module('../../../bootstrap/state.js', () => ({
+      ...bootstrapSnap,
       getOriginalCwd: () => '/tmp/proj',
       getSessionId: () => {
         throw new Error('no session')
@@ -259,12 +292,14 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       isSessionPersistenceDisabled: () => false,
     }))
     mock.module('../../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
+      ...worktreeSnap,
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
@@ -276,7 +311,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     // If handoff proceeded it would call ensureDaemonRunning / write job —
     // these must not be reached without a session id.
     mock.module('../../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installPromptSnap,
       ensureDaemonRunning: async () => {
         throw new Error('must not reach daemon without session')
       },
@@ -299,17 +334,20 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     process.env.CLAUDE_CONFIG_DIR = dir
 
     mock.module('../../../bootstrap/state.js', () => ({
+      ...bootstrapSnap,
       getOriginalCwd: () => '/tmp/proj',
       getSessionId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       isSessionPersistenceDisabled: () => true,
     }))
     mock.module('../../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
+      ...worktreeSnap,
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
@@ -319,7 +357,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installPromptSnap,
       ensureDaemonRunning: async () => {
         throw new Error('must not reach daemon when persistence disabled')
       },
@@ -381,17 +419,20 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     process.env.CLAUDE_CONFIG_DIR = dir
 
     mock.module('../../../bootstrap/state.js', () => ({
+      ...bootstrapSnap,
       getOriginalCwd: () => '/tmp/proj',
       getSessionId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       isSessionPersistenceDisabled: () => false,
     }))
     mock.module('../../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       getCurrentSessionTitle: () => undefined,
     }))
     mock.module('../../../types/ids.js', () => ({
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
+      ...worktreeSnap,
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
@@ -401,7 +442,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installPromptSnap,
       ensureDaemonRunning: async () => ({ ok: false }),
     }))
 
@@ -504,11 +545,13 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
     process.env.CLAUDE_CONFIG_DIR = dir
 
     mock.module('../../../bootstrap/state.js', () => ({
+      ...bootstrapSnap,
       getOriginalCwd: () => '/tmp/proj',
       getSessionId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       isSessionPersistenceDisabled: () => false,
     }))
     mock.module('../../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       getCurrentSessionTitle: () => undefined,
       flushSessionStorage: async () => {},
     }))
@@ -516,6 +559,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       asSessionId: (s: string) => s,
     }))
     mock.module('../../../utils/worktree.js', () => ({
+      ...worktreeSnap,
       getCurrentWorktreeSession: () => null,
     }))
     mock.module('../../../bridge/replBridgeHandle.js', () => ({
@@ -525,7 +569,7 @@ describe('seedForLeftArrow + writeA8qJobState (official Sj4/A8q)', () => {
       resetLeftArrowBridgeHandleForTests: () => {},
     }))
     mock.module('../../../daemon/installPrompt.js', () => ({
-      ...realInstallPrompt,
+      ...installPromptSnap,
       ensureDaemonRunning: async () => ({ ok: true }),
     }))
     mock.module('../../../daemon/controlSocketClient.js', () => ({
@@ -783,7 +827,7 @@ describe('tryQueueLeftArrowSpawnFail (densable yNo queued_for_later)', () => {
     if (prevHome === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = prevHome
     if (dir) rmSync(dir, { recursive: true, force: true })
-    mock.restore()
+    restoreLeftArrowModuleMocks()
   })
 
   test('copies transcript + marks job failed with linkScanPath/respawnFlags', async () => {
@@ -812,6 +856,7 @@ describe('tryQueueLeftArrowSpawnFail (densable yNo queued_for_later)', () => {
     })
 
     mock.module('../../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       getCurrentSessionTitle: () => undefined,
       getTranscriptPathForSession: (id: string) =>
         join(projects, `${id}.jsonl`),
@@ -848,6 +893,7 @@ describe('tryQueueLeftArrowSpawnFail (densable yNo queued_for_later)', () => {
     dir = mkdtempSync(join(tmpdir(), 'a8q-queue-miss-'))
     process.env.CLAUDE_CONFIG_DIR = dir
     mock.module('../../../utils/sessionStorage.js', () => ({
+      ...sessionStorageSnap,
       getCurrentSessionTitle: () => undefined,
       getTranscriptPathForSession: (id: string) =>
         join(dir, 'projects', `${id}.jsonl`),

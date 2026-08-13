@@ -1,7 +1,8 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
@@ -10,13 +11,19 @@ mock.module('src/utils/log.ts', logMock)
 // Do not mock messageQueueManager — Bun mock.module is process-global and
 // incomplete stubs break SleepTool (hasCommandsInQueue / enqueue).
 
+// Spread real sdkEventQueue — incomplete strip drops drain/emit and poisons
+// workflow notifications + MonitorMcp bookends under process-global mock.module.
+const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 mock.module('src/utils/sdkEventQueue.js', () => ({
+  ...sdkEventQueueSnap,
   enqueueSdkEvent: () => {},
 }))
 
+const diskOutputSnap = snapshotModuleExports(realDiskOutput)
 function diskOutputMock() {
   return {
-    ...realDiskOutput,
+    ...diskOutputSnap,
     getTaskOutputPath: (id: string) => `/tmp/${id}`,
     getTaskOutputDelta: async () => null,
     evictTaskOutput: noop,
@@ -30,7 +37,10 @@ mock.module('src/utils/cleanupRegistry.js', () => ({
   registerCleanup: () => () => {},
 }))
 
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: noop,
   stripProtoFields: (x: unknown) => x,
 }))
@@ -38,6 +48,15 @@ mock.module('src/services/analytics/index.js', () => ({
 mock.module('src/services/PromptSuggestion/speculation.js', () => ({
   abortSpeculation: noop,
 }))
+
+afterAll(() => {
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
+  mock.module('../../../utils/task/diskOutput.js', () => ({
+    ...diskOutputSnap,
+  }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+})
 
 const {
   addKeepaliveReason,

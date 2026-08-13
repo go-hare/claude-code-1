@@ -13,12 +13,11 @@ import { getTurnZeroSkillDiscovery } from '../prefetch.js'
 import { clearSkillIndexCache } from '../localSearch.js'
 
 let root: string
-let previousCwd: string
+const suiteCwd = process.cwd()
 const originalEnv = { ...process.env }
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-search-prefetch-'))
-  previousCwd = process.cwd()
   process.chdir(root)
   process.env = { ...originalEnv }
   process.env.CLAUDE_CONFIG_DIR = join(root, 'config')
@@ -32,7 +31,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  process.chdir(previousCwd)
+  process.chdir(suiteCwd)
   process.env = { ...originalEnv }
   clearCommandsCache()
   clearSkillIndexCache()

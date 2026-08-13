@@ -9,6 +9,11 @@ import {
 } from 'bun:test'
 import { logMock } from '../../../../../../tests/mocks/log'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../../../../tests/mocks/settings.js'
 
 type MockAxiosResponse = {
   data: ArrayBuffer
@@ -34,21 +39,33 @@ axiosHandle.stubs.isAxiosError = (error: unknown): boolean =>
   error !== null &&
   (error as { isAxiosError?: unknown }).isAxiosError === true
 
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
 }))
 
+const realClaudeApi = await import('src/services/api/claude.js')
+const claudeApiSnap = snapshotModuleExports(realClaudeApi)
 mock.module('src/services/api/claude.js', () => ({
+  ...claudeApiSnap,
   queryHaiku: async () => ({ message: { content: [] } }),
 }))
 
+const realHttp = await import('src/utils/http.js')
+const httpSnap = snapshotModuleExports(realHttp)
 mock.module('src/utils/http.js', () => ({
+  ...httpSnap,
   getWebFetchUserAgent: () => 'TestAgent/1.0',
 }))
 
 mock.module('src/utils/log.ts', logMock)
 
+const realMcpOut = await import('src/utils/mcpOutputStorage.js')
+const mcpOutSnap = snapshotModuleExports(realMcpOut)
 mock.module('src/utils/mcpOutputStorage.js', () => ({
+  ...mcpOutSnap,
   isBinaryContentType: (contentType: string) =>
     !contentType.toLowerCase().startsWith('text/'),
   persistBinaryContent: async () => ({
@@ -59,11 +76,6 @@ mock.module('src/utils/mcpOutputStorage.js', () => ({
 
 // Snapshot BEFORE mock — live namespace rebinds under Bun mock.module.
 import * as realSettings from 'src/utils/settings/settings.js'
-import {
-  createSettingsMock,
-  restoreSettingsMockWith,
-  snapshotModuleExports,
-} from '../../../../../../tests/mocks/settings.js'
 const settingsSnap = snapshotModuleExports(realSettings)
 mock.module(
   'src/utils/settings/settings.js',
@@ -76,6 +88,11 @@ afterAll(() => {
   restoreSettingsMockWith(mock.module, settingsSnap, [
     'src/utils/settings/settings.js',
   ])
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/api/claude.js', () => ({ ...claudeApiSnap }))
+  mock.module('src/utils/http.js', () => ({ ...httpSnap }))
+  mock.module('src/utils/mcpOutputStorage.js', () => ({ ...mcpOutSnap }))
+  axiosHandle.useStubs = false
 })
 
 beforeEach(() => {
@@ -89,10 +106,6 @@ beforeEach(() => {
 
 beforeAll(() => {
   axiosHandle.useStubs = true
-})
-
-afterAll(() => {
-  axiosHandle.useStubs = false
 })
 
 describe('WebFetch response headers', () => {

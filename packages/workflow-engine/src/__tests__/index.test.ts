@@ -50,7 +50,13 @@ test('engine constant values are stable', () => {
   expect(wf.MAX_TOTAL_AGENTS).toBe(1000)
   expect(wf.MAX_ITEMS_PER_CALL).toBe(4096)
   expect(wf.MAX_CONCURRENCY_CAP).toBe(16)
-  expect(wf.DEFAULT_MAX_CONCURRENCY).toBe(3)
+  // densable 2.1.229: host-derived DEFAULT_MAX_CONCURRENCY via availableParallelism
+  // (Math.min(16, Math.max(2, n-2))), not a hard-coded 3.
+  expect(wf.DEFAULT_MAX_CONCURRENCY).toBeGreaterThanOrEqual(2)
+  expect(wf.DEFAULT_MAX_CONCURRENCY).toBeLessThanOrEqual(16)
+  expect(wf.DEFAULT_MAX_CONCURRENCY).toBe(wf.resolveDefaultMaxConcurrency())
+  expect(wf.workflowDefaultConcurrencyFromParallelism(10)).toBe(8)
+  expect(wf.workflowDefaultConcurrencyFromParallelism(2)).toBe(2)
   expect(wf.WORKFLOW_SCRIPT_EXTENSIONS).toEqual(['.ts', '.js', '.mjs'])
 })
 

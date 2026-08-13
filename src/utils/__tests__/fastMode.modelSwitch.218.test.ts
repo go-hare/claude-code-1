@@ -1,15 +1,32 @@
 /**
  * densable 2.1.218 #31 — Rft/uU/dU model-switch fast mode announce helpers.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import { growthbookMock } from '../../../tests/mocks/growthbook'
+import {
+  createSettingsMock,
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
+import * as realSettings from 'src/utils/settings/settings.js'
+import * as realProviders from 'src/utils/model/providers.js'
+import * as realResidualFinalEnvGates from '../residualFinalEnvGates.js'
 
 const logEventMock = mock(() => {})
+const settingsSnap = snapshotModuleExports(realSettings)
+const providersSnap = snapshotModuleExports(realProviders)
 
 mock.module('src/services/analytics/index.js', () => ({
   logEvent: logEventMock,
 }))
-
-import { growthbookMock } from '../../../tests/mocks/growthbook'
 
 // Spread shared mock — incomplete growthbook mocks poison co-running suites.
 mock.module('src/services/analytics/growthbook.js', () => ({
@@ -30,11 +47,16 @@ mock.module('src/utils/auth.js', () => ({
   hasProfileScope: () => false,
 }))
 
-mock.module('src/utils/settings/settings.js', () => ({
-  getInitialSettings: () => ({ fastMode: true }),
-  getSettingsForSource: () => undefined,
-  updateSettingsForSource: () => {},
-}))
+mock.module(
+  'src/utils/settings/settings.js',
+  createSettingsMock(settingsSnap, {
+    getInitialSettings: () => ({ fastMode: true }),
+    getSettingsForSource: () => undefined,
+    updateSettingsForSource: (() => ({
+      error: null,
+    })) as unknown as typeof realSettings.updateSettingsForSource,
+  }),
+)
 
 // Do NOT mock src/utils/config.js — Bun mock.module is process-global and
 // poisons sibling 218 tests that need real saveGlobalConfig / getGlobalConfig
@@ -42,6 +64,7 @@ mock.module('src/utils/settings/settings.js', () => ({
 // do not require config; isFastModeEnabled uses settings + residual gates.
 
 mock.module('src/utils/model/providers.js', () => ({
+  ...providersSnap,
   getAPIProvider: () => 'firstParty',
 }))
 
@@ -49,19 +72,47 @@ mock.module('src/utils/bundledMode.js', () => ({
   isInBundledMode: () => true,
 }))
 
+// Incomplete privacyLevel strip poisons submitTranscriptShare essential-traffic gate.
+const realPrivacy = await import('src/utils/privacyLevel.js')
+const privacySnap = snapshotModuleExports(realPrivacy)
 mock.module('src/utils/privacyLevel.js', () => ({
+  ...privacySnap,
   isEssentialTrafficOnly: () => false,
 }))
 
+const realResidualMore = await import('src/utils/residualMoreEnvGates.js')
+const residualMoreSnap = snapshotModuleExports(realResidualMore)
 mock.module('src/utils/residualMoreEnvGates.js', () => ({
+  ...residualMoreSnap,
   isOpus47FastModeEnabled: () => true,
   shouldSkipFastModeNetworkErrors: () => false,
   shouldSkipFastModeOrgCheck: () => false,
 }))
 
+// Process-global mock.module: must preserve full residualFinalEnvGates surface
+// (isUseBedrockEnvEnabled etc.) or getAPIProvider / co-suites collapse to firstParty.
 mock.module('src/utils/residualFinalEnvGates.js', () => ({
+  ...realResidualFinalEnvGates,
   isFastModeDisabled: () => false,
 }))
+
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
+
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap)
+  mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
+  mock.module('src/utils/residualFinalEnvGates.js', () => ({
+    ...realResidualFinalEnvGates,
+  }))
+  mock.module('src/utils/privacyLevel.js', () => ({ ...privacySnap }))
+  mock.module('src/utils/residualMoreEnvGates.js', () => ({
+    ...residualMoreSnap,
+  }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 import {
   formatModelSwitchFastModeSuffix,

@@ -8,20 +8,14 @@ import {
   test,
 } from 'bun:test'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
-
-// Each test below calls `mock.module('axios', ...)` per-test. Without an
-// afterAll cleanup, the LAST per-test stub leaks into every test file that
-// runs after this one (mock.module is process-global, last-write-wins). The
-// spread-real mock registered here at the end re-routes axios to the real
-// module, undoing the stub leakage so later suites see real axios.
-afterAll(() => {
-  setupAxiosMock()
-})
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 
 // Defensive mock: agent.test.ts mocks config.js which can corrupt Bun's
-// src/* path alias resolution. Provide AbortError directly so the dynamic
-// import in createAdapter() never needs to resolve the alias at runtime.
+// src/* path alias resolution. Spread real errors so co-suites keep exports.
+const realErrors = await import('src/utils/errors.js')
+const errorsSnap = snapshotModuleExports(realErrors)
 const _abortMock = () => ({
+  ...errorsSnap,
   AbortError: class AbortError extends Error {
     constructor(message?: string) {
       super(message)
@@ -33,6 +27,15 @@ const _abortMock = () => ({
 })
 mock.module('src/utils/errors.js', _abortMock)
 mock.module('src/utils/errors', _abortMock)
+
+// Each test below calls `mock.module('axios', ...)` per-test. Without an
+// afterAll cleanup, the LAST per-test stub leaks into every test file that
+// runs after this one (mock.module is process-global, last-write-wins).
+afterAll(() => {
+  setupAxiosMock()
+  mock.module('src/utils/errors.js', () => ({ ...errorsSnap }))
+  mock.module('src/utils/errors', () => ({ ...errorsSnap }))
+})
 
 const originalBraveSearchApiKey = process.env.BRAVE_SEARCH_API_KEY
 const originalBraveApiKey = process.env.BRAVE_API_KEY

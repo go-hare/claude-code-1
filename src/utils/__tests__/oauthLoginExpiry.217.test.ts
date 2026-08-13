@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realProviders from 'src/utils/model/providers.js'
 
 let provider: string = 'firstParty'
 let subscriber = true
@@ -7,7 +9,10 @@ let tokens: {
   expiresAt?: number | null
 } | null = null
 
+const providersSnap = snapshotModuleExports(realProviders)
+
 mock.module('src/utils/model/providers.js', () => ({
+  ...providersSnap,
   getAPIProvider: () => provider,
 }))
 
@@ -28,6 +33,10 @@ afterEach(() => {
   provider = 'firstParty'
   subscriber = true
   tokens = null
+})
+
+afterAll(() => {
+  mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
 })
 
 describe('getLoginExpiryWarning densable mAr (2.1.217 #16)', () => {

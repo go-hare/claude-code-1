@@ -81,71 +81,34 @@ mock.module('bun:bundle', () => ({
   feature: (_name: string) => true,
 }))
 
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   stripProtoFields: (v: unknown) => v,
 }))
 
-// ── State mock with non-null projectDir ──
+// ── State mock with non-null projectDir (spread real — restore in afterAll) ──
 let _mockProjectDir: string | null = null
-
-mock.module('src/bootstrap/state.js', () => ({
+const realBootstrap = await import('src/bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
+const bootstrapOverlay = () => ({
+  ...bootstrapSnap,
   getSessionId: () => 'test-session-pd',
   getSessionProjectDir: () => _mockProjectDir,
   getOriginalCwd: () => '/mock/cwd',
   getProjectRoot: () => '/mock/project',
-  getIsNonInteractiveSession: () => false,
-  regenerateSessionId: () => {},
-  getParentSessionId: () => undefined,
-  switchSession: () => {},
-  onSessionSwitch: () => () => {},
-  setOriginalCwd: () => {},
-  setProjectRoot: () => {},
-  getDirectConnectServerUrl: () => undefined,
-  setDirectConnectServerUrl: () => {},
-  addToTotalDurationState: () => {},
-  resetTotalDurationStateAndCost_FOR_TESTS_ONLY: () => {},
-  addToTotalCostState: () => {},
-  getTotalCostUSD: () => 0,
-  getTotalAPIDuration: () => 0,
-  getTotalDuration: () => 0,
-  getTotalAPIDurationWithoutRetries: () => 0,
-  getTotalToolDuration: () => 0,
-  addToToolDuration: () => {},
-  getTurnHookDurationMs: () => 0,
-  addToTurnHookDuration: () => {},
-  resetTurnHookDuration: () => {},
-  getTurnHookCount: () => 0,
-  getTurnToolDurationMs: () => 0,
-  resetTurnToolDuration: () => {},
-  getTurnToolCount: () => 0,
-  getTurnClassifierDurationMs: () => 0,
-  addToTurnClassifierDuration: () => {},
-  resetTurnClassifierDuration: () => {},
-  getTurnClassifierCount: () => 0,
-  getStatsStore: () => ({}),
-  setStatsStore: () => {},
-  updateLastInteractionTime: () => {},
-  flushInteractionTime: () => {},
-  addToTotalLinesChanged: () => {},
-  getTotalLinesAdded: () => 0,
-  getTotalLinesRemoved: () => 0,
-  getTotalInputTokens: () => 0,
-  getTotalOutputTokens: () => 0,
-  getTotalCacheReadInputTokens: () => 0,
-  getTotalCacheCreationInputTokens: () => 0,
-  getTotalWebSearchRequests: () => 0,
-  getTurnOutputTokens: () => 0,
-  getCurrentTurnTokenBudget: () => null,
-  setLastAPIRequest: () => {},
-  getLastAPIRequest: () => null,
-  setLastAPIRequestMessages: () => {},
-  getLastAPIRequestMessages: () => [],
-  getSdkAgentProgressSummariesEnabled: () => false,
-  addSlowOperation: () => {},
   getCwdState: () => '/mock/cwd',
-  setCwdState: () => {},
-}))
+  getIsNonInteractiveSession: () => false,
+  getParentSessionId: () => undefined,
+  // Keep real setCwd*/setOriginalCwd/setProjectRoot so pathQuote co-suites work
+  // while this mock is still registered mid-suite; afterAll restores fully.
+})
+mock.module('src/bootstrap/state.js', bootstrapOverlay)
+mock.module('../../../bootstrap/state.js', bootstrapOverlay)
 
 // ── State ──
 let tmpDir: string
@@ -177,6 +140,9 @@ beforeAll(() => {
 })
 afterAll(() => {
   useShareProjectdirCpStubs = false
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
 })
 
 describe('share command — getTranscriptPath projectDir branch', () => {

@@ -5,13 +5,17 @@
  * - pNo resolveUltrareviewBranchArg (prose / embedded_pr / branch)
  * - dun ultrareviewLaunchAcknowledgementNudge
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
+const realAnalytics = await import('src/services/analytics/index.js')
+const analyticsSnap = snapshotModuleExports(realAnalytics)
 mock.module('src/services/analytics/index.js', () => ({
+  ...analyticsSnap,
   logEvent: () => {},
   logEventAsync: async () => {},
   stripProtoFields: <V>(v: V) => v,
@@ -20,7 +24,11 @@ mock.module('src/services/analytics/index.js', () => ({
 }))
 // Full surface: Bun mock.module is process-global; partial re-exports break
 // named imports pulled transitively via git/teleport/gitignore graph.
+// Snapshot + afterAll restore so null GB flags do not leak into fullscreen co-suites.
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: () => null,
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
   getFeatureValue_DEPRECATED: async () => undefined,
@@ -43,6 +51,12 @@ mock.module('src/services/analytics/growthbook.js', () => ({
   getDynamicConfig_BLOCKS_ON_INIT: async () => undefined,
   getDynamicConfig_CACHED_MAY_BE_STALE: () => undefined,
 }))
+afterAll(() => {
+  mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 // densable pNo: multi-word is branch only when rev-parse succeeds.
 // Mock only the exec layer — do NOT mock src/utils/git.js. Incomplete git

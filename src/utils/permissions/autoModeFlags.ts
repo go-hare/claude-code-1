@@ -35,10 +35,17 @@ export type AutoModeFlagConfig = {
 }
 
 function readGbConfig(): AutoModeFlagConfig {
-  return getFeatureValue_CACHED_MAY_BE_STALE(
+  // GrowthBook may be mocked to return null in other suites (process-global
+  // mock.module). Treat non-object as empty config so resolvers never throw on
+  // `gb.editRemovalVisibility` etc.
+  const raw = getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_auto_mode_config',
     {} as AutoModeFlagConfig,
   )
+  if (raw && typeof raw === 'object') {
+    return raw as AutoModeFlagConfig
+  }
+  return {}
 }
 
 /**

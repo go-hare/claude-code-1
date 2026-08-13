@@ -240,8 +240,11 @@ export function isFullscreenFeatureGateEnabled(): boolean {
     if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_creek', false)) {
       return true
     }
-    // Official tengu_pewter_brook default false
-    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_pewter_brook', false)
+    // Official tengu_pewter_brook default false — coerce so non-boolean GB
+    // stubs (null/undefined) fail closed rather than leaking null outward.
+    return Boolean(
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_pewter_brook', false),
+    )
   } catch {
     return false
   }

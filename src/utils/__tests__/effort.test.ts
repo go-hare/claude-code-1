@@ -103,17 +103,51 @@ let modelAccessCacheOverride:
     }>
   | undefined
 
+// Launch-pin flags must be process-local for this suite: effortCatalog
+// require('../config.js') + Bun mock.module can miss TEST_GLOBAL_CONFIG writes
+// when other files also mock config. Keep pin state here and merge on read/write.
+let launchPinState = {
+  unpinOpus47LaunchEffort: false,
+  unpinOpus48LaunchEffort: false,
+  unpinFable5LaunchEffort: false,
+}
+
 function configMock() {
   return {
     ...configSnap,
     getGlobalConfig: () => {
       const base = realGetGlobalConfig()
-      if (modelAccessCacheOverride === undefined) {
-        return base
-      }
       return {
         ...base,
-        modelAccessCache: modelAccessCacheOverride,
+        ...launchPinState,
+        ...(modelAccessCacheOverride !== undefined
+          ? { modelAccessCache: modelAccessCacheOverride }
+          : {}),
+      }
+    },
+    saveGlobalConfig: (
+      updater: (current: Record<string, unknown>) => Record<string, unknown>,
+    ) => {
+      const base = {
+        ...realGetGlobalConfig(),
+        ...launchPinState,
+      } as Record<string, unknown>
+      const next = updater(base)
+      if (next === base) return
+      launchPinState = {
+        unpinOpus47LaunchEffort: next.unpinOpus47LaunchEffort === true,
+        unpinOpus48LaunchEffort: next.unpinOpus48LaunchEffort === true,
+        unpinFable5LaunchEffort: next.unpinFable5LaunchEffort === true,
+      }
+      // Best-effort keep shared test config in sync for co-suites.
+      try {
+        ;(
+          configSnap.saveGlobalConfig as (
+            u: (c: Record<string, unknown>) => Record<string, unknown>,
+          ) => void
+        )?.(u => ({ ...u, ...next }))
+      } catch {
+        // ignore
       }
     },
   }
@@ -121,9 +155,12 @@ function configMock() {
 mock.module('src/utils/config.js', configMock)
 // effortCatalog requires('../config.js') relative path
 mock.module('../config.js', configMock)
+// Absolute-style alias used by some importers
+mock.module('src/utils/config.ts', configMock)
 afterAll(() => {
   mock.module('src/utils/config.js', () => ({ ...configSnap }))
   mock.module('../config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/config.ts', () => ({ ...configSnap }))
 })
 
 // ─── EFFORT_LEVELS constant ────────────────────────────────────────────
@@ -558,6 +595,11 @@ describe('densable effort catalog matrix', () => {
     delete process.env.CLAUDE_CODE_EFFORT_LEVEL
     delete process.env.CLAUDE_CODE_USE_OPENAI
     delete process.env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT
+    launchPinState = {
+      unpinOpus47LaunchEffort: false,
+      unpinOpus48LaunchEffort: false,
+      unpinFable5LaunchEffort: false,
+    }
     resetEffortLaunchPinsForTests()
   })
 
@@ -565,6 +607,11 @@ describe('densable effort catalog matrix', () => {
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k]
       else process.env[k] = v
+    }
+    launchPinState = {
+      unpinOpus47LaunchEffort: false,
+      unpinOpus48LaunchEffort: false,
+      unpinFable5LaunchEffort: false,
     }
     resetEffortLaunchPinsForTests()
   })

@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
 
+const realGrowthbook = await import('../../services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, defaultValue: unknown) =>
     defaultValue ?? {},
-  // Incomplete mocks poison the process-global module registry — export
-  // every name other tests/imports may re-resolve in the same bun test run.
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE: () => false,
   getFeatureValue_CACHED_WITH_REFRESH: (_key: string, defaultValue: unknown) =>
     defaultValue ?? {},
@@ -15,6 +17,12 @@ mock.module('src/services/analytics/growthbook.js', () => ({
     defaultValue: unknown,
   ) => defaultValue ?? {},
 }))
+
+afterAll(() => {
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 const { getEffortNotificationText, effortLevelToSymbol } = await import(
   '../EffortIndicator.js'

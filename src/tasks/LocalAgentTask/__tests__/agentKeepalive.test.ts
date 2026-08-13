@@ -14,7 +14,10 @@ const tasksSnap = snapshotModuleExports(realTasks)
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
+const realSessionStorage = await import('src/utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 mock.module('src/utils/sessionStorage.js', () => ({
+  ...sessionStorageSnap,
   getAgentTranscriptPath: (id: string) => `/tmp/t/${id}`,
   isTranscriptPersistenceDisabled: () => true,
   recordSidechainTranscript: async () => {},
@@ -85,6 +88,8 @@ afterAll(() => {
   mock.module('src/utils/tasks.js', () => ({ ...tasksSnap }))
   mock.module('../../utils/tasks.js', () => ({ ...tasksSnap }))
   mock.module('../../../utils/tasks.js', () => ({ ...tasksSnap }))
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
 })
 mock.module('src/services/PromptSuggestion/speculation.js', () => ({
   abortSpeculation: noop,
@@ -100,10 +105,14 @@ mock.module('src/utils/abortController.js', () => ({
   createAbortController: () => new AbortController(),
   createChildAbortController: () => new AbortController(),
 }))
+// Spread real sdkEventQueue — drainSdkEvents:()=>[] without restore empties
+// workflow notifications co-suite under process-global mock.module.
+const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 mock.module('src/utils/sdkEventQueue.js', () => ({
+  ...sdkEventQueueSnap,
   enqueueSdkEvent: noop,
   emitTaskTerminatedSdk: () => true,
-  drainSdkEvents: () => [],
 }))
 mock.module('src/utils/task/sdkProgress.js', () => ({
   emitTaskProgress: noop,

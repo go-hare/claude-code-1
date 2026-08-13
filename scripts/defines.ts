@@ -97,6 +97,13 @@ export const DEFAULT_BUILD_FEATURES = [
   'DAEMON', // 守护进程模式，长驻 supervisor 管理后台 worker（非 GB 级主因）
   'ACP', // ACP 代理协议，支持外部 agent 接入
   'WORKFLOW_SCRIPTS', // 工作流脚本（.claude/workflows/ 中的 YAML/MD）
+  // densable SEA ships reactive compact (QGo / tengu_reactive_compact_* /
+  // Ysa "automatic compaction failed"). Without this flag, feature() DCE
+  // nulls query.ts reactiveCompact → 413/PTL is not withheld and long-session
+  // resume dies as "Prompt is too long" + exit 1. Source + #25 tests already
+  // present; product pack must match densable. Do NOT enable CONTEXT_COLLAPSE
+  // or HISTORY_SNIP here — collapse remains stub-risk / suppress-autocompact.
+  'REACTIVE_COMPACT', // 413/PTL withhold + tryReactiveCompact recovery (+ Ysa annotate)
   // 'HISTORY_SNIP', // 已禁用：snip 功能暂时关闭
   // 'CONTEXT_COLLAPSE', // 已禁用：实现是空壳 stub，启用后会抑制 auto compact 导致上下文管理完全失效
   'MONITOR_TOOL', // Monitor 工具，流式监控后台进程输出

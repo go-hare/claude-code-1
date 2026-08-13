@@ -18,12 +18,11 @@ import {
 import { loadInstincts, readObservations } from '../index.js'
 
 let root: string
-let previousCwd: string
+const suiteCwd = process.cwd()
 const originalEnv = { ...process.env }
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-learning-smoke-'))
-  previousCwd = process.cwd()
   process.chdir(root)
   process.env = { ...originalEnv }
   process.env.CLAUDE_SKILL_LEARNING_HOME = join(root, 'learning-home')
@@ -35,7 +34,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  process.chdir(previousCwd)
+  process.chdir(suiteCwd)
   process.env = { ...originalEnv }
   resetSkillLearningConfig()
   clearCommandsCache()

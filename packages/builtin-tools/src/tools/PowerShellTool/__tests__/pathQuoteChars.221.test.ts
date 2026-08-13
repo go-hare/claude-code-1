@@ -7,9 +7,14 @@
  * - If stripped form would auto-allow → force ask with exact reason string
  * - Surrounding-only strip is NOT enough (inner quotes must still force ask)
  */
-import { describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { logMock } from '../../../../../../tests/mocks/log'
 import { debugMock } from '../../../../../../tests/mocks/debug'
+import {
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+} from 'src/bootstrap/state.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -29,6 +34,20 @@ const {
   validatePath,
 } = await import('../pathValidation.js')
 const { getEmptyToolPermissionContext } = await import('src/Tool.js')
+
+// validatePath → isSessionMemoryPath → getProjectDir(sanitizePath(projectRoot)).
+// Full-suite pollution can leave projectRoot undefined → sanitizePathRaw TypeError.
+const suiteCwd = process.cwd()
+beforeEach(() => {
+  setCwdState(suiteCwd)
+  setOriginalCwd(suiteCwd)
+  setProjectRoot(suiteCwd)
+})
+afterEach(() => {
+  setCwdState(suiteCwd)
+  setOriginalCwd(suiteCwd)
+  setProjectRoot(suiteCwd)
+})
 
 function makeContext(
   overrides: Partial<ReturnType<typeof getEmptyToolPermissionContext>> = {},

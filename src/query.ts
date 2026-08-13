@@ -1151,20 +1151,22 @@ async function* queryLoop(
         (contextCollapse?.isContextCollapseEnabled() ?? false) &&
         isAutoCompactEnabled()
     }
-    // Hoist media-recovery gate once per turn. Withholding (inside the
-    // stream loop) and recovery (after) must agree; CACHED_MAY_BE_STALE can
-    // flip during the 5-30s stream, and withhold-without-recover would eat
-    // the message. PTL doesn't hoist because its withholding is ungated —
-    // it predates the experiment and is already the control-arm baseline.
-    const mediaRecoveryEnabled =
-      reactiveCompact?.isReactiveCompactEnabled() ?? false
+    // densable stream: gup/XGo withhold without ex(); recovery is gated later
+    // by Jsa (canAttemptReactiveCompact → ex()+Rhe()+source). When the
+    // REACTIVE_COMPACT module is compiled in, media errors are withheld the
+    // same way as PTL so tryReactiveCompact can strip/retry or surface.
+    // (Previously gated on isReactiveCompactEnabled=DISABLE_COMPACT only,
+    // which diverged from densable XGo always-withhold.)
+    const mediaRecoveryEnabled = reactiveCompact != null
+    // densable: skip synthetic blocking_limit preempt when ex() would allow
+    // QGo recovery (isAutoCompactEnabled ≈ densable ex()). Remote Rhe is
+    // checked inside try; if remote-disallowed we still prefer API 413 path
+    // over a synthetic PTL when auto-compact is on.
     if (
       !compactionResult &&
       querySource !== 'compact' &&
       querySource !== 'session_memory' &&
-      !(
-        reactiveCompact?.isReactiveCompactEnabled() && isAutoCompactEnabled()
-      ) &&
+      !(reactiveCompact != null && isAutoCompactEnabled()) &&
       !collapseOwnsIt
     ) {
       const { isAtBlockingLimit } = calculateTokenWarningState(

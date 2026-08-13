@@ -4,7 +4,15 @@
  * Symlinked shared-checkout spellings must not let bg / worktree-isolated
  * sessions write outside their isolation boundary.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { execFileSync } from 'child_process'
 import {
   mkdirSync,
@@ -24,9 +32,20 @@ import {
   setOriginalCwd,
   setProjectRoot,
 } from '../../bootstrap/state.js'
+import { debugMock } from '../../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realConcurrentSessions from '../concurrentSessions.js'
+import * as realWorktree from '../worktree.js'
+import * as realSettings from '../settings/settings.js'
+import * as realCwd from '../cwd.js'
 
 // densable qRu/nKr/ZRu need real findGitRoot — do NOT mock.module('../git.js').
 // Bun mock.module is process-global and poisons sibling ZRu AST tests.
+
+const concurrentSnap = snapshotModuleExports(realConcurrentSessions)
+const worktreeSnap = snapshotModuleExports(realWorktree)
+const settingsSnap = snapshotModuleExports(realSettings)
+const cwdSnap = snapshotModuleExports(realCwd)
 
 const mockIsBgSession = mock(() => false)
 const mockGetCurrentWorktreeSession = mock(
@@ -42,19 +61,24 @@ const mockGetSettings = mock(
 )
 const mockGetCwdOverride = mock((): string | undefined => undefined)
 
-mock.module('../debug.js', () => ({
-  logForDebugging: () => {},
-}))
+// Complete debug surface — incomplete {logForDebugging} drops isDebugToStdErr
+// and poisons /tui co-suites under process-global mock.module.
+mock.module('../debug.js', debugMock)
+mock.module('src/utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
 
 mock.module('../concurrentSessions.js', () => ({
+  ...concurrentSnap,
   isBgSession: () => mockIsBgSession(),
 }))
 
 mock.module('../worktree.js', () => ({
+  ...worktreeSnap,
   getCurrentWorktreeSession: () => mockGetCurrentWorktreeSession(),
 }))
 
 mock.module('../settings/settings.js', () => ({
+  ...settingsSnap,
   getSettings_DEPRECATED: () => mockGetSettings(),
   getSettingsForSource: () => null,
   getInitialSettings: () => ({}),
@@ -63,6 +87,7 @@ mock.module('../settings/settings.js', () => ({
 // densable agentWorktree often arrives via cwd ALS override; keep getCwd on
 // bootstrap cwd state so setCwdState() in fixtures is visible.
 mock.module('../cwd.js', () => ({
+  ...cwdSnap,
   getCwd: () => {
     const ov = mockGetCwdOverride()
     if (ov) return ov
@@ -87,6 +112,16 @@ mock.module('../cwd.js', () => ({
     }
   },
 }))
+
+afterAll(() => {
+  mock.module('../concurrentSessions.js', () => ({ ...concurrentSnap }))
+  mock.module('../worktree.js', () => ({ ...worktreeSnap }))
+  mock.module('../settings/settings.js', () => ({ ...settingsSnap }))
+  mock.module('../cwd.js', () => ({ ...cwdSnap }))
+  mock.module('../debug.js', debugMock)
+  mock.module('src/utils/debug.js', debugMock)
+  mock.module('src/utils/debug.ts', debugMock)
+})
 
 const {
   canonicalizeForBgContainment,
@@ -231,9 +266,17 @@ describe('canonicalizeForBgContainment densable XNe/N6g', () => {
 
   test('UNC / network-shaped is skipped without resolving', () => {
     const unc = '\\\\server\\share\\file.ts'
-    const c = canonicalizeForBgContainment(unc)
-    expect(c.skipped).toBe(true)
-    expect(c.canonical).toBeNull()
+    // densable Zj network-skip lives in N6g win32 branch only. On darwin/linux,
+    // expandPath treats `\\server\…` as a relative spelling under cwd, so the
+    // public canonicalize entry cannot assert win32 skip semantics.
+    const n6g = N6g(unc, 'win32')
+    expect(n6g.skipped).toBe(true)
+    expect(n6g.canonical).toBeNull()
+    if (process.platform === 'win32') {
+      const c = canonicalizeForBgContainment(unc)
+      expect(c.skipped).toBe(true)
+      expect(c.canonical).toBeNull()
+    }
   })
 
   test('N6g refuses raw dot-segment spelling', () => {

@@ -294,11 +294,15 @@ class ShellCommandImpl implements ShellCommand {
   }
 
   #exitHandler(code: number | null, signal: NodeJS.Signals | null): void {
+    // densable / POSIX shell: SIGTERM → 128+15 = 143 (same as #doKill(SIGTERM)).
+    // Do not use 144 (that would be 128+16 / SIGTOP) — external SIGTERM and
+    // timeout kill must share the densable 143 code so #handleExit can gate
+    // "Command timed out" only when wasKilled && code === SIGTERM.
     const exitCode =
       code !== null && code !== undefined
         ? code
         : signal === 'SIGTERM'
-          ? 144
+          ? SIGTERM
           : 1
     this.#resolveExitCode(exitCode)
   }

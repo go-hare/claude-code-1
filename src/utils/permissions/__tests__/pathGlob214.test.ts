@@ -4,7 +4,7 @@
  * - matchingRuleForInput (zw): reverse-map + deny/ask any-depth
  * - matchesPathRule (hqe): hook if: always allow-style anchor
  */
-import { describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
   adjustPermissionPatternForIgnore,
   matchingRuleForInput,
@@ -12,6 +12,51 @@ import {
 } from '../filesystem.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import { join } from 'path'
+import {
+  getCwdState,
+  getOriginalCwd,
+  getProjectRoot,
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+} from '../../../bootstrap/state.js'
+
+// matchesPathRule uses getCwd() as pattern root; under full suite bootstrap
+// STATE.cwd can be left undefined by other tests → path.relative throws.
+// Also restore afterEach so we don't leave a poisoned cwd for co-suites.
+const suiteCwd = process.cwd()
+let prevCwd: string
+let prevOriginal: string
+let prevProject: string
+beforeEach(() => {
+  try {
+    prevCwd = getCwdState()
+  } catch {
+    prevCwd = suiteCwd
+  }
+  try {
+    prevOriginal = getOriginalCwd()
+  } catch {
+    prevOriginal = suiteCwd
+  }
+  try {
+    prevProject = getProjectRoot()
+  } catch {
+    prevProject = suiteCwd
+  }
+  setCwdState(suiteCwd)
+  setOriginalCwd(suiteCwd)
+  setProjectRoot(suiteCwd)
+})
+afterEach(() => {
+  try {
+    setCwdState(prevCwd ?? suiteCwd)
+    setOriginalCwd(prevOriginal ?? suiteCwd)
+    setProjectRoot(prevProject ?? suiteCwd)
+  } catch {
+    // ignore
+  }
+})
 
 function baseCtx(
   overrides: Partial<ToolPermissionContext> = {},

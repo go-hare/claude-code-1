@@ -1,18 +1,36 @@
 /**
  * densable 2.1.219 IQt / HQt / T5i — adaptive_thinking + rejects_disabled_thinking.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { growthbookMock } from '../../../tests/mocks/growthbook'
+import * as realSettings from 'src/utils/settings/settings.js'
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
+
+const settingsSnap = snapshotModuleExports(realSettings)
 
 // Spread shared mock — incomplete growthbook mocks poison co-running suites.
+// Always-true without afterAll restore bypasses sessionSpawnCaps amber_kestrel throw.
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   ...growthbookMock(),
   getFeatureValue_CACHED_MAY_BE_STALE: () => true,
 }))
 
 mock.module('src/utils/settings/settings.js', () => ({
+  ...settingsSnap,
   getSettingsWithErrors: () => ({ settings: {}, errors: [] }),
 }))
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap)
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+})
 
 // Do NOT mock providers globally in a way that poisons siblings — set via
 // process env if needed. Default firstParty.

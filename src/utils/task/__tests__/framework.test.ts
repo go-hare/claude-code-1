@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { debugMock } from '../../../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import * as realDiskOutput from '../diskOutput.js'
 import {
   enqueuePendingNotification,
@@ -12,9 +13,12 @@ const noop = () => {}
 
 mock.module('src/utils/debug.ts', debugMock)
 
+const realSdkEventQueue = await import('src/utils/sdkEventQueue.js')
+const sdkEventQueueSnap = snapshotModuleExports(realSdkEventQueue)
 const sdkEvents: any[] = []
 function sdkEventQueueMock() {
   return {
+    ...sdkEventQueueSnap,
     enqueueSdkEvent: (event: any) => sdkEvents.push(event),
     // Official 2.1 task_updated path used by updateTaskState (require).
     emitTaskUpdatedSdk: (taskId: string, patch: Record<string, unknown>) => {
@@ -29,12 +33,17 @@ function sdkEventQueueMock() {
     emitTaskSummarySdk: () => {},
     emitThinkingTokensSdk: () => {},
     emitModelFallbackSdk: () => {},
-    drainSdkEvents: () => [],
+    // Local capture for this suite — do not leave drainSdkEvents:()=>[] without restore.
+    drainSdkEvents: () => sdkEvents.splice(0),
     clearTaskTerminatedSdkGate: () => {},
   }
 }
 mock.module('src/utils/sdkEventQueue.js', sdkEventQueueMock)
 mock.module('../sdkEventQueue.js', sdkEventQueueMock)
+afterAll(() => {
+  mock.module('src/utils/sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+  mock.module('../sdkEventQueue.js', () => ({ ...sdkEventQueueSnap }))
+})
 
 // Spread real diskOutput so DiskTaskOutput survives process-global mock.module
 // pollution when this file runs with agentKeepalive / LocalAgentTask suites.

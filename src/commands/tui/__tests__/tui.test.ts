@@ -28,10 +28,11 @@ beforeEach(() => {
   claudeDir = join(tmpDir, '.claude')
   mkdirSync(claudeDir, { recursive: true })
   process.env.CLAUDE_CONFIG_DIR = claudeDir
-  // getClaudeConfigHomeDir is `memoize(...)` — clear its cache so this
-  // suite's CLAUDE_CONFIG_DIR overrides any value cached by an earlier
-  // test file in the same process.
-  getClaudeConfigHomeDir.cache?.clear?.()
+  // getClaudeConfigHomeDir is `memoize(...)` — clear only when lodash .cache
+  // exists (process-global mocks may replace it with a plain function).
+  ;(
+    getClaudeConfigHomeDir as { cache?: { clear?: () => void } }
+  ).cache?.clear?.()
   // Save env vars we may mutate
   origEnv.CLAUDE_CODE_NO_FLICKER = process.env.CLAUDE_CODE_NO_FLICKER
   delete process.env.CLAUDE_CODE_NO_FLICKER
@@ -40,6 +41,9 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true })
   delete process.env.CLAUDE_CONFIG_DIR
+  ;(
+    getClaudeConfigHomeDir as { cache?: { clear?: () => void } }
+  ).cache?.clear?.()
   // Restore env vars
   if (origEnv.CLAUDE_CODE_NO_FLICKER === undefined) {
     delete process.env.CLAUDE_CODE_NO_FLICKER

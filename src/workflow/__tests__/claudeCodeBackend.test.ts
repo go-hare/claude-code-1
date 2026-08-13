@@ -35,7 +35,8 @@ mock.module(
     isBuiltInAgent: () => true,
   }),
 )
-mock.module('src/tools.js', () => ({ assembleToolPool: () => ({ tools: [] }) }))
+// assembleToolPool returns Tools (array), not { tools: [] } — map() is called on it.
+mock.module('src/tools.js', () => ({ assembleToolPool: () => [] }))
 mock.module('src/utils/messages.js', () => ({
   // Return a shape that satisfies UserMessage consumers process-wide.
   // Bun's mock.module is process-global (last-write-wins), so an incomplete

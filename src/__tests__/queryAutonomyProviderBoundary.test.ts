@@ -27,10 +27,9 @@ import {
 } from '../utils/autonomyRuns'
 
 let tempDir = ''
-let originalProcessCwd = ''
+const suiteCwd = process.cwd()
 
 beforeEach(async () => {
-  originalProcessCwd = process.cwd()
   tempDir = await createTempDir('query-autonomy-provider-boundary-')
   resetStateForTests()
   resetCommandQueue()
@@ -42,8 +41,10 @@ beforeEach(async () => {
 afterEach(async () => {
   resetStateForTests()
   resetCommandQueue()
-  if (originalProcessCwd) {
-    process.chdir(originalProcessCwd)
+  try {
+    process.chdir(suiteCwd)
+  } catch {
+    // ignore
   }
   if (tempDir) {
     let lastError: unknown

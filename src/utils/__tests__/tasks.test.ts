@@ -98,9 +98,13 @@ beforeEach(async () => {
     `claude-test-tasks-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   )
   process.env.CLAUDE_CONFIG_DIR = configDir
-  // Reset memoize cache by changing env
+  // Memoize is keyed by CLAUDE_CONFIG_DIR; clear only when lodash .cache exists.
+  // Under process-global mock.module some suites replace getClaudeConfigHomeDir
+  // with a plain function (no .cache) — optional-chain so the whole file does not cascade.
   const { getClaudeConfigHomeDir } = await import('src/utils/envUtils')
-  getClaudeConfigHomeDir.cache.clear?.()
+  ;(
+    getClaudeConfigHomeDir as { cache?: { clear?: () => void } }
+  ).cache?.clear?.()
 })
 
 afterEach(async () => {
@@ -111,7 +115,9 @@ afterEach(async () => {
     delete process.env.CLAUDE_CONFIG_DIR
   }
   const { getClaudeConfigHomeDir } = await import('src/utils/envUtils')
-  getClaudeConfigHomeDir.cache.clear?.()
+  ;(
+    getClaudeConfigHomeDir as { cache?: { clear?: () => void } }
+  ).cache?.clear?.()
   await rm(configDir, { recursive: true, force: true }).catch(() => {})
 })
 

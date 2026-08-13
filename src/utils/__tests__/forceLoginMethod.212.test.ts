@@ -1,7 +1,26 @@
 /**
  * densable 2.1.212 #43 — forceLoginMethod multi-surface enforcement (A9t / Stt).
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import * as realSettings from '../settings/settings.js'
+import * as realSettingsConstants from '../settings/constants.js'
+import * as realAws from '../aws.js'
+import {
+  restoreSettingsMockWith,
+  snapshotModuleExports,
+} from '../../../tests/mocks/settings.js'
+
+const settingsSnap = snapshotModuleExports(realSettings)
+const settingsConstSnap = snapshotModuleExports(realSettingsConstants)
+const awsSnap = snapshotModuleExports(realAws)
 
 const mockGetInitialSettings = mock(() => ({}) as Record<string, unknown>)
 const mockGetSettingsForSource = mock(
@@ -24,22 +43,41 @@ const mockIsHostManagedProviderAuth = mock(() => false)
 const mockLogEvent = mock((_name?: string, _props?: unknown) => {})
 
 mock.module('../settings/settings.js', () => ({
+  ...settingsSnap,
+  getInitialSettings: () => mockGetInitialSettings(),
+  getSettingsForSource: (s: string) => mockGetSettingsForSource(s),
+  getPolicySettingsOrigin: () => mockGetPolicySettingsOrigin(),
+}))
+mock.module('src/utils/settings/settings.js', () => ({
+  ...settingsSnap,
   getInitialSettings: () => mockGetInitialSettings(),
   getSettingsForSource: (s: string) => mockGetSettingsForSource(s),
   getPolicySettingsOrigin: () => mockGetPolicySettingsOrigin(),
 }))
 
 mock.module('../settings/constants.js', () => ({
+  ...settingsConstSnap,
   getEnabledSettingSources: () => [...mockGetEnabledSettingSources()],
 }))
 
 mock.module('../aws.js', () => ({
+  ...awsSnap,
   isHostManagedProviderAuth: () => mockIsHostManagedProviderAuth(),
 }))
 
 mock.module('../../services/analytics/index.js', () => ({
   logEvent: (name: string, props?: unknown) => mockLogEvent(name, props),
 }))
+
+afterAll(() => {
+  restoreSettingsMockWith(mock.module, settingsSnap, [
+    '../settings/settings.js',
+    'src/utils/settings/settings.js',
+    'src/utils/settings/settings.ts',
+  ])
+  mock.module('../settings/constants.js', () => ({ ...settingsConstSnap }))
+  mock.module('../aws.js', () => ({ ...awsSnap }))
+})
 
 const {
   isAdminManagedPolicyOrigin,

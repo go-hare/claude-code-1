@@ -1,24 +1,38 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import type { AppState } from 'src/state/AppState.js'
 import { asAgentId } from 'src/types/ids.js'
 import {
   clearDynamicTeamContext,
   setDynamicTeamContext,
 } from 'src/utils/teammate.js'
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 import { SendMessageTool } from '../SendMessageTool.js'
 
 // Avoid real disk for observer sidecar gate (missing file → null → allow).
+// Spread real + afterAll restore — incomplete strip poisons resume/metadata co-suites.
+const realSessionStorage = await import('src/utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
 mock.module('src/utils/sessionStorage.js', () => ({
+  ...sessionStorageSnap,
   readAgentMetadata: async () => null,
 }))
+afterAll(() => {
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+})
 
 const writeToMailboxMock = mock(async () => 'msg-mock-1')
+const realTeammateMailbox = await import('src/utils/teammateMailbox.js')
+const teammateMailboxSnap = snapshotModuleExports(realTeammateMailbox)
 mock.module('src/utils/teammateMailbox.js', () => ({
+  ...teammateMailboxSnap,
   writeToMailbox: writeToMailboxMock,
   createShutdownApprovedMessage: () => ({}),
   createShutdownRejectedMessage: () => ({}),
   createShutdownRequestMessage: () => ({}),
 }))
+afterAll(() => {
+  mock.module('src/utils/teammateMailbox.js', () => ({ ...teammateMailboxSnap }))
+})
 
 type TaskSlice = {
   type: 'local_agent'

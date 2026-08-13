@@ -23,9 +23,6 @@ axiosHandle.stubs.request = async () => ({
 beforeAll(() => {
   axiosHandle.useStubs = true
 })
-afterAll(() => {
-  axiosHandle.useStubs = false
-})
 
 mock.module('src/utils/auth.js', authMock)
 
@@ -33,13 +30,30 @@ mock.module('src/services/oauth/client.js', () => ({
   getOrganizationUUID: async () => 'org',
 }))
 
+import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
+const realGrowthbook = await import('src/services/analytics/growthbook.js')
+const growthbookSnap = snapshotModuleExports(realGrowthbook)
 mock.module('src/services/analytics/growthbook.js', () => ({
+  ...growthbookSnap,
   getFeatureValue_CACHED_MAY_BE_STALE: () => true,
 }))
 
+const realPolicy = await import('src/services/policyLimits/index.js')
+const policySnap = snapshotModuleExports(realPolicy)
 mock.module('src/services/policyLimits/index.js', () => ({
+  ...policySnap,
   isPolicyAllowed: () => true,
 }))
+
+// Restore after snaps are declared (afterAll callback runs post-suite; order
+// still kept below declarations for readability / no TDZ confusion).
+afterAll(() => {
+  axiosHandle.useStubs = false
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+  }))
+  mock.module('src/services/policyLimits/index.js', () => ({ ...policySnap }))
+})
 
 // Narrow mock for the side-effectful entries in `src/constants/oauth.js`.
 // Pure data exports (ALL_OAUTH_SCOPES, CLAUDE_AI_*_SCOPE, etc.) come from

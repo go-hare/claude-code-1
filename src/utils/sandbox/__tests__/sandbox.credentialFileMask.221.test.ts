@@ -37,25 +37,32 @@ mock.module('../settings/constants.js', () => ({
   isSettingSourceEnabled: () => true,
 }))
 
+const realBootstrap = await import('src/bootstrap/state.js')
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
 mock.module('src/bootstrap/state.js', () => ({
+  ...bootstrapSnap,
   getAdditionalDirectoriesForClaudeMd: () => [],
   getCwdState: () => process.cwd(),
   getOriginalCwd: () => process.cwd(),
 }))
 
 const realRipgrep = await import('src/utils/ripgrep.js')
+const ripgrepSnap = snapshotModuleExports(realRipgrep)
 mock.module('src/utils/ripgrep.js', () => ({
-  ...realRipgrep,
+  ...ripgrepSnap,
   ripgrepCommand: () => ({ rgPath: 'rg', rgArgs: [], argv0: undefined }),
 }))
 const realHostProxy = await import('src/utils/hostProxyPorts.js')
+const hostProxySnap = snapshotModuleExports(realHostProxy)
 mock.module('src/utils/hostProxyPorts.js', () => ({
-  ...realHostProxy,
+  ...hostProxySnap,
   readHostProxyPorts: () => ({}),
 }))
+// Snapshot BEFORE mock — /tmp/claude-home must not stick for co-suites.
 const realEnvUtils = await import('src/utils/envUtils.js')
+const envUtilsSnap = snapshotModuleExports(realEnvUtils)
 mock.module('src/utils/envUtils.js', () => ({
-  ...realEnvUtils,
+  ...envUtilsSnap,
   getClaudeConfigHomeDir: () => '/tmp/claude-home',
 }))
 
@@ -74,6 +81,10 @@ afterAll(() => {
     'src/utils/settings/settings.ts',
     '../settings/settings.js',
   ])
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
+  mock.module('src/utils/ripgrep.js', () => ({ ...ripgrepSnap }))
+  mock.module('src/utils/hostProxyPorts.js', () => ({ ...hostProxySnap }))
 })
 
 function bySource(

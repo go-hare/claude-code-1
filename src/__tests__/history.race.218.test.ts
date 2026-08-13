@@ -17,12 +17,18 @@ import { join } from 'path'
 import { setProjectRoot } from '../bootstrap/state.js'
 import * as realEnvUtils from '../utils/envUtils.js'
 import * as realResidualGates from '../utils/residualFinalEnvGates.js'
+import { debugMock } from '../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../tests/mocks/settings.js'
 
 let tmpHome: string
 
+// Snapshot BEFORE mock.module — live namespace rebinds under Bun.
+const envUtilsSnap = snapshotModuleExports(realEnvUtils)
+const residualGatesSnap = snapshotModuleExports(realResidualGates)
+
 // Preserve full residual gate surface — incomplete mocks pollute sibling files.
 mock.module('src/utils/residualFinalEnvGates.js', () => ({
-  ...realResidualGates,
+  ...residualGatesSnap,
   shouldSkipPromptHistory: () => false,
 }))
 
@@ -30,15 +36,18 @@ mock.module('src/utils/cleanupRegistry.js', () => ({
   registerCleanup: () => {},
 }))
 
-mock.module('src/utils/debug.js', () => ({
-  logForDebugging: () => {},
-}))
+// Complete debug surface — incomplete {logForDebugging} drops isDebugToStdErr
+// and poisons /tui co-suites under process-global mock.module.
+mock.module('src/utils/debug.js', debugMock)
+mock.module('src/utils/debug.ts', debugMock)
 
 // Preserve full envUtils surface — incomplete mocks pollute sibling files
 // (isEnvTruthy etc.) under Bun process-global mock.module.
 mock.module('src/utils/envUtils.js', () => ({
-  ...realEnvUtils,
-  getClaudeConfigHomeDir: () => tmpHome,
+  ...envUtilsSnap,
+  getClaudeConfigHomeDir: Object.assign(() => tmpHome, {
+    cache: { clear: () => {}, get: () => undefined },
+  }),
 }))
 
 mock.module('src/utils/pasteStore.js', () => ({
@@ -100,7 +109,12 @@ describe('densable 2.1.218 #20 history race', () => {
   })
 
   afterAll(() => {
-    mock.restore()
+    // Explicit restore with pre-mock snapshots — do NOT mock.restore() after
+    // re-registering (restore can re-apply last factories that close over tmpHome).
+    mock.module('src/utils/envUtils.js', () => ({ ...envUtilsSnap }))
+    mock.module('src/utils/residualFinalEnvGates.js', () => ({
+      ...residualGatesSnap,
+    }))
   })
 
   test('flush keeps concurrent adds: two sequential adds both land once', async () => {

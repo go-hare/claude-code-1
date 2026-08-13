@@ -4,7 +4,7 @@
  * Avoid mock.module on bootstrap/state (process-global pollution of addSlowOperation).
  * Use real setLastAPIRequest / getLastAPIRequest / setIsRemoteMode.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import {
   getLastAPIRequest,
   setIsRemoteMode,
@@ -12,43 +12,48 @@ import {
 } from '../../../bootstrap/state.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/log.js', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/debug.js', debugMock)
 
-// Overlay only the OAuth refresh used by share — keep rest of auth real
-// so process-global mock.module does not strip getRateLimitTier / etc.
+// Snapshot BEFORE mock — live rebinding of realAuth/realProviders poisons co-suites.
 const realAuth = await import('../../../utils/auth.js')
+const authSnap = snapshotModuleExports(realAuth)
 const authOverlay = () => ({
-  ...realAuth,
+  ...authSnap,
   checkAndRefreshOAuthTokenIfNeeded: async () => {},
 })
 mock.module('src/utils/auth.ts', authOverlay)
 mock.module('src/utils/auth.js', authOverlay)
 
-mock.module('src/utils/http.ts', () => ({
+const realHttp = await import('../../../utils/http.js')
+const httpSnap = snapshotModuleExports(realHttp)
+const httpOverlay = () => ({
+  ...httpSnap,
   getAuthHeaders: () => ({ headers: { Authorization: 'Bearer t' } }),
   getUserAgent: () => 'test-agent',
-}))
-mock.module('src/utils/http.js', () => ({
-  getAuthHeaders: () => ({ headers: { Authorization: 'Bearer t' } }),
-  getUserAgent: () => 'test-agent',
-}))
+})
+mock.module('src/utils/http.ts', httpOverlay)
+mock.module('src/utils/http.js', httpOverlay)
 
-mock.module('src/utils/messages.ts', () => ({
+const realMessages = await import('../../../utils/messages.js')
+const messagesSnap = snapshotModuleExports(realMessages)
+const messagesOverlay = () => ({
+  ...messagesSnap,
   normalizeMessagesForAPI: (m: unknown) => m,
-}))
-mock.module('src/utils/messages.js', () => ({
-  normalizeMessagesForAPI: (m: unknown) => m,
-}))
+})
+mock.module('src/utils/messages.ts', messagesOverlay)
+mock.module('src/utils/messages.js', messagesOverlay)
 
 // densable FNi headSha via getHead (mock only git head, not bootstrap/state).
 let mockHeadSha = 'abc123deadbeef'
 const realGit = await import('../../../utils/git.js')
+const gitSnap = snapshotModuleExports(realGit)
 const gitOverlay = () => ({
-  ...realGit,
+  ...gitSnap,
   getHead: async () => mockHeadSha,
 })
 mock.module('src/utils/git.ts', gitOverlay)
@@ -56,18 +61,17 @@ mock.module('src/utils/git.js', gitOverlay)
 
 let mockSubagentTranscripts: Record<string, unknown[]> = {}
 let mockRawTranscriptPath = '/tmp/no-such-transcript.jsonl'
-mock.module('src/utils/sessionStorage.ts', () => ({
+const realSessionStorage = await import('../../../utils/sessionStorage.js')
+const sessionStorageSnap = snapshotModuleExports(realSessionStorage)
+const sessionStorageOverlay = () => ({
+  ...sessionStorageSnap,
   extractAgentIdsFromMessages: () => Object.keys(mockSubagentTranscripts),
   getTranscriptPath: () => mockRawTranscriptPath,
   loadSubagentTranscripts: async () => mockSubagentTranscripts,
   MAX_TRANSCRIPT_READ_BYTES: 1024 * 1024,
-}))
-mock.module('src/utils/sessionStorage.js', () => ({
-  extractAgentIdsFromMessages: () => Object.keys(mockSubagentTranscripts),
-  getTranscriptPath: () => mockRawTranscriptPath,
-  loadSubagentTranscripts: async () => mockSubagentTranscripts,
-  MAX_TRANSCRIPT_READ_BYTES: 1024 * 1024,
-}))
+})
+mock.module('src/utils/sessionStorage.ts', sessionStorageOverlay)
+mock.module('src/utils/sessionStorage.js', sessionStorageOverlay)
 
 // Controllable redact — default identity; fail-closed tests override.
 let redactImpl: (s: string) => string = (s: string) => s
@@ -80,15 +84,15 @@ mock.module('../Feedback.js', () => ({
 
 // densable early gates — default allow; tests flip via env / policy mock
 let policyAllowed = true
-mock.module('src/services/policyLimits/index.ts', () => ({
+const realPolicy = await import('../../../services/policyLimits/index.js')
+const policySnap = snapshotModuleExports(realPolicy)
+const policyOverlay = () => ({
+  ...policySnap,
   isPolicyAllowed: () => policyAllowed,
-}))
-mock.module('src/services/policyLimits/index.js', () => ({
-  isPolicyAllowed: () => policyAllowed,
-}))
-mock.module('../../../services/policyLimits/index.js', () => ({
-  isPolicyAllowed: () => policyAllowed,
-}))
+})
+mock.module('src/services/policyLimits/index.ts', policyOverlay)
+mock.module('src/services/policyLimits/index.js', policyOverlay)
+mock.module('../../../services/policyLimits/index.js', policyOverlay)
 
 // Prefer setupAxiosMock (hygiene) over bare mock.module('axios')
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
@@ -111,12 +115,33 @@ axiosHandle.useStubs = true
 // densable m0t provider — default firstParty so ladder tests stay on post path.
 let mockProvider: string = 'firstParty'
 const realProviders = await import('../../../utils/model/providers.js')
+const providersSnap = snapshotModuleExports(realProviders)
 const providersOverlay = () => ({
-  ...realProviders,
+  ...providersSnap,
   getAPIProvider: () => mockProvider,
 })
 mock.module('src/utils/model/providers.ts', providersOverlay)
 mock.module('src/utils/model/providers.js', providersOverlay)
+
+afterAll(() => {
+  mock.module('src/utils/auth.ts', () => ({ ...authSnap }))
+  mock.module('src/utils/auth.js', () => ({ ...authSnap }))
+  mock.module('src/utils/http.ts', () => ({ ...httpSnap }))
+  mock.module('src/utils/http.js', () => ({ ...httpSnap }))
+  mock.module('src/utils/messages.ts', () => ({ ...messagesSnap }))
+  mock.module('src/utils/messages.js', () => ({ ...messagesSnap }))
+  mock.module('src/utils/git.ts', () => ({ ...gitSnap }))
+  mock.module('src/utils/git.js', () => ({ ...gitSnap }))
+  mock.module('src/utils/sessionStorage.ts', () => ({ ...sessionStorageSnap }))
+  mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
+  mock.module('src/services/policyLimits/index.ts', () => ({ ...policySnap }))
+  mock.module('src/services/policyLimits/index.js', () => ({ ...policySnap }))
+  mock.module('../../../services/policyLimits/index.js', () => ({
+    ...policySnap,
+  }))
+  mock.module('src/utils/model/providers.ts', () => ({ ...providersSnap }))
+  mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
+})
 
 ;(globalThis as { MACRO?: { VERSION: string } }).MACRO = {
   VERSION: '2.1.224-test',
@@ -350,17 +375,35 @@ describe('densable 2.1.224 #16/#25 submitTranscriptShare ladder', () => {
   })
 
   test('essential traffic only → essential_traffic_only before post', async () => {
+    // Pin privacyLevel for this test — co-suites may leave isEssentialTrafficOnly
+    // mocked false without restore (process-global mock.module).
+    const realPrivacy = await import('../../../utils/privacyLevel.js')
+    const privacySnap = snapshotModuleExports(realPrivacy)
+    mock.module('src/utils/privacyLevel.js', () => ({
+      ...privacySnap,
+      isEssentialTrafficOnly: () => true,
+    }))
+    mock.module('../../../utils/privacyLevel.js', () => ({
+      ...privacySnap,
+      isEssentialTrafficOnly: () => true,
+    }))
     process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
-    const result = await submitTranscriptShare(
-      [],
-      'bad_feedback_survey',
-      'app-ess',
-    )
-    expect(result).toEqual({
-      success: false,
-      errorCode: 'essential_traffic_only',
-    })
-    expect(axiosPost).not.toHaveBeenCalled()
+    try {
+      const result = await submitTranscriptShare(
+        [],
+        'bad_feedback_survey',
+        'app-ess',
+      )
+      expect(result).toEqual({
+        success: false,
+        errorCode: 'essential_traffic_only',
+      })
+      expect(axiosPost).not.toHaveBeenCalled()
+    } finally {
+      mock.module('src/utils/privacyLevel.js', () => ({ ...privacySnap }))
+      mock.module('../../../utils/privacyLevel.js', () => ({ ...privacySnap }))
+      delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+    }
   })
 
   test('policy allow_product_feedback false → policy_blocked before post', async () => {

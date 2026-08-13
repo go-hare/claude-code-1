@@ -4,7 +4,7 @@
  * GP-blocked powershell.exe does not surface as uv_spawn EUNKNOWN.
  */
 import { describe, expect, test } from 'bun:test'
-import { basename } from 'path'
+import { win32 } from 'path'
 
 /**
  * Pure mirror of densable YKh Windows candidate order after which("pwsh") miss.
@@ -33,7 +33,10 @@ function windowsDesktopFallback(env: { SYSTEMROOT?: string }): string {
 }
 
 function editionFromPath(p: string): 'core' | 'desktop' {
-  const base = basename(p)
+  // Pure Windows path mirror — use win32.basename so POSIX hosts do not treat
+  // backslashes as part of a single path segment (path.basename would).
+  const base = win32
+    .basename(p)
     .toLowerCase()
     .replace(/\.exe$/, '')
   return base === 'pwsh' ? 'core' : 'desktop'

@@ -85,21 +85,40 @@ describe('Tool chain: presets', () => {
 // ─── getTools (with permission context) ────────────────────────────────
 
 describe('Tool chain: getTools with context', () => {
+  // getTools → isEnabled() may resolve model via auth; hermetic CI has no keys.
+  function withAuthEnv<T>(fn: () => T): T {
+    const prevKey = process.env.ANTHROPIC_API_KEY
+    const prevOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN
+    process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-key'
+    try {
+      return fn()
+    } finally {
+      if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = prevKey
+      if (prevOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevOauth
+    }
+  }
+
   test('getTools returns tools (subset of base tools)', () => {
-    const allTools = getAllBaseTools()
-    const ctx = getEmptyToolPermissionContext()
-    const tools = getTools(ctx)
-    expect(tools.length).toBeGreaterThan(0)
-    expect(tools.length).toBeLessThanOrEqual(allTools.length)
+    withAuthEnv(() => {
+      const allTools = getAllBaseTools()
+      const ctx = getEmptyToolPermissionContext()
+      const tools = getTools(ctx)
+      expect(tools.length).toBeGreaterThan(0)
+      expect(tools.length).toBeLessThanOrEqual(allTools.length)
+    })
   })
 
   test('getTools results all have name and call function', () => {
-    const ctx = getEmptyToolPermissionContext()
-    const tools = getTools(ctx)
-    for (const tool of tools) {
-      expect(tool.name).toBeTruthy()
-      expect(typeof tool.call).toBe('function')
-    }
+    withAuthEnv(() => {
+      const ctx = getEmptyToolPermissionContext()
+      const tools = getTools(ctx)
+      for (const tool of tools) {
+        expect(tool.name).toBeTruthy()
+        expect(typeof tool.call).toBe('function')
+      }
+    })
   })
 })
 
