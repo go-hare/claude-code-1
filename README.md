@@ -43,9 +43,23 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.222 → 2.1.228** 产品对齐（222 worktree/streaming/RC + **228 layout/Windows git/SHR/UDS/skills/Vertex/Write gate 等 18 条**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.38**），与 git tag 可能不同步。
+近期主线已收口 **densable 2.1.211 → … → 2.1.228 → 2.1.229** 产品对齐（228 layout/Windows git/SHR/UDS 等 + **229 全包 32 条：HAVE 27 / N/A 5**，含 PTL reactive compact 产品默认）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.39**），与 git tag 可能不同步。
 
-#### densable 2.1.228 对齐说明（2.7.37）
+#### densable 2.1.229 对齐说明（2.7.39）
+
+对照文档：`docs/upstream-extraction/v2.1.229/official-229-checklist.md`（**HAVE 27 / N/A 5 / GAP 0**）、`changelog-2.1.229.md`。叠在 **2.1.228** 之上。**2.7.39** 在 229 产品线上补了 **DEFAULT_BUILD `REACTIVE_COMPACT`**（长会话 413/PTL withhold + try 恢复；**不含** CONTEXT_COLLAPSE / HISTORY_SNIP）与 densable **ex / Jsa / Rhe** 门控。
+
+| 面 | 已 1:1 落地 | 故意不扩 / 不动 |
+| -- | ----------- | --------------- |
+| **上下文 / PTL** | #20 messages-only >32MB `request_body_over_limit`；#25 Ysa/bua「automatic compaction failed」；**`REACTIVE_COMPACT` 产品默认 ON**；try 经 densable **ex()**（=`isAutoCompactEnabled`）+ **Jsa**（source/$Ir/yAt）+ **Rhe**（remote GB） | **CONTEXT_COLLAPSE / HISTORY_SNIP** 仍 OFF；precompute swap 未 ship |
+| **OAuth / 归因 / 1M** | #12 MCP OAuth `127.0.0.1`；#10 attribution `ignoreEnvOptOut` + auto-mode force；#11 subscriber 1M 仅 first-party/unix socket | — |
+| **SHR / Windows** | #2 server launcher hooks；#23 GCM fail-fast；#29 win32 强制 `--base-dir`；#22 managed-mcp exclusive soft-skip | — |
+| **插件 / 列表 / 流** | #4 marketplace `command`+`link`；#5 ListAgents offline/cloud；#6 VirtualMessageList keys；#16 plugin in-use markers | — |
+| **工具 / 路径 / 空白** | #7 safeToolInput non-string；#8 ProgressBar/MarkdownTable clamp；#9 Windows `\\?\`/UNC strip；#19 stream-json blank gate | — |
+| **工作流 / 其它** | #17 host cores 并发；#24 prefix stagger；#26 IPv6 doctor；#27 login OAUTH 复告；#28 commit-push-pr deny；#13/#14/#15/#18 RC/GH/diagnostics/cron | **#3** SSE host ping、**#21** Desktop OTEL、**#30–#32** VSCode **N/A** invent-ban |
+| **Feature 默认** | **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS 外围 ON | collapse/snip/ULTRAPLAN 仍 OFF |
+
+#### densable 2.1.228 对齐说明（2.7.37，已并入）
 
 对照文档：`docs/upstream-extraction/v2.1.228/official-228-checklist.md`（**HAVE 17 + PARTIAL 1 / GAP 0**；#12 core-only）、`changelog-2.1.228.md`、`cross-pack-residuals.md`。叠在 **2.1.227** 之上（中间 223–227 已并入 git；本 npm 线一次收口到 228）。
 
@@ -165,10 +179,11 @@
 | **ultrareview / teleport** | Qre 创建仍 `POST /v1/sessions`；OTe/KLc/H8/F1g/nts 走 `/v1/code/sessions`；o9t token、payload wrap、archive=kill | 主 CLI 不发明 densable 未注册的 `--project/--ref/--on-branch` 旗标（中间层 rts 已就绪） |
 | **Feature 默认** | 构建默认 feature 集见 `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS 外围** 默认 ON（2026-08-12）；**ULTRAPLAN** 仍 OFF |
 
-### 近期更新（2.7.5 → 2.7.38）
+### 近期更新（2.7.5 → 2.7.39）
 
 | 版本 | 要点 |
 | ---- | ---- |
+| **2.7.39** | **densable 2.1.229（HAVE 27 / N/A 5 / GAP 0）** + 产品默认 **`REACTIVE_COMPACT`**：长会话 413/PTL withhold + try 恢复（Ysa/bua #25；messages >32MB unrecoverable #20）；try 门控 densable **ex/Jsa/Rhe**；OAuth `127.0.0.1`、attribution force、SHR launcher hooks/GCM/base-dir、plugin command 源、ListAgents offline/cloud、safeToolInput、UNC path、workflow host 并发/prefix stagger、IPv6 doctor、commit-push-pr deny 等。N/A：#3 SSE host、#21 Desktop OTEL、#30–32 VSCode。**不含** collapse/snip。 |
 | **2.7.38** | **Grok 4.6 推理档 catalog**：按模型 ID 最长匹配加 `grok-4.6` 行（不按厂商启发式）。官方 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)（2026-08-12）：`grok-4.6` 为 `low \| medium \| high \| xhigh`（默认 `high`）；`grok-4.5` 仍三档（xhigh 当 high）。另有 `grok-4.20-reasoning` 三档、`grok-4.20-multi-agent` 含 xhigh（agent count）。`queryModelGrok` 对**映射后** id 发 Chat Completions `reasoning_effort`。不加裸 `grok-4` / `grok-4.20` 行。 |
 | **2.7.37** | **densable 2.1.228（HAVE 17 + PARTIAL 1 / GAP 0；#12 core-only）** + 已并入 223–227：Ink layout recover；kTd whole-token re-ESC + incomplete buffer；Windows `uio`；SHR checkout skip + follow-up hold；UDS `key_publish` fail-closed + LAN TCP auth；RC reattach owner / left-arrow；syncedSkills harden core；Write/Edit Jqy/MCt+l8t；Vertex fail-fast + Bedrock GKd；St mid-turn；cross-session from-name；cleanup memory / plugin symlink / marketplace ssn；`/tui` model pin；title ◐/◑；auto-mode 去 expensive；DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS 外围 ON**；221 #10 null-proto + createSdkMcpServer。跨 pack 残差见 `cross-pack-residuals.md`（teleport invent-ban）。 |
 | **2.7.36** | **streaming 空 `●` hotfix（densable 222 residual）**：`hasContentAfter` 对齐 densable `y\|\|aem`（去掉 invent `\|\|streamingPreview`）；whitespace / strip-empty 不画 XEl；`Qci` trim-empty 清 `STREAM_FLAG_DISPLAYED`。避免 collapsed 工具组后假 past-tense「Ran N…」+ Cooking 前 lone bullet。 |

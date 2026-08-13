@@ -43,9 +43,23 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.222 → 2.1.228** product alignment (222 worktree/streaming/RC + **228 layout / Windows git / SHR / UDS / skills / Vertex / Write gate**, 18 rows). **Published npm version is whatever `package.json` says** (currently **2.7.38**; trust `package.json` / npm) and may not match git tags.
+Recent work closed **densable 2.1.211 → … → 2.1.228 → 2.1.229** product alignment (228 layout/Windows git/SHR/UDS + **229 full pack 32 rows: HAVE 27 / N/A 5**, including product-default PTL reactive compact). **Published npm version is whatever `package.json` says** (currently **2.7.39**; trust `package.json` / npm) and may not match git tags.
 
-#### densable 2.1.228 alignment (2.7.37)
+#### densable 2.1.229 alignment (2.7.39)
+
+Source of truth: `docs/upstream-extraction/v2.1.229/official-229-checklist.md` (**HAVE 27 / N/A 5 / GAP 0**), `changelog-2.1.229.md`. Stacked on **2.1.228**. **2.7.39** also ships **DEFAULT_BUILD `REACTIVE_COMPACT`** (long-session 413/PTL withhold + try recovery; **not** CONTEXT_COLLAPSE / HISTORY_SNIP) with densable **ex / Jsa / Rhe** gates.
+
+| Surface | Landed 1:1 | Intentionally out of scope |
+| ------- | ---------- | -------------------------- |
+| **context / PTL** | #20 messages-only >32MB `request_body_over_limit`; #25 Ysa/bua “automatic compaction failed”; **`REACTIVE_COMPACT` product default ON**; try gated by densable **ex()** (`isAutoCompactEnabled`) + **Jsa** (source/$Ir/yAt) + **Rhe** (remote GB) | **CONTEXT_COLLAPSE / HISTORY_SNIP** still OFF; precompute swap not shipped |
+| **OAuth / attribution / 1M** | #12 MCP OAuth `127.0.0.1`; #10 attribution `ignoreEnvOptOut` + auto-mode force; #11 subscriber 1M only first-party/unix socket | — |
+| **SHR / Windows** | #2 server launcher hooks; #23 GCM fail-fast; #29 win32 requires `--base-dir`; #22 managed-mcp exclusive soft-skip | — |
+| **plugins / peers / stream** | #4 marketplace `command`+`link`; #5 ListAgents offline/cloud; #6 VirtualMessageList keys; #16 plugin in-use markers | — |
+| **tools / paths / blank** | #7 safeToolInput non-string; #8 ProgressBar/MarkdownTable clamp; #9 Windows `\\?\`/UNC strip; #19 stream-json blank gate | — |
+| **workflow / other** | #17 host-core concurrency; #24 prefix stagger; #26 IPv6 doctor; #27 login OAUTH re-warn; #28 commit-push-pr deny; #13/#14/#15/#18 RC/GH/diagnostics/cron | **#3** SSE host ping, **#21** Desktop OTEL, **#30–#32** VSCode **N/A** invent-ban |
+| **Feature defaults** | **REACTIVE_COMPACT** + UDS/LAN/TEAMMEM/KAIROS periphery ON | collapse/snip/ULTRAPLAN still OFF |
+
+#### densable 2.1.228 alignment (2.7.37, included)
 
 Source of truth: `docs/upstream-extraction/v2.1.228/official-228-checklist.md` (**HAVE 17 + PARTIAL 1 / GAP 0**; #12 core-only), `changelog-2.1.228.md`, `cross-pack-residuals.md`. Stacked on **2.1.227** (223–227 already on git; this npm line closes through 228).
 
@@ -165,10 +179,11 @@ Source of truth: `docs/upstream-extraction/v2.1.212/official-212-checklist.md` (
 | **ultrareview / teleport** | Qre create stays `POST /v1/sessions`; OTe/KLc/H8/F1g/nts on `/v1/code/sessions`; o9t token, payload wrap, archive=kill | Do not invent main-CLI `--project/--ref/--on-branch` flags densable never registers (rts middle layer already ready) |
 | **Feature defaults** | Build default feature set in `build.ts` | **UDS_INBOX / LAN_PIPES / TEAMMEM / KAIROS periphery** ON since 2026-08-12; **ULTRAPLAN** still OFF |
 
-### Recent updates (2.7.5 → 2.7.38)
+### Recent updates (2.7.5 → 2.7.39)
 
 | Version | Highlights |
 | ------- | ---------- |
+| **2.7.39** | **densable 2.1.229 (HAVE 27 / N/A 5 / GAP 0)** + product-default **`REACTIVE_COMPACT`**: long-session 413/PTL withhold + try recovery (Ysa/bua #25; messages >32MB unrecoverable #20); try gates densable **ex/Jsa/Rhe**; OAuth `127.0.0.1`, attribution force, SHR launcher hooks/GCM/base-dir, plugin command sources, ListAgents offline/cloud, safeToolInput, UNC path, workflow host concurrency/prefix stagger, IPv6 doctor, commit-push-pr deny, etc. N/A: #3 SSE host, #21 Desktop OTEL, #30–32 VSCode. **No** collapse/snip. |
 | **2.7.38** | **Grok 4.6 effort catalog**: add a `grok-4.6` row via longest-substring model-id match (not a vendor heuristic). Official [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning) (2026-08-12): `grok-4.6` is `low \| medium \| high \| xhigh` (default `high`); `grok-4.5` stays 3-tier (xhigh treated as high). Also `grok-4.20-reasoning` 3-tier and `grok-4.20-multi-agent` with xhigh (agent count). `queryModelGrok` sends Chat Completions `reasoning_effort` on the **mapped** id. No bare `grok-4` / `grok-4.20` rows. |
 | **2.7.37** | **densable 2.1.228 (HAVE 17 + PARTIAL 1 / GAP 0; #12 core-only)** + 223–227 included: Ink layout recover; kTd whole-token re-ESC + incomplete buffer; Windows `uio`; SHR checkout skip + follow-up hold; UDS `key_publish` fail-closed + LAN TCP auth; RC reattach owner / left-arrow; syncedSkills harden core; Write/Edit Jqy/MCt+l8t; Vertex fail-fast + Bedrock GKd; St mid-turn; cross-session from-name; cleanup memory / plugin symlink / marketplace ssn; `/tui` model pin; title ◐/◑; auto-mode drop expensive; DEFAULT_BUILD **UDS/LAN/TEAMMEM/KAIROS periphery ON**; 221 #10 null-proto + createSdkMcpServer. Residuals: `cross-pack-residuals.md` (teleport invent-ban). |
 | **2.7.36** | **Empty streaming `●` hotfix (densable 222 residual)**: `hasContentAfter` matches densable `y\|\|aem` (drop invent `\|\|streamingPreview`); whitespace / strip-empty does not paint XEl; `Qci` trim-empty clears `STREAM_FLAG_DISPLAYED`. Stops false past-tense “Ran N…” after collapsed tools + lone bullet before Cooking. |
