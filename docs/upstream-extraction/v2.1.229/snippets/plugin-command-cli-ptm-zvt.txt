@@ -1,0 +1,122 @@
+# densable 2.1.229 #4 residual — CLI ptm / btm / zvt / _qu
+
+Core command-source (dFe/c6_/Oxd/HK) already HAVE in pluginCommandSource.ts.
+This file is the **CLI consent + producer-deny residual** gold only.
+
+## ptm — interactive consent (SEA @273461619)
+
+```js
+async function ptm(e,t,{yes:r=!1,acceptedCommand:n}={}){
+  if(typeof t.source!=="object"||t.source.source!=="command")return;
+  if(_le()){ La(`${dxe}\n`); return }                 // managed policy
+  if(t.source.mode==="link"&&Kt()==="windows"){ La(`${hkr}\n`); return }
+  let o=t.source.command, i=HK(t.source);
+  if(n===i&&!f0t())return;                             // already accepted, same workspace
+  // print announcement with plugin@marketplace + mode desc (cTn)
+  let u=process.stdout.isTTY&&process.stdin.isTTY;
+  if(r){
+    if(!Q.CLAUDE_CODE_CHILD_SESSION&&!Q.CLAUDECODE)return{kind:"accepted",grantKey:i};
+    if(!u){ La("-y/--yes is ignored inside a Claude Code session…\n"); return }
+  }
+  if(!u){ La("Not an interactive terminal…\n"); return }
+  return La("Run this command now? [y/N] "),
+    await btm()?{kind:"accepted",grantKey:i}:{kind:"declined"}
+}
+async function btm(){
+  let e=readline.createInterface({input:process.stdin});
+  try{ for await(let t of e) return /^y(es)?$/i.test(t.trim()); return !1 }
+  finally{ e.close() }
+}
+// HK: e.mode==="link"?`${e.command}${L$o}`:e.command
+// L$o = "\n[mode: link]"
+```
+
+## ftm / update announceCommandSource
+
+- install/update CLI paths call `ptm` via `announceCommandSource`
+- installed plugin record may store `sourceCommand` (grantKey) for re-accept detection
+- Hs_ schema passthrough: `sourceCommand`, `sourceProducerPath`, `previousProducerPaths`
+
+## zvt / qvt — deny producer dir + bus (SEA @260562319)
+
+```js
+function zvt(e,{emit:t=!0}={}){
+  if(!path.isAbsolute(e)||GCe(e)||H_(e))return;
+  let r=gu().commandProducerDirsDenied;
+  if(r.has(e))return;
+  r.add(e);
+  gu().commandProducerDirsComparable=null;
+  if(t)qvt();  // emit bus for watchers
+}
+function qvt(){try{cDs.emit()}catch(e){xe(e)}}
+// cDs=xs() pure signal; sole product subscriber:
+//   sandbox init: cDs.subscribe(()=>bHo())  // bHo = refreshConfig when sandboxing on
+// _qu(e,t,r,{maxAgeMs}) — path under denied/comparable producer?
+// densable _qu rebuild uses kgt(...,{foldCase:!0}) for comparable roots
+```
+
+## densable Oxd — zvt before materialize (SEA @262941842)
+
+```js
+async function Oxd(e,t,r,n){
+  // policy / windows link ban / d6_ consent
+  return wu("plugin_command_install", async()=>{
+    let o=await c6_(e);                          // run command → producer dir
+    if(cpe(o,_n(),{foldCase:!0})) throw ...;     // refuse cwd/ancestor
+    if(zvt(o), e.mode==="link") return {...,producerDirectory:o};  // zvt FIRST
+    return await kxd(o), await r(o,t), {...};    // then copy
+  })
+}
+```
+
+## densable jEr sandbox fold (SEA @261670928)
+
+```js
+// inside convertToSandboxRuntimeConfig / jEr:
+// BFs(e)=cpe(e,_n()) — skip when cwd is under producer
+for(let Me of lDs(RPo()))
+  if(Xs.isAbsolute(Me)&&!BFs(Xs.resolve(Me)))
+    m(Xs.resolve(Me),!1,!0);  // m → denyWrite
+// cDs.subscribe → bHo/refreshConfig re-runs jEr so zvt updates OS deny
+```
+
+## densable interactive UI consent (not TTY ptm)
+
+```js
+// Install (Ikr call site in marketplace UI):
+commandSourceConsent:
+  typeof entry.source==="object"&&entry.source.source==="command"
+    ? {kind:"shown", command:HK(entry.source), pluginId}
+    : void 0
+
+// Update (ManagePlugins Me("update")):
+// densable calls _5r(pluginId, scope, {}, storage) — empty options.
+// R0v then uses recorded sourceCommand from install record (not shown/ptm).
+// CLI update wires announceCommandSource→ptm; UI does not clone TTY prompt.
+```
+
+## Local land (2.1.229 residual)
+
+- `pluginCommandSource.ts`: ptm=`promptCommandSourceConsent`, btm=`readYesFromStdin`,
+  x0v=`getRecordedCommandSourceConsent`, ftm=`announceCommandSourceForInstall`, HPd=`mergePreviousProducerPaths`
+- `commandProducerDirs.ts`: zvt=`denyCommandProducerDir`, qvt=`emitCommandProducerDirsChanged`,
+  cDs=`subscribeCommandProducerDirsChanged` (createSignal), _qu=`isPathUnderDeniedCommandProducer`,
+  lDs=`scanInstalledCommandProducerDirs`, RPo=`getCommandProducerScanRoots`；comparable cache 在 zvt/lDs 后 invalidate
+- sandbox `initialize`: densable cDs.subscribe → `refreshConfig` (bHo); cleanup with settings unsub
+- **sandbox jEr fold**: `convertToSandboxRuntimeConfig` → `lDs(RPo())` absolute producers
+  not under cwd (BFs) → `denyWrite` (OS-level; not app-only DXS)
+- **Oxd early zvt**: `installCommandPluginSource` calls `denyCommandProducerDir(producer)`
+  immediately after c6_ + cwd/ancestor check, **before** copy/link
+- uninstall densable gUo/Dz_: `removePluginInstallation` collects producerDirs → zvt({emit:false})×N → one qvt
+- schema `PluginInstallationEntrySchema`: sourceCommand / sourceProducerPath / previousProducerPaths
+- `cacheAndRegisterPlugin` → cachePlugin(commandSourceConsent) + persist HK/producer + zvt
+- `installResolvedPlugin` / `installPluginOp` pass consent; CLI `plugin install -y/--yes` + ftm before install
+- **UI install (Ikr)**: `installPluginFromMarketplace` / `uiCommandSourceConsentForInstall` → shown HK
+- **update path**: densable R0v — `updatePluginOp` options
+  `shownSourceCommand` / `announceCommandSource` / `skipCommandSources`;
+  `performPluginUpdate` → cachePlugin(commandSourceConsent) + persist HK/producer + zvt;
+  CLI `plugin update -y/--yes` + ptm via announce; autoupdate `skipCommandSources: true`;
+  **UI update** empty options → recorded consent (densable Me("update") 1:1, not Ink TTY ptm)
+- **_qu consumer**: densable DXS — `isDangerousFilePathToAutoEdit` calls
+  `_qu(path, RPo(), {maxAgeMs:5000})`; comparable roots use densable kgt foldCase
+- tests: `pluginCommandSource.229.test.ts` residual (+ lDs + cache + qvt bus + UI shown)

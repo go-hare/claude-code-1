@@ -81,7 +81,7 @@ workflow 脚本内可用的钩子（语义详见引擎包 `engine/hooks.ts`）�
 | `log(msg)` | 进度日志（面板展示，无状态变更） |
 | `workflow(name \| { scriptPath }, args?)` | 嵌套一层子 workflow（仅允许一层） |
 
-**硬限**：单次 `parallel`/`pipeline` ≤ `MAX_ITEMS_PER_CALL`（4096）；单 workflow 总 agent ≤ `MAX_TOTAL_AGENTS`（1000）；并发 cap 默认 = `DEFAULT_MAX_CONCURRENCY`（3），可经 Workflow 工具的 `maxConcurrency` 入参覆盖，绝对上限 `MAX_CONCURRENCY_CAP`（16）。
+**硬限**：单次 `parallel`/`pipeline` ≤ `MAX_ITEMS_PER_CALL`（4096）；单 workflow 总 agent ≤ `MAX_TOTAL_AGENTS`（1000）；并发 cap 默认 = densable `__S(os.availableParallelism())` → `[2, 16]`（通常 cores−2；OS API 不可用时回落 3），导出为 `DEFAULT_MAX_CONCURRENCY`，可经 Workflow 工具的 `maxConcurrency` 入参覆盖，绝对上限 `MAX_CONCURRENCY_CAP`（16）。
 
 ## 四、编写 workflow
 
@@ -177,7 +177,7 @@ return results.flat().filter(Boolean)
 
 - **journal**：每次 run 记录到 `.claude/workflow-runs/<runId>/journal.jsonl`。`resumeFromRunId` 重放 journal，已完成 `agent()` 秒回缓存结果。
 - **budget**：`budget.total` 为 token 硬顶（默认 `null` = 无限）；`budget.spent()` / `budget.remaining()` 读实时消耗；耗尽后再发 `agent()` 抛错。
-- **并发**：引擎 `Semaphore` 默认许可 3（`DEFAULT_MAX_CONCURRENCY`），可经 Workflow 工具的 `maxConcurrency` 入参 per-run 覆盖（钳到 `[1, MAX_CONCURRENCY_CAP=16]`）。
+- **并发**：引擎 `Semaphore` 默认许可 = host-derived `DEFAULT_MAX_CONCURRENCY`（`availableParallelism` → densable `__S`，非写死 3），可经 Workflow 工具的 `maxConcurrency` 入参 per-run 覆盖（钳到 `[1, MAX_CONCURRENCY_CAP=16]`）。
 - **错误**：脚本语法/meta 错 → `parseScript` 即时返错（不进后台）；agent 抛错 → `kind:'dead'` → `null`，workflow 继续（`parallel`/`pipeline` 容错）；`WorkflowAbortedError` → `killed`。
 - **SDK task_progress（densable jrH 对齐）**：progress bus 事件经 `src/workflow/taskProgressBridge.ts` 节流（16ms）映射为 `system/task_progress`，附带 `workflow_progress` 增量（phase/agent；log 不进 SDK payload）。仅 headless/non-interactive 下入队（与 `enqueueSdkEvent` 一致）。Desktop Tasks 依赖这些中途帧启用 Running 中的 `local_workflow` 行；仅有 `task_started` + 结束 `task-notification` 时该行会保持 disabled。
 - **Task state progress（densable tm8 对齐）**：同一批 delta 会 upsert 进 `LocalWorkflowTaskState.workflowProgress`（agent/phase 按 `${type}:${index}`），并维护 `progressVersion` / `agentCount` / `totalTokens` / `totalToolCalls`；`workflow_log` 只留在 task 上，超 `2*500` 裁旧 log。

@@ -1,0 +1,30 @@
+# densable 2.1.229 #18 — scheduled-tasks atomic replace + Windows FS error
+
+## Gold Ksc createCronScheduler (SEA)
+
+```js
+// chokidar.watch(path, {
+//   persistent: false,
+//   awaitWriteFinish: { stabilityThreshold: k0w=300 },
+//   ignorePermissionErrors: true,
+// })
+// A.on("error", … [ScheduledTasks] watcher error … warn)
+// A.on("unlink", ()=>{ if(!k) h=[], y.clear() })  // clear tasks/schedule on atomic replace unlink
+// stop(): A?.close(); A=null
+```
+
+## Local (already 1:1)
+
+- `src/utils/cronScheduler.ts`
+  - FILE_STABILITY_MS = 300
+  - persistent: false, ignorePermissionErrors: true
+  - unlink → tasks=[], nextFireAt.clear()
+  - error → logForDebugging warn `[ScheduledTasks] watcher error`
+  - stop() → watcher?.close(); watcher=null
+- 222 pack also landed fileChanged null-first teardown + Windows UNC filter
+  (`fileChangedWatcher.ts`, `fileWatcherErrorTeardown.222.test.ts`)
+
+## Verdict
+
+**HAVE** — no additional land required for 229 #18; residual atomic-replace leak
+was the missing unlink clear + error handler (present) and 222 teardown.

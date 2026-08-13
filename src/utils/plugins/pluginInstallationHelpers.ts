@@ -29,9 +29,11 @@ import {
   type ResolutionResult,
   resolveDependencyClosure,
 } from './dependencyResolver.js'
+import { denyCommandProducerDir } from './commandProducerDirs.js'
 import {
   addInstalledPlugin,
   getGitCommitSha,
+  loadInstalledPluginsV2,
 } from './installedPluginsManager.js'
 import { getManagedPluginNames } from './managedPlugins.js'
 import {
@@ -39,6 +41,12 @@ import {
   getPluginById,
   loadKnownMarketplacesConfigSafe,
 } from './marketplaceManager.js'
+import {
+  commandPluginConsentKey,
+  isCommandPluginSource,
+  mergePreviousProducerPaths,
+  type CommandSourceConsent,
+} from './pluginCommandSource.js'
 import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
@@ -172,6 +180,10 @@ export async function cacheAndRegisterPlugin(
   scope: PluginScope = 'user',
   projectPath?: string,
   localSourcePath?: string,
+  options?: {
+    /** densable 2.1.229 #4 — command-source consent for Oxd/d6_ */
+    commandSourceConsent?: CommandSourceConsent
+  },
 ): Promise<string> {
   // For local plugins, we need the resolved absolute path
   // Cast to PluginSource since cachePlugin handles any string path at runtime
@@ -188,6 +200,7 @@ export async function cacheAndRegisterPlugin(
     manifest: entry as PluginMarketplaceEntry,
     marketplaceHeaders,
     marketplaceUrl,
+    commandSourceConsent: options?.commandSourceConsent,
   })
 
   // For local plugins, use the original source path for Git SHA calculation
@@ -259,6 +272,24 @@ export async function cacheAndRegisterPlugin(
     finalPath = zipPath
   }
 
+  // densable $Tn: for command sources persist HK + producerPath and zvt deny
+  const commandSource = isCommandPluginSource(entry.source)
+    ? entry.source
+    : undefined
+  const existingEntry = commandSource
+    ? loadInstalledPluginsV2().plugins[pluginId]?.find(
+        e => e.scope === scope && e.projectPath === projectPath,
+      )
+    : undefined
+  const producerPath = cacheResult.producerPath
+  const sourceCommand = commandSource
+    ? commandPluginConsentKey(commandSource)
+    : undefined
+  const previousProducerPaths =
+    commandSource && producerPath !== undefined
+      ? mergePreviousProducerPaths(existingEntry, producerPath)
+      : undefined
+
   // Add to both V1 and V2 installed_plugins files with correct scope
   addInstalledPlugin(
     pluginId,
@@ -268,10 +299,21 @@ export async function cacheAndRegisterPlugin(
       lastUpdated: now,
       installPath: finalPath,
       gitCommitSha,
+      ...(sourceCommand !== undefined && { sourceCommand }),
+      ...(producerPath !== undefined && { sourceProducerPath: producerPath }),
+      ...(previousProducerPaths !== undefined &&
+        previousProducerPaths.length > 0 && {
+          previousProducerPaths,
+        }),
     },
     scope,
     projectPath,
   )
+
+  // densable zvt after materialize
+  if (producerPath !== undefined) {
+    denyCommandProducerDir(producerPath)
+  }
 
   return finalPath
 }
@@ -401,11 +443,14 @@ export async function installResolvedPlugin({
   entry,
   scope,
   marketplaceInstallLocation,
+  commandSourceConsent,
 }: {
   pluginId: string
   entry: PluginMarketplaceEntry
   scope: 'user' | 'project' | 'local'
   marketplaceInstallLocation?: string
+  /** densable 2.1.229 #4 — Pkr.commandSourceConsent (shown/accepted/recorded) */
+  commandSourceConsent?: CommandSourceConsent
 }): Promise<InstallCoreResult> {
   const settingSource = scopeToSettingSource(scope)
 
@@ -518,12 +563,17 @@ export async function installResolvedPlugin({
         source,
       )
     }
+    // densable $Tn: only the install root gets explicit consent; deps use
+    // recorded/none via cachePlugin assert (command deps rare).
     await cacheAndRegisterPlugin(
       id,
       info.entry,
       scope,
       projectPath,
       localSourcePath,
+      id === pluginId && commandSourceConsent
+        ? { commandSourceConsent }
+        : undefined,
     )
   }
 
@@ -556,12 +606,35 @@ export type InstallPluginParams = {
   marketplaceName: string
   scope?: 'user' | 'project' | 'local'
   trigger?: 'hint' | 'user'
+  /**
+   * densable Ikr `commandSourceConsent`. UI callers may omit — when the entry
+   * is a command source, this wrapper supplies densable shown HK consent
+   * (`{kind:"shown", command:HK(source), pluginId}`).
+   */
+  commandSourceConsent?: CommandSourceConsent
+}
+
+/**
+ * densable UI install consent for command sources (Ikr call site).
+ * Interactive Ink UI does not clone TTY ptm — densable uses kind "shown" + HK.
+ */
+export function uiCommandSourceConsentForInstall(
+  pluginId: string,
+  entry: PluginMarketplaceEntry,
+): CommandSourceConsent | undefined {
+  if (!isCommandPluginSource(entry.source)) return undefined
+  return {
+    kind: 'shown',
+    command: commandPluginConsentKey(entry.source),
+    pluginId,
+  }
 }
 
 /**
  * Install a single plugin from a marketplace with the specified scope.
  * Interactive-UI wrapper around `installResolvedPlugin` — adds try/catch,
  * analytics, and UI-style message formatting.
+ * densable Ikr: command sources get shown HK consent (not interactive ptm).
  */
 export async function installPluginFromMarketplace({
   pluginId,
@@ -569,6 +642,7 @@ export async function installPluginFromMarketplace({
   marketplaceName,
   scope = 'user',
   trigger = 'user',
+  commandSourceConsent,
 }: InstallPluginParams): Promise<InstallPluginResult> {
   try {
     // Look up the marketplace install location for local-source plugins.
@@ -577,11 +651,16 @@ export async function installPluginFromMarketplace({
     const pluginInfo = await getPluginById(pluginId)
     const marketplaceInstallLocation = pluginInfo?.marketplaceInstallLocation
 
+    // densable Ikr: UI install path uses shown HK for command sources.
+    const consent =
+      commandSourceConsent ?? uiCommandSourceConsentForInstall(pluginId, entry)
+
     const result = await installResolvedPlugin({
       pluginId,
       entry,
       scope,
       marketplaceInstallLocation,
+      commandSourceConsent: consent,
     })
 
     if (!result.ok) {

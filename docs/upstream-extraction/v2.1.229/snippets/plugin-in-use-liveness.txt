@@ -1,0 +1,22 @@
+# densable 2.1.229 #16 — plugin cache liveness markers
+# SEA ~263002630–263008500 (IId / PId / vTn / wId / $6_ / vId)
+
+$me=".orphaned_at", Ume=".in_use", kot=".links_materialized"
+STn=".in_use-links", Z9s=".last_inuse_sweep", TId=86400000
+
+# IId(versionPath):
+#   if symlink → RId → pluginsDir/.in_use-links/<m>/<p>/<v>/<pid>
+#   else → versionPath/.in_use/<pid>
+#   payload: {pid, procStart|procStartFt via jLe(gae())}
+#   vId registers process.exit → $6_ unlinkSync own markers
+
+# PId(paths): skip if .last_inuse_sweep mtime < 1 day; else vTn each + stamp
+
+# vTn / wId: readdir markers; keep live (pid===1 || kill(0)) && EL identity;
+#            delete dead; empty/tmp count as live; return hasLive
+
+# orphan delete path: if await vTn(e) → "Skipping orphan cleanup, in use by live session"
+
+# Nq_ after assemblePluginLoadResult: IId each cache-resident enabled path + PId
+
+# Local: src/utils/plugins/pluginInUseMarkers.ts + pluginLoader wire + cacheUtils orphan gate

@@ -23,6 +23,10 @@ import {
   getPathsForPermissionCheck,
 } from '../fsOperations.js'
 import {
+  getCommandProducerScanRoots,
+  isPathUnderDeniedCommandProducer,
+} from '../plugins/commandProducerDirs.js'
+import {
   containsPathTraversal,
   expandPath,
   getDirectoryForPath,
@@ -455,6 +459,19 @@ function isDangerousFilePathToAutoEdit(path: string): boolean {
   // Check for UNC paths (defense-in-depth to catch any patterns that might not be caught by containsVulnerableUncPath)
   // Block anything starting with \\ or // as these are potentially UNC paths that could access network resources
   if (path.startsWith('\\\\') || path.startsWith('//')) {
+    return true
+  }
+
+  // densable 2.1.229 #4 DXS/_qu: command-source producer dirs (zvt + lDs)
+  // are sensitive — refuse auto-edit so tools cannot mutate the install source.
+  // densable: _qu(path, RPo(), Sn(), {maxAgeMs:5000})
+  if (
+    isPathUnderDeniedCommandProducer(
+      absolutePath,
+      getCommandProducerScanRoots(),
+      { maxAgeMs: 5000 },
+    )
+  ) {
     return true
   }
 

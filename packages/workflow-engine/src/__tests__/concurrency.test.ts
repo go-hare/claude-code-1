@@ -4,7 +4,12 @@ import {
   Semaphore,
   maxConcurrency,
 } from '../engine/concurrency.js'
-import { DEFAULT_MAX_CONCURRENCY, MAX_CONCURRENCY_CAP } from '../constants.js'
+import {
+  DEFAULT_MAX_CONCURRENCY,
+  MAX_CONCURRENCY_CAP,
+  resolveDefaultMaxConcurrency,
+  workflowDefaultConcurrencyFromParallelism,
+} from '../constants.js'
 
 test('Semaphore limits concurrency, permit transfer does not leak', async () => {
   const sem = new Semaphore(2)
@@ -24,9 +29,33 @@ test('Semaphore limits concurrency, permit transfer does not leak', async () => 
   expect(peak).toBe(2) // never exceeds permits
 })
 
-test('maxConcurrency returns DEFAULT_MAX_CONCURRENCY (=3)', () => {
+test('maxConcurrency returns DEFAULT_MAX_CONCURRENCY (host-derived densable b_S)', () => {
   expect(maxConcurrency()).toBe(DEFAULT_MAX_CONCURRENCY)
-  expect(maxConcurrency()).toBe(3)
+  // densable __S: Math.min(16, Math.max(2, n-2)) → always in [2, 16]
+  expect(DEFAULT_MAX_CONCURRENCY).toBeGreaterThanOrEqual(2)
+  expect(DEFAULT_MAX_CONCURRENCY).toBeLessThanOrEqual(MAX_CONCURRENCY_CAP)
+})
+
+test('densable 2.1.229 #17 __S workflowDefaultConcurrencyFromParallelism', () => {
+  // Math.min(16, Math.max(2, e-2))
+  expect(workflowDefaultConcurrencyFromParallelism(1)).toBe(2) // max(2, -1) → 2
+  expect(workflowDefaultConcurrencyFromParallelism(2)).toBe(2)
+  expect(workflowDefaultConcurrencyFromParallelism(3)).toBe(2)
+  expect(workflowDefaultConcurrencyFromParallelism(4)).toBe(2)
+  expect(workflowDefaultConcurrencyFromParallelism(5)).toBe(3)
+  expect(workflowDefaultConcurrencyFromParallelism(8)).toBe(6)
+  expect(workflowDefaultConcurrencyFromParallelism(18)).toBe(16) // min 16
+  expect(workflowDefaultConcurrencyFromParallelism(32)).toBe(16)
+  expect(workflowDefaultConcurrencyFromParallelism(2.9)).toBe(2) // floor
+  expect(workflowDefaultConcurrencyFromParallelism(Number.NaN)).toBe(2)
+})
+
+test('densable 2.1.229 #17 resolveDefaultMaxConcurrency uses availableParallelism inject', () => {
+  // cgroup-limited container: availableParallelism=2 → concurrency 2 (not host cores)
+  expect(resolveDefaultMaxConcurrency(() => 2)).toBe(2)
+  expect(resolveDefaultMaxConcurrency(() => 4)).toBe(2)
+  expect(resolveDefaultMaxConcurrency(() => 10)).toBe(8)
+  expect(resolveDefaultMaxConcurrency(() => 100)).toBe(16)
 })
 
 test('clampMaxConcurrency: undefined/NaN→DEFAULT; <1→1; >CAP→CAP; normal value kept', () => {

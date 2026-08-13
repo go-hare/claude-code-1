@@ -2,6 +2,7 @@ import type { OverageDisabledReason } from 'src/services/claudeAiLimits.js'
 import { isClaudeAISubscriber } from '../auth.js'
 import { getGlobalConfig } from '../config.js'
 import { is1mContextDisabled } from '../context.js'
+import { isFirstPartyAnthropicBaseUrl } from './providers.js'
 
 /**
  * Check if extra usage is enabled based on the cached disabled reason.
@@ -42,31 +43,48 @@ function isExtraUsageEnabled(): boolean {
   }
 }
 
+/**
+ * densable 2.1.229 RAu — subscriber on first-party Anthropic path (or unix socket).
+ * Custom ANTHROPIC_BASE_URL gateways are NOT first-party: they must not require
+ * claude.ai extra-usage for Sonnet/Opus 1M (fixes /model reject bug).
+ */
+export function isFirstPartySubscriberFor1mAccess(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    isClaudeAISubscriber() &&
+    (!!env.ANTHROPIC_UNIX_SOCKET || isFirstPartyAnthropicBaseUrl(env))
+  )
+}
+
 // @[MODEL LAUNCH]: Add check if the new model supports 1M context
-export function checkOpus1mAccess(): boolean {
+/** densable Hte — Opus 1M access */
+export function checkOpus1mAccess(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
   if (is1mContextDisabled()) {
     return false
   }
 
-  if (isClaudeAISubscriber()) {
-    // Subscribers have access if extra usage is enabled for their account
+  // densable RAu → kAu (extra usage); else allow (PAYG / custom gateway)
+  if (isFirstPartySubscriberFor1mAccess(env)) {
     return isExtraUsageEnabled()
   }
 
-  // Non-subscribers (API/PAYG) have access
   return true
 }
 
-export function checkSonnet1mAccess(): boolean {
+/** densable ufe — Sonnet 1M access */
+export function checkSonnet1mAccess(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
   if (is1mContextDisabled()) {
     return false
   }
 
-  if (isClaudeAISubscriber()) {
-    // Subscribers have access if extra usage is enabled for their account
+  if (isFirstPartySubscriberFor1mAccess(env)) {
     return isExtraUsageEnabled()
   }
 
-  // Non-subscribers (API/PAYG) have access
   return true
 }

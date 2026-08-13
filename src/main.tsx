@@ -281,7 +281,12 @@ import {
   parseMcpConfigFromFilePath,
   storeMcpConfigServerErrors,
 } from 'src/services/mcp/config.js';
-import { filterMcpServersForHermeticMode, formatMcpHermeticDropWarn } from './utils/mcpHermeticFilter.js';
+import {
+  filterMcpServersForHermeticMode,
+  formatEnterpriseMcpConfigDropWarn,
+  formatMcpHermeticDropWarn,
+} from './utils/mcpHermeticFilter.js';
+import { isRemoteEnvEnabled } from './utils/residualFinalEnvGates.js';
 import { isXaaEnabled } from 'src/services/mcp/xaaIdpLogin.js';
 import { getRelevantTips } from 'src/services/tips/tipRegistry.js';
 import { logContextMetrics } from 'src/utils/api.js';
@@ -2287,10 +2292,27 @@ async function run(): Promise<CommanderCommand> {
               `Warning: MCP ${plural(blocked.length, 'server')} blocked by enterprise policy: ${blocked.join(', ')}\n`,
             );
           }
-          // Official rhf: safe-mode / remote-hermetic drop non-sdk --mcp-config servers.
-          const hermetic = filterMcpServersForHermeticMode(allowed as Record<string, ScopedMcpServerConfig>);
+          // densable 2.1.229 AYh: safe / hermetic / enterprise-remote soft-drop non-sdk.
+          // Ia = L$() && CLAUDE_CODE_REMOTE && !strictMcpConfig && GUo(sdkOnly)
+          // When true, drop non-sdk with warn instead of process.exit (SHR/remote).
+          const allowedRecord = allowed as Record<string, ScopedMcpServerConfig>;
+          const sdkOnly = Object.fromEntries(
+            Object.entries(allowedRecord).filter(([, cfg]) => cfg.type === 'sdk'),
+          ) as Record<string, ScopedMcpServerConfig>;
+          const dropForEnterpriseMcpConfig =
+            doesEnterpriseMcpConfigExist() &&
+            isRemoteEnvEnabled() &&
+            !options.strictMcpConfig &&
+            areMcpConfigsAllowedWithEnterpriseMcpConfig(sdkOnly);
+          const hermetic = filterMcpServersForHermeticMode(allowedRecord, {
+            dropForEnterpriseMcpConfig,
+          });
           if (hermetic.dropped.length > 0 && hermetic.reason) {
-            process.stderr.write(formatMcpHermeticDropWarn(hermetic.dropped, hermetic.reason) + '\n');
+            if (hermetic.reason === 'enterprise MCP config') {
+              process.stderr.write(formatEnterpriseMcpConfigDropWarn(hermetic.dropped) + '\n');
+            } else {
+              process.stderr.write(formatMcpHermeticDropWarn(hermetic.dropped, hermetic.reason) + '\n');
+            }
           }
           dynamicMcpConfig = {
             ...dynamicMcpConfig,
@@ -5527,6 +5549,7 @@ async function run(): Promise<CommanderCommand> {
     });
 
   // Plugin install command (+ densable 2.1.218 --config KEY=VALUE / BJy)
+  // densable 2.1.229 #4: -y/--yes accepts command-source plugin install non-interactively
   pluginCmd
     .command('install <plugin>')
     .alias('i')
@@ -5538,8 +5561,9 @@ async function run(): Promise<CommanderCommand> {
       (value: string, previous: string[]) => [...previous, value],
       [] as string[],
     )
+    .option('-y, --yes', 'Accept command-source plugin install without prompting')
     .addOption(coworkOption())
-    .action(async (plugin: string, options: { scope?: string; cowork?: boolean; config?: string[] }) => {
+    .action(async (plugin: string, options: { scope?: string; cowork?: boolean; config?: string[]; yes?: boolean }) => {
       const { pluginInstallHandler } = await import('./cli/handlers/plugins.js');
       await pluginInstallHandler(plugin, options);
     });
@@ -5591,12 +5615,14 @@ async function run(): Promise<CommanderCommand> {
     });
 
   // Plugin update command
+  // densable 2.1.229 #4: -y/--yes accepts command-source plugin update without prompting
   pluginCmd
     .command('update <plugin>')
     .description('Update a plugin to the latest version (restart required to apply)')
     .option('-s, --scope <scope>', `Installation scope: ${VALID_UPDATE_SCOPES.join(', ')} (default: user)`)
+    .option('-y, --yes', 'Accept command-source plugin update without prompting')
     .addOption(coworkOption())
-    .action(async (plugin: string, options: { scope?: string; cowork?: boolean }) => {
+    .action(async (plugin: string, options: { scope?: string; cowork?: boolean; yes?: boolean }) => {
       const { pluginUpdateHandler } = await import('./cli/handlers/plugins.js');
       await pluginUpdateHandler(plugin, options);
     });

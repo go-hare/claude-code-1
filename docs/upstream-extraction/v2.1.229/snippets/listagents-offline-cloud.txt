@@ -1,0 +1,51 @@
+===== needle='offline' offset=54995305 =====
+ent········1.4.0
+··import-statementhard_soft_breaksautolinkHeadingssrc/frontend.tsxsrc/lib/utils.ts<r><green>···<r><r><yellow>··<d>·[2mSkipped·[0m cloudflare-pagesallow-unresolved
+
+·[1mFlags:·[0mupdate-snapshotsreporter-outfile--update-timings--parallel-delay--react-compiler--sql-preconnect--prefer-offline--heap-prof-name--no-deprecation--trace-warnings--use-openssl-ca--use-bundled-caJSVALUE_TO_BOOL(invalid ABI typeallowPositionalsSessionHandshakePACKETS_RECEIVEDCC_ALGO_RENO_STRDEFAULT_MAX_DATAKEY_UPDATE_COUNT207 Multi-Status304 Not Modified306 Switch Proxy401 Unauthorized414 URI Too Long418 I'm a Teapot510 Not ExtendedmaxPayloadLengthsetSocketOptionsapplication/wasmBlob is detachedfetch.preconnectchromium-browser--user-data-dir=toHaveBeenCalledgit_dependenciesstandalone_shelltranspiler_ca
+
+===== needle='offline' offset=59432295 =====
+llback" (missing packages only), "force" (always).installAuto-install dependencies during execution. Equivalent to --install=fallback.Evaluate argument as a scriptEvaluate argument as a script and print the resultprintSkip staleness checks for packages in the Bun runtime and resolve from diskprefer-offlineUse the latest matching versions of packages in the Bun runtime, always checking npmprefer-latestSet the default port for Bun.serveoriginPass custom conditions to resolveconditionsPreconnect to a URL while code is loadingOffer h2 in fetch() TLS ALPN. Same as BUN_FEATURE_FLAG_EXPERIMENTAL_HTTP2_CLIENT=1experimental-http2-fetchHonor Alt-Svc: h3 in fetch() and upgrade to HTTP/3. Same as BUN_FEATURE_FLAG_EXPERIMENTAL_HTTP3_CLIENT=1experimental-http3-fetchSet the maximum size of HTTP headers i
+
+===== needle='offline' offset=59616527 =====
+out promiseOKSELECT command failed with non-OK responseReceived non-SELECT response while in the SELECT state.Authentication failed (unexpected response)····Server does not support RESP3Authentication failed with unexpected responsePush message is not a subscription message.Connection is closed and offline queue is disabledConnection has failedParser consumed 0 bytes unexpectedly (stack path)Failed to read data (stack path)Parser consumed 0 bytes unexpectedly (buffer path)Failed to read data (buffer path)Max reconnection attempts reachedrejectsToresolvesToinfallible: prop has valueheadingparagraphimagestrikethroughtextInvalid cron expression: unrecognized field syntaxInvalid cron expression: step value must be a positive integerInvalid cron expression: range must be ascending (use 'a,b' or
+
+===== needle='cloud' offset=54995152 =====
+·Xoc······8·HTTPResponseSinkHTMLRewriterSinkonTestFinished()node:stream/iternode_api_types.hDNS_ECONNREFUSEDDNS_EDESTRUCTIONnon-empty stringaddrinfo present········1.4.0
+··import-statementhard_soft_breaksautolinkHeadingssrc/frontend.tsxsrc/lib/utils.ts<r><green>···<r><r><yellow>··<d>·[2mSkipped·[0m cloudflare-pagesallow-unresolved
+
+·[1mFlags:·[0mupdate-snapshotsreporter-outfile--update-timings--parallel-delay--react-compiler--sql-preconnect--prefer-offline--heap-prof-name--no-deprecation--trace-warnings--use-openssl-ca--use-bundled-caJSVALUE_TO_BOOL(invalid ABI typeallowPositionalsSessionHandshakePACKETS_RECEIVEDCC_ALGO_RENO_STRDEFAULT_MAX_DATAKEY_UPDATE_COUNT207 Multi-Status304 Not Modified306 Switch Proxy401 Unauthorized414 URI Too Long418 I'm a Teapot510 Not ExtendedmaxPayloadLengthsetS
+
+===== needle='cloud' offset=58612490 =====
+lbertalateralset of small">.appenddo withfederalbank ofbeneathDespiteCapitalgrounds), and percentit fromclosingcontainInsteadfifteenas well.yahoo.respondfighterobscurereflectorganic= Math.editingonline paddinga wholeonerroryear ofend of barrierwhen itheader home ofresumedrenamedstrong>heatingretainscloudfrway of March 1knowingin partBetweenlessonsclosestvirtuallinks">crossedEND -->famous awardedLicenseHealth fairly wealthyminimalAfricancompetelabel">singingfarmersBrasil)discussreplaceGregoryfont copursuedappearsmake uproundedboth ofblockedsaw theofficescoloursif(docuwhen heenforcepush(fuAugust UTF-8">Fantasyin mostinjuredUsuallyfarmingclosureobject defenceuse of Medical<body>
+evidentbe usedkeyCodesixteenIslamic#000000entire widely active (typeofone cancolor =speakerextendsPhysicsterrain<tb
+
+===== needle='cloud' offset=59916425 =====
+n run ····.
+·!·[0m·[31mUh-oh·[0m. ·[1m·[33mbun ·m·[0m is a subcommand reserved for future use by Bun.
+
+If you were trying to run a package.json script called ····, use ·[1m·[35mbun run ·····[0m.
+·appcircleaws-codebuildazure-pipelinesbamboo····bitbucket-pipelinesbitrisebuddybuildkite········cirrus-cicloudflare-workerscodefreshcodemagicdronedsariearthlyexpo-application-servicesgerritgitea-actionsgithub-actionsgitlab-cigoogle-cloud-buildharness-ci/app/.heroku/node/bin/nodehudsonjenkinslayercimagnum-cinetlify-cinevercodereleasehubsail-ciscrewdriversemaphoresourcehutstrider-cdtaskclustertravis-civercelvisual-studio-app-centerwoodpeckerxcode-cloudxcode-serverheroku········· ·[2m··········[0m ········· ·[2m··········[0m ···   ·[2m····[0m   ··········[2m··········[0m··········[2m··········[0m···wa
+
+===== needle='ListAgents' offset=70209296 =====
+Worktree·············T-·····Workflow························code-review··············u2·
+···SearchPlugins···················SearchSkills·············w2·····SuggestPluginInstall······················*·
+···SuggestSkills···················ListPlugins··············F,·
+···ListSkills················)·
+···ListAgents······················ListPeers1&·················
+···CronCreate··················
+···CronDelete··············IQ*·····CronList··+·················!···Cancel a scheduled cron job by ID·························,·····List scheduled cron jobs························WaitForMcpServers·······························RefreshMcpTools··········O,·····R·e·-·q·u·e·r·i·e·s· ·t·h·e· ·t·o·o·l· ·l·i·s·t· ·o·f· ·c·o·n·n·e·c·t·e·d· ·M·C·P· ·s·e·r·v·e·r·s· ·a·n·d· ·u·p·d·a·t·e·s· ·t·h·e· ·s·e·t· ·o·f· ·a·
+
+===== needle='ListAgents' offset=77114064 =====
+············replyTextForConsent·····························stampArtifactDbReadConsent······················stampArtifactDbWriteConsent·····················stampArtifactReadConsent························stampArtifactWatchConsent·······················zodEnumFieldIncludes····························ListAgentsTool··················ShareOnboardingGuideTool························initBundledWorkflows····························ALL_AGENT_DISALLOWED_TOOLS······················ASYNC_AGENT_ALLOWED_TOOLS·······················COORDINATOR_MODE_ALLOWED_TOOLS··················CUSTOM_AGENT_DISALLOWED_TOOLS···················REPL_ONLY_TOOLS·················TOOL_PRESETS····················assembleToolPool················filterToolsByDenyRules··························getAllBaseTools·················getT
+
+===== needle='ListAgents' offset=182138368 =====
+····························································································0···············P···············p···············································································Agent···························TaskStop····················
+···TaskOutput··················
+···ListAgents······················SendUserMessage·················ListMcpResourcesTool····························ReadMcpResourceTool·····························ReadMcpResourceDirTool··························mcp__···························__bash··························__web_fetch·····
+···································
+······························DL·······O······|······@····}······@··········································y;·····················X·······················`···················
+
+===== needle='disconnected Remote Control' MISSING =====
+
+===== needle='status: "offline"' MISSING =====

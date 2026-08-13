@@ -1,0 +1,76 @@
+# densable 2.1.229 #2 — server-supplied Claude Code hooks for SHR
+#
+# Gold: remote.launcher_hooks → materialize command hooks + launcher-settings.json
+# → child `--settings` (NOT lifecycle --hooks-dir alone).
+
+## Constants (SEA)
+
+```js
+myg = 131072
+mjw = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}\.(py|sh)$/
+hjw = new Set([
+  "Stop","SubagentStop","UserPromptSubmit","SessionStart","SessionEnd",
+  "PreToolUse","PostToolUse","PreCompact","Notification",
+])
+// _jw blocked server claude_code_args includes "settings"
+```
+
+## gjw validate (fail-soft)
+
+- not array / not object / unknown event / invalid filename
+- case-insensitive unique filename
+- script size 1..myg bytes
+- a7i compact error values (≤200 bytes)
+
+## Pyg + yjw materialize
+
+```js
+// Pyg: configDir/hooks must be absent or plain directory
+// yjw(configDir, hooks, cleanupPaths, onDebug, onStatus):
+//   validate → on fail: status "launcher_hooks validation failed — dropping
+//     (CCR deploy regression, session continues without CCR-supplied hooks)"
+//   mkdir hooks/.ccr-launcher mode 0700
+//   write each script wx 0700; cleanupPaths.push
+//   write launcher-settings.json {hooks: event→[{matcher:"",hooks:[{type:command,command,args:[]}]}]} wx 0600
+//   return {settingsPath}
+```
+
+## Call site (rBh after mcp_config seed)
+
+```js
+if (X.launcher_hooks && (!Array.isArray(X.launcher_hooks) || X.launcher_hooks.length > 0)) {
+  let wr = await yjw(Fe, X.launcher_hooks, _e, u, d)
+  if (wr) {
+    Pe = wr.settingsPath
+    if (Pt.repoDisablesAllHooks)
+      d("… disableAllHooks:true — the child will drop every flagSettings hook …")
+    // else if Mt: confine_scan_aborted metric; else success metric
+  }
+}
+// sjv: if (y) J.push("--settings", y)  // y = Pe
+// finally: for (Xt of [...Pe?[Pe]:[], ..._e]) unlink
+```
+
+## Confine bag (kjv)
+
+```js
+// when settings under root that is childCwd or ancestor of childCwd:
+if (r && (c===e || e.startsWith(c+sep)) && y?.disableAllHooks===!0)
+  r.repoDisablesAllHooks = !0
+// disableAllHooks:false still throws operator-posture (unchanged)
+```
+
+## Host seed fjw
+
+- Skip host seed of `hooks/.ccr-launcher` (+ children)
+- If hooks path not plain dir, skip all host `hooks/*` seeds
+
+## Local land
+
+- `src/self-hosted-runner/launcherHooks.ts` — gjw/yjw/Pyg/a7i
+- `sessionChild.ts` — launcherSettingsPath + blocked `settings` + `--settings`
+- `sessionHandler.ts` — materialize after mcp_config; cleanup Pe/_e
+- `sessionConfine.ts` — outBag.repoDisablesAllHooks + ApplyConfineResult
+- `sessionSeed.ts` — fjw skip `.ccr-launcher`
+- `sessionRuntime.ts` — cleanupSessionSideFiles launcherCleanupPaths
+- tests: `src/self-hosted-runner/__tests__/launcherHooks.229.test.ts`

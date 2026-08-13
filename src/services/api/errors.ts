@@ -33,11 +33,17 @@ import { getAPIProvider } from 'src/utils/model/providers.js'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import {
   API_PDF_MAX_PAGES,
-  API_REQUEST_BODY_MAX_SIZE,
   PDF_TARGET_RAW_SIZE,
 } from '../../constants/apiLimits.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { formatFileSize } from '../../utils/format.js'
+import {
+  formatGenericRequestTooLargeMessage,
+  formatStrippableMediaRequestTooLargeMessage,
+  formatUnrecoverableRequestBodyErrorDetails,
+  formatUnrecoverableRequestTooLargeMessage,
+  tryClassifyRequestBodySize,
+} from './requestBodySize.js'
 import { ImageResizeError } from '../../utils/imageResizer.js'
 import { ImageSizeError } from '../../utils/imageValidation.js'
 import {
@@ -204,14 +210,13 @@ export function getImageTooLargeErrorMessage(): string {
     : 'Image was too large. Double press esc to go back and try again with a smaller image.'
 }
 /**
- * densable X8i — 413 request body over R5i (32MB). Multi-image conversations
- * commonly hit this via accumulated attachments, not a single oversized file.
+ * densable X8i / xYo — 413 request body over R5i (32MB). Multi-image
+ * conversations commonly hit this via accumulated attachments.
+ * densable 2.1.229 #20: when messages alone exceed the limit, callers use
+ * formatUnrecoverableRequestTooLargeMessage instead (fail once, clear copy).
  */
 export function getRequestTooLargeErrorMessage(): string {
-  const limits = `max ${formatFileSize(API_REQUEST_BODY_MAX_SIZE)}`
-  return getIsNonInteractiveSession()
-    ? `Request too large (${limits}). Accumulated images and attachments in the conversation pushed the request over the limit. Remove older images or compact the conversation.`
-    : `Request too large (${limits}). Accumulated images and attachments in the conversation pushed the request over the limit. Run /compact, or double press esc to go back and remove attachments.`
+  return formatGenericRequestTooLargeMessage(getIsNonInteractiveSession())
 }
 export const OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE =
   'Your account does not have access to Claude Code. Please run /login.'
@@ -924,6 +929,9 @@ export function getAssistantMessageFromError(
 
   // densable 413: context-window phrasing → prompt_too_long (W3); else X8i
   // request_too_large with errorDetails for Gvg/isMediaSizeError (#33).
+  // densable 2.1.229 #20: when messages alone exceed the body limit, fail once
+  // with hwp + request_body_over_limit (NOT request_too_large → no strip/compact
+  // retry loop).
   if (error instanceof APIError && error.status === 413) {
     if (error.message.toLowerCase().includes('context window')) {
       return createAssistantAPIErrorMessage({
@@ -931,6 +939,29 @@ export function getAssistantMessageFromError(
         error: 'invalid_request',
         errorDetails: error.message,
       })
+    }
+    if (options?.messagesForAPI) {
+      const measure = tryClassifyRequestBodySize(options.messagesForAPI)
+      if (measure?.kind === 'unrecoverable') {
+        return createAssistantAPIErrorMessage({
+          content: formatUnrecoverableRequestTooLargeMessage(
+            measure,
+            getIsNonInteractiveSession(),
+          ),
+          error: 'invalid_request',
+          errorDetails: formatUnrecoverableRequestBodyErrorDetails(measure),
+        })
+      }
+      if (measure?.kind === 'strippable_media') {
+        return createAssistantAPIErrorMessage({
+          content: formatStrippableMediaRequestTooLargeMessage(
+            measure,
+            getIsNonInteractiveSession(),
+          ),
+          error: 'invalid_request',
+          errorDetails: `request_too_large: ${error.message}`,
+        })
+      }
     }
     return createAssistantAPIErrorMessage({
       content: getRequestTooLargeErrorMessage(),

@@ -11,6 +11,13 @@ export type BridgePeerSession = {
   name?: string
   cwd?: string
   pid?: number
+  /**
+   * densable 2.1.229 Esf — when false, ListAgents shows "offline".
+   * Live local registry peers default to connected; remote cloud rows set transport.
+   */
+  connected?: boolean
+  transport?: 'uds' | 'bridge' | 'cloud' | 'did'
+  status?: string
 }
 
 /**
@@ -32,6 +39,9 @@ export async function listBridgePeers(): Promise<BridgePeerSession[]> {
       name: session.name ?? session.kind,
       cwd: session.cwd,
       pid: session.pid,
+      transport: 'bridge',
+      // densable Esf: live registry entry → connected; dead/stale would be offline
+      connected: session.alive !== false,
     })
   }
 

@@ -28,6 +28,7 @@ import {
 } from './fileStateCache.js'
 import { isNotEmptyMessage, normalizeMessages } from './messages.js'
 import { expandPath } from './path.js'
+import { getSafeToolFilePathFromRaw } from './safeToolInput.js'
 import type {
   inputSchema as permissionToolInputSchema,
   outputSchema as permissionToolOutputSchema,
@@ -521,31 +522,33 @@ export function extractReadFilesFromMessages(
           content.type === 'tool_use' &&
           content.name === FILE_WRITE_TOOL_NAME
         ) {
-          // Extract file_path and content from the Write tool use input
-          const input = content.input as
-            | { file_path?: string; content?: unknown }
-            | undefined
+          // densable #7 nst/AIr — only string file_path (resume may carry object)
+          const filePath = getSafeToolFilePathFromRaw(content.input)
+          const rawContent =
+            content.input &&
+            typeof content.input === 'object' &&
+            content.input !== null
+              ? (content.input as { content?: unknown }).content
+              : undefined
           if (
-            input?.file_path &&
-            input.content !== undefined &&
-            input.content !== null
+            filePath !== undefined &&
+            rawContent !== undefined &&
+            rawContent !== null
           ) {
-            // Normalize to absolute path for consistent cache lookups
-            const absolutePath = expandPath(input.file_path, cwd)
+            const absolutePath = expandPath(filePath, cwd)
             fileWriteToolUseIds.set(content.id, {
               filePath: absolutePath,
-              content: coerceToolContentToString(input.content),
+              content: coerceToolContentToString(rawContent),
             })
           }
         } else if (
           content.type === 'tool_use' &&
           content.name === FILE_EDIT_TOOL_NAME
         ) {
-          // Edit's input has old_string/new_string, not the resulting content.
-          // Track the path so the second pass can read current disk state.
-          const input = content.input as { file_path?: string } | undefined
-          if (input?.file_path) {
-            const absolutePath = expandPath(input.file_path, cwd)
+          // densable #7 nst/AIr — typeof string gate before expandPath
+          const filePath = getSafeToolFilePathFromRaw(content.input)
+          if (filePath !== undefined) {
+            const absolutePath = expandPath(filePath, cwd)
             fileEditToolUseIds.set(content.id, absolutePath)
           }
         }

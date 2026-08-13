@@ -1,0 +1,6 @@
+// densable 2.1.229 SEA — #7 non-string tool input (nst / CIr / AIr)
+// offset ~264237240 in /tmp/official-229/plat/package/claude
+function nst(e){if(typeof e!=="object"||e===null)return{};let{file_path:t,path:r,pattern:n,glob:o,command:i,query:s,content:a}=e;return{...CIr(t)&&{file_path:t},...CIr(r)&&{path:r},...CIr(n)&&{pattern:n},...CIr(o)&&{glob:o},...CIr(i)&&{command:i},...CIr(s)&&{query:s},...typeof a==="string"&&{content:a}}}
+function CIr(e){return typeof e==="string"&&!e.includes("\x00")}
+function AIr(e){return e.file_path??e.path}
+// call sites: collapse read/search (yab after nst), Rab file_path extract, repl_tool_call display hint

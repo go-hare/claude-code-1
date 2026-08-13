@@ -51,6 +51,10 @@ import {
   isMemoryDirectory,
   isShellCommandTargetingMemory,
 } from './memoryFileDetection.js'
+import {
+  extractSafeToolInputFields,
+  getSafeToolFilePath,
+} from './safeToolInput.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemOps = feature('TEAMMEM')
@@ -89,24 +93,19 @@ export type SearchOrReadResult = {
 /**
  * Extract the primary file/directory path from a tool_use input.
  * Handles both `file_path` (Read/Write/Edit) and `path` (Grep/Glob).
+ * densable 2.1.229 #7: route through nst/CIr so non-string resume values don't crash.
  */
 function getFilePathFromToolInput(toolInput: unknown): string | undefined {
-  const input = toolInput as
-    | { file_path?: string; path?: string; pattern?: string; glob?: string }
-    | undefined
-  return input?.file_path ?? input?.path
+  return getSafeToolFilePath(extractSafeToolInputFields(toolInput))
 }
 
 /**
  * Check if a search tool use targets memory files by examining its path, pattern, and glob.
+ * densable yab(e) after nst(t) — only string path/glob/command are considered.
  */
 function isMemorySearch(toolInput: unknown): boolean {
-  const input = toolInput as
-    | { path?: string; pattern?: string; glob?: string; command?: string }
-    | undefined
-  if (!input) {
-    return false
-  }
+  // densable: nst before path/glob/command string ops
+  const input = extractSafeToolInputFields(toolInput)
   // Check if the search path targets a memory file or directory (Grep/Glob tools)
   if (input.path) {
     if (isAutoManagedMemoryFile(input.path) || isMemoryDirectory(input.path)) {
@@ -602,22 +601,23 @@ function getFilePathsFromReadMessage(msg: RenderableMessage): string[] {
   if (msg.type === 'assistant') {
     const content = getFirstContentItem(msg.message?.content)
     if (content && content.type === 'tool_use') {
-      const input = (content as { input: unknown }).input as
-        | { file_path?: string }
-        | undefined
-      if (input?.file_path) {
-        paths.push(input.file_path)
+      // densable Rab: nst(r.input) then file_path only when CIr-safe
+      const { file_path: filePath } = extractSafeToolInputFields(
+        (content as { input: unknown }).input,
+      )
+      if (filePath) {
+        paths.push(filePath)
       }
     }
   } else if (msg.type === 'grouped_tool_use') {
     for (const m of msg.messages) {
       const content = getFirstContentItem(m.message?.content)
       if (content && content.type === 'tool_use') {
-        const input = (content as { input: unknown }).input as
-          | { file_path?: string }
-          | undefined
-        if (input?.file_path) {
-          paths.push(input.file_path)
+        const { file_path: filePath } = extractSafeToolInputFields(
+          (content as { input: unknown }).input,
+        )
+        if (filePath) {
+          paths.push(filePath)
         }
       }
     }
@@ -886,35 +886,35 @@ export function collapseReadSearchGroups(
         const count = countToolUses(msg)
         currentGroup.mcpCallCount = (currentGroup.mcpCallCount ?? 0) + count
         currentGroup.mcpServerNames?.add(toolInfo.mcpServerName)
-        const input = toolInfo.input as { query?: string } | undefined
-        if (input?.query) {
-          currentGroup.latestDisplayHint = `"${input.query}"`
+        // densable nst: only string query becomes display hint
+        const { query } = extractSafeToolInputFields(toolInfo.input)
+        if (query) {
+          currentGroup.latestDisplayHint = `"${query}"`
         }
       } else if (isFullscreenEnvEnabled() && toolInfo.isBash) {
         // Non-search/read Bash command — counted separately so the summary
         // says "Ran N bash commands" instead of breaking the group.
         const count = countToolUses(msg)
         currentGroup.bashCount = (currentGroup.bashCount ?? 0) + count
-        const input = toolInfo.input as { command?: string } | undefined
-        if (input?.command) {
+        const { command } = extractSafeToolInputFields(toolInfo.input)
+        if (command) {
           // Prefer the stripped `# comment` if present (it's what Claude wrote
           // for the human — same trigger as the comment-as-label tool-use render).
           currentGroup.latestDisplayHint =
-            extractBashCommentLabel(input.command) ??
-            commandAsHint(input.command)
+            extractBashCommentLabel(command) ?? commandAsHint(command)
           // Remember tool_use_id → command so the result (arriving next) can
           // be scanned for commit SHA / PR URL.
           for (const id of getToolUseIdsFromMessage(msg)) {
-            currentGroup.bashCommands?.set(id, input.command)
+            currentGroup.bashCommands?.set(id, command)
           }
         }
       } else if (toolInfo.isList) {
         // Directory-listing bash commands (ls, tree, du) — counted separately
         // so the summary says "Listed N directories" instead of "Read N files".
         currentGroup.listCount += countToolUses(msg)
-        const input = toolInfo.input as { command?: string } | undefined
-        if (input?.command) {
-          currentGroup.latestDisplayHint = commandAsHint(input.command)
+        const { command } = extractSafeToolInputFields(toolInfo.input)
+        if (command) {
+          currentGroup.latestDisplayHint = commandAsHint(command)
         }
       } else if (toolInfo.isSearch) {
         // Use the isSearch flag from the tool to properly categorize bash search commands
@@ -931,10 +931,10 @@ export function collapseReadSearchGroups(
           currentGroup.memorySearchCount += count
         } else {
           // Regular (non-memory) search — collect pattern for display
-          const input = toolInfo.input as { pattern?: string } | undefined
-          if (input?.pattern) {
-            currentGroup.nonMemSearchArgs.push(input.pattern)
-            currentGroup.latestDisplayHint = `"${input.pattern}"`
+          const { pattern } = extractSafeToolInputFields(toolInfo.input)
+          if (pattern) {
+            currentGroup.nonMemSearchArgs.push(pattern)
+            currentGroup.latestDisplayHint = `"${pattern}"`
           }
         }
       } else {
@@ -955,9 +955,9 @@ export function collapseReadSearchGroups(
         if (filePaths.length === 0) {
           currentGroup.readOperationCount += countToolUses(msg)
           // Use the Bash command as the display hint (truncated for readability)
-          const input = toolInfo.input as { command?: string } | undefined
-          if (input?.command) {
-            currentGroup.latestDisplayHint = commandAsHint(input.command)
+          const { command } = extractSafeToolInputFields(toolInfo.input)
+          if (command) {
+            currentGroup.latestDisplayHint = commandAsHint(command)
           }
         }
       }

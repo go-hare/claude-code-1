@@ -1,0 +1,8 @@
+// densable 2.1.229 — #9 Windows \\?\ / UNC path strip (SEA ~257220354 / 260834786)
+// Rwr (expandPath `_$`): aggressive strip of any \\?\ prefix
+function Rwr(e){if(/^\\\\\?\\unc\\/i.test(e))return"\\\\"+e.slice(8);if(e.startsWith("\\\\?\\"))return e.slice(4);return e}
+// Xpr (realpath / pathToFileURL): drive-letter or UNC only
+function Xpr(e){if(e.startsWith("\\\\?\\UNC\\"))return"\\\\"+e.slice(8);if(e.startsWith("\\\\?\\")&&e.length>=7&&e[5]===":")return e.slice(4);return e}
+// expandPath wire: e=Rwr(sd_(e)); capitalize drive; UOo(e)&&!glob → win32.normalize early
+// UOo: win32.toNamespacedPath looks like \\?\UNC\...
+// Local: src/utils/path.ts stripWindowsExtendedPathPrefix (Rwr) + expandPath Windows branch

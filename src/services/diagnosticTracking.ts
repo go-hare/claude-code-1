@@ -6,11 +6,19 @@ import type { MCPServerConnection } from '../services/mcp/types.js'
 import { ClaudeError } from '../utils/errors.js'
 import { normalizePathForComparison, pathsEqual } from '../utils/file.js'
 import { getConnectedIdeClient } from '../utils/ide.js'
-import { jsonParse } from '../utils/slowOperations.js'
+import { every } from '../utils/set.js'
+import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 
 class DiagnosticsTrackingError extends ClaudeError {}
 
+/** densable QUd */
 const MAX_DIAGNOSTICS_SUMMARY_CHARS = 4000
+
+/**
+ * densable sQ_ — strip leading `/` before Windows drive-letter URIs
+ * (`/C:/…` or `\C:\…`) so path comparison matches IDE-normalized paths.
+ */
+const LEADING_SEP_DRIVE_LETTER = /^[\\/][A-Za-z]:[\\/]/
 
 /** densable fvd — lowercase severity → LSP-style label. */
 const DIAGNOSTIC_SEVERITY_BY_LOWER: Record<string, DiagnosticSeverity> = {
@@ -19,6 +27,27 @@ const DIAGNOSTIC_SEVERITY_BY_LOWER: Record<string, DiagnosticSeverity> = {
   info: 'Info',
   information: 'Info',
   hint: 'Hint',
+}
+
+/**
+ * densable Gjo — stable fingerprint for Set-based diagnostic equality.
+ * Avoids O(n²) some/every scans when a file has thousands of diagnostics
+ * (2.1.229 #15 multi-second UI stall).
+ */
+export function diagnosticFingerprint(d: Diagnostic): string {
+  const t = d.range
+  // Normalize code to string so number|string from LSP transports fingerprint equal.
+  const code = d.code === undefined || d.code === null ? d.code : String(d.code)
+  return jsonStringify([
+    d.message,
+    d.severity,
+    d.source,
+    code,
+    t?.start?.line,
+    t?.start?.character,
+    t?.end?.line,
+    t?.end?.character,
+  ])
 }
 
 /**
@@ -117,7 +146,7 @@ export class DiagnosticTrackingService {
   }
 
   private normalizeFileUri(fileUri: string): string {
-    // Remove our protocol prefixes
+    // densable iQ_ — strip protocol prefixes
     const protocolPrefixes = [
       'file://',
       '_claude_fs_right:',
@@ -125,11 +154,18 @@ export class DiagnosticTrackingService {
     ]
 
     let normalized = fileUri
+    let strippedPrefix = false
     for (const prefix of protocolPrefixes) {
       if (fileUri.startsWith(prefix)) {
         normalized = fileUri.slice(prefix.length)
+        strippedPrefix = true
         break
       }
+    }
+
+    // densable sQ_ — after protocol strip, drop leading sep before drive letter
+    if (strippedPrefix && LEADING_SEP_DRIVE_LETTER.test(normalized)) {
+      normalized = normalized.slice(1)
     }
 
     // Use shared utility for platform-aware path normalization
@@ -235,6 +271,11 @@ export class DiagnosticTrackingService {
       return []
     }
 
+    // densable: skip IDE round-trip when no edited-file baselines
+    if (this.baseline.size === 0) {
+      return []
+    }
+
     // Check if we have any files with diagnostic changes
     let allDiagnosticFiles: DiagnosticFile[] = []
     try {
@@ -248,29 +289,38 @@ export class DiagnosticTrackingService {
       // If fetching all diagnostics fails, return empty
       return []
     }
-    const diagnosticsForFileUrisWithBaselines = allDiagnosticFiles
-      .filter(file => this.baseline.has(this.normalizeFileUri(file.uri)))
-      .filter(file => file.uri.startsWith('file://'))
 
+    // densable single-pass: file:// rows + _claude_fs_right map, baseline only
+    const diagnosticsForFileUrisWithBaselines: Array<{
+      file: DiagnosticFile
+      normalizedPath: string
+    }> = []
     const diagnosticsForClaudeFsRightUrisWithBaselinesMap = new Map<
       string,
       DiagnosticFile
     >()
-    allDiagnosticFiles
-      .filter(file => this.baseline.has(this.normalizeFileUri(file.uri)))
-      .filter(file => file.uri.startsWith('_claude_fs_right:'))
-      .forEach(file => {
+    for (const file of allDiagnosticFiles) {
+      const isFileUri = file.uri.startsWith('file://')
+      if (!isFileUri && !file.uri.startsWith('_claude_fs_right:')) continue
+      const normalizedPath = this.normalizeFileUri(file.uri)
+      if (!this.baseline.has(normalizedPath)) continue
+      if (isFileUri) {
+        diagnosticsForFileUrisWithBaselines.push({ file, normalizedPath })
+      } else {
         diagnosticsForClaudeFsRightUrisWithBaselinesMap.set(
-          this.normalizeFileUri(file.uri),
+          normalizedPath,
           file,
         )
-      })
+      }
+    }
 
     const newDiagnosticFiles: DiagnosticFile[] = []
 
     // Process file:// protocol diagnostics
-    for (const file of diagnosticsForFileUrisWithBaselines) {
-      const normalizedPath = this.normalizeFileUri(file.uri)
+    for (const {
+      file,
+      normalizedPath,
+    } of diagnosticsForFileUrisWithBaselines) {
       const baselineDiagnostics = this.baseline.get(normalizedPath) || []
 
       // Get the _claude_fs_right file if it exists
@@ -304,9 +354,12 @@ export class DiagnosticTrackingService {
         )
       }
 
-      // Find new diagnostics that aren't in the baseline
+      // densable Gjo Set membership — O(n) not O(n²)
+      const baselineFingerprints = new Set(
+        baselineDiagnostics.map(diagnosticFingerprint),
+      )
       const newDiagnostics = fileToUse.diagnostics.filter(
-        d => !baselineDiagnostics.some(b => this.areDiagnosticsEqual(d, b)),
+        d => !baselineFingerprints.has(diagnosticFingerprint(d)),
       )
 
       if (newDiagnostics.length > 0) {
@@ -334,29 +387,16 @@ export class DiagnosticTrackingService {
     return []
   }
 
-  private areDiagnosticsEqual(a: Diagnostic, b: Diagnostic): boolean {
-    return (
-      a.message === b.message &&
-      a.severity === b.severity &&
-      a.source === b.source &&
-      a.code === b.code &&
-      a.range.start.line === b.range.start.line &&
-      a.range.start.character === b.range.start.character &&
-      a.range.end.line === b.range.end.line &&
-      a.range.end.character === b.range.end.character
-    )
-  }
-
+  /**
+   * densable areDiagnosticArraysEqual via Gjo fingerprints + V2o set subset.
+   * Set membership is O(n); previous some/every was O(n²) and stalled the UI
+   * on files with thousands of IDE diagnostics (2.1.229 #15).
+   */
   private areDiagnosticArraysEqual(a: Diagnostic[], b: Diagnostic[]): boolean {
     if (a.length !== b.length) return false
-
-    // Check if every diagnostic in 'a' exists in 'b'
-    return (
-      a.every(diagA =>
-        b.some(diagB => this.areDiagnosticsEqual(diagA, diagB)),
-      ) &&
-      b.every(diagB => a.some(diagA => this.areDiagnosticsEqual(diagA, diagB)))
-    )
+    const setA = new Set(a.map(diagnosticFingerprint))
+    const setB = new Set(b.map(diagnosticFingerprint))
+    return setA.size === setB.size && every(setA, setB)
   }
 
   /**

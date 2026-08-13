@@ -154,7 +154,7 @@ describe('densable 2.1.224 #1 sessionConfine (kjv/EKn/tre)', () => {
     mkdirSync(configDir)
     mkdirSync(stage)
     const logs: string[] = []
-    const warned = await applyRepoSettingsConfine({
+    const result = await applyRepoSettingsConfine({
       mode: 'warn',
       childCwd: ws,
       addDirs: [ws],
@@ -163,7 +163,7 @@ describe('densable 2.1.224 #1 sessionConfine (kjv/EKn/tre)', () => {
       stageFileRoot: stage,
       onStatus: m => logs.push(m),
     })
-    expect(warned).toBe(true)
+    expect(result.warned).toBe(true)
     expect(logs.some(m => m.includes('[runner:confine] WARN'))).toBe(true)
   })
 
@@ -179,7 +179,7 @@ describe('densable 2.1.224 #1 sessionConfine (kjv/EKn/tre)', () => {
     const stage = join(sess, 'uploads')
     mkdirSync(configDir)
     mkdirSync(stage)
-    const warned = await applyRepoSettingsConfine({
+    const result = await applyRepoSettingsConfine({
       mode: 'off',
       childCwd: ws,
       addDirs: [ws],
@@ -188,6 +188,7 @@ describe('densable 2.1.224 #1 sessionConfine (kjv/EKn/tre)', () => {
       stageFileRoot: stage,
       onStatus: () => {},
     })
-    expect(warned).toBe(false)
+    expect(result.warned).toBe(false)
+    expect(result.repoDisablesAllHooks).toBe(false)
   })
 })

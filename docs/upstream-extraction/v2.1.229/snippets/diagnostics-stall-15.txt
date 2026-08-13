@@ -1,0 +1,158 @@
+# densable 2.1.229 #15 — Multi-second UI stalls after large IDE diagnostics edit
+# SEA: /tmp/official-229/plat/package/claude
+# Primary JS cluster ~263799700–263805280 (class `_he`, singleton `Dit`)
+# Changelog gold: "Fixed multi-second UI stalls after editing a file with thousands of IDE diagnostics while the IDE extension is connected"
+#
+# Verdict: LAND-DELTA (not 1:1 HAVE)
+# Local: src/services/diagnosticTracking.ts still uses O(n²) areDiagnosticsEqual / areDiagnosticArraysEqual
+# and multi-filter getNewDiagnostics. densable 229 fixes stalls via Set-fingerprint equality + early exits.
+# No debounce/batch/throttle/setTimeout found in the diagnostics class cluster.
+
+================================================================================
+## GOLD SYMBOLS (SEA evidence)
+================================================================================
+| densable | role |
+|----------|------|
+| `_he` | DiagnosticsTracker class (local: DiagnosticTrackingService) |
+| `Dit` | Lazy singleton `new YR(()=>new _he)` (local: diagnosticTracker) |
+| `Gjo` | Diagnostic fingerprint: `JSON.stringify([message,severity,source,code,start.line,start.char,end.line,end.char])` via `Aon` |
+| `Aon` | `JSON.stringify(e)` |
+| `V2o` | Set subset equality: `for (x of e) if (!t.has(x)) return false; return true` |
+| `QUd=4000` | formatDiagnosticsSummary max chars; truncates with `"…[truncated]"` via `QUd-12` |
+| `sQ_` | `/^[\\/][A-Za-z]:[\\/]/` — strip leading slash before Windows drive after protocol strip |
+| `iQ_` | `["file://","_claude_fs_right:","_claude_fs_left:"]` |
+| `aQ_` | drive-letter shape for ZUd mismatch telemetry |
+| `ZUd` | path-shape summary used in mismatch log secondary message |
+| `S0` / `Xmo` | path normalize / pathsEqual (local: normalizePathForComparison / pathsEqual) |
+| `lQ_` / `t3d` | severity map (local: mapDiagnosticSeverity / DIAGNOSTIC_SEVERITY_BY_LOWER) |
+| `Wjo` / `e3d` | sanitize drop latches WeakSet/Set (local: sanitizedDiagnosticObjectPayloads / nonArrayDiagnosticsPayloadKinds) |
+| `formatDiagnosticsBlock` | wraps summary in `<new-diagnostics>…</new-diagnostics>` (local: messages.ts path) |
+
+NOT present in densable class: ensureFileOpened, areDiagnosticsEqual method name, debounce/batch/stall strings.
+
+================================================================================
+## DENSABLE SNIPPETS (verbatim from SEA)
+================================================================================
+
+### Helpers
+```js
+function V2o(e,t){for(let r of e)if(!t.has(r))return!1;return!0}
+function Aon(e){return JSON.stringify(e)}
+function Gjo(e){let t=e.range;return Aon([e.message,e.severity,e.source,e.code,t?.start?.line,t?.start?.character,t?.end?.line,t?.end?.character])}
+var QUd=4000
+iQ_=["file://","_claude_fs_right:","_claude_fs_left:"]
+sQ_=/^[\\/][A-Za-z]:[\\/]/
+```
+
+### normalizeFileUri (drive strip sQ_)
+```js
+normalizeFileUri(e){
+  let t=iQ_.find((o)=>e.startsWith(o)),
+      r=t?e.slice(t.length):e,
+      n=t!==void 0&&sQ_.test(r)?r.slice(1):r;
+  return S0(n)
+}
+```
+
+### getNewDiagnostics — stall-critical path
+```js
+async getNewDiagnostics(){
+  if(!this.initialized||!this.mcpClient||this.mcpClient.type!=="connected")return[];
+  if(this.baseline.size===0)return[];   // EARLY EXIT — skip full IDE fetch when nothing edited
+  let e=[];
+  try{
+    let o=await XUd().callIdeRpc("getDiagnostics",{},this.mcpClient);
+    e=this.parseDiagnosticResult(o)
+  }catch(o){return[]}
+  let t=[],r=new Map;
+  // single pass: partition file:// vs _claude_fs_right for baseline keys only
+  for(let o of e){
+    let i=o.uri.startsWith("file://");
+    if(!i&&!o.uri.startsWith("_claude_fs_right:"))continue;
+    let s=this.normalizeFileUri(o.uri);
+    if(!this.baseline.has(s))continue;
+    if(i)t.push({file:o,normalizedPath:s});
+    else r.set(s,o)
+  }
+  let n=[];
+  for(let{file:o,normalizedPath:i}of t){
+    let s=this.baseline.get(i)||[],a=r.get(i),l=o;
+    if(a){
+      let d=this.rightFileDiagnosticsState.get(i);
+      if(!d||!this.areDiagnosticArraysEqual(d,a.diagnostics))l=a;
+      this.rightFileDiagnosticsState.set(i,a.diagnostics)
+    }
+    // O(n) fingerprint set membership vs local O(n²) nested some/every
+    let c=new Set(s.map(Gjo)),
+        u=l.diagnostics.filter((d)=>!c.has(Gjo(d)));
+    if(u.length>0)n.push({uri:o.uri,diagnostics:u});
+    this.baseline.set(i,l.diagnostics)
+  }
+  return n
+}
+```
+
+### areDiagnosticArraysEqual — Set + V2o (not nested every/some)
+```js
+areDiagnosticArraysEqual(e,t){
+  if(e.length!==t.length)return!1;
+  let r=new Set(e.map(Gjo)),n=new Set(t.map(Gjo));
+  return r.size===n.size&&V2o(r,n)
+}
+```
+
+### formatDiagnosticsSummary truncation
+```js
+static formatDiagnosticsSummary(e){
+  let r=e.map(...).join(`\n\n`);
+  if(r.length>QUd)return r.slice(0,QUd-12)+"…[truncated]";
+  return r
+}
+static formatDiagnosticsBlock(e){
+  return `<new-diagnostics>The following new diagnostic issues were detected:\n\n${_he.formatDiagnosticsSummary(e)}</new-diagnostics>`
+}
+```
+
+### beforeFileEdited (for completeness; not the stall kernel)
+```js
+async beforeFileEdited(e){
+  // getDiagnostics {uri:`file://${e}`}; mismatch uses ZUd shapes in secondary log;
+  // baseline.set(normalized, n?n.diagnostics:[])
+}
+```
+
+### What is NOT the 229 fix
+- No debounce / throttle / requestIdleCallback / batch queue in `_he` cluster.
+- Stall fix = algorithmic: fingerprint Set membership + baseline.size early return + single-pass partition.
+- Thousands of diagnostics: O(n²) pairwise field compare → multi-second UI; Set of JSON fingerprints → ~O(n).
+
+================================================================================
+## LOCAL STATUS (src/services/diagnosticTracking.ts) — LANDED
+================================================================================
+HAVE (2.1.229 #15 land):
+- `diagnosticFingerprint` = densable Gjo (exported)
+- `areDiagnosticArraysEqual` = Set + `every` (V2o), not O(n²)
+- `getNewDiagnostics`: `baseline.size===0` early return; single-pass file:// / _claude_fs_right partition; new diags via `!Set.has(Gjo)`
+- `normalizeFileUri`: iQ_ prefixes + sQ_ leading-sep drive strip
+- QUd-equivalent MAX_DIAGNOSTICS_SUMMARY_CHARS = 4000 + `…[truncated]`
+- Tests: `src/services/__tests__/diagnosticTracking.229.test.ts`
+
+Optional residual (non-stall): densable formatDiagnosticsBlock / ZUd mismatch shape log; local keep ensureFileOpened
+
+================================================================================
+## RECOMMENDATION
+================================================================================
+**HAVE** — stall-critical Gjo/V2o/early-return/sQ_/single-pass landed.
+
+## SEA offsets (for re-verify)
+- class `_he` / getNewDiagnostics / Gjo use: ~263800332–263802476
+- QUd / format / Gjo def / Dit: ~263803942–263805200
+- V2o def: ~262537048
+- Aon def: ~257554728
+- S0/Xmo: ~258331208
+- String anchors: getDiagnostics, beforeFileEdited, rightFileDiagnosticsState, _claude_fs_right, Dropped a ${kind} diagnostics files payload, QUd=4000
+
+## Structured summary
+- **gold symbols:** `_he`, `Dit`, `Gjo`, `Aon`, `V2o`, `QUd=4000`, `sQ_`, `iQ_`, `ZUd`, `formatDiagnosticsBlock`, `baseline.size===0` early exit
+- **local status:** scaffolding HAVE; stall-critical equality/partition **MISS**
+- **recommend:** **land-delta** (Set equality + early exit + single-pass; optional sQ_)

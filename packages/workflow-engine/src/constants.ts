@@ -16,13 +16,51 @@ export const WORKFLOW_RUNS_DIR = '.claude/workflow-runs'
 export const WORKFLOW_SCRIPT_EXTENSIONS = ['.ts', '.js', '.mjs'] as const
 
 /**
- * Concurrency: default semaphore permits per workflow run.
- * History: previously used min(CAP, cpuCores - 2); changed to a fixed default of 3 — to avoid fanning out a dozen agents at once on multi-core machines.
- * A single run can override this via the Workflow tool's maxConcurrency input (still clamped by CAP).
+ * densable `__S(e)` — map host/container parallelism → default agent concurrency:
+ *   Math.min(16, Math.max(2, e - 2))
+ * densable 2.1.229 #17: use `os.availableParallelism()` (cgroup-aware on Linux),
+ * not raw host `os.cpus().length`, so CPU-limited containers do not fan out
+ * to the host core count.
  */
-export const DEFAULT_MAX_CONCURRENCY = 3
+export function workflowDefaultConcurrencyFromParallelism(
+  parallelism: number,
+): number {
+  const n = Number.isFinite(parallelism) ? Math.floor(parallelism) : 2
+  return Math.min(16, Math.max(2, n - 2))
+}
 
-/** Absolute cap on user-supplied maxConcurrency (anti-abuse). */
+/**
+ * densable `b_S = __S(os.availableParallelism())` at module init.
+ * Falls back to 3 when the OS APIs are unavailable.
+ */
+export function resolveDefaultMaxConcurrency(
+  availableParallelismFn?: () => number,
+): number {
+  try {
+    if (availableParallelismFn) {
+      return workflowDefaultConcurrencyFromParallelism(availableParallelismFn())
+    }
+    // Lazy require keeps constants free of hard os import for tree-shaking tests
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const os = require('node:os') as typeof import('node:os')
+    const n =
+      typeof os.availableParallelism === 'function'
+        ? os.availableParallelism()
+        : os.cpus().length
+    return workflowDefaultConcurrencyFromParallelism(n)
+  } catch {
+    return 3
+  }
+}
+
+/**
+ * Concurrency: default semaphore permits per workflow run.
+ * densable pins at process start via availableParallelism (cgroup-aware).
+ * A single run can override via Workflow tool maxConcurrency (still clamped by CAP).
+ */
+export const DEFAULT_MAX_CONCURRENCY = resolveDefaultMaxConcurrency()
+
+/** Absolute cap on user-supplied maxConcurrency (anti-abuse). densable 16. */
 export const MAX_CONCURRENCY_CAP = 16
 
 /** Total cap on agent() calls within a single workflow lifecycle. */

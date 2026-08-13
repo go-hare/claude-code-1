@@ -14,6 +14,8 @@ export const BLOCKED_CLAUDE_CODE_ARGS = new Set([
   'replay-user-messages',
   'debug-file',
   'mcp-config',
+  // densable `_jw` — server cannot override CCR launcher --settings
+  'settings',
 ])
 
 /** densable `vfS` — allowed flag name shape for fff */
@@ -181,6 +183,8 @@ export type BuildSessionChildArgsOpts = {
   sessionId: string
   debugFile: string
   mcpConfigPath?: string
+  /** densable `launcherSettingsPath` / Pe → `--settings` */
+  launcherSettingsPath?: string
   addDirs?: string[]
   /** densable remote config `claude_code_args` object */
   claudeCodeArgs?: Record<string, unknown>
@@ -215,6 +219,10 @@ export function buildSessionChildArgs(
   ]
   if (opts.mcpConfigPath) {
     argv.push('--mcp-config', opts.mcpConfigPath)
+  }
+  // densable sjv: if (y) J.push("--settings", y)
+  if (opts.launcherSettingsPath) {
+    argv.push('--settings', opts.launcherSettingsPath)
   }
   for (const dir of opts.addDirs ?? []) {
     argv.push('--add-dir', dir)

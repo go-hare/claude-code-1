@@ -23,6 +23,10 @@ import {
   jsonStringify,
   writeFileSync_DEPRECATED,
 } from '../slowOperations.js'
+import {
+  denyCommandProducerDir,
+  emitCommandProducerDirsChanged,
+} from './commandProducerDirs.js'
 import { getPluginsDirectory } from './pluginDirectories.js'
 import {
   type InstalledPlugin,
@@ -436,6 +440,16 @@ export function addPluginInstallation(
     lastUpdated: new Date().toISOString(),
     gitCommitSha: metadata.gitCommitSha,
     ...(projectPath && { projectPath }),
+    // densable 2.1.229 #4 — command-source grant + producer paths
+    ...(metadata.sourceCommand !== undefined && {
+      sourceCommand: metadata.sourceCommand,
+    }),
+    ...(metadata.sourceProducerPath !== undefined && {
+      sourceProducerPath: metadata.sourceProducerPath,
+    }),
+    ...(metadata.previousProducerPaths !== undefined && {
+      previousProducerPaths: metadata.previousProducerPaths,
+    }),
   }
 
   if (existingIndex >= 0) {
@@ -453,6 +467,9 @@ export function addPluginInstallation(
 /**
  * Remove a plugin installation entry from a specific scope.
  *
+ * densable gUo/Dz_: collect sourceProducerPath + previousProducerPaths from the
+ * removed entry, zvt each with emit:false, then one qvt if any producers found.
+ *
  * @param pluginId - Plugin ID in "plugin@marketplace" format
  * @param scope - Installation scope to remove
  * @param projectPath - Project path (for project/local scopes)
@@ -469,9 +486,20 @@ export function removePluginInstallation(
     return
   }
 
-  data.plugins[pluginId] = installations.filter(
-    entry => !(entry.scope === scope && entry.projectPath === projectPath),
-  )
+  // densable Dz_: gather producer dirs from the installation being removed
+  const producerDirs: string[] = []
+  data.plugins[pluginId] = installations.filter(entry => {
+    const match = entry.scope === scope && entry.projectPath === projectPath
+    if (match) {
+      if (entry.sourceProducerPath) {
+        producerDirs.push(entry.sourceProducerPath)
+      }
+      for (const p of entry.previousProducerPaths ?? []) {
+        if (p) producerDirs.push(p)
+      }
+    }
+    return !match
+  })
 
   // Remove plugin entirely if no installations left
   if (data.plugins[pluginId].length === 0) {
@@ -480,6 +508,14 @@ export function removePluginInstallation(
 
   saveInstalledPluginsV2(data)
   logForDebugging(`Removed installation for ${pluginId} at scope ${scope}`)
+
+  // densable gUo: batch zvt({emit:false}) then single qvt
+  if (producerDirs.length > 0) {
+    for (const dir of producerDirs) {
+      denyCommandProducerDir(dir, { emit: false })
+    }
+    emitCommandProducerDirsChanged()
+  }
 }
 
 // =============================================================================
@@ -536,6 +572,9 @@ export function loadInstalledPluginsFromDisk(): InstalledPluginsFileV2 {
  * Used by background updater to record new version on disk while session
  * continues using the old version.
  *
+ * densable 2.1.229 #4: optional command-source consent/producer fields from
+ * R0v update path (sourceCommand / sourceProducerPath / previousProducerPaths).
+ *
  * @param pluginId - Plugin ID in "plugin@marketplace" format
  * @param scope - Installation scope
  * @param projectPath - Project path (for project/local scopes)
@@ -549,6 +588,11 @@ export function updateInstallationPathOnDisk(
   newPath: string,
   newVersion: string,
   gitCommitSha?: string,
+  commandSourceMeta?: {
+    sourceCommand?: string
+    sourceProducerPath?: string
+    previousProducerPaths?: string[]
+  },
 ): void {
   const diskData = loadInstalledPluginsFromDisk()
   const installations = diskData.plugins[pluginId]
@@ -570,6 +614,15 @@ export function updateInstallationPathOnDisk(
     entry.lastUpdated = new Date().toISOString()
     if (gitCommitSha !== undefined) {
       entry.gitCommitSha = gitCommitSha
+    }
+    if (commandSourceMeta?.sourceCommand !== undefined) {
+      entry.sourceCommand = commandSourceMeta.sourceCommand
+    }
+    if (commandSourceMeta?.sourceProducerPath !== undefined) {
+      entry.sourceProducerPath = commandSourceMeta.sourceProducerPath
+    }
+    if (commandSourceMeta?.previousProducerPaths !== undefined) {
+      entry.previousProducerPaths = commandSourceMeta.previousProducerPaths
     }
 
     const filePath = getInstalledPluginsFilePath()
@@ -879,9 +932,16 @@ export function isPluginGloballyInstalled(pluginId: string): boolean {
  * @param scope - Installation scope (defaults to 'user' for backward compatibility)
  * @param projectPath - Project path (for project/local scopes)
  */
+export type InstalledPluginWriteMetadata = InstalledPlugin & {
+  /** densable 2.1.229 #4 — accepted command consent key (HK) */
+  sourceCommand?: string
+  sourceProducerPath?: string
+  previousProducerPaths?: string[]
+}
+
 export function addInstalledPlugin(
   pluginId: string,
-  metadata: InstalledPlugin,
+  metadata: InstalledPluginWriteMetadata,
   scope: PersistableScope = 'user',
   projectPath?: string,
 ): void {
@@ -894,6 +954,16 @@ export function addInstalledPlugin(
     lastUpdated: metadata.lastUpdated,
     gitCommitSha: metadata.gitCommitSha,
     ...(projectPath && { projectPath }),
+    // densable 2.1.229 #4 — command-source grant + producer paths
+    ...(metadata.sourceCommand !== undefined && {
+      sourceCommand: metadata.sourceCommand,
+    }),
+    ...(metadata.sourceProducerPath !== undefined && {
+      sourceProducerPath: metadata.sourceProducerPath,
+    }),
+    ...(metadata.previousProducerPaths !== undefined && {
+      previousProducerPaths: metadata.previousProducerPaths,
+    }),
   }
 
   // Get or create array for this plugin (preserves other scope installations)

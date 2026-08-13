@@ -86,6 +86,7 @@ import {
   applyRepoSettingsConfine,
   type ConfineRepoSettings,
 } from './sessionConfine.js'
+import { materializeLauncherHooks } from './launcherHooks.js'
 import {
   buildSessionGoneEndSessionLine,
   isEpochMismatchRunnerError,
@@ -300,6 +301,8 @@ export type SpawnSessionChildOpts = {
   inferenceAccessToken: string
   claudeCodeArgs?: Record<string, unknown>
   mcpConfigPath?: string
+  /** densable `launcherSettingsPath` / Pe → child `--settings` */
+  launcherSettingsPath?: string
   addDirs?: string[]
   /** densable `governedGit` / `governedGitConfigPath` for sjv env */
   governedGitConfig?: boolean
@@ -342,6 +345,7 @@ export async function spawnSessionChild(
     sessionId: opts.sessionId,
     debugFile: opts.debugFile,
     mcpConfigPath: opts.mcpConfigPath,
+    launcherSettingsPath: opts.launcherSettingsPath,
     addDirs: opts.addDirs,
     claudeCodeArgs: opts.claudeCodeArgs,
     onDebug: opts.onDebug,
@@ -635,6 +639,10 @@ export async function handleSession(
   let exitResultForCleanup = 'failed'
   /** densable `de` — mcp-config.json path (always unlinked in finally) */
   let mcpConfigPathLive: string | undefined
+  /** densable `Pe` — launcher-settings.json path */
+  let launcherSettingsPathLive: string | undefined
+  /** densable `_e` — staged launcher hook script paths + settings for finally unlink */
+  const launcherCleanupPaths: string[] = []
   /** densable `Be` — repos where Tjv wrote local proxy credential.helper */
   let proxyCredTracksLive: Array<{ path: string; origin: string }> = []
   /** densable `Le` — worktrees cleaned in finally (even on abandoned) */
@@ -1417,7 +1425,7 @@ export async function handleSession(
     // densable rBh confine (EKn + kjv + outside-workspace) before spawn
     const confineMode: ConfineRepoSettings =
       opts.confineRepoSettings ?? 'enforce'
-    await applyRepoSettingsConfine({
+    const confineResult = await applyRepoSettingsConfine({
       mode: confineMode,
       childCwd,
       addDirs,
@@ -1459,7 +1467,39 @@ export async function handleSession(
       mcpConfigPathLive = mcpConfigPath
     }
 
-    // densable: after git prep + mcp_config, abort before qUi/spawn → abandoned
+    // densable 2.1.229 #2: X.launcher_hooks → yjw → Pe + --settings
+    // if (X.launcher_hooks && (!Array.isArray || length>0)) materialize
+    let launcherSettingsPath: string | undefined
+    const launcherHooks = (remote as { launcher_hooks?: unknown })
+      .launcher_hooks
+    if (
+      launcherHooks !== undefined &&
+      (!Array.isArray(launcherHooks) || launcherHooks.length > 0)
+    ) {
+      const materialized = await materializeLauncherHooks(
+        configDir,
+        launcherHooks,
+        launcherCleanupPaths,
+        onDebug,
+        onStatus,
+      )
+      if (materialized) {
+        launcherSettingsPath = materialized.settingsPath
+        launcherSettingsPathLive = launcherSettingsPath
+        if (confineResult.repoDisablesAllHooks) {
+          onStatus(
+            '[runner:session] launcher_hooks materialized, but a repo .claude/settings.json or settings.local.json carries disableAllHooks:true — the child will drop every flagSettings hook (CCR-supplied Stop reply-gate included)',
+          )
+        } else if (confineResult.confineScanAborted) {
+          // densable ke(…, self_hosted_launcher_hooks_confine_scan_aborted)
+          onDebug(
+            '[runner:session] launcher_hooks: confine scan aborted (warn mode) — hooks still wired via --settings',
+          )
+        }
+      }
+    }
+
+    // densable: after git prep + mcp_config + launcher_hooks, abort before spawn
     if (signal.aborted) {
       onDebug(
         `[runner:session] Aborted after git prep for ${sessionId} — bailing before spawn`,
@@ -1797,6 +1837,7 @@ export async function handleSession(
         inferenceAccessToken: accessTokenLive,
         claudeCodeArgs,
         mcpConfigPath,
+        launcherSettingsPath,
         addDirs: addDirs.length > 0 ? addDirs : undefined,
         // densable sjv(governedGit:pt, governedGitConfigPath:J)
         governedGitConfig: governed?.toolConfig.gitConfig,
@@ -2013,12 +2054,16 @@ export async function handleSession(
         )
       })
     }
-    // densable: completed → unlink debug; always unlink mcp
+    // densable: completed → unlink debug; always unlink mcp + Pe/_e launcher paths
     await cleanupSessionSideFiles({
       sessionId,
       exitResult: exitResultForCleanup,
       debugFile,
       mcpConfigPath: mcpConfigPathLive,
+      launcherCleanupPaths: [
+        ...(launcherSettingsPathLive ? [launcherSettingsPathLive] : []),
+        ...launcherCleanupPaths,
+      ],
       onStatus,
     })
     if (worktreesLive.length > 0) {

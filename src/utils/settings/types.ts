@@ -646,6 +646,13 @@ export const SettingsSchema = lazySchema(() =>
           'When true (and set in managed settings), only hooks from managed settings run. ' +
             'User, project, and local hooks are ignored.',
         ),
+      // densable 2.1.229 #4 — block marketplace plugin source:"command"
+      disableCommandPluginSources: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true (and set in managed settings), marketplace plugins with source "command" are not installed or updated and their commands are not run. When unset, allowManagedHooksOnly also disables command-sourced plugins (densable _le). Invalid values are treated as true (fail closed).',
+        ),
       // Allowlist of URL patterns HTTP hooks may target (follows allowedMcpServers precedent)
       allowedHttpHookUrls: z
         .array(z.string())

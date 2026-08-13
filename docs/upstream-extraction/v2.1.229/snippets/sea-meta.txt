@@ -1,0 +1,8 @@
+size: 294720528
+sha256: d732f0ba0a539c58c2ffcaef06ed03b4e523726f0cb6cc27b3a5b7e7ae0a7a21
+version_hits: // Version: 2.1.229 x6
+version_token: 2.1.229 x370
+vs_228_size: 5422384
+path: /tmp/official-229/plat/package/claude
+tgz_main_sha256: fa9d45905b782a4a398bb8662f2065d206a7a0b7bf9acbb85afe4761e0576588
+tgz_darwin_arm64_sha256: d8bf3203231f18e585d2fc88d36c8a8a22fa980a458e16304ea9944cc586fb59

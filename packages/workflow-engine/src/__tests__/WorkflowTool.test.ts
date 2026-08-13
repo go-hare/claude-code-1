@@ -242,12 +242,13 @@ test('metadata methods: description/prompt/renderToolUseMessage', async () => {
   )
 })
 
-test('prompt includes default concurrency 3 + AskUserQuestion guidance', async () => {
+test('prompt includes host-derived concurrency + AskUserQuestion guidance', async () => {
   const { ports } = mockPorts('/tmp', new Map())
   const tool = createWorkflowTool(ports)
   const p = await tool.prompt()
-  // densable playbook wording: "capped at 3 by default" / "OMIT it to use 3"
-  expect(p).toMatch(/capped at 3 by default|OMIT it to use 3/i)
+  // densable 2.1.229 #17: host-derived default (availableParallelism), not hard-coded 3
+  expect(p).toMatch(/host-derived default|availableParallelism/i)
+  expect(p).toMatch(/OMIT it to use the host-derived default/i)
   expect(p).toMatch(/maxConcurrency/i)
   expect(p).toMatch(/AskUserQuestion/i)
 })

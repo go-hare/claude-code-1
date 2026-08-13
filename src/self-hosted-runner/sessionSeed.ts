@@ -7,6 +7,10 @@ import { realpathSync } from 'node:fs'
 import { mkdir, realpath, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import type { HostConfigSnapshot } from './hostConfig.js'
+import {
+  assertHooksDirIsPlainDirectory,
+  isCcrLauncherHostSeedPath,
+} from './launcherHooks.js'
 import { withTimeoutMs } from './rootRunner.js'
 import { assertNoSessionDirOverlap } from './sessionConfine.js'
 
@@ -292,9 +296,24 @@ export async function seedHostConfigIntoSession(
 ): Promise<void> {
   if (!snapshot) return
   try {
+    const seeded: string[] = []
     await withTimeoutMs(
       (async () => {
+        // densable fjw/Pyg: skip host hooks/* when hooks is not a plain dir;
+        // always skip hooks/.ccr-launcher (CCR materialize owns that tree)
+        const hooksPlain = await assertHooksDirIsPlainDirectory(
+          configDir,
+          onStatus,
+        )
         for (const [rel, { buf, mode }] of snapshot.files) {
+          const lower = rel.toLowerCase()
+          if (
+            !hooksPlain &&
+            (lower === 'hooks' || lower.startsWith(`hooks${sep}`))
+          ) {
+            continue
+          }
+          if (isCcrLauncherHostSeedPath(rel)) continue
           const full = join(configDir, rel)
           const sepIdx = rel.lastIndexOf(sep)
           if (sepIdx > 0) {
@@ -303,6 +322,7 @@ export async function seedHostConfigIntoSession(
             })
           }
           await writeFile(full, buf, { mode })
+          seeded.push(rel)
         }
         if (snapshot.mcpServers) {
           const body = JSON.stringify({ mcpServers: snapshot.mcpServers })
@@ -316,8 +336,8 @@ export async function seedHostConfigIntoSession(
       HOST_SEED_WRITE_TIMEOUT_MS,
       `[runner:stuck] seed write → ${configDir}`,
     )
-    if (snapshot.files.size > 0 || snapshot.mcpServers) {
-      const keys = [...snapshot.files.keys()]
+    if (seeded.length > 0 || snapshot.mcpServers) {
+      const keys = [...seeded]
       if (snapshot.mcpServers) {
         keys.push(
           `.claude.json[mcpServers×${Object.keys(snapshot.mcpServers).length}]`,

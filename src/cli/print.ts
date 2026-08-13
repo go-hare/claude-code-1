@@ -277,11 +277,18 @@ import {
   reconnectMcpServerImpl,
 } from 'src/services/mcp/client.js'
 import {
+  doesEnterpriseMcpConfigExist,
   filterMcpServersByPolicy,
   getMcpConfigByName,
   isMcpServerDisabled,
   setMcpServerEnabled,
 } from 'src/services/mcp/config.js'
+import {
+  ENTERPRISE_MCP_SET_SERVERS_IGNORE_REASON,
+  HERMETIC_MCP_SET_SERVERS_IGNORE_REASON,
+  isRemoteHermeticSession,
+} from 'src/utils/mcpHermeticFilter.js'
+import { isRemoteEnvEnabled } from 'src/utils/residualFinalEnvGates.js'
 import {
   performMCPOAuthFlow,
   revokeServerTokens,
@@ -1074,7 +1081,29 @@ export async function runHeadless(
     (Boolean(validateUuid(options.resume)) || options.resume.endsWith('.jsonl'))
   const isUsingSdkUrl = Boolean(options.sdkUrl)
 
-  if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl) {
+  // densable 2.1.229 #19 — whitespace-only print/stream-json input must not
+  // reach the model (400). densable:
+  //   typeof t==="string"&&t.trim()===""&&!F&&!D&&!Y
+  //   t!=="" → "Input contained only whitespace…"
+  // Local early gate has no deferredToolUse/Gup (D/Y); sdkUrl = F.
+  // Pure empty string still allows valid resume / sdkUrl (pre-229 local).
+  if (typeof inputPrompt === 'string' && inputPrompt.trim() === '') {
+    if (inputPrompt !== '' && !isUsingSdkUrl) {
+      // Non-empty but only whitespace — densable product string 1:1
+      process.stderr.write(
+        `Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print\n`,
+      )
+      gracefulShutdownSync(1)
+      return
+    }
+    if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl) {
+      process.stderr.write(
+        `Error: Input must be provided either through stdin or as a prompt argument when using --print\n`,
+      )
+      gracefulShutdownSync(1)
+      return
+    }
+  } else if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl) {
     process.stderr.write(
       `Error: Input must be provided either through stdin or as a prompt argument when using --print\n`,
     )
@@ -7455,11 +7484,35 @@ export async function handleMcpSetServers(
       'Blocked by enterprise policy (allowedMcpServers/deniedMcpServers)'
   }
 
+  // densable 2.1.229 mcp_set_servers soft-ignore (remote+enterprise / hermetic):
+  // keep only type==="sdk"; non-sdk get ignore reason instead of hard exit.
+  // Priority: hermetic > enterprise remote (same as densable S assignment).
+  let serversAfterExclusive: Record<
+    string,
+    McpServerConfigForProcessTransport
+  > = allowedServers
+  const exclusiveIgnoreReason = isRemoteHermeticSession()
+    ? HERMETIC_MCP_SET_SERVERS_IGNORE_REASON
+    : isRemoteEnvEnabled() && doesEnterpriseMcpConfigExist()
+      ? ENTERPRISE_MCP_SET_SERVERS_IGNORE_REASON
+      : undefined
+  if (exclusiveIgnoreReason !== undefined) {
+    const kept: Record<string, McpServerConfigForProcessTransport> = {}
+    for (const [name, config] of Object.entries(allowedServers)) {
+      if ((config.type as string) === 'sdk') {
+        kept[name] = config
+      } else {
+        policyErrors[name] = exclusiveIgnoreReason
+      }
+    }
+    serversAfterExclusive = kept
+  }
+
   // Separate SDK servers from process-based servers
   const sdkServers: Record<string, McpSdkServerConfig> = {}
   const processServers: Record<string, McpServerConfigForProcessTransport> = {}
 
-  for (const [name, config] of Object.entries(allowedServers)) {
+  for (const [name, config] of Object.entries(serversAfterExclusive)) {
     if ((config.type as string) === 'sdk') {
       sdkServers[name] = config as unknown as McpSdkServerConfig
     } else {

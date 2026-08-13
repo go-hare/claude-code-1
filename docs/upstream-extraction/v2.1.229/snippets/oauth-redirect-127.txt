@@ -1,0 +1,183 @@
+===== needle='127.0.0.1' offset=56429493 =====
+alSocketData];
+    if (!socketData)
+      return;
+    if (!socketData[1].req[kAutoDestroyed])
+      socketData[1].end();
+  }
+  _final(_callback) {}
+  get localAddress() {
+    return this.address() ? "127.0.0.1" : @undefined;
+  }
+  get localFamily() {
+    return "IPv4";
+  }
+  get localPort() {
+    return 80;
+  }
+  get pending() {
+    return this.connecting;
+  }
+  _read(_size) {}
+  get readyState() {
+    if (this.connecting)
+      return "opening";
+    if (this.readable)
+      return this.writable ? "open" : "readOnly";
+    else
+      return this.writable ? "writeOnly" : "closed";
+  }
+  ref() {
+
+
+===== needle='127.0.0.1' offset=57375269 =====
+ModuleById(144);
+}
+function defaultTriggerAsyncIdScope(triggerAsyncId, block, ...args) {
+  return block.@apply(null, args);
+}
+function lookup4(lookup, address, callback) {
+  return lookup(address || "127.0.0.1", 4, callback);
+}
+function lookup6(lookup, address, callback) {
+  return lookup(address || "::1", 6, callback);
+}
+var dns;
+function newHandle(type, lookup) {
+  if (lookup === @undefined) {
+    if (dns === @undefined)
+      dns = @getInternalField(@internalModuleRegistry, 150) || @createInternalModuleById(150);
+    lookup = dns.lookup;
+  } else
+    validateFunction(lookup, "lookup");
+  le
+
+===== needle='127.0.0.1' offset=57581460 =====
+thCode(161, "port", ">= 0 && <= 65535", port);
+  }
+  let portNumber = port === @undefined || port === null ? process.debugPort : port, hostname = typeof host === "string" && host.length > 0 ? host : "127.0.0.1", requestedUrl = `ws://${hostname.includes(":") && !hostname.startsWith("[") ? `[${hostname}]` : hostname}:${portNumber}/${globalThis.crypto.randomUUID()}`, disposable = {
+    __proto__: null,
+    [Symbol.dispose]() {
+      close();
+    }
+  }, resolvedUrl;
+  try {
+    resolvedUrl = openNodeInspector(requestedUrl, !!wait);
+  } catch (e) {
+    let raw = e?.message ?? @String(e), prefix = "
+
+===== needle='127.0.0.1' offset=58476168 =====
+p·q·r·s·t·u·v·w·x·y·z·{·|·}·~···········································································································································································127.0.0.1···1·······2···3···4············································································E5=!UaAm)i·%]·9·Me}QYy·1-····qIu·
+··!···%-·7·3·
+·F2<·UdAs#n··_·7
+Ki}PZx·-(·················································································································································d···························@···············································
+
+===== needle='127.0.0.1' offset=59559117 =====
+=0)FZ(!1);else B=-1,d()}function d0(){if(B===-1)return;if(B===0&&I.size===0)return;B--,C=!0,d()}function u0(){if(B>=T.length-1)return;B++,C=!0,d()}var i0=location.host==="localhost"||location.host==="127.0.0.1",s0=typeof document<"u"?()=>new Promise((Z)=>{let $=null,X=()=>{if($!==null)clearTimeout($),$=null},G=()=>{if($!==null)clearTimeout($);window.removeEventListener("focus",G),window.removeEventListener("blur",X),Z()};if(window.addEventListener("focus",G),document.hasFocus())$=setTimeout(()=>{$=null,G()},i0?2500:2500),window.addEventListener("blur",X)}):()=>new Promise((Z)=>setTimeout(Z,250
+
+===== needle='redirect_uri' offset=70269472 =====
+····
+···verbosePii················'·····tracePii··3·····················isPiiLoggingEnabled·······················%·····@azure/msal-common······························15.13.1···················(·····redirect_uri_empty··X····2+··············U(·····claims_request_parsing_error··············,·····authority_uri_insecure··················I·'·····url_parse_error···········2·····empty_url_error···········*·····empty_input_scopes_error··,·····················invalid_claims············-·····token_request_empty·····························logout_request_empty·····················?,·····invalid_code_cha
+
+===== needle='redirect_uri' offset=70275248 =====
+················I·'·
+···emitEvents1·····················addFields················P%·····incrementFields···········&·····cacheEventByCorrelationId·················%·····client_ids%·············I·)·····redirect_uri··············0·
+···response_type···············
+···response_mode············'(·
+···grant_type······················claims··························scope···························error_description·······························access_token··············(·····id_token··&··············d%·
+···expires_in······················refresh_token_expires_in·················T/·····state···········
+
+===== needle='redirect_uri' offset=70276268 =====
+emetry0·····················x-client-last-telemetry·p·.··············*-·····x-ms-lib-capability·X·····.···············/·
+···x-app-name3···············'·····x-app-ver················7(·····post_logout_redirect_uri····················
+···id_token_hint···················device_code·················
+···client_secret···················client_assertion··········)·····client_assertion_type·····*···············%·
+···token_type···············//·····req_cnf···%···············,·····assertion·+·············I·2·····requested_token_use·····························on_behalf_of····················foci········
+
+===== needle='redirect_uri' offset=70276996 =====
+····················sid·X···P"3···············2·
+···login_hint)·····················domain_hint···············)·····x-client-xtra-sku···X···PH0···············3·
+···brk_client_id···················brk_redirect_uri················instance_aware··················ear_jwk···················0·····ear_jwe_crypto··········(···················
+····················v·······················i0·····detectRegion··············(·····getRegionFromIMDS···X···P·)···············,·····getCurrentVersion·······················(···················
+···················@|························,·····getAuthorityType····
+
+===== needle='redirect_uri' offset=84024144 =====
+········o·······························code····························true····························client_id·······················c···························
+···response_type···················redirect_uri····················n·······························http://localhost:·······························r·······························/callback·······················i·······························scope··························· ·······························code_challenge··················e·······························code_challenge_method···························S256············
+
+===== needle='localhost' offset=55206686 =====
+················································,···B·)···s·····v·^·····@···O·Q·······s···:· ·····@·S·VVVVVVVVVVVVVV·VVVVVVVVVVVV3;VVVVVVVVVVVAVVVVVVVVVVVVVVVV)VG$VVVVLVVVVVV.·········c·········p·····localhost·······································································._UG#_Store·N6reflex12FuzzyMatcherE·N4Grep11EXIT_SEARCHE··4Grep···N6reflex11LineMatcherE·10GrepMaster·N4Grep12StdInHandlerE·N6reflex5Input7HandlerE·10zstreambuf·N4Grep28FormatInvertMatchGrepHandlerE·N4Grep11GrepHandlerE···N6reflex15AbstractMatcher7HandlerE·N4Grep30OnlyMatchingContextGrepHandlerE·N4Grep22InvertMatchGrep
+
+===== needle='localhost' offset=55343329 =====
+WithCode(128, "File URL path must be absolute");
+  return pathname.slice(1);
+}
+function getPathFromURLPosix(url) {
+  if (url.hostname !== "")
+    throw @makeErrorWithCode(127, 'File URL host must be "localhost" or empty on darwin');
+  let pathname = url.pathname;
+  for (let n = 0;n < pathname.length; n++)
+    if (pathname[n] === "%") {
+      let third = pathname.codePointAt(n + 2) | 32;
+      if (pathname[n + 1] === "2" && third === 102)
+        throw @makeErrorWithCode(128, "File URL path must not include encoded / characters");
+    }
+  return decodeURIComponent(pathname);
+}
+function fileURLT
+
+===== needle='localhost' offset=55346272 =====
+LON */)
+      throw @makeErrorWithCode(128, "File URL path must be absolute");
+    return decoded.subarray(1);
+  }
+  if (url.hostname !== "")
+    throw @makeErrorWithCode(127, 'File URL host must be "localhost" or empty on darwin');
+  return percentDecodeIntoBuffer(url.pathname);
+}
+$ = {
+  parse: urlParse,
+  resolve: urlResolve,
+  resolveObject: urlResolveObject,
+  format: urlFormat,
+  Url,
+  URLSearchParams,
+  URL,
+  URLPattern,
+  pathToFileURL,
+  fileURLToPath,
+  fileURLToPathBuffer,
+  urlToHttpOptions,
+  domainToASCII,
+  domainToUnicode
+};
+return $})
+
+·(function (){"use strict";// build/rel
+
+===== needle='localhost' offset=56222436 =====
+ckServerIdentity } = self[bunTLSConnectOptions];
+    if (!verifyError && !self.isSessionReused() && typeof checkServerIdentity === "function") {
+      let hostname = self.servername || self._host || "localhost", cert = self.getPeerCertificate(!0);
+      if (cert)
+        verifyError = checkServerIdentity(hostname, cert);
+    }
+    let rejectUnauthorized;
+    if (self._requestCert || (rejectUnauthorized = self._rejectUnauthorized))
+      if (verifyError) {
+        if (self.authorized = !1, self.authorizationError = verifyError.code || verifyError.message, rejectUnauthorized ?? self._rejectUnaut
+
+===== needle='localhost' offset=56276228 =====
+sTimeout)
+    socket.setTimeout(optionsTimeout);
+  return socket.connect(normalized);
+}
+function lookupAndConnect(self, options) {
+  let { localAddress, localPort } = options, host = options.host || "localhost", { port, autoSelectFamilyAttemptTimeout, autoSelectFamily } = options;
+  if (validateString(host, "options.host"), localAddress && !isIP(localAddress))
+    throw @makeErrorWithCode(131, localAddress);
+  if (localPort)
+    validateNumber(localPort, "options.localPort");
+  if (typeof port < "u") {
+    if (typeof port !== "number" && typeof port !== "string")
+      throw @makeErrorWithCode

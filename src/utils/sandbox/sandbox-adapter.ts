@@ -23,8 +23,10 @@ import {
 import { rmSync, statSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { memoize } from 'lodash-es'
+import { isIP } from 'node:net'
 import { homedir } from 'os'
-import { dirname, join, posix, resolve, sep } from 'path'
+import { dirname, isAbsolute, join, posix, resolve, sep } from 'path'
+import { URL as NodeURL } from 'node:url'
 import {
   getAdditionalDirectoriesForClaudeMd,
   getCwdState,
@@ -34,6 +36,12 @@ import { logForDebugging } from '../debug.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { expandPath } from '../path.js'
 import { getPlatform, type Platform } from '../platform.js'
+import {
+  getCommandProducerScanRoots,
+  isPathEqualOrUnder,
+  scanInstalledCommandProducerDirs,
+  subscribeCommandProducerDirsChanged,
+} from '../plugins/commandProducerDirs.js'
 import { settingsChangeDetector } from '../settings/changeDetector.js'
 import {
   isSettingSourceEnabled,
@@ -691,6 +699,21 @@ export function convertToSandboxRuntimeConfig(
   denyWrite.push(resolve(originalCwd, '.claude', 'skills'))
   if (cwd !== originalCwd) {
     denyWrite.push(resolve(cwd, '.claude', 'skills'))
+  }
+
+  // densable jEr: for (const p of lDs(RPo())) if absolute && !BFs(resolve(p))
+  //   m(resolve(p), false, true) → denyWrite. BFs(e) = cpe(e, cwd) = cwd under e.
+  // Folds session zvt bag + installed sourceProducerPath / previousProducerPaths
+  // so sandboxed Bash cannot mutate mode:"link" producer trees (app-layer DXS
+  // alone is not enough). cDs → refreshConfig re-runs this builder.
+  for (const producer of scanInstalledCommandProducerDirs(
+    getCommandProducerScanRoots(),
+  )) {
+    if (!isAbsolute(producer)) continue
+    const abs = resolve(producer)
+    // densable BFs — skip when cwd is the producer or under it (would lock workspace)
+    if (isPathEqualOrUnder(abs, cwd)) continue
+    denyWrite.push(abs)
   }
 
   // SECURITY: Git's is_git_directory() treats cwd as a bare repo if it has
@@ -1391,6 +1414,185 @@ function getLinuxGlobPatternWarnings(): string[] {
   }
 }
 
+// ============================================================================
+// densable 2.1.229 #26 — IPv6 / unreliable domain spelling warnings
+// SEA: iA_ / sA_ / VFs / fHo / RRe / jNe / UFs / nnd=/^[1-9][0-9]{0,4}$/
+// ============================================================================
+
+/** densable nnd — port suffix 1–65535, no leading zeros */
+const IPV6_PORT_SUFFIX_RE = /^[1-9][0-9]{0,4}$/
+
+/** densable jNe — strip surrounding [] from host */
+function stripIpv6Brackets(host: string): string {
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host
+}
+
+/**
+ * densable RRe — canonicalize host via URL hostname + strip trailing dot.
+ * Returns undefined when the host is not a valid URL host.
+ */
+function canonicalizeNetworkHost(host: string): string | undefined {
+  try {
+    const stripped = stripIpv6Brackets(host)
+    const forUrl = isIP(stripped) === 6 ? `[${stripped}]` : stripped
+    const hostname = new NodeURL(`http://${forUrl}/`).hostname
+    return stripIpv6Brackets(hostname).replace(/\.$/, '')
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * densable fHo — non-IPv6 host whose canonical form differs from lowercase input
+ * (trailing-dot / punycode / case drift).
+ */
+function isNonCanonicalDomainSpelling(host: string): boolean {
+  if (isIP(host) === 6) return false
+  const canonical = canonicalizeNetworkHost(host)
+  return canonical !== undefined && canonical !== host.toLowerCase()
+}
+
+/**
+ * densable VFs — unbracketed multi-colon entry (bare IPv6 or host:port with IPv6).
+ */
+function isUnbracketedMultiColonDomain(entry: string): boolean {
+  const first = entry.indexOf(':')
+  return (
+    first !== -1 &&
+    entry.indexOf(':', first + 1) !== -1 &&
+    !entry.startsWith('[')
+  )
+}
+
+/**
+ * densable UFs — collect allowedDomains / deniedDomains from settings +
+ * WebFetch(domain:...) permission rules.
+ */
+function collectSandboxNetworkDomains(
+  settingsList: Array<SettingsJson | undefined | null>,
+  side: 'allow' | 'deny',
+): string[] {
+  const key = side === 'allow' ? 'allowedDomains' : 'deniedDomains'
+  const out: string[] = []
+  for (const settings of settingsList) {
+    if (!settings) continue
+    for (const domain of settings.sandbox?.network?.[key] ?? []) {
+      out.push(domain)
+    }
+    for (const ruleString of settings.permissions?.[side] ?? []) {
+      const rule = permissionRuleValueFromString(ruleString)
+      if (
+        rule.toolName === WEB_FETCH_TOOL_NAME &&
+        rule.ruleContent?.startsWith('domain:')
+      ) {
+        out.push(rule.ruleContent.substring('domain:'.length))
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * densable EV-ish: non-empty settings sources (enabled only).
+ * Used with merged settings so doctor sees user+project+policy domains.
+ */
+function listNonEmptySettingsSources(): SettingsJson[] {
+  const out: SettingsJson[] = []
+  for (const source of SETTING_SOURCES) {
+    if (!isSettingSourceEnabled(source)) continue
+    const s = getSettingsForSource(source)
+    if (s && Object.keys(s).length > 0) out.push(s)
+  }
+  return out
+}
+
+/**
+ * densable iA_ / getUnbracketedIpv6DomainWarnings.
+ *
+ * Flags domain entries that are unreliable for fail-closed enforcement:
+ * - contains `@`
+ * - unbracketed multi-colon (bare IPv6)
+ * - bracketed IPv6 with bad port / non-IPv6 interior / leading zeros / globs
+ */
+function getUnbracketedIpv6DomainWarnings(): string[] {
+  try {
+    const merged = getSettings_DEPRECATED()
+    const sources = listNonEmptySettingsSources()
+    const settingsList = [...(merged ? [merged] : []), ...sources]
+    const bad = new Set<string>()
+    for (const side of ['allow', 'deny'] as const) {
+      for (const entry of collectSandboxNetworkDomains(settingsList, side)) {
+        if (entry.includes('@')) {
+          bad.add(entry)
+          continue
+        }
+        if (isUnbracketedMultiColonDomain(entry)) {
+          bad.add(entry)
+          continue
+        }
+        if (entry.startsWith('[')) {
+          const close = entry.indexOf(']')
+          const after = close === -1 ? undefined : entry.slice(close + 1)
+          const interior = close === -1 ? undefined : entry.slice(1, close)
+          if (
+            after === undefined ||
+            interior === undefined ||
+            (after !== '' &&
+              (!after.startsWith(':') ||
+                !IPV6_PORT_SUFFIX_RE.test(after.slice(1)) ||
+                Number(after.slice(1)) > 65535)) ||
+            canonicalizeNetworkHost(interior) === undefined ||
+            isNonCanonicalDomainSpelling(interior) ||
+            interior.includes('*')
+          ) {
+            bad.add(entry)
+          }
+        }
+      }
+    }
+    return [...bad]
+  } catch (error) {
+    logForDebugging(`Failed to get IPv6 domain entry warnings: ${error}`)
+    return []
+  }
+}
+
+/**
+ * densable sA_ / getUnbracketedIpv6InjectHostWarnings.
+ * injectHosts multi-colon entries that are not already lowercase canonical IPv6.
+ */
+function getUnbracketedIpv6InjectHostWarnings(): string[] {
+  try {
+    const merged = getSettings_DEPRECATED()
+    const sources = listNonEmptySettingsSources()
+    const settingsList = [...(merged ? [merged] : []), ...sources]
+    const bad = new Set<string>()
+    for (const settings of settingsList) {
+      const creds = settings.sandbox?.credentials
+      for (const item of [
+        ...(creds?.envVars ?? []),
+        ...(creds?.files ?? []),
+      ] as Array<{ injectHosts?: string[] }>) {
+        for (const host of item.injectHosts ?? []) {
+          const first = host.indexOf(':')
+          if (first === -1 || host.indexOf(':', first + 1) === -1) continue
+          if (
+            isIP(host) === 6 &&
+            canonicalizeNetworkHost(host) === host.toLowerCase()
+          ) {
+            continue
+          }
+          bad.add(host)
+        }
+      }
+    }
+    return [...bad]
+  } catch (error) {
+    logForDebugging(`Failed to get injectHosts entry warnings: ${error}`)
+    return []
+  }
+}
+
 /**
  * Check if sandbox settings are locked by policy
  */
@@ -1536,12 +1738,22 @@ async function initialize(
       await BaseSandboxManager.initialize(runtimeConfig, wrappedCallback)
 
       // Subscribe to settings changes to update sandbox config dynamically
-      settingsSubscriptionCleanup = settingsChangeDetector.subscribe(() => {
+      // densable: also cDs.subscribe(() => bHo()) — command-producer deny bag
+      // changes (zvt/qvt) must refresh sandbox config so write deny tracks producers.
+      const unsubSettings = settingsChangeDetector.subscribe(() => {
         const settings = getSettings_DEPRECATED()
         const newConfig = convertToSandboxRuntimeConfig(settings)
         BaseSandboxManager.updateConfig(newConfig)
         logForDebugging('Sandbox configuration updated from settings change')
       })
+      const unsubCommandProducers = subscribeCommandProducerDirsChanged(() => {
+        // densable bHo: if sandboxing enabled, rebuild runtime config from settings
+        refreshConfig()
+      })
+      settingsSubscriptionCleanup = () => {
+        unsubSettings()
+        unsubCommandProducers()
+      }
     } catch (error) {
       // Clear the promise on error so initialization can be retried
       initializationPromise = undefined
@@ -1680,6 +1892,10 @@ export interface ISandboxManager {
   getSandboxViolationStore(): SandboxViolationStore
   annotateStderrWithSandboxFailures(command: string, stderr: string): string
   getLinuxGlobPatternWarnings(): string[]
+  /** densable 2.1.229 iA_ — unreliable IPv6/domain spellings for doctor */
+  getUnbracketedIpv6DomainWarnings(): string[]
+  /** densable 2.1.229 sA_ — injectHosts multi-colon IPv6 spelling warnings */
+  getUnbracketedIpv6InjectHostWarnings(): string[]
   /** densable o0g — mask without tlsTerminate/allowPlaintextInject warning */
   getMaskCredentialWarning(): string | undefined
   /** densable ruu — whether mask warning path may fire */
@@ -1790,6 +2006,8 @@ export const SandboxManager: ISandboxManager = {
   getNetworkRestrictionConfig: BaseSandboxManager.getNetworkRestrictionConfig,
   getIgnoreViolations: BaseSandboxManager.getIgnoreViolations,
   getLinuxGlobPatternWarnings,
+  getUnbracketedIpv6DomainWarnings,
+  getUnbracketedIpv6InjectHostWarnings,
   getMaskCredentialWarning,
   canMaskCredentialWarningFire,
   isSupportedPlatform,

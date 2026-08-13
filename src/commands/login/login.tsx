@@ -26,10 +26,18 @@ import { removeWorkspaceKey } from '../../services/auth/saveWorkspaceKey.js';
 export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXCommandContext): Promise<React.ReactNode> {
   // Snapshot auth state once at call time (pure, no network)
   const authStatus = getAuthStatus();
+  // densable 2.1.229 #27 o9m — snapshot env token BEFORE login so success
+  // note (i9m) still fires after installOAuthTokens may clear/replace env.
+  const { getOauthTokenEnvStartingMessage, formatLoginDoneMessage, isOauthTokenEnvSetAtStart } = await import(
+    './oauthTokenEnvWarning.js'
+  );
+  const envTokenWasSet = isOauthTokenEnvSetAtStart();
+  const startingMessage = getOauthTokenEnvStartingMessage();
 
   return (
     <Login
       authStatus={authStatus}
+      startingMessage={startingMessage}
       onDone={async success => {
         context.onChangeAPIKey();
         // Signature-bearing blocks (thinking, connector_text) are bound to the API key —
@@ -63,7 +71,21 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
             authVersion: prev.authVersion + 1,
           }));
         }
-        onDone(success ? 'Login successful' : 'Login interrupted');
+        // densable s9m — repeat OAUTH_TOKEN override warning after success
+        // densable gatewayActive (Jn()==="gateway"): suppress post-note on gateway client
+        let gatewayActive = false;
+        try {
+          const { getClientType } = await import('../../bootstrap/state.js');
+          gatewayActive = getClientType() === 'gateway';
+        } catch {
+          gatewayActive = false;
+        }
+        onDone(
+          formatLoginDoneMessage(success, {
+            envTokenWasSet,
+            gatewayActive,
+          }),
+        );
       }}
     />
   );

@@ -216,15 +216,25 @@ function parseSettingsJson(raw: string): Record<string, unknown> | null {
   }
 }
 
+/** densable out-bag on kjv/jjw — repo disableAllHooks:true under child workspace */
+export type ScanRepoSettingsBag = {
+  repoDisablesAllHooks?: boolean
+}
+
 /**
  * densable `kjv` — scan childCwd + prepared repo paths for confine entries.
  * Throws ConfineRepoSettingsError on hard fail-closed conditions (symlink
  * settings, env override, operator posture negate, unreadable non-ENOENT).
  * Returns list of write-scope paths for outside-workspace check.
+ *
+ * densable 2.1.229: when `outBag` is provided and a settings file under a root
+ * that is childCwd (or an ancestor of childCwd) has `disableAllHooks:true`,
+ * sets `outBag.repoDisablesAllHooks=true` (does not throw — only false throws).
  */
 export async function scanRepoCommittedSettings(
   childCwd: string,
   preparedPaths: string[],
+  outBag?: ScanRepoSettingsBag,
 ): Promise<ConfineEntry[]> {
   const out: ConfineEntry[] = []
 
@@ -390,6 +400,16 @@ export async function scanRepoCommittedSettings(
 
       const g = parseSettingsJson(content)
       if (!g) continue
+
+      // densable: if (r && (c===e || e.startsWith(c+sep)) && y?.disableAllHooks===!0)
+      // r.repoDisablesAllHooks=!0 — true is allowed (flag only); false still throws below
+      if (
+        outBag &&
+        (root === childCwd || childCwd.startsWith(root + sep)) &&
+        g.disableAllHooks === true
+      ) {
+        outBag.repoDisablesAllHooks = true
+      }
 
       // env override — fail closed
       const envObj = g.env
@@ -569,16 +589,23 @@ export type ApplyConfineOpts = {
   onStatus: (msg: string) => void
 }
 
+/** densable apply result — warned (lt) + Mt scan-abort + Pt.repoDisablesAllHooks */
+export type ApplyConfineResult = {
+  warned: boolean
+  /** densable `Mt` — scan threw under warn mode (confine_scan_aborted) */
+  confineScanAborted: boolean
+  /** densable `Pt.repoDisablesAllHooks` */
+  repoDisablesAllHooks: boolean
+}
+
 /**
  * densable rBh confine block after G2h:
  * EKn config/stage vs child scope → kjv scan → re-EKn with entry paths →
  * outside-workspace tre checks. warn logs + continues; enforce throws.
- *
- * Returns true if any warn-path violation was observed (Ot flag).
  */
 export async function applyRepoSettingsConfine(
   opts: ApplyConfineOpts,
-): Promise<boolean> {
+): Promise<ApplyConfineResult> {
   const {
     mode,
     childCwd,
@@ -593,17 +620,29 @@ export async function applyRepoSettingsConfine(
   assertNoSessionDirOverlap(configDir, 'config dir', childCwd, addDirs)
   assertNoSessionDirOverlap(stageFileRoot, 'stage-file root', childCwd, addDirs)
 
-  if (mode === 'off') return false
+  if (mode === 'off') {
+    return {
+      warned: false,
+      confineScanAborted: false,
+      repoDisablesAllHooks: false,
+    }
+  }
 
   let entries: ConfineEntry[] = []
   let warned = false
+  let confineScanAborted = false
+  const bag: ScanRepoSettingsBag = {}
   try {
-    entries = await scanRepoCommittedSettings(childCwd, preparedPaths)
+    entries = await scanRepoCommittedSettings(childCwd, preparedPaths, bag)
   } catch (err) {
     if (mode === 'warn') {
       const msg = err instanceof Error ? err.message : String(err)
       onStatus(`[runner:confine] WARN (would refuse): ${msg}`)
-      return true
+      return {
+        warned: true,
+        confineScanAborted: true,
+        repoDisablesAllHooks: Boolean(bag.repoDisablesAllHooks),
+      }
     }
     throw err
   }
@@ -679,5 +718,9 @@ export async function applyRepoSettingsConfine(
     }
   }
 
-  return warned
+  return {
+    warned,
+    confineScanAborted,
+    repoDisablesAllHooks: Boolean(bag.repoDisablesAllHooks),
+  }
 }

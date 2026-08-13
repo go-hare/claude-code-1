@@ -1,0 +1,29 @@
+# densable 2.1.229 #20 — messages alone >32MB: fail once, clear message
+# SEA: /tmp/official-229/plat/package/claude
+
+## Gold
+Y0r = 33554432  // 32 MiB
+function aLb(){ /* parse override or Y0r */ }
+function fwp({messagesForAPI:e,limitBytes:t=aLb()}){
+  let r=cLb(e), n=Afa(e.map(o=>o.message.content));
+  return {kind: n-r>t ? "unrecoverable" : r>0 ? "strippable_media" : "compactable",
+          bodyBytes:n, mediaBytes:r, limitBytes:t}
+}
+function ALb(e){ try{return fwp(e)} catch{...; return} }
+
+// 413 handler (Lwp):
+if (pwp(e.error) && r?.messagesForAPI && bwp()) {
+  let s = ALb({messagesForAPI: r.messagesForAPI});
+  if (s?.kind==="unrecoverable") return yd({content:hwp(s), errorDetails:_wp(s)});
+  if (s?.kind==="strippable_media") return yd({content:ywp(s), errorDetails:`request_too_large: ${e.message}`});
+}
+return yd({content:xYo(), errorDetails:`request_too_large: ${e.message}`});
+
+// hwp / _wp:
+// "Request too large for the API's ${limit} request limit: this conversation is about ${body}, and none of it is images..."
+// errorDetails: request_body_over_limit: body=…B (messages only) media=…B limit=…B
+// NOTE: request_body_over_limit is intentionally NOT matched by media-size strip retry (pLb/n8o only look for request_too_large).
+
+## Local
+- src/services/api/requestBodySize.ts (fwp/hwp/ywp/xYo/_wp)
+- src/services/api/errors.ts 413 branch uses classify when messagesForAPI present

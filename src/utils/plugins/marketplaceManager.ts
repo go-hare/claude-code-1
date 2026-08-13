@@ -513,10 +513,11 @@ function seedDirFor(installLocation: string): string | undefined {
  * Provides helpful error messages for common failure scenarios.
  * If a ref is specified, fetches and checks out that specific branch or tag.
  */
-// Environment variables to prevent git from prompting for credentials
+// densable `h0t` / `Ole` — fail-fast non-interactive git credential env
 const GIT_NO_PROMPT_ENV = {
   GIT_TERMINAL_PROMPT: '0', // Prevent terminal credential prompts
   GIT_ASKPASS: '', // Disable askpass GUI programs
+  GCM_INTERACTIVE: 'never', // Git Credential Manager: never prompt (densable h0t)
 }
 
 function getPluginGitTimeoutMs(): number {

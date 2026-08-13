@@ -7,11 +7,48 @@ import {
   posix,
   relative,
   resolve,
+  win32,
 } from 'path'
 import { getCwd } from './cwd.js'
 import { getFsImplementation } from './fsOperations.js'
 import { getPlatform } from './platform.js'
 import { posixPathToWindowsPath } from './windowsPaths.js'
+
+/**
+ * densable `Rwr` — strip Windows extended-length prefixes during path expansion.
+ * More aggressive than densable `Xpr` / `stripWindowsLongPathPrefix`: any `\\?\`
+ * prefix is removed (not only drive-letter forms).
+ *
+ * - `\\?\UNC\server\share` → `\\server\share`
+ * - `\\?\C:\Users\...` → `C:\Users\...`
+ * - `\\?\volume{...}` → `volume{...}` (caller may still treat as device path)
+ */
+export function stripWindowsExtendedPathPrefix(path: string): string {
+  if (/^\\\\\?\\unc\\/i.test(path)) return '\\\\' + path.slice(8)
+  if (path.startsWith('\\\\?\\')) return path.slice(4)
+  return path
+}
+
+/**
+ * densable `Xpr` — strip only well-formed long-path prefixes (drive letter or UNC).
+ * Leaves other `\\?\…` device paths intact (unlike {@link stripWindowsExtendedPathPrefix}).
+ */
+export function stripWindowsLongPathPrefixXpr(path: string): string {
+  if (path.startsWith('\\\\?\\UNC\\')) return '\\\\' + path.slice(8)
+  if (path.startsWith('\\\\?\\') && path.length >= 7 && path[5] === ':') {
+    return path.slice(4)
+  }
+  return path
+}
+
+/**
+ * densable `UOo` — true when win32.toNamespacedPath looks like `\\?\UNC\…`
+ * (network UNC that must not be resolve()'d against cwd).
+ */
+function isWindowsNamespacedUnc(path: string): boolean {
+  const namespaced = win32.toNamespacedPath(path)
+  return /^[\\/]{2}[?.][\\/]unc[\\/]/i.test(namespaced)
+}
 
 /**
  * Expands a path that may contain tilde notation (~) to an absolute path.
@@ -80,12 +117,27 @@ export function expandPath(path: string, baseDir?: string): string {
 
   // On Windows, convert POSIX-style paths (e.g., /c/Users/...) to Windows format
   let processedPath = trimmedPath
-  if (getPlatform() === 'windows' && trimmedPath.match(/^\/[a-z]\//i)) {
-    try {
-      processedPath = posixPathToWindowsPath(trimmedPath)
-    } catch {
-      // If conversion fails, use original path
-      processedPath = trimmedPath
+  if (getPlatform() === 'windows') {
+    // densable `_$`: Rwr(…) before further expansion — prevents crash on `\\?\` / UNC
+    processedPath = stripWindowsExtendedPathPrefix(processedPath)
+    if (processedPath.match(/^\/[a-z]\//i)) {
+      try {
+        processedPath = posixPathToWindowsPath(processedPath)
+      } catch {
+        // If conversion fails, keep stripped path
+      }
+    }
+    // densable: capitalize drive letter after strip
+    if (/^[a-z]:/.test(processedPath)) {
+      processedPath = processedPath[0]!.toUpperCase() + processedPath.slice(1)
+    }
+    // densable UOo && !glob: early win32.normalize for network UNC
+    if (
+      isWindowsNamespacedUnc(processedPath) &&
+      !processedPath.includes('*') &&
+      !processedPath.includes('?')
+    ) {
+      return win32.normalize(processedPath).normalize('NFC')
     }
   }
 

@@ -1,0 +1,9 @@
+# densable 2.1.229 #14 — CODE_REVIEW plugin workflow posts reviews
+# SEA offsets ~71508445 / 276144850 (prompt --comment + claude_args)
+
+prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+
+# Local: src/constants/github-app.ts CODE_REVIEW_PLUGIN_WORKFLOW_CONTENT
+# Without --comment the skill finishes without posting; without allowedTools
+# the inline-comment MCP tool is denied.

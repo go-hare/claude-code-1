@@ -1,0 +1,9 @@
+// densable 2.1.229 — #8 narrow terminal RangeError (progress bar / markdown table)
+// Pattern: always Math.max(0, …) before String.repeat / pad width math.
+// SEA samples (app region ~268040637+):
+//   e+" ".repeat(Math.max(0,t-or(e)))
+//   c+" ".repeat(Math.max(0,r[u]-or(c)))
+// Local crash sites before fix:
+//   ProgressBar: BLOCKS[…].repeat(whole) when width < 0
+//   MarkdownTable: '─'.repeat(Math.min(terminalWidth-1,40)) when terminalWidth 0/1 → negative
+//   MarkdownTable: mid.repeat(width+2) if width ever negative

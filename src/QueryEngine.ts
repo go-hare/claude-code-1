@@ -464,6 +464,7 @@ export class QueryEngine {
       messages: messagesFromUserInput,
       shouldQuery,
       allowedTools,
+      disallowedTools,
       model: modelFromUserInput,
       resultText,
     } = await processUserInput({
@@ -550,16 +551,31 @@ export class QueryEngine {
     const messagesToAck = replayUserMessages ? replayableMessages : []
 
     // Update the ToolPermissionContext based on user input processing (as necessary)
-    setAppState(prev => ({
-      ...prev,
-      toolPermissionContext: {
-        ...prev.toolPermissionContext,
-        alwaysAllowRules: {
-          ...prev.toolPermissionContext.alwaysAllowRules,
-          command: allowedTools,
+    // densable 2.1.229 xai — disallowedTools → alwaysDenyRules.command:
+    // union only when length>0; empty does NOT clear (sticky session harden).
+    // Contrast alwaysAllowRules.command which is replaced each turn.
+    setAppState(prev => {
+      const denyExtra = disallowedTools ?? []
+      const curDeny = prev.toolPermissionContext.alwaysDenyRules.command ?? []
+      const nextDeny =
+        denyExtra.length === 0
+          ? curDeny
+          : Array.from(new Set([...curDeny, ...denyExtra]))
+      return {
+        ...prev,
+        toolPermissionContext: {
+          ...prev.toolPermissionContext,
+          alwaysAllowRules: {
+            ...prev.toolPermissionContext.alwaysAllowRules,
+            command: allowedTools,
+          },
+          alwaysDenyRules: {
+            ...prev.toolPermissionContext.alwaysDenyRules,
+            command: nextDeny.length > 0 ? nextDeny : undefined,
+          },
         },
-      },
-    }))
+      }
+    })
 
     const mainLoopModel = modelFromUserInput ?? initialMainLoopModel
 

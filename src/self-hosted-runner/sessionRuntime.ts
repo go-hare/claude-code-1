@@ -380,6 +380,7 @@ export function createIngressFenceBgController(opts: {
  *   if (re === "completed") unlink(debug)
  *   else status preserve message
  *   if (de) unlink(mcp-config) always
+ *   for (Xt of [...Pe?[Pe]:[], ..._e]) unlink launcher settings + scripts
  */
 export async function cleanupSessionSideFiles(opts: {
   sessionId: string
@@ -387,6 +388,8 @@ export async function cleanupSessionSideFiles(opts: {
   exitResult?: string
   debugFile: string
   mcpConfigPath?: string
+  /** densable Pe + _e — launcher-settings.json + staged hook scripts */
+  launcherCleanupPaths?: string[]
   onStatus: (msg: string) => void
 }): Promise<void> {
   if (opts.exitResult === 'completed') {
@@ -398,6 +401,9 @@ export async function cleanupSessionSideFiles(opts: {
   }
   if (opts.mcpConfigPath) {
     await unlink(opts.mcpConfigPath).catch(() => {})
+  }
+  for (const path of opts.launcherCleanupPaths ?? []) {
+    await unlink(path).catch(() => {})
   }
 }
 

@@ -983,6 +983,8 @@ async function classifyYoloActionXml(
         max_tokens: (mode === 'fast' ? 256 : 64) + thinkingPadding,
         system: systemBlocks,
         skipSystemPromptPrefix: true,
+        // densable 2.1.229 forceAttributionHeader for auto-mode classifier
+        forceAttributionHeader: true,
         temperature: getClassifierTemperature(),
         thinking: disableThinking,
         messages: [
@@ -1073,6 +1075,8 @@ async function classifyYoloActionXml(
       max_tokens: 4096 + thinkingPadding,
       system: systemBlocks,
       skipSystemPromptPrefix: true,
+      // densable 2.1.229 forceAttributionHeader for auto-mode classifier
+      forceAttributionHeader: true,
       temperature: getClassifierTemperature(),
       thinking: disableThinking,
       messages: [
@@ -1432,6 +1436,8 @@ export async function classifyYoloAction(
           },
         ],
         skipSystemPromptPrefix: true,
+        // densable 2.1.229 forceAttributionHeader for auto-mode classifier
+        forceAttributionHeader: true,
         temperature: getClassifierTemperature(),
         thinking: disableThinking,
         messages: [

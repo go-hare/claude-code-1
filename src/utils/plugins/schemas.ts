@@ -1230,6 +1230,34 @@ export const PluginSourceSchema = lazySchema(() =>
         'Plugin distributed as a zip archive fetched over HTTPS — for hosting on any ' +
           "static file server or artifact repository (S3, GitLab, nginx) with no git or npm on the client. Authentication comes from the enclosing marketplace: when the archive URL shares the marketplace url-source's origin, that source's headers are sent with the download.",
       ),
+    // densable 2.1.229 #4 — command-sourced plugin directory
+    z
+      .object({
+        source: z.literal('command'),
+        command: z
+          .string()
+          .min(1)
+          .describe(
+            'Shell command that prints exactly one absolute path: the plugin directory. Run from the user home directory with a timeout; stdout is capped. Requires interactive consent on install/update.',
+          ),
+        mode: z
+          .enum(['copy', 'link'])
+          .optional()
+          .describe(
+            'How the command output directory is used: "copy" (default) copies into the plugin cache; "link" symlinks top-level entries in place (not supported on Windows yet).',
+          ),
+        timeout: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            'Command timeout in seconds (densable default 60). The process is stopped if it exceeds this.',
+          ),
+      })
+      .describe(
+        'Plugin directory produced by running a shell command (marketplace `source: "command"`). The command must print a single absolute path to a plugin-shaped directory. Subject to managed-policy disableCommandPluginSources / allowManagedHooksOnly and interactive consent.',
+      ),
     // TODO (future work) gist
     // TODO (future work) single file?
   ]),
@@ -1276,7 +1304,7 @@ const SettingsMarketplacePluginSchema = lazySchema(() =>
     .refine(p => typeof p.source !== 'string', {
       message:
         'Plugins in a settings-sourced marketplace must use remote sources ' +
-        '(github, git-subdir, npm, url, archive). Relative-path sources like "./foo" ' +
+        '(github, git-subdir, npm, url, archive, command). Relative-path sources like "./foo" ' +
         'have no marketplace repository to resolve against.',
     }),
 )
@@ -1691,6 +1719,27 @@ export const PluginInstallationEntrySchema = lazySchema(() =>
       .string()
       .optional()
       .describe('Git commit SHA for git-based plugins'),
+    // densable 2.1.229 #4 / c3c — command-source consent + producer paths
+    sourceCommand: z
+      .string()
+      .max(520)
+      .optional()
+      .describe(
+        'The `command`-source command the user accepted at explicit install/update. The once-per-session background re-resolve only runs while the marketplace entry still declares this exact command; a changed command (or an entry that became command-sourced later) is skipped with a warning until the user runs an explicit update.',
+      ),
+    sourceProducerPath: z
+      .string()
+      .max(4096)
+      .optional()
+      .describe(
+        'The directory a `command`-source plugin was last resolved to (what its command printed). Served in place in link mode and re-copied every session in copy mode, so the sandbox write-denies it; refreshed on every install/update, including no-op updates that resolve to a new location.',
+      ),
+    previousProducerPaths: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Producer directories this installation was resolved to before the current one (most recent last, bounded). A concurrent older session may still serve one of them, so the sandbox keeps write-denying them too.',
+      ),
   }),
 )
 

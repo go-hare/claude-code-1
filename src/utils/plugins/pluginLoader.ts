@@ -110,6 +110,10 @@ import {
   getPluginByIdCacheOnly,
   loadKnownMarketplacesConfigSafe,
 } from './marketplaceManager.js'
+import {
+  installCommandPluginSource,
+  type CommandSourceConsent,
+} from './pluginCommandSource.js'
 import { getPluginSeedDirs, getPluginsDirectory } from './pluginDirectories.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import { validatePathWithinBase } from './pluginInstallationHelpers.js'
@@ -907,6 +911,10 @@ export function generateTemporaryCacheNameForPlugin(
       case 'archive':
         prefix = 'archive'
         break
+      case 'command':
+        // densable 2.1.229 #4
+        prefix = 'command'
+        break
       default:
         prefix = 'unknown'
     }
@@ -928,8 +936,20 @@ export async function cachePlugin(
      */
     marketplaceHeaders?: Record<string, string>
     marketplaceUrl?: string
+    /**
+     * densable 2.1.229 #4 / Oxd `n` — command-source consent (d6_).
+     * Required for `source: "command"` installs; without matching consent
+     * the command is not run.
+     */
+    commandSourceConsent?: CommandSourceConsent
   },
-): Promise<{ path: string; manifest: PluginManifest; gitCommitSha?: string }> {
+): Promise<{
+  path: string
+  manifest: PluginManifest
+  gitCommitSha?: string
+  /** densable Oxd producer directory for command sources */
+  producerPath?: string
+}> {
   const cachePath = getPluginCachePath()
 
   await getFsImplementation().mkdir(cachePath)
@@ -939,6 +959,7 @@ export async function cachePlugin(
 
   let shouldCleanup = false
   let gitCommitSha: string | undefined
+  let producerPath: string | undefined
 
   try {
     logForDebugging(
@@ -984,6 +1005,17 @@ export async function cachePlugin(
             options?.marketplaceUrl,
           )
           break
+        case 'command': {
+          // densable 2.1.229 #4 Oxd — run marketplace command → copy/link into
+          // temp cache. contentSha256 occupies gitCommitSha like archive.
+          const installed = await installCommandPluginSource(source, tempPath, {
+            consent: options?.commandSourceConsent,
+            copyDir,
+          })
+          gitCommitSha = installed.contentSha256
+          producerPath = installed.producerDirectory
+          break
+        }
         case 'pip':
           throw new Error('Python package plugins are not yet supported')
         default:
@@ -1122,6 +1154,7 @@ export async function cachePlugin(
     path: finalPath,
     manifest,
     ...(gitCommitSha && { gitCommitSha }),
+    ...(producerPath !== undefined && { producerPath }),
   }
 }
 
@@ -3289,6 +3322,15 @@ async function assemblePluginLoadResult(
 
   // 3. Cache plugin settings for synchronous access by the settings cascade
   cachePluginSettings(enabledPlugins)
+
+  // densable Nq_ — write `.in_use` pid markers for cache-resident enabled
+  // plugins + daily dead-marker sweep (2.1.229 #16). Fire-and-forget so load
+  // latency is not blocked on ps/lstart; exit handler still cleans own markers.
+  void import('./pluginInUseMarkers.js')
+    .then(({ markEnabledPluginVersionsInUse }) =>
+      markEnabledPluginVersionsInUse(enabledPlugins),
+    )
+    .catch(e => logError(e))
 
   return {
     enabled: enabledPlugins,

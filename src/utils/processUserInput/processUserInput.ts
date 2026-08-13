@@ -73,6 +73,11 @@ export type ProcessUserInputBaseResult = {
   )[]
   shouldQuery: boolean
   allowedTools?: string[]
+  /**
+   * densable 2.1.229 — slash/skill disallowedTools applied to
+   * alwaysDenyRules.command for the turn (commit-push-pr dangerous flags).
+   */
+  disallowedTools?: string[]
   model?: string
   effort?: EffortValue
   // Output text for non-interactive mode (e.g., forked commands)
@@ -394,6 +399,29 @@ async function processUserInputBase(
 
   // Collect image metadata texts for isMeta message
   const imageMetadataTexts: string[] = []
+
+  // densable 2.1.229 #19 (Z4v / YAm) — non-interactive whitespace-only prompt
+  // must not hit the API (stream-json 400). densable:
+  //   t==="prompt" && typeof e==="string" && e!=="" && e.trim()===""
+  //   && isNonInteractiveSession && !isMeta && w!==!1
+  // densable YAm string 1:1.
+  if (
+    mode === 'prompt' &&
+    typeof input === 'string' &&
+    input !== '' &&
+    input.trim() === '' &&
+    context.options.isNonInteractiveSession &&
+    !isMeta
+  ) {
+    const BLANK_PROMPT_MESSAGE =
+      'Blank prompt — the message was only whitespace, so nothing was sent to the model.'
+    logEvent('prompt_submit_empty', {})
+    return {
+      messages: [createSystemMessage(BLANK_PROMPT_MESSAGE, 'warning')],
+      shouldQuery: false,
+      resultText: BLANK_PROMPT_MESSAGE,
+    }
+  }
 
   // Normalized view of `input` with image blocks resized. For string input
   // this is just `input`; for array input it's the processed blocks. We pass

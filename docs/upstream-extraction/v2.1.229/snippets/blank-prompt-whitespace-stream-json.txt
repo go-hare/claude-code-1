@@ -1,0 +1,11 @@
+// densable 2.1.229 — #19 stream-json / --print whitespace-only (SEA)
+// Interactive/non-interactive processUserInputBase (Z4v):
+//   YAm="Blank prompt — the message was only whitespace, so nothing was sent to the model."
+//   if(t==="prompt"&&typeof e==="string"&&e!==""&&e.trim()===""&&n.options.isNonInteractiveSession&&!g&&w!==!1)
+//     return be("prompt_submit_empty"),{messages:[sl(YAm,"warning")],shouldQuery:!1,resultText:YAm}
+// Print path after loadInitialMessages:
+//   if(typeof t==="string"&&t.trim()===""&&!F&&!D&&!Y){
+//     process.stderr.write(t!==""?`Error: Input contained only whitespace. Provide a prompt with text through stdin or as a prompt argument when using --print\n`
+//       :j||c.continue?`Error: No deferred tool marker found…`
+//       :`Error: Input must be provided…`)
+// Local: processUserInput.ts YAm gate; print.ts early whitespace-only stderr (sdkUrl skip)

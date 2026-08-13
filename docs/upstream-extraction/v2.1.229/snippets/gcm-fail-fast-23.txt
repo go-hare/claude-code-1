@@ -1,0 +1,32 @@
+# densable 2.1.229 #23 — SHR git GCM fail-fast (h0t / rR)
+
+## Gold (SEA)
+
+```js
+// shared bag (plugin Ole + agent-proxy fill + rR GCM key)
+h0t = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_ASKPASS: "",
+  GCM_INTERACTIVE: "never",
+}
+Xme = ["-c", "core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes"]
+
+// Ole (plugin git): return { ...e, ...h0t, ...q9s(GIT_CONFIG_COUNT, [["credential.interactive","false"]]) }
+// Wxd: only fill keys from h0t that are undefined on caller env
+
+// rR (BYOC git prepare spawn env) — 2.1.229 delta for GCM hang:
+//   GIT_TERMINAL_PROMPT:"0",
+//   GCM_INTERACTIVE:h0t.GCM_INTERACTIVE,   // ← only this key from h0t in rR
+//   LC_ALL:"C", GIT_PROGRESS_DELAY:"0", ...
+//   GIT_SSH_COMMAND:`${process.env.GIT_SSH_COMMAND||"ssh"} -o BatchMode=yes -o ConnectTimeout=30`
+// Note: rR does NOT inject GIT_ASKPASS (unlike Ole/Wxd); GCM_INTERACTIVE is the GCM-specific fail-fast.
+```
+
+## Local land
+
+- `src/self-hosted-runner/gitPrepare.ts`
+  - export `GIT_H0T_ENV` (= densable h0t)
+  - `runGitPrepare` (rR) env: `GCM_INTERACTIVE: GIT_H0T_ENV.GCM_INTERACTIVE`
+- `src/utils/plugins/marketplaceManager.ts`
+  - `GIT_NO_PROMPT_ENV` + `GCM_INTERACTIVE: 'never'` (Ole bag parity)
+- tests: `gitPrepare.224.test.ts` asserts `GIT_H0T_ENV` shape

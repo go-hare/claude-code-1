@@ -34,7 +34,23 @@ export function createSignal<Args extends unknown[] = []>(): Signal<Args> {
       }
     },
     emit(...args) {
-      for (const listener of listeners) listener(...args)
+      // densable xs()/cDs: run every listener; do not stop on the first throw.
+      // Single failure rethrows as-is; multiple → AggregateError (callers like
+      // densable qvt still wrap emit in try/catch + logError).
+      const errors: unknown[] = []
+      for (const listener of listeners) {
+        try {
+          listener(...args)
+        } catch (e) {
+          errors.push(e)
+        }
+      }
+      if (errors.length === 1) {
+        throw errors[0]
+      }
+      if (errors.length > 1) {
+        throw new AggregateError(errors, 'Multiple signal listeners failed')
+      }
     },
     clear() {
       listeners.clear()

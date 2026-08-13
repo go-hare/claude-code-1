@@ -1,19 +1,19 @@
 import { isTeamMemFile } from '../memdir/teamMemPaths.js'
 import { FILE_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileEditTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
+import {
+  extractSafeToolInputFields,
+  getSafeToolFilePath,
+} from './safeToolInput.js'
 
 export { isTeamMemFile }
 
 /**
  * Check if a search tool use targets team memory files by examining its path.
+ * densable 2.1.229 #7: nst/CIr before path string ops.
  */
 export function isTeamMemorySearch(toolInput: unknown): boolean {
-  const input = toolInput as
-    | { path?: string; pattern?: string; glob?: string }
-    | undefined
-  if (!input) {
-    return false
-  }
+  const input = extractSafeToolInputFields(toolInput)
   if (input.path && isTeamMemFile(input.path)) {
     return true
   }
@@ -30,8 +30,7 @@ export function isTeamMemoryWriteOrEdit(
   if (toolName !== FILE_WRITE_TOOL_NAME && toolName !== FILE_EDIT_TOOL_NAME) {
     return false
   }
-  const input = toolInput as { file_path?: string; path?: string } | undefined
-  const filePath = input?.file_path ?? input?.path
+  const filePath = getSafeToolFilePath(extractSafeToolInputFields(toolInput))
   return filePath !== undefined && isTeamMemFile(filePath)
 }
 

@@ -4556,6 +4556,8 @@ export function REPL({
       effort?: EffortValue,
       /** Official JWH.stopHookActive — seed query loop for stop-hook continuations. */
       stopHookActive?: boolean,
+      /** densable 2.1.229 — slash/skill disallowedTools → alwaysDenyRules.command */
+      additionalDisallowedTools: string[] = [],
     ) => {
       // Prepare IDE integration for new prompt. Read mcpClients fresh from
       // store — useManageMCPConnections may have populated it since the
@@ -4619,12 +4621,22 @@ export function REPL({
       // (~85 calls/turn); hoisting it here makes getAppState a pure read and stops
       // ephemeral contexts (permission dialog, BackgroundTasksDialog) from
       // accidentally clearing it mid-turn.
+      // densable 2.1.229 xai — when disallowedTools non-empty, union into
+      // alwaysDenyRules.command (length>0 only; no clear → sticky session deny).
+      // alwaysAllowRules.command is replaced each turn (skill-scoped allow).
       store.setState(prev => {
-        const cur = prev.toolPermissionContext.alwaysAllowRules.command;
-        if (
-          cur === additionalAllowedTools ||
-          (cur?.length === additionalAllowedTools.length && cur.every((v, i) => v === additionalAllowedTools[i]))
-        ) {
+        const curAllow = prev.toolPermissionContext.alwaysAllowRules.command;
+        const allowSame =
+          curAllow === additionalAllowedTools ||
+          (curAllow?.length === additionalAllowedTools.length &&
+            curAllow.every((v, i) => v === additionalAllowedTools[i]));
+        const curDeny = prev.toolPermissionContext.alwaysDenyRules.command ?? [];
+        const nextDeny =
+          additionalDisallowedTools.length === 0
+            ? curDeny
+            : Array.from(new Set([...curDeny, ...additionalDisallowedTools]));
+        const denySame = curDeny.length === nextDeny.length && curDeny.every((v, i) => v === nextDeny[i]);
+        if (allowSame && denySame) {
           return prev;
         }
         return {
@@ -4634,6 +4646,10 @@ export function REPL({
             alwaysAllowRules: {
               ...prev.toolPermissionContext.alwaysAllowRules,
               command: additionalAllowedTools,
+            },
+            alwaysDenyRules: {
+              ...prev.toolPermissionContext.alwaysDenyRules,
+              command: nextDeny.length > 0 ? nextDeny : undefined,
             },
           },
         };
@@ -4884,6 +4900,8 @@ export function REPL({
       stopHookActive?: boolean,
       /** Official t5 — remote/SDK client platform preserved across concurrent re-queue. */
       clientPlatform?: string,
+      /** densable 2.1.229 — slash/skill disallowedTools for the turn. */
+      additionalDisallowedTools: string[] = [],
     ): Promise<boolean> => {
       // If this is a teammate, mark them as active when starting a turn
       if (isAgentSwarmsEnabled()) {
@@ -5003,6 +5021,7 @@ export function REPL({
             mainLoopModelParam,
             effort,
             stopHookActive,
+            additionalDisallowedTools,
           );
         } catch (error) {
           if (feature('UDS_INBOX')) {

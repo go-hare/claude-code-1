@@ -1,0 +1,23 @@
+# densable 2.1.229 #27 — /login CLAUDE_CODE_OAUTH_TOKEN override warnings
+# SEA: /tmp/official-229/plat/package/claude
+
+## Product strings (1:1)
+n9m:
+  but if that variable is set in your shell profile or a Claude Code settings file, new `claude` sessions will keep using the old token until you remove it there.
+
+o9m (startingMessage when env set):
+  Warning: CLAUDE_CODE_OAUTH_TOKEN is set in your environment. This session will switch to your new credentials after logging in, <n9m>
+
+i9m (post-success note):
+  Note: CLAUDE_CODE_OAUTH_TOKEN was set in your environment when /login started. This session will use your new credentials, <n9m>
+
+s9m(success, {bridgeDisconnected, envTokenWasSet, gatewayActive}):
+  !success → "Login interrupted"
+  success + bridgeDisconnected → "Login successful. Remote Control disconnected."
+  success → "Login successful"
+  if envTokenWasSet && !gatewayActive → append "\n\n" + i9m
+
+## Local
+- src/commands/login/oauthTokenEnvWarning.ts
+- src/commands/login/login.tsx call() snapshots envTokenWasSet + startingMessage at start;
+  formatLoginDoneMessage on onDone; gatewayActive via getClientType()==='gateway'

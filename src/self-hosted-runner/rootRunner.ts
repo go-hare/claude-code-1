@@ -140,10 +140,18 @@ export const DEFERRED_HOLD_REMINDERS_MS = [
 
 export type ConfineRepoSettings = 'enforce' | 'warn' | 'off'
 
+/** densable `baseDirSource` — tracks how baseDir was chosen for win32 gate. */
+export type BaseDirSource = 'default' | 'env' | 'flag'
+
 export type RootRunnerArgs = {
   apiUrl: string
   capacity: number
   baseDir: string
+  /**
+   * densable 2.1.229 `baseDirSource` — used by `n_g` to reject bare default
+   * `/workspace` on Windows (env/flag override still allowed).
+   */
+  baseDirSource: BaseDirSource
   execPath: string | undefined
   logLevel: string
   logFile: string | undefined
@@ -393,16 +401,31 @@ function isAuthFailure(err: unknown): boolean {
 // ── parseArgs (wBh) ────────────────────────────────────────────────────────
 
 /**
- * densable `wBh` — parse root runner CLI args.
+ * densable 2.1.229 `n_g` — Windows rejects bare built-in default baseDir.
+ * Env (`SELF_HOSTED_RUNNER_BASE_DIR`) and `--base-dir` flag still allowed.
+ */
+export function assertWindowsBaseDirSource(
+  baseDirSource: BaseDirSource,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === 'win32' && baseDirSource === 'default') {
+    throw new Error(
+      '--base-dir (or SELF_HOSTED_RUNNER_BASE_DIR) is required on Windows: the built-in default is a POSIX container path that does not apply there. Pass the directory that repositories should be checked out under.',
+    )
+  }
+}
+
+/**
+ * densable `wBh` / `t_g` — parse root runner CLI args.
  * Mutates process.env for timeout/lifetime flags (1:1 densable).
  */
 export function parseRootArgs(argv: string[]): RootRunnerArgs {
+  const envBaseDir = process.env.SELF_HOSTED_RUNNER_BASE_DIR || undefined
   const t: RootRunnerArgs = {
     apiUrl: DEFAULT_API_URL,
     capacity: DEFAULT_CAPACITY,
-    baseDir: pathResolve(
-      process.env.SELF_HOSTED_RUNNER_BASE_DIR || DEFAULT_BASE_DIR,
-    ),
+    baseDir: pathResolve(envBaseDir ?? DEFAULT_BASE_DIR),
+    baseDirSource: envBaseDir === undefined ? 'default' : 'env',
     execPath: process.env.SELF_HOSTED_RUNNER_EXEC_PATH,
     logLevel: 'info',
     logFile: process.env.SELF_HOSTED_RUNNER_LOG_FILE || undefined,
@@ -470,6 +493,7 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
       case '--base-dir':
         if (i) {
           t.baseDir = pathResolve(i)
+          t.baseDirSource = 'flag'
           n++
         }
         break
@@ -1965,6 +1989,8 @@ export async function selfHostedRunnerMain(
   let secret: string
   try {
     args = parseRootArgs(argv)
+    // densable 2.1.229 n_g — Windows requires explicit base-dir (no /workspace default)
+    assertWindowsBaseDirSource(args.baseDirSource)
     secret = await (deps.resolveSecret ?? resolveEnvironmentSecret)(args)
     // densable 2.1.225 izh — fail early if baseDir is not writable (NFS/CSI)
     await ensureBaseDirWritable(args.baseDir)

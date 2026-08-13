@@ -41,13 +41,33 @@ type PeerInfo = {
   name?: string
   cwd?: string
   pid?: number
+  /**
+   * densable 2.1.229 Esf / gAS transport labels.
+   * - connected===false → offline (disconnected Remote Control)
+   * - transport==='cloud' → cloud
+   */
+  connected?: boolean
+  transport?: 'uds' | 'bridge' | 'cloud' | 'did'
+  status?: string
 }
 
 /** densable m5b — model-facing listing string. */
 type ListAgentsOutput = { listing: string }
 
 /**
+ * densable 2.1.229 Esf — bridge/RC status for listing.
+ * `connected===false` wins over raw status → "offline".
+ */
+function resolvePeerStatusLabel(p: PeerInfo): string | undefined {
+  if (p.transport === 'cloud') return 'cloud'
+  if (p.connected === false) return 'offline'
+  if (p.status === 'offline' || p.status === 'cloud') return p.status
+  return undefined
+}
+
+/**
  * densable 2.1.225 listing — every row leads with `name [ref]`.
+ * densable 2.1.229 — append offline/cloud when known.
  * Local peers still use address as the ref token when distinct from name.
  */
 function formatPeersListing(peers: PeerInfo[]): string {
@@ -58,11 +78,19 @@ function formatPeersListing(peers: PeerInfo[]): string {
     const name = p.name?.trim() || p.address
     const ref = p.address
     const bits = [`${name} [${ref}]`]
+    const status = resolvePeerStatusLabel(p)
+    if (status) bits.push(status)
     if (p.cwd) bits.push(`@ ${p.cwd}`)
     if (p.pid !== undefined) bits.push(`pid ${p.pid}`)
     return bits.join(' ')
   })
   return `Found ${lines.length} agent(s):\n${lines.join('\n')}`
+}
+
+/** @internal densable 2.1.229 tests */
+export const __test = {
+  formatPeersListing,
+  resolvePeerStatusLabel,
 }
 
 export const ListAgentsTool = buildTool({
@@ -140,11 +168,24 @@ export const ListAgentsTool = buildTool({
         name: peer.name ?? peer.kind,
         cwd: peer.cwd,
         pid: peer.pid,
+        transport: 'uds',
+        // densable-ish: dead registry entries surface as offline
+        connected: peer.alive !== false,
       })
     }
 
     for (const peer of await bridgePeers.listBridgePeers()) {
-      addPeer(peer)
+      addPeer({
+        address: peer.address,
+        name: peer.name,
+        cwd: peer.cwd,
+        pid: peer.pid,
+        transport:
+          peer.transport ??
+          (peer.address.startsWith('bridge:') ? 'bridge' : undefined),
+        connected: peer.connected,
+        status: peer.status,
+      })
     }
 
     return {

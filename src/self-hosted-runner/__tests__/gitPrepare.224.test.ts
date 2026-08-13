@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   DEFAULT_FETCH_DEPTH,
+  GIT_H0T_ENV,
   GIT_HARD_CAP_MS,
   GIT_SAFE_CONFIG_ARGS,
   GIT_SILENCE_BUDGET_MS,
@@ -66,6 +67,12 @@ describe('densable 2.1.224 #1 gitPrepare pure (aWd/Fjy helpers)', () => {
     expect(DEFAULT_FETCH_DEPTH).toBe(50)
     expect(GIT_SILENCE_BUDGET_MS).toBe(120_000)
     expect(GIT_HARD_CAP_MS).toBe(1_800_000)
+    // densable h0t (2.1.229 #23 GCM fail-fast)
+    expect(GIT_H0T_ENV).toEqual({
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: '',
+      GCM_INTERACTIVE: 'never',
+    })
     expect(GIT_SAFE_CONFIG_ARGS).toContain('core.hooksPath=/dev/null')
     expect(resolveFetchDepth({}).depth).toBe(50)
     expect(

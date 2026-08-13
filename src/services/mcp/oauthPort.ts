@@ -13,7 +13,11 @@ const REDIRECT_PORT_RANGE =
 const REDIRECT_PORT_FALLBACK = 3118
 
 /**
- * Builds a redirect URI on localhost with the given port and a fixed `/callback` path.
+ * Builds a redirect URI on loopback with the given port and a fixed `/callback` path.
+ *
+ * densable 2.1.229 `eBr` — use `127.0.0.1` (not `localhost`) so strict
+ * authorization servers that reject DNS-resolved loopback hosts accept the
+ * redirect. Callback servers already bind `127.0.0.1` (auth.ts / xaaIdpLogin).
  *
  * RFC 8252 Section 7.3 (OAuth for Native Apps): loopback redirect URIs match any
  * port as long as the path matches.
@@ -21,7 +25,7 @@ const REDIRECT_PORT_FALLBACK = 3118
 export function buildRedirectUri(
   port: number = REDIRECT_PORT_FALLBACK,
 ): string {
-  return `http://localhost:${port}/callback`
+  return `http://127.0.0.1:${port}/callback`
 }
 
 function getMcpOAuthCallbackPort(): number | undefined {

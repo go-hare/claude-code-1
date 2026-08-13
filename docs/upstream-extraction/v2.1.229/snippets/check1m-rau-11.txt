@@ -1,0 +1,26 @@
+# densable 2.1.229 #11 — RAu / Hte / ufe 1M access (custom BASE_URL)
+
+## Gold (SEA /tmp/official-229/plat/package/claude)
+
+```js
+function kAu(){ /* extra usage from cachedExtraUsageDisabledReason */ }
+function RAu(){return $i()&&(!!Q.ANTHROPIC_UNIX_SOCKET||Gp())}
+function Hte(){if(sae())return!1;if(RAu())return kAu();return!0}
+function ufe(){if(sae())return!1;if(RAu())return kAu();return!0}
+// sae = CLAUDE_CODE_DISABLE_1M_CONTEXT
+// $i  = isClaudeAISubscriber
+// Gp  = isFirstPartyAnthropicBaseUrl (unset BASE_URL | api.anthropic.com | ASSUME)
+```
+
+## Bug
+
+Pre-229 / local pre-land: any subscriber always ran extra-usage gate.
+Custom ANTHROPIC_BASE_URL gateway users (claude.ai OAuth + proxy) were rejected
+for Sonnet/Opus 1M even though RAu is false.
+
+## Local land
+
+- `src/utils/model/check1mAccess.ts`
+  - `isFirstPartySubscriberFor1mAccess` = RAu
+  - `checkOpus1mAccess` / `checkSonnet1mAccess` = Hte / ufe
+- tests: `src/utils/model/__tests__/check1mAccess.229.test.ts`

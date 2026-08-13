@@ -240,7 +240,8 @@ export const MarkdownTable = React.memo(function MarkdownTable({
 
     let line = left;
     columnWidths.forEach((width, colIndex) => {
-      line += mid.repeat(width + 2);
+      // densable 2.1.229 #8: never pass negative counts to String.repeat
+      line += mid.repeat(Math.max(0, width + 2));
       line += colIndex < columnWidths.length - 1 ? cross : right;
     });
     return line;
@@ -251,7 +252,9 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   function renderVerticalFormat(): string {
     const lines: string[] = [];
     const headers = token.header.map(h => getPlainText(h.tokens));
-    const separatorWidth = Math.min(terminalWidth - 1, 40);
+    // densable 2.1.229 #8: terminalWidth 0/1 → Math.min(width-1,40) is negative and
+    // '─'.repeat throws RangeError (also on --continue/--resume at startup).
+    const separatorWidth = Math.max(0, Math.min(terminalWidth - 1, 40));
     const separator = '─'.repeat(separatorWidth);
     // Small indent for wrapped lines (just 2 spaces)
     const wrapIndent = '  ';

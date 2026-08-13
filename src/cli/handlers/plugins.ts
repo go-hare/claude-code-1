@@ -627,9 +627,15 @@ export async function marketplaceUpdateHandler(
 }
 
 // plugin install (lines 5690–5721) + densable --config KEY=VALUE (BJy/$Jy)
+// densable 2.1.229 #4: -y/--yes + ftm/ptm command-source consent before install
 export async function pluginInstallHandler(
   plugin: string,
-  options: { scope?: string; cowork?: boolean; config?: string[] },
+  options: {
+    scope?: string
+    cowork?: boolean
+    config?: string[]
+    yes?: boolean
+  },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   const scope = options.scope || 'user'
@@ -659,6 +665,19 @@ export async function pluginInstallHandler(
     scope: scope as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 
+  // densable ftm/DCv — command-source consent before materialize
+  const { announceCommandSourceForInstall } = await import(
+    '../../utils/plugins/pluginCommandSource.js'
+  )
+  const consent = await announceCommandSourceForInstall(plugin, {
+    yes: options.yes === true,
+    scope: scope as 'user' | 'project' | 'local',
+  })
+  if (consent?.kind === 'declined') {
+    console.log('Aborted.')
+    process.exit(1)
+  }
+
   const configEntries = Array.isArray(options.config)
     ? options.config
     : undefined
@@ -666,6 +685,7 @@ export async function pluginInstallHandler(
     plugin,
     scope as 'user' | 'project' | 'local',
     configEntries,
+    consent?.kind === 'accepted' ? consent.grantKey : undefined,
   )
 }
 
@@ -812,9 +832,10 @@ export async function pluginDisableHandler(
 }
 
 // plugin update (lines 5918–5948)
+// densable 2.1.229 #4: -y/--yes + ptm command-source consent via updatePluginCli
 export async function pluginUpdateHandler(
   plugin: string,
-  options: { scope?: string; cowork?: boolean },
+  options: { scope?: string; cowork?: boolean; yes?: boolean },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
   const { name, marketplace } = parsePluginIdentifier(plugin)
@@ -843,5 +864,5 @@ export async function pluginUpdateHandler(
     cliError('--cowork can only be used with user scope')
   }
 
-  await updatePluginCli(plugin, scope)
+  await updatePluginCli(plugin, scope, { yes: options.yes === true })
 }

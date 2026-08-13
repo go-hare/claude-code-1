@@ -26,6 +26,7 @@ import {
   findReverseDependents,
   formatReverseDependentsSuffix,
 } from '../../utils/plugins/dependencyResolver.js'
+import { denyCommandProducerDir } from '../../utils/plugins/commandProducerDirs.js'
 import {
   loadInstalledPluginsFromDisk,
   loadInstalledPluginsV2,
@@ -40,6 +41,13 @@ import {
   tryRefreshMarketplaceOnCatalogMiss,
 } from '../../utils/plugins/marketplaceManager.js'
 import { deletePluginDataDir } from '../../utils/plugins/pluginDirectories.js'
+import type { CommandSourceConsent } from '../../utils/plugins/pluginCommandSource.js'
+import {
+  commandPluginConsentKey,
+  isCommandPluginSource,
+  isCommandSourceConsentWorkspaceScoped,
+  mergePreviousProducerPaths,
+} from '../../utils/plugins/pluginCommandSource.js'
 import {
   findPluginKeyCaseInsensitive,
   parsePluginIdentifier,
@@ -352,6 +360,15 @@ export function getPluginInstallationFromV2(pluginId: string): {
 export async function installPluginOp(
   plugin: string,
   scope: InstallableScope = 'user',
+  options?: {
+    /**
+     * densable ctm `shownSourceCommand` — HK grant key from CLI ptm/-y.
+     * When set, becomes commandSourceConsent kind "shown".
+     * When unset, falls back to densable x0v recorded consent from
+     * installed_plugins.
+     */
+    shownSourceCommand?: string
+  },
 ): Promise<PluginOperationResult> {
   assertInstallableScope(scope)
 
@@ -434,11 +451,31 @@ export async function installPluginOp(
   const entry = foundPlugin
   const pluginId = `${entry.name}@${foundMarketplace}`
 
+  // densable ctm: shownSourceCommand → {kind:"shown"} else x0v recorded
+  let commandSourceConsent: CommandSourceConsent | undefined
+  if (options?.shownSourceCommand !== undefined) {
+    commandSourceConsent = {
+      kind: 'shown',
+      command: options.shownSourceCommand,
+      pluginId,
+    }
+  } else {
+    const { getRecordedCommandSourceConsent } = await import(
+      '../../utils/plugins/pluginCommandSource.js'
+    )
+    commandSourceConsent = getRecordedCommandSourceConsent(
+      pluginId,
+      entry.source,
+      loadInstalledPluginsV2().plugins[pluginId],
+    )
+  }
+
   const result = await installResolvedPlugin({
     pluginId,
     entry,
     scope,
     marketplaceInstallLocation,
+    commandSourceConsent,
   })
 
   if (!result.ok) {
@@ -944,6 +981,22 @@ export async function disableAllPluginsOp(): Promise<PluginOperationResult> {
 }
 
 /**
+ * densable R0v options for command-source consent during update.
+ * - shownSourceCommand: HK grant key from CLI ptm/-y (kind "shown")
+ * - announceCommandSource: densable o hook — CLI wires ptm; returns grantKey
+ * - skipCommandSources: background paths that never re-run command sources
+ */
+export type PluginUpdateCommandSourceOptions = {
+  shownSourceCommand?: string
+  announceCommandSource?: (
+    pluginId: string,
+    entry: PluginMarketplaceEntry,
+    acceptedCommand: string | undefined,
+  ) => Promise<string | undefined>
+  skipCommandSources?: boolean
+}
+
+/**
  * Update a plugin to the latest version.
  *
  * This function performs a NON-INPLACE update:
@@ -954,6 +1007,8 @@ export async function disableAllPluginsOp(): Promise<PluginOperationResult> {
  * 5. Updates installation in V2 file (memory stays unchanged until restart)
  * 6. Cleans up old version if no longer referenced by any installation
  *
+ * densable R0v: command sources get announce/ptm → shown consent, else recorded.
+ *
  * @param plugin Plugin name or plugin@marketplace identifier
  * @param scope Scope to update. Unlike install/uninstall/enable/disable, managed scope IS allowed.
  * @returns Result indicating success/failure with version info
@@ -961,6 +1016,7 @@ export async function disableAllPluginsOp(): Promise<PluginOperationResult> {
 export async function updatePluginOp(
   plugin: string,
   scope: PluginScope,
+  options?: PluginUpdateCommandSourceOptions,
 ): Promise<PluginUpdateResult> {
   // Parse the plugin identifier to get the full plugin ID
   const { name: pluginName, marketplace: marketplaceName } =
@@ -1018,12 +1074,14 @@ export async function updatePluginOp(
     installation,
     scope,
     projectPath,
+    options,
   })
 }
 
 /**
  * Perform the actual plugin update: fetch source, calculate version, copy to cache, update disk.
  * This is the core update execution extracted from updatePluginOp.
+ * densable R0v: command sources get announce/ptm → shown consent, else recorded sourceCommand.
  */
 async function performPluginUpdate({
   pluginId,
@@ -1033,14 +1091,22 @@ async function performPluginUpdate({
   installation,
   scope,
   projectPath,
+  options,
 }: {
   pluginId: string
   pluginName: string
   entry: PluginMarketplaceEntry
   marketplaceInstallLocation: string
-  installation: { version?: string; installPath: string }
+  installation: {
+    version?: string
+    installPath: string
+    sourceCommand?: string
+    sourceProducerPath?: string
+    previousProducerPaths?: string[]
+  }
   scope: PluginScope
   projectPath: string | undefined
+  options?: PluginUpdateCommandSourceOptions
 }): Promise<PluginUpdateResult> {
   const fs = getFsImplementation()
   const oldVersion = installation.version
@@ -1049,22 +1115,88 @@ async function performPluginUpdate({
   let newVersion: string
   let shouldCleanupSource = false
   let gitCommitSha: string | undefined
+  let producerPath: string | undefined
+  let commandSourceConsent: CommandSourceConsent | undefined
+
+  // densable R0v: resolve command-source consent before materialize
+  if (isCommandPluginSource(entry.source)) {
+    const skip = options?.skipCommandSources === true
+    let grantKey: string | undefined
+    if (options?.shownSourceCommand !== undefined) {
+      grantKey = options.shownSourceCommand
+    } else if (!skip && options?.announceCommandSource) {
+      grantKey = await options.announceCommandSource(
+        pluginId,
+        entry,
+        installation.sourceCommand,
+      )
+    }
+
+    const priorMatches =
+      options?.announceCommandSource !== undefined &&
+      !isCommandSourceConsentWorkspaceScoped() &&
+      installation.sourceCommand === commandPluginConsentKey(entry.source)
+
+    // densable: when announce hook is wired and user declined / display-only,
+    // refuse re-run (unless prior HK still matches without workspace scope).
+    if (
+      options?.announceCommandSource !== undefined &&
+      grantKey === undefined &&
+      !priorMatches
+    ) {
+      return {
+        success: false,
+        message: `${pluginName} is installed by running a command that was not accepted, so it was not re-run. Review and accept it with \`claude plugin update ${pluginId}\`.`,
+        pluginId,
+        scope,
+      }
+    }
+
+    if (skip) {
+      return {
+        success: false,
+        message: `${pluginName} is installed by running a command, which the background marketplace update never runs; it is re-resolved separately once per session.`,
+        pluginId,
+        scope,
+      }
+    }
+
+    if (grantKey !== undefined) {
+      commandSourceConsent = {
+        kind: 'shown',
+        command: grantKey,
+        pluginId,
+      }
+    } else {
+      // densable: recorded from install record (x0v shape) when no new grant
+      commandSourceConsent = {
+        kind: 'recorded',
+        command: isCommandSourceConsentWorkspaceScoped()
+          ? undefined
+          : installation.sourceCommand,
+        pluginId,
+      }
+    }
+  }
 
   // Handle remote vs local plugins
   if (typeof entry.source !== 'string') {
     // Remote plugin: download to temp directory first.
     // densable archive auth: same-origin url-source headers as install path
     // (cacheAndRegisterPlugin / loadPluginFromMarketplaceEntry).
+    // densable R0v: pass commandSourceConsent into Pkr/cachePlugin.
     const { marketplaceHeaders, marketplaceUrl } =
       await resolveMarketplaceArchiveAuth(pluginId)
     const cacheResult = await cachePlugin(entry.source, {
       manifest: { name: entry.name },
       marketplaceHeaders,
       marketplaceUrl,
+      commandSourceConsent,
     })
     sourcePath = cacheResult.path
     shouldCleanupSource = true
     gitCommitSha = cacheResult.gitCommitSha
+    producerPath = cacheResult.producerPath
 
     // Calculate version from downloaded plugin. For git-subdir sources,
     // cachePlugin captured the commit SHA before discarding the ephemeral
@@ -1179,6 +1311,37 @@ async function performPluginUpdate({
     // Store old version path for potential cleanup
     const oldVersionPath = installation.installPath
 
+    // densable $Tn/R0v: persist HK + producer on update; zvt deny bag
+    let commandSourceMeta:
+      | {
+          sourceCommand?: string
+          sourceProducerPath?: string
+          previousProducerPaths?: string[]
+        }
+      | undefined
+    if (isCommandPluginSource(entry.source) && commandSourceConsent) {
+      const sourceCommand =
+        commandSourceConsent.kind === 'shown' ||
+        commandSourceConsent.kind === 'accepted'
+          ? commandSourceConsent.command
+          : commandSourceConsent.kind === 'recorded' &&
+              commandSourceConsent.command !== undefined
+            ? commandSourceConsent.command
+            : commandPluginConsentKey(entry.source)
+      const previousProducerPaths =
+        producerPath !== undefined
+          ? mergePreviousProducerPaths(installation, producerPath)
+          : installation.previousProducerPaths
+      commandSourceMeta = {
+        sourceCommand,
+        ...(producerPath !== undefined && { sourceProducerPath: producerPath }),
+        ...(previousProducerPaths !== undefined && { previousProducerPaths }),
+      }
+      if (producerPath !== undefined) {
+        denyCommandProducerDir(producerPath)
+      }
+    }
+
     // Update disk JSON file for this installation
     // (memory stays unchanged until restart)
     updateInstallationPathOnDisk(
@@ -1188,6 +1351,7 @@ async function performPluginUpdate({
       versionedPath,
       newVersion,
       gitCommitSha,
+      commandSourceMeta,
     )
 
     if (oldVersionPath && oldVersionPath !== versionedPath) {

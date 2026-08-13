@@ -148,6 +148,8 @@ export async function autoModeCritiqueHandler(options: {
       model,
       system: CRITIQUE_SYSTEM_PROMPT,
       skipSystemPromptPrefix: true,
+      // densable 2.1.229 forceAttributionHeader for auto-mode classifier
+      forceAttributionHeader: true,
       max_tokens: 4096,
       messages: [
         {

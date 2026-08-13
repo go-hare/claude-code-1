@@ -4,8 +4,21 @@ import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logForDebugging } from '../utils/debug.js'
 import { isEnvDefinedFalsy } from '../utils/envUtils.js'
-import { getAPIProvider } from '../utils/model/providers.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from '../utils/model/providers.js'
 import { getWorkload } from '../utils/workloadContext.js'
+
+/** densable 2.1.229 Hzo options — force attribution past env opt-out. */
+export type AttributionHeaderOptions = {
+  /**
+   * densable `ignoreEnvOptOut`. When true on direct first-party Anthropic
+   * (not unix-socket tunnel), skip `CLAUDE_CODE_ATTRIBUTION_HEADER` env opt-out
+   * so auto-mode classifier sideQuery still sends the billing header.
+   */
+  ignoreEnvOptOut?: boolean
+}
 
 const DEFAULT_PREFIX = `You are Claude Code, Anthropic's official CLI for Claude.`
 const AGENT_SDK_CLAUDE_CODE_PRESET_PREFIX = `You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.`
@@ -67,9 +80,27 @@ function isAttributionHeaderEnabled(): boolean {
 }
 
 /**
+ * densable 2.1.229 Hzo gate: force past env opt-out only on direct first-party
+ * Anthropic (provider firstParty + first-party base + no ANTHROPIC_UNIX_SOCKET).
+ */
+function shouldIgnoreAttributionEnvOptOut(
+  options?: AttributionHeaderOptions,
+): boolean {
+  return (
+    options?.ignoreEnvOptOut === true &&
+    getAPIProvider() === 'firstParty' &&
+    isFirstPartyAnthropicBaseUrl() &&
+    !process.env.ANTHROPIC_UNIX_SOCKET
+  )
+}
+
+/**
  * Get attribution header for API requests.
  * Returns a header string with cc_version and cc_entrypoint.
  * Enabled by default, can be disabled via env var or GrowthBook killswitch.
+ *
+ * densable 2.1.229 Hzo: `ignoreEnvOptOut` lets auto-mode classifier sideQuery
+ * keep the billing header when the user set CLAUDE_CODE_ATTRIBUTION_HEADER=0.
  *
  * When NATIVE_CLIENT_ATTESTATION is enabled, includes a `cch=00000` placeholder.
  * Before the request is sent, Bun's native HTTP stack finds this placeholder
@@ -80,8 +111,15 @@ function isAttributionHeaderEnabled(): boolean {
  * We use a placeholder (instead of injecting from Zig) because same-length
  * replacement avoids Content-Length changes and buffer reallocation.
  */
-export function getAttributionHeader(): string {
-  if (!isAttributionHeaderEnabled()) {
+export function getAttributionHeader(
+  options?: AttributionHeaderOptions,
+): string {
+  // densable Hzo:
+  // if (!(o?.ignoreEnvOptOut && firstParty && hjt() && !UNIX_SOCKET) && Ap(env)) return ""
+  if (
+    !shouldIgnoreAttributionEnvOptOut(options) &&
+    !isAttributionHeaderEnabled()
+  ) {
     return ''
   }
 

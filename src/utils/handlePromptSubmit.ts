@@ -86,6 +86,11 @@ type BaseExecutionParams = {
     stopHookActive?: boolean,
     /** Official drain: first clientPlatform on the batch (remote/SDK). */
     clientPlatform?: string,
+    /**
+     * densable 2.1.229 — slash/skill disallowedTools for the turn
+     * (alwaysDenyRules.command). Optional so existing call sites omit it.
+     */
+    additionalDisallowedTools?: string[],
   ) => Promise<boolean>
   setAppState: (updater: (prev: AppState) => AppState) => void
   onBeforeQuery?: (input: string, newMessages: Message[]) => Promise<boolean>
@@ -493,6 +498,8 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     const newMessages: Message[] = []
     let shouldQuery = false
     let allowedTools: string[] | undefined
+    // densable 2.1.229 — command disallowedTools for the turn
+    let disallowedTools: string[] | undefined
     let model: string | undefined
     let effort: EffortValue | undefined
     let nextInput: string | undefined
@@ -602,6 +609,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           if (isFirst) {
             shouldQuery = result.shouldQuery
             allowedTools = result.allowedTools
+            disallowedTools = result.disallowedTools
             model = result.model
             effort = result.effort
             nextInput = result.nextInput
@@ -678,6 +686,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             effort,
             stopHookActive,
             clientPlatform,
+            disallowedTools ?? [],
           )
         } else {
           // Local slash commands that skip messages (e.g., /model, /theme).

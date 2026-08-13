@@ -80,6 +80,17 @@ export const GIT_SCRUB_ENV: NodeJS.ProcessEnv = {
   GIT_ALLOW_PROTOCOL: 'https:http:ssh',
 }
 
+/**
+ * densable `h0t` — non-interactive git credential fail-fast env.
+ * SHR `rR` injects `GCM_INTERACTIVE:h0t.GCM_INTERACTIVE` (2.1.229 #23);
+ * plugin `Ole` spreads the full bag.
+ */
+export const GIT_H0T_ENV = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: '',
+  GCM_INTERACTIVE: 'never',
+} as const
+
 /** densable `V7s` */
 export const GIT_LFS_LOCKS_FALSE = ['-c', 'lfs.locksverify=false'] as const
 
@@ -772,6 +783,8 @@ export async function runGitPrepare(
     CLAUDE_CODE_SESSION_ACCESS_TOKEN: undefined,
     ...(hasProxyAuth ? { GIT_CONFIG_GLOBAL: '/dev/null' } : undefined),
     GIT_TERMINAL_PROMPT: '0',
+    // densable 2.1.229 #23 — rR: GCM_INTERACTIVE:h0t.GCM_INTERACTIVE (fail-fast GCM)
+    GCM_INTERACTIVE: GIT_H0T_ENV.GCM_INTERACTIVE,
     LC_ALL: 'C',
     GIT_PROGRESS_DELAY: '0',
     ...GIT_SCRUB_ENV,

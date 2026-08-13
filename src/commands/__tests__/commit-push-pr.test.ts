@@ -166,6 +166,7 @@ describe('commit-push-pr getPromptForCommand', () => {
     getAppState: () => ({
       toolPermissionContext: {
         alwaysAllowRules: { command: [] },
+        alwaysDenyRules: { command: [] },
       },
     }),
   })
@@ -277,6 +278,7 @@ describe('commit-push-pr getPromptForCommand', () => {
       getAppState: () => ({
         toolPermissionContext: {
           alwaysAllowRules: { command: ['pre-existing'] },
+          alwaysDenyRules: { command: [] },
           extra: true,
         },
         someState: 'value',

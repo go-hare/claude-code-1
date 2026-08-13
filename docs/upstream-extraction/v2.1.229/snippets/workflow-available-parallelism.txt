@@ -1,0 +1,16 @@
+# densable 2.1.229 #17 — workflow default concurrency from availableParallelism
+# SEA: /tmp/official-229/plat/package/claude
+
+## Gold
+function __S(e){return Math.min(16,Math.max(2,e-2))}
+b_S=__S(qZp.availableParallelism())   // qZp = require("os")
+
+## Rationale
+Use os.availableParallelism() (cgroup-aware on Linux), not raw os.cpus().length,
+so CPU-limited containers do not fan out to the host core count.
+
+## Local
+- packages/workflow-engine/src/constants.ts
+  workflowDefaultConcurrencyFromParallelism (__S)
+  resolveDefaultMaxConcurrency (injectable for tests)
+  DEFAULT_MAX_CONCURRENCY = resolveDefaultMaxConcurrency()  // densable b_S

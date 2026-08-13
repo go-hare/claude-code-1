@@ -11,6 +11,7 @@ import {
   getAttributionHeader,
   getCLISyspromptPrefix,
 } from '../constants/system.js'
+import { getAnthropicApiKey, isClaudeAISubscriber } from './auth.js'
 import { logEvent } from '../services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/metadata.js'
 import { getAPIMetadata } from '../services/api/claude.js'
@@ -94,6 +95,13 @@ export type SideQueryOptions = {
   signal?: AbortSignal
   /** Skip CLI system prompt prefix (keeps attribution header for OAuth). For internal classifiers that provide their own prompt. */
   skipSystemPromptPrefix?: boolean
+  /**
+   * densable 2.1.229 `forceAttributionHeader` — auto-mode classifier paths set
+   * this so Hzo can ignore CLAUDE_CODE_ATTRIBUTION_HEADER env opt-out on direct
+   * first-party Anthropic (unless densable `j5t`: no API key + Claude.ai
+   * subscriber).
+   */
+  forceAttributionHeader?: boolean
   /** Temperature override */
   temperature?: number
   /** Thinking budget (enables thinking), or `false` to send `{ type: 'disabled' }`. */
@@ -188,6 +196,34 @@ function isOAuthTokenRevokedError(error: unknown): boolean {
  * // Model validation
  * await sideQuery({ querySource: 'model_validation', model, max_tokens: 1, messages: [{ role: 'user', content: 'Hi' }] })
  */
+/**
+ * densable `j5t` — `cfe()===null && b1()`.
+ * When true, forceAttributionHeader does NOT set ignoreEnvOptOut
+ * (pure Claude.ai OAuth subscriber without API key).
+ */
+function isApiKeyAbsentClaudeAISubscriber(): boolean {
+  let key: string | null
+  try {
+    key = getAnthropicApiKey()
+  } catch {
+    key = null
+  }
+  return key === null && isClaudeAISubscriber()
+}
+
+/**
+ * densable sideQuery Hzo opts:
+ * `p&&!j5t()?{ignoreEnvOptOut:!0}:void 0`
+ */
+function attributionHeaderOptionsForSideQuery(
+  forceAttributionHeader: boolean | undefined,
+): { ignoreEnvOptOut: true } | undefined {
+  if (forceAttributionHeader && !isApiKeyAbsentClaudeAISubscriber()) {
+    return { ignoreEnvOptOut: true }
+  }
+  return undefined
+}
+
 export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
   const {
     model,
@@ -200,6 +236,7 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     maxRetries = 2,
     signal,
     skipSystemPromptPrefix,
+    forceAttributionHeader,
     temperature,
     thinking,
     stop_sequences,
@@ -235,7 +272,9 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     betas.push(STRUCTURED_OUTPUTS_BETA_HEADER)
   }
 
-  const attributionHeader = getAttributionHeader()
+  const attributionHeader = getAttributionHeader(
+    attributionHeaderOptionsForSideQuery(forceAttributionHeader),
+  )
 
   // Build system as array to keep attribution header in its own block
   // (prevents server-side parsing from including system content in cc_entrypoint)

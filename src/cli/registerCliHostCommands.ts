@@ -540,11 +540,15 @@ export function registerCliHostCommands(
       'Installation scope: user, project, or local',
       'user',
     )
+    .option(
+      '-y, --yes',
+      'Accept command-source plugin install without prompting',
+    )
     .addOption(coworkOption())
     .action(
       async (
         plugin: string,
-        commandOptions: { scope?: string; cowork?: boolean },
+        commandOptions: { scope?: string; cowork?: boolean; yes?: boolean },
       ) => {
         const { pluginInstallHandler } = await import(
           '../cli/handlers/plugins.js'
@@ -632,11 +636,15 @@ export function registerCliHostCommands(
       '-s, --scope <scope>',
       `Installation scope: ${VALID_UPDATE_SCOPES.join(', ')} (default: user)`,
     )
+    .option(
+      '-y, --yes',
+      'Accept command-source plugin update without prompting',
+    )
     .addOption(coworkOption())
     .action(
       async (
         plugin: string,
-        commandOptions: { scope?: string; cowork?: boolean },
+        commandOptions: { scope?: string; cowork?: boolean; yes?: boolean },
       ) => {
         const { pluginUpdateHandler } = await import(
           '../cli/handlers/plugins.js'

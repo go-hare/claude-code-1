@@ -1,0 +1,217 @@
+# densable 2.1.229 #13 — RC clients stuck working spinner after laptop slash
+# SEA: /tmp/official-229/plat/package/claude
+# Changelog: "Fixed Remote Control clients showing a stuck working spinner after a slash command typed in the laptop terminal"
+#
+# Verdict: GOLD FOUND — product surface multi-part; local largely HAVE / beyond densable
+# (not pure UNKNOWN; not a clean 1:1 missing symbol to invent-land)
+#
+# Product bug class:
+# Laptop types a slash (often local / local-jsx, shouldQuery:false). Hidden scaffolding
+# messages (`<local-command-caveat>`, local-command-stdout/stderr, meta caveat) still
+# flow over the bridge. If worker_status stays `running` (or UI `working` stays true)
+# after the command completes, RC clients keep the working spinner.
+#
+# densable fix surface (multi-part, no single string "stuck spinner after slash"):
+#  1) REPL derives `working` only from isQueryActive (r_h / DBa); local-jsx forces waiting, working:false
+#  2) remote-bridge only Un("running") when filtered msgs pass fCo AND no pending permission map
+#  3) sendResult() forces Un("idle") + result event (k0s)
+#
+# Local already has richer scaffolding filter + result deferral for this class.
+
+================================================================================
+## FALSE LEADS RULED OUT
+================================================================================
+| lead | why not #13 |
+|------|-------------|
+| workshop `setSpinnerMessage` / authoring progress | local IDE/workshop spinner, not RC client worker_status |
+| artifact / autoreact `status:"working"` | artifact activity store, not remote-control session list spinner |
+| MCP task status "working" / idle timeouts | MCP task lifecycle, not laptop slash → RC |
+| bridge logger Ready/Connected shimmer (`bridgeStatusUtil` / `bridgeUI`) | laptop bridge UI connection label, not remote client "working" |
+| `updateSessionActivity` / `claude ps` (BG_SESSIONS) | concurrent session activity, not CCR worker_status |
+
+================================================================================
+## GOLD SYMBOLS (SEA evidence)
+================================================================================
+| densable | role | local analogue |
+|----------|------|----------------|
+| `Un(state, details?)` | remote-bridge state wrapper → `dr.reportState(...)`; also arms activity on requires_action/idle | `transport.reportState` in `remoteBridgeCore.ts` / `replBridge.ts` |
+| `fCo` | running-report gate: `e.type==="user"&&!e.isCompactSummary` | `shouldReportRunningForMessage(s)` — **richer** (filters meta caveat / pure system-reminder) |
+| `TSt` | isEligibleBridgeMessage (user/assistant/system local_command\|compact_boundary; skip virtual; attachment hook_system_message) | `isEligibleBridgeMessage` in `bridgeMessaging.ts` |
+| `Zku` | extractTitleText | `extractTitleText` |
+| `k0s(sessionId)` | makeResultMessage (success result stub) | `makeResultMessage` |
+| `rRu` | worker_shutting_down system event | present on teardown paths |
+| `r_h` | REPL session status derivation: waiting dialogs → working:false; else busy/idle + working:isQueryActive | `sessionStatus` in `REPL.tsx` (+ local no separate `working` store for RC) |
+| `KzT` | waitingFor source; includes `isShowingLocalJSXCommand` → `"dialog open"` | `isShowingLocalJSXCommand` → sessionStatus `'waiting'` |
+| `DBa` / `MBa` / `OBa` | working boolean store (`OBa={working:!1}`; `DBa(e)` set; `MBa()` get) | densable desktop/working channel; local RC path is worker_status not OBa |
+| `qZe` | `"local-command-caveat"` tag const | `LOCAL_COMMAND_CAVEAT_TAG` in `constants/xml.ts` |
+| `iP` / `oz` | local-command-stdout / local-command-stderr | same tags |
+| `A$e()` | meta caveat user message (`isMeta:!0`) wrapping local-command-caveat | local processSlashCommand / messages helpers |
+| `Wd` / `Jt` / `xx` | REPL: isShowingLocalJSXCommand, isQueryActive, r_h result | same concepts in `REPL.tsx` |
+
+NOT present as export names in densable SEA:
+- `shouldReportRunningForMessages` / comment about local-command-caveat reopening turn
+- `shouldDeferBridgeResult` / "bouncing back to running on local slash"
+
+================================================================================
+## DENSABLE SNIPPETS (verbatim / near-verbatim from SEA)
+================================================================================
+
+### REPL working derivation (r_h / KzT) — ~276953893
+```js
+function r_h(e){
+  let t=KzT(e);
+  if(t!==void 0)return{status:"waiting",waitingFor:t,working:!1};
+  return{
+    status:e.isLoading||e.delegatedActive?"busy":"idle",
+    waitingFor:void 0,
+    working:e.isQueryActive
+  }
+}
+function KzT(e){
+  if(e.sandboxHostPrompt||e.workerSandboxPrompt)return"sandbox request";
+  if(e.elicitationPrompt)return"input needed";
+  if(e.managedSettingsSecurityPrompt)return"dialog open";
+  if(e.topDialogWaitingFor!==void 0)return e.topDialogWaitingFor;
+  if(e.pendingWorkerRequest)return"worker request";
+  if(e.pendingSandboxRequest)return"sandbox request";
+  if(e.isShowingLocalJSXCommand)return"dialog open";
+  return
+}
+```
+
+### REPL wiring — working store from r_h (~280897862)
+```js
+// … isShowingLocalJSXCommand:Wd, isLoading:fo, isQueryActive:Jt, delegatedActive:tm
+// xx = r_h({…})
+Qr.useEffect(()=>{DBa(xx)},[xx])
+Qr.useEffect(()=>()=>DBa(!1),[])
+```
+
+### Working store (~271426342)
+```js
+function DBa(e){OBa.setState((t)=>t.working===e?t:{working:e})}
+function MBa(){return OBa.getState().working}
+// OBa=B0({working:!1})
+```
+
+### Bridge eligibility + running gate (~259736728)
+```js
+function TSt(e){
+  if((e.type==="user"||e.type==="assistant")&&e.isVirtual)return!1;
+  if(e.type==="attachment")return e.attachment.type==="hook_system_message";
+  return e.type==="user"||e.type==="assistant"||e.type==="system"&&(
+    e.subtype==="local_command"||
+    e.subtype==="compact_boundary"&&(Kh().bridgeStateFramesGate?.()??!0)
+  )
+}
+function fCo(e){return e.type==="user"&&!e.isCompactSummary}
+```
+
+### Un wrapper + writeMessages running report (~269471382 / ~269492175)
+```js
+Un=(ar,rn)=>{
+  if(w&&(ar==="requires_action"||ar==="idle"))w();
+  if(dr.reportState(ar,rn),ar==="requires_action"&&rn){ /* pending map details */ }
+}
+// writeMessages path:
+// if(rn.some(fCo)&&Dr.size===0)Un("running");
+// also drain-after-flush: if(ar.some(fCo)&&Dr.size===0)Un("running");
+// history flush: if(Ao&&fCo(Ao)&&Dr.size===0)Un("running");
+```
+
+### sendResult → idle (~269494948)
+```js
+sendResult(){
+  if(Co){E("[remote-bridge] Dropping result during 401 recovery");return}
+  Un("idle"),dr.write(k0s(zt)),E("[remote-bridge] Sent result")
+}
+function k0s(e){
+  return{type:"result",subtype:"success",duration_ms:0,/*…*/,session_id:e,uuid:vSt.randomUUID()}
+}
+```
+
+### densable useReplBridge sendBridgeResult — NO defer (~277023659)
+```js
+// densable: immediate
+{sendBridgeResult:vm.useCallback(()=>{f.current?.sendResult()},[])}
+```
+Contrast local: defers when transcript mirror not flushed so slash scaffolding cannot bounce running after idle.
+
+### Slash / local-jsx scaffolding tags
+```js
+// xml consts ~257668745
+iP="local-command-stdout", oz="local-command-stderr", qZe="local-command-caveat"
+// meta caveat
+function A$e(){
+  return bn({
+    content:`<${qZe}>Caveat: The messages below were generated by the user while running local commands. DO NOT respond…</${qZe}>`,
+    isMeta:!0
+  })
+}
+// local-jsx throw / onDone paths emit shouldQuery:!1 + clearLocalJSX:!0
+```
+
+================================================================================
+## LOCAL STATUS
+================================================================================
+Paths (worktree/repo):
+- `/Users/apple/work-py/hare-code/claude-code-1/.claude/worktrees/wf_1cc0327d-b8d-23641/src/bridge/bridgeMessaging.ts`
+- `.../src/bridge/remoteBridgeCore.ts`
+- `.../src/bridge/replBridge.ts`
+- `.../src/bridge/bridgeResultScheduling.ts`
+- `.../src/hooks/useReplBridge.tsx`
+- `.../src/screens/REPL.tsx`
+- `.../src/bridge/__tests__/bridgeMessaging.test.ts`
+- `.../src/bridge/__tests__/bridgeResultScheduling.test.ts`
+
+HAVE (covers densable #13 product class, often stronger):
+1. **`shouldReportRunningForMessage(s)`** — explicit filter so pure `<local-command-caveat>` / pure `<system-reminder>` meta scaffolding does **not** re-open running after slash complete. densable `fCo` would still treat meta caveat user msgs as running (type user, not compact summary).
+2. **`writeMessages` → reportState('running') only if shouldReportRunningForMessages(filtered)`** in `remoteBridgeCore.ts` (comment documents v2 server does not derive worker_status; scaffolding must not re-open turn).
+3. **`sendResult` → reportState('idle') + makeResultMessage`** in remote + repl bridge cores.
+4. **`shouldDeferBridgeResult` / pendingResultAfterFlush** in `useReplBridge` — holds result until mirrored messages flush so `/clear` and similar local slash do not bounce RC to running then stick. densable SEA sendBridgeResult is immediate only.
+5. **REPL** `isShowingLocalJSXCommand` → sessionStatus `'waiting'` (not busy); query activity via `isQueryActive` / queryGuard. Local does not mirror densable `DBa`/`OBa` working store 1:1 for RC; RC spinner is `worker_status` via reportState.
+
+Local densable-broader extras (do not invent-remove):
+- RUNNING_STATE_META_TAGS allowlist for real automation triggers (tick, task-notification, …)
+- bridgeResultScheduling tests
+- bridgeMessaging tests for caveat/reminder vs tick
+
+Possible residual gaps (not confirmed missing densable 229 exclusive gold):
+- densable `Dr.size===0` gate (pending permission map) before Un("running") on writeMessages — local uses requires_action on can_use_tool and running on control_response/cancel; verify no race where scaffolding+pending map differs
+- densable `DBa(working)` for non-CCR consumers of working flag — only relevant if a RC client reads that channel; primary RC list uses worker_status
+- densable `TSt` allows compact_boundary gated + attachment hook_system_message; local eligibility slightly narrower on system subtypes — unrelated to slash spinner
+
+================================================================================
+## RECOMMENDATION
+================================================================================
+**HAVE / keep local richer path — do not regress to densable fCo.**
+
+Checklist #13 should move off pure UNKNOWN:
+- **Gold anchors:** Un, fCo, TSt, k0s, r_h, KzT, DBa/OBa, A$e/qZe, sendResult idle, writeMessages some(fCo)&&Dr.size===0
+- **Local gap for stuck spinner after laptop slash:** effectively **none** for the documented product class; local scaffolding filter + deferred sendResult is the stronger fix surface.
+- **Do NOT invent** a new land that only copies `fCo` (would re-break local-command-caveat meta → running).
+- Optional hygiene (not required for #13): document densable Un/Dr.size gate parity in comments; confirm permission pending map does not leave running without sendResult.
+
+## SEA offsets (re-verify)
+- TSt / fCo: ~259736728–259737100
+- k0s / rRu: ~259746012
+- Un= / reportState wrapper: ~269471382
+- Un("running") writeMessages: ~269492175
+- sendResult Un("idle"): ~269494948
+- r_h / KzT: ~276953893
+- DBa / OBa: ~271426342
+- REPL DBa(xx) wiring: ~280897862
+- densable sendBridgeResult immediate: ~277023659
+- qZe / iP / oz: ~257668745
+- A$e: ~271746022
+- local-jsx clearLocalJSX / shouldQuery:!1: ~268205385+
+
+## Structured summary
+- **gold?** YES — multi-part RC worker_status + REPL working derivation + slash scaffolding
+- **symbols:** `Un`, `fCo`, `TSt`, `k0s`, `r_h`, `KzT`, `DBa`/`MBa`/`OBa`, `A$e`, `qZe`, `sendResult→idle`, writeMessages `some(fCo)&&Dr.size===0`
+- **local gap?** No material gap for #13 stuck spinner; local **beyond** densable via `shouldReportRunningForMessages` + `shouldDeferBridgeResult`
+- **UNKNOWN?** No (was checklist UNKNOWN pre-extraction); product gold now anchored. Residual only if a specific RC client still keys off densable `OBa.working` rather than worker_status (not evidenced as the changelog fix).
+
+
+## NOTE
+Canonical gold for #13 is worker_status (Un/fCo/sendResult/shouldReportRunning*) not Desktop frame-live act:0 alone. Local is HAVE / beyond densable.

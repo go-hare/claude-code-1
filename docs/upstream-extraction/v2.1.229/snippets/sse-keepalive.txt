@@ -1,0 +1,327 @@
+# densable 2.1.229 #3 — SSE keepalive (VERDICT: N/A host/gateway)
+
+## Product surface
+
+densable **gateway host** emits SSE `event: ping` during silent gaps when
+proxying Vertex/Bedrock (their SDKs drop upstream pings / Bedrock sends none).
+
+SEA:
+- `tBw = \`event: ping\ndata: {"type": "ping"}\n\n\``
+- `eBw = 15000` (related interval in gateway region)
+- protocol docs: "emit your own `event: ping` during silent gaps so long
+  thinking pauses don't trip client or proxy idle timeouts"
+
+## Not CLI invent
+
+Local **client** residual already landed densable 2.1.222 **Tfb**:
+`src/utils/streamKeepAlive.ts` — synthetic `{type:"ping"}` when body bytes
+advance but no SSE event (consumer idle reset). That is **client-side**, not
+gateway emit of `event: ping` on the wire.
+
+No go-hare package is the densable cloud gateway that serves Vertex/Bedrock
+translation. Do not invent a gateway ping emitter in the CLI.
+
+## Verdict
+
+**N/A** (host/gateway) + client Tfb **HAVE** from 222.
+
+===== needle='so long thinking pauses don' offset=282039366 =====
+o a cloud
+provider's Claude endpoint needs translation:
+
+- **Model IDs.** The client sends Anthropic-style IDs like
+  \`claude-sonnet-4-5\`; translate to the upstream's form (Bedrock model ID or
+  inference-profile ARN; Vertex \`@\`-versioned ID), or advertise
+  upstream-native IDs from \`/v1/models\`.
+- **\`anthropic-beta\`.** Bedrock rejects some betas in the *header*; move them
+  into the request body as \`"anthropic_beta": [...]\`. Vertex and Foundry
+  accept the header.
+- **Streaming.** Bedrock's native stream is AWS binary event-stream, not SSE;
+  decode and re-emit Anthropic-shaped \`text/event-stream\`. The provider SDKs
+  handle this, but their stream iterators drop the upstream's \`ping\` events
+  (and Bedrock sends none) \u2014 emit your own \`event: ping\` during silent gaps
+  so long thinking pauses don't trip client or proxy idle timeouts.
+- **\`count_tokens\`.** Bedrock has no count-tokens API. Return
+  \`501 not_supported\`; the client falls back to a Haiku \`max_tokens:1\` probe.
+- **Headers.** Forward \`content-type\`, \`accept\`, \`accept-encoding\`,
+  \`anthropic-version\`, \`anthropic-beta\`, \`user-agent\`, and \`x-stainless-*\`;
+  strip the client's \`Authorization\` and apply the upstream's own
+  credentials. On the response, strip hop-by-hop headers
+  (\`content-encoding\`, \`content-length\`, \`transfer-encoding\`, \`connection\`).
+- **Errors.** Upstream error messages can carry your cloud account
+  IDs/ARNs/project IDs \u2014 log them for the operator, return a generic
+  message, but keep \`error.type\` so the client's retry logic still works.
+
+## References
+
+RFC 6749 (OAuth 2.0), RFC 8414 (AS metadata), RFC 8628 (device grant),
+Anthropic Messages API, Claude Code settings reference, OTLP spec.
+`:`# Claude Code gateway protocol
+
+This is the wire contract the Claude Code CLI uses to talk to this gateway:
+sign-in, inference, managed settings, and telemetry. It's served from the
+gateway itself so it always matches the version you're running.
+
+> **Stability:** this protocol exists to give you a more stable target than
+> proxying raw CLI traffic. Auth is standard OAuth 2.0, inference is the
+> Messages API, and headers are the lowest common denominator across
+> backends. We keep it backwards compatible within reason to support older
+> clients, but not forever \u2014 expect changes, managed settings in particular,
+> with notice.
+
+A develo
+
+===== needle='so long thinking pauses don' offset=282052880 =====
+o a cloud
+provider's Claude endpoint needs translation:
+
+- **Model IDs.** The client sends Anthropic-style IDs like
+  \`claude-sonnet-4-5\`; translate to the upstream's form (Bedrock model ID or
+  inference-profile ARN; Vertex \`@\`-versioned ID), or advertise
+  upstream-native IDs from \`/v1/models\`.
+- **\`anthropic-beta\`.** Bedrock rejects some betas in the *header*; move them
+  into the request body as \`"anthropic_beta": [...]\`. Vertex and Foundry
+  accept the header.
+- **Streaming.** Bedrock's native stream is AWS binary event-stream, not SSE;
+  decode and re-emit Anthropic-shaped \`text/event-stream\`. The provider SDKs
+  handle this, but their stream iterators drop the upstream's \`ping\` events
+  (and Bedrock sends none) \u2014 emit your own \`event: ping\` during silent gaps
+  so long thinking pauses don't trip client or proxy idle timeouts.
+- **\`count_tokens\`.** Bedrock has no count-tokens API. Return
+  \`501 not_supported\`; the client falls back to a Haiku \`max_tokens:1\` probe.
+- **Headers.** Forward \`content-type\`, \`accept\`, \`accept-encoding\`,
+  \`anthropic-version\`, \`anthropic-beta\`, \`user-agent\`, and \`x-stainless-*\`;
+  strip the client's \`Authorization\` and apply the upstream's own
+  credentials. On the response, strip hop-by-hop headers
+  (\`content-encoding\`, \`content-length\`, \`transfer-encoding\`, \`connection\`).
+- **Errors.** Upstream error messages can carry your cloud account
+  IDs/ARNs/project IDs \u2014 log them for the operator, return a generic
+  message, but keep \`error.type\` so the client's retry logic still works.
+
+## References
+
+RFC 6749 (OAuth 2.0), RFC 8414 (AS metadata), RFC 8628 (device grant),
+Anthropic Messages API, Claude Code settings reference, OTLP spec.
+`.replace("## Flow",`${`> **This deployment runs without an identity provider (\`oidc\` is not
+> configured):** the device sign-in flow described below is unavailable \u2014
+> every IdP-backed sign-in route returns 404 and the well-known document
+> advertises no OAuth endpoints. Callers authenticate as customer-routed
+> inference principals with a short-lived CRI JWT minted by Anthropic (see
+> the customer-routed inference section).
+
+`}## Flow`);return e.criEnabled?t+`
+## Customer-routed inference
+
+This deployment accepts customer-routed inference (CRI) callers: Claude
+Enterprise clients that authenticate with a short-lived, audience-bound
+C
+
+===== needle='event: ping' offset=75532848 =====
+}
+button.go:focus-visible{outline:2px solid #2A78D6;outline-offset:2px}
+.error-card{background:#FFF;border:.5px solid rgba(31,30,29,.15);border-left:3px solid #A63244;border-radius:10px;padding:14px 16px;font-size:14px;line-height:1.5;display:flex;align-items:flex-start;gap:10px}
+.error-card .bang{flex:none;width:18px;height:18px;border-radius:50%;background:#A63244;color:#FFF;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1;margin-top:1px}
+.error-card .msg{color:#3D3D3A}
+@media (max-width:520px){h1{font-size:26px}body{padding:32px 18px}.code-display,.code-input{font-size:22px}}
+···························· ··%·%·%·%·%·%·%
+··%·%·%·%·%·%·%·%·%
+· · ··%·% ··%·%····························https://api.anthropic.com···················$···event: ping
+data: {"type": "ping"}
+
+····························/v1/organizations/spend_limits··················fanout······················%···blocked by your organization's policy···········Z·······m·······················x-request-id················2···cloud session was archived before producing output······························You are an expert reviewer of auto mode classifier rules for Claude Code.
+
+Claude Code has an "auto mode" that uses an AI classifier to decide whether tool calls should be auto-approved or require user confirmation. Users can write custom rules in four categories:
+
+- **allow**: Actions the classifier should auto-approve
+- **soft_deny**: Destructive/irreversible actions the classifier should block unless clear user intent authorizes them
+- **hard_deny**: Security-boundary actions the classifier should block unconditionally (user intent does not clear these)
+- **environment**: Context about the user's setup that helps the classifier make decisions
+
+Your job is to critique the user's custom rules for clarity, completeness, and potential issues. The classifier is an LLM that reads these rules as part of its system prompt.
+
+For each rule, evaluate:
+1. **Clarity**: Is the rule unambiguous? Could the classifier misinterpret it?
+2. **Completeness**: Are there gaps or edge cases the rule doesn't cover?
+3. **Conflicts**: Do any of the rules conflict with each other?
+4. **Actionability**: Is the rule specific enough for the classifier to act on?
+
+Be concise and constructive. Only comment on rules that could be improved. If all rules look good, say so.····
+
+===== needle='event: ping' offset=281999422 =====
+get("x-amzn-errortype")??void 0,message:f.message}),h}throw f}}function tso(e){return e!==void 0&&fBw[e]||"api_error"}function umc(e,t,r,n){let o=new Map;for(let i of e)o.set(i.id,{type:"model",id:i.id,display_name:i.label??i.id,...i.description&&{description:i.description}});if(r){let i=[$Es,pfe,ytt],s=mBw.filter((a)=>!i.includes(a)).reverse();for(let a of[...i,...s]){let l=bu[a];if(o.has(l.firstParty))continue;let c=!1;for(let u of t)if(u==="anthropic"||l[u]!==null){c=!0;break}if(c)o.set(l.firstParty,{type:"model",id:l.firstParty,display_name:l.firstParty})}}return n?[...o.values()].filter((i)=>imc(i.id,n)):[...o.values()]}function wpg(e,t,r=!0,n){return Response.json({data:umc(e,new Set(t.map((o)=>o.provider)),r,n),has_more:!1,first_id:null,last_id:null})}var JFw,QFw,ZFw,eBw=15000,tBw=`event: ping
+data: {"type": "ping"}
+
+`,rBw,iBw,lBw,yKi=3600000,cmc,fBw,_Ki,mBw;var bKi=T(()=>{nz();SL();Md();Xo();oqe();pr();ut();qj();Ii();ug();h2o();hr();Gr();jde();Wht();hpg();VIr();JFw=new Set(["content-type","accept","accept-encoding","anthropic-beta","anthropic-version","user-agent"]);QFw=["content-encoding","content-length","transfer-encoding","connection","cf-ray","via","request-id"],ZFw={"Content-Type":"text/event-stream","Cache-Control":"no-cache",Connection:"keep-alive"},rBw=["/v1/messages","/v1/messages/count_tokens"];iBw=["x-gateway-upstream","x-gateway-upstream-kind","x-gateway-model","x-gateway-upstream-model"];lBw=new Set(["invalid_request_error","authentication_error","permission_error","not_found_error","request_too_large","rate_limit_error","not_supported","overloaded_error","api_error","billing_error","policy_blocked"]);cmc=new WeakMap;fBw={400:"invalid_request_error",401:"authentication_error",403:"permission_error",404:"not_found_error",413:"request_too_large",429:"rate_limit_error",501:"not_supported",529:"overloaded_error"},_Ki={400:"upstream rejected the request",401:"upstream authentication failed \u2014 check the gateway operator",403:"upstream denied the request \u2014 check the gateway operator",404:"upstream resource not found",413:"request too large for this upstream",429:"upstream rate limit exceeded",500:"upstream error",501:"upstream does not support this endpoint",529:"upstream overloaded"};mBw=["haiku45","sonnet45","sonnet46","sonnet5","opus41","opus46","opus47","opus48","opus5","fable5"]});function o2(e,t,r){return Response.json({type:"er
+
+===== needle='event: ping' offset=282039331 =====
+c.com\` is pass-through. Proxying to a cloud
+provider's Claude endpoint needs translation:
+
+- **Model IDs.** The client sends Anthropic-style IDs like
+  \`claude-sonnet-4-5\`; translate to the upstream's form (Bedrock model ID or
+  inference-profile ARN; Vertex \`@\`-versioned ID), or advertise
+  upstream-native IDs from \`/v1/models\`.
+- **\`anthropic-beta\`.** Bedrock rejects some betas in the *header*; move them
+  into the request body as \`"anthropic_beta": [...]\`. Vertex and Foundry
+  accept the header.
+- **Streaming.** Bedrock's native stream is AWS binary event-stream, not SSE;
+  decode and re-emit Anthropic-shaped \`text/event-stream\`. The provider SDKs
+  handle this, but their stream iterators drop the upstream's \`ping\` events
+  (and Bedrock sends none) \u2014 emit your own \`event: ping\` during silent gaps
+  so long thinking pauses don't trip client or proxy idle timeouts.
+- **\`count_tokens\`.** Bedrock has no count-tokens API. Return
+  \`501 not_supported\`; the client falls back to a Haiku \`max_tokens:1\` probe.
+- **Headers.** Forward \`content-type\`, \`accept\`, \`accept-encoding\`,
+  \`anthropic-version\`, \`anthropic-beta\`, \`user-agent\`, and \`x-stainless-*\`;
+  strip the client's \`Authorization\` and apply the upstream's own
+  credentials. On the response, strip hop-by-hop headers
+  (\`content-encoding\`, \`content-length\`, \`transfer-encoding\`, \`connection\`).
+- **Errors.** Upstream error messages can carry your cloud account
+  IDs/ARNs/project IDs \u2014 log them for the operator, return a generic
+  message, but keep \`error.type\` so the client's retry logic still works.
+
+## References
+
+RFC 6749 (OAuth 2.0), RFC 8414 (AS metadata), RFC 8628 (device grant),
+Anthropic Messages API, Claude Code settings reference, OTLP spec.
+`:`# Claude Code gateway protocol
+
+This is the wire contract the Claude Code CLI uses to talk to this gateway:
+sign-in, inference, managed settings, and telemetry. It's served from the
+gateway itself so it always matches the version you're running.
+
+> **Stability:** this protocol exists to give you a more stable target than
+> proxying raw CLI traffic. Auth is standard OAuth 2.0, inference is the
+> Messages API, and headers are the lowest common denominator across
+> backends. We keep it backwards compatible within reason to support older
+> clients, but not forever \u2014 expect changes, managed settings in p
+
+===== needle='Keepalive' offset=70067499 =====
+···············+·····outputTokensAtTurnStart·P·2·····················budget··················I·0·····continuationCount·························1·····snapshotForTurn·········I·2·····incrementContinuation···················(···········X·······
+···········x···············K·······P···············································`·······K·······0···············`·········································································.···············/···············1···············3·····················tasks·····(·····················schedule························replaceTasks····················chainStartedAt··················recordChainStart········I+(·····forgetChainStart·········k(·····tickInFlightPrompt··X····w*···············*·····replaceTickInFlightPrompt·,·····················consecutiveKeepalives·····'·····················replaceConsecutiveKeepalives····················ended···················I·(·····replaceEnded············(···········X·······
+···········X······· ·······················K·······0·······························P···································X·····1···············%·····p········································K+·····holder··················I·5·····mainThreadAgentType·X·····*··············G1·····replaceMainThreadAgentType)·····················mainThreadAgentHooksX·····)··············5+·····replaceMainThreadAgentHooks·············(···········X·······
+···········8·······p··············· ·······K······· ·········································································2·····skills····4·············In(·····lookup··P·*··············Z-·····record··················I·(·····forget····················%·····forgetAll·+·············(···········X·······
+···········h···············K·······0···············P·······················K·······················`·························································0·····`···············p·········-···············(·····················sections··)···············-·
+···recordSection·············3·····forgetAllSections···X·····2·····················noteInvalidation················epoch·····················*·····registerWordingLatchClear················ /·····clearWordingLatch·M·X·····-·····················lastEmittedDate·········I^%·····replaceLastEmittedDate··················(···················
+···········································K···············································K··················
+
+===== needle='Keepalive' offset=70067554 =====
+··············budget··················I·0·····continuationCount·························1·····snapshotForTurn·········I·2·····incrementContinuation···················(···········X·······
+···········x···············K·······P···············································`·······K·······0···············`·········································································.···············/···············1···············3·····················tasks·····(·····················schedule························replaceTasks····················chainStartedAt··················recordChainStart········I+(·····forgetChainStart·········k(·····tickInFlightPrompt··X····w*···············*·····replaceTickInFlightPrompt·,·····················consecutiveKeepalives·····'·····················replaceConsecutiveKeepalives····················ended···················I·(·····replaceEnded············(···········X·······
+···········X······· ·······················K·······0·······························P···································X·····1···············%·····p········································K+·····holder··················I·5·····mainThreadAgentType·X·····*··············G1·····replaceMainThreadAgentType)·····················mainThreadAgentHooksX·····)··············5+·····replaceMainThreadAgentHooks·············(···········X·······
+···········8·······p··············· ·······K······· ·········································································2·····skills····4·············In(·····lookup··P·*··············Z-·····record··················I·(·····forget····················%·····forgetAll·+·············(···········X·······
+···········h···············K·······0···············P·······················K·······················`·························································0·····`···············p·········-···············(·····················sections··)···············-·
+···recordSection·············3·····forgetAllSections···X·····2·····················noteInvalidation················epoch·····················*·····registerWordingLatchClear················ /·····clearWordingLatch·M·X·····-·····················lastEmittedDate·········I^%·····replaceLastEmittedDate··················(···················
+···········································K···············································K······················· ···············0···············@·······K·······P·
+
+===== needle='Keepalive' offset=76888466 =====
+··············getInvokedSkillsForAgent························getIsInteractive················getIsNonInteractiveSession······················getIsRemoteMode·················getIsScrollDraining·····························getLastAPIRequest·······························getLastAPIRequestMessages·······················getLastApiCompletionTimestamp···················getLastCancelledAPIMessageId····················getLastClassifierRequests·······················getLastEmittedDate······························getLastInteractionTime··························getLastMainRequestId····························getLastMainThreadCacheTtlMs·················
+···getLocCounter···················getLoggerProvider·······························getLoopChainStartedAt···························getLoopConsecutiveKeepalives····················getLoopEnded····················getLoopTickInFlightPrompt·······················getMainLoopBusy·················getMainLoopModelOverride························getMainThreadAgentHooks·························getMainThreadAgentType··························getMantleRefutedAdminPin························getMcpClientsFromAccessor·······················getMcpConnectNonBlocking························getMemoryToggledOff·····························getMeter························getMeterProvider············ ···getModelOverrideOptOutForSession················getModelStrings·············
+···getModelUsage···················getOTelWindowCloseCause·························getOauthScopesFromFd····························getOauthTokenFromFd·····························getOnboardingShownThisSession···················getOriginalCwd··················getParentManagedSettings························getParentSessionId······························getPendingBranchLinks···························getPendingPrLinks·······························getPermissionPromptToolName·····················getPlanSlugCache············"···getPolicyPredicateTelemetryEmitted······························getPrCounter····················getPrintOutputFormat····························getProjectRoot··················getPromptCache1hAllowlist·······················getPromptId·····················getPromptIndex·············· ···getProposeGoalAvailabilityLogged················getQuestionPreviewFormat····················&···getRefusalFallbackLatchOriginRequestId··························ge
+
+===== needle='keepalive ping' MISSING =====
+
+===== needle='idle timeouts' offset=170449331 =====
+·r· ·t·h·e· ·o·r·g· ·|· ·E·s·c·a·l·a·t·e· ··  ·t·h·i·s· ·i·s· ·o·r·g·-·l·e·v·e·l· ·c·o·n·f·i·g· ·o·n· ·t·h·e· ·A·n·t·h·r·o·p·i·c· ·s·i·d·e· ·|·
+·
+·#·#·#· ·2·.· ·N·e·t·w·o·r·k·
+·
+·|· ·S·i·g·n·a·t·u·r·e· ·|· ·C·h·e·c·k· ·|· ·R·o·o·t· ·c·a·u·s·e· ·|· ·F·i·x· ·|·
+·|·-·-·-·|·-·-·-·|·-·-·-·|·-·-·-·|·
+·|· ·`·g·e·t·a·d·d·r·i·n·f·o· ·E·N·O·T·F·O·U·N·D· ···················` | `nslookup ··················` | DNS resolution broken | Fix resolver / `/etc/resolv.conf` / cluster DNS |
+| `connect ETIMEDOUT` / `ECONNREFUSED` | `curl -sI --max-time 5 ··············6···/` | Firewall blocks egress on 443 | Allow egress to `··························:443` |
+| `ECONNRESET` mid-poll | How long was the connection open before reset? | NAT / proxy idle-connection timeout dropping long-lived polls | Raise NAT/proxy idle timeouts |
+| `unable to verify the first certificate` | `openssl s_client -connect ·····················:·4·4·3· ·<·/·d·e·v·/·n·u·l·l·`· ·|· ·C·o·r·p·o·r·a·t·e· ·T·L·S· ·i·n·t·e·r·c·e·p·t·i·o·n· ·/· ·m·i·s·s·i·n·g· ·C·A· ·|· ·I·n·s·t·a·l·l· ·C·A· ·b·u·n·d·l·e·;· ·s·e·t· ·`·N·O·D·E·_·E·X·T·R·A·_·C·A·_·C·E·R·T·S·`· ·|·
+·|· ·`·c·u·r·l·`· ·f·r·o·m· ·t·h·e· ·h·o·s·t· ·w·o·r·k·s· ·b·u·t· ·t·h·e· ·r·u·n·n·e·r· ·p·r·o·c·e·s·s· ·c·a·n·'·t· ·c·o·n·n·e·c·t· ·|· ·D·u·m·p· ·`·H·T·T·P·S·_·P·R·O·X·Y·`· ·/· ·`·H·T·T·P·_·P·R·O·X·Y·`· ·/· ·`·N·O·_·P·R·O·X·Y·`· ·f·r·o·m· ·t·h·e· ·r·u·n·n·e·r·'·s· ·e·n·v· ·|· ·P·r·o·x·y· ·e·n·v· ·v·a·r·s· ·s·e·t· ·(·o·r· ·m·i·s·s·i·n·g·)· ·o·n· ·t·h·e· ·r·u·n·n·e·r· ·p·r·o·c·e·s·s· ·o·n·l·y· ·|· ·M·a·t·c·h· ·p·r·o·x·y· ·e·n·v· ·b·e·t·w·e·e·n· ·h·o·s·t· ·a·n·d· ·r·u·n·n·e·r· ·|·
+·|· ·`·4·0·4·`· ·o·n· ·e·v·e·r·y· ·A·P·I· ·p·a·t·h· ·|· ·`·e·c·h·o· ·$·A·N·T·H·R·O·P·I·C·_·B·A·S·E·_·U·R·L·`· ··  ·c·o·m·p·a·r·e· ·t·o· ·e·x·p·e·c·t·e·d· ·`·····················r···` | `ANTHROPIC_BASE_URL` mis-set | Fix or unset `ANTHROPIC_BASE_URL` |
+| `Rate limited (429). Polling too frequently.` on PollWork | Custom poll interval below 5s? Many replicas sharing one environment? | Backend rate-limiting | Restore default poll interval; reduce replica fan-out |
+| Mid-run `poll auth failed` on an otherwise-healthy runner | `date -u` vs `curl -sI ······························/· ·\·|· ·g·r·e·p· ·-·i· ·'·^·d·a·t·e·:·'·`· ·|· ·R·u·n·n·e·r· ·c·l·o·c·k· ·s·k·e·w· ·t·h·r·o·w·s· ·o·f·f· ·t·h·e· ·8·0·%·-·T·T·L· ·r·e·f·r·e·s·h· ·s·c·h·e·d·u·l·e· ·|· ·F·i·x· ·N·T·P· ·o·n· ·t·h·e· ·h·o·s·t· ·|
+
+===== needle='idle timeouts' offset=282039417 =====
+ion:
+
+- **Model IDs.** The client sends Anthropic-style IDs like
+  \`claude-sonnet-4-5\`; translate to the upstream's form (Bedrock model ID or
+  inference-profile ARN; Vertex \`@\`-versioned ID), or advertise
+  upstream-native IDs from \`/v1/models\`.
+- **\`anthropic-beta\`.** Bedrock rejects some betas in the *header*; move them
+  into the request body as \`"anthropic_beta": [...]\`. Vertex and Foundry
+  accept the header.
+- **Streaming.** Bedrock's native stream is AWS binary event-stream, not SSE;
+  decode and re-emit Anthropic-shaped \`text/event-stream\`. The provider SDKs
+  handle this, but their stream iterators drop the upstream's \`ping\` events
+  (and Bedrock sends none) \u2014 emit your own \`event: ping\` during silent gaps
+  so long thinking pauses don't trip client or proxy idle timeouts.
+- **\`count_tokens\`.** Bedrock has no count-tokens API. Return
+  \`501 not_supported\`; the client falls back to a Haiku \`max_tokens:1\` probe.
+- **Headers.** Forward \`content-type\`, \`accept\`, \`accept-encoding\`,
+  \`anthropic-version\`, \`anthropic-beta\`, \`user-agent\`, and \`x-stainless-*\`;
+  strip the client's \`Authorization\` and apply the upstream's own
+  credentials. On the response, strip hop-by-hop headers
+  (\`content-encoding\`, \`content-length\`, \`transfer-encoding\`, \`connection\`).
+- **Errors.** Upstream error messages can carry your cloud account
+  IDs/ARNs/project IDs \u2014 log them for the operator, return a generic
+  message, but keep \`error.type\` so the client's retry logic still works.
+
+## References
+
+RFC 6749 (OAuth 2.0), RFC 8414 (AS metadata), RFC 8628 (device grant),
+Anthropic Messages API, Claude Code settings reference, OTLP spec.
+`:`# Claude Code gateway protocol
+
+This is the wire contract the Claude Code CLI uses to talk to this gateway:
+sign-in, inference, managed settings, and telemetry. It's served from the
+gateway itself so it always matches the version you're running.
+
+> **Stability:** this protocol exists to give you a more stable target than
+> proxying raw CLI traffic. Auth is standard OAuth 2.0, inference is the
+> Messages API, and headers are the lowest common denominator across
+> backends. We keep it backwards compatible within reason to support older
+> clients, but not forever \u2014 expect changes, managed settings in particular,
+> with notice.
+
+A developer points Claude Code at your gateway's base URL v
+
+===== needle='idle timeouts' offset=282052931 =====
+ion:
+
+- **Model IDs.** The client sends Anthropic-style IDs like
+  \`claude-sonnet-4-5\`; translate to the upstream's form (Bedrock model ID or
+  inference-profile ARN; Vertex \`@\`-versioned ID), or advertise
+  upstream-native IDs from \`/v1/models\`.
+- **\`anthropic-beta\`.** Bedrock rejects some betas in the *header*; move them
+  into the request body as \`"anthropic_beta": [...]\`. Vertex and Foundry
+  accept the header.
+- **Streaming.** Bedrock's native stream is AWS binary event-stream, not SSE;
+  decode and re-emit Anthropic-shaped \`text/event-stream\`. The provider SDKs
+  handle this, but their stream iterators drop the upstream's \`ping\` events
+  (and Bedrock sends none) \u2014 emit your own \`event: ping\` during silent gaps
+  so long thinking pauses don't trip client or proxy idle timeouts.
+- **\`count_tokens\`.** Bedrock has no count-tokens API. Return
+  \`501 not_supported\`; the client falls back to a Haiku \`max_tokens:1\` probe.
+- **Headers.** Forward \`content-type\`, \`accept\`, \`accept-encoding\`,
+  \`anthropic-version\`, \`anthropic-beta\`, \`user-agent\`, and \`x-stainless-*\`;
+  strip the client's \`Authorization\` and apply the upstream's own
+  credentials. On the response, strip hop-by-hop headers
+  (\`content-encoding\`, \`content-length\`, \`transfer-encoding\`, \`connection\`).
+- **Errors.** Upstream error messages can carry your cloud account
+  IDs/ARNs/project IDs \u2014 log them for the operator, return a generic
+  message, but keep \`error.type\` so the client's retry logic still works.
+
+## References
+
+RFC 6749 (OAuth 2.0), RFC 8414 (AS metadata), RFC 8628 (device grant),
+Anthropic Messages API, Claude Code settings reference, OTLP spec.
+`.replace("## Flow",`${`> **This deployment runs without an identity provider (\`oidc\` is not
+> configured):** the device sign-in flow described below is unavailable \u2014
+> every IdP-backed sign-in route returns 404 and the well-known document
+> advertises no OAuth endpoints. Callers authenticate as customer-routed
+> inference principals with a short-lived CRI JWT minted by Anthropic (see
+> the customer-routed inference section).
+
+`}## Flow`);return e.criEnabled?t+`
+## Customer-routed inference
+
+This deployment accepts customer-routed inference (CRI) callers: Claude
+Enterprise clients that authenticate with a short-lived, audience-bound
+CRI JWT minted by Anthropic instead of a gateway ses

@@ -2516,19 +2516,20 @@ async function* queryLoop(
         }
       }
       if ((isWithheld413 || isWithheldMedia) && reactiveCompact) {
-        const compacted = await reactiveCompact.tryReactiveCompact({
-          hasAttempted: hasAttemptedReactiveCompact,
-          querySource,
-          aborted: toolUseContext.abortController.signal.aborted,
-          messages: messagesForQuery,
-          cacheSafeParams: {
-            systemPrompt,
-            userContext,
-            systemContext,
-            toolUseContext,
-            forkContextMessages: messagesForQuery,
-          },
-        })
+        const { result: compacted, failure: compactFailure } =
+          await reactiveCompact.tryReactiveCompact({
+            hasAttempted: hasAttemptedReactiveCompact,
+            querySource,
+            aborted: toolUseContext.abortController.signal.aborted,
+            messages: messagesForQuery,
+            cacheSafeParams: {
+              systemPrompt,
+              userContext,
+              systemContext,
+              toolUseContext,
+              forkContextMessages: messagesForQuery,
+            },
+          })
 
         if (compacted) {
           // task_budget: same carryover as the proactive path above.
@@ -2570,8 +2571,23 @@ async function* queryLoop(
         // so hooks have nothing meaningful to evaluate. Running stop hooks
         // on prompt-too-long creates a death spiral: error → hook blocking
         // → retry → error → … (the hook injects more tokens each cycle).
-        yield lastMessage!
-        void executeStopFailureHooks(lastMessage!, toolUseContext)
+        // densable Ysa/bua (#25): when compact failed with error+detail and the
+        // last message is a PTL api error, annotate content so the user sees
+        // "Prompt is too long · automatic compaction failed: …".
+        let surfaced: AssistantMessage = lastMessage as AssistantMessage
+        if (
+          lastMessage &&
+          lastMessage.type === 'assistant' &&
+          lastMessage.isApiErrorMessage &&
+          isPromptTooLongMessage(lastMessage)
+        ) {
+          surfaced = reactiveCompact.annotatePromptTooLongWithCompactFailure(
+            lastMessage as AssistantMessage,
+            compactFailure,
+          )
+        }
+        yield surfaced
+        void executeStopFailureHooks(surfaced, toolUseContext)
         return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
       } else if (feature('CONTEXT_COLLAPSE') && isWithheld413) {
         // reactiveCompact compiled out but contextCollapse withheld and

@@ -1363,6 +1363,10 @@ async function getMessagesForPromptSlashCommand(
   const metadata = formatCommandLoadingMetadata(command, args);
 
   const additionalAllowedTools = parseToolListFromCLI(command.allowedTools ?? []);
+  // densable 2.1.229 — command.disallowedTools → alwaysDenyRules.command
+  const additionalDisallowedTools = parseToolListFromCLI(
+    command.type === 'prompt' ? (command.disallowedTools ?? []) : [],
+  );
 
   // Create content for the main message, including any pasted images
   const mainMessageContent: ContentBlockParam[] =
@@ -1423,6 +1427,7 @@ async function getMessagesForPromptSlashCommand(
     messages,
     shouldQuery: true,
     allowedTools: additionalAllowedTools,
+    disallowedTools: additionalDisallowedTools,
     model: command.model,
     effort: command.effort,
     command,

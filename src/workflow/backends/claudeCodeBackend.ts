@@ -30,7 +30,12 @@ import { logEvent } from '../../services/analytics/index.js'
 import type { ModelAlias } from '../../utils/model/aliases.js'
 import type { Message } from '../../types/message.js'
 import type { ToolUseContext } from '../../Tool.js'
+import { getCwd } from '../../utils/cwd.js'
 import { readHostBundle } from '../hostHandle.js'
+import {
+  buildWorkflowPrefixKey,
+  enterWorkflowPrefixStagger,
+} from '../prefixStagger.js'
 
 /** Fallback definition for workflow subagents (used when agentType does not match a real registry entry). */
 export const WORKFLOW_AGENT: BuiltInAgentDefinition = {
@@ -294,6 +299,30 @@ export const claudeCodeBackend: AgentAdapter = {
     let toolCount = 0
     let lastToolName: string | undefined
 
+    // densable 2.1.229 #24 — same-prefix prompt-cache warm-up stagger (FZp)
+    const toolNames = workerTools.map(t => t.name).sort()
+    // densable Ze = model, effort, agentType, tools, schema, cwd (newline-joined)
+    const sessionEffort = toolUseContext.getAppState?.()?.effortValue ?? ''
+    const prefixKey = buildWorkflowPrefixKey({
+      model: model ?? toolUseContext.options.mainLoopModel,
+      effort: sessionEffort,
+      agentType: agentDef.agentType,
+      toolNames,
+      schemaJson: params.schema ? JSON.stringify(params.schema) : '',
+      cwd: worktreeInfo?.worktreePath ?? getCwd(),
+    })
+    const prefixGate = await enterWorkflowPrefixStagger({
+      prefix: prefixKey,
+      agentLabel: params.label ?? agentDef.agentType,
+      signal: agentAbort.signal,
+    })
+    let markedPrefixWarm = false
+    const markPrefixResponded = (): void => {
+      if (markedPrefixWarm) return
+      markedPrefixWarm = true
+      prefixGate.responded()
+    }
+
     try {
       await runInCwd(async () => {
         for await (const msg of runAgent({
@@ -312,6 +341,14 @@ export const claudeCodeBackend: AgentAdapter = {
           ...(worktreeInfo ? { worktreePath: worktreeInfo.worktreePath } : {}),
         })) {
           messages.push(msg as Message)
+          // densable ht.responded() on first non-error assistant message
+          if (
+            msg.type === 'assistant' &&
+            msg.message &&
+            !(msg as { isApiErrorMessage?: boolean }).isApiErrorMessage
+          ) {
+            markPrefixResponded()
+          }
           // Accumulate running progress: assistant message carries usage (cumulative value -> overwrite), tool_use inside content (incremental).
           if (msg.type === 'assistant' && msg.message) {
             const usage = msg.message.usage as
@@ -361,6 +398,8 @@ export const claudeCodeBackend: AgentAdapter = {
       logEvent('tengu_workflow_agent', { ok: 0 })
       return { kind: 'dead', reason: 'runagent-threw', detail }
     } finally {
+      // densable ht.done() — drop leader if never responded so followers are not stuck
+      prefixGate.done()
       // cleanup (idempotent): listener removeEventListener / Map.delete are safe to call repeatedly.
       if (typeof ctx.unregisterAgentAbort === 'function') {
         ctx.unregisterAgentAbort(ctx.agentId)

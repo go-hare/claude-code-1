@@ -113,7 +113,10 @@ async function updatePlugin(
 
   for (const { scope } of installations) {
     try {
-      const result = await updatePluginOp(pluginId, scope)
+      // densable: background marketplace update never re-runs command sources
+      const result = await updatePluginOp(pluginId, scope, {
+        skipCommandSources: true,
+      })
 
       if (result.success && !result.alreadyUpToDate) {
         wasUpdated = true

@@ -1,0 +1,35 @@
+# densable 2.1.229 #22 — managed-mcp.json exclusive + remote soft-skip
+
+## Gold AYh (SEA)
+
+```js
+function AYh(e,{dropForEnterpriseMcpConfig:t}){
+  let r=yu()?"safe mode":roo()?"hermetic mode":t?"enterprise MCP config":void 0;
+  if(!r)return{servers:e,dropped:[],reason:r};
+  let n={},o=[];
+  for(let[i,s]of Object.entries(e))if(s.type==="sdk")n[i]=s;else o.push(i);
+  return{servers:n,dropped:o,reason:r}
+}
+// main --mcp-config:
+// gc = sdk-only of policy-allowed
+// Ia = L$() && CLAUDE_CODE_REMOTE && !strictMcpConfig && GUo(gc)
+// AYh(_i,{dropForEnterpriseMcpConfig:Ia})
+// warn: "Warning: an enterprise MCP config (managed-mcp.json) is present and has
+//   exclusive control over MCP servers; ignoring N MCP server(s) supplied via --mcp-config: …"
+// hard exit still: L$() && (strict || (Nr && !GUo(Nr)))
+// GUo = every type==="sdk" && name==="claude-vscode"
+// L$  = doesEnterpriseMcpConfigExist (managed-mcp.json)
+
+// mcp_set_servers:
+// S = hermetic ? "Ignored in hermetic mode…"
+//   : REMOTE&&L$() ? "Ignored: an enterprise MCP config (managed-mcp.json) is present…"
+//   : void 0
+// if S: keep only sdk; non-sdk → errors[name]=S
+```
+
+## Local land
+
+- `src/utils/mcpHermeticFilter.ts` — AYh reason + enterprise warn / set_servers ignore strings
+- `src/main.tsx` — dropForEnterpriseMcpConfig wire + enterprise stderr warn
+- `src/cli/print.ts` `handleMcpSetServers` — remote+enterprise / hermetic soft-ignore
+- tests: `src/utils/__tests__/mcpHermeticFilter.229.test.ts`

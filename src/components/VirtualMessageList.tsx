@@ -1,6 +1,15 @@
 import type { RefObject } from 'react';
 import * as React from 'react';
-import { useCallback, useContext, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useVirtualScroll } from '../hooks/useVirtualScroll.js';
 import { Box, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@anthropic/ink';
 import { TextHoverColorContext } from './design-system/ThemedText.js';
@@ -10,7 +19,9 @@ import { ScrollChromeContext } from './FullscreenLayout.js';
 const HEADROOM = 3;
 
 import { logForDebugging } from '../utils/debug.js';
+import { logError } from '../utils/log.js';
 import { sleep } from '../utils/sleep.js';
+import { plural } from '../utils/stringUtils.js';
 import { renderableSearchText } from '../utils/transcriptSearch.js';
 import type { RenderableMessage } from '../types/message.js';
 import {
@@ -21,6 +32,110 @@ import {
   stripSystemReminders,
   toolCallOf,
 } from './messageActions.js';
+
+/**
+ * densable mfT cache — incremental itemKeys with collision counts.
+ * Mutated in place across appends; rebuilt when prefix uuid chain breaks.
+ */
+export type VirtualItemKeyCache = {
+  keys: string[];
+  uuids: string[];
+  seen: Map<string, number>;
+  itemKey: ((msg: RenderableMessage) => string) | null;
+  loggedDups: Set<string>;
+};
+
+export function createVirtualItemKeyCache(): VirtualItemKeyCache {
+  return {
+    keys: [],
+    uuids: [],
+    seen: new Map(),
+    itemKey: null,
+    loggedDups: new Set(),
+  };
+}
+
+/** densable mqm-ish short type label for dup error samples. */
+function shortMsgType(msg: RenderableMessage): string {
+  switch (msg.type) {
+    case 'user':
+    case 'assistant': {
+      const block = (msg as { message?: { content?: unknown } }).message?.content;
+      const first = Array.isArray(block) ? block[0] : undefined;
+      const t =
+        first && typeof first === 'object' && first !== null && 'type' in first
+          ? String((first as { type: unknown }).type)
+          : '?';
+      return `${msg.type}/${t}`;
+    }
+    case 'system':
+      return `system/${(msg as { subtype?: string }).subtype ?? '?'}`;
+    case 'attachment':
+      return `attachment/${(msg as { attachment?: { type?: string } }).attachment?.type ?? '?'}`;
+    case 'grouped_tool_use':
+    case 'collapsed_read_search':
+      return msg.type;
+    default:
+      return String((msg as { type: string }).type);
+  }
+}
+
+/**
+ * densable mfT — build React itemKeys with `#N` suffix on sibling collisions.
+ * When two messages share the same base key (upstream uuid-dup / conversationId
+ * reuse), virtual list + React would otherwise remount/double-print long
+ * streaming rows (2.1.229 #6).
+ */
+export function buildVirtualItemKeys(
+  messages: readonly RenderableMessage[],
+  itemKey: (msg: RenderableMessage) => string,
+  cache: VirtualItemKeyCache,
+  typeLabel: (msg: RenderableMessage) => string = shortMsgType,
+): string[] {
+  let o = 0;
+  if (cache.itemKey === itemKey && messages.length >= cache.keys.length) {
+    const s = cache.keys.length;
+    while (o < s && messages[o]?.uuid === cache.uuids[o]) o++;
+  }
+  if (o < cache.keys.length) {
+    cache.keys = [];
+    cache.uuids = [];
+    cache.seen = new Map();
+    o = 0;
+  }
+  cache.itemKey = itemKey;
+
+  let firstDupSamples: Map<string, string> | null = null;
+  for (; o < messages.length; o++) {
+    const msg = messages[o]!;
+    const base = itemKey(msg);
+    const count = cache.seen.get(base);
+    if (count === undefined) {
+      cache.seen.set(base, 1);
+      cache.keys.push(base);
+    } else {
+      cache.seen.set(base, count + 1);
+      // densable: first occurrence keeps bare key; later get `#1`, `#2`, …
+      cache.keys.push(`${base}#${count}`);
+      if (!cache.loggedDups.has(base)) {
+        cache.loggedDups.add(base);
+        firstDupSamples ??= new Map();
+        firstDupSamples.set(base, typeLabel(msg));
+      }
+    }
+    cache.uuids.push(msg.uuid);
+  }
+
+  if (firstDupSamples) {
+    const samples = [...firstDupSamples].slice(0, 3).map(([k, label]) => `[${label}] ×${cache.seen.get(k)}`);
+    logError(
+      new Error(
+        `VirtualMessageList: duplicate sibling itemKeys (deduped via #N suffix; upstream uuid-dup): ${firstDupSamples.size} ${plural(firstDupSamples.size, 'key')}, ${samples.join(', ')}`,
+      ),
+    );
+  }
+  return cache.keys;
+}
 
 // Fallback extractor: lower + cache here for callers without the
 // Messages.tsx tool-lookup path (tests, static contexts). Messages.tsx
@@ -316,27 +431,18 @@ export function VirtualMessageList({
   scanElement,
   setPositions,
 }: Props): React.ReactNode {
-  // Incremental key array. Streaming appends one message at a time; rebuilding
-  // the full string array on every commit allocates O(n) per message (~1MB
-  // churn at 27k messages). Append-only delta push when the prefix matches;
-  // fall back to full rebuild on compaction, /clear, or itemKey change.
-  const keysRef = useRef<string[]>([]);
-  const prevMessagesRef = useRef<typeof messages>(messages);
-  const prevItemKeyRef = useRef(itemKey);
-  if (
-    prevItemKeyRef.current !== itemKey ||
-    messages.length < keysRef.current.length ||
-    messages[0] !== prevMessagesRef.current[0]
-  ) {
-    keysRef.current = messages.map(m => itemKey(m));
-  } else {
-    for (let i = keysRef.current.length; i < messages.length; i++) {
-      keysRef.current.push(itemKey(messages[i]!));
-    }
-  }
-  prevMessagesRef.current = messages;
-  prevItemKeyRef.current = itemKey;
-  const keys = keysRef.current;
+  // densable mfT — incremental itemKeys with #N suffix on sibling collisions.
+  // Streaming appends one message at a time; rebuilding the full string array
+  // on every commit allocates O(n) per message (~1MB churn at 27k messages).
+  // Append-only delta when the uuid prefix matches; full rebuild on
+  // compaction, /clear, or itemKey change. Duplicate sibling keys (upstream
+  // uuid-dup) get `#1`, `#2`, … so React/virtual scroll never mounts two
+  // rows under the same key (2.1.229 #6 long-stream double-print/disappear).
+  const keysCacheRef = useRef(createVirtualItemKeyCache());
+  const keys = useMemo(
+    () => buildVirtualItemKeys(messages, itemKey, keysCacheRef.current, shortMsgType),
+    [messages, itemKey],
+  );
   const {
     range,
     topSpacer,

@@ -12,6 +12,7 @@ import { getDisplayPath } from '../../utils/file.js';
 import { formatDuration, formatSecondsShort } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import type { buildMessageLookups } from '../../utils/messages.js';
+import { extractSafeToolInputFields } from '../../utils/safeToolInput.js';
 import type { ThemeName } from '../../utils/theme.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { useSelectedMessageBg } from '../messageActions.js';
@@ -189,16 +190,14 @@ export function CollapsedReadSearchContent({
     for (const id of toolUseIds) {
       if (!inProgressToolUseIDs.has(id)) continue;
       const latest = lookups.progressMessagesByToolUseID.get(id)?.at(-1)?.data as Record<string, unknown> | undefined;
-      if (latest?.type === 'repl_tool_call' && latest.phase === 'start') {
-        const input = latest.toolInput as {
-          command?: string;
-          pattern?: string;
-          file_path?: string;
-        };
+      // densable 2.1.229 #7: nst(et.toolInput) before display — non-string
+      // file_path/pattern/command from resume must not reach getDisplayPath.
+      if (latest?.type === 'repl_tool_call' && (latest.phase === 'start' || latest.phase === 'executing')) {
+        const safe = extractSafeToolInputFields(latest.toolInput);
         incomingHint =
-          input.file_path ??
-          (input.pattern ? `"${input.pattern}"` : undefined) ??
-          input.command ??
+          safe.file_path ??
+          (safe.pattern ? `"${safe.pattern}"` : undefined) ??
+          safe.command ??
           (latest.toolName as string | undefined);
       }
     }

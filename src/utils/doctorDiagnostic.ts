@@ -550,6 +550,48 @@ export function detectLinuxGlobPatternWarnings(): Array<{
   return warnings
 }
 
+/**
+ * densable 2.1.229 Otv — doctor issue for unreliable sandbox network domain spellings.
+ * SEA fix string is 1:1 with densable.
+ */
+function formatFoundList(entries: string[]): string {
+  const head = entries.slice(0, 3).join(', ')
+  const more = entries.length - 3
+  return more > 0 ? `${head} (${more} more)` : head
+}
+
+export function detectUnbracketedIpv6DomainWarnings(): Array<{
+  issue: string
+  fix: string
+}> {
+  const entries = SandboxManager.getUnbracketedIpv6DomainWarnings()
+  if (entries.length === 0) return []
+  return [
+    {
+      issue: 'Sandbox network domain entries have unreliable spellings',
+      fix: `Found: ${formatFoundList(entries)}. IPv6 literals must be bracketed, with any port 1-65535 and no leading zeros ("[::1]", "[::1]:443"); non-IPv6 entries must not contain wildcards in brackets, extra colons, "@", or path/query characters, and must use their canonical spelling (lowercase, no trailing dot, punycode). Until fixed, enforcement is conservative: a denied entry denies at least what any parseable reading denies (an entry with no parseable reading denies nothing); an allowed entry never allows more than written and may be removed entirely; bracketed IPv6-glob entries apply to in-process checks only, not the sandbox proxy.`,
+    },
+  ]
+}
+
+/**
+ * densable 2.1.229 Dtv — injectHosts that can never match bare canonical IPv6 destinations.
+ */
+export function detectUnbracketedIpv6InjectHostWarnings(): Array<{
+  issue: string
+  fix: string
+}> {
+  const entries = SandboxManager.getUnbracketedIpv6InjectHostWarnings()
+  if (entries.length === 0) return []
+  return [
+    {
+      issue:
+        'Sandbox credential injectHosts entries can never match their destination',
+      fix: `Found: ${formatFoundList(entries)}. Credential injection matches the bare, canonically-compressed destination address exactly and ignores ports — rewrite each entry as that bare form (e.g. "::1", "2001:db8::1"). Bracketed, zone-id, or non-canonical IPv6 spellings never match, so the credential is never injected there.`,
+    },
+  ]
+}
+
 export async function getDoctorDiagnostic(): Promise<DiagnosticInfo> {
   const installationType = await getCurrentInstallationType()
   const version =
@@ -561,6 +603,9 @@ export async function getDoctorDiagnostic(): Promise<DiagnosticInfo> {
 
   // Add glob pattern warnings for Linux sandboxing
   warnings.push(...detectLinuxGlobPatternWarnings())
+  // densable 2.1.229 Otv / Dtv — unreliable IPv6 domain + injectHosts spellings
+  warnings.push(...detectUnbracketedIpv6DomainWarnings())
+  warnings.push(...detectUnbracketedIpv6InjectHostWarnings())
 
   // Add warnings for leftover npm installations when running native
   if (installationType === 'native') {

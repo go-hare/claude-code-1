@@ -94,6 +94,13 @@ export async function calculatePluginVersion(
       )
       return shortSha
     }
+    // densable 2.1.229 #4 — command source contentSha256 also reuses this slot
+    if (typeof source === 'object' && source.source === 'command') {
+      logForDebugging(
+        `Using command-source content sha256 version for ${pluginId}: ${shortSha}`,
+      )
+      return shortSha
+    }
     logForDebugging(`Using pre-resolved git SHA for ${pluginId}: ${shortSha}`)
     return shortSha
   }

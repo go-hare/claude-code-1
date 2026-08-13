@@ -189,6 +189,23 @@ async function processOrphanedPluginVersion(
   }
 
   if (now - orphanedAt > CLEANUP_AGE_MS) {
+    // densable s5b + vTn: skip delete while another live session holds `.in_use`
+    try {
+      const { pluginVersionHasLiveUsers } = await import(
+        './pluginInUseMarkers.js'
+      )
+      if (await pluginVersionHasLiveUsers(versionPath)) {
+        logForDebugging(
+          `Skipping orphan cleanup, in use by live session: ${versionPath}`,
+        )
+        return
+      }
+    } catch (error) {
+      logForDebugging(
+        `Failed to check ${versionPath} for live users, skipping cleanup: ${error}`,
+      )
+      return
+    }
     try {
       await rm(versionPath, { recursive: true, force: true })
     } catch (error) {

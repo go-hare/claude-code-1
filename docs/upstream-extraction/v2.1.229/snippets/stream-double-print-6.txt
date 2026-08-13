@@ -1,0 +1,60 @@
+# densable 2.1.229 #6 — Long responses partly disappear / printed twice while streaming
+# SEA: /tmp/official-229/plat/package/claude
+# Primary JS: function mfT @ 275987288; error string @ 275987841 / 146247636
+# Changelog gold: "Fixed long responses partly disappearing while streaming and being printed twice"
+#
+# Verdict: HAVE (landed)
+# Local: src/components/VirtualMessageList.tsx — buildVirtualItemKeys / createVirtualItemKeyCache
+#        + useMemo wire via keysCacheRef (densable mfT 1:1)
+
+================================================================================
+## GOLD SYMBOLS
+================================================================================
+| densable | role |
+|----------|------|
+| `mfT(e,t,r,n)` | incremental itemKeys builder (messages, itemKey, cache, typeLabel) |
+| `mqm` / `ffT` | short type labels for dup samples (user/assistant/system/attachment) |
+| `r.keys` / `r.uuids` / `r.seen` / `r.itemKey` / `r.loggedDups` | mfT cache fields |
+| `#N` suffix | first sibling keeps bare key; later get `${base}#${count}` where count starts at 1 |
+| error once | `VirtualMessageList: duplicate sibling itemKeys (deduped via #N suffix; upstream uuid-dup): …` |
+
+================================================================================
+## DENSABLE mfT (verbatim SEA decompile)
+================================================================================
+```js
+function mfT(e,t,r,n=(o)=>q1r(o.type)){
+  let o=0;
+  if(r.itemKey===t&&e.length>=r.keys.length){
+    let s=r.keys.length;
+    while(o<s&&e[o].uuid===r.uuids[o])o++
+  }
+  if(o<r.keys.length)r.keys=[],r.uuids=[],r.seen=new Map,o=0;
+  r.itemKey=t;
+  let i=null;
+  for(;o<e.length;o++){
+    let s=e[o],a=t(s),l=r.seen.get(a);
+    if(l===void 0)r.seen.set(a,1),r.keys.push(a);
+    else if(r.seen.set(a,l+1),r.keys.push(`${a}#${l}`),!r.loggedDups.has(a))
+      r.loggedDups.add(a),(i??=new Map).set(a,n(s));
+    r.uuids.push(s.uuid)
+  }
+  if(i){
+    let s=[...i].slice(0,3).map(([a,l])=>`[${l}] ×${r.seen.get(a)}`);
+    xe(Error(`VirtualMessageList: duplicate sibling itemKeys (deduped via #N suffix; upstream uuid-dup): ${i.size} ${Dt(i.size,"key")}, ${s.join(", ")}`))
+  }
+  return r.keys
+}
+```
+
+## Product delta (why double-print)
+- Upstream uuid-dup / conversationId reuse → two React siblings share the same itemKey
+- Virtual list remounts / reuses wrong row → long stream appears twice or vanishes mid-stream
+- mfT makes keys unique with `#N` without inventing alternate virtualization
+
+## Local wire
+- `buildVirtualItemKeys` + `createVirtualItemKeyCache` exported from VirtualMessageList.tsx
+- `keysCacheRef` + `useMemo(() => buildVirtualItemKeys(messages, itemKey, cache, shortMsgType), [messages, itemKey])`
+- Messages.tsx `messageKey = uuid-conversationId` still feeds itemKey; mfT handles collisions
+
+## Tests
+- `src/components/__tests__/buildVirtualItemKeys.229.test.ts`

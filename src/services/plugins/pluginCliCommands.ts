@@ -99,16 +99,20 @@ function handlePluginCommandError(
  * @param plugin Plugin identifier (name or plugin@marketplace)
  * @param scope Installation scope: user, project, or local (defaults to 'user')
  * @param configEntries densable --config KEY=VALUE (repeatable)
+ * @param shownSourceCommand densable ptm grantKey (HK) after CLI consent
  */
 export async function installPlugin(
   plugin: string,
   scope: InstallableScope = 'user',
   configEntries?: readonly string[],
+  shownSourceCommand?: string,
 ): Promise<void> {
   try {
     console.log(`Installing plugin "${plugin}"...`)
 
-    const result = await installPluginOp(plugin, scope)
+    const result = await installPluginOp(plugin, scope, {
+      shownSourceCommand,
+    })
 
     if (!result.success) {
       throw new Error(result.message)
@@ -301,19 +305,38 @@ export async function disableAllPlugins(): Promise<void> {
 
 /**
  * CLI command: Update a plugin non-interactively
+ * densable 2.1.229 #4: announceCommandSource → ptm for command sources; -y/--yes
  * @param plugin Plugin name or plugin@marketplace identifier
  * @param scope Scope to update
+ * @param options.yes densable -y accept command source without prompt
  */
 export async function updatePluginCli(
   plugin: string,
   scope: PluginScope,
+  options: { yes?: boolean } = {},
 ): Promise<void> {
   try {
     writeToStdout(
       `Checking for updates for plugin "${plugin}" at ${scope} scope…\n`,
     )
 
-    const result = await updatePluginOp(plugin, scope)
+    const { promptCommandSourceConsent } = await import(
+      '../../utils/plugins/pluginCommandSource.js'
+    )
+
+    const result = await updatePluginOp(plugin, scope, {
+      // densable R0v announceCommandSource → ptm; declined aborts
+      announceCommandSource: async (pluginId, entry, acceptedCommand) => {
+        const consent = await promptCommandSourceConsent(pluginId, entry, {
+          yes: options.yes === true,
+          acceptedCommand,
+        })
+        if (consent?.kind === 'declined') {
+          throw new Error('Aborted — the command was not run.')
+        }
+        return consent?.kind === 'accepted' ? consent.grantKey : undefined
+      },
+    })
 
     if (!result.success) {
       throw new Error(result.message)
